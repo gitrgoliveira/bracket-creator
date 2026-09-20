@@ -391,7 +391,13 @@ function WatchlistPanel({ roster, watchlist, setWatchlist, primaryKey, setPrimar
     // upcoming matches for X" while X was fighting. The id is NOT re-resolved by
     // name: bc-pnum rules an id that resolves to nothing resolves to nothing.
     // What changes is that the failure is now VISIBLE.
-    const unresolved = !!entry.id && !pRecord;
+    // `roster.length` is the guard, not a nicety: absence is a claim about a
+    // roster, so with no roster there is nothing to be absent from and the
+    // honest answer is silence. app.jsx:1376 holds the whole viewer behind a
+    // spinner until the tournament payload lands, so this is not reachable
+    // today -- it is here so that a future lazy roster load cannot turn every
+    // chip amber on first paint.
+    const unresolved = roster.length > 0 && !!entry.id && !pRecord;
     return (
       <span key={k} className={`pmf__chip ${checkedIn ? "is-checked-in" : ""} ${isPrimary ? "is-primary" : ""} ${unresolved ? "pmf__chip--unresolved" : ""}`}
         title={unresolved ? "Not in this tournament's roster" : (checkedIn ? "Checked in" : undefined)}>
@@ -411,7 +417,7 @@ function WatchlistPanel({ roster, watchlist, setWatchlist, primaryKey, setPrimar
   // Is the shown entry's stored id absent from this tournament's roster? Drives
   // the wording below: "not in the roster" is a different fact from "has no
   // more matches", and conflating them is what made the panel state a falsehood.
-  const heroUnresolved = !!(heroEntry && heroEntry.id && !rosterById.get(heroEntry.id));
+  const heroUnresolved = !!(roster.length > 0 && heroEntry && heroEntry.id && !rosterById.get(heroEntry.id));
 
   const heroLabel = heroEntry
     ? (heroEntry.type === "dojo" ? heroEntry.dojo : (rosterById.get(heroEntry.id)?.name || heroEntry.name || ""))
@@ -461,11 +467,17 @@ function WatchlistPanel({ roster, watchlist, setWatchlist, primaryKey, setPrimar
 
       {/* Hint when ≥2 entities are watched but none is pinned. The card below
           is already showing the first-added entry, so this no longer says
-          "pin to get a card": it says what pinning still DOES, which is move
-          the card and turn on the chime. */}
+          "pin to get a card": it says what pinning still DOES, which is turn
+          the chime on (and move the card).
+
+          It must NOT say "follow someone ELSE". The shown person is unpinned
+          too, so a reader watching themselves plus a training partner would
+          read that as "nothing here for me" and never get the chime -- which
+          is precisely the state the display/chime split creates and this hint
+          exists to resolve. */}
       {multi && !primaryEntry && (
         <div className="hint watchlist-pin-hint">
-          Showing {heroLabel || "the first on your list"}. Tap ☆ on a chip to follow someone else and get an on-deck chime.
+          Showing {heroLabel || "the first on your list"}. Tap ☆ on a chip to pin who gets the on-deck chime.
         </div>
       )}
 

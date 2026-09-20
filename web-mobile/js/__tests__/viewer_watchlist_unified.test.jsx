@@ -3,6 +3,7 @@
 // dojo-aware resolution, primary selection (implicit/pinned/stale), and the
 // primary hero next-match builder. Pure functions only: no DOM, no hooks.
 import { describe, it, expect } from 'vitest';
+import { readSource } from './helpers/source.js';
 import {
   entryKey,
   normalizeWatchlistEntry,
@@ -194,6 +195,22 @@ describe('heroEntry vs findPrimaryEntry', () => {
   it('is null only when nothing is watched', () => {
     expect(heroEntry([], '')).toBeNull();
     expect(heroEntry(null, '')).toBeNull();
+  });
+
+  // The helper being right is not the same as the HOST calling the right one.
+  // Swapping viewer_home's two derivations passes every assertion above and
+  // every prop assertion in the panel suite, and puts the bug straight back,
+  // so the wiring is pinned at the source. A SOURCE check because ViewerHome
+  // mounts over the viewer fetch harness; what a regression does is pass the
+  // other variable, and that is what this catches.
+  it('viewer_home feeds the card heroEntry and the chime findPrimaryEntry', () => {
+    const src = readSource('viewer_home.jsx');
+    expect(src).toMatch(/const heroWatchEntry = useMemo\(\(\) => heroEntry\(watchlist, primaryKey\)/);
+    expect(src).toMatch(/heroEntry=\{heroWatchEntry\}/);
+    expect(src).toMatch(/heroNextMatch=\{heroNextMatch\}/);
+    // And the alert keeps the opt-in one.
+    expect(src).toMatch(/useFollowedMatchAlert\(primaryNextMatch/);
+    expect(src).toMatch(/const primaryEntry = useMemo\(\(\) => findPrimaryEntry\(watchlist, primaryKey\)/);
   });
 });
 

@@ -222,7 +222,13 @@ describe('WatchlistPanel', () => {
     expect(heroNodes(tree), 'the card survives a second watched person').toHaveLength(1);
     const hint = byClass(tree, 'watchlist-pin-hint');
     expect(hint).toHaveLength(1);
-    expect(collectText(hint[0])).toMatch(/Showing Robert Young/);
+    const hintText = collectText(hint[0]);
+    expect(hintText).toMatch(/Showing Robert Young/);
+    // The shown person is unpinned too, so the invitation must cover THEM.
+    // "follow someone else" told a reader watching themselves plus a partner
+    // that there was nothing here for them, and left the chime off.
+    expect(hintText, 'the hint must not exclude the person it is showing').not.toMatch(/someone else/);
+    expect(hintText).toMatch(/chime/);
     expect(byClass(tree, 'vsched')).toHaveLength(1); // compact upcoming list
   });
 
@@ -261,6 +267,20 @@ describe('WatchlistPanel', () => {
     const text = collectText(hint[0]);
     expect(text).toMatch(/not in this tournament's roster/);
     expect(text, 'never the misleading claim').not.toMatch(/No upcoming matches/);
+  });
+
+  it('claims nothing about a roster it does not have', () => {
+    // Absence is a claim, and an empty roster supports no claim. app.jsx holds
+    // the viewer behind a spinner until the payload lands, so this is a floor
+    // rather than a live bug -- without it, a future lazy roster load would
+    // turn every chip amber on first paint and tell the reader to delete
+    // people who are perfectly fine.
+    const wl = [{ type: 'player', id: 'p1', name: 'Robert Young', dojo: 'Hagane Dojo' }];
+    const tree = runtime.mount(WatchlistPanel, baseProps({
+      roster: [], watchlist: wl, primaryEntry: wl[0], heroEntry: wl[0], heroNextMatch: null,
+    }));
+    expect(byClass(tree, 'pmf__chip--unresolved')).toHaveLength(0);
+    expect(findAll(tree, (n) => n.props?.['data-testid'] === 'watchlist-unresolved')).toHaveLength(0);
   });
 
   it('still says "no upcoming matches" when the entry DOES resolve', () => {

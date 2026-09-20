@@ -126,3 +126,26 @@ describe('the stacked and engi surfaces carry the side the same way', () => {
     expect(block('.engi-side--shiro')).toMatch(/repeating-linear-gradient/);
   });
 });
+
+// The engi editor showed NO competitor number at all until 2026-09-20 (spotted
+// by the operator reviewing the tint change above). An engi PAIR is one
+// participant with one number, so the chip rides the FIRST member's line, which
+// is what every other engi surface does (viewer_standings.jsx,
+// viewer_competition.jsx). Without it this was the one scoring surface where an
+// operator could not match the card in front of them to the bout sheet.
+describe('the engi editor shows the competitor number', () => {
+  const src = () => read('admin_scoring_engi.jsx');
+
+  it('renders each side through NumberedName, the one owner of the chip rule', () => {
+    expect(src()).toMatch(/import \{ NumberedName \} from '\.\/numbered_name\.jsx'/);
+    expect(src()).toMatch(/<NumberedName side="shiro" name=\{shiroName\} number=\{m\.sideB\?\.number\} \/>/);
+    expect(src()).toMatch(/<NumberedName side="aka" name=\{akaName\} number=\{m\.sideA\?\.number\} \/>/);
+  });
+
+  it('puts the chip on the first member only, never the second', () => {
+    // The pair's second member shares the pair's single number; repeating the
+    // chip there would imply two competitors.
+    expect(src()).toMatch(/\{shiroDN && <div className="engi-side__name">\{shiroDN\}<\/div>\}/);
+    expect(src()).toMatch(/\{akaDN && <div className="engi-side__name">\{akaDN\}<\/div>\}/);
+  });
+});

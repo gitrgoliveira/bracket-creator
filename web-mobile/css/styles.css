@@ -5051,34 +5051,10 @@ button.vsched-item:not([data-clickable]) {
   text-align: right;
 }
 
-/* Explicit SHIRO/AKA pill on each kendo side: framed white for Shiro, solid red
-   for Aka (DESIGN.md §4). `align-self` follows the side's inward text-align.
-   This is now the LAST side pill in the app -- the engi editor's twin was
-   dropped with bc-sccl, since that card's tint carries the side on its own. It
-   stays here because bc-dnst rules the score board names the side once in text,
-   by this badge, with the bout rows below carrying it by tint and position. */
-.sb-side__badge {
-  display: inline-block;
-  align-self: flex-start;
-  font-size: 10px;
-  font-weight: 700;
-  text-transform: uppercase;
-  letter-spacing: 0.08em;
-  padding: 2px 8px;
-  border-radius: 4px;
-  margin-bottom: 6px;
-}
-.sb-side--shiro .sb-side__badge { align-self: flex-end; }
-.sb-side__badge--shiro {
-  background: #fff;
-  color: var(--accent);
-  border: 1.5px solid var(--accent);
-}
-.sb-side__badge--aka {
-  background: var(--red);
-  color: #fff;
-  border: 1px solid var(--red);
-}
+/* No SHIRO/AKA pill on a kendo side: the half is TINTED, and a tinted surface
+   does not need the badge as well (operator ruling 2026-09-20, bc-sccl). The
+   fills live on .sb-side--shiro/--aka above. This was the last side pill in the
+   app; every other one went the same way in the same pass. */
 
 .sb-name {
   font-size: 22px;
@@ -5111,19 +5087,20 @@ button.vsched-item:not([data-clickable]) {
   /* The centre carries both slot groups around the VS, so it is sized by its
      content instead of the fixed 140px separator column. */
   grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
-  grid-template-rows: 1fr auto auto auto 1fr;
+  /* Three content rows, not four: the SHIRO/AKA badge that used to own row 2
+     is gone (bc-sccl), so name and points move up one and the template loses a
+     row. Leaving the old five-row template would hold an empty band where the
+     badge was. */
+  grid-template-rows: 1fr auto auto 1fr;
 }
 .sb-match:has(.sb-slots) > .sb-side {
   display: grid;
   grid-row: 1 / -1;
   grid-template-rows: subgrid;
 }
-.sb-match:has(.sb-slots) > .sb-side > .sb-side__badge { grid-row: 2; }
-.sb-match:has(.sb-slots) > .sb-side > .sb-name { grid-row: 3; align-self: end; }
-.sb-match:has(.sb-slots) > .sb-side > .sb-points-grid { grid-row: 4; }
+.sb-match:has(.sb-slots) > .sb-side > .sb-name { grid-row: 2; align-self: end; }
+.sb-match:has(.sb-slots) > .sb-side > .sb-points-grid { grid-row: 3; }
 .sb-match:has(.sb-slots) > .sb-center { grid-row: 1 / -1; }
-.sb-match:has(.sb-slots) > .sb-side--shiro > .sb-side__badge { justify-self: end; }
-.sb-match:has(.sb-slots) > .sb-side--aka > .sb-side__badge { justify-self: start; }
 
 /* the side label (".sb-dojo" historically held it) becomes the identity chip,
    one statement of the side, colour-coded, like the inline editor's chip */
@@ -10316,18 +10293,18 @@ abbr.msb-lab { text-decoration: none; cursor: help; }
      individual board's centre carries four 44px slots and cannot shrink, so
      it takes its own row above the two sides instead of squeezing them to a
      glyph per line; the sides then share the width. The side's subgrid rows
-     are renumbered for the three rows that remain. */
+     are renumbered for the two rows that remain (the badge's row went with the
+     badge, bc-sccl). */
   .sb-match:has(.sb-slots) {
     grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
-    grid-template-rows: auto auto auto auto;
+    grid-template-rows: auto auto auto;
   }
   .sb-match:has(.sb-slots) > .sb-center { grid-row: 1; grid-column: 1 / -1; }
   .sb-match:has(.sb-slots) > .sb-side { grid-row: 2 / -1; }
   .sb-match:has(.sb-slots) > .sb-side--shiro { grid-column: 1; }
   .sb-match:has(.sb-slots) > .sb-side--aka { grid-column: 2; }
-  .sb-match:has(.sb-slots) > .sb-side > .sb-side__badge { grid-row: 1; }
-  .sb-match:has(.sb-slots) > .sb-side > .sb-name { grid-row: 2; }
-  .sb-match:has(.sb-slots) > .sb-side > .sb-points-grid { grid-row: 3; }
+  .sb-match:has(.sb-slots) > .sb-side > .sb-name { grid-row: 1; }
+  .sb-match:has(.sb-slots) > .sb-side > .sb-points-grid { grid-row: 2; }
   /* The team header's fixed centre and gutter margin exist to align it with
      the bout rows' columns; those rows stack below, so the header goes back
      to content-sized columns and full width. */

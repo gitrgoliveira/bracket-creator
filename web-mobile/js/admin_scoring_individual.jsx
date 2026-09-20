@@ -821,10 +821,17 @@ export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, on
                 {sides.map((s, idx) => (
                   <React.Fragment key={s.key}>
                     <div className={`sb-side sb-side--${s.color}`}>
-                      {/* Explicit SHIRO/AKA pill, matching the Engi editor's
-                          side badge so both editors label the side the same way
-                          (impeccable re-critique symmetry). */}
-                      <div className={`sb-side__badge sb-side__badge--${s.color}`}>{sideColorName(s.color)}</div>
+                      {/* No SHIRO/AKA pill: the half is TINTED, and a tinted
+                          surface does not need the badge as well (operator
+                          ruling 2026-09-20, bc-sccl). This SUPERSEDES the
+                          bc-dnst rule that the board names the side once in
+                          text by this header badge; the tint plus the Shiro
+                          hatch now carry it, exactly as the bout rows and foul
+                          counters below already did. The sr-only label keeps
+                          the side in text for a screen reader, which is what
+                          DESIGN.md §4 requires when colour would otherwise be
+                          the only signal. */}
+                      <span className="sr-only">{sideColorName(s.color)}: </span>
                       {/* Competitor number chip: owned by numbered_name.jsx
                           (the outer-side rule lives there). */}
                       <div className="sb-name">

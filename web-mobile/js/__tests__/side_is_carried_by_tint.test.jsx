@@ -114,10 +114,13 @@ describe('the side is carried by a tinted cell', () => {
       const src = read(file);
       expect(src, `${file} does not use SideCell`).toMatch(/<SideCell side="shiro"/);
       expect(src, `${file} does not use SideCell`).toMatch(/<SideCell side="aka"/);
-      expect(src, `${file} suppresses the label it must carry`).not.toMatch(/label=\{false\}/);
     }
     // ...and the primitive really emits it, so the loop above is not vacuous.
     expect(codeOf('side_cell.jsx')).toMatch(/<span className="sr-only">\{sideWord\(side\)\}: <\/span>/);
+    // ...unconditionally. The surfaces cannot opt out because there is no
+    // opt-out: a default-true `label` prop shipped once with zero callers,
+    // which is an untested switch on the guarantee this file exists to make.
+    expect(codeOf('side_cell.jsx'), 'the label opt-out is back').not.toMatch(/label\s*=\s*true/);
     // The inert channel is gone rather than left beside the real one: an
     // aria-label on these role=generic cells was never announced.
     expect(read('admin_shiaijo.jsx')).not.toMatch(/shiaijo-(qrow|sides)__side[^>]*aria-label/);

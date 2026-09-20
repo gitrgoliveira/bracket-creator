@@ -50,17 +50,15 @@ export function SideLabel({ side }) {
 //              the shared pair and keep their fill; stacking side-fill--* on
 //              top would repaint them at a different pitch. They still come
 //              here for the label, which is the part that was going missing.
-//   label      pass false ONLY where the side is already named in VISIBLE
-//              text, so a second label would be announced twice. NO CALLER
-//              passes it today: the one surface that names the side visibly
-//              (the watchlist hero, CLAUDE.md's exception, granted by size)
-//              does not use SideCell at all -- it would be built with the
-//              only thing this guarantees turned off, and wrapping its row in
-//              a component hides it from the panel suite's shim. The flag
-//              exists for the next such surface; until one arrives it is
-//              unexercised, so treat it as untested.
 //   as         element to render; "div" by default.
-export function SideCell({ side, className = "", density = "", fill = true, label = true, as: Tag = "div", children, ...rest }) {
+//
+// There is deliberately NO switch for the label. An early draft had one, for
+// a surface that already names the side in visible text -- but the only such
+// surface (the watchlist hero, CLAUDE.md's exception, granted by size) does
+// not come here at all, so the switch shipped with no caller: an untested way
+// to turn off the one thing this component exists to guarantee. Re-add it
+// WITH the caller that needs it, never ahead of one.
+export function SideCell({ side, className = "", density = "", fill = true, as: Tag = "div", children, ...rest }) {
   const cls = [
     className,
     fill ? `side-fill--${side}` : "",
@@ -70,7 +68,7 @@ export function SideCell({ side, className = "", density = "", fill = true, labe
     .join(" ");
   return (
     <Tag className={cls} {...rest}>
-      {label ? <SideLabel side={side} /> : null}
+      <SideLabel side={side} />
       {children}
     </Tag>
   );

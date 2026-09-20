@@ -2,7 +2,7 @@
 // Extracted from viewer.jsx (mp-pxxc step 10).
 
 import { competitionKindLabel, compMatches, tournamentMatches, TournamentInfo, compareDmy } from './viewer_utils.jsx';
-import { matchParticipantIds, addPlayerToWatchlist, resolveEntryPlayerIds, resolveWatchedPlayers, findPrimaryEntry, buildPrimaryNextMatch, buildRoster, useWatchlist, buildWatchedSets, matchInvolvesWatchedSet } from './viewer_watchlist_core.jsx';
+import { matchParticipantIds, addPlayerToWatchlist, resolveEntryPlayerIds, resolveWatchedPlayers, findPrimaryEntry, heroEntry, buildPrimaryNextMatch, buildRoster, useWatchlist, buildWatchedSets, matchInvolvesWatchedSet } from './viewer_watchlist_core.jsx';
 import { runOnce, notifEnable, notifDisable, useChimeMuted, isFollowedMatchOnDeck, useFollowedMatchAlert, useSecondaryWatchAlert, MyMatchAlertBanner } from './viewer_alerts.jsx';
 import { notificationSupported } from './viewer_notifications.jsx';
 import { VSchedItem, MatchViewerModal } from './viewer_match.jsx';
@@ -176,6 +176,14 @@ export function ViewerHome({ tournament, onSelectCompetition, onAdminClick, onOp
   const primaryIds = useMemo(() => new Set(resolveEntryPlayerIds(primaryEntry, roster)), [primaryEntry, roster]);
   const primaryNextMatch = useMemo(() => buildPrimaryNextMatch(primaryEntry, roster, bothSidesMatches), [primaryEntry, roster, bothSidesMatches]);
 
+  // The CARD's subject, which is not always the chime's (bc-wlhc). heroEntry
+  // falls back to the first-added entry when nothing is pinned; primaryEntry
+  // above stays null there, so useFollowedMatchAlert below never fires for
+  // someone the reader did not choose. Two derivations, one line apart, so the
+  // difference is visible rather than hidden behind a flag.
+  const heroWatchEntry = useMemo(() => heroEntry(watchlist, primaryKey), [watchlist, primaryKey]);
+  const heroNextMatch = useMemo(() => buildPrimaryNextMatch(heroWatchEntry, roster, bothSidesMatches), [heroWatchEntry, roster, bothSidesMatches]);
+
   // Compact list of running and upcoming watched matches: shown when ≥2 entities
   // are watched (coach multi-watch). Includes running matches so they can be
   // excluded from the global-NOW hero section (mp-42rg de-dup). Bounded so it
@@ -318,7 +326,8 @@ export function ViewerHome({ tournament, onSelectCompetition, onAdminClick, onOp
             primaryKey={primaryKey}
             setPrimaryKey={setPrimaryKey}
             primaryEntry={primaryEntry}
-            primaryNextMatch={primaryNextMatch}
+            heroEntry={heroWatchEntry}
+            heroNextMatch={heroNextMatch}
             upcoming={watchedUpcoming}
             onMatchClick={setSelectedMatch}
             chimeMuted={chimeMuted}

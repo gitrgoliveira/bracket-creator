@@ -12,6 +12,7 @@ import {
   resolveWatchedPlayers,
   effectivePrimaryKey,
   findPrimaryEntry,
+  heroEntry,
   buildPrimaryNextMatch,
 } from '../viewer.jsx';
 
@@ -165,6 +166,34 @@ describe('findPrimaryEntry', () => {
     expect(findPrimaryEntry([{ id: 'a1' }, { id: 'a2' }], '')).toBeNull();
     expect(findPrimaryEntry([{ id: 'a1' }, { id: 'a2' }], 'player:a2'))
       .toEqual({ type: 'player', id: 'a2', name: '', dojo: '' });
+  });
+});
+
+// bc-wlhc. The two questions the panel asks are NOT the same question, and
+// conflating them is what deleted the card the moment a coach added a second
+// person to watch. Pinned as a PAIR: an assertion on heroEntry alone would pass
+// if someone "simplified" findPrimaryEntry to share the fallback, which would
+// hand the chime to whoever happened to be added first.
+describe('heroEntry vs findPrimaryEntry', () => {
+  const two = [{ id: 'a1' }, { id: 'a2' }];
+
+  it('falls back to the first entry when nothing is pinned, while the chime does not', () => {
+    expect(heroEntry(two, '')).toEqual({ type: 'player', id: 'a1', name: '', dojo: '' });
+    expect(findPrimaryEntry(two, ''), 'the chime stays opt-in').toBeNull();
+  });
+
+  it('follows a valid pin, like the primary', () => {
+    expect(heroEntry(two, 'player:a2')).toEqual({ type: 'player', id: 'a2', name: '', dojo: '' });
+  });
+
+  it('falls back when the pin is stale, so a removed pin cannot blank the card', () => {
+    expect(heroEntry(two, 'player:gone')).toEqual({ type: 'player', id: 'a1', name: '', dojo: '' });
+    expect(findPrimaryEntry(two, 'player:gone')).toBeNull();
+  });
+
+  it('is null only when nothing is watched', () => {
+    expect(heroEntry([], '')).toBeNull();
+    expect(heroEntry(null, '')).toBeNull();
   });
 });
 

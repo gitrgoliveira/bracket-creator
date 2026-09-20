@@ -272,6 +272,27 @@ export function effectivePrimaryKey(watchlist, pinnedKey) {
   return list.some((e) => entryKey(e) === pinnedKey) ? pinnedKey : null;
 }
 
+// heroEntry: which entry the CARD shows. This is deliberately NOT
+// effectivePrimaryKey.
+//
+// The primary drives two different things: the hero card (display) and
+// useFollowedMatchAlert (a chime, a title flash, a notification). Returning
+// null for 2+ unpinned entries is the right answer for the ALERT -- the loud
+// tier must never attach itself to someone the reader did not choose; that is
+// what the "no hero, no chime" test pins, and the quiet tier
+// (useSecondaryWatchAlert) covers the others.
+//
+// But it was also the answer for the CARD, so adding a training partner deleted
+// the most valuable element on the page and left a ☆ hint in its place
+// (bc-wlhc). Display has no such hazard: showing the first-added entry's match
+// costs the reader nothing and is almost always themselves.
+//
+// So: the card falls back to the first entry, the alert does not. Callers that
+// mean "who gets the chime" keep using findPrimaryEntry.
+export function heroEntry(watchlist, pinnedKey) {
+  return findPrimaryEntry(watchlist, pinnedKey) || normalizeWatchlist(watchlist)[0] || null;
+}
+
 // findPrimaryEntry: the primary entry object (or null), per effectivePrimaryKey.
 export function findPrimaryEntry(watchlist, pinnedKey) {
   const key = effectivePrimaryKey(watchlist, pinnedKey);

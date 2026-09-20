@@ -28,15 +28,16 @@ const { useState, useRef: useRefV, useCallback } = React;
 //   - status==="scheduled" + queuePosition===1 → "Next up"
 //   - status==="scheduled" + queuePosition>1   → "<qp-1> before yours"
 //   - status==="running"                       → null (WatchHeroCard signals running
-//                                                        via .my-match--running ring + label change;
+//                                                        via its navy .wl-hero__now band;
 //                                                        no Queue chip needed)
 //   - anything else (completed/forfeit/cancelled, or no qp)  → null (hide chip)
 //
 // Wording mirrors the VSchedItem helper below and display.jsx::queueLabel
 // so all three viewer surfaces agree. Running matches return null because
-// WatchHeroCard already signals the running state via the .my-match--running
-// CSS ring and label change ("Your match"): the Queue chip must not add a
-// redundant label. We intentionally do NOT
+// WatchHeroCard already signals the running state via its navy .wl-hero__now
+// band and label change ("Your match"): the Queue chip must not add a
+// redundant label. Note the card's own "when" line still renders while running
+// (it reads "Now"), so the live region does not leave the DOM with this chip. We intentionally do NOT
 // fall back to "Scheduled HH:MM" the way display.jsx does: the
 // MyMatchPanel already has a dedicated Time chip.
 // Exported for unit-testing.

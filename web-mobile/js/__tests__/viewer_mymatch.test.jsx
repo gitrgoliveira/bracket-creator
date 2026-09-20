@@ -146,8 +146,8 @@ describe('mymatchQueueLabel', () => {
     expect(mymatchQueueLabel({ status: 'scheduled', queuePosition: 99 })).toBe('98 before yours');
   });
 
-  it('returns null when status === "running" (running state shown by .my-match--running ring)', () => {
-    // WatchHeroCard signals the running state via the .my-match--running CSS ring
+  it('returns null when status === "running" (running state shown by the navy band)', () => {
+    // WatchHeroCard signals the running state via its navy .wl-hero__now band
     // and label change ("Your match"). The Queue chip must not add a redundant label.
     expect(mymatchQueueLabel({ status: 'running', queuePosition: 0 })).toBeNull();
     expect(mymatchQueueLabel({ status: 'running' })).toBeNull();

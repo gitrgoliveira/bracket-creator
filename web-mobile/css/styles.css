@@ -2606,8 +2606,175 @@ button.sync-status-pill:focus-visible {
   overflow: hidden;
 }
 
-.my-match--running {
-  box-shadow: 0 0 0 4px var(--accent-soft);
+/* ---------- Watchlist hero card (.wl-hero) ----------
+   The personalised "your next match" card on the viewer home. Its own block,
+   NOT a variant of .my-match: that class is also ViewerOverview's simpler
+   next-match card (viewer_competition.jsx), and repainting it would silently
+   change a second surface.
+
+   PHONE-FIRST AND NEVER TRUNCATE (operator ruling 2026-09-20, bc-wlhc). The
+   predecessor put Court / Time / Queue in three `flex: 1` chips; at 390px that
+   is 86px each, which wrapped "Shiaijo A" with the court LETTER orphaned on
+   its own line and "11 before yours" onto three. Everything here is full
+   width and stacked, so there is nothing to wrap and nothing to clip -- note
+   the absence of `overflow: hidden`, which on the old card silently cut the
+   Shiaijo glossary tooltip into an unreadable box.
+
+   The card is LIGHT. The predecessor was `background: var(--accent)` in every
+   state, which spent the running colour on the resting card (Principle 3) and
+   left running with a 1.20:1 ring; it also put --red-soft's Aka tint on navy,
+   where red cannot read. Light at rest means navy is free to mean "on court
+   now", and the side tints land on the ground they were designed for. */
+.wl-hero {
+  background: var(--surface);
+  color: var(--ink);
+  border: 1px solid var(--line);
+  border-radius: var(--r-lg);
+  margin-bottom: 14px;
+  overflow: visible;
+}
+
+.wl-hero--running {
+  border-color: var(--accent);
+  border-width: 2px;
+}
+
+/* The running band: white on --accent at 12.36:1, the whole width of the card.
+   Radius matches the card's inner corners so it reads as part of the shell. */
+.wl-hero__now {
+  background: var(--accent);
+  color: var(--accent-fg);
+  font-weight: 800;
+  font-size: 12px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  padding: 8px 16px;
+  border-radius: calc(var(--r-lg) - 2px) calc(var(--r-lg) - 2px) 0 0;
+}
+
+.wl-hero__body {
+  padding: 14px 16px 16px;
+}
+
+.wl-hero__lbl {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+}
+
+/* The instruction, and the largest thing on the card. */
+.wl-hero__where {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin-top: 2px;
+}
+
+.wl-hero__where-l {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--ink-2);
+}
+
+.wl-hero__where-v {
+  font-family: var(--font-display);
+  font-size: 34px;
+  font-weight: 800;
+  line-height: 1.05;
+  color: var(--ink-1);
+  /* The one token that says where to walk. It may never wrap. */
+  white-space: nowrap;
+}
+
+.wl-hero__when {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--ink-2);
+  margin-top: 2px;
+}
+
+.wl-hero__round {
+  font-size: 12px;
+  color: var(--ink-3);
+  margin-top: 2px;
+}
+
+/* The pairing. One row per competitor, full width, stacked: on a phone the two
+   sides cannot sit left/right without squeezing names. */
+.wl-hero__sides {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  width: 100%;
+  margin-top: 12px;
+  text-align: left;
+}
+
+button.wl-hero__sides--btn {
+  border: none;
+  background: none;
+  padding: 0;
+  cursor: pointer;
+  color: inherit;
+  font: inherit;
+}
+
+/* The fill comes from .side-fill--shiro/--aka (shared with the scores list and
+   the court console); this owns only the geometry. */
+.wl-hero__side {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 8px;
+  padding: 8px 10px;
+  border-radius: 8px;
+}
+
+.wl-hero__side-head {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.wl-hero__side-lbl {
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--ink-2);
+}
+
+/* "you": which of the two rows is the watched entity. */
+.wl-hero__you {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--accent);
+  background: var(--accent-soft);
+  border-radius: 4px;
+  padding: 1px 5px;
+}
+
+.wl-hero__side-name {
+  font-size: 17px;
+  font-weight: 700;
+  color: var(--ink-1);
+}
+
+.wl-hero__side-dojo {
+  font-size: 12px;
+  color: var(--ink-2);
+}
+
+.wl-hero__more {
+  display: block;
+  margin-top: 8px;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--accent);
 }
 
 .my-match__lbl {
@@ -4202,6 +4369,26 @@ button.vsched-item:not([data-clickable]) {
 .pmf__chip.is-checked-in {
   background: var(--ok-soft);
   color: var(--ok-ink);
+}
+
+/* A watch entry whose stored id is not in this tournament's roster (bc-wlhc).
+   --warn, not --danger: nothing is lost or broken, the entry simply cannot be
+   resolved and the reader must re-add it. It sits beside the name rather than
+   replacing it, so the chip still says WHO it was. */
+.pmf__chip--unresolved {
+  background: var(--warn-soft);
+  color: var(--warn-ink);
+  border: 1px solid var(--warn-border);
+}
+
+.pmf__chip-warn {
+  font-weight: 700;
+  color: var(--warn);
+}
+
+/* The matching hint. Same reasoning as the chip: caution, not error. */
+.watchlist-primary-unresolved {
+  color: var(--warn-ink);
 }
 
 .pmf__chip button {
@@ -8642,7 +8829,28 @@ abbr.msb-lab { text-decoration: none; cursor: help; }
 }
 
 /* Slightly looser chip bar: chips can carry a pin star + remove button. */
-.watchlist-chips { gap: 6px; }
+/* bc-wlhc: the watchlist row is a PHONE surface and its two controls were
+   17x13 (the pin star) and 13x14 (the remove x) CSS px, under the 24x24 floor
+   of WCAG 2.5.8 and far under it for a control that DELETES a watch entry with
+   no undo. Both grow to a 32x32 target, Material's standard chip height.
+   Scoped to this row rather than .pmf__chip, which PlayerMultiFilter shares.
+
+   Not 44x44 (WCAG 2.5.5 AAA): the targets are kept INSIDE each chip, so at 44
+   a wrapping row would either stack two rows of 44px chips or need overlapping
+   hit areas, where a tap near the edge lands on a neighbour's delete. 32 is the
+   largest size this layout reaches without a target ever covering another. */
+.watchlist-chips { gap: 8px; }
+
+.watchlist-chips .pmf__chip { padding: 0 2px 0 8px; }
+
+.watchlist-chips .pmf__chip button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 32px;
+  min-height: 32px;
+  padding: 0;
+}
 
 /* Pin star toggles the primary entity (shown only when ≥2 entities). */
 .pmf__chip-pin {

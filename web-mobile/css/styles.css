@@ -1848,6 +1848,33 @@ a:hover {
   border-radius: 0 6px 6px 0;
 }
 
+/* Aka/Shiro side FILL: the tinted-cell arm of DESIGN.md §4's dense-row rule,
+   held as ONE pair instead of a copy per surface. Applied by the three operator
+   surfaces that used to name the side with a SHIRO/AKA text badge instead
+   (operator decision 2026-09-20, bc-sccl): the scores-list row, the court
+   console's queue row, and its MatchSides. The host owns its own padding and
+   corner radii; this owns only the fill.
+
+   The hatch is load-bearing rather than decorative: pure white on a white card
+   is invisible, so Shiro is a diagonal hatch over --white-side while Aka is a
+   flat --red-soft. That also keeps the two readable without relying on colour,
+   which is what lets the text badge go (DESIGN.md §4: colour is never the only
+   signal).
+
+   Two surfaces predate this pair and keep their own copies at a different hatch
+   pitch: .pool-match-numbered-row__side--* (3px, the form this was taken from)
+   and .vsched-item__side--* (6px). They are deliberately left alone, because
+   folding them in here would change how they look, not just where the rule
+   lives. */
+.side-fill--shiro {
+  background: var(--white-side);
+  background-image: repeating-linear-gradient(-45deg, transparent, transparent 3px, var(--shiro-hatch) 3px, var(--shiro-hatch) 6px);
+}
+
+.side-fill--aka {
+  background: var(--red-soft);
+}
+
 .pool-match-numbered-row__name {
   font-weight: 600;
   font-size: 12px;
@@ -2863,23 +2890,6 @@ button.vsched-item:not([data-clickable]) {
   color: var(--ink-3);
 }
 .vsched-item__queue--next {
-  color: var(--accent);
-}
-
-/* Final / status label, pushed right when queue chip is absent */
-.vsched-item__status {
-  margin-left: auto;
-  color: var(--ink-3);
-}
-
-/* HANTEI badge */
-.vsched-item__hantei {
-  margin-left: 6px;
-  font-size: 10px;
-  font-weight: 700;
-  padding: 1px 5px;
-  border-radius: 3px;
-  background: var(--accent-soft);
   color: var(--accent);
 }
 
@@ -4852,10 +4862,18 @@ button.vsched-item:not([data-clickable]) {
   min-width: 0;
 }
 
+/* The side cells carry the side by TINT (.side-fill--shiro/--aka), not by the
+   SHIRO/AKA text badge they used to hold (operator decision 2026-09-20,
+   bc-sccl). Padding and the outer-corner radii live here so the two cells read
+   as one segmented control with the score between them. */
 .score-edit-row__side {
   flex: 1;
   min-width: 0;
+  padding: 4px 8px;
 }
+
+.score-edit-row__side--shiro { border-radius: 6px 0 0 6px; }
+.score-edit-row__side--aka { border-radius: 0 6px 6px 0; }
 
 .score-edit-row__side .name {
   font-weight: 500;
@@ -4865,9 +4883,14 @@ button.vsched-item:not([data-clickable]) {
   text-overflow: ellipsis;
 }
 
+/* One step darker than the --ink-3 secondary text normally used, because this
+   cell is now TINTED (bc-sccl): --ink-3 measures 4.83:1 on the white card it
+   used to sit on but only 4.09:1 on --red-soft, under the 4.5 floor for 11px
+   text. --ink-2 is 8.69:1 there. Both sides take the same value so Shiro and
+   Aka read identically, even though Shiro's lighter tint would have passed. */
 .score-edit-row__side .dojo {
   font-size: 11px;
-  color: var(--ink-3);
+  color: var(--ink-2);
 }
 
 .score-edit-row__side--win .name {
@@ -6148,32 +6171,6 @@ button.vsched-item:not([data-clickable]) {
   text-decoration: underline;
 }
 
-
-/* Score editor row Aka/Shiro badges */
-.se-color-badge {
-  display: inline-flex;
-  align-items: center;
-  font-size: 8px;
-  font-weight: 800;
-  letter-spacing: 0.06em;
-  padding: 1px 4px;
-  border-radius: 3px;
-  vertical-align: middle;
-  flex-shrink: 0;
-}
-
-.se-color-badge--aka {
-  background: var(--red);
-  color: white;
-  margin-right: 4px;
-}
-
-.se-color-badge--shiro {
-  background: #fff;
-  color: var(--accent);
-  border: 1px solid var(--accent);
-  margin-left: 4px;
-}
 
 /* Team header color label */
 .team-header__color {
@@ -9042,8 +9039,6 @@ abbr.msb-lab { text-decoration: none; cursor: help; }
 /* Shiro/Aka badges run 7px across the console; bump them on the operator
    console so they stay legible at arm's length in a bright hall (critique
    P2). Scoped to .shiaijo so the dense schedule editor is untouched. */
-.shiaijo .se-color-badge { font-size: 10px; padding: 2px 5px; }
-.shiaijo-sides .se-color-badge { font-size: 10px; padding: 2px 6px; }
 
 .linklike {
   background: none; border: 0; padding: 0; font: inherit;
@@ -9130,9 +9125,16 @@ abbr.msb-lab { text-decoration: none; cursor: help; }
 
 /* Big sides block for the Up Next card */
 .shiaijo-sides { display: flex; align-items: center; gap: 12px; }
-.shiaijo-sides__side { flex: 1; min-width: 0; }
+/* Tinted side cells, same treatment as the scores list (bc-sccl); the badge
+   these replaced is gone. Slightly more padding than the compact rows, since
+   this block is the court's headline matchup. */
+.shiaijo-sides__side { flex: 1; min-width: 0; padding: 6px 10px; }
+.shiaijo-sides__side--shiro { border-radius: 8px 0 0 8px; }
+.shiaijo-sides__side--aka { border-radius: 0 8px 8px 0; }
 .shiaijo-sides__side .name { font-weight: 600; font-size: 15px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.shiaijo-sides__side .dojo { font-size: 11px; color: var(--ink-3); }
+/* --ink-2 rather than --ink-3 for the same reason as the scores row: the cell
+   is tinted now, and --ink-3 falls to 4.09:1 on --red-soft (bc-sccl). */
+.shiaijo-sides__side .dojo { font-size: 11px; color: var(--ink-2); }
 .shiaijo-sides__vs { font-size: 12px; color: var(--ink-3); }
 .shiaijo-sides--lg .name { font-size: 18px; }
 
@@ -9180,11 +9182,14 @@ abbr.msb-lab { text-decoration: none; cursor: help; }
 }
 .shiaijo-qrow__time { font-weight: 600; color: var(--ink-2); min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .shiaijo-qrow__state { font-family: var(--font-mono); font-weight: 700; font-size: 13px; color: var(--ink); white-space: nowrap; display: inline-flex; align-items: center; gap: 6px; }
-.shiaijo-qrow__final { font-family: var(--font-sans); font-weight: 600; font-size: 10px; color: var(--ink-3); }
 /* Matchup: two equal name columns flanking the centre "vs", names hug centre. */
 .shiaijo-qrow__match { display: grid; grid-template-columns: 1fr auto 1fr; align-items: center; gap: 8px; }
-.shiaijo-qrow__side { display: flex; align-items: center; gap: 6px; min-width: 0; }
-.shiaijo-qrow__side--aka { flex-direction: row-reverse; text-align: right; }
+/* Tinted side cells (bc-sccl). The two halves are already equal: the parent
+   .shiaijo-qrow__match is a 1fr/auto/1fr grid, so each cell fills its column
+   and the fills meet at the centre "vs" without needing a flex basis here. */
+.shiaijo-qrow__side { display: flex; align-items: center; gap: 6px; min-width: 0; padding: 4px 8px; }
+.shiaijo-qrow__side--shiro { border-radius: 6px 0 0 6px; }
+.shiaijo-qrow__side--aka { flex-direction: row-reverse; text-align: right; border-radius: 0 6px 6px 0; }
 .shiaijo-qrow__name { font-weight: 600; font-size: 14px; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .shiaijo-qrow__vs { font-size: 11px; color: var(--ink-3); }
 /* Completed result, centred on its own line below the names (the names keep the

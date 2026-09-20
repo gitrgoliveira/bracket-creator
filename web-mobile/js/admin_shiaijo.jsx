@@ -1863,19 +1863,25 @@ export function ShiaijoQueueRow({ m, scheduled, courts, onMoveCourt, onMove, onE
                         </span>
                     )}
                 </span>
+                {/* No "Final" for a completed row (operator ruling 2026-09-20,
+                    bc-sccl): "Final" names the LAST MATCH OF A KNOCKOUT, never a
+                    finished bout. The row already says it three other ways -- the
+                    score on its own line below, a "Correct" button instead of
+                    "Score", and the "Completed" group heading above. "Waiting"
+                    stays: a blocked row has no other marker. */}
                 <span className="shiaijo-qrow__state">
-                    {isComplete && <span className="shiaijo-qrow__final">Final</span>}
                     {pending && <span className="shiaijo-qrow__waiting">Waiting</span>}
                 </span>
             </div>
             <div className="shiaijo-qrow__match">
-                <div className="shiaijo-qrow__side" aria-label={`Shiro: ${bName}`}>
-                    <span className="se-color-badge se-color-badge--shiro">SHIRO</span>
+                {/* Side by CELL TINT, not a SHIRO/AKA badge (operator decision
+                    2026-09-20, bc-sccl). The aria-label already carries the side in
+                    text, so no sr-only span is added here: it would double-announce. */}
+                <div className="shiaijo-qrow__side shiaijo-qrow__side--shiro side-fill--shiro" aria-label={`Shiro: ${bName}`}>
                     <span className="shiaijo-qrow__name"><NumberedName side="shiro" name={bName} number={m.sideB?.number} clip /></span>
                 </div>
                 <span className="shiaijo-qrow__vs">vs</span>
-                <div className="shiaijo-qrow__side shiaijo-qrow__side--aka" aria-label={`Aka: ${aName}`}>
-                    <span className="se-color-badge se-color-badge--aka">AKA</span>
+                <div className="shiaijo-qrow__side shiaijo-qrow__side--aka side-fill--aka" aria-label={`Aka: ${aName}`}>
                     <span className="shiaijo-qrow__name"><NumberedName side="aka" name={aName} number={m.sideA?.number} clip /></span>
                 </div>
             </div>
@@ -1949,16 +1955,16 @@ export function ShiaijoQueueRow({ m, scheduled, courts, onMoveCourt, onMove, onE
 function MatchSides({ m, large }) {
     return (
         <div className={`shiaijo-sides ${large ? "shiaijo-sides--lg" : ""}`}>
-            <div className="shiaijo-sides__side" aria-label={`Shiro: ${m.sideB?.name || ""}`}>
-                <span className="se-color-badge se-color-badge--shiro">SHIRO</span>
+            {/* Side by CELL TINT, not a SHIRO/AKA badge (bc-sccl); the aria-label
+                carries the side in text, as on the queue row above. */}
+            <div className="shiaijo-sides__side shiaijo-sides__side--shiro side-fill--shiro" aria-label={`Shiro: ${m.sideB?.name || ""}`}>
                 <div className="name">
                     <NumberedName side="shiro" name={m.sideB?.name} number={m.sideB?.number} clip />
                 </div>
                 <div className="dojo">{m.sideB?.dojo}</div>
             </div>
             <div className="shiaijo-sides__vs">vs</div>
-            <div className="shiaijo-sides__side" style={{ textAlign: "right" }} aria-label={`Aka: ${m.sideA?.name || ""}`}>
-                <span className="se-color-badge se-color-badge--aka">AKA</span>
+            <div className="shiaijo-sides__side shiaijo-sides__side--aka side-fill--aka" style={{ textAlign: "right" }} aria-label={`Aka: ${m.sideA?.name || ""}`}>
                 <div className="name">
                     <NumberedName side="aka" name={m.sideA?.name} number={m.sideA?.number} clip />
                 </div>

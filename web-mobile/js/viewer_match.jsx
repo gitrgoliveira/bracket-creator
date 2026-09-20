@@ -194,8 +194,9 @@ export const VSchedItem = React.memo(({ m, tweaks, showCompetition, onClick, hig
   // stays gracefully empty for non-queued matches and pre-T046 responses.
   // Wording is owned by display.jsx::queueLabel (bead mp-e3k) so every
   // viewer surface stays in sync; we still gate on scheduled+qp>0 here
-  // because this row already renders ● NOW / Final on the right for
-  // running/completed and we don't want the fallback "Scheduled hh:mm".
+  // because this row already renders ● NOW on the right for a running match
+  // and we don't want the fallback "Scheduled hh:mm". (A completed row used to
+  // render "Final" there too; that badge is gone, see below.)
   const qp = Number(m.queuePosition);
   // Use the NEUTRAL court-queue label ("Next up" / "#N") here, not the
   // "N before yours" wording: VSchedItem renders on the general schedule and
@@ -215,10 +216,21 @@ export const VSchedItem = React.memo(({ m, tweaks, showCompetition, onClick, hig
             {queueLabel}
           </span>
         )}
-        {m.status === "completed" && <span className="vsched-item__status">Final</span>}
-        {m.status === "completed" && m.decidedByHantei && (
-          <span className="vsched-item__hantei" data-testid="vsched-hantei">HANTEI</span>
-        )}
+        {/* No "Final" badge here (operator ruling 2026-09-20, bc-sccl): "Final"
+            names the LAST MATCH OF A KNOCKOUT and nothing else, so it may not
+            double as a done/not-done marker on an ordinary bout. The only list
+            that renders a completed row is viewer_competition.jsx's
+            `recentMatches`, which sits under a "Recent results" heading, and the
+            card carries its score either way; the running and upcoming lists
+            never hold a completed match. */}
+        {/* No HANTEI chip either (operator ruling 2026-09-20, bc-sccl). It was
+            added on 2026-05-20 when decidedByHantei was a BOOLEAN and this row
+            showed nothing about it; since the 2026-08-21 ruling the verdict IS
+            an ippon, so this card's own score string carries it ("– vs Ht") and
+            the chip became a duplicate. That is the same duplicate the TV
+            header and lobby chips were removed for: a surface that renders the
+            mark must not also chip it, and only a surface with no such row
+            (MatchCard's meta strip, the OBS lower third) keeps one. */}
       </div>
       {(showCompetition || m.phase === "pool" || m.round) ? (
         <div className="vsched-item__ctx">

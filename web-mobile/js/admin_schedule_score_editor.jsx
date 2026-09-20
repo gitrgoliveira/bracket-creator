@@ -247,10 +247,19 @@ export function AdminScoreEditor({ t, c, onEditScore, onMoveCourt, restrictToCom
               </div>
               <ScoreEditCourtBtn m={m} courts={tournament.courts || []} onMoveCourt={onMoveCourt} />
               <div className="score-edit-row__sides">
-                  <div className={`score-edit-row__side ${bWin ? "score-edit-row__side--win" : ""}`} style={{ textAlign: "right" }}>
+                  {/* The side is carried by the CELL TINT (.side-fill--*), not by a
+                      SHIRO/AKA text badge (operator decision 2026-09-20, bc-sccl):
+                      DESIGN.md §4 offers a tinted cell, a coloured header or a filled
+                      badge for a dense row, and the tint gives the side real area on
+                      the densest list in the app. The badge was also the side's only
+                      TEXT, so an sr-only label replaces it -- §4 requires colour never
+                      be the only signal, and the Shiro hatch covers the sighted case.
+                      Mirrors PoolNumberedMatchRow (viewer_standings.jsx), which
+                      dropped its badge for the same tint. */}
+                  <div className={`score-edit-row__side score-edit-row__side--shiro side-fill--shiro ${bWin ? "score-edit-row__side--win" : ""}`} style={{ textAlign: "right" }}>
+                    <span className="sr-only">Shiro: </span>
                     <div className="name"><NumberedName side="shiro" name={m.sideB?.name} number={m.sideB?.number} clip /></div>
                     <div className="dojo">{m.sideB?.dojo}</div>
-                    <span className="se-color-badge se-color-badge--shiro">SHIRO</span>
                   </div>
                   {/* Foul ▲ flanks the SCORE (Shiro left, Aka right): a hansoku is part of
                       the scoreline, so it reads at the score's level. The slots are reserved
@@ -262,16 +271,20 @@ export function AdminScoreEditor({ t, c, onEditScore, onMoveCourt, restrictToCom
                     </span>
                     <span className="score-edit-row__foul">{foulA && <span className="msb-hansoku" data-testid="foul-mark-a">{foulA}</span>}</span>
                   </div>
-                  <div className={`score-edit-row__side ${aWin ? "score-edit-row__side--win" : ""}`}>
-                    <span className="se-color-badge se-color-badge--aka">AKA</span>
+                  <div className={`score-edit-row__side score-edit-row__side--aka side-fill--aka ${aWin ? "score-edit-row__side--win" : ""}`}>
+                    <span className="sr-only">Aka: </span>
                     <div className="name"><NumberedName side="aka" name={m.sideA?.name} number={m.sideA?.number} clip /></div>
                     <div className="dojo">{m.sideA?.dojo}</div>
                   </div>
               </div>
               <div>
                 {/* Running: no "● NOW" label: the row highlight is the signal (removed as
-                    redundant). Completed keeps its Final / Corrected status. */}
-                {m.status === "completed" && <span style={{ fontSize: 10, color: "var(--ink-3)" }}>{isCorrection ? "Corrected" : "Final"}</span>}
+                    redundant). A completed row says nothing here either (operator ruling
+                    2026-09-20, bc-sccl): "Final" restated what the row already showed
+                    twice over, in the recorded score and in the button reading "Correct"
+                    rather than "Score". "Corrected" stays, because a re-entered result is
+                    NOT derivable from anything else on the row. */}
+                {isCorrection && <span style={{ fontSize: 10, color: "var(--ink-3)" }}>Corrected</span>}
               </div>
               <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
                 <button type="button" className={getScoreBtnClass(m.status)} onClick={() => setOpenKey(scoreKeyOf(m))}>

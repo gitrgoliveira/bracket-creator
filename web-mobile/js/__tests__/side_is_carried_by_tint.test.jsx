@@ -28,18 +28,13 @@ import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'fs';
 import { dirname, resolve } from 'path';
 import { fileURLToPath } from 'url';
+// Shared with the sibling suite: readCode strips comments, because every
+// removal site explains itself in one and a raw read matches its own
+// explanation.
+import { readSource as read, readCode as codeOf } from './helpers/source.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const read = (p) => readFileSync(resolve(__dirname, '..', p), 'utf8');
 const css = readFileSync(resolve(__dirname, '..', '..', 'css', 'styles.css'), 'utf8');
-
-// Source with comments stripped. Comments here legitimately NAME what was
-// removed (each removal site explains itself), so an absence assertion that
-// read the raw file would match its own explanation -- which is exactly what
-// happened on this helper's first use.
-const codeOf = (file) => read(file)
-  .replace(/\/\*[\s\S]*?\*\//g, '')
-  .replace(/^\s*\/\/.*$/gm, '');
 
 // The declarations of one top-level rule, by exact selector.
 const block = (selector) => {
@@ -170,7 +165,10 @@ describe('the TV board names no side', () => {
 
   it('renders no SHIRO/AKA heading', () => {
     expect(src()).not.toMatch(/TermD name="(shiro|aka)"/);
-    expect(codeOf('display_scoreboard.jsx')).not.toMatch(/["'`](SHIRO|AKA)["'`]/);
+    // Quoted literal OR a bare JSX text node: a mutation that re-added the
+    // heading as <span>AKA</span> slipped past the literal-only check, so both
+    // forms are matched here (same pattern the HANTEI sweep uses).
+    expect(codeOf('display_scoreboard.jsx')).not.toMatch(/(["'`](SHIRO|AKA)["'`]|>\s*(SHIRO|AKA)\s*<)/);
   });
 
   it('still separates the sides by colour, which is now load-bearing', () => {

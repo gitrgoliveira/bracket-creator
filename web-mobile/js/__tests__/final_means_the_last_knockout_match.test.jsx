@@ -24,9 +24,12 @@
 // the literal back, and that is what these catch.
 
 import { describe, it, expect } from 'vitest';
-import { readdirSync, readFileSync } from 'fs';
+import { readdirSync } from 'fs';
 import { dirname, resolve } from 'path';
 import { fileURLToPath } from 'url';
+// readCode strips comments: every removal site explains itself in one, so a raw
+// read would match its own explanation. Shared with the sibling suite.
+import { readCode as codeOf } from './helpers/source.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -34,14 +37,6 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 // is swept without anyone remembering to add it here.
 const modules = () => readdirSync(resolve(__dirname, '..'))
   .filter(f => f.endsWith('.jsx'));
-
-// Comments legitimately NAME the removed label (each removal site explains
-// itself), so every assertion reads code only. Block comments go first; then
-// whole-line // comments, matched from the line start so a "https://" inside
-// code is never mistaken for one.
-const codeOf = (file) => readFileSync(resolve(__dirname, '..', file), 'utf8')
-  .replace(/\/\*[\s\S]*?\*\//g, '')
-  .replace(/^\s*\/\/.*$/gm, '');
 
 const SCORES_LIST = 'admin_schedule_score_editor.jsx';
 const STATE_BADGE_SURFACES = [SCORES_LIST, 'admin_shiaijo.jsx', 'viewer_match.jsx'];

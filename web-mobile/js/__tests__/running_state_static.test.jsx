@@ -1,7 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { readFileSync } from 'fs';
-import { dirname, resolve } from 'path';
-import { fileURLToPath } from 'url';
+import { cssBlock, readStylesheet } from './helpers/source.js';
 
 // bc-csst, operator ruling 2026-09-19 (DESIGN.md Principle 3): motion means a
 // warning or an expected operator action, never "this is normal and ongoing".
@@ -10,14 +8,12 @@ import { fileURLToPath } from 'url';
 // this one reads the stylesheet and pins the removal, the same way
 // team_editor_vacancy_not_flagged pins a removed warning.
 
-const __dirname = dirname(fileURLToPath(import.meta.url));
-const css = readFileSync(resolve(__dirname, '..', '..', 'css', 'styles.css'), 'utf8');
+const css = readStylesheet();
 
-// The declarations of one top-level rule, by exact selector.
 const block = (selector) => {
-  const start = css.indexOf(`\n${selector} {`);
-  expect(start, `rule ${selector} exists`).toBeGreaterThan(-1);
-  return css.slice(start, css.indexOf('}', start));
+  const b = cssBlock(css, selector);
+  expect(b, `rule ${selector} exists`).not.toBeNull();
+  return b;
 };
 
 describe('ordinary ongoing state does not pulse', () => {

@@ -33,3 +33,20 @@ export const readCode = (file) =>
 
 /** Share of a module's bytes that survive readCode. Guards the phantom-block bug. */
 export const retentionRatio = (file) => readCode(file).length / readSource(file).length;
+
+/** Read the stylesheet once; callers pass it to cssBlock. */
+export const readStylesheet = () =>
+  readFileSync(resolve(JS_DIR, '..', 'css', 'styles.css'), 'utf8');
+
+// The declarations of one top-level CSS rule, found by ANY selector in its
+// list. Two suites had a copy of this that looked for `\n<selector> {`, so a
+// rule the selector merely SHARES -- `.side-fill--shiro,\n.pool-...--shiro {`
+// -- stopped being found, and the failure read as "the fill is gone" when only
+// its spelling had changed. Matches the selector at a line start followed by
+// either `{` (alone) or `,` (one entry of a list).
+export const cssBlock = (css, selector) => {
+  const esc = selector.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const m = new RegExp(`^${esc}\\s*[,{]`, 'm').exec(css);
+  if (!m) return null;
+  return css.slice(m.index, css.indexOf('}', css.indexOf('{', m.index)));
+};

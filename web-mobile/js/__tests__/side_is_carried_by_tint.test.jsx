@@ -30,22 +30,17 @@
 // or drops the fill class, and that is what these catch.
 
 import { describe, it, expect } from 'vitest';
-import { readFileSync } from 'fs';
-import { dirname, resolve } from 'path';
-import { fileURLToPath } from 'url';
 // Shared with the sibling suite: readCode strips comments, because every
 // removal site explains itself in one and a raw read matches its own
 // explanation.
-import { readSource as read, readCode as codeOf } from './helpers/source.js';
+import { readSource as read, readCode as codeOf, cssBlock, readStylesheet } from './helpers/source.js';
 
-const __dirname = dirname(fileURLToPath(import.meta.url));
-const css = readFileSync(resolve(__dirname, '..', '..', 'css', 'styles.css'), 'utf8');
+const css = readStylesheet();
 
-// The declarations of one top-level rule, by exact selector.
 const block = (selector) => {
-  const start = css.indexOf(`\n${selector} {`);
-  expect(start, `rule ${selector} exists`).toBeGreaterThan(-1);
-  return css.slice(start, css.indexOf('}', start));
+  const b = cssBlock(css, selector);
+  expect(b, `rule ${selector} exists`).not.toBeNull();
+  return b;
 };
 
 // Every surface that was converted, with the side classes it must now apply.
@@ -78,6 +73,20 @@ describe('the side is carried by a tinted cell', () => {
     }
     // The class had no other user, so leaving the rules behind would be dead CSS.
     expect(css).not.toMatch(/se-color-badge/);
+  });
+
+  // .bc-color-badge was the watchlist card's side badge and the last one left
+  // in the tree. bc-wlhc replaced that card with tinted rows, so it lost its
+  // only renderer -- but it was the one badge this sweep did not name, so its
+  // ~24 lines survived while every sibling's were deleted, under a comment
+  // saying "Used by viewer_watchlist.jsx only" and a CLAUDE.md sentence calling
+  // it the ruling's standing exception. Dead CSS plus a doc telling the next
+  // agent to keep it.
+  it('leaves no .bc-color-badge behind either, in markup or in the sheet', () => {
+    for (const f of ['viewer_watchlist.jsx', 'bracket.jsx', 'viewer_match.jsx']) {
+      expect(read(f), `${f} still renders the watchlist side badge`).not.toMatch(/bc-color-badge/);
+    }
+    expect(css, 'the rules outlived their only renderer').not.toMatch(/bc-color-badge/);
   });
 
   it('replaces the badge TEXT with an sr-only label on every converted surface', () => {

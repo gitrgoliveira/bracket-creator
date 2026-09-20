@@ -61,8 +61,8 @@ All tokens are defined in the `:root` block in [styles.css](web-mobile/css/style
 
 | Token | Value | Use |
 |---|---|---|
-| `--accent` | `#1d3557` | Primary CTAs, active nav, winner-side (Shiro), Shiro frame/badges, **running state** (border/ring/dot/running-strip), brand fills |
-| `--accent-soft` | `#e7eaf3` | Hover/active tint, focus rings, Shiro court chips, **running state rings/backgrounds** |
+| `--accent` | `#1d3557` | Primary CTAs, active nav, winner-side (Shiro), Shiro frame/badges, **running state** (border/ring/dot/running-strip), brand fills. **Re-set at runtime** by `applyTheme` (`app.jsx`) from the Branding primary, together with `--accent-strong`, the filled-button hover shade darkened from it; a stored value that is the stock navy, or not a `#rrggbb` colour, leaves `:root`'s values in place. |
+| `--accent-soft` | `#e7eaf3` | Hover/active tint, focus rings, Shiro court chips, **running state rings/backgrounds**. **Derived at runtime** from a custom Branding primary (8% of it toward white) unless the operator picked a soft colour of their own; the stock pair leaves this token alone, because the derivation only approximates the hand-tuned value. |
 | `--accent-fg` | `#ffffff` | The **on-colour** ink: text and icons that sit on a filled colour surface (`--accent` primarily, but equally the amber announcement banner and the red outage strip, which need the same white and should not each spell it differently). It is also the *fill* of an element that inverts against such a surface, like the white admin pill on the navy hero, where the on-colour value is exactly what is wanted. Only use `--surface` when the white is a neutral page surface (a card, a modal, an input), not part of a colour pairing. |
 | `--red` | `#c1121f` | Aka (Red) side fill/badge, danger buttons. **Aka + danger only: never running state** (see Principle 3) |
 | `--red-soft` | `#fde7e8` | Aka (Red) side tint (score editor, bracket, pool/schedule rows) |

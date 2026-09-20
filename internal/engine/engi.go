@@ -66,8 +66,8 @@ func engiWinnerSide(flagsA, flagsB int) string {
 // so the audit trail is preserved for engi competitions.
 //
 // Returns the persisted MatchResult so the handler can echo / broadcast it.
-func (e *Engine) recordEngiMatchResult(h state.StoreTx, compID, matchID string, flagsA, flagsB int, correctionReason string) (*state.MatchResult, error) {
-	return e.recordEngiMatch(h, compID, matchID, flagsA, flagsB, correctionReason)
+func (e *Engine) recordEngiMatchResult(h state.StoreTx, compID, matchID string, flagsA, flagsB int, correctionReason string, opts ...ForceOptions) (*state.MatchResult, error) {
+	return e.recordEngiMatch(h, compID, matchID, flagsA, flagsB, correctionReason, opts...)
 }
 
 // backfillEngiResult copies the engine-derived identity from a recorded engi
@@ -102,7 +102,11 @@ func (e *Engine) recordEngiMatch(
 	compID, matchID string,
 	flagsA, flagsB int,
 	correctionReason string,
+	opts ...ForceOptions,
 ) (*state.MatchResult, error) {
+	fo := firstForceOptions(opts)
+	force := fo.Force
+	var reopened []ReopenedMatch
 	if !engiValidTotal(flagsA, flagsB) {
 		return nil, validationErrorf(
 			"engi: flag total %d+%d=%d is invalid; total must be odd and in {1,3,5} (3- or 5-referee panel, no draw possible)",
@@ -138,8 +142,32 @@ func (e *Engine) recordEngiMatch(
 				if !bracketMatchPlayable(bm) {
 					return validationErrorf("knockout match %s is not ready to score: a feeder pool or match has not finished", matchID)
 				}
+				// bc-kcdg: engi is a knockout like any other, so a correction
+				// here repaints the next round exactly as the kendo path's
+				// does, and must answer the same way. This seam RETURNS before
+				// writeToPoolOrBracket, so the guard on that path never sees an
+				// engi write and engi corrections silently repainted a played
+				// downstream match.
+				//
+				// guardOverrideDownstreamKnockoutCorrection, not the
+				// MatchResult-shaped twin: engi decides its winner from the
+				// flag count rather than from a submitted result, so the
+				// override guard's bare-name input is the shape that fits.
+				newWinner := bm.SideB
+				if winnerSide == "A" {
+					newWinner = bm.SideA
+				}
+				if !force {
+					if err := guardOverrideDownstreamKnockoutCorrection(b, rIdx, mIdx, bm, newWinner); err != nil {
+						return err
+					}
+				}
+				priorWinner, priorWinnerID := bm.Winner, bm.WinnerID
 				result = applyEngiToBracketMatch(bm, flagsA, flagsB, winnerSide, correctionReason)
 				e.propagateBracketWinner(b, rIdx, mIdx)
+				if force && winnerActuallyChanged(priorWinner, priorWinnerID, bm) {
+					reopened = forceReopenDownstreamChain(b, rIdx, mIdx, bm.ID)
+				}
 				return nil
 			}
 		}
@@ -156,6 +184,9 @@ func (e *Engine) recordEngiMatch(
 	})
 	if updateErr != nil {
 		return nil, updateErr
+	}
+	if fo.Reopened != nil {
+		*fo.Reopened = append(*fo.Reopened, reopened...)
 	}
 	return result, nil
 }

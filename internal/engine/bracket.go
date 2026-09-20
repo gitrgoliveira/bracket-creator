@@ -394,7 +394,7 @@ func (e *Engine) buildBracketFromDraw(comp *state.Competition, draw *helper.Knoc
 			finalCourt = last[0].Court
 		}
 		bracket.ThirdPlaceMatch = &state.BracketMatch{
-			ID:           "m-bronze",
+			ID:           state.BronzeMatchID,
 			Status:       state.MatchStatusScheduled,
 			DisplayRound: -1,
 			Court:        bronzeDefaultCourt(finalCourt, comp.Courts),

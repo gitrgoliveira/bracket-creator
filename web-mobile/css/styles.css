@@ -4824,6 +4824,17 @@ button.vsched-item:not([data-clickable]) {
   font-weight: 600;
 }
 
+/* The knockout match number, under the time. Same mono face as the time so the
+   two read as one identifying block, but lighter: the number identifies the
+   match, it does not compete with the competitors' names. */
+.score-edit-row__matchno {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--ink-3);
+  margin-top: 2px;
+}
+
 .score-edit-row__court {
   background: var(--accent-soft);
   color: var(--accent);

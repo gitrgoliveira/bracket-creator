@@ -21,7 +21,10 @@ import { realIppons } from './result_slot.jsx';
 // script-tagged), so the double-module-eval trap that keeps this file off
 // api_client.jsx does not apply to it — the same move admin_scoring_shared.jsx
 // already makes.
-import { writeDidNotLand, writeWasSuperseded, writeWasRefusedForClock, CLOCK_SKEW_REASON_TEXT } from './write_result.jsx';
+import {
+    writeDidNotLand, writeWasSuperseded, writeWasRefusedForClock, CLOCK_SKEW_REASON_TEXT,
+    attemptScoreWrite, DOWNSTREAM_KNOCKOUT_PLAYED_CANCELLED,
+} from './write_result.jsx';
 // swissRoundLabel: single owner is pool_ids.jsx (mp-dej2); this file used to
 // carry its own copy.
 import { swissRoundLabel } from './pool_ids.jsx';
@@ -282,6 +285,17 @@ export function shiaijoScoreCell(m) {
     return s ? { kind: "ippon", ippon: s } : { kind: "none" };
 }
 
+// recordOverrideWinner adapts attemptScoreWrite's generic (compId, matchId,
+// result, password) call shape into overrideBracketWinner's own positional
+// signature. Only sends forceDownstreamReopen when true, so the FIRST attempt
+// for each feeder is byte-identical to the call before this override gained
+// the confirm+retry loop (bc-kcdg).
+function recordOverrideWinner(compId, matchId, result, pw) {
+    return result.forceDownstreamReopen
+        ? window.API.overrideBracketWinner(compId, matchId, result.winnerName, pw, true)
+        : window.API.overrideBracketWinner(compId, matchId, result.winnerName, pw);
+}
+
 // ResolveFeedersModal (mp-y3nk Phase 3): last-resort recovery when a court must
 // run a knockout final whose feeder results have not synced from other shiaijos
 // (dropped/delayed SSE). The operator asserts each unresolved feeder's winner;
@@ -322,7 +336,24 @@ function ResolveFeedersModal({ match, comp, password, onClose, onResolved, onOpt
             let anyClockRefused = false;
             for (const s of resolvable) {
                 const winner = picks[s.feeder.id];
-                const r = await window.API.overrideBracketWinner(comp.id, s.feeder.id, winner, password);
+                // bc-kcdg: routed through the shared attemptScoreWrite loop
+                // (write_result.jsx) so a 409 downstream_knockout_played
+                // refusal -- this feeder's assertion would repaint a later
+                // match that already played on the current winner -- gets the
+                // same confirm+retry experience as a score correction, rather
+                // than surfacing the raw refusal as an opaque error string.
+                // recordOverrideWinner adapts the (compId, matchId, result,
+                // password) shape attemptScoreWrite calls into
+                // overrideBracketWinner's own positional signature.
+                const r = await attemptScoreWrite({
+                    recordScore: recordOverrideWinner,
+                    confirmDialog: window.confirmDialog,
+                    compId: comp.id,
+                    matchId: s.feeder.id,
+                    result: { winnerName: winner },
+                    password,
+                    match: null,
+                });
                 if (writeWasSuperseded(r)) {
                     // The server dropped this assertion, so our pick is NOT the
                     // authoritative winner: skip the optimistic advance and let
@@ -365,7 +396,15 @@ function ResolveFeedersModal({ match, comp, password, onClose, onResolved, onOpt
             if (onResolved) onResolved();
             onClose();
         } catch (e) {
-            setError((e && e.message) || "Could not resolve the feeders. Check your connection and try again.");
+            // bc-kcdg: a declined downstream-reopen override leaves everything
+            // unchanged (neither this feeder assertion nor the later match it
+            // would have reopened was written), so it gets its own copy rather
+            // than the generic connection-failure message below.
+            if (e && e.downstreamKnockoutPlayedCancelled) {
+                setError(DOWNSTREAM_KNOCKOUT_PLAYED_CANCELLED);
+            } else {
+                setError((e && e.message) || "Could not resolve the feeders. Check your connection and try again.");
+            }
         } finally {
             setBusy(false);
         }

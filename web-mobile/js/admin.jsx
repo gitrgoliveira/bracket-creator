@@ -3,6 +3,13 @@
 
 import { applyPatch as patchCompetitionData, checkSeqGap } from './patch.jsx';
 import { createTimerPool } from './timer_pool.jsx';
+// Imported from the leaf, not read off `window`: write_result.jsx is
+// import-only (see its header) and every consumer ES-imports it directly.
+import {
+  DOWNSTREAM_KNOCKOUT_PLAYED_CANCELLED,
+  attemptScoreWrite,
+  downstreamKnockoutReopenedNotice,
+} from './write_result.jsx';
 
 const { useState: useStateA, useEffect: useEffectA, useRef: useRefA } = React;
 
@@ -68,6 +75,14 @@ const Modal = window.Modal;
 function mergeCompetitionsIntoTournament(currentT, mutator) {
   return { ...currentT, competitions: mutator(currentT.competitions || []) };
 }
+
+// bc-kcdg: attemptScoreWrite (imported from write_result.jsx, the shared
+// confirm+retry loop for a 409 downstream_knockout_played refusal) is the
+// single place editMatchScore below -- and therefore every score-editor host
+// and both editor bodies -- gets this behaviour. It is ALSO used by
+// admin_shiaijo.jsx's ResolveFeedersModal for the override-winner "Run now"
+// recovery; see write_result.jsx's doc comment for why the shared loop lives
+// there rather than being defined once per script-tagged host.
 
 // Pure helper for the "merge a tournament-level patch onto the latest
 // tournament state" pattern used by AdminApp.updateTournament. Same
@@ -272,13 +287,37 @@ function AdminApp({ tournament, onUpdate, onLogout, onViewerMode, onPasswordChan
     await refreshCompsBestEffort("Move");
   };
 
+  // bc-kcdg: THE single chokepoint every score-editor host (the bracket
+  // panel, pools, the schedule score editor, per-court shiaijo) routes a
+  // score write through via onEditScore, for both the individual and team
+  // editor bodies. attemptScoreWrite above owns the downstream-knockout
+  // confirm+retry loop; wiring it here means every host and both editors
+  // get it for free.
   const editMatchScore = async (compId, matchId, result, match) => {
     let saveRes;
     try {
-      saveRes = await window.API.recordScore(compId, matchId, result, password, match);
+      saveRes = await attemptScoreWrite({
+        recordScore: window.API.recordScore,
+        confirmDialog: window.confirmDialog,
+        compId, matchId, result, password, match,
+      });
     } catch (e) {
+      if (e.downstreamKnockoutPlayedCancelled) {
+        // Declining the override leaves everything as it was: neither this
+        // match nor the later one it depends on was written.
+        showToast(DOWNSTREAM_KNOCKOUT_PLAYED_CANCELLED);
+        throw e;
+      }
       showToast(e.message, "error");
       throw e;
+    }
+    // bc-kcdg: say what the confirmation actually did. The operator agreed to
+    // reopen specific later matches; without this the only evidence is the
+    // board. attemptScoreWrite attaches the ids the refusal named, so the
+    // notice names the same matches the dialog did.
+    if (saveRes && saveRes.downstreamReopened) {
+      const notice = downstreamKnockoutReopenedNotice(saveRes.downstreamReopened);
+      if (notice) showToast(notice);
     }
     // F5: when the write was only queued (offline/transient), skip the
     // best-effort refresh. There is nothing new on the server yet.
@@ -928,4 +967,4 @@ window.normalizeCreatedRecord = normalizeCreatedRecord;
 // component with no window binding, and its confirm phase now carries the
 // "will NOT be started" list, which is the surface that stops "Start all"
 // offering a competition the server would refuse.
-export { mergeCompetitionsIntoTournament, mergeTournamentPatch, normalizeCreatedRecord, StartAllModal };
+export { mergeCompetitionsIntoTournament, mergeTournamentPatch, normalizeCreatedRecord, StartAllModal, attemptScoreWrite };

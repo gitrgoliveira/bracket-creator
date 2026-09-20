@@ -23,6 +23,7 @@ import {
   isKoTieBlocked,
 } from '../admin_scoring_modal.jsx';
 import { makeSubmitDecision } from '../admin_scoring_shared.jsx';
+import { DOWNSTREAM_KNOCKOUT_PLAYED_CANCELLED } from '../write_result.jsx';
 import { sameCompetitor } from '../competitor_identity.jsx';
 import { preserveStoredDaihyosenVerdict } from '../admin_scoring_team.jsx';
 import { hanteiWinnerKey, hanteiSlot } from '../result_slot.jsx';
@@ -1380,6 +1381,145 @@ describe('item 7: non-points decisions advance to next match', () => {
       await submit('kiken-voluntary', { decisionBy: 'shiro', decisionReason: '' });
       expect(setWithdrawnPlayer).toHaveBeenCalledWith(match.sideB);
     });
+  });
+});
+
+// bc-cse (finding 1): the decision path (kiken / fusenpai / daihyosen) gets
+// the SAME downstream_knockout_played confirm+retry experience the score
+// path's editMatchScore (admin.jsx) has, via the SAME attemptScoreWrite loop
+// (write_result.jsx). Before this fix, api_client.jsx's recordDecision threw
+// a plain `new Error(err.error)` on the 409, so the operator saw the literal
+// token "downstream_knockout_played" and nothing could set
+// forceDownstreamReopen to get past it.
+describe('submitDecisionRequest / makeSubmitDecision: downstream_knockout_played confirm+retry (bc-cse)', () => {
+  let savedAPI;
+  let savedConfirmDialog;
+  beforeEach(() => {
+    savedAPI = window.API;
+    savedConfirmDialog = window.confirmDialog;
+  });
+  afterEach(() => {
+    window.API = savedAPI;
+    window.confirmDialog = savedConfirmDialog;
+  });
+
+  function downstreamError(fields = {}) {
+    const e = new Error(
+      'correcting match "m1" would change the winner already propagated into "m5", which has recorded its own result',
+    );
+    e.downstreamKnockoutPlayed = { matchId: 'm1', blockingMatchId: 'm5', displaced: 'Aoki Taro', ...fields };
+    return e;
+  }
+
+  it('submitDecisionRequest: on refusal, prompts via window.confirmDialog and retries with forceDownstreamReopen:true', async () => {
+    window.API = {
+      recordDecision: vi.fn()
+        .mockRejectedValueOnce(downstreamError())
+        // The server reports what it actually reopened; the client never
+        // infers it from the refusal it was shown.
+        .mockResolvedValueOnce({ winner: 'Aoki Taro', status: 'completed', reopenedMatches: [{ id: 'm5', number: 5 }] }),
+    };
+    window.confirmDialog = vi.fn().mockResolvedValue(true);
+
+    const result = await submitDecisionRequest(
+      'c1', 'm1', 'kiken-voluntary', { decisionBy: 'aka', decisionReason: '' }, 0, 'pw',
+    );
+
+    // The decision path gets the same after-the-fact accounting as a score
+    // correction: the result carries what the confirmation reopened, so the
+    // operator can be told rather than left to read the board.
+    expect(result).toEqual({
+      winner: 'Aoki Taro', status: 'completed',
+      reopenedMatches: [{ id: 'm5', number: 5 }],
+      downstreamReopened: [{ id: 'm5', number: 5 }],
+    });
+    expect(window.confirmDialog).toHaveBeenCalledTimes(1);
+    const dialogArg = window.confirmDialog.mock.calls[0][0];
+    expect(dialogArg.message).toContain('m5');
+    expect(dialogArg.message).toContain('Aoki Taro');
+
+    // recordDecision must still be called with exactly the 4-argument shape
+    // pinned by the regression tests above (compId, matchId, body, password) --
+    // attemptScoreWrite's extra `match` argument must NOT reach it.
+    expect(window.API.recordDecision).toHaveBeenCalledTimes(2);
+    expect(window.API.recordDecision.mock.calls[0]).toHaveLength(4);
+    expect(window.API.recordDecision.mock.calls[0]).toEqual(
+      ['c1', 'm1', { decision: 'kiken-voluntary', decisionBy: 'aka' }, 'pw'],
+    );
+    // The retry carries the SAME body plus the force flag.
+    expect(window.API.recordDecision.mock.calls[1]).toHaveLength(4);
+    expect(window.API.recordDecision.mock.calls[1][2]).toEqual(
+      { decision: 'kiken-voluntary', decisionBy: 'aka', forceDownstreamReopen: true },
+    );
+  });
+
+  it('makeSubmitDecision: declining the confirm dialog shows the cancellation copy, not the raw refusal message', async () => {
+    window.API = { recordDecision: vi.fn().mockRejectedValue(downstreamError()) };
+    window.confirmDialog = vi.fn().mockResolvedValue(false);
+
+    const setDecisionErr = vi.fn();
+    const submit = makeSubmitDecision({
+      match: { compId: 'c1', id: 'm1', sideA: { id: 'pa', name: 'Aoki Taro' }, sideB: { id: 'pb', name: 'Bo' } },
+      enchoPeriodCount: 0,
+      password: 'pw',
+      mountedRef: { current: true },
+      setDecisionSubmitting: vi.fn(),
+      setDecisionErr,
+      setWithdrawnPlayer: vi.fn(),
+      setDecisionPromptKind: vi.fn(),
+      onClose: vi.fn(),
+      isComplete: true, // correcting an already-completed match
+      entityLabel: 'competitors',
+    });
+
+    await submit('kiken-voluntary', { decisionBy: 'aka', decisionReason: '' });
+
+    expect(window.confirmDialog).toHaveBeenCalledTimes(1);
+    // Only the ONE doomed attempt: declining must never retry.
+    expect(window.API.recordDecision).toHaveBeenCalledTimes(1);
+    expect(setDecisionErr).toHaveBeenCalledWith(DOWNSTREAM_KNOCKOUT_PLAYED_CANCELLED);
+    // Must not fall through to the generic error text (the raw refusal
+    // message, or the decision_locked confirm copy).
+    expect(setDecisionErr).not.toHaveBeenCalledWith(
+      expect.stringContaining('already played match'),
+    );
+  });
+
+  it('makeSubmitDecision: confirming applies the correction and proceeds past the refusal (correction closes the modal)', async () => {
+    window.API = {
+      recordDecision: vi.fn()
+        .mockRejectedValueOnce(downstreamError())
+        // The server reports what it actually reopened; the client never
+        // infers it from the refusal it was shown.
+        .mockResolvedValueOnce({ winner: 'Aoki Taro', status: 'completed', reopenedMatches: [{ id: 'm5', number: 5 }] }),
+    };
+    window.confirmDialog = vi.fn().mockResolvedValue(true);
+
+    const onClose = vi.fn();
+    const setDecisionErr = vi.fn();
+    const submit = makeSubmitDecision({
+      match: { compId: 'c1', id: 'm1', sideA: { id: 'pa', name: 'Aoki Taro' }, sideB: { id: 'pb', name: 'Bo' } },
+      enchoPeriodCount: 0,
+      password: 'pw',
+      mountedRef: { current: true },
+      setDecisionSubmitting: vi.fn(),
+      setDecisionErr,
+      setWithdrawnPlayer: vi.fn(),
+      setDecisionPromptKind: vi.fn(),
+      onClose,
+      isComplete: true,
+      entityLabel: 'competitors',
+    });
+
+    // fusenpai (not kiken): kiken always parks on RemainingMatchesPanel
+    // regardless of isComplete, so a correction that should close the modal
+    // needs a non-kiken decision to exercise the else-branch onClose() path.
+    await submit('fusenpai', { decisionBy: 'aka', decisionReason: '' });
+
+    expect(window.API.recordDecision).toHaveBeenCalledTimes(2);
+    expect(setDecisionErr).not.toHaveBeenCalledWith(DOWNSTREAM_KNOCKOUT_PLAYED_CANCELLED);
+    // A correction (isComplete=true) never calls onAfterDecision; it closes.
+    expect(onClose).toHaveBeenCalled();
   });
 });
 

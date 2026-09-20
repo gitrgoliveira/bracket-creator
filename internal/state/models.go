@@ -1705,6 +1705,12 @@ type BracketMatch struct {
 	PlaceholderWinner string `json:"placeholderWinner,omitempty"`
 }
 
+// BronzeMatchID is the id every 3rd-place match carries. It hangs off
+// Bracket.ThirdPlaceMatch rather than sitting in Rounds (see that field), so
+// code that must recognise the bronze compares against this rather than
+// re-spelling the literal.
+const BronzeMatchID = "m-bronze"
+
 type Bracket struct {
 	Rounds [][]BracketMatch `json:"rounds"`
 	// Preview marks a bracket whose leaves are pool-origin PLACEHOLDERS
@@ -1721,7 +1727,7 @@ type Bracket struct {
 	// corrupt advancement math. The pointer + omitempty keeps bracket.json
 	// backward-compatible: nil for every existing/kendo bracket. Generated only
 	// for naginata competitions with a real semifinal round (len(Rounds) >= 2);
-	// its ID is always "m-bronze", and its sides are filled from the two
+	// its ID is always BronzeMatchID, and its sides are filled from the two
 	// semifinal losers by propagateBracketWinner.
 	ThirdPlaceMatch *BracketMatch `json:"thirdPlaceMatch,omitempty"`
 	// DrawOrder holds participant ids in bracket-position order, top of the

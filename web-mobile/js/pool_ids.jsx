@@ -32,6 +32,37 @@ export function poolNameOf(id) {
 }
 
 // This regex constant is intentionally module-private: callers use the
+// exported poolMatchNumberOf() wrapper below, never the raw pattern.
+const POOL_MATCH_ORDINAL_RE = /-(\d+)$/;
+
+// poolMatchNumberOf: the bout's match number WITHIN its pool, 1-based, or 0
+// when the id carries no such ordinal.
+//
+// A pool bout is numbered inside its own pool and the numbering RESTARTS for
+// each pool (operator ruling 2026-09-19), so "Pool B · Match 1" and
+// "Pool A · Match 1" are different bouts and a render site must name the pool
+// alongside the number. This is a separate numbering from the knockout's
+// `BracketMatch.MatchNumber`, which runs once across the whole tree.
+//
+// The number comes from the id's own numeric suffix (0-based on disk, so +1
+// here), NOT from the bout's position in whatever list a caller holds: the
+// export treats that suffix as the bout's stable identity (see
+// `poolOrdinals` in internal/export/builder.go, where a skipped unresolvable
+// match must not shift the ones after it), and a list-position count would
+// renumber every later bout the moment one is filtered out.
+//
+// Supplementary bouts ("…-DH-N", "…-TB-N") get 0: they are rep bouts appended
+// after the round-robin, not one of its numbered bouts, and their own DH/TB
+// suffix is a separate sequence. The same caveat as poolNameOf applies -- any
+// id ending in "-<digits>" parses -- so gate on the phase, not on a non-zero
+// result alone.
+export function poolMatchNumberOf(id) {
+    if (typeof id !== "string" || isSupplementaryBout(id)) return 0;
+    const n = id.match(POOL_MATCH_ORDINAL_RE)?.[1];
+    return n === undefined ? 0 : Number(n) + 1;
+}
+
+// This regex constant is intentionally module-private: callers use the
 // exported isSupplementaryBout() wrapper below, never the raw pattern.
 const SUPPLEMENTARY_BOUT_RE = /-(?:DH|TB)-\d+$/;
 

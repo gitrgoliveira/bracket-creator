@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { poolNameOf, isSupplementaryBout, isPoolDaihyosenBout } from '../pool_ids.jsx';
+import { poolNameOf, isSupplementaryBout, isPoolDaihyosenBout, poolMatchNumberOf } from '../pool_ids.jsx';
 
 describe('poolNameOf', () => {
   it('parses regular / DH / TB ids to the pool name, hyphens preserved', () => {
@@ -53,5 +53,27 @@ describe('isPoolDaihyosenBout (label: daihyosen ONLY, not tiebreaker)', () => {
     expect(isPoolDaihyosenBout('Pool A-DH-East-0')).toBe(false);
     // The pool's real daihyosen bout still matches (ends in -DH-N).
     expect(isPoolDaihyosenBout('Pool A-DH-East-DH-0')).toBe(true);
+  });
+});
+
+describe('poolMatchNumberOf (a pool bout is numbered inside its own pool)', () => {
+  it('turns the id\'s 0-based suffix into a 1-based match number', () => {
+    expect(poolMatchNumberOf('Pool A-0')).toBe(1);
+    expect(poolMatchNumberOf('Pool A-5')).toBe(6);
+    expect(poolMatchNumberOf('Pool A-East-2')).toBe(3);
+  });
+  it('restarts per pool: the same number belongs to a different bout in each pool', () => {
+    // This is why a render site must name the pool alongside the number.
+    expect(poolMatchNumberOf('Pool A-0')).toBe(poolMatchNumberOf('Pool B-0'));
+  });
+  it('is 0 for a supplementary rep bout, which is not one of the numbered bouts', () => {
+    expect(poolMatchNumberOf('Pool A-DH-0')).toBe(0);
+    expect(poolMatchNumberOf('Pool A-TB-2')).toBe(0);
+  });
+  it('is 0 when there is no ordinal, and never throws', () => {
+    expect(poolMatchNumberOf('nodash')).toBe(0);
+    expect(poolMatchNumberOf('')).toBe(0);
+    expect(poolMatchNumberOf(undefined)).toBe(0);
+    expect(poolMatchNumberOf(null)).toBe(0);
   });
 });

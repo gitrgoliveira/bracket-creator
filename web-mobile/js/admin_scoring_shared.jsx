@@ -7,7 +7,10 @@ const { useState: useStateA, useEffect: useEffectA, useRef: useRefA, useMemo: us
 const Icon = window.Icon;
 
 import { DAIHYOSEN_POSITION } from './pool_ids.jsx';
-import { writeDidNotLand, writeWasSuperseded, SUPERSEDED_REASON, SUPERSEDED_ADVICE } from './write_result.jsx';
+import {
+  writeDidNotLand, writeWasSuperseded, SUPERSEDED_REASON, SUPERSEDED_ADVICE,
+  attemptScoreWrite, DOWNSTREAM_KNOCKOUT_PLAYED_CANCELLED,
+} from './write_result.jsx';
 import { sameCompetitor } from './competitor_identity.jsx';
 
 // Kendo best-of-3 cap. Mirrors the server-side `maxIpponsPerSide` in
@@ -303,9 +306,27 @@ function buildDecisionBody(kind, { decisionBy, decisionReason }, enchoPeriodCoun
 // inside the test, which was how the original gap slipped through). Returns
 // the promise from window.API.recordDecision so callers can await + handle
 // the 409 decision_locked retry-with-force loop.
+//
+// bc-cse: routed through attemptScoreWrite (write_result.jsx), the SAME
+// confirm-and-retry loop admin.jsx's editMatchScore gives the score path, so
+// a kiken/fusenpai/daihyosen decision that corrects a completed knockout
+// match whose later round already played gets the identical
+// downstream_knockout_played 409 experience instead of a raw error token
+// with no way forward. The recordScore collaborator here deliberately
+// declares only 4 parameters (compId, matchId, result, password) so the
+// `match` argument attemptScoreWrite forwards is dropped rather than reaching
+// window.API.recordDecision, whose call-site contract (pinned in
+// admin_scoring_modal.test.jsx) is exactly 4 arguments. `result` is the
+// already-built decision body: attemptScoreWrite's retry spreads
+// `forceDownstreamReopen: true` onto it exactly as it does the score body,
+// since both are plain objects the server reads the same field off.
 function submitDecisionRequest(compId, matchId, kind, decisionPayload, enchoPeriodCount, password, opts = {}) {
   const body = buildDecisionBody(kind, decisionPayload, enchoPeriodCount, opts);
-  return window.API.recordDecision(compId, matchId, body, resolveDecisionPassword(password));
+  return attemptScoreWrite({
+    recordScore: (cId, mId, result, pwd) => window.API.recordDecision(cId, mId, result, pwd),
+    confirmDialog: window.confirmDialog,
+    compId, matchId, result: body, password: resolveDecisionPassword(password),
+  });
 }
 
 // makeSubmitDecision builds the kiken/fusenpai decision submit handler shared by
@@ -409,6 +430,15 @@ function makeSubmitDecision({
       }
     } catch (e) {
       const msg = e?.message || 'Failed to record decision';
+      // bc-cse: the operator declined attemptScoreWrite's downstream-knockout
+      // confirm dialog (submitDecisionRequest above). Declining left the
+      // match and the later result it depends on unchanged -- the SAME
+      // cancellation copy the score path's editMatchScore shows (admin.jsx),
+      // not the raw refusal message the thrown error still carries.
+      if (e && e.downstreamKnockoutPlayedCancelled) {
+        if (mountedRef.current) setDecisionErr(DOWNSTREAM_KNOCKOUT_PLAYED_CANCELLED);
+        return;
+      }
       // T103: server returns "decision_locked" when a kiken-undo would
       // invalidate a downstream match: confirm and retry with force.
       if (!opts.force && /decision_locked/i.test(msg)) {

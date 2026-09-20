@@ -1167,6 +1167,137 @@ describe('subscribeTerminalWriteFailed: permanent terminal-write rejection is su
     });
 });
 
+// bc-cse: a QUEUED terminal knockout correction (score OR decision) that
+// replays into a 409 downstream_knockout_played must be discarded (it can
+// never land automatically -- nothing at this device can tap the confirm
+// dialog attemptScoreWrite shows for a LIVE write) but the operator must be
+// told in words what happened and what to do, not the bare
+// "downstream_knockout_played" token. Covers BOTH flush-loop branches that
+// can see this refusal: the generic non-retryable-4xx branch (score, and any
+// other terminal kind) and the decision-specific 409 branch (which otherwise
+// treats a 409 as "our own lost-response write already landed").
+describe('_flushQueue: downstream_knockout_played 409 on a queued correction (bc-cse)', () => {
+    it('drops a queued SCORE correction and reports the human reason + advice, not the raw token', async () => {
+        const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+        mockFetch(() => Promise.reject(new TypeError('offline')));
+        await API.recordScore('c1', 'mcorr', { status: 'completed', winner: 'A' }, 'pw', null);
+        expect(API.hasPendingTerminalWrite('c1', 'mcorr')).toBe(true);
+
+        const failures = [];
+        const unsubFail = mod.subscribeTerminalWriteFailed((info) => failures.push(info));
+        const alerts = [];
+        const unsubAlert = mod.subscribeQueueAlert((a) => alerts.push(a));
+
+        mockFetch(() => Promise.resolve({
+            ok: false,
+            status: 409,
+            json: () => Promise.resolve({
+                error: 'downstream_knockout_played',
+                matchId: 'mcorr',
+                blockingMatchId: 'm5',
+                displaced: 'Aoki Taro',
+                message: 'correcting "mcorr" would change the winner already propagated into "m5", which has recorded its own result',
+            }),
+        }));
+        window.dispatchEvent(new Event('online'));
+        await tick(50);
+        unsubFail();
+        unsubAlert();
+        warnSpy.mockRestore();
+
+        // Non-retryable: the entry is gone, not retried forever.
+        expect(API.hasPendingTerminalWrite('c1', 'mcorr')).toBe(false);
+
+        expect(failures.length).toBeGreaterThanOrEqual(1);
+        expect(failures[0]).toMatchObject({ compID: 'c1', matchID: 'mcorr', status: 409 });
+        // Names the blocking match and the displaced competitor in words.
+        expect(failures[0].reason).toContain('m5');
+        expect(failures[0].reason).toContain('Aoki Taro');
+        expect(failures[0].reason).not.toBe('downstream_knockout_played');
+        // Tells the operator the actual remedy (redo it online), not the generic
+        // "Re-enter the result and submit again." default.
+        expect(failures[0].advice).toMatch(/online/i);
+
+        const rejected = alerts.filter((a) => a.kind === 'rejected');
+        expect(rejected.length).toBeGreaterThanOrEqual(1);
+        expect(rejected[0].detail).toContain('m5');
+        expect(rejected[0].detail).not.toBe('downstream_knockout_played');
+    });
+
+    it('drops a queued DECISION correction (kiken/fusenpai/daihyosen) and reports the human reason, not the raw token', async () => {
+        // Pre-fix this landed in the decision-specific 409 branch
+        // (terminal && kind === 'decision' && res.status === 409), which reads
+        // any body.error other than decision_locked/already_ineligible as an
+        // "unexpected" 409 and reported body.reasonHuman || body.error --
+        // i.e. the literal string "downstream_knockout_played" -- with no
+        // advice at all.
+        const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+        mockFetch(() => Promise.reject(new TypeError('offline')));
+        await API.recordDecision('c1', 'mdec', { decision: 'kiken-voluntary', decisionBy: 'aka' }, 'pw');
+        expect(API.hasPendingTerminalWrite('c1', 'mdec')).toBe(true);
+
+        const failures = [];
+        const unsubFail = mod.subscribeTerminalWriteFailed((info) => failures.push(info));
+        const alerts = [];
+        const unsubAlert = mod.subscribeQueueAlert((a) => alerts.push(a));
+
+        mockFetch(() => Promise.resolve({
+            ok: false,
+            status: 409,
+            json: () => Promise.resolve({
+                error: 'downstream_knockout_played',
+                matchId: 'mdec',
+                blockingMatchId: 'm9',
+                displaced: 'Bob',
+                message: 'correcting "mdec" would change the winner already propagated into "m9", which has recorded its own result',
+            }),
+        }));
+        window.dispatchEvent(new Event('online'));
+        await tick(50);
+        unsubFail();
+        unsubAlert();
+        warnSpy.mockRestore();
+
+        expect(API.hasPendingTerminalWrite('c1', 'mdec')).toBe(false);
+
+        expect(failures.length).toBeGreaterThanOrEqual(1);
+        expect(failures[0]).toMatchObject({ compID: 'c1', matchID: 'mdec', status: 409 });
+        expect(failures[0].reason).toContain('m9');
+        expect(failures[0].reason).toContain('Bob');
+        expect(failures[0].reason).not.toBe('downstream_knockout_played');
+        expect(failures[0].advice).toMatch(/online/i);
+
+        const rejected = alerts.filter((a) => a.kind === 'rejected');
+        expect(rejected.length).toBeGreaterThanOrEqual(1);
+        expect(rejected[0].detail).toContain('m9');
+        expect(rejected[0].detail).not.toBe('downstream_knockout_played');
+    });
+
+    it('still applies decision_locked-as-success for an UNRELATED 409 (regression guard on the branch above)', async () => {
+        // The decision-specific 409 branch must keep treating decision_locked /
+        // already_ineligible as "our own lost-response write already landed"
+        // and stay silent -- the downstream_knockout_played handling above must
+        // not swallow that existing contract.
+        mockFetch(() => Promise.reject(new TypeError('offline')));
+        await API.recordDecision('c1', 'mlocked', { decision: 'fusenpai', decisionBy: 'shiro' }, 'pw');
+
+        const failures = [];
+        const unsubFail = mod.subscribeTerminalWriteFailed((info) => failures.push(info));
+
+        mockFetch(() => Promise.resolve({
+            ok: false,
+            status: 409,
+            json: () => Promise.resolve({ error: 'decision_locked' }),
+        }));
+        window.dispatchEvent(new Event('online'));
+        await tick(50);
+        unsubFail();
+
+        expect(API.hasPendingTerminalWrite('c1', 'mlocked')).toBe(false);
+        expect(failures.length).toBe(0);
+    });
+});
+
 // mp-y3nk: a queued override the server LWW-dropped (applied:false) must trigger
 // a bracketResync notification so stale optimistic local bracket state is replaced.
 // The queue entry is drained regardless (retry cannot change the outcome).

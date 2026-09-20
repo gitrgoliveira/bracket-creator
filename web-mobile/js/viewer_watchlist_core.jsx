@@ -289,8 +289,23 @@ export function effectivePrimaryKey(watchlist, pinnedKey) {
 //
 // So: the card falls back to the first entry, the alert does not. Callers that
 // mean "who gets the chime" keep using findPrimaryEntry.
-export function heroEntry(watchlist, pinnedKey) {
-  return findPrimaryEntry(watchlist, pinnedKey) || normalizeWatchlist(watchlist)[0] || null;
+// hasMatch is optional and, when given, decides the UNPINNED fallback: the
+// first entry that can actually fill the card, rather than the first ADDED.
+// Without it the fallback reproduced the very bug this function exists to fix,
+// by list order instead of by pin -- a coach who added a training partner
+// first and themselves second got "No upcoming matches for <partner>" the
+// moment the partner finished, while their own bout was minutes away and had
+// no card. A PIN still wins even when it yields nothing: it is an explicit
+// choice, and silently showing someone else would be the worse surprise.
+export function heroEntry(watchlist, pinnedKey, hasMatch) {
+  const pinned = findPrimaryEntry(watchlist, pinnedKey);
+  if (pinned) return pinned;
+  const list = normalizeWatchlist(watchlist);
+  if (typeof hasMatch === "function") {
+    const live = list.find((e) => hasMatch(e));
+    if (live) return live;
+  }
+  return list[0] || null;
 }
 
 // findPrimaryEntry: the primary entry object (or null), per effectivePrimaryKey.

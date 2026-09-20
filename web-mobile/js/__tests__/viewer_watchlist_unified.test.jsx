@@ -203,9 +203,41 @@ describe('heroEntry vs findPrimaryEntry', () => {
   // so the wiring is pinned at the source. A SOURCE check because ViewerHome
   // mounts over the viewer fetch harness; what a regression does is pass the
   // other variable, and that is what this catches.
+  // The UNPINNED fallback. Without the predicate it returned the first-ADDED
+  // entry whatever its state, which reproduced the bug this function exists to
+  // fix by list order: the coach who added a partner first and themselves
+  // second lost their card the moment the partner finished.
+  describe('the unpinned fallback prefers an entry that can fill the card', () => {
+    const two = [{ type: 'player', id: 'a1' }, { type: 'player', id: 'a2' }];
+    const entry = (id) => ({ type: 'player', id, name: '', dojo: '' });
+
+    it('skips a first-added entry with nothing to show', () => {
+      expect(heroEntry(two, '', (e) => e.id === 'a2')).toEqual(entry('a2'));
+    });
+
+    it('still names the first when NOBODY has a match', () => {
+      // Not null: the panel needs a subject for "No upcoming matches for X".
+      expect(heroEntry(two, '', () => false)).toEqual(entry('a1'));
+    });
+
+    it('a PIN wins even when it yields nothing', () => {
+      // An explicit choice. Quietly showing someone else would be the worse
+      // surprise, and the pin also drives the chime.
+      expect(heroEntry(two, 'player:a1', (e) => e.id === 'a2')).toEqual(entry('a1'));
+    });
+
+    it('without a predicate it is unchanged: first added', () => {
+      expect(heroEntry(two, '')).toEqual(entry('a1'));
+    });
+  });
+
   it('viewer_home feeds the card heroEntry and the chime findPrimaryEntry', () => {
     const src = readSource('viewer_home.jsx');
-    expect(src).toMatch(/const heroWatchEntry = useMemo\(\(\) => heroEntry\(watchlist, primaryKey\)/);
+    // Matched loosely on purpose: what must hold is that the CARD's entry comes
+    // from heroEntry over (watchlist, primaryKey). Pinning the whole memo line
+    // meant a refactor of its body -- which is what adding the "has a match"
+    // predicate was -- reddened a test whose message is about wiring.
+    expect(src).toMatch(/heroEntry\(watchlist, primaryKey/);
     expect(src).toMatch(/heroEntry=\{heroWatchEntry\}/);
     expect(src).toMatch(/heroNextMatch=\{heroNextMatch\}/);
     // And the alert keeps the opt-in one.

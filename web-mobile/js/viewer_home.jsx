@@ -181,8 +181,19 @@ export function ViewerHome({ tournament, onSelectCompetition, onAdminClick, onOp
   // above stays null there, so useFollowedMatchAlert below never fires for
   // someone the reader did not choose. Two derivations, one line apart, so the
   // difference is visible rather than hidden behind a flag.
-  const heroWatchEntry = useMemo(() => heroEntry(watchlist, primaryKey), [watchlist, primaryKey]);
-  const heroNextMatch = useMemo(() => buildPrimaryNextMatch(heroWatchEntry, roster, bothSidesMatches), [heroWatchEntry, roster, bothSidesMatches]);
+  // One memo, not two: the entry and its match are decided together, because
+  // choosing the entry now depends on whether it HAS a match. The Map keys on
+  // the entry object, which heroEntry hands back unchanged, so each candidate
+  // is scanned at most once and the chosen one is not re-scanned.
+  const { heroWatchEntry, heroNextMatch } = useMemo(() => {
+    const seen = new Map();
+    const nextFor = (e) => {
+      if (!seen.has(e)) seen.set(e, buildPrimaryNextMatch(e, roster, bothSidesMatches));
+      return seen.get(e);
+    };
+    const entry = heroEntry(watchlist, primaryKey, (e) => !!nextFor(e));
+    return { heroWatchEntry: entry, heroNextMatch: entry ? nextFor(entry) : null };
+  }, [watchlist, primaryKey, roster, bothSidesMatches]);
 
   // Compact list of running and upcoming watched matches: shown when ≥2 entities
   // are watched (coach multi-watch). Includes running matches so they can be
@@ -205,6 +216,14 @@ export function ViewerHome({ tournament, onSelectCompetition, onAdminClick, onOp
   // On-deck matches for NON-primary watched players (the quiet, rate-limited
   // banner path). A match that involves the primary is handled by the loud
   // path, so it is excluded here.
+  //
+  // primaryIds is EMPTY when nothing is pinned, so this now fires for the same
+  // match the hero card shows. That is deliberate and not the duplication the
+  // compact list had: unpinned, nothing chimes, so this quiet banner is the
+  // only on-deck NOTIFICATION that reader gets, and they got it before the card
+  // came back. A card is a thing you look at; a banner is a thing that tells
+  // you. Keying this on heroWatchEntry instead would silently remove the last
+  // notice an unpinned reader receives.
   const secondaryOnDeck = useMemo(
     () => filterSecondaryOnDeck(bothSidesMatches, resolvedWatched, primaryIds),
     [bothSidesMatches, resolvedWatched, primaryIds]

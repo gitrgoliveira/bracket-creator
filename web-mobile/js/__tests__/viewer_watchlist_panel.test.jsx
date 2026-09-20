@@ -263,8 +263,14 @@ describe('WatchlistPanel', () => {
       { type: 'player', id: 'p1', name: 'Robert Young', dojo: 'Hagane Dojo' },
       { type: 'player', id: 'p2', name: 'Nolan Clark', dojo: 'Tsubaki Kenyukai' },
     ];
+    // upcoming carries the hero's own match AND a second one. Before the
+    // de-dup the list re-rendered the hero match as its first row, directly
+    // under the far larger card showing it -- and the old fixture passed the
+    // SAME match as both, so the suite pinned the duplication instead of
+    // catching it.
+    const OTHER = { ...MATCH, id: 'm2', court: 'B' };
     const tree = runtime.mount(WatchlistPanel, baseProps({
-      watchlist: wl, primaryEntry: null, heroEntry: wl[0], heroNextMatch: MATCH, upcoming: [MATCH],
+      watchlist: wl, primaryEntry: null, heroEntry: wl[0], heroNextMatch: MATCH, upcoming: [MATCH, OTHER],
     }));
     expect(byClass(tree, 'pmf__chip')).toHaveLength(2);
     expect(byClass(tree, 'pmf__chip-pin')).toHaveLength(2);
@@ -278,7 +284,50 @@ describe('WatchlistPanel', () => {
     // that there was nothing here for them, and left the chime off.
     expect(hintText, 'the hint must not exclude the person it is showing').not.toMatch(/someone else/);
     expect(hintText).toMatch(/chime/);
-    expect(byClass(tree, 'vsched')).toHaveLength(1); // compact upcoming list
+    // The list renders, and it does NOT repeat the match on the card above it.
+    expect(byClass(tree, 'vsched'), 'compact upcoming list').toHaveLength(1);
+    const rows = findAll(tree, (n) => n.props && n.props.m && n.props.showCompetition);
+    expect(rows.map((r) => r.props.m.id),
+      "the hero's own match is not listed again beneath it").toEqual(['m2']);
+  });
+
+  // A DOJO that resolves to nobody. The unresolved treatment was gated on
+  // entry.id, which only players carry, so this state kept printing "No
+  // upcoming matches for Hagane Dojo" -- an absence claim about a roster with
+  // no Hagane member in it, which is the falsehood this whole branch exists to
+  // stop making.
+  it('flags a dojo that nobody in this roster belongs to', () => {
+    const wl = [{ type: 'dojo', dojo: 'Hagane Dojo' }];
+    const tree = runtime.mount(WatchlistPanel, baseProps({
+      // Roster is non-empty and holds nobody from Hagane: the entry is stale,
+      // not merely unloaded.
+      roster: [{ id: 'p9', name: 'Someone Else', dojo: 'Tsubaki Kenyukai' }],
+      watchlist: wl, primaryEntry: wl[0], heroEntry: wl[0], heroNextMatch: null,
+    }));
+    const text = collectText(tree);
+    expect(text, 'it must not claim the dojo simply has no matches left')
+      .not.toMatch(/No upcoming matches for Hagane Dojo/);
+    expect(text).toMatch(/No one from Hagane Dojo is in this tournament's roster/);
+    // ...and it must not tell them to re-add a dojo the picker cannot offer.
+    expect(text, 'that advice is unfollowable for a dojo').not.toMatch(/add them again/);
+    expect(byClass(tree, 'pmf__chip--unresolved'),
+      'the chip carries the state too, not just the sentence').toHaveLength(1);
+  });
+
+  // "Showing X." asserted a card that was not there.
+  it('does not say it is showing someone when there is no card', () => {
+    const wl = [
+      { type: 'player', id: 'p1', name: 'Robert Young', dojo: 'Hagane Dojo' },
+      { type: 'player', id: 'p2', name: 'Nolan Clark', dojo: 'Tsubaki Kenyukai' },
+    ];
+    const tree = runtime.mount(WatchlistPanel, baseProps({
+      watchlist: wl, primaryEntry: null, heroEntry: wl[0], heroNextMatch: null,
+    }));
+    const hintText = collectText(byClass(tree, 'watchlist-pin-hint')[0]);
+    expect(hintText, 'no card, so nothing is being shown').not.toMatch(/Showing/);
+    // The ☆ explanation survives: it is the only place the chime is
+    // discoverable, and this reader needs it more than the one with a card.
+    expect(hintText).toMatch(/chime/);
   });
 
   it('multi, pinned: hero rendered, no pin hint', () => {

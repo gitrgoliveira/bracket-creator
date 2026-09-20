@@ -378,6 +378,28 @@ function WatchlistPanel({ roster, watchlist, setWatchlist, primaryKey, setPrimar
     setPrimaryKey(primaryKey === k ? "" : k);
   };
 
+  // Does this entry resolve to NOBODY in this tournament? One predicate for
+  // both entry types, because the falsehood it prevents is the same one.
+  //
+  // It was originally gated on `entry.id`, which only players carry, so a dojo
+  // went unchecked and the panel still printed "No upcoming matches for Hagane
+  // Dojo" when the roster held no Hagane member at all -- the exact claim this
+  // code exists to stop making. A dojo resolves through the roster rather than
+  // by id, so it is asked through resolveEntryPlayerIds, the same resolution
+  // buildPrimaryNextMatch uses, instead of restating the rule here.
+  //
+  // roster.length is load-bearing, not defensive: absence is a claim ABOUT a
+  // roster, so with no roster there is nothing to be absent from and the honest
+  // answer is silence. Reachable and browser-checked: a tournament with no
+  // competitions yet (the roster is built from t.competitions) plus a watchlist
+  // carried over from a previous event, which is the normal shape of
+  // bc_watchlist -- one localStorage key per BROWSER, not per tournament.
+  const entryUnresolved = (entry) => {
+    if (!entry || roster.length === 0) return false;
+    if (entry.type === "dojo") return resolveEntryPlayerIds(entry, roster).length === 0;
+    return !!entry.id && !rosterById.get(entry.id);
+  };
+
   // Chip for one entry: player or dojo, with optional pin star (≥2 entries)
   // and a remove button.
   const renderChip = (entry) => {
@@ -388,13 +410,16 @@ function WatchlistPanel({ roster, watchlist, setWatchlist, primaryKey, setPrimar
     const isPrimary = multi && effectiveKey === k;
     if (entry.type === "dojo") {
       const total = dojos.find((d) => d.name === entry.dojo)?.total ?? 0;
+      const unresolved = entryUnresolved(entry);
       return (
-        <span key={k} className={`pmf__chip pmf__chip--dojo ${isPrimary ? "is-primary" : ""}`}>
+        <span key={k} className={`pmf__chip pmf__chip--dojo ${isPrimary ? "is-primary" : ""} ${unresolved ? "pmf__chip--unresolved" : ""}`}
+          title={unresolved ? "No one from this dojo is in this tournament's roster" : undefined}>
           {multi && (
             <button type="button" className="pmf__chip-pin" onClick={() => togglePin(entry)} aria-label={isPrimary ? `Unpin ${entry.dojo}` : `Pin ${entry.dojo} as primary`} aria-pressed={isPrimary}>
               {isPrimary ? "★" : "☆"}
             </button>
           )}
+          {unresolved && <span aria-hidden="true">⚠</span>}
           <span className="pmf__chip-icon" aria-hidden="true">⌂</span>
           {entry.dojo} ({total})
           <button type="button" onClick={() => removeEntry(entry)} aria-label={`Remove ${entry.dojo}`}>×</button>
@@ -410,16 +435,8 @@ function WatchlistPanel({ roster, watchlist, setWatchlist, primaryKey, setPrimar
     // buildPrimaryNextMatch returned nothing -- and the panel then printed "No
     // upcoming matches for X" while X was fighting. The id is NOT re-resolved by
     // name: bc-pnum rules an id that resolves to nothing resolves to nothing.
-    // What changes is that the failure is now VISIBLE.
-    // `roster.length` is load-bearing, not defensive: absence is a claim ABOUT
-    // a roster, so with no roster there is nothing to be absent from and the
-    // honest answer is silence. The state is reachable and was checked in the
-    // browser -- a tournament with no competitions yet (roster is built from
-    // t.competitions) plus a watchlist carried over from a previous event,
-    // which is the normal shape of bc_watchlist: one localStorage key per
-    // BROWSER, not per tournament. Without this every chip there would go
-    // amber and tell the reader to delete people who are perfectly fine.
-    const unresolved = roster.length > 0 && !!entry.id && !pRecord;
+    // What changes is that the failure is now VISIBLE. See entryUnresolved.
+    const unresolved = entryUnresolved(entry);
     return (
       <span key={k} className={`pmf__chip ${checkedIn ? "is-checked-in" : ""} ${isPrimary ? "is-primary" : ""} ${unresolved ? "pmf__chip--unresolved" : ""}`}
         title={unresolved ? "Not in this tournament's roster" : (checkedIn ? "Checked in" : undefined)}>
@@ -439,11 +456,23 @@ function WatchlistPanel({ roster, watchlist, setWatchlist, primaryKey, setPrimar
   // Is the shown entry's stored id absent from this tournament's roster? Drives
   // the wording below: "not in the roster" is a different fact from "has no
   // more matches", and conflating them is what made the panel state a falsehood.
-  const heroUnresolved = !!(roster.length > 0 && heroEntry && heroEntry.id && !rosterById.get(heroEntry.id));
+  const heroUnresolved = entryUnresolved(heroEntry);
 
   const heroLabel = heroEntry
     ? (heroEntry.type === "dojo" ? heroEntry.dojo : (rosterById.get(heroEntry.id)?.name || heroEntry.name || ""))
     : "";
+
+  // The compact list must not repeat the match the hero card is already
+  // showing, one element above it and far larger. Same rule mp-42rg applied
+  // between this list and the global NOW section.
+  //
+  // Filtered HERE rather than in viewer_home's buildWatchlistUpcoming memo,
+  // because globalRunning subtracts that memo's contents from the global NOW
+  // section: dropping the hero match there would not remove it from the page,
+  // it would move it back into NOW.
+  const listed = heroNextMatch
+    ? upcoming.filter((m) => !(m.compId === heroNextMatch.compId && m.id === heroNextMatch.id))
+    : upcoming;
 
   return (
     <div className="card card--sm mymatch-card" data-testid="viewer-home-watchlist">
@@ -497,9 +526,16 @@ function WatchlistPanel({ roster, watchlist, setWatchlist, primaryKey, setPrimar
           read that as "nothing here for me" and never get the chime -- which
           is precisely the state the display/chime split creates and this hint
           exists to resolve. */}
+      {/* "Showing X." only when there IS a card. Unconditionally, it sat
+          directly above "X is not in this tournament's roster" or "No upcoming
+          matches for X" -- two adjacent lines, one claiming to show them, the
+          other saying they cannot be shown. The ☆ sentence stays in BOTH cases:
+          it is the only place the chime is discoverable, and dropping the whole
+          hint would leave the reader without a card AND without the way to fix
+          which one they get. */}
       {multi && !primaryEntry && (
         <div className="hint watchlist-pin-hint">
-          Showing {heroLabel || "the first on your list"}. Tap ☆ on a chip to pin who gets the on-deck chime.
+          {heroNextMatch && heroLabel ? `Showing ${heroLabel}. ` : ""}Tap ☆ on a chip to pin who gets the on-deck chime.
         </div>
       )}
 
@@ -516,8 +552,13 @@ function WatchlistPanel({ roster, watchlist, setWatchlist, primaryKey, setPrimar
       {heroEntry && !heroNextMatch && (
         <div className={`hint--md ${heroUnresolved ? "watchlist-primary-unresolved" : "watchlist-primary-done"}`}
           data-testid={heroUnresolved ? "watchlist-unresolved" : "watchlist-primary-done"}>
+          {/* A dojo gets its own wording. "Remove the entry and add them again"
+              is unfollowable for a dojo that the picker cannot offer back,
+              because the same missing members are why it is not listed. */}
           {heroUnresolved
-            ? `${heroLabel || "This competitor"} is not in this tournament's roster, so their matches can't be found. Remove the entry and add them again.`
+            ? (heroEntry.type === "dojo"
+              ? `No one from ${heroLabel} is in this tournament's roster, so there are no matches to show.`
+              : `${heroLabel || "This competitor"} is not in this tournament's roster, so their matches can't be found. Remove the entry and add them again.`)
             : (heroLabel ? `No upcoming matches for ${heroLabel}.` : "No upcoming matches.")}
         </div>
       )}
@@ -525,9 +566,9 @@ function WatchlistPanel({ roster, watchlist, setWatchlist, primaryKey, setPrimar
       {/* Bounded compact list of running and upcoming watched matches: shown when
           ≥2 entities are watched so a coach sees the whole squad at a glance.
           Includes running matches (buildWatchlistUpcoming returns both). */}
-      {multi && upcoming.length > 0 && (
+      {multi && listed.length > 0 && (
         <div className="vsched vsched--incard">
-          {upcoming.map((m) => (
+          {listed.map((m) => (
             <VSchedItem
               key={`${m.compId}:${m.id}`}
               m={m}

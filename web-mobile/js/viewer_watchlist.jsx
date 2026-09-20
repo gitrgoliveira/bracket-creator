@@ -228,8 +228,13 @@ function WatchHeroCard({ nextMatch, primaryIds, entityLabel, onMatchClick }) {
     </div>
   );
 
+  // "you" is gated on the eyebrow, not hardcoded. For a DOJO entry the subject
+  // is whichever member happens to be up next, and the reader is the coach or
+  // parent watching them, so marking that row "you" told them they were about
+  // to fight. showDojoEyebrow is already exactly the "the subject is not the
+  // entity you watched" signal, so it is the gate.
   const sides = [
-    sideRow("subject", mySide, subjectName, subject && subject.number, subject && subject.dojo, true),
+    sideRow("subject", mySide, subjectName, subject && subject.number, subject && subject.dojo, !showDojoEyebrow),
     opponent && (typeof opponent === "object")
       ? sideRow("opp", oppSide, opponent.name, opponent.number, opponent.dojo, false)
       : null,
@@ -286,16 +291,22 @@ function WatchHeroCard({ nextMatch, primaryIds, entityLabel, onMatchClick }) {
         <div className="wl-hero__round">
           {nextMatch.compName ? `${nextMatch.compName} · ` : ""}{phaseLabel}
         </div>
-        {onMatchClick ? (
-          <button type="button" className="wl-hero__sides wl-hero__sides--btn"
-            aria-label={`Match details: ${subjectName}${opponent && opponent.name ? ` versus ${opponent.name}` : ""}`}
-            onClick={() => onMatchClick(nextMatch)}>
-            {sides}
-            <span className="wl-hero__more" aria-hidden="true">Match details →</span>
-          </button>
-        ) : (
-          <div className="wl-hero__sides">{sides}</div>
-        )}
+        {/* NO aria-label on this button. An explicit name REPLACES the
+            subtree for assistive tech (role=button has presentational
+            children), so the label that used to sit here -- "Match details:
+            X versus Y" -- was the only thing announced, and the side word,
+            the "you" marker, both competitor numbers and both dojos inside
+            it were not. The comment above calls the word a redundant channel
+            beside the fill; that was true only for a sighted reader.
+            Name-from-contents says all of it and cannot drift from what is
+            on screen, which a parallel label would. */}
+        <button type="button" className="wl-hero__sides wl-hero__sides--btn"
+          onClick={() => onMatchClick(nextMatch)}>
+          {sides}
+          {/* The words name the ACTION and stay in the accessible name; only
+              the arrow is hidden, since "right arrow" is noise. */}
+          <span className="wl-hero__more">Match details<span aria-hidden="true"> →</span></span>
+        </button>
       </div>
     </div>
   );

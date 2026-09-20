@@ -29,7 +29,8 @@ import { dirname, resolve } from 'path';
 import { fileURLToPath } from 'url';
 // readCode strips comments: every removal site explains itself in one, so a raw
 // read would match its own explanation. Shared with the sibling suite.
-import { readCode as codeOf } from './helpers/source.js';
+import { readCode as codeOf, retentionRatio } from './helpers/source.js';
+import { roundLabel } from '../bracket.jsx';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -57,8 +58,15 @@ describe('"Final" is a knockout round, not a match state', () => {
 
   // The other half of the rule: the sanctioned use must survive. Without this,
   // a later sweep for the word would "helpfully" take the round label too.
+  //
+  // CALLED, not grepped. This used to pin the source line
+  // `if (fromEnd === 0) return "Final";` character for character, so a braced
+  // if, a ternary or a lookup table -- all neutral refactors that keep the
+  // label working -- reddened it, and the message would have sent the next
+  // reader hunting a rendering bug that did not exist.
   it('bracket.jsx still names the last knockout round "Final"', () => {
-    expect(codeOf('bracket.jsx')).toMatch(/if \(fromEnd === 0\) return "Final";/);
+    expect(roundLabel(3, 4)).toBe('Final');
+    expect(roundLabel(2, 4)).toBe('Semifinals');
   });
 
 });
@@ -91,6 +99,24 @@ describe('a HANTEI badge must never exist', () => {
     expect(files.length, 'the sweep must actually find the modules').toBeGreaterThan(50);
     const offenders = files.filter(f => /(["'`]HANTEI["'`]|>\s*HANTEI\s*<)/.test(codeOf(f)));
     expect(offenders, 'a HANTEI badge may never exist on any surface').toEqual([]);
+  });
+
+  // The sweep above guards against reading no FILES. This guards against
+  // reading a truncated STRING from each one, which is the failure that
+  // actually happened: readCode stripped block comments in a separate earlier
+  // pass, so a "/*" inside a // comment opened a phantom block that ran to the
+  // next "*/". match_scoreboard.jsx -- the likeliest home for a re-added badge
+  // -- kept 16.3% of its bytes, api_client.jsx 25.9%, and the sweep read only
+  // that. Both now retain 36.7% and 41.4%.
+  //
+  // Scoped to these two rather than every module: a small doc-heavy leaf
+  // legitimately retains 14% (result_recency.jsx), so a blanket floor would
+  // either be too low to catch anything or would fail honest files.
+  it('reads most of the two modules the phantom-block bug used to swallow', () => {
+    for (const f of ['match_scoreboard.jsx', 'api_client.jsx']) {
+      expect(retentionRatio(f), `${f} is being truncated before the sweep reads it`)
+        .toBeGreaterThan(0.30);
+    }
   });
 });
 

@@ -1875,13 +1875,21 @@ export function ShiaijoQueueRow({ m, scheduled, courts, onMoveCourt, onMove, onE
             </div>
             <div className="shiaijo-qrow__match">
                 {/* Side by CELL TINT, not a SHIRO/AKA badge (operator decision
-                    2026-09-20, bc-sccl). The aria-label already carries the side in
-                    text, so no sr-only span is added here: it would double-announce. */}
-                <div className="shiaijo-qrow__side shiaijo-qrow__side--shiro side-fill--shiro" aria-label={`Shiro: ${bName}`}>
+                    2026-09-20, bc-sccl). The text channel is an sr-only span, the
+                    same one every other converted surface took.
+                    It is NOT an aria-label on this div, which is what these cells
+                    carried until 2026-09-20: a bare div is role=generic, and ARIA
+                    prohibits author naming there, so that label was announced by
+                    nothing. Removing the badge on top of it would have left the
+                    side carried by colour alone on the one surface where reading
+                    it wrong mis-scores a bout. */}
+                <div className="shiaijo-qrow__side shiaijo-qrow__side--shiro side-fill--shiro">
+                    <span className="sr-only">Shiro: </span>
                     <span className="shiaijo-qrow__name"><NumberedName side="shiro" name={bName} number={m.sideB?.number} clip /></span>
                 </div>
                 <span className="shiaijo-qrow__vs">vs</span>
-                <div className="shiaijo-qrow__side shiaijo-qrow__side--aka side-fill--aka" aria-label={`Aka: ${aName}`}>
+                <div className="shiaijo-qrow__side shiaijo-qrow__side--aka side-fill--aka">
+                    <span className="sr-only">Aka: </span>
                     <span className="shiaijo-qrow__name"><NumberedName side="aka" name={aName} number={m.sideA?.number} clip /></span>
                 </div>
             </div>
@@ -1955,16 +1963,18 @@ export function ShiaijoQueueRow({ m, scheduled, courts, onMoveCourt, onMove, onE
 function MatchSides({ m, large }) {
     return (
         <div className={`shiaijo-sides ${large ? "shiaijo-sides--lg" : ""}`}>
-            {/* Side by CELL TINT, not a SHIRO/AKA badge (bc-sccl); the aria-label
-                carries the side in text, as on the queue row above. */}
-            <div className="shiaijo-sides__side shiaijo-sides__side--shiro side-fill--shiro" aria-label={`Shiro: ${m.sideB?.name || ""}`}>
+            {/* Side by CELL TINT, not a SHIRO/AKA badge (bc-sccl); an sr-only
+                span carries the side in text, as on the queue row above. */}
+            <div className="shiaijo-sides__side shiaijo-sides__side--shiro side-fill--shiro">
+                <span className="sr-only">Shiro: </span>
                 <div className="name">
                     <NumberedName side="shiro" name={m.sideB?.name} number={m.sideB?.number} clip />
                 </div>
                 <div className="dojo">{m.sideB?.dojo}</div>
             </div>
             <div className="shiaijo-sides__vs">vs</div>
-            <div className="shiaijo-sides__side shiaijo-sides__side--aka side-fill--aka" style={{ textAlign: "right" }} aria-label={`Aka: ${m.sideA?.name || ""}`}>
+            <div className="shiaijo-sides__side shiaijo-sides__side--aka side-fill--aka" style={{ textAlign: "right" }}>
+                <span className="sr-only">Aka: </span>
                 <div className="name">
                     <NumberedName side="aka" name={m.sideA?.name} number={m.sideA?.number} clip />
                 </div>

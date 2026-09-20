@@ -13,9 +13,14 @@
 //
 // The badge was also the side's only TEXT. §4 requires that colour never be the
 // only signal, so two things replace it: the Shiro hatch (a non-colour cue) and
-// an sr-only label on the scores list. The two court-console surfaces already
-// carry aria-label on the cell, so they get no sr-only span -- it would
-// double-announce.
+// an sr-only label on EVERY converted surface.
+//
+// That last part was wrong in the first cut of this file, which exempted the two
+// court-console surfaces "because the cell already carries an aria-label". It
+// does, and that label names nothing: the cell is a bare div, so its role is
+// generic, and ARIA prohibits author naming on it. The exemption was asserted
+// here as `not.toMatch(/sr-only/)`, so the gate held the gap open. Both now
+// carry the span and it is pinned positively.
 //
 // Removed markup and deleted CSS leave no failing test behind on their own,
 // which is why this file exists (same reason as running_state_static.test.jsx).
@@ -75,13 +80,15 @@ describe('the side is carried by a tinted cell', () => {
     expect(css).not.toMatch(/se-color-badge/);
   });
 
-  it('replaces the badge TEXT with an sr-only label on the scores list', () => {
-    // Only there: the two court-console cells already carry aria-label, and a
-    // second label would be announced twice.
-    const scores = read('admin_schedule_score_editor.jsx');
-    expect(scores).toMatch(/<span className="sr-only">Shiro: <\/span>/);
-    expect(scores).toMatch(/<span className="sr-only">Aka: <\/span>/);
-    expect(read('admin_shiaijo.jsx')).not.toMatch(/sr-only">(Shiro|Aka)/);
+  it('replaces the badge TEXT with an sr-only label on every converted surface', () => {
+    for (const file of ['admin_schedule_score_editor.jsx', 'admin_shiaijo.jsx']) {
+      const src = read(file);
+      expect(src, `${file} names no Shiro side in text`).toMatch(/<span className="sr-only">Shiro: <\/span>/);
+      expect(src, `${file} names no Aka side in text`).toMatch(/<span className="sr-only">Aka: <\/span>/);
+    }
+    // And the inert channel is gone rather than left beside the real one: an
+    // aria-label on these role=generic cells was never announced.
+    expect(read('admin_shiaijo.jsx')).not.toMatch(/shiaijo-(qrow|sides)__side[^>]*aria-label/);
   });
 });
 

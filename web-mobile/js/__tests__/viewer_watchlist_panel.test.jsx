@@ -79,6 +79,24 @@ describe('WatchHeroCard', () => {
     expect(rowText(opp)).not.toContain('you');
   });
 
+  // The rows live inside the "Match details" button. A button with an explicit
+  // aria-label announces THAT and nothing else (role=button has presentational
+  // children), which is how the first cut of this card silently dropped the side
+  // word, the "you" marker, both numbers and both dojos from the accessible
+  // name -- on the one surface in this change whose side label is visible text
+  // rather than sr-only. Name-from-contents is what keeps them.
+  it('keeps the side rows in the accessible name of the details button', () => {
+    const tree = runtime.mount(WatchHeroCard, { nextMatch: MATCH, primaryIds: new Set(['p1']), entityLabel: 'Robert Young', onMatchClick: vi.fn() });
+    const btn = findAll(tree, (n) => n.type === 'button' && hasClass(n, 'wl-hero__sides--btn'))[0];
+    expect(btn, 'the sides are wrapped in a button').toBeTruthy();
+    expect(btn.props['aria-label'],
+      'an explicit name here would replace everything below it').toBeUndefined();
+    const spoken = collectText(btn, expandNamed('NumberedName'));
+    for (const part of ['Aka', 'you', 'Robert Young', 'Shiro', 'Nolan Clark', 'Match details']) {
+      expect(spoken, `"${part}" must survive in the button's accessible name`).toContain(part);
+    }
+  });
+
   it('shows the side-B player as Shiro when the primary is on side B', () => {
     const tree = runtime.mount(WatchHeroCard, { nextMatch: MATCH, primaryIds: new Set(['p2']), entityLabel: 'Nolan Clark', onMatchClick: vi.fn() });
     const [subject, opp] = sideRows(tree);
@@ -128,6 +146,10 @@ describe('WatchHeroCard', () => {
     expect(lbl).toContain('Hagane Dojo');
     expect(lbl).not.toMatch(/next up/i);
     expect(rowText(sideRows(tree)[0])).toContain('Robert Young');
+    // ...and that row is NOT marked "you". The reader watched a DOJO, so they
+    // are the coach or the parent, not whichever member happens to be up.
+    expect(rowText(sideRows(tree)[0]),
+      'the subject of a dojo card is not the reader').not.toContain('you');
   });
 
   // The scheduled dojo arm used to append "· next up" unconditionally, so a

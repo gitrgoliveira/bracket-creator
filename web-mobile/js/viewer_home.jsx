@@ -173,7 +173,7 @@ export function ViewerHome({ tournament, onSelectCompetition, onAdminClick, onOp
     // the list you already keep. normalizeWatchlist dedupes by entry key with
     // FIRST occurrence winning, so existing entries survive and only genuinely
     // new ones are appended, and it applies WATCHLIST_MAX to the result.
-    if (shared.length) setWatchlist((prev) => normalizeWatchlist([...prev, ...shared]));
+    if (shared.length) setWatchlist((prev) => normalizeWatchlist(shared));
     // Runs exactly once, gated by the deepLinkApplied ref; addWatchPlayer is an
     // unstable callback we deliberately do not depend on.
     // oxlint-disable-next-line react-hooks/exhaustive-deps

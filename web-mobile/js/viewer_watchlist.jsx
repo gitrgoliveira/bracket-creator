@@ -410,22 +410,24 @@ function WatchlistShareModal({ url, onClose }) {
     try {
       window.renderQR(canvasRef.current, url, { moduleSize: 5, quietZone: 4 });
     } catch (e) {
-      // Already gated on the measured length, so reaching here means the
-      // encoder disagrees with its own published ceiling. Say so rather than
-      // failing silently; the link itself still works, which is why this does
-      // not take the modal down.
+      // NOT the capacity case: `fits` already ruled that out against the
+      // encoder's own published ceiling. This is for a canvas that will not
+      // give a 2d context, which is a browser condition rather than anything
+      // about the payload. The link is the deliverable and still renders
+      // below, so a failed QR must not take the modal down with it.
       console.error("watchlist QR render failed", e);
     }
   }, [url, fits]);
 
-  if (!Modal) return null;
-
   return (
     <Modal title="Share your watchlist" onClose={onClose} footer={<>
+      {/* window.copyToClipboard and window.Modal are read unguarded, like
+          window.pluralize at the top of this file: index.html script-tags
+          ui.jsx and qr.js ahead of viewer_watchlist.js, and module scripts
+          execute in order, so all three are published before anything here
+          renders. A guard would be describing a state index.html prevents. */}
       <button type="button" className="btn btn--primary" onClick={() => {
-        const copy = window.copyToClipboard;
-        if (!copy) return;
-        copy(url).then(() => setCopied(true)).catch(() => setCopied(false));
+        window.copyToClipboard(url).then(() => setCopied(true)).catch(() => setCopied(false));
       }}>Copy link</button>
       <button type="button" className="btn" onClick={onClose}>Close</button>
     </>}>

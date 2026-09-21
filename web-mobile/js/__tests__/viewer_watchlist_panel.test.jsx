@@ -245,6 +245,39 @@ describe('WatchlistPanel', () => {
     expect(byClass(tree, 'watchlist-pin-hint')).toHaveLength(0);
   });
 
+  // bc-wlpl: the Share control. Gated on having something to share -- an empty
+  // watchlist produces an empty link (buildWatchlistLink returns ""), and a
+  // control that hands over nothing is worse than no control.
+  describe('the share control', () => {
+    it('is absent while the watchlist is empty', () => {
+      const tree = runtime.mount(WatchlistPanel, baseProps());
+      expect(byClass(tree, 'watchlist-share-btn')).toHaveLength(0);
+    });
+
+    it('appears once there is an entry to share', () => {
+      const wl = [{ type: 'player', id: 'p1', name: 'Robert Young', dojo: 'Hagane Dojo' }];
+      const tree = runtime.mount(WatchlistPanel, baseProps({
+        watchlist: wl, primaryEntry: wl[0], heroEntry: wl[0], heroNextMatch: MATCH,
+      }));
+      expect(byClass(tree, 'watchlist-share-btn')).toHaveLength(1);
+    });
+
+    // An entry the roster cannot resolve is still shareable, encoded by ID.
+    // This looks like it should be dropped and MUST NOT BE: the roster can
+    // legitimately be absent when the link is built (a competition's
+    // participants can fail to load, which is the whole reason
+    // rosterFullyLoaded exists), and nothing distinguishes "this person left
+    // the roster" from "the roster is not here yet". Dropping the entry would
+    // silently hand over a shorter list than the sender is looking at; keeping
+    // the id costs only a token the far end ignores if it truly resolves to
+    // nobody.
+    it('still offers a link for an entry the roster cannot resolve, so a not-yet-loaded roster does not silently shorten it', () => {
+      const wl = [{ type: 'player', id: 'not-in-this-roster', name: 'Ghost', dojo: 'X' }];
+      const tree = runtime.mount(WatchlistPanel, baseProps({ watchlist: wl, roster: [] }));
+      expect(byClass(tree, 'watchlist-share-btn')).toHaveLength(1);
+    });
+  });
+
   it('single entry: one chip with NO pin star, hero rendered, no pin hint', () => {
     const wl = [{ type: 'player', id: 'p1', name: 'Robert Young', dojo: 'Hagane Dojo' }];
     const tree = runtime.mount(WatchlistPanel, baseProps({

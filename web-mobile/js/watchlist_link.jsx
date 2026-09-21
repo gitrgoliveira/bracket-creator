@@ -148,7 +148,8 @@ export function resolveWatchlistTokens(tokens, roster) {
 // several bytes per character once percent-encoded.
 export function watchlistLinkFitsQR(url, maxBytes) {
   if (!url) return false;
-  const limit = Number(maxBytes);
-  if (!limit) return false;
-  return new TextEncoder().encode(url).length <= limit;
+  // No guard on maxBytes: a missing or unparseable limit coerces to NaN and
+  // `length <= NaN` is already false, which is the answer we would have
+  // written by hand. An explicit check would be a second way to say it.
+  return new TextEncoder().encode(url).length <= Number(maxBytes);
 }

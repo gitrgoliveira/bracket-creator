@@ -272,6 +272,42 @@ export function effectivePrimaryKey(watchlist, pinnedKey) {
   return list.some((e) => entryKey(e) === pinnedKey) ? pinnedKey : null;
 }
 
+// heroEntry: which entry the CARD shows. This is deliberately NOT
+// effectivePrimaryKey.
+//
+// The primary drives two different things: the hero card (display) and
+// useFollowedMatchAlert (a chime, a title flash, a notification). Returning
+// null for 2+ unpinned entries is the right answer for the ALERT -- the loud
+// tier must never attach itself to someone the reader did not choose; that is
+// what the "no hero, no chime" test pins, and the quiet tier
+// (useSecondaryWatchAlert) covers the others.
+//
+// But it was also the answer for the CARD, so adding a training partner deleted
+// the most valuable element on the page and left a ☆ hint in its place
+// (bc-wlhc). Display has no such hazard: showing the first-added entry's match
+// costs the reader nothing and is almost always themselves.
+//
+// So: the card falls back to the first entry, the alert does not. Callers that
+// mean "who gets the chime" keep using findPrimaryEntry.
+// hasMatch is optional and, when given, decides the UNPINNED fallback: the
+// first entry that can actually fill the card, rather than the first ADDED.
+// Without it the fallback reproduced the very bug this function exists to fix,
+// by list order instead of by pin -- a coach who added a training partner
+// first and themselves second got "No upcoming matches for <partner>" the
+// moment the partner finished, while their own bout was minutes away and had
+// no card. A PIN still wins even when it yields nothing: it is an explicit
+// choice, and silently showing someone else would be the worse surprise.
+export function heroEntry(watchlist, pinnedKey, hasMatch) {
+  const pinned = findPrimaryEntry(watchlist, pinnedKey);
+  if (pinned) return pinned;
+  const list = normalizeWatchlist(watchlist);
+  if (typeof hasMatch === "function") {
+    const live = list.find((e) => hasMatch(e));
+    if (live) return live;
+  }
+  return list[0] || null;
+}
+
 // findPrimaryEntry: the primary entry object (or null), per effectivePrimaryKey.
 export function findPrimaryEntry(watchlist, pinnedKey) {
   const key = effectivePrimaryKey(watchlist, pinnedKey);
@@ -315,6 +351,28 @@ export function buildPrimaryNextMatch(primaryEntry, roster, allMatches) {
     return (a.scheduledAt || "99:99").localeCompare(b.scheduledAt || "99:99");
   });
   return mine[0] || null;
+}
+
+// Did every competition's roster LOAD? buildRoster cannot say: a competition
+// whose participants.csv failed to read contributes no players, which is
+// indistinguishable there from one that simply has none.
+//
+// That difference decides whether an id's ABSENCE from the roster means
+// anything. The viewer payload swallowed a per-competition participants
+// failure (logged, then Players = nil, payload still returned), so one
+// unreadable file left every OTHER competition populating the roster -- the
+// watchlist's roster.length > 0 guard passed, and every watched competitor
+// from the failed competition turned amber and was told to delete and re-add
+// someone the picker could not offer back, because the same missing roster is
+// why they were not listed.
+//
+// Absent is read as LOADED: an older payload carries no such key, and a
+// client that read that as "unavailable" would go silent about genuinely
+// stale entries. A MISSING participants.csv is not a failure either -- the
+// store returns ([], nil) for one -- so a competition with no roster yet
+// reports true.
+export function rosterFullyLoaded(competitions) {
+  return (competitions || []).every((c) => !c || c.rosterAvailable !== false);
 }
 
 // checkedIn=true wins if any check-in-enabled competition has the player checked in.

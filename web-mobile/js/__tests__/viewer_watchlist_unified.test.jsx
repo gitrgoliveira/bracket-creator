@@ -3,6 +3,7 @@
 // dojo-aware resolution, primary selection (implicit/pinned/stale), and the
 // primary hero next-match builder. Pure functions only: no DOM, no hooks.
 import { describe, it, expect } from 'vitest';
+import { readSource } from './helpers/source.js';
 import {
   entryKey,
   normalizeWatchlistEntry,
@@ -12,7 +13,9 @@ import {
   resolveWatchedPlayers,
   effectivePrimaryKey,
   findPrimaryEntry,
+  heroEntry,
   buildPrimaryNextMatch,
+  rosterFullyLoaded,
 } from '../viewer.jsx';
 
 // Fictitious dojo names per the design brief (no real-world clubs).
@@ -165,6 +168,105 @@ describe('findPrimaryEntry', () => {
     expect(findPrimaryEntry([{ id: 'a1' }, { id: 'a2' }], '')).toBeNull();
     expect(findPrimaryEntry([{ id: 'a1' }, { id: 'a2' }], 'player:a2'))
       .toEqual({ type: 'player', id: 'a2', name: '', dojo: '' });
+  });
+});
+
+// bc-wlhc. The two questions the panel asks are NOT the same question, and
+// conflating them is what deleted the card the moment a coach added a second
+// person to watch. Pinned as a PAIR: an assertion on heroEntry alone would pass
+// if someone "simplified" findPrimaryEntry to share the fallback, which would
+// hand the chime to whoever happened to be added first.
+describe('heroEntry vs findPrimaryEntry', () => {
+  const two = [{ id: 'a1' }, { id: 'a2' }];
+
+  it('falls back to the first entry when nothing is pinned, while the chime does not', () => {
+    expect(heroEntry(two, '')).toEqual({ type: 'player', id: 'a1', name: '', dojo: '' });
+    expect(findPrimaryEntry(two, ''), 'the chime stays opt-in').toBeNull();
+  });
+
+  it('follows a valid pin, like the primary', () => {
+    expect(heroEntry(two, 'player:a2')).toEqual({ type: 'player', id: 'a2', name: '', dojo: '' });
+  });
+
+  it('falls back when the pin is stale, so a removed pin cannot blank the card', () => {
+    expect(heroEntry(two, 'player:gone')).toEqual({ type: 'player', id: 'a1', name: '', dojo: '' });
+    expect(findPrimaryEntry(two, 'player:gone')).toBeNull();
+  });
+
+  it('is null only when nothing is watched', () => {
+    expect(heroEntry([], '')).toBeNull();
+    expect(heroEntry(null, '')).toBeNull();
+  });
+
+  // The UNPINNED fallback. Without the predicate it returned the first-ADDED
+  // entry whatever its state, which reproduced the bug this function exists to
+  // fix by list order: the coach who added a partner first and themselves
+  // second lost their card the moment the partner finished.
+  describe('the unpinned fallback prefers an entry that can fill the card', () => {
+    const two = [{ type: 'player', id: 'a1' }, { type: 'player', id: 'a2' }];
+    const entry = (id) => ({ type: 'player', id, name: '', dojo: '' });
+
+    it('skips a first-added entry with nothing to show', () => {
+      expect(heroEntry(two, '', (e) => e.id === 'a2')).toEqual(entry('a2'));
+    });
+
+    it('still names the first when NOBODY has a match', () => {
+      // Not null: the panel needs a subject for "No upcoming matches for X".
+      expect(heroEntry(two, '', () => false)).toEqual(entry('a1'));
+    });
+
+    it('a PIN wins even when it yields nothing', () => {
+      // An explicit choice. Quietly showing someone else would be the worse
+      // surprise, and the pin also drives the chime.
+      expect(heroEntry(two, 'player:a1', (e) => e.id === 'a2')).toEqual(entry('a1'));
+    });
+
+    it('without a predicate it is unchanged: first added', () => {
+      expect(heroEntry(two, '')).toEqual(entry('a1'));
+    });
+  });
+
+  // The helper being right is not the same as the HOST calling the right one.
+  // Swapping viewer_home's two derivations passes every assertion above and
+  // every prop assertion in the panel suite, and puts the bug straight back,
+  // so the wiring is pinned at the source. A SOURCE check because ViewerHome
+  // mounts over the viewer fetch harness; what a regression does is pass the
+  // other variable, and that is what this catches.
+  it('viewer_home feeds the card heroEntry and the chime findPrimaryEntry', () => {
+    const src = readSource('viewer_home.jsx');
+    // Matched loosely on purpose: what must hold is that the CARD's entry comes
+    // from heroEntry over (watchlist, primaryKey). Pinning the whole memo line
+    // meant a refactor of its body -- which is what adding the "has a match"
+    // predicate was -- reddened a test whose message is about wiring.
+    expect(src).toMatch(/heroEntry\(watchlist, primaryKey/);
+    expect(src).toMatch(/heroEntry=\{heroWatchEntry\}/);
+    expect(src).toMatch(/heroNextMatch=\{heroNextMatch\}/);
+    // And the alert keeps the opt-in one.
+    expect(src).toMatch(/useFollowedMatchAlert\(primaryNextMatch/);
+    expect(src).toMatch(/findPrimaryEntry\(watchlist, primaryKey/);
+  });
+});
+
+// A roster that is non-empty but INCOMPLETE. The viewer payload builds each
+// competition independently and swallows a per-competition participants
+// failure, so one unreadable participants.csv leaves every other competition
+// populating the roster -- and the watchlist's roster.length guard, which is
+// a proxy for "the roster loaded", passes.
+describe('rosterFullyLoaded', () => {
+  it('is true when every competition reports its roster loaded', () => {
+    expect(rosterFullyLoaded([{ rosterAvailable: true }, { rosterAvailable: true }])).toBe(true);
+  });
+
+  it('is false when ANY competition failed to load one', () => {
+    expect(rosterFullyLoaded([{ rosterAvailable: true }, { rosterAvailable: false }])).toBe(false);
+  });
+
+  it('reads an ABSENT key as loaded', () => {
+    // An older payload carries no such key. Reading that as "unavailable"
+    // would silence the stale-entry warning entirely.
+    expect(rosterFullyLoaded([{}, { rosterAvailable: true }])).toBe(true);
+    expect(rosterFullyLoaded([])).toBe(true);
+    expect(rosterFullyLoaded(null)).toBe(true);
   });
 });
 

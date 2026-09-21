@@ -14,6 +14,7 @@
 
 import { createTimerPool } from './timer_pool.jsx';
 import { realIppons } from './result_slot.jsx';
+import { SideCell } from './side_cell.jsx';
 // Imported DIRECTLY from the leaf rather than read off `window`. Two of the
 // call sites below sit inside a `try { } catch (_e) { }` that swallows, so a
 // missing global there would degrade into exactly the silent not-saved failure
@@ -1863,21 +1864,35 @@ export function ShiaijoQueueRow({ m, scheduled, courts, onMoveCourt, onMove, onE
                         </span>
                     )}
                 </span>
+                {/* No "Final" for a completed row (operator ruling 2026-09-20,
+                    bc-sccl): "Final" names the LAST MATCH OF A KNOCKOUT, never a
+                    finished bout. The row already says it two other ways -- the
+                    score on its own line below and the "Completed" group heading
+                    above -- plus a "Correct" button when the console wires
+                    onCorrect (there is no "Score" button on this row; that
+                    contrast belongs to the scores list). "Waiting" stays: a
+                    blocked row has no other marker. */}
                 <span className="shiaijo-qrow__state">
-                    {isComplete && <span className="shiaijo-qrow__final">Final</span>}
                     {pending && <span className="shiaijo-qrow__waiting">Waiting</span>}
                 </span>
             </div>
             <div className="shiaijo-qrow__match">
-                <div className="shiaijo-qrow__side" aria-label={`Shiro: ${bName}`}>
-                    <span className="se-color-badge se-color-badge--shiro">SHIRO</span>
+                {/* Side by CELL TINT, not a SHIRO/AKA badge (operator decision
+                    2026-09-20, bc-sccl). The text channel is an sr-only span, the
+                    same one every other converted surface took.
+                    It is NOT an aria-label on this div, which is what these cells
+                    carried until 2026-09-20: a bare div is role=generic, and ARIA
+                    prohibits author naming there, so that label was announced by
+                    nothing. Removing the badge on top of it would have left the
+                    side carried by colour alone on the one surface where reading
+                    it wrong mis-scores a bout. */}
+                <SideCell side="shiro" className="shiaijo-qrow__side shiaijo-qrow__side--shiro">
                     <span className="shiaijo-qrow__name"><NumberedName side="shiro" name={bName} number={m.sideB?.number} clip /></span>
-                </div>
+                </SideCell>
                 <span className="shiaijo-qrow__vs">vs</span>
-                <div className="shiaijo-qrow__side shiaijo-qrow__side--aka" aria-label={`Aka: ${aName}`}>
-                    <span className="se-color-badge se-color-badge--aka">AKA</span>
+                <SideCell side="aka" className="shiaijo-qrow__side shiaijo-qrow__side--aka">
                     <span className="shiaijo-qrow__name"><NumberedName side="aka" name={aName} number={m.sideA?.number} clip /></span>
-                </div>
+                </SideCell>
             </div>
             {/* Completed result on its own centred line BELOW the names: the
                 canonical "marks in the centre" position, but stacked so the
@@ -1949,21 +1964,21 @@ export function ShiaijoQueueRow({ m, scheduled, courts, onMoveCourt, onMove, onE
 function MatchSides({ m, large }) {
     return (
         <div className={`shiaijo-sides ${large ? "shiaijo-sides--lg" : ""}`}>
-            <div className="shiaijo-sides__side" aria-label={`Shiro: ${m.sideB?.name || ""}`}>
-                <span className="se-color-badge se-color-badge--shiro">SHIRO</span>
+            {/* Side by CELL TINT, not a SHIRO/AKA badge (bc-sccl); an sr-only
+                span carries the side in text, as on the queue row above. */}
+            <SideCell side="shiro" className="shiaijo-sides__side shiaijo-sides__side--shiro">
                 <div className="name">
                     <NumberedName side="shiro" name={m.sideB?.name} number={m.sideB?.number} clip />
                 </div>
                 <div className="dojo">{m.sideB?.dojo}</div>
-            </div>
+            </SideCell>
             <div className="shiaijo-sides__vs">vs</div>
-            <div className="shiaijo-sides__side" style={{ textAlign: "right" }} aria-label={`Aka: ${m.sideA?.name || ""}`}>
-                <span className="se-color-badge se-color-badge--aka">AKA</span>
+            <SideCell side="aka" className="shiaijo-sides__side shiaijo-sides__side--aka" style={{ textAlign: "right" }}>
                 <div className="name">
                     <NumberedName side="aka" name={m.sideA?.name} number={m.sideA?.number} clip />
                 </div>
                 <div className="dojo">{m.sideA?.dojo}</div>
-            </div>
+            </SideCell>
         </div>
     );
 }

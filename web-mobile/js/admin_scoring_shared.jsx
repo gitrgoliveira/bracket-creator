@@ -12,6 +12,7 @@ import {
   attemptScoreWrite, DOWNSTREAM_KNOCKOUT_PLAYED_CANCELLED,
 } from './write_result.jsx';
 import { sameCompetitor } from './competitor_identity.jsx';
+import { sideWord } from './side_cell.jsx';
 
 // Kendo best-of-3 cap. Mirrors the server-side `maxIpponsPerSide` in
 // internal/mobileapp/validation.go: the bout ends when one side reaches
@@ -842,9 +843,14 @@ function RemainingMatchesPanel({ compID, password, withdrawnPlayer, onAwarded, o
 // sideColorName: the human-readable side name for a "shiro"/"aka" colour key.
 // Named for the colour it takes so it cannot be confused with admin_helpers.jsx's
 // sideName(side), which takes a side object and returns a participant name.
-// Used in header badges and aria-labels of both editors.
+// Used in aria-labels only: the foul counter's two buttons below and the
+// individual editor's slot grid. The sr-only side labels come from SideLabel
+// (side_cell.jsx), never from here. (It named the header badges until bc-sccl
+// removed them; a reader tracing the badge rule from here would look for
+// markup that no longer exists.)
 function sideColorName(color) {
-  return color === "shiro" ? "Shiro" : "Aka";
+  // Delegates: side_cell.jsx owns the word, so the two can never disagree.
+  return sideWord(color);
 }
 
 // Reusable foul counter: independent +/- buttons per side with clear labeling.

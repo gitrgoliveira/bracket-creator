@@ -4,6 +4,7 @@
 import { poolLabel, tournamentMatches, compareDmy } from './viewer_utils.jsx';
 import { matchParticipantIds, matchParticipantNames, useWatchlist, resolveEntryPlayerIds, resolveWatchedPlayers, findPrimaryEntry, buildRoster, buildWatchedSets, matchInvolvesWatchedSet } from './viewer_watchlist_core.jsx';
 import { withNumber } from './match_scoreboard.jsx';
+import { SideCell } from './side_cell.jsx';
 import { MatchViewerModal, localQueueLabelCompact } from './viewer_match.jsx';
 import { sameCompetitor, competitorKey } from './competitor_identity.jsx';
 
@@ -295,14 +296,15 @@ export function TWMatch({ m, highlight, onClick }) {
         )}
       </div>
       <div className="tw-match__players">
-        <div className={`tw-match__name ${bWin ? "tw-match__name--w" : ""}`}>
-          <span className="tw-match__badge tw-match__badge--shiro">S</span>
+        {/* Side by CELL TINT, matching the admin twin in admin_schedule_page.jsx
+            (bc-sccl); the S/A squares are gone and sr-only labels carry the side
+            in text. */}
+        <SideCell side="shiro" density="mid" className={`tw-match__name ${bWin ? "tw-match__name--w" : ""}`}>
           {withNumber(m.sideB)}
-        </div>
-        <div className={`tw-match__name ${aWin ? "tw-match__name--w" : ""}`}>
-          <span className="tw-match__badge tw-match__badge--aka">A</span>
+        </SideCell>
+        <SideCell side="aka" density="mid" className={`tw-match__name ${aWin ? "tw-match__name--w" : ""}`}>
           {withNumber(m.sideA)}
-        </div>
+        </SideCell>
         <div className="tw-match__comp">{m.compName}</div>
       </div>
       <div style={{ textAlign: "right", fontFamily: "var(--font-mono)", fontWeight: 700, fontSize: 13, whiteSpace: "pre-line" }}>

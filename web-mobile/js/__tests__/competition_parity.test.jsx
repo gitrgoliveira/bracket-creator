@@ -3,6 +3,7 @@ import { readFileSync } from 'fs';
 import { resolve, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import * as SHAPE from '../competition_shape.jsx';
+import { stripComments } from './helpers/source.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const read = (f) => readFileSync(resolve(__dirname, '..', f), 'utf8');
@@ -35,10 +36,6 @@ const SETTINGS_SRC = read('admin_competition_settings.jsx');
 // apart. Same rationale as admin_competition.test.jsx's `finalNext` allowlist
 // parser (~line 416) and qualifier_preview.test.jsx's "radio copy has a
 // single home" describe block, which this file's structure and voice follow.
-
-function stripComments(s) {
-  return s.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/[^\n]*/g, '');
-}
 
 // Comment-stripped once each, for the same reason SETUP_SRC/SETTINGS_SRC
 // are read once: two describe blocks below both need these and were each

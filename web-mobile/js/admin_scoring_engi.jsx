@@ -22,6 +22,9 @@ const { useState: useStateE, useEffect: useEffectE, useRef: useRefE } = React;
 
 import { ReasonPrompt, CORRECTION_PRESETS, useAdoptFromServer } from './admin_scoring_shared.jsx';
 import { useEscapeToClose, confirmDialog } from './ui.jsx';
+// NumberedName: single owner of the number-chip-on-the-outer-side rule.
+import { NumberedName } from './numbered_name.jsx';
+import { SideCell } from './side_cell.jsx';
 
 const MAX_FLAGS = 5;
 // Valid totals: 1, 3, 5 (odd, guarantees a winner).
@@ -344,10 +347,24 @@ export function EngiScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext
         {/* Sides: Shiro (left, sideB) | Aka (right, sideA) */}
         <div className="engi-sides">
           {/* Shiro / White / sideB */}
-          <div className={`engi-side engi-side--shiro${winnerSide === "b" ? " engi-side--winner" : ""}`} data-testid="engi-side-shiro">
-            <div className="engi-side__badge engi-side__badge--shiro">Shiro</div>
+          <SideCell side="shiro" fill={false} className={`engi-side engi-side--shiro${winnerSide === "b" ? " engi-side--winner" : ""}`} data-testid="engi-side-shiro">
+            {/* No Aka/Shiro badge (operator decision 2026-09-20, bc-sccl): this
+                card already carries the full DESIGN.md §4 treatment -- a tinted
+                fill plus a coloured top bar, the same tokens and 45° hatch pitch
+                as the kendo score card -- so the badge restated the side a third
+                time. The sr-only label keeps it in text for a screen reader,
+                since the hatch only serves the sighted case. */}
+            {/* The competitor number rides the FIRST member's line, as on every
+                other engi surface (viewer_standings.jsx, viewer_competition.jsx):
+                an engi PAIR is one participant with one number, so the chip
+                belongs to the pair, not to either member. This editor had no
+                number at all, which made it the one scoring surface where an
+                operator could not match the card in front of them to the bout
+                sheet. */}
             <div className="engi-side__names">
-              <div className="engi-side__name">{shiroName}</div>
+              <div className="engi-side__name">
+                <NumberedName side="shiro" name={shiroName} number={m.sideB?.number} />
+              </div>
               {shiroDN && <div className="engi-side__name">{shiroDN}</div>}
               {shiroDojo && <div className="engi-side__dojo">{shiroDojo}</div>}
             </div>
@@ -371,7 +388,7 @@ export function EngiScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext
                 data-testid="engi-shiro-inc"
               >+</button>
             </div>
-          </div>
+          </SideCell>
 
           {/* Decorative entry-zone divider (aria-hidden), exempt from the
               boutMiddle contract per the SCOPE note in bracket.jsx (the
@@ -383,10 +400,11 @@ export function EngiScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext
           <div className="engi-divider" aria-hidden="true">vs</div>
 
           {/* Aka / Red / sideA */}
-          <div className={`engi-side engi-side--aka${winnerSide === "a" ? " engi-side--winner" : ""}`} data-testid="engi-side-aka">
-            <div className="engi-side__badge engi-side__badge--aka">Aka</div>
+          <SideCell side="aka" fill={false} className={`engi-side engi-side--aka${winnerSide === "a" ? " engi-side--winner" : ""}`} data-testid="engi-side-aka">
             <div className="engi-side__names">
-              <div className="engi-side__name">{akaName}</div>
+              <div className="engi-side__name">
+                <NumberedName side="aka" name={akaName} number={m.sideA?.number} />
+              </div>
               {akaDN && <div className="engi-side__name">{akaDN}</div>}
               {akaDojo && <div className="engi-side__dojo">{akaDojo}</div>}
             </div>
@@ -410,7 +428,7 @@ export function EngiScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext
                 data-testid="engi-aka-inc"
               >+</button>
             </div>
-          </div>
+          </SideCell>
         </div>
 
         {/* Total validity indicator */}

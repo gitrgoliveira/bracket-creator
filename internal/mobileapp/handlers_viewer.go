@@ -413,6 +413,20 @@ func buildViewerCompetitionPayload(store *state.Store, compID, courtFilter strin
 	// competition detail endpoint build the list from (bc-pnum ruling 1e
 	// follow-up), so the two surfaces never disagree about what a given
 	// competition's issues are.
+	// Whether this competition's roster LOADED, which is a different fact from
+	// whether it is empty. A failed read leaves Players nil, and a client that
+	// cannot tell the two apart reads "this id is not in the roster" from what
+	// is really "this roster is missing" -- the viewer watchlist then turns a
+	// perfectly valid entry amber and tells the reader to delete and re-add
+	// someone the picker cannot offer back, because the same missing roster is
+	// why they are not listed.
+	//
+	// TWO things this is NOT. A missing file: loadParticipants returns
+	// ([], nil) for one, so a competition with no roster yet reports true. And
+	// a malformed file: LazyQuotes plus FieldsPerRecord = -1 mean bad bytes
+	// parse into garbage rows rather than failing, so what this actually
+	// reports is an OS-level read failure -- narrow, but previously invisible.
+	payload["rosterAvailable"] = plErr == nil
 	issues := viewerDataIssues(comp, players, pools, poolMatches, pmErr, brErr, poolsErr)
 	if len(issues) > 0 {
 		payload["dataIssues"] = issues
@@ -816,6 +830,12 @@ func RegisterViewerHandlers(r *gin.RouterGroup, store *state.Store, eng *engine.
 			if isTeamComp {
 				payload["teamMembers"] = squads
 			}
+			// Always true when reached: a participants read failure is never a
+			// *state.CorruptFileError (see the degradedReads note above), so the
+			// loop returns before here. Emitted anyway so this payload and the
+			// aggregate's carry the same keys; the SPA reads the flag from the
+			// aggregate (api_client.jsx normalizeViewerCompItem), never from here.
+			payload["rosterAvailable"] = playersErr == nil
 			if issues := viewerDataIssues(comp, comp.Players, pools, poolMatches, poolMatchesErr, bracketErr, poolsErr); len(issues) > 0 {
 				payload["dataIssues"] = issues
 			}

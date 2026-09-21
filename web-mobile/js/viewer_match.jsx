@@ -13,6 +13,7 @@
 // unchanged.
 
 import { writeDidNotLand } from './write_result.jsx';
+import { SideLabel } from './side_cell.jsx';
 import { useTeamLineups, TeamScoreboard, IndividualScore, numberedParts } from './match_scoreboard.jsx';
 import { NumberedName } from './numbered_name.jsx';
 import { TermV, poolLabel } from './viewer_utils.jsx';
@@ -28,17 +29,21 @@ const { useState, useRef: useRefV, useCallback } = React;
 //   - status==="scheduled" + queuePosition===1 → "Next up"
 //   - status==="scheduled" + queuePosition>1   → "<qp-1> before yours"
 //   - status==="running"                       → null (WatchHeroCard signals running
-//                                                        via .my-match--running ring + label change;
+//                                                        via its navy .wl-hero__now band;
 //                                                        no Queue chip needed)
 //   - anything else (completed/forfeit/cancelled, or no qp)  → null (hide chip)
 //
 // Wording mirrors the VSchedItem helper below and display.jsx::queueLabel
 // so all three viewer surfaces agree. Running matches return null because
-// WatchHeroCard already signals the running state via the .my-match--running
-// CSS ring and label change ("Your match"): the Queue chip must not add a
-// redundant label. We intentionally do NOT
-// fall back to "Scheduled HH:MM" the way display.jsx does: the
-// MyMatchPanel already has a dedicated Time chip.
+// WatchHeroCard already signals the running state via its navy .wl-hero__now
+// band and label change ("Your match"): the Queue chip must not add a
+// redundant label. Note the card's own "when" line still renders while
+// running (it reads "Now"), so the live region does not leave the DOM with
+// this chip. We intentionally do NOT fall back to "Scheduled HH:MM" the way
+// display.jsx does: the hero's own "when" line carries the time, in
+// .wl-hero__when. (That line used to say "the MyMatchPanel already has a
+// dedicated Time chip" -- bc-wlhc removed the three-chip Court/Time/Queue row
+// and there is no MyMatchPanel in the tree.)
 // Exported for unit-testing.
 export function mymatchQueueLabel(m) {
   if (!m) return null;
@@ -194,8 +199,9 @@ export const VSchedItem = React.memo(({ m, tweaks, showCompetition, onClick, hig
   // stays gracefully empty for non-queued matches and pre-T046 responses.
   // Wording is owned by display.jsx::queueLabel (bead mp-e3k) so every
   // viewer surface stays in sync; we still gate on scheduled+qp>0 here
-  // because this row already renders ● NOW / Final on the right for
-  // running/completed and we don't want the fallback "Scheduled hh:mm".
+  // because this row already renders ● NOW on the right for a running match
+  // and we don't want the fallback "Scheduled hh:mm". (A completed row used to
+  // render "Final" there too; that badge is gone, see below.)
   const qp = Number(m.queuePosition);
   // Use the NEUTRAL court-queue label ("Next up" / "#N") here, not the
   // "N before yours" wording: VSchedItem renders on the general schedule and
@@ -215,10 +221,21 @@ export const VSchedItem = React.memo(({ m, tweaks, showCompetition, onClick, hig
             {queueLabel}
           </span>
         )}
-        {m.status === "completed" && <span className="vsched-item__status">Final</span>}
-        {m.status === "completed" && m.decidedByHantei && (
-          <span className="vsched-item__hantei" data-testid="vsched-hantei">HANTEI</span>
-        )}
+        {/* No "Final" badge here (operator ruling 2026-09-20, bc-sccl): "Final"
+            names the LAST MATCH OF A KNOCKOUT and nothing else, so it may not
+            double as a done/not-done marker on an ordinary bout. The only list
+            that renders a completed row is viewer_competition.jsx's
+            `recentMatches`, which sits under a "Recent results" heading, and the
+            card carries its score either way; the running and upcoming lists
+            never hold a completed match. */}
+        {/* No HANTEI chip either (operator ruling 2026-09-20, bc-sccl). It was
+            added on 2026-05-20 when decidedByHantei was a BOOLEAN and this row
+            showed nothing about it; since the 2026-08-21 ruling the verdict IS
+            an ippon, so this card's own score string carries it ("– vs Ht") and
+            the chip became a duplicate. That is the same duplicate the TV
+            header and lobby chips were removed for: a surface that renders the
+            mark must not also chip it, and only a surface with no such row
+            (MatchCard's meta strip, the OBS lower third) keeps one. */}
       </div>
       {(showCompetition || m.phase === "pool" || m.round) ? (
         <div className="vsched-item__ctx">
@@ -229,7 +246,7 @@ export const VSchedItem = React.memo(({ m, tweaks, showCompetition, onClick, hig
       ) : null}
       <div className="vsched-item__players">
         <div className={`vsched-item__side vsched-item__side--shiro ${bWin ? "vsched-item__side--w" : ""}`}>
-          <span className="sr-only">Shiro:</span>
+          <SideLabel side="shiro" />
           {/* Both cells below render NumberedName in `clip` mode rather than
               withNumber's flat string. `.n` is a nowrap-ellipsis box, and a
               string puts the number inside the text it ellipsises -- which for
@@ -265,7 +282,7 @@ export const VSchedItem = React.memo(({ m, tweaks, showCompetition, onClick, hig
           <span className="vsched-item__vs">{window.boutMiddle ? window.boutMiddle(m.decision, m.encho, m.score) : "vs"}</span>
         )}
         <div className={`vsched-item__side vsched-item__side--aka ${aWin ? "vsched-item__side--w" : ""}`}>
-          <span className="sr-only">Aka:</span>
+          <SideLabel side="aka" />
           <span className="n"><NumberedName side="aka" clip {...numberedParts(m.sideA, undefined)} /></span>
           {tweaks.showDojo && m.sideA?.dojo ? <span className="d">{m.sideA.dojo}</span> : null}
         </div>

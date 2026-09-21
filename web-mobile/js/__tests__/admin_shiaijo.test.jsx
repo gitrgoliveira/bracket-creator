@@ -109,7 +109,10 @@ describe('swissRoundLabel; synthetic engine pool name → operator-facing label'
 
 // The completed result is rendered on its own centred line BELOW the names
 // (.shiaijo-qrow__result), NOT in the top-right state slot; so the (often long)
-// names keep the full-width matchup line. The state slot carries only "Final".
+// names keep the full-width matchup line. The state slot is EMPTY for a
+// completed row: its "Final" badge was removed by operator ruling 2026-09-20
+// (bc-sccl), "Final" being the name of a knockout's last match and not a
+// done marker. The slot still carries "Waiting" for a blocked row.
 describe('ShiaijoQueueRow; completed result placement', () => {
   const realReact = global.React;
   let runtime, ShiaijoQueueRow, orig = {};
@@ -160,11 +163,11 @@ describe('ShiaijoQueueRow; completed result placement', () => {
     const result = byClass(tree, 'shiaijo-qrow__result');
     expect(result.length).toBe(1);
     expect(text(result[0])).toContain('·;MK');
-    // The top-right state slot shows only "Final"; the score is NOT there.
+    // The top-right state slot stays EMPTY on a completed row, and in
+    // particular the score is NOT there: it belongs to the result line above.
     const state = byClass(tree, 'shiaijo-qrow__state');
     expect(state.length).toBe(1);
-    expect(text(state[0])).toContain('Final');
-    expect(text(state[0])).not.toContain('MK');
+    expect(text(state[0]).trim()).toBe('');
   });
 
   it('shows no result line for a scheduled match (centre stays vs)', () => {

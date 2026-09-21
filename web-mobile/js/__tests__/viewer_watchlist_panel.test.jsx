@@ -8,6 +8,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { makeReactive } from './helpers/reactive_react.js';
 import { collectText, expandNamed } from './helpers/vdom.js';
+import { cssBlock, readStylesheet } from './helpers/source.js';
 
 const realReact = global.React;
 
@@ -56,20 +57,54 @@ describe('WatchHeroCard', () => {
     expect(tree).toBeNull();
   });
 
-  it('shows the side-A player as AKA when the primary is on side A', () => {
+  // bc-wlhc: the side is carried by a TINTED ROW per competitor, not an 8px
+  // badge, so these assert the fill CLASS as well as the word -- the class is
+  // the channel a colour-blind or glare-blinded reader actually gets, and the
+  // old text-only assertion could not see it. Row order is subject first: this
+  // is a personal card, not a bracket card, so "me" leads and the tint (not the
+  // position) carries the side.
+  const sideRows = (tree) => byClass(tree, 'wl-hero__side');
+  const rowText = (row) => collectText(row, expandNamed('NumberedName'));
+
+  it('shows the side-A player as Aka when the primary is on side A', () => {
     const tree = runtime.mount(WatchHeroCard, { nextMatch: MATCH, primaryIds: new Set(['p1']), entityLabel: 'Robert Young', onMatchClick: vi.fn() });
-    const name = byClass(tree, 'my-match__name')[0];
-    expect(collectText(name, expandNamed('NumberedName'))).toContain('AKA');
-    expect(collectText(name, expandNamed('NumberedName'))).toContain('Robert Young');
-    // Opponent is the other side.
-    expect(collectText(byClass(tree, 'my-match__opp')[0], expandNamed('NumberedName'))).toContain('Nolan Clark');
+    const [subject, opp] = sideRows(tree);
+    expect(hasClass(subject, 'side-fill--aka')).toBe(true);
+    expect(rowText(subject)).toContain('Aka');
+    expect(rowText(subject)).toContain('Robert Young');
+    // "you" marks which of the two rows is the watched entity.
+    expect(rowText(subject)).toContain('you');
+    // Opponent is the other side, and takes the other fill.
+    expect(hasClass(opp, 'side-fill--shiro')).toBe(true);
+    expect(rowText(opp)).toContain('Nolan Clark');
+    expect(rowText(opp)).not.toContain('you');
   });
 
-  it('shows the side-B player as SHIRO when the primary is on side B', () => {
+  // The rows live inside the "Match details" button. A button with an explicit
+  // aria-label announces THAT and nothing else (role=button has presentational
+  // children), which is how the first cut of this card silently dropped the side
+  // word, the "you" marker, both numbers and both dojos from the accessible
+  // name -- on the one surface in this change whose side label is visible text
+  // rather than sr-only. Name-from-contents is what keeps them.
+  it('keeps the side rows in the accessible name of the details button', () => {
+    const tree = runtime.mount(WatchHeroCard, { nextMatch: MATCH, primaryIds: new Set(['p1']), entityLabel: 'Robert Young', onMatchClick: vi.fn() });
+    const btn = findAll(tree, (n) => n.type === 'button' && hasClass(n, 'wl-hero__sides--btn'))[0];
+    expect(btn, 'the sides are wrapped in a button').toBeTruthy();
+    expect(btn.props['aria-label'],
+      'an explicit name here would replace everything below it').toBeUndefined();
+    const spoken = collectText(btn, expandNamed('NumberedName'));
+    for (const part of ['Aka', 'you', 'Robert Young', 'Shiro', 'Nolan Clark', 'Match details']) {
+      expect(spoken, `"${part}" must survive in the button's accessible name`).toContain(part);
+    }
+  });
+
+  it('shows the side-B player as Shiro when the primary is on side B', () => {
     const tree = runtime.mount(WatchHeroCard, { nextMatch: MATCH, primaryIds: new Set(['p2']), entityLabel: 'Nolan Clark', onMatchClick: vi.fn() });
-    const name = byClass(tree, 'my-match__name')[0];
-    expect(collectText(name, expandNamed('NumberedName'))).toContain('SHIRO');
-    expect(collectText(name, expandNamed('NumberedName'))).toContain('Nolan Clark');
+    const [subject, opp] = sideRows(tree);
+    expect(hasClass(subject, 'side-fill--shiro')).toBe(true);
+    expect(rowText(subject)).toContain('Shiro');
+    expect(rowText(subject)).toContain('Nolan Clark');
+    expect(hasClass(opp, 'side-fill--aka')).toBe(true);
   });
 
   // bc-rvfx: the watchlist card rendered NO competitor number anywhere, while
@@ -87,19 +122,18 @@ describe('WatchHeroCard', () => {
       sideB: { ...MATCH.sideB, number: 'K7' },
     };
     const tree = runtime.mount(WatchHeroCard, { nextMatch: numbered, primaryIds: new Set(['p1']), entityLabel: 'Robert Young', onMatchClick: vi.fn() });
-    const name = collectText(byClass(tree, 'my-match__name')[0], expandNamed('NumberedName'));
-    expect(name).toContain('K12');
-    expect(name).toContain('Robert Young');
-    const opp = collectText(byClass(tree, 'my-match__opp')[0], expandNamed('NumberedName'));
-    expect(opp).toContain('K7');
-    expect(opp).toContain('Nolan Clark');
+    const [subject, opp] = sideRows(tree);
+    expect(rowText(subject)).toContain('K12');
+    expect(rowText(subject)).toContain('Robert Young');
+    expect(rowText(opp)).toContain('K7');
+    expect(rowText(opp)).toContain('Nolan Clark');
   });
 
   it('renders the name alone when the competitor has no number yet', () => {
     // Pre-draw, nobody has a number: the chip must not render a stray gap or
     // an empty element. MATCH carries no `number`, which is that state.
     const tree = runtime.mount(WatchHeroCard, { nextMatch: MATCH, primaryIds: new Set(['p1']), entityLabel: 'Robert Young', onMatchClick: vi.fn() });
-    const name = collectText(byClass(tree, 'my-match__name')[0], expandNamed('NumberedName'));
+    const name = rowText(sideRows(tree)[0]);
     expect(name).toContain('Robert Young');
     expect(name).not.toMatch(/K\d/);
   });
@@ -109,15 +143,69 @@ describe('WatchHeroCard', () => {
     // MATCH is running, so the hero label is the bare dojo eyebrow: no
     // "· next up" suffix (a running match is happening now, not next up).
     const tree = runtime.mount(WatchHeroCard, { nextMatch: MATCH, primaryIds: new Set(['p1', 'p3']), entityLabel: 'Hagane Dojo', onMatchClick: vi.fn() });
-    const lbl = collectText(byClass(tree, 'my-match__lbl')[0], expandNamed('NumberedName'));
+    const lbl = collectText(byClass(tree, 'wl-hero__lbl')[0], expandNamed('NumberedName'));
     expect(lbl).toContain('Hagane Dojo');
     expect(lbl).not.toMatch(/next up/i);
-    expect(collectText(byClass(tree, 'my-match__name')[0], expandNamed('NumberedName'))).toContain('Robert Young');
+    expect(rowText(sideRows(tree)[0])).toContain('Robert Young');
+    // ...and that row is NOT marked "you". The reader watched a DOJO, so they
+    // are the coach or the parent, not whichever member happens to be up.
+    expect(rowText(sideRows(tree)[0]),
+      'the subject of a dojo card is not the reader').not.toContain('you');
+  });
+
+  // The scheduled dojo arm used to append "· next up" unconditionally, so a
+  // card with THREE bouts ahead of it still announced "Hagane Dojo · next up".
+  // That is not a duplicate of the queue line, it contradicts it. The eyebrow
+  // names WHO; the line below names WHEN.
+  it('names the dojo alone, and leaves the queue line to say where in the queue', () => {
+    const scheduled = { ...MATCH, status: 'scheduled', queuePosition: 4 };
+    const tree = runtime.mount(WatchHeroCard, { nextMatch: scheduled, primaryIds: new Set(['p1', 'p3']), entityLabel: 'Hagane Dojo', onMatchClick: vi.fn() });
+    const lbl = collectText(byClass(tree, 'wl-hero__lbl')[0], expandNamed('NumberedName'));
+    expect(lbl).toBe('Hagane Dojo');
+    const live = findAll(tree, (n) => n.props?.['aria-live'] === 'polite')[0];
+    expect(collectText(live, expandNamed('NumberedName')),
+      'the queue position has exactly one home, and it is this line').toContain('3 before yours');
+  });
+
+  // bc-wlhc. MATCH is running, so this also pins the two things the old card
+  // got wrong at exactly that moment: the running signal must be the navy BAND
+  // (the old 1.20:1 ring was the only cue), and the live region must still be
+  // in the DOM (the old one sat on the Queue chip, which is removed when
+  // running, so "your match has started" could never be announced).
+  it('signals a running match with the band, and keeps the live region mounted', () => {
+    const tree = runtime.mount(WatchHeroCard, { nextMatch: MATCH, primaryIds: new Set(['p1']), entityLabel: 'Robert Young', onMatchClick: vi.fn() });
+    const band = byClass(tree, 'wl-hero__now')[0];
+    expect(band, 'a running match renders the navy band').toBeTruthy();
+    expect(collectText(band, expandNamed('NumberedName'))).toMatch(/on court now/i);
+    const live = findAll(tree, (n) => n.props?.['aria-live'] === 'polite')[0];
+    expect(live, 'the live region survives the start of the match').toBeTruthy();
+    // While running the line reads "Now", not the scheduled time.
+    expect(collectText(live, expandNamed('NumberedName'))).toContain('Now');
+  });
+
+  // The band used to read "On court now · Shiaijo A" while the 34px hero
+  // letter said "Shiaijo A" twenty pixels below it. One fact, one home: the
+  // hero letter is the bigger statement, so the band gives the court up.
+  // (Same rule that removed the TV header chip and the team summary row.)
+  it('states the court once: the band does not repeat the hero letter', () => {
+    const tree = runtime.mount(WatchHeroCard, { nextMatch: MATCH, primaryIds: new Set(['p1']), entityLabel: 'Robert Young', onMatchClick: vi.fn() });
+    const band = collectText(byClass(tree, 'wl-hero__now')[0], expandNamed('NumberedName'));
+    expect(band).toMatch(/on court now/i);
+    expect(band, 'the band must not name the court').not.toMatch(/\bA\b/);
+    // ...and the hero letter still carries it, so nothing was simply deleted.
+    expect(collectText(byClass(tree, 'wl-hero__where-v')[0], expandNamed('NumberedName'))).toBe('A');
+  });
+
+  it('never wraps the court letter: it is its own nowrap element', () => {
+    const tree = runtime.mount(WatchHeroCard, { nextMatch: MATCH, primaryIds: new Set(['p1']), entityLabel: 'Robert Young', onMatchClick: vi.fn() });
+    const v = byClass(tree, 'wl-hero__where-v')[0];
+    expect(v, 'the court letter has its own element').toBeTruthy();
+    expect(collectText(v, expandNamed('NumberedName')).trim()).toBe('A');
   });
 });
 
 describe('WatchlistPanel', () => {
-  let runtime, WatchlistPanel, WatchHeroCard, WatchPicker;
+  let runtime, WatchlistPanel, WatchHeroCard, WatchPicker, ROSTER_NOT_LOADED;
   beforeEach(async () => {
     runtime = makeReactive();
     global.React = runtime.React;
@@ -129,7 +217,7 @@ describe('WatchlistPanel', () => {
     // (effectivePrimaryKey, entryKey, resolveEntryPlayerIds, addPlayerToWatchlist,
     // VSchedItem, WATCHLIST_MAX); the components live in viewer_watchlist.jsx.
     await import('../viewer.jsx');
-    ({ WatchlistPanel, WatchHeroCard, WatchPicker } = await import('../viewer_watchlist.jsx'));
+    ({ WatchlistPanel, WatchHeroCard, WatchPicker, ROSTER_NOT_LOADED } = await import('../viewer_watchlist.jsx'));
   });
   afterEach(() => { runtime.unmount(); global.React = realReact; vi.resetModules(); });
 
@@ -140,7 +228,8 @@ describe('WatchlistPanel', () => {
     primaryKey: '',
     setPrimaryKey: vi.fn(),
     primaryEntry: null,
-    primaryNextMatch: null,
+    heroEntry: null,
+    heroNextMatch: null,
     upcoming: [],
     onMatchClick: vi.fn(),
     ...over,
@@ -158,7 +247,7 @@ describe('WatchlistPanel', () => {
   it('single entry: one chip with NO pin star, hero rendered, no pin hint', () => {
     const wl = [{ type: 'player', id: 'p1', name: 'Robert Young', dojo: 'Hagane Dojo' }];
     const tree = runtime.mount(WatchlistPanel, baseProps({
-      watchlist: wl, primaryEntry: wl[0], primaryNextMatch: MATCH,
+      watchlist: wl, primaryEntry: wl[0], heroEntry: wl[0], heroNextMatch: MATCH,
     }));
     expect(byClass(tree, 'pmf__chip')).toHaveLength(1);
     expect(byClass(tree, 'pmf__chip-pin')).toHaveLength(0); // no pin UI for a lone entry
@@ -166,19 +255,127 @@ describe('WatchlistPanel', () => {
     expect(byClass(tree, 'watchlist-pin-hint')).toHaveLength(0);
   });
 
-  it('multi, no pin: pin stars on every chip, pin hint, no hero, compact list shown', () => {
+  // bc-wlhc: adding a second person used to DELETE the hero, because the card
+  // was gated on the same null the chime is gated on. The hint and the hero now
+  // coexist: the card shows the first-added entry, the hint says what pinning
+  // still buys (moving it, plus the chime).
+  it('multi, no pin: pin stars, hero STILL rendered, hint names who it is showing', () => {
+    const wl = [
+      { type: 'player', id: 'p1', name: 'Robert Young', dojo: 'Hagane Dojo' },
+      { type: 'player', id: 'p2', name: 'Nolan Clark', dojo: 'Tsubaki Kenyukai' },
+    ];
+    // upcoming carries the hero's own match AND a second one. Before the
+    // de-dup the list re-rendered the hero match as its first row, directly
+    // under the far larger card showing it -- and the old fixture passed the
+    // SAME match as both, so the suite pinned the duplication instead of
+    // catching it.
+    const OTHER = { ...MATCH, id: 'm2', court: 'B' };
+    const tree = runtime.mount(WatchlistPanel, baseProps({
+      watchlist: wl, primaryEntry: null, heroEntry: wl[0], heroNextMatch: MATCH, upcoming: [MATCH, OTHER],
+    }));
+    expect(byClass(tree, 'pmf__chip')).toHaveLength(2);
+    expect(byClass(tree, 'pmf__chip-pin')).toHaveLength(2);
+    expect(heroNodes(tree), 'the card survives a second watched person').toHaveLength(1);
+    const hint = byClass(tree, 'watchlist-pin-hint');
+    expect(hint).toHaveLength(1);
+    const hintText = collectText(hint[0]);
+    expect(hintText).toMatch(/Showing Robert Young/);
+    // The shown person is unpinned too, so the invitation must cover THEM.
+    // "follow someone else" told a reader watching themselves plus a partner
+    // that there was nothing here for them, and left the chime off.
+    expect(hintText, 'the hint must not exclude the person it is showing').not.toMatch(/someone else/);
+    expect(hintText).toMatch(/chime/);
+    // The list renders, and it does NOT repeat the match on the card above it.
+    expect(byClass(tree, 'vsched'), 'compact upcoming list').toHaveLength(1);
+    const rows = findAll(tree, (n) => n.props && n.props.m && n.props.showCompetition);
+    expect(rows.map((r) => r.props.m.id),
+      "the hero's own match is not listed again beneath it").toEqual(['m2']);
+  });
+
+  // A DOJO that resolves to nobody. The unresolved treatment was gated on
+  // entry.id, which only players carry, so this state kept printing "No
+  // upcoming matches for Hagane Dojo" -- an absence claim about a roster with
+  // no Hagane member in it, which is the falsehood this whole branch exists to
+  // stop making.
+  it('flags a dojo that nobody in this roster belongs to', () => {
+    const wl = [{ type: 'dojo', dojo: 'Hagane Dojo' }];
+    const tree = runtime.mount(WatchlistPanel, baseProps({
+      // Roster is non-empty and holds nobody from Hagane: the entry is stale,
+      // not merely unloaded.
+      roster: [{ id: 'p9', name: 'Someone Else', dojo: 'Tsubaki Kenyukai' }],
+      watchlist: wl, primaryEntry: wl[0], heroEntry: wl[0], heroNextMatch: null,
+    }));
+    const text = collectText(tree);
+    expect(text, 'it must not claim the dojo simply has no matches left')
+      .not.toMatch(/No upcoming matches for Hagane Dojo/);
+    expect(text).toMatch(/No one from Hagane Dojo is in this tournament's roster/);
+    // ...and it must not tell them to re-add a dojo the picker cannot offer.
+    expect(text, 'that advice is unfollowable for a dojo').not.toMatch(/add them again/);
+    expect(byClass(tree, 'pmf__chip--unresolved'),
+      'the chip carries the state too, not just the sentence').toHaveLength(1);
+  });
+
+  // The amber claim is about the TOURNAMENT, so it may only be made when the
+  // tournament's rosters actually loaded.
+  it('makes no "not in this roster" claim while a roster failed to load', () => {
+    const wl = [{ type: 'player', id: 'gone', name: 'Kaito Shimizu', dojo: 'Old Dojo' }];
+    const props = {
+      // Non-empty: another competition's roster loaded fine, which is exactly
+      // the state that used to defeat the roster.length guard.
+      roster: [{ id: 'p9', name: 'Someone Else', dojo: 'Kenshinkan' }],
+      watchlist: wl, primaryEntry: wl[0], heroEntry: wl[0], heroNextMatch: null,
+    };
+    const broken = runtime.mount(WatchlistPanel, baseProps({ ...props, rosterLoaded: false }));
+    expect(collectText(broken), 'it cannot know this while a roster is missing')
+      .not.toMatch(/is not in this tournament's roster/);
+    expect(byClass(broken, 'pmf__chip--unresolved'),
+      'and the chip must not go amber either').toHaveLength(0);
+
+    // Same entry, same roster, rosters all loaded: now the claim is warranted.
+    const ok = runtime.mount(WatchlistPanel, baseProps({ ...props, rosterLoaded: true }));
+    expect(collectText(ok)).toMatch(/is not in this tournament's roster/);
+    expect(byClass(ok, 'pmf__chip--unresolved')).toHaveLength(1);
+  });
+
+  // Going quiet on the amber claim was only half of it: the fall-through arm
+  // then said "No upcoming matches for Hagane Dojo", which for a DOJO is a
+  // claim about members the panel cannot see (a dojo resolves through the
+  // roster), and the chip counted "(0)" of them. A player entry resolves by
+  // id, so its line stays honest and is left alone.
+  it('says the roster could not be loaded rather than "no upcoming matches" for a dojo', () => {
+    const wl = [{ type: 'dojo', dojo: 'Hagane Dojo' }];
+    const props = {
+      roster: [{ id: 'p9', name: 'Someone Else', dojo: 'Kenshinkan' }],
+      watchlist: wl, primaryEntry: wl[0], heroEntry: wl[0], heroNextMatch: null,
+    };
+    const broken = collectText(runtime.mount(WatchlistPanel, baseProps({ ...props, rosterLoaded: false })));
+    expect(broken, 'a claim about people it cannot see').not.toMatch(/No upcoming matches for Hagane Dojo/);
+    expect(broken).not.toMatch(/is in this tournament's roster/);
+    expect(broken).toContain(ROSTER_NOT_LOADED);
+    expect(broken, 'the count is a roster claim too').not.toMatch(/Hagane Dojo \(0\)/);
+
+    const wlp = [{ type: 'player', id: 'p1', name: 'Robert Young', dojo: 'Hagane Dojo' }];
+    const player = collectText(runtime.mount(WatchlistPanel, baseProps({
+      watchlist: wlp, primaryEntry: wlp[0], heroEntry: wlp[0], heroNextMatch: null, rosterLoaded: false,
+    })));
+    expect(player, 'a player resolves by id, so the line holds').toMatch(/No upcoming matches for Robert Young/);
+    expect(player).not.toContain(ROSTER_NOT_LOADED);
+  });
+
+  // "Showing X." asserted a card that was not there.
+  it('does not say it is showing someone when there is no card', () => {
     const wl = [
       { type: 'player', id: 'p1', name: 'Robert Young', dojo: 'Hagane Dojo' },
       { type: 'player', id: 'p2', name: 'Nolan Clark', dojo: 'Tsubaki Kenyukai' },
     ];
     const tree = runtime.mount(WatchlistPanel, baseProps({
-      watchlist: wl, primaryEntry: null, upcoming: [MATCH],
+      watchlist: wl, primaryEntry: null, heroEntry: wl[0], heroNextMatch: null,
     }));
-    expect(byClass(tree, 'pmf__chip')).toHaveLength(2);
-    expect(byClass(tree, 'pmf__chip-pin')).toHaveLength(2);
-    expect(byClass(tree, 'watchlist-pin-hint')).toHaveLength(1);
-    expect(heroNodes(tree)).toHaveLength(0);
-    expect(byClass(tree, 'vsched')).toHaveLength(1); // compact upcoming list
+    const hintText = collectText(byClass(tree, 'watchlist-pin-hint')[0]);
+    expect(hintText, 'no card, so nothing is being shown').not.toMatch(/Showing/);
+    // The ☆ explanation survives: it is the only place the chime is
+    // discoverable, and this reader needs it more than the one with a card.
+    expect(hintText).toMatch(/chime/);
   });
 
   it('multi, pinned: hero rendered, no pin hint', () => {
@@ -187,10 +384,69 @@ describe('WatchlistPanel', () => {
       { type: 'dojo', dojo: 'Hagane Dojo' },
     ];
     const tree = runtime.mount(WatchlistPanel, baseProps({
-      watchlist: wl, primaryKey: 'dojo:Hagane Dojo', primaryEntry: wl[1], primaryNextMatch: MATCH, upcoming: [MATCH],
+      watchlist: wl, primaryKey: 'dojo:Hagane Dojo', primaryEntry: wl[1], heroEntry: wl[1], heroNextMatch: MATCH, upcoming: [MATCH],
     }));
     expect(heroNodes(tree)).toHaveLength(1);
     expect(byClass(tree, 'watchlist-pin-hint')).toHaveLength(0);
+  });
+
+  // bc-wlhc. The watchlist is persisted across tournaments, so a stored id can
+  // stop resolving (a re-import, a delete/recreate, a replaced participant).
+  // The chip kept rendering from its STORED name and looked perfectly healthy,
+  // while the panel below it said "No upcoming matches for X" -- a statement
+  // the panel had no way to know was true, and which read as "X is done for the
+  // day" to a reader watching X fight on the court in front of them.
+  //
+  // Note what is NOT done: the id is not re-resolved by name. bc-pnum rules
+  // that an id resolving to nothing resolves to nothing. The fix is to make the
+  // failure visible, not to guess past it.
+  it('marks a watch entry whose id is not in the roster, and says so instead of claiming no matches', () => {
+    const wl = [{ type: 'player', id: 'gone-from-roster', name: 'Robert Young', dojo: 'Hagane Dojo' }];
+    const tree = runtime.mount(WatchlistPanel, baseProps({
+      watchlist: wl, primaryEntry: wl[0], heroEntry: wl[0], heroNextMatch: null,
+    }));
+    const chip = byClass(tree, 'pmf__chip--unresolved');
+    expect(chip, 'the chip carries the unresolved state').toHaveLength(1);
+    // A non-colour marker, so the state is not carried by the amber alone.
+    // Rendered bare, as every other ⚠ in the tree is, which also means it
+    // takes the chip's own --warn-ink (8.75:1) rather than a dedicated
+    // --warn (4.84:1) that would be fainter than the text it marks.
+    expect(collectText(chip[0])).toMatch(/⚠/);
+
+    const hint = findAll(tree, (n) => n.props?.['data-testid'] === 'watchlist-unresolved');
+    expect(hint, 'the hint names the real problem').toHaveLength(1);
+    const text = collectText(hint[0]);
+    expect(text).toMatch(/not in this tournament's roster/);
+    expect(text, 'never the misleading claim').not.toMatch(/No upcoming matches/);
+  });
+
+  it('claims nothing about a roster it does not have', () => {
+    // Absence is a claim, and an empty roster supports no claim. This state is
+    // REACHABLE and was checked in the browser: a tournament with no
+    // competitions yet (the roster is built from t.competitions) plus a
+    // watchlist carried over from a previous event -- bc_watchlist is one
+    // localStorage key per BROWSER, not per tournament. Without the guard that
+    // screen turns every chip amber and tells the reader to delete people who
+    // are perfectly fine.
+    const wl = [{ type: 'player', id: 'p1', name: 'Robert Young', dojo: 'Hagane Dojo' }];
+    const tree = runtime.mount(WatchlistPanel, baseProps({
+      roster: [], watchlist: wl, primaryEntry: wl[0], heroEntry: wl[0], heroNextMatch: null,
+    }));
+    expect(byClass(tree, 'pmf__chip--unresolved')).toHaveLength(0);
+    expect(findAll(tree, (n) => n.props?.['data-testid'] === 'watchlist-unresolved')).toHaveLength(0);
+  });
+
+  it('still says "no upcoming matches" when the entry DOES resolve', () => {
+    // The other half: the reworded hint must not swallow the ordinary
+    // finished-for-today case, which is the common one.
+    const wl = [{ type: 'player', id: 'p1', name: 'Robert Young', dojo: 'Hagane Dojo' }];
+    const tree = runtime.mount(WatchlistPanel, baseProps({
+      watchlist: wl, primaryEntry: wl[0], heroEntry: wl[0], heroNextMatch: null,
+    }));
+    expect(byClass(tree, 'pmf__chip--unresolved')).toHaveLength(0);
+    const hint = findAll(tree, (n) => n.props?.['data-testid'] === 'watchlist-primary-done');
+    expect(hint).toHaveLength(1);
+    expect(collectText(hint[0])).toMatch(/No upcoming matches for Robert Young/);
   });
 
   it('renders a dojo chip with its member count', () => {
@@ -239,7 +495,7 @@ describe('WatchlistPanel', () => {
 });
 
 describe('WatchPicker', () => {
-  let runtime, WatchPicker;
+  let runtime, WatchPicker, ROSTER_NOT_LOADED;
   beforeEach(async () => {
     runtime = makeReactive();
     global.React = runtime.React;
@@ -250,7 +506,7 @@ describe('WatchPicker', () => {
     // WatchPicker now lives in viewer_watchlist.jsx (reads window.pluralize,
     // set above, at module load).
     await import('../viewer.jsx');
-    ({ WatchPicker } = await import('../viewer_watchlist.jsx'));
+    ({ WatchPicker, ROSTER_NOT_LOADED } = await import('../viewer_watchlist.jsx'));
   });
   afterEach(() => { runtime.unmount(); global.React = realReact; vi.resetModules(); });
 
@@ -279,6 +535,105 @@ describe('WatchPicker', () => {
     expect(collectText(dojoOpts[0], expandNamed('NumberedName'))).toMatch(/Watch all · 2 members/);
     // The dojo's members also match the query by dojo name.
     expect(collectText(tree, expandNamed('NumberedName'))).toContain('Robert Young');
+  });
+
+  // bc-wlhc: with nothing to offer, the dropdown used to render NOTHING, so on
+  // a phone (no hover, no console) a mistyped name was indistinguishable from a
+  // broken control. The two dead ends are worded apart because the reader's
+  // next action differs: fix the spelling, versus nothing left to add.
+  const emptyRow = (tree) => findAll(tree, (n) => n.props?.['data-testid'] === 'watchpicker-empty');
+
+  it('says so when the query matches nobody', () => {
+    const tree = openWith('Zzzzz');
+    expect(emptyRow(tree), 'the dropdown must not render empty').toHaveLength(1);
+    const text = collectText(emptyRow(tree)[0]);
+    expect(text).toMatch(/No one here matches/);
+    expect(text).toMatch(/Zzzzz/);
+  });
+
+  // The competitor NUMBER is searchable (operator request 2026-09-21).
+  describe('the competitor number is searchable', () => {
+    // Z and W on purpose: neither letter occurs in any fixture name or dojo,
+    // so a hit here can only have come from the NUMBER. ("m" would have been
+    // useless -- it matches "Aoi Mori" by name.)
+    const NUMBERED = [
+      { id: 'p1', name: 'Robert Young', dojo: 'Hagane Dojo', number: 'Z1' },
+      { id: 'p2', name: 'Nolan Clark', dojo: 'Tsubaki Kenyukai', number: 'Z12' },
+      { id: 'p3', name: 'Aoi Mori', dojo: 'Hagane Dojo', number: 'W2' },
+    ];
+    const offered = (tree) =>
+      byClass(tree, 'pmf__option')
+        .filter((o) => !String(o.props.className).includes('--dojo'))
+        .map((o) => collectText(o, expandNamed('NumberedName')));
+
+    it('offers a whole draw for its bare prefix', () => {
+      // The number embeds the competition's numberPrefix, so this is the
+      // useful filter: "everyone in the Z draw".
+      const found = offered(openWith('z', { roster: NUMBERED })).join(' | ');
+      expect(found).toContain('Robert Young');
+      expect(found).toContain('Nolan Clark');
+      expect(found, 'W2 is a different draw').not.toContain('Aoi Mori');
+    });
+
+    it('matches from the START, not anywhere in the number', () => {
+      // Substring matching would drag every number CONTAINING 1 into a search
+      // for "1" -- here both Z1 and Z12 -- which is noise, not a filter.
+      const tree = openWith('1', { roster: NUMBERED });
+      expect(offered(tree), 'no number STARTS with 1').toHaveLength(0);
+      expect(emptyRow(tree)).toHaveLength(1);
+    });
+
+    it('shows the number on the row, so the match is visible', () => {
+      // Matching on something the reader cannot see is worse than not
+      // matching: they would type Z1, get a list, and not see which row is Z1.
+      expect(offered(openWith('z', { roster: NUMBERED }))[0]).toContain('Z1');
+    });
+
+    it('names the number as searchable when nothing matches', () => {
+      const text = collectText(emptyRow(openWith('Zzzzz', { roster: NUMBERED }))[0]);
+      expect(text).toMatch(/competitor number/);
+    });
+  });
+
+  it('distinguishes "already watching them all" from "no such person"', () => {
+    const tree = openWith('Hagane', {
+      watchedPlayerIds: ['p1', 'p3'], watchedDojos: ['Hagane Dojo'],
+    });
+    expect(emptyRow(tree)).toHaveLength(1);
+    const text = collectText(emptyRow(tree)[0]);
+    expect(text).toMatch(/already on your watchlist/);
+    expect(text, 'the roster DOES hold them, so this is the wrong message').not.toMatch(/No one here matches/);
+  });
+
+  it('says the tournament is empty when the roster is', () => {
+    const tree = openWith('', { roster: [], dojos: [] });
+    expect(emptyRow(tree)).toHaveLength(1);
+    expect(collectText(emptyRow(tree)[0])).toMatch(/No competitors have been added/);
+  });
+
+  // ...but only when the roster actually LOADED. An empty roster and one that
+  // failed to read look identical from here, and the two dead ends above are
+  // both claims about who is entered: with a competition's participants
+  // missing, "nobody has been added" and "no one matches" would send the
+  // reader to re-check a spelling that was never wrong. The panel's chips go
+  // quiet on the same flag; this row says why instead, because a silent
+  // dropdown reads as a broken control (bc-wlhc).
+  it('says the roster could not be loaded instead of claiming it is empty', () => {
+    const tree = openWith('', { roster: [], dojos: [], rosterLoaded: false });
+    expect(emptyRow(tree)).toHaveLength(1);
+    const text = collectText(emptyRow(tree)[0]);
+    expect(text).toBe(ROSTER_NOT_LOADED);
+    expect(text).not.toMatch(/No competitors have been added/);
+  });
+
+  it('makes no "no one matches" claim about a name while a roster failed to load', () => {
+    // ROSTER is the healthy competition's; the typed name lives in the one
+    // that did not load.
+    const tree = openWith('Yamada', { rosterLoaded: false });
+    expect(emptyRow(tree)).toHaveLength(1);
+    const text = collectText(emptyRow(tree)[0]);
+    expect(text).toBe(ROSTER_NOT_LOADED);
+    expect(text).not.toMatch(/No one here matches/);
   });
 
   it('excludes already-watched players and dojos from the dropdown', () => {
@@ -373,5 +728,34 @@ describe('useWatchlist legacy migration', () => {
     expect(ls._store.bc_my_player_id).toBeUndefined();
     expect(ls._store.bc_my_player_name).toBeUndefined();
     expect(JSON.parse(ls._store.bc_watchlist)).toEqual([{ type: 'player', id: 'p1', name: 'Alice', dojo: '' }]);
+  });
+});
+
+// The chip row's two CSS fixes from the review round, pinned in the sheet:
+// neither has a render harness that reads computed style, and both regressed
+// silently once (a bare 36px that never grew under a coarse pointer; a pinned
+// stale chip whose star vanished into its own fill).
+describe('the watchlist chip row in the stylesheet', () => {
+  const css = readStylesheet();
+  const block = (selector) => {
+    const b = cssBlock(css, selector);
+    expect(b, `rule ${selector} exists`).not.toBeNull();
+    return b;
+  };
+
+  it('clamps both chip controls to --tap-floor, never a bare pixel size', () => {
+    const b = block('.watchlist-chips .pmf__chip button');
+    expect(b).toMatch(/min-width: max\(36px, var\(--tap-floor\)\)/);
+    expect(b).toMatch(/min-height: max\(36px, var\(--tap-floor\)\)/);
+  });
+
+  it('keeps the pin star legible on the unresolved chip', () => {
+    // .pmf__chip.is-primary .pmf__chip-pin paints the star amber-400, which is
+    // 1.6:1 on the unresolved chip's amber-50 fill; this rule must sit later
+    // and take --warn-ink.
+    const b = block('.pmf__chip.pmf__chip--unresolved .pmf__chip-pin');
+    expect(b).toContain('var(--warn-ink)');
+    expect(css.indexOf('.pmf__chip.pmf__chip--unresolved .pmf__chip-pin'))
+      .toBeGreaterThan(css.indexOf('.pmf__chip.is-primary .pmf__chip-pin'));
   });
 });

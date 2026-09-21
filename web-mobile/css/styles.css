@@ -1835,17 +1835,77 @@ a:hover {
   min-width: 0;
 }
 
+/* Fill comes from the shared .side-fill--* rules below, which this pair is
+   byte-identical to; only the geometry is its own. */
 .pool-match-numbered-row__side--shiro {
-  background: var(--white-side);
-  background-image: repeating-linear-gradient(-45deg, transparent, transparent 3px, var(--shiro-hatch) 3px, var(--shiro-hatch) 6px);
   border-radius: 6px 0 0 6px;
 }
 
 .pool-match-numbered-row__side--aka {
-  background: var(--red-soft);
   justify-content: flex-end;
   text-align: right;
   border-radius: 0 6px 6px 0;
+}
+
+/* Aka/Shiro side FILL: the tinted-cell arm of DESIGN.md §4's dense-row rule,
+   held as ONE pair instead of a copy per surface. Applied by the three operator
+   surfaces that used to name the side with a SHIRO/AKA text badge instead
+   (operator decision 2026-09-20, bc-sccl): the scores-list row, the court
+   console's queue row, and its MatchSides. The host owns its own padding and
+   corner radii; this owns only the fill.
+
+   The hatch is load-bearing rather than decorative: pure white on a white card
+   is invisible, so Shiro is a diagonal hatch over --white-side while Aka is a
+   flat --red-soft. That also keeps the two readable without relying on colour,
+   which is what lets the text badge go (DESIGN.md §4: colour is never the only
+   signal).
+
+   .pool-match-numbered-row__side--* is the form this pair was taken from and
+   was byte-identical to it, so it SHARES these rules rather than keeping a
+   copy; it adds only its own border-radius above. An earlier version of this
+   comment called it "a different hatch pitch" and then quoted the same 3px
+   this rule uses, which would have let the two drift on a screen that shows
+   both. .vsched-item__side--* genuinely differs (6px) and is left alone:
+   folding that one in would change how it looks, not just where it lives. */
+.side-fill--shiro,
+.pool-match-numbered-row__side--shiro {
+  background: var(--white-side);
+  background-image: repeating-linear-gradient(-45deg, transparent, transparent 3px, var(--shiro-hatch) 3px, var(--shiro-hatch) 6px);
+}
+
+.side-fill--aka,
+.pool-match-numbered-row__side--aka {
+  background: var(--red-soft);
+}
+
+/* HATCH PITCH. The Shiro hatch exists at three pitches across the app and that
+   is deliberate -- a dense queue row and a full-height score editor want
+   different stripe frequencies -- but until bc-sccl every surface hand-rolled
+   its own copy of the gradient. This modifier is how a new surface picks the
+   mid pitch instead of writing another copy:
+
+     (default)            3px / 6px   dense rows: the scores list, the court
+                                      console, the pool numbered row
+     .side-fill--mid      6px / 7px   also .vsched-item__side--shiro and
+                                      .bc-match--v1 .bc-side--b; the compact
+                                      schedule rows take it through SideCell
+                                      density="mid"
+     (no modifier yet)    7px / 8px   .engi-side--shiro, .sb-side--shiro,
+                                      .team-sub-match__side--shiro
+
+   The five surfaces named above KEEP their own copies for now, on purpose. The
+   declarations are identical, so folding them in is tempting, but it would
+   move a background declaration up the sheet past other rules that paint the same
+   elements (.bc-match--v2 .bc-side--b, .editor-modal--compact .sb-side--shiro,
+   the compact team-bouts override), and the only honest way to show that
+   changed nothing is to re-measure five surfaces in a browser -- two of them
+   scoring surfaces. Worth doing; not worth doing blind. A --loose modifier for
+   the 7/8px pitch shipped once with no caller and was removed: add it WITH the
+   first surface that folds onto it, never ahead of one. What matters now is
+   that nobody adds a sixth private copy. */
+.side-fill--shiro.side-fill--mid {
+  background-image: repeating-linear-gradient(
+    -45deg, transparent 0 6px, var(--shiro-hatch) 6px 7px);
 }
 
 .pool-match-numbered-row__name {
@@ -2579,8 +2639,175 @@ button.sync-status-pill:focus-visible {
   overflow: hidden;
 }
 
-.my-match--running {
-  box-shadow: 0 0 0 4px var(--accent-soft);
+/* ---------- Watchlist hero card (.wl-hero) ----------
+   The personalised "your next match" card on the viewer home. Its own block,
+   NOT a variant of .my-match: that class is also ViewerOverview's simpler
+   next-match card (viewer_competition.jsx), and repainting it would silently
+   change a second surface.
+
+   PHONE-FIRST AND NEVER TRUNCATE (operator ruling 2026-09-20, bc-wlhc). The
+   predecessor put Court / Time / Queue in three `flex: 1` chips; at 390px that
+   is 86px each, which wrapped "Shiaijo A" with the court LETTER orphaned on
+   its own line and "11 before yours" onto three. Everything here is full
+   width and stacked, so there is nothing to wrap and nothing to clip -- note
+   the absence of `overflow: hidden`, which on the old card silently cut the
+   Shiaijo glossary tooltip into an unreadable box.
+
+   The card is LIGHT. The predecessor was `background: var(--accent)` in every
+   state, which spent the running colour on the resting card (Principle 3) and
+   left running with a 1.20:1 ring; it also put --red-soft's Aka tint on navy,
+   where red cannot read. Light at rest means navy is free to mean "on court
+   now", and the side tints land on the ground they were designed for. */
+.wl-hero {
+  background: var(--surface);
+  color: var(--ink);
+  border: 1px solid var(--line);
+  border-radius: var(--r-lg);
+  margin-bottom: 14px;
+  overflow: visible;
+}
+
+.wl-hero--running {
+  border-color: var(--accent);
+  border-width: 2px;
+}
+
+/* The running band: white on --accent at 12.36:1, the whole width of the card.
+   Radius matches the card's inner corners so it reads as part of the shell. */
+.wl-hero__now {
+  background: var(--accent);
+  color: var(--accent-fg);
+  font-weight: 800;
+  font-size: 12px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  padding: 8px 16px;
+  border-radius: calc(var(--r-lg) - 2px) calc(var(--r-lg) - 2px) 0 0;
+}
+
+.wl-hero__body {
+  padding: 14px 16px 16px;
+}
+
+.wl-hero__lbl {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+}
+
+/* The instruction, and the largest thing on the card. */
+.wl-hero__where {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin-top: 2px;
+}
+
+.wl-hero__where-l {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--ink-2);
+}
+
+.wl-hero__where-v {
+  font-family: var(--font-display);
+  font-size: 34px;
+  font-weight: 800;
+  line-height: 1.05;
+  color: var(--ink-1);
+  /* The one token that says where to walk. It may never wrap. */
+  white-space: nowrap;
+}
+
+.wl-hero__when {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--ink-2);
+  margin-top: 2px;
+}
+
+.wl-hero__round {
+  font-size: 12px;
+  color: var(--ink-3);
+  margin-top: 2px;
+}
+
+/* The pairing. One row per competitor, full width, stacked: on a phone the two
+   sides cannot sit left/right without squeezing names. */
+.wl-hero__sides {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  width: 100%;
+  margin-top: 12px;
+  text-align: left;
+}
+
+button.wl-hero__sides--btn {
+  border: none;
+  background: none;
+  padding: 0;
+  cursor: pointer;
+  color: inherit;
+  font: inherit;
+}
+
+/* The fill comes from .side-fill--shiro/--aka (shared with the scores list and
+   the court console); this owns only the geometry. */
+.wl-hero__side {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 8px;
+  padding: 8px 10px;
+  border-radius: 8px;
+}
+
+.wl-hero__side-head {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.wl-hero__side-lbl {
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--ink-2);
+}
+
+/* "you": which of the two rows is the watched entity. */
+.wl-hero__you {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--accent);
+  background: var(--accent-soft);
+  border-radius: 4px;
+  padding: 1px 5px;
+}
+
+.wl-hero__side-name {
+  font-size: 17px;
+  font-weight: 700;
+  color: var(--ink-1);
+}
+
+.wl-hero__side-dojo {
+  font-size: 12px;
+  color: var(--ink-2);
+}
+
+.wl-hero__more {
+  display: block;
+  margin-top: 8px;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--accent);
 }
 
 .my-match__lbl {
@@ -2633,8 +2860,11 @@ button.sync-status-pill:focus-visible {
   letter-spacing: 0.05em;
 }
 
-/* Shared card styling, applies to both the home MyMatchPanel
-   <button> and the ViewerOverview <div> mount sites. */
+/* The opponent card on the competition page's "your next match" block
+   (viewer_competition.jsx, a plain <div>). The home watchlist used to mount
+   it as a <button> too, with its own reset rules; bc-wlhc rebuilt that card
+   as .wl-hero, so this is the one mount site left and the button reset went
+   with the button. */
 .my-match__opp {
   display: block;
   width: 100%;
@@ -2642,15 +2872,6 @@ button.sync-status-pill:focus-visible {
   padding: 12px;
   background: rgba(255, 255, 255, 0.1);
   border-radius: 10px;
-}
-
-/* Button-only resets: keep these on <button>.my-match__opp so the
-   non-clickable <div> in ViewerOverview doesn't look interactive. */
-button.my-match__opp {
-  border: none;
-  text-align: left;
-  cursor: pointer;
-  color: inherit;
 }
 
 /* Anchor vlist rows, remove browser default underline */
@@ -2863,23 +3084,6 @@ button.vsched-item:not([data-clickable]) {
   color: var(--ink-3);
 }
 .vsched-item__queue--next {
-  color: var(--accent);
-}
-
-/* Final / status label, pushed right when queue chip is absent */
-.vsched-item__status {
-  margin-left: auto;
-  color: var(--ink-3);
-}
-
-/* HANTEI badge */
-.vsched-item__hantei {
-  margin-left: 6px;
-  font-size: 10px;
-  font-weight: 700;
-  padding: 1px 5px;
-  border-radius: 3px;
-  background: var(--accent-soft);
   color: var(--accent);
 }
 
@@ -4513,20 +4717,33 @@ button.vsched-item:not([data-clickable]) {
   line-height: 1.3;
 }
 
+/* Padding and radius for the tinted side fill (--shiro/--aka, further down);
+   they live on the base so both sides get identical geometry whatever their
+   fill. .tw-match__comp below repeats the horizontal value: see there. */
 .tw-match__name {
   font-weight: 500;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+  padding: 2px 6px;
+  border-radius: 5px;
+  margin-bottom: 2px;
 }
 
 .tw-match__name--w {
   font-weight: 700;
 }
 
+/* The same 6px inset as .tw-match__name above. Without it this caption was
+   flush to the column while the two names were inset by the padding their tint
+   needs, stepping the left edge of every row on both compact schedules. The
+   names are what a reader scans, so the caption aligns to THEM, not to the
+   tinted block's edge. Measured at 390px: both text runs now start at the same
+   x, where the caption used to start 6px left. */
 .tw-match__comp {
   font-size: 10.5px;
   color: var(--ink-3);
+  padding: 0 6px;
   margin-top: 3px;
   white-space: nowrap;
   overflow: hidden;
@@ -4629,30 +4846,6 @@ button.vsched-item:not([data-clickable]) {
 }
 .engi-side--winner .engi-side__name {
   font-weight: 700;
-}
-
-.engi-side__badge {
-  font-size: 11px;
-  font-weight: 700;
-  text-transform: uppercase;
-  letter-spacing: 0.08em;
-  padding: 2px 8px;
-  border-radius: 4px;
-}
-
-/* Framed white, never flat grey (DESIGN.md §4: "all Shiro badges are framed
-   white: never flat grey"). Aka is a solid red badge, matching every other
-   Aka badge in the app. */
-.engi-side__badge--shiro {
-  background: #fff;
-  color: var(--accent);
-  border: 1.5px solid var(--accent);
-}
-
-.engi-side__badge--aka {
-  background: var(--red);
-  color: #fff;
-  border: 1px solid var(--red);
 }
 
 .engi-side__names {
@@ -4852,10 +5045,25 @@ button.vsched-item:not([data-clickable]) {
   min-width: 0;
 }
 
+/* The side cells carry the side by TINT (.side-fill--shiro/--aka), not by the
+   SHIRO/AKA text badge they used to hold (operator decision 2026-09-20,
+   bc-sccl).
+
+   The parent sets gap: 8px, so the two fills do NOT touch: each is its own
+   tinted cell with the score floating between them, and only the OUTER corners
+   are rounded so the pair still reads as one control pointing inwards. An
+   earlier version of this comment called them "one segmented control" and said
+   the fills met, which the gap has always contradicted -- checked in the
+   browser at 1180px. Left as it renders: the square inner corners are what the
+   operator signed off on. Change the radii only together with the gap. */
 .score-edit-row__side {
   flex: 1;
   min-width: 0;
+  padding: 4px 8px;
 }
+
+.score-edit-row__side--shiro { border-radius: 6px 0 0 6px; }
+.score-edit-row__side--aka { border-radius: 0 6px 6px 0; }
 
 .score-edit-row__side .name {
   font-weight: 500;
@@ -4865,9 +5073,14 @@ button.vsched-item:not([data-clickable]) {
   text-overflow: ellipsis;
 }
 
+/* One step darker than the --ink-3 secondary text normally used, because this
+   cell is now TINTED (bc-sccl): --ink-3 measures 4.83:1 on the white card it
+   used to sit on but only 4.09:1 on --red-soft, under the 4.5 floor for 11px
+   text. --ink-2 is 8.69:1 there. Both sides take the same value so Shiro and
+   Aka read identically, even though Shiro's lighter tint would have passed. */
 .score-edit-row__side .dojo {
   font-size: 11px;
-  color: var(--ink-3);
+  color: var(--ink-2);
 }
 
 .score-edit-row__side--win .name {
@@ -5046,31 +5259,10 @@ button.vsched-item:not([data-clickable]) {
   text-align: right;
 }
 
-/* Explicit SHIRO/AKA pill on each kendo side, matching .engi-side__badge so the
-   two editors label the side identically (framed white for Shiro, solid red for
-   Aka — DESIGN.md §4). `align-self` follows the side's inward text-align. */
-.sb-side__badge {
-  display: inline-block;
-  align-self: flex-start;
-  font-size: 10px;
-  font-weight: 700;
-  text-transform: uppercase;
-  letter-spacing: 0.08em;
-  padding: 2px 8px;
-  border-radius: 4px;
-  margin-bottom: 6px;
-}
-.sb-side--shiro .sb-side__badge { align-self: flex-end; }
-.sb-side__badge--shiro {
-  background: #fff;
-  color: var(--accent);
-  border: 1.5px solid var(--accent);
-}
-.sb-side__badge--aka {
-  background: var(--red);
-  color: #fff;
-  border: 1px solid var(--red);
-}
+/* No SHIRO/AKA pill on a kendo side: the half is TINTED, and a tinted surface
+   does not need the badge as well (operator ruling 2026-09-20, bc-sccl). The
+   fills live on .sb-side--shiro/--aka above. This was the last side pill in the
+   app; every other one went the same way in the same pass. */
 
 .sb-name {
   font-size: 22px;
@@ -5103,19 +5295,20 @@ button.vsched-item:not([data-clickable]) {
   /* The centre carries both slot groups around the VS, so it is sized by its
      content instead of the fixed 140px separator column. */
   grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
-  grid-template-rows: 1fr auto auto auto 1fr;
+  /* Two content rows between the 1fr spacers, not three: the SHIRO/AKA badge
+     that used to own row 2 is gone (bc-sccl), so name and points move up one
+     and the template loses a row. Leaving the old five-row template would
+     hold an empty band where the badge was. */
+  grid-template-rows: 1fr auto auto 1fr;
 }
 .sb-match:has(.sb-slots) > .sb-side {
   display: grid;
   grid-row: 1 / -1;
   grid-template-rows: subgrid;
 }
-.sb-match:has(.sb-slots) > .sb-side > .sb-side__badge { grid-row: 2; }
-.sb-match:has(.sb-slots) > .sb-side > .sb-name { grid-row: 3; align-self: end; }
-.sb-match:has(.sb-slots) > .sb-side > .sb-points-grid { grid-row: 4; }
+.sb-match:has(.sb-slots) > .sb-side > .sb-name { grid-row: 2; align-self: end; }
+.sb-match:has(.sb-slots) > .sb-side > .sb-points-grid { grid-row: 3; }
 .sb-match:has(.sb-slots) > .sb-center { grid-row: 1 / -1; }
-.sb-match:has(.sb-slots) > .sb-side--shiro > .sb-side__badge { justify-self: end; }
-.sb-match:has(.sb-slots) > .sb-side--aka > .sb-side__badge { justify-self: start; }
 
 /* the side label (".sb-dojo" historically held it) becomes the identity chip,
    one statement of the side, colour-coded, like the inline editor's chip */
@@ -6019,37 +6212,6 @@ button.vsched-item:not([data-clickable]) {
 /* (The former duplicate light-refresh .team-summary block lived here; the
    single consolidated block above is now the only source. mp-gmcg.) */
 
-/* ---------- Aka/Shiro color badges ---------- */
-/* Used by viewer_watchlist.jsx only: that card has no side tint, so it names
-   the side in text. The bracket card carries the side via its leading colour
-   bar and tint alone and names no side in text (operator ruling 2026-09-14,
-   bc-dnst). */
-.bc-color-badge {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 8px;
-  font-weight: 800;
-  letter-spacing: 0.06em;
-  padding: 1px 4px;
-  border-radius: 3px;
-  margin-right: 4px;
-  flex-shrink: 0;
-  vertical-align: middle;
-}
-
-.bc-color-badge--aka {
-  background: var(--red);
-  color: white;
-}
-
-.bc-color-badge--shiro {
-  /* framed white to match the system (was flat grey #e8eaf0) */
-  background: #fff;
-  color: var(--accent);
-  border: 1px solid var(--accent);
-}
-
 /* Competitor number prefix (e.g. "K1") shown before a player name. The value
    in player.number already embeds the competition's configured numberPrefix;
    this only styles it as a compact monospace badge (mp-3 / numberPrefix).
@@ -6105,31 +6267,13 @@ button.vsched-item:not([data-clickable]) {
   margin: 0;
 }
 
-/* Schedule / TW-match compact badges (A/S) */
-.tw-match__badge {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 14px;
-  height: 14px;
-  border-radius: 3px;
-  font-size: 8px;
-  font-weight: 800;
-  flex-shrink: 0;
-  margin-right: 3px;
-  vertical-align: middle;
-}
-
-.tw-match__badge--aka {
-  background: var(--red);
-  color: white;
-}
-
-.tw-match__badge--shiro {
-  background: #fff;
-  color: var(--accent);
-  border: 1px solid var(--accent);
-}
+/* The two compact schedules' stacked side lines take their tint from
+   .side-fill--* at the --mid pitch (SideCell density="mid"), so they read like
+   .vsched-item__side--*, the stacked rows on the public schedule. They used to
+   carry their own copy of that gradient; it was byte-identical, and nothing
+   else paints .tw-match__name's background, so it was deleted rather than left
+   to drift. This treatment replaced a pair of 14x14 A/S squares that gave the
+   side no area at all on a list that can run to dozens of rows. */
 
 .tw-match__time--editable {
   background: transparent;
@@ -6148,32 +6292,6 @@ button.vsched-item:not([data-clickable]) {
   text-decoration: underline;
 }
 
-
-/* Score editor row Aka/Shiro badges */
-.se-color-badge {
-  display: inline-flex;
-  align-items: center;
-  font-size: 8px;
-  font-weight: 800;
-  letter-spacing: 0.06em;
-  padding: 1px 4px;
-  border-radius: 3px;
-  vertical-align: middle;
-  flex-shrink: 0;
-}
-
-.se-color-badge--aka {
-  background: var(--red);
-  color: white;
-  margin-right: 4px;
-}
-
-.se-color-badge--shiro {
-  background: #fff;
-  color: var(--accent);
-  border: 1px solid var(--accent);
-  margin-left: 4px;
-}
 
 /* Team header color label */
 .team-header__color {
@@ -7650,21 +7768,28 @@ abbr.msb-lab { text-decoration: none; cursor: help; }
      per line need every pixel of it. */
   padding: 12px 8px;
 }
-.editor-modal--compact .sb-side--aka,
-.editor-modal--compact .sb-side--shiro {
-  /* Soft 4–6% tonal wash instead of the candy-coloured corner gradient. */
-}
+/* Soft 4-6% tonal wash instead of the candy-coloured corner gradient. The two
+   hex "fallback" declarations that used to precede these were dead: a
+   declaration using var() is valid at parse time, so it always replaced the
+   literal, and a browser without color-mix() falls to unset, never back. */
 .editor-modal--compact .sb-side--aka {
-  background: linear-gradient(135deg, #fff5f5 0%, #fef2f2 100%); /* fallback */
   background: linear-gradient(135deg,
     color-mix(in srgb, var(--red) 5%, var(--surface)) 0%,
     color-mix(in srgb, var(--red) 3%, var(--surface)) 100%);
 }
 .editor-modal--compact .sb-side--shiro {
-  background: linear-gradient(135deg, #f8faff 0%, #f0f4ff 100%); /* fallback */
-  background: linear-gradient(135deg,
-    color-mix(in srgb, var(--accent) 5%, var(--surface)) 0%,
-    color-mix(in srgb, var(--accent) 3%, var(--surface)) 100%);
+  /* The same wash, but as background-image LAYERS rather than the `background`
+     shorthand: the shorthand resets background-image and took the 45° hatch
+     from .sb-side--shiro with it, so the individual editor (always compact)
+     and every kachinuki editor shipped the SHIRO/AKA badge removal (bc-sccl)
+     without the one NON-COLOUR cue that ruling relies on (DESIGN.md §4). Hatch
+     on top, wash under; the base rule's --white-side background-color is
+     fully covered by the opaque wash. Pinned by side_is_carried_by_tint. */
+  background-image:
+    repeating-linear-gradient(-45deg, transparent 0 7px, var(--shiro-hatch) 7px 8px),
+    linear-gradient(135deg,
+      color-mix(in srgb, var(--accent) 5%, var(--surface)) 0%,
+      color-mix(in srgb, var(--accent) 3%, var(--surface)) 100%);
 }
 .editor-modal--compact .sb-name {
   font-family: var(--font-display);
@@ -7715,8 +7840,11 @@ abbr.msb-lab { text-decoration: none; cursor: help; }
 /* auto-fit can only count tracks against a definite width, and the side's own
    grid column is content-sized (justify-content: center), so it would hand the
    marks a one-column track however wide the side is. Stretch that column in
-   compact mode; the names keep their inward text-align pin, and the slots and
-   the side badge have their own justify-self, so none of them move. */
+   compact mode; the names keep their inward text-align pin and the slots have
+   their own justify-self, so none of them move. (This also named the side
+   badge, which bc-sccl removed along with .sb-side__badge's justify-self --
+   one of the two premises this reasoning rests on, so a later reader checking
+   whether the stretch is still safe started from a wrong model.) */
 .editor-modal--compact .sb-match:has(.sb-slots) > .sb-side {
   justify-content: stretch;
 }
@@ -8683,17 +8811,46 @@ abbr.msb-lab { text-decoration: none; cursor: help; }
 .pmf__chip-tick { margin-left: 4px; font-size: 10px; }
 
 /* ---------- mp-xhaa: unified watchlist panel ---------- */
-/* The hero (navy .my-match block) now nests inside the white watchlist card.
-   It is a featured region, not a nested card (no border/shadow), give it
-   breathing room from the picker above and drop its own bottom margin so the
-   card padding owns the trailing space. */
-.mymatch-card .my-match {
+/* The hero nests inside the white watchlist card. It is a featured region,
+   not a nested card: give it breathing room from the picker above and drop its
+   own bottom margin so the card padding owns the trailing space.
+
+   Selector updated with the class. This said `.mymatch-card .my-match` and the
+   hero became .wl-hero, so both halves silently stopped applying: the card
+   butted against the pin hint above it and added its own 14px below, on top of
+   the card's padding -- the exact double gap the zeroed bottom prevents.
+   .my-match still exists, on ViewerOverview, which never nests in this card. */
+.mymatch-card .wl-hero {
   margin-top: 12px;
   margin-bottom: 0;
 }
 
 /* Slightly looser chip bar: chips can carry a pin star + remove button. */
-.watchlist-chips { gap: 6px; }
+/* bc-wlhc: the watchlist row is a PHONE surface and its two controls were
+   17x13 (the pin star) and 13x14 (the remove x) CSS px, under the 24x24 floor
+   of WCAG 2.5.8 and far under it for a control that DELETES a watch entry with
+   no undo. Both grow to the sheet's documented floors (DESIGN.md §2 Principle
+   4 and §6): 36x36 on a fine pointer, and --tap-floor's 44 under a coarse one,
+   through the max() idiom --tap-floor's own comment prescribes. Scoped to this
+   row rather than .pmf__chip, which PlayerMultiFilter shares.
+
+   The first cut pinned a bare 36 and argued against 44 by claiming a wrapping
+   row would need overlapping hit areas at that size. It would not: min-height
+   makes the CHIP grow, so the targets stay disjoint and only the row gets
+   taller. The bare number left the delete control 36px on every phone, below
+   the floor every other dense control in this sheet already meets. */
+.watchlist-chips { gap: 8px; }
+
+.watchlist-chips .pmf__chip { padding: 0 2px 0 8px; }
+
+.watchlist-chips .pmf__chip button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: max(36px, var(--tap-floor));
+  min-height: max(36px, var(--tap-floor));
+  padding: 0;
+}
 
 /* Pin star toggles the primary entity (shown only when ≥2 entities). */
 .pmf__chip-pin {
@@ -8722,12 +8879,45 @@ abbr.msb-lab { text-decoration: none; cursor: help; }
 }
 .pmf__chip.is-primary .pmf__chip-pin { color: #fbbf24; }
 
+/* A watch entry that resolves to nobody in this tournament (bc-wlhc).
+   --warn, not --danger: nothing is lost or broken, the entry simply cannot be
+   resolved. The fill sits beside the name rather than replacing it, so the
+   chip still says WHO it was.
+
+   TWO classes, and placed AFTER .pmf__chip.is-primary, because it has to beat
+   it on specificity AND source order. One class at its old home earlier in the
+   sheet lost both, so a PINNED stale chip -- the one the panel's warning is
+   actually about, and the one driving the card -- rendered as an ordinary navy
+   pinned chip with only an amber border on navy to show for it. */
+.pmf__chip.pmf__chip--unresolved {
+  background: var(--warn-soft);
+  color: var(--warn-ink);
+  border: 1px solid var(--warn-border);
+}
+/* The pinned chip's filled star is amber-400 (#fbbf24) on navy, three classes
+   deep above; on this chip's amber-50 fill that measured 1.6:1 and vanished,
+   so the ONE chip whose pin the panel's warning is about looked like the only
+   chip without a pin control. Same specificity, later in the sheet, so it
+   wins on order. */
+.pmf__chip.pmf__chip--unresolved .pmf__chip-pin { color: var(--warn-ink); }
+
 /* Dropdown dojo rows: tint the leading glyph with the accent so dojo options
    are scannable against the player rows. */
 .pmf__option--dojo .pmf__check { color: var(--accent); font-weight: 700; }
 
 .watchlist-pin-hint { margin-top: 8px; }
-.watchlist-primary-done { margin-top: 12px; }
+
+/* These two are alternatives on the SAME element, so they need the same
+   margin; the unresolved arm had none and rendered flush against the block
+   above it. The doubled selector is defensive, not load-bearing here: this
+   rule now sits AFTER .hint--md, so one class would win the tie on order, but
+   its first home was earlier in the sheet, where .hint--md's own one-class
+   colour won and painted the warning in ordinary grey --ink-3 -- visually
+   identical to the benign "no upcoming matches" line it exists to be
+   distinguished from. Two classes keep it winning wherever it moves. */
+.watchlist-primary-done,
+.hint--md.watchlist-primary-unresolved { margin-top: 12px; }
+.hint--md.watchlist-primary-unresolved { color: var(--warn-ink); }
 
 /* ---------- Awards view header (replaces inline styles) ---------- */
 .awards__header {
@@ -9039,12 +9229,6 @@ abbr.msb-lab { text-decoration: none; cursor: help; }
   white-space: nowrap;
 }
 
-/* Shiro/Aka badges run 7px across the console; bump them on the operator
-   console so they stay legible at arm's length in a bright hall (critique
-   P2). Scoped to .shiaijo so the dense schedule editor is untouched. */
-.shiaijo .se-color-badge { font-size: 10px; padding: 2px 5px; }
-.shiaijo-sides .se-color-badge { font-size: 10px; padding: 2px 6px; }
-
 .linklike {
   background: none; border: 0; padding: 0; font: inherit;
   color: var(--accent); text-decoration: underline; cursor: pointer;
@@ -9130,9 +9314,16 @@ abbr.msb-lab { text-decoration: none; cursor: help; }
 
 /* Big sides block for the Up Next card */
 .shiaijo-sides { display: flex; align-items: center; gap: 12px; }
-.shiaijo-sides__side { flex: 1; min-width: 0; }
+/* Tinted side cells, same treatment as the scores list (bc-sccl); the badge
+   these replaced is gone. Slightly more padding than the compact rows, since
+   this block is the court's headline matchup. */
+.shiaijo-sides__side { flex: 1; min-width: 0; padding: 6px 10px; }
+.shiaijo-sides__side--shiro { border-radius: 8px 0 0 8px; }
+.shiaijo-sides__side--aka { border-radius: 0 8px 8px 0; }
 .shiaijo-sides__side .name { font-weight: 600; font-size: 15px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.shiaijo-sides__side .dojo { font-size: 11px; color: var(--ink-3); }
+/* --ink-2 rather than --ink-3 for the same reason as the scores row: the cell
+   is tinted now, and --ink-3 falls to 4.09:1 on --red-soft (bc-sccl). */
+.shiaijo-sides__side .dojo { font-size: 11px; color: var(--ink-2); }
 .shiaijo-sides__vs { font-size: 12px; color: var(--ink-3); }
 .shiaijo-sides--lg .name { font-size: 18px; }
 
@@ -9180,11 +9371,17 @@ abbr.msb-lab { text-decoration: none; cursor: help; }
 }
 .shiaijo-qrow__time { font-weight: 600; color: var(--ink-2); min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .shiaijo-qrow__state { font-family: var(--font-mono); font-weight: 700; font-size: 13px; color: var(--ink); white-space: nowrap; display: inline-flex; align-items: center; gap: 6px; }
-.shiaijo-qrow__final { font-family: var(--font-sans); font-weight: 600; font-size: 10px; color: var(--ink-3); }
 /* Matchup: two equal name columns flanking the centre "vs", names hug centre. */
 .shiaijo-qrow__match { display: grid; grid-template-columns: 1fr auto 1fr; align-items: center; gap: 8px; }
-.shiaijo-qrow__side { display: flex; align-items: center; gap: 6px; min-width: 0; }
-.shiaijo-qrow__side--aka { flex-direction: row-reverse; text-align: right; }
+/* Tinted side cells (bc-sccl). The two halves are already equal: the parent
+   .shiaijo-qrow__match is a 1fr/auto/1fr grid, so each cell fills its column
+   without needing a flex basis here. The fills do NOT meet at the centre "vs":
+   that grid also sets gap: 8px, so a strip of card shows either side of it.
+   Same shape as the scores list above, and the same correction -- this said
+   they met. */
+.shiaijo-qrow__side { display: flex; align-items: center; gap: 6px; min-width: 0; padding: 4px 8px; }
+.shiaijo-qrow__side--shiro { border-radius: 6px 0 0 6px; }
+.shiaijo-qrow__side--aka { flex-direction: row-reverse; text-align: right; border-radius: 0 6px 6px 0; }
 .shiaijo-qrow__name { font-weight: 600; font-size: 14px; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .shiaijo-qrow__vs { font-size: 11px; color: var(--ink-3); }
 /* Completed result, centred on its own line below the names (the names keep the
@@ -10336,18 +10533,18 @@ abbr.msb-lab { text-decoration: none; cursor: help; }
      individual board's centre carries four 44px slots and cannot shrink, so
      it takes its own row above the two sides instead of squeezing them to a
      glyph per line; the sides then share the width. The side's subgrid rows
-     are renumbered for the three rows that remain. */
+     are renumbered for the two rows that remain (the badge's row went with the
+     badge, bc-sccl). */
   .sb-match:has(.sb-slots) {
     grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
-    grid-template-rows: auto auto auto auto;
+    grid-template-rows: auto auto auto;
   }
   .sb-match:has(.sb-slots) > .sb-center { grid-row: 1; grid-column: 1 / -1; }
   .sb-match:has(.sb-slots) > .sb-side { grid-row: 2 / -1; }
   .sb-match:has(.sb-slots) > .sb-side--shiro { grid-column: 1; }
   .sb-match:has(.sb-slots) > .sb-side--aka { grid-column: 2; }
-  .sb-match:has(.sb-slots) > .sb-side > .sb-side__badge { grid-row: 1; }
-  .sb-match:has(.sb-slots) > .sb-side > .sb-name { grid-row: 2; }
-  .sb-match:has(.sb-slots) > .sb-side > .sb-points-grid { grid-row: 3; }
+  .sb-match:has(.sb-slots) > .sb-side > .sb-name { grid-row: 1; }
+  .sb-match:has(.sb-slots) > .sb-side > .sb-points-grid { grid-row: 2; }
   /* The team header's fixed centre and gutter margin exist to align it with
      the bout rows' columns; those rows stack below, so the header goes back
      to content-sized columns and full width. */

@@ -128,23 +128,21 @@ describe('ScoreEditorModal render-smoke', () => {
   });
 });
 
-// impeccable re-critique symmetry: the individual (kendo) and team editors now
-// carry the same explicit SHIRO/AKA pill badge the Engi editor has, so the side
-// is labelled identically across all three editors.
-describe('ScoreEditorModal SHIRO/AKA side badges', () => {
-  it('renders a framed Shiro badge and a solid Aka badge on the individual editor', () => {
-    const { container } = renderModal(makeIndividualMatch());
-    const shiro = container.querySelector('.sb-side--shiro .sb-side__badge--shiro');
-    const aka = container.querySelector('.sb-side--aka .sb-side__badge--aka');
-    expect(shiro).not.toBeNull();
-    expect(aka).not.toBeNull();
-    expect(shiro.textContent).toBe('Shiro');
-    expect(aka.textContent).toBe('Aka');
-  });
-
-  it('renders the same badges on the team editor', () => {
-    const { container } = renderModal(makeTeamMatch());
-    expect(container.querySelector('.sb-side--shiro .sb-side__badge--shiro')?.textContent).toBe('Shiro');
-    expect(container.querySelector('.sb-side--aka .sb-side__badge--aka')?.textContent).toBe('Aka');
-  });
+// A TINTED surface carries no SHIRO/AKA badge (operator ruling 2026-09-20,
+// bc-sccl, superseding bc-dnst's "named once in text, by the header badge").
+// Both editors' halves are tinted -- --red-soft for Aka, --white-side plus the
+// 45° hatch for Shiro -- so the pill was a second statement of the same fact.
+// This file previously asserted the badges were PRESENT; it now pins their
+// removal, and pins the sr-only label that has to replace them, because dropping
+// the badge without it would leave colour as the only signal (DESIGN.md §4).
+describe('ScoreEditorModal side labelling', () => {
+  for (const [label, make] of [['individual', makeIndividualMatch], ['team', makeTeamMatch]]) {
+    it(`renders no SHIRO/AKA pill on the ${label} editor, and names the side for a screen reader`, () => {
+      const { container } = renderModal(make());
+      expect(container.querySelector('.sb-side__badge')).toBeNull();
+      const srText = [...container.querySelectorAll('.sb-side .sr-only')].map(e => e.textContent.trim());
+      expect(srText).toContain('Shiro:');
+      expect(srText).toContain('Aka:');
+    });
+  }
 });

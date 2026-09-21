@@ -2,7 +2,7 @@
 // Extracted from viewer.jsx (mp-pxxc step 10).
 
 import { competitionKindLabel, compMatches, tournamentMatches, TournamentInfo, compareDmy } from './viewer_utils.jsx';
-import { matchParticipantIds, addPlayerToWatchlist, resolveEntryPlayerIds, resolveWatchedPlayers, findPrimaryEntry, buildPrimaryNextMatch, buildRoster, useWatchlist, buildWatchedSets, matchInvolvesWatchedSet } from './viewer_watchlist_core.jsx';
+import { matchParticipantIds, addPlayerToWatchlist, resolveEntryPlayerIds, resolveWatchedPlayers, findPrimaryEntry, heroEntry, buildPrimaryNextMatch, buildRoster, rosterFullyLoaded, useWatchlist, buildWatchedSets, matchInvolvesWatchedSet } from './viewer_watchlist_core.jsx';
 import { runOnce, notifEnable, notifDisable, useChimeMuted, isFollowedMatchOnDeck, useFollowedMatchAlert, useSecondaryWatchAlert, MyMatchAlertBanner } from './viewer_alerts.jsx';
 import { notificationSupported } from './viewer_notifications.jsx';
 import { VSchedItem, MatchViewerModal } from './viewer_match.jsx';
@@ -129,6 +129,10 @@ export function ViewerHome({ tournament, onSelectCompetition, onAdminClick, onOp
   const [watchlist, setWatchlist] = useWatchlist();
   const [primaryKey, setPrimaryKey] = usePrimaryWatch();
   const roster = useMemo(() => buildRoster(t.competitions), [t.competitions]);
+  // Derived beside the roster because it qualifies it: a non-empty roster does
+  // not mean every competition's participants loaded, and only the panel's
+  // "not in this tournament" claim depends on the difference.
+  const rosterLoaded = useMemo(() => rosterFullyLoaded(t.competitions), [t.competitions]);
 
   // Add a single player to the watchlist (dedup by id). Used by the deep link.
   const addWatchPlayer = (p) => setWatchlist(prev => addPlayerToWatchlist(prev, p));
@@ -176,6 +180,32 @@ export function ViewerHome({ tournament, onSelectCompetition, onAdminClick, onOp
   const primaryIds = useMemo(() => new Set(resolveEntryPlayerIds(primaryEntry, roster)), [primaryEntry, roster]);
   const primaryNextMatch = useMemo(() => buildPrimaryNextMatch(primaryEntry, roster, bothSidesMatches), [primaryEntry, roster, bothSidesMatches]);
 
+  // The CARD's subject, which is not always the chime's (bc-wlhc). heroEntry
+  // falls back to the first-added entry when nothing is pinned; primaryEntry
+  // above stays null there, so useFollowedMatchAlert below never fires for
+  // someone the reader did not choose. Two derivations, one line apart, so the
+  // difference is visible rather than hidden behind a flag.
+  // One memo, not two: the entry and its match are decided together, because
+  // choosing the entry now depends on whether it HAS a match. The Map keys on
+  // the entry object, which heroEntry hands back unchanged, so each candidate
+  // is scanned at most once and the chosen one is not re-scanned.
+  const { heroWatchEntry, heroNextMatch } = useMemo(() => {
+    // Pinned is the common case, and heroEntry's pinned arm IS
+    // findPrimaryEntry(watchlist, primaryKey) -- the call primaryEntry made one
+    // line above, whose match primaryNextMatch already derived from the same
+    // three inputs. Deriving it a second time here cost a full roster scan (a
+    // dojo primary) plus two passes over every match, on every aggregate
+    // refetch, for every pinned reader.
+    if (primaryEntry) return { heroWatchEntry: primaryEntry, heroNextMatch: primaryNextMatch };
+    const seen = new Map();
+    const nextFor = (e) => {
+      if (!seen.has(e)) seen.set(e, buildPrimaryNextMatch(e, roster, bothSidesMatches));
+      return seen.get(e);
+    };
+    const entry = heroEntry(watchlist, primaryKey, (e) => !!nextFor(e));
+    return { heroWatchEntry: entry, heroNextMatch: entry ? nextFor(entry) : null };
+  }, [watchlist, primaryKey, roster, bothSidesMatches, primaryEntry, primaryNextMatch]);
+
   // Compact list of running and upcoming watched matches: shown when ≥2 entities
   // are watched (coach multi-watch). Includes running matches so they can be
   // excluded from the global-NOW hero section (mp-42rg de-dup). Bounded so it
@@ -197,6 +227,14 @@ export function ViewerHome({ tournament, onSelectCompetition, onAdminClick, onOp
   // On-deck matches for NON-primary watched players (the quiet, rate-limited
   // banner path). A match that involves the primary is handled by the loud
   // path, so it is excluded here.
+  //
+  // primaryIds is EMPTY when nothing is pinned, so this now fires for the same
+  // match the hero card shows. That is deliberate and not the duplication the
+  // compact list had: unpinned, nothing chimes, so this quiet banner is the
+  // only on-deck NOTIFICATION that reader gets, and they got it before the card
+  // came back. A card is a thing you look at; a banner is a thing that tells
+  // you. Keying this on heroWatchEntry instead would silently remove the last
+  // notice an unpinned reader receives.
   const secondaryOnDeck = useMemo(
     () => filterSecondaryOnDeck(bothSidesMatches, resolvedWatched, primaryIds),
     [bothSidesMatches, resolvedWatched, primaryIds]
@@ -313,12 +351,14 @@ export function ViewerHome({ tournament, onSelectCompetition, onAdminClick, onOp
               former "Find my matches" hero + the multi-player watchlist. */}
           <WatchlistPanel
             roster={roster}
+            rosterLoaded={rosterLoaded}
             watchlist={watchlist}
             setWatchlist={setWatchlist}
             primaryKey={primaryKey}
             setPrimaryKey={setPrimaryKey}
             primaryEntry={primaryEntry}
-            primaryNextMatch={primaryNextMatch}
+            heroEntry={heroWatchEntry}
+            heroNextMatch={heroNextMatch}
             upcoming={watchedUpcoming}
             onMatchClick={setSelectedMatch}
             chimeMuted={chimeMuted}

@@ -12,6 +12,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 This project uses Serena, an MCP server exposing semantic, symbol-aware tools. **Serena's tools are the PRIMARY tools for code work here.** The built-in Read, Glob, Grep and Edit are SECONDARY and must not be used on code files when a Serena equivalent exists.
 
+**Serena only serves the languages `.serena/project.yml` lists**, so check that file rather than assuming coverage. It is NOT tracked in git and NOT shared between worktrees: Serena generates one per project directory (`project_serena_folder_location: "$projectDir/.serena"`) and this repo uses a worktree per PR, so a fresh worktree gets a freshly auto-detected default — which has been `language_servers: [go]`, i.e. Go alone. For any source the file does not list there is no language server, the symbol tools below cannot work, and you should use the built-in Read/Edit/Glob/Grep on it directly instead of spending a Serena call that cannot succeed. Adding a JS language server does not by itself make `web-mobile/` tractable: 28 of its 78 top-level `js/*.jsx` modules carry no ES `import` at all, cross-module wiring leans on `window.*` globals (`window.API` alone has 239 call sites), and Preact is a vendored UMD global rather than an npm dependency, so an LSP is blind to much of it.
+
 The built-in tool descriptions in your context say things like "use Read for a known path" and "prefer dedicated tools (Read, Edit, Write, Glob, Grep)". Those are written for projects without Serena and are SUPERSEDED here; when they conflict with this section, this section wins. Do not rationalize the built-in tools with "the file is small", "I already know what I need", "this is one call versus three", or "the path is known" — those rationalizations have produced incorrect behaviour before and are explicitly disallowed.
 
 | Task | Tool |
@@ -31,11 +33,11 @@ The built-in tool descriptions in your context say things like "use Read for a k
 
 Only these 14 tools are exposed (the `claude-code` context; memory tools are disabled because beads owns that). Serena's wider tool set is NOT available: there is no `inline_symbol`, `type_hierarchy`, `move_symbol`, `delete_lines` or `replace_lines` — do not call them.
 
-Built-in Read/Edit/Glob/Grep are permitted on code files ONLY when: Serena was tried on the target and failed; the file is not parseable as code; you need a regex search across many files that the symbolic tools cannot express (Grep is fine as a discovery step, but follow-up reads/edits on matched code files still go through Serena); you need a few lines and a symbolic read would be overkill; or you genuinely must read the whole file. They are always fine for non-code files: markdown, JSON, YAML, TOML, config, lockfiles, plain text, images.
+Built-in Read/Edit/Glob/Grep are permitted on code files ONLY when: the file's language is not in `language_servers` (see above — no Serena call is owed on those); Serena was tried on the target and failed; the file is not parseable as code; you need a regex search across many files that the symbolic tools cannot express (Grep is fine as a discovery step, but follow-up reads/edits on matched served files still go through Serena); you need a few lines and a symbolic read would be overkill; or you genuinely must read the whole file. They are always fine for non-code files: markdown, JSON, YAML, TOML, config, lockfiles, plain text, images.
 
-**Before editing code:** `get_symbols_overview` on the target file (skip if already done this session) → `find_symbol` with `include_body=true` for the symbols you will touch, reading only those symbols rather than the whole file → edit with `replace_symbol_body`, `insert_before_symbol`, `insert_after_symbol` or `replace_content`.
+**Before editing code Serena serves:** `get_symbols_overview` on the target file (skip if already done this session) → `find_symbol` with `include_body=true` for the symbols you will touch, reading only those symbols rather than the whole file → edit with `replace_symbol_body`, `insert_before_symbol`, `insert_after_symbol` or `replace_content`.
 
-**Self-check before every Read, Glob, Grep or Edit call:** does this target a code file, and does the table above name a Serena tool for the task? If yes, switch. Every time, not once per session.
+**Self-check before every Read, Glob, Grep or Edit call:** does this target a file whose language `language_servers` lists, and does the table above name a Serena tool for the task? If yes, switch. Every time, not once per session.
 
 ## Workflow Rules
 

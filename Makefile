@@ -176,6 +176,8 @@ js/check-imports: ## Check cross-module named imports resolve (mp-zac3 split mod
 	@node web-mobile/check-imports.mjs
 	@echo "Checking the write-result rule is asked, not re-derived..."
 	@node web-mobile/check-write-result.mjs
+	@echo "Checking the competitor-number match rule is asked, not re-derived..."
+	@node web-mobile/check-competitor-search.mjs
 
 js/validate: js/lint js/check-imports js/test js/security ## Run all Javascript checks
 

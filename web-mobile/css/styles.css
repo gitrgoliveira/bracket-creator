@@ -8786,6 +8786,63 @@ abbr.msb-lab { text-decoration: none; cursor: help; }
 }
 .watchlist-bell-btn--muted:hover { background: var(--line); color: var(--ink-2); }
 
+/* Share (bc-wlpl). Sits AFTER the bell in the DOM on purpose: the bell
+   already carries margin-left:auto, so it absorbs the free space and both
+   controls end up grouped at the right. Giving this one an auto margin too
+   would split the space between them and strand them apart. */
+.watchlist-share-btn {
+  display: inline-flex;
+  align-items: center;
+  /* 44px to match the bell beside it: the head is a row of touch targets and
+     a short one here would be the only control on the card you can miss. */
+  min-height: 44px;
+  padding: 0 12px;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  background: transparent;
+  color: var(--ink-2);
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: background 0.15s var(--ease-out), color 0.15s var(--ease-out);
+}
+.watchlist-share-btn:hover { background: var(--accent-soft); color: var(--accent); }
+
+.wl-share {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 14px;
+}
+/* pixelated: the QR is drawn at one canvas pixel per module and scaled up, so
+   smoothing it would blur the module edges a camera needs to resolve. */
+.wl-share__qr {
+  display: block;
+  image-rendering: pixelated;
+}
+.wl-share__url {
+  width: 100%;
+  background: var(--surface-2);
+  border-radius: 6px;
+  padding: 8px 12px;
+  font-family: var(--font-mono, monospace);
+  font-size: 13px;
+  /* The URL is one unbroken token, so it must be allowed to break anywhere or
+     it overflows the modal on a phone. user-select:all makes one tap select
+     the whole thing where the clipboard API is unavailable (plain http on a
+     venue LAN), which is the fallback the Copy button lands on. */
+  word-break: break-all;
+  user-select: all;
+}
+.wl-share__note {
+  margin: 0;
+  font-size: 13px;
+  color: var(--ink-3);
+  text-align: center;
+}
+.wl-share__note--ok { color: var(--accent); font-weight: 500; }
+
 /* vsched inside the watchlist card: flat row list, no nested card boxes.
    Regular items become hairline-separated rows; running items keep their
    accent ring since they carry meaningful live state. */

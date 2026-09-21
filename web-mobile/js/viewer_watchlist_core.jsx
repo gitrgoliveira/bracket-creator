@@ -384,9 +384,23 @@ export function buildRoster(competitions) {
       const checkedIn = !!c.checkInEnabled && !!p.checkedIn;
       const existing = map.get(p.id);
       if (!existing) {
-        map.set(p.id, { ...p, checkedIn });
-      } else if (checkedIn && !existing.checkedIn) {
-        map.set(p.id, { ...existing, checkedIn: true });
+        // `comps` is the competition names this record covers, for the
+        // schedule picker's row. It lives here rather than in that picker
+        // because it used to run its OWN near-identical dedup to collect it
+        // -- same shape, but with no `!p || !p.id` guard, so every id-less
+        // player collapsed into one entry keyed on `undefined`.
+        map.set(p.id, { ...p, checkedIn, comps: [c.name || ""] });
+      } else {
+        // Reached only if the SAME participant id appears under two
+        // competitions. Participant ids are minted per competition (a fresh
+        // uuid in state.AddParticipant, `${compID}-pN` in the admin client),
+        // so one person entered in two competitions holds two DIFFERENT ids
+        // and arrives here as two separate records, each with its own number
+        // -- which is why both of their numbers are independently searchable
+        // without anything merging them. This branch is pre-existing and kept
+        // as-is; it is not load-bearing for anything in bc-nsrc.
+        existing.comps.push(c.name || "");
+        if (checkedIn && !existing.checkedIn) existing.checkedIn = true;
       }
     });
   });

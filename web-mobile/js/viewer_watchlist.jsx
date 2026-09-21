@@ -17,14 +17,22 @@
 // populated `window`. Only React (a vendor global) and pluralize (from ui.js,
 // loaded before this file) are read at module-eval time.
 //
-// numbered_name.jsx and side_cell.jsx are the two ES imports here, and both are
-// safe where a window read would be pointless: each is a LEAF (no imports of
-// its own, so no cycle to break) and neither is script-tagged, so these imports
-// and every other module's resolve to the same /dist/<name>.jsx URL and the
-// browser evaluates each once. Neither is on `window` at all, so there is
-// nothing to read.
+// numbered_name.jsx, side_cell.jsx and competitor_search.jsx are the ES
+// imports here, and all are safe where a window read would be pointless: each
+// is a LEAF (no imports of its own, so no cycle to break) and none is
+// script-tagged, so these imports and every other module's resolve to the same
+// /dist/<name>.jsx URL and the browser evaluates each once. None is on
+// `window` at all, so there is nothing to read.
+//
+// watchlist_link.jsx is the one that is not a bare leaf: it imports
+// competitor_search.jsx. That is still safe, because the leaf wording above is
+// a sufficient condition and not the real one -- what matters is that the
+// chain is ACYCLIC and no module in it is script-tagged, so none of it can be
+// evaluated twice or mid-cycle.
 import { NumberedName } from './numbered_name.jsx';
 import { sideWord, sideFillClass } from './side_cell.jsx';
+import { competitorMatchesQuery } from './competitor_search.jsx';
+import { buildWatchlistLink, watchlistLinkFitsQR } from './watchlist_link.jsx';
 
 // The one line the picker and the hero-empty state show while a competition's
 // participants failed to load (rosterAvailable:false on the aggregate, see
@@ -37,6 +45,7 @@ export const ROSTER_NOT_LOADED =
 
 const { useState, useMemo, useCallback } = React;
 const useRefV = React.useRef;
+const useEffectV = React.useEffect;
 const pluralize = window.pluralize;
 
 // Bell icon for the watchlist alert toggle (muted = diagonal slash).
@@ -74,25 +83,15 @@ function WatchPicker({ roster, rosterLoaded = true, dojos, watchedPlayerIds, wat
   // useCallback, not plain functions: the three memos below depend on them, and
   // the dependency they really have is on `q` THROUGH them, which the
   // exhaustive-deps rule cannot see past a fresh closure.
-  const playerMatchesQuery = useCallback(
-    (p) =>
-      !q ||
-      (p.name || "").toLowerCase().includes(q) ||
-      (p.dojo || "").toLowerCase().includes(q) ||
-      // The competitor NUMBER, matched from the START (operator request
-      // 2026-09-21). Prefix, not substring, because the number already embeds
-      // the competition's numberPrefix ("M1", "K12"): typing "M" is then
-      // "everyone in the men's draw", which is the useful filter, while a
-      // substring match on "1" would drag in every K12 and M21 as well.
-      //
-      // Nothing to match before the draw: competitor numbers belong to draw
-      // POSITIONS and none is shown until the draw is generated (bc-pnum), so
-      // p.number is empty and this arm is simply false. That is why the row
-      // renders the number too -- matching on something the reader cannot see
-      // is worse than not matching at all.
-      String(p.number || "").toLowerCase().startsWith(q),
-    [q]
-  );
+  // The rule itself lives in competitor_search.jsx, which the public schedule
+  // picker and that page's free-text chip ask too -- this surface states it
+  // zero times (bc-nsrc). Worth keeping in mind here: there is nothing to
+  // match on before the draw, because competitor numbers belong to draw
+  // POSITIONS and none exists until the draw is generated (bc-pnum), so the
+  // number arm is simply false then. That is why the row renders the number
+  // too -- matching on something the reader cannot see is worse than not
+  // matching at all.
+  const playerMatchesQuery = useCallback((p) => competitorMatchesQuery(p, q), [q]);
   const dojoMatchesQuery = useCallback((d) => !q || (d.name || "").toLowerCase().includes(q), [q]);
 
   // Dojo matches: a dojo is offered until it is watched as a dojo entry. The
@@ -385,6 +384,74 @@ function WatchHeroCard({ nextMatch, primaryIds, entityLabel, onMatchClick }) {
 // first-added entry, because a card is not a chime and hiding it cost the
 // reader the one thing they opened the page for. Everything visual below reads
 // heroEntry; only the pin hint reads primaryEntry.
+// WatchlistShareModal: the watchlist as a link someone else can open
+// (bc-wlpl). The list otherwise lives only in localStorage, so it does not
+// survive a second phone, another browser profile or a cleared cache.
+//
+// Modal, renderQR and QR_MAX_BYTES are read from `window` at RENDER time,
+// which is this file's convention for anything outside its leaf imports (see
+// the header). qr.js is script-tagged and publishes both, exactly as the
+// /display overlay consumes it.
+//
+// The QR is OFFERED, not assumed. A QR tops out at QR_MAX_BYTES bytes
+// INCLUDING the origin, so a number-encoded list of around 45 fits and a
+// list still carrying ids (nobody has a number until the draw runs) stops
+// fitting at about five. Asking watchlistLinkFitsQR first is deliberate:
+// the alternative is calling renderQR and catching its throw, which is
+// control flow by exception for a fact we can simply measure.
+function WatchlistShareModal({ url, onClose }) {
+  const Modal = window.Modal;
+  const canvasRef = useRefV(null);
+  const [copied, setCopied] = useState(false);
+  const fits = watchlistLinkFitsQR(url, window.QR_MAX_BYTES);
+
+  useEffectV(() => {
+    if (!fits || !canvasRef.current || !window.renderQR) return;
+    try {
+      window.renderQR(canvasRef.current, url, { moduleSize: 5, quietZone: 4 });
+    } catch (e) {
+      // Already gated on the measured length, so reaching here means the
+      // encoder disagrees with its own published ceiling. Say so rather than
+      // failing silently; the link itself still works, which is why this does
+      // not take the modal down.
+      console.error("watchlist QR render failed", e);
+    }
+  }, [url, fits]);
+
+  if (!Modal) return null;
+
+  return (
+    <Modal title="Share your watchlist" onClose={onClose} footer={<>
+      <button type="button" className="btn btn--primary" onClick={() => {
+        const copy = window.copyToClipboard;
+        if (!copy) return;
+        copy(url).then(() => setCopied(true)).catch(() => setCopied(false));
+      }}>Copy link</button>
+      <button type="button" className="btn" onClick={onClose}>Close</button>
+    </>}>
+      <div className="wl-share">
+        {fits && <canvas ref={canvasRef} className="wl-share__qr" />}
+        <div className="wl-share__url" data-testid="watchlist-share-url">{url}</div>
+        {/* The copy confirmation is a PERSISTENT line, not a toast: a toast
+            dwells for under three seconds, which is long enough to miss and
+            too short to photograph, and this one answers "did that work?"
+            about an action with no other visible effect. */}
+        {copied && <p className="wl-share__note wl-share__note--ok" role="status">Copied.</p>}
+        <p className="wl-share__note">
+          Opening this link ADDS these competitors to someone's watchlist. It does not replace what they already watch.
+        </p>
+        {/* Stated because it is the cost of the short, scannable form the
+            operator chose (bc-wlpl): a competitor is identified by their
+            number where they have one, and a number belongs to a DRAW
+            POSITION, so regenerating a draw re-points it. */}
+        <p className="wl-share__note">
+          Share it on the day. Competitor numbers come from the draw, so a link made before a draw is regenerated can point at someone else afterwards.
+        </p>
+      </div>
+    </Modal>
+  );
+}
+
 function WatchlistPanel({ roster, rosterLoaded = true, watchlist, setWatchlist, primaryKey, setPrimaryKey, primaryEntry, heroEntry, heroNextMatch, upcoming, onMatchClick, chimeMuted, onBellToggle, onFirstAdd }) {
   // Cross-boundary helpers from viewer.jsx, read at render time (see header).
   const { effectivePrimaryKey, addPlayerToWatchlist, entryKey, resolveEntryPlayerIds, VSchedItem, WATCHLIST_MAX } = window;
@@ -547,11 +614,30 @@ function WatchlistPanel({ roster, rosterLoaded = true, watchlist, setWatchlist, 
     ? upcoming.filter((m) => !(m.compId === heroNextMatch.compId && m.id === heroNextMatch.id))
     : upcoming;
 
+  const [shareOpen, setShareOpen] = useState(false);
+  // BUILT, never read off the address bar. app.jsx syncs its state to the
+  // PATH only (pathFromState emits no query), so the first navigation away
+  // rewrites the URL and drops any ?w= that brought the reader here. The
+  // address bar is therefore not the permalink, and copying location.href
+  // would hand over an empty list.
+  const shareUrl = useMemo(() => {
+    if (typeof window === "undefined" || !window.location) return "";
+    return buildWatchlistLink(`${window.location.origin}/`, watchlist, roster);
+  }, [watchlist, roster]);
+
   return (
     <div className="card card--sm mymatch-card" data-testid="viewer-home-watchlist">
       <div className="watchlist-card-head">
         <span className="watchlist-card-title">Watchlist</span>
         {count > 0 && <span className="watchlist-count" aria-label={`${count} watched`}>{count}</span>}
+        {count > 0 && shareUrl && (
+          <button type="button"
+            className="watchlist-share-btn"
+            onClick={() => setShareOpen(true)}
+            aria-label="Share your watchlist"
+            title="Share your watchlist"
+          >Share</button>
+        )}
         {onBellToggle != null && (
           <button type="button"
             className={`watchlist-bell-btn${chimeMuted ? " watchlist-bell-btn--muted" : ""}`}
@@ -666,6 +752,10 @@ function WatchlistPanel({ roster, rosterLoaded = true, watchlist, setWatchlist, 
             />
           ))}
         </div>
+      )}
+
+      {shareOpen && shareUrl && (
+        <WatchlistShareModal url={shareUrl} onClose={() => setShareOpen(false)} />
       )}
     </div>
   );

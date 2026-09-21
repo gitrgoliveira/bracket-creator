@@ -7,6 +7,7 @@ import { withNumber } from './match_scoreboard.jsx';
 import { SideCell } from './side_cell.jsx';
 import { MatchViewerModal, localQueueLabelCompact } from './viewer_match.jsx';
 import { sameCompetitor, competitorKey } from './competitor_identity.jsx';
+import { competitorMatchesQuery, matchMentions } from './competitor_search.jsx';
 
 const { useState, useMemo, useRef: useRefV } = React;
 const EmptyState = window.EmptyState;
@@ -105,23 +106,18 @@ export function PlayerMultiFilter({ tournament, picked, setPicked, dojoText, set
   const [query, setQuery] = useState("");
   const ref = useRefV(null);
 
-  // build a deduped roster across all competitions
-  const roster = useMemo(() => {
-    const map = new Map();
-    (tournament.competitions || []).forEach((c) => {
-      c.players.forEach((p) => {
-        const key = p.id;
-        if (!map.has(key)) map.set(key, { ...p, comps: [c.name] });
-        else map.get(key).comps.push(c.name);
-      });
-    });
-    return Array.from(map.values());
-  }, [tournament]);
+  // ONE roster builder for the whole viewer (bc-nsrc). A second, near-identical
+  // dedup used to live here: the same first-competition-wins shape, but
+  // accumulating `comps` where buildRoster accumulated `checkedIn`, and --
+  // unlike buildRoster -- with NO `!p || !p.id` guard, so every id-less player
+  // in the tournament collapsed into one entry keyed on `undefined`.
+  // buildRoster now carries `comps` as well and applies the hide-finished-ones
+  // ruling to it and to the numbers together, so a competitor entered in two
+  // competitions is findable by either live number rather than only the first.
+  const roster = useMemo(() => buildRoster(tournament.competitions), [tournament]);
 
   const q = query.trim().toLowerCase();
-  const filtered = q ? roster.filter((p) =>
-    p.name.toLowerCase().includes(q) || (p.dojo || "").toLowerCase().includes(q) || (p.number || "").toLowerCase().includes(q)
-  ) : roster;
+  const filtered = q ? roster.filter((p) => competitorMatchesQuery(p, q)) : roster;
   const matches = filtered.slice(0, 30);
 
   window.useClickOutside(ref, () => setOpen(false), open);
@@ -234,10 +230,10 @@ export function applyFilters(matches, picked, dojoText, compFilter) {
       const hit = sideMatchesPickedSet(m.sideA, pickedSet) || sideMatchesPickedSet(m.sideB, pickedSet);
       if (!hit) return false;
     }
-    if (dt) {
-      const hit = [m.sideA?.name, m.sideB?.name, m.sideA?.dojo, m.sideB?.dojo, m.sideA?.number, m.sideB?.number].some((s) => (s || "").toLowerCase().includes(dt));
-      if (!hit) return false;
-    }
+    // Same predicate as the picker's dropdown above (bc-nsrc): the free-text
+    // chip and the dropdown sit on the SAME page, so a competitor the one
+    // offers must be a competitor the other filters to.
+    if (dt && !matchMentions(m, dt)) return false;
     return true;
   });
 }
@@ -246,7 +242,7 @@ export function matchHighlightedBy(m, picked, dojoText) {
   const pickedSet = buildPickedSets(picked);
   if (picked.length > 0 && (sideMatchesPickedSet(m.sideA, pickedSet) || sideMatchesPickedSet(m.sideB, pickedSet))) return true;
   const dt = (dojoText || "").trim().toLowerCase();
-  if (dt && [m.sideA?.name, m.sideB?.name, m.sideA?.dojo, m.sideB?.dojo, m.sideA?.number, m.sideB?.number].some((s) => (s || "").toLowerCase().includes(dt))) return true;
+  if (dt && matchMentions(m, dt)) return true;
   return false;
 }
 

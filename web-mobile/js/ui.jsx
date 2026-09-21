@@ -618,6 +618,33 @@ function isInteractiveTarget(el) {
 
 export { FieldError, StatusBadge, formatDate, Toast, StableInput, pluralize, useEscapeToClose, useClickOutside, isTextEntry, isInteractiveTarget, formatAdminHeaderSub, formatViewerHeaderEyebrow, confirmDialog, promptDialog, DialogHost, Icon, LoadingSpinner, EmptyState, ShiaijoCountNotes, Modal };
 
+// copyToClipboard: shared by every "here is a link, take it" surface (the
+// admin registration-link modal and the public watchlist share sheet). It
+// lived in admin_shell.jsx until the watchlist needed it too, and a public
+// surface must not import the admin shell.
+//
+// The execCommand path is NOT dead legacy code: navigator.clipboard is only
+// available in a secure context, and this app is routinely served over plain
+// http on a venue LAN, which is exactly where someone wants to hand a link to
+// the person next to them.
+async function copyToClipboard(text) {
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    return navigator.clipboard.writeText(text);
+  }
+  const ta = document.createElement('textarea');
+  ta.value = text;
+  ta.style.position = 'fixed';
+  ta.style.opacity = '0';
+  document.body.appendChild(ta);
+  ta.select();
+  try {
+    const ok = document.execCommand('copy');
+    if (!ok) throw new Error('execCommand copy failed');
+  } finally {
+    document.body.removeChild(ta);
+  }
+}
+
 if (typeof window !== "undefined") {
   window.StatusBadge = StatusBadge;
   window.formatDate = formatDate;
@@ -641,6 +668,7 @@ if (typeof window !== "undefined") {
   window.FieldError = FieldError;
   window.ShiaijoCountNotes = ShiaijoCountNotes;
   window.Modal = Modal;
+  window.copyToClipboard = copyToClipboard;
 
   // Split a combined engi pair name ("Name 1 - Name 2") into [member1, member2].
   // member2 is "" when the name carries no pair separator. Splits on the FIRST

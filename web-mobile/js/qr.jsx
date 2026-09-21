@@ -93,15 +93,27 @@ function byteCapacity(v) {
   return Math.floor((totalDataCW(v) * 8 - 4 - charCountBits(v)) / 8);
 }
 
+// The largest version QR_BLOCKS_M carries, named once so selectVersion's loop
+// bound, its error message and QR_MAX_BYTES below cannot fall out of step.
+const QR_MAX_VERSION = 10;
+
+// The longest text renderQR can encode at all. DERIVED from the block table
+// above rather than written as a literal, so it stays true if that table
+// changes. Exported (and mirrored on window beside renderQR) because a caller
+// that BUILDS the text needs to know whether a QR is possible before it offers
+// one -- asking here is the alternative to calling renderQR and catching the
+// throw, which is control flow by exception for a perfectly predictable fact.
+export const QR_MAX_BYTES = byteCapacity(QR_MAX_VERSION);
+
 function selectVersion(byteLen) {
   // Start at version 2 (25×25). Version 1 (21×21) is intentionally excluded for
   // scan reliability: at 1px/module + 4-module quiet zone it renders to only 29×29 px,
   // below the minimum image size most phone cameras can reliably detect (~33×33 px).
   // This applies regardless of payload length.
-  for (let v = 2; v <= 10; v++) {
+  for (let v = 2; v <= QR_MAX_VERSION; v++) {
     if (byteCapacity(v) >= byteLen) return v;
   }
-  throw new Error(`Text too long for QR versions 2-10 (max ~${byteCapacity(10)} bytes)`);
+  throw new Error(`Text too long for QR versions 2-${QR_MAX_VERSION} (max ~${QR_MAX_BYTES} bytes)`);
 }
 
 // ---------------------------------------------------------------------------
@@ -500,4 +512,8 @@ export function renderQR(canvas, text, { moduleSize = 6, quietZone = 4 } = {}) {
 // modules (e.g. window.TvDisplay / window.StreamingOverlay in display.jsx).
 if (typeof window !== "undefined") {
   window.renderQR = renderQR;
+  // Beside renderQR for the same reason: a surface that decides whether to
+  // OFFER a QR needs the ceiling, and the ones that do (the watchlist share
+  // sheet) read this module from window rather than importing it.
+  window.QR_MAX_BYTES = QR_MAX_BYTES;
 }

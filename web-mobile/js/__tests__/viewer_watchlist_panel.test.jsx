@@ -9,6 +9,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { makeReactive } from './helpers/reactive_react.js';
 import { collectText, expandNamed } from './helpers/vdom.js';
 import { cssBlock, readStylesheet } from './helpers/source.js';
+import { buildRoster } from '../viewer_watchlist_core.jsx';
 
 const realReact = global.React;
 
@@ -556,11 +557,24 @@ describe('WatchPicker', () => {
     // Z and W on purpose: neither letter occurs in any fixture name or dojo,
     // so a hit here can only have come from the NUMBER. ("m" would have been
     // useless -- it matches "Aoi Mori" by name.)
-    const NUMBERED = [
-      { id: 'p1', name: 'Robert Young', dojo: 'Hagane Dojo', number: 'Z1' },
-      { id: 'p2', name: 'Nolan Clark', dojo: 'Tsubaki Kenyukai', number: 'Z12' },
-      { id: 'p3', name: 'Aoi Mori', dojo: 'Hagane Dojo', number: 'W2' },
-    ];
+    // Built through buildRoster, the ONE producer of the roster this picker is
+    // ever given (viewer_home.jsx:131 is its only production source), rather
+    // than hand-rolled. A hand-rolled record carried `number` but none of the
+    // derived fields the row renders, so it could go green while the real
+    // roster shape rendered nothing.
+    const NUMBERED = buildRoster([
+      {
+        id: 'cz', name: 'Z Draw', players: [
+          { id: 'p1', name: 'Robert Young', dojo: 'Hagane Dojo', number: 'Z1' },
+          { id: 'p2', name: 'Nolan Clark', dojo: 'Tsubaki Kenyukai', number: 'Z12' },
+        ],
+      },
+      {
+        id: 'cw', name: 'W Draw', players: [
+          { id: 'p3', name: 'Aoi Mori', dojo: 'Hagane Dojo', number: 'W2' },
+        ],
+      },
+    ]);
     const offered = (tree) =>
       byClass(tree, 'pmf__option')
         .filter((o) => !String(o.props.className).includes('--dojo'))
@@ -575,12 +589,22 @@ describe('WatchPicker', () => {
       expect(found, 'W2 is a different draw').not.toContain('Aoi Mori');
     });
 
-    it('matches from the START, not anywhere in the number', () => {
-      // Substring matching would drag every number CONTAINING 1 into a search
-      // for "1" -- here both Z1 and Z12 -- which is noise, not a filter.
+    it('finds nobody for a bare number: the prefix is required', () => {
+      // Operator ruling 2026-09-21 (bc-nsrc): the number ALWAYS needs its
+      // prefix. Digits alone are not a competitor number, so they match
+      // nothing -- not Z1, and not Z12 either.
       const tree = openWith('1', { roster: NUMBERED });
-      expect(offered(tree), 'no number STARTS with 1').toHaveLength(0);
+      expect(offered(tree), 'a bare number is not a competitor number').toHaveLength(0);
       expect(emptyRow(tree)).toHaveLength(1);
+    });
+
+    it('takes a number WITH its prefix as the WHOLE number', () => {
+      // The other arm of the same ruling: "z1" is Z1 and nothing else. The
+      // prefix matching this picker used to do offered Z12 here too, which
+      // the ruling refuses.
+      const found = offered(openWith('z1', { roster: NUMBERED })).join(' | ');
+      expect(found).toContain('Robert Young');
+      expect(found, 'Z12 is a different competitor, not a longer Z1').not.toContain('Nolan Clark');
     });
 
     it('shows the number on the row, so the match is visible', () => {

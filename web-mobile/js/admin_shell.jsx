@@ -17,6 +17,9 @@ const Icon = window.Icon;
 const formatLabelShort = window.formatLabelShort;
 const formatAdminHeaderSub = window.formatAdminHeaderSub;
 const Modal = window.Modal;
+// Hoisted into ui.jsx when the public watchlist share sheet needed the same
+// "take this link" behaviour: a public surface cannot import the admin shell.
+const copyToClipboard = window.copyToClipboard;
 
 // Maximum running-match chips rendered in the topbar status strip before the
 // "+N more" overflow indicator kicks in.
@@ -580,25 +583,6 @@ function AdminDashboard({ tournament, password, onOpenCompetition, onCreateCompe
       )}
     </div>
   );
-}
-
-async function copyToClipboard(text) {
-  if (navigator.clipboard && navigator.clipboard.writeText) {
-    return navigator.clipboard.writeText(text);
-  }
-  // Fallback for non-secure context (LAN without TLS)
-  const ta = document.createElement('textarea');
-  ta.value = text;
-  ta.style.position = 'fixed';
-  ta.style.opacity = '0';
-  document.body.appendChild(ta);
-  ta.select();
-  try {
-    const ok = document.execCommand('copy');
-    if (!ok) throw new Error('execCommand copy failed');
-  } finally {
-    document.body.removeChild(ta);
-  }
 }
 
 function ShareRegistrationModal({ url, onClose, showToast }) {

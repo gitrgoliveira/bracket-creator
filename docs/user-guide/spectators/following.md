@@ -9,7 +9,7 @@ If you are not sure which role fits you, refer to [Choosing your setup](../start
 The viewer brings together everything you need to follow the day in one place:
 
 - A personal **Watchlist** so you can track yourself, specific competitors, or a whole dojo. As a watched match approaches, the viewer nudges you so competitors know when to warm up and coaches know when to be at the court.
-- The full match schedule across all shiai-jo, filterable by competitor or team. The free-text filter matches a competitor's name, their assigned number, or their tag (for example, "A1"), so you can jump straight to their bouts.
+- The full match schedule across all shiai-jo, filterable by competitor or team. The free-text filter matches a competitor's name, their dojo, or their competitor number, so you can jump straight to their bouts. See [Searching by competitor number](#searching-by-competitor-number) for how numbers are matched.
 - Pool standings that update as scores are entered, with no page refresh needed.
 - The elimination bracket filling in as matches are completed.
 
@@ -24,6 +24,28 @@ Tap a competition to see its schedule, standings, and bracket. Aka (red) and Shi
   ![A competition's public page: upcoming matches and recent results with waza-level scores.](../../screenshots/viewer-competition.png){ .bc-phone }
   <figcaption>A competition's page: upcoming matches and recent results with waza-level scores.</figcaption>
 </figure>
+
+### Searching by competitor number
+
+Every competitor gets a number once the draw for their competition has run. The number starts with a letter that belongs to the competition, so "K12" and "M12" are two different people in two different draws.
+
+Type the number the way it is printed on the draw sheet, letter included:
+
+- **The letter on its own** lists everyone in that draw. Type "K" to see the whole K competition.
+- **The letter and the digits** finds that one competitor. "K12" finds K12, and not K120.
+- **Digits on their own** find nobody. "12" is not a competitor number, because it does not say which competition it belongs to.
+
+Names and dojos still match on any part of what you type, so a surname fragment is enough for those. Only the number needs to be typed in full.
+
+If someone is entered in more than one competition, they have a separate number in each one, and the filter lists them once per competition. Searching either number finds them, and each result tells you which competition it belongs to.
+
+### Share your watchlist
+
+Your watchlist is kept on the device you built it on. It is not tied to an account, so it does not follow you to a second phone or survive clearing your browser data. To move it, or to hand it to someone else, use **Share** at the top of the watchlist card.
+
+The share sheet gives you a link, and a QR code when the list is short enough to fit in one. Anyone who opens the link gets those competitors **added** to their own watchlist. It never replaces what they are already watching, so a coach can send the same link to every parent without anyone losing their own list.
+
+Share the link on the day of the tournament. Competitors are identified by their number where they have one, and numbers come from the draw, so a link created before a draw is regenerated can point at a different competitor afterwards.
 
 ## Scoreboards and court displays
 

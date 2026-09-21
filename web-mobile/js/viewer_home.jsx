@@ -2,11 +2,13 @@
 // Extracted from viewer.jsx (mp-pxxc step 10).
 
 import { competitionKindLabel, compMatches, tournamentMatches, TournamentInfo, compareDmy } from './viewer_utils.jsx';
-import { matchParticipantIds, addPlayerToWatchlist, resolveEntryPlayerIds, resolveWatchedPlayers, findPrimaryEntry, heroEntry, buildPrimaryNextMatch, buildRoster, rosterFullyLoaded, useWatchlist, buildWatchedSets, matchInvolvesWatchedSet } from './viewer_watchlist_core.jsx';
+import { matchParticipantIds, addPlayerToWatchlist, normalizeWatchlist, resolveEntryPlayerIds, resolveWatchedPlayers, findPrimaryEntry, heroEntry, buildPrimaryNextMatch, buildRoster, rosterFullyLoaded, useWatchlist, buildWatchedSets, matchInvolvesWatchedSet } from './viewer_watchlist_core.jsx';
 import { runOnce, notifEnable, notifDisable, useChimeMuted, isFollowedMatchOnDeck, useFollowedMatchAlert, useSecondaryWatchAlert, MyMatchAlertBanner } from './viewer_alerts.jsx';
 import { notificationSupported } from './viewer_notifications.jsx';
 import { VSchedItem, MatchViewerModal } from './viewer_match.jsx';
 import { buildWatchlistUpcoming, usePrimaryWatch, WATCHED_UPCOMING_LIST_MAX } from './viewer_schedule.jsx';
+import { competitorNumbers } from './competitor_search.jsx';
+import { parseWatchlistTokens, resolveWatchlistTokens } from './watchlist_link.jsx';
 
 const { useState, useMemo, useRef: useRefV, useEffect } = React;
 const StatusBadge = window.StatusBadge;
@@ -77,7 +79,17 @@ export function resolveDeepLink(searchString, roster) {
   if (!qpPlayer && !qpNumber && !qpName) return null;
   let hit = qpPlayer ? roster.find((p) => p.id === qpPlayer) : null;
   if (!hit && qpNumber) {
-    hit = roster.find((p) => (p.number || "") === qpNumber);
+    // EXACT and case-sensitive, unchanged: this value is machine-generated
+    // (a QR/permalink encodes it verbatim), not typed by a person, so it is
+    // deliberately not the typed-query rule in competitor_search.jsx. Pinned
+    // by resolve_deep_link.test.jsx.
+    //
+    // What DID change is the set searched: a competitor entered in more than
+    // one competition holds more than one number, and this used to compare
+    // against `p.number` alone, which was whichever competition the roster
+    // build happened to keep. competitorNumbers is the shared reader of that
+    // set (bc-nsrc), so this asks about every number they hold.
+    hit = roster.find((p) => competitorNumbers(p).includes(qpNumber));
   }
   if (!hit) {
     const needle = (qpName || qpPlayer).toLowerCase();
@@ -147,9 +159,21 @@ export function ViewerHome({ tournament, onSelectCompetition, onAdminClick, onOp
     if (deepLinkApplied.current) return;
     if (typeof window === "undefined" || !window.location) return;
     if (roster.length === 0) return; // wait until participants are loaded
-    const result = resolveDeepLink(window.location.search, roster);
+    const search = window.location.search;
+    const result = resolveDeepLink(search, roster);
+    // bc-wlpl: the multi-entry permalink, resolved under the SAME two gates
+    // that already protect the single-player one, because it needs both for
+    // the same reasons -- tokens cannot resolve against a roster that has not
+    // arrived, and re-applying on every render would fight an operator
+    // removing an entry they were just handed.
+    const shared = resolveWatchlistTokens(parseWatchlistTokens(search), roster);
     deepLinkApplied.current = true;
     if (result && result.player) addWatchPlayer(result.player);
+    // MERGE, never replace: arriving at someone else's link must not delete
+    // the list you already keep. normalizeWatchlist dedupes by entry key with
+    // FIRST occurrence winning, so existing entries survive and only genuinely
+    // new ones are appended, and it applies WATCHLIST_MAX to the result.
+    if (shared.length) setWatchlist((prev) => normalizeWatchlist([...prev, ...shared]));
     // Runs exactly once, gated by the deepLinkApplied ref; addWatchPlayer is an
     // unstable callback we deliberately do not depend on.
     // oxlint-disable-next-line react-hooks/exhaustive-deps

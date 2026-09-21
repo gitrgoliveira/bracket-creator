@@ -17,13 +17,23 @@
 // populated `window`. Only React (a vendor global) and pluralize (from ui.js,
 // loaded before this file) are read at module-eval time.
 //
-// NumberedName is the one ES import here, and it is safe where a window read
-// would be pointless: it is a LEAF (no imports of its own, so no cycle to
-// break) and it is never script-tagged, so this import and the ten existing
-// ones all resolve to the same /dist/numbered_name.jsx URL and the browser
-// evaluates it once. It is not on `window` at all, so there is nothing to read.
+// numbered_name.jsx and side_cell.jsx are the two ES imports here, and both are
+// safe where a window read would be pointless: each is a LEAF (no imports of
+// its own, so no cycle to break) and neither is script-tagged, so these imports
+// and every other module's resolve to the same /dist/<name>.jsx URL and the
+// browser evaluates each once. Neither is on `window` at all, so there is
+// nothing to read.
 import { NumberedName } from './numbered_name.jsx';
-import { sideWord } from './side_cell.jsx';
+import { sideWord, sideFillClass } from './side_cell.jsx';
+
+// The one line the picker and the hero-empty state show while a competition's
+// participants failed to load (rosterAvailable:false on the aggregate, see
+// rosterFullyLoaded). Everything else those two say is a claim ABOUT the
+// roster, and with part of it missing the honest answer is this rather than
+// silence: silence looked like a control that had stopped working (bc-wlhc),
+// and the chips' own silence already covers the per-entry claim.
+export const ROSTER_NOT_LOADED =
+  "Some competitor lists could not be loaded, so not everyone can be found here yet.";
 
 const { useState, useMemo, useCallback } = React;
 const useRefV = React.useRef;
@@ -47,7 +57,7 @@ window.BellIcon = BellIcon;
 // (matching dojos first, then matching players), so "Hagane" offers
 // "Watch all of Hagane Dojo" as one entry instead of forcing the user to add
 // members one by one. Replaces the old SinglePlayerPicker (mp-xhaa).
-function WatchPicker({ roster, dojos, watchedPlayerIds, watchedDojos, onPickPlayer, onPickDojo, placeholder }) {
+function WatchPicker({ roster, rosterLoaded = true, dojos, watchedPlayerIds, watchedDojos, onPickPlayer, onPickDojo, placeholder }) {
   const [query, setQuery] = useState("");
   const [open, setOpen] = useState(false);
   const ref = useRefV(null);
@@ -135,13 +145,22 @@ function WatchPicker({ roster, dojos, watchedPlayerIds, watchedDojos, onPickPlay
       {open && total === 0 && (
         <div className="pmf__dropdown">
           <div className="pmf__empty" data-testid="watchpicker-empty">
-            {roster.length === 0
-              ? "No competitors have been added to this tournament yet."
-              : !matchedAnyIncludingWatched
-                ? `No one here matches “${query.trim()}”. Try a surname, a dojo, or a competitor number.`
-                : q
-                  ? `Everyone matching “${query.trim()}” is already on your watchlist.`
-                  : "Everyone in this tournament is already on your watchlist."}
+            {/* Every line below is a claim ABOUT the roster, so none may be
+                made while a competition's participants failed to load: the
+                missing people are exactly the ones this box cannot offer, and
+                "nobody has been added" or "no one matches" would send the
+                reader to re-check a spelling that was never wrong. Gated as a
+                whole rather than per branch, so a fifth branch cannot inherit
+                the gap. */}
+            {!rosterLoaded
+              ? ROSTER_NOT_LOADED
+              : roster.length === 0
+                ? "No competitors have been added to this tournament yet."
+                : !matchedAnyIncludingWatched
+                  ? `No one here matches “${query.trim()}”. Try a surname, a dojo, or a competitor number.`
+                  : q
+                    ? `Everyone matching “${query.trim()}” is already on your watchlist.`
+                    : "Everyone in this tournament is already on your watchlist."}
           </div>
         </div>
       )}
@@ -192,11 +211,14 @@ function WatchPicker({ roster, dojos, watchedPlayerIds, watchedDojos, onPickPlay
 }
 
 // WatchHeroCard: the rich "next match" hero for the PRIMARY watched entity
-// (mp-xhaa). Lifted from the former MyMatchPanel so the lone-competitor case
-// keeps its full treatment: AKA/SHIRO badge, queue position, opponent, court,
-// time. The subject is whichever side belongs to the primary: for a player
-// primary that's the player; for a dojo primary it's the member currently
-// competing (primaryIds covers all members).
+// (mp-xhaa, rebuilt for a phone by bc-wlhc). Top to bottom: a solid navy band
+// while the match runs, an eyebrow naming WHO the card is about, the court as
+// the 34px headline (where to walk), the queue position or time, the round,
+// then one tinted row per competitor with its visible Aka/Shiro word, the
+// number chip, the dojo and a "you" marker on the watched person, all inside
+// the "Match details" button. The subject is whichever side belongs to the
+// primary: for a player primary that's the player; for a dojo primary it's the
+// member currently competing (primaryIds covers all members).
 function WatchHeroCard({ nextMatch, primaryIds, entityLabel, onMatchClick }) {
   // Cross-boundary helpers from viewer.jsx, read at render time (see header).
   const { matchParticipantIds, poolLabel, mymatchQueueLabel, TermV } = window;
@@ -249,13 +271,14 @@ function WatchHeroCard({ nextMatch, primaryIds, entityLabel, onMatchClick }) {
   // sr-only label arrive WITH the tint, and this card is the one surface that
   // names the side in VISIBLE text instead (CLAUDE.md's single exception,
   // granted on SIZE: a large personal card read at arm's length, not a dense
-  // row). So it would be constructed with label={false}, i.e. with the only
-  // thing it guarantees turned off, and wrapping the row in a component also
-  // hides it from the panel suite's shim, which does not execute child
-  // component vnodes. It takes sideWord from the same leaf, which is the part
-  // that actually drifts. Do not copy the visible word onto a dense row.
+  // row), so the sr-only span would only double the word. It still takes BOTH
+  // halves from the owner -- sideWord for the word, sideFillClass for the
+  // class -- rather than spelling the class by hand, which the sweep in
+  // side_is_carried_by_tint.test.jsx forbids everywhere but the owner; the
+  // hero is that sweep's one sanctioned sideFillClass caller, by name. Do not
+  // copy the visible word onto a dense row.
   const sideRow = (key, side, name, number, dojo, you) => (
-    <div key={key} className={`wl-hero__side side-fill--${side}`}>
+    <div key={key} className={`wl-hero__side ${sideFillClass(side)}`}>
       <span className="wl-hero__side-head">
         <span className="wl-hero__side-lbl">{sideWord(side)}</span>
         {you ? <span className="wl-hero__you">you</span> : null}
@@ -374,17 +397,6 @@ function WatchlistPanel({ roster, rosterLoaded = true, watchlist, setWatchlist, 
     return Array.from(counts.entries()).map(([name, total]) => ({ name, total })).sort((a, b) => a.name.localeCompare(b.name));
   }, [roster]);
 
-  // Dojos with at least one ID-BEARING member, for entryUnresolved below. Built
-  // in its own pass rather than reusing the counts above on purpose: that map
-  // counts every row with a dojo, while resolveEntryPlayerIds -- the thing this
-  // has to agree with -- also requires p.id. An id-less row would make the two
-  // disagree, and a dojo chip would stop reporting itself unresolved.
-  const dojosWithMembers = useMemo(() => {
-    const set = new Set();
-    roster.forEach((p) => { if (p && p.id && p.dojo) set.add(p.dojo); });
-    return set;
-  }, [roster]);
-
   const watchedPlayerIds = useMemo(() => watchlist.filter((e) => e.type === "player").map((e) => e.id), [watchlist]);
   const watchedDojos = useMemo(() => watchlist.filter((e) => e.type === "dojo").map((e) => e.dojo), [watchlist]);
 
@@ -433,8 +445,10 @@ function WatchlistPanel({ roster, rosterLoaded = true, watchlist, setWatchlist, 
   // went unchecked and the panel still printed "No upcoming matches for Hagane
   // Dojo" when the roster held no Hagane member at all -- the exact claim this
   // code exists to stop making. A dojo resolves through the roster rather than
-  // by id, so it is asked through resolveEntryPlayerIds, the same resolution
-  // buildPrimaryNextMatch uses, instead of restating the rule here.
+  // by id, so it is asked of the same `dojos` list the picker offers from:
+  // buildRoster (viewer_watchlist_core.jsx) drops every id-less row, so a dojo
+  // with a chip count has a resolvable member by construction, and the two
+  // cannot disagree.
   //
   // roster.length is load-bearing, not defensive: absence is a claim ABOUT a
   // roster, so with no roster there is nothing to be absent from and the honest
@@ -445,14 +459,15 @@ function WatchlistPanel({ roster, rosterLoaded = true, watchlist, setWatchlist, 
   const entryUnresolved = (entry) => {
     // rosterLoaded is the other half of roster.length. A non-empty roster only
     // means SOME competition's participants loaded; if another one's failed,
-    // this entry's absence says nothing about the tournament and the honest
-    // answer is silence, exactly as for an empty roster.
+    // this entry's absence says nothing about the tournament, so the chip
+    // stays quiet and the picker and the hero-empty line say ROSTER_NOT_LOADED
+    // instead of a claim about who is missing.
     if (!entry || !rosterLoaded || roster.length === 0) return false;
-    // O(1) against the set above. This used to filter the whole roster and
-    // allocate an id array per dojo chip per render, only to ask if it was
-    // empty -- ~50 chips x a few thousand participants at the documented
-    // ceiling, on every aggregate refetch.
-    if (entry.type === "dojo") return !dojosWithMembers.has(entry.dojo);
+    // Against the memoised dojo list, not a roster scan: this used to filter
+    // the whole roster and allocate an id array per dojo chip per render, only
+    // to ask if it was empty -- ~50 chips x a few thousand participants at the
+    // documented ceiling, on every aggregate refetch.
+    if (entry.type === "dojo") return !dojos.some((d) => d.name === entry.dojo);
     return !!entry.id && !rosterById.get(entry.id);
   };
 
@@ -477,7 +492,9 @@ function WatchlistPanel({ roster, rosterLoaded = true, watchlist, setWatchlist, 
           )}
           {unresolved && <span aria-hidden="true">⚠</span>}
           <span className="pmf__chip-icon" aria-hidden="true">⌂</span>
-          {entry.dojo} ({total})
+          {/* The count is a claim about the roster too: "(0)" beside a dojo
+              whose competition failed to load says nobody entered. */}
+          {entry.dojo}{rosterLoaded ? ` (${total})` : ""}
           <button type="button" onClick={() => removeEntry(entry)} aria-label={`Remove ${entry.dojo}`}>×</button>
         </span>
       );
@@ -571,6 +588,7 @@ function WatchlistPanel({ roster, rosterLoaded = true, watchlist, setWatchlist, 
            success because the error scrolled past a tail -1. */
         <WatchPicker
           roster={roster}
+          rosterLoaded={rosterLoaded}
           dojos={dojos}
           watchedPlayerIds={watchedPlayerIds}
           watchedDojos={watchedDojos}
@@ -619,11 +637,17 @@ function WatchlistPanel({ roster, rosterLoaded = true, watchlist, setWatchlist, 
           {/* A dojo gets its own wording. "Remove the entry and add them again"
               is unfollowable for a dojo that the picker cannot offer back,
               because the same missing members are why it is not listed. */}
+          {/* A dojo resolves its members THROUGH the roster, so with part of
+              it missing "no upcoming matches" would be a claim about people
+              this panel cannot see. A player entry resolves by id and keeps
+              the honest line. */}
           {heroUnresolved
             ? (heroEntry.type === "dojo"
               ? `No one from ${heroLabel} is in this tournament's roster, so there are no matches to show.`
               : `${heroLabel || "This competitor"} is not in this tournament's roster, so their matches can't be found. Remove the entry and add them again.`)
-            : (heroLabel ? `No upcoming matches for ${heroLabel}.` : "No upcoming matches.")}
+            : (!rosterLoaded && heroEntry.type === "dojo")
+              ? ROSTER_NOT_LOADED
+              : (heroLabel ? `No upcoming matches for ${heroLabel}.` : "No upcoming matches.")}
         </div>
       )}
 

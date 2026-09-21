@@ -306,3 +306,45 @@ describe('bc-rvfx: engi editor density is the same on both hosts', () => {
     }
   });
 });
+
+// bc-sccl: an engi pair is ONE participant with ONE number, so the chip
+// (NumberedName's .num-prefix span) rides the FIRST member's line only,
+// never the second (operator decision 2026-09-20). side_is_carried_by_tint
+// pins NumberedName as the chip's one owner at the source; this is the
+// rendered half that test defers here -- where the chip lands, and that the
+// pair's second member gets none.
+describe('EngiScoreEditorModal number chip rides the first member only (bc-sccl)', () => {
+  it('shows exactly one chip per side, on the first member line, none on the second', () => {
+    // The pair's second member line only renders when `name` carries the
+    // combined-name separator (" - ", split by window.engiPairParts,
+    // ui.jsx): this editor reads `name` only and never touches the
+    // zekken/displayName column the participant CSV schema also carries
+    // (which holds "ZEKKEN1 - ZEKKEN2" for an engi pair), so a displayName
+    // field on the fixture object does nothing here.
+    render(<EngiScoreEditorModal
+      match={makeMatch({
+        sideA: { id: 'p-aka', name: 'Aka Member 1 - Aka Member 2', dojo: 'Aka Dojo', number: 'K1' },
+        sideB: { id: 'p-shiro', name: 'Shiro Member 1 - Shiro Member 2', dojo: 'Shiro Dojo', number: 'K2' },
+      })}
+      onClose={() => {}}
+      onSubmit={() => {}}
+    />);
+    const shiroBox = screen.getByTestId('engi-side-shiro');
+    const akaBox = screen.getByTestId('engi-side-aka');
+
+    const shiroChips = shiroBox.querySelectorAll('.num-prefix');
+    expect(shiroChips.length).toBe(1);
+    expect(shiroChips[0].textContent).toBe('K2');
+
+    const akaChips = akaBox.querySelectorAll('.num-prefix');
+    expect(akaChips.length).toBe(1);
+    expect(akaChips[0].textContent).toBe('K1');
+
+    // Both name lines share the .engi-side__name class; the second (the
+    // pair's other member) is the one after the chip-carrying first.
+    const shiroLines = shiroBox.querySelectorAll('.engi-side__name');
+    expect(shiroLines.length).toBe(2);
+    expect(shiroLines[1].textContent).toBe('Shiro Member 2');
+    expect(shiroLines[1].querySelector('.num-prefix')).toBeNull();
+  });
+});

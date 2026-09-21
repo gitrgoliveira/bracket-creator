@@ -427,7 +427,7 @@ func buildViewerCompetitionPayload(store *state.Store, compID, courtFilter strin
 	// parse into garbage rows rather than failing, so what this actually
 	// reports is an OS-level read failure -- narrow, but previously invisible.
 	payload["rosterAvailable"] = plErr == nil
-	issues := viewerDataIssues(comp, players, pools, poolMatches, plErr, pmErr, brErr, poolsErr)
+	issues := viewerDataIssues(comp, players, pools, poolMatches, pmErr, brErr, poolsErr)
 	if len(issues) > 0 {
 		payload["dataIssues"] = issues
 	}
@@ -523,17 +523,11 @@ func missingIDsIssue(file, detail string) *gin.H {
 // fault as poolsErr (engine.CalculatePoolStandings's own internal LoadPools
 // reads the same pools.csv) -- reporting both would either double the entry
 // or require a dedup rule this function would then own alone.
-func viewerDataIssues(comp *state.Competition, players []domain.Player, pools []helper.Pool, poolMatches []state.MatchResult, plErr, pmErr, brErr, poolsErr error) []gin.H {
+func viewerDataIssues(comp *state.Competition, players []domain.Player, pools []helper.Pool, poolMatches []state.MatchResult, pmErr, brErr, poolsErr error) []gin.H {
 	if !drawInPoolsFile(comp) {
 		pools, poolsErr = nil, nil
 	}
-	// plErr joins the others: it was the one file whose failure was logged and
-	// then dropped. Note it rarely produces a corrupt-file issue in practice --
-	// helper's CSV reader sets LazyQuotes and FieldsPerRecord = -1, so bad
-	// bytes parse into garbage rows instead of erroring, and what reaches here
-	// is an OS-level read failure. Threaded anyway so the one path that can
-	// report is not the one path that stays silent.
-	issues := dataIssuesFrom(plErr, pmErr, brErr, poolsErr)
+	issues := dataIssuesFrom(pmErr, brErr, poolsErr)
 	if mi := missingIDsIssue("participants.csv", helper.MissingParticipantIDsMessage(players)); mi != nil {
 		issues = append(issues, *mi)
 	}
@@ -836,8 +830,13 @@ func RegisterViewerHandlers(r *gin.RouterGroup, store *state.Store, eng *engine.
 			if isTeamComp {
 				payload["teamMembers"] = squads
 			}
+			// Always true when reached: a participants read failure is never a
+			// *state.CorruptFileError (see the degradedReads note above), so the
+			// loop returns before here. Emitted anyway so this payload and the
+			// aggregate's carry the same keys; the SPA reads the flag from the
+			// aggregate (api_client.jsx normalizeViewerCompItem), never from here.
 			payload["rosterAvailable"] = playersErr == nil
-			if issues := viewerDataIssues(comp, comp.Players, pools, poolMatches, playersErr, poolMatchesErr, bracketErr, poolsErr); len(issues) > 0 {
+			if issues := viewerDataIssues(comp, comp.Players, pools, poolMatches, poolMatchesErr, bracketErr, poolsErr); len(issues) > 0 {
 				payload["dataIssues"] = issues
 			}
 			return json.Marshal(payload)

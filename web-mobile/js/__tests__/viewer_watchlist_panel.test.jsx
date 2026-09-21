@@ -8,6 +8,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { makeReactive } from './helpers/reactive_react.js';
 import { collectText, expandNamed } from './helpers/vdom.js';
+import { cssBlock, readStylesheet } from './helpers/source.js';
 
 const realReact = global.React;
 
@@ -204,7 +205,7 @@ describe('WatchHeroCard', () => {
 });
 
 describe('WatchlistPanel', () => {
-  let runtime, WatchlistPanel, WatchHeroCard, WatchPicker;
+  let runtime, WatchlistPanel, WatchHeroCard, WatchPicker, ROSTER_NOT_LOADED;
   beforeEach(async () => {
     runtime = makeReactive();
     global.React = runtime.React;
@@ -216,7 +217,7 @@ describe('WatchlistPanel', () => {
     // (effectivePrimaryKey, entryKey, resolveEntryPlayerIds, addPlayerToWatchlist,
     // VSchedItem, WATCHLIST_MAX); the components live in viewer_watchlist.jsx.
     await import('../viewer.jsx');
-    ({ WatchlistPanel, WatchHeroCard, WatchPicker } = await import('../viewer_watchlist.jsx'));
+    ({ WatchlistPanel, WatchHeroCard, WatchPicker, ROSTER_NOT_LOADED } = await import('../viewer_watchlist.jsx'));
   });
   afterEach(() => { runtime.unmount(); global.React = realReact; vi.resetModules(); });
 
@@ -334,6 +335,31 @@ describe('WatchlistPanel', () => {
     const ok = runtime.mount(WatchlistPanel, baseProps({ ...props, rosterLoaded: true }));
     expect(collectText(ok)).toMatch(/is not in this tournament's roster/);
     expect(byClass(ok, 'pmf__chip--unresolved')).toHaveLength(1);
+  });
+
+  // Going quiet on the amber claim was only half of it: the fall-through arm
+  // then said "No upcoming matches for Hagane Dojo", which for a DOJO is a
+  // claim about members the panel cannot see (a dojo resolves through the
+  // roster), and the chip counted "(0)" of them. A player entry resolves by
+  // id, so its line stays honest and is left alone.
+  it('says the roster could not be loaded rather than "no upcoming matches" for a dojo', () => {
+    const wl = [{ type: 'dojo', dojo: 'Hagane Dojo' }];
+    const props = {
+      roster: [{ id: 'p9', name: 'Someone Else', dojo: 'Kenshinkan' }],
+      watchlist: wl, primaryEntry: wl[0], heroEntry: wl[0], heroNextMatch: null,
+    };
+    const broken = collectText(runtime.mount(WatchlistPanel, baseProps({ ...props, rosterLoaded: false })));
+    expect(broken, 'a claim about people it cannot see').not.toMatch(/No upcoming matches for Hagane Dojo/);
+    expect(broken).not.toMatch(/is in this tournament's roster/);
+    expect(broken).toContain(ROSTER_NOT_LOADED);
+    expect(broken, 'the count is a roster claim too').not.toMatch(/Hagane Dojo \(0\)/);
+
+    const wlp = [{ type: 'player', id: 'p1', name: 'Robert Young', dojo: 'Hagane Dojo' }];
+    const player = collectText(runtime.mount(WatchlistPanel, baseProps({
+      watchlist: wlp, primaryEntry: wlp[0], heroEntry: wlp[0], heroNextMatch: null, rosterLoaded: false,
+    })));
+    expect(player, 'a player resolves by id, so the line holds').toMatch(/No upcoming matches for Robert Young/);
+    expect(player).not.toContain(ROSTER_NOT_LOADED);
   });
 
   // "Showing X." asserted a card that was not there.
@@ -469,7 +495,7 @@ describe('WatchlistPanel', () => {
 });
 
 describe('WatchPicker', () => {
-  let runtime, WatchPicker;
+  let runtime, WatchPicker, ROSTER_NOT_LOADED;
   beforeEach(async () => {
     runtime = makeReactive();
     global.React = runtime.React;
@@ -480,7 +506,7 @@ describe('WatchPicker', () => {
     // WatchPicker now lives in viewer_watchlist.jsx (reads window.pluralize,
     // set above, at module load).
     await import('../viewer.jsx');
-    ({ WatchPicker } = await import('../viewer_watchlist.jsx'));
+    ({ WatchPicker, ROSTER_NOT_LOADED } = await import('../viewer_watchlist.jsx'));
   });
   afterEach(() => { runtime.unmount(); global.React = realReact; vi.resetModules(); });
 
@@ -585,6 +611,31 @@ describe('WatchPicker', () => {
     expect(collectText(emptyRow(tree)[0])).toMatch(/No competitors have been added/);
   });
 
+  // ...but only when the roster actually LOADED. An empty roster and one that
+  // failed to read look identical from here, and the two dead ends above are
+  // both claims about who is entered: with a competition's participants
+  // missing, "nobody has been added" and "no one matches" would send the
+  // reader to re-check a spelling that was never wrong. The panel's chips go
+  // quiet on the same flag; this row says why instead, because a silent
+  // dropdown reads as a broken control (bc-wlhc).
+  it('says the roster could not be loaded instead of claiming it is empty', () => {
+    const tree = openWith('', { roster: [], dojos: [], rosterLoaded: false });
+    expect(emptyRow(tree)).toHaveLength(1);
+    const text = collectText(emptyRow(tree)[0]);
+    expect(text).toBe(ROSTER_NOT_LOADED);
+    expect(text).not.toMatch(/No competitors have been added/);
+  });
+
+  it('makes no "no one matches" claim about a name while a roster failed to load', () => {
+    // ROSTER is the healthy competition's; the typed name lives in the one
+    // that did not load.
+    const tree = openWith('Yamada', { rosterLoaded: false });
+    expect(emptyRow(tree)).toHaveLength(1);
+    const text = collectText(emptyRow(tree)[0]);
+    expect(text).toBe(ROSTER_NOT_LOADED);
+    expect(text).not.toMatch(/No one here matches/);
+  });
+
   it('excludes already-watched players and dojos from the dropdown', () => {
     const tree = openWith('', { watchedPlayerIds: ['p1'], watchedDojos: ['Hagane Dojo'] });
     const txt = collectText(byClass(tree, 'pmf__dropdown')[0], expandNamed('NumberedName'));
@@ -677,5 +728,34 @@ describe('useWatchlist legacy migration', () => {
     expect(ls._store.bc_my_player_id).toBeUndefined();
     expect(ls._store.bc_my_player_name).toBeUndefined();
     expect(JSON.parse(ls._store.bc_watchlist)).toEqual([{ type: 'player', id: 'p1', name: 'Alice', dojo: '' }]);
+  });
+});
+
+// The chip row's two CSS fixes from the review round, pinned in the sheet:
+// neither has a render harness that reads computed style, and both regressed
+// silently once (a bare 36px that never grew under a coarse pointer; a pinned
+// stale chip whose star vanished into its own fill).
+describe('the watchlist chip row in the stylesheet', () => {
+  const css = readStylesheet();
+  const block = (selector) => {
+    const b = cssBlock(css, selector);
+    expect(b, `rule ${selector} exists`).not.toBeNull();
+    return b;
+  };
+
+  it('clamps both chip controls to --tap-floor, never a bare pixel size', () => {
+    const b = block('.watchlist-chips .pmf__chip button');
+    expect(b).toMatch(/min-width: max\(36px, var\(--tap-floor\)\)/);
+    expect(b).toMatch(/min-height: max\(36px, var\(--tap-floor\)\)/);
+  });
+
+  it('keeps the pin star legible on the unresolved chip', () => {
+    // .pmf__chip.is-primary .pmf__chip-pin paints the star amber-400, which is
+    // 1.6:1 on the unresolved chip's amber-50 fill; this rule must sit later
+    // and take --warn-ink.
+    const b = block('.pmf__chip.pmf__chip--unresolved .pmf__chip-pin');
+    expect(b).toContain('var(--warn-ink)');
+    expect(css.indexOf('.pmf__chip.pmf__chip--unresolved .pmf__chip-pin'))
+      .toBeGreaterThan(css.indexOf('.pmf__chip.is-primary .pmf__chip-pin'));
   });
 });

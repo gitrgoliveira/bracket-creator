@@ -1881,33 +1881,31 @@ a:hover {
 /* HATCH PITCH. The Shiro hatch exists at three pitches across the app and that
    is deliberate -- a dense queue row and a full-height score editor want
    different stripe frequencies -- but until bc-sccl every surface hand-rolled
-   its own copy of the gradient, so there are SEVEN. These two modifiers are
-   how a new surface picks a pitch instead of writing an eighth:
+   its own copy of the gradient. This modifier is how a new surface picks the
+   mid pitch instead of writing another copy:
 
      (default)            3px / 6px   dense rows: the scores list, the court
                                       console, the pool numbered row
-     .side-fill--mid      6px / 7px   also .vsched-item__side--shiro,
-                                      .tw-match__name--shiro, .bc-match--v1
-                                      .bc-side--b
-     .side-fill--loose    7px / 8px   also .engi-side--shiro, .sb-side--shiro,
+     .side-fill--mid      6px / 7px   also .vsched-item__side--shiro and
+                                      .bc-match--v1 .bc-side--b; the compact
+                                      schedule rows take it through SideCell
+                                      density="mid"
+     (no modifier yet)    7px / 8px   .engi-side--shiro, .sb-side--shiro,
                                       .team-sub-match__side--shiro
 
-   The six surfaces named above KEEP their own copies for now, on purpose. The
+   The five surfaces named above KEEP their own copies for now, on purpose. The
    declarations are identical, so folding them in is tempting, but it would
    move a background declaration up the sheet past other rules that paint the same
    elements (.bc-match--v2 .bc-side--b, .editor-modal--compact .sb-side--shiro,
    the compact team-bouts override), and the only honest way to show that
-   changed nothing is to re-measure six surfaces in a browser -- two of them
-   scoring surfaces. Worth doing; not worth doing blind. What matters now is
-   that nobody adds a seventh copy. */
+   changed nothing is to re-measure five surfaces in a browser -- two of them
+   scoring surfaces. Worth doing; not worth doing blind. A --loose modifier for
+   the 7/8px pitch shipped once with no caller and was removed: add it WITH the
+   first surface that folds onto it, never ahead of one. What matters now is
+   that nobody adds a sixth private copy. */
 .side-fill--shiro.side-fill--mid {
   background-image: repeating-linear-gradient(
     -45deg, transparent 0 6px, var(--shiro-hatch) 6px 7px);
-}
-
-.side-fill--shiro.side-fill--loose {
-  background-image: repeating-linear-gradient(
-    -45deg, transparent 0 7px, var(--shiro-hatch) 7px 8px);
 }
 
 .pool-match-numbered-row__name {
@@ -2862,8 +2860,11 @@ button.wl-hero__sides--btn {
   letter-spacing: 0.05em;
 }
 
-/* Shared card styling, applies to both the home MyMatchPanel
-   <button> and the ViewerOverview <div> mount sites. */
+/* The opponent card on the competition page's "your next match" block
+   (viewer_competition.jsx, a plain <div>). The home watchlist used to mount
+   it as a <button> too, with its own reset rules; bc-wlhc rebuilt that card
+   as .wl-hero, so this is the one mount site left and the button reset went
+   with the button. */
 .my-match__opp {
   display: block;
   width: 100%;
@@ -2871,15 +2872,6 @@ button.wl-hero__sides--btn {
   padding: 12px;
   background: rgba(255, 255, 255, 0.1);
   border-radius: 10px;
-}
-
-/* Button-only resets: keep these on <button>.my-match__opp so the
-   non-clickable <div> in ViewerOverview doesn't look interactive. */
-button.my-match__opp {
-  border: none;
-  text-align: left;
-  cursor: pointer;
-  color: inherit;
 }
 
 /* Anchor vlist rows, remove browser default underline */
@@ -5303,10 +5295,10 @@ button.vsched-item:not([data-clickable]) {
   /* The centre carries both slot groups around the VS, so it is sized by its
      content instead of the fixed 140px separator column. */
   grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
-  /* Three content rows, not four: the SHIRO/AKA badge that used to own row 2
-     is gone (bc-sccl), so name and points move up one and the template loses a
-     row. Leaving the old five-row template would hold an empty band where the
-     badge was. */
+  /* Two content rows between the 1fr spacers, not three: the SHIRO/AKA badge
+     that used to own row 2 is gone (bc-sccl), so name and points move up one
+     and the template loses a row. Leaving the old five-row template would
+     hold an empty band where the badge was. */
   grid-template-rows: 1fr auto auto 1fr;
 }
 .sb-match:has(.sb-slots) > .sb-side {
@@ -7776,21 +7768,28 @@ abbr.msb-lab { text-decoration: none; cursor: help; }
      per line need every pixel of it. */
   padding: 12px 8px;
 }
-.editor-modal--compact .sb-side--aka,
-.editor-modal--compact .sb-side--shiro {
-  /* Soft 4–6% tonal wash instead of the candy-coloured corner gradient. */
-}
+/* Soft 4-6% tonal wash instead of the candy-coloured corner gradient. The two
+   hex "fallback" declarations that used to precede these were dead: a
+   declaration using var() is valid at parse time, so it always replaced the
+   literal, and a browser without color-mix() falls to unset, never back. */
 .editor-modal--compact .sb-side--aka {
-  background: linear-gradient(135deg, #fff5f5 0%, #fef2f2 100%); /* fallback */
   background: linear-gradient(135deg,
     color-mix(in srgb, var(--red) 5%, var(--surface)) 0%,
     color-mix(in srgb, var(--red) 3%, var(--surface)) 100%);
 }
 .editor-modal--compact .sb-side--shiro {
-  background: linear-gradient(135deg, #f8faff 0%, #f0f4ff 100%); /* fallback */
-  background: linear-gradient(135deg,
-    color-mix(in srgb, var(--accent) 5%, var(--surface)) 0%,
-    color-mix(in srgb, var(--accent) 3%, var(--surface)) 100%);
+  /* The same wash, but as background-image LAYERS rather than the `background`
+     shorthand: the shorthand resets background-image and took the 45° hatch
+     from .sb-side--shiro with it, so the individual editor (always compact)
+     and every kachinuki editor shipped the SHIRO/AKA badge removal (bc-sccl)
+     without the one NON-COLOUR cue that ruling relies on (DESIGN.md §4). Hatch
+     on top, wash under; the base rule's --white-side background-color is
+     fully covered by the opaque wash. Pinned by side_is_carried_by_tint. */
+  background-image:
+    repeating-linear-gradient(-45deg, transparent 0 7px, var(--shiro-hatch) 7px 8px),
+    linear-gradient(135deg,
+      color-mix(in srgb, var(--accent) 5%, var(--surface)) 0%,
+      color-mix(in srgb, var(--accent) 3%, var(--surface)) 100%);
 }
 .editor-modal--compact .sb-name {
   font-family: var(--font-display);
@@ -8830,16 +8829,16 @@ abbr.msb-lab { text-decoration: none; cursor: help; }
 /* bc-wlhc: the watchlist row is a PHONE surface and its two controls were
    17x13 (the pin star) and 13x14 (the remove x) CSS px, under the 24x24 floor
    of WCAG 2.5.8 and far under it for a control that DELETES a watch entry with
-   no undo. Both grow to a 36x36 target, which is DESIGN.md §9's documented
-   floor for a shared surface. Scoped to this row rather than .pmf__chip, which
-   PlayerMultiFilter shares.
+   no undo. Both grow to the sheet's documented floors (DESIGN.md §2 Principle
+   4 and §6): 36x36 on a fine pointer, and --tap-floor's 44 under a coarse one,
+   through the max() idiom --tap-floor's own comment prescribes. Scoped to this
+   row rather than .pmf__chip, which PlayerMultiFilter shares.
 
-   Not 44x44 (WCAG 2.5.5 AAA): the targets are kept INSIDE each chip, so at 44
-   a wrapping row would need overlapping hit areas, where a tap near the edge
-   lands on a neighbour's delete. 36 clears the documented floor and still
-   leaves the rows disjoint -- measured in the browser at 390px, not assumed:
-   the first cut of this rule stopped at 32 and argued only against 44, which
-   missed that 36 was the number it had to reach. */
+   The first cut pinned a bare 36 and argued against 44 by claiming a wrapping
+   row would need overlapping hit areas at that size. It would not: min-height
+   makes the CHIP grow, so the targets stay disjoint and only the row gets
+   taller. The bare number left the delete control 36px on every phone, below
+   the floor every other dense control in this sheet already meets. */
 .watchlist-chips { gap: 8px; }
 
 .watchlist-chips .pmf__chip { padding: 0 2px 0 8px; }
@@ -8848,8 +8847,8 @@ abbr.msb-lab { text-decoration: none; cursor: help; }
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  min-width: 36px;
-  min-height: 36px;
+  min-width: max(36px, var(--tap-floor));
+  min-height: max(36px, var(--tap-floor));
   padding: 0;
 }
 
@@ -8895,6 +8894,12 @@ abbr.msb-lab { text-decoration: none; cursor: help; }
   color: var(--warn-ink);
   border: 1px solid var(--warn-border);
 }
+/* The pinned chip's filled star is amber-400 (#fbbf24) on navy, three classes
+   deep above; on this chip's amber-50 fill that measured 1.6:1 and vanished,
+   so the ONE chip whose pin the panel's warning is about looked like the only
+   chip without a pin control. Same specificity, later in the sheet, so it
+   wins on order. */
+.pmf__chip.pmf__chip--unresolved .pmf__chip-pin { color: var(--warn-ink); }
 
 /* Dropdown dojo rows: tint the leading glyph with the accent so dojo options
    are scannable against the player rows. */
@@ -8904,10 +8909,12 @@ abbr.msb-lab { text-decoration: none; cursor: help; }
 
 /* These two are alternatives on the SAME element, so they need the same
    margin; the unresolved arm had none and rendered flush against the block
-   above it. The doubled selector is load-bearing: .hint--md is also one class
-   and sits later in this sheet, so it won the tie and painted the warning in
-   ordinary grey --ink-3 -- visually identical to the benign "no upcoming
-   matches" line it exists to be distinguished from. */
+   above it. The doubled selector is defensive, not load-bearing here: this
+   rule now sits AFTER .hint--md, so one class would win the tie on order, but
+   its first home was earlier in the sheet, where .hint--md's own one-class
+   colour won and painted the warning in ordinary grey --ink-3 -- visually
+   identical to the benign "no upcoming matches" line it exists to be
+   distinguished from. Two classes keep it winning wherever it moves. */
 .watchlist-primary-done,
 .hint--md.watchlist-primary-unresolved { margin-top: 12px; }
 .hint--md.watchlist-primary-unresolved { color: var(--warn-ink); }

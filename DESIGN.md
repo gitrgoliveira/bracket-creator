@@ -61,7 +61,7 @@ All tokens are defined in the `:root` block in [styles.css](web-mobile/css/style
 
 | Token | Value | Use |
 |---|---|---|
-| `--accent` | `#1d3557` | Primary CTAs, active nav, winner-side (Shiro), Shiro frame/hatch, **running state** (border/ring/dot/running-strip), brand fills. **Re-set at runtime** by `applyTheme` (`app.jsx`) from the Branding primary, together with `--accent-strong`, the filled-button hover shade darkened from it; a stored value that is the stock navy, or not a `#rrggbb` colour, leaves `:root`'s values in place. |
+| `--accent` | `#1d3557` | Primary CTAs, active nav, winner-side (Shiro), Shiro frame (the hatch is its own token, `--shiro-hatch`, which `applyTheme` does not re-set), **running state** (border/ring/dot/running-strip), brand fills. **Re-set at runtime** by `applyTheme` (`app.jsx`) from the Branding primary, together with `--accent-strong`, the filled-button hover shade darkened from it; a stored value that is the stock navy, or not a `#rrggbb` colour, leaves `:root`'s values in place. |
 | `--accent-soft` | `#e7eaf3` | Hover/active tint, focus rings, Shiro court chips, **running state rings/backgrounds**. **Derived at runtime** from a custom Branding primary (8% of it toward white) unless the operator picked a soft colour of their own; the stock pair leaves this token alone, because the derivation only approximates the hand-tuned value. |
 | `--accent-fg` | `#ffffff` | The **on-colour** ink: text and icons that sit on a filled colour surface (`--accent` primarily, but equally the amber announcement banner and the red outage strip, which need the same white and should not each spell it differently). It is also the *fill* of an element that inverts against such a surface, like the white admin pill on the navy hero, where the on-colour value is exactly what is wanted. Only use `--surface` when the white is a neutral page surface (a card, a modal, an input), not part of a colour pairing. |
 | `--red` | `#c1121f` | Aka (Red) side fill, danger buttons. **Aka + danger only: never running state** (see Principle 3) |
@@ -260,7 +260,7 @@ Quick lookup: scan, then `Ctrl+F` the class name to jump to its subsection.
 | Podium | `.podium-step--{1,2,3}` | Final-standings podium |
 | "My Match" hero | `.my-match` | Competition-overview hero card |
 | Watchlist hero | `.wl-hero` | Viewer-home watchlist hero card (bc-wlhc). Its own block, NOT a variant of `.my-match`, which `ViewerOverview` still uses |
-| Side fill | `.side-fill--{shiro,aka}` | The shared Aka/Shiro tinted-cell pair (bc-sccl). Emitted by `SideCell` (side_cell.jsx) from its `side` prop, together with the `sr-only` label; a surface passes `side` and its own geometry class, never this class by hand. `density="mid"` picks the 6/7px hatch |
+| Side fill | `.side-fill--{shiro,aka}` | The shared Aka/Shiro tinted-cell pair (bc-sccl). Emitted by `SideCell` (side_cell.jsx) from its `side` prop, together with the `sr-only` label; a surface passes `side` and its own geometry class, never this class by hand; the watchlist hero, which names the side visibly and so takes no `sr-only` label, gets the class from `sideFillClass`, the owner's one other export for it. `density="mid"` picks the 6/7px hatch |
 | Registration desk | `.rd-*` | Cross-competition check-in surface (rail + roster + hand-over tag) |
 
 ### Buttons: `.btn`
@@ -342,11 +342,11 @@ The hatch on Shiro is load-bearing, and more so now that the badge is gone: pure
 
 **Color area scales with the component** (Principle 2):
 
-- **Full scoreboard** ([display.jsx](web-mobile/js/display.jsx)): flood the whole half: tinted background, 6px top bar, large side label.
-- **Score editor / bracket card / pool row / schedule row**: these are dense and were the weak spot: a thin spine reads as decoration, not signal. Give each side **real area**: a tinted cell (`--red-soft` / hatched white), an always-on colored header (present *before* a winner is chosen), or a filled badge. Don't rely on a hairline.
+- **Full scoreboard** ([display.jsx](web-mobile/js/display.jsx)): flood the whole half: tinted background, 6px top bar. No side label: the SHIRO/AKA headings went with bc-sccl, position and each name's colour carry it, and a projector has no screen-reader audience (see [CLAUDE.md](CLAUDE.md) "Match Colors").
+- **Score editor / bracket card / pool row / schedule row**: these are dense and were the weak spot: a thin spine reads as decoration, not signal. Give each side **real area**: a tinted cell (`--red-soft` / hatched white) or an always-on colored header (present *before* a winner is chosen). Never a filled badge: bc-sccl removed every one. Don't rely on a hairline.
 - **Smallest rows**: the tinted segment IS the minimum: the compact schedule's 14×14 `A`/`S` squares were removed with every other badge (bc-sccl) and the row's two names are tinted instead. Below that, stop shrinking the cue and give the side real area.
 
-**Never** swap side order by seeding: geometry is the rule (see Match cards). And the label/position/badge are redundant with color on purpose: color is never the *only* signal, so the distinction holds for color-blind operators and washed-out projectors.
+**Never** swap side order by seeding: geometry is the rule (see Match cards). And the text label (`sr-only`, or visible on the watchlist hero) and position are redundant with color on purpose: color is never the *only* signal, so the distinction holds for color-blind operators and washed-out projectors. The surfaces that carry no text at all are exactly the TV board and the bracket card, each by its own ruling (see [CLAUDE.md](CLAUDE.md) "Match Colors").
 
 > Reference mock for the full system across all six surfaces: [web-mobile/design/aka-shiro-system.html](web-mobile/design/aka-shiro-system.html) (standalone: not embedded; system-font + token-faithful integration lands in `styles.css`).
 

@@ -1866,10 +1866,12 @@ export function ShiaijoQueueRow({ m, scheduled, courts, onMoveCourt, onMove, onE
                 </span>
                 {/* No "Final" for a completed row (operator ruling 2026-09-20,
                     bc-sccl): "Final" names the LAST MATCH OF A KNOCKOUT, never a
-                    finished bout. The row already says it three other ways -- the
-                    score on its own line below, a "Correct" button instead of
-                    "Score", and the "Completed" group heading above. "Waiting"
-                    stays: a blocked row has no other marker. */}
+                    finished bout. The row already says it two other ways -- the
+                    score on its own line below and the "Completed" group heading
+                    above -- plus a "Correct" button when the console wires
+                    onCorrect (there is no "Score" button on this row; that
+                    contrast belongs to the scores list). "Waiting" stays: a
+                    blocked row has no other marker. */}
                 <span className="shiaijo-qrow__state">
                     {pending && <span className="shiaijo-qrow__waiting">Waiting</span>}
                 </span>

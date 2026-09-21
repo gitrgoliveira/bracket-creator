@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { makeReactive } from './helpers/reactive_react.js';
-import { findAll, collectText, expandAll } from './helpers/vdom.js';
+import { findAll, collectText, expandAll, expandNamed } from './helpers/vdom.js';
 
 
 // Walk a vnode tree and return the first vnode matching a predicate.
@@ -546,8 +546,11 @@ describe('PoolNumberedMatchRow team IV score (mp-o4xl)', () => {
     // No visible chip badges remain.
     expect(findAll(tree, hasClass('cbadge'))).toHaveLength(0);
 
-    // Both side labels survive as sr-only spans, in Shiro/Aka order.
-    const srLabels = findAll(tree, hasClass('sr-only')).map(collectText);
+    // Both side labels survive, in Shiro/Aka order, and come from the owner:
+    // the shim never invokes a component, so the SideLabel vnodes are found by
+    // type and expanded by name to read the span each renders.
+    const srLabels = findAll(tree, (n) => typeof n.type === 'function' && n.type.name === 'SideLabel')
+      .map((n) => collectText(n, expandNamed('SideLabel')));
     expect(srLabels).toEqual(['Shiro: ', 'Aka: ']);
 
     // Names render in full (no truncation markup couples to the assertion;

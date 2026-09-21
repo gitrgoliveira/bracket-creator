@@ -2,9 +2,10 @@
 // show a matchup as two cells, the side is carried by a TINTED CELL, not by a
 // SHIRO/AKA text badge.
 //
-// DESIGN.md §4 offers three treatments for a dense row -- a tinted cell, an
-// always-on coloured header, or a filled badge -- and these surfaces used the
-// badge, the smallest of the three, on the densest lists in the app. Moving
+// DESIGN.md §4 used to offer three treatments for a dense row -- a tinted cell,
+// an always-on coloured header, or a filled badge -- and these surfaces used the
+// badge, the smallest of the three, on the densest lists in the app (the badge
+// option left §4 with the badges themselves). Moving
 // them to the tint also makes them agree with PoolNumberedMatchRow
 // (viewer_standings.jsx), which renders tinted and badge-less on the very same
 // court-console screen, and it gives the competitor number chip its side colour
@@ -24,10 +25,12 @@
 //
 // Removed markup and deleted CSS leave no failing test behind on their own,
 // which is why this file exists (same reason as running_state_static.test.jsx).
-// These are SOURCE and STYLESHEET assertions: all three surfaces mount over the
-// API or inside a court console, so rendering them here would exercise their
-// fetch harnesses rather than the treatment. A regression puts the badge back
-// or drops the fill class, and that is what these catch.
+// These are SOURCE and STYLESHEET assertions. The surfaces that have a mount
+// harness are pinned in their own render suites (admin_scoring_modal.render,
+// admin_scoring_engi.render, admin_shiaijo.test); what a source sweep catches
+// that a fixture cannot is the badge coming back or the fill class dropping
+// out of ANY module, including one no fixture mounts. A regression puts the
+// badge back or drops the fill class, and that is what these catch.
 
 import { describe, it, expect } from 'vitest';
 // Shared with the sibling suite: readCode strips comments, because every
@@ -57,6 +60,18 @@ describe('the side is carried by a tinted cell', () => {
     expect(block('.side-fill--shiro')).toMatch(/repeating-linear-gradient\(-45deg/);
     expect(block('.side-fill--shiro')).toContain('var(--shiro-hatch)');
     expect(block('.side-fill--aka')).toContain('background: var(--red-soft)');
+  });
+
+  it('keeps the Shiro hatch in the compact score-editor host', () => {
+    // The individual editor is ALWAYS compact (admin_scoring_individual.jsx
+    // 1210/1215) and every kachinuki editor is, so this is the host where the
+    // hatch has to hold. A `background:` shorthand there silently reset the
+    // background-image the base rule paints, which is how the editors shipped
+    // the badge removal without the one non-colour cue it relies on.
+    const b = block('.editor-modal--compact .sb-side--shiro');
+    expect(b).toMatch(/repeating-linear-gradient\(\s*-45deg/);
+    expect(b).toContain('var(--shiro-hatch)');
+    expect(b, 'the shorthand resets background-image').not.toMatch(/^\s*background:/m);
   });
 
   // Pins the PRIMITIVE, not the spelling. This used to require the exact
@@ -115,23 +130,44 @@ describe('the side is carried by a tinted cell', () => {
       expect(src, `${file} does not use SideCell`).toMatch(/<SideCell side="shiro"/);
       expect(src, `${file} does not use SideCell`).toMatch(/<SideCell side="aka"/);
     }
-    // The list above pins the five surfaces this change edited. This pins the
+    // The surfaces that paint their own tint take the label alone. Pinned
+    // POSITIVELY too: the sweep below only forbids a hand-typed label, and
+    // passes just as happily when there is no label at all, so without this
+    // both viewer_match.jsx rows could drop their span and the public schedule
+    // would ship colour-only under a green suite.
+    const LABEL_ONLY = [
+      ['admin_scoring_individual.jsx', /<SideLabel side=\{s\.color\} \/>/],
+      ['admin_scoring_team.jsx', /<SideLabel side=\{s\.color\} \/>/],
+      ['viewer_match.jsx', /<SideLabel side="shiro" \/>/],
+      ['viewer_match.jsx', /<SideLabel side="aka" \/>/],
+      ['viewer_standings.jsx', /<SideLabel side="shiro" \/>/],
+      ['viewer_standings.jsx', /<SideLabel side="aka" \/>/],
+    ];
+    for (const [file, re] of LABEL_ONLY) {
+      expect(read(file), `${file} lost its SideLabel`).toMatch(re);
+    }
+    // The lists above pin the surfaces this change edited. This pins the
     // RULE: no module may hand-type a side label, so a NEW surface cannot ship
     // one either. The enumerated form passed for every file it did not name,
     // which is how viewer_standings.jsx kept "Shiro: " and viewer_match.jsx
     // kept "Shiro:" -- the exact two spellings side_cell.jsx cites as its
-    // reason to exist -- through the commit that introduced the owner.
-    // viewer_standings.jsx is the one known holdout, excluded by NAME so a new
-    // one still fails. Converting it is a separate change, not a shrug: its
-    // suite mounts PoolNumberedMatchRow through a vdom shim whose findAll walks
-    // raw children and never invokes a component, so <SideLabel> makes the span
-    // invisible to the assertion. Fixing that means touching the shared vdom
-    // helper, which is well outside the change this sweep guards.
-    const HOLDOUTS = ['side_cell.jsx', 'viewer_standings.jsx'];
+    // reason to exist -- through the commit that introduced the owner. Only
+    // the owner is excluded, by name; there is no other holdout.
+    const HOLDOUTS = ['side_cell.jsx'];
     const handTyped = modules().filter(
       (f) => !HOLDOUTS.includes(f) && /sr-only">\s*(Shiro|Aka)/.test(codeOf(f))
     );
     expect(handTyped, 'the side label has one emitter: SideLabel').toEqual([]);
+    // The CLASS half of the same rule, repo-wide rather than for the three
+    // SURFACES above: the fill class is spelled by the owner alone. Exactly
+    // one module may take it without the label, the watchlist hero, because
+    // it names the side in VISIBLE text (CLAUDE.md's size exception); it must
+    // do so through sideFillClass and still render that word.
+    const handTypedClass = modules().filter((f) => f !== 'side_cell.jsx' && /side-fill--/.test(codeOf(f)));
+    expect(handTypedClass, 'the fill class has one owner: side_cell.jsx').toEqual([]);
+    const classCallers = modules().filter((f) => f !== 'side_cell.jsx' && /sideFillClass\(/.test(codeOf(f)));
+    expect(classCallers, 'sideFillClass has one sanctioned caller').toEqual(['viewer_watchlist.jsx']);
+    expect(codeOf('viewer_watchlist.jsx'), 'the hero must still name the side visibly').toMatch(/wl-hero__side-lbl/);
     expect(modules().length, 'the sweep must actually find the modules').toBeGreaterThan(50);
     // ...and the primitive really emits it, so the loop above is not vacuous.
     expect(codeOf('side_cell.jsx')).toMatch(/<span className="sr-only">\{sideWord\(side\)\}: <\/span>/);
@@ -206,17 +242,16 @@ describe('the stacked and engi surfaces carry the side the same way', () => {
 describe('the engi editor shows the competitor number', () => {
   const src = () => read('admin_scoring_engi.jsx');
 
+  // Only the OWNER is pinned at the source. Where the chip lands, and that the
+  // pair's second member gets none, is asserted on the rendered editor in
+  // render/admin_scoring_engi.render.test.jsx: this used to pin the two JSX
+  // lines character for character, which reddened on a neutral rewrite
+  // (`m.sideB && m.sideB.number`) and stayed green if the whole side was
+  // wrapped in `{false && ...}`.
   it('renders each side through NumberedName, the one owner of the chip rule', () => {
     expect(src()).toMatch(/import \{ NumberedName \} from '\.\/numbered_name\.jsx'/);
-    expect(src()).toMatch(/<NumberedName side="shiro" name=\{shiroName\} number=\{m\.sideB\?\.number\} \/>/);
-    expect(src()).toMatch(/<NumberedName side="aka" name=\{akaName\} number=\{m\.sideA\?\.number\} \/>/);
-  });
-
-  it('puts the chip on the first member only, never the second', () => {
-    // The pair's second member shares the pair's single number; repeating the
-    // chip there would imply two competitors.
-    expect(src()).toMatch(/\{shiroDN && <div className="engi-side__name">\{shiroDN\}<\/div>\}/);
-    expect(src()).toMatch(/\{akaDN && <div className="engi-side__name">\{akaDN\}<\/div>\}/);
+    expect(src()).toMatch(/<NumberedName side="shiro"/);
+    expect(src()).toMatch(/<NumberedName side="aka"/);
   });
 });
 

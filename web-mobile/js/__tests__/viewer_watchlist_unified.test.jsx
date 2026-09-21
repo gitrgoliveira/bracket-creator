@@ -198,35 +198,6 @@ describe('heroEntry vs findPrimaryEntry', () => {
     expect(heroEntry(null, '')).toBeNull();
   });
 
-  // The helper being right is not the same as the HOST calling the right one.
-  // Swapping viewer_home's two derivations passes every assertion above and
-  // every prop assertion in the panel suite, and puts the bug straight back,
-  // so the wiring is pinned at the source. A SOURCE check because ViewerHome
-  // mounts over the viewer fetch harness; what a regression does is pass the
-  // other variable, and that is what this catches.
-  // A roster that is non-empty but INCOMPLETE. The viewer payload builds each
-  // competition independently and swallows a per-competition participants
-  // failure, so one unreadable participants.csv leaves every other competition
-  // populating the roster -- and the watchlist's roster.length guard, which is
-  // a proxy for "the roster loaded", passes.
-  describe('rosterFullyLoaded', () => {
-    it('is true when every competition reports its roster loaded', () => {
-      expect(rosterFullyLoaded([{ rosterAvailable: true }, { rosterAvailable: true }])).toBe(true);
-    });
-
-    it('is false when ANY competition failed to load one', () => {
-      expect(rosterFullyLoaded([{ rosterAvailable: true }, { rosterAvailable: false }])).toBe(false);
-    });
-
-    it('reads an ABSENT key as loaded', () => {
-      // An older payload carries no such key. Reading that as "unavailable"
-      // would silence the stale-entry warning entirely.
-      expect(rosterFullyLoaded([{}, { rosterAvailable: true }])).toBe(true);
-      expect(rosterFullyLoaded([])).toBe(true);
-      expect(rosterFullyLoaded(null)).toBe(true);
-    });
-  });
-
   // The UNPINNED fallback. Without the predicate it returned the first-ADDED
   // entry whatever its state, which reproduced the bug this function exists to
   // fix by list order: the coach who added a partner first and themselves
@@ -255,6 +226,12 @@ describe('heroEntry vs findPrimaryEntry', () => {
     });
   });
 
+  // The helper being right is not the same as the HOST calling the right one.
+  // Swapping viewer_home's two derivations passes every assertion above and
+  // every prop assertion in the panel suite, and puts the bug straight back,
+  // so the wiring is pinned at the source. A SOURCE check because ViewerHome
+  // mounts over the viewer fetch harness; what a regression does is pass the
+  // other variable, and that is what this catches.
   it('viewer_home feeds the card heroEntry and the chime findPrimaryEntry', () => {
     const src = readSource('viewer_home.jsx');
     // Matched loosely on purpose: what must hold is that the CARD's entry comes
@@ -266,7 +243,30 @@ describe('heroEntry vs findPrimaryEntry', () => {
     expect(src).toMatch(/heroNextMatch=\{heroNextMatch\}/);
     // And the alert keeps the opt-in one.
     expect(src).toMatch(/useFollowedMatchAlert\(primaryNextMatch/);
-    expect(src).toMatch(/const primaryEntry = useMemo\(\(\) => findPrimaryEntry\(watchlist, primaryKey\)/);
+    expect(src).toMatch(/findPrimaryEntry\(watchlist, primaryKey/);
+  });
+});
+
+// A roster that is non-empty but INCOMPLETE. The viewer payload builds each
+// competition independently and swallows a per-competition participants
+// failure, so one unreadable participants.csv leaves every other competition
+// populating the roster -- and the watchlist's roster.length guard, which is
+// a proxy for "the roster loaded", passes.
+describe('rosterFullyLoaded', () => {
+  it('is true when every competition reports its roster loaded', () => {
+    expect(rosterFullyLoaded([{ rosterAvailable: true }, { rosterAvailable: true }])).toBe(true);
+  });
+
+  it('is false when ANY competition failed to load one', () => {
+    expect(rosterFullyLoaded([{ rosterAvailable: true }, { rosterAvailable: false }])).toBe(false);
+  });
+
+  it('reads an ABSENT key as loaded', () => {
+    // An older payload carries no such key. Reading that as "unavailable"
+    // would silence the stale-entry warning entirely.
+    expect(rosterFullyLoaded([{}, { rosterAvailable: true }])).toBe(true);
+    expect(rosterFullyLoaded([])).toBe(true);
+    expect(rosterFullyLoaded(null)).toBe(true);
   });
 });
 

@@ -101,13 +101,19 @@ describe('a HANTEI badge must never exist', () => {
   // pass, so a "/*" inside a // comment opened a phantom block that ran to the
   // next "*/". match_scoreboard.jsx -- the likeliest home for a re-added badge
   // -- kept 16.3% of its bytes, api_client.jsx 25.9%, and the sweep read only
-  // that. Both now retain 36.7% and 41.4%.
+  // that. Both now retain 36.7% and 41.3%.
   //
-  // Scoped to these two rather than every module: a small doc-heavy leaf
+  // Extended to the three STATE_BADGE_SURFACES files too: the
+  // STATE_BADGE_SURFACES loop earlier in this file (the "renders no Final
+  // literal" checks) reads each of them individually with no retention floor
+  // of their own, so a truncated read there would pass just as vacuously as
+  // it did for match_scoreboard.jsx and api_client.jsx before this guard
+  // existed. They retain 51.8%, 59.5% and 47.0% today, all comfortably above
+  // the 0.30 floor. Still not every module: a small doc-heavy leaf
   // legitimately retains 14% (result_recency.jsx), so a blanket floor would
   // either be too low to catch anything or would fail honest files.
-  it('reads most of the two modules the phantom-block bug used to swallow', () => {
-    for (const f of ['match_scoreboard.jsx', 'api_client.jsx']) {
+  it('reads most of the badge-sweep modules, including the two the phantom-block bug used to swallow', () => {
+    for (const f of [...STATE_BADGE_SURFACES, 'match_scoreboard.jsx', 'api_client.jsx']) {
       expect(retentionRatio(f), `${f} is being truncated before the sweep reads it`)
         .toBeGreaterThan(0.30);
     }
@@ -128,7 +134,17 @@ describe('the scores row still says a match is done, without the word', () => {
   // The button is now what tells a completed row from an unplayed one, so the
   // removals depend on it: "Correct" only ever appears on a finished match,
   // "Score" on a running or scheduled one.
+  //
+  // Still a SOURCE pin, not a rendered one: this file runs under vitest's
+  // "unit" project (vitest.config.js), whose setup stubs global.React with
+  // plain non-DOM objects, so @testing-library/react cannot mount
+  // AdminScoreEditorPage here -- only a *.render.test.jsx file under
+  // js/__tests__/render/ gets real React. Loosened from the exact ternary
+  // expression to formatting-tolerant substring checks, so a neutral rewrite
+  // (a lookup table, a helper function) does not redden this test.
   it('leaves the button carrying the state: Correct when completed, Score otherwise', () => {
-    expect(code()).toMatch(/m\.status === "completed" \? "Correct" : "Score"/);
+    const c = code();
+    expect(c.includes('"Correct"') && c.includes('"Score"'), 'both button labels must exist in the module').toBe(true);
+    expect(c).toMatch(/^(?=.*"completed")(?=.*"Correct").*$/m);
   });
 });

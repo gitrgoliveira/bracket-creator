@@ -24,6 +24,16 @@ export function sideWord(side) {
   return side === "aka" ? "Aka" : "Shiro";
 }
 
+// The fill class alone. SideCell builds its own from this, and exactly ONE
+// other caller is sanctioned: the watchlist hero, which names the side in
+// VISIBLE text (CLAUDE.md's size exception) and so must not also carry the
+// sr-only label SideCell emits, but must not spell the class by hand either.
+// side_is_carried_by_tint.test.jsx fails on any other module that calls this
+// or writes `side-fill--` itself, so the class still has one owner.
+export function sideFillClass(side, density = "") {
+  return density ? `side-fill--${side} side-fill--${density}` : `side-fill--${side}`;
+}
+
 // The screen-reader text channel for a tinted cell.
 //
 // NOT an aria-label. On a bare <div> the implicit role is `generic`, where
@@ -41,15 +51,15 @@ export function SideLabel({ side }) {
 //
 //   side       "shiro" | "aka". The one place the surface states it.
 //   className  the surface's own geometry/layout classes; kept verbatim.
-//   density    the hatch pitch: "" (3/6px, the dense-row default), "mid"
-//              (6/7px, schedule rows and the bracket card) or "loose" (7/8px,
-//              the score editors and the engi card). Three pitches exist on
-//              purpose; see the .side-fill--* block in styles.css.
+//   density    the hatch pitch: "" (3/6px, the dense-row default) or "mid"
+//              (6/7px, the compact schedule rows). A third, 7/8px pitch exists
+//              only as private copies on the score editors and the engi card;
+//              see the HATCH PITCH note in styles.css before adding a value.
 //   fill       pass false where the surface PAINTS ITS OWN tint under its own
-//              class (the compact schedule rows, the engi card). They predate
-//              the shared pair and keep their fill; stacking side-fill--* on
-//              top would repaint them at a different pitch. They still come
-//              here for the label, which is the part that was going missing.
+//              class (the engi card, the one caller). It predates the shared
+//              pair and keeps its fill; stacking side-fill--* on top would
+//              repaint it at a different pitch. It still comes here for the
+//              label, which is the part that was going missing.
 //
 // There is deliberately NO switch for the label. An early draft had one, for
 // a surface that already names the side in visible text -- but the only such
@@ -58,13 +68,7 @@ export function SideLabel({ side }) {
 // to turn off the one thing this component exists to guarantee. Re-add it
 // WITH the caller that needs it, never ahead of one.
 export function SideCell({ side, className = "", density = "", fill = true, children, ...rest }) {
-  const cls = [
-    className,
-    fill ? `side-fill--${side}` : "",
-    fill && density ? `side-fill--${density}` : "",
-  ]
-    .filter(Boolean)
-    .join(" ");
+  const cls = [className, fill ? sideFillClass(side, density) : ""].filter(Boolean).join(" ");
   return (
     <div className={cls} {...rest}>
       <SideLabel side={side} />

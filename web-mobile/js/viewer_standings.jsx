@@ -23,6 +23,7 @@ import { sameCompetitor } from './competitor_identity.jsx';
 // NumberedName: single owner of the number-chip-on-the-outer-side rule
 // (bc-dnst); see that file's header for why this stays an ES import.
 import { NumberedName } from './numbered_name.jsx';
+import { SideLabel } from './side_cell.jsx';
 
 const { useState, useMemo } = React;
 const EmptyState = window.EmptyState;
@@ -659,7 +660,7 @@ export const PoolNumberedMatchRow = React.memo(({ m, num, onMatchClick, isEngi }
     <Tag className={`pool-match-numbered-row${m.status === "running" ? " is-running" : ""}`} style={{ cursor: handleClick ? "pointer" : "default" }} {...interactiveProps}>
       <span className="pool-match-numbered-row__num">{num}</span>
       <div className="pool-match-numbered-row__side pool-match-numbered-row__side--shiro">
-        <span className="sr-only">Shiro: </span>
+        <SideLabel side="shiro" />
         <span className="pool-match-numbered-row__name"><NumberedName side="shiro" name={bName || "-"} number={bNum} /></span>
         {shiroWonDH ? <DHBadge /> : null}
         {bDN ? <span className="pool-match-numbered-row__name">{bDN}</span> : null}
@@ -675,7 +676,7 @@ export const PoolNumberedMatchRow = React.memo(({ m, num, onMatchClick, isEngi }
         {window.matchStateCell(m)}
       </span>
       <div className="pool-match-numbered-row__side pool-match-numbered-row__side--aka">
-        <span className="sr-only">Aka: </span>
+        <SideLabel side="aka" />
         {/* Aka is right-aligned, so the DH pill goes BEFORE the name to sit on
             the inside edge (toward the centre score), mirroring the Shiro side
             where the pill follows the name. */}

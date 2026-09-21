@@ -33,7 +33,7 @@ import { describe, it, expect } from 'vitest';
 // Shared with the sibling suite: readCode strips comments, because every
 // removal site explains itself in one and a raw read matches its own
 // explanation.
-import { readSource as read, readCode as codeOf, cssBlock, readStylesheet } from './helpers/source.js';
+import { readSource as read, readCode as codeOf, cssBlock, readStylesheet, modules, renderedLiteral } from './helpers/source.js';
 
 const css = readStylesheet();
 
@@ -115,6 +115,24 @@ describe('the side is carried by a tinted cell', () => {
       expect(src, `${file} does not use SideCell`).toMatch(/<SideCell side="shiro"/);
       expect(src, `${file} does not use SideCell`).toMatch(/<SideCell side="aka"/);
     }
+    // The list above pins the five surfaces this change edited. This pins the
+    // RULE: no module may hand-type a side label, so a NEW surface cannot ship
+    // one either. The enumerated form passed for every file it did not name,
+    // which is how viewer_standings.jsx kept "Shiro: " and viewer_match.jsx
+    // kept "Shiro:" -- the exact two spellings side_cell.jsx cites as its
+    // reason to exist -- through the commit that introduced the owner.
+    // viewer_standings.jsx is the one known holdout, excluded by NAME so a new
+    // one still fails. Converting it is a separate change, not a shrug: its
+    // suite mounts PoolNumberedMatchRow through a vdom shim whose findAll walks
+    // raw children and never invokes a component, so <SideLabel> makes the span
+    // invisible to the assertion. Fixing that means touching the shared vdom
+    // helper, which is well outside the change this sweep guards.
+    const HOLDOUTS = ['side_cell.jsx', 'viewer_standings.jsx'];
+    const handTyped = modules().filter(
+      (f) => !HOLDOUTS.includes(f) && /sr-only">\s*(Shiro|Aka)/.test(codeOf(f))
+    );
+    expect(handTyped, 'the side label has one emitter: SideLabel').toEqual([]);
+    expect(modules().length, 'the sweep must actually find the modules').toBeGreaterThan(50);
     // ...and the primitive really emits it, so the loop above is not vacuous.
     expect(codeOf('side_cell.jsx')).toMatch(/<span className="sr-only">\{sideWord\(side\)\}: <\/span>/);
     // ...unconditionally. The surfaces cannot opt out because there is no
@@ -146,19 +164,21 @@ describe('text on a tinted cell keeps its contrast', () => {
 // it already carried one, and only the badge came off.
 describe('the stacked and engi surfaces carry the side the same way', () => {
   it('tints both compact schedule rows and drops the A/S squares', () => {
+    // These rows take the SHARED fill at the --mid pitch. They used to carry a
+    // byte-identical private copy of that gradient, added by the same change
+    // that introduced the modifier -- the seventh copy the .side-fill--*
+    // comment says nobody adds. Nothing else paints .tw-match__name's
+    // background, so collapsing it moved no pixel; that is why this asserts on
+    // the modifier rather than on a per-surface class.
     // \s* because this declaration wraps the angle onto the next line.
-    expect(block('.tw-match__name--shiro')).toMatch(/repeating-linear-gradient\(\s*-45deg/);
-    expect(block('.tw-match__name--aka')).toContain('background: var(--red-soft)');
+    expect(block('.side-fill--shiro.side-fill--mid')).toMatch(/repeating-linear-gradient\(\s*-45deg/);
+    expect(block('.side-fill--aka')).toContain('background: var(--red-soft)');
+    expect(css, 'the private copy is back').not.toMatch(/\.tw-match__name--(shiro|aka)\s*\{/);
     for (const f of ['admin_schedule_page.jsx', 'viewer_schedule.jsx']) {
       const src = read(f);
       expect(src, `${f} still renders an A/S square`).not.toMatch(/tw-match__badge/);
-      expect(src).toContain('tw-match__name--shiro');
-      expect(src).toContain('tw-match__name--aka');
-      // These rows PAINT THEIR OWN tint at the 6/7px pitch, so they pass
-      // fill={false} and come to the primitive only for the label. Stacking
-      // side-fill--* on top would repaint them at the dense-row pitch.
-      expect(src).toMatch(/<SideCell side="shiro" fill=\{false\}/);
-      expect(src).toMatch(/<SideCell side="aka" fill=\{false\}/);
+      expect(src).toMatch(/<SideCell side="shiro" density="mid"/);
+      expect(src).toMatch(/<SideCell side="aka" density="mid"/);
     }
     expect(css, 'the A/S square styling is dead CSS now').not.toMatch(/tw-match__badge/);
   });
@@ -212,10 +232,7 @@ describe('the TV board names no side', () => {
 
   it('renders no SHIRO/AKA heading', () => {
     expect(src()).not.toMatch(/TermD name="(shiro|aka)"/);
-    // Quoted literal OR a bare JSX text node: a mutation that re-added the
-    // heading as <span>AKA</span> slipped past the literal-only check, so both
-    // forms are matched here (same pattern the HANTEI sweep uses).
-    expect(codeOf('display_scoreboard.jsx')).not.toMatch(/(["'`](SHIRO|AKA)["'`]|>\s*(SHIRO|AKA)\s*<)/);
+    expect(codeOf('display_scoreboard.jsx')).not.toMatch(renderedLiteral('SHIRO|AKA'));
   });
 
   it('still separates the sides by colour, which is now load-bearing', () => {

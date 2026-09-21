@@ -851,8 +851,6 @@ function sideColorName(color) {
   return sideWord(color);
 }
 
-
-
 // Reusable foul counter: independent +/- buttons per side with clear labeling.
 // The `+` button delegates to `onIncrement` which applies the
 // applyFoulIncrement rule (auto-award H + reset at the 2-foul boundary);

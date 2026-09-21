@@ -299,10 +299,10 @@ export function TWMatch({ m, highlight, onClick }) {
         {/* Side by CELL TINT, matching the admin twin in admin_schedule_page.jsx
             (bc-sccl); the S/A squares are gone and sr-only labels carry the side
             in text. */}
-        <SideCell side="shiro" fill={false} className={`tw-match__name tw-match__name--shiro ${bWin ? "tw-match__name--w" : ""}`}>
+        <SideCell side="shiro" density="mid" className={`tw-match__name ${bWin ? "tw-match__name--w" : ""}`}>
           {withNumber(m.sideB)}
         </SideCell>
-        <SideCell side="aka" fill={false} className={`tw-match__name tw-match__name--aka ${aWin ? "tw-match__name--w" : ""}`}>
+        <SideCell side="aka" density="mid" className={`tw-match__name ${aWin ? "tw-match__name--w" : ""}`}>
           {withNumber(m.sideA)}
         </SideCell>
         <div className="tw-match__comp">{m.compName}</div>

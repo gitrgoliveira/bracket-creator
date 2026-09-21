@@ -190,6 +190,13 @@ export function ViewerHome({ tournament, onSelectCompetition, onAdminClick, onOp
   // the entry object, which heroEntry hands back unchanged, so each candidate
   // is scanned at most once and the chosen one is not re-scanned.
   const { heroWatchEntry, heroNextMatch } = useMemo(() => {
+    // Pinned is the common case, and heroEntry's pinned arm IS
+    // findPrimaryEntry(watchlist, primaryKey) -- the call primaryEntry made one
+    // line above, whose match primaryNextMatch already derived from the same
+    // three inputs. Deriving it a second time here cost a full roster scan (a
+    // dojo primary) plus two passes over every match, on every aggregate
+    // refetch, for every pinned reader.
+    if (primaryEntry) return { heroWatchEntry: primaryEntry, heroNextMatch: primaryNextMatch };
     const seen = new Map();
     const nextFor = (e) => {
       if (!seen.has(e)) seen.set(e, buildPrimaryNextMatch(e, roster, bothSidesMatches));
@@ -197,7 +204,7 @@ export function ViewerHome({ tournament, onSelectCompetition, onAdminClick, onOp
     };
     const entry = heroEntry(watchlist, primaryKey, (e) => !!nextFor(e));
     return { heroWatchEntry: entry, heroNextMatch: entry ? nextFor(entry) : null };
-  }, [watchlist, primaryKey, roster, bothSidesMatches]);
+  }, [watchlist, primaryKey, roster, bothSidesMatches, primaryEntry, primaryNextMatch]);
 
   // Compact list of running and upcoming watched matches: shown when ≥2 entities
   // are watched (coach multi-watch). Includes running matches so they can be

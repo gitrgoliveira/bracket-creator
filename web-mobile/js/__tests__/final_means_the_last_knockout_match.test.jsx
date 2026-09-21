@@ -24,20 +24,14 @@
 // the literal back, and that is what these catch.
 
 import { describe, it, expect } from 'vitest';
-import { readdirSync } from 'fs';
-import { dirname, resolve } from 'path';
-import { fileURLToPath } from 'url';
 // readCode strips comments: every removal site explains itself in one, so a raw
 // read would match its own explanation. Shared with the sibling suite.
-import { readCode as codeOf, retentionRatio } from './helpers/source.js';
+import { readCode as codeOf, retentionRatio, modules, renderedLiteral } from './helpers/source.js';
 import { roundLabel } from '../bracket.jsx';
 
-const __dirname = dirname(fileURLToPath(import.meta.url));
 
 // Every SPA module. Read from disk rather than listed, so a surface added later
 // is swept without anyone remembering to add it here.
-const modules = () => readdirSync(resolve(__dirname, '..'))
-  .filter(f => f.endsWith('.jsx'));
 
 const SCORES_LIST = 'admin_schedule_score_editor.jsx';
 const STATE_BADGE_SURFACES = [SCORES_LIST, 'admin_shiaijo.jsx', 'viewer_match.jsx'];
@@ -47,7 +41,7 @@ const STATE_BADGE_SURFACES = [SCORES_LIST, 'admin_shiaijo.jsx', 'viewer_match.js
 // the bare word instead would flag identifiers that merely contain it --
 // viewer_match.jsx's own `isFinalized` is exactly that, and it caught this
 // assertion on its first run.
-const RENDERED_FINAL = /(["'`]Final["'`]|>\s*Final\s*<)/;
+const RENDERED_FINAL = renderedLiteral('Final');
 
 describe('"Final" is a knockout round, not a match state', () => {
   for (const file of STATE_BADGE_SURFACES) {
@@ -97,7 +91,7 @@ describe('a HANTEI badge must never exist', () => {
     // this guard the day the layout moves. 79 modules today; the floor only has
     // to be high enough that an empty or truncated listing fails loudly.
     expect(files.length, 'the sweep must actually find the modules').toBeGreaterThan(50);
-    const offenders = files.filter(f => /(["'`]HANTEI["'`]|>\s*HANTEI\s*<)/.test(codeOf(f)));
+    const offenders = files.filter(f => renderedLiteral('HANTEI').test(codeOf(f)));
     expect(offenders, 'a HANTEI badge may never exist on any surface').toEqual([]);
   });
 

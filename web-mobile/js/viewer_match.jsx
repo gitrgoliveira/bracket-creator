@@ -13,6 +13,7 @@
 // unchanged.
 
 import { writeDidNotLand } from './write_result.jsx';
+import { SideLabel } from './side_cell.jsx';
 import { useTeamLineups, TeamScoreboard, IndividualScore, numberedParts } from './match_scoreboard.jsx';
 import { NumberedName } from './numbered_name.jsx';
 import { TermV, poolLabel } from './viewer_utils.jsx';
@@ -245,7 +246,7 @@ export const VSchedItem = React.memo(({ m, tweaks, showCompetition, onClick, hig
       ) : null}
       <div className="vsched-item__players">
         <div className={`vsched-item__side vsched-item__side--shiro ${bWin ? "vsched-item__side--w" : ""}`}>
-          <span className="sr-only">Shiro:</span>
+          <SideLabel side="shiro" />
           {/* Both cells below render NumberedName in `clip` mode rather than
               withNumber's flat string. `.n` is a nowrap-ellipsis box, and a
               string puts the number inside the text it ellipsises -- which for
@@ -281,7 +282,7 @@ export const VSchedItem = React.memo(({ m, tweaks, showCompetition, onClick, hig
           <span className="vsched-item__vs">{window.boutMiddle ? window.boutMiddle(m.decision, m.encho, m.score) : "vs"}</span>
         )}
         <div className={`vsched-item__side vsched-item__side--aka ${aWin ? "vsched-item__side--w" : ""}`}>
-          <span className="sr-only">Aka:</span>
+          <SideLabel side="aka" />
           <span className="n"><NumberedName side="aka" clip {...numberedParts(m.sideA, undefined)} /></span>
           {tweaks.showDojo && m.sideA?.dojo ? <span className="d">{m.sideA.dojo}</span> : null}
         </div>

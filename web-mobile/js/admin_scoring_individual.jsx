@@ -9,6 +9,7 @@ const { useState: useStateA, useEffect: useEffectA, useRef: useRefA } = React;
 // daihyosen-specific; the rep pickers below stay gated on m.repIsTeam (a "-TB-"
 // tiebreaker is also a rep bout, just not a daihyosen).
 import { isPoolDaihyosenBout } from './pool_ids.jsx';
+import { SideLabel } from './side_cell.jsx';
 import { realIppons, hanteiTied, hanteiSlot, hanteiWinnerKey, sideSlotOrder } from './result_slot.jsx';
 import { sameCompetitor } from './competitor_identity.jsx';
 import { NumberedName } from './numbered_name.jsx';
@@ -831,7 +832,7 @@ export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, on
                           the side in text for a screen reader, which is what
                           DESIGN.md §4 requires when colour would otherwise be
                           the only signal. */}
-                      <span className="sr-only">{sideColorName(s.color)}: </span>
+                      <SideLabel side={s.color} />
                       {/* Competitor number chip: owned by numbered_name.jsx
                           (the outer-side rule lives there). */}
                       <div className="sb-name">

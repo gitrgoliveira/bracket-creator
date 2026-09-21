@@ -30,10 +30,10 @@ import {
   CORRECTION_PRESETS,
   REOPEN_PRESETS,
   useAdoptFromServer,
-  sideColorName,
 } from './admin_scoring_shared.jsx';
 
 import { useDebouncedRunningWrite, SyncStatusPill } from './admin_scoring_autosave.jsx';
+import { SideLabel } from './side_cell.jsx';
 
 // Imported from the leaf, not read off `window`, for the same reason
 // admin_scoring_shared.jsx does it: write_result.jsx is import-only, and this
@@ -2676,7 +2676,7 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
                       individual editor for the ruling). The numbered bout rows
                       below this header have always been tint-only, so the whole
                       board now reads one way. */}
-                  <span className="sr-only">{sideColorName(s.color)}: </span>
+                  <SideLabel side={s.color} />
                   {/* Team number chip: owned by numbered_name.jsx
                       (the outer-side rule lives there). */}
                   <div className="sb-name">

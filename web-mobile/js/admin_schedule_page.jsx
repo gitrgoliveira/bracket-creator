@@ -84,10 +84,10 @@ const AdminTWMatch = React.memo(({ m, highlight, courts, onMove, onTimeChange })
             public schedule rows. The squares were the side's only TEXT, so the
             sr-only labels below replace them: DESIGN.md §4 requires colour is
             never the only signal, and the Shiro hatch covers the sighted case. */}
-        <SideCell side="shiro" fill={false} className={`tw-match__name tw-match__name--shiro ${bWin ? "tw-match__name--w" : ""}`}>
+        <SideCell side="shiro" density="mid" className={`tw-match__name ${bWin ? "tw-match__name--w" : ""}`}>
           <NumberedName name={m.sideB?.name || "TBD"} number={m.sideB?.number} />
         </SideCell>
-        <SideCell side="aka" fill={false} className={`tw-match__name tw-match__name--aka ${aWin ? "tw-match__name--w" : ""}`}>
+        <SideCell side="aka" density="mid" className={`tw-match__name ${aWin ? "tw-match__name--w" : ""}`}>
           <NumberedName name={m.sideA?.name || "TBD"} number={m.sideA?.number} />
         </SideCell>
         <div className="tw-match__comp">{m.compName}</div>

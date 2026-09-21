@@ -50,7 +50,6 @@ export function SideLabel({ side }) {
 //              the shared pair and keep their fill; stacking side-fill--* on
 //              top would repaint them at a different pitch. They still come
 //              here for the label, which is the part that was going missing.
-//   as         element to render; "div" by default.
 //
 // There is deliberately NO switch for the label. An early draft had one, for
 // a surface that already names the side in visible text -- but the only such
@@ -58,7 +57,7 @@ export function SideLabel({ side }) {
 // not come here at all, so the switch shipped with no caller: an untested way
 // to turn off the one thing this component exists to guarantee. Re-add it
 // WITH the caller that needs it, never ahead of one.
-export function SideCell({ side, className = "", density = "", fill = true, as: Tag = "div", children, ...rest }) {
+export function SideCell({ side, className = "", density = "", fill = true, children, ...rest }) {
   const cls = [
     className,
     fill ? `side-fill--${side}` : "",
@@ -67,9 +66,9 @@ export function SideCell({ side, className = "", density = "", fill = true, as: 
     .filter(Boolean)
     .join(" ");
   return (
-    <Tag className={cls} {...rest}>
+    <div className={cls} {...rest}>
       <SideLabel side={side} />
       {children}
-    </Tag>
+    </div>
   );
 }

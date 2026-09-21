@@ -105,8 +105,8 @@ function WatchPicker({ roster, dojos, watchedPlayerIds, watchedDojos, onPickPlay
   // different next actions -- "that name is not in this tournament" (check the
   // spelling) versus "you already watch all of them" (nothing to do) -- and
   // this is the only thing that tells them apart. See the empty row below.
-  const matchedIncludingWatched = useMemo(
-    () => (dojos || []).filter(dojoMatchesQuery).length + roster.filter(playerMatchesQuery).length,
+  const matchedAnyIncludingWatched = useMemo(
+    () => (dojos || []).some(dojoMatchesQuery) || roster.some(playerMatchesQuery),
     [roster, dojos, playerMatchesQuery, dojoMatchesQuery]
   );
 
@@ -137,7 +137,7 @@ function WatchPicker({ roster, dojos, watchedPlayerIds, watchedDojos, onPickPlay
           <div className="pmf__empty" data-testid="watchpicker-empty">
             {roster.length === 0
               ? "No competitors have been added to this tournament yet."
-              : matchedIncludingWatched === 0
+              : !matchedAnyIncludingWatched
                 ? `No one here matches “${query.trim()}”. Try a surname, a dojo, or a competitor number.`
                 : q
                   ? `Everyone matching “${query.trim()}” is already on your watchlist.`
@@ -374,6 +374,17 @@ function WatchlistPanel({ roster, rosterLoaded = true, watchlist, setWatchlist, 
     return Array.from(counts.entries()).map(([name, total]) => ({ name, total })).sort((a, b) => a.name.localeCompare(b.name));
   }, [roster]);
 
+  // Dojos with at least one ID-BEARING member, for entryUnresolved below. Built
+  // in its own pass rather than reusing the counts above on purpose: that map
+  // counts every row with a dojo, while resolveEntryPlayerIds -- the thing this
+  // has to agree with -- also requires p.id. An id-less row would make the two
+  // disagree, and a dojo chip would stop reporting itself unresolved.
+  const dojosWithMembers = useMemo(() => {
+    const set = new Set();
+    roster.forEach((p) => { if (p && p.id && p.dojo) set.add(p.dojo); });
+    return set;
+  }, [roster]);
+
   const watchedPlayerIds = useMemo(() => watchlist.filter((e) => e.type === "player").map((e) => e.id), [watchlist]);
   const watchedDojos = useMemo(() => watchlist.filter((e) => e.type === "dojo").map((e) => e.dojo), [watchlist]);
 
@@ -437,7 +448,11 @@ function WatchlistPanel({ roster, rosterLoaded = true, watchlist, setWatchlist, 
     // this entry's absence says nothing about the tournament and the honest
     // answer is silence, exactly as for an empty roster.
     if (!entry || !rosterLoaded || roster.length === 0) return false;
-    if (entry.type === "dojo") return resolveEntryPlayerIds(entry, roster).length === 0;
+    // O(1) against the set above. This used to filter the whole roster and
+    // allocate an id array per dojo chip per render, only to ask if it was
+    // empty -- ~50 chips x a few thousand participants at the documented
+    // ceiling, on every aggregate refetch.
+    if (entry.type === "dojo") return !dojosWithMembers.has(entry.dojo);
     return !!entry.id && !rosterById.get(entry.id);
   };
 

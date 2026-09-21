@@ -260,7 +260,7 @@ Quick lookup: scan, then `Ctrl+F` the class name to jump to its subsection.
 | Podium | `.podium-step--{1,2,3}` | Final-standings podium |
 | "My Match" hero | `.my-match` | Competition-overview hero card |
 | Watchlist hero | `.wl-hero` | Viewer-home watchlist hero card (bc-wlhc). Its own block, NOT a variant of `.my-match`, which `ViewerOverview` still uses |
-| Side fill | `.side-fill--{shiro,aka}` | The shared Aka/Shiro tinted-cell pair (bc-sccl); add it beside a surface's own geometry class |
+| Side fill | `.side-fill--{shiro,aka}` | The shared Aka/Shiro tinted-cell pair (bc-sccl). Emitted by `SideCell` (side_cell.jsx) from its `side` prop, together with the `sr-only` label; a surface passes `side` and its own geometry class, never this class by hand. `density="mid"` picks the 6/7px hatch |
 | Registration desk | `.rd-*` | Cross-competition check-in surface (rail + roster + hand-over tag) |
 
 ### Buttons: `.btn`

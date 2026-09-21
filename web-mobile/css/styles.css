@@ -6275,21 +6275,13 @@ button.vsched-item:not([data-clickable]) {
   margin: 0;
 }
 
-/* Schedule / TW-match side treatment (bc-sccl). These rows STACK the two sides,
-   so they take the same tinted-cell treatment as .vsched-item__side--*, the
-   stacked rows on the public schedule -- same tokens, same 6px/7px hatch pitch,
-   so the two schedules read alike. This replaced a pair of 14x14 A/S squares
-   that gave the side no area at all on a list that can run to dozens of rows.
-   The padding is tighter than the viewer's because this row is denser. */
-.tw-match__name--shiro {
-  background: var(--white-side);
-  background-image: repeating-linear-gradient(
-    -45deg, transparent 0 6px, var(--shiro-hatch) 6px 7px);
-}
-
-.tw-match__name--aka {
-  background: var(--red-soft);
-}
+/* The two compact schedules' stacked side lines take their tint from
+   .side-fill--* at the --mid pitch (SideCell density="mid"), so they read like
+   .vsched-item__side--*, the stacked rows on the public schedule. They used to
+   carry their own copy of that gradient; it was byte-identical, and nothing
+   else paints .tw-match__name's background, so it was deleted rather than left
+   to drift. This treatment replaced a pair of 14x14 A/S squares that gave the
+   side no area at all on a list that can run to dozens of rows. */
 
 .tw-match__time--editable {
   background: transparent;

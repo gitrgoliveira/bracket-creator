@@ -18,7 +18,7 @@
 // over: a TRAILING // comment is not stripped, so one containing "/*" can
 // still open a phantom block. No module in the tree does that today and
 // retentionRatio is what would catch it.
-import { readFileSync } from 'fs';
+import { readFileSync, readdirSync } from 'fs';
 import { dirname, resolve } from 'path';
 import { fileURLToPath } from 'url';
 
@@ -50,3 +50,14 @@ export const cssBlock = (css, selector) => {
   if (!m) return null;
   return css.slice(m.index, css.indexOf('}', css.indexOf('{', m.index)));
 };
+
+/** Every top-level module in web-mobile/js, for repo-wide sweeps. */
+export const modules = () => readdirSync(JS_DIR).filter((f) => f.endsWith('.jsx'));
+
+// A word as it would REACH a reader: a quoted literal, or a JSX text node.
+// Three suites spelled this by hand. The `>word<` arm is not decoration -- it
+// was added after a mutation that re-added `<span>HANTEI</span>` walked past a
+// literal-only check, so a sweep that omits it passes on the very edit it
+// exists to catch. One owner means the next widening reaches every caller.
+export const renderedLiteral = (word) =>
+  new RegExp(`(["'\`](?:${word})["'\`]|>\\s*(?:${word})\\s*<)`);

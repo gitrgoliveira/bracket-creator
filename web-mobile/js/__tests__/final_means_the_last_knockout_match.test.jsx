@@ -94,7 +94,7 @@ describe('a HANTEI badge must never exist', () => {
   it('no module renders a HANTEI badge', () => {
     const files = modules();
     // A sweep that reads nothing passes vacuously, which would silently retire
-    // this guard the day the layout moves. 78 modules today; the floor only has
+    // this guard the day the layout moves. 79 modules today; the floor only has
     // to be high enough that an empty or truncated listing fails loudly.
     expect(files.length, 'the sweep must actually find the modules').toBeGreaterThan(50);
     const offenders = files.filter(f => /(["'`]HANTEI["'`]|>\s*HANTEI\s*<)/.test(codeOf(f)));

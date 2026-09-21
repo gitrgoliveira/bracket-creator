@@ -9,7 +9,7 @@ If you are not sure which role fits you, refer to [Choosing your setup](../start
 The viewer brings together everything you need to follow the day in one place:
 
 - A personal **Watchlist** so you can track yourself, specific competitors, or a whole dojo. As a watched match approaches, the viewer nudges you so competitors know when to warm up and coaches know when to be at the court.
-- The full match schedule across all shiai-jo, filterable by competitor or team. The free-text filter matches a competitor's name, their dojo, or their competitor number, so you can jump straight to their bouts. See [Searching by competitor number](#searching-by-competitor-number) for how numbers are matched.
+- The full match schedule across all shiai-jo, filterable by competitor or team. The free-text filter matches a competitor's name, their dojo, or their competitor number, so you can jump straight to their bouts. Refer to [Searching by competitor number](#searching-by-competitor-number) for how numbers are matched.
 - Pool standings that update as scores are entered, with no page refresh needed.
 - The elimination bracket filling in as matches are completed.
 
@@ -27,12 +27,12 @@ Tap a competition to see its schedule, standings, and bracket. Aka (red) and Shi
 
 ### Searching by competitor number
 
-Every competitor gets a number once the draw for their competition has run. The number starts with a letter that belongs to the competition, so "K12" and "M12" are two different people in two different draws.
+Once the draw for a competition has run, its competitors are numbered. The number starts with a short prefix that belongs to that competition, so "K12" and "M12" are two different people in two different draws. Swiss competitions are the exception and use no numbers at all.
 
-Type the number the way it is printed on the draw sheet, letter included:
+Type the number the way it is printed on the draw sheet, prefix included:
 
-- **The letter on its own** lists everyone in that draw. Type "K" to see the whole K competition.
-- **The letter and the digits** finds that one competitor. "K12" finds K12, and not K120.
+- **The prefix on its own** lists everyone in that draw. Type "K" to see the whole K competition.
+- **The prefix and the digits** finds that one competitor. "K12" finds K12, and not K120.
 - **Digits on their own** find nobody. "12" is not a competitor number, because it does not say which competition it belongs to.
 
 Names and dojos still match on any part of what you type, so a surname fragment is enough for those. Only the number needs to be typed in full.

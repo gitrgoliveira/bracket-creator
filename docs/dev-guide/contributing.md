@@ -91,9 +91,9 @@ make docs/videos        # the application videos
 make docs/media         # both
 ```
 
-They are separate targets because they cost very different amounts of time. The screenshots finish in a few minutes. Each video is recorded in real time and paced so a reader can follow it, so regenerating all three takes considerably longer.
+They are separate targets because you rarely want both at once. Neither is especially slow: measured on one machine, the three videos take about 60 seconds and the 30 screenshots about 175. A video is recorded in real time and paced so a reader can follow it, so it is the more expensive of the two per clip, but there are only three of them.
 
-Either target takes `NAME=` for a single capture, and the screenshots target also takes `FAMILY=` for one group:
+Both targets take `NAME=` for a single capture or `FAMILY=` for one group:
 
 ```sh
 make docs/screenshots NAME=mobile-dashboard
@@ -105,23 +105,23 @@ You need `node` and `python3`. The first run installs the harness dependencies a
 
 A run builds the binary, starts a server on a free port against a throwaway data directory, seeds a tournament, drives the interface in a real browser, and writes the result to `scripts/screenshots/out/`. Nothing is written into `docs/` directly, so publishing a new capture stays your decision.
 
-You do not have to review all thirty. Every screenshot is compared pixel by pixel against the one it would replace, and a run ends by listing only the surfaces that actually changed:
+You do not have to review all 30. Every screenshot is compared pixel by pixel against the one it would replace, and a run ends by listing only the surfaces that actually changed:
 
 ```
 28 unchanged, 2 changed, 0 video (not compared)
 
 changed - eyeball these, then copy them over docs/screenshots/:
-  viewer-competition: CHANGED 815x1163 (1284 px differ, max 212 levels)
-  team-lineup: CHANGED 1585x1212 (96 px differ, max 87 levels)
+  viewer-competition: CHANGED 815x1163 (height differs from committed 815x2088 by 44% - check the content by eye)
+  team-lineup: CHANGED 1585x1212 (156024 px differ, max 230 levels)
 ```
 
-Look at those, and copy across the ones whose change you meant to make. A capture reported as unchanged reproduced the committed file, so there is nothing to see and nothing to copy.
+Look at those, and copy across the ones whose change you meant to make. A capture reported as unchanged is indistinguishable from the committed file to a reader, so there is nothing to review and nothing to copy.
 
 The comparison allows a small tolerance, because two runs of the same code do not produce identical bytes. It is set well below any difference a reader could notice and well above the measured noise, so a listed change is a real one.
 
 Videos are never compared: their encoding depends on how fast the machine drove the interface, so a clip is restaged on every run and only worth copying if you drove a change.
 
-Each capture is a real browser session, so a run also reports anything the page complained about while it was being photographed. An uncaught error fails that capture, because the picture would show a broken surface as though it were working. A console message is only reported, since some are normal.
+Each capture is a real browser session, so a run also reports anything the page complained about while it was being photographed. An uncaught error fails that capture, because the picture would show a broken surface as though it were working. A console message is only reported, since some are normal. A run with any failed capture exits non-zero, so the target can gate a script.
 
 A capture whose dimensions no longer match its committed twin is reported as a size mismatch. That usually means the viewport or the crop selector needs adjusting rather than that the surface changed.
 

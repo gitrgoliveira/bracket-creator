@@ -11,14 +11,17 @@ real application in a browser.
     make docs/screenshots FAMILY=editors         # one group
     make docs/videos NAME=kachinuki-demo         # one video
 
-Screenshots and videos are split because they cost very different amounts of
-time: the stills finish in a few minutes, while each video is recorded in real
-time and has to be paced for a human to follow.
+Screenshots and videos are split because you rarely want both at once. Neither
+is especially slow: measured on one machine, the three videos take about 60
+seconds and the 30 screenshots about 175. A video is recorded in real time and
+paced for a human to follow, so it is the more expensive of the two per clip,
+but there are only three of them.
 
 Output lands in `out/`, never straight into `docs/`. Each still is compared
 pixel by pixel against the file it would replace, and a run ends by naming only
-the surfaces that actually changed - those are the ones to look at and copy
-across. A capture reported `unchanged` reproduced the committed file exactly.
+the surfaces that actually changed. Those are the ones to look at and copy
+across. A capture reported `unchanged` is indistinguishable from the committed
+file to a reader, so there is nothing to review and nothing to copy.
 
 That comparison is only meaningful because `docs/screenshots/` holds this
 harness's own output. If you replace a committed image by any other means, the
@@ -33,19 +36,6 @@ a numbered list under the `<video>` in
 several seconds between recordings. The runner prints the new marks as
 `CHAPTERS`; copy them into that list, or the numbers point at the wrong
 moments.
-
-## When a page misbehaves
-
-A capture is a real browser session, so the page can say it is broken while
-being photographed. Two severities, treated differently on purpose:
-
-- An **uncaught exception** fails the capture. The surface is broken and the
-  screenshot would record that as though it were the product working.
-- A **console error** is reported after the run but does not fail it. The SPA
-  asks for a team's lineup before one exists and the server answers 404, which
-  the client handles; that is normal on seven captures here. Failing on it
-  would fire on every team surface, and a gate that always fires is one the
-  operator learns to skip.
 
 ## Prerequisites
 
@@ -62,6 +52,7 @@ would pull it into `audit-ci`'s scope.
     run.mjs          the runner: boots a server, seeds, drives, captures
     lib/server.mjs   starts `mobile-app` or `serve` on a free port + temp data dir
     lib/api.mjs      the scaffolding calls (tournament, competition, roster, draw)
+    lib/net.mjs      picks a free port for the server
     lib/ui.mjs       signing in, and nothing else: each editor is driven by
                      the recipe group that needs it (see that file's header)
     lib/seed.mjs     runs scripts/setup_tournament.py for the demo tournament
@@ -89,19 +80,38 @@ viewport, DPR, what to wait for, what to crop) and carry a `drive()` where the
 subject of the capture is itself a procedure, such as a score editor mid-bout.
 
 Derive the viewport from the committed file: `file docs/screenshots/<name>.png`.
-Most captures are at a device scale factor of 2, so a committed 2560x1800 means a
-1280x900 viewport. The runner compares width always, and height for every mode
-except `fullPage`, whose height moves with content.
+Most captures are at a device scale factor of 1, so the committed dimensions are
+the viewport. Six are at 2, where a committed 2560x1800 means a 1280x900
+viewport: `mobile-dashboard`, `mobile-participants`, `mobile-draw-preview`,
+`mobile-pool-standings`, `selfrun-register` and `selfrun-viewer-home`. Read the
+recipe's `dpr` rather than assuming either. The runner compares width always,
+and height for every mode except `fullPage`, whose height moves with content.
 
-A new capture has nothing to compare against and simply reports `NEW`.
+A new capture has nothing to compare against and reports `NEW`.
+
+## When a page misbehaves
+
+A capture is a real browser session, so the page can say it is broken while
+being photographed. Two severities, treated differently on purpose:
+
+- An **uncaught exception** fails the capture. The surface is broken and the
+  screenshot would record that as though it were the product working.
+- A **console error** is reported after the run but does not fail it. The SPA
+  asks for a team's lineup before one exists and the server answers 404, which
+  the client handles; that is normal on seven captures here. Failing on it
+  would fire on every team surface, and a gate that always fires is one the
+  operator learns to skip.
+
+A run with any failed capture exits non-zero, so the target can gate a script.
 
 ## Why the run is reproducible
 
-A capture has to reproduce byte for byte when nothing changed, or the "what
-changed" list is noise. Two things make that true and both are load-bearing:
-Chromium's text rasterisation is pinned at launch (`DETERMINISTIC_RENDERING` in
-`run.mjs`), and every screenshot is taken with animations finished and the text
-caret hidden. Without the first, six captures landed a few grey levels apart on
-every run; without the second, a CSS transition caught mid-flight moved one
-input border by 40 levels. The comparison still allows a small tolerance, set
-from those measurements, because the residue does not quite reach zero.
+A capture has to reproduce closely enough that an unchanged surface never
+reaches the changed list, or that list is noise. Two things make that true and
+both are load-bearing: Chromium's text rasterisation is pinned at launch
+(`DETERMINISTIC_RENDERING` in `run.mjs`), and every screenshot is taken with
+animations finished and the text caret hidden. Without the first, six captures
+differed on every run, by as much as 50 grey levels; without the second, a CSS
+transition caught mid-flight moved one input border by 40. Those two fixes take
+the residue down to at most 1 grey level over a handful of pixels, which is not
+zero, so the comparison keeps a tolerance set from those measurements.

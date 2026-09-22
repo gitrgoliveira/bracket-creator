@@ -3,7 +3,7 @@
 // dojo-aware resolution, primary selection (implicit/pinned/stale), and the
 // primary hero next-match builder. Pure functions only: no DOM, no hooks.
 import { describe, it, expect } from 'vitest';
-import { readSource } from './helpers/source.js';
+import { readSource, readCode } from './helpers/source.js';
 import {
   entryKey,
   normalizeWatchlistEntry,
@@ -287,6 +287,21 @@ describe('heroEntry vs findPrimaryEntry', () => {
     const src = readSource('viewer_home.jsx');
     expect(src).toMatch(/const \{ entries, keys, outstanding \} = resolveFreshTokens\(/);
     expect(src).toMatch(/if \(!rosterLoaded && outstanding > 0\) return;/);
+  });
+
+  // The ledger records what LANDED. A resolved token that the merge dropped at
+  // WATCHLIST_MAX was being recorded as applied, after which the strip removed
+  // the only copy of the link: the reader could prune to make room and reload
+  // and get nothing. Read through readCode so the comment explaining this,
+  // which necessarily names the same symbols, cannot satisfy the assertions.
+  it('viewer_home records a shared token only once it is in the list', () => {
+    const code = readCode('viewer_home.jsx');
+    expect(code).toMatch(/const landed = landedSharedKeys\(watchlist, entries, keys\);/);
+    expect(code).toMatch(/landed\.forEach\(\(k\) => sharedApplied\.current\.add\(k\)\);/);
+    expect(code, 'the unconditional record is what this replaced')
+      .not.toMatch(/keys\.forEach\(\(k\) => sharedApplied\.current\.add\(k\)\);/);
+    expect(code, 'and an unlanded token keeps the query, whatever the roster is doing')
+      .toMatch(/if \(keys\.length > landed\.length\) return;/);
   });
 });
 

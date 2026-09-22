@@ -12,7 +12,7 @@
 // mergeSharedWatchlist is that rule with a name. Every test below is written
 // to go red on the exact mutation that escaped.
 import { describe, it, expect } from 'vitest';
-import { mergeSharedWatchlist, buildRoster, WATCHLIST_MAX } from '../viewer_watchlist_core.jsx';
+import { mergeSharedWatchlist, landedSharedKeys, buildRoster, WATCHLIST_MAX } from '../viewer_watchlist_core.jsx';
 import { resolveFreshTokens } from '../watchlist_link.jsx';
 
 const player = (id, name) => ({ type: 'player', id, name, dojo: 'Hagane' });
@@ -162,5 +162,55 @@ describe('resolveFreshTokens', () => {
       expect(resolveFreshTokens([], [], new Set()).outstanding).toBe(0);
       expect(resolveFreshTokens(null, [], null).outstanding).toBe(0);
     });
+  });
+});
+
+// landedSharedKeys: the ledger must record what ARRIVED, not what resolved.
+//
+// The gap between the two is WATCHLIST_MAX. A reader already at the cap gets
+// nothing from a link, and recording those tokens as applied told the ledger
+// otherwise -- after which viewer_home stripped ?w= and the reader had no copy
+// of the link left to retry with once they had pruned.
+describe('landedSharedKeys', () => {
+  const player = (n) => ({ type: 'player', id: 'p' + n, name: 'P' + n, dojo: 'D' });
+  const keyFor = (n) => 'competitor:K' + n;
+
+  it('reports every key when the list has room', () => {
+    const entries = [player(1), player(2)];
+    const keys = [keyFor(1), keyFor(2)];
+    expect(landedSharedKeys([], entries, keys)).toEqual(keys);
+  });
+
+  it('reports NOTHING when the device is already at the cap', () => {
+    const full = Array.from({ length: WATCHLIST_MAX }, (_, i) => player(100 + i));
+    expect(full).toHaveLength(WATCHLIST_MAX);
+    expect(landedSharedKeys(full, [player(1)], [keyFor(1)])).toEqual([]);
+  });
+
+  it('reports only the ones that FIT when the link straddles the cap', () => {
+    // One free slot, two shared entries: the first lands, the second does not,
+    // and the caller must keep retrying for the second alone.
+    const nearlyFull = Array.from({ length: WATCHLIST_MAX - 1 }, (_, i) => player(100 + i));
+    const landed = landedSharedKeys(nearlyFull, [player(1), player(2)], [keyFor(1), keyFor(2)]);
+    expect(landed).toEqual([keyFor(1)]);
+  });
+
+  it('counts an entry the reader ALREADY watches as landed', () => {
+    // It is in the list, so the link has nothing left to do for it. Retrying
+    // forever on a duplicate would keep ?w= in the address bar for good.
+    const landed = landedSharedKeys([player(1)], [player(1)], [keyFor(1)]);
+    expect(landed).toEqual([keyFor(1)]);
+  });
+
+  it('the pruned-then-reload retry: what did not land, lands later', () => {
+    const full = Array.from({ length: WATCHLIST_MAX }, (_, i) => player(100 + i));
+    expect(landedSharedKeys(full, [player(1)], [keyFor(1)]), 'nothing at the cap').toEqual([]);
+    const pruned = full.slice(1); // the reader removes one entry
+    expect(landedSharedKeys(pruned, [player(1)], [keyFor(1)]), 'room now').toEqual([keyFor(1)]);
+  });
+
+  it('tolerates empty and missing inputs', () => {
+    expect(landedSharedKeys([], [], [])).toEqual([]);
+    expect(landedSharedKeys(null, null, null)).toEqual([]);
   });
 });

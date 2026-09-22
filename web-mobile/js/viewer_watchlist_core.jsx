@@ -208,6 +208,35 @@ export function mergeSharedWatchlist(existing, shared) {
   return normalizeWatchlist([...(existing || []), ...(shared || [])]);
 }
 
+// landedSharedKeys: which of a shared link's tokens actually ENDED UP in the
+// list, given what the device already watches.
+//
+// It exists because the merge above can drop entries in silence:
+// normalizeWatchlist caps at WATCHLIST_MAX and the existing entries are
+// concatenated first, so a reader already at the cap receives nothing from a
+// link. The list is right to refuse -- the cap is the cap -- but the CALLER's
+// ledger is not, and that is what this answers.
+//
+// viewer_home records a token as applied so that a healing roster can never
+// re-add an entry the reader has since pruned. Recording one that never
+// landed inverted that protection into data loss: nothing was added, the
+// ledger said it had been, and the ?w= strip then removed the only copy of
+// the link, so pruning to make room and reloading brought back nothing. A
+// token that did not land is therefore NOT applied, and the caller keeps the
+// query until it is.
+//
+// `entries` and `keys` are the index-aligned pair resolveFreshTokens returns
+// (it pushes to both in the same step); that alignment is stated there.
+export function landedSharedKeys(existing, entries, keys) {
+  const present = new Set(mergeSharedWatchlist(existing, entries).map(entryKey));
+  const landed = [];
+  (entries || []).forEach((e, i) => {
+    const key = (keys || [])[i];
+    if (key && present.has(entryKey(e))) landed.push(key);
+  });
+  return landed;
+}
+
 // migrateWatchlistOnLoad: fold the legacy single "followed player"
 // (bc_my_player_id / bc_my_player_name) into the watchlist exactly once.
 // Returns { list, migrated }:

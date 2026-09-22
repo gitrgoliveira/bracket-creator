@@ -25,10 +25,10 @@
 // read.
 //
 // watchlist_link.jsx is the one that is not a bare leaf: it imports
-// competitor_search.jsx. That is still safe, because the leaf wording above is
-// a sufficient condition and not the real one -- what matters is that the
-// chain is ACYCLIC and no module in it is script-tagged, so none of it can be
-// evaluated twice or mid-cycle.
+// competitor_identity.jsx, which has no imports of its own. That is still
+// safe, because the leaf wording above is a sufficient condition and not the
+// real one -- what matters is that the chain is ACYCLIC and no module in it is
+// script-tagged, so none of it can be evaluated twice or mid-cycle.
 import { NumberedName } from './numbered_name.jsx';
 import { sideWord, sideFillClass } from './side_cell.jsx';
 import { competitorMatchesQuery } from './competitor_search.jsx';

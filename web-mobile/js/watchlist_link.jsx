@@ -41,16 +41,21 @@
 //
 // SEPARATOR. "," and not ".", and the query is read RAW rather than through
 // URLSearchParams.get. encodeURIComponent leaves "." untouched, so a dojo
-// named "St. Mary's Kendo Club" would have split into two tokens; it DOES
+// named "St. Mary's Dojo" would have split into two tokens; it DOES
 // escape "," to %2C. But URLSearchParams.get decodes before we ever see the
 // string, handing back a literal comma that then splits wrongly -- so the
 // decode has to happen per token, after the split, never before it.
 //
-// Not a pure leaf: it imports competitor_search.jsx (itself a leaf) for the
-// one thing it must not restate, "what number does this competitor hold".
-// The chain viewer_watchlist -> watchlist_link -> competitor_search is
-// acyclic and none of the three is script-tagged, which is the real safety
-// condition behind viewer_watchlist.jsx's import note.
+// Not a pure leaf: it imports competitor_identity.jsx for the one thing it
+// must not restate, "what number does this competitor hold". That module has
+// no imports at all, so the chain viewer_watchlist -> watchlist_link ->
+// competitor_identity is acyclic and none of the three is script-tagged,
+// which is the real safety condition behind viewer_watchlist.jsx's note.
+//
+// This said competitor_search.jsx until 2026-09-23, naming an edge that does
+// not exist: the accessor was moved to the identity leaf precisely so that a
+// caller could read the FIELD without this module's typed-query rule, and
+// this line did not move with it. Do not "restore" it.
 import { numberOf } from './competitor_identity.jsx';
 
 export const WATCHLIST_PARAM = "w";
@@ -232,7 +237,14 @@ function tokenKey(tok) {
 //
 // Recording only what RESOLVED is what makes the retry safe in the other
 // direction: an entry the reader has since removed is never re-added, because
-// its token was recorded the first time it resolved.
+// its token was recorded the first time it resolved. Resolving is necessary
+// and not sufficient, though: the caller records a token once it has actually
+// LANDED in the list (landedSharedKeys, viewer_watchlist_core.jsx), because
+// the merge can still drop a resolved entry at WATCHLIST_MAX.
+//
+// `entries` and `keys` are INDEX-ALIGNED: both are pushed in the same step
+// below, so keys[i] is the token that produced entries[i]. landedSharedKeys
+// reads them that way.
 //
 // `outstanding` counts the tokens this pass could neither skip as already
 // applied nor resolve: the ones a later roster might still answer for. It is

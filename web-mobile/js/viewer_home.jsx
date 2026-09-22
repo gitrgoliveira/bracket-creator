@@ -2,7 +2,7 @@
 // Extracted from viewer.jsx (mp-pxxc step 10).
 
 import { competitionKindLabel, compMatches, tournamentMatches, TournamentInfo, compareDmy } from './viewer_utils.jsx';
-import { matchParticipantIds, addPlayerToWatchlist, mergeSharedWatchlist, resolveEntryPlayerIds, resolveWatchedPlayers, findPrimaryEntry, heroEntry, buildPrimaryNextMatch, buildPrimaryLastResult, buildRoster, rosterFullyLoaded, useWatchlist, buildWatchedSets, matchInvolvesWatchedSet } from './viewer_watchlist_core.jsx';
+import { matchParticipantIds, addPlayerToWatchlist, mergeSharedWatchlist, resolveEntryPlayerIds, resolveWatchedPlayers, findPrimaryEntry, heroEntry, landedSharedKeys, buildPrimaryNextMatch, buildPrimaryLastResult, buildRoster, rosterFullyLoaded, useWatchlist, buildWatchedSets, matchInvolvesWatchedSet } from './viewer_watchlist_core.jsx';
 import { runOnce, notifEnable, notifDisable, useChimeMuted, isFollowedMatchOnDeck, useFollowedMatchAlert, useSecondaryWatchAlert, MyMatchAlertBanner } from './viewer_alerts.jsx';
 import { notificationSupported } from './viewer_notifications.jsx';
 import { VSchedItem, MatchViewerModal } from './viewer_match.jsx';
@@ -192,7 +192,19 @@ export function ViewerHome({ tournament, onSelectCompetition, onAdminClick, onOp
     const { entries, keys, outstanding } = resolveFreshTokens(
       parseWatchlistTokens(window.location.search), roster, sharedApplied.current,
     );
-    keys.forEach((k) => sharedApplied.current.add(k));
+    // Applied means LANDED, not merely resolved. The merge drops what will
+    // not fit (WATCHLIST_MAX, existing entries first), so a reader already at
+    // the cap receives nothing from a link -- and recording those tokens
+    // anyway told the ledger they had arrived, after which the strip below
+    // removed the only copy of the link. Pruning to make room and reloading
+    // then brought back nothing. landedSharedKeys owns that question.
+    //
+    // Computed against `watchlist` while the write goes through the functional
+    // form below: if a concurrent update makes `prev` differ, the ledger is
+    // merely incomplete, never wrong, and this effect re-runs on the resulting
+    // watchlist change and retries whatever it did not record.
+    const landed = landedSharedKeys(watchlist, entries, keys);
+    landed.forEach((k) => sharedApplied.current.add(k));
     // MERGE, never replace: arriving at someone else's link must not delete
     // the list you already keep. The rule is mergeSharedWatchlist's, not this
     // effect's -- it used to be spelled out here, which is exactly how it got
@@ -209,6 +221,13 @@ export function ViewerHome({ tournament, onSelectCompetition, onAdminClick, onOp
     // the thing the strip exists to prevent, arrived at through the failure
     // the retry exists to survive. With no `?w=` at all there are no tokens,
     // so this settles on the first pass and strips nothing.
+    //
+    // A token that resolved but did NOT land is outstanding too, and this one
+    // blocks the strip whatever the roster is doing: the roster has nothing to
+    // do with a full list. Keeping ?w= costs the reader nothing (no entry of
+    // theirs can come back, because none was added) and is the only thing that
+    // lets them prune and reload to collect the rest.
+    if (keys.length > landed.length) return;
     if (!rosterLoaded && outstanding > 0) return;
     sharedSettled.current = true;
     // Strip ?w= once there is nothing left to resolve. The ledger above lives

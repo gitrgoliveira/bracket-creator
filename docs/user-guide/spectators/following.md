@@ -29,13 +29,15 @@ Tap a competition to see its schedule, standings, and bracket. Aka (red) and Shi
 
 Once the draw for a competition has run, its competitors are numbered. The number starts with a short prefix that belongs to that competition, so "K12" and "M12" are two different people in two different draws. Swiss competitions are the exception and use no numbers at all.
 
-Type the number the way it is printed on the draw sheet, prefix included:
+The same number identifies that competitor everywhere it appears: on their tag, on the pool or draw sheet, on the Names to Print cards, at the desk, and beside their name on screen in the viewer and on the venue's display boards. Type it the way it is printed, prefix included:
 
 - **The prefix on its own** brings up that whole draw. Type "K" and every K number is listed, along with anyone whose name or dojo happens to contain a "k".
 - **The prefix and the digits** finds that one competitor. "K12" finds K12, and not K120.
 - **Digits on their own** find nobody. "12" is not a competitor number, because it does not say which competition it belongs to.
 
 Names and dojos still match on any part of what you type, so a surname fragment is enough for those. Only the number needs to be typed in full.
+
+Refer to [QR codes on competitor tags](#qr-codes-on-competitor-tags): if you have the tag in your hand, scanning it opens that competitor directly, with no typing at all.
 
 If someone is entered in more than one competition, they have a separate number in each one, and the filter lists them once per competition. Searching either number finds them, and each result tells you which competition it belongs to.
 

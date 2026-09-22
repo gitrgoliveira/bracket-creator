@@ -8,7 +8,7 @@ import { notificationSupported } from './viewer_notifications.jsx';
 import { VSchedItem, MatchViewerModal } from './viewer_match.jsx';
 import { buildWatchlistUpcoming, usePrimaryWatch, WATCHED_UPCOMING_LIST_MAX } from './viewer_schedule.jsx';
 import { competitorNumber } from './competitor_search.jsx';
-import { parseWatchlistTokens, resolveWatchlistTokens } from './watchlist_link.jsx';
+import { parseWatchlistTokens, resolveFreshTokens } from './watchlist_link.jsx';
 
 const { useState, useMemo, useRef: useRefV, useEffect } = React;
 const StatusBadge = window.StatusBadge;
@@ -154,29 +154,44 @@ export function ViewerHome({ tournament, onSelectCompetition, onAdminClick, onOp
   // the resolved player: they become the implicit primary when they land as
   // the sole entry.
   const deepLinkApplied = useRefV(false);
+  // Which ?w= tokens have already been folded in, and whether we can stop
+  // looking. A token is recorded ONLY once it resolves, which is what makes a
+  // partially-loaded roster safe: a competition whose participants failed to
+  // load contributes nothing on this pass, and its entries land on a later one
+  // when that roster arrives. Before this, the whole link was applied once
+  // against whatever had loaded, so a coach's 20-entry link could silently
+  // arrive as 15 with no retry and no sign to either end.
+  //
+  // Recording the tokens is equally load-bearing in the other direction: it is
+  // what stops a healing roster re-adding an entry the reader has since
+  // removed. Once rosterFullyLoaded is true there is nothing left to wait for,
+  // so the effect stops re-resolving.
+  const sharedApplied = useRefV(new Set());
+  const sharedSettled = useRefV(false);
   React.useEffect(() => {
-    if (deepLinkApplied.current) return;
     if (typeof window === "undefined" || !window.location) return;
     if (roster.length === 0) return; // wait until participants are loaded
     const search = window.location.search;
-    const result = resolveDeepLink(search, roster);
-    // bc-wlpl: the multi-entry permalink, resolved under the SAME two gates
-    // that already protect the single-player one, because it needs both for
-    // the same reasons -- tokens cannot resolve against a roster that has not
-    // arrived, and re-applying on every render would fight an operator
-    // removing an entry they were just handed.
-    const shared = resolveWatchlistTokens(parseWatchlistTokens(search), roster);
+    const result = deepLinkApplied.current ? null : resolveDeepLink(search, roster);
     deepLinkApplied.current = true;
     if (result && result.player) addWatchPlayer(result.player);
+
+    // bc-wlpl: the multi-entry permalink. Which tokens are still outstanding
+    // and what they resolve to is resolveFreshTokens' rule, not this effect's.
+    if (sharedSettled.current) return;
+    const { entries, keys } = resolveFreshTokens(
+      parseWatchlistTokens(search), roster, sharedApplied.current,
+    );
+    keys.forEach((k) => sharedApplied.current.add(k));
     // MERGE, never replace: arriving at someone else's link must not delete
     // the list you already keep. The rule is mergeSharedWatchlist's, not this
     // effect's -- it used to be spelled out here, which is exactly how it got
     // silently replaced by "the shared list alone" with no test to notice.
-    if (shared.length) setWatchlist((prev) => mergeSharedWatchlist(prev, shared));
-    // Runs exactly once, gated by the deepLinkApplied ref; addWatchPlayer is an
-    // unstable callback we deliberately do not depend on.
+    if (entries.length) setWatchlist((prev) => mergeSharedWatchlist(prev, entries));
+    if (rosterLoaded) sharedSettled.current = true;
+    // addWatchPlayer is an unstable callback we deliberately do not depend on.
     // oxlint-disable-next-line react-hooks/exhaustive-deps
-  }, [roster, watchlist]);
+  }, [roster, watchlist, rosterLoaded]);
 
   // global "across-all-competitions" lists for the home page
   const allMatches = useMemo(() => tournamentMatches(t), [t]);

@@ -177,6 +177,45 @@ export function resolveWatchlistTokens(tokens, roster) {
   return out;
 }
 
+// tokenKey: the identity of a parsed token, for remembering that it has
+// already been folded into the watchlist.
+export function tokenKey(tok) {
+  return tok ? `${tok.kind}:${tok.value}` : "";
+}
+
+// resolveFreshTokens: the tokens that have NOT been applied yet and that
+// resolve against the roster as it stands right now, with the keys to record
+// for the ones that did.
+//
+// Token by token, and that is the whole point. A tournament's payload can come
+// back with one competition's participants missing (rosterFullyLoaded exists
+// because that is real), and resolving the link as a single all-or-nothing
+// batch meant a coach's 20-entry link could arrive as 15, permanently, with no
+// retry and no sign to either end. Resolving individually lets the rest land on
+// a later pass when that roster arrives.
+//
+// Recording only what RESOLVED is what makes the retry safe in the other
+// direction: an entry the reader has since removed is never re-added, because
+// its token was recorded the first time it resolved.
+//
+// Lives here, not inline in the effect that calls it. The last rule this
+// feature kept inside a useEffect was silently replaced and no test could
+// reach it.
+export function resolveFreshTokens(tokens, roster, appliedKeys) {
+  const seen = appliedKeys || new Set();
+  const entries = [];
+  const keys = [];
+  (tokens || []).forEach((tok) => {
+    const key = tokenKey(tok);
+    if (!key || seen.has(key)) return;
+    const [entry] = resolveWatchlistTokens([tok], roster);
+    if (!entry) return; // not loaded yet, or genuinely not in this tournament
+    entries.push(entry);
+    keys.push(key);
+  });
+  return { entries, keys };
+}
+
 // watchlistLinkFitsQR: can this URL be a QR code at all? Asked BEFORE offering
 // the control, rather than calling renderQR and catching its throw. The byte
 // length is what matters, not the character count: a non-ASCII dojo name costs

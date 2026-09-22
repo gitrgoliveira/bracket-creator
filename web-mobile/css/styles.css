@@ -8810,19 +8810,23 @@ abbr.msb-lab { text-decoration: none; cursor: help; }
 }
 .watchlist-share-btn:hover { background: var(--accent-soft); color: var(--accent); }
 
-.wl-share {
+/* The shared "here is a link, take it" sheet (ui.jsx ShareLinkModal), used by
+   the admin registration link and the public watchlist permalink. These rules
+   replace the inline styles the admin sheet used to carry, so the two surfaces
+   cannot drift apart on spacing the way they drifted on markup. */
+.share-link {
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 14px;
+  gap: 16px;
 }
 /* pixelated: the QR is drawn at one canvas pixel per module and scaled up, so
    smoothing it would blur the module edges a camera needs to resolve. */
-.wl-share__qr {
+.share-link__qr {
   display: block;
   image-rendering: pixelated;
 }
-.wl-share__url {
+.share-link__url {
   width: 100%;
   background: var(--surface-2);
   border-radius: 6px;
@@ -8830,19 +8834,19 @@ abbr.msb-lab { text-decoration: none; cursor: help; }
   font-family: var(--font-mono, monospace);
   font-size: 13px;
   /* The URL is one unbroken token, so it must be allowed to break anywhere or
-     it overflows the modal on a phone. user-select:all makes one tap select
+     it overflows the sheet on a phone. user-select:all makes one tap select
      the whole thing where the clipboard API is unavailable (plain http on a
      venue LAN), which is the fallback the Copy button lands on. */
   word-break: break-all;
   user-select: all;
 }
-.wl-share__note {
+.share-link__note {
   margin: 0;
   font-size: 13px;
   color: var(--ink-3);
   text-align: center;
 }
-.wl-share__note--ok { color: var(--accent); font-weight: 500; }
+.share-link__note--ok { color: var(--accent); font-weight: 500; }
 
 /* vsched inside the watchlist card: flat row list, no nested card boxes.
    Regular items become hairline-separated rows; running items keep their

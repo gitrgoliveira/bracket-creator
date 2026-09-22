@@ -521,6 +521,56 @@ function ShiaijoCountNotes({ error, hint }) {
   );
 }
 
+// ShareLinkModal: the ONE "here is a link, take it" sheet. A QR, the URL as
+// selectable text, whatever the caller wants to say about it, and Copy/Close.
+//
+// Two surfaces share it and must not drift apart: the admin's registration
+// link and the public watchlist permalink (bc-wlpl). The watchlist one started
+// life as a second, near-identical copy -- same Modal, same canvas, same URL
+// block, same footer -- which is exactly the duplication this repo keeps
+// paying for, so it was folded back into this.
+//
+// What the two genuinely differ on is passed in, not forked: the title, the
+// prose under the URL (`children`), whether a QR is possible at all (`showQR`
+// -- a watchlist link carrying ids can exceed what a QR holds), and what
+// happens after a copy (`onCopy`, so the admin can raise its toast and the
+// watchlist can show a persistent line).
+//
+// window.renderQR rather than an import: ui.jsx is script-tagged BEFORE qr.js
+// (index.html lines 116 and 128), so the global does not exist at module-eval
+// time here. Reading it inside the effect defers that to render, by which
+// point every module script has run.
+function ShareLinkModal({ title, url, onClose, onCopy, showQR = true, children }) {
+  const canvasRef = React.useRef(null);
+
+  React.useEffect(() => {
+    if (!showQR || !canvasRef.current || !window.renderQR) return;
+    try {
+      window.renderQR(canvasRef.current, url, { moduleSize: 6, quietZone: 4 });
+    } catch (e) {
+      // A canvas that will not give a 2d context. The link itself is the
+      // deliverable and still renders below, so this must not take the sheet
+      // down with it.
+      console.error("QR render failed", e);
+    }
+  }, [url, showQR]);
+
+  return (
+    <Modal title={title} onClose={onClose} footer={<>
+      <button type="button" className="btn btn--primary" onClick={() => {
+        copyToClipboard(url).then(() => onCopy && onCopy(true)).catch(() => onCopy && onCopy(false));
+      }}>Copy link</button>
+      <button type="button" className="btn" onClick={onClose}>Close</button>
+    </>}>
+      <div className="share-link">
+        {showQR && <canvas ref={canvasRef} className="share-link__qr" />}
+        <div className="share-link__url" data-testid="share-link-url">{url}</div>
+        {children}
+      </div>
+    </Modal>
+  );
+}
+
 function Modal({ title, onClose, children, footer, size, dismissable = true, className, style, ariaLabel }) {
   useEscapeToClose(dismissable ? onClose : undefined);
   return (
@@ -669,6 +719,7 @@ if (typeof window !== "undefined") {
   window.ShiaijoCountNotes = ShiaijoCountNotes;
   window.Modal = Modal;
   window.copyToClipboard = copyToClipboard;
+  window.ShareLinkModal = ShareLinkModal;
 
   // Split a combined engi pair name ("Name 1 - Name 2") into [member1, member2].
   // member2 is "" when the name carries no pair separator. Splits on the FIRST

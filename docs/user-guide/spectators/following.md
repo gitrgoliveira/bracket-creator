@@ -31,7 +31,7 @@ Once the draw for a competition has run, its competitors are numbered. The numbe
 
 Type the number the way it is printed on the draw sheet, prefix included:
 
-- **The prefix on its own** lists everyone in that draw. Type "K" to see the whole K competition.
+- **The prefix on its own** brings up that whole draw. Type "K" and every K number is listed, along with anyone whose name or dojo happens to contain a "k".
 - **The prefix and the digits** finds that one competitor. "K12" finds K12, and not K120.
 - **Digits on their own** find nobody. "12" is not a competitor number, because it does not say which competition it belongs to.
 

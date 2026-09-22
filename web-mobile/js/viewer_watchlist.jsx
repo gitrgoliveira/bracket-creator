@@ -45,7 +45,6 @@ export const ROSTER_NOT_LOADED =
 
 const { useState, useMemo, useCallback } = React;
 const useRefV = React.useRef;
-const useEffectV = React.useEffect;
 const pluralize = window.pluralize;
 
 // Bell icon for the watchlist alert toggle (muted = diagonal slash).
@@ -388,69 +387,47 @@ function WatchHeroCard({ nextMatch, primaryIds, entityLabel, onMatchClick }) {
 // (bc-wlpl). The list otherwise lives only in localStorage, so it does not
 // survive a second phone, another browser profile or a cleared cache.
 //
-// Modal, renderQR and QR_MAX_BYTES are read from `window` at RENDER time,
-// which is this file's convention for anything outside its leaf imports (see
-// the header). qr.js is script-tagged and publishes both, exactly as the
-// /display overlay consumes it.
+// The SHEET is ui.jsx's ShareLinkModal, shared with the admin's registration
+// link; this component supplies only what the two genuinely differ on. It was
+// briefly a second copy of that sheet, which is the duplication this repo
+// keeps paying for, so it was folded back.
 //
-// The QR is OFFERED, not assumed. A QR tops out at QR_MAX_BYTES bytes
-// INCLUDING the origin, so a number-encoded list of around 45 fits and a
-// list still carrying ids (nobody has a number until the draw runs) stops
-// fitting at about five. Asking watchlistLinkFitsQR first is deliberate:
-// the alternative is calling renderQR and catching its throw, which is
-// control flow by exception for a fact we can simply measure.
+// ShareLinkModal and QR_MAX_BYTES are read from `window` at RENDER time,
+// which is this file's convention for anything outside its leaf imports (see
+// the header). ui.jsx and qr.js are both script-tagged ahead of this module
+// and publish them, exactly as the /display overlay consumes renderQR.
 function WatchlistShareModal({ url, onClose }) {
-  const Modal = window.Modal;
-  const canvasRef = useRefV(null);
   const [copied, setCopied] = useState(false);
+  // A QR is OFFERED, not assumed: it tops out at QR_MAX_BYTES INCLUDING the
+  // origin, so a number-encoded list of around 45 fits while a list still
+  // carrying ids (nobody has a number until the draw runs) stops fitting at
+  // about five. Measuring beats calling renderQR and catching its throw.
   const fits = watchlistLinkFitsQR(url, window.QR_MAX_BYTES);
-
-  useEffectV(() => {
-    if (!fits || !canvasRef.current || !window.renderQR) return;
-    try {
-      window.renderQR(canvasRef.current, url, { moduleSize: 5, quietZone: 4 });
-    } catch (e) {
-      // NOT the capacity case: `fits` already ruled that out against the
-      // encoder's own published ceiling. This is for a canvas that will not
-      // give a 2d context, which is a browser condition rather than anything
-      // about the payload. The link is the deliverable and still renders
-      // below, so a failed QR must not take the modal down with it.
-      console.error("watchlist QR render failed", e);
-    }
-  }, [url, fits]);
+  const ShareLinkModal = window.ShareLinkModal;
 
   return (
-    <Modal title="Share your watchlist" onClose={onClose} footer={<>
-      {/* window.copyToClipboard and window.Modal are read unguarded, like
-          window.pluralize at the top of this file: index.html script-tags
-          ui.jsx and qr.js ahead of viewer_watchlist.js, and module scripts
-          execute in order, so all three are published before anything here
-          renders. A guard would be describing a state index.html prevents. */}
-      <button type="button" className="btn btn--primary" onClick={() => {
-        window.copyToClipboard(url).then(() => setCopied(true)).catch(() => setCopied(false));
-      }}>Copy link</button>
-      <button type="button" className="btn" onClick={onClose}>Close</button>
-    </>}>
-      <div className="wl-share">
-        {fits && <canvas ref={canvasRef} className="wl-share__qr" />}
-        <div className="wl-share__url" data-testid="watchlist-share-url">{url}</div>
-        {/* The copy confirmation is a PERSISTENT line, not a toast: a toast
-            dwells for under three seconds, which is long enough to miss and
-            too short to photograph, and this one answers "did that work?"
-            about an action with no other visible effect. */}
-        {copied && <p className="wl-share__note wl-share__note--ok" role="status">Copied.</p>}
-        <p className="wl-share__note">
-          Opening this link ADDS these competitors to someone's watchlist. It does not replace what they already watch.
-        </p>
-        {/* Stated because it is the cost of the short, scannable form the
-            operator chose (bc-wlpl): a competitor is identified by their
-            number where they have one, and a number belongs to a DRAW
-            POSITION, so regenerating a draw re-points it. */}
-        <p className="wl-share__note">
-          Share it on the day. Competitor numbers come from the draw, so a link made before a draw is regenerated can point at someone else afterwards.
-        </p>
-      </div>
-    </Modal>
+    <ShareLinkModal
+      title="Share your watchlist"
+      url={url}
+      onClose={onClose}
+      onCopy={setCopied}
+      showQR={fits}
+    >
+      {/* A PERSISTENT line, not a toast: a toast dwells for under three
+          seconds, which is long enough to miss, and this one answers "did that
+          work?" about an action with no other visible effect. */}
+      {copied && <p className="share-link__note share-link__note--ok" role="status">Copied.</p>}
+      <p className="share-link__note">
+        Opening this link ADDS these competitors to someone's watchlist. It does not replace what they already watch.
+      </p>
+      {/* Stated because it is the cost of the short, scannable form the
+          operator chose (bc-wlpl): a competitor is identified by their number
+          where they have one, and a number belongs to a DRAW POSITION, so
+          regenerating a draw re-points it. */}
+      <p className="share-link__note">
+        Share it on the day. Competitor numbers come from the draw, so a link made before a draw is regenerated can point at someone else afterwards.
+      </p>
+    </ShareLinkModal>
   );
 }
 

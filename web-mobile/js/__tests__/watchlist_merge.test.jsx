@@ -12,7 +12,8 @@
 // mergeSharedWatchlist is that rule with a name. Every test below is written
 // to go red on the exact mutation that escaped.
 import { describe, it, expect } from 'vitest';
-import { mergeSharedWatchlist, WATCHLIST_MAX } from '../viewer_watchlist_core.jsx';
+import { mergeSharedWatchlist, buildRoster, WATCHLIST_MAX } from '../viewer_watchlist_core.jsx';
+import { resolveFreshTokens } from '../watchlist_link.jsx';
 
 const player = (id, name) => ({ type: 'player', id, name, dojo: 'Hagane' });
 const dojo = (name) => ({ type: 'dojo', dojo: name });
@@ -79,5 +80,59 @@ describe('mergeSharedWatchlist', () => {
     const shared = [{ type: 'player', name: 'No id at all' }, player('p2', 'Kenji Mori')];
     const out = mergeSharedWatchlist(mine, shared);
     expect(out.map((e) => e.id)).toEqual(['p1', 'p2']);
+  });
+});
+
+// bc-wlpl: which tokens of a shared link are still outstanding, and what they
+// resolve to against the roster AS IT STANDS. Lives beside the merge rule
+// because the two together are what "opening a link" means.
+describe('resolveFreshTokens', () => {
+  const comp = (id, players) => ({ id, name: id, status: 'running', players });
+  const alice = { id: 'A-p1', name: 'Alice', dojo: 'Shibuya', number: 'K1' };
+  const bob = { id: 'B-p1', name: 'Bob', dojo: 'Kobe', number: 'V2' };
+  const tok = (value) => ({ kind: 'competitor', value });
+
+  it('resolves what the roster currently holds and reports the keys to remember', () => {
+    const roster = buildRoster([comp('A', [alice])]);
+    const { entries, keys } = resolveFreshTokens([tok('K1')], roster, new Set());
+    expect(entries.map((e) => e.id)).toEqual(['A-p1']);
+    expect(keys).toEqual(['competitor:K1']);
+  });
+
+  it('A PARTIALLY LOADED ROSTER LOSES NOTHING: the rest land on a later pass', () => {
+    // THE regression this function exists for. A tournament payload can come
+    // back with one competition's participants missing, and the link used to
+    // be applied once against whatever had arrived -- so those entries were
+    // dropped permanently, with no retry and no sign to either end.
+    const applied = new Set();
+    const partial = buildRoster([comp('A', [alice])]);          // B has not loaded
+    const first = resolveFreshTokens([tok('K1'), tok('V2')], partial, applied);
+    expect(first.entries.map((e) => e.id), 'only what loaded').toEqual(['A-p1']);
+    first.keys.forEach((k) => applied.add(k));
+
+    const full = buildRoster([comp('A', [alice]), comp('B', [bob])]); // B arrives
+    const second = resolveFreshTokens([tok('K1'), tok('V2')], full, applied);
+    expect(second.entries.map((e) => e.id), 'the straggler lands now').toEqual(['B-p1']);
+    expect(second.entries, 'and Alice is NOT offered twice').toHaveLength(1);
+  });
+
+  it('never re-offers a token already applied, so a removed entry stays removed', () => {
+    // The other half of the retry being safe. Without this, a roster that
+    // heals would re-add a competitor the reader had just deleted.
+    const roster = buildRoster([comp('A', [alice])]);
+    const applied = new Set(['competitor:K1']);
+    expect(resolveFreshTokens([tok('K1')], roster, applied).entries).toEqual([]);
+  });
+
+  it('a token that resolves to nobody is not recorded, so it is retried', () => {
+    const roster = buildRoster([comp('A', [alice])]);
+    const { entries, keys } = resolveFreshTokens([tok('ZZ99')], roster, new Set());
+    expect(entries).toEqual([]);
+    expect(keys, 'not recorded: the roster may simply not hold them YET').toEqual([]);
+  });
+
+  it('tolerates empty and missing inputs', () => {
+    expect(resolveFreshTokens([], [], new Set()).entries).toEqual([]);
+    expect(resolveFreshTokens(null, [], null).entries).toEqual([]);
   });
 });

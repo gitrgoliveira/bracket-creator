@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import {
-  competitorNumbers,
+  competitorNumber,
   matchesCompetitorNumber,
   competitorMatchesQuery,
   matchMentions,
@@ -33,7 +33,7 @@ describe('matchesCompetitorNumber; the number rule', () => {
 
   cases.forEach(([q, expectedHits]) => {
     it(`"${q}" -> [${expectedHits.join(', ')}]`, () => {
-      const hits = roster.numbers.filter((n) => matchesCompetitorNumber({ numbers: [n] }, q));
+      const hits = roster.numbers.filter((n) => matchesCompetitorNumber({ number: n }, q));
       expect(hits).toEqual(expectedHits);
     });
   });
@@ -43,42 +43,49 @@ describe('matchesCompetitorNumber; the number rule', () => {
   // the anchor back to includes() passes every "hits" row above trivially (a
   // superset still contains the expected subset) but only these rows catch it.
   it('explicit misses: a prefix-typed number never matches a longer or shorter sibling', () => {
-    expect(matchesCompetitorNumber({ numbers: ['K12'] }, 'k1')).toBe(false);
-    expect(matchesCompetitorNumber({ numbers: ['K120'] }, 'k1')).toBe(false);
-    expect(matchesCompetitorNumber({ numbers: ['K120'] }, 'k12')).toBe(false);
-    expect(matchesCompetitorNumber({ numbers: ['K1'] }, 'k12')).toBe(false);
-    expect(matchesCompetitorNumber({ numbers: ['K1', 'K12', 'K120'] }, 'sk1')).toBe(false);
-    expect(matchesCompetitorNumber({ numbers: ['K1'] }, '1')).toBe(false);
-    expect(matchesCompetitorNumber({ numbers: ['K12'] }, '12')).toBe(false);
+    expect(matchesCompetitorNumber({ number: 'K12' }, 'k1')).toBe(false);
+    expect(matchesCompetitorNumber({ number: 'K120' }, 'k1')).toBe(false);
+    expect(matchesCompetitorNumber({ number: 'K120' }, 'k12')).toBe(false);
+    expect(matchesCompetitorNumber({ number: 'K1' }, 'k12')).toBe(false);
+    // A competitor now holds exactly one number, so the old fixture that put
+    // K1/K12/K120 on a single record is re-expressed as three separate ones.
+    expect(matchesCompetitorNumber({ number: 'K1' }, 'sk1')).toBe(false);
+    expect(matchesCompetitorNumber({ number: 'K12' }, 'sk1')).toBe(false);
+    expect(matchesCompetitorNumber({ number: 'K120' }, 'sk1')).toBe(false);
+    expect(matchesCompetitorNumber({ number: 'K1' }, '1')).toBe(false);
+    expect(matchesCompetitorNumber({ number: 'K12' }, '12')).toBe(false);
   });
 
   it('a bare-digit query still finds a legacy unprefixed number, because that number\'s WHOLE value is the digit', () => {
-    expect(matchesCompetitorNumber({ numbers: ['1'] }, '1')).toBe(true);
+    expect(matchesCompetitorNumber({ number: '1' }, '1')).toBe(true);
   });
 
   it('returns false for an empty query and does not throw on a null/undefined competitor', () => {
-    expect(matchesCompetitorNumber({ numbers: ['K1'] }, '')).toBe(false);
+    expect(matchesCompetitorNumber({ number: 'K1' }, '')).toBe(false);
     expect(matchesCompetitorNumber(null, 'k1')).toBe(false);
     expect(matchesCompetitorNumber(undefined, 'k1')).toBe(false);
   });
 });
 
-describe('competitorNumbers; both competitor shapes', () => {
-  it('reads a roster record\'s `numbers` array as-is', () => {
-    expect(competitorNumbers({ numbers: ['K1', 'K12'] })).toEqual(['K1', 'K12']);
+describe('competitorNumber; both competitor shapes', () => {
+  // The `numbers` ARRAY shape this suite used to exercise is gone: a
+  // competitor holds exactly one number, and a roster record and a match
+  // side both carry it under the same `number` field (see the module
+  // header), so there is nothing left for the two shapes to disagree about.
+  it('reads a roster record\'s `number` string', () => {
+    expect(competitorNumber({ number: 'K1' })).toBe('K1');
   });
 
-  it('reads a match side\'s single `number` and wraps it', () => {
-    expect(competitorNumbers({ number: 'K1' })).toEqual(['K1']);
+  it('reads a match side\'s `number` string the same way', () => {
+    expect(competitorNumber({ number: 'K1' })).toBe('K1');
   });
 
-  // A match side belongs to exactly one competition, so `numbers` is never
-  // present there; an absent or empty `number` yields no numbers, not [""].
-  it('returns [] for a side with no number and for a null/undefined competitor', () => {
-    expect(competitorNumbers({ number: '' })).toEqual([]);
-    expect(competitorNumbers({})).toEqual([]);
-    expect(competitorNumbers(null)).toEqual([]);
-    expect(competitorNumbers(undefined)).toEqual([]);
+  // An absent or empty `number` yields "", not an array.
+  it('returns "" for a competitor with no number and for a null/undefined competitor', () => {
+    expect(competitorNumber({ number: '' })).toBe('');
+    expect(competitorNumber({})).toBe('');
+    expect(competitorNumber(null)).toBe('');
+    expect(competitorNumber(undefined)).toBe('');
   });
 });
 
@@ -176,7 +183,7 @@ describe('buildRoster feeding competitor_search', () => {
 
   it('a record with no number matches no number query, which is how a pre-draw roster behaves', () => {
     const roster = buildRoster([comp('A', 'setup', [{ id: 'A-p1', name: 'Alice', dojo: 'Shibuya' }])]);
-    expect(competitorNumbers(roster[0])).toEqual([]);
+    expect(competitorNumber(roster[0])).toBe('');
     expect(matchesCompetitorNumber(roster[0], 'k1')).toBe(false);
     expect(competitorMatchesQuery(roster[0], 'alice'), 'still findable by name').toBe(true);
   });

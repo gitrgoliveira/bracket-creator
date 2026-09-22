@@ -1,5 +1,11 @@
 // competitor_search.jsx: the ONE answer to "does this competitor match what
-// the reader typed" on the public surfaces (bc-nsrc).
+// the reader typed" in the tournament's people-pickers (bc-nsrc).
+//
+// Those pickers are the public watchlist and the schedule filter -- and the
+// schedule filter is mounted on an ADMIN surface too (PlayerMultiFilter, from
+// admin_schedule_page.jsx as well as viewer_schedule.jsx), so this rule is not
+// "public only". That matters because the two admin REFUSALS recorded further
+// down are specific surfaces, not a blanket exemption.
 //
 // It exists because that question was spelled three different ways in three
 // files and two of them could not find a competitor by the number printed on
@@ -53,24 +59,28 @@
 // A leaf with no imports, like numbered_name.jsx and write_result.jsx, so
 // every consumer ES-imports it directly.
 
-// competitorNumbers accepts both competitor shapes this app carries, so one
-// rule serves both without either caller restating it:
-//   a ROSTER record  -> `numbers`, every live number (buildRoster applies the
-//                       hide-finished-ones ruling, viewer_watchlist_core.jsx)
-//   a MATCH SIDE     -> `number`, a single number that is already the right
-//                       one, because a match belongs to exactly one
-//                       competition
-// Exported because resolveDeepLink (viewer_home.jsx) needs the same answer to
-// "which numbers does this competitor hold" while applying its OWN comparison:
-// `?playerNumber=` carries a machine-generated value, so it stays EXACT and
-// CASE-SENSITIVE, pinned by resolve_deep_link.test.jsx ("QR encodes exact
+// competitorNumber: a competitor holds exactly ONE number, and this is the one
+// place that reads it. Both shapes this app carries agree on that:
+//   a ROSTER record (buildRoster output)
+//   a MATCH SIDE, whose number is already the right one because a match
+//   belongs to exactly one competition
+//
+// Someone entered in two competitions does NOT hold two numbers here: ids are
+// minted per competition (a fresh uuid in state.AddParticipant, `${compID}-pN`
+// in the admin client), so they arrive as two separate records with one number
+// each and nothing merges them. An earlier revision of this module accepted a
+// `numbers` ARRAY for that case; nothing ever produced one, so the branch was
+// dead and the comments around it described a feature that does not exist.
+//
+// Exported because resolveDeepLink (viewer_home.jsx) and the watchlist
+// permalink (watchlist_link.jsx) both need the same answer while applying
+// their OWN comparison: those values are machine-generated, so they stay EXACT
+// and CASE-SENSITIVE (pinned by resolve_deep_link.test.jsx, "QR encodes exact
 // value"). That is a different contract from a person typing into a search
-// box, and routing it through the typed-query rule below would have quietly
-// broken it. Shape knowledge is shared; the comparison is not.
-export function competitorNumbers(p) {
-  if (!p) return [];
-  if (Array.isArray(p.numbers)) return p.numbers;
-  return p.number ? [p.number] : [];
+// box, and routing them through the typed-query rule below would quietly break
+// it. Shape knowledge is shared; the comparison is not.
+export function competitorNumber(p) {
+  return p && p.number ? String(p.number) : "";
 }
 
 // matchesCompetitorNumber: THE number rule, stated once. `q` is already
@@ -78,12 +88,9 @@ export function competitorNumbers(p) {
 // before it filters, so re-normalising here would hide a caller that stopped).
 export function matchesCompetitorNumber(p, q) {
   if (!q) return false;
-  const anchored = /\d/.test(q);
-  return competitorNumbers(p).some((raw) => {
-    const n = String(raw || "").toLowerCase();
-    if (!n) return false;
-    return anchored ? n === q : n.startsWith(q);
-  });
+  const n = competitorNumber(p).toLowerCase();
+  if (!n) return false;
+  return /\d/.test(q) ? n === q : n.startsWith(q);
 }
 
 // competitorMatchesQuery: the whole predicate, for a roster record or a match

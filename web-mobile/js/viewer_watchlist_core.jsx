@@ -188,6 +188,25 @@ export function normalizeWatchlist(arr) {
   return out.slice(0, WATCHLIST_MAX);
 }
 
+// mergeSharedWatchlist: what opening a watchlist permalink (bc-wlpl) does to
+// the list already on the device. It ADDS. It never replaces.
+//
+// A one-line rule with an expensive failure mode, and it has already failed
+// once: a commit briefly shipped the shared list alone, so opening a friend's
+// link would have deleted every competitor the recipient was already watching.
+// The whole suite stayed green, because the rule was spelled inline inside an
+// effect where no test could reach it. It has a name now so it can be pinned,
+// and watchlist_merge.test.jsx pins it.
+//
+// normalizeWatchlist does the work that makes ADD safe: it dedupes by entry
+// key with the FIRST occurrence winning, so a competitor already on the device
+// keeps their existing entry rather than being replaced by the incoming copy,
+// and it applies WATCHLIST_MAX to the result so a large shared list cannot
+// push the device over the cap.
+export function mergeSharedWatchlist(existing, shared) {
+  return normalizeWatchlist([...(existing || []), ...(shared || [])]);
+}
+
 // migrateWatchlistOnLoad: fold the legacy single "followed player"
 // (bc_my_player_id / bc_my_player_name) into the watchlist exactly once.
 // Returns { list, migrated }:
@@ -397,8 +416,12 @@ export function buildRoster(competitions) {
         // so one person entered in two competitions holds two DIFFERENT ids
         // and arrives here as two separate records, each with its own number
         // -- which is why both of their numbers are independently searchable
-        // without anything merging them. This branch is pre-existing and kept
-        // as-is; it is not load-bearing for anything in bc-nsrc.
+        // without anything merging them.
+        //
+        // So this branch is effectively unreachable. It is kept because the
+        // `checkedIn` merge predates bc-nsrc and removing a guard needs better
+        // evidence than "I could not reach it"; the `comps.push` was added
+        // with it so the two accumulations cannot diverge if it ever does run.
         existing.comps.push(c.name || "");
         if (checkedIn && !existing.checkedIn) existing.checkedIn = true;
       }

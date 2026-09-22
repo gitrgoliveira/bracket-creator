@@ -2,12 +2,12 @@
 // Extracted from viewer.jsx (mp-pxxc step 10).
 
 import { competitionKindLabel, compMatches, tournamentMatches, TournamentInfo, compareDmy } from './viewer_utils.jsx';
-import { matchParticipantIds, addPlayerToWatchlist, normalizeWatchlist, resolveEntryPlayerIds, resolveWatchedPlayers, findPrimaryEntry, heroEntry, buildPrimaryNextMatch, buildRoster, rosterFullyLoaded, useWatchlist, buildWatchedSets, matchInvolvesWatchedSet } from './viewer_watchlist_core.jsx';
+import { matchParticipantIds, addPlayerToWatchlist, mergeSharedWatchlist, resolveEntryPlayerIds, resolveWatchedPlayers, findPrimaryEntry, heroEntry, buildPrimaryNextMatch, buildRoster, rosterFullyLoaded, useWatchlist, buildWatchedSets, matchInvolvesWatchedSet } from './viewer_watchlist_core.jsx';
 import { runOnce, notifEnable, notifDisable, useChimeMuted, isFollowedMatchOnDeck, useFollowedMatchAlert, useSecondaryWatchAlert, MyMatchAlertBanner } from './viewer_alerts.jsx';
 import { notificationSupported } from './viewer_notifications.jsx';
 import { VSchedItem, MatchViewerModal } from './viewer_match.jsx';
 import { buildWatchlistUpcoming, usePrimaryWatch, WATCHED_UPCOMING_LIST_MAX } from './viewer_schedule.jsx';
-import { competitorNumbers } from './competitor_search.jsx';
+import { competitorNumber } from './competitor_search.jsx';
 import { parseWatchlistTokens, resolveWatchlistTokens } from './watchlist_link.jsx';
 
 const { useState, useMemo, useRef: useRefV, useEffect } = React;
@@ -79,17 +79,16 @@ export function resolveDeepLink(searchString, roster) {
   if (!qpPlayer && !qpNumber && !qpName) return null;
   let hit = qpPlayer ? roster.find((p) => p.id === qpPlayer) : null;
   if (!hit && qpNumber) {
-    // EXACT and case-sensitive, unchanged: this value is machine-generated
-    // (a QR/permalink encodes it verbatim), not typed by a person, so it is
-    // deliberately not the typed-query rule in competitor_search.jsx. Pinned
+    // EXACT and case-sensitive: this value is machine-generated (a QR or a
+    // permalink encodes it verbatim), not typed by a person, so it is
+    // deliberately NOT the typed-query rule in competitor_search.jsx. Pinned
     // by resolve_deep_link.test.jsx.
     //
-    // What DID change is the set searched: a competitor entered in more than
-    // one competition holds more than one number, and this used to compare
-    // against `p.number` alone, which was whichever competition the roster
-    // build happened to keep. competitorNumbers is the shared reader of that
-    // set (bc-nsrc), so this asks about every number they hold.
-    hit = roster.find((p) => competitorNumbers(p).includes(qpNumber));
+    // Behaviourally identical to the `p.number === qpNumber` this replaced.
+    // It reads through competitorNumber only so that the watchlist permalink
+    // (bc-wlpl), which asks the very same question of the very same records,
+    // cannot answer it differently.
+    hit = roster.find((p) => competitorNumber(p) === qpNumber);
   }
   if (!hit) {
     const needle = (qpName || qpPlayer).toLowerCase();
@@ -170,10 +169,10 @@ export function ViewerHome({ tournament, onSelectCompetition, onAdminClick, onOp
     deepLinkApplied.current = true;
     if (result && result.player) addWatchPlayer(result.player);
     // MERGE, never replace: arriving at someone else's link must not delete
-    // the list you already keep. normalizeWatchlist dedupes by entry key with
-    // FIRST occurrence winning, so existing entries survive and only genuinely
-    // new ones are appended, and it applies WATCHLIST_MAX to the result.
-    if (shared.length) setWatchlist((prev) => normalizeWatchlist([...prev, ...shared]));
+    // the list you already keep. The rule is mergeSharedWatchlist's, not this
+    // effect's -- it used to be spelled out here, which is exactly how it got
+    // silently replaced by "the shared list alone" with no test to notice.
+    if (shared.length) setWatchlist((prev) => mergeSharedWatchlist(prev, shared));
     // Runs exactly once, gated by the deepLinkApplied ref; addWatchPlayer is an
     // unstable callback we deliberately do not depend on.
     // oxlint-disable-next-line react-hooks/exhaustive-deps

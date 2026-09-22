@@ -111,9 +111,15 @@ export function PlayerMultiFilter({ tournament, picked, setPicked, dojoText, set
   // accumulating `comps` where buildRoster accumulated `checkedIn`, and --
   // unlike buildRoster -- with NO `!p || !p.id` guard, so every id-less player
   // in the tournament collapsed into one entry keyed on `undefined`.
-  // buildRoster now carries `comps` as well and applies the hide-finished-ones
-  // ruling to it and to the numbers together, so a competitor entered in two
-  // competitions is findable by either live number rather than only the first.
+  // buildRoster now carries `comps` too, so nothing is lost by sharing it.
+  //
+  // One behaviour DOES change, deliberately: buildRoster drops a player with
+  // no id, where the private builder kept them merged under `undefined`. That
+  // makes this picker agree with the watchlist picker, which has always used
+  // buildRoster and always dropped them. An id-less roster is a legacy state
+  // the app already names for the operator (helper.MissingParticipantIDsMessage
+  // tells them to save the roster once), and one bogus row standing in for
+  // every id-less competitor was not a better answer than none.
   const roster = useMemo(() => buildRoster(tournament.competitions), [tournament]);
 
   const q = query.trim().toLowerCase();

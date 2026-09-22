@@ -17,12 +17,12 @@
 // populated `window`. Only React (a vendor global) and pluralize (from ui.js,
 // loaded before this file) are read at module-eval time.
 //
-// numbered_name.jsx, side_cell.jsx and competitor_search.jsx are the ES
-// imports here, and all are safe where a window read would be pointless: each
-// is a LEAF (no imports of its own, so no cycle to break) and none is
-// script-tagged, so these imports and every other module's resolve to the same
-// /dist/<name>.jsx URL and the browser evaluates each once. None is on
-// `window` at all, so there is nothing to read.
+// numbered_name.jsx, side_cell.jsx, competitor_search.jsx and
+// watchlist_link.jsx are the ES imports here, and all are safe where a window
+// read would be pointless: none is script-tagged, so these imports and every
+// other module's resolve to the same /dist/<name>.jsx URL and the browser
+// evaluates each once. None is on `window` at all, so there is nothing to
+// read.
 //
 // watchlist_link.jsx is the one that is not a bare leaf: it imports
 // competitor_search.jsx. That is still safe, because the leaf wording above is
@@ -632,14 +632,6 @@ function WatchlistPanel({ roster, rosterLoaded = true, watchlist, setWatchlist, 
       <div className="watchlist-card-head">
         <span className="watchlist-card-title">Watchlist</span>
         {count > 0 && <span className="watchlist-count" aria-label={`${count} watched`}>{count}</span>}
-        {count > 0 && shareUrl && (
-          <button type="button"
-            className="watchlist-share-btn"
-            onClick={() => setShareOpen(true)}
-            aria-label="Share your watchlist"
-            title="Share your watchlist"
-          >Share</button>
-        )}
         {onBellToggle != null && (
           <button type="button"
             className={`watchlist-bell-btn${chimeMuted ? " watchlist-bell-btn--muted" : ""}`}
@@ -650,6 +642,19 @@ function WatchlistPanel({ roster, rosterLoaded = true, watchlist, setWatchlist, 
           >
             <BellIcon muted={chimeMuted} />
           </button>
+        )}
+        {/* AFTER the bell, which carries the head's `margin-left: auto`: the
+            bell absorbs the free space and this follows it, so the two group
+            at the right. Placed BEFORE the bell it rendered hard against the
+            count with a 127px void between the two controls (measured at
+            390px), which read as a layout accident rather than a choice. */}
+        {count > 0 && shareUrl && (
+          <button type="button"
+            className="watchlist-share-btn"
+            onClick={() => setShareOpen(true)}
+            aria-label="Share your watchlist"
+            title="Share your watchlist"
+          >Share</button>
         )}
       </div>
 

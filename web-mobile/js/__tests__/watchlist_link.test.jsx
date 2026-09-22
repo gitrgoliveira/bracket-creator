@@ -47,7 +47,7 @@ describe('round trip: a mixed watchlist survives encode -> parse -> resolve', ()
 
   it('encodes per entry: the numbered competitor by number, the numberless one by id, in ONE list', () => {
     const tokens = watchlistTokens(watchlist, roster);
-    expect(tokens).toEqual(['K12', bobId, 'd~Hagane%20Dojo']);
+    expect(tokens).toEqual(['K12', bobId, ':Hagane%20Dojo']);
   });
 });
 
@@ -95,6 +95,47 @@ describe('the delimiter collision: a dojo name carrying the separator itself', (
   });
 });
 
+describe('the ":" sentinel does not collide with a real competitor number or dojo name', () => {
+  // The first version of DOJO_SENTINEL was "d~" and was ambiguous: nothing
+  // stops an operator picking "d~" as a competition's number prefix
+  // (helper.ValidateNumberPrefix checks length only), so a real roster can
+  // hand this module a competitor number that looks exactly like the OLD
+  // marker. Under "d~" that competitor silently became a dojo entry named
+  // "1" and was dropped. ":" cannot repeat this: it is in the set
+  // encodeURIComponent ALWAYS escapes, so an encoded competitor number or id
+  // can never begin with a literal ":" (see DOJO_SENTINEL's header).
+  it('a competitor numbered "d~1" round-trips as a COMPETITOR, never a dojo named "1"', () => {
+    const roster = buildRoster([
+      comp('A', 'running', [{ id: 'p1', name: 'Alice', dojo: 'Shibuya', number: 'd~1' }]),
+    ]);
+    const watchlist = [{ type: 'player', id: 'p1', name: 'Alice', dojo: 'Shibuya' }];
+
+    const url = buildWatchlistLink('https://example.test/viewer', watchlist, roster);
+    const search = url.slice(url.indexOf('?'));
+    const tokens = parseWatchlistTokens(search);
+    expect(tokens).toEqual([{ kind: 'competitor', value: 'd~1' }]);
+
+    const resolved = resolveWatchlistTokens(tokens, roster);
+    expect(resolved).toEqual([{ type: 'player', id: 'p1', name: 'Alice', dojo: 'Shibuya' }]);
+  });
+
+  it('a dojo whose name begins with ":" still round-trips correctly', () => {
+    // The marker is read on the RAW (pre-decode) token, and encodeURIComponent
+    // always escapes ":", so a dojo name starting with a literal colon can
+    // never produce a raw token starting with an UNESCAPED ":" of its own --
+    // only the sentinel byte itself does, so tagging stays unambiguous.
+    const dojoName = ':Colonised Dojo';
+    const watchlist = [{ type: 'dojo', dojo: dojoName }];
+    const url = buildWatchlistLink('https://example.test/viewer', watchlist, []);
+    const search = url.slice(url.indexOf('?'));
+    const tokens = parseWatchlistTokens(search);
+    expect(tokens).toEqual([{ kind: 'dojo', value: dojoName }]);
+
+    const resolved = resolveWatchlistTokens(tokens, []);
+    expect(resolved).toEqual([{ type: 'dojo', dojo: dojoName }]);
+  });
+});
+
 describe('watchlistLinkFitsQR', () => {
   it('is true exactly at the byte limit and false one byte over', () => {
     // ASCII, so bytes === characters here: this pins the boundary itself,
@@ -131,7 +172,14 @@ describe('resolveWatchlistTokens drops what does not resolve, keeps the rest', (
   ]);
 
   it('drops a stale/unknown token -- a competitor who left the roster, or a number re-minted by a re-draw', () => {
-    const resolved = resolveWatchlistTokens(['K1', 'K99', 'not-a-real-id'], roster);
+    const resolved = resolveWatchlistTokens(
+      [
+        { kind: 'competitor', value: 'K1' },
+        { kind: 'competitor', value: 'K99' },
+        { kind: 'competitor', value: 'not-a-real-id' },
+      ],
+      roster,
+    );
     expect(resolved).toEqual([{ type: 'player', id: 'p1', name: 'Alice', dojo: 'Shibuya' }]);
   });
 
@@ -139,7 +187,11 @@ describe('resolveWatchlistTokens drops what does not resolve, keeps the rest', (
     const search = `?${WATCHLIST_PARAM}=K1,%zz,K99`;
     let tokens;
     expect(() => { tokens = parseWatchlistTokens(search); }).not.toThrow();
-    expect(tokens).toEqual(['K1', 'K99']); // "%zz" decoded to "" by safeDecodeToken and filtered out
+    // "%zz" decoded to "" by safeDecodeToken and filtered out
+    expect(tokens).toEqual([
+      { kind: 'competitor', value: 'K1' },
+      { kind: 'competitor', value: 'K99' },
+    ]);
     expect(resolveWatchlistTokens(tokens, roster)).toEqual([
       { type: 'player', id: 'p1', name: 'Alice', dojo: 'Shibuya' },
     ]);
@@ -149,10 +201,10 @@ describe('resolveWatchlistTokens drops what does not resolve, keeps the rest', (
 describe('resolution precedence: id before number, matching resolveDeepLink', () => {
   it('a token equal to one competitor\'s id AND another competitor\'s number resolves to the ID match', () => {
     const roster = [
-      { id: 'DUPTOK', name: 'IdOwner', dojo: 'X', numbers: [] },
-      { id: 'other-id', name: 'NumberOwner', dojo: 'Y', numbers: ['DUPTOK'] },
+      { id: 'DUPTOK', name: 'IdOwner', dojo: 'X', number: '' },
+      { id: 'other-id', name: 'NumberOwner', dojo: 'Y', number: 'DUPTOK' },
     ];
-    expect(resolveWatchlistTokens(['DUPTOK'], roster)).toEqual([
+    expect(resolveWatchlistTokens([{ kind: 'competitor', value: 'DUPTOK' }], roster)).toEqual([
       { type: 'player', id: 'DUPTOK', name: 'IdOwner', dojo: 'X' },
     ]);
   });
@@ -163,8 +215,8 @@ describe('number resolution is exact and case-sensitive (machine-generated token
     const roster = buildRoster([
       comp('A', 'running', [{ id: 'p1', name: 'Alice', dojo: 'Shibuya', number: 'K12' }]),
     ]);
-    expect(resolveWatchlistTokens(['k12'], roster)).toEqual([]);
-    expect(resolveWatchlistTokens(['K12'], roster)).toEqual([
+    expect(resolveWatchlistTokens([{ kind: 'competitor', value: 'k12' }], roster)).toEqual([]);
+    expect(resolveWatchlistTokens([{ kind: 'competitor', value: 'K12' }], roster)).toEqual([
       { type: 'player', id: 'p1', name: 'Alice', dojo: 'Shibuya' },
     ]);
   });

@@ -8786,10 +8786,11 @@ abbr.msb-lab { text-decoration: none; cursor: help; }
 }
 .watchlist-bell-btn--muted:hover { background: var(--line); color: var(--ink-2); }
 
-/* Share (bc-wlpl). Sits AFTER the bell in the DOM on purpose: the bell
-   already carries margin-left:auto, so it absorbs the free space and both
-   controls end up grouped at the right. Giving this one an auto margin too
-   would split the space between them and strand them apart. */
+/* Share (bc-wlpl). Sits AFTER the bell in the DOM: the bell already carries
+   margin-left:auto, so it absorbs the free space and this button follows it,
+   grouping the two at the right. Do NOT give this one an auto margin as well
+   -- two auto margins split the free space between them, which is what left a
+   127px void between the controls when this button was rendered first. */
 .watchlist-share-btn {
   display: inline-flex;
   align-items: center;

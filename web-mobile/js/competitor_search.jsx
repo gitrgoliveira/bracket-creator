@@ -3,11 +3,11 @@ import { numberOf } from './competitor_identity.jsx';
 // competitor_search.jsx: the ONE answer to "does this competitor match what
 // the reader typed" in the tournament's people-pickers (bc-nsrc).
 //
-// Those pickers are the public watchlist and the schedule filter -- and the
-// schedule filter is mounted on an ADMIN surface too (PlayerMultiFilter, from
-// admin_schedule_page.jsx as well as viewer_schedule.jsx), so this rule is not
-// "public only". That matters because the two admin REFUSALS recorded further
-// down are specific surfaces, not a blanket exemption.
+// The consumers are the public watchlist picker, the schedule filter (which
+// PlayerMultiFilter mounts on the PUBLIC schedule and on admin_schedule_page
+// alike) and the admin Scores page's match filter. So this rule is not "public
+// only" -- which matters, because the two admin REFUSALS recorded further down
+// are specific surfaces rather than a blanket exemption.
 //
 // It exists because that question was spelled three different ways in three
 // files and two of them could not find a competitor by the number printed on

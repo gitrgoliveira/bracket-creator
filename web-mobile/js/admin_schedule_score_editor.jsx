@@ -2,6 +2,7 @@
 // startPatch, ScoreEditCourtBtn (local), AdminScoreEditor, AdminScoreEditorPage.
 
 import { writeDidNotLand, matchLabel } from './write_result.jsx';
+import { matchMentions } from './competitor_search.jsx';
 import { SideCell } from './side_cell.jsx';
 import { allMatchesCompleted } from './admin_schedule_utils.jsx';
 import { MatchLineupPanel } from './admin_schedule_lineup.jsx';
@@ -163,7 +164,11 @@ export function AdminScoreEditor({ t, c, onEditScore, onMoveCourt, restrictToCom
     if (statusFilter === "scheduled" && m.status !== "scheduled") return false;
     if (statusFilter === "complete" && m.status !== "completed") return false;
     if (!f) return true;
-    return [m.sideA?.name, m.sideB?.name, m.sideA?.dojo, m.sideB?.dojo].some((s) => (s || "").toLowerCase().includes(f));
+    // The shared rule (bc-nsrc), not a fourth hand-rolled copy. This page
+    // shows a number chip on every row, so the operator could read the column
+    // and not search it -- the same contradiction the bead was filed for.
+    // Operator ruling 2026-09-22.
+    return matchMentions(m, f);
   });
 
   // Status keys must match backend values; sort running first, then upcoming,
@@ -183,7 +188,7 @@ export function AdminScoreEditor({ t, c, onEditScore, onMoveCourt, restrictToCom
         <input
           className="input"
           style={{ flex: 1, minWidth: 180 }}
-          placeholder="Search player, team, dojo…"
+          placeholder="Search player, team, dojo or number…"
           aria-label="Filter matches by player, team, or dojo"
           value={filter}
           onChange={(e) => setFilter(e.target.value)}

@@ -1,6 +1,12 @@
 #!/usr/bin/env node
-// Guards the ONE rule that answers "does this competitor match what the
-// reader typed", especially the competitor-NUMBER arm of it.
+// Guards the competitor-NUMBER match rule: a picker that filters a list by
+// what the reader typed must ASK that rule rather than re-derive it.
+//
+// A rule, not a monopoly (operator correction 2026-09-22). The app has other
+// people-searches on purpose -- the registration desk's fuzzy RANKED search
+// answers "who did they most likely mean" with a score, and Participants &
+// seeds keeps its own haystack -- and both are ruled exemptions, carried as
+// data in ALLOWED below rather than left to prose.
 //
 // The rule lives in js/competitor_search.jsx as matchesCompetitorNumber (and
 // the wider competitorMatchesQuery it composes into). Every consumer must ask

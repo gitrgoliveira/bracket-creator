@@ -1,7 +1,16 @@
 import { numberOf } from './competitor_identity.jsx';
 
-// competitor_search.jsx: the ONE answer to "does this competitor match what
-// the reader typed" in the tournament's people-pickers (bc-nsrc).
+// competitor_search.jsx: the owner of the competitor-NUMBER match rule, and
+// with it the answer to "does this row match what the reader typed" for the
+// pickers that FILTER A LIST by it (bc-nsrc).
+//
+// It is NOT the app's only people-search, and calling it that would be wrong
+// twice over (operator correction 2026-09-22). The registration desk runs a
+// fuzzy RANKED search, and that is a different question as well as a different
+// rule: it asks "who did this person most likely mean", answered with a score
+// that orders the arrival queue, where this module answers "does this row
+// match", a boolean that keeps or drops a row. Participants & seeds keeps its
+// own name/zekken/dojo/dan-grade haystack. Both are ruled (see SCOPE below).
 //
 // The consumers are the public watchlist picker, the schedule filter (which
 // PlayerMultiFilter mounts on the PUBLIC schedule and on admin_schedule_page

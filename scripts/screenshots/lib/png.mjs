@@ -50,8 +50,10 @@ export function pngSize(file) {
 }
 
 // Decode to raw samples. Deliberately supports only what Playwright writes -
-// 8 bits per sample, no interlacing - and returns null for anything else
-// rather than guessing, which lets the caller fall back to a byte compare.
+// 8 bits per sample, no interlacing - and returns null for anything else rather
+// than guessing. pixelDiff passes that null on as "no opinion", which the
+// runner reads as changed, so an undecodable capture is sent for review rather
+// than waved through.
 function decode(file) {
   if (!fs.existsSync(file)) return null;
   const buf = fs.readFileSync(file);

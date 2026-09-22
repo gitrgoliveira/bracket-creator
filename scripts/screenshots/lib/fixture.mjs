@@ -63,8 +63,14 @@ export function assertLineupIds(dataDir, compId) {
 }
 
 // Minimal RFC4180 reader: the SubResults column is JSON embedded in a CSV
-// field, so its quotes are doubled and a naive split destroys it.
-function csvRows(text) {
+// field, so its quotes are doubled and a naive split destroys it. Every column
+// is also full of UUIDs, which makes a pattern like "does a digit appear" true
+// of an untouched file - so the checks below parse rather than grep.
+//
+// Exported because the recipes' own read-back gates need the same reader; it
+// lived twice, and a reader that disagrees with itself is how a gate passes on
+// exactly the fixture it exists to reject.
+export function csvRows(text) {
   const rows = [];
   let row = [];
   let field = '';
@@ -80,7 +86,9 @@ function csvRows(text) {
     else if (c === '\n') { row.push(field); rows.push(row); row = []; field = ''; }
     else if (c !== '\r') field += c;
   }
-  if (field || row.length) { row.push(field); rows.push(row); }
+  // `field !== ''` rather than a truthiness test: a trailing field of exactly
+  // "0" is a value, and dropping it would shorten the last row by one column.
+  if (field !== '' || row.length) { row.push(field); rows.push(row); }
   return rows;
 }
 

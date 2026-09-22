@@ -7,20 +7,17 @@
 // shot's state - a running match stays running, a completed one stays
 // completed. Each drive() checks the precondition it needs and throws rather
 // than photograph the wrong moment.
-import { loginAdmin, settle, PASSWORD } from '../lib/ui.mjs';
+import { loginAdmin, settle } from '../lib/ui.mjs';
 import { roster } from '../lib/api.mjs';
 import { assertBoutPoints, assertLineupIds } from '../lib/fixture.mjs';
-import fs from 'node:fs';
-import path from 'node:path';
 
-// The kachinuki editor is ALWAYS the compact, internally-scrolled layout
-// (admin_scoring_team.jsx:1125 - `useCompact = teamSize <= 5 || isKachinuki`),
-// so the bout list is capped to the viewport and a crop of the whole modal
-// would show a scrollbar instead of the board. Un-capping it is a capture
-// concern only; nothing about the editor's behaviour changes.
-const EXPAND = `.modal-backdrop{align-items:flex-start!important;padding:8px 0!important}`
-  + `.editor-modal--compact{max-height:none!important;height:auto!important}`
-  + `.team-bouts-scroll{max-height:none!important;overflow:visible!important}`;
+// Why the viewports below are so tall: the kachinuki editor is ALWAYS the
+// compact, internally-scrolled layout (admin_scoring_team.jsx:1125 -
+// `useCompact = teamSize <= 5 || isKachinuki`), so its bout list is capped
+// against the viewport and a crop of the whole modal shows a scrollbar instead
+// of the board. Each viewport is therefore sized so the modal fits inside it
+// uncapped. Do not reach for injected CSS instead: every recipe here navigates
+// inside drive(), which discards an injected style sheet.
 
 const IND = 'individual-cup';
 const TEAMS = 'kachinuki-teams';
@@ -29,31 +26,6 @@ const KO = 'kachinuki-knockout';
 const POSITIONS = ['senpo', 'jiho', 'chuken', 'fukusho', 'taisho'];
 
 // ---------------------------------------------------------------- seeding --
-
-// The demo family may already own the tournament (one mobile server serves
-// every mobile recipe), and it registers courts A and B only. The knockout
-// competition needs a third court of its own: court locks are cross-
-// competition, so two competitions sharing a court cannot both hold a running
-// match, which is exactly what these captures need.
-async function ensureTournamentCourts(api, courts) {
-  try {
-    // Same name/date/venue the demo family's setup_tournament.py uses, so the
-    // page header reads the same whichever family reached the server first
-    // (that script tolerates an existing tournament and leaves it alone).
-    await api.tournament({
-      name: 'London Cup Demo', date: '10-05-2026', venue: 'London',
-      durationDays: 2, courts,
-    });
-    return;
-  } catch {
-    // Already created - fall through and widen the existing one.
-  }
-  const t = await api.get('/api/tournament');
-  const have = t.courts || [];
-  const want = have.concat(courts.filter((c) => !have.includes(c)));
-  if (want.length === have.length) return;
-  await api.put('/api/tournament', { ...t, courts: want, password: PASSWORD });
-}
 
 // Name five members onto a team AFTER the draw. A drawn team is seeded with
 // teamSize + state.SquadReserveSlots numbered blank slots (internal/state/
@@ -148,7 +120,13 @@ export const families = {
 
   editors: {
     seed: async ({ api }) => {
-      await ensureTournamentCourts(api, ['A', 'B', 'C']);
+      // Three courts, one per competition. Court locks are cross-competition,
+      // so two competitions sharing a court cannot both hold a running match,
+      // which is exactly what these captures need.
+      await api.tournament({
+        name: 'London Cup Demo', date: '10-05-2026', venue: 'London',
+        durationDays: 2, courts: ['A', 'B', 'C'],
+      });
 
       // Individual: 6 entrants over 2 pools of 3, so pool A reads
       // "MATCH 1 OF 3" and the editor's Next/Finish+Start-Next chain has
@@ -427,7 +405,6 @@ export const recipes = [
     viewport: { width: 520, height: 1700 },
     dpr: 1,
     capture: { selector: '.editor-modal' },
-    css: EXPAND,
     setup: ({ page, base }) => loginAdmin(page, base),
     drive: async ({ page, base, fixture }) => {
       await openScoreEditorRow(page, base, fixture.teams.a, fixture.teams.b);
@@ -460,7 +437,6 @@ export const recipes = [
     viewport: { width: 520, height: 1250 },
     dpr: 1,
     capture: { selector: '.editor-modal' },
-    css: EXPAND,
     setup: ({ page, base }) => loginAdmin(page, base),
     drive: async ({ page, base, fixture }) => {
       await openScoreEditorRow(page, base, fixture.teams.a, fixture.teams.b);
@@ -485,7 +461,6 @@ export const recipes = [
     viewport: { width: 520, height: 1250 },
     dpr: 1,
     capture: { selector: '.editor-modal' },
-    css: EXPAND,
     setup: ({ page, base }) => loginAdmin(page, base),
     drive: async ({ page, base, fixture }) => {
       await openScoreEditorRow(page, base, fixture.ko.a, fixture.ko.b);
@@ -507,7 +482,6 @@ export const recipes = [
     viewport: { width: 800, height: 1100 },
     dpr: 1,
     capture: { selector: '.editor-modal' },
-    css: EXPAND,
     setup: ({ page, base }) => loginAdmin(page, base),
     drive: async ({ page, base, fixture }) => {
       await openScoreEditorRow(page, base, fixture.teams.a, fixture.teams.b);
@@ -532,7 +506,6 @@ export const recipes = [
     viewport: { width: 671, height: 1100 },
     dpr: 1,
     capture: { selector: '.decision-prompt' },
-    css: EXPAND,
     setup: ({ page, base }) => loginAdmin(page, base),
     drive: async ({ page, base, fixture }) => {
       await openScoreEditorRow(page, base, fixture.teams.a, fixture.teams.b);
@@ -577,7 +550,6 @@ export const recipes = [
     viewport: { width: 693, height: 1100 },
     dpr: 1,
     capture: { selector: '.reason-prompt' },
-    css: EXPAND,
     setup: ({ page, base }) => loginAdmin(page, base),
     drive: async ({ page, base, fixture }) => {
       await openScoreEditorRow(page, base, fixture.teams.a, fixture.teams.b);

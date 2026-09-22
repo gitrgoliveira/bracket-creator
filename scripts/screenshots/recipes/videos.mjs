@@ -316,9 +316,9 @@ export const recipes = [
     family: 'videoKachinuki',
     viewport: { width: 820, height: 1120 },
     capture: 'video',
-    // No `route` and no `css`: drive() navigates four times and the runner
-    // injects css once, before drive, so the style would be gone by the second
-    // page. EXPAND is re-injected after every navigation instead.
+    // No `route`: drive() navigates four times, and a navigation discards any
+    // style sheet injected into the page it left. The runner has no css hook
+    // for that reason; EXPAND is re-injected here after every navigation.
     setup: async ({ context, fixture }) => {
       await authIn(context);
       // Frame 0 is roughly now: the page exists and has not navigated.

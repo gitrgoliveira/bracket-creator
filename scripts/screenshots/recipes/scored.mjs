@@ -22,7 +22,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { loginAdmin, settle } from '../lib/ui.mjs';
-import { assertBoutPoints, assertLineupIds } from '../lib/fixture.mjs';
+import { assertLineupIds, csvRows } from '../lib/fixture.mjs';
 
 const TEAM_COMP = 'team-championship';
 const SWISS_TEAM = 'swiss-teams';
@@ -370,36 +370,15 @@ async function enterLineup(api, page, base, compId, names) {
 // An assertion nobody has seen fail is not a gate. All are candidates for
 // lib/fixture.mjs.
 // ---------------------------------------------------------------------------
-// pool-matches.csv has to be PARSED, not grepped. Its SubResults column holds
-// a JSON array whose quotes are CSV-doubled (`""ipponsA"":null`), so a pattern
-// written for JSON silently never matches, and every other column is full of
-// UUIDs, which makes "does a digit appear" true of an untouched file. Both
-// mistakes produce a check that passes on exactly the fixture it exists to
-// reject; these two were red-verified against a quick-scored competition.
-function parseCsv(text) {
-  const rows = [];
-  let row = [];
-  let field = '';
-  let quoted = false;
-  for (let i = 0; i < text.length; i += 1) {
-    const c = text[i];
-    if (quoted) {
-      if (c !== '"') field += c;
-      else if (text[i + 1] === '"') { field += '"'; i += 1; }
-      else quoted = false;
-    } else if (c === '"') quoted = true;
-    else if (c === ',') { row.push(field); field = ''; }
-    else if (c === '\n') { row.push(field); rows.push(row); row = []; field = ''; }
-    else if (c !== '\r') field += c;
-  }
-  if (field !== '' || row.length) { row.push(field); rows.push(row); }
-  return rows;
-}
-
+// pool-matches.csv has to be PARSED, not grepped, and lib/fixture.mjs's
+// csvRows is the reader for it - its header says why. A pattern written for
+// the SubResults JSON silently never matches, which produces a check that
+// passes on exactly the fixture it exists to reject; these two were
+// red-verified against a quick-scored competition.
 function poolMatchRecords(dataDir, compId) {
   const p = path.join(dataDir, 'competitions', compId, 'pool-matches.csv');
   if (!fs.existsSync(p)) throw new Error(`${compId}: no pool-matches.csv`);
-  const [header, ...rows] = parseCsv(fs.readFileSync(p, 'utf8'));
+  const [header, ...rows] = csvRows(fs.readFileSync(p, 'utf8'));
   if (!header) throw new Error(`${compId}: pool-matches.csv is empty`);
   return rows.filter((r) => r.length === header.length)
     .map((r) => Object.fromEntries(header.map((h, i) => [h, r[i]])));

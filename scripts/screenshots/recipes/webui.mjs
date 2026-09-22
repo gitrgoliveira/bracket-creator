@@ -79,9 +79,10 @@ async function waitForSeedsModalHidden(page) {
 
 // Ranks the medium sample's first three rows (Kevin Clark, Luke Rodriguez,
 // Michael Lewis) 1/2/3. Each row's rank field is `.seed-input`
-// (web/js/app.js:865-869), one per participant in list order. Deliberately
-// leaves focus in the last-filled input (nth(2), Michael Lewis) rather than
-// blurring, matching the committed screenshot's focus ring there.
+// (web/js/app.js:865-869), one per participant in list order. Filling leaves
+// focus in the last input, but no capture shows a focus ring: the runner blurs
+// the active element before every screenshot, so the three seeded rows are
+// photographed as an operator would see them after tabbing away.
 async function assignFirstThreeSeeds(page) {
   const inputs = page.locator('.seed-input');
   await inputs.first().waitFor({ state: 'visible' });

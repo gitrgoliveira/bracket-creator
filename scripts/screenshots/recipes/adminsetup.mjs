@@ -121,22 +121,21 @@ export const families = {
       await api.generateDraw(id);
       await api.start(id);
 
-      // Best-effort: close one of the two first-round matches so the
-      // Overview stats strip reads "1/2 matches done" as the committed shot
-      // does. A fusensho decision is format-agnostic (it ends the match
-      // outright, unlike quick-score, which the server explicitly refuses
-      // for kachinuki - "score bouts individually", handlers_match.go). If
-      // this fails for any reason the capture still shows the right SURFACE
-      // (Overview, with the estimate range), just at 0/2 instead of 1/2.
+      // Close one of the two first-round matches so the Overview stats strip
+      // reads "1/2 matches done" as the committed shot does. A fusensho
+      // decision is format-agnostic (it ends the match outright, unlike
+      // quick-score, which the server explicitly refuses for kachinuki -
+      // "score bouts individually", handlers_match.go).
       try {
         const detail = await api.viewer(id);
         const matchId = detail?.bracket?.rounds?.[0]?.[0]?.id;
-        if (matchId) {
-          await api.post(`/api/competitions/${id}/matches/${encodeURIComponent(matchId)}/decision`, {
-            decision: 'fusensho',
-            decisionBy: 'shiro',
-          });
+        if (!matchId) {
+          throw new Error('the draw has no first-round match to close');
         }
+        await api.post(`/api/competitions/${id}/matches/${encodeURIComponent(matchId)}/decision`, {
+          decision: 'fusensho',
+          decisionBy: 'shiro',
+        });
       } catch (err) {
         // Do not swallow this. The capture's subject includes the "1/2 matches
         // done" and "50%" tiles, so a fixture that failed to close a match

@@ -12,13 +12,20 @@ import time
 PORT = os.environ.get("PORT", "8080")
 BASE_URL = os.environ.get("BASE_URL", f"http://localhost:{PORT}").rstrip("/")
 PASSWORD = os.environ.get("TOURNAMENT_PASSWORD", "testpassword")
+# Optional: pause between scoring writes. The default paces the seeder for a
+# server writing to disk; the docs capture harness lowers it.
+try:
+    SCORE_DELAY = float(os.environ.get("SEED_SCORE_DELAY", "0.05"))
+except ValueError:
+    print("[WARN] SEED_SCORE_DELAY is not a number; using 0.05")
+    SCORE_DELAY = 0.05
 # Optional: leave one or more categories mid-run instead of scoring them to the
 # end. Comma-separated; unset by default, so `make mobile-app-example` still
 # completes everything.
-SCORE_DELAY = float(os.environ.get("SEED_SCORE_DELAY", "0.05"))
 LEAVE_RUNNING = [
     t.strip() for t in os.environ.get("SEED_LEAVE_RUNNING", "").split(",") if t.strip()
 ]
+# How many matches of a left-running category to score before stopping.
 try:
     RUNNING_SCORED = int(os.environ.get("SEED_RUNNING_SCORED", "8"))
 except ValueError:

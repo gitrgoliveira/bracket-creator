@@ -11,11 +11,11 @@
 // runner deliberately does not overwrite a committed file: what to publish is
 // the operator's call.
 //
-// Each still is byte-compared against its committed twin, which works because
-// docs/screenshots holds this harness's own output. A run therefore ends with
-// the SHORT list of surfaces that actually changed - those are the ones to
-// eyeball and copy across. An "unchanged" capture reproduced the committed file
-// exactly and needs neither.
+// Each still is compared pixel by pixel against its committed twin, which works
+// because docs/screenshots holds this harness's own output. A run therefore ends
+// with the SHORT list of surfaces that actually changed - those are the ones to
+// eyeball and copy across. An "unchanged" capture is indistinguishable from the
+// committed file to a reader and needs neither.
 import fs from 'node:fs';
 import path from 'node:path';
 import { chromium } from 'playwright-core';
@@ -32,11 +32,9 @@ const args = Object.fromEntries(
 );
 
 // Chromium rasterises text slightly differently from run to run unless these
-// are pinned, which put six captures a few grey levels apart on every run - far
-// too faint to see, but enough to defeat a byte compare and so to report a
-// change that was not one. Subpixel antialiasing and hinting are the variable
-// parts; turning them off costs nothing here because the captures are DPR 2,
-// where greyscale antialiasing is what a reader sees anyway.
+// are pinned, which put six captures as much as 50 grey levels apart on every
+// run - well above the comparison's tolerance, so each was reported as a change
+// that was not one. Subpixel antialiasing and hinting are the variable parts.
 const DETERMINISTIC_RENDERING = [
   '--disable-lcd-text',
   '--disable-font-subpixel-positioning',
@@ -66,12 +64,13 @@ function selected() {
 
 // What changed about this capture since the committed original.
 //
-// Byte equality is the headline, and it is only meaningful because
+// The pixel compare is the headline, and it is only meaningful because
 // docs/screenshots holds this harness's own output: an unchanged surface
-// reproduces the committed file exactly. So "unchanged" means there is nothing
-// to eyeball and nothing to copy, which is what makes a 30-capture run
-// reviewable. Dimensions are reported only when the bytes DID change, where
-// they distinguish a layout move from a change in the pixels inside it.
+// reproduces the committed file to within the tolerance png.mjs sets. So
+// "unchanged" means there is nothing to eyeball and nothing to copy, which is
+// what makes a 30-capture run reviewable. Dimensions are reported only when the
+// pixels DID move, where they distinguish a layout change from a change in the
+// pixels inside it.
 function reportStill(recipe, file) {
   const committed = path.join(COMMITTED, `${recipe.name}.png`);
   const want = pngSize(committed);
@@ -152,9 +151,6 @@ async function runRecipe(browser, recipe, ctx) {
   });
   const page = await context.newPage();
   // A capture is a real browser session, so the page can tell us it is broken.
-  // An uncaught exception or a console error usually means the surface being
-  // documented is misbehaving, and the screenshot would record that as though
-  // it were the product working.
   // Two severities, deliberately not treated alike. An UNCAUGHT exception means
   // the surface is broken and the capture would record that as the product
   // working, so it fails the capture. A console error does not: the SPA asks
@@ -180,18 +176,21 @@ async function runRecipe(browser, recipe, ctx) {
     if (recipe.waitFor) {
       await page.locator(recipe.waitFor).first().waitFor({ state: 'visible', timeout: 20000 });
     }
-    if (recipe.css) await page.addStyleTag({ content: recipe.css });
     if (recipe.drive) await recipe.drive(args);
     // Refuse to capture a fixture that is missing what the shot exists to show.
     if (recipe.assert) await recipe.assert(args);
+    let file = null;
     if (!isVideo) {
-      const file = path.join(OUT, `${recipe.name}.png`);
+      file = path.join(OUT, `${recipe.name}.png`);
       await captureStill(page, recipe, file);
-      if (pageErrors.length) {
-        throw new Error(`the page threw while being captured: ${pageErrors[0]}`);
-      }
-      return { ...reportStill(recipe, file), faults: pageFaults };
     }
+    // Outside the still branch on purpose: a video of a surface that threw
+    // records the same broken product a screenshot would, and staging it as a
+    // normal clip is how it reaches the docs.
+    if (pageErrors.length) {
+      throw new Error(`the page threw while being captured: ${pageErrors[0]}`);
+    }
+    if (!isVideo) return { ...reportStill(recipe, file), faults: pageFaults };
   } finally {
     await context.close();
   }

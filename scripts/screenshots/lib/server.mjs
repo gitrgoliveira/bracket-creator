@@ -18,11 +18,17 @@ const BIN = path.join(REPO, 'bin', 'bracket-creator');
 // /api/status (cmd/serve.go:112). Polling the wrong one never succeeds.
 const READY_PATH = { mobile: '/health', web: '/api/status' };
 
+// Has the child gone? Both halves matter: a process killed by a SIGNAL reports
+// a null exitCode, so testing exitCode alone reads a dead server as still
+// starting and polls the full 30 seconds before blaming the readiness probe.
+const exited = (child) => child.exitCode !== null || child.signalCode !== null;
+
 async function waitForHealth(base, child, readyPath, timeoutMs = 30000) {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
-    if (child.exitCode !== null) {
-      throw new Error(`server exited early with code ${child.exitCode}`);
+    if (exited(child)) {
+      throw new Error('server exited early '
+        + `(${child.signalCode ? `signal ${child.signalCode}` : `code ${child.exitCode}`})`);
     }
     try {
       const res = await fetch(base + readyPath);
@@ -80,7 +86,7 @@ export async function start(kind) {
     child.kill('SIGTERM');
     // The binary shuts SSE down gracefully; give it a moment before insisting.
     await new Promise((r) => setTimeout(r, 400));
-    if (child.exitCode === null) child.kill('SIGKILL');
+    if (!exited(child)) child.kill('SIGKILL');
     fs.rmSync(dataDir, { recursive: true, force: true });
   };
 

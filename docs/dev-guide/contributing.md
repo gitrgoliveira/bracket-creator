@@ -121,6 +121,8 @@ The comparison allows a small tolerance, because two runs of the same code do no
 
 Videos are never compared: their encoding depends on how fast the machine drove the interface, so a clip is restaged on every run and only worth copying if you drove a change.
 
+Each capture is a real browser session, so a run also reports anything the page complained about while it was being photographed. An uncaught error fails that capture, because the picture would show a broken surface as though it were working. A console message is only reported, since some are normal.
+
 A capture whose dimensions no longer match its committed twin is reported as a size mismatch. That usually means the viewport or the crop selector needs adjusting rather than that the surface changed.
 
 One rule decides how a capture is seeded. Anything showing competitor numbers, bout rows or points has to be produced by driving the interface. A lineup or a score written straight over the API carries no member identifiers and no bout points, so those numbers render blank and the scores read zero. Creating the tournament, its competitions, its participants and its draw over the API is fine.

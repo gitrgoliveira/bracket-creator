@@ -151,6 +151,23 @@ async function runRecipe(browser, recipe, ctx) {
     ...(isVideo ? { recordVideo: { dir: OUT, size: recipe.viewport } } : {}),
   });
   const page = await context.newPage();
+  // A capture is a real browser session, so the page can tell us it is broken.
+  // An uncaught exception or a console error usually means the surface being
+  // documented is misbehaving, and the screenshot would record that as though
+  // it were the product working.
+  // Two severities, deliberately not treated alike. An UNCAUGHT exception means
+  // the surface is broken and the capture would record that as the product
+  // working, so it fails the capture. A console error does not: the SPA asks
+  // for a team's lineup before one exists and the server answers 404, which the
+  // client handles and which is normal on seven captures here. Failing on that
+  // would make the gate cry wolf on every team surface, and a gate that always
+  // fires is one the operator learns to skip.
+  const pageErrors = [];
+  const pageFaults = [];
+  page.on('pageerror', (err) => pageErrors.push(err.message.split('\n')[0]));
+  page.on('console', (msg) => {
+    if (msg.type() === 'error') pageFaults.push(`console.error ${msg.text().split('\n')[0]}`);
+  });
   // page.video() has to be taken while the page is alive: closing the context
   // is what finalises the file, and by then the page handle is gone.
   const video = isVideo ? page.video() : null;
@@ -170,7 +187,10 @@ async function runRecipe(browser, recipe, ctx) {
     if (!isVideo) {
       const file = path.join(OUT, `${recipe.name}.png`);
       await captureStill(page, recipe, file);
-      return reportStill(recipe, file);
+      if (pageErrors.length) {
+        throw new Error(`the page threw while being captured: ${pageErrors[0]}`);
+      }
+      return { ...reportStill(recipe, file), faults: pageFaults };
     }
   } finally {
     await context.close();
@@ -181,7 +201,7 @@ async function runRecipe(browser, recipe, ctx) {
   // boundaries move with how fast the machine drove the UI - so a clip of an
   // unchanged surface does not reproduce its committed bytes, and a CHANGED
   // verdict on every run would train the operator to ignore the column.
-  return { changed: null, note: `video -> ${path.relative(REPO, staged)}` };
+  return { changed: null, note: `video -> ${path.relative(REPO, staged)}`, faults: pageFaults };
 }
 
 async function main() {
@@ -273,6 +293,15 @@ async function main() {
   if (videos.length) {
     console.log('\nvideos are always restaged - copy over docs/videos/ only if you drove a change:');
     for (const [name] of videos) console.log(`  ${name}`);
+  }
+  // A page that logged an error while being photographed is worth saying out
+  // loud: the capture looks like the product working, and records it broken.
+  const faulted = results.filter(([, v]) => v.faults && v.faults.length);
+  if (faulted.length) {
+    console.log('\npage errors during capture - the surface misbehaved while being photographed:');
+    for (const [name, v] of faulted) {
+      for (const fault of [...new Set(v.faults)]) console.log(`  ${name}: ${fault}`);
+    }
   }
   console.log(`\nstaged in ${path.relative(REPO, OUT)}/`);
   if (failed.length) process.exitCode = 1;

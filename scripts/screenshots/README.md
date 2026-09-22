@@ -34,6 +34,19 @@ several seconds between recordings. The runner prints the new marks as
 `CHAPTERS`; copy them into that list, or the numbers point at the wrong
 moments.
 
+## When a page misbehaves
+
+A capture is a real browser session, so the page can say it is broken while
+being photographed. Two severities, treated differently on purpose:
+
+- An **uncaught exception** fails the capture. The surface is broken and the
+  screenshot would record that as though it were the product working.
+- A **console error** is reported after the run but does not fail it. The SPA
+  asks for a team's lineup before one exists and the server answers 404, which
+  the client handles; that is normal on seven captures here. Failing on it
+  would fire on every team surface, and a gate that always fires is one the
+  operator learns to skip.
+
 ## Prerequisites
 
 `node` and `python3`. `make docs/screenshots` (or `docs/videos`) installs this directory's npm

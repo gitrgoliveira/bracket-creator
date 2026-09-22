@@ -11,12 +11,18 @@
 // unapplied roster paste in mobile-add-participants are driven through the
 // real interface, because those two are showing the OPERATOR TYPING, not
 // just data that happens to be on screen.
-import { loginAdmin } from '../lib/ui.mjs';
 
-// Local helpers (not shared via lib/ui.mjs - see the bc-shot brief: only the
-// recipe-owning file may change here). Each is small enough it wasn't worth
-// promoting; if a second recipe file grows the same need, that's the signal
-// to move it.
+// Local helpers, kept here rather than in lib/ui.mjs because each has one
+// caller; a second recipe file growing the same need is the signal to move it.
+
+// The competition ids the seed creates, at module level so a recipe's `route`
+// can name them: run.mjs concatenates `base + route`, so the id has to be
+// known when the recipe is declared, not when the fixture is.
+const MEN_ID = 'men-individual';
+const KNOCKOUT_ID = 'knockout-cup';
+const OVERVIEW_ID = 'up-to-2nd-dan';
+const DRAW_ID = 'third-dan-and-above';
+const KACHINUKI_ID = 'kachinuki-teams';
 
 // The create-competition form and the settings screen both render this
 // field via competition_fields.jsx's PillGroup/`.field` markup
@@ -72,6 +78,7 @@ export const families = {
   // one competition per capture, all left in setup (or, for the draw
   // preview, draw-ready) status.
   setup: {
+    server: 'mobile',
     // SINCE scoping inputs (lib/scope.mjs): the create form, the participants
     // page, the competition overview/settings/pools pages, and the modules the
     // create form and settings page share.
@@ -84,23 +91,17 @@ export const families = {
     seed: async ({ api }) => {
       await api.tournament({ name: TOURNAMENT_NAME, date: TOURNAMENT_DATE, durationDays: 1, courts: ['A', 'B'] });
 
-      const menId = 'men-individual';
-      await api.competition(menId, "Men's Individual", { date: TOURNAMENT_DATE, courts: ['A', 'B'] });
+      await api.competition(MEN_ID, "Men's Individual", { date: TOURNAMENT_DATE, courts: ['A', 'B'] });
 
-      const knockoutId = 'knockout-cup';
-      await api.competition(knockoutId, 'Knockout Cup', { date: TOURNAMENT_DATE, format: 'knockout', courts: ['A', 'B'] });
-      await api.participants(knockoutId, ROSTER_10);
+      await api.competition(KNOCKOUT_ID, 'Knockout Cup', { date: TOURNAMENT_DATE, format: 'knockout', courts: ['A', 'B'] });
+      await api.participants(KNOCKOUT_ID, ROSTER_10);
 
-      const overviewId = 'up-to-2nd-dan';
-      await api.competition(overviewId, "Men's Individual: up to 2nd dan", { date: TOURNAMENT_DATE, courts: ['A', 'B'] });
-      await api.participants(overviewId, ROSTER_18);
+      await api.competition(OVERVIEW_ID, "Men's Individual: up to 2nd dan", { date: TOURNAMENT_DATE, courts: ['A', 'B'] });
+      await api.participants(OVERVIEW_ID, ROSTER_18);
 
-      const drawId = 'third-dan-and-above';
-      await api.competition(drawId, "Men's Individual: 3rd dan and above", { date: TOURNAMENT_DATE, format: 'mixed', poolSize: 3, poolWinners: 2, courts: ['A', 'B'] });
-      await api.participants(drawId, ROSTER_18);
-      await api.generateDraw(drawId);
-
-      return { menId, knockoutId, overviewId, drawId };
+      await api.competition(DRAW_ID, "Men's Individual: 3rd dan and above", { date: TOURNAMENT_DATE, format: 'mixed', poolSize: 3, poolWinners: 2, courts: ['A', 'B'] });
+      await api.participants(DRAW_ID, ROSTER_18);
+      await api.generateDraw(DRAW_ID);
     },
   },
 
@@ -113,13 +114,14 @@ export const families = {
   // decision) so the "matches done"/"now"/progress tiles the committed shot
   // shows are real rather than the untouched draw-ready defaults.
   kachinuki: {
+    server: 'mobile',
     // SINCE scoping inputs (lib/scope.mjs): the competition overview page and
     // the duration estimate it shows.
     sources: ['web-mobile/js/admin_competition', 'web-mobile/js/duration'],
     seed: async ({ api }) => {
       await api.tournament({ name: 'Kachinuki Demo', date: TOURNAMENT_DATE, durationDays: 1, courts: ['A'] });
 
-      const id = 'kachinuki-teams';
+      const id = KACHINUKI_ID;
       await api.competition(id, 'Kachinuki Teams', {
         date: TOURNAMENT_DATE, format: 'knockout', courts: ['A'],
         teamSize: 5, teamMatchType: 'kachinuki',
@@ -137,25 +139,16 @@ export const families = {
       // reads "1/2 matches done" as the committed shot does. A fusensho
       // decision is format-agnostic (it ends the match outright, unlike
       // quick-score, which the server explicitly refuses for kachinuki -
-      // "score bouts individually", handlers_match.go).
-      try {
-        const detail = await api.viewer(id);
-        const matchId = detail?.bracket?.rounds?.[0]?.[0]?.id;
-        if (!matchId) {
-          throw new Error('the draw has no first-round match to close');
-        }
-        await api.post(`/api/competitions/${id}/matches/${encodeURIComponent(matchId)}/decision`, {
-          decision: 'fusensho',
-          decisionBy: 'shiro',
-        });
-      } catch (err) {
-        // Do not swallow this. The capture's subject includes the "1/2 matches
-        // done" and "50%" tiles, so a fixture that failed to close a match
-        // would still photograph cleanly while showing the wrong figures.
-        throw new Error(`kachinuki family: could not close a match, so the progress tiles would be wrong: ${err.message}`);
-      }
-
-      return { id };
+      // "score bouts individually", handlers_match.go). Not best-effort: the
+      // capture's subject includes the "1/2" and "50%" tiles, so a fixture
+      // that failed to close a match would photograph cleanly and wrong.
+      const detail = await api.viewer(id);
+      const matchId = detail?.bracket?.rounds?.[0]?.[0]?.id;
+      if (!matchId) throw new Error(`${id}: the draw has no first-round match to close`);
+      await api.post(`/api/competitions/${id}/matches/${encodeURIComponent(matchId)}/decision`, {
+        decision: 'fusensho',
+        decisionBy: 'shiro',
+      });
     },
   },
 };
@@ -163,16 +156,12 @@ export const families = {
 export const recipes = [
   {
     name: 'mobile-create-competition',
-    server: 'mobile',
     family: 'setup',
     viewport: { width: 1600, height: 1000 },
-    dpr: 1,
     capture: 'viewport',
     waitFor: 'text=Add competition',
-    setup: async ({ page, base }) => {
-      await loginAdmin(page, base);
-      await page.goto(base + '/admin/create-competition', { waitUntil: 'domcontentloaded' });
-    },
+    auth: 'admin',
+    route: '/admin/create-competition',
     drive: async ({ page }) => {
       await fillFieldByLabel(page, 'Display name', "Men's Individual");
       // Default format is Knockout only (COMPETITION_DEFAULTS.format,
@@ -184,16 +173,12 @@ export const recipes = [
 
   {
     name: 'mobile-add-participants',
-    server: 'mobile',
     family: 'setup',
     viewport: { width: 1600, height: 1000 },
-    dpr: 1,
     capture: 'viewport',
     waitFor: 'text=Participant list',
-    setup: async ({ page, base, fixture }) => {
-      await loginAdmin(page, base);
-      await page.goto(base + `/admin/competition/${fixture.menId}/participants`, { waitUntil: 'domcontentloaded' });
-    },
+    auth: 'admin',
+    route: `/admin/competition/${MEN_ID}/participants`,
     // Types a roster into the paste box WITHOUT clicking "Apply changes":
     // the committed shot shows the "Unsaved changes" state (rosterDirty,
     // admin_participants.jsx:860) with the saved roster still at 0 players.
@@ -210,16 +195,12 @@ export const recipes = [
 
   {
     name: 'mobile-participant-setup',
-    server: 'mobile',
     family: 'setup',
     viewport: { width: 1265, height: 900 },
-    dpr: 1,
     capture: 'fullPage',
     waitFor: 'text=Ordering & seeding',
-    setup: async ({ page, base, fixture }) => {
-      await loginAdmin(page, base);
-      await page.goto(base + `/admin/competition/${fixture.knockoutId}/participants`, { waitUntil: 'domcontentloaded' });
-    },
+    auth: 'admin',
+    route: `/admin/competition/${KNOCKOUT_ID}/participants`,
     // Seeds the first three of the ten already-added participants, matching
     // the committed shot's three highlighted seed rows.
     drive: async ({ page }) => {
@@ -231,43 +212,33 @@ export const recipes = [
 
   {
     name: 'mobile-participants',
-    server: 'mobile',
     family: 'setup',
     viewport: { width: 1280, height: 1000 },
     dpr: 2,
     capture: 'viewport',
     waitFor: 'text=Next steps',
-    setup: async ({ page, base, fixture }) => {
-      await loginAdmin(page, base);
-      await page.goto(base + `/admin/competition/${fixture.overviewId}/overview`, { waitUntil: 'domcontentloaded' });
-    },
+    auth: 'admin',
+    route: `/admin/competition/${OVERVIEW_ID}/overview`,
   },
 
   {
     name: 'mobile-draw-preview',
-    server: 'mobile',
     family: 'setup',
     viewport: { width: 1257, height: 900 },
     dpr: 2,
     capture: 'fullPage',
     waitFor: 'text=Draw ready',
-    setup: async ({ page, base, fixture }) => {
-      await loginAdmin(page, base);
-      await page.goto(base + `/admin/competition/${fixture.drawId}/pools`, { waitUntil: 'domcontentloaded' });
-    },
+    auth: 'admin',
+    route: `/admin/competition/${DRAW_ID}/pools`,
   },
 
   {
     name: 'kachinuki-estimate-range',
-    server: 'mobile',
     family: 'kachinuki',
     viewport: { width: 920, height: 900 },
-    dpr: 1,
     capture: 'viewport',
     waitFor: 'text=Schedule estimate',
-    setup: async ({ page, base, fixture }) => {
-      await loginAdmin(page, base);
-      await page.goto(base + `/admin/competition/${fixture.id}/overview`, { waitUntil: 'domcontentloaded' });
-    },
+    auth: 'admin',
+    route: `/admin/competition/${KACHINUKI_ID}/overview`,
   },
 ];

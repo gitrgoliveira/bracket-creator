@@ -9,13 +9,18 @@
 // same ones the client makes, with no per-fighter detail to lose.
 export const PASSWORD = 'testpassword';
 
-export function client(base) {
+// `headers` lets a caller add one: a self-run tournament gates roster and draw
+// mutations behind a second X-Admin-Password header (middleware.go's
+// RequireElevatedPassword), and the recipe that needs it configures this
+// client rather than re-implementing the call.
+export function client(base, headers = {}) {
   const call = async (method, p, body, auth = true) => {
     const res = await fetch(base + p, {
       method,
       headers: {
         'Content-Type': 'application/json',
         ...(auth ? { 'X-Tournament-Password': PASSWORD } : {}),
+        ...headers,
       },
       body: body != null ? JSON.stringify(body) : undefined,
     });

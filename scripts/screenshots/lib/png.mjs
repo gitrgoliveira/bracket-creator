@@ -127,8 +127,10 @@ export function pixelDiff(fileA, fileB) {
   const a = decode(fileA);
   const b = decode(fileB);
   if (!a || !b) return null;
+  // A size mismatch IS a change; saying so here spares the caller a second
+  // field to test in the right order.
   if (a.width !== b.width || a.height !== b.height || a.samples !== b.samples) {
-    return { sizeDiffers: true, differing: null, maxDelta: null };
+    return { sizeDiffers: true, changed: true, differing: null, maxDelta: null };
   }
   let differing = 0;
   let maxDelta = 0;

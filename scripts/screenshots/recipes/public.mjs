@@ -1,8 +1,6 @@
 // Public / spectator surfaces: everything a browser sees WITHOUT ever having
-// authenticated as an operator. Per the harness brief, these captures must
-// run against a context that has never logged in - clearAuth (lib/ui.mjs) is
-// used defensively in every setup(), even though a fresh Playwright context
-// (see run.mjs's runRecipe) has empty localStorage by construction.
+// authenticated as an operator. None of these recipes declares `auth`, and a
+// fresh Playwright context has never logged in, so that is the whole of it.
 //
 // Two of the six captures (viewer-home, viewer-competition) reuse the `demo`
 // family from admin.mjs - the same "London Cup Demo" tournament the rest of
@@ -15,44 +13,22 @@
 // them in self-run mode. That used to require scheduling care because every
 // mobile recipe shared one server; run.mjs now gives each FAMILY its own
 // server and data dir, so the families cannot contaminate one another.
-import { loginAdmin, clearAuth, settle, PASSWORD } from '../lib/ui.mjs';
+import { settle, PASSWORD, withAdminPage } from '../lib/ui.mjs';
+import { client } from '../lib/api.mjs';
 import { assertIndividualBoutPoints, assertHanteiRecorded } from '../lib/fixture.mjs';
+import { SCORE_EDITOR_SOURCES, VIEWER_SOURCES } from '../lib/scope.mjs';
 import { families as adminFamilies } from './admin.mjs';
 
+// The competition ids two seeds below create, at module level so the recipes
+// that capture them can say so in `route` (run.mjs concatenates `base +
+// route`, so the id has to be known when the recipe is declared).
+const ENCHO_COMP = 'individual-cup';
+const SELFRUN_COMP = 'open-individual';
 
-
-// Local helper, not in lib/ui.mjs: clicks the Score button on the FIRST row
-// of /admin/score-editor matching a status predicate. The editors group's own opener
-// finds a row by the two competitors' names, which none of these fixtures
-// need to hardcode - the fixtures below only care about ORDER (first
-// scheduled match, next scheduled match, ...), not identity.
-function scoreEditRow(page, { excludeCompleted = false, excludeRunning = false } = {}) {
-  let sel = '.score-edit-row';
-  if (excludeCompleted) sel += ':not(.score-edit-row--complete)';
-  if (excludeRunning) sel += ':not(.score-edit-row--running)';
-  return page.locator(sel).first();
-}
-
-// api.mjs's client() only ever sends X-Tournament-Password. A self-run
-// tournament with an adminPassword set gates roster/draw/import mutations
-// behind a SECOND header, X-Admin-Password (middleware.go's
-// RequireElevatedPassword) - this is scaffolding (a plain roster POST, no
-// ippons/member ids to lose), so a raw fetch is the right tool per the
-// fixture-fidelity rule, not a UI-driven flow.
-async function elevatedCall(base, method, path, body) {
-  const res = await fetch(base + path, {
-    method,
-    headers: {
-      'Content-Type': 'application/json',
-      'X-Tournament-Password': PASSWORD,
-      'X-Admin-Password': PASSWORD,
-    },
-    body: body != null ? JSON.stringify(body) : undefined,
-  });
-  const text = await res.text();
-  if (!res.ok) throw new Error(`${method} ${path} -> ${res.status} ${text.slice(0, 200)}`);
-  return text.trim() ? JSON.parse(text) : null;
-}
+// The FIRST row of /admin/score-editor. The editors group's own opener finds
+// a row by the two competitors' names; the fixtures here only care about
+// ORDER (first scheduled match, next scheduled match, ...), not identity.
+const firstScoreRow = (page) => page.locator('.score-edit-row').first();
 
 async function openScoreEditorRow(page, row) {
   await row.waitFor({ state: 'visible', timeout: 15000 });
@@ -112,9 +88,10 @@ export const families = {
   // A small roster is added so the public home page isn't bare, but nothing
   // needs scoring or a draw for either capture.
   selfRun: {
+    server: 'mobile',
     // SINCE scoping inputs (lib/scope.mjs): the self-registration page and the
     // public viewer home.
-    sources: ['web-mobile/js/registration', 'web-mobile/js/viewer'],
+    sources: ['web-mobile/js/registration', ...VIEWER_SOURCES],
     seed: async ({ api, base }) => {
       await api.tournament({
         name: 'Riverside Open',
@@ -122,7 +99,7 @@ export const families = {
         mode: 'self-run',
         adminPassword: PASSWORD,
       });
-      const compId = await api.competition('open-individual', 'Open Individual', { courts: ['A'] });
+      const compId = await api.competition(SELFRUN_COMP, 'Open Individual', { courts: ['A'] });
       // A SECOND open competition, because selfrun-viewer-home's caption reads
       // "each open competition carries a Register button" - a plural claim that
       // one card demonstrates poorly, and that a reader cannot check at all.
@@ -130,17 +107,17 @@ export const families = {
       // Setting a self-run tournament's adminPassword above flips
       // ElevatedVerifier.GateActive() on (middleware.go's RequireElevatedPassword):
       // a roster mutation is one of the gated "destructive ops" (delete
-      // competition, discard draw, roster add/edit, import), so it now needs
-      // a SECOND header, X-Admin-Password, that api.mjs's client() never
-      // sends. elevatedCall (below) is a local one-off for this one call
-      // rather than a change to the shared client.
-      await elevatedCall(base, 'POST', `/api/competitions/${compId}/participants`, { players: [
+      // competition, discard draw, roster add/edit, import), so it needs a
+      // SECOND header, X-Admin-Password, which the shared client sends when
+      // asked. A plain roster POST is scaffolding, not a fidelity concern.
+      const elevated = client(base, { 'X-Admin-Password': PASSWORD });
+      await elevated.post(`/api/competitions/${compId}/participants`, { players: [
         { name: 'Emi Kondo', dojo: 'Riverside Dojo' },
         { name: 'Taro Fujita', dojo: 'Riverside Dojo' },
         { name: 'Nana Ishii', dojo: 'Harbor Dojo' },
         { name: 'Sho Matsuda', dojo: 'Harbor Dojo' },
       ] });
-      await elevatedCall(base, 'POST', `/api/competitions/${secondId}/participants`, { players: [
+      await elevated.post(`/api/competitions/${secondId}/participants`, { players: [
         { name: 'Aiko Tanaka', dojo: 'Riverside Dojo' },
         { name: 'Mika Suzuki', dojo: 'Harbor Dojo' },
         { name: 'Hana Sato', dojo: 'Northgate Dojo' },
@@ -160,14 +137,13 @@ export const families = {
   //   - match 4: started but left unscored -> "ON NOW".
   //   - matches 5-6: left scheduled -> "Up next".
   enchoPool: {
+    server: 'mobile',
     // SINCE scoping inputs (lib/scope.mjs): the public competition page it
     // captures, plus the score editor its seed drives to record the hantei.
-    sources: [
-      'web-mobile/js/viewer', 'web-mobile/js/admin_scoring_', 'web-mobile/js/admin_schedule',
-    ],
+    sources: [...VIEWER_SOURCES, ...SCORE_EDITOR_SOURCES],
     seed: async ({ api, base, browser }) => {
       await api.tournament({ name: 'Encho Cup', courts: ['A'] });
-      const compId = await api.competition('individual-cup', 'Individual Cup', {
+      const compId = await api.competition(ENCHO_COMP, 'Individual Cup', {
         courts: ['A'],
         format: 'league',
       });
@@ -179,10 +155,7 @@ export const families = {
       ]);
       await api.start(compId);
 
-      const ctx = await browser.newContext();
-      try {
-        const page = await ctx.newPage();
-        await loginAdmin(page, base);
+      await withAdminPage(browser, null, async (page) => {
         await page.goto(base + '/admin/score-editor', { waitUntil: 'domcontentloaded' });
 
         // Open match 1 once. Its "Finish + Start Next ->" button (the
@@ -193,7 +166,7 @@ export const families = {
         // running - so matches 2-4 never need a fresh "Score" click from
         // the (covered-by-modal-backdrop) list underneath. Only match 1
         // needs an explicit "Start match" tap.
-        await openScoreEditorRow(page, scoreEditRow(page));
+        await openScoreEditorRow(page, firstScoreRow(page));
         await clickStartMatch(page);
 
         // Match 1: tied 0-0, then decided in encho by a single strike -
@@ -221,9 +194,7 @@ export const families = {
         // finish above) -> "ON NOW". Leave it unscored and don't finish it.
         // Matches 5-6 are left untouched -> "Up next".
         await settle(page);
-      } finally {
-        await ctx.close();
-      }
+      });
       return { compId };
     },
   },
@@ -236,11 +207,10 @@ export const families = {
   // and no next-pool strip. Two pools are the minimum that gives the board a
   // current group AND a next one.
   liveCourt: {
+    server: 'mobile',
     // SINCE scoping inputs (lib/scope.mjs): the TV display it captures, plus
     // the score editor its seed drives to start the bouts.
-    sources: [
-      'web-mobile/js/display', 'web-mobile/js/admin_scoring_', 'web-mobile/js/admin_schedule',
-    ],
+    sources: ['web-mobile/js/display', ...SCORE_EDITOR_SOURCES],
     seed: async ({ api, base, browser }) => {
       await api.tournament({ name: 'Court Board Demo', courts: ['A'] });
       const compId = await api.competition('board-demo', 'Board Demo Individual', {
@@ -259,14 +229,11 @@ export const families = {
       ]);
       await api.start(compId);
 
-      const ctx = await browser.newContext();
-      try {
-        const page = await ctx.newPage();
-        await loginAdmin(page, base);
+      await withAdminPage(browser, null, async (page) => {
         await page.goto(base + '/admin/score-editor', { waitUntil: 'domcontentloaded' });
 
         // Match 1: a plain 2-0 win, completed.
-        await openScoreEditorRow(page, scoreEditRow(page));
+        await openScoreEditorRow(page, firstScoreRow(page));
         await clickStartMatch(page);
         await tapIppon(page, 'aka', 'M');
         await tapIppon(page, 'aka', 'K');
@@ -279,9 +246,7 @@ export const families = {
         await tapIppon(page, 'shiro', 'M');
         await settle(page);
         // Left running on purpose - no finishMatch() call.
-      } finally {
-        await ctx.close();
-      }
+      });
       return { compId, court: 'A' };
     },
   },
@@ -290,13 +255,10 @@ export const families = {
 export const recipes = [
   {
     name: 'viewer-home',
-    server: 'mobile',
     family: 'demo',
     route: '/',
     viewport: { width: 804, height: 900 },
-    dpr: 1,
     capture: 'fullPage',
-    setup: ({ page, base }) => clearAuth(page, base),
     // viewer_home.jsx:300, the tournament name header. Not
     // [data-testid="viewer-home-display-modes"] (viewer_home.jsx:535): that
     // testid sits inside a collapsed <details>, present in the DOM but not
@@ -305,13 +267,10 @@ export const recipes = [
   },
   {
     name: 'viewer-competition',
-    server: 'mobile',
     family: 'demo',
     route: '/competition/men-up-to-2d',
     viewport: { width: 815, height: 900 },
-    dpr: 1,
     capture: 'fullPage',
-    setup: ({ page, base }) => clearAuth(page, base),
     // viewer_competition.jsx:326, the tab strip ("Overview"/"Pools"/...).
     waitFor: '.viewer__tab',
     // The caption promises "recent results with waza-level scores", and a
@@ -321,16 +280,10 @@ export const recipes = [
   },
   {
     name: 'viewer-result-encho',
-    server: 'mobile',
     family: 'enchoPool',
-    // Matches enchoPool.seed's fixed competition id below - fixed rather
-    // than fixture-derived because run.mjs's route handling is a plain
-    // `base + recipe.route` string concat with no support for a function.
-    route: '/competition/individual-cup',
+    route: `/competition/${ENCHO_COMP}`,
     viewport: { width: 906, height: 900 },
-    dpr: 1,
     capture: 'fullPage',
-    setup: ({ page, base }) => clearAuth(page, base),
     // viewer_competition.jsx: "Recent results" section-title, only rendered
     // once recentMatches is non-empty.
     waitFor: 'text=Recent results',
@@ -338,17 +291,14 @@ export const recipes = [
     // AND a hantei result. Without ippons the (E) would sit beside two blank
     // cells; without an Ht the shot silently drops half its caption.
     assert: ({ dataDir }) => {
-      assertIndividualBoutPoints(dataDir, 'individual-cup');
-      assertHanteiRecorded(dataDir, 'individual-cup');
+      assertIndividualBoutPoints(dataDir, ENCHO_COMP);
+      assertHanteiRecorded(dataDir, ENCHO_COMP);
     },
   },
   {
     name: 'selfrun-register',
-    server: 'mobile',
     family: 'selfRun',
-    // Matches selfRun.seed's fixed competition id below (see the route
-    // comment on viewer-result-encho for why this can't be fixture-derived).
-    route: '/register/open-individual',
+    route: `/register/${SELFRUN_COMP}`,
     // Height is short on purpose: fullPage's own height isn't compared
     // (run.mjs only checks width for that mode) but a short viewport keeps
     // the page's min-height:100vh wrapper from padding the capture with a
@@ -356,31 +306,25 @@ export const recipes = [
     viewport: { width: 380, height: 560 },
     dpr: 2,
     capture: 'fullPage',
-    setup: ({ page, base }) => clearAuth(page, base),
     // registration.jsx:190, the "Register" h2.
     waitFor: 'text=Register',
   },
   {
     name: 'selfrun-viewer-home',
-    server: 'mobile',
     family: 'selfRun',
     route: '/',
     // Short height for the same min-height:100vh reason as selfrun-register.
     viewport: { width: 380, height: 600 },
     dpr: 2,
     capture: 'fullPage',
-    setup: ({ page, base }) => clearAuth(page, base),
     waitFor: '.viewer__title--lg',
   },
   {
     name: 'display-scoreboard',
-    server: 'mobile',
     family: 'liveCourt',
     route: '/display?court=A',
     viewport: { width: 2560, height: 1440 },
-    dpr: 1,
     capture: 'viewport',
-    setup: ({ page, base }) => clearAuth(page, base),
     // display_scoreboard.jsx:449, TvIndividualBoard's root.
     waitFor: '[data-testid="tv-display-root"]',
   },

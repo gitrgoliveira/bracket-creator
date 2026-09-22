@@ -23,6 +23,7 @@ import { start, REPO } from './lib/server.mjs';
 import { client } from './lib/api.mjs';
 import { pngSize, pixelDiff } from './lib/png.mjs';
 import { changedPaths, scope } from './lib/scope.mjs';
+import { authAdmin } from './lib/ui.mjs';
 import { recipes, families, recipeFiles } from './recipes/index.mjs';
 
 const OUT = path.join(REPO, 'scripts', 'screenshots', 'out');
@@ -47,7 +48,16 @@ const DETERMINISTIC_RENDERING = [
 
 const KINDS = { still: (r) => r.capture !== 'video', video: (r) => r.capture === 'video' };
 
+const KNOWN_ARGS = ['KIND', 'NAME', 'FAMILY', 'SINCE'];
+
 function selected() {
+  // A misspelt key (FAMILIY=, SINCE-main) would otherwise be dropped on the
+  // floor and the run would obey a command you did not give, for three minutes.
+  for (const key of Object.keys(args)) {
+    if (!KNOWN_ARGS.includes(key)) {
+      throw new Error(`unknown argument ${key}= - use one of: ${KNOWN_ARGS.join(', ')}`);
+    }
+  }
   let list = recipes;
   if (args.KIND) {
     const pick = KINDS[args.KIND];
@@ -104,7 +114,7 @@ function reportStill(recipe, file) {
   if (!got) return { changed: true, note: 'no readable PNG was written' };
   if (!want) return { changed: true, note: `NEW ${dims(got)} - no committed file to compare` };
   const diff = pixelDiff(file, committed);
-  if (diff && !diff.sizeDiffers && !diff.changed) {
+  if (diff && !diff.changed) {
     return { changed: false, note: `unchanged ${dims(got)}` };
   }
 
@@ -181,6 +191,9 @@ async function runRecipe(browser, recipe, ctx) {
     deviceScaleFactor: recipe.dpr || 1,
     ...(isVideo ? { recordVideo: { dir: OUT, size: recipe.viewport } } : {}),
   });
+  // Before the page exists, so there is no navigation order to reason about:
+  // an init script on the context applies to every page it opens.
+  if (recipe.auth === 'admin') await authAdmin(context);
   const page = await context.newPage();
   // A capture is a real browser session, so the page can tell us it is broken.
   // Two severities, deliberately not treated alike. An UNCAUGHT exception means
@@ -254,23 +267,24 @@ async function main() {
   // isolation is close to free.
   const groups = new Map();
   for (const r of list) {
-    const key = `${r.server}\u0000${r.family}`;
-    if (!groups.has(key)) groups.set(key, []);
-    groups.get(key).push(r);
+    if (!groups.has(r.family)) groups.set(r.family, []);
+    groups.get(r.family).push(r);
   }
 
   const results = [];
   const browser = await chromium.launch({ args: DETERMINISTIC_RENDERING });
   try {
-    for (const [key, group] of groups) {
-      const [serverKind, familyName] = key.split('\u0000');
+    for (const [familyName, group] of groups) {
       const family = families[familyName];
       if (!family) throw new Error(`${group[0].name}: unknown family ${familyName}`);
 
-      const server = await start(serverKind);
+      // Which server a family seeds against is the family's property, so it
+      // is declared once there rather than on each of its recipes.
+      const server = await start(family.server);
+      let fixture = {};
       try {
         process.stdout.write(`seeding ${familyName}... `);
-        const fixture = (await family.seed({
+        fixture = (await family.seed({
           api: client(server.base), base: server.base, browser, dataDir: server.dataDir,
         })) || {};
         process.stdout.write('done\n');
@@ -301,6 +315,10 @@ async function main() {
           }
         }
       } finally {
+        // A seed may hold something open across its captures (a signed-in
+        // page whose editor the clip watches); this is where it lets go,
+        // before the server it was talking to.
+        if (family.teardown) await family.teardown(fixture);
         await server.stop();
       }
     }

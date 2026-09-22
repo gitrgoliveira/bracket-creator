@@ -36,17 +36,27 @@
 import { execFileSync } from 'node:child_process';
 import { REPO } from './server.mjs';
 
-const HARNESS = [
-  'scripts/screenshots/run.mjs',
-  'scripts/screenshots/lib/',
-  'scripts/screenshots/recipes/index.mjs',
-  'scripts/screenshots/package',
-  'Makefile',
-];
+const under = (p, prefixes) => prefixes.some((x) => p.startsWith(x));
+
+// Rule 1's set is the harness MINUS the recipes: everything under
+// scripts/screenshots/ except recipes/ (rule 2 scopes those per file) and
+// prose (a README edit reaches no capture), plus the Makefile that invokes it.
+// A prefix with two exceptions rather than a list of files, so a new lib
+// module or a second directory cannot fall through to "no capture depends on
+// it" - the one direction this module must never err in.
+const isHarness = (p) => p === 'Makefile'
+  || (p.startsWith('scripts/screenshots/')
+    && !p.startsWith('scripts/screenshots/recipes/')
+    && !p.endsWith('.md'));
 
 const APPLICATION = ['web-mobile/', 'web/', 'internal/', 'cmd/', 'main.go', 'go.mod', 'go.sum'];
 
-const under = (p, prefixes) => prefixes.some((x) => p.startsWith(x));
+// Source sets that always travel together, so a family spreads one name
+// rather than re-typing a pair and forgetting half of it: the score editors
+// are hosted by the schedule page (admin_schedule_score_editor.jsx), and every
+// public page is a viewer_* module.
+export const SCORE_EDITOR_SOURCES = ['web-mobile/js/admin_scoring_', 'web-mobile/js/admin_schedule'];
+export const VIEWER_SOURCES = ['web-mobile/js/viewer'];
 
 // Everything git considers changed: the branch against `since`, the index and
 // worktree against HEAD, and files git does not know about yet. Ignored files
@@ -76,7 +86,7 @@ export function scope(paths, families, recipeFiles) {
   };
 
   for (const p of [...paths].sort()) {
-    if (under(p, HARNESS)) {
+    if (isHarness(p)) {
       take(p, all, 'harness file: every family');
       continue;
     }

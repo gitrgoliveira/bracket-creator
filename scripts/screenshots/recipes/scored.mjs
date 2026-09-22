@@ -21,8 +21,9 @@
 // tournament, so a family cannot have one of its own.
 import fs from 'node:fs';
 import path from 'node:path';
-import { loginAdmin, settle } from '../lib/ui.mjs';
-import { assertLineupIds, csvRows } from '../lib/fixture.mjs';
+import { settle, withAdminPage } from '../lib/ui.mjs';
+import { assertLineupIds, assertIndividualBoutPoints, csvRows } from '../lib/fixture.mjs';
+import { SCORE_EDITOR_SOURCES, VIEWER_SOURCES } from '../lib/scope.mjs';
 
 const TEAM_COMP = 'team-championship';
 const SWISS_TEAM = 'swiss-teams';
@@ -81,10 +82,8 @@ const POOL_NAMES = [
 // ---------------------------------------------------------------------------
 // Local UI helpers.
 //
-// These are deliberately NOT in lib/ui.mjs: they are the first driver for the
-// fixed-order team sheet, the engi flag counter and the score-list loop, and
-// lib/ui.mjs is edited concurrently. They are candidates to move there once
-// the harness settles (noted in the group's report).
+// The first driver for the fixed-order team sheet, the engi flag counter and
+// the score-list loop; local for the reason lib/ui.mjs gives in its header.
 // ---------------------------------------------------------------------------
 
 const EDITOR = '[data-testid="scoring-modal-root"], .editor-modal';
@@ -238,7 +237,7 @@ async function scoreTeamEncounter(editor, page, i) {
 // nil-nil would show a 0 in the Flags column the capture exists to explain.
 const ENGI_SPLITS = [[3, 2], [4, 1], [1, 4], [2, 3]];
 
-async function scoreEngiMatch(page, base, compId, i) {
+async function scoreEngiMatch(page, i) {
   const editor = page.locator(EDITOR).first();
   const [aka, shiro] = ENGI_SPLITS[i % ENGI_SPLITS.length];
   for (let n = 0; n < aka; n += 1) {
@@ -263,7 +262,7 @@ async function scoreEveryEngiMatch(page, base, compId, startIndex, limit = 20) {
     const rows = scorableRows(page);
     if (!(await rows.count())) break;
     await openEditorForRow(page, rows.first());
-    await scoreEngiMatch(page, base, compId, startIndex + done);
+    await scoreEngiMatch(page, startIndex + done);
     done += 1;
   }
   return done;
@@ -273,13 +272,12 @@ async function scoreEveryEngiMatch(page, base, compId, startIndex, limit = 20) {
 // repeat. POST /competitions/:id/swiss/generate-round is the real path
 // (internal/mobileapp/handlers_swiss.go:48); it 409s while the current round
 // still has an unscored match, which is why the scoring runs first.
-async function playSwiss(api, page, base, compId, rounds, scoreRound) {
+async function playSwiss(api, compId, rounds, scoreRound) {
   let scored = 0;
   for (let r = 1; r <= rounds; r += 1) {
     scored += await scoreRound(scored);
     if (r < rounds) await api.post(`/api/competitions/${compId}/swiss/generate-round`);
   }
-  return scored;
 }
 
 // ---------------------------------------------------------------------------
@@ -411,20 +409,6 @@ function assertTeamSubBouts(dataDir, compId) {
   return scoredBouts;
 }
 
-// An INDIVIDUAL match keeps its points in the top-level IpponsA / IpponsB
-// columns (the SubResults blob above is the team shape), and they are what the
-// pool's PW / PL and the head-to-head letters are drawn from.
-function assertIndividualIppons(dataDir, compId) {
-  const completed = poolMatchRecords(dataDir, compId).filter((m) => m.Status === 'completed');
-  if (!completed.length) throw new Error(`${compId}: no completed pool match to check`);
-  const withPoints = completed.filter((m) => (m.IpponsA || '').trim() || (m.IpponsB || '').trim());
-  if (!withPoints.length) {
-    throw new Error(`${compId}: no completed pool match records an ippon - PW/PL will be zero ` +
-      'and the head-to-head grid will be blank');
-  }
-  return withPoints.length;
-}
-
 // Engi scores in flags, in their own two columns; every other column of an
 // untouched row is already full of digits, so only these two can be read.
 function assertEngiFlags(dataDir, compId) {
@@ -441,19 +425,20 @@ function assertEngiFlags(dataDir, compId) {
 // Exported so the checks themselves can be red-verified against a saved
 // quick-scored fixture: an assertion nobody has watched fail is not a gate.
 // The registry only reads `families` and `recipes`, so extra exports are inert.
-export { assertTeamSubBouts, assertEngiFlags, assertIndividualIppons };
+export { assertTeamSubBouts, assertEngiFlags };
 
 // ---------------------------------------------------------------------------
 // The family.
 // ---------------------------------------------------------------------------
 export const families = {
   scored: {
+    server: 'mobile',
     // SINCE scoping inputs (lib/scope.mjs): the Lineups page and its resolver
     // modules, the public standings pages it captures, and the editors its
     // seed drives to enter the scores.
     sources: [
       'web-mobile/js/admin_lineup', 'web-mobile/js/lineup_', 'web-mobile/js/squad_member_label',
-      'web-mobile/js/viewer', 'web-mobile/js/admin_scoring_', 'web-mobile/js/admin_schedule',
+      ...VIEWER_SOURCES, ...SCORE_EDITOR_SOURCES,
     ],
     seed: async ({ api, base, browser }) => {
       await api.tournament({
@@ -496,25 +481,20 @@ export const families = {
       })));
       await api.start(POOLS_COMP);
 
-      const context = await browser.newContext({ viewport: { width: 1600, height: 1000 } });
-      const page = await context.newPage();
       let lineupTeam = '';
-      try {
-        await loginAdmin(page, base);
+      await withAdminPage(browser, { width: 1600, height: 1000 }, async (page) => {
         lineupTeam = await enterLineup(api, page, base, TEAM_COMP, LINEUP_NAMES);
 
-        await playSwiss(api, page, base, SWISS_TEAM, 2, (done) =>
+        await playSwiss(api, SWISS_TEAM, 2, (done) =>
           scoreEveryMatch(page, base, SWISS_TEAM, (editor, p, i) =>
             scoreTeamEncounter(editor, p, done + i), 8));
 
-        await playSwiss(api, page, base, SWISS_ENGI, 2, (done) =>
+        await playSwiss(api, SWISS_ENGI, 2, (done) =>
           scoreEveryEngiMatch(page, base, SWISS_ENGI, done, 8));
 
         await scoreEveryMatch(page, base, POOLS_COMP, scoreIndividualBout, 60);
         await api.post(`/api/competitions/${POOLS_COMP}/complete`);
-      } finally {
-        await context.close();
-      }
+      });
 
       return {
         teamComp: TEAM_COMP, swissTeam: SWISS_TEAM, swissEngi: SWISS_ENGI, pools: POOLS_COMP,
@@ -535,13 +515,11 @@ export const recipes = [
     // full-page reports the layout width (1600), never the 15px a scrollbar
     // took off the original.
     name: 'team-lineup',
-    server: 'mobile',
     family: 'scored',
     route: `/admin/competition/${TEAM_COMP}/lineups`,
     viewport: { width: 1585, height: 1212 },
-    dpr: 1,
     capture: 'viewport',
-    setup: ({ page, base }) => loginAdmin(page, base),
+    auth: 'admin',
     waitFor: '[data-testid="lineup-form-root"]',
     // The Team dropdown opens on the first team in ROSTER order, which is not
     // the one whose lineup was entered: slot numbers come from the draw.
@@ -573,11 +551,9 @@ export const recipes = [
     // caption is a sibling DIV after </table>, so the old crop could never
     // contain it. The image was quietly contradicting its own description.
     name: 'swiss-standings-team',
-    server: 'mobile',
     family: 'scored',
     route: `/competition/${SWISS_TEAM}/swiss`,
     viewport: { width: 900, height: 900 },
-    dpr: 1,
     capture: { selector: '.pool' },
     waitFor: 'table.pool__table tbody tr td',
     // Stricter than lib/fixture.mjs's assertBoutPoints: this also rejects a
@@ -593,11 +569,9 @@ export const recipes = [
     // The engi Swiss standings with their winner banner. The page footer is in
     // shot, so this is the whole viewer page, not a crop.
     name: 'swiss-standings-engi',
-    server: 'mobile',
     family: 'scored',
     route: `/competition/${SWISS_ENGI}/swiss`,
     viewport: { width: 769, height: 774 },
-    dpr: 1,
     capture: 'viewport',
     waitFor: 'table.pool__table tbody tr td',
     assert: ({ dataDir }) => { assertEngiFlags(dataDir, SWISS_ENGI); },
@@ -608,7 +582,6 @@ export const recipes = [
     // original's layout width. A full-page capture reports the LAYOUT width,
     // so the 1265 has to be asked for: at 1280 it comes out 2560.
     name: 'mobile-pool-standings',
-    server: 'mobile',
     family: 'scored',
     route: `/competition/${POOLS_COMP}/pools`,
     viewport: { width: 1265, height: 900 },
@@ -617,10 +590,16 @@ export const recipes = [
     waitFor: '.pool',
     // assertBoutPoints is NOT used here. It reads the SubResults column, which
     // only a TEAM competition fills, so on this individual competition it would
-    // iterate nothing and pass regardless. assertIndividualIppons reads the
-    // top-level ippon columns, which is where this competition's points live.
+    // iterate nothing and pass regardless. The individual check reads the
+    // top-level ippon columns, where this competition's points live, and
+    // rejects every decided row without them; the floor on `decided` is
+    // because it, too, passes vacuously on a competition nobody scored.
     assert: ({ dataDir }) => {
-      assertIndividualIppons(dataDir, POOLS_COMP);
+      const { decided } = assertIndividualBoutPoints(dataDir, POOLS_COMP);
+      if (!decided) {
+        throw new Error(`${POOLS_COMP}: no decided pool match - PW/PL will be zero and the ` +
+          'head-to-head grid blank');
+      }
     },
   },
 ];

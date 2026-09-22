@@ -15,6 +15,7 @@
 
 export const families = {
   webui: {
+    server: 'web',
     // SINCE scoping inputs (lib/scope.mjs): the CLI web UI is the whole of
     // web/, served by `serve` and nothing under web-mobile/.
     sources: ['web/'],
@@ -99,11 +100,9 @@ export const recipes = [
     // Default landing state: Knockout selected (the radio's default
     // `checked`, web/index.html:59), no participants loaded yet.
     name: 'webui-main',
-    server: 'web',
     family: 'webui',
     route: '/',
     viewport: { width: 1265, height: 900 },
-    dpr: 1,
     capture: 'fullPage',
     waitFor: '#loadMediumSample',
     drive: async ({ page }) => waitForVersionBadge(page),
@@ -112,11 +111,9 @@ export const recipes = [
     // Pools + Knockout, medium sample loaded: 18 players, pool options
     // visible, validation success panel, populated time estimate.
     name: 'webui-player-list',
-    server: 'web',
     family: 'webui',
     route: '/',
     viewport: { width: 1265, height: 900 },
-    dpr: 1,
     capture: 'fullPage',
     waitFor: '#loadMediumSample',
     drive: loadPoolsMediumSample,
@@ -127,11 +124,9 @@ export const recipes = [
     // 1280x900, not the modal's full row list), matching the committed shot
     // being cut off partway down the table.
     name: 'webui-seeding-modal',
-    server: 'web',
     family: 'webui',
     route: '/',
     viewport: { width: 1280, height: 900 },
-    dpr: 1,
     capture: 'viewport',
     waitFor: '#loadMediumSample',
     drive: async (args) => {
@@ -146,11 +141,9 @@ export const recipes = [
     // Seeds saved and the modal closed: #manageSeeds relabels itself to
     // "3 Seeds Assigned" (web/js/app.js:918-925).
     name: 'webui-seeds-assigned',
-    server: 'web',
     family: 'webui',
     route: '/',
     viewport: { width: 1265, height: 900 },
-    dpr: 1,
     capture: 'fullPage',
     waitFor: '#loadMediumSample',
     drive: async (args) => {

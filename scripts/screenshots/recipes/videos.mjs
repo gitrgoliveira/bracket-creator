@@ -11,64 +11,28 @@
 //      context with recordVideo and hands the recipe a live page, so anything
 //      setup() does is ON FILM. Logging in through the form would put the login
 //      screen in frame 0, so these recipes seed the two localStorage keys the
-//      SPA reads instead (authIn below). Everything else slow - creating the
+//      SPA reads instead (authAdmin, lib/ui.mjs). Everything else slow - creating the
 //      tournament, scoring the matches that fill "Recent results" - belongs in
 //      the family seed(), which gets `browser` and can open its own contexts
 //      that no camera is pointed at.
 //   2. Pacing is content. These are clips a reader watches, so the waits are
 //      deliberate and are sized against the committed files' durations rather
 //      than trimmed to the minimum the DOM needs.
-import { PASSWORD } from '../lib/api.mjs';
+import { authAdmin } from '../lib/ui.mjs';
+import { SCORE_EDITOR_SOURCES, VIEWER_SOURCES } from '../lib/scope.mjs';
 
 // ---------------------------------------------------------------------------
-// Local helpers. Each is a candidate for lib/ui.mjs, but this file must not
-// edit shared files while other agents hold them, so they live here for now.
+// Local helpers: the editor-driving ones stay here for the reason lib/ui.mjs
+// gives in its header.
 // ---------------------------------------------------------------------------
 
-// Auth without the login screen. clearAuth (lib/ui.mjs) names the same two
-// keys from the other direction. addInitScript on the CONTEXT applies to the
-// page's next navigation, which is all a video recipe ever needs: its page is
-// still on about:blank when setup() runs.
-async function authIn(context) {
-  await context.addInitScript((pw) => {
-    try {
-      localStorage.setItem('bc_authed', 'true');
-      localStorage.setItem('bc_password', pw);
-    } catch (_) { /* storage disabled; the API calls will 401 loudly */ }
-  }, PASSWORD);
-}
-
-// The runner gives each family its own server and data dir, so a tournament
-// normally will not exist yet. Ask before creating anyway rather than swallowing
-// a 409: a masked failure here surfaces much later as a page that renders an
-// empty state.
-async function ensureTournament(base) {
-  const res = await fetch(base + '/api/viewer/tournament');
-  if (res.ok) {
-    const text = await res.text();
-    const existing = text.trim() ? JSON.parse(text) : null;
-    if (existing) return existing;
-  }
-  const created = await fetch(base + '/api/tournament', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      name: 'London Cup 2026',
-      date: '19-09-2026',
-      venue: 'London',
-      durationDays: 1,
-      courts: ['A', 'B'],
-      password: PASSWORD,
-    }),
-  });
-  if (!created.ok) {
-    throw new Error(`POST /api/tournament -> ${created.status} ${(await created.text()).slice(0, 160)}`);
-  }
-  const again = await fetch(base + '/api/viewer/tournament');
-  return JSON.parse(await again.text());
-}
-
-const courtsOf = (t) => (Array.isArray(t?.courts) && t.courts.length ? t.courts : ['A']);
+// The tournament every clip is recorded against. Each family gets a fresh
+// server, so this is a plain create, and the courts are known here rather
+// than read back afterwards.
+const COURTS = ['A', 'B'];
+const tournament = (api) => api.tournament({
+  name: 'London Cup 2026', date: '19-09-2026', venue: 'London', durationDays: 1, courts: COURTS,
+});
 
 // An ippon button is a single letter (admin_scoring_individual.jsx:843,
 // `ipt-btn`), so match the whole string: has-text("M") is a substring test and
@@ -98,13 +62,11 @@ async function finishMatch(page, gap = 550) {
 // ---------------------------------------------------------------------------
 // kachinuki-demo
 // ---------------------------------------------------------------------------
-// Originally ported from a standalone scripts/record-kachinuki-demo.cjs,
-// removed once this recipe replaced it: it wrote straight into docs/videos/,
-// bypassing the staging dir, and was a second recorder for the same clip. It
-// produced the
-// committed clip. Its seed, its CSS injection and its keyboard scoring are kept
-// as they are; what changes is that the server, the browser and the recording
-// now come from the harness.
+// Ported from a standalone scripts/record-kachinuki-demo.cjs, deleted once
+// this recipe replaced it: it wrote straight into docs/videos/, bypassing the
+// staging dir, and was a second recorder for the same clip. Its seed, its CSS
+// injection and its keyboard scoring are kept; the server, the browser and
+// the recording now come from the harness.
 const KACHI_KO = 'vid-kachinuki-ko';
 const KACHI_LEAGUE = 'vid-kachinuki-league';
 
@@ -115,20 +77,11 @@ const EXPAND = '.modal-backdrop{align-items:flex-start!important;padding:8px 0!i
   + '.team-bouts-scroll{max-height:none!important;overflow:visible!important}';
 
 async function seedKachinukiComp(api, id, name, format, teamA, teamB, court) {
-  await api.post('/api/competitions', {
-    id,
-    name,
-    kind: 'team',
-    format,
-    teamSize: 5,
-    teamMatchType: 'kachinuki',
-    courts: [court],
-    roundRobin: true,
-    poolSize: 3,
-    poolWinners: 2,
-    withZekkenName: false,
-    numberPrefix: '',
-    status: 'setup',
+  // Through api.competition rather than a raw POST, so the competition gets
+  // the start time every other seed gets; without it the scores page header
+  // in the clip read "<date> at ·".
+  await api.competition(id, name, {
+    format, teamSize: 5, teamMatchType: 'kachinuki', courts: [court],
   });
   await api.participants(id, [
     { name: teamA, dojo: 'North' },
@@ -226,29 +179,21 @@ async function openFirstMatch(page, base, compId) {
   }
 }
 
-// How many rows sit under "Recent results". That section renders LAST
+// The rows under "Recent results". That section renders LAST
 // (viewer_competition.jsx:713), so it is the final .vsched group on the page.
-function recentCount(page) {
-  return page.evaluate(() => {
-    const groups = [...document.querySelectorAll('.vsched')];
-    const last = groups[groups.length - 1];
-    return last ? last.querySelectorAll('.vsched-item').length : 0;
-  });
-}
+const recentItems = (page) => page.locator('.vsched').last().locator('.vsched-item');
 
 export const families = {
   // Two 2-team kachinuki competitions, started and ready to score: a knockout
   // (where a tie cannot end the encounter) and a league (where it can).
   videoKachinuki: {
+    server: 'mobile',
     // SINCE scoping inputs (lib/scope.mjs): the competition scores page the
     // clip opens and the team editor it drives.
-    sources: [
-      'web-mobile/js/admin_competition', 'web-mobile/js/admin_scoring_',
-      'web-mobile/js/admin_schedule',
-    ],
-    seed: async ({ api, base }) => {
-      const t = await ensureTournament(base);
-      const court = courtsOf(t)[0];
+    sources: ['web-mobile/js/admin_competition', ...SCORE_EDITOR_SOURCES],
+    seed: async ({ api }) => {
+      await tournament(api);
+      const court = COURTS[0];
       await seedKachinukiComp(api, KACHI_KO, 'KO Demo', 'knockout', 'Aka', 'Shiro', court);
       await seedKachinukiComp(api, KACHI_LEAGUE, 'League Demo', 'league', 'Kita', 'Minami', court);
       return { ko: KACHI_KO, lg: KACHI_LEAGUE };
@@ -258,14 +203,14 @@ export const families = {
   // A competition with its roster in and NO draw yet: generating it is the
   // subject of the clip, so the fixture has to stop one step short.
   videoDrawPending: {
+    server: 'mobile',
     // SINCE scoping inputs (lib/scope.mjs): the competition overview page
     // where the draw is generated.
     sources: ['web-mobile/js/admin_competition'],
-    seed: async ({ api, base }) => {
-      const t = await ensureTournament(base);
-      const courts = courtsOf(t).slice(0, 2);
+    seed: async ({ api }) => {
+      await tournament(api);
       await api.competition(DRAW_COMP, "Men's Individual: 3rd dan and above", {
-        courts, numberPrefix: 'M', startTime: '09:00', date: '19-09-2026',
+        courts: COURTS, numberPrefix: 'M', startTime: '09:00', date: '19-09-2026',
       });
       await api.participants(DRAW_COMP, DRAW_ROSTER);
       return { compId: DRAW_COMP };
@@ -277,17 +222,19 @@ export const families = {
   // context is the SECOND screen the clip is about; it is opened here, off
   // camera, so the clip itself is only the push landing on the viewer.
   videoLive: {
+    server: 'mobile',
     // SINCE scoping inputs (lib/scope.mjs): the public competition page the
     // clip watches update, plus the score editor its seed drives.
-    sources: [
-      'web-mobile/js/viewer', 'web-mobile/js/admin_scoring_', 'web-mobile/js/admin_schedule',
-    ],
+    sources: [...VIEWER_SOURCES, ...SCORE_EDITOR_SOURCES],
+    // The seed leaves a signed-in page parked on the running match's editor
+    // for the clip to drive; this closes it once the clip is recorded.
+    teardown: ({ adminContext }) => adminContext.close(),
     seed: async ({ api, base, browser }) => {
-      const t = await ensureTournament(base);
+      await tournament(api);
       // The last shiaijo, and only that one: the editor chains Prev/Next within
       // a court, and keeping this competition off the courts other fixtures use
       // keeps its running match from blocking their starts.
-      const court = courtsOf(t).slice(-1);
+      const court = COURTS.slice(-1);
       // A number prefix is unique per tournament (the create returns 400 on a
       // reused one), and this file's draw fixture already holds "M".
       await api.competition(LIVE_COMP, "Men's Individual: 2nd dan and under", {
@@ -298,7 +245,7 @@ export const families = {
       await api.start(LIVE_COMP);
 
       const context = await browser.newContext({ viewport: { width: 1280, height: 900 } });
-      await authIn(context);
+      await authAdmin(context);
       const adminPage = await context.newPage();
       await openFirstMatch(adminPage, base, LIVE_COMP);
       // Two finished results fill "Recent results"; each Finish lands on the
@@ -326,15 +273,15 @@ export const recipes = [
     // in docs/user-guide/organisers/team-tournaments.md, so a re-record that
     // moves them means the prose moves too.
     name: 'kachinuki-demo',
-    server: 'mobile',
     family: 'videoKachinuki',
     viewport: { width: 820, height: 1120 },
     capture: 'video',
     // No `route`: drive() navigates four times, and a navigation discards any
     // style sheet injected into the page it left. The runner has no css hook
     // for that reason; EXPAND is re-injected here after every navigation.
+    // Not `auth: 'admin'`: this setup also stamps t0, so the two stay together.
     setup: async ({ context, fixture }) => {
-      await authIn(context);
+      await authAdmin(context);
       // Frame 0 is roughly now: the page exists and has not navigated.
       fixture.t0 = Date.now();
     },
@@ -454,13 +401,12 @@ export const recipes = [
 
   {
     name: 'draw-generation',
-    server: 'mobile',
     family: 'videoDrawPending',
     route: `/admin/competition/${DRAW_COMP}`,
     viewport: { width: 1160, height: 620 },
     capture: 'video',
     waitFor: 'button:has-text("Generate draw")',
-    setup: ({ context }) => authIn(context),
+    auth: 'admin',
     drive: async ({ page }) => {
       // Let the reader read the pre-draw header first. Shorter than it looks:
       // the clip opens on ~1.2s of the SPA's own "Loading…" screen, because a
@@ -493,33 +439,29 @@ export const recipes = [
     // the runner seeds a family immediately before its first recipe, so
     // anything this file starts happens after the other two are done.
     name: 'realtime-update',
-    server: 'mobile',
     family: 'videoLive',
     route: `/competition/${LIVE_COMP}`,
     viewport: { width: 440, height: 900 },
     capture: 'video',
-    // No authIn: this context must never have logged in, or the SPA would
+    // No `auth`: this context must never have logged in, or the SPA would
     // render the operator's view of the page instead of the public one.
     waitFor: '.section-title--running',
     drive: async ({ page, fixture }) => {
       const admin = fixture.adminPage;
-      const before = await recentCount(page);
+      const before = await recentItems(page).count();
 
       // The viewer sits on the running match while the operator scores it.
       await page.waitForTimeout(1100);
       await scoreOpenMatch(admin, [['aka', 'M'], ['shiro', 'D'], ['aka', 'K']], 600);
       await finishMatch(admin, 380);
 
-      // Wait on the push itself, not on a guess about how long it takes.
-      await page.waitForFunction((n) => {
-        const groups = [...document.querySelectorAll('.vsched')];
-        const last = groups[groups.length - 1];
-        return last ? last.querySelectorAll('.vsched-item').length > n : false;
-      }, before, { timeout: 20000 });
+      // Wait on the push itself, not on a guess about how long it takes: the
+      // row after the last one counted above appearing IS the push landing.
+      await recentItems(page).nth(before).waitFor({ state: 'visible', timeout: 20000 });
       await page.waitForTimeout(1300);
     },
     assert: async ({ page }) => {
-      const n = await recentCount(page);
+      const n = await recentItems(page).count();
       if (n < 3) throw new Error(`realtime-update: only ${n} recent results - the push never landed`);
     },
   },

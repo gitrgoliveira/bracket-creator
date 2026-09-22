@@ -91,7 +91,7 @@ make docs/videos        # the application videos
 make docs/media         # both
 ```
 
-They are separate targets because you rarely want both at once. Neither is especially slow: measured on one machine, the three videos take about 60 seconds and the 30 screenshots about 175. A video is recorded in real time and paced so a reader can follow it, so it is the more expensive of the two per clip, but there are only three of them.
+They are separate targets because you rarely want both at once. Neither is especially slow; the harness README (`scripts/screenshots/README.md`) has the timings, and the detail of how a run is kept reproducible.
 
 Both targets take `NAME=` for a single capture or `FAMILY=` for one group:
 

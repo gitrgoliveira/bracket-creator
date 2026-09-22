@@ -25,12 +25,9 @@ except ValueError:
 LEAVE_RUNNING = [
     t.strip() for t in os.environ.get("SEED_LEAVE_RUNNING", "").split(",") if t.strip()
 ]
-# How many matches of a left-running category to score before stopping.
-try:
-    RUNNING_SCORED = int(os.environ.get("SEED_RUNNING_SCORED", "8"))
-except ValueError:
-    print("[WARN] SEED_RUNNING_SCORED is not a number; using 8")
-    RUNNING_SCORED = 8
+# How many matches of a left-running category to score before stopping: enough
+# to fill a dashboard with results while a match is still in progress.
+RUNNING_SCORED = 8
 HEADERS = {
     "X-Tournament-Password": PASSWORD,
     "Content-Type": "application/json"

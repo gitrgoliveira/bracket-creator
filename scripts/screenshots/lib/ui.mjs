@@ -4,31 +4,39 @@
 // a UI change breaks one place rather than thirty recipes.
 // One owner: lib/api.mjs declares the password the seeder and the UI share.
 // Imported AND re-exported, not `export ... from`: that form re-exports
-// without binding the name locally, so loginAdmin below could not see it.
+// without binding the name locally, so authAdmin below could not see it.
 import { PASSWORD } from './api.mjs';
 
 export { PASSWORD };
 
-// The SPA renders / as an operator when these keys are present, so a public
-// capture needs a context that has never logged in.
-export async function loginAdmin(page, base) {
-  await page.goto(base + '/admin', { waitUntil: 'domcontentloaded' });
-  const pw = page.locator('input[type=password]').first();
-  await pw.waitFor({ state: 'visible', timeout: 15000 });
-  await pw.fill(PASSWORD);
-  await pw.press('Enter');
-  await page.waitForFunction(
-    () => !document.querySelector('input[type=password]'),
-    { timeout: 15000 },
-  );
+// Sign a context in as the operator, without the login form. The SPA renders
+// its admin surfaces when these two localStorage keys are present, so setting
+// them before the first navigation is all a capture needs. Driving the form
+// instead put a login screen in frame 0 of every video and a form round trip
+// in front of every admin screenshot, and left the public captures clearing
+// keys that a fresh context never had: a public capture is simply one that
+// never calls this. The runner calls it for a recipe declaring `auth: 'admin'`;
+// a seed calls it on a context of its own, usually through withAdminPage.
+export async function authAdmin(context) {
+  await context.addInitScript((pw) => {
+    try {
+      localStorage.setItem('bc_authed', 'true');
+      localStorage.setItem('bc_password', pw);
+    } catch (_) { /* storage disabled; the API calls will 401 loudly */ }
+  }, PASSWORD);
 }
 
-export async function clearAuth(page, base) {
-  await page.goto(base + '/', { waitUntil: 'domcontentloaded' });
-  await page.evaluate(() => {
-    localStorage.removeItem('bc_authed');
-    localStorage.removeItem('bc_password');
-  });
+// A signed-in page for a seed to drive, on a context of its own that is closed
+// when fn returns or throws. Pass a viewport when the driven surface lays out
+// by width; the editors do.
+export async function withAdminPage(browser, viewport, fn) {
+  const context = await browser.newContext(viewport ? { viewport } : {});
+  await authAdmin(context);
+  try {
+    return await fn(await context.newPage());
+  } finally {
+    await context.close();
+  }
 }
 
 // NOTE: this file deliberately stops at auth. Driving a score editor lives in
@@ -39,6 +47,8 @@ export async function clearAuth(page, base) {
 // correction-reason box as the last text field, which on a kachinuki row is a
 // typeable fighter name. They were exported and imported by nothing. If those
 // five local implementations are ever unified, unify them on the team editor's
-// behaviour, not the individual one's.
+// behaviour, not the individual one's - and settle first what the editor IS:
+// scored.mjs finds it by `[data-testid="scoring-modal-root"], .editor-modal`,
+// the other four by `.editor-modal` alone.
 
 export const settle = (page, ms = 350) => page.waitForTimeout(ms);

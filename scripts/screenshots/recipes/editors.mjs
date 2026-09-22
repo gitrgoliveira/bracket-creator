@@ -7,9 +7,10 @@
 // shot's state - a running match stays running, a completed one stays
 // completed. Each drive() checks the precondition it needs and throws rather
 // than photograph the wrong moment.
-import { loginAdmin, settle } from '../lib/ui.mjs';
+import { settle, withAdminPage } from '../lib/ui.mjs';
 import { roster } from '../lib/api.mjs';
 import { assertBoutPoints, assertLineupIds } from '../lib/fixture.mjs';
+import { SCORE_EDITOR_SOURCES } from '../lib/scope.mjs';
 
 // Why the viewports below are so tall: the kachinuki editor is ALWAYS the
 // compact, internally-scrolled layout (admin_scoring_team.jsx:1125 -
@@ -66,12 +67,10 @@ export const families = {
   // has nothing left to start. Deliberately separate from the demo tournament,
   // which keeps a category mid-run on every court.
   driedCourt: {
+    server: 'mobile',
     // SINCE scoping inputs (lib/scope.mjs): the court console it captures, plus
     // the score editor its seed drives to run the court dry.
-    sources: [
-      'web-mobile/js/admin_shiaijo', 'web-mobile/js/admin_scoring_',
-      'web-mobile/js/admin_schedule',
-    ],
+    sources: ['web-mobile/js/admin_shiaijo', ...SCORE_EDITOR_SOURCES],
     seed: async ({ api, base, browser }) => {
       await api.tournament({ courts: ['A'] });
       const id = await api.competition('sixth-dan-and-up', '6D and up', {
@@ -91,10 +90,7 @@ export const families = {
       // than the court console on purpose: the console only offers "Start
       // match" when nothing is open, so a loop keyed on that button stops as
       // soon as it has started one and the bracket never finishes.
-      const ctx = await browser.newContext({ viewport: { width: 1180, height: 820 } });
-      const page = await ctx.newPage();
-      try {
-        await loginAdmin(page, base);
+      await withAdminPage(browser, { width: 1180, height: 820 }, async (page) => {
         for (let guard = 0; guard < 16; guard += 1) {
           await page.goto(`${base}/admin/score-editor`, { waitUntil: 'domcontentloaded' });
           await page.waitForTimeout(700);
@@ -117,17 +113,16 @@ export const families = {
           if (await armed.count()) await armed.click();
           await page.waitForTimeout(800);
         }
-      } finally {
-        await ctx.close();
-      }
+      });
       return { compId: id };
     },
   },
 
   editors: {
+    server: 'mobile',
     // SINCE scoping inputs (lib/scope.mjs): the score editors and the schedule
     // page that hosts them (admin_schedule_score_editor.jsx).
-    sources: ['web-mobile/js/admin_scoring_', 'web-mobile/js/admin_schedule'],
+    sources: SCORE_EDITOR_SOURCES,
     seed: async ({ api }) => {
       // Three courts, one per competition. Court locks are cross-competition,
       // so two competitions sharing a court cannot both hold a running match,
@@ -222,10 +217,8 @@ export const families = {
 };
 
 // ------------------------------------------------------------- local ui ----
-// lib/ui.mjs covers the INDIVIDUAL editor. The team editor needs its own
-// helpers and they are deliberately local (brief rule 1: shared files are
-// being edited concurrently). Two of them would be worth promoting - see the
-// report.
+// The team editor's drivers, local for the reason lib/ui.mjs gives in its
+// header.
 
 async function openScoreEditorRow(page, base, a, b) {
   await page.goto(base + '/admin/score-editor', { waitUntil: 'domcontentloaded' });
@@ -366,16 +359,14 @@ export const recipes = [
     // The individual board mid-fight: one ippon each side, the match running,
     // the clear hint under the slots.
     name: 'mobile-score-editor',
-    server: 'mobile',
     family: 'editors',
     // 1181, not 1180: the backdrop centres the 560px modal, so an even
     // viewport puts it on a whole pixel and the crop comes out 560 wide
     // against the committed 561. One pixel of viewport moves the modal half a
     // pixel and changes nothing else.
     viewport: { width: 1181, height: 820 },
-    dpr: 1,
     capture: { selector: '.editor-modal' },
-    setup: ({ page, base }) => loginAdmin(page, base),
+    auth: 'admin',
     drive: async ({ page, base, fixture }) => {
       await openScoreEditorRow(page, base, fixture.ind.a, fixture.ind.b);
       await startIfOffered(page);
@@ -386,12 +377,10 @@ export const recipes = [
     // The same fight in overtime: the encho row expanded at x2, which the
     // eyebrow echoes as "(E) OVERTIME x2".
     name: 'mobile-encho-overtime',
-    server: 'mobile',
     family: 'editors',
     viewport: { width: 921, height: 892 },
-    dpr: 1,
     capture: 'viewport',
-    setup: ({ page, base }) => loginAdmin(page, base),
+    auth: 'admin',
     drive: async ({ page, base, fixture }) => {
       await openScoreEditorRow(page, base, fixture.ind.a, fixture.ind.b);
       await startIfOffered(page);
@@ -409,12 +398,10 @@ export const recipes = [
     // open bout cannot show. Reopening the FIRST bout, as this did, left no
     // collapsed row in shot at all.
     name: 'kachinuki-correct-bout',
-    server: 'mobile',
     family: 'editors',
     viewport: { width: 520, height: 1700 },
-    dpr: 1,
     capture: { selector: '.editor-modal' },
-    setup: ({ page, base }) => loginAdmin(page, base),
+    auth: 'admin',
     drive: async ({ page, base, fixture }) => {
       await openScoreEditorRow(page, base, fixture.teams.a, fixture.teams.b);
       await startIfOffered(page);
@@ -441,12 +428,10 @@ export const recipes = [
     // The same encounter one step on: bout 2 recorded, so the server appended
     // bout 3 and the footer explains what Record bout and End match will do.
     name: 'kachinuki-scoring-buttons',
-    server: 'mobile',
     family: 'editors',
     viewport: { width: 520, height: 1250 },
-    dpr: 1,
     capture: { selector: '.editor-modal' },
-    setup: ({ page, base }) => loginAdmin(page, base),
+    auth: 'admin',
     drive: async ({ page, base, fixture }) => {
       await openScoreEditorRow(page, base, fixture.teams.a, fixture.teams.b);
       await startIfOffered(page);
@@ -465,12 +450,10 @@ export const recipes = [
     // A knockout can't end level, so a tied bout offers Encho instead of End
     // match - the footer says so and End match is disabled.
     name: 'kachinuki-knockout-tie-encho',
-    server: 'mobile',
     family: 'editors',
     viewport: { width: 520, height: 1250 },
-    dpr: 1,
     capture: { selector: '.editor-modal' },
-    setup: ({ page, base }) => loginAdmin(page, base),
+    auth: 'admin',
     drive: async ({ page, base, fixture }) => {
       await openScoreEditorRow(page, base, fixture.ko.a, fixture.ko.b);
       await startIfOffered(page);
@@ -486,12 +469,10 @@ export const recipes = [
     // The finished encounter, opened again from a completed row: the summary
     // band carries the verdict and the footer offers Reopen match.
     name: 'kachinuki-reopen',
-    server: 'mobile',
     family: 'editors',
     viewport: { width: 800, height: 1100 },
-    dpr: 1,
     capture: { selector: '.editor-modal' },
-    setup: ({ page, base }) => loginAdmin(page, base),
+    auth: 'admin',
     drive: async ({ page, base, fixture }) => {
       await openScoreEditorRow(page, base, fixture.teams.a, fixture.teams.b);
       if (await page.locator('[data-testid="kachinuki-end-match-button"]').count()) {
@@ -507,15 +488,13 @@ export const recipes = [
     // finalization with no justification, so the prompt makes the reason box
     // mandatory (admin_scoring_shared.jsx:637-694).
     name: 'decision-reason-after-reopen',
-    server: 'mobile',
     family: 'editors',
     // The prompt is as wide as the modal's body allows (modal - 2x14px), and
     // the modal is min(760px, 96vw) (styles.css:5881), so its width is chosen
     // by the viewport: 671 puts the committed 617px crop on the pixel.
     viewport: { width: 671, height: 1100 },
-    dpr: 1,
     capture: { selector: '.decision-prompt' },
-    setup: ({ page, base }) => loginAdmin(page, base),
+    auth: 'admin',
     drive: async ({ page, base, fixture }) => {
       await openScoreEditorRow(page, base, fixture.teams.a, fixture.teams.b);
       const reopen = page.locator('[data-testid="kachinuki-reopen-button"]');
@@ -552,14 +531,12 @@ export const recipes = [
     // instead of arming, and its Confirm IS the commit
     // (admin_scoring_team.jsx:3825-3827).
     name: 'kachinuki-reopen-reason',
-    server: 'mobile',
     family: 'editors',
     // Same arithmetic as decision-reason-after-reopen: 693 gives the
     // committed 638px crop.
     viewport: { width: 693, height: 1100 },
-    dpr: 1,
     capture: { selector: '.reason-prompt' },
-    setup: ({ page, base }) => loginAdmin(page, base),
+    auth: 'admin',
     drive: async ({ page, base, fixture }) => {
       await openScoreEditorRow(page, base, fixture.teams.a, fixture.teams.b);
       // ONE tap: on a reopened encounter the prompt REPLACES the arm step.
@@ -585,12 +562,10 @@ export const recipes = [
     // Start match, which is the opposite of this shot's subject. It did
     // exactly that, and only the size check ran, so it passed.
     name: 'console-correct-completed',
-    server: 'mobile',
     family: 'driedCourt',
     viewport: { width: 1180, height: 820 },
-    dpr: 1,
     capture: 'viewport',
-    setup: ({ page, base }) => loginAdmin(page, base),
+    auth: 'admin',
     route: '/admin/shiaijo/A',
     waitFor: 'text=Shiaijo A',
     drive: async ({ page }) => {

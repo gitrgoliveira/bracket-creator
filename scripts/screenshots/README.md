@@ -91,8 +91,9 @@ would pull it into `audit-ci`'s scope.
     lib/server.mjs   starts `mobile-app` or `serve` on a free port + temp data dir
     lib/api.mjs      the scaffolding calls (tournament, competition, roster, draw)
     lib/net.mjs      picks a free port for the server
-    lib/ui.mjs       signing in, and nothing else: each editor is driven by
-                     the recipe group that needs it (see that file's header)
+    lib/ui.mjs       operator auth for a context, and nothing else: each editor
+                     is driven by the recipe group that needs it (see its header)
+    lib/scope.mjs    which groups a set of changed files reaches (SINCE=)
     lib/seed.mjs     runs scripts/setup_tournament.py for the demo tournament
     lib/fixture.mjs  read-back checks that refuse to capture a bad fixture
     lib/png.mjs      PNG dimensions and the pixel compare behind `unchanged`
@@ -116,13 +117,16 @@ Add a recipe to the file for its group, or create a new group file and register 
 in `recipes/index.mjs`. Recipes are declarative where they can be (route,
 viewport, DPR, what to wait for, what to crop) and carry a `drive()` where the
 subject of the capture is itself a procedure, such as a score editor mid-bout.
+A recipe that shows the operator's view declares `auth: 'admin'`; a public one
+declares nothing and runs in a context that has never signed in. The server a
+group runs against is declared once, on the group.
 
 Derive the viewport from the committed file: `file docs/screenshots/<name>.png`.
 Most captures are at a device scale factor of 1, so the committed dimensions are
 the viewport. Six are at 2, where a committed 2560x1800 means a 1280x900
 viewport: `mobile-dashboard`, `mobile-participants`, `mobile-draw-preview`,
-`mobile-pool-standings`, `selfrun-register` and `selfrun-viewer-home`. Read the
-recipe's `dpr` rather than assuming either. The runner compares width always,
+`mobile-pool-standings`, `selfrun-register` and `selfrun-viewer-home`. Those six
+declare `dpr: 2`; a recipe that says nothing is at 1. The runner compares width always,
 and height for every mode except `fullPage`, whose height moves with content.
 
 A new capture has nothing to compare against and reports `NEW`.

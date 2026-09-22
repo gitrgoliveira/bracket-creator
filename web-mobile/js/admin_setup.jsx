@@ -557,7 +557,20 @@ function AdminEditTournament({ tournament, onCancel, onSave, onLogout, onViewerM
                 onChange={(e) => setPublicURL(e.target.value)}
                 placeholder="https://my-tournament.example.com"
               />
-              <div className="field__hint">The address participants reach this tournament at: used for QR codes and share links. Leave blank to use the current browser address.</div>
+              {/* Both outcomes named, because they are NOT the same outcome
+                  and the shorter wording implied they were. "Leave blank to
+                  use the current browser address" is true of the share links,
+                  which fall back to window.location.origin (linkBase,
+                  viewer_utils.jsx), and false of the printed tag: the Excel
+                  export runs on the SERVER, reads tourn.PublicURL with no
+                  fallback available to it, and CreateTagsSheet then embeds
+                  nothing at all (engine/export.go). So an operator who
+                  followed this hint printed a full set of tags with no QR on
+                  them and found out afterwards. The docs have always said
+                  this in four places, including the scanner's side of it in
+                  the spectator guide; the field the operator actually reads
+                  while deciding did not. */}
+              <div className="field__hint">The address participants reach this tournament at. Set it to put a QR code on every printed competitor tag. Leave it blank and share links use the current browser address instead, but printed tags carry no QR code.</div>
               {publicURL.trim() === "" && isNonPublicOrigin(window.location.origin) && (
                 <window.FieldError>
                   {(() => {

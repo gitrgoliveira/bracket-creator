@@ -165,6 +165,15 @@ export function parseWatchlistTokens(search) {
 // reload retry it. Clearing the query wholesale took that away, so scanning a
 // tag while one competition was still loading silently did nothing, with a
 // reload no longer able to fix it.
+//
+// Hand-rolled rather than `new URLSearchParams(s); sp.delete(WATCHLIST_PARAM)`
+// because that cannot return the string UNCHANGED: it re-serialises what it
+// kept, and `toString()` writes a space as "+", so `?name=Ken%20Saito` (a real
+// deep-link shape, resolveDeepLink reads `name`) comes back rewritten even
+// when there was no `w` in it at all. The caller compares before it touches
+// the address bar, so a rewrite there would rewrite links this function has no
+// business touching. Measured, not assumed: only the space differs, which is
+// enough.
 export function stripWatchlistParam(search) {
   const s = String(search || "");
   const q = s.replace(/^\?/, "");

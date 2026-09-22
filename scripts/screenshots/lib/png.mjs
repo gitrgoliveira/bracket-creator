@@ -16,14 +16,12 @@ import zlib from 'node:zlib';
 
 // Why a tolerance rather than a byte compare, which would be one line: two runs
 // of the SAME code on the SAME machine do not produce identical bytes. Measured
-// here over repeated full runs, six of thirty captures landed a few grey levels
-// apart. Pinning Chromium's text rasterisation (see DETERMINISTIC_RENDERING in
-// run.mjs) took that noise floor down to a MAX of 1 grey level over at most a
-// handful of pixels, but not to zero - so a byte compare still reported five
-// surfaces as changed on every run, which is worse than reporting nothing.
+// by re-running the whole suite against the committed images: two of the thirty
+// come back a single grey level away, on a few pixels each. Small, but a byte
+// compare calls them changed on every run, which is worse than saying nothing.
 //
 // The two thresholds are set from that measurement, with the real differences
-// the same runs turned up for scale: a focus ring left on an input and a button
+// earlier runs turned up for scale: a focus ring left on an input and a button
 // captured in its disabled state both moved hundreds of pixels by 36+ levels.
 // So there are two clear orders of magnitude between noise and signal here, and
 // these sit between them rather than being tuned to either.

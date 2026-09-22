@@ -31,10 +31,12 @@ const args = Object.fromEntries(
   process.argv.slice(2).filter((a) => a.includes('=')).map((a) => a.split(/=(.*)/s).slice(0, 2)),
 );
 
-// Chromium rasterises text slightly differently from run to run unless these
-// are pinned, which put six captures as much as 50 grey levels apart on every
-// run - well above the comparison's tolerance, so each was reported as a change
-// that was not one. Subpixel antialiasing and hinting are the variable parts.
+// Chromium's text rasterisation follows the HOST's font and colour
+// configuration, so these pin it to one instead: greyscale antialiasing, no
+// hinting, sRGB. Load-bearing rather than tidy-up - removing them changes every
+// one of the 30 captures (measured), so the committed images ARE this
+// configuration's output and a host rendering any other way reports all 30 as
+// changed.
 const DETERMINISTIC_RENDERING = [
   '--disable-lcd-text',
   '--disable-font-subpixel-positioning',

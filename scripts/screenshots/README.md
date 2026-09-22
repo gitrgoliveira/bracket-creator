@@ -110,8 +110,10 @@ A capture has to reproduce closely enough that an unchanged surface never
 reaches the changed list, or that list is noise. Two things make that true and
 both are load-bearing: Chromium's text rasterisation is pinned at launch
 (`DETERMINISTIC_RENDERING` in `run.mjs`), and every screenshot is taken with
-animations finished and the text caret hidden. Without the first, six captures
-differed on every run, by as much as 50 grey levels; without the second, a CSS
-transition caught mid-flight moved one input border by 40. Those two fixes take
-the residue down to at most 1 grey level over a handful of pixels, which is not
-zero, so the comparison keeps a tolerance set from those measurements.
+animations finished and the text caret hidden. The first fixes rasterisation to
+one configuration instead of the host's, so the committed images are that
+configuration's output; drop those flags and all 30 captures change. The second
+stops a CSS transition being caught mid-flight, which moved one input border by
+40 grey levels. What is left is small but not zero: re-run the suite and two of
+the thirty come back a single grey level from the committed file. That is why
+the comparison keeps a tolerance instead of comparing bytes.

@@ -189,7 +189,7 @@ export function AdminScoreEditor({ t, c, onEditScore, onMoveCourt, restrictToCom
           className="input"
           style={{ flex: 1, minWidth: 180 }}
           placeholder="Search player, team, dojo or number…"
-          aria-label="Filter matches by player, team, or dojo"
+          aria-label="Filter matches by player, team, dojo or number"
           value={filter}
           onChange={(e) => setFilter(e.target.value)}
         />

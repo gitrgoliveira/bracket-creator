@@ -116,4 +116,17 @@ describe('the Scores filter finds a competitor by their number', () => {
     await mountAndType('Kyoto');
     expect(rows()).toBe(1);
   });
+
+  it('the accessible name says the box searches numbers too', async () => {
+    // The visible placeholder was updated with the rule and the aria-label was
+    // not, so a screen-reader user was told the box searched "player, team, or
+    // dojo" -- the very list this ruling stopped being true. An explicit name
+    // REPLACES the placeholder for assistive tech, so the omission was total,
+    // not a duplication.
+    const box = await mountAndType('');
+    const spoken = box.getAttribute('aria-label');
+    expect(spoken).toMatch(/number/i);
+    expect(spoken).toMatch(/player/i);
+    expect(spoken).toMatch(/dojo/i);
+  });
 });

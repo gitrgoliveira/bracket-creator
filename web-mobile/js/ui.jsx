@@ -544,7 +544,11 @@ function ShareLinkModal({ title, url, onClose, onCopy, showQR = true, children }
   const canvasRef = React.useRef(null);
 
   React.useEffect(() => {
-    if (!showQR || !canvasRef.current || !window.renderQR) return;
+    // No `window.renderQR` check: index.html script-tags ui.jsx (116) and
+    // qr.js (128) ahead of app.js (183), and module scripts execute in order,
+    // so the global is published before anything renders. The canvas check is
+    // inherited from the admin sheet this replaced and stays.
+    if (!showQR || !canvasRef.current) return;
     try {
       window.renderQR(canvasRef.current, url, { moduleSize: 6, quietZone: 4 });
     } catch (e) {

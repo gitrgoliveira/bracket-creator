@@ -10,6 +10,7 @@ real application in a browser.
     make docs/screenshots NAME=mobile-dashboard  # one capture
     make docs/screenshots FAMILY=editors         # one group
     make docs/videos NAME=kachinuki-demo         # one video
+    make docs/screenshots SINCE=main             # only the groups your changes reach
 
 Screenshots and videos are split because you rarely want both at once. Neither
 is especially slow: measured on one machine, the three videos take about 60
@@ -36,6 +37,43 @@ a numbered list under the `<video>` in
 several seconds between recordings. The runner prints the new marks as
 `CHAPTERS`; copy them into that list, or the numbers point at the wrong
 moments.
+
+## Capturing only what your change reaches
+
+`SINCE=<git ref>` runs only the groups whose inputs changed, and skips the
+rest. "Changed" is git's answer: the branch against that ref, plus anything
+uncommitted or untracked. It is never a file's modified date. Git stores no
+dates, so a working copy's dates only record when that checkout last wrote
+each file; a fresh clone stamps everything at once and a branch switch
+restamps whatever differs.
+
+    make docs/screenshots SINCE=main
+
+Each group declares the source files it depends on as path prefixes
+(`sources:` on the family in its recipe file), and the group's own recipe
+file always counts. Three rules decide, and the run prints which one fired for
+every changed path before any seeding starts:
+
+1. A harness file (`run.mjs`, `lib/`, the registry, the `Makefile`) can alter
+   any capture, so it selects every group.
+2. A path a group claims selects that group.
+3. Application source that no group claims selects every group. The shared
+   modules (`styles.css`, `app.jsx`, the Go handlers, the scoreboard
+   primitives) are claimed by nobody on purpose, because a change there can
+   reach any surface. Unclaimed is the safe case, not the skip case.
+
+A path matching none of those, such as docs prose, selects nothing. A run whose
+scope is empty says so and exits 0.
+
+    scoping to files changed since main, plus uncommitted changes: 2
+      docs/user-guide/organisers/web-ui.md  -> no capture depends on it
+      web-mobile/js/admin_lineup.jsx        -> scored
+    selected 1 of 10 families (scored; 4 captures); skipping demo, setup, ...
+
+The unit is the group, not the capture, because seeding is most of a run's
+cost and every capture in a group rides the same seed. A change to Go source
+runs everything, since the binary feeds every capture. The full run is the
+default, and stays the right call when you are not sure what a change reaches.
 
 ## Prerequisites
 
@@ -88,6 +126,11 @@ recipe's `dpr` rather than assuming either. The runner compares width always,
 and height for every mode except `fullPage`, whose height moves with content.
 
 A new capture has nothing to compare against and reports `NEW`.
+
+A new group should declare `sources:` (the path prefixes of what its captures
+render, plus anything its seed drives). A group that declares none is treated
+as depending on all application source, so it runs on every scoped run rather
+than silently sitting one out.
 
 ## When a page misbehaves
 

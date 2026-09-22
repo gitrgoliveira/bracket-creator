@@ -112,6 +112,9 @@ export const families = {
   // A small roster is added so the public home page isn't bare, but nothing
   // needs scoring or a draw for either capture.
   selfRun: {
+    // SINCE scoping inputs (lib/scope.mjs): the self-registration page and the
+    // public viewer home.
+    sources: ['web-mobile/js/registration', 'web-mobile/js/viewer'],
     seed: async ({ api, base }) => {
       await api.tournament({
         name: 'Riverside Open',
@@ -157,6 +160,11 @@ export const families = {
   //   - match 4: started but left unscored -> "ON NOW".
   //   - matches 5-6: left scheduled -> "Up next".
   enchoPool: {
+    // SINCE scoping inputs (lib/scope.mjs): the public competition page it
+    // captures, plus the score editor its seed drives to record the hantei.
+    sources: [
+      'web-mobile/js/viewer', 'web-mobile/js/admin_scoring_', 'web-mobile/js/admin_schedule',
+    ],
     seed: async ({ api, base, browser }) => {
       await api.tournament({ name: 'Encho Cup', courts: ['A'] });
       const compId = await api.competition('individual-cup', 'Individual Cup', {
@@ -228,6 +236,11 @@ export const families = {
   // and no next-pool strip. Two pools are the minimum that gives the board a
   // current group AND a next one.
   liveCourt: {
+    // SINCE scoping inputs (lib/scope.mjs): the TV display it captures, plus
+    // the score editor its seed drives to start the bouts.
+    sources: [
+      'web-mobile/js/display', 'web-mobile/js/admin_scoring_', 'web-mobile/js/admin_schedule',
+    ],
     seed: async ({ api, base, browser }) => {
       await api.tournament({ name: 'Court Board Demo', courts: ['A'] });
       const compId = await api.competition('board-demo', 'Board Demo Individual', {

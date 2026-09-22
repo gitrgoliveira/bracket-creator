@@ -22,7 +22,8 @@ import { chromium } from 'playwright-core';
 import { start, REPO } from './lib/server.mjs';
 import { client } from './lib/api.mjs';
 import { pngSize, pixelDiff } from './lib/png.mjs';
-import { recipes, families } from './recipes/index.mjs';
+import { changedPaths, scope } from './lib/scope.mjs';
+import { recipes, families, recipeFiles } from './recipes/index.mjs';
 
 const OUT = path.join(REPO, 'scripts', 'screenshots', 'out');
 const COMMITTED = path.join(REPO, 'docs', 'screenshots');
@@ -61,7 +62,29 @@ function selected() {
     const known = recipes.map((r) => r.name).sort().join('\n  ');
     throw new Error(`no recipe matched. Known names:\n  ${known}`);
   }
+  // SINCE narrows AFTER the explicit filters, so a misspelt NAME still fails
+  // loudly above, while a real NAME outside the scope reports "nothing to do".
+  if (args.SINCE) list = scoped(list, args.SINCE);
   return list;
+}
+
+// Keep only the recipes whose family some changed file reaches, and say why,
+// path by path, BEFORE any seeding starts: a wrong scope discovered after a
+// three-minute wait is what teaches an operator to stop using the flag.
+function scoped(list, since) {
+  const paths = changedPaths(since);
+  const { selected, reasons } = scope(paths, families, recipeFiles);
+  console.log(`scoping to files changed since ${since}, plus uncommitted changes: ${paths.size}`);
+  const width = Math.max(0, ...reasons.map(([p]) => p.length));
+  for (const [p, why] of reasons) console.log(`  ${p.padEnd(width)}  -> ${why}`);
+  const kept = list.filter((r) => selected.has(r.family));
+  const inScope = [...new Set(kept.map((r) => r.family))];
+  const all = [...new Set(list.map((r) => r.family))];
+  const skipped = all.filter((f) => !selected.has(f));
+  console.log(`selected ${inScope.length} of ${all.length} families`
+    + (inScope.length ? ` (${inScope.join(', ')}; ${kept.length} captures)` : '')
+    + (skipped.length ? `; skipping ${skipped.join(', ')}` : '') + '\n');
+  return kept;
 }
 
 // What changed about this capture since the committed original.
@@ -215,6 +238,12 @@ async function runRecipe(browser, recipe, ctx) {
 async function main() {
   fs.mkdirSync(OUT, { recursive: true });
   const list = selected();
+  // A real outcome of SINCE (a docs-only change reaches no capture), not an
+  // error: exit 0 without launching a browser.
+  if (!list.length) {
+    console.log('no capture depends on any changed file - nothing to do');
+    return;
+  }
 
   // One server PER FAMILY, not per server kind. Fixtures are not compatible with
   // each other: a self-run tournament and an officiated one differ in mode and

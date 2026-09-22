@@ -72,6 +72,15 @@ export const families = {
   // one competition per capture, all left in setup (or, for the draw
   // preview, draw-ready) status.
   setup: {
+    // SINCE scoping inputs (lib/scope.mjs): the create form, the participants
+    // page, the competition overview/settings/pools pages, and the modules the
+    // create form and settings page share.
+    sources: [
+      'web-mobile/js/admin_setup', 'web-mobile/js/admin_participants',
+      'web-mobile/js/admin_competition', 'web-mobile/js/admin_pools',
+      'web-mobile/js/competition_fields', 'web-mobile/js/competition_shape',
+      'web-mobile/js/qualifier_preview',
+    ],
     seed: async ({ api }) => {
       await api.tournament({ name: TOURNAMENT_NAME, date: TOURNAMENT_DATE, durationDays: 1, courts: ['A', 'B'] });
 
@@ -104,6 +113,9 @@ export const families = {
   // decision) so the "matches done"/"now"/progress tiles the committed shot
   // shows are real rather than the untouched draw-ready defaults.
   kachinuki: {
+    // SINCE scoping inputs (lib/scope.mjs): the competition overview page and
+    // the duration estimate it shows.
+    sources: ['web-mobile/js/admin_competition', 'web-mobile/js/duration'],
     seed: async ({ api }) => {
       await api.tournament({ name: 'Kachinuki Demo', date: TOURNAMENT_DATE, durationDays: 1, courts: ['A'] });
 

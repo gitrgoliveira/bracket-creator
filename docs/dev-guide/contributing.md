@@ -101,6 +101,14 @@ make docs/screenshots FAMILY=editors
 make docs/videos NAME=kachinuki-demo
 ```
 
+To capture only the groups your change can reach, pass a git ref:
+
+```sh
+make docs/screenshots SINCE=main
+```
+
+That reads git's list of changed files (your branch against `main`, plus anything uncommitted) and matches it against the source files each group declares it depends on. A changed file that no group claims runs everything, so a missed dependency costs time rather than a wrong screenshot. The run prints which groups it selected and why before it starts. A change that reaches no capture, such as this page, reports that and exits cleanly.
+
 You need `node` and `python3`. The first run installs the harness dependencies and downloads a browser for it. That browser is deliberately kept out of the frontend test dependencies, so `make js/deps` stays fast for everyone who never captures anything.
 
 A run builds the binary, starts a server on a free port against a throwaway data directory, seeds a tournament, drives the interface in a real browser, and writes the result to `scripts/screenshots/out/`. Nothing is written into `docs/` directly, so publishing a new capture stays your decision.

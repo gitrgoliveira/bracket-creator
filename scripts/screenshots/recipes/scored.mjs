@@ -448,6 +448,13 @@ export { assertTeamSubBouts, assertEngiFlags, assertIndividualIppons };
 // ---------------------------------------------------------------------------
 export const families = {
   scored: {
+    // SINCE scoping inputs (lib/scope.mjs): the Lineups page and its resolver
+    // modules, the public standings pages it captures, and the editors its
+    // seed drives to enter the scores.
+    sources: [
+      'web-mobile/js/admin_lineup', 'web-mobile/js/lineup_', 'web-mobile/js/squad_member_label',
+      'web-mobile/js/viewer', 'web-mobile/js/admin_scoring_', 'web-mobile/js/admin_schedule',
+    ],
     seed: async ({ api, base, browser }) => {
       await api.tournament({
         name: 'London Cup 2026',

@@ -15,6 +15,9 @@
 
 export const families = {
   webui: {
+    // SINCE scoping inputs (lib/scope.mjs): the CLI web UI is the whole of
+    // web/, served by `serve` and nothing under web-mobile/.
+    sources: ['web/'],
     seed: async () => ({}),
   },
 };

@@ -346,18 +346,23 @@ $(SHOTS_BROWSER_STAMP): $(SHOTS_DEPS_STAMP)
 	@touch $@
 
 docs/screenshots: export VERSION := $(DOCS_CAPTURE_VERSION)
-docs/screenshots: go/build $(SHOTS_BROWSER_STAMP) ## Regenerate the application screenshots (NAME=<one> or FAMILY=<group>)
-	@node $(SHOTS_DIR)/run.mjs KIND=still $(if $(NAME),NAME=$(NAME),) $(if $(FAMILY),FAMILY=$(FAMILY),)
+# All three take NAME=<one capture>, FAMILY=<one group>, or SINCE=<git ref> to
+# capture only the groups whose source files changed against that ref (plus
+# any uncommitted change). The full run is the default on purpose.
+SHOTS_ARGS = $(if $(NAME),NAME=$(NAME),) $(if $(FAMILY),FAMILY=$(FAMILY),) $(if $(SINCE),SINCE=$(SINCE),)
+
+docs/screenshots: go/build $(SHOTS_BROWSER_STAMP) ## Regenerate the application screenshots (NAME=, FAMILY= or SINCE=main to scope)
+	@node $(SHOTS_DIR)/run.mjs KIND=still $(SHOTS_ARGS)
 
 docs/videos: export VERSION := $(DOCS_CAPTURE_VERSION)
-docs/videos: go/build $(SHOTS_BROWSER_STAMP) ## Regenerate the application videos (NAME=<one> or FAMILY=<group>)
-	@node $(SHOTS_DIR)/run.mjs KIND=video $(if $(NAME),NAME=$(NAME),) $(if $(FAMILY),FAMILY=$(FAMILY),)
+docs/videos: go/build $(SHOTS_BROWSER_STAMP) ## Regenerate the application videos (NAME=, FAMILY= or SINCE=main to scope)
+	@node $(SHOTS_DIR)/run.mjs KIND=video $(SHOTS_ARGS)
 
 docs/media: export VERSION := $(DOCS_CAPTURE_VERSION)
-docs/media: go/build $(SHOTS_BROWSER_STAMP) ## Regenerate every captured screenshot and video
+docs/media: go/build $(SHOTS_BROWSER_STAMP) ## Regenerate every captured screenshot and video (NAME=, FAMILY= or SINCE=main to scope)
 	@# One run with no KIND, rather than depending on the two targets above:
 	@# those would start node and a browser twice over two disjoint halves.
-	@node $(SHOTS_DIR)/run.mjs $(if $(NAME),NAME=$(NAME),) $(if $(FAMILY),FAMILY=$(FAMILY),)
+	@node $(SHOTS_DIR)/run.mjs $(SHOTS_ARGS)
 
 run: go/build ## Run the application locally
 	@echo "Running $(BIN_NAME)..."

@@ -240,6 +240,12 @@ export const families = {
   // Two 2-team kachinuki competitions, started and ready to score: a knockout
   // (where a tie cannot end the encounter) and a league (where it can).
   videoKachinuki: {
+    // SINCE scoping inputs (lib/scope.mjs): the competition scores page the
+    // clip opens and the team editor it drives.
+    sources: [
+      'web-mobile/js/admin_competition', 'web-mobile/js/admin_scoring_',
+      'web-mobile/js/admin_schedule',
+    ],
     seed: async ({ api, base }) => {
       const t = await ensureTournament(base);
       const court = courtsOf(t)[0];
@@ -252,6 +258,9 @@ export const families = {
   // A competition with its roster in and NO draw yet: generating it is the
   // subject of the clip, so the fixture has to stop one step short.
   videoDrawPending: {
+    // SINCE scoping inputs (lib/scope.mjs): the competition overview page
+    // where the draw is generated.
+    sources: ['web-mobile/js/admin_competition'],
     seed: async ({ api, base }) => {
       const t = await ensureTournament(base);
       const courts = courtsOf(t).slice(0, 2);
@@ -268,6 +277,11 @@ export const families = {
   // context is the SECOND screen the clip is about; it is opened here, off
   // camera, so the clip itself is only the push landing on the viewer.
   videoLive: {
+    // SINCE scoping inputs (lib/scope.mjs): the public competition page the
+    // clip watches update, plus the score editor its seed drives.
+    sources: [
+      'web-mobile/js/viewer', 'web-mobile/js/admin_scoring_', 'web-mobile/js/admin_schedule',
+    ],
     seed: async ({ api, base, browser }) => {
       const t = await ensureTournament(base);
       // The last shiaijo, and only that one: the editor chains Prev/Next within

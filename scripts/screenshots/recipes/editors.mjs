@@ -66,6 +66,12 @@ export const families = {
   // has nothing left to start. Deliberately separate from the demo tournament,
   // which keeps a category mid-run on every court.
   driedCourt: {
+    // SINCE scoping inputs (lib/scope.mjs): the court console it captures, plus
+    // the score editor its seed drives to run the court dry.
+    sources: [
+      'web-mobile/js/admin_shiaijo', 'web-mobile/js/admin_scoring_',
+      'web-mobile/js/admin_schedule',
+    ],
     seed: async ({ api, base, browser }) => {
       await api.tournament({ courts: ['A'] });
       const id = await api.competition('sixth-dan-and-up', '6D and up', {
@@ -119,6 +125,9 @@ export const families = {
   },
 
   editors: {
+    // SINCE scoping inputs (lib/scope.mjs): the score editors and the schedule
+    // page that hosts them (admin_schedule_score_editor.jsx).
+    sources: ['web-mobile/js/admin_scoring_', 'web-mobile/js/admin_schedule'],
     seed: async ({ api }) => {
       // Three courts, one per competition. Court locks are cross-competition,
       // so two competitions sharing a court cannot both hold a running match,

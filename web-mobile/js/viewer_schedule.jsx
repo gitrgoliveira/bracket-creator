@@ -87,8 +87,10 @@ export function buildWatchlistUpcoming(watched, allMatches, max = WATCHED_UPCOMI
   // still fighting.
   const finished = [];
   people.forEach((p) => {
+    // No guard on an identity-less entry: an empty set matches nothing, so
+    // both passes below already come back empty and the behaviour is the same
+    // either way.
     const own = buildWatchedSets([p]);
-    if (own.size === 0) return;
     if (upcoming.some((m) => matchInvolvesWatchedSet(m, own))) return; // still has something ahead
     const done = list.filter((m) => m && m.status === "completed" && matchInvolvesWatchedSet(m, own));
     done.sort(resultRecencyDesc);

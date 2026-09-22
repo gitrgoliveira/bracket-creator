@@ -252,7 +252,13 @@ describe('TeamScoreEditorModal encho stepper is unbounded (mp-m4bn)', () => {
     }
     expect(inc.disabled).toBe(false);
     expect(screen.queryByRole('alert')).toBeNull();
-  });
+    // 15s, not the 5s default. This case re-renders a five-person team editor
+    // seven times (once per stepper tap plus the initial mount) and measures
+    // around 5.4s on a busy box, so it timed out whenever the machine was
+    // loaded -- reproduced by running several suites concurrently. The six
+    // taps are the pin ("however many periods"), so they stay; the arbitrary
+    // default is what gives way.
+  }, 15000);
 });
 
 describe('TeamScoreEditorModal kachinuki bout navigation', () => {

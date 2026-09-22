@@ -85,8 +85,24 @@ async function scoreAndCapture(match) {
   const ippons = document.querySelectorAll('button.ipt-btn');
   await act(async () => { fireEvent.click(ippons[0]); });
   await finish();
-  expect(window.API.recordScore).toHaveBeenCalledTimes(1);
-  const [, , patch] = window.API.recordScore.mock.calls[0];
+  // Select the FINISH write by its status rather than asserting a total call
+  // count. The strike above marks the editor dirty, which schedules a 300ms
+  // debounced autosave (AUTOSAVE_DEBOUNCE_MS, admin_scoring_autosave.jsx)
+  // writing status "running". doSubmit cancels that timer -- but only if the
+  // two Finish taps land inside those 300ms.
+  //
+  // Whether they do is decided by machine load, not by anything this file is
+  // testing: under a busy box the autosave fires first and the count is 2.
+  // Reproduced deterministically by running four suites concurrently, where
+  // this was the only failure, every time. An autosave landing between a
+  // strike and Finish is also perfectly legitimate in real use, so a count of
+  // 1 was never the contract.
+  //
+  // "Exactly one COMPLETED write" still catches the regression a count would
+  // (a double finish), without encoding the race.
+  const completed = window.API.recordScore.mock.calls.filter(([, , p]) => p && p.status === "completed");
+  expect(completed, "exactly one completed write").toHaveLength(1);
+  const [, , patch] = completed[0];
   return patch.subResults || [];
 }
 

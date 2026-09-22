@@ -309,7 +309,7 @@ export function effectivePrimaryKey(watchlist, pinnedKey) {
 //
 // So: the card falls back to the first entry, the alert does not. Callers that
 // mean "who gets the chime" keep using findPrimaryEntry.
-// hasMatch is optional and, when given, decides the UNPINNED fallback: the
+// matchFor is optional and, when given, decides the UNPINNED fallback: the
 // first entry that can actually fill the card, rather than the first ADDED.
 // Without it the fallback reproduced the very bug this function exists to fix,
 // by list order instead of by pin -- a coach who added a training partner
@@ -317,13 +317,28 @@ export function effectivePrimaryKey(watchlist, pinnedKey) {
 // moment the partner finished, while their own bout was minutes away and had
 // no card. A PIN still wins even when it yields nothing: it is an explicit
 // choice, and silently showing someone else would be the worse surprise.
-export function heroEntry(watchlist, pinnedKey, hasMatch) {
+//
+// It returns the MATCH, not a boolean, and the two tiers below are why. Once
+// the card began falling back to a finished bout (buildPrimaryLastResult), a
+// boolean "can this entry fill the card" went true for anyone with a RESULT,
+// which is almost everyone by mid-afternoon -- so the fallback collapsed back
+// to the first-added entry and re-opened the bug above in a quieter form: the
+// partner's finished bout on the card while the reader's own is minutes away.
+// A match still to fight therefore outranks a result, and a result outranks an
+// entry with nothing at all. The caller is expected to memoise matchFor; it is
+// called at most twice per entry.
+export function heroEntry(watchlist, pinnedKey, matchFor) {
   const pinned = findPrimaryEntry(watchlist, pinnedKey);
   if (pinned) return pinned;
   const list = normalizeWatchlist(watchlist);
-  if (typeof hasMatch === "function") {
-    const live = list.find((e) => hasMatch(e));
-    if (live) return live;
+  if (typeof matchFor === "function") {
+    const toFight = list.find((e) => {
+      const m = matchFor(e);
+      return !!m && m.status !== "completed";
+    });
+    if (toFight) return toFight;
+    const finished = list.find((e) => !!matchFor(e));
+    if (finished) return finished;
   }
   return list[0] || null;
 }
@@ -335,58 +350,75 @@ export function findPrimaryEntry(watchlist, pinnedKey) {
   return normalizeWatchlist(watchlist).find((e) => entryKey(e) === key) || null;
 }
 
-// buildPrimaryNextMatch: the hero match for the primary entry: the nearest
-// non-completed match involving the primary (a player → just them; a dojo →
-// any current member), ordered running-first then by scheduledAt so the hero
-// surfaces a live match before a merely-scheduled one. Callers pass match
-// lists already filtered through hasBothSides (as the home page does): this
-// helper stays free of the window.hasBothSides proxy so it is unit-testable
-// in isolation.
-export function buildPrimaryNextMatch(primaryEntry, roster, allMatches) {
-  if (!primaryEntry) return null;
+// matchesInvolving: the matches `keep` accepts that the primary entry is a
+// side of (a player → just them; a dojo → any current member). The two
+// builders below differ only in which matches they keep and how they order
+// what is left, so the id resolution -- and the bc-pnum rule it carries --
+// is answered here once.
+//
+// bc-pnum (HIGH regression fix): the primary
+// entry always carries a real id (resolveEntryPlayerIds only ever returns
+// roster-backed ids), so a match side with NO id is a MIXED pair and must
+// never be guessed at by name -- sameCompetitor's rule. A removed name
+// fallback used to activate whenever this id pass found nothing, matching
+// ANY pending match whose side's name happened to equal a current
+// member's roster name (or, for a player entry, the follower's own
+// name), regardless of whether that side carried an id. On a legacy/
+// id-less roster this could name the follower as their own opponent
+// ("Alice ... vs Opponent: Alice", reported live) or surface a dojo-mate's
+// unrelated match. Removed outright: a roster whose matches predate id
+// persistence now shows no hero card rather than a wrong one.
+function matchesInvolving(primaryEntry, roster, allMatches, keep) {
+  if (!primaryEntry) return [];
   const ids = new Set(resolveEntryPlayerIds(primaryEntry, roster));
-  if (ids.size === 0) return null;
+  if (ids.size === 0) return [];
   const list = Array.isArray(allMatches) ? allMatches : [];
-  const pending = list.filter((m) => m && m.status !== "completed");
-  // bc-pnum (HIGH regression fix): the primary
-  // entry always carries a real id (resolveEntryPlayerIds only ever returns
-  // roster-backed ids), so a match side with NO id is a MIXED pair and must
-  // never be guessed at by name -- sameCompetitor's rule. A removed name
-  // fallback used to activate whenever this id pass found nothing, matching
-  // ANY pending match whose side's name happened to equal a current
-  // member's roster name (or, for a player entry, the follower's own
-  // name), regardless of whether that side carried an id. On a legacy/
-  // id-less roster this could name the follower as their own opponent
-  // ("Alice ... vs Opponent: Alice", reported live) or surface a dojo-mate's
-  // unrelated match. Removed outright: a roster whose matches predate id
-  // persistence now shows no hero card rather than a wrong one.
-  const mine = pending.filter((m) => {
+  return list.filter((m) => {
+    if (!m || !keep(m)) return false;
     const [a, b] = matchParticipantIds(m);
     return (a && ids.has(a)) || (b && ids.has(b));
   });
+}
+
+// buildPrimaryNextMatch: the hero match for the primary entry: the nearest
+// match STILL TO FIGHT, ordered running-first then by scheduledAt so the hero
+// surfaces a running match before a merely-scheduled one. Callers pass match
+// lists already filtered through hasBothSides (as the home page does): this
+// helper stays free of the window.hasBothSides proxy so it is unit-testable
+// in isolation.
+//
+// It answers exactly that question and never falls back to a finished match.
+// The last-result card the watchlist hero shows once a competitor is done
+// (operator ruling 2026-09-22) is buildPrimaryLastResult below, and the
+// surface that wants both composes them. Answering both HERE was tried and
+// leaked immediately: ViewerOverview's banner (viewer_competition.jsx) asks
+// this same function and prints the answer under a hard-coded "Your next
+// match" with a court and a time, so a bout already fought arrived there as a
+// fixture still to come.
+export function buildPrimaryNextMatch(primaryEntry, roster, allMatches) {
+  const mine = matchesInvolving(primaryEntry, roster, allMatches, (m) => m.status !== "completed");
   mine.sort((a, b) => {
     const ao = a.status === "running" ? 0 : 1;
     const bo = b.status === "running" ? 0 : 1;
     if (ao !== bo) return ao - bo;
     return (a.scheduledAt || "99:99").localeCompare(b.scheduledAt || "99:99");
   });
-  if (mine[0]) return mine[0];
+  return mine[0] || null;
+}
 
-  // Nothing left to fight: offer the LAST RESULT instead (operator ruling
-  // 2026-09-22). A competitor who is out, or who has finished their day, is
-  // exactly who the reader still cares about -- and the card previously went
-  // to "No upcoming matches", which answers the wrong question. The watchlist
-  // is how the reader follows a person, not only a fixture.
-  //
-  // Recency is resultRecencyDesc's rule, not a re-sort by scheduled time: the
-  // most recent RESULT is the last write, which is not the latest slot when a
-  // court has run out of schedule order (result_recency.jsx owns this; the
-  // court console and the public Recent results already ask it).
-  const done = list.filter((m) => {
-    if (!m || m.status !== "completed") return false;
-    const [a, b] = matchParticipantIds(m);
-    return (a && ids.has(a)) || (b && ids.has(b));
-  });
+// buildPrimaryLastResult: the most recent RESULT involving the primary entry,
+// or null. The watchlist hero offers it when there is nothing left to fight
+// (operator ruling 2026-09-22): a competitor who is out, or who has finished
+// their day, is exactly who the reader still cares about, and the card used to
+// go to "No upcoming matches", which answers the wrong question. The watchlist
+// is how a reader follows a PERSON, not only a fixture.
+//
+// Recency is resultRecencyDesc's rule, not a re-sort by scheduled time: the
+// most recent RESULT is the last write, which is not the latest slot when a
+// court has run out of schedule order (result_recency.jsx owns this; the court
+// console and the public Recent results already ask it).
+export function buildPrimaryLastResult(primaryEntry, roster, allMatches) {
+  const done = matchesInvolving(primaryEntry, roster, allMatches, (m) => m.status === "completed");
   done.sort(resultRecencyDesc);
   return done[0] || null;
 }

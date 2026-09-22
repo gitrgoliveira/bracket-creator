@@ -234,6 +234,12 @@ function tokenKey(tok) {
 // direction: an entry the reader has since removed is never re-added, because
 // its token was recorded the first time it resolved.
 //
+// `outstanding` counts the tokens this pass could neither skip as already
+// applied nor resolve: the ones a later roster might still answer for. It is
+// how the caller knows the link is FINISHED with, without waiting for every
+// competition in the tournament to load -- a wait that never ends when one
+// of them permanently fails, and the caller's retry then never stops.
+//
 // Lives here, not inline in the effect that calls it. The last rule this
 // feature kept inside a useEffect was silently replaced and no test could
 // reach it.
@@ -241,13 +247,15 @@ export function resolveFreshTokens(tokens, roster, appliedKeys) {
   const seen = appliedKeys || new Set();
   const entries = [];
   const keys = [];
+  let outstanding = 0;
   (tokens || []).forEach((tok) => {
     const key = tokenKey(tok);
-    if (!key || seen.has(key)) return;
+    if (!key) return;
+    if (seen.has(key)) return;
     const entry = resolveToken(tok, roster);
-    if (!entry) return; // not loaded yet, or genuinely not in this tournament
+    if (!entry) { outstanding += 1; return; } // not loaded yet, or genuinely not in this tournament
     entries.push(entry);
     keys.push(key);
   });
-  return { entries, keys };
+  return { entries, keys, outstanding };
 }

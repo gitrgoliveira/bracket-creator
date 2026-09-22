@@ -135,4 +135,32 @@ describe('resolveFreshTokens', () => {
     expect(resolveFreshTokens([], [], new Set()).entries).toEqual([]);
     expect(resolveFreshTokens(null, [], null).entries).toEqual([]);
   });
+
+  // `outstanding` is how the caller knows the link is FINISHED with. It exists
+  // because the alternative test -- "has every competition's roster loaded?"
+  // -- is never satisfied when one of them permanently fails, and the caller
+  // then never strips ?w= from the address bar, so every reload re-applies the
+  // link and re-adds entries the reader has pruned.
+  describe('outstanding: what a later pass could still answer', () => {
+    it('is 0 once every token has been applied, even from a partial roster', () => {
+      const applied = new Set();
+      const partial = buildRoster([comp('A', [alice])]); // B never loads
+      const first = resolveFreshTokens([tok('K1')], partial, applied);
+      expect(first.outstanding, 'K1 resolved on this pass').toBe(0);
+      first.keys.forEach((k) => applied.add(k));
+      // The second pass sees it as already applied, which is equally settled.
+      expect(resolveFreshTokens([tok('K1')], partial, applied).outstanding).toBe(0);
+    });
+
+    it('counts a token that resolved to nobody, because a later roster may hold it', () => {
+      const partial = buildRoster([comp('A', [alice])]);
+      const { outstanding } = resolveFreshTokens([tok('K1'), tok('V2')], partial, new Set());
+      expect(outstanding, 'V2 belongs to a competition that has not loaded').toBe(1);
+    });
+
+    it('is 0 for a query carrying no tokens at all', () => {
+      expect(resolveFreshTokens([], [], new Set()).outstanding).toBe(0);
+      expect(resolveFreshTokens(null, [], null).outstanding).toBe(0);
+    });
+  });
 });

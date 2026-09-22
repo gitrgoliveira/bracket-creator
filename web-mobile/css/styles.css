@@ -2721,6 +2721,18 @@ button.sync-status-pill:focus-visible {
   white-space: nowrap;
 }
 
+/* The finished card's headline. Display type like the court letter beside it,
+   but smaller and WRAPPABLE: a score string is several tokens ("M Ht (E) K"),
+   where the court is one letter that may never break. Monospace-ish alignment
+   is not wanted here -- this is a headline, not a column. */
+.wl-hero__score {
+  font-family: var(--font-display);
+  font-size: 22px;
+  font-weight: 800;
+  line-height: 1.15;
+  color: var(--ink-1);
+}
+
 .wl-hero__when {
   font-size: 15px;
   font-weight: 600;
@@ -8847,6 +8859,10 @@ abbr.msb-lab { text-decoration: none; cursor: help; }
   text-align: center;
 }
 .share-link__note--ok { color: var(--accent); font-weight: 500; }
+/* The copy FAILED. --danger-ink rather than --danger: this is body text on the
+   sheet's white, where the ~7:1 red reads, and the note carries the failure in
+   words as well as colour (DESIGN.md: colour is never the only signal). */
+.share-link__note--err { color: var(--danger-ink); font-weight: 500; }
 
 /* vsched inside the watchlist card: flat row list, no nested card boxes.
    Regular items become hairline-separated rows; running items keep their

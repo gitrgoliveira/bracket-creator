@@ -2,7 +2,7 @@
 // Extracted from viewer.jsx (mp-pxxc step 10).
 
 import { competitionKindLabel, compMatches, tournamentMatches, TournamentInfo, compareDmy } from './viewer_utils.jsx';
-import { matchParticipantIds, addPlayerToWatchlist, mergeSharedWatchlist, resolveEntryPlayerIds, resolveWatchedPlayers, findPrimaryEntry, heroEntry, buildPrimaryNextMatch, buildRoster, rosterFullyLoaded, useWatchlist, buildWatchedSets, matchInvolvesWatchedSet } from './viewer_watchlist_core.jsx';
+import { matchParticipantIds, addPlayerToWatchlist, mergeSharedWatchlist, resolveEntryPlayerIds, resolveWatchedPlayers, findPrimaryEntry, heroEntry, buildPrimaryNextMatch, buildPrimaryLastResult, buildRoster, rosterFullyLoaded, useWatchlist, buildWatchedSets, matchInvolvesWatchedSet } from './viewer_watchlist_core.jsx';
 import { runOnce, notifEnable, notifDisable, useChimeMuted, isFollowedMatchOnDeck, useFollowedMatchAlert, useSecondaryWatchAlert, MyMatchAlertBanner } from './viewer_alerts.jsx';
 import { notificationSupported } from './viewer_notifications.jsx';
 import { VSchedItem, MatchViewerModal } from './viewer_match.jsx';
@@ -189,7 +189,7 @@ export function ViewerHome({ tournament, onSelectCompetition, onAdminClick, onOp
     if (roster.length === 0) return; // wait until participants are loaded
     // Which tokens are still outstanding, and what they resolve to, is
     // resolveFreshTokens' rule rather than this effect's.
-    const { entries, keys } = resolveFreshTokens(
+    const { entries, keys, outstanding } = resolveFreshTokens(
       parseWatchlistTokens(window.location.search), roster, sharedApplied.current,
     );
     keys.forEach((k) => sharedApplied.current.add(k));
@@ -198,7 +198,18 @@ export function ViewerHome({ tournament, onSelectCompetition, onAdminClick, onOp
     // effect's -- it used to be spelled out here, which is exactly how it got
     // silently replaced by "the shared list alone" with no test to notice.
     if (entries.length) setWatchlist((prev) => mergeSharedWatchlist(prev, entries));
-    if (!rosterLoaded) return;
+    // Settle when nothing is left that a later pass could answer: either every
+    // competition's roster has arrived (so an unresolved token is genuinely
+    // not in this tournament), OR every token this link carries has already
+    // been applied. The second arm is not a shortcut, it is the whole reason
+    // this is not `if (!rosterLoaded) return` alone: a tournament where ONE
+    // competition's participants never load leaves rosterLoaded false for the
+    // life of the page, so the strip below never ran, the query outlived every
+    // reload, and the entries a reader pruned came back each time -- exactly
+    // the thing the strip exists to prevent, arrived at through the failure
+    // the retry exists to survive. With no `?w=` at all there are no tokens,
+    // so this settles on the first pass and strips nothing.
+    if (!rosterLoaded && outstanding > 0) return;
     sharedSettled.current = true;
     // Strip ?w= once there is nothing left to resolve. The ledger above lives
     // for this mount, but the list it protects lives in localStorage and
@@ -247,29 +258,40 @@ export function ViewerHome({ tournament, onSelectCompetition, onAdminClick, onOp
   const primaryNextMatch = useMemo(() => buildPrimaryNextMatch(primaryEntry, roster, bothSidesMatches), [primaryEntry, roster, bothSidesMatches]);
 
   // The CARD's subject, which is not always the chime's (bc-wlhc). heroEntry
-  // falls back to the first-added entry when nothing is pinned; primaryEntry
-  // above stays null there, so useFollowedMatchAlert below never fires for
-  // someone the reader did not choose. Two derivations, one line apart, so the
-  // difference is visible rather than hidden behind a flag.
+  // falls back when nothing is pinned; primaryEntry above stays null there, so
+  // useFollowedMatchAlert below never fires for someone the reader did not
+  // choose. Two derivations, one line apart, so the difference is visible
+  // rather than hidden behind a flag.
+  //
+  // The card also takes a FINISHED bout when its subject has nothing left to
+  // fight (operator ruling 2026-09-22), and composes that here rather than
+  // asking one builder for both: buildPrimaryNextMatch is what the chime and
+  // ViewerOverview's "Your next match" banner read, and neither may ever be
+  // handed a match already fought.
+  //
   // One memo, not two: the entry and its match are decided together, because
-  // choosing the entry now depends on whether it HAS a match. The Map keys on
-  // the entry object, which heroEntry hands back unchanged, so each candidate
-  // is scanned at most once and the chosen one is not re-scanned.
+  // choosing the entry depends on WHICH of the two it has. The Map keys on the
+  // entry object, which heroEntry hands back unchanged, so each candidate is
+  // scanned at most once and the chosen one is not re-scanned.
   const { heroWatchEntry, heroNextMatch } = useMemo(() => {
+    const lastResultFor = (e) => buildPrimaryLastResult(e, roster, bothSidesMatches);
     // Pinned is the common case, and heroEntry's pinned arm IS
     // findPrimaryEntry(watchlist, primaryKey) -- the call primaryEntry made one
     // line above, whose match primaryNextMatch already derived from the same
     // three inputs. Deriving it a second time here cost a full roster scan (a
     // dojo primary) plus two passes over every match, on every aggregate
-    // refetch, for every pinned reader.
-    if (primaryEntry) return { heroWatchEntry: primaryEntry, heroNextMatch: primaryNextMatch };
+    // refetch, for every pinned reader. A PIN is an explicit choice, so it
+    // keeps the card even when all it can show is a result.
+    if (primaryEntry) {
+      return { heroWatchEntry: primaryEntry, heroNextMatch: primaryNextMatch || lastResultFor(primaryEntry) };
+    }
     const seen = new Map();
-    const nextFor = (e) => {
-      if (!seen.has(e)) seen.set(e, buildPrimaryNextMatch(e, roster, bothSidesMatches));
+    const matchFor = (e) => {
+      if (!seen.has(e)) seen.set(e, buildPrimaryNextMatch(e, roster, bothSidesMatches) || lastResultFor(e));
       return seen.get(e);
     };
-    const entry = heroEntry(watchlist, primaryKey, (e) => !!nextFor(e));
-    return { heroWatchEntry: entry, heroNextMatch: entry ? nextFor(entry) : null };
+    const entry = heroEntry(watchlist, primaryKey, matchFor);
+    return { heroWatchEntry: entry, heroNextMatch: entry ? matchFor(entry) : null };
   }, [watchlist, primaryKey, roster, bothSidesMatches, primaryEntry, primaryNextMatch]);
 
   // Compact list of running and upcoming watched matches: shown when ≥2 entities

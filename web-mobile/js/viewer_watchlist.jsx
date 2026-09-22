@@ -219,7 +219,7 @@ function WatchPicker({ roster, rosterLoaded = true, dojos, watchedPlayerIds, wat
 // member currently competing (primaryIds covers all members).
 function WatchHeroCard({ nextMatch, primaryIds, entityLabel, onMatchClick }) {
   // Cross-boundary helpers from viewer.jsx, read at render time (see header).
-  const { matchParticipantIds, poolLabel, mymatchQueueLabel, TermV } = window;
+  const { matchParticipantIds, poolLabel, mymatchQueueLabel, matchScoreStr, TermV } = window;
   if (!nextMatch) return null;
   const ids = primaryIds || new Set();
   const [aId, bId] = matchParticipantIds(nextMatch);
@@ -250,15 +250,26 @@ function WatchHeroCard({ nextMatch, primaryIds, entityLabel, onMatchClick }) {
   // 86px each, which wrapped "Shiaijo A" onto two lines with the court LETTER
   // orphaned and "11 before yours" onto three. The surface is phone-first and
   // must never truncate or wrap into rubble (operator ruling 2026-09-20).
-  // A FINISHED match says so. This card now falls back to the last result when
-  // a watched competitor has nothing left to fight (operator ruling
-  // 2026-09-22), and without this it would print that match's scheduled time
-  // -- reading exactly like a fixture still to come. The queue label is
-  // dropped with it: "3 before yours" is meaningless once the bout is over.
+  // A FINISHED match says so. This card falls back to the last result when a
+  // watched competitor has nothing left to fight (operator ruling 2026-09-22),
+  // and without this it would print that match's scheduled time -- reading
+  // exactly like a fixture still to come. The queue label is dropped with it:
+  // "3 before yours" is meaningless once the bout is over, and so is this
+  // whole line, because the headline below carries the result instead. The div
+  // still renders (empty): it is the live region, and removing it is how the
+  // "your match has started" announcement was lost once already.
   const finished = nextMatch.status === "completed";
   const whenLine = finished
-    ? "Result"
+    ? ""
     : [running ? "Now" : (nextMatch.scheduledAt || "Time TBA"), queueLabel].filter(Boolean).join(" · ");
+  // The score through matchScoreStr, the ONE owner every other completed row
+  // in the app reads (VSchedItem, the admin schedule, the pool rows), so this
+  // card cannot invent a second spelling of a result. It reads Shiro-left /
+  // Aka-right like every one of them, which is why the tinted rows below keep
+  // naming their side in words -- they are ordered subject-first, not
+  // Shiro-first, and the word is what maps one onto the other. It returns ""
+  // when nothing was recorded (a completed match carrying no marks at all).
+  const scoreStr = finished ? (matchScoreStr(nextMatch) || "") : "";
   // For a dojo primary, name the dojo above the competing member so the
   // relationship is clear ("Hagane Dojo" → "Aoi" is up).
   const showDojoEyebrow = entityLabel && entityLabel !== subjectName;
@@ -336,9 +347,24 @@ function WatchHeroCard({ nextMatch, primaryIds, entityLabel, onMatchClick }) {
         {/* The INSTRUCTION is the headline: where to walk. The watched person's
             own name is the one fact they already know, so it moves down to its
             tinted row. nowrap on the letter: it is the single token that tells
-            a competitor where to go and it used to wrap onto its own line. */}
+            a competitor where to go and it used to wrap onto its own line.
+
+            A finished bout has no instruction to give, so the slot carries the
+            RESULT instead. Leaving the court here told the reader to walk to a
+            shiaijo where nothing of theirs will happen, and an unassigned one
+            promised "Court to be announced" about a match that will never be
+            called again. The score is what the reader came for -- the docs
+            page says this card shows "how they finished" -- and it is set in
+            its own smaller, wrappable type, because a score string is several
+            tokens long and the 34px nowrap letter beside it is sized for
+            exactly one. */}
         <div className="wl-hero__where">
-          {nextMatch.court ? (
+          {finished ? (
+            <>
+              <span className="wl-hero__where-l">Result</span>
+              <span className="wl-hero__score">{scoreStr || "Finished"}</span>
+            </>
+          ) : nextMatch.court ? (
             <>
               <span className="wl-hero__where-l"><TermV name="shiaijo">Shiaijo</TermV></span>
               <span className="wl-hero__where-v">{nextMatch.court}</span>
@@ -396,7 +422,15 @@ function WatchHeroCard({ nextMatch, primaryIds, entityLabel, onMatchClick }) {
 // script-tagged ahead of this module, exactly as the /display overlay consumes
 // renderQR.
 function WatchlistShareModal({ base, watchlist, roster, onClose }) {
-  const [copied, setCopied] = useState(false);
+  // "" / "ok" / "fail", not a boolean. `onCopy={setCopied}` looked complete
+  // and could not say FAILED: ShareLinkModal calls onCopy(false) when the
+  // clipboard refuses, which put the state back to its untouched value and the
+  // sheet said nothing at all. That is precisely the venue case this app is
+  // built for -- plain http on a LAN, where navigator.clipboard does not exist
+  // and execCommand can still be refused -- so the one action on the sheet
+  // failed in silence. The admin sheet already toasts it; this one has no
+  // toast, so it says the same thing in place.
+  const [copyState, setCopyState] = useState("");
   // Built HERE rather than by the panel, so it is built only when the sheet is
   // actually opened. As a panel-level memo it was rebuilt on every tournament
   // refresh -- which on the viewer home means every SSE score write in the
@@ -409,12 +443,17 @@ function WatchlistShareModal({ base, watchlist, roster, onClose }) {
       title="Share your watchlist"
       url={url}
       onClose={onClose}
-      onCopy={setCopied}
+      onCopy={(ok) => setCopyState(ok ? "ok" : "fail")}
     >
       {/* A PERSISTENT line, not a toast: a toast dwells for under three
           seconds, which is long enough to miss, and this one answers "did that
           work?" about an action with no other visible effect. */}
-      {copied && <p className="share-link__note share-link__note--ok" role="status">Copied.</p>}
+      {copyState === "ok" && <p className="share-link__note share-link__note--ok" role="status">Copied.</p>}
+      {copyState === "fail" && (
+        <p className="share-link__note share-link__note--err" role="status">
+          Copy failed; select the link above manually.
+        </p>
+      )}
       <p className="share-link__note">
         Opening this link ADDS these competitors to someone's watchlist. It does not replace what they already watch.
       </p>
@@ -767,4 +806,4 @@ function WatchlistPanel({ tournament, roster, rosterLoaded = true, watchlist, se
 window.WatchlistPanel = WatchlistPanel;
 
 // ES exports for the vitest suite, which imports these directly.
-export { WatchPicker, WatchHeroCard, WatchlistPanel };
+export { WatchPicker, WatchHeroCard, WatchlistPanel, WatchlistShareModal };

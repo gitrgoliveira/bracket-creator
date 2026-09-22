@@ -47,8 +47,11 @@ describe('WatchHeroCard', () => {
     vi.resetModules();
     // viewer.jsx populates window.* with the helpers WatchHeroCard reads at
     // render (matchParticipantIds, poolLabel, mymatchQueueLabel, TermV);
-    // the component itself now lives in viewer_watchlist.jsx.
+    // the component itself now lives in viewer_watchlist.jsx. bracket.jsx
+    // publishes window.matchScoreStr, the one score-string owner the finished
+    // card reads -- in the browser it is script-tagged, here it is imported.
     await import('../viewer.jsx');
+    await import('../bracket.jsx');
     ({ WatchHeroCard } = await import('../viewer_watchlist.jsx'));
   });
   afterEach(() => { runtime.unmount(); global.React = realReact; vi.resetModules(); });
@@ -202,6 +205,72 @@ describe('WatchHeroCard', () => {
     const v = byClass(tree, 'wl-hero__where-v')[0];
     expect(v, 'the court letter has its own element').toBeTruthy();
     expect(collectText(v, expandNamed('NumberedName')).trim()).toBe('A');
+  });
+
+  // The FINISHED card (operator ruling 2026-09-22: once a watched competitor
+  // has nothing left to fight, the card shows their last result).
+  //
+  // None of this was pinned when the fallback landed, and the card went on
+  // rendering the court as its 34px headline -- an instruction to walk to a
+  // shiaijo where nothing of theirs will happen -- while showing no score at
+  // all, which is the one thing the docs page promises of it ("so you can
+  // still see how they finished").
+  describe('a finished match', () => {
+    // sideA is Aka and sits on the RIGHT of every score string in the app, so
+    // Robert's two ippons read on the right of the middle.
+    const FINISHED = {
+      ...MATCH,
+      id: 'm-done',
+      status: 'completed',
+      ipponsA: ['M', 'K'],
+      ipponsB: [],
+      winner: { id: 'p1', name: 'Robert Young' },
+    };
+    const mount = (m) => runtime.mount(WatchHeroCard, {
+      nextMatch: m, primaryIds: new Set(['p1']), entityLabel: 'Robert Young', onMatchClick: vi.fn(),
+    });
+    const text = (n) => collectText(n, expandNamed('NumberedName'));
+
+    it('gives no court instruction: the bout is over', () => {
+      const tree = mount(FINISHED);
+      expect(byClass(tree, 'wl-hero__where-v'),
+        'the 34px court letter is an instruction, and there is none left to give').toHaveLength(0);
+      expect(text(byClass(tree, 'wl-hero__where')[0])).not.toMatch(/shiaijo/i);
+    });
+
+    it('does not promise a court that will never be announced', () => {
+      // The other arm, and the worse one: an unassigned finished match used to
+      // read "Court to be announced" about a match already fought.
+      const tree = mount({ ...FINISHED, court: '' });
+      expect(text(byClass(tree, 'wl-hero__where')[0])).not.toMatch(/announced/i);
+    });
+
+    it('shows the score instead, through the app-wide score string', () => {
+      const tree = mount(FINISHED);
+      const score = byClass(tree, 'wl-hero__score')[0];
+      expect(score, 'the result takes the headline slot').toBeTruthy();
+      expect(text(score), "Robert's two ippons").toContain('MK');
+      expect(text(byClass(tree, 'wl-hero__where')[0])).toContain('Result');
+    });
+
+    it('says "Finished" when the match carries no marks at all', () => {
+      // A completed row with nothing recorded: matchScoreStr returns "", and
+      // an empty headline would read as a rendering fault.
+      const tree = mount({ ...FINISHED, ipponsA: [], ipponsB: [], winner: null });
+      expect(text(byClass(tree, 'wl-hero__score')[0])).toBe('Finished');
+    });
+
+    it('names the card "Your last match", not "Your next match"', () => {
+      expect(text(byClass(mount(FINISHED), 'wl-hero__lbl')[0])).toBe('Your last match');
+    });
+
+    it('keeps the live region mounted and drops the queue wording', () => {
+      const tree = mount({ ...FINISHED, queuePosition: 4 });
+      const live = findAll(tree, (n) => n.props?.['aria-live'] === 'polite')[0];
+      expect(live, 'the live region is never unmounted').toBeTruthy();
+      expect(text(live), '"3 before yours" is meaningless once the bout is over').not.toMatch(/before yours/);
+      expect(text(live), 'and so is the scheduled time').not.toContain('09:00');
+    });
   });
 });
 

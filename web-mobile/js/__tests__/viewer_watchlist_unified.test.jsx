@@ -15,6 +15,7 @@ import {
   findPrimaryEntry,
   heroEntry,
   buildPrimaryNextMatch,
+  buildPrimaryLastResult,
   rosterFullyLoaded,
 } from '../viewer.jsx';
 
@@ -205,24 +206,50 @@ describe('heroEntry vs findPrimaryEntry', () => {
   describe('the unpinned fallback prefers an entry that can fill the card', () => {
     const two = [{ type: 'player', id: 'a1' }, { type: 'player', id: 'a2' }];
     const entry = (id) => ({ type: 'player', id, name: '', dojo: '' });
+    const pending = { id: 'm-soon', status: 'scheduled' };
+    const result = { id: 'm-done', status: 'completed' };
 
     it('skips a first-added entry with nothing to show', () => {
-      expect(heroEntry(two, '', (e) => e.id === 'a2')).toEqual(entry('a2'));
+      expect(heroEntry(two, '', (e) => (e.id === 'a2' ? pending : null))).toEqual(entry('a2'));
     });
 
     it('still names the first when NOBODY has a match', () => {
       // Not null: the panel needs a subject for "No upcoming matches for X".
-      expect(heroEntry(two, '', () => false)).toEqual(entry('a1'));
+      expect(heroEntry(two, '', () => null)).toEqual(entry('a1'));
     });
 
     it('a PIN wins even when it yields nothing', () => {
       // An explicit choice. Quietly showing someone else would be the worse
       // surprise, and the pin also drives the chime.
-      expect(heroEntry(two, 'player:a1', (e) => e.id === 'a2')).toEqual(entry('a1'));
+      expect(heroEntry(two, 'player:a1', (e) => (e.id === 'a2' ? pending : null))).toEqual(entry('a1'));
     });
 
     it('without a predicate it is unchanged: first added', () => {
       expect(heroEntry(two, '')).toEqual(entry('a1'));
+    });
+
+    // The TIERS, and why this takes a match rather than a boolean. Once the
+    // card began falling back to a finished bout, "can this entry fill the
+    // card" went true for anyone with a RESULT -- which by mid-afternoon is
+    // almost everyone -- so a boolean predicate collapsed the fallback back to
+    // the first-ADDED entry and re-opened the bug above in a quieter form.
+    it('a match still to FIGHT outranks a RESULT, whatever the list order', () => {
+      // The reported shape exactly: the partner (added first) has finished,
+      // the reader (added second) is due on court.
+      const matchFor = (e) => (e.id === 'a1' ? result : pending);
+      expect(heroEntry(two, '', matchFor)).toEqual(entry('a2'));
+    });
+
+    it('a RESULT still outranks an entry with nothing at all', () => {
+      // Second tier: nobody is due on, so the card shows the one person whose
+      // day can still be reported on rather than an empty card for the other.
+      const matchFor = (e) => (e.id === 'a2' ? result : null);
+      expect(heroEntry(two, '', matchFor)).toEqual(entry('a2'));
+    });
+
+    it('two entries with results keep list order', () => {
+      // Within a tier nothing reorders: first added wins, as it always did.
+      expect(heroEntry(two, '', () => result)).toEqual(entry('a1'));
     });
   });
 
@@ -245,6 +272,22 @@ describe('heroEntry vs findPrimaryEntry', () => {
     expect(src).toMatch(/useFollowedMatchAlert\(primaryNextMatch/);
     expect(src).toMatch(/findPrimaryEntry\(watchlist, primaryKey/);
   });
+
+  // The ?w= effect settles on resolveFreshTokens' `outstanding`, never on
+  // rosterLoaded alone. A SOURCE check for the same reason as the one above:
+  // the effect runs inside ViewerHome over the viewer fetch harness, and what
+  // a regression does here is delete one operand of a condition.
+  //
+  // Why it matters: rosterLoaded is false for the life of the page when ONE
+  // competition's participants never load (the viewer payload swallows that
+  // failure), so gating the strip on it alone meant the query outlived every
+  // reload and re-applied the shared link each time -- re-adding entries the
+  // reader had pruned, which is the exact thing the strip exists to prevent.
+  it('viewer_home settles the shared link on outstanding, not on rosterLoaded alone', () => {
+    const src = readSource('viewer_home.jsx');
+    expect(src).toMatch(/const \{ entries, keys, outstanding \} = resolveFreshTokens\(/);
+    expect(src).toMatch(/if \(!rosterLoaded && outstanding > 0\) return;/);
+  });
 });
 
 // A roster that is non-empty but INCOMPLETE. The viewer payload builds each
@@ -252,6 +295,52 @@ describe('heroEntry vs findPrimaryEntry', () => {
 // failure, so one unreadable participants.csv leaves every other competition
 // populating the roster -- and the watchlist's roster.length guard, which is
 // a proxy for "the roster loaded", passes.
+// buildPrimaryLastResult: the other half of the split (operator ruling
+// 2026-09-22). It used to be a fallback arm INSIDE buildPrimaryNextMatch,
+// where it leaked to every other caller of that function.
+describe('buildPrimaryLastResult', () => {
+  it('returns the last result once nothing is left to fight', () => {
+    // The card used to print "No upcoming matches" here, which answers the
+    // wrong question: a competitor who is out is exactly who the reader still
+    // cares about.
+    const only = [{ id: 'done', sideAId: 'a1', sideBId: 'z', status: 'completed' }];
+    expect(buildPrimaryLastResult({ type: 'player', id: 'a1' }, roster, only).id).toBe('done');
+  });
+
+  it('picks the most recent RESULT, by write time rather than by slot', () => {
+    // resultRecencyDesc's rule (result_recency.jsx): the latest result is the
+    // last WRITE, which is not the latest scheduled slot once a court has run
+    // out of schedule order. Here the earlier slot was scored later.
+    const done = [
+      { id: 'late-slot', sideAId: 'a1', sideBId: 'z', status: 'completed', scheduledAt: '15:00', modifiedAt: 100 },
+      { id: 'scored-last', sideAId: 'a1', sideBId: 'z', status: 'completed', scheduledAt: '09:00', modifiedAt: 900 },
+    ];
+    expect(buildPrimaryLastResult({ type: 'player', id: 'a1' }, roster, done).id).toBe('scored-last');
+  });
+
+  it('never returns a match still to be fought', () => {
+    const pending = [{ id: 'soon', sideAId: 'a1', sideBId: 'z', status: 'scheduled', scheduledAt: '11:00' }];
+    expect(buildPrimaryLastResult({ type: 'player', id: 'a1' }, roster, pending)).toBeNull();
+  });
+
+  it('answers for a dojo primary through its current members', () => {
+    const done = [{ id: 'aoi-done', sideAId: 'a2', sideBId: 'z', status: 'completed' }];
+    expect(buildPrimaryLastResult({ type: 'dojo', dojo: 'Hagane Dojo' }, roster, done).id).toBe('aoi-done');
+  });
+
+  it('keeps the id-only rule: an id-less side named after a dojo-mate gets nothing', () => {
+    // The bc-pnum rule now lives in the helper both builders share, so it
+    // cannot reach one and miss the other.
+    const legacy = [{ id: 'legacy1', sideA: { id: '', name: 'Aoi' }, sideB: { id: '', name: 'X' }, status: 'completed' }];
+    expect(buildPrimaryLastResult({ type: 'dojo', dojo: 'Hagane Dojo' }, roster, legacy)).toBeNull();
+  });
+
+  it('returns null for a null primary and for an empty list', () => {
+    expect(buildPrimaryLastResult(null, roster, [])).toBeNull();
+    expect(buildPrimaryLastResult({ type: 'player', id: 'a1' }, roster, [])).toBeNull();
+  });
+});
+
 describe('rosterFullyLoaded', () => {
   it('is true when every competition reports its roster loaded', () => {
     expect(rosterFullyLoaded([{ rosterAvailable: true }, { rosterAvailable: true }])).toBe(true);
@@ -285,30 +374,18 @@ describe('buildPrimaryNextMatch', () => {
     const m = buildPrimaryNextMatch({ type: 'player', id: 'a1' }, roster, matches);
     expect(m.id).toBe('soon'); // 'done' excluded, 'soon' is a1's only upcoming
   });
-  it('prefers a pending match over a completed one', () => {
-    // A result is the FALLBACK, never a competitor for the card: while
-    // anything is still to be fought, that is what the reader is waiting for.
+  it('ignores a completed match while anything is still to be fought', () => {
     const m = buildPrimaryNextMatch({ type: 'player', id: 'a1' }, roster, matches);
     expect(m.id).toBe('soon');
   });
 
-  it('falls back to the LAST RESULT once nothing is left to fight', () => {
-    // Operator ruling 2026-09-22. This used to return null and the panel then
-    // printed "No upcoming matches", which answers the wrong question: a
-    // competitor who is out is exactly who the reader still cares about.
+  it('returns NULL when every match is already fought, rather than the result', () => {
+    // It answers one question. The last-result card is buildPrimaryLastResult
+    // below, composed by the ONE surface that wants it: this function is also
+    // what feeds the chime and ViewerOverview's hard-coded "Your next match"
+    // banner, and a bout already fought must never reach either.
     const only = [{ id: 'done', sideAId: 'a1', sideBId: 'z', status: 'completed' }];
-    expect(buildPrimaryNextMatch({ type: 'player', id: 'a1' }, roster, only).id).toBe('done');
-  });
-
-  it('picks the most recent RESULT, by write time rather than by slot', () => {
-    // resultRecencyDesc's rule (result_recency.jsx): the latest result is the
-    // last WRITE, which is not the latest scheduled slot once a court has run
-    // out of schedule order. Here the earlier slot was scored later.
-    const done = [
-      { id: 'late-slot', sideAId: 'a1', sideBId: 'z', status: 'completed', scheduledAt: '15:00', modifiedAt: 100 },
-      { id: 'scored-last', sideAId: 'a1', sideBId: 'z', status: 'completed', scheduledAt: '09:00', modifiedAt: 900 },
-    ];
-    expect(buildPrimaryNextMatch({ type: 'player', id: 'a1' }, roster, done).id).toBe('scored-last');
+    expect(buildPrimaryNextMatch({ type: 'player', id: 'a1' }, roster, only)).toBeNull();
   });
 
   it('still returns null when the competitor has no matches at all', () => {

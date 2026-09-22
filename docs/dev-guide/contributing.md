@@ -117,7 +117,7 @@ changed - eyeball these, then copy them over docs/screenshots/:
 
 Look at those, and copy across the ones whose change you meant to make. A capture reported as unchanged is indistinguishable from the committed file to a reader, so there is nothing to review and nothing to copy.
 
-The comparison allows a small tolerance, because two runs of the same code do not produce identical bytes. It is set well below any difference a reader could notice and well above the measured noise, so a listed change is a real one.
+The comparison allows a small tolerance, because two runs of the same code do not produce identical bytes. It is set well below any difference a reader could notice and well above the measured noise, so a listed change is almost always a real one. Almost: a capture you did not touch does occasionally appear in that list. Re-run before you go looking, since two runs disagreeing about the same surface is itself worth knowing.
 
 Videos are never compared: their encoding depends on how fast the machine drove the interface, so a clip is restaged on every run and only worth copying if you drove a change.
 

@@ -110,10 +110,24 @@ A capture has to reproduce closely enough that an unchanged surface never
 reaches the changed list, or that list is noise. Two things make that true and
 both are load-bearing: Chromium's text rasterisation is pinned at launch
 (`DETERMINISTIC_RENDERING` in `run.mjs`), and every screenshot is taken with
-animations finished and the text caret hidden. The first fixes rasterisation to
-one configuration instead of the host's, so the committed images are that
-configuration's output; drop those flags and all 30 captures change. The second
-stops a CSS transition being caught mid-flight, which moved one input border by
-40 grey levels. What is left is small but not zero: re-run the suite and two of
-the thirty come back a single grey level from the committed file. That is why
-the comparison keeps a tolerance instead of comparing bytes.
+animations finished and the text caret hidden. They do different jobs, and it is
+worth knowing which:
+
+- The rasteriser flags fix **which** rendering you get, not whether it repeats.
+  Drop them and all 30 captures change, because the committed images are this
+  configuration's output. Run-to-run drift without them is one capture at one
+  grey level, so they are not what makes a run reproduce.
+- The caret and animation settings are what makes a run reproduce. Turn them
+  off and run twice: three of the thirty come back different between the two
+  runs, by up to 31 grey levels over hundreds of pixels. A CSS transition
+  caught mid-flight is the usual culprit.
+
+What is left is small but not zero: re-run the suite and one or two of the
+thirty come back a grey level or two from the committed file, on a handful of
+pixels. That is why the comparison keeps a tolerance instead of comparing bytes.
+
+One caveat, because it is the operator who would hit it. Over seven runs here,
+six reported all thirty unchanged and one reported a single capture changed,
+and that one has not reproduced since. So the changed list is not guaranteed
+empty on an untouched tree. If a capture you did not expect appears there,
+re-run before going looking: two runs disagreeing is itself the finding.

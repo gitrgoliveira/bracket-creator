@@ -16,9 +16,12 @@ import zlib from 'node:zlib';
 
 // Why a tolerance rather than a byte compare, which would be one line: two runs
 // of the SAME code on the SAME machine do not produce identical bytes. Measured
-// by re-running the whole suite against the committed images: two of the thirty
-// come back a single grey level away, on a few pixels each. Small, but a byte
-// compare calls them changed on every run, which is worse than saying nothing.
+// by re-running the whole suite against the committed images: one or two of the
+// thirty come back a grey level or two away, on a few pixels each. Small, but a
+// byte compare calls them changed on every run, which is worse than saying
+// nothing. The figure is a range because it moves between runs - do not pin it
+// to whatever a single run reports, which is how it came to be quoted as three
+// different numbers in three files.
 //
 // The two thresholds are set from that measurement, with the real differences
 // earlier runs turned up for scale: a focus ring left on an input and a button

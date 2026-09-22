@@ -110,11 +110,18 @@ function reportStill(recipe, file) {
   return { changed: true, note: `CHANGED ${dims(got)}${scale}` };
 }
 
-// Playwright's own stabilisers, and they are load-bearing rather than tidy-up:
-// a CSS transition caught mid-flight put the SAME input border a measured 40
-// grey levels apart between two runs, and a blinking caret does the same on any
-// capture that typed into a field. "disabled" finishes each animation and
-// renders its end state, which is the state the docs should show anyway.
+// Playwright's own stabilisers, and THESE are what make a run reproduce.
+// Measured by turning them off and running the suite twice: three of the thirty
+// captures come back different between the two runs, by up to 31 grey levels
+// over hundreds or thousands of pixels - far above the comparison's tolerance,
+// so each would be reported as changed on every run. A CSS transition caught
+// mid-flight and a blinking caret are the variable parts. "disabled" finishes
+// each animation and renders its end state, which is the state the docs should
+// show anyway.
+//
+// Note which fix does which job: these stabilise a run against ITSELF, while
+// DETERMINISTIC_RENDERING above does not (unpinned, run-to-run drift is one
+// capture at one grey level) and instead fixes WHICH rendering you get.
 const STABLE = { animations: 'disabled', caret: 'hide' };
 
 async function captureStill(page, recipe, file) {

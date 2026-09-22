@@ -99,11 +99,23 @@ const QR_MAX_VERSION = 10;
 
 // The longest text renderQR can encode at all. DERIVED from the block table
 // above rather than written as a literal, so it stays true if that table
-// changes. Exported (and mirrored on window beside renderQR) because a caller
-// that BUILDS the text needs to know whether a QR is possible before it offers
-// one -- asking here is the alternative to calling renderQR and catching the
-// throw, which is control flow by exception for a perfectly predictable fact.
-export const QR_MAX_BYTES = byteCapacity(QR_MAX_VERSION);
+// changes.
+const QR_MAX_BYTES = byteCapacity(QR_MAX_VERSION);
+
+// qrFits: can this text be a QR code at all? Asked by any surface that OFFERS
+// a QR, so it can decide before drawing rather than calling renderQR and
+// catching its throw.
+//
+// It answers rather than publishing the ceiling, because the ceiling alone is
+// the smaller half of the knowledge. Capacity is measured in ENCODED BYTES,
+// not characters, and a caller handed a bare number naturally writes
+// `url.length <= max` -- right for ASCII and wrong the moment a dojo name is
+// not. That convention belongs with the encoder that imposes it: this is the
+// same measure selectVersion is given below.
+export function qrFits(text) {
+  if (!text) return false;
+  return new TextEncoder().encode(text).length <= QR_MAX_BYTES;
+}
 
 function selectVersion(byteLen) {
   // Start at version 2 (25×25). Version 1 (21×21) is intentionally excluded for
@@ -512,8 +524,8 @@ export function renderQR(canvas, text, { moduleSize = 6, quietZone = 4 } = {}) {
 // modules (e.g. window.TvDisplay / window.StreamingOverlay in display.jsx).
 if (typeof window !== "undefined") {
   window.renderQR = renderQR;
-  // Beside renderQR for the same reason: a surface that decides whether to
-  // OFFER a QR needs the ceiling, and the ones that do (the watchlist share
-  // sheet) read this module from window rather than importing it.
-  window.QR_MAX_BYTES = QR_MAX_BYTES;
+  // Beside renderQR for the same reason: the surface that decides whether to
+  // OFFER a QR (ui.jsx's ShareLinkModal) reads this module from window rather
+  // than importing it.
+  window.qrFits = qrFits;
 }

@@ -5,7 +5,7 @@
 // The rule lives in js/competitor_search.jsx as matchesCompetitorNumber (and
 // the wider competitorMatchesQuery it composes into). Every consumer must ask
 // that rather than re-deriving a number test from the raw `.number`/
-// `.numbers` field.
+// `.number` field.
 //
 // This check exists because the codebase has already paid for that once. The
 // question was spelled three different ways in three files: viewer_schedule
@@ -40,8 +40,23 @@ const ROOT = resolve(dirname(fileURLToPath(import.meta.url)));
 const JS_DIR = resolve(ROOT, 'js');
 
 // The module that OWNS the rule, and is therefore the one place allowed to
-// state a number comparison in terms of the raw `.number`/`.numbers` field.
+// state a number comparison in terms of the raw `.number` field.
 const OWNER = 'competitor_search.jsx';
+
+// The two surfaces the operator ruled OUT of this rule on 2026-09-21. They are
+// listed here, not only in the owner's prose, because the enforcer is what a
+// future maintainer will actually consult:
+//
+//   admin_participants.jsx      the roster search does not search numbers at all
+//   admin_registration_desk.jsx keeps its fuzzy ranked search, so it still finds
+//                               K12 from a bare "12"
+//
+// Without this the desk escapes only by SHAPE -- rdHaystack joins the number
+// into a string and scores it as a subsequence, which the regex below cannot
+// see. Refactor that haystack to a plain `.includes` and the build would break,
+// and the obvious repair (route it through the owner) would silently overturn
+// the ruling. Named exemptions fail loudly instead.
+const ALLOWED = new Set(['admin_participants.jsx', 'admin_registration_desk.jsx']);
 
 // Tests may legitimately construct these shapes as fixtures and assert on
 // them. They are not consumers deciding control flow, so they are out of
@@ -56,11 +71,11 @@ const SKIP_DIRS = new Set(['__tests__', 'dist', 'vendor', 'node_modules']);
 // that cries wolf gets switched off, which is strictly worse than no check.
 //
 // What IS worth enforcing is the exact shape that caused the incident: a
-// `.number`/`.numbers` read landing on the same line as `.includes(` or
+// `.number` read landing on the same line as `.includes(` or
 // `.startsWith(`, which is precisely how the three surfaces drifted apart.
 const FORBIDDEN = [
   {
-    re: /\.numbers?\b[\s\S]*\.(includes|startsWith)\(/,
+    re: /\.number\b.*\.(includes|startsWith)\(/,
     why: 'hand-rolls a competitor-number match; call matchesCompetitorNumber(p, q) (or competitorMatchesQuery) from competitor_search.jsx instead',
   },
 ];
@@ -90,6 +105,7 @@ const violations = [];
 for (const file of walk(JS_DIR)) {
   const rel = relative(ROOT, file);
   if (file.endsWith(OWNER)) continue;
+  if ([...ALLOWED].some((a) => file.endsWith(a))) continue; // exempt by operator ruling
   const lines = stripComments(readFileSync(file, 'utf8')).split('\n');
   lines.forEach((line, i) => {
     for (const { re, why } of FORBIDDEN) {

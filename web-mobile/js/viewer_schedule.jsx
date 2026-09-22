@@ -123,7 +123,14 @@ export function PlayerMultiFilter({ tournament, picked, setPicked, dojoText, set
   const roster = useMemo(() => buildRoster(tournament.competitions), [tournament]);
 
   const q = query.trim().toLowerCase();
-  const filtered = q ? roster.filter((p) => competitorMatchesQuery(p, q)) : roster;
+  // Memoised on the two things it reads. Unmemoised (as it was before), the
+  // whole roster was re-scanned on every re-render of the enclosing schedule
+  // page -- which at a live event means every SSE score write in the venue,
+  // producing an identical result each time while a filter query is active.
+  const filtered = useMemo(
+    () => (q ? roster.filter((p) => competitorMatchesQuery(p, q)) : roster),
+    [roster, q],
+  );
   const matches = filtered.slice(0, 30);
 
   window.useClickOutside(ref, () => setOpen(false), open);

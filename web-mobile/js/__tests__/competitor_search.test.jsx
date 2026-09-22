@@ -1,18 +1,18 @@
 import { describe, it, expect } from 'vitest';
 import {
-  competitorNumber,
   matchesCompetitorNumber,
   competitorMatchesQuery,
   matchMentions,
 } from '../competitor_search.jsx';
 import { buildRoster } from '../viewer_watchlist_core.jsx';
+import { numberOf } from '../competitor_identity.jsx';
 
 // The worked example from the module header (bc-nsrc operator ruling): a
 // number search needs its prefix, and once the prefix is typed the number
 // must be typed whole. Table-driven over the SAME roster the header uses, so
 // a future edit that narrows or widens the anchoring shows up here first.
 describe('matchesCompetitorNumber; the number rule', () => {
-  const roster = { numbers: ['K1', 'K12', 'K120', 'M12', 'M112', 'SK1'] };
+  const NUMBERS = ['K1', 'K12', 'K120', 'M12', 'M112', 'SK1'];
 
   const cases = [
     // Bare digits: no prefix means it is not a competitor number at all,
@@ -33,7 +33,7 @@ describe('matchesCompetitorNumber; the number rule', () => {
 
   cases.forEach(([q, expectedHits]) => {
     it(`"${q}" -> [${expectedHits.join(', ')}]`, () => {
-      const hits = roster.numbers.filter((n) => matchesCompetitorNumber({ number: n }, q));
+      const hits = NUMBERS.filter((n) => matchesCompetitorNumber({ number: n }, q));
       expect(hits).toEqual(expectedHits);
     });
   });
@@ -67,25 +67,19 @@ describe('matchesCompetitorNumber; the number rule', () => {
   });
 });
 
-describe('competitorNumber; both competitor shapes', () => {
-  // The `numbers` ARRAY shape this suite used to exercise is gone: a
-  // competitor holds exactly one number, and a roster record and a match
-  // side both carry it under the same `number` field (see the module
-  // header), so there is nothing left for the two shapes to disagree about.
-  it('reads a roster record\'s `number` string', () => {
-    expect(competitorNumber({ number: 'K1' })).toBe('K1');
+describe('numberOf, the accessor this rule reads through', () => {
+  // A roster record and a match side carry the number under the SAME field,
+  // so there are no longer two shapes to reconcile -- the `numbers` array this
+  // suite used to exercise never existed in production and is gone.
+  it('reads the `number` string off either competitor shape', () => {
+    expect(numberOf({ number: 'K1' })).toBe('K1');
   });
 
-  it('reads a match side\'s `number` string the same way', () => {
-    expect(competitorNumber({ number: 'K1' })).toBe('K1');
-  });
-
-  // An absent or empty `number` yields "", not an array.
   it('returns "" for a competitor with no number and for a null/undefined competitor', () => {
-    expect(competitorNumber({ number: '' })).toBe('');
-    expect(competitorNumber({})).toBe('');
-    expect(competitorNumber(null)).toBe('');
-    expect(competitorNumber(undefined)).toBe('');
+    expect(numberOf({ number: '' })).toBe('');
+    expect(numberOf({})).toBe('');
+    expect(numberOf(null)).toBe('');
+    expect(numberOf(undefined)).toBe('');
   });
 });
 
@@ -183,7 +177,7 @@ describe('buildRoster feeding competitor_search', () => {
 
   it('a record with no number matches no number query, which is how a pre-draw roster behaves', () => {
     const roster = buildRoster([comp('A', 'setup', [{ id: 'A-p1', name: 'Alice', dojo: 'Shibuya' }])]);
-    expect(competitorNumber(roster[0])).toBe('');
+    expect(numberOf(roster[0])).toBe('');
     expect(matchesCompetitorNumber(roster[0], 'k1')).toBe(false);
     expect(competitorMatchesQuery(roster[0], 'alice'), 'still findable by name').toBe(true);
   });

@@ -1,3 +1,5 @@
+import { numberOf } from './competitor_identity.jsx';
+
 // competitor_search.jsx: the ONE answer to "does this competitor match what
 // the reader typed" in the tournament's people-pickers (bc-nsrc).
 //
@@ -56,39 +58,23 @@
 // it keeps finding K12 from a bare "12". Both divergences are ruled, not
 // oversights -- do not "unify" them.
 //
-// A leaf with no imports, like numbered_name.jsx and write_result.jsx, so
-// every consumer ES-imports it directly.
+// Consumers ES-import it directly; its only import is the identity leaf.
 
-// competitorNumber: a competitor holds exactly ONE number, and this is the one
-// place that reads it. Both shapes this app carries agree on that:
-//   a ROSTER record (buildRoster output)
-//   a MATCH SIDE, whose number is already the right one because a match
-//   belongs to exactly one competition
+// The competitor-number ACCESSOR is competitor_identity.jsx's numberOf: it
+// sits beside idOf/nameOf as a plain field read, and lives there because two
+// callers want the field WITHOUT this module's rule (resolveDeepLink and the
+// watchlist permalink both compare a machine-generated number exactly).
 //
-// Someone entered in two competitions does NOT hold two numbers here: ids are
-// minted per competition (a fresh uuid in state.AddParticipant, `${compID}-pN`
-// in the admin client), so they arrive as two separate records with one number
-// each and nothing merges them. An earlier revision of this module accepted a
-// `numbers` ARRAY for that case; nothing ever produced one, so the branch was
-// dead and the comments around it described a feature that does not exist.
-//
-// Exported because resolveDeepLink (viewer_home.jsx) and the watchlist
-// permalink (watchlist_link.jsx) both need the same answer while applying
-// their OWN comparison: those values are machine-generated, so they stay EXACT
-// and CASE-SENSITIVE (pinned by resolve_deep_link.test.jsx, "QR encodes exact
-// value"). That is a different contract from a person typing into a search
-// box, and routing them through the typed-query rule below would quietly break
-// it. Shape knowledge is shared; the comparison is not.
-export function competitorNumber(p) {
-  return p && p.number ? String(p.number) : "";
-}
+// This module owns the RULE and nothing else. Importing the leaf costs it no
+// leaf-ness of its own: competitor_identity.jsx has no imports, and the chain
+// stays acyclic and script-tag free.
 
 // matchesCompetitorNumber: THE number rule, stated once. `q` is already
 // trimmed and lowercased by the caller (every call site computes exactly that
 // before it filters, so re-normalising here would hide a caller that stopped).
 export function matchesCompetitorNumber(p, q) {
   if (!q) return false;
-  const n = competitorNumber(p).toLowerCase();
+  const n = numberOf(p).toLowerCase();
   if (!n) return false;
   return /\d/.test(q) ? n === q : n.startsWith(q);
 }

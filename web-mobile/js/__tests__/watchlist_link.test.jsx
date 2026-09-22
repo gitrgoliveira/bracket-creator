@@ -5,9 +5,8 @@ import {
   buildWatchlistLink,
   parseWatchlistTokens,
   resolveWatchlistTokens,
-  watchlistLinkFitsQR,
 } from '../watchlist_link.jsx';
-import { buildRoster, normalizeWatchlist, WATCHLIST_MAX } from '../viewer_watchlist_core.jsx';
+import { buildRoster } from '../viewer_watchlist_core.jsx';
 
 // watchlist_link.jsx (bc-wlpl): the watchlist as a shareable permalink. Its
 // own header states the per-entry token rule and why the query is read raw
@@ -136,35 +135,6 @@ describe('the ":" sentinel does not collide with a real competitor number or doj
   });
 });
 
-describe('watchlistLinkFitsQR', () => {
-  it('is true exactly at the byte limit and false one byte over', () => {
-    // ASCII, so bytes === characters here: this pins the boundary itself,
-    // not just "small passes, huge fails".
-    const atLimit = 'a'.repeat(20);
-    const overLimit = 'a'.repeat(21);
-    expect(new TextEncoder().encode(atLimit).length).toBe(20);
-    expect(watchlistLinkFitsQR(atLimit, 20)).toBe(true);
-    expect(watchlistLinkFitsQR(overLimit, 20)).toBe(false);
-  });
-
-  it('is false for an empty url, whatever the limit', () => {
-    expect(watchlistLinkFitsQR('', 213)).toBe(false);
-  });
-
-  it('is false when maxBytes is 0 or undefined, even for a tiny url', () => {
-    expect(watchlistLinkFitsQR('https://x', 0)).toBe(false);
-    expect(watchlistLinkFitsQR('https://x', undefined)).toBe(false);
-  });
-
-  it('measures BYTES, not characters: a multi-byte character pushes a SHORT string over a limit its character count would pass', () => {
-    // "京" is 3 bytes in UTF-8. Five of them is 5 characters (well under a
-    // 10-character reading of the limit) but 15 bytes (over a 10-byte one).
-    const url = '京'.repeat(5);
-    expect(url.length).toBeLessThanOrEqual(10); // character count alone would pass
-    expect(new TextEncoder().encode(url).length).toBe(15);
-    expect(watchlistLinkFitsQR(url, 10)).toBe(false);
-  });
-});
 
 describe('resolveWatchlistTokens drops what does not resolve, keeps the rest', () => {
   const roster = buildRoster([
@@ -236,31 +206,8 @@ describe('buildWatchlistLink returns "" when there is nothing shareable, so call
   });
 });
 
-// The app's own merge rule (resolveDeepLink's contract, restated in the
-// module header): opening a link ADDS to the device's existing watchlist
-// rather than replacing it. Import normalizeWatchlist rather than
-// reimplementing its dedup/cap here.
-describe('merge semantics: normalizeWatchlist([...existing, ...resolved])', () => {
-  it('keeps existing entries and appends only genuinely new ones', () => {
-    const existing = [{ type: 'player', id: 'p1', name: 'Alice (local)', dojo: 'Shibuya' }];
-    const resolved = [
-      { type: 'player', id: 'p1', name: 'Alice (from link)', dojo: 'Shibuya' }, // duplicate: existing wins
-      { type: 'player', id: 'p2', name: 'Bob', dojo: 'Osaka' }, // genuinely new
-    ];
-    const merged = normalizeWatchlist([...existing, ...resolved]);
-    expect(merged).toEqual([
-      { type: 'player', id: 'p1', name: 'Alice (local)', dojo: 'Shibuya' }, // first occurrence wins
-      { type: 'player', id: 'p2', name: 'Bob', dojo: 'Osaka' },
-    ]);
-  });
-
-  it('caps the merge at WATCHLIST_MAX, dropping the newly-resolved entry once the existing list already fills it', () => {
-    const existing = Array.from({ length: WATCHLIST_MAX }, (_, i) => (
-      { type: 'player', id: `existing-${i}`, name: `P${i}`, dojo: 'X' }
-    ));
-    const resolved = [{ type: 'player', id: 'new-from-link', name: 'NewOne', dojo: 'Y' }];
-    const merged = normalizeWatchlist([...existing, ...resolved]);
-    expect(merged).toHaveLength(WATCHLIST_MAX);
-    expect(merged.some((e) => e.id === 'new-from-link')).toBe(false);
-  });
-});
+// The merge half of "opening a link" lives in watchlist_merge.test.jsx, where
+// it is asserted against mergeSharedWatchlist. It is deliberately NOT restated
+// here: this suite had a copy that spelled `normalizeWatchlist([...a, ...b])`
+// out by hand, which is the exact expression mergeSharedWatchlist exists to
+// own and the exact one a bad commit once replaced with the shared list alone.

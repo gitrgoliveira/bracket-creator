@@ -32,7 +32,7 @@
 import { NumberedName } from './numbered_name.jsx';
 import { sideWord, sideFillClass } from './side_cell.jsx';
 import { competitorMatchesQuery } from './competitor_search.jsx';
-import { buildWatchlistLink, watchlistLinkFitsQR } from './watchlist_link.jsx';
+import { buildWatchlistLink } from './watchlist_link.jsx';
 
 // The one line the picker and the hero-empty state show while a competition's
 // participants failed to load (rosterAvailable:false on the aggregate, see
@@ -370,19 +370,6 @@ function WatchHeroCard({ nextMatch, primaryIds, entityLabel, onMatchClick }) {
   );
 }
 
-// WatchlistPanel: the unified personalisation panel (mp-xhaa). One card that
-// absorbs the former "Find my matches" hero and the multi-player watchlist:
-//   - chip list of watched entities (players + whole dojos), each removable,
-//     each pin-able when ≥2 entities exist;
-//   - a single unified picker (WatchPicker) that adds a player OR a dojo;
-//   - the hero card for the primary entity (implicit when 1, pinned when ≥2);
-//   - a bounded "watched upcoming" compact list when ≥2 entities are watched.
-// Two entry props, on purpose (bc-wlhc). `primaryEntry` is who the CHIME
-// follows: null until the reader pins someone, so the loud tier is always a
-// choice. `heroEntry` is who the CARD shows, which falls back to the
-// first-added entry, because a card is not a chime and hiding it cost the
-// reader the one thing they opened the page for. Everything visual below reads
-// heroEntry; only the pin hint reads primaryEntry.
 // WatchlistShareModal: the watchlist as a link someone else can open
 // (bc-wlpl). The list otherwise lives only in localStorage, so it does not
 // survive a second phone, another browser profile or a cleared cache.
@@ -392,17 +379,22 @@ function WatchHeroCard({ nextMatch, primaryIds, entityLabel, onMatchClick }) {
 // briefly a second copy of that sheet, which is the duplication this repo
 // keeps paying for, so it was folded back.
 //
-// ShareLinkModal and QR_MAX_BYTES are read from `window` at RENDER time,
-// which is this file's convention for anything outside its leaf imports (see
-// the header). ui.jsx and qr.js are both script-tagged ahead of this module
-// and publish them, exactly as the /display overlay consumes renderQR.
-function WatchlistShareModal({ url, onClose }) {
+// Whether the link is short enough to be a QR is NOT decided here: qr.js owns
+// that, and ShareLinkModal asks it. A watchlist still carrying ids (nobody has
+// a number until the draw runs) can exceed what a QR holds, but that is a fact
+// about the encoder rather than about this surface.
+//
+// ShareLinkModal is read from `window` at RENDER time, which is this file's
+// convention for anything outside its leaf imports (see the header). ui.jsx is
+// script-tagged ahead of this module, exactly as the /display overlay consumes
+// renderQR.
+function WatchlistShareModal({ base, watchlist, roster, onClose }) {
   const [copied, setCopied] = useState(false);
-  // A QR is OFFERED, not assumed: it tops out at QR_MAX_BYTES INCLUDING the
-  // origin, so a number-encoded list of around 45 fits while a list still
-  // carrying ids (nobody has a number until the draw runs) stops fitting at
-  // about five. Measuring beats calling renderQR and catching its throw.
-  const fits = watchlistLinkFitsQR(url, window.QR_MAX_BYTES);
+  // Built HERE rather than by the panel, so it is built only when the sheet is
+  // actually opened. As a panel-level memo it was rebuilt on every tournament
+  // refresh -- which on the viewer home means every SSE score write in the
+  // venue -- walking the whole roster to produce a string nobody was reading.
+  const url = buildWatchlistLink(base, watchlist, roster);
   const ShareLinkModal = window.ShareLinkModal;
 
   return (
@@ -411,7 +403,6 @@ function WatchlistShareModal({ url, onClose }) {
       url={url}
       onClose={onClose}
       onCopy={setCopied}
-      showQR={fits}
     >
       {/* A PERSISTENT line, not a toast: a toast dwells for under three
           seconds, which is long enough to miss, and this one answers "did that
@@ -431,7 +422,20 @@ function WatchlistShareModal({ url, onClose }) {
   );
 }
 
-function WatchlistPanel({ roster, rosterLoaded = true, watchlist, setWatchlist, primaryKey, setPrimaryKey, primaryEntry, heroEntry, heroNextMatch, upcoming, onMatchClick, chimeMuted, onBellToggle, onFirstAdd }) {
+// WatchlistPanel: the unified personalisation panel (mp-xhaa). One card that
+// absorbs the former "Find my matches" hero and the multi-player watchlist:
+//   - chip list of watched entities (players + whole dojos), each removable,
+//     each pin-able when ≥2 entities exist;
+//   - a single unified picker (WatchPicker) that adds a player OR a dojo;
+//   - the hero card for the primary entity (implicit when 1, pinned when ≥2);
+//   - a bounded "watched upcoming" compact list when ≥2 entities are watched.
+// Two entry props, on purpose (bc-wlhc). `primaryEntry` is who the CHIME
+// follows: null until the reader pins someone, so the loud tier is always a
+// choice. `heroEntry` is who the CARD shows, which falls back to the
+// first-added entry, because a card is not a chime and hiding it cost the
+// reader the one thing they opened the page for. Everything visual below reads
+// heroEntry; only the pin hint reads primaryEntry.
+function WatchlistPanel({ tournament, roster, rosterLoaded = true, watchlist, setWatchlist, primaryKey, setPrimaryKey, primaryEntry, heroEntry, heroNextMatch, upcoming, onMatchClick, chimeMuted, onBellToggle, onFirstAdd }) {
   // Cross-boundary helpers from viewer.jsx, read at render time (see header).
   const { effectivePrimaryKey, addPlayerToWatchlist, entryKey, resolveEntryPlayerIds, VSchedItem, WATCHLIST_MAX } = window;
   const rosterById = useMemo(() => new Map(roster.map((p) => [p.id, p])), [roster]);
@@ -594,15 +598,19 @@ function WatchlistPanel({ roster, rosterLoaded = true, watchlist, setWatchlist, 
     : upcoming;
 
   const [shareOpen, setShareOpen] = useState(false);
-  // BUILT, never read off the address bar. app.jsx syncs its state to the
-  // PATH only (pathFromState emits no query), so the first navigation away
-  // rewrites the URL and drops any ?w= that brought the reader here. The
-  // address bar is therefore not the permalink, and copying location.href
-  // would hand over an empty list.
-  const shareUrl = useMemo(() => {
-    if (typeof window === "undefined" || !window.location) return "";
-    return buildWatchlistLink(`${window.location.origin}/`, watchlist, roster);
-  }, [watchlist, roster]);
+  // linkBase is the ONE builder of an externally-shareable base (viewer_utils
+  // .jsx), and it is what makes this link work off the venue LAN: it returns
+  // the operator's configured publicURL when there is one, and guards the
+  // opaque-origin case where location.origin is the literal string "null".
+  // Hand-rolling `location.origin` here meant a watchlist shared from a phone
+  // encoded http://192.168.x.x:8080 even when the operator had set a public
+  // URL -- the same mistake the admin registration sheet avoids by calling
+  // this.
+  //
+  // BUILT, never read off the address bar: app.jsx syncs its state to the PATH
+  // only, so the first navigation away drops any ?w= that brought the reader
+  // here. The address bar is not the permalink.
+  const shareBase = `${(window.linkBase || (() => window.location.origin))(tournament)}/`;
 
   return (
     <div className="card card--sm mymatch-card" data-testid="viewer-home-watchlist">
@@ -625,7 +633,7 @@ function WatchlistPanel({ roster, rosterLoaded = true, watchlist, setWatchlist, 
             at the right. Placed BEFORE the bell it rendered hard against the
             count with a 127px void between the two controls (measured at
             390px), which read as a layout accident rather than a choice. */}
-        {count > 0 && shareUrl && (
+        {count > 0 && (
           <button type="button"
             className="watchlist-share-btn"
             onClick={() => setShareOpen(true)}
@@ -738,8 +746,8 @@ function WatchlistPanel({ roster, rosterLoaded = true, watchlist, setWatchlist, 
         </div>
       )}
 
-      {shareOpen && shareUrl && (
-        <WatchlistShareModal url={shareUrl} onClose={() => setShareOpen(false)} />
+      {shareOpen && (
+        <WatchlistShareModal base={shareBase} watchlist={watchlist} roster={roster} onClose={() => setShareOpen(false)} />
       )}
     </div>
   );

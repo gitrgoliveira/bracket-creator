@@ -7,7 +7,7 @@ import { runOnce, notifEnable, notifDisable, useChimeMuted, isFollowedMatchOnDec
 import { notificationSupported } from './viewer_notifications.jsx';
 import { VSchedItem, MatchViewerModal } from './viewer_match.jsx';
 import { buildWatchlistUpcoming, usePrimaryWatch, WATCHED_UPCOMING_LIST_MAX } from './viewer_schedule.jsx';
-import { competitorNumber } from './competitor_search.jsx';
+import { numberOf } from './competitor_identity.jsx';
 import { parseWatchlistTokens, resolveFreshTokens } from './watchlist_link.jsx';
 
 const { useState, useMemo, useRef: useRefV, useEffect } = React;
@@ -85,10 +85,10 @@ export function resolveDeepLink(searchString, roster) {
     // by resolve_deep_link.test.jsx.
     //
     // Behaviourally identical to the `p.number === qpNumber` this replaced.
-    // It reads through competitorNumber only so that the watchlist permalink
+    // It reads through numberOf only so that the watchlist permalink
     // (bc-wlpl), which asks the very same question of the very same records,
     // cannot answer it differently.
-    hit = roster.find((p) => competitorNumber(p) === qpNumber);
+    hit = roster.find((p) => numberOf(p) === qpNumber);
   }
   if (!hit) {
     const needle = (qpName || qpPlayer).toLowerCase();
@@ -154,33 +154,43 @@ export function ViewerHome({ tournament, onSelectCompetition, onAdminClick, onOp
   // the resolved player: they become the implicit primary when they land as
   // the sole entry.
   const deepLinkApplied = useRefV(false);
-  // Which ?w= tokens have already been folded in, and whether we can stop
-  // looking. A token is recorded ONLY once it resolves, which is what makes a
+  React.useEffect(() => {
+    if (deepLinkApplied.current) return;
+    if (typeof window === "undefined" || !window.location) return;
+    if (roster.length === 0) return; // wait until participants are loaded
+    const result = resolveDeepLink(window.location.search, roster);
+    deepLinkApplied.current = true;
+    if (result && result.player) addWatchPlayer(result.player);
+    // Runs exactly once, gated by the deepLinkApplied ref; addWatchPlayer is an
+    // unstable callback we deliberately do not depend on.
+    // oxlint-disable-next-line react-hooks/exhaustive-deps
+  }, [roster, watchlist]);
+
+  // bc-wlpl: the MULTI-ENTRY permalink, `?w=`. Its own effect, not folded into
+  // the one above: the two links have different gates (this one keeps
+  // resolving while the roster fills, that one is strictly once) and sharing a
+  // body made each one's early return depend on its position relative to the
+  // other's.
+  //
+  // A token is recorded ONLY once it resolves, which is what makes a
   // partially-loaded roster safe: a competition whose participants failed to
   // load contributes nothing on this pass, and its entries land on a later one
-  // when that roster arrives. Before this, the whole link was applied once
-  // against whatever had loaded, so a coach's 20-entry link could silently
-  // arrive as 15 with no retry and no sign to either end.
+  // when that roster arrives. Applying the link once against whatever had
+  // loaded meant a coach's 20-entry link could silently arrive as 15, with no
+  // retry and no sign to either end.
   //
-  // Recording the tokens is equally load-bearing in the other direction: it is
-  // what stops a healing roster re-adding an entry the reader has since
-  // removed. Once rosterFullyLoaded is true there is nothing left to wait for,
-  // so the effect stops re-resolving.
+  // Recording is equally load-bearing in the other direction: it stops a
+  // healing roster re-adding an entry the reader has since removed.
   const sharedApplied = useRefV(new Set());
   const sharedSettled = useRefV(false);
   React.useEffect(() => {
+    if (sharedSettled.current) return;
     if (typeof window === "undefined" || !window.location) return;
     if (roster.length === 0) return; // wait until participants are loaded
-    const search = window.location.search;
-    const result = deepLinkApplied.current ? null : resolveDeepLink(search, roster);
-    deepLinkApplied.current = true;
-    if (result && result.player) addWatchPlayer(result.player);
-
-    // bc-wlpl: the multi-entry permalink. Which tokens are still outstanding
-    // and what they resolve to is resolveFreshTokens' rule, not this effect's.
-    if (sharedSettled.current) return;
+    // Which tokens are still outstanding, and what they resolve to, is
+    // resolveFreshTokens' rule rather than this effect's.
     const { entries, keys } = resolveFreshTokens(
-      parseWatchlistTokens(search), roster, sharedApplied.current,
+      parseWatchlistTokens(window.location.search), roster, sharedApplied.current,
     );
     keys.forEach((k) => sharedApplied.current.add(k));
     // MERGE, never replace: arriving at someone else's link must not delete
@@ -188,10 +198,19 @@ export function ViewerHome({ tournament, onSelectCompetition, onAdminClick, onOp
     // effect's -- it used to be spelled out here, which is exactly how it got
     // silently replaced by "the shared list alone" with no test to notice.
     if (entries.length) setWatchlist((prev) => mergeSharedWatchlist(prev, entries));
-    if (rosterLoaded) sharedSettled.current = true;
-    // addWatchPlayer is an unstable callback we deliberately do not depend on.
-    // oxlint-disable-next-line react-hooks/exhaustive-deps
-  }, [roster, watchlist, rosterLoaded]);
+    if (!rosterLoaded) return;
+    sharedSettled.current = true;
+    // Strip ?w= once there is nothing left to resolve. The ledger above lives
+    // for this mount, but the list it protects lives in localStorage and
+    // outlives it -- so without this, a reader who opens a shared link, prunes
+    // it and then RELOADS gets the pruned entries back. app.jsx only rewrites
+    // the URL when the path changes, and on the home screen it does not, so
+    // the query survives in the address bar until something removes it.
+    // replaceState adds no history entry, so Back is unaffected.
+    window.history.replaceState(null, "", window.location.pathname);
+    // The two refs are listed rather than suppressed: a ref object's identity
+    // never changes, so naming them is honest and costs no extra runs.
+  }, [roster, watchlist, rosterLoaded, setWatchlist, sharedApplied, sharedSettled]);
 
   // global "across-all-competitions" lists for the home page
   const allMatches = useMemo(() => tournamentMatches(t), [t]);
@@ -388,6 +407,7 @@ export function ViewerHome({ tournament, onSelectCompetition, onAdminClick, onOp
               fight without scrolling past the competition list. Absorbs the
               former "Find my matches" hero + the multi-player watchlist. */}
           <WatchlistPanel
+            tournament={t}
             roster={roster}
             rosterLoaded={rosterLoaded}
             watchlist={watchlist}

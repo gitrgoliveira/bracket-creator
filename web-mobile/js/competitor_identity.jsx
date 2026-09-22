@@ -45,6 +45,23 @@ export function nameOf(x) {
   return (x && typeof x === "object" ? x.name : x) || "";
 }
 
+// numberOf: the competitor's assigned number ("K12"), or "" when they have
+// none. A field accessor beside idOf/nameOf, and nothing more.
+//
+// It is NOT part of identity and must stay out of competitorKey and
+// sameCompetitor. A number belongs to a DRAW POSITION rather than to a person
+// (bc-pnum): it does not exist before the draw runs, and regenerating a draw
+// re-points it at someone else. Identity here stays id-then-name.
+//
+// It lives in this leaf rather than in competitor_search.jsx because two of
+// that module's importers wanted only this accessor and had to disclaim its
+// typed-query rule in a comment to say so -- resolveDeepLink and the watchlist
+// permalink both compare a machine-generated number EXACTLY, which is the
+// opposite of the rule that module owns.
+export function numberOf(x) {
+  return (x && typeof x === "object" && x.number) ? String(x.number) : "";
+}
+
 // competitorKey: id-decides-else-name as a single string, so THE RULE above
 // falls out of comparing two keys rather than being restated at every call
 // site. "id:"+id when x carries one; else "nm:"+normalizeName(name) when x

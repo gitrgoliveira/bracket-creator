@@ -5,6 +5,7 @@ import {
   buildWatchlistLink,
   parseWatchlistTokens,
   resolveWatchlistTokens,
+  stripWatchlistParam,
 } from '../watchlist_link.jsx';
 import { buildRoster } from '../viewer_watchlist_core.jsx';
 
@@ -211,3 +212,42 @@ describe('buildWatchlistLink returns "" when there is nothing shareable, so call
 // here: this suite had a copy that spelled `normalizeWatchlist([...a, ...b])`
 // out by hand, which is the exact expression mergeSharedWatchlist exists to
 // own and the exact one a bad commit once replaced with the shared list alone.
+
+// stripWatchlistParam: what the address bar keeps once a shared link has been
+// folded in. The reason this is a function rather than one line in the effect
+// is the COMPETITOR TAG: helper.playerTagURL prints each tag's QR as
+// `<publicURL>/?playerNumber=K12`, so the viewer's query is not the watchlist's
+// to clear.
+describe('stripWatchlistParam', () => {
+  it('removes w and keeps a tag QR\'s playerNumber', () => {
+    // THE regression. Clearing the whole query spent a scanned tag that had
+    // resolved to nobody (its competition had not loaded yet) with no way to
+    // retry it, because the reload had nothing left to read.
+    expect(stripWatchlistParam('?w=K1,K2&playerNumber=K12')).toBe('?playerNumber=K12');
+    expect(stripWatchlistParam('?playerNumber=K12&w=K1')).toBe('?playerNumber=K12');
+  });
+
+  it('returns the query UNCHANGED when there is no w, so the caller leaves the URL alone', () => {
+    // The caller compares before it calls replaceState, so "unchanged" here is
+    // what keeps a tag link untouched rather than merely intact.
+    expect(stripWatchlistParam('?playerNumber=K12')).toBe('?playerNumber=K12');
+    expect(stripWatchlistParam('?player=3f2a&name=Ken')).toBe('?player=3f2a&name=Ken');
+    expect(stripWatchlistParam('')).toBe('');
+  });
+
+  it('drops the query entirely when w was the only parameter', () => {
+    expect(stripWatchlistParam('?w=K1,K2')).toBe('');
+    expect(stripWatchlistParam('?w=')).toBe('');
+  });
+
+  it('does not match a parameter that merely starts with w', () => {
+    expect(stripWatchlistParam('?watch=K1')).toBe('?watch=K1');
+    expect(stripWatchlistParam('?w2=K1&w=K3')).toBe('?w2=K1');
+  });
+
+  it('leaves an encoded value alone, including one carrying = or ,', () => {
+    // The dojo sentinel and separator ride inside a token; nothing here may
+    // re-split or decode them, since this function only removes a parameter.
+    expect(stripWatchlistParam('?q=a%3Db&w=%3AHagane%20Dojo')).toBe('?q=a%3Db');
+  });
+});

@@ -8,7 +8,7 @@ import { notificationSupported } from './viewer_notifications.jsx';
 import { VSchedItem, MatchViewerModal } from './viewer_match.jsx';
 import { buildWatchlistUpcoming, usePrimaryWatch, WATCHED_UPCOMING_LIST_MAX } from './viewer_schedule.jsx';
 import { numberOf } from './competitor_identity.jsx';
-import { parseWatchlistTokens, resolveFreshTokens } from './watchlist_link.jsx';
+import { parseWatchlistTokens, resolveFreshTokens, stripWatchlistParam } from './watchlist_link.jsx';
 
 const { useState, useMemo, useRef: useRefV, useEffect } = React;
 const StatusBadge = window.StatusBadge;
@@ -207,7 +207,16 @@ export function ViewerHome({ tournament, onSelectCompetition, onAdminClick, onOp
     // the URL when the path changes, and on the home screen it does not, so
     // the query survives in the address bar until something removes it.
     // replaceState adds no history entry, so Back is unaffected.
-    window.history.replaceState(null, "", window.location.pathname);
+    //
+    // Only `w` goes: a printed tag's QR is `?playerNumber=K12`
+    // (helper.playerTagURL), and that query surviving is what lets a reload
+    // retry a deep link that resolved to nobody because its competition had
+    // not loaded yet. stripWatchlistParam returns the search unchanged when
+    // there is no `w`, so a tag link is not touched at all.
+    const nextSearch = stripWatchlistParam(window.location.search);
+    if (nextSearch !== window.location.search) {
+      window.history.replaceState(null, "", window.location.pathname + nextSearch);
+    }
     // The two refs are listed rather than suppressed: a ref object's identity
     // never changes, so naming them is honest and costs no extra runs.
   }, [roster, watchlist, rosterLoaded, setWatchlist, sharedApplied, sharedSettled]);

@@ -14,8 +14,8 @@
 //   why: "Adding to the watchlist is non-destructive (unlike the old
 //   single-follow overwrite)". Arriving at a friend's link must not delete
 //   your own list. This is load-bearing and was briefly lost to a bad commit
-//   (see the fix commit for bc-wlpl), so viewer_home_permalink_merge.test.jsx
-//   now pins it.
+//   (see the fix commit for bc-wlpl), so mergeSharedWatchlist owns that rule
+//   and watchlist_merge.test.jsx pins it.
 //
 //   APPLIED ONCE, AFTER THE ROSTER LOADS. The tokens cannot resolve against a
 //   roster that has not arrived, and re-applying on every render would fight
@@ -150,6 +150,31 @@ export function parseWatchlistTokens(search) {
     if (value) out.push({ kind: isDojo ? "dojo" : "competitor", value });
   });
   return out;
+}
+
+// stripWatchlistParam: the same query WITHOUT `w`, every other parameter left
+// alone. Returns the string unchanged when there was no `w` to remove, so a
+// caller can compare and leave the address bar untouched.
+//
+// Dropping the WHOLE query here would be wrong, and specifically wrong for the
+// competitor tag. `helper.playerTagURL` prints each tag's QR as
+// `<publicURL>/?playerNumber=K12`, which resolveDeepLink (viewer_home.jsx)
+// reads. That link is applied as soon as the roster is non-empty, but a
+// competitor whose competition has not loaded yet resolves to nobody and the
+// deep link is spent; the query surviving in the address bar is what lets a
+// reload retry it. Clearing the query wholesale took that away, so scanning a
+// tag while one competition was still loading silently did nothing, with a
+// reload no longer able to fix it.
+export function stripWatchlistParam(search) {
+  const s = String(search || "");
+  const q = s.replace(/^\?/, "");
+  if (!q) return s;
+  const kept = q.split("&").filter((part) => {
+    if (!part) return false;
+    const eq = part.indexOf("=");
+    return (eq < 0 ? part : part.slice(0, eq)) !== WATCHLIST_PARAM;
+  });
+  return kept.length ? `?${kept.join("&")}` : "";
 }
 
 // resolveWatchlistTokens: parsed tokens back into watchlist entries, against

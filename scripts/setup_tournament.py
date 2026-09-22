@@ -12,6 +12,18 @@ import time
 PORT = os.environ.get("PORT", "8080")
 BASE_URL = os.environ.get("BASE_URL", f"http://localhost:{PORT}").rstrip("/")
 PASSWORD = os.environ.get("TOURNAMENT_PASSWORD", "testpassword")
+# Optional: leave one or more categories mid-run instead of scoring them to the
+# end. Comma-separated; unset by default, so `make mobile-app-example` still
+# completes everything.
+SCORE_DELAY = float(os.environ.get("SEED_SCORE_DELAY", "0.05"))
+LEAVE_RUNNING = [
+    t.strip() for t in os.environ.get("SEED_LEAVE_RUNNING", "").split(",") if t.strip()
+]
+try:
+    RUNNING_SCORED = int(os.environ.get("SEED_RUNNING_SCORED", "8"))
+except ValueError:
+    print("[WARN] SEED_RUNNING_SCORED is not a number; using 8")
+    RUNNING_SCORED = 8
 HEADERS = {
     "X-Tournament-Password": PASSWORD,
     "Content-Type": "application/json"
@@ -230,9 +242,17 @@ def get_predictable_result(is_team, index, can_draw=True):
             return get_predictable_result(is_team, index + 1, can_draw)
         return data
 
-def score_all_matches(comp_id):
+def score_all_matches(comp_id, stop_after=None):
+    """Score until nothing is scoreable, or until stop_after matches.
+
+    stop_after leaves a competition genuinely mid-run, which is what the
+    documentation captures of the dashboard and the viewer need: a fully
+    scored tournament shows every competition as Completed and no live
+    match anywhere.
+    """
     print(f"Running competition {comp_id}...")
-    
+
+    scored = 0
     iteration = 0
     while iteration < 100:
         iteration += 1
@@ -278,6 +298,10 @@ def score_all_matches(comp_id):
         print(f"Found {len(to_score)} matches to score (Iteration {iteration})...")
 
         for i, (match, is_pool_match) in enumerate(to_score):
+            if stop_after is not None and scored >= stop_after:
+                print(f"Stopping after {scored} matches; {comp_id} stays mid-run.")
+                return
+            scored += 1
             mid = match['id']
             sideA = match['sideA']
             sideB = match['sideB']
@@ -332,8 +356,11 @@ def score_all_matches(comp_id):
                                     json=payload, headers=HEADERS).raise_for_status()
                 print(f"  Scored {mid}: {sideA} vs {sideB} -> {res_data['winner_side']} ({len(ipponsA)}-{len(ipponsB)})")
             
-            # Small delay for realism
-            time.sleep(0.05)
+            # Small delay for realism. `make mobile-app-example` is watched while
+            # it runs, so the pacing is wanted there. The capture harness is not
+            # watched and pays it once per match, which measured at 14 seconds
+            # of a 3-minute run, so it sets SEED_SCORE_DELAY=0.
+            time.sleep(SCORE_DELAY)
 
     # Print summary (using the new readable scoreSummary if available).
     resp = requests.get(f"{BASE_URL}/api/viewer/competitions/{comp_id}")
@@ -359,6 +386,16 @@ def main():
     wait_for_server()
     setup_tournament()
 
+    known = [c['title'] for c in CATEGORIES]
+    for title in LEAVE_RUNNING:
+        if title not in known:
+            # Exact string match with no feedback used to mean a renamed category
+            # silently produced a fully completed tournament, and the documentation
+            # captures that depend on a running competition came out wrong on a
+            # green run.
+            print(f"[WARN] SEED_LEAVE_RUNNING entry {title!r} matches no category; "
+                  f"known titles: {known}")
+
     for cat in CATEGORIES:
         # Per-category isolation: a cyclic pool tie can block one comp from
         # finishing. Don't let that abort seeding of the remaining categories.
@@ -372,6 +409,12 @@ def main():
             #    into the knockout in place, so the subsequent loop iterations
             #    pick up the now-playable knockout matches automatically, pools
             #    and knockout are all driven by this one call.
+            if cat['title'] in LEAVE_RUNNING:
+                # Deliberately left mid-run, so the dashboard has a "currently
+                # running" competition and the viewer has a live match.
+                score_all_matches(comp_id, stop_after=RUNNING_SCORED)
+                print(f"[OK] {comp_id} left running.")
+                continue
             score_all_matches(comp_id)
 
             # 3. Finalize. A mixed comp ends in 'knockout' status once the

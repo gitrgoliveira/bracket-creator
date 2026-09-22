@@ -178,7 +178,7 @@ In Swiss, two further tie-breaks apply after those eight criteria:
 head-to-head (the team that won the direct encounter ranks higher), then
 name order as the final deterministic fallback.
 
-![Team Swiss standings: a table with rank, team, and the full tie-break columns W, L, T, IV, IL, IT, PW, and PL, with a caption reading "Ranked by: team wins, IV, PW, head-to-head".](../../screenshots/swiss-standings-team.png)
+![Team Swiss standings: a table with rank, team, and the full tie-break columns W, L, T, IV, IL, IT, PW, and PL, with a caption reading "Ranked by: team wins, then IV, then PW, then head-to-head".](../../screenshots/swiss-standings-team.png)
 
 !!! note
     When two or more teams remain tied after all eight criteria and the tie is consequential (it decides who advances or how they are seeded), the next step depends on format:

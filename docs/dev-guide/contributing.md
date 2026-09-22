@@ -81,6 +81,50 @@ An explicit `--folder`, `--port`, or `--bind` flag still overrides the env var.
 
 Editing these frontend sources and refreshing the browser does **not** pick up changes. The browser still gets the embedded bundle from the last binary build.
 
+## Regenerate the documentation screenshots
+
+Every screenshot and video under `docs/screenshots/` and `docs/videos/` is captured from the running application by a script, so a picture cannot quietly drift from the product it shows.
+
+```sh
+make docs/screenshots   # the application screenshots
+make docs/videos        # the application videos
+make docs/media         # both
+```
+
+They are separate targets because they cost very different amounts of time. The screenshots finish in a few minutes. Each video is recorded in real time and paced so a reader can follow it, so regenerating all three takes considerably longer.
+
+Either target takes `NAME=` for a single capture, and the screenshots target also takes `FAMILY=` for one group:
+
+```sh
+make docs/screenshots NAME=mobile-dashboard
+make docs/screenshots FAMILY=editors
+make docs/videos NAME=kachinuki-demo
+```
+
+You need `node` and `python3`. The first run installs the harness dependencies and downloads a browser for it. That browser is deliberately kept out of the frontend test dependencies, so `make js/deps` stays fast for everyone who never captures anything.
+
+A run builds the binary, starts a server on a free port against a throwaway data directory, seeds a tournament, drives the interface in a real browser, and writes the result to `scripts/screenshots/out/`. Nothing is written into `docs/` directly, so publishing a new capture stays your decision.
+
+You do not have to review all thirty. Every screenshot is compared pixel by pixel against the one it would replace, and a run ends by listing only the surfaces that actually changed:
+
+```
+28 unchanged, 2 changed, 0 video (not compared)
+
+changed - eyeball these, then copy them over docs/screenshots/:
+  viewer-competition: CHANGED 815x1163 (1284 px differ, max 212 levels)
+  team-lineup: CHANGED 1585x1212 (96 px differ, max 87 levels)
+```
+
+Look at those, and copy across the ones whose change you meant to make. A capture reported as unchanged reproduced the committed file, so there is nothing to see and nothing to copy.
+
+The comparison allows a small tolerance, because two runs of the same code do not produce identical bytes. It is set well below any difference a reader could notice and well above the measured noise, so a listed change is a real one.
+
+Videos are never compared: their encoding depends on how fast the machine drove the interface, so a clip is restaged on every run and only worth copying if you drove a change.
+
+A capture whose dimensions no longer match its committed twin is reported as a size mismatch. That usually means the viewport or the crop selector needs adjusting rather than that the surface changed.
+
+One rule decides how a capture is seeded. Anything showing competitor numbers, bout rows or points has to be produced by driving the interface. A lineup or a score written straight over the API carries no member identifiers and no bout points, so those numbers render blank and the scores read zero. Creating the tournament, its competitions, its participants and its draw over the API is fine.
+
 ## Create a commit
 
 We use Conventional Commits, so write commit messages in that format.

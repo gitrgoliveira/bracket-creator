@@ -25,7 +25,7 @@ else
 endif
 
 # Define phony targets
-.PHONY: default help clean local/deps hooks/install go/fmt go/generate go/test go/build go/lint go/sec go/sec-tests go/vuln go/security js/deps js/lint js/sec js/outdated js/security js/check-imports js/validate examples docker/build docker/run pre-commit docs/deps docs/serve docs/open docs/build docs/linkcheck docs/prose docs/clean run run-mobile esbuild-jsx goreleaser/test release version
+.PHONY: default help clean local/deps hooks/install go/fmt go/generate go/test go/build go/lint go/sec go/sec-tests go/vuln go/security js/deps js/lint js/sec js/outdated js/security js/check-imports js/validate examples docker/build docker/run pre-commit docs/deps docs/serve docs/open docs/build docs/linkcheck docs/prose docs/clean docs/screenshots docs/videos docs/media run run-mobile esbuild-jsx goreleaser/test release version
 
 default: help ## Show help information (default)
 
@@ -313,6 +313,51 @@ docs/prose: ## Check the docs sources against the public-prose rules (stdlib-onl
 docs/clean: ## Remove the docs venv and the built site
 	@echo "Removing $(DOCS_VENV) and site/..."
 	rm -rf $(DOCS_VENV) site
+
+# Docs capture harness. Playwright lives in its own package on purpose: putting
+# it in web-mobile/package.json would download a browser for every worktree that
+# runs js/deps, and would pull it into audit-ci's scope. Both stamps sit inside
+# node_modules/, which is already ignored.
+# The captures are built at the latest RELEASE tag rather than at the working
+# tree's own version. Two reasons, both about the comparison in run.mjs. The app
+# prints its build metadata on screen - a version badge in the web UI, a footer
+# in the tournament app - and off a release tag that reads as a commit sha plus
+# a build date, so every capture showing it would differ from the committed one
+# after any commit, and the "what changed" list would be noise. It also keeps a
+# branch name out of the published images: captured from this worktree, the
+# badge read the full branch, session id and all.
+#
+# Note this leaves bin/bracket-creator stamped with that version until the next
+# plain `make go/build`.
+DOCS_CAPTURE_VERSION := $(shell git describe --tags --abbrev=0 2>/dev/null || echo dev)
+
+SHOTS_DIR := scripts/screenshots
+SHOTS_DEPS_STAMP := $(SHOTS_DIR)/node_modules/.package-lock.json
+SHOTS_BROWSER_STAMP := $(SHOTS_DIR)/node_modules/.chromium-installed
+
+$(SHOTS_DEPS_STAMP): $(SHOTS_DIR)/package.json $(SHOTS_DIR)/package-lock.json
+	@echo "Installing the capture harness dependencies..."
+	@npm --prefix $(SHOTS_DIR) ci --no-audit --no-fund
+	@touch $@
+
+$(SHOTS_BROWSER_STAMP): $(SHOTS_DEPS_STAMP)
+	@echo "Downloading the harness browser..."
+	@cd $(SHOTS_DIR) && npx playwright-core install chromium
+	@touch $@
+
+docs/screenshots: export VERSION := $(DOCS_CAPTURE_VERSION)
+docs/screenshots: go/build $(SHOTS_BROWSER_STAMP) ## Regenerate the application screenshots (NAME=<one> or FAMILY=<group>)
+	@node $(SHOTS_DIR)/run.mjs KIND=still $(if $(NAME),NAME=$(NAME),) $(if $(FAMILY),FAMILY=$(FAMILY),)
+
+docs/videos: export VERSION := $(DOCS_CAPTURE_VERSION)
+docs/videos: go/build $(SHOTS_BROWSER_STAMP) ## Regenerate the application videos (NAME=<one> or FAMILY=<group>)
+	@node $(SHOTS_DIR)/run.mjs KIND=video $(if $(NAME),NAME=$(NAME),) $(if $(FAMILY),FAMILY=$(FAMILY),)
+
+docs/media: export VERSION := $(DOCS_CAPTURE_VERSION)
+docs/media: go/build $(SHOTS_BROWSER_STAMP) ## Regenerate every captured screenshot and video
+	@# One run with no KIND, rather than depending on the two targets above:
+	@# those would start node and a browser twice over two disjoint halves.
+	@node $(SHOTS_DIR)/run.mjs $(if $(NAME),NAME=$(NAME),) $(if $(FAMILY),FAMILY=$(FAMILY),)
 
 run: go/build ## Run the application locally
 	@echo "Running $(BIN_NAME)..."

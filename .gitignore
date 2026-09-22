@@ -65,6 +65,8 @@ Thumbs.db
 !web-mobile/.oxlintrc.json
 !web/package.json
 !web/package-lock.json
+!scripts/screenshots/package.json
+!scripts/screenshots/package-lock.json
 # Go testdata fixtures. These are test INPUTS, not build output: the blanket
 # *.json above would silently drop them, and a golden table that never lands
 # fails CI on a checkout that works locally. /**/ matches zero or more
@@ -148,3 +150,6 @@ mp-*/
 # `.serena/*` (not `.serena/`) so the negation below can re-include the file.
 .serena/*
 !.serena/project.yml
+
+# Docs capture harness: staged output, compared by eye before it replaces a committed file.
+scripts/screenshots/out/

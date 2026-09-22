@@ -12,7 +12,7 @@ Then open [http://localhost:8080](http://localhost:8080) in your browser.
 
 ## Main screen
 
-Configure the tournament on the main screen. Choose the format, either **Pools and Knockout** or **Knockout (Knockout Tournament)**, then set the number of courts, pool sizes, and other options. Upload your participant CSV directly from the browser.
+Configure the tournament on the main screen. Choose the format, either **Pools + Knockout** or **Knockout (direct elimination)**, then set the number of courts, pool sizes, and other options. Upload your participant CSV directly from the browser.
 
 Both formats build a knockout bracket, so the number of courts must be 1, 2, 4, 8 or 16. The bracket is split into one block per shiai-jo, and those blocks merge in pairs, so the count must halve cleanly all the way down. The app refuses any other count and lists the counts to use instead. Refer to [Shiai-jo count](../commands/create-pools.md#shiai-jo-count).
 

@@ -19,10 +19,8 @@ export { PASSWORD };
 // a seed calls it on a context of its own, usually through withAdminPage.
 export async function authAdmin(context) {
   await context.addInitScript((pw) => {
-    try {
-      localStorage.setItem('bc_authed', 'true');
-      localStorage.setItem('bc_password', pw);
-    } catch (_) { /* storage disabled; the API calls will 401 loudly */ }
+    localStorage.setItem('bc_authed', 'true');
+    localStorage.setItem('bc_password', pw);
   }, PASSWORD);
 }
 

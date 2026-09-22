@@ -250,8 +250,15 @@ function WatchHeroCard({ nextMatch, primaryIds, entityLabel, onMatchClick }) {
   // 86px each, which wrapped "Shiaijo A" onto two lines with the court LETTER
   // orphaned and "11 before yours" onto three. The surface is phone-first and
   // must never truncate or wrap into rubble (operator ruling 2026-09-20).
-  const whenLine = [running ? "Now" : (nextMatch.scheduledAt || "Time TBA"), queueLabel]
-    .filter(Boolean).join(" · ");
+  // A FINISHED match says so. This card now falls back to the last result when
+  // a watched competitor has nothing left to fight (operator ruling
+  // 2026-09-22), and without this it would print that match's scheduled time
+  // -- reading exactly like a fixture still to come. The queue label is
+  // dropped with it: "3 before yours" is meaningless once the bout is over.
+  const finished = nextMatch.status === "completed";
+  const whenLine = finished
+    ? "Result"
+    : [running ? "Now" : (nextMatch.scheduledAt || "Time TBA"), queueLabel].filter(Boolean).join(" · ");
   // For a dojo primary, name the dojo above the competing member so the
   // relationship is clear ("Hagane Dojo" → "Aoi" is up).
   const showDojoEyebrow = entityLabel && entityLabel !== subjectName;
@@ -324,7 +331,7 @@ function WatchHeroCard({ nextMatch, primaryIds, entityLabel, onMatchClick }) {
             not hold. Naming the dojo alone matches what the running arm always
             did. */}
         <div className="wl-hero__lbl">
-          {showDojoEyebrow ? entityLabel : (running ? "Your match" : "Your next match")}
+          {showDojoEyebrow ? entityLabel : (finished ? "Your last match" : running ? "Your match" : "Your next match")}
         </div>
         {/* The INSTRUCTION is the headline: where to walk. The watched person's
             own name is the one fact they already know, so it moves down to its

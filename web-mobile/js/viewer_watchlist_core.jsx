@@ -18,6 +18,7 @@
 // lazy reads: those assignments still live in viewer.jsx.
 
 import { competitorKey } from './competitor_identity.jsx';
+import { resultRecencyDesc } from './result_recency.jsx';
 
 const { useState } = React;
 
@@ -369,7 +370,25 @@ export function buildPrimaryNextMatch(primaryEntry, roster, allMatches) {
     if (ao !== bo) return ao - bo;
     return (a.scheduledAt || "99:99").localeCompare(b.scheduledAt || "99:99");
   });
-  return mine[0] || null;
+  if (mine[0]) return mine[0];
+
+  // Nothing left to fight: offer the LAST RESULT instead (operator ruling
+  // 2026-09-22). A competitor who is out, or who has finished their day, is
+  // exactly who the reader still cares about -- and the card previously went
+  // to "No upcoming matches", which answers the wrong question. The watchlist
+  // is how the reader follows a person, not only a fixture.
+  //
+  // Recency is resultRecencyDesc's rule, not a re-sort by scheduled time: the
+  // most recent RESULT is the last write, which is not the latest slot when a
+  // court has run out of schedule order (result_recency.jsx owns this; the
+  // court console and the public Recent results already ask it).
+  const done = list.filter((m) => {
+    if (!m || m.status !== "completed") return false;
+    const [a, b] = matchParticipantIds(m);
+    return (a && ids.has(a)) || (b && ids.has(b));
+  });
+  done.sort(resultRecencyDesc);
+  return done[0] || null;
 }
 
 // Did every competition's roster LOAD? buildRoster cannot say: a competition

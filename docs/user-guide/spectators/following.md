@@ -8,7 +8,7 @@ If you are not sure which role fits you, refer to [Choosing your setup](../start
 
 The viewer brings together everything you need to follow the day in one place:
 
-- A personal **Watchlist** so you can track yourself, specific competitors, or a whole dojo. As a watched match approaches, the viewer nudges you so competitors know when to warm up and coaches know when to be at the court.
+- A personal **Watchlist** so you can track yourself, specific competitors, or a whole dojo. As a watched match approaches, the viewer nudges you so competitors know when to warm up and coaches know when to be at the court. Once someone you watch has no match left to fight, their card shows their last result instead, so you can still see how they finished.
 - The full match schedule across all shiai-jo, filterable by competitor or team. The free-text filter matches a competitor's name, their dojo, or their competitor number, so you can jump straight to their bouts. Refer to [Searching by competitor number](#searching-by-competitor-number) for how numbers are matched.
 - Pool standings that update as scores are entered, with no page refresh needed.
 - The elimination bracket filling in as matches are completed.

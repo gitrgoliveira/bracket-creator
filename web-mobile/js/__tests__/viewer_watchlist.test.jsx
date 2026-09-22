@@ -154,3 +154,67 @@ describe('buildWatchlistUpcoming', () => {
     expect(buildWatchlistUpcoming(watched, all)).toEqual([]);
   });
 });
+
+// Operator ruling 2026-09-22: a watched competitor with no upcoming or current
+// match contributes their LAST RESULT to this list instead of vanishing from
+// it. The watchlist is how a reader follows a PERSON, not only a fixture.
+describe('buildWatchlistUpcoming: a finished competitor shows their last result', () => {
+  const done = (id, who, at, modifiedAt) => (
+    { id, sideAId: who, sideBId: 'x', scheduledAt: at, status: 'completed', modifiedAt }
+  );
+  const soon = (id, who, at) => (
+    { id, sideAId: who, sideBId: 'x', scheduledAt: at, status: 'scheduled' }
+  );
+
+  it('offers the last result when the competitor has nothing left to fight', () => {
+    const out = buildWatchlistUpcoming([{ id: 'p1' }], [done('d1', 'p1', '09:00', 10)]);
+    expect(out.map((m) => m.id)).toEqual(['d1']);
+  });
+
+  it('PER COMPETITOR: one still fighting does not suppress a finished one', () => {
+    // THE distinction. A list-level "is it empty" test would show only p1's
+    // upcoming match and drop p2 entirely, which is what used to happen.
+    const out = buildWatchlistUpcoming(
+      [{ id: 'p1' }, { id: 'p2' }],
+      [soon('s1', 'p1', '11:00'), done('d2', 'p2', '09:00', 10)],
+    );
+    expect(out.map((m) => m.id)).toEqual(['s1', 'd2']);
+  });
+
+  it('a competitor still fighting contributes NO result, only what is ahead', () => {
+    const out = buildWatchlistUpcoming(
+      [{ id: 'p1' }],
+      [soon('s1', 'p1', '11:00'), done('d1', 'p1', '09:00', 10)],
+    );
+    expect(out.map((m) => m.id)).toEqual(['s1']);
+  });
+
+  it('picks the most recent result by WRITE time, not by slot', () => {
+    // resultRecencyDesc (result_recency.jsx): a court running out of schedule
+    // order scores an earlier slot later, and that is the newer result.
+    const out = buildWatchlistUpcoming(
+      [{ id: 'p1' }],
+      [done('late-slot', 'p1', '15:00', 100), done('scored-last', 'p1', '09:00', 900)],
+    );
+    expect(out.map((m) => m.id)).toEqual(['scored-last']);
+  });
+
+  it('results come AFTER what is still to be fought', () => {
+    const out = buildWatchlistUpcoming(
+      [{ id: 'p1' }, { id: 'p2' }],
+      [done('d2', 'p2', '08:00', 10), soon('s1', 'p1', '11:00')],
+    );
+    expect(out.map((m) => m.id), 'upcoming first, then the result').toEqual(['s1', 'd2']);
+  });
+
+  it('a competitor with no matches at all contributes nothing', () => {
+    const out = buildWatchlistUpcoming([{ id: 'p1' }, { id: 'ghost' }], [soon('s1', 'p1', '11:00')]);
+    expect(out.map((m) => m.id)).toEqual(['s1']);
+  });
+
+  it('one shared result is not listed twice when both sides are watched', () => {
+    const shared = { id: 'd', sideAId: 'p1', sideBId: 'p2', scheduledAt: '09:00', status: 'completed', modifiedAt: 10 };
+    const out = buildWatchlistUpcoming([{ id: 'p1' }, { id: 'p2' }], [shared]);
+    expect(out.map((m) => m.id)).toEqual(['d']);
+  });
+});

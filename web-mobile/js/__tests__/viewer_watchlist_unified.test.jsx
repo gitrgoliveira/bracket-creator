@@ -285,9 +285,34 @@ describe('buildPrimaryNextMatch', () => {
     const m = buildPrimaryNextMatch({ type: 'player', id: 'a1' }, roster, matches);
     expect(m.id).toBe('soon'); // 'done' excluded, 'soon' is a1's only upcoming
   });
-  it('excludes completed matches and returns null when none remain', () => {
+  it('prefers a pending match over a completed one', () => {
+    // A result is the FALLBACK, never a competitor for the card: while
+    // anything is still to be fought, that is what the reader is waiting for.
+    const m = buildPrimaryNextMatch({ type: 'player', id: 'a1' }, roster, matches);
+    expect(m.id).toBe('soon');
+  });
+
+  it('falls back to the LAST RESULT once nothing is left to fight', () => {
+    // Operator ruling 2026-09-22. This used to return null and the panel then
+    // printed "No upcoming matches", which answers the wrong question: a
+    // competitor who is out is exactly who the reader still cares about.
     const only = [{ id: 'done', sideAId: 'a1', sideBId: 'z', status: 'completed' }];
-    expect(buildPrimaryNextMatch({ type: 'player', id: 'a1' }, roster, only)).toBeNull();
+    expect(buildPrimaryNextMatch({ type: 'player', id: 'a1' }, roster, only).id).toBe('done');
+  });
+
+  it('picks the most recent RESULT, by write time rather than by slot', () => {
+    // resultRecencyDesc's rule (result_recency.jsx): the latest result is the
+    // last WRITE, which is not the latest scheduled slot once a court has run
+    // out of schedule order. Here the earlier slot was scored later.
+    const done = [
+      { id: 'late-slot', sideAId: 'a1', sideBId: 'z', status: 'completed', scheduledAt: '15:00', modifiedAt: 100 },
+      { id: 'scored-last', sideAId: 'a1', sideBId: 'z', status: 'completed', scheduledAt: '09:00', modifiedAt: 900 },
+    ];
+    expect(buildPrimaryNextMatch({ type: 'player', id: 'a1' }, roster, done).id).toBe('scored-last');
+  });
+
+  it('still returns null when the competitor has no matches at all', () => {
+    expect(buildPrimaryNextMatch({ type: 'player', id: 'a1' }, roster, [])).toBeNull();
   });
   it('returns null for a dojo with no current members', () => {
     expect(buildPrimaryNextMatch({ type: 'dojo', dojo: 'Empty Dojo' }, roster, matches)).toBeNull();

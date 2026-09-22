@@ -8,6 +8,7 @@ import { SideCell } from './side_cell.jsx';
 import { MatchViewerModal, localQueueLabelCompact } from './viewer_match.jsx';
 import { sameCompetitor, competitorKey } from './competitor_identity.jsx';
 import { competitorMatchesQuery, matchMentions } from './competitor_search.jsx';
+import { resultRecencyDesc } from './result_recency.jsx';
 
 const { useState, useMemo, useRef: useRefV } = React;
 const EmptyState = window.EmptyState;
@@ -61,7 +62,8 @@ export function usePrimaryWatch() {
 // elsewhere correctly refused it -- watching Sato of Tokyo must not also
 // surface an id-less "Sato" row.
 export function buildWatchlistUpcoming(watched, allMatches, max = WATCHED_UPCOMING_MAX) {
-  const sets = buildWatchedSets(watched);
+  const people = (Array.isArray(watched) ? watched : []).filter(Boolean);
+  const sets = buildWatchedSets(people);
   if (sets.size === 0) return [];
   const list = Array.isArray(allMatches) ? allMatches : [];
   const upcoming = list.filter((m) => m && m.status !== "completed" && matchInvolvesWatchedSet(m, sets));
@@ -70,7 +72,33 @@ export function buildWatchlistUpcoming(watched, allMatches, max = WATCHED_UPCOMI
     const yt = y.scheduledAt || "99:99";
     return xt.localeCompare(yt);
   });
-  return upcoming.slice(0, max);
+
+  // PER COMPETITOR, not per list (operator ruling 2026-09-22): a watched
+  // competitor with nothing left to fight contributes their last RESULT here
+  // instead. Someone watching three people, one of whom is out, still wants
+  // that person's row -- and they used to vanish from this list entirely the
+  // moment their last match completed.
+  //
+  // Asked per person rather than "is the whole list empty", because the two
+  // differ exactly when they matter: with one competitor still fighting and
+  // one done, a list-level test would keep showing only the first and drop the
+  // second. Each person is tested with a set of their own, which is also why
+  // the completed pass cannot pull in a match belonging to someone else who is
+  // still fighting.
+  const finished = [];
+  people.forEach((p) => {
+    const own = buildWatchedSets([p]);
+    if (own.size === 0) return;
+    if (upcoming.some((m) => matchInvolvesWatchedSet(m, own))) return; // still has something ahead
+    const done = list.filter((m) => m && m.status === "completed" && matchInvolvesWatchedSet(m, own));
+    done.sort(resultRecencyDesc);
+    if (done[0] && !finished.includes(done[0])) finished.push(done[0]);
+  });
+
+  // Upcoming first: what has not happened yet is the reason to keep looking at
+  // this panel. The finished rows read as results, and VSchedItem already
+  // renders them with their score rather than a time.
+  return upcoming.concat(finished).slice(0, max);
 }
 
 // Return the subset of `matches` where the followed player participates.

@@ -1,6 +1,9 @@
 package helper
 
 import (
+	"encoding/json"
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -14,30 +17,6 @@ func TestPlayerTagURL(t *testing.T) {
 		number    string
 		want      string
 	}{
-		{
-			name:      "basic",
-			publicURL: "https://kendo.example.com",
-			number:    "K1",
-			want:      "https://kendo.example.com/?playerNumber=K1",
-		},
-		{
-			name:      "trailing slash is trimmed",
-			publicURL: "https://kendo.example.com/",
-			number:    "K1",
-			want:      "https://kendo.example.com/?playerNumber=K1",
-		},
-		{
-			name:      "number with special chars is query-escaped",
-			publicURL: "https://example.com",
-			number:    "A+B",
-			want:      "https://example.com/?playerNumber=A%2BB",
-		},
-		{
-			name:      "number with space is query-escaped",
-			publicURL: "https://example.com",
-			number:    "K 1",
-			want:      "https://example.com/?playerNumber=K+1",
-		},
 		{
 			name:      "non-http scheme returns empty",
 			publicURL: "javascript:alert(1)",
@@ -66,6 +45,28 @@ func TestPlayerTagURL(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			assert.Equal(t, tc.want, playerTagURL(tc.publicURL, tc.number))
+		})
+	}
+}
+
+// TestPlayerTagURL_SharedFixture pins the tag QR's URL against the table the
+// viewer's suite also reads (watchlist_link.test.jsx), so the Go encoder and
+// the JS decoder of `?w=` agree on every row. See the fixture's _comment.
+func TestPlayerTagURL_SharedFixture(t *testing.T) {
+	raw, err := os.ReadFile(filepath.Join("testdata", "tag_watch_links.json"))
+	require.NoError(t, err)
+	var doc struct {
+		Cases []struct {
+			PublicURL string `json:"publicURL"`
+			Number    string `json:"number"`
+			URL       string `json:"url"`
+		} `json:"cases"`
+	}
+	require.NoError(t, json.Unmarshal(raw, &doc))
+	require.NotEmpty(t, doc.Cases, "an empty table would assert nothing")
+	for _, tc := range doc.Cases {
+		t.Run(tc.Number, func(t *testing.T) {
+			assert.Equal(t, tc.URL, playerTagURL(tc.PublicURL, tc.Number))
 		})
 	}
 }

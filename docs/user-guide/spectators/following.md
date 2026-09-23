@@ -8,8 +8,8 @@ If you are not sure which role fits you, refer to [Choosing your setup](../start
 
 The viewer brings together everything you need to follow the day in one place:
 
-- A personal **Watchlist** so you can track yourself, specific competitors, or a whole dojo. As a watched match approaches, the viewer nudges you so competitors know when to warm up and coaches know when to be at the court.
-- The full match schedule across all shiai-jo, filterable by competitor or team. The free-text filter matches a competitor's name, their assigned number, or their tag (for example, "A1"), so you can jump straight to their bouts.
+- A personal **Watchlist** so you can track yourself, specific competitors, or a whole dojo. As a watched match approaches, the viewer nudges you so competitors know when to warm up and coaches know when to be at the court. Once someone you watch has no match left to fight, their card shows their last result instead, so you can still see how they finished.
+- The full match schedule across all shiai-jo, filterable by competitor or team. The free-text filter matches a competitor's name, their dojo, or their competitor number, so you can jump straight to their bouts. Refer to [Searching by competitor number](#searching-by-competitor-number) for how numbers are matched.
 - Pool standings that update as scores are entered, with no page refresh needed.
 - The elimination bracket filling in as matches are completed.
 
@@ -24,6 +24,32 @@ Tap a competition to see its schedule, standings, and bracket. Aka (red) and Shi
   ![A competition's public page: upcoming matches and recent results with waza-level scores.](../../screenshots/viewer-competition.png){ .bc-phone }
   <figcaption>A competition's page: upcoming matches and recent results with waza-level scores.</figcaption>
 </figure>
+
+### Searching by competitor number
+
+Once the draw for a competition has run, its competitors are numbered. The number starts with a short prefix that belongs to that competition, so "K12" and "M12" are two different people in two different draws. Swiss competitions are the exception and use no numbers at all.
+
+The same number identifies that competitor everywhere it appears: on their tag, on the pool or draw sheet, on the Names to Print cards, at the desk, and beside their name on screen in the viewer and on the venue's display boards. Type it the way it is printed, prefix included:
+
+- **The prefix on its own** brings up that whole draw. Type "K" and every K number is listed, along with anyone whose name or dojo happens to contain a "k". A prefix can carry digits of its own when the plain letter was already taken by another competition: "K02" is then a prefix like any other, so typing "K02" lists that whole draw and "K" lists both.
+- **The prefix and the digits** finds that one competitor. "K12" finds K12, and not K120.
+- **Digits on their own** find nobody by number. "12" is not a competitor number, because it does not say which competition it belongs to. As with the prefix on its own, anyone whose name or dojo happens to contain "12" is still listed.
+
+Names and dojos still match on any part of what you type, so a surname fragment is enough for those. Only the number needs to be typed in full.
+
+Refer to [QR codes on competitor tags](#qr-codes-on-competitor-tags): if you have the tag in your hand, scanning it adds that competitor to your watchlist, with no typing at all.
+
+If someone is entered in more than one competition, they have a separate number in each one, and the filter lists them once per competition. Searching either number finds them, and each result tells you which competition it belongs to.
+
+### Share your watchlist
+
+Your watchlist is kept on the device you built it on. It is not tied to an account, so it does not follow you to a second phone or survive clearing your browser data. To move it, or to hand it to someone else, use **Share** at the top of the watchlist card.
+
+The share sheet gives you a link, and a QR code when the list is short enough to fit in one. Anyone who opens the link gets those competitors **added** to their own watchlist. It never replaces what they are already watching, so a coach can send the same link to every parent without anyone losing their own list.
+
+Share the link on the day of the tournament. Competitors are identified by their number where they have one, and numbers come from the draw, so a link created before a draw is regenerated can point at a different competitor afterwards.
+
+On the home screen, the address bar carries your watchlist too, and it updates as you add or remove someone. A bookmark of the home screen, or its address copied into another browser, therefore works like a shared link: opening it adds those competitors. Because opening a link only ever adds, an older copy brings back anyone you have removed since. To send your list to someone else, use **Share** rather than the address bar: on the venue network the address bar can show the venue's local address, which works only on that network, while Share uses the tournament's public address when the organiser has set one.
 
 ## Scoreboards and court displays
 
@@ -64,7 +90,7 @@ Scores entered by the operator appear on the viewer immediately, across every co
 
 ## QR codes on competitor tags
 
-When the organiser sets the tournament public URL, each printed competitor tag includes a personal QR code. Scan it to open your own page on the viewer, showing your schedule and results directly.
+When the organiser sets the tournament public URL, each printed competitor tag includes a personal QR code. Scanning it opens the viewer and adds that competitor to your watchlist, so their next match and results appear on the home screen. The code is a shared watchlist link with one competitor in it: it adds to whatever you already watch and never removes anyone. If that competitor's competition is still loading when you scan, they are added as soon as it loads.
 
 !!! tip
-    You do not need to set up a Watchlist if you use your tag's QR code: the personal page opens straight to your matches. The code only works once the organiser has configured a public URL for the tournament. If scanning your tag does not open anything, ask the organiser for the tournament URL and use the Watchlist instead.
+    The code only works once the organiser has configured a public URL for the tournament. If scanning your tag does not open anything, ask the organiser for the tournament URL and add yourself to the watchlist by name or number instead.

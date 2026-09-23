@@ -3,8 +3,6 @@
 // lives here so it loads before any section-specific file. See
 // web-mobile/admin_split_plan.md.
 
-import { renderQR } from './qr.js';
-
 const { useState: useStateA, useMemo: useMemoA, useEffect: useEffectA, useRef: useRefA } = React;
 
 // Producers (loaded earlier).
@@ -17,6 +15,11 @@ const Icon = window.Icon;
 const formatLabelShort = window.formatLabelShort;
 const formatAdminHeaderSub = window.formatAdminHeaderSub;
 const Modal = window.Modal;
+// Hoisted into ui.jsx when the public watchlist share sheet needed the same
+// "take this link" sheet: a public surface cannot import the admin shell, and
+// a second copy of a QR-plus-copy modal is the drift this repo keeps paying
+// for. qr.js is no longer imported here because ShareLinkModal owns the QR.
+const ShareLinkModal = window.ShareLinkModal;
 
 // Maximum running-match chips rendered in the topbar status strip before the
 // "+N more" overflow indicator kicks in.
@@ -582,55 +585,32 @@ function AdminDashboard({ tournament, password, onOpenCompetition, onCreateCompe
   );
 }
 
-async function copyToClipboard(text) {
-  if (navigator.clipboard && navigator.clipboard.writeText) {
-    return navigator.clipboard.writeText(text);
-  }
-  // Fallback for non-secure context (LAN without TLS)
-  const ta = document.createElement('textarea');
-  ta.value = text;
-  ta.style.position = 'fixed';
-  ta.style.opacity = '0';
-  document.body.appendChild(ta);
-  ta.select();
-  try {
-    const ok = document.execCommand('copy');
-    if (!ok) throw new Error('execCommand copy failed');
-  } finally {
-    document.body.removeChild(ta);
-  }
-}
-
 function ShareRegistrationModal({ url, onClose, showToast }) {
-  const canvasRef = useRefA(null);
-
-  useEffectA(() => {
-    if (canvasRef.current) {
-      try {
-        renderQR(canvasRef.current, url, { moduleSize: 6, quietZone: 4 });
-      } catch (e) {
-        console.error("QR render failed", e);
-      }
-    }
-  }, [url]);
-
+  // The sheet itself is ui.jsx's ShareLinkModal, shared with the public
+  // watchlist permalink. Only the wording and the copy feedback are this
+  // surface's own.
   return (
-    <Modal title="Share registration link" onClose={onClose} footer={<>
-      <button type="button" className="btn btn--primary" onClick={() => {
-        copyToClipboard(url).then(() => showToast && showToast("Registration link copied!")).catch(() => showToast && showToast("Copy failed; select the link above manually", "error"));
-      }}>Copy link</button>
-      <button type="button" className="btn" onClick={onClose}>Close</button>
-    </>}>
-      <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 16 }}>
-        <canvas ref={canvasRef} style={{ display: "block", imageRendering: "pixelated" }} />
-        <div style={{ width: "100%", background: "var(--surface-2)", borderRadius: 6, padding: "8px 12px", fontFamily: "monospace", fontSize: 13, wordBreak: "break-all", userSelect: "all" }}>
-          {url}
-        </div>
-        <p style={{ margin: 0, fontSize: 13, color: "var(--ink-3)", textAlign: "center" }}>
-          Participants can scan this QR code or open the link to register.
+    <ShareLinkModal
+      title="Share registration link"
+      url={url}
+      onClose={onClose}
+      onCopy={(ok) => {
+        if (!showToast) return;
+        if (ok) showToast("Registration link copied!");
+        else showToast("Copy failed; select the link above manually", "error");
+      }}
+    >
+      {/* Worded for what the sheet shows: ShareLinkModal drops the QR for a
+          URL too long to encode, and a note telling people to scan a code that
+          is not there sends them looking for it. */}
+      {(showQR) => (
+        <p className="share-link__note">
+          {showQR
+            ? "Participants can scan this QR code or open the link to register."
+            : "Participants can open the link to register."}
         </p>
-      </div>
-    </Modal>
+      )}
+    </ShareLinkModal>
   );
 }
 

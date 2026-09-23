@@ -9,6 +9,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { makeReactive } from './helpers/reactive_react.js';
 import { collectText, expandNamed } from './helpers/vdom.js';
 import { cssBlock, readStylesheet } from './helpers/source.js';
+import { buildRoster } from '../viewer_watchlist_core.jsx';
 
 const realReact = global.React;
 
@@ -46,8 +47,11 @@ describe('WatchHeroCard', () => {
     vi.resetModules();
     // viewer.jsx populates window.* with the helpers WatchHeroCard reads at
     // render (matchParticipantIds, poolLabel, mymatchQueueLabel, TermV);
-    // the component itself now lives in viewer_watchlist.jsx.
+    // the component itself now lives in viewer_watchlist.jsx. bracket.jsx
+    // publishes window.matchScoreStr, the one score-string owner the finished
+    // card reads -- in the browser it is script-tagged, here it is imported.
     await import('../viewer.jsx');
+    await import('../bracket.jsx');
     ({ WatchHeroCard } = await import('../viewer_watchlist.jsx'));
   });
   afterEach(() => { runtime.unmount(); global.React = realReact; vi.resetModules(); });
@@ -202,6 +206,72 @@ describe('WatchHeroCard', () => {
     expect(v, 'the court letter has its own element').toBeTruthy();
     expect(collectText(v, expandNamed('NumberedName')).trim()).toBe('A');
   });
+
+  // The FINISHED card (operator ruling 2026-09-22: once a watched competitor
+  // has nothing left to fight, the card shows their last result).
+  //
+  // None of this was pinned when the fallback landed, and the card went on
+  // rendering the court as its 34px headline -- an instruction to walk to a
+  // shiaijo where nothing of theirs will happen -- while showing no score at
+  // all, which is the one thing the docs page promises of it ("so you can
+  // still see how they finished").
+  describe('a finished match', () => {
+    // sideA is Aka and sits on the RIGHT of every score string in the app, so
+    // Robert's two ippons read on the right of the middle.
+    const FINISHED = {
+      ...MATCH,
+      id: 'm-done',
+      status: 'completed',
+      ipponsA: ['M', 'K'],
+      ipponsB: [],
+      winner: { id: 'p1', name: 'Robert Young' },
+    };
+    const mount = (m) => runtime.mount(WatchHeroCard, {
+      nextMatch: m, primaryIds: new Set(['p1']), entityLabel: 'Robert Young', onMatchClick: vi.fn(),
+    });
+    const text = (n) => collectText(n, expandNamed('NumberedName'));
+
+    it('gives no court instruction: the bout is over', () => {
+      const tree = mount(FINISHED);
+      expect(byClass(tree, 'wl-hero__where-v'),
+        'the 34px court letter is an instruction, and there is none left to give').toHaveLength(0);
+      expect(text(byClass(tree, 'wl-hero__where')[0])).not.toMatch(/shiaijo/i);
+    });
+
+    it('does not promise a court that will never be announced', () => {
+      // The other arm, and the worse one: an unassigned finished match used to
+      // read "Court to be announced" about a match already fought.
+      const tree = mount({ ...FINISHED, court: '' });
+      expect(text(byClass(tree, 'wl-hero__where')[0])).not.toMatch(/announced/i);
+    });
+
+    it('shows the score instead, through the app-wide score string', () => {
+      const tree = mount(FINISHED);
+      const score = byClass(tree, 'wl-hero__score')[0];
+      expect(score, 'the result takes the headline slot').toBeTruthy();
+      expect(text(score), "Robert's two ippons").toContain('MK');
+      expect(text(byClass(tree, 'wl-hero__where')[0])).toContain('Result');
+    });
+
+    it('says "Finished" when the match carries no marks at all', () => {
+      // A completed row with nothing recorded: matchScoreStr returns "", and
+      // an empty headline would read as a rendering fault.
+      const tree = mount({ ...FINISHED, ipponsA: [], ipponsB: [], winner: null });
+      expect(text(byClass(tree, 'wl-hero__score')[0])).toBe('Finished');
+    });
+
+    it('names the card "Your last match", not "Your next match"', () => {
+      expect(text(byClass(mount(FINISHED), 'wl-hero__lbl')[0])).toBe('Your last match');
+    });
+
+    it('keeps the live region mounted and drops the queue wording', () => {
+      const tree = mount({ ...FINISHED, queuePosition: 4 });
+      const live = findAll(tree, (n) => n.props?.['aria-live'] === 'polite')[0];
+      expect(live, 'the live region is never unmounted').toBeTruthy();
+      expect(text(live), '"3 before yours" is meaningless once the bout is over').not.toMatch(/before yours/);
+      expect(text(live), 'and so is the scheduled time').not.toContain('09:00');
+    });
+  });
 });
 
 describe('WatchlistPanel', () => {
@@ -242,6 +312,39 @@ describe('WatchlistPanel', () => {
     expect(byClass(tree, 'pmf__chip')).toHaveLength(0);
     expect(heroNodes(tree)).toHaveLength(0);
     expect(byClass(tree, 'watchlist-pin-hint')).toHaveLength(0);
+  });
+
+  // bc-wlpl: the Share control. Gated on having something to share -- an empty
+  // watchlist produces an empty link (buildWatchlistLink returns ""), and a
+  // control that hands over nothing is worse than no control.
+  describe('the share control', () => {
+    it('is absent while the watchlist is empty', () => {
+      const tree = runtime.mount(WatchlistPanel, baseProps());
+      expect(byClass(tree, 'watchlist-share-btn')).toHaveLength(0);
+    });
+
+    it('appears once there is an entry to share', () => {
+      const wl = [{ type: 'player', id: 'p1', name: 'Robert Young', dojo: 'Hagane Dojo' }];
+      const tree = runtime.mount(WatchlistPanel, baseProps({
+        watchlist: wl, primaryEntry: wl[0], heroEntry: wl[0], heroNextMatch: MATCH,
+      }));
+      expect(byClass(tree, 'watchlist-share-btn')).toHaveLength(1);
+    });
+
+    // An entry the roster cannot resolve is still shareable, encoded by ID.
+    // This looks like it should be dropped and MUST NOT BE: the roster can
+    // legitimately be absent when the link is built (a competition's
+    // participants can fail to load, which is the whole reason
+    // rosterFullyLoaded exists), and nothing distinguishes "this person left
+    // the roster" from "the roster is not here yet". Dropping the entry would
+    // silently hand over a shorter list than the sender is looking at; keeping
+    // the id costs only a token the far end ignores if it truly resolves to
+    // nobody.
+    it('still offers a link for an entry the roster cannot resolve, so a not-yet-loaded roster does not silently shorten it', () => {
+      const wl = [{ type: 'player', id: 'not-in-this-roster', name: 'Ghost', dojo: 'X' }];
+      const tree = runtime.mount(WatchlistPanel, baseProps({ watchlist: wl, roster: [] }));
+      expect(byClass(tree, 'watchlist-share-btn')).toHaveLength(1);
+    });
   });
 
   it('single entry: one chip with NO pin star, hero rendered, no pin hint', () => {
@@ -556,11 +659,26 @@ describe('WatchPicker', () => {
     // Z and W on purpose: neither letter occurs in any fixture name or dojo,
     // so a hit here can only have come from the NUMBER. ("m" would have been
     // useless -- it matches "Aoi Mori" by name.)
-    const NUMBERED = [
-      { id: 'p1', name: 'Robert Young', dojo: 'Hagane Dojo', number: 'Z1' },
-      { id: 'p2', name: 'Nolan Clark', dojo: 'Tsubaki Kenyukai', number: 'Z12' },
-      { id: 'p3', name: 'Aoi Mori', dojo: 'Hagane Dojo', number: 'W2' },
-    ];
+    // Built through buildRoster, the ONE producer of the roster this picker is
+    // ever given (viewer_home.jsx:131 is its only production source), rather
+    // than hand-rolled. A hand-rolled record carried `number` but none of the
+    // derived fields the row renders, so it could go green while the real
+    // roster shape rendered nothing.
+    // Each competition carries the prefix its numbers were minted under, as
+    // the wire does: the rule's "prefix alone" arm reads it off the record.
+    const NUMBERED = buildRoster([
+      {
+        id: 'cz', name: 'Z Draw', numberPrefix: 'Z', players: [
+          { id: 'p1', name: 'Robert Young', dojo: 'Hagane Dojo', number: 'Z1' },
+          { id: 'p2', name: 'Nolan Clark', dojo: 'Tsubaki Kenyukai', number: 'Z12' },
+        ],
+      },
+      {
+        id: 'cw', name: 'W Draw', numberPrefix: 'W', players: [
+          { id: 'p3', name: 'Aoi Mori', dojo: 'Hagane Dojo', number: 'W2' },
+        ],
+      },
+    ]);
     const offered = (tree) =>
       byClass(tree, 'pmf__option')
         .filter((o) => !String(o.props.className).includes('--dojo'))
@@ -575,12 +693,22 @@ describe('WatchPicker', () => {
       expect(found, 'W2 is a different draw').not.toContain('Aoi Mori');
     });
 
-    it('matches from the START, not anywhere in the number', () => {
-      // Substring matching would drag every number CONTAINING 1 into a search
-      // for "1" -- here both Z1 and Z12 -- which is noise, not a filter.
+    it('finds nobody for a bare number: the prefix is required', () => {
+      // Operator ruling 2026-09-21 (bc-nsrc): the number ALWAYS needs its
+      // prefix. Digits alone are not a competitor number, so they match
+      // nothing -- not Z1, and not Z12 either.
       const tree = openWith('1', { roster: NUMBERED });
-      expect(offered(tree), 'no number STARTS with 1').toHaveLength(0);
+      expect(offered(tree), 'a bare number is not a competitor number').toHaveLength(0);
       expect(emptyRow(tree)).toHaveLength(1);
+    });
+
+    it('takes a number WITH its prefix as the WHOLE number', () => {
+      // The other arm of the same ruling: "z1" is Z1 and nothing else. The
+      // prefix matching this picker used to do offered Z12 here too, which
+      // the ruling refuses.
+      const found = offered(openWith('z1', { roster: NUMBERED })).join(' | ');
+      expect(found).toContain('Robert Young');
+      expect(found, 'Z12 is a different competitor, not a longer Z1').not.toContain('Nolan Clark');
     });
 
     it('shows the number on the row, so the match is visible', () => {

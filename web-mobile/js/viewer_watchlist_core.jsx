@@ -18,6 +18,8 @@
 // lazy reads: those assignments still live in viewer.jsx.
 
 import { competitorKey } from './competitor_identity.jsx';
+import { resultRecencyDesc } from './result_recency.jsx';
+import { parseWatchlistTokens, resolveFreshTokens, WATCHLIST_PARAM } from './watchlist_link.jsx';
 
 const { useState } = React;
 
@@ -122,8 +124,8 @@ export function matchInvolvesWatchedSet(m, watched) {
   return sideIsWatched(aId, aName, watched) || sideIsWatched(bId, bName, watched);
 }
 
-// LocalStorage keys for FR-020 / FR-024. Centralised so the deep-link
-// handler (T114) writes the same keys the panels read.
+// LocalStorage keys for FR-020 / FR-024. Centralised so every writer and
+// reader shares the same keys.
 const LS_MY_PLAYER_ID = "bc_my_player_id";
 const LS_MY_PLAYER_NAME = "bc_my_player_name";
 const LS_WATCHLIST = "bc_watchlist";
@@ -186,6 +188,158 @@ export function normalizeWatchlist(arr) {
     out.push(e);
   });
   return out.slice(0, WATCHLIST_MAX);
+}
+
+// mergeSharedWatchlist: what opening a watchlist permalink (bc-wlpl) does to
+// the list already on the device. It ADDS. It never replaces.
+//
+// A one-line rule with an expensive failure mode, and it has already failed
+// once: a commit briefly shipped the shared list alone, so opening a friend's
+// link would have deleted every competitor the recipient was already watching.
+// The whole suite stayed green, because the rule was spelled inline inside an
+// effect where no test could reach it. It has a name now so it can be pinned,
+// and watchlist_merge.test.jsx pins it.
+//
+// normalizeWatchlist does the work that makes ADD safe: it dedupes by entry
+// key with the FIRST occurrence winning, so a competitor already on the device
+// keeps their existing entry rather than being replaced by the incoming copy,
+// and it applies WATCHLIST_MAX to the result so a large shared list cannot
+// push the device over the cap.
+//
+// A merge that adds nothing returns `existing` ITSELF, not an equal copy.
+// That is the common case now: the home address bar mirrors the list
+// (mirrorWatchlistParam), so every reload of home reads the device's own list
+// back as a link. useWatchlist's setter drops a same-reference result, so the
+// no-op costs no re-render and no localStorage write, and cannot feed the
+// effect's own dependency (the write loop sharedLinkPass describes).
+export function mergeSharedWatchlist(existing, shared) {
+  const merged = normalizeWatchlist([...(existing || []), ...(shared || [])]);
+  const unchanged = Array.isArray(existing) && merged.length === existing.length
+    && merged.every((e, i) => entryKey(e) === entryKey(existing[i]));
+  return unchanged ? existing : merged;
+}
+
+// landedSharedKeys: which of a shared link's tokens actually ENDED UP in the
+// list, given what the device already watches.
+//
+// It exists because the merge above can drop entries in silence:
+// normalizeWatchlist caps at WATCHLIST_MAX and the existing entries are
+// concatenated first, so a reader already at the cap receives nothing from a
+// link. The list is right to refuse -- the cap is the cap -- but the CALLER's
+// ledger is not, and that is what this answers.
+//
+// viewer_home records a token as applied so that a healing roster can never
+// re-add an entry the reader has since pruned. Recording one that never
+// landed inverted that protection into data loss: nothing was added, the
+// ledger said it had been, and settling then took ?w= out of the address
+// bar, the only copy of the link, so pruning to make room and reloading
+// brought back nothing. A token that did not land is therefore NOT applied,
+// and the caller keeps the query until it is.
+//
+// `entries` and `keys` are the index-aligned pair resolveFreshTokens returns
+// (it pushes to both in the same step); that alignment is stated there.
+export function landedSharedKeys(existing, entries, keys) {
+  const present = new Set(mergeSharedWatchlist(existing, entries).map(entryKey));
+  const landed = [];
+  (entries || []).forEach((e, i) => {
+    const key = (keys || [])[i];
+    if (key && present.has(entryKey(e))) landed.push(key);
+  });
+  return landed;
+}
+
+// sharedLinkPass: ONE pass of applying a ?w= permalink to the device's list,
+// as a decision rather than an action. The effect in viewer_home.jsx calls it
+// and then does exactly what it says: record `landed`, merge `entries` if
+// `write`, and once `settle`, hand the address bar over to the list. Every
+// rule about the pass lives here, where a unit test can run it, and none in
+// the effect, where nothing can.
+//
+// It exists because of a loop. The effect used to write whenever a token
+// RESOLVED and settle only once every token had LANDED -- two different
+// conditions, and the gap between them is WATCHLIST_MAX. A reader already at
+// the cap opened a link: the token resolved, the merge dropped it, nothing
+// was recorded, the write still ran, and mergeSharedWatchlist returns a fresh
+// array every time, so the state changed by reference, the effect re-fired on
+// its own dependency, and round again -- measured at ~60 localStorage writes
+// a second, indefinitely, for exactly the reader the at-cap retry was written
+// for. `write` is now the same condition the ledger records on: something
+// landed. A pass that writes always records, so each pass leaves strictly
+// fewer unrecorded tokens than the last, and the sequence reaches a pass that
+// writes nothing. That is pinned as a fixpoint test, not asserted in prose.
+//
+// `settle` is the two-clause rule the effect used to spell inline: nothing a
+// later pass could still answer, meaning no token resolved-but-unlanded (the
+// list is full; the reader prunes and the query must survive to retry) and no
+// token unresolved while a roster may still arrive.
+export function sharedLinkPass({ search, roster, watchlist, applied, rosterLoaded }) {
+  const tokens = parseWatchlistTokens(search);
+  const { entries, keys, outstanding } = resolveFreshTokens(tokens, roster, applied);
+  const landed = landedSharedKeys(watchlist, entries, keys);
+  const unlanded = keys.length - landed.length;
+  return {
+    entries,
+    landed,
+    write: landed.length > 0,
+    settle: unlanded === 0 && (rosterLoaded || outstanding === 0),
+  };
+}
+
+// The ledger of ?w= tokens that LANDED (sharedApplied in viewer_home.jsx)
+// used to live for one mount, while the list it protects lives in
+// localStorage and outlives it. sharedLinkPass keeps the query while a token
+// is still outstanding -- the list is full, or a competition's roster failed
+// to read -- and across a RELOAD in that state a fresh mount, with an empty
+// ledger, re-applied every token the previous mount had landed: a reader who
+// had pruned one of them got it back. That is the resurrection mirroring
+// the list into the address bar prevents, reopened for exactly the held case.
+//
+// sessionStorage carries the ledger across the reload: same tab, same link.
+// It is keyed on the raw `w` value, so a DIFFERENT link starts a fresh
+// ledger; a new tab is a fresh open (sessionStorage is per tab); and
+// settling clears it, so re-opening the same link later still adds. The three
+// helpers take the storage as a parameter so a unit test can hand them a
+// fake, and sessionStore() is the one place the real one is reached -- the
+// property access itself can throw where storage is blocked, and a link that
+// cannot remember what it landed still lands it (the in-memory ledger
+// protects the mount; only the reload protection is lost).
+export const SS_SHARED_LEDGER = "bc_watch_shared_ledger";
+
+const sharedLinkValue = (search) => new URLSearchParams(search || "").get(WATCHLIST_PARAM) || "";
+
+export function sessionStore() {
+  try {
+    return typeof window === "undefined" ? null : window.sessionStorage;
+  } catch (_e) {
+    return null; // storage blocked (private mode, cookies off): no reload protection
+  }
+}
+
+export function readSharedLedger(storage, search) {
+  const w = sharedLinkValue(search);
+  if (!w || !storage) return new Set();
+  try {
+    const parsed = JSON.parse(storage.getItem(SS_SHARED_LEDGER) || "null");
+    if (!parsed || parsed.w !== w || !Array.isArray(parsed.keys)) return new Set();
+    return new Set(parsed.keys.filter((k) => typeof k === "string"));
+  } catch (_e) {
+    return new Set(); // malformed or unreadable: start a fresh ledger
+  }
+}
+
+export function writeSharedLedger(storage, search, keys) {
+  const w = sharedLinkValue(search);
+  if (!w || !storage) return;
+  try {
+    storage.setItem(SS_SHARED_LEDGER, JSON.stringify({ w, keys: Array.from(keys) }));
+  } catch (_e) { /* quota or blocked: the in-memory ledger still protects this mount */ }
+}
+
+export function clearSharedLedger(storage) {
+  if (!storage) return;
+  try {
+    storage.removeItem(SS_SHARED_LEDGER);
+  } catch (_e) { /* nothing to clear */ }
 }
 
 // migrateWatchlistOnLoad: fold the legacy single "followed player"
@@ -289,7 +443,7 @@ export function effectivePrimaryKey(watchlist, pinnedKey) {
 //
 // So: the card falls back to the first entry, the alert does not. Callers that
 // mean "who gets the chime" keep using findPrimaryEntry.
-// hasMatch is optional and, when given, decides the UNPINNED fallback: the
+// matchFor is optional and, when given, decides the UNPINNED fallback: the
 // first entry that can actually fill the card, rather than the first ADDED.
 // Without it the fallback reproduced the very bug this function exists to fix,
 // by list order instead of by pin -- a coach who added a training partner
@@ -297,13 +451,30 @@ export function effectivePrimaryKey(watchlist, pinnedKey) {
 // moment the partner finished, while their own bout was minutes away and had
 // no card. A PIN still wins even when it yields nothing: it is an explicit
 // choice, and silently showing someone else would be the worse surprise.
-export function heroEntry(watchlist, pinnedKey, hasMatch) {
+//
+// It returns the MATCH, not a boolean, and the two tiers below are why. Once
+// the card began falling back to a finished bout (buildPrimaryLastResult), a
+// boolean "can this entry fill the card" went true for anyone with a RESULT,
+// which is almost everyone by mid-afternoon -- so the fallback collapsed back
+// to the first-added entry and re-opened the bug above in a quieter form: the
+// partner's finished bout on the card while the reader's own is minutes away.
+// A match still to fight therefore outranks a result, and a result outranks an
+// entry with nothing at all. One pass: matchFor is asked once per entry, the
+// first entry still to fight returns on the spot, and the first with any
+// match at all is remembered in case nobody is.
+export function heroEntry(watchlist, pinnedKey, matchFor) {
   const pinned = findPrimaryEntry(watchlist, pinnedKey);
   if (pinned) return pinned;
   const list = normalizeWatchlist(watchlist);
-  if (typeof hasMatch === "function") {
-    const live = list.find((e) => hasMatch(e));
-    if (live) return live;
+  if (typeof matchFor === "function") {
+    let finished = null;
+    for (const e of list) {
+      const m = matchFor(e);
+      if (!m) continue;
+      if (m.status !== "completed") return e;
+      if (!finished) finished = e;
+    }
+    if (finished) return finished;
   }
   return list[0] || null;
 }
@@ -315,35 +486,87 @@ export function findPrimaryEntry(watchlist, pinnedKey) {
   return normalizeWatchlist(watchlist).find((e) => entryKey(e) === key) || null;
 }
 
+// matchesInvolving: the matches `keep` accepts that the primary entry is a
+// side of (a player → just them; a dojo → any current member). The two
+// builders below differ only in which matches they keep and how they order
+// what is left, so the id resolution -- and the bc-pnum rule it carries --
+// is answered here once.
+//
+// bc-pnum (HIGH regression fix): the primary
+// entry always carries a real id (resolveEntryPlayerIds only ever returns
+// roster-backed ids), so a match side with NO id is a MIXED pair and must
+// never be guessed at by name -- sameCompetitor's rule. A removed name
+// fallback used to activate whenever this id pass found nothing, matching
+// ANY pending match whose side's name happened to equal a current
+// member's roster name (or, for a player entry, the follower's own
+// name), regardless of whether that side carried an id. On a legacy/
+// id-less roster this could name the follower as their own opponent
+// ("Alice ... vs Opponent: Alice", reported live) or surface a dojo-mate's
+// unrelated match. Removed outright: a roster whose matches predate id
+// persistence now shows no hero card rather than a wrong one.
+function matchesInvolving(primaryEntry, roster, allMatches, keep) {
+  if (!primaryEntry) return [];
+  const ids = new Set(resolveEntryPlayerIds(primaryEntry, roster));
+  if (ids.size === 0) return [];
+  const index = indexFor(allMatches);
+  // A dojo entry whose two members meet each other lists that match under
+  // both ids; the Set folds it back to one, in the list's own order.
+  const seen = new Set();
+  ids.forEach((id) => (index.get(id) || []).forEach((m) => seen.add(m)));
+  return (Array.isArray(allMatches) ? allMatches : []).filter((m) => seen.has(m) && keep(m));
+}
+
+// matchesByParticipantId: every match a participant id appears on, keyed by
+// that id. A side with no id is not indexed: an id-less side is a MIXED pair
+// under sameCompetitor's rule and must never be reached by name.
+export function matchesByParticipantId(allMatches) {
+  const index = new Map();
+  (Array.isArray(allMatches) ? allMatches : []).forEach((m) => {
+    if (!m) return;
+    matchParticipantIds(m).forEach((id) => {
+      if (!id) return;
+      if (!index.has(id)) index.set(id, []);
+      index.get(id).push(m);
+    });
+  });
+  return index;
+}
+
+// One index per match ARRAY, not per call. The home page asks the two
+// builders above for up to WATCHLIST_MAX entries on every SSE refresh, each
+// against the same `bothSidesMatches` array, so a filter per call walked the
+// whole schedule fifty times per tick. A WeakMap keyed on the array itself
+// builds the index once per array identity and lets it go with the array;
+// callers keep passing plain arrays (viewer_competition.jsx, the suite) and
+// never see it.
+const INDEX_BY_LIST = new WeakMap();
+function indexFor(allMatches) {
+  if (!Array.isArray(allMatches)) return new Map();
+  let index = INDEX_BY_LIST.get(allMatches);
+  if (!index) {
+    index = matchesByParticipantId(allMatches);
+    INDEX_BY_LIST.set(allMatches, index);
+  }
+  return index;
+}
+
 // buildPrimaryNextMatch: the hero match for the primary entry: the nearest
-// non-completed match involving the primary (a player → just them; a dojo →
-// any current member), ordered running-first then by scheduledAt so the hero
-// surfaces a live match before a merely-scheduled one. Callers pass match
+// match STILL TO FIGHT, ordered running-first then by scheduledAt so the hero
+// surfaces a running match before a merely-scheduled one. Callers pass match
 // lists already filtered through hasBothSides (as the home page does): this
 // helper stays free of the window.hasBothSides proxy so it is unit-testable
 // in isolation.
+//
+// It answers exactly that question and never falls back to a finished match.
+// The last-result card the watchlist hero shows once a competitor is done
+// (operator ruling 2026-09-22) is buildPrimaryLastResult below, and the
+// surface that wants both composes them. Answering both HERE was tried and
+// leaked immediately: ViewerOverview's banner (viewer_competition.jsx) asks
+// this same function and prints the answer under a hard-coded "Your next
+// match" with a court and a time, so a bout already fought arrived there as a
+// fixture still to come.
 export function buildPrimaryNextMatch(primaryEntry, roster, allMatches) {
-  if (!primaryEntry) return null;
-  const ids = new Set(resolveEntryPlayerIds(primaryEntry, roster));
-  if (ids.size === 0) return null;
-  const list = Array.isArray(allMatches) ? allMatches : [];
-  const pending = list.filter((m) => m && m.status !== "completed");
-  // bc-pnum (HIGH regression fix): the primary
-  // entry always carries a real id (resolveEntryPlayerIds only ever returns
-  // roster-backed ids), so a match side with NO id is a MIXED pair and must
-  // never be guessed at by name -- sameCompetitor's rule. A removed name
-  // fallback used to activate whenever this id pass found nothing, matching
-  // ANY pending match whose side's name happened to equal a current
-  // member's roster name (or, for a player entry, the follower's own
-  // name), regardless of whether that side carried an id. On a legacy/
-  // id-less roster this could name the follower as their own opponent
-  // ("Alice ... vs Opponent: Alice", reported live) or surface a dojo-mate's
-  // unrelated match. Removed outright: a roster whose matches predate id
-  // persistence now shows no hero card rather than a wrong one.
-  const mine = pending.filter((m) => {
-    const [a, b] = matchParticipantIds(m);
-    return (a && ids.has(a)) || (b && ids.has(b));
-  });
+  const mine = matchesInvolving(primaryEntry, roster, allMatches, (m) => m.status !== "completed");
   mine.sort((a, b) => {
     const ao = a.status === "running" ? 0 : 1;
     const bo = b.status === "running" ? 0 : 1;
@@ -351,6 +574,23 @@ export function buildPrimaryNextMatch(primaryEntry, roster, allMatches) {
     return (a.scheduledAt || "99:99").localeCompare(b.scheduledAt || "99:99");
   });
   return mine[0] || null;
+}
+
+// buildPrimaryLastResult: the most recent RESULT involving the primary entry,
+// or null. The watchlist hero offers it when there is nothing left to fight
+// (operator ruling 2026-09-22): a competitor who is out, or who has finished
+// their day, is exactly who the reader still cares about, and the card used to
+// go to "No upcoming matches", which answers the wrong question. The watchlist
+// is how a reader follows a PERSON, not only a fixture.
+//
+// Recency is resultRecencyDesc's rule, not a re-sort by scheduled time: the
+// most recent RESULT is the last write, which is not the latest slot when a
+// court has run out of schedule order (result_recency.jsx owns this; the court
+// console and the public Recent results already ask it).
+export function buildPrimaryLastResult(primaryEntry, roster, allMatches) {
+  const done = matchesInvolving(primaryEntry, roster, allMatches, (m) => m.status === "completed");
+  done.sort(resultRecencyDesc);
+  return done[0] || null;
 }
 
 // Did every competition's roster LOAD? buildRoster cannot say: a competition
@@ -384,9 +624,36 @@ export function buildRoster(competitions) {
       const checkedIn = !!c.checkInEnabled && !!p.checkedIn;
       const existing = map.get(p.id);
       if (!existing) {
-        map.set(p.id, { ...p, checkedIn });
-      } else if (checkedIn && !existing.checkedIn) {
-        map.set(p.id, { ...existing, checkedIn: true });
+        // `comps` is the competition names this record covers, for the
+        // schedule picker's row. It lives here rather than in that picker
+        // because it used to run its OWN near-identical dedup to collect it
+        // -- same shape, but with no `!p || !p.id` guard, so every id-less
+        // player collapsed into one entry keyed on `undefined`.
+        // `numberPrefix` rides with the number it was minted under: the
+        // number rule's "prefix alone selects the draw" arm reads it through
+        // prefixOf (competitor_identity.jsx), because "K021" alone cannot say
+        // whether its prefix is K or K02.
+        map.set(p.id, { ...p, checkedIn, comps: [c.name || ""], numberPrefix: c.numberPrefix || "" });
+      } else {
+        // Reached only if the SAME participant id appears under two
+        // competitions. Participant ids are minted per competition (a fresh
+        // uuid in state.AddParticipant, `${compID}-pN` in the admin client),
+        // so one person entered in two competitions holds two DIFFERENT ids
+        // and arrives here as two separate records, each with its own number
+        // -- which is why both of their numbers are independently searchable
+        // without anything merging them.
+        //
+        // So this branch is effectively unreachable. It is kept because the
+        // `checkedIn` merge predates bc-nsrc and removing a guard needs better
+        // evidence than "I could not reach it"; `comps` accumulates with it so
+        // the two cannot diverge if it ever does run. A fresh record, not a
+        // mutation: the `...p` above already gave the map its own object, and
+        // an in-place push would reach into it after it was stored.
+        map.set(p.id, {
+          ...existing,
+          comps: [...existing.comps, c.name || ""],
+          checkedIn: existing.checkedIn || checkedIn,
+        });
       }
     });
   });

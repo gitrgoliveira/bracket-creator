@@ -17,14 +17,22 @@
 // populated `window`. Only React (a vendor global) and pluralize (from ui.js,
 // loaded before this file) are read at module-eval time.
 //
-// numbered_name.jsx and side_cell.jsx are the two ES imports here, and both are
-// safe where a window read would be pointless: each is a LEAF (no imports of
-// its own, so no cycle to break) and neither is script-tagged, so these imports
-// and every other module's resolve to the same /dist/<name>.jsx URL and the
-// browser evaluates each once. Neither is on `window` at all, so there is
-// nothing to read.
+// numbered_name.jsx, side_cell.jsx, competitor_search.jsx and
+// watchlist_link.jsx are the ES imports here, and all are safe where a window
+// read would be pointless: none is script-tagged, so these imports and every
+// other module's resolve to the same /dist/<name>.jsx URL and the browser
+// evaluates each once. None is on `window` at all, so there is nothing to
+// read.
+//
+// watchlist_link.jsx is the one that is not a bare leaf: it imports
+// competitor_identity.jsx, which has no imports of its own. That is still
+// safe, because the leaf wording above is a sufficient condition and not the
+// real one -- what matters is that the chain is ACYCLIC and no module in it is
+// script-tagged, so none of it can be evaluated twice or mid-cycle.
 import { NumberedName } from './numbered_name.jsx';
 import { sideWord, sideFillClass } from './side_cell.jsx';
+import { competitorMatchesQuery } from './competitor_search.jsx';
+import { buildWatchlistLink } from './watchlist_link.jsx';
 
 // The one line the picker and the hero-empty state show while a competition's
 // participants failed to load (rosterAvailable:false on the aggregate, see
@@ -74,25 +82,15 @@ function WatchPicker({ roster, rosterLoaded = true, dojos, watchedPlayerIds, wat
   // useCallback, not plain functions: the three memos below depend on them, and
   // the dependency they really have is on `q` THROUGH them, which the
   // exhaustive-deps rule cannot see past a fresh closure.
-  const playerMatchesQuery = useCallback(
-    (p) =>
-      !q ||
-      (p.name || "").toLowerCase().includes(q) ||
-      (p.dojo || "").toLowerCase().includes(q) ||
-      // The competitor NUMBER, matched from the START (operator request
-      // 2026-09-21). Prefix, not substring, because the number already embeds
-      // the competition's numberPrefix ("M1", "K12"): typing "M" is then
-      // "everyone in the men's draw", which is the useful filter, while a
-      // substring match on "1" would drag in every K12 and M21 as well.
-      //
-      // Nothing to match before the draw: competitor numbers belong to draw
-      // POSITIONS and none is shown until the draw is generated (bc-pnum), so
-      // p.number is empty and this arm is simply false. That is why the row
-      // renders the number too -- matching on something the reader cannot see
-      // is worse than not matching at all.
-      String(p.number || "").toLowerCase().startsWith(q),
-    [q]
-  );
+  // The rule itself lives in competitor_search.jsx, which the public schedule
+  // picker and that page's free-text chip ask too -- this surface states it
+  // zero times (bc-nsrc). Worth keeping in mind here: there is nothing to
+  // match on before the draw, because competitor numbers belong to draw
+  // POSITIONS and none exists until the draw is generated (bc-pnum), so the
+  // number arm is simply false then. That is why the row renders the number
+  // too -- matching on something the reader cannot see is worse than not
+  // matching at all.
+  const playerMatchesQuery = useCallback((p) => competitorMatchesQuery(p, q), [q]);
   const dojoMatchesQuery = useCallback((d) => !q || (d.name || "").toLowerCase().includes(q), [q]);
 
   // Dojo matches: a dojo is offered until it is watched as a dojo entry. The
@@ -221,7 +219,7 @@ function WatchPicker({ roster, rosterLoaded = true, dojos, watchedPlayerIds, wat
 // member currently competing (primaryIds covers all members).
 function WatchHeroCard({ nextMatch, primaryIds, entityLabel, onMatchClick }) {
   // Cross-boundary helpers from viewer.jsx, read at render time (see header).
-  const { matchParticipantIds, poolLabel, mymatchQueueLabel, TermV } = window;
+  const { matchParticipantIds, poolLabel, mymatchQueueLabel, matchScoreStr, TermV } = window;
   if (!nextMatch) return null;
   const ids = primaryIds || new Set();
   const [aId, bId] = matchParticipantIds(nextMatch);
@@ -252,8 +250,27 @@ function WatchHeroCard({ nextMatch, primaryIds, entityLabel, onMatchClick }) {
   // 86px each, which wrapped "Shiaijo A" onto two lines with the court LETTER
   // orphaned and "11 before yours" onto three. The surface is phone-first and
   // must never truncate or wrap into rubble (operator ruling 2026-09-20).
-  const whenLine = [running ? "Now" : (nextMatch.scheduledAt || "Time TBA"), queueLabel]
-    .filter(Boolean).join(" · ");
+  // A FINISHED match says so. This card falls back to the last result when a
+  // watched competitor has nothing left to fight (operator ruling 2026-09-22),
+  // and without this it would print that match's scheduled time -- reading
+  // exactly like a fixture still to come. The queue label is dropped with it:
+  // "3 before yours" is meaningless once the bout is over, and so is this
+  // whole line, because the headline below carries the result instead. The div
+  // still renders (empty): it is the live region, and removing it is how the
+  // "your match has started" announcement was lost once already.
+  const finished = nextMatch.status === "completed";
+  const whenLine = finished
+    ? ""
+    : [running ? "Now" : (nextMatch.scheduledAt || "Time TBA"), queueLabel].filter(Boolean).join(" · ");
+  // The score through matchScoreStr, the ONE owner every other completed row
+  // in the app reads (VSchedItem, the admin schedule, the pool rows), so this
+  // card cannot invent a second spelling of a result. It reads Shiro-left /
+  // Aka-right like every one of them, which is why the tinted rows below keep
+  // naming their side in words -- they are ordered subject-first, not
+  // Shiro-first, and the word is what maps one onto the other. It returns ""
+  // when nothing was recorded (a completed match carrying no marks at all),
+  // and the card says "Finished" in that one case rather than sit empty.
+  const scoreStr = finished ? matchScoreStr(nextMatch) || "Finished" : "";
   // For a dojo primary, name the dojo above the competing member so the
   // relationship is clear ("Hagane Dojo" → "Aoi" is up).
   const showDojoEyebrow = entityLabel && entityLabel !== subjectName;
@@ -326,14 +343,29 @@ function WatchHeroCard({ nextMatch, primaryIds, entityLabel, onMatchClick }) {
             not hold. Naming the dojo alone matches what the running arm always
             did. */}
         <div className="wl-hero__lbl">
-          {showDojoEyebrow ? entityLabel : (running ? "Your match" : "Your next match")}
+          {showDojoEyebrow ? entityLabel : (finished ? "Your last match" : running ? "Your match" : "Your next match")}
         </div>
         {/* The INSTRUCTION is the headline: where to walk. The watched person's
             own name is the one fact they already know, so it moves down to its
             tinted row. nowrap on the letter: it is the single token that tells
-            a competitor where to go and it used to wrap onto its own line. */}
+            a competitor where to go and it used to wrap onto its own line.
+
+            A finished bout has no instruction to give, so the slot carries the
+            RESULT instead. Leaving the court here told the reader to walk to a
+            shiaijo where nothing of theirs will happen, and an unassigned one
+            promised "Court to be announced" about a match that will never be
+            called again. The score is what the reader came for -- the docs
+            page says this card shows "how they finished" -- and it is set in
+            its own smaller, wrappable type, because a score string is several
+            tokens long and the 34px nowrap letter beside it is sized for
+            exactly one. */}
         <div className="wl-hero__where">
-          {nextMatch.court ? (
+          {finished ? (
+            <>
+              <span className="wl-hero__where-l">Result</span>
+              <span className="wl-hero__score">{scoreStr}</span>
+            </>
+          ) : nextMatch.court ? (
             <>
               <span className="wl-hero__where-l"><TermV name="shiaijo">Shiaijo</TermV></span>
               <span className="wl-hero__where-v">{nextMatch.court}</span>
@@ -372,6 +404,73 @@ function WatchHeroCard({ nextMatch, primaryIds, entityLabel, onMatchClick }) {
   );
 }
 
+// WatchlistShareModal: the watchlist as a link someone else can open
+// (bc-wlpl). The list otherwise lives only in localStorage, so it does not
+// survive a second phone, another browser profile or a cleared cache.
+//
+// The SHEET is ui.jsx's ShareLinkModal, shared with the admin's registration
+// link; this component supplies only what the two genuinely differ on. It was
+// briefly a second copy of that sheet, which is the duplication this repo
+// keeps paying for, so it was folded back.
+//
+// Whether the link is short enough to be a QR is NOT decided here: qr.js owns
+// that, and ShareLinkModal asks it. A watchlist still carrying ids (nobody has
+// a number until the draw runs) can exceed what a QR holds, but that is a fact
+// about the encoder rather than about this surface.
+//
+// ShareLinkModal is read from `window` at RENDER time, which is this file's
+// convention for anything outside its leaf imports (see the header). ui.jsx is
+// script-tagged ahead of this module, exactly as the /display overlay consumes
+// renderQR.
+function WatchlistShareModal({ base, watchlist, roster, onClose }) {
+  // "" / "ok" / "fail", not a boolean. `onCopy={setCopied}` looked complete
+  // and could not say FAILED: ShareLinkModal calls onCopy(false) when the
+  // clipboard refuses, which put the state back to its untouched value and the
+  // sheet said nothing at all. That is precisely the venue case this app is
+  // built for -- plain http on a LAN, where navigator.clipboard does not exist
+  // and execCommand can still be refused -- so the one action on the sheet
+  // failed in silence. The admin sheet already toasts it; this one has no
+  // toast, so it says the same thing in place.
+  const [copyState, setCopyState] = useState("");
+  // Built HERE rather than by the panel, so it is built only when the sheet is
+  // actually opened. As a panel-level memo it was rebuilt on every tournament
+  // refresh -- which on the viewer home means every SSE score write in the
+  // venue -- walking the whole roster to produce a string nobody was reading.
+  // Memoised on its inputs so the copy-state re-renders below do not walk the
+  // roster again for the same string.
+  const url = useMemo(() => buildWatchlistLink(base, watchlist, roster), [base, watchlist, roster]);
+  const ShareLinkModal = window.ShareLinkModal;
+
+  return (
+    <ShareLinkModal
+      title="Share your watchlist"
+      url={url}
+      onClose={onClose}
+      onCopy={(ok) => setCopyState(ok ? "ok" : "fail")}
+    >
+      {/* A PERSISTENT line, not a toast: a toast dwells for under three
+          seconds, which is long enough to miss, and this one answers "did that
+          work?" about an action with no other visible effect. */}
+      {copyState === "ok" && <p className="share-link__note share-link__note--ok" role="status">Copied.</p>}
+      {copyState === "fail" && (
+        <p className="share-link__note share-link__note--err" role="status">
+          Copy failed; select the link above manually.
+        </p>
+      )}
+      <p className="share-link__note">
+        Opening this link ADDS these competitors to someone's watchlist. It does not replace what they already watch.
+      </p>
+      {/* Stated because it is the cost of the short, scannable form the
+          operator chose (bc-wlpl): a competitor is identified by their number
+          where they have one, and a number belongs to a DRAW POSITION, so
+          regenerating a draw re-points it. */}
+      <p className="share-link__note">
+        Share it on the day. Competitor numbers come from the draw, so a link made before a draw is regenerated can point at someone else afterwards.
+      </p>
+    </ShareLinkModal>
+  );
+}
+
 // WatchlistPanel: the unified personalisation panel (mp-xhaa). One card that
 // absorbs the former "Find my matches" hero and the multi-player watchlist:
 //   - chip list of watched entities (players + whole dojos), each removable,
@@ -385,7 +484,7 @@ function WatchHeroCard({ nextMatch, primaryIds, entityLabel, onMatchClick }) {
 // first-added entry, because a card is not a chime and hiding it cost the
 // reader the one thing they opened the page for. Everything visual below reads
 // heroEntry; only the pin hint reads primaryEntry.
-function WatchlistPanel({ roster, rosterLoaded = true, watchlist, setWatchlist, primaryKey, setPrimaryKey, primaryEntry, heroEntry, heroNextMatch, upcoming, onMatchClick, chimeMuted, onBellToggle, onFirstAdd }) {
+function WatchlistPanel({ tournament, roster, rosterLoaded = true, watchlist, setWatchlist, primaryKey, setPrimaryKey, primaryEntry, heroEntry, heroNextMatch, upcoming, onMatchClick, chimeMuted, onBellToggle, onFirstAdd }) {
   // Cross-boundary helpers from viewer.jsx, read at render time (see header).
   const { effectivePrimaryKey, addPlayerToWatchlist, entryKey, resolveEntryPlayerIds, VSchedItem, WATCHLIST_MAX } = window;
   const rosterById = useMemo(() => new Map(roster.map((p) => [p.id, p])), [roster]);
@@ -547,6 +646,22 @@ function WatchlistPanel({ roster, rosterLoaded = true, watchlist, setWatchlist, 
     ? upcoming.filter((m) => !(m.compId === heroNextMatch.compId && m.id === heroNextMatch.id))
     : upcoming;
 
+  const [shareOpen, setShareOpen] = useState(false);
+  // linkBase is the ONE builder of an externally-shareable base (viewer_utils
+  // .jsx), and it is what makes this link work off the venue LAN: it returns
+  // the operator's configured publicURL when there is one, and guards the
+  // opaque-origin case where location.origin is the literal string "null".
+  // Hand-rolling `location.origin` here meant a watchlist shared from a phone
+  // encoded http://192.168.x.x:8080 even when the operator had set a public
+  // URL -- the same mistake the admin registration sheet avoids by calling
+  // this.
+  //
+  // BUILT, never read off the address bar, even though home's bar now carries
+  // the same `w` (mirrorWatchlistParam): the bar holds the origin the reader
+  // typed, and on the venue LAN that is the private address linkBase exists
+  // to replace. Same list, different origin.
+  const shareBase = `${(window.linkBase || (() => window.location.origin))(tournament)}/`;
+
   return (
     <div className="card card--sm mymatch-card" data-testid="viewer-home-watchlist">
       <div className="watchlist-card-head">
@@ -562,6 +677,19 @@ function WatchlistPanel({ roster, rosterLoaded = true, watchlist, setWatchlist, 
           >
             <BellIcon muted={chimeMuted} />
           </button>
+        )}
+        {/* AFTER the bell, which carries the head's `margin-left: auto`: the
+            bell absorbs the free space and this follows it, so the two group
+            at the right. Placed BEFORE the bell it rendered hard against the
+            count with a 127px void between the two controls (measured at
+            390px), which read as a layout accident rather than a choice. */}
+        {count > 0 && (
+          <button type="button"
+            className="watchlist-share-btn"
+            onClick={() => setShareOpen(true)}
+            aria-label="Share your watchlist"
+            title="Share your watchlist"
+          >Share</button>
         )}
       </div>
 
@@ -667,6 +795,10 @@ function WatchlistPanel({ roster, rosterLoaded = true, watchlist, setWatchlist, 
           ))}
         </div>
       )}
+
+      {shareOpen && (
+        <WatchlistShareModal base={shareBase} watchlist={watchlist} roster={roster} onClose={() => setShareOpen(false)} />
+      )}
     </div>
   );
 }
@@ -678,4 +810,4 @@ function WatchlistPanel({ roster, rosterLoaded = true, watchlist, setWatchlist, 
 window.WatchlistPanel = WatchlistPanel;
 
 // ES exports for the vitest suite, which imports these directly.
-export { WatchPicker, WatchHeroCard, WatchlistPanel };
+export { WatchPicker, WatchHeroCard, WatchlistPanel, WatchlistShareModal };

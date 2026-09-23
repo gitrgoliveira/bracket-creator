@@ -521,6 +521,71 @@ function ShiaijoCountNotes({ error, hint }) {
   );
 }
 
+// ShareLinkModal: the ONE "here is a link, take it" sheet. A QR, the URL as
+// selectable text, whatever the caller wants to say about it, and Copy/Close.
+//
+// Two surfaces share it and must not drift apart: the admin's registration
+// link and the public watchlist permalink (bc-wlpl). The watchlist one started
+// life as a second, near-identical copy -- same Modal, same canvas, same URL
+// block, same footer -- which is exactly the duplication this repo keeps
+// paying for, so it was folded back into this.
+//
+// What the two genuinely differ on is passed in, not forked: the title, the
+// prose under the URL (`children`), and what happens after a copy (`onCopy`,
+// so the admin can raise its toast and the watchlist can show a persistent
+// line).
+//
+// Whether a QR is possible is NOT one of those: this asks qr.js directly. A
+// long link cannot be encoded, and that is a fact about the encoder rather
+// than about which surface is sharing, so neither caller has to know a QR has
+// a limit. It also fixes the admin sheet, which used to render-and-catch and
+// showed an empty canvas for an over-long registration URL.
+//
+// window.renderQR / window.qrFits rather than imports: ui.jsx is script-tagged
+// BEFORE qr.js (index.html lines 116 and 128), so the globals do not exist at
+// module-eval time here. Reading them at render defers that to a point where
+// every module script has run.
+//
+// `children` may be a node or a function of showQR. The registration sheet's
+// note says "scan this QR code", which is a lie on the very sheet that drops
+// the QR for an over-long URL; the function form lets a caller word its note
+// for the case actually rendered without measuring the URL a second time.
+function ShareLinkModal({ title, url, onClose, onCopy, children }) {
+  const canvasRef = React.useRef(null);
+  const showQR = React.useMemo(() => window.qrFits(url), [url]);
+
+  React.useEffect(() => {
+    // No `window.renderQR` check: index.html script-tags ui.jsx (116) and
+    // qr.js (128) ahead of app.js (183), and module scripts execute in order,
+    // so the global is published before anything renders. The canvas check is
+    // inherited from the admin sheet this replaced and stays.
+    if (!showQR || !canvasRef.current) return;
+    try {
+      window.renderQR(canvasRef.current, url, { moduleSize: 6, quietZone: 4 });
+    } catch (e) {
+      // A canvas that will not give a 2d context. The link itself is the
+      // deliverable and still renders below, so this must not take the sheet
+      // down with it.
+      console.error("QR render failed", e);
+    }
+  }, [url, showQR]);
+
+  return (
+    <Modal title={title} onClose={onClose} footer={<>
+      <button type="button" className="btn btn--primary" onClick={() => {
+        copyToClipboard(url).then(() => onCopy && onCopy(true)).catch(() => onCopy && onCopy(false));
+      }}>Copy link</button>
+      <button type="button" className="btn" onClick={onClose}>Close</button>
+    </>}>
+      <div className="share-link">
+        {showQR && <canvas ref={canvasRef} className="share-link__qr" />}
+        <div className="share-link__url" data-testid="share-link-url">{url}</div>
+        {typeof children === "function" ? children(showQR) : children}
+      </div>
+    </Modal>
+  );
+}
+
 function Modal({ title, onClose, children, footer, size, dismissable = true, className, style, ariaLabel }) {
   useEscapeToClose(dismissable ? onClose : undefined);
   return (
@@ -618,6 +683,35 @@ function isInteractiveTarget(el) {
 
 export { FieldError, StatusBadge, formatDate, Toast, StableInput, pluralize, useEscapeToClose, useClickOutside, isTextEntry, isInteractiveTarget, formatAdminHeaderSub, formatViewerHeaderEyebrow, confirmDialog, promptDialog, DialogHost, Icon, LoadingSpinner, EmptyState, ShiaijoCountNotes, Modal };
 
+// copyToClipboard: the clipboard half of ShareLinkModal above, the one sheet
+// that copies anything. It lived in admin_shell.jsx until the watchlist
+// needed the same sheet, and a public surface must not import the admin
+// shell. Deliberately NOT mirrored on window: a global with no reader is an
+// invitation to copy a link without the sheet, which is the duplication this
+// module just finished absorbing.
+//
+// The execCommand path is NOT dead legacy code: navigator.clipboard is only
+// available in a secure context, and this app is routinely served over plain
+// http on a venue LAN, which is exactly where someone wants to hand a link to
+// the person next to them.
+async function copyToClipboard(text) {
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    return navigator.clipboard.writeText(text);
+  }
+  const ta = document.createElement('textarea');
+  ta.value = text;
+  ta.style.position = 'fixed';
+  ta.style.opacity = '0';
+  document.body.appendChild(ta);
+  ta.select();
+  try {
+    const ok = document.execCommand('copy');
+    if (!ok) throw new Error('execCommand copy failed');
+  } finally {
+    document.body.removeChild(ta);
+  }
+}
+
 if (typeof window !== "undefined") {
   window.StatusBadge = StatusBadge;
   window.formatDate = formatDate;
@@ -641,6 +735,7 @@ if (typeof window !== "undefined") {
   window.FieldError = FieldError;
   window.ShiaijoCountNotes = ShiaijoCountNotes;
   window.Modal = Modal;
+  window.ShareLinkModal = ShareLinkModal;
 
   // Split a combined engi pair name ("Name 1 - Name 2") into [member1, member2].
   // member2 is "" when the name carries no pair separator. Splits on the FIRST

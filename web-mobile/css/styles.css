@@ -671,7 +671,8 @@ a:hover {
 .court-popover button:focus-visible,
 .running-strip__chip:focus-visible,
 .radio-pill:focus-visible,
-.tsm-fouls__btn:focus-visible {
+.tsm-fouls__btn:focus-visible,
+.watchlist-share-btn:focus-visible {
   /* Visible 2px accent outline + the soft glow: --accent-soft alone is
      ~1.09:1 on white, effectively invisible to keyboard users (critique P3). */
   outline: 2px solid var(--accent);
@@ -2719,6 +2720,18 @@ button.sync-status-pill:focus-visible {
   color: var(--ink-1);
   /* The one token that says where to walk. It may never wrap. */
   white-space: nowrap;
+}
+
+/* The finished card's headline. Display type like the court letter beside it,
+   but smaller and WRAPPABLE: a score string is several tokens ("M Ht (E) K"),
+   where the court is one letter that may never break. Monospace-ish alignment
+   is not wanted here -- this is a headline, not a column. */
+.wl-hero__score {
+  font-family: var(--font-display);
+  font-size: 22px;
+  font-weight: 800;
+  line-height: 1.15;
+  color: var(--ink-1);
 }
 
 .wl-hero__when {
@@ -8786,6 +8799,74 @@ abbr.msb-lab { text-decoration: none; cursor: help; }
 }
 .watchlist-bell-btn--muted:hover { background: var(--line); color: var(--ink-2); }
 
+/* Share (bc-wlpl). Sits AFTER the bell in the DOM: the bell already carries
+   margin-left:auto, so it absorbs the free space and this button follows it,
+   grouping the two at the right. Do NOT give this one an auto margin as well
+   -- two auto margins split the free space between them, which is what left a
+   127px void between the controls when this button was rendered first. */
+.watchlist-share-btn {
+  display: inline-flex;
+  align-items: center;
+  /* 44px to match the bell beside it: the head is a row of touch targets and
+     a short one here would be the only control on the card you can miss. */
+  min-height: 44px;
+  padding: 0 12px;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  background: transparent;
+  color: var(--ink-2);
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: background 0.15s var(--ease-out), color 0.15s var(--ease-out);
+}
+.watchlist-share-btn:hover { background: var(--accent-soft); color: var(--accent); }
+/* Its focus ring is the shared .btn group's (see .btn:focus-visible above):
+   this is a pill, not a .btn, so it does not inherit that rule by class. */
+
+/* The shared "here is a link, take it" sheet (ui.jsx ShareLinkModal), used by
+   the admin registration link and the public watchlist permalink. These rules
+   replace the inline styles the admin sheet used to carry, so the two surfaces
+   cannot drift apart on spacing the way they drifted on markup. */
+.share-link {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 16px;
+}
+/* pixelated: the QR is drawn at one canvas pixel per module and scaled up, so
+   smoothing it would blur the module edges a camera needs to resolve. */
+.share-link__qr {
+  display: block;
+  image-rendering: pixelated;
+}
+.share-link__url {
+  width: 100%;
+  background: var(--surface-2);
+  border-radius: 6px;
+  padding: 8px 12px;
+  font-family: var(--font-mono, monospace);
+  font-size: 13px;
+  /* The URL is one unbroken token, so it must be allowed to break anywhere or
+     it overflows the sheet on a phone. user-select:all makes one tap select
+     the whole thing where the clipboard API is unavailable (plain http on a
+     venue LAN), which is the fallback the Copy button lands on. */
+  word-break: break-all;
+  user-select: all;
+}
+.share-link__note {
+  margin: 0;
+  font-size: 13px;
+  color: var(--ink-3);
+  text-align: center;
+}
+.share-link__note--ok { color: var(--accent); font-weight: 500; }
+/* The copy FAILED. --danger-ink rather than --danger: this is body text on the
+   sheet's white, where the ~7:1 red reads, and the note carries the failure in
+   words as well as colour (DESIGN.md: colour is never the only signal). */
+.share-link__note--err { color: var(--danger-ink); font-weight: 500; }
+
 /* vsched inside the watchlist card: flat row list, no nested card boxes.
    Regular items become hairline-separated rows; running items keep their
    accent ring since they carry meaningful live state. */
@@ -8952,30 +9033,6 @@ abbr.msb-lab { text-decoration: none; cursor: help; }
   border-radius: 50%;
   background: var(--red);
   flex-shrink: 0;
-}
-
-/* ---------- Pending deep-link follow confirmation banner ---------- */
-.pending-follow-banner {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  background: var(--accent-soft);
-  border: 1px solid color-mix(in oklch, var(--accent) 30%, transparent);
-  border-radius: var(--r-md);
-  padding: 8px 12px;
-  font-size: 12px;
-  margin-bottom: 12px;
-  flex-wrap: wrap;
-}
-.pending-follow-banner__label {
-  flex: 1;
-  min-width: 0;
-  color: var(--ink-2);
-  font-weight: 500;
-}
-.pending-follow-banner__name {
-  font-weight: 700;
-  color: var(--accent);
 }
 
 /* Vlist row with inline padding override */

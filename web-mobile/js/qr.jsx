@@ -93,22 +93,53 @@ function byteCapacity(v) {
   return Math.floor((totalDataCW(v) * 8 - 4 - charCountBits(v)) / 8);
 }
 
+// The largest version QR_BLOCKS_M carries, named once so selectVersion's loop
+// bound, its error message and QR_MAX_BYTES below cannot fall out of step.
+const QR_MAX_VERSION = 10;
+
+// The longest text renderQR can encode at all. DERIVED from the block table
+// above rather than written as a literal, so it stays true if that table
+// changes.
+const QR_MAX_BYTES = byteCapacity(QR_MAX_VERSION);
+
+// qrFits: can this text be a QR code at all? Asked by any surface that OFFERS
+// a QR, so it can decide before drawing rather than calling renderQR and
+// catching its throw.
+//
+// It answers rather than publishing the ceiling, because the ceiling alone is
+// the smaller half of the knowledge. Capacity is measured in ENCODED BYTES,
+// not characters, and a caller handed a bare number naturally writes
+// `url.length <= max` -- right for ASCII and wrong the moment a dojo name is
+// not. That convention belongs with the encoder that imposes it: this is the
+// same measure selectVersion is given below.
+export function qrFits(text) {
+  if (!text) return false;
+  return utf8Bytes(text).length <= QR_MAX_BYTES;
+}
+
+// utf8Bytes: the ONE measure of a payload. qrFits, the encoder and the
+// matrix builder all size the text through it, so "fits" and "encodes" can
+// never disagree about how long a string is.
+function utf8Bytes(text) {
+  return new TextEncoder().encode(text);
+}
+
 function selectVersion(byteLen) {
   // Start at version 2 (25×25). Version 1 (21×21) is intentionally excluded for
   // scan reliability: at 1px/module + 4-module quiet zone it renders to only 29×29 px,
   // below the minimum image size most phone cameras can reliably detect (~33×33 px).
   // This applies regardless of payload length.
-  for (let v = 2; v <= 10; v++) {
+  for (let v = 2; v <= QR_MAX_VERSION; v++) {
     if (byteCapacity(v) >= byteLen) return v;
   }
-  throw new Error(`Text too long for QR versions 2-10 (max ~${byteCapacity(10)} bytes)`);
+  throw new Error(`Text too long for QR versions 2-${QR_MAX_VERSION} (max ~${QR_MAX_BYTES} bytes)`);
 }
 
 // ---------------------------------------------------------------------------
 // Data encoding: byte mode
 // ---------------------------------------------------------------------------
 function encodeByte(text, version) {
-  const bytes = new TextEncoder().encode(text);
+  const bytes = utf8Bytes(text);
   const dataCW = totalDataCW(version);
   const totalBits = dataCW * 8;
 
@@ -418,7 +449,7 @@ function placeFormatInfo(mat, size, maskId) {
 // Build a complete QR matrix
 // ---------------------------------------------------------------------------
 function buildQR(text) {
-  const bytes = new TextEncoder().encode(text);
+  const bytes = utf8Bytes(text);
   const version = selectVersion(bytes.length);
   const size = matrixSize(version);
 
@@ -500,4 +531,8 @@ export function renderQR(canvas, text, { moduleSize = 6, quietZone = 4 } = {}) {
 // modules (e.g. window.TvDisplay / window.StreamingOverlay in display.jsx).
 if (typeof window !== "undefined") {
   window.renderQR = renderQR;
+  // Beside renderQR for the same reason: the surface that decides whether to
+  // OFFER a QR (ui.jsx's ShareLinkModal) reads this module from window rather
+  // than importing it.
+  window.qrFits = qrFits;
 }

@@ -286,6 +286,11 @@ async function main() {
     args: [...DETERMINISTIC_RENDERING, ...(asRoot ? ['--no-sandbox'] : [])],
   });
   try {
+    // Families run one at a time, by operator decision (2026-09-23): separate
+    // servers would allow running them in parallel, but the run-to-run noise
+    // the pixel tolerances in lib/png.mjs were set from was measured on this
+    // sequential loop, and a run that competes with itself for CPU renders
+    // under different timing.
     for (const [familyName, group] of groups) {
       const family = families[familyName];
       if (!family) throw new Error(`${group[0].name}: unknown family ${familyName}`);

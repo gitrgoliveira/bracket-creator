@@ -67,6 +67,22 @@ describe('the home address bar mirrors the watchlist', () => {
     expect(window.location.search).toBe('?w=K1');
   });
 
+  it('an in-app return to home mirrors onto home, never onto the page being left', async () => {
+    // Back from /results inside the app: ViewerHome's effects run before
+    // App's, so the address bar still reads /results when home first renders.
+    // App's state-to-URL effect then pushes "/" and router.jsx's route()
+    // dispatches popstate. `w` belongs on "/" alone.
+    seedList(ALICE);
+    window.history.replaceState(null, '', '/results');
+    await act(async () => { render(<ViewerHome tournament={BOTH} />); });
+    expect(window.location.pathname + window.location.search).toBe('/results');
+    await act(async () => {
+      window.history.pushState(null, '', '/');
+      window.dispatchEvent(new PopStateEvent('popstate'));
+    });
+    expect(window.location.pathname + window.location.search).toBe('/?w=K1');
+  });
+
   it('removing an entry rewrites the bar, so a reload does not bring it back', async () => {
     seedList(ALICE, BOB);
     await mount(BOTH, '');

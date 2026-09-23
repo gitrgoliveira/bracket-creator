@@ -63,11 +63,23 @@ export function shouldShowRegister(tournament, competition, hasHandler) {
     (!competition.status || competition.status === "setup"));
 }
 
+// The viewer home's path: app.jsx's pathFromState returns "/" for it.
+const VIEWER_HOME_PATH = "/";
+
 // mirrorWatchlistToAddressBar: keep the home screen's `w` equal to the list
 // (bc-wlpl). The rule is mirrorWatchlistParam's; this only carries it out.
 // replaceState adds no history entry, so an edit to the list never costs the
 // reader a Back press, and comparing first leaves an unchanged URL alone.
+//
+// Only while the address bar SHOWS home. Being mounted is not enough: on an
+// in-app return to home (Back from /results, a competition, the schedule),
+// ViewerHome's effects run before App's, because a child's effects run before
+// its parent's, and App's state-to-URL effect has not yet pushed "/". A write
+// then put `w` onto the page being left (/results?w=...), and App's push
+// dropped it from home. ViewerHome re-runs this once App's push announces
+// itself (router.jsx's route() dispatches popstate).
 function mirrorWatchlistToAddressBar(watchlist, roster) {
+  if (window.location.pathname !== VIEWER_HOME_PATH) return;
   const nextSearch = mirrorWatchlistParam(window.location.search, watchlist, roster);
   if (nextSearch !== window.location.search) {
     window.history.replaceState(null, "", window.location.pathname + nextSearch);
@@ -153,9 +165,18 @@ export function ViewerHome({ tournament, onSelectCompetition, onAdminClick, onOp
   // entry silently dropped (and the sessionStorage ledger, keyed on the raw
   // `w`, would no longer match on a reload).
   //
-  // Home only, by construction: app.jsx renders ViewerHome as the fallback of
-  // its screen conditional, so it is unmounted on every other screen and this
-  // never writes `w` onto a competition's path.
+  // Home only: mirrorWatchlistToAddressBar writes only while the address bar
+  // shows home's path, and `locationPath` (below) re-runs this effect when
+  // App's push to "/" lands, which on an in-app return to home is AFTER this
+  // effect's first run.
+  const [locationPath, setLocationPath] = useState(() =>
+    (typeof window === "undefined" ? "" : window.location.pathname));
+  useEffect(() => {
+    if (typeof window === "undefined") return undefined;
+    const onNavigate = () => setLocationPath(window.location.pathname);
+    window.addEventListener("popstate", onNavigate);
+    return () => window.removeEventListener("popstate", onNavigate);
+  }, []);
   const sharedSettled = useRefV(false);
   React.useEffect(() => {
     if (typeof window === "undefined" || !window.location) return;
@@ -204,7 +225,11 @@ export function ViewerHome({ tournament, onSelectCompetition, onAdminClick, onOp
     if (!pass.write) mirrorWatchlistToAddressBar(watchlist, roster);
     // The Set and the ref are listed rather than suppressed: neither identity
     // ever changes, so naming them is honest and costs no extra runs.
-  }, [roster, watchlist, rosterLoaded, setWatchlist, sharedApplied, sharedSettled]);
+    // `locationPath` is read by nothing here; it is listed so that App's push
+    // to home re-runs the mirror (see mirrorWatchlistToAddressBar) by name.
+    // Today it would re-run anyway, because useWatchlist hands back a new
+    // setter every render, but that is an accident this must not rest on.
+  }, [roster, watchlist, rosterLoaded, setWatchlist, sharedApplied, sharedSettled, locationPath]);
 
   // global "across-all-competitions" lists for the home page
   const allMatches = useMemo(() => tournamentMatches(t), [t]);

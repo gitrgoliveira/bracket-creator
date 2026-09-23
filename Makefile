@@ -346,11 +346,9 @@ $(SHOTS_BROWSER_STAMP): $(SHOTS_DEPS_STAMP)
 	@touch $@
 
 docs/screenshots: export VERSION := $(DOCS_CAPTURE_VERSION)
-# All three take NAME=<one capture>, FAMILY=<one group>, or SINCE=<git ref> to
-# capture only the groups whose source files changed against that ref (plus
-# any uncommitted change); docs/media also takes KIND=still|video. The full run
-# is the default on purpose. Each token is single-quoted so the recipe shell
-# passes the value to run.mjs as one literal argument.
+# The scoping arguments (NAME=, FAMILY=, SINCE=, and KIND= on docs/media) are
+# documented in scripts/screenshots/README.md. Each is single-quoted so the
+# recipe shell passes the value to run.mjs as one literal argument.
 SHOTS_ARGS = $(if $(NAME),'NAME=$(NAME)',) $(if $(FAMILY),'FAMILY=$(FAMILY)',) $(if $(SINCE),'SINCE=$(SINCE)',)
 
 # The capture build is pinned to the latest release tag so the on-screen

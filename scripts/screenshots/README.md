@@ -11,6 +11,7 @@ real application in a browser.
     make docs/screenshots FAMILY=editors         # one group
     make docs/videos NAME=kachinuki-demo         # one video
     make docs/screenshots SINCE=main             # only the groups your changes reach
+    make docs/media KIND=video FAMILY=videoLive  # docs/media narrowed to stills or videos
 
 Screenshots and videos are split because you rarely want both at once. Neither
 is especially slow: measured on one machine, the three videos take about 60
@@ -23,6 +24,20 @@ pixel by pixel against the file it would replace, and a run ends by naming only
 the surfaces that actually changed. Those are the ones to look at and copy
 across. A capture reported `unchanged` is indistinguishable from the committed
 file to a reader, so there is nothing to review and nothing to copy.
+
+    28 unchanged, 2 changed, 0 video (not compared)
+
+    changed - eyeball these, then copy them over docs/screenshots/:
+      viewer-competition: CHANGED 815x1163 (height differs from committed 815x2088 by 44% - check the content by eye)
+      team-lineup: CHANGED 1585x1212 (156024 px differ, max 230 levels)
+
+A changed line says how many pixels moved and by how many grey levels at most,
+followed by the box they fall inside, as `within left,top-right,bottom` in the
+capture's own pixels (a 20x40 patch painted at 40,100 reads `within
+40,100-59,139`). A small box names one element; one spanning the capture is a layout
+shift. A capture whose width, or fixed height, no longer matches its committed
+twin is reported as a size mismatch instead, which usually means the recipe's
+viewport or crop selector needs adjusting rather than that the surface changed.
 
 That comparison is only meaningful because `docs/screenshots/` holds this
 harness's own output. If you replace a committed image by any other means, the
@@ -98,8 +113,8 @@ would pull it into `audit-ci`'s scope.
     lib/server.mjs   starts `mobile-app` or `serve` on a free port + temp data dir
     lib/api.mjs      the scaffolding calls (tournament, competition, roster, draw)
     lib/net.mjs      picks a free port for the server
-    lib/ui.mjs       operator auth for a context, and nothing else: each editor
-                     is driven by the recipe group that needs it (see its header)
+    lib/ui.mjs       operator auth for a context (see its closing note on editors)
+    lib/editor.mjs   the score editor's selector and its two-tap Finish
     lib/scope.mjs    which groups a set of changed files reaches (SINCE=)
     lib/seed.mjs     runs scripts/setup_tournament.py for the demo tournament
     lib/fixture.mjs  read-back checks that refuse to capture a bad fixture
@@ -184,4 +199,6 @@ One caveat, because it is the operator who would hit it. Over seven runs here,
 six reported all thirty unchanged and one reported a single capture changed,
 and that one has not reproduced since. So the changed list is not guaranteed
 empty on an untouched tree. If a capture you did not expect appears there,
-re-run before going looking: two runs disagreeing is itself the finding.
+note its line (the box says where it moved) and keep its image from `out/`
+before re-running, since the re-run overwrites it. Then re-run: two runs
+disagreeing is itself the finding.

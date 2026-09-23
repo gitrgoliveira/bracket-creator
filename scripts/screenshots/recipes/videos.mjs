@@ -1,6 +1,6 @@
 // The three docs VIDEOS, ported into the capture harness.
 //
-//   kachinuki-demo      docs/videos/kachinuki-demo.webm        820x1120  ~38s
+//   kachinuki-demo      docs/videos/kachinuki-demo.webm        820x1120  ~31s
 //   draw-generation     docs/screenshots/draw-generation.webm  1160x620  ~7s
 //   realtime-update     docs/screenshots/realtime-update.webm  440x900   ~6s
 //

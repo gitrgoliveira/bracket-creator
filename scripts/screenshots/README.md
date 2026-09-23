@@ -47,10 +47,10 @@ the interface, so a clip never reproduces its committed bytes.
 
 Re-recording `kachinuki-demo` carries one manual step. The clip is chaptered by
 a numbered list under the `<video>` in
-`docs/user-guide/organisers/team-tournaments.md`, and its timings move by
-several seconds between recordings. The runner prints the new marks as
-`CHAPTERS`; copy them into that list, or the numbers point at the wrong
-moments.
+`docs/user-guide/organisers/team-tournaments.md`, and its timings can move
+between recordings (by under a second across the recordings made so far). The
+runner prints the new marks as `CHAPTERS`; check them against that list, which
+rounds each mark to the second, and update it when one no longer matches.
 
 ## Capturing only what your change reaches
 
@@ -82,7 +82,7 @@ scope is empty says so and exits 0.
     scoping to files changed since main, plus uncommitted changes: 2
       docs/user-guide/organisers/web-ui.md  -> no capture depends on it
       web-mobile/js/admin_lineup.jsx        -> scored
-    selected 1 of 10 families (scored; 4 captures); skipping demo, setup, ...
+    selected 1 of 13 families (scored; 4 captures); skipping demo, setup, ...
 
 The unit is the group, not the capture, because seeding is most of a run's
 cost and every capture in a group rides the same seed. A change to Go source
@@ -159,8 +159,8 @@ A new capture has nothing to compare against and reports `NEW`.
 
 A new group should declare `sources:` (the path prefixes of what its captures
 render, plus anything its seed drives). A group that declares none is treated
-as depending on all application source, so it runs on every scoped run rather
-than silently sitting one out.
+as depending on all application source, so it runs on every scoped run that an
+application change triggers, rather than silently sitting one out.
 
 ## When a page misbehaves
 
@@ -183,8 +183,7 @@ A capture has to reproduce closely enough that an unchanged surface never
 reaches the changed list, or that list is noise. Two things make that true and
 both are load-bearing: Chromium's text rasterisation is pinned at launch
 (`DETERMINISTIC_RENDERING` in `run.mjs`), and every screenshot is taken with
-animations finished and the text caret hidden. They do different jobs, and it is
-worth knowing which:
+animations finished and the text caret hidden. They do different jobs:
 
 - The rasteriser flags fix **which** rendering you get, not whether it repeats.
   Drop them and all 30 captures change, because the committed images are this

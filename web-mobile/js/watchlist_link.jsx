@@ -17,9 +17,10 @@
 //   MERGE, NOT REPLACE. Opening a link ADDS to whatever the device already
 //   watches, capped at WATCHLIST_MAX, because adding is non-destructive
 //   (unlike the old single-follow overwrite that preceded the watchlist).
-//   Arriving at a friend's link must not delete your own list. This is load-bearing and was briefly lost to a bad commit
-//   (see the fix commit for bc-wlpl), so mergeSharedWatchlist owns that rule
-//   and watchlist_merge.test.jsx pins it.
+//   Arriving at a friend's link must not delete your own list. This is
+//   load-bearing and was briefly lost to a bad commit (see the fix commit for
+//   bc-wlpl), so mergeSharedWatchlist owns that rule and
+//   watchlist_merge.test.jsx pins it.
 //
 //   APPLIED ONCE, AFTER THE ROSTER LOADS. The tokens cannot resolve against a
 //   roster that has not arrived, and re-applying on every render would fight
@@ -137,10 +138,12 @@ export function watchlistTokens(watchlist, roster) {
 // bar now carries the same `w` (mirrorWatchlistParam): the bar holds whatever
 // origin the reader typed, typically the venue LAN's http://192.168.x.x,
 // where the Share link must carry the operator's public URL.
+//
+// The query is mirrorWatchlistParam's over an empty one, so the Share link and
+// the address bar can never write the list in two different formats.
 export function buildWatchlistLink(base, watchlist, roster) {
-  const tokens = watchlistTokens(watchlist, roster);
-  if (!tokens.length) return "";
-  return `${base}?${WATCHLIST_PARAM}=${tokens.join(SEP)}`;
+  const query = mirrorWatchlistParam("", watchlist, roster);
+  return query ? `${base}${query}` : "";
 }
 
 // parseWatchlistTokens: the tokens carried by a query string, each tagged with
@@ -174,15 +177,12 @@ export function parseWatchlistTokens(search) {
 // mirrorWatchlistParam below, which strips and then writes the list back.
 //
 // Dropping the WHOLE query here would be wrong: other parameters are not this
-// module's, and nothing entitles the watchlist to rewrite them. (It once
-// mattered concretely: the printed tag was `?playerNumber=`, read by a
-// one-shot reader, and a surviving query was what let a reload retry a scan.
-// The tag is a `w` link now and that reader is gone.)
+// module's, and nothing entitles the watchlist to rewrite them.
 //
 // Hand-rolled rather than `new URLSearchParams(s); sp.delete(WATCHLIST_PARAM)`
 // because that cannot return the string UNCHANGED: it re-serialises what it
-// kept, and `toString()` writes a space as "+", so `?name=Ken%20Saito` comes back rewritten even
-// when there was no `w` in it at all. The caller compares before it touches
+// kept, and `toString()` writes a space as "+", so `?name=Ken%20Saito` comes
+// back rewritten even when there was no `w` in it at all. The caller compares before it touches
 // the address bar, so a rewrite there would rewrite links this function has no
 // business touching. Measured, not assumed: only the space differs, which is
 // enough.

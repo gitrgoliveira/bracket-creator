@@ -169,13 +169,14 @@ export function ViewerHome({ tournament, onSelectCompetition, onAdminClick, onOp
     // sequence of passes ends. This effect only carries out the verdict:
     // record what landed, merge if something did, settle if nothing is left.
     //
-    // The merge is gated on `write` -- something LANDED that was not already
-    // on the list -- and not on "a token resolved", and that difference was a
-    // loop: mergeSharedWatchlist
-    // returns a fresh array every time, so a write that changed nothing still
+    // The merge is gated on `write` -- something LANDED -- and not on "a token
+    // resolved", and that difference was a loop: mergeSharedWatchlist then
+    // returned a fresh array every time, so a write that changed nothing still
     // changed the state by reference, the effect re-fired on its own
     // dependency, and a reader already at WATCHLIST_MAX spun at ~60
-    // localStorage writes a second for as long as the tab was open.
+    // localStorage writes a second for as long as the tab was open. (A merge
+    // that adds nothing now returns the same array, so an entry that landed
+    // because it was already listed writes nothing either.)
     const pass = sharedLinkPass({
       search: window.location.search, roster, watchlist, applied: sharedApplied, rosterLoaded,
     });

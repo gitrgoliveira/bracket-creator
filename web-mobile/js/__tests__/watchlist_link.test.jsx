@@ -236,17 +236,14 @@ describe('parseWatchlistTokens drops whitespace-only tokens', () => {
 // stripWatchlistParam: what the address bar keeps once a shared link has been
 // folded in. The rest of the query is not the watchlist's to clear.
 describe('stripWatchlistParam', () => {
-  it('removes w and keeps a deep link\'s parameter', () => {
-    // THE regression. Clearing the whole query spent a deep link that had
-    // resolved to nobody (its competition had not loaded yet) with no way to
-    // retry it, because the reload had nothing left to read.
+  it('removes w and keeps every other parameter', () => {
     expect(stripWatchlistParam('?w=K1,K2&name=Ken')).toBe('?name=Ken');
     expect(stripWatchlistParam('?name=Ken&w=K1')).toBe('?name=Ken');
   });
 
   it('returns the query UNCHANGED when there is no w, so the caller leaves the URL alone', () => {
     // The caller compares before it calls replaceState, so "unchanged" here is
-    // what keeps a deep link untouched rather than merely intact.
+    // what keeps a URL untouched rather than merely intact.
     expect(stripWatchlistParam('?name=Ken')).toBe('?name=Ken');
     expect(stripWatchlistParam('?player=3f2a&name=Ken')).toBe('?player=3f2a&name=Ken');
     expect(stripWatchlistParam('')).toBe('');
@@ -329,7 +326,7 @@ describe('the tag QR link (shared fixture with helper.playerTagURL)', () => {
       const search = c.url.slice(c.url.indexOf('?'));
       expect(parseWatchlistTokens(search)).toEqual([{ kind: 'competitor', value: c.number }]);
       const roster = buildRoster([comp('A', 'running', [{ id: 'p1', name: 'Alice', dojo: 'Nara', number: c.number }])]);
-      expect(`?${WATCHLIST_PARAM}=${watchlistTokens([{ type: 'player', id: 'p1' }], roster).join(',')}`).toBe(search);
+      expect(mirrorWatchlistParam('', [{ type: 'player', id: 'p1' }], roster)).toBe(search);
     });
   });
 });

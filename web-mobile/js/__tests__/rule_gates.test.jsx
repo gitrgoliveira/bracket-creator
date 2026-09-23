@@ -76,8 +76,8 @@ describe('the competitor-number rule catches every spelling of the test', () => 
   it('but not asking the owner, and not the exact identity compare', () => {
     expect(trips('matchesCompetitorNumber(p, q)')).toBe(false);
     expect(trips('competitorMatchesQuery(p, q)')).toBe(false);
-    // The deep link and the permalink compare a machine-generated number
-    // whole; that is the identity read the accessor exists for.
+    // The permalink compares a machine-generated number whole; that is the
+    // identity read the accessor exists for.
     expect(trips('numberOf(p) === q')).toBe(false);
   });
 });

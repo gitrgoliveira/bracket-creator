@@ -9035,30 +9035,6 @@ abbr.msb-lab { text-decoration: none; cursor: help; }
   flex-shrink: 0;
 }
 
-/* ---------- Pending deep-link follow confirmation banner ---------- */
-.pending-follow-banner {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  background: var(--accent-soft);
-  border: 1px solid color-mix(in oklch, var(--accent) 30%, transparent);
-  border-radius: var(--r-md);
-  padding: 8px 12px;
-  font-size: 12px;
-  margin-bottom: 12px;
-  flex-wrap: wrap;
-}
-.pending-follow-banner__label {
-  flex: 1;
-  min-width: 0;
-  color: var(--ink-2);
-  font-weight: 500;
-}
-.pending-follow-banner__name {
-  font-weight: 700;
-  color: var(--accent);
-}
-
 /* Vlist row with inline padding override */
 .vlist-item--row-padded { padding: 0 12px 12px; }
 /* Non-interactive vlist row, no hover cursor */

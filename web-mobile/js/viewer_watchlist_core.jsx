@@ -124,8 +124,8 @@ export function matchInvolvesWatchedSet(m, watched) {
   return sideIsWatched(aId, aName, watched) || sideIsWatched(bId, bName, watched);
 }
 
-// LocalStorage keys for FR-020 / FR-024. Centralised so the deep-link
-// handler (T114) writes the same keys the panels read.
+// LocalStorage keys for FR-020 / FR-024. Centralised so every writer and
+// reader shares the same keys.
 const LS_MY_PLAYER_ID = "bc_my_player_id";
 const LS_MY_PLAYER_NAME = "bc_my_player_name";
 const LS_WATCHLIST = "bc_watchlist";
@@ -205,8 +205,18 @@ export function normalizeWatchlist(arr) {
 // keeps their existing entry rather than being replaced by the incoming copy,
 // and it applies WATCHLIST_MAX to the result so a large shared list cannot
 // push the device over the cap.
+//
+// A merge that adds nothing returns `existing` ITSELF, not an equal copy.
+// That is the common case now: the home address bar mirrors the list
+// (mirrorWatchlistParam), so every reload of home reads the device's own list
+// back as a link. useWatchlist's setter drops a same-reference result, so the
+// no-op costs no re-render and no localStorage write, and cannot feed the
+// effect's own dependency (the write loop sharedLinkPass describes).
 export function mergeSharedWatchlist(existing, shared) {
-  return normalizeWatchlist([...(existing || []), ...(shared || [])]);
+  const merged = normalizeWatchlist([...(existing || []), ...(shared || [])]);
+  const unchanged = Array.isArray(existing) && merged.length === existing.length
+    && merged.every((e, i) => entryKey(e) === entryKey(existing[i]));
+  return unchanged ? existing : merged;
 }
 
 // landedSharedKeys: which of a shared link's tokens actually ENDED UP in the
@@ -222,9 +232,9 @@ export function mergeSharedWatchlist(existing, shared) {
 // re-add an entry the reader has since pruned. Recording one that never
 // landed inverted that protection into data loss: nothing was added, the
 // ledger said it had been, and settling then took ?w= out of the address
-// bar, the only copy of the link, so pruning to make room and reloading brought back nothing. A
-// token that did not land is therefore NOT applied, and the caller keeps the
-// query until it is.
+// bar, the only copy of the link, so pruning to make room and reloading
+// brought back nothing. A token that did not land is therefore NOT applied,
+// and the caller keeps the query until it is.
 //
 // `entries` and `keys` are the index-aligned pair resolveFreshTokens returns
 // (it pushes to both in the same step); that alignment is stated there.
@@ -241,8 +251,9 @@ export function landedSharedKeys(existing, entries, keys) {
 // sharedLinkPass: ONE pass of applying a ?w= permalink to the device's list,
 // as a decision rather than an action. The effect in viewer_home.jsx calls it
 // and then does exactly what it says: record `landed`, merge `entries` if
-// `write`, and once `settle`, hand the address bar over to the list. Every rule about the pass lives here,
-// where a unit test can run it, and none in the effect, where nothing can.
+// `write`, and once `settle`, hand the address bar over to the list. Every
+// rule about the pass lives here, where a unit test can run it, and none in
+// the effect, where nothing can.
 //
 // It exists because of a loop. The effect used to write whenever a token
 // RESOLVED and settle only once every token had LANDED -- two different
@@ -261,26 +272,15 @@ export function landedSharedKeys(existing, entries, keys) {
 // later pass could still answer, meaning no token resolved-but-unlanded (the
 // list is full; the reader prunes and the query must survive to retry) and no
 // token unresolved while a roster may still arrive.
-//
-// `write` is narrower than `landed`: a token whose entry was ALREADY on the
-// list lands (the ledger records it) but writes nothing. That is the common
-// case now, not an edge: the home screen's address bar mirrors the list
-// (mirrorWatchlistParam), so every reload of home reads the device's own list
-// back as a ?w= link. Writing it would be an identical list under a fresh
-// array reference, one localStorage write and re-render per reload. The
-// fixpoint argument above is unaffected: every pass still records what landed.
 export function sharedLinkPass({ search, roster, watchlist, applied, rosterLoaded }) {
   const tokens = parseWatchlistTokens(search);
   const { entries, keys, outstanding } = resolveFreshTokens(tokens, roster, applied);
   const landed = landedSharedKeys(watchlist, entries, keys);
   const unlanded = keys.length - landed.length;
-  const had = new Set((watchlist || []).map(entryKey));
-  const landedSet = new Set(landed);
-  const added = entries.some((e, i) => landedSet.has(keys[i]) && !had.has(entryKey(e)));
   return {
     entries,
     landed,
-    write: added,
+    write: landed.length > 0,
     settle: unlanded === 0 && (rosterLoaded || outstanding === 0),
   };
 }

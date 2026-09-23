@@ -60,6 +60,23 @@ describe('mergeSharedWatchlist', () => {
     expect(mergeSharedWatchlist(mine, [])).toEqual(mine);
   });
 
+  it('a merge that adds nothing hands back the SAME array, not an equal copy', () => {
+    // useWatchlist's setter drops a same-reference result, so this is what
+    // makes reading your own list back from the address bar cost no
+    // re-render and no storage write. An equal copy would re-render every time.
+    const mine = [player('p1', 'Ken Saito'), dojo('Hagane')];
+    expect(mergeSharedWatchlist(mine, [])).toBe(mine);
+    expect(mergeSharedWatchlist(mine, [player('p1', 'Ken Saito')])).toBe(mine);
+    expect(mergeSharedWatchlist(mine, [dojo('Hagane')])).toBe(mine);
+  });
+
+  it('a merge that adds something returns a new array', () => {
+    const mine = [player('p1', 'Ken Saito')];
+    const out = mergeSharedWatchlist(mine, [player('p2', 'Kenji Mori')]);
+    expect(out).not.toBe(mine);
+    expect(out.map((e) => e.id)).toEqual(['p1', 'p2']);
+  });
+
   it('an empty device takes the shared list whole', () => {
     const shared = [player('p2', 'Kenji Mori')];
     expect(mergeSharedWatchlist([], shared)).toEqual(shared);
@@ -283,17 +300,15 @@ describe('sharedLinkPass', () => {
     expect(second.settle).toBe(true);
   });
 
-  it('an entry already watched counts as landed but writes nothing', () => {
+  it('an entry already watched lands, and the merge hands back the same list', () => {
     // The home address bar mirrors the list (mirrorWatchlistParam), so every
-    // reload of home reads the device's OWN list back as a ?w= link. That must
-    // settle in one pass with no write: a write here is an identical list
-    // under a fresh reference, one localStorage write per reload. The token is
-    // still recorded, which is what the ledger needs.
+    // reload of home reads the device's OWN list back as a ?w= link. The merge
+    // returns the same array, which useWatchlist's setter drops, so the reload
+    // costs no storage write. The token is recorded, which the ledger needs.
     const already = [{ type: 'player', id: 'A-p1', name: 'Alice', dojo: 'Shibuya' }];
     const r = drive({ search: '?w=K1', watchlist: already });
-    expect(r.writes).toBe(0);
-    expect(r.passes).toBe(1);
     expect(r.list).toBe(already);
+    expect(r.passes).toBeLessThanOrEqual(2);
     expect(r.settle).toBe(true);
     expect(r.applied.has('competitor:K1')).toBe(true);
   });

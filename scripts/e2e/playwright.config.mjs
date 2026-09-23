@@ -12,7 +12,12 @@ export default defineConfig({
   // Playwright wipes outputDir at the start of every run. Per-step journey
   // screenshots live beside it in output/<journey>/ (fixtures/shots.mjs), so
   // this directory only ever holds Playwright's own traces and failure shots.
-  outputDir: './output/test-results',
+  // Two runs at once in one checkout must not share it, or the second run's
+  // wipe deletes the first run's traces mid-test (ENOENT on context close):
+  // give each concurrent run its own E2E_RESULTS_DIR. It is read from the
+  // environment, not derived from the pid, because every worker process
+  // re-reads this file and must resolve the same directory.
+  outputDir: process.env.E2E_RESULTS_DIR || './output/test-results',
   // A journey drives the create wizard, the roster and the draw through the
   // interface before it reaches the step it is about, so a test is slow by
   // design. Each worker boots its own server (fixtures/test.mjs), so files

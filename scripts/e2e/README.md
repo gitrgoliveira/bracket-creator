@@ -107,6 +107,10 @@ were taken, and are replaced on the next run. Playwright's own traces and
 failure screenshots land in `output/test-results/`. Both are gitignored.
 There are no pixel comparisons: a screenshot is for a person to look at.
 
+Every run empties `output/test-results/` when it starts. Two runs at the same
+time in one checkout would delete each other's traces mid-test, so give the
+second one its own folder: `E2E_RESULTS_DIR=output/test-results-2 make e2e ...`.
+
 ## When a journey finds a bug
 
 A functional defect found by a journey is filed as a bead, and that step

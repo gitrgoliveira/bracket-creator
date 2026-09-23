@@ -74,7 +74,11 @@ async function finishMatch(page) {
   const modal = page.locator('.editor-modal');
   const finish = modal.locator('button').filter({ hasText: /^(Finish|End match|Save correction)/ }).first();
   await finish.click();
+  // Give the arm a moment to render rather than probing it on the same tick:
+  // a probe that misses skips the second tap, the match stays open, and the
+  // next taps land on it while every assert still passes.
   const armed = modal.locator('button').filter({ hasText: /^Tap again to finish/ }).first();
+  await armed.waitFor({ state: 'visible', timeout: 3000 }).catch(() => {});
   if (await armed.count()) await armed.click();
 }
 

@@ -19,6 +19,13 @@ export { PASSWORD };
 // a seed calls it on a context of its own, usually through withAdminPage.
 export async function authAdmin(context) {
   await context.addInitScript((pw) => {
+    // An init script also runs on the context's initial about:blank document,
+    // whose opaque origin has no localStorage: touching it throws a
+    // SecurityError. Measured: the runner's pageerror listener is attached
+    // after that document exists, so the throw went unseen by timing alone.
+    // Skip it there and set the keys on the app's origin, the only one that
+    // reads them.
+    if (location.protocol === 'about:') return;
     localStorage.setItem('bc_authed', 'true');
     localStorage.setItem('bc_password', pw);
   }, PASSWORD);

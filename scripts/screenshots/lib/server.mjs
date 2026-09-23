@@ -8,9 +8,12 @@ import { spawn } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { freePort } from './net.mjs';
 
-const REPO = path.resolve(new URL('../../..', import.meta.url).pathname);
+// fileURLToPath, not URL.pathname: the latter leaves a space in the checkout
+// path percent-encoded, and the binary is then reported missing.
+const REPO = path.resolve(fileURLToPath(new URL('../../..', import.meta.url)));
 const BIN = path.join(REPO, 'bin', 'bracket-creator');
 
 // The two commands expose different readiness probes: /health is registered by
@@ -76,6 +79,9 @@ export async function start(kind) {
     await waitForHealth(base, child, readyPath);
   } catch (err) {
     child.kill('SIGKILL');
+    // stop() is never handed out on this path, so the data dir it would have
+    // removed is removed here.
+    fs.rmSync(dataDir, { recursive: true, force: true });
     throw new Error(`${err.message}\n--- server output ---\n${log.join('')}`);
   }
 

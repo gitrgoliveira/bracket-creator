@@ -38,8 +38,24 @@ export function demoTournament(base) {
       stdio: ['ignore', 'pipe', 'pipe'],
     });
     const out = [];
-    child.stdout.on('data', (b) => out.push(b.toString()));
-    child.stderr.on('data', (b) => out.push(b.toString()));
+    const keep = (b) => {
+      const text = b.toString();
+      out.push(text);
+      // The seeder's warnings are the ONE thing in its log the operator must
+      // see: a SEED_LEAVE_RUNNING title that matches no category means the
+      // demo is scored to the end and two captures contradict their captions.
+      // The successful-run log is otherwise discarded, so surface these as
+      // they arrive.
+      for (const line of text.split('\n')) {
+        if (line.includes('[WARN]')) console.log(`\n  setup_tournament.py: ${line.trim()}`);
+      }
+    };
+    child.stdout.on('data', keep);
+    child.stderr.on('data', keep);
+    // Without this a spawn failure (no python3 on PATH) is an uncaught
+    // exception that bypasses every finally in the runner and leaks the
+    // server, the browser and the data dir.
+    child.on('error', (err) => reject(new Error(`could not run python3: ${err.message}`)));
     child.on('close', (code) => {
       if (code === 0) return resolve({ log: out.join('') });
       reject(new Error(`setup_tournament.py exited ${code}\n${out.join('').slice(-1500)}`));

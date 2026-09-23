@@ -119,7 +119,10 @@ async function finishMatch(page) {
   const chained = modal.locator('button').filter({ hasText: /^Finish \+ Start Next/ }).first();
   const btn = (await plain.count()) ? plain : chained;
   await btn.click();
+  // Wait for the arm rather than probing it on the same tick; a missed probe
+  // skips the second tap and the following scores land on the wrong match.
   const armed = modal.locator('button').filter({ hasText: /^Tap again to finish/ }).first();
+  await armed.waitFor({ state: 'visible', timeout: 3000 }).catch(() => {});
   if (await armed.count()) await armed.click();
   await settle(page, 600);
   await closeEditor(page);

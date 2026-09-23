@@ -43,7 +43,11 @@ export function assertLineupIds(dataDir, compId) {
         if (!line.trim()) continue;
         const at = line.match(/^\s*/)[0].length;
         if (at <= indent) break;
-        if (/^\s*[\w-]+:\s*\S/.test(line)) total += 1;
+        // The key may be quoted: yaml.v3 writes the numeric position keys a
+        // team of any size but five gets as `"1": Alice`, and a bare-word
+        // pattern counted those lineups as 0 and 0, passing the id-less case
+        // this exists to reject.
+        if (/^\s*"?[\w-]+"?:\s*\S/.test(line)) total += 1;
       }
     }
     return total;

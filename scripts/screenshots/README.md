@@ -77,9 +77,16 @@ default, and stays the right call when you are not sure what a change reaches.
 
 ## Prerequisites
 
-`node` and `python3`. `make docs/screenshots` (or `docs/videos`) installs this directory's npm
-dependencies and downloads its own chromium on first use; both are stamped inside
-`node_modules/`, so the download happens once per worktree.
+`node` and `python3`, and a checkout that can reach a release tag (a shallow
+clone cannot; `git fetch --tags`). `make docs/screenshots` (or `docs/videos`)
+installs this directory's npm dependencies and downloads its own chromium on
+first use; both are stamped inside `node_modules/`, so the download happens
+once per worktree. If the browser cache under `~/.cache/ms-playwright` is
+removed later the stamp outlives it; run `npx playwright-core install
+chromium` here. Run the targets on their own: `make go/build docs/screenshots`
+in one invocation builds the binary before the capture version is applied.
+Under root the browser is launched without its sandbox, since Chromium
+refuses to run it as root.
 
 Playwright lives here rather than in `web-mobile/package.json` on purpose. Putting
 it there would download a browser for every worktree that runs `make js/deps`, and

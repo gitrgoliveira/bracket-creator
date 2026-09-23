@@ -279,13 +279,10 @@ export const recipes = [
     // No `route`: drive() navigates four times, and a navigation discards any
     // style sheet injected into the page it left. The runner has no css hook
     // for that reason; EXPAND is re-injected here after every navigation.
-    // Not `auth: 'admin'`: this setup also stamps t0, so the two stay together.
-    setup: async ({ context, fixture }) => {
-      await authAdmin(context);
+    auth: 'admin',
+    drive: async ({ page, base, fixture }) => {
       // Frame 0 is roughly now: the page exists and has not navigated.
       fixture.t0 = Date.now();
-    },
-    drive: async ({ page, base, fixture }) => {
       const { ko, lg } = fixture;
       const marks = [];
       const mark = (l) => marks.push([((Date.now() - fixture.t0) / 1000).toFixed(1), l]);

@@ -25,7 +25,7 @@ else
 endif
 
 # Define phony targets
-.PHONY: default help clean local/deps hooks/install go/fmt go/generate go/test go/build go/lint go/sec go/sec-tests go/vuln go/security js/deps js/lint js/sec js/outdated js/security js/check-imports js/validate examples docker/build docker/run pre-commit docs/deps docs/serve docs/open docs/build docs/linkcheck docs/prose docs/clean docs/screenshots docs/videos docs/media run run-mobile esbuild-jsx goreleaser/test release version
+.PHONY: default help clean local/deps hooks/install go/fmt go/generate go/test go/build go/lint go/sec go/sec-tests go/vuln go/security js/deps js/lint js/sec js/outdated js/security js/check-imports js/validate examples docker/build docker/run pre-commit docs/deps docs/serve docs/open docs/build docs/linkcheck docs/prose docs/clean docs/capture-version docs/screenshots docs/videos docs/media run run-mobile esbuild-jsx goreleaser/test release version
 
 default: help ## Show help information (default)
 
@@ -329,7 +329,7 @@ docs/clean: ## Remove the docs venv and the built site
 #
 # Note this leaves bin/bracket-creator stamped with that version until the next
 # plain `make go/build`.
-DOCS_CAPTURE_VERSION := $(shell git describe --tags --abbrev=0 2>/dev/null || echo dev)
+DOCS_CAPTURE_VERSION := $(shell git describe --tags --abbrev=0 2>/dev/null)
 
 SHOTS_DIR := scripts/screenshots
 SHOTS_DEPS_STAMP := $(SHOTS_DIR)/node_modules/.package-lock.json
@@ -348,21 +348,30 @@ $(SHOTS_BROWSER_STAMP): $(SHOTS_DEPS_STAMP)
 docs/screenshots: export VERSION := $(DOCS_CAPTURE_VERSION)
 # All three take NAME=<one capture>, FAMILY=<one group>, or SINCE=<git ref> to
 # capture only the groups whose source files changed against that ref (plus
-# any uncommitted change). The full run is the default on purpose.
+# any uncommitted change); docs/media also takes KIND=still|video. The full run
+# is the default on purpose.
 SHOTS_ARGS = $(if $(NAME),NAME=$(NAME),) $(if $(FAMILY),FAMILY=$(FAMILY),) $(if $(SINCE),SINCE=$(SINCE),)
 
-docs/screenshots: go/build $(SHOTS_BROWSER_STAMP) ## Regenerate the application screenshots (NAME=, FAMILY= or SINCE=main to scope)
+# The capture build is pinned to the latest release tag so the on-screen
+# version never churns the images. Refuse rather than fall back when no tag is
+# reachable (a shallow clone): a non-semver stamp makes the footer render the
+# commit sha and build date instead, and every footer-bearing capture then
+# reports CHANGED after any commit. Named first so it runs before go/build.
+docs/capture-version:
+	@test -n "$(DOCS_CAPTURE_VERSION)" || { echo "no release tag reachable (shallow clone?) - run: git fetch --tags"; exit 1; }
+
+docs/screenshots: docs/capture-version go/build $(SHOTS_BROWSER_STAMP) ## Regenerate the application screenshots (NAME=, FAMILY= or SINCE=main to scope)
 	@node $(SHOTS_DIR)/run.mjs KIND=still $(SHOTS_ARGS)
 
 docs/videos: export VERSION := $(DOCS_CAPTURE_VERSION)
-docs/videos: go/build $(SHOTS_BROWSER_STAMP) ## Regenerate the application videos (NAME=, FAMILY= or SINCE=main to scope)
+docs/videos: docs/capture-version go/build $(SHOTS_BROWSER_STAMP) ## Regenerate the application videos (NAME=, FAMILY= or SINCE=main to scope)
 	@node $(SHOTS_DIR)/run.mjs KIND=video $(SHOTS_ARGS)
 
 docs/media: export VERSION := $(DOCS_CAPTURE_VERSION)
-docs/media: go/build $(SHOTS_BROWSER_STAMP) ## Regenerate every captured screenshot and video (NAME=, FAMILY= or SINCE=main to scope)
+docs/media: docs/capture-version go/build $(SHOTS_BROWSER_STAMP) ## Regenerate every captured screenshot and video (NAME=, FAMILY=, SINCE=main or KIND=still|video to scope)
 	@# One run with no KIND, rather than depending on the two targets above:
 	@# those would start node and a browser twice over two disjoint halves.
-	@node $(SHOTS_DIR)/run.mjs $(SHOTS_ARGS)
+	@node $(SHOTS_DIR)/run.mjs $(if $(KIND),KIND=$(KIND),) $(SHOTS_ARGS)
 
 run: go/build ## Run the application locally
 	@echo "Running $(BIN_NAME)..."

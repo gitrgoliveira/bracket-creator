@@ -38,13 +38,18 @@ import { REPO } from './server.mjs';
 
 const under = (p, prefixes) => prefixes.some((x) => p.startsWith(x));
 
-// Rule 1's set is the harness MINUS the recipes: everything under
-// scripts/screenshots/ except recipes/ (rule 2 scopes those per file) and
-// prose (a README edit reaches no capture), plus the Makefile that invokes it.
-// A prefix with two exceptions rather than a list of files, so a new lib
-// module or a second directory cannot fall through to "no capture depends on
-// it" - the one direction this module must never err in.
-const isHarness = (p) => p === 'Makefile'
+// Rule 1's set is the harness MINUS the recipe files: everything under
+// scripts/screenshots/ except the per-group recipe files (rule 2 scopes those
+// per file) and prose (a README edit reaches no capture), plus the Makefile
+// that invokes it. The registry, recipes/index.mjs, is harness rather than
+// recipe: it is what wires every group in, so it stays in this set even
+// though it lives in that directory - a review caught it falling through to
+// "no capture depends on it" when this was first written as a prefix.
+// A prefix with exceptions rather than a list of files, so a new lib module or
+// a second directory cannot fall through the same way - the one direction this
+// module must never err in.
+const REGISTRY = 'scripts/screenshots/recipes/index.mjs';
+const isHarness = (p) => p === 'Makefile' || p === REGISTRY
   || (p.startsWith('scripts/screenshots/')
     && !p.startsWith('scripts/screenshots/recipes/')
     && !p.endsWith('.md'));
@@ -52,10 +57,17 @@ const isHarness = (p) => p === 'Makefile'
 const APPLICATION = ['web-mobile/', 'web/', 'internal/', 'cmd/', 'main.go', 'go.mod', 'go.sum'];
 
 // Source sets that always travel together, so a family spreads one name
-// rather than re-typing a pair and forgetting half of it: the score editors
-// are hosted by the schedule page (admin_schedule_score_editor.jsx), and every
-// public page is a viewer_* module.
-export const SCORE_EDITOR_SOURCES = ['web-mobile/js/admin_scoring_', 'web-mobile/js/admin_schedule'];
+// rather than re-typing a pair and forgetting half of it. The score-editor set
+// names the editors and the ONE module that hosts them, the /admin/score-editor
+// list (admin_schedule_score_editor.jsx). It deliberately does not name the
+// bare `admin_schedule` prefix: that also matched admin_schedule_utils.jsx,
+// whose estimate range the kachinuki and setup families photograph, so an
+// edit there selected the editor families and skipped those two - an
+// under-select. The other admin_schedule* modules stay unclaimed so a change
+// to any of them runs everything.
+export const SCORE_EDITOR_SOURCES = [
+  'web-mobile/js/admin_scoring_', 'web-mobile/js/admin_schedule_score_editor',
+];
 export const VIEWER_SOURCES = ['web-mobile/js/viewer'];
 
 // Everything git considers changed: the branch against `since`, the index and

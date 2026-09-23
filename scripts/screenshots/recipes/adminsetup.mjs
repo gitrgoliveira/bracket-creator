@@ -184,8 +184,10 @@ export const recipes = [
     // admin_participants.jsx:860) with the saved roster still at 0 players.
     drive: async ({ page }) => {
       const lines = [
-        'Haruki Tanaka, Kenshinkan', 'Ren Suzuki, Musashi Dojo', 'Sota Yamamoto, Kenshinkan',
-        'Yuto Watanabe, Seibukan', 'Riku Nakamura, Musashi Dojo', 'Kaito Kobayashi, Seibukan',
+        // Dojos match ROSTER_18 above: the same person is shown on several
+        // captures of this page, and identity is (name, dojo).
+        'Haruki Tanaka, Kenshinkan', 'Ren Suzuki, Musashi Dojo', 'Sota Yamamoto, Seishinkan',
+        'Yuto Watanabe, Kenshinkan', 'Riku Nakamura, Musashi Dojo', 'Kaito Kobayashi, Seibukan',
         'Daiki Yoshida, Hokushinkan', 'Hinata Kato, Kenshinkan', 'Sora Sasaki, Musashi Dojo',
         'Takumi Ito, Hokushinkan', 'Yuma Saito, Seibukan', 'Aoi Takahashi, Hokushinkan',
       ].join('\n');

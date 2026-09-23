@@ -1,11 +1,16 @@
 #!/usr/bin/env node
 // Docs capture runner.
 //
-//   node scripts/screenshots/run.mjs              # every recipe
-//   node scripts/screenshots/run.mjs KIND=still   # the screenshots only
-//   node scripts/screenshots/run.mjs KIND=video   # the videos only
-//   node scripts/screenshots/run.mjs NAME=viewer-home
-//   node scripts/screenshots/run.mjs FAMILY=editors
+//   make docs/media                               # every recipe
+//   make docs/screenshots                         # the screenshots only
+//   make docs/videos                              # the videos only
+//   make docs/screenshots NAME=viewer-home
+//   make docs/screenshots FAMILY=editors
+//   make docs/screenshots SINCE=main
+//
+// Through make, not `node run.mjs` directly: the targets build the binary,
+// install this directory's npm dependencies and download its browser, and
+// none of those exists in a fresh worktree.
 //
 // Output lands in scripts/screenshots/out/, never straight into docs/, and the
 // runner deliberately does not overwrite a committed file: what to publish is
@@ -29,9 +34,18 @@ import { recipes, families, recipeFiles } from './recipes/index.mjs';
 const OUT = path.join(REPO, 'scripts', 'screenshots', 'out');
 const COMMITTED = path.join(REPO, 'docs', 'screenshots');
 
-const args = Object.fromEntries(
-  process.argv.slice(2).filter((a) => a.includes('=')).map((a) => a.split(/=(.*)/s).slice(0, 2)),
-);
+// Every token must be KEY=value with a known KEY and a non-empty value. The
+// filter-then-validate form this replaced dropped `SINCE-main` (no `=`) before
+// it could be checked and read `NAME=` as "not given", so both ran all 33
+// captures as though the command had been obeyed.
+const KNOWN_ARGS = ['KIND', 'NAME', 'FAMILY', 'SINCE'];
+const args = Object.fromEntries(process.argv.slice(2).map((token) => {
+  const m = /^([A-Z]+)=(.+)$/s.exec(token);
+  if (!m || !KNOWN_ARGS.includes(m[1])) {
+    throw new Error(`bad argument "${token}" - use KEY=value with one of: ${KNOWN_ARGS.join(', ')}`);
+  }
+  return [m[1], m[2]];
+}));
 
 // Chromium's text rasterisation follows the HOST's font and colour
 // configuration, so these pin it to one instead: greyscale antialiasing, no
@@ -48,16 +62,7 @@ const DETERMINISTIC_RENDERING = [
 
 const KINDS = { still: (r) => r.capture !== 'video', video: (r) => r.capture === 'video' };
 
-const KNOWN_ARGS = ['KIND', 'NAME', 'FAMILY', 'SINCE'];
-
 function selected() {
-  // A misspelt key (FAMILIY=, SINCE-main) would otherwise be dropped on the
-  // floor and the run would obey a command you did not give, for three minutes.
-  for (const key of Object.keys(args)) {
-    if (!KNOWN_ARGS.includes(key)) {
-      throw new Error(`unknown argument ${key}= - use one of: ${KNOWN_ARGS.join(', ')}`);
-    }
-  }
   let list = recipes;
   if (args.KIND) {
     const pick = KINDS[args.KIND];
@@ -113,16 +118,17 @@ function reportStill(recipe, file) {
   const dims = (d) => `${d.width}x${d.height}`;
   if (!got) return { changed: true, note: 'no readable PNG was written' };
   if (!want) return { changed: true, note: `NEW ${dims(got)} - no committed file to compare` };
-  const diff = pixelDiff(file, committed);
-  if (diff && !diff.changed) {
-    return { changed: false, note: `unchanged ${dims(got)}` };
-  }
-
   // Width is decisive; height only for fixed-size modes. A full-page capture's
   // height legitimately moves with content, so comparing it would cry wolf.
+  // Decided from the headers BEFORE the pixel compare decodes both files in
+  // full: a mismatch is a change whatever the pixels say.
   const heightMatters = recipe.capture !== 'fullPage';
   if (got.width !== want.width || (heightMatters && got.height !== want.height)) {
     return { changed: true, note: `CHANGED, size MISMATCH got ${dims(got)} want ${dims(want)}` };
+  }
+  const diff = pixelDiff(file, committed);
+  if (diff && !diff.changed) {
+    return { changed: false, note: `unchanged ${dims(got)}` };
   }
   // Height is not compared for a full-page capture, because content length
   // legitimately moves. A LARGE swing is still worth saying out loud: it is
@@ -213,8 +219,7 @@ async function runRecipe(browser, recipe, ctx) {
   // is what finalises the file, and by then the page handle is gone.
   const video = isVideo ? page.video() : null;
   try {
-    const args = { page, base, api, dataDir, context, fixture };
-    if (recipe.setup) await recipe.setup(args);
+    const args = { page, base, api, dataDir, fixture };
     if (recipe.route) {
       await page.goto(base + recipe.route, { waitUntil: 'domcontentloaded' });
     }
@@ -272,7 +277,12 @@ async function main() {
   }
 
   const results = [];
-  const browser = await chromium.launch({ args: DETERMINISTIC_RENDERING });
+  // Chromium refuses to run its sandbox as root; the recorder this harness
+  // replaced passed --no-sandbox unconditionally, which is broader than needed.
+  const asRoot = typeof process.getuid === 'function' && process.getuid() === 0;
+  const browser = await chromium.launch({
+    args: [...DETERMINISTIC_RENDERING, ...(asRoot ? ['--no-sandbox'] : [])],
+  });
   try {
     for (const [familyName, group] of groups) {
       const family = families[familyName];
@@ -281,7 +291,9 @@ async function main() {
       // Which server a family seeds against is the family's property, so it
       // is declared once there rather than on each of its recipes.
       const server = await start(family.server);
-      let fixture = {};
+      // null until the seed returns, so a seed that THROWS never reaches a
+      // teardown written for the fixture it would have produced.
+      let fixture = null;
       try {
         process.stdout.write(`seeding ${familyName}... `);
         fixture = (await family.seed({
@@ -317,9 +329,14 @@ async function main() {
       } finally {
         // A seed may hold something open across its captures (a signed-in
         // page whose editor the clip watches); this is where it lets go,
-        // before the server it was talking to.
-        if (family.teardown) await family.teardown(fixture);
-        await server.stop();
+        // before the server it was talking to. Its own try/finally so a
+        // teardown that throws neither masks the error that got us here nor
+        // leaves the server running.
+        try {
+          if (fixture && family.teardown) await family.teardown(fixture);
+        } finally {
+          await server.stop();
+        }
       }
     }
   } finally {
@@ -346,8 +363,15 @@ async function main() {
     for (const [name, v] of changed) console.log(`  ${name}: ${v.note}`);
   }
   if (videos.length) {
-    console.log('\nvideos are always restaged - copy over docs/videos/ only if you drove a change:');
-    for (const [name] of videos) console.log(`  ${name}`);
+    // Name each clip's REAL destination: two of the three are published from
+    // docs/screenshots/, and a blanket "copy over docs/videos/" left the
+    // published clip stale and an orphan beside it.
+    console.log('\nvideos are always restaged - copy each over its committed file only if you drove a change:');
+    for (const [name] of videos) {
+      const twin = ['videos', 'screenshots'].map((d) => path.join('docs', d, `${name}.webm`))
+        .find((p) => fs.existsSync(path.join(REPO, p)));
+      console.log(`  ${name} -> ${twin || '(new clip: no committed file yet; pick a docs/ home and reference it)'}`);
+    }
   }
   // A page that logged an error while being photographed is worth saying out
   // loud: the capture looks like the product working, and records it broken.

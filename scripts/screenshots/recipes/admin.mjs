@@ -9,12 +9,13 @@ export const families = {
   demo: {
     server: 'mobile',
     // What a SINCE-scoped run treats as this family's inputs (lib/scope.mjs):
-    // the demo seed script and its CSVs, the admin dashboard, and the public
-    // viewer pages two of its captures show. Shared modules are claimed by no
-    // family on purpose - a change there runs everything.
+    // the demo seed script and its CSVs, and the public viewer pages two of its
+    // captures show. Shared modules are claimed by no family on purpose - a
+    // change there runs everything. That includes admin.jsx, which routes every
+    // admin page, and admin_shell.jsx, the dashboard's host and every admin
+    // page's frame, although this family's dashboard capture shows them.
     sources: [
-      'scripts/setup_tournament.py', 'test-data/',
-      'web-mobile/js/admin.jsx', ...VIEWER_SOURCES,
+      'scripts/setup_tournament.py', 'test-data/', ...VIEWER_SOURCES,
     ],
     seed: async ({ base }) => {
       await demoTournament(base);

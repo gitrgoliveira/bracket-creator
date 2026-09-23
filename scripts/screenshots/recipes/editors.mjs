@@ -25,38 +25,7 @@ const IND = 'individual-cup';
 const TEAMS = 'kachinuki-teams';
 const KO = 'kachinuki-knockout';
 
-const POSITIONS = ['senpo', 'jiho', 'chuken', 'fukusho', 'taisho'];
-
 // ---------------------------------------------------------------- seeding --
-
-// Name five members onto a team AFTER the draw. A drawn team is seeded with
-// teamSize + state.SquadReserveSlots numbered blank slots (internal/state/
-// squad.go:64), so an added member takes the next index after those - which is
-// why the committed captures read "K2.8" and not "K2.1". Returns the member
-// records so the lineup can be written BY ID.
-async function nameTeam(api, compId, teamId, names) {
-  const out = [];
-  for (const name of names) {
-    out.push(await api.addMember(compId, teamId, name));
-  }
-  return out;
-}
-
-// Write a lineup carrying BOTH the display name and the member id, which is
-// the shape the client writes (LineupRequest.MemberIDs, handlers_lineup.go:73)
-// and the only shape that renders a competitor-number chip: the chip resolves
-// through the member id, so a name-only lineup shows no number at all.
-// Lineups must land BEFORE any bout is recorded; a bout freezes the names it
-// was fought under.
-async function setLineup(api, compId, teamId, members) {
-  const positions = {};
-  const memberIds = {};
-  members.slice(0, POSITIONS.length).forEach((m, i) => {
-    positions[POSITIONS[i]] = m.name;
-    memberIds[POSITIONS[i]] = m.id;
-  });
-  await api.put(`/api/competitions/${compId}/teams/${teamId}/lineups/0`, { positions, memberIds });
-}
 
 async function teamIds(api, compId) {
   const parts = await api.get(`/api/competitions/${compId}/participants`);
@@ -187,7 +156,7 @@ export const families = {
       };
       for (const comp of [TEAMS, KO]) {
         for (const t of await teamIds(api, comp)) {
-          await setLineup(api, comp, t.id, await nameTeam(api, comp, t.id, memberNames[t.name]));
+          await api.lineup(comp, t.id, await api.nameMembers(comp, t.id, memberNames[t.name]));
         }
       }
 

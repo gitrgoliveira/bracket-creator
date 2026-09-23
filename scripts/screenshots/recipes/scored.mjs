@@ -22,6 +22,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { settle, withAdminPage } from '../lib/ui.mjs';
+import { POSITIONS } from '../lib/api.mjs';
 import { EDITOR, finishMatch } from '../lib/editor.mjs';
 import { assertLineupIds, assertIndividualBoutPoints, csvRows } from '../lib/fixture.mjs';
 import { SCORE_EDITOR_SOURCES, VIEWER_SOURCES } from '../lib/scope.mjs';
@@ -31,10 +32,8 @@ const SWISS_TEAM = 'swiss-teams';
 const SWISS_ENGI = 'swiss-engi';
 const POOLS_COMP = 'women-up-to-2d';
 
-// The five FIK fighting-order positions, in sheet order. The Lineups page
-// renders one <select data-testid="lineup-position-<key>"> per position
-// (admin_lineup.jsx:807-809).
-const POSITIONS = ['senpo', 'jiho', 'chuken', 'fukusho', 'taisho'];
+// The Lineups page renders one <select data-testid="lineup-position-<key>">
+// per position (admin_lineup.jsx:807-809), keyed by lib/api.mjs's POSITIONS.
 
 const LINEUP_NAMES = [
   'Haruki Tanaka', 'Ren Suzuki', 'Sota Yamamoto', 'Yuto Watanabe', 'Riku Nakamura',
@@ -422,10 +421,12 @@ export const families = {
   scored: {
     server: 'mobile',
     // SINCE scoping inputs (lib/scope.mjs): the Lineups page and its resolver
-    // modules, the public standings pages it captures, and the editors its
-    // seed drives to enter the scores.
+    // modules, the competition page that frames it (admin_competition, whose
+    // header team-lineup shows), the public standings pages it captures, and
+    // the editors its seed drives to enter the scores.
     sources: [
       'web-mobile/js/admin_lineup', 'web-mobile/js/lineup_', 'web-mobile/js/squad_member_label',
+      'web-mobile/js/admin_competition',
       ...VIEWER_SOURCES, ...SCORE_EDITOR_SOURCES,
     ],
     seed: async ({ api, base, browser }) => {

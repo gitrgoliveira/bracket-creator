@@ -65,9 +65,11 @@ async function finishMatch(page, gap = 550) {
 // ---------------------------------------------------------------------------
 // Ported from a standalone scripts/record-kachinuki-demo.cjs, deleted once
 // this recipe replaced it: it wrote straight into docs/videos/, bypassing the
-// staging dir, and was a second recorder for the same clip. Its seed, its CSS
-// injection and its keyboard scoring are kept; the server, the browser and
-// the recording now come from the harness.
+// staging dir, and was a second recorder for the same clip. Its CSS injection
+// and its keyboard scoring are kept; the server, the browser and the recording
+// now come from the harness. Its seed wrote name-only lineups for teams called
+// "Aka" and "Shiro", so the bout rows showed no competitor numbers; the teams
+// below are real ones with numbered members.
 const KACHI_KO = 'vid-kachinuki-ko';
 const KACHI_LEAGUE = 'vid-kachinuki-league';
 
@@ -77,32 +79,29 @@ const EXPAND = '.modal-backdrop{align-items:flex-start!important;padding:8px 0!i
   + '.editor-modal--compact{max-height:none!important;height:auto!important}'
   + '.team-bouts-scroll{max-height:none!important;overflow:visible!important}';
 
+// Each team, its dojo and its five fighters in fighting order. The fighters are
+// named onto the numbered members the draw seeds and the lineup is written by
+// member id (lib/api.mjs, nameMembers + lineup), so every bout row carries its
+// competitor-number chip, as it does for a team entered on the Lineups page.
+const KACHI_TEAMS = {
+  'Team Kaze': { dojo: 'Kaze Dojo', fighters: ['Aoyama', 'Hirano', 'Iwata', 'Kondo', 'Murata'] },
+  'Team Nami': { dojo: 'Nami Dojo', fighters: ['Hayashi', 'Ikeda', 'Kaneko', 'Noguchi', 'Okada'] },
+  'Team Kita': { dojo: 'Kita Dojo', fighters: ['Sasaki', 'Takeda', 'Uchiyama', 'Yoshida', 'Hamada'] },
+  'Team Minami': { dojo: 'Minami Dojo', fighters: ['Imai', 'Kojima', 'Miura', 'Nakano', 'Shimizu'] },
+};
+
 async function seedKachinukiComp(api, id, name, format, teamA, teamB, court) {
   // Through api.competition rather than a raw POST, so the competition gets
-  // the start time every other seed gets; without it the scores page header
-  // in the clip read "<date> at ·".
+  // the start time every other seed gets.
   await api.competition(id, name, {
     format, teamSize: 5, teamMatchType: 'kachinuki', courts: [court],
   });
-  await api.participants(id, [
-    { name: teamA, dojo: 'North' },
-    { name: teamB, dojo: 'South' },
-  ]);
-  const parts = await api.get(`/api/competitions/${id}/participants`);
-  const lineup = (pre) => ({
-    positions: {
-      senpo: `${pre}-S`, jiho: `${pre}-J`, chuken: `${pre}-C`,
-      fukusho: `${pre}-F`, taisho: `${pre}-T`,
-    },
-  });
-  // NOTE (fidelity): these lineups are written over HTTP as bare NAMES, so the
-  // positions carry no member ids and the bout rows render without competitor
-  // number chips. That is what the committed clip shows too, and the recorder
-  // this recipe ports did the same, so the port is faithful. Driving the
-  // Lineups page instead would add the chips and change the clip.
-  await api.put(`/api/competitions/${id}/teams/${parts[0].id}/lineups/0`, lineup(teamA));
-  await api.put(`/api/competitions/${id}/teams/${parts[1].id}/lineups/0`, lineup(teamB));
+  await api.participants(id, [teamA, teamB].map((t) => ({ name: t, dojo: KACHI_TEAMS[t].dojo })));
+  // The numbered members exist only once the draw has run.
   await api.generateDraw(id);
+  for (const p of await api.get(`/api/competitions/${id}/participants`)) {
+    await api.lineup(id, p.id, await api.nameMembers(id, p.id, KACHI_TEAMS[p.name].fighters));
+  }
   await api.start(id);
   return id;
 }
@@ -195,8 +194,8 @@ export const families = {
     seed: async ({ api }) => {
       await tournament(api);
       const court = COURTS[0];
-      await seedKachinukiComp(api, KACHI_KO, 'KO Demo', 'knockout', 'Aka', 'Shiro', court);
-      await seedKachinukiComp(api, KACHI_LEAGUE, 'League Demo', 'league', 'Kita', 'Minami', court);
+      await seedKachinukiComp(api, KACHI_KO, 'KO Demo', 'knockout', 'Team Kaze', 'Team Nami', court);
+      await seedKachinukiComp(api, KACHI_LEAGUE, 'League Demo', 'league', 'Team Kita', 'Team Minami', court);
       return { ko: KACHI_KO, lg: KACHI_LEAGUE };
     },
   },

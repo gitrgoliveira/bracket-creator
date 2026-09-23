@@ -6,7 +6,10 @@
 // and bout points, which silently removes number chips and zeroes PW/PL - it
 // has shipped a misleading screenshot before. Creating a tournament, a
 // competition, its participants and its draw is not that: those calls are the
-// same ones the client makes, with no per-fighter detail to lose.
+// same ones the client makes, with no per-fighter detail to lose. Nor is a
+// lineup written through nameMembers + lineup below: it names the draw's own
+// numbered members and carries their ids, exactly the request the client
+// sends, and fixture.mjs's assertLineupIds re-reads it before a capture.
 export const PASSWORD = 'testpassword';
 
 // `headers` lets a caller add one: a self-run tournament gates roster and draw
@@ -82,10 +85,44 @@ export function client(base, headers = {}) {
     generateDraw: (id) => call('POST', `/api/competitions/${id}/generate-draw`),
     start: (id) => call('POST', `/api/competitions/${id}/start`),
     viewer: (id) => call('GET', `/api/viewer/competitions/${id}`),
-    addMember: (id, tid, name) =>
-      call('POST', `/api/competitions/${id}/teams/${tid}/members`, { name }),
+
+    // Name a drawn team's people the way the Lineups page does: by naming the
+    // numbered blank members the draw seeded (teamSize + state.SquadReserveSlots
+    // of them, internal/state/squad.go), in number order, so they read 1..n as
+    // a real team's do. Adding members instead mints new ones after the blanks,
+    // which is how the captures came to show "K2.8" for a first fighter.
+    // Returns the named members, ids included, for a lineup written by id.
+    async nameMembers(id, tid, names) {
+      const { teamMembers } = await call('GET', `/api/competitions/${id}/team-members`);
+      const blanks = teamMembers[tid].filter((m) => !m.name).sort((a, b) => a.index - b.index);
+      const named = [];
+      for (const [i, name] of names.entries()) {
+        await call('PUT', `/api/competitions/${id}/teams/${tid}/members/${blanks[i].id}`, { name });
+        named.push({ ...blanks[i], name });
+      }
+      return named;
+    },
+
+    // Write a round-0 lineup carrying BOTH each position's name and its member
+    // id, the shape the client writes (LineupRequest.MemberIDs,
+    // handlers_lineup.go) and the only one that renders a competitor-number
+    // chip: the chip resolves through the member id, so a name-only lineup
+    // shows no number. Lineups must land BEFORE any bout is recorded; a bout
+    // freezes the names it was fought under.
+    async lineup(id, tid, members) {
+      const positions = {};
+      const memberIds = {};
+      members.slice(0, POSITIONS.length).forEach((m, i) => {
+        positions[POSITIONS[i]] = m.name;
+        memberIds[POSITIONS[i]] = m.id;
+      });
+      return call('PUT', `/api/competitions/${id}/teams/${tid}/lineups/0`, { positions, memberIds });
+    },
   };
 }
+
+// The five FIK fighting-order positions, in sheet order.
+export const POSITIONS = ['senpo', 'jiho', 'chuken', 'fukusho', 'taisho'];
 
 // Roster helpers. Dojos must be non-blank: a blank one is refused by the save
 // floor (state.ErrBlankDojo) and again by the tree-aware draw.

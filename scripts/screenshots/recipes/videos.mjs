@@ -19,6 +19,7 @@
 //      deliberate and are sized against the committed files' durations rather
 //      than trimmed to the minimum the DOM needs.
 import { authAdmin } from '../lib/ui.mjs';
+import { EDITOR } from '../lib/editor.mjs';
 import { SCORE_EDITOR_SOURCES, VIEWER_SOURCES } from '../lib/scope.mjs';
 
 // ---------------------------------------------------------------------------
@@ -48,7 +49,7 @@ function ipponBtn(page, side, waza) {
 // (admin_schedule_score_editor.jsx:409), which makes it "Finish + Start Next"
 // - so target the button, not the words.
 function finishBtn(page) {
-  return page.locator('.editor-modal .score-nav__actions .btn--primary').first();
+  return page.locator(EDITOR).locator('.score-nav__actions .btn--primary').first();
 }
 
 async function finishMatch(page, gap = 550) {
@@ -171,8 +172,8 @@ async function openFirstMatch(page, base, compId) {
   await page.goto(`${base}/admin/competition/${compId}/scores`, { waitUntil: 'domcontentloaded' });
   await page.locator('.score-edit-row').first().waitFor({ state: 'visible', timeout: 20000 });
   await page.locator('button.score-btn').first().click();
-  await page.locator('.editor-modal').waitFor({ state: 'visible', timeout: 15000 });
-  const start = page.locator('.editor-modal button', { hasText: /^Start match$/ }).first();
+  await page.locator(EDITOR).waitFor({ state: 'visible', timeout: 15000 });
+  const start = page.locator(EDITOR).locator('button', { hasText: /^Start match$/ }).first();
   if (await start.count()) {
     await start.click();
     await page.waitForTimeout(900);
@@ -259,7 +260,7 @@ export const families = {
         await scoreOpenMatch(adminPage, taps, 120);
         await finishMatch(adminPage, 350);
       }
-      await adminPage.locator('.editor-modal .sb-side--aka').first()
+      await adminPage.locator(EDITOR).locator('.sb-side--aka').first()
         .waitFor({ state: 'visible', timeout: 15000 });
       return { compId: LIVE_COMP, adminPage, adminContext: context };
     },

@@ -50,10 +50,11 @@ export async function withAdminPage(browser, viewport, fn) {
 // the shared helpers that once lived here were wrong for two of the three: they
 // scoped ippons to the individual board's side wrappers, and located the
 // correction-reason box as the last text field, which on a kachinuki row is a
-// typeable fighter name. They were exported and imported by nothing. If those
-// five local implementations are ever unified, unify them on the team editor's
-// behaviour, not the individual one's - and settle first what the editor IS:
-// scored.mjs finds it by `[data-testid="scoring-modal-root"], .editor-modal`,
-// the other four by `.editor-modal` alone.
+// typeable fighter name. They were exported and imported by nothing. The two
+// things every editor does share live in lib/editor.mjs: the dialog selector
+// and the two-tap Finish. The kachinuki "End match" (editors.mjs) and the
+// realtime-update clip's paced double tap (videos.mjs) stay local on purpose:
+// the first arms a different button with a different label, and the second
+// happens on camera, where the gap between the taps is chosen for the viewer.
 
 export const settle = (page, ms = 350) => page.waitForTimeout(ms);

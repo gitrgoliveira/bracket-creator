@@ -22,6 +22,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { settle, withAdminPage } from '../lib/ui.mjs';
+import { EDITOR, finishMatch } from '../lib/editor.mjs';
 import { assertLineupIds, assertIndividualBoutPoints, csvRows } from '../lib/fixture.mjs';
 import { SCORE_EDITOR_SOURCES, VIEWER_SOURCES } from '../lib/scope.mjs';
 
@@ -86,8 +87,6 @@ const POOL_NAMES = [
 // the score-list loop; local for the reason lib/ui.mjs gives in its header.
 // ---------------------------------------------------------------------------
 
-const EDITOR = '[data-testid="scoring-modal-root"], .editor-modal';
-
 // An ippon button is one CHARACTER (M/K/D/T/H, admin_scoring_shared.jsx:35-37),
 // so match it exactly: has-text("M") would also hit a "MK" label elsewhere.
 function ipponButton(scope, waza) {
@@ -104,26 +103,12 @@ async function openEditorForRow(page, row) {
   }
 }
 
-// Finishing is a two-tap guard: the button arms ("Tap again to finish"), only
-// the second tap submits (admin_scoring_individual.jsx:1176/1184, and the same
-// pair on the team sheet at admin_scoring_team.jsx:3850/3859).
-//
-// The two labels are alternatives, not a preference: the editor offers
-// "Finish + Start Next →" whenever another match waits on the same shiaijo and
-// the bare "Finish" only when none does. So the chained form is the normal one,
-// and it leaves the editor OPEN on the next match - which would sit over the
-// list this loop clicks. Dismiss it; the loop re-reads the list and reopens.
-async function finishMatch(page) {
-  const modal = page.locator(EDITOR).first();
-  const plain = modal.locator('button').filter({ hasText: /^Finish$/ }).first();
-  const chained = modal.locator('button').filter({ hasText: /^Finish \+ Start Next/ }).first();
-  const btn = (await plain.count()) ? plain : chained;
-  await btn.click();
-  // Wait for the arm rather than probing it on the same tick; a missed probe
-  // skips the second tap and the following scores land on the wrong match.
-  const armed = modal.locator('button').filter({ hasText: /^Tap again to finish/ }).first();
-  await armed.waitFor({ state: 'visible', timeout: 3000 }).catch(() => {});
-  if (await armed.count()) await armed.click();
+// The editor offers "Finish + Start Next →" whenever another match waits on the
+// same shiaijo, so the chained form is the normal one, and it leaves the editor
+// OPEN on the next match - which would sit over the list this loop clicks.
+// Dismiss it; the loop re-reads the list and reopens.
+async function finishAndClose(page) {
+  await finishMatch(page);
   await settle(page, 600);
   await closeEditor(page);
 }
@@ -170,7 +155,7 @@ async function scoreEveryMatch(page, base, compId, score, limit = 60) {
     }
     await openEditorForRow(page, scorableRows(page).first());
     await score(page.locator(EDITOR).first(), page, done);
-    await finishMatch(page);
+    await finishAndClose(page);
     done += 1;
   }
   return done;

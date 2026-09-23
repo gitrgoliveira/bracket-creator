@@ -9,6 +9,7 @@
 // than photograph the wrong moment.
 import { settle, withAdminPage } from '../lib/ui.mjs';
 import { roster } from '../lib/api.mjs';
+import { EDITOR, finishMatch } from '../lib/editor.mjs';
 import { assertBoutPoints, assertLineupIds } from '../lib/fixture.mjs';
 import { SCORE_EDITOR_SOURCES } from '../lib/scope.mjs';
 
@@ -97,20 +98,14 @@ export const families = {
           const score = page.locator('button').filter({ hasText: /^Score$/ }).first();
           if (!(await score.count())) break;
           await score.click();
-          await page.locator('.editor-modal').waitFor({ state: 'visible', timeout: 15000 });
-          const begin = page.locator('.editor-modal button').filter({ hasText: /^Start match$/ }).first();
+          await page.locator(EDITOR).waitFor({ state: 'visible', timeout: 15000 });
+          const begin = page.locator(EDITOR).locator('button').filter({ hasText: /^Start match$/ }).first();
           if (await begin.count()) { await begin.click(); await page.waitForTimeout(400); }
           for (let i = 0; i < 2; i += 1) {
             await page.locator('.sb-side--shiro .ipt-btn').filter({ hasText: /^M$/ }).first().click();
             await page.waitForTimeout(250);
           }
-          const finish = page.locator('.editor-modal button')
-            .filter({ hasText: /^(Finish|Finish \+ Start Next)/ }).first();
-          await finish.click();
-          await page.waitForTimeout(400);
-          const armed = page.locator('.editor-modal button')
-            .filter({ hasText: /^Tap again to finish/ }).first();
-          if (await armed.count()) await armed.click();
+          await finishMatch(page);
           await page.waitForTimeout(800);
         }
       });
@@ -228,12 +223,12 @@ async function openScoreEditorRow(page, base, a, b) {
   // reads "Score" while the match is scheduled or running and "Correct" once
   // it is complete.
   await row.locator('button').filter({ hasText: /^(Score|Correct)$/ }).first().click();
-  await page.locator('.editor-modal').waitFor({ state: 'visible', timeout: 20000 });
+  await page.locator(EDITOR).waitFor({ state: 'visible', timeout: 20000 });
   await page.waitForTimeout(600);
 }
 
 async function startIfOffered(page) {
-  const btn = page.locator('.editor-modal button', { hasText: 'Start match' });
+  const btn = page.locator(EDITOR).locator('button', { hasText: 'Start match' });
   if (await btn.count()) {
     await btn.first().click();
     await page.waitForTimeout(900);
@@ -253,7 +248,7 @@ async function boutIppon(page, side, waza = 'M') {
 const teamBtn = (page, testid) => page.locator(`[data-testid="${testid}"]`).first();
 
 const recordBoutBtn = (page) =>
-  page.locator('.editor-modal button').filter({ hasText: /^Record bout$/ }).first();
+  page.locator(EDITOR).locator('button').filter({ hasText: /^Record bout$/ }).first();
 
 // Score the current bout only if nothing is on it yet. Record bout is disabled
 // until the bout has been played (`!kachinukiCurrentBoutPlayed`,
@@ -365,7 +360,7 @@ export const recipes = [
     // against the committed 561. One pixel of viewport moves the modal half a
     // pixel and changes nothing else.
     viewport: { width: 1181, height: 820 },
-    capture: { selector: '.editor-modal' },
+    capture: { selector: EDITOR },
     auth: 'admin',
     drive: async ({ page, base, fixture }) => {
       await openScoreEditorRow(page, base, fixture.ind.a, fixture.ind.b);
@@ -400,7 +395,7 @@ export const recipes = [
     name: 'kachinuki-correct-bout',
     family: 'editors',
     viewport: { width: 520, height: 1700 },
-    capture: { selector: '.editor-modal' },
+    capture: { selector: EDITOR },
     auth: 'admin',
     drive: async ({ page, base, fixture }) => {
       await openScoreEditorRow(page, base, fixture.teams.a, fixture.teams.b);
@@ -430,7 +425,7 @@ export const recipes = [
     name: 'kachinuki-scoring-buttons',
     family: 'editors',
     viewport: { width: 520, height: 1250 },
-    capture: { selector: '.editor-modal' },
+    capture: { selector: EDITOR },
     auth: 'admin',
     drive: async ({ page, base, fixture }) => {
       await openScoreEditorRow(page, base, fixture.teams.a, fixture.teams.b);
@@ -452,7 +447,7 @@ export const recipes = [
     name: 'kachinuki-knockout-tie-encho',
     family: 'editors',
     viewport: { width: 520, height: 1250 },
-    capture: { selector: '.editor-modal' },
+    capture: { selector: EDITOR },
     auth: 'admin',
     drive: async ({ page, base, fixture }) => {
       await openScoreEditorRow(page, base, fixture.ko.a, fixture.ko.b);
@@ -471,7 +466,7 @@ export const recipes = [
     name: 'kachinuki-reopen',
     family: 'editors',
     viewport: { width: 800, height: 1100 },
-    capture: { selector: '.editor-modal' },
+    capture: { selector: EDITOR },
     auth: 'admin',
     drive: async ({ page, base, fixture }) => {
       await openScoreEditorRow(page, base, fixture.teams.a, fixture.teams.b);
@@ -507,7 +502,7 @@ export const recipes = [
       }
       // admin_scoring_team.jsx:3481 - the decision controls live behind a
       // <details> disclosure.
-      const disclosure = page.locator('.editor-modal details.decision-disclosure').first();
+      const disclosure = page.locator(EDITOR).locator('details.decision-disclosure').first();
       if (!(await disclosure.evaluate((d) => d.open))) {
         await disclosure.locator('summary').click();
         await page.waitForTimeout(400);

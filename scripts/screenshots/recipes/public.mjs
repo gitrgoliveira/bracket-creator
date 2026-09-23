@@ -15,6 +15,7 @@
 // server and data dir, so the families cannot contaminate one another.
 import { settle, PASSWORD, withAdminPage } from '../lib/ui.mjs';
 import { client } from '../lib/api.mjs';
+import { EDITOR, finishMatch } from '../lib/editor.mjs';
 import { assertIndividualBoutPoints, assertHanteiRecorded } from '../lib/fixture.mjs';
 import { SCORE_EDITOR_SOURCES, VIEWER_SOURCES } from '../lib/scope.mjs';
 import { families as adminFamilies } from './admin.mjs';
@@ -33,11 +34,11 @@ const firstScoreRow = (page) => page.locator('.score-edit-row').first();
 async function openScoreEditorRow(page, row) {
   await row.waitFor({ state: 'visible', timeout: 15000 });
   await row.locator('button', { hasText: /^(Score|Correct)$/ }).first().click();
-  await page.locator('.editor-modal').waitFor({ state: 'visible', timeout: 15000 });
+  await page.locator(EDITOR).waitFor({ state: 'visible', timeout: 15000 });
 }
 
 async function clickStartMatch(page) {
-  const btn = page.locator('.editor-modal button', { hasText: 'Start match' }).first();
+  const btn = page.locator(EDITOR).locator('button', { hasText: 'Start match' }).first();
   if (await btn.count()) await btn.click();
 }
 
@@ -68,18 +69,6 @@ async function armEncho(page) {
 async function decideByHantei(page, side) {
   await page.locator('[data-testid="scoring-modal-hantei-arm"]').click();
   await page.locator(`[data-testid="scoring-modal-hantei-${side}"]`).click();
-}
-
-async function finishMatch(page) {
-  const modal = page.locator('.editor-modal');
-  const finish = modal.locator('button').filter({ hasText: /^(Finish|End match|Save correction)/ }).first();
-  await finish.click();
-  // Give the arm a moment to render rather than probing it on the same tick:
-  // a probe that misses skips the second tap, the match stays open, and the
-  // next taps land on it while every assert still passes.
-  const armed = modal.locator('button').filter({ hasText: /^Tap again to finish/ }).first();
-  await armed.waitFor({ state: 'visible', timeout: 3000 }).catch(() => {});
-  if (await armed.count()) await armed.click();
 }
 
 export const families = {

@@ -29,12 +29,11 @@ file to a reader, so there is nothing to review and nothing to copy.
 
     changed - eyeball these, then copy them over docs/screenshots/:
       viewer-competition: CHANGED 815x1163 (height differs from committed 815x2088 by 44% - check the content by eye)
-      team-lineup: CHANGED 1585x1212 (156024 px differ, max 230 levels)
+      mobile-pool-standings: CHANGED 2530x4914 (799 px differ, max 189 levels, within 1176,4734-1353,4750)
 
 A changed line says how many pixels moved and by how many grey levels at most,
 followed by the box they fall inside, as `within left,top-right,bottom` in the
-capture's own pixels (a 20x40 patch painted at 40,100 reads `within
-40,100-59,139`). A small box names one element; one spanning the capture is a layout
+capture's own pixels. A small box names one element; one spanning the capture is a layout
 shift. A capture whose width, or fixed height, no longer matches its committed
 twin is reported as a size mismatch instead, which usually means the recipe's
 viewport or crop selector needs adjusting rather than that the surface changed.
@@ -168,9 +167,9 @@ being photographed. Two severities, treated differently on purpose:
   screenshot would record that as though it were the product working.
 - A **console error** is reported after the run but does not fail it. The SPA
   asks for a team's lineup before one exists and the server answers 404, which
-  the client handles; that is normal on seven captures here. Failing on it
-  would fire on every team surface, and a gate that always fires is one the
-  operator learns to skip.
+  the client handles; that is normal on seven screenshots and the kachinuki
+  video here. Failing on it would fire on every team surface, and a gate that
+  always fires is one the operator learns to skip.
 
 A run with any failed capture exits non-zero, so the target can gate a script.
 

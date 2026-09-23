@@ -23,7 +23,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { settle, withAdminPage } from '../lib/ui.mjs';
 import { POSITIONS } from '../lib/api.mjs';
-import { EDITOR, finishMatch } from '../lib/editor.mjs';
+import { EDITOR, finishMatch, startMatch } from '../lib/editor.mjs';
 import { assertLineupIds, assertIndividualBoutPoints, csvRows } from '../lib/fixture.mjs';
 import { SCORE_EDITOR_SOURCES, VIEWER_SOURCES } from '../lib/scope.mjs';
 
@@ -95,11 +95,7 @@ function ipponButton(scope, waza) {
 async function openEditorForRow(page, row) {
   await row.locator('button').filter({ hasText: /^Score$/ }).first().click();
   await page.locator(EDITOR).first().waitFor({ state: 'visible', timeout: 15000 });
-  const start = page.locator(EDITOR).locator('button').filter({ hasText: /^Start match$/ }).first();
-  if (await start.count()) {
-    await start.click();
-    await settle(page, 300);
-  }
+  await startMatch(page);
 }
 
 // The editor offers "Finish + Start Next →" whenever another match waits on the
@@ -108,7 +104,6 @@ async function openEditorForRow(page, row) {
 // Dismiss it; the loop re-reads the list and reopens.
 async function finishAndClose(page) {
   await finishMatch(page);
-  await settle(page, 600);
   await closeEditor(page);
 }
 
@@ -309,10 +304,13 @@ async function enterLineup(api, page, base, compId, names) {
     const input = row.locator('input.input');
     await input.waitFor({ state: 'visible', timeout: 10000 });
     await input.fill(names[i]);
-    await row.locator('button').filter({ hasText: /^Save$/ }).click();
+    await Promise.all([
+      page.waitForResponse((r) => r.request().method() === 'PUT' && r.ok()
+        && /\/teams\/[^/]+\/members\/[^/]+$/.test(new URL(r.url()).pathname)),
+      row.locator('button').filter({ hasText: /^Save$/ }).click(),
+    ]);
     await page.locator('[data-testid^="squad-member-"]').nth(i).locator('button')
       .filter({ hasText: /^Rename$/ }).waitFor({ state: 'visible', timeout: 10000 });
-    await settle(page, 200);
   }
 
   // Pick each renamed member into its position BY ID: a position written with
@@ -329,9 +327,13 @@ async function enterLineup(api, page, base, compId, names) {
     await settle(page, 250);
   }
 
-  await page.locator('button').filter({ hasText: /^Save lineup$/ }).click();
-  await page.locator('button').filter({ hasText: /^Save lineup$/ }).waitFor({ state: 'visible', timeout: 15000 });
-  await settle(page, 800);
+  // Wait for the save itself: the assert re-reads the lineup from disk, so a
+  // guessed pause that ends before the PUT lands checks the old file.
+  await Promise.all([
+    page.waitForResponse((r) => r.request().method() === 'PUT' && r.ok()
+      && /\/teams\/[^/]+\/lineups\/\d+$/.test(new URL(r.url()).pathname)),
+    page.locator('button').filter({ hasText: /^Save lineup$/ }).click(),
+  ]);
 
   // Read the lineup back off the server before anything downstream trusts it.
   // A save that half-lands leaves a page that still LOOKS right, and the
@@ -523,12 +525,12 @@ export const recipes = [
       );
       await settle(page, 400);
     },
-    // The shared check proves a memberIds block exists; the count proves all
-    // five positions carry one, which is what puts a chip on every row.
-    assert: ({ dataDir }) => {
-      const { ids } = assertLineupIds(dataDir, TEAM_COMP);
+    // The shared check proves every filled position carries a member id; the
+    // count proves all five are filled, which is what puts a chip on every row.
+    assert: async ({ api }) => {
+      const { ids } = await assertLineupIds(api, TEAM_COMP);
       if (ids !== LINEUP_NAMES.length) {
-        throw new Error(`${TEAM_COMP}: lineups.yaml carries ${ids} member ids, expected ` +
+        throw new Error(`${TEAM_COMP}: the lineup carries ${ids} member ids, expected ` +
           `${LINEUP_NAMES.length} - a position without one renders no competitor number`);
       }
     },

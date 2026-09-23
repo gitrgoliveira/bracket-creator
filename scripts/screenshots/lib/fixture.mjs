@@ -5,8 +5,8 @@
 // plausible-looking page whose stored record is empty. That is precisely how a
 // team screenshot shipped with no competitor-number chips and PW/PL of zero:
 // the numbers belong to member IDs, and a record without them renders bare.
-// Checking the FILE, not the DOM, is the point - the DOM can look right while
-// the write never landed.
+// Checking the stored record, not the DOM, is the point - the DOM can look
+// right while the write never landed.
 import fs from 'node:fs';
 import path from 'node:path';
 
@@ -17,53 +17,34 @@ function read(dataDir, compId, file) {
   return fs.existsSync(p) ? fs.readFileSync(p, 'utf8') : null;
 }
 
-// Every lineup position must carry a member id, not just a name: the number
-// chip is resolved by id, so a name-only lineup renders without one.
+// Every filled lineup position must carry a member id, not just a name: the
+// number chip is resolved by id, so a name-only position renders without one.
 //
-// The stored shape is two parallel maps per lineup (domain.TeamLineup):
-//
-//     positions:
-//       senpo: Hoshino
-//     memberIds:
-//       senpo: c1327f9d-...
-//
-// memberIds is `omitempty`, so its absence is exactly the failure this guards.
-export function assertLineupIds(dataDir, compId) {
-  const yaml = read(dataDir, compId, 'lineups.yaml');
-  if (!yaml) throw new Error(`${compId}: no lineups.yaml - the lineup never saved`);
-
-  const count = (block) => {
-    let total = 0;
-    const lines = yaml.split('\n');
-    for (let i = 0; i < lines.length; i += 1) {
-      if (!new RegExp(`^(\\s*)${block}:\\s*$`).test(lines[i])) continue;
-      const indent = lines[i].match(/^\s*/)[0].length;
-      for (let j = i + 1; j < lines.length; j += 1) {
-        const line = lines[j];
-        if (!line.trim()) continue;
-        const at = line.match(/^\s*/)[0].length;
-        if (at <= indent) break;
-        // The key may be quoted: yaml.v3 writes the numeric position keys a
-        // team of any size but five gets as `"1": Alice`, and a bare-word
-        // pattern counted those lineups as 0 and 0, passing the id-less case
-        // this exists to reject.
-        if (/^\s*"?[\w-]+"?:\s*\S/.test(line)) total += 1;
-      }
+// Checked lineup by lineup, through the server, which serves each team's
+// round-0 lineup already parsed (domain.TeamLineup: `positions` and the
+// `omitempty` `memberIds`, two parallel maps). This used to hand-parse
+// lineups.yaml by indentation and compare FILE-WIDE totals, so one lineup's
+// spare id could hide another's missing one. A team with no lineup yet is
+// skipped (the server answers 404 by design); no lineup at all is a failure.
+// Returns how many positions carry an id, for a recipe that checks the count.
+export async function assertLineupIds(api, compId) {
+  let ids = 0;
+  let lineups = 0;
+  for (const team of await api.get(`/api/competitions/${compId}/participants`)) {
+    const lineup = await api.find(`/api/competitions/${compId}/teams/${team.id}/lineups/0`);
+    if (!lineup) continue;
+    lineups += 1;
+    const memberIds = lineup.memberIds || {};
+    const filled = Object.keys(lineup.positions || {}).filter((pos) => lineup.positions[pos] || memberIds[pos]);
+    const bare = filled.filter((pos) => !memberIds[pos]);
+    if (bare.length) {
+      throw new Error(`${compId}: ${team.name}'s lineup has no member id at ${bare.join(', ')}, ` +
+        `so ${bare.length} row(s) will render without a competitor-number chip`);
     }
-    return total;
-  };
-
-  const positions = count('positions');
-  const ids = count('memberIds');
-  // Every filled position needs its own id, not just one somewhere in the file.
-  // A lineup with five names and one id renders four bare rows, which is the
-  // exact failure this exists to prevent.
-  if (ids < positions) {
-    throw new Error(`${compId}: lineups.yaml has ${positions} filled positions but only ` +
-      `${ids} member ids, so ${positions - ids} row(s) will render without a ` +
-      'competitor-number chip');
+    ids += filled.length;
   }
-  return { positions, ids };
+  if (!lineups) throw new Error(`${compId}: no team has a lineup - the lineup never saved`);
+  return { ids };
 }
 
 // Minimal RFC4180 reader: the SubResults column is JSON embedded in a CSV

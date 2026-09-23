@@ -17,7 +17,9 @@ export const PASSWORD = 'testpassword';
 // RequireElevatedPassword), and the recipe that needs it configures this
 // client rather than re-implementing the call.
 export function client(base, headers = {}) {
-  const call = async (method, p, body, auth = true) => {
+  // `absentIs404`: the route answers 404 for "none yet" by design, so that is
+  // a null result rather than a failure (find, below).
+  const call = async (method, p, body, auth = true, absentIs404 = false) => {
     const res = await fetch(base + p, {
       method,
       headers: {
@@ -27,6 +29,7 @@ export function client(base, headers = {}) {
       },
       body: body != null ? JSON.stringify(body) : undefined,
     });
+    if (absentIs404 && res.status === 404) return null;
     const text = await res.text();
     if (!res.ok) throw new Error(`${method} ${p} -> ${res.status} ${text.slice(0, 200)}`);
     return text.trim() ? JSON.parse(text) : null;
@@ -35,6 +38,9 @@ export function client(base, headers = {}) {
   return {
     call,
     get: (p) => call('GET', p),
+    // A GET for something that may not exist yet, such as a team's lineup
+    // (handlers_lineup.go answers 404 until one is saved): null, not a throw.
+    find: (p) => call('GET', p, undefined, true, true),
     post: (p, b) => call('POST', p, b),
     put: (p, b) => call('PUT', p, b),
 

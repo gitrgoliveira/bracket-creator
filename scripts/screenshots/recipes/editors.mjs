@@ -9,7 +9,7 @@
 // than photograph the wrong moment.
 import { settle, withAdminPage } from '../lib/ui.mjs';
 import { roster } from '../lib/api.mjs';
-import { EDITOR, finishMatch } from '../lib/editor.mjs';
+import { EDITOR, finishMatch, startMatch } from '../lib/editor.mjs';
 import { assertBoutPoints, assertLineupIds } from '../lib/fixture.mjs';
 import { SCORE_EDITOR_SOURCES } from '../lib/scope.mjs';
 
@@ -63,19 +63,19 @@ export const families = {
       await withAdminPage(browser, { width: 1180, height: 820 }, async (page) => {
         for (let guard = 0; guard < 16; guard += 1) {
           await page.goto(`${base}/admin/score-editor`, { waitUntil: 'domcontentloaded' });
-          await page.waitForTimeout(700);
+          // The list has loaded once it shows a row: a court run dry still
+          // lists its completed matches, each offering "Correct".
+          await page.locator('.score-edit-row').first().waitFor({ state: 'visible', timeout: 15000 });
           const score = page.locator('button').filter({ hasText: /^Score$/ }).first();
           if (!(await score.count())) break;
           await score.click();
           await page.locator(EDITOR).waitFor({ state: 'visible', timeout: 15000 });
-          const begin = page.locator(EDITOR).locator('button').filter({ hasText: /^Start match$/ }).first();
-          if (await begin.count()) { await begin.click(); await page.waitForTimeout(400); }
+          await startMatch(page);
           for (let i = 0; i < 2; i += 1) {
             await page.locator('.sb-side--shiro .ipt-btn').filter({ hasText: /^M$/ }).first().click();
             await page.waitForTimeout(250);
           }
           await finishMatch(page);
-          await page.waitForTimeout(800);
         }
       });
       return { compId: id };
@@ -194,14 +194,6 @@ async function openScoreEditorRow(page, base, a, b) {
   await row.locator('button').filter({ hasText: /^(Score|Correct)$/ }).first().click();
   await page.locator(EDITOR).waitFor({ state: 'visible', timeout: 20000 });
   await page.waitForTimeout(600);
-}
-
-async function startIfOffered(page) {
-  const btn = page.locator(EDITOR).locator('button', { hasText: 'Start match' });
-  if (await btn.count()) {
-    await btn.first().click();
-    await page.waitForTimeout(900);
-  }
 }
 
 // Score one ippon on the CURRENT kachinuki bout through the editor's own key
@@ -333,7 +325,7 @@ export const recipes = [
     auth: 'admin',
     drive: async ({ page, base, fixture }) => {
       await openScoreEditorRow(page, base, fixture.ind.a, fixture.ind.b);
-      await startIfOffered(page);
+      await startMatch(page);
       await ensureOneIpponEachSide(page);
     },
   },
@@ -347,7 +339,7 @@ export const recipes = [
     auth: 'admin',
     drive: async ({ page, base, fixture }) => {
       await openScoreEditorRow(page, base, fixture.ind.a, fixture.ind.b);
-      await startIfOffered(page);
+      await startMatch(page);
       await ensureOneIpponEachSide(page);
       await setEncho(page, 2);
     },
@@ -368,7 +360,7 @@ export const recipes = [
     auth: 'admin',
     drive: async ({ page, base, fixture }) => {
       await openScoreEditorRow(page, base, fixture.teams.a, fixture.teams.b);
-      await startIfOffered(page);
+      await startMatch(page);
       while (await fought(page) < 3) {
         await scoreCurrentBout(page);
         await recordBout(page);
@@ -383,8 +375,8 @@ export const recipes = [
       await page.locator('[data-testid="kachinuki-done-bout-1"]').click();
       await page.waitForTimeout(500);
     },
-    assert: ({ dataDir }) => {
-      assertLineupIds(dataDir, TEAMS);
+    assert: async ({ api, dataDir }) => {
+      await assertLineupIds(api, TEAMS);
       assertBoutPoints(dataDir, TEAMS);
     },
   },
@@ -398,15 +390,15 @@ export const recipes = [
     auth: 'admin',
     drive: async ({ page, base, fixture }) => {
       await openScoreEditorRow(page, base, fixture.teams.a, fixture.teams.b);
-      await startIfOffered(page);
+      await startMatch(page);
       while (await fought(page) < 2) {
         await scoreCurrentBout(page);
         await recordBout(page);
       }
       await collapseDoneBouts(page);
     },
-    assert: ({ dataDir }) => {
-      assertLineupIds(dataDir, TEAMS);
+    assert: async ({ api, dataDir }) => {
+      await assertLineupIds(api, TEAMS);
       assertBoutPoints(dataDir, TEAMS);
     },
   },
@@ -420,7 +412,7 @@ export const recipes = [
     auth: 'admin',
     drive: async ({ page, base, fixture }) => {
       await openScoreEditorRow(page, base, fixture.ko.a, fixture.ko.b);
-      await startIfOffered(page);
+      await startMatch(page);
       // admin_scoring_team.jsx:3159 - the bout's own "Tie (hikiwake)" toggle.
       const tie = page.locator('[data-testid="scoring-modal-tie-button"]').first();
       if ((await tie.getAttribute('class') || '').indexOf('btn--primary') === -1) {

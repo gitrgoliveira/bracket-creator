@@ -127,10 +127,11 @@ export function pixelDiff(fileA, fileB) {
   const a = decode(fileA);
   const b = decode(fileB);
   if (!a || !b) return null;
-  // A size mismatch IS a change; saying so here spares the caller a second
-  // field to test in the right order.
+  // A size mismatch IS a change. The caller has already refused a width or
+  // fixed-height mismatch from the headers alone; this is how a full-page
+  // capture, whose height it lets through, still reports one.
   if (a.width !== b.width || a.height !== b.height || a.samples !== b.samples) {
-    return { sizeDiffers: true, changed: true, differing: null, maxDelta: null };
+    return { changed: true, differing: null, maxDelta: null };
   }
   let differing = 0;
   let maxDelta = 0;
@@ -158,12 +159,5 @@ export function pixelDiff(fileA, fileB) {
       }
     }
   }
-  return {
-    sizeDiffers: false,
-    differing,
-    maxDelta,
-    box,
-    changed: differing >= MIN_DIFFERING_PIXELS,
-    total: a.width * a.height,
-  };
+  return { differing, maxDelta, box, changed: differing >= MIN_DIFFERING_PIXELS };
 }

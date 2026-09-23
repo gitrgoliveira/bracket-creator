@@ -74,7 +74,10 @@ export const VIEWER_SOURCES = ['web-mobile/js/viewer'];
 // worktree against HEAD, and files git does not know about yet. Ignored files
 // (the build's version stamps, out/, node_modules) never appear. `since` is
 // resolved to a commit first, so a mistyped ref, or one git would read as an
-// option (`--output=...`), stops the run instead of reaching `git diff`.
+// option (`--output=...`), stops the run instead of reaching `git diff`. Four
+// separate git calls on purpose: each answers a different question, one spawn
+// is milliseconds against a run of minutes, and one command per question is
+// the version that can be read and checked.
 export function changedPaths(since) {
   const git = (...argv) => execFileSync('git', argv, { cwd: REPO, encoding: 'utf8' })
     .split('\n').filter(Boolean);

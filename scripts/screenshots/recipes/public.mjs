@@ -15,7 +15,7 @@
 // server and data dir, so the families cannot contaminate one another.
 import { settle, PASSWORD, withAdminPage } from '../lib/ui.mjs';
 import { client } from '../lib/api.mjs';
-import { EDITOR, finishMatch } from '../lib/editor.mjs';
+import { EDITOR, finishMatch, startMatch } from '../lib/editor.mjs';
 import { assertIndividualBoutPoints, assertHanteiRecorded } from '../lib/fixture.mjs';
 import { SCORE_EDITOR_SOURCES, VIEWER_SOURCES } from '../lib/scope.mjs';
 import { families as adminFamilies } from './admin.mjs';
@@ -35,11 +35,6 @@ async function openScoreEditorRow(page, row) {
   await row.waitFor({ state: 'visible', timeout: 15000 });
   await row.locator('button', { hasText: /^(Score|Correct)$/ }).first().click();
   await page.locator(EDITOR).waitFor({ state: 'visible', timeout: 15000 });
-}
-
-async function clickStartMatch(page) {
-  const btn = page.locator(EDITOR).locator('button', { hasText: 'Start match' }).first();
-  if (await btn.count()) await btn.click();
 }
 
 async function tapIppon(page, side, waza = 'M') {
@@ -160,7 +155,7 @@ export const families = {
         // the (covered-by-modal-backdrop) list underneath. Only match 1
         // needs an explicit "Start match" tap.
         await openScoreEditorRow(page, firstScoreRow(page));
-        await clickStartMatch(page);
+        await startMatch(page);
 
         // Match 1: tied 0-0, then decided in encho by a single strike -
         // the "M (E) -" recent-result row this capture exists to show.
@@ -170,7 +165,6 @@ export const families = {
         await finishMatch(page); // -> chains into match 2, already running
 
         // Match 2: a plain win, so "Recent results" has more than one row.
-        await settle(page);
         await tapIppon(page, 'aka', 'M');
         await tapIppon(page, 'aka', 'K');
         await settle(page);
@@ -180,7 +174,6 @@ export const families = {
         // capture promises "a hantei result with the Ht mark beside the
         // winner", and nothing here used to produce one - the shot shipped
         // without the very mark it exists to show.
-        await settle(page);
         await decideByHantei(page, 'shiro');
 
         // Match 4 is now open and already running (chained by the match 3
@@ -227,7 +220,7 @@ export const families = {
 
         // Match 1: a plain 2-0 win, completed.
         await openScoreEditorRow(page, firstScoreRow(page));
-        await clickStartMatch(page);
+        await startMatch(page);
         await tapIppon(page, 'aka', 'M');
         await tapIppon(page, 'aka', 'K');
         await settle(page);

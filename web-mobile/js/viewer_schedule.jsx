@@ -100,7 +100,19 @@ export function buildWatchlistUpcoming(watched, allMatches, max = WATCHED_UPCOMI
   // Upcoming first: what has not happened yet is the reason to keep looking at
   // this panel. The finished rows read as results, and VSchedItem already
   // renders them with their score rather than a time.
-  return upcoming.concat(finished).slice(0, max);
+  //
+  // ORDER is not the same question as what survives the CAP, and conflating
+  // them cost the ruling above its effect. The cap cuts from the end, results
+  // are appended last, so a watched set with `max` bouts still ahead lost
+  // EVERY result row -- and a coach watching a dojo through round one clears
+  // ten pending bouts immediately, which is exactly when they most want to see
+  // who is already out. Room is reserved for the results instead, bounded so
+  // fixtures keep at least half the list: a competitor who is out is worth
+  // more than the FURTHEST-OUT fixture and less than the next few (operator
+  // ruling 2026-09-23, decided against the two rendered lists rather than in
+  // the abstract).
+  const room = Math.max(max - finished.length, Math.ceil(max / 2));
+  return upcoming.slice(0, room).concat(finished).slice(0, max);
 }
 
 // Return the subset of `matches` where the followed player participates.

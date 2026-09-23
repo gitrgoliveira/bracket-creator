@@ -217,4 +217,66 @@ describe('buildWatchlistUpcoming: a finished competitor shows their last result'
     const out = buildWatchlistUpcoming([{ id: 'p1' }, { id: 'p2' }], [shared]);
     expect(out.map((m) => m.id)).toEqual(['d']);
   });
+
+  // THE CAP. Order and survival are different questions, and answering only
+  // the first left this whole feature switched off for the reader who needs it
+  // most: appending the results and truncating meant a watched set with `max`
+  // bouts still ahead kept none of them. A coach watching a dojo through round
+  // one clears ten pending bouts immediately (measured on a 32-player draw:
+  // fifteen). Operator ruling 2026-09-23, taken against the two rendered lists.
+  describe('the cap reserves room for the results', () => {
+    // n people, each with one pending match; plus one who is already out.
+    const manyPending = (n) => Array.from({ length: n }, (_, i) =>
+      soon('s' + i, 'p' + i, String(9 + i).padStart(2, '0') + ':00'));
+    const watchedPending = (n) => Array.from({ length: n }, (_, i) => ({ id: 'p' + i }));
+
+    it('keeps the result when the fixtures alone would fill the list', () => {
+      const out = buildWatchlistUpcoming(
+        [...watchedPending(10), { id: 'out1' }],
+        [...manyPending(10), done('d1', 'out1', '08:00', 10)],
+        10,
+      );
+      expect(out, 'still capped').toHaveLength(10);
+      expect(out.map((m) => m.id), 'the result survives').toContain('d1');
+      expect(out[out.length - 1].id, 'and it is last, after the fixtures').toBe('d1');
+    });
+
+    it('drops the FURTHEST-OUT fixture to make that room, never the nearest', () => {
+      const out = buildWatchlistUpcoming(
+        [...watchedPending(10), { id: 'out1' }],
+        [...manyPending(10), done('d1', 'out1', '08:00', 10)],
+        10,
+      );
+      const ids = out.map((m) => m.id);
+      expect(ids, 'the nearest bout is never the one sacrificed').toContain('s0');
+      expect(ids, 'the last fixture is').not.toContain('s9');
+    });
+
+    it('fixtures keep at least HALF the list when many competitors are out', () => {
+      // The other side of the bound, and it needs more fixtures than the floor
+      // allows or it pins nothing: with only two of them, reserving max-8=2
+      // slots and reserving ceil(10/2)=5 both yield the same two rows. Eight
+      // pending and eight out is where the floor is the only thing deciding.
+      const outs = Array.from({ length: 8 }, (_, i) => ({ id: 'o' + i }));
+      const results = outs.map((o, i) => done('d' + i, o.id, '08:00', 10 + i));
+      const out = buildWatchlistUpcoming(
+        [...watchedPending(8), ...outs],
+        [...manyPending(8), ...results],
+        10,
+      );
+      expect(out).toHaveLength(10);
+      const pending = out.filter((m) => m.status !== 'completed');
+      expect(pending.length, 'the panel does not become a results page').toBe(5);
+      expect(out.filter((m) => m.status === 'completed').length).toBe(5);
+    });
+
+    it('changes nothing when everything already fits', () => {
+      const out = buildWatchlistUpcoming(
+        [{ id: 'p1' }, { id: 'out1' }],
+        [soon('s1', 'p1', '11:00'), done('d1', 'out1', '08:00', 10)],
+        10,
+      );
+      expect(out.map((m) => m.id)).toEqual(['s1', 'd1']);
+    });
+  });
 });

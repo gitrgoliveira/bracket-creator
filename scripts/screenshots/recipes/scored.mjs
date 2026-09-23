@@ -65,8 +65,8 @@ const ENGI_PAIRS = [
 ];
 
 const POOL_DOJOS = [
-  'Team Alpha', 'Team Beta', 'Team Delta', 'Team Epsilon',
-  'Team Mu', 'Team Psi', 'Team Rho', 'Team Tau', 'Team Theta', 'Team Xi', 'Team Zeta',
+  'Hizen Dojo', 'Mushinkan', 'Shofukan', 'Kaiyukan',
+  'Hokuryukan', 'Fumeikan', 'Renshinkan', 'Shuyukan', 'Yushinkan', 'Kanoya Dojo', 'Ryushinkan',
 ];
 
 // 19 competitors is what the committed capture shows: at poolSize 3 that is

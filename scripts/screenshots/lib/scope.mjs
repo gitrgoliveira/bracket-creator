@@ -72,12 +72,15 @@ export const VIEWER_SOURCES = ['web-mobile/js/viewer'];
 
 // Everything git considers changed: the branch against `since`, the index and
 // worktree against HEAD, and files git does not know about yet. Ignored files
-// (the build's version stamps, out/, node_modules) never appear.
+// (the build's version stamps, out/, node_modules) never appear. `since` is
+// resolved to a commit first, so a mistyped ref, or one git would read as an
+// option (`--output=...`), stops the run instead of reaching `git diff`.
 export function changedPaths(since) {
   const git = (...argv) => execFileSync('git', argv, { cwd: REPO, encoding: 'utf8' })
     .split('\n').filter(Boolean);
+  const [base] = git('rev-parse', '--verify', '--end-of-options', `${since}^{commit}`);
   return new Set([
-    ...git('diff', '--name-only', `${since}...HEAD`),
+    ...git('diff', '--name-only', `${base}...HEAD`),
     ...git('diff', '--name-only', 'HEAD'),
     ...git('ls-files', '--others', '--exclude-standard'),
   ]);

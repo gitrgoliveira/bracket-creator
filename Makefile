@@ -349,8 +349,9 @@ docs/screenshots: export VERSION := $(DOCS_CAPTURE_VERSION)
 # All three take NAME=<one capture>, FAMILY=<one group>, or SINCE=<git ref> to
 # capture only the groups whose source files changed against that ref (plus
 # any uncommitted change); docs/media also takes KIND=still|video. The full run
-# is the default on purpose.
-SHOTS_ARGS = $(if $(NAME),NAME=$(NAME),) $(if $(FAMILY),FAMILY=$(FAMILY),) $(if $(SINCE),SINCE=$(SINCE),)
+# is the default on purpose. Each token is single-quoted so the recipe shell
+# passes the value to run.mjs as one literal argument.
+SHOTS_ARGS = $(if $(NAME),'NAME=$(NAME)',) $(if $(FAMILY),'FAMILY=$(FAMILY)',) $(if $(SINCE),'SINCE=$(SINCE)',)
 
 # The capture build is pinned to the latest release tag so the on-screen
 # version never churns the images. Refuse rather than fall back when no tag is
@@ -371,7 +372,7 @@ docs/media: export VERSION := $(DOCS_CAPTURE_VERSION)
 docs/media: docs/capture-version go/build $(SHOTS_BROWSER_STAMP) ## Regenerate every captured screenshot and video (NAME=, FAMILY=, SINCE=main or KIND=still|video to scope)
 	@# One run with no KIND, rather than depending on the two targets above:
 	@# those would start node and a browser twice over two disjoint halves.
-	@node $(SHOTS_DIR)/run.mjs $(if $(KIND),KIND=$(KIND),) $(SHOTS_ARGS)
+	@node $(SHOTS_DIR)/run.mjs $(if $(KIND),'KIND=$(KIND)',) $(SHOTS_ARGS)
 
 run: go/build ## Run the application locally
 	@echo "Running $(BIN_NAME)..."

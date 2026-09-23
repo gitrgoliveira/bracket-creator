@@ -391,19 +391,21 @@ export function effectivePrimaryKey(watchlist, pinnedKey) {
 // to the first-added entry and re-opened the bug above in a quieter form: the
 // partner's finished bout on the card while the reader's own is minutes away.
 // A match still to fight therefore outranks a result, and a result outranks an
-// entry with nothing at all. The caller is expected to memoise matchFor; it is
-// called at most twice per entry.
+// entry with nothing at all. One pass: matchFor is asked once per entry, the
+// first entry still to fight returns on the spot, and the first with any
+// match at all is remembered in case nobody is.
 export function heroEntry(watchlist, pinnedKey, matchFor) {
   const pinned = findPrimaryEntry(watchlist, pinnedKey);
   if (pinned) return pinned;
   const list = normalizeWatchlist(watchlist);
   if (typeof matchFor === "function") {
-    const toFight = list.find((e) => {
+    let finished = null;
+    for (const e of list) {
       const m = matchFor(e);
-      return !!m && m.status !== "completed";
-    });
-    if (toFight) return toFight;
-    const finished = list.find((e) => !!matchFor(e));
+      if (!m) continue;
+      if (m.status !== "completed") return e;
+      if (!finished) finished = e;
+    }
     if (finished) return finished;
   }
   return list[0] || null;
@@ -537,10 +539,15 @@ export function buildRoster(competitions) {
         //
         // So this branch is effectively unreachable. It is kept because the
         // `checkedIn` merge predates bc-nsrc and removing a guard needs better
-        // evidence than "I could not reach it"; the `comps.push` was added
-        // with it so the two accumulations cannot diverge if it ever does run.
-        existing.comps.push(c.name || "");
-        if (checkedIn && !existing.checkedIn) existing.checkedIn = true;
+        // evidence than "I could not reach it"; `comps` accumulates with it so
+        // the two cannot diverge if it ever does run. A fresh record, not a
+        // mutation: the `...p` above already gave the map its own object, and
+        // an in-place push would reach into it after it was stored.
+        map.set(p.id, {
+          ...existing,
+          comps: [...existing.comps, c.name || ""],
+          checkedIn: existing.checkedIn || checkedIn,
+        });
       }
     });
   });

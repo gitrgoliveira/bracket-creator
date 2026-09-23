@@ -671,7 +671,8 @@ a:hover {
 .court-popover button:focus-visible,
 .running-strip__chip:focus-visible,
 .radio-pill:focus-visible,
-.tsm-fouls__btn:focus-visible {
+.tsm-fouls__btn:focus-visible,
+.watchlist-share-btn:focus-visible {
   /* Visible 2px accent outline + the soft glow: --accent-soft alone is
      ~1.09:1 on white, effectively invisible to keyboard users (critique P3). */
   outline: 2px solid var(--accent);
@@ -8821,6 +8822,8 @@ abbr.msb-lab { text-decoration: none; cursor: help; }
   transition: background 0.15s var(--ease-out), color 0.15s var(--ease-out);
 }
 .watchlist-share-btn:hover { background: var(--accent-soft); color: var(--accent); }
+/* Its focus ring is the shared .btn group's (see .btn:focus-visible above):
+   this is a pill, not a .btn, so it does not inherit that rule by class. */
 
 /* The shared "here is a link, take it" sheet (ui.jsx ShareLinkModal), used by
    the admin registration link and the public watchlist permalink. These rules

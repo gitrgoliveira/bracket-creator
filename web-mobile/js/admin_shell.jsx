@@ -600,9 +600,16 @@ function ShareRegistrationModal({ url, onClose, showToast }) {
         else showToast("Copy failed; select the link above manually", "error");
       }}
     >
-      <p className="share-link__note">
-        Participants can scan this QR code or open the link to register.
-      </p>
+      {/* Worded for what the sheet shows: ShareLinkModal drops the QR for a
+          URL too long to encode, and a note telling people to scan a code that
+          is not there sends them looking for it. */}
+      {(showQR) => (
+        <p className="share-link__note">
+          {showQR
+            ? "Participants can scan this QR code or open the link to register."
+            : "Participants can open the link to register."}
+        </p>
+      )}
     </ShareLinkModal>
   );
 }

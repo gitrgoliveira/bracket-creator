@@ -114,7 +114,14 @@ const QR_MAX_BYTES = byteCapacity(QR_MAX_VERSION);
 // same measure selectVersion is given below.
 export function qrFits(text) {
   if (!text) return false;
-  return new TextEncoder().encode(text).length <= QR_MAX_BYTES;
+  return utf8Bytes(text).length <= QR_MAX_BYTES;
+}
+
+// utf8Bytes: the ONE measure of a payload. qrFits, the encoder and the
+// matrix builder all size the text through it, so "fits" and "encodes" can
+// never disagree about how long a string is.
+function utf8Bytes(text) {
+  return new TextEncoder().encode(text);
 }
 
 function selectVersion(byteLen) {
@@ -132,7 +139,7 @@ function selectVersion(byteLen) {
 // Data encoding: byte mode
 // ---------------------------------------------------------------------------
 function encodeByte(text, version) {
-  const bytes = new TextEncoder().encode(text);
+  const bytes = utf8Bytes(text);
   const dataCW = totalDataCW(version);
   const totalBits = dataCW * 8;
 
@@ -442,7 +449,7 @@ function placeFormatInfo(mat, size, maskId) {
 // Build a complete QR matrix
 // ---------------------------------------------------------------------------
 function buildQR(text) {
-  const bytes = new TextEncoder().encode(text);
+  const bytes = utf8Bytes(text);
   const version = selectVersion(bytes.length);
   const size = matrixSize(version);
 

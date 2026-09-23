@@ -268,8 +268,9 @@ function WatchHeroCard({ nextMatch, primaryIds, entityLabel, onMatchClick }) {
   // Aka-right like every one of them, which is why the tinted rows below keep
   // naming their side in words -- they are ordered subject-first, not
   // Shiro-first, and the word is what maps one onto the other. It returns ""
-  // when nothing was recorded (a completed match carrying no marks at all).
-  const scoreStr = finished ? (matchScoreStr(nextMatch) || "") : "";
+  // when nothing was recorded (a completed match carrying no marks at all),
+  // and the card says "Finished" in that one case rather than sit empty.
+  const scoreStr = finished ? matchScoreStr(nextMatch) || "Finished" : "";
   // For a dojo primary, name the dojo above the competing member so the
   // relationship is clear ("Hagane Dojo" → "Aoi" is up).
   const showDojoEyebrow = entityLabel && entityLabel !== subjectName;
@@ -362,7 +363,7 @@ function WatchHeroCard({ nextMatch, primaryIds, entityLabel, onMatchClick }) {
           {finished ? (
             <>
               <span className="wl-hero__where-l">Result</span>
-              <span className="wl-hero__score">{scoreStr || "Finished"}</span>
+              <span className="wl-hero__score">{scoreStr}</span>
             </>
           ) : nextMatch.court ? (
             <>
@@ -435,7 +436,9 @@ function WatchlistShareModal({ base, watchlist, roster, onClose }) {
   // actually opened. As a panel-level memo it was rebuilt on every tournament
   // refresh -- which on the viewer home means every SSE score write in the
   // venue -- walking the whole roster to produce a string nobody was reading.
-  const url = buildWatchlistLink(base, watchlist, roster);
+  // Memoised on its inputs so the copy-state re-renders below do not walk the
+  // roster again for the same string.
+  const url = useMemo(() => buildWatchlistLink(base, watchlist, roster), [base, watchlist, roster]);
   const ShareLinkModal = window.ShareLinkModal;
 
   return (

@@ -545,9 +545,14 @@ function ShiaijoCountNotes({ error, hint }) {
 // BEFORE qr.js (index.html lines 116 and 128), so the globals do not exist at
 // module-eval time here. Reading them at render defers that to a point where
 // every module script has run.
+//
+// `children` may be a node or a function of showQR. The registration sheet's
+// note says "scan this QR code", which is a lie on the very sheet that drops
+// the QR for an over-long URL; the function form lets a caller word its note
+// for the case actually rendered without measuring the URL a second time.
 function ShareLinkModal({ title, url, onClose, onCopy, children }) {
   const canvasRef = React.useRef(null);
-  const showQR = window.qrFits(url);
+  const showQR = React.useMemo(() => window.qrFits(url), [url]);
 
   React.useEffect(() => {
     // No `window.renderQR` check: index.html script-tags ui.jsx (116) and
@@ -575,7 +580,7 @@ function ShareLinkModal({ title, url, onClose, onCopy, children }) {
       <div className="share-link">
         {showQR && <canvas ref={canvasRef} className="share-link__qr" />}
         <div className="share-link__url" data-testid="share-link-url">{url}</div>
-        {children}
+        {typeof children === "function" ? children(showQR) : children}
       </div>
     </Modal>
   );

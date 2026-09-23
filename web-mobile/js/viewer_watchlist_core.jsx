@@ -527,7 +527,11 @@ export function buildRoster(competitions) {
         // because it used to run its OWN near-identical dedup to collect it
         // -- same shape, but with no `!p || !p.id` guard, so every id-less
         // player collapsed into one entry keyed on `undefined`.
-        map.set(p.id, { ...p, checkedIn, comps: [c.name || ""] });
+        // `numberPrefix` rides with the number it was minted under: the
+        // number rule's "prefix alone selects the draw" arm reads it through
+        // prefixOf (competitor_identity.jsx), because "K021" alone cannot say
+        // whether its prefix is K or K02.
+        map.set(p.id, { ...p, checkedIn, comps: [c.name || ""], numberPrefix: c.numberPrefix || "" });
       } else {
         // Reached only if the SAME participant id appears under two
         // competitions. Participant ids are minted per competition (a fresh

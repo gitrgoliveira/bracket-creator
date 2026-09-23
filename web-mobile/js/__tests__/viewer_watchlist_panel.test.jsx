@@ -664,15 +664,17 @@ describe('WatchPicker', () => {
     // than hand-rolled. A hand-rolled record carried `number` but none of the
     // derived fields the row renders, so it could go green while the real
     // roster shape rendered nothing.
+    // Each competition carries the prefix its numbers were minted under, as
+    // the wire does: the rule's "prefix alone" arm reads it off the record.
     const NUMBERED = buildRoster([
       {
-        id: 'cz', name: 'Z Draw', players: [
+        id: 'cz', name: 'Z Draw', numberPrefix: 'Z', players: [
           { id: 'p1', name: 'Robert Young', dojo: 'Hagane Dojo', number: 'Z1' },
           { id: 'p2', name: 'Nolan Clark', dojo: 'Tsubaki Kenyukai', number: 'Z12' },
         ],
       },
       {
-        id: 'cw', name: 'W Draw', players: [
+        id: 'cw', name: 'W Draw', numberPrefix: 'W', players: [
           { id: 'p3', name: 'Aoi Mori', dojo: 'Hagane Dojo', number: 'W2' },
         ],
       },

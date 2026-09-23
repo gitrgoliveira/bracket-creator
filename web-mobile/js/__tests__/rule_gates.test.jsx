@@ -66,9 +66,11 @@ describe('the competitor-number rule catches every spelling of the test', () => 
     expect(trips('String(p.number || "").toLowerCase().startsWith(q)')).toBe(true);
   });
 
-  it('the accessor, which the first regex missed', () => {
+  it('the accessors, which the first regex missed', () => {
     expect(trips('numberOf(p).startsWith(q)')).toBe(true);
     expect(trips('numberOf(p).toLowerCase().includes(q)')).toBe(true);
+    // The draw-selecting arm reads the prefix; re-deriving it is the same drift.
+    expect(trips('prefixOf(p).toLowerCase().startsWith(q)')).toBe(true);
   });
 
   it('but not asking the owner, and not the exact identity compare', () => {

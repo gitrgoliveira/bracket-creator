@@ -1,4 +1,4 @@
-import { numberOf } from './competitor_identity.jsx';
+import { numberOf, prefixOf } from './competitor_identity.jsx';
 
 // competitor_search.jsx: the owner of the competitor-NUMBER match rule, and
 // with it the answer to "does this row match what the reader typed" for the
@@ -30,29 +30,36 @@ import { numberOf } from './competitor_identity.jsx';
 // so the same keystroke found a person on one surface and nobody on its
 // sibling, under a placeholder promising both.
 //
-// THE NUMBER RULE (operator ruling 2026-09-21, bc-nsrc). The number always
-// needs its prefix, and a number typed WITH its prefix must be the WHOLE
-// number:
+// THE NUMBER RULE (operator rulings 2026-09-21 and 2026-09-23, bc-nsrc). The
+// prefix alone selects the competition's draw, and a number typed past its
+// prefix must be the WHOLE number:
 //
-//     roster: K1, K12, K120, M12, M112, SK1
+//     roster: K1, K12, K120 (prefix K); K021 (prefix K02); M12 (M); SK1 (SK)
 //     "12"    -> nobody          a bare number is not a competitor number
-//     "k"     -> K1, K12, K120   the prefix alone selects that draw
-//     "sk"    -> SK1             "sk1" does not start with "k"
+//     "k"     -> K1, K12, K120, K021   both K draws: "k" begins both prefixes
+//     "k0"    -> K021            only the K02 draw's prefix begins with "k0"
+//     "k02"   -> K021            the whole prefix selects that draw
+//     "sk"    -> SK1             "k" is not how "sk" begins
 //     "k1"    -> K1              NOT K12, NOT K120
 //     "k12"   -> K12             NOT K120
+//     "k021"  -> K021            past the prefix, the whole number
 //
-// Two arms, and deliberately NO bare-digit special case:
+// Two arms, and both read the record's own competition prefix:
 //
-//     q holds no digit  ->  the number STARTS WITH q
-//     q holds a digit   ->  the number EQUALS q
+//     q EQUALS the number                       ->  match
+//     q BEGINS the competition's numberPrefix   ->  match (the draw)
 //
-// "a bare number finds nobody" falls out of exactness rather than being its
-// own clause, because a competition is never drawn without a prefix (see
-// cmd/shared.go resolveNumberPrefix: an unprefixed number "would collide with
-// every other competition's and is not a tag anyone can call at the desk").
-// A hand-edited legacy file with unprefixed numbers would let "1" match the
-// competitor numbered "1" -- which is still that competitor's WHOLE number,
-// so it does not violate the ruling.
+// The prefix has to come from the record (prefixOf, stamped by the two record
+// builders named in competitor_identity.jsx) and not be inferred from the
+// number string, because the string cannot say where its prefix ends:
+// DefaultNumberPrefix mints "K02" once "K" is taken, and "K021" is then K02's
+// first competitor, not K's twenty-first. An earlier form of this rule read
+// "q holds a digit -> exact" and so found nobody for "k02", while the docs
+// promised the whole draw. A competitor only ever carries a number when their
+// competition carries a prefix (handlers_viewer.go numberingApplies), so a
+// record with a number and no prefix is a hand-edited legacy file, where the
+// first arm still lets "1" find the competitor numbered "1" -- that number's
+// WHOLE value -- and nothing else does.
 //
 // NAME AND DOJO keep substring matching. Only the number is anchored: a
 // surname is something you type a fragment of, a number is an identifier you
@@ -69,10 +76,11 @@ import { numberOf } from './competitor_identity.jsx';
 //
 // Consumers ES-import it directly; its only import is the identity leaf.
 
-// The competitor-number ACCESSOR is competitor_identity.jsx's numberOf: it
-// sits beside idOf/nameOf as a plain field read, and lives there because two
-// callers want the field WITHOUT this module's rule (resolveDeepLink and the
-// watchlist permalink both compare a machine-generated number exactly).
+// The competitor-number ACCESSORS are competitor_identity.jsx's numberOf and
+// prefixOf: they sit beside idOf/nameOf as plain field reads, and live there
+// because two callers want the number WITHOUT this module's rule
+// (resolveDeepLink and the watchlist permalink both compare a
+// machine-generated number exactly).
 //
 // This module owns the RULE and nothing else. Importing the leaf costs it no
 // leaf-ness of its own: competitor_identity.jsx has no imports, and the chain
@@ -85,7 +93,9 @@ export function matchesCompetitorNumber(p, q) {
   if (!q) return false;
   const n = numberOf(p).toLowerCase();
   if (!n) return false;
-  return /\d/.test(q) ? n === q : n.startsWith(q);
+  if (n === q) return true;
+  const prefix = prefixOf(p).toLowerCase();
+  return !!prefix && prefix.startsWith(q);
 }
 
 // competitorMatchesQuery: the whole predicate, for a roster record or a match

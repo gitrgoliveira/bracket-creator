@@ -31,7 +31,7 @@ Once the draw for a competition has run, its competitors are numbered. The numbe
 
 The same number identifies that competitor everywhere it appears: on their tag, on the pool or draw sheet, on the Names to Print cards, at the desk, and beside their name on screen in the viewer and on the venue's display boards. Type it the way it is printed, prefix included:
 
-- **The prefix on its own** brings up that whole draw. Type "K" and every K number is listed, along with anyone whose name or dojo happens to contain a "k".
+- **The prefix on its own** brings up that whole draw. Type "K" and every K number is listed, along with anyone whose name or dojo happens to contain a "k". A prefix can carry digits of its own when the plain letter was already taken by another competition: "K02" is then a prefix like any other, so typing "K02" lists that whole draw and "K" lists both.
 - **The prefix and the digits** finds that one competitor. "K12" finds K12, and not K120.
 - **Digits on their own** find nobody by number. "12" is not a competitor number, because it does not say which competition it belongs to. As with the prefix on its own, anyone whose name or dojo happens to contain "12" is still listed.
 

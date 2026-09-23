@@ -90,12 +90,15 @@ const ALLOWED = new Set(['admin_participants.jsx', 'admin_registration_desk.jsx'
 // so the moment a consumer read the number through numberOf the very same
 // hand-rolled test walked past the gate.
 //
+// `prefixOf(` is in the same group: the draw-selecting arm reads the prefix,
+// and a caller re-deriving THAT half of the rule is the same drift.
+//
 // The exact comparison `numberOf(p) === q` is NOT policed, on purpose: the
 // deep link and the permalink compare a machine-generated number whole, which
 // is the identity read the accessor exists for, not a re-derived match rule.
 export const FORBIDDEN = [
   {
-    re: /(\.number\b|numberOf\().*\.(includes|startsWith)\(/,
+    re: /(\.number\b|numberOf\(|prefixOf\().*\.(includes|startsWith)\(/,
     why: 'hand-rolls a competitor-number match; call matchesCompetitorNumber(p, q) (or competitorMatchesQuery) from competitor_search.jsx instead',
   },
 ];

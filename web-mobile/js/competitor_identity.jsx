@@ -62,6 +62,22 @@ export function numberOf(x) {
   return (x && typeof x === "object" && x.number) ? String(x.number) : "";
 }
 
+// prefixOf: the number PREFIX of the competition this record was numbered in
+// ("K", or "K02" when the plain letter was already taken), or "" when the
+// record carries none. Trimmed here, mirroring Go's EffectiveNumberPrefix,
+// because the number was minted from the trimmed value while the wire carries
+// the field as typed. Stamped onto every roster record by buildRoster
+// (viewer_watchlist_core.jsx) and onto every resolved match side by
+// buildPlayerMap (api_serializers.jsx), from the competition each came from.
+//
+// It exists because the number string alone cannot say where its prefix ends:
+// "K021" is K02's first competitor or K's twenty-first, and only the
+// competition knows which. competitor_search.jsx reads it for the "prefix
+// alone selects the draw" arm of the number rule; nothing else should need it.
+export function prefixOf(x) {
+  return (x && typeof x === "object" && x.numberPrefix) ? String(x.numberPrefix).trim() : "";
+}
+
 // competitorKey: id-decides-else-name as a single string, so THE RULE above
 // falls out of comparing two keys rather than being restated at every call
 // site. "id:"+id when x carries one; else "nm:"+normalizeName(name) when x

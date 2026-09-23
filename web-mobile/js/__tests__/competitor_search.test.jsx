@@ -5,35 +5,55 @@ import {
   matchMentions,
 } from '../competitor_search.jsx';
 import { buildRoster } from '../viewer_watchlist_core.jsx';
-import { numberOf } from '../competitor_identity.jsx';
+import { buildPlayerMap, normalizeMatch } from '../api_serializers.jsx';
+import { numberOf, prefixOf } from '../competitor_identity.jsx';
 
-// The worked example from the module header (bc-nsrc operator ruling): a
-// number search needs its prefix, and once the prefix is typed the number
+// The worked example from the module header (bc-nsrc operator rulings): the
+// prefix alone selects the draw, and once typed past the prefix the number
 // must be typed whole. Table-driven over the SAME roster the header uses, so
 // a future edit that narrows or widens the anchoring shows up here first.
+//
+// Every record carries the prefix it was numbered under, as the two record
+// builders stamp it in production (pinned at the bottom of this file). The
+// prefix is a FIELD, not something read off the number: "K021" is K02's
+// first competitor here, and the number string alone could not say so.
 describe('matchesCompetitorNumber; the number rule', () => {
-  const NUMBERS = ['K1', 'K12', 'K120', 'M12', 'M112', 'SK1'];
+  const rec = (number, numberPrefix) => ({ number, numberPrefix });
+  const ROSTER = [
+    rec('K1', 'K'), rec('K12', 'K'), rec('K120', 'K'),
+    rec('K021', 'K02'),
+    rec('M12', 'M'), rec('M112', 'M'), rec('SK1', 'SK'),
+  ];
 
   const cases = [
     // Bare digits: no prefix means it is not a competitor number at all,
     // whatever digits happen to overlap with a real one.
     ['12', []],
     ['1', []],
-    // Prefix alone (no digit in q): every number starting with it, unanchored.
-    ['k', ['K1', 'K12', 'K120']],
-    // "sk1" does not start with "k": SK is a different prefix from K, not a
-    // K-prefixed continuation, so "sk" must never pull in the K numbers.
+    // Prefix alone: every draw whose prefix begins with it. "k" begins both
+    // K and K02, so both draws answer.
+    ['k', ['K1', 'K12', 'K120', 'K021']],
+    // A digit-bearing prefix, minted when the plain letter was taken: "k0"
+    // and "k02" select the K02 draw and nothing from the K draw.
+    ['k0', ['K021']],
+    ['k02', ['K021']],
+    // "sk" does not begin with "k": SK is a different prefix from K, not a
+    // K-prefixed continuation, so "k" must never pull in the SK numbers and
+    // "sk" pulls in only its own.
     ['sk', ['SK1']],
-    // Once a digit is typed, the match is exact: "k1" is K1's WHOLE number,
-    // so K12 and K120 (which merely start with "k1") must NOT hit.
+    ['s', ['SK1']],
+    // Past the prefix the match is exact: "k1" is K1's WHOLE number, so K12
+    // and K120 (which merely start with "k1") must NOT hit, and "k021" is
+    // K02's first competitor, not K's twenty-first.
     ['k1', ['K1']],
     ['k12', ['K12']],
     ['k120', ['K120']],
+    ['k021', ['K021']],
   ];
 
   cases.forEach(([q, expectedHits]) => {
     it(`"${q}" -> [${expectedHits.join(', ')}]`, () => {
-      const hits = NUMBERS.filter((n) => matchesCompetitorNumber({ number: n }, q));
+      const hits = ROSTER.filter((p) => matchesCompetitorNumber(p, q)).map((p) => p.number);
       expect(hits).toEqual(expectedHits);
     });
   });
@@ -43,21 +63,38 @@ describe('matchesCompetitorNumber; the number rule', () => {
   // the anchor back to includes() passes every "hits" row above trivially (a
   // superset still contains the expected subset) but only these rows catch it.
   it('explicit misses: a prefix-typed number never matches a longer or shorter sibling', () => {
-    expect(matchesCompetitorNumber({ number: 'K12' }, 'k1')).toBe(false);
-    expect(matchesCompetitorNumber({ number: 'K120' }, 'k1')).toBe(false);
-    expect(matchesCompetitorNumber({ number: 'K120' }, 'k12')).toBe(false);
-    expect(matchesCompetitorNumber({ number: 'K1' }, 'k12')).toBe(false);
+    expect(matchesCompetitorNumber(rec('K12', 'K'), 'k1')).toBe(false);
+    expect(matchesCompetitorNumber(rec('K120', 'K'), 'k1')).toBe(false);
+    expect(matchesCompetitorNumber(rec('K120', 'K'), 'k12')).toBe(false);
+    expect(matchesCompetitorNumber(rec('K1', 'K'), 'k12')).toBe(false);
     // A competitor now holds exactly one number, so the old fixture that put
     // K1/K12/K120 on a single record is re-expressed as three separate ones.
-    expect(matchesCompetitorNumber({ number: 'K1' }, 'sk1')).toBe(false);
-    expect(matchesCompetitorNumber({ number: 'K12' }, 'sk1')).toBe(false);
-    expect(matchesCompetitorNumber({ number: 'K120' }, 'sk1')).toBe(false);
-    expect(matchesCompetitorNumber({ number: 'K1' }, '1')).toBe(false);
-    expect(matchesCompetitorNumber({ number: 'K12' }, '12')).toBe(false);
+    expect(matchesCompetitorNumber(rec('K1', 'K'), 'sk1')).toBe(false);
+    expect(matchesCompetitorNumber(rec('K12', 'K'), 'sk1')).toBe(false);
+    expect(matchesCompetitorNumber(rec('K120', 'K'), 'sk1')).toBe(false);
+    expect(matchesCompetitorNumber(rec('K1', 'K'), '1')).toBe(false);
+    expect(matchesCompetitorNumber(rec('K12', 'K'), '12')).toBe(false);
+    // The digit-bearing prefix does not leak into the plain one either way:
+    // "k02" is not K's competitor 2 by any reading, and "k2" is not K02's draw.
+    expect(matchesCompetitorNumber(rec('K2', 'K'), 'k02')).toBe(false);
+    expect(matchesCompetitorNumber(rec('K021', 'K02'), 'k2')).toBe(false);
+  });
+
+  it('the prefix is read from the record, not inferred from the number', () => {
+    // Same number string, different competition: only the field can tell.
+    expect(matchesCompetitorNumber(rec('K021', 'K02'), 'k02')).toBe(true);
+    expect(matchesCompetitorNumber(rec('K021', 'K'), 'k02')).toBe(false);
+    // Trimmed as Go's EffectiveNumberPrefix trims it: the number was minted
+    // from the trimmed value while the wire carries the field as typed.
+    expect(matchesCompetitorNumber(rec('K1', ' K '), 'k')).toBe(true);
   });
 
   it('a bare-digit query still finds a legacy unprefixed number, because that number\'s WHOLE value is the digit', () => {
+    // Such a record carries no prefix at all (a competitor only has a number
+    // when their competition has a prefix, handlers_viewer.go numberingApplies),
+    // so the exact arm is the only one that can answer for it.
     expect(matchesCompetitorNumber({ number: '1' }, '1')).toBe(true);
+    expect(matchesCompetitorNumber({ number: '12' }, '1')).toBe(false);
   });
 
   it('returns false for an empty query and does not throw on a null/undefined competitor', () => {
@@ -182,6 +219,22 @@ describe('buildRoster feeding competitor_search', () => {
     expect(competitorMatchesQuery(roster[0], 'alice'), 'still findable by name').toBe(true);
   });
 
+  // THE INVARIANT the rule rests on: a record that carries a number carries
+  // the prefix it was minted under, stamped from its competition. Without it
+  // the "prefix alone" arm has nothing to read, and a reviewer would be
+  // tempted to re-add an inference from the number string -- which cannot be
+  // made ("K021": K02's first, or K's twenty-first?).
+  it('stamps each record with its competition\'s numberPrefix, read back through prefixOf', () => {
+    const roster = buildRoster([
+      { ...comp('K02 Draw', 'running', [{ id: 'A-p1', name: 'Alice', dojo: 'Shibuya', number: 'K021' }]), numberPrefix: 'K02' },
+      { ...comp('K Draw', 'running', [{ id: 'B-p1', name: 'Bob', dojo: 'Osaka', number: 'K21' }]), numberPrefix: ' K ' },
+    ]);
+    expect(prefixOf(roster[0])).toBe('K02');
+    expect(prefixOf(roster[1]), 'trimmed, as the number was minted from the trimmed value').toBe('K');
+    expect(roster.filter((p) => matchesCompetitorNumber(p, 'k02')).map((p) => p.number)).toEqual(['K021']);
+    expect(roster.filter((p) => matchesCompetitorNumber(p, 'k')).map((p) => p.number)).toEqual(['K021', 'K21']);
+  });
+
   it('drops a player with no id, and does not collapse two id-less players into one entry', () => {
     // The guard matters because the schedule picker used to run its own dedup
     // WITHOUT it, keying every id-less player on `undefined` and merging them
@@ -193,5 +246,33 @@ describe('buildRoster feeding competitor_search', () => {
       ]),
     ]);
     expect(roster).toHaveLength(0);
+  });
+});
+
+// The other record kind: a MATCH SIDE. normalizeMatch resolves a side off the
+// map buildPlayerMap builds from the competition, so the prefix has to ride
+// that map or the schedule's free-text arm (matchMentions) would answer
+// "k02" differently from the picker beside it.
+describe('a resolved match side carries the prefix too', () => {
+  const comp = {
+    id: 'k02', numberPrefix: 'K02',
+    players: [
+      { id: 'p1', name: 'Alice', dojo: 'Shibuya', number: 'K021' },
+      { id: 'p2', name: 'Bob', dojo: 'Osaka', number: 'K022' },
+    ],
+  };
+
+  it('buildPlayerMap stamps the competition prefix on every entry', () => {
+    const map = buildPlayerMap(comp);
+    expect(prefixOf(map['p1'])).toBe('K02');
+    expect(prefixOf(map['Bob'])).toBe('K02');
+  });
+
+  it('so matchMentions selects the draw by its prefix and the competitor by the whole number', () => {
+    const m = normalizeMatch({ id: 'm1', sideA: 'Alice', sideB: 'Bob', sideAId: 'p1', sideBId: 'p2', status: 'scheduled' }, buildPlayerMap(comp));
+    expect(prefixOf(m.sideA)).toBe('K02');
+    expect(matchMentions(m, 'k02')).toBe(true);
+    expect(matchMentions(m, 'k021')).toBe(true);
+    expect(matchMentions(m, 'k2'), '"k2" is neither this draw nor a whole number in it').toBe(false);
   });
 });

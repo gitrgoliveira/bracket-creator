@@ -696,8 +696,8 @@ describe('API Utils', () => {
       // bc-pnum: neither fixture player has a real id, so `id` stays "" --
       // buildPlayerMap must never invent one from the name (see the
       // "does not invent an id from the name" test below for why).
-      expect(map['Alice']).toEqual({ id: '', name: 'Alice', dojo: 'Dojo A', seed: 1, displayName: '', number: '', source: '', danGrade: '' });
-      expect(map['Bob']).toEqual({ id: '', name: 'Bob', dojo: 'Dojo B', seed: 0, displayName: '', number: '', source: '', danGrade: '' });
+      expect(map['Alice']).toEqual({ id: '', name: 'Alice', dojo: 'Dojo A', seed: 1, displayName: '', number: '', numberPrefix: '', source: '', danGrade: '' });
+      expect(map['Bob']).toEqual({ id: '', name: 'Bob', dojo: 'Dojo B', seed: 0, displayName: '', number: '', numberPrefix: '', source: '', danGrade: '' });
     });
 
     it('carries displayName and number into the map (qualifier identity in bracket)', () => {

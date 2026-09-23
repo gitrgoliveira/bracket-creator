@@ -12,7 +12,7 @@
 // mergeSharedWatchlist is that rule with a name. Every test below is written
 // to go red on the exact mutation that escaped.
 import { describe, it, expect } from 'vitest';
-import { mergeSharedWatchlist, landedSharedKeys, sharedLinkPass, buildRoster, WATCHLIST_MAX } from '../viewer_watchlist_core.jsx';
+import { mergeSharedWatchlist, landedSharedKeys, sharedLinkPass, buildRoster, WATCHLIST_MAX, readSharedLedger, writeSharedLedger, clearSharedLedger, SS_SHARED_LEDGER } from '../viewer_watchlist_core.jsx';
 import { resolveFreshTokens } from '../watchlist_link.jsx';
 
 const player = (id, name) => ({ type: 'player', id, name, dojo: 'Hagane' });
@@ -234,8 +234,7 @@ describe('sharedLinkPass', () => {
   const filler = (n) => Array.from({ length: n }, (_, i) => ({ type: 'player', id: 'fill-' + i, name: 'F' + i, dojo: 'D' }));
 
   // The effect, with its state fed back. Returns how it came to rest.
-  function drive({ search, roster = ROSTER, watchlist = [], rosterLoaded = true }, maxPasses = 6) {
-    const applied = new Set();
+  function drive({ search, roster = ROSTER, watchlist = [], rosterLoaded = true, applied = new Set() }, maxPasses = 6) {
     let list = watchlist;
     let writes = 0;
     for (let i = 1; i <= maxPasses; i++) {
@@ -309,5 +308,65 @@ describe('sharedLinkPass', () => {
     expect(p.write).toBe(false);
     expect(p.settle).toBe(true);
   });
+
+  // THE LEDGER ACROSS A RELOAD. sharedLinkPass keeps the query while a token
+  // is held (the list is full; a roster failed to read). The ledger of what
+  // landed lived for one mount, so a reload in that state re-landed every
+  // token the previous mount had -- and a reader who had PRUNED one of them
+  // got it back. sessionStorage now carries the ledger for the same tab and
+  // the same link. A fake storage stands in for it here.
+  const fakeStorage = () => {
+    const items = new Map();
+    return {
+      getItem: (k) => (items.has(k) ? items.get(k) : null),
+      setItem: (k, v) => { items.set(k, String(v)); },
+      removeItem: (k) => { items.delete(k); },
+      size: () => items.size,
+    };
+  };
+
+  it('RELOAD MID-HOLD: a pruned entry stays pruned, and the held one still lands when room appears', () => {
+    const storage = fakeStorage();
+    const search = '?w=K1,K2';
+    // First mount: K1 lands, K2 is held (one seat short), the query is kept.
+    const first = drive({ search, watchlist: filler(WATCHLIST_MAX - 1) });
+    expect(first.settle).toBe(false);
+    expect(first.list.some((e) => e.id === 'A-p1')).toBe(true);
+    writeSharedLedger(storage, search, first.applied);
+    // The reader prunes Alice. Then the tab reloads with the query still there.
+    const pruned = first.list.filter((e) => e.id !== 'A-p1');
+    const second = drive({ search, watchlist: pruned, applied: readSharedLedger(storage, search) });
+    expect(second.list.some((e) => e.id === 'A-p1'), 'Alice does not come back').toBe(false);
+    expect(second.list.some((e) => e.id === 'A-p2'), 'Bob, held before, now fits and lands').toBe(true);
+    expect(second.settle).toBe(true);
+    // Settled: the effect clears the ledger with the query.
+    clearSharedLedger(storage);
+    expect(storage.size()).toBe(0);
+  });
+
+  it('the ledger is for THIS link: another link, or none, starts fresh', () => {
+    const storage = fakeStorage();
+    writeSharedLedger(storage, '?w=K1,K2', new Set(['competitor:K1']));
+    expect(readSharedLedger(storage, '?w=K1,K2')).toEqual(new Set(['competitor:K1']));
+    expect(readSharedLedger(storage, '?w=K2').size, 'a different link').toBe(0);
+    expect(readSharedLedger(storage, '?playerNumber=K1').size, 'no link at all').toBe(0);
+    // And nothing is written for a search with no `w` to key it on.
+    writeSharedLedger(storage, '?playerNumber=K1', new Set(['competitor:K1']));
+    expect(JSON.parse(storage.getItem(SS_SHARED_LEDGER)).w).toBe('K1,K2');
+  });
+
+  it('a blocked or corrupt storage costs the reload protection and nothing else', () => {
+    const throwing = { getItem() { throw new Error('blocked'); }, setItem() { throw new Error('blocked'); }, removeItem() { throw new Error('blocked'); } };
+    expect(readSharedLedger(throwing, '?w=K1').size).toBe(0);
+    expect(() => writeSharedLedger(throwing, '?w=K1', new Set(['competitor:K1']))).not.toThrow();
+    expect(() => clearSharedLedger(throwing)).not.toThrow();
+    expect(readSharedLedger(null, '?w=K1').size, 'no storage at all').toBe(0);
+    const corrupt = fakeStorage();
+    corrupt.setItem(SS_SHARED_LEDGER, '{not json');
+    expect(readSharedLedger(corrupt, '?w=K1').size).toBe(0);
+    corrupt.setItem(SS_SHARED_LEDGER, JSON.stringify({ w: 'K1', keys: 'competitor:K1' }));
+    expect(readSharedLedger(corrupt, '?w=K1').size, 'keys must be an array').toBe(0);
+  });
+
 });
 

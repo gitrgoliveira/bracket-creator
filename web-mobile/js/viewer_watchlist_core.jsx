@@ -19,7 +19,7 @@
 
 import { competitorKey } from './competitor_identity.jsx';
 import { resultRecencyDesc } from './result_recency.jsx';
-import { parseWatchlistTokens, resolveFreshTokens } from './watchlist_link.jsx';
+import { parseWatchlistTokens, resolveFreshTokens, WATCHLIST_PARAM } from './watchlist_link.jsx';
 
 const { useState } = React;
 
@@ -274,6 +274,63 @@ export function sharedLinkPass({ search, roster, watchlist, applied, rosterLoade
   };
 }
 
+// The ledger of ?w= tokens that LANDED (sharedApplied in viewer_home.jsx)
+// used to live for one mount, while the list it protects lives in
+// localStorage and outlives it. sharedLinkPass keeps the query while a token
+// is still outstanding -- the list is full, or a competition's roster failed
+// to read -- and across a RELOAD in that state a fresh mount, with an empty
+// ledger, re-applied every token the previous mount had landed: a reader who
+// had pruned one of them got it back. That is the resurrection the strip
+// exists to prevent, reopened for exactly the held case.
+//
+// sessionStorage carries the ledger across the reload: same tab, same link.
+// It is keyed on the raw `w` value, so a DIFFERENT link starts a fresh
+// ledger; a new tab is a fresh open (sessionStorage is per tab); and the
+// strip clears it, so re-opening the same link later still adds. The three
+// helpers take the storage as a parameter so a unit test can hand them a
+// fake, and sessionStore() is the one place the real one is reached -- the
+// property access itself can throw where storage is blocked, and a link that
+// cannot remember what it landed still lands it (the in-memory ledger
+// protects the mount; only the reload protection is lost).
+export const SS_SHARED_LEDGER = "bc_watch_shared_ledger";
+
+const sharedLinkValue = (search) => new URLSearchParams(search || "").get(WATCHLIST_PARAM) || "";
+
+export function sessionStore() {
+  try {
+    return typeof window === "undefined" ? null : window.sessionStorage;
+  } catch (_e) {
+    return null; // storage blocked (private mode, cookies off): no reload protection
+  }
+}
+
+export function readSharedLedger(storage, search) {
+  const w = sharedLinkValue(search);
+  if (!w || !storage) return new Set();
+  try {
+    const parsed = JSON.parse(storage.getItem(SS_SHARED_LEDGER) || "null");
+    if (!parsed || parsed.w !== w || !Array.isArray(parsed.keys)) return new Set();
+    return new Set(parsed.keys.filter((k) => typeof k === "string"));
+  } catch (_e) {
+    return new Set(); // malformed or unreadable: start a fresh ledger
+  }
+}
+
+export function writeSharedLedger(storage, search, keys) {
+  const w = sharedLinkValue(search);
+  if (!w || !storage) return;
+  try {
+    storage.setItem(SS_SHARED_LEDGER, JSON.stringify({ w, keys: Array.from(keys) }));
+  } catch (_e) { /* quota or blocked: the in-memory ledger still protects this mount */ }
+}
+
+export function clearSharedLedger(storage) {
+  if (!storage) return;
+  try {
+    storage.removeItem(SS_SHARED_LEDGER);
+  } catch (_e) { /* nothing to clear */ }
+}
+
 // migrateWatchlistOnLoad: fold the legacy single "followed player"
 // (bc_my_player_id / bc_my_player_name) into the watchlist exactly once.
 // Returns { list, migrated }:
@@ -440,12 +497,46 @@ function matchesInvolving(primaryEntry, roster, allMatches, keep) {
   if (!primaryEntry) return [];
   const ids = new Set(resolveEntryPlayerIds(primaryEntry, roster));
   if (ids.size === 0) return [];
-  const list = Array.isArray(allMatches) ? allMatches : [];
-  return list.filter((m) => {
-    if (!m || !keep(m)) return false;
-    const [a, b] = matchParticipantIds(m);
-    return (a && ids.has(a)) || (b && ids.has(b));
+  const index = indexFor(allMatches);
+  // A dojo entry whose two members meet each other lists that match under
+  // both ids; the Set folds it back to one, in the list's own order.
+  const seen = new Set();
+  ids.forEach((id) => (index.get(id) || []).forEach((m) => seen.add(m)));
+  return (Array.isArray(allMatches) ? allMatches : []).filter((m) => seen.has(m) && keep(m));
+}
+
+// matchesByParticipantId: every match a participant id appears on, keyed by
+// that id. A side with no id is not indexed: an id-less side is a MIXED pair
+// under sameCompetitor's rule and must never be reached by name.
+export function matchesByParticipantId(allMatches) {
+  const index = new Map();
+  (Array.isArray(allMatches) ? allMatches : []).forEach((m) => {
+    if (!m) return;
+    matchParticipantIds(m).forEach((id) => {
+      if (!id) return;
+      if (!index.has(id)) index.set(id, []);
+      index.get(id).push(m);
+    });
   });
+  return index;
+}
+
+// One index per match ARRAY, not per call. The home page asks the two
+// builders above for up to WATCHLIST_MAX entries on every SSE refresh, each
+// against the same `bothSidesMatches` array, so a filter per call walked the
+// whole schedule fifty times per tick. A WeakMap keyed on the array itself
+// builds the index once per array identity and lets it go with the array;
+// callers keep passing plain arrays (viewer_competition.jsx, the suite) and
+// never see it.
+const INDEX_BY_LIST = new WeakMap();
+function indexFor(allMatches) {
+  if (!Array.isArray(allMatches)) return new Map();
+  let index = INDEX_BY_LIST.get(allMatches);
+  if (!index) {
+    index = matchesByParticipantId(allMatches);
+    INDEX_BY_LIST.set(allMatches, index);
+  }
+  return index;
 }
 
 // buildPrimaryNextMatch: the hero match for the primary entry: the nearest

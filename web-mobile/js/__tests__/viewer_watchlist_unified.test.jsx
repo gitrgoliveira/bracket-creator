@@ -18,6 +18,11 @@ import {
   buildPrimaryLastResult,
   rosterFullyLoaded,
 } from '../viewer.jsx';
+import {
+  matchesByParticipantId as coreMatchesByParticipantId,
+  buildPrimaryNextMatch as coreBuildPrimaryNextMatch,
+  buildPrimaryLastResult as coreBuildPrimaryLastResult,
+} from '../viewer_watchlist_core.jsx';
 
 // Fictitious dojo names per the design brief (no real-world clubs).
 const roster = [
@@ -286,7 +291,9 @@ describe('heroEntry vs findPrimaryEntry', () => {
     // that gap is the loop the fixpoint test in watchlist_merge.test.jsx pins.
     const code = readCode('viewer_home.jsx');
     expect(code).toMatch(/const pass = sharedLinkPass\(\{/);
-    expect(code).toMatch(/pass\.landed\.forEach\(\(k\) => sharedApplied\.current\.add\(k\)\);/);
+    // The ledger is a stable Set held in state (seeded from sessionStorage on
+    // a same-link reload), no longer a ref, so it is `.add`, not `.current.add`.
+    expect(code).toMatch(/pass\.landed\.forEach\(\(k\) => sharedApplied\.add\(k\)\);/);
     expect(code).toMatch(/if \(pass\.write\) setWatchlist\(/);
     expect(code).toMatch(/if \(!pass\.settle\) return;/);
     expect(code, 'the write gated on resolution is what looped').not.toMatch(/if \(entries\.length\) setWatchlist/);
@@ -433,5 +440,58 @@ describe('buildPrimaryNextMatch', () => {
       { id: 'weird', sideA: { id: '', name: 'Akira' }, sideB: { id: '', name: 'Someone Else' }, status: 'scheduled', scheduledAt: '09:00' },
     ];
     expect(buildPrimaryNextMatch({ type: 'player', id: 'a1', name: 'Akira' }, roster, selfNamedMatch)).toBeNull();
+  });
+});
+
+// The participant index behind buildPrimaryNextMatch/buildPrimaryLastResult.
+// The home page asks those two for up to WATCHLIST_MAX entries on every SSE
+// refresh, each against the same match array; matchesInvolving used to walk
+// the whole schedule once per call. It now walks it once per ARRAY, through
+// this index, and the index has rules of its own worth pinning.
+describe('matchesByParticipantId', () => {
+  const m = (id, aId, bId) => ({ id, sideA: { id: aId, name: aId }, sideB: { id: bId, name: bId }, sideAId: aId, sideBId: bId, status: 'scheduled' });
+
+  it('lists a match under BOTH of its side ids', () => {
+    const index = coreMatchesByParticipantId([m('m1', 'a1', 'b1')]);
+    expect(index.get('a1').map((x) => x.id)).toEqual(['m1']);
+    expect(index.get('b1').map((x) => x.id)).toEqual(['m1']);
+  });
+
+  it('an id-less side is not indexed at all: never reachable by name, and never under ""', () => {
+    const index = coreMatchesByParticipantId([m('m1', 'a1', '')]);
+    expect(index.has('')).toBe(false);
+    expect(index.get('a1').map((x) => x.id)).toEqual(['m1']);
+  });
+
+  it('a dojo whose two members meet each other gets that match ONCE from the builders', () => {
+    // Both members' ids point at the same match; the Set in matchesInvolving
+    // folds the two index hits back to one.
+    const roster = [
+      { id: 'a1', name: 'Akira', dojo: 'Hagane Dojo' },
+      { id: 'a2', name: 'Aoi', dojo: 'Hagane Dojo' },
+    ];
+    const meet = { ...m('m1', 'a1', 'a2'), status: 'completed', modifiedAt: 5 };
+    const other = { ...m('m2', 'a1', 'b1'), status: 'completed', modifiedAt: 1 };
+    const dojo = { type: 'dojo', dojo: 'Hagane Dojo' };
+    expect(coreBuildPrimaryLastResult(dojo, roster, [meet, other])).toBe(meet);
+    expect(coreBuildPrimaryNextMatch(dojo, roster, [m('m3', 'a2', 'b1'), m('m4', 'a1', 'a2')]).id).toBe('m3');
+  });
+
+  it('tolerates a non-array and null entries', () => {
+    expect(coreMatchesByParticipantId(null).size).toBe(0);
+    expect(coreMatchesByParticipantId([null, m('m1', 'a1', 'b1')]).get('a1')).toHaveLength(1);
+  });
+});
+
+// The ?w= ledger survives a reload of the same tab (readSharedLedger and
+// friends, pinned in watchlist_merge.test.jsx). This checks the effect that
+// owns the ledger actually reads, writes and clears it, which a unit test of
+// the helpers cannot see.
+describe('viewer_home carries the shared ledger through sessionStorage', () => {
+  it('seeds from it, writes on a landing, clears on settle', () => {
+    const src = readCode('viewer_home.jsx');
+    expect(src).toMatch(/readSharedLedger\(sessionStore\(\)/);
+    expect(src).toMatch(/writeSharedLedger\(sessionStore\(\)/);
+    expect(src).toMatch(/clearSharedLedger\(sessionStore\(\)\)/);
   });
 });

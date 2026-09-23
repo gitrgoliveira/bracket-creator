@@ -2,7 +2,7 @@
 // Extracted from viewer.jsx (mp-pxxc step 10).
 
 import { competitionKindLabel, compMatches, tournamentMatches, TournamentInfo, compareDmy } from './viewer_utils.jsx';
-import { matchParticipantIds, addPlayerToWatchlist, mergeSharedWatchlist, resolveEntryPlayerIds, resolveWatchedPlayers, findPrimaryEntry, heroEntry, sharedLinkPass, buildPrimaryNextMatch, buildPrimaryLastResult, buildRoster, rosterFullyLoaded, useWatchlist, buildWatchedSets, matchInvolvesWatchedSet } from './viewer_watchlist_core.jsx';
+import { matchParticipantIds, addPlayerToWatchlist, mergeSharedWatchlist, resolveEntryPlayerIds, resolveWatchedPlayers, findPrimaryEntry, heroEntry, sharedLinkPass, readSharedLedger, writeSharedLedger, clearSharedLedger, sessionStore, buildPrimaryNextMatch, buildPrimaryLastResult, buildRoster, rosterFullyLoaded, useWatchlist, buildWatchedSets, matchInvolvesWatchedSet } from './viewer_watchlist_core.jsx';
 import { runOnce, notifEnable, notifDisable, useChimeMuted, isFollowedMatchOnDeck, useFollowedMatchAlert, useSecondaryWatchAlert, MyMatchAlertBanner } from './viewer_alerts.jsx';
 import { notificationSupported } from './viewer_notifications.jsx';
 import { VSchedItem, MatchViewerModal } from './viewer_match.jsx';
@@ -181,7 +181,11 @@ export function ViewerHome({ tournament, onSelectCompetition, onAdminClick, onOp
   //
   // Recording is equally load-bearing in the other direction: it stops a
   // healing roster re-adding an entry the reader has since removed.
-  const sharedApplied = useRefV(new Set());
+  // Seeded from sessionStorage when the tab is reloading the SAME link
+  // mid-hold, so what the previous mount landed is not landed again (see
+  // readSharedLedger). A stable Set: useState's initialiser runs once.
+  const [sharedApplied] = useState(() =>
+    (typeof window === "undefined" ? new Set() : readSharedLedger(sessionStore(), window.location.search)));
   const sharedSettled = useRefV(false);
   React.useEffect(() => {
     if (sharedSettled.current) return;
@@ -199,9 +203,12 @@ export function ViewerHome({ tournament, onSelectCompetition, onAdminClick, onOp
     // dependency, and a reader already at WATCHLIST_MAX spun at ~60
     // localStorage writes a second for as long as the tab was open.
     const pass = sharedLinkPass({
-      search: window.location.search, roster, watchlist, applied: sharedApplied.current, rosterLoaded,
+      search: window.location.search, roster, watchlist, applied: sharedApplied, rosterLoaded,
     });
-    pass.landed.forEach((k) => sharedApplied.current.add(k));
+    pass.landed.forEach((k) => sharedApplied.add(k));
+    // Remembered across a reload of this tab while the query is held, so a
+    // pruned entry does not come back with the reload.
+    if (pass.landed.length > 0) writeSharedLedger(sessionStore(), window.location.search, sharedApplied);
     // MERGE, never replace: arriving at someone else's link must not delete
     // the list you already keep. The rule is mergeSharedWatchlist's, not this
     // effect's -- it used to be spelled out here, which is exactly how it got
@@ -212,6 +219,9 @@ export function ViewerHome({ tournament, onSelectCompetition, onAdminClick, onOp
     if (pass.write) setWatchlist((prev) => mergeSharedWatchlist(prev, pass.entries));
     if (!pass.settle) return;
     sharedSettled.current = true;
+    // Settled: the query goes below, and the ledger with it, so re-opening
+    // this same link later is a fresh open that adds again.
+    clearSharedLedger(sessionStore());
     // Strip ?w= once there is nothing left to resolve. The ledger above lives
     // for this mount, but the list it protects lives in localStorage and
     // outlives it -- so without this, a reader who opens a shared link, prunes
@@ -229,8 +239,8 @@ export function ViewerHome({ tournament, onSelectCompetition, onAdminClick, onOp
     if (nextSearch !== window.location.search) {
       window.history.replaceState(null, "", window.location.pathname + nextSearch);
     }
-    // The two refs are listed rather than suppressed: a ref object's identity
-    // never changes, so naming them is honest and costs no extra runs.
+    // The Set and the ref are listed rather than suppressed: neither identity
+    // ever changes, so naming them is honest and costs no extra runs.
   }, [roster, watchlist, rosterLoaded, setWatchlist, sharedApplied, sharedSettled]);
 
   // global "across-all-competitions" lists for the home page

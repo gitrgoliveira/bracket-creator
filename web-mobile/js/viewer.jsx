@@ -29,7 +29,6 @@ export { notificationSupported, AnnBellBtn } from './viewer_notifications.jsx';
 export { subBoutLabel } from './viewer_match.jsx';
 export { mymatchQueueLabel };
 export { shouldShowRegister };
-export { resolveDeepLink } from './viewer_home.jsx';
 
 // --- window.* surface for non-module consumers ---
 // (viewer_awards.jsx sets window.{buildAllWinnersPublic,AllWinnersView}; the

@@ -78,9 +78,8 @@ import { numberOf, prefixOf } from './competitor_identity.jsx';
 
 // The competitor-number ACCESSORS are competitor_identity.jsx's numberOf and
 // prefixOf: they sit beside idOf/nameOf as plain field reads, and live there
-// because two callers want the number WITHOUT this module's rule
-// (resolveDeepLink and the watchlist permalink both compare a
-// machine-generated number exactly).
+// because the watchlist permalink wants the number WITHOUT this module's rule
+// (it compares a machine-generated number exactly).
 //
 // This module owns the RULE and nothing else. Importing the leaf costs it no
 // leaf-ness of its own: competitor_identity.jsx has no imports, and the chain

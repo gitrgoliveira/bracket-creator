@@ -119,11 +119,16 @@ describe('the home address bar mirrors the watchlist', () => {
     expect(window.location.search).toBe('?w=M1');
   });
 
-  it("other parameters survive beside the mirrored list", async () => {
-    // resolveDeepLink reads ?name= once; a reload can only retry it if the
-    // query keeps it.
-    await mount({ name: 'T', competitions: [comp('A', 'K', [ALICE, BOB])] }, '?name=Alice');
+  it('?player= and ?name= add nobody, and are left alone beside the list', async () => {
+    // The one-shot ?player= / ?name= reader was removed on 2026-09-23 as
+    // duplicated behaviour: ?w=<id> does what ?player= did, and nothing ever
+    // produced ?name=. A leftover link neither adds anyone nor loses its
+    // parameters to the mirror.
+    window.localStorage.setItem('bc_watchlist', JSON.stringify([
+      { type: 'player', id: 'a1', name: 'Alice Abe', dojo: 'Nara' },
+    ]));
+    await mount({ name: 'T', competitions: [comp('A', 'K', [ALICE, BOB])] }, '?player=a2&name=Bob');
     expect(watchedNames()).toEqual(['Alice Abe']);
-    expect(window.location.search).toBe('?name=Alice&w=K1');
+    expect(window.location.search).toBe('?player=a2&name=Bob&w=K1');
   });
 });

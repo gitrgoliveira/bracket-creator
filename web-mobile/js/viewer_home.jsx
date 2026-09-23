@@ -2,7 +2,7 @@
 // Extracted from viewer.jsx (mp-pxxc step 10).
 
 import { competitionKindLabel, compMatches, tournamentMatches, TournamentInfo, compareDmy } from './viewer_utils.jsx';
-import { matchParticipantIds, addPlayerToWatchlist, mergeSharedWatchlist, resolveEntryPlayerIds, resolveWatchedPlayers, findPrimaryEntry, heroEntry, sharedLinkPass, readSharedLedger, writeSharedLedger, clearSharedLedger, sessionStore, buildPrimaryNextMatch, buildPrimaryLastResult, buildRoster, rosterFullyLoaded, useWatchlist, buildWatchedSets, matchInvolvesWatchedSet } from './viewer_watchlist_core.jsx';
+import { matchParticipantIds, mergeSharedWatchlist, resolveEntryPlayerIds, resolveWatchedPlayers, findPrimaryEntry, heroEntry, sharedLinkPass, readSharedLedger, writeSharedLedger, clearSharedLedger, sessionStore, buildPrimaryNextMatch, buildPrimaryLastResult, buildRoster, rosterFullyLoaded, useWatchlist, buildWatchedSets, matchInvolvesWatchedSet } from './viewer_watchlist_core.jsx';
 import { runOnce, notifEnable, notifDisable, useChimeMuted, isFollowedMatchOnDeck, useFollowedMatchAlert, useSecondaryWatchAlert, MyMatchAlertBanner } from './viewer_alerts.jsx';
 import { notificationSupported } from './viewer_notifications.jsx';
 import { VSchedItem, MatchViewerModal } from './viewer_match.jsx';
@@ -63,31 +63,6 @@ export function shouldShowRegister(tournament, competition, hasHandler) {
     (!competition.status || competition.status === "setup"));
 }
 
-// Pure helper: resolve a ?player= / ?name= deep link against the participant
-// roster. Resolution order:
-//   1. ?player= as exact id (UUID) match
-//   2. ?name= (or ?player= as backward-compatible fallback) as case-insensitive
-//      name substring: allows legacy links that used ?player=<name> to keep working
-// Returns null when no participant matches, else { player: {id,name} }.
-export function resolveDeepLink(searchString, roster) {
-  const params = new URLSearchParams(searchString || "");
-  const qpPlayer = (params.get("player") || "").trim();
-  const qpName = (params.get("name") || "").trim();
-  if (!qpPlayer && !qpName) return null;
-  // No ?playerNumber= arm any more: a printed tag's QR is a one-entry
-  // watchlist permalink, ?w=<number> (bc-wlpl, helper.playerTagURL), read by
-  // the ?w= effect below with its retry while a roster is still loading. The
-  // operator ruled 2026-09-23 that tags printed before that need not keep
-  // working, so nothing reads the old parameter.
-  let hit = qpPlayer ? roster.find((p) => p.id === qpPlayer) : null;
-  if (!hit) {
-    const needle = (qpName || qpPlayer).toLowerCase();
-    if (needle) hit = roster.find((p) => (p.name || "").toLowerCase().includes(needle));
-  }
-  if (!hit) return null;
-  return { player: { id: hit.id, name: hit.name } };
-}
-
 // mirrorWatchlistToAddressBar: keep the home screen's `w` equal to the list
 // (bc-wlpl). The rule is mirrorWatchlistParam's; this only carries it out.
 // replaceState adds no history entry, so an edit to the list never costs the
@@ -146,32 +121,12 @@ export function ViewerHome({ tournament, onSelectCompetition, onAdminClick, onOp
   // "not in this tournament" claim depends on the difference.
   const rosterLoaded = useMemo(() => rosterFullyLoaded(t.competitions), [t.competitions]);
 
-  // Add a single player to the watchlist (dedup by id). Used by the deep link.
-  const addWatchPlayer = (p) => setWatchlist(prev => addPlayerToWatchlist(prev, p));
-
-  // T114 / mp-xhaa: parse `?player=<uuid>` (and optionally `?name=<name>`) deep
-  // links from QR codes exactly once. Adding to the watchlist is
-  // non-destructive (unlike the old single-follow overwrite), so we just add
-  // the resolved player: they become the implicit primary when they land as
-  // the sole entry.
-  const deepLinkApplied = useRefV(false);
-  React.useEffect(() => {
-    if (deepLinkApplied.current) return;
-    if (typeof window === "undefined" || !window.location) return;
-    if (roster.length === 0) return; // wait until participants are loaded
-    const result = resolveDeepLink(window.location.search, roster);
-    deepLinkApplied.current = true;
-    if (result && result.player) addWatchPlayer(result.player);
-    // Runs exactly once, gated by the deepLinkApplied ref; addWatchPlayer is an
-    // unstable callback we deliberately do not depend on.
-    // oxlint-disable-next-line react-hooks/exhaustive-deps
-  }, [roster, watchlist]);
-
-  // bc-wlpl: the MULTI-ENTRY permalink, `?w=`. Its own effect, not folded into
-  // the one above: the two links have different gates (this one keeps
-  // resolving while the roster fills, that one is strictly once) and sharing a
-  // body made each one's early return depend on its position relative to the
-  // other's.
+  // bc-wlpl: the viewer's one deep link, `?w=` -- a shared list, a printed
+  // tag's QR (a one-entry list) and the home address bar are all this. A
+  // one-shot `?player=` / `?name=` reader used to sit beside it; the operator
+  // removed it on 2026-09-23 as duplicated behaviour, since `?w=<id>` does
+  // what `?player=<id>` did (and retries while rosters load) and nothing ever
+  // produced a `?name=` link.
   //
   // A token is recorded ONLY once it resolves, which is what makes a
   // partially-loaded roster safe: a competition whose participants failed to

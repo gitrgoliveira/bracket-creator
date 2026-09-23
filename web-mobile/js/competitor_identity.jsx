@@ -53,11 +53,11 @@ export function nameOf(x) {
 // (bc-pnum): it does not exist before the draw runs, and regenerating a draw
 // re-points it at someone else. Identity here stays id-then-name.
 //
-// It lives in this leaf rather than in competitor_search.jsx because two of
-// that module's importers wanted only this accessor and had to disclaim its
-// typed-query rule in a comment to say so -- resolveDeepLink and the watchlist
-// permalink both compare a machine-generated number EXACTLY, which is the
-// opposite of the rule that module owns.
+// It lives in this leaf rather than in competitor_search.jsx because the
+// watchlist permalink wants only this accessor: it compares a machine-
+// generated number EXACTLY, which is the opposite of the typed-query rule that
+// module owns, and importing that module meant disclaiming its rule in a
+// comment.
 export function numberOf(x) {
   return (x && typeof x === "object" && x.number) ? String(x.number) : "";
 }

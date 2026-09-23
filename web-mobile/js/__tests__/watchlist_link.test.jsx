@@ -172,7 +172,7 @@ describe('resolveWatchlistTokens drops what does not resolve, keeps the rest', (
   });
 });
 
-describe('resolution precedence: id before number, matching resolveDeepLink', () => {
+describe('resolution precedence: id before number', () => {
   it('a token equal to one competitor\'s id AND another competitor\'s number resolves to the ID match', () => {
     const roster = [
       { id: 'DUPTOK', name: 'IdOwner', dojo: 'X', number: '' },
@@ -234,9 +234,7 @@ describe('parseWatchlistTokens drops whitespace-only tokens', () => {
 });
 
 // stripWatchlistParam: what the address bar keeps once a shared link has been
-// folded in. The rest of the query is not the watchlist's to clear:
-// resolveDeepLink reads `?player=` / `?name=`, and a reload can only retry one
-// of those if it survives.
+// folded in. The rest of the query is not the watchlist's to clear.
 describe('stripWatchlistParam', () => {
   it('removes w and keeps a deep link\'s parameter', () => {
     // THE regression. Clearing the whole query spent a deep link that had

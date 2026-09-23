@@ -115,10 +115,10 @@ The following clip walks through the flows end to end, recorded from the score e
   Your browser does not support the video tag.
 </video>
 
-1. **Winner stays on** (0:00): each win keeps the winner on to face the losing team's next fighter, and every fought bout reads **vs** in the centre.
+1. **Winner stays on** (0:02): each win keeps the winner on to face the losing team's next fighter, and every fought bout reads **vs** in the centre.
 2. **A knockout tie and Encho** (0:08): a knockout cannot end in a draw, so a tied bout holds **End match** back and offers **Encho**: the same pair fights on, marked **(E)**, until a point lands.
 3. **A drawn encounter in a league** (0:15): the same tie in a league is simply ended as a draw, marked **X**.
-4. **Reopen** (0:22): a completed encounter is reopened with all its bouts intact, then ended again, which asks for a reason.
+4. **Reopen** (0:21): a completed encounter is reopened with all its bouts intact, then ended again, which asks for a reason.
 
 ### Choosing the team match format
 
@@ -178,7 +178,7 @@ In Swiss, two further tie-breaks apply after those eight criteria:
 head-to-head (the team that won the direct encounter ranks higher), then
 name order as the final deterministic fallback.
 
-![Team Swiss standings: a table with rank, team, and the full tie-break columns W, L, T, IV, IL, IT, PW, and PL, with a caption reading "Ranked by: team wins, IV, PW, head-to-head".](../../screenshots/swiss-standings-team.png)
+![Team Swiss standings: a table with rank, team, and the full tie-break columns W, L, T, IV, IL, IT, PW, and PL, with a caption ranking by team wins, then IV, then PW, then head-to-head.](../../screenshots/swiss-standings-team.png)
 
 !!! note
     When two or more teams remain tied after all eight criteria and the tie is consequential (it decides who advances or how they are seeded), the next step depends on format:

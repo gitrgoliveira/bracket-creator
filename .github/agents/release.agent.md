@@ -73,6 +73,7 @@ Commits are categorized by conventional commit prefixes:
 2. Suggest an appropriate version bump (major/minor/patch) based on commit history
 3. Run `make go/test` to verify all tests pass
 4. Run `make goreleaser/test` to validate the goreleaser config locally
+   - Check `DOCS_CAPTURE_VERSION` in the `Makefile` equals the version being tagged: the docs screenshots show it, so a release's docs must be captured at that release's version. If it differs, stop and ask the user to set it, run `make docs/screenshots`, and merge the changed captures before tagging
 5. **Generate release notes preview**:
    - Parse commits since the last tag using `git log --pretty=format:"%s|%h" <previous_tag>..HEAD`
    - Categorize commits according to the rules in the "Release Notes Format" section

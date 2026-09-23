@@ -25,7 +25,7 @@ else
 endif
 
 # Define phony targets
-.PHONY: default help clean local/deps hooks/install go/fmt go/generate go/test go/build go/lint go/sec go/sec-tests go/vuln go/security js/deps js/lint js/sec js/outdated js/security js/check-imports js/validate examples docker/build docker/run pre-commit docs/deps docs/serve docs/open docs/build docs/linkcheck docs/prose docs/clean run run-mobile esbuild-jsx goreleaser/test release version
+.PHONY: default help clean local/deps hooks/install go/fmt go/generate go/test go/build go/lint go/sec go/sec-tests go/vuln go/security js/deps js/lint js/sec js/outdated js/security js/check-imports js/validate examples docker/build docker/run pre-commit docs/deps docs/serve docs/open docs/build docs/linkcheck docs/prose docs/clean docs/screenshots docs/videos docs/media run run-mobile esbuild-jsx goreleaser/test release version
 
 default: help ## Show help information (default)
 
@@ -315,6 +315,61 @@ docs/prose: ## Check the docs sources against the public-prose rules (stdlib-onl
 docs/clean: ## Remove the docs venv and the built site
 	@echo "Removing $(DOCS_VENV) and site/..."
 	rm -rf $(DOCS_VENV) site
+
+# Docs capture harness. Playwright lives in its own package on purpose: putting
+# it in web-mobile/package.json would download a browser for every worktree that
+# runs js/deps, and would pull it into audit-ci's scope. Both stamps sit inside
+# node_modules/, which is already ignored.
+#
+# The captures are built stamped with DOCS_CAPTURE_VERSION rather than the
+# working tree's own version. The app prints its build metadata on screen (a
+# version badge in the web UI, a footer in the tournament app), and anything
+# but a release version reads as a commit sha plus a build date, so every
+# capture showing it would differ from the committed one after any commit and
+# the "what changed" list would be noise. It also keeps a branch name out of
+# the published images: captured from a worktree, the badge read the full
+# branch, session id and all.
+#
+# It is the release these docs will ship WITH, set by hand, not derived from
+# the latest tag: a derived value showed the previous release in a release's
+# own docs, and moved every version-bearing capture the moment a tag landed.
+# Checking it equals the version about to be tagged is a release step
+# (.github/agents/release.agent.md). This leaves bin/bracket-creator stamped
+# with it until the next plain `make go/build`.
+DOCS_CAPTURE_VERSION := v2.1.0
+
+SHOTS_DIR := scripts/screenshots
+SHOTS_DEPS_STAMP := $(SHOTS_DIR)/node_modules/.package-lock.json
+SHOTS_BROWSER_STAMP := $(SHOTS_DIR)/node_modules/.chromium-installed
+
+$(SHOTS_DEPS_STAMP): $(SHOTS_DIR)/package.json $(SHOTS_DIR)/package-lock.json
+	@echo "Installing the capture harness dependencies..."
+	@npm --prefix $(SHOTS_DIR) ci --no-audit --no-fund
+	@touch $@
+
+$(SHOTS_BROWSER_STAMP): $(SHOTS_DEPS_STAMP)
+	@echo "Downloading the harness browser..."
+	@cd $(SHOTS_DIR) && npx playwright-core install chromium
+	@touch $@
+
+docs/screenshots: export VERSION := $(DOCS_CAPTURE_VERSION)
+# The scoping arguments (NAME=, FAMILY=, SINCE=, and KIND= on docs/media) are
+# documented in scripts/screenshots/README.md. Each is single-quoted so the
+# recipe shell passes the value to run.mjs as one literal argument.
+SHOTS_ARGS = $(if $(NAME),'NAME=$(NAME)',) $(if $(FAMILY),'FAMILY=$(FAMILY)',) $(if $(SINCE),'SINCE=$(SINCE)',)
+
+docs/screenshots: go/build $(SHOTS_BROWSER_STAMP) ## Regenerate the application screenshots (NAME=, FAMILY= or SINCE=main to scope)
+	@node $(SHOTS_DIR)/run.mjs KIND=still $(SHOTS_ARGS)
+
+docs/videos: export VERSION := $(DOCS_CAPTURE_VERSION)
+docs/videos: go/build $(SHOTS_BROWSER_STAMP) ## Regenerate the application videos (NAME=, FAMILY= or SINCE=main to scope)
+	@node $(SHOTS_DIR)/run.mjs KIND=video $(SHOTS_ARGS)
+
+docs/media: export VERSION := $(DOCS_CAPTURE_VERSION)
+docs/media: go/build $(SHOTS_BROWSER_STAMP) ## Regenerate every captured screenshot and video (NAME=, FAMILY=, SINCE=main or KIND=still|video to scope)
+	@# One run with no KIND, rather than depending on the two targets above:
+	@# those would start node and a browser twice over two disjoint halves.
+	@node $(SHOTS_DIR)/run.mjs $(if $(KIND),'KIND=$(KIND)',) $(SHOTS_ARGS)
 
 run: go/build ## Run the application locally
 	@echo "Running $(BIN_NAME)..."

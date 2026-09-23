@@ -1,0 +1,247 @@
+// Admin SETUP surfaces: create-competition, participants/seeding, the
+// pools-preview draw, and the kachinuki schedule-estimate range.
+//
+// Unlike the `demo` family (admin.mjs), these show a competition still in
+// `setup` (or, for the pools-preview shot, `draw-ready`) status: nothing has
+// been started or scored. So every fixture here is built straight over the
+// HTTP API (tournament, competitions, participants, the draw) - allowed per
+// api.mjs's own comment, since none of these captures show a member-number
+// chip, a bout row, or a point that could be silently dropped by an HTTP
+// write. Only the seed-rank assignment in mobile-participant-setup and the
+// unapplied roster paste in mobile-add-participants are driven through the
+// real interface, because those two are showing the OPERATOR TYPING, not
+// just data that happens to be on screen.
+
+// Local helpers, kept here rather than in lib/ui.mjs because each has one
+// caller; a second recipe file growing the same need is the signal to move it.
+
+// The competition ids the seed creates, at module level so a recipe's `route`
+// can name them: run.mjs concatenates `base + route`, so the id has to be
+// known when the recipe is declared, not when the fixture is.
+const MEN_ID = 'men-individual';
+const KNOCKOUT_ID = 'knockout-cup';
+const OVERVIEW_ID = 'up-to-2nd-dan';
+const DRAW_ID = 'third-dan-and-above';
+const KACHINUKI_ID = 'kachinuki-teams';
+
+// The create-competition form and the settings screen both render this
+// field via competition_fields.jsx's PillGroup/`.field` markup
+// (web-mobile/js/admin_setup.jsx:1176-1227), so a field is found by its
+// visible label rather than a CSS hook the markup doesn't expose one for.
+async function fillFieldByLabel(page, label, value) {
+  const field = page.locator('.field').filter({ has: page.locator('.field__label', { hasText: label }) }).first();
+  await field.locator('input').first().fill(value);
+}
+
+// PillGroup renders each option as a `.radio-pill` button carrying its
+// label verbatim (web-mobile/js/competition_fields.jsx:68-86), used for
+// both the Format and Competition-type groups on the create form.
+async function clickPill(page, label) {
+  await page.locator('.radio-pill', { hasText: label }).first().click();
+}
+
+// Seed-rank input: aria-label is `Seed rank for ${p.name}`
+// (web-mobile/js/admin_participants.jsx:972). StableInput (ui.jsx:149)
+// commits on blur immediately (no need to wait out its 200ms debounce), so
+// a Tab press after fill is enough to land the PUT.
+async function setSeedRank(page, name, rank) {
+  const input = page.locator(`input[aria-label="Seed rank for ${name}"]`);
+  await input.waitFor({ state: 'visible', timeout: 15000 });
+  await input.fill(String(rank));
+  await input.press('Tab');
+  await page.waitForTimeout(400);
+}
+
+const TOURNAMENT_NAME = 'Spring Kendo Taikai 2026';
+const TOURNAMENT_DATE = '16-05-2026';
+
+// The 18-name/dojo roster that mobile-draw-preview's committed shot draws
+// into 6 pools of 3 (default poolSize). Reused for mobile-participants too,
+// so both captures show a plausible, internally-consistent roster.
+const ROSTER_18 = [
+  ['Daniel Brooks', 'Eikoku Kendo Club'], ['William Hill', 'Thames Kendo Kai'], ['Felix Bauer', 'Berlin Kenyu'],
+  ['Sota Yamamoto', 'Seishinkan'], ['Riku Nakamura', 'Musashi Dojo'], ['Erik Lund', 'Nordic Kendo'],
+  ['Haruki Tanaka', 'Kenshinkan'], ['Pierre Dubois', 'Paris Kendo Club'], ['Luca Conti', 'Milano Kendo'],
+  ['Ren Suzuki', 'Musashi Dojo'], ['Hinata Kato', 'Seishinkan'], ['Antoine Moreau', 'Paris Kendo Club'],
+  ['Yuto Watanabe', 'Kenshinkan'], ['Marco Rossi', 'Milano Kendo'], ['Tomas Novak', 'Praha Kendo'],
+  ['Oliver Walker', 'Thames Kendo Kai'], ['Jonas Weber', 'Berlin Kenyu'], ['Mikael Berg', 'Nordic Kendo'],
+].map(([name, dojo]) => ({ name, dojo }));
+
+const ROSTER_10 = [
+  ['Aiko Sato', 'Tokyo'], ['Kenji Mori', 'Osaka'], ['Yuki Sato', 'Kyoto'], ['Hana Ito', 'Tokyo'],
+  ['Ren Kato', 'Osaka'], ['Mio Abe', 'Kyoto'], ['Sora Kimura', 'Tokyo'], ['Taro Ono', 'Osaka'],
+  ['Yui Endo', 'Kyoto'], ['Sho Fujii', 'Tokyo'],
+].map(([name, dojo]) => ({ name, dojo }));
+
+export const families = {
+  // Covers every recipe except kachinuki-estimate-range: one tournament,
+  // one competition per capture, all left in setup (or, for the draw
+  // preview, draw-ready) status.
+  setup: {
+    server: 'mobile',
+    // SINCE scoping inputs (lib/scope.mjs): the create form, the participants
+    // page and the competition overview/settings/pools pages. The helpers the
+    // create form shares with other pages (competition_fields,
+    // competition_shape, qualifier_preview, duration) are claimed by no family
+    // on purpose: their importers reach captures outside this one, so a change
+    // to one of them runs everything.
+    sources: [
+      'web-mobile/js/admin_setup', 'web-mobile/js/admin_participants',
+      'web-mobile/js/admin_competition', 'web-mobile/js/admin_pools',
+    ],
+    seed: async ({ api }) => {
+      await api.tournament({ name: TOURNAMENT_NAME, date: TOURNAMENT_DATE, durationDays: 1, courts: ['A', 'B'] });
+
+      await api.competition(MEN_ID, "Men's Individual", { date: TOURNAMENT_DATE, courts: ['A', 'B'] });
+
+      await api.competition(KNOCKOUT_ID, 'Knockout Cup', { date: TOURNAMENT_DATE, format: 'knockout', courts: ['A', 'B'] });
+      await api.participants(KNOCKOUT_ID, ROSTER_10);
+
+      await api.competition(OVERVIEW_ID, "Men's Individual: up to 2nd dan", { date: TOURNAMENT_DATE, courts: ['A', 'B'] });
+      await api.participants(OVERVIEW_ID, ROSTER_18);
+
+      await api.competition(DRAW_ID, "Men's Individual: 3rd dan and above", { date: TOURNAMENT_DATE, format: 'mixed', poolSize: 3, poolWinners: 2, courts: ['A', 'B'] });
+      await api.participants(DRAW_ID, ROSTER_18);
+      await api.generateDraw(DRAW_ID);
+    },
+  },
+
+  // A separate tournament: a 4-team kachinuki knockout, so the schedule
+  // estimator's best/average/worst RANGE (variable bout count under
+  // kachinuki, admin_schedule_utils.jsx:11-25) has something to compute
+  // over. The range itself is a pure function of format/teamSize/roster, not
+  // of match progress, so the competition need not be started for the range
+  // to render; it is started anyway (and one match closed via a fusensho
+  // decision) so the "matches done"/"now"/progress tiles the committed shot
+  // shows are real rather than the untouched draw-ready defaults.
+  kachinuki: {
+    server: 'mobile',
+    // SINCE scoping inputs (lib/scope.mjs): the competition overview page. The
+    // duration helper it shows an estimate through is shared (see setup above).
+    sources: ['web-mobile/js/admin_competition'],
+    seed: async ({ api }) => {
+      await api.tournament({ name: 'Kachinuki Demo', date: TOURNAMENT_DATE, durationDays: 1, courts: ['A'] });
+
+      const id = KACHINUKI_ID;
+      await api.competition(id, 'Kachinuki Teams', {
+        date: TOURNAMENT_DATE, format: 'knockout', courts: ['A'],
+        teamSize: 5, teamMatchType: 'kachinuki',
+      });
+      await api.participants(id, [
+        { name: 'Team Falcon', dojo: 'London' },
+        { name: 'Team Dragon', dojo: 'Osaka' },
+        { name: 'Team Tiger', dojo: 'Kyoto' },
+        { name: 'Team Phoenix', dojo: 'Tokyo' },
+      ]);
+      await api.generateDraw(id);
+      await api.start(id);
+
+      // Close one of the two first-round matches so the Overview stats strip
+      // reads "1/2 matches done" as the committed shot does. A fusensho
+      // decision is format-agnostic (it ends the match outright, unlike
+      // quick-score, which the server explicitly refuses for kachinuki -
+      // "score bouts individually", handlers_match.go). Not best-effort: the
+      // capture's subject includes the "1/2" and "50%" tiles, so a fixture
+      // that failed to close a match would photograph cleanly and wrong.
+      const detail = await api.viewer(id);
+      const matchId = detail?.bracket?.rounds?.[0]?.[0]?.id;
+      if (!matchId) throw new Error(`${id}: the draw has no first-round match to close`);
+      await api.post(`/api/competitions/${id}/matches/${encodeURIComponent(matchId)}/decision`, {
+        decision: 'fusensho',
+        decisionBy: 'shiro',
+      });
+    },
+  },
+};
+
+export const recipes = [
+  {
+    name: 'mobile-create-competition',
+    family: 'setup',
+    viewport: { width: 1600, height: 1000 },
+    capture: 'viewport',
+    waitFor: 'text=Add competition',
+    auth: 'admin',
+    route: '/admin/create-competition',
+    drive: async ({ page }) => {
+      await fillFieldByLabel(page, 'Display name', "Men's Individual");
+      // Default format is Knockout only (COMPETITION_DEFAULTS.format,
+      // competition_shape.jsx:1202); the committed shot has "Pools +
+      // Knockout" selected.
+      await clickPill(page, 'Pools + Knockout');
+    },
+  },
+
+  {
+    name: 'mobile-add-participants',
+    family: 'setup',
+    viewport: { width: 1600, height: 1000 },
+    capture: 'viewport',
+    waitFor: 'text=Participant list',
+    auth: 'admin',
+    route: `/admin/competition/${MEN_ID}/participants`,
+    // Types a roster into the paste box WITHOUT clicking "Apply changes":
+    // the committed shot shows the "Unsaved changes" state (rosterDirty,
+    // admin_participants.jsx:860) with the saved roster still at 0 players.
+    drive: async ({ page }) => {
+      const lines = [
+        // Dojos match ROSTER_18 above: the same person is shown on several
+        // captures of this page, and identity is (name, dojo).
+        'Haruki Tanaka, Kenshinkan', 'Ren Suzuki, Musashi Dojo', 'Sota Yamamoto, Seishinkan',
+        'Yuto Watanabe, Kenshinkan', 'Riku Nakamura, Musashi Dojo', 'Kaito Kobayashi, Seibukan',
+        'Daiki Yoshida, Hokushinkan', 'Hinata Kato, Kenshinkan', 'Sora Sasaki, Musashi Dojo',
+        'Takumi Ito, Hokushinkan', 'Yuma Saito, Seibukan', 'Aoi Takahashi, Hokushinkan',
+      ].join('\n');
+      await page.locator('.lined-textarea__area').fill(lines);
+    },
+  },
+
+  {
+    name: 'mobile-participant-setup',
+    family: 'setup',
+    viewport: { width: 1265, height: 900 },
+    capture: 'fullPage',
+    waitFor: 'text=Ordering & seeding',
+    auth: 'admin',
+    route: `/admin/competition/${KNOCKOUT_ID}/participants`,
+    // Seeds the first three of the ten already-added participants, matching
+    // the committed shot's three highlighted seed rows.
+    drive: async ({ page }) => {
+      await setSeedRank(page, 'Aiko Sato', 1);
+      await setSeedRank(page, 'Kenji Mori', 2);
+      await setSeedRank(page, 'Yuki Sato', 3);
+    },
+  },
+
+  {
+    name: 'mobile-participants',
+    family: 'setup',
+    viewport: { width: 1280, height: 1000 },
+    dpr: 2,
+    capture: 'viewport',
+    waitFor: 'text=Next steps',
+    auth: 'admin',
+    route: `/admin/competition/${OVERVIEW_ID}/overview`,
+  },
+
+  {
+    name: 'mobile-draw-preview',
+    family: 'setup',
+    viewport: { width: 1257, height: 900 },
+    dpr: 2,
+    capture: 'fullPage',
+    waitFor: 'text=Draw ready',
+    auth: 'admin',
+    route: `/admin/competition/${DRAW_ID}/pools`,
+  },
+
+  {
+    name: 'kachinuki-estimate-range',
+    family: 'kachinuki',
+    viewport: { width: 920, height: 900 },
+    capture: 'viewport',
+    waitFor: 'text=Schedule estimate',
+    auth: 'admin',
+    route: `/admin/competition/${KACHINUKI_ID}/overview`,
+  },
+];

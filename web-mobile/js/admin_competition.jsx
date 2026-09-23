@@ -356,8 +356,11 @@ function AdminCompetition({ tournament, competition, pools, poolMatches, standin
               <StatusBadge status={localStatus ?? c.status} format={c.format} />
             </div>
             <div className="page-head__sub">
-              {window.competitionKindLabel(c)} · {(c.players || []).length} {c.kind === "team" ? "teams" : "players"} ·
-              {c.date && ` ${formatDate(c.date)} at `} {c.startTime} · {courtsSummary}
+              {window.competitionKindLabel(c)} · {(c.players || []).length} {c.kind === "team" ? "teams" : "players"} ·{" "}
+              {/* "at" only between a date AND a time, and the separator only
+                  after one of them, or a missing time reads "<date> at ·". */}
+              {[c.date && formatDate(c.date), c.startTime].filter(Boolean).join(" at ")}
+              {(c.date || c.startTime) && " · "}{courtsSummary}
             </div>
           </div>
           <div className="page-head__actions" style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 8 }}>

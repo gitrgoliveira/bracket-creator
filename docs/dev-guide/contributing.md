@@ -81,6 +81,24 @@ An explicit `--folder`, `--port`, or `--bind` flag still overrides the env var.
 
 Editing these frontend sources and refreshing the browser does **not** pick up changes. The browser still gets the embedded bundle from the last binary build.
 
+## Regenerate the documentation screenshots
+
+Every screenshot and video under `docs/screenshots/` and `docs/videos/` is captured from the running application by a script, so a picture cannot quietly drift from the product it shows. If your change alters anything a user sees, recapture what it reaches with `make docs/media SINCE=main` before you open the pull request.
+
+```sh
+make docs/screenshots                        # the application screenshots
+make docs/videos                             # the application videos
+make docs/media                              # both
+
+make docs/screenshots NAME=mobile-dashboard  # one capture
+make docs/screenshots FAMILY=editors         # one group
+make docs/screenshots SINCE=main             # only the groups your changes reach
+```
+
+You need `node` and `python3`; the first run installs the rest. A run writes to `scripts/screenshots/out/`, never into `docs/` directly, and ends by listing only the screenshots that differ from the committed ones. Look at those and copy across the ones whose change you meant to make. Anything reported as unchanged needs no review. Videos are never compared, so copy a video only when your change alters what it shows.
+
+The harness's own guide, [`scripts/screenshots/README.md`](https://github.com/gitrgoliveira/bracket-creator/blob/main/scripts/screenshots/README.md), covers the rest: how `SINCE=` decides what to capture, what a changed line tells you, what to do when a capture you did not touch appears in the list, how a capture must be seeded, and how to add one.
+
 ## Create a commit
 
 We use Conventional Commits, so write commit messages in that format.

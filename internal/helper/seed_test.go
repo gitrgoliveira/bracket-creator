@@ -2205,7 +2205,7 @@ func TestPoolSeeding_DojoSpreadFallback(t *testing.T) {
 
 func TestPoolSeeding_RealRosterDojoSpread(t *testing.T) {
 	// Regression test for bc-dojo, using the real committed roster
-	// test-data/individual_men_up_to_2nd_2026.csv (50 players, 15 "Team Rho"),
+	// test-data/individual_men_up_to_2nd_2026.csv (50 players, 15 "Renshinkan"),
 	// run through BuildPoolPhase(players, 5, false, 2) -- the one function
 	// documented to get the PoolSeeding -> CreatePools -> ReorderPoolsForCourts
 	// order and the derived pool/court counts right, exactly as the real
@@ -2224,13 +2224,13 @@ func TestPoolSeeding_RealRosterDojoSpread(t *testing.T) {
 	players := loadDistributionRoster(t, "../../test-data/individual_men_up_to_2nd_2026.csv")
 	require.Len(t, players, 50)
 
-	rhoCount := 0
+	renshinkanCount := 0
 	for _, p := range players {
-		if p.Dojo == "Team Rho" {
-			rhoCount++
+		if p.Dojo == "Renshinkan" {
+			renshinkanCount++
 		}
 	}
-	require.Equal(t, 15, rhoCount, "fixture drifted: expected 15 Team Rho players")
+	require.Equal(t, 15, renshinkanCount, "fixture drifted: expected 15 Renshinkan players")
 
 	pools, drawCourts, err := BuildPoolPhase(players, 5, false, 2)
 	require.NoError(t, err)

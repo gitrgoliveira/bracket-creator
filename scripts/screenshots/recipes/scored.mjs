@@ -422,13 +422,14 @@ export { assertTeamSubBouts, assertEngiFlags };
 export const families = {
   scored: {
     server: 'mobile',
-    // SINCE scoping inputs (lib/scope.mjs): the Lineups page and its resolver
-    // modules, the competition page that frames it (admin_competition, whose
-    // header team-lineup shows), the public standings pages it captures, and
-    // the editors its seed drives to enter the scores.
+    // SINCE scoping inputs (lib/scope.mjs): the Lineups page, the competition
+    // page that frames it (admin_competition, whose header team-lineup shows),
+    // the public standings pages it captures, and the editors its seed drives
+    // to enter the scores. The lineup resolver and squad_member_label are not
+    // claimed: the score editors, scoreboards and stream overlay import them
+    // too, so a change to them runs everything.
     sources: [
-      'web-mobile/js/admin_lineup', 'web-mobile/js/lineup_', 'web-mobile/js/squad_member_label',
-      'web-mobile/js/admin_competition',
+      'web-mobile/js/admin_lineup', 'web-mobile/js/admin_competition',
       ...VIEWER_SOURCES, ...SCORE_EDITOR_SOURCES,
     ],
     seed: async ({ api, base, browser }) => {

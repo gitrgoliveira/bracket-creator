@@ -345,7 +345,37 @@ export const recipes = [
     },
   },
   {
-    // Kachinuki mid-encounter with a fought bout opened for correction. The
+    // The encounter two bouts in: bout 2 recorded, so the server appended
+    // bout 3, still unscored. That is the state both captions describe: the
+    // "× Remove this bout" undo appears only on a bout with no score yet, and
+    // the footer explains what Record bout and End match will do. It runs
+    // BEFORE kachinuki-correct-bout, which carries the same encounter past
+    // this point, so a family run and a NAME= run take the same picture.
+    name: 'kachinuki-scoring-buttons',
+    family: 'editors',
+    viewport: { width: 520, height: 1250 },
+    capture: { selector: EDITOR },
+    auth: 'admin',
+    drive: async ({ page, base, fixture }) => {
+      await openScoreEditorRow(page, base, fixture.teams.a, fixture.teams.b);
+      await startMatch(page);
+      while (await fought(page) < 2) {
+        await scoreCurrentBout(page);
+        await recordBout(page);
+      }
+      if (await fought(page) !== 2) {
+        throw new Error(`expected exactly two recorded bouts, found ${await fought(page)}`);
+      }
+      await collapseDoneBouts(page);
+    },
+    assert: async ({ api, dataDir }) => {
+      await assertLineupIds(api, TEAMS);
+      assertBoutPoints(dataDir, TEAMS);
+    },
+  },
+  {
+    // Kachinuki mid-encounter, carried on from kachinuki-scoring-buttons, with
+    // a fought bout opened for correction. The
     // MIDDLE of three recorded bouts is the one reopened, so a read-only row
     // sits above it AND below it. That is what the caption on
     // team-tournaments.md describes, and what the paragraph above it needs to
@@ -374,28 +404,6 @@ export const recipes = [
       // middle of the three, so bouts 0 and 2 stay collapsed either side of it.
       await page.locator('[data-testid="kachinuki-done-bout-1"]').click();
       await page.waitForTimeout(500);
-    },
-    assert: async ({ api, dataDir }) => {
-      await assertLineupIds(api, TEAMS);
-      assertBoutPoints(dataDir, TEAMS);
-    },
-  },
-  {
-    // The same encounter one step on: bout 2 recorded, so the server appended
-    // bout 3 and the footer explains what Record bout and End match will do.
-    name: 'kachinuki-scoring-buttons',
-    family: 'editors',
-    viewport: { width: 520, height: 1250 },
-    capture: { selector: EDITOR },
-    auth: 'admin',
-    drive: async ({ page, base, fixture }) => {
-      await openScoreEditorRow(page, base, fixture.teams.a, fixture.teams.b);
-      await startMatch(page);
-      while (await fought(page) < 2) {
-        await scoreCurrentBout(page);
-        await recordBout(page);
-      }
-      await collapseDoneBouts(page);
     },
     assert: async ({ api, dataDir }) => {
       await assertLineupIds(api, TEAMS);

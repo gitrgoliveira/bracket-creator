@@ -80,13 +80,14 @@ export const families = {
   setup: {
     server: 'mobile',
     // SINCE scoping inputs (lib/scope.mjs): the create form, the participants
-    // page, the competition overview/settings/pools pages, and the modules the
-    // create form and settings page share.
+    // page and the competition overview/settings/pools pages. The helpers the
+    // create form shares with other pages (competition_fields,
+    // competition_shape, qualifier_preview, duration) are claimed by no family
+    // on purpose: their importers reach captures outside this one, so a change
+    // to one of them runs everything.
     sources: [
       'web-mobile/js/admin_setup', 'web-mobile/js/admin_participants',
       'web-mobile/js/admin_competition', 'web-mobile/js/admin_pools',
-      'web-mobile/js/competition_fields', 'web-mobile/js/competition_shape',
-      'web-mobile/js/qualifier_preview',
     ],
     seed: async ({ api }) => {
       await api.tournament({ name: TOURNAMENT_NAME, date: TOURNAMENT_DATE, durationDays: 1, courts: ['A', 'B'] });
@@ -115,9 +116,9 @@ export const families = {
   // shows are real rather than the untouched draw-ready defaults.
   kachinuki: {
     server: 'mobile',
-    // SINCE scoping inputs (lib/scope.mjs): the competition overview page and
-    // the duration estimate it shows.
-    sources: ['web-mobile/js/admin_competition', 'web-mobile/js/duration'],
+    // SINCE scoping inputs (lib/scope.mjs): the competition overview page. The
+    // duration helper it shows an estimate through is shared (see setup above).
+    sources: ['web-mobile/js/admin_competition'],
     seed: async ({ api }) => {
       await api.tournament({ name: 'Kachinuki Demo', date: TOURNAMENT_DATE, durationDays: 1, courts: ['A'] });
 

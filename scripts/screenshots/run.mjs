@@ -171,13 +171,19 @@ async function captureStill(page, recipe, file) {
   // was missing from a capture that otherwise looked complete. The brand logo
   // also has an onError fallback that swaps src and starts a SECOND load, so
   // "the request finished" is not the same as "the image is on screen".
-  // Bounded, because a request that never settles must not hang the run.
-  await page.evaluate(() => Promise.race([
-    Promise.all(Array.from(document.images)
-      .filter((img) => !img.complete)
-      .map((img) => new Promise((done) => { img.onload = done; img.onerror = done; }))),
-    new Promise((done) => setTimeout(done, 5000)),
-  ]));
+  //
+  // So wait for the END state, polled: every eagerly loaded image complete and
+  // non-empty, then decoded (the logo is `decoding="async"`, so complete is not
+  // yet painted). An earlier version resolved on the FIRST error event and let
+  // a 5s cap pass silently, which is how the fallback logo's second load was
+  // still in flight when mobile-participants was taken (its box on the one run
+  // it failed: the 60x60 logo corner). A lazy image off screen never loads, so
+  // it is not waited for; one that never arrives fails the capture rather than
+  // photographing its absence.
+  const eager = () => Array.from(document.images).filter((img) => img.loading !== 'lazy');
+  await page.waitForFunction(
+    `(${eager})().every((img) => img.complete && img.naturalWidth > 0)`, null, { timeout: 15000 });
+  await page.evaluate(`Promise.all((${eager})().map((img) => img.decode()))`);
   // Drop the focus ring the driving left behind. Every capture here is reached
   // by clicking, so the last control tapped keeps focus and renders a ring no
   // operator would see at that moment - one shipped a dark ring around a
@@ -279,6 +285,18 @@ async function main() {
   }
 
   const results = [];
+  // Record a capture as failed and remove its output from an EARLIER run. The
+  // console FAILED line scrolls past in a 33-recipe run, and contributing.md
+  // tells the operator to copy what is in out/ across to docs/ - so a stale
+  // image left behind is one they would copy believing it fresh.
+  const fail = (recipe, why) => {
+    for (const ext of ['png', 'webm']) {
+      const stale = path.join(OUT, `${recipe.name}.${ext}`);
+      if (fs.existsSync(stale)) fs.rmSync(stale);
+    }
+    results.push([recipe.name, { failed: true, note: `FAILED ${why}` }]);
+    console.log(`  ${recipe.name}: FAILED ${why}`);
+  };
   // Chromium refuses to run its sandbox as root; the recorder this harness
   // replaced passed --no-sandbox unconditionally, which is broader than needed.
   const asRoot = typeof process.getuid === 'function' && process.getuid() === 0;
@@ -303,10 +321,21 @@ async function main() {
       let fixture = null;
       try {
         process.stdout.write(`seeding ${familyName}... `);
-        fixture = (await family.seed({
-          api: client(server.base), base: server.base, browser, dataDir: server.dataDir,
-        })) || {};
-        process.stdout.write('done\n');
+        try {
+          fixture = (await family.seed({
+            api: client(server.base), base: server.base, browser, dataDir: server.dataDir,
+          })) || {};
+          process.stdout.write('done\n');
+        } catch (err) {
+          // A seed that throws fails this family's captures, not the run: the
+          // families after it still capture, and every capture it owned gets
+          // a FAILED line and loses its previous output, exactly as a single
+          // failed capture does below.
+          const why = err.message.split('\n')[0];
+          process.stdout.write(`FAILED ${why}\n`);
+          for (const recipe of group) fail(recipe, `seed failed: ${why}`);
+          continue;
+        }
 
         for (const recipe of group) {
           const ctx = {
@@ -320,17 +349,7 @@ async function main() {
             results.push([recipe.name, verdict]);
             console.log(`  ${recipe.name}: ${verdict.note}`);
           } catch (err) {
-            // Remove any output from an EARLIER run. The console FAILED line
-            // scrolls past in a 33-recipe run, and contributing.md tells the
-            // operator to copy what is in out/ across to docs/ - so a stale
-            // image left behind is one they would copy believing it fresh.
-            for (const ext of ['png', 'webm']) {
-              const stale = path.join(OUT, `${recipe.name}.${ext}`);
-              if (fs.existsSync(stale)) fs.rmSync(stale);
-            }
-            const why = err.message.split('\n')[0];
-            results.push([recipe.name, { failed: true, note: `FAILED ${why}` }]);
-            console.log(`  ${recipe.name}: FAILED ${why}`);
+            fail(recipe, err.message.split('\n')[0]);
           }
         }
       } finally {

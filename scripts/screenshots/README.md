@@ -198,10 +198,12 @@ What is left is small but not zero: re-run the suite and one or two of the
 thirty come back a grey level or two from the committed file, on a handful of
 pixels. That is why the comparison keeps a tolerance instead of comparing bytes.
 
-One caveat, because it is the operator who would hit it. Over seven runs here,
-six reported all thirty unchanged and one reported a single capture changed,
-and that one has not reproduced since. So the changed list is not guaranteed
-empty on an untouched tree. If a capture you did not expect appears there,
-note its line (the box says where it moved) and keep its image from `out/`
-before re-running, since the re-run overwrites it. Then re-run: two runs
-disagreeing is itself the finding.
+One caveat, because it is the operator who would hit it. A capture used to
+come back changed on roughly one run in twenty with nothing touched. The box
+found it: the admin topbar's logo, photographed while its fallback image was
+still loading. The runner now waits for every image to load and decode before
+a shot, but the changed list is still not guaranteed empty on an untouched
+tree. If a capture you did not expect appears there, note its line (the box
+says where it moved) and keep its image from `out/` before re-running, since
+the re-run overwrites it. Then re-run: two runs disagreeing is itself the
+finding.

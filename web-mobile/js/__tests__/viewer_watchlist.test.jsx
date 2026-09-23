@@ -154,3 +154,129 @@ describe('buildWatchlistUpcoming', () => {
     expect(buildWatchlistUpcoming(watched, all)).toEqual([]);
   });
 });
+
+// Operator ruling 2026-09-22: a watched competitor with no upcoming or current
+// match contributes their LAST RESULT to this list instead of vanishing from
+// it. The watchlist is how a reader follows a PERSON, not only a fixture.
+describe('buildWatchlistUpcoming: a finished competitor shows their last result', () => {
+  const done = (id, who, at, modifiedAt) => (
+    { id, sideAId: who, sideBId: 'x', scheduledAt: at, status: 'completed', modifiedAt }
+  );
+  const soon = (id, who, at) => (
+    { id, sideAId: who, sideBId: 'x', scheduledAt: at, status: 'scheduled' }
+  );
+
+  it('offers the last result when the competitor has nothing left to fight', () => {
+    const out = buildWatchlistUpcoming([{ id: 'p1' }], [done('d1', 'p1', '09:00', 10)]);
+    expect(out.map((m) => m.id)).toEqual(['d1']);
+  });
+
+  it('PER COMPETITOR: one still fighting does not suppress a finished one', () => {
+    // THE distinction. A list-level "is it empty" test would show only p1's
+    // upcoming match and drop p2 entirely, which is what used to happen.
+    const out = buildWatchlistUpcoming(
+      [{ id: 'p1' }, { id: 'p2' }],
+      [soon('s1', 'p1', '11:00'), done('d2', 'p2', '09:00', 10)],
+    );
+    expect(out.map((m) => m.id)).toEqual(['s1', 'd2']);
+  });
+
+  it('a competitor still fighting contributes NO result, only what is ahead', () => {
+    const out = buildWatchlistUpcoming(
+      [{ id: 'p1' }],
+      [soon('s1', 'p1', '11:00'), done('d1', 'p1', '09:00', 10)],
+    );
+    expect(out.map((m) => m.id)).toEqual(['s1']);
+  });
+
+  it('picks the most recent result by WRITE time, not by slot', () => {
+    // resultRecencyDesc (result_recency.jsx): a court running out of schedule
+    // order scores an earlier slot later, and that is the newer result.
+    const out = buildWatchlistUpcoming(
+      [{ id: 'p1' }],
+      [done('late-slot', 'p1', '15:00', 100), done('scored-last', 'p1', '09:00', 900)],
+    );
+    expect(out.map((m) => m.id)).toEqual(['scored-last']);
+  });
+
+  it('results come AFTER what is still to be fought', () => {
+    const out = buildWatchlistUpcoming(
+      [{ id: 'p1' }, { id: 'p2' }],
+      [done('d2', 'p2', '08:00', 10), soon('s1', 'p1', '11:00')],
+    );
+    expect(out.map((m) => m.id), 'upcoming first, then the result').toEqual(['s1', 'd2']);
+  });
+
+  it('a competitor with no matches at all contributes nothing', () => {
+    const out = buildWatchlistUpcoming([{ id: 'p1' }, { id: 'ghost' }], [soon('s1', 'p1', '11:00')]);
+    expect(out.map((m) => m.id)).toEqual(['s1']);
+  });
+
+  it('one shared result is not listed twice when both sides are watched', () => {
+    const shared = { id: 'd', sideAId: 'p1', sideBId: 'p2', scheduledAt: '09:00', status: 'completed', modifiedAt: 10 };
+    const out = buildWatchlistUpcoming([{ id: 'p1' }, { id: 'p2' }], [shared]);
+    expect(out.map((m) => m.id)).toEqual(['d']);
+  });
+
+  // THE CAP. Order and survival are different questions, and answering only
+  // the first left this whole feature switched off for the reader who needs it
+  // most: appending the results and truncating meant a watched set with `max`
+  // bouts still ahead kept none of them. A coach watching a dojo through round
+  // one clears ten pending bouts immediately (measured on a 32-player draw:
+  // fifteen). Operator ruling 2026-09-23, taken against the two rendered lists.
+  describe('the cap reserves room for the results', () => {
+    // n people, each with one pending match; plus one who is already out.
+    const manyPending = (n) => Array.from({ length: n }, (_, i) =>
+      soon('s' + i, 'p' + i, String(9 + i).padStart(2, '0') + ':00'));
+    const watchedPending = (n) => Array.from({ length: n }, (_, i) => ({ id: 'p' + i }));
+
+    it('keeps the result when the fixtures alone would fill the list', () => {
+      const out = buildWatchlistUpcoming(
+        [...watchedPending(10), { id: 'out1' }],
+        [...manyPending(10), done('d1', 'out1', '08:00', 10)],
+        10,
+      );
+      expect(out, 'still capped').toHaveLength(10);
+      expect(out.map((m) => m.id), 'the result survives').toContain('d1');
+      expect(out[out.length - 1].id, 'and it is last, after the fixtures').toBe('d1');
+    });
+
+    it('drops the FURTHEST-OUT fixture to make that room, never the nearest', () => {
+      const out = buildWatchlistUpcoming(
+        [...watchedPending(10), { id: 'out1' }],
+        [...manyPending(10), done('d1', 'out1', '08:00', 10)],
+        10,
+      );
+      const ids = out.map((m) => m.id);
+      expect(ids, 'the nearest bout is never the one sacrificed').toContain('s0');
+      expect(ids, 'the last fixture is').not.toContain('s9');
+    });
+
+    it('fixtures keep at least HALF the list when many competitors are out', () => {
+      // The other side of the bound, and it needs more fixtures than the floor
+      // allows or it pins nothing: with only two of them, reserving max-8=2
+      // slots and reserving ceil(10/2)=5 both yield the same two rows. Eight
+      // pending and eight out is where the floor is the only thing deciding.
+      const outs = Array.from({ length: 8 }, (_, i) => ({ id: 'o' + i }));
+      const results = outs.map((o, i) => done('d' + i, o.id, '08:00', 10 + i));
+      const out = buildWatchlistUpcoming(
+        [...watchedPending(8), ...outs],
+        [...manyPending(8), ...results],
+        10,
+      );
+      expect(out).toHaveLength(10);
+      const pending = out.filter((m) => m.status !== 'completed');
+      expect(pending.length, 'the panel does not become a results page').toBe(5);
+      expect(out.filter((m) => m.status === 'completed').length).toBe(5);
+    });
+
+    it('changes nothing when everything already fits', () => {
+      const out = buildWatchlistUpcoming(
+        [{ id: 'p1' }, { id: 'out1' }],
+        [soon('s1', 'p1', '11:00'), done('d1', 'out1', '08:00', 10)],
+        10,
+      );
+      expect(out.map((m) => m.id)).toEqual(['s1', 'd1']);
+    });
+  });
+});

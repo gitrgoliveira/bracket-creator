@@ -349,6 +349,10 @@ function buildPlayerMap(comp) {
             seed: norm.seed ?? 0,
             displayName: norm.displayName || "",
             number: norm.number || "",
+            // The prefix that number was minted under, so a match side answers
+            // the number rule's "prefix alone selects the draw" arm exactly as
+            // a roster record does (competitor_identity.jsx prefixOf).
+            numberPrefix: comp.numberPrefix || "",
             source: norm.source || "",
             danGrade: norm.danGrade || "",
         };

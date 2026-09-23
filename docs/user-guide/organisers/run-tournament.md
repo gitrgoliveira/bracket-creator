@@ -275,7 +275,7 @@ PDF exports (competitor tags, name sheets, and bracket trees) are available to a
 
 The lean container image omits LibreOffice and returns a clear message when a PDF is requested.
 
-When the **Public URL** is set and competitors have assigned numbers, each printed tag includes a QR code that opens that competitor's public page. Refer to [Hosting](../install/hosting.md) for guidance on setting the public URL.
+When the **Public URL** is set and competitors have assigned numbers, each printed tag includes a QR code that opens the viewer and adds that competitor to the scanner's watchlist. Refer to [Hosting](../install/hosting.md) for guidance on setting the public URL.
 
 ## Data format
 

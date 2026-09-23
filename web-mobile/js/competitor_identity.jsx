@@ -45,6 +45,39 @@ export function nameOf(x) {
   return (x && typeof x === "object" ? x.name : x) || "";
 }
 
+// numberOf: the competitor's assigned number ("K12"), or "" when they have
+// none. A field accessor beside idOf/nameOf, and nothing more.
+//
+// It is NOT part of identity and must stay out of competitorKey and
+// sameCompetitor. A number belongs to a DRAW POSITION rather than to a person
+// (bc-pnum): it does not exist before the draw runs, and regenerating a draw
+// re-points it at someone else. Identity here stays id-then-name.
+//
+// It lives in this leaf rather than in competitor_search.jsx because the
+// watchlist permalink wants only this accessor: it compares a machine-
+// generated number EXACTLY, which is the opposite of the typed-query rule that
+// module owns, and importing that module meant disclaiming its rule in a
+// comment.
+export function numberOf(x) {
+  return (x && typeof x === "object" && x.number) ? String(x.number) : "";
+}
+
+// prefixOf: the number PREFIX of the competition this record was numbered in
+// ("K", or "K02" when the plain letter was already taken), or "" when the
+// record carries none. Trimmed here, mirroring Go's EffectiveNumberPrefix,
+// because the number was minted from the trimmed value while the wire carries
+// the field as typed. Stamped onto every roster record by buildRoster
+// (viewer_watchlist_core.jsx) and onto every resolved match side by
+// buildPlayerMap (api_serializers.jsx), from the competition each came from.
+//
+// It exists because the number string alone cannot say where its prefix ends:
+// "K021" is K02's first competitor or K's twenty-first, and only the
+// competition knows which. competitor_search.jsx reads it for the "prefix
+// alone selects the draw" arm of the number rule; nothing else should need it.
+export function prefixOf(x) {
+  return (x && typeof x === "object" && x.numberPrefix) ? String(x.numberPrefix).trim() : "";
+}
+
 // competitorKey: id-decides-else-name as a single string, so THE RULE above
 // falls out of comparing two keys rather than being restated at every call
 // site. "id:"+id when x carries one; else "nm:"+normalizeName(name) when x

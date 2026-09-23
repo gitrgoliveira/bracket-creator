@@ -2,11 +2,12 @@
 // Extracted from viewer.jsx (mp-pxxc step 10).
 
 import { competitionKindLabel, compMatches, tournamentMatches, TournamentInfo, compareDmy } from './viewer_utils.jsx';
-import { matchParticipantIds, addPlayerToWatchlist, resolveEntryPlayerIds, resolveWatchedPlayers, findPrimaryEntry, heroEntry, buildPrimaryNextMatch, buildRoster, rosterFullyLoaded, useWatchlist, buildWatchedSets, matchInvolvesWatchedSet } from './viewer_watchlist_core.jsx';
+import { matchParticipantIds, mergeSharedWatchlist, resolveEntryPlayerIds, resolveWatchedPlayers, findPrimaryEntry, heroEntry, sharedLinkPass, readSharedLedger, writeSharedLedger, clearSharedLedger, sessionStore, buildPrimaryNextMatch, buildPrimaryLastResult, buildRoster, rosterFullyLoaded, useWatchlist, buildWatchedSets, matchInvolvesWatchedSet } from './viewer_watchlist_core.jsx';
 import { runOnce, notifEnable, notifDisable, useChimeMuted, isFollowedMatchOnDeck, useFollowedMatchAlert, useSecondaryWatchAlert, MyMatchAlertBanner } from './viewer_alerts.jsx';
 import { notificationSupported } from './viewer_notifications.jsx';
 import { VSchedItem, MatchViewerModal } from './viewer_match.jsx';
 import { buildWatchlistUpcoming, usePrimaryWatch, WATCHED_UPCOMING_LIST_MAX } from './viewer_schedule.jsx';
+import { mirrorWatchlistParam } from './watchlist_link.jsx';
 
 const { useState, useMemo, useRef: useRefV, useEffect } = React;
 const StatusBadge = window.StatusBadge;
@@ -62,29 +63,27 @@ export function shouldShowRegister(tournament, competition, hasHandler) {
     (!competition.status || competition.status === "setup"));
 }
 
-// Pure helper: resolve a ?player= / ?playerNumber= / ?name= deep link against
-// the participant roster. Resolution order:
-//   1. ?player= as exact id (UUID) match
-//   2. ?playerNumber= as exact number match (mp-yin4 tag QR)
-//   3. ?name= (or ?player= as backward-compatible fallback) as case-insensitive
-//      name substring: allows legacy links that used ?player=<name> to keep working
-// Returns null when no participant matches, else { player: {id,name} }.
-export function resolveDeepLink(searchString, roster) {
-  const params = new URLSearchParams(searchString || "");
-  const qpPlayer = (params.get("player") || "").trim();
-  const qpNumber = (params.get("playerNumber") || "").trim();
-  const qpName = (params.get("name") || "").trim();
-  if (!qpPlayer && !qpNumber && !qpName) return null;
-  let hit = qpPlayer ? roster.find((p) => p.id === qpPlayer) : null;
-  if (!hit && qpNumber) {
-    hit = roster.find((p) => (p.number || "") === qpNumber);
+// The viewer home's path: app.jsx's pathFromState returns "/" for it.
+const VIEWER_HOME_PATH = "/";
+
+// mirrorWatchlistToAddressBar: keep the home screen's `w` equal to the list
+// (bc-wlpl). The rule is mirrorWatchlistParam's; this only carries it out.
+// replaceState adds no history entry, so an edit to the list never costs the
+// reader a Back press, and comparing first leaves an unchanged URL alone.
+//
+// Only while the address bar SHOWS home. Being mounted is not enough: on an
+// in-app return to home (Back from /results, a competition, the schedule),
+// ViewerHome's effects run before App's, because a child's effects run before
+// its parent's, and App's state-to-URL effect has not yet pushed "/". A write
+// then put `w` onto the page being left (/results?w=...), and App's push
+// dropped it from home. ViewerHome re-runs this once App's push announces
+// itself (router.jsx's route() dispatches popstate).
+function mirrorWatchlistToAddressBar(watchlist, roster) {
+  if (window.location.pathname !== VIEWER_HOME_PATH) return;
+  const nextSearch = mirrorWatchlistParam(window.location.search, watchlist, roster);
+  if (nextSearch !== window.location.search) {
+    window.history.replaceState(null, "", window.location.pathname + nextSearch);
   }
-  if (!hit) {
-    const needle = (qpName || qpPlayer).toLowerCase();
-    if (needle) hit = roster.find((p) => (p.name || "").toLowerCase().includes(needle));
-  }
-  if (!hit) return null;
-  return { player: { id: hit.id, name: hit.name } };
 }
 
 export function ViewerHome({ tournament, onSelectCompetition, onAdminClick, onOpenSchedule, onRegister, onOpenResults, sseConnected = true }) {
@@ -134,26 +133,103 @@ export function ViewerHome({ tournament, onSelectCompetition, onAdminClick, onOp
   // "not in this tournament" claim depends on the difference.
   const rosterLoaded = useMemo(() => rosterFullyLoaded(t.competitions), [t.competitions]);
 
-  // Add a single player to the watchlist (dedup by id). Used by the deep link.
-  const addWatchPlayer = (p) => setWatchlist(prev => addPlayerToWatchlist(prev, p));
+  // bc-wlpl: the viewer's one deep link, `?w=` -- a shared list, a printed
+  // tag's QR (a one-entry list) and the home address bar are all this. A
+  // one-shot `?player=` / `?name=` reader used to sit beside it; the operator
+  // removed it on 2026-09-23 as duplicated behaviour, since `?w=<id>` does
+  // what `?player=<id>` did (and retries while rosters load) and nothing ever
+  // produced a `?name=` link.
+  //
+  // A token is recorded ONLY once it resolves, which is what makes a
+  // partially-loaded roster safe: a competition whose participants failed to
+  // load contributes nothing on this pass, and its entries land on a later one
+  // when that roster arrives. Applying the link once against whatever had
+  // loaded meant a coach's 20-entry link could silently arrive as 15, with no
+  // retry and no sign to either end.
+  //
+  // Recording is equally load-bearing in the other direction: it stops a
+  // healing roster re-adding an entry the reader has since removed.
+  // Seeded from sessionStorage when the tab is reloading the SAME link
+  // mid-hold, so what the previous mount landed is not landed again (see
+  // readSharedLedger). A stable Set: useState's initialiser runs once.
+  const [sharedApplied] = useState(() =>
+    (typeof window === "undefined" ? new Set() : readSharedLedger(sessionStore(), window.location.search)));
 
-  // T114 / mp-xhaa: parse `?player=<uuid>` (and optionally `?name=<name>`) deep
-  // links from QR codes exactly once. Adding to the watchlist is
-  // non-destructive (unlike the old single-follow overwrite), so we just add
-  // the resolved player: they become the implicit primary when they land as
-  // the sole entry.
-  const deepLinkApplied = useRefV(false);
+  // The same effect owns the address bar AFTER the link settles: it keeps `w`
+  // equal to the list (mirrorWatchlistParam, operator ruling 2026-09-23), so a
+  // bookmark or a reload carries the list. The order is the invariant: an
+  // INBOUND ?w= is read-only until it settles, and only then does the tab
+  // write its own list over it. Mirroring earlier would overwrite a token
+  // still waiting for its competition's roster, and the next pass, reading
+  // the rewritten query, would find nothing outstanding and settle with that
+  // entry silently dropped (and the sessionStorage ledger, keyed on the raw
+  // `w`, would no longer match on a reload).
+  //
+  // Home only: mirrorWatchlistToAddressBar writes only while the address bar
+  // shows home's path, and `locationPath` (below) re-runs this effect when
+  // App's push to "/" lands, which on an in-app return to home is AFTER this
+  // effect's first run.
+  const [locationPath, setLocationPath] = useState(() =>
+    (typeof window === "undefined" ? "" : window.location.pathname));
+  useEffect(() => {
+    if (typeof window === "undefined") return undefined;
+    const onNavigate = () => setLocationPath(window.location.pathname);
+    window.addEventListener("popstate", onNavigate);
+    return () => window.removeEventListener("popstate", onNavigate);
+  }, []);
+  const sharedSettled = useRefV(false);
   React.useEffect(() => {
-    if (deepLinkApplied.current) return;
     if (typeof window === "undefined" || !window.location) return;
     if (roster.length === 0) return; // wait until participants are loaded
-    const result = resolveDeepLink(window.location.search, roster);
-    deepLinkApplied.current = true;
-    if (result && result.player) addWatchPlayer(result.player);
-    // Runs exactly once, gated by the deepLinkApplied ref; addWatchPlayer is an
-    // unstable callback we deliberately do not depend on.
-    // oxlint-disable-next-line react-hooks/exhaustive-deps
-  }, [roster, watchlist]);
+    if (sharedSettled.current) {
+      mirrorWatchlistToAddressBar(watchlist, roster);
+      return;
+    }
+    // Every decision about this pass is sharedLinkPass's (viewer_watchlist_core
+    // .jsx), where a unit test can run it and a fixpoint test proves the
+    // sequence of passes ends. This effect only carries out the verdict:
+    // record what landed, merge if something did, settle if nothing is left.
+    //
+    // The merge is gated on `write` -- something LANDED -- and not on "a token
+    // resolved", and that difference was a loop: mergeSharedWatchlist then
+    // returned a fresh array every time, so a write that changed nothing still
+    // changed the state by reference, the effect re-fired on its own
+    // dependency, and a reader already at WATCHLIST_MAX spun at ~60
+    // localStorage writes a second for as long as the tab was open. (A merge
+    // that adds nothing now returns the same array, so an entry that landed
+    // because it was already listed writes nothing either.)
+    const pass = sharedLinkPass({
+      search: window.location.search, roster, watchlist, applied: sharedApplied, rosterLoaded,
+    });
+    pass.landed.forEach((k) => sharedApplied.add(k));
+    // Remembered across a reload of this tab while the query is held, so a
+    // pruned entry does not come back with the reload.
+    if (pass.landed.length > 0) writeSharedLedger(sessionStore(), window.location.search, sharedApplied);
+    // MERGE, never replace: arriving at someone else's link must not delete
+    // the list you already keep. The rule is mergeSharedWatchlist's, not this
+    // effect's -- it used to be spelled out here, which is exactly how it got
+    // silently replaced by "the shared list alone" with no test to notice.
+    // The functional form takes `prev` so a concurrent update is merged over,
+    // not under; the ledger above was computed against `watchlist`, and if the
+    // two differ the ledger is merely incomplete and the next pass retries.
+    if (pass.write) setWatchlist((prev) => mergeSharedWatchlist(prev, pass.entries));
+    if (!pass.settle) return;
+    sharedSettled.current = true;
+    // Settled: the inbound link is finished with, and the ledger goes with
+    // it, so re-opening this same link later is a fresh open that adds again.
+    clearSharedLedger(sessionStore());
+    // From here the address bar mirrors the list. Not on a pass that WROTE:
+    // `watchlist` in this closure is the list from before that merge, so
+    // mirroring it would drop the entries this pass just added from the bar
+    // until the next render. The write re-renders, and that pass mirrors.
+    if (!pass.write) mirrorWatchlistToAddressBar(watchlist, roster);
+    // The Set and the ref are listed rather than suppressed: neither identity
+    // ever changes, so naming them is honest and costs no extra runs.
+    // `locationPath` is read by nothing here; it is listed so that App's push
+    // to home re-runs the mirror (see mirrorWatchlistToAddressBar) by name.
+    // Today it would re-run anyway, because useWatchlist hands back a new
+    // setter every render, but that is an accident this must not rest on.
+  }, [roster, watchlist, rosterLoaded, setWatchlist, sharedApplied, sharedSettled, locationPath]);
 
   // global "across-all-competitions" lists for the home page
   const allMatches = useMemo(() => tournamentMatches(t), [t]);
@@ -181,29 +257,40 @@ export function ViewerHome({ tournament, onSelectCompetition, onAdminClick, onOp
   const primaryNextMatch = useMemo(() => buildPrimaryNextMatch(primaryEntry, roster, bothSidesMatches), [primaryEntry, roster, bothSidesMatches]);
 
   // The CARD's subject, which is not always the chime's (bc-wlhc). heroEntry
-  // falls back to the first-added entry when nothing is pinned; primaryEntry
-  // above stays null there, so useFollowedMatchAlert below never fires for
-  // someone the reader did not choose. Two derivations, one line apart, so the
-  // difference is visible rather than hidden behind a flag.
+  // falls back when nothing is pinned; primaryEntry above stays null there, so
+  // useFollowedMatchAlert below never fires for someone the reader did not
+  // choose. Two derivations, one line apart, so the difference is visible
+  // rather than hidden behind a flag.
+  //
+  // The card also takes a FINISHED bout when its subject has nothing left to
+  // fight (operator ruling 2026-09-22), and composes that here rather than
+  // asking one builder for both: buildPrimaryNextMatch is what the chime and
+  // ViewerOverview's "Your next match" banner read, and neither may ever be
+  // handed a match already fought.
+  //
   // One memo, not two: the entry and its match are decided together, because
-  // choosing the entry now depends on whether it HAS a match. The Map keys on
-  // the entry object, which heroEntry hands back unchanged, so each candidate
-  // is scanned at most once and the chosen one is not re-scanned.
+  // choosing the entry depends on WHICH of the two it has. The Map keys on the
+  // entry object, which heroEntry hands back unchanged, so each candidate is
+  // scanned at most once and the chosen one is not re-scanned.
   const { heroWatchEntry, heroNextMatch } = useMemo(() => {
+    const lastResultFor = (e) => buildPrimaryLastResult(e, roster, bothSidesMatches);
     // Pinned is the common case, and heroEntry's pinned arm IS
     // findPrimaryEntry(watchlist, primaryKey) -- the call primaryEntry made one
     // line above, whose match primaryNextMatch already derived from the same
     // three inputs. Deriving it a second time here cost a full roster scan (a
     // dojo primary) plus two passes over every match, on every aggregate
-    // refetch, for every pinned reader.
-    if (primaryEntry) return { heroWatchEntry: primaryEntry, heroNextMatch: primaryNextMatch };
+    // refetch, for every pinned reader. A PIN is an explicit choice, so it
+    // keeps the card even when all it can show is a result.
+    if (primaryEntry) {
+      return { heroWatchEntry: primaryEntry, heroNextMatch: primaryNextMatch || lastResultFor(primaryEntry) };
+    }
     const seen = new Map();
-    const nextFor = (e) => {
-      if (!seen.has(e)) seen.set(e, buildPrimaryNextMatch(e, roster, bothSidesMatches));
+    const matchFor = (e) => {
+      if (!seen.has(e)) seen.set(e, buildPrimaryNextMatch(e, roster, bothSidesMatches) || lastResultFor(e));
       return seen.get(e);
     };
-    const entry = heroEntry(watchlist, primaryKey, (e) => !!nextFor(e));
-    return { heroWatchEntry: entry, heroNextMatch: entry ? nextFor(entry) : null };
+    const entry = heroEntry(watchlist, primaryKey, matchFor);
+    return { heroWatchEntry: entry, heroNextMatch: entry ? matchFor(entry) : null };
   }, [watchlist, primaryKey, roster, bothSidesMatches, primaryEntry, primaryNextMatch]);
 
   // Compact list of running and upcoming watched matches: shown when ≥2 entities
@@ -350,6 +437,7 @@ export function ViewerHome({ tournament, onSelectCompetition, onAdminClick, onOp
               fight without scrolling past the competition list. Absorbs the
               former "Find my matches" hero + the multi-player watchlist. */}
           <WatchlistPanel
+            tournament={t}
             roster={roster}
             rosterLoaded={rosterLoaded}
             watchlist={watchlist}

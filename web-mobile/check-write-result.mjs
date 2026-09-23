@@ -23,15 +23,19 @@
 // If you are adding a genuinely new shape, add it to write_result.jsx and let
 // every consumer inherit it. That is the entire point.
 //
-// No npm dependencies, Node.js built-ins only.
+// No npm dependencies, Node.js built-ins only. The walk, the comment stripper
+// and the line scan are shared with check-competitor-search.mjs through
+// check-helpers.mjs; this file owns only the rule. FORBIDDEN is exported and
+// the run is guarded on being the entry script so a test can import the rule.
 //
 // Usage:   node web-mobile/check-write-result.mjs
 // Exit 0   no hand-rolled checks outside the owning module
 // Exit 1   at least one site re-derives the rule
 
-import { readFileSync, readdirSync, statSync } from 'node:fs';
+import { readFileSync } from 'node:fs';
 import { resolve, dirname, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { walk, scanSource, printViolations } from './check-helpers.mjs';
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)));
 const JS_DIR = resolve(ROOT, 'js');
@@ -40,11 +44,10 @@ const JS_DIR = resolve(ROOT, 'js');
 // state it in terms of the raw response fields.
 const OWNER = 'write_result.jsx';
 
-// Tests may legitimately construct these shapes as fixtures ({applied:false} as
-// a mocked response body) and assert on them. They are not consumers deciding
-// control flow, so they are out of scope -- the thing being guarded is a
-// PRODUCTION site branching on a hand-rolled test.
-const SKIP_DIRS = new Set(['__tests__', 'dist', 'vendor', 'node_modules']);
+// Tests are out of scope (check-helpers.mjs's SKIP_DIRS): a fixture may
+// legitimately construct these shapes ({applied:false} as a mocked response
+// body), and the thing being guarded is a PRODUCTION site branching on a
+// hand-rolled test.
 
 // SCOPE, deliberately narrow. An earlier draft of this check policed `.queued`
 // too and flagged ten sites, every one of them legitimate: lineup writes (a
@@ -58,7 +61,7 @@ const SKIP_DIRS = new Set(['__tests__', 'dist', 'vendor', 'node_modules']);
 // owns the rule and the client that parses the response, nothing should be
 // comparing it by hand -- that comparison is the one that has to stay in step
 // with a rule the owner might extend.
-const FORBIDDEN = [
+export const FORBIDDEN = [
   {
     re: /\.applied\s*(===|==|!==|!=)\s*(false|true)/,
     why: 'compares .applied by hand; ask writeDidNotLand(res) or writeWasSuperseded(res) instead',
@@ -89,57 +92,30 @@ const FORBIDDEN = [
 const ALLOWED = new Set(['api_client.jsx']);
 const ALLOWED_RULE_INDEX = 0;
 
-function* walk(dir) {
-  for (const entry of readdirSync(dir)) {
-    const full = resolve(dir, entry);
-    if (statSync(full).isDirectory()) {
-      if (!SKIP_DIRS.has(entry)) yield* walk(full);
-      continue;
+export function findViolations() {
+  const violations = [];
+  for (const file of walk(JS_DIR)) {
+    if (file.endsWith(OWNER)) continue;
+    const exempt = [...ALLOWED].some((a) => file.endsWith(a));
+    const rules = exempt ? FORBIDDEN.filter((_, r) => r !== ALLOWED_RULE_INDEX) : FORBIDDEN;
+    const rel = relative(ROOT, file);
+    for (const hit of scanSource(readFileSync(file, 'utf8'), rules)) {
+      violations.push({ rel, ...hit });
     }
-    if (entry.endsWith('.jsx') || entry.endsWith('.js')) yield full;
   }
+  return violations;
 }
 
-// Strip line and block comments so a comment DESCRIBING the rule (which several
-// of these files legitimately do, at length) is not mistaken for a use of it.
-function stripComments(src) {
-  return src
-    .replace(/\/\*[\s\S]*?\*\//g, '')
-    .replace(/^\s*\/\/.*$/gm, '')
-    .replace(/([^:])\/\/.*$/gm, '$1');
+if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+  const violations = findViolations();
+  if (violations.length === 0) {
+    console.log('  ✓ the not-landed rule is asked, never re-derived');
+    console.log('All write-result checks OK.');
+    process.exit(0);
+  }
+  console.error('Hand-rolled "did the write land?" checks found.\n');
+  console.error(`The rule belongs to js/${OWNER} (writeDidNotLand / writeWasSuperseded).`);
+  console.error('Re-deriving it at a call site is how the sixth site was missed last time.\n');
+  printViolations(violations);
+  process.exit(1);
 }
-
-const violations = [];
-
-for (const file of walk(JS_DIR)) {
-  const rel = relative(ROOT, file);
-  if (file.endsWith(OWNER)) continue;
-  const exempt = [...ALLOWED].some((a) => file.endsWith(a));
-  const lines = stripComments(readFileSync(file, 'utf8')).split('\n');
-  lines.forEach((line, i) => {
-    for (let r = 0; r < FORBIDDEN.length; r++) {
-      if (exempt && r === ALLOWED_RULE_INDEX) continue;
-      const { re, why } = FORBIDDEN[r];
-      if (re.test(line)) {
-        violations.push({ rel, line: i + 1, text: line.trim(), why });
-        break;
-      }
-    }
-  });
-}
-
-if (violations.length === 0) {
-  console.log('  ✓ the not-landed rule is asked, never re-derived');
-  console.log('All write-result checks OK.');
-  process.exit(0);
-}
-
-console.error('Hand-rolled "did the write land?" checks found.\n');
-console.error(`The rule belongs to js/${OWNER} (writeDidNotLand / writeWasSuperseded).`);
-console.error('Re-deriving it at a call site is how the sixth site was missed last time.\n');
-for (const v of violations) {
-  console.error(`  ${v.rel}:${v.line}`);
-  console.error(`    ${v.text}`);
-  console.error(`    ${v.why}\n`);
-}
-process.exit(1);

@@ -7,6 +7,8 @@ import { withNumber } from './match_scoreboard.jsx';
 import { SideCell } from './side_cell.jsx';
 import { MatchViewerModal, localQueueLabelCompact } from './viewer_match.jsx';
 import { sameCompetitor, competitorKey } from './competitor_identity.jsx';
+import { competitorMatchesQuery, matchMentions } from './competitor_search.jsx';
+import { resultRecencyDesc } from './result_recency.jsx';
 
 const { useState, useMemo, useRef: useRefV } = React;
 const EmptyState = window.EmptyState;
@@ -60,7 +62,8 @@ export function usePrimaryWatch() {
 // elsewhere correctly refused it -- watching Sato of Tokyo must not also
 // surface an id-less "Sato" row.
 export function buildWatchlistUpcoming(watched, allMatches, max = WATCHED_UPCOMING_MAX) {
-  const sets = buildWatchedSets(watched);
+  const people = (Array.isArray(watched) ? watched : []).filter(Boolean);
+  const sets = buildWatchedSets(people);
   if (sets.size === 0) return [];
   const list = Array.isArray(allMatches) ? allMatches : [];
   const upcoming = list.filter((m) => m && m.status !== "completed" && matchInvolvesWatchedSet(m, sets));
@@ -69,7 +72,47 @@ export function buildWatchlistUpcoming(watched, allMatches, max = WATCHED_UPCOMI
     const yt = y.scheduledAt || "99:99";
     return xt.localeCompare(yt);
   });
-  return upcoming.slice(0, max);
+
+  // PER COMPETITOR, not per list (operator ruling 2026-09-22): a watched
+  // competitor with nothing left to fight contributes their last RESULT here
+  // instead. Someone watching three people, one of whom is out, still wants
+  // that person's row -- and they used to vanish from this list entirely the
+  // moment their last match completed.
+  //
+  // Asked per person rather than "is the whole list empty", because the two
+  // differ exactly when they matter: with one competitor still fighting and
+  // one done, a list-level test would keep showing only the first and drop the
+  // second. Each person is tested with a set of their own, which is also why
+  // the completed pass cannot pull in a match belonging to someone else who is
+  // still fighting.
+  const finished = [];
+  people.forEach((p) => {
+    // No guard on an identity-less entry: an empty set matches nothing, so
+    // both passes below already come back empty and the behaviour is the same
+    // either way.
+    const own = buildWatchedSets([p]);
+    if (upcoming.some((m) => matchInvolvesWatchedSet(m, own))) return; // still has something ahead
+    const done = list.filter((m) => m && m.status === "completed" && matchInvolvesWatchedSet(m, own));
+    done.sort(resultRecencyDesc);
+    if (done[0] && !finished.includes(done[0])) finished.push(done[0]);
+  });
+
+  // Upcoming first: what has not happened yet is the reason to keep looking at
+  // this panel. The finished rows read as results, and VSchedItem already
+  // renders them with their score rather than a time.
+  //
+  // ORDER is not the same question as what survives the CAP, and conflating
+  // them cost the ruling above its effect. The cap cuts from the end, results
+  // are appended last, so a watched set with `max` bouts still ahead lost
+  // EVERY result row -- and a coach watching a dojo through round one clears
+  // ten pending bouts immediately, which is exactly when they most want to see
+  // who is already out. Room is reserved for the results instead, bounded so
+  // fixtures keep at least half the list: a competitor who is out is worth
+  // more than the FURTHEST-OUT fixture and less than the next few (operator
+  // ruling 2026-09-23, decided against the two rendered lists rather than in
+  // the abstract).
+  const room = Math.max(max - finished.length, Math.ceil(max / 2));
+  return upcoming.slice(0, room).concat(finished).slice(0, max);
 }
 
 // Return the subset of `matches` where the followed player participates.
@@ -105,23 +148,31 @@ export function PlayerMultiFilter({ tournament, picked, setPicked, dojoText, set
   const [query, setQuery] = useState("");
   const ref = useRefV(null);
 
-  // build a deduped roster across all competitions
-  const roster = useMemo(() => {
-    const map = new Map();
-    (tournament.competitions || []).forEach((c) => {
-      c.players.forEach((p) => {
-        const key = p.id;
-        if (!map.has(key)) map.set(key, { ...p, comps: [c.name] });
-        else map.get(key).comps.push(c.name);
-      });
-    });
-    return Array.from(map.values());
-  }, [tournament]);
+  // ONE roster builder for the whole viewer (bc-nsrc). A second, near-identical
+  // dedup used to live here: the same first-competition-wins shape, but
+  // accumulating `comps` where buildRoster accumulated `checkedIn`, and --
+  // unlike buildRoster -- with NO `!p || !p.id` guard, so every id-less player
+  // in the tournament collapsed into one entry keyed on `undefined`.
+  // buildRoster now carries `comps` too, so nothing is lost by sharing it.
+  //
+  // One behaviour DOES change, deliberately: buildRoster drops a player with
+  // no id, where the private builder kept them merged under `undefined`. That
+  // makes this picker agree with the watchlist picker, which has always used
+  // buildRoster and always dropped them. An id-less roster is a legacy state
+  // the app already names for the operator (helper.MissingParticipantIDsMessage
+  // tells them to save the roster once), and one bogus row standing in for
+  // every id-less competitor was not a better answer than none.
+  const roster = useMemo(() => buildRoster(tournament.competitions), [tournament]);
 
   const q = query.trim().toLowerCase();
-  const filtered = q ? roster.filter((p) =>
-    p.name.toLowerCase().includes(q) || (p.dojo || "").toLowerCase().includes(q) || (p.number || "").toLowerCase().includes(q)
-  ) : roster;
+  // Memoised on the two things it reads, which saves the roster scan on the
+  // re-renders that change neither: opening the dropdown, picking a chip,
+  // clearing the dojo text. It does NOT save it on an SSE refresh -- that
+  // replaces `tournament`, so `roster` is rebuilt and this recomputes with it.
+  const filtered = useMemo(
+    () => (q ? roster.filter((p) => competitorMatchesQuery(p, q)) : roster),
+    [roster, q],
+  );
   const matches = filtered.slice(0, 30);
 
   window.useClickOutside(ref, () => setOpen(false), open);
@@ -135,7 +186,7 @@ export function PlayerMultiFilter({ tournament, picked, setPicked, dojoText, set
     <div className="pmf" ref={ref}>
       <div className="pmf__bar" onClick={() => setOpen(true)}>
         {picked.length === 0 && !dojoText && !query ? (
-          <span className="pmf__placeholder">Filter by player, tag, team, or dojo…</span>
+          <span className="pmf__placeholder">Filter by player, team, dojo or number…</span>
         ) : null}
         {picked.map((p) => (
           <span key={p.id} className="pmf__chip">
@@ -151,6 +202,7 @@ export function PlayerMultiFilter({ tournament, picked, setPicked, dojoText, set
         ) : null}
         <input
           className="pmf__input"
+          aria-label="Filter by player, team, dojo or number"
           placeholder={picked.length || dojoText ? "Add more…" : ""}
           value={query}
           onChange={(e) => setQuery(e.target.value)}
@@ -175,7 +227,7 @@ export function PlayerMultiFilter({ tournament, picked, setPicked, dojoText, set
           </div>
           {q && (
             <button type="button" className="pmf__option pmf__option--text" onClick={() => { setDojoText(query.trim()); setQuery(""); }}>
-              <span>Match "<b>{query}</b>" in any name, tag, or dojo</span>
+              <span>Match "<b>{query}</b>" in any name, dojo or number</span>
             </button>
           )}
           {matches.map((p) => {
@@ -234,10 +286,10 @@ export function applyFilters(matches, picked, dojoText, compFilter) {
       const hit = sideMatchesPickedSet(m.sideA, pickedSet) || sideMatchesPickedSet(m.sideB, pickedSet);
       if (!hit) return false;
     }
-    if (dt) {
-      const hit = [m.sideA?.name, m.sideB?.name, m.sideA?.dojo, m.sideB?.dojo, m.sideA?.number, m.sideB?.number].some((s) => (s || "").toLowerCase().includes(dt));
-      if (!hit) return false;
-    }
+    // Same predicate as the picker's dropdown above (bc-nsrc): the free-text
+    // chip and the dropdown sit on the SAME page, so a competitor the one
+    // offers must be a competitor the other filters to.
+    if (dt && !matchMentions(m, dt)) return false;
     return true;
   });
 }
@@ -246,7 +298,7 @@ export function matchHighlightedBy(m, picked, dojoText) {
   const pickedSet = buildPickedSets(picked);
   if (picked.length > 0 && (sideMatchesPickedSet(m.sideA, pickedSet) || sideMatchesPickedSet(m.sideB, pickedSet))) return true;
   const dt = (dojoText || "").trim().toLowerCase();
-  if (dt && [m.sideA?.name, m.sideB?.name, m.sideA?.dojo, m.sideB?.dojo, m.sideA?.number, m.sideB?.number].some((s) => (s || "").toLowerCase().includes(dt))) return true;
+  if (dt && matchMentions(m, dt)) return true;
   return false;
 }
 

@@ -19,6 +19,7 @@
 
 import { competitorKey } from './competitor_identity.jsx';
 import { resultRecencyDesc } from './result_recency.jsx';
+import { parseWatchlistTokens, resolveFreshTokens } from './watchlist_link.jsx';
 
 const { useState } = React;
 
@@ -235,6 +236,42 @@ export function landedSharedKeys(existing, entries, keys) {
     if (key && present.has(entryKey(e))) landed.push(key);
   });
   return landed;
+}
+
+// sharedLinkPass: ONE pass of applying a ?w= permalink to the device's list,
+// as a decision rather than an action. The effect in viewer_home.jsx calls it
+// and then does exactly what it says: record `landed`, merge `entries` if
+// `write`, strip the query if `settle`. Every rule about the pass lives here,
+// where a unit test can run it, and none in the effect, where nothing can.
+//
+// It exists because of a loop. The effect used to write whenever a token
+// RESOLVED and settle only once every token had LANDED -- two different
+// conditions, and the gap between them is WATCHLIST_MAX. A reader already at
+// the cap opened a link: the token resolved, the merge dropped it, nothing
+// was recorded, the write still ran, and mergeSharedWatchlist returns a fresh
+// array every time, so the state changed by reference, the effect re-fired on
+// its own dependency, and round again -- measured at ~60 localStorage writes
+// a second, indefinitely, for exactly the reader the at-cap retry was written
+// for. `write` is now the same condition the ledger records on: something
+// landed. A pass that writes always records, so each pass leaves strictly
+// fewer unrecorded tokens than the last, and the sequence reaches a pass that
+// writes nothing. That is pinned as a fixpoint test, not asserted in prose.
+//
+// `settle` is the two-clause rule the effect used to spell inline: nothing a
+// later pass could still answer, meaning no token resolved-but-unlanded (the
+// list is full; the reader prunes and the query must survive to retry) and no
+// token unresolved while a roster may still arrive.
+export function sharedLinkPass({ search, roster, watchlist, applied, rosterLoaded }) {
+  const tokens = parseWatchlistTokens(search);
+  const { entries, keys, outstanding } = resolveFreshTokens(tokens, roster, applied);
+  const landed = landedSharedKeys(watchlist, entries, keys);
+  const unlanded = keys.length - landed.length;
+  return {
+    entries,
+    landed,
+    write: landed.length > 0,
+    settle: unlanded === 0 && (rosterLoaded || outstanding === 0),
+  };
 }
 
 // migrateWatchlistOnLoad: fold the legacy single "followed player"

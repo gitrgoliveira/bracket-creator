@@ -12,7 +12,7 @@
 // mergeSharedWatchlist is that rule with a name. Every test below is written
 // to go red on the exact mutation that escaped.
 import { describe, it, expect } from 'vitest';
-import { mergeSharedWatchlist, landedSharedKeys, buildRoster, WATCHLIST_MAX } from '../viewer_watchlist_core.jsx';
+import { mergeSharedWatchlist, landedSharedKeys, sharedLinkPass, buildRoster, WATCHLIST_MAX } from '../viewer_watchlist_core.jsx';
 import { resolveFreshTokens } from '../watchlist_link.jsx';
 
 const player = (id, name) => ({ type: 'player', id, name, dojo: 'Hagane' });
@@ -214,3 +214,100 @@ describe('landedSharedKeys', () => {
     expect(landedSharedKeys(null, null, null)).toEqual([]);
   });
 });
+
+// sharedLinkPass: the whole pass as a decision, and the proof that the
+// sequence of passes ENDS.
+//
+// The effect that applies a ?w= link re-fires on every render (its setter is
+// a fresh closure each time), so the only thing standing between it and a
+// loop is that some pass writes nothing. It used to write whenever a token
+// resolved and settle only once every token landed; at WATCHLIST_MAX those
+// differ, and the page spun at ~60 localStorage writes a second. `drive`
+// below is that effect with the state fed back, and every case must reach a
+// pass that writes nothing within tokens+1 passes.
+describe('sharedLinkPass', () => {
+  const comp = (id, players) => ({ id, name: id, status: 'running', checkInEnabled: false, players });
+  const ROSTER = buildRoster([comp('A', [
+    { id: 'A-p1', name: 'Alice', dojo: 'Shibuya', number: 'K1' },
+    { id: 'A-p2', name: 'Bob', dojo: 'Osaka', number: 'K2' },
+  ])]);
+  const filler = (n) => Array.from({ length: n }, (_, i) => ({ type: 'player', id: 'fill-' + i, name: 'F' + i, dojo: 'D' }));
+
+  // The effect, with its state fed back. Returns how it came to rest.
+  function drive({ search, roster = ROSTER, watchlist = [], rosterLoaded = true }, maxPasses = 6) {
+    const applied = new Set();
+    let list = watchlist;
+    let writes = 0;
+    for (let i = 1; i <= maxPasses; i++) {
+      const pass = sharedLinkPass({ search, roster, watchlist: list, applied, rosterLoaded });
+      pass.landed.forEach((k) => applied.add(k));
+      if (pass.write) { list = mergeSharedWatchlist(list, pass.entries); writes++; continue; }
+      return { passes: i, writes, list, settle: pass.settle, applied };
+    }
+    throw new Error('no quiescence within ' + maxPasses + ' passes');
+  }
+
+  it('an ordinary link lands, writes once, and settles', () => {
+    const r = drive({ search: '?w=K1,K2' });
+    expect(r.writes).toBe(1);
+    expect(r.list.map((e) => e.id)).toEqual(['A-p1', 'A-p2']);
+    expect(r.settle).toBe(true);
+  });
+
+  it('AT THE CAP: writes nothing, records nothing, keeps the query -- and stops', () => {
+    // The loop. One pass, zero writes, not settled (so ?w= survives for the
+    // reader to prune and retry), and the drive comes to rest immediately.
+    const r = drive({ search: '?w=K1', watchlist: filler(WATCHLIST_MAX) });
+    expect(r.passes).toBe(1);
+    expect(r.writes).toBe(0);
+    expect(r.applied.size).toBe(0);
+    expect(r.settle).toBe(false);
+    expect(r.list).toHaveLength(WATCHLIST_MAX);
+  });
+
+  it('STRADDLING the cap: the one that fits lands, the other holds the query, and it stops', () => {
+    const r = drive({ search: '?w=K1,K2', watchlist: filler(WATCHLIST_MAX - 1) });
+    expect(r.writes).toBe(1);
+    expect(r.list.some((e) => e.id === 'A-p1')).toBe(true);
+    expect(r.list.some((e) => e.id === 'A-p2')).toBe(false);
+    expect(r.applied.has('competitor:K1')).toBe(true);
+    expect(r.applied.has('competitor:K2')).toBe(false);
+    expect(r.settle).toBe(false);
+  });
+
+  it('the prune-and-retry the query is kept for: room appears, the rest lands', () => {
+    const first = drive({ search: '?w=K1', watchlist: filler(WATCHLIST_MAX) });
+    expect(first.writes).toBe(0);
+    const pruned = first.list.slice(1);
+    const second = drive({ search: '?w=K1', watchlist: pruned });
+    expect(second.list.some((e) => e.id === 'A-p1')).toBe(true);
+    expect(second.settle).toBe(true);
+  });
+
+  it('an entry already watched counts as landed: one idempotent write, then quiet', () => {
+    const already = [{ type: 'player', id: 'A-p1', name: 'Alice', dojo: 'Shibuya' }];
+    const r = drive({ search: '?w=K1', watchlist: already });
+    expect(r.passes).toBeLessThanOrEqual(2);
+    expect(r.list).toHaveLength(1);
+    expect(r.settle).toBe(true);
+  });
+
+  it('does not settle while a roster may still bring a token home', () => {
+    const p = sharedLinkPass({ search: '?w=ZZ9', roster: ROSTER, watchlist: [], applied: new Set(), rosterLoaded: false });
+    expect(p.write).toBe(false);
+    expect(p.settle).toBe(false);
+  });
+
+  it('settles on a token genuinely not in this tournament once every roster is here', () => {
+    const p = sharedLinkPass({ search: '?w=ZZ9', roster: ROSTER, watchlist: [], applied: new Set(), rosterLoaded: true });
+    expect(p.write).toBe(false);
+    expect(p.settle).toBe(true);
+  });
+
+  it('with no ?w= at all: nothing to write, settled on the first pass', () => {
+    const p = sharedLinkPass({ search: '?playerNumber=K1', roster: ROSTER, watchlist: [], applied: new Set(), rosterLoaded: false });
+    expect(p.write).toBe(false);
+    expect(p.settle).toBe(true);
+  });
+});
+

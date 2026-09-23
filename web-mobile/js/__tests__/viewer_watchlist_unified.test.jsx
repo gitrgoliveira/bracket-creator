@@ -273,35 +273,24 @@ describe('heroEntry vs findPrimaryEntry', () => {
     expect(src).toMatch(/findPrimaryEntry\(watchlist, primaryKey/);
   });
 
-  // The ?w= effect settles on resolveFreshTokens' `outstanding`, never on
-  // rosterLoaded alone. A SOURCE check for the same reason as the one above:
-  // the effect runs inside ViewerHome over the viewer fetch harness, and what
-  // a regression does here is delete one operand of a condition.
-  //
-  // Why it matters: rosterLoaded is false for the life of the page when ONE
-  // competition's participants never load (the viewer payload swallows that
-  // failure), so gating the strip on it alone meant the query outlived every
-  // reload and re-applied the shared link each time -- re-adding entries the
-  // reader had pruned, which is the exact thing the strip exists to prevent.
-  it('viewer_home settles the shared link on outstanding, not on rosterLoaded alone', () => {
-    const src = readSource('viewer_home.jsx');
-    expect(src).toMatch(/const \{ entries, keys, outstanding \} = resolveFreshTokens\(/);
-    expect(src).toMatch(/if \(!rosterLoaded && outstanding > 0\) return;/);
-  });
 
   // The ledger records what LANDED. A resolved token that the merge dropped at
   // WATCHLIST_MAX was being recorded as applied, after which the strip removed
   // the only copy of the link: the reader could prune to make room and reload
   // and get nothing. Read through readCode so the comment explaining this,
   // which necessarily names the same symbols, cannot satisfy the assertions.
-  it('viewer_home records a shared token only once it is in the list', () => {
+  it('viewer_home carries out sharedLinkPass and decides nothing itself', () => {
+    // The pass is the one owner of every rule about applying a link, and the
+    // effect must only act on its verdict. In particular the WRITE is gated on
+    // `pass.write` (something landed), never on the entries having resolved:
+    // that gap is the loop the fixpoint test in watchlist_merge.test.jsx pins.
     const code = readCode('viewer_home.jsx');
-    expect(code).toMatch(/const landed = landedSharedKeys\(watchlist, entries, keys\);/);
-    expect(code).toMatch(/landed\.forEach\(\(k\) => sharedApplied\.current\.add\(k\)\);/);
-    expect(code, 'the unconditional record is what this replaced')
-      .not.toMatch(/keys\.forEach\(\(k\) => sharedApplied\.current\.add\(k\)\);/);
-    expect(code, 'and an unlanded token keeps the query, whatever the roster is doing')
-      .toMatch(/if \(keys\.length > landed\.length\) return;/);
+    expect(code).toMatch(/const pass = sharedLinkPass\(\{/);
+    expect(code).toMatch(/pass\.landed\.forEach\(\(k\) => sharedApplied\.current\.add\(k\)\);/);
+    expect(code).toMatch(/if \(pass\.write\) setWatchlist\(/);
+    expect(code).toMatch(/if \(!pass\.settle\) return;/);
+    expect(code, 'the write gated on resolution is what looped').not.toMatch(/if \(entries\.length\) setWatchlist/);
+    expect(code, 'no settle rule is spelled inline any more').not.toMatch(/outstanding > 0\) return;/);
   });
 });
 

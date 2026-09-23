@@ -213,6 +213,23 @@ describe('buildWatchlistLink returns "" when there is nothing shareable, so call
 // out by hand, which is the exact expression mergeSharedWatchlist exists to
 // own and the exact one a bad commit once replaced with the shared list alone.
 
+// A whitespace-only token is NO token. normalizeWatchlistEntry trims a dojo
+// name and drops an empty one, so " " used to parse as a dojo entry that could
+// never land -- on an EMPTY list, with no cap involved -- which is one of the
+// two ways into the write loop sharedLinkPass closes.
+describe('parseWatchlistTokens drops whitespace-only tokens', () => {
+  it('a blank dojo token yields nothing', () => {
+    expect(parseWatchlistTokens('?w=:%20')).toEqual([]);
+    expect(parseWatchlistTokens('?w=:')).toEqual([]);
+  });
+  it('a blank competitor token yields nothing', () => {
+    expect(parseWatchlistTokens('?w=%20')).toEqual([]);
+  });
+  it('surrounding whitespace is trimmed off a real token', () => {
+    expect(parseWatchlistTokens('?w=%20K1%20')).toEqual([{ kind: 'competitor', value: 'K1' }]);
+  });
+});
+
 // stripWatchlistParam: what the address bar keeps once a shared link has been
 // folded in. The reason this is a function rather than one line in the effect
 // is the COMPETITOR TAG: helper.playerTagURL prints each tag's QR as

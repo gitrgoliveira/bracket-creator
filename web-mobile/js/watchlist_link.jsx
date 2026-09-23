@@ -151,7 +151,12 @@ export function parseWatchlistTokens(search) {
   const out = [];
   raw.split(SEP).forEach((tok) => {
     const isDojo = tok.startsWith(DOJO_SENTINEL);
-    const value = safeDecodeToken(isDojo ? tok.slice(DOJO_SENTINEL.length) : tok);
+    // Trimmed, because normalizeWatchlistEntry trims a dojo name and drops an
+    // empty one: a whitespace-only token (`?w=:%20`, hand-typed or truncated)
+    // used to survive here as " ", resolve to a dojo entry, and then vanish in
+    // the merge -- a token that could never land, on an EMPTY list, which is
+    // the loop sharedLinkPass describes with no cap needed to reach it.
+    const value = safeDecodeToken(isDojo ? tok.slice(DOJO_SENTINEL.length) : tok).trim();
     if (value) out.push({ kind: isDojo ? "dojo" : "competitor", value });
   });
   return out;

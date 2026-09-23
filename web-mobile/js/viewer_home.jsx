@@ -2,13 +2,13 @@
 // Extracted from viewer.jsx (mp-pxxc step 10).
 
 import { competitionKindLabel, compMatches, tournamentMatches, TournamentInfo, compareDmy } from './viewer_utils.jsx';
-import { matchParticipantIds, addPlayerToWatchlist, mergeSharedWatchlist, resolveEntryPlayerIds, resolveWatchedPlayers, findPrimaryEntry, heroEntry, landedSharedKeys, buildPrimaryNextMatch, buildPrimaryLastResult, buildRoster, rosterFullyLoaded, useWatchlist, buildWatchedSets, matchInvolvesWatchedSet } from './viewer_watchlist_core.jsx';
+import { matchParticipantIds, addPlayerToWatchlist, mergeSharedWatchlist, resolveEntryPlayerIds, resolveWatchedPlayers, findPrimaryEntry, heroEntry, sharedLinkPass, buildPrimaryNextMatch, buildPrimaryLastResult, buildRoster, rosterFullyLoaded, useWatchlist, buildWatchedSets, matchInvolvesWatchedSet } from './viewer_watchlist_core.jsx';
 import { runOnce, notifEnable, notifDisable, useChimeMuted, isFollowedMatchOnDeck, useFollowedMatchAlert, useSecondaryWatchAlert, MyMatchAlertBanner } from './viewer_alerts.jsx';
 import { notificationSupported } from './viewer_notifications.jsx';
 import { VSchedItem, MatchViewerModal } from './viewer_match.jsx';
 import { buildWatchlistUpcoming, usePrimaryWatch, WATCHED_UPCOMING_LIST_MAX } from './viewer_schedule.jsx';
 import { numberOf } from './competitor_identity.jsx';
-import { parseWatchlistTokens, resolveFreshTokens, stripWatchlistParam } from './watchlist_link.jsx';
+import { stripWatchlistParam } from './watchlist_link.jsx';
 
 const { useState, useMemo, useRef: useRefV, useEffect } = React;
 const StatusBadge = window.StatusBadge;
@@ -187,48 +187,30 @@ export function ViewerHome({ tournament, onSelectCompetition, onAdminClick, onOp
     if (sharedSettled.current) return;
     if (typeof window === "undefined" || !window.location) return;
     if (roster.length === 0) return; // wait until participants are loaded
-    // Which tokens are still outstanding, and what they resolve to, is
-    // resolveFreshTokens' rule rather than this effect's.
-    const { entries, keys, outstanding } = resolveFreshTokens(
-      parseWatchlistTokens(window.location.search), roster, sharedApplied.current,
-    );
-    // Applied means LANDED, not merely resolved. The merge drops what will
-    // not fit (WATCHLIST_MAX, existing entries first), so a reader already at
-    // the cap receives nothing from a link -- and recording those tokens
-    // anyway told the ledger they had arrived, after which the strip below
-    // removed the only copy of the link. Pruning to make room and reloading
-    // then brought back nothing. landedSharedKeys owns that question.
+    // Every decision about this pass is sharedLinkPass's (viewer_watchlist_core
+    // .jsx), where a unit test can run it and a fixpoint test proves the
+    // sequence of passes ends. This effect only carries out the verdict:
+    // record what landed, merge if something did, settle if nothing is left.
     //
-    // Computed against `watchlist` while the write goes through the functional
-    // form below: if a concurrent update makes `prev` differ, the ledger is
-    // merely incomplete, never wrong, and this effect re-runs on the resulting
-    // watchlist change and retries whatever it did not record.
-    const landed = landedSharedKeys(watchlist, entries, keys);
-    landed.forEach((k) => sharedApplied.current.add(k));
+    // The merge is gated on `write` -- something LANDED -- and not on "a
+    // token resolved", and that difference was a loop: mergeSharedWatchlist
+    // returns a fresh array every time, so a write that changed nothing still
+    // changed the state by reference, the effect re-fired on its own
+    // dependency, and a reader already at WATCHLIST_MAX spun at ~60
+    // localStorage writes a second for as long as the tab was open.
+    const pass = sharedLinkPass({
+      search: window.location.search, roster, watchlist, applied: sharedApplied.current, rosterLoaded,
+    });
+    pass.landed.forEach((k) => sharedApplied.current.add(k));
     // MERGE, never replace: arriving at someone else's link must not delete
     // the list you already keep. The rule is mergeSharedWatchlist's, not this
     // effect's -- it used to be spelled out here, which is exactly how it got
     // silently replaced by "the shared list alone" with no test to notice.
-    if (entries.length) setWatchlist((prev) => mergeSharedWatchlist(prev, entries));
-    // Settle when nothing is left that a later pass could answer: either every
-    // competition's roster has arrived (so an unresolved token is genuinely
-    // not in this tournament), OR every token this link carries has already
-    // been applied. The second arm is not a shortcut, it is the whole reason
-    // this is not `if (!rosterLoaded) return` alone: a tournament where ONE
-    // competition's participants never load leaves rosterLoaded false for the
-    // life of the page, so the strip below never ran, the query outlived every
-    // reload, and the entries a reader pruned came back each time -- exactly
-    // the thing the strip exists to prevent, arrived at through the failure
-    // the retry exists to survive. With no `?w=` at all there are no tokens,
-    // so this settles on the first pass and strips nothing.
-    //
-    // A token that resolved but did NOT land is outstanding too, and this one
-    // blocks the strip whatever the roster is doing: the roster has nothing to
-    // do with a full list. Keeping ?w= costs the reader nothing (no entry of
-    // theirs can come back, because none was added) and is the only thing that
-    // lets them prune and reload to collect the rest.
-    if (keys.length > landed.length) return;
-    if (!rosterLoaded && outstanding > 0) return;
+    // The functional form takes `prev` so a concurrent update is merged over,
+    // not under; the ledger above was computed against `watchlist`, and if the
+    // two differ the ledger is merely incomplete and the next pass retries.
+    if (pass.write) setWatchlist((prev) => mergeSharedWatchlist(prev, pass.entries));
+    if (!pass.settle) return;
     sharedSettled.current = true;
     // Strip ?w= once there is nothing left to resolve. The ledger above lives
     // for this mount, but the list it protects lives in localStorage and

@@ -3,7 +3,9 @@
 // The watchlist lives in localStorage, so it does not survive a second phone,
 // a different browser profile or a cleared cache. This module encodes it into
 // a URL and reads it back, so a coach can hand their list to a parent and a
-// competitor can move it to the tablet they actually watch on.
+// competitor can move it to the tablet they actually watch on. The same `w`
+// also rides in the home screen's address bar, kept equal to the list
+// (mirrorWatchlistParam), so a bookmark carries it too.
 //
 // It GENERALISES what viewer_home.jsx's resolveDeepLink already does for ONE
 // person (`?player=`, `?playerNumber=`). Two of that function's decisions are
@@ -128,9 +130,11 @@ export function watchlistTokens(watchlist, roster) {
 }
 
 // buildWatchlistLink: the shareable URL, or "" when there is nothing to share.
-// `base` is the page URL WITHOUT a query (the caller builds it rather than
-// reading location.href: app.jsx syncs state to the path only, so the address
-// bar drops this query on the first navigation and is never the permalink).
+// `base` is the page URL WITHOUT a query. The caller builds it (linkBase)
+// rather than reading location.href, even though the home screen's address
+// bar now carries the same `w` (mirrorWatchlistParam): the bar holds whatever
+// origin the reader typed, typically the venue LAN's http://192.168.x.x,
+// where the Share link must carry the operator's public URL.
 export function buildWatchlistLink(base, watchlist, roster) {
   const tokens = watchlistTokens(watchlist, roster);
   if (!tokens.length) return "";
@@ -164,7 +168,8 @@ export function parseWatchlistTokens(search) {
 
 // stripWatchlistParam: the same query WITHOUT `w`, every other parameter left
 // alone. Returns the string unchanged when there was no `w` to remove, so a
-// caller can compare and leave the address bar untouched.
+// caller can compare and leave the address bar untouched. Its caller is
+// mirrorWatchlistParam below, which strips and then writes the list back.
 //
 // Dropping the WHOLE query here would be wrong, and specifically wrong for the
 // competitor tag. `helper.playerTagURL` prints each tag's QR as
@@ -194,6 +199,32 @@ export function stripWatchlistParam(search) {
     return (eq < 0 ? part : part.slice(0, eq)) !== WATCHLIST_PARAM;
   });
   return kept.length ? `?${kept.join("&")}` : "";
+}
+
+// mirrorWatchlistParam: the query the home screen's address bar should hold
+// for this watchlist -- `w` set to the list's tokens, every other parameter
+// left alone, and `w` removed when the list is empty (bc-wlpl, operator
+// ruling 2026-09-23). So the address bar IS the list: a bookmark, a reload or
+// a copied URL carries it, and opening one ADDS, like any ?w= link.
+//
+// Three things the ruling accepted, so do not "fix" them: an older copy of
+// the URL (a bookmark, a restored tab, Back to a home history entry) re-adds
+// an entry removed since, because opening a link adds and never replaces;
+// the query goes on navigation away from home, because app.jsx writes the
+// path only; and the list is visible in the address bar and its history.
+//
+// Returns `search` UNCHANGED when it already carries exactly this `w`,
+// wherever the parameter sits, so the caller's compare-before-replaceState
+// does not reorder a URL that needs nothing.
+export function mirrorWatchlistParam(search, watchlist, roster) {
+  const s = String(search || "");
+  const tokens = watchlistTokens(watchlist, roster);
+  const value = tokens.join(SEP);
+  if (value && rawParam(s, WATCHLIST_PARAM) === value) return s;
+  const kept = stripWatchlistParam(s);
+  if (!value) return kept;
+  const w = `${WATCHLIST_PARAM}=${value}`;
+  return kept ? `${kept}&${w}` : `?${w}`;
 }
 
 // resolveWatchlistTokens: parsed tokens back into watchlist entries, against

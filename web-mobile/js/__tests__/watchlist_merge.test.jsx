@@ -283,11 +283,26 @@ describe('sharedLinkPass', () => {
     expect(second.settle).toBe(true);
   });
 
-  it('an entry already watched counts as landed: one idempotent write, then quiet', () => {
+  it('an entry already watched counts as landed but writes nothing', () => {
+    // The home address bar mirrors the list (mirrorWatchlistParam), so every
+    // reload of home reads the device's OWN list back as a ?w= link. That must
+    // settle in one pass with no write: a write here is an identical list
+    // under a fresh reference, one localStorage write per reload. The token is
+    // still recorded, which is what the ledger needs.
     const already = [{ type: 'player', id: 'A-p1', name: 'Alice', dojo: 'Shibuya' }];
     const r = drive({ search: '?w=K1', watchlist: already });
-    expect(r.passes).toBeLessThanOrEqual(2);
-    expect(r.list).toHaveLength(1);
+    expect(r.writes).toBe(0);
+    expect(r.passes).toBe(1);
+    expect(r.list).toBe(already);
+    expect(r.settle).toBe(true);
+    expect(r.applied.has('competitor:K1')).toBe(true);
+  });
+
+  it('a link mixing a watched entry with a new one writes once, for the new one', () => {
+    const already = [{ type: 'player', id: 'A-p1', name: 'Alice', dojo: 'Shibuya' }];
+    const r = drive({ search: '?w=K1,K2', watchlist: already });
+    expect(r.writes).toBe(1);
+    expect(r.list.map((e) => e.id)).toEqual(['A-p1', 'A-p2']);
     expect(r.settle).toBe(true);
   });
 

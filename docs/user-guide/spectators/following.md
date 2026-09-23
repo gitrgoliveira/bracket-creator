@@ -49,6 +49,8 @@ The share sheet gives you a link, and a QR code when the list is short enough to
 
 Share the link on the day of the tournament. Competitors are identified by their number where they have one, and numbers come from the draw, so a link created before a draw is regenerated can point at a different competitor afterwards.
 
+On the home screen, the address bar carries your watchlist too, and it updates as you add or remove someone. A bookmark of the home screen, or its address copied into another browser, therefore works like a shared link: opening it adds those competitors. Because opening a link only ever adds, an older copy brings back anyone you have removed since. To send your list to someone else, use **Share** rather than the address bar: on the venue network the address bar can show the venue's local address, which works only on that network, while Share uses the tournament's public address when the organiser has set one.
+
 ## Scoreboards and court displays
 
 Each shiai-jo runs one digital scoreboard on a TV or projector: a court-scoped display with no password showing the score for the bout in progress. Referees, the two competitors, the scoring operator, and spectators at that court all read from the same screen.

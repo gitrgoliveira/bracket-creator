@@ -8,7 +8,7 @@ import { notificationSupported } from './viewer_notifications.jsx';
 import { VSchedItem, MatchViewerModal } from './viewer_match.jsx';
 import { buildWatchlistUpcoming, usePrimaryWatch, WATCHED_UPCOMING_LIST_MAX } from './viewer_schedule.jsx';
 import { numberOf } from './competitor_identity.jsx';
-import { stripWatchlistParam } from './watchlist_link.jsx';
+import { mirrorWatchlistParam } from './watchlist_link.jsx';
 
 const { useState, useMemo, useRef: useRefV, useEffect } = React;
 const StatusBadge = window.StatusBadge;
@@ -96,6 +96,17 @@ export function resolveDeepLink(searchString, roster) {
   }
   if (!hit) return null;
   return { player: { id: hit.id, name: hit.name } };
+}
+
+// mirrorWatchlistToAddressBar: keep the home screen's `w` equal to the list
+// (bc-wlpl). The rule is mirrorWatchlistParam's; this only carries it out.
+// replaceState adds no history entry, so an edit to the list never costs the
+// reader a Back press, and comparing first leaves an unchanged URL alone.
+function mirrorWatchlistToAddressBar(watchlist, roster) {
+  const nextSearch = mirrorWatchlistParam(window.location.search, watchlist, roster);
+  if (nextSearch !== window.location.search) {
+    window.history.replaceState(null, "", window.location.pathname + nextSearch);
+  }
 }
 
 export function ViewerHome({ tournament, onSelectCompetition, onAdminClick, onOpenSchedule, onRegister, onOpenResults, sseConnected = true }) {
@@ -186,18 +197,36 @@ export function ViewerHome({ tournament, onSelectCompetition, onAdminClick, onOp
   // readSharedLedger). A stable Set: useState's initialiser runs once.
   const [sharedApplied] = useState(() =>
     (typeof window === "undefined" ? new Set() : readSharedLedger(sessionStore(), window.location.search)));
+
+  // The same effect owns the address bar AFTER the link settles: it keeps `w`
+  // equal to the list (mirrorWatchlistParam, operator ruling 2026-09-23), so a
+  // bookmark or a reload carries the list. The order is the invariant: an
+  // INBOUND ?w= is read-only until it settles, and only then does the tab
+  // write its own list over it. Mirroring earlier would overwrite a token
+  // still waiting for its competition's roster, and the next pass, reading
+  // the rewritten query, would find nothing outstanding and settle with that
+  // entry silently dropped (and the sessionStorage ledger, keyed on the raw
+  // `w`, would no longer match on a reload).
+  //
+  // Home only, by construction: app.jsx renders ViewerHome as the fallback of
+  // its screen conditional, so it is unmounted on every other screen and this
+  // never writes `w` onto a competition's path.
   const sharedSettled = useRefV(false);
   React.useEffect(() => {
-    if (sharedSettled.current) return;
     if (typeof window === "undefined" || !window.location) return;
     if (roster.length === 0) return; // wait until participants are loaded
+    if (sharedSettled.current) {
+      mirrorWatchlistToAddressBar(watchlist, roster);
+      return;
+    }
     // Every decision about this pass is sharedLinkPass's (viewer_watchlist_core
     // .jsx), where a unit test can run it and a fixpoint test proves the
     // sequence of passes ends. This effect only carries out the verdict:
     // record what landed, merge if something did, settle if nothing is left.
     //
-    // The merge is gated on `write` -- something LANDED -- and not on "a
-    // token resolved", and that difference was a loop: mergeSharedWatchlist
+    // The merge is gated on `write` -- something LANDED that was not already
+    // on the list -- and not on "a token resolved", and that difference was a
+    // loop: mergeSharedWatchlist
     // returns a fresh array every time, so a write that changed nothing still
     // changed the state by reference, the effect re-fired on its own
     // dependency, and a reader already at WATCHLIST_MAX spun at ~60
@@ -219,26 +248,14 @@ export function ViewerHome({ tournament, onSelectCompetition, onAdminClick, onOp
     if (pass.write) setWatchlist((prev) => mergeSharedWatchlist(prev, pass.entries));
     if (!pass.settle) return;
     sharedSettled.current = true;
-    // Settled: the query goes below, and the ledger with it, so re-opening
-    // this same link later is a fresh open that adds again.
+    // Settled: the inbound link is finished with, and the ledger goes with
+    // it, so re-opening this same link later is a fresh open that adds again.
     clearSharedLedger(sessionStore());
-    // Strip ?w= once there is nothing left to resolve. The ledger above lives
-    // for this mount, but the list it protects lives in localStorage and
-    // outlives it -- so without this, a reader who opens a shared link, prunes
-    // it and then RELOADS gets the pruned entries back. app.jsx only rewrites
-    // the URL when the path changes, and on the home screen it does not, so
-    // the query survives in the address bar until something removes it.
-    // replaceState adds no history entry, so Back is unaffected.
-    //
-    // Only `w` goes: a printed tag's QR is `?playerNumber=K12`
-    // (helper.playerTagURL), and that query surviving is what lets a reload
-    // retry a deep link that resolved to nobody because its competition had
-    // not loaded yet. stripWatchlistParam returns the search unchanged when
-    // there is no `w`, so a tag link is not touched at all.
-    const nextSearch = stripWatchlistParam(window.location.search);
-    if (nextSearch !== window.location.search) {
-      window.history.replaceState(null, "", window.location.pathname + nextSearch);
-    }
+    // From here the address bar mirrors the list. Not on a pass that WROTE:
+    // `watchlist` in this closure is the list from before that merge, so
+    // mirroring it would drop the entries this pass just added from the bar
+    // until the next render. The write re-renders, and that pass mirrors.
+    if (!pass.write) mirrorWatchlistToAddressBar(watchlist, roster);
     // The Set and the ref are listed rather than suppressed: neither identity
     // ever changes, so naming them is honest and costs no extra runs.
   }, [roster, watchlist, rosterLoaded, setWatchlist, sharedApplied, sharedSettled]);

@@ -6,6 +6,7 @@ import {
   parseWatchlistTokens,
   resolveWatchlistTokens,
   stripWatchlistParam,
+  mirrorWatchlistParam,
 } from '../watchlist_link.jsx';
 import { buildRoster } from '../viewer_watchlist_core.jsx';
 
@@ -266,5 +267,48 @@ describe('stripWatchlistParam', () => {
     // The dojo sentinel and separator ride inside a token; nothing here may
     // re-split or decode them, since this function only removes a parameter.
     expect(stripWatchlistParam('?q=a%3Db&w=%3AHagane%20Dojo')).toBe('?q=a%3Db');
+  });
+});
+
+// mirrorWatchlistParam: what the home screen's address bar holds for a list
+// (operator ruling 2026-09-23). viewer_home compares the result with
+// location.search before it calls replaceState, so "unchanged" must mean the
+// SAME string, not an equivalent one.
+describe('mirrorWatchlistParam', () => {
+  const roster = buildRoster([comp('A', 'running', [
+    { id: 'p1', name: 'Alice', dojo: 'Nara', number: 'K1' },
+    { id: 'p2', name: 'Bob', dojo: 'Kobe', number: 'K2' },
+  ])]);
+  const alice = { type: 'player', id: 'p1', name: 'Alice', dojo: 'Nara' };
+  const bob = { type: 'player', id: 'p2', name: 'Bob', dojo: 'Kobe' };
+
+  it('writes the list, in list order, onto an empty query', () => {
+    expect(mirrorWatchlistParam('', [bob, alice], roster)).toBe('?w=K2,K1');
+  });
+
+  it('replaces a stale w and keeps every other parameter', () => {
+    expect(mirrorWatchlistParam('?w=K9&playerNumber=K12', [alice], roster)).toBe('?playerNumber=K12&w=K1');
+  });
+
+  it('returns the query untouched when it already holds this list, wherever w sits', () => {
+    // Stripping and re-appending would move w to the end, and the caller would
+    // then rewrite a URL that needed nothing.
+    const s = '?w=K1&playerNumber=K12';
+    expect(mirrorWatchlistParam(s, [alice], roster)).toBe(s);
+  });
+
+  it('an empty list takes w out rather than leaving ?w=', () => {
+    expect(mirrorWatchlistParam('?w=K1&x=1', [], roster)).toBe('?x=1');
+    expect(mirrorWatchlistParam('?w=K1', [], roster)).toBe('');
+    expect(mirrorWatchlistParam('', [], roster)).toBe('');
+  });
+
+  it('reads back as the same list: the bar is a link like any other', () => {
+    const dojo = { type: 'dojo', dojo: 'Hagane Dojo' };
+    const search = mirrorWatchlistParam('?playerNumber=K2', [alice, dojo], roster);
+    expect(resolveWatchlistTokens(parseWatchlistTokens(search), roster)).toEqual([
+      { type: 'player', id: 'p1', name: 'Alice', dojo: 'Nara' },
+      { type: 'dojo', dojo: 'Hagane Dojo' },
+    ]);
   });
 });

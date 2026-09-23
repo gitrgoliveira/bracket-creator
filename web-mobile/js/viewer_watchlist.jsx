@@ -656,9 +656,10 @@ function WatchlistPanel({ tournament, roster, rosterLoaded = true, watchlist, se
   // URL -- the same mistake the admin registration sheet avoids by calling
   // this.
   //
-  // BUILT, never read off the address bar: app.jsx syncs its state to the PATH
-  // only, so the first navigation away drops any ?w= that brought the reader
-  // here. The address bar is not the permalink.
+  // BUILT, never read off the address bar, even though home's bar now carries
+  // the same `w` (mirrorWatchlistParam): the bar holds the origin the reader
+  // typed, and on the venue LAN that is the private address linkBase exists
+  // to replace. Same list, different origin.
   const shareBase = `${(window.linkBase || (() => window.location.origin))(tournament)}/`;
 
   return (

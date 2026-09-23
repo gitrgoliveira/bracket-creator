@@ -221,8 +221,8 @@ export function mergeSharedWatchlist(existing, shared) {
 // viewer_home records a token as applied so that a healing roster can never
 // re-add an entry the reader has since pruned. Recording one that never
 // landed inverted that protection into data loss: nothing was added, the
-// ledger said it had been, and the ?w= strip then removed the only copy of
-// the link, so pruning to make room and reloading brought back nothing. A
+// ledger said it had been, and settling then took ?w= out of the address
+// bar, the only copy of the link, so pruning to make room and reloading brought back nothing. A
 // token that did not land is therefore NOT applied, and the caller keeps the
 // query until it is.
 //
@@ -241,7 +241,7 @@ export function landedSharedKeys(existing, entries, keys) {
 // sharedLinkPass: ONE pass of applying a ?w= permalink to the device's list,
 // as a decision rather than an action. The effect in viewer_home.jsx calls it
 // and then does exactly what it says: record `landed`, merge `entries` if
-// `write`, strip the query if `settle`. Every rule about the pass lives here,
+// `write`, and once `settle`, hand the address bar over to the list. Every rule about the pass lives here,
 // where a unit test can run it, and none in the effect, where nothing can.
 //
 // It exists because of a loop. The effect used to write whenever a token
@@ -261,15 +261,26 @@ export function landedSharedKeys(existing, entries, keys) {
 // later pass could still answer, meaning no token resolved-but-unlanded (the
 // list is full; the reader prunes and the query must survive to retry) and no
 // token unresolved while a roster may still arrive.
+//
+// `write` is narrower than `landed`: a token whose entry was ALREADY on the
+// list lands (the ledger records it) but writes nothing. That is the common
+// case now, not an edge: the home screen's address bar mirrors the list
+// (mirrorWatchlistParam), so every reload of home reads the device's own list
+// back as a ?w= link. Writing it would be an identical list under a fresh
+// array reference, one localStorage write and re-render per reload. The
+// fixpoint argument above is unaffected: every pass still records what landed.
 export function sharedLinkPass({ search, roster, watchlist, applied, rosterLoaded }) {
   const tokens = parseWatchlistTokens(search);
   const { entries, keys, outstanding } = resolveFreshTokens(tokens, roster, applied);
   const landed = landedSharedKeys(watchlist, entries, keys);
   const unlanded = keys.length - landed.length;
+  const had = new Set((watchlist || []).map(entryKey));
+  const landedSet = new Set(landed);
+  const added = entries.some((e, i) => landedSet.has(keys[i]) && !had.has(entryKey(e)));
   return {
     entries,
     landed,
-    write: landed.length > 0,
+    write: added,
     settle: unlanded === 0 && (rosterLoaded || outstanding === 0),
   };
 }
@@ -280,13 +291,13 @@ export function sharedLinkPass({ search, roster, watchlist, applied, rosterLoade
 // is still outstanding -- the list is full, or a competition's roster failed
 // to read -- and across a RELOAD in that state a fresh mount, with an empty
 // ledger, re-applied every token the previous mount had landed: a reader who
-// had pruned one of them got it back. That is the resurrection the strip
-// exists to prevent, reopened for exactly the held case.
+// had pruned one of them got it back. That is the resurrection mirroring
+// the list into the address bar prevents, reopened for exactly the held case.
 //
 // sessionStorage carries the ledger across the reload: same tab, same link.
 // It is keyed on the raw `w` value, so a DIFFERENT link starts a fresh
-// ledger; a new tab is a fresh open (sessionStorage is per tab); and the
-// strip clears it, so re-opening the same link later still adds. The three
+// ledger; a new tab is a fresh open (sessionStorage is per tab); and
+// settling clears it, so re-opening the same link later still adds. The three
 // helpers take the storage as a parameter so a unit test can hand them a
 // fake, and sessionStore() is the one place the real one is reached -- the
 // property access itself can throw where storage is blocked, and a link that

@@ -33,8 +33,8 @@ file to a reader, so there is nothing to review and nothing to copy.
 
 A changed line says how many pixels moved and by how many grey levels at most,
 followed by the box they fall inside, as `within left,top-right,bottom` in the
-capture's own pixels. A small box names one element; one spanning the capture is a layout
-shift. A capture whose width, or fixed height, no longer matches its committed
+capture's own pixels. A small box names one element; one spanning the capture
+is a layout shift. A capture whose width, or fixed height, no longer matches its committed
 twin is reported as a size mismatch instead, which usually means the recipe's
 viewport or crop selector needs adjusting rather than that the surface changed.
 
@@ -111,10 +111,11 @@ would pull it into `audit-ci`'s scope.
 
     run.mjs          the runner: boots a server, seeds, drives, captures
     lib/server.mjs   starts `mobile-app` or `serve` on a free port + temp data dir
-    lib/api.mjs      the scaffolding calls (tournament, competition, roster, draw)
+    lib/api.mjs      the scaffolding calls (tournament, competition, roster, draw,
+                     and a lineup written by member id)
     lib/net.mjs      picks a free port for the server
     lib/ui.mjs       operator auth for a context (see its closing note on editors)
-    lib/editor.mjs   the score editor's selector and its two-tap Finish
+    lib/editor.mjs   the score editor's selector, its Start match and two-tap Finish
     lib/scope.mjs    which groups a set of changed files reaches (SINCE=)
     lib/seed.mjs     runs scripts/setup_tournament.py for the demo tournament
     lib/fixture.mjs  read-back checks that refuse to capture a bad fixture
@@ -124,13 +125,16 @@ would pull it into `audit-ci`'s scope.
 ## The rule that shapes the seeding
 
 Competitor numbers resolve by member id and points come from ippon arrays. A
-lineup or a score written over the HTTP API carries neither, so the number chips
-render blank and PW/PL read zero. That has shipped a misleading screenshot before.
+lineup written by name alone, or a score written over the HTTP API, carries
+neither, so the number chips render blank and PW/PL read zero. That has shipped a misleading screenshot before.
 
 So the API creates the tournament, the competitions, the participants and the
-draw, and everything that shows numbers, bout rows or points is entered by
-driving the interface. `lib/fixture.mjs` re-reads the stored files afterwards and
-refuses to capture when the ids or the points are missing, because a
+draw, and everything that shows bout rows or points is entered by driving the
+interface. A lineup is the one exception: `lib/api.mjs`'s `nameMembers` and
+`lineup` name the draw's own numbered members and write the lineup by member
+id, the same request the Lineups page sends. `lib/fixture.mjs` re-reads the
+stored record afterwards (the pool files, and each lineup through the server)
+and refuses to capture when the ids or the points are missing, because a
 half-completed flow leaves a page that still looks right.
 
 ## Adding a capture

@@ -33,7 +33,7 @@ The same number identifies that competitor everywhere it appears: on their tag, 
 
 - **The prefix on its own** brings up that whole draw. Type "K" and every K number is listed, along with anyone whose name or dojo happens to contain a "k".
 - **The prefix and the digits** finds that one competitor. "K12" finds K12, and not K120.
-- **Digits on their own** find nobody. "12" is not a competitor number, because it does not say which competition it belongs to.
+- **Digits on their own** find nobody by number. "12" is not a competitor number, because it does not say which competition it belongs to. As with the prefix on its own, anyone whose name or dojo happens to contain "12" is still listed.
 
 Names and dojos still match on any part of what you type, so a surname fragment is enough for those. Only the number needs to be typed in full.
 

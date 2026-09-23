@@ -186,7 +186,7 @@ export function PlayerMultiFilter({ tournament, picked, setPicked, dojoText, set
     <div className="pmf" ref={ref}>
       <div className="pmf__bar" onClick={() => setOpen(true)}>
         {picked.length === 0 && !dojoText && !query ? (
-          <span className="pmf__placeholder">Filter by player, tag, team, or dojo…</span>
+          <span className="pmf__placeholder">Filter by player, team, dojo or number…</span>
         ) : null}
         {picked.map((p) => (
           <span key={p.id} className="pmf__chip">
@@ -202,6 +202,7 @@ export function PlayerMultiFilter({ tournament, picked, setPicked, dojoText, set
         ) : null}
         <input
           className="pmf__input"
+          aria-label="Filter by player, team, dojo or number"
           placeholder={picked.length || dojoText ? "Add more…" : ""}
           value={query}
           onChange={(e) => setQuery(e.target.value)}
@@ -226,7 +227,7 @@ export function PlayerMultiFilter({ tournament, picked, setPicked, dojoText, set
           </div>
           {q && (
             <button type="button" className="pmf__option pmf__option--text" onClick={() => { setDojoText(query.trim()); setQuery(""); }}>
-              <span>Match "<b>{query}</b>" in any name, tag, or dojo</span>
+              <span>Match "<b>{query}</b>" in any name, dojo or number</span>
             </button>
           )}
           {matches.map((p) => {

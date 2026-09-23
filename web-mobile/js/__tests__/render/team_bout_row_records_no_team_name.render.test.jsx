@@ -20,6 +20,7 @@ import React from 'react';
 import { render, act, screen, fireEvent } from '@testing-library/react';
 import { describe, it, expect, vi, beforeAll, afterAll, beforeEach } from 'vitest';
 import { installWindowStubs } from '../helpers/stub_globals.js';
+import { AUTOSAVE_DEBOUNCE_MS } from '../../admin_scoring_autosave.jsx';
 
 const STUBBED_GLOBALS = {
   isHikiwake: () => false,
@@ -85,6 +86,10 @@ async function scoreAndCapture(match) {
   const ippons = document.querySelectorAll('button.ipt-btn');
   await act(async () => { fireEvent.click(ippons[0]); });
   await finish();
+  // Let the debounce window elapse before reading the calls: a cancel that
+  // doSubmit lost would fire its "running" write only now, and the last-write
+  // assertion below exists to see it.
+  await act(() => new Promise((r) => setTimeout(r, AUTOSAVE_DEBOUNCE_MS + 50)));
   // Select the FINISH write by its status rather than asserting a total call
   // count. The strike above marks the editor dirty, which schedules a 300ms
   // debounced autosave (AUTOSAVE_DEBOUNCE_MS, admin_scoring_autosave.jsx)
@@ -100,8 +105,14 @@ async function scoreAndCapture(match) {
   //
   // "Exactly one COMPLETED write" still catches the regression a count would
   // (a double finish), without encoding the race.
-  const completed = window.API.recordScore.mock.calls.filter(([, , p]) => p && p.status === "completed");
+  const calls = window.API.recordScore.mock.calls;
+  const completed = calls.filter(([, , p]) => p && p.status === "completed");
   expect(completed, "exactly one completed write").toHaveLength(1);
+  // And it is the LAST write. Selecting by status tolerates an autosave that
+  // fired BEFORE Finish; it must not tolerate one that fires AFTER, because a
+  // "running" write landing on a finished encounter is the editor reopening
+  // the match it just closed -- the cancel in doSubmit is what prevents it.
+  expect(calls[calls.length - 1], "the completed write is the last one").toBe(completed[0]);
   const [, , patch] = completed[0];
   return patch.subResults || [];
 }

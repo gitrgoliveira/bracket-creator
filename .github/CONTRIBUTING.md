@@ -48,6 +48,23 @@ Before you commit the changes, we also suggest you run:
 make pre-commit
 ```
 
+## Update the documentation screenshots
+
+The screenshots and videos in the documentation are captured from the running
+application by a script. If your change alters anything a user sees, recapture
+the ones it reaches:
+
+```sh
+make docs/media SINCE=main
+```
+
+The run lists the screenshots that changed. Look at each, and copy the ones
+your change meant to alter from `scripts/screenshots/out/` into
+`docs/screenshots/`. Videos are not compared, so copy a video only when your
+change alters what it shows. The
+[contributing guide](https://gitrgoliveira.github.io/bracket-creator/dev-guide/contributing/#regenerate-the-documentation-screenshots)
+has the details.
+
 ## Create a commit
 
 Commit messages should be well formatted, and to make that "standardized", we

@@ -79,15 +79,17 @@ const EXPAND = '.modal-backdrop{align-items:flex-start!important;padding:8px 0!i
   + '.editor-modal--compact{max-height:none!important;height:auto!important}'
   + '.team-bouts-scroll{max-height:none!important;overflow:visible!important}';
 
-// Each team, its dojo and its five fighters in fighting order. The fighters are
-// named onto the numbered members the draw seeds and the lineup is written by
-// member id (lib/api.mjs, nameMembers + lineup), so every bout row carries its
-// competitor-number chip, as it does for a team entered on the Lineups page.
+// Each team, its dojo and its five fighters in fighting order. The team names
+// are one word because the clip's Scores list row truncates a longer one to
+// "Team…". The fighters are named onto the numbered members the draw seeds and
+// the lineup is written by member id (lib/api.mjs, nameMembers + lineup), so
+// every bout row carries its competitor-number chip, as it does for a team
+// entered on the Lineups page.
 const KACHI_TEAMS = {
-  'Team Kaze': { dojo: 'Kaze Dojo', fighters: ['Aoyama', 'Hirano', 'Iwata', 'Kondo', 'Murata'] },
-  'Team Nami': { dojo: 'Nami Dojo', fighters: ['Hayashi', 'Ikeda', 'Kaneko', 'Noguchi', 'Okada'] },
-  'Team Kita': { dojo: 'Kita Dojo', fighters: ['Sasaki', 'Takeda', 'Uchiyama', 'Yoshida', 'Hamada'] },
-  'Team Minami': { dojo: 'Minami Dojo', fighters: ['Imai', 'Kojima', 'Miura', 'Nakano', 'Shimizu'] },
+  Kaze: { dojo: 'Kaze Dojo', fighters: ['Aoyama', 'Hirano', 'Iwata', 'Kondo', 'Murata'] },
+  Nami: { dojo: 'Nami Dojo', fighters: ['Hayashi', 'Ikeda', 'Kaneko', 'Noguchi', 'Okada'] },
+  Kita: { dojo: 'Kita Dojo', fighters: ['Sasaki', 'Takeda', 'Uchiyama', 'Yoshida', 'Hamada'] },
+  Minami: { dojo: 'Minami Dojo', fighters: ['Imai', 'Kojima', 'Miura', 'Nakano', 'Shimizu'] },
 };
 
 async function seedKachinukiComp(api, id, name, format, teamA, teamB, court) {
@@ -194,8 +196,8 @@ export const families = {
     seed: async ({ api }) => {
       await tournament(api);
       const court = COURTS[0];
-      await seedKachinukiComp(api, KACHI_KO, 'KO Demo', 'knockout', 'Team Kaze', 'Team Nami', court);
-      await seedKachinukiComp(api, KACHI_LEAGUE, 'League Demo', 'league', 'Team Kita', 'Team Minami', court);
+      await seedKachinukiComp(api, KACHI_KO, 'KO Demo', 'knockout', 'Kaze', 'Nami', court);
+      await seedKachinukiComp(api, KACHI_LEAGUE, 'League Demo', 'league', 'Kita', 'Minami', court);
       return { ko: KACHI_KO, lg: KACHI_LEAGUE };
     },
   },

@@ -62,6 +62,7 @@ read the diff. See CONTRIBUTING and CLAUDE.md.
 - [ ] Manual browser verification (for `web-mobile/` or `web/` changes): describe what you exercised
 - [ ] Screenshots added above (REQUIRED for any UI-affecting change)
 - [ ] Docs updated under `docs/` for any new or changed user-facing feature, flag, command, or behavior (`make docs/build` passes)
+- [ ] Docs screenshots and videos recaptured for any change to what a user sees (`make docs/media SINCE=main`; the changed ones reviewed and copied into `docs/`, or "none changed")
 - [ ] No new console errors or warnings
 
 <!-- Bead reference: -->

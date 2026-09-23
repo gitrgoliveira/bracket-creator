@@ -73,9 +73,17 @@ make docs/build        # Build + strict-validate the MkDocs site (the PR-templat
 make docs/serve        # Serve docs locally with live reload
 make docs/deps         # Create .venv-docs from docs/requirements.txt
 make docs/clean        # Remove .venv-docs and the built site/
-# All docs/* targets run through .venv-docs (pinned mkdocs + Material from
-# docs/requirements.txt). The system-PATH mkdocs drifts (older, no Material),
-# so never call mkdocs directly for verification; use make docs/build.
+# The MkDocs targets above run through .venv-docs (pinned mkdocs + Material
+# from docs/requirements.txt). The system-PATH mkdocs drifts (older, no
+# Material), so never call mkdocs directly for verification; use make docs/build.
+
+make docs/screenshots  # Recapture the docs screenshots (NAME=, FAMILY=, SINCE=main to scope)
+make docs/videos       # Recapture the docs videos
+make docs/media        # Both. After a change to what a user sees: make docs/media SINCE=main
+# The capture harness (scripts/screenshots/, its README is the guide) writes to
+# scripts/screenshots/out/ and lists only the screenshots that changed; review
+# those and copy them into docs/. Videos are never compared: copy one only when
+# the change alters what it shows.
 
 # Run a single test
 go test -run TestName ./internal/helper/...

@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { makeReactive } from './helpers/reactive_react.js';
-import { findAll } from './helpers/vdom.js';
+import { findAll, collectText } from './helpers/vdom.js';
 
 
 const shellClass = (tree) => {
@@ -150,5 +150,22 @@ describe('ViewerCompetition bracket-tab shell width modifier', () => {
     const cls = shellClass(mount({ activeTab: 'bracket', bracket: null }));
     expect(cls).toBeTruthy();
     expect(cls).not.toContain('viewer__shell--bracket');
+  });
+
+  // The header line above the title reuses this file's mount. It composes the
+  // date, the start time and the shiaijo, and a competition may have none of
+  // its own shiaijo (courts normalise to []) or no date, so each separator
+  // must only appear with something on both sides of it (bc-shfu).
+  const eyebrow = (overrides) => {
+    const hits = findAll(mount({ competition: mkComp(overrides) }), n =>
+      typeof n === 'object' && !Array.isArray(n) && n.props?.className === 'viewer__eyebrow');
+    return collectText(hits[0]).replace(/\s+/g, ' ').trim();
+  };
+
+  it('composes date, time and shiaijo with no dangling separator', () => {
+    expect(eyebrow({ date: '2026-06-01', startTime: '09:00', courts: ['A'] })).toBe('2026-06-01 at 09:00 · A');
+    expect(eyebrow({ date: '2026-06-01', startTime: '', courts: ['A'] })).toBe('2026-06-01 · A');
+    expect(eyebrow({ date: '', startTime: '', courts: ['A', 'B'] })).toBe('A, B');
+    expect(eyebrow({ date: '2026-06-01', startTime: '09:00', courts: [] })).toBe('2026-06-01 at 09:00');
   });
 });

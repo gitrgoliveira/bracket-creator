@@ -1132,3 +1132,34 @@ describe('AdminCompetition Overview renders a dataIssues notice from the detail 
     expect(container.textContent).not.toContain('no id on file');
   });
 });
+
+// The page-head subtitle composes the date, the start time and the shiaijo
+// summary. A missing start time rendered "<date> at · A" and a missing date
+// AND time rendered "players · · A": each separator must only appear when
+// something sits on both sides of it.
+describe('AdminCompetition page-head subtitle (bc-shfu)', () => {
+  const subtitle = async (overrides) => {
+    const { container } = await mountSection('overview', { comp: makeCompetition(overrides) });
+    return container.querySelector('.page-head__sub').textContent.replace(/\s+/g, ' ').trim();
+  };
+
+  it('joins the date and start time with "at"', async () => {
+    expect(await subtitle({ date: '2026-06-01', startTime: '09:00' }))
+      .toBe('Individual · 2 players · 2026-06-01 at 09:00 · A');
+  });
+
+  it('drops "at" when there is no start time', async () => {
+    expect(await subtitle({ date: '2026-06-01', startTime: '' }))
+      .toBe('Individual · 2 players · 2026-06-01 · A');
+  });
+
+  it('shows a start time with no date on its own', async () => {
+    expect(await subtitle({ date: '', startTime: '09:00' }))
+      .toBe('Individual · 2 players · 09:00 · A');
+  });
+
+  it('adds no extra separator when there is neither', async () => {
+    expect(await subtitle({ date: '', startTime: '' }))
+      .toBe('Individual · 2 players · A');
+  });
+});

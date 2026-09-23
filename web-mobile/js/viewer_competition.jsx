@@ -306,7 +306,11 @@ export function ViewerCompetition({ tournament, competition, pools, poolMatches,
             <div className="viewer__eyebrow">
               {c.date && <span style={{ fontWeight: 600 }}>{formatDate(c.date)}</span>}
               {c.date && c.startTime && " at "}
-              {c.startTime} · {c.courts.join(", ")}
+              {c.startTime}
+              {/* A competition may have no date or none of its own shiaijo,
+                  so the separator needs something on both sides. */}
+              {(c.date || c.startTime) && c.courts.length > 0 && " · "}
+              {c.courts.join(", ")}
             </div>
             <div className="viewer__title">{c.name}</div>
             <div className="viewer__sub">{competitionKindLabel(c)}</div>

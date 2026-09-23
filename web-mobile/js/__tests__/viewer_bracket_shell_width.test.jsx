@@ -153,9 +153,10 @@ describe('ViewerCompetition bracket-tab shell width modifier', () => {
   });
 
   // The header line above the title reuses this file's mount. It composes the
-  // date, the start time and the shiaijo, and a competition may have none of
-  // its own shiaijo (courts normalise to []) or no date, so each separator
-  // must only appear with something on both sides of it (bc-shfu).
+  // date, the start time and the shiaijo. A competition in a tournament with
+  // no date has none either, so with no start time the separator has nothing
+  // before it and must not appear (bc-shfu). The shiaijo list is never empty:
+  // the server gives every competition at least one (resolveCompetitionCourts).
   const eyebrow = (overrides) => {
     const hits = findAll(mount({ competition: mkComp(overrides) }), n =>
       typeof n === 'object' && !Array.isArray(n) && n.props?.className === 'viewer__eyebrow');
@@ -166,6 +167,6 @@ describe('ViewerCompetition bracket-tab shell width modifier', () => {
     expect(eyebrow({ date: '2026-06-01', startTime: '09:00', courts: ['A'] })).toBe('2026-06-01 at 09:00 · A');
     expect(eyebrow({ date: '2026-06-01', startTime: '', courts: ['A'] })).toBe('2026-06-01 · A');
     expect(eyebrow({ date: '', startTime: '', courts: ['A', 'B'] })).toBe('A, B');
-    expect(eyebrow({ date: '2026-06-01', startTime: '09:00', courts: [] })).toBe('2026-06-01 at 09:00');
+    expect(eyebrow({ date: '', startTime: '10:30', courts: ['A'] })).toBe('10:30 · A');
   });
 });

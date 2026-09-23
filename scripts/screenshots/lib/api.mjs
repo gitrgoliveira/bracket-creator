@@ -63,11 +63,10 @@ export function client(base, headers = {}) {
         courts: ['A'],
         withZekkenName: false,
         numberPrefix: '',
-        // A competition with no start time renders its subtitle as
-        // "<date> at * <courts>" - a dangling "at" with nothing after it, which
-        // shipped into four captures. Defaulted here rather than at the call
-        // sites so a new recipe cannot reintroduce it; override per recipe when
-        // the time itself matters.
+        // Gives every captured competition a start time, as a real
+        // tournament's would have. (Without one it used to render a dangling
+        // "<date> at ·", which shipped into four captures; the application no
+        // longer does that.) Override per recipe when the time itself matters.
         startTime: '09:00',
         date: '',
         status: 'setup',

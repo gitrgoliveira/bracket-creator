@@ -307,9 +307,9 @@ export function ViewerCompetition({ tournament, competition, pools, poolMatches,
               {c.date && <span style={{ fontWeight: 600 }}>{formatDate(c.date)}</span>}
               {c.date && c.startTime && " at "}
               {c.startTime}
-              {/* A competition may have no date or none of its own shiaijo,
-                  so the separator needs something on both sides. */}
-              {(c.date || c.startTime) && c.courts.length > 0 && " · "}
+              {/* No date (a tournament without one) and no start time would
+                  otherwise lead the shiaijo list with a bare separator. */}
+              {(c.date || c.startTime) && " · "}
               {c.courts.join(", ")}
             </div>
             <div className="viewer__title">{c.name}</div>

@@ -36,7 +36,14 @@ const ALICE = { id: 'a1', name: 'Alice Abe', dojo: 'Nara', number: 'K1' };
 const BOB = { id: 'a2', name: 'Bob Baba', dojo: 'Kobe', number: 'K2' };
 const MEI = { id: 'b1', name: 'Mei Mori', dojo: 'Kobe', number: 'M1' };
 
-const watchedIds = () => JSON.parse(window.localStorage.getItem('bc_watchlist') || '[]').map((e) => e.id);
+// Who the card shows as watched, read off the chips' remove controls. Not
+// localStorage: useWatchlist writes storage only when its functional updater
+// has run by the time the setter returns, which Preact (the app) guarantees
+// and React 18 (this suite) does not once earlier renders left work pending,
+// so a storage read here passed alone and failed after its neighbours.
+const watchedNames = () => [...document.querySelectorAll(
+  '[data-testid=viewer-home-watchlist] button[aria-label^="Remove "]',
+)].map((b) => b.getAttribute('aria-label').slice('Remove '.length));
 
 async function mount(tournament, search) {
   window.history.replaceState(null, '', '/' + search);
@@ -76,14 +83,14 @@ describe('the home address bar mirrors the watchlist', () => {
       comp('B', 'M', [], { rosterAvailable: false }),
     ] };
     const view = await mount(partial, '?w=K1,M1');
-    expect(watchedIds()).toEqual(['a1']);
+    expect(watchedNames()).toEqual(['Alice Abe']);
     expect(window.location.search).toBe('?w=K1,M1');
 
     // The roster heals: M1 lands, the link settles, and only now does the bar
     // become the list -- which here is exactly the link.
     const healed = { name: 'T', competitions: [comp('A', 'K', [ALICE]), comp('B', 'M', [MEI])] };
     await act(async () => { view.rerender(<ViewerHome tournament={healed} />); });
-    expect(watchedIds()).toEqual(['a1', 'b1']);
+    expect(watchedNames()).toEqual(['Alice Abe', 'Mei Mori']);
     expect(window.location.search).toBe('?w=K1,M1');
   });
 
@@ -92,13 +99,31 @@ describe('the home address bar mirrors the watchlist', () => {
       { type: 'player', id: 'a2', name: 'Bob Baba', dojo: 'Kobe' },
     ]));
     await mount({ name: 'T', competitions: [comp('A', 'K', [ALICE, BOB])] }, '?w=K1');
-    expect(watchedIds()).toEqual(['a2', 'a1']);
+    expect(watchedNames()).toEqual(['Bob Baba', 'Alice Abe']);
     expect(window.location.search).toBe('?w=K2,K1');
   });
 
-  it("a printed tag's ?playerNumber= survives beside the mirrored list", async () => {
-    await mount({ name: 'T', competitions: [comp('A', 'K', [ALICE, BOB])] }, '?playerNumber=K1');
-    expect(watchedIds()).toEqual(['a1']);
-    expect(window.location.search).toBe('?playerNumber=K1&w=K1');
+  it('a tag scanned before its competition loads still lands when it does', async () => {
+    // helper.playerTagURL prints each tag's QR as <publicURL>/?w=<number>, a
+    // one-entry watch link. The old ?playerNumber= reader ran once, as soon as
+    // ANY roster loaded, so this scan resolved to nobody and needed a reload.
+    const partial = { name: 'T', competitions: [
+      comp('A', 'K', [ALICE]),
+      comp('B', 'M', [], { rosterAvailable: false }),
+    ] };
+    const view = await mount(partial, '?w=M1');
+    expect(watchedNames()).toEqual([]);
+    const healed = { name: 'T', competitions: [comp('A', 'K', [ALICE]), comp('B', 'M', [MEI])] };
+    await act(async () => { view.rerender(<ViewerHome tournament={healed} />); });
+    expect(watchedNames()).toEqual(['Mei Mori']);
+    expect(window.location.search).toBe('?w=M1');
+  });
+
+  it("other parameters survive beside the mirrored list", async () => {
+    // resolveDeepLink reads ?name= once; a reload can only retry it if the
+    // query keeps it.
+    await mount({ name: 'T', competitions: [comp('A', 'K', [ALICE, BOB])] }, '?name=Alice');
+    expect(watchedNames()).toEqual(['Alice Abe']);
+    expect(window.location.search).toBe('?name=Alice&w=K1');
   });
 });

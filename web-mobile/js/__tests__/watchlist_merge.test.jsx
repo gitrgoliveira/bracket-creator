@@ -319,7 +319,7 @@ describe('sharedLinkPass', () => {
   });
 
   it('with no ?w= at all: nothing to write, settled on the first pass', () => {
-    const p = sharedLinkPass({ search: '?playerNumber=K1', roster: ROSTER, watchlist: [], applied: new Set(), rosterLoaded: false });
+    const p = sharedLinkPass({ search: '?name=Alice', roster: ROSTER, watchlist: [], applied: new Set(), rosterLoaded: false });
     expect(p.write).toBe(false);
     expect(p.settle).toBe(true);
   });
@@ -364,9 +364,9 @@ describe('sharedLinkPass', () => {
     writeSharedLedger(storage, '?w=K1,K2', new Set(['competitor:K1']));
     expect(readSharedLedger(storage, '?w=K1,K2')).toEqual(new Set(['competitor:K1']));
     expect(readSharedLedger(storage, '?w=K2').size, 'a different link').toBe(0);
-    expect(readSharedLedger(storage, '?playerNumber=K1').size, 'no link at all').toBe(0);
+    expect(readSharedLedger(storage, '?name=Alice').size, 'no link at all').toBe(0);
     // And nothing is written for a search with no `w` to key it on.
-    writeSharedLedger(storage, '?playerNumber=K1', new Set(['competitor:K1']));
+    writeSharedLedger(storage, '?name=Alice', new Set(['competitor:K1']));
     expect(JSON.parse(storage.getItem(SS_SHARED_LEDGER)).w).toBe('K1,K2');
   });
 

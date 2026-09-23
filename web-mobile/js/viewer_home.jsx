@@ -7,7 +7,6 @@ import { runOnce, notifEnable, notifDisable, useChimeMuted, isFollowedMatchOnDec
 import { notificationSupported } from './viewer_notifications.jsx';
 import { VSchedItem, MatchViewerModal } from './viewer_match.jsx';
 import { buildWatchlistUpcoming, usePrimaryWatch, WATCHED_UPCOMING_LIST_MAX } from './viewer_schedule.jsx';
-import { numberOf } from './competitor_identity.jsx';
 import { mirrorWatchlistParam } from './watchlist_link.jsx';
 
 const { useState, useMemo, useRef: useRefV, useEffect } = React;
@@ -64,32 +63,23 @@ export function shouldShowRegister(tournament, competition, hasHandler) {
     (!competition.status || competition.status === "setup"));
 }
 
-// Pure helper: resolve a ?player= / ?playerNumber= / ?name= deep link against
-// the participant roster. Resolution order:
+// Pure helper: resolve a ?player= / ?name= deep link against the participant
+// roster. Resolution order:
 //   1. ?player= as exact id (UUID) match
-//   2. ?playerNumber= as exact number match (mp-yin4 tag QR)
-//   3. ?name= (or ?player= as backward-compatible fallback) as case-insensitive
+//   2. ?name= (or ?player= as backward-compatible fallback) as case-insensitive
 //      name substring: allows legacy links that used ?player=<name> to keep working
 // Returns null when no participant matches, else { player: {id,name} }.
 export function resolveDeepLink(searchString, roster) {
   const params = new URLSearchParams(searchString || "");
   const qpPlayer = (params.get("player") || "").trim();
-  const qpNumber = (params.get("playerNumber") || "").trim();
   const qpName = (params.get("name") || "").trim();
-  if (!qpPlayer && !qpNumber && !qpName) return null;
+  if (!qpPlayer && !qpName) return null;
+  // No ?playerNumber= arm any more: a printed tag's QR is a one-entry
+  // watchlist permalink, ?w=<number> (bc-wlpl, helper.playerTagURL), read by
+  // the ?w= effect below with its retry while a roster is still loading. The
+  // operator ruled 2026-09-23 that tags printed before that need not keep
+  // working, so nothing reads the old parameter.
   let hit = qpPlayer ? roster.find((p) => p.id === qpPlayer) : null;
-  if (!hit && qpNumber) {
-    // EXACT and case-sensitive: this value is machine-generated (a QR or a
-    // permalink encodes it verbatim), not typed by a person, so it is
-    // deliberately NOT the typed-query rule in competitor_search.jsx. Pinned
-    // by resolve_deep_link.test.jsx.
-    //
-    // Behaviourally identical to the `p.number === qpNumber` this replaced.
-    // It reads through numberOf only so that the watchlist permalink
-    // (bc-wlpl), which asks the very same question of the very same records,
-    // cannot answer it differently.
-    hit = roster.find((p) => numberOf(p) === qpNumber);
-  }
   if (!hit) {
     const needle = (qpName || qpPlayer).toLowerCase();
     if (needle) hit = roster.find((p) => (p.name || "").toLowerCase().includes(needle));

@@ -1,4 +1,6 @@
 import { describe, it, expect } from 'vitest';
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 import {
   WATCHLIST_PARAM,
   watchlistTokens,
@@ -232,23 +234,22 @@ describe('parseWatchlistTokens drops whitespace-only tokens', () => {
 });
 
 // stripWatchlistParam: what the address bar keeps once a shared link has been
-// folded in. The reason this is a function rather than one line in the effect
-// is the COMPETITOR TAG: helper.playerTagURL prints each tag's QR as
-// `<publicURL>/?playerNumber=K12`, so the viewer's query is not the watchlist's
-// to clear.
+// folded in. The rest of the query is not the watchlist's to clear:
+// resolveDeepLink reads `?player=` / `?name=`, and a reload can only retry one
+// of those if it survives.
 describe('stripWatchlistParam', () => {
-  it('removes w and keeps a tag QR\'s playerNumber', () => {
-    // THE regression. Clearing the whole query spent a scanned tag that had
+  it('removes w and keeps a deep link\'s parameter', () => {
+    // THE regression. Clearing the whole query spent a deep link that had
     // resolved to nobody (its competition had not loaded yet) with no way to
     // retry it, because the reload had nothing left to read.
-    expect(stripWatchlistParam('?w=K1,K2&playerNumber=K12')).toBe('?playerNumber=K12');
-    expect(stripWatchlistParam('?playerNumber=K12&w=K1')).toBe('?playerNumber=K12');
+    expect(stripWatchlistParam('?w=K1,K2&name=Ken')).toBe('?name=Ken');
+    expect(stripWatchlistParam('?name=Ken&w=K1')).toBe('?name=Ken');
   });
 
   it('returns the query UNCHANGED when there is no w, so the caller leaves the URL alone', () => {
     // The caller compares before it calls replaceState, so "unchanged" here is
-    // what keeps a tag link untouched rather than merely intact.
-    expect(stripWatchlistParam('?playerNumber=K12')).toBe('?playerNumber=K12');
+    // what keeps a deep link untouched rather than merely intact.
+    expect(stripWatchlistParam('?name=Ken')).toBe('?name=Ken');
     expect(stripWatchlistParam('?player=3f2a&name=Ken')).toBe('?player=3f2a&name=Ken');
     expect(stripWatchlistParam('')).toBe('');
   });
@@ -287,13 +288,13 @@ describe('mirrorWatchlistParam', () => {
   });
 
   it('replaces a stale w and keeps every other parameter', () => {
-    expect(mirrorWatchlistParam('?w=K9&playerNumber=K12', [alice], roster)).toBe('?playerNumber=K12&w=K1');
+    expect(mirrorWatchlistParam('?w=K9&name=Ken', [alice], roster)).toBe('?name=Ken&w=K1');
   });
 
   it('returns the query untouched when it already holds this list, wherever w sits', () => {
     // Stripping and re-appending would move w to the end, and the caller would
     // then rewrite a URL that needed nothing.
-    const s = '?w=K1&playerNumber=K12';
+    const s = '?w=K1&name=Ken';
     expect(mirrorWatchlistParam(s, [alice], roster)).toBe(s);
   });
 
@@ -305,10 +306,32 @@ describe('mirrorWatchlistParam', () => {
 
   it('reads back as the same list: the bar is a link like any other', () => {
     const dojo = { type: 'dojo', dojo: 'Hagane Dojo' };
-    const search = mirrorWatchlistParam('?playerNumber=K2', [alice, dojo], roster);
+    const search = mirrorWatchlistParam('?name=Ken', [alice, dojo], roster);
     expect(resolveWatchlistTokens(parseWatchlistTokens(search), roster)).toEqual([
       { type: 'player', id: 'p1', name: 'Alice', dojo: 'Nara' },
       { type: 'dojo', dojo: 'Hagane Dojo' },
     ]);
+  });
+});
+
+// THE PRINTED TAG. Its QR is a one-entry ?w= link built in Go
+// (helper.playerTagURL) and read here. Both languages read the same table,
+// internal/helper/testdata/tag_watch_links.json, so neither side can change
+// the format alone: Go asserts it produces each `url`, and this asserts the
+// viewer reads that exact string back as the number, and would write the
+// same token itself.
+describe('the tag QR link (shared fixture with helper.playerTagURL)', () => {
+  const doc = JSON.parse(readFileSync(
+    resolve(__dirname, '..', '..', '..', 'internal', 'helper', 'testdata', 'tag_watch_links.json'), 'utf8'));
+  it('has cases', () => {
+    expect(doc.cases.length, 'an empty table would assert nothing').toBeGreaterThan(0);
+  });
+  doc.cases.forEach((c) => {
+    it(`reads ${JSON.stringify(c.number)} back from ${c.url}`, () => {
+      const search = c.url.slice(c.url.indexOf('?'));
+      expect(parseWatchlistTokens(search)).toEqual([{ kind: 'competitor', value: c.number }]);
+      const roster = buildRoster([comp('A', 'running', [{ id: 'p1', name: 'Alice', dojo: 'Nara', number: c.number }])]);
+      expect(`?${WATCHLIST_PARAM}=${watchlistTokens([{ type: 'player', id: 'p1' }], roster).join(',')}`).toBe(search);
+    });
   });
 });

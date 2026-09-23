@@ -7,8 +7,10 @@
 // also rides in the home screen's address bar, kept equal to the list
 // (mirrorWatchlistParam), so a bookmark carries it too.
 //
-// It GENERALISES what viewer_home.jsx's resolveDeepLink already does for ONE
-// person (`?player=`, `?playerNumber=`). Two of that function's decisions are
+// It GENERALISES what viewer_home.jsx's resolveDeepLink does for ONE person
+// (`?player=`). A printed tag's QR is this link with one entry, `?w=<number>`
+// (helper.playerTagURL, whose Go encoder shares a fixture with this module's
+// suite: internal/helper/testdata/tag_watch_links.json). Two of that function's decisions are
 // inherited rather than re-made, because they are settled:
 //
 //   MERGE, NOT REPLACE. Opening a link ADDS to whatever the device already
@@ -171,15 +173,12 @@ export function parseWatchlistTokens(search) {
 // caller can compare and leave the address bar untouched. Its caller is
 // mirrorWatchlistParam below, which strips and then writes the list back.
 //
-// Dropping the WHOLE query here would be wrong, and specifically wrong for the
-// competitor tag. `helper.playerTagURL` prints each tag's QR as
-// `<publicURL>/?playerNumber=K12`, which resolveDeepLink (viewer_home.jsx)
-// reads. That link is applied as soon as the roster is non-empty, but a
-// competitor whose competition has not loaded yet resolves to nobody and the
-// deep link is spent; the query surviving in the address bar is what lets a
-// reload retry it. Clearing the query wholesale took that away, so scanning a
-// tag while one competition was still loading silently did nothing, with a
-// reload no longer able to fix it.
+// Dropping the WHOLE query here would be wrong: other parameters are not this
+// module's. resolveDeepLink (viewer_home.jsx) reads `?player=` and `?name=`
+// once, and a query that survives in the address bar is what lets a reload
+// retry one that resolved to nobody because its competition had not loaded.
+// (The printed tag used to be one of those, `?playerNumber=`; it is a `w`
+// link now, and so gets the ?w= effect's own retry.)
 //
 // Hand-rolled rather than `new URLSearchParams(s); sp.delete(WATCHLIST_PARAM)`
 // because that cannot return the string UNCHANGED: it re-serialises what it

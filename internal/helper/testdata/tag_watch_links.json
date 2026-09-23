@@ -1,0 +1,14 @@
+{
+  "_comment": "A printed tag's QR is the viewer's one-entry watchlist permalink, ?w=<number> (bc-wlpl). Go builds it (playerTagURL, internal/helper/qr.go) and the viewer reads it (parseWatchlistTokens, web-mobile/js/watchlist_link.jsx). Both suites read THIS table, so the encoder and the decoder cannot drift by one side changing with its own tests. `url` is the exact string Go must produce; the JS suite asserts its query parses back to one competitor token equal to `number`, and that the viewer's own encoder writes the same token. The odd numbers are real: helper.ValidateNumberPrefix checks length only, so a prefix may hold a space, a plus, a comma or the dojo marker.",
+  "cases": [
+    { "publicURL": "https://kendo.example.com", "number": "K1", "url": "https://kendo.example.com/?w=K1" },
+    { "publicURL": "https://kendo.example.com/", "number": "K12", "url": "https://kendo.example.com/?w=K12" },
+    { "publicURL": "https://example.com/viewer?x=1#top", "number": "K1", "url": "https://example.com/viewer/?w=K1" },
+    { "publicURL": "https://example.com", "number": "A+B", "url": "https://example.com/?w=A%2BB" },
+    { "publicURL": "https://example.com", "number": "K 1", "url": "https://example.com/?w=K%201" },
+    { "publicURL": "https://example.com", "number": ":1", "url": "https://example.com/?w=%3A1" },
+    { "publicURL": "https://example.com", "number": "a,1", "url": "https://example.com/?w=a%2C1" },
+    { "publicURL": "https://example.com", "number": "d~1", "url": "https://example.com/?w=d~1" },
+    { "publicURL": "https://example.com", "number": "É1", "url": "https://example.com/?w=%C3%891" }
+  ]
+}

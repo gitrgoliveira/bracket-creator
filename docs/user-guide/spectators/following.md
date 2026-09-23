@@ -37,7 +37,7 @@ The same number identifies that competitor everywhere it appears: on their tag, 
 
 Names and dojos still match on any part of what you type, so a surname fragment is enough for those. Only the number needs to be typed in full.
 
-Refer to [QR codes on competitor tags](#qr-codes-on-competitor-tags): if you have the tag in your hand, scanning it opens that competitor directly, with no typing at all.
+Refer to [QR codes on competitor tags](#qr-codes-on-competitor-tags): if you have the tag in your hand, scanning it adds that competitor to your watchlist, with no typing at all.
 
 If someone is entered in more than one competition, they have a separate number in each one, and the filter lists them once per competition. Searching either number finds them, and each result tells you which competition it belongs to.
 
@@ -90,7 +90,7 @@ Scores entered by the operator appear on the viewer immediately, across every co
 
 ## QR codes on competitor tags
 
-When the organiser sets the tournament public URL, each printed competitor tag includes a personal QR code. Scan it to open your own page on the viewer, showing your schedule and results directly.
+When the organiser sets the tournament public URL, each printed competitor tag includes a personal QR code. Scanning it opens the viewer and adds that competitor to your watchlist, so their next match and results appear on the home screen. The code is a shared watchlist link with one competitor in it: it adds to whatever you already watch and never removes anyone. If that competitor's competition is still loading when you scan, they are added as soon as it loads.
 
 !!! tip
-    You do not need to set up a Watchlist if you use your tag's QR code: the personal page opens straight to your matches. The code only works once the organiser has configured a public URL for the tournament. If scanning your tag does not open anything, ask the organiser for the tournament URL and use the Watchlist instead.
+    The code only works once the organiser has configured a public URL for the tournament. If scanning your tag does not open anything, ask the organiser for the tournament URL and add yourself to the watchlist by name or number instead.

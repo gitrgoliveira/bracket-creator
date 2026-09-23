@@ -1,58 +1,25 @@
-// mp-yin4: playerNumber deep-link resolution in the public viewer.
+// resolveDeepLink no longer reads ?playerNumber=. A printed tag's QR used to
+// be `?playerNumber=<number>` (mp-yin4); it is now the one-entry watchlist
+// permalink `?w=<number>` (bc-wlpl, helper.playerTagURL), read by the ?w=
+// effect with its retry while a roster loads. The operator ruled on
+// 2026-09-23 that tags printed before that need not keep working. This file
+// pins the removal, because a deleted arm otherwise leaves no failing test.
+// The ?player= / ?name= arms are covered in viewer_deeplink.test.jsx.
 import { describe, it, expect } from 'vitest';
 import { resolveDeepLink } from '../viewer.jsx';
 
 const roster = [
   { id: 'uuid-001', name: 'Alice Tanaka', number: 'K1' },
-  { id: 'uuid-002', name: 'Bob Yamada',   number: 'K2' },
-  { id: 'uuid-003', name: 'Carol Suzuki', number: 'M1' },
-  { id: 'uuid-004', name: 'Dave Ito',     number: '' },   // no prefix
+  { id: 'uuid-002', name: 'Bob Yamada', number: 'K2' },
 ];
 
-describe('resolveDeepLink: ?playerNumber=', () => {
-  it('resolves a numbered player by exact match', () => {
-    const result = resolveDeepLink('?playerNumber=K1', roster);
-    expect(result).not.toBeNull();
-    expect(result.player.id).toBe('uuid-001');
-    expect(result.player.name).toBe('Alice Tanaka');
+describe('resolveDeepLink', () => {
+  it('does not read ?playerNumber= (tags print ?w= now)', () => {
+    expect(resolveDeepLink('?playerNumber=K1', roster)).toBeNull();
   });
 
-  it('resolves a different prefix', () => {
-    const result = resolveDeepLink('?playerNumber=M1', roster);
-    expect(result).not.toBeNull();
-    expect(result.player.id).toBe('uuid-003');
-  });
-
-  it('returns null when number does not match any player', () => {
-    const result = resolveDeepLink('?playerNumber=Z99', roster);
-    expect(result).toBeNull();
-  });
-
-  it('does not match a player with an empty number', () => {
-    const result = resolveDeepLink('?playerNumber=', roster);
-    expect(result).toBeNull();
-  });
-
-  it('number match is case-sensitive (QR encodes exact value)', () => {
-    const result = resolveDeepLink('?playerNumber=k1', roster);
-    expect(result).toBeNull();
-  });
-
-  it('UUID ?player= takes precedence over ?playerNumber=', () => {
-    const result = resolveDeepLink('?player=uuid-002&playerNumber=K1', roster);
-    expect(result).not.toBeNull();
-    expect(result.player.id).toBe('uuid-002'); // Bob, not Alice
-  });
-
-  it('?playerNumber= takes precedence over ?name=', () => {
+  it('a stray ?playerNumber= does not outrank ?name=', () => {
     const result = resolveDeepLink('?playerNumber=K2&name=Alice+Tanaka', roster);
-    expect(result).not.toBeNull();
-    expect(result.player.id).toBe('uuid-002'); // Bob via number, not Alice via name
-  });
-
-  it('falls through to ?name= when ?playerNumber= has no match', () => {
-    const result = resolveDeepLink('?playerNumber=Z99&name=Alice+Tanaka', roster);
-    expect(result).not.toBeNull();
     expect(result.player.id).toBe('uuid-001');
   });
 

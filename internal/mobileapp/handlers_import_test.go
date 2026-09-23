@@ -645,8 +645,8 @@ competitions:
 	//
 	// This reassignment PRESERVES mp-yin4's
 	// invariant rather than abandoning it -- prefix+number stays globally
-	// unique across every competition, which is what lets the viewer's
-	// `?playerNumber=` deep link (mp-yin4 tag QR, viewer_home.jsx) resolve
+	// unique across every competition, which is what lets a printed tag's QR
+	// (`?w=<number>`, helper.playerTagURL, read by watchlist_link.jsx) resolve
 	// to exactly one competitor. Rejecting the row would also have
 	// preserved it, just by refusing the collision instead of resolving it;
 	// re-validating the re-derived prefix is

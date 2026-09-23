@@ -10,8 +10,8 @@
 //
 // The rule lives in js/competitor_search.jsx as matchesCompetitorNumber (and
 // the wider competitorMatchesQuery it composes into). Every consumer must ask
-// that rather than re-deriving a number test from the raw `.number`/
-// `.number` field.
+// that rather than re-deriving a number test from the raw `.number` field or
+// its accessor, competitor_identity.jsx's numberOf.
 //
 // This check exists because the codebase has already paid for that once. The
 // question was spelled three different ways in three files: viewer_schedule
@@ -32,15 +32,23 @@
 // competitor_search.jsx and let every consumer inherit it. That is the
 // entire point.
 //
-// No npm dependencies, Node.js built-ins only.
+// No npm dependencies, Node.js built-ins only. The walk, the comment stripper
+// and the line scan are shared with check-write-result.mjs through
+// check-helpers.mjs; this file owns only the rule.
 //
 // Usage:   node web-mobile/check-competitor-search.mjs
 // Exit 0   no hand-rolled number checks outside the owning module
 // Exit 1   at least one site re-derives the rule
+//
+// FORBIDDEN is exported and the run is guarded on being the entry script, so
+// js/__tests__/rule_gates.test.jsx can import the rule and prove a fixture
+// line trips it. The gate itself had no test, which is how the accessor form
+// (`numberOf(p).startsWith(q)`) shipped past its first regex unpoliced.
 
-import { readFileSync, readdirSync, statSync } from 'node:fs';
+import { readFileSync } from 'node:fs';
 import { resolve, dirname, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { walk, scanSource, printViolations } from './check-helpers.mjs';
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)));
 const JS_DIR = resolve(ROOT, 'js');
@@ -64,11 +72,9 @@ const OWNER = 'competitor_search.jsx';
 // the ruling. Named exemptions fail loudly instead.
 const ALLOWED = new Set(['admin_participants.jsx', 'admin_registration_desk.jsx']);
 
-// Tests may legitimately construct these shapes as fixtures and assert on
-// them. They are not consumers deciding control flow, so they are out of
-// scope -- the thing being guarded is a PRODUCTION site branching on a
-// hand-rolled number test.
-const SKIP_DIRS = new Set(['__tests__', 'dist', 'vendor', 'node_modules']);
+// Tests are out of scope (check-helpers.mjs's SKIP_DIRS): a fixture may
+// legitimately construct these shapes, and the thing being guarded is a
+// PRODUCTION site branching on a hand-rolled number test.
 
 // SCOPE, deliberately narrow. This does not try to police every possible way
 // of comparing a number -- check-write-result.mjs's own SCOPE note explains
@@ -77,64 +83,46 @@ const SKIP_DIRS = new Set(['__tests__', 'dist', 'vendor', 'node_modules']);
 // that cries wolf gets switched off, which is strictly worse than no check.
 //
 // What IS worth enforcing is the exact shape that caused the incident: a
-// `.number` read landing on the same line as `.includes(` or
-// `.startsWith(`, which is precisely how the three surfaces drifted apart.
-const FORBIDDEN = [
+// read of the number -- the raw `.number` field or the `numberOf(` accessor
+// that wraps it -- landing on the same line as `.includes(` or `.startsWith(`,
+// which is precisely how the three surfaces drifted apart. The accessor arm
+// is not a widening of the scope: the first regex policed the field alone,
+// so the moment a consumer read the number through numberOf the very same
+// hand-rolled test walked past the gate.
+//
+// The exact comparison `numberOf(p) === q` is NOT policed, on purpose: the
+// deep link and the permalink compare a machine-generated number whole, which
+// is the identity read the accessor exists for, not a re-derived match rule.
+export const FORBIDDEN = [
   {
-    re: /\.number\b.*\.(includes|startsWith)\(/,
+    re: /(\.number\b|numberOf\().*\.(includes|startsWith)\(/,
     why: 'hand-rolls a competitor-number match; call matchesCompetitorNumber(p, q) (or competitorMatchesQuery) from competitor_search.jsx instead',
   },
 ];
 
-function* walk(dir) {
-  for (const entry of readdirSync(dir)) {
-    const full = resolve(dir, entry);
-    if (statSync(full).isDirectory()) {
-      if (!SKIP_DIRS.has(entry)) yield* walk(full);
-      continue;
+export function findViolations() {
+  const violations = [];
+  for (const file of walk(JS_DIR)) {
+    if (file.endsWith(OWNER)) continue;
+    if ([...ALLOWED].some((a) => file.endsWith(a))) continue; // exempt by operator ruling
+    const rel = relative(ROOT, file);
+    for (const hit of scanSource(readFileSync(file, 'utf8'), FORBIDDEN)) {
+      violations.push({ rel, ...hit });
     }
-    if (entry.endsWith('.jsx') || entry.endsWith('.js')) yield full;
   }
+  return violations;
 }
 
-// Strip line and block comments so a comment DESCRIBING the rule (which this
-// file itself does, at length) is not mistaken for a use of it.
-function stripComments(src) {
-  return src
-    .replace(/\/\*[\s\S]*?\*\//g, '')
-    .replace(/^\s*\/\/.*$/gm, '')
-    .replace(/([^:])\/\/.*$/gm, '$1');
+if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+  const violations = findViolations();
+  if (violations.length === 0) {
+    console.log('  ✓ the competitor-number match rule is asked, never re-derived');
+    console.log('All competitor-search checks OK.');
+    process.exit(0);
+  }
+  console.error('Hand-rolled competitor-number match checks found.\n');
+  console.error(`The rule belongs to js/${OWNER} (matchesCompetitorNumber).`);
+  console.error('Re-deriving it at a call site is how the three surfaces drifted last time.\n');
+  printViolations(violations);
+  process.exit(1);
 }
-
-const violations = [];
-
-for (const file of walk(JS_DIR)) {
-  const rel = relative(ROOT, file);
-  if (file.endsWith(OWNER)) continue;
-  if ([...ALLOWED].some((a) => file.endsWith(a))) continue; // exempt by operator ruling
-  const lines = stripComments(readFileSync(file, 'utf8')).split('\n');
-  lines.forEach((line, i) => {
-    for (const { re, why } of FORBIDDEN) {
-      if (re.test(line)) {
-        violations.push({ rel, line: i + 1, text: line.trim(), why });
-        break;
-      }
-    }
-  });
-}
-
-if (violations.length === 0) {
-  console.log('  ✓ the competitor-number match rule is asked, never re-derived');
-  console.log('All competitor-search checks OK.');
-  process.exit(0);
-}
-
-console.error('Hand-rolled competitor-number match checks found.\n');
-console.error(`The rule belongs to js/${OWNER} (matchesCompetitorNumber).`);
-console.error('Re-deriving it at a call site is how the three surfaces drifted last time.\n');
-for (const v of violations) {
-  console.error(`  ${v.rel}:${v.line}`);
-  console.error(`    ${v.text}`);
-  console.error(`    ${v.why}\n`);
-}
-process.exit(1);

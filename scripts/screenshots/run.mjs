@@ -144,8 +144,10 @@ function reportStill(recipe, file) {
       };
     }
   }
+  const where = diff && diff.box
+    ? `, within ${diff.box.x1},${diff.box.y1}-${diff.box.x2},${diff.box.y2}` : '';
   const scale = diff && diff.differing != null
-    ? ` (${diff.differing} px differ, max ${diff.maxDelta} levels)` : '';
+    ? ` (${diff.differing} px differ, max ${diff.maxDelta} levels${where})` : '';
   return { changed: true, note: `CHANGED ${dims(got)}${scale}` };
 }
 

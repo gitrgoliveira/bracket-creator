@@ -134,6 +134,10 @@ export function pixelDiff(fileA, fileB) {
   }
   let differing = 0;
   let maxDelta = 0;
+  // Where the differing pixels sit. A count and a depth say how much moved but
+  // not what: a box around a clock or a spinner names a flake at a glance,
+  // while one spanning the page is a layout shift.
+  let box = null;
   for (let i = 0; i < a.data.length; i += a.samples) {
     let worst = 0;
     for (let s = 0; s < a.samples; s++) {
@@ -141,12 +145,24 @@ export function pixelDiff(fileA, fileB) {
       if (delta > worst) worst = delta;
     }
     if (worst > maxDelta) maxDelta = worst;
-    if (worst > CHANNEL_TOLERANCE) differing++;
+    if (worst > CHANNEL_TOLERANCE) {
+      differing++;
+      const px = i / a.samples;
+      const x = px % a.width;
+      const y = (px - x) / a.width;
+      if (!box) box = { x1: x, y1: y, x2: x, y2: y };
+      else {
+        if (x < box.x1) box.x1 = x;
+        if (x > box.x2) box.x2 = x;
+        box.y2 = y;
+      }
+    }
   }
   return {
     sizeDiffers: false,
     differing,
     maxDelta,
+    box,
     changed: differing >= MIN_DIFFERING_PIXELS,
     total: a.width * a.height,
   };

@@ -16,7 +16,7 @@
 // taisho drawing, staying on, and then being defeated. The final is played
 // out and a spectator's phone sees the finished knockout.
 //
-// Functional defects found here are test.fixme('FINDING-C<n>: ...') blocks,
+// Functional defects found here are test.fixme('<bead-id>: ...') blocks,
 // each a self-contained reproduction placed where the fixture supports it.
 // Each was run once as a plain test() and failed at its own assertion. The
 // tests after one tolerate what it leaves behind, so removing a fixme once
@@ -961,10 +961,10 @@ test.describe('J5 kachinuki from the court console', () => {
     });
   });
 
-  // FINDING-C2: while a finished match is pinned open for correction, Start
+  // bc-crpn: while a finished match is pinned open for correction, Start
   // match on the Up next card starts the next match but the panel keeps
   // showing the correction: the running match appears nowhere on the page.
-  test.fixme('FINDING-C2: Start match while a correction is pinned hides the match it started', async ({ page }) => {
+  test.fixme('bc-crpn: Start match while a correction is pinned hides the match it started', async ({ page }) => {
     await login(page);
     await openShiaijo(page, 'A');
     const next = await sides(upNextCard(page));
@@ -1027,9 +1027,9 @@ test.describe('J5 kachinuki from the court console', () => {
     });
   });
 
-  // FINDING-C3: a tap on an EMPTY mark slot (the "·" beside the scored
+  // bc-emsl: a tap on an EMPTY mark slot (the "·" beside the scored
   // marks) is not a no-op: it clears the bout's Tie.
-  test.fixme('FINDING-C3: tapping an empty mark slot clears the bout\'s Tie', async ({ page }) => {
+  test.fixme('bc-emsl: tapping an empty mark slot clears the bout\'s Tie', async ({ page }) => {
     await login(page);
     await openShiaijo(page, 'A');
     const row = currentBout(page);
@@ -1045,9 +1045,9 @@ test.describe('J5 kachinuki from the court console', () => {
     await awardBoutIppon(page, 'shiro', 'M');
   });
 
-  // FINDING-C4: Encho on ONE kachinuki bout sets the encounter's overtime
+  // bc-kheb: Encho on ONE kachinuki bout sets the encounter's overtime
   // count, so the header keeps reading "(E) OVERTIME" on every later bout.
-  test.fixme('FINDING-C4: after one bout goes to encho, the header claims overtime on every later bout', async ({ page }) => {
+  test.fixme('bc-kheb: after one bout goes to encho, the header claims overtime on every later bout', async ({ page }) => {
     await login(page);
     await openShiaijo(page, 'A');
     const row = currentBout(page);
@@ -1060,10 +1060,10 @@ test.describe('J5 kachinuki from the court console', () => {
     await expect(editor(page).locator('.editor-modal__eyebrow').first()).not.toContainText(/overtime/i);
   });
 
-  // FINDING-C5: for the autosave's debounce window after a tap, the sync pill
+  // bc-sync: for the autosave's debounce window after a tap, the sync pill
   // already reads "Synced" although nothing has been sent; a reload in that
   // window loses the point with no warning (audit row "final bout 4").
-  test.fixme('FINDING-C5: the sync pill reads "Synced" while a tapped point is still unsaved', async ({ page }) => {
+  test.fixme('bc-sync: the sync pill reads "Synced" while a tapped point is still unsaved', async ({ page }) => {
     await login(page);
     await openShiaijo(page, 'A');
     const live = currentBout(page);

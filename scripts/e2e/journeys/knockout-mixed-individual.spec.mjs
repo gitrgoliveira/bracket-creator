@@ -12,7 +12,7 @@
 // per action x variant (written to output/knockout-mixed-individual/audit.json),
 // and asserts only what the docs promise. Judgement (friction, legibility) is
 // formed from the screenshots in output/knockout-mixed-individual/, never
-// asserted here. The FINDING-A<n> tests at the end are functional defects
+// asserted here. The <bead-id> tests at the end are functional defects
 // the journeys found; each seeds its own competition so it runs alone once
 // its bead fixes the defect and the fixme is removed.
 import { test, expect, isCoarse } from '../fixtures/test.mjs';
@@ -983,7 +983,7 @@ test.describe('knockout-mixed-individual', () => {
     return id;
   };
 
-  test.fixme('FINDING-A1: after a kiken on the shiaijo console the remaining-matches panel stays until the operator closes it', async ({ page }) => {
+  test.fixme('bc-kpnl: after a kiken on the shiaijo console the remaining-matches panel stays until the operator closes it', async ({ page }) => {
     await login(page);
     await seedOwn(page, { name: 'Finding A1', format: 'mixed', poolSize: 3, poolWinners: 2, courts: ['G'], numberPrefix: 'FA' }, rosterOf('Aone', 6));
     await openShiaijo(page, 'G');
@@ -996,7 +996,7 @@ test.describe('knockout-mixed-individual', () => {
     await expect(panel.getByRole('button', { name: 'Award default win to opponent' })).toHaveCount(1);
   });
 
-  test.fixme('FINDING-A2: a withdrawn competitor\'s remaining pool bout can be recorded as their default loss', async ({ page }) => {
+  test.fixme('bc-kfup: a withdrawn competitor\'s remaining pool bout can be recorded as their default loss', async ({ page }) => {
     await login(page);
     const id = await seedOwn(page, { name: 'Finding A2', format: 'mixed', poolSize: 3, poolWinners: 2, courts: ['H'], numberPrefix: 'FB' }, rosterOf('Atwo', 6));
     await openShiaijo(page, 'H');
@@ -1015,7 +1015,7 @@ test.describe('knockout-mixed-individual', () => {
     await expect(page.locator('.score-edit-row').filter({ hasText: first.aka }).filter({ hasText: /Fus\./ })).toHaveCount(1);
   });
 
-  test.fixme('FINDING-A3: tapping the Overtime pill opens the encho counter, as the docs describe', async ({ page }) => {
+  test.fixme('bc-otpl: tapping the Overtime pill opens the encho counter, as the docs describe', async ({ page }) => {
     await login(page);
     await seedOwn(page, { name: 'Finding A3', format: 'knockout', courts: ['I'], numberPrefix: 'FC' }, rosterOf('Athree', 4));
     await openShiaijo(page, 'I');
@@ -1024,7 +1024,7 @@ test.describe('knockout-mixed-individual', () => {
     await expect(inlineEditor(page).getByTestId('scoring-modal-encho-checkbox')).toBeVisible();
   });
 
-  test.fixme('FINDING-A4: a hantei verdict can be corrected to the other side from the Correct editor', async ({ page }) => {
+  test.fixme('bc-htcr: a hantei verdict can be corrected to the other side from the Correct editor', async ({ page }) => {
     await login(page);
     await seedOwn(page, { name: 'Finding A4', format: 'knockout', courts: ['J'], numberPrefix: 'FD' }, rosterOf('Afour', 4));
     await openShiaijo(page, 'J');
@@ -1051,7 +1051,7 @@ test.describe('knockout-mixed-individual', () => {
     await expect.poll(async () => (await done.locator('.shiaijo-qrow__result').innerText()).trim(), { timeout: 10_000 }).not.toBe(before);
   });
 
-  test.fixme('FINDING-A5: the Pools-tab score editor stays open through Start match and an ippon', async ({ page }) => {
+  test.fixme('bc-plcl: the Pools-tab score editor stays open through Start match and an ippon', async ({ page }) => {
     await login(page);
     const id = await seedOwn(page, { name: 'Finding A5', format: 'mixed', poolSize: 3, poolWinners: 2, courts: ['K'], numberPrefix: 'FE' }, rosterOf('Afive', 6));
     await page.goto(`/admin/competition/${id}/pools`);
@@ -1066,7 +1066,7 @@ test.describe('knockout-mixed-individual', () => {
     await page.waitForTimeout(1500);
     await expect(page.locator(EDITOR)).toBeVisible();
   });
-  test.fixme('FINDING-A6: Send back to queue warns that the score will be discarded whenever a mark is on the board', async ({ page }) => {
+  test.fixme('bc-sbq: Send back to queue warns that the score will be discarded whenever a mark is on the board', async ({ page }) => {
     await login(page);
     await seedOwn(page, { name: 'Finding A6', format: 'mixed', poolSize: 3, poolWinners: 2, courts: ['L'], numberPrefix: 'FF' }, rosterOf('Asix', 6));
     await openShiaijo(page, 'L');
@@ -1088,7 +1088,7 @@ test.describe('knockout-mixed-individual', () => {
     await expect(dialog).not.toContainText('nothing will be lost');
     await page.unroute('**/api/**', slowReads);
   });
-  test.fixme('FINDING-A7: in pools + knockout, no knockout bout is scheduled before the last pool bout', async ({ page }) => {
+  test.fixme('bc-kosc: in pools + knockout, no knockout bout is scheduled before the last pool bout', async ({ page }) => {
     await login(page);
     const id = await seedOwn(page, { name: 'Finding A7', format: 'mixed', poolSize: 3, poolWinners: 2, courts: ['M'], numberPrefix: 'FG' }, rosterOf('Aseven', 6));
     await page.goto(`/admin/competition/${id}/scores`);
@@ -1103,7 +1103,7 @@ test.describe('knockout-mixed-individual', () => {
     expect(koTimes.length).toBeGreaterThan(0);
     expect(koTimes[0] > poolTimes[poolTimes.length - 1]).toBe(true);
   });
-  test.fixme('FINDING-A8: finishing a bout offline on the court console says the result is not saved yet', async ({ page, context }) => {
+  test.fixme('bc-offl: finishing a bout offline on the court console says the result is not saved yet', async ({ page, context }) => {
     await login(page);
     await seedOwn(page, { name: 'Finding A8', format: 'knockout', courts: ['N'], numberPrefix: 'FH' }, rosterOf('Aeight', 4));
     await openShiaijo(page, 'N');

@@ -11,7 +11,7 @@
 // promise is asserted (docs/user-guide/court-operators/scoring-a-match.md,
 // recording-decisions.md, organisers/team-tournaments.md). A step that
 // exposes a functional defect is kept as its own self-contained
-// test.fixme('FINDING-B<n>: ...') below the journeys, so this file stays green
+// test.fixme('<bead-id>: ...') below the journeys, so this file stays green
 // and the step guards the fix once the fixme is removed.
 import { test, expect } from '../fixtures/test.mjs';
 import { OPERATOR_DEVICE, PUBLIC_DEVICE } from '../fixtures/devices.mjs';
@@ -183,7 +183,7 @@ test.describe('knockout-mixed-team', () => {
       const label = (await T.panelSide(page, 0).innerText()).includes('Inheriting round default');
       await shot(page, 'f3-panel-round-default');
       record({ step: 'EP2 open panel', action: 'Enter lineup (Up next)', variant: 'correct', inheritingLabel: label, shiroBoxes,
-        roundDefaultOnLineupsPage: ['Aoki', 'Baba', 'Chiba'], note: 'FINDING-B1 when the boxes are empty' });
+        roundDefaultOnLineupsPage: ['Aoki', 'Baba', 'Chiba'], note: 'bc-lpfb when the boxes are empty' });
     });
 
     await test.step('F3 EP2 Aka lineup typed in the panel; V1 neighbour of Aka Save; duplicate refusal', async () => {
@@ -217,7 +217,7 @@ test.describe('knockout-mixed-team', () => {
       await expect(err).toBeVisible();
       const copy = (await err.innerText()).trim();
       await shot(page, 'f3-panel-duplicate-refused');
-      record({ step: 'EP2 duplicate', action: 'type Dai at 2 (Dai at 1), Save', variant: 'refusal copy', copy, note: 'FINDING-B2 when it names 2, the position being typed, not 1' });
+      record({ step: 'EP2 duplicate', action: 'type Dai at 2 (Dai at 1), Save', variant: 'refusal copy', copy, note: 'bc-lprf when it names 2, the position being typed, not 1' });
       expect(copy).toMatch(/Dai is already at/);
       // Repair: put Eto back.
       await T.pickFromNameBox(T.panelInput(page, 1, '2'), 'Eto');
@@ -409,7 +409,7 @@ test.describe('knockout-mixed-team', () => {
       const matchesText = (await page.locator('body').innerText()).replace(/\s+/g, ' ');
       const i = matchesText.indexOf('Pool A');
       record({ step: 'pool kiken chain', action: 'Pools tab after the chain', variant: 'consistency', awardsTapped: awarded,
-        poolA: matchesText.slice(i, i + 700), note: 'FINDING-B8 when the panel vanished and the match is still scheduled' });
+        poolA: matchesText.slice(i, i + 700), note: 'bc-kpnl when the panel vanished and the match is still scheduled' });
       // The operator carries on at the court: Up next now holds the
       // withdrawn team's remaining match.
       await openShiaijo(page, 'A');
@@ -599,7 +599,7 @@ test.describe('knockout-mixed-team', () => {
       const afterUntoggle = { shiro: await T.rowSlots(T.boutRow(ed, 3), 'shiro').allInnerTexts(), aka: await T.rowSlots(T.boutRow(ed, 3), 'aka').allInnerTexts() };
       await shot(page, 'bout3-untoggle-after-reload');
       record({ step: 'bout 3', action: 'Fusensho Aka, reload, untoggle', variant: 'V3 interrupt reload', ...r, afterReload, afterUntoggle, sheet: await T.sheetState(ed),
-        expected: 'Shiro K restored (the control title promises the previous score)', note: 'FINDING-B4 when Shiro is empty' });
+        expected: 'Shiro K restored (the control title promises the previous score)', note: 'bc-fsnp when Shiro is empty' });
       // Make bout 3 a clean hikiwake for the tie that follows.
       for (const side of ['shiro', 'aka']) {
         while (await T.rowSlots(T.boutRow(ed, 3), side).count()) await T.rowSlots(T.boutRow(ed, 3), side).first().tap();
@@ -615,7 +615,7 @@ test.describe('knockout-mixed-team', () => {
       await T.boutRow(ed, 4).scrollIntoViewIfNeeded();
       await shot(page, 'bout4-before-it-is-fought');
       record({ step: 'bout 4', action: 'look at a bout not yet fought', variant: 'V5 which bout is live', untouched4, sheet: await T.sheetState(ed),
-        note: 'FINDING-B3 when an unfought bout reads X / ✓ Tie' });
+        note: 'bc-unfx when an unfought bout reads X / ✓ Tie' });
       let offlinePill;
       const off = await interrupt(page, 'offline', {
         during: async (p) => {
@@ -635,7 +635,7 @@ test.describe('knockout-mixed-team', () => {
       await expect(T.boutRow(ed, 4)).toBeVisible();
       await page.waitForTimeout(1500);
       record({ step: 'bout 4', action: 'Aka kote, reload within 300ms', variant: 'V3 interrupt reload (instant)', ...quick, pillAtReload,
-        akaAfter: await T.rowSlots(T.boutRow(ed, 4), 'aka').allInnerTexts(), expected: ['D', 'K'], note: 'FINDING-B5 when K is gone' });
+        akaAfter: await T.rowSlots(T.boutRow(ed, 4), 'aka').allInnerTexts(), expected: ['D', 'K'], note: 'bc-sync when K is gone' });
       const hidden = await interrupt(page, 'hidden');
       record({ step: 'bout 4', action: 'tab hidden and back', variant: 'V3 interrupt hidden', ...hidden,
         sameMatch: (await ed.locator('.editor-modal__eyebrow').first().innerText()).trim() === identity,
@@ -658,7 +658,7 @@ test.describe('knockout-mixed-team', () => {
       const after5 = { middle: (await T.rowMiddle(row5).innerText()).trim(), tieLabel: (await T.rowTie(row5).innerText()).trim() };
       await shot(page, 'bout5-tie-tapped');
       record({ step: 'bout 5', action: 'Tie (hikiwake) on the unfought bout 5', variant: 'correct', before5, after5,
-        note: 'FINDING-B3 when the tap turns the draw OFF because the unfought bout already read X' });
+        note: 'bc-unfx when the tap turns the draw OFF because the unfought bout already read X' });
     });
 
     await test.step('bout 5 tied: the encounter is level, Finish is held back', async () => {
@@ -996,11 +996,11 @@ test.describe('knockout-mixed-team', () => {
     await testInfo.attach('audit.json', { body: JSON.stringify(rows, null, 2), contentType: 'application/json' });
   });
   // ------------------------------------------------------------ findings
-  // Each FINDING-B<n> below is a functional defect a journey step exposed,
+  // Each <bead-id> below is a functional defect a journey step exposed,
   // kept as a self-contained test so the fix can remove the fixme and keep
   // the step as its guard. Each seeds its own competition on its own shiaijo.
 
-  test.fixme('FINDING-B1: the match lineup panel shows a pool match\'s round-default lineup as empty', async ({ page }) => {
+  test.fixme('bc-lpfb: the match lineup panel shows a pool match\'s round-default lineup as empty', async ({ page }) => {
     await T.enterAdmin(page);
     const id = await createCompetition(page, {
       name: 'B1 Pools', kind: 'team', format: 'mixed', teamSize: 3, teamMatchType: 'fixed', courts: ['G', 'H'], numberPrefix: 'G',
@@ -1020,7 +1020,7 @@ test.describe('knockout-mixed-team', () => {
     await expect(T.panelInput(page, 0, '3')).toHaveValue('Chiba');
   });
 
-  test.fixme('FINDING-B2: the match lineup panel\'s "already at" refusal names the wrong position', async ({ page }) => {
+  test.fixme('bc-lprf: the match lineup panel\'s "already at" refusal names the wrong position', async ({ page }) => {
     await T.enterAdmin(page);
     await seedF4(page, { name: 'B2 KO', court: 'I', prefix: 'I', teams: FOUR_TEAMS('B2') });
     await openShiaijo(page, 'I');
@@ -1036,7 +1036,7 @@ test.describe('knockout-mixed-team', () => {
     await expect(T.panelSide(page, 1).locator('.alert--error')).toHaveText('Dai is already at Senpo.');
   });
 
-  test.fixme('FINDING-B3: a bout not yet fought reads as a draw (X, "✓ Tie") on the sheet and the TV board', async ({ page, browser, baseURL }) => {
+  test.fixme('bc-unfx: a bout not yet fought reads as a draw (X, "✓ Tie") on the sheet and the TV board', async ({ page, browser, baseURL }) => {
     await T.enterAdmin(page);
     await seedF4(page, { name: 'B3 KO', court: 'J', prefix: 'J', teams: [['B3 Ume', 'Kita Dojo'], ['B3 Sakura', 'Minami Dojo']] });
     await openShiaijo(page, 'J');
@@ -1061,7 +1061,7 @@ test.describe('knockout-mixed-team', () => {
     }
   });
 
-  test.fixme('FINDING-B4: a fusensho wipes the points the other side already scored, so its undo cannot bring them back after a reload', async ({ page }) => {
+  test.fixme('bc-fsnp: a fusensho wipes the points the other side already scored, so its undo cannot bring them back after a reload', async ({ page }) => {
     await T.enterAdmin(page);
     await seedF4(page, { name: 'B4 KO', court: 'K', prefix: 'L', teams: [['B4 Ume', 'Kita Dojo'], ['B4 Sakura', 'Minami Dojo']] });
     await openShiaijo(page, 'K');
@@ -1085,7 +1085,7 @@ test.describe('knockout-mixed-team', () => {
     await expect(T.rowSlots(T.boutRow(ed, 1), 'aka')).toHaveCount(0);
   });
 
-  test.fixme('FINDING-B3: a pool encounter finished with a bout left unscored counts that bout as an individual draw (IT)', async ({ page }) => {
+  test.fixme('RULING-NEEDED mp-yqxn.2 (does an unfought bout count as IT?): a pool encounter finished with a bout left unscored counts that bout as an individual draw (IT)', async ({ page }) => {
     await T.enterAdmin(page);
     const id = await createCompetition(page, {
       name: 'B3 Pools', kind: 'team', format: 'mixed', teamSize: 3, teamMatchType: 'fixed', courts: ['M', 'N'], numberPrefix: 'Q',
@@ -1106,7 +1106,7 @@ test.describe('knockout-mixed-team', () => {
     await expect(page.locator('tr').filter({ hasText: pair.shiro }).first()).toContainText(/1\s*0\s*0\s*1\s*0\s*1\s*1\s*0\s*$/);
   });
 
-  test.fixme('FINDING-B6: the daihyosen row offers no way to pick each team\'s representative', async ({ page }) => {
+  test.fixme('bc-dhrp: the daihyosen row offers no way to pick each team\'s representative', async ({ page }) => {
     await T.enterAdmin(page);
     await seedF4(page, { name: 'B6 KO', court: 'F', prefix: 'R', teams: [['B6 Ume', 'Kita Dojo'], ['B6 Sakura', 'Minami Dojo']] });
     await openShiaijo(page, 'F');
@@ -1120,7 +1120,7 @@ test.describe('knockout-mixed-team', () => {
     await expect(T.rowNameBox(dh, 'shiro')).toBeVisible();
     await expect(T.rowNameBox(dh, 'aka')).toBeVisible();
   });
-  test.fixme('FINDING-B8: on the court console the withdrawn team\'s remaining-matches panel vanishes before a default win can be awarded', async ({ page }) => {
+  test.fixme('bc-kpnl: on the court console the withdrawn team\'s remaining-matches panel vanishes before a default win can be awarded', async ({ page }) => {
     await T.enterAdmin(page);
     const id = await createCompetition(page, {
       name: 'B8 Pools', kind: 'team', format: 'mixed', teamSize: 3, teamMatchType: 'fixed', courts: ['O', 'P'], numberPrefix: 'V',

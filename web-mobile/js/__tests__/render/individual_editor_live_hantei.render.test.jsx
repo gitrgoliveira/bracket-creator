@@ -432,7 +432,9 @@ describe('the team editor shows the bout scoreline the server holds', () => {
     const onSubmit = vi.fn();
     const { rerender, container } = open(teamMatch([]), onSubmit);
     await scoreOneForKyoto(container);
-    await reopenWith(rerender, teamMatch([bout(1, 'b')]), onSubmit);
+    // Bout 3 arrives too: Finish refuses while any bout has no result
+    // (bc-tmfn), and this test is about bout 1 surviving the write.
+    await reopenWith(rerender, teamMatch([bout(1, 'b'), bout(3, 'a')]), onSubmit);
 
     const finish = () => [...container.querySelectorAll('button')].find(b => /finish/i.test(b.textContent));
     for (let i = 0; i < 2 && finish(); i++) { await act(async () => { fireEvent.click(finish()); }); }
@@ -494,10 +496,12 @@ describe('the team editor shows the bout scoreline the server holds', () => {
     // `position: 4`, a fourth numbered bout in a three-person team.
     const onSubmit = vi.fn();
     const dh = { position: -1, sideA: KYOTO, sideB: OSAKA, ipponsA: ['M'], ipponsB: ['K'], decision: 'daihyosen' };
-    const { rerender, container } = open(teamMatch([bout(1, 'a'), dh]), onSubmit);
+    // Bout 3 is recorded so Finish is allowed to write (bc-tmfn: it refuses
+    // while any bout has no result).
+    const { rerender, container } = open(teamMatch([bout(1, 'a'), bout(3, 'b'), dh]), onSubmit);
     await scoreOneForKyoto(container);   // dirty, so the adopt cannot paper over it
 
-    await reopenWith(rerender, teamMatch([bout(1, 'a')]), onSubmit);
+    await reopenWith(rerender, teamMatch([bout(1, 'a'), bout(3, 'b')]), onSubmit);
 
     const finishBtn = () => [...container.querySelectorAll('button')].find(b => /finish/i.test(b.textContent));
     for (let i = 0; i < 2 && finishBtn(); i++) { await act(async () => { fireEvent.click(finishBtn()); }); }
@@ -527,9 +531,10 @@ describe('the team editor shows the bout scoreline the server holds', () => {
     // emitted patch, since the rep bout is excluded from IV/PW by design and so
     // leaves no trace in the summary strip.
     const onSubmit = vi.fn();
-    const { rerender, container } = open(teamMatch([bout(1, 'a'), bout(2, 'b')]), onSubmit);
+    // All three bouts recorded so Finish is allowed to write (bc-tmfn).
+    const { rerender, container } = open(teamMatch([bout(1, 'a'), bout(2, 'b'), bout(3, 'a')]), onSubmit);
     await reopenWith(rerender, teamMatch([
-      bout(1, 'a'), bout(2, 'b'),
+      bout(1, 'a'), bout(2, 'b'), bout(3, 'a'),
       { position: -1, sideA: KYOTO, sideB: OSAKA, ipponsA: [], ipponsB: [], decision: 'daihyosen' },
     ]), onSubmit);
 

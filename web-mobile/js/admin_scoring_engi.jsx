@@ -51,8 +51,10 @@ function PipRow({ count, side }) {
 
 // EngiShortcutHint: quiet keyboard-shortcut reminder, matching the kendo
 // editor's ScoringShortcutHint style. aria-hidden (the same actions are
-// reachable via the on-screen counters and Save button).
-function EngiShortcutHint({ hasNav = false }) {
+// reachable via the on-screen counters and Save button). It shares the
+// `.scoring-shortcut-hint` class for its layout, so it hides under a coarse
+// pointer too (bc-kbhn), and lists ←/→ and Esc only where they act.
+function EngiShortcutHint({ hasNav = false, canClose = false }) {
   const kbd = {
     fontFamily: "var(--font-mono)", fontSize: 11, padding: "1px 5px",
     border: "1px solid var(--line)", borderRadius: 4, background: "var(--surface)",
@@ -60,9 +62,9 @@ function EngiShortcutHint({ hasNav = false }) {
   };
   return (
     <div
+      className="scoring-shortcut-hint"
       data-testid="engi-shortcut-hint"
       aria-hidden="true"
-      style={{ marginTop: 6, fontSize: 12, color: "var(--ink-3)", textAlign: "center", display: "flex", gap: 4, justifyContent: "center", alignItems: "center", flexWrap: "wrap" }}
     >
       <kbd style={kbd}>A</kbd><kbd style={kbd}>S</kbd><span>add Aka/Shiro flag</span>
       <span aria-hidden="true">·</span>
@@ -70,8 +72,7 @@ function EngiShortcutHint({ hasNav = false }) {
       <span aria-hidden="true">·</span>
       <kbd style={kbd}>Enter</kbd><span>save</span>
       {hasNav && <><span aria-hidden="true">·</span><kbd style={kbd}>←</kbd><kbd style={kbd}>→</kbd><span>prev/next</span></>}
-      <span aria-hidden="true">·</span>
-      <kbd style={kbd}>Esc</kbd><span>close</span>
+      {canClose && <><span aria-hidden="true">·</span><kbd style={kbd}>Esc</kbd><span>close</span></>}
     </div>
   );
 }
@@ -276,7 +277,7 @@ export function EngiScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext
   // fresh state via kbRef. Escape stays owned by useEscapeToClose above.
   const kbRef = useRefE(null);
   const lastSideRef = useRefE(null); // "a" | "s" | null: which side Backspace undoes
-  kbRef.current = { submitting, canSubmit, showCorrectionPrompt, flagsA, flagsB, setFlagsA, setFlagsB, clamp, handleSubmit, onPrev, onNext };
+  kbRef.current = { submitting, canSubmit, showCorrectionPrompt, flagsA, flagsB, setFlagsA, setFlagsB, clamp, handleSubmit, onPrev, onNext, prevMatch, nextMatch };
   useEffectE(() => {
     const onKeyDown = (ev) => {
       const s = kbRef.current;
@@ -288,8 +289,11 @@ export function EngiScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext
       if (window.isTextEntry && window.isTextEntry(ev.target)) return;
 
       // ←/→ move between queued matches (parity with the kendo editor).
-      if (ev.key === "ArrowLeft" && s.onPrev) { ev.preventDefault(); s.onPrev(); return; }
-      if (ev.key === "ArrowRight" && s.onNext) { ev.preventDefault(); s.onNext(); return; }
+      // Keyed on the neighbour match as well as the callback: the Scores tab
+      // wires onPrev/onNext unconditionally, and with no neighbour they call
+      // scoreKeyOf(null), which throws. Same condition as the hint's hasNav.
+      if (ev.key === "ArrowLeft" && s.onPrev && s.prevMatch) { ev.preventDefault(); s.onPrev(); return; }
+      if (ev.key === "ArrowRight" && s.onNext && s.nextMatch) { ev.preventDefault(); s.onNext(); return; }
 
       if (ev.key === "Enter") {
         // Let a focused button/link/input handle its own Enter (e.g. Cancel).
@@ -521,7 +525,7 @@ export function EngiScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext
         {/* Quiet keyboard-shortcut reminder (parity with the kendo editor's
             ScoringShortcutHint). Hidden during the reason prompt, when keys
             are disabled. */}
-        {!(isComplete && showCorrectionPrompt) && <EngiShortcutHint hasNav={!!(prevMatch || nextMatch)} />}
+        {!(isComplete && showCorrectionPrompt) && <EngiShortcutHint hasNav={!!((prevMatch && onPrev) || (nextMatch && onNext))} canClose={canClose} />}
       </div>
     </>
   );

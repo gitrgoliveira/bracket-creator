@@ -51,6 +51,8 @@ describe('API.recordScore: downstream_knockout_played (bc-kcdg)', () => {
       // both the final and the bronze match. Shape is {id, number}.
       blockingMatches: [{ id: 'm5' }],
       displaced: 'Aoki Taro',
+      // A knockout correction moves no pool place.
+      qualifierChange: [],
     });
   });
 
@@ -140,6 +142,8 @@ describe('API.overrideBracketWinner: downstream_knockout_played (bc-kcdg)', () =
       // both the final and the bronze match. Shape is {id, number}.
       blockingMatches: [{ id: 'm-r1-0' }],
       displaced: 'Bob',
+      // A knockout correction moves no pool place.
+      qualifierChange: [],
     });
   });
 
@@ -231,6 +235,8 @@ describe('API.recordDecision: downstream_knockout_played (bc-cse)', () => {
       // both the final and the bronze match. Shape is {id, number}.
       blockingMatches: [{ id: 'm5' }],
       displaced: 'Aoki Taro',
+      // A knockout correction moves no pool place.
+      qualifierChange: [],
     });
   });
 
@@ -264,5 +270,58 @@ describe('API.recordDecision: downstream_knockout_played (bc-cse)', () => {
     expect(url).toBe('/api/competitions/c1/matches/m1/decision');
     const sentBody = JSON.parse(opts.body);
     expect(sentBody.forceDownstreamReopen).toBe(true);
+  });
+});
+
+// A POOL correction in a mixed competition: the same played refusal carries
+// qualifierChange (who moves), and a knockout match being fought answers with
+// the terminal downstream_knockout_running, whose thrown message is the
+// operator's copy rather than the bare code and which is NOT a confirmable
+// refusal (downstreamKnockoutPlayedRefusal reads null, so attemptScoreWrite
+// never offers "Apply and reopen" for it).
+describe('pool corrections that move a qualifier', () => {
+  let originalFetch;
+  afterEach(() => { if (originalFetch) global.fetch = originalFetch; });
+
+  const qc = [{ pool: 'Pool A', rank: 1, place: '1st', from: { name: 'A1', id: 'a1' }, to: { name: 'A2', id: 'a2' } }];
+
+  it('recordScore parses qualifierChange onto the refusal', async () => {
+    originalFetch = global.fetch;
+    global.fetch = vi.fn().mockResolvedValue({
+      ok: false,
+      status: 409,
+      json: async () => ({
+        error: 'downstream_knockout_played', matchId: 'Pool A-0', blockingMatchId: 'm-r1-0',
+        blockingMatches: [{ id: 'm-r1-0', number: 1 }], displaced: 'A1', qualifierChange: qc, message: 'x',
+      }),
+    });
+    const err = await API.recordScore('c1', 'Pool A-0', { status: 'completed' }, 'pw').then(
+      () => { throw new Error('expected a rejection'); },
+      (e) => e,
+    );
+    expect(downstreamKnockoutPlayedRefusal(err).qualifierChange).toEqual(qc);
+  });
+
+  it.each([
+    ['recordScore', () => API.recordScore('c1', 'Pool A-0', { status: 'completed' }, 'pw')],
+    ['recordDecision', () => API.recordDecision('c1', 'Pool A-0', { decision: 'kiken-voluntary', decisionBy: 'aka' }, 'pw')],
+  ])('%s throws the running refusal as the operator copy, never confirmable', async (_door, send) => {
+    originalFetch = global.fetch;
+    global.fetch = vi.fn().mockResolvedValue({
+      ok: false,
+      status: 409,
+      json: async () => ({
+        error: 'downstream_knockout_running', matchId: 'Pool A-0',
+        runningMatches: [{ id: 'm-r1-0', number: 1 }], message: 'server copy',
+      }),
+    });
+    const err = await send().then(
+      () => { throw new Error('expected a rejection'); },
+      (e) => e,
+    );
+    expect(err.message).toBe('Match 1 is being fought now. Finish it or send it back to the queue, then save again.');
+    expect(err.code).toBe('downstream_knockout_running');
+    expect(err.downstreamKnockoutRunning).toEqual({ matchId: 'Pool A-0', runningMatches: [{ id: 'm-r1-0', number: 1 }] });
+    expect(downstreamKnockoutPlayedRefusal(err)).toBeNull();
   });
 });

@@ -541,3 +541,96 @@ describe('AdminPools chusen banner: non-ASCII member keys do not collapse the DO
     expect(labels[0].htmlFor).not.toBe(labels[1].htmlFor);
   });
 });
+
+// A recorded rank can move who holds a qualifying place after the knockout has
+// started, and the server refuses it like a pool result correction. The panel
+// must ask the operator (the same confirm the score editors use, naming who
+// moves and which match reopens) and, confirmed, resend THAT member's rank
+// with the confirmation before going on; declined, it records nothing more and
+// says so in the group.
+describe('AdminPools chusen banner: a rank that moves a knockout qualifier', () => {
+  const refusal = () => {
+    const e = new Error('downstream_knockout_played');
+    e.downstreamKnockoutPlayed = {
+      matchId: '', blockingMatchId: 'm9', blockingMatches: [{ id: 'm9', number: 9 }], displaced: 'Beta',
+      qualifierChange: [{ pool: 'Pool A', rank: 1, place: '1st', from: { name: 'Beta' }, to: { name: 'Alpha' } }],
+      ranking: true,
+    };
+    return e;
+  };
+
+  async function recordDefaults(api) {
+    await mountAdminPools({ api });
+    await screen.findByText('Chusen (drawing lots) required');
+    const recordBtn = screen.getByRole('button', { name: /Record chusen result/ });
+    await act(async () => { fireEvent.click(recordBtn); });
+  }
+
+  it('asks, and on confirm resends that rank with the confirmation', async () => {
+    const api = makeApi([uniqueGroup]);
+    api.overridePoolRank = vi.fn()
+      .mockRejectedValueOnce(refusal())
+      .mockResolvedValue(true);
+    window.confirmDialog = vi.fn().mockResolvedValue(true);
+    await recordDefaults(api);
+
+    await waitFor(() => expect(api.overridePoolRank).toHaveBeenCalledTimes(3));
+    expect(window.confirmDialog).toHaveBeenCalledTimes(1);
+    const { message, confirmLabel } = window.confirmDialog.mock.calls[0][0];
+    expect(message).toContain("Recording this ranking moves Pool A's 1st place from Beta to Alpha");
+    expect(message).toContain('Match 9');
+    expect(confirmLabel).toBe('Apply and reopen');
+    const calls = api.overridePoolRank.mock.calls;
+    expect(calls[0]).toEqual(['c1', 'Pool A', 'Alpha', 1, PASSWORD, 'team-a']);
+    expect(calls[1]).toEqual(['c1', 'Pool A', 'Alpha', 1, PASSWORD, 'team-a', true]);
+    expect(calls[2]).toEqual(['c1', 'Pool A', 'Beta', 2, PASSWORD, 'team-b']);
+  });
+
+  it('declined, records nothing more and says so in the group', async () => {
+    const api = makeApi([uniqueGroup]);
+    api.overridePoolRank = vi.fn().mockRejectedValueOnce(refusal()).mockResolvedValue(true);
+    window.confirmDialog = vi.fn().mockResolvedValue(false);
+    await recordDefaults(api);
+
+    await screen.findByText('Ranking not recorded: the knockout match already fought was left unchanged.');
+    expect(api.overridePoolRank).toHaveBeenCalledTimes(1);
+  });
+});
+
+// A pool correction made after a mixed competition's knockout has started can
+// leave a qualifying tie only a chusen settles, and the server accepts the
+// chusen then (AcceptsPoolRankOverride). The panel must fetch and show it in
+// knockout status too, or the knockout match that place feeds can never be
+// played. A knockout-only competition has no pool order to set, so it is not
+// asked.
+describe('AdminPools chusen banner: after the knockout has started', () => {
+  it('fetches and shows the candidates for a mixed competition in knockout status', async () => {
+    const api = makeApi([uniqueGroup]);
+    await mountAdminPools({ api, comp: teamComp({ status: 'knockout' }) });
+
+    await screen.findByText('Chusen (drawing lots) required');
+    expect(api.chusenCandidates).toHaveBeenCalledWith('c1', PASSWORD);
+    expect(screen.getByText('Alpha')).toBeTruthy();
+    expect(screen.getByText('Beta')).toBeTruthy();
+  });
+
+  it('does not ask for a competition whose knockout has no pools behind it', async () => {
+    const api = makeApi([uniqueGroup]);
+    window.API = api;
+    await act(async () => {
+      render(
+        <AdminPools
+          c={teamComp({ format: 'knockout', status: 'knockout' })}
+          pools={onePool}
+          poolMatches={[]}
+          standings={{}}
+          tweaks={{}}
+          onEditScore={vi.fn()}
+          password={PASSWORD}
+        />
+      );
+    });
+    expect(api.chusenCandidates).not.toHaveBeenCalled();
+    expect(screen.queryByText('Chusen (drawing lots) required')).toBeNull();
+  });
+});

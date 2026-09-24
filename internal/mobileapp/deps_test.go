@@ -82,6 +82,10 @@ func (stubScoringEngine) MaybeAutoCompletePools(string) (engine.AutoCompleteOutc
 	return engine.AutoCompleteNoChange, nil
 }
 
+func (stubScoringEngine) MaybeAutoCompletePoolsAfterWrite(string, ...state.MatchResult) (engine.AutoCompleteOutcome, error) {
+	return engine.AutoCompleteNoChange, nil
+}
+
 func (stubScoringEngine) UpdateMatchCourt(string, string, string) error {
 	return nil
 }
@@ -96,6 +100,10 @@ func (stubScoringEngine) UpdateMatchTime(string, string, string) error {
 
 func (stubScoringEngine) MaybeAdvanceKachinuki(string, string) (bool, []state.SubMatchResult, error) {
 	return false, nil, nil
+}
+
+func (stubScoringEngine) TeamBoutsWithNoFighter(string, string) (map[int]bool, error) {
+	return nil, nil
 }
 
 // stubEligibilityEngine is a controllable implementation of EligibilityEngine

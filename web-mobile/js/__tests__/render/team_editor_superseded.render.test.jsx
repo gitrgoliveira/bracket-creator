@@ -195,6 +195,10 @@ describe('team score editor: a failed write disarms the finish confirmation', ()
       sideB: { id: 'team-B', name: 'Team B' },
       subResults: [
         { position: 1, sideA: 'Team A', sideB: 'Team B', ipponsA: ['M', 'M'], ipponsB: [], winner: 'Team A' },
+        // bc-tmfn: every bout is fought, so Finish only arms once each
+        // numbered bout has a result.
+        { position: 2, sideA: '', sideB: '', ipponsA: ['K'], ipponsB: [], winner: 'Team A' },
+        { position: 3, sideA: '', sideB: '', ipponsA: [], ipponsB: [], winner: '', decision: 'hikiwake' },
       ],
     };
   }

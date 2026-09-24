@@ -235,10 +235,8 @@ func (e *Engine) InjectPoolDaihyosenMatches(compID string) ([]state.MatchResult,
 		return nil, notFoundErrorf("competition %s not found", compID)
 	}
 
-	// A daihyosen is played only where the tie affects advancement/seeding
-	// (see tieAffectsAdvancement): the top poolWinners of each pool advance.
-	poolWinners := comp.EffectivePoolWinners()
-
+	// A daihyosen is played only where the tie affects advancement/seeding;
+	// pendingTieBreaks owns that band.
 	standings, err := e.CalculatePoolStandings(compID)
 	if err != nil {
 		return nil, err
@@ -258,11 +256,7 @@ func (e *Engine) InjectPoolDaihyosenMatches(compID string) ([]state.MatchResult,
 	// group being processed via groupMemberIDs -- see that function's
 	// doc comment for why a bare-name reduction at this scan stage would
 	// collapse distinct namesake-involving pairs.
-	type poolDHInfo struct {
-		existingRows []state.MatchResult
-		count        int
-	}
-	poolDH := map[string]*poolDHInfo{}
+	poolDH := map[string][]state.MatchResult{}
 	poolCourt := map[string]string{}
 	// regularIncomplete[pool] is true if any regular (non-DH) match in the pool
 	// is not yet completed. Daihyosen tie-breaks must only be injected after a
@@ -284,11 +278,7 @@ func (e *Engine) InjectPoolDaihyosenMatches(compID string) ([]state.MatchResult,
 			poolCourt[pn] = m.Court
 		}
 		if IsPoolDaihyosenMatchID(m.ID) {
-			if poolDH[pn] == nil {
-				poolDH[pn] = &poolDHInfo{}
-			}
-			poolDH[pn].count++
-			poolDH[pn].existingRows = append(poolDH[pn].existingRows, m)
+			poolDH[pn] = append(poolDH[pn], m)
 		} else if m.Status != state.MatchStatusCompleted {
 			regularIncomplete[pn] = true
 		}
@@ -300,24 +290,8 @@ func (e *Engine) InjectPoolDaihyosenMatches(compID string) ([]state.MatchResult,
 		if regularIncomplete[poolName] {
 			continue
 		}
-		info := poolDH[poolName]
-		existingCount := 0
-		var existingRows []state.MatchResult
-		if info != nil {
-			existingCount = info.count
-			existingRows = info.existingRows
-		}
-
-		for _, positions := range detectPoolTies(poolStandings) {
-			// Only break ties that affect who advances / their seed: a tie sitting
-			// entirely below the top-poolWinners cut shares its rank with no bout.
-			if !tieAffectsAdvancement(positions, poolWinners) {
-				continue
-			}
-			group := standingsAt(poolStandings, positions)
-			newMatches := generatePoolDaihyosenMatches(poolName, group, existingCount, poolCourt[poolName], existingRows)
-			existingCount += len(newMatches)
-			injected = append(injected, newMatches...)
+		for _, p := range pendingTieBreaks(comp, poolName, poolStandings, poolDH[poolName], poolCourt[poolName], true) {
+			injected = append(injected, p.bouts...)
 		}
 	}
 

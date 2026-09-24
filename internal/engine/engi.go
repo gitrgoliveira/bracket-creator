@@ -162,7 +162,7 @@ func (e *Engine) recordEngiMatch(
 						return err
 					}
 				}
-				priorWinner, priorWinnerID := bm.Winner, bm.WinnerID
+				priorWinner, priorWinnerID := propagatedWinnerOf(b, rIdx, mIdx, bm)
 				result = applyEngiToBracketMatch(bm, flagsA, flagsB, winnerSide, correctionReason)
 				e.propagateBracketWinner(b, rIdx, mIdx)
 				if force && winnerActuallyChanged(priorWinner, priorWinnerID, bm) {
@@ -185,6 +185,7 @@ func (e *Engine) recordEngiMatch(
 	if updateErr != nil {
 		return nil, updateErr
 	}
+	e.restoreForceReopened(h, compID, reopened)
 	if fo.Reopened != nil {
 		*fo.Reopened = append(*fo.Reopened, reopened...)
 	}

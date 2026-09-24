@@ -2671,6 +2671,12 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 			// to send.
 			PlayerID string `json:"playerId"`
 			Rank     int    `json:"rank"`
+			// ForceDownstreamReopen is the operator's confirmation of a 409
+			// downstream_knockout_played refusal: the new order moves a
+			// qualifier out of a knockout match the old one already fought,
+			// and confirming reopens that match with the new qualifier seated
+			// (engine.OverridePoolRank). Never past downstream_knockout_running.
+			ForceDownstreamReopen bool `json:"forceDownstreamReopen"`
 		}
 		if err := c.ShouldBindJSON(&req); err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
@@ -2701,8 +2707,12 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 			c.JSON(http.StatusNotFound, gin.H{"error": "competition not found"})
 			return
 		}
-		if comp.Status != state.CompStatusPools {
-			c.JSON(http.StatusConflict, gin.H{"error": "rank overrides only accepted while competition is in pools stage"})
+		// A pools + knockout competition takes one after its knockout has
+		// started too: a pool correction made then can leave a tie only a
+		// chusen settles, and a wrong chusen must stay fixable. What the new
+		// order does to the knockout is answered below, as for any override.
+		if !comp.AcceptsPoolRankOverride() {
+			c.JSON(http.StatusConflict, gin.H{"error": "rank overrides only accepted while competition is in pools stage, or in knockout stage for a pools + knockout competition"})
 			return
 		}
 		// Pool-size validation: rank within a pool is bounded by the
@@ -2742,15 +2752,38 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 			return
 		}
 
-		changed, err := store.SaveRankOverrideChanged(id, poolId, playerID, req.Rank)
+		// A rank override moves the pool's order without a match write, so it
+		// answers for the knockout the pool feeds exactly as a pool result
+		// correction does: the same 409s, the same confirmation, the same
+		// reopen (engine.OverridePoolRank).
+		var reopened []engine.ReopenedMatch
+		changed, err := eng.OverridePoolRank(id, poolId, playerID, req.Rank, engine.ForceOptions{
+			Force:    req.ForceDownstreamReopen,
+			Reopened: &reopened,
+		})
 		if err != nil {
-			internalError(c, err)
+			switch {
+			case respondIfDownstreamKnockoutRunning(c, err):
+			case respondIfDownstreamKnockoutPlayed(c, err):
+			case respondIfEngineWriteError(c, err):
+			default:
+				internalError(c, err)
+			}
 			return
 		}
 		if changed {
 			hub.Broadcast(EventTournamentUpdated, nil)
 		}
-		c.Status(http.StatusOK)
+		broadcastReopenedDownstream(hub, id, reopened)
+		if changed && comp.Format == state.CompFormatMixed {
+			// A new order can complete a pool (a chusen settles its last
+			// tie): seating a pool's slots for the first time is the
+			// auto-complete's job, which otherwise waited for the next score
+			// write. The full door, not the after-write one: no match was
+			// written, but the pool's standings moved.
+			tryAutoCompletePools(c, eng, hub, id)
+		}
+		c.JSON(http.StatusOK, gin.H{"reopenedMatches": blockedMatchesPayload(reopened)})
 	})
 
 	// GET /competitions/:id/chusen-candidates

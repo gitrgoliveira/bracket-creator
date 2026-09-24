@@ -150,7 +150,13 @@ const RunningMatchPanel = React.memo(({ match, compId, courts, matchNum, onMoveC
             // place. Remounting on every bout-log change also DISCARDED the
             // operator's unsaved scores — on a kachinuki encounter that is every
             // appended pairing — which is the harm, not the fix.
-            key={`${match.id}:${match.status}`}
+            // Nor the status (bc-tmfn), for the same reason: the editor
+            // follows a status change in place, as it does on the Scores tab
+            // and the court console, whose keys never carried one. Remounting
+            // on completed -> running threw away what a Clear withdrawal and
+            // reopen came back with (its notice naming a later match it also
+            // reopened) at the moment the operator goes on scoring here.
+            key={match.id}
             variant="inline"
             match={match}
             // Offer "close" only when there's a result card to fall back to

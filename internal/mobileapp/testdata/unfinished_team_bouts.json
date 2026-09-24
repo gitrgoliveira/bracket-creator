@@ -1,0 +1,19 @@
+{
+  "_comment": [
+    "bc-tmfn: the refusal copy for finishing a team match while numbered bouts",
+    "have no result, shared by BOTH implementations of unfinishedTeamBoutsMessage:",
+    "internal/mobileapp/team_finish_gate.go (the server's 400) and",
+    "web-mobile/js/admin_scoring_team.jsx (the editor's refusal). The operator",
+    "must read the same words whichever side refused. It pins values, not source",
+    "text. The copy names the bouts and what to record and never mentions the",
+    "lineup. Go half: TestUnfinishedTeamBoutsMessage_SharedTable; JS half:",
+    "unfinished_team_bouts.test.jsx."
+  ],
+  "cases": [
+    { "teamSize": 5, "bouts": [5], "message": "Bout 5 (Taisho) has no result. Record a score, a Tie, or a Fusensho before finishing." },
+    { "teamSize": 5, "bouts": [2, 3], "message": "Bout 2 (Jiho) and Bout 3 (Chuken) have no result. Record a score, a Tie, or a Fusensho before finishing." },
+    { "teamSize": 5, "bouts": [1, 4, 5], "message": "Bout 1 (Senpo), Bout 4 (Fukusho) and Bout 5 (Taisho) have no result. Record a score, a Tie, or a Fusensho before finishing." },
+    { "teamSize": 3, "bouts": [3], "message": "Bout 3 has no result. Record a score, a Tie, or a Fusensho before finishing." },
+    { "teamSize": 7, "bouts": [6, 7], "message": "Bout 6 and Bout 7 have no result. Record a score, a Tie, or a Fusensho before finishing." }
+  ]
+}

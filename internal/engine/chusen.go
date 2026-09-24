@@ -123,7 +123,10 @@ func groupNeedsChusen(group []state.PlayerStanding, allMatches []state.MatchResu
 // left undetermined and that therefore need a chusen (drawing lots). It is the
 // single source of truth for "which groups still need an operator lots-draw",
 // used by the GET /chusen-candidates endpoint. Empty (not an error) when the
-// competition is not a team comp in the pools stage, or no such group exists.
+// competition is not a team comp whose pool order can still be set by hand
+// (state.Competition.AcceptsPoolRankOverride: the pools stage, or a pools +
+// knockout competition's knockout, where a pool correction can reopen a tie),
+// or no such group exists.
 //
 // Pools are returned in name order for stable output.
 func (e *Engine) ChusenCandidates(compID string) ([]ChusenGroup, error) {
@@ -135,7 +138,7 @@ func (e *Engine) ChusenCandidates(compID string) ([]ChusenGroup, error) {
 		return nil, notFoundErrorf("competition %s not found", compID)
 	}
 	isTeam := comp.Kind == "team" || comp.TeamSize > 0
-	if !isTeam || comp.Status != state.CompStatusPools {
+	if !isTeam || !comp.AcceptsPoolRankOverride() {
 		return nil, nil
 	}
 

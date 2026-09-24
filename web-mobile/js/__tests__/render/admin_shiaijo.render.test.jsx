@@ -17,7 +17,10 @@ const STUBBED_GLOBALS = {
   // MODULE-EVAL-TIME: captured at import; set before dynamic import below
   AdminTopbar: ({ children }) => <div data-testid="topbar">{children}</div>,
   Breadcrumbs: () => null,
-  ScoreEditorModal: () => <div data-testid="score-editor" />,
+  // Carries the id of the match the panel is scoring, so a test can tell
+  // WHICH match the console selected (captured at import, so it cannot be
+  // swapped per test).
+  ScoreEditorModal: ({ match }) => <div data-testid="score-editor" data-match={match ? match.id : ''} />,
   CourtPicker: () => null,
   BracketTree: () => null,
   Icon: ({ name }) => <span>{name}</span>,
@@ -66,13 +69,13 @@ function makeMinimalTournament(overrides = {}) {
   };
 }
 
-function renderPage(tournament, court = 'A') {
+function renderPage(tournament, court = 'A', props = {}) {
   return render(
     <AdminShiaijoPage
       tournament={tournament}
       court={court}
       onBack={vi.fn()}
-      onEditScore={vi.fn()}
+      onEditScore={props.onEditScore || vi.fn()}
       onMoveCourt={vi.fn()}
       onLogout={vi.fn()}
       onViewerMode={vi.fn()}
@@ -570,6 +573,188 @@ describe('AdminShiaijoPage render-smoke', () => {
       window.API.fetchCourtMatches = prevFetch;
       window.API.subscribeToEvents = prevSub;
       window.API.revertMatchToQueue = prevRevert;
+    }
+  });
+
+  // UAT (bc-tmfn): the operator corrects a finished match, taps Clear
+  // withdrawal and reopen (the match is RUNNING again), scores the rest and
+  // taps Finish + Start Next. The console kept the old match pinned in
+  // CORRECTION mode and hid the match it had just started until "Back to
+  // court". A reopened correction is the court's live bout, so it becomes the
+  // live pick and the correction ends.
+  it('a reopened correction becomes the live match, so Finish + Start Next moves on to the match it started', async () => {
+    const side = (id, name) => ({ id, name });
+    const m1 = {
+      id: 'm1', compId: 'c1', compName: 'Cup', status: 'completed', phase: 'pool', poolName: 'Pool A',
+      court: 'A', scheduledAt: '09:00', modifiedAt: 1000,
+      sideA: side('p1', 'Yamada'), sideB: side('p2', 'Tanaka'), winner: side('p1', 'Yamada'),
+    };
+    const m2 = {
+      id: 'm2', compId: 'c1', compName: 'Cup', status: 'scheduled', phase: 'pool', poolName: 'Pool A',
+      court: 'A', scheduledAt: '09:05', sideA: side('p3', 'Sato'), sideB: side('p4', 'Kato'),
+    };
+    let current = [m1, m2];
+    window.tournamentMatches = () => current;
+    window.filterMatchesByCourt = (matches) => matches;
+    const prevFetch = window.API.fetchCourtMatches;
+    const prevSub = window.API.subscribeToEvents;
+    const prevRevert = window.API.revertMatchToQueue;
+    window.API.fetchCourtMatches = vi.fn().mockImplementation(() => Promise.resolve([{ id: 'c1', name: 'Cup' }]));
+    window.API.subscribeToEvents = () => () => {};
+    window.API.revertMatchToQueue = vi.fn().mockResolvedValue(true);
+    try {
+      let utils;
+      await act(async () => { utils = renderPage(makeMinimalTournament()); });
+      const editorMatch = () => utils.getByTestId('score-editor').getAttribute('data-match');
+      const heading = () => utils.container.querySelector('.shiaijo-context__toggle').textContent;
+      const refresh = async () => { await act(async () => { utils.getByRole('button', { name: /refresh/i }).click(); }); };
+
+      await act(async () => { utils.getByRole('button', { name: /^correct$/i }).click(); });
+      expect(editorMatch()).toBe('m1');
+      expect(heading()).toContain('Correcting');
+
+      // Clear withdrawal and reopen: m1 is running again.
+      current = [{ ...m1, status: 'running', winner: undefined }, m2];
+      await refresh();
+      expect(editorMatch()).toBe('m1');
+      expect(heading()).not.toContain('Correcting');
+
+      // Finish + Start Next: m1 is completed again and m2 is running.
+      current = [{ ...m1, status: 'completed', modifiedAt: 3000 }, { ...m2, status: 'running' }];
+      await refresh();
+      expect(editorMatch(), 'the panel must follow the match Finish + Start Next started').toBe('m2');
+      expect(utils.queryByRole('button', { name: /back to court/i })).toBeNull();
+      expect(heading()).not.toContain('Correcting');
+    } finally {
+      window.API.fetchCourtMatches = prevFetch;
+      window.API.subscribeToEvents = prevSub;
+      window.API.revertMatchToQueue = prevRevert;
+    }
+  });
+
+  // UAT (bc-tmfn): a Start refused for an ineligible competitor
+  // ("kiken-voluntary at Pool A-2") stayed on screen after the withdrawal was
+  // cleared and eligibility restored, and after that match started it sat
+  // under the NEXT match. It must go once it may no longer apply (an
+  // eligibility change in its competition, or ANY change of Up next), and
+  // stay while it still does.
+  it('a refused Start is dropped when eligibility changes or Up next moves on, and kept while it still applies', async () => {
+    const side = (id, name) => ({ id, name });
+    const m1 = {
+      id: 'm1', compId: 'c1', compName: 'Cup', status: 'scheduled', phase: 'pool', poolName: 'Pool A',
+      court: 'A', scheduledAt: '09:00', sideA: side('p1', 'Yamada'), sideB: side('p2', 'Tanaka'),
+    };
+    const m2 = {
+      id: 'm2', compId: 'c1', compName: 'Cup', status: 'scheduled', phase: 'pool', poolName: 'Pool A',
+      court: 'A', scheduledAt: '09:05', sideA: side('p3', 'Sato'), sideB: side('p4', 'Kato'),
+    };
+    let current = [m1, m2];
+    window.tournamentMatches = () => current;
+    window.filterMatchesByCourt = (matches) => matches;
+    let emit = () => {};
+    const prevFetch = window.API.fetchCourtMatches;
+    const prevSub = window.API.subscribeToEvents;
+    window.API.fetchCourtMatches = vi.fn().mockImplementation(() => Promise.resolve([{ id: 'c1', name: 'Cup' }]));
+    window.API.subscribeToEvents = (cb) => { emit = cb; return () => {}; };
+    const onEditScore = vi.fn().mockRejectedValue(new Error('kiken-voluntary at Pool A-2'));
+    try {
+      let utils;
+      await act(async () => { utils = renderPage(makeMinimalTournament(), 'A', { onEditScore }); });
+      const refusal = () => utils.container.querySelector('.shiaijo-upnext__error');
+      // The Up next card's own Start (an Upcoming row carries one too).
+      const start = async () => {
+        const card = utils.container.querySelector('.shiaijo-upnext__card');
+        const btn = [...card.querySelectorAll('button')].find((b) => /start match/i.test(b.textContent));
+        await act(async () => { btn.click(); });
+      };
+      const refresh = async () => { await act(async () => { utils.getByRole('button', { name: /refresh/i }).click(); }); };
+      const send = async (event) => { await act(async () => { emit(event); }); };
+
+      // A Start refused for an UPCOMING row's match is not shown under Up
+      // next, which is a different match (the toast names it at the time).
+      await act(async () => { utils.container.querySelector('.shiaijo-row__pick').click(); });
+      expect(onEditScore).toHaveBeenCalledTimes(1);
+      expect(refusal()).toBeNull();
+
+      await start();
+      expect(refusal()?.textContent).toBe('kiken-voluntary at Pool A-2');
+
+      // Still applies: a refetch with the same Up next, an unrelated event, and
+      // an eligibility change in ANOTHER competition all leave it.
+      await refresh();
+      await send({ type: 'match_updated', data: { competitionId: 'c1', matchId: 'm9' } });
+      await send({ type: 'competitor_status_updated', data: { competitionId: 'other', status: {} } });
+      expect(refusal()?.textContent).toBe('kiken-voluntary at Pool A-2');
+
+      // The restore in this competition clears it.
+      await send({ type: 'competitor_status_updated', data: { competitionId: 'c1', status: { eligible: true } } });
+      expect(refusal()).toBeNull();
+
+      // Refused again, then m1 starts elsewhere: Up next is now m2, and the
+      // refusal must not sit under it.
+      await start();
+      expect(refusal()).not.toBeNull();
+      current = [{ ...m1, status: 'running' }, m2];
+      await refresh();
+      expect(utils.container.querySelector('.shiaijo-upnext__card').textContent).toContain('Sato');
+      expect(refusal()).toBeNull();
+
+      // Nor does it come back if m1 returns to the top of the queue.
+      current = [m1, m2];
+      await refresh();
+      expect(utils.container.querySelector('.shiaijo-upnext__card').textContent).toContain('Yamada');
+      expect(refusal()).toBeNull();
+    } finally {
+      window.API.fetchCourtMatches = prevFetch;
+      window.API.subscribeToEvents = prevSub;
+    }
+  });
+
+  // A Start refused for a match picked from further down the queue (here its
+  // competitor is fighting on another court) is kept keyed to that match. It
+  // used to come back when that match later reached Up next, although its
+  // cause was gone by then and nothing else clears it: a finished match sends
+  // no competitor_status_updated. Any change of Up next drops it.
+  it('a refused Start for a match further down the queue does not reappear when it becomes Up next', async () => {
+    const side = (id, name) => ({ id, name });
+    const m1 = {
+      id: 'm1', compId: 'c1', compName: 'Cup', status: 'scheduled', phase: 'pool', poolName: 'Pool A',
+      court: 'A', scheduledAt: '09:00', sideA: side('p1', 'Yamada'), sideB: side('p2', 'Tanaka'),
+    };
+    const m2 = {
+      id: 'm2', compId: 'c1', compName: 'Cup', status: 'scheduled', phase: 'pool', poolName: 'Pool A',
+      court: 'A', scheduledAt: '09:05', sideA: side('p3', 'Sato'), sideB: side('p4', 'Kato'),
+    };
+    let current = [m1, m2];
+    window.tournamentMatches = () => current;
+    window.filterMatchesByCourt = (matches) => matches;
+    const prevFetch = window.API.fetchCourtMatches;
+    const prevSub = window.API.subscribeToEvents;
+    window.API.fetchCourtMatches = vi.fn().mockImplementation(() => Promise.resolve([{ id: 'c1', name: 'Cup' }]));
+    window.API.subscribeToEvents = () => () => {};
+    const onEditScore = vi.fn().mockRejectedValue(new Error('Sato is fighting on shiaijo B'));
+    try {
+      let utils;
+      await act(async () => { utils = renderPage(makeMinimalTournament(), 'A', { onEditScore }); });
+      const refusal = () => utils.container.querySelector('.shiaijo-upnext__error');
+      const refresh = async () => { await act(async () => { utils.getByRole('button', { name: /refresh/i }).click(); }); };
+
+      // Picked from the queue below Up next and refused: not shown under Up
+      // next, which is m1.
+      await act(async () => { utils.container.querySelector('.shiaijo-row__pick').click(); });
+      expect(onEditScore).toHaveBeenCalledTimes(1);
+      expect(onEditScore.mock.calls[0][1]).toBe('m2');
+      expect(refusal()).toBeNull();
+
+      // m1 starts, so m2 is now Up next. The old refusal must not come back
+      // with it.
+      current = [{ ...m1, status: 'running' }, m2];
+      await refresh();
+      expect(utils.container.querySelector('.shiaijo-upnext__card').textContent).toContain('Sato');
+      expect(refusal()).toBeNull();
+    } finally {
+      window.API.fetchCourtMatches = prevFetch;
+      window.API.subscribeToEvents = prevSub;
     }
   });
 

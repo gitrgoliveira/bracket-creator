@@ -9,10 +9,11 @@ const Icon = window.Icon;
 import { DAIHYOSEN_POSITION } from './pool_ids.jsx';
 import {
   writeDidNotLand, writeWasSuperseded, SUPERSEDED_REASON, SUPERSEDED_ADVICE,
-  attemptScoreWrite, DOWNSTREAM_KNOCKOUT_PLAYED_CANCELLED,
+  attemptScoreWrite, DOWNSTREAM_KNOCKOUT_PLAYED_CANCELLED, downstreamKnockoutReopenedNotice,
 } from './write_result.jsx';
 import { sameCompetitor } from './competitor_identity.jsx';
 import { sideWord } from './side_cell.jsx';
+import { isWithdrawalDecision } from './api_serializers.jsx';
 
 // Kendo best-of-3 cap. Mirrors the server-side `maxIpponsPerSide` in
 // internal/mobileapp/validation.go: the bout ends when one side reaches
@@ -91,44 +92,66 @@ function IpponLegend({ isNaginata }) {
   );
 }
 
-// ScoringShortcutHint: quiet, always-present reminder of the keyboard
-// shortcuts the modal supports. Rendered below the prev/next nav so the
-// affordance sits where operators look for navigation. Clarity over
-// decoration: plain muted text, no animation. Styled inline (this region of
-// styles.css is owned elsewhere).
+// ScoringShortcutHint: quiet reminder of the keyboard shortcuts the editor
+// supports. Rendered below the prev/next nav so the affordance sits where
+// operators look for navigation. Clarity over decoration: plain muted text, no
+// animation. The container's layout lives in the `.scoring-shortcut-hint`
+// rule in styles.css, NOT inline: an inline display:flex outranked the
+// coarse-pointer `display: none` and showed the hint on the iPad (bc-kbhn).
 // pointKeys: the valid ippon letters ("MKDTH" / "MKDTSH") when this editor
 // supports keyboard scoring — individual matches and kachinuki bouts — else
 // "" (fixed-order team bouts score by tap only). Listed so the shortcut is
-// discoverable instead of hidden in the code; the hint is display:none under
-// a coarse pointer, so this only ever shows to a keyboard/mouse operator.
-function ScoringShortcutHint({ pointKeys = "" }) {
+// discoverable instead of hidden in the code.
+// hasNav / canClose: whether ←/→ and Esc actually do something on this host.
+// A key that does nothing is never listed (the inline court console wires
+// neither), and with nothing to list the hint renders nothing at all.
+function ScoringShortcutHint({ pointKeys = "", hasNav = false, canClose = false }) {
   const kbd = {
     fontFamily: "var(--font-mono)", fontSize: 11, padding: "1px 5px",
     border: "1px solid var(--line)", borderRadius: 4, background: "var(--surface)",
     color: "var(--ink-3)", margin: "0 1px",
   };
   const keys = pointKeys ? [...pointKeys] : [];
+  const groups = [];
+  if (keys.length > 0) {
+    groups.push(
+      <React.Fragment key="pts">
+        {keys.map((k) => <kbd key={k} style={kbd}>{k}</kbd>)}
+        <span>Shiro</span>
+        <span aria-hidden="true">·</span>
+        <kbd style={kbd}>⇧</kbd><span>Aka</span>
+      </React.Fragment>,
+    );
+  }
+  if (hasNav) {
+    groups.push(
+      <React.Fragment key="nav">
+        <kbd style={kbd}>←</kbd><kbd style={kbd}>→</kbd>
+        <span>prev/next</span>
+      </React.Fragment>,
+    );
+  }
+  if (canClose) {
+    groups.push(
+      <React.Fragment key="close">
+        <kbd style={kbd}>Esc</kbd>
+        <span>close</span>
+      </React.Fragment>,
+    );
+  }
+  if (groups.length === 0) return null;
   return (
     <div
       className="scoring-shortcut-hint"
       data-testid="scoring-modal-shortcut-hint"
       aria-hidden="true"
-      style={{ marginTop: 6, fontSize: 12, color: "var(--ink-3)", textAlign: "center", display: "flex", gap: 4, justifyContent: "center", alignItems: "center", flexWrap: "wrap" }}
     >
-      {keys.length > 0 && (
-        <React.Fragment>
-          {keys.map((k) => <kbd key={k} style={kbd}>{k}</kbd>)}
-          <span>Shiro</span>
-          <span aria-hidden="true">·</span>
-          <kbd style={kbd}>⇧</kbd><span>Aka</span>
-          <span aria-hidden="true">·</span>
+      {groups.map((g, i) => (
+        <React.Fragment key={g.key}>
+          {i > 0 && <span aria-hidden="true">·</span>}
+          {g}
         </React.Fragment>
-      )}
-      <kbd style={kbd}>←</kbd><kbd style={kbd}>→</kbd>
-      <span>prev/next</span>
-      <span aria-hidden="true">·</span>
-      <kbd style={kbd}>Esc</kbd>
-      <span>close</span>
+      ))}
     </div>
   );
 }
@@ -645,12 +668,9 @@ function DecisionPrompt({ kind, sideA, sideB, defaultSide, askReason, requireRea
   // wrap the kendo terms so a volunteer hovering/tapping the title
   // gets the full tooltip.
   const isKiken = window.isKikenDecision(kind);
-  const kikenLabel = kind === "kiken-injury" ? "Kiken – Injury" : "Kiken – Voluntary";
-  const title = isKiken
-    ? React.createElement(TermAS, { name: kind }, kikenLabel)
-    : kind === "fusenpai"
-      ? React.createElement(TermAS, { name: kind }, "Fusenpai")
-      : "Decision";
+  const title = isKiken || kind === "fusenpai"
+    ? React.createElement(TermAS, { name: kind }, withdrawalLabel(kind))
+    : "Decision";
 
   const submit = (e) => {
     e?.preventDefault?.();
@@ -1151,6 +1171,390 @@ const CORRECTION_PRESETS = ["Scoring error", "Wrong competitor", "Data entry", "
 // instead of a comment-only obligation that drifts on the next edit.
 const REOPEN_PRESETS = ["Ended by mistake", ...CORRECTION_PRESETS];
 
+// Presets for the reason collected by Clear withdrawal and reopen. The honest
+// first answer for clearing a withdrawal is that it was entered by mistake, so
+// it leads and is the default; the correction vocabulary follows, derived as
+// REOPEN_PRESETS is.
+const WITHDRAWAL_REOPEN_PRESETS = ["Withdrawal recorded by mistake", ...CORRECTION_PRESETS];
+
+// withdrawalLabel: the operator's name for a match-level withdrawal decision,
+// the ONE copy of it: DecisionPrompt's title and the Recorded line in both
+// editors read it. Any kiken that is not the injury kind reads as voluntary,
+// the legacy bare "kiken" included, which the server loads as voluntary too.
+function withdrawalLabel(decision) {
+  if (decision === "fusenpai") return "Fusenpai";
+  return decision === "kiken-injury" ? "Kiken – Injury" : "Kiken – Voluntary";
+}
+
+// withdrawnSideOf: the side a recorded withdrawal names as the one that
+// withdrew (or did not appear), or null when the match cannot say.
+// decisionBy is authoritative (aka = sideA, shiro = sideB, the server's own
+// mapping in RecordDecisionTx). A ruling without it falls back to the side the
+// recorded winner is NOT, attributed by sameCompetitor (id first), never by a
+// bare name comparison.
+function withdrawnSideOf(m) {
+  const key = withdrawnKeyOf(m);
+  if (key === "a") return m.sideA || null;
+  if (key === "b") return m.sideB || null;
+  return null;
+}
+
+// withdrawnKeyOf: the same answer as withdrawnSideOf, as the editors' side key
+// ("a" = Aka/sideA, "b" = Shiro/sideB), or "" when the match cannot say.
+function withdrawnKeyOf(m) {
+  if (m.decisionBy === "aka") return "a";
+  if (m.decisionBy === "shiro") return "b";
+  if (m.winner && m.sideA && sameCompetitor(m.winner, m.sideA)) return "b";
+  if (m.winner && m.sideB && sameCompetitor(m.winner, m.sideB)) return "a";
+  return "";
+}
+
+// withdrawalInForce: the one statement of "a recorded withdrawal is in force
+// on this correction": the match is completed and a withdrawal (any kiken, or
+// fusenpai) decided it. Both editors ask it: it gates RecordedWithdrawal, and
+// the individual editor locks the winner's default-win maru while it holds
+// (Save correction keeps the withdrawal and its maru, engine
+// keptWithdrawalScoreline, so the maru is not the operator's to edit). It stops
+// holding the moment the withdrawal is cleared, because the reopen puts the
+// match back to running.
+function withdrawalInForce(m) {
+  return m.status === "completed" && isWithdrawalDecision(m.decision);
+}
+
+// useMatchReopen: the one client of POST .../reopen and its court-busy remedy
+// POST .../requeue-blocker-and-reopen, for every editor that reopens a match:
+// the kachinuki Reopen (one tap, no reason) and Clear withdrawal and reopen in
+// the individual and team editors (with the reason collected first). It was
+// the kachinuki editor's own state machine; lifting it here is what lets the
+// individual editor offer the same door without a second copy of it.
+//
+// Three outcomes, each of which the returned state carries:
+//   - success: onReopened() runs when given. The kachinuki Reopen passes the
+//     host's onClose; Clear withdrawal and reopen passes nothing, so the
+//     editor STAYS OPEN and follows the match to running in place: the
+//     operator is told to score the rest and finish it, and `notice` (which
+//     names any later match the reopen also reopened) is only readable in an
+//     editor that is still there. busy stays true,
+//     so a double tap cannot post a second reopen the server would 409 as
+//     "not completed"; the effect below clears it once the match is running;
+//   - court_busy: `conflict` names the match holding the court, and
+//     requeueBlocker() is the remedy (it carries the same reason and, once
+//     given, the same downstream confirmation);
+//   - a later knockout match with its own result (downstream_knockout_played):
+//     attemptScoreWrite, the score path's confirm-and-retry loop, asks the
+//     operator with the same dialog a correction gets and retries with the
+//     force flag (operator ruling 2026-09-24: "The operator just needs to be
+//     aware of the consequences"). What that reopened is named in `notice`;
+//     declining leaves everything as it was and says so in `err`.
+// Every other refusal is the server's sentence, shown verbatim in `err`.
+function useMatchReopen({ match, password, isComplete, onReopened }) {
+  const mountedRef = useRefA(true);
+  useEffectA(() => () => { mountedRef.current = false; }, []);
+  const [busy, setBusy] = useStateA(false);
+  const [err, setErr] = useStateA("");
+  // { court, matchId, compId, message, reason, force }: the match ALREADY
+  // running on this court, plus what the refused reopen carried.
+  const [conflict, setConflict] = useStateA(null);
+  // Best-effort "Match 2 · Shiro vs Aka" for the blocking match. The operator
+  // is about to wipe that match's score, so naming its competitors (not just
+  // the server's opaque id) is a safety property, not decoration.
+  const [blockerLabel, setBlockerLabel] = useStateA("");
+  const [notice, setNotice] = useStateA("");
+  // Set once the operator has confirmed the downstream reopen, so the
+  // court-busy remedy that may follow does not ask them a second time.
+  const confirmedRef = useRefA(false);
+
+  // Once the match reopens (status flips to running), a stale error or
+  // conflict describes a completed-state action that no longer applies.
+  useEffectA(() => {
+    if (!isComplete) { setErr(""); setConflict(null); setBusy(false); }
+  }, [isComplete]);
+
+  const applyFailure = (e, reason) => {
+    if (e && e.downstreamKnockoutPlayedCancelled) {
+      setConflict(null);
+      setErr(DOWNSTREAM_KNOCKOUT_PLAYED_CANCELLED);
+      return;
+    }
+    const msg = String(e?.message || "Failed to reopen match");
+    if (e?.code === "court_busy" && e?.matchId) {
+      setErr("");
+      setConflict({
+        court: e.court || match.court || "",
+        matchId: e.matchId,
+        compId: e.compId || match.compId,
+        message: msg,
+        reason,
+        force: confirmedRef.current,
+      });
+      return;
+    }
+    setConflict(null);
+    setErr(msg);
+  };
+
+  const run = (call, reason, force) => attemptScoreWrite({
+    recordScore: (_compId, _matchId, result, pw) => call(pw, { reason, force: !!result.forceDownstreamReopen }),
+    confirmDialog: async (opts) => {
+      const ok = await window.confirmDialog(opts);
+      if (ok) confirmedRef.current = true;
+      return ok;
+    },
+    compId: match.compId,
+    matchId: match.id,
+    result: force ? { forceDownstreamReopen: true } : {},
+    password: resolveDecisionPassword(password),
+    match,
+  });
+
+  const finish = (res) => {
+    const reopened = downstreamKnockoutReopenedNotice(res && res.downstreamReopened);
+    if (reopened) setNotice(reopened);
+    if (onReopened) onReopened();
+  };
+
+  const reopen = async (reason = "") => {
+    if (busy) return;
+    setErr("");
+    setConflict(null);
+    setNotice("");
+    confirmedRef.current = false;
+    setBusy(true);
+    try {
+      const res = await run((pw, opts) => window.API.reopenMatch(match.compId, match.id, pw, opts), reason, false);
+      if (!mountedRef.current) return;
+      finish(res);
+    } catch (e) {
+      if (!mountedRef.current) return;
+      applyFailure(e, reason);
+      setBusy(false);
+    }
+  };
+
+  // The remedy: send the blocking match back to the queue and reopen this one,
+  // in ONE server call under one court lock (mp-gmcg review A4). DESTRUCTIVE:
+  // revert-to-queue clears that match's partial score, which is why the panel
+  // spells the consequence out before this can be tapped.
+  const requeueBlocker = async () => {
+    const c = conflict;
+    if (!c || busy) return;
+    setErr("");
+    setBusy(true);
+    try {
+      const res = await run(
+        (pw, opts) => window.API.requeueBlockerAndReopen(match.compId, match.id, c.compId, c.matchId, pw, opts),
+        c.reason, c.force,
+      );
+      if (!mountedRef.current) return;
+      setConflict(null);
+      finish(res);
+    } catch (e) {
+      if (!mountedRef.current) return;
+      // One atomic call, so one failure path: a DIFFERENT match that has since
+      // taken the court is offered the remedy again; anything else is shown.
+      applyFailure(e, c.reason);
+    } finally {
+      if (mountedRef.current) setBusy(false);
+    }
+  };
+
+  useEffectA(() => {
+    setBlockerLabel("");
+    if (!conflict?.matchId || !conflict?.compId) return;
+    if (typeof window.compMatchesForCompetition !== "function" || typeof window.API?.fetchCompetitionDetails !== "function") return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const detail = await window.API.fetchCompetitionDetails(conflict.compId);
+        if (cancelled || !mountedRef.current) return;
+        // compMatchesForCompetition (viewer_utils.jsx) owns the recombination
+        // of the details payload's config with its matches (mp-dej2).
+        const hit = (window.compMatchesForCompetition(detail.config || detail, detail) || []).find(x => x.id === conflict.matchId);
+        if (!hit) return;
+        const shiro = hit.sideB?.name || hit.sideB || "";
+        const aka = hit.sideA?.name || hit.sideA || "";
+        // Match number first: it is how the console labels every other match.
+        const label = [
+          hit.matchNumber ? `Match ${hit.matchNumber}` : "",
+          shiro && aka ? `${shiro} vs ${aka}` : "",
+        ].filter(Boolean).join(" · ");
+        if (label) setBlockerLabel(label);
+      } catch { /* best effort: the panel falls back to the match id */ }
+    })();
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [conflict?.compId, conflict?.matchId]);
+
+  return { busy, err, conflict, blockerLabel, notice, reopen, requeueBlocker, dismissConflict: () => setConflict(null) };
+}
+
+// ReopenFeedback: what a reopen made through useMatchReopen came back with,
+// rendered ONCE per editor, outside the control that started the reopen
+// (testIdPrefix names the door). It must outlive that control: Clear
+// withdrawal and reopen (RecordedWithdrawal) unmounts the moment the match is
+// running again, which is exactly when its `notice` has something to say, so
+// a copy inside it could never be seen. The court-busy panel's
+// warning is NOT optional chrome: the remedy WIPES the blocking match's partial
+// score, and the operator tapping it is looking at their own match, not that
+// one, so the consequence is stated in full above the button.
+function ReopenFeedback({ ctl, testIdPrefix }) {
+  const c = ctl.conflict;
+  return (
+    <>
+      {ctl.notice && (
+        <div role="status" data-testid={`${testIdPrefix}-notice`} style={{ fontSize: 12, color: "var(--ink-2)", marginBottom: 6 }}>{ctl.notice}</div>
+      )}
+      {ctl.err && (
+        <div data-testid={`${testIdPrefix}-error`} style={{ color: "var(--danger)", fontSize: 12, marginBottom: 6 }}>{ctl.err}</div>
+      )}
+      {c && (
+        <div className="alert alert--error reopen-conflict" data-testid={`${testIdPrefix}-conflict`}>
+          <div className="reopen-conflict__head">
+            Shiaijo {c.court || "?"} is running {ctl.blockerLabel || c.matchId}.
+          </div>
+          <div className="reopen-conflict__warn" data-testid={`${testIdPrefix}-conflict-warning`}>
+            Sending it back to the queue clears any score already entered for it. Finishing that
+            match instead keeps its score.
+          </div>
+          <div className="reopen-conflict__msg">{c.message}</div>
+          <div className="reopen-conflict__actions">
+            <button
+              type="button"
+              className="btn btn--sm btn--danger"
+              data-testid={`${testIdPrefix}-requeue-button`}
+              onClick={ctl.requeueBlocker}
+              disabled={ctl.busy}
+              title="Clears that match's score, returns it to the queue, then reopens this one"
+            >
+              {ctl.busy ? "Working…" : "Clear its score, queue it, and reopen"}
+            </button>
+            <button
+              type="button"
+              className="btn btn--sm btn--ghost"
+              data-testid={`${testIdPrefix}-conflict-dismiss`}
+              onClick={ctl.dismissConflict}
+              disabled={ctl.busy}
+            >
+              Leave it running
+            </button>
+          </div>
+        </div>
+      )}
+    </>
+  );
+}
+
+// RecordedWithdrawal: what a correction of a withdrawal-decided match shows
+// about the withdrawal, and the one way to remove it, identical in the
+// individual and team editors (operator ruling 2026-09-24: "Everything should
+// be able to be fixed, in case of a wrong entry").
+//
+// Clearing a withdrawal is a REOPEN, not a score write: a withdrawal means the
+// opponent received the default score, so without it the match was never
+// decided. The match goes back to running with what was fought kept and the
+// withdrawn side eligible again, and the operator scores the rest and
+// finishes it normally (engine.ReopenMatch). The reason is asked for BEFORE
+// the reopen posts and rides it, with the consequence spelled out above it
+// (operator ruling 2026-09-24: the operator "just needs to be aware of the
+// consequences"). On a single bout (singleBout: the individual editor, which
+// also scores a team's -DH-/-TB- rep bout) the consequence names the one
+// thing the reopen cannot keep, the winner's points, which the recorded
+// withdrawal had already replaced with the default win.
+//
+// A kachinuki encounter a withdrawal decided renders this too, in place of
+// its plain one-tap Reopen, so a withdrawal has one control and one
+// consequence text in every editor; the plain Reopen stays for every other
+// kachinuki result. Switching the withdrawal to the other side stays with the
+// editor's own withdrawal controls. What the reopen came back with (the
+// notice, an error, the court-busy remedy) is rendered by the editor through
+// ReopenFeedback, never here: this unmounts as soon as the match is running.
+//
+// A POOL match of a pools-then-knockout competition adds one line: finishing
+// the reopened match may change who qualifies from its pool, and the save
+// that finishes it shows which knockout matches that affects before anything
+// is saved (the server's qualifierChange refusal, confirmed through
+// attemptScoreWrite like any other).
+function RecordedWithdrawal({ match, ctl, disabled = false, singleBout = false }) {
+  const [asking, setAsking] = useStateA(false);
+  const withdrawnKey = withdrawnKeyOf(match);
+  const withdrawn = withdrawnSideOf(match);
+  const who = withdrawn?.name || "";
+  const winner = withdrawnKey === "a" ? match.sideB : withdrawnKey === "b" ? match.sideA : null;
+  const winnerName = winner?.name || "";
+  const what = match.decision === "fusenpai" ? "did not appear" : "withdrew";
+  const feedsKnockout = match.phase === "pool" && match.compFormat === "mixed";
+  return (
+    <div className="decision-recorded" data-testid="recorded-withdrawal" style={{ marginTop: 10, fontSize: 13 }}>
+      <div>
+        <span>Recorded: {withdrawalLabel(match.decision)}{who ? `, ${who} ${what}` : ""}.</span>
+        {!asking && (
+          <>
+            {" "}
+            <button
+              type="button"
+              className="btn btn--sm"
+              data-testid="clear-withdrawal-reopen"
+              onClick={() => setAsking(true)}
+              disabled={disabled || ctl.busy}
+            >
+              {ctl.busy ? "Reopening…" : "Clear withdrawal and reopen"}
+            </button>
+          </>
+        )}
+      </div>
+      {asking && (
+        <>
+          {singleBout && match.decision === "fusenpai" ? (
+            // A no-show fought nothing, so there are no points to keep or
+            // lose: the reopen only removes the default win.
+            <p data-testid="clear-withdrawal-consequence" style={{ margin: "6px 0 0" }}>
+              This reopens the match: it goes back to running, the default win given
+              to {winnerName || "the other side"} is removed, and {who || "the side marked absent"} can
+              compete again. Then score the match and finish it.
+            </p>
+          ) : singleBout ? (
+            // A single bout (an individual match, or a team -DH-/-TB- rep
+            // bout) loses the WINNER's points on a reopen: recording the
+            // kiken replaced them with the default win (recordDecisionTx)
+            // and the reopen drops that verdict, so only what the withdrawing
+            // side struck is still there to keep (engine singleBoutFightOf).
+            <p data-testid="clear-withdrawal-consequence" style={{ margin: "6px 0 0" }}>
+              This reopens the match: it goes back to running and {who || "the withdrawn side"} can
+              compete again. {winnerName || "The winner"}&apos;s points were replaced by the default
+              win when the withdrawal was recorded, so enter them again; {who ? `${who}'s` : "the withdrawn side's"} points
+              are kept. Then score the rest and finish it.
+            </p>
+          ) : (
+            <p data-testid="clear-withdrawal-consequence" style={{ margin: "6px 0 0" }}>
+              This reopens the match: it goes back to running with what was fought kept,{" "}
+              {who || "the withdrawn side"} can compete again, and you score the rest and finish it.
+            </p>
+          )}
+          {feedsKnockout && (
+            // A pool match of a pools-then-knockout competition feeds the
+            // knockout through its standings, so the result it is finished
+            // with may seat someone else there. The reopen itself moves
+            // nobody; the finishing save is what is checked, and it names
+            // any knockout match already fought before anything is saved.
+            <p data-testid="clear-withdrawal-qualifier-note" style={{ margin: "6px 0 0" }}>
+              Finishing it may change who qualifies from {match.poolName || "its pool"}. If that moves
+              someone who has already fought in the knockout, you will be shown which knockout
+              matches it affects before anything is saved.
+            </p>
+          )}
+          <ReasonPrompt
+            label="Why is this withdrawal being cleared?"
+            presets={WITHDRAWAL_REOPEN_PRESETS}
+            submitting={ctl.busy}
+            onConfirm={(r) => { setAsking(false); ctl.reopen(r); }}
+            onCancel={() => setAsking(false)}
+          />
+        </>
+      )}
+    </div>
+  );
+}
+
 // A match has ONE result and every surface asking for it shows the same one,
 // and the score editors are such surfaces: while one is open, the viewer card,
 // the bracket, the TV board, the lobby and the export are all already showing
@@ -1276,4 +1680,12 @@ export {
   ReasonPrompt,
   CORRECTION_PRESETS,
   REOPEN_PRESETS,
+  WITHDRAWAL_REOPEN_PRESETS,
+  withdrawalLabel,
+  withdrawnSideOf,
+  withdrawnKeyOf,
+  withdrawalInForce,
+  useMatchReopen,
+  ReopenFeedback,
+  RecordedWithdrawal,
 };

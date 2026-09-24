@@ -47,7 +47,9 @@ type DecisionRequest struct {
 	// guard (engine.DownstreamKnockoutPlayedError, HTTP 409
 	// downstream_knockout_played): a decision that changes an already-
 	// propagated bracket winner while a downstream match carries a result of
-	// its own is refused by default. Same field name and contract as every
+	// its own is refused by default, as is a decision on a mixed
+	// competition's POOL match that moves a qualifier the knockout already
+	// played. Same field name and contract as every
 	// other knockout-correction write (see scoreRequestBody.ForceDownstreamReopen
 	// in handlers_match.go); a SEPARATE field from Force above, which answers
 	// a different question (T103's decision-lock override): this maps to
@@ -174,7 +176,7 @@ func RegisterDecisionHandlers(r *gin.RouterGroup, eng ScoringEngine, store Compe
 		req.ModifiedAt = clampClientModifiedAt(req.ModifiedAt)
 		reason := strings.TrimSpace(req.DecisionReason)
 		txErr := tx.WithTransaction(id, func(stx state.StoreTx) error {
-			// mp-gmcg: a reason-less kachinuki reopen DEFERS its audit
+			// mp-gmcg: a reason-less reopen DEFERS its audit
 			// justification to whatever finalizes the match next. PUT /score
 			// collects it (applyCorrectionReasonUnderTx); this endpoint is the
 			// OTHER way to finalize a match, so it has to collect it too — a
@@ -188,20 +190,14 @@ func RegisterDecisionHandlers(r *gin.RouterGroup, eng ScoringEngine, store Compe
 			// finalize on an assumed-false ReopenPending and silently discard the
 			// mandatory reopen audit reason.
 			//
-			// The read is KACHINUKI-ONLY: ReopenPending is set exclusively by
-			// ReopenKachinukiMatch (which rejects non-kachinuki), so a
-			// non-kachinuki match can never carry it. Skip the whole (2-file)
-			// snapshot read for the common non-kachinuki decision — comp is
-			// already loaded above, so the gate itself costs no read (mp-gmcg
-			// review E3). snap stays zero-valued (ReopenPending false), so the
-			// checks below are correctly no-ops.
-			var snap matchSnapshot
-			if comp.IsKachinuki() {
-				var snapErr error
-				snap, _, snapErr = matchSnapshotOrErr(stx, id, mid, "reopen-pending")
-				if snapErr != nil {
-					return snapErr
-				}
+			// The read is NOT kachinuki-only any more: ReopenPending is set by
+			// engine.ReopenMatch, which since bc-tmfn also reopens a match of
+			// any format that a withdrawal decided (the kachinuki-only skip of
+			// mp-gmcg review E3 would now let a decision finalize such a match
+			// without the reason, and leave the flag set on a completed match).
+			snap, _, snapErr := matchSnapshotOrErr(stx, id, mid, "reopen-pending")
+			if snapErr != nil {
+				return snapErr
 			}
 			if snap.ReopenPending && reason == "" {
 				reasonErr = &ValidationError{Field: "decisionReason", Message: ReopenNeedsReasonMessage}
@@ -293,6 +289,11 @@ func RegisterDecisionHandlers(r *gin.RouterGroup, eng ScoringEngine, store Compe
 					"error":  "decision_locked",
 					"reason": engErr.Error(),
 				})
+			case respondIfDownstreamKnockoutRunning(c, engErr):
+				// A decision on a mixed competition's POOL match that would
+				// move a qualifier out of a knockout match being fought now:
+				// terminal, not confirmable (see
+				// respondIfDownstreamKnockoutRunning's doc comment).
 			case respondIfDownstreamKnockoutPlayed(c, engErr):
 				// bc-kcdg: this decision would change an already-propagated
 				// bracket winner while a downstream match carries a result of
@@ -300,24 +301,17 @@ func RegisterDecisionHandlers(r *gin.RouterGroup, eng ScoringEngine, store Compe
 				// knockout-correction write (see
 				// respondIfDownstreamKnockoutPlayed's doc comment);
 				// respondIfDownstreamKnockoutPlayed already wrote the response.
-				// Retry with forceDownstreamReopen:true once confirmed.
-			case respondIfDownstreamKnockoutScored(c, engErr):
-				// mp-e2k1: this decision writes a pool match (e.g. kiken/
-				// fusenpai on a Mixed competition's pool phase) via
-				// RecordDecisionTx -> RecordMatchResultWithIneligibilityTx, which
-				// would displace a qualifying finisher already scored into a
-				// downstream bracket match. Same fixed wire contract as
-				// /score's mapping (see respondIfDownstreamKnockoutScored's
-				// doc comment); before this, /decision fell through to
-				// respondIfEngineWriteError/internalError, a generic 500 the
-				// offline write queue retries forever for a write that can
-				// never win.
+				// Retry with forceDownstreamReopen:true once confirmed. A
+				// decision on a mixed competition's POOL match reaches this too
+				// when it moves a qualifier the knockout already played
+				// (qualifierChange names who moves).
 			case errors.As(engErr, &engNotFoundErr):
 				c.JSON(http.StatusNotFound, gin.H{"error": engNotFoundErr.Error()})
 			default:
 				// engine.ValidationError → 400 and a corrupt overrides.json → 422
 				// (computeStandingsFrom, reached via RecordDecisionTx ->
-				// RecordMatchResultWithIneligibilityTx's mp-e2k1 mixed-pool guard)
+				// RecordMatchResultWithIneligibilityTx's pool requalification
+				// check)
 				// both fall through respondIfEngineWriteError.
 				if respondIfEngineWriteError(c, engErr) {
 					return
@@ -336,16 +330,17 @@ func RegisterDecisionHandlers(r *gin.RouterGroup, eng ScoringEngine, store Compe
 		// just corrected; broadcast it too so a client watching only that
 		// court/match learns its verdict was cleared (mirrors /score,
 		// /override-winner, and /quick-score).
-		for _, reopened := range reopenedDownstream {
-			hub.Broadcast(EventMatchUpdated, gin.H{"competitionId": id, "matchId": reopened.ID})
-		}
+		broadcastReopenedDownstream(hub, id, reopenedDownstream)
 		if status != nil {
 			hub.Broadcast(EventCompetitorStatusUpdated, gin.H{
 				"competitionId": id,
 				"status":        status,
 			})
 		}
-		tryAutoCompletePools(c, eng, hub, id)
+		// A decision always closes the match it rules on, so what the
+		// after-write check needs (which match, left completed) is known
+		// without reading the returned result.
+		tryAutoCompletePoolsAfterWrite(c, eng, hub, id, state.MatchResult{ID: mid, Status: state.MatchStatusCompleted})
 
 		c.JSON(http.StatusOK, result)
 	})

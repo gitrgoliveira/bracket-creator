@@ -14,6 +14,11 @@ import { nameOf } from './result_slot.jsx';
 // like every other identity-keyed surface.
 import { checkinPid } from './data.jsx';
 import { NO_ID_POOL_HINT, NoIdHint } from './data_integrity.jsx';
+// A recorded rank can move who holds a qualifying place after the knockout
+// has started, and the server refuses it like a pool result correction
+// (downstream_knockout_played): the chusen writes go through the same
+// confirm-and-retry every score write uses.
+import { attemptScoreWrite, DOWNSTREAM_KNOCKOUT_RANKING_CANCELLED } from './write_result.jsx';
 
 const { useState: useStateA, useEffect: useEffectA, useRef: useRefA, useMemo: useMemoA } = React;
 const EmptyState = window.EmptyState;
@@ -180,8 +185,12 @@ function AdminPools({ c, pools, poolMatches, standings, tweaks, onEditScore, pas
 
   // Chusen (drawing lots) candidate state: team-pool ties the daihyosen
   // could not settle (a cycle / all-drawn). Only fetched for team comps in
-  // the "pools" phase (non-league too: mixed pool stage can have DH cycles).
+  // the "pools" phase (non-league too: mixed pool stage can have DH cycles),
+  // and for a mixed comp in its "knockout" phase as well: a pool correction
+  // made then can leave a tie only a chusen settles, and a wrong chusen must
+  // stay fixable. The server's AcceptsPoolRankOverride is the same rule.
   const isTeamComp = c && (c.kind === "team" || c.teamSize > 0);
+  const chusenOpen = !!c && (c.status === "pools" || (c.format === "mixed" && c.status === "knockout"));
   const [chusenCandidates, setChusenCandidates] = useStateA(null);
   // Per-member input values: keys are "${groupKey}::${identity}" -> string,
   // where groupKey is "${poolName}::${minPosition}" and identity is
@@ -215,7 +224,7 @@ function AdminPools({ c, pools, poolMatches, standings, tweaks, onEditScore, pas
   );
 
   useEffectA(() => {
-    if (!isTeamComp || !c || c.status !== "pools" || !window.API || typeof window.API.chusenCandidates !== "function") {
+    if (!isTeamComp || !chusenOpen || !window.API || typeof window.API.chusenCandidates !== "function") {
       setChusenCandidates(null);
       return;
     }
@@ -224,7 +233,7 @@ function AdminPools({ c, pools, poolMatches, standings, tweaks, onEditScore, pas
       .then(list => { if (!cancelled) setChusenCandidates(list); })
       .catch(() => { if (!cancelled) setChusenCandidates(null); });
     return () => { cancelled = true; };
-  }, [c && c.id, c && c.status, isTeamComp, poolMatchesSig, standingsSig, password]);
+  }, [c && c.id, c && c.status, chusenOpen, isTeamComp, poolMatchesSig, standingsSig, password]);
 
   // Fetch candidates whenever poolMatches changes (triggered by match_updated
   // SSE events, which the Go handler now broadcasts for AwaitingLeagueTiebreak).
@@ -315,8 +324,9 @@ function AdminPools({ c, pools, poolMatches, standings, tweaks, onEditScore, pas
     });
   };
 
-  // Chusen banner: shown when chusenCandidates is non-empty (team comp in
-  // pools stage, at least one DH cycle left unresolved).
+  // Chusen banner: shown when chusenCandidates is non-empty (team comp whose
+  // pool order is still open, chusenOpen above; at least one DH cycle left
+  // unresolved).
   const chusenBanner = chusenCandidates && chusenCandidates.length > 0 ? (
     <div
       className="alert alert--warn league-tiebreak"
@@ -406,7 +416,19 @@ function AdminPools({ c, pools, poolMatches, standings, tweaks, onEditScore, pas
           try {
             for (let i = 0; i < members.length; i++) {
               const member = members[i];
-              await window.API.overridePoolRank(c.id, poolName, member.name, effRank(member, i), password, member.id);
+              // A rank that moves a qualifier out of a knockout match the old
+              // one already fought is refused with the names of who moves;
+              // attemptScoreWrite asks the operator and, confirmed, resends it
+              // with forceDownstreamReopen, which reopens that match. The
+              // confirmation is only passed when set, so an ordinary record
+              // keeps its six-argument call.
+              await attemptScoreWrite({
+                recordScore: (cId, pool, body, pwd) => (body.forceDownstreamReopen
+                  ? window.API.overridePoolRank(cId, pool, member.name, body.rank, pwd, member.id, true)
+                  : window.API.overridePoolRank(cId, pool, member.name, body.rank, pwd, member.id)),
+                confirmDialog: window.confirmDialog,
+                compId: c.id, matchId: poolName, result: { rank: effRank(member, i) }, password,
+              });
             }
             // Optimistically hide THIS group only (a pool can hold several) - the
             // effect re-fetches on the next update to reconcile.
@@ -420,7 +442,10 @@ function AdminPools({ c, pools, poolMatches, standings, tweaks, onEditScore, pas
               return next;
             });
           } catch (e) {
-            setChusenGroupErr(prev => ({ ...prev, [groupKey]: e.message || "Failed to record chusen result" }));
+            const msg = e && e.downstreamKnockoutPlayedCancelled
+              ? DOWNSTREAM_KNOCKOUT_RANKING_CANCELLED
+              : (e.message || "Failed to record chusen result");
+            setChusenGroupErr(prev => ({ ...prev, [groupKey]: msg }));
             // The per-member overridePoolRank writes are sequential, so a mid-loop
             // failure may have persisted some ranks but not others. overridePoolRank
             // is idempotent per member (retrying re-sends every rank), and the group

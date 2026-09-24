@@ -2313,7 +2313,7 @@ a:hover {
   color: var(--ink-2);
 }
 
-.ipt-btn:hover {
+.ipt-btn:hover:not(:disabled) {
   border-color: var(--ink-4);
 }
 
@@ -5198,7 +5198,21 @@ button.vsched-item:not([data-clickable]) {
 }
 
 /* Keyboard-shortcut reminder (←/→ · Esc): meaningless on touch devices, so
-   it hides under coarse pointers (critique minor). */
+   it hides under coarse pointers (critique minor). The layout lives here and
+   NOT in an inline style: an inline display:flex beat the media query below
+   and showed the hint on the iPad (bc-kbhn). Keep this base rule BEFORE the
+   coarse-pointer one so the latter wins on equal specificity. */
+.scoring-shortcut-hint {
+  display: flex;
+  gap: 4px;
+  justify-content: center;
+  align-items: center;
+  flex-wrap: wrap;
+  margin-top: 6px;
+  font-size: 12px;
+  color: var(--ink-3);
+  text-align: center;
+}
 @media (pointer: coarse) {
   .scoring-shortcut-hint { display: none; }
 }
@@ -5428,6 +5442,22 @@ button.vsched-item:not([data-clickable]) {
   background: var(--accent);
   border-color: var(--accent);
   color: var(--accent-fg);
+}
+
+/* A mark or a letter the operator cannot change right now -- the bout is
+   already decided, a hantei stands, or it is the winner's default-win maru
+   while a recorded withdrawal is in force -- takes the disabled look every
+   other disabled control on this board already has (.btn:disabled,
+   .sb-draw-toggle:disabled). Without it the winner's read-only side looked
+   exactly like the withdrawer's side the operator was correcting, pointer
+   cursor and all (UAT, bc-tmfn). Opacity only: the fills and the side tint
+   keep their colours, so Shiro and Aka are still told apart by tint and
+   hatch, and the maru stays readable. The two hover rules skip a disabled
+   button, so it does not react to the pointer either. */
+.ipt-btn:disabled,
+.sb-slot:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
 }
 
 .sb-vs {
@@ -7287,7 +7317,7 @@ abbr.msb-lab { text-decoration: none; cursor: help; }
   border-color: rgba(220, 38, 38, 0.3);
   font-weight: 800;
 }
-.ipt-btn--h:hover { background: rgba(220, 38, 38, 0.12); }
+.ipt-btn--h:hover:not(:disabled) { background: rgba(220, 38, 38, 0.12); }
 
 /* Touch: the "Send back to queue" control and the kiken/fusenpai disclosure
    toggles were the only operator controls that fell below the 44px touch target

@@ -30,6 +30,10 @@ import {
   CORRECTION_PRESETS,
   REOPEN_PRESETS,
   useAdoptFromServer,
+  useMatchReopen,
+  ReopenFeedback,
+  RecordedWithdrawal,
+  withdrawalInForce,
 } from './admin_scoring_shared.jsx';
 
 import { useDebouncedRunningWrite, SyncStatusPill } from './admin_scoring_autosave.jsx';
@@ -46,6 +50,12 @@ import { notLandedBanner } from './write_result.jsx';
 import { boutMiddle, winnerSideLR } from './bracket.jsx';
 import { realIppons, hanteiTied, hanteiSlot, hanteiWinnerKey, nameOf, sideSlotOrder, attributeWinnerSide, subBoutAttribution } from './result_slot.jsx';
 import { NumberedName } from './numbered_name.jsx';
+
+// bc-kbrw: how long after a fought kachinuki bout opens a further pointer tap
+// on the bout list is ignored, so the second tap of a double tap cannot land
+// on the row that moved under the finger. Longer than a double tap's gap,
+// shorter than a deliberate second tap. Exported for the render test.
+export const DONE_BOUT_OPEN_TAP_GUARD_MS = 400;
 
 // renderTeamBoutMiddle: the ONE place the editor turns a sub-bout into its
 // centre value, for BOTH the read-only done row and the live entry row. Derives
@@ -121,7 +131,7 @@ export function preserveStoredDaihyosenVerdict({ armed, pickedSide, tied, existi
 // StreamingOverlay). The implementations live in lineup_resolver.jsx;
 // re-exported here so existing imports from admin_scoring_modal.jsx (which
 // re-exports them onward) continue to work.
-import { resolveMatchLineup, resolveLineupTeamId, resolveBoutSideName, resolveBoutSideMemberId, resolveSquadMember, squadMemberIdForUniqueName, squadRosterEntries, rosterWithoutPlacedElsewhere, resolveBoutSideDisplayName, buildInlineLineupWrite, POS_KEYS_5, POS_LABELS_5 } from './lineup_resolver.jsx';
+import { resolveMatchLineup, resolveLineupTeamId, resolveBoutSideName, resolveBoutSideMemberId, resolveSquadMember, squadMemberIdForUniqueName, squadRosterEntries, rosterWithoutPlacedElsewhere, resolveBoutSideDisplayName, buildInlineLineupWrite, pickFromLineup, pickMemberIdFromLineup, POS_KEYS_5, POS_LABELS_5 } from './lineup_resolver.jsx';
 import { DAIHYOSEN_POSITION } from './pool_ids.jsx';
 // The shared owner of what an operator is told about unreadable data; the
 // editor gets the repair-oriented wording, the pool surfaces get theirs.
@@ -217,6 +227,45 @@ export function isKoTieBlocked({ isKnockoutPhase, teamWinner, isComplete }) {
   return !!isKnockoutPhase && teamWinner === null && !isComplete;
 }
 
+// unfinishedTeamBouts: the numbered bouts (1..teamSize, in order) of a team
+// match that have no result, which Finish refuses while any remain: every
+// bout of a team match is fought (operator ruling 2026-09-24). "Has a result"
+// is subBoutHasBeenPlayed, the one played-bout predicate, and state.
+// SubMatchResult.HasResult is its Go twin on the server gate. Rows are found
+// by their `_pos`, never by index. The daihyosen row is never numbered, so it
+// is never returned.
+//
+// A position that the lineups in force leave vacant on BOTH sides has no bout
+// and is skipped. A side whose lineup is unknown (null: none saved, or not
+// loaded yet) counts as occupied at every position, and a vacancy on one side
+// only is not skipped: the present fighter takes a fusensho. Mirrors
+// engine.TeamBoutsWithNoFighter. Callers skip kachinuki, which ends on End
+// match instead.
+export function unfinishedTeamBouts({ subs, teamSize, lineupA, lineupB }) {
+  const vacant = (lineup, idx) =>
+    !!lineup && !pickFromLineup(lineup, idx, teamSize) && !pickMemberIdFromLineup(lineup, idx, teamSize);
+  const out = [];
+  for (let bout = 1; bout <= teamSize; bout++) {
+    const idx = bout - 1;
+    if (vacant(lineupA, idx) && vacant(lineupB, idx)) continue;
+    const row = (subs || []).find(s => s && s._pos === bout);
+    if (!subBoutHasBeenPlayed(row)) out.push(bout);
+  }
+  return out;
+}
+
+// unfinishedTeamBoutsMessage: the refusal copy, word for word the server's
+// (unfinishedTeamBoutsMessage in internal/mobileapp/team_finish_gate.go; both
+// are pinned to internal/mobileapp/testdata/unfinished_team_bouts.json). It
+// names the bouts and what to record, and never mentions the lineup: a vacancy
+// is legitimate play, not something to complete.
+export function unfinishedTeamBoutsMessage(teamSize, bouts) {
+  const labels = (bouts || []).map(b => `Bout ${b}${teamSize === 5 && b >= 1 && b <= 5 ? ` (${POS_LABELS_5[b - 1]})` : ""}`);
+  if (labels.length === 0) return "";
+  const list = labels.length === 1 ? labels[0] : `${labels.slice(0, -1).join(", ")} and ${labels[labels.length - 1]}`;
+  return `${list} ${labels.length === 1 ? "has" : "have"} no result. Record a score, a Tie, or a Fusensho before finishing.`;
+}
+
 // isKachinukiBoutMode: while a kachinuki encounter is being fought (not a
 // correction, no legacy daihyosen row) the modal's primary actions are
 // [Record bout] (a running write flagged kachinukiBoutFinal that the server
@@ -241,9 +290,17 @@ export function isKachinukiBoutMode({ isKachinuki, isComplete, hasDaihyosen }) {
 // winner/decision cleared, bout log kept, more bouts addable). The backend
 // endpoint 400s non-kachinuki competitions, whose only sanctioned edit of a
 // finished result remains the correction path, so the button must not
-// render for them at all.
-export function canReopenKachinukiMatch({ isKachinuki, isComplete }) {
-  return !!isKachinuki && !!isComplete;
+// render for them at all. Nor does it render on an encounter a withdrawal
+// decided (recordedWithdrawal, admin_scoring_shared.jsx withdrawalInForce):
+// that reopen also makes the withdrawn team eligible again, so it goes
+// through RecordedWithdrawal, which states that consequence and asks why
+// first, rather than one silent tap. The argument is required: a caller that
+// forgets it must not quietly bring the silent path back.
+export function canReopenKachinukiMatch({ isKachinuki, isComplete, recordedWithdrawal }) {
+  if (typeof recordedWithdrawal !== "boolean") {
+    throw new TypeError("canReopenKachinukiMatch: recordedWithdrawal is required");
+  }
+  return !!isKachinuki && !!isComplete && !recordedWithdrawal;
 }
 
 // isKachinukiBoutRemovable: whether the [× Remove this bout] undo renders for
@@ -630,8 +687,10 @@ export function fusenshoSideFromSub(sub) {
 // positions, but kachinuki appends bouts dynamically, so emitting unplayed
 // positions as 0–0 hikiwake would corrupt advancement (AdvanceKachinuki keys
 // off the LAST SubResult having an outcome) and inflate individual-draw
-// standings. Fixed-position matches keep all positions: a 0–0 there is a
-// legitimate hikiwake.
+// standings. Team matches keep all positions on the wire, but every bout
+// is fought (operator ruling 2026-09-24): an unplayed row goes out with
+// decision "" rather than as a hikiwake, and Finish refuses while one
+// remains (unfinishedTeamBouts, which asks this predicate per bout).
 //
 // This is THE single played-bout primitive for kachinuki (operator input
 // determines the bout outcome): the wire filter, the Record-bout gate,
@@ -815,16 +874,10 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
   // true by construction rather than by a pair of flags that must be kept
   // from overlapping.
   const [reasonPromptKind, setReasonPromptKind] = useStateA("");
-  // mp-gmcg: [Reopen match] on a completed kachinuki match. Reopening is ONE
-  // TAP (operator ruling): the operator who ended a match by mistake is at the
-  // shiaijo with the competitors still standing there, so nothing may stand
-  // between them and getting back into the encounter. The justification is
-  // collected on the way OUT instead (see reopenReasonRequired below).
-  // 409s from the server ("not completed" / "downstream match already
-  // fought") surface inline; the court-busy 409 gets an actionable remedy
-  // panel instead of a dead end (reopenConflict).
-  const [reopenBusy, setReopenBusy] = useStateA(false);
-  const [reopenErr, setReopenErr] = useStateA("");
+  // mp-gmcg: [Reopen match] on a completed kachinuki match, and (bc-tmfn)
+  // Clear withdrawal and reopen on a completed match a withdrawal decided:
+  // both run through useMatchReopen (reopenCtl, below), which owns the busy
+  // flag, the inline error, the court-busy remedy and the downstream confirm.
   // mp-gmcg: [Remove this bout] busy/error, kept separate from the reopen
   // channel above (that one is the completed-match flow; this is a running-
   // match empty-bout undo).
@@ -843,15 +896,6 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
   // knows the real later results.
   const [editingDoneBoutIdx, setEditingDoneBoutIdx] = useStateA(-1);
   const editingDoneOriginalRef = useRefA(null);
-  // The structured court_busy 409, unpacked: { court, matchId, compId,
-  // message } describing the match ALREADY RUNNING on this court. Non-null
-  // means the remedy panel is on screen.
-  const [reopenConflict, setReopenConflict] = useStateA(null);
-  // Best-effort "Shiro vs Aka" for the blocking match. The operator is about
-  // to wipe that match's score, so naming the competitors (not just the
-  // server's opaque match id) is a safety property, not decoration. Empty
-  // until/unless the lookup lands; the panel falls back to the id.
-  const [blockerLabel, setBlockerLabel] = useStateA("");
   // T131: lineup data so each bout cell can show the assigned player
   // name + canonical position label. Falls back gracefully when the
   // lineup hasn't been submitted yet (404 → null).
@@ -948,9 +992,18 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
   // and invisible on the wire. Hoisting the shared terms into this one const
   // makes that impossible: both callers see the same verdict-dirty answer by
   // construction.
-  const daihyosenVerdictDirty =
+  //
+  // daihyosenResultDirty is the same test WITHOUT the hantei arm, which is a
+  // mode rather than a result (bc-dscn): closing a running match flushes on
+  // it, so an arm alone never sends a freshly stamped write whose scoreline is
+  // unchanged, which could win last-write-wins over another device's older
+  // queued result. daihyosenVerdictDirty is built FROM it, so the two cannot
+  // disagree about anything but the arm.
+  const daihyosenResultDirty =
     enchoPeriodCount !== initialEnchoPeriods ||
-    daihyosenHantei !== recordedDaihyosenSide ||
+    daihyosenHantei !== recordedDaihyosenSide;
+  const daihyosenVerdictDirty =
+    daihyosenResultDirty ||
     daihyosenHanteiArmed !== daihyosenHanteiRecorded;
   // The ONE hantei undo, shared by the Ht chip and the panel Cancel so the
   // two paths cannot drift. Like the pick buttons, it is LOCAL state only:
@@ -976,7 +1029,7 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
   const _autosaveIsRunningRef = useRefA(false);
   const _autosaveBuildPatchRef = useRefA(null);
   const _autosaveOnSubmitRef = useRefA(null);
-  const { markDirty: markScoringDirty, cancelDebounce: cancelScoringDebounce } = useDebouncedRunningWrite({
+  const { markDirty: markScoringDirty, cancelDebounce: cancelScoringDebounce, flushPending: flushScoringAutosave } = useDebouncedRunningWrite({
     isRunningRef: _autosaveIsRunningRef,
     buildPatchRef: _autosaveBuildPatchRef,
     onSubmitRef: _autosaveOnSubmitRef,
@@ -1534,6 +1587,35 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
   // Block Finish while a KO encounter has no winner: the operator must add and
   // score a daihyosen first (the affordance below). Pool draws stay finishable.
   const koTieBlocked = isKoTieBlocked({ isKnockoutPhase, teamWinner, isComplete });
+  // bc-tmfn: Finish (and Save correction: corrections are not exempt) refuses
+  // while a numbered bout has no result. Kachinuki ends on End match instead.
+  // The refusal is shown once the operator taps Finish, and then follows the
+  // board live: it names fewer bouts as they are scored and goes away when
+  // none remain. The server refuses the same write with the same words.
+  // A correction to a match a withdrawal ended is not refused: that write
+  // keeps the recorded kiken/fusenpai (operator ruling 2026-09-24, "Save
+  // correction should just save what the operator enters"), so the bouts
+  // nobody fought after it are not a finish (engine.KeepsWithdrawalRuling).
+  // Removing a withdrawal recorded by mistake is not a save at all: it is
+  // Clear withdrawal and reopen (RecordedWithdrawal), after which the match is
+  // running and every bout needs a result like any other. A kachinuki
+  // encounter a withdrawal decided gets the same line and control, in place
+  // of its plain Reopen (canReopenKachinukiMatch), but no Save correction, so
+  // keepsWithdrawal (which shapes that save) stays off for it.
+  const recordedWithdrawal = withdrawalInForce(m);
+  const keepsWithdrawal = recordedWithdrawal && !isKachinuki;
+  const unfinishedBouts = (isKachinuki || keepsWithdrawal) ? [] : unfinishedTeamBouts({ subs, teamSize, lineupA, lineupB });
+  const [finishRefused, setFinishRefused] = useStateA(false);
+  const finishRefusal = finishRefused && unfinishedBouts.length > 0
+    ? unfinishedTeamBoutsMessage(teamSize, unfinishedBouts)
+    : "";
+  // Returns true when Finish must not proceed, and surfaces why.
+  const refuseUnfinishedFinish = () => {
+    if (unfinishedBouts.length === 0) return false;
+    setFinishRefused(true);
+    setFinishArmed(false);
+    return true;
+  };
   // While a kachinuki match is being fought, the primary actions record
   // the current BOUT (running write + kachinukiBoutFinal flag) or END the
   // match (operator-led, mp-gmcg): completion is never inferred from
@@ -1812,149 +1894,33 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
   useEffectA(() => { setFinishArmed(false); setEndArmed(false); setReasonPromptKind(""); }, [operatorEditSeq, daihyosenHantei]);
 
   // mp-gmcg: reopen a completed kachinuki match (POST .../reopen): status
-  // back to running, winner/decision cleared, bout log kept. This POST is a
-  // direct API call, NOT a score write, so it does NOT flow through the host's
-  // onEditScore/setOpenMatch channel that keeps the modal live across a
-  // running write — the `match` prop here is the host's openMatch snapshot,
-  // captured completed, and nothing repaints it in place. So on success we
-  // CLOSE the editor: the host's SSE match_updated handler flips the match
-  // row to running, and the operator taps Score to resume bout-by-bout on the
-  // now-running encounter. The server's 409s are full-sentence messages ("...
-  // is not completed ..." / "cannot reopen: a downstream knockout match ...")
-  // and surface inline verbatim, never silently; the court-busy one carries a
-  // remedy panel with them (below).
+  // back to running, winner/decision cleared, bout log kept; and (bc-tmfn)
+  // the same door for Clear withdrawal and reopen (RecordedWithdrawal below).
+  // This POST is a direct API call, NOT a score write, so it does NOT flow
+  // through the host's onEditScore/setOpenMatch channel that keeps the modal
+  // live across a running write — the `match` prop here is the host's
+  // openMatch snapshot, captured completed, and nothing repaints it in place.
+  // So on success the kachinuki Reopen CLOSES the editor: the host's SSE
+  // match_updated handler flips the match row to running, and the operator
+  // taps Score to resume on the now-running encounter. Clear withdrawal and
+  // reopen does NOT close it (no onReopened): its consequence text tells the
+  // operator to score the rest and finish it here, and the hosts that resolve
+  // the open match from live data (the Scores tab, the pools page, the court
+  // console) follow it to running in place, where the ReopenFeedback below
+  // can still show what else the reopen reopened. useMatchReopen
+  // (admin_scoring_shared.jsx) owns
+  // the rest: the server's 409s surface inline verbatim, the court-busy one
+  // with its remedy panel, and a later knockout match with its own result is
+  // confirmed with the operator before it is reopened too.
   //
-  // NO REASON IS ASKED FOR HERE (operator ruling): the tap posts. The
-  // justification rides the write that closes the encounter back out
+  // The kachinuki Reopen asks for NO REASON (operator ruling): the tap posts.
+  // The justification rides the write that closes the encounter back out
   // (reopenReasonRequired above), which is where the operator knows what
-  // actually happened anyway.
-  //
-  // A reopen failure is either actionable here or a sentence to read. The
-  // court-busy 409 is the actionable one: it names the match holding the
-  // court, so the operator can clear it from this panel instead of being told
-  // to go somewhere else. Note the asymmetry that makes this mandatory: a
-  // plain correction bypasses the court gate entirely, so kachinuki operators
-  // — for whom reopen is the ONLY way to fix a bout log — would otherwise be
-  // the one group with no way out of a busy court.
-  const applyReopenFailure = (e) => {
-    const msg = String(e?.message || "Failed to reopen match");
-    if (e?.code === "court_busy" && e?.matchId) {
-      setReopenErr("");
-      setReopenConflict({
-        court: e.court || m.court || "",
-        matchId: e.matchId,
-        compId: e.compId || m.compId,
-        message: msg,
-      });
-      return;
-    }
-    setReopenConflict(null);
-    setReopenErr(msg);
-  };
-
-  // Once the match reopens (status flips to running / bout mode), drop any
-  // stale reopen error or court-busy conflict and re-enable the control: they
-  // describe a completed-state action that no longer applies. Without this a
-  // failed-then-succeeded reopen could leave an error lingering in bout mode
-  // (the inline variant does not remount on the transition).
-  useEffectA(() => {
-    if (!isComplete) { setReopenErr(""); setReopenConflict(null); setReopenBusy(false); }
-  }, [isComplete]);
-
-  const onReopenMatch = async () => {
-    if (reopenBusy) return;
-    setReopenErr("");
-    setReopenConflict(null);
-    setReopenBusy(true);
-    try {
-      await window.API.reopenMatch(m.compId, m.id, resolveDecisionPassword(password));
-      if (!mountedRef.current) return;
-      // Success: KEEP the button disabled (reopenBusy stays true). onClose is a
-      // no-op in the inline (shiaijo) variant, so the completed snapshot lingers
-      // through the SSE refetch window; re-enabling now would let a double-tap
-      // fire a second reopen that the server rejects ("not completed", 409). The
-      // refetch flips the match to running, and the effect above clears
-      // reopenBusy. The overlay variant unmounts on onClose, so this is moot.
-      onClose();
-    } catch (e) {
-      if (!mountedRef.current) return;
-      applyReopenFailure(e);
-      setReopenBusy(false);
-    }
-  };
-
-  // The remedy: send the blocking match back to the queue, then retry the
-  // reopen the conflict refused. DESTRUCTIVE — revert-to-queue clears that
-  // match's partial score — which is why the panel spells the consequence out
-  // before this can be tapped.
-  const requeueBlockerAndReopen = async () => {
-    const c = reopenConflict;
-    if (!c || reopenBusy) return;
-    setReopenErr("");
-    setReopenBusy(true);
-    try {
-      // ONE atomic server call (mp-gmcg review A4): requeue the blocker AND
-      // reopen the target under a single court lock, closing the race the old
-      // two-call revert-then-reopen had (a peer could take the freed court in
-      // between). A court_busy failure means a DIFFERENT match has since taken
-      // the court; applyReopenFailure re-offers the remedy for that one.
-      await window.API.requeueBlockerAndReopen(m.compId, m.id, c.compId, c.matchId, resolveDecisionPassword(password));
-      if (!mountedRef.current) return;
-      setReopenConflict(null);
-      onClose();
-    } catch (e) {
-      if (!mountedRef.current) return;
-      // One atomic call now, so a single failure path: applyReopenFailure
-      // re-offers the remedy if a DIFFERENT match has since taken the court
-      // (court_busy), and otherwise shows the server's sentence — a completed
-      // or unknown blocker, a downstream-fought target, etc. The requeue and
-      // reopen commit together or not at all, so there is no partial state to
-      // describe separately.
-      applyReopenFailure(e);
-    } finally {
-      if (mountedRef.current) setReopenBusy(false);
-    }
-  };
-
-  // Name the blocking match's competitors when we can. Best effort by design:
-  // the server's match id is enough to ACT on, so a failed or unavailable
-  // lookup degrades to that rather than blocking the remedy.
-  useEffectA(() => {
-    setBlockerLabel("");
-    if (!reopenConflict?.matchId || !reopenConflict?.compId) return;
-    if (typeof window.compMatchesForCompetition !== "function" || typeof window.API?.fetchCompetitionDetails !== "function") return;
-    let cancelled = false;
-    (async () => {
-      try {
-        const detail = await window.API.fetchCompetitionDetails(reopenConflict.compId);
-        if (cancelled || !mountedRef.current) return;
-        // compMatches expects a competition in LIST shape, where `status` and
-        // `teamMatchType` sit at the TOP level. The details payload keeps those
-        // under `config`, and compMatches bails on a missing status via its
-        // "setup" guard, so passing `detail` straight in always returned [] and
-        // every conflict panel fell back to naming the blocker by its raw id
-        // ("Shiaijo A is running m-r1-1"), which tells an operator nothing.
-        //
-        // compMatchesForCompetition (viewer_utils.jsx) owns that recombination
-        // now. This site had its own copy, and the withdrawal panel in
-        // admin_scoring_shared.jsx had none at all and silently listed nothing,
-        // which is why the rule was given one home (mp-dej2).
-        const hit = (window.compMatchesForCompetition(detail.config || detail, detail) || []).find(x => x.id === reopenConflict.matchId);
-        if (!hit) return;
-        const shiro = hit.sideB?.name || hit.sideB || "";
-        const aka = hit.sideA?.name || hit.sideA || "";
-        // Match number first: it is how the console labels every other match
-        // ("09:16 · KTeam · Match 2"), so it is what the operator is looking for.
-        const label = [
-          hit.matchNumber ? `Match ${hit.matchNumber}` : "",
-          shiro && aka ? `${shiro} vs ${aka}` : "",
-        ].filter(Boolean).join(" · ");
-        if (label) setBlockerLabel(label);
-      } catch { /* best effort: the panel falls back to the match id */ }
-    })();
-    return () => { cancelled = true; };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [reopenConflict?.compId, reopenConflict?.matchId]);
+  // actually happened anyway. Note the asymmetry that makes the court-busy
+  // remedy mandatory: a plain correction bypasses the court gate entirely, so
+  // kachinuki operators, for whom reopen is the ONLY way to fix a bout log,
+  // would otherwise be the one group with no way out of a busy court.
+  const reopenCtl = useMatchReopen({ match: m, password, isComplete, onReopened: recordedWithdrawal ? undefined : onClose });
 
   // mp-4pc: when a daihyosen exists the encho counter belongs to that
   // sub-bout (attached per-sub in buildPatch), so suppress the top-level
@@ -2108,7 +2074,22 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
   const openDoneBoutEdit = (idx) => {
     const t = subTotals[idx];
     editingDoneOriginalRef.current = { winner: t ? t.winner : null };
+    doneBoutOpenedAtRef.current = Date.now();
     setEditingDoneBoutIdx(idx);
+  };
+  // bc-kbrw: opening a fought bout expands it under the finger, so the second
+  // tap of a double tap landed on whatever moved there: another bout, or a
+  // control of the row just opened. For DONE_BOUT_OPEN_TAP_GUARD_MS after a
+  // row opens, a pointer click anywhere in the bout list is swallowed in the
+  // capture phase, before it reaches any row. A ref, not state, so a batched
+  // double tap cannot read a stale value. Keyboard activation is never
+  // swallowed: a click synthesized from Enter/Space carries detail === 0.
+  const doneBoutOpenedAtRef = useRefA(0);
+  const swallowDoubleTapAfterOpen = (ev) => {
+    if (ev.detail === 0) return;
+    if (Date.now() - doneBoutOpenedAtRef.current >= DONE_BOUT_OPEN_TAP_GUARD_MS) return;
+    ev.stopPropagation();
+    ev.preventDefault();
   };
   const closeDoneBoutEdit = () => { editingDoneOriginalRef.current = null; setEditingDoneBoutIdx(-1); };
 
@@ -2249,10 +2230,14 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
       const w = wKey === "a" ? m.sideA : wKey === "b" ? m.sideB : null;
       // T096/FR-031: per-bout fusensho overrides the default hikiwake/fought
       // mapping. The daihyosen always carries decision="daihyosen".
+      // A bout nobody has fought yet stays decision "": it is not a hikiwake,
+      // and writing one made an untouched row indistinguishable from an
+      // operator-marked Tie on the server and on the next open, which is
+      // what let a team match finish with bouts unfought (bc-tmfn).
       let decision = "";
       if (isDaihyo) decision = "daihyosen";
       else if (s.fusensho) decision = "fusensho";
-      else if (t.winner === null) decision = "hikiwake";
+      else if (t.winner === null && subBoutHasBeenPlayed(s)) decision = "hikiwake";
       const teamWinnerName = nameOf(w);
       // Competition-type-aware sub-bout identity: a kachinuki bout is consumed
       // per-competitor (advancement + bout-log export), so persist player-name
@@ -2380,8 +2365,8 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
     });
     // Kachinuki appends bouts dynamically, so the all-positions map above leaves
     // untouched trailing positions. Drop them (keep the daihyosen and any played
-    // bout): see subBoutHasBeenPlayed. Fixed-position matches keep every
-    // position because a 0–0 there is a legitimate hikiwake.
+    // bout): see subBoutHasBeenPlayed. Team matches keep every position; an
+    // unplayed one carries decision "" and Finish refuses until it has a result.
     if (isKachinuki) {
       subResults = subResults.filter((_entry, idx) => idx === daihyosenIdx || subBoutHasBeenPlayed(subs[idx]));
     }
@@ -2390,7 +2375,13 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
     // null + hikiwake here while the sub row keeps its verdict silently
     // flipped a pool encounter's W/L/T to a draw (knockout saves bounced off
     // "cannot mark completed with no winner").
-    const winner = teamWinner === "a" ? m.sideA : teamWinner === "b" ? m.sideB : (dhKeep ? (m.winner || null) : null);
+    // A correction that keeps a recorded withdrawal (keepsWithdrawal) keeps its
+    // winner too: the server stores the ruling's winner whatever the bouts
+    // say, so this write names it rather than the bouts' leader, and the
+    // shiaijo page's local bracket advance (maybeAdvanceLocal) cannot move the
+    // team that withdrew into the next round.
+    const winner = keepsWithdrawal ? (m.winner || null)
+      : teamWinner === "a" ? m.sideA : teamWinner === "b" ? m.sideB : (dhKeep ? (m.winner || null) : null);
     // correctionReason rides any write that AMENDS a finalized result: a
     // correction to a completed match, and (mp-gmcg) the write that completes
     // a REOPENED one, which the server refuses without it. Same field, same
@@ -2465,7 +2456,7 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
       // slots - labelling the loser's IV as the winner's whenever the two
       // differ. max/min cannot name the side either, but it can never invert
       // them, and in every reachable daihyosen IV is tied so both agree.
-      score: { type: (teamWinner || dhKeep) ? "ippon" : "hikiwake", winnerPts, loserPts, fouls: { a: 0, b: 0 }, corrected: isComplete },
+      score: { type: (teamWinner || dhKeep || keepsWithdrawal) ? "ippon" : "hikiwake", winnerPts, loserPts, fouls: { a: 0, b: 0 }, corrected: isComplete },
       subResults,
       ...enchoBlock(),
       ...correctionBlock,
@@ -2516,6 +2507,18 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
   // repetition on the busiest path in the file.
   const serverSubsSig = JSON.stringify(serverSubs);
   const isDirty = JSON.stringify(subs) !== serverSubsSig || daihyosenVerdictDirty;
+  // bc-dscn: what closing a RUNNING match may flush. isDirty without the
+  // hantei arm (see daihyosenResultDirty).
+  const scoringDirty = JSON.stringify(subs) !== serverSubsSig || daihyosenResultDirty;
+  // bc-dscn: an edit the running patch would NOT carry. Under kachinuki
+  // buildPatch drops every row subBoutHasBeenPlayed rejects, so a changed but
+  // unplayed row (a fighter picked on the current bout past the first, which
+  // rides the bout and not a lineup PUT, or a bout cleared back to 0-0) never
+  // reaches the server by a flush. Closing would lose it, so it keeps the
+  // prompt. Same per-row server comparison isDirty makes: subs is aligned to
+  // serverSubs by reconcileRowsToPositions, so index idx is the same position.
+  const runningPatchDropsAnEdit = isKachinuki && subs.some((s, idx) =>
+    idx !== daihyosenIdx && !subBoutHasBeenPlayed(s) && JSON.stringify(s) !== JSON.stringify(serverSubs[idx]));
   // RE-SEED the bout rows when the stored result moves, PER ROW.
   //
   // Without this an editor left open kept showing the board it opened with
@@ -2585,6 +2588,23 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
     // Same contract as ScoreEditorModal: never close while a save,
     // decision, or daihyosen request is mid-flight.
     if (submitting || decisionSubmitting || daihyosenBusy) return;
+    // bc-dscn: a host that cannot close (the inline court console) has nothing
+    // to discard INTO, so it never prompts either.
+    if (!canClose) return;
+    // bc-dscn: on a RUNNING match every scoring edit is autosaved, so closing
+    // discards nothing: save any edit still inside the debounce window now and
+    // close without asking. buildPatch("running") carries what scoringDirty
+    // compares: every played bout row in subResults, match-level encho, and
+    // the daihyosen verdict (encho count and hantei pick via
+    // daihyosenEnchoFields). Not carried, and handled here: a hantei ARM with
+    // no side picked is only a mode, not a result, so it is dropped with no
+    // write (the individual editor's rule too); and a kachinuki row the
+    // played-row filter drops (runningPatchDropsAnEdit) keeps the prompt.
+    if (m.status === "running" && !runningPatchDropsAnEdit) {
+      if (scoringDirty) flushScoringAutosave();
+      onClose();
+      return;
+    }
     if (isDirty && !(await window.confirmDialog({ message: "Discard unsaved scoring changes?", confirmLabel: "Discard changes", danger: true }))) return;
     onClose();
   };
@@ -2594,16 +2614,22 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
   // unambiguous target — see scoreCurrentBoutWaza); fixed-format team scoring
   // is many sub-matches and stays tap-only, and Enter-to-finish isn't wired.
   const kbRef = React.useRef(null);
-  kbRef.current = { submitting, handleDismiss, onPrev, onNext, kachinukiBoutMode, isNaginataTeam, scoreCurrentBoutWaza };
+  kbRef.current = { submitting, handleDismiss, canClose, onPrev, onNext, prevMatch, nextMatch, kachinukiBoutMode, isNaginataTeam, scoreCurrentBoutWaza };
   useEffectA(() => {
     const onKeyDown = (ev) => {
       const s = kbRef.current;
       if (s.submitting) return;
       if (ev.ctrlKey || ev.metaKey || ev.altKey) return;
-      if (ev.key === "Escape") { ev.preventDefault(); s.handleDismiss(); return; }
+      // bc-dscn: Esc closes only where the host can close. On the inline court
+      // console it belongs to whatever has focus (e.g. an open fighter list),
+      // so it is left unhandled and not prevented.
+      if (ev.key === "Escape") { if (!s.canClose) return; ev.preventDefault(); s.handleDismiss(); return; }
       if (window.isTextEntry(ev.target)) return;
-      if (ev.key === "ArrowLeft" && s.onPrev) { ev.preventDefault(); s.onPrev(); return; }
-      if (ev.key === "ArrowRight" && s.onNext) { ev.preventDefault(); s.onNext(); return; }
+      // Keyed on the neighbour match as well as the callback, as in
+      // ScoreEditorModal: the Scores tab wires onPrev/onNext unconditionally,
+      // and with no neighbour they call scoreKeyOf(null), which throws.
+      if (ev.key === "ArrowLeft" && s.onPrev && s.prevMatch) { ev.preventDefault(); s.onPrev(); return; }
+      if (ev.key === "ArrowRight" && s.onNext && s.nextMatch) { ev.preventDefault(); s.onNext(); return; }
       // mp-gmcg: keyboard ippon entry, KACHINUKI bout mode only (one current
       // bout → unambiguous target; the general team editor has many). Mirrors
       // the individual editor: blocked when any interactive element
@@ -2718,7 +2744,7 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
               The .team-bouts-scroll wrapper gives the roomy (non-compact)
               layout an independent scroll region for the bout list so the
               team header / summary / decision / footer stay anchored. */}
-          <div className="team-bouts-scroll">
+          <div className="team-bouts-scroll" onClickCapture={swallowDoubleTapAfterOpen}>
           {[
             // mp-gmcg: operator-led completion. The banner reads "ended"
             // ONLY for a completed match (correction view): a running
@@ -3476,6 +3502,14 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
               active bout. Native <details> keeps the buttons in the DOM
               (still queryable/testable); it just reclaims the ambient
               attention the scoring task should own. */}
+          {/* Correcting a match a withdrawal ended: say what is recorded, and
+              offer to remove it when it was a wrong entry (operator ruling
+              2026-09-24), by reopening the match. Switching it to the other
+              team stays with the Withdrawal or no-show controls below. The
+              same component serves the individual editor. */}
+          {recordedWithdrawal && !decisionPromptKind && !withdrawnPlayer && !selfReport && (
+            <RecordedWithdrawal match={m} ctl={reopenCtl} disabled={submitting || decisionSubmitting} />
+          )}
           {!withdrawnPlayer && !decisionPromptKind && !selfReport && (
             <details className="decision-disclosure">
               <summary className="decision-disclosure__summary">Withdrawal or no-show (kiken · fusenpai)</summary>
@@ -3629,6 +3663,14 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
               )}
             </div>
           )}
+          {/* bc-tmfn: why Finish did not finish. Visible text, not a title
+              (a tablet has no hover), and only after a Finish tap, so a
+              match in progress is not nagged about bouts still to come. */}
+          {finishRefusal && (
+            <div className="alert alert--error" role="alert" data-testid="team-finish-unfinished-bouts" style={{ marginTop: 6 }}>
+              {finishRefusal}
+            </div>
+          )}
           {/* mp-gmcg: inline reason for the disabled [Record bout]. The tired
               operator sees the greyed button but the "why" was tooltip-only,
               unreachable on a tablet (critique P2). Shown only in the common
@@ -3639,53 +3681,17 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
               <span>Score this bout to enable <strong>Record bout</strong>, or <strong>End match</strong> to finish on the last scored bout.</span>
             </div>
           )}
-          {reopenErr && (
-            <div data-testid="kachinuki-reopen-error" style={{ color: "var(--danger)", fontSize: 12, marginBottom: 6 }}>{reopenErr}</div>
-          )}
-          {/* mp-gmcg: court-busy remedy. A busy court used to be a dead end
-              for the one group that has no alternative (a correction bypasses
-              the court gate; a kachinuki bout log can only be fixed by
-              reopening). So name the match holding the court and offer to
-              clear it from here.
-
-              The warning is NOT optional chrome: revert-to-queue WIPES that
-              match's partial score, and the operator tapping this is looking
-              at their own match, not that one. It is stated in full, in the
-              danger palette, above the button — never hidden behind a tooltip
-              or implied by a red button. */}
-          {reopenConflict && (
-            <div className="alert alert--error reopen-conflict" data-testid="kachinuki-reopen-conflict">
-              <div className="reopen-conflict__head">
-                Shiaijo {reopenConflict.court || "?"} is running {blockerLabel || reopenConflict.matchId}.
-              </div>
-              <div className="reopen-conflict__warn" data-testid="kachinuki-reopen-conflict-warning">
-                Sending it back to the queue clears any score already entered for it. Finishing that
-                match instead keeps its score.
-              </div>
-              <div className="reopen-conflict__msg">{reopenConflict.message}</div>
-              <div className="reopen-conflict__actions">
-                <button
-                  type="button"
-                  className="btn btn--sm btn--danger"
-                  data-testid="kachinuki-reopen-requeue-button"
-                  onClick={requeueBlockerAndReopen}
-                  disabled={reopenBusy}
-                  title="Clears that match's score, returns it to the queue, then reopens this one"
-                >
-                  {reopenBusy ? "Working…" : "Clear its score, queue it, and reopen"}
-                </button>
-                <button
-                  type="button"
-                  className="btn btn--sm btn--ghost"
-                  data-testid="kachinuki-reopen-conflict-dismiss"
-                  onClick={() => setReopenConflict(null)}
-                  disabled={reopenBusy}
-                >
-                  Leave it running
-                </button>
-              </div>
-            </div>
-          )}
+          {/* mp-gmcg: a reopen's outcome: its notice, its error, and the
+              court-busy remedy (a busy court used to be a dead end for the one
+              group that has no alternative: a correction bypasses the court
+              gate; a kachinuki bout log can only be fixed by reopening). ONE
+              copy for both doors, the kachinuki Reopen and Clear withdrawal
+              and reopen, and outside both: RecordedWithdrawal unmounts when
+              the match is running again, so a notice rendered inside it was
+              never seen (bc-tmfn). The prefix names the editor's door; a
+              kachinuki encounter keeps its existing ids whichever control
+              reopened it. */}
+          <ReopenFeedback ctl={reopenCtl} testIdPrefix={isKachinuki ? "kachinuki-reopen" : "withdrawal-reopen"} />
           {/* F5: "not saved" banner, shared class with ScoreEditorModal so both
               editors read identically. Placed once, above score-nav, which
               `inner` shares between the wide overlay and the narrow shiaijo
@@ -3730,16 +3736,16 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
                   the shiaijo with the competitors waiting, and the write is
                   reversible (the encounter is re-ended from the same bout
                   log). The audit reason is demanded on the way out instead. */}
-              {canReopenKachinukiMatch({ isKachinuki, isComplete }) && (
+              {canReopenKachinukiMatch({ isKachinuki, isComplete, recordedWithdrawal }) && (
                 <button
                   type="button"
                   className="btn btn--sm btn--ghost"
                   data-testid="kachinuki-reopen-button"
-                  onClick={onReopenMatch}
-                  disabled={submitting || reopenBusy || decisionSubmitting}
+                  onClick={() => reopenCtl.reopen()}
+                  disabled={submitting || reopenCtl.busy || decisionSubmitting}
                   title="Reopen: back to running, result cleared, bouts kept"
                 >
-                  {reopenBusy ? "Reopening…" : "Reopen match"}
+                  {reopenCtl.busy ? "Reopening…" : "Reopen match"}
                 </button>
               )}
               {canClose && <button className="btn" onClick={handleDismiss} disabled={submitting}>Cancel</button>}
@@ -3848,6 +3854,7 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
                 // mode, then End match re-derives from the last bout. Only
                 // non-kachinuki completed matches keep the generic correction.
                 <button className={`btn btn--primary ${finishArmed && !isComplete ? "btn--confirm" : ""}`} onClick={() => {
+                  if (refuseUnfinishedFinish()) return;
                   if (isComplete && !correctionReason) { setReasonPromptKind("correction"); return; }
                   if (!isComplete && !finishArmed) { setFinishArmed(true); return; }
                   doSubmit(() => (isComplete ? onSubmit : onSubmitAndNext)(buildPatch("completed")));
@@ -3857,6 +3864,7 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
                 </button>
               ) : (
                 <button className={`btn btn--primary ${finishArmed && !isComplete ? "btn--confirm" : ""}`} onClick={() => {
+                  if (refuseUnfinishedFinish()) return;
                   if (isComplete && !correctionReason) { setReasonPromptKind("correction"); return; }
                   if (!isComplete && !finishArmed) { setFinishArmed(true); return; }
                   doSubmit(() => onSubmit(buildPatch("completed")));
@@ -3872,8 +3880,9 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
           </div>
           </>
           )}
-          {/* Quiet, always-present keyboard-shortcut reminder. */}
-          <ScoringShortcutHint pointKeys={kachinukiBoutMode ? getValidPointKeys(isNaginataTeam) : ""} />
+          {/* Quiet keyboard-shortcut reminder. It lists only keys that act on
+              this host (the same conditions the keydown handler checks). */}
+          <ScoringShortcutHint pointKeys={kachinukiBoutMode ? getValidPointKeys(isNaginataTeam) : ""} hasNav={!!((prevMatch && onPrev) || (nextMatch && onNext))} canClose={canClose} />
         </div>
     </>
   );

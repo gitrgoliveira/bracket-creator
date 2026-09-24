@@ -61,8 +61,41 @@ Chusen is the last resort when two or more tied teams have played a round of dai
 
 When chusen is required, the **Pools** tab (labelled **League** for league competitions) shows a **"Chusen (drawing lots) required"** panel listing the tied teams. Draw lots offline, enter each team's finishing position in the panel, and record it to settle the order and let the competition advance.
 
+In a competition with pools and then a knockout, the panel can also appear after the knockout has started, when a corrected pool result leaves a tie that only chusen can settle. The knockout match that the tied place feeds waits until you record the positions.
+
+The positions you record decide who goes through. If they change who holds a qualifying place after the old holder has already fought a knockout match, the app asks first, in the same way as for a corrected pool result: it names who moves and which match was fought, and **Apply and reopen** records the positions and reopens that match for the new qualifier. If that knockout match is being fought right now, the positions are not recorded until it is finished or sent back to the queue. Refer to [Correct a pool result after the knockout has started](scoring-a-match.md#correct-a-pool-result-after-the-knockout-has-started).
+
 Chusen is the only place ranks are set by hand, and it happens only when the bouts themselves cannot decide the order.
 
 ## Competitor eligibility after a decision
 
 A kiken or fusenpai marks the competitor who withdrew or did not appear as ineligible for further matches. The app blocks starting an ineligible competitor, so a withdrawn competitor cannot silently re-enter the draw. An injury kiken (FIK Article 30) can be reversed: once the operator reinstates the competitor, the eligibility block is lifted and they can fight again.
+
+## Correcting a withdrawal recorded by mistake
+
+A kiken or fusenpai entered in error can always be fixed. Open the match in the score editor. It shows what is recorded, for example "Recorded: Kiken – Voluntary, Kyoto withdrew". Pick the fix that matches what happened:
+
+- **The wrong competitor or team was marked.** Record the withdrawal again for the other side. In an individual match, use the **Kiken – Voluntary**, **Kiken – Injury** or **Fusenpai** button in the editor's **Decision** row. In a team match, open **Withdrawal or no-show** and use the same buttons there. The side you first marked is eligible again, and the other side becomes the one that withdrew.
+- **Nobody withdrew.** Choose **Clear withdrawal and reopen** and give a reason. A withdrawal gives the opponent the win by default, so without it the match was never decided. The match goes back to in progress and the editor stays open on it. The withdrawn competitor or team can compete again. Score the rest of the match and finish it as usual.
+
+What the reopen keeps depends on the match:
+
+- **A team match** keeps every bout already fought.
+- **An individual match** keeps the points the withdrawn competitor had struck. It does not keep the winner's points. Recording the withdrawal replaced them with the default-win circles, and clearing the withdrawal removes those circles, so enter the winner's points again before you finish. The same applies to a team's representative bout, which is scored in the individual editor, and it also keeps who fought it for each team. The editor says this before you confirm.
+
+A kachinuki team match that ended with a withdrawal or no-show shows the same **Clear withdrawal and reopen** in place of its **Reopen match** button, because the reopen also makes the withdrawn team eligible again. A kachinuki match that ended any other way keeps **Reopen match**.
+
+Removing a withdrawal makes the withdrawn competitor or team eligible again, whichever kind of withdrawal it was, because a withdrawal entered by mistake never happened. This includes a voluntary kiken, which otherwise cannot be reversed.
+
+**Save correction** on its own never removes a withdrawal. It saves the points or bouts you enter and keeps the withdrawal, its winner and the competitor's eligibility as they were recorded. In an individual match the winner's default-win circles are shown but cannot be changed. Only the withdrawn competitor's points can be corrected, and they are limited to one point, because a competitor with two points has already won the bout.
+
+A fix can change who goes through to later matches, so the app warns you first and you can cancel or go ahead:
+
+- Recording the withdrawal for the other side warns you when either side has already started a later match.
+- Clearing a withdrawal in a knockout match warns you when the next match has already been played. If you go ahead, that next match is reopened so it can be fought and scored again, and the editor names it once the reopen is done. If a withdrawal decided that next match, its withdrawn competitor is eligible again too.
+
+In a knockout, a next match that is still in progress must be finished or sent back to the queue before a withdrawal can be cleared. If another match is running on this match's court, the app names it and offers to send it back to the queue, which clears any score entered for it.
+
+In a pool of a competition that ends in a knockout, clearing a withdrawal is not refused because of the knockout. Clearing it moves nobody in the bracket: the pool simply has an unfinished match again. When you finish that match, the app checks whether the result changes who qualifies from the pool. The same result is saved as usual. A result that moves someone who has already fought in the knockout is handled like any pool correction: you are shown who moves and which knockout matches are affected before anything is saved. Refer to [Correct a pool result after the knockout has started](scoring-a-match.md#correct-a-pool-result-after-the-knockout-has-started).
+
+Matches that were already awarded to the opponents of a withdrawn competitor keep their results. Correct them one by one if they need to change.

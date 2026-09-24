@@ -1,6 +1,8 @@
 package engine
 
 import (
+	"errors"
+	"fmt"
 	"strconv"
 	"testing"
 
@@ -154,4 +156,26 @@ func TestCalculatePoolStandings_Override_LegacyBareNameKeyIsUnresolvable(t *test
 	}
 	assert.False(t, byID["legacy-p1"].IsOverridden, "a legacy bare-name-keyed override no longer resolves (operator ruling bc-pnum)")
 	assert.False(t, byID["legacy-p2"].IsOverridden)
+}
+
+// undoAfterFailedTx is OverridePoolRank's decision after a failed
+// transaction. A transaction that committed nothing takes the directly written
+// override back. One whose WAL committed before its Apply failed
+// (state.ErrTxCommitted, pinned on the real WAL by
+// TestWithTransaction_ApplyFailureAfterCommitIsMarked) is replayed on restart,
+// reopening the knockout for the new order, so the override stays with it:
+// taking it back would let the resolver repaint the old qualifier into the
+// reopened match.
+func TestUndoAfterFailedTx(t *testing.T) {
+	calls := 0
+	undo := func() { calls++ }
+
+	assert.True(t, undoAfterFailedTx(errors.New(`WithTransaction "c": Commit: disk full`), undo))
+	assert.Equal(t, 1, calls, "an uncommitted transaction takes the override back")
+
+	committed := fmt.Errorf(`WithTransaction "c": Apply: %w (%w)`, errors.New("disk full"), state.ErrTxCommitted)
+	assert.False(t, undoAfterFailedTx(committed, undo))
+	assert.Equal(t, 1, calls, "a committed transaction keeps the override for its replay")
+
+	assert.False(t, undoAfterFailedTx(errors.New("refused before any write"), nil), "nothing to undo")
 }

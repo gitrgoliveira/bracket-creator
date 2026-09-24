@@ -110,7 +110,7 @@ func respondIfEngineWriteError(c *gin.Context, err error) bool {
 // (Store.ResetOverridesForce, used by DELETE .../overrides) loads and
 // parses the existing file before saving, so a corrupt file makes them fail
 // identically -- and every engine call that reads standings
-// (computeStandingsFrom, reached via the mp-e2k1 mixed-pool guard,
+// (computeStandingsFrom, reached via the pool requalification check,
 // LeagueTiebreakCandidates, ChusenCandidates) hits the same LoadOverrides
 // call underneath. Left unmapped, that surfaces as an opaque 500, which the
 // SPA's offline write queue retries forever for the write endpoints
@@ -170,15 +170,21 @@ func respondUnexportableCompetitionError(c *gin.Context, err error) bool {
 // respondIfDownstreamKnockoutPlayed answers engine.DownstreamKnockoutPlayedError
 // (bc-kcdg) with the ONE fixed wire contract every knockout-correction write
 // shares -- HTTP 409 {"error":"downstream_knockout_played","matchId",
-// "blockingMatchId","blockingMatches","displaced","message"} -- and reports whether it
-// answered, so the caller's switch can fall through to its own remaining
-// arms exactly like the other respondIf* helpers in this file.
+// "blockingMatchId","blockingMatches","displaced","qualifierChange","message"}
+// -- and reports whether it answered, so the caller's switch can fall through
+// to its own remaining arms exactly like the other respondIf* helpers in this
+// file.
 //
 // Correcting a completed bracket match (via /score, /override-winner,
 // /decision, or /quick-score) can change a winner already propagated into a
 // downstream match that has since recorded its own result; the engine
 // refuses by default and the operator retries with forceDownstreamReopen
-// once they've confirmed the override (see ForceOptions.Force on the
+// once they've confirmed the override. Correcting a POOL match in a mixed
+// competition answers the same way when it moves who holds a qualifying
+// place and the old qualifier has already fought a knockout match:
+// qualifierChange then names each place that moves (from, to), so the
+// operator is told who moves, not only which match reopens; it is an empty
+// list for a knockout correction (see ForceOptions.Force on the
 // matching request field of whichever endpoint they're using). Before this
 // existed, only /score and /override-winner had this mapping hand-copied
 // into their own error switches (identically, since both need the exact
@@ -201,55 +207,79 @@ func respondIfDownstreamKnockoutPlayed(c *gin.Context, err error) bool {
 		// rides along for addressing, never for display.
 		"blockingMatches": blockedMatchesPayload(downstreamPlayedErr.Blocking),
 		"displaced":       downstreamPlayedErr.Displaced,
+		"qualifierChange": qualifierChangePayload(downstreamPlayedErr.QualifierChange),
 		"message":         downstreamPlayedErr.Error(),
 	})
 	return true
 }
 
-// blockedMatchesPayload renders the blocked matches for the wire: id for
-// addressing, number for the operator. A number of 0 means the match never got
-// one (a bye placeholder, or a pre-numbering bracket); the client falls back to
-// the id there rather than printing "Match 0".
+// qualifierChangePayload renders a refusal's qualifier changes as a list,
+// never null, so a client reads one shape whichever kind of correction it
+// made.
+func qualifierChangePayload(changes []engine.QualifierChange) []engine.QualifierChange {
+	if changes == nil {
+		return []engine.QualifierChange{}
+	}
+	return changes
+}
+
+// respondIfDownstreamKnockoutRunning answers engine.DownstreamKnockoutRunningError
+// with HTTP 409 {"error":"downstream_knockout_running","matchId",
+// "runningMatches","message"} and reports whether it answered. A pool
+// correction in a mixed competition that would move a qualifier out of a
+// knockout match somebody is fighting right now is refused outright: unlike
+// downstream_knockout_played it is NOT confirmable (forceDownstreamReopen does
+// not get past it), because reopening a match mid-bout would wipe what is
+// being scored at the shiaijo. message is the operator's copy ("Match 9 (Quarterfinals) is
+// being fought now. Finish it or send it back to the queue, then save
+// again."). A 409, never a 5xx, so the offline write queue drops a replay
+// that meets it instead of retrying it forever (mp-q8c6).
+func respondIfDownstreamKnockoutRunning(c *gin.Context, err error) bool {
+	var runningErr *engine.DownstreamKnockoutRunningError
+	if !errors.As(err, &runningErr) {
+		return false
+	}
+	c.JSON(http.StatusConflict, gin.H{
+		"error":          "downstream_knockout_running",
+		"matchId":        runningErr.MatchID,
+		"runningMatches": blockedMatchesPayload(runningErr.Running),
+		"message":        runningErr.Error(),
+	})
+	return true
+}
+
+// blockedMatchesPayload renders knockout matches for the wire, for every
+// payload that names them to the operator (blockingMatches, runningMatches,
+// reopenedMatches): id for addressing, number, and label, the words the
+// operator is shown ("Match 3 (Final)", engine.MatchLabel). The client prints
+// the label as it is rather than composing its own from the number, so the
+// dialog and this payload's message cannot name the same match two ways. A
+// number of 0 means the match never got one (a bye placeholder, or a
+// pre-numbering bracket); the label then falls back to the match's name or id
+// rather than "Match 0".
 func blockedMatchesPayload(blocking []engine.ReopenedMatch) []map[string]any {
 	out := make([]map[string]any, 0, len(blocking))
 	for _, b := range blocking {
-		out = append(out, map[string]any{"id": b.ID, "number": b.Number})
+		out = append(out, map[string]any{"id": b.ID, "number": b.Number, "label": engine.MatchLabel(b)})
 	}
 	return out
 }
 
-// respondIfDownstreamKnockoutScored answers engine.DownstreamKnockoutScoredError
-// (mp-e2k1) with the ONE fixed wire contract -- HTTP 409
-// {"error":"downstream_knockout_scored","pool","finisher","matchId","message"}
-// -- and reports whether it answered, so the caller's switch can fall through
-// to its own remaining arms exactly like the other respondIf* helpers in this
-// file. This is a DIFFERENT guard from respondIfDownstreamKnockoutPlayed
-// above: mp-e2k1 fires on a POOL match re-score (in a Mixed competition) that
-// would change which competitor holds a qualifying rank while a downstream
-// bracket match already carries that finisher's own scored result, whereas
-// bc-kcdg's DownstreamKnockoutPlayedError guards a bracket-match correction
-// that would repaint an already-propagated winner. Both are reachable from
-// every write endpoint that ends up inside RecordMatchResultWithIneligibility(Tx)
-// for a pool match id (/score, /quick-score, bulk-score's per-entry
-// transaction, and /decision via RecordDecisionTx(WithOptions)); before this
-// helper existed, only /score mapped it and the rest fell through to a
-// generic 500, which the SPA's offline write queue retries forever (mp-q8c6
-// poisoned-queue pattern) for a write that can never win. OverrideBracketWinner
-// writes the bracket directly (UpdateBracket) and never reaches this guard, so
-// it has no arm for this error.
-func respondIfDownstreamKnockoutScored(c *gin.Context, err error) bool {
-	var downstreamScoredErr *engine.DownstreamKnockoutScoredError
-	if !errors.As(err, &downstreamScoredErr) {
-		return false
+// broadcastReopenedDownstream announces the downstream matches a confirmed
+// reopen or correction reopened: match_updated for each (each is a distinct
+// match from the one the operator acted on, so a client watching only that
+// court or match must hear its verdict was cleared), and
+// competitor_status_updated for each one whose cleared verdict was a
+// withdrawal, since the engine restored the competitor it barred
+// (engine.ReopenedMatch.Restored). One helper for every door that can reopen
+// downstream, so none of them can announce the reopen and miss the restore.
+func broadcastReopenedDownstream(hub Broadcaster, compID string, reopened []engine.ReopenedMatch) {
+	for _, r := range reopened {
+		hub.Broadcast(EventMatchUpdated, gin.H{"competitionId": compID, "matchId": r.ID})
+		if r.Restored != nil {
+			hub.Broadcast(EventCompetitorStatusUpdated, gin.H{"competitionId": compID, "status": r.Restored})
+		}
 	}
-	c.JSON(http.StatusConflict, gin.H{
-		"error":    "downstream_knockout_scored",
-		"pool":     downstreamScoredErr.Pool,
-		"finisher": downstreamScoredErr.Finisher,
-		"matchId":  downstreamScoredErr.MatchID,
-		"message":  downstreamScoredErr.Error(),
-	})
-	return true
 }
 
 // classifyRosterWriteError maps one of the participant-roster write sentinel

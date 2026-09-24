@@ -39,6 +39,14 @@ import (
 // team PARTICIPANT ID, mirroring how the lineup editor saves them.
 func setupKachinukiScoreServer(t *testing.T, compID string) (*gin.Engine, *state.Store) {
 	t.Helper()
+	r, store, _ := setupKachinukiScoreServerWithHub(t, compID)
+	return r, store
+}
+
+// setupKachinukiScoreServerWithHub is setupKachinukiScoreServer that also
+// hands back the hub, for a test that asserts what was broadcast.
+func setupKachinukiScoreServerWithHub(t *testing.T, compID string) (*gin.Engine, *state.Store, *Hub) {
+	t.Helper()
 	store, err := state.NewStore(t.TempDir())
 	require.NoError(t, err)
 	eng := engine.New(store)
@@ -84,7 +92,7 @@ func setupKachinukiScoreServer(t *testing.T, compID string) (*gin.Engine, *state
 	// point is that an obligation created on one endpoint cannot be walked
 	// around by picking the other.
 	RegisterDecisionHandlers(admin, eng, store, store, hub)
-	return r, store
+	return r, store, hub
 }
 
 // postDecision POSTs a decision payload to the decision endpoint.
@@ -889,6 +897,121 @@ func TestReopenHandler_KachinukiPoolMatch(t *testing.T) {
 	assert.Equal(t, state.MatchStatusCompleted, matches[0].Status, "a fresh End match after reopen must complete normally")
 	assert.Equal(t, "Tora", matches[0].Winner)
 	assert.Len(t, matches[0].SubResults, 2)
+}
+
+// broadcastsDuring returns every hub payload broadcast while fn runs.
+func broadcastsDuring(t *testing.T, hub *Hub, fn func()) []string {
+	t.Helper()
+	ch := hub.Subscribe()
+	require.NotNil(t, ch)
+	var events []string
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		for e := range ch {
+			events = append(events, e.payload)
+		}
+	}()
+	fn()
+	hub.Unsubscribe(ch)
+	<-done
+	return events
+}
+
+// TestReopenHandler_KachinukiWithdrawalRemovedBroadcastsRestore: reopening a
+// kachinuki match a withdrawal ended removes the withdrawal (operator ruling
+// 2026-09-24: "Everything should be able to be fixed, in case of a wrong
+// entry"), so the team it barred is eligible again and both reopen doors
+// broadcast that restore as competitor_status_updated, exactly as /score
+// does. A reopen of a match no withdrawal ended broadcasts no status.
+func TestReopenHandler_KachinukiWithdrawalRemovedBroadcastsRestore(t *testing.T) {
+	const compID = "kachinuki-reopen-kiken"
+	statusUpdateFor := func(events []string, playerID string) bool {
+		for _, e := range events {
+			if strings.Contains(e, `"type":"competitor_status_updated"`) &&
+				strings.Contains(e, `"playerId":"`+playerID+`"`) && strings.Contains(e, `"eligible":true`) {
+				return true
+			}
+		}
+		return false
+	}
+	// seed puts Ryu v Tora on court A, bout 1 fought, and ends it with
+	// Ryu's (aka) kiken through the real /decision endpoint.
+	seed := func(t *testing.T) (*gin.Engine, *state.Store, *Hub, string, string) {
+		r, store, hub := setupKachinukiScoreServerWithHub(t, compID)
+		players, err := store.LoadParticipants(compID, false)
+		require.NoError(t, err)
+		ids := map[string]string{}
+		for _, p := range players {
+			ids[p.Name] = p.ID
+		}
+		require.NoError(t, store.SavePoolMatches(compID, []state.MatchResult{{
+			ID: "P1-0", SideA: "Ryu", SideAID: ids["Ryu"], SideB: "Tora", SideBID: ids["Tora"],
+			Court: "A", Status: state.MatchStatusRunning,
+			SubResults: []state.SubMatchResult{
+				{Position: 1, SideA: "R-1", SideB: "W-1", IpponsA: []string{"M"}, Winner: "R-1", Decision: "fought"},
+			},
+		}}))
+		w := postDecision(t, r, compID, "P1-0", map[string]any{"decision": "kiken-voluntary", "decisionBy": "aka"})
+		require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+		statuses, err := store.LoadCompetitorStatus(compID)
+		require.NoError(t, err)
+		require.False(t, statuses[ids["Ryu"]].Eligible, "precondition: the kiken barred Ryu")
+		return r, store, hub, ids["Ryu"], ids["Tora"]
+	}
+
+	t.Run("reopen", func(t *testing.T) {
+		r, store, hub, ryuID, _ := seed(t)
+		events := broadcastsDuring(t, hub, func() {
+			w := postReopen(t, r, compID, "P1-0", "Wrong entry: nobody withdrew")
+			require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+		})
+		statuses, err := store.LoadCompetitorStatus(compID)
+		require.NoError(t, err)
+		assert.True(t, statuses[ryuID].Eligible, "the team the withdrawal barred is eligible again")
+		assert.True(t, statusUpdateFor(events, ryuID), "the restore is broadcast; got %v", events)
+	})
+
+	t.Run("requeue-blocker-and-reopen", func(t *testing.T) {
+		r, store, hub, ryuID, toraID := seed(t)
+		// The court's next match, started after the kiken. It cannot involve
+		// Ryu, whom the kiken barred (the app refuses to start an ineligible
+		// team), so a third team is on court with Tora.
+		players, err := store.LoadParticipants(compID, false)
+		require.NoError(t, err)
+		kumaID := helper.NewUUID4()
+		require.NoError(t, store.SaveParticipants(compID, append(players, domain.Player{ID: kumaID, Name: "Kuma", Dojo: "DojoK"})))
+		ms, err := store.LoadPoolMatches(compID)
+		require.NoError(t, err)
+		ms = append(ms, state.MatchResult{
+			ID: "P1-1", SideA: "Tora", SideAID: toraID, SideB: "Kuma", SideBID: kumaID,
+			Court: "A", Status: state.MatchStatusRunning,
+		})
+		require.NoError(t, store.SavePoolMatches(compID, ms))
+		events := broadcastsDuring(t, hub, func() {
+			w := postRequeueAndReopen(t, r, compID, "P1-0", map[string]any{"blockerCompId": compID, "blockerMatchId": "P1-1"})
+			require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+		})
+		statuses, err := store.LoadCompetitorStatus(compID)
+		require.NoError(t, err)
+		assert.True(t, statuses[ryuID].Eligible)
+		assert.True(t, statusUpdateFor(events, ryuID), "the restore is broadcast; got %v", events)
+	})
+
+	t.Run("no withdrawal: no status broadcast", func(t *testing.T) {
+		r, store, hub := setupKachinukiScoreServerWithHub(t, compID)
+		require.NoError(t, store.SavePoolMatches(compID, []state.MatchResult{completedKachinukiPoolMatch()}))
+		events := broadcastsDuring(t, hub, func() {
+			w := postReopen(t, r, compID, "P1-0", "wrong winner recorded")
+			require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+		})
+		var sawMatchUpdate bool
+		for _, e := range events {
+			assert.NotContains(t, e, `"type":"competitor_status_updated"`, "nothing was withdrawn, so nothing is restored")
+			sawMatchUpdate = sawMatchUpdate || strings.Contains(e, `"type":"match_updated"`)
+		}
+		assert.True(t, sawMatchUpdate, "the capture saw the reopen's own broadcast; got %v", events)
+	})
 }
 
 // TestReopenHandler_NonKachinukiRejected: reopen exists ONLY for

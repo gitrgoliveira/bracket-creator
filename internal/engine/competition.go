@@ -124,11 +124,39 @@ const (
 // locks; that is safe because MaybeAutoCompletePools is NOT inside an open
 // transform at that point.
 func (e *Engine) MaybeAutoCompletePools(compID string) (AutoCompleteOutcome, error) {
+	return e.maybeAutoCompletePools(compID, true)
+}
+
+// MaybeAutoCompletePoolsAfterWrite is MaybeAutoCompletePools for a door that
+// has just written the given matches (a score, a decision, a bulk batch), and
+// the one such doors call. The difference is the knockout-status pool pass
+// (advanceMixedPools once a mixed competition is in its knockout): it re-reads
+// every pool's matches and standings, runs both tie-break injectors and parses
+// the bracket, under the per-competition lock, and only a write that can move
+// who holds a qualifying place needs it (poolWriteCanMoveQualifiers: a pool
+// match, tie-break and pool daihyosen rows included, left completed). Every
+// knockout write and every autosave in knockout status therefore skips it. A
+// door that moves standings WITHOUT a match write (a pool-rank override) calls
+// MaybeAutoCompletePools, which always runs it.
+func (e *Engine) MaybeAutoCompletePoolsAfterWrite(compID string, written ...state.MatchResult) (AutoCompleteOutcome, error) {
+	poolsMayHaveMoved := false
+	for i := range written {
+		if poolWriteCanMoveQualifiers(written[i].ID, written[i].Status) {
+			poolsMayHaveMoved = true
+			break
+		}
+	}
+	return e.maybeAutoCompletePools(compID, poolsMayHaveMoved)
+}
+
+// maybeAutoCompletePools is the shared body of both doors above.
+// poolsMayHaveMoved gates only the knockout-status pool pass.
+func (e *Engine) maybeAutoCompletePools(compID string, poolsMayHaveMoved bool) (AutoCompleteOutcome, error) {
 	started, comp, err := e.autoStartOnFirstResult(compID)
 	if err != nil {
 		return AutoCompleteNoChange, err
 	}
-	outcome, err := e.maybeAutoCompletePoolsRunning(compID, comp)
+	outcome, err := e.maybeAutoCompletePoolsRunning(compID, comp, poolsMayHaveMoved)
 	if err != nil {
 		return outcome, err
 	}
@@ -227,14 +255,37 @@ func (e *Engine) hasRecordedResult(compID string) (bool, error) {
 
 // maybeAutoCompletePoolsRunning is MaybeAutoCompletePools' pool-phase half.
 // comp is the caller's already-loaded competition (possibly nil when no such
-// competition exists), so the two halves share one read.
-func (e *Engine) maybeAutoCompletePoolsRunning(compID string, comp *state.Competition) (AutoCompleteOutcome, error) {
+// competition exists), so the two halves share one read. poolsMayHaveMoved
+// is false only when the caller knows its write cannot have moved pool
+// standings (MaybeAutoCompletePoolsAfterWrite).
+func (e *Engine) maybeAutoCompletePoolsRunning(compID string, comp *state.Competition, poolsMayHaveMoved bool) (AutoCompleteOutcome, error) {
 	// MIXED (Pools + Knockout): resolve incrementally, pool finishers drop into
 	// their knockout slots the moment each pool completes, with NO wait for the
 	// rest of the pool phase. Short-circuit BEFORE the comp-wide "all pools done"
 	// gate below (which is only meaningful for league completion).
-	if comp != nil && comp.Format == state.CompFormatMixed && comp.Status == state.CompStatusPools {
-		return e.advanceMixedPools(compID, comp)
+	//
+	// KNOCKOUT status too, not just pools: a pool correction made after the
+	// last pool was seeded can leave a place tied (its slot back on its draw
+	// label, pool_requalify.go), and the tie-break that settles it is injected
+	// and then seated only here. Stopping at the pools->knockout flip left that
+	// slot a placeholder for the rest of the competition. Everything this does
+	// is idempotent, and resolveSlots never repaints a running or played match.
+	//
+	// In knockout status it runs only when pool standings may have moved: it
+	// costs a full re-read of the pools, standings, both injectors and the
+	// bracket under the per-competition lock, and once the pools are seeded
+	// almost every write is a knockout match (or its autosave), which can move
+	// nothing here. Such a write returns NoChange rather than falling through
+	// to the league path below, which a mixed competition has no use for.
+	if comp != nil && comp.Format == state.CompFormatMixed {
+		switch {
+		case comp.Status == state.CompStatusPools:
+			return e.advanceMixedPools(compID, comp)
+		case comp.Status == state.CompStatusKnockout && poolsMayHaveMoved:
+			return e.advanceMixedPools(compID, comp)
+		case comp.Status == state.CompStatusKnockout:
+			return AutoCompleteNoChange, nil
+		}
 	}
 
 	// Optional fast-path outside the lock, avoids taking the

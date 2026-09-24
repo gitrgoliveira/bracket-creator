@@ -49,7 +49,9 @@ const getScoreBtnClass = window.getScoreBtnClass;
 // A knockout row is named by matchLabel (write_result.jsx), the same owner the
 // correction dialogs use, so the row an operator is sent to looking for
 // "Match 15" -- or for "the 3rd-place match", the one match named rather than
-// numbered -- carries exactly the words they were given.
+// numbered -- carries the words they were given. A dialog adds the round the
+// server names it with ("Match 15 (Semifinals)"); the row keeps the number,
+// which is what the dialog's label leads with.
 //
 // Returns "" when the match carries no number at all: a bracket match drawn
 // before numbering existed, and a pool supplementary bout (daihyosen or

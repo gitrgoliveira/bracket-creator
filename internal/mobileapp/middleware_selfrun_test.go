@@ -1002,9 +1002,6 @@ func TestSelfRun_ReopenRequiresMainPassword(t *testing.T) {
 	})
 
 	t.Run("with_main_password_passes_the_gate", func(t *testing.T) {
-		// The body carries the mandatory audit reason so the request gets past
-		// the handler's own 400 and reaches the engine's kachinuki-only check,
-		// which is what this assertion is actually about.
 		req := jsonReq(http.MethodPost, "/api/competitions/some-comp/matches/m-r1-0/reopen",
 			map[string]any{"reason": "wrong winner recorded"})
 		req.Header.Set("X-Tournament-Password", "main-pw")
@@ -1012,12 +1009,12 @@ func TestSelfRun_ReopenRequiresMainPassword(t *testing.T) {
 		r.ServeHTTP(w, req)
 		// What matters here is that the credential cleared the middleware (a
 		// 401 would mean the gate rejected the main password). The handler
-		// itself then answers 400: the fixture competition doesn't exist, so
-		// the engine's kachinuki-only validation fires.
+		// itself then answers 404: the fixture competition doesn't exist, so
+		// the engine finds no match to reopen.
 		assert.NotEqual(t, http.StatusUnauthorized, w.Code, w.Body.String())
-		assert.Equal(t, http.StatusBadRequest, w.Code, w.Body.String())
-		assert.Contains(t, w.Body.String(), "kachinuki",
-			"the request must reach ReopenKachinukiMatch's own validation")
+		assert.Equal(t, http.StatusNotFound, w.Code, w.Body.String())
+		assert.Contains(t, w.Body.String(), "not found",
+			"the request must reach ReopenMatch's own lookup")
 	})
 }
 

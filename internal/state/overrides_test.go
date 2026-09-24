@@ -70,6 +70,35 @@ func TestOverrides(t *testing.T) {
 	assert.Empty(t, overrides.Winners)
 }
 
+// RestoreRankOverride is the undo of a refused override: it puts back the
+// value read before the change, or removes the key when there was none.
+func TestRestoreRankOverride(t *testing.T) {
+	dir, err := os.MkdirTemp("", "overrides-restore-*")
+	require.NoError(t, err)
+	defer os.RemoveAll(dir)
+	store, err := NewStore(dir)
+	require.NoError(t, err)
+	compID := "comp-restore"
+	require.NoError(t, store.SaveCompetition(&Competition{ID: compID, Name: "Comp Restore"}))
+	key := helper.CompetitorKey("alice-id", "", "")
+	ranks := func() map[string]int {
+		o, lerr := store.LoadOverrides(compID)
+		require.NoError(t, lerr)
+		return o.PoolRanks["Pool A"]
+	}
+
+	require.NoError(t, store.SaveRankOverride(compID, "Pool A", "alice-id", 2))
+	require.NoError(t, store.RestoreRankOverride(compID, "Pool A", "alice-id", 0, false))
+	assert.NotContains(t, ranks(), key, "no prior override: the key is removed")
+
+	require.NoError(t, store.SaveRankOverride(compID, "Pool A", "alice-id", 3))
+	require.NoError(t, store.RestoreRankOverride(compID, "Pool B", "alice-id", 1, true))
+	o, err := store.LoadOverrides(compID)
+	require.NoError(t, err)
+	assert.Equal(t, 1, o.PoolRanks["Pool B"][key], "a prior override is put back, creating its pool's map")
+	assert.Equal(t, 3, ranks()[key], "another pool's override is untouched")
+}
+
 func TestSaveOverrides_InvalidDir(t *testing.T) {
 	// Try to save to a directory that cannot be created
 	dir, err := os.MkdirTemp("", "overrides-fail-*")

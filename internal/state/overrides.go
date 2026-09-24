@@ -175,6 +175,23 @@ func (s *Store) SaveRankOverride(compID, poolID, playerID string, rank int) erro
 	return err
 }
 
+// RestoreRankOverride puts one competitor's pool-rank override back to a value
+// read before a change: rank when present, else no override at all. It is the
+// undo half of an override the engine refused after writing it
+// (engine.OverridePoolRank): overrides.json serializes on the store-wide lock,
+// not the per-competition one, so it is never staged in a transaction and a
+// refusal has to put it back by hand. The present arm is SaveRankOverride
+// itself; the absent arm deletes the same participant-id key it writes.
+func (s *Store) RestoreRankOverride(compID, poolID, playerID string, rank int, present bool) error {
+	if present {
+		return s.SaveRankOverride(compID, poolID, playerID, rank)
+	}
+	key := helper.CompetitorKey(playerID, "", "")
+	return s.modifyOverrides(compID, func(o *Overrides) {
+		delete(o.PoolRanks[poolID], key)
+	})
+}
+
 func (s *Store) SaveWinnerOverride(compID, matchID, winnerName string) error {
 	return s.modifyOverrides(compID, func(o *Overrides) {
 		o.Winners[matchID] = winnerName

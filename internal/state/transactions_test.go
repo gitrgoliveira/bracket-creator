@@ -4,6 +4,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"testing"
@@ -1517,4 +1518,67 @@ func TestStoreTx_PendingPaths(t *testing.T) {
 		require.ErrorIs(t, err, wantErr,
 			"UpdateBracket pending-path must propagate mutate error")
 	})
+}
+
+// A transaction whose Apply fails AFTER its WAL committed is not dropped: the
+// next startup replays it. Its error therefore carries ErrTxCommitted, so a
+// caller that did work outside the WAL (engine.OverridePoolRank's
+// overrides.json) keeps that work for the replay instead of undoing it. A
+// Commit that fails commits nothing and carries no such mark.
+func TestWithTransaction_ApplyFailureAfterCommitIsMarked(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("chmod 0500 isn't enforced on Windows the same way")
+	}
+	if os.Getuid() == 0 {
+		t.Skip("Skipping permission test: root bypasses file permission restrictions")
+	}
+	dir := t.TempDir()
+	store, err := NewStore(dir)
+	require.NoError(t, err)
+	compID := "apply-fails"
+	require.NoError(t, store.SaveCompetition(&Competition{ID: compID, Name: "Apply Fails"}))
+	compDir := store.compPath(compID)
+	walDir := filepath.Join(dir, ".wal")
+	bracket := func(id string) *Bracket {
+		return &Bracket{Rounds: [][]BracketMatch{{{ID: id, SideA: "A", SideB: "B", Status: MatchStatusScheduled}}}}
+	}
+	walCount := func() int {
+		entries, rerr := os.ReadDir(walDir)
+		require.NoError(t, rerr)
+		return len(entries)
+	}
+
+	// Commit writes into .wal/, which stays writable; Apply writes into the
+	// competition's own directory, which no longer is.
+	before := walCount()
+	err = store.WithTransaction(compID, func(tx StoreTx) error {
+		if serr := tx.SaveBracket(compID, bracket("m-applied-on-replay")); serr != nil {
+			return serr
+		}
+		return os.Chmod(compDir, 0500)
+	})
+	require.NoError(t, os.Chmod(compDir, 0700))
+	require.Error(t, err)
+	assert.ErrorIs(t, err, ErrTxCommitted)
+	assert.Contains(t, err.Error(), "Apply:")
+	assert.Equal(t, before+1, walCount(), "the committed WAL stays on disk for the replay")
+
+	restarted, err := NewStore(dir)
+	require.NoError(t, err)
+	got, err := restarted.LoadBracket(compID)
+	require.NoError(t, err)
+	require.NotNil(t, got, "the replay lands the committed transaction")
+	assert.Equal(t, "m-applied-on-replay", got.Rounds[0][0].ID)
+
+	// A Commit that fails leaves nothing to replay.
+	err = restarted.WithTransaction(compID, func(tx StoreTx) error {
+		if serr := tx.SaveBracket(compID, bracket("m-never-committed")); serr != nil {
+			return serr
+		}
+		return os.Chmod(walDir, 0500)
+	})
+	require.NoError(t, os.Chmod(walDir, 0700))
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "Commit:")
+	assert.NotErrorIs(t, err, ErrTxCommitted)
 }

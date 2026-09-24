@@ -134,9 +134,9 @@ describe('kachinuki [Reopen match] is one tap', () => {
     // No gate of any kind: the tap IS the reopen.
     expect(screen.queryByText('Reason for reopening')).toBeNull();
     expect(window.API.reopenMatch).toHaveBeenCalledTimes(1);
-    // Three arguments: comp, match, password. A reason argument here would
-    // mean the operator was asked for one.
-    expect(window.API.reopenMatch).toHaveBeenCalledWith('comp1', 'm1', 'secret');
+    // No reason and no downstream confirmation: a reason here would mean the
+    // operator was asked for one.
+    expect(window.API.reopenMatch).toHaveBeenCalledWith('comp1', 'm1', 'secret', { reason: '', force: false });
     await waitFor(() => expect(onClose).toHaveBeenCalled());
   });
 
@@ -279,7 +279,7 @@ describe('kachinuki reopen: a busy court gets a remedy, not a dead end', () => {
 
     // ONE server call: target=(comp1, m1), blocker=(comp1, m-r1-1). No second
     // reopenMatch call — the requeue and reopen commit together server-side.
-    expect(window.API.requeueBlockerAndReopen).toHaveBeenCalledWith('comp1', 'm1', 'comp1', 'm-r1-1', 'secret');
+    expect(window.API.requeueBlockerAndReopen).toHaveBeenCalledWith('comp1', 'm1', 'comp1', 'm-r1-1', 'secret', { reason: '', force: false });
     expect(window.API.reopenMatch).toHaveBeenCalledTimes(1);
     await waitFor(() => expect(onClose).toHaveBeenCalled());
   });

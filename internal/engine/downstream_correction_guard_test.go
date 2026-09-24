@@ -274,7 +274,7 @@ func TestDownstreamKnockoutCorrection_RestoreBypassesGuard(t *testing.T) {
 		Status: state.MatchStatusCompleted,
 	}
 	txErr := inTx(t, store, compID, func(tx state.StoreTx) error {
-		_, err := eng.recordBracketMatchResult(tx, compID, "m-r1-0", snapshot, matchWriteRestore, false)
+		_, _, err := eng.recordBracketMatchResult(tx, compID, "m-r1-0", snapshot, matchWriteRestore, false)
 		return err
 	})
 	require.NoError(t, txErr, "matchWriteRestore must never be refused by the downstream guard")
@@ -905,12 +905,12 @@ func TestDownstreamKnockoutCorrection_ReopenedCarriesTheMatchNumber(t *testing.T
 			{
 				{ID: "m-r1-0", SideA: "Alice", SideB: "Bob", SideAID: "alice", SideBID: "bob",
 					Winner: "Alice", WinnerID: "alice", Status: state.MatchStatusCompleted,
-					IpponsA: []string{"M"}, MatchNumber: 1},
+					IpponsA: []string{"M"}, MatchNumber: 1, DisplayRound: 2},
 			},
 			{
 				{ID: "m-r2-0", SideA: "Alice", SideB: "Charlie", SideAID: "alice", SideBID: "charlie",
 					Winner: "Alice", WinnerID: "alice", Status: state.MatchStatusCompleted,
-					IpponsA: []string{"M", "M"}, MatchNumber: 3},
+					IpponsA: []string{"M", "M"}, MatchNumber: 3, DisplayRound: 1},
 			},
 		},
 	}))
@@ -925,7 +925,7 @@ func TestDownstreamKnockoutCorrection_ReopenedCarriesTheMatchNumber(t *testing.T
 	require.ErrorAs(t, txErr, &dkErr)
 	require.Len(t, dkErr.Blocking, 1)
 	assert.Equal(t, 3, dkErr.Blocking[0].Number, "the operator's label, not the id")
-	assert.Contains(t, dkErr.Error(), "Match 3")
+	assert.Contains(t, dkErr.Error(), "Match 3 (Final)", "the number, qualified by its knockout round")
 	assert.NotContains(t, dkErr.Error(), "m-r2-0", "the internal id must not be shown")
 
 	// And so does what the forced write reports back.
@@ -938,7 +938,7 @@ func TestDownstreamKnockoutCorrection_ReopenedCarriesTheMatchNumber(t *testing.T
 	require.Len(t, reopened, 1)
 	assert.Equal(t, "m-r2-0", reopened[0].ID, "the id still travels, for addressing the match")
 	assert.Equal(t, 3, reopened[0].Number)
-	assert.Equal(t, "Match 3", MatchLabel(reopened[0]))
+	assert.Equal(t, "Match 3 (Final)", MatchLabel(reopened[0]))
 
 	// A match with no number (a bye placeholder, or a pre-numbering bracket)
 	// falls back to the id rather than printing "Match 0".

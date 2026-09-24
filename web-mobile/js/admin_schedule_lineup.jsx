@@ -513,12 +513,23 @@ export function MatchLineupSideEditor({ comp, team, match, allMatches, password,
 
   return (
     <div data-testid={`match-lineup-side-${teamId}`}>
-      <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8, flexWrap: "wrap" }}>
         <span style={{ fontWeight: 700, fontSize: 13 }}>{teamName}</span>
         {isMatchOverride
           ? <span style={{ fontSize: 11, color: "var(--accent)", fontWeight: 600 }}>Override for this match</span>
           : <span style={{ fontSize: 11, color: "var(--ink-3)" }}>Inheriting round default</span>
         }
+        <button type="button"
+          className="btn btn--sm"
+          style={{ marginLeft: "auto" }}
+          onClick={copyFromPrevious}
+          disabled={!hasSiblings || copying || saving}
+          title={hasSiblings
+            ? "Find and copy the lineup from the most recent previous match"
+            : "No other matches for this team"}
+        >
+          {copying ? "Copying…" : "Copy from previous match"}
+        </button>
       </div>
 
       {error && (
@@ -612,16 +623,6 @@ export function MatchLineupSideEditor({ comp, team, match, allMatches, password,
           disabled={saving || copying}
         >
           {saving ? "Saving…" : "Save lineup"}
-        </button>
-        <button type="button"
-          className="btn btn--sm"
-          onClick={copyFromPrevious}
-          disabled={!hasSiblings || copying || saving}
-          title={hasSiblings
-            ? "Find and copy the lineup from the most recent previous match"
-            : "No other matches for this team"}
-        >
-          {copying ? "Copying…" : "Copy from previous match"}
         </button>
       </div>
     </div>

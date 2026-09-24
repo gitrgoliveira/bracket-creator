@@ -1029,7 +1029,9 @@ func TestScoreHandler_KikenSameNameNamesakesNoWinnerIDRejected(t *testing.T) {
 
 // TestScoreHandler_CorruptOverrides_TerminalErrorThenRepairable is PR #416
 // finding 10: a corrupt overrides.json makes computeStandingsFrom (reached
-// during a mixed-format pool score write via the mp-e2k1 guard) fail closed,
+// during a mixed-format pool score write via the pool requalification check,
+// which reads standings once the written pool is complete and its knockout is
+// drawn) fail closed,
 // correctly -- but before this fix the error was unmapped and fell through
 // to internalError's 500, which the SPA's offline write queue retries
 // forever (mp-q8c6 poisoned-queue pattern), with no way to repair the file
@@ -1039,6 +1041,20 @@ func TestScoreHandler_KikenSameNameNamesakesNoWinnerIDRejected(t *testing.T) {
 // naming the file, and Store.ResetOverridesForce (called here directly,
 // since the reset-overrides HTTP handler in handlers_competition.go is
 // outside this change's scope) is the load-free repair door.
+// seatUnresolvedPoolAKnockout gives a mixed test competition the knockout its
+// Pool A feeds, drawn but not yet seated ("Pool A-1st" still in the slot).
+// The pool requalification check reads standings only once the written pool
+// is complete and a drawn knockout exists, so a corrupt-overrides test needs
+// one for that read to happen at all.
+func seatUnresolvedPoolAKnockout(t *testing.T, store *state.Store, compID string) {
+	t.Helper()
+	require.NoError(t, store.SaveBracket(compID, &state.Bracket{Rounds: [][]state.BracketMatch{{{
+		ID: "m-r1-0", MatchNumber: 1,
+		PlaceholderA: "Pool A-1st", PlaceholderB: "Pool B-1st",
+		SideA: "Pool A-1st", SideB: "Pool B-1st",
+	}}}}))
+}
+
 func TestScoreHandler_CorruptOverrides_TerminalErrorThenRepairable(t *testing.T) {
 	r, store, _, _, tempDir := setupTestRouter(t)
 	defer os.RemoveAll(tempDir)
@@ -1062,6 +1078,7 @@ func TestScoreHandler_CorruptOverrides_TerminalErrorThenRepairable(t *testing.T)
 	require.NoError(t, store.SavePoolMatches(compID, []state.MatchResult{
 		{ID: "Pool A-0", SideA: "Alice", SideAID: aliceID, SideB: "Bob", SideBID: bobID, Status: state.MatchStatusScheduled},
 	}))
+	seatUnresolvedPoolAKnockout(t, store, compID)
 
 	// Corrupt overrides.json directly (mirrors engine's corruptOverridesFile
 	// test helper, package-private there): the competition directory must
@@ -1131,6 +1148,7 @@ func TestBulkScoreHandler_CorruptOverrides_ReasonEnriched(t *testing.T) {
 	require.NoError(t, store.SavePoolMatches(compID, []state.MatchResult{
 		{ID: "Pool A-0", SideA: "Alice", SideB: "Bob", Status: state.MatchStatusScheduled},
 	}))
+	seatUnresolvedPoolAKnockout(t, store, compID)
 
 	overridesPath := filepath.Join(store.GetFolder(), "competitions", compID, "overrides.json")
 	require.NoError(t, os.WriteFile(overridesPath, []byte("{not valid json"), 0o600))
@@ -3819,206 +3837,6 @@ func TestBulkScoreHandler_DownstreamKnockoutPlayed_ReasonCode(t *testing.T) {
 	assert.Equal(t, state.MatchStatusScheduled, b2.Rounds[1][0].Status,
 		"reopened in place and waiting to be fought again: running would hold the court, which deadlocked two reopened siblings")
 	assert.Empty(t, b2.Rounds[1][0].Winner, "the reopened match's stale verdict was cleared")
-}
-
-// seedMixedCompWithScoredKnockoutFinisher builds a minimal Mixed competition
-// (bc-cse finding 1) with two 2-player pools (PoolWinners=1), both pool
-// matches already scored, and a knockout bracket whose single round-0 match
-// (the two pool winners, A1 vs B1) is COMPLETED with A1 as winner.
-// Re-scoring "Pool A-0" to flip its finisher (A1 -> A2) then hits the mp-e2k1
-// guard inside RecordMatchResultWithIneligibility(Tx): the knockout leaf
-// already carries A1's own scored result, so displacing A1 from the pool is
-// refused with *engine.DownstreamKnockoutScoredError.
-//
-// Mirrors internal/engine's saveMixedCompForGuardTest (scoring_tx_test.go),
-// rebuilt here rather than reused because that helper's bracket construction
-// goes through *Engine's unexported buildBracketFromDraw, not reachable from
-// this package; the completed bracket is built by hand instead, which is
-// sufficient since hasStartedKnockoutMatchTx (the guard's own downstream
-// lookup) matches by name/id directly against bracket.Rounds, not by
-// re-deriving the bracket from the pools.
-func seedMixedCompWithScoredKnockoutFinisher(t *testing.T, store *state.Store, compID string) {
-	t.Helper()
-	require.NoError(t, store.SaveCompetition(&state.Competition{
-		ID:                compID,
-		Name:              compID,
-		Format:            state.CompFormatMixed,
-		Status:            state.CompStatusPools,
-		Courts:            []string{"A"},
-		PoolWinners:       1,
-		HasParticipantIDs: true,
-	}))
-	require.NoError(t, store.SavePools(compID, []helper.Pool{
-		{PoolName: "Pool A", Players: []helper.Player{
-			{ID: "a1-id", Name: "A1", Dojo: "Dojo A1"}, {ID: "a2-id", Name: "A2", Dojo: "Dojo A2"},
-		}},
-		{PoolName: "Pool B", Players: []helper.Player{
-			{ID: "b1-id", Name: "B1", Dojo: "Dojo B1"}, {ID: "b2-id", Name: "B2", Dojo: "Dojo B2"},
-		}},
-	}))
-	require.NoError(t, store.SaveParticipants(compID, []domain.Player{
-		{ID: "a1-id", Name: "A1", Dojo: "Dojo A1"},
-		{ID: "a2-id", Name: "A2", Dojo: "Dojo A2"},
-		{ID: "b1-id", Name: "B1", Dojo: "Dojo B1"},
-		{ID: "b2-id", Name: "B2", Dojo: "Dojo B2"},
-	}))
-	require.NoError(t, store.SavePoolMatches(compID, []state.MatchResult{
-		{ID: "Pool A-0", SideA: "A1", SideB: "A2", SideAID: "a1-id", SideBID: "a2-id",
-			Winner: "A1", WinnerID: "a1-id", IpponsA: []string{"M", "M"}, Status: state.MatchStatusCompleted},
-		{ID: "Pool B-0", SideA: "B1", SideB: "B2", SideAID: "b1-id", SideBID: "b2-id",
-			Winner: "B1", WinnerID: "b1-id", IpponsA: []string{"M", "M"}, Status: state.MatchStatusCompleted},
-	}))
-	require.NoError(t, store.SaveBracket(compID, &state.Bracket{
-		Rounds: [][]state.BracketMatch{
-			{
-				{ID: "m-r1-0", SideA: "A1", SideB: "B1", SideAID: "a1-id", SideBID: "b1-id",
-					Winner: "A1", WinnerID: "a1-id", IpponsA: []string{"M"}, Status: state.MatchStatusCompleted},
-			},
-		},
-	}))
-}
-
-// TestScoreHandler_DownstreamKnockoutScored_409Shape pins the mp-e2k1 wire
-// contract for /score, now routed through the shared
-// respondIfDownstreamKnockoutScored helper (bc-cse finding 1) rather than
-// hand-copied inline: re-scoring a completed pool match to flip its
-// qualifying finisher, while the knockout leaf that finisher's win already
-// fed carries its own scored result, is refused with HTTP 409
-// {"error":"downstream_knockout_scored","pool","finisher","matchId","message"}.
-// Revert the respondIfDownstreamKnockoutScored extraction back to its old
-// inline body (or drop the call) to see this go red only if the mapping is
-// removed entirely; it otherwise pins the extraction preserved behaviour.
-func TestScoreHandler_DownstreamKnockoutScored_409Shape(t *testing.T) {
-	r, store, _, _, tempDir := setupTestRouter(t)
-	defer os.RemoveAll(tempDir)
-
-	compID := "e2k1-score-409"
-	seedMixedCompWithScoredKnockoutFinisher(t, store, compID)
-
-	body, _ := json.Marshal(map[string]any{
-		"sideA": "A1", "sideB": "A2",
-		"winner": "A2", "ipponsB": []string{"M"},
-		"status": "completed", "correctionReason": "scoresheet was misread",
-	})
-	w := httptest.NewRecorder()
-	req, err := http.NewRequest("PUT", "/api/competitions/"+compID+"/matches/Pool A-0/score", bytes.NewBuffer(body))
-	require.NoError(t, err)
-	req.Header.Set("Content-Type", "application/json")
-	r.ServeHTTP(w, req)
-
-	require.Equal(t, http.StatusConflict, w.Code, w.Body.String())
-	var resp map[string]any
-	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
-	assert.Equal(t, "downstream_knockout_scored", resp["error"])
-	assert.Equal(t, "Pool A", resp["pool"])
-	assert.Equal(t, "A1", resp["finisher"])
-	assert.Equal(t, "m-r1-0", resp["matchId"])
-	assert.NotEmpty(t, resp["message"])
-
-	stored, err := store.LoadPoolMatches(compID)
-	require.NoError(t, err)
-	for _, m := range stored {
-		if m.ID == "Pool A-0" {
-			assert.Equal(t, "A1", m.Winner, "a refusal must leave the pool match untouched")
-		}
-	}
-}
-
-// TestQuickScoreHandler_DownstreamKnockoutScored_409Shape pins the FIXED wire
-// contract (bc-cse finding 1): before this fix, quick-score wrote through
-// RecordMatchResultWithIneligibility (added to carry the bc-kcdg force
-// option) with no arm for *engine.DownstreamKnockoutScoredError in its error
-// switch, so a re-score that displaces a pool finisher already scored into a
-// downstream knockout match fell through to a generic HTTP 500 -- which the
-// SPA's offline write queue retries forever for a write that can never win
-// (mp-q8c6 poisoned-queue pattern). Revert only the
-// respondIfDownstreamKnockoutScored arm in quick-score's error switch
-// (handlers_match.go) to see this go red (500 instead of 409).
-func TestQuickScoreHandler_DownstreamKnockoutScored_409Shape(t *testing.T) {
-	r, store, _, _, tempDir := setupTestRouter(t)
-	defer os.RemoveAll(tempDir)
-
-	compID := "e2k1-qs-409"
-	seedMixedCompWithScoredKnockoutFinisher(t, store, compID)
-
-	body, _ := json.Marshal(map[string]any{
-		"sideA": "A1", "sideB": "A2",
-		"teamAWins": 0, "teamBWins": 1,
-	})
-	w := httptest.NewRecorder()
-	req, err := http.NewRequest("PUT", "/api/competitions/"+compID+"/matches/Pool A-0/quick-score", bytes.NewBuffer(body))
-	require.NoError(t, err)
-	req.Header.Set("Content-Type", "application/json")
-	r.ServeHTTP(w, req)
-
-	require.Equal(t, http.StatusConflict, w.Code, w.Body.String())
-	var resp map[string]any
-	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
-	assert.Equal(t, "downstream_knockout_scored", resp["error"])
-	assert.Equal(t, "Pool A", resp["pool"])
-	assert.Equal(t, "A1", resp["finisher"])
-	assert.Equal(t, "m-r1-0", resp["matchId"])
-	assert.NotEmpty(t, resp["message"])
-
-	stored, err := store.LoadPoolMatches(compID)
-	require.NoError(t, err)
-	for _, m := range stored {
-		if m.ID == "Pool A-0" {
-			assert.Equal(t, "A1", m.Winner, "a refusal must leave the pool match untouched")
-		}
-	}
-}
-
-// TestBulkScoreHandler_DownstreamKnockoutScored_ReasonCode pins bulk-score's
-// per-entry mirror of the same mp-e2k1 mapping (bc-cse finding 1 audit):
-// unlike the single-match endpoints, bulk-score is always HTTP 200 with
-// per-entry partial-success results, so the refusal surfaces as a
-// machine-readable Reason ("downstream_knockout_scored") on that entry,
-// exactly like the existing "downstream_knockout_played" reason. Before this
-// fix the entry's Reason was left empty (only the free-text Error was set),
-// so a client could not distinguish it from an arbitrary rejection or learn
-// that retrying with forceDownstreamReopen:true would resolve it.
-func TestBulkScoreHandler_DownstreamKnockoutScored_ReasonCode(t *testing.T) {
-	r, store, _, _, tempDir := setupTestRouter(t)
-	defer os.RemoveAll(tempDir)
-
-	compID := "e2k1-bulk-409"
-	seedMixedCompWithScoredKnockoutFinisher(t, store, compID)
-
-	entry := map[string]any{
-		"id": "Pool A-0", "sideA": "A1", "sideB": "A2",
-		"winner": "A2", "ipponsB": []string{"M"},
-		"status": "completed", "correctionReason": "scoresheet was misread",
-	}
-	body, _ := json.Marshal([]map[string]any{entry})
-	w := httptest.NewRecorder()
-	req, _ := http.NewRequest("POST", "/api/competitions/"+compID+"/matches/bulk-score", bytes.NewBuffer(body))
-	req.Header.Set("Content-Type", "application/json")
-	r.ServeHTTP(w, req)
-
-	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
-	var resp struct {
-		Succeeded int `json:"succeeded"`
-		Errors    []struct {
-			MatchID string `json:"matchId"`
-			Error   string `json:"error"`
-			Reason  string `json:"reason"`
-		} `json:"errors"`
-	}
-	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
-	assert.Equal(t, 0, resp.Succeeded)
-	require.Len(t, resp.Errors, 1)
-	assert.Equal(t, "Pool A-0", resp.Errors[0].MatchID)
-	assert.Equal(t, "downstream_knockout_scored", resp.Errors[0].Reason)
-	assert.NotEmpty(t, resp.Errors[0].Error)
-
-	stored, err := store.LoadPoolMatches(compID)
-	require.NoError(t, err)
-	for _, m := range stored {
-		if m.ID == "Pool A-0" {
-			assert.Equal(t, "A1", m.Winner, "a refusal must leave the pool match untouched")
-		}
-	}
 }
 
 // TestScoreHandler_ReopenedBroadcastCarriesTheMatchID pins the SHAPE of the

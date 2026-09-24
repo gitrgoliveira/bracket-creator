@@ -406,13 +406,5 @@ func resolveKachinukiBoutPosition(positions map[string]string, matchID, team, me
 // title-cased label suitable for the Excel cell (e.g. "senpo" → "Senpo").
 // Numeric positions ("1", "2", …) pass through unchanged.
 func formatPositionLabel(p domain.Position) string {
-	s := string(p)
-	if s == "" {
-		return ""
-	}
-	// Numeric positions stay numeric.
-	if s[0] >= '0' && s[0] <= '9' {
-		return s
-	}
-	return strings.ToUpper(s[:1]) + s[1:]
+	return p.Label()
 }

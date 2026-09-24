@@ -997,6 +997,20 @@ func CanGenerateDraw(status CompetitionStatus) bool {
 	return status == CompStatusSetup || status == ""
 }
 
+// AcceptsPoolRankOverride reports whether a competition's pool order may be
+// set by hand (a chusen, recorded as a pool-rank override): in its pools
+// stage, and, for a pools + knockout competition, after the knockout has
+// started as well. A pool result corrected then can leave a qualifying tie
+// that the daihyosen cannot settle, and a chusen recorded by mistake has to
+// stay fixable (operator ruling: "Everything should be able to be fixed, in
+// case of a wrong entry"); what the new order does to the knockout is
+// answered by engine.OverridePoolRank's requalification. The one statement of
+// this rule, shared by the override-rank door and engine.ChusenCandidates, so
+// the chusen panel is never offered a tie the door would refuse.
+func (c Competition) AcceptsPoolRankOverride() bool {
+	return c.Status == CompStatusPools || (c.Format == CompFormatMixed && c.Status == CompStatusKnockout)
+}
+
 type MatchStatus string
 
 const (
@@ -1194,6 +1208,23 @@ func (s *SubMatchResult) HanteiDecided() bool {
 	return domain.ContainsHantei(s.IpponsA) || domain.ContainsHantei(s.IpponsB)
 }
 
+// HasResult reports whether this bout carries a result: a winner, a decision
+// (a Tie is "hikiwake", a default win "fusensho"), a struck point or the
+// hantei mark on either side, a foul, or an overtime. A row with none of
+// those was never fought. It is the Go twin of subBoutHasBeenPlayed
+// (web-mobile/js/admin_scoring_team.jsx), and the finish gate for a team
+// match (every bout is fought, operator ruling 2026-09-24) asks it of each
+// numbered bout. Placeholder and empty cells are not points, the same rule
+// CountScoringIppons applies everywhere else, so a row of unfilled slots
+// reads as unfought exactly as it does in the editor.
+func (s *SubMatchResult) HasResult() bool {
+	return s.Winner != "" || s.Decision != "" ||
+		domain.CountScoringIppons(s.IpponsA) > 0 || domain.CountScoringIppons(s.IpponsB) > 0 ||
+		s.HanteiDecided() ||
+		s.HansokuA > 0 || s.HansokuB > 0 ||
+		s.Encho.On()
+}
+
 // Attribution reads this row's six identity fields into the shape every
 // "which side won" owner takes (domain.AttributeWinnerSide, and
 // domain.SubBoutAttribution for the sub-bout rule). It exists so that no
@@ -1380,8 +1411,9 @@ type MatchResult struct {
 	// columns absent load as 0. Bracket matches persist fine via bracket.json.
 	FlagsA int `json:"flagsA,omitempty" yaml:"flags_a,omitempty"`
 	FlagsB int `json:"flagsB,omitempty" yaml:"flags_b,omitempty"`
-	// ReopenPending marks a kachinuki match that was reopened WITHOUT an audit
-	// reason and therefore still owes one (mp-gmcg). Reopening is one tap so an
+	// ReopenPending marks a match that was reopened (engine.ReopenMatch: a
+	// kachinuki match, or one a withdrawal decided) WITHOUT an audit reason
+	// and therefore still owes one (mp-gmcg). Reopening is one tap so an
 	// operator who ended a match by mistake can get straight back in; the
 	// justification is collected on the NEXT completion instead, folded into a
 	// step they were already taking. The score path refuses to complete a

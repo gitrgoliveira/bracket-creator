@@ -1141,6 +1141,36 @@ describe('API Utils', () => {
         const [, opts] = global.fetch.mock.calls[0];
         expect(JSON.parse(opts.body)).toEqual({ playerName: 'Alice', rank: 3, playerId: 'id-alice' });
       });
+
+      // A rank that moves a qualifier out of a knockout match already fought
+      // is refused like a pool correction. The refusal must reach the caller
+      // as the structured error attemptScoreWrite reads (marked as a ranking
+      // for the dialog copy), and the confirmed retry must carry the
+      // confirmation; the terminal running refusal keeps its operator copy.
+      it('parses a downstream refusal and forwards the confirmation', async () => {
+        global.fetch = vi.fn().mockResolvedValue({
+          ok: false,
+          status: 409,
+          json: async () => ({
+            error: 'downstream_knockout_played', matchId: '', blockingMatchId: 'm9',
+            blockingMatches: [{ id: 'm9', number: 9 }], displaced: 'Alpha',
+            qualifierChange: [{ pool: 'Pool A', rank: 1, place: '1st', from: { name: 'Alpha' }, to: { name: 'Beta' } }],
+          }),
+        });
+        const err = await API.overridePoolRank('c1', 'Pool A', 'Beta', 1, 'pw', 'id-beta').catch((e) => e);
+        expect(err.downstreamKnockoutPlayed).toMatchObject({ ranking: true, blockingMatchId: 'm9' });
+        expect(err.downstreamKnockoutPlayed.qualifierChange).toHaveLength(1);
+
+        global.fetch = vi.fn().mockResolvedValue({
+          ok: false,
+          status: 409,
+          json: async () => ({ error: 'downstream_knockout_running', matchId: '', runningMatches: [{ id: 'm9', number: 9 }] }),
+        });
+        await expect(API.overridePoolRank('c1', 'Pool A', 'Beta', 1, 'pw', 'id-beta', true))
+          .rejects.toThrow('Match 9 is being fought now. Finish it or send it back to the queue, then save again.');
+        const [, opts] = global.fetch.mock.calls[0];
+        expect(JSON.parse(opts.body)).toEqual({ playerName: 'Beta', rank: 1, playerId: 'id-beta', forceDownstreamReopen: true });
+      });
     });
 
     describe('overrideBracketWinner (applied signal)', () => {

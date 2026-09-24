@@ -5,7 +5,9 @@
 // by the server via reopenPending). Pin the URL/method/headers, the reasonless
 // body, the verbatim error surfacing the editor relies on (the server's 409s
 // are full sentences the operator reads unchanged), and the blocking-match
-// identity the court-busy remedy is built on.
+// identity the court-busy remedy is built on. Clear withdrawal and reopen
+// (bc-tmfn) adds the optional reason and downstream confirmation, and the
+// structured downstream_knockout_played refusal.
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { API } from '../api_client.jsx';
@@ -26,9 +28,9 @@ describe('API.reopenMatch', () => {
   afterEach(() => { global.fetch = originalFetch; });
 
   it('POSTs a reasonless JSON body with the password header', async () => {
-    global.fetch = mockFetch(200, {});
-    const ok = await API.reopenMatch('c42', 'm-r1-0', 'secret');
-    expect(ok).toBe(true);
+    global.fetch = mockFetch(200, { reopenedMatches: [] });
+    const res = await API.reopenMatch('c42', 'm-r1-0', 'secret');
+    expect(res).toEqual({ reopenedMatches: [] });
     const [url, opts] = global.fetch.mock.calls[0];
     expect(url).toBe('/api/competitions/c42/matches/m-r1-0/reopen');
     expect(opts.method).toBe('POST');
@@ -38,6 +40,38 @@ describe('API.reopenMatch', () => {
     // An empty OBJECT, not an absent body: a handler that binds JSON fails on
     // an absent one. And no `reason`: this call must never demand one.
     expect(JSON.parse(opts.body)).toEqual({});
+  });
+
+  // bc-tmfn: Clear withdrawal and reopen collects its reason before the tap
+  // posts, and a retry after the downstream confirm carries the force flag.
+  it('sends the reason and the downstream confirmation only when given', async () => {
+    global.fetch = mockFetch(200, { reopenedMatches: [{ id: 'm-r2-0', number: 2 }] });
+    const res = await API.reopenMatch('c1', 'm1', 'secret', { reason: 'Withdrawal recorded by mistake', force: true });
+    expect(res.reopenedMatches).toEqual([{ id: 'm-r2-0', number: 2 }]);
+    expect(JSON.parse(global.fetch.mock.calls[0][1].body))
+      .toEqual({ reason: 'Withdrawal recorded by mistake', forceDownstreamReopen: true });
+  });
+
+  it('parses the downstream_knockout_played refusal the way the score path does', async () => {
+    global.fetch = mockFetch(409, {
+      error: 'downstream_knockout_played',
+      matchId: 'm-r1-0',
+      blockingMatchId: 'm-r2-0',
+      blockingMatches: [{ id: 'm-r2-0', number: 2 }],
+      displaced: 'Ryu',
+      message: 'correcting match "m-r1-0" would change the winner ...',
+    });
+    const err = await API.reopenMatch('c1', 'm-r1-0', 'secret').then(
+      () => { throw new Error('expected a rejection'); },
+      (e) => e
+    );
+    expect(err.downstreamKnockoutPlayed).toEqual({
+      matchId: 'm-r1-0',
+      blockingMatchId: 'm-r2-0',
+      blockingMatches: [{ id: 'm-r2-0', number: 2 }],
+      displaced: 'Ryu',
+      qualifierChange: [],
+    });
   });
 
   it('surfaces the court-busy 409 sentence, not the machine code, and keeps the blocking match', async () => {
@@ -97,9 +131,9 @@ describe('API.requeueBlockerAndReopen', () => {
   afterEach(() => { global.fetch = originalFetch; });
 
   it('POSTs the blocker identity to the atomic endpoint with the password header', async () => {
-    global.fetch = mockFetch(200, {});
-    const ok = await API.requeueBlockerAndReopen('tgt', 'm-r1-0', 'blk', 'm-r1-1', 'secret');
-    expect(ok).toBe(true);
+    global.fetch = mockFetch(200, { reopenedMatches: [] });
+    const res = await API.requeueBlockerAndReopen('tgt', 'm-r1-0', 'blk', 'm-r1-1', 'secret');
+    expect(res).toEqual({ reopenedMatches: [] });
     const [url, opts] = global.fetch.mock.calls[0];
     expect(url).toBe('/api/competitions/tgt/matches/m-r1-0/requeue-blocker-and-reopen');
     expect(opts.method).toBe('POST');

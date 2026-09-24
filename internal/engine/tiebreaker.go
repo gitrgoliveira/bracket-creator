@@ -211,6 +211,63 @@ func tieNeedsIndividualBreak(comp *state.Competition, positions []int, group []s
 	return tieAffectsAdvancement(positions, poolWinners)
 }
 
+// pendingTieBreak is one tied group of a pool that still owes supplementary
+// bouts: its positions (0-based, into the Points-sorted standings) and the
+// bouts that would settle it.
+type pendingTieBreak struct {
+	positions []int
+	bouts     []state.MatchResult
+}
+
+// pendingTieBreaks is the ONE statement of which supplementary bouts a pool
+// still owes, given the rows already on disk. It is the per-pool body of both
+// injectors (InjectTiebreakerMatches with daihyosen=false,
+// InjectPoolDaihyosenMatches with daihyosen=true), extracted so the
+// requalification planner (pool_requalify.go) can ask the same question
+// inside a transaction, where the injectors themselves cannot run (they write
+// through the bare store).
+//
+// A group whose bouts have all been generated returns nothing here even though
+// detectPoolTies still reports it: Points never change after a supplementary
+// bout (applyTiebreakSort only reorders within the group), so "tied" is not
+// "unsettled". A caller wanting "unsettled" must use this, never
+// detectPoolTies alone, or a settled pool reads as tied forever.
+//
+// The band each kind breaks is the injector's own: individual bouts follow
+// tieNeedsIndividualBreak, team daihyosen follows tieAffectsAdvancement, both
+// against EffectivePoolWinners (not MatchWinnerRanksNeeded: an
+// extra-qualifier "-2nd" slot below that band is never given a bout, so
+// treating it as owing one would leave it unresolved forever).
+//
+// existingRows are the pool's rows of the matching kind (TB rows for
+// individual, DH rows for team); their count seeds the new bouts' ids.
+func pendingTieBreaks(comp *state.Competition, poolName string, poolStandings []state.PlayerStanding, existingRows []state.MatchResult, court string, daihyosen bool) []pendingTieBreak {
+	poolWinners := comp.EffectivePoolWinners()
+	existingCount := len(existingRows)
+	var out []pendingTieBreak
+	for _, positions := range detectPoolTies(poolStandings) {
+		group := standingsAt(poolStandings, positions)
+		var bouts []state.MatchResult
+		if daihyosen {
+			if !tieAffectsAdvancement(positions, poolWinners) {
+				continue
+			}
+			bouts = generatePoolDaihyosenMatches(poolName, group, existingCount, court, existingRows)
+		} else {
+			if !tieNeedsIndividualBreak(comp, positions, group, poolWinners) {
+				continue
+			}
+			bouts = generateTiebreakerMatches(poolName, group, existingCount, court, existingRows)
+		}
+		if len(bouts) == 0 {
+			continue
+		}
+		existingCount += len(bouts)
+		out = append(out, pendingTieBreak{positions: positions, bouts: bouts})
+	}
+	return out
+}
+
 // tiebreakerPairKey returns a canonical (order-independent) key for a
 // pair of player names, used to detect already-existing TB matches.
 func tiebreakerPairKey(a, b string) string {
@@ -356,9 +413,7 @@ func (e *Engine) InjectTiebreakerMatches(compID string) ([]state.MatchResult, er
 	}
 
 	// Supplementary ippon-shobu bouts are held only where the tie affects
-	// advancement/seeding (see tieAffectsAdvancement): top poolWinners advance.
-	poolWinners := comp.EffectivePoolWinners()
-
+	// advancement/seeding; pendingTieBreaks owns that band.
 	standings, err := e.CalculatePoolStandings(compID)
 	if err != nil {
 		return nil, err
@@ -375,11 +430,7 @@ func (e *Engine) InjectTiebreakerMatches(compID string) ([]state.MatchResult, er
 	// the SPECIFIC tied group being processed via groupMemberIDs -- see
 	// that function's doc comment for why a bare-name reduction at this scan
 	// stage would collapse distinct namesake-involving pairs.
-	type poolTBInfo struct {
-		existingRows []state.MatchResult
-		count        int
-	}
-	poolTB := map[string]*poolTBInfo{}
+	poolTB := map[string][]state.MatchResult{}
 	poolCourt := map[string]string{}
 	// regularIncomplete[pool] becomes true if ANY regular (non-TB) match in the
 	// pool is not yet completed. Tiebreakers must only be injected once a pool's
@@ -401,11 +452,7 @@ func (e *Engine) InjectTiebreakerMatches(compID string) ([]state.MatchResult, er
 			poolCourt[pn] = m.Court
 		}
 		if IsTiebreakerMatchID(m.ID) {
-			if poolTB[pn] == nil {
-				poolTB[pn] = &poolTBInfo{}
-			}
-			poolTB[pn].count++
-			poolTB[pn].existingRows = append(poolTB[pn].existingRows, m)
+			poolTB[pn] = append(poolTB[pn], m)
 		} else if m.Status != state.MatchStatusCompleted {
 			regularIncomplete[pn] = true
 		}
@@ -417,22 +464,8 @@ func (e *Engine) InjectTiebreakerMatches(compID string) ([]state.MatchResult, er
 		if regularIncomplete[poolName] {
 			continue
 		}
-		info := poolTB[poolName]
-		existingCount := 0
-		var existingRows []state.MatchResult
-		if info != nil {
-			existingCount = info.count
-			existingRows = info.existingRows
-		}
-
-		for _, positions := range detectPoolTies(poolStandings) {
-			group := standingsAt(poolStandings, positions)
-			if !tieNeedsIndividualBreak(comp, positions, group, poolWinners) {
-				continue
-			}
-			newMatches := generateTiebreakerMatches(poolName, group, existingCount, poolCourt[poolName], existingRows)
-			existingCount += len(newMatches)
-			injected = append(injected, newMatches...)
+		for _, p := range pendingTieBreaks(comp, poolName, poolStandings, poolTB[poolName], poolCourt[poolName], false) {
+			injected = append(injected, p.bouts...)
 		}
 	}
 

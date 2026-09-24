@@ -1,7 +1,7 @@
 // What every recipe that drives a score editor agrees on: which element the
 // editor IS, how a match is started, and how its Finish commits. Everything else about driving one
 // (how a bout is scored, how a fighter is named) differs between the
-// individual, fixed-order team and kachinuki editors, so it stays in the recipe
+// individual, team and kachinuki editors, so it stays in the recipe
 // that needs it; see the note at the end of lib/ui.mjs.
 
 // The editor dialog. Every overlay editor renders `.modal-backdrop
@@ -20,7 +20,7 @@ export const EDITOR = '.editor-modal';
 // leaves (it moves on to the next match), so startMatch's wait would not hold.
 export const INLINE_EDITOR = '.scoring-panel';
 
-// Finish is a two-tap guard on the individual and fixed-order team editors:
+// Finish is a two-tap guard on the individual and (non-kachinuki) team editors:
 // the first tap arms the button ("Tap again to finish"), only the second
 // submits (admin_scoring_individual.jsx and admin_scoring_team.jsx, the
 // `finishArmed` label). Its label is "Finish + Start Next →" instead whenever

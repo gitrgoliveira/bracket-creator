@@ -1,9 +1,9 @@
-// Fixed-order TEAM journeys (mp-yqxn.2, reviewer B): lineup entry from all
+// TEAM (non-kachinuki) journeys (mp-yqxn.2, reviewer B): lineup entry from all
 // three entry points (J3), scoring a team encounter at the court (J4), and one
 // result on every surface (J7). Everything is seeded through the interface.
 //
-//   F3  team, fixed order, 3 per team, pools + knockout, six teams, shiaijo A+B
-//   F4  team, fixed order, 5 per team, knockout only (daihyosen is knockout-only)
+//   F3  team, 3 per team, pools + knockout, six teams, shiaijo A+B
+//   F4  team, 5 per team, knockout only (daihyosen is knockout-only)
 //
 // The clumsy operator's variants (fixtures/clumsy.mjs) are PERFORMED here and
 // recorded as AUDIT lines (and audit.json per test); whether an outcome is
@@ -47,7 +47,7 @@ function recorder(journey) {
   return { rows, record };
 }
 
-// F3: fixed-order teams of three, pools then knockout, on shiaijo A and B.
+// F3: teams of three, pools then knockout, on shiaijo A and B.
 async function seedF3(page, name = 'Team Mixed') {
   const id = await createCompetition(page, {
     name, kind: 'team', format: 'mixed', teamSize: 3, teamMatchType: 'fixed', courts: ['A', 'B'], numberPrefix: 'M',
@@ -58,7 +58,7 @@ async function seedF3(page, name = 'Team Mixed') {
   return id;
 }
 
-// F4: fixed-order teams of five, knockout only, on one shiaijo.
+// F4: teams of five, knockout only, on one shiaijo.
 async function seedF4(page, { name, court, prefix, teams }) {
   const id = await createCompetition(page, {
     name, kind: 'team', format: 'knockout', teamSize: 5, teamMatchType: 'fixed', courts: [court], numberPrefix: prefix,
@@ -480,7 +480,7 @@ test.describe('knockout-mixed-team', () => {
     await testInfo.attach('audit.json', { body: JSON.stringify(rows, null, 2), contentType: 'application/json' });
   });
   // ------------------------------------------------------------------- J4
-  test('J4 fixed-order team scoring at the court (F4)', async ({ page }, testInfo) => {
+  test('J4 team scoring at the court (F4)', async ({ page }, testInfo) => {
     test.setTimeout(600_000);
     const shot = journeyShots('J4-team-scoring');
     const { rows, record } = recorder('J4');

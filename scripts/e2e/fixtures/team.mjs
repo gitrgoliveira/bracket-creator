@@ -1,4 +1,4 @@
-// Fixed-order TEAM competitions: naming team members, the three lineup entry
+// TEAM (non-kachinuki) competitions: naming team members, the three lineup entry
 // points, and scoring a bout inside a team encounter.
 //
 //   the Lineups page      /admin/competition/:id/lineups (admin_lineup.jsx)

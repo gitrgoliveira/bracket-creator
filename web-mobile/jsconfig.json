@@ -1,0 +1,9 @@
+{
+  "compilerOptions": {
+    "allowJs": true,
+    "checkJs": false,
+    "module": "esnext",
+    "moduleResolution": "bundler"
+  },
+  "include": ["js/**/*.jsx", "js/**/*.js"]
+}

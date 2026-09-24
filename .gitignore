@@ -63,6 +63,7 @@ Thumbs.db
 !web-mobile/package.json
 !web-mobile/package-lock.json
 !web-mobile/.oxlintrc.json
+!web-mobile/jsconfig.json
 !web/package.json
 !web/package-lock.json
 !scripts/screenshots/package.json

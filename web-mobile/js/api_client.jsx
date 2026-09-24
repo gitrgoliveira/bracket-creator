@@ -78,8 +78,14 @@ async function reopenFailureError(res) {
     // A later knockout match already has its own result: the same refusal a
     // knockout correction gets, parsed by the same helper, so the caller asks
     // downstreamKnockoutPlayedRefusal(e) and confirms before retrying with force.
+    // `reopen` marks it as met by a reopen rather than a corrected result, for
+    // the dialog's copy (write_result.jsx), the way overridePoolRank marks
+    // `ranking`.
     const downstream = _downstreamKnockoutPlayedError(err);
-    if (downstream) return downstream;
+    if (downstream) {
+        downstream.downstreamKnockoutPlayed.reopen = true;
+        return downstream;
+    }
     const e = new Error(err.message || err.error || "Failed to reopen match");
     if (err.error) e.code = err.error;
     if (err.court) e.court = err.court;

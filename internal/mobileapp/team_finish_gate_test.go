@@ -75,19 +75,13 @@ func setupTeamFinishServerWithHub(t *testing.T, teamSize int, matchType state.Te
 // other position vacant.
 func saveFinishGateLineup(t *testing.T, store *state.Store, teamID string, teamSize int, occupied ...int) {
 	t.Helper()
-	saveFinishGateLineupAt(t, store, teamID, teamSize, 0, occupied...)
-}
-
-// saveFinishGateLineupAt is saveFinishGateLineup for a given round.
-func saveFinishGateLineupAt(t *testing.T, store *state.Store, teamID string, teamSize, round int, occupied ...int) {
-	t.Helper()
 	positions := map[domain.Position]string{}
 	for _, bout := range occupied {
 		pos, ok := domain.PositionForBout(teamSize, bout)
 		require.True(t, ok)
 		positions[pos] = teamID[:4] + "-fighter-" + string(pos)
 	}
-	require.NoError(t, store.SetTeamLineup("tf", domain.TeamLineup{TeamID: teamID, Round: round, Positions: positions}, teamSize))
+	require.NoError(t, store.SetTeamLineup("tf", domain.TeamLineup{TeamID: teamID, Round: 0, Positions: positions}, teamSize))
 }
 
 // wonBout is a numbered bout Ryu won by a men.
@@ -380,74 +374,28 @@ func TestTeamFinishRefusalUnderTx(t *testing.T) {
 	assert.Same(t, refusal, teamFinishRefusalUnderTx(refusal, kiken, &state.MatchResult{Status: state.MatchStatusCompleted, Decision: "fought"}))
 }
 
-func TestTeamFinishGate_Vacancies(t *testing.T) {
-	cases := []struct {
-		name      string
-		lineupA   []int // occupied bouts; nil means no lineup saved
-		lineupB   []int
-		wantCode  int
-		wantInErr string
-	}{
-		{name: "a position both sides leave vacant has no bout", lineupA: []int{1, 2}, lineupB: []int{1, 2}, wantCode: http.StatusOK},
-		{name: "a vacancy on one side is still a bout", lineupA: []int{1, 2}, lineupB: []int{1, 2, 3}, wantCode: http.StatusBadRequest, wantInErr: "Bout 3 has no result."},
-		{name: "no saved lineup counts as occupied", lineupA: nil, lineupB: []int{1, 2}, wantCode: http.StatusBadRequest, wantInErr: "Bout 3 has no result."},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			r, store := setupTeamFinishServer(t, 3, state.TeamMatchTypeFixed)
-			if tc.lineupA != nil {
-				saveFinishGateLineup(t, store, finishGateTeamAID, 3, tc.lineupA...)
-			}
-			if tc.lineupB != nil {
-				saveFinishGateLineup(t, store, finishGateTeamBID, 3, tc.lineupB...)
-			}
-			w := putScore(t, r, "tf", finishGateMatchID, finishPayload(wonBout(1), wonBout(2)))
-			require.Equal(t, tc.wantCode, w.Code, w.Body.String())
-			if tc.wantInErr != "" {
-				assert.Contains(t, w.Body.String(), tc.wantInErr)
-				assert.NotContains(t, w.Body.String(), "lineup")
-			}
-		})
-	}
-}
+// Every bout of a team match has a result or a decision (operator ruling
+// 2026-09-24): a position neither team fields is recorded as a Tie, which
+// counts as an individual draw for both teams. The lineups in force never
+// exempt a bout from the gate, and the refusal never mentions them.
+func TestTeamFinishGate_APositionNeitherTeamFieldsNeedsATie(t *testing.T) {
+	r, store := setupTeamFinishServer(t, 3, state.TeamMatchTypeFixed)
+	// Both lineups leave bout 3 empty: nobody fights it, and it still needs a
+	// result. The operator records it as a Tie.
+	saveFinishGateLineup(t, store, finishGateTeamAID, 3, 1, 2)
+	saveFinishGateLineup(t, store, finishGateTeamBID, 3, 1, 2)
 
-// The gate resolves a pool match's lineup by the round the score sheet uses
-// (the client's resolveRoundIndex: a pool, league or Swiss match's own Round),
-// not by round 0, so the bouts it exempts are the ones the operator was shown.
-// Round 5 is a lineup saved ahead for a later round: with the match read as
-// round 0 nothing is at or below it and the lookup fell back to the highest
-// round overall, which is round 5's lineup, not this match's.
-func TestTeamFinishGate_PoolMatchUsesItsOwnRound(t *testing.T) {
-	full := []int{1, 2, 3, 4, 5}
-	noTaisho := []int{1, 2, 3, 4}
-	cases := []struct {
-		name     string
-		rounds   map[int][]int // round -> occupied bouts, saved for both teams
-		wantCode int
-	}{
-		{name: "round 3 leaves Taisho empty on both sides", rounds: map[int][]int{1: full, 3: noTaisho}, wantCode: http.StatusOK},
-		{name: "Taisho empty in round 1 only", rounds: map[int][]int{1: noTaisho, 3: full}, wantCode: http.StatusBadRequest},
-		{name: "round 3 leaves Taisho empty, a later round is full", rounds: map[int][]int{1: full, 3: noTaisho, 5: full}, wantCode: http.StatusOK},
-		{name: "round 3 is full, a later round leaves Taisho empty", rounds: map[int][]int{1: noTaisho, 3: full, 5: noTaisho}, wantCode: http.StatusBadRequest},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			r, store := setupTeamFinishServer(t, 5, state.TeamMatchTypeFixed)
-			ms, err := store.LoadPoolMatches("tf")
-			require.NoError(t, err)
-			ms[0].Round = 3
-			require.NoError(t, store.SavePoolMatches("tf", ms))
-			for round, occupied := range tc.rounds {
-				saveFinishGateLineupAt(t, store, finishGateTeamAID, 5, round, occupied...)
-				saveFinishGateLineupAt(t, store, finishGateTeamBID, 5, round, occupied...)
-			}
-			w := putScore(t, r, "tf", finishGateMatchID, finishPayload(wonBout(1), wonBout(2), wonBout(3), wonBout(4)))
-			require.Equal(t, tc.wantCode, w.Code, w.Body.String())
-			if tc.wantCode == http.StatusBadRequest {
-				assert.Contains(t, w.Body.String(), "Bout 5 (Taisho) has no result.")
-			}
-		})
-	}
+	w := putScore(t, r, "tf", finishGateMatchID, finishPayload(wonBout(1), wonBout(2)))
+	require.Equal(t, http.StatusBadRequest, w.Code, w.Body.String())
+	assert.Contains(t, w.Body.String(), "Bout 3 has no result.")
+	assert.NotContains(t, w.Body.String(), "lineup", "a vacancy is legitimate play, never something to complete")
+	assert.Equal(t, state.MatchStatusRunning, finishGateStored(t, store).Status, "a refused finish writes nothing")
+
+	tie := unfoughtBout(3)
+	tie["decision"] = string(domain.DecisionHikiwake)
+	w = putScore(t, r, "tf", finishGateMatchID, finishPayload(wonBout(1), wonBout(2), tie))
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	assert.Equal(t, state.MatchStatusCompleted, finishGateStored(t, store).Status)
 }
 
 // POST .../bulk-score can complete a team match too, so it runs the same gate
@@ -492,14 +440,6 @@ func TestTeamFinishGate_BulkScore(t *testing.T) {
 	})
 }
 
-// failingVacancies answers the vacancy question with an error, which must
-// exempt nothing rather than let the finish through.
-type failingVacancies struct{}
-
-func (failingVacancies) TeamBoutsWithNoFighter(string, string) (map[int]bool, error) {
-	return map[int]bool{3: true}, os.ErrPermission
-}
-
 func TestRefuseUnfinishedTeamFinish_Scope(t *testing.T) {
 	store, err := state.NewStore(t.TempDir())
 	require.NoError(t, err)
@@ -507,33 +447,32 @@ func TestRefuseUnfinishedTeamFinish_Scope(t *testing.T) {
 	require.NoError(t, store.SaveCompetition(&state.Competition{ID: "team", Kind: "team", Format: state.CompFormatMixed, TeamSize: 3}))
 	partial := &state.MatchResult{Status: state.MatchStatusCompleted, SubResults: []state.SubMatchResult{{Position: 1, Winner: "A"}}}
 
-	verr, err := refuseUnfinishedTeamFinish(store, stubScoringEngine{}, "ind", "Pool A-1", partial)
+	verr, err := refuseUnfinishedTeamFinish(store, "ind", "Pool A-1", partial)
 	require.NoError(t, err)
 	assert.Nil(t, verr, "an individual competition has no bouts to gate")
 
 	for _, id := range []string{"Pool A-DH-1", "Pool A-TB-1"} {
-		verr, err = refuseUnfinishedTeamFinish(store, stubScoringEngine{}, "team", id, partial)
+		verr, err = refuseUnfinishedTeamFinish(store, "team", id, partial)
 		require.NoError(t, err)
 		assert.Nil(t, verr, "%s is a single rep bout, not a team encounter", id)
 	}
 
 	withdrawal := *partial
 	withdrawal.Decision = string(domain.DecisionFusenpai)
-	verr, err = refuseUnfinishedTeamFinish(store, stubScoringEngine{}, "team", "Pool A-1", &withdrawal)
+	verr, err = refuseUnfinishedTeamFinish(store, "team", "Pool A-1", &withdrawal)
 	require.NoError(t, err)
 	assert.Nil(t, verr, "a withdrawal is not a fought finish")
 
-	verr, err = refuseUnfinishedTeamFinish(store, failingVacancies{}, "team", "Pool A-1", partial)
+	verr, err = refuseUnfinishedTeamFinish(store, "team", "Pool A-1", partial)
 	require.NoError(t, err)
 	require.NotNil(t, verr)
-	assert.Equal(t, "Bout 2 and Bout 3 have no result. Record a score, a Tie, or a Fusensho before finishing.", verr.Error(),
-		"a vacancy lookup that failed exempts nothing")
+	assert.Equal(t, "Bout 2 and Bout 3 have no result. Record a score, a Tie, or a Fusensho before finishing.", verr.Error())
 
-	verr, err = refuseUnfinishedTeamFinish(store, stubScoringEngine{}, "missing", "Pool A-1", partial)
+	verr, err = refuseUnfinishedTeamFinish(store, "missing", "Pool A-1", partial)
 	require.NoError(t, err)
 	assert.Nil(t, verr, "a competition that does not exist is left to the engine write to report")
 
-	_, err = refuseUnfinishedTeamFinish(store, stubScoringEngine{}, "bad/id", "Pool A-1", partial)
+	_, err = refuseUnfinishedTeamFinish(store, "bad/id", "Pool A-1", partial)
 	assert.Error(t, err, "an unreadable competition is an error, not a pass")
 }
 
@@ -564,6 +503,5 @@ func TestUnfinishedTeamBouts(t *testing.T) {
 		{Position: state.DaihyosenSubPosition, Winner: "A", Decision: "daihyosen"},
 		{Position: 4, Decision: "hikiwake"},
 	}
-	assert.Equal(t, []int{2, 3, 5}, unfinishedTeamBouts(subs, 5, nil))
-	assert.Equal(t, []int{2, 5}, unfinishedTeamBouts(subs, 5, map[int]bool{3: true}))
+	assert.Equal(t, []int{2, 3, 5}, unfinishedTeamBouts(subs, 5))
 }

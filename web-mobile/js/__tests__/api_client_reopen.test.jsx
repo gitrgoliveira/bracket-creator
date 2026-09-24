@@ -65,13 +65,32 @@ describe('API.reopenMatch', () => {
       () => { throw new Error('expected a rejection'); },
       (e) => e
     );
+    // `reopen` marks the refusal as met by a reopen rather than a corrected
+    // result, for the confirm dialog's copy (the way overridePoolRank marks
+    // `ranking`).
     expect(err.downstreamKnockoutPlayed).toEqual({
       matchId: 'm-r1-0',
       blockingMatchId: 'm-r2-0',
       blockingMatches: [{ id: 'm-r2-0', number: 2 }],
       displaced: 'Ryu',
       qualifierChange: [],
+      reopen: true,
     });
+  });
+
+  it('marks the refusal from the atomic court-busy remedy as a reopen too', async () => {
+    global.fetch = mockFetch(409, {
+      error: 'downstream_knockout_played',
+      matchId: 'm-r1-0',
+      blockingMatchId: 'm-r2-0',
+      blockingMatches: [{ id: 'm-r2-0', number: 2 }],
+      displaced: 'Ryu',
+    });
+    const err = await API.requeueBlockerAndReopen('c1', 'm-r1-0', 'c1', 'm-r1-1', 'secret').then(
+      () => { throw new Error('expected a rejection'); },
+      (e) => e
+    );
+    expect(err.downstreamKnockoutPlayed.reopen).toBe(true);
   });
 
   it('surfaces the court-busy 409 sentence, not the machine code, and keeps the blocking match', async () => {

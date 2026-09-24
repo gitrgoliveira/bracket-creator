@@ -131,7 +131,7 @@ export function preserveStoredDaihyosenVerdict({ armed, pickedSide, tied, existi
 // StreamingOverlay). The implementations live in lineup_resolver.jsx;
 // re-exported here so existing imports from admin_scoring_modal.jsx (which
 // re-exports them onward) continue to work.
-import { resolveMatchLineup, resolveLineupTeamId, resolveBoutSideName, resolveBoutSideMemberId, resolveSquadMember, squadMemberIdForUniqueName, squadRosterEntries, rosterWithoutPlacedElsewhere, resolveBoutSideDisplayName, buildInlineLineupWrite, pickFromLineup, pickMemberIdFromLineup, POS_KEYS_5, POS_LABELS_5 } from './lineup_resolver.jsx';
+import { resolveMatchLineup, resolveLineupTeamId, resolveBoutSideName, resolveBoutSideMemberId, resolveSquadMember, squadMemberIdForUniqueName, squadRosterEntries, rosterWithoutPlacedElsewhere, resolveBoutSideDisplayName, buildInlineLineupWrite, POS_KEYS_5, POS_LABELS_5 } from './lineup_resolver.jsx';
 import { DAIHYOSEN_POSITION } from './pool_ids.jsx';
 // The shared owner of what an operator is told about unreadable data; the
 // editor gets the repair-oriented wording, the pool surfaces get theirs.
@@ -235,19 +235,13 @@ export function isKoTieBlocked({ isKnockoutPhase, teamWinner, isComplete }) {
 // by their `_pos`, never by index. The daihyosen row is never numbered, so it
 // is never returned.
 //
-// A position that the lineups in force leave vacant on BOTH sides has no bout
-// and is skipped. A side whose lineup is unknown (null: none saved, or not
-// loaded yet) counts as occupied at every position, and a vacancy on one side
-// only is not skipped: the present fighter takes a fusensho. Mirrors
-// engine.TeamBoutsWithNoFighter. Callers skip kachinuki, which ends on End
-// match instead.
-export function unfinishedTeamBouts({ subs, teamSize, lineupA, lineupB }) {
-  const vacant = (lineup, idx) =>
-    !!lineup && !pickFromLineup(lineup, idx, teamSize) && !pickMemberIdFromLineup(lineup, idx, teamSize);
+// Every position counts, whoever the lineups field there: a vacancy on one
+// side is a fusensho for the fighter who is present, and a position neither
+// side fields is recorded as a Tie (operator ruling 2026-09-24). Callers skip
+// kachinuki, which ends on End match instead.
+export function unfinishedTeamBouts({ subs, teamSize }) {
   const out = [];
   for (let bout = 1; bout <= teamSize; bout++) {
-    const idx = bout - 1;
-    if (vacant(lineupA, idx) && vacant(lineupB, idx)) continue;
     const row = (subs || []).find(s => s && s._pos === bout);
     if (!subBoutHasBeenPlayed(row)) out.push(bout);
   }
@@ -1604,7 +1598,7 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
   // keepsWithdrawal (which shapes that save) stays off for it.
   const recordedWithdrawal = withdrawalInForce(m);
   const keepsWithdrawal = recordedWithdrawal && !isKachinuki;
-  const unfinishedBouts = (isKachinuki || keepsWithdrawal) ? [] : unfinishedTeamBouts({ subs, teamSize, lineupA, lineupB });
+  const unfinishedBouts = (isKachinuki || keepsWithdrawal) ? [] : unfinishedTeamBouts({ subs, teamSize });
   const [finishRefused, setFinishRefused] = useStateA(false);
   const finishRefusal = finishRefused && unfinishedBouts.length > 0
     ? unfinishedTeamBoutsMessage(teamSize, unfinishedBouts)
@@ -1897,20 +1891,17 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
   // back to running, winner/decision cleared, bout log kept; and (bc-tmfn)
   // the same door for Clear withdrawal and reopen (RecordedWithdrawal below).
   // This POST is a direct API call, NOT a score write, so it does NOT flow
-  // through the host's onEditScore/setOpenMatch channel that keeps the modal
-  // live across a running write — the `match` prop here is the host's
-  // openMatch snapshot, captured completed, and nothing repaints it in place.
-  // So on success the kachinuki Reopen CLOSES the editor: the host's SSE
-  // match_updated handler flips the match row to running, and the operator
-  // taps Score to resume on the now-running encounter. Clear withdrawal and
-  // reopen does NOT close it (no onReopened): its consequence text tells the
-  // operator to score the rest and finish it here, and the hosts that resolve
-  // the open match from live data (the Scores tab, the pools page, the court
-  // console) follow it to running in place, where the ReopenFeedback below
-  // can still show what else the reopen reopened. useMatchReopen
-  // (admin_scoring_shared.jsx) owns
-  // the rest: the server's 409s surface inline verbatim, the court-busy one
-  // with its remedy panel, and a later knockout match with its own result is
+  // through the host's onEditScore channel. Neither door closes the editor:
+  // the hosts resolve the open match from live data (the Scores tab, the
+  // pools page, the bracket page, the court console), so the server's
+  // match_updated broadcast follows it to running in place, where the
+  // operator carries on (the kachinuki Reopen) or scores the rest and
+  // finishes it (Clear withdrawal and reopen), and where the ReopenFeedback
+  // below can still show what else the reopen reopened. Closing the kachinuki
+  // editor on success, as it used to, hid that notice at the moment it had
+  // something to say. useMatchReopen (admin_scoring_shared.jsx) owns the
+  // rest: the server's 409s surface inline verbatim, the court-busy one with
+  // its remedy panel, and a later knockout match with its own result is
   // confirmed with the operator before it is reopened too.
   //
   // The kachinuki Reopen asks for NO REASON (operator ruling): the tap posts.
@@ -1920,7 +1911,7 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
   // remedy mandatory: a plain correction bypasses the court gate entirely, so
   // kachinuki operators, for whom reopen is the ONLY way to fix a bout log,
   // would otherwise be the one group with no way out of a busy court.
-  const reopenCtl = useMatchReopen({ match: m, password, isComplete, onReopened: recordedWithdrawal ? undefined : onClose });
+  const reopenCtl = useMatchReopen({ match: m, password, isComplete });
 
   // mp-4pc: when a daihyosen exists the encho counter belongs to that
   // sub-bout (attached per-sub in buildPatch), so suppress the top-level
@@ -3742,10 +3733,10 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
                   className="btn btn--sm btn--ghost"
                   data-testid="kachinuki-reopen-button"
                   onClick={() => reopenCtl.reopen()}
-                  disabled={submitting || reopenCtl.busy || decisionSubmitting}
+                  disabled={submitting || reopenCtl.busy || reopenCtl.landed || decisionSubmitting}
                   title="Reopen: back to running, result cleared, bouts kept"
                 >
-                  {reopenCtl.busy ? "Reopening…" : "Reopen match"}
+                  {reopenCtl.busy ? "Reopening…" : reopenCtl.landed ? "Reopened" : "Reopen match"}
                 </button>
               )}
               {canClose && <button className="btn" onClick={handleDismiss} disabled={submitting}>Cancel</button>}

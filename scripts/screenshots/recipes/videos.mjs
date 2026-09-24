@@ -385,8 +385,8 @@ export const recipes = [
       mark('P4 reopen');
       await openScore(ko);
       await page.waitForTimeout(1200);
-      await click('[data-testid="kachinuki-reopen-button"]', 1600); // closes the modal
-      await openScore(ko);                                            // reopen the now-running match
+      // The editor stays open: the encounter flips to running in place.
+      await click('[data-testid="kachinuki-reopen-button"]', 1600);
       await page.waitForTimeout(900);
       await endMatch();
       mark('end');

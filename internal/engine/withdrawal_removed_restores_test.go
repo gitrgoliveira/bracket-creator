@@ -137,3 +137,46 @@ func TestWithdrawalRemoved_RecordMatchResultDoorRestores(t *testing.T) {
 	assert.True(t, wrEligible(t, store, compID, wrTeamAID))
 	assert.Equal(t, "fought", wrPoolMatch(t, store, compID).Decision)
 }
+
+// A score write (PUT /score, bulk-score) that records the withdrawal against
+// the OTHER side moves it, exactly as POST /decision does: the new withdrawer
+// is barred and the team the first entry barred by mistake is eligible again,
+// with the restore returned for the broadcast. Before, only /decision's own
+// restore did this, so the score doors left both teams barred.
+func TestWithdrawalMoved_ScoreWriteRestoresTheFirstWithdrawer(t *testing.T) {
+	for name, write := range map[string]func(eng *Engine, compID string, r *state.MatchResult) (string, error){
+		"RecordMatchResultWithIneligibility": func(eng *Engine, compID string, r *state.MatchResult) (string, error) {
+			st, err := eng.RecordMatchResultWithIneligibility(compID, "Pool A-0", r)
+			if st == nil {
+				return "", err
+			}
+			return st.PlayerID, err
+		},
+		"RecordMatchResult": func(eng *Engine, compID string, r *state.MatchResult) (string, error) {
+			return "", eng.RecordMatchResult(compID, "Pool A-0", r)
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			eng, store, compID, _ := seedPoolWithdrawal(t, "kiken-voluntary")
+			require.False(t, wrEligible(t, store, compID, wrTeamAID), "precondition: the kiken barred Ryu")
+
+			restored, err := write(eng, compID, &state.MatchResult{
+				ID: "Pool A-0", SideA: wrTeamA, SideB: wrTeamB,
+				Winner: wrTeamA, WinnerID: wrTeamAID, Decision: "kiken-voluntary", DecisionBy: "shiro",
+				IpponsA: []string{"○", "○"}, IpponsB: []string{},
+				Status: state.MatchStatusCompleted, CorrectionReason: "The other team withdrew",
+				SubResults: []state.SubMatchResult{wrBout1("M")},
+			})
+			require.NoError(t, err)
+
+			m := wrPoolMatch(t, store, compID)
+			assert.Equal(t, "kiken-voluntary", m.Decision)
+			assert.Equal(t, wrTeamA, m.Winner, "the withdrawal now names Tora")
+			assert.True(t, wrEligible(t, store, compID, wrTeamAID), "Ryu never withdrew, so Ryu is eligible again")
+			assert.False(t, wrEligible(t, store, compID, wrTeamBID), "Tora withdrew")
+			if name == "RecordMatchResultWithIneligibility" {
+				assert.Equal(t, wrTeamAID, restored, "the restore is returned for the broadcast, as on /decision")
+			}
+		})
+	}
+}

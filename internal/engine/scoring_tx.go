@@ -118,9 +118,14 @@ func (e *Engine) RecordMatchResultWithIneligibilityTx(tx state.StoreTx, compID, 
 		// its pool feeds exactly as a kendo one does (below): prior is read
 		// first, so a refusal can put the pool row back. Only a pool write in
 		// a mixed competition needs it, so no other engi write pays the read.
+		// A prior it cannot read is the write's error, never a nil prior: a
+		// nil prior leaves the refusal below nothing to roll back to.
 		var engiPrior *state.MatchResult
 		if comp.Format == state.CompFormatMixed && IsPoolMatchID(matchID) {
-			engiPrior, _ = e.lookupExistingResult(tx, compID, matchID)
+			var lerr error
+			if engiPrior, lerr = e.lookupExistingResult(tx, compID, matchID); lerr != nil {
+				return nil, lerr
+			}
 		}
 		// fo carries bc-kcdg's downstream-correction confirmation through the
 		// engi seam. Without it an engi knockout correction could neither be
@@ -144,8 +149,14 @@ func (e *Engine) RecordMatchResultWithIneligibilityTx(tx state.StoreTx, compID, 
 	// Capture the prior result so we can roll back the score on
 	// AlreadyIneligibleError. lookupExistingResult reads directly from
 	// the tx so it sees the state INSIDE the lock (the on-disk state
-	// hasn't moved under us, we hold the lock).
-	prior, _ := e.lookupExistingResult(tx, compID, matchID)
+	// hasn't moved under us, we hold the lock). A prior it cannot read is
+	// the write's error: every guard below (the kachinuki merge, K3, the
+	// rollback, the pool requalification refusal) reads a nil prior as
+	// "nothing stored", which would let the write through unguarded.
+	prior, err := e.lookupExistingResult(tx, compID, matchID)
+	if err != nil {
+		return nil, err
+	}
 
 	// Kachinuki bout logs merge BY POSITION rather than replace wholesale
 	// (ACID: a client whose local log is behind the server must never
@@ -225,16 +236,19 @@ func (e *Engine) RecordMatchResultWithIneligibilityTx(tx state.StoreTx, compID, 
 	// The eligibility record follows the ruling (operator ruling 2026-09-24:
 	// "Everything should be able to be fixed, in case of a wrong entry").
 	// This write landed (a superseded, mismatched or rolled-back write
-	// returned above) and REPLACED a recorded withdrawal with a result that
-	// is not one: a decision that is not a withdrawal (fusensho or daihyosen
-	// through recordDecisionTx, or any decision KeepsWithdrawalRuling does not
-	// keep the ruling for; a kept ruling returned above, via
-	// inheritedRuling). The withdrawal it replaced never happened, so the
-	// competitor it barred is restored, and the restored status is returned
-	// so the handler broadcasts competitor_status_updated. result is the
-	// post-merge value, i.e. what is now stored.
+	// returned above) and REPLACED a recorded withdrawal (a kept ruling
+	// returned above, via inheritedRuling): with a result that is not one
+	// (fusensho or daihyosen through recordDecisionTx, or any decision
+	// KeepsWithdrawalRuling does not keep the ruling for), or with a
+	// withdrawal by the OTHER side. The withdrawal it replaced never
+	// happened, so the competitor it barred is restored, keeping the one
+	// this write barred (status), on every door alike: /score, bulk-score
+	// and /decision. The restored status takes priority in the return, so
+	// the handler broadcasts competitor_status_updated for it: the new
+	// withdrawer's status is already carried by the match's own decision.
+	// result is the post-merge value, i.e. what is now stored.
 	if prior != nil {
-		if restored := e.restoreIfWithdrawalRemoved(tx, compID, matchID, prior.Decision, result.Decision); restored != nil {
+		if restored := e.restoreIfWithdrawalRemoved(tx, compID, matchID, prior.Decision, result.Decision, status); restored != nil {
 			status = restored
 		}
 	}
@@ -266,20 +280,39 @@ func (e *Engine) refuseConcurrentWithdrawal(tx state.StoreTx, compID, matchID st
 }
 
 // restoreIfWithdrawalRemoved is the one statement of "the eligibility record
-// follows the ruling" for a forward score write: when the stored decision
-// was a withdrawal (kiken, fusenpai) and the decision the write left stored
-// is not one, the withdrawal was removed, so everyone this match recorded as
-// ineligible is restored (restoreEligibilityRecordedByMatch). Returns the
-// restored status, or nil when nothing was removed or restored. Both forward
-// doors with an eligibility side effect call it after their write landed:
-// RecordMatchResultWithIneligibilityTx and writeMatchResult. The reopen
-// (reopenUnderCourtLock) calls it too, after its save, since clearing the
+// follows the ruling" for a write that replaced a recorded withdrawal (kiken,
+// fusenpai). It restores every competitor-status entry this match recorded
+// (restoreEligibilityRecordedByMatch) except the one the write itself has just
+// recorded, loser:
+//   - the decision now stored is not a withdrawal: the withdrawal was
+//     removed, so nobody this match barred stays barred (loser is nil);
+//   - it is a withdrawal again: it may have MOVED to the other side, so the
+//     competitor the first entry barred is restored and loser, the one this
+//     write barred, is kept. When the write could not resolve a loser (nil)
+//     no entry is provably stale, so nothing is restored (PR #416 finding 1:
+//     re-recording a withdrawal whose side name drifted must not free the
+//     competitor who still withdrew).
+//
+// Returns the last restored status, or nil when nothing was restored. Every
+// door that replaces a withdrawal calls it after its write landed:
+// RecordMatchResultWithIneligibilityTx (PUT /score, bulk-score and, through
+// it, POST /decision) and writeMatchResult. The reopen (reopenUnderCourtLock)
+// and restoreForceReopened call it too, after their save, since clearing the
 // decision removes a withdrawal just as a rescore does.
-func (e *Engine) restoreIfWithdrawalRemoved(tx state.StoreTx, compID, matchID, priorDecision, storedDecision string) *domain.CompetitorStatus {
-	if !domain.IsWithdrawalDecisionStr(priorDecision) || domain.IsWithdrawalDecisionStr(storedDecision) {
+func (e *Engine) restoreIfWithdrawalRemoved(tx state.StoreTx, compID, matchID, priorDecision, storedDecision string, loser *domain.CompetitorStatus) *domain.CompetitorStatus {
+	if !domain.IsWithdrawalDecisionStr(priorDecision) {
 		return nil
 	}
-	return e.restoreEligibilityRecordedByMatch(tx, compID, matchID, "")
+	keep := ""
+	if domain.IsWithdrawalDecisionStr(storedDecision) {
+		if loser == nil {
+			log.Printf("engine: restoreIfWithdrawalRemoved compId=%s matchId=%s: the write recorded %q but resolved no loser; restoring nobody (no entry this match recorded is provably stale)",
+				compID, matchID, storedDecision)
+			return nil
+		}
+		keep = loser.PlayerID
+	}
+	return e.restoreEligibilityRecordedByMatch(tx, compID, matchID, keep)
 }
 
 // rollbackMatchResultTx restores prior over a partial score-write within the
@@ -904,55 +937,12 @@ func (e *Engine) recordDecisionTx(tx state.StoreTx, compID, matchID, decision, d
 	if err != nil {
 		return nil, nil, err
 	}
-	// T103 undo: restore eligibility for whichever competitor-status ENTRY
-	// this exact match wrote that the write above did NOT just (re)confirm
-	// (restoreEligibilityRecordedByMatch, keyed on the record's own MatchID).
-	//
-	// currentLoserID is the player the write above just confirmed
-	// ineligible for THIS match, if any (status is nil when the new
-	// decision no longer causes ineligibility at all, e.g. rescored as
-	// "fought", or when recordIneligibilityFromDecision's own write was a
-	// non-fatal no-op). Every OTHER MatchID==matchID/Eligible==false entry
-	// is stale by construction (recordIneligibilityFromDecision's K2
-	// check-and-set only ever adds one such entry per call) and is restored.
-	//
-	// PR #416 finding 1: status==nil does NOT always mean "this match no
-	// longer makes anyone ineligible" -- RecordMatchResultWithIneligibilityTx
-	// also returns (nil, nil) when recordIneligibilityFromDecision could not
-	// RESOLVE the loser (its *ValidationError is logged and swallowed a few
-	// lines above) or hit a non-fatal load error. Re-recording the SAME
-	// kiken/fusenpai on a match whose side name has drifted from the roster
-	// would otherwise flip the STILL-withdrawn competitor back to
-	// Eligible:true: the loop below would see status==nil, treat every
-	// MatchID==matchID entry as stale, and restore it. Gate the restore on
-	// the write having actually SETTLED the loser: when the new decision is
-	// itself a withdrawal and the write resolved no status at all, no
-	// MatchID==matchID record is provably stale, so skip the restore
-	// outright and log why, rather than silently un-revoking eligibility the
-	// operator never rescinded. Restoring proceeds as before whenever the
-	// new decision is NOT a withdrawal (the "fought"/undo path this loop
-	// exists for) or when a status WAS resolved (the write settled who,
-	// this match, is currently the loser).
-	newIsWithdrawal := domain.IsWithdrawalDecisionStr(decision)
-	switch {
-	case newIsWithdrawal && status == nil:
-		log.Printf("engine: RecordDecisionTx compId=%s matchId=%s: new decision %q is a withdrawal but recordIneligibilityFromDecision did not resolve/write a loser; skipping the stale-eligibility restore (no MatchID==%s record is provably stale)",
-			compID, matchID, decision, matchID)
-	default:
-		var currentLoserID string
-		if status != nil {
-			currentLoserID = status.PlayerID
-		}
-		// The restored player's re-earned eligibility takes priority over the
-		// new loser's status in this single-value return (see
-		// restoreEligibilityRecordedByMatch). When a recorded withdrawal is
-		// replaced by a decision that is not one (fusensho, daihyosen), the
-		// write above already ran the same restore (the rule in
-		// RecordMatchResultWithIneligibilityTx), so this finds nothing left.
-		if restored := e.restoreEligibilityRecordedByMatch(tx, compID, matchID, currentLoserID); restored != nil {
-			status = restored
-		}
-	}
+	// T103 undo: the write above already restored whoever the withdrawal it
+	// replaced had barred (restoreIfWithdrawalRemoved, called by
+	// RecordMatchResultWithIneligibilityTx for every door), keeping the new
+	// withdrawer, and returned the restored status in priority. A second
+	// restore here read that RESTORED status as the current loser and freed
+	// the new withdrawer, so there is none: the rule has one owner.
 	return result, status, nil
 }
 
@@ -961,10 +951,10 @@ func (e *Engine) recordDecisionTx(tx state.StoreTx, compID, matchID, decision, d
 // st.Eligible == false) except keepPlayerID, the player the current write
 // has just (re)confirmed ineligible for this match ("" when it confirmed
 // nobody). It returns the last status it restored, or nil when it restored
-// none. Two callers, one body: recordDecisionTx's T103 undo (a withdrawal
-// moved to the other side, or replaced by another /decision outcome) and
-// rule A in RecordMatchResultWithIneligibilityTx (a /score or bulk-score
-// write that replaces a recorded withdrawal with a fought result).
+// none. Its one caller is restoreIfWithdrawalRemoved, which every door that
+// replaces a recorded withdrawal goes through: a withdrawal moved to the
+// other side or replaced by another outcome, on /decision, /score and
+// bulk-score alike, and a reopen that clears it.
 //
 // Restoring by the record's own MatchID -- not by re-deriving identity from
 // the match's side names/ids the way an earlier version did -- is exact for

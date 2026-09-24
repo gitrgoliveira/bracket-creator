@@ -347,7 +347,7 @@ func (e *Engine) buildKachinukiPositionMap(compID string, comp *state.Competitio
 			if playerName == "" {
 				continue
 			}
-			index(playerName, formatPositionLabel(pos))
+			index(playerName, pos.Label())
 		}
 		// Every position held by id is indexed under the id as well, so a
 		// nameless fighter (bc-dnst) still resolves; resolveKachinukiPosition
@@ -371,7 +371,7 @@ func (e *Engine) buildKachinukiPositionMap(compID string, comp *state.Competitio
 				continue
 			}
 			indexedIDs[memberID] = struct{}{}
-			index(memberKey(memberID), formatPositionLabel(pos))
+			index(memberKey(memberID), pos.Label())
 		}
 	}
 	return out
@@ -400,11 +400,4 @@ func resolveKachinukiBoutPosition(positions map[string]string, matchID, team, me
 		}
 	}
 	return resolveKachinukiPosition(positions, matchID, team, player)
-}
-
-// formatPositionLabel turns a domain.Position wire value into a
-// title-cased label suitable for the Excel cell (e.g. "senpo" → "Senpo").
-// Numeric positions ("1", "2", …) pass through unchanged.
-func formatPositionLabel(p domain.Position) string {
-	return p.Label()
 }

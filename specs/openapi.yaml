@@ -2285,9 +2285,10 @@ paths:
             A `completed` write on a team match (not kachinuki) is also
             refused while a numbered bout (1..teamSize) has no result in
             `subResults`: no winner, decision, ippon, foul or encho. A bout
-            missing from the payload has no result. A position that the
-            lineups in force leave vacant on both sides is exempt, and a
-            withdrawal (`decision` kiken or fusenpai) is not gated. The
+            missing from the payload has no result. Every position is gated,
+            whatever the lineups name: a position neither team fields is
+            recorded as a Tie (`decision` hikiwake). A withdrawal
+            (`decision` kiken or fusenpai) is not gated. The
             `error` names the bouts, e.g. "Bout 5 (Taisho) has no result.
             Record a score, a Tie, or a Fusensho before finishing."
 
@@ -2312,7 +2313,10 @@ paths:
             to it. Every competitor-status entry that match recorded is
             restored to eligible, whatever the withdrawal was (kiken-voluntary
             included), and the restore is broadcast as
-            `competitor_status_updated`.
+            `competitor_status_updated`. A kiken or fusenpai naming the OTHER
+            side moves the withdrawal, as POST /decision does: the new
+            withdrawer is made ineligible and only the competitor the first
+            entry barred is restored.
           content:
             application/json:
               schema:
@@ -2944,8 +2948,9 @@ paths:
         An entry that would complete a team match (not kachinuki) while a numbered bout
         (1..teamSize) has no result is refused by the same rule as PUT /score's 400: no
         winner, decision, ippon, foul or encho on that bout, a bout missing from
-        `subResults` counting as no result, a position the lineups in force leave vacant on
-        both sides exempt, a withdrawal (`decision` kiken or fusenpai) not gated, and a
+        `subResults` counting as no result, every position gated whatever the lineups name
+        (a position neither team fields is recorded as a Tie), a withdrawal (`decision`
+        kiken or fusenpai) not gated, and a
         correction whose `decision` is empty or `hikiwake` on a match a withdrawal ended not
         gated either (it keeps the withdrawal, as on PUT /score; any other `decision`
         replaces the withdrawal, is gated, and restores the competitor's eligibility). The

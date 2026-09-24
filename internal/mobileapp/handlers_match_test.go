@@ -1392,6 +1392,13 @@ func TestQuickScoreHandler(t *testing.T) {
 		for _, sub := range result.SubResults {
 			assert.Empty(t, sub.SideA, "sub-bout SideA must be empty, not team name")
 			assert.Empty(t, sub.SideB, "sub-bout SideB must be empty, not team name")
+			// Every row carries a result, so a later Save correction echoing
+			// these rows is not refused as unfought, and a draw row counts as
+			// the IT it stands for.
+			assert.True(t, sub.HasResult(), "bout %d must carry a result", sub.Position)
+			if sub.Winner == "" {
+				assert.Equal(t, state.DecisionDraw, sub.Decision, "a quick-scored draw is a Tie")
+			}
 		}
 
 		standings, err := eng.CalculatePoolStandings("c1")

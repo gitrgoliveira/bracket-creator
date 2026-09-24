@@ -629,7 +629,7 @@ func RegisterMatchHandlers(r *gin.RouterGroup, eng *engine.Engine, store Competi
 			// it lands in errs naming the bouts, nothing is written for it,
 			// and the rest of the batch is unaffected (this endpoint is
 			// always 200, partial success).
-			finishRefusal, finishErr := refuseUnfinishedTeamFinish(store, eng, id, results[i].ID, &results[i].MatchResult)
+			finishRefusal, finishErr := refuseUnfinishedTeamFinish(store, id, results[i].ID, &results[i].MatchResult)
 			if finishErr != nil {
 				errs = append(errs, scoreError{MatchID: results[i].ID, Error: finishErr.Error()})
 				continue
@@ -853,8 +853,12 @@ func RegisterMatchHandlers(r *gin.RouterGroup, eng *engine.Engine, store Competi
 			subResults = append(subResults, state.SubMatchResult{Position: pos, Winner: req.SideB})
 			pos++
 		}
+		// A draw row is a Tie: it carries the hikiwake decision, so it has a
+		// result (state.SubMatchResult.HasResult). Without one it read as an
+		// unfought bout, which the standings do not count as IT and the team
+		// finish gate refuses on a later Save correction.
 		for range req.Draws {
-			subResults = append(subResults, state.SubMatchResult{Position: pos})
+			subResults = append(subResults, state.SubMatchResult{Position: pos, Decision: state.DecisionDraw})
 			pos++
 		}
 
@@ -2230,7 +2234,7 @@ func registerScoreHandler(r *gin.RouterGroup, eng ScoringEngine, store Competiti
 		// what is out of scope and why. The refusal is computed here and
 		// applied inside the transaction below (teamFinishRefusalUnderTx),
 		// where the stored decision its one exemption reads is race-free.
-		finishRefusal, finishErr := refuseUnfinishedTeamFinish(store, eng, id, mid, (*state.MatchResult)(&req))
+		finishRefusal, finishErr := refuseUnfinishedTeamFinish(store, id, mid, (*state.MatchResult)(&req))
 		if finishErr != nil {
 			internalError(c, finishErr)
 			return

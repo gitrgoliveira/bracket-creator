@@ -14,6 +14,7 @@ import {
     downstreamKnockoutPlayedRefusal,
     downstreamKnockoutPlayedConfirm,
     DOWNSTREAM_KNOCKOUT_PLAYED_CANCELLED,
+    DOWNSTREAM_KNOCKOUT_REOPEN_CANCELLED,
     downstreamKnockoutReopenedNotice,
     downstreamKnockoutRunningMessage,
     matchLabel,
@@ -85,6 +86,48 @@ describe('DOWNSTREAM_KNOCKOUT_PLAYED_CANCELLED', () => {
     it('is a non-empty, distinct string from the other not-landed copy', () => {
         expect(DOWNSTREAM_KNOCKOUT_PLAYED_CANCELLED).toBeTruthy();
         expect(typeof DOWNSTREAM_KNOCKOUT_PLAYED_CANCELLED).toBe('string');
+    });
+});
+
+// The same refusal met by a REOPEN (Reopen match, Clear withdrawal and
+// reopen): the operator is reopening a match, not applying a correction, so the
+// dialog says what reopening does and the button names that act. api_client's
+// reopenFailureError marks the refusal `reopen`.
+describe('downstreamKnockoutPlayedConfirm for a reopen', () => {
+    it('says reopening this match reopens the later one, never "correction"', () => {
+        const { message, confirmLabel, danger } = downstreamKnockoutPlayedConfirm({
+            blockingMatchId: 'm-r2-0',
+            blockingMatches: [{ id: 'm-r2-0', number: 3 }],
+            displaced: 'Suzuki Ichiro',
+            reopen: true,
+        });
+        expect(message).toContain('Suzuki Ichiro already played Match 3');
+        expect(message).toContain('Reopening this match also reopens Match 3');
+        expect(message.toLowerCase()).toContain('cleared');
+        expect(message.toLowerCase()).not.toContain('correction');
+        expect(confirmLabel).toBe('Reopen both');
+        expect(danger).toBe(true);
+    });
+
+    it('names every match in the plural and still never says "correction"', () => {
+        const { message, confirmLabel } = downstreamKnockoutPlayedConfirm({
+            blockingMatchId: 'm-bronze',
+            blockingMatches: [{ id: 'm-bronze', number: 4 }, { id: 'm-r2-0', number: 3 }],
+            displaced: 'Suzuki Ichiro',
+            reopen: true,
+        });
+        expect(message).toContain('Match 4');
+        expect(message).toContain('Match 3');
+        expect(message).toContain('Reopening this match also reopens both');
+        expect(message.toLowerCase()).not.toContain('correction');
+        expect(message).not.toContain('Suzuki Ichiro');
+        expect(confirmLabel).toBe('Reopen all of them');
+    });
+
+    it('has its own cancellation copy', () => {
+        expect(DOWNSTREAM_KNOCKOUT_REOPEN_CANCELLED).toMatch(/^Reopen cancelled/);
+        expect(DOWNSTREAM_KNOCKOUT_REOPEN_CANCELLED.toLowerCase()).not.toContain('correction');
+        expect(DOWNSTREAM_KNOCKOUT_REOPEN_CANCELLED).not.toBe(DOWNSTREAM_KNOCKOUT_PLAYED_CANCELLED);
     });
 });
 

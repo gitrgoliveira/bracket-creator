@@ -168,10 +168,6 @@ type ScoringEngine interface {
 	// caller echoes it without re-reading the match. Mirrors
 	// engine.Engine.MaybeAdvanceKachinuki. FR-044, T135.
 	MaybeAdvanceKachinuki(compID, matchID string) (bool, []state.SubMatchResult, error)
-	// TeamBoutsWithNoFighter returns the numbered bouts of a team match
-	// that both sides' lineups in force leave vacant, which the team finish
-	// gate exempts (bc-tmfn). Mirrors engine.Engine.TeamBoutsWithNoFighter.
-	TeamBoutsWithNoFighter(compID, matchID string) (map[int]bool, error)
 }
 
 // CompetitorStatusStore is the consumer-boundary view of state.Store

@@ -359,24 +359,9 @@ func TestTeamLineupOrderedMembers_IdOnlySlotIsOccupied(t *testing.T) {
 	assert.Equal(t, []string{"Aoki", ""}, gotNames)
 }
 
-// bc-tmfn: PositionForBout / VacantAt answer "does this side field anyone at
-// bout n", which the team finish gate asks of both sides.
-func TestTeamLineup_VacantAt(t *testing.T) {
-	five := domain.TeamLineup{
-		Positions: map[domain.Position]string{domain.PosSenpo: "A", domain.PosTaisho: ""},
-		MemberIDs: map[domain.Position]string{domain.PosChuken: "m-3"},
-	}
-	assert.False(t, five.VacantAt(5, 1), "a named position is occupied")
-	assert.True(t, five.VacantAt(5, 2), "a position with neither name nor id is vacant")
-	assert.False(t, five.VacantAt(5, 3), "an id alone occupies a position")
-	assert.True(t, five.VacantAt(5, 5), "an empty name is no occupant")
-	assert.False(t, five.VacantAt(5, 0), "a bout outside the team is never reported vacant")
-	assert.False(t, five.VacantAt(5, 6), "a bout outside the team is never reported vacant")
-
-	three := domain.TeamLineup{Positions: map[domain.Position]string{domain.PositionNumbered(2): "B"}}
-	assert.True(t, three.VacantAt(3, 1))
-	assert.False(t, three.VacantAt(3, 2))
-
+// PositionForBout names the position that fights numbered bout n, which the
+// team finish gate's refusal uses to label a five-person team's bouts.
+func TestPositionForBout(t *testing.T) {
 	pos, ok := domain.PositionForBout(5, 4)
 	require.True(t, ok)
 	assert.Equal(t, domain.PosFukusho, pos)
@@ -385,10 +370,26 @@ func TestTeamLineup_VacantAt(t *testing.T) {
 	assert.Equal(t, domain.PositionNumbered(3), pos)
 	_, ok = domain.PositionForBout(3, 4)
 	assert.False(t, ok)
+	_, ok = domain.PositionForBout(5, 0)
+	assert.False(t, ok)
 }
 
 func TestPosition_Label(t *testing.T) {
-	assert.Equal(t, "Taisho", domain.PosTaisho.Label())
-	assert.Equal(t, "3", domain.PositionNumbered(3).Label())
-	assert.Equal(t, "", domain.Position("").Label())
+	tests := []struct {
+		pos  domain.Position
+		want string
+	}{
+		{domain.PosSenpo, "Senpo"},
+		{domain.PosJiho, "Jiho"},
+		{domain.PosChuken, "Chuken"},
+		{domain.PosFukusho, "Fukusho"},
+		{domain.PosTaisho, "Taisho"},
+		{domain.PositionNumbered(3), "3"},
+		{"1", "1"},
+		{"", ""},
+		{"unknown", "Unknown"},
+	}
+	for _, tc := range tests {
+		assert.Equal(t, tc.want, tc.pos.Label(), "position %q", tc.pos)
+	}
 }

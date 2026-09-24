@@ -987,7 +987,13 @@ func accrueTeamSubResults(sA, sB *state.PlayerStanding, m state.MatchResult) {
 			sB.IndividualWins++
 			sA.IndividualLosses++
 		default:
-			if sub.Winner == "" {
+			// A draw is a bout that HAS a result and names no winner: a Tie
+			// (hikiwake) or a scored tie. A row with no result was never
+			// fought (an unfought bout kept on a match a withdrawal decided),
+			// and counting it as IT for both teams credited a draw nobody
+			// fought. state.SubMatchResult.HasResult is the one played-bout
+			// predicate, the same one the team finish gate asks.
+			if sub.Winner == "" && sub.HasResult() {
 				sA.IndividualDraws++
 				sB.IndividualDraws++
 			}
@@ -1489,13 +1495,16 @@ func (e *Engine) writeMatchResult(h state.StoreTx, compId string, matchId string
 	}
 	// Side-effect writes are non-fatal: the match score is already staged,
 	// so propagating would cause a 500 retry that double-records the score.
-	if _, err := e.recordIneligibilityFromDecision(h, compId, matchId, result); err != nil {
+	loser, err := e.recordIneligibilityFromDecision(h, compId, matchId, result)
+	if err != nil {
 		log.Printf("engine: recordIneligibilityFromDecision compId=%s matchId=%s: %v", compId, matchId, err)
 	}
 	// The eligibility record follows the ruling, as in
 	// RecordMatchResultWithIneligibilityTx: a write that replaced a recorded
-	// withdrawal with a result that is not one restores whom it barred.
-	e.restoreIfWithdrawalRemoved(h, compId, matchId, priorDecision, result.Decision)
+	// withdrawal, with a result that is not one or with a withdrawal by the
+	// other side, restores whom the first one barred and keeps whom this one
+	// barred (loser).
+	e.restoreIfWithdrawalRemoved(h, compId, matchId, priorDecision, result.Decision, loser)
 	return nil
 }
 
@@ -2734,8 +2743,10 @@ func winnerActuallyChanged(priorWinner, priorWinnerID string, bm *state.BracketM
 // longer changes, so repeating the correction raises nothing and the second
 // sibling would sit contradicting itself forever (verified against the running
 // app: re-saving the same correction returned 200 with the final still showing
-// the old winner). Rounds BEYOND the next are not unwound here; they are asked
-// about in their own turn, when the re-fought result propagates into them.
+// the old winner). Rounds BEYOND the next are not reopened here. One nobody has
+// touched only stops showing the winner the reopened match had sent on
+// (retractIntoUntouched); one already played is asked about in its own turn,
+// when the re-fought result propagates into it.
 //
 // reopenBracketMatch, not requeueBracketMatch: the match was already played
 // and stays where it is, reopened in place, so the queue is left alone
@@ -2744,8 +2755,16 @@ func winnerActuallyChanged(priorWinner, priorWinnerID string, bm *state.BracketM
 // owing one -- see downstreamReopenReason.
 func forceReopenDownstreamChain(bracket *state.Bracket, rIdx, mIdx int, correctedID string) []ReopenedMatch {
 	var reopened []ReopenedMatch
+	_, next := downstreamTargets(bracket, rIdx, mIdx)
 	for _, m := range firstDownstreamWithOwnResult(bracket, rIdx, mIdx) {
 		reopened = append(reopened, reopenDisplacedBracketMatch(m, downstreamReopenReason(correctedID)))
+		// The reopened next-round match no longer has a winner, so what it
+		// had propagated comes back out of a round nobody has touched, the
+		// same retraction a pool correction's reopen applies
+		// (applyRequalification). The bronze match has no downstream.
+		if m == next {
+			retractIntoUntouched(bracket, rIdx+1, mIdx/2)
+		}
 	}
 	return reopened
 }
@@ -2821,7 +2840,7 @@ func reopenDisplacedBracketMatch(m *state.BracketMatch, reason string) ReopenedM
 // forceReopenDownstreamChain), with the same handle it wrote through.
 func (e *Engine) restoreForceReopened(h state.StoreTx, compID string, reopened []ReopenedMatch) {
 	for i := range reopened {
-		reopened[i].Restored = e.restoreIfWithdrawalRemoved(h, compID, reopened[i].ID, reopened[i].PriorDecision, "")
+		reopened[i].Restored = e.restoreIfWithdrawalRemoved(h, compID, reopened[i].ID, reopened[i].PriorDecision, "", nil)
 	}
 }
 

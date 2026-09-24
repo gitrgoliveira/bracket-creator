@@ -215,7 +215,7 @@ export function downstreamKnockoutPlayedRefusal(err) {
 // to be fought and re-entered (its recorded result is cleared). Cancelling
 // leaves everything as it was -- the caller must not retry on a
 // cancelled/false result, only on an explicit confirm.
-export function downstreamKnockoutPlayedConfirm({ blockingMatchId, blockingMatches, displaced, qualifierChange, ranking } = {}) {
+export function downstreamKnockoutPlayedConfirm({ blockingMatchId, blockingMatches, displaced, qualifierChange, ranking, reopen } = {}) {
     // A POOL correction in a mixed competition that moves who holds a
     // qualifying place says so first: the operator is correcting a pool
     // result, so "who moves in the knockout" is the consequence they cannot
@@ -256,6 +256,24 @@ export function downstreamKnockoutPlayedConfirm({ blockingMatchId, blockingMatch
     // slot, is false of the other. It read "Ren Takada already played the
     // 3rd-place match and Match 3" when Ren had played only the bronze.
     // Mirrors engine.DownstreamKnockoutPlayedError.Error's own plural arm.
+    //
+    // `reopen` (set by api_client's reopenFailureError) is the same refusal
+    // met by a REOPEN (Reopen match, Clear withdrawal and reopen): the
+    // operator is reopening this match, not applying a correction, so the
+    // copy says what reopening does and the button names that act.
+    if (reopen) {
+        return {
+            message: many
+                ? `${blocking} were built on this match's current result and have already been played. ` +
+                  'Reopening this match also reopens both for re-entry: their recorded results are cleared, ' +
+                  'and they must be fought and scored again.'
+                : `${who} already played ${blocking}, which was built on this match's current result. ` +
+                  `Reopening this match also reopens ${blocking} for re-entry: its recorded result is ` +
+                  'cleared, and it must be fought and scored again.',
+            confirmLabel: many ? 'Reopen all of them' : 'Reopen both',
+            danger: true,
+        };
+    }
     return {
         message: many
             ? `${blocking} were built on this match's current result and have already been played. ` +
@@ -359,6 +377,11 @@ function runningParts(runningMatches) {
 // override left the match, and the later one it would have reopened,
 // completely unchanged -- neither was written.
 export const DOWNSTREAM_KNOCKOUT_PLAYED_CANCELLED = 'Correction cancelled: the match and the later result it depends on were left unchanged.';
+
+// The same declined confirmation when what was refused is a REOPEN (Reopen
+// match, Clear withdrawal and reopen, admin_scoring_shared.jsx's
+// useMatchReopen): nothing was corrected, so it does not say "correction".
+export const DOWNSTREAM_KNOCKOUT_REOPEN_CANCELLED = 'Reopen cancelled: this match and the later result it depends on were left unchanged.';
 
 // The chusen panel's copy for the same declined confirmation when what was
 // refused is a pool rank recorded by hand (overridePoolRank): that rank was

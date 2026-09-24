@@ -201,25 +201,6 @@ func PositionForBout(teamSize, bout int) (Position, bool) {
 	return order[bout-1], true
 }
 
-// VacantAt reports whether the lineup leaves numbered bout `bout` (1-based)
-// with nobody on this side: the position is not among OrderedMembers'
-// occupied slots, i.e. it carries neither a name nor a member id. It reads
-// OrderedMembers rather than walking the maps itself, so "occupied" has one
-// definition. A bout outside 1..teamSize is not reported vacant: nothing
-// here can say it has no fighter.
-func (t TeamLineup) VacantAt(teamSize, bout int) bool {
-	pos, ok := PositionForBout(teamSize, bout)
-	if !ok {
-		return false
-	}
-	for _, slot := range t.OrderedMembers(teamSize) {
-		if slot.Position == pos {
-			return false
-		}
-	}
-	return true
-}
-
 // allowedPositionSet returns the valid position keys for a team size: the five
 // FIK names for 5-person teams, else numbered positions 1..teamSize.
 func allowedPositionSet(teamSize int) map[Position]struct{} {

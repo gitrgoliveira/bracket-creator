@@ -1,7 +1,6 @@
 package mobileapp
 
 import (
-	"log"
 	"strconv"
 	"strings"
 
@@ -10,19 +9,13 @@ import (
 	"github.com/gitrgoliveira/bracket-creator/internal/state"
 )
 
-// teamBoutVacancies is the engine view the team finish gate needs: which
-// numbered bouts no side fields a fighter for. *engine.Engine satisfies it,
-// and so does every ScoringEngine.
-type teamBoutVacancies interface {
-	TeamBoutsWithNoFighter(compID, matchID string) (map[int]bool, error)
-}
-
 // unfinishedTeamBouts returns, in bout order, the numbered bouts 1..teamSize
 // of a team match that carry no result in subs (state.SubMatchResult.
 // HasResult). A bout missing from subs has no result either. The daihyosen
 // row (state.DaihyosenSubPosition) is never numbered, so it is never
-// returned; bouts in noBout (no fighter on either side) are skipped.
-func unfinishedTeamBouts(subs []state.SubMatchResult, teamSize int, noBout map[int]bool) []int {
+// returned. Every position counts, whoever the lineups field there: a bout
+// neither team fields is recorded as a Tie (operator ruling 2026-09-24).
+func unfinishedTeamBouts(subs []state.SubMatchResult, teamSize int) []int {
 	played := make(map[int]bool, len(subs))
 	for i := range subs {
 		if subs[i].Position >= 1 && subs[i].HasResult() {
@@ -31,7 +24,7 @@ func unfinishedTeamBouts(subs []state.SubMatchResult, teamSize int, noBout map[i
 	}
 	var out []int
 	for bout := 1; bout <= teamSize; bout++ {
-		if !played[bout] && !noBout[bout] {
+		if !played[bout] {
 			out = append(out, bout)
 		}
 	}
@@ -81,9 +74,9 @@ func unfinishedTeamBoutsMessage(teamSize int, bouts []int) string {
 // competition that could not be read; a competition that does not exist is
 // left to the engine write, which reports it.
 //
-// It is the half that runs BEFORE the write's transaction, because the
-// lineup read behind TeamBoutsWithNoFighter goes through the store's own
-// locks and would deadlock under the per-competition lock. The refusal it
+// It is the half that runs BEFORE the write's transaction, because it reads
+// the competition through the store's own locks, which would deadlock under
+// the per-competition lock the transaction holds. The refusal it
 // returns is only a candidate: the caller applies it inside the transaction
 // through teamFinishRefusalUnderTx, which exempts the one write that depends
 // on the STORED match, so that read and the write it gates happen under one
@@ -97,11 +90,12 @@ func unfinishedTeamBoutsMessage(teamSize int, bouts []int) string {
 //   - an individual competition, and the pool daihyosen / tiebreaker rows of
 //     a team competition, which are single bouts with no numbered positions.
 //
-// A position neither side fields has no bout and is exempt; a vacancy on one
-// side only is not (the present fighter takes a fusensho). See
-// engine.Engine.TeamBoutsWithNoFighter. Corrections are gated too, except the
-// one teamFinishRefusalUnderTx exempts.
-func refuseUnfinishedTeamFinish(store CompetitionStore, eng teamBoutVacancies, compID, matchID string, req *state.MatchResult) (*ValidationError, error) {
+// Every numbered position is gated, whatever the lineups field there
+// (operator ruling 2026-09-24): a vacancy on one side is a fusensho for the
+// fighter who is present, and a position neither side fields is a Tie. The
+// gate never reads the lineups and never asks for one to be completed.
+// Corrections are gated too, except the one teamFinishRefusalUnderTx exempts.
+func refuseUnfinishedTeamFinish(store CompetitionStore, compID, matchID string, req *state.MatchResult) (*ValidationError, error) {
 	if req.Status != state.MatchStatusCompleted || domain.IsWithdrawalDecisionStr(req.Decision) {
 		return nil, nil
 	}
@@ -115,14 +109,7 @@ func refuseUnfinishedTeamFinish(store CompetitionStore, eng teamBoutVacancies, c
 	if comp == nil || comp.TeamSize < 2 || comp.IsKachinuki() {
 		return nil, nil
 	}
-	noBout, err := eng.TeamBoutsWithNoFighter(compID, matchID)
-	if err != nil {
-		// Fail closed: with no vacancy answer every numbered bout is gated,
-		// which only ever asks for more results, never fewer.
-		log.Printf("TeamBoutsWithNoFighter(%s, %s) for the team finish gate: %v; exempting no bout", compID, matchID, err)
-		noBout = nil
-	}
-	bouts := unfinishedTeamBouts(req.SubResults, comp.TeamSize, noBout)
+	bouts := unfinishedTeamBouts(req.SubResults, comp.TeamSize)
 	if len(bouts) == 0 {
 		return nil, nil
 	}

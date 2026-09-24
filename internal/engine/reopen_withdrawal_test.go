@@ -245,6 +245,39 @@ func TestReopenKachinuki_ClosedDownstreamIsWarnAndProceed(t *testing.T) {
 	assert.Equal(t, "Winner of r2-m0", b.Rounds[1][0].SideA)
 }
 
+// The confirmed reopen takes the reopened downstream match's own winner back
+// out of a round beyond it that nobody has touched, as a forced correction
+// does: the final no longer names RedTeam once the semifinal RedTeam won is
+// reopened.
+func TestReopenKachinuki_ForcedReopenRetractsFromAnUntouchedRound(t *testing.T) {
+	const compID = "rw-kachi-3r"
+	eng, store, _ := setupKachinukiComp(t, compID, 3)
+	bout := func(a, b string) []state.SubMatchResult {
+		return []state.SubMatchResult{{Position: 1, SideA: a, SideB: b, IpponsA: []string{"M"}, Winner: a, Decision: "fought"}}
+	}
+	require.NoError(t, store.SaveBracket(compID, &state.Bracket{Rounds: [][]state.BracketMatch{
+		{{ID: "QF0", SideA: "RedTeam", SideB: "WhiteTeam", Status: state.MatchStatusCompleted, Winner: "RedTeam",
+			Decision: "kachinuki-exhaustion", SubResults: bout("R-1", "W-1")}},
+		{{ID: "SF0", SideA: "RedTeam", SideB: "Kuma", Status: state.MatchStatusCompleted, Winner: "RedTeam",
+			Decision: "kachinuki-exhaustion", SubResults: bout("R-1", "K-1")}},
+		{{ID: "F0", SideA: "RedTeam", SideB: "Washi", Status: state.MatchStatusScheduled}},
+	}}))
+
+	var reopened []ReopenedMatch
+	_, err := eng.ReopenMatch(compID, "QF0", "", ForceOptions{Force: true, Reopened: &reopened})
+	require.NoError(t, err)
+	require.Equal(t, []string{"SF0"}, reopenedIDs(reopened))
+
+	b, err := store.LoadBracket(compID)
+	require.NoError(t, err)
+	assert.Equal(t, state.MatchStatusRunning, b.Rounds[0][0].Status)
+	assert.Equal(t, state.MatchStatusScheduled, b.Rounds[1][0].Status)
+	final := b.Rounds[2][0]
+	assert.Equal(t, winnerOfPlaceholder(len(b.Rounds)-1, 0), final.SideA,
+		"the untouched final waits for the reopened semifinal instead of naming RedTeam")
+	assert.Equal(t, "Washi", final.SideB)
+}
+
 // A team competition's -DH- rep bout is a single bout: the match carries no
 // bout rows and its match-level scoreline IS the bout. Reopening a withdrawal
 // that decided it keeps who fought it (RepPlayerA/B) with the letters struck,

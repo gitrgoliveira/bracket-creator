@@ -987,7 +987,7 @@ func (e *Engine) reopenUnderCourtLock(compID string, comp *state.Competition, ma
 				}
 				// The reopen cleared the decision: a withdrawal it removed
 				// bars nobody (see ELIGIBILITY on ReopenMatch).
-				restored = e.restoreIfWithdrawalRemoved(tx, compID, matchID, prior, h.Pool.Decision)
+				restored = e.restoreIfWithdrawalRemoved(tx, compID, matchID, prior, h.Pool.Decision, nil)
 				return nil
 			}
 			if cerr := courtGate(h, h.Bracket.Court); cerr != nil {
@@ -1029,7 +1029,7 @@ func (e *Engine) reopenUnderCourtLock(compID string, comp *state.Competition, ma
 			if fo.Reopened != nil {
 				*fo.Reopened = reopenedDownstream
 			}
-			restored = e.restoreIfWithdrawalRemoved(tx, compID, matchID, prior, h.Bracket.Decision)
+			restored = e.restoreIfWithdrawalRemoved(tx, compID, matchID, prior, h.Bracket.Decision, nil)
 			return nil
 		})
 		if ferr != nil {
@@ -1679,8 +1679,9 @@ func retractPropagatedWinner(bracket *state.Bracket, rIdx, mIdx int) error {
 	return nil
 }
 
-// retractIntoUntouched is retractPropagatedWinner for a match a pool
-// correction has just reopened (applyRequalification): each target the old
+// retractIntoUntouched is retractPropagatedWinner for a match a correction
+// elsewhere has just reopened (applyRequalification for a pool correction,
+// forceReopenDownstreamChain for a knockout one or a reopen): each target the old
 // winner reached is cleared back to its feeder placeholder ONLY if nobody has
 // touched it since, judged per target rather than all-or-nothing, so an
 // untouched final is not left advertising a pairing because the 3rd-place
@@ -2184,9 +2185,7 @@ func (e *Engine) kachinukiRemainingRoster(compID, matchID string, comp *state.Co
 // match-scoped lineup first, else the round-scoped one for roundIdx, per
 // state.FindBestLineupAny's tiers. The resolver answers false when the side
 // has no saved lineup, including when the lineups could not be loaded (the
-// error is logged under caller). It is the one place a match side's lineup is
-// resolved, shared by the kachinuki roster and the team finish gate
-// (TeamBoutsWithNoFighter).
+// error is logged under caller). Its one caller is kachinukiRemainingRoster.
 func (e *Engine) lineupInForce(compID, matchID string, comp *state.Competition, roundIdx int, caller string) func(teamName string) (domain.TeamLineup, bool) {
 	lineups, err := e.store.LoadTeamLineups(compID)
 	if err != nil {
@@ -2229,71 +2228,4 @@ func (e *Engine) lineupInForce(compID, matchID string, comp *state.Competition, 
 		}
 		return state.FindBestLineupAny(lineups, teamKeys(teamName), matchID, roundIdx)
 	}
-}
-
-// lineupRoundOfTeamMatch is the round a team match's round-scoped lineup is
-// looked up by, mirroring the client's resolveRoundIndex (admin_helpers.jsx),
-// which picks the lineup the score sheet shows. A bracket match uses its
-// 0-based round index (findTeamMatch's, which is the client's roundIndex,
-// the bronze match included). A pool, league or Swiss match carries no round
-// index on the client, so it uses the match's own Round (the round-robin
-// round, or the Swiss round) when non-negative, else 0.
-//
-// Only the team finish gate uses this. findTeamMatch still answers 0 for
-// every pool match, and kachinukiRemainingRoster keeps that: its divergence
-// from the sheet predates the gate and is out of this change's scope.
-func lineupRoundOfTeamMatch(m *state.MatchResult, isBracket bool, bracketRoundIdx int) int {
-	if isBracket {
-		return bracketRoundIdx
-	}
-	if m.Round >= 0 {
-		return m.Round
-	}
-	return 0
-}
-
-// TeamBoutsWithNoFighter returns the numbered bouts (1-based) of team match
-// matchID that have no bout at all because the lineups in force for BOTH
-// sides leave that position vacant (domain.TeamLineup.VacantAt). The team
-// finish gate exempts exactly these: every bout of a team match is fought
-// (operator ruling 2026-09-24), and a position neither team fields is not a
-// bout. A side with NO saved lineup is taken as occupied at every position,
-// because an unknown lineup is not an absent fighter; so is a vacancy on one
-// side only, where the present fighter takes a fusensho. It never judges a
-// vacancy as a fault: lineups are never required to be complete.
-//
-// The round-scoped lineup is looked up by the round the score sheet uses
-// (lineupRoundOfTeamMatch), so the gate and the operator's sheet agree about
-// which lineup is in force.
-//
-// Returns nil (nothing exempt) for an individual or missing competition, or a
-// match id it cannot find. An error means the competition itself could not be read.
-func (e *Engine) TeamBoutsWithNoFighter(compID, matchID string) (map[int]bool, error) {
-	comp, err := e.store.LoadCompetition(compID)
-	if err != nil {
-		return nil, err
-	}
-	if comp == nil || comp.TeamSize < 2 {
-		return nil, nil
-	}
-	match, isBracket, roundIdx, err := e.findTeamMatch(compID, matchID)
-	if err != nil || match == nil {
-		return nil, err
-	}
-	lineupFor := e.lineupInForce(compID, matchID, comp, lineupRoundOfTeamMatch(match, isBracket, roundIdx), "engine.TeamBoutsWithNoFighter")
-	lineupA, foundA := lineupFor(match.SideA)
-	lineupB, foundB := lineupFor(match.SideB)
-	if !foundA || !foundB {
-		return nil, nil
-	}
-	var out map[int]bool
-	for bout := 1; bout <= comp.TeamSize; bout++ {
-		if lineupA.VacantAt(comp.TeamSize, bout) && lineupB.VacantAt(comp.TeamSize, bout) {
-			if out == nil {
-				out = map[int]bool{}
-			}
-			out[bout] = true
-		}
-	}
-	return out, nil
 }

@@ -264,7 +264,7 @@ export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, on
   // A correction here keeps a recorded withdrawal (it has no way to state a
   // decision), so removing one recorded by mistake is a reopen: the match goes
   // back to running with the letters the withdrawing side struck. The editor
-  // STAYS OPEN (no onReopened) and follows the match to running in place, so
+  // STAYS OPEN and follows the match to running in place, so
   // the operator scores the rest here, as the consequence text tells them,
   // and the ReopenFeedback in the footer can still show what else the reopen
   // reopened. Called unconditionally (rules of hooks: the team and engi

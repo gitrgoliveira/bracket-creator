@@ -14,7 +14,7 @@ import { render, act, screen, fireEvent, waitFor } from '@testing-library/react'
 import { describe, it, expect, vi, beforeAll, afterAll, beforeEach } from 'vitest';
 import { installWindowStubs } from '../helpers/stub_globals.js';
 import { readStylesheet, cssBlock } from '../helpers/source.js';
-import { DOWNSTREAM_KNOCKOUT_PLAYED_CANCELLED } from '../../write_result.jsx';
+import { DOWNSTREAM_KNOCKOUT_REOPEN_CANCELLED } from '../../write_result.jsx';
 
 const STUBBED_GLOBALS = {
   isHikiwake: () => false,
@@ -163,7 +163,8 @@ describe.each([
 
   it('asks before reopening a later match with its own result, then retries with force', async () => {
     const refusal = Object.assign(new Error('refused'), {
-      downstreamKnockoutPlayed: { matchId: fixture().id, blockingMatchId: 'm-r2-0', blockingMatches: [{ id: 'm-r2-0', number: 2 }], displaced: 'Yamada' },
+      // As api_client's reopenFailureError marks it: met by a reopen.
+      downstreamKnockoutPlayed: { matchId: fixture().id, blockingMatchId: 'm-r2-0', blockingMatches: [{ id: 'm-r2-0', number: 2 }], displaced: 'Yamada', reopen: true },
     });
     window.API.reopenMatch = vi.fn()
       .mockRejectedValueOnce(refusal)
@@ -174,6 +175,10 @@ describe.each([
     await waitFor(() => expect(window.API.reopenMatch).toHaveBeenCalledTimes(2));
     expect(window.confirmDialog).toHaveBeenCalledTimes(1);
     expect(window.confirmDialog.mock.calls[0][0].message).toContain('Match 2');
+    // Reopen words, not a correction's: the operator is reopening this match.
+    expect(window.confirmDialog.mock.calls[0][0].message).toContain('Reopening this match also reopens Match 2');
+    expect(window.confirmDialog.mock.calls[0][0].message.toLowerCase()).not.toContain('correction');
+    expect(window.confirmDialog.mock.calls[0][0].confirmLabel).toBe('Reopen both');
     expect(window.API.reopenMatch.mock.calls[1][3]).toEqual({ reason: 'Withdrawal recorded by mistake', force: true });
 
     // bc-tmfn R3: the notice is read AFTER the match is running again, which
@@ -185,17 +190,22 @@ describe.each([
     expect(onClose).not.toHaveBeenCalled();
     expect(screen.getByTestId('withdrawal-reopen-notice').textContent)
       .toBe('Match 2 was reopened: it must be fought and scored again.');
+
+    // A new result on the same match (here another kiken) ends that reopen:
+    // the notice described it, not the match now in front of the operator.
+    await act(async () => { flip({ status: 'completed', decision: 'kiken-voluntary', decisionBy: 'aka' }); });
+    expect(screen.queryByTestId('withdrawal-reopen-notice')).toBeNull();
   });
 
   it('declining the downstream confirm leaves everything as it was and says so', async () => {
     window.confirmDialog = vi.fn().mockResolvedValue(false);
     window.API.reopenMatch = vi.fn().mockRejectedValue(Object.assign(new Error('refused'), {
-      downstreamKnockoutPlayed: { blockingMatchId: 'm-r2-0', blockingMatches: [{ id: 'm-r2-0', number: 2 }] },
+      downstreamKnockoutPlayed: { blockingMatchId: 'm-r2-0', blockingMatches: [{ id: 'm-r2-0', number: 2 }], reopen: true },
     }));
     const onClose = vi.fn();
     await mount(fixture(), { onClose });
     await clearAndConfirm();
-    await waitFor(() => expect(screen.getByTestId('withdrawal-reopen-error').textContent).toBe(DOWNSTREAM_KNOCKOUT_PLAYED_CANCELLED));
+    await waitFor(() => expect(screen.getByTestId('withdrawal-reopen-error').textContent).toBe(DOWNSTREAM_KNOCKOUT_REOPEN_CANCELLED));
     expect(window.API.reopenMatch).toHaveBeenCalledTimes(1);
     expect(onClose).not.toHaveBeenCalled();
   });

@@ -20,7 +20,7 @@ An injury kiken can be reinstated later by the operator if the competitor recove
 
 **Fusenpai** is a no-show default loss: the competitor who did not appear forfeits the match.
 
-**Fusensho** is a per-bout default win, used in team matches when the opposing team fields a vacant position.
+**Fusensho** is a per-bout default win, used in team matches when the opposing team fields a vacant position. When neither team has a fighter for a position, there is no default win: record that bout as a **Tie**.
 
 A default win (kiken, fusenpai, or fusensho) awards the winner the match points without a technique, and each awarded point is recorded as a circle. This follows the FIK Regulations of Kendo Shiai and Shinpan (Article 32 and the score board appendix). The winner's score shows two circles, or a single circle during overtime, when only the one deciding point is awarded. Any point the withdrawing side had already scored stays valid and is kept on the sheet. In a team match, the sub-bouts already fought are preserved and still count toward the standings.
 
@@ -92,7 +92,7 @@ Removing a withdrawal makes the withdrawn competitor or team eligible again, whi
 A fix can change who goes through to later matches, so the app warns you first and you can cancel or go ahead:
 
 - Recording the withdrawal for the other side warns you when either side has already started a later match.
-- Clearing a withdrawal in a knockout match warns you when the next match has already been played. If you go ahead, that next match is reopened so it can be fought and scored again, and the editor names it once the reopen is done. If a withdrawal decided that next match, its withdrawn competitor is eligible again too.
+- Clearing a withdrawal in a knockout match warns you when the next match has already been played. If you go ahead, that next match is reopened so it can be fought and scored again, and the editor names it once the reopen is done. A round after it that nobody has played yet stops showing its winner. If a withdrawal decided that next match, its withdrawn competitor is eligible again too.
 
 In a knockout, a next match that is still in progress must be finished or sent back to the queue before a withdrawal can be cleared. If another match is running on this match's court, the app names it and offers to send it back to the queue, which clears any score entered for it.
 

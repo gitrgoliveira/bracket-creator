@@ -9,7 +9,7 @@ const Icon = window.Icon;
 import { DAIHYOSEN_POSITION } from './pool_ids.jsx';
 import {
   writeDidNotLand, writeWasSuperseded, SUPERSEDED_REASON, SUPERSEDED_ADVICE,
-  attemptScoreWrite, DOWNSTREAM_KNOCKOUT_PLAYED_CANCELLED, downstreamKnockoutReopenedNotice,
+  attemptScoreWrite, DOWNSTREAM_KNOCKOUT_PLAYED_CANCELLED, DOWNSTREAM_KNOCKOUT_REOPEN_CANCELLED, downstreamKnockoutReopenedNotice,
 } from './write_result.jsx';
 import { sameCompetitor } from './competitor_identity.jsx';
 import { sideWord } from './side_cell.jsx';
@@ -1229,14 +1229,15 @@ function withdrawalInForce(m) {
 // individual editor offer the same door without a second copy of it.
 //
 // Three outcomes, each of which the returned state carries:
-//   - success: onReopened() runs when given. The kachinuki Reopen passes the
-//     host's onClose; Clear withdrawal and reopen passes nothing, so the
-//     editor STAYS OPEN and follows the match to running in place: the
-//     operator is told to score the rest and finish it, and `notice` (which
-//     names any later match the reopen also reopened) is only readable in an
-//     editor that is still there. busy stays true,
-//     so a double tap cannot post a second reopen the server would 409 as
-//     "not completed"; the effect below clears it once the match is running;
+//   - success: the editor STAYS OPEN and follows the match to running in
+//     place, for both doors (the kachinuki Reopen and Clear withdrawal and
+//     reopen): `notice`, which names any later match the reopen also
+//     reopened, is only readable in an editor that is still there. busy
+//     clears on the success response and `landed` is set, so the button says
+//     the reopen landed rather than "Reopening…" even when the match_updated
+//     broadcast that flips the prop never arrives, while a double tap still
+//     cannot post a second reopen the server would 409 as "not completed".
+//     The effect below clears `landed` once the match is running;
 //   - court_busy: `conflict` names the match holding the court, and
 //     requeueBlocker() is the remedy (it carries the same reason and, once
 //     given, the same downstream confirmation);
@@ -1247,10 +1248,12 @@ function withdrawalInForce(m) {
 //     aware of the consequences"). What that reopened is named in `notice`;
 //     declining leaves everything as it was and says so in `err`.
 // Every other refusal is the server's sentence, shown verbatim in `err`.
-function useMatchReopen({ match, password, isComplete, onReopened }) {
+function useMatchReopen({ match, password, isComplete }) {
   const mountedRef = useRefA(true);
   useEffectA(() => () => { mountedRef.current = false; }, []);
   const [busy, setBusy] = useStateA(false);
+  // The server answered success; the match prop may not have flipped yet.
+  const [landed, setLanded] = useStateA(false);
   const [err, setErr] = useStateA("");
   // { court, matchId, compId, message, reason, force }: the match ALREADY
   // running on this court, plus what the refused reopen carried.
@@ -1265,15 +1268,19 @@ function useMatchReopen({ match, password, isComplete, onReopened }) {
   const confirmedRef = useRefA(false);
 
   // Once the match reopens (status flips to running), a stale error or
-  // conflict describes a completed-state action that no longer applies.
+  // conflict describes a completed-state action that no longer applies. When it
+  // completes AGAIN (a new result or decision), the reopen notice is history:
+  // it described that reopen, not the match now on screen. Keyed on the value,
+  // so the notice set while the match is still completed survives the flip.
   useEffectA(() => {
-    if (!isComplete) { setErr(""); setConflict(null); setBusy(false); }
+    if (!isComplete) { setErr(""); setConflict(null); setBusy(false); setLanded(false); }
+    else setNotice("");
   }, [isComplete]);
 
   const applyFailure = (e, reason) => {
     if (e && e.downstreamKnockoutPlayedCancelled) {
       setConflict(null);
-      setErr(DOWNSTREAM_KNOCKOUT_PLAYED_CANCELLED);
+      setErr(DOWNSTREAM_KNOCKOUT_REOPEN_CANCELLED);
       return;
     }
     const msg = String(e?.message || "Failed to reopen match");
@@ -1310,11 +1317,12 @@ function useMatchReopen({ match, password, isComplete, onReopened }) {
   const finish = (res) => {
     const reopened = downstreamKnockoutReopenedNotice(res && res.downstreamReopened);
     if (reopened) setNotice(reopened);
-    if (onReopened) onReopened();
+    setBusy(false);
+    setLanded(true);
   };
 
   const reopen = async (reason = "") => {
-    if (busy) return;
+    if (busy || landed) return;
     setErr("");
     setConflict(null);
     setNotice("");
@@ -1337,7 +1345,7 @@ function useMatchReopen({ match, password, isComplete, onReopened }) {
   // spells the consequence out before this can be tapped.
   const requeueBlocker = async () => {
     const c = conflict;
-    if (!c || busy) return;
+    if (!c || busy || landed) return;
     setErr("");
     setBusy(true);
     try {
@@ -1385,7 +1393,7 @@ function useMatchReopen({ match, password, isComplete, onReopened }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [conflict?.compId, conflict?.matchId]);
 
-  return { busy, err, conflict, blockerLabel, notice, reopen, requeueBlocker, dismissConflict: () => setConflict(null) };
+  return { busy, landed, err, conflict, blockerLabel, notice, reopen, requeueBlocker, dismissConflict: () => setConflict(null) };
 }
 
 // ReopenFeedback: what a reopen made through useMatchReopen came back with,
@@ -1495,9 +1503,9 @@ function RecordedWithdrawal({ match, ctl, disabled = false, singleBout = false }
               className="btn btn--sm"
               data-testid="clear-withdrawal-reopen"
               onClick={() => setAsking(true)}
-              disabled={disabled || ctl.busy}
+              disabled={disabled || ctl.busy || ctl.landed}
             >
-              {ctl.busy ? "Reopening…" : "Clear withdrawal and reopen"}
+              {ctl.busy ? "Reopening…" : ctl.landed ? "Reopened" : "Clear withdrawal and reopen"}
             </button>
           </>
         )}

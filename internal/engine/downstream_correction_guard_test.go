@@ -992,3 +992,40 @@ func TestDownstreamKnockoutCorrection_ReopenedSiblingsDoNotHoldACourt(t *testing
 	}
 	assert.Zero(t, running, "a reopen starts nothing; the operator starts the next match themselves")
 }
+
+// The confirmation reopens the next match, and what THAT match had sent on is
+// taken back out of a round nobody has touched: the final stops advertising a
+// competitor whose semifinal win was just cleared. It is the retraction a pool
+// correction's reopen applies (retractIntoUntouched). A round that was already
+// played is left for its own confirmation (TestDownstreamKnockoutCorrection_Force).
+func TestDownstreamKnockoutCorrection_ForceRetractsFromAnUntouchedRound(t *testing.T) {
+	eng, store, _ := setupTestEngine(t)
+	compID := "kcdg-untouched-final"
+	seedThreeRoundBracket(t, store, compID)
+	require.NoError(t, store.UpdateBracket(compID, func(b *state.Bracket) error {
+		final := &b.Rounds[2][0]
+		final.Winner, final.WinnerID = "", ""
+		final.IpponsA = nil
+		final.Status = state.MatchStatusScheduled
+		return nil
+	}))
+
+	var reopened []ReopenedMatch
+	txErr := inTx(t, store, compID, func(tx state.StoreTx) error {
+		_, err := eng.RecordMatchResultWithIneligibilityTx(tx, compID, "m-r1-0", correctR1ToBob("confirmed override"),
+			ForceOptions{Force: true, Reopened: &reopened})
+		return err
+	})
+	require.NoError(t, txErr)
+	require.Equal(t, []string{"m-r2-0"}, reopenedIDs(reopened))
+
+	b, err := store.LoadBracket(compID)
+	require.NoError(t, err)
+	assert.Equal(t, "Bob", b.Rounds[1][0].SideA, "the corrected winner is seated in the reopened match")
+	final := b.Rounds[2][0]
+	assert.Equal(t, winnerOfPlaceholder(len(b.Rounds)-1, 0), final.SideA,
+		"the untouched final waits for the reopened match again instead of naming Alice")
+	assert.Empty(t, final.SideAID, "a placeholder carries no id")
+	assert.Equal(t, "Dave", final.SideB, "the other side is not this correction's")
+	assert.Equal(t, state.MatchStatusScheduled, final.Status)
+}

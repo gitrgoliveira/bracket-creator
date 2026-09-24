@@ -207,6 +207,8 @@ test.describe('knockout-mixed-team', () => {
       await T.panelSave(page, 1);
       await expect(T.panelSide(page, 1)).toContainText('Override for this match');
       await shot(page, 'f3-panel-aka-saved');
+      const rename = T.panelSide(page, 1).getByRole('button', { name: 'Rename 1 player' });
+      record({ step: 'EP2 Rename', action: 'Rename control on the panel', variant: 'tap target', renameTapBox: await T.tapBox(rename) });
 
       // One member at two positions: type Dai (at 1) into 2 and save.
       await T.typeIntoNameBox(T.panelInput(page, 1, '2'), 'Dai');
@@ -542,6 +544,19 @@ test.describe('knockout-mixed-team', () => {
       await T.boutIppon(ed, 2, 'aka', 'M');
       const totals = await T.teamTotals(ed);
       record({ step: 'running total', action: 'after bouts 1-2', variant: 'correct', ...totals, sheet: await T.sheetState(ed) });
+      // B12: how many bout rows fit the operator's screen.
+      const coarse = await page.evaluate(() => matchMedia('(pointer: coarse)').matches);
+      expect(coarse).toBe(true);
+      await page.evaluate(() => window.scrollTo(0, 0));
+      const layout = await page.evaluate(() => {
+        const rows = [...document.querySelectorAll('.scoring-panel .team-sub-match')].map((r) => r.getBoundingClientRect());
+        const vh = innerHeight;
+        const visible = rows.reduce((n, r) => n + Math.max(0, Math.min(r.bottom, vh) - Math.max(r.top, 0)) / r.height, 0);
+        const band = document.querySelector('.scoring-panel .team-summary')?.getBoundingClientRect();
+        return { rowHeights: rows.map((r) => Math.round(r.height)), boutsVisibleAtTop: Math.round(visible * 10) / 10,
+          bandTop: band ? Math.round(band.top) : null, viewport: vh };
+      });
+      record({ step: 'layout', action: 'bouts per screen at 1180x820', variant: 'R6 glance', coarse, ...layout });
       expect(totals.shiro).toBe('IV: 1 · PW: 1');
       expect(totals.aka).toBe('IV: 1 · PW: 1');
       await shot(page, 'after-bout2-totals');

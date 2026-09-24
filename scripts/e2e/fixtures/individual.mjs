@@ -71,7 +71,10 @@ export function auditLog() {
 }
 
 // A control's rendered size, for the 44px coarse-pointer floor.
+// The page must still match (pointer: coarse) at the moment of measuring, or
+// the 44px floor rules are off and the size reads low.
 export async function tapSize(locator) {
+  expect(await locator.page().evaluate(() => matchMedia('(pointer: coarse)').matches)).toBe(true);
   const box = await locator.boundingBox();
   if (!box) return null;
   return { w: Math.round(box.width), h: Math.round(box.height), meets44: box.width >= 44 && box.height >= 44 };

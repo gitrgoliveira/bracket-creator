@@ -243,7 +243,11 @@ export async function finishTeam(root) {
 }
 
 // Tap-target size of a control, for the audit's >= 44px rule.
+// Measured only under (pointer: coarse), where the 44px tap-floor rules apply:
+// the measurement asserts it first.
 export async function tapBox(locator) {
+  const coarse = await locator.page().evaluate(() => matchMedia('(pointer: coarse)').matches);
+  expect(coarse, 'tap targets are measured under (pointer: coarse)').toBe(true);
   const b = await locator.boundingBox();
   return b ? { w: Math.round(b.width), h: Math.round(b.height), ok: b.width >= 44 && b.height >= 44 } : null;
 }

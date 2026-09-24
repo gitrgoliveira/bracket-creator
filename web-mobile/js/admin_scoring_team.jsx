@@ -34,6 +34,9 @@ import {
   ReopenFeedback,
   RecordedWithdrawal,
   withdrawalInForce,
+  withdrawnKeyOf,
+  withdrawalLabel,
+  WithdrawalMarkedName,
 } from './admin_scoring_shared.jsx';
 
 import { useDebouncedRunningWrite, SyncStatusPill } from './admin_scoring_autosave.jsx';
@@ -49,7 +52,6 @@ import { notLandedBanner } from './write_result.jsx';
 // chain (CLAUDE.md § Match Decision Types: the middle rule lives in ONE place).
 import { boutMiddle, winnerSideLR } from './bracket.jsx';
 import { realIppons, hanteiTied, hanteiSlot, hanteiWinnerKey, nameOf, sideSlotOrder, attributeWinnerSide, subBoutAttribution } from './result_slot.jsx';
-import { NumberedName } from './numbered_name.jsx';
 
 // bc-kbrw: how long after a fought kachinuki bout opens a further pointer tap
 // on the bout list is ignored, so the second tap of a double tap cannot land
@@ -1577,7 +1579,22 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
   // result, so a KO encounter tied solely on 0–0 draws must read "DAIHYOSEN",
   // not pending ("-"). teamEncounterHasResult folds those draws in.
   const teamHasAnyScore = teamEncounterHasResult({ ivA, ivB, pwA, pwB, subTotals, daihyosenIdx });
-  const teamVerdictText = teamResultLabel({ teamWinner, isKnockoutPhase, hasAnyScore: teamHasAnyScore, isKachinuki });
+  // bc-kcsh: a match a recorded withdrawal (kiken/fusenpai) ended was decided
+  // by that ruling, not by its bouts, which stopped when it was recorded, so
+  // reading the band off them said DRAW over a won match. While the withdrawal
+  // is in force the band states the RECORDED result instead: the side the
+  // ruling leaves as the winner (the other side from withdrawnKeyOf, the same
+  // answer as the Recorded line and the header's Kiken/Fus. mark) in the
+  // band's own wording, and the decision under it (withdrawalLabel). That is
+  // also the result Save correction keeps (keepsWithdrawal writes m.winner).
+  // IV/PW stay the bout-derived figures, as on the viewer card's summary row
+  // (teamIVPWFrom): they are standings figures, not the verdict. teamWinner is
+  // left alone; the Finish gates read it.
+  const recordedWithdrawal = withdrawalInForce(m);
+  const withdrawalWinner = recordedWithdrawal ? ({ a: "b", b: "a" }[withdrawnKeyOf(m)] || null) : null;
+  const teamVerdictText = withdrawalWinner
+    ? teamResultLabel({ teamWinner: withdrawalWinner })
+    : teamResultLabel({ teamWinner, isKnockoutPhase, hasAnyScore: teamHasAnyScore, isKachinuki });
   // Block Finish while a KO encounter has no winner: the operator must add and
   // score a daihyosen first (the affordance below). Pool draws stay finishable.
   const koTieBlocked = isKoTieBlocked({ isKnockoutPhase, teamWinner, isComplete });
@@ -1596,7 +1613,6 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
   // encounter a withdrawal decided gets the same line and control, in place
   // of its plain Reopen (canReopenKachinukiMatch), but no Save correction, so
   // keepsWithdrawal (which shapes that save) stays off for it.
-  const recordedWithdrawal = withdrawalInForce(m);
   const keepsWithdrawal = recordedWithdrawal && !isKachinuki;
   const unfinishedBouts = (isKachinuki || keepsWithdrawal) ? [] : unfinishedTeamBouts({ subs, teamSize });
   const [finishRefused, setFinishRefused] = useStateA(false);
@@ -2695,9 +2711,11 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
                       board now reads one way. */}
                   <SideLabel side={s.color} />
                   {/* Team number chip: owned by numbered_name.jsx
-                      (the outer-side rule lives there). */}
+                      (the outer-side rule lives there). A recorded
+                      withdrawal's Kiken/Fus. rides beside the withdrawn team
+                      (WithdrawalMarkedName, bc-kcsh), never in the centre. */}
                   <div className="sb-name">
-                    <NumberedName side={s.color} name={s.name} number={s.number} />
+                    <WithdrawalMarkedName match={m} sideKey={s.key} side={s.color} name={s.name} number={s.number} />
                   </div>
                 </div>
                 {idx === 0 && (
@@ -3306,8 +3324,14 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
                         ) : (
                           <>
                             <div className="team-summary__label">RESULT</div>
-                            <div className="team-summary__verdict">{teamVerdictText}</div>
+                            <div className="team-summary__verdict" data-testid="team-summary-result">{teamVerdictText}</div>
                           </>
+                        )}
+                        {/* bc-kcsh: the recorded decision under the verdict
+                            while a withdrawal is in force (see
+                            teamVerdictText). */}
+                        {recordedWithdrawal && (
+                          <div className="team-summary__fact" data-testid="team-summary-decision">{withdrawalLabel(m.decision)}</div>
                         )}
                       </div>
                     )}

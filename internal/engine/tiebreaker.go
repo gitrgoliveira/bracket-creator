@@ -126,25 +126,7 @@ func applyTiebreakSort(sorted []state.PlayerStanding, matches []state.MatchResul
 		i := positions[0]
 		j := positions[len(positions)-1] + 1
 
-		ids := groupMemberIDs(sorted[i:j])
-
-		groupWins := map[string]int{}
-		for _, m := range matches {
-			if !isSupplementaryID(m.ID) || m.Status != state.MatchStatusCompleted || m.WinnerID == "" {
-				continue
-			}
-			if !ids[m.SideAID] || !ids[m.SideBID] || m.SideAID == m.SideBID {
-				continue
-			}
-			// Winner by id only (operator ruling bc-pnum); see resolveWinnerSide.
-			winnerIsA, winnerIsB := resolveWinnerSide(m)
-			switch {
-			case winnerIsA:
-				groupWins[m.SideAID]++
-			case winnerIsB:
-				groupWins[m.SideBID]++
-			}
-		}
+		groupWins := supplementaryGroupWins(sorted[i:j], matches, isSupplementaryID)
 		if len(groupWins) > 0 {
 			sort.SliceStable(sorted[i:j], func(a, b int) bool {
 				keyA := sorted[i+a].Player.ID
@@ -153,6 +135,76 @@ func applyTiebreakSort(sorted []state.PlayerStanding, matches []state.MatchResul
 			})
 		}
 	}
+}
+
+// supplementaryGroupWins counts each tied-group member's wins in the decided
+// supplementary bouts (isSupplementaryID: TB or DH rows) fought WITHIN the
+// group, keyed by participant id. It is the one tally both readers of a
+// supplementary result use: applyTiebreakSort orders the group by it, and
+// tieSettled asks whether it orders the group completely. Membership and
+// attribution are id-only, exactly as applyTiebreakSort's doc comment states.
+func supplementaryGroupWins(group []state.PlayerStanding, matches []state.MatchResult, isSupplementaryID func(string) bool) map[string]int {
+	ids := groupMemberIDs(group)
+	groupWins := map[string]int{}
+	for _, m := range matches {
+		if !isSupplementaryID(m.ID) || m.Status != state.MatchStatusCompleted || m.WinnerID == "" {
+			continue
+		}
+		if !ids[m.SideAID] || !ids[m.SideBID] || m.SideAID == m.SideBID {
+			continue
+		}
+		// Winner by id only (operator ruling bc-pnum); see resolveWinnerSide.
+		winnerIsA, winnerIsB := resolveWinnerSide(m)
+		switch {
+		case winnerIsA:
+			groupWins[m.SideAID]++
+		case winnerIsB:
+			groupWins[m.SideBID]++
+		}
+	}
+	return groupWins
+}
+
+// strictlyOrderedByWins reports whether a win tally puts every member of the
+// group on a DIFFERENT count, i.e. the bouts decided the group's whole order.
+// A member with no id can hold no wins (supplementaryGroupWins is id-only), so
+// it leaves the order undecided. Distinct counts are only reachable once the
+// group's full pairwise round has been fought with no drawn bout (n distinct
+// counts sum to at least n(n-1)/2, one per bout), so a round still in progress
+// never reads as settled.
+func strictlyOrderedByWins(group []state.PlayerStanding, wins map[string]int) bool {
+	seen := make(map[int]bool, len(group))
+	for _, s := range group {
+		if s.Player.ID == "" {
+			return false
+		}
+		w := wins[s.Player.ID]
+		if seen[w] {
+			return false
+		}
+		seen[w] = true
+	}
+	return true
+}
+
+// tieSettled reports whether a Points-tied group's finishing order has
+// already been decided, so it is no longer a tie to break: the operator
+// recorded a chusen for every member (chusenRecorded, the per-pool rank
+// overrides), or the group's supplementary bouts ordered it completely, the
+// ippon-shobu (TB) bouts in any competition and the daihyosen (DH) bouts in a
+// team one, the same two passes computeStandingsFrom sorts by. Points never
+// change after either (applyTiebreakSort only reorders within the group), so
+// detectPoolTies alone still reports such a group, and the tie highlight read
+// it as a tie forever (operator ruling 2026-09-24: a tie settled by chusen or
+// by daihyosen is no longer a tie).
+func tieSettled(group []state.PlayerStanding, matches []state.MatchResult, isTeam bool, groupOverrides map[string]int) bool {
+	if chusenRecorded(group, groupOverrides) {
+		return true
+	}
+	if strictlyOrderedByWins(group, supplementaryGroupWins(group, matches, IsTiebreakerMatchID)) {
+		return true
+	}
+	return isTeam && strictlyOrderedByWins(group, supplementaryGroupWins(group, matches, IsPoolDaihyosenMatchID))
 }
 
 // tieAffectsAdvancement reports whether a tied group (identified by its 0-based

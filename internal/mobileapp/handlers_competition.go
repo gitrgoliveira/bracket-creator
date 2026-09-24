@@ -2789,7 +2789,8 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 	// GET /competitions/:id/chusen-candidates
 	// Consequential team-pool ties the daihyosen left undetermined (a cycle /
 	// all-drawn); the operator settles each by chusen (drawing lots), recorded via
-	// the override-rank endpoint. Admin-gated: RegisterCompetitionHandlers is
+	// the override-rank endpoint. "recorded" lists the ties a chusen already
+	// settled, with the recorded ranks, so a wrong order can be changed. Admin-gated: RegisterCompetitionHandlers is
 	// mounted under the authenticated router group, so callers must send the
 	// tournament password header (unlike the public league-tiebreak candidates).
 	r.GET("/competitions/:id/chusen-candidates", func(c *gin.Context) {
@@ -2797,9 +2798,9 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 		if !ok {
 			return
 		}
-		candidates, err := eng.ChusenCandidates(id)
+		report, err := eng.ChusenStatus(id)
 		if err != nil {
-			// ChusenCandidates loads overrides.json directly. A corrupt file
+			// ChusenStatus loads overrides.json directly. A corrupt file
 			// is operator-recoverable state (repair via DELETE .../overrides),
 			// not a server fault, so it gets the same terminal 422 every other
 			// LoadOverrides-reaching endpoint answers with.
@@ -2809,28 +2810,42 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 			respondEngineError(c, err)
 			return
 		}
-		out := make([]gin.H, 0, len(candidates))
-		for _, g := range candidates {
-			names := make([]string, len(g.Teams))
-			for i, t := range g.Teams {
-				names[i] = t.Player.Name
+		groupsJSON := func(groups []engine.ChusenGroup) []gin.H {
+			out := make([]gin.H, 0, len(groups))
+			for _, g := range groups {
+				names := make([]string, len(g.Teams))
+				for i, t := range g.Teams {
+					names[i] = t.Player.Name
+				}
+				// teams carries id/dojo alongside each name (bc-cse), via the
+				// same competitorRef shape GET /league-tiebreak/candidates emits
+				// (PR #416 finding 6), so the SPA's chusen resolver can call
+				// PUT .../override-rank with playerId (falling back to
+				// playerDojo), the same identity disambiguation the operator
+				// rule requires. Team names are supposed to be unique even
+				// across dojos (checkNewTeamNameCollisions), but that check has
+				// one documented hole -- an unreadable config.md disables it for
+				// that write, logged and allowed through (engine/chusen.go) --
+				// so a same-name collision can exist on disk. teamNames alone
+				// (kept for older clients) cannot tell such a pair apart; this
+				// hardens the wire format for that hole and keeps it consistent
+				// with the individual override path.
+				group := gin.H{"poolName": g.PoolName, "teamNames": names, "teams": competitorRefsFrom(g.Teams), "minPosition": g.MinPosition}
+				if g.Ranks != nil {
+					// A recorded group carries each team's recorded rank,
+					// parallel to teams, so the SPA shows and pre-fills the
+					// order that was recorded without inferring it from the
+					// array position.
+					group["ranks"] = g.Ranks
+				}
+				out = append(out, group)
 			}
-			// teams carries id/dojo alongside each name (bc-cse), via the
-			// same competitorRef shape GET /league-tiebreak/candidates emits
-			// (PR #416 finding 6), so the SPA's chusen resolver can call
-			// PUT .../override-rank with playerId (falling back to
-			// playerDojo), the same identity disambiguation the operator
-			// rule requires. Team names are supposed to be unique even
-			// across dojos (checkNewTeamNameCollisions), but that check has
-			// one documented hole -- an unreadable config.md disables it for
-			// that write, logged and allowed through (engine/chusen.go) --
-			// so a same-name collision can exist on disk. teamNames alone
-			// (kept for older clients) cannot tell such a pair apart; this
-			// hardens the wire format for that hole and keeps it consistent
-			// with the individual override path.
-			out = append(out, gin.H{"poolName": g.PoolName, "teamNames": names, "teams": competitorRefsFrom(g.Teams), "minPosition": g.MinPosition})
+			return out
 		}
-		c.JSON(http.StatusOK, gin.H{"candidates": out})
+		// recorded lists the groups a chusen already settled, so a chusen
+		// recorded in the wrong order can be changed from the UI through the
+		// same override-rank door.
+		c.JSON(http.StatusOK, gin.H{"candidates": groupsJSON(report.Pending), "recorded": groupsJSON(report.Recorded)})
 	})
 
 	r.DELETE("/competitions/:id/overrides", RequireElevatedPassword(elevated), func(c *gin.Context) {

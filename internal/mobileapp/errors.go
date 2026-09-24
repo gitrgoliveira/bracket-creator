@@ -111,7 +111,7 @@ func respondIfEngineWriteError(c *gin.Context, err error) bool {
 // parses the existing file before saving, so a corrupt file makes them fail
 // identically -- and every engine call that reads standings
 // (computeStandingsFrom, reached via the pool requalification check,
-// LeagueTiebreakCandidates, ChusenCandidates) hits the same LoadOverrides
+// LeagueTiebreakCandidates, ChusenStatus) hits the same LoadOverrides
 // call underneath. Left unmapped, that surfaces as an opaque 500, which the
 // SPA's offline write queue retries forever for the write endpoints
 // (mp-q8c6 poisoned-queue pattern) -- a genuinely corrupt file on disk

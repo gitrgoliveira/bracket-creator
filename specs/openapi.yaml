@@ -1810,20 +1810,36 @@ paths:
         for a non-team competition, a competition not in the pools stage (a
         mixed competition's knockout stage counts, since a pool correction
         made then can reopen a tie), or when no group currently needs chusen.
+        `recorded` lists the ties a chusen already settled (every tied team
+        carries a recorded rank), with those ranks, so a chusen recorded in
+        the wrong order can be changed through the same
+        `PUT .../override-rank`. It follows the same visibility rules as
+        `candidates`.
       security:
         - TournamentPassword: []
       parameters:
         - $ref: '#/components/parameters/CompetitionId'
       responses:
         '200':
-          description: Still-tied groups needing an operator lots-draw.
+          description: >
+            Still-tied groups needing an operator lots-draw, and the groups a
+            recorded chusen already settled.
           content:
             application/json:
               schema:
                 type: object
+                required: [candidates, recorded]
                 properties:
                   candidates:
                     type: array
+                    items:
+                      $ref: '#/components/schemas/ChusenCandidateGroup'
+                  recorded:
+                    type: array
+                    description: >
+                      Ties a recorded chusen settled. Each group's `teams` are
+                      in the recorded order and `ranks` carries each team's
+                      recorded finishing position.
                     items:
                       $ref: '#/components/schemas/ChusenCandidateGroup'
         '404':
@@ -5674,6 +5690,14 @@ components:
         minPosition:
           type: integer
           description: 1-based finishing position of the best-placed member of this tied group.
+        ranks:
+          type: array
+          description: >
+            Present only on a group in `recorded`: each team's recorded
+            chusen finishing position, positionally parallel to teams. Absent
+            on a group still waiting for its chusen.
+          items:
+            type: integer
 
     LeagueTiebreakCandidateGroup:
       type: object

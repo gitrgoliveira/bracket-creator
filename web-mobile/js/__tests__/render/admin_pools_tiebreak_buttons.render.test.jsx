@@ -45,7 +45,7 @@ function makeApi({ candidates, finalized = false }) {
   return {
     // No chusen ties for these fixtures; isTeamComp is also true for a team
     // league, so this effect runs too and must resolve to something benign.
-    chusenCandidates: vi.fn().mockResolvedValue([]),
+    chusenCandidates: vi.fn().mockResolvedValue({ candidates: [], recorded: [] }),
     leagueTiebreakCandidates: vi.fn().mockResolvedValue({ candidates, finalized }),
     leagueTiebreakGenerate: vi.fn().mockResolvedValue({ matches: [] }),
     leagueTiebreakRemove: vi.fn().mockResolvedValue({ deleted: 0 }),

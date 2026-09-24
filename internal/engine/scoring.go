@@ -1835,11 +1835,19 @@ func (e *Engine) computeStandingsFrom(loader poolStandingsLoader, compId string)
 			applyTiebreakSort(sorted, matches, IsPoolDaihyosenMatchID)
 		}
 
+		// `overrides` itself is loaded ONCE above this loop, not per pool.
+		var poolOverrides map[string]int
+		if overrides != nil {
+			poolOverrides = overrides.PoolRanks[p.PoolName]
+		}
+
 		// Detect ties before applying manual rank overrides. detectPoolTies walks
 		// adjacent elements, so it must run while the slice is still Points-sorted.
-		// Overrides only change the display order; the underlying scoring tie is real
-		// regardless of how the operator chose to resolve it.
-		markTiedStandings(comp, sorted, poolResults[p.PoolName], playerStandings)
+		// A tie already settled is not flagged: a chusen recorded for every
+		// member of the group (poolOverrides), or supplementary bouts that
+		// ordered it completely, decided the order, so the group is no longer a
+		// tie to break (operator ruling 2026-09-24; see tieSettled).
+		markTiedStandings(comp, sorted, poolResults[p.PoolName], playerStandings, poolOverrides)
 
 		// Apply manual rank overrides. Overrides are keyed by competitor
 		// participant id ONLY (bc-cse, bc-pnum), not bare name:
@@ -1847,11 +1855,6 @@ func (e *Engine) computeStandingsFrom(loader poolStandingsLoader, compId string)
 		// pre-bc-cse overrides.json entry keyed by bare name alone is
 		// unresolvable until the operator re-records it through the current
 		// chusen/override-rank flow.
-		// `overrides` itself is loaded ONCE above this loop, not per pool.
-		var poolOverrides map[string]int
-		if overrides != nil {
-			poolOverrides = overrides.PoolRanks[p.PoolName]
-		}
 		if len(poolOverrides) > 0 {
 			// TWO defects fixed together (bc-idfx):
 			//
@@ -2022,7 +2025,13 @@ func applyJointThirdRanks(comp *state.Competition, sorted []state.PlayerStanding
 // that function's doc comment. Unused by the pools branch (nil is fine, e.g.
 // direct callers such as the unit tests in tied_standings_test.go, which
 // build a synthetic byKey from `sorted` itself via rosterIndexFrom).
-func markTiedStandings(comp *state.Competition, sorted []state.PlayerStanding, matches []state.MatchResult, rosterIndex map[string]*state.PlayerStanding) {
+//
+// poolOverrides is the pool's recorded rank overrides (a chusen), nil when
+// none. Both branches mark only the groups tieSettled leaves open: Tied means
+// a tie still to be broken, which is what the amber row tells the operator,
+// so a group a chusen or its supplementary bouts already ordered is not one
+// even though its Points stay equal.
+func markTiedStandings(comp *state.Competition, sorted []state.PlayerStanding, matches []state.MatchResult, rosterIndex map[string]*state.PlayerStanding, poolOverrides map[string]int) {
 	if len(sorted) == 0 {
 		return
 	}
@@ -2036,17 +2045,28 @@ func markTiedStandings(comp *state.Competition, sorted []state.PlayerStanding, m
 	}
 
 	isLeague := comp != nil && comp.Format == state.CompFormatLeague
+	isTeam := comp != nil && comp.TeamSize > 0
+
+	// The supplementary rows are read here, from the full pool list, before
+	// the branches see only the regular matches.
+	var open [][]int
+	for _, positions := range detectPoolTies(sorted) {
+		if !tieSettled(standingsAt(sorted, positions), matches, isTeam, poolOverrides) {
+			open = append(open, positions)
+		}
+	}
 
 	if isLeague {
-		markTiedStandingsLeague(comp, sorted, regularMatches, rosterIndex)
+		markTiedStandingsLeague(comp, sorted, regularMatches, rosterIndex, open)
 	} else {
-		markTiedStandingsPools(sorted, regularMatches)
+		markTiedStandingsPools(sorted, regularMatches, open)
 	}
 }
 
 // markTiedStandingsPools marks tied rows in a pools (non-league) competition.
 // Rows are only marked once ALL regular matches in the pool are complete.
-func markTiedStandingsPools(sorted []state.PlayerStanding, regularMatches []state.MatchResult) {
+// open is the tied groups (positions into sorted) still to be broken.
+func markTiedStandingsPools(sorted []state.PlayerStanding, regularMatches []state.MatchResult, open [][]int) {
 	// Gate: there must be at least one regular match, and all must be completed.
 	// With no matches at all the pool hasn't started, everyone is tied at 0
 	// points, which must NOT surface as amber.
@@ -2059,8 +2079,8 @@ func markTiedStandingsPools(sorted []state.PlayerStanding, regularMatches []stat
 		}
 	}
 
-	// Pool is complete; mark every tied group.
-	for _, positions := range detectPoolTies(sorted) {
+	// Pool is complete; mark every tied group still open.
+	for _, positions := range open {
 		for _, idx := range positions {
 			sorted[idx].Tied = true
 		}
@@ -2099,7 +2119,7 @@ func markTiedStandingsPools(sorted []state.PlayerStanding, regularMatches []stat
 //     (SideAID/SideBID blank) resolves to nothing here (lookupStandingsPlayer
 //     is id-only), exactly as it contributes nothing to computeStandingsFrom's
 //     own tally, so the two never disagree about who a match side means.
-func markTiedStandingsLeague(comp *state.Competition, sorted []state.PlayerStanding, regularMatches []state.MatchResult, rosterIndex map[string]*state.PlayerStanding) {
+func markTiedStandingsLeague(comp *state.Competition, sorted []state.PlayerStanding, regularMatches []state.MatchResult, rosterIndex map[string]*state.PlayerStanding, open [][]int) {
 	topN := min(effectiveTopN(comp), len(sorted))
 
 	// statusFor is keyed by helper.CompetitorKey (id-preferred, name+dojo
@@ -2151,9 +2171,10 @@ func markTiedStandingsLeague(comp *state.Competition, sorted []state.PlayerStand
 		return
 	}
 
-	// Trigger has fired: mark tied groups that intersect the top-N band and
-	// are not covered by the two-joint-3rd-places exemption.
-	for _, positions := range detectPoolTies(sorted) {
+	// Trigger has fired: mark the open tied groups (see markTiedStandings)
+	// that intersect the top-N band and are not covered by the
+	// two-joint-3rd-places exemption.
+	for _, positions := range open {
 		minPos := positions[0] + 1 // 1-based
 		g := TiedGroup{
 			Teams:       standingsAt(sorted, positions),

@@ -12,7 +12,6 @@ import { isPoolDaihyosenBout } from './pool_ids.jsx';
 import { SideLabel } from './side_cell.jsx';
 import { realIppons, hanteiTied, hanteiSlot, hanteiWinnerKey, sideSlotOrder } from './result_slot.jsx';
 import { sameCompetitor } from './competitor_identity.jsx';
-import { NumberedName } from './numbered_name.jsx';
 // Imported from the leaf, not read off `window`: this editor is ES-imported by
 // its host and by unit tests that never load api_client, and write_result.jsx
 // is import-only so it can be reached directly (see its header).
@@ -46,6 +45,7 @@ import {
   RecordedWithdrawal,
   withdrawalInForce,
   withdrawnKeyOf,
+  WithdrawalMarkedName,
 } from './admin_scoring_shared.jsx';
 
 import { SyncStatusPill, useDebouncedRunningWrite } from './admin_scoring_autosave.jsx';
@@ -932,9 +932,11 @@ export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, on
                           the only signal. */}
                       <SideLabel side={s.color} />
                       {/* Competitor number chip: owned by numbered_name.jsx
-                          (the outer-side rule lives there). */}
+                          (the outer-side rule lives there). A recorded
+                          withdrawal's Kiken/Fus. rides beside the withdrawn
+                          competitor (WithdrawalMarkedName, bc-kcsh). */}
                       <div className="sb-name">
-                        <NumberedName side={s.color} name={s.name} number={s.number} />
+                        <WithdrawalMarkedName match={m} sideKey={s.key} side={s.color} name={s.name} number={s.number} />
                       </div>
                       <div className="sb-points-grid">
                         {getIpponButtons(isNaginata).map((cc) => (

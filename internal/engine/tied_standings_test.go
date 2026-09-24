@@ -5,9 +5,11 @@ import (
 	"testing"
 
 	"github.com/gitrgoliveira/bracket-creator/internal/domain"
+	"github.com/gitrgoliveira/bracket-creator/internal/helper"
 	"github.com/gitrgoliveira/bracket-creator/internal/state"
 	bctest "github.com/gitrgoliveira/bracket-creator/internal/test/idstamp"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 // tiedStanding builds a standing with an explicit name and Points value.
@@ -81,28 +83,28 @@ func TestMarkTiedStandings_Pools(t *testing.T) {
 
 	t.Run("no matches yet → no amber even when all tied at 0", func(t *testing.T) {
 		sorted := []state.PlayerStanding{tiedStanding("A", 0), tiedStanding("B", 0), tiedStanding("C", 0)}
-		markTiedStandings(comp, sorted, nil, rosterIndexFrom(sorted))
+		markTiedStandings(comp, sorted, nil, rosterIndexFrom(sorted), nil)
 		assert.Empty(t, tiedNames(sorted), "pre-start pool must not surface amber")
 	})
 
 	t.Run("pool complete with a tie → tied rows marked", func(t *testing.T) {
 		sorted := []state.PlayerStanding{tiedStanding("A", 100), tiedStanding("B", 100), tiedStanding("C", 50)}
 		matches := []state.MatchResult{completedMatch(0, "A", "B"), completedMatch(1, "A", "C"), completedMatch(2, "B", "C")}
-		markTiedStandings(comp, sorted, matches, rosterIndexFrom(sorted))
+		markTiedStandings(comp, sorted, matches, rosterIndexFrom(sorted), nil)
 		assert.Equal(t, map[string]bool{"A": true, "B": true}, tiedNames(sorted))
 	})
 
 	t.Run("pool incomplete → no amber even if currently tied", func(t *testing.T) {
 		sorted := []state.PlayerStanding{tiedStanding("A", 100), tiedStanding("B", 100), tiedStanding("C", 50)}
 		matches := []state.MatchResult{completedMatch(0, "A", "B"), scheduledMatch(1, "A", "C")}
-		markTiedStandings(comp, sorted, matches, rosterIndexFrom(sorted))
+		markTiedStandings(comp, sorted, matches, rosterIndexFrom(sorted), nil)
 		assert.Empty(t, tiedNames(sorted), "an unscored match must suppress amber")
 	})
 
 	t.Run("pool complete, no tie → nothing marked", func(t *testing.T) {
 		sorted := []state.PlayerStanding{tiedStanding("A", 100), tiedStanding("B", 60), tiedStanding("C", 50)}
 		matches := []state.MatchResult{completedMatch(0, "A", "B"), completedMatch(1, "A", "C"), completedMatch(2, "B", "C")}
-		markTiedStandings(comp, sorted, matches, rosterIndexFrom(sorted))
+		markTiedStandings(comp, sorted, matches, rosterIndexFrom(sorted), nil)
 		assert.Empty(t, tiedNames(sorted))
 	})
 
@@ -112,7 +114,7 @@ func TestMarkTiedStandings_Pools(t *testing.T) {
 			completedMatch(0, "A", "B"), completedMatch(1, "A", "C"), completedMatch(2, "B", "C"),
 			{ID: "Pool A-TB-0", SideA: "A", SideB: "B", Status: state.MatchStatusScheduled},
 		}
-		markTiedStandings(comp, sorted, matches, rosterIndexFrom(sorted))
+		markTiedStandings(comp, sorted, matches, rosterIndexFrom(sorted), nil)
 		assert.Equal(t, map[string]bool{"A": true, "B": true}, tiedNames(sorted),
 			"a pending TB bout is supplementary and must not gate the highlight")
 	})
@@ -158,7 +160,7 @@ func TestMarkTiedStandings_League(t *testing.T) {
 				// All matches scheduled → nobody has finished their fixtures.
 				matches := leagueRoundRobin([]string{"A", "B", "C", "D"}, false)
 				stampStandingsAndMatchIDs(sorted, matches)
-				markTiedStandings(comp, sorted, matches, rosterIndexFrom(sorted))
+				markTiedStandings(comp, sorted, matches, rosterIndexFrom(sorted), nil)
 				assert.Empty(t, tiedNames(sorted))
 			})
 
@@ -170,7 +172,7 @@ func TestMarkTiedStandings_League(t *testing.T) {
 					scheduledMatch(3, "B", "C"), scheduledMatch(4, "B", "D"), scheduledMatch(5, "C", "D"),
 				}
 				stampStandingsAndMatchIDs(sorted, matches)
-				markTiedStandings(comp, sorted, matches, rosterIndexFrom(sorted))
+				markTiedStandings(comp, sorted, matches, rosterIndexFrom(sorted), nil)
 				assert.Equal(t, map[string]bool{"A": true, "B": true}, tiedNames(sorted),
 					"emerging trigger fires once a top-N competitor is done, even though B isn't")
 			})
@@ -183,7 +185,7 @@ func TestMarkTiedStandings_League(t *testing.T) {
 				}
 				matches := leagueRoundRobin([]string{"A", "B", "C", "D", "E"}, true)
 				stampStandingsAndMatchIDs(sorted, matches)
-				markTiedStandings(comp, sorted, matches, rosterIndexFrom(sorted))
+				markTiedStandings(comp, sorted, matches, rosterIndexFrom(sorted), nil)
 				assert.Empty(t, tiedNames(sorted), "a tie below the top-N band is not consequential")
 			})
 
@@ -191,7 +193,7 @@ func TestMarkTiedStandings_League(t *testing.T) {
 				sorted := []state.PlayerStanding{tiedStanding("A", 100), tiedStanding("B", 90), tiedStanding("C", 80)}
 				matches := leagueRoundRobin([]string{"A", "B", "C"}, true)
 				stampStandingsAndMatchIDs(sorted, matches)
-				markTiedStandings(comp, sorted, matches, rosterIndexFrom(sorted))
+				markTiedStandings(comp, sorted, matches, rosterIndexFrom(sorted), nil)
 				assert.Empty(t, tiedNames(sorted))
 			})
 		})
@@ -238,7 +240,7 @@ func TestMarkTiedStandings_League_NamesakeCountersNotMerged(t *testing.T) {
 		{ID: "Pool A-2", SideA: "Alice", SideB: "Bob", SideAID: aliceOsaka.ID, SideBID: bob.ID, Status: state.MatchStatusScheduled},
 	}
 
-	markTiedStandings(comp, sorted, matches, rosterIndexFrom(sorted))
+	markTiedStandings(comp, sorted, matches, rosterIndexFrom(sorted), nil)
 
 	assert.True(t, sorted[0].Tied, "Alice@Tokyo finished every fight of her own and is in the tied top-N band")
 	assert.True(t, sorted[1].Tied, "the whole tied group (both Alices) must be marked once the trigger fires")
@@ -255,7 +257,7 @@ func TestMarkTiedStandings_TwoThirdPlacesExemption(t *testing.T) {
 		comp := &state.Competition{Format: state.CompFormatLeague, LeagueTiebreakTopN: 4, LeagueTwoThirdPlaces: true}
 		sorted := []state.PlayerStanding{tiedStanding("A", 100), tiedStanding("B", 90), tiedStanding("C", 50), tiedStanding("D", 50)}
 		stampStandingsAndMatchIDs(sorted, matches)
-		markTiedStandings(comp, sorted, matches, rosterIndexFrom(sorted))
+		markTiedStandings(comp, sorted, matches, rosterIndexFrom(sorted), nil)
 		assert.Empty(t, tiedNames(sorted), "joint-3rd tie needs no decider when two-third-places is enabled")
 	})
 
@@ -263,7 +265,7 @@ func TestMarkTiedStandings_TwoThirdPlacesExemption(t *testing.T) {
 		comp := &state.Competition{Format: state.CompFormatLeague, LeagueTiebreakTopN: 4, LeagueTwoThirdPlaces: false}
 		sorted := []state.PlayerStanding{tiedStanding("A", 100), tiedStanding("B", 90), tiedStanding("C", 50), tiedStanding("D", 50)}
 		stampStandingsAndMatchIDs(sorted, matches)
-		markTiedStandings(comp, sorted, matches, rosterIndexFrom(sorted))
+		markTiedStandings(comp, sorted, matches, rosterIndexFrom(sorted), nil)
 		assert.Equal(t, map[string]bool{"C": true, "D": true}, tiedNames(sorted))
 	})
 
@@ -272,7 +274,7 @@ func TestMarkTiedStandings_TwoThirdPlacesExemption(t *testing.T) {
 		// Tie at positions 2-3 (MinPosition 2 < 3): a decider IS needed for 2nd.
 		sorted := []state.PlayerStanding{tiedStanding("A", 100), tiedStanding("B", 80), tiedStanding("C", 80), tiedStanding("D", 40)}
 		stampStandingsAndMatchIDs(sorted, matches)
-		markTiedStandings(comp, sorted, matches, rosterIndexFrom(sorted))
+		markTiedStandings(comp, sorted, matches, rosterIndexFrom(sorted), nil)
 		assert.Equal(t, map[string]bool{"B": true, "C": true}, tiedNames(sorted))
 	})
 }
@@ -285,12 +287,12 @@ func TestMarkTiedStandings_AutoClear(t *testing.T) {
 
 	// Tied first.
 	tied := []state.PlayerStanding{tiedStanding("A", 100), tiedStanding("B", 100), tiedStanding("C", 50)}
-	markTiedStandings(comp, tied, matches, rosterIndexFrom(tied))
+	markTiedStandings(comp, tied, matches, rosterIndexFrom(tied), nil)
 	assert.Equal(t, map[string]bool{"A": true, "B": true}, tiedNames(tied))
 
 	// A later result separates A and B → no rows flagged.
 	resolved := []state.PlayerStanding{tiedStanding("A", 110), tiedStanding("B", 100), tiedStanding("C", 50)}
-	markTiedStandings(comp, resolved, matches, rosterIndexFrom(resolved))
+	markTiedStandings(comp, resolved, matches, rosterIndexFrom(resolved), nil)
 	assert.Empty(t, tiedNames(resolved), "resolved tie must clear the highlight")
 }
 
@@ -300,6 +302,120 @@ func TestMarkTiedStandings_AutoClear(t *testing.T) {
 func TestMarkTiedStandings_EmptyStandings(t *testing.T) {
 	comp := &state.Competition{Format: state.CompFormatLeague}
 	var sorted []state.PlayerStanding
-	markTiedStandings(comp, sorted, nil, rosterIndexFrom(sorted)) // must not panic
+	markTiedStandings(comp, sorted, nil, rosterIndexFrom(sorted), nil) // must not panic
 	assert.Empty(t, tiedNames(sorted))
+}
+
+// TestMarkTiedStandings_SettledTieIsNotTied: Tied marks a tie still to be
+// broken, which is what the amber row tells the operator (operator ruling
+// 2026-09-24: a tie settled by chusen or by daihyosen is no longer a tie).
+// Pools branch; A and B stay equal on Points whatever settles them.
+func TestMarkTiedStandings_SettledTieIsNotTied(t *testing.T) {
+	comp := &state.Competition{Format: state.CompFormatMixed}
+	build := func(extra ...state.MatchResult) ([]state.PlayerStanding, []state.MatchResult) {
+		sorted := []state.PlayerStanding{tiedStanding("A", 100), tiedStanding("B", 100), tiedStanding("C", 50)}
+		matches := append([]state.MatchResult{completedMatch(0, "A", "B"), completedMatch(1, "A", "C"), completedMatch(2, "B", "C")}, extra...)
+		stampStandingsAndMatchIDs(sorted, matches)
+		return sorted, matches
+	}
+	// The key SaveRankOverride writes (lookupPoolRankOverride's doc comment).
+	chusen := func(sorted []state.PlayerStanding, names ...string) map[string]int {
+		o := map[string]int{}
+		for i, s := range sorted {
+			for _, n := range names {
+				if s.Player.Name == n {
+					o[helper.CompetitorKey(s.Player.ID, "", "")] = i + 1
+				}
+			}
+		}
+		return o
+	}
+	tb := state.MatchResult{ID: "Pool A-TB-1", SideA: "A", SideB: "B", Status: state.MatchStatusScheduled}
+	tied := map[string]bool{"A": true, "B": true}
+
+	t.Run("nothing recorded: still a tie", func(t *testing.T) {
+		sorted, matches := build()
+		markTiedStandings(comp, sorted, matches, rosterIndexFrom(sorted), nil)
+		assert.Equal(t, tied, tiedNames(sorted))
+	})
+	t.Run("chusen recorded for every member: not a tie", func(t *testing.T) {
+		sorted, matches := build()
+		markTiedStandings(comp, sorted, matches, rosterIndexFrom(sorted), chusen(sorted, "A", "B"))
+		assert.Empty(t, tiedNames(sorted))
+	})
+	t.Run("an override on one member only: still a tie", func(t *testing.T) {
+		sorted, matches := build()
+		markTiedStandings(comp, sorted, matches, rosterIndexFrom(sorted), chusen(sorted, "A"))
+		assert.Equal(t, tied, tiedNames(sorted))
+	})
+	t.Run("ippon-shobu not yet fought: still a tie", func(t *testing.T) {
+		sorted, matches := build(tb)
+		markTiedStandings(comp, sorted, matches, rosterIndexFrom(sorted), nil)
+		assert.Equal(t, tied, tiedNames(sorted))
+	})
+	t.Run("ippon-shobu decided: not a tie", func(t *testing.T) {
+		decided := tb
+		decided.Status = state.MatchStatusCompleted
+		sorted, matches := build(decided)
+		matches[3].WinnerID = matches[3].SideAID
+		markTiedStandings(comp, sorted, matches, rosterIndexFrom(sorted), nil)
+		assert.Empty(t, tiedNames(sorted))
+	})
+}
+
+// TestCalculatePoolStandings_SettledTieIsNotTied drives the same rule through
+// the real standings path for a team pool, where a daihyosen is the
+// supplementary bout and a chusen is recorded as rank overrides: three teams
+// tied on every criterion stay tied through a daihyosen cycle until the
+// chusen is recorded, and a strictly ordered daihyosen settles them outright.
+func TestCalculatePoolStandings_SettledTieIsNotTied(t *testing.T) {
+	all := map[string]bool{"Alpha": true, "Beta": true, "Gamma": true}
+	tiedIn := func(t *testing.T, eng *Engine, compID string) map[string]bool {
+		t.Helper()
+		standings, err := eng.CalculatePoolStandings(compID)
+		require.NoError(t, err)
+		return tiedNames(standings["Pool A"])
+	}
+	// Alpha > Beta, Beta > Gamma, Gamma > Alpha: one win each. Checked as an
+	// unordered pair (see TestChusenCandidates_CycleNeedsChusen).
+	cycle := func(sideA, sideB string) string {
+		pair := map[string]bool{sideA: true, sideB: true}
+		switch {
+		case pair["Alpha"] && pair["Beta"]:
+			return "Alpha"
+		case pair["Alpha"] && pair["Gamma"]:
+			return "Gamma"
+		}
+		return "Beta"
+	}
+
+	t.Run("daihyosen cycle, then chusen", func(t *testing.T) {
+		compID := "settled-tie-chusen"
+		eng, store := setupTeamPoolComp(t, compID, true)
+		assert.Equal(t, all, tiedIn(t, eng, compID), "a tie on every criterion is a tie")
+		_, err := eng.InjectPoolDaihyosenMatches(compID)
+		require.NoError(t, err)
+		scoreInjectedDH(t, eng, store, compID, cycle)
+		assert.Equal(t, all, tiedIn(t, eng, compID), "a daihyosen cycle leaves the tie to a chusen")
+
+		require.NoError(t, store.SaveRankOverride(compID, "Pool A", bctest.StampPlayerID("Beta", "Dojo Beta"), 1))
+		require.NoError(t, store.SaveRankOverride(compID, "Pool A", bctest.StampPlayerID("Gamma", "Dojo Gamma"), 2))
+		require.NoError(t, store.SaveRankOverride(compID, "Pool A", bctest.StampPlayerID("Alpha", "Dojo Alpha"), 3))
+		eng.standingsCache.Delete(compID)
+		eng.standingsFlight.Delete(compID)
+		assert.Empty(t, tiedIn(t, eng, compID), "the recorded chusen settled it")
+	})
+	t.Run("strictly ordered daihyosen", func(t *testing.T) {
+		compID := "settled-tie-dh"
+		eng, store := setupTeamPoolComp(t, compID, true)
+		_, err := eng.InjectPoolDaihyosenMatches(compID)
+		require.NoError(t, err)
+		scoreInjectedDH(t, eng, store, compID, func(sideA, sideB string) string {
+			if sideA == "Alpha" || sideB == "Alpha" {
+				return "Alpha"
+			}
+			return "Beta"
+		})
+		assert.Empty(t, tiedIn(t, eng, compID), "the daihyosen settled it")
+	})
 }

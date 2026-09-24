@@ -1005,7 +1005,7 @@ func CanGenerateDraw(status CompetitionStatus) bool {
 // stay fixable (operator ruling: "Everything should be able to be fixed, in
 // case of a wrong entry"); what the new order does to the knockout is
 // answered by engine.OverridePoolRank's requalification. The one statement of
-// this rule, shared by the override-rank door and engine.ChusenCandidates, so
+// this rule, shared by the override-rank door and engine.ChusenStatus, so
 // the chusen panel is never offered a tie the door would refuse.
 func (c Competition) AcceptsPoolRankOverride() bool {
 	return c.Status == CompStatusPools || (c.Format == CompFormatMixed && c.Status == CompStatusKnockout)
@@ -1582,7 +1582,10 @@ type PlayerStanding struct {
 	IndividualDraws  int           `json:"individualDraws,omitempty"`
 	PointsWon        int           `json:"pointsWon,omitempty"`
 	PointsLost       int           `json:"pointsLost,omitempty"`
-	Tied             bool          `json:"tied,omitempty"`
+	// Tied marks a row in a tie still to be broken (the amber standings
+	// row): equal Points, and not yet settled by a recorded chusen or by its
+	// supplementary bouts (engine.markTiedStandings).
+	Tied bool `json:"tied,omitempty"`
 	// Flags is the total accumulated own-side referee flags for engi (kata
 	// demonstration) standings. A dedicated field, NOT an overload of
 	// IpponsGiven, so the wire stays self-describing (wins vs flags as distinct

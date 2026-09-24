@@ -1349,4 +1349,4 @@ window.matchMiddleMark = matchMiddleMark;
 window.winnerSideLR = winnerSideLR;
 window.sideLabel = sideLabel;
 
-export { formatIpponsScore, enchoLabel, boutMiddle, defaultWinMaru, matchMiddleMark, winnerSideLR, sideLabel, roundLabel, bracketRoundLabel, teamIVScore, teamIVPWScore, engiFlagScore, matchScoreStr, matchStateCell, buildDisplayModel, computeMetaTops, bronzeUnderFinalStyle, PlayerLine, slotDisplayName, makeSlotLabeller, bracketSlotLabeller, MatchCard, BracketTree, elbowXFor, connectorPath };
+export { formatIpponsScore, enchoLabel, boutMiddle, defaultWinMaru, matchMiddleMark, sideMarks, winnerSideLR, sideLabel, roundLabel, bracketRoundLabel, teamIVScore, teamIVPWScore, engiFlagScore, matchScoreStr, matchStateCell, buildDisplayModel, computeMetaTops, bronzeUnderFinalStyle, PlayerLine, slotDisplayName, makeSlotLabeller, bracketSlotLabeller, MatchCard, BracketTree, elbowXFor, connectorPath };

@@ -19,6 +19,7 @@ import { NO_ID_POOL_HINT, NoIdHint } from './data_integrity.jsx';
 // (downstream_knockout_played): the chusen writes go through the same
 // confirm-and-retry every score write uses.
 import { attemptScoreWrite, DOWNSTREAM_KNOCKOUT_RANKING_CANCELLED } from './write_result.jsx';
+import { rankOrdinal } from './viewer_standings.jsx';
 
 const { useState: useStateA, useEffect: useEffectA, useRef: useRefA, useMemo: useMemoA } = React;
 const EmptyState = window.EmptyState;
@@ -204,6 +205,16 @@ function AdminPools({ c, pools, poolMatches, standings, tweaks, onEditScore, pas
   const [chusenBusy, setChusenBusy] = useStateA({});
   // Per-group error: keyed by the same "${poolName}::${minPosition}" -> string.
   const [chusenGroupErr, setChusenGroupErr] = useStateA({});
+  // Ties a chusen already settled, each carrying its recorded `ranks`
+  // (parallel to `teams`), so one recorded in the wrong order can be changed.
+  // Fetched with chusenCandidates, so it shows exactly where they would.
+  const [chusenRecorded, setChusenRecorded] = useStateA(null);
+  // groupKey -> true while the operator is changing that recorded chusen.
+  const [chusenChanging, setChusenChanging] = useStateA({});
+  const applyChusen = (res) => {
+    setChusenCandidates(res ? res.candidates : null);
+    setChusenRecorded(res ? res.recorded : null);
+  };
 
   // Lightweight signature so the effect re-runs when match results change.
   // Memoized so typing into a chusen position input (local state) does not
@@ -225,13 +236,13 @@ function AdminPools({ c, pools, poolMatches, standings, tweaks, onEditScore, pas
 
   useEffectA(() => {
     if (!isTeamComp || !chusenOpen || !window.API || typeof window.API.chusenCandidates !== "function") {
-      setChusenCandidates(null);
+      applyChusen(null);
       return;
     }
     let cancelled = false;
     window.API.chusenCandidates(c.id, password)
-      .then(list => { if (!cancelled) setChusenCandidates(list); })
-      .catch(() => { if (!cancelled) setChusenCandidates(null); });
+      .then(res => { if (!cancelled) applyChusen(res); })
+      .catch(() => { if (!cancelled) applyChusen(null); });
     return () => { cancelled = true; };
   }, [c && c.id, c && c.status, chusenOpen, isTeamComp, poolMatchesSig, standingsSig, password]);
 
@@ -324,6 +335,234 @@ function AdminPools({ c, pools, poolMatches, standings, tweaks, onEditScore, pas
     });
   };
 
+  // chusenEntry renders one tie's position entry: the team inputs, their
+  // validation and the overridePoolRank writes. The pending banner uses it for
+  // a first chusen; the recorded panel reuses it (changing=true) to change a
+  // chusen recorded in the wrong order, so both go through the same path and
+  // the same knockout warning.
+  const chusenEntry = (group, changing = false) => {
+    const { poolName, teamNames, minPosition } = group;
+    // Members keyed by IDENTITY (checkinPid), never by name
+    // (bc-cse follow-up) and never by index (bc-appx item 2): `teams`
+    // carries the authoritative per-member identity ({id, name, dojo}),
+    // positionally parallel to the legacy `teamNames` strings (server:
+    // handlers_competition.go builds teams[i] and names[i] from the same
+    // loop over g.Teams). Two members CAN share a display name --
+    // reachable only via the documented enforcement hole in team-name
+    // uniqueness (an unreadable config.md write skips
+    // checkNewTeamNameCollisions) -- so keying anything by bare name
+    // collapses both onto one identity. `teams` is required on the wire
+    // (this SPA ships in the same binary as the server that emits it,
+    // so there is no older-server case to be compatible with); a
+    // teamNames-only fallback would silently collapse a same-name pair
+    // back onto one key, exactly the bug this comment used to guard
+    // against, so there is deliberately no fallback here. A payload
+    // without it is a server bug, and skipping the group keeps that
+    // contained to this banner rather than tripping the page-level
+    // error boundary for every other pool on the screen.
+    const members = group.teams;
+    if (!members) return null;
+    // A pool can hold more than one unresolved tied group (e.g. a cycle at
+    // 1st/2nd and a separate cycle at 3rd/4th). Key by pool + best position
+    // so the React key and the busy/error maps never collide across groups.
+    const groupKey = `${poolName}::${minPosition}`;
+    const isBusy = !!chusenBusy[groupKey];
+    const groupErrMsg = chusenGroupErr[groupKey] || null;
+    // overridePoolRank requires playerId (operator ruling bc-pnum: the
+    // server resolves a pool member by id only and 400s outright
+    // without one). Disabling the button here, with NoIdHint's remedy,
+    // replaces letting the operator click through to that 400. Mirrors
+    // the league-tiebreak buttons' own idsMissing gate below.
+    const idsMissing = members.some(m => !m.id);
+
+    // Effective value for a member's input, keyed by the member's
+    // IDENTITY (checkinPid; data.jsx owns id-vs-name|dojo fallback rule),
+    // never its position in `members`: the group order comes from the
+    // server's live standings sort, which reorders after a partial
+    // write, so an index-keyed lookup can read back a DIFFERENT team's
+    // typed value on retry. The operator's edit if present, else the
+    // displayed default (minPosition + index --
+    // idx is still used here only to pick a distinct default rank per
+    // position, not to key the input). Both validation and submit read
+    // this so accepting the shown defaults (already a valid permutation)
+    // records without forcing a manual edit. Keyed on groupKey (pool +
+    // minPosition) as well as identity, not bare poolName: a pool can hold
+    // more than one unresolved tied group (see the groupKey comment
+    // above), and PoolWinners has no upper bound, so e.g. a cycle at
+    // 1st/2nd and another at 3rd/4th in the SAME pool must not share one
+    // input/clear per member.
+    // A recorded chusen being changed starts from the ranks it was
+    // recorded with (group.ranks, parallel to members), so Change opens
+    // on the order the operator is correcting.
+    const defaultRank = (idx) => (group.ranks ? group.ranks[idx] : minPosition + idx);
+    const effRank = (member, idx) => {
+      const raw = chusenInputs[`${groupKey}::${checkinPid(member)}`];
+      return parseInt(raw !== undefined ? raw : String(defaultRank(idx)), 10);
+    };
+    const clearInputs = () => setChusenInputs(prev => {
+      const next = { ...prev };
+      for (let i = 0; i < members.length; i++) delete next[`${groupKey}::${checkinPid(members[i])}`];
+      return next;
+    });
+
+    const handleRecord = async () => {
+      // Validate: entered positions must be exactly the set
+      // {minPosition .. minPosition + members.length - 1}.
+      const expected = new Set();
+      for (let i = 0; i < members.length; i++) expected.add(minPosition + i);
+      const entered = new Set();
+      let valid = true;
+      for (let i = 0; i < members.length; i++) {
+        const val = effRank(members[i], i);
+        if (isNaN(val) || !expected.has(val) || entered.has(val)) { valid = false; break; }
+        entered.add(val);
+      }
+      if (!valid) {
+        const lo = minPosition;
+        const hi = minPosition + members.length - 1;
+        setChusenGroupErr(prev => ({ ...prev, [groupKey]: `Enter each of positions ${lo} to ${hi} exactly once` }));
+        return;
+      }
+      setChusenGroupErr(prev => ({ ...prev, [groupKey]: null }));
+      setChusenBusy(prev => ({ ...prev, [groupKey]: true }));
+      try {
+        for (let i = 0; i < members.length; i++) {
+          const member = members[i];
+          // A rank that moves a qualifier out of a knockout match the old
+          // one already fought is refused with the names of who moves;
+          // attemptScoreWrite asks the operator and, confirmed, resends it
+          // with forceDownstreamReopen, which reopens that match. The
+          // confirmation is only passed when set, so an ordinary record
+          // keeps its six-argument call.
+          await attemptScoreWrite({
+            recordScore: (cId, pool, body, pwd) => (body.forceDownstreamReopen
+              ? window.API.overridePoolRank(cId, pool, member.name, body.rank, pwd, member.id, true)
+              : window.API.overridePoolRank(cId, pool, member.name, body.rank, pwd, member.id)),
+            confirmDialog: window.confirmDialog,
+            compId: c.id, matchId: poolName, result: { rank: effRank(member, i) }, password,
+          });
+        }
+        if (changing) {
+          // Show the new order at once and close the entry; the re-fetch
+          // the new standings trigger reconciles it.
+          const ranks = members.map((m, i) => effRank(m, i));
+          setChusenRecorded(prev => (prev || []).map(g => (g.poolName === poolName && g.minPosition === minPosition ? { ...g, ranks } : g)));
+          setChusenChanging(prev => ({ ...prev, [groupKey]: false }));
+        } else {
+          // Optimistically hide THIS group only (a pool can hold several) - the
+          // effect re-fetches on the next update to reconcile.
+          setChusenCandidates(prev => (prev || []).filter(g => !(g.poolName === poolName && g.minPosition === minPosition)));
+        }
+        // Clear inputs for this group only (groupKey + identity, not bare
+        // poolName -- see the effRank comment: a sibling tied group in the
+        // same pool must not have its inputs wiped here too).
+        clearInputs();
+      } catch (e) {
+        const msg = e && e.downstreamKnockoutPlayedCancelled
+          ? DOWNSTREAM_KNOCKOUT_RANKING_CANCELLED
+          : (e.message || "Failed to record chusen result");
+        setChusenGroupErr(prev => ({ ...prev, [groupKey]: msg }));
+        // The per-member overridePoolRank writes are sequential, so a mid-loop
+        // failure may have persisted some ranks but not others. overridePoolRank
+        // is idempotent per member (retrying re-sends every rank), and the group
+        // stays visible on failure so the operator can retry. Re-fetch the
+        // candidates so the banner reflects exactly which teams still need a
+        // rank, rather than waiting for the next SSE-driven refresh.
+        if (window.API && typeof window.API.chusenCandidates === "function") {
+          window.API.chusenCandidates(c.id, password)
+            .then(applyChusen)
+            .catch(() => {});
+        }
+      } finally {
+        setChusenBusy(prev => ({ ...prev, [groupKey]: false }));
+      }
+    };
+
+    return (
+      <div key={groupKey} className="league-tiebreak__group">
+        <div className="league-tiebreak__group-header">
+          <span className="league-tiebreak__pos">{poolName}</span>
+          <span className="league-tiebreak__teams">{teamNames.join(" · ")}</span>
+        </div>
+        {changing && (
+          <div className="league-tiebreak__desc" style={{ marginBottom: 8 }}>
+            Enter the order the lots actually gave. Changing it can change who qualifies from {poolName}. If a team moves out of a knockout match that has already been fought, you are asked before that match is reopened.
+          </div>
+        )}
+        <div className="league-tiebreak__desc" style={{ marginBottom: 8 }}>
+          Assign positions {minPosition} to {minPosition + members.length - 1} (one per team):
+        </div>
+        {members.map((member, idx) => {
+          // groupKey + member IDENTITY, not index: see the effRank/
+          // checkinPid comments above -- the member array order is
+          // not stable across a re-fetch, so an index-keyed input can
+          // silently attach to the WRONG team after a mid-loop failure.
+          const memberKey = checkinPid(member);
+          const inputKey = `${groupKey}::${memberKey}`;
+          const defaultVal = defaultRank(idx);
+          // Stable DOM id so the label is programmatically tied to its
+          // input. `idx` here, NOT memberKey: memberKey can be a
+          // non-ASCII name|dojo string (Japanese names are the normal
+          // case for this roster), and the regex below collapses every
+          // non-ASCII run to a single "-", so two id-less members whose
+          // keys differ only in non-ASCII characters collided on the
+          // SAME DOM id (duplicate ids, and the label's htmlFor focused
+          // the other team's input). idx is unique within this group's
+          // render (label and input come from the same map iteration),
+          // which is all a DOM id needs -- unlike inputKey/memberKey
+          // above, it does not need to survive a re-fetch reorder.
+          const inputId = `chusen-${groupKey}-${idx}`.replace(/[^a-zA-Z0-9_-]+/g, "-");
+          return (
+            <div key={inputKey} style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 4 }}>
+              <label htmlFor={inputId} style={{ flex: 1 }}>{member.name}</label>
+              <input
+                id={inputId}
+                type="number"
+                min={minPosition}
+                max={minPosition + members.length - 1}
+                style={{ width: 64 }}
+                value={chusenInputs[inputKey] !== undefined ? chusenInputs[inputKey] : String(defaultVal)}
+                onChange={e => setChusenInputs(prev => ({ ...prev, [inputKey]: e.target.value }))}
+                disabled={isBusy}
+              />
+            </div>
+          );
+        })}
+        <div className="league-tiebreak__actions" style={{ marginTop: 8 }}>
+          <button
+            type="button"
+            className="btn btn--sm btn--primary"
+            disabled={isBusy || idsMissing}
+            onClick={handleRecord}
+          >
+            {isBusy && <span className="spinner" />}
+            Record chusen result
+          </button>
+          {changing && (
+            <button
+              type="button"
+              className="btn btn--sm btn--ghost"
+              disabled={isBusy}
+              onClick={() => {
+                clearInputs();
+                setChusenGroupErr(prev => ({ ...prev, [groupKey]: null }));
+                setChusenChanging(prev => ({ ...prev, [groupKey]: false }));
+              }}
+            >
+              Cancel
+            </button>
+          )}
+          {idsMissing && (
+            <NoIdHint text={NO_ID_POOL_HINT} />
+          )}
+        </div>
+        {groupErrMsg && (
+          <div className="league-tiebreak__err">{groupErrMsg}</div>
+        )}
+      </div>
+    );
+  };
+
   // Chusen banner: shown when chusenCandidates is non-empty (team comp whose
   // pool order is still open, chusenOpen above; at least one DH cycle left
   // unresolved).
@@ -337,193 +576,43 @@ function AdminPools({ c, pools, poolMatches, standings, tweaks, onEditScore, pas
       <div className="league-tiebreak__desc">
         The daihyosen didn&apos;t settle the order (two or more teams tied on daihyosen wins). Draw lots and record each team&apos;s finishing position below.
       </div>
-      {chusenCandidates.map((group) => {
-        const { poolName, teamNames, minPosition } = group;
-        // Members keyed by IDENTITY (checkinPid), never by name
-        // (bc-cse follow-up) and never by index (bc-appx item 2): `teams`
-        // carries the authoritative per-member identity ({id, name, dojo}),
-        // positionally parallel to the legacy `teamNames` strings (server:
-        // handlers_competition.go builds teams[i] and names[i] from the same
-        // loop over g.Teams). Two members CAN share a display name --
-        // reachable only via the documented enforcement hole in team-name
-        // uniqueness (an unreadable config.md write skips
-        // checkNewTeamNameCollisions) -- so keying anything by bare name
-        // collapses both onto one identity. `teams` is required on the wire
-        // (this SPA ships in the same binary as the server that emits it,
-        // so there is no older-server case to be compatible with); a
-        // teamNames-only fallback would silently collapse a same-name pair
-        // back onto one key, exactly the bug this comment used to guard
-        // against, so there is deliberately no fallback here. A payload
-        // without it is a server bug, and skipping the group keeps that
-        // contained to this banner rather than tripping the page-level
-        // error boundary for every other pool on the screen.
-        const members = group.teams;
-        if (!members) return null;
-        // A pool can hold more than one unresolved tied group (e.g. a cycle at
-        // 1st/2nd and a separate cycle at 3rd/4th). Key by pool + best position
-        // so the React key and the busy/error maps never collide across groups.
-        const groupKey = `${poolName}::${minPosition}`;
-        const isBusy = !!chusenBusy[groupKey];
-        const groupErrMsg = chusenGroupErr[groupKey] || null;
-        // overridePoolRank requires playerId (operator ruling bc-pnum: the
-        // server resolves a pool member by id only and 400s outright
-        // without one). Disabling the button here, with NoIdHint's remedy,
-        // replaces letting the operator click through to that 400. Mirrors
-        // the league-tiebreak buttons' own idsMissing gate below.
-        const idsMissing = members.some(m => !m.id);
+      {chusenCandidates.map(group => chusenEntry(group))}
+    </div>
+  ) : null;
 
-        // Effective value for a member's input, keyed by the member's
-        // IDENTITY (checkinPid; data.jsx owns id-vs-name|dojo fallback rule),
-        // never its position in `members`: the group order comes from the
-        // server's live standings sort, which reorders after a partial
-        // write, so an index-keyed lookup can read back a DIFFERENT team's
-        // typed value on retry. The operator's edit if present, else the
-        // displayed default (minPosition + index --
-        // idx is still used here only to pick a distinct default rank per
-        // position, not to key the input). Both validation and submit read
-        // this so accepting the shown defaults (already a valid permutation)
-        // records without forcing a manual edit. Keyed on groupKey (pool +
-        // minPosition) as well as identity, not bare poolName: a pool can hold
-        // more than one unresolved tied group (see the groupKey comment
-        // above), and PoolWinners has no upper bound, so e.g. a cycle at
-        // 1st/2nd and another at 3rd/4th in the SAME pool must not share one
-        // input/clear per member.
-        const effRank = (member, idx) => {
-          const raw = chusenInputs[`${groupKey}::${checkinPid(member)}`];
-          return parseInt(raw !== undefined ? raw : String(minPosition + idx), 10);
-        };
-
-        const handleRecord = async () => {
-          // Validate: entered positions must be exactly the set
-          // {minPosition .. minPosition + members.length - 1}.
-          const expected = new Set();
-          for (let i = 0; i < members.length; i++) expected.add(minPosition + i);
-          const entered = new Set();
-          let valid = true;
-          for (let i = 0; i < members.length; i++) {
-            const val = effRank(members[i], i);
-            if (isNaN(val) || !expected.has(val) || entered.has(val)) { valid = false; break; }
-            entered.add(val);
-          }
-          if (!valid) {
-            const lo = minPosition;
-            const hi = minPosition + members.length - 1;
-            setChusenGroupErr(prev => ({ ...prev, [groupKey]: `Enter each of positions ${lo} to ${hi} exactly once` }));
-            return;
-          }
-          setChusenGroupErr(prev => ({ ...prev, [groupKey]: null }));
-          setChusenBusy(prev => ({ ...prev, [groupKey]: true }));
-          try {
-            for (let i = 0; i < members.length; i++) {
-              const member = members[i];
-              // A rank that moves a qualifier out of a knockout match the old
-              // one already fought is refused with the names of who moves;
-              // attemptScoreWrite asks the operator and, confirmed, resends it
-              // with forceDownstreamReopen, which reopens that match. The
-              // confirmation is only passed when set, so an ordinary record
-              // keeps its six-argument call.
-              await attemptScoreWrite({
-                recordScore: (cId, pool, body, pwd) => (body.forceDownstreamReopen
-                  ? window.API.overridePoolRank(cId, pool, member.name, body.rank, pwd, member.id, true)
-                  : window.API.overridePoolRank(cId, pool, member.name, body.rank, pwd, member.id)),
-                confirmDialog: window.confirmDialog,
-                compId: c.id, matchId: poolName, result: { rank: effRank(member, i) }, password,
-              });
-            }
-            // Optimistically hide THIS group only (a pool can hold several) - the
-            // effect re-fetches on the next update to reconcile.
-            setChusenCandidates(prev => (prev || []).filter(g => !(g.poolName === poolName && g.minPosition === minPosition)));
-            // Clear inputs for this group only (groupKey + identity, not bare
-            // poolName -- see the effRank comment: a sibling tied group in the
-            // same pool must not have its inputs wiped here too).
-            setChusenInputs(prev => {
-              const next = { ...prev };
-              for (let i = 0; i < members.length; i++) delete next[`${groupKey}::${checkinPid(members[i])}`];
-              return next;
-            });
-          } catch (e) {
-            const msg = e && e.downstreamKnockoutPlayedCancelled
-              ? DOWNSTREAM_KNOCKOUT_RANKING_CANCELLED
-              : (e.message || "Failed to record chusen result");
-            setChusenGroupErr(prev => ({ ...prev, [groupKey]: msg }));
-            // The per-member overridePoolRank writes are sequential, so a mid-loop
-            // failure may have persisted some ranks but not others. overridePoolRank
-            // is idempotent per member (retrying re-sends every rank), and the group
-            // stays visible on failure so the operator can retry. Re-fetch the
-            // candidates so the banner reflects exactly which teams still need a
-            // rank, rather than waiting for the next SSE-driven refresh.
-            if (window.API && typeof window.API.chusenCandidates === "function") {
-              window.API.chusenCandidates(c.id, password)
-                .then(list => setChusenCandidates(list))
-                .catch(() => {});
-            }
-          } finally {
-            setChusenBusy(prev => ({ ...prev, [groupKey]: false }));
-          }
-        };
-
+  // Recorded chusen: each tie a chusen already settled, shown in the recorded
+  // order with a Change control, because a chusen recorded in the wrong order
+  // must stay fixable. Only these ties are editable: the general rank override
+  // was removed on purpose. Change reopens chusenEntry pre-filled with the
+  // recorded ranks.
+  const chusenRecordedPanel = chusenRecorded && chusenRecorded.length > 0 ? (
+    <div className="card league-tiebreak">
+      <div className="league-tiebreak__title">Chusen (drawing lots) recorded</div>
+      {chusenRecorded.map((group) => {
+        const groupKey = `${group.poolName}::${group.minPosition}`;
+        if (!group.teams || !group.ranks) return null;
+        if (chusenChanging[groupKey]) return chusenEntry(group, true);
+        const order = group.teams
+          .map((t, i) => ({ name: t.name, rank: group.ranks[i] }))
+          .sort((a, b) => a.rank - b.rank)
+          .map(o => `${rankOrdinal(o.rank)} ${o.name}`)
+          .join(", ");
         return (
           <div key={groupKey} className="league-tiebreak__group">
             <div className="league-tiebreak__group-header">
-              <span className="league-tiebreak__pos">{poolName}</span>
-              <span className="league-tiebreak__teams">{teamNames.join(" · ")}</span>
+              <span className="league-tiebreak__pos">{group.poolName}</span>
+              <span className="league-tiebreak__teams">Drawing lots: {order}</span>
             </div>
-            <div className="league-tiebreak__desc" style={{ marginBottom: 8 }}>
-              Assign positions {minPosition} to {minPosition + members.length - 1} (one per team):
-            </div>
-            {members.map((member, idx) => {
-              // groupKey + member IDENTITY, not index: see the effRank/
-              // checkinPid comments above -- the member array order is
-              // not stable across a re-fetch, so an index-keyed input can
-              // silently attach to the WRONG team after a mid-loop failure.
-              const memberKey = checkinPid(member);
-              const inputKey = `${groupKey}::${memberKey}`;
-              const defaultVal = minPosition + idx;
-              // Stable DOM id so the label is programmatically tied to its
-              // input. `idx` here, NOT memberKey: memberKey can be a
-              // non-ASCII name|dojo string (Japanese names are the normal
-              // case for this roster), and the regex below collapses every
-              // non-ASCII run to a single "-", so two id-less members whose
-              // keys differ only in non-ASCII characters collided on the
-              // SAME DOM id (duplicate ids, and the label's htmlFor focused
-              // the other team's input). idx is unique within this group's
-              // render (label and input come from the same map iteration),
-              // which is all a DOM id needs -- unlike inputKey/memberKey
-              // above, it does not need to survive a re-fetch reorder.
-              const inputId = `chusen-${groupKey}-${idx}`.replace(/[^a-zA-Z0-9_-]+/g, "-");
-              return (
-                <div key={inputKey} style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 4 }}>
-                  <label htmlFor={inputId} style={{ flex: 1 }}>{member.name}</label>
-                  <input
-                    id={inputId}
-                    type="number"
-                    min={minPosition}
-                    max={minPosition + members.length - 1}
-                    style={{ width: 64 }}
-                    value={chusenInputs[inputKey] !== undefined ? chusenInputs[inputKey] : String(defaultVal)}
-                    onChange={e => setChusenInputs(prev => ({ ...prev, [inputKey]: e.target.value }))}
-                    disabled={isBusy}
-                  />
-                </div>
-              );
-            })}
-            <div className="league-tiebreak__actions" style={{ marginTop: 8 }}>
+            <div className="league-tiebreak__actions">
               <button
                 type="button"
-                className="btn btn--sm btn--primary"
-                disabled={isBusy || idsMissing}
-                onClick={handleRecord}
+                className="btn btn--sm"
+                aria-label={`Change the drawing lots for ${group.poolName}`}
+                onClick={() => setChusenChanging(prev => ({ ...prev, [groupKey]: true }))}
               >
-                {isBusy && <span className="spinner" />}
-                Record chusen result
+                Change
               </button>
-              {idsMissing && (
-                <NoIdHint text={NO_ID_POOL_HINT} />
-              )}
             </div>
-            {groupErrMsg && (
-              <div className="league-tiebreak__err">{groupErrMsg}</div>
-            )}
           </div>
         );
       })}
@@ -666,6 +755,7 @@ function AdminPools({ c, pools, poolMatches, standings, tweaks, onEditScore, pas
     <>
     <div>
       {chusenBanner}
+      {chusenRecordedPanel}
       {leagueTiebreakBanner}
       {/* Standings ordering is decided by FORMAT (mp-ahu6): pools always
           draw-order via PoolsViewer, leagues always rank-order via

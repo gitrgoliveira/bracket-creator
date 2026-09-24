@@ -6,7 +6,9 @@
 // specifiers resolve in the browser. viewer.js is the SOLE viewer entry script in
 // index.html and imports this module: do NOT give it its own <script type="module">
 // tag, or the browser fetches it under a second URL (.js?v=N vs .jsx) and evaluates
-// it twice (double-load; same class as mp-zd1v).
+// it twice (double-load; same class as mp-zd1v). admin_pools.jsx also imports
+// rankOrdinal from here by the same ".jsx" specifier, so it shares this one
+// module instance rather than loading a second copy.
 //
 // Cycle note: viewer.jsx imports from this file and re-exports every symbol
 // here (plus window.* assignments) so the public surface of viewer.jsx is
@@ -612,7 +614,8 @@ export function LeagueMatrix({ pool, matches, tweaks, onMatchClick, highlightPla
 
 // rankOrdinal converts a 1-based rank integer to a short ordinal string.
 // Handles the 11th/12th/13th exception and the general st/nd/rd/th rules.
-function rankOrdinal(rank) {
+// Exported for the admin Pools tab's recorded-chusen line.
+export function rankOrdinal(rank) {
   const mod100 = rank % 100;
   const mod10 = rank % 10;
   if (mod100 >= 11 && mod100 <= 13) return rank + "th";

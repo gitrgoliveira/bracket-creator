@@ -67,13 +67,19 @@ The positions you record decide who goes through. If they change who holds a qua
 
 Chusen is the only place ranks are set by hand, and it happens only when the bouts themselves cannot decide the order.
 
+### Change a chusen recorded in the wrong order
+
+After you record a chusen, the same tab shows a **"Chusen (drawing lots) recorded"** panel with the order you recorded, for example "Drawing lots: 1st Kyoto, 2nd Osaka, 3rd Nara". If you entered the order wrongly, select **Change**. The entry opens again with the recorded positions filled in. Enter the order the lots actually gave and record it, or select **Cancel** to leave the recorded order as it is.
+
+A changed order can change who qualifies from the pool. The app treats it the same as a first chusen: if a team moves out of a knockout match that has already been fought, it asks first, and **Apply and reopen** reopens that match for the new qualifier. If that match is being fought right now, the change is not recorded until the match is finished or sent back to the queue.
+
 ## Competitor eligibility after a decision
 
 A kiken or fusenpai marks the competitor who withdrew or did not appear as ineligible for further matches. The app blocks starting an ineligible competitor, so a withdrawn competitor cannot silently re-enter the draw. An injury kiken (FIK Article 30) can be reversed: once the operator reinstates the competitor, the eligibility block is lifted and they can fight again.
 
 ## Correcting a withdrawal recorded by mistake
 
-A kiken or fusenpai entered in error can always be fixed. Open the match in the score editor. It shows what is recorded, for example "Recorded: Kiken – Voluntary, Kyoto withdrew". Pick the fix that matches what happened:
+A kiken or fusenpai entered in error can always be fixed. Open the match in the score editor. It shows what is recorded, for example "Recorded: Kiken – Voluntary, Kyoto withdrew", and marks the side that withdrew with **Kiken** or **Fus.** beside its name. In a team match the result below the bouts names the recorded winner and the decision, even though the bouts after the withdrawal were never fought. Pick the fix that matches what happened:
 
 - **The wrong competitor or team was marked.** Record the withdrawal again for the other side. In an individual match, use the **Kiken – Voluntary**, **Kiken – Injury** or **Fusenpai** button in the editor's **Decision** row. In a team match, open **Withdrawal or no-show** and use the same buttons there. The side you first marked is eligible again, and the other side becomes the one that withdrew.
 - **Nobody withdrew.** Choose **Clear withdrawal and reopen** and give a reason. A withdrawal gives the opponent the win by default, so without it the match was never decided. The match goes back to in progress and the editor stays open on it. The withdrawn competitor or team can compete again. Score the rest of the match and finish it as usual.

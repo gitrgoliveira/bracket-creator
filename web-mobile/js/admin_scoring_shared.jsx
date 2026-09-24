@@ -14,6 +14,8 @@ import {
 import { sameCompetitor } from './competitor_identity.jsx';
 import { sideWord } from './side_cell.jsx';
 import { isWithdrawalDecision } from './api_serializers.jsx';
+import { sideMarks } from './bracket.jsx';
+import { NumberedName, numberFollowsName } from './numbered_name.jsx';
 
 // Kendo best-of-3 cap. Mirrors the server-side `maxIpponsPerSide` in
 // internal/mobileapp/validation.go: the bout ends when one side reaches
@@ -1563,6 +1565,28 @@ function RecordedWithdrawal({ match, ctl, disabled = false, singleBout = false }
   );
 }
 
+// WithdrawalMarkedName: a side's name in an editor header, carrying the RESULT
+// mark (Kiken / Fus.) of a recorded withdrawal beside the competitor it names
+// while that withdrawal is in force, so a correction shows the recorded
+// decision before any edit (bc-kcsh). WHICH mark is sideMarks (bracket.jsx),
+// the owner the score strings and the bracket card already read
+// ("M Kiken vs ○○"); WHICH side is withdrawnKeyOf, the answer the Recorded line
+// under the board gives, so the two cannot disagree. The mark sits on the
+// INNER side of the name, across it from the number (numberFollowsName), and
+// never in the centre: the middle is a closed set, and Kiken/Fus. name one
+// competitor. Both editors render their header names through here, the
+// individual board and the team encounter header alike.
+function WithdrawalMarkedName({ match, sideKey, side, name, number }) {
+  const mark = withdrawalInForce(match) && withdrawnKeyOf(match) === sideKey
+    ? sideMarks(match.decision, false).loser
+    : "";
+  if (!mark) return <NumberedName side={side} name={name} number={number} />;
+  const markEl = <span className="sb-result-mark" data-testid={`withdrawal-mark-${side}`}>{mark}</span>;
+  return numberFollowsName(side)
+    ? <>{markEl}{" "}<NumberedName side={side} name={name} number={number} /></>
+    : <><NumberedName side={side} name={name} number={number} />{" "}{markEl}</>;
+}
+
 // A match has ONE result and every surface asking for it shows the same one,
 // and the score editors are such surfaces: while one is open, the viewer card,
 // the bracket, the TV board, the lobby and the export are all already showing
@@ -1696,4 +1720,5 @@ export {
   useMatchReopen,
   ReopenFeedback,
   RecordedWithdrawal,
+  WithdrawalMarkedName,
 };

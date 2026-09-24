@@ -5303,6 +5303,17 @@ button.vsched-item:not([data-clickable]) {
   overflow-wrap: anywhere;
 }
 
+/* bc-kcsh: a recorded withdrawal's result mark (Kiken / Fus.) beside the
+   withdrawn side's name in both editor headers (WithdrawalMarkedName). The
+   same word the score strings put in that side's cell, set as a quieter
+   tag so it reads as a mark on the name rather than part of it. */
+.sb-result-mark {
+  font: 800 13px/1 var(--font-strong);
+  letter-spacing: 0.02em;
+  color: var(--ink-2);
+  white-space: nowrap;
+}
+
 /* Option D (harden): on the INDIVIDUAL scoring board only, scoped with
    :has(.sb-slots) so the team header (.sb-match/.sb-side carrying just a
    badge + name, no slots) is untouched, lay each side out as a SUBGRID that
@@ -5728,7 +5739,9 @@ button.vsched-item:not([data-clickable]) {
 }
 
 /* Kachinuki running headline content: a bout-log fact ("X beat Y · stays
-   on"), never a verdict — the verdict appears only on completion. */
+   on"), never a verdict — the verdict appears only on completion. Also the
+   recorded decision ("Kiken – Voluntary") under the verdict of a match a
+   withdrawal ended (bc-kcsh). */
 .team-summary__fact {
   font-size: 13.5px;
   font-weight: 700;

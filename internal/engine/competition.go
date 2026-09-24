@@ -588,7 +588,7 @@ func leagueGroupHasDH(group []state.PlayerStanding, allMatches []state.MatchResu
 
 // dhCycleExists reports whether any tied group is still unresolved after its
 // daihyosen bouts (a cycle / all-drawn), i.e. it needs a chusen. Delegates the
-// per-group check to groupNeedsChusen (the same predicate ChusenCandidates uses
+// per-group check to groupNeedsChusen (the same predicate ChusenStatus uses
 // to surface those groups to the operator). Below-cut ties never block: DH
 // matches are injected only for advancement-affecting groups, so a below-cut
 // group has no DH bouts and groupNeedsChusen returns false. When it does return

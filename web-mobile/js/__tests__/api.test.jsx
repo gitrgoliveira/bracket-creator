@@ -1735,10 +1735,13 @@ describe('API Utils', () => {
     });
 
     describe('chusenCandidates', () => {
-      it('returns the candidates array from the response', async () => {
+      it('returns the candidates and recorded arrays from the response', async () => {
         const payload = {
           candidates: [
             { poolName: 'Pool A', teamNames: ['Team 1', 'Team 2'], minPosition: 2 },
+          ],
+          recorded: [
+            { poolName: 'Pool B', teamNames: ['Team 4', 'Team 3'], minPosition: 1, ranks: [1, 2] },
           ],
         };
         global.fetch = vi.fn().mockResolvedValue({
@@ -1746,20 +1749,20 @@ describe('API Utils', () => {
           json: async () => payload,
         });
         const result = await API.chusenCandidates('comp-1', 'pw');
-        expect(result).toEqual(payload.candidates);
+        expect(result).toEqual({ candidates: payload.candidates, recorded: payload.recorded });
         expect(global.fetch).toHaveBeenCalledWith(
           '/api/competitions/comp-1/chusen-candidates',
           { headers: { 'X-Tournament-Password': 'pw' } }
         );
       });
 
-      it('returns [] when the candidates field is absent', async () => {
+      it('returns empty lists when the fields are absent', async () => {
         global.fetch = vi.fn().mockResolvedValue({
           ok: true,
           json: async () => ({}),
         });
         const result = await API.chusenCandidates('comp-1');
-        expect(result).toEqual([]);
+        expect(result).toEqual({ candidates: [], recorded: [] });
       });
 
       it('throws with the status when the body has no error field', async () => {

@@ -112,6 +112,121 @@ func TestChusenCandidates_ResolvedByOverride(t *testing.T) {
 	assert.Empty(t, cands, "a chusen recorded as a full rank override clears the candidate")
 }
 
+// scoreDHCycle scores setupTeamPoolComp's injected daihyosen round into the
+// perfect cycle Alpha > Beta > Gamma > Alpha (one win each), the tie only a
+// chusen settles. Checked as UNORDERED pairs; see
+// TestChusenCandidates_CycleNeedsChusen for why a fixed side cannot be assumed.
+func scoreDHCycle(t *testing.T, eng *Engine, store *state.Store, compID string) {
+	t.Helper()
+	_, err := eng.InjectPoolDaihyosenMatches(compID)
+	require.NoError(t, err)
+	scoreInjectedDH(t, eng, store, compID, func(sideA, sideB string) string {
+		pair := map[string]bool{sideA: true, sideB: true}
+		switch {
+		case pair["Alpha"] && pair["Beta"]:
+			return "Alpha"
+		case pair["Alpha"] && pair["Gamma"]:
+			return "Gamma"
+		case pair["Beta"] && pair["Gamma"]:
+			return "Beta"
+		}
+		return sideA
+	})
+}
+
+// recordChusenOrder records a drawn order for Pool A through the store, one
+// team per rank starting at 1, and drops the standings cache so the next read
+// sees it.
+func recordChusenOrder(t *testing.T, eng *Engine, store *state.Store, compID string, order ...string) {
+	t.Helper()
+	for i, name := range order {
+		require.NoError(t, store.SaveRankOverride(compID, "Pool A", bctest.StampPlayerID(name, "Dojo "+name), i+1))
+	}
+	eng.standingsCache.Delete(compID)
+	eng.standingsFlight.Delete(compID)
+}
+
+func chusenTeamNames(g ChusenGroup) []string {
+	names := make([]string, len(g.Teams))
+	for i, s := range g.Teams {
+		names[i] = s.Player.Name
+	}
+	return names
+}
+
+// A chusen recorded in the wrong order must stay fixable, so ChusenStatus
+// reports a group a recorded chusen settled, in the recorded order and with
+// the recorded ranks, and keeps reporting it after the order is changed. The
+// orders used here are deliberately not the natural one, so the reported
+// order can only have come from the override.
+func TestChusenStatus_ReportsTheRecordedOrder(t *testing.T) {
+	compID := "chusen-recorded"
+	eng, store := setupTeamPoolComp(t, compID, true)
+	scoreDHCycle(t, eng, store, compID)
+
+	report, err := eng.ChusenStatus(compID)
+	require.NoError(t, err)
+	require.Len(t, report.Pending, 1)
+	assert.Empty(t, report.Recorded, "a tie still waiting for its chusen is not a recorded one")
+	assert.Nil(t, report.Pending[0].Ranks, "a pending group carries no recorded ranks")
+
+	recordChusenOrder(t, eng, store, compID, "Gamma", "Alpha", "Beta")
+	report, err = eng.ChusenStatus(compID)
+	require.NoError(t, err)
+	assert.Empty(t, report.Pending, "the recorded chusen clears the candidate")
+	require.Len(t, report.Recorded, 1, "the group the chusen settled is reported as recorded")
+	g := report.Recorded[0]
+	assert.Equal(t, "Pool A", g.PoolName)
+	assert.Equal(t, 1, g.MinPosition)
+	assert.Equal(t, []string{"Gamma", "Alpha", "Beta"}, chusenTeamNames(g))
+	assert.Equal(t, []int{1, 2, 3}, g.Ranks)
+
+	// The operator changes it: still the same recorded group, now in the new order.
+	recordChusenOrder(t, eng, store, compID, "Beta", "Gamma", "Alpha")
+	report, err = eng.ChusenStatus(compID)
+	require.NoError(t, err)
+	assert.Empty(t, report.Pending)
+	require.Len(t, report.Recorded, 1)
+	assert.Equal(t, []string{"Beta", "Gamma", "Alpha"}, chusenTeamNames(report.Recorded[0]))
+	assert.Equal(t, []int{1, 2, 3}, report.Recorded[0].Ranks)
+}
+
+// Only a group the daihyosen left undetermined is a chusen, so only such a
+// group is reported as recorded. An override on a group the daihyosen put in
+// a strict order (reachable only through the API) is not a chusen, and a
+// partly recorded one is still waiting for its chusen.
+func TestChusenStatus_RecordedIsOnlyAChusen(t *testing.T) {
+	t.Run("an override on a daihyosen-decided group is not a recorded chusen", func(t *testing.T) {
+		compID := "chusen-strict-override"
+		eng, store := setupTeamPoolComp(t, compID, true)
+		_, err := eng.InjectPoolDaihyosenMatches(compID)
+		require.NoError(t, err)
+		scoreInjectedDH(t, eng, store, compID, func(sideA, sideB string) string {
+			if sideA == "Alpha" || sideB == "Alpha" {
+				return "Alpha"
+			}
+			return "Beta"
+		})
+		recordChusenOrder(t, eng, store, compID, "Alpha", "Beta", "Gamma")
+
+		report, err := eng.ChusenStatus(compID)
+		require.NoError(t, err)
+		assert.Empty(t, report.Pending)
+		assert.Empty(t, report.Recorded)
+	})
+	t.Run("a partly recorded chusen is still pending", func(t *testing.T) {
+		compID := "chusen-partial-override"
+		eng, store := setupTeamPoolComp(t, compID, true)
+		scoreDHCycle(t, eng, store, compID)
+		recordChusenOrder(t, eng, store, compID, "Gamma")
+
+		report, err := eng.ChusenStatus(compID)
+		require.NoError(t, err)
+		assert.Len(t, report.Pending, 1)
+		assert.Empty(t, report.Recorded)
+	})
+}
+
 // TestChusenCandidates_NonTeamHasNone: individual (non-team) competitions never
 // surface chusen candidates (chusen here resolves team-pool daihyosen cycles).
 func TestChusenCandidates_NonTeamHasNone(t *testing.T) {
@@ -353,6 +468,11 @@ func TestChusen_KnockoutStatus_SeatsTheSlotAndStaysFixable(t *testing.T) {
 	cands, err = f.eng.ChusenCandidates(f.compID)
 	require.NoError(t, err)
 	assert.Empty(t, cands, "the recorded chusen clears the candidate")
+	report, err := f.eng.ChusenStatus(f.compID)
+	require.NoError(t, err)
+	require.Len(t, report.Recorded, 1, "the recorded chusen is still reported in knockout status, so it can be changed")
+	assert.Equal(t, []string{"Alpha", "Beta", "Gamma"}, chusenTeamNames(report.Recorded[0]))
+	assert.Equal(t, []int{1, 2, 3}, report.Recorded[0].Ranks)
 
 	// The final is fought, then the chusen turns out to have been misrecorded:
 	// Alpha drew 3rd, so Beta (2nd) holds Pool A's 1st place.

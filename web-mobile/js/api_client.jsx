@@ -3500,7 +3500,10 @@ const API = {
             throw new Error(err.error || `Failed to load chusen candidates (${res.status})`);
         }
         const data = await res.json();
-        return data.candidates || [];
+        // candidates: ties still waiting for a chusen. recorded: ties a chusen
+        // already settled, each with the recorded `ranks` parallel to `teams`,
+        // so a chusen recorded in the wrong order can be changed.
+        return { candidates: data.candidates || [], recorded: data.recorded || [] };
     },
 
     // leagueTiebreakGenerate: POST /competitions/:id/league-tiebreak

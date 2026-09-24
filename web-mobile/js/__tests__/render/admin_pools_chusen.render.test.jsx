@@ -58,6 +58,9 @@
 //     item 1): three empty-id members must not collapse onto one row,
 //     now enforced by checkinPid itself rather than a self-contained
 //     workaround.
+//
+// The last two blocks pin a separate rule: a recorded chusen is shown with a
+// Change control that reopens the same entry, and nothing else offers one.
 
 import React from 'react';
 import { render, act, fireEvent, screen, waitFor } from '@testing-library/react';
@@ -148,9 +151,11 @@ const uniqueGroup = {
   minPosition: 1,
 };
 
-function makeApi(candidates) {
+// API.chusenCandidates resolves both lists from one GET: the ties still
+// waiting for a chusen and the ties a recorded chusen settled.
+function makeApi(candidates, recorded = []) {
   return {
-    chusenCandidates: vi.fn().mockResolvedValue(candidates),
+    chusenCandidates: vi.fn().mockResolvedValue({ candidates, recorded }),
     overridePoolRank: vi.fn().mockResolvedValue(true),
   };
 }
@@ -382,8 +387,8 @@ describe('AdminPools chusen banner: a mid-loop failure reorders the group (bc-ap
       // First call (mount) returns the original order; the second call (the
       // catch block's re-fetch, triggered below) returns the reordered one.
       chusenCandidates: vi.fn()
-        .mockResolvedValueOnce([initialGroup])
-        .mockResolvedValueOnce([reorderedGroup]),
+        .mockResolvedValueOnce({ candidates: [initialGroup], recorded: [] })
+        .mockResolvedValueOnce({ candidates: [reorderedGroup], recorded: [] }),
       // The FIRST overridePoolRank call in the submit loop -- Alpha's, since
       // Alpha is members[0] in the order at the moment the operator clicks --
       // rejects, simulating the mid-loop write failure. The loop is
@@ -632,5 +637,110 @@ describe('AdminPools chusen banner: after the knockout has started', () => {
     });
     expect(api.chusenCandidates).not.toHaveBeenCalled();
     expect(screen.queryByText('Chusen (drawing lots) required')).toBeNull();
+  });
+});
+
+// A chusen recorded in the wrong order must stay fixable (operator ruling:
+// everything can be fixed after a wrong entry). Once every team in the tie has
+// a rank, the tie leaves the "required" panel, so the Pools tab shows it as
+// recorded, in the recorded order, with Change. Change reopens the same entry
+// pre-filled with the recorded ranks and records the new order through the
+// same overridePoolRank path a first chusen uses.
+describe('AdminPools chusen: a recorded chusen can be changed', () => {
+  // The server sends the teams in standings order and each team's recorded
+  // rank parallel to them; the order below is deliberately not by rank, so
+  // the displayed order can only come from `ranks`.
+  const recordedGroup = {
+    poolName: 'Pool A',
+    teamNames: ['Alpha', 'Beta', 'Gamma'],
+    teams: [
+      { id: 'id-alpha', name: 'Alpha', dojo: 'Dojo A' },
+      { id: 'id-beta', name: 'Beta', dojo: 'Dojo B' },
+      { id: 'id-gamma', name: 'Gamma', dojo: 'Dojo G' },
+    ],
+    minPosition: 1,
+    ranks: [2, 3, 1],
+  };
+
+  it('shows the recorded order, and Change reopens the entry pre-filled and records the new order', async () => {
+    const api = makeApi([], [recordedGroup]);
+    await mountAdminPools({ api });
+
+    await screen.findByText('Drawing lots: 1st Gamma, 2nd Alpha, 3rd Beta');
+    expect(screen.queryByText('Chusen (drawing lots) required')).toBeNull();
+    expect(screen.queryAllByRole('spinbutton')).toHaveLength(0);
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Change the drawing lots for Pool A' }));
+    });
+    expect(screen.getByText(/Changing it can change who qualifies from Pool A/)).toBeTruthy();
+    // Pre-filled with the recorded ranks, not the array positions.
+    expect(screen.getByLabelText('Alpha').value).toBe('2');
+    expect(screen.getByLabelText('Beta').value).toBe('3');
+    expect(screen.getByLabelText('Gamma').value).toBe('1');
+
+    fireEvent.change(screen.getByLabelText('Alpha'), { target: { value: '1' } });
+    fireEvent.change(screen.getByLabelText('Beta'), { target: { value: '2' } });
+    fireEvent.change(screen.getByLabelText('Gamma'), { target: { value: '3' } });
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: /Record chusen result/ }));
+    });
+
+    await waitFor(() => expect(api.overridePoolRank).toHaveBeenCalledTimes(3));
+    // (compID, poolID, playerName, rank, password, playerId): the same call a
+    // first chusen makes, one per team.
+    expect(api.overridePoolRank.mock.calls).toEqual([
+      ['c1', 'Pool A', 'Alpha', 1, PASSWORD, 'id-alpha'],
+      ['c1', 'Pool A', 'Beta', 2, PASSWORD, 'id-beta'],
+      ['c1', 'Pool A', 'Gamma', 3, PASSWORD, 'id-gamma'],
+    ]);
+    await screen.findByText('Drawing lots: 1st Alpha, 2nd Beta, 3rd Gamma');
+    expect(screen.queryAllByRole('spinbutton')).toHaveLength(0);
+  });
+
+  it('Cancel closes the entry without recording anything', async () => {
+    const api = makeApi([], [recordedGroup]);
+    await mountAdminPools({ api });
+
+    await act(async () => {
+      fireEvent.click(await screen.findByRole('button', { name: 'Change the drawing lots for Pool A' }));
+    });
+    fireEvent.change(screen.getByLabelText('Alpha'), { target: { value: '1' } });
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+    });
+
+    expect(api.overridePoolRank).not.toHaveBeenCalled();
+    expect(screen.getByText('Drawing lots: 1st Gamma, 2nd Alpha, 3rd Beta')).toBeTruthy();
+    // Reopening starts again from the recorded order, not the abandoned edit.
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Change the drawing lots for Pool A' }));
+    });
+    expect(screen.getByLabelText('Alpha').value).toBe('2');
+  });
+});
+
+// Only a tie settled by chusen is editable here: the general rank override was
+// removed on purpose. A pool with no chusen shows nothing, and a tie still
+// waiting for its chusen offers the entry but no Change.
+describe('AdminPools chusen: a pool without a recorded chusen offers no Change', () => {
+  it('shows nothing for a pool with no chusen', async () => {
+    const api = makeApi([], []);
+    await mountAdminPools({ api });
+
+    expect(screen.queryByText('Chusen (drawing lots) recorded')).toBeNull();
+    expect(screen.queryByText('Chusen (drawing lots) required')).toBeNull();
+    expect(screen.queryByText(/Drawing lots:/)).toBeNull();
+    expect(screen.queryByRole('button', { name: /Change/ })).toBeNull();
+    expect(screen.queryAllByRole('spinbutton')).toHaveLength(0);
+  });
+
+  it('offers no Change for a tie still waiting for its chusen', async () => {
+    const api = makeApi([uniqueGroup], []);
+    await mountAdminPools({ api });
+
+    await screen.findByText('Chusen (drawing lots) required');
+    expect(screen.queryByText('Chusen (drawing lots) recorded')).toBeNull();
+    expect(screen.queryByRole('button', { name: /Change/ })).toBeNull();
   });
 });

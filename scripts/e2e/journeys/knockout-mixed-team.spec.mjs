@@ -1085,7 +1085,10 @@ test.describe('knockout-mixed-team', () => {
     await expect(T.rowSlots(T.boutRow(ed, 1), 'aka')).toHaveCount(0);
   });
 
-  test.fixme('RULING-NEEDED mp-yqxn.2 (does an unfought bout count as IT?): a pool encounter finished with a bout left unscored counts that bout as an individual draw (IT)', async ({ page }) => {
+  // Operator ruling 2026-09-24: every bout of a team match is fought; there
+  // are no unfinished team matches. So Finish must refuse while a numbered
+  // bout has no result, and an unfought bout never reaches the standings.
+  test.fixme('bc-tmfn: a team encounter cannot be finished while a bout has no result', async ({ page }) => {
     await T.enterAdmin(page);
     const id = await createCompetition(page, {
       name: 'B3 Pools', kind: 'team', format: 'mixed', teamSize: 3, teamMatchType: 'fixed', courts: ['M', 'N'], numberPrefix: 'Q',
@@ -1098,12 +1101,14 @@ test.describe('knockout-mixed-team', () => {
     const pair = await sides(ed);
     await T.boutIppon(ed, 1, 'shiro', 'M');
     await T.ensureTie(ed, 2);
-    // Bout 3 is never scored.
+    // Bout 3 is never scored: Finish must not commit the encounter.
     await page.waitForTimeout(1200);
-    await T.finishTeam(ed);
+    const finish = T.finishBtn(ed);
+    await finish.tap().catch(() => {});
+    await finish.tap().catch(() => {});
     await page.goto(`/admin/competition/${id}/pools`);
-    // W L T IV IL IT PW PL: one real draw (bout 2), so IT is 1, not 2.
-    await expect(page.locator('tr').filter({ hasText: pair.shiro }).first()).toContainText(/1\s*0\s*0\s*1\s*0\s*1\s*1\s*0\s*$/);
+    // The encounter is still unfinished, so no team has played a match yet.
+    await expect(page.locator('tr').filter({ hasText: pair.shiro }).first()).toContainText(/0\s*0\s*0\s*0\s*0\s*0\s*0\s*0\s*$/);
   });
 
   test.fixme('bc-dhrp: the daihyosen row offers no way to pick each team\'s representative', async ({ page }) => {

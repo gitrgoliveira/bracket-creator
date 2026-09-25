@@ -1590,10 +1590,13 @@ function RecordedWithdrawal({ match, ctl, disabled = false, singleBout = false }
         const all = window.compMatchesForCompetition
           ? window.compMatchesForCompetition(detail.config || detail, detail)
           : [];
+        // fusenpai too (bc-kfup): a fusenpai recorded on a competitor's
+        // remaining match after they withdrew chains onto this bar, the
+        // same default win for the opponent a fusensho records.
         const hits = all.filter(x => (
           x.id !== match.id &&
           x.status === "completed" &&
-          x.decision === "fusensho" &&
+          (x.decision === "fusensho" || x.decision === "fusenpai") &&
           ((x.decisionBy === "aka" && sameCompetitor(x.sideA, withdrawn)) ||
             (x.decisionBy === "shiro" && sameCompetitor(x.sideB, withdrawn)))
         ));
@@ -1618,9 +1621,15 @@ function RecordedWithdrawal({ match, ctl, disabled = false, singleBout = false }
   // pattern as laterDefaultWins above -- unknown (fetch failed, or no
   // matching row) reads as "still barred, not reinstateable", the more
   // conservative of the wrong guesses.
+  // Fetched for a fusenpai as well (bc-kfup): a fusenpai recorded against a
+  // competitor another match already barred chains onto that bar and records
+  // no status of its own, so its clear behaves exactly like a fusensho's
+  // (chainedLoss below) and the status record is how the editor tells it
+  // from an ordinary fusenpai, whose record names THIS match.
   const [withdrawnStatus, setWithdrawnStatus] = useStateA(null);
+  const needsStatus = isDefaultWin || match.decision === "fusenpai";
   useEffectA(() => {
-    if (!isDefaultWin || !withdrawn?.id || !match.compId) {
+    if (!needsStatus || !withdrawn?.id || !match.compId) {
       setWithdrawnStatus(null);
       return;
     }
@@ -1636,7 +1645,14 @@ function RecordedWithdrawal({ match, ctl, disabled = false, singleBout = false }
     })();
     return () => { cancelled = true; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isDefaultWin, match.compId, withdrawn?.id]);
+  }, [needsStatus, match.compId, withdrawn?.id]);
+  // A fusenpai chained onto another match's bar: the barred competitor's
+  // record names a DIFFERENT match, so clearing this one restores nobody and
+  // the server returns it to the queue while that bar holds
+  // (engine.reopenTargetStatus), exactly as for a fusensho.
+  const chainedLoss = !isDefaultWin && !!(withdrawnStatus && withdrawnStatus.eligible === false &&
+    withdrawnStatus.matchId && withdrawnStatus.matchId !== match.id);
+  const clearsDefaultWin = isDefaultWin || chainedLoss;
   const canReinstate = !!(withdrawnStatus && withdrawnStatus.eligible === false && withdrawnStatus.reinstateable);
   // bc-cse: the barred competitor's own status record now reads eligible --
   // reinstated, or their earlier withdrawal cleared elsewhere -- so the
@@ -1677,10 +1693,10 @@ function RecordedWithdrawal({ match, ctl, disabled = false, singleBout = false }
                   is still barred (BarredMatchNotice shows again), and only
                   to running once they no longer are, so this button cannot
                   promise "and reopen" for either outcome uniformly. */}
-              {ctl.busy ? "Reopening…" : ctl.landed ? "Reopened" : isDefaultWin ? "Clear default win" : "Clear withdrawal and reopen"}
+              {ctl.busy ? "Reopening…" : ctl.landed ? "Reopened" : clearsDefaultWin ? "Clear default win" : "Clear withdrawal and reopen"}
         </button>
       </div>
-          {isDefaultWin ? (
+          {clearsDefaultWin ? (
             // bc-cse: a fusensho names the OTHER competitor as barred, not
             // this match's own withdrawal, so clearing it does not simply
             // "reopen to running" -- the barred competitor is almost always

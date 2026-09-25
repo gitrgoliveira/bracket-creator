@@ -413,7 +413,8 @@ func TestRecordDecision_FusenpaiChainsOntoExistingBar(t *testing.T) {
 	// /decision door: fusenpai on Alice (shiro, sideB) in Pool A-1.
 	res, status, err := eng.RecordDecision(compID, "Pool A-1", "fusenpai", "shiro", "did not appear", nil, false)
 	require.NoError(t, err, "a fusenpai against an already-withdrawn competitor is their default loss, not a second withdrawal")
-	assert.Nil(t, status, "the chained fusenpai bars nobody new, so it returns no status to broadcast")
+	require.NotNil(t, status, "the chained fusenpai returns the loser's status in force")
+	assert.Equal(t, "Pool A-0", status.MatchID, "... unchanged: it still names the match where Alice withdrew")
 	require.NotNil(t, res)
 	assert.Equal(t, state.MatchStatusCompleted, res.Status)
 	assert.Equal(t, "fusenpai", res.Decision)
@@ -429,7 +430,8 @@ func TestRecordDecision_FusenpaiChainsOntoExistingBar(t *testing.T) {
 		DecisionBy: "aka",
 	})
 	require.NoError(t, err, "the /score door must chain the fusenpai exactly as /decision does")
-	assert.Nil(t, status)
+	require.NotNil(t, status)
+	assert.Equal(t, "Pool A-0", status.MatchID)
 
 	after := barred()
 	assert.Equal(t, "Pool A-0", after.MatchID, "the status must still name the match that barred Alice")
@@ -451,6 +453,98 @@ func TestRecordDecision_FusenpaiChainsOntoExistingBar(t *testing.T) {
 	var alreadyErr *AlreadyIneligibleError
 	require.ErrorAs(t, err, &alreadyErr, "a kiken against a competitor already barred elsewhere is still refused")
 	assert.Equal(t, "Pool A-0", alreadyErr.MatchID)
+}
+
+// TestRecordDecision_FusenpaiChainCorrectsAWrongKiken pins the correction
+// path through a chained fusenpai (bc-kfup review). Alice withdrew in Pool
+// A-0. On Pool A-1 the operator marks the wrong side, recording a kiken for
+// Carol, then corrects it to Alice's fusenpai (recording-decisions.md, "The
+// wrong competitor or team was marked"). Carol never withdrew, so the
+// correction must restore her; Alice's status must still name Pool A-0.
+// The chained fusenpai returns Alice's existing status as the loser in
+// force, which is what lets restoreIfWithdrawalRemoved restore Carol: a nil
+// loser there reads as "could not resolve who lost" and restores nobody.
+func TestRecordDecision_FusenpaiChainCorrectsAWrongKiken(t *testing.T) {
+	eng, store, _ := setupTestEngine(t)
+	compID := "fusenpai-chain-correction"
+	createTestCompetition(t, store, compID, "league", 2)
+
+	aliceID := helper.NewUUID4()
+	bobID := helper.NewUUID4()
+	carolID := helper.NewUUID4()
+	require.NoError(t, store.SaveParticipants(compID, []domain.Player{
+		{ID: aliceID, Name: "Alice", Dojo: "A"},
+		{ID: bobID, Name: "Bob", Dojo: "B"},
+		{ID: carolID, Name: "Carol", Dojo: "C"},
+	}))
+	require.NoError(t, store.SavePoolMatches(compID, []state.MatchResult{
+		{ID: "Pool A-0", SideA: "Alice", SideAID: aliceID, SideB: "Bob", SideBID: bobID, Status: state.MatchStatusScheduled},
+		{ID: "Pool A-1", SideA: "Carol", SideAID: carolID, SideB: "Alice", SideBID: aliceID, Status: state.MatchStatusScheduled},
+	}))
+
+	_, _, err := eng.RecordDecision(compID, "Pool A-0", "kiken-voluntary", "aka", "withdrew", nil, false)
+	require.NoError(t, err)
+	// The wrong side: Carol (aka) marked as withdrawing in Pool A-1.
+	_, _, err = eng.RecordDecision(compID, "Pool A-1", "kiken-voluntary", "aka", "wrong side", nil, false)
+	require.NoError(t, err)
+	statuses, err := store.LoadCompetitorStatus(compID)
+	require.NoError(t, err)
+	require.False(t, statuses[carolID].Eligible, "precondition: the wrong kiken barred Carol")
+
+	// The correction: Alice (shiro) did not appear. force: replacing a
+	// recorded withdrawal while Alice's Pool A-0 is already decided is the
+	// T103 lock, which the editor confirms ("Proceed anyway") and retries.
+	_, status, err := eng.RecordDecision(compID, "Pool A-1", "fusenpai", "shiro", "corrected", nil, true)
+	require.NoError(t, err)
+	require.NotNil(t, status)
+	assert.Equal(t, carolID, status.PlayerID, "the restored competitor is the one the write reports")
+
+	statuses, err = store.LoadCompetitorStatus(compID)
+	require.NoError(t, err)
+	if carol, ok := statuses[carolID]; ok {
+		assert.True(t, carol.Eligible, "Carol never withdrew: the correction must restore her")
+	}
+	alice := statuses[aliceID]
+	assert.False(t, alice.Eligible)
+	assert.Equal(t, "Pool A-0", alice.MatchID, "Alice's status still names the match where she withdrew")
+}
+
+// TestRecordDecision_FusenpaiChainClosesARunningMatch pins bc-kfup's second
+// repro: the kiken is recorded (here as a correction of a fought result)
+// after the competitor's next match has already started. That running match
+// still has to be closed, and a fusenpai on it records the default loss.
+func TestRecordDecision_FusenpaiChainClosesARunningMatch(t *testing.T) {
+	eng, store, _ := setupTestEngine(t)
+	compID := "fusenpai-chain-running"
+	createTestCompetition(t, store, compID, "league", 2)
+
+	aliceID := helper.NewUUID4()
+	bobID := helper.NewUUID4()
+	carolID := helper.NewUUID4()
+	require.NoError(t, store.SaveParticipants(compID, []domain.Player{
+		{ID: aliceID, Name: "Alice", Dojo: "A"},
+		{ID: bobID, Name: "Bob", Dojo: "B"},
+		{ID: carolID, Name: "Carol", Dojo: "C"},
+	}))
+	require.NoError(t, store.SavePoolMatches(compID, []state.MatchResult{
+		{ID: "Pool A-0", SideA: "Alice", SideAID: aliceID, SideB: "Bob", SideBID: bobID, Status: state.MatchStatusCompleted,
+			Winner: "Alice", WinnerID: aliceID, IpponsA: []string{"M", "K"}},
+		{ID: "Pool A-1", SideA: "Carol", SideAID: carolID, SideB: "Alice", SideBID: aliceID, Status: state.MatchStatusRunning},
+	}))
+
+	// The fought result is corrected to a kiken by Alice (aka).
+	_, _, err := eng.RecordDecision(compID, "Pool A-0", "kiken-voluntary", "aka", "withdrew after all", nil, true)
+	require.NoError(t, err)
+
+	// Her running match is closed as her default loss (shiro: Alice is sideB).
+	res, _, err := eng.RecordDecision(compID, "Pool A-1", "fusenpai", "shiro", "did not continue", nil, false)
+	require.NoError(t, err, "a fusenpai closes a running match of an already-withdrawn competitor")
+	assert.Equal(t, state.MatchStatusCompleted, res.Status)
+	assert.Equal(t, carolID, res.WinnerID)
+
+	statuses, err := store.LoadCompetitorStatus(compID)
+	require.NoError(t, err)
+	assert.Equal(t, "Pool A-0", statuses[aliceID].MatchID)
 }
 
 // TestAlreadyBarredRefusal pins the one rule both T105 halves ask: which

@@ -944,6 +944,24 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
         () => withdrawalKey ? sorted.find((x) => matchKey(x) === withdrawalKey) || null : null,
         [withdrawalKey, sorted]
     );
+    // The kiken pin is for a kiken-COMPLETED match. Once that match leaves
+    // "completed" (Clear withdrawal and reopen, here or on another device) it
+    // is no longer what the Remaining matches panel was opened for, so the pin
+    // ends the way a correction does: a running match becomes the live pick
+    // (same key, so the editor does not remount), a scheduled or vanished one
+    // simply releases. It waits until the feed has shown the match completed
+    // at least once: the pin is set the moment the kiken lands, while the feed
+    // still shows the match running, and releasing on that would drop the
+    // panel it exists to keep. Keyed on the status VALUE, never the object.
+    const withdrawalStatus = withdrawalMatch ? withdrawalMatch.status : null;
+    const withdrawalSeenCompleted = useRefSh(null);
+    useEffectSh(() => {
+        if (!withdrawalKey) return;
+        if (withdrawalStatus === "completed") { withdrawalSeenCompleted.current = withdrawalKey; return; }
+        if (withdrawalStatus && withdrawalSeenCompleted.current !== withdrawalKey) return;
+        if (withdrawalStatus === "running") setPickedKey(withdrawalKey);
+        setWithdrawalKey(null);
+    }, [withdrawalKey, withdrawalStatus]);
     const selectedMatch = useMemoSh(
         () => correctingMatch || withdrawalMatch || pickedMatch || running[0] || null,
         [correctingMatch, withdrawalMatch, pickedMatch, running]
@@ -1334,8 +1352,9 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
             // to pickedKey (cleared above) once the refetch shows it running, but
             // one sent back before that refetch landed would otherwise re-pin the
             // panel to a now-scheduled match with no exit. Harmless (no-op) when
-            // reverting a plain running bout.
+            // reverting a plain running bout. The kiken pin likewise.
             setCorrectingKey(null);
+            setWithdrawalKey(null);
         } catch (e) {
             if (mountedRef.current) {
                 if (showToast) showToast((e && e.message) || "Could not send match back to queue", "error");

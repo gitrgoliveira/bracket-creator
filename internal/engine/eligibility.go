@@ -312,7 +312,9 @@ func (e *Engine) checkConcurrentIneligibility(h state.StoreTx, compID, matchID, 
 //     matches, the operator's intended exit once StartMatchTx refuses to
 //     start that match. The caller records the loss and leaves the existing
 //     CompetitorStatus untouched, so its MatchID still names the match that
-//     barred them, which the T103 undo keys on.
+//     barred them, which the T103 undo keys on. Reopening such a match
+//     restores nobody (the status is not this match's), so
+//     reopenTargetStatus sends it back to the queue while the bar holds.
 func alreadyBarredRefusal(decision, playerID string, barred *domain.CompetitorStatus) error {
 	if barred == nil || decision == string(domain.DecisionFusenpai) {
 		return nil
@@ -844,12 +846,12 @@ func combinedPlayerPool(compPlayers []domain.Player, participants []domain.Playe
 //
 // Returns the persisted CompetitorStatus when a status was written
 // (so the handler layer can broadcast the corresponding
-// `competitor-status-updated` SSE event), (nil, nil) when no status change
-// applies (non-kiken/fusenpai decision, unresolvable loser, unknown
-// player, or a fusenpai against a competitor another match already barred,
-// which alreadyBarredRefusal chains onto that bar), or a non-nil error when
-// the row's own ids prove the loser ambiguous or a kiken finds them already
-// barred elsewhere.
+// `competitor-status-updated` SSE event), or, for a fusenpai against a
+// competitor another match already barred (alreadyBarredRefusal chains it
+// onto that bar), their existing status, unchanged; (nil, nil) when no
+// status applies (non-kiken/fusenpai decision, unresolvable loser, or
+// unknown player); or a non-nil error when the row's own ids prove the loser
+// ambiguous or a kiken finds them already barred elsewhere.
 //
 // FR-036, contracts/match-decisions.md §side-effects.
 func (e *Engine) recordIneligibilityFromDecision(h state.StoreTx, compID, matchID string, result *state.MatchResult) (*domain.CompetitorStatus, error) {
@@ -941,9 +943,13 @@ func (e *Engine) recordIneligibilityFromDecision(h state.StoreTx, compID, matchI
 		}
 		// A fusenpai chained onto an existing bar (bc-kfup): the match
 		// records the default loss and the status that barred them stays
-		// exactly as it was, still naming its own match. Nothing changed, so
-		// there is no status to return (and none to broadcast).
-		return nil, nil
+		// exactly as it was, still naming its own match. It is returned,
+		// unchanged, as the loser's status in force: restoreIfWithdrawalRemoved
+		// reads a nil loser as "could not resolve who lost" and restores
+		// nobody, so a nil here would leave barred the competitor a wrong
+		// kiken on THIS match had marked, when the operator corrects it to
+		// this fusenpai. Broadcasting it again changes nothing.
+		return barred, nil
 	}
 	if err := h.SetCompetitorStatus(compID, status); err != nil {
 		return nil, err

@@ -652,3 +652,48 @@ describe('Clear withdrawal and reopen: a later default win from the same withdra
     expect(screen.queryByTestId('clear-withdrawal-default-win-consequences')).toBeNull();
   });
 });
+
+// bc-kfup: a fusenpai recorded on a remaining match of a competitor who had
+// already withdrawn elsewhere chains onto that bar and records no status of
+// its own. Clearing it restores nobody, so the server sends the match back
+// to the queue while the bar holds (engine.reopenTargetStatus), the same as
+// a fusensho. The editor tells the two fusenpai apart by the competitor's
+// status record: an ordinary fusenpai's names THIS match.
+describe('clearing a fusenpai chained onto an earlier withdrawal (bc-kfup)', () => {
+  it('says the match goes back to the queue, not that the competitor can compete again', async () => {
+    window.API.fetchCompetitorStatuses = vi.fn().mockResolvedValue([
+      { playerId: 'p2', eligible: false, matchId: 'Pool A-0' },
+    ]);
+    await mount(individualWithdrawal());
+    await waitFor(() => expect(screen.getByTestId('clear-withdrawal-reopen').textContent).toBe('Clear default win'));
+    const text = screen.getByTestId('clear-withdrawal-consequence').textContent;
+    expect(text).toBe('The match goes back to the queue. Tanaka is still withdrawn, so record the default win again.');
+    expect(text).not.toContain('can compete again');
+  });
+
+  it('keeps the ordinary copy for a fusenpai that barred the competitor itself', async () => {
+    window.API.fetchCompetitorStatuses = vi.fn().mockResolvedValue([
+      { playerId: 'p2', eligible: false, matchId: 'm-r1-0' },
+    ]);
+    await mount(individualWithdrawal());
+    await waitFor(() => expect(window.API.fetchCompetitorStatuses).toHaveBeenCalled());
+    expect(screen.getByTestId('clear-withdrawal-reopen').textContent).toBe('Clear withdrawal and reopen');
+    expect(screen.getByTestId('clear-withdrawal-consequence').textContent).toContain('can compete again');
+  });
+
+  it("lists a chained fusenpai among the original withdrawal's later default wins", async () => {
+    window.API.fetchCompetitionDetails = vi.fn().mockResolvedValue({ config: {} });
+    window.compMatchesForCompetition = () => [{
+      id: 'Pool A-3', compId: 'comp1', status: 'completed', phase: 'pool', poolName: 'Pool A', matchNumber: 3,
+      decision: 'fusenpai', decisionBy: 'aka',
+      sideA: { id: 'p2', name: 'Tanaka' }, sideB: { id: 'p3', name: 'Suzuki' },
+    }];
+    try {
+      await mount(individualWithdrawal({ decision: 'kiken-voluntary' }));
+      await waitFor(() => expect(screen.getByTestId('clear-withdrawal-default-win-Pool A-3')).toBeTruthy());
+      expect(screen.getByTestId('clear-withdrawal-default-win-Pool A-3').textContent).toContain('keeps its default win');
+    } finally {
+      window.compMatchesForCompetition = STUBBED_GLOBALS.compMatchesForCompetition;
+    }
+  });
+});

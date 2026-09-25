@@ -1105,6 +1105,32 @@ describe('the kiken-decided match stays on the console until its panel is closed
     } finally { c.restore(); }
   });
 
+  // The pin is for a kiken-COMPLETED match. Reopened (Clear withdrawal and
+  // reopen) it is the court's live bout, so it becomes the pick and the pin
+  // ends: Finish + Start Next then moves on to the match it started, as it
+  // does after a reopened correction (bc-tmfn). Without the release the
+  // panel stayed pinned on the old match and hid the one just started.
+  it('releases once the match is reopened, so Finish + Start Next moves on', async () => {
+    const c = await mountCourt([courtMatch('m1', 'running'), courtMatch('m2', 'scheduled')]);
+    try {
+      await act(async () => { probe.props.onWithdrawal({ id: 'm1-a', name: 'Aka m1' }); });
+      // The feed has not caught up with the kiken yet: the pin must hold.
+      expect(c.editorMatch()).toBe('m1');
+      c.feed.current = [courtMatch('m1', 'completed', { decision: 'kiken-voluntary', decisionBy: 'aka' }), courtMatch('m2', 'scheduled')];
+      await c.refresh();
+      expect(c.editorMatch()).toBe('m1');
+      // Clear withdrawal and reopen: m1 is running again.
+      c.feed.current = [courtMatch('m1', 'running'), courtMatch('m2', 'scheduled')];
+      await c.refresh();
+      expect(c.editorMatch()).toBe('m1');
+      expect(c.utils.queryByRole('button', { name: /back to court/i })).toBeNull();
+      // Finish + Start Next: m1 completed again and m2 running.
+      c.feed.current = [courtMatch('m1', 'completed'), courtMatch('m2', 'running')];
+      await c.refresh();
+      expect(c.editorMatch(), 'the panel must follow the match Finish + Start Next started').toBe('m2');
+    } finally { c.restore(); }
+  });
+
   it('every other onClose is still a no-op on the console', async () => {
     const c = await mountCourt([courtMatch('m1', 'running'), courtMatch('m2', 'scheduled')]);
     try {

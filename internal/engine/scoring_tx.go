@@ -369,7 +369,7 @@ func (e *Engine) restoreIfWithdrawalRemoved(tx state.StoreTx, compID, matchID, p
 	keep := ""
 	if domain.IsWithdrawalDecisionStr(storedDecision) {
 		if loser == nil {
-			log.Printf("engine: restoreIfWithdrawalRemoved compId=%s matchId=%s: the write recorded %q but barred nobody new (a fusenpai chained onto an existing bar, or a loser it could not resolve); restoring nobody (no entry this match recorded is provably stale)",
+			log.Printf("engine: restoreIfWithdrawalRemoved compId=%s matchId=%s: the write recorded %q but resolved no loser; restoring nobody (no entry this match recorded is provably stale)",
 				compID, matchID, storedDecision)
 			return nil
 		}

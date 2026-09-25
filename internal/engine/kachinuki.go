@@ -1591,33 +1591,37 @@ func findMatchHome(tx state.StoreTx, compID, matchID string, visit func(matchHom
 // as an offline-queued Save correction replayed afterwards, is older than the
 // reopen and is refused as superseded instead of completing the match again.
 // reopenTargetStatus decides RUNNING vs SCHEDULED for a reopen (bc-cse item
-// 9). Every reopen but one goes to RUNNING, as it always has: the operator
-// tapped Reopen to fight on. The exception is a match-level FUSENSHO
+// 9). Every reopen goes to RUNNING, as it always has (the operator tapped
+// Reopen to fight on), except a default win whose barred side is barred by
+// ANOTHER match. The first such case was a match-level FUSENSHO
 // (domain.DecisionFusensho) recorded to close a barred competitor's
 // remaining match with a default win for the opponent -- fusensho itself
 // never writes a CompetitorStatus (recordIneligibilityFromDecision only
 // fires for domain.IsWithdrawalDecisionStr, which deliberately excludes it;
 // see ReopenMatch's ELIGIBILITY doc), so the bar this match's decisionBy
 // side carries, if any, was recorded by an EARLIER withdrawal elsewhere and
-// this reopen restores nothing. If that earlier bar still holds, the
-// competitor still cannot fight: reopening to RUNNING would only let
+// this reopen restores nothing. The second is a FUSENPAI chained onto such a
+// bar (bc-kfup, alreadyBarredRefusal): it records the default loss and no
+// status of its own, so the same holds. If that earlier bar still holds,
+// the competitor still cannot fight: reopening to RUNNING would only let
 // StartMatchTx refuse every later write on this match with no way forward,
 // so it goes to SCHEDULED instead, which re-shows the barred-match notice
-// (annotateIneligibleSides) exactly as it did before the fusensho was ever
-// recorded, and, taking no court, is not refused for a busy one (see the
-// COURT GATE note on ReopenMatch). Once the competitor is reinstated or the
-// earlier withdrawal is itself cleared, the SAME reopen goes to RUNNING like
-// any other.
+// (annotateIneligibleSides) exactly as it did before the default win was
+// ever recorded, and, taking no court, is not refused for a busy one (see
+// the COURT GATE note on ReopenMatch). Once the competitor is reinstated or
+// the earlier withdrawal is itself cleared, the SAME reopen goes to RUNNING
+// like any other. An ordinary kiken or fusenpai is unaffected: the status
+// it recorded names THIS match, which BarredSides' undo-path exemption (a
+// status recorded BY matchID never bars it) ignores, and which the reopen
+// restores.
 //
 // decisionBy names the WITHDRAWING side (recordDecisionTx's own convention:
 // "aka" -> sideA lost, "shiro" -> sideB lost), so it is read against
 // BarredSides' A/B return the same way. statuses/matchID/sideAID/sideBID are
 // the reopened match's OWN identity, read before reopenPoolMatch/
-// reopenBracketMatch clear Decision/DecisionBy -- BarredSides' own
-// undo-path exemption (a status recorded BY matchID itself never bars it)
-// does not apply here, since fusensho never recorded one.
+// reopenBracketMatch clear Decision/DecisionBy.
 func reopenTargetStatus(statuses map[string]domain.CompetitorStatus, matchID, decision, decisionBy, sideAID, sideBID string) state.MatchStatus {
-	if decision != string(domain.DecisionFusensho) {
+	if !domain.IsDefaultWinDecisionStr(decision) {
 		return state.MatchStatusRunning
 	}
 	a, b := BarredSides(statuses, matchID, sideAID, sideBID)
@@ -1629,13 +1633,13 @@ func reopenTargetStatus(statuses map[string]domain.CompetitorStatus, matchID, de
 }
 
 // reopenTargetStatusTx is reopenTargetStatus's tx-aware wrapper: it loads
-// CompetitorStatus LAZILY, only when decision is a fusensho (the one case
+// CompetitorStatus LAZILY, only when decision is a default win (the one case
 // reopenTargetStatus needs it for), through the live transaction handle. A
 // load failure is logged rather than discarded and defaults to RUNNING
 // (today's behaviour), since a read the operator cannot diagnose must never
 // silently trade one stuck state for another.
 func (e *Engine) reopenTargetStatusTx(tx state.StoreTx, compID, matchID, decision, decisionBy, sideAID, sideBID string) state.MatchStatus {
-	if decision != string(domain.DecisionFusensho) {
+	if !domain.IsDefaultWinDecisionStr(decision) {
 		return state.MatchStatusRunning
 	}
 	statuses, err := tx.LoadCompetitorStatus(compID)

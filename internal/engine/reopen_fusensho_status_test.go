@@ -119,3 +119,76 @@ func TestReopenMatch_FusenshoMatch_NoLongerBarred_GoesToRunning(t *testing.T) {
 	assert.Equal(t, state.MatchStatusRunning, m1.Status,
 		"Alice is no longer barred by anything, so this reopen behaves like any other")
 }
+
+// bc-kfup: a FUSENPAI chained onto an earlier bar (alreadyBarredRefusal)
+// records the default loss and no CompetitorStatus of its own, the same
+// shape as the match-level fusensho above. Reopening it restores nobody, so
+// while the earlier bar holds it must go to SCHEDULED, not RUNNING.
+func TestReopenMatch_ChainedFusenpai_StillBarred_GoesToScheduled(t *testing.T) {
+	eng, store, _ := setupTestEngine(t)
+	compID := "reopen-chained-fusenpai"
+	require.NoError(t, store.SaveCompetition(&state.Competition{ID: compID, Name: compID, Status: state.CompStatusPools}))
+	aliceID, bobID, carolID := helper.NewUUID4(), helper.NewUUID4(), helper.NewUUID4()
+	require.NoError(t, store.SaveParticipants(compID, []domain.Player{
+		{ID: aliceID, Name: "Alice", Dojo: "A"},
+		{ID: bobID, Name: "Bob", Dojo: "B"},
+		{ID: carolID, Name: "Carol", Dojo: "C"},
+	}))
+	require.NoError(t, store.SavePoolMatches(compID, []state.MatchResult{
+		{ID: "Pool A-0", SideA: "Alice", SideB: "Bob", SideAID: aliceID, SideBID: bobID, Status: state.MatchStatusScheduled},
+		{ID: "Pool A-1", SideA: "Alice", SideB: "Carol", SideAID: aliceID, SideBID: carolID, Status: state.MatchStatusScheduled},
+	}))
+	_, _, err := eng.RecordDecision(compID, "Pool A-0", "kiken-voluntary", "aka", "withdrew", nil, false)
+	require.NoError(t, err)
+	_, _, err = eng.RecordDecision(compID, "Pool A-1", "fusenpai", "aka", "did not appear", nil, false)
+	require.NoError(t, err)
+
+	_, err = eng.ReopenMatch(compID, "Pool A-1", "")
+	require.NoError(t, err)
+
+	matches, err := store.LoadPoolMatches(compID)
+	require.NoError(t, err)
+	for _, m := range matches {
+		if m.ID == "Pool A-1" {
+			assert.Equal(t, state.MatchStatusScheduled, m.Status,
+				"Alice is still barred by Pool A-0; RUNNING would strand the operator behind StartMatchTx")
+			assert.Empty(t, m.Decision)
+		}
+	}
+	statuses, err := store.LoadCompetitorStatus(compID)
+	require.NoError(t, err)
+	assert.False(t, statuses[aliceID].Eligible)
+	assert.Equal(t, "Pool A-0", statuses[aliceID].MatchID, "the reopen of the chained match leaves the Pool A-0 bar as it was")
+}
+
+// An ordinary fusenpai (the loser's own bar, recorded by THIS match) still
+// reopens to RUNNING: BarredSides ignores a status recorded by the match
+// being checked, and the reopen restores it.
+func TestReopenMatch_OrdinaryFusenpai_GoesToRunning(t *testing.T) {
+	eng, store, _ := setupTestEngine(t)
+	compID := "reopen-ordinary-fusenpai"
+	require.NoError(t, store.SaveCompetition(&state.Competition{ID: compID, Name: compID, Status: state.CompStatusPools}))
+	aliceID, bobID := helper.NewUUID4(), helper.NewUUID4()
+	require.NoError(t, store.SaveParticipants(compID, []domain.Player{
+		{ID: aliceID, Name: "Alice", Dojo: "A"},
+		{ID: bobID, Name: "Bob", Dojo: "B"},
+	}))
+	require.NoError(t, store.SavePoolMatches(compID, []state.MatchResult{
+		{ID: "Pool A-0", SideA: "Alice", SideB: "Bob", SideAID: aliceID, SideBID: bobID, Status: state.MatchStatusScheduled},
+	}))
+	_, _, err := eng.RecordDecision(compID, "Pool A-0", "fusenpai", "aka", "did not appear", nil, false)
+	require.NoError(t, err)
+
+	_, err = eng.ReopenMatch(compID, "Pool A-0", "")
+	require.NoError(t, err)
+
+	matches, err := store.LoadPoolMatches(compID)
+	require.NoError(t, err)
+	require.Len(t, matches, 1)
+	assert.Equal(t, state.MatchStatusRunning, matches[0].Status)
+	statuses, err := store.LoadCompetitorStatus(compID)
+	require.NoError(t, err)
+	if st, ok := statuses[aliceID]; ok {
+		assert.True(t, st.Eligible, "the reopen restores the competitor this match barred")
+	}
+}

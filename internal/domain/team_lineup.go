@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"strconv"
+	"strings"
 )
 
 // Position names a slot in a team lineup. For 5-person teams the named
@@ -24,6 +25,16 @@ const (
 // PositionNumbered returns the canonical Position value for a non-5
 // team size, where positions are 1-indexed numeric strings.
 func PositionNumbered(n int) Position { return Position(strconv.Itoa(n)) }
+
+// Label is the position as the operator reads it: a FIK name title-cased
+// ("senpo" becomes "Senpo"), a numbered position unchanged ("3").
+func (p Position) Label() string {
+	s := string(p)
+	if s == "" || (s[0] >= '0' && s[0] <= '9') {
+		return s
+	}
+	return strings.ToUpper(s[:1]) + s[1:]
+}
 
 // TeamLineup pins which player occupies each Position for a team in a
 // given round OR for a specific match. The lineup is always editable,
@@ -177,6 +188,17 @@ func (t TeamLineup) OrderedMembers(teamSize int) []LineupSlot {
 		out = append(out, LineupSlot{Position: pos, Name: name, MemberID: memberID})
 	}
 	return out
+}
+
+// PositionForBout returns the lineup Position that fights numbered bout
+// `bout` (1-based) of a team match: the bout-th entry of the canonical order
+// OrderedMembers walks. False when bout is outside 1..teamSize.
+func PositionForBout(teamSize, bout int) (Position, bool) {
+	order := canonicalPositionOrder(teamSize)
+	if bout < 1 || bout > len(order) {
+		return "", false
+	}
+	return order[bout-1], true
 }
 
 // allowedPositionSet returns the valid position keys for a team size: the five

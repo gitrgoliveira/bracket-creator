@@ -228,13 +228,11 @@ func NewKnockoutDraw(root *Node, numCourts int) *KnockoutDraw {
 	if root == nil {
 		return nil
 	}
-	// Normalize through the slot codec so every knockout consumer sees ONE
-	// geometry. CreateBalancedTree gives a ragged roster a riseless tree whose
-	// shallow pairs classify a round late; the skeleton export rebuilds from
-	// the bracket's slots and gets the risen tree, which fights those pairs in
-	// round 1 as the reference sheets print (Node.risen). Without this, the
-	// CLI's printed rounds and the app export's disagree about the same draw.
-	// BuildSlotTree(SlotArray(x)) is idempotent on slot-built trees.
+	// Normalize through the slot codec so every knockout consumer holds the
+	// tree the app export rebuilds from the bracket's slots (EliminationDraw),
+	// rise marks included (Node.risenAfter). A CreateBalancedTree input keeps
+	// its shape; it only gains the marks. BuildSlotTree(SlotArray(x)) is
+	// idempotent on slot-built trees.
 	root = BuildSlotTree(SlotArray(root))
 	if root == nil {
 		return nil
@@ -405,12 +403,12 @@ func byeRankClass(rank int) int {
 
 // buildBlock lays one block's occupants out inside its own subtree.
 //
-// The layout is GREEDY (D4): the round-1 layer holds floor(q/2) real matches
+// The layout is GREEDY (D4): the first slot layer holds floor(q/2) real pairs
 // and, when q is odd, exactly ONE named bye, which goes to the block's
 // highest-precedence occupant under R6. Every other empty slot pairs with
 // another empty slot into a phantom match that is dropped downstream and never
-// printed. Deeper byes fall to whichever slot the phantom pairs leave and are
-// taken by match WINNERS, not pools, so R6 does not allocate them.
+// printed. A real pair beside a phantom pair is fought at its distance from
+// the final, as the sheets print it; R6 places only the named bye.
 //
 // Concretely, q occupants fill a NextPow2(q) slot array as
 //
@@ -419,9 +417,10 @@ func byeRankClass(rank int) int {
 // and the tail is padded with empty slots. The single inserted gap after the
 // bye occupant is what makes it the round-1 bye; everything after it pairs up
 // consecutively. For the EKC Junior Individual Male court A (q=5) that is
-// [P1, "", P2, P3, P4, P5, "", ""]: P1 byes, P2 v P3, P4 v P5, and the round-2
-// bye falls to W(P4 v P5) rather than to P1 -- the ladder the sheet shows, and
-// the one recursive halving provably cannot produce.
+// [P1, "", P2, P3, P4, P5, "", ""]: P1 meets W(P2 v P3), and P4 v P5 is the
+// other half of the court final -- the pairings the sheet prints (P2 v P3
+// alone in column 1, the other two bouts in column 2), and ones recursive
+// halving provably cannot produce.
 //
 // The BLOCK is D4's unit, not the printable region. The two coincide at every
 // shiaijo count but one, which is why D4 was first written in terms of a
@@ -432,9 +431,9 @@ func byeRankClass(rank int) int {
 // holds at most one of them, and from the 3rd on the blocks run out before the
 // quarters do (planBlocks).
 //
-// Within a block the order interleaves the RANK groups, so a home 1st meets a
-// crossed-in lower finisher in round 1 rather than another home 1st (EKC Junior
-// Team Q1: P1#1 v P5#2, P2#1 v P6#2).
+// Within a block the order interleaves the RANK groups, so a home 1st's first
+// opponent is a crossed-in lower finisher rather than another home 1st (EKC
+// Junior Team Q1: P1#1 v P5#2, P2#1 v P6#2).
 //
 // mirrored is the block's position in its half: false for the half's first
 // (outer-top) block, true for its second. It matters only to the R6(c)
@@ -909,15 +908,12 @@ func BuildSlotTree(slots []string) *Node {
 	mid := len(slots) / 2
 	left := BuildSlotTree(slots[:mid])
 	right := BuildSlotTree(slots[mid:])
-	// A SLOT-level collapse marks the survivor as RISEN so round
-	// classification can put it back at the level it was built at (see
-	// Node.risen): without the mark, a phantom-risen match schedules a round
-	// late on every surface that reads rounds -- the Excel columns, the match
-	// numbers and the app's bracket -- where the sheet fights it in round 1.
-	// The mark belongs HERE and not in joinNodes: combine's assembly joins
-	// (a lone block against an empty half, say) collapse structure, not empty
-	// slots, and marking those lifted a 2-entrant draw's only match clean out
-	// of every round.
+	// A SLOT-level collapse marks the survivor as RISEN, on the side the
+	// empty half sat, so SlotArray can put that half back and the court
+	// geometry can count its slots (see Node.risenAfter); the mark does not
+	// move the survivor's round. It belongs HERE and not in joinNodes:
+	// combine's assembly joins (a lone block against an empty half, say)
+	// collapse structure, not empty slots.
 	switch {
 	case left == nil:
 		if right != nil {
@@ -1409,7 +1405,7 @@ func (d *KnockoutDraw) RegionSpans() [][2]int {
 	// The BAND offset, not the content one: a region's span has to cover
 	// every slot the region occupies, rise slots included, or the slots a
 	// leading collapse left empty would be attributed to the NEXT court.
-	walkLeafOffsets(d.Root, 0, func(node *Node, bandAt, _, width int) {
+	walkLeafOffsets(d.Root, 0, func(node *Node, bandAt, width int) {
 		if i, ok := index[node]; ok && i < len(spans) {
 			spans[i] = [2]int{bandAt, bandAt + width}
 		}
@@ -1418,27 +1414,25 @@ func (d *KnockoutDraw) RegionSpans() [][2]int {
 }
 
 // walkLeafOffsets visits every node with its offset and width in
-// TreeToLeafArray(root) -- the ONE traversal that turns the tree back into leaf
+// SlotArray(root) -- the ONE traversal that turns the tree back into leaf
 // positions. The padding rule is not restated here, nor in leafArrayWidth: both
-// defer to leafPadTarget (tree.go), so a change to TreeToLeafArray's geometry
-// has one place to land.
+// defer to leafPadTarget (tree.go), so a change to the padding has one place
+// to land.
 //
 // Both readers of that geometry go through it. They must agree exactly: one
 // (RegionSpans) decides which slots a shiaijo's region owns, the other
 // (NodeCourts) decides which shiaijo a bout prints under, and a disagreement
 // puts the operator console and the printed running order on different courts
 // with nothing to catch it. Written once for the same reason leafPadTarget is.
-// The two offsets are reported SEPARATELY because the two readers want
-// different ones, and conflating them is how the risen-before geometry went
-// wrong: a node owns the whole BAND [bandOffset, bandOffset+width), rises
-// included, but its entrants sit in the CONTENT sub-range, which for a
-// leading collapse starts partway in. RegionSpans tiles the leaf array and so
-// needs the band (content-only spans would leave the rise slots owned by
-// nobody); SlotRoundMatches locates a bout's first-round window and so needs
-// the content. Passing the content offset with the band WIDTH, as this used
-// to, gave RegionSpans a span running past the node's own slots, and so
-// handed the first slots of the NEXT region to this court.
-func walkLeafOffsets(n *Node, offset int, visit func(node *Node, bandOffset, contentOffset, width int)) {
+// Each node is reported with its BAND [bandOffset, bandOffset+width), rises
+// included: RegionSpans tiles the leaf array, and a content-only span would
+// leave the rise slots owned by nobody. The node's entrants sit in the
+// CONTENT sub-range, which for a leading collapse starts partway into the
+// band, and that is where its children are walked from. Reporting the content
+// offset with the band WIDTH, as this once did, gave RegionSpans a span
+// running past the node's own slots, and so handed the first slots of the
+// NEXT region to this court.
+func walkLeafOffsets(n *Node, bandOffset int, visit func(node *Node, bandOffset, width int)) {
 	if n == nil {
 		return
 	}
@@ -1448,13 +1442,13 @@ func walkLeafOffsets(n *Node, offset int, visit func(node *Node, bandOffset, con
 	// when it led, so offsets below stay slot-true (SlotArray is the same
 	// reading; before- and after-rises never mix on one node in practice).
 	content := width >> (n.risenAfter + n.risenBefore)
-	contentOffset := offset
+	contentOffset := bandOffset
 	level := width
 	for i := 0; i < n.risenBefore; i++ {
 		level /= 2
 		contentOffset += level
 	}
-	visit(n, offset, contentOffset, width)
+	visit(n, bandOffset, width)
 	if n.LeafNode {
 		return
 	}
@@ -1463,66 +1457,9 @@ func walkLeafOffsets(n *Node, offset int, visit func(node *Node, bandOffset, con
 	walkLeafOffsets(n.Right, contentOffset+side, visit)
 }
 
-// leafArrayWidth is len(TreeToLeafArray(n)) without building the slice. It
-// measures with leafPadTarget, the same rule TreeToLeafArray builds with, so
-// the two cannot disagree about where a region starts.
-// SlotRoundMatch locates one bout of a draw in pow2-bracket terms: the slot
-// offset and entrant width of its first-round window, plus the round the
-// risen-aware walk (BuildEliminationMatchRounds) fights it in, 0-based from
-// the first round. The engine uses this to stamp DisplayRound on its pow2
-// bracket matches: neither the pow2 row (which tail-pads an assembly-level
-// late bout into round-1 adjacency) nor the feeder graph (which defers a
-// phantom-risen pair the sheets fight in round 1) can tell those two shapes
-// apart on their own -- the risen tree is the one place the distinction
-// lives, so its walk is the one source of a bout's round.
-type SlotRoundMatch struct {
-	Offset       int
-	EntrantWidth int
-	Round        int
-}
-
-// SlotRoundMatches maps every bout of the draw tree through walkLeafOffsets'
-// slot geometry. EntrantWidth is the bout's content width (its slot width
-// with the rises stripped), i.e. the width of the pow2 round row the bout's
-// entrants sit in.
-func SlotRoundMatches(root *Node) []SlotRoundMatch {
-	type geo struct{ offset, content int }
-	geos := map[*Node]geo{}
-	// The CONTENT offset: a bout's first-round window is where its entrants
-	// actually sit, which for a leading collapse starts partway into the band.
-	walkLeafOffsets(root, 0, func(n *Node, _, contentAt, width int) {
-		geos[n] = geo{contentAt, width >> (n.risenAfter + n.risenBefore)}
-	})
-	var out []SlotRoundMatch
-	for roundIdx, round := range BuildEliminationMatchRounds(root) {
-		for _, m := range round {
-			if g, ok := geos[m]; ok {
-				out = append(out, SlotRoundMatch{Offset: g.offset, EntrantWidth: g.content, Round: roundIdx})
-			}
-		}
-	}
-	return out
-}
-
-// slotDepth is the tree depth in SLOT levels: the depth CalculateDepth would
-// report had no empty sibling ever been collapsed. The two differ exactly on
-// trees whose top carries rises -- a split page holding one risen block, say --
-// where physical depth under-counts and would drop the block's bout from every
-// round (its virtual level exceeds the physical target range). leafArrayWidth
-// is always a power of two, so this is log2(width)+1 computed by bit length.
-func slotDepth(n *Node) int {
-	if n == nil {
-		return 0
-	}
-	w := leafArrayWidth(n)
-	d := 0
-	for w > 0 {
-		d++
-		w >>= 1
-	}
-	return d
-}
-
+// leafArrayWidth is len(SlotArray(n)) without building the slice: the same
+// leafPadTarget padding, doubled once per rise, so the two cannot disagree
+// about where a region starts.
 func leafArrayWidth(n *Node) int {
 	if n == nil {
 		return 0
@@ -1561,7 +1498,7 @@ func (d *KnockoutDraw) NodeCourts() map[*Node]int {
 	out := make(map[*Node]int)
 	// The BAND, matching RegionSpans above: the two are compared against each
 	// other, so they must measure the same thing.
-	walkLeafOffsets(d.Root, 0, func(node *Node, bandAt, _, width int) {
+	walkLeafOffsets(d.Root, 0, func(node *Node, bandAt, width int) {
 		out[node] = CourtForSpan(spans, bandAt, width)
 	})
 	return out

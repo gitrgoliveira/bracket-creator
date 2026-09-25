@@ -336,26 +336,14 @@ export const recipes = [
         await page.waitForTimeout(ms);
       };
       const endMatch = async () => {
-        // Ending is normally a two-tap guard: the first tap arms the button,
-        // the second commits. A REOPENED encounter is different - there the
-        // audit-reason prompt REPLACES the arm step and appears on the first
-        // tap (admin_scoring_team.jsx:3825), so a blind second tap finds no
-        // button. Branch on which of the two happened rather than swallowing
-        // the failure: a clip whose encounter never ends is the wrong clip.
+        // Ending is a two-tap guard: the first tap arms the button, the
+        // second commits. A reopened encounter ends the same way: it asks for
+        // no reason.
         const b = page.locator('[data-testid="kachinuki-end-match-button"]');
-        const conf = page.locator('button:has-text("Confirm")');
         await b.click({ timeout: 5000 });
         await page.waitForTimeout(650);
-        if (!(await conf.count())) {
-          await b.click({ timeout: 5000 });
-          await page.waitForTimeout(900);
-        }
-        if (await conf.count()) {
-          await conf.first().click();
-          await page.waitForTimeout(1300);
-        } else {
-          await page.waitForTimeout(600);
-        }
+        await b.click({ timeout: 5000 });
+        await page.waitForTimeout(1500);
       };
 
       // 1: winner stays on. Every fought bout reads "vs" in its centre.
@@ -381,12 +369,12 @@ export const recipes = [
       await endMatch();
 
       // 4: a completed encounter reopens with its bouts intact, then ends
-      // again through the reason prompt.
+      // again.
       mark('P4 reopen');
       await openScore(ko);
       await page.waitForTimeout(1200);
-      await click('[data-testid="kachinuki-reopen-button"]', 1600); // closes the modal
-      await openScore(ko);                                            // reopen the now-running match
+      // The editor stays open: the encounter flips to running in place.
+      await click('[data-testid="kachinuki-reopen-button"]', 1600);
       await page.waitForTimeout(900);
       await endMatch();
       mark('end');

@@ -342,7 +342,11 @@ function AdminCompetition({ tournament, competition, pools, poolMatches, standin
   return (
     <div className="app">
       <AdminTopbar onLogout={onLogout} onViewerMode={onViewerMode} tournament={t} />
-      <div className="page page--wide" style={{ maxWidth: 1400 }}>
+      {/* 1400px keeps every section's lines readable, except the Bracket's:
+          a tree needs 180px per round, so a 33 to 64 draw (six rounds) is
+          wider than the capped page leaves it and the page takes the whole
+          window there instead (operator decision). */}
+      <div className="page page--wide" style={{ maxWidth: section === "bracket" ? "none" : 1400 }}>
         <Breadcrumbs items={[
           { label: "Dashboard", onClick: onBack },
           { label: c.name, onClick: section === "overview" ? null : () => onSection("overview") },

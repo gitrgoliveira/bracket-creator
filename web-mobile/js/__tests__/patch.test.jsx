@@ -292,6 +292,60 @@ describe('applyPatch', () => {
     expect(next.poolMatches[1]).not.toBe(prev.poolMatches[1]);
     expect(next.poolMatches[2]).toBe(prev.poolMatches[2]);
   });
+
+  // bc-tmfn: the server derives `ineligibleSides` from eligibility, which
+  // only a competitor_status_updated refetch changes (see
+  // ineligible_match.jsx). An SSE match_updated patch for that match is not
+  // that refetch, so it may arrive without the field -- and when it does,
+  // the stored stamp must survive the merge.
+  describe('ineligibleSides survives a patch', () => {
+    const prevWithStamp = () => ({
+      poolMatches: [
+        { id: "p1", court: "A", scheduledAt: "09:30", status: "scheduled", ineligibleSides: { b: "fusenpai" } },
+      ],
+    });
+
+    it('keeps the stamp when the patch omits the field entirely', () => {
+      const next = applyPatch(prevWithStamp(), { data: { result: { id: "p1", court: "A" } } });
+      expect(next.poolMatches[0].ineligibleSides).toEqual({ b: "fusenpai" });
+    });
+
+    // bc-cse: the sibling test that sent `ineligibleSides: null` explicitly
+    // is gone -- the field is a Go pointer with `omitempty`
+    // (internal/state/models.go), so an absent stamp is OMITTED from the
+    // wire, never sent as a literal `null`; that payload shape cannot occur
+    // and the wrapper that used to defend against it was removed with it.
+
+    it('a patch carrying a real ineligibleSides value wins (server says nobody is barred any more)', () => {
+      const next = applyPatch(prevWithStamp(), { data: { result: { id: "p1", ineligibleSides: {} } } });
+      expect(next.poolMatches[0].ineligibleSides).toEqual({});
+    });
+
+    it('a patch carrying a different ineligibleSides value wins', () => {
+      const next = applyPatch(prevWithStamp(), { data: { result: { id: "p1", ineligibleSides: { a: "kiken-injury" } } } });
+      expect(next.poolMatches[0].ineligibleSides).toEqual({ a: "kiken-injury" });
+    });
+  });
+
+  // bc-tmfn: a patch that flips whether a still-scheduled match is barred
+  // must re-rank the per-court queue, same as a status/court/scheduledAt
+  // change does -- recomputeQueuePositions gives a barred match position 0
+  // and skips it, so its sibling must move up to take that slot.
+  it('re-ranks per-court siblings when a patch flips a still-scheduled match to barred', () => {
+    const prev = {
+      poolMatches: [
+        // p1 was next-up (qp 1) before the withdrawal that bars it.
+        { id: "p1", court: "A", scheduledAt: "09:00", status: "scheduled", queuePosition: 1 },
+        { id: "p1b", court: "A", scheduledAt: "09:45", status: "scheduled" },
+      ],
+    };
+    const next = applyPatch(prev, {
+      data: { result: { id: "p1", status: "scheduled", ineligibleSides: { a: "fusenpai" } } },
+    });
+    const byId = Object.fromEntries(next.poolMatches.map(m => [m.id, m]));
+    expect(byId.p1.queuePosition).toBe(0);
+    expect(byId.p1b.queuePosition).toBe(1);
+  });
 });
 
 describe('recomputeQueuePositions', () => {
@@ -369,6 +423,34 @@ describe('recomputeQueuePositions', () => {
     expect(out).not.toBe(matches);
     expect(out[0].queuePosition).toBe(0);
     expect(out[1].queuePosition).toBe(0);
+  });
+
+  // bc-tmfn: a barred match (ineligible_match.jsx -- a scheduled match whose
+  // competitor withdrew earlier) cannot be fought, so it holds position 0
+  // and is skipped by the counter: later matches on the same court move up
+  // to take the slot it would otherwise have consumed.
+  it('gives a barred scheduled match position 0 and does not count it', () => {
+    const matches = [
+      // Stale qp 5 (as if the withdrawal barred it after it already held a
+      // real position): the recompute must zero it, not just leave it be.
+      { id: "a1", court: "A", status: "scheduled", queuePosition: 5, ineligibleSides: { a: "kiken-voluntary" } },
+      { id: "a2", court: "A", status: "scheduled" },
+      { id: "a3", court: "A", status: "scheduled" },
+    ];
+    const out = recomputeQueuePositions(matches);
+    expect(out[0].queuePosition).toBe(0);
+    expect(out[1].queuePosition).toBe(1);
+    expect(out[2].queuePosition).toBe(2);
+  });
+
+  it('a match with an ineligibleSides stamp that is NOT scheduled counts normally (barredSides gates on status)', () => {
+    const matches = [
+      { id: "a1", court: "A", status: "running", queuePosition: 3, ineligibleSides: { a: "kiken-voluntary" } },
+      { id: "a2", court: "A", status: "scheduled" },
+    ];
+    const out = recomputeQueuePositions(matches);
+    expect(out[0].queuePosition).toBe(0); // running is never counted anyway
+    expect(out[1].queuePosition).toBe(1);
   });
 });
 
@@ -470,6 +552,25 @@ describe('recomputeBracketQueuePositions', () => {
     expect(out).not.toBe(bracket);
     expect(out.rounds[0][0].queuePosition).toBe(0);
     expect(out.rounds[0][1].queuePosition).toBe(0);
+  });
+
+  // bc-tmfn: mirrors the pool helper's barred-skip test above.
+  it('gives a barred scheduled bracket match position 0 and does not count it', () => {
+    const bracket = {
+      rounds: [
+        [
+          { id: "r1m1", court: "A", status: "scheduled", queuePosition: 5, ineligibleSides: { b: "fusenpai" } },
+          { id: "r1m2", court: "A", status: "scheduled" },
+        ],
+        [
+          { id: "r2m1", court: "A", status: "scheduled" },
+        ],
+      ],
+    };
+    const out = recomputeBracketQueuePositions(bracket);
+    expect(out.rounds[0][0].queuePosition).toBe(0);
+    expect(out.rounds[0][1].queuePosition).toBe(1);
+    expect(out.rounds[1][0].queuePosition).toBe(2);
   });
 
   it('handles nil / empty / malformed bracket gracefully', () => {

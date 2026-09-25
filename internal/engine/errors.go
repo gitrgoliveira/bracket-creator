@@ -58,37 +58,6 @@ func notFoundErrorf(format string, args ...any) *NotFoundError {
 // T103, CHK024.
 var ErrDecisionLocked = errors.New("decision locked: a subsequent match has started")
 
-// ErrDownstreamKnockoutScored is the sentinel matched by errors.Is for
-// DownstreamKnockoutScoredError. Handlers should return HTTP 409.
-//
-// mp-e2k1.
-var ErrDownstreamKnockoutScored = errors.New("downstream knockout match already scored")
-
-// DownstreamKnockoutScoredError is returned when a pool re-score would
-// change a pool finisher who has already been consumed by a started or
-// completed knockout (bracket) match. The operator must reset the
-// knockout match first before correcting the pool result.
-//
-// mp-e2k1.
-type DownstreamKnockoutScoredError struct {
-	// Pool is the name of the pool whose re-score was rejected.
-	Pool string
-	// Finisher is the name of the pool finisher whose bracket placement
-	// would be displaced by the re-score.
-	Finisher string
-	// MatchID is the ID of the downstream knockout match that has already
-	// been started (running or completed) with the current finisher as a side.
-	MatchID string
-}
-
-func (e *DownstreamKnockoutScoredError) Error() string {
-	return fmt.Sprintf("pool %q re-score rejected: finisher %q is already in a started knockout match %q, reset that match first", e.Pool, e.Finisher, e.MatchID)
-}
-
-func (e *DownstreamKnockoutScoredError) Is(target error) bool {
-	return target == ErrDownstreamKnockoutScored
-}
-
 // ErrDownstreamKnockoutPlayed is the sentinel matched by errors.Is for
 // DownstreamKnockoutPlayedError. Handlers should return HTTP 409.
 //
@@ -114,15 +83,36 @@ var ErrDownstreamKnockoutPlayed = errors.New("downstream knockout match already 
 // Never raised for a matchWriteRestore (a K3 rollback replaying a trusted
 // snapshot), and never for a downstream slot merely auto-completed by a bye
 // (see bracketMatchCarriesOwnResult).
+//
+// Also returned for a POOL correction in a mixed competition that moves who
+// holds a qualifying place while a knockout match the old qualifier already
+// fought stands on it (requalifyAfterPoolWrite): MatchID is then the pool
+// match, Blocking the knockout matches fought, QualifierChange the places
+// that move, and Force reopens those matches with the new qualifier seated.
+// A pool-rank override (OverridePoolRanks) is answered the same way, with an
+// empty MatchID: it moves the pool's order without correcting any match.
 type DownstreamKnockoutPlayedError struct {
-	// MatchID is the id of the match being corrected.
+	// MatchID is the id of the match being corrected; "" for a pool-rank
+	// override, which corrects none.
 	MatchID string
+	// Label is MatchID's operator-facing label (bc-cse item 14), populated
+	// PURELY at construction (MatchLabel/OperatorMatchLabel take an
+	// already-loaded comp/bracket, no store I/O), never resolved inside
+	// Error() itself: Error() has no store handle to resolve one with, and
+	// this error is typically raised from inside a live transaction, where
+	// a label helper that reads through the store would deadlock against
+	// the lock the transaction already holds (non-reentrant). Empty only
+	// for a pool-rank override (MatchID is also empty there; Error()
+	// reports the pool by name instead). Every production constructor
+	// sets it otherwise; there is no bare-MatchID fallback in Error(), so a
+	// hand-built struct (a test value) must set it too.
+	Label string
 	// BlockingMatchID is the FIRST blocking match (bronze before the next
 	// round), kept as the single-value form every existing consumer reads.
 	BlockingMatchID string
 	// Blocking is every match this correction is blocked on, one hop down and
-	// closed with a result of its own, each with the MATCH NUMBER the operator
-	// knows it by. Almost always one; a semifinal feeds both the final and the
+	// closed with a result of its own, each with the MATCH NUMBER and knockout
+	// round the operator knows it by (MatchLabel). Almost always one; a semifinal feeds both the final and the
 	// bronze match, so it can be two, and both are cleared by the one
 	// confirmation that names them (see newDownstreamKnockoutPlayedError for
 	// why they cannot be split).
@@ -139,9 +129,60 @@ type DownstreamKnockoutPlayedError struct {
 	// see the plural arm below and downstreamKnockoutPlayedConfirm in
 	// write_result.jsx, which mirrors it.
 	Displaced string
+	// QualifierChange is set only when the write being corrected is a POOL
+	// match in a mixed competition: the correction moves who holds one or more
+	// of that pool's qualifying places, and Blocking lists the knockout matches
+	// the old qualifier has already fought (planRequalification). Each entry
+	// names the place and both occupants, so the operator is told who moves,
+	// not just which match reopens. Empty for a knockout correction.
+	QualifierChange []QualifierChange
+}
+
+// QualifierChange is one pool place a correction moves: from the competitor
+// seated in the knockout for it to the one the corrected standings now put
+// there. Tied means the corrected standings leave that place undecided until
+// a tie-break is fought, so the slot returns to its draw label ("Pool A-1st")
+// and To is empty.
+type QualifierChange struct {
+	Pool  string            `json:"pool"`
+	Rank  int               `json:"rank"`
+	Place string            `json:"place"`
+	From  QualifierIdentity `json:"from"`
+	To    QualifierIdentity `json:"to"`
+	Tied  bool              `json:"tied,omitempty"`
+}
+
+// QualifierIdentity names a competitor on the wire the way every other
+// payload does: the name to show, the participant id to address them by.
+type QualifierIdentity struct {
+	Name string `json:"name"`
+	ID   string `json:"id,omitempty"`
 }
 
 func (e *DownstreamKnockoutPlayedError) Error() string {
+	// bc-cse item 14: Label is the operator-facing spelling of MatchID
+	// (populated at construction; see the struct doc for why not here).
+	// Every production constructor sets it, so there is no bare-id fallback
+	// here; a hand-built test value must set it too.
+	label := e.Label
+	if len(e.QualifierChange) > 0 {
+		labels := make([]string, 0, len(e.Blocking))
+		for _, b := range e.Blocking {
+			labels = append(labels, MatchLabel(b))
+		}
+		verb, them, who := "was", "it", "the competitor being replaced"
+		if len(labels) > 1 {
+			verb, them, who = "were", "them", "the competitors being replaced"
+		}
+		pool := e.QualifierChange[0].Pool
+		change := fmt.Sprintf("correcting %s changes who qualified from %s", label, pool)
+		if e.MatchID == "" {
+			// A pool-rank override (OverridePoolRanks) corrects no match.
+			change = fmt.Sprintf("changing the ranking of %s changes who qualified from it", pool)
+		}
+		return fmt.Sprintf("%s, and %s %s already fought by %s. Retry with forceDownstreamReopen to apply the change and reopen %s to be fought again",
+			change, strings.Join(labels, " and "), verb, who, them)
+	}
 	labels := make([]string, 0, len(e.Blocking))
 	for _, b := range e.Blocking {
 		labels = append(labels, MatchLabel(b))
@@ -153,22 +194,94 @@ func (e *DownstreamKnockoutPlayedError) Error() string {
 	if len(e.Blocking) > 1 {
 		// No Displaced clause: it names one competitor, and these matches do
 		// not share one.
-		return fmt.Sprintf("correcting match %q would change the winner already propagated into %s, which have recorded their own results. Retry with forceDownstreamReopen to apply the correction and reopen both to be fought again",
-			e.MatchID, blocked)
+		return fmt.Sprintf("correcting %s would change the winner already propagated into %s, which have recorded their own results. Retry with forceDownstreamReopen to apply the correction and reopen both to be fought again",
+			label, blocked)
 	}
-	return fmt.Sprintf("correcting match %q would change the winner already propagated into %s, which has recorded its own result; this would displace %q without updating that result. Retry with forceDownstreamReopen to apply the correction and reopen %s to be fought again",
-		e.MatchID, blocked, e.Displaced, blocked)
+	return fmt.Sprintf("correcting %s would change the winner already propagated into %s, which has recorded its own result; this would displace %q without updating that result. Retry with forceDownstreamReopen to apply the correction and reopen %s to be fought again",
+		label, blocked, e.Displaced, blocked)
 }
 
 func (e *DownstreamKnockoutPlayedError) Is(target error) bool {
 	return target == ErrDownstreamKnockoutPlayed
 }
 
-// MatchLabel names a match the way the OPERATOR sees it: "Match 3", the label
-// on the score sheet, the bracket and the Excel tree sheet.
+// ErrDownstreamKnockoutRunning is the sentinel matched by errors.Is for
+// DownstreamKnockoutRunningError. Handlers should return HTTP 409.
+var ErrDownstreamKnockoutRunning = errors.New("downstream knockout match is being fought")
+
+// DownstreamKnockoutRunningError refuses a write that would move a
+// qualifier out of a knockout match somebody is fighting RIGHT NOW. Two
+// producers construct it, distinguished by Reopening: a pool correction in
+// a mixed competition (pool_requalify.go's requalifyAfterPoolWrite, the
+// default Reopening:false), and the reopen / requeue-blocker-and-reopen
+// doors (reopenBracketDownstreamCheck, kachinuki.go, Reopening:true). Unlike
+// DownstreamKnockoutPlayedError it cannot be confirmed past: reopening a
+// match mid-bout would wipe strikes being scored at the shiaijo, so the
+// operator finishes the match or sends it back to the queue first, THEN
+// retries -- which of those two doors "retries" means is Reopening's whole
+// reason to exist (see Error()). Checked before the played case, so the
+// operator is never asked to confirm something that would then be refused.
+type DownstreamKnockoutRunningError struct {
+	// MatchID is the pool match being corrected; "" for a pool-rank override
+	// (OverridePoolRanks), which corrects none.
+	MatchID string
+	// Running is every knockout match the move would reach that is being
+	// fought, each with the number the operator knows it by.
+	Running []ReopenedMatch
+	// Reopening is true ONLY from the reopen/requeue-blocker-and-reopen
+	// construction site. A reopen has no "save" step to retry -- bc-cse:
+	// the shared sentence used to end "...then save again" regardless of
+	// door, which is simply wrong advice on a reopen (there was never a
+	// save to repeat); Reopening picks the correct remedy clause instead.
+	Reopening bool
+}
+
+// Error is the operator-facing sentence (the SPA shows the same words, from
+// write_result.jsx's downstreamKnockoutRunningMessage) for the SAVE-path
+// wording (Reopening:false); the reopen path's own wording is Reopening's
+// whole reason to exist, see the struct doc.
+func (e *DownstreamKnockoutRunningError) Error() string {
+	labels := make([]string, 0, len(e.Running))
+	for _, r := range e.Running {
+		labels = append(labels, MatchLabel(r))
+	}
+	subject := strings.Join(labels, " and ")
+	if subject == "" {
+		subject = "A knockout match"
+	}
+	verb := "is"
+	them := "it"
+	if len(labels) > 1 {
+		verb, them = "are", "them"
+	}
+	retry := "then save again"
+	if e.Reopening {
+		retry = "then reopen this match again"
+	}
+	return fmt.Sprintf("%s %s being fought now. Finish %s or send %s back to the queue, %s.",
+		SentenceCase(subject), verb, them, them, retry)
+}
+
+func (e *DownstreamKnockoutRunningError) Is(target error) bool {
+	return target == ErrDownstreamKnockoutRunning
+}
+
+// MatchLabel names a KNOCKOUT match the way the OPERATOR sees it: its match
+// number, the label on the score sheet, the bracket and the Excel tree sheet,
+// qualified by its round, "Match 3 (Final)". The round is what tells it apart
+// from a pool match: pool matches are numbered from 1 inside each pool, so a
+// bare "Match 1" in a dialog raised while correcting "Pool A · Match 1" read as
+// the match on screen. The round name is the one the bracket prints over the
+// match's column (bracketRoundLabel in web-mobile/js/bracket.jsx, mirrored by
+// roundLabelFromEnd below); a bracket saved before DisplayRound existed has no
+// round to name, so it says "knockout Match 3" instead.
+//
+// The client shows this string as it is (the payloads carry it as `label`
+// beside `number`), so the dialog and the server's own message say the same
+// words and the format is decided here only.
 //
 // The 3rd-place match is the one match that has a NAME instead of a number:
-// assignBracketMatchNumbers walks Bracket.Rounds, and the bronze hangs off the
+// state.Bracket.NumberMatches walks Bracket.Rounds, and the bronze hangs off the
 // separate ThirdPlaceMatch field, so it is numbered neither here nor on the
 // printed tree (helper.AssignMatchNumbers walks the same rounds). It is called
 // the 3rd-place match on every surface an operator sees, so that is what this
@@ -179,14 +292,52 @@ func (e *DownstreamKnockoutPlayedError) Is(target error) bool {
 // cannot name (a bye placeholder, or a bracket saved before numbering
 // existed): a bare id still beats "Match 0", but it is a fallback, not a
 // normal case.
+// SentenceCase upper-cases s's first byte, leaving the rest untouched, and
+// returns "" unchanged. Every operator match label in this codebase
+// (MatchLabel above, OperatorMatchLabel, operatorMatchLabel) deliberately
+// starts lowercase mid-sentence ("the 3rd-place match", "knockout Match 3",
+// a bare pool name), which reads wrong the moment one is interpolated at
+// the START of a sentence ("%s is not completed yet..."). Extracted from a
+// hand-rolled copy (DownstreamKnockoutRunningError.Error) so every OTHER
+// sentence-initial use -- in this package and in mobileapp, which already
+// imports engine -- shares the one capitalisation rule instead of another
+// hand-rolled copy.
+func SentenceCase(s string) string {
+	if s == "" {
+		return s
+	}
+	return strings.ToUpper(s[:1]) + s[1:]
+}
+
 func MatchLabel(m ReopenedMatch) string {
 	if m.Number > 0 {
-		return fmt.Sprintf("Match %d", m.Number)
+		if m.DisplayRound > 0 {
+			return fmt.Sprintf("Match %d (%s)", m.Number, roundLabelFromEnd(m.DisplayRound-1))
+		}
+		return fmt.Sprintf("knockout Match %d", m.Number)
 	}
 	if m.ID == state.BronzeMatchID {
 		return "the 3rd-place match"
 	}
 	return m.ID
+}
+
+// roundLabelFromEnd names a knockout round by how many rounds come after it:
+// 0 = Final, 1 = Semifinals, 2 = Quarterfinals, then the bracket-size form
+// "R16", "R32", .... It mirrors roundLabelFromEnd in web-mobile/js/bracket.jsx,
+// which names the bracket's columns, and both are pinned by
+// testdata/round_labels.json so the round a dialog names is the column the
+// operator finds the match under.
+func roundLabelFromEnd(fromEnd int) string {
+	switch fromEnd {
+	case 0:
+		return "Final"
+	case 1:
+		return "Semifinals"
+	case 2:
+		return "Quarterfinals"
+	}
+	return fmt.Sprintf("R%d", 1<<(fromEnd+1))
 }
 
 // ErrSwissExportUnsupported is returned by Engine.ExportCompetitionXlsx (and

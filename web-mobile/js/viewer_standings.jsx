@@ -6,7 +6,9 @@
 // specifiers resolve in the browser. viewer.js is the SOLE viewer entry script in
 // index.html and imports this module: do NOT give it its own <script type="module">
 // tag, or the browser fetches it under a second URL (.js?v=N vs .jsx) and evaluates
-// it twice (double-load; same class as mp-zd1v).
+// it twice (double-load; same class as mp-zd1v). admin_pools.jsx also imports
+// rankOrdinal from here by the same ".jsx" specifier, so it shares this one
+// module instance rather than loading a second copy.
 //
 // Cycle note: viewer.jsx imports from this file and re-exports every symbol
 // here (plus window.* assignments) so the public surface of viewer.jsx is
@@ -24,6 +26,11 @@ import { sameCompetitor } from './competitor_identity.jsx';
 // (bc-dnst); see that file's header for why this stays an ES import.
 import { NumberedName } from './numbered_name.jsx';
 import { SideLabel } from './side_cell.jsx';
+// teamNameMark: the match-level Kiken/Fus. mark a default-win decision gives
+// a TEAM row, placed beside the withdrawn team's name (bc-tmfn). Reused here
+// rather than re-derived: see its header in match_scoreboard.jsx.
+import { teamNameMark } from './match_scoreboard.jsx';
+import { barredNameMark } from './barred_chip.jsx';
 
 const { useState, useMemo } = React;
 const EmptyState = window.EmptyState;
@@ -612,7 +619,8 @@ export function LeagueMatrix({ pool, matches, tweaks, onMatchClick, highlightPla
 
 // rankOrdinal converts a 1-based rank integer to a short ordinal string.
 // Handles the 11th/12th/13th exception and the general st/nd/rd/th rules.
-function rankOrdinal(rank) {
+// Exported for the admin Pools tab's recorded-chusen line.
+export function rankOrdinal(rank) {
   const mod100 = rank % 100;
   const mod10 = rank % 10;
   if (mod100 >= 11 && mod100 <= 13) return rank + "th";
@@ -650,6 +658,15 @@ export const PoolNumberedMatchRow = React.memo(({ m, num, onMatchClick, isEngi }
   const shiroWonDH = wonDH(m.sideB); // shiro = sideB
   const akaWonDH = wonDH(m.sideA);   // aka = sideA
 
+  // bc-tmfn: a TEAM row's score cell (window.matchStateCell → teamIVPWScore)
+  // is deliberately free of marks, so the match-level Kiken/Fus. a default
+  // win closed a team match with rides beside the withdrawn team's NAME
+  // instead -- the ONE shared computation (window.teamMatchMarks,
+  // bracket.jsx), which derives its own team-row signal from m.subResults
+  // (bc-cse) so an individual match's own mark, already inline in
+  // matchStateCell's score string, is never doubled here.
+  const { shiro: teamShiroMark, aka: teamAkaMark } = window.teamMatchMarks ? window.teamMatchMarks(m) : { shiro: "", aka: "" };
+
   const handleClick = onMatchClick ? () => onMatchClick(m) : undefined;
 
   // Non-interactive <div> when there's no handler (read-only reuse) so the row
@@ -661,7 +678,7 @@ export const PoolNumberedMatchRow = React.memo(({ m, num, onMatchClick, isEngi }
       <span className="pool-match-numbered-row__num">{num}</span>
       <div className="pool-match-numbered-row__side pool-match-numbered-row__side--shiro">
         <SideLabel side="shiro" />
-        <span className="pool-match-numbered-row__name"><NumberedName side="shiro" name={bName || "-"} number={bNum} /></span>
+        <span className="pool-match-numbered-row__name">{barredNameMark(m, "shiro", teamNameMark("shiro", teamShiroMark, <NumberedName side="shiro" name={bName || "-"} number={bNum} />))}</span>
         {shiroWonDH ? <DHBadge /> : null}
         {bDN ? <span className="pool-match-numbered-row__name">{bDN}</span> : null}
       </div>
@@ -681,7 +698,7 @@ export const PoolNumberedMatchRow = React.memo(({ m, num, onMatchClick, isEngi }
             the inside edge (toward the centre score), mirroring the Shiro side
             where the pill follows the name. */}
         {akaWonDH ? <DHBadge /> : null}
-        <span className="pool-match-numbered-row__name"><NumberedName side="aka" name={aName || "-"} number={aNum} /></span>
+        <span className="pool-match-numbered-row__name">{barredNameMark(m, "aka", teamNameMark("aka", teamAkaMark, <NumberedName side="aka" name={aName || "-"} number={aNum} />))}</span>
         {aDN ? <span className="pool-match-numbered-row__name">{aDN}</span> : null}
       </div>
     </Tag>

@@ -159,11 +159,21 @@ export function notLandedBanner(res) {
 // The id fallback remains for a match with no number and no name -- a bye
 // placeholder, or a bracket saved before numbering existed -- because a bare
 // id still beats "Match 0".
+//
+// A match the SERVER names arrives with `label` ("Match 3 (Final)"), and that
+// label wins: engine.MatchLabel qualifies the number with the match's knockout
+// round, because a bare "Match 1" in a dialog raised while correcting
+// "Pool A · Match 1" reads as the match on screen. The server owns that
+// format so this dialog and the server's own message say the same words;
+// composing it here from the number would be a second copy of it. The number
+// arm below stays for a caller naming a match it built itself (the scores
+// list's own rows).
 const BRONZE_MATCH_ID = 'm-bronze';
 
 export function matchLabel(m) {
     if (!m) return '';
     if (typeof m === 'string') return m;
+    if (typeof m.label === 'string' && m.label) return m.label;
     if (m.number > 0) return `Match ${m.number}`;
     if (m.id === BRONZE_MATCH_ID) return 'the 3rd-place match';
     return m.id || '';
@@ -184,7 +194,7 @@ function matchLabelList(ms) {
 // silently repaint that later match's side while its own recorded result
 // stayed put. The server now REFUSES the write outright -- HTTP 409
 // {"error": "downstream_knockout_played", matchId, blockingMatchId,
-// displaced, message} -- rather than the 200 {applied:false} shape the rest
+// blockingMatches, displaced, qualifierChange, message} -- rather than the 200 {applied:false} shape the rest
 // of this file owns, because this is a hard validation gate, not a
 // last-write-wins drop: nothing raced the operator, the write is simply
 // disallowed until they say so explicitly.
@@ -205,7 +215,21 @@ export function downstreamKnockoutPlayedRefusal(err) {
 // to be fought and re-entered (its recorded result is cleared). Cancelling
 // leaves everything as it was -- the caller must not retry on a
 // cancelled/false result, only on an explicit confirm.
-export function downstreamKnockoutPlayedConfirm({ blockingMatchId, blockingMatches, displaced } = {}) {
+export function downstreamKnockoutPlayedConfirm({ blockingMatchId, blockingMatches, displaced, qualifierChange, ranking, reopen } = {}) {
+    // A POOL correction in a mixed competition that moves who holds a
+    // qualifying place says so first: the operator is correcting a pool
+    // result, so "who moves in the knockout" is the consequence they cannot
+    // see from where they are. Branched before the knockout defaults below,
+    // whose `displaced` describes one slot only. `ranking` (set by
+    // api_client's overridePoolRanks) is the same refusal for a pool rank
+    // recorded by hand (chusen), which corrects no result.
+    if (qualifierChange && qualifierChange.length) {
+        return {
+            message: qualifierMoveConfirmMessage(qualifierChange, blockingMatches, blockingMatchId, displaced, ranking),
+            confirmLabel: 'Apply and reopen',
+            danger: true,
+        };
+    }
     // The `displaced` default covers a shape the server genuinely sends: it is
     // the corrected match's STORED winner, and a bye-resolved slot is completed
     // with an empty winner, so a correction written over one arrives with
@@ -232,6 +256,24 @@ export function downstreamKnockoutPlayedConfirm({ blockingMatchId, blockingMatch
     // slot, is false of the other. It read "Ren Takada already played the
     // 3rd-place match and Match 3" when Ren had played only the bronze.
     // Mirrors engine.DownstreamKnockoutPlayedError.Error's own plural arm.
+    //
+    // `reopen` (set by api_client's reopenFailureError) is the same refusal
+    // met by a REOPEN (Reopen match, Clear withdrawal and reopen): the
+    // operator is reopening this match, not applying a correction, so the
+    // copy says what reopening does and the button names that act.
+    if (reopen) {
+        return {
+            message: many
+                ? `${blocking} were built on this match's current result and have already been played. ` +
+                  'Reopening this match also reopens both for re-entry: their recorded results are cleared, ' +
+                  'and they must be fought and scored again.'
+                : `${who} already played ${blocking}, which was built on this match's current result. ` +
+                  `Reopening this match also reopens ${blocking} for re-entry: its recorded result is ` +
+                  'cleared, and it must be fought and scored again.',
+            confirmLabel: many ? 'Reopen all of them' : 'Reopen both',
+            danger: true,
+        };
+    }
     return {
         message: many
             ? `${blocking} were built on this match's current result and have already been played. ` +
@@ -245,10 +287,133 @@ export function downstreamKnockoutPlayedConfirm({ blockingMatchId, blockingMatch
     };
 }
 
+// placeName: "Pool A's 1st place".
+function placeName(c) {
+    return `${c.pool || 'The pool'}'s ${c.place || 'qualifying'} place`;
+}
+
+// qualifierMoveConfirmMessage is the confirm copy for a pool correction that
+// moves one or more qualifying places (the server's qualifierChange, each
+// {pool, rank, place, from: {name, id}, to: {name, id}, tied}). ONE paragraph,
+// for the same reason as the knockout copy above: the dialog renders a plain
+// <p>. It names who moves, then which knockout matches were already fought
+// and what confirming does to them.
+function qualifierMoveConfirmMessage(changes, blockingMatches, blockingMatchId, displaced, ranking) {
+    const nameOf = (who, fallback) => (who && who.name) || fallback;
+    const lead = ranking ? 'Recording this ranking' : 'Changing this result';
+    let moves;
+    if (changes.length === 1) {
+        const c = changes[0];
+        const from = nameOf(c.from, 'the current qualifier');
+        moves = c.tied
+            ? `${lead} leaves ${placeName(c)} tied, to be settled by a tie-break, so ${from} no longer holds it in the knockout.`
+            : `${lead} moves ${placeName(c)} from ${from} to ${nameOf(c.to, 'another competitor')}, who takes ${from}'s place in the knockout.`;
+    } else {
+        const items = changes.map((c) => (c.tied
+            ? `${placeName(c)} (${nameOf(c.from, 'the current qualifier')}, now tied until a tie-break is fought)`
+            : `${placeName(c)} (${nameOf(c.from, 'the current qualifier')} to ${nameOf(c.to, 'another competitor')})`));
+        moves = `${lead} changes who holds ${items.slice(0, -1).join(', ')} and ${items[items.length - 1]}, and the knockout is changed to match.`;
+    }
+    const ms = (blockingMatches && blockingMatches.length)
+        ? blockingMatches
+        : (blockingMatchId ? [{ id: blockingMatchId }] : []);
+    const blocking = matchLabelList(ms) || 'A knockout match';
+    const Blocking = blocking.charAt(0).toUpperCase() + blocking.slice(1);
+    const many = ms.length > 1;
+    // A reopened match on a TIED place has nobody to seat until the tie-break
+    // decides who holds that place, so it cannot be "fought again" straight
+    // away: say when it will be. When only some places are tied the payload
+    // does not say which reopened match stands on which place, so the wait is
+    // stated for the tied ones rather than claimed of every match.
+    const tied = changes.filter((c) => c.tied).length;
+    const places = tied > 1 ? 'the places' : 'the place';
+    let refight;
+    if (tied === changes.length) {
+        refight = `fought once the tie-break decides ${places}`;
+    } else if (tied > 0) {
+        refight = 'fought again; a match on a tied place waits for the tie-break to decide it';
+    } else {
+        refight = many ? 'they must be fought again' : 'it must be fought again';
+    }
+    const fought = many
+        ? `${Blocking} were already fought with the competitors being replaced: they will be reopened, their results cleared, and ${refight}.`
+        : `${Blocking} was already fought${displaced ? ` with ${displaced}` : ''}: it will be reopened, its result cleared, and ${refight}.`;
+    return `${moves} ${fought}`;
+}
+
+// downstreamKnockoutRunningMessage (the 409 downstream_knockout_running): a
+// pool correction that would move a qualifier out of a knockout match being
+// fought RIGHT NOW. Not confirmable, so this is an error message, never a
+// dialog: the operator finishes that match or sends it back to the queue,
+// then saves again. The server's Go message says the same words
+// (engine.DownstreamKnockoutRunningError).
+export function downstreamKnockoutRunningMessage(runningMatches) {
+    const { subject, them } = runningParts(runningMatches);
+    return `${subject}. Finish ${them} or send ${them} back to the queue, then save again.`;
+}
+
+// downstreamKnockoutRunningReopenMessage: the same refusal (409
+// downstream_knockout_running) met by a REOPEN rather than a score write
+// (bc-cse). "then save again" is wrong here -- a reopen has no save step to
+// retry, the operator taps Reopen again once the blocking match is out of
+// the way -- so this is a separate message, not a parameter on the one
+// above, the same split downstreamKnockoutPlayedConfirm's own `reopen` flag
+// already draws for the played-shape refusal.
+export function downstreamKnockoutRunningReopenMessage(runningMatches) {
+    const { subject, them } = runningParts(runningMatches);
+    return `${subject}. Finish ${them} or send ${them} back to the queue, then reopen again.`;
+}
+
+// downstreamKnockoutRunningQueueDrop: the same refusal met by a QUEUED replay,
+// in the { reason, advice } shape the not-saved banner renders as "Not saved:
+// <reason>. <advice>". The advice is the remedy for a write that is no longer
+// on screen: enter it again once that match is out of the way.
+export function downstreamKnockoutRunningQueueDrop(runningMatches) {
+    const { subject, them } = runningParts(runningMatches);
+    return {
+        reason: subject,
+        advice: `Finish ${them} or send ${them} back to the queue, then enter this result again.`,
+    };
+}
+
+// courtBusyMessage (bc-rawm): the operator sentence for a 409 court_busy
+// refusal on a score write -- the shiaijo this match wants is not free, a
+// DIFFERENT match already holds it. Named the way the operator sees it, off
+// the server's own `label` field, never the internal matchId the body also
+// carries: unlike matchLabel's own id fallback (built for a match this app
+// names itself). bc-cse: no "This shiaijo"/"another match" fallback text --
+// respondCourtBusy (handlers_match.go) always sends both `court` and a
+// `label` (matchLabelOrID falls back to the raw match id itself rather than
+// omitting the field), so the fallbacks were dead code defending against a
+// shape the server never sends.
+export function courtBusyMessage({ court, label }) {
+    return `Shiaijo ${court} is running ${label}. Finish it or send it back to the queue first.`;
+}
+
+function runningParts(runningMatches) {
+    const ms = (runningMatches || []).filter(Boolean);
+    const named = matchLabelList(ms) || 'A knockout match';
+    const Named = named.charAt(0).toUpperCase() + named.slice(1);
+    return ms.length > 1
+        ? { subject: `${Named} are being fought now`, them: 'them' }
+        : { subject: `${Named} is being fought now`, them: 'it' };
+}
+
 // The cancellation notice: confirms to the operator that declining the
 // override left the match, and the later one it would have reopened,
 // completely unchanged -- neither was written.
 export const DOWNSTREAM_KNOCKOUT_PLAYED_CANCELLED = 'Correction cancelled: the match and the later result it depends on were left unchanged.';
+
+// The same declined confirmation when what was refused is a REOPEN (Reopen
+// match, Clear withdrawal and reopen, admin_scoring_shared.jsx's
+// useMatchReopen): nothing was corrected, so it does not say "correction".
+export const DOWNSTREAM_KNOCKOUT_REOPEN_CANCELLED = 'Reopen cancelled: this match and the later result it depends on were left unchanged.';
+
+// The chusen panel's copy for the same declined confirmation when what was
+// refused is a chusen order recorded by hand (overridePoolRanks): the order
+// is one write, so none of it was recorded, and the knockout match it would
+// have reopened was left as it was.
+export const DOWNSTREAM_KNOCKOUT_RANKING_CANCELLED = 'Ranking not recorded: the knockout match already fought was left unchanged.';
 
 // downstreamKnockoutPlayedQueueDrop (bc-cse): the copy for THIS refusal
 // arriving on a QUEUED replay rather than a live tap. A correction typed

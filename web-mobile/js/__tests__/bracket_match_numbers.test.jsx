@@ -17,8 +17,9 @@ import { buildDisplayModel } from '../bracket.jsx';
 //  1. The SPA surfaces exactly the served numbers. Its REAL-match filter (not
 //     hidden && displayRound > 0) has to select exactly the set the engine
 //     numbered (not Hidden && not empty-vs-empty) — those are different
-//     predicates over the same data — and the bye-slot cards it synthesizes
-//     itself must stay out of the numbering.
+//     predicates over the same data. And the columns hold exactly those bouts:
+//     a competitor who skips a round gets no card of their own (bc-tmfn), so
+//     nothing unnumbered is drawn between the numbered cards.
 //  2. The legacy FALLBACK walk still reproduces the engine's numbering exactly.
 //     It runs for brackets persisted before matchNumber existed, which still
 //     render, and now that the primary path consumes the served value it is the
@@ -98,21 +99,26 @@ describe('bracket match numbers: served numbering, and the legacy fallback walk'
       expect(matchNumById).toEqual(expected);
       expectDense(matchNumById);
 
-      // Bye-slot placeholders are cards the model SYNTHESIZES so a structural
-      // bye reads spatially; they are not bouts, no referee can be sent to one,
-      // and neither side numbers them. Numbering them would shift every card
-      // after them out of step with the sheet.
-      allCards(rounds).filter((m) => m.isByeSlot).forEach((slot) => {
-        expect(matchNumById[slot.id]).toBeUndefined();
-      });
+      // The cards drawn are exactly the numbered bouts. A competitor who skips
+      // a round appears only in the card of the match they first fight, as
+      // the printed sheets show them (bc-tmfn): the model draws no placeholder
+      // for the skipped round. A synthesized card would be a box no referee
+      // can be sent to, drawn among the numbered ones.
+      expect(allCards(rounds).map((m) => m.id).sort()).toEqual(Object.keys(expected).sort());
     });
   });
 
-  // The bye-slot assertion above is vacuous on a table of only balanced shapes,
-  // and it is the model's own invention, so nothing else would notice.
-  it('the table exercises bye-slot cards at all', () => {
-    const byes = table.cases.reduce((n, c) => n + allCards(c.rounds).filter((m) => m.isByeSlot).length, 0);
-    expect(byes, 'no case in the golden produces a structural-bye card: the unnumbered-bye check asserts nothing').toBeGreaterThan(0);
+  // The cards-are-bouts assertion above is vacuous on a table of only balanced
+  // shapes: a card that skips nothing never had a placeholder to draw. At
+  // least one case needs a structural skip, a real match past the first
+  // column with a side that no match feeds.
+  it('the table exercises structural skips at all', () => {
+    const skips = table.cases.reduce((n, c) => {
+      const real = c.rounds.flat().filter((m) => !m.hidden && (m.displayRound || 0) > 0);
+      const maxDR = Math.max(...real.map((m) => m.displayRound));
+      return n + real.filter((m) => m.displayRound < maxDR && (m.feeders || []).some((f) => f === '')).length;
+    }, 0);
+    expect(skips, 'no case in the golden has a structural skip: the cards-are-bouts check asserts nothing').toBeGreaterThan(0);
   });
 
   // The one case that proves the model CONSUMES the served numbering rather

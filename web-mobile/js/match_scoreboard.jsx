@@ -22,6 +22,8 @@ import { DAIHYOSEN_POSITION } from './pool_ids.jsx';
 import { resultSlot, sideSlotOrder, realIppons, hanteiTied, nameOf, attributeWinnerSide, subBoutAttribution } from './result_slot.jsx';
 import { sideLookupKey } from './competitor_identity.jsx';
 import { NumberedName, numberFollowsName } from './numbered_name.jsx';
+import { creditedBoutSide, subBoutHasResult } from './team_default_credit.jsx';
+import { barredNameMark } from './barred_chip.jsx';
 
 // bc-pnum: inline style for the squad member label riding beside a bout
 // row's fighter name (BoutSubRow below), the public twin of
@@ -31,10 +33,15 @@ import { NumberedName, numberFollowsName } from './numbered_name.jsx';
 // own header warns against for admin_lineup.jsx specifically -- the same
 // reasoning applies to any admin panel. `em` sizing (rather than a fixed px)
 // scales with the name it rides beside across variant="card"/"tv".
-const SQUAD_MEMBER_LABEL_STYLE = { fontSize: "0.7em", fontWeight: 600, opacity: 0.75, marginRight: "0.35em" };
-// Aka's label sits AFTER the name (the outer side), so its gap is on the
-// other side of it (bc-dnst).
-const SQUAD_MEMBER_LABEL_STYLE_AFTER = { ...SQUAD_MEMBER_LABEL_STYLE, marginRight: 0, marginLeft: "0.35em" };
+//
+// bc-cse: no margin -- the parent .msb-name--labelled cell now supplies the
+// gap via CSS (styles.css), so a margin here on top of it would double the
+// space. Both entries in the pair still exist because the label's flex ORDER
+// (Shiro's leading, Aka's trailing -- see the JSX below) is decided by
+// element order, not by this style object; nothing else distinguishes them
+// once neither carries a margin.
+const SQUAD_MEMBER_LABEL_STYLE = { fontSize: "0.7em", fontWeight: 600, opacity: 0.75 };
+const SQUAD_MEMBER_LABEL_STYLE_AFTER = { ...SQUAD_MEMBER_LABEL_STYLE };
 
 const { useState: useSB, useEffect: useEB } = React;
 
@@ -161,7 +168,9 @@ export function useTeamLineups(match, competition, roundIndex) {
       let round = 0;
       if (typeof roundIndex === "number" && roundIndex >= 0) {
         round = roundIndex;
-      } else if (typeof match.round === "number") {
+      } else if (typeof match.round === "number" && match.round >= 0) {
+        // A pool match stores Round -1 ("no round"); like resolveRoundIndex,
+        // it reads as round 0 rather than asking the server for round -1.
         round = match.round;
       } else if (typeof match.round === "string") {
         const mr = /^Round\s+(\d+)$/.exec(match.round);
@@ -489,12 +498,20 @@ export function BoutSubRow({ sub, index, lineupA, lineupB, teamSize, isDH, state
 
 // Aggregate IV (individual victories) + PW (points won) per side from the
 // regular (non-DH) bouts. sideB = shiro/left, sideA = aka/right.
-export function teamIVPW(subResults, matchSideA, matchSideB) {
+export function teamIVPW(subResults, matchSideA, matchSideB, matchCtx) {
   let ivShiro = 0, ivAka = 0, pwShiro = 0, pwAka = 0;
   // Count only real numbered bouts: skip the daihyosen sentinel AND any
   // malformed negative position, mirroring the Go-side defensive skip
   // (state.TeamResultFrom: Position <= DaihyosenSubPosition).
   for (const s of (subResults || []).filter(x => x.position > DAIHYOSEN_POSITION)) {
+    // bc-tmfn: a numbered bout with no result of its own, under an active
+    // match-level default-win ruling, is credited IV+1/PW+2 to the OTHER
+    // side from decisionBy — see team_default_credit.jsx for the whole
+    // rule. matchCtx is OPTIONAL (omitted callers, e.g. streaming_overlay.jsx,
+    // keep their pre-existing behaviour byte-for-byte: teamDefaultWinCreditActive(undefined) is false).
+    const creditSide = creditedBoutSide(s, matchCtx);
+    if (creditSide === "a") { ivAka++; pwAka += 2; continue; }
+    if (creditSide === "b") { ivShiro++; pwShiro += 2; continue; }
     const a = ipponLetters(s.ipponsA).filter(Boolean).length;
     const b = ipponLetters(s.ipponsB).filter(Boolean).length;
     pwShiro += b; pwAka += a;
@@ -586,7 +603,7 @@ export function withNumber(side, withZekkenName, color) {
 // The rule lives here so a surface that wants it passes a flag instead of
 // reaching into these internals with its own selector — the shape that produced
 // the `.msb-sep { display: none }` bug this component just had to fix.
-export function IndividualScore({ match, variant, showNames, withZekkenName, shiroName, akaName, showDojo }) {
+export function IndividualScore({ match, variant, showNames, withZekkenName, shiroName, akaName, showDojo, showBarredChip }) {
   // nameOf, not a local unwrap: same object-or-bare-string rule the slot leaf's
   // hanteiWinnerKey applies, so the two attribution paths cannot read a side
   // name differently.
@@ -652,12 +669,28 @@ export function IndividualScore({ match, variant, showNames, withZekkenName, shi
   // inherited `normal` and truncates the name instead — so the stacked cell
   // takes the unclipped form, where `.numbered-name { display: contents }`
   // leaves chip and name inline and the cell's own wrapping applies.
-  const nameCell = (parts, side, dojo) => (
-    <>
-      <NumberedName side={side} clip={!dojo} name={parts.name} number={parts.number} />
-      {dojo && <span className="bc-dojo msb-dojo">{dojo}</span>}
-    </>
-  );
+  // bc-cse: showBarredChip wraps the name in barredNameMark (barred_chip.jsx),
+  // the SAME "Withdrawn" chip every phone schedule row (VSchedItem,
+  // viewer_schedule.jsx's TWMatch, viewer_standings.jsx) already shows for a
+  // scheduled match a competitor is barred from -- the TV individual pool
+  // board (TvIndividualBoard) is the one caller that opts in, since a barred
+  // bout used to list there as a plain scheduled row with no chip at all.
+  // Off by default: the lobby board and the viewer's own match card render
+  // through this same showNames path and are unaffected. msb-name--labelled
+  // (fix bc-cse #4) makes the cell a flex row so the chip is a flex:none
+  // sibling and only the NumberedName clip wrapper shrinks/ellipsises --
+  // without it a long name clipped the chip off the end (or, on Aka, pushed
+  // its leading chip past the visible width), the same class of bug the
+  // member-label rows were fixed for.
+  const nameCell = (parts, side, dojo) => {
+    const nameEl = <NumberedName side={side} clip={!dojo} name={parts.name} number={parts.number} />;
+    return (
+      <>
+        {showBarredChip ? barredNameMark(match, side, nameEl) : nameEl}
+        {dojo && <span className="bc-dojo msb-dojo">{dojo}</span>}
+      </>
+    );
+  };
   // Emphasise the decided winner's NAME. sub.winner is already id-first with a
   // name fallback and is blanked for an indistinguishable same-name pair, so
   // neither side lights up when the data cannot attribute the win. This is the
@@ -667,12 +700,13 @@ export function IndividualScore({ match, variant, showNames, withZekkenName, shi
   // for an ippon-LESS result, i.e. hantei or a default win).
   const winShiroName = !!sub.winner && sub.winner === sub.sideB;
   const winAkaName = !!sub.winner && sub.winner === sub.sideA;
+  const labelledCls = showBarredChip ? " msb-name--labelled" : "";
   return (
     <div className={"msb msb-individual" + (variant === "tv" ? " msb--tv" : "")} data-testid="individual-score">
       <div className="msb-row">
-        <span className={"msb-name" + (shiroDojo ? " msb-name--stacked" : "") + (winShiroName ? " msb-name--win" : "")} data-testid={showNames ? "indiv-shiro-name" : undefined}>{showNames ? nameCell(shiroParts, "shiro", shiroDojo) : ""}</span>
+        <span className={"msb-name" + labelledCls + (shiroDojo ? " msb-name--stacked" : "") + (winShiroName ? " msb-name--win" : "")} data-testid={showNames ? "indiv-shiro-name" : undefined}>{showNames ? nameCell(shiroParts, "shiro", shiroDojo) : ""}</span>
         {centreMarks(sub)}
-        <span className={"msb-name msb-name--aka" + (akaDojo ? " msb-name--stacked" : "") + (winAkaName ? " msb-name--win" : "")} data-testid={showNames ? "indiv-aka-name" : undefined}>{showNames ? nameCell(akaParts, "aka", akaDojo) : ""}</span>
+        <span className={"msb-name msb-name--aka" + labelledCls + (akaDojo ? " msb-name--stacked" : "") + (winAkaName ? " msb-name--win" : "")} data-testid={showNames ? "indiv-aka-name" : undefined}>{showNames ? nameCell(akaParts, "aka", akaDojo) : ""}</span>
       </div>
     </div>
   );
@@ -693,10 +727,10 @@ export function IndividualScore({ match, variant, showNames, withZekkenName, shi
 // IV/PW readout (display_scoreboard.jsx) and TeamScoreboard's own §277
 // summary row derive from the exact same function and can never disagree
 // about which source won.
-export function teamIVPWFrom(teamResult, subResults, matchSideA, matchSideB) {
+export function teamIVPWFrom(teamResult, subResults, matchSideA, matchSideB, matchCtx) {
   return teamResult && typeof teamResult === "object"
     ? { ivShiro: teamResult.shiroIV || 0, ivAka: teamResult.akaIV || 0, pwShiro: teamResult.shiroPW || 0, pwAka: teamResult.akaPW || 0 }
-    : teamIVPW(subResults, matchSideA, matchSideB);
+    : teamIVPW(subResults, matchSideA, matchSideB, matchCtx);
 }
 
 // TeamScoreboard: §277 team table: an IV/PW summary row (labeled, per side) +
@@ -709,11 +743,35 @@ export function teamIVPWFrom(teamResult, subResults, matchSideA, matchSideB) {
 // squadA/squadB/numberA/numberB (bc-pnum): threaded straight through to every
 // BoutSubRow, which is where the label is actually composed and rendered;
 // see that component's header for the props' shape and defaults.
-export function TeamScoreboard({ subResults, teamResult, lineupA, lineupB, teamSize, showDH, variant, shiroName, akaName, matchSideA, matchSideB, isRunning, kachinuki, squadA, squadB, numberA, numberB }) {
+// teamNameMark: a match-level result mark (Kiken/Fus.) riding beside a TEAM
+// name+number block, on the INNER side (toward the centre "vs"/score, the
+// side OPPOSITE the competitor number chip) -- the same placement
+// admin_scoring_shared.jsx's WithdrawalMarkedName already gives the team
+// editor's header names, replicated here (not imported: that module is an
+// ADMIN editor with its own network/state machine, and this is a PUBLIC
+// shared component reaching only for the small leaf pieces -- NumberedName,
+// numberFollowsName -- it already imports). `nameEl` is the already-built
+// NumberedName element to wrap; `mark` is a plain STRING the caller computes
+// (bracket.jsx sideMarks + placeMarks); this function only places it, it does
+// not decide what the mark says (see team_default_credit.jsx's header for
+// why TeamScoreboard itself never learns that rule).
+export function teamNameMark(side, mark, nameEl) {
+  if (!mark) return nameEl;
+  const markEl = <span className="sb-result-mark" data-testid={`team-summary-mark-${side}`}>{mark}</span>;
+  return numberFollowsName(side) ? <>{markEl}{" "}{nameEl}</> : <>{nameEl}{" "}{markEl}</>;
+}
+
+export function TeamScoreboard({ subResults, teamResult, lineupA, lineupB, teamSize, showDH, variant, shiroName, akaName, matchSideA, matchSideB, isRunning, kachinuki, squadA, squadB, numberA, numberB, decision, decisionBy, status, shiroMark, akaMark }) {
   // Real numbered bouts only: exclude the daihyosen sentinel and any malformed
   // negative position (mirrors the Go-side defensive skip).
   const regular = (subResults || []).filter(s => s.position > DAIHYOSEN_POSITION);
-  const { ivShiro, ivAka, pwShiro, pwAka } = teamIVPWFrom(teamResult, subResults, matchSideA, matchSideB);
+  // bc-tmfn: the match-level default-win credit context. decision/decisionBy/
+  // status are new OPTIONAL props (every existing caller/test that omits them
+  // keeps behaving exactly as before: teamDefaultWinCreditActive(undefined) is
+  // false, so creditedBoutSide never fires and effectiveSub below is a no-op
+  // pass-through). See team_default_credit.jsx for the whole rule.
+  const matchCtx = { status, decision, decisionBy, kachinuki };
+  const { ivShiro, ivAka, pwShiro, pwAka } = teamIVPWFrom(teamResult, subResults, matchSideA, matchSideB, matchCtx);
   // FIK: a Daihyosen (representative bout) only happens when the team match is
   // TIED after the regular bouts: equal individual victories AND equal points.
   // Guard the render on the tie so a stale/invalid position:-1 sub never shows a
@@ -722,31 +780,46 @@ export function TeamScoreboard({ subResults, teamResult, lineupA, lineupB, teamS
   const renderDH = !!showDH && tied;
   const dhSub = renderDH ? (subResults || []).find(s => s.position === DAIHYOSEN_POSITION) : null;
   const tv = variant === "tv";
+  // effectiveSub: the bout centreMarks/isScored actually render for numbered
+  // position i+1 -- the REAL recorded row when one exists (or already has a
+  // result), or else a SYNTHESISED default-win row when the active ruling
+  // credits this position (bc-tmfn). The synthesised row is shaped exactly
+  // like a real per-bout fusensho row naming the TEAMS (the pre-existing
+  // quick-score synth shape subWinnerSides already resolves via its
+  // matchSideA/matchSideB fallback tier), so centreMarks/resultCells render
+  // its ○○ default-win maru through the SAME machinery a real one already
+  // gets -- no second rendering path to keep in sync.
+  const effectiveSub = (i) => {
+    const real = regular[i];
+    const creditSide = creditedBoutSide(real, matchCtx);
+    if (!creditSide) return real || {};
+    return {
+      position: i + 1, decision: "fusensho",
+      winner: creditSide === "a" ? matchSideA : matchSideB,
+      ipponsA: [], ipponsB: [],
+    };
+  };
   // The current bout = first unscored regular bout (navy "now" highlight via
   // var(--accent-soft): the running signal), but only while the match is
   // RUNNING (see rowState below). Already-scored bouts are "done"; unscored
   // bouts are "queued". On a non-running board (completed or up-next) nothing
   // is "now": a completed match that left padded/unplayed positions unscored
   // (e.g. a quick-score synthesising fewer subResults than teamSize) keeps
-  // those rows "queued", not "done".
-  const isScored = (s) => {
-    const a = ipponLetters(s.ipponsA).filter(Boolean).length;
-    const b = ipponLetters(s.ipponsB).filter(Boolean).length;
-    // A bout counts as scored once it has any recorded outcome: ippon letters,
-    // a hansoku, a hantei, an explicit winner or decision (quick-score and
-    // forfeit-style outcomes set winner/decision without ippon letters), or a
-    // hikiwake draw.
-    return a > 0 || b > 0 || s.hansokuA || s.hansokuB || s.decidedByHantei ||
-      !!s.winner || (typeof s.decision === "string" && s.decision !== "") ||
-      (typeof window.isHikiwake === "function" && (window.isHikiwake(s.score?.type) || window.isHikiwake(s.decision)));
-  };
+  // those rows "queued", not "done". A CREDITED row also reads "done": it is
+  // built from teamDefaultWinCreditActive, which requires status ===
+  // "completed", so it can only ever coincide with isRunning being false.
+  const isScored = (s) => subBoutHasResult(s) ||
+    // Legacy/client-only branch subBoutHasResult does not cover: a bare
+    // score.type === "hikiwake" with no decision string set (a quick-score
+    // synth shape). Preserved so this delegation loses no existing coverage.
+    (typeof window.isHikiwake === "function" && window.isHikiwake(s.score?.type));
   // Kachinuki: row count = recorded bouts only (no teamSize padding).
   // Show at least 1 row so the bootstrap senpo-vs-senpo bout is always visible.
   // Fixed-order: render one row per lineup position (teamSize), padding past
   // recorded subResults so a running encounter shows all bouts: completed,
   // the current one, and still-to-come positions.
   const rowCount = kachinuki ? Math.max(regular.length, 1) : Math.max(regular.length, teamSize || 0);
-  const scoredAt = (i) => i < regular.length && isScored(regular[i]);
+  const scoredAt = (i) => isScored(effectiveSub(i));
   // Per-row state: a scored bout is "done"; the first unscored bout is "now"
   // ONLY when the match is RUNNING (so a 0–0 running board highlights bout 1);
   // every other unscored bout is "queued". Gating "now" on isRunning means a
@@ -777,9 +850,15 @@ export function TeamScoreboard({ subResults, teamResult, lineupA, lineupB, teamS
           {/* The summary cell ellipsises, so it takes the chip as its own flex
               child rather than a number baked into the string: at 402px the cell
               is 85px wide and "Seishinkan Ember T7" (126px) lost its T7 outright,
-              while Shiro's leading number survived (measured, bc-rvfx). */}
+              while Shiro's leading number survived (measured, bc-rvfx).
+              shiroMark/akaMark (bc-tmfn) are the match-level Kiken/Fus. mark
+              for a team a default-win decision withdrew/barred -- STRINGS the
+              caller computes (bracket.jsx sideMarks + placeMarks, the SAME
+              rule MatchCard uses), never derived in here: see
+              team_default_credit.jsx's header for why this component does not
+              learn the mark rule itself. */}
           <span className="msb-name msb-name--labelled" data-testid="summary-shiro-name">
-            <NumberedName side="shiro" clip name={shiroName || ""} number={numberB || ""} />
+            {teamNameMark("shiro", shiroMark, <NumberedName side="shiro" clip name={shiroName || ""} number={numberB || ""} />)}
           </span>
           <span className="msb-marks">
             <span className="msb-slots">
@@ -793,7 +872,7 @@ export function TeamScoreboard({ subResults, teamResult, lineupA, lineupB, teamS
             </span>
           </span>
           <span className="msb-name msb-name--aka msb-name--labelled" data-testid="summary-aka-name">
-            <NumberedName side="aka" clip name={akaName || ""} number={numberA || ""} />
+            {teamNameMark("aka", akaMark, <NumberedName side="aka" clip name={akaName || ""} number={numberA || ""} />)}
           </span>
         </div>
       )}
@@ -802,9 +881,13 @@ export function TeamScoreboard({ subResults, teamResult, lineupA, lineupB, teamS
           subResults so a running encounter shows the still-to-come bouts too:
           not just the scored ones (a partially-scored match used to render only
           its scored rows). A padding row has no sub: BoutSubRow shows the pinned
-          lineup name when present, else the bout number (mp-13y #4/#6). */}
+          lineup name when present, else the bout number (mp-13y #4/#6). A
+          CREDITED row (bc-tmfn) substitutes the synthesised default-win sub
+          from effectiveSub, so it renders exactly like a real per-bout
+          fusensho row: done state, ○○ on the credited side, plain "vs"
+          centre. */}
       {Array.from({ length: rowCount }, (_, i) => (
-        <BoutSubRow key={i} sub={regular[i] || {}} index={i} lineupA={lineupA} lineupB={lineupB}
+        <BoutSubRow key={i} sub={effectiveSub(i)} index={i} lineupA={lineupA} lineupB={lineupB}
           teamSize={teamSize} isDH={false} state={rowState(i)} matchSideA={matchSideA} matchSideB={matchSideB} kachinuki={!!kachinuki}
           squadA={squadA} squadB={squadB} numberA={numberA} numberB={numberB} />
       ))}

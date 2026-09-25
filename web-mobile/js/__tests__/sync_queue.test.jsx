@@ -1298,6 +1298,50 @@ describe('_flushQueue: downstream_knockout_played 409 on a queued correction (bc
     });
 });
 
+// bc-cse: a queued SCORE write can be replayed after the shiaijo it wants has
+// since been taken by a different match -- the server's 409 court_busy, which
+// falls through the generic non-retryable-4xx drop branch (same as
+// downstream_knockout_played above). Pre-fix this reported the bare
+// "court_busy" token; it must report the operator sentence instead.
+describe('_flushQueue: court_busy 409 on a queued score write (bc-cse)', () => {
+    it('drops the entry and reports the shiaijo + blocking match, not the raw token', async () => {
+        const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+        mockFetch(() => Promise.reject(new TypeError('offline')));
+        await API.recordScore('c1', 'mcorr', { status: 'completed', winner: 'A' }, 'pw', null);
+        expect(API.hasPendingTerminalWrite('c1', 'mcorr')).toBe(true);
+
+        const failures = [];
+        const unsubFail = mod.subscribeTerminalWriteFailed((info) => failures.push(info));
+        const alerts = [];
+        const unsubAlert = mod.subscribeQueueAlert((a) => alerts.push(a));
+
+        mockFetch(() => Promise.resolve({
+            ok: false,
+            status: 409,
+            json: () => Promise.resolve({
+                error: 'court_busy', court: 'A', matchId: 'm-blk', compId: 'c1', label: 'Pool A · Match 2',
+            }),
+        }));
+        window.dispatchEvent(new Event('online'));
+        await tick(50);
+        unsubFail();
+        unsubAlert();
+        warnSpy.mockRestore();
+
+        expect(API.hasPendingTerminalWrite('c1', 'mcorr')).toBe(false);
+
+        expect(failures.length).toBeGreaterThanOrEqual(1);
+        expect(failures[0].reason).toBe(
+            'Shiaijo A is running Pool A · Match 2. Finish it or send it back to the queue first.'
+        );
+        expect(failures[0].reason).not.toBe('court_busy');
+
+        const rejected = alerts.filter((a) => a.kind === 'rejected');
+        expect(rejected.length).toBeGreaterThanOrEqual(1);
+        expect(rejected[0].detail).not.toBe('court_busy');
+    });
+});
+
 // mp-y3nk: a queued override the server LWW-dropped (applied:false) must trigger
 // a bracketResync notification so stale optimistic local bracket state is replaced.
 // The queue entry is drained regardless (retry cannot change the outcome).
@@ -2078,5 +2122,111 @@ describe('writeWasSuperseded (bc-lww1)', () => {
     it('is the one owned by write_result.jsx, not a second copy', async () => {
         const owner = await import('../write_result.jsx');
         expect(mod.writeWasSuperseded).toBe(owner.writeWasSuperseded);
+    });
+});
+
+// A forced write ("Apply and reopen") answered ONE refusal, naming the matches
+// that stood then. The queue must never replay that confirmation: a replay
+// minutes later would reopen whatever stands by then, which nobody confirmed.
+// _enqueueTerminalWrite strips forceDownstreamReopen, so the replay meets the
+// refusal again and is dropped with words, while the live attempt still sent it.
+describe('_enqueueTerminalWrite: a queued write never carries the downstream confirmation', () => {
+    it.each([
+        ['score', () => API.recordScore('c1', 'mforce', { status: 'completed', winner: 'A', forceDownstreamReopen: true }, 'pw', null)],
+        ['decision', () => API.recordDecision('c1', 'mforce', { decision: 'kiken-voluntary', decisionBy: 'aka', forceDownstreamReopen: true }, 'pw')],
+    ])('%s: the live try sends it, the queued replay does not', async (_kind, send) => {
+        const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+        const live = [];
+        mockFetch((_url, opts) => {
+            live.push(JSON.parse(opts.body));
+            return Promise.resolve({ ok: false, status: 503, json: () => Promise.resolve({ error: 'unavailable' }) });
+        });
+        const res = await send();
+        expect(res).toEqual({ queued: true });
+        expect(live[0].forceDownstreamReopen).toBe(true);
+
+        const replays = [];
+        const failures = [];
+        const unsubFail = mod.subscribeTerminalWriteFailed((info) => failures.push(info));
+        mockFetch((_url, opts) => {
+            replays.push(JSON.parse(opts.body));
+            return Promise.resolve({
+                ok: false,
+                status: 409,
+                json: () => Promise.resolve({
+                    error: 'downstream_knockout_played',
+                    matchId: 'mforce',
+                    blockingMatchId: 'm9',
+                    blockingMatches: [{ id: 'm9', number: 9 }],
+                    displaced: 'Aoki Taro',
+                    qualifierChange: [{ pool: 'Pool A', rank: 1, place: '1st', from: { name: 'Aoki Taro' }, to: { name: 'Bob' } }],
+                }),
+            });
+        });
+        window.dispatchEvent(new Event('online'));
+        await tick(50);
+        unsubFail();
+        warnSpy.mockRestore();
+
+        expect(replays.length).toBeGreaterThanOrEqual(1);
+        for (const body of replays) expect(body).not.toHaveProperty('forceDownstreamReopen');
+        expect(API.hasPendingTerminalWrite('c1', 'mforce')).toBe(false);
+        expect(failures[0].reason).toContain('Match 9');
+    });
+
+    // The enqueue strip cannot reach an entry that was queued before it
+    // existed: an older bundle wrote the confirmation into localStorage, and
+    // this bundle rehydrates that entry verbatim. The flush loop is the one
+    // door every replay goes through, so it must strip it too.
+    it('a rehydrated entry that still holds the confirmation replays without it', async () => {
+        const stale = [['c1:mold', {
+            compID: 'c1', matchID: 'mold',
+            payload: { status: 'completed', winner: 'A', forceDownstreamReopen: true },
+            password: 'pw', kind: 'score', terminal: true, method: 'PUT',
+            url: '/api/competitions/c1/matches/mold/score', enqueuedAt: Date.now(),
+        }]];
+        localStorage.setItem('bc_write_queue', JSON.stringify(stale));
+        const replays = [];
+        mockFetch((url, opts) => {
+            if (String(url).includes('/matches/mold/')) replays.push(JSON.parse(opts.body));
+            return Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve({}) });
+        });
+        vi.resetModules();
+        const m = await import('../api_client.jsx');
+        await tick(50);
+        expect(replays.length).toBeGreaterThanOrEqual(1);
+        for (const body of replays) {
+            expect(body).not.toHaveProperty('forceDownstreamReopen');
+            expect(body.winner).toBe('A');
+        }
+        expect(m.API.hasPendingTerminalWrite('c1', 'mold')).toBe(false);
+    });
+
+    it('a replay meeting a knockout match being fought is dropped with the operator copy, not the token', async () => {
+        const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+        mockFetch(() => Promise.reject(new TypeError('offline')));
+        await API.recordScore('c1', 'mrun', { status: 'completed', winner: 'A' }, 'pw', null);
+        expect(API.hasPendingTerminalWrite('c1', 'mrun')).toBe(true);
+
+        const failures = [];
+        const unsubFail = mod.subscribeTerminalWriteFailed((info) => failures.push(info));
+        mockFetch(() => Promise.resolve({
+            ok: false,
+            status: 409,
+            json: () => Promise.resolve({
+                error: 'downstream_knockout_running',
+                matchId: 'mrun',
+                runningMatches: [{ id: 'm-r1-0', number: 9 }],
+                message: 'Match 9 is being fought now. Finish it or send it back to the queue, then save again.',
+            }),
+        }));
+        window.dispatchEvent(new Event('online'));
+        await tick(50);
+        unsubFail();
+        warnSpy.mockRestore();
+
+        expect(API.hasPendingTerminalWrite('c1', 'mrun')).toBe(false);
+        expect(failures[0].reason).toBe('Match 9 is being fought now');
+        expect(failures[0].advice).toBe('Finish it or send it back to the queue, then enter this result again.');
     });
 });

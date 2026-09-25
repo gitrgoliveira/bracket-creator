@@ -794,7 +794,7 @@ func TestApplyPoolWrite_RestorePolicyIgnoresWinnerIDMismatch(t *testing.T) {
 		Winner: "Alice", WinnerID: "some-stale-id", Status: state.MatchStatusCompleted,
 	}
 
-	mismatch, superseded, err := applyPoolWrite(stored, prior, matchWriteRestore)
+	mismatch, superseded, _, err := applyPoolWrite(stored, prior, matchWriteRestore)
 	require.NoError(t, err, "a restore must never be rejected by the forward-only WinnerID check")
 	assert.False(t, mismatch)
 	assert.False(t, superseded)
@@ -813,7 +813,7 @@ func TestApplyPoolWrite_ForwardPolicyStillRejectsWinnerIDMismatch(t *testing.T) 
 		ID: "Pool A-0", SideA: "Alice", SideB: "Bob", SideAID: "id-alice", SideBID: "id-bob",
 		Winner: "Alice", WinnerID: "not-a-side-id", Status: state.MatchStatusCompleted,
 	}
-	_, _, err := applyPoolWrite(stored, forward, matchWriteForward)
+	_, _, _, err := applyPoolWrite(stored, forward, matchWriteForward)
 	require.Error(t, err, "a client forward write naming an unattributable winnerId must still be rejected")
 }
 

@@ -896,3 +896,67 @@ func TestClearTeamMemberName_LeavesTheSquadUntouchedWhenTheLineupHalfFails(t *te
 		}
 	}
 }
+
+// bc-tmfn: a roster replace that drops a team must prune that team's
+// team-members.yaml entry, not leave it to accumulate under an id no
+// surviving roster row carries. A team that STAYS (same id, whether
+// unchanged or re-submitted by a caller that preserves identity) must keep
+// its members untouched.
+func TestSaveParticipants_PrunesOrphanedTeamMembers(t *testing.T) {
+	s, id, teamA, teamB := newSquadTestStore(t)
+
+	squadsBefore, err := s.LoadSquads(id)
+	require.NoError(t, err)
+	require.NotEmpty(t, squadsBefore[teamA], "team A must have been seeded on the first save")
+	require.NotEmpty(t, squadsBefore[teamB], "team B must have been seeded on the first save")
+
+	// Replace the roster, dropping team B and keeping team A under its SAME
+	// id -- a real caller preserving identity, exactly like the batch
+	// POST /participants handler's id carry-forward or the PUT roster
+	// path's client-side minting.
+	require.NoError(t, s.SaveParticipants(id, []domain.Player{
+		{ID: teamA, Name: "Tora", Dojo: "Tora Dojo"},
+	}))
+
+	squadsAfter, err := s.LoadSquads(id)
+	require.NoError(t, err)
+	assert.Equal(t, squadsBefore[teamA], squadsAfter[teamA], "team A's members must be untouched")
+	_, stillPresent := squadsAfter[teamB]
+	assert.False(t, stillPresent, "team B's key must be pruned, not merely emptied, once it leaves the roster")
+}
+
+// bc-tmfn follow-up: once a draw exists, a fought bout can resolve a team
+// member by id (the Excel export and bout-log resolution both do), and the
+// roster stays editable after the start by ruling (bc-pnum ruling 1: a
+// clean Apply on a started competition is expected to succeed) -- so a
+// roster replace on a STARTED competition must NOT prune a removed team's
+// team-members.yaml entry, even though that team is no longer on the
+// roster. Only a competition still in setup (no draw yet) is safe to prune.
+func TestSaveParticipants_DoesNotPruneTeamMembersOnceStarted(t *testing.T) {
+	s, id, teamA, teamB := newSquadTestStore(t)
+
+	squadsBefore, err := s.LoadSquads(id)
+	require.NoError(t, err)
+	require.NotEmpty(t, squadsBefore[teamA], "team A must have been seeded on the first save")
+	require.NotEmpty(t, squadsBefore[teamB], "team B must have been seeded on the first save")
+
+	// Move the competition past setup, as a generated draw and a started
+	// competition would (e.g. pools).
+	comp, err := s.LoadCompetition(id)
+	require.NoError(t, err)
+	comp.Status = CompStatusPools
+	require.NoError(t, s.SaveCompetition(comp))
+
+	// Replace the roster, dropping team B and keeping team A under its SAME
+	// id -- exactly the "clean Apply" bc-pnum ruling 1 keeps open after the
+	// start.
+	require.NoError(t, s.SaveParticipants(id, []domain.Player{
+		{ID: teamA, Name: "Tora", Dojo: "Tora Dojo"},
+	}))
+
+	squadsAfter, err := s.LoadSquads(id)
+	require.NoError(t, err)
+	assert.Equal(t, squadsBefore[teamA], squadsAfter[teamA], "team A's members must be untouched")
+	assert.Equal(t, squadsBefore[teamB], squadsAfter[teamB],
+		"team B's members must survive once a draw exists: a fought bout may still reference them by id, so the prune must not run")
+}

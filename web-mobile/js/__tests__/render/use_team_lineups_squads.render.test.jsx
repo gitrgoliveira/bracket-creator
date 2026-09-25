@@ -48,3 +48,17 @@ describe('useTeamLineups follows a changed squads map (bc-dnst)', () => {
     expect(latest.squadA.map(m => m.name)).toEqual(['Sato']);
   });
 });
+
+// A pool match stores Round -1 ("no round"). A board handed the stored
+// match (no roundIndex) must read it as round 0, as resolveRoundIndex does:
+// the server refuses a negative round with a 400.
+describe('useTeamLineups reads a pool match stored Round -1 as round 0', () => {
+  it('never asks the server for round -1', async () => {
+    const POOL_MATCH = { ...MATCH, round: -1 };
+    function PoolProbe() { useTeamLineups(POOL_MATCH, COMP('Sato')); return null; }
+    await act(async () => { render(<PoolProbe />); });
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+    expect(window.API.fetchTeamLineup).toHaveBeenCalled();
+    for (const call of window.API.fetchTeamLineup.mock.calls) expect(call[2]).toBe(0);
+  });
+});

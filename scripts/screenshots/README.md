@@ -3,7 +3,7 @@
 Regenerates every screenshot and video the documentation embeds, by driving the
 real application in a browser.
 
-    make docs/screenshots                        # the 30 application screenshots
+    make docs/screenshots                        # the 31 application screenshots
     make docs/videos                             # the 3 application videos
     make docs/media                              # both
 
@@ -15,7 +15,7 @@ real application in a browser.
 
 Screenshots and videos are split because you rarely want both at once. Neither
 is especially slow: measured on one machine, the three videos take about 60
-seconds and the 30 screenshots about 175. A video is recorded in real time and
+seconds and the screenshots about 175 (measured when there were 30). A video is recorded in real time and
 paced for a human to follow, so it is the more expensive of the two per clip,
 but there are only three of them.
 
@@ -186,7 +186,7 @@ both are load-bearing: Chromium's text rasterisation is pinned at launch
 animations finished and the text caret hidden. They do different jobs:
 
 - The rasteriser flags fix **which** rendering you get, not whether it repeats.
-  Drop them and all 30 captures change, because the committed images are this
+  Drop them and every capture changes, because the committed images are this
   configuration's output. Run-to-run drift without them is one capture at one
   grey level, so they are not what makes a run reproduce.
 - The caret and animation settings are what makes a run reproduce. Turn them

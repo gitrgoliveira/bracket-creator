@@ -547,6 +547,74 @@ func TestBatchPostPureRemovalDropsOrphanedSeed(t *testing.T) {
 	assert.Equal(t, 3, byName["Ghost Competitor"].SeedRank)
 }
 
+// bc-tmfn: the batch POST replace carries no id in its wire DTO, so a
+// surviving row must have its id resolved by (name, dojo) against the
+// existing roster -- the same match the handler already computes for
+// CheckedIn -- rather than left to state.saveParticipantsNoLock's mint-if-
+// missing fallback, which would hand EVERY row a fresh id on every replace.
+// For a team competition that identity IS what team-members.yaml is keyed
+// on, so losing it on a replace that keeps the team orphans its members; a
+// team dropped from the roster must have its members pruned instead of
+// accumulating forever.
+func TestBatchPostKeepsSurvivingTeamIDAndPrunesRemovedTeamMembers(t *testing.T) {
+	r, store, _, _, tempDir := setupTestRouter(t)
+	defer os.RemoveAll(tempDir)
+
+	compID := "comp-batch-team-id-carry"
+	require.NoError(t, store.SaveCompetition(&state.Competition{
+		ID:       compID,
+		Name:     "Batch Team ID Carry Test",
+		Kind:     "team",
+		TeamSize: 3,
+		Status:   state.CompStatusSetup,
+	}))
+	require.NoError(t, store.SaveParticipants(compID, []domain.Player{
+		{Name: "Tora A", Dojo: "Tora Dojo"},
+		{Name: "Retsu B", Dojo: "Retsu Dojo"},
+	}))
+
+	before := mustLoad(t, store, compID)
+	require.Len(t, before, 2)
+	var toraID, retsuID string
+	for _, p := range before {
+		switch p.Name {
+		case "Tora A":
+			toraID = p.ID
+		case "Retsu B":
+			retsuID = p.ID
+		}
+	}
+	require.NotEmpty(t, toraID)
+	require.NotEmpty(t, retsuID)
+
+	squadsBefore, err := store.LoadSquads(compID)
+	require.NoError(t, err)
+	require.NotEmpty(t, squadsBefore[toraID], "Tora A must have been seeded team members")
+	require.NotEmpty(t, squadsBefore[retsuID], "Retsu B must have been seeded team members")
+
+	// Replace the roster keeping only Tora A, under the wire DTO's shape,
+	// which carries no id field at all.
+	body, _ := json.Marshal(map[string]any{"players": []map[string]string{
+		{"name": "Tora A", "dojo": "Tora Dojo"},
+	}})
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("POST", "/api/competitions/"+compID+"/participants", bytes.NewBuffer(body))
+	req.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(w, req)
+	require.Equal(t, http.StatusOK, w.Code, "body: %s", w.Body.String())
+
+	var saved []domain.Player
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &saved))
+	require.Len(t, saved, 1)
+	assert.Equal(t, toraID, saved[0].ID, "a surviving (name, dojo) match must keep its existing id, not mint a fresh one")
+
+	squadsAfter, err := store.LoadSquads(compID)
+	require.NoError(t, err)
+	assert.Equal(t, squadsBefore[toraID], squadsAfter[toraID], "Tora A's team members must be untouched")
+	_, retsuStillPresent := squadsAfter[retsuID]
+	assert.False(t, retsuStillPresent, "Retsu B's team members must be pruned once the team leaves the roster")
+}
+
 // TestBatchPostPreservingSeedIdentityAccepted is the companion case: a bulk
 // replace that leaves every seeded participant's (name, dojo) untouched must
 // still succeed, even though other, unseeded rows in the same batch change.

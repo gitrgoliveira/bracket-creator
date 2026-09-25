@@ -142,11 +142,8 @@ func TestStructuralRulesHoldAtEverySeedCount(t *testing.T) {
 
 						// Rounds must partition the matches: a draw of n
 						// entrants plays n-1, and every one must classify
-						// into exactly one round. This is the guard on
-						// Node.risen's virtual depth -- a risen match whose
-						// virtual level exceeded the tree depth would fall
-						// out of every round and silently vanish from the
-						// sheet.
+						// into exactly one round, or it silently vanishes
+						// from the sheet.
 						totalMatches := 0
 						for _, r := range BuildEliminationMatchRounds(draw.Root) {
 							totalMatches += len(r)

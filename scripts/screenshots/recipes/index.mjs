@@ -15,6 +15,7 @@ import * as publicViews from './public.mjs';
 import * as videos from './videos.mjs';
 import * as editors from './editors.mjs';
 import * as scored from './scored.mjs';
+import * as knockout from './knockout.mjs';
 
 // Each module paired with its file name, because a module cannot name its own
 // file and the SINCE scoping (lib/scope.mjs) needs to know which recipe files
@@ -28,6 +29,7 @@ const groups = [
   [videos, 'videos.mjs'],
   [editors, 'editors.mjs'],
   [scored, 'scored.mjs'],
+  [knockout, 'knockout.mjs'],
 ];
 
 // family -> Set of repo-relative recipe file paths that touch it.

@@ -189,6 +189,44 @@ func (s *Store) saveTeamLineupsLocked(compID string, lineups map[string]domain.T
 	return nil
 }
 
+// pruneOrphanedTeamLineupsLocked drops lineups.yaml entries for teams no
+// longer present in keepIDs, the lineup sibling of
+// pruneOrphanedTeamMembersLocked in squad.go (bc-tmfn): same trigger (a
+// roster write that already landed), same Kind/TeamSize gate, same
+// best-effort contract (a failure here is logged by the caller, not
+// propagated). Only writes when an entry was actually dropped.
+func (s *Store) pruneOrphanedTeamLineupsLocked(compID string, comp *Competition, keepIDs map[string]bool) error {
+	if comp == nil || (comp.Kind != "team" && comp.TeamSize == 0) {
+		return nil
+	}
+	// Same setup-only scope as pruneOrphanedTeamMembersLocked (squad.go),
+	// and for the same reason: once a draw exists a fought bout can resolve
+	// a lineup position by member id, and the roster stays editable after
+	// the start by ruling (bc-pnum ruling 1), so pruning past this point
+	// would silently delete data a match still references.
+	if !CanGenerateDraw(comp.Status) {
+		return nil
+	}
+	lineups, err := s.loadTeamLineupsLocked(compID)
+	if err != nil {
+		return err
+	}
+	if len(lineups) == 0 {
+		return nil
+	}
+	changed := false
+	for key, l := range lineups {
+		if !keepIDs[l.TeamID] {
+			delete(lineups, key)
+			changed = true
+		}
+	}
+	if !changed {
+		return nil
+	}
+	return s.saveTeamLineupsLocked(compID, lineups, s.directWrite)
+}
+
 // SetTeamLineup validates and persists a lineup, replacing any prior
 // entry for the same (teamID, round). The caller MUST pass the
 // competition's team size so ValidatePositions can check that the

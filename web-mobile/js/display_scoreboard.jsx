@@ -7,8 +7,9 @@
 import { findRunningOnCourt, findUpcomingOnCourt, countCourtMatches, sideLabelParts, phaseLabel, poolNameOf, isSupplementaryBout, phaseProgressOnCourt, bracketRoundSiblings, StreamingQR } from './display_helpers.jsx';
 import { NumberedName } from './numbered_name.jsx';
 import { teamMatchTypeFor, DAIHYOSEN_POSITION } from './pool_ids.jsx';
-import { TeamScoreboard, IndividualScore, useTeamLineups, teamIVPW, teamIVPWFrom } from './match_scoreboard.jsx';
-import { realIppons } from './result_slot.jsx';
+import { TeamScoreboard, IndividualScore, useTeamLineups, teamIVPWFrom, teamNameMark } from './match_scoreboard.jsx';
+import { isBarredMatch } from './ineligible_match.jsx';
+import { subBoutHasResult } from './team_default_credit.jsx';
 
 const { useMemo: useMD } = React;
 
@@ -108,7 +109,30 @@ function TvWhiteBoard({ tournament, court, linkState = 'connected', promoted, is
     // one computation, never two chances to disagree.
     const matchSideA = promoted.match.sideA?.name || (typeof promoted.match.sideA === "string" ? promoted.match.sideA : "");
     const matchSideB = promoted.match.sideB?.name || (typeof promoted.match.sideB === "string" ? promoted.match.sideB : "");
-    const { ivShiro, ivAka, pwShiro, pwAka } = teamIVPWFrom(promoted.match?.teamResult, subResults, matchSideA, matchSideB);
+    const isKachinuki = teamMatchTypeFor(promoted.competition) === "kachinuki";
+    // bc-tmfn: the match-level default-win credit context, threaded into
+    // BOTH the headline's own teamIVPWFrom call and TeamScoreboard below (see
+    // team_default_credit.jsx for the whole rule). Every field is OPTIONAL on
+    // TeamScoreboard/teamIVPWFrom, so this is a no-op wherever the ruling is
+    // not in force.
+    const matchCtx = { status: promoted.match?.status, decision: promoted.match?.decision, decisionBy: promoted.match?.decisionBy, kachinuki: isKachinuki };
+    const { ivShiro, ivAka, pwShiro, pwAka } = teamIVPWFrom(promoted.match?.teamResult, subResults, matchSideA, matchSideB, matchCtx);
+    // bc-tmfn: the match-level Kiken/Fus. mark for a team a default-win
+    // decision withdrew/barred, placed beside the headline name -- the SAME
+    // pattern MatchCard (bracket.jsx) uses (sameCompetitor + sideMarks +
+    // placeMarks). bc-cse: reached through the ONE shared composition of
+    // that pattern, window.teamMatchMarks (bracket.jsx), rather than
+    // re-derived inline here -- this board reaches bracket.jsx's primitives
+    // through window globals like every other viewer/display module (see
+    // result_slot.jsx's header). isTeamMatch is this board's OWN team-match
+    // signal (competition format), passed through as the override
+    // teamMatchMarks accepts. Computed ONCE here and threaded into
+    // TeamScoreboard too, so the headline and the (suppressed, on this
+    // variant) summary row can never disagree about which side carries the
+    // mark.
+    const { shiro: teamShiroMark, aka: teamAkaMark } = window.teamMatchMarks
+        ? window.teamMatchMarks(promoted.match, isTeamMatch)
+        : { shiro: "", aka: "" };
     // NO middle mark here (operator ruling): the FIK row centre rendered by the
     // shared scoreboard below is the mark's ONE home, and this header chip
     // duplicating X/(E)/(DH) ~10cm above it was an error; the plain "vs" stays.
@@ -175,7 +199,13 @@ function TvWhiteBoard({ tournament, court, linkState = 'connected', promoted, is
                     here: this is a projector/OBS surface with no screen-reader
                     audience, unlike the operator consoles that did take one. */}
                 <div style={{ minWidth: 0 }}>
-                    <div style={{ fontSize: "5vh", fontWeight: 800, color: "var(--ink-1)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{repShiro || <NumberedName side="shiro" clip {...shiroTeamParts} />}</div>
+                    {/* bc-cse: msb-name--labelled -- see viewer_match.jsx's
+                        VSchedItem comment for why a mark riding beside a
+                        clip-mode name needs its own flex row: without it a
+                        long team name clips the Kiken/Fus. mark off the end.
+                        No-op (harmless) when repShiro renders instead, since
+                        that branch carries no mark at all. */}
+                    <div className="msb-name--labelled" style={{ fontSize: "5vh", fontWeight: 800, color: "var(--ink-1)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{repShiro || teamNameMark("shiro", teamShiroMark, <NumberedName side="shiro" clip {...shiroTeamParts} />)}</div>
                     {repShiro && <div data-testid="rep-shiro-team" style={{ fontSize: "2.4vh", fontWeight: 600, color: "var(--ink-3)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}><NumberedName side="shiro" clip {...shiroTeamParts} /></div>}
                     {isTeamMatch && (
                         <div data-testid="headline-ivpw-shiro" style={{ display: "flex", gap: "1.4vw", fontSize: "2vh", fontWeight: 700, color: "var(--ink-1)", marginTop: "0.6vh" }}>
@@ -186,7 +216,11 @@ function TvWhiteBoard({ tournament, court, linkState = 'connected', promoted, is
                 </div>
                 <div style={{ display: "flex", justifyContent: "center" }}>{nameCentre}</div>
                 <div style={{ minWidth: 0, textAlign: "right" }}>
-                    <div style={{ fontSize: "5vh", fontWeight: 800, color: "var(--red)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{repAka || <NumberedName side="aka" clip {...akaTeamParts} />}</div>
+                    {/* bc-cse: msb-name--labelled + msb-name--aka (flex row,
+                        justify-content flex-end so it still reads to the
+                        right once .name-labelled overrides the parent's
+                        textAlign, which no longer reaches a flex child). */}
+                    <div className="msb-name--labelled msb-name--aka" style={{ fontSize: "5vh", fontWeight: 800, color: "var(--red)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{repAka || teamNameMark("aka", teamAkaMark, <NumberedName side="aka" clip {...akaTeamParts} />)}</div>
                     {repAka && <div data-testid="rep-aka-team" style={{ fontSize: "2.4vh", fontWeight: 600, color: "var(--ink-3)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}><NumberedName side="aka" clip {...akaTeamParts} /></div>}
                     {isTeamMatch && (
                         <div data-testid="headline-ivpw-aka" style={{ display: "flex", gap: "1.4vw", justifyContent: "flex-end", fontSize: "2vh", fontWeight: 700, color: "var(--red)", marginTop: "0.6vh" }}>
@@ -220,7 +254,9 @@ function TvWhiteBoard({ tournament, court, linkState = 'connected', promoted, is
                         matchSideA={matchSideA} matchSideB={matchSideB}
                         squadA={squadA} squadB={squadB}
                         numberA={promoted.match.sideA?.number || ""} numberB={promoted.match.sideB?.number || ""}
-                        kachinuki={teamMatchTypeFor(promoted.competition) === "kachinuki"} />
+                        kachinuki={isKachinuki}
+                        decision={promoted.match?.decision} decisionBy={promoted.match?.decisionBy} status={promoted.match?.status}
+                        shiroMark={teamShiroMark} akaMark={teamAkaMark} />
                 </div>
             ) : (
                 <div style={{ flex: 1, display: "flex", alignItems: "flex-start", justifyContent: "center", paddingTop: "2vh" }}>
@@ -368,6 +404,10 @@ function findNextPoolOnCourt(competition, currentPoolName, court) {
     const zekken = !!competition.withZekkenName;
     const bouts = competition.poolMatches
         .filter(m => poolNameOf(m.id) === nextName)
+        // A barred bout (ineligible_match.jsx) cannot be fought as scheduled,
+        // so it is not a real "up next" bout for this strip: same picker rule
+        // as findUpcomingOnCourt.
+        .filter(m => !isBarredMatch(m))
         .sort(compareByRunOrder)
         .map(m => ({
             id: m.id,
@@ -518,7 +558,7 @@ function TvIndividualBoard({ tournament, court, linkState = 'connected', promote
                                 background: isNow ? "var(--accent-soft)" : isDone ? "#f9fafb" : "transparent",
                                 opacity: isNow ? 1 : isDone ? 0.88 : 0.78,
                             }}>
-                            <IndividualScore match={m} variant="tv" showNames withZekkenName={zekken} />
+                            <IndividualScore match={m} variant="tv" showNames withZekkenName={zekken} showBarredChip />
                         </div>
                     );
                 })}
@@ -678,45 +718,36 @@ function TvDisplay({ court, tournament, competitions, withZekkenName, linkState 
 
     // mp-13y: DH (Daihyosen) row gating: shown when:
     //   1. All regular bouts are complete (every sub has ippons, hantei, or draw).
-    //   2. IV (Individual Victories) are tied.
-    //   3. PW (Points Won) are also tied.
-    //   4. It is a knockout phase (not a pool match).
+    //   2. It is a knockout phase (not a pool match).
+    //   3. IV (Individual Victories) and PW (Points Won) are both tied, which
+    //      TeamScoreboard checks itself (see the end of the memo below).
     // The DH sub-result (position === DAIHYOSEN_POSITION) may or may not exist
     // yet; when absent, TeamScoreboard renders a "Daihyosen pending" placeholder.
     const subResults = (promoted && promoted.match && promoted.match.subResults) || [];
     const isKnockoutPhase = !!(promoted && promoted.isBracket) ||
         !!(promoted && promoted.match && promoted.match.phase === "bracket");
-    // Extract stable string primitives from promoted.match.sideA/B so the
-    // useMemo below can dep on values rather than the promoted object literal
-    // (which is recreated on every render, defeating memoisation).
-    const promotedSideA = promoted?.match?.sideA?.name || (typeof promoted?.match?.sideA === "string" ? promoted.match.sideA : "");
-    const promotedSideB = promoted?.match?.sideB?.name || (typeof promoted?.match?.sideB === "string" ? promoted.match.sideB : "");
     const showDH = useMD(() => {
         if (!isTeamMatch || !isKnockoutPhase) return false;
         const regularSubs = subResults.filter(s => s.position > DAIHYOSEN_POSITION);
         if (regularSubs.length === 0) return false;
-        const allDone = regularSubs.every(s => {
-            const aIp = realIppons(s.ipponsA);
-            const bIp = realIppons(s.ipponsB);
-            // Mirror the shared scoreboard's "scored" test: a bout can also be
-            // decided with no ippon letters: fusensho/kiken (winner + decision),
-            // a hansoku award, or an explicit winner. Without these, a tied
-            // knockout closed by forfeit would never satisfy allDone and the
-            // Daihyosen row would be suppressed forever.
-            return aIp.length > 0 || bIp.length > 0 || s.decidedByHantei ||
-                !!s.winner || (typeof s.decision === "string" && s.decision !== "") ||
-                s.hansokuA > 0 || s.hansokuB > 0 ||
-                (typeof window.isHikiwake === "function" &&
-                    (window.isHikiwake(s.score?.type) || window.isHikiwake(s.decision)));
-        });
-        if (!allDone) return false;
-        // The match is tied (→ show DH) when IV and PW are level per side.
-        // teamIVPW already prefers an explicit `sub.winner` (which the server
-        // guarantees equals sideA/sideB), so a hantei-decided 0-0 bout is
-        // counted as an IV for its winner there: no extra hantei loop needed.
-        const { ivShiro, ivAka, pwShiro, pwAka } = teamIVPW(subResults, promotedSideA, promotedSideB);
-        return ivShiro === ivAka && pwShiro === pwAka;
-    }, [subResults, isTeamMatch, isKnockoutPhase, promotedSideA, promotedSideB]);
+        // bc-cse: subBoutHasResult (team_default_credit.jsx) is THE wire-level
+        // "has a result" test -- a winner, a decision, a struck point, the
+        // hantei mark, a hansoku award, or an overtime -- exactly what this
+        // used to hand-roll here. Without one of those, a tied knockout closed
+        // by forfeit would never satisfy allDone and the Daihyosen row would
+        // be suppressed forever. The isHikiwake(score.type) arm is the one
+        // legacy/client-only branch it does not cover (a bare quick-score
+        // synth shape), same as TeamScoreboard's isScored (match_scoreboard.jsx)
+        // this mirrors.
+        const allDone = regularSubs.every(s => subBoutHasResult(s) ||
+            (typeof window.isHikiwake === "function" && window.isHikiwake(s.score?.type)));
+        // Whether the encounter is TIED is not asked here: TeamScoreboard
+        // gates the row on showDH && its own tie test, which reads the
+        // server's teamResult first (teamIVPWFrom), exactly as the viewer
+        // card does. A second tie test here from the bout rows alone could
+        // only disagree with that one and hide a row the card shows.
+        return allDone;
+    }, [subResults, isTeamMatch, isKnockoutPhase]);
 
     // White scoreboard for any promoted match.
     // Team → TvWhiteBoard (IV/PW summary + bout grid). Individual → grouped

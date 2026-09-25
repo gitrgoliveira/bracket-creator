@@ -997,6 +997,20 @@ func CanGenerateDraw(status CompetitionStatus) bool {
 	return status == CompStatusSetup || status == ""
 }
 
+// AcceptsPoolRankOverride reports whether a competition's pool order may be
+// set by hand (a chusen, recorded as a pool-rank override): in its pools
+// stage, and, for a pools + knockout competition, after the knockout has
+// started as well. A pool result corrected then can leave a qualifying tie
+// that the daihyosen cannot settle, and a chusen recorded by mistake has to
+// stay fixable (operator ruling: "Everything should be able to be fixed, in
+// case of a wrong entry"); what the new order does to the knockout is
+// answered by engine.OverridePoolRanks' requalification. The one statement of
+// this rule, shared by the override-rank door and engine.ChusenStatus, so
+// the chusen panel is never offered a tie the door would refuse.
+func (c Competition) AcceptsPoolRankOverride() bool {
+	return c.Status == CompStatusPools || (c.Format == CompFormatMixed && c.Status == CompStatusKnockout)
+}
+
 type MatchStatus string
 
 const (
@@ -1194,6 +1208,23 @@ func (s *SubMatchResult) HanteiDecided() bool {
 	return domain.ContainsHantei(s.IpponsA) || domain.ContainsHantei(s.IpponsB)
 }
 
+// HasResult reports whether this bout carries a result: a winner, a decision
+// (a Tie is "hikiwake", a default win "fusensho"), a struck point or the
+// hantei mark on either side, a foul, or an overtime. A row with none of
+// those was never fought. It is the Go twin of subBoutHasBeenPlayed
+// (web-mobile/js/admin_scoring_team.jsx), and the finish gate for a team
+// match (every bout is fought, operator ruling 2026-09-24) asks it of each
+// numbered bout. Placeholder and empty cells are not points, the same rule
+// CountScoringIppons applies everywhere else, so a row of unfilled slots
+// reads as unfought exactly as it does in the editor.
+func (s *SubMatchResult) HasResult() bool {
+	return s.Winner != "" || s.Decision != "" ||
+		domain.CountScoringIppons(s.IpponsA) > 0 || domain.CountScoringIppons(s.IpponsB) > 0 ||
+		s.HanteiDecided() ||
+		s.HansokuA > 0 || s.HansokuB > 0 ||
+		s.Encho.On()
+}
+
 // Attribution reads this row's six identity fields into the shape every
 // "which side won" owner takes (domain.AttributeWinnerSide, and
 // domain.SubBoutAttribution for the sub-bout rule). It exists so that no
@@ -1266,6 +1297,21 @@ func (s *SubMatchResult) ResolveMemberWinnerID() bool {
 		}
 	}
 	return false
+}
+
+// IneligibleSidesAnnotation names which side(s) of a SCHEDULED match are
+// currently barred by a withdrawal recorded on a DIFFERENT match (bc-cse).
+// Both fields are optional and independent: either, both, or neither may be
+// set. The value is the barring status's decision string (domain.Decision,
+// e.g. "kiken-voluntary"), never the reason sentence -- a client that wants
+// prose reads the 409 a write attempt against this match would get
+// (reasonHumanForBarredCompetitor, mobileapp/errors.go); this annotation
+// exists so a match LIST can grey the row without attempting the write
+// first. See MatchResult.IneligibleSides / BracketMatch.IneligibleSides for
+// how it is stamped and kept off disk.
+type IneligibleSidesAnnotation struct {
+	A string `json:"a,omitempty"`
+	B string `json:"b,omitempty"`
 }
 
 type MatchResult struct {
@@ -1344,6 +1390,17 @@ type MatchResult struct {
 	SubResultsUnreadable bool           `json:"subResultsUnreadable,omitempty" yaml:"-"`
 	Encho                *EnchoMetadata `json:"encho,omitempty" yaml:"encho,omitempty"`
 	QueuePosition        int            `json:"queuePosition,omitempty" yaml:"-"`
+	// IneligibleSides is a READ-ONLY, request-time annotation (bc-cse),
+	// exactly like QueuePosition above: stamped only on the copy a viewer
+	// endpoint serves (mobileapp.annotateIneligibleSides), never on an
+	// object bound for a write, so it never reaches pool-matches.csv (no
+	// entry in poolMatchColumns, pools.go) the same way QueuePosition does
+	// not. Non-nil only for a SCHEDULED match whose stamped SideAID/SideBID
+	// are currently barred (engine.BarredSides) by a withdrawal recorded on
+	// a DIFFERENT match, so the SPA can grey the row / skip it in "next up"
+	// without a second round trip. Omitted on the wire entirely when
+	// neither side is barred.
+	IneligibleSides *IneligibleSidesAnnotation `json:"ineligibleSides,omitempty" yaml:"-"`
 	// DecidedByHantei is a LEGACY READ-ONLY channel, exactly as on
 	// SubMatchResult (see there and legacy_hantei.go): the verdict is the
 	// domain.HanteiMark entry in the winner's IpponsA/IpponsB. A hantei on a
@@ -1380,14 +1437,15 @@ type MatchResult struct {
 	// columns absent load as 0. Bracket matches persist fine via bracket.json.
 	FlagsA int `json:"flagsA,omitempty" yaml:"flags_a,omitempty"`
 	FlagsB int `json:"flagsB,omitempty" yaml:"flags_b,omitempty"`
-	// ReopenPending marks a kachinuki match that was reopened WITHOUT an audit
-	// reason and therefore still owes one (mp-gmcg). Reopening is one tap so an
-	// operator who ended a match by mistake can get straight back in; the
-	// justification is collected on the NEXT completion instead, folded into a
-	// step they were already taking. The score path refuses to complete a
-	// flagged match without a correctionReason and clears the flag once one
-	// lands, so the audit record is written later than the action it justifies
-	// but is never lost.
+	// ReopenPending marks a match that was reopened (engine.ReopenMatch: a
+	// kachinuki match, or one a withdrawal decided) WITHOUT an audit reason
+	// and not yet ended again. Nothing is refused for it: a match can be
+	// reopened without any reason, and ending it again works like ending any
+	// match (operator ruling 2026-09-25, which retired mp-gmcg's rule that the
+	// next completion must carry a reason). What it still does: a reason the
+	// ending write does carry is kept as the correction reason, since that
+	// completion replaces a result the reopen discarded, and the ending write
+	// clears it.
 	//
 	// SERVER-OWNED. MatchResult binds straight from the score request body, so
 	// a client could otherwise plant or clear the flag; the handler overwrites
@@ -1471,6 +1529,20 @@ func (m *MatchResult) MissingSideOrWinnerID() bool {
 		(m.Winner != "" && m.WinnerID == "")
 }
 
+// Attribution reads this match's six identity fields into the shape every
+// "which side won" owner takes (domain.AttributeWinnerSide), mirroring
+// SubMatchResult.Attribution above. It exists so a caller never hand-builds
+// the domain.WinnerAttribution literal at each call site: all six fields
+// are the same type and mutually assignable, so a transposed pair compiles
+// clean and silently marks the wrong competitor (the same hazard
+// WinnerAttribution's own doc comment names).
+func (m *MatchResult) Attribution() domain.WinnerAttribution {
+	return domain.WinnerAttribution{
+		Winner: m.Winner, SideA: m.SideA, SideB: m.SideB,
+		WinnerID: m.WinnerID, SideAID: m.SideAID, SideBID: m.SideBID,
+	}
+}
+
 // EnchoMetadata records overtime / sudden-death periods played in a
 // match. Read/persisted only in Slice 1; the score endpoint accepts it
 // but does not yet act on it. Slice 3 (T076) will wire it into the
@@ -1550,7 +1622,10 @@ type PlayerStanding struct {
 	IndividualDraws  int           `json:"individualDraws,omitempty"`
 	PointsWon        int           `json:"pointsWon,omitempty"`
 	PointsLost       int           `json:"pointsLost,omitempty"`
-	Tied             bool          `json:"tied,omitempty"`
+	// Tied marks a row in a tie still to be broken (the amber standings
+	// row): equal Points, and not yet settled by a recorded chusen or by its
+	// supplementary bouts (engine.markTiedStandings).
+	Tied bool `json:"tied,omitempty"`
 	// Flags is the total accumulated own-side referee flags for engi (kata
 	// demonstration) standings. A dedicated field, NOT an overload of
 	// IpponsGiven, so the wire stays self-describing (wins vs flags as distinct
@@ -1611,10 +1686,21 @@ type BracketMatch struct {
 	HansokuB      int      `json:"hansokuB,omitempty"`
 	IsOverridden  bool     `json:"isOverridden"`
 	QueuePosition int      `json:"queuePosition,omitempty"`
+	// IneligibleSides mirrors MatchResult.IneligibleSides for a bracket
+	// match (bc-cse): a request-time-only annotation, stamped by
+	// mobileapp.annotateIneligibleSides on the copy a viewer endpoint
+	// serves, never on the object a write persists to bracket.json (the
+	// same discipline QueuePosition above already relies on -- see its own
+	// doc comment on MatchResult for why that is safe without a json:"-"
+	// tag: BracketMatch's own MarshalJSON, below, is a straight struct
+	// marshal, so what keeps a derived field off disk is WHEN it is set,
+	// not a wire/disk type split).
+	IneligibleSides *IneligibleSidesAnnotation `json:"ineligibleSides,omitempty"`
 	// MatchNumber is the sequential bracket match number, matching the
 	// "Match N" label printed on the Excel tree sheet. 0 means unset; for a
 	// BracketMatch that is a hidden/bye placeholder, or a legacy bracket saved
-	// before numbering was assigned.
+	// before numbering was assigned. Stamped together with DisplayRound, by
+	// the one producer DisplayRound's comment below names.
 	MatchNumber int `json:"matchNumber,omitempty"`
 	// Decision-type metadata mirrors MatchResult so an elimination-stage
 	// kiken/fusenpai/encho is reconstructable from bracket.json alone
@@ -1643,9 +1729,9 @@ type BracketMatch struct {
 	// counts survive a restart. Zero for non-engi matches.
 	FlagsA int `json:"flagsA,omitempty"`
 	FlagsB int `json:"flagsB,omitempty"`
-	// ReopenPending mirrors MatchResult.ReopenPending for bracket matches
-	// (mp-gmcg): the match was reopened with no audit reason and still owes
-	// one, so the next completion must carry a correctionReason. Persisted in
+	// ReopenPending mirrors MatchResult.ReopenPending for bracket matches: the
+	// match was reopened with no audit reason and has not been ended again.
+	// Nothing is refused for it (see MatchResult.ReopenPending). Persisted in
 	// bracket.json. Server-owned: the score write deliberately does NOT copy
 	// this field off the client-supplied MatchResult (unlike ResultSource /
 	// CorrectionReason), so only the reopen path and the handler's
@@ -1666,6 +1752,14 @@ type BracketMatch struct {
 	// real bout and must not be drawn as a match card. Feeders holds the IDs of
 	// the two real feeder matches whose winners meet here, in [A, B] order; an
 	// empty string means that side is a seeded entrant / bye (no connector line).
+	// DisplayRound and MatchNumber have ONE producer,
+	// Bracket.StampRoundsFromFeeders (a real match's round is its distance
+	// from the final along Feeders), run when the draw is generated and again
+	// on load (Bracket.RestampRoundsFromFeeders, via Store.EnsureLegacyUpgraded).
+	// The load pass recomputes any stored bracket whose rounds or numbers
+	// differ from that rule: in practice one drawn by v2.0.0 or v2.1.0 (rounds
+	// misclassified) or an older one with byes numbered before the leaf-slot
+	// tie-break (v2.0.0). It changes nothing on one the current generator drew.
 	DisplayRound int      `json:"displayRound,omitempty"`
 	Hidden       bool     `json:"hidden,omitempty"`
 	Feeders      []string `json:"feeders,omitempty"`
@@ -1703,6 +1797,16 @@ type BracketMatch struct {
 	PlaceholderA      string `json:"placeholderA,omitempty"`
 	PlaceholderB      string `json:"placeholderB,omitempty"`
 	PlaceholderWinner string `json:"placeholderWinner,omitempty"`
+}
+
+// Attribution reads this bracket match's six identity fields into the shape
+// every "which side won" owner takes (domain.AttributeWinnerSide), mirroring
+// MatchResult.Attribution above.
+func (m *BracketMatch) Attribution() domain.WinnerAttribution {
+	return domain.WinnerAttribution{
+		Winner: m.Winner, SideA: m.SideA, SideB: m.SideB,
+		WinnerID: m.WinnerID, SideAID: m.SideAID, SideBID: m.SideBID,
+	}
 }
 
 // BronzeMatchID is the id every 3rd-place match carries. It hangs off
@@ -1743,6 +1847,18 @@ type Bracket struct {
 	// this field existed has no draw order and yields NO numbers, by design;
 	// there is no name-based fallback.
 	DrawOrder []string `json:"drawOrder,omitempty"`
+	// TimesSettled records that the load-time repair of old scheduling
+	// (Bracket.RestampRoundsFromFeeders) owes this bracket's times nothing:
+	// the draw that built it scheduled every court in match-number order
+	// (engine.buildBracketFromDraw), or the repair has already run on it
+	// once, handing the times out again or, when play had already started,
+	// leaving them as they were. The repair runs only while it is false, so
+	// a time the operator moves afterwards is never taken back: moving a
+	// match up the court queue only swaps two times, and without this record
+	// the repair could not tell that swap from the old scheduler's storage
+	// order. Absent on a bracket written before it existed, which is exactly
+	// the bracket the repair is for.
+	TimesSettled bool `json:"timesSettled,omitempty"`
 }
 
 type Announcement struct {

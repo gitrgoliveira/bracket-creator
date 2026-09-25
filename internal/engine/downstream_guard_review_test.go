@@ -114,12 +114,32 @@ func TestDownstreamGuard_RefusalNamesNoOneWhenTwoMatchesBlock(t *testing.T) {
 	// The single-blocker message still names them, where it is true.
 	single := &DownstreamKnockoutPlayedError{
 		MatchID:         "m-r1-0",
+		Label:           "Match 1 (Semifinals)",
 		BlockingMatchID: "m-r2-0",
 		Blocking:        []ReopenedMatch{{ID: "m-r2-0", Number: 9}},
 		Displaced:       "Alice",
 	}
 	assert.Contains(t, single.Error(), "Alice")
 	assert.Contains(t, single.Error(), "Match 9")
+}
+
+// TestDownstreamKnockoutPlayedError_ErrorHasNoBareMatchIDFallback pins bc-cse
+// item 14's removal of the bare-MatchID fallback: every production
+// constructor of DownstreamKnockoutPlayedError sets Label
+// (newDownstreamKnockoutPlayedError, answerRequalification), so Error()
+// trusts Label as-is and no longer substitutes the internal MatchID when
+// Label is empty. A raw id ("m-internal-42") reaching the operator would be
+// exactly the leak MatchLabel/OperatorMatchLabel exist to prevent.
+func TestDownstreamKnockoutPlayedError_ErrorHasNoBareMatchIDFallback(t *testing.T) {
+	err := &DownstreamKnockoutPlayedError{
+		MatchID:         "m-internal-42",
+		BlockingMatchID: "m-r2-0",
+		Blocking:        []ReopenedMatch{{ID: "m-r2-0", Number: 9}},
+		Displaced:       "Alice",
+	}
+	msg := err.Error()
+	assert.NotContains(t, msg, "m-internal-42",
+		"an empty Label must not fall back to the raw MatchID")
 }
 
 // TestDownstreamGuard_EngiKnockoutIsGuardedToo closes the last write path.

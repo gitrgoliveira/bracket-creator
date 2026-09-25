@@ -303,6 +303,56 @@ func (s *Store) saveSquadsLocked(compID string, squads map[string][]domain.TeamM
 	return nil
 }
 
+// pruneOrphanedTeamMembersLocked drops team-members.yaml entries for teams
+// no longer present in keepIDs, the ids on the roster the save that calls
+// this just persisted (bc-tmfn). Called from saveParticipantsNoLock, under
+// the same per-competition lock that write already holds, after the
+// participants.csv write has landed.
+//
+// Same Kind/TeamSize gate as upgradeSquadsFromMetadataLocked (an individual
+// competition never has a team-members.yaml worth reading) and the same
+// best-effort contract as saveParticipantsNoLock's caller applies to the
+// analogous seeds-orphan cleanup: a failure here is logged by the caller,
+// not propagated, so a roster write that already succeeded is never rolled
+// back over a squad file that failed to prune. Only writes when an entry was
+// actually dropped, matching saveSquadsLocked's own change-gated write.
+func (s *Store) pruneOrphanedTeamMembersLocked(compID string, comp *Competition, keepIDs map[string]bool) error {
+	if comp == nil || (comp.Kind != "team" && comp.TeamSize == 0) {
+		return nil
+	}
+	// Scoped to a competition still in setup, no draw yet (CanGenerateDraw:
+	// status "setup" or the legacy empty status). Once a draw exists the
+	// roster stays editable after the start by ruling (bc-pnum ruling 1: a
+	// clean Apply on a started competition is expected to succeed), and a
+	// fought bout can resolve a team member by id (the Excel export and
+	// bout-log resolution both do, per resolveKachinukiDisplayName /
+	// resolveBoutSideDisplayName) even after that team leaves the roster.
+	// Pruning past this point would silently delete data a match still
+	// references. Before the draw no match exists, so an entry for a team
+	// no longer on the roster is dead data and pruning it is safe.
+	if !CanGenerateDraw(comp.Status) {
+		return nil
+	}
+	squads, err := s.loadSquadsLocked(compID)
+	if err != nil {
+		return err
+	}
+	if len(squads) == 0 {
+		return nil
+	}
+	changed := false
+	for teamID := range squads {
+		if !keepIDs[teamID] {
+			delete(squads, teamID)
+			changed = true
+		}
+	}
+	if !changed {
+		return nil
+	}
+	return s.saveSquadsLocked(compID, squads, s.directWrite)
+}
+
 // requireTeamParticipantLocked refuses a teamID no participant in this
 // competition carries. Caller MUST hold the per-competition lock.
 //

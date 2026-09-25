@@ -5,7 +5,9 @@
 // by the server via reopenPending). Pin the URL/method/headers, the reasonless
 // body, the verbatim error surfacing the editor relies on (the server's 409s
 // are full sentences the operator reads unchanged), and the blocking-match
-// identity the court-busy remedy is built on.
+// identity the court-busy remedy is built on. Clear withdrawal and reopen
+// (bc-tmfn) adds the optional reason and downstream confirmation, and the
+// structured downstream_knockout_played refusal.
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { API } from '../api_client.jsx';
@@ -26,9 +28,9 @@ describe('API.reopenMatch', () => {
   afterEach(() => { global.fetch = originalFetch; });
 
   it('POSTs a reasonless JSON body with the password header', async () => {
-    global.fetch = mockFetch(200, {});
-    const ok = await API.reopenMatch('c42', 'm-r1-0', 'secret');
-    expect(ok).toBe(true);
+    global.fetch = mockFetch(200, { reopenedMatches: [] });
+    const res = await API.reopenMatch('c42', 'm-r1-0', 'secret');
+    expect(res).toEqual({ reopenedMatches: [] });
     const [url, opts] = global.fetch.mock.calls[0];
     expect(url).toBe('/api/competitions/c42/matches/m-r1-0/reopen');
     expect(opts.method).toBe('POST');
@@ -38,6 +40,57 @@ describe('API.reopenMatch', () => {
     // An empty OBJECT, not an absent body: a handler that binds JSON fails on
     // an absent one. And no `reason`: this call must never demand one.
     expect(JSON.parse(opts.body)).toEqual({});
+  });
+
+  // bc-tmfn: Clear withdrawal and reopen collects its reason before the tap
+  // posts, and a retry after the downstream confirm carries the force flag.
+  it('sends the reason and the downstream confirmation only when given', async () => {
+    global.fetch = mockFetch(200, { reopenedMatches: [{ id: 'm-r2-0', number: 2 }] });
+    const res = await API.reopenMatch('c1', 'm1', 'secret', { reason: 'Withdrawal recorded by mistake', force: true });
+    expect(res.reopenedMatches).toEqual([{ id: 'm-r2-0', number: 2 }]);
+    expect(JSON.parse(global.fetch.mock.calls[0][1].body))
+      .toEqual({ reason: 'Withdrawal recorded by mistake', forceDownstreamReopen: true });
+  });
+
+  it('parses the downstream_knockout_played refusal the way the score path does', async () => {
+    global.fetch = mockFetch(409, {
+      error: 'downstream_knockout_played',
+      matchId: 'm-r1-0',
+      blockingMatchId: 'm-r2-0',
+      blockingMatches: [{ id: 'm-r2-0', number: 2 }],
+      displaced: 'Ryu',
+      message: 'correcting match "m-r1-0" would change the winner ...',
+    });
+    const err = await API.reopenMatch('c1', 'm-r1-0', 'secret').then(
+      () => { throw new Error('expected a rejection'); },
+      (e) => e
+    );
+    // `reopen` marks the refusal as met by a reopen rather than a corrected
+    // result, for the confirm dialog's copy (the way overridePoolRanks marks
+    // `ranking`).
+    expect(err.downstreamKnockoutPlayed).toEqual({
+      matchId: 'm-r1-0',
+      blockingMatchId: 'm-r2-0',
+      blockingMatches: [{ id: 'm-r2-0', number: 2 }],
+      displaced: 'Ryu',
+      qualifierChange: [],
+      reopen: true,
+    });
+  });
+
+  it('marks the refusal from the atomic court-busy remedy as a reopen too', async () => {
+    global.fetch = mockFetch(409, {
+      error: 'downstream_knockout_played',
+      matchId: 'm-r1-0',
+      blockingMatchId: 'm-r2-0',
+      blockingMatches: [{ id: 'm-r2-0', number: 2 }],
+      displaced: 'Ryu',
+    });
+    const err = await API.requeueBlockerAndReopen('c1', 'm-r1-0', 'c1', 'm-r1-1', 'secret').then(
+      () => { throw new Error('expected a rejection'); },
+      (e) => e
+    );
+    expect(err.downstreamKnockoutPlayed.reopen).toBe(true);
   });
 
   it('surfaces the court-busy 409 sentence, not the machine code, and keeps the blocking match', async () => {
@@ -66,6 +119,65 @@ describe('API.reopenMatch', () => {
     expect(err.court).toBe('A');
     expect(err.matchId).toBe('m-r1-1');
     expect(err.compId).toBe('c1');
+  });
+
+  // bc-rawm: the court-busy conflict reuses the score path's structured
+  // payload (see the test above), which now carries `label` too -- the
+  // blocking match's operator name. Carried through onto the thrown Error so
+  // ReopenFeedback (admin_scoring_shared.jsx) can prefer it over its own
+  // best-effort fetched blockerLabel and never fall back to the raw matchId.
+  it('carries the server label onto the court-busy Error for the reopen panel heading', async () => {
+    global.fetch = mockFetch(409, {
+      error: 'court_busy',
+      court: 'A',
+      matchId: 'm-r1-1',
+      compId: 'c1',
+      label: 'Pool A · Match 2',
+      message: 'Court A already has a running match (m-r1-1). Finish that match before reopening this one.',
+    });
+    const err = await API.reopenMatch('c1', 'm1', 'secret').then(
+      () => { throw new Error('expected a rejection'); },
+      (e) => e
+    );
+    expect(err.label).toBe('Pool A · Match 2');
+  });
+
+  it('carries no label when the server sends none', async () => {
+    global.fetch = mockFetch(409, {
+      error: 'court_busy', court: 'A', matchId: 'm-r1-1', compId: 'c1', message: 'x',
+    });
+    const err = await API.reopenMatch('c1', 'm1', 'secret').then(
+      () => { throw new Error('expected a rejection'); },
+      (e) => e
+    );
+    expect(err.label).toBeUndefined();
+  });
+
+  // bc-rawm: reopenFailureError now routes through the shared
+  // _downstreamRefusalError (both downstream_knockout_played AND
+  // downstream_knockout_running), not _downstreamKnockoutPlayedError alone,
+  // so a kachinuki reopen blocked by a downstream match STILL RUNNING (not
+  // yet played) gets its OWN copy instead of falling through to the bare
+  // "downstream_knockout_running" token below. bc-cse: that copy is now the
+  // REOPEN variant ("...then reopen again"), not the score path's "...then
+  // save again" -- a reopen has no save step to retry.
+  it('parses the downstream_knockout_running refusal with the REOPEN copy, not the score path\'s', async () => {
+    global.fetch = mockFetch(409, {
+      error: 'downstream_knockout_running',
+      matchId: 'm-r1-0',
+      runningMatches: [{ id: 'm-r2-0', label: 'Match 7 (Final)' }],
+      message: 'server copy',
+    });
+    const err = await API.reopenMatch('c1', 'm-r1-0', 'secret').then(
+      () => { throw new Error('expected a rejection'); },
+      (e) => e
+    );
+    expect(err.message).toBe('Match 7 (Final) is being fought now. Finish it or send it back to the queue, then reopen again.');
+    expect(err.code).toBe('downstream_knockout_running');
+    expect(err.downstreamKnockoutRunning).toEqual({ matchId: 'm-r1-0', runningMatches: [{ id: 'm-r2-0', label: 'Match 7 (Final)' }] });
+    // Not marked as a "played" refusal: the running shape carries nothing to
+    // mark .reopen on, and its own copy already says what to do.
+    expect(err.downstreamKnockoutPlayed).toBeUndefined();
   });
 
   it('surfaces the plain-sentence 409s (not completed, downstream fought) verbatim', async () => {
@@ -97,9 +209,9 @@ describe('API.requeueBlockerAndReopen', () => {
   afterEach(() => { global.fetch = originalFetch; });
 
   it('POSTs the blocker identity to the atomic endpoint with the password header', async () => {
-    global.fetch = mockFetch(200, {});
-    const ok = await API.requeueBlockerAndReopen('tgt', 'm-r1-0', 'blk', 'm-r1-1', 'secret');
-    expect(ok).toBe(true);
+    global.fetch = mockFetch(200, { reopenedMatches: [] });
+    const res = await API.requeueBlockerAndReopen('tgt', 'm-r1-0', 'blk', 'm-r1-1', 'secret');
+    expect(res).toEqual({ reopenedMatches: [] });
     const [url, opts] = global.fetch.mock.calls[0];
     expect(url).toBe('/api/competitions/tgt/matches/m-r1-0/requeue-blocker-and-reopen');
     expect(opts.method).toBe('POST');

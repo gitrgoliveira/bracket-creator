@@ -31,41 +31,22 @@ import (
 // real invariants a transcription error would violate, independent of the
 // draw builder.
 //
-// ekc2026Region.rounds carries a leading EMPTY round for Ladies courts B and
-// C. Both are a clean 8 = 2^3 occupants with no bye, so read in isolation
-// their first live round would be index 0; the sheet PRINTS their first live
-// bouts in the same COLUMN as the round-2 bouts of their depth-4 semifinal
-// siblings A and D (10 occupants each, needing a genuine round to shed 2
-// occupants down to 8 before the shared tree can align), and column position
-// is round depth on these sheets.
+// ekc2026Region.rounds is each court's OWN round list (regionRounds, counted
+// within the region). Ladies courts B and C are a clean 8 = 2^3 occupants with
+// no bye, so their first bouts are index 0 there. The sheet prints those bouts
+// in the same COLUMN as the round-2 bouts of their semifinal siblings A and D
+// (10 occupants each): its columns count back from the final, and the whole
+// draw's rounds (BuildEliminationMatchRounds on draw.Root, the walk that
+// numbers the matches) group them the same way. A court's own rounds cannot
+// show that, so the literals below carry no leading empty round for B and C.
 //
-// LP-3a checked whether the existing "risen" mechanism (Node.risenBefore/
-// risenAfter, tree.go) produces that leading column for B/C automatically,
-// and it does NOT, for a structural reason rather than a missing case: risen
-// is set in exactly one place (BuildSlotTree's own empty-sibling collapse,
-// draw.go), which records a REAL absent occupant. B and C have none -- both
-// are full 8-occupant blocks -- so nothing marks them there, and the assembly
-// step that pairs them with A/D into a semifinal (drawPlan.combine ->
-// joinNodes) never sets a rise either: joinNodes only rises a side when its
-// SIBLING is nil, never merely shallower. Marking B/C risen after the fact to
-// force the alignment was tried and rejected: leafArrayWidth (draw.go) folds
-// a node's OWN risen count into its reported width, and that width is what
-// walkLeafOffsets/RegionSpans use to place every LATER region (C, D, the
-// semis, the final) in the whole draw's leaf array -- inflating B's width to
-// "fix" its own round count would shift every region after it onto the wrong
-// leaf slots and mis-court their bouts. There is no region-local way to ask
-// for this column shift without corrupting the whole-draw geometry.
+// Rise marks (Node.risenBefore/risenAfter) play no part in this: they are slot
+// geometry and never move a round, and B and C carry none (full blocks, and
+// joinNodes never marks the semifinal join). Marking them anyway would widen
+// B's slot footprint (leafArrayWidth) and shift every later region onto the
+// wrong leaf slots and courts.
 //
-// So regionRounds(draw.Regions[i]) for courts B and C reports exactly their
-// own local round count (3 rounds: no leading empty one), and the rounds
-// tables below were adjusted to that -- the leading `{}` this comment used to
-// describe is gone from B and C's literals -- per this file's own rule that a
-// disagreement between the sheet and a derived mechanism is resolved by
-// fixing the call site, not by bending the mechanism (or asserting something
-// it cannot produce) to match a guess. The sheet's printed column alignment
-// may still be real; if so it is a page-layout fact for the Excel export to
-// reproduce separately, not a claim this data-model test makes. Men
-// Individual has no such mismatch: all four courts land on local depth 4 (13,
+// Men Individual has no such offset: all four courts land on local depth 4 (13,
 // 11, 11 and 12 occupants all need ceil(log2) = 4), so no Men court skips a
 // round.
 //
@@ -205,9 +186,9 @@ func TestEKC2026LadiesIndividualDrawShape(t *testing.T) {
 			court: "B", poolFrom: 10, poolTo: 17,
 			rounds: [][]string{
 				// No leading empty round here: a clean 8-occupant block with no
-				// bye of its own reports its own 3 local rounds, not a 4th
-				// column-alignment round the data model has no way to produce
-				// (see the file-level comment).
+				// bye of its own reports its own 3 local rounds. The column it
+				// shares with A's round 2 is a whole-draw fact (see the
+				// file-level comment).
 				{"Pool 10-1st v Pool 11-1st", "Pool 12-1st v Pool 13-1st", "Pool 14-1st v Pool 15-1st", "Pool 16-1st v Pool 17-1st"}, // F10-F13
 				{"W v W", "W v W"}, // F14, F15
 				{"W v W"},          // F16 block final

@@ -38,7 +38,22 @@ func countScoringIppons(ippons []string) int {
 // are no countable sub-bouts (an individual match, or a slice containing
 // only the daihyosen placeholder with Position == DaihyosenSubPosition (-1)).
 // engine.ComputeTeamSummary delegates here.
-func TeamResultFrom(subResults []SubMatchResult, sideAName, sideBName string) *TeamResultLine {
+//
+// credit is REQUIRED (bc-cse: a variadic credit let a caller silently skip
+// the default-win rule, which handlers_daihyosen.go's tie check did until
+// this change; see ComputeTeamSummary's own doc comment for that call
+// site). A caller that knows the match's default-win crediting
+// (MatchResult.TeamResult, BracketMatch.TeamResult, the Excel export)
+// passes exactly one domain.MatchSide from DefaultWinCreditSide. A
+// numbered bout (Position >= 1) with no result of its own is then routed
+// through SubBoutEffectiveResult, which credits it to that side the same
+// way a played bout with its own per-bout fusensho decision already counts
+// (operator ruling: every bout of a non-kachinuki team match a default-win
+// decision closes has a result or is credited one). Passing
+// domain.MatchSideNone reproduces the pre-credit behaviour exactly: an
+// unfought bout contributes nothing; use it explicitly, with a short
+// comment, only where no default-win ruling can possibly be in force.
+func TeamResultFrom(subResults []SubMatchResult, sideAName, sideBName string, credit domain.MatchSide) *TeamResultLine {
 	if len(subResults) == 0 {
 		return nil
 	}
@@ -60,14 +75,22 @@ func TeamResultFrom(subResults []SubMatchResult, sideAName, sideBName string) *T
 			continue
 		}
 		hasBout = true
-		switch SubBoutWinnerSide(sub, sideAName, sideBName) {
+		// SubBoutEffectiveResult substitutes the FIK default-win maru for an
+		// unfought bout on a match a default-win ruling closed (credit names
+		// the side; DefaultWinCreditSide), so a kiken/fusenpai/fusensho
+		// declared before every numbered bout was scored still credits IV/PW
+		// for the positions nobody fought, the same way a played bout with
+		// its own per-bout fusensho decision already does. A real result on
+		// the row, or no credit to apply, returns it unchanged.
+		outcome := SubBoutEffectiveResult(sub, credit, sideAName, sideBName)
+		switch SubBoutWinnerSide(outcome, sideAName, sideBName) {
 		case domain.MatchSideA:
 			line.AkaIV++
 		case domain.MatchSideB:
 			line.ShiroIV++
 		}
-		line.AkaPW += countScoringIppons(sub.IpponsA)
-		line.ShiroPW += countScoringIppons(sub.IpponsB)
+		line.AkaPW += countScoringIppons(outcome.IpponsA)
+		line.ShiroPW += countScoringIppons(outcome.IpponsB)
 	}
 	if !hasBout {
 		return nil
@@ -139,13 +162,188 @@ func SubBoutWinnerSide(sub SubMatchResult, sideAName, sideBName string) domain.M
 	return domain.MatchSideNone
 }
 
+// DefaultWinCreditSide reports which side a default-win ruling (any kiken,
+// fusenpai, or fusensho: domain.IsDefaultWinDecisionStr) closing THIS match
+// credits every unfought numbered bout to -- domain.MatchSideNone for
+// anything else: an individual match, a running/reopened match (the ruling
+// only ever credits a COMPLETED match), or a completed match some other
+// decision closed (fought, hikiwake, daihyosen, kachinuki-exhaustion).
+//
+// decisionBy names the side that WITHDREW or was BARRED ("aka" = SideA,
+// "shiro" = SideB; see engine.recordDecisionTx / keptWithdrawalScoreline),
+// so the credited side is the OTHER one. decisionBy is empty only for a
+// ruling recorded before it was captured (legacy data); the credited side
+// then falls back to the match's own winner attribution
+// (domain.AttributeWinnerSide, ids first, names second).
+//
+// att is built via MatchResult.Attribution() / BracketMatch.Attribution()
+// so a caller never hand-transposes the six identity fields.
+func DefaultWinCreditSide(status MatchStatus, decision, decisionBy string, att domain.WinnerAttribution) domain.MatchSide {
+	if status != MatchStatusCompleted || !domain.IsDefaultWinDecisionStr(decision) {
+		return domain.MatchSideNone
+	}
+	switch decisionBy {
+	case "aka": // SideA withdrew or was barred; the OTHER side (Shiro) is credited.
+		return domain.MatchSideB
+	case "shiro": // SideB withdrew or was barred; the OTHER side (Aka) is credited.
+		return domain.MatchSideA
+	}
+	return domain.AttributeWinnerSide(att)
+}
+
+// SubBoutEffectiveResult returns sub's EFFECTIVE result for IV/PW and Excel
+// export purposes: unchanged when it already carries one (HasResult), or,
+// when it carries none and credit names a side (DefaultWinCreditSide), a
+// synthetic row crediting that side the FIK default-win maru (Art. 32,
+// domain.DefaultWinIppons) -- Winner set to the credited side's team name,
+// SideA/SideB left exactly as the stored row held them (matching the
+// existing quick-score / per-bout-fusensho shape: a fixed-order bout
+// records no per-fighter identity, operator ruling bc-dnst).
+//
+// Decision is deliberately left untouched -- never set to the match's own
+// decision: a reader shows the maru without a per-row Kiken/Fus. mark,
+// because that mark names the ONE competitor who withdrew and already rides
+// the match-level summary row's IV cell; repeating it on every credited
+// bout would misname each fighter as having personally defaulted.
+//
+// credit is domain.MatchSideNone for anything but a completed default-win
+// ruling (see DefaultWinCreditSide), and the daihyosen placeholder
+// (Position < 1) is never synthesized, so a caller may call this
+// unconditionally for every row in a match's SubResults.
+func SubBoutEffectiveResult(sub SubMatchResult, credit domain.MatchSide, sideAName, sideBName string) SubMatchResult {
+	if sub.Position < 1 || sub.HasResult() || credit == domain.MatchSideNone {
+		return sub
+	}
+	out := sub
+	maru := domain.DefaultWinIppons(false)
+	switch credit {
+	case domain.MatchSideA:
+		out.Winner = sideAName
+		out.IpponsA = maru
+	case domain.MatchSideB:
+		out.Winner = sideBName
+		out.IpponsB = maru
+	}
+	return out
+}
+
+// PadDefaultWinBoutPositions returns subResults with an EMPTY SubMatchResult
+// row (Position only; no winner, decision or ippons) for every numbered
+// position 1..teamSize it does not already carry. A position
+// already present -- fought, previously padded, or otherwise recorded -- is
+// left untouched, and the daihyosen row (Position < 1) is never added here.
+//
+// Both the live write path (engine.RecordMatchResultWithIneligibilityTx, on
+// a completed default-win team-match write) and the legacy-load repair
+// (state.EnsureLegacyUpgraded) call this ONE function, so a completed
+// default-win team match ends up with one row per position whoever wrote it
+// or when. That matters because SubBoutEffectiveResult / DefaultWinCreditSide
+// can only credit a Position actually PRESENT in SubResults -- a position
+// missing from the slice entirely is invisible to every reader that ranges
+// over it (TeamResultFrom, engine.accrueTeamSubResults, the Excel export),
+// credit side or no.
+//
+// When it pads, the numbered rows come back in Position order, because the
+// team scoreboard names a bout's fighter by the row's array index
+// (TeamScoreboard's pickFromLineup, match_scoreboard.jsx): a stored
+// [Position 2] padded to [2, 1, 3, 4, 5] put the first fighter on the second
+// bout. Every other row (the daihyosen row at DaihyosenSubPosition, or a
+// malformed position) follows the numbered block in its original order, so
+// the daihyosen row never sorts first. A call with nothing to pad returns
+// subResults unchanged.
+func PadDefaultWinBoutPositions(subResults []SubMatchResult, teamSize int) []SubMatchResult {
+	present := make(map[int]bool, len(subResults))
+	for _, s := range subResults {
+		present[s.Position] = true
+	}
+	needsPadding := false
+	for pos := 1; pos <= teamSize; pos++ {
+		if !present[pos] {
+			needsPadding = true
+			break
+		}
+	}
+	if !needsPadding {
+		return subResults
+	}
+
+	byPosition := make(map[int][]SubMatchResult, teamSize)
+	var trailing []SubMatchResult
+	for _, s := range subResults {
+		if s.Position >= 1 && s.Position <= teamSize {
+			byPosition[s.Position] = append(byPosition[s.Position], s)
+			continue
+		}
+		// The daihyosen row (Position == DaihyosenSubPosition, -1), any
+		// other non-positive row, or a malformed Position > teamSize: kept,
+		// in its original relative order, after the ordered numbered block
+		// below.
+		trailing = append(trailing, s)
+	}
+
+	out := make([]SubMatchResult, 0, teamSize+len(trailing))
+	for pos := 1; pos <= teamSize; pos++ {
+		if rows, ok := byPosition[pos]; ok {
+			out = append(out, rows...)
+			continue
+		}
+		out = append(out, SubMatchResult{Position: pos})
+	}
+	return append(out, trailing...)
+}
+
+// NeedsDefaultWinBoutPadding reports whether a stored match needs
+// PadDefaultWinBoutPositions applied: completed, both sides named, closed by
+// a default-win decision (domain.IsDefaultWinDecisionStr; a caller correcting
+// a match while KEEPING a stored withdrawal ruling passes that stored
+// decision here, since its own incoming Decision is blank until the ruling
+// is reinstated downstream), not a pool daihyosen/tiebreaker row
+// (IsPoolDaihyosenMatchID / IsTiebreakerMatchID), and missing at least one
+// numbered position 1..teamSize.
+//
+// subResultsUnreadable must be the SAME row's flag (MatchResult's own field
+// for a pool match; a bracket match carries no such flag because
+// bracket.json parses as one atomic document, so pass false there). A cell
+// that failed to parse loads with SubResults empty and the corrupt bytes
+// retained separately (MatchResult.SubResultsRaw) for repair; padding it
+// anyway would fill SubResults with placeholder rows, making it non-empty
+// and so defeating the raw-bytes preservation on the next write -- the very
+// data loss this predicate exists to avoid. Shared by the legacy-load repair
+// (state.EnsureLegacyUpgraded) and the write-time gate
+// (engine.RecordMatchResultWithIneligibilityTx) so the two never drift.
+func NeedsDefaultWinBoutPadding(status MatchStatus, decision, sideA, sideB, id string, subResults []SubMatchResult, subResultsUnreadable bool, teamSize int) bool {
+	if status != MatchStatusCompleted || sideA == "" || sideB == "" {
+		return false
+	}
+	if subResultsUnreadable {
+		return false
+	}
+	if !domain.IsDefaultWinDecisionStr(decision) {
+		return false
+	}
+	if IsPoolDaihyosenMatchID(id) || IsTiebreakerMatchID(id) {
+		return false
+	}
+	present := make(map[int]bool, len(subResults))
+	for _, sub := range subResults {
+		present[sub.Position] = true
+	}
+	for pos := 1; pos <= teamSize; pos++ {
+		if !present[pos] {
+			return true
+		}
+	}
+	return false
+}
+
 // TeamResult returns the team-match summary for this match, or nil for an
 // individual match. See TeamResultFrom.
 func (m *MatchResult) TeamResult() *TeamResultLine {
 	if m == nil {
 		return nil
 	}
-	return TeamResultFrom(m.SubResults, m.SideA, m.SideB)
+	credit := DefaultWinCreditSide(m.Status, m.Decision, m.DecisionBy, m.Attribution())
+	return TeamResultFrom(m.SubResults, m.SideA, m.SideB, credit)
 }
 
 // MarshalJSON augments the wire form of a MatchResult with the computed
@@ -170,7 +368,8 @@ func (m *BracketMatch) TeamResult() *TeamResultLine {
 	if m == nil {
 		return nil
 	}
-	return TeamResultFrom(m.SubResults, m.SideA, m.SideB)
+	credit := DefaultWinCreditSide(m.Status, m.Decision, m.DecisionBy, m.Attribution())
+	return TeamResultFrom(m.SubResults, m.SideA, m.SideB, credit)
 }
 
 // MarshalJSON mirrors MatchResult.MarshalJSON for bracket (elimination)

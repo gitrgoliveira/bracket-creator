@@ -5,13 +5,10 @@
 //   1. REOPEN IS ONE TAP. The operator ended the match BY MISTAKE and is
 //      standing at the shiaijo with the competitors still there. Nothing may
 //      stand between the tap and the reopen — no prompt, no reason, no arm.
-//   2. THE REASON IS COLLECTED ON THE WAY OUT. The write that completes a
-//      reopened encounter carries a correctionReason (the server refuses it
-//      otherwise), prompted for on [End match]. The requirement is driven by
-//      the SERVER field m.reopenPending, never by local state: this editor
-//      mounts per match, so an operator who reopens, walks off to another
-//      court and comes back has no local memory of the reopen — exactly the
-//      case the design exists to survive, and the case a local flag loses.
+//   2. ENDING IT AGAIN ASKS FOR NO REASON EITHER (operator ruling
+//      2026-09-25: a match can be reopened without any reason, and nothing is
+//      gated on that). [End match] and the withdrawal panel behave on a
+//      reopened encounter exactly as on any running one.
 //   3. A BUSY COURT IS NOT A DEAD END. The court-busy 409 names the match
 //      holding the court; the panel offers to send it back to the queue and
 //      retry. That is DESTRUCTIVE (it clears that match's score), so the
@@ -19,8 +16,8 @@
 //      retry may strand the UI when it fails.
 
 import React from 'react';
-import { render, act, fireEvent, screen, waitFor, within } from '@testing-library/react';
-import { describe, it, expect, vi, beforeAll, afterAll, beforeEach } from 'vitest';
+import { render, act, fireEvent, screen, waitFor } from '@testing-library/react';
+import { describe, it, expect, vi, beforeAll, afterAll, beforeEach, afterEach } from 'vitest';
 import { installWindowStubs } from '../helpers/stub_globals.js';
 
 const STUBBED_GLOBALS = {
@@ -99,8 +96,8 @@ function completedKachinukiMatch(overrides = {}) {
 }
 
 // The same encounter after a reopen: running again, bout log intact, and
-// carrying the server's reopenPending stamp — the flag that makes the audit
-// reason due on the next completing write.
+// carrying the server's reopenPending stamp, which asks the operator for
+// nothing.
 function reopenedKachinukiMatch(overrides = {}) {
   return completedKachinukiMatch({
     status: 'running',
@@ -127,17 +124,20 @@ async function renderEditor(props = {}) {
 }
 
 describe('kachinuki [Reopen match] is one tap', () => {
-  it('posts immediately, with no reason and no prompt, and closes the editor', async () => {
+  it('posts immediately, with no reason and no prompt, and keeps the editor open', async () => {
     const onClose = vi.fn();
     await renderEditor({ onClose });
     await act(async () => { fireEvent.click(screen.getByTestId('kachinuki-reopen-button')); });
     // No gate of any kind: the tap IS the reopen.
     expect(screen.queryByText('Reason for reopening')).toBeNull();
     expect(window.API.reopenMatch).toHaveBeenCalledTimes(1);
-    // Three arguments: comp, match, password. A reason argument here would
-    // mean the operator was asked for one.
-    expect(window.API.reopenMatch).toHaveBeenCalledWith('comp1', 'm1', 'secret');
-    await waitFor(() => expect(onClose).toHaveBeenCalled());
+    // No reason and no downstream confirmation: a reason here would mean the
+    // operator was asked for one.
+    expect(window.API.reopenMatch).toHaveBeenCalledWith('comp1', 'm1', 'secret', { reason: '', force: false });
+    // The editor follows the match to running in place, as Clear withdrawal
+    // and reopen does, so what the reopen reports can still be read here.
+    await waitFor(() => expect(screen.getByTestId('kachinuki-reopen-button').textContent).toBe('Reopened'));
+    expect(onClose).not.toHaveBeenCalled();
   });
 
   it('shows a plain-sentence 409 inline, verbatim, and stays open', async () => {
@@ -158,10 +158,10 @@ describe('kachinuki [Reopen match] is one tap', () => {
   });
 
   it('stays disabled after a successful tap so a double-tap cannot fire a second reopen', async () => {
-    // mp-gmcg: onClose is a no-op in the inline (shiaijo) variant, so the
-    // completed snapshot lingers through the SSE refetch window. The button
-    // must stay disabled until the match flips to running, or a second tap
-    // posts a reopen the server rejects as "not completed" (409).
+    // mp-gmcg: the editor stays open, so the completed snapshot lingers
+    // through the SSE refetch window. The button must stay disabled until the
+    // match flips to running, or a second tap posts a reopen the server
+    // rejects as "not completed" (409).
     await renderEditor();
     await act(async () => { fireEvent.click(screen.getByTestId('kachinuki-reopen-button')); });
     await waitFor(() => expect(window.API.reopenMatch).toHaveBeenCalledTimes(1));
@@ -170,52 +170,106 @@ describe('kachinuki [Reopen match] is one tap', () => {
     await act(async () => { fireEvent.click(screen.getByTestId('kachinuki-reopen-button')); });
     expect(window.API.reopenMatch).toHaveBeenCalledTimes(1);
   });
+
+  // The match_updated broadcast is what flips the prop to running. When it
+  // never arrives (a dropped event, no refetch), the success response is the
+  // only word the editor gets, so it must not go on saying "Reopening…" as if
+  // the request were still in flight: it says the reopen landed, and still
+  // refuses a second post.
+  it('says Reopened on the success response even when the running match never arrives', async () => {
+    await renderEditor();
+    await act(async () => { fireEvent.click(screen.getByTestId('kachinuki-reopen-button')); });
+    await waitFor(() => expect(window.API.reopenMatch).toHaveBeenCalledTimes(1));
+    const button = screen.getByTestId('kachinuki-reopen-button');
+    await waitFor(() => expect(button.textContent).toBe('Reopened'));
+    expect(button.textContent).not.toBe('Reopening…');
+    expect(button.disabled).toBe(true);
+  });
 });
 
-describe('kachinuki reopen: the reason is collected on the way OUT', () => {
-  it('[End match] on a reopened encounter prompts, then sends the reason as correctionReason', async () => {
+describe('kachinuki reopen: a later knockout match already fought', () => {
+  // The dialog stub is shared across the file; put back the default answer.
+  afterEach(() => { window.confirmDialog = vi.fn().mockResolvedValue(true); });
+
+  // What api_client's reopenFailureError throws for the 409
+  // downstream_knockout_played refusal of a reopen.
+  function reopenDownstreamRefusal() {
+    const e = new Error('reopening match "m1" would change the winner ...');
+    e.downstreamKnockoutPlayed = {
+      matchId: 'm1',
+      blockingMatchId: 'm-r2-0',
+      blockingMatches: [{ id: 'm-r2-0', number: 3 }],
+      displaced: 'Team A',
+      qualifierChange: [],
+      reopen: true,
+    };
+    return e;
+  }
+
+  it('asks in reopen words, and on confirm keeps the editor open to name what else it reopened', async () => {
+    const onClose = vi.fn();
+    window.confirmDialog = vi.fn().mockResolvedValue(true);
+    window.API.reopenMatch = vi.fn()
+      .mockRejectedValueOnce(reopenDownstreamRefusal())
+      .mockResolvedValueOnce({ reopenedMatches: [{ id: 'm-r2-0', number: 3 }] });
+    const utils = await renderEditor({ onClose });
+    await act(async () => { fireEvent.click(screen.getByTestId('kachinuki-reopen-button')); });
+
+    await waitFor(() => expect(window.confirmDialog).toHaveBeenCalledTimes(1));
+    const { message, confirmLabel } = window.confirmDialog.mock.calls[0][0];
+    expect(message).toContain('Reopening this match also reopens Match 3');
+    expect(message.toLowerCase()).not.toContain('correction');
+    expect(confirmLabel).toBe('Reopen both');
+
+    await waitFor(() => expect(window.API.reopenMatch).toHaveBeenCalledTimes(2));
+    expect(window.API.reopenMatch.mock.calls[1][3]).toEqual({ reason: '', force: true });
+    await waitFor(() => expect(screen.getByTestId('kachinuki-reopen-notice').textContent)
+      .toBe('Match 3 was reopened: it must be fought and scored again.'));
+    expect(onClose).not.toHaveBeenCalled();
+
+    // The notice is read once the match is running again, which is when the
+    // operator looks for it: the flip removes the Reopen control, not it.
+    await act(async () => {
+      utils.rerender(
+        <ScoreEditorModal match={reopenedKachinukiMatch()} onClose={onClose}
+          onSubmit={vi.fn().mockResolvedValue(undefined)} password="secret" />
+      );
+    });
+    expect(screen.queryByTestId('kachinuki-reopen-button')).toBeNull();
+    expect(screen.getByTestId('kachinuki-reopen-notice').textContent)
+      .toBe('Match 3 was reopened: it must be fought and scored again.');
+    expect(onClose).not.toHaveBeenCalled();
+  });
+
+  it('says the reopen was cancelled, not a correction, when the operator declines', async () => {
+    window.confirmDialog = vi.fn().mockResolvedValue(false);
+    window.API.reopenMatch = vi.fn().mockRejectedValue(reopenDownstreamRefusal());
+    await renderEditor();
+    await act(async () => { fireEvent.click(screen.getByTestId('kachinuki-reopen-button')); });
+    await waitFor(() => expect(screen.getByTestId('kachinuki-reopen-error').textContent)
+      .toBe('Reopen cancelled: this match and the later result it depends on were left unchanged.'));
+    expect(window.API.reopenMatch).toHaveBeenCalledTimes(1);
+    expect(screen.getByTestId('kachinuki-reopen-button').textContent).toBe('Reopen match');
+  });
+});
+
+describe('kachinuki reopen: ending it again asks for no reason', () => {
+  it('[End match] on a reopened encounter arms and ends as on any running one', async () => {
     const onSubmit = vi.fn().mockResolvedValue(undefined);
     await renderEditor({ match: reopenedKachinukiMatch(), onSubmit });
 
-    // First tap opens the prompt INSTEAD of arming: its Confirm is the commit.
     fireEvent.click(screen.getByTestId('kachinuki-end-match-button'));
-    expect(screen.getByText('Reason for reopening')).toBeTruthy();
+    expect(screen.queryByText('Reason for reopening')).toBeNull();
     expect(onSubmit).not.toHaveBeenCalled();
-    // The real reason is the default selection: an operator who ended by
-    // mistake must not have to relabel it "Scoring error" or type it out.
-    expect(screen.getByLabelText('Reason category').value).toBe('Ended by mistake');
-    // The verdict being committed is shown: the prompt hides the End button
-    // whose armed label would otherwise carry it.
-    expect(screen.getByTestId('kachinuki-end-verdict').textContent).toContain('AKA WIN');
-
-    // A free-text note so the asserted reason cannot be the default arriving
-    // by accident.
-    fireEvent.change(screen.getByLabelText('Reason note'), { target: { value: 'ended on the wrong bout' } });
-    await act(async () => { fireEvent.click(screen.getByText('Confirm')); });
+    await act(async () => { fireEvent.click(screen.getByTestId('kachinuki-end-match-button')); });
 
     await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(1));
     const patch = onSubmit.mock.calls[0][0];
     expect(patch.status).toBe('completed');
-    expect(patch.correctionReason).toBe('Ended by mistake: ended on the wrong bout');
-  });
-
-  it('Cancel abandons the End write without submitting', async () => {
-    const onSubmit = vi.fn().mockResolvedValue(undefined);
-    await renderEditor({ match: reopenedKachinukiMatch(), onSubmit });
-    fireEvent.click(screen.getByTestId('kachinuki-end-match-button'));
-    // Scoped to the prompt's own Cancel: while a reason prompt owns the footer
-    // it must be the ONLY Cancel on screen, so this also pins that the
-    // editor's nav row is hidden underneath it.
-    const prompt = screen.getByText('Reason for reopening').closest('form');
-    fireEvent.click(within(prompt).getByText('Cancel'));
-    expect(onSubmit).not.toHaveBeenCalled();
-    // Back to rest: End is available again for a second attempt.
-    expect(screen.getByTestId('kachinuki-end-match-button')).toBeTruthy();
+    expect(patch.correctionReason).toBeUndefined();
   });
 
   it('does not prompt on a running encounter that was never reopened', async () => {
-    // The requirement rides the SERVER field. Without reopenPending the End
-    // action keeps its ordinary arm/confirm and sends no correctionReason.
     const onSubmit = vi.fn().mockResolvedValue(undefined);
     await renderEditor({ match: reopenedKachinukiMatch({ reopenPending: false }), onSubmit });
     const end = screen.getByTestId('kachinuki-end-match-button');
@@ -260,8 +314,12 @@ describe('kachinuki reopen: a busy court gets a remedy, not a dead end', () => {
     // The warning is on screen, in words, BEFORE the operator commits.
     expect(screen.getByTestId('kachinuki-reopen-conflict-warning').textContent)
       .toContain('clears any score already entered for it');
-    // The server's own sentence is not swallowed by our friendlier heading.
-    expect(panel.textContent).toContain('Court A already has a running match (m-r1-1).');
+    // bc-rawm: the server's own raw sentence is GONE, not shown alongside the
+    // heading -- it named the same internal id and told the operator to
+    // "finish that match before reopening", the opposite of this panel's own
+    // remedy button.
+    expect(panel.textContent).not.toContain('Finish that match before reopening');
+    expect(panel.textContent).not.toContain('m-r1-1');
     expect(screen.getByTestId('kachinuki-reopen-requeue-button')).toBeTruthy();
   });
 
@@ -279,9 +337,10 @@ describe('kachinuki reopen: a busy court gets a remedy, not a dead end', () => {
 
     // ONE server call: target=(comp1, m1), blocker=(comp1, m-r1-1). No second
     // reopenMatch call — the requeue and reopen commit together server-side.
-    expect(window.API.requeueBlockerAndReopen).toHaveBeenCalledWith('comp1', 'm1', 'comp1', 'm-r1-1', 'secret');
+    expect(window.API.requeueBlockerAndReopen).toHaveBeenCalledWith('comp1', 'm1', 'comp1', 'm-r1-1', 'secret', { reason: '', force: false });
     expect(window.API.reopenMatch).toHaveBeenCalledTimes(1);
-    await waitFor(() => expect(onClose).toHaveBeenCalled());
+    await waitFor(() => expect(screen.queryByTestId('kachinuki-reopen-conflict')).toBeNull());
+    expect(onClose).not.toHaveBeenCalled();
   });
 
   it('clears the panel and shows the message when the atomic remedy is refused', async () => {
@@ -305,53 +364,49 @@ describe('kachinuki reopen: a busy court gets a remedy, not a dead end', () => {
 
   it('re-offers the remedy when a DIFFERENT match has since taken the court', async () => {
     // The atomic remedy fails with a court_busy naming a NEW blocker: the panel
-    // updates to that match rather than dead-ending.
+    // re-offers the remedy rather than dead-ending. bc-rawm: the panel no
+    // longer prints the blocking matchId as text (no label was sent for it
+    // here, and window.compMatchesForCompetition's fixture only knows
+    // 'm-r1-1', so the fetched blockerLabel cannot resolve the new one
+    // either), so this proves the new conflict took hold BEHAVIOURALLY:
+    // tapping the remedy again targets the NEW blocker's id, not the stale
+    // one.
     window.API.reopenMatch = vi.fn().mockRejectedValue(courtBusyError());
     const newBlocker = courtBusyError();
     newBlocker.matchId = 'm-r1-2';
     newBlocker.message = 'Court A already has a running match (m-r1-2). Finish that match before reopening this one.';
-    window.API.requeueBlockerAndReopen = vi.fn().mockRejectedValue(newBlocker);
+    window.API.requeueBlockerAndReopen = vi.fn()
+      .mockRejectedValueOnce(newBlocker)
+      .mockResolvedValue(true);
     await renderEditor();
     await act(async () => { fireEvent.click(screen.getByTestId('kachinuki-reopen-button')); });
     await screen.findByTestId('kachinuki-reopen-conflict');
 
     await act(async () => { fireEvent.click(screen.getByTestId('kachinuki-reopen-requeue-button')); });
 
-    // Still a conflict panel, now naming the new blocker — the remedy is re-offered.
-    const panel = await screen.findByTestId('kachinuki-reopen-conflict');
-    await waitFor(() => expect(panel.textContent).toContain('m-r1-2'));
+    // Still a conflict panel — the remedy is re-offered, not a dead end.
+    await screen.findByTestId('kachinuki-reopen-conflict');
     expect(screen.getByTestId('kachinuki-reopen-requeue-button')).toBeTruthy();
+
+    await act(async () => { fireEvent.click(screen.getByTestId('kachinuki-reopen-requeue-button')); });
+    expect(window.API.requeueBlockerAndReopen).toHaveBeenLastCalledWith(
+      'comp1', 'm1', 'comp1', 'm-r1-2', 'secret', { reason: '', force: false },
+    );
   });
 
-  // POST /decision is the OTHER way to finalize a match, so the server demands
-  // the outstanding reason there too. The client has to ASK for it: the reason
-  // box is normally rendered only for kiken, so on a reopened encounter a
-  // fusenpai had no field at all and the operator met a 400 they could not
-  // satisfy from the UI. These pin the prompt, not just the payload.
-  it('asks for the reason on a fusenpai after a reason-less reopen', async () => {
+  // POST /decision is the other way to end a match, and after a reason-less
+  // reopen it asks for no reason either: the panel is the same as on any
+  // running match, with Record available at once.
+  it('asks for no reason on a fusenpai after a reason-less reopen', async () => {
     await renderEditor({ match: reopenedKachinukiMatch() });
     await act(async () => { fireEvent.click(screen.getByTestId('scoring-modal-fusenpai-button')); });
 
-    // The box exists at all (it does not for a non-reopened fusenpai) and says
-    // it is required, naming the reopen as the cause.
-    const input = screen.getByTestId('decision-reason');
-    expect(input).toBeTruthy();
-    expect(screen.getByText(/Reason \(required/)).toBeTruthy();
-    expect(screen.getByText(/reopened, so ending it again needs a reason/)).toBeTruthy();
-
-    // Record is held back while it is empty, so the operator cannot walk into
-    // the server's rejection.
-    const record = screen.getByRole('button', { name: 'Record' });
-    expect(record.disabled).toBe(true);
-    await act(async () => { fireEvent.input(input, { target: { value: '   ' } }); });
-    expect(record.disabled).toBe(true);
-    await act(async () => { fireEvent.input(input, { target: { value: 'Ended by mistake' } }); });
-    expect(record.disabled).toBe(false);
+    expect(screen.queryByTestId('decision-reason')).toBeNull();
+    expect(screen.queryByText(/ending it again needs a reason/)).toBeNull();
+    expect(screen.getByRole('button', { name: 'Record' }).disabled).toBe(false);
   });
 
   it('leaves the reason optional when the match was not reopened', async () => {
-    // Blast radius: the ordinary decision flow must stay reasonless. Gating
-    // every decision would be a worse regression than the hole it closed.
     await renderEditor({ match: completedKachinukiMatch({ status: 'running', winner: null }) });
     await act(async () => { fireEvent.click(screen.getByTestId('scoring-modal-fusenpai-button')); });
 

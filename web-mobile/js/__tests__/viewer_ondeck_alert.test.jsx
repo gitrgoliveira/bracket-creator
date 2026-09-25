@@ -48,6 +48,14 @@ describe('isFollowedMatchOnDeck', () => {
     expect(isFollowedMatchOnDeck({ status: 'scheduled', queuePosition: 'abc' })).toBe(false);
     expect(isFollowedMatchOnDeck({ status: 'scheduled', queuePosition: null })).toBe(false);
   });
+
+  // bc-tmfn: a barred scheduled match (ineligible_match.jsx -- its
+  // competitor withdrew earlier) is never on deck, whatever queuePosition
+  // reads. queuePosition: 1 is a realistic transient (client state before
+  // patch.jsx's recompute catches up), not just a defensive extra.
+  it('returns false for a barred scheduled match even with queuePosition 1', () => {
+    expect(isFollowedMatchOnDeck({ status: 'scheduled', queuePosition: 1, ineligibleSides: { a: 'kiken-voluntary' } })).toBe(false);
+  });
 });
 
 // ---------------------------------------------------------------------------

@@ -2,11 +2,13 @@ package mobileapp
 
 import (
 	"errors"
+	"fmt"
 	"log"
 	"net/http"
 
 	"github.com/gin-gonic/gin"
 
+	"github.com/gitrgoliveira/bracket-creator/internal/domain"
 	"github.com/gitrgoliveira/bracket-creator/internal/engine"
 	"github.com/gitrgoliveira/bracket-creator/internal/state"
 )
@@ -74,6 +76,139 @@ func respondEngineError(c *gin.Context, err error) {
 	}
 }
 
+// reasonHumanForBarredCompetitor builds the ONE operator sentence for a 409
+// ineligible_competitor / already_ineligible refusal (bc-rawm acceptance:
+// "None of the messages reaches the operator raw: each names the match in
+// operator terms and says what to do"): the barred competitor's name, the
+// match they were barred IN (its operator label), and the remedy -- record
+// the default win for the OPPONENT of thisMatchID (the match the operator
+// was trying to start/decide when the refusal fired), or reinstate for a
+// kiken-injury. Falls back to domain.ResolveReasonHuman(reason) whenever any
+// piece cannot be resolved, so the operator is never shown nothing.
+//
+// Both names are read off thisMatchID's OWN stored sides
+// (store.MatchSidesByID) rather than a separate roster lookup: the barred
+// competitor is provably one of thisMatchID's two sides in every producer of
+// these two errors -- StartMatchTx/checkEligibilityExcludingMatch resolve
+// playerID FROM this match's own ids (engine.BarredSides against
+// matchSideParticipantIDs' return), and checkConcurrentIneligibility's loser
+// is this match's own decisionBy side -- so playerID always equals one of
+// sideAID/sideBID when it can be resolved at all. An id-unstamped row (a
+// bye, an unresolved feeder, an unrepaired legacy row) degrades to the
+// fallback rather than guessing which side the id names.
+//
+// barringMatchID/decision come from IneligibleCompetitorError.MatchID/
+// Decision or AlreadyIneligibleError.MatchID/Decision (engine.BarredSides'
+// two producers, eligibility.go); thisMatchID is always the match id in the
+// URL the handler is answering for.
+func reasonHumanForBarredCompetitor(store CompetitionStore, compID, thisMatchID, playerID, reason, barringMatchID, decision string) string {
+	fallback := domain.ResolveReasonHuman(reason)
+	// No barring match to name at all (a status set directly via
+	// POST /competitor-status, with no matchId): OperatorMatchLabel would
+	// degrade an empty id to an empty label, producing a sentence naming no
+	// match ("withdrew in  and cannot fight again"). Prefer the translated
+	// fallback; ResolveReasonHuman's own contract is to return "" rather
+	// than echo its input so the CALLER can decide whether to fall back to
+	// the raw reason (its doc comment), so an untranslatable reason here
+	// still surfaces SOMETHING rather than a silently empty reasonHuman.
+	if barringMatchID == "" {
+		if fallback != "" {
+			return fallback
+		}
+		return reason
+	}
+	sideA, sideB, sideAID, sideBID, found, err := store.MatchSidesByID(compID, thisMatchID)
+	if err != nil || !found {
+		return fallback
+	}
+	var name, opponent string
+	switch playerID {
+	case sideAID:
+		name, opponent = sideA, sideB
+	case sideBID:
+		name, opponent = sideB, sideA
+	default:
+		return fallback
+	}
+	if name == "" {
+		return fallback
+	}
+	// matchLabelOrID (== engine.OperatorMatchLabelFromStore) loads the
+	// competition and the bracket itself, degrading -- and LOGGING -- a
+	// LoadBracket failure to a pool-phase-only label rather than losing the
+	// sentence's name/remedy: the barring match is very unlikely to be a
+	// knockout one anyway (a withdrawal is almost always recorded in the
+	// pool phase), and even a bare id beats the generic fallback losing the
+	// name/remedy too. bc-cse finding 7: this used to hand-roll that same
+	// load-then-degrade sequence, with the LoadBracket error discarded via
+	// a blank identifier (an errcheck violation) and a second, unlogged copy
+	// of what OperatorMatchLabelFromStore already does.
+	label := matchLabelOrID(store, compID, barringMatchID)
+	return barredCompetitorSentence(name, label, decision, opponent)
+}
+
+// bothSidesBarredReasonHuman builds the operator sentence for a match whose
+// BOTH sides are already barred (IneligibleCompetitorError.BothSidesBarred,
+// bc-cse item 10): unlike a one-sided bar, there is no single opponent to
+// hand the default win to, so reasonHumanForBarredCompetitor's remedy
+// clauses do not apply -- the fix is upstream of this match entirely
+// (correct the earlier withdrawal that barred one of them, or the draw that
+// paired two already-barred competitors together).
+func bothSidesBarredReasonHuman(store CompetitionStore, compID, matchID string) string {
+	const fallback = "Neither competitor can fight: correct the earlier withdrawal or the draw."
+	sideA, sideB, _, _, found, err := store.MatchSidesByID(compID, matchID)
+	if err != nil || !found || sideA == "" || sideB == "" {
+		return fallback
+	}
+	label := matchLabelOrID(store, compID, matchID)
+	return fmt.Sprintf("Neither %s nor %s can fight %s: correct the earlier withdrawal or the draw.", sideA, sideB, label)
+}
+
+// matchLabelOrID resolves matchID's operator label within compID, via
+// engine.OperatorMatchLabelFromStore (bc-cse/11b: the one load-then-degrade
+// body this and Engine.operatorMatchLabel both delegate to). Every call site
+// here is building operator-facing prose, never gating logic, so a load
+// failure degrades the label rather than the response. compID is the
+// match's OWN competition, which for a cross-competition refusal (e.g.
+// *engine.CourtBusyError.CompID, court occupancy is tournament-global) is
+// NOT necessarily the competition the current request targets.
+func matchLabelOrID(store CompetitionStore, compID, matchID string) string {
+	return engine.OperatorMatchLabelFromStore(store, compID, matchID)
+}
+
+// barredCompetitorSentence is the one place the barred-competitor operator
+// sentences are spelled, for each decision that can bar someone
+// (kiken/kiken-voluntary, kiken-injury, fusenpai). opponent == "" (the
+// current match's other side could not be resolved) drops the remedy clause
+// rather than naming nobody; label names the BARRING match (barringMatchID
+// in reasonHumanForBarredCompetitor, the one call site), never thisMatchID
+// -- the sentence says WHERE the competitor was barred, and the remedy
+// (record the default win for opponent) is what to do about THIS match.
+func barredCompetitorSentence(name, label, decision, opponent string) string {
+	switch decision {
+	case string(domain.DecisionKikenInjury):
+		if opponent == "" {
+			return fmt.Sprintf("%s withdrew injured in %s. Reinstate %s if the doctor allows.", name, label, name)
+		}
+		return fmt.Sprintf("%s withdrew injured in %s. Reinstate %s if the doctor allows, or record the default win for %s.", name, label, name, opponent)
+	case string(domain.DecisionFusenpai):
+		if opponent == "" {
+			return fmt.Sprintf("%s did not appear for %s and cannot fight again.", name, label)
+		}
+		return fmt.Sprintf("%s did not appear for %s and cannot fight again. Record the default win for %s.", name, label, opponent)
+	default:
+		// kiken, kiken-voluntary, and any other/legacy barring decision this
+		// app never itself writes (fusensho/daihyosen do not bar anyone, so
+		// BarredSides never surfaces one in practice): the withdrawal
+		// sentence is the safe default, since every reachable barring
+		// decision besides the two cases above IS a kiken variant.
+		if opponent == "" {
+			return fmt.Sprintf("%s withdrew in %s and cannot fight again.", name, label)
+		}
+		return fmt.Sprintf("%s withdrew in %s and cannot fight again. Record the default win for %s.", name, label, opponent)
+	}
+}
+
 // respondIfEngineWriteError composes the sentinel checks a match-write
 // handler (score, decision, daihyosen) needs after its engine call: a
 // superseded write (200 {"applied":false}), a rejected precondition
@@ -110,8 +245,8 @@ func respondIfEngineWriteError(c *gin.Context, err error) bool {
 // (Store.ResetOverridesForce, used by DELETE .../overrides) loads and
 // parses the existing file before saving, so a corrupt file makes them fail
 // identically -- and every engine call that reads standings
-// (computeStandingsFrom, reached via the mp-e2k1 mixed-pool guard,
-// LeagueTiebreakCandidates, ChusenCandidates) hits the same LoadOverrides
+// (computeStandingsFrom, reached via the pool requalification check,
+// LeagueTiebreakCandidates, ChusenStatus) hits the same LoadOverrides
 // call underneath. Left unmapped, that surfaces as an opaque 500, which the
 // SPA's offline write queue retries forever for the write endpoints
 // (mp-q8c6 poisoned-queue pattern) -- a genuinely corrupt file on disk
@@ -170,15 +305,21 @@ func respondUnexportableCompetitionError(c *gin.Context, err error) bool {
 // respondIfDownstreamKnockoutPlayed answers engine.DownstreamKnockoutPlayedError
 // (bc-kcdg) with the ONE fixed wire contract every knockout-correction write
 // shares -- HTTP 409 {"error":"downstream_knockout_played","matchId",
-// "blockingMatchId","blockingMatches","displaced","message"} -- and reports whether it
-// answered, so the caller's switch can fall through to its own remaining
-// arms exactly like the other respondIf* helpers in this file.
+// "blockingMatchId","blockingMatches","displaced","qualifierChange","message"}
+// -- and reports whether it answered, so the caller's switch can fall through
+// to its own remaining arms exactly like the other respondIf* helpers in this
+// file.
 //
 // Correcting a completed bracket match (via /score, /override-winner,
 // /decision, or /quick-score) can change a winner already propagated into a
 // downstream match that has since recorded its own result; the engine
 // refuses by default and the operator retries with forceDownstreamReopen
-// once they've confirmed the override (see ForceOptions.Force on the
+// once they've confirmed the override. Correcting a POOL match in a mixed
+// competition answers the same way when it moves who holds a qualifying
+// place and the old qualifier has already fought a knockout match:
+// qualifierChange then names each place that moves (from, to), so the
+// operator is told who moves, not only which match reopens; it is an empty
+// list for a knockout correction (see ForceOptions.Force on the
 // matching request field of whichever endpoint they're using). Before this
 // existed, only /score and /override-winner had this mapping hand-copied
 // into their own error switches (identically, since both need the exact
@@ -201,55 +342,79 @@ func respondIfDownstreamKnockoutPlayed(c *gin.Context, err error) bool {
 		// rides along for addressing, never for display.
 		"blockingMatches": blockedMatchesPayload(downstreamPlayedErr.Blocking),
 		"displaced":       downstreamPlayedErr.Displaced,
+		"qualifierChange": qualifierChangePayload(downstreamPlayedErr.QualifierChange),
 		"message":         downstreamPlayedErr.Error(),
 	})
 	return true
 }
 
-// blockedMatchesPayload renders the blocked matches for the wire: id for
-// addressing, number for the operator. A number of 0 means the match never got
-// one (a bye placeholder, or a pre-numbering bracket); the client falls back to
-// the id there rather than printing "Match 0".
+// qualifierChangePayload renders a refusal's qualifier changes as a list,
+// never null, so a client reads one shape whichever kind of correction it
+// made.
+func qualifierChangePayload(changes []engine.QualifierChange) []engine.QualifierChange {
+	if changes == nil {
+		return []engine.QualifierChange{}
+	}
+	return changes
+}
+
+// respondIfDownstreamKnockoutRunning answers engine.DownstreamKnockoutRunningError
+// with HTTP 409 {"error":"downstream_knockout_running","matchId",
+// "runningMatches","message"} and reports whether it answered. A pool
+// correction in a mixed competition that would move a qualifier out of a
+// knockout match somebody is fighting right now is refused outright: unlike
+// downstream_knockout_played it is NOT confirmable (forceDownstreamReopen does
+// not get past it), because reopening a match mid-bout would wipe what is
+// being scored at the shiaijo. message is the operator's copy ("Match 9 (Quarterfinals) is
+// being fought now. Finish it or send it back to the queue, then save
+// again."). A 409, never a 5xx, so the offline write queue drops a replay
+// that meets it instead of retrying it forever (mp-q8c6).
+func respondIfDownstreamKnockoutRunning(c *gin.Context, err error) bool {
+	var runningErr *engine.DownstreamKnockoutRunningError
+	if !errors.As(err, &runningErr) {
+		return false
+	}
+	c.JSON(http.StatusConflict, gin.H{
+		"error":          "downstream_knockout_running",
+		"matchId":        runningErr.MatchID,
+		"runningMatches": blockedMatchesPayload(runningErr.Running),
+		"message":        runningErr.Error(),
+	})
+	return true
+}
+
+// blockedMatchesPayload renders knockout matches for the wire, for every
+// payload that names them to the operator (blockingMatches, runningMatches,
+// reopenedMatches): id for addressing, number, and label, the words the
+// operator is shown ("Match 3 (Final)", engine.MatchLabel). The client prints
+// the label as it is rather than composing its own from the number, so the
+// dialog and this payload's message cannot name the same match two ways. A
+// number of 0 means the match never got one (a bye placeholder, or a
+// pre-numbering bracket); the label then falls back to the match's name or id
+// rather than "Match 0".
 func blockedMatchesPayload(blocking []engine.ReopenedMatch) []map[string]any {
 	out := make([]map[string]any, 0, len(blocking))
 	for _, b := range blocking {
-		out = append(out, map[string]any{"id": b.ID, "number": b.Number})
+		out = append(out, map[string]any{"id": b.ID, "number": b.Number, "label": engine.MatchLabel(b)})
 	}
 	return out
 }
 
-// respondIfDownstreamKnockoutScored answers engine.DownstreamKnockoutScoredError
-// (mp-e2k1) with the ONE fixed wire contract -- HTTP 409
-// {"error":"downstream_knockout_scored","pool","finisher","matchId","message"}
-// -- and reports whether it answered, so the caller's switch can fall through
-// to its own remaining arms exactly like the other respondIf* helpers in this
-// file. This is a DIFFERENT guard from respondIfDownstreamKnockoutPlayed
-// above: mp-e2k1 fires on a POOL match re-score (in a Mixed competition) that
-// would change which competitor holds a qualifying rank while a downstream
-// bracket match already carries that finisher's own scored result, whereas
-// bc-kcdg's DownstreamKnockoutPlayedError guards a bracket-match correction
-// that would repaint an already-propagated winner. Both are reachable from
-// every write endpoint that ends up inside RecordMatchResultWithIneligibility(Tx)
-// for a pool match id (/score, /quick-score, bulk-score's per-entry
-// transaction, and /decision via RecordDecisionTx(WithOptions)); before this
-// helper existed, only /score mapped it and the rest fell through to a
-// generic 500, which the SPA's offline write queue retries forever (mp-q8c6
-// poisoned-queue pattern) for a write that can never win. OverrideBracketWinner
-// writes the bracket directly (UpdateBracket) and never reaches this guard, so
-// it has no arm for this error.
-func respondIfDownstreamKnockoutScored(c *gin.Context, err error) bool {
-	var downstreamScoredErr *engine.DownstreamKnockoutScoredError
-	if !errors.As(err, &downstreamScoredErr) {
-		return false
+// broadcastReopenedDownstream announces the downstream matches a confirmed
+// reopen or correction reopened: match_updated for each (each is a distinct
+// match from the one the operator acted on, so a client watching only that
+// court or match must hear its verdict was cleared), and
+// competitor_status_updated for each one whose cleared verdict was a
+// withdrawal, since the engine restored the competitor it barred
+// (engine.ReopenedMatch.Restored). One helper for every door that can reopen
+// downstream, so none of them can announce the reopen and miss the restore.
+func broadcastReopenedDownstream(hub Broadcaster, compID string, reopened []engine.ReopenedMatch) {
+	for _, r := range reopened {
+		hub.Broadcast(EventMatchUpdated, gin.H{"competitionId": compID, "matchId": r.ID})
+		if r.Restored != nil {
+			hub.Broadcast(EventCompetitorStatusUpdated, gin.H{"competitionId": compID, "status": r.Restored})
+		}
 	}
-	c.JSON(http.StatusConflict, gin.H{
-		"error":    "downstream_knockout_scored",
-		"pool":     downstreamScoredErr.Pool,
-		"finisher": downstreamScoredErr.Finisher,
-		"matchId":  downstreamScoredErr.MatchID,
-		"message":  downstreamScoredErr.Error(),
-	})
-	return true
 }
 
 // classifyRosterWriteError maps one of the participant-roster write sentinel

@@ -81,24 +81,32 @@ describe('buildDisplayModel', () => {
     const model = buildDisplayModel(fivePlayerRounds());
     expect(model.hasMeta).toBe(true);
     // Columns ordered first round → final: [QF, SF, Final].
-    expect(model.columns.map((c) => c.filter((m) => !m.isByeSlot).length)).toEqual([1, 2, 1]);
+    expect(model.columns.map((c) => c.length)).toEqual([1, 2, 1]);
     const ids = (col) => col.map((m) => m.id).sort();
-    expect(ids(model.columns[0].filter((m) => !m.isByeSlot))).toEqual(['m-r1-3']); // QF: Dave/Eve
+    // The first column holds ONLY the one first-round bout. Alice, Bob and
+    // Carol skip it and get no placeholder card there (bc-tmfn): they first
+    // appear in their semifinal cards.
+    expect(ids(model.columns[0])).toEqual(['m-r1-3']); // QF: Dave/Eve
     expect(ids(model.columns[1])).toEqual(['m-r1-0', 'm-r2-1']); // SF: Alice/Bob + Carol
     expect(ids(model.columns[2])).toEqual(['m-r3-0']); // Final
     // No hidden/phantom match leaks into any column.
     const all = model.columns.flat();
     expect(all.some((m) => m.hidden)).toBe(false);
-    expect(all.filter((m) => !m.isByeSlot)).toHaveLength(4); // N-1 real matches
+    expect(all).toHaveLength(4); // N-1 real matches, and nothing else
   });
 
-  it('exposes a feeder graph keyed by match id (byes carry no feeder)', () => {
+  it('exposes a feeder graph of real matches only (a skipped side has no feeder)', () => {
     const model = buildDisplayModel(fivePlayerRounds());
     expect(model.feedersById['m-r3-0']).toEqual(['m-r1-0', 'm-r2-1']); // final ← Alice/Bob, Carol SF
-    expect(model.feedersById['m-r2-1']).toEqual(['bye-m-r2-1-0', 'm-r1-3']); // Carol SF ← bye slot + Dave/Eve
-    expect(model.feedersById['m-r1-0']).toEqual(['bye-m-r1-0-0', 'bye-m-r1-0-1']); // Alice/Bob seeded in; both sides are byes
-    expect(model.feedersById['bye-m-r1-0-0']).toEqual([]); // bye slot is a leaf
-    expect(model.feedersById['m-r1-3']).toEqual([]); // Dave/Eve seeded in
+    expect(model.feedersById['m-r2-1']).toEqual(['m-r1-3']); // Carol SF ← Dave/Eve only; Carol comes straight in
+    expect(model.feedersById['m-r1-0']).toEqual([]); // Alice/Bob both come straight into the SF
+    expect(model.feedersById['m-r1-3']).toEqual([]); // Dave/Eve: the first-round bout
+    // Keyed by exactly the drawn matches: nothing synthesized.
+    expect(Object.keys(model.feedersById).sort()).toEqual(['m-r1-0', 'm-r1-3', 'm-r2-1', 'm-r3-0']);
+    // The raw [sideA, sideB] pair survives on the column entry, so the
+    // connector can tell WHICH side a lone feeder fills (connectorTargetY).
+    const carolSF = model.columns.flat().find((m) => m.id === 'm-r2-1');
+    expect(carolSF.feeders).toEqual(['', 'm-r1-3']);
   });
 
   it('assigns sequential match numbers left-to-right, top-to-bottom (matchNumById)', () => {
@@ -180,54 +188,75 @@ describe('buildDisplayModel', () => {
 });
 
 describe('computeMetaTops', () => {
-  it('centres each parent on the mean of its feeders and stacks bye leaves', () => {
+  // bc-tmfn: with no placeholder cards, a parent can have 0, 1 or 2 feeders.
+  // 100px cards with the seam at 50: the Aka row's centre sits at 25, the
+  // Shiro row's at 75, so a one-fed card shifts 25px against its feeder, more
+  // than the 16px gap between stacked cards.
+  const heights = { 'm-r1-0': 100, 'm-r1-3': 100, 'm-r2-1': 100, 'm-r3-0': 100 };
+  const offsets = { 'm-r1-0': 50, 'm-r1-3': 50, 'm-r2-1': 50, 'm-r3-0': 50 };
+  const GAP = 16;
+
+  it('puts a one-fed card\'s Shiro row level with its feeder, and keeps the card clear of the one above', () => {
+    const model = buildDisplayModel(fivePlayerRounds()); // Carol's SF is fed on sideB
+    const tops = computeMetaTops(model.columns, model.feedersById, heights, offsets, { 'm-r2-1': 75 });
+    const anchor = (id) => tops[id] + offsets[id];
+    expect(Object.keys(tops).sort()).toEqual(['m-r1-0', 'm-r1-3', 'm-r2-1', 'm-r3-0']);
+    // Alice/Bob's SF, fed by nothing, is stacked first.
+    expect(tops['m-r1-0']).toBe(0);
+    // Carol's SF: its Shiro row centre is level with Dave/Eve's anchor, so the
+    // line between them is straight.
+    expect(tops['m-r2-1'] + 75).toBe(anchor('m-r1-3'));
+    // It rose 25px against Dave/Eve, and still keeps the full gap below
+    // Alice/Bob in their shared column: Dave/Eve was stacked lower instead.
+    expect(tops['m-r2-1']).toBe(tops['m-r1-0'] + heights['m-r1-0'] + GAP);
+    expect(tops['m-r1-3']).toBe(tops['m-r2-1'] + 25);
+    // The final is centred on the two semifinal anchors.
+    expect(anchor('m-r3-0')).toBeCloseTo((anchor('m-r1-0') + anchor('m-r2-1')) / 2, 5);
+  });
+
+  it('puts a one-fed card\'s Aka row level with its feeder, and keeps what is stacked after it clear', () => {
+    // Carol's SF fed on sideA, and first under the final, so Alice/Bob's SF is
+    // stacked after it in the same column.
+    const rounds = fivePlayerRounds();
+    rounds[1][1] = { ...rounds[1][1], sideA: 'Winner of r3-m3', sideB: 'Carol', feeders: ['m-r1-3', ''] };
+    rounds[2][0] = { ...rounds[2][0], feeders: ['m-r2-1', 'm-r1-0'] };
+    const model = buildDisplayModel(rounds);
+    const tops = computeMetaTops(model.columns, model.feedersById, heights, offsets, { 'm-r2-1': 25 });
+    const anchor = (id) => tops[id] + offsets[id];
+    expect(tops['m-r1-3']).toBe(0);
+    // The Aka row centre is level with Dave/Eve's anchor: the card dropped 25px.
+    expect(tops['m-r2-1'] + 25).toBe(anchor('m-r1-3'));
+    expect(tops['m-r2-1']).toBe(25);
+    // Alice/Bob's SF, stacked next in the same column, keeps the full gap.
+    expect(tops['m-r1-0']).toBe(tops['m-r2-1'] + heights['m-r2-1'] + GAP);
+  });
+
+  it('levels a one-fed card at its seam when no fed-row centre is given', () => {
     const model = buildDisplayModel(fivePlayerRounds());
-    const heights = { 'm-r1-0': 100, 'm-r1-3': 100, 'm-r2-1': 100, 'm-r3-0': 100 };
-    const tops = computeMetaTops(model.columns, model.feedersById, heights);
-    // bye slots have no entry in heights; use the DEFAULT_H fallback (110).
-    const centre = (id) => tops[id] + (heights[id] ?? 110) / 2;
-    // Alice/Bob (leaf) is stacked first, Dave/Eve second.
-    expect(centre('m-r1-0')).toBeLessThan(centre('m-r1-3'));
-    // Carol's SF is centred on its two feeders: bye-m-r2-1-0 (Carol side) + Dave/Eve.
-    expect(centre('m-r2-1')).toBeCloseTo((centre('bye-m-r2-1-0') + centre('m-r1-3')) / 2, 5);
-    // Final is centred between Alice/Bob and Carol's SF.
-    expect(centre('m-r3-0')).toBeCloseTo((centre('m-r1-0') + centre('m-r2-1')) / 2, 5);
+    const tops = computeMetaTops(model.columns, model.feedersById, heights, offsets);
+    expect(tops['m-r2-1'] + offsets['m-r2-1']).toBe(tops['m-r1-3'] + offsets['m-r1-3']);
   });
 
   // mp-ydk7: connectors anchor at each card's sides-block midline, which sits
-  // BELOW the geometric centre for a match card (the meta-header offset) but AT
-  // the centre for a bye-slot card (no .bc-side). When a parent is fed by one
-  // match card + one bye-slot, centring it on feeder GEOMETRIC CENTRES leaves its
-  // seam ~6px off the feeder-anchor midpoint (the elbow misses the seam). Passing
-  // per-card `offsets` must centre each parent so its OWN anchor equals the mean
-  // of its feeders' anchors → delta 0 for every parent, including the asymmetric
-  // match+bye case. Guards the regression the centre-of-mass layout shipped on
-  // unbalanced (mp-5ng7) brackets.
-  it('zeroes feeder-vs-child delta under asymmetric match/bye anchor offsets', () => {
+  // BELOW the geometric centre by the meta header, and cards differ in height
+  // (a filled name+dojo card is taller than a TBD one). Centring a parent on
+  // its feeders' GEOMETRIC centres would leave its seam off the feeders'
+  // seams. Passing per-card `offsets` must place each two-fed parent so its
+  // OWN anchor equals the mean of its feeders' anchors, and a one-fed parent
+  // so its fed row equals its feeder's anchor.
+  it('zeroes feeder-vs-child delta under asymmetric card heights and anchor offsets', () => {
     const model = buildDisplayModel(fivePlayerRounds());
-    const MATCH_H = 114, BYE_H = 44;
-    // Match cards: sides-midline 63px from top (12px header + ~half the sides).
-    // Bye-slot cards: centred, so offset = height / 2.
-    const MATCH_OFF = 63, BYE_OFF = BYE_H / 2;
-    const isBye = (id) => id.startsWith('bye-');
-    const heights = {}, offsets = {};
-    for (const col of model.columns) {
-      for (const m of col) {
-        heights[m.id] = isBye(m.id) ? BYE_H : MATCH_H;
-        offsets[m.id] = isBye(m.id) ? BYE_OFF : MATCH_OFF;
-      }
-    }
-    const tops = computeMetaTops(model.columns, model.feedersById, heights, offsets);
-    const anchor = (id) => tops[id] + offsets[id]; // the y the SVG connectors join at
-    // For every parent: its anchor (seam) == mean of its feeders' anchors → delta 0.
-    for (const [childId, feeders] of Object.entries(model.feedersById)) {
-      const fs = feeders.filter(Boolean);
-      if (!fs.length) continue;
-      const mean = fs.reduce((s, fid) => s + anchor(fid), 0) / fs.length;
-      expect(anchor(childId)).toBeCloseTo(mean, 5);
-    }
-    // Sanity: the case under test really is asymmetric; Carol's SF mixes a bye
-    // (centre-anchored) with a match feeder (seam-anchored, larger offset).
-    expect(offsets['bye-m-r2-1-0']).not.toBe(offsets['m-r1-3']);
+    const h = { 'm-r1-0': 118, 'm-r1-3': 118, 'm-r2-1': 104, 'm-r3-0': 104 };
+    const off = { 'm-r1-0': 66, 'm-r1-3': 66, 'm-r2-1': 59, 'm-r3-0': 59 };
+    const tops = computeMetaTops(model.columns, model.feedersById, h, off, { 'm-r2-1': 81 });
+    const anchor = (id) => tops[id] + off[id]; // the y the SVG connectors join at
+    // The final, fed by two: its anchor is the mean of theirs.
+    expect(anchor('m-r3-0')).toBeCloseTo((anchor('m-r1-0') + anchor('m-r2-1')) / 2, 5);
+    // Carol's SF, fed by one on its Shiro row: that row is level with it.
+    expect(tops['m-r2-1'] + 81).toBeCloseTo(anchor('m-r1-3'), 5);
+    // Sanity: the case under test really is asymmetric; the final's two
+    // feeders carry different offsets.
+    expect(off['m-r1-0']).not.toBe(off['m-r2-1']);
   });
 });
+

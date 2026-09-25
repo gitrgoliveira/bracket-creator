@@ -140,7 +140,9 @@ func (e *Engine) recordEngiMatch(
 				}
 				bm := &b.Rounds[rIdx][mIdx]
 				if !bracketMatchPlayable(bm) {
-					return validationErrorf("knockout match %s is not ready to score: a feeder pool or match has not finished", matchID)
+					// PURE (bm already carries Number/DisplayRound): safe
+					// inside UpdateBracket's mutate callback (bc-cse item 14).
+					return validationErrorf("%s is not ready to score: a feeder pool or match has not finished", SentenceCase(MatchLabel(bracketMatchRef(bm))))
 				}
 				// bc-kcdg: engi is a knockout like any other, so a correction
 				// here repaints the next round exactly as the kendo path's
@@ -162,7 +164,7 @@ func (e *Engine) recordEngiMatch(
 						return err
 					}
 				}
-				priorWinner, priorWinnerID := bm.Winner, bm.WinnerID
+				priorWinner, priorWinnerID := propagatedWinnerOf(b, rIdx, mIdx, bm)
 				result = applyEngiToBracketMatch(bm, flagsA, flagsB, winnerSide, correctionReason)
 				e.propagateBracketWinner(b, rIdx, mIdx)
 				if force && winnerActuallyChanged(priorWinner, priorWinnerID, bm) {
@@ -174,7 +176,8 @@ func (e *Engine) recordEngiMatch(
 		if b.ThirdPlaceMatch != nil && b.ThirdPlaceMatch.ID == matchID {
 			bm := b.ThirdPlaceMatch
 			if !bracketMatchPlayable(bm) {
-				return validationErrorf("knockout match %s is not ready to score: a feeder pool or match has not finished", matchID)
+				// PURE, same reasoning as the round branch above.
+				return validationErrorf("%s is not ready to score: a feeder pool or match has not finished", SentenceCase(MatchLabel(bracketMatchRef(bm))))
 			}
 			result = applyEngiToBracketMatch(bm, flagsA, flagsB, winnerSide, correctionReason)
 			// No propagation out of bronze.
@@ -185,6 +188,7 @@ func (e *Engine) recordEngiMatch(
 	if updateErr != nil {
 		return nil, updateErr
 	}
+	e.restoreForceReopened(h, compID, reopened)
 	if fo.Reopened != nil {
 		*fo.Reopened = append(*fo.Reopened, reopened...)
 	}

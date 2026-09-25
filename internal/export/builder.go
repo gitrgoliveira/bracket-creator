@@ -465,8 +465,12 @@ func overlayTeamPoolScores(f *excelize.File, pools []helper.Pool, resultByID map
 			writeTeamSummaryCells(f, sheetName, courtStartCol, summaryExcelRow, mr, mirror)
 
 			// Sub-match rows start two rows below the Red header (1-based).
+			// credit: same call writeTeamSummaryCells makes internally, so
+			// the summary row and the bout rows below agree on which side a
+			// default-win ruling credits.
 			subStartExcelRow := rowIdx + 3
-			writeTeamSubMatchScores(f, sheetName, courtStartCol, subStartExcelRow, mr.SubResults, teamSize, mirror, mr.SideA, mr.SideB)
+			credit := state.DefaultWinCreditSide(mr.Status, mr.Decision, mr.DecisionBy, mr.Attribution())
+			writeTeamSubMatchScores(f, sheetName, courtStartCol, subStartExcelRow, mr.SubResults, teamSize, mirror, mr.SideA, mr.SideB, credit)
 		}
 	}
 
@@ -513,12 +517,18 @@ func writeTeamSummaryCells(f *excelize.File, sheetName string, courtStartCol, ex
 	rPCol := colNum(courtStartCol + 4)
 	rVCol := colNum(courtStartCol + 5)
 
-	lMark, rMark := SideMarksLR(mr.Decision, mr.HanteiDecided(), domain.WinnerAttribution{
-		WinnerID: mr.WinnerID, SideAID: mr.SideAID, SideBID: mr.SideBID,
-		Winner: mr.Winner, SideA: mr.SideA, SideB: mr.SideB,
-	}, mirror)
+	att := mr.Attribution()
+	lMark, rMark := SideMarksLR(mr.Decision, mr.HanteiDecided(), att, mirror)
 
-	line := state.TeamResultFrom(mr.SubResults, mr.SideA, mr.SideB)
+	// credit is state.DefaultWinCreditSide's answer for THIS match: which
+	// side (if any) a default-win ruling (kiken/fusenpai/fusensho) closing
+	// it credits every unfought numbered bout to. TeamResultFrom routes it
+	// through SubBoutEffectiveResult per bout, so a match decided before
+	// every bout was scored still shows the default-win maru for the
+	// credited side's IV/PW, the same way a played bout with its own
+	// per-bout fusensho decision already does.
+	credit := state.DefaultWinCreditSide(mr.Status, mr.Decision, mr.DecisionBy, att)
+	line := state.TeamResultFrom(mr.SubResults, mr.SideA, mr.SideB, credit)
 	if line != nil {
 		// SideA = Aka, SideB = Shiro. Left is Aka unless mirror.
 		leftIV, leftPW := line.AkaIV, line.AkaPW
@@ -531,8 +541,15 @@ func writeTeamSummaryCells(f *excelize.File, sheetName string, courtStartCol, ex
 		setIVCellWithMark(f, sheetName, rVCol, excelRow, rightIV, rMark)
 		setIntCellDirect(f, sheetName, rPCol, excelRow, rightPW)
 	} else {
-		// No summary line (e.g. a forfeit before any bout was fought):
-		// the result marks still need a home in the competitor's cell.
+		// No summary line: mr.SubResults is genuinely empty (0 rows). Since
+		// a completed default-win team match is now padded with one row per
+		// numbered position (state.PadDefaultWinBoutPositions, applied both
+		// at write time and by the legacy-load repair), this is no longer
+		// the ordinary "forfeit before any bout was fought" case it used to
+		// be -- it is now the residual fallback for what padding does not
+		// reach: a bye, a daihyosen/tiebreaker row, or a match this view's
+		// SubResults were never threaded through at all. The result marks
+		// still need a home in the competitor's cell.
 		if lMark != "" {
 			setCellStr(f, sheetName, lVCol, excelRow, lMark)
 		}
@@ -597,9 +614,19 @@ func bracketMatchResultView(bm *state.BracketMatch) state.MatchResult {
 		// the app decided it by id. A row that carries no id (a bye, an
 		// unresolved feeder, an unrepaired legacy row) passes "" and takes
 		// the name path exactly as before.
-		SideAID:    bm.SideAID,
-		SideBID:    bm.SideBID,
-		WinnerID:   bm.WinnerID,
+		SideAID:  bm.SideAID,
+		SideBID:  bm.SideBID,
+		WinnerID: bm.WinnerID,
+		// Status and DecisionBy travel too (bc-tmfn follow-up):
+		// state.DefaultWinCreditSide (called from writeTeamSummaryCells)
+		// needs both to decide whether a default-win ruling credits an
+		// unfought numbered bout, and a bracket match's own Status/
+		// DecisionBy are what that decision rests on -- omitting them left
+		// Status at its zero value ("", never MatchStatusCompleted), so a
+		// completed bracket kiken/fusenpai/fusensho could never be credited
+		// through this projection.
+		Status:     bm.Status,
+		DecisionBy: bm.DecisionBy,
 		Decision:   bm.Decision,
 		Encho:      bm.Encho,
 		SubResults: bm.SubResults,
@@ -638,7 +665,16 @@ func setIVCellWithMark(f *excelize.File, sheetName, col string, row, iv int, mar
 // this same sheet's IV/PW summary still counts the bout. state.SubBoutWinnerSide
 // and the JS twin subWinnerSides both carry the same match-level arms; this is
 // the third reader of that rule and it was the one without them.
-func writeTeamSubMatchScores(f *excelize.File, sheetName string, courtStartCol, subStartExcelRow int, subResults []state.SubMatchResult, teamSize int, mirror bool, matchSideA, matchSideB string) {
+// credit is state.DefaultWinCreditSide's answer for the whole match (the
+// caller computes it once, shared with writeTeamSummaryCells so the summary
+// row and this sheet's bout rows never disagree about which side a
+// default-win ruling credits): a numbered bout with no result of its own is
+// routed through state.SubBoutEffectiveResult, which shows the FIK
+// default-win maru for that side without a per-row Kiken/Fus. mark -- the
+// mark names the ONE competitor who withdrew and already rides the summary
+// row's IV cell. domain.MatchSideNone reproduces the pre-credit behaviour
+// exactly (an unfought bout's cells stay blank).
+func writeTeamSubMatchScores(f *excelize.File, sheetName string, courtStartCol, subStartExcelRow int, subResults []state.SubMatchResult, teamSize int, mirror bool, matchSideA, matchSideB string, credit domain.MatchSide) {
 	lVCol := colNum(courtStartCol + 1)
 	rVCol := colNum(courtStartCol + 5)
 
@@ -646,6 +682,14 @@ func writeTeamSubMatchScores(f *excelize.File, sheetName string, courtStartCol, 
 		if sub.Position <= 0 || sub.Position > teamSize {
 			continue // skip daihyosen placeholder / unpositioned / out-of-range rows
 		}
+		// state.SubBoutEffectiveResult substitutes the FIK default-win maru
+		// (Winner set to the credited side's team name, IpponsA/IpponsB the
+		// maru) for a bout with no result of its own on a match a
+		// default-win ruling closed; unchanged otherwise (a fought bout, or
+		// credit == domain.MatchSideNone). Decision is deliberately left
+		// untouched by that substitution, so this row draws no Kiken/Fus.
+		// mark -- only the match-level summary row names the withdrawer.
+		sub = state.SubBoutEffectiveResult(sub, credit, matchSideA, matchSideB)
 		// Sub-match row for Position P is the P-th sub row (1-based Position).
 		excelRow := subStartExcelRow + (sub.Position - 1)
 
@@ -1081,8 +1125,13 @@ func overlayTeamBracketScores(f *excelize.File, bracketByNum map[int]state.Brack
 			}
 
 			// Sub-match ippon letters: Position p sits at H+2+p, i.e. the sub
-			// rows start at H+3. Same writer as the pool sheet.
-			writeTeamSubMatchScores(f, sheetName, courtStartCol, headerExcelRow+3, bm.SubResults, teamSize, mirror, bm.SideA, bm.SideB)
+			// rows start at H+3. Same writer as the pool sheet. credit is
+			// computed straight off bm (not the bracketMatchResultView below,
+			// which exists for writeTeamSummaryCells' state.MatchResult
+			// param) but is the SAME answer: both read Status/Decision/
+			// DecisionBy/Attribution off this one bm.
+			credit := state.DefaultWinCreditSide(bm.Status, bm.Decision, bm.DecisionBy, bm.Attribution())
+			writeTeamSubMatchScores(f, sheetName, courtStartCol, headerExcelRow+3, bm.SubResults, teamSize, mirror, bm.SideA, bm.SideB, credit)
 
 			// IV/PW summary row = H + 5 + teamSize. Route through the shared
 			// pool-sheet writer so the IV-mark contract (and the forfeit

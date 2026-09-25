@@ -19,7 +19,7 @@
 // the 200 body (mp-y3nk), so the caller can tell a landed write from a stale
 // reconnect replay the server dropped.
 //
-// Empty-body methods (overridePoolRank,
+// Empty-body methods (overridePoolRanks,
 // resetOverrides, updateMatchTime, moveMatchCourt,
 // deleteCompetition) deliberately return `true`
 // rather than `res.json()`: calling res.json() on a 200/204 with no
@@ -40,7 +40,8 @@ import {
     writeDidNotLand, writeWasSuperseded, writeWasRefusedForClock,
     SUPERSEDED_REASON, SUPERSEDED_ADVICE,
     CLOCK_SKEW_REASON_TEXT, CLOCK_SKEW_ADVICE, CLOCK_SKEW_UNHEALED_ADVICE,
-    downstreamKnockoutPlayedQueueDrop,
+    downstreamKnockoutPlayedQueueDrop, downstreamKnockoutRunningMessage, downstreamKnockoutRunningReopenMessage,
+    downstreamKnockoutRunningQueueDrop, courtBusyMessage,
 } from './write_result.jsx';
 
 // ---------------------------------------------------------------------------
@@ -75,12 +76,53 @@ function fetchWithTimeout(url, opts, ms = 12000) {
 // server field is threaded once, not per endpoint. Async: it awaits the body.
 async function reopenFailureError(res) {
     const err = await res.json().catch(() => ({}));
+    // A later knockout match already has its own result: the same refusal a
+    // knockout correction gets, parsed by the same helper, so the caller asks
+    // downstreamKnockoutPlayedRefusal(e) and confirms before retrying with force.
+    // `reopen` marks it as met by a reopen rather than a corrected result, for
+    // the dialog's copy (write_result.jsx), the way overridePoolRanks marks
+    // `ranking`.
+    //
+    // bc-rawm: routed through the shared _downstreamRefusalError rather than
+    // _downstreamKnockoutPlayedError alone, so a kachinuki reopen blocked by a
+    // DOWNSTREAM MATCH STILL RUNNING (not yet played) gets a copy for THIS
+    // being a reopen (bc-cse: `{ reopen: true }` selects
+    // downstreamKnockoutRunningReopenMessage, "...then reopen again" rather
+    // than the score path's "...then save again", which has no save step to
+    // retry here), instead of falling through to the bare
+    // "downstream_knockout_running" token below. The PLAYED shape ALSO marks
+    // `reopen` on its own structured field below, for the confirm dialog's
+    // copy; the running shape carries no `.downstreamKnockoutPlayed` to mark,
+    // its message alone already says what to do about a match still being
+    // fought.
+    const downstream = _downstreamRefusalError(err, { reopen: true });
+    if (downstream) {
+        if (downstream.downstreamKnockoutPlayed) downstream.downstreamKnockoutPlayed.reopen = true;
+        return downstream;
+    }
     const e = new Error(err.message || err.error || "Failed to reopen match");
     if (err.error) e.code = err.error;
     if (err.court) e.court = err.court;
     if (err.matchId) e.matchId = err.matchId;
     if (err.compId) e.compId = err.compId;
+    // bc-rawm: the court-busy conflict reuses the score path's structured
+    // court_busy payload (see recordScore below), which now carries `label`
+    // -- the blocking match named the way the operator sees it. Carried
+    // through so ReopenFeedback (admin_scoring_shared.jsx) can prefer it over
+    // its own best-effort fetched label, and never fall back to printing the
+    // raw matchId.
+    if (err.label) e.label = err.label;
     return e;
+}
+
+// reopenBody is the optional half of both reopen requests: the audit reason
+// and the downstream confirmation, each sent only when set, so the one-tap
+// kachinuki Reopen still posts {} exactly as before.
+function reopenBody(reason, force) {
+    const body = {};
+    if (reason) body.reason = reason;
+    if (force) body.forceDownstreamReopen = true;
+    return body;
 }
 
 // normalizeViewerCompItem maps one {config, poolMatches, bracket} item from the
@@ -148,16 +190,86 @@ function _downstreamKnockoutPlayedError(body) {
     err.downstreamKnockoutPlayed = {
         matchId: body.matchId,
         blockingMatchId: body.blockingMatchId,
-        // Every match the confirmation will clear, each as {id, number}: the
-        // NUMBER is what the operator is shown ("Match 3"), the id only
-        // addresses it. One entry, except when a semifinal fed both the final
+        // Every match the confirmation will clear, each as {id, number,
+        // label}: the LABEL is what the operator is shown ("Match 3
+        // (Final)", write_result.jsx matchLabel), the id only addresses it. One entry, except when a semifinal fed both the final
         // and the bronze match.
         blockingMatches: body.blockingMatches && body.blockingMatches.length
             ? body.blockingMatches
             : (body.blockingMatchId ? [{ id: body.blockingMatchId }] : []),
         displaced: body.displaced,
+        // A POOL correction in a mixed competition names the qualifying
+        // places it moves ({pool, rank, place, from, to, tied}); empty for a
+        // knockout correction, which moves no pool place.
+        qualifierChange: body.qualifierChange || [],
     };
     return err;
+}
+
+// Parses the 409 downstream_knockout_running refusal: a pool correction that
+// would move a qualifier out of a knockout match being fought now. Unlike the
+// played refusal it is NOT confirmable, so it carries no confirm fields; the
+// thrown Error's message is the operator's copy (write_result.jsx's
+// downstreamKnockoutRunningMessage) rather than the bare code, which is what
+// every `new Error(data.error)` fallback below would otherwise show. Returns
+// null when the body is not this refusal. bc-cse: `opts.reopen` swaps in
+// downstreamKnockoutRunningReopenMessage instead -- the score path's "then
+// save again" is wrong for a REOPEN, which has no save step to retry.
+function _downstreamKnockoutRunningError(body, opts) {
+    if (!body || body.error !== 'downstream_knockout_running') return null;
+    const message = (opts && opts.reopen)
+        ? downstreamKnockoutRunningReopenMessage(body.runningMatches)
+        : downstreamKnockoutRunningMessage(body.runningMatches);
+    const err = new Error(message);
+    err.code = body.error;
+    err.downstreamKnockoutRunning = { matchId: body.matchId, runningMatches: body.runningMatches || [] };
+    return err;
+}
+
+// _downstreamRefusalError is the one parse every score/decision write throws
+// through for a knockout-consequence 409: the confirmable played refusal, or
+// the terminal running one.
+function _downstreamRefusalError(body, opts) {
+    return _downstreamKnockoutPlayedError(body) || _downstreamKnockoutRunningError(body, opts);
+}
+
+// _courtBusyError (bc-rawm): the 409 court_busy refusal on a score write --
+// this match's shiaijo is not free, a DIFFERENT match already holds it. Built
+// into an operator sentence via write_result.jsx's courtBusyMessage rather
+// than echoing the server's own `message` field, so the sentence names the
+// blocking match the way the operator sees it (the server's `label`) and
+// never falls back to printing the internal id the body also carries.
+// Deliberately separate from _downstreamRefusalError: this is not a
+// downstream-knockout refusal, and reopenFailureError's own court_busy
+// handling (the "TWO 409 SHAPES" branch below) keeps using the server's raw
+// `message` for its own Error, unaffected by this helper.
+function _courtBusyError(body) {
+    if (!body || body.error !== 'court_busy') return null;
+    const err = new Error(courtBusyMessage({ court: body.court, label: body.label }));
+    err.code = body.error;
+    if (body.court) err.court = body.court;
+    if (body.matchId) err.matchId = body.matchId;
+    if (body.compId) err.compId = body.compId;
+    if (body.label) err.label = body.label;
+    return err;
+}
+
+// _downstreamQueueDropCopy is what a DROPPED queued write is reported with when
+// the server refused its replay for a knockout reason: the played refusal's
+// queue copy (it cannot be confirmed from the flush loop, nobody is there), or
+// the running refusal's. Both are write_result.jsx's words. bc-cse: also a
+// court_busy refusal (_courtBusyError, whose message is courtBusyMessage's),
+// so a queued write dropped for a busy shiaijo alerts the operator sentence
+// rather than the bare "court_busy" token both drop sites below used to fall
+// through to. null for any other body.
+function _downstreamQueueDropCopy(body) {
+    const played = _downstreamKnockoutPlayedError(body);
+    if (played) return downstreamKnockoutPlayedQueueDrop(played.downstreamKnockoutPlayed);
+    const running = _downstreamKnockoutRunningError(body);
+    if (running) return downstreamKnockoutRunningQueueDrop(running.downstreamKnockoutRunning.runningMatches);
+    const courtBusy = _courtBusyError(body);
+    if (courtBusy) return { reason: courtBusy.message };
+    return null;
 }
 
 // ---------------------------------------------------------------------------
@@ -919,7 +1031,9 @@ async function _flushQueue() {
                     const res = await fetchWithTimeout(effectiveUrl, {
                         method: effectiveMethod,
                         headers: { 'Content-Type': 'application/json', 'X-Tournament-Password': password },
-                        body: JSON.stringify(payload),
+                        // Never a replayed confirmation, whatever the entry holds:
+                        // see _withoutDownstreamConfirmation.
+                        body: JSON.stringify(_withoutDownstreamConfirmation(payload)),
                     });
                     if (res.ok) {
                         // Success (HTTP 200/201, including a stale {stale:true} no-op): remove
@@ -1158,14 +1272,11 @@ async function _flushQueue() {
                             // human copy, same reason this can't just retry: there is no
                             // operator here for attemptScoreWrite's confirm dialog to
                             // prompt, and nothing sets forceDownstreamReopen automatically.
-                            const downstreamRefusal = _downstreamKnockoutPlayedError(body);
-                            const dropCopy = downstreamRefusal
-                                ? downstreamKnockoutPlayedQueueDrop(downstreamRefusal.downstreamKnockoutPlayed)
-                                : null;
+                            const dropCopy = _downstreamQueueDropCopy(body);
                             const reason = dropCopy ? dropCopy.reason : (body.reasonHuman || body.error || 'conflict (409)');
                             _notifyTerminalWriteFailed({
                                 compID, matchID, kind, status: 409, reason,
-                                ...(dropCopy ? { advice: dropCopy.advice } : {}),
+                                ...(dropCopy && dropCopy.advice ? { advice: dropCopy.advice } : {}),
                             });
                             _notifyQueueAlert({
                                 kind: 'rejected', count: 1, terminalCount: 1, compID, matchID,
@@ -1205,15 +1316,12 @@ async function _flushQueue() {
                         // "downstream_knockout_played" token, which is what an operator
                         // reading this alert used to see with no way to understand it or
                         // move forward.
-                        const downstreamRefusal = _downstreamKnockoutPlayedError(body);
-                        const dropCopy = downstreamRefusal
-                            ? downstreamKnockoutPlayedQueueDrop(downstreamRefusal.downstreamKnockoutPlayed)
-                            : null;
+                        const dropCopy = _downstreamQueueDropCopy(body);
                         const reason = dropCopy ? dropCopy.reason : (body.reasonHuman || body.error || `HTTP ${res.status}`);
                         if (terminal) {
                             _notifyTerminalWriteFailed({
                                 compID, matchID, kind, status: res.status, reason,
-                                ...(dropCopy ? { advice: dropCopy.advice } : {}),
+                                ...(dropCopy && dropCopy.advice ? { advice: dropCopy.advice } : {}),
                             });
                         }
                         _notifyQueueAlert({
@@ -1326,6 +1434,25 @@ function enqueueRunningWrite(compID, matchID, payload, password) {
     });
 }
 
+// _withoutDownstreamConfirmation is the ONE owner of "a queued write NEVER
+// carries the operator's downstream confirmation". A "Proceed anyway" answered
+// one specific refusal, naming the knockout matches that stood then; a replay
+// minutes or hours later would reopen whatever stands by then, which nobody
+// confirmed. So a replay that still meets the refusal gets the 409 and is
+// dropped with its queue copy (downstreamKnockoutPlayedQueueDrop).
+//
+// Applied at BOTH ends of the queue: _enqueueTerminalWrite, so the stored copy
+// (and localStorage) never holds it, and _flushQueue, the one door EVERY
+// replay goes through, so an entry that already holds it cannot send it
+// either. That second call is not redundant: an entry queued by an older
+// bundle, before the enqueue strip existed, is rehydrated from localStorage
+// verbatim and replayed by this bundle's flush loop. Returns a COPY, never a
+// mutation: the live fetch and _broadcastPatch share the caller's object.
+function _withoutDownstreamConfirmation(payload) {
+    const { forceDownstreamReopen: _confirmation, ...rest } = payload || {};
+    return rest;
+}
+
 /**
  * F5: Enqueue a terminal write for offline-resilient delivery.
  * Terminal entries (completed score, decision, lineup) supersede any running
@@ -1341,7 +1468,7 @@ function enqueueRunningWrite(compID, matchID, payload, password) {
  */
 function _enqueueTerminalWrite(key, kind, method, url, payload, password, compID, matchID) {
     _commitEnqueue(key, {
-        compID, matchID, payload, password,
+        compID, matchID, payload: _withoutDownstreamConfirmation(payload), password,
         kind, terminal: true,
         method, url,
         enqueuedAt: Date.now(),
@@ -1782,7 +1909,7 @@ const API = {
         }
         // Backend returns 204 No Content: calling .json() on an empty
         // body throws SyntaxError per the Fetch spec (same pattern as
-        // overridePoolRank etc. above).
+        // overridePoolRanks etc. above).
         return true;
     },
     // Set or rotate the elevated (destructive-ops) admin password (spec 004
@@ -2329,7 +2456,7 @@ const API = {
             if (retryBody.error === "ineligible_competitor" || retryBody.error === "already_ineligible") {
                 throw new Error(retryBody.reasonHuman || retryBody.reason || retryBody.error || "Failed to record score");
             }
-            throw _downstreamKnockoutPlayedError(retryBody) || new Error(retryBody.error || "Failed to record score");
+            throw _courtBusyError(retryBody) || _downstreamRefusalError(retryBody) || new Error(retryBody.error || "Failed to record score");
         };
 
         let res;
@@ -2416,12 +2543,18 @@ const API = {
         if (data.error === "ineligible_competitor" || data.error === "already_ineligible") {
             throw new Error(data.reasonHuman || data.reason || data.error || "Failed to record score");
         }
+        // bc-rawm: 409 court_busy (the shiaijo this match wants is running a
+        // different match) is built into an operator sentence naming the
+        // shiaijo and the blocking match, never the bare "court_busy" token;
+        // see _courtBusyError above.
+        const courtBusy = _courtBusyError(data);
+        if (courtBusy) throw courtBusy;
         // bc-kcdg: 409 downstream_knockout_played (correcting a completed
         // knockout match whose later round already played) is parsed into a
         // structured error rather than a plain message; see
         // _downstreamKnockoutPlayedError and write_result.jsx's
         // downstreamKnockoutPlayedRefusal.
-        throw _downstreamKnockoutPlayedError(data) || new Error(data.error || "Failed to record score");
+        throw _downstreamRefusalError(data) || new Error(data.error || "Failed to record score");
     },
     // T093–T095: kiken / fusenpai / fusensho / daihyosen: server auto-fills
     // scoreline and Winner from {decision, decisionBy, encho}. Body shape is
@@ -2476,6 +2609,18 @@ const API = {
             // can surface the error. The decision-locked-as-success rule is ONLY
             // for queued retries in _flushQueue, not for direct calls.
             const err = await res.json().catch(() => ({}));
+            // bc-rawm: the eligibility gate (mp-dc52 Phase 3) refuses a
+            // decision exactly as it refuses a score write -- 409
+            // ineligible_competitor / already_ineligible carrying a full
+            // operator sentence in reasonHuman -- so prefer it the same way
+            // recordScore does below: reasonHuman, then reason, then the bare
+            // code. Checked BEFORE the downstream parse: neither downstream
+            // helper matches these two codes, so without this branch the
+            // fallback `new Error(err.error ...)` would have thrown the raw
+            // machine token instead of the server's sentence.
+            if (err.error === "ineligible_competitor" || err.error === "already_ineligible") {
+                throw new Error(err.reasonHuman || err.reason || err.error || "Failed to record decision");
+            }
             // bc-cse: 409 downstream_knockout_played (a kiken/fusenpai/daihyosen
             // decision that corrects a completed knockout match whose later
             // round already played) gets the SAME structured parse as the
@@ -2486,29 +2631,29 @@ const API = {
             // a decision retry (submitDecisionRequest, admin_scoring_shared.jsx,
             // is what now reads .downstreamKnockoutPlayed off this error via
             // attemptScoreWrite).
-            throw _downstreamKnockoutPlayedError(err) || new Error(err.error || "Failed to record decision");
+            throw _downstreamRefusalError(err) || new Error(err.error || "Failed to record decision");
         }
         const data = await res.json();
-        // bc-cse defence in depth, and INERT today by construction: the
-        // /decision handler maps a superseded write to 200 {"applied": false},
-        // but RecordDecisionTx builds its MatchResult with no ModifiedAt, so the
-        // write takes ApplyByTimestamp's unstamped bypass and the server cannot
-        // currently emit this body. Asked anyway for the same reason the server
-        // maps it: a 200 the caller reads as success while nothing was stored is
-        // precisely bc-lww1, and a decision resolves a match, so swallowing it
-        // would leave the operator looking at a verdict the disk never held.
+        // bc-cse, LIVE since mp-jnvl: the /decision handler maps a superseded
+        // write to 200 {"applied": false}, and a decision now carries a real
+        // modifiedAt (stamped above, exactly as recordScore stamps its own
+        // payload) that reaches RecordDecisionTx through its variadic
+        // modifiedAt parameter, which the handler always passes. So
+        // ApplyByTimestamp's LWW guard runs on a decision exactly as it does
+        // on a score write, and the server can genuinely emit this body for
+        // either reason (superseded or clock_skew) -- this is no longer a
+        // defence against a shape the server cannot send. Handled for the
+        // same reason bc-lww1 exists at all: a 200 the caller reads as
+        // success while nothing was stored would leave the operator looking
+        // at a verdict the disk never held.
         //
-        // ONE verdict for every applied:false here, and deliberately NOT the
-        // terminal SCORE path's split. That path earns its clock-specific copy
-        // by healing the offset and RETRYING once: only after the retry is
-        // refused again may it tell the operator their clock cannot be
-        // reconciled. This path does neither -- a decision carries no
-        // modifiedAt to re-stamp, so there is nothing to heal and retry -- and
-        // saying "the device clock could not be reconciled" without having
-        // tried would be a verdict on an attempt that never happened. So the
-        // decision path REPORTS rather than recovering, with the plain
-        // superseded copy. The offset is still relearned, since a skewed
-        // device is worth correcting for the next write that IS stamped.
+        // ONE verdict for every applied:false here, unlike the terminal SCORE
+        // path's split: that path earns its clock-specific copy by healing
+        // the offset and RETRYING once before reporting. This path does not
+        // attempt that heal-and-resend, so a decision refused for either
+        // reason is reported with the plain superseded copy rather than the
+        // dedicated clock-skew one. The offset is still relearned either way,
+        // since a skewed device is worth correcting for the next write.
         if (writeWasSuperseded(data)) {
             _relearnClockThrottled();
             _notifyScoreSuperseded(compID, matchID);
@@ -2537,15 +2682,31 @@ const API = {
         }
         return res.json();
     },
-    // playerId is REQUIRED (operator ruling bc-pnum): the server resolves a
-    // pool member by id only (resolvePoolOverrideTarget,
+    // overridePoolRanks records a whole group of pool ranks, a chusen's order,
+    // as ONE write: ranks is [{ playerId, rank }], and the server records
+    // every rank together and answers for the final order only. Sent one rank
+    // at a time, the order passed through states nobody chose, so a knockout
+    // match whose place the final order keeps could be named and reopened.
+    //
+    // playerId is REQUIRED on every entry (operator ruling bc-pnum): the
+    // server resolves a pool member by id only (poolHasPlayerID,
     // handlers_competition.go) and rejects the request with 400 when it is
     // missing -- two pool members can legally share a display name from
-    // different dojos, so playerName alone can never disambiguate them.
-    // playerDojo is NOT sent: the server never read it (id-only resolution
-    // has no use for it), so a caller has nothing to gain by supplying it.
-    async overridePoolRank(compID, poolID, playerName, rank, password, playerId) {
-        const body = { playerName, rank, playerId };
+    // different dojos, so a name can never disambiguate them. Neither a name
+    // nor a dojo is sent: the server never reads them.
+    //
+    // forceDownstreamReopen is the operator's confirmation of a 409
+    // downstream_knockout_played refusal: a new order that moves a qualifier
+    // out of a knockout match the old one already fought is refused exactly
+    // like a pool result correction (and one being fought is refused outright,
+    // downstream_knockout_running). Both are parsed into the same structured
+    // errors recordScore throws, so the chusen panel offers the same
+    // confirm-and-retry (write_result.jsx's attemptScoreWrite); `ranking`
+    // marks the refusal as a rank change rather than a corrected result, for
+    // the dialog's copy.
+    async overridePoolRanks(compID, poolID, ranks, password, forceDownstreamReopen) {
+        const body = { ranks };
+        if (forceDownstreamReopen) body.forceDownstreamReopen = true;
         const res = await fetch(`/api/competitions/${compID}/pools/${poolID}/override-rank`, {
             method: 'PUT',
             headers: {
@@ -2556,12 +2717,16 @@ const API = {
         });
         if (!res.ok) {
             const err = await res.json().catch(() => ({}));
-            throw new Error(err.error || "Failed to override rank");
+            const refusal = _downstreamRefusalError(err);
+            if (refusal && refusal.downstreamKnockoutPlayed) refusal.downstreamKnockoutPlayed.ranking = true;
+            throw refusal || new Error(err.error || "Failed to override rank");
         }
-        // Backend returns 200 with empty body. Calling .json() on an
-        // empty body throws SyntaxError per the Fetch spec, which would
-        // surface to the user as an alert("Failed: Unexpected end of
-        // JSON input") right after a successful save.
+        // The body ({reopenedMatches}) is deliberately not read: an older
+        // server answered 200 with an EMPTY body, and calling .json() on one
+        // throws SyntaxError per the Fetch spec, which surfaced as an
+        // alert("Failed: Unexpected end of JSON input") right after a
+        // successful save. The confirm dialog already named what a forced
+        // override reopens, and each reopened match is announced over SSE.
         return true;
     },
     // bc-kcdg: forceDownstreamReopen is the operator's confirmed override of a
@@ -2788,24 +2953,28 @@ const API = {
         }
         return true;
     },
-    // mp-gmcg: reopen a COMPLETED kachinuki team match: status back to
-    // running, winner/decision cleared, bout log kept.
+    // mp-gmcg: reopen a COMPLETED kachinuki team match, or (bc-tmfn) any
+    // completed match a withdrawal decided: status back to running,
+    // winner/decision cleared, fought bouts kept.
     //
-    // NO REASON IS SENT, deliberately (operator ruling). An operator who ended
-    // a match BY MISTAKE at a shiaijo must be able to get back into it in ONE
-    // TAP; making them justify the mistake before they may undo it is friction
-    // at the worst possible moment. The audit trail is collected on the way
-    // OUT instead: the server stamps `reopenPending` on the reopened match and
-    // rejects the later COMPLETING write unless it carries a correctionReason
-    // (400, field correctionReason), which admin_scoring_team.jsx prompts for
-    // on [End match]. The body stays an empty JSON object (not absent) so a
-    // handler that binds JSON still parses the request.
+    // The kachinuki Reopen sends NO REASON, deliberately (operator ruling). An
+    // operator who ended a match BY MISTAKE at a shiaijo must be able to get
+    // back into it in ONE TAP; making them justify the mistake before they may
+    // undo it is friction at the worst possible moment, and ending the match
+    // again asks for no reason either (operator ruling 2026-09-25: a match can
+    // be reopened without any reason, and nothing is gated on that). Clear
+    // withdrawal and reopen is one tap with no reason too; opts.reason stays
+    // for any caller that has one to record. opts.force is the operator's confirmation after a
+    // downstream_knockout_played refusal. The body stays a JSON object (never
+    // absent) so a handler that binds JSON still parses the request.
     //
-    // 400 = a non-kachinuki competition; 409 = not completed / downstream
-    // bracket match already fought (the propagated winner cannot be retracted)
-    // / another match is already running on this match's court. The editor
-    // shows whichever came back verbatim, so the unwrap keeps the server's own
-    // words.
+    // 400 = neither kachinuki nor withdrawal-decided; 409 = not completed / a
+    // later match in progress or resolved by a bye / a later match with its
+    // own result (downstream_knockout_played, parsed like the score path's,
+    // so the caller confirms and retries with force) / another match is
+    // already running on this match's court. The editor shows whichever came
+    // back verbatim, so the unwrap keeps the server's own words. Resolves to
+    // the server's { reopenedMatches: [{id, number, label}] }.
     //
     // TWO 409 SHAPES: most carry the sentence in `error`, but the court-busy
     // conflict reuses the score path's structured payload, where `error` is
@@ -2816,35 +2985,36 @@ const API = {
     // conflict, and a busy court would be a dead end (kachinuki reopen is the
     // ONLY way to fix a bout log). The server broadcasts match_updated on
     // success.
-    async reopenMatch(compID, matchID, password) {
+    async reopenMatch(compID, matchID, password, { reason = "", force = false } = {}) {
         const res = await fetch(`/api/competitions/${compID}/matches/${matchID}/reopen`, {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
                 'X-Tournament-Password': password
             },
-            body: JSON.stringify({})
+            body: JSON.stringify(reopenBody(reason, force))
         });
         if (!res.ok) throw await reopenFailureError(res);
-        return true;
+        return res.json().catch(() => ({}));
     },
     // mp-gmcg (review A4): atomically requeue the match holding the court AND
     // reopen the target, in ONE server call under one court lock — replaces the
     // former two-call revert-then-reopen, which raced (a peer could take the
     // freed court between the calls). Surfaces the SAME court_busy detail shape
     // as reopenMatch, so the panel re-offers the remedy when a DIFFERENT match
-    // has since taken the court.
-    async requeueBlockerAndReopen(targetComp, targetMatch, blockerComp, blockerMatch, password) {
+    // has since taken the court. opts as reopenMatch's: the remedy carries the
+    // same reason and confirmation the reopen it retries did.
+    async requeueBlockerAndReopen(targetComp, targetMatch, blockerComp, blockerMatch, password, { reason = "", force = false } = {}) {
         const res = await fetch(`/api/competitions/${targetComp}/matches/${targetMatch}/requeue-blocker-and-reopen`, {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
                 'X-Tournament-Password': password
             },
-            body: JSON.stringify({ blockerCompId: blockerComp, blockerMatchId: blockerMatch })
+            body: JSON.stringify({ blockerCompId: blockerComp, blockerMatchId: blockerMatch, ...reopenBody(reason, force) })
         });
         if (!res.ok) throw await reopenFailureError(res);
-        return true;
+        return res.json().catch(() => ({}));
     },
     // mp-gmcg: remove a trailing UNSCORED kachinuki bout appended by mistake
     // ([Record bout] / [Add next bout]). Kachinuki-only; targets a numbered
@@ -3388,7 +3558,7 @@ const API = {
 
     // chusenCandidates: GET /competitions/:id/chusen-candidates
     // Consequential team-pool ties the daihyosen could not settle; the operator
-    // resolves each by chusen (drawing lots), recorded via overridePoolRank.
+    // resolves each by chusen (drawing lots), recorded via overridePoolRanks.
     async chusenCandidates(compID, password) {
         // Lives in the admin-gated competition router, so it needs the
         // tournament password header (unlike the public league candidates GET).
@@ -3402,7 +3572,10 @@ const API = {
             throw new Error(err.error || `Failed to load chusen candidates (${res.status})`);
         }
         const data = await res.json();
-        return data.candidates || [];
+        // candidates: ties still waiting for a chusen. recorded: ties a chusen
+        // already settled, each with the recorded `ranks` parallel to `teams`,
+        // so a chusen recorded in the wrong order can be changed.
+        return { candidates: data.candidates || [], recorded: data.recorded || [] };
     },
 
     // leagueTiebreakGenerate: POST /competitions/:id/league-tiebreak

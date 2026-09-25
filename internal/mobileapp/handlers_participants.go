@@ -195,10 +195,15 @@ func RegisterParticipantHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 		// PUT /competitions/:id roster path (the SPA's primary import flow);
 		// this endpoint stays a plain array response to keep one shape.
 
-		// Load existing participants so we can preserve check-in state for
-		// players that survive the edit (matched by normalizedName+normalizedDojo).
-		// A full roster replacement via this endpoint must not silently clear
-		// check-ins that were already recorded.
+		// Load existing participants so we can preserve check-in state, AND
+		// identity (the participant id), for rows that survive the edit
+		// (matched by normalizedName+normalizedDojo). A full roster
+		// replacement via this endpoint must not silently clear check-ins
+		// that were already recorded, and -- bc-tmfn -- must not silently
+		// mint a fresh id for a row that already has one: a team's id is
+		// what team-members.yaml and lineups.yaml are keyed on, so a
+		// surviving row without its old id back comes back with an empty
+		// squad even though the team itself never left the roster.
 		existing, err := store.LoadParticipants(id, comp.EffectiveWithZekkenName())
 		if err != nil {
 			internalError(c, err, "failed to load participants")
@@ -206,13 +211,16 @@ func RegisterParticipantHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 		}
 		// Key by (normalizedName, normalizedDojo), NOT name alone. Tier-1
 		// dedup allows two same-named competitors from different dojos, so a
-		// name-only key would transfer check-in state between distinct
-		// people. helper.CompetitorKey("", name, dojo) is exactly that
-		// composite (with an "nd:" prefix, harmless here: the key never
-		// leaves this local map).
-		checkedInByKey := make(map[string]bool, len(existing))
+		// name-only key would transfer check-in state (and identity) between
+		// distinct people. helper.CompetitorKey("", name, dojo) is exactly
+		// that composite (with an "nd:" prefix, harmless here: the key never
+		// leaves this local map). Keyed on the whole existing Player, not
+		// just CheckedIn, so this one lookup carries both fields forward;
+		// two maps built from the same existing slice could only ever agree
+		// by construction, not by anything enforcing it.
+		existingByKey := make(map[string]domain.Player, len(existing))
 		for _, ep := range existing {
-			checkedInByKey[helper.CompetitorKey("", ep.Name, ep.Dojo)] = ep.CheckedIn
+			existingByKey[helper.CompetitorKey("", ep.Name, ep.Dojo)] = ep
 		}
 
 		players := make([]domain.Player, 0, len(req.Players))
@@ -226,14 +234,21 @@ func RegisterParticipantHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 			if !comp.EffectiveWithZekkenName() {
 				displayName = ""
 			}
+			match := existingByKey[helper.CompetitorKey("", p.Name, p.Dojo)]
 			players = append(players, domain.Player{
+				// ID is carried forward for a row that matches an existing
+				// participant; a genuinely new row leaves this empty and
+				// saveParticipantsNoLock mints a fresh id for it, same as
+				// today. match is the zero Player for a new row, whose ID is
+				// already "".
+				ID:           match.ID,
 				Name:         p.Name,
 				DisplayName:  displayName,
 				Dojo:         p.Dojo,
 				Metadata:     p.Metadata,
 				Source:       helper.CanonicalRegistrationSource(p.Source),
 				PoolPosition: int64(i),
-				CheckedIn:    checkedInByKey[helper.CompetitorKey("", p.Name, p.Dojo)],
+				CheckedIn:    match.CheckedIn,
 			})
 		}
 

@@ -103,13 +103,22 @@ describe('koTieBlocked does not gate the bout submit', () => {
 
 describe('canReopenKachinukiMatch', () => {
   it('renders only on a COMPLETED kachinuki match', () => {
-    expect(canReopenKachinukiMatch({ isKachinuki: true, isComplete: true })).toBe(true);
+    expect(canReopenKachinukiMatch({ isKachinuki: true, isComplete: true, recordedWithdrawal: false })).toBe(true);
   });
   it('is false on a running kachinuki match (nothing to reopen)', () => {
-    expect(canReopenKachinukiMatch({ isKachinuki: true, isComplete: false })).toBe(false);
+    expect(canReopenKachinukiMatch({ isKachinuki: true, isComplete: false, recordedWithdrawal: false })).toBe(false);
   });
   it('is false for non-kachinuki (backend 400s the endpoint; button must not render)', () => {
-    expect(canReopenKachinukiMatch({ isKachinuki: false, isComplete: true })).toBe(false);
+    expect(canReopenKachinukiMatch({ isKachinuki: false, isComplete: true, recordedWithdrawal: false })).toBe(false);
+  });
+  // bc-tmfn: a withdrawal-decided encounter reopens through RecordedWithdrawal,
+  // which states that the withdrawn team becomes eligible again and asks why;
+  // the silent one-tap Reopen must not be offered beside it.
+  it('is false on a kachinuki encounter a withdrawal decided', () => {
+    expect(canReopenKachinukiMatch({ isKachinuki: true, isComplete: true, recordedWithdrawal: true })).toBe(false);
+  });
+  it('refuses a call that does not say whether a withdrawal is recorded', () => {
+    expect(() => canReopenKachinukiMatch({ isKachinuki: true, isComplete: true })).toThrow(TypeError);
   });
 });
 

@@ -1083,10 +1083,12 @@ describe('API Utils', () => {
     // end of JSON input") right after a *successful* save. The fix is
     // `return true;`, verified here by mocking a response with no .json
     // method (any call to it would throw, which the test would see).
-    describe('overridePoolRank (empty-body success)', () => {
+    describe('overridePoolRanks (empty-body success)', () => {
+      const order = [{ playerId: 'id-alice', rank: 2 }, { playerId: 'id-bob', rank: 1 }];
+
       it('resolves to true on 200 with no body', async () => {
         global.fetch = vi.fn().mockResolvedValue({ ok: true, status: 200 });
-        await expect(API.overridePoolRank('c1', 'p1', 'Alice', 2, 'pw'))
+        await expect(API.overridePoolRanks('c1', 'p1', order, 'pw'))
           .resolves.toBe(true);
       });
 
@@ -1099,7 +1101,7 @@ describe('API Utils', () => {
           status: 200,
           json: async () => { throw new SyntaxError('Unexpected end of JSON input'); },
         });
-        await expect(API.overridePoolRank('c1', 'p1', 'Alice', 2, 'pw'))
+        await expect(API.overridePoolRanks('c1', 'p1', order, 'pw'))
           .resolves.toBe(true);
       });
 
@@ -1109,13 +1111,19 @@ describe('API Utils', () => {
           status: 400,
           json: async () => ({ error: 'rank must be a positive integer ≤ 1000' }),
         });
-        await expect(API.overridePoolRank('c1', 'p1', 'Alice', 2000, 'pw'))
+        await expect(API.overridePoolRanks('c1', 'p1', [{ playerId: 'id-alice', rank: 2000 }], 'pw'))
           .rejects.toThrow('rank must be a positive integer ≤ 1000');
       });
 
-      it('PUTs JSON body with playerName + rank', async () => {
+      // The whole order goes in ONE request, as the group form ({ranks}),
+      // so the server answers for the final order only. playerId is REQUIRED
+      // server-side (operator ruling bc-pnum: a pool member is resolved by id
+      // only), and neither a name nor a dojo is sent: the server never reads
+      // them.
+      it('PUTs the whole order as one ranks body', async () => {
         global.fetch = vi.fn().mockResolvedValue({ ok: true });
-        await API.overridePoolRank('comp1', 'pool-A', 'Alice', 3, 'secret');
+        await API.overridePoolRanks('comp1', 'pool-A', order, 'secret');
+        expect(global.fetch).toHaveBeenCalledTimes(1);
         expect(global.fetch).toHaveBeenCalledWith(
           '/api/competitions/comp1/pools/pool-A/override-rank',
           expect.objectContaining({
@@ -1124,22 +1132,40 @@ describe('API Utils', () => {
               'Content-Type': 'application/json',
               'X-Tournament-Password': 'secret',
             }),
-            body: JSON.stringify({ playerName: 'Alice', rank: 3 }),
           }),
         );
+        const [, opts] = global.fetch.mock.calls[0];
+        expect(JSON.parse(opts.body)).toEqual({ ranks: order });
       });
 
-      // playerId is REQUIRED server-side (operator ruling bc-pnum:
-      // resolvePoolOverrideTarget resolves a pool member by id only). This
-      // pins that the client forwards it verbatim, and that playerDojo is
-      // NEVER sent -- the server never read it, so there is nothing to gain
-      // from including it, unlike the pre-bc-pnum client which sent it
-      // whenever the caller happened to have one.
-      it('includes playerId when the caller passes one, and never sends playerDojo', async () => {
-        global.fetch = vi.fn().mockResolvedValue({ ok: true });
-        await API.overridePoolRank('comp1', 'pool-A', 'Alice', 3, 'secret', 'id-alice');
+      // An order that moves a qualifier out of a knockout match already
+      // fought is refused like a pool correction. The refusal must reach the
+      // caller as the structured error attemptScoreWrite reads (marked as a
+      // ranking for the dialog copy), and the confirmed retry must carry the
+      // confirmation; the terminal running refusal keeps its operator copy.
+      it('parses a downstream refusal and forwards the confirmation', async () => {
+        global.fetch = vi.fn().mockResolvedValue({
+          ok: false,
+          status: 409,
+          json: async () => ({
+            error: 'downstream_knockout_played', matchId: '', blockingMatchId: 'm9',
+            blockingMatches: [{ id: 'm9', number: 9 }], displaced: 'Alpha',
+            qualifierChange: [{ pool: 'Pool A', rank: 1, place: '1st', from: { name: 'Alpha' }, to: { name: 'Beta' } }],
+          }),
+        });
+        const err = await API.overridePoolRanks('c1', 'Pool A', order, 'pw').catch((e) => e);
+        expect(err.downstreamKnockoutPlayed).toMatchObject({ ranking: true, blockingMatchId: 'm9' });
+        expect(err.downstreamKnockoutPlayed.qualifierChange).toHaveLength(1);
+
+        global.fetch = vi.fn().mockResolvedValue({
+          ok: false,
+          status: 409,
+          json: async () => ({ error: 'downstream_knockout_running', matchId: '', runningMatches: [{ id: 'm9', number: 9 }] }),
+        });
+        await expect(API.overridePoolRanks('c1', 'Pool A', order, 'pw', true))
+          .rejects.toThrow('Match 9 is being fought now. Finish it or send it back to the queue, then save again.');
         const [, opts] = global.fetch.mock.calls[0];
-        expect(JSON.parse(opts.body)).toEqual({ playerName: 'Alice', rank: 3, playerId: 'id-alice' });
+        expect(JSON.parse(opts.body)).toEqual({ ranks: order, forceDownstreamReopen: true });
       });
     });
 
@@ -1410,7 +1436,7 @@ describe('API Utils', () => {
     // endpoint. The client must:
     //   - send the new password in a JSON body
     //   - return true on a 204 success (no res.json(); same empty-body
-    //     pattern as overridePoolRank above)
+    //     pattern as overridePoolRanks above)
     //   - throw an Error whose .status is the HTTP status, so the
     //     ResetPasswordForm can branch on 404 ("disabled by operator")
     //     vs other errors.
@@ -1450,7 +1476,7 @@ describe('API Utils', () => {
       it('does not call res.json() on the success path', async () => {
         // Empty 204 body; any call to .json() would throw
         // SyntaxError per the Fetch spec. Mirrors the
-        // overridePoolRank regression coverage above.
+        // overridePoolRanks regression coverage above.
         global.fetch = vi.fn().mockResolvedValue({
           ok: true,
           status: 204,
@@ -1705,10 +1731,13 @@ describe('API Utils', () => {
     });
 
     describe('chusenCandidates', () => {
-      it('returns the candidates array from the response', async () => {
+      it('returns the candidates and recorded arrays from the response', async () => {
         const payload = {
           candidates: [
             { poolName: 'Pool A', teamNames: ['Team 1', 'Team 2'], minPosition: 2 },
+          ],
+          recorded: [
+            { poolName: 'Pool B', teamNames: ['Team 4', 'Team 3'], minPosition: 1, ranks: [1, 2] },
           ],
         };
         global.fetch = vi.fn().mockResolvedValue({
@@ -1716,20 +1745,20 @@ describe('API Utils', () => {
           json: async () => payload,
         });
         const result = await API.chusenCandidates('comp-1', 'pw');
-        expect(result).toEqual(payload.candidates);
+        expect(result).toEqual({ candidates: payload.candidates, recorded: payload.recorded });
         expect(global.fetch).toHaveBeenCalledWith(
           '/api/competitions/comp-1/chusen-candidates',
           { headers: { 'X-Tournament-Password': 'pw' } }
         );
       });
 
-      it('returns [] when the candidates field is absent', async () => {
+      it('returns empty lists when the fields are absent', async () => {
         global.fetch = vi.fn().mockResolvedValue({
           ok: true,
           json: async () => ({}),
         });
         const result = await API.chusenCandidates('comp-1');
-        expect(result).toEqual([]);
+        expect(result).toEqual({ candidates: [], recorded: [] });
       });
 
       it('throws with the status when the body has no error field', async () => {

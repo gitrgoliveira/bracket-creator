@@ -190,8 +190,9 @@ func (s *Store) copyBracket(b *Bracket) *Bracket {
 		return nil
 	}
 	res := &Bracket{
-		Rounds:  make([][]BracketMatch, len(b.Rounds)),
-		Preview: b.Preview,
+		Rounds:       make([][]BracketMatch, len(b.Rounds)),
+		Preview:      b.Preview,
+		TimesSettled: b.TimesSettled,
 	}
 	if b.DrawOrder != nil {
 		res.DrawOrder = append([]string(nil), b.DrawOrder...)

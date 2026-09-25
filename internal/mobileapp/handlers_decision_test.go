@@ -208,7 +208,7 @@ func TestDecisionHandler_NonEngiUnaffected(t *testing.T) {
 // decision-endpoint sibling of TestScoreHandler_CorruptOverrides_TerminalErrorThenRepairable
 // (handlers_match_test.go): RecordDecisionTx writes through
 // RecordMatchResultWithIneligibilityTx, which for a MIXED competition's pool
-// match re-score runs the mp-e2k1 guard's computeStandingsFrom call -- the
+// match write runs the pool requalification check's computeStandingsFrom call -- the
 // same LoadOverrides call the score handler's corrupt-overrides fix already
 // covered. Before this fix the decision handler's error switch had no branch
 // for state.ErrCorruptOverrides, so it fell through to the default
@@ -233,6 +233,7 @@ func TestDecisionHandler_CorruptOverrides_TerminalError(t *testing.T) {
 	require.NoError(t, store.SavePoolMatches(compID, []state.MatchResult{
 		{ID: "Pool A-0", SideA: "Alice", SideB: "Bob", Status: state.MatchStatusScheduled},
 	}))
+	seatUnresolvedPoolAKnockout(t, store, compID)
 
 	// Corrupt overrides.json directly: the competition directory must already
 	// exist, which SaveCompetition above guaranteed.
@@ -340,54 +341,4 @@ func TestDecisionHandler_DownstreamKnockoutPlayed_ForceReturns200(t *testing.T) 
 	assert.Equal(t, state.MatchStatusScheduled, b.Rounds[1][0].Status,
 		"reopened in place and waiting to be fought again: running would hold the court, which deadlocked two reopened siblings")
 	assert.Empty(t, b.Rounds[1][0].Winner, "the reopened match's stale verdict was cleared")
-}
-
-// TestDecisionHandler_DownstreamKnockoutScored_409Shape pins the FIXED wire
-// contract (bc-cse finding 1): a kiken decision on a completed POOL match
-// that would flip its qualifying finisher, while the knockout leaf that
-// finisher's win already fed carries its own scored result, writes through
-// RecordDecisionTx -> RecordMatchResultWithIneligibilityTx, which raises
-// *engine.DownstreamKnockoutScoredError (mp-e2k1). Before this fix the
-// decision handler's error switch had no arm for it, so it fell through to
-// respondIfEngineWriteError/internalError, a generic HTTP 500 the SPA's
-// offline write queue retries forever for a write that can never win
-// (mp-q8c6 poisoned-queue pattern). Revert only the
-// respondIfDownstreamKnockoutScored case in handlers_decision.go's switch to
-// see this go red (500 instead of 409).
-//
-// decisionBy "aka" names sideA (A1) as the withdrawing loser, so A2 (sideB)
-// becomes the winner -- flipping Pool A's finisher exactly like
-// TestScoreHandler_DownstreamKnockoutScored_409Shape's re-score does.
-func TestDecisionHandler_DownstreamKnockoutScored_409Shape(t *testing.T) {
-	r, store, _, _, tempDir := setupTestRouter(t)
-	defer os.RemoveAll(tempDir)
-
-	compID := "e2k1-decision-409"
-	seedMixedCompWithScoredKnockoutFinisher(t, store, compID)
-
-	body, _ := json.Marshal(DecisionRequest{Decision: "kiken-voluntary", DecisionBy: "aka"})
-	req, err := http.NewRequest(http.MethodPost,
-		"/api/competitions/"+compID+"/matches/Pool A-0/decision",
-		bytes.NewBuffer(body))
-	require.NoError(t, err)
-	req.Header.Set("Content-Type", "application/json")
-	w := httptest.NewRecorder()
-	r.ServeHTTP(w, req)
-
-	require.Equal(t, http.StatusConflict, w.Code, w.Body.String())
-	var resp map[string]any
-	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
-	assert.Equal(t, "downstream_knockout_scored", resp["error"])
-	assert.Equal(t, "Pool A", resp["pool"])
-	assert.Equal(t, "A1", resp["finisher"])
-	assert.Equal(t, "m-r1-0", resp["matchId"])
-	assert.NotEmpty(t, resp["message"])
-
-	stored, err := store.LoadPoolMatches(compID)
-	require.NoError(t, err)
-	for _, m := range stored {
-		if m.ID == "Pool A-0" {
-			assert.Equal(t, "A1", m.Winner, "a refusal must leave the pool match untouched")
-		}
-	}
 }

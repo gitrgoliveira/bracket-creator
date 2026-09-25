@@ -19,46 +19,83 @@ import (
 // so these fields are never marshaled directly and carry no json tags.
 type ChusenGroup struct {
 	PoolName string
-	// Teams are the still-tied members in current standings order.
+	// Teams are the tied members in current standings order (which, once a
+	// chusen is recorded, is the order the override ranks sort them into).
 	Teams []state.PlayerStanding
 	// MinPosition is the 1-based finishing position of the best-placed member.
 	MinPosition int
+	// Ranks is each team's recorded chusen rank, parallel to Teams, read from
+	// the override itself rather than from the standings row. Set only on a
+	// group already settled by chusen (ChusenReport.Recorded); nil on one
+	// still waiting for it.
+	Ranks []int
+}
+
+// ChusenReport is every consequential team-pool tie the daihyosen left
+// undetermined, split by whether the operator has recorded its chusen yet.
+type ChusenReport struct {
+	// Pending groups still need a chusen (drawing lots).
+	Pending []ChusenGroup
+	// Recorded groups were settled by a chusen already recorded
+	// (groupSettledByChusen). The operator may change the recorded order, in
+	// case it was entered wrongly.
+	Recorded []ChusenGroup
 }
 
 // groupNeedsChusen reports whether a tied group remains unresolved after its
 // daihyosen bouts and therefore needs a chusen (drawing lots). It is the single
 // per-group predicate shared by dhCycleExists (which blocks auto-completion) and
-// ChusenCandidates (which surfaces the groups to the operator). groupOverrides
-// is poolRanks[poolName] for the group's pool (nil when none).
+// ChusenStatus (which surfaces the groups to the operator). groupOverrides is
+// poolRanks[poolName] for the group's pool (nil when none).
 //
-// Returns false when: the operator has already ranked every member (chusen
-// recorded), no daihyosen bout among the group has been played yet, or the
-// played bouts produced a strictly-ordered win count. Returns true whenever two
-// or more members finish the completed round on the same daihyosen win count
-// (a true win/loss cycle, an all-drawn round, or any other partial tie) so the
-// order is undetermined.
+// Returns false when the operator has already ranked every member (chusen
+// recorded, chusenRecorded) or when daihyosenLeftTied says the bouts settled
+// the order or have not all been fought yet.
+func groupNeedsChusen(group []state.PlayerStanding, allMatches []state.MatchResult, groupOverrides map[string]int) bool {
+	return !chusenRecorded(group, groupOverrides) && daihyosenLeftTied(group, allMatches)
+}
+
+// groupSettledByChusen reports whether a tied group WAS decided by chusen: its
+// daihyosen left the order undetermined, exactly as groupNeedsChusen requires,
+// and the operator has since recorded a rank for every member. It is the one
+// owner of "which groups were decided by chusen", which are the only groups
+// whose recorded order the operator is offered to change: a chusen entered in
+// the wrong order must stay fixable, but no other rank is set by hand.
+func groupSettledByChusen(group []state.PlayerStanding, allMatches []state.MatchResult, groupOverrides map[string]int) bool {
+	return chusenRecorded(group, groupOverrides) && daihyosenLeftTied(group, allMatches)
+}
+
+// chusenRecorded reports whether every member of a tied group carries a
+// pool-rank override, i.e. the operator has recorded the drawn order.
 //
 // groupOverrides is resolved per member via lookupPoolRankOverride, keyed by
 // participant id ONLY (bc-cse, bc-pnum). Two same-name, different-dojo
 // teammates in one tied group therefore never share a single "already
 // recorded" verdict -- each is checked against its own override entry.
-func groupNeedsChusen(group []state.PlayerStanding, allMatches []state.MatchResult, groupOverrides map[string]int) bool {
-	if len(groupOverrides) > 0 {
-		allOverridden := true
-		for _, s := range group {
-			if _, ok := lookupPoolRankOverride(groupOverrides, s.Player.ID); !ok {
-				allOverridden = false
-				break
-			}
-		}
-		if allOverridden {
+func chusenRecorded(group []state.PlayerStanding, groupOverrides map[string]int) bool {
+	if len(groupOverrides) == 0 {
+		return false
+	}
+	for _, s := range group {
+		if _, ok := lookupPoolRankOverride(groupOverrides, s.Player.ID); !ok {
 			return false
 		}
 	}
+	return true
+}
+
+// daihyosenLeftTied reports whether a tied group's daihyosen bouts left its
+// order undetermined, whatever the operator has recorded since. Returns false
+// when no daihyosen bout among the group has been played yet, the round is not
+// complete, or the played bouts produced a strictly-ordered win count. Returns
+// true whenever two or more members finish the completed round on the same
+// daihyosen win count (a true win/loss cycle, an all-drawn round, or any other
+// partial tie).
+func daihyosenLeftTied(group []state.PlayerStanding, allMatches []state.MatchResult) bool {
 	// Membership and win counts key on competitor identity by participant id
 	// ONLY (operator ruling bc-pnum), matching applyTiebreakSort next door.
-	// Note what this is and is not: chusen is team-only (ChusenCandidates
-	// returns nil for an individual competition) and two TEAMS may not share
+	// Note what this is and is not: chusen is team-only (ChusenStatus
+	// reports nothing for an individual competition) and two TEAMS may not share
 	// a name even across dojos (checkNewTeamNameCollisions,
 	// state/participants.go), so unlike the individual tiebreak path this is
 	// NOT a routinely reachable collision. It is kept because the team-name
@@ -119,37 +156,43 @@ func groupNeedsChusen(group []state.PlayerStanding, allMatches []state.MatchResu
 	return false
 }
 
-// ChusenCandidates returns the consequential team-pool ties that the daihyosen
-// left undetermined and that therefore need a chusen (drawing lots). It is the
-// single source of truth for "which groups still need an operator lots-draw",
-// used by the GET /chusen-candidates endpoint. Empty (not an error) when the
-// competition is not a team comp in the pools stage, or no such group exists.
+// ChusenStatus returns the consequential team-pool ties that the daihyosen
+// left undetermined, split into those that still need a chusen (drawing lots)
+// and those a recorded chusen already settled. It is the single source of
+// truth for both, used by the GET /chusen-candidates endpoint: "which groups
+// still need an operator lots-draw" is groupNeedsChusen, and "which groups were
+// decided by chusen" is groupSettledByChusen. Empty (not an error) when the
+// competition is not a team comp whose pool order can still be set by hand
+// (state.Competition.AcceptsPoolRankOverride: the pools stage, or a pools +
+// knockout competition's knockout, where a pool correction can reopen a tie),
+// or no such group exists.
 //
 // Pools are returned in name order for stable output.
-func (e *Engine) ChusenCandidates(compID string) ([]ChusenGroup, error) {
+func (e *Engine) ChusenStatus(compID string) (ChusenReport, error) {
+	var report ChusenReport
 	comp, err := e.store.LoadCompetition(compID)
 	if err != nil {
-		return nil, err
+		return report, err
 	}
 	if comp == nil {
-		return nil, notFoundErrorf("competition %s not found", compID)
+		return report, notFoundErrorf("competition %s not found", compID)
 	}
 	isTeam := comp.Kind == "team" || comp.TeamSize > 0
-	if !isTeam || comp.Status != state.CompStatusPools {
-		return nil, nil
+	if !isTeam || !comp.AcceptsPoolRankOverride() {
+		return report, nil
 	}
 
 	standings, err := e.CalculatePoolStandings(compID)
 	if err != nil {
-		return nil, err
+		return report, err
 	}
 	matches, err := e.store.LoadPoolMatches(compID)
 	if err != nil {
-		return nil, err
+		return report, err
 	}
 	overridesObj, err := e.store.LoadOverrides(compID)
 	if err != nil {
-		return nil, err
+		return report, err
 	}
 	var poolRanks map[string]map[string]int
 	if overridesObj != nil {
@@ -163,23 +206,33 @@ func (e *Engine) ChusenCandidates(compID string) ([]ChusenGroup, error) {
 	}
 	sort.Strings(poolNames)
 
-	var out []ChusenGroup
 	for _, poolName := range poolNames {
 		poolStandings := standings[poolName]
+		groupOverrides := poolRanks[poolName]
 		for _, positions := range detectPoolTies(poolStandings) {
 			// Only a tie that affects advancement/seed warrants a decider at all.
 			if !tieAffectsAdvancement(positions, poolWinners) {
 				continue
 			}
 			group := standingsAt(poolStandings, positions)
-			if groupNeedsChusen(group, matches, poolRanks[poolName]) {
-				out = append(out, ChusenGroup{
-					PoolName:    poolName,
-					Teams:       group,
-					MinPosition: positions[0] + 1,
-				})
+			g := ChusenGroup{
+				PoolName:    poolName,
+				Teams:       group,
+				MinPosition: positions[0] + 1,
+			}
+			switch {
+			case groupNeedsChusen(group, matches, groupOverrides):
+				report.Pending = append(report.Pending, g)
+			case groupSettledByChusen(group, matches, groupOverrides):
+				g.Ranks = make([]int, len(group))
+				for i, s := range group {
+					if r, ok := lookupPoolRankOverride(groupOverrides, s.Player.ID); ok {
+						g.Ranks[i] = r
+					}
+				}
+				report.Recorded = append(report.Recorded, g)
 			}
 		}
 	}
-	return out, nil
+	return report, nil
 }

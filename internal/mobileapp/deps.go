@@ -83,8 +83,9 @@ type ScoringEngine interface {
 	// opts is variadic engine.ForceOptions (bc-kcdg): omit it for the
 	// pre-existing behaviour (force=false, no reopen list wanted), or pass
 	// one to bypass the downstream-knockout-correction guard
-	// (engine.DownstreamKnockoutPlayedError) and collect the IDs of any
-	// downstream bracket match reopened as a result.
+	// (engine.DownstreamKnockoutPlayedError, raised by a knockout correction
+	// or by a pool correction that moves a qualifier the knockout already
+	// played) and collect the IDs of any bracket match reopened as a result.
 	RecordMatchResultWithIneligibility(compID string, matchID string, result *state.MatchResult, opts ...engine.ForceOptions) (*domain.CompetitorStatus, error)
 	// RecordMatchResultWithIneligibilityTx is the tx-aware twin used by
 	// the score handler under WithTransaction (T156). Same return shape
@@ -142,6 +143,11 @@ type ScoringEngine interface {
 	// score from the shiaijo view starts the competition just as
 	// POST .../start does. Mirrors engine.Engine.MaybeAutoCompletePools.
 	MaybeAutoCompletePools(compID string) (engine.AutoCompleteOutcome, error)
+	// MaybeAutoCompletePoolsAfterWrite is the same check for a door that has
+	// just written the given matches: once a mixed competition is in its
+	// knockout it skips the pool pass unless one of them is a completed pool
+	// match. Mirrors engine.Engine.MaybeAutoCompletePoolsAfterWrite.
+	MaybeAutoCompletePoolsAfterWrite(compID string, written ...state.MatchResult) (engine.AutoCompleteOutcome, error)
 	// UpdateMatchCourt reassigns a match to a different court. Mirrors
 	// engine.Engine.UpdateMatchCourt.
 	UpdateMatchCourt(compID string, matchID string, newCourt string) error

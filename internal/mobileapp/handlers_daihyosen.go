@@ -99,7 +99,7 @@ func respondIfValidationError(c *gin.Context, err error) bool {
 
 // DaihyosenEngine is the consumer-boundary view of *engine.Engine used
 // by the daihyosen handler. Mirrors engine.Engine.AddDaihyosen +
-// RecordMatchResultWithIneligibilityTx + MaybeAutoCompletePools.
+// RecordMatchResultWithIneligibilityTx + MaybeAutoCompletePoolsAfterWrite.
 //
 // Defined as a named local interface (rather than reusing ScoringEngine)
 // because AddDaihyosen is not on the existing ScoringEngine interface,
@@ -110,7 +110,7 @@ func respondIfValidationError(c *gin.Context, err error) bool {
 type DaihyosenEngine interface {
 	AddDaihyosen(compID, matchID string, sideA, sideB engine.TeamSummary, isPool bool, sideAEligible, sideBEligible int) (*state.SubMatchResult, error)
 	RecordMatchResultWithIneligibilityTx(tx state.StoreTx, compID, matchID string, result *state.MatchResult, opts ...engine.ForceOptions) (*domain.CompetitorStatus, error)
-	MaybeAutoCompletePools(compID string) (engine.AutoCompleteOutcome, error)
+	MaybeAutoCompletePoolsAfterWrite(compID string, written ...state.MatchResult) (engine.AutoCompleteOutcome, error)
 }
 
 // DaihyosenStore is the consumer-boundary view of *state.Store used by
@@ -323,7 +323,17 @@ func RegisterDaihyosenHandlers(r *gin.RouterGroup, eng DaihyosenEngine, store Da
 				return nil
 			}
 
-			sideASummary, sideBSummary := engine.ComputeTeamSummary(match.SubResults, match.SideA, match.SideB)
+			// credit is state.DefaultWinCreditSide's answer for THIS match
+			// (bc-cse: ComputeTeamSummary's credit is no longer optional). It is
+			// always domain.MatchSideNone here in practice: AddDaihyosen only
+			// ever applies to a still-tied, still-RUNNING encounter (never a
+			// completed one), and DefaultWinCreditSide credits nobody unless the
+			// match is completed. Computed properly anyway rather than passed as
+			// a bare domain.MatchSideNone, so this call site goes through the
+			// same canonical derivation as every other TeamResult reader instead
+			// of hand-asserting the invariant.
+			credit := state.DefaultWinCreditSide(match.Status, match.Decision, match.DecisionBy, match.Attribution())
+			sideASummary, sideBSummary := engine.ComputeTeamSummary(match.SubResults, match.SideA, match.SideB, credit)
 
 			// Count eligible competitors per side under the same lock (CHK026).
 			// Pre-Slice-7 there are no explicit rosters; eligibility is tracked
@@ -419,8 +429,10 @@ func RegisterDaihyosenHandlers(r *gin.RouterGroup, eng DaihyosenEngine, store Da
 			"result":        matchForBroadcast(updated),
 		})
 
-		// Inline auto-complete check (same pattern as tryAutoCompletePools).
-		outcome, autoErr := eng.MaybeAutoCompletePools(id)
+		// Inline auto-complete check (same pattern as
+		// tryAutoCompletePoolsAfterWrite). A rep bout is only ever added to a
+		// knockout match, so in knockout status this skips the pool pass.
+		outcome, autoErr := eng.MaybeAutoCompletePoolsAfterWrite(id, updated)
 		switch {
 		case autoErr != nil:
 			log.Printf("MaybeAutoCompletePools(%s) after daihyosen: %v", id, autoErr)

@@ -852,3 +852,26 @@ func TestMatchWinnerRanksNeeded(t *testing.T) {
 		})
 	}
 }
+
+// A pool order is set by hand (a chusen) in the pools stage, and, for a mixed
+// competition only, after its knockout has started as well: a pool correction
+// made then can reopen a tie only a chusen settles.
+func TestCompetition_AcceptsPoolRankOverride(t *testing.T) {
+	for _, tc := range []struct {
+		format string
+		status CompetitionStatus
+		want   bool
+	}{
+		{CompFormatMixed, CompStatusPools, true},
+		{CompFormatLeague, CompStatusPools, true},
+		{CompFormatMixed, CompStatusKnockout, true},
+		{CompFormatKnockout, CompStatusKnockout, false},
+		{"", CompStatusKnockout, false},
+		{CompFormatMixed, CompStatusSetup, false},
+		{CompFormatMixed, CompStatusDrawReady, false},
+		{CompFormatMixed, CompStatusComplete, false},
+	} {
+		c := Competition{Format: tc.format, Status: tc.status}
+		assert.Equal(t, tc.want, c.AcceptsPoolRankOverride(), "format=%q status=%q", tc.format, tc.status)
+	}
+}

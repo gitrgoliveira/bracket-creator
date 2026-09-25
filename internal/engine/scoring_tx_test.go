@@ -657,7 +657,7 @@ func TestRecordMatchResultWithIneligibilityTx_HansokuAutoAward(t *testing.T) {
 	assert.Equal(t, []string{"M"}, stored[0].IpponsA)
 }
 
-// --- mp-e2k1: pool re-score guard against scored downstream knockout --------
+// --- pool corrections that move a qualifier the knockout already seated ----
 
 // saveMixedCompForGuardTest sets up a minimal mixed competition with two pools
 // (poolWinners=1), saves the scheduled pool matches and the preview knockout
@@ -784,24 +784,22 @@ func TestPoolRescore_NoFinisherChange_Allowed(t *testing.T) {
 	assert.NoError(t, rescore, "re-score with same finisher must be allowed even after knockout match is scored")
 }
 
-// TestPoolRescore_FinisherFlip_LeafScheduled_Allowed verifies that re-scoring
-// a pool match to flip the 1st-place finisher while the knockout leaf is still
-// scheduled succeeds and does NOT trigger the guard.
-func TestPoolRescore_FinisherFlip_LeafScheduled_Allowed(t *testing.T) {
+// TestPoolRescore_FinisherFlip_LeafScheduled_Repaints pins G1: once the
+// competition has reached knockout status nothing re-resolved a pool, so a
+// correction that moved the pool winner while the knockout leaf was still
+// untouched left the OLD qualifier in the slot. The correcting write now
+// seats the new one itself, in its own transaction, with no resolver call.
+func TestPoolRescore_FinisherFlip_LeafScheduled_Repaints(t *testing.T) {
 	eng, store, compID := saveMixedCompForGuardTest(t, 0)
 
-	// Score Pool A: A1 wins. Score Pool B: B1 wins.
 	scorePoolMatchTx(t, eng, store, compID, "Pool A-0", "A1", "A2", "A1")
 	scorePoolMatchTx(t, eng, store, compID, "Pool B-0", "B1", "B2", "B1")
-
-	// Resolve the bracket so the knockout leaf has real names.
 	_, allResolved, err := eng.ResolveQualifiedPools(compID)
 	require.NoError(t, err)
 	require.True(t, allResolved)
+	setCompStatus(t, store, compID, state.CompStatusKnockout)
 
-	// Do NOT score the knockout leaf, it stays scheduled.
-
-	// RE-SCORE Pool A to flip finisher (A2 now wins).
+	// The knockout leaf stays scheduled. Flip Pool A (A2 now wins).
 	var rescore error
 	txErr := store.WithTransaction(compID, func(tx state.StoreTx) error {
 		_, rescore = eng.RecordMatchResultWithIneligibilityTx(tx, compID, "Pool A-0", &state.MatchResult{
@@ -814,14 +812,54 @@ func TestPoolRescore_FinisherFlip_LeafScheduled_Allowed(t *testing.T) {
 		return nil
 	})
 	require.NoError(t, txErr)
-	assert.NoError(t, rescore, "finisher flip on unscored knockout leaf must be allowed")
+	require.NoError(t, rescore, "a finisher flip whose knockout leaf is untouched must be allowed")
+
+	b, err := store.LoadBracket(compID)
+	require.NoError(t, err)
+	leaf := b.Rounds[0][0]
+	a2 := poolPlayerID(t, store, compID, "A2")
+	if leaf.PlaceholderA == "Pool A-1st" {
+		assert.Equal(t, "A2", leaf.SideA)
+		assert.Equal(t, a2, leaf.SideAID)
+	} else {
+		require.Equal(t, "Pool A-1st", leaf.PlaceholderB)
+		assert.Equal(t, "A2", leaf.SideB)
+		assert.Equal(t, a2, leaf.SideBID)
+	}
+	assert.Equal(t, state.MatchStatusScheduled, leaf.Status)
 }
 
-// TestPoolRescore_FinisherFlip_KnockoutCompleted_Rejected verifies that re-scoring
-// a pool match to flip a finisher whose knockout leaf is completed returns
-// DownstreamKnockoutScoredError (wrapping ErrDownstreamKnockoutScored) and rolls
-// back the pool-match result to the prior state.
-func TestPoolRescore_FinisherFlip_KnockoutCompleted_Rejected(t *testing.T) {
+// setCompStatus moves a test competition to status.
+func setCompStatus(t *testing.T, store *state.Store, compID string, status state.CompetitionStatus) {
+	t.Helper()
+	_, err := store.UpdateCompetitionChanged(compID, func(c *state.Competition) (*state.Competition, error) {
+		c.Status = status
+		return c, nil
+	})
+	require.NoError(t, err)
+}
+
+// poolPlayerID returns the participant id of the pool player named name.
+func poolPlayerID(t *testing.T, store *state.Store, compID, name string) string {
+	t.Helper()
+	pools, err := store.LoadPools(compID)
+	require.NoError(t, err)
+	for _, p := range pools {
+		for _, pl := range p.Players {
+			if pl.Name == name {
+				return pl.ID
+			}
+		}
+	}
+	t.Fatalf("no pool player named %q", name)
+	return ""
+}
+
+// TestPoolRescore_FinisherFlip_KnockoutCompleted_Warns verifies that re-scoring
+// a pool match to flip a finisher whose knockout leaf was already fought
+// returns DownstreamKnockoutPlayedError naming the leaf and the place that
+// moves, and rolls back the pool-match result, until the operator confirms.
+func TestPoolRescore_FinisherFlip_KnockoutCompleted_Warns(t *testing.T) {
 	eng, store, compID := saveMixedCompForGuardTest(t, 0)
 
 	// Score Pool A (A1 wins) and Pool B (B1 wins).
@@ -864,14 +902,21 @@ func TestPoolRescore_FinisherFlip_KnockoutCompleted_Rejected(t *testing.T) {
 		return nil
 	})
 	require.NoError(t, txErr)
-	require.Error(t, rescore, "flipping finisher of a scored knockout must be rejected")
-	assert.ErrorIs(t, rescore, ErrDownstreamKnockoutScored)
+	require.Error(t, rescore, "flipping the finisher of a fought knockout must warn first")
+	assert.ErrorIs(t, rescore, ErrDownstreamKnockoutPlayed)
 
-	var dkErr *DownstreamKnockoutScoredError
+	var dkErr *DownstreamKnockoutPlayedError
 	require.ErrorAs(t, rescore, &dkErr)
-	assert.Equal(t, "Pool A", dkErr.Pool)
-	assert.Equal(t, "A1", dkErr.Finisher)
-	assert.Equal(t, knockoutMatchID, dkErr.MatchID)
+	assert.Equal(t, "Pool A-0", dkErr.MatchID)
+	assert.Equal(t, knockoutMatchID, dkErr.BlockingMatchID)
+	require.Len(t, dkErr.QualifierChange, 1)
+	qc := dkErr.QualifierChange[0]
+	assert.Equal(t, "Pool A", qc.Pool)
+	assert.Equal(t, 1, qc.Rank)
+	assert.Equal(t, "1st", qc.Place)
+	assert.Equal(t, "A1", qc.From.Name)
+	assert.Equal(t, "A2", qc.To.Name)
+	assert.Equal(t, poolPlayerID(t, store, compID, "A2"), qc.To.ID)
 
 	// Verify the pool match was rolled back to prior state (A1 wins).
 	matches, err := store.LoadPoolMatches(compID)
@@ -892,8 +937,10 @@ func TestPoolRescore_FinisherFlip_KnockoutCompleted_Rejected(t *testing.T) {
 	assert.Equal(t, "A1", b.Rounds[0][0].Winner, "knockout match winner must remain unchanged after rejected pool re-score")
 }
 
-// TestPoolRescore_FinisherFlip_KnockoutRunning_Rejected verifies the guard
-// also fires when the downstream bracket match is RUNNING (not yet completed).
+// TestPoolRescore_FinisherFlip_KnockoutRunning_Rejected verifies a knockout
+// match being fought refuses the move outright, and that the operator's
+// confirmation cannot get past it: reopening mid-bout would wipe strikes being
+// scored at the shiaijo.
 func TestPoolRescore_FinisherFlip_KnockoutRunning_Rejected(t *testing.T) {
 	eng, store, compID := saveMixedCompForGuardTest(t, 0)
 
@@ -919,46 +966,49 @@ func TestPoolRescore_FinisherFlip_KnockoutRunning_Rejected(t *testing.T) {
 	})
 	require.NoError(t, txErr)
 
-	// Attempt re-score Pool A flipping the finisher.
-	var rescore error
-	txErr = store.WithTransaction(compID, func(tx state.StoreTx) error {
-		_, rescore = eng.RecordMatchResultWithIneligibilityTx(tx, compID, "Pool A-0", &state.MatchResult{
-			SideA:   "A1",
-			SideB:   "A2",
-			Winner:  "A2",
-			IpponsB: []string{"M"},
-			Status:  state.MatchStatusCompleted,
+	// Attempt re-score Pool A flipping the finisher, with and without force.
+	for _, force := range []bool{false, true} {
+		var rescore error
+		txErr = store.WithTransaction(compID, func(tx state.StoreTx) error {
+			_, rescore = eng.RecordMatchResultWithIneligibilityTx(tx, compID, "Pool A-0", &state.MatchResult{
+				SideA:   "A1",
+				SideB:   "A2",
+				Winner:  "A2",
+				IpponsB: []string{"M"},
+				Status:  state.MatchStatusCompleted,
+			}, ForceOptions{Force: force})
+			return nil
 		})
-		return nil
-	})
-	require.NoError(t, txErr)
-	require.Error(t, rescore)
-	assert.ErrorIs(t, rescore, ErrDownstreamKnockoutScored, "running knockout leaf must also block a finisher flip")
+		require.NoError(t, txErr)
+		require.Error(t, rescore, "force=%v", force)
+		assert.ErrorIs(t, rescore, ErrDownstreamKnockoutRunning, "a running knockout leaf refuses a finisher flip (force=%v)", force)
+		assert.NotErrorIs(t, rescore, ErrDownstreamKnockoutPlayed, "never offered as confirmable (force=%v)", force)
+		var runErr *DownstreamKnockoutRunningError
+		require.ErrorAs(t, rescore, &runErr)
+		require.Len(t, runErr.Running, 1)
+		assert.Equal(t, knockoutMatchID, runErr.Running[0].ID)
+		assert.Contains(t, runErr.Error(), "is being fought now. Finish it or send it back to the queue, then save again.")
+	}
+	poolA0 := loadPoolMatchByID(t, store, compID, "Pool A-0")
+	assert.Equal(t, "A1", poolA0.Winner, "the refused correction must not land")
+	b, err = store.LoadBracket(compID)
+	require.NoError(t, err)
+	assert.Equal(t, state.MatchStatusRunning, b.Rounds[0][0].Status)
 }
 
-// TestPoolRescore_NamesakeFinisherSwap_KnockoutStarted_Rejected is the
-// regression guard for the finding that oldTopN/newSet/displaced in
-// RecordMatchResultWithIneligibilityTx were keyed by bare Player.Name: a
-// re-score that swaps WHICH of two same-named, different-dojo competitors
-// (CheckDuplicateEntriesByNameDojo explicitly allows this) holds a
-// qualifying rank changed the IDENTITY at that rank without changing the
-// bare name occupying it, so the name-keyed `displaced` computation stayed
-// empty and hasStartedKnockoutMatchTx was never even consulted -- a silent
-// identity swap under a started bracket slot.
+// TestPoolRescore_NamesakeFinisherSwap_KnockoutPlayed_Warns: a correction
+// that swaps WHICH of two same-named, different-dojo competitors
+// (CheckDuplicateEntriesByNameDojo explicitly allows this) holds a qualifying
+// place changes the competitor without changing the name in the slot. The
+// change is measured by participant id against the slot's own id, so it is
+// caught; a name comparison would see "Alice" before and after and let the
+// swap through silently under a played knockout match.
 //
-// Fixture: Pool A has three competitors -- P1 (always wins, rank 1) and two
-// "Alice"s from different dojos. AliceX beats AliceY initially (AliceX ranks
-// 2nd, qualifying with poolWinners=2; AliceY ranks 3rd, non-qualifying). A
-// knockout match is hand-crafted as already RUNNING for the qualifying
-// "Alice" (there is no way to tell from the bracket's bare-name side which
-// dojo actually qualified, which is itself the point: the guard's downstream
-// bracket lookup is name-only and deliberately over-broad). Re-scoring the
-// AliceX-vs-AliceY pool match to flip the winner promotes AliceY to 2nd and
-// drops AliceX out of the top-N: same bare name at rank 2, different
-// competitor. The identity-keyed guard must detect this as a displacement and
-// reject the re-score; the pre-fix bare-name-keyed version saw "Alice" still
-// present at rank 2 and let it through.
-func TestPoolRescore_NamesakeFinisherSwap_KnockoutStarted_Rejected(t *testing.T) {
+// Fixture: Pool A has P1 (always 1st) and two Alices. AliceX beats AliceY, so
+// AliceX is 2nd and qualifies (poolWinners=2). The knockout leaf seated for
+// "Pool A-2nd" holds AliceX (by id) and has been fought. Re-scoring the
+// AliceX-vs-AliceY match promotes AliceY.
+func TestPoolRescore_NamesakeFinisherSwap_KnockoutPlayed_Warns(t *testing.T) {
 	eng, store, _ := setupTestEngine(t)
 	compID := "namesake-guard-test"
 
@@ -971,7 +1021,7 @@ func TestPoolRescore_NamesakeFinisherSwap_KnockoutStarted_Rejected(t *testing.T)
 		Name:        compID,
 		Kind:        "individual",
 		Format:      state.CompFormatMixed,
-		Status:      state.CompStatusPools,
+		Status:      state.CompStatusKnockout,
 		Courts:      []string{"A"},
 		StartTime:   "09:00",
 		PoolWinners: 2,
@@ -990,21 +1040,22 @@ func TestPoolRescore_NamesakeFinisherSwap_KnockoutStarted_Rejected(t *testing.T)
 	scoreNamesakeMatchTx(t, eng, store, compID, "Pool A-1", "P1", "Alice", p1.ID, aliceY.ID, p1.ID)
 	scoreNamesakeMatchTx(t, eng, store, compID, "Pool A-2", "Alice", "Alice", aliceX.ID, aliceY.ID, aliceX.ID)
 
-	// Sanity: AliceX (rank 2) qualifies with poolWinners=2, AliceY (rank 3) does not.
 	standings, err := eng.CalculatePoolStandings(compID)
 	require.NoError(t, err)
 	require.Len(t, standings["Pool A"], 3)
 	require.Equal(t, aliceX.ID, standings["Pool A"][1].Player.ID, "AliceX must be rank 2 before the re-score")
 
-	// Hand-craft a started knockout match for the qualifying "Alice" (bracket
-	// sides are bare names only; there is no dojo to tell the two apart).
+	// The seated knockout: AliceX (by id) in "Pool A-2nd", already fought.
 	require.NoError(t, store.SaveBracket(compID, &state.Bracket{
-		Rounds: [][]state.BracketMatch{
-			{{ID: "r1-m0", SideA: "Alice", SideB: "P1", Status: state.MatchStatusRunning}},
-		},
+		Rounds: [][]state.BracketMatch{{{
+			ID: "m-r1-0", MatchNumber: 1,
+			PlaceholderA: "Pool A-2nd", PlaceholderB: "Pool A-1st",
+			SideA: "Alice", SideAID: aliceX.ID, SideB: "P1", SideBID: p1.ID,
+			Winner: "Alice", WinnerID: aliceX.ID, IpponsA: []string{"M"},
+			Status: state.MatchStatusCompleted,
+		}}},
 	}))
 
-	// Re-score Pool A-2, flipping the winner: AliceY now beats AliceX.
 	var rescore error
 	txErr := store.WithTransaction(compID, func(tx state.StoreTx) error {
 		_, rescore = eng.RecordMatchResultWithIneligibilityTx(tx, compID, "Pool A-2", &state.MatchResult{
@@ -1020,22 +1071,18 @@ func TestPoolRescore_NamesakeFinisherSwap_KnockoutStarted_Rejected(t *testing.T)
 		return nil
 	})
 	require.NoError(t, txErr)
-	require.Error(t, rescore, "swapping which namesake holds the qualifying rank must be rejected while the knockout leaf is started")
-	assert.ErrorIs(t, rescore, ErrDownstreamKnockoutScored)
-	var dkErr *DownstreamKnockoutScoredError
+	require.Error(t, rescore, "swapping which namesake holds the place must warn while the knockout leaf is played")
+	var dkErr *DownstreamKnockoutPlayedError
 	require.ErrorAs(t, rescore, &dkErr)
-	assert.Equal(t, "Pool A", dkErr.Pool)
+	require.Len(t, dkErr.QualifierChange, 1)
+	qc := dkErr.QualifierChange[0]
+	assert.Equal(t, 2, qc.Rank)
+	assert.Equal(t, aliceX.ID, qc.From.ID)
+	assert.Equal(t, aliceY.ID, qc.To.ID)
+	assert.Equal(t, "Alice", qc.From.Name)
+	assert.Equal(t, "Alice", qc.To.Name)
 
-	// Verify the pool match was rolled back: AliceX must still be the recorded winner.
-	matches, err := store.LoadPoolMatches(compID)
-	require.NoError(t, err)
-	var poolA2 *state.MatchResult
-	for i := range matches {
-		if matches[i].ID == "Pool A-2" {
-			poolA2 = &matches[i]
-			break
-		}
-	}
+	poolA2 := loadPoolMatchByID(t, store, compID, "Pool A-2")
 	require.NotNil(t, poolA2)
 	assert.Equal(t, aliceX.ID, poolA2.WinnerID, "pool match result must have been rolled back to AliceX as winner")
 }
@@ -1099,8 +1146,8 @@ func TestPoolRescore_NonMixedComp_GuardIsNoOp(t *testing.T) {
 	assert.NoError(t, rescore, "non-mixed comp must never trigger the downstream knockout guard")
 }
 
-// TestPoolRescore_TeamMixed_GuardFires verifies that the guard applies equally
-// to team-format mixed competitions (TeamSize > 0).
+// TestPoolRescore_TeamMixed_GuardFires verifies that the warning applies
+// equally to team-format mixed competitions (TeamSize > 0).
 func TestPoolRescore_TeamMixed_GuardFires(t *testing.T) {
 	eng, store, compID := saveMixedCompForGuardTest(t, 3 /* TeamSize */)
 
@@ -1143,14 +1190,15 @@ func TestPoolRescore_TeamMixed_GuardFires(t *testing.T) {
 		return nil
 	})
 	require.NoError(t, txErr)
-	require.Error(t, rescore, "team mixed comp must also be protected by the downstream knockout guard")
-	assert.ErrorIs(t, rescore, ErrDownstreamKnockoutScored)
+	require.Error(t, rescore, "team mixed comp must also warn before moving a played qualifier")
+	assert.ErrorIs(t, rescore, ErrDownstreamKnockoutPlayed)
 }
 
-// TestPoolRescore_CorruptBracket_FailsClosed verifies the guard does NOT fail
-// open when the bracket can't be read. A displacing re-score whose verification
-// hits a corrupt bracket.json must be rejected (error surfaced) and the prior
-// pool result preserved, never silently committed. (Copilot review, PR #246.)
+// TestPoolRescore_CorruptBracket_FailsClosed verifies the requalification
+// check does NOT fail open when the bracket can't be read. A re-score whose
+// check hits a corrupt bracket.json must be rejected (error surfaced) and the
+// prior pool result preserved, never silently committed. (Copilot review, PR
+// #246.)
 func TestPoolRescore_CorruptBracket_FailsClosed(t *testing.T) {
 	eng, store, dir := setupTestEngine(t)
 	compID := "guard-corrupt"
@@ -1190,8 +1238,8 @@ func TestPoolRescore_CorruptBracket_FailsClosed(t *testing.T) {
 	bracketPath := filepath.Join(dir, "competitions", compID, "bracket.json")
 	require.NoError(t, os.WriteFile(bracketPath, []byte("{ this is not valid json"), 0o600))
 
-	// Re-score Pool A-0 to flip the finisher (A1 → A2). This displaces A1, so the
-	// guard tries to read the (now corrupt) bracket. It must fail closed.
+	// Re-score Pool A-0 to flip the finisher (A1 → A2). The requalification
+	// check reads the (now corrupt) bracket. It must fail closed.
 	var rescore error
 	txErr := store.WithTransaction(compID, func(tx state.StoreTx) error {
 		_, rescore = eng.RecordMatchResultWithIneligibilityTx(tx, compID, "Pool A-0", &state.MatchResult{
@@ -1200,8 +1248,8 @@ func TestPoolRescore_CorruptBracket_FailsClosed(t *testing.T) {
 		return nil // mirror the handler: surface the engine error out-of-band
 	})
 	require.NoError(t, txErr)
-	require.Error(t, rescore, "a corrupt bracket must make the guard fail closed, not silently allow the re-score")
-	assert.NotErrorIs(t, rescore, ErrDownstreamKnockoutScored, "this is a read fault, not a clean downstream-scored rejection")
+	require.Error(t, rescore, "a corrupt bracket must make the check fail closed, not silently allow the re-score")
+	assert.NotErrorIs(t, rescore, ErrDownstreamKnockoutPlayed, "this is a read fault, not a clean downstream warning")
 
 	// The corrupting re-score must NOT have persisted: Pool A-0 still A1-wins.
 	stored, err := store.LoadPoolMatches(compID)
@@ -1216,59 +1264,11 @@ func TestPoolRescore_CorruptBracket_FailsClosed(t *testing.T) {
 	assert.Equal(t, "A1", poolA0.Winner, "prior pool result must be preserved after a fail-closed rejection")
 }
 
-// TestHasStartedKnockoutMatchTx_ReportsMatchedFinisher verifies the helper
-// returns the displaced name actually sitting in the started match, not just
-// the first input name, so the 409 payload's Finisher stays consistent with
-// MatchID when more than one finisher is displaced (poolWinners > 1).
-// (Copilot review, PR #246.)
-func TestHasStartedKnockoutMatchTx_ReportsMatchedFinisher(t *testing.T) {
-	eng, store, _ := setupTestEngine(t)
-	compID := "matched-finisher"
-
-	require.NoError(t, store.SaveCompetition(&state.Competition{
-		ID: compID, Name: compID, Kind: "individual",
-		Format: state.CompFormatMixed, Status: state.CompStatusPools,
-		Courts: []string{"A"}, StartTime: "09:00", PoolWinners: 2,
-	}))
-	// A1's leaf is still scheduled; A2's leaf is running. Scanning for both must
-	// return A2 (the one in the started match), regardless of slice order.
-	require.NoError(t, store.SaveBracket(compID, &state.Bracket{
-		Rounds: [][]state.BracketMatch{{
-			{ID: "r0-m0", SideA: "A1", SideB: "X1", Status: state.MatchStatusScheduled},
-			{ID: "r0-m1", SideA: "X2", SideB: "A2", Status: state.MatchStatusRunning},
-		}},
-	}))
-
-	run := func(names []string) (string, string) {
-		var gotName, gotID string
-		require.NoError(t, store.WithTransaction(compID, func(tx state.StoreTx) error {
-			var err error
-			gotName, gotID, err = eng.hasStartedKnockoutMatchTx(tx, compID, names)
-			return err
-		}))
-		return gotName, gotID
-	}
-
-	name, id := run([]string{"A1", "A2"})
-	assert.Equal(t, "A2", name, "must report the finisher in the started match, not displaced[0]")
-	assert.Equal(t, "r0-m1", id)
-
-	// Order-independence: A2 first must give the same result.
-	name, id = run([]string{"A2", "A1"})
-	assert.Equal(t, "A2", name)
-	assert.Equal(t, "r0-m1", id)
-
-	// Only a scheduled-leaf finisher → no started match found.
-	name, id = run([]string{"A1"})
-	assert.Empty(t, name)
-	assert.Empty(t, id)
-}
-
-// TestKnockoutRescore_NotGatedAsPoolMatch verifies the guard does not mistake a
-// knockout (bracket) match for a pool match. Bracket IDs ("m-rN-i") parse as a
-// pool via poolNameFromMatchID's trailing-"-digits" rule, so without the
-// IsPoolMatchID gate a KO re-score would run the pool-standings guard. Re-scoring
-// a KO match must succeed and never raise DownstreamKnockoutScoredError.
+// TestKnockoutRescore_NotGatedAsPoolMatch verifies the requalification check
+// does not mistake a knockout (bracket) match for a pool match. Bracket IDs
+// ("m-rN-i") parse as a pool via poolNameFromMatchID's trailing-"-digits"
+// rule, so without the IsPoolMatchID gate a KO re-score would run the pool
+// check. Re-scoring a KO match with nothing downstream must succeed.
 // (Copilot review, PR #246.)
 func TestKnockoutRescore_NotGatedAsPoolMatch(t *testing.T) {
 	eng, store, compID := saveMixedCompForGuardTest(t, 0)
@@ -1301,8 +1301,7 @@ func TestKnockoutRescore_NotGatedAsPoolMatch(t *testing.T) {
 		})
 		return nil
 	}))
-	assert.NoError(t, rescore, "knockout re-score must not be gated by the pool re-score guard")
-	assert.NotErrorIs(t, rescore, ErrDownstreamKnockoutScored)
+	assert.NoError(t, rescore, "knockout re-score must not be gated by the pool requalification check")
 }
 
 // TestCourtOccupied covers the PURE court-occupancy scan extracted for E4

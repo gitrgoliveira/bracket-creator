@@ -1,0 +1,129 @@
+{
+  "rounds": [
+    [
+      {
+        "id": "m-r1-0",
+        "sideA": "P1",
+        "sideB": "P2",
+        "winner": "",
+        "status": "scheduled",
+        "court": "A",
+        "scheduledAt": "09:00",
+        "sideAId": "dffe615e-c3af-4ae6-9592-620a6e409310",
+        "sideBId": "04c2b84c-2ac8-4a91-9ee7-e5f32d21934e",
+        "isOverridden": false,
+        "matchNumber": 1,
+        "displayRound": 3,
+        "feeders": [
+          "",
+          ""
+        ]
+      },
+      {
+        "id": "m-r1-1",
+        "sideA": "",
+        "sideB": "",
+        "winner": "",
+        "status": "completed",
+        "court": "A",
+        "scheduledAt": "09:05",
+        "isOverridden": false,
+        "hidden": true
+      },
+      {
+        "id": "m-r1-2",
+        "sideA": "P3",
+        "sideB": "",
+        "winner": "P3",
+        "status": "completed",
+        "court": "A",
+        "scheduledAt": "09:05",
+        "sideAId": "d2bcc7a9-0254-474f-9bbe-016464d5a925",
+        "winnerId": "d2bcc7a9-0254-474f-9bbe-016464d5a925",
+        "isOverridden": false,
+        "hidden": true
+      },
+      {
+        "id": "m-r1-3",
+        "sideA": "P4",
+        "sideB": "P5",
+        "winner": "P4",
+        "status": "completed",
+        "court": "A",
+        "scheduledAt": "09:05",
+        "sideAId": "41d48317-34bf-405a-9ec8-43f0e6547072",
+        "sideBId": "3c11f5d1-0503-4393-8e95-feee34ecd61c",
+        "winnerId": "41d48317-34bf-405a-9ec8-43f0e6547072",
+        "ipponsA": [
+          "M",
+          "K"
+        ],
+        "isOverridden": false,
+        "matchNumber": 2,
+        "resultSource": "admin",
+        "displayRound": 3,
+        "feeders": [
+          "",
+          ""
+        ],
+        "modifiedAt": 1790337238130
+      }
+    ],
+    [
+      {
+        "id": "m-r2-0",
+        "sideA": "Winner of r3-m0",
+        "sideB": "",
+        "winner": "",
+        "status": "completed",
+        "court": "A",
+        "scheduledAt": "09:10",
+        "isOverridden": false,
+        "hidden": true
+      },
+      {
+        "id": "m-r2-1",
+        "sideA": "P3",
+        "sideB": "P4",
+        "winner": "",
+        "status": "scheduled",
+        "court": "A",
+        "scheduledAt": "09:10",
+        "sideAId": "d2bcc7a9-0254-474f-9bbe-016464d5a925",
+        "sideBId": "41d48317-34bf-405a-9ec8-43f0e6547072",
+        "isOverridden": false,
+        "matchNumber": 3,
+        "displayRound": 2,
+        "feeders": [
+          "",
+          "m-r1-3"
+        ]
+      }
+    ],
+    [
+      {
+        "id": "m-r3-0",
+        "sideA": "Winner of r2-m0",
+        "sideB": "Winner of r2-m1",
+        "winner": "",
+        "status": "scheduled",
+        "court": "A",
+        "scheduledAt": "09:15",
+        "isOverridden": false,
+        "matchNumber": 4,
+        "displayRound": 1,
+        "feeders": [
+          "m-r1-0",
+          "m-r2-1"
+        ]
+      }
+    ]
+  ],
+  "drawOrder": [
+    "dffe615e-c3af-4ae6-9592-620a6e409310",
+    "04c2b84c-2ac8-4a91-9ee7-e5f32d21934e",
+    "d2bcc7a9-0254-474f-9bbe-016464d5a925",
+    "41d48317-34bf-405a-9ec8-43f0e6547072",
+    "3c11f5d1-0503-4393-8e95-feee34ecd61c"
+  ]
+}

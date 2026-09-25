@@ -2,7 +2,6 @@ package engine
 
 import (
 	"fmt"
-	"sort"
 	"strings"
 
 	"github.com/gitrgoliveira/bracket-creator/internal/domain"
@@ -84,19 +83,6 @@ func (e *Engine) generateKnockout(comp *state.Competition, players []domain.Play
 	}
 
 	return e.store.SaveBracket(comp.ID, bracket)
-}
-
-// bracketMatchLeafSlot is the LEFTMOST first-round slot that match (roundIdx,
-// matchIdx) is rooted above, in a pow2-padded bracket.Rounds: match (r, m)
-// covers leaves [m*2^(r+1), (m+1)*2^(r+1)).
-//
-// Two things derive from it and they MUST agree: a match's court (the region
-// owning that leaf) and the tie-break inside a DisplayRound when numbering
-// matches. They are the same quantity, so they are one function -- numbering a
-// bout by one rule and placing it by another is precisely how the printed
-// sheet's "Match 12" and the app's "Match 12" became different bouts.
-func bracketMatchLeafSlot(roundIdx, matchIdx int) int {
-	return matchIdx * (1 << (roundIdx + 1))
 }
 
 // generatePoolPreviewBracket builds the in-place knockout bracket for a mixed
@@ -209,13 +195,13 @@ func (e *Engine) buildBracketFromDraw(comp *state.Competition, draw *helper.Knoc
 	if draw == nil || draw.Root == nil {
 		return nil, fmt.Errorf("buildBracketFromDraw: no draw to build from")
 	}
-	// SlotArray, not TreeToLeafArray: the pow2 bracket must carry the draw's
-	// SLOT geometry so its round indices equal the printed Excel columns. The
-	// flat array tail-pads a vacancy block's bye pair into adjacency
-	// ([H10,C6,"",""] for the true [H10,"",C6,""]), which would fight a bout
-	// in round 1 that the sheet prints in round 2. Region widths are identical
-	// under both readings, so the spans and every court derivation are
-	// unaffected.
+	// SlotArray, not TreeToLeafArray: the pow2 bracket must hold every bout at
+	// the slots the draw tree gives it. The flat array tail-pads a vacancy
+	// block's bye pair into adjacency ([H10,C6,"",""] for the true
+	// [H10,"",C6,""]), which would store H10 v C6 in the first pow2 row
+	// although the sheet prints it in round 2, so the stored rows would not be
+	// the draw tree's. Region widths are identical under both readings, so the
+	// spans and every court derivation are unaffected.
 	leaves := helper.SlotArray(draw.Root)
 	regionSpans := draw.RegionSpans()
 
@@ -269,7 +255,7 @@ func (e *Engine) buildBracketFromDraw(comp *state.Competition, draw *helper.Knoc
 			// hall runs its closing bouts. helper.CourtForSpan owns both rules
 			// and the Excel side asks it the same question (NodeCourts), so the
 			// operator's screen and the printed handout cannot disagree.
-			courtIdx := helper.CourtForSpan(regionSpans, bracketMatchLeafSlot(rIdx, i), 1<<(rIdx+1))
+			courtIdx := helper.CourtForSpan(regionSpans, state.BracketMatchLeafSlot(rIdx, i), 1<<(rIdx+1))
 			court := ""
 			if len(comp.Courts) > 0 {
 				if courtIdx >= len(comp.Courts) {
@@ -347,16 +333,13 @@ func (e *Engine) buildBracketFromDraw(comp *state.Competition, draw *helper.Knoc
 		}
 	}
 
-	// Per-court slot assignment (T150) + ceremony-block skipping
-	// (T151). See pools.go for the same wiring; tournament load
-	// failures abort the start so the operator notices the missing
-	// schedule data rather than silently shipping a uniform-start
-	// bracket.
+	// Tournament load failures abort the start so the operator notices the
+	// missing schedule data rather than silently shipping a uniform-start
+	// bracket (the slots are assigned below, once the matches are numbered).
 	tournament, err := e.store.LoadTournament()
 	if err != nil {
 		return nil, err
 	}
-	assignBracketMatchSlots(bracket.Rounds, comp, tournament)
 
 	// Display metadata (mp-7f2w): label each match with its effective round and
 	// real feeders so the viewer renders the same effective-round columns as the
@@ -364,13 +347,30 @@ func (e *Engine) buildBracketFromDraw(comp *state.Competition, draw *helper.Knoc
 	// the "Winner of rX-mY" placeholders are still intact, it must NOT be
 	// recomputed after results resolve those placeholders into player names.
 	computeBracketDisplayMetadata(bracket)
-	applySlotDisplayRounds(bracket, draw)
 
-	// Assign sequential match numbers matching the Excel Tree sheet (AC8).
-	// Must run AFTER computeBracketDisplayMetadata sets Hidden so the skipping
-	// logic is identical to helper.AssignMatchNumbers (nil-node skip in Excel
-	// = Hidden or both-sides-empty in the web bracket).
-	assignBracketMatchNumbers(bracket)
+	// Rounds and match numbers (AC8), from the Feeders just stamped: each real
+	// bout's round is its distance from the final, the column the workbook
+	// prints it in, and the numbers follow helper.AssignMatchNumbers' walk
+	// (Hidden or both-sides-empty here = the Excel nil-node skip). The ONE
+	// body lives on state.Bracket so the load-time restamp
+	// (RestampRoundsFromFeeders) runs it too, and so a stored bracket and a
+	// fresh one cannot be stamped by different rules. It reads the Feeders and
+	// Hidden stamped above, never the sides' contents beyond whether both are
+	// empty (state.BracketMatch.numbered says why that does not change after
+	// the draw in any supported flow), so it walks a bracket in play exactly
+	// as it walked this one. A
+	// refusal here means the draw built a bracket its own feeders cannot
+	// describe: an internal fault, never an operator's.
+	if err := bracket.StampRoundsFromFeeders(); err != nil {
+		return nil, fmt.Errorf("buildBracketFromDraw: stamping rounds and match numbers: %w", err)
+	}
+
+	// Per-court slot assignment (T150) + ceremony-block skipping (T151), in
+	// match-number order, so it runs after the numbering above. See pools.go
+	// for the same wiring. Scheduled in number order, so the load-time repair
+	// of the old storage-order scheduling owes it nothing (TimesSettled).
+	assignBracketMatchSlots(bracket.Rounds, comp, tournament)
+	bracket.TimesSettled = true
 
 	// Bronze (3rd-place) knockout: only when this competition's format
 	// requires a single 3rd place (comp.RequiresSingleThirdPlace, the
@@ -480,84 +480,12 @@ func bronzeDefaultCourt(finalCourt string, courts []string) string {
 	return ""
 }
 
-// assignBracketMatchNumbers sets MatchNumber on every real (non-Hidden,
-// non-empty) bracket match. This is the web API's numbering implementation; the
-// Excel renderer has a SEPARATE one, helper.AssignMatchNumbers, which operates on
-// []*Node instead of *state.Bracket. The two are NOT a literally-shared function
-// (the types differ), they are kept equal-by-contract so the on-screen "Match N"
-// always equals the printed Excel "Match N".
-//
-// Ordering, CRITICAL for byes: the Excel sheet numbers via eliminationMatchRounds,
-// which groups matches by DEPTH-FROM-ROOT (the unbalanced tree's deepest matches
-// come first), NOT by raw bracket.Rounds index. With a non-power-of-two roster the
-// pow2-padded bracket.Rounds order diverges from that depth grouping, so numbering
-// in raw Rounds order drifts (e.g. 5 entrants: the lone deep first-round bout must
-// be Match 1, not the shallow slot-0 bout). DisplayRound already encodes the Excel
-// depth grouping (verified by TestBracketDisplayMetadata_MatchesExcelRounds), so we
-// number by descending DisplayRound (deepest/earliest round first).
-//
-// The tie-break inside a DisplayRound is the match's LEFTMOST FIRST-ROUND SLOT,
-// bracketMatchLeafSlot — the same function buildBracketFromDraw uses to find a
-// match's court. It has to be, because Excel's TraverseRounds walks each depth level
-// LEFT TO RIGHT across the whole tree, and one effective round can draw its
-// matches from several pow2 rounds at once: a shallow region's first bout and a
-// deep region's second bout share a DisplayRound while sitting in bracket.Rounds
-// 0 and 1. Tie-breaking on the within-round position alone (the old rule) then
-// interleaves them by an index that means different things in the two rounds, and
-// the printed "Match 12" and the app's "Match 12" become different bouts. Measured
-// on a pool-fed draw of 8 pools x 3 qualifiers: the sheet numbered Pool G-3rd v
-// Pool H-3rd 12 while the app numbered the E-1st/A-2nd v F-1st/B-2nd bout 12
-// (bc-draw Phase 5). The leaf slot orders them the way the sheet prints them,
-// because a node's slot range is contiguous and left-to-right IS increasing slot.
-//
-// Skip rule (matches the Excel nil-node skip): Hidden (structural-bye) matches and
-// both-sides-empty dead matches are excluded and do not consume a number.
-//
-// The printed Excel sheet is authoritative. The contract is enforced by
-// TestMatchNumberingParity_ExcelVsWeb (match_numbering_parity_test.go) for
-// knockout brackets and by TestExcelWorkbookMatchesEngineBracket_Mixed
-// (excel_draw_parity_test.go) for pool-fed ones, the latter by reading the numbers
-// back out of a rendered workbook. If they ever diverge, fix THIS path to match
-// the Excel one — and the JS buildDisplayModel matchNumById ordering with it
-// (web-mobile/js/bracket.jsx), which is the third implementation of this walk.
-//
-// Must run AFTER computeBracketDisplayMetadata, which sets Hidden / DisplayRound.
-func assignBracketMatchNumbers(b *state.Bracket) {
-	type ref struct {
-		m *state.BracketMatch
-		// leafSlot is the first-round slot this match's subtree starts at.
-		leafSlot int
-	}
-	var real []ref
-	for ri := range b.Rounds {
-		for mi := range b.Rounds[ri] {
-			m := &b.Rounds[ri][mi]
-			if m.Hidden {
-				continue
-			}
-			if m.SideA == "" && m.SideB == "" {
-				continue
-			}
-			real = append(real, ref{m: m, leafSlot: bracketMatchLeafSlot(ri, mi)})
-		}
-	}
-	// Descending DisplayRound (deepest/earliest round first), then left to right
-	// across the whole tree, mirrors the Excel eliminationMatchRounds walk.
-	sort.SliceStable(real, func(i, j int) bool {
-		if real[i].m.DisplayRound != real[j].m.DisplayRound {
-			return real[i].m.DisplayRound > real[j].m.DisplayRound
-		}
-		return real[i].leafSlot < real[j].leafSlot
-	})
-	for i, r := range real {
-		r.m.MatchNumber = i + 1
-	}
-}
-
-// computeBracketDisplayMetadata fills DisplayRound / Hidden / Feeders on every
-// match so the viewer can render effective-round columns identical to the Excel
-// Tree sheet (matches grouped by depth-from-root; structural byes skip a column
-// rather than appearing as empty cards). It is purely additive, the positional
+// computeBracketDisplayMetadata fills Hidden / Feeders on every match (and
+// clears DisplayRound, which state.Bracket.StampRoundsFromFeeders then derives
+// from those Feeders) so the viewer can render effective-round columns
+// identical to the Excel Tree sheet (matches grouped by depth-from-root;
+// structural byes skip a column rather than appearing as empty cards). It is
+// purely additive, the positional
 // ID + "Winner of rX-mY" resolution scheme used by scoring/scheduling/the pool
 // resolver is untouched.
 //
@@ -566,8 +494,8 @@ func assignBracketMatchNumbers(b *state.Bracket) {
 // byes) are marked Hidden. For each real match, Feeders holds the IDs of the two
 // REAL feeder matches whose winners meet here ([A, B] order); a side fed by a
 // seeded entrant / pool placeholder / bye carries "" (no connector). DisplayRound
-// counts from the final (1 = Final), assigned by walking the real feeder graph
-// outward from the lone real match in the last round.
+// counts from the final (1 = Final): StampRoundsFromFeeders walks this real
+// feeder graph outward from the lone real match in the last round.
 //
 // Must run after bye winners have been auto-resolved and propagated (so resolved
 // names already sit in their feeder slots), i.e. at the end of bracket build.
@@ -614,70 +542,20 @@ func computeBracketDisplayMetadata(bracket *state.Bracket) {
 		return "" // dead match (both empty)
 	}
 
-	byID := make(map[string]*state.BracketMatch)
 	for r := range rounds {
 		for i := range rounds[r] {
 			mm := &rounds[r][i]
-			byID[mm.ID] = mm
+			// DisplayRound is cleared on every match: the real ones take
+			// theirs from these Feeders (state.Bracket.StampRoundsFromFeeders),
+			// the Hidden ones carry none.
+			mm.DisplayRound = 0
 			if isReal(mm) {
 				mm.Hidden = false
-				mm.DisplayRound = 0 // assigned by the walk below
 				mm.Feeders = []string{realFeederID(mm.SideA), realFeederID(mm.SideB)}
 			} else {
 				mm.Hidden = true
-				mm.DisplayRound = 0
 				mm.Feeders = nil
 			}
-		}
-	}
-
-	// DisplayRound's provisional value is the match's POW2 round counted from
-	// the final (1 = Final); applySlotDisplayRounds then overrides every bout
-	// the draw tree knows with the round the risen-aware Excel walk fights it
-	// in, which is the printed column. The pow2 row alone is wrong for an
-	// assembly-level late bout that the pow2 padding parks in round-1
-	// adjacency, and the old feeder-graph walk was wrong the other way for a
-	// phantom-risen pair the sheets fight in round 1 (34th EKC Junior Male
-	// F2) -- the bracket graph cannot tell those two shapes apart, so neither
-	// recomputation can be the source. The draw tree can (Node.risen), and
-	// its walk is what the workbook prints.
-	if !isReal(at(numRounds-1, 0)) {
-		return // degenerate bracket (e.g. < 2 competitors)
-	}
-	for r := range rounds {
-		for i := range rounds[r] {
-			if mm := &rounds[r][i]; !mm.Hidden {
-				mm.DisplayRound = numRounds - r
-			}
-		}
-	}
-}
-
-// applySlotDisplayRounds stamps each real bracket match with the round the
-// draw's risen-aware walk (helper.SlotRoundMatches) fights it in. A bout is
-// located by its first-round window: entrant width 2^(r+1) starting at slot
-// offset i*2^(r+1) identifies pow2 match (r, i) exactly, because the bracket
-// was built from helper.SlotArray of the same tree.
-func applySlotDisplayRounds(bracket *state.Bracket, draw *helper.KnockoutDraw) {
-	if bracket == nil || draw == nil || draw.Root == nil {
-		return
-	}
-	numRounds := len(bracket.Rounds)
-	for _, sm := range helper.SlotRoundMatches(draw.Root) {
-		w := sm.EntrantWidth
-		r := -1
-		for ww := w; ww > 1; ww >>= 1 {
-			r++
-		}
-		if r < 0 || r >= numRounds {
-			continue
-		}
-		i := sm.Offset / w
-		if i < 0 || i >= len(bracket.Rounds[r]) {
-			continue
-		}
-		if mm := &bracket.Rounds[r][i]; !mm.Hidden {
-			mm.DisplayRound = numRounds - sm.Round
 		}
 	}
 }

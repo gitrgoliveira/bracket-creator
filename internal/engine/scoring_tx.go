@@ -59,23 +59,6 @@ import (
 	"github.com/gitrgoliveira/bracket-creator/internal/state"
 )
 
-// topNFinisher pairs a top-N finisher's IDENTITY key (the participant id,
-// id-only per operator ruling bc-pnum) with their bare display name. The
-// mp-e2k1 displaced-qualifier guard below needs both: membership in the
-// pre/post top-N sets must be decided by identity (two competitors sharing a
-// display name from different dojos are explicitly legal,
-// CheckDuplicateEntriesByNameDojo, so a bare-name set would not notice a
-// re-score swapping WHICH namesake holds a qualifying rank), while
-// hasStartedKnockoutMatchTx's bracket lookup still matches by name only (a
-// bracket match can carry a per-side id since bc-brid, but this mp-e2k1
-// guard was not converted -- a separate, lower-priority gap that bead
-// recorded rather than closed), so the reported Finisher must still be a
-// name.
-type topNFinisher struct {
-	key  string
-	name string
-}
-
 // RecordMatchResultWithIneligibilityTx is the tx-aware twin of
 // RecordMatchResultWithIneligibility. The K3/CHK047 partial-write
 // rollback path replays the prior result via the same tx so the
@@ -94,10 +77,12 @@ type topNFinisher struct {
 // by the K3 AlreadyIneligibleError path below only restores the corrected
 // match itself (rollbackMatchResultTx replays `prior` through this same
 // match id) -- the downstream matches forceReopenDownstreamChain reopened
-// stay reopened. Reaching this requires force=true on a decision write whose
-// loser turns out to already be ineligible from a different match, a narrow
-// intersection not covered by this bead's test list; recorded here rather
-// than silently left undiscoverable.
+// stay reopened. The same holds for the knockout matches a forced POOL
+// correction reopens (requalifyAfterPoolWrite): the rollback restores the
+// pool match, not the bracket. Reaching either requires force=true on a
+// decision write whose loser turns out to already be ineligible from a
+// different match, a narrow intersection not covered by this bead's test
+// list; recorded here rather than silently left undiscoverable.
 func (e *Engine) RecordMatchResultWithIneligibilityTx(tx state.StoreTx, compID, matchID string, result *state.MatchResult, opts ...ForceOptions) (*domain.CompetitorStatus, error) {
 	fo := firstForceOptions(opts)
 	result.ID = matchID
@@ -129,6 +114,19 @@ func (e *Engine) RecordMatchResultWithIneligibilityTx(tx state.StoreTx, compID, 
 	// stamping winners -- caught by TestWinnerIDInvariant_EveryWritePathStampsASideID).
 	engiStartWrite := result.FlagsA == 0 && result.FlagsB == 0 && result.Status != state.MatchStatusCompleted
 	if comp != nil && comp.Engi && !engiStartWrite {
+		// A pool write in a mixed engi competition answers for the knockout
+		// its pool feeds exactly as a kendo one does (below): prior is read
+		// first, so a refusal can put the pool row back. Only a pool write in
+		// a mixed competition needs it, so no other engi write pays the read.
+		// A prior it cannot read is the write's error, never a nil prior: a
+		// nil prior leaves the refusal below nothing to roll back to.
+		var engiPrior *state.MatchResult
+		if comp.Format == state.CompFormatMixed && IsPoolMatchID(matchID) {
+			var lerr error
+			if engiPrior, lerr = e.lookupExistingResult(tx, compID, matchID); lerr != nil {
+				return nil, lerr
+			}
+		}
 		// fo carries bc-kcdg's downstream-correction confirmation through the
 		// engi seam. Without it an engi knockout correction could neither be
 		// refused nor confirmed: the guard lives past this early return.
@@ -137,6 +135,9 @@ func (e *Engine) RecordMatchResultWithIneligibilityTx(tx state.StoreTx, compID, 
 			return nil, recErr
 		}
 		backfillEngiResult(result, rec)
+		if err := e.requalifyMixedPoolWrite(tx, compID, comp, matchID, rec, engiPrior, fo); err != nil {
+			return nil, err
+		}
 		return nil, nil
 	}
 
@@ -148,8 +149,14 @@ func (e *Engine) RecordMatchResultWithIneligibilityTx(tx state.StoreTx, compID, 
 	// Capture the prior result so we can roll back the score on
 	// AlreadyIneligibleError. lookupExistingResult reads directly from
 	// the tx so it sees the state INSIDE the lock (the on-disk state
-	// hasn't moved under us, we hold the lock).
-	prior, _ := e.lookupExistingResult(tx, compID, matchID)
+	// hasn't moved under us, we hold the lock). A prior it cannot read is
+	// the write's error: every guard below (the kachinuki merge, K3, the
+	// rollback, the pool requalification refusal) reads a nil prior as
+	// "nothing stored", which would let the write through unguarded.
+	prior, err := e.lookupExistingResult(tx, compID, matchID)
+	if err != nil {
+		return nil, err
+	}
 
 	// Kachinuki bout logs merge BY POSITION rather than replace wholesale
 	// (ACID: a client whose local log is behind the server must never
@@ -163,49 +170,81 @@ func (e *Engine) RecordMatchResultWithIneligibilityTx(tx state.StoreTx, compID, 
 		return nil, merr
 	}
 
-	// mp-e2k1: For mixed competitions, capture the pre-write standings for
-	// the match's pool so we can compare after the write and detect whether
-	// any qualifying finisher would be displaced from a started knockout match.
-	// We only need this for re-scores (prior != nil) in mixed comps.
-	// NOTE: the engi early-return above ensures this block only runs for
-	// non-engi competitions, so compIsEngi is always false here and is not
-	// tracked as a variable.
-	var (
-		poolRescoredName string         // pool this match belongs to (empty = not a pool match)
-		oldTopN          []topNFinisher // qualifying finishers BEFORE the write, keyed by identity
-		poolWinners      int            // EffectivePoolWinners, captured so the post-write block needn't reload the comp
-	)
-	if prior != nil {
-		// mp-e2k1: reuse the comp already loaded (and error-checked) at the
-		// engi-dispatch above rather than re-reading config.md from disk — the
-		// tx sees no pending config write, so a reload would just re-parse the
-		// same bytes. The load error is already returned there, so this path is
-		// still fail-closed; a nil comp skips the mixed guard as before.
-		if comp != nil && comp.Format == state.CompFormatMixed {
-			// Only actual pool matches ("Pool X-…") can change pool finishers.
-			// Gate on IsPoolMatchID so a knockout re-score ("m-rN-i"), whose ID
-			// would otherwise parse as a pool via poolNameFromMatchID's trailing
-			// "-<digits>" rule, skips the standings pre-read entirely.
-			if pn, ok := poolNameFromMatchID(matchID); ok && IsPoolMatchID(matchID) {
-				poolRescoredName = pn
-				poolWinners = comp.EffectivePoolWinners()
-				// Fail closed: if we can't establish the pre-write finishers we
-				// can't prove the re-score is safe, so abort before writing
-				// anything (nothing is staged yet, so returning aborts cleanly).
-				preStandings, sErr := e.computeStandingsFrom(tx, compID)
-				if sErr != nil {
-					return nil, fmt.Errorf("mp-e2k1: pre-write standings for %s pool %q: %w", compID, pn, sErr)
-				}
-				ps := preStandings[pn]
-				for i := 0; i < poolWinners && i < len(ps); i++ {
-					p := ps[i].Player
-					oldTopN = append(oldTopN, topNFinisher{key: p.ID, name: p.Name})
-				}
-			}
+	// Default-win bout padding (bc-tmfn follow-up): a non-kachinuki team
+	// match a default-win ruling (any kiken, fusenpai, or fusensho:
+	// domain.IsDefaultWinDecisionStr) closes before every numbered bout has
+	// a result of its own -- most commonly a kiken declared before the
+	// match's first bout was ever scored -- gets an empty SubMatchResult row
+	// (Position only) for every missing position 1..TeamSize, via
+	// state.NeedsDefaultWinBoutPadding / state.PadDefaultWinBoutPositions, the
+	// SAME predicate and function the legacy-load repair uses
+	// (state.EnsureLegacyUpgraded). Without a row for every position,
+	// state.DefaultWinCreditSide's readers (TeamResultFrom,
+	// accrueTeamSubResults, the Excel export) have nothing to range over for
+	// the positions nobody fought and silently credit them zero.
+	//
+	// Gated on PRIOR's sides and unreadable flag, never result's: a client
+	// score payload commonly omits SideA/SideB and relies on reconcileSides
+	// (inside applyPoolWrite/applyBracketResultIn, called later via
+	// writeToPoolOrBracket) to backfill them from the stored row -- reading
+	// result.SideA/SideB here would skip padding on exactly that common case
+	// (a bare kiken payload). Likewise a stored SubResults cell that failed
+	// to parse must never be padded over: NeedsDefaultWinBoutPadding's
+	// subResultsUnreadable check keeps this branch from turning an empty
+	// result.SubResults into a non-empty padded one, which would defeat
+	// applyPoolWrite's own raw-bytes preservation (it only keeps
+	// SubResultsRaw when the incoming SubResults is still empty) and destroy
+	// the only copy of the corrupt cell. prior is guaranteed non-nil here:
+	// the lookupExistingResult error above already returned on a miss.
+	//
+	// The decision tested is result's own, OR -- covering a CORRECTION that
+	// KEEPS a stored withdrawal ruling -- prior's: such a write's own
+	// Decision is either empty (a score sheet states no decision) or an
+	// explicit "hikiwake" (KeepsWithdrawalRuling's own two accepted shapes),
+	// and applyPoolWrite/applyBracketResultIn only reinstate the stored
+	// decision AFTER this point (preserveWithdrawalRuling), so testing
+	// result.Decision alone would miss it here -- and nothing downstream
+	// pads again once this function returns. A correction can legitimately
+	// send fewer SubResults rows than TeamSize (e.g. a bout-level edit that
+	// only touches the rows it corrects), so this is the one place that
+	// still needs to catch it up.
+	//
+	// Excluded: a bye (either side empty -- a bye never carries a
+	// default-win decision in practice, but the padding shape assumes two
+	// real teams either way) and a pool daihyosen/tiebreaker row
+	// (IsPoolDaihyosenMatchID / IsTiebreakerMatchID), which is scored as a
+	// single individual representative bout, never the team's own numbered
+	// positions. Both checked inside NeedsDefaultWinBoutPadding.
+	if comp != nil && comp.TeamSize >= 2 && !comp.IsKachinuki() {
+		// KeepsWithdrawalRuling is checked UNCONDITIONALLY, not only when
+		// result.Decision == "": it is also true for an explicit incoming
+		// "hikiwake" over a stored default win (its own definition allows
+		// incoming.Decision to be "" OR "hikiwake"), and that write must
+		// still pad, since preserveWithdrawalRuling reinstates prior.Decision
+		// downstream regardless of which of the two the correction sent.
+		padDecision := result.Decision
+		if KeepsWithdrawalRuling(prior.Status, prior.Decision, result) {
+			padDecision = prior.Decision
+		}
+		if state.NeedsDefaultWinBoutPadding(result.Status, padDecision, prior.SideA, prior.SideB, matchID,
+			result.SubResults, prior.SubResultsUnreadable, comp.TeamSize) {
+			result.SubResults = state.PadDefaultWinBoutPositions(result.SubResults, comp.TeamSize)
 		}
 	}
 
-	sideMismatch, reopened, err := e.writeToPoolOrBracket(tx, compID, matchID, result, matchWriteForward, fo.Force)
+	// K3 ahead of the write: a withdrawal whose loser a DIFFERENT match has
+	// already made ineligible is refused before anything is written. The
+	// post-write check (recordIneligibilityFromDecision, below) still refuses
+	// it and rolls the match back, but that rollback restores the match row
+	// ONLY: what the write set off in the same transaction (a mixed
+	// competition's requalification reopening and repainting the knockout
+	// matches the old qualifier fought, and restoring the eligibility their
+	// verdicts recorded) stayed staged and committed with the refusal.
+	if err := e.refuseConcurrentWithdrawal(tx, compID, matchID, result, prior); err != nil {
+		return nil, err
+	}
+
+	sideMismatch, reopened, inheritedRuling, err := e.writeToPoolOrBracket(tx, compID, matchID, result, matchWriteForward, fo.Force)
 	if err != nil {
 		return nil, err
 	}
@@ -219,74 +258,27 @@ func (e *Engine) RecordMatchResultWithIneligibilityTx(tx state.StoreTx, compID, 
 		return nil, ErrMatchSideMismatch
 	}
 
-	// mp-e2k1 guard: after the pool-match write, check whether any
-	// qualifying finisher changed. If a displaced finisher already appears
-	// in a started/completed bracket match, reject the re-score.
-	if err == nil && poolRescoredName != "" && len(oldTopN) > 0 {
-		// Fail closed on any verification-read failure past this point: the
-		// forward write is already staged, so we restore prior before returning
-		// the error, never silently commit a re-score we couldn't prove safe.
-		postStandings, sErr := e.computeStandingsFrom(tx, compID)
-		if sErr != nil {
-			e.rollbackMatchResultTx(tx, compID, matchID, prior)
-			return nil, fmt.Errorf("mp-e2k1: post-write standings for %s pool %q: %w", compID, poolRescoredName, sErr)
-		}
-		ps := postStandings[poolRescoredName]
-		// Build the new top-N set and find displaced finishers, keyed by
-		// IDENTITY (the participant id, id-only per operator ruling bc-pnum)
-		// rather than bare name. Two competitors sharing a display name from
-		// different dojos are explicitly legal (CheckDuplicateEntriesByNameDojo),
-		// so a re-score that swaps WHICH namesake holds a qualifying rank
-		// changes the identity at that rank without changing the bare name
-		// occupying it; a name-keyed newSet would see the same string still
-		// present and silently miss the swap (mp-e2k1's guard exists
-		// precisely to catch a qualifying finisher changing under a started
-		// knockout match). poolWinners was captured pre-write, the
-		// competition record can't change within this tx, so no reload is
-		// needed.
-		newSet := make(map[string]struct{}, poolWinners)
-		for i := 0; i < poolWinners && i < len(ps); i++ {
-			p := ps[i].Player
-			newSet[p.ID] = struct{}{}
-		}
-		// displaced carries bare NAMES (not keys): hasStartedKnockoutMatchTx
-		// below still matches bracket sides by name only (a bracket match CAN
-		// carry a per-side id since bc-brid, but this mp-e2k1 guard was not
-		// converted -- see topNFinisher's doc comment above, a separate,
-		// lower-priority gap that bead recorded rather than closed), so a
-		// namesake swap deliberately produces an over-broad name-based lookup
-		// that can match EITHER dojo's occupant of that bracket slot. That is
-		// intentional: the guard fails CLOSED on a namesake collision rather
-		// than silently letting an identity swap through.
-		var displaced []string
-		for _, f := range oldTopN {
-			if _, stillIn := newSet[f.key]; !stillIn {
-				displaced = append(displaced, f.name)
-			}
-		}
-		if len(displaced) > 0 {
-			blockingFinisher, knockoutMatchID, hErr := e.hasStartedKnockoutMatchTx(tx, compID, displaced)
-			if hErr != nil {
-				e.rollbackMatchResultTx(tx, compID, matchID, prior)
-				return nil, fmt.Errorf("mp-e2k1: checking started knockout matches for %s: %w", compID, hErr)
-			}
-			if blockingFinisher != "" {
-				// Reject: restore the prior result so the corrupting re-score
-				// never lands. Within a tx, writes are in-memory WAL intents
-				// coalesced last-write-wins, so this rollback supersedes the
-				// forward write before Commit applies the final state. Report the
-				// finisher actually sitting in the blocking match so Finisher and
-				// MatchID stay consistent (matters when poolWinners > 1).
-				e.rollbackMatchResultTx(tx, compID, matchID, prior)
-				return nil, &DownstreamKnockoutScoredError{
-					Pool:     poolRescoredName,
-					Finisher: blockingFinisher,
-					MatchID:  knockoutMatchID,
-				}
-			}
-		}
+	// A pool write in a mixed competition answers for what it does to the
+	// knockout its pool feeds (pool_requalify.go): a place whose occupant
+	// moves is repainted, a knockout match the old qualifier already fought is
+	// named for the operator to confirm (force reopens it), and a match being
+	// fought now refuses the write. Any refusal restores prior first. Runs for
+	// every pool write, a first completion included: it only ever acts on a
+	// slot that is already occupied, and ignores a pool that is not complete.
+	if err := e.requalifyMixedPoolWrite(tx, compID, comp, matchID, result, prior, fo); err != nil {
+		return nil, err
 	}
 
+	// A bout-row correction that kept a recorded withdrawal
+	// (preserveWithdrawalRuling) changed no ruling, so it has no eligibility
+	// consequence: re-recording the withdrawal would rewrite the competitor's
+	// status (its RecordedAt, and undo a kiken-injury reinstatement) and
+	// broadcast a change nobody made. Deliberately keyed on the helper's own
+	// report, never on comparing result with prior: an unchanged
+	// (decision, loser) test would also swallow a genuine re-decision.
+	if inheritedRuling {
+		return nil, nil
+	}
 	status, err := e.recordIneligibilityFromDecision(tx, compID, matchID, result)
 	if err != nil {
 		var alreadyErr *AlreadyIneligibleError
@@ -303,13 +295,94 @@ func (e *Engine) RecordMatchResultWithIneligibilityTx(tx state.StoreTx, compID, 
 		log.Printf("engine: recordIneligibilityFromDecision compId=%s matchId=%s: %v", compID, matchID, err)
 		return nil, nil
 	}
+	// The eligibility record follows the ruling (operator ruling 2026-09-24:
+	// "Everything should be able to be fixed, in case of a wrong entry").
+	// This write landed (a superseded, mismatched or rolled-back write
+	// returned above) and REPLACED a recorded withdrawal (a kept ruling
+	// returned above, via inheritedRuling): with a result that is not one
+	// (fusensho or daihyosen through recordDecisionTx, or any decision
+	// KeepsWithdrawalRuling does not keep the ruling for), or with a
+	// withdrawal by the OTHER side. The withdrawal it replaced never
+	// happened, so the competitor it barred is restored, keeping the one
+	// this write barred (status), on every door alike: /score, bulk-score
+	// and /decision. The restored status takes priority in the return, so
+	// the handler broadcasts competitor_status_updated for it: the new
+	// withdrawer's status is already carried by the match's own decision.
+	// result is the post-merge value, i.e. what is now stored.
+	if prior != nil {
+		if restored := e.restoreIfWithdrawalRemoved(tx, compID, matchID, prior.Decision, result.Decision, status); restored != nil {
+			status = restored
+		}
+	}
 	return status, nil
 }
 
+// refuseConcurrentWithdrawal is K3's pre-write half: for a withdrawal decision
+// it names the loser the write would record and refuses with
+// AlreadyIneligibleError when a different match has already made them
+// ineligible (checkConcurrentIneligibility, the check recordDecisionTx makes
+// before its own write). The loser is read off a scratch copy with the stored
+// identity folded in by backfillMatchIdentity, the same fold the write
+// applies, so it is the loser the post-write check would name. A payload that
+// fold rejects, or whose losing side cannot be attributed, is left to the
+// write and the post-write check, which answer it as before.
+func (e *Engine) refuseConcurrentWithdrawal(tx state.StoreTx, compID, matchID string, result, prior *state.MatchResult) error {
+	if prior == nil || !domain.IsWithdrawalDecisionStr(result.Decision) {
+		return nil
+	}
+	probe := *result
+	if err := backfillMatchIdentity(&probe, prior, matchWriteForward); err != nil {
+		return nil
+	}
+	loserID, loserName, ok := losingSide(&probe)
+	if !ok {
+		return nil
+	}
+	return e.checkConcurrentIneligibility(tx, compID, matchID, loserID, loserName)
+}
+
+// restoreIfWithdrawalRemoved is the one statement of "the eligibility record
+// follows the ruling" for a write that replaced a recorded withdrawal (kiken,
+// fusenpai). It restores every competitor-status entry this match recorded
+// (restoreEligibilityRecordedByMatch) except the one the write itself has just
+// recorded, loser:
+//   - the decision now stored is not a withdrawal: the withdrawal was
+//     removed, so nobody this match barred stays barred (loser is nil);
+//   - it is a withdrawal again: it may have MOVED to the other side, so the
+//     competitor the first entry barred is restored and loser, the one this
+//     write barred, is kept. When the write could not resolve a loser (nil)
+//     no entry is provably stale, so nothing is restored (PR #416 finding 1:
+//     re-recording a withdrawal whose side name drifted must not free the
+//     competitor who still withdrew).
+//
+// Returns the last restored status, or nil when nothing was restored. Every
+// door that replaces a withdrawal calls it after its write landed:
+// RecordMatchResultWithIneligibilityTx (PUT /score, bulk-score and, through
+// it, POST /decision) and writeMatchResult. The reopen (reopenUnderCourtLock)
+// and restoreForceReopened call it too, after their save, since clearing the
+// decision removes a withdrawal just as a rescore does.
+func (e *Engine) restoreIfWithdrawalRemoved(tx state.StoreTx, compID, matchID, priorDecision, storedDecision string, loser *domain.CompetitorStatus) *domain.CompetitorStatus {
+	if !domain.IsWithdrawalDecisionStr(priorDecision) {
+		return nil
+	}
+	keep := ""
+	if domain.IsWithdrawalDecisionStr(storedDecision) {
+		if loser == nil {
+			log.Printf("engine: restoreIfWithdrawalRemoved compId=%s matchId=%s: the write recorded %q but resolved no loser; restoring nobody (no entry this match recorded is provably stale)",
+				compID, matchID, storedDecision)
+			return nil
+		}
+		keep = loser.PlayerID
+	}
+	return e.restoreEligibilityRecordedByMatch(tx, compID, matchID, keep)
+}
+
 // rollbackMatchResultTx restores prior over a partial score-write within the
-// same transaction. Shared by the two reject paths in
-// RecordMatchResultWithIneligibilityTx: K3 (AlreadyIneligible) and mp-e2k1
-// (downstream knockout already scored). Within a tx, writes are in-memory WAL
+// same transaction. Shared by the reject paths in
+// RecordMatchResultWithIneligibilityTx: K3 (AlreadyIneligible) and the pool
+// requalification refusals (requalifyAfterPoolWrite: a knockout match the
+// move reaches is being fought, or was already fought and the operator has not
+// confirmed). Within a tx, writes are in-memory WAL
 // intents coalesced last-write-wins, so this restore supersedes the forward
 // write before Commit applies the final state. prior must be non-nil.
 //
@@ -359,15 +432,7 @@ func (e *Engine) StartMatchTx(tx state.StoreTx, compID, matchID string) error {
 	if err != nil {
 		return err
 	}
-	for _, pid := range ids {
-		if pid == "" {
-			continue
-		}
-		if st, ok := statuses[pid]; ok && !st.Eligible && st.MatchID != matchID {
-			return &IneligibleCompetitorError{PlayerID: pid, Reason: st.Reason}
-		}
-	}
-	return nil
+	return eligibilityErrorForSides(statuses, matchID, ids)
 }
 
 // checkSimultaneousMatchTx returns *IneligibleCompetitorError if either
@@ -402,34 +467,41 @@ func (e *Engine) StartMatchTx(tx state.StoreTx, compID, matchID string) error {
 func (e *Engine) checkSimultaneousMatchTx(h state.StoreTx, compID, matchID string) error {
 	var sideA, sideB, rawIDA, rawIDB string
 	isPoolMatch := false
+	// Load errors are returned as they are (see lookupExistingResult): an
+	// unreadable pool-matches.csv/bracket.json must not silently drop out of
+	// this check -- swallowing it let a corrupt file pass the simultaneity
+	// gate and start a competitor on a second court while their first match
+	// was still running.
 	poolMatches, poolErr := h.LoadPoolMatches(compID)
-	if poolErr == nil {
-		if m, ok := findPoolMatch(poolMatches, matchID); ok {
-			isPoolMatch = true
-			sideA, sideB = m.SideA, m.SideB
-			rawIDA, rawIDB = m.SideAID, m.SideBID
-		}
+	if poolErr != nil {
+		return poolErr
+	}
+	if m, ok := findPoolMatch(poolMatches, matchID); ok {
+		isPoolMatch = true
+		sideA, sideB = m.SideA, m.SideB
+		rawIDA, rawIDB = m.SideAID, m.SideBID
 	}
 
 	// Loaded once, reused below both for this match's OWN identity (bracket
 	// half only) and for the bracket-vs-bracket comparison loop.
 	bracket, berr := h.LoadBracket(compID)
+	if berr != nil {
+		return berr
+	}
 
 	if !isPoolMatch {
-		if berr == nil {
-			if bm := findBracketMatchInBracket(bracket, matchID); bm != nil {
-				sideA, sideB = bm.SideA, bm.SideB
-				rawIDA, rawIDB = bm.SideAID, bm.SideBID
-			}
+		if bm := findBracketMatchInBracket(bracket, matchID); bm != nil {
+			sideA, sideB = bm.SideA, bm.SideB
+			rawIDA, rawIDB = bm.SideAID, bm.SideBID
 		}
 		if sideA == "" && sideB == "" {
-			// Not found in the bracket read above (a berr load failure, or a
-			// genuinely unknown matchID): fall back to the general resolver,
-			// matching the previous behaviour.
+			// Not found in the bracket read above (a genuinely unknown
+			// matchID): fall back to the general resolver, matching the
+			// previous behaviour.
 			var err error
 			sideA, sideB, err = e.lookupMatchSides(h, compID, matchID)
 			if err != nil {
-				return nil
+				return err
 			}
 		}
 		// The row's OWN ids are preferred (above); the roster name scan only
@@ -458,38 +530,60 @@ func (e *Engine) checkSimultaneousMatchTx(h state.StoreTx, compID, matchID strin
 		return name
 	}
 
-	if poolErr == nil {
-		for _, m := range poolMatches {
-			if m.ID == matchID || m.Status != state.MatchStatusRunning {
-				continue
+	// bc-cse: the operator sentence for the gate itself (comp/bracket are
+	// already the ones this call needs to name the OTHER match, m/bm below,
+	// not matchID). comp is loaded LAZILY, inside the closure, not above:
+	// every caller of checkSimultaneousMatchTx returns immediately on the
+	// first conflict found, so this closure runs AT MOST ONCE per call, and
+	// loading comp here means the common case (no conflict) never pays for
+	// it at all. comp is still best-effort: OperatorMatchLabel degrades to
+	// the pool's own name on a nil comp (no League-heading override), so a
+	// load failure still gates the write correctly, only the sentence's
+	// match name gets plainer -- but the error is logged rather than
+	// discarded, per the errcheck rule.
+	simultaneousReason := func(name, otherMatchID, court string) string {
+		comp, err := h.LoadCompetition(compID)
+		if err != nil {
+			log.Printf("engine: checkSimultaneousMatchTx: LoadCompetition compId=%s: %v (label degrades to pool-phase-only)", compID, err)
+		}
+		label := OperatorMatchLabel(comp, bracket, otherMatchID)
+		return fmt.Sprintf("%s is fighting now in %s on Shiaijo %s. Finish that match first.", name, label, court)
+	}
+
+	for _, m := range poolMatches {
+		if m.ID == matchID || m.Status != state.MatchStatusRunning {
+			continue
+		}
+		if rawIDA != "" && (m.SideAID == rawIDA || m.SideBID == rawIDA) {
+			return &IneligibleCompetitorError{
+				PlayerID:     playerIDFor(rawIDA, sideA),
+				Reason:       simultaneousReason(sideA, m.ID, m.Court),
+				Simultaneous: true,
 			}
-			if rawIDA != "" && (m.SideAID == rawIDA || m.SideBID == rawIDA) {
-				return &IneligibleCompetitorError{
-					PlayerID: playerIDFor(rawIDA, sideA),
-					Reason:   fmt.Sprintf("already fighting in match %s on court %s", m.ID, m.Court),
-				}
-			}
-			if rawIDB != "" && (m.SideAID == rawIDB || m.SideBID == rawIDB) {
-				return &IneligibleCompetitorError{
-					PlayerID: playerIDFor(rawIDB, sideB),
-					Reason:   fmt.Sprintf("already fighting in match %s on court %s", m.ID, m.Court),
-				}
+		}
+		if rawIDB != "" && (m.SideAID == rawIDB || m.SideBID == rawIDB) {
+			return &IneligibleCompetitorError{
+				PlayerID:     playerIDFor(rawIDB, sideB),
+				Reason:       simultaneousReason(sideB, m.ID, m.Court),
+				Simultaneous: true,
 			}
 		}
 	}
 
-	if berr == nil && bracket != nil {
+	if bracket != nil {
 		checkBracketMatch := func(bm *state.BracketMatch) error {
 			if sideA != "" && matchesBracketSide(rawIDA, sideA, bm) {
 				return &IneligibleCompetitorError{
-					PlayerID: playerIDFor(rawIDA, sideA),
-					Reason:   fmt.Sprintf("already fighting in match %s on court %s", bm.ID, bm.Court),
+					PlayerID:     playerIDFor(rawIDA, sideA),
+					Reason:       simultaneousReason(sideA, bm.ID, bm.Court),
+					Simultaneous: true,
 				}
 			}
 			if sideB != "" && matchesBracketSide(rawIDB, sideB, bm) {
 				return &IneligibleCompetitorError{
-					PlayerID: playerIDFor(rawIDB, sideB),
-					Reason:   fmt.Sprintf("already fighting in match %s on court %s", bm.ID, bm.Court),
+					PlayerID:     playerIDFor(rawIDB, sideB),
+					Reason:       simultaneousReason(sideB, bm.ID, bm.Court),
+					Simultaneous: true,
 				}
 			}
 			return nil
@@ -602,7 +696,7 @@ func (e *Engine) checkCourtExclusivityTx(tx state.StoreTx, compID, matchID strin
 // match back to running, so a court that already has a running match would end
 // up with TWO, wedging the exclusivity check for BOTH (the re-End of the
 // reopened match and every further score write to the genuinely live bout).
-// See ReopenKachinukiMatch's COURT GATE note.
+// See ReopenMatch's COURT GATE note.
 func courtFreeInCompTxWith(tx state.StoreTx, compID, matchID, court string, poolMatches []state.MatchResult, bracket *state.Bracket) error {
 	if court == "" {
 		return nil
@@ -707,71 +801,6 @@ func resolvePlayerIDs(h state.StoreTx, compID, sideA, sideB string) (rawIDA, raw
 	}
 	pool := combinedPlayerPool(comp.Players, participants)
 	return lookupPlayerID(pool, sideA), lookupPlayerID(pool, sideB)
-}
-
-// hasStartedKnockoutMatchTx reports whether any BRACKET (knockout) match
-// with status running or completed currently lists one of playerNames as a
-// side. This is the bracket-only counterpart of hasDownstreamMatchStarted
-// (eligibility.go, called here through tx), pool matches are intentionally
-// NOT scanned because a pool finisher legitimately appears in their own
-// completed pool bouts, which must NOT trip the guard.
-//
-// mp-e2k1.
-func (e *Engine) hasStartedKnockoutMatchTx(tx state.StoreTx, compID string, playerNames []string) (matchedName, matchID string, err error) {
-	wantSet := make(map[string]struct{}, len(playerNames))
-	for _, n := range playerNames {
-		if n != "" {
-			wantSet[n] = struct{}{}
-		}
-	}
-	if len(wantSet) == 0 {
-		return "", "", nil
-	}
-	// matchedSide returns the displaced name found on this match (a or b), or ""
-	// if neither side is one of the displaced finishers. Returning the name keeps
-	// the caller's error payload consistent: the reported Finisher is the one
-	// actually sitting in the blocking match, not just displaced[0].
-	matchedSide := func(a, b string) string {
-		if _, ok := wantSet[a]; ok {
-			return a
-		}
-		if _, ok := wantSet[b]; ok {
-			return b
-		}
-		return ""
-	}
-	isStarted := func(s state.MatchStatus) bool {
-		return s == state.MatchStatusRunning || s == state.MatchStatusCompleted
-	}
-	bracket, err := tx.LoadBracket(compID)
-	if err != nil {
-		// A genuinely absent bracket is NOT an error, LoadBracket maps a
-		// missing file to an empty bracket with nil error (parseBracketFile,
-		// os.IsNotExist). So a non-nil error here is a real fault (corrupt
-		// bracket.json, permission/IO error). Propagate it rather than treating
-		// it as "no started knockout match", which would let the caller's guard
-		// fail open and allow a re-score that should be blocked.
-		return "", "", err
-	}
-	if bracket == nil {
-		return "", "", nil
-	}
-	for _, round := range bracket.Rounds {
-		for _, bm := range round {
-			if !isStarted(bm.Status) {
-				continue
-			}
-			if name := matchedSide(bm.SideA, bm.SideB); name != "" {
-				return name, bm.ID, nil
-			}
-		}
-	}
-	if bm := bracket.ThirdPlaceMatch; bm != nil && isStarted(bm.Status) {
-		if name := matchedSide(bm.SideA, bm.SideB); name != "" {
-			return name, bm.ID, nil
-		}
-	}
-	return "", "", nil
 }
 
 // clientWriteStamp is the caller's server-relative write stamp, or 0 when the
@@ -991,111 +1020,85 @@ func (e *Engine) recordDecisionTx(tx state.StoreTx, compID, matchID, decision, d
 	if err != nil {
 		return nil, nil, err
 	}
-	// T103 undo: restore eligibility for whichever competitor-status ENTRY
-	// this exact match wrote (st.MatchID == matchID, st.Eligible == false)
-	// that the write above did NOT just (re)confirm. Restoring by the
-	// record's own MatchID -- not by re-deriving identity from the match's
-	// side names/ids the way the prior version of this block did -- is
-	// exact for every shape the write can take, including a same-name
-	// pairing: recordIneligibilityFromDecision already resolved and wrote
-	// this exact entry once, correctly, at kiken/fusenpai time (or refused
-	// to, for a row it could not resolve), so there is nothing left here to
-	// re-derive or guess. This also closes a starvation bug the old
-	// name/id-comparison version had: for a same-name pairing, the old
-	// ambiguity skip fired on every rescore of that match (not just the
-	// one that mattered), so the prior loser stayed permanently ineligible
-	// -- ReinstateCompetitor refuses unless Reinstateable, and neither
-	// kiken-voluntary nor fusenpai ever are.
-	//
-	// currentLoserID is the player the write above just confirmed
-	// ineligible for THIS match, if any (status is nil when the new
-	// decision no longer causes ineligibility at all, e.g. rescored as
-	// "fought", or when recordIneligibilityFromDecision's own write was a
-	// non-fatal no-op). Every OTHER MatchID==matchID/Eligible==false entry
-	// is stale by construction (recordIneligibilityFromDecision's K2
-	// check-and-set only ever adds one such entry per call) and is restored.
-	//
-	// PR #416 finding 1: status==nil does NOT always mean "this match no
-	// longer makes anyone ineligible" -- RecordMatchResultWithIneligibilityTx
-	// also returns (nil, nil) when recordIneligibilityFromDecision could not
-	// RESOLVE the loser (its *ValidationError is logged and swallowed a few
-	// lines above) or hit a non-fatal load error. Re-recording the SAME
-	// kiken/fusenpai on a match whose side name has drifted from the roster
-	// would otherwise flip the STILL-withdrawn competitor back to
-	// Eligible:true: the loop below would see status==nil, treat every
-	// MatchID==matchID entry as stale, and restore it. Gate the restore on
-	// the write having actually SETTLED the loser: when the new decision is
-	// itself a withdrawal and the write resolved no status at all, no
-	// MatchID==matchID record is provably stale, so skip the restore
-	// outright and log why, rather than silently un-revoking eligibility the
-	// operator never rescinded. Restoring proceeds as before whenever the
-	// new decision is NOT a withdrawal (the "fought"/undo path this loop
-	// exists for) or when a status WAS resolved (the write settled who,
-	// this match, is currently the loser).
-	newIsWithdrawal := domain.IsWithdrawalDecisionStr(decision)
-	switch {
-	case newIsWithdrawal && status == nil:
-		log.Printf("engine: RecordDecisionTx compId=%s matchId=%s: new decision %q is a withdrawal but recordIneligibilityFromDecision did not resolve/write a loser; skipping the stale-eligibility restore (no MatchID==%s record is provably stale)",
-			compID, matchID, decision, matchID)
-	default:
-		if statuses, serr := tx.LoadCompetitorStatus(compID); serr != nil {
-			log.Printf("engine: RecordDecisionTx compId=%s matchId=%s: LoadCompetitorStatus for restore: %v", compID, matchID, serr)
-		} else {
-			var currentLoserID string
-			if status != nil {
-				currentLoserID = status.PlayerID
-			}
-			// PR #416 finding 2: iterate in sorted playerID order so the
-			// outcome is deterministic rather than depending on Go's
-			// randomized map iteration order -- matters once more than one
-			// stale entry needs restoring in the same call, which previously
-			// left BOTH which player's restore landed last (irrelevant, every
-			// resolved restore below is written unconditionally) and, more
-			// importantly, which one this function RETURNS to depend on map
-			// iteration order.
-			//
-			// This intentionally preserves the existing single-status
-			// priority (documented in the loop below by the fact that a
-			// restore, when one fires, still overwrites `status`), the same
-			// shape TestRecordDecision_KikenUndo and
-			// TestRecordDecisionTx_KikenUndoSucceeds already pin for a
-			// decisionBy flip (kiken moves from Alice to Bob): the RESTORED
-			// player's re-earned eligibility is what the operator's UI most
-			// needs surfaced from this single-value return -- the new
-			// loser's withdrawal is already conveyed by the returned
-			// MatchResult's own Decision/DecisionBy/Winner fields, while the
-			// restoration has no other channel. Changing that priority (or
-			// broadcasting every touched status individually) needs either a
-			// wider return shape or handler-side fan-out, both out of this
-			// change's scope; the sentence above is the deliberate, narrower
-			// slice of finding 2 this pass implements.
-			playerIDs := make([]string, 0, len(statuses))
-			for playerID := range statuses {
-				playerIDs = append(playerIDs, playerID)
-			}
-			sort.Strings(playerIDs)
-			for _, playerID := range playerIDs {
-				st := statuses[playerID]
-				if st.MatchID != matchID || st.Eligible || playerID == currentLoserID {
-					continue
-				}
-				// A fresh minimal status, not the stale record with Eligible
-				// flipped: Reason/Reinstateable describe why the player WAS
-				// ineligible, which no longer applies once restored (mirrors the
-				// removed restoreCompetitorEligibility's own construction).
-				restored := domain.CompetitorStatus{
-					PlayerID:   playerID,
-					Eligible:   true,
-					MatchID:    matchID,
-					RecordedAt: time.Now().UTC(),
-				}
-				if werr := tx.SetCompetitorStatus(compID, restored); werr != nil {
-					log.Printf("engine: RecordDecisionTx compId=%s matchId=%s: restoring stale eligibility for playerId=%s: %v", compID, matchID, playerID, werr)
-					continue
-				}
-				status = &restored
-			}
-		}
-	}
+	// T103 undo: the write above already restored whoever the withdrawal it
+	// replaced had barred (restoreIfWithdrawalRemoved, called by
+	// RecordMatchResultWithIneligibilityTx for every door), keeping the new
+	// withdrawer, and returned the restored status in priority. A second
+	// restore here read that RESTORED status as the current loser and freed
+	// the new withdrawer, so there is none: the rule has one owner.
 	return result, status, nil
+}
+
+// restoreEligibilityRecordedByMatch restores eligibility for every
+// competitor-status ENTRY this exact match wrote (st.MatchID == matchID,
+// st.Eligible == false) except keepPlayerID, the player the current write
+// has just (re)confirmed ineligible for this match ("" when it confirmed
+// nobody). It returns the last status it restored, or nil when it restored
+// none. Its one caller is restoreIfWithdrawalRemoved, which every door that
+// replaces a recorded withdrawal goes through: a withdrawal moved to the
+// other side or replaced by another outcome, on /decision, /score and
+// bulk-score alike, and a reopen that clears it.
+//
+// Restoring by the record's own MatchID -- not by re-deriving identity from
+// the match's side names/ids the way an earlier version did -- is exact for
+// every shape the write can take, including a same-name pairing:
+// recordIneligibilityFromDecision already resolved and wrote this exact
+// entry once, correctly, at kiken/fusenpai time (or refused to, for a row it
+// could not resolve), so there is nothing left here to re-derive or guess.
+// It also closes a starvation bug the old name/id-comparison version had:
+// for a same-name pairing, the old ambiguity skip fired on every rescore of
+// that match, so the prior loser stayed permanently ineligible --
+// ReinstateCompetitor refuses unless Reinstateable, and neither
+// kiken-voluntary nor fusenpai ever are.
+//
+// Every kind of withdrawal is restored, kiken-voluntary included, even
+// though FIK Art. 31 bars a voluntary withdrawer from following shiai: a
+// withdrawal the operator replaces or removes was a wrong entry, and a
+// withdrawal that never happened bars nobody (operator ruling 2026-09-24:
+// "Everything should be able to be fixed, in case of a wrong entry").
+//
+// PR #416 finding 2: players are visited in sorted playerID order so the
+// returned status is deterministic rather than depending on Go's randomized
+// map iteration order once more than one stale entry is restored in one
+// call. The RESTORED player's status is what the caller returns because it
+// is what the operator's UI most needs surfaced: a new loser's withdrawal is
+// already conveyed by the returned MatchResult's own Decision/DecisionBy/
+// Winner fields, while the restoration has no other channel.
+//
+// Best effort, like the eligibility write it undoes: a load or write error
+// is logged and the entry skipped, never failing the score write that has
+// already landed.
+func (e *Engine) restoreEligibilityRecordedByMatch(tx state.StoreTx, compID, matchID, keepPlayerID string) *domain.CompetitorStatus {
+	statuses, serr := tx.LoadCompetitorStatus(compID)
+	if serr != nil {
+		log.Printf("engine: restoreEligibilityRecordedByMatch compId=%s matchId=%s: LoadCompetitorStatus: %v", compID, matchID, serr)
+		return nil
+	}
+	playerIDs := make([]string, 0, len(statuses))
+	for playerID := range statuses {
+		playerIDs = append(playerIDs, playerID)
+	}
+	sort.Strings(playerIDs)
+	var last *domain.CompetitorStatus
+	for _, playerID := range playerIDs {
+		st := statuses[playerID]
+		if st.MatchID != matchID || st.Eligible || playerID == keepPlayerID {
+			continue
+		}
+		// A fresh minimal status, not the stale record with Eligible
+		// flipped: Reason/Reinstateable describe why the player WAS
+		// ineligible, which no longer applies once restored.
+		restored := domain.CompetitorStatus{
+			PlayerID:   playerID,
+			Eligible:   true,
+			MatchID:    matchID,
+			RecordedAt: time.Now().UTC(),
+		}
+		if werr := tx.SetCompetitorStatus(compID, restored); werr != nil {
+			log.Printf("engine: restoreEligibilityRecordedByMatch compId=%s matchId=%s: restoring playerId=%s: %v", compID, matchID, playerID, werr)
+			continue
+		}
+		last = &restored
+	}
+	return last
 }

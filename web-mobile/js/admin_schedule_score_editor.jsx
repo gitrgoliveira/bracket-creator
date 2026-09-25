@@ -1,17 +1,26 @@
 // Score editor components extracted from admin_schedule.jsx (mp-d7tl).
 // startPatch, ScoreEditCourtBtn (local), AdminScoreEditor, AdminScoreEditorPage.
 
-import { writeDidNotLand, matchLabel } from './write_result.jsx';
+import { writeDidNotLand } from './write_result.jsx';
 import { matchMentions } from './competitor_search.jsx';
 import { SideCell } from './side_cell.jsx';
 import { allMatchesCompleted } from './admin_schedule_utils.jsx';
 import { MatchLineupPanel } from './admin_schedule_lineup.jsx';
-import { boutHansokuMark } from './match_scoreboard.jsx';
+import { boutHansokuMark, teamNameMark } from './match_scoreboard.jsx';
 import { sameCompetitor } from './competitor_identity.jsx';
-import { poolMatchNumberOf } from './pool_ids.jsx';
+import { scoreRowMatchLabel } from './pool_ids.jsx';
 // NumberedName: single owner of the number-chip-on-the-outer-side rule
 // (bc-dnst); see that file's header for why this stays an ES import.
 import { NumberedName } from './numbered_name.jsx';
+// bc-cse: a scheduled match a competitor is barred from cannot be fought, so
+// no auto-pick may offer it and its row shows the default-win action
+// instead. One leaf owns the question (ineligible_match.jsx); BarredMatchNotice
+// (admin_scoring_shared.jsx) is the one component that renders it everywhere.
+import { isBarredMatch } from './ineligible_match.jsx';
+// Straight from its own leaf, not admin_scoring_shared.jsx (which also
+// imports bracket.jsx): see barred_match_notice.jsx's header for why that
+// matters for this file's own render suite.
+import { BarredMatchNotice } from './barred_match_notice.jsx';
 
 const { useState: useStateA, useMemo: useMemoA, useEffect: useEffectA, useRef: useRefA } = React;
 
@@ -28,44 +37,14 @@ const ScoreEditorModal = window.ScoreEditorModal;
 const hasBothSides = window.hasBothSides;
 const getScoreBtnClass = window.getScoreBtnClass;
 
-// scoreRowMatchLabel: how the scores list names a match to the operator.
-//
-// EVERY row carries an identity, because this list is where an operator lands
-// after a dialog names a match ("Match 15 was reopened"), and a row identified
-// only by its time and its two competitors cannot be found that way.
-//
-// The two phases number independently, so the label says which numbering it
-// is quoting. A knockout match owns a number across the whole tree, the same
-// one the printed tree and the correction dialogs use, so it reads bare:
-// "Match 15". A pool bout is numbered inside its own pool and the numbering
-// restarts per pool (operator ruling 2026-09-19), so its pool is named with
-// it: "Pool A · Match 2". Without that prefix the two would collide, since
-// every pool has a Match 1 and so does the bracket.
-//
-// The pool's own name comes from window.poolLabel (viewer_utils.jsx), the one
-// owner of the pool-vs-league-vs-Swiss heading, so a Swiss round reads
-// "Round 3 · Match 2" rather than the synthetic "Swiss-R3" id.
-//
-// A knockout row is named by matchLabel (write_result.jsx), the same owner the
-// correction dialogs use, so the row an operator is sent to looking for
-// "Match 15" -- or for "the 3rd-place match", the one match named rather than
-// numbered -- carries exactly the words they were given.
-//
-// Returns "" when the match carries no number at all: a bracket match drawn
-// before numbering existed, and a pool supplementary bout (daihyosen or
-// tiebreaker), which is an appended rep bout rather than one of the pool's
-// numbered round-robin bouts.
-export function scoreRowMatchLabel(m) {
-  if (m.phase === "bracket") {
-    const label = matchLabel({ number: m.matchNumber, id: m.id });
-    // matchLabel falls back to the raw id, which names nothing on screen.
-    return label === m.id ? "" : label;
-  }
-  const n = poolMatchNumberOf(m.id || "");
-  if (!n) return "";
-  const pool = (window.poolLabel ? window.poolLabel(m) : m.poolName) || "";
-  return pool ? `${pool} · Match ${n}` : `Match ${n}`;
-}
+// scoreRowMatchLabel: relocated to pool_ids.jsx (bc-cse), which can serve
+// admin_scoring_shared.jsx too without the cycle importing this file would
+// create (this file -> admin_schedule_lineup.jsx -> admin_scoring_shared.jsx
+// already exists). Re-exported here (of the LOCAL binding imported above, so
+// the module is fetched once) so this file's own use below, and the
+// existing `from './admin_schedule_score_editor.jsx'` test import, need no
+// change; see pool_ids.jsx for the full rule.
+export { scoreRowMatchLabel };
 
 // ---------- Score editor ----------
 export function AdminScoreEditorPage({ tournament, onBack, onEditScore, onMoveCourt, onLogout, onViewerMode, password }) {
@@ -231,6 +210,15 @@ export function AdminScoreEditor({ t, c, onEditScore, onMoveCourt, restrictToCom
           const aWin = !!m.winner && !!m.sideA && sameCompetitor(m.winner, m.sideA);
           const bWin = !!m.winner && !!m.sideB && sameCompetitor(m.winner, m.sideB);
           const isCorrection = m.status === "completed" && m.score?.corrected;
+          // bc-tmfn: a TEAM row's score cell (window.matchScoreStr →
+          // teamIVPWScore) is deliberately free of marks, so the match-level
+          // Kiken/Fus. a default win closed a team match with rides beside
+          // the withdrawn team's NAME instead -- the ONE shared computation
+          // (window.teamMatchMarks, bracket.jsx), which derives its own
+          // team-row signal from m.subResults (bc-cse) so an individual
+          // match's own mark, already inline in its score string below, is
+          // never doubled here.
+          const { shiro: teamShiroMark, aka: teamAkaMark } = window.teamMatchMarks ? window.teamMatchMarks(m) : { shiro: "", aka: "" };
           // Outstanding single hansoku → red ▲ next to the offending side (same
           // mark as the scoresheet). hansoku may live on the match or under
           // score.fouls depending on the source; fall back across both.
@@ -263,7 +251,17 @@ export function AdminScoreEditor({ t, c, onEditScore, onMoveCourt, restrictToCom
                       Mirrors PoolNumberedMatchRow (viewer_standings.jsx), which
                       dropped its badge for the same tint. */}
                   <SideCell side="shiro" className={`score-edit-row__side score-edit-row__side--shiro ${bWin ? "score-edit-row__side--win" : ""}`} style={{ textAlign: "right" }}>
-                    <div className="name"><NumberedName side="shiro" name={m.sideB?.name} number={m.sideB?.number} clip /></div>
+                    {/* bc-cse: msb-name--labelled -- see viewer_match.jsx's
+                        VSchedItem comment for why a mark riding beside a
+                        clip-mode name needs its own flex row: without it a
+                        long name clips the mark off the end. justifyContent
+                        here (not the msb-name--aka class, which is Aka's own)
+                        because THIS row reads toward the centre score from
+                        both sides -- Shiro right-aligned, Aka left-aligned --
+                        the opposite of most name cells; the parent's own
+                        textAlign:"right" no longer reaches a flex child once
+                        .name becomes the flex container. */}
+                    <div className="name msb-name--labelled" style={{ justifyContent: "flex-end" }}>{teamNameMark("shiro", teamShiroMark, <NumberedName side="shiro" name={m.sideB?.name} number={m.sideB?.number} clip />)}</div>
                     <div className="dojo">{m.sideB?.dojo}</div>
                   </SideCell>
                   {/* Foul ▲ flanks the SCORE (Shiro left, Aka right): a hansoku is part of
@@ -277,7 +275,12 @@ export function AdminScoreEditor({ t, c, onEditScore, onMoveCourt, restrictToCom
                     <span className="score-edit-row__foul">{foulA && <span className="msb-hansoku" data-testid="foul-mark-a">{foulA}</span>}</span>
                   </div>
                   <SideCell side="aka" className={`score-edit-row__side score-edit-row__side--aka ${aWin ? "score-edit-row__side--win" : ""}`}>
-                    <div className="name"><NumberedName side="aka" name={m.sideA?.name} number={m.sideA?.number} clip /></div>
+                    {/* No msb-name--aka here: unlike most name cells this row
+                        reads Aka LEFT-aligned (toward the centre score from
+                        the right side), the opposite of that class's own
+                        justify-content:flex-end/color:red base -- this host
+                        already owns its own aka styling. */}
+                    <div className="name msb-name--labelled">{teamNameMark("aka", teamAkaMark, <NumberedName side="aka" name={m.sideA?.name} number={m.sideA?.number} clip />)}</div>
                     <div className="dojo">{m.sideA?.dojo}</div>
                   </SideCell>
               </div>
@@ -305,6 +308,15 @@ export function AdminScoreEditor({ t, c, onEditScore, onMoveCourt, restrictToCom
                   </button>
                 )}
               </div>
+              {/* bc-cse: a scheduled match a competitor is barred from cannot
+                  be fought as scheduled; show why and the one-tap resolution
+                  (BarredMatchNotice, admin_scoring_shared.jsx) on its own full-
+                  width row rather than squeezed into the 5-column grid. */}
+              {isBarredMatch(m) && (
+                <div style={{ gridColumn: "1 / -1" }}>
+                  <BarredMatchNotice match={m} password={password} />
+                </div>
+              )}
             </div>
           );
         })}
@@ -346,8 +358,11 @@ export function AdminScoreEditor({ t, c, onEditScore, onMoveCourt, restrictToCom
         // modal to loop back to match 1 after the final save.
         // Guard on openIdx >= 0: when openMatch is not found in sameCourt (openIdx
         // === -1), slice(0) would scan the whole array and return a spurious match.
+        // bc-cse: skip a barred match (isBarredMatch, ineligible_match.jsx):
+        // Finish + Start Next and the after-decision advance both feed this
+        // straight into a Start write, which the server would just refuse.
         const nextActiveMatch = openIdx >= 0
-          ? sameCourt.slice(openIdx + 1).find(m => m.status !== 'completed') || null
+          ? sameCourt.slice(openIdx + 1).find(m => m.status !== 'completed' && !isBarredMatch(m)) || null
           : null;
         // Minimal "start" patch (status → running, empty score). Mirrors the
         // modal's own buildPatch("running") for an unscored match and works for

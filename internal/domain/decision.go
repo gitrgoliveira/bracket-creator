@@ -119,9 +119,15 @@ func IsDefaultWinDecisionStr(s string) bool {
 
 // IsWithdrawalDecisionStr reports whether the decision is a WITHDRAWAL: any
 // kiken variant, or fusenpai (a no-show). Deliberately narrower than
-// IsDefaultWinDecisionStr, which additionally includes fusensho -- a
-// PER-BOUT default win awarded within a team encounter on someone ELSE's
-// withdrawal, not a withdrawal of the bout it is recorded on.
+// IsDefaultWinDecisionStr, which additionally includes fusensho -- a default
+// win awarded on someone ELSE's withdrawal, not a withdrawal of the bout/
+// match it is recorded on. Fusensho is not only a PER-BOUT mark within a
+// team encounter: an operator may also record it at MATCH level via
+// POST /decision (handlers_decision.go's allow-list) to close out a barred
+// competitor's remaining scheduled match once they're already ineligible
+// from an earlier kiken/fusenpai elsewhere -- ScoreRequest.Validate (the
+// /score endpoint) rejects a top-level fusensho, but /decision's is a
+// separate, distinct allow-list that accepts it.
 //
 // The expression `!IsKikenDecisionStr(d) && d != string(DecisionFusenpai)`
 // (or its positive mirror, `IsKikenDecisionStr(d) || d == string(DecisionFusenpai)`)

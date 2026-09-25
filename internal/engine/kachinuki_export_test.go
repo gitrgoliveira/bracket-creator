@@ -13,30 +13,6 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// TestFormatPositionLabel exercises every named position and the
-// numeric/empty fall-through paths.
-func TestFormatPositionLabel(t *testing.T) {
-	tests := []struct {
-		pos  domain.Position
-		want string
-	}{
-		{domain.PosSenpo, "Senpo"},
-		{domain.PosJiho, "Jiho"},
-		{domain.PosChuken, "Chuken"},
-		{domain.PosFukusho, "Fukusho"},
-		{domain.PosTaisho, "Taisho"},
-		{"1", "1"},
-		{"2", "2"},
-		{"", ""},
-		{"unknown", "Unknown"},
-	}
-	for _, tc := range tests {
-		t.Run(string(tc.pos), func(t *testing.T) {
-			assert.Equal(t, tc.want, formatPositionLabel(tc.pos))
-		})
-	}
-}
-
 // TestLineupKey verifies the composite key is stable and uses the
 // null-byte separator so a team named "A\x00B" can't collide with
 // team "A" + player "B\x00anything".

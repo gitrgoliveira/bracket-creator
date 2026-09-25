@@ -7,12 +7,10 @@
 // filter in viewer_competition.jsx used to test only `status === "completed"
 // && m.winner`, so those byes rendered as finished results reading
 // "TBD vs <name>" under a Final badge, with nothing to say that nobody was
-// ever scheduled. A bye is bracket structure, not a result; it stays
-// discoverable in the Bracket tab, where the entrant renders as an unopposed
-// slot tagged BYE feeding the next round (bc-bye-slot__tag in BracketTreeMeta,
-// pinned by render/bracket_bye_slot.render.test.jsx; not the MatchCard's
-// bc-bye-tag, which is gated on score.type === "bye" and unreachable from a
-// server payload).
+// ever scheduled. A bye is bracket structure, not a result; the Bracket tab
+// shows it the way the printed sheets do, with the entrant appearing only in
+// the card of the match they first fight (pinned by
+// render/bracket_structural_bye.render.test.jsx).
 //
 // The filter's guard is the shared `hasBothSides` predicate, NOT a hand-rolled
 // `m.sideA && m.sideB`: normalizeMatch (api_serializers.jsx) substitutes a

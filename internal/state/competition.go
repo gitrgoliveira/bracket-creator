@@ -440,8 +440,10 @@ func (s *Store) DeleteCompetition(id string) error {
 	defer mu.Unlock()
 
 	// A recreated same-ID competition must be re-checked for legacy shapes
-	// (its files are new); drop the once-per-process upgrade mark with it.
+	// (its files are new); drop the once-per-process upgrade mark with it, and
+	// the mark that its bracket's refusal was already logged.
 	s.legacyUpgraded.Delete(id)
+	s.bracketRoundsRefusalLogged.Delete(id)
 
 	// overrides.json is the one file in this directory whose writers serialize
 	// on the store-wide s.mu rather than the per-competition lock, so the lock

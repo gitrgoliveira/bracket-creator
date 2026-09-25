@@ -11,7 +11,7 @@ import (
 // scheduleClockLayout is the only time format used here. Wire format
 // is HH:MM (24h), with a zero-valued date so we operate purely on
 // minutes-of-day arithmetic. T150 / T151.
-const scheduleClockLayout = "15:04"
+const scheduleClockLayout = state.ScheduledAtLayout
 
 // defaultLunchStartClock is the fallback start-of-lunch when a
 // tournament defines LunchBlock duration but does not (yet) carry a
@@ -264,10 +264,11 @@ func assignPoolMatchSlots(matches []state.MatchResult, comp *state.Competition, 
 // body), and each court's cursor advances by perMatchElapsedMinutes
 // after every assignment. T150, T151.
 //
-// Auto-resolved bye matches (Status == Completed at generation time)
-// still receive a ScheduledAt for UI consistency, the operator-
-// facing schedule lists them even though no play happens. The court
-// cursor is NOT advanced for byes (they consume no court time).
+// Unnumbered rows (the draw's byes, hidden pass-through matches and empty
+// pairs, all Completed at generation time) take their court's opening time,
+// ahead of Match 1: nothing is played on them and no surface lists them as
+// a match to play. The court cursor is NOT advanced for them (they consume
+// no court time).
 //
 // Returns the maximum per-court end-cursor (the clock time when the
 // last match on the busiest court finishes). Callers that only want

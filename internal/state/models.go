@@ -1699,7 +1699,8 @@ type BracketMatch struct {
 	// MatchNumber is the sequential bracket match number, matching the
 	// "Match N" label printed on the Excel tree sheet. 0 means unset; for a
 	// BracketMatch that is a hidden/bye placeholder, or a legacy bracket saved
-	// before numbering was assigned.
+	// before numbering was assigned. Stamped together with DisplayRound, by
+	// the one producer DisplayRound's comment below names.
 	MatchNumber int `json:"matchNumber,omitempty"`
 	// Decision-type metadata mirrors MatchResult so an elimination-stage
 	// kiken/fusenpai/encho is reconstructable from bracket.json alone
@@ -1751,10 +1752,14 @@ type BracketMatch struct {
 	// real bout and must not be drawn as a match card. Feeders holds the IDs of
 	// the two real feeder matches whose winners meet here, in [A, B] order; an
 	// empty string means that side is a seeded entrant / bye (no connector line).
-	// DisplayRound and MatchNumber are also recomputed from Feeders once on load
-	// (Bracket.RestampRoundsFromFeeders, via Store.EnsureLegacyUpgraded), which
-	// corrects a bracket drawn by v2.0.0 or v2.1.0 and changes nothing on one
-	// the current generator drew.
+	// DisplayRound and MatchNumber have ONE producer,
+	// Bracket.StampRoundsFromFeeders (a real match's round is its distance
+	// from the final along Feeders), run when the draw is generated and again
+	// on load (Bracket.RestampRoundsFromFeeders, via Store.EnsureLegacyUpgraded).
+	// The load pass recomputes any stored bracket whose rounds or numbers
+	// differ from that rule: in practice one drawn by v2.0.0 or v2.1.0 (rounds
+	// misclassified) or an older one with byes numbered before the leaf-slot
+	// tie-break (v2.0.0). It changes nothing on one the current generator drew.
 	DisplayRound int      `json:"displayRound,omitempty"`
 	Hidden       bool     `json:"hidden,omitempty"`
 	Feeders      []string `json:"feeders,omitempty"`

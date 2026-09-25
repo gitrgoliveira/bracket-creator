@@ -1861,8 +1861,9 @@ func unresolveBye(bm *state.BracketMatch) {
 //
 // A bye passes a winner on without being fought, so it is never the match a
 // door answers to: next is, the first one a person could have fought. A
-// REOPEN unwinds the byes (retractPropagatedWinner) rather than being refused
-// by them: there is nothing to finish, requeue or confirm on a match nobody
+// REOPEN unwinds the byes (retractPropagatedWinner, and retractIntoUntouched
+// for a match a correction reopened) rather than being refused by them:
+// there is nothing to finish, requeue or confirm on a match nobody
 // fought, and refusing left no way at all to remove a wrongly recorded
 // withdrawal whose winner went through one, since a correction keeps the
 // withdrawal (KeepsWithdrawalRuling). A CORRECTION re-resolves them with its
@@ -1958,6 +1959,19 @@ func retractPropagatedWinner(bracket *state.Bracket, rIdx, mIdx int) error {
 		return ErrReopenDownstreamFought
 	}
 	clearPropagatedSlots(bracket, rIdx, mIdx, d.bronze, nil)
+	d.unwindChain(bracket, rIdx, mIdx)
+	return nil
+}
+
+// unwindChain is the mutation both retractions share (retractPropagatedWinner
+// and retractIntoUntouched): it undoes what propagateBracketWinner wrote along
+// the chain past the ROUND match at (rIdx, mIdx). Every bye in d.byes is
+// unresolved, nearest first (its fed side back to its feeder's "Winner of ..."
+// placeholder, then unresolveBye), and the slot the last of them fed in d.next
+// (the match itself when there is no bye) goes back to that feeder's
+// placeholder. The bronze is not on the chain, since a bye never feeds one,
+// so each caller clears it by its own rule.
+func (d propagatedDownstream) unwindChain(bracket *state.Bracket, rIdx, mIdx int) {
 	feed := bracketPos{rIdx, mIdx}
 	for _, bye := range d.byes {
 		bm := &bracket.Rounds[bye.R][bye.M]
@@ -1966,7 +1980,6 @@ func retractPropagatedWinner(bracket *state.Bracket, rIdx, mIdx int) error {
 		feed = bye
 	}
 	clearPropagatedSlots(bracket, feed.R, feed.M, nil, d.next)
-	return nil
 }
 
 // retractIntoUntouched is retractPropagatedWinner for a match a correction
@@ -1978,19 +1991,34 @@ func retractPropagatedWinner(bracket *state.Bracket, rIdx, mIdx int) error {
 // match beside it was played. A target that was played is left exactly as it
 // is: it is one hop further than this correction reaches, and it gets its own
 // warning when the reopened match is fought again and its new result
-// propagates (the operator's one-decision-per-round ruling). A target a bye
-// already completed off the old winner is left too, and logged: undoing a
-// bye's own propagation is not something this retraction does.
+// propagates (the operator's one-decision-per-round ruling).
+//
+// The targets are the ones propagatedDownstreamOf names, so the hop is counted
+// past any bye the old winner was passed through, as every other door counts
+// it: next is the first match past the byes, the one a person could have
+// fought. An untouched next has the whole chain unwound (unwindChain): each
+// bye unresolved and next's slot back to its placeholder. Judging the bye
+// itself instead read it as played (generation completes it, and the
+// auto-resolution gives it a winner), so a pool correction left the displaced
+// qualifier seated past the bye, in a match that could then be started with
+// both sides named. A played next keeps the byes before it as well: they carry
+// the winner it shows, and re-fighting the reopened match warns about it
+// through them.
 func retractIntoUntouched(bracket *state.Bracket, rIdx, mIdx int) {
-	bronze, next := downstreamTargets(bracket, rIdx, mIdx)
-	keep := func(d *state.BracketMatch) *state.BracketMatch {
-		if d == nil || !bracketMatchStartedOrScored(d) {
-			return d
+	d := propagatedDownstreamOf(bracket, rIdx, mIdx)
+	kept := func(t *state.BracketMatch) bool {
+		if t == nil || !bracketMatchStartedOrScored(t) {
+			return false
 		}
-		log.Printf("engine: bracket match %s keeps the winner propagated into it: it is %s, so the reopened match %s does not retract it", d.ID, d.Status, bracket.Rounds[rIdx][mIdx].ID)
-		return nil
+		log.Printf("engine: bracket match %s keeps the winner propagated into it: it is %s, so the reopened match %s does not retract it", t.ID, t.Status, bracket.Rounds[rIdx][mIdx].ID)
+		return true
 	}
-	clearPropagatedSlots(bracket, rIdx, mIdx, keep(bronze), keep(next))
+	if !kept(d.bronze) {
+		clearPropagatedSlots(bracket, rIdx, mIdx, d.bronze, nil)
+	}
+	if !kept(d.next) {
+		d.unwindChain(bracket, rIdx, mIdx)
+	}
 }
 
 // clearPropagatedSlots is the mutation half of retractPropagatedWinner, shared

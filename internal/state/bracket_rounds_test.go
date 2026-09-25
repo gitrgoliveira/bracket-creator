@@ -1,10 +1,13 @@
 package state_test
 
 // bracket_rounds_test.go pins Bracket.RestampRoundsFromFeeders, the load-time
-// correction for brackets drawn by v2.0.0 and v2.1.0 (bc-tmfn). Those releases
-// put a pair drawn beside an empty pair one round early; the restamp recomputes
-// each real match's round as its distance from the final along the stored
-// Feeders and renumbers, and changes nothing else.
+// correction for stored brackets whose rounds or match numbers differ from the
+// rule generation applies (bc-tmfn): v2.0.0 and v2.1.0 put a pair drawn beside
+// an empty pair one round early, and older releases broke a tie inside a round
+// by a different order. The restamp recomputes each real match's round as its
+// distance from the final along the stored Feeders and renumbers; on a bracket
+// nobody has started it also puts each court's times in match-number order
+// (bracket_rounds_schedule_test.go), and it changes nothing else.
 
 import (
 	"encoding/json"
@@ -62,9 +65,11 @@ func TestRestampRoundsFromFeeders_CorrectsTheV21FiveEntrantBracket(t *testing.T)
 
 	changes, err := got.RestampRoundsFromFeeders()
 	require.NoError(t, err)
+	// P4 v P5 carries a recorded result, so the times stay where v2.1.0 put
+	// them even though the two bouts swap numbers.
 	assert.Equal(t, []state.BracketRoundChange{
-		{ID: "m-r1-0", OldRound: 3, NewRound: 2, OldNumber: 1, NewNumber: 2},
-		{ID: "m-r1-3", OldRound: 3, NewRound: 3, OldNumber: 2, NewNumber: 1},
+		{ID: "m-r1-0", OldRound: 3, NewRound: 2, OldNumber: 1, NewNumber: 2, OldScheduledAt: "09:00", NewScheduledAt: "09:00"},
+		{ID: "m-r1-3", OldRound: 3, NewRound: 3, OldNumber: 2, NewNumber: 1, OldScheduledAt: "09:05", NewScheduledAt: "09:05"},
 	}, changes)
 
 	// The whole bracket equals the stored one with exactly these four fields

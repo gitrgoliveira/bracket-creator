@@ -34,6 +34,12 @@ type Store struct {
 	// DeleteCompetition so a recreated same-ID competition is re-checked.
 	legacyUpgraded sync.Map
 
+	// bracketRoundsRefusalLogged marks competitions whose bracket.json the
+	// rounds upgrade has already logged as unwalkable this process
+	// (upgradeBracketRoundsLocked), so a re-armed upgrade pass does not repeat
+	// the line after every roster write. Cleared on DeleteCompetition.
+	bracketRoundsRefusalLogged sync.Map
+
 	// compRenameMu serializes "uniqueness-check + save" sequences across
 	// all competitions. Required because per-comp locks alone can't fix
 	// the cross-comp AB-BA race: two concurrent renames of different

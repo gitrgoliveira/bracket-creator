@@ -12,17 +12,27 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// Drift guard for the load-time restamp (bc-tmfn). Generation stamps each
-// bout's round from the DRAW TREE (computeBracketDisplayMetadata, then
-// applySlotDisplayRounds); state.Bracket.RestampRoundsFromFeeders, which
-// corrects brackets drawn by v2.0.0 and v2.1.0 on load, recomputes it from the
-// STORED FEEDERS as the distance from the final. The two routes must give the
-// same rounds, or every load would renumber a freshly drawn bracket away from
-// the Excel export. These tests pin that the restamp changes nothing on a
-// bracket the current generator wrote, fresh and in play.
+// Guard for the load-time restamp (bc-tmfn). Generation and the restamp share
+// ONE producer of rounds and match numbers, state.Bracket.StampRoundsFromFeeders
+// (each real bout's round is its distance from the final along the Feeders
+// computeBracketDisplayMetadata stamps), so on a FRESH bracket a restamp being
+// a no-op is true by construction. What that half still catches is a second
+// producer creeping back into generation after the shared stamp: anything that
+// rewrites a round or a number there (the pow2 provisional rounds this
+// replaced, say) makes every load renumber a freshly drawn bracket, and the
+// sweep below goes red on it. The Excel parity suites
+// (excel_draw_parity_test.go, match_numbering_parity_test.go) and
+// bracket_match_numbers_golden_test.go are what prove the shared producer
+// matches the printed sheet.
+//
+// The PLAYED halves are not tautological: they pin that fighting a knockout
+// out, and resolving pool finishers into it (ResolveQualifiedPools), never
+// rewrite the Feeders or Hidden flags nor empty a side, which is what lets the
+// restamp walk a bracket in play exactly as generation walked it.
 
 // assertRestampIsNoOp restamps an independent copy of compID's stored bracket
-// and requires it to come back identical, rounds and match numbers included.
+// and requires it to come back identical, rounds, match numbers and scheduled
+// times included.
 func assertRestampIsNoOp(t *testing.T, store *state.Store, compID string) {
 	t.Helper()
 	stored, err := store.LoadBracket(compID)
@@ -45,7 +55,7 @@ func assertRestampIsNoOp(t *testing.T, store *state.Store, compID string) {
 
 	changes, err := restamped.RestampRoundsFromFeeders()
 	require.NoError(t, err)
-	assert.Empty(t, changes, "the stored feeders and the draw tree disagree about a round")
+	assert.Empty(t, changes, "the restamp moved a round, number or time generation stamped")
 	assert.Equal(t, stored, restamped)
 }
 

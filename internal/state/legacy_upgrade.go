@@ -109,20 +109,36 @@ import (
 //     exact name) is left alone; the fields stay empty and the identity-
 //     critical readers keep their name-based fallback for it.
 //
-//   - bracket.json DisplayRound/MatchNumber as v2.0.0 and v2.1.0 stamped them
-//     convert ON READ, below (bc-tmfn), after the side-id repair above. Those
-//     releases put a pair drawn beside an empty pair one round early, and
-//     match numbers are ordered by round, so a bracket drawn by either
-//     disagreed with the Excel export, which numbers the rebuilt tree and
-//     lays scores and courts onto the printed numbers. Recognising one needs
-//     no guess: the rounds are recomputed from the bracket's OWN stored
-//     Feeders (distance from the final, Bracket.RestampRoundsFromFeeders),
-//     the rule current generation stamps, so a bracket that is already right
-//     compares equal and is not written. Pairings, results, courts, scheduled
-//     times and the bronze are never touched. A bracket with no Feeders at
-//     all predates both the feeder metadata and the misclassification and is
-//     left alone silently; one whose Feeders do not form the generated tree
-//     is left alone and logged.
+//   - bracket.json DisplayRound/MatchNumber convert ON READ, below (bc-tmfn),
+//     in the same parse and the same write as the side-id repair above
+//     (upgradeBracketLocked). Any stored bracket whose rounds or numbers
+//     differ from the rule generation applies is recomputed: each real
+//     bout's round is its distance from the final along the bracket's OWN
+//     stored Feeders, and the bouts are renumbered by the one numbering
+//     rule (Bracket.RestampRoundsFromFeeders, sharing
+//     Bracket.StampRoundsFromFeeders with generation). In practice that
+//     means brackets drawn by v2.0.0 or v2.1.0, which put a pair drawn beside
+//     an empty pair one round early and numbered by those rounds, and older
+//     brackets with byes: their rounds were already right (Feeders are
+//     stored since v0.17.0, mp-7f2w, and every release before v2.0.0
+//     derived the rounds from them),
+//     but before v2.0.0 a tie inside a round was broken by the bout's
+//     position in its own pow2 round, not its first-round slot, so where one
+//     round draws bouts from two pow2 rounds they are renumbered. Either
+//     way the app then agrees with the Excel export, which numbers the
+//     rebuilt tree and lays scores and courts onto the printed numbers.
+//     Recognising one needs no guess, and a bracket that is already right
+//     compares equal and is not written. Times too: every release before
+//     match-number scheduling gave a court its times in storage order, so
+//     on a bracket where no real bout has been started, scored or decided, a
+//     court whose times still rise in storage order has its OWN times handed
+//     out again in match-number order and the court queue runs Match 1
+//     first. A touched bracket keeps its times, and so does a court whose
+//     times do not rise in storage order (this release's scheduling, or a
+//     time moved by hand). Pairings, results, courts and the bronze are
+//     never touched. A bracket with no Feeders at all predates the
+//     feeder metadata and is left alone silently; one whose Feeders do not
+//     form the generated tree is left alone and logged, once per process.
 //
 //   - participants.csv rows without the leading id column convert ON WRITE
 //     (marshalParticipantsCSV mints ids for id-less rows on every save), and
@@ -323,13 +339,10 @@ func (s *Store) EnsureLegacyUpgraded(compID string) {
 	if err := s.upgradePoolMatchSideIDsLocked(compID, roster); err != nil {
 		log.Printf("state: legacy pool-match-side-id upgrade for %s: %v", compID, err)
 	}
-	if err := s.upgradeBracketSideIDsLocked(compID, roster); err != nil {
-		log.Printf("state: legacy bracket-side-id upgrade for %s: %v", compID, err)
-	}
-	// After the side-id repair, which may rewrite the same file first. Needs
-	// nothing from the roster: it reads only the bracket's own shape.
-	if err := s.upgradeBracketRoundsLocked(compID); err != nil {
-		log.Printf("state: legacy bracket-rounds upgrade for %s: %v", compID, err)
+	// bracket.json's side ids, then its rounds, match numbers and times, over
+	// one parse and at most one write (upgradeBracketLocked).
+	if err := s.upgradeBracketLocked(compID, roster); err != nil {
+		log.Printf("state: legacy bracket upgrade for %s: %v", compID, err)
 	}
 	if err := s.upgradeLineupMemberIDsLocked(compID, roster); err != nil {
 		log.Printf("state: legacy lineup-member-id upgrade for %s: %v", compID, err)
@@ -1064,19 +1077,28 @@ func bracketNeedsIDRepair(b *Bracket) bool {
 	return b.ThirdPlaceMatch != nil && bracketSideNeedsIDRepair(b.ThirdPlaceMatch)
 }
 
-// upgradeBracketSideIDsLocked completes a legacy (no-id) bracket.json's
-// SideAID/SideBID/WinnerID. See the header comment above for the full
-// resolution order (DrawOrder positionally for round 0, then the
-// unique-bare-name fallback everywhere else, then WinnerID derived from each
-// row's own resolved sides). Caller holds the per-comp lock.
+// upgradeBracketLocked runs the two bracket.json repairs, the side ids
+// (upgradeBracketSideIDsLocked) and then the rounds, match numbers and times
+// (upgradeBracketRoundsLocked), over ONE parse of the file, and saves it once
+// when either changed it. The rounds pass reads one thing the side-id pass
+// writes, WinnerID, in its "has this bracket been played" check, and the
+// side-id pass only derives a WinnerID on a row whose Winner already answers
+// yes, so their order does not change the outcome. Caller holds the per-comp
+// lock.
 //
 // Parses bracket.json directly (parseBracketFile) rather than going through
 // loadBracketLocked, for the same reason the pools/pool-matches upgrades
 // above parse directly: that wrapper is parse-then-deep-copy
 // (state.copyBracket), and the copy is pure overhead when this repair owns
 // the parsed value exclusively and either discards it or hands it straight
-// to saveBracketLocked.
-func (s *Store) upgradeBracketSideIDsLocked(compID string, roster *legacyUpgradeRoster) error {
+// to saveBracketLocked, which refreshes the bracket cache and bumps its file
+// version as every bracket write does.
+//
+// A side-id repair that fails part way (an unreadable roster) is logged and
+// does not stop the rounds: what it had already stamped is the positional
+// round-0 repair from DrawOrder, which needs no roster and is exact, so it is
+// saved along with the rounds rather than thrown away.
+func (s *Store) upgradeBracketLocked(compID string, roster *legacyUpgradeRoster) error {
 	path := s.compPath(compID, "bracket.json")
 	parsed, err := parseBracketFile(path)
 	if err != nil {
@@ -1086,8 +1108,37 @@ func (s *Store) upgradeBracketSideIDsLocked(compID string, roster *legacyUpgrade
 	if bracket == nil || len(bracket.Rounds) == 0 {
 		return nil
 	}
-	if !bracketNeedsIDRepair(bracket) {
+	idsChanged, err := s.upgradeBracketSideIDsLocked(compID, bracket, roster)
+	if err != nil {
+		log.Printf("state: legacy bracket-side-id upgrade for %s: %v", compID, err)
+	}
+	changes := s.upgradeBracketRoundsLocked(compID, bracket)
+	if !idsChanged && len(changes) == 0 {
 		return nil
+	}
+	if err := s.saveBracketLocked(compID, bracket, s.directWrite); err != nil {
+		return err
+	}
+	if len(changes) > 0 {
+		moved := make([]string, 0, len(changes))
+		for _, c := range changes {
+			moved = append(moved, fmt.Sprintf("%s round %d->%d match %d->%d at %q->%q",
+				c.ID, c.OldRound, c.NewRound, c.OldNumber, c.NewNumber, c.OldScheduledAt, c.NewScheduledAt))
+		}
+		log.Printf("state: bracket rounds for %s recomputed from its feeders: %s", compID, strings.Join(moved, "; "))
+	}
+	return nil
+}
+
+// upgradeBracketSideIDsLocked completes a legacy (no-id) bracket's
+// SideAID/SideBID/WinnerID in place and reports whether it changed anything.
+// See the header comment above for the full resolution order (DrawOrder
+// positionally for round 0, then the unique-bare-name fallback everywhere
+// else, then WinnerID derived from each row's own resolved sides). Called by
+// upgradeBracketLocked, which owns the parse and the save.
+func (s *Store) upgradeBracketSideIDsLocked(compID string, bracket *Bracket, roster *legacyUpgradeRoster) (bool, error) {
+	if !bracketNeedsIDRepair(bracket) {
+		return false, nil
 	}
 
 	// (a) Round 0, positionally, from DrawOrder -- exact even for a
@@ -1100,7 +1151,7 @@ func (s *Store) upgradeBracketSideIDsLocked(compID string, roster *legacyUpgrade
 	// documented on the pools.csv/pool-matches.csv upgrades above.
 	idx, err := roster.get()
 	if err != nil {
-		return err
+		return changed, err
 	}
 	if idx != nil {
 		resolveSide := func(m *BracketMatch) {
@@ -1196,55 +1247,33 @@ func (s *Store) upgradeBracketSideIDsLocked(compID string, roster *legacyUpgrade
 	if bracket.ThirdPlaceMatch != nil {
 		resolveSubs(bracket.ThirdPlaceMatch)
 	}
-
-	if !changed {
-		return nil
-	}
-	return s.saveBracketLocked(compID, bracket, s.directWrite)
+	return changed, nil
 }
 
-// upgradeBracketRoundsLocked brings a stored bracket.json's DisplayRound and
-// MatchNumber up to the current round classification (bc-tmfn), through
-// Bracket.RestampRoundsFromFeeders. See the header comment above for which
-// brackets it changes and which it leaves alone. Caller holds the per-comp
-// lock.
+// upgradeBracketRoundsLocked brings a parsed bracket's DisplayRound and
+// MatchNumber (and, on an untouched bracket it renumbers, its times) up to
+// the rule generation applies (bc-tmfn), in place, through
+// Bracket.RestampRoundsFromFeeders, and returns what moved. See the header
+// comment above for which brackets it changes and which it leaves alone.
+// Called by upgradeBracketLocked, which owns the parse and the save.
 //
-// Parses bracket.json directly (parseBracketFile) rather than going through
-// loadBracketLocked, for the reason upgradeBracketSideIDsLocked gives: this
-// repair owns the parsed value and either discards it or hands it straight to
-// saveBracketLocked. It parses again rather than sharing that pass's value
-// because that pass may just have rewritten the file. saveBracketLocked
-// refreshes the bracket cache and bumps its file version, as every bracket
-// write does.
-func (s *Store) upgradeBracketRoundsLocked(compID string) error {
-	path := s.compPath(compID, "bracket.json")
-	parsed, err := parseBracketFile(path)
-	if err != nil {
-		return nil // missing/unreadable bracket is the consumers' error to report
-	}
-	bracket, _ := parsed.(*Bracket)
-	if bracket == nil || len(bracket.Rounds) == 0 {
-		return nil
-	}
+// A bracket whose Feeders cannot be walked is left as stored and logged, but
+// only the FIRST time this process meets it: saveParticipantsNoLock re-arms
+// EnsureLegacyUpgraded after every roster write (bc-pnum), and a bracket that
+// cannot be walked on one pass cannot be on the next, so logging each pass
+// would repeat the same line after every check-in.
+func (s *Store) upgradeBracketRoundsLocked(compID string, bracket *Bracket) []BracketRoundChange {
 	changes, err := bracket.RestampRoundsFromFeeders()
 	if errors.Is(err, ErrBracketNoFeeders) {
-		return nil // predates the feeder metadata, and the misclassification with it
+		return nil // predates the feeder metadata: nothing to walk
 	}
 	if err != nil {
-		return fmt.Errorf("rounds and match numbers left as stored: %w", err)
-	}
-	if len(changes) == 0 {
+		if _, logged := s.bracketRoundsRefusalLogged.LoadOrStore(compID, struct{}{}); !logged {
+			log.Printf("state: legacy bracket-rounds upgrade for %s: rounds and match numbers left as stored: %v", compID, err)
+		}
 		return nil
 	}
-	if err := s.saveBracketLocked(compID, bracket, s.directWrite); err != nil {
-		return err
-	}
-	moved := make([]string, 0, len(changes))
-	for _, c := range changes {
-		moved = append(moved, fmt.Sprintf("%s round %d->%d match %d->%d", c.ID, c.OldRound, c.NewRound, c.OldNumber, c.NewNumber))
-	}
-	log.Printf("state: bracket rounds for %s recomputed from its feeders: %s", compID, strings.Join(moved, "; "))
-	return nil
+	return changes
 }
 
 // upgradeTeamDefaultWinBoutPaddingLocked pads a stored COMPLETED team match

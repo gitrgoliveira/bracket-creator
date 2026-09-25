@@ -10,10 +10,13 @@ package state_test
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
+	"github.com/gitrgoliveira/bracket-creator/internal/domain"
 	"github.com/gitrgoliveira/bracket-creator/internal/state"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -92,4 +95,36 @@ func TestLegacyBracketRoundsUpgrade_UnwalkableBracketIsLeftAsStored(t *testing.T
 	require.NoError(t, err)
 	assert.Equal(t, string(raw), string(after))
 	assert.Zero(t, fresh.FileVersion("c1", "bracket.json"))
+}
+
+// A bracket that cannot be walked is reported once per process, not after
+// every roster write: saveParticipantsNoLock re-arms the upgrade pass
+// (bc-pnum), and the refusal is the same on every pass.
+func TestLegacyBracketRoundsUpgrade_UnwalkableBracketIsLoggedOnce(t *testing.T) {
+	dir, _ := newLegacyUpgradeFixture(t)
+	var b state.Bracket
+	v21, err := os.ReadFile(filepath.FromSlash(v21FiveEntrantFixture))
+	require.NoError(t, err)
+	require.NoError(t, json.Unmarshal(v21, &b))
+	m := matchByID(t, &b, "m-r1-1") // a real bout no match names as a feeder
+	m.SideA, m.SideB, m.Hidden = "X", "Y", false
+	m.SideAID, m.SideBID = "x-id", "y-id"
+	raw, err := json.MarshalIndent(&b, "", "  ")
+	require.NoError(t, err)
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "competitions", "c1", "bracket.json"), raw, 0o600))
+
+	logged := captureStateLog(t, func() {
+		// Opening the store runs the pass once (the startup sweep).
+		fresh := freshLegacyUpgradeStore(t, dir)
+		for i := range 3 {
+			_, err := fresh.LoadBracket("c1")
+			require.NoError(t, err)
+			// A roster write re-arms the once-per-process upgrade pass.
+			require.NoError(t, fresh.SaveParticipants("c1", []domain.Player{
+				{Name: fmt.Sprintf("Entrant %d", i), Dojo: "Seibukan"},
+			}))
+		}
+	})
+	assert.Equal(t, 1, strings.Count(logged, "legacy bracket-rounds upgrade for c1"),
+		"the refusal is logged once, not once per roster write:\n%s", logged)
 }

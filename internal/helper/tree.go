@@ -293,8 +293,7 @@ func regionPages(region *Node, want int) []*Node {
 // [H10,C6,"",""], a pair followed by an empty pair. The risen side counts
 // recorded by BuildSlotTree put each collapse back where it was, so a pow2
 // bracket built from this array (engine buildBracketFromDraw) holds every bout
-// at the slots the draw tree gives it, which is how the engine finds each
-// bout's printed round (SlotRoundMatches).
+// at the slots the draw tree gives it.
 //
 // Trees not built from slot arrays (CreateBalancedTree) carry no rises and
 // come back with TreeToLeafArray's tail-padded geometry, which for them is

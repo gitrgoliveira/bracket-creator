@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"sort"
+	"time"
 )
 
 // BracketMatchLeafSlot is the LEFTMOST first-round slot that match (roundIdx,
@@ -22,17 +23,23 @@ func BracketMatchLeafSlot(roundIdx, matchIdx int) int {
 
 // numbered reports whether m is a real bout, one that carries a round and a
 // match number: not a Hidden structural bye and not a both-sides-empty dead
-// match. NumberMatches numbers exactly these, and RestampRoundsFromFeeders
+// match. NumberMatches numbers exactly these, and StampRoundsFromFeeders
 // requires its walk to reach every one of them, so the two cannot disagree
-// about which matches count.
+// about which matches count. At generation it equals !Hidden
+// (engine.computeBracketDisplayMetadata hides every match missing a side), and
+// it stays so because no write after the draw empties a side of a match in
+// Rounds: a result moves a name in, retracting it restores a "Winner of"
+// placeholder, and only the bronze, outside Rounds, is ever blanked. The side
+// check mirrors the Excel numbering's nil-node skip.
 func (m *BracketMatch) numbered() bool {
 	return !m.Hidden && (m.SideA != "" || m.SideB != "")
 }
 
 // NumberMatches sets MatchNumber on every real (non-Hidden, non-empty) bracket
-// match. It is the ONE body of the web API's numbering: engine.buildBracketFromDraw
-// runs it when a draw is generated, and RestampRoundsFromFeeders runs it again
-// when a stored bracket's rounds are brought up to date on load. The Excel
+// match. It is the ONE body of the web API's numbering, run by
+// StampRoundsFromFeeders right after it stamps the rounds, both when
+// engine.buildBracketFromDraw generates a draw and when
+// RestampRoundsFromFeeders brings a stored bracket up to date on load. The Excel
 // renderer has a SEPARATE implementation, helper.AssignMatchNumbers, which
 // operates on []*Node instead of *Bracket. The two are NOT a literally-shared
 // function (the types differ), they are kept equal-by-contract so the on-screen
@@ -74,9 +81,8 @@ func (m *BracketMatch) numbered() bool {
 // JS buildDisplayModel matchNumById ordering with it (web-mobile/js/bracket.jsx),
 // which is the third implementation of this walk.
 //
-// Must run AFTER Hidden and DisplayRound are set: at generation by
-// engine.computeBracketDisplayMetadata and engine.applySlotDisplayRounds, on
-// load by RestampRoundsFromFeeders.
+// Must run AFTER Hidden (engine.computeBracketDisplayMetadata, at generation)
+// and DisplayRound (StampRoundsFromFeeders) are set.
 func (b *Bracket) NumberMatches() {
 	type ref struct {
 		m *BracketMatch
@@ -107,70 +113,80 @@ func (b *Bracket) NumberMatches() {
 }
 
 // ErrBracketNoFeeders reports a bracket whose matches carry no Feeders at all:
-// one generated before the display metadata existed (mp-7f2w). Its rounds
-// cannot be walked, and it also predates the round classification
-// RestampRoundsFromFeeders corrects, so there is nothing to correct.
+// one generated before the display metadata existed (mp-7f2w, v0.17.0). Its
+// rounds cannot be walked, so RestampRoundsFromFeeders leaves it as stored.
 var ErrBracketNoFeeders = errors.New("bracket carries no feeder metadata")
 
 // ErrBracketFeedersUnwalkable reports stored Feeders that do not form the tree
 // generation writes, so no round can be derived from them with confidence.
 var ErrBracketFeedersUnwalkable = errors.New("bracket feeders cannot be walked from the final")
 
-// BracketRoundChange is one match whose stored round or match number
-// RestampRoundsFromFeeders changed.
+// ScheduledAtLayout is how a match's ScheduledAt reads: HH:MM, 24-hour. The
+// engine's scheduler writes it in this layout (scheduleClockLayout).
+const ScheduledAtLayout = "15:04"
+
+// BracketRoundChange is one match whose stored round, match number or
+// scheduled time RestampRoundsFromFeeders changed.
 type BracketRoundChange struct {
-	ID        string
-	OldRound  int
-	NewRound  int
-	OldNumber int
-	NewNumber int
+	ID             string
+	OldRound       int
+	NewRound       int
+	OldNumber      int
+	NewNumber      int
+	OldScheduledAt string
+	NewScheduledAt string
 }
 
-// RestampRoundsFromFeeders recomputes every real match's DisplayRound from the
-// bracket's own stored Feeders, renumbers the matches with NumberMatches, and
-// returns what moved (nil when nothing did, so a second call is a no-op).
+// RestampRoundsFromFeeders brings a STORED bracket's DisplayRound and
+// MatchNumber up to the rule generation applies, StampRoundsFromFeeders, puts
+// an unstarted bracket's times in match-number order, and returns what moved
+// (nil when nothing did, so a second call is a no-op).
+// Store.EnsureLegacyUpgraded calls it once per load.
 //
-// Why it exists: DisplayRound and MatchNumber are stamped once, when the draw is
-// generated, and nothing recomputed them afterwards. v2.0.0 and v2.1.0 put a
-// pair drawn beside an empty pair one round early (P1 v P2 of a five-entrant
-// knockout was a quarterfinal rather than a semifinal), so a bracket drawn by
-// either release kept those rounds and the numbers ordered by them, while the
-// Excel export rebuilds the tree, numbers it with the corrected walk, and lays
-// scores and courts onto the printed numbers. Store.EnsureLegacyUpgraded calls
-// this once per load so such a bracket agrees with the export again.
+// Why it exists: DisplayRound and MatchNumber are stamped once, when the draw
+// is generated, and nothing recomputed them afterwards, while the Excel export
+// rebuilds the tree, numbers it with today's walk, and lays scores and courts
+// onto the printed numbers. So it recomputes any stored bracket whose rounds or
+// numbers differ from the rule. In practice that is two kinds of bracket:
 //
-// The rule: a match's round is its distance from the final. The final (the sole
-// match of the last round) is round 1 and every match named in a match's
-// Feeders is one round deeper. Generation reaches the same rounds by another
-// route, the draw tree's own walk (engine.applySlotDisplayRounds), and
-// TestRestampRoundsFromFeeders_LeavesFreshBracketsUnchanged (internal/engine)
-// pins that the two agree on freshly generated knockout and pool-fed brackets.
-// Feeders and Hidden are written at generation and never rewritten when results
-// resolve the sides, so a bracket in play walks exactly like a fresh one.
+//   - drawn by v2.0.0 or v2.1.0, which put a pair drawn beside an empty pair
+//     one round early (P1 v P2 of a five-entrant knockout was a quarterfinal
+//     rather than a semifinal) and numbered by those rounds;
+//   - drawn by an older release (Feeders are stored, and the rounds derived
+//     from them, since v0.17.0), whose rounds are therefore already right
+//     but which broke a tie inside a round by the match's position in its
+//     own pow2 round rather than by its first-round slot
+//     (BracketMatchLeafSlot, v2.0.0). Where one round draws its bouts from
+//     two pow2 rounds, which takes byes, the two orders differ and the
+//     bracket is renumbered (a nine-entrant v1.1.0 knockout swaps its
+//     Matches 4 and 5).
 //
-// Only matches the walk reaches move. Hidden matches keep their stored values,
-// the bronze (ThirdPlaceMatch, DisplayRound -1) is neither read nor written, and
-// pairings, results, courts and scheduled times are never touched.
+// Times: every release before this one scheduled a court in storage order, not
+// match-number order, so on a bracket with byes the court queue (ordered by
+// time) could list Match 2 before Match 1, renumbered or not. On a bracket
+// nobody has started (no real match started, scored or decided), a court
+// whose times still rise in storage order has them handed out again in match-
+// number order, the order a fresh draw is scheduled in; see
+// scheduleNumberedInNumberOrder. Once any real match has been touched the
+// times stay as stored, and a court whose times do not rise in storage order
+// (this release's own scheduling, or a time the operator moved) keeps them.
 //
-// When the bracket cannot be walked safely it changes NOTHING, numbers included,
-// and says why: ErrBracketNoFeeders when no match carries Feeders, and
-// ErrBracketFeedersUnwalkable when the last round is not a single final, a
-// feeder names a match that is missing, not real, or already reached, or a real
-// match is never reached from the final.
+// Only real matches move. Hidden matches keep their stored values, the bronze
+// (ThirdPlaceMatch, DisplayRound -1) is neither read nor written, and
+// pairings, results and courts are never touched.
+//
+// When the bracket cannot be walked safely it changes NOTHING, numbers and
+// times included, and says why: ErrBracketNoFeeders when no match carries
+// Feeders, and ErrBracketFeedersUnwalkable as StampRoundsFromFeeders
+// describes.
 func (b *Bracket) RestampRoundsFromFeeders() ([]BracketRoundChange, error) {
 	if b == nil || len(b.Rounds) == 0 {
 		return nil, nil
 	}
-	byID := make(map[string]*BracketMatch)
 	hasFeeders := false
 	for ri := range b.Rounds {
 		for mi := range b.Rounds[ri] {
-			m := &b.Rounds[ri][mi]
-			if _, dup := byID[m.ID]; dup {
-				return nil, fmt.Errorf("%w: match id %q appears twice", ErrBracketFeedersUnwalkable, m.ID)
-			}
-			byID[m.ID] = m
-			if len(m.Feeders) > 0 {
+			if len(b.Rounds[ri][mi].Feeders) > 0 {
 				hasFeeders = true
 			}
 		}
@@ -178,17 +194,105 @@ func (b *Bracket) RestampRoundsFromFeeders() ([]BracketRoundChange, error) {
 	if !hasFeeders {
 		return nil, ErrBracketNoFeeders
 	}
+
+	type stamp struct {
+		round, number int
+		at            string
+	}
+	before := make(map[*BracketMatch]stamp)
+	for ri := range b.Rounds {
+		for mi := range b.Rounds[ri] {
+			m := &b.Rounds[ri][mi]
+			before[m] = stamp{m.DisplayRound, m.MatchNumber, m.ScheduledAt}
+		}
+	}
+	if err := b.StampRoundsFromFeeders(); err != nil {
+		return nil, err
+	}
+	if !b.anyNumberedMatchTouched() {
+		b.scheduleNumberedInNumberOrder()
+	}
+
+	var changes []BracketRoundChange
+	for ri := range b.Rounds {
+		for mi := range b.Rounds[ri] {
+			m := &b.Rounds[ri][mi]
+			old := before[m]
+			if old.round != m.DisplayRound || old.number != m.MatchNumber || old.at != m.ScheduledAt {
+				changes = append(changes, BracketRoundChange{
+					ID:             m.ID,
+					OldRound:       old.round,
+					NewRound:       m.DisplayRound,
+					OldNumber:      old.number,
+					NewNumber:      m.MatchNumber,
+					OldScheduledAt: old.at,
+					NewScheduledAt: m.ScheduledAt,
+				})
+			}
+		}
+	}
+	return changes, nil
+}
+
+// StampRoundsFromFeeders is the ONE producer of DisplayRound and MatchNumber
+// on a bracket's real matches: each one's round is its distance from the
+// final along the stored Feeders (the final, the sole match of the last
+// round, is round 1; every match named in a match's Feeders is one round
+// deeper), and the matches are then numbered by NumberMatches.
+// engine.buildBracketFromDraw calls it once Hidden and Feeders are stamped,
+// and RestampRoundsFromFeeders calls it on load, so a freshly generated
+// bracket and a restamped one cannot disagree about a round.
+//
+// It reads Feeders and numbered() (Hidden, and whether both sides are empty),
+// never a side's contents, so it walks a bracket in play exactly as it walked
+// the fresh one: nothing after the draw rewrites Feeders or Hidden, and
+// numbered() says why its side check cannot change either.
+//
+// Hidden matches and the bronze (ThirdPlaceMatch) are neither read nor
+// written. A bracket with no real match (fewer than two entrants) is left as
+// it is. When the Feeders cannot be walked it changes NOTHING and returns
+// ErrBracketFeedersUnwalkable: the last round is not a single final, a match
+// id repeats, a feeder names a match that is missing, not real, or already
+// reached, or a real match is never reached from the final.
+func (b *Bracket) StampRoundsFromFeeders() error {
+	if b == nil || len(b.Rounds) == 0 {
+		return nil
+	}
+	rounds, err := b.feederRounds()
+	if err != nil {
+		return err
+	}
+	for m, r := range rounds {
+		m.DisplayRound = r
+	}
+	b.NumberMatches()
+	return nil
+}
+
+// feederRounds walks the Feeders from the final and returns every real
+// match's round, writing nothing, so a refusal leaves the bracket exactly as
+// it was. See StampRoundsFromFeeders for the rule and the refusals.
+func (b *Bracket) feederRounds() (map[*BracketMatch]int, error) {
+	byID := make(map[string]*BracketMatch)
+	for ri := range b.Rounds {
+		for mi := range b.Rounds[ri] {
+			m := &b.Rounds[ri][mi]
+			if _, dup := byID[m.ID]; dup {
+				return nil, fmt.Errorf("%w: match id %q appears twice", ErrBracketFeedersUnwalkable, m.ID)
+			}
+			byID[m.ID] = m
+		}
+	}
 	last := b.Rounds[len(b.Rounds)-1]
 	if len(last) != 1 {
 		return nil, fmt.Errorf("%w: the last round holds %d matches, not one final", ErrBracketFeedersUnwalkable, len(last))
 	}
 
-	// Walk from the final, breadth first, recording each match's round before
-	// anything is written, so a refusal leaves the bracket exactly as it was.
-	// A final that is not a real bout (fewer than two entrants) roots no walk.
-	round := make(map[string]int)
+	// Breadth first from the final. A final that is not a real bout (fewer
+	// than two entrants) roots no walk.
+	round := make(map[*BracketMatch]int)
 	if final := &last[0]; final.numbered() {
-		round[final.ID] = 1
+		round[final] = 1
 		queue := []*BracketMatch{final}
 		for len(queue) > 0 {
 			m := queue[0]
@@ -204,10 +308,10 @@ func (b *Bracket) RestampRoundsFromFeeders() ([]BracketRoundChange, error) {
 				if !f.numbered() {
 					return nil, fmt.Errorf("%w: %s names feeder %s, which is not a real match", ErrBracketFeedersUnwalkable, m.ID, fid)
 				}
-				if _, seen := round[fid]; seen {
+				if _, seen := round[f]; seen {
 					return nil, fmt.Errorf("%w: %s is reached twice", ErrBracketFeedersUnwalkable, fid)
 				}
-				round[fid] = round[m.ID] + 1
+				round[f] = round[m] + 1
 				queue = append(queue, f)
 			}
 		}
@@ -215,36 +319,89 @@ func (b *Bracket) RestampRoundsFromFeeders() ([]BracketRoundChange, error) {
 	for ri := range b.Rounds {
 		for mi := range b.Rounds[ri] {
 			m := &b.Rounds[ri][mi]
-			if _, reached := round[m.ID]; m.numbered() && !reached {
+			if _, reached := round[m]; m.numbered() && !reached {
 				return nil, fmt.Errorf("%w: %s is not reached from the final", ErrBracketFeedersUnwalkable, m.ID)
 			}
 		}
 	}
+	return round, nil
+}
 
-	type stamp struct{ round, number int }
-	before := make(map[string]stamp, len(byID))
-	for id, m := range byID {
-		before[id] = stamp{m.DisplayRound, m.MatchNumber}
-	}
-	for id, r := range round {
-		byID[id].DisplayRound = r
-	}
-	b.NumberMatches()
-
-	var changes []BracketRoundChange
+// anyNumberedMatchTouched reports whether any real match of the bracket has
+// been started or carries anything a result writes: a status other than
+// scheduled, a winner, a score, sub-bouts, a decision, overtime, or a write
+// stamp (a match started and put back in the queue keeps its stamp). Byes and
+// Hidden matches are resolved by the draw itself and do not count, and the
+// bronze cannot be played before the semifinals.
+func (b *Bracket) anyNumberedMatchTouched() bool {
 	for ri := range b.Rounds {
 		for mi := range b.Rounds[ri] {
 			m := &b.Rounds[ri][mi]
-			if old := before[m.ID]; old.round != m.DisplayRound || old.number != m.MatchNumber {
-				changes = append(changes, BracketRoundChange{
-					ID:        m.ID,
-					OldRound:  old.round,
-					NewRound:  m.DisplayRound,
-					OldNumber: old.number,
-					NewNumber: m.MatchNumber,
-				})
+			if !m.numbered() {
+				continue
+			}
+			if m.Status != MatchStatusScheduled || m.Winner != "" || m.WinnerID != "" ||
+				len(m.IpponsA) > 0 || len(m.IpponsB) > 0 || m.HansokuA != 0 || m.HansokuB != 0 ||
+				len(m.SubResults) > 0 || m.Decision != "" || m.Encho != nil || m.ModifiedAt != 0 {
+				return true
 			}
 		}
 	}
-	return changes, nil
+	return false
+}
+
+// scheduleNumberedInNumberOrder gives each court's real matches that court's
+// OWN scheduled times, earliest time to the lowest match number, so the court
+// plays in match-number order as a fresh draw does
+// (engine.assignBracketMatchSlots). No time is invented or dropped: a court's
+// set of times is unchanged, only who holds which. Hidden matches and the
+// bronze keep theirs.
+//
+// It only touches a court whose times still carry the signature of the old
+// scheduler: every release before match-number scheduling handed a court its
+// times in STORAGE order (Rounds, then position), so they rise along it. A
+// court whose times do not (a fresh draw of this release, whose times rise
+// in number order instead, or a time the operator moved by hand) is left as
+// it is, and so is one where a real match carries no time or one that does
+// not read as a clock time. A court whose storage and number orders agree
+// comes back unchanged, which is what makes a second call a no-op.
+func (b *Bracket) scheduleNumberedInNumberOrder() {
+	byCourt := make(map[string][]*BracketMatch)
+	var courts []string
+	for ri := range b.Rounds {
+		for mi := range b.Rounds[ri] {
+			m := &b.Rounds[ri][mi]
+			if !m.numbered() {
+				continue
+			}
+			if _, seen := byCourt[m.Court]; !seen {
+				courts = append(courts, m.Court)
+			}
+			byCourt[m.Court] = append(byCourt[m.Court], m)
+		}
+	}
+	for _, court := range courts {
+		ms := byCourt[court] // storage order: Rounds, then position
+		times := make([]string, 0, len(ms))
+		storageOrdered := true
+		var prev time.Time
+		for i, m := range ms {
+			clock, err := time.Parse(ScheduledAtLayout, m.ScheduledAt)
+			if err != nil || (i > 0 && clock.Before(prev)) {
+				storageOrdered = false
+				break
+			}
+			prev = clock
+			times = append(times, m.ScheduledAt)
+		}
+		if !storageOrdered {
+			continue
+		}
+		// times is ascending already (it was checked to be), so the earliest
+		// goes to the lowest match number.
+		sort.SliceStable(ms, func(i, j int) bool { return ms[i].MatchNumber < ms[j].MatchNumber })
+		for i, m := range ms {
+			m.ScheduledAt = times[i]
+		}
+	}
 }

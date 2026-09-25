@@ -196,12 +196,12 @@ func (e *Engine) buildBracketFromDraw(comp *state.Competition, draw *helper.Knoc
 		return nil, fmt.Errorf("buildBracketFromDraw: no draw to build from")
 	}
 	// SlotArray, not TreeToLeafArray: the pow2 bracket must hold every bout at
-	// the slots the draw tree gives it, or applySlotDisplayRounds cannot find
-	// the bout to stamp its printed round. The flat array tail-pads a vacancy
+	// the slots the draw tree gives it. The flat array tail-pads a vacancy
 	// block's bye pair into adjacency ([H10,C6,"",""] for the true
-	// [H10,"",C6,""]), which would fight a bout in round 1 that the sheet
-	// prints in round 2. Region widths are identical under both readings, so
-	// the spans and every court derivation are unaffected.
+	// [H10,"",C6,""]), which would store H10 v C6 in the first pow2 row
+	// although the sheet prints it in round 2, so the stored rows would not be
+	// the draw tree's. Region widths are identical under both readings, so the
+	// spans and every court derivation are unaffected.
 	leaves := helper.SlotArray(draw.Root)
 	regionSpans := draw.RegionSpans()
 
@@ -346,18 +346,23 @@ func (e *Engine) buildBracketFromDraw(comp *state.Competition, draw *helper.Knoc
 	// Excel Tree sheet (structural byes skip a column). Computed once here, while
 	// the "Winner of rX-mY" placeholders are still intact, it must NOT be
 	// recomputed after results resolve those placeholders into player names.
-	// (The load-time restamp, state.Bracket.RestampRoundsFromFeeders, does not
-	// break this rule: it reads only the Feeders stamped here, never the sides.)
 	computeBracketDisplayMetadata(bracket)
-	applySlotDisplayRounds(bracket, draw)
 
-	// Assign sequential match numbers matching the Excel Tree sheet (AC8).
-	// Must run AFTER computeBracketDisplayMetadata sets Hidden so the skipping
-	// logic is identical to helper.AssignMatchNumbers (nil-node skip in Excel
-	// = Hidden or both-sides-empty in the web bracket). The rule lives on
-	// state.Bracket so the load-time restamp (RestampRoundsFromFeeders) numbers
-	// a stored bracket with this same body.
-	bracket.NumberMatches()
+	// Rounds and match numbers (AC8), from the Feeders just stamped: each real
+	// bout's round is its distance from the final, the column the workbook
+	// prints it in, and the numbers follow helper.AssignMatchNumbers' walk
+	// (Hidden or both-sides-empty here = the Excel nil-node skip). The ONE
+	// body lives on state.Bracket so the load-time restamp
+	// (RestampRoundsFromFeeders) runs it too, and so a stored bracket and a
+	// fresh one cannot be stamped by different rules. It reads the Feeders and
+	// Hidden stamped above, never the sides' contents beyond whether both are
+	// empty (state.BracketMatch.numbered says why that cannot change after the
+	// draw), so it walks a bracket in play exactly as it walked this one. A
+	// refusal here means the draw built a bracket its own feeders cannot
+	// describe: an internal fault, never an operator's.
+	if err := bracket.StampRoundsFromFeeders(); err != nil {
+		return nil, fmt.Errorf("buildBracketFromDraw: stamping rounds and match numbers: %w", err)
+	}
 
 	// Per-court slot assignment (T150) + ceremony-block skipping (T151), in
 	// match-number order, so it runs after the numbering above. See pools.go
@@ -472,10 +477,12 @@ func bronzeDefaultCourt(finalCourt string, courts []string) string {
 	return ""
 }
 
-// computeBracketDisplayMetadata fills DisplayRound / Hidden / Feeders on every
-// match so the viewer can render effective-round columns identical to the Excel
-// Tree sheet (matches grouped by depth-from-root; structural byes skip a column
-// rather than appearing as empty cards). It is purely additive, the positional
+// computeBracketDisplayMetadata fills Hidden / Feeders on every match (and
+// clears DisplayRound, which state.Bracket.StampRoundsFromFeeders then derives
+// from those Feeders) so the viewer can render effective-round columns
+// identical to the Excel Tree sheet (matches grouped by depth-from-root;
+// structural byes skip a column rather than appearing as empty cards). It is
+// purely additive, the positional
 // ID + "Winner of rX-mY" resolution scheme used by scoring/scheduling/the pool
 // resolver is untouched.
 //
@@ -484,8 +491,8 @@ func bronzeDefaultCourt(finalCourt string, courts []string) string {
 // byes) are marked Hidden. For each real match, Feeders holds the IDs of the two
 // REAL feeder matches whose winners meet here ([A, B] order); a side fed by a
 // seeded entrant / pool placeholder / bye carries "" (no connector). DisplayRound
-// counts from the final (1 = Final), assigned by walking the real feeder graph
-// outward from the lone real match in the last round.
+// counts from the final (1 = Final): StampRoundsFromFeeders walks this real
+// feeder graph outward from the lone real match in the last round.
 //
 // Must run after bye winners have been auto-resolved and propagated (so resolved
 // names already sit in their feeder slots), i.e. at the end of bracket build.
@@ -532,74 +539,20 @@ func computeBracketDisplayMetadata(bracket *state.Bracket) {
 		return "" // dead match (both empty)
 	}
 
-	byID := make(map[string]*state.BracketMatch)
 	for r := range rounds {
 		for i := range rounds[r] {
 			mm := &rounds[r][i]
-			byID[mm.ID] = mm
+			// DisplayRound is cleared on every match: the real ones take
+			// theirs from these Feeders (state.Bracket.StampRoundsFromFeeders),
+			// the Hidden ones carry none.
+			mm.DisplayRound = 0
 			if isReal(mm) {
 				mm.Hidden = false
-				mm.DisplayRound = 0 // assigned by the walk below
 				mm.Feeders = []string{realFeederID(mm.SideA), realFeederID(mm.SideB)}
 			} else {
 				mm.Hidden = true
-				mm.DisplayRound = 0
 				mm.Feeders = nil
 			}
-		}
-	}
-
-	// DisplayRound's provisional value is the match's POW2 round counted from
-	// the final (1 = Final); applySlotDisplayRounds then overrides every bout
-	// the draw tree knows with its distance from the final in that tree, the
-	// column the workbook prints it in. The two differ wherever an empty half
-	// was collapsed on a bout's path to the final: a pair beside a phantom
-	// pair sits in the first pow2 row but prints a column later (34th EKC
-	// Junior Individual Male, P4 v P5), and the pow2 padding parks an
-	// assembly-level late bout in round-1 adjacency. The real feeder graph
-	// gives the same rounds (TestBracketDisplayMetadata_Feeders pins one
-	// round per feeder step); the tree walk stays the source because it is
-	// what the workbook prints. The load-time restamp of an older bracket
-	// (state.Bracket.RestampRoundsFromFeeders) walks that feeder graph, so the
-	// two routes must keep agreeing:
-	// TestRestampRoundsFromFeeders_LeavesFreshBracketsUnchanged pins it.
-	if !isReal(at(numRounds-1, 0)) {
-		return // degenerate bracket (e.g. < 2 competitors)
-	}
-	for r := range rounds {
-		for i := range rounds[r] {
-			if mm := &rounds[r][i]; !mm.Hidden {
-				mm.DisplayRound = numRounds - r
-			}
-		}
-	}
-}
-
-// applySlotDisplayRounds stamps each real bracket match with the round the
-// draw tree fights it in, its distance from the final (helper.SlotRoundMatches).
-// A bout is located by its first-round window: entrant width 2^(r+1) starting
-// at slot offset i*2^(r+1) identifies pow2 match (r, i) exactly, because the
-// bracket was built from helper.SlotArray of the same tree.
-func applySlotDisplayRounds(bracket *state.Bracket, draw *helper.KnockoutDraw) {
-	if bracket == nil || draw == nil || draw.Root == nil {
-		return
-	}
-	numRounds := len(bracket.Rounds)
-	for _, sm := range helper.SlotRoundMatches(draw.Root) {
-		w := sm.EntrantWidth
-		r := -1
-		for ww := w; ww > 1; ww >>= 1 {
-			r++
-		}
-		if r < 0 || r >= numRounds {
-			continue
-		}
-		i := sm.Offset / w
-		if i < 0 || i >= len(bracket.Rounds[r]) {
-			continue
-		}
-		if mm := &bracket.Rounds[r][i]; !mm.Hidden {
-			mm.DisplayRound = numRounds - sm.Round
 		}
 	}
 }

@@ -2703,10 +2703,10 @@ func (e *Engine) applyBracketResultIn(bracket *state.Bracket, compID, matchID st
 // correction).
 //
 // This is deliberately narrower than bracketMatchStartedOrScored
-// (kachinuki.go), which the REOPEN path uses and which intentionally DOES
-// treat a bye completion as blocking (retracting a winner whose bye already
-// resolved downstream would orphan that resolution). The two predicates
-// answer different questions for different rules; do not merge them.
+// (kachinuki.go), which asks whether a match has been touched at all, a bye
+// completion included; the retractions no longer apply it to a bye, which
+// they unwind instead (propagatedDownstreamOf). The two predicates answer
+// different questions for different rules; do not merge them.
 //
 // RECORDED CONTENT always blocks, whatever the status, and a RUNNING match
 // blocks even while empty: it is on court being fought right now, which is

@@ -1182,18 +1182,6 @@ window.ReasonPrompt = ReasonPrompt;
 
 const CORRECTION_PRESETS = ["Scoring error", "Wrong competitor", "Data entry", "Other"];
 
-// Presets for the reason collected by Clear withdrawal and reopen. The honest
-// first answer for clearing a withdrawal is that it was entered by mistake, so
-// it leads and is the default; the correction vocabulary follows, DERIVED from
-// CORRECTION_PRESETS rather than restated so the two cannot drift.
-const WITHDRAWAL_REOPEN_PRESETS = ["Withdrawal recorded by mistake", ...CORRECTION_PRESETS];
-
-// bc-cse: the sibling set for clearing a match-level FUSENSHO (a default win
-// awarded because the OTHER competitor was barred elsewhere), which is not a
-// withdrawal on THIS match at all, so "Withdrawal recorded by mistake" is the
-// wrong first answer for it -- derived the same way, first entry swapped.
-const DEFAULT_WIN_REOPEN_PRESETS = ["Default win recorded by mistake", ...CORRECTION_PRESETS];
-
 // withdrawalLabel: the operator's name for a match-level withdrawal decision,
 // the ONE copy of it: DecisionPrompt's title and the Recorded line in both
 // editors read it. Any kiken that is not the injury kind reads as voluntary,
@@ -1254,8 +1242,8 @@ function withdrawalInForce(m) {
 
 // useMatchReopen: the one client of POST .../reopen and its court-busy remedy
 // POST .../requeue-blocker-and-reopen, for every editor that reopens a match:
-// the kachinuki Reopen (one tap, no reason) and Clear withdrawal and reopen in
-// the individual and team editors (with the reason collected first). It was
+// the kachinuki Reopen and Clear withdrawal and reopen in the individual and
+// team editors, both one tap with no reason. It was
 // the kachinuki editor's own state machine; lifting it here is what lets the
 // individual editor offer the same door without a second copy of it.
 //
@@ -1558,7 +1546,6 @@ function ReopenFeedback({ ctl, testIdPrefix }) {
 // only the copy differs (the Recorded line names the winner, and "Clear
 // default win and reopen" replaces "Clear withdrawal and reopen").
 function RecordedWithdrawal({ match, ctl, disabled = false, singleBout = false }) {
-  const [asking, setAsking] = useStateA(false);
   const withdrawnKey = withdrawnKeyOf(match);
   const withdrawn = withdrawnSideOf(match);
   const who = withdrawn?.name || "";
@@ -1575,12 +1562,14 @@ function RecordedWithdrawal({ match, ctl, disabled = false, singleBout = false }
   // as the one that withdrew), clearing THIS withdrawal does not touch those --
   // they keep their own recorded result and must be reopened separately to be
   // fought. Fetched the same way RemainingMatchesPanel finds them (fetch +
-  // compMatchesForCompetition), only once the operator asks to clear (asking),
-  // never eagerly. Best-effort: a fetch failure just omits the list rather than
+  // compMatchesForCompetition), when the recorded withdrawal is shown: the
+  // clear is one tap (operator ruling 2026-09-25), so the consequences are
+  // stated beside the button, before it is tapped, rather than in a confirm
+  // step. Best-effort: a fetch failure just omits the list rather than
   // blocking the reopen the operator came here to do.
   const [laterDefaultWins, setLaterDefaultWins] = useStateA(null);
   useEffectA(() => {
-    if (!asking || !withdrawn || !match.compId) { setLaterDefaultWins(null); return; }
+    if (!withdrawn || !match.compId) { setLaterDefaultWins(null); return; }
     let cancelled = false;
     (async () => {
       try {
@@ -1603,14 +1592,14 @@ function RecordedWithdrawal({ match, ctl, disabled = false, singleBout = false }
     })();
     return () => { cancelled = true; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [asking, match.compId, match.id, withdrawn?.id, withdrawn?.name]);
+  }, [match.compId, match.id, withdrawn?.id, withdrawn?.name]);
 
   // bc-cse: whether the FUSENSHO's barred competitor (`withdrawn`, the side
   // THIS match's decisionBy names -- barred elsewhere, not by anything on
   // this match) is STILL barred, whether that withdrawal is reinstateable,
   // or whether they are eligible again already (reinstated, or their
-  // earlier withdrawal cleared), so the confirm can offer the right remedy
-  // instead of guessing. isDefaultWin-only: a kiken/fusenpai clear on this
+  // earlier withdrawal cleared), so the consequence can name the right
+  // remedy instead of guessing. isDefaultWin-only: a kiken/fusenpai clear on this
   // match is an ordinary withdrawal, not another competitor's barring, so
   // it never needs this. window.API.fetchCompetitorStatuses always exists
   // in the app (api_client.jsx); best-effort is only about the FETCH, same
@@ -1619,7 +1608,7 @@ function RecordedWithdrawal({ match, ctl, disabled = false, singleBout = false }
   // conservative of the wrong guesses.
   const [withdrawnStatus, setWithdrawnStatus] = useStateA(null);
   useEffectA(() => {
-    if (!asking || !isDefaultWin || !withdrawn?.id || !match.compId) {
+    if (!isDefaultWin || !withdrawn?.id || !match.compId) {
       setWithdrawnStatus(null);
       return;
     }
@@ -1635,7 +1624,7 @@ function RecordedWithdrawal({ match, ctl, disabled = false, singleBout = false }
     })();
     return () => { cancelled = true; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [asking, isDefaultWin, match.compId, withdrawn?.id]);
+  }, [isDefaultWin, match.compId, withdrawn?.id]);
   const canReinstate = !!(withdrawnStatus && withdrawnStatus.eligible === false && withdrawnStatus.reinstateable);
   // bc-cse: the barred competitor's own status record now reads eligible --
   // reinstated, or their earlier withdrawal cleared elsewhere -- so the
@@ -1657,16 +1646,19 @@ function RecordedWithdrawal({ match, ctl, disabled = false, singleBout = false }
             ? `Recorded: Default win (fusensho) for ${winnerName || "the opponent"}. ${who || "The withdrawn competitor"} had withdrawn.`
             : `Recorded: ${withdrawalLabel(match.decision)}${who ? `, ${who} ${what}` : ""}.`}
         </span>
-        {!asking && (
-          <>
-            {" "}
-            <button
-              type="button"
-              className="btn btn--sm"
-              data-testid="clear-withdrawal-reopen"
-              onClick={() => setAsking(true)}
-              disabled={disabled || ctl.busy || ctl.landed}
-            >
+        {" "}
+        {/* One tap, no reason (operator ruling 2026-09-25: a match can be
+            reopened without any reason, and nothing is gated on that). What
+            the clear does is stated below, before it is tapped. The one
+            second step left is useMatchReopen's own, when a later knockout
+            match has already been fought ("Reopen both"). */}
+        <button
+          type="button"
+          className="btn btn--sm"
+          data-testid="clear-withdrawal-reopen"
+          onClick={() => ctl.reopen("")}
+          disabled={disabled || ctl.busy || ctl.landed}
+        >
               {/* bc-cse: "Clear default win" -- no "and reopen" -- because a
                   fusensho reopen no longer always lands running: the server
                   returns the match to SCHEDULED when the barred competitor
@@ -1674,12 +1666,8 @@ function RecordedWithdrawal({ match, ctl, disabled = false, singleBout = false }
                   to running once they no longer are, so this button cannot
                   promise "and reopen" for either outcome uniformly. */}
               {ctl.busy ? "Reopening…" : ctl.landed ? "Reopened" : isDefaultWin ? "Clear default win" : "Clear withdrawal and reopen"}
-            </button>
-          </>
-        )}
+        </button>
       </div>
-      {asking && (
-        <>
           {isDefaultWin ? (
             // bc-cse: a fusensho names the OTHER competitor as barred, not
             // this match's own withdrawal, so clearing it does not simply
@@ -1758,15 +1746,6 @@ function RecordedWithdrawal({ match, ctl, disabled = false, singleBout = false }
               })}
             </div>
           )}
-          <ReasonPrompt
-            label={isDefaultWin ? "Why is this default win being cleared?" : "Why is this withdrawal being cleared?"}
-            presets={isDefaultWin ? DEFAULT_WIN_REOPEN_PRESETS : WITHDRAWAL_REOPEN_PRESETS}
-            submitting={ctl.busy}
-            onConfirm={(r) => { setAsking(false); ctl.reopen(r); }}
-            onCancel={() => setAsking(false)}
-          />
-        </>
-      )}
     </div>
   );
 }
@@ -1928,7 +1907,6 @@ export {
   LineupNameInput,
   ReasonPrompt,
   CORRECTION_PRESETS,
-  WITHDRAWAL_REOPEN_PRESETS,
   withdrawalLabel,
   withdrawnSideOf,
   withdrawnKeyOf,

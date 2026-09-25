@@ -2963,8 +2963,8 @@ const API = {
     // undo it is friction at the worst possible moment, and ending the match
     // again asks for no reason either (operator ruling 2026-09-25: a match can
     // be reopened without any reason, and nothing is gated on that). Clear
-    // withdrawal and reopen sends one (opts.reason, a preset chosen before the
-    // tap posts, "Withdrawal recorded by mistake" by default). opts.force is the operator's confirmation after a
+    // withdrawal and reopen is one tap with no reason too; opts.reason stays
+    // for any caller that has one to record. opts.force is the operator's confirmation after a
     // downstream_knockout_played refusal. The body stays a JSON object (never
     // absent) so a handler that binds JSON still parses the request.
     //

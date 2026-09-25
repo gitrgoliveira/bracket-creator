@@ -175,10 +175,9 @@ func RegisterDecisionHandlers(r *gin.RouterGroup, eng ScoringEngine, store Compe
 		// handle, so the per-comp lock is acquired exactly once for the
 		// entire mutation.
 		var (
-			result    *state.MatchResult
-			status    *domain.CompetitorStatus
-			engErr    error
-			reasonErr *ValidationError
+			result *state.MatchResult
+			status *domain.CompetitorStatus
+			engErr error
 			// bc-kcdg: reopenedDownstream collects the IDs of any downstream
 			// bracket match reopened by a forced correction, populated only
 			// when req.ForceDownstreamReopen actually unblocked one.
@@ -186,32 +185,20 @@ func RegisterDecisionHandlers(r *gin.RouterGroup, eng ScoringEngine, store Compe
 		)
 		reason := strings.TrimSpace(req.DecisionReason)
 		txErr := tx.WithTransaction(id, func(stx state.StoreTx) error {
-			// mp-gmcg: a reason-less reopen DEFERS its audit
-			// justification to whatever finalizes the match next. PUT /score
-			// collects it (applyCorrectionReasonUnderTx); this endpoint is the
-			// OTHER way to finalize a match, so it has to collect it too — a
-			// kiken recorded on a reopened encounter is still a result
-			// replacing one the operator had already declared final.
+			// A match reopened without a reason (ReopenPending) is ended here
+			// like any other: never refused for a missing reason (operator
+			// ruling 2026-09-25: a match can be reopened without any reason,
+			// and nothing is gated on that). The write below discharges the
+			// flag and keeps the decision's reason, if any, as the correction
+			// reason. The read is in-tx, so it is race-free against a
+			// concurrent finalization, and it fails CLOSED on a load error.
 			//
-			// Checked in-tx, before the engine write, so the read is race-free
-			// against a concurrent finalization and a rejection costs no write.
-			// matchSnapshotOrErr fails CLOSED on a load error (unlike a
-			// best-effort error-swallowing read), so a dropped read can't
-			// finalize on an assumed-false ReopenPending and silently discard the
-			// mandatory reopen audit reason.
-			//
-			// The read is NOT kachinuki-only any more: ReopenPending is set by
-			// engine.ReopenMatch, which since bc-tmfn also reopens a match of
-			// any format that a withdrawal decided (the kachinuki-only skip of
-			// mp-gmcg review E3 would now let a decision finalize such a match
-			// without the reason, and leave the flag set on a completed match).
+			// ReopenPending is set by engine.ReopenMatch, which since bc-tmfn
+			// reopens a match of any format that a withdrawal decided, so the
+			// read is not kachinuki-only.
 			snap, _, snapErr := matchSnapshotOrErr(stx, id, mid, "reopen-pending")
 			if snapErr != nil {
 				return snapErr
-			}
-			if snap.ReopenPending && reason == "" {
-				reasonErr = &ValidationError{Field: "decisionReason", Message: ReopenNeedsReasonMessage}
-				return nil
 			}
 			// Pass the TRIMMED reason (not req.DecisionReason): it is persisted
 			// into DecisionReason, and dischargeReopenPendingUnderTx stores the
@@ -244,10 +231,6 @@ func RegisterDecisionHandlers(r *gin.RouterGroup, eng ScoringEngine, store Compe
 		})
 		if txErr != nil {
 			internalError(c, txErr)
-			return
-		}
-		if reasonErr != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": reasonErr.Error()})
 			return
 		}
 		if engErr != nil {

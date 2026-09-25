@@ -659,18 +659,14 @@ function EnchoControl({ enchoPeriodCount, setEnchoPeriodCount }) {
 // Render the inline kiken/fusenpai prompt that replaces the score controls
 // while open. Side picker uses radio inputs labelled "SHIRO (White)" / "AKA
 // (Red)" to stay consistent with the score board legend; the value submitted
-// to the backend is "shiro" or "aka" per DecisionRequest.Validate.
-// requireReason (mp-gmcg): the match was reopened without a reason, so the
-// server rejects ANY finalization that carries none — including this one, since
-// a decision is just the other way to end a match. Without this the operator
-// meets a 400 they cannot satisfy: the reason box is only rendered for kiken,
-// so fusenpai on a reopened encounter would have no field to fill at all.
-// Forcing the box open AND blocking submit turns that dead end into a prompt.
-function DecisionPrompt({ kind, sideA, sideB, defaultSide, askReason, requireReason, onCancel, onSubmit, submitting }) {
+// to the backend is "shiro" or "aka" per DecisionRequest.Validate. The reason
+// is always optional, a reopened match included: a match can be reopened
+// without any reason, and ending it again asks for none (operator ruling
+// 2026-09-25).
+function DecisionPrompt({ kind, sideA, sideB, defaultSide, askReason, onCancel, onSubmit, submitting }) {
   const [side, setSide] = useStateA(defaultSide || "shiro");
   const [reason, setReason] = useStateA("");
-  const showReason = askReason || requireReason;
-  const reasonMissing = requireReason && reason.trim() === "";
+  const showReason = askReason;
   // Display rule (locked, glossary.md §Display rule): render the
   // romaji term ALONE: the popover (via <Term>) carries the gloss.
   // We keep "Decision" untouched (it's already plain English) and
@@ -683,7 +679,7 @@ function DecisionPrompt({ kind, sideA, sideB, defaultSide, askReason, requireRea
 
   const submit = (e) => {
     e?.preventDefault?.();
-    if (submitting || reasonMissing) return;
+    if (submitting) return;
     onSubmit({ decisionBy: side, decisionReason: showReason ? reason.trim() : "" });
   };
 
@@ -705,7 +701,7 @@ function DecisionPrompt({ kind, sideA, sideB, defaultSide, askReason, requireRea
         {showReason && (
           <label style={{ display: "flex", flexDirection: "column", gap: 4, marginTop: 4 }}>
             <span style={{ fontWeight: 600 }}>
-              {requireReason ? "Reason (required, ≤200 chars)" : "Reason (optional, ≤200 chars)"}
+              Reason (optional, ≤200 chars)
             </span>
             <input
               type="text"
@@ -713,20 +709,15 @@ function DecisionPrompt({ kind, sideA, sideB, defaultSide, askReason, requireRea
               maxLength={200}
               value={reason}
               onInput={(e) => setReason(e.target.value)}
-              placeholder={requireReason ? "Why is this match being ended again?" : "e.g. injury, no-show, doctor's stop"}
+              placeholder="e.g. injury, no-show, doctor's stop"
               data-testid="decision-reason"
             />
-            {requireReason && (
-              <span style={{ fontSize: 11, color: "var(--muted, #666)" }}>
-                This match was reopened, so ending it again needs a reason.
-              </span>
-            )}
           </label>
         )}
       </div>
       <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", marginTop: 10 }}>
         <button type="button" className="btn btn--sm" onClick={onCancel} disabled={submitting}>Cancel</button>
-        <button type="submit" className="btn btn--primary btn--sm" disabled={submitting || reasonMissing}>
+        <button type="submit" className="btn btn--primary btn--sm" disabled={submitting}>
           {submitting ? "Saving…" : "Record"}
         </button>
       </div>
@@ -1191,23 +1182,10 @@ window.ReasonPrompt = ReasonPrompt;
 
 const CORRECTION_PRESETS = ["Scoring error", "Wrong competitor", "Data entry", "Other"];
 
-// mp-gmcg: presets for the REOPEN audit reason, collected on the write that
-// closes a reopened kachinuki encounter back out (admin_scoring_team.jsx).
-// "Ended by mistake" is FIRST, and therefore the default selection, because it
-// is the overwhelmingly common reason a shiaijo operator reopens a match: the
-// correction presets offer no honest option for it, so an operator forced
-// through that list either mislabels the reopen "Scoring error" or picks
-// "Other" and types the same sentence every time. The remaining entries mirror
-// CORRECTION_PRESETS so a reopen made for a genuine scoring/identity/data
-// problem still lands in the same audit vocabulary — so it is DERIVED from
-// CORRECTION_PRESETS rather than restated, making that mirror structural
-// instead of a comment-only obligation that drifts on the next edit.
-const REOPEN_PRESETS = ["Ended by mistake", ...CORRECTION_PRESETS];
-
 // Presets for the reason collected by Clear withdrawal and reopen. The honest
 // first answer for clearing a withdrawal is that it was entered by mistake, so
-// it leads and is the default; the correction vocabulary follows, derived as
-// REOPEN_PRESETS is.
+// it leads and is the default; the correction vocabulary follows, DERIVED from
+// CORRECTION_PRESETS rather than restated so the two cannot drift.
 const WITHDRAWAL_REOPEN_PRESETS = ["Withdrawal recorded by mistake", ...CORRECTION_PRESETS];
 
 // bc-cse: the sibling set for clearing a match-level FUSENSHO (a default win
@@ -1950,7 +1928,6 @@ export {
   LineupNameInput,
   ReasonPrompt,
   CORRECTION_PRESETS,
-  REOPEN_PRESETS,
   WITHDRAWAL_REOPEN_PRESETS,
   withdrawalLabel,
   withdrawnSideOf,

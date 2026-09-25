@@ -2960,14 +2960,11 @@ const API = {
     // The kachinuki Reopen sends NO REASON, deliberately (operator ruling). An
     // operator who ended a match BY MISTAKE at a shiaijo must be able to get
     // back into it in ONE TAP; making them justify the mistake before they may
-    // undo it is friction at the worst possible moment. The audit trail is
-    // collected on the way OUT instead: the server stamps `reopenPending` on
-    // the reopened match and rejects the later COMPLETING write unless it
-    // carries a correctionReason (400, field correctionReason), which
-    // admin_scoring_team.jsx prompts for on [End match]. Clear withdrawal and
-    // reopen sends one (opts.reason, collected before the tap posts), because
-    // no editor but the kachinuki one prompts for a reopen's reason on the way
-    // out. opts.force is the operator's confirmation after a
+    // undo it is friction at the worst possible moment, and ending the match
+    // again asks for no reason either (operator ruling 2026-09-25: a match can
+    // be reopened without any reason, and nothing is gated on that). Clear
+    // withdrawal and reopen sends one (opts.reason, a preset chosen before the
+    // tap posts, "Withdrawal recorded by mistake" by default). opts.force is the operator's confirmation after a
     // downstream_knockout_played refusal. The body stays a JSON object (never
     // absent) so a handler that binds JSON still parses the request.
     //

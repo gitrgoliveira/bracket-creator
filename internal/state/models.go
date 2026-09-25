@@ -1439,13 +1439,13 @@ type MatchResult struct {
 	FlagsB int `json:"flagsB,omitempty" yaml:"flags_b,omitempty"`
 	// ReopenPending marks a match that was reopened (engine.ReopenMatch: a
 	// kachinuki match, or one a withdrawal decided) WITHOUT an audit reason
-	// and therefore still owes one (mp-gmcg). Reopening is one tap so an
-	// operator who ended a match by mistake can get straight back in; the
-	// justification is collected on the NEXT completion instead, folded into a
-	// step they were already taking. The score path refuses to complete a
-	// flagged match without a correctionReason and clears the flag once one
-	// lands, so the audit record is written later than the action it justifies
-	// but is never lost.
+	// and not yet ended again. Nothing is refused for it: a match can be
+	// reopened without any reason, and ending it again works like ending any
+	// match (operator ruling 2026-09-25, which retired mp-gmcg's rule that the
+	// next completion must carry a reason). What it still does: a reason the
+	// ending write does carry is kept as the correction reason, since that
+	// completion replaces a result the reopen discarded, and the ending write
+	// clears it.
 	//
 	// SERVER-OWNED. MatchResult binds straight from the score request body, so
 	// a client could otherwise plant or clear the flag; the handler overwrites
@@ -1729,9 +1729,9 @@ type BracketMatch struct {
 	// counts survive a restart. Zero for non-engi matches.
 	FlagsA int `json:"flagsA,omitempty"`
 	FlagsB int `json:"flagsB,omitempty"`
-	// ReopenPending mirrors MatchResult.ReopenPending for bracket matches
-	// (mp-gmcg): the match was reopened with no audit reason and still owes
-	// one, so the next completion must carry a correctionReason. Persisted in
+	// ReopenPending mirrors MatchResult.ReopenPending for bracket matches: the
+	// match was reopened with no audit reason and has not been ended again.
+	// Nothing is refused for it (see MatchResult.ReopenPending). Persisted in
 	// bracket.json. Server-owned: the score write deliberately does NOT copy
 	// this field off the client-supplied MatchResult (unlike ResultSource /
 	// CorrectionReason), so only the reopen path and the handler's

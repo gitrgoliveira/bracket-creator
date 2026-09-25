@@ -31,15 +31,7 @@ Once a match is scored it moves to the **Completed** list on the court console, 
 What Correct offers depends on the format:
 
 - For most matches, the editor reopens with the recorded scores ready to edit. Adjust the ippons, fouls, or winner, then use **Save correction**. A short reason is required so the change stays traceable.
-- For a kachinuki team encounter, the editor shows the recorded bouts with a **Reopen match** button. An encounter that ended with a withdrawal or a no-show shows **Clear withdrawal and reopen** instead; refer to [Correcting a withdrawal recorded by mistake](recording-decisions.md#correcting-a-withdrawal-recorded-by-mistake). Reopen is immediate: one tap returns the encounter to running with its bout log intact, so you can carry on or fix a bout. A reason is still kept with the result, but the app asks for it when you end the match again, not on the way back in. Correcting a mistake never costs you more than a tap.
-
-    You are asked for that reason however you end it. If the encounter finishes with a withdrawal or a no-show instead of a scored bout, the kiken or fusenpai panel asks for the reason in the same way. The **Record** button stays unavailable until you give one.
-
-    ![The Fusenpai panel on a reopened encounter: a side picker, a required reason box prompting "Why is this match being ended again?", a note that the match was reopened so ending it again needs a reason, and a Record button held back until the reason is filled in.](../../screenshots/decision-reason-after-reopen.png)
-
-    Ending it on a scored bout asks in the same dialog, with **Ended by mistake** offered as the first reason:
-
-    ![Ending a reopened encounter: the editor asks for a reason, with "Ended by mistake" already selected and a note box beside it](../../screenshots/kachinuki-reopen-reason.png)
+- For a kachinuki team encounter, the editor shows the recorded bouts with a **Reopen match** button. An encounter that ended with a withdrawal or a no-show shows **Clear withdrawal and reopen** instead; refer to [Correcting a withdrawal recorded by mistake](recording-decisions.md#correcting-a-withdrawal-recorded-by-mistake). Reopen is immediate: one tap returns the encounter to running with its bout log intact, so you can carry on or fix a bout. No reason is needed, and none is asked for when you end the match again, whether you finish on a scored bout or record a withdrawal or a no-show. Correcting a mistake never costs you more than a tap.
 
 Reopening puts the encounter back into play, and a court can only run one match at a time. If another match is already running on that court, the editor names it and offers two ways forward. Leave it running, or clear its score, send it back to the queue, and reopen in a single step. Sending a match back to the queue clears any score already entered for it, so if that match is part way through, finish it first instead.
 
@@ -96,7 +88,7 @@ On a tied bout you also decide what the tie means, according to the [kachinuki m
 - **Encho** keeps the same pair fighting when the pairing must produce a result. It is available in any stage.
 - **End match** records a drawn encounter in pools or leagues. In a knockout a tied last bout cannot end the match, so continue with **Record bout** or **Encho**.
 
-If you finish too early, open the completed match and use **Reopen match** to carry on. Reopening takes a single tap; you are asked for a reason when you end the match again. The bouts you have already fought stay on screen as read-only rows above the current bout. The encounter reads like a regular team sheet, and you can check the winner-stays-on order at a glance. **× Remove this bout** takes back an unscored pairing the app added by mistake without ending the encounter.
+If you finish too early, open the completed match and use **Reopen match** to carry on. Reopening takes a single tap, and ending the match again asks for no reason. The bouts you have already fought stay on screen as read-only rows above the current bout. The encounter reads like a regular team sheet, and you can check the winner-stays-on order at a glance. **× Remove this bout** takes back an unscored pairing the app added by mistake without ending the encounter.
 
 To fix a bout you have already recorded, tap its row: it reopens in place with the scoring controls. If your change flips who won, the app flags the later bouts for you to check. Refer to [Scoring a kachinuki encounter](../organisers/team-tournaments.md#scoring-a-kachinuki-encounter) for the full flow.
 

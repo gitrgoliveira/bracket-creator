@@ -28,7 +28,6 @@ import {
   LineupNameInput,
   ReasonPrompt,
   CORRECTION_PRESETS,
-  REOPEN_PRESETS,
   useAdoptFromServer,
   useMatchReopen,
   ReopenFeedback,
@@ -865,16 +864,12 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
   const [decisionSubmitting, setDecisionSubmitting] = useStateA(false);
   const [decisionErr, setDecisionErr] = useStateA("");
   const [withdrawnPlayer, setWithdrawnPlayer] = useStateA(null);
-  // Audit reason collected when correcting a completed team match, or when
-  // closing out a REOPENED one: mirrors the ScoreEditorModal correction flow
-  // (same ReasonPrompt), and rides the completing write as correctionReason
-  // either way. One reason value, because the wire field is one field.
+  // Audit reason collected when correcting a completed team match: mirrors
+  // the ScoreEditorModal correction flow (same ReasonPrompt), and rides the
+  // completing write as correctionReason.
   const [correctionReason, setCorrectionReason] = useStateA("");
-  // Which audit prompt owns the footer: "" | "correction" | "reopen". Both are
-  // the same ReasonPrompt and both ARE the confirm step of a high-stakes
-  // write, so exactly one may ever be on screen: a single selector makes that
-  // true by construction rather than by a pair of flags that must be kept
-  // from overlapping.
+  // Whether the correction's audit prompt owns the footer: "" | "correction".
+  // The prompt IS the confirm step of a high-stakes write.
   const [reasonPromptKind, setReasonPromptKind] = useStateA("");
   // mp-gmcg: [Reopen match] on a completed kachinuki match, and (bc-tmfn)
   // Clear withdrawal and reopen on a completed match a withdrawal decided:
@@ -1668,28 +1663,14 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
   // legitimate; the match is not being completed); End match has its own
   // knockout-tie gate via deriveKachinukiEndOutcome.
   const kachinukiBoutMode = isKachinukiBoutMode({ isKachinuki, isComplete, hasDaihyosen });
-  // mp-gmcg: the server stamps `reopenPending` on a match it reopened for a
-  // mistake and REJECTS the write that completes it again unless that write
-  // carries a correctionReason (400, field correctionReason). So the reason
-  // the reopen skipped is demanded here, on [End match].
-  //
-  // This MUST be driven off the server field, never off local state: the
-  // editor mounts per match, so an operator who reopens, walks away to another
-  // court and comes back has no local memory of the reopen at all — which is
-  // precisely the case this design exists to survive. m.reopenPending survives
-  // it because the match carries it.
-  const reopenReasonRequired = !!m.reopenPending;
-  // The two audit prompts that can take over the footer, derived from the one
-  // reasonPromptKind selector so only one Cancel/Confirm row may ever be on
-  // screen. Each also hides the footer's own nav+actions below. The extra
-  // condition on each is the state that makes that prompt meaningful at all,
-  // so a stale kind (e.g. the match completing underneath an open prompt)
-  // closes itself rather than hanging over a footer it no longer belongs to.
+  // The audit prompt that can take over the footer (a correction's reason),
+  // from the reasonPromptKind selector. It also hides the footer's own
+  // nav+actions below. isComplete is the state that makes it meaningful at
+  // all, so a stale kind closes itself rather than hanging over a footer it no
+  // longer belongs to. Ending a REOPENED match asks for no reason (operator
+  // ruling 2026-09-25: a match can be reopened without any reason, and nothing
+  // is gated on that), so there is no second prompt for it.
   const correctionPromptOpen = reasonPromptKind === "correction" && isComplete;
-  // kachinukiBoutMode because this prompt belongs to [End match] specifically:
-  // that keeps kachinukiEndOutcome non-null wherever the prompt commits it,
-  // and closes the prompt if the encounter completes underneath it.
-  const reopenPromptOpen = reasonPromptKind === "reopen" && reopenReasonRequired && kachinukiBoutMode;
   // Rows to render: kachinuki shows only bouts that exist in the server log
   // (kachinukiVisiblePositions handles the bout-1 bootstrap, the running
   // current-bout selection, the correction show-all branch, and the
@@ -1953,10 +1934,8 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
   // its remedy panel, and a later knockout match with its own result is
   // confirmed with the operator before it is reopened too.
   //
-  // The kachinuki Reopen asks for NO REASON (operator ruling): the tap posts.
-  // The justification rides the write that closes the encounter back out
-  // (reopenReasonRequired above), which is where the operator knows what
-  // actually happened anyway. Note the asymmetry that makes the court-busy
+  // The kachinuki Reopen asks for NO REASON (operator ruling): the tap posts,
+  // and ending the encounter again asks for none either. Note the asymmetry that makes the court-busy
   // remedy mandatory: a plain correction bypasses the court gate entirely, so
   // kachinuki operators, for whom reopen is the ONLY way to fix a bout log,
   // would otherwise be the one group with no way out of a busy court.
@@ -2422,11 +2401,8 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
     // team that withdrew into the next round.
     const winner = keepsWithdrawal ? (m.winner || null)
       : teamWinner === "a" ? m.sideA : teamWinner === "b" ? m.sideB : (dhKeep ? (m.winner || null) : null);
-    // correctionReason rides any write that AMENDS a finalized result: a
-    // correction to a completed match, and (mp-gmcg) the write that completes
-    // a REOPENED one, which the server refuses without it. Same field, same
-    // audit trail, two ways in.
-    const correctionBlock = (isComplete || reopenReasonRequired) && correctionReason ? { correctionReason } : {};
+    // correctionReason rides a correction to a completed match.
+    const correctionBlock = isComplete && correctionReason ? { correctionReason } : {};
     // When transitioning to "running" (▶ Start), teamWinner is typically
     // null (0–0). Don't emit score.type: "hikiwake": toBackendMatchResult
     // maps score.type to decision, which would persist a draw decision on
@@ -3615,12 +3591,6 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
               sideB={{ name: m.sideB?.name || m.sideB }}
               defaultSide="shiro"
               askReason={window.isKikenDecision(decisionPromptKind)}
-              // Same server-owned obligation the End-match flow honours via
-              // reopenReasonRequired: a decision finalizes the match too, so
-              // POST /decision rejects it without a reason. Rides m.reopenPending
-              // (not local state) for the same reason the End prompt does — the
-              // editor remounts per match and a client-only flag would evaporate.
-              requireReason={reopenReasonRequired}
               submitting={decisionSubmitting}
               onCancel={() => { setDecisionPromptKind(""); setDecisionErr(""); }}
               onSubmit={({ decisionBy, decisionReason }) => submitDecision(decisionPromptKind, { decisionBy, decisionReason })}
@@ -3670,40 +3640,12 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
               onCancel={() => setReasonPromptKind("")}
             />
           )}
-          {/* mp-gmcg: the same audit prompt on the way OUT of a reopen. The
-              reopen itself was one tap; this write is the one that re-finalizes
-              the result, so this is where the justification is owed — and the
-              server enforces it (400 correctionReason on a completing write
-              while reopenPending). Its Confirm IS the commit, so the verdict
-              being committed is shown above it (the End button's armed label is
-              hidden while a prompt owns the footer). setCorrectionReason is
-              async, so the confirmed string is spread onto the patch directly
-              rather than read back through buildPatch. */}
-          {reopenPromptOpen && (
-            <>
-              <div className="reopen-reason__verdict" data-testid="kachinuki-end-verdict">
-                Ending this match: <strong>{kachinukiEndOutcomeLabel(kachinukiEndOutcome)}</strong>
-              </div>
-              <ReasonPrompt
-                label="Reason for reopening"
-                presets={REOPEN_PRESETS}
-                submitting={submitting}
-                onConfirm={(r) => {
-                  setCorrectionReason(r);
-                  setReasonPromptKind("");
-                  const patch = { ...buildPatch("completed", { endOutcome: kachinukiEndOutcome }), correctionReason: r };
-                  doSubmit(() => onSubmit(patch));
-                }}
-                onCancel={() => setReasonPromptKind("")}
-              />
-            </>
-          )}
           {/* While a reason prompt is open it owns the only Cancel/commit
               row: hide the footer's own nav+actions so the operator never sees
               two Cancels and two commit buttons at the highest-stakes moment
               (amending or discarding a recorded result). Mirrored in
               Score/EngiScoreEditorModal. */}
-          {!(correctionPromptOpen || reopenPromptOpen) && (
+          {!correctionPromptOpen && (
           <>
           {/* mp-gmcg: inline End-match hint (plain text, no modal). Shown
               while End is blocked (nothing scored yet, or a knockout tie:
@@ -3814,7 +3756,7 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
                   match prop. ONE TAP, no prompt: the operator is standing at
                   the shiaijo with the competitors waiting, and the write is
                   reversible (the encounter is re-ended from the same bout
-                  log). The audit reason is demanded on the way out instead. */}
+                  log), and ending it again asks for no reason either. */}
               {canReopenKachinukiMatch({ isKachinuki, isComplete, recordedWithdrawal }) && (
                 <button
                   type="button"
@@ -3901,13 +3843,6 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
                 )}
                 <button type="button" className={`btn ${endArmed ? "btn--confirm" : ""}`} data-testid="kachinuki-end-match-button" onClick={() => {
                   if (kachinukiEndOutcome?.kind === "blocked") return;
-                  // mp-gmcg: on a REOPENED encounter the audit reason is owed
-                  // now, and the prompt's Confirm is the commit — so it
-                  // REPLACES the arm step rather than following it (one
-                  // confirm, not two; same shape as the correction path).
-                  // Once a reason has been confirmed it sticks, so a retry
-                  // after a failed write doesn't re-ask for it.
-                  if (reopenReasonRequired && !correctionReason) { setEndArmed(false); setReasonPromptKind("reopen"); return; }
                   if (!endArmed) { setEndArmed(true); setFinishArmed(false); return; }
                   doSubmit(() => onSubmit(buildPatch("completed", { endOutcome: kachinukiEndOutcome })));
                 }} disabled={submitting || kachinukiEndOutcome?.kind === "blocked"}

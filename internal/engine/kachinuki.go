@@ -788,12 +788,11 @@ var (
 // justification cannot simply be dropped — but demanding it HERE was too
 // much friction: an operator who ended a match by mistake, at a shiaijo,
 // mid-session, had to compose a reason before they could get back in.
-// Reopen is therefore one tap, and when no reason is given the match is
-// flagged ReopenPending instead: the score path then refuses to complete it
-// again without a correctionReason and clears the flag once one lands
-// (mp-gmcg). The audit record is written LATER than the action it
-// justifies; it is never written at all only if the match is never ended
-// again, in which case there is no rewritten result to justify.
+// Reopen is therefore one tap, and ending the match again asks for no
+// reason either (operator ruling 2026-09-25: a match can be reopened without
+// any reason, and nothing is gated on that). When no reason is given the
+// match is flagged ReopenPending, which only lets a reason sent with the next
+// completion be kept as its correction reason; that completion clears it.
 //
 // The flag is persisted rather than held client-side because the score
 // editor mounts per match: navigating away and back would lose it.
@@ -1736,10 +1735,9 @@ func reopenBracketMatch(bm *state.BracketMatch, reason string, targetStatus stat
 	bm.ModifiedAt = time.Now().UnixMilli()
 }
 
-// reopenPending reports whether a reopen still OWES an audit justification:
-// true when no reason was supplied (the score path collects it on the next
-// completion), false when the operator already gave one so this reopen is
-// justified as it happens. One helper rather than a `reason == ""` test
+// reopenPending reports whether a reopen was made without an audit reason:
+// true when none was supplied, false when the operator gave one. Nothing is
+// refused for it (see state.MatchResult.ReopenPending). One helper rather than a `reason == ""` test
 // inlined at each of its two call sites (reopenPoolMatch, reopenBracketMatch
 // — the latter already covers both the bracket-round and bronze homes), so a
 // third caller can't drift from the rule — the same reason the reopen keeps its

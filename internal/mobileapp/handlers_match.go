@@ -774,11 +774,10 @@ func RegisterMatchHandlers(r *gin.RouterGroup, eng *engine.Engine, store Competi
 			var capturedStatus *domain.CompetitorStatus
 			var reopenedThisItem []engine.ReopenedMatch
 			if err := tx.WithTransaction(id, func(stx state.StoreTx) error {
-				// Correction-reason audit policy (require a reason when the write
-				// rewrites a result the operator already declared final — a
-				// completed -> completed overwrite, or the re-End of a match
-				// reopened without one — otherwise carry the STORED reason
-				// forward). The rule itself lives in
+				// Correction-reason audit policy (require a reason for a
+				// completed -> completed overwrite, otherwise carry the STORED
+				// reason forward; ending a match reopened without a reason is
+				// never refused). The rule itself lives in
 				// applyCorrectionReasonUnderTx, shared with the single-score path
 				// so the two cannot drift; only the error SHAPE differs here
 				// (partial-success entries carry a plain message).
@@ -1242,11 +1241,11 @@ func RegisterMatchHandlers(r *gin.RouterGroup, eng *engine.Engine, store Competi
 	// valid, so reopening is ONE TAP. Requiring the justification here was
 	// too much friction for the case it is most needed in: an operator who
 	// ended a match by mistake, at a shiaijo, mid-session, had to compose a
-	// reason before they could get back in. Rewriting a finalized result is
-	// still audited — a reason-less reopen sets state.MatchResult.ReopenPending
-	// and the score path then refuses to complete the match again without a
-	// correctionReason (see applyCorrectionReasonUnderTx). The record is
-	// written later than the action it justifies; it is not lost.
+	// reason before they could get back in. Ending the match again asks for
+	// no reason either (operator ruling 2026-09-25: a match can be reopened
+	// without any reason, and nothing is gated on that). A reason-less reopen
+	// sets state.MatchResult.ReopenPending, which only lets a reason sent with
+	// the next completion be kept (see applyCorrectionReasonUnderTx).
 	//
 	// A completed match that is neither kachinuki nor decided by a withdrawal
 	// gets 400 (its sanctioned edit of a finished result remains the
@@ -1800,7 +1799,7 @@ type matchStores interface {
 // it: Status drives the correction / stale-write / finalized gates,
 // CorrectionReason carries the kachinuki reopen justification forward (see
 // applyCorrectionReasonUnderTx), and ReopenPending says a reason-less reopen
-// still owes one.
+// has not been ended again.
 //
 // It carries only the fields the guards actually read: the post-advance
 // kachinuki bout log now rides back to the editor on MaybeAdvanceKachinuki's
@@ -2092,24 +2091,20 @@ type correctionCheck struct {
 // by the locked and tx scoring paths); each caller wraps the Reject verdict
 // in its own error shape.
 //
-// A completion must be JUSTIFIED in two cases, and both demand exactly the
-// same thing (a non-empty CorrectionReason), because both rewrite a result
-// the operator had already declared final:
+// completed -> completed is a CORRECTION: overwriting an already-finalized
+// result requires a non-empty CorrectionReason for traceability. This applies
+// to ANY decision type, including a withdrawal (kiken/fusenpai) submitted via
+// /score; exempting those would let a finalized result be overwritten with no
+// audit reason. Reject reports a missing reason and r is left otherwise
+// untouched; on acceptance the supplied reason is kept.
 //
-//   - completed -> completed is a CORRECTION: overwriting an already-finalized
-//     result requires a reason for traceability. This applies to ANY decision
-//     type, including a withdrawal (kiken/fusenpai) submitted via /score;
-//     exempting those would let a finalized result be overwritten with no
-//     audit reason.
-//   - the match carries ReopenPending: it was reopened with no reason
-//     (mp-gmcg), so its stored status is `running` and the completion looks
-//     like a first finalization — but the finalized result it replaces was
-//     discarded by that reopen. The justification reopen no longer asks for is
-//     collected HERE, on a step the operator was already taking.
-//
-// In both cases Reject reports a missing reason and r is left otherwise
-// untouched; on acceptance the supplied reason is kept and ReopenPending is
-// discharged (nothing is outstanding once the record exists).
+// A match reopened without a reason (ReopenPending) is NOT asked for one
+// when it is ended again: a match can be reopened without any reason, and
+// nothing is gated on that (operator ruling 2026-09-25, which retired the
+// mp-gmcg rule that collected the reopen's reason here). Ending it works like
+// ending any match; the one difference is that a reason the client does send
+// is kept, since the completion replaces a result the reopen discarded, and
+// ReopenPending is discharged.
 //
 // Anything else (a genuine first finalization, or a running/scheduled write)
 // is not a rewrite. A client-supplied reason is meaningless there and is
@@ -2123,10 +2118,9 @@ type correctionCheck struct {
 // ReopenPending is SERVER-OWNED and is re-stamped from the stored value on
 // every write, before any of the above. state.MatchResult binds straight from
 // the request body, so a client could otherwise plant the flag on an unrelated
-// match or — the damaging direction — clear its own outstanding justification
-// by sending `reopenPending: false`. Re-stamping is also what keeps the flag
-// alive across a pool match's running writes, which would otherwise blank it
-// through the same whole-struct overwrite.
+// match or clear it by sending `reopenPending: false`. Re-stamping is also
+// what keeps the flag alive across a pool match's running writes, which would
+// otherwise blank it through the same whole-struct overwrite.
 //
 // Returning the stored status keeps this the transaction's ONLY match lookup:
 // StoreTx loads deliberately bypass the file cache (state.LoadPoolMatchesLocked
@@ -2136,24 +2130,27 @@ type correctionCheck struct {
 // stale-after-complete guard reads the returned status instead.
 func applyCorrectionReasonUnderTx(stx state.StoreTx, compID, matchID string, r *state.MatchResult) (correctionCheck, error) {
 	// matchSnapshotOrErr fails CLOSED on a load error: the correction-reason
-	// gate below must not pass on an assumed-false ReopenPending, silently
-	// finalizing without the mandatory reason (or dropping a client-supplied
-	// CorrectionReason) — the audit hole this gate exists to close (mp-gmcg).
+	// gate below must not pass on an assumed-running status, silently
+	// overwriting a finalized result without the mandatory reason.
 	snap, _, err := matchSnapshotOrErr(stx, compID, matchID, "correction-reason")
 	if err != nil {
 		return correctionCheck{}, err
 	}
 	r.ReopenPending = snap.ReopenPending
-	if r.Status == state.MatchStatusCompleted && (snap.Status == state.MatchStatusCompleted || snap.ReopenPending) {
+	if r.Status == state.MatchStatusCompleted && snap.Status == state.MatchStatusCompleted {
 		if r.CorrectionReason == "" {
-			return correctionCheck{StoredStatus: snap.Status, StoredDecision: snap.Decision, Reject: missingCorrectionReasonError(snap)}, nil
+			return correctionCheck{StoredStatus: snap.Status, StoredDecision: snap.Decision, Reject: missingCorrectionReasonError()}, nil
 		}
-		// The justification has landed: the reopen is no longer outstanding.
+		return correctionCheck{StoredStatus: snap.Status, StoredDecision: snap.Decision}, nil
+	}
+	if r.Status == state.MatchStatusCompleted && snap.ReopenPending {
+		// Ended again after a reason-less reopen: never refused, the
+		// client's reason (if any) kept, the flag discharged.
 		r.ReopenPending = false
 		return correctionCheck{
 			StoredStatus:              snap.Status,
 			StoredDecision:            snap.Decision,
-			ClearBracketReopenPending: snap.InBracket && snap.ReopenPending,
+			ClearBracketReopenPending: snap.InBracket,
 		}, nil
 	}
 	// Non-completing write: pin the reason to the STORED one. This is not just a
@@ -2171,33 +2168,15 @@ func applyCorrectionReasonUnderTx(stx state.StoreTx, compID, matchID string, r *
 	return correctionCheck{StoredStatus: snap.Status, StoredDecision: snap.Decision}, nil
 }
 
-// missingCorrectionReasonError names the CAUSE, not just the rule. Both
-// branches reject on the same field with the same HTTP shape, but an operator
-// re-ending a match they reopened one tap ago has no idea they are performing
-// a "correction" — telling them the reopen is what asks for the reason is the
-// difference between a fixable prompt and a dead end.
-func missingCorrectionReasonError(snap matchSnapshot) *ValidationError {
-	msg := "correcting a completed match result requires a non-empty correctionReason"
-	if snap.Status != state.MatchStatusCompleted && snap.ReopenPending {
-		msg = ReopenNeedsReasonMessage
-	}
-	return &ValidationError{Field: "correctionReason", Message: msg}
+// missingCorrectionReasonError is the refusal for overwriting a completed
+// result without a correction reason.
+func missingCorrectionReasonError() *ValidationError {
+	return &ValidationError{Field: "correctionReason", Message: "correcting a completed match result requires a non-empty correctionReason"}
 }
 
-// ReopenNeedsReasonMessage is the operator-facing text for "you reopened this
-// match, so finalizing it again has to say why". It lives here as a constant
-// because a match can be finalized through EITHER endpoint — PUT /score
-// (applyCorrectionReasonUnderTx, above) or POST /decision (kiken/fusenpai,
-// handlers_decision.go) — and the two report it on DIFFERENT fields
-// (correctionReason vs decisionReason, each endpoint's own audit field). The
-// FIELD differs, the rule does not, so the wording is shared rather than
-// duplicated: an operator who meets this on one endpoint should not be told
-// something subtly different on the other.
-const ReopenNeedsReasonMessage = "this match was reopened; ending it again requires a reason"
-
 // dischargeReopenPendingUnderTx clears a match's stored ReopenPending flag
-// after a completion that carried its justification, and — when reason is
-// non-empty — records that justification in CorrectionReason. Runs inside the
+// after a completion, and, when reason is non-empty, records it in
+// CorrectionReason. Runs inside the
 // caller's WithTransaction, AFTER the engine write has succeeded: the
 // finalizing handlers commit the transaction even when the engine rejects the
 // write (engErr is surfaced afterwards), so discharging beforehand would
@@ -2631,12 +2610,11 @@ func registerScoreHandler(r *gin.RouterGroup, eng ScoringEngine, store Competiti
 						return nil
 					}
 				}
-				// Correction audit: a write that rewrites a result the operator
-				// already declared final requires a non-empty CorrectionReason for
-				// traceability — either a completed -> completed overwrite, or the
-				// re-End of a match reopened without a reason (mp-gmcg). A genuine
-				// first finalization needs no reason but must carry the STORED one
-				// forward. All of that rule lives in
+				// Correction audit: a completed -> completed overwrite requires a
+				// non-empty CorrectionReason for traceability. Ending a match
+				// reopened without a reason is never refused (operator ruling
+				// 2026-09-25). A genuine first finalization needs no reason but
+				// must carry the STORED one forward. All of that rule lives in
 				// applyCorrectionReasonUnderTx, shared with the bulk-score path. It
 				// runs inside the tx so the is-completed read is race-free (same
 				// lock), and the status it returns is reused by the stale-write
@@ -2707,8 +2685,8 @@ func registerScoreHandler(r *gin.RouterGroup, eng ScoringEngine, store Competiti
 				// settled on.
 				if engErr == nil && check.ClearBracketReopenPending {
 					// Only after the write actually landed: this branch commits
-					// even when engErr is set, so discharging the outstanding
-					// justification any earlier would clear it for a rejected write.
+					// even when engErr is set, so discharging any earlier would
+					// clear the flag for a rejected write.
 					// ClearBracketReopenPending implies InBracket, so skip the pool probe.
 					return dischargeReopenPendingUnderTx(stx, id, mid, "", true)
 				}

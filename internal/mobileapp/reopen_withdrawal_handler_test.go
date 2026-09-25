@@ -191,12 +191,11 @@ func TestReopenHandler_IndividualPoolWithdrawal(t *testing.T) {
 	assert.NotContains(t, w.Body.String(), "correctionReason")
 }
 
-// A withdrawal cleared with no reason owes one on the next completion, and a
-// decision is one: POST /decision reads ReopenPending for every format now,
-// not only kachinuki, so re-recording a withdrawal on the reopened match
-// without a reason is refused rather than leaving the flag set on a
-// completed match.
-func TestDecisionHandler_ReopenedWithdrawalOwesItsReason(t *testing.T) {
+// A withdrawal cleared with no reason is recorded again without one: a match
+// can be reopened without any reason, and nothing is gated on that (operator
+// ruling 2026-09-25). POST /decision reads ReopenPending for every format, so
+// the flag is cleared on the completed match rather than left set.
+func TestDecisionHandler_ReopenedWithdrawalNeedsNoReason(t *testing.T) {
 	r, store, _ := setupIndividualKnockoutWithdrawal(t)
 	require.NoError(t, store.UpdateBracket("rw", func(b *state.Bracket) error {
 		f := &b.Rounds[1][0]
@@ -210,14 +209,11 @@ func TestDecisionHandler_ReopenedWithdrawalOwesItsReason(t *testing.T) {
 	require.True(t, b.Rounds[0][0].ReopenPending)
 
 	w = postDecision(t, r, "rw", "m-r1-0", map[string]any{"decision": "fusenpai", "decisionBy": "aka"})
-	require.Equal(t, http.StatusBadRequest, w.Code, w.Body.String())
-	assert.Contains(t, w.Body.String(), "decisionReason")
-
-	w = postDecision(t, r, "rw", "m-r1-0", map[string]any{"decision": "fusenpai", "decisionBy": "aka", "decisionReason": "It was Yamada who did not appear"})
 	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
 	b, err = store.LoadBracket("rw")
 	require.NoError(t, err)
-	assert.False(t, b.Rounds[0][0].ReopenPending, "the reason discharged it")
+	assert.Equal(t, state.MatchStatusCompleted, b.Rounds[0][0].Status)
+	assert.False(t, b.Rounds[0][0].ReopenPending, "ending the match clears the flag")
 }
 
 // withdrawalServer wires the match and decision handlers over a fresh store

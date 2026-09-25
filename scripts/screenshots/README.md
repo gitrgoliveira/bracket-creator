@@ -3,7 +3,7 @@
 Regenerates every screenshot and video the documentation embeds, by driving the
 real application in a browser.
 
-    make docs/screenshots                        # the 33 application screenshots
+    make docs/screenshots                        # the 31 application screenshots
     make docs/videos                             # the 3 application videos
     make docs/media                              # both
 

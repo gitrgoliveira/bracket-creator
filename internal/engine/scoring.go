@@ -2907,19 +2907,14 @@ func (e *Engine) restoreForceReopened(h state.StoreTx, compID string, reopened [
 // match they corrected, which would read as someone else's history on this
 // match's trail.
 //
-// Supplying a reason at all is what keeps the reopen payable. reopenPending("")
-// treats an empty reason as "still owes an audit justification", and only the
-// TEAM editor has a prompt to collect one, so an individual match reopened with
-// no reason could not be completed at all: the write came back 400 "this match
-// was reopened; ending it again requires a reason". The system knows why this
-// one was reopened, so it says so itself instead of billing the operator for an
-// explanation of something it did to them.
+// The system knows why this one was reopened, so it records that itself rather
+// than leaving the match's trail without an explanation of something it did.
 func downstreamReopenReason(correctedID string) string {
 	return fmt.Sprintf("reopened: the result of match %s was corrected", correctedID)
 }
 
 // requeueBracketMatch normalises a bracket match to a CLEAN SCHEDULED match:
-// no verdict, no scoreline, no provenance, no audit debt. It is
+// no verdict, no scoreline, no provenance, no reopen flag. It is
 // RevertMatchToQueue's bracket branch, extracted so the body has a name and a
 // doc rather than sitting inline in a closure.
 //
@@ -3408,12 +3403,10 @@ func (e *Engine) OverrideBracketWinner(compId string, matchId string, winnerName
 					setBracketOverrideWinner(m, winnerName)
 					m.IsOverridden = true
 					m.Status = state.MatchStatusCompleted
-					// An override is itself the operator's audited, final decision,
-					// so it discharges any outstanding reopen debt: a reopened match
-					// closed out this way must not keep ReopenPending set (it bypasses
-					// applyCorrectionReasonUnderTx/dischargeReopenPendingUnderTx), or
-					// the flag lingers until some later score write is forced to
-					// invent a reason (mp-gmcg review).
+					// An override ends the match, so a reopened match closed out
+					// this way must not keep ReopenPending set: it bypasses
+					// applyCorrectionReasonUnderTx/dischargeReopenPendingUnderTx,
+					// which clear it on every other way of ending a match.
 					m.ReopenPending = false
 					if modifiedAt != 0 {
 						m.ModifiedAt = modifiedAt
@@ -3542,13 +3535,11 @@ func (e *Engine) RevertMatchToQueue(compId, matchId string) error {
 		r.FlagsB = 0
 		r.ResultSource = ""
 		r.CorrectionReason = ""
-		// ReopenPending is a match-level verdict field a kachinuki result can
-		// carry (reopenPoolMatch sets it), so requeue must clear it too: a
-		// reopened-then-requeued match that kept the flag would keep owing an
-		// audit reason for a result that no longer exists, and
-		// applyCorrectionReasonUnderTx would reject its first honest
-		// finalization demanding one (mp-gmcg review). reopenBracketMatch's doc
-		// names this exact mirror obligation on RevertMatchToQueue.
+		// ReopenPending is a match-level field a reopened result carries
+		// (reopenPoolMatch sets it), so requeue clears it too: the result the
+		// reopen discarded no longer matters to a match sent back to the
+		// queue. reopenBracketMatch's doc names this mirror obligation on
+		// RevertMatchToQueue.
 		r.ReopenPending = false
 		// Rep-bout nominations name who fought a pool/league daihyosen; they are
 		// result data for that supplementary bout, so a requeued match must not

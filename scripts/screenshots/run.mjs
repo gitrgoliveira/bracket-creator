@@ -286,7 +286,7 @@ async function main() {
 
   const results = [];
   // Record a capture as failed and remove its output from an EARLIER run. The
-  // console FAILED line scrolls past in a 33-recipe run, and contributing.md
+  // console FAILED line scrolls past in a 31-recipe run, and contributing.md
   // tells the operator to copy what is in out/ across to docs/ - so a stale
   // image left behind is one they would copy believing it fresh.
   const fail = (recipe, why) => {

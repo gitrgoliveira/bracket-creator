@@ -7271,15 +7271,6 @@ abbr.msb-lab { text-decoration: none; cursor: help; }
   margin-top: 8px;
 }
 
-/* The verdict about to be committed, shown above the reopen-reason prompt:
-   that prompt's Confirm IS the commit, and it hides the End button whose
-   armed label would otherwise carry this. */
-.reopen-reason__verdict {
-  font-size: var(--fs-sm);
-  color: var(--ink-2);
-  margin-bottom: 4px;
-}
-
 /* F5: pending-write banner, offline / transient queued terminal write */
 .pending-write-banner {
   display: flex;

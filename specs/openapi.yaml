@@ -2317,16 +2317,13 @@ paths:
                     required: [stale]
         '400':
           description: |
-            Invalid payload, or a completion that rewrites a result the
-            operator had already declared final without justifying it. The
-            latter needs a non-empty `correctionReason` in two cases:
-            - the match is already `completed` (a correction);
-            - the match carries `reopenPending`, i.e. it was reopened via
-              `POST .../reopen` without a reason. Its stored status is
-              `running`, so the write looks like a first completion, but the
-              finalized result it replaces was discarded by that reopen. A
-              successful completion records the reason and clears
-              `reopenPending`.
+            Invalid payload, or a correction of a match that is already
+            `completed` without a non-empty `correctionReason`. A match
+            reopened via `POST .../reopen` without a reason (`reopenPending`)
+            is NOT refused for one when it is completed again: a match can be
+            reopened without any reason, and nothing is gated on that. The
+            completion clears `reopenPending` and keeps a `correctionReason`
+            if one is sent.
 
             A `completed` write on a team match (not kachinuki) is also
             refused while a numbered bout (1..teamSize) has no result in
@@ -2578,17 +2575,13 @@ paths:
         `downstream_knockout_played` with `qualifierChange` (see PUT
         .../score).
 
-        Discarding a finalized result is audited, but NOT at this step:
         `reason` is optional and the request body may be omitted entirely, so
         reopening is one tap for an operator who ended a match by mistake at a
-        shiaijo. When no reason is given the match is flagged `reopenPending`
-        and the justification is collected on the next completion instead: a
-        `PUT .../score` that completes a `reopenPending` match is rejected with
-        400 unless it carries a `correctionReason`, which then clears the flag.
-        The audit record is therefore written later than the action it
-        justifies, never skipped. A `reason` supplied here is recorded
-        immediately as the match's `correctionReason` and leaves nothing
-        outstanding (`reopenPending` stays false).
+        shiaijo, and ending the match again asks for no reason either. When no
+        reason is given the match is flagged `reopenPending`, which the next
+        completion clears (keeping a reason if that write sends one). A
+        `reason` supplied here is recorded immediately as the match's
+        `correctionReason` (`reopenPending` stays false).
       security:
         - TournamentPassword: []
       parameters:
@@ -2608,7 +2601,7 @@ paths:
                     Optional. Why the recorded result is being discarded (e.g.
                     "Ended too early"). Trimmed server-side; absent, empty or
                     whitespace-only all mean "no reason given", which sets
-                    `reopenPending` instead of rejecting the request. Same
+                    `reopenPending`; nothing is refused for it. Same
                     200-character cap as `decisionReason` /
                     `correctionReason`.
                 forceDownstreamReopen:
@@ -3220,11 +3213,10 @@ paths:
         or representative bout rather than ippon scoring.
 
 
-        A decision FINALIZES the match, so it is subject to the same audit
-        rule as `/score`: when the match carries `reopenPending` (it was
-        reopened without a reason), `decisionReason` becomes REQUIRED and the
-        request is rejected with 400 without it. The supplied reason is
-        persisted to `correctionReason` and `reopenPending` is cleared.
+        A decision on a match reopened without a reason (`reopenPending`)
+        needs no reason either: it clears `reopenPending`, and a
+        `decisionReason` it carries is also kept as the match's
+        `correctionReason`.
 
 
         `decision: "hikiwake"` is accepted here ONLY as the one-tap remedy
@@ -3268,9 +3260,8 @@ paths:
                   type: string
                   maxLength: 200
                   description: >
-                    Free-text operator note. REQUIRED when the target match has
-                    `reopenPending: true`; optional otherwise. Whitespace-only
-                    does not satisfy the requirement.
+                    Free-text operator note. Optional, a reopened match
+                    included.
                 encho:
                   $ref: '#/components/schemas/EnchoMetadata'
                 modifiedAt:
@@ -3302,8 +3293,7 @@ paths:
                   - $ref: '#/components/schemas/RefusedWrite'
         '400':
           description: >
-            Invalid payload, or a missing `decisionReason` on a match that was
-            reopened without one (`reopenPending: true`).
+            Invalid payload.
           content:
             application/json:
               schema:
@@ -5199,9 +5189,10 @@ components:
           description: >
             Audit justification for rewriting a result the operator had already
             declared final. Required when the write completes a match that is
-            already `completed` (a correction) or that carries `reopenPending`;
-            otherwise it is dropped, so the field always means "this rewrote a
-            finalized result". A stored reason is carried forward across
+            already `completed` (a correction). Kept, but not required, when
+            the write completes a match that carries `reopenPending`.
+            Otherwise it is dropped, so the field always means "this rewrote
+            a finalized result". A stored reason is carried forward across
             subsequent writes.
 
             A correction does NOT exempt the write from the timestamp
@@ -5218,11 +5209,10 @@ components:
           readOnly: true
           description: >
             True when the match was reopened via `POST .../reopen` without a
-            reason and still owes its audit justification. While set, a write
-            that completes the match must carry a `correctionReason` (400
-            otherwise); a successful one records the reason and clears this
-            flag. Server-owned: a client-supplied value is ignored on every
-            write.
+            reason and has not been completed since. Nothing is refused for
+            it: the write that completes the match clears it, and keeps a
+            `correctionReason` if one is sent. Server-owned: a client-supplied
+            value is ignored on every write.
         encho:
           $ref: '#/components/schemas/EnchoMetadata'
         status:
@@ -5533,9 +5523,8 @@ components:
           readOnly: true
           description: >
             Mirrors `MatchResult.reopenPending` for elimination-stage matches:
-            the match was reopened without a reason and still owes its audit
-            justification, so the next completing write must carry a
-            `correctionReason`. Persisted in bracket.json.
+            the match was reopened without a reason and has not been
+            completed since. Persisted in bracket.json.
         subResults:
           type: array
           description: >

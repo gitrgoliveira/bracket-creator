@@ -195,13 +195,18 @@ test.describe('knockout-mixed-team', () => {
       const box2Options = await T.panelSide(page, 1).locator('.pmf__option').allInnerTexts();
       await T.dismissNameBox(page);
       await shot(page, 'f3-panel-aka-typed');
-      // V1: the thumb lands left of Aka's Save lineup.
+      // V1: the thumb lands left of Aka's Save lineup. Since bc-cpdc moved
+      // "Copy from previous match" to the top of each side, no control sits
+      // within reach there, so the row records that the hazard is gone.
       const akaSave = T.panelSide(page, 1).getByRole('button', { name: 'Save lineup' });
-      const nb = await tapNeighbour(akaSave, 'left');
+      const nb = await tapNeighbour(akaSave, 'left').catch((e) => {
+        if (!/no control within/.test(e.message)) throw e;
+        return { hazardGone: true };
+      });
       await page.waitForTimeout(800);
       const shiroState = (await T.panelSide(page, 0).innerText()).replace(/\s+/g, ' ');
       await shot(page, 'f3-panel-v1-neighbour-of-aka-save');
-      record({ step: 'EP2 save Aka', action: 'Save lineup (Aka)', variant: 'V1 tapNeighbour left', ...nb, shiroSideAfter: shiroState.slice(0, 200),
+      record({ step: 'EP2 save Aka', action: 'Save lineup (Aka)', variant: 'V1 tapNeighbour left (hazard gone since bc-cpdc)', ...nb, shiroSideAfter: shiroState.slice(0, 200),
         akaSaveTapBox: await T.tapBox(akaSave), box2OfferedWhileDaiAt1: box2Options });
       // Then the intended tap.
       await T.panelSave(page, 1);
@@ -327,7 +332,7 @@ test.describe('knockout-mixed-team', () => {
         ...(hasty || {}), membersBefore: before, membersAfter: after, alert: r.alert });
     });
 
-    await test.step('F3: finish the pool encounter with bout 3 left unfought; what the standings count', async () => {
+    await test.step('F3: finish the pool encounter with bout 3 recorded as a Tie; what the standings count', async () => {
       await openShiaijo(page, 'A');
       const ed = inlineEditor(page);
       await expect(T.boutRow(ed, 1)).toBeVisible();
@@ -339,11 +344,13 @@ test.describe('knockout-mixed-team', () => {
       }
       await T.boutIppon(ed, 1, 'shiro', 'M');
       await T.ensureTie(ed, 2);
-      // Bout 3 is not fought (no fighter on either side). Whatever the sheet
-      // shows for it is left alone.
+      // bc-tmfn (operator ruling 2026-09-24): every bout of a team match has
+      // a result; neither team fields bout 3, so it is recorded as a Tie
+      // rather than left unfought, and Finish now refuses until it is.
+      await T.ensureTie(ed, 3);
       await page.waitForTimeout(1200);
       const sheet = await T.sheetState(ed, 3);
-      await shot(page, 'f3-pool-encounter-bout3-unfought');
+      await shot(page, 'f3-pool-encounter-bout3-tied');
       await T.finishTeam(ed);
       await page.goto(`/admin/competition/${f3}/pools`);
       await page.waitForTimeout(1500);
@@ -351,9 +358,8 @@ test.describe('knockout-mixed-team', () => {
       const standings = await page.locator('tr').filter({ hasText: pairNow.shiro }).first().innerText().catch(() => '');
       const standingsAka = await page.locator('tr').filter({ hasText: pairNow.aka }).first().innerText().catch(() => '');
       const header = await page.locator('tr').filter({ hasText: /\bIT\b/ }).first().innerText().catch(() => '');
-      record({ step: 'pool standings', action: 'Finish with bout 1 won, bout 2 drawn, bout 3 unfought', variant: 'consistency', pair: pairNow, sheet,
-        header: header.replace(/\s+/g, ' '), shiroRow: standings.replace(/\s+/g, ' '), akaRow: standingsAka.replace(/\s+/g, ' '),
-        note: 'B3: IT counts the unfought bout 3 as a draw when it reads 2' });
+      record({ step: 'pool standings', action: 'Finish with bout 1 won, bouts 2 and 3 tied', variant: 'consistency', pair: pairNow, sheet,
+        header: header.replace(/\s+/g, ' '), shiroRow: standings.replace(/\s+/g, ' '), akaRow: standingsAka.replace(/\s+/g, ' ') });
     });
 
     await test.step('F3: a team kiken in the pool and the default-win chain for its remaining matches', async () => {
@@ -905,6 +911,9 @@ test.describe('knockout-mixed-team', () => {
       await test.step('level the encounter and add the daihyosen at the court', async () => {
         await T.boutIppon(ed, 2, 'aka', 'M');
         for (const n of [3, 4, 5]) await T.ensureTie(ed, n);
+        // Let the last Tie's autosave land first: added inside its 300ms
+        // debounce, the representative bout is erased by it (bc-dhas).
+        await page.waitForTimeout(800);
         await ed.getByTestId('scoring-modal-daihyosen-button').tap();
         await expect(T.boutRow(ed, 'DH')).toBeVisible();
         await expect(tvBoard(tv)).toContainText('(DH)');
@@ -1036,7 +1045,7 @@ test.describe('knockout-mixed-team', () => {
     await expect(T.panelSide(page, 1).locator('.alert--error')).toHaveText('Dai is already at Senpo.');
   });
 
-  test.fixme('bc-unfx: a bout not yet fought reads as a draw (X, "✓ Tie") on the sheet and the TV board', async ({ page, browser, baseURL }) => {
+  test('bc-unfx: a bout not yet fought reads as a draw (X, "✓ Tie") on the sheet and the TV board', async ({ page, browser, baseURL }) => {
     await T.enterAdmin(page);
     await seedF4(page, { name: 'B3 KO', court: 'J', prefix: 'J', teams: [['B3 Ume', 'Kita Dojo'], ['B3 Sakura', 'Minami Dojo']] });
     await openShiaijo(page, 'J');
@@ -1088,7 +1097,7 @@ test.describe('knockout-mixed-team', () => {
   // Operator ruling 2026-09-24: every bout of a team match is fought; there
   // are no unfinished team matches. So Finish must refuse while a numbered
   // bout has no result, and an unfought bout never reaches the standings.
-  test.fixme('bc-tmfn: a team encounter cannot be finished while a bout has no result', async ({ page }) => {
+  test('bc-tmfn: a team encounter cannot be finished while a bout has no result', async ({ page }) => {
     await T.enterAdmin(page);
     const id = await createCompetition(page, {
       name: 'B3 Pools', kind: 'team', format: 'mixed', teamSize: 3, teamMatchType: 'fixed', courts: ['M', 'N'], numberPrefix: 'Q',
@@ -1117,6 +1126,8 @@ test.describe('knockout-mixed-team', () => {
     await openShiaijo(page, 'F');
     const ed = await T.startUpNextTeam(page);
     for (const n of [1, 2, 3, 4, 5]) await T.ensureTie(ed, n);
+    // Past the last Tie's autosave, so bc-dhas does not erase the row.
+    await page.waitForTimeout(800);
     await ed.getByTestId('scoring-modal-daihyosen-button').tap();
     const dh = T.boutRow(ed, 'DH');
     await expect(dh).toBeVisible();
@@ -1124,6 +1135,21 @@ test.describe('knockout-mixed-team', () => {
     // representative from its roster."
     await expect(T.rowNameBox(dh, 'shiro')).toBeVisible();
     await expect(T.rowNameBox(dh, 'aka')).toBeVisible();
+  });
+
+  test.fixme('bc-dhas: a representative bout added right after the last Tie is erased by that Tie\'s pending autosave', async ({ page }) => {
+    await T.enterAdmin(page);
+    await seedF4(page, { name: 'B9 KO', court: 'L', prefix: 'T', teams: [['B9 Ume', 'Kita Dojo'], ['B9 Sakura', 'Minami Dojo']] });
+    await openShiaijo(page, 'L');
+    const ed = await T.startUpNextTeam(page);
+    for (const n of [1, 2, 3, 4, 5]) await T.ensureTie(ed, n);
+    // The pill already reads Synced; the operator goes straight on.
+    await ed.getByTestId('scoring-modal-daihyosen-button').tap();
+    await expect(T.boutRow(ed, 'DH')).toBeVisible();
+    await page.waitForTimeout(1500);
+    await expect(T.boutRow(ed, 'DH')).toBeVisible();
+    await page.reload();
+    await expect(T.boutRow(ed, 'DH')).toBeVisible();
   });
   test.fixme('bc-kpnl: on the court console the withdrawn team\'s remaining-matches panel vanishes before a default win can be awarded', async ({ page }) => {
     await T.enterAdmin(page);

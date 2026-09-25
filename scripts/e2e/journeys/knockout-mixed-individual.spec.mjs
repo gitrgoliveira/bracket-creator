@@ -438,58 +438,39 @@ test.describe('knockout-mixed-individual', () => {
       idle: await page.locator('.shiaijo__placeholder').isVisible().catch(() => false),
       shot: await shot(page, 'kiken-chain-after-3s') });
 
-    // The withdrawn competitor's next bout is still in this court's queue.
-    // The operator tries to start it from its row.
+    // The withdrawn competitor's next bout is still in this court's queue,
+    // now carrying the barred-match notice (bc-tmfn): Start match is gone
+    // from that row, replaced by the notice's own one-tap resolution.
     const nextOfWithdrawn = page.locator('.shiaijo-upnext__card, .shiaijo__queue .shiaijo-qrow:not(.shiaijo-qrow--complete)')
       .filter({ hasText: withdrawnName }).first();
     await expect(nextOfWithdrawn).toBeVisible();
     const pairW = await sides(nextOfWithdrawn);
-    await nextOfWithdrawn.getByRole('button', { name: 'Start match' }).tap();
-    await page.waitForTimeout(1500);
-    const startErr = (await page.locator('.shiaijo-upnext__error, .toast').allInnerTexts().catch(() => [])).join(' | ');
-    row({ step: 'kiken chain', action: "Start the withdrawn competitor's next bout (court console)", variant: 'recovery attempt',
-      pair: pairW, message: startErr.replace(/\s+/g, ' ').slice(0, 240), running: await inlineRunning(page),
-      shot: await shot(page, 'start-withdrawn-next-bout') });
+    const notice = nextOfWithdrawn.getByTestId('barred-match-notice');
+    await expect(notice).toBeVisible();
+    const noticeText = (await notice.locator('div').first().innerText()).trim();
+    const startCount = await nextOfWithdrawn.getByRole('button', { name: 'Start match' }).count();
+    row({ step: 'kiken chain', action: "The withdrawn competitor's next bout (court console)", variant: 'correct path',
+      pair: pairW, noStartButton: startCount === 0, notice: noticeText,
+      shot: await shot(page, 'withdrawn-next-bout-barred') });
+    expect(startCount).toBe(0);
+    expect(noticeText).toBe(`${withdrawnName} withdrew: record the default win.`);
 
-    // The Scores tab overlay: record that bout as the withdrawn competitor's
-    // fusenpai, which is what "Award default win to opponent" sends as well.
-    await page.goto(`/admin/competition/${comps.F1b}/scores`);
-    const scoreRowW = page.locator('.score-edit-row').filter({ hasText: pairW.shiro }).filter({ hasText: pairW.aka })
-      .filter({ has: page.getByRole('button', { name: /^Score$/ }) }).first();
-    await scoreRowW.getByRole('button', { name: /^Score$/ }).tap();
-    await expect(page.locator(EDITOR)).toBeVisible();
-    const ovSides = await editorSides(page, EDITOR);
-    const wSide = ovSides.shiro === withdrawnName ? 'shiro' : 'aka';
-    await recordDecision(page, 'fusenpai', { side: wSide, root: EDITOR });
-    await page.waitForTimeout(1500);
-    const chainErr = ((await page.locator(EDITOR).locator('div[style*="danger"]').allInnerTexts().catch(() => [])) || []).join(' | ');
-    const chainDone = !(await page.locator(EDITOR).isVisible().catch(() => false)) || !chainErr;
-    row({ step: 'kiken chain', action: "Fusenpai against the withdrawn competitor's next bout (Scores tab)", variant: 'correct path (the chain)',
-      withdrawnSide: wSide, error: chainErr, recorded: chainDone, shot: await shot(page, 'chain-fusenpai-scores-tab') });
-    // Recovery attempt: score that bout for the opponent instead (one men)
-    // and Finish, since the default loss is refused.
-    let scoredRecovery = null;
-    if (!chainDone) {
-      const opp = wSide === 'shiro' ? 'aka' : 'shiro';
-      const cancelPrompt = decisionPrompt(page, EDITOR).getByRole('button', { name: 'Cancel' });
-      if (await cancelPrompt.isVisible().catch(() => false)) await cancelPrompt.tap();
-      await ipponButton(page, opp, 'M', EDITOR).tap();
-      await finishButton(page, EDITOR).tap();
-      if (await armedFinishButton(page, EDITOR).isVisible().catch(() => false)) await armedFinishButton(page, EDITOR).tap();
-      await page.waitForTimeout(1500);
-      const msg = (await page.locator('.toast, [role="alert"], .pending-write-banner').allInnerTexts().catch(() => [])).join(' | ');
-      const rowText = (await scoreRowW.innerText().catch(() => '')).replace(/\s+/g, ' ');
-      scoredRecovery = { message: msg.replace(/\s+/g, ' ').slice(0, 240), overlayOpen: await page.locator(EDITOR).isVisible().catch(() => false),
-        rowNow: rowText.slice(0, 200) };
-      row({ step: 'kiken chain', action: 'score the bout for the opponent (M) and Finish, Scores tab', variant: 'recovery attempt',
-        ...scoredRecovery, shot: await shot(page, 'chain-scored-instead') });
-    }
-    if (await page.locator(EDITOR).isVisible().catch(() => false)) {
-      await page.locator(EDITOR).getByRole('button', { name: /Close/ }).first().tap().catch(() => {});
-      if (await page.locator('.modal[role="dialog"] .modal__foot').isVisible().catch(() => false)) {
-        await page.locator('.modal[role="dialog"] .modal__foot').getByRole('button', { name: /Discard/ }).tap();
-      }
-    }
+    // Record the default win the way the operator now does: tap the notice's
+    // own button, then double-tap it (the impatient thumb) -- it locks itself
+    // on the first response, so only one decision must land.
+    const defaultWinBtn = notice.getByTestId('barred-match-default-win');
+    row({ step: 'kiken chain', action: 'Record default win for the opponent (barred-match notice)', variant: 'size', ...(await tapSize(defaultWinBtn)) });
+    const dblDefaultWin = await doubleTap(defaultWinBtn);
+    const chainRow = completedRowFor(page, pairW);
+    await expect(chainRow).toBeVisible({ timeout: 8000 });
+    const chainResult = (await chainRow.locator('.shiaijo-qrow__result').innerText()).trim();
+    row({ step: 'kiken chain', action: 'Record default win for the opponent (barred-match notice)', variant: 'V2 doubleTap', ...dblDefaultWin,
+      result: chainResult, cardLeftQueue: !(await nextOfWithdrawn.isVisible().catch(() => false)),
+      shot: await shot(page, 'chain-default-win-recorded') });
+    // The notice records a fusensho: the winner shows two circles and the
+    // Fus. mark sits beside them, the side that was present (sideMarks).
+    expect(chainResult).toMatch(/○/);
+    expect(chainResult).toMatch(/Fus\./);
 
     // The undo, performed the way it happens: the court has already moved on
     // (Up next started), then the operator realises Aka withdrew, not Shiro.
@@ -604,16 +585,21 @@ test.describe('knockout-mixed-individual', () => {
     const markDraw = inlineEditor(page).getByTestId('scoring-modal-mark-draw');
     row({ step: 'knockout tie', action: 'Mark draw', variant: 'correct path', disabled: await markDraw.isDisabled(),
       title: await markDraw.getAttribute('title') });
-    // V1-like: the thumb taps Finish on a 1-1 knockout bout (it is enabled).
-    await finishButton(page).tap();
-    const armedTie = await armedFinishButton(page).isVisible().catch(() => false);
-    if (armedTie) await armedFinishButton(page).tap();
-    await page.waitForTimeout(1500);
-    const tieMsg = (await page.locator('.toast, .pending-write-banner, [role="alert"]').allInnerTexts().catch(() => [])).join(' | ');
+    // V1-like: the thumb reaches for Finish on a 1-1 knockout bout. The
+    // button itself now refuses the tie (bc-tmfn): "Needs a winner",
+    // disabled, rather than an enabled Finish the server would reject after
+    // the two-tap confirm.
+    const koTieBtn = inlineEditor(page).locator('button').filter({ hasText: 'Needs a winner' }).first();
+    const koTieDisabled = await koTieBtn.isDisabled();
+    const koTieTitle = await koTieBtn.getAttribute('title');
+    const koTieLabel = (await koTieBtn.innerText()).trim();
     const tieCompleted = await completedRowFor(page, semi).isVisible().catch(() => false);
     row({ step: 'knockout tie', action: 'Finish on a 1-1 knockout bout', variant: 'V1 (Finish instead of Overtime)',
-      finishEnabled: true, armed: armedTie, completed: tieCompleted, message: tieMsg.replace(/\s+/g, ' ').slice(0, 240),
+      finishEnabled: !koTieDisabled, label: koTieLabel, title: koTieTitle, completed: tieCompleted,
       stillRunning: await inlineRunning(page), shot: await shot(page, 'finish-on-knockout-tie') });
+    expect(koTieDisabled).toBe(true);
+    expect(koTieLabel).toBe('Needs a winner');
+    expect(koTieTitle).toBe('Needs a winner: fight encho, then record hantei if still tied.');
     expect(tieCompleted).toBe(false);
 
     const pill = inlineEditor(page).getByTestId('scoring-modal-encho-pill');

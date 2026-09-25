@@ -628,24 +628,40 @@ test.describe('J5 kachinuki from the court console', () => {
       if (!correctionState.autosaved) await fixBout8();
     });
 
-    await test.step('End match on a reopened encounter asks for a reason; answered hastily', async () => {
-      await endMatchButton(page).tap();
-      await expect(page.locator('.reason-prompt')).toBeVisible();
-      await shot(page, 'm1-reopen-reason-prompt');
-      // V3: the tab reloads with the reason prompt open.
+    await test.step('End match on a reopened encounter asks for no reason: armed, then reloaded, then ended', async () => {
+      // 9df3980a: ending a reopened match works like ending any match now, so
+      // this is the same two-tap arm/confirm guard every End match uses
+      // (endMatchButton), not a reason prompt.
+      const end = endMatchButton(page);
+      await end.tap();
+      await expect(end).toHaveText(/^Tap again/);
+      const armedLabel = (await end.innerText()).trim();
+      await shot(page, 'm1-reopen-end-armed');
+      // V3: the tab reloads while End match is armed but not yet confirmed.
       const reload = await interruptC(page, 'reload');
       await expect(editor(page)).toBeVisible();
-      record({ step: 'M1 reopen', action: 'reason prompt open', variant: 'V3 interrupt reload', ...reload,
-        promptStill: await page.locator('.reason-prompt').isVisible(), stillRunning: await recordBoutButton(page).isVisible(),
+      const stillRunning = await recordBoutButton(page).isVisible();
+      const endedByReload = await completedRow(page, m1).isVisible();
+      record({ step: 'M1 reopen', action: 'End match armed', variant: 'V3 interrupt reload', ...reload, armedLabel,
+        stillRunning, endedByReload,
         bout8: await boutNames(currentBout(page)), bout8Marks: await boutFilled(currentBout(page), 'shiro').allInnerTexts(),
-        screenshot: await shot(page, 'v3-reload-reason-prompt') });
-      // Whatever the reload brought back is what End would record: put the
-      // correction back if it was lost.
+        screenshot: await shot(page, 'v3-reload-end-armed') });
+      // The reload discards the client-only armed state without writing
+      // anything: the encounter is still reopened and running, and bout 8
+      // keeps the correction.
+      expect(stillRunning).toBe(true);
+      expect(endedByReload).toBe(false);
       if ((await bout8Marks()).join('') !== 'M') await fixBout8();
-      if (!(await page.locator('.reason-prompt').isVisible())) await endMatchButton(page).tap();
-      const hasty = await hastyReasonPrompt(page);
-      record({ step: 'M1 reopen', action: 'End match -> reason prompt', variant: 'V4 hasty confirm', ...hasty,
-        screenshot: await shot(page, 'v4-reason-hasty') });
+      // End for real, clumsily: two taps inside 300ms on the two-tap guard
+      // (the same clumsy variant M1's first ending used above).
+      const v2end = await doubleTap(endMatchButton(page));
+      const completed = await completedRow(page, m1).waitFor({ state: 'visible', timeout: 8000 }).then(() => true, () => false);
+      const endLabelAfter = completed ? null : (await endMatchButton(page).innerText().catch(() => null));
+      record({ step: 'M1 reopen', action: 'End match (two-tap guard)', variant: 'V2 doubleTap', ...v2end,
+        completedByDoubleTap: completed, endLabelAfter, screenshot: await shot(page, 'v2-end-match-double-tap-reopen') });
+      if (!completed) {
+        if (/^Tap again/.test(endLabelAfter || '')) await endMatchButton(page).tap(); else await endMatch(page);
+      }
       const row = completedRow(page, m1);
       await expect(row).toBeVisible();
       await expect(row.locator('.shiaijo-qrow__result')).toContainText('IV');
@@ -731,9 +747,10 @@ test.describe('J5 kachinuki from the court console', () => {
       expect(upNext).toEqual(m2);
     });
 
-    await test.step('M1 ended again (reason owed); M2 restarts with its score cleared', async () => {
-      await endMatchButton(page).tap();
-      await hastyReasonPrompt(page);
+    await test.step('M1 ended again (no reason owed, 9df3980a); M2 restarts with its score cleared', async () => {
+      // Ending a reopened match asks for no reason: the same two-tap
+      // arm/confirm guard every End match uses.
+      await endMatch(page);
       await expect(completedRow(page, m1)).toBeVisible();
       // The operator carries straight on: Start match on the Up next card.
       await expect(upNextCard(page)).toBeVisible();

@@ -138,7 +138,7 @@ export function preserveStoredDaihyosenVerdict({ armed, pickedSide, tied, existi
 // StreamingOverlay). The implementations live in lineup_resolver.jsx;
 // re-exported here so existing imports from admin_scoring_modal.jsx (which
 // re-exports them onward) continue to work.
-import { resolveMatchLineup, resolveLineupTeamId, resolveBoutSideName, resolveBoutSideMemberId, resolveSquadMember, squadMemberIdForUniqueName, squadRosterEntries, rosterWithoutPlacedElsewhere, resolveBoutSideDisplayName, buildInlineLineupWrite, POS_KEYS_5, POS_LABELS_5 } from './lineup_resolver.jsx';
+import { resolveMatchLineup, resolveLineupTeamId, resolveBoutSideName, resolveBoutSideMemberId, resolveSquadMember, squadMemberIdForUniqueName, squadRosterEntries, rosterWithoutPlacedElsewhere, resolveBoutSideDisplayName, buildInlineLineupWrite, kachinukiTaishoPairing, POS_KEYS_5, POS_LABELS_5 } from './lineup_resolver.jsx';
 import { DAIHYOSEN_POSITION } from './pool_ids.jsx';
 // The shared owner of what an operator is told about unreadable data; the
 // editor gets the repair-oriented wording, the pool surfaces get theirs.
@@ -456,7 +456,9 @@ export function kachinukiEndOutcomeLabel(outcome) {
 // but whether the pairing must produce a result, e.g. the taisho must be
 // defeated, is OPERATOR DISCRETION, never derived from the phase). Not
 // available when nothing is recorded or when the last bout already has a
-// winner.
+// winner. This is the OUTCOME half only: WHICH pairing may go to encho (only
+// taisho against taisho, bc-kten) is kachinukiEnchoPairingAllowed in the
+// editor, applied on top of it.
 export function kachinukiEnchoAvailable(outcome) {
   if (!outcome) return false;
   return outcome.kind === "draw" || (outcome.kind === "blocked" && outcome.reason === "knockout-tie");
@@ -1806,6 +1808,8 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
   // never target a bout the encounter has already advanced past.
   const applyKachinukiEncho = () => {
     if (kachinukiLastScoredIdx < 0 || kachinukiLastScoredIdx !== kachinukiCurBoutIdx) return;
+    // Read at call time, after the render declared it (below).
+    if (!kachinukiEnchoPairingAllowed) return;
     setEnchoPeriodCount(cnt => cnt + 1);
     updateSub(kachinukiLastScoredIdx, prev => ({ ...prev, encho: (prev.encho || 0) + 1, draw: false, _preFusensho: undefined }));
     setEndArmed(false);
@@ -2036,6 +2040,25 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
     const b = sideIdentity("b");
     return { aName: a.name, bName: b.name, aMemberId: a.memberId, bMemberId: b.memberId };
   };
+  // bc-kten (operator ruling 2026-09-25): only the last bout, taisho against
+  // taisho, may go to encho. kachinukiTaishoPairing is the JS twin of the
+  // server's domain.KachinukiTaishoPairing (one shared table pins both), read
+  // for the bout Encho would land on, with the same fighters the row shows.
+  // An unknown roster (a side with no lineup) never withholds Encho: a tied
+  // knockout bout already has End match held back, so hiding Encho on a guess
+  // would leave the court no way to finish. Declared after playerNamesForBout,
+  // which it calls; kachinukiEnchoShown is what the button and hint read.
+  const kachinukiEnchoPairingAllowed = (() => {
+    if (!kachinukiEnchoOffered) return false;
+    const { aName, bName, aMemberId, bMemberId } = playerNamesForBout(kachinukiCurBoutIdx);
+    const { taisho, known } = kachinukiTaishoPairing({
+      teamSize, lineupA, lineupB,
+      a: { name: aName, memberId: aMemberId },
+      b: { name: bName, memberId: bMemberId },
+    });
+    return !known || taisho;
+  })();
+  const kachinukiEnchoShown = kachinukiEnchoOffered && kachinukiEnchoPairingAllowed;
 
   // bc-pnum: the squad member label beside a bout row's fighter name (the
   // SAME "T10.1" identifier the round-scoped Lineups page shows --
@@ -3665,7 +3688,9 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
               legitimate: whether the pairing must produce a result (e.g.
               the taisho must be defeated) is operator discretion, never
               derived from the phase. The Encho affordance therefore
-              renders for every tied last bout (kachinukiEnchoAvailable).
+              renders for a tied last bout (kachinukiEnchoAvailable) when
+              the pairing is taisho against taisho, or the roster is
+              unknown (kachinukiEnchoShown, bc-kten).
               This replaces the koTieBlocked gating for kachinuki: the
               correction-mode Finish buttons below never see a running
               kachinuki match, so there are no competing hints. */}
@@ -3677,9 +3702,9 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
                 // The Encho clause is dropped once the encounter has advanced
                 // past the tied bout (kachinukiEnchoOffered false) so the hint
                 // never advertises a hidden button (mp-gmcg review).
-                <span>Tied bout. End match records a drawn encounter. Record bout retires both and brings the next pair up.{kachinukiEnchoOffered ? " Encho keeps the same pair fighting when this pairing must produce a result." : ""}</span>
+                <span>Tied bout. End match records a drawn encounter. Record bout retires both and brings the next pair up.{kachinukiEnchoShown ? " Encho keeps the same pair fighting when this pairing must produce a result." : ""}</span>
               ) : (
-                <span>No draws in a knockout. Record bout brings the next fighter up.{kachinukiEnchoOffered ? " Encho keeps the same pair on this bout." : ""} Continue until there is a point.</span>
+                <span>No draws in a knockout. Record bout brings the next fighter up.{kachinukiEnchoShown ? " Encho keeps the same pair on this bout." : ""} Continue until there is a point.</span>
               )}
             </div>
           )}
@@ -3840,7 +3865,7 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
                     (kachinukiEnchoOffered): once Record has advanced the
                     encounter, overtime on the past bout is meaningless and the
                     button would silently edit a read-only row (mp-gmcg review). */}
-                {kachinukiEnchoOffered && (
+                {kachinukiEnchoShown && (
                   <button
                     type="button"
                     className="btn"

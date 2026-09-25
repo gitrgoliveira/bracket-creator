@@ -190,6 +190,60 @@ func (t TeamLineup) OrderedMembers(teamSize int) []LineupSlot {
 	return out
 }
 
+// Taisho returns the lineup's taisho: its LAST occupied slot in canonical
+// position order (OrderedMembers' last element), the fighter the team fields
+// last. With a vacancy at the back the last fielded fighter is the taisho.
+// False when no position is occupied.
+func (t TeamLineup) Taisho(teamSize int) (LineupSlot, bool) {
+	members := t.OrderedMembers(teamSize)
+	if len(members) == 0 {
+		return LineupSlot{}, false
+	}
+	return members[len(members)-1], true
+}
+
+// BoutFighter is one side of a kachinuki bout as KachinukiTaishoPairing reads
+// it: the fighter's display name and squad member id (either may be empty).
+type BoutFighter struct {
+	Name     string
+	MemberID string
+}
+
+// holds reports whether this slot is fighter f: by member id when both carry
+// one, else by display name (the order domain.SubBoutAttribution uses). An
+// empty fighter is nobody.
+func (s LineupSlot) holds(f BoutFighter) bool {
+	if f.MemberID != "" && s.MemberID != "" {
+		return f.MemberID == s.MemberID
+	}
+	return f.Name != "" && f.Name == s.Name
+}
+
+// KachinukiTaishoPairing is the ONE rule for whether a kachinuki bout may go
+// to encho (operator ruling 2026-09-25, bc-kten): only the last bout, taisho
+// against taisho, may. Any other tie retires per the kachinuki mode in force.
+// taisho reports whether a and b are each their team's taisho (Taisho, from
+// the lineup in force for that side).
+//
+// known is false when either side has no lineup (nil) or an empty one: the
+// app then cannot tell who the taisho is, and callers must NOT refuse on it.
+// A tied knockout bout already has End match held back, so refusing encho on
+// a guess would leave the court with no way to finish.
+//
+// JS twin: kachinukiTaishoPairing (web-mobile/js/lineup_resolver.jsx). Both
+// are pinned by internal/domain/testdata/kachinuki_taisho.json.
+func KachinukiTaishoPairing(teamSize int, lineupA, lineupB *TeamLineup, a, b BoutFighter) (taisho, known bool) {
+	if lineupA == nil || lineupB == nil {
+		return false, false
+	}
+	ta, okA := lineupA.Taisho(teamSize)
+	tb, okB := lineupB.Taisho(teamSize)
+	if !okA || !okB {
+		return false, false
+	}
+	return ta.holds(a) && tb.holds(b), true
+}
+
 // PositionForBout returns the lineup Position that fights numbered bout
 // `bout` (1-based) of a team match: the bout-th entry of the canonical order
 // OrderedMembers walks. False when bout is outside 1..teamSize.

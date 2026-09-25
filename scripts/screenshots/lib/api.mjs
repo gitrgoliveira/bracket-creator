@@ -115,12 +115,18 @@ export function client(base, headers = {}) {
     // chip: the chip resolves through the member id, so a name-only lineup
     // shows no number. Lineups must land BEFORE any bout is recorded; a bout
     // freezes the names it was fought under.
-    async lineup(id, tid, members) {
+    //
+    // teamSize picks the position keys the server accepts: the five FIK names
+    // for a 5-person team, else "1".."N" (domain canonicalPositionOrder).
+    async lineup(id, tid, members, teamSize = POSITIONS.length) {
+      const keys = teamSize === POSITIONS.length
+        ? POSITIONS
+        : Array.from({ length: teamSize }, (_, i) => String(i + 1));
       const positions = {};
       const memberIds = {};
-      members.slice(0, POSITIONS.length).forEach((m, i) => {
-        positions[POSITIONS[i]] = m.name;
-        memberIds[POSITIONS[i]] = m.id;
+      members.slice(0, keys.length).forEach((m, i) => {
+        positions[keys[i]] = m.name;
+        memberIds[keys[i]] = m.id;
       });
       return call('PUT', `/api/competitions/${id}/teams/${tid}/lineups/0`, { positions, memberIds });
     },

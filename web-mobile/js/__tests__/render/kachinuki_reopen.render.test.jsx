@@ -659,6 +659,40 @@ describe('kachinuki Encho is offered only on the current tied bout', () => {
     const hint = screen.queryByTestId('kachinuki-end-hint');
     if (hint) expect(hint.textContent).not.toContain('Encho keeps');
   });
+
+  // bc-kten (operator ruling 2026-09-25): only the last bout, taisho against
+  // taisho, may go to encho. With both lineups in force the editor knows who
+  // each taisho is (kachinukiTaishoPairing, the twin of the server's rule).
+  describe('only taisho against taisho (bc-kten)', () => {
+    const lineupFor = (p) => ({ positions: { 1: `${p}1`, 2: `${p}2`, 3: `${p}3` } });
+    beforeEach(() => {
+      window.API.fetchMatchLineup = vi.fn().mockImplementation(async (_c, teamId) => (
+        teamId === 'team-A' ? lineupFor('A') : teamId === 'team-B' ? lineupFor('B') : null
+      ));
+    });
+    const drawn = (pos) => ({ position: pos, sideA: `A${pos}`, sideB: `B${pos}`, ipponsA: [], ipponsB: [], decision: 'hikiwake' });
+
+    it('withholds Encho from a tie between the first fighters', async () => {
+      await renderEditor({
+        match: completedKachinukiMatch({ status: 'running', winner: null, subResults: [tiedBout(1)] }),
+      });
+      await waitFor(() => expect(window.API.fetchMatchLineup).toHaveBeenCalledTimes(2));
+      await waitFor(() => expect(screen.queryByTestId('kachinuki-encho-button')).toBeNull());
+      const hint = screen.queryByTestId('kachinuki-end-hint');
+      if (hint) expect(hint.textContent).not.toContain('Encho keeps');
+    });
+
+    it('offers Encho when the two taisho are tied', async () => {
+      await renderEditor({
+        match: completedKachinukiMatch({
+          status: 'running', winner: null,
+          subResults: [drawn(1), drawn(2), tiedBout(3, 'A3', 'B3')],
+        }),
+      });
+      await waitFor(() => expect(window.API.fetchMatchLineup).toHaveBeenCalledTimes(2));
+      expect(screen.getByTestId('kachinuki-encho-button')).toBeTruthy();
+    });
+  });
 });
 
 // mp-gmcg review: a per-bout kachinuki encho also bumped the MATCH-level

@@ -344,6 +344,11 @@ func anyNumberedBoutHasEncho(subResults []state.SubMatchResult) bool {
 // not here. Both the single-score and bulk-score paths must route through
 // this helper rather than re-deriving the rule.
 //
+// WHICH bout may go to encho is a separate axis from the phase: only the last
+// bout, taisho against taisho (operator ruling 2026-09-25, bc-kten). That is
+// judged after this shape gate, by engine.KachinukiEnchoRefusal, which both
+// score paths call exactly when this returns true.
+//
 // FAIL CLOSED: any load failure keeps the STRICT daihyosen-only gate. The
 // error is logged rather than swallowed (errcheck) and rather than returned:
 // a load failure must not surface to the operator as a 400 blaming the
@@ -732,6 +737,14 @@ func RegisterMatchHandlers(r *gin.RouterGroup, eng *engine.Engine, store Competi
 			if err := validateBulkScoreLengths(&results[i].MatchResult, allowNumberedEncho); err != nil {
 				errs = append(errs, scoreError{MatchID: results[i].ID, Error: err.Error()})
 				continue
+			}
+			// bc-kten: in kachinuki only taisho against taisho may go to
+			// encho (same gate as the single-score path).
+			if allowNumberedEncho && anyNumberedBoutHasEncho(results[i].SubResults) {
+				if err := eng.KachinukiEnchoRefusal(id, results[i].ID, results[i].SubResults); err != nil {
+					errs = append(errs, scoreError{MatchID: results[i].ID, Error: err.Error()})
+					continue
+				}
 			}
 
 			// mp-62vr: rep-player names belong only on a pool daihyosen/tiebreaker
@@ -2433,6 +2446,15 @@ func registerScoreHandler(r *gin.RouterGroup, eng ScoringEngine, store Competiti
 			}
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 			return
+		}
+		// bc-kten: in kachinuki only taisho against taisho may go to encho.
+		// allowNumberedEncho is true exactly when this is a kachinuki payload
+		// carrying a numbered-bout encho, so no other write pays the reads.
+		if allowNumberedEncho {
+			if err := eng.KachinukiEnchoRefusal(id, mid, req.SubResults); err != nil {
+				c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+				return
+			}
 		}
 		// bc-tmfn: a team match cannot be finished while a numbered bout has
 		// no result (every bout is fought). This handler is the door every

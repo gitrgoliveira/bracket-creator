@@ -168,6 +168,10 @@ type ScoringEngine interface {
 	// caller echoes it without re-reading the match. Mirrors
 	// engine.Engine.MaybeAdvanceKachinuki. FR-044, T135.
 	MaybeAdvanceKachinuki(compID, matchID string) (bool, []state.SubMatchResult, error)
+	// KachinukiEnchoRefusal refuses a NEW encho on a kachinuki bout that is
+	// not taisho against taisho (bc-kten). Mirrors
+	// engine.Engine.KachinukiEnchoRefusal.
+	KachinukiEnchoRefusal(compID, matchID string, incoming []state.SubMatchResult) error
 }
 
 // CompetitorStatusStore is the consumer-boundary view of state.Store

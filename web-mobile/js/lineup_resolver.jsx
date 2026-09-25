@@ -407,6 +407,54 @@ export function pickMemberIdFromLineup(lineup, index, teamSize) {
   return "";
 }
 
+
+// lineupTaisho / kachinukiTaishoPairing (bc-kten, operator ruling 2026-09-25):
+// in a kachinuki encounter only the very last bout, taisho against taisho,
+// may go to encho. JS twins of domain.TeamLineup.Taisho and
+// domain.KachinukiTaishoPairing; both are pinned by the shared table
+// internal/domain/testdata/kachinuki_taisho.json. The position walk mirrors
+// Go's canonicalPositionOrder EXACTLY (the five FIK names for a 5-person team,
+// else "1".."N"), so a 5-person lineup saved under numeric keys reads as
+// empty here as it does to the server: unlike pickFromLineup, no numeric
+// fallback, or the editor would offer what the server refuses.
+function taishoPositionKeys(teamSize) {
+  if (teamSize === 5) return POS_KEYS_5;
+  return Array.from({ length: Math.max(0, teamSize || 0) }, (_, i) => String(i + 1));
+}
+
+// The lineup's taisho: its LAST occupied position ({name, memberId}), a
+// position being occupied when it carries a name OR a member id. null when
+// there is no lineup or nothing is placed.
+export function lineupTaisho(lineup, teamSize) {
+  if (!lineup) return null;
+  const positions = lineup.positions || {};
+  const ids = lineup.memberIds || {};
+  let last = null;
+  for (const key of taishoPositionKeys(teamSize)) {
+    const name = positions[key] || "";
+    const memberId = ids[key] || "";
+    if (!name && !memberId) continue;
+    last = { name, memberId };
+  }
+  return last;
+}
+
+function taishoHolds(slot, fighter) {
+  if (fighter.memberId && slot.memberId) return fighter.memberId === slot.memberId;
+  return !!fighter.name && fighter.name === slot.name;
+}
+
+// Whether a kachinuki bout between fighters a (Aka) and b (Shiro) is taisho
+// against taisho. known is false when either side has no lineup or an empty
+// one: the app then cannot tell who the taisho is and must not withhold
+// Encho, since a tied knockout bout already has End match held back.
+export function kachinukiTaishoPairing({ teamSize, lineupA, lineupB, a, b }) {
+  const ta = lineupTaisho(lineupA, teamSize);
+  const tb = lineupTaisho(lineupB, teamSize);
+  if (!ta || !tb) return { taisho: false, known: false };
+  return { taisho: taishoHolds(ta, a || {}) && taishoHolds(tb, b || {}), known: true };
+}
+
 // resolveBoutSideMemberId: which squad MEMBER ID identifies one side of a
 // sub-bout row (bc-pnum: extend the squad member label -- squadMemberLabel,
 // squad_member_label.jsx -- to the team scoring surfaces). MIRRORS

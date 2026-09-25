@@ -19,7 +19,8 @@
 //     domain.DecisionKachinukiExhaustion.
 //   - A tied final bout is a drawn encounter in pools/league; a knockout
 //     tie is resolved by encho on that same bout (daihyosen does not
-//     exist in kachinuki).
+//     exist in kachinuki). Only the last bout, taisho against taisho, may
+//     go to encho (bc-kten, KachinukiEnchoRefusal).
 //
 // AdvanceKachinuki encapsulates the pure decision logic. Callers
 // (typically a score handler, see handlers_match.go) pass a snapshot

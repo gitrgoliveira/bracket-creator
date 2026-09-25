@@ -26,7 +26,7 @@ Tap a competition to see its schedule, standings, and bracket. Aka (red) and Shi
 </figure>
 
 <figure class="bc-fig" markdown="span">
-  ![A knockout's Bracket tab on a phone. The first-round bouts and two quarterfinals are scored, each winner ticked, the next quarterfinal is marked NOW, and two winners already face each other in a semifinal. The later rounds continue off the right-hand edge.](../../screenshots/viewer-bracket.png){ .bc-phone }
+  ![A knockout's Bracket tab on a phone. The two first-round bouts and two quarterfinals are scored, each winner ticked, the next quarterfinal is marked NOW, and two winners already face each other in a semifinal. The later rounds continue off the right-hand edge.](../../screenshots/viewer-bracket.png){ .bc-phone }
   <figcaption>The Bracket tab: results fill in the tree as matches are completed. Scroll sideways for the later rounds.</figcaption>
 </figure>
 

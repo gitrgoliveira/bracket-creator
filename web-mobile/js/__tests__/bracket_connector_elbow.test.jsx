@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { elbowXFor, connectorPath } from '../bracket.jsx';
+import { elbowXFor, connectorPath, connectorTargetY } from '../bracket.jsx';
 
 // bc-pnum: in an uneven effective-round bracket a feeder can skip a column
 // (a bye auto-advance elides the hidden column between it and its parent).
@@ -64,5 +64,57 @@ describe('connector elbow: routes through the gap before the PARENT column', () 
     expect(elbowX).toBe(258);
     expect(elbowX).toBe(230 + 28);
     expect(elbowX).toBe(286 - 28);
+  });
+});
+
+// bc-tmfn (operator ruling, option A): a competitor who skips a round gets no
+// placeholder card, so a card can be fed by ONE match, its other side a
+// competitor who comes straight in. That connector ends on the row the match
+// fills, at the row's centre: feeders[0] fills sideA, the Aka row
+// (.bc-side--a); feeders[1] fills sideB, the Shiro row (.bc-side--b). A card
+// fed by TWO matches keeps the single join at its anchor, the seam between the
+// rows. Pure: the row centre comes from a callback, called only when needed.
+// That BracketConnectorsMeta actually routes through this helper is pinned on
+// a real mount in render/bracket_structural_bye.render.test.jsx.
+describe('connectorTargetY: where a feeder connector ends on its parent card', () => {
+  // A card whose seam (anchor) is at 150, Aka row centre 135, Shiro row centre 165.
+  const cardAnchorY = 150;
+  const ROW = { a: 135, b: 165 };
+  const recorder = () => {
+    const calls = [];
+    const rowMidY = (side) => { calls.push(side); return ROW[side]; };
+    return { calls, rowMidY };
+  };
+
+  it("one feeder in sideB (Shiro): ends at the Shiro row's centre", () => {
+    const { calls, rowMidY } = recorder();
+    expect(connectorTargetY({ feeders: ['', 'm-r1-3'], fid: 'm-r1-3', cardAnchorY, rowMidY })).toBe(165);
+    expect(calls).toEqual(['b']);
+  });
+
+  it("one feeder in sideA (Aka): ends at the Aka row's centre", () => {
+    const { calls, rowMidY } = recorder();
+    expect(connectorTargetY({ feeders: ['m-r1-3', ''], fid: 'm-r1-3', cardAnchorY, rowMidY })).toBe(135);
+    expect(calls).toEqual(['a']);
+  });
+
+  it('two feeders: both connectors join at the card anchor, and no row is measured', () => {
+    const { calls, rowMidY } = recorder();
+    const feeders = ['m-r1-0', 'm-r2-1'];
+    expect(connectorTargetY({ feeders, fid: 'm-r1-0', cardAnchorY, rowMidY })).toBe(150);
+    expect(connectorTargetY({ feeders, fid: 'm-r2-1', cardAnchorY, rowMidY })).toBe(150);
+    expect(calls).toEqual([]);
+  });
+
+  it('falls back to the anchor when the fed row cannot be measured', () => {
+    expect(connectorTargetY({ feeders: ['', 'm-r1-3'], fid: 'm-r1-3', cardAnchorY, rowMidY: () => null })).toBe(150);
+  });
+
+  it('falls back to the anchor for a feeder that is not the lone one on the card', () => {
+    // Defensive: the effect only asks about ids in the card's own feeders.
+    const { calls, rowMidY } = recorder();
+    expect(connectorTargetY({ feeders: ['', 'm-r1-3'], fid: 'm-other', cardAnchorY, rowMidY })).toBe(150);
+    expect(connectorTargetY({ feeders: undefined, fid: 'm-r1-3', cardAnchorY, rowMidY })).toBe(150);
+    expect(calls).toEqual([]);
   });
 });

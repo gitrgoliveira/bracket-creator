@@ -157,8 +157,9 @@ Everything else about the prefix works the same as the pooled-format rule: you c
 
 Byes are decided **inside each block**, never across the draw as a whole.
 
-- A block with an **even** number of competitors gets **no bye at all**, whatever seeds you have set. There is nothing to award.
+- A block that fills its slots exactly (two, four, eight or sixteen competitors) gets **no bye at all**, whatever seeds you have set. There is nothing to award.
 - A block with an **odd** number of competitors has **exactly one** bye to award: a place that skips the first round and meets the winner of a first-round bout.
+- In any block that does not fill its slots, some competitors start a round later than the others. The Bracket page shows each of them first in the match they fight, as the European Championship sheets print them.
 
 Where a block has a bye, it goes to a pool winner, in this order:
 
@@ -170,12 +171,12 @@ The second criterion is fatigue compensation. In a round-robin pool of four, a c
 
 A block does not have to hold a pool winner. From two qualifiers per pool upwards there are more qualifiers than there are pools, so a block can be filled entirely by qualifiers that crossed in from other shiai-jo. Its bye then goes to the best of those instead: runners-up first, ranked by their own pool's place in the bye order, then third qualifiers. The same thing happens where a bye lands in a part of a block that holds no pool winner, and it can also happen because keeping a pool's own qualifiers apart outranks this order.
 
-Every match is placed in the round its distance from the final gives it, as the European Championship sheets print them. So in a block of five only two competitors fight in the first round. The bye goes to one of the other three, who then meets that winner, and the remaining two meet each other in the same round, both one step from the block's final. The bracket marks all three BYE in the first column, because none of them fights there; only the one place is awarded by the order above. Nothing else is allocated and there is nothing for you to choose.
+Every match is placed in the round its distance from the final gives it, as the European Championship sheets print them. So in a block of five only two competitors fight in the first round. The bye goes to one of the other three, who then meets that winner, and the remaining two meet each other in the same round, both one step from the block's final. None of the three appears in the first column; only the one place is awarded by the order above. A block of six sits in eight slots the same way: four competitors fight in the first round and two start in the second. Nothing else is allocated and there is nothing for you to choose.
 
-![The Bracket page for a knockout of five competitors on one shiai-jo. The Quarterfinals column holds the one first-round bout, M1, and three competitors marked BYE. In the Semifinals, M2 is between two of those three and M3 puts the third against the winner of M1. The Final is M4.](../../screenshots/knockout-bracket-five.png)
+![The Bracket page for a knockout of five competitors on one shiai-jo. The Quarterfinals column holds only the one first-round bout, M1. In the Semifinals, M2 is between two competitors who start there, and M3 puts the third against the winner of M1, whose line joins the row the winner will fill. The Final is M4.](../../screenshots/knockout-bracket-five.png)
 
 !!! note "Empty slots are not the same as byes"
-    A bracket is drawn on a power of two, so a block of five competitors sits in eight slots. One of those competitors is awarded the bye. The remaining empty slots pair off with each other and are never printed; the two competitors beside them simply start a round later, which is why the bracket marks them BYE too.
+    A bracket is drawn on a power of two, so a block of five competitors sits in eight slots. One of those competitors is awarded the bye. The remaining empty slots pair off with each other and are never printed; the two competitors beside them simply start a round later.
 
 ## Seeding
 

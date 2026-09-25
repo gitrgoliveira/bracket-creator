@@ -569,9 +569,10 @@ const MatchCard = React.memo(({ match, variant, showDojo, onClick, highlighted, 
   // has (the card builds its per-side scores from ippon arrays and never calls
   // matchScoreStr, so removing this leaves such a card completely unlabelled).
   // A server-fed structural bye in a bracket carrying mp-7f2w metadata is not
-  // drawn as a MatchCard at all (a legacy bracket has no metadata, routes to
-  // BracketTreeLegacy, and does draw every rounds[] entry as a card): it renders
-  // as the bc-bye-slot placeholder in BracketTreeMeta below.
+  // drawn at all (a legacy bracket has no metadata, routes to
+  // BracketTreeLegacy, and does draw every rounds[] entry as a card): the
+  // competitor who skips the round appears only in the card of the match they
+  // first fight (BracketTreeMeta below, bc-tmfn).
   const isBye = match.score?.type === "bye";
 
   const ipponsA = match.ipponsA || [];
@@ -752,31 +753,17 @@ function buildDisplayModel(rounds) {
     }));
     const columns = [];
     for (let dr = maxDR; dr >= 1; dr--) columns.push(real.filter((m) => m.displayRound === dr));
-    // Structural-bye slots: for non-leaf matches whose feeder[i] is "" (meaning
-    // one side had no upstream match and the player seeded directly), insert a
-    // visible placeholder card in the upstream column so the tree layout
-    // communicates the skip spatially: mirroring the Excel Tree sheet output.
-    // Leaf-round matches (displayRound === maxDR) always have "" feeders for real
-    // players; those don't need placeholders.
+    // Feeder graph: each real match's upstream MATCHES, in [sideA, sideB]
+    // order with the empty entries dropped. A "" feeder is a side with no
+    // upstream match: a competitor who skips one or more rounds (a structural
+    // bye) and first fights in this card. That competitor appears ONLY here,
+    // as the EKC reference sheets and the Excel tree page print them: no
+    // placeholder card in the column before and no connector into that side
+    // (operator ruling, bc-tmfn). The raw [sideA, sideB] `feeders` stays on
+    // each column entry (the spread above), because the connector needs to
+    // know WHICH side a lone feeder fills (connectorTargetY).
     const feedersById = {};
-    real.forEach((m) => {
-      const hasUpstream = m.displayRound < maxDR;
-      const resolvedFeeders = [];
-      (m.feeders || []).forEach((feederId, idx) => {
-        if (feederId === "" && hasUpstream) {
-          const playerObj = idx === 0 ? m.sideA : m.sideB;
-          const playerName = typeof playerObj === "object" ? (playerObj?.name || "") : (playerObj || "");
-          const slot = { id: `bye-${m.id}-${idx}`, isByeSlot: true, displayRound: m.displayRound + 1, playerName };
-          feedersById[slot.id] = [];
-          const colIdx = maxDR - slot.displayRound;
-          if (colIdx >= 0 && colIdx < columns.length) columns[colIdx].push(slot);
-          resolvedFeeders.push(slot.id);
-        } else if (feederId !== "") {
-          resolvedFeeders.push(feederId);
-        }
-      });
-      feedersById[m.id] = resolvedFeeders;
-    });
+    real.forEach((m) => { feedersById[m.id] = (m.feeders || []).filter(Boolean); });
     // Match numbers: the "M1", "M2" stamped on the cards. A referee reads the
     // printed Excel sheet and the operator's screen side by side, so "M12" here
     // and "Match 12" there must name the same bout.
@@ -834,19 +821,27 @@ function buildDisplayModel(rounds) {
 }
 
 // computeMetaTops lays out an (uneven) effective-round bracket. It walks the
-// feeder graph from the final: matches with no feeders ("seeded" entrants: real
-// players or bye recipients) are stacked top-to-bottom in depth-first encounter
-// order, and every parent is centred so its OWN connector anchor sits at the mean
-// of its feeders' anchors. Returns a map of matchId → absolute top (px).
+// feeder graph from the final: matches with no feeders are stacked
+// top-to-bottom in depth-first encounter order, and every parent is centred so
+// its OWN connector anchor sits at the mean of its feeders' anchors. Returns a
+// map of matchId → absolute top (px).
+//
+// "No feeders" covers every card whose two competitors both come straight in,
+// wherever its column is: a first-round bout, and equally a later-round card
+// whose two competitors both skipped the earlier rounds (in a 5-entrant draw,
+// the semifinal between two direct entrants). Such a card is stacked like a
+// first-round bout, in its own column, at the running cursor. A card fed by
+// ONE match (the other side is a direct entrant) has a single anchor to
+// average, so it sits level with its feeder, seam on seam; the connector then
+// turns at the elbow to reach the fed row (connectorTargetY).
 //
 // `heights` is matchId → measured card height. `offsets` is matchId → anchor
 // distance from the card top (the y the SVG connectors join at: the sides-block
-// midline for match cards, the geometric centre for bye-slot cards). Centring on
-// the mean of feeder ANCHORS rather than geometric centres keeps the elbow on each
-// card's seam even when a tall, header-offset match card feeds a child alongside a
-// shorter bye-slot card: otherwise the asymmetric offset shifts the merge ~6px
-// off the seam (delta != 0). `offsets` defaults to h/2 for any id it omits, so a
-// caller that passes only heights gets the prior geometric-centre-of-mass layout.
+// midline, below the geometric centre by the meta header). Centring on the mean
+// of feeder ANCHORS rather than geometric centres puts each parent's seam at
+// the mean of its feeders' seams whatever their heights. `offsets` defaults to
+// h/2 for any id it omits, so a caller that passes only heights gets the
+// geometric-centre layout.
 function computeMetaTops(columns, feedersById, heights, offsets = {}) {
   const GAP = 16;
   const DEFAULT_H = 110;
@@ -921,16 +916,40 @@ function connectorPath({ fRight, fMidY, mLeft, mMidY, elbowX }) {
   return `M ${fRight} ${fMidY} L ${elbowX} ${fMidY} L ${elbowX} ${mMidY} L ${mLeft} ${mMidY}`;
 }
 
+// connectorTargetY: the y (tree-relative px) at which the connector from
+// feeder `fid` ends on its parent card (operator ruling, bc-tmfn, option A).
+//
+// `feeders` is the parent's RAW [sideA, sideB] feeder pair from the engine,
+// where "" marks a side with no upstream match (a competitor who skipped the
+// earlier rounds and first fights in this card).
+//  - Fed by TWO matches: the connector joins at the card's anchor, the seam
+//    between its two rows (`cardAnchorY`), where the two feeders merge.
+//  - Fed by exactly ONE match: the connector ends on the row that match fills,
+//    at that row's vertical centre: index 0 is sideA, the Aka row
+//    (.bc-side--a); index 1 is sideB, the Shiro row (.bc-side--b). Joining at
+//    the seam there would read as feeding both competitors.
+//
+// `rowMidY(side)` returns the centre of the "a" or "b" row, or null when it
+// cannot be measured (falls back to the anchor). It is called ONLY in the
+// one-feeder case, so the effect measures a row element only when this rule
+// needs it. Pure apart from that callback, so it is unit-testable without a
+// layout engine, like elbowXFor/connectorPath above.
+function connectorTargetY({ feeders, fid, cardAnchorY, rowMidY }) {
+  const fed = [];
+  (feeders || []).forEach((f, i) => { if (f) fed.push(i); });
+  if (fed.length !== 1 || fed[0] > 1 || feeders[fed[0]] !== fid) return cardAnchorY;
+  const y = rowMidY(fed[0] === 0 ? "a" : "b");
+  return y == null ? cardAnchorY : y;
+}
+
 // columnRightEdge: the right edge (tree-relative px) of the first mounted
 // card in `col`, or null if col is empty/unmounted. Every card in a column
 // shares the same right edge: once positioned, each .bc-match-wrap gets
 // `left: 0, right: 0` from wrapStyle in BracketTreeMeta, and before that
 // first measure pass it already spans the same width because its parent
-// .bc-round-matches is a flex column with the default stretch cross-axis —
-// so any one member's rect gives the whole column's edge. In practice this
-// reads a .bc-match: buildDisplayModel pushes each column's real matches
-// before appending its bye-slot placeholders, so a real match's ref is
-// always found first.
+// .bc-round-matches is a flex column with the default stretch cross-axis,
+// so any one member's rect gives the whole column's edge. Every column entry
+// is a real match's .bc-match (buildDisplayModel draws no placeholder cards).
 function columnRightEdge(col, refMap, treeRect) {
   if (!col) return null;
   for (const m of col) {
@@ -943,9 +962,10 @@ function columnRightEdge(col, refMap, treeRect) {
 // BracketConnectorsMeta draws feeder→parent elbows for the effective-round
 // layout (mp-7f2w). Unlike the legacy BracketConnectors it pairs by the explicit
 // feeder graph, not binary (2i, 2i+1) positions, so uneven columns connect
-// correctly. Bye-slot placeholder cards (isByeSlot) appear in the feeder graph
-// and in refMap, so they DO receive connector lines from their parent match:
-// the elbow terminates at the bye card, mirroring the Excel Tree sheet.
+// correctly. Only real matches are in the feeder graph, so a side whose
+// competitor skipped the earlier rounds receives no connector at all; where
+// such a side leaves a card fed by ONE match, that connector ends on the row
+// the match fills rather than at the card's seam (connectorTargetY).
 //
 // Every elbow routes through the gap immediately before the PARENT's column
 // (elbowXFor), measured from the DOM rather than the CSS `.bc-tree` gap
@@ -975,7 +995,16 @@ function BracketConnectorsMeta({ columns, feedersById, treeRef, refMap, version,
           if (!mEl) return;
           const mR = mEl.getBoundingClientRect();
           const mLeft = mR.left - treeRect.left;
-          const mMidY = anchorY(mEl, mR, treeRect.top);
+          const cardAnchorY = anchorY(mEl, mR, treeRect.top);
+          // The fed row's centre, measured only when connectorTargetY asks
+          // (a card fed by ONE match). Both PlayerLine shapes carry
+          // bc-side--a / bc-side--b, the empty (TBD) row included.
+          const rowMidY = (side) => {
+            const row = mEl.querySelector(`.bc-side--${side}`);
+            if (!row) return null;
+            const r = row.getBoundingClientRect();
+            return (r.top + r.bottom) / 2 - treeRect.top;
+          };
           if (gapBefore == null) {
             const prevRight = columnRightEdge(columns[ci - 1], refMap, treeRect);
             if (prevRight != null) gapBefore = mLeft - prevRight;
@@ -994,6 +1023,7 @@ function BracketConnectorsMeta({ columns, feedersById, treeRef, refMap, version,
             const fR = fEl.getBoundingClientRect();
             const fRight = fR.right - treeRect.left;
             const fMidY = anchorY(fEl, fR, treeRect.top);
+            const mMidY = connectorTargetY({ feeders: m.feeders, fid, cardAnchorY, rowMidY });
             out.push({ key: `${fid}->${m.id}`, d: connectorPath({ fRight, fMidY, mLeft, mMidY, elbowX }) });
           });
         });
@@ -1018,9 +1048,10 @@ function BracketConnectorsMeta({ columns, feedersById, treeRef, refMap, version,
   );
 }
 
-// BracketTreeMeta renders the effective-round columns (mp-7f2w). Real match cards
-// plus structural-bye placeholder cards (isByeSlot=true) are included; phantoms
-// (hidden) are dropped. All cards are absolutely positioned at the
+// BracketTreeMeta renders the effective-round columns (mp-7f2w). Only real match
+// cards are drawn: phantoms (hidden) are dropped, and a competitor who skips a
+// round appears only in the card of the match they first fight, with no
+// placeholder before it (bc-tmfn). All cards are absolutely positioned at the
 // feeder-graph-derived top so parents sit centred on their feeders
 // (see computeMetaTops).
 function BracketTreeMeta({ columns, feedersById, matchNumById, slotLabel, variant = 1, showDojo = true, onMatchClick, highlightedMatchId, autoScrollMatchId, scrollContainerRef, highlightPlayers, isEngi }) {
@@ -1054,10 +1085,11 @@ function BracketTreeMeta({ columns, feedersById, matchNumById, slotLabel, varian
           const rect = el.getBoundingClientRect();
           heights[m.id] = rect.height;
           // Anchor offset from the card top: the y the SVG connectors join at.
-          // Mirrors anchorY(): sides-block midline for match cards, geometric
-          // centre for bye-slot cards (no .bc-side). Passing this to computeMetaTops
-          // centres parents on feeder ANCHORS, not geometric centres, so the elbow
-          // lands on the seam even for a match-card + bye-slot feeder pair.
+          // Mirrors anchorY(): the sides-block midline, falling back to the
+          // geometric centre for a card without two .bc-side rows. Passing this
+          // to computeMetaTops centres parents on feeder ANCHORS, not geometric
+          // centres, so a two-feeder parent's seam lands on the mean of its
+          // feeders' seams whatever their card heights.
           const sides = el.querySelectorAll(".bc-side");
           if (sides.length >= 2) {
             const f = sides[0].getBoundingClientRect();
@@ -1129,41 +1161,20 @@ function BracketTreeMeta({ columns, feedersById, matchNumById, slotLabel, varian
               const wrapStyle = top != null
                 ? { "--mi": mi, position: "absolute", top: `${top}px`, left: 0, right: 0 }
                 : { "--mi": mi };
-              const inner = m.isByeSlot ? (
-                <div
-                  className="bc-bye-slot"
-                  aria-label={`${m.playerName || "Bye"}: advances without an opponent`}
-                  ref={(el) => { if (el) refMap.current[m.id] = el; }}
-                >
-                  {/* The BYE tag is unconditional: a named slot without it is
-                      just a grey box with a name in it, which reads as an
-                      unexplained extra card rather than "this entrant advanced
-                      unopposed". Name + tag share one flex row (see
-                      .bc-bye-slot in styles.css): the name takes the free space
-                      and ellipsises, the tag never shrinks, so a long name
-                      truncates instead of pushing the marker out of the
-                      fixed-width column. Rendered once in both cases: the
-                      nameless slot is the tag alone, exactly as before. */}
-                  {m.playerName ? <span className="bc-bye-slot__name">{m.playerName}</span> : null}
-                  <span className="bc-bye-slot__tag">BYE</span>
-                </div>
-              ) : (
-                <MatchCard
-                  match={m}
-                  variant={variant}
-                  showDojo={showDojo}
-                  highlighted={m.id === highlightedMatchId}
-                  matchRef={(el) => { if (el) refMap.current[m.id] = el; }}
-                  onClick={() => onMatchClick && onMatchClick(m, ci, mi, columns.length)}
-                  highlightPlayers={highlightPlayers}
-                  matchNum={matchNumById[m.id]}
-                  isEngi={isEngi}
-                  slotLabel={slotLabel}
-                />
-              );
               return (
                 <div className="bc-match-wrap" key={m.id} style={wrapStyle}>
-                  {inner}
+                  <MatchCard
+                    match={m}
+                    variant={variant}
+                    showDojo={showDojo}
+                    highlighted={m.id === highlightedMatchId}
+                    matchRef={(el) => { if (el) refMap.current[m.id] = el; }}
+                    onClick={() => onMatchClick && onMatchClick(m, ci, mi, columns.length)}
+                    highlightPlayers={highlightPlayers}
+                    matchNum={matchNumById[m.id]}
+                    isEngi={isEngi}
+                    slotLabel={slotLabel}
+                  />
                 </div>
               );
             })}
@@ -1433,4 +1444,4 @@ window.sideMarks = sideMarks;
 window.placeMarks = placeMarks;
 window.teamMatchMarks = teamMatchMarks;
 
-export { formatIpponsScore, enchoLabel, boutMiddle, defaultWinMaru, matchMiddleMark, sideMarks, placeMarks, teamMatchMarks, winnerSideLR, sideLabel, roundLabel, bracketRoundLabel, teamIVScore, teamIVPWScore, engiFlagScore, matchScoreStr, matchStateCell, buildDisplayModel, computeMetaTops, bronzeUnderFinalStyle, PlayerLine, slotDisplayName, makeSlotLabeller, bracketSlotLabeller, MatchCard, BracketTree, elbowXFor, connectorPath };
+export { formatIpponsScore, enchoLabel, boutMiddle, defaultWinMaru, matchMiddleMark, sideMarks, placeMarks, teamMatchMarks, winnerSideLR, sideLabel, roundLabel, bracketRoundLabel, teamIVScore, teamIVPWScore, engiFlagScore, matchScoreStr, matchStateCell, buildDisplayModel, computeMetaTops, bronzeUnderFinalStyle, PlayerLine, slotDisplayName, makeSlotLabeller, bracketSlotLabeller, MatchCard, BracketTree, elbowXFor, connectorPath, connectorTargetY };

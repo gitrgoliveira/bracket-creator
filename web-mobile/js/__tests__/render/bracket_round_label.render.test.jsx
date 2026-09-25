@@ -61,8 +61,8 @@ const fivePlayerRounds = () => [
 ];
 
 // Every rendered column: its header text and the ids of the match cards drawn
-// under it, straight out of the DOM. Bye slots carry no data-match-id (they are
-// a .bc-bye-slot div, not a MatchCard button), so only real matches appear.
+// under it, straight out of the DOM. Only a MatchCard carries data-match-id, and
+// the tree draws nothing else, so only real matches appear.
 const domColumns = (container) => Array.from(container.querySelectorAll('.bc-round')).map((col) => {
   const header = col.querySelector('.bc-round-label');
   return {

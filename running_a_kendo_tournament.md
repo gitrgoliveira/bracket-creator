@@ -163,7 +163,7 @@ Per the FIK *Regulations of Kendo Shiai and Shinpan* (Shinpan Management, p.15, 
 
 ### Sanbon-Shobu (Three-Point Match)
 
-The standard format used in most competitions. The first competitor to score **two points (ippon)** wins. If time expires and one competitor has scored one point while the opponent has none, the competitor with the point wins. A score of 0–0 or 1–1 at the end of regulation time is a **hikiwake** (draw) in pool matches.
+The standard format used in most competitions. The first competitor to score **two points (ippon)** wins. If time expires and one competitor has scored one point while the opponent has none, the competitor with the point wins. A score of 0–0 or 1–1 at the end of regulation time is a **hikiwake** (draw) in pool matches, and in the individual bouts of a team match in any phase.
 
 ### Ippon-Shobu (One-Point Match)
 
@@ -175,6 +175,8 @@ The first competitor to score one point wins. Used for:
 ### Encho (Overtime)
 
 When a knockout match ends in a draw, an **encho** (E) period is played under ippon-shobu rules, the first to score wins. Encho duration is typically 3 minutes but varies by tournament. Some tournaments allow multiple encho periods before moving to hantei.
+
+Encho is not limited to the knockout. An individual pool match can also go to encho when the tournament's rules call for a result there. A team pool encounter is not extended: a tie there is a draw, and teams still level on pool standings play a supplementary daihyosen (see [How a Team Pool Is Decided](#how-a-team-pool-is-decided)).
 
 ### Chusen (Drawing Lots)
 
@@ -202,7 +204,7 @@ Each match follows a fixed sequence of etiquette and referee commands. Understan
    - **Wakare**, called during close-quarters engagement (tsubazeriai) to separate competitors. The timer does **not** stop.
    - **Gogi**, the chief referee may call "Yame" then "Gogi" to convene a conference among the three referees.
 7. **Point awarded**, when at least two referees agree on a valid strike, the chief referee announces the target: "Men ari!", "Kote ari!", "Do ari!", or "Tsuki ari!". Competitors return to starting lines.
-8. **Match end**, when a competitor scores 2 points, the chief referee announces "Shobu ari!" (victory decided). If time expires, the referee announces "Jikan" and the side with more ippon wins, or the match is a draw (in pools) or proceeds to encho (in knockout).
+8. **Match end**, when a competitor scores 2 points, the chief referee announces "Shobu ari!" (victory decided). If time expires, the referee announces "Jikan" and the side with more ippon wins, or the match is a draw (in pools, unless the tournament's rules call for encho) or proceeds to encho (in knockout).
 9. **Closing Sonkyo**, competitors return to the starting line, assume sonkyo, sheathe the shinai, and stand.
 10. **Retreat and bow**, step backward, exchange a standing bow, and exit without turning their back to the opponent.
 
@@ -214,7 +216,7 @@ FIK Articles 30–33 distinguish between **voluntary withdrawal** (kiken) and **
 
 ### Voluntary Withdrawal (Kiken, FIK Article 31)
 
-- The withdrawing competitor loses. The opponent is awarded **2–0** (a full win by default, per Article 32).
+- The withdrawing competitor loses. The opponent is awarded **two points** (Article 32), and any point the withdrawing competitor had already scored **stays valid**: a competitor who withdraws after scoring one point loses 1–2, not 0–2.
 - If withdrawal occurs during encho, the opponent receives **1 point** instead.
 - A competitor who voluntarily defaults is **prohibited from participating in following shiai** (Article 31).
 - If both competitors withdraw, neither receives a win or points.
@@ -224,24 +226,24 @@ FIK Articles 30–33 distinguish between **voluntary withdrawal** (kiken) and **
 - If the opponent is deemed responsible for the injury (intentionally or not), the **opponent loses** and cannot participate in following shiai (Article 30-2, 30-4). The opponent's points and status are invalidated (Article 33).
 - If the cause cannot be ascertained, the **injured competitor loses**.
 - Unlike kiken, an injured competitor **may be reinstated** in later shiai if a doctor and the shinpan-in permit it (Article 30-3).
-- The opponent is awarded 2–0 (or 1–0 in encho), same as kiken.
+- The winner is awarded two points (one in encho) and the loser's points already scored stay valid, same as kiken (Article 32). The exception is an opponent who loses for causing the injury, whose points are invalidated (Article 33).
 
 ### Team Matches
 
-Withdrawal rules for team members differ from pre-tournament absences (fusensho). Under FIK rules for **5-person teams**:
+Withdrawal rules for team members differ from pre-tournament absences (fusensho). Which positions may be left vacant is **not a hard rule**: it depends on each tournament's rules, and the app enforces neither the positions nor a team size. FIK's default for **5-person teams** is:
 
 - If **1 member** withdraws, the vacancy must be the Jiho (2nd) position.
 - If **2 members** withdraw, the vacancies must be the Jiho (2nd) and Fukusho (4th) positions.
 - The Senpo (1st) and Taisho (captain, 5th) positions **cannot** be forfeited.
 - If **3 or more members** withdraw, the team cannot participate.
 
-For non-standard team sizes (3, 7, 10+), the tournament rules will specify which positions may be left vacant. The general principle is that the first and last positions cannot be forfeited.
+For non-standard team sizes (3, 7, 10+), the tournament rules will specify which positions may be left vacant. A common principle is that the first and last positions cannot be forfeited, but a tournament may set its own.
 
 Team order and players can change between each team match.
 
 ### Recording
 
-On the scoreboard, a kiken is recorded the same way as fusensho, the opponent receives the default score (2–0 for regulation, 1–0 for encho). The court manager notes the withdrawal for the tournament manager.
+On the scoreboard, a kiken is recorded the same way as fusensho: the winner receives the default points, two for regulation or one for encho. Unlike a fusensho, where the absent side never fought, any point the withdrawing competitor had already scored stays on the sheet (Article 32). The court manager notes the withdrawal for the tournament manager.
 
 ## Competitor Colours (Aka and Shiro)
 
@@ -281,7 +283,7 @@ Both the column layout and the mark order come from the FIK *Regulations of Kend
 - **Hansoku triangle position**, the outstanding-hansoku **▲** is placed **between the competitor's name and that side's ippon slots**. It is never mixed into the ippon slots; it hugs the name so the slots stay free to fill outward-to-inward. In Table 2's Taisho row each ▲ sits at the name-side edge of that side's own score column, White's against the White name and Red's against the Red name, so it is outside the ippon slots but still inboard of the name.
 - **vs**, centre column, normally blank. **X** marks a hikiwake (draw).
 - **Fouls**, hansoku are tracked per side. A single outstanding hansoku displays as the **red upward triangle (▲)** next to the offending competitor's name (FIK Table 1, p.15, defines the ▲ mark; its placement is shown in Table 2's Taisho row: position as above, between the name and that side's slots). On the second hansoku the **▲ is deleted** and 1 ippon is awarded to the opponent (recorded as **H** in one of the opponent's slots, filling outside-to-inside like any ippon), so the outstanding count is always 0 or 1, a competitor never shows two triangles. In sosai (simultaneous mutual hansoku) the ▲ marks are left in place. The exported Excel scoresheet writes each side's score as one cell, so there the ▲ rides the **outer edge** of the offender's cell, the edge nearest their name: `▲ M` in the White (left) cell, `M ▲` in the Red (right) cell. That keeps the same name-side placement the on-screen scoreboard uses, within a layout that has no separate slot column.
-- **Draw**, an **X** in the "vs" column, or both sides finishing with equal total ippon, marks a hikiwake. Draws only occur in pool matches.
+- **Draw**, an **X** in the "vs" column, or both sides finishing with equal total ippon, marks a hikiwake. Draws occur in pool, league and Swiss matches, and in the individual bouts of a team match in any phase. A knockout match itself cannot end drawn.
 - **Hantei**, if a knockout match is decided by judges' decision, an **Ht** mark is placed on the winner's side to show the referees **decided the match**. A hantei is only taken from a tied scoreline, and since sanbon-shobu ends at 2 that means 0-0 or 1-1, so the winner always has a free slot. On the app's on-screen scoreboard **Ht** fills that slot in the same outside-to-inside order a point would, and at 1-1 the board reads `[K][ ] vs [Ht][M]`; it never sits on the centre line, which carries shared marks only. The exported Excel scoresheet writes each side's score as one cell, so there the mark trails the letters in the winner's cell (`M Ht`) rather than occupying a slot. **Ht** is recorded in the score row like an ippon but never counted as one (and is distinct from **H**, the hansoku ippon): it records the match outcome, not a scored point.
 
 ### Team Match Scoreboard
@@ -330,13 +332,13 @@ Each individual elimination match is a self-contained block. There are no draws:
 | Row | Name (left) | | | vs | | | Name (right) |
 |---|---|---|---|---|---|---|---|
 | **Header** | Round N, Match M |||||||
-| **Colours** | Red | | | vs | | | White |
-| **Scoring** | Pool A-1st | | | | | | Pool B-1st |
+| **Colours** | White | | | vs | | | Red |
+| **Scoring** | Pool B-1st | | | | | | Pool A-1st |
 | **1st** | | | | | | 1. | *(winner name)* |
 | **2nd** | | | | | | 2. | *(runner-up name)* |
 
 - **Header row**, merged across all columns, shows round and match number.
-- **Colour labels**, a Red/White header row identifies which side is which.
+- **Colour labels**, a White/Red header row identifies which side is which. White is on the left and Red on the right, as on every scoreboard (see [Fixed Layout](#fixed-layout)), so the upper-half entrant (Red, here Pool A-1st) is written on the right.
 - **Source labels** indicate where each competitor comes from: "Pool A-1st", "Pool B-2nd", or "M 15" (winner of match 15) for later rounds.
 - **Result rows** (1st/2nd), the operator writes the winner and runner-up names here. The winner cell feeds into subsequent rounds via formulas.
 
@@ -345,12 +347,12 @@ For **team elimination matches**, the block expands with sub-bout rows and a sum
 | Row | Name (left) | | | vs | | | Name (right) |
 |---|---|---|---|---|---|---|---|
 | **Header** | Round N, Match M |||||||
-| **Colours** | Red | | | vs | | | White |
-| **Summary** | Pool A-1st | IV | PW | | PW | IV | Pool B-1st |
+| **Colours** | White | | | vs | | | Red |
+| **Summary** | Pool B-1st | IV | PW | | PW | IV | Pool A-1st |
 | Bout 1 | 1 | | | | | | 1 |
 | Bout 2 | 2 | | | | | | 2 |
 | ... | | | | | | | |
-| **Labels** | Pool A-1st | IV | PW | | PW | IV | Pool B-1st |
+| **Labels** | Pool B-1st | IV | PW | | PW | IV | Pool A-1st |
 | **Totals** | Victories / Points | *##* | *##* | | *##* | *##* | Victories / Points |
 | **1st** | | | | | | 1. | *(winner name)* |
 | **2nd** | | | | | | 2. | *(runner-up name)* |
@@ -361,7 +363,7 @@ For **team elimination matches**, the block expands with sub-bout rows and a sum
 ## How a Match Is Decided
 
 1. **Within regulation time**: first to 2 points wins (sanbon-shobu), or the competitor leading at time-up wins.
-2. **Draw in pools**: if the score is level (0–0 or 1–1) at time-up, it is a hikiwake.
+2. **Draw in pools**: if the score is level (0–0 or 1–1) at time-up, it is a hikiwake, unless the tournament's rules send an individual pool match to encho.
 3. **Draw in knockout**: encho is normally played, and **hantei** decides if it is still tied. Encho is not a precondition, a tied match may be taken straight to hantei.
 
 ## Pool Match Order
@@ -451,11 +453,12 @@ Seeding separates the strongest competitors so they do not meet in early rounds.
 
 ### Pool Draw
 
-Pools are built using a greedy algorithm with **dojo-conflict avoidance**: each unseeded player is assigned to the first pool (in rotating order) where their dojo is not already represented. If no conflict-free pool has space, the algorithm falls back to any pool with room, accepting the dojo conflict. This is deterministic given the input order, not random.
+The pool draw follows the **EKC and WKC** draw formats, with **dojo avoidance**. The user documentation owns the details: [The pool draw](docs/user-guide/organisers/pool-draw.md) for who lands in which pool, and [The knockout draw](docs/user-guide/organisers/knockout-draw.md) for which pool feeds which knockout slot. In outline:
 
-### Seeded Pool Placement
-
-Seeded players are distributed across pools so that no pool contains two top seeds. When multiple courts are in use, seeds are further spread across courts, the top seed in each court's bracket lands on opposite ends, ensuring they can only meet in the court's final round.
+- **Seeds first.** Seeded competitors are placed first, in rank order: in different pools and, as far as the shape allows, on different shiaijo and at opposite ends of each shiaijo's set of pools.
+- **Everyone else, one at a time.** The rest are placed in the order the list arrives. Any shuffle happens before the draw, and the draw itself is deterministic. Each competitor goes where their dojo is least represented along the knockout tree that the pools feed, so dojo-mates are kept out of the same pool and meet as late as possible in the knockout.
+- **The dojo is the only thing kept apart.** When a dojo has more members than there are pools, some must share, and the draw spreads them as evenly as it can.
+- **A final exchange pass** swaps competitors between pools only where that keeps dojos apart longer. It never changes pool sizes and never moves a seeded competitor.
 
 ### In Elimination Brackets
 

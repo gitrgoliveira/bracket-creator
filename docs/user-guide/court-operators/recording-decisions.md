@@ -28,11 +28,11 @@ When the default win (kiken, fusenpai, or fusensho) decides a regular team match
 
 ## Hikiwake
 
-A hikiwake is a draw. It applies in pool, league, and Swiss matches (not in the knockout phase) and contributes to the standings separately from wins and losses. To record one, tap **Mark draw** between the two sides in the score editor; in a team encounter, tap **Tie (hikiwake)** on the bout's row.
+A hikiwake is a draw. It applies in pool, league, and Swiss matches, and in the individual bouts of a team encounter in any phase. A knockout match itself cannot end in a draw. A hikiwake contributes to the standings separately from wins and losses. To record one, tap **Mark draw** between the two sides in the score editor; in a team encounter, tap **Tie (hikiwake)** on the bout's row.
 
 ## Encho (overtime)
 
-Encho is the extra period played when a knockout match is level at the end of regulation. It follows ippon-shobu rules: the first competitor to score wins.
+Encho is the extra period played when a match is level at the end of regulation and must still produce a winner. That is usually a knockout match, but an individual pool match can also go to encho when the tournament's rules call for it. A team pool encounter is not extended: a tie there is a draw, and teams still level on the pool standings play a daihyosen instead. Encho follows ippon-shobu rules: the first competitor to score wins.
 
 An individual knockout match cannot be finished level. While the score is tied, the **Finish** button reads **Needs a winner** instead: fight encho, then record a hantei if the competitors are still level after it.
 

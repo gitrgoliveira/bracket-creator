@@ -58,7 +58,7 @@ type EstimateMatchCountsInput struct {
 // Returned counts reflect court-time-consuming matches only. Auto-resolved
 // bracket byes (player-vs-bye leaf matches marked Completed at generation time)
 // are excluded because assignBracketMatchSlots does not advance the court
-// cursor for them (scheduler_slots.go: 286-291). Pool-side byes are not
+// cursor for them (its Status == Completed branch in scheduler_slots.go). Pool-side byes are not
 // applicable (pools have no bye mechanism). Negative PlayerCount or
 // zero-round Swiss are clamped to zero matches rather than erroring,
 // because the estimator may be called speculatively before validation is

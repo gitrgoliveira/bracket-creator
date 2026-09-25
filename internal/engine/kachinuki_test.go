@@ -43,6 +43,20 @@ func setupKachinukiComp(t *testing.T, id string, teamSize int, opts ...func(*sta
 	return eng, store, comp
 }
 
+// reopenErr is ReopenMatch for a test that asserts only the error;
+// the restored status is pinned by kachinuki_reopen_withdrawal_test.go.
+func reopenErr(eng *Engine, compID, matchID, reason string) error {
+	_, err := eng.ReopenMatch(compID, matchID, reason)
+	return err
+}
+
+// requeueReopenErr is RequeueBlockerAndReopen for a test that
+// asserts only the error.
+func requeueReopenErr(eng *Engine, targetComp, targetMatch, blockerComp, blockerMatch, reason string) error {
+	_, err := eng.RequeueBlockerAndReopen(targetComp, targetMatch, blockerComp, blockerMatch, reason)
+	return err
+}
+
 // TestKachinukiWinnerAdvances covers the FR-044 happy path: when one
 // side's player wins a bout, that player stays on and faces the head
 // of the opposing side's remaining queue.
@@ -1752,7 +1766,7 @@ func TestReopenKachinukiMatch(t *testing.T) {
 		eng, store, _ := setupTestEngine(t)
 		require.NoError(t, store.SaveCompetition(&state.Competition{ID: "fixed", TeamSize: 3}))
 		require.NoError(t, store.SavePoolMatches("fixed", []state.MatchResult{completedPool()}))
-		err := eng.ReopenKachinukiMatch("fixed", "P1-0", "operator error")
+		err := reopenErr(eng, "fixed", "P1-0", "operator error")
 		var verr *ValidationError
 		require.ErrorAs(t, err, &verr, "non-kachinuki reopen must be a validation error (400)")
 	})
@@ -1760,7 +1774,7 @@ func TestReopenKachinukiMatch(t *testing.T) {
 	t.Run("pool match reopened: running, outcome cleared, bout log kept", func(t *testing.T) {
 		eng, store, _ := setupKachinukiComp(t, "reopen-pool", 3)
 		require.NoError(t, store.SavePoolMatches("reopen-pool", []state.MatchResult{completedPool()}))
-		require.NoError(t, eng.ReopenKachinukiMatch("reopen-pool", "P1-0", "  wrong winner recorded  "))
+		require.NoError(t, reopenErr(eng, "reopen-pool", "P1-0", "  wrong winner recorded  "))
 
 		matches, err := store.LoadPoolMatches("reopen-pool")
 		require.NoError(t, err)
@@ -1780,13 +1794,13 @@ func TestReopenKachinukiMatch(t *testing.T) {
 		m.Status = state.MatchStatusRunning
 		m.Winner = ""
 		require.NoError(t, store.SavePoolMatches("reopen-running", []state.MatchResult{m}))
-		err := eng.ReopenKachinukiMatch("reopen-running", "P1-0", "operator error")
+		err := reopenErr(eng, "reopen-running", "P1-0", "operator error")
 		assert.ErrorIs(t, err, ErrReopenNotCompleted)
 	})
 
 	t.Run("match not found", func(t *testing.T) {
 		eng, _, _ := setupKachinukiComp(t, "reopen-missing", 3)
-		err := eng.ReopenKachinukiMatch("reopen-missing", "nope", "operator error")
+		err := reopenErr(eng, "reopen-missing", "nope", "operator error")
 		var nfErr *NotFoundError
 		assert.ErrorAs(t, err, &nfErr)
 	})
@@ -1813,7 +1827,7 @@ func TestReopenKachinukiMatch(t *testing.T) {
 				ID: "B0", SideA: "WhiteTeam", SideB: "", Status: state.MatchStatusScheduled,
 			},
 		}))
-		require.NoError(t, eng.ReopenKachinukiMatch("reopen-semi", "SF0", "taisho bout must be re-fought"))
+		require.NoError(t, reopenErr(eng, "reopen-semi", "SF0", "taisho bout must be re-fought"))
 
 		bracket, err := store.LoadBracket("reopen-semi")
 		require.NoError(t, err)
@@ -1847,8 +1861,10 @@ func TestReopenKachinukiMatch(t *testing.T) {
 				},
 			},
 		}))
-		err := eng.ReopenKachinukiMatch("reopen-blocked", "SF0", "operator error")
-		assert.ErrorIs(t, err, ErrReopenDownstreamFought)
+		err := reopenErr(eng, "reopen-blocked", "SF0", "operator error")
+		// bc-cse: F0 is RUNNING, so this is DownstreamKnockoutRunningError
+		// now, not the bare ErrReopenDownstreamFought sentinel.
+		assert.ErrorIs(t, err, ErrDownstreamKnockoutRunning)
 
 		bracket, lerr := store.LoadBracket("reopen-blocked")
 		require.NoError(t, lerr)
@@ -1870,7 +1886,7 @@ func TestReopenKachinukiMatch(t *testing.T) {
 				},
 			},
 		}))
-		require.NoError(t, eng.ReopenKachinukiMatch("reopen-bronze", "B0", "bronze scored on the wrong sheet"))
+		require.NoError(t, reopenErr(eng, "reopen-bronze", "B0", "bronze scored on the wrong sheet"))
 
 		bracket, err := store.LoadBracket("reopen-bronze")
 		require.NoError(t, err)
@@ -1928,7 +1944,7 @@ func TestReopenKachinukiMatch_ReopenPending(t *testing.T) {
 				compID := "reopen-pending-pool"
 				eng, store, _ := setupKachinukiComp(t, compID, 3)
 				require.NoError(t, store.SavePoolMatches(compID, []state.MatchResult{completedPool()}))
-				require.NoError(t, eng.ReopenKachinukiMatch(compID, "P1-0", tc.reason))
+				require.NoError(t, reopenErr(eng, compID, "P1-0", tc.reason))
 
 				matches, err := store.LoadPoolMatches(compID)
 				require.NoError(t, err)
@@ -1940,7 +1956,7 @@ func TestReopenKachinukiMatch_ReopenPending(t *testing.T) {
 				compID := "reopen-pending-bracket"
 				eng, store, _ := setupKachinukiComp(t, compID, 3)
 				require.NoError(t, store.SaveBracket(compID, completedBracket()))
-				require.NoError(t, eng.ReopenKachinukiMatch(compID, "F0", tc.reason))
+				require.NoError(t, reopenErr(eng, compID, "F0", tc.reason))
 
 				bracket, err := store.LoadBracket(compID)
 				require.NoError(t, err)
@@ -1951,7 +1967,7 @@ func TestReopenKachinukiMatch_ReopenPending(t *testing.T) {
 				compID := "reopen-pending-bronze"
 				eng, store, _ := setupKachinukiComp(t, compID, 3)
 				require.NoError(t, store.SaveBracket(compID, completedBracket()))
-				require.NoError(t, eng.ReopenKachinukiMatch(compID, "B0", tc.reason))
+				require.NoError(t, reopenErr(eng, compID, "B0", tc.reason))
 
 				bracket, err := store.LoadBracket(compID)
 				require.NoError(t, err)
@@ -1977,7 +1993,7 @@ func TestRevertMatchToQueue_ClearsReopenPending(t *testing.T) {
 			ID: "P1-0", SideA: "RedTeam", SideB: "WhiteTeam", Status: state.MatchStatusCompleted,
 			Winner: "RedTeam", Decision: "kachinuki-exhaustion",
 		}}))
-		require.NoError(t, eng.ReopenKachinukiMatch(compID, "P1-0", "")) // reason-less → pending
+		require.NoError(t, reopenErr(eng, compID, "P1-0", "")) // reason-less → pending
 		before, err := store.LoadPoolMatches(compID)
 		require.NoError(t, err)
 		require.True(t, before[0].ReopenPending, "precondition: reason-less reopen sets the flag")
@@ -1998,7 +2014,7 @@ func TestRevertMatchToQueue_ClearsReopenPending(t *testing.T) {
 				Winner: "RedTeam", Decision: "kachinuki-exhaustion",
 			}}},
 		}))
-		require.NoError(t, eng.ReopenKachinukiMatch(compID, "F0", "")) // reason-less → pending
+		require.NoError(t, reopenErr(eng, compID, "F0", "")) // reason-less → pending
 		before, err := store.LoadBracket(compID)
 		require.NoError(t, err)
 		require.True(t, before.Rounds[0][0].ReopenPending, "precondition")
@@ -2024,7 +2040,7 @@ func TestOverrideBracketWinner_ClearsReopenPending(t *testing.T) {
 			Winner: "RedTeam", Decision: "kachinuki-exhaustion",
 		}}},
 	}))
-	require.NoError(t, eng.ReopenKachinukiMatch(compID, "F0", "")) // reason-less → pending
+	require.NoError(t, reopenErr(eng, compID, "F0", "")) // reason-less → pending
 	before, err := store.LoadBracket(compID)
 	require.NoError(t, err)
 	require.True(t, before.Rounds[0][0].ReopenPending, "precondition")
@@ -2082,7 +2098,7 @@ func TestReopenKachinukiMatch_DiscardsVerdictKeepsBoutLog(t *testing.T) {
 			ResultSource: "admin", RepPlayerA: "R-2", RepPlayerB: "W-2",
 			SubResults: boutLog,
 		}}))
-		require.NoError(t, eng.ReopenKachinukiMatch(compID, "P1-0", "ended too early"))
+		require.NoError(t, reopenErr(eng, compID, "P1-0", "ended too early"))
 
 		matches, err := store.LoadPoolMatches(compID)
 		require.NoError(t, err)
@@ -2131,7 +2147,7 @@ func TestReopenKachinukiMatch_DiscardsVerdictKeepsBoutLog(t *testing.T) {
 				}},
 			},
 		}))
-		require.NoError(t, eng.ReopenKachinukiMatch(compID, "F0", "ended too early"))
+		require.NoError(t, reopenErr(eng, compID, "F0", "ended too early"))
 
 		bracket, err := store.LoadBracket(compID)
 		require.NoError(t, err)
@@ -2177,7 +2193,7 @@ func TestReopenKachinukiMatchCourtBusy(t *testing.T) {
 			runningOnCourt("P1-1", "A"),
 		}))
 
-		err := eng.ReopenKachinukiMatch("reopen-court-busy", "P1-0", "need more bouts")
+		err := reopenErr(eng, "reopen-court-busy", "P1-0", "need more bouts")
 		require.Error(t, err)
 		var busy *CourtBusyError
 		require.ErrorAs(t, err, &busy)
@@ -2204,7 +2220,7 @@ func TestReopenKachinukiMatchCourtBusy(t *testing.T) {
 			runningOnCourt("P1-1", "B"),
 		}))
 
-		require.NoError(t, eng.ReopenKachinukiMatch("reopen-court-free", "P1-0", "need more bouts"))
+		require.NoError(t, reopenErr(eng, "reopen-court-free", "P1-0", "need more bouts"))
 		matches, lerr := store.LoadPoolMatches("reopen-court-free")
 		require.NoError(t, lerr)
 		assert.Equal(t, state.MatchStatusRunning, matches[0].Status)
@@ -2227,7 +2243,7 @@ func TestReopenKachinukiMatchCourtBusy(t *testing.T) {
 			runningOnCourt("P1-0", "A"),
 		}))
 
-		err := eng.ReopenKachinukiMatch("reopen-bracket-pool-busy", "SF0", "need more bouts")
+		err := reopenErr(eng, "reopen-bracket-pool-busy", "SF0", "need more bouts")
 		var busy *CourtBusyError
 		require.ErrorAs(t, err, &busy)
 		assert.Equal(t, "P1-0", busy.MatchID, "a pool match holding the court blocks a bracket reopen")
@@ -2245,7 +2261,7 @@ func TestReopenKachinukiMatchCourtBusy(t *testing.T) {
 			}},
 		}))
 
-		err := eng.ReopenKachinukiMatch("reopen-pool-bracket-busy", "P1-0", "need more bouts")
+		err := reopenErr(eng, "reopen-pool-bracket-busy", "P1-0", "need more bouts")
 		var busy *CourtBusyError
 		require.ErrorAs(t, err, &busy)
 		assert.Equal(t, "SF1", busy.MatchID, "a bracket match holding the court blocks a pool reopen")
@@ -2266,7 +2282,7 @@ func TestReopenKachinukiMatchCourtBusy(t *testing.T) {
 			},
 		}))
 
-		err := eng.ReopenKachinukiMatch("reopen-court-busy-bracket", "SF0", "need more bouts")
+		err := reopenErr(eng, "reopen-court-busy-bracket", "SF0", "need more bouts")
 		var busy *CourtBusyError
 		require.ErrorAs(t, err, &busy)
 		assert.Equal(t, "SF1", busy.MatchID)
@@ -2289,7 +2305,7 @@ func TestReopenKachinukiMatchCourtBusy(t *testing.T) {
 			},
 		}))
 
-		err := eng.ReopenKachinukiMatch("reopen-court-busy-bronze", "B0", "need more bouts")
+		err := reopenErr(eng, "reopen-court-busy-bronze", "B0", "need more bouts")
 		var busy *CourtBusyError
 		require.ErrorAs(t, err, &busy)
 		assert.Equal(t, "F0", busy.MatchID)
@@ -2313,7 +2329,7 @@ func TestReopenKachinukiMatchCourtBusy(t *testing.T) {
 			runningOnCourt("P9-0", "A"),
 		}))
 
-		err := eng.ReopenKachinukiMatch("reopen-cross-a", "P1-0", "need more bouts")
+		err := reopenErr(eng, "reopen-cross-a", "P1-0", "need more bouts")
 		var busy *CourtBusyError
 		require.ErrorAs(t, err, &busy)
 		assert.Equal(t, "reopen-cross-b", busy.CompID, "the conflicting competition must be named")
@@ -2325,7 +2341,7 @@ func TestReopenKachinukiMatchCourtBusy(t *testing.T) {
 
 	// mp-gmcg review: an UNREOPENABLE target (its winner already fed a fought
 	// downstream) whose court is held by a running match in ANOTHER competition
-	// must report the permanent ErrReopenDownstreamFought, NOT a transient
+	// must report the permanent downstream reason, NOT a transient
 	// court_busy. Otherwise the admin remedy panel (which branches on
 	// code=="court_busy") offers to requeue the court's occupant for a target that
 	// can never reopen — a dead end. The plain-reopen entry pre-checks the result
@@ -2339,8 +2355,10 @@ func TestReopenKachinukiMatchCourtBusy(t *testing.T) {
 			runningOnCourt("P9-0", "A"),
 		}))
 
-		err := eng.ReopenKachinukiMatch("reopen-cross-ds-a", "SF0", "")
-		require.ErrorIs(t, err, ErrReopenDownstreamFought, "the permanent reason must win over a transient court_busy")
+		err := reopenErr(eng, "reopen-cross-ds-a", "SF0", "")
+		// bc-cse: foughtDownstreamBracket's F0 is RUNNING, so this is
+		// DownstreamKnockoutRunningError now, not the bare sentinel.
+		require.ErrorIs(t, err, ErrDownstreamKnockoutRunning, "the permanent reason must win over a transient court_busy")
 		var busy *CourtBusyError
 		require.NotErrorAs(t, err, &busy, "an unreopenable target must not surface as court_busy")
 
@@ -2363,10 +2381,10 @@ func TestRequeueBlockerAndReopenKachinuki(t *testing.T) {
 		}))
 
 		// A plain reopen is refused: court A is busy with P1-1.
-		require.ErrorIs(t, eng.ReopenKachinukiMatch("requeue-reopen", "P1-0", ""), ErrCourtBusy)
+		require.ErrorIs(t, reopenErr(eng, "requeue-reopen", "P1-0", ""), ErrCourtBusy)
 
 		// Requeue the blocker + reopen the target in one atomic operation.
-		require.NoError(t, eng.RequeueBlockerAndReopenKachinuki("requeue-reopen", "P1-0", "requeue-reopen", "P1-1", ""))
+		require.NoError(t, requeueReopenErr(eng, "requeue-reopen", "P1-0", "requeue-reopen", "P1-1", ""))
 
 		byID := map[string]state.MatchResult{}
 		matches, _ := store.LoadPoolMatches("requeue-reopen")
@@ -2386,7 +2404,7 @@ func TestRequeueBlockerAndReopenKachinuki(t *testing.T) {
 		require.NoError(t, store.SavePoolMatches("rq-target", []state.MatchResult{completedOnCourt("P1-0", "A")}))
 		require.NoError(t, store.SavePoolMatches("rq-blocker", []state.MatchResult{runningOnCourt("B1-0", "A")}))
 
-		require.NoError(t, eng.RequeueBlockerAndReopenKachinuki("rq-target", "P1-0", "rq-blocker", "B1-0", ""))
+		require.NoError(t, requeueReopenErr(eng, "rq-target", "P1-0", "rq-blocker", "B1-0", ""))
 
 		assert.Equal(t, state.MatchStatusRunning, loadPoolMatchByID(t, store, "rq-target", "P1-0").Status)
 		assert.Equal(t, state.MatchStatusScheduled, loadPoolMatchByID(t, store, "rq-blocker", "B1-0").Status)
@@ -2403,7 +2421,7 @@ func TestRequeueBlockerAndReopenKachinuki(t *testing.T) {
 			runningOnCourt("P1-2", "B"),   // sibling on court B — different court, NOT a blocker
 		}))
 
-		require.NoError(t, eng.RequeueBlockerAndReopenKachinuki("rq-multicourt", "P1-0", "rq-multicourt", "P1-1", ""))
+		require.NoError(t, requeueReopenErr(eng, "rq-multicourt", "P1-0", "rq-multicourt", "P1-1", ""))
 
 		byID := map[string]state.MatchResult{}
 		matches, _ := store.LoadPoolMatches("rq-multicourt")
@@ -2429,7 +2447,7 @@ func TestRequeueBlockerAndReopenKachinuki(t *testing.T) {
 		}))
 
 		// Client wrongly names the court-B bystander as the blocker.
-		err := eng.RequeueBlockerAndReopenKachinuki("rq-wrongcourt", "P1-0", "rq-wrongcourt", "P1-2", "")
+		err := requeueReopenErr(eng, "rq-wrongcourt", "P1-0", "rq-wrongcourt", "P1-2", "")
 		var verr *ValidationError
 		require.ErrorAs(t, err, &verr, "a blocker on the wrong court is a client error")
 
@@ -2459,49 +2477,16 @@ func TestRequeueBlockerAndReopenKachinuki(t *testing.T) {
 		}))
 		require.NoError(t, store.SavePoolMatches("rq-ds-blocker", []state.MatchResult{scoredBlocker("B1-0", "A")}))
 
-		err := eng.RequeueBlockerAndReopenKachinuki("rq-downstream", "SF0", "rq-ds-blocker", "B1-0", "")
-		assert.ErrorIs(t, err, ErrReopenDownstreamFought)
+		err := requeueReopenErr(eng, "rq-downstream", "SF0", "rq-ds-blocker", "B1-0", "")
+		// bc-cse: foughtDownstreamBracket's F0 is RUNNING, so this is
+		// DownstreamKnockoutRunningError now, not the bare sentinel.
+		assert.ErrorIs(t, err, ErrDownstreamKnockoutRunning)
 
 		assertBlockerIntact(t, store, "rq-ds-blocker", "B1-0")
 
 		bracket, lerr := store.LoadBracket("rq-downstream")
 		require.NoError(t, lerr)
 		assert.Equal(t, state.MatchStatusCompleted, bracket.Rounds[0][0].Status, "target stays completed")
-	})
-
-	// mp-gmcg review: the fought-downstream subtest above only exercises the
-	// BRACKET branch of checkTargetReopenable. checkPoolReopenDownstreamTx
-	// short-circuits unless Format == Mixed (kachinuki.go), so the pre-check's
-	// POOL branch is otherwise dead in this whole test — a refactor that dropped
-	// its wiring would pass every case. This pins it: a MIXED-format pool target
-	// whose finisher already sits in a started knockout is refused via the pool
-	// branch WITHOUT wiping the blocker.
-	t.Run("a mixed-pool target with a started knockout downstream is rejected WITHOUT wiping the blocker", func(t *testing.T) {
-		eng, store, compID := startedMixedKnockout(t)
-
-		// Give the completed Pool A-0 a court so requireBlockerHoldsCourt passes
-		// and the flow reaches the pre-check (the fixture assigns none).
-		matches, err := store.LoadPoolMatches(compID)
-		require.NoError(t, err)
-		for i := range matches {
-			if matches[i].ID == "Pool A-0" {
-				matches[i].Court = "A"
-			}
-		}
-		require.NoError(t, store.SavePoolMatches(compID, matches))
-
-		// A blocker running on Pool A-0's court (A), in another competition, with
-		// a live score the destructive revert would clear.
-		require.NoError(t, store.SaveCompetition(&state.Competition{
-			ID: "rq-pool-blocker", TeamSize: 2, TeamMatchType: state.TeamMatchTypeKachinuki,
-		}))
-		require.NoError(t, store.SavePoolMatches("rq-pool-blocker", []state.MatchResult{scoredBlocker("B1-0", "A")}))
-
-		err = eng.RequeueBlockerAndReopenKachinuki(compID, "Pool A-0", "rq-pool-blocker", "B1-0", "")
-		assert.ErrorIs(t, err, ErrReopenDownstreamFought)
-
-		assertBlockerIntact(t, store, "rq-pool-blocker", "B1-0")
-		assert.Equal(t, state.MatchStatusCompleted, loadPoolMatchByID(t, store, compID, "Pool A-0").Status, "pool target stays completed")
 	})
 
 	// mp-gmcg review: the ErrReopenNotCompleted arm of the pre-check had no
@@ -2516,7 +2501,7 @@ func TestRequeueBlockerAndReopenKachinuki(t *testing.T) {
 		require.NoError(t, store.SavePoolMatches("rq-notdone", []state.MatchResult{runningOnCourt("P1-0", "A")}))
 		require.NoError(t, store.SavePoolMatches("rq-notdone-blocker", []state.MatchResult{scoredBlocker("B1-0", "A")}))
 
-		err := eng.RequeueBlockerAndReopenKachinuki("rq-notdone", "P1-0", "rq-notdone-blocker", "B1-0", "")
+		err := requeueReopenErr(eng, "rq-notdone", "P1-0", "rq-notdone-blocker", "B1-0", "")
 		assert.ErrorIs(t, err, ErrReopenNotCompleted)
 
 		assertBlockerIntact(t, store, "rq-notdone-blocker", "B1-0")
@@ -2531,27 +2516,34 @@ func TestRequeueBlockerAndReopenKachinuki(t *testing.T) {
 			completedOnCourt("P1-0", "A"),
 			completedOnCourt("P1-1", "A"),
 		}))
-		err := eng.RequeueBlockerAndReopenKachinuki("rq-done-blocker", "P1-0", "rq-done-blocker", "P1-1", "")
+		err := requeueReopenErr(eng, "rq-done-blocker", "P1-0", "rq-done-blocker", "P1-1", "")
 		var verr *ValidationError
 		require.ErrorAs(t, err, &verr)
 		assert.Equal(t, state.MatchStatusCompleted, loadPoolMatchByID(t, store, "rq-done-blocker", "P1-0").Status,
 			"the target must not reopen when the requeue is rejected")
 	})
 
-	t.Run("a non-kachinuki target is rejected", func(t *testing.T) {
+	t.Run("a non-kachinuki target no withdrawal decided is rejected WITHOUT wiping the blocker", func(t *testing.T) {
 		eng, store, _ := setupTestEngine(t)
 		require.NoError(t, store.SaveCompetition(&state.Competition{
 			ID: "rq-fixed", TeamSize: 3, TeamMatchType: state.TeamMatchTypeFixed,
 		}))
-		err := eng.RequeueBlockerAndReopenKachinuki("rq-fixed", "P1-0", "rq-fixed", "P1-1", "")
+		require.NoError(t, store.SavePoolMatches("rq-fixed", []state.MatchResult{
+			completedOnCourt("P1-0", "A"),
+			scoredBlocker("P1-1", "A"),
+		}))
+		err := requeueReopenErr(eng, "rq-fixed", "P1-0", "rq-fixed", "P1-1", "")
 		var verr *ValidationError
 		require.ErrorAs(t, err, &verr)
+		assert.Equal(t, state.MatchStatusRunning, loadPoolMatchByID(t, store, "rq-fixed", "P1-1").Status,
+			"the gate runs before the destructive requeue, so the blocker keeps its live score")
+		assert.Equal(t, state.MatchStatusCompleted, loadPoolMatchByID(t, store, "rq-fixed", "P1-0").Status)
 	})
 
 	t.Run("an unknown blocker errors and leaves the target finished", func(t *testing.T) {
 		eng, store, _ := setupKachinukiComp(t, "rq-nf-blocker", 3)
 		require.NoError(t, store.SavePoolMatches("rq-nf-blocker", []state.MatchResult{completedOnCourt("P1-0", "A")}))
-		err := eng.RequeueBlockerAndReopenKachinuki("rq-nf-blocker", "P1-0", "rq-nf-blocker", "nope", "")
+		err := requeueReopenErr(eng, "rq-nf-blocker", "P1-0", "rq-nf-blocker", "nope", "")
 		require.Error(t, err)
 		assert.Equal(t, state.MatchStatusCompleted, loadPoolMatchByID(t, store, "rq-nf-blocker", "P1-0").Status)
 	})
@@ -3300,27 +3292,43 @@ func startedMixedKnockout(t *testing.T) (*Engine, *state.Store, string) {
 	return eng, store, compID
 }
 
-// TestReopenKachinukiPoolMatch_DownstreamKnockoutStarted_Rejected pins the
-// pool-branch parity with the bracket branch (mp-gmcg): reopening a pool match
-// whose current finisher already sits in a STARTED knockout match is refused
-// with ErrReopenDownstreamFought, so a later re-End cannot strand the displaced
-// finisher in the bracket. The score path's mp-e2k1 guard cannot catch that,
-// because by re-End time the reopened match is excluded from the standings
-// baseline it compares against.
-func TestReopenKachinukiPoolMatch_DownstreamKnockoutStarted_Rejected(t *testing.T) {
+// TestReopenKachinukiPoolMatch_DownstreamKnockoutStarted_FinishDecides pins
+// the pool reopen's rule: reopening a pool match moves no knockout slot (the
+// pool is incomplete while it is open), so it is allowed even while its
+// finisher sits in a started knockout match. What the reopen leads to is
+// decided when it is FINISHED: the finishing write runs the requalification
+// rule against the bracket, so the same result is silent and a changed one is
+// refused here, because the knockout match it reaches is being fought.
+func TestReopenKachinukiPoolMatch_DownstreamKnockoutStarted_FinishDecides(t *testing.T) {
 	eng, store, compID := startedMixedKnockout(t)
 
-	// Reopening Pool A-0 (whose finisher A1 sits in the running knockout) is refused.
-	err := eng.ReopenKachinukiMatch(compID, "Pool A-0", "")
-	require.Error(t, err)
-	assert.ErrorIs(t, err, ErrReopenDownstreamFought)
+	finish := func(winner string) error {
+		r := &state.MatchResult{SideA: "A1", SideB: "A2", Winner: winner, IpponsA: []string{"M"}, Status: state.MatchStatusCompleted}
+		if winner == "A2" {
+			r.IpponsA, r.IpponsB = nil, []string{"M"}
+		}
+		var werr error
+		require.NoError(t, store.WithTransaction(compID, func(tx state.StoreTx) error {
+			_, werr = eng.RecordMatchResultWithIneligibilityTx(tx, compID, "Pool A-0", r)
+			return nil
+		}))
+		return werr
+	}
 
-	// The pool match stays completed with its original winner (not reopened).
+	require.NoError(t, reopenErr(eng, compID, "Pool A-0", "scored the wrong bout"))
+	assert.Equal(t, state.MatchStatusRunning, loadPoolMatchByID(t, store, compID, "Pool A-0").Status)
+
+	// Same result: nothing in the knockout moves, so nothing is said.
+	require.NoError(t, finish("A1"))
+	assert.Equal(t, state.MatchStatusCompleted, loadPoolMatchByID(t, store, compID, "Pool A-0").Status)
+
+	// A different result would move A1 out of the knockout match being fought.
+	require.NoError(t, reopenErr(eng, compID, "Pool A-0", "scored the wrong bout again"))
+	err := finish("A2")
+	require.ErrorIs(t, err, ErrDownstreamKnockoutRunning)
 	poolA0 := loadPoolMatchByID(t, store, compID, "Pool A-0")
-	require.NotNil(t, poolA0)
-	assert.Equal(t, state.MatchStatusCompleted, poolA0.Status)
-	assert.Equal(t, "A1", poolA0.Winner)
-	assert.False(t, poolA0.ReopenPending)
+	assert.Equal(t, state.MatchStatusRunning, poolA0.Status, "the refused finish must leave the reopened match as it was")
+	assert.Empty(t, poolA0.Winner)
 }
 
 // TestReopenKachinukiPoolMatch_KnockoutNotStarted_Allowed is the companion: with
@@ -3338,7 +3346,7 @@ func TestReopenKachinukiPoolMatch_KnockoutNotStarted_Allowed(t *testing.T) {
 	require.True(t, allResolved)
 	// The knockout leaf is resolved but left SCHEDULED (never started).
 
-	err = eng.ReopenKachinukiMatch(compID, "Pool A-0", "scored the wrong bout")
+	err = reopenErr(eng, compID, "Pool A-0", "scored the wrong bout")
 	require.NoError(t, err)
 
 	poolA0 := loadPoolMatchByID(t, store, compID, "Pool A-0")

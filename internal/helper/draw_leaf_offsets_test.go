@@ -10,12 +10,12 @@ import (
 
 // walkLeafOffsets is the ONE traversal that turns a draw tree back into slot
 // positions, and two exported readers depend on it disagreeing with nobody:
-// RegionSpans decides which slots a shiaijo's region owns, NodeCourts decides
-// which shiaijo a bout prints under, and SlotRoundMatches locates a bout's
-// first-round window. Its own doc comment says a disagreement puts the operator
-// console and the printed running order on different courts with nothing to
-// catch it, so the geometry is pinned here directly rather than only through
-// whichever draws today's builders happen to produce.
+// RegionSpans decides which slots a shiaijo's region owns, and NodeCourts
+// decides which shiaijo a bout prints under. Its own doc comment says a
+// disagreement puts the operator console and the printed running order on
+// different courts with nothing to catch it, so the geometry is pinned here
+// directly rather than only through whichever draws today's builders happen
+// to produce.
 //
 // The property under test is the definition of the geometry, not a restatement
 // of the arithmetic: the BAND a node is reported to occupy must be exactly that
@@ -61,7 +61,7 @@ func TestWalkLeafOffsetsBandIsExactlyTheNodesOwnSlots(t *testing.T) {
 			rootSlots := SlotArray(root)
 
 			seen := 0
-			walkLeafOffsets(root, 0, func(n *Node, bandOffset, contentOffset, width int) {
+			walkLeafOffsets(root, 0, func(n *Node, bandOffset, width int) {
 				seen++
 				label := nodeLabelForTest(n)
 
@@ -70,31 +70,11 @@ func TestWalkLeafOffsetsBandIsExactlyTheNodesOwnSlots(t *testing.T) {
 					label, bandOffset, bandOffset+width, len(rootSlots))
 				require.GreaterOrEqualf(t, bandOffset, 0, "node %s: negative band offset", label)
 
+				// Every node's band is checked, children included, so this
+				// also pins where the walk descends from: a child walked from
+				// the wrong offset reports a band that is not its own slots.
 				assert.Equalf(t, SlotArray(n), rootSlots[bandOffset:bandOffset+width],
 					"node %s: the band reported for it is not the slots it actually owns", label)
-
-				// The content sub-range is where the node's OWN entrants sit,
-				// which SlotRoundMatches reads as a bout's first-round window.
-				// SlotArray pads a rise onto the FRONT of the band for a
-				// leading collapse and onto the BACK for a trailing one, so
-				// the content is the band with this node's own pad stripped
-				// from the corresponding end. (A CHILD's rise leaves empties
-				// inside the content; those belong to the child, not here,
-				// which is why this compares sub-arrays rather than asserting
-				// the first content slot is non-empty.)
-				content := width >> (n.risenAfter + n.risenBefore)
-				assert.GreaterOrEqualf(t, contentOffset, bandOffset,
-					"node %s: content offset %d is before its band start %d", label, contentOffset, bandOffset)
-				require.LessOrEqualf(t, contentOffset+content, bandOffset+width,
-					"node %s: content [%d,%d) runs past its band end %d", label, contentOffset, contentOffset+content, bandOffset+width)
-
-				own := SlotArray(n)
-				wantContent := own[:content]
-				if n.risenBefore > 0 {
-					wantContent = own[width-content:]
-				}
-				assert.Equalf(t, wantContent, rootSlots[contentOffset:contentOffset+content],
-					"node %s: the content window reported for it is not where its own entrants sit", label)
 			})
 			assert.Positive(t, seen, "the walk visited no nodes")
 		})

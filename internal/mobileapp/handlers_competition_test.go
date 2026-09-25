@@ -4767,10 +4767,12 @@ func TestChusenCandidates_NotFound(t *testing.T) {
 // (or dojo) to call PUT .../override-rank unambiguously: two teams CAN
 // legally share a display name from different dojos (operator identity
 // rule), and teamNames alone cannot tell them apart.
-func TestChusenCandidates_IncludesTeamIdentity(t *testing.T) {
-	r, store, eng, _, _ := setupTestRouter(t)
-	compID := "chusen-identity"
-
+// seedChusenCycle stores a three-team league pool (Alpha, Beta, Gamma, ids
+// "<name>-id") whose every encounter was drawn, injects the daihyosen round and
+// scores it into the cycle Alpha > Beta > Gamma > Alpha: a tie only a chusen
+// settles, mirroring engine's TestChusenCandidates_CycleNeedsChusen.
+func seedChusenCycle(t *testing.T, store *state.Store, eng *engine.Engine, compID string) {
+	t.Helper()
 	require.NoError(t, store.SaveCompetition(&state.Competition{
 		ID: compID, Name: "Chusen Identity", Status: state.CompStatusPools,
 		Kind: "team", TeamSize: 2, Format: state.CompFormatLeague, Courts: []string{"A"},
@@ -4782,8 +4784,6 @@ func TestChusenCandidates_IncludesTeamIdentity(t *testing.T) {
 			{ID: "gamma-id", Name: "Gamma", Dojo: "Dojo C"},
 		}},
 	}))
-	// Fully drawn round robin puts all three teams in one tied group,
-	// mirroring engine's TestChusenCandidates_CycleNeedsChusen.
 	require.NoError(t, store.SavePoolMatches(compID, []state.MatchResult{
 		{ID: "Pool A-0", SideA: "Alpha", SideB: "Beta", SideAID: "alpha-id", SideBID: "beta-id",
 			Status: state.MatchStatusCompleted, Decision: string(domain.DecisionHikiwake), Court: "A"},
@@ -4796,8 +4796,6 @@ func TestChusenCandidates_IncludesTeamIdentity(t *testing.T) {
 	_, err := eng.InjectPoolDaihyosenMatches(compID)
 	require.NoError(t, err)
 
-	// Score the injected daihyosen bouts into a genuine cycle (no chusen
-	// override yet): Alpha>Beta, Beta>Gamma, Gamma>Alpha.
 	all, err := store.LoadPoolMatches(compID)
 	require.NoError(t, err)
 	cycleBeats := map[string]string{"Alpha": "Beta", "Beta": "Gamma", "Gamma": "Alpha"}
@@ -4813,6 +4811,62 @@ func TestChusenCandidates_IncludesTeamIdentity(t *testing.T) {
 		}
 	}
 	require.NoError(t, store.SavePoolMatches(compID, all))
+}
+
+// TestChusenCandidates_ReportsTheRecordedChusen: once the operator records a
+// chusen through PUT .../override-rank, GET .../chusen-candidates stops
+// offering the tie and lists it under "recorded" instead, in the recorded
+// order and with the recorded ranks, so a chusen recorded in the wrong order
+// can be changed from the UI.
+func TestChusenCandidates_ReportsTheRecordedChusen(t *testing.T) {
+	r, store, eng, _, _ := setupTestRouter(t)
+	compID := "chusen-recorded"
+	seedChusenCycle(t, store, eng, compID)
+
+	get := func() (cands, recorded []any) {
+		t.Helper()
+		w := sendJSON(t, r, http.MethodGet, "/api/competitions/"+compID+"/chusen-candidates", nil)
+		require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+		var body map[string]any
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &body))
+		cands, ok := body["candidates"].([]any)
+		require.True(t, ok, "candidates must be a JSON array")
+		recorded, ok = body["recorded"].([]any)
+		require.True(t, ok, "recorded must be a JSON array, never null")
+		return cands, recorded
+	}
+	cands, recorded := get()
+	require.Len(t, cands, 1)
+	assert.Empty(t, recorded, "a tie waiting for its chusen is not a recorded one")
+	_, hasRanks := cands[0].(map[string]any)["ranks"]
+	assert.False(t, hasRanks, "a pending group carries no recorded ranks")
+
+	for rank, id := range []string{"gamma-id", "alpha-id", "beta-id"} {
+		w := sendJSON(t, r, http.MethodPut, "/api/competitions/"+compID+"/pools/Pool%20A/override-rank",
+			map[string]any{"playerId": id, "rank": rank + 1})
+		require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	}
+
+	cands, recorded = get()
+	assert.Empty(t, cands, "the recorded chusen clears the candidate")
+	require.Len(t, recorded, 1, "the tie the chusen settled is listed as recorded")
+	group := recorded[0].(map[string]any)
+	assert.Equal(t, "Pool A", group["poolName"])
+	assert.EqualValues(t, 1, group["minPosition"])
+	teams := group["teams"].([]any)
+	require.Len(t, teams, 3)
+	ids := make([]string, len(teams))
+	for i, raw := range teams {
+		ids[i] = raw.(map[string]any)["id"].(string)
+	}
+	assert.Equal(t, []string{"gamma-id", "alpha-id", "beta-id"}, ids, "teams arrive in the recorded order")
+	assert.Equal(t, []any{float64(1), float64(2), float64(3)}, group["ranks"])
+}
+
+func TestChusenCandidates_IncludesTeamIdentity(t *testing.T) {
+	r, store, eng, _, _ := setupTestRouter(t)
+	compID := "chusen-identity"
+	seedChusenCycle(t, store, eng, compID)
 
 	w := httptest.NewRecorder()
 	req, _ := http.NewRequest("GET", "/api/competitions/"+compID+"/chusen-candidates", nil)
@@ -5804,7 +5858,7 @@ func TestDeleteOverridesHandler_CorruptOverrides_ForceRepairs(t *testing.T) {
 }
 
 // TestChusenCandidatesHandler_CorruptOverrides_TerminalError is bc-pnum gap 3:
-// GET /api/competitions/:id/chusen-candidates calls engine.ChusenCandidates,
+// GET /api/competitions/:id/chusen-candidates calls engine.ChusenStatus,
 // which loads overrides.json directly (and also indirectly via
 // CalculatePoolStandings). Before this fix an unmapped state.ErrCorruptOverrides
 // fell through to the handler's own opaque-500 branch; the fix maps it to the

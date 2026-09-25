@@ -1,0 +1,28 @@
+{
+  "_comment": [
+    "The knockout round names, shared by BOTH language implementations:",
+    "roundLabelFromEnd in internal/engine/errors.go (the round a refusal or a",
+    "reopen names, through MatchLabel: \"Match 3 (Final)\") and",
+    "roundLabelFromEnd in web-mobile/js/bracket.jsx (the heading over each",
+    "bracket column, reached through bracketRoundLabel). Keyed by the match's",
+    "displayRound (1 = Final). TestRoundLabelFromEnd_GoldenTable",
+    "(internal/engine/match_label_test.go) drives the Go side; the \"round",
+    "label Go/JS mirror\" describe in",
+    "web-mobile/js/__tests__/write_result_downstream_knockout.test.jsx drives",
+    "the JS side over this same file.",
+    "",
+    "Why a shared file: a dialog that says \"Match 3 (Semifinals)\" sends the",
+    "operator to the column headed Semifinals, so the two spellings must not",
+    "drift. Changing one language and its own tests together is the realistic",
+    "drift, and two independent tables both stay green through it; editing",
+    "this file fails the other language's suite at once."
+  ],
+  "cases": [
+    { "displayRound": 1, "label": "Final" },
+    { "displayRound": 2, "label": "Semifinals" },
+    { "displayRound": 3, "label": "Quarterfinals" },
+    { "displayRound": 4, "label": "R16" },
+    { "displayRound": 5, "label": "R32" },
+    { "displayRound": 7, "label": "R128" }
+  ]
+}

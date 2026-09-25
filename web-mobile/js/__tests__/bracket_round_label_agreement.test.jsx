@@ -51,7 +51,7 @@ const columnLabelByMatchId = (rounds) => {
   const out = {};
   model.columns.forEach((col, ci) => {
     const label = bracketRoundLabel(col[0], ci, model.columns.length);
-    col.forEach((m) => { if (!m.isByeSlot) out[m.id] = label; });
+    col.forEach((m) => { out[m.id] = label; });
   });
   return out;
 };

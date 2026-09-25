@@ -625,6 +625,34 @@ func checkUniqueCompFieldsTolerant(eng *engine.Engine, name, prefix, excludeID s
 	return eng.CheckUniqueCompFields(name, prefix, excludeID, true)
 }
 
+// validateRankOverrides checks a pool-rank override request's ranks (the
+// group form, or the single form as a one-entry group) against what the
+// request alone can show: every entry names a player and a positive rank, and
+// no player or rank appears twice. The cap is an absolute overflow guard,
+// defense-in-depth against weird stale-pool or LoadPools-error edge cases;
+// the rank is checked against the pool's actual size, and the id against its
+// roster (poolHasPlayerID), once the pool is loaded.
+func validateRankOverrides(ranks []engine.RankOverride) error {
+	players := make(map[string]bool, len(ranks))
+	places := make(map[int]bool, len(ranks))
+	for _, r := range ranks {
+		switch {
+		case r.PlayerID == "":
+			return fmt.Errorf("playerId is required")
+		case r.Rank <= 0:
+			return fmt.Errorf("rank must be a positive integer")
+		case r.Rank > helper.MaxRankOverride:
+			return fmt.Errorf("rank must be a positive integer ≤ %d", helper.MaxRankOverride)
+		case players[r.PlayerID]:
+			return fmt.Errorf("playerId %q is given more than one rank", r.PlayerID)
+		case places[r.Rank]:
+			return fmt.Errorf("rank %d is given to more than one player", r.Rank)
+		}
+		players[r.PlayerID], places[r.Rank] = true, true
+	}
+	return nil
+}
+
 // poolHasPlayerID validates the pool-rank override request's target id
 // against the pool's OWN roster rather than trusting it verbatim from the
 // request. playerID is REQUIRED (operator ruling bc-pnum): a pool-rank
@@ -632,7 +660,7 @@ func checkUniqueCompFieldsTolerant(eng *engine.Engine, name, prefix, excludeID s
 // playerName/playerDojo narrowing path left to fall back to. playerID must
 // name a player actually in this pool; a wrong/foreign/blank id is a 400,
 // never a silent name-based guess. The override is then saved keyed by
-// playerID alone (SaveRankOverrideChanged), so no name/dojo lookup is
+// playerID alone (SaveRankOverridesChanged), so no name/dojo lookup is
 // needed once this check passes.
 func poolHasPlayerID(players []domain.Player, playerID string) error {
 	if playerID == "" {
@@ -2671,25 +2699,44 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 			// to send.
 			PlayerID string `json:"playerId"`
 			Rank     int    `json:"rank"`
+			// Ranks is the group form, sent instead of playerId/rank: every
+			// rank of a chusen's order at once, recorded and answered for as
+			// ONE change (engine.OverridePoolRanks), so the knockout check
+			// sees only the order the operator entered. Sent one rank at a
+			// time, the order passed through states nobody chose, and a
+			// knockout match whose place the final order keeps was named and
+			// reopened. Each entry is resolved by id only, as the single form.
+			Ranks []struct {
+				PlayerID string `json:"playerId"`
+				Rank     int    `json:"rank"`
+			} `json:"ranks"`
+			// ForceDownstreamReopen is the operator's confirmation of a 409
+			// downstream_knockout_played refusal: the new order moves a
+			// qualifier out of a knockout match the old one already fought,
+			// and confirming reopens that match with the new qualifier seated
+			// (engine.OverridePoolRanks). Never past downstream_knockout_running.
+			ForceDownstreamReopen bool `json:"forceDownstreamReopen"`
 		}
 		if err := c.ShouldBindJSON(&req); err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 			return
 		}
-		playerID := strings.TrimSpace(req.PlayerID)
-		if playerID == "" {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "playerId is required"})
-			return
+		// The single form is a one-entry group, so both forms go through the
+		// same checks and the same engine call.
+		var ranks []engine.RankOverride
+		if len(req.Ranks) > 0 {
+			if strings.TrimSpace(req.PlayerID) != "" || req.Rank != 0 {
+				c.JSON(http.StatusBadRequest, gin.H{"error": "send either ranks or playerId and rank, not both"})
+				return
+			}
+			for _, r := range req.Ranks {
+				ranks = append(ranks, engine.RankOverride{PlayerID: strings.TrimSpace(r.PlayerID), Rank: r.Rank})
+			}
+		} else {
+			ranks = []engine.RankOverride{{PlayerID: strings.TrimSpace(req.PlayerID), Rank: req.Rank}}
 		}
-		if req.Rank <= 0 {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "rank must be a positive integer"})
-			return
-		}
-		// Absolute overflow guard, defense-in-depth against weird
-		// stale-pool or LoadPools-error edge cases. The real semantic
-		// validation against the pool's actual size happens below.
-		if req.Rank > helper.MaxRankOverride {
-			c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("rank must be a positive integer ≤ %d", helper.MaxRankOverride)})
+		if err := validateRankOverrides(ranks); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 			return
 		}
 		comp, err := store.LoadCompetition(id)
@@ -2701,8 +2748,12 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 			c.JSON(http.StatusNotFound, gin.H{"error": "competition not found"})
 			return
 		}
-		if comp.Status != state.CompStatusPools {
-			c.JSON(http.StatusConflict, gin.H{"error": "rank overrides only accepted while competition is in pools stage"})
+		// A pools + knockout competition takes one after its knockout has
+		// started too: a pool correction made then can leave a tie only a
+		// chusen settles, and a wrong chusen must stay fixable. What the new
+		// order does to the knockout is answered below, as for any override.
+		if !comp.AcceptsPoolRankOverride() {
+			c.JSON(http.StatusConflict, gin.H{"error": "rank overrides only accepted while competition is in pools stage, or in knockout stage for a pools + knockout competition"})
 			return
 		}
 		// Pool-size validation: rank within a pool is bounded by the
@@ -2731,32 +2782,57 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 			return
 		}
 		poolSize := len(targetPool.Players)
-		if req.Rank > poolSize {
-			c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("rank %d exceeds pool size %d", req.Rank, poolSize)})
-			return
+		for _, r := range ranks {
+			if r.Rank > poolSize {
+				c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("rank %d exceeds pool size %d", r.Rank, poolSize)})
+				return
+			}
+			// poolHasPlayerID's own doc comment has the id-only rationale.
+			if err := poolHasPlayerID(targetPool.Players, r.PlayerID); err != nil {
+				c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+				return
+			}
 		}
 
-		// poolHasPlayerID's own doc comment has the id-only rationale.
-		if err := poolHasPlayerID(targetPool.Players, playerID); err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-			return
-		}
-
-		changed, err := store.SaveRankOverrideChanged(id, poolId, playerID, req.Rank)
+		// A rank override moves the pool's order without a match write, so it
+		// answers for the knockout the pool feeds exactly as a pool result
+		// correction does: the same 409s, the same confirmation, the same
+		// reopen (engine.OverridePoolRanks), once, for the whole group.
+		var reopened []engine.ReopenedMatch
+		changed, err := eng.OverridePoolRanks(id, poolId, ranks, engine.ForceOptions{
+			Force:    req.ForceDownstreamReopen,
+			Reopened: &reopened,
+		})
 		if err != nil {
-			internalError(c, err)
+			switch {
+			case respondIfDownstreamKnockoutRunning(c, err):
+			case respondIfDownstreamKnockoutPlayed(c, err):
+			case respondIfEngineWriteError(c, err):
+			default:
+				internalError(c, err)
+			}
 			return
 		}
 		if changed {
 			hub.Broadcast(EventTournamentUpdated, nil)
 		}
-		c.Status(http.StatusOK)
+		broadcastReopenedDownstream(hub, id, reopened)
+		if changed && comp.Format == state.CompFormatMixed {
+			// A new order can complete a pool (a chusen settles its last
+			// tie): seating a pool's slots for the first time is the
+			// auto-complete's job, which otherwise waited for the next score
+			// write. The full door, not the after-write one: no match was
+			// written, but the pool's standings moved.
+			tryAutoCompletePools(c, eng, hub, id)
+		}
+		c.JSON(http.StatusOK, gin.H{"reopenedMatches": blockedMatchesPayload(reopened)})
 	})
 
 	// GET /competitions/:id/chusen-candidates
 	// Consequential team-pool ties the daihyosen left undetermined (a cycle /
 	// all-drawn); the operator settles each by chusen (drawing lots), recorded via
-	// the override-rank endpoint. Admin-gated: RegisterCompetitionHandlers is
+	// the override-rank endpoint. "recorded" lists the ties a chusen already
+	// settled, with the recorded ranks, so a wrong order can be changed. Admin-gated: RegisterCompetitionHandlers is
 	// mounted under the authenticated router group, so callers must send the
 	// tournament password header (unlike the public league-tiebreak candidates).
 	r.GET("/competitions/:id/chusen-candidates", func(c *gin.Context) {
@@ -2764,9 +2840,9 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 		if !ok {
 			return
 		}
-		candidates, err := eng.ChusenCandidates(id)
+		report, err := eng.ChusenStatus(id)
 		if err != nil {
-			// ChusenCandidates loads overrides.json directly. A corrupt file
+			// ChusenStatus loads overrides.json directly. A corrupt file
 			// is operator-recoverable state (repair via DELETE .../overrides),
 			// not a server fault, so it gets the same terminal 422 every other
 			// LoadOverrides-reaching endpoint answers with.
@@ -2776,28 +2852,42 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 			respondEngineError(c, err)
 			return
 		}
-		out := make([]gin.H, 0, len(candidates))
-		for _, g := range candidates {
-			names := make([]string, len(g.Teams))
-			for i, t := range g.Teams {
-				names[i] = t.Player.Name
+		groupsJSON := func(groups []engine.ChusenGroup) []gin.H {
+			out := make([]gin.H, 0, len(groups))
+			for _, g := range groups {
+				names := make([]string, len(g.Teams))
+				for i, t := range g.Teams {
+					names[i] = t.Player.Name
+				}
+				// teams carries id/dojo alongside each name (bc-cse), via the
+				// same competitorRef shape GET /league-tiebreak/candidates emits
+				// (PR #416 finding 6), so the SPA's chusen resolver can record
+				// the order through PUT .../override-rank's ranks group, each
+				// team by playerId, the same identity disambiguation the
+				// operator rule requires. Team names are supposed to be unique even
+				// across dojos (checkNewTeamNameCollisions), but that check has
+				// one documented hole -- an unreadable config.md disables it for
+				// that write, logged and allowed through (engine/chusen.go) --
+				// so a same-name collision can exist on disk. teamNames alone
+				// (kept for older clients) cannot tell such a pair apart; this
+				// hardens the wire format for that hole and keeps it consistent
+				// with the individual override path.
+				group := gin.H{"poolName": g.PoolName, "teamNames": names, "teams": competitorRefsFrom(g.Teams), "minPosition": g.MinPosition}
+				if g.Ranks != nil {
+					// A recorded group carries each team's recorded rank,
+					// parallel to teams, so the SPA shows and pre-fills the
+					// order that was recorded without inferring it from the
+					// array position.
+					group["ranks"] = g.Ranks
+				}
+				out = append(out, group)
 			}
-			// teams carries id/dojo alongside each name (bc-cse), via the
-			// same competitorRef shape GET /league-tiebreak/candidates emits
-			// (PR #416 finding 6), so the SPA's chusen resolver can call
-			// PUT .../override-rank with playerId (falling back to
-			// playerDojo), the same identity disambiguation the operator
-			// rule requires. Team names are supposed to be unique even
-			// across dojos (checkNewTeamNameCollisions), but that check has
-			// one documented hole -- an unreadable config.md disables it for
-			// that write, logged and allowed through (engine/chusen.go) --
-			// so a same-name collision can exist on disk. teamNames alone
-			// (kept for older clients) cannot tell such a pair apart; this
-			// hardens the wire format for that hole and keeps it consistent
-			// with the individual override path.
-			out = append(out, gin.H{"poolName": g.PoolName, "teamNames": names, "teams": competitorRefsFrom(g.Teams), "minPosition": g.MinPosition})
+			return out
 		}
-		c.JSON(http.StatusOK, gin.H{"candidates": out})
+		// recorded lists the groups a chusen already settled, so a chusen
+		// recorded in the wrong order can be changed from the UI through the
+		// same override-rank door.
+		c.JSON(http.StatusOK, gin.H{"candidates": groupsJSON(report.Pending), "recorded": groupsJSON(report.Recorded)})
 	})
 
 	r.DELETE("/competitions/:id/overrides", RequireElevatedPassword(elevated), func(c *gin.Context) {

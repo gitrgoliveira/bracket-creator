@@ -122,6 +122,49 @@ func TestDownstreamKnockoutCorrection_RefusedByDefault(t *testing.T) {
 		"a refused correction must not bump the file version")
 }
 
+// TestDownstreamKnockoutCorrection_RefusalMessageNamesTheOperatorLabelNotRawID
+// covers bc-cse item 14: DownstreamKnockoutPlayedError.Error() used to
+// interpolate the raw match id ("m-r1-0") into its "correcting match %q..."
+// sentence, which IS sent to the operator verbatim
+// (respondIfDownstreamKnockoutPlayed's "message" field). It must instead
+// name the match the way the operator sees it (MatchLabel), exactly like
+// every other operator-facing refusal in this family.
+func TestDownstreamKnockoutCorrection_RefusalMessageNamesTheOperatorLabelNotRawID(t *testing.T) {
+	eng, store, _ := setupTestEngine(t)
+	compID := "kcdg-label-not-id"
+	require.NoError(t, store.SaveCompetition(&state.Competition{
+		ID: compID, Name: compID, Status: state.CompStatusKnockout,
+	}))
+	b := &state.Bracket{
+		Rounds: [][]state.BracketMatch{
+			{
+				{ID: "m-r1-0", SideA: "Alice", SideB: "Bob", SideAID: "alice", SideBID: "bob",
+					Winner: "Alice", WinnerID: "alice", Status: state.MatchStatusCompleted,
+					IpponsA: []string{"M"}, MatchNumber: 1, DisplayRound: 2},
+			},
+			{
+				// The final carries its OWN result (ippons), so correcting
+				// m-r1-0 is blocked on it.
+				{ID: "m-r2-0", SideA: "Alice", SideB: "Dave", SideAID: "alice", SideBID: "dave",
+					Winner: "Alice", WinnerID: "alice", Status: state.MatchStatusCompleted,
+					IpponsA: []string{"M", "M"}, MatchNumber: 2, DisplayRound: 1},
+			},
+		},
+	}
+	require.NoError(t, store.SaveBracket(compID, b))
+
+	txErr := inTx(t, store, compID, func(tx state.StoreTx) error {
+		_, err := eng.RecordMatchResultWithIneligibilityTx(tx, compID, "m-r1-0", correctR1ToBob("fix"), ForceOptions{})
+		return err
+	})
+	var dkErr *DownstreamKnockoutPlayedError
+	require.ErrorAs(t, txErr, &dkErr)
+
+	msg := dkErr.Error()
+	assert.NotContains(t, msg, "m-r1-0", "the raw match id must not reach the operator")
+	assert.Contains(t, msg, "Match 1 (Semifinals)", "the corrected match is named by its operator label instead")
+}
+
 func TestDownstreamKnockoutCorrection_Force(t *testing.T) {
 	eng, store, _ := setupTestEngine(t)
 	compID := "kcdg-force"
@@ -258,6 +301,79 @@ func TestDownstreamKnockoutCorrection_ByeDoesNotBlock(t *testing.T) {
 	assert.Equal(t, state.MatchStatusCompleted, got.Rounds[1][0].Status)
 }
 
+// TestReopenMatch_ByeResolvedDownstream_IsUnwound: the REOPEN door on the
+// SAME bye-completed-downstream shape TestDownstreamKnockoutCorrection_ByeDoesNotBlock
+// proves the CORRECTION door sails through. It used to be refused (a 409
+// naming Save correction as the remedy), but a correction KEEPS a recorded
+// withdrawal (KeepsWithdrawalRuling), so a kiken
+// recorded by mistake whose winner went through a bye could not be removed by
+// any door. Nobody fought the bye, so the reopen unwinds it instead: the slot
+// returns to its feeder placeholder and the match to the completed,
+// winner-less shape generation gave it. reopen_bye_unwind_test.go covers the
+// same rule on a generated draw, with a played or running match past the bye.
+func TestReopenMatch_ByeResolvedDownstream_IsUnwound(t *testing.T) {
+	eng, store, _ := setupTestEngine(t)
+	compID := "kcdg-bye-reopen"
+	require.NoError(t, store.SaveCompetition(&state.Competition{
+		ID: compID, Name: "kcdg-bye-reopen", Status: state.CompStatusKnockout,
+	}))
+	b := &state.Bracket{
+		Rounds: [][]state.BracketMatch{
+			{
+				// Decision must be a default-win one: reopenResultPreconditionTx
+				// refuses a reopen on any other decided-by-fight result for a
+				// non-kachinuki match, before it ever reaches the downstream
+				// check this test targets.
+				{ID: "m-r1-0", SideA: "Alice", SideB: "Bob", SideAID: "alice", SideBID: "bob",
+					Winner: "Alice", WinnerID: "alice", Status: state.MatchStatusCompleted,
+					Decision: "kiken-voluntary", MatchNumber: 1, DisplayRound: 2},
+			},
+			{
+				{ID: "m-r2-0", SideA: "Alice", SideB: "", SideAID: "alice",
+					Winner: "Alice", WinnerID: "alice", Status: state.MatchStatusCompleted,
+					MatchNumber: 2, DisplayRound: 1},
+			},
+		},
+	}
+	require.NoError(t, store.SaveBracket(compID, b))
+
+	_, err := eng.ReopenMatch(compID, "m-r1-0", "test reason")
+	require.NoError(t, err, "a bye nobody fought must not refuse the reopen")
+
+	got, err := store.LoadBracket(compID)
+	require.NoError(t, err)
+	assert.Equal(t, state.MatchStatusRunning, got.Rounds[0][0].Status)
+	bye := got.Rounds[1][0]
+	assert.Equal(t, winnerOfPlaceholder(2, 0), bye.SideA)
+	assert.Empty(t, bye.SideAID)
+	assert.Empty(t, bye.Winner)
+	assert.Empty(t, bye.WinnerID)
+	assert.Equal(t, state.MatchStatusCompleted, bye.Status, "back to the latent-bye shape generation gives it")
+}
+
+// TestReopenBracketDownstreamCheck_ScheduledWithStrayDataIsNotResolvedByBye
+// covers the second half of bc-cse item 8: bracketMatchStartedOrScored is
+// true on more than a completed match (Winner/SubResults/Ippons set is
+// enough), so a downstream row that is still SCHEDULED but carries stray
+// Winner data must not be classified "resolved by a bye" -- that label
+// promises the specific, clean completed-via-bye shape
+// TestReopenMatch_ByeResolvedDownstream_IsUnwound pins,
+// and propagatedDownstream.played's OWN gate (bracketMatchCarriesOwnResult)
+// requires Completed too, so a scheduled row can never be "played" either.
+func TestReopenBracketDownstreamCheck_ScheduledWithStrayDataIsNotResolvedByBye(t *testing.T) {
+	bracket := &state.Bracket{
+		Rounds: [][]state.BracketMatch{
+			{{ID: "m-r1-0", SideA: "Alice", SideB: "Bob"}},
+			// Stray/transitional data: SCHEDULED but a Winner is already
+			// set (never happens on a normal write path; a hand-edited or
+			// mid-migration file is the reachable shape).
+			{{ID: "m-r2-0", SideA: "Alice", Winner: "Alice", Status: state.MatchStatusScheduled}},
+		},
+	}
+	err := reopenBracketDownstreamCheck(bracket, 0, 0, false)
+	assert.NoError(t, err, "a still-scheduled downstream row must not be labelled resolved-by-bye")
+}
+
 func TestDownstreamKnockoutCorrection_RestoreBypassesGuard(t *testing.T) {
 	eng, store, _ := setupTestEngine(t)
 	compID := "kcdg-restore"
@@ -274,7 +390,7 @@ func TestDownstreamKnockoutCorrection_RestoreBypassesGuard(t *testing.T) {
 		Status: state.MatchStatusCompleted,
 	}
 	txErr := inTx(t, store, compID, func(tx state.StoreTx) error {
-		_, err := eng.recordBracketMatchResult(tx, compID, "m-r1-0", snapshot, matchWriteRestore, false)
+		_, _, err := eng.recordBracketMatchResult(tx, compID, "m-r1-0", snapshot, matchWriteRestore, false)
 		return err
 	})
 	require.NoError(t, txErr, "matchWriteRestore must never be refused by the downstream guard")
@@ -905,12 +1021,12 @@ func TestDownstreamKnockoutCorrection_ReopenedCarriesTheMatchNumber(t *testing.T
 			{
 				{ID: "m-r1-0", SideA: "Alice", SideB: "Bob", SideAID: "alice", SideBID: "bob",
 					Winner: "Alice", WinnerID: "alice", Status: state.MatchStatusCompleted,
-					IpponsA: []string{"M"}, MatchNumber: 1},
+					IpponsA: []string{"M"}, MatchNumber: 1, DisplayRound: 2},
 			},
 			{
 				{ID: "m-r2-0", SideA: "Alice", SideB: "Charlie", SideAID: "alice", SideBID: "charlie",
 					Winner: "Alice", WinnerID: "alice", Status: state.MatchStatusCompleted,
-					IpponsA: []string{"M", "M"}, MatchNumber: 3},
+					IpponsA: []string{"M", "M"}, MatchNumber: 3, DisplayRound: 1},
 			},
 		},
 	}))
@@ -925,7 +1041,7 @@ func TestDownstreamKnockoutCorrection_ReopenedCarriesTheMatchNumber(t *testing.T
 	require.ErrorAs(t, txErr, &dkErr)
 	require.Len(t, dkErr.Blocking, 1)
 	assert.Equal(t, 3, dkErr.Blocking[0].Number, "the operator's label, not the id")
-	assert.Contains(t, dkErr.Error(), "Match 3")
+	assert.Contains(t, dkErr.Error(), "Match 3 (Final)", "the number, qualified by its knockout round")
 	assert.NotContains(t, dkErr.Error(), "m-r2-0", "the internal id must not be shown")
 
 	// And so does what the forced write reports back.
@@ -938,7 +1054,7 @@ func TestDownstreamKnockoutCorrection_ReopenedCarriesTheMatchNumber(t *testing.T
 	require.Len(t, reopened, 1)
 	assert.Equal(t, "m-r2-0", reopened[0].ID, "the id still travels, for addressing the match")
 	assert.Equal(t, 3, reopened[0].Number)
-	assert.Equal(t, "Match 3", MatchLabel(reopened[0]))
+	assert.Equal(t, "Match 3 (Final)", MatchLabel(reopened[0]))
 
 	// A match with no number (a bye placeholder, or a pre-numbering bracket)
 	// falls back to the id rather than printing "Match 0".
@@ -991,4 +1107,41 @@ func TestDownstreamKnockoutCorrection_ReopenedSiblingsDoNotHoldACourt(t *testing
 		running++
 	}
 	assert.Zero(t, running, "a reopen starts nothing; the operator starts the next match themselves")
+}
+
+// The confirmation reopens the next match, and what THAT match had sent on is
+// taken back out of a round nobody has touched: the final stops advertising a
+// competitor whose semifinal win was just cleared. It is the retraction a pool
+// correction's reopen applies (retractIntoUntouched). A round that was already
+// played is left for its own confirmation (TestDownstreamKnockoutCorrection_Force).
+func TestDownstreamKnockoutCorrection_ForceRetractsFromAnUntouchedRound(t *testing.T) {
+	eng, store, _ := setupTestEngine(t)
+	compID := "kcdg-untouched-final"
+	seedThreeRoundBracket(t, store, compID)
+	require.NoError(t, store.UpdateBracket(compID, func(b *state.Bracket) error {
+		final := &b.Rounds[2][0]
+		final.Winner, final.WinnerID = "", ""
+		final.IpponsA = nil
+		final.Status = state.MatchStatusScheduled
+		return nil
+	}))
+
+	var reopened []ReopenedMatch
+	txErr := inTx(t, store, compID, func(tx state.StoreTx) error {
+		_, err := eng.RecordMatchResultWithIneligibilityTx(tx, compID, "m-r1-0", correctR1ToBob("confirmed override"),
+			ForceOptions{Force: true, Reopened: &reopened})
+		return err
+	})
+	require.NoError(t, txErr)
+	require.Equal(t, []string{"m-r2-0"}, reopenedIDs(reopened))
+
+	b, err := store.LoadBracket(compID)
+	require.NoError(t, err)
+	assert.Equal(t, "Bob", b.Rounds[1][0].SideA, "the corrected winner is seated in the reopened match")
+	final := b.Rounds[2][0]
+	assert.Equal(t, winnerOfPlaceholder(len(b.Rounds)-1, 0), final.SideA,
+		"the untouched final waits for the reopened match again instead of naming Alice")
+	assert.Empty(t, final.SideAID, "a placeholder carries no id")
+	assert.Equal(t, "Dave", final.SideB, "the other side is not this correction's")
+	assert.Equal(t, state.MatchStatusScheduled, final.Status)
 }

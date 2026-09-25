@@ -186,6 +186,19 @@ describe('AdminCompetition section render-smoke (mp-hpe3 split characterization)
   });
 });
 
+// The page keeps its 1400px width everywhere except the Bracket section, which
+// takes the whole window so a six-round tree (33 to 64 competitors) has room
+// on a large monitor (operator decision).
+describe('AdminCompetition page width', () => {
+  it('lifts the 1400px width only on the Bracket section', async () => {
+    const page = (c) => c.querySelector('.page');
+    const { container: bracket } = await mountSection('bracket');
+    expect(page(bracket).style.maxWidth).toBe('none');
+    const { container: overview } = await mountSection('overview');
+    expect(page(overview).style.maxWidth).toBe('1400px');
+  });
+});
+
 // mp-gy6g: "Complete competition" is the only trigger for a bracket-based
 // (knockout, or mixed-after-knockout) competition to ever reach status
 // "completed" — MaybeAutoCompletePools only auto-transitions League on its

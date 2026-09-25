@@ -39,6 +39,15 @@
 // than fall through to a wrong-shape merge.
 import { mergeMatchPatch as _mergeMatchPatch } from './data.jsx';
 import { normalizeMatch, buildPlayerMap } from './api_serializers.jsx';
+import { isBarredMatch } from './ineligible_match.jsx';
+
+// bc-cse: _mergeMatchPatchKeepIneligible, which used to live here, is gone.
+// It defended `ineligibleSides` against an explicit `null` in the patch, but
+// the field is a Go pointer with `omitempty` (internal/state/models.go), so
+// an absent stamp is OMITTED from the wire, never sent as `null` or `{}` --
+// that shape cannot occur. An omitted key already survives the ordinary
+// `{...existing, ...patch}` spread `_mergeMatchPatch` performs unchanged, so
+// the wrapper was defending against a payload the server can never send.
 
 // statusSortOrder mirrors annotateBracketQueuePositions in
 // internal/mobileapp/handlers_match.go and the per-court sort in
@@ -115,7 +124,10 @@ function recomputeQueuePositions(matches) {
     for (const bucket of byCourt.values()) {
         let counter = 0;
         for (const e of bucket) {
-            if (e.m.status === "scheduled") {
+            // A barred match (ineligible_match.jsx) cannot be fought as
+            // scheduled: it holds position 0 and is skipped by the counter,
+            // so later matches move up to take the slot it would have held.
+            if (e.m.status === "scheduled" && !isBarredMatch(e.m)) {
                 counter++;
                 newPositions[e.idx] = counter;
             }
@@ -201,7 +213,8 @@ function recomputeBracketQueuePositions(bracket) {
         let counter = 0;
         for (const e of bucket) {
             let pos = 0;
-            if (e.m.status === "scheduled") {
+            // Same barred-skip rule as recomputeQueuePositions above.
+            if (e.m.status === "scheduled" && !isBarredMatch(e.m)) {
                 counter++;
                 pos = counter;
             }
@@ -406,6 +419,13 @@ function applyPatch(prev, event) {
         if (prevStatus === "scheduled" && nextStatus === "scheduled") {
             if ((prevMatch.court || "") !== (nextMatch.court || "")) return true;
             if ((prevMatch.scheduledAt || "") !== (nextMatch.scheduledAt || "")) return true;
+            // A patch that DOES carry ineligibleSides (the contract only says
+            // one "may" arrive without it) can flip whether this still-
+            // scheduled match is barred. recomputeQueuePositions gives a
+            // barred match position 0 and skips it in the per-court count, so
+            // that flip changes queue membership exactly like leaving/entering
+            // `scheduled` does: siblings on either side must re-rank.
+            if (isBarredMatch(prevMatch) !== isBarredMatch(nextMatch)) return true;
         }
         return false;
     };

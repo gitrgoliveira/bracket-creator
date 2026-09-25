@@ -72,6 +72,14 @@ beforeEach(() => {
   window.API.recordScore.mockClear();
 });
 
+// bc-tmfn: every bout of a team match is fought, so Finish refuses while a
+// numbered bout has no result. These fixtures finish, so each numbered bout
+// is recorded as a Tie, which is what an untouched row used to be sent as:
+// the daihyosen row these tests are about sees exactly what it saw before.
+const FOUGHT_BOUTS = [1, 2, 3].map((position) => ({
+  position, sideA: '', sideB: '', ipponsA: [], ipponsB: [], winner: '', decision: 'hikiwake',
+}));
+
 function makeMatch(overrides = {}) {
   return {
     id: 'm-pool-1',
@@ -85,6 +93,7 @@ function makeMatch(overrides = {}) {
     sideA: { id: 'team-kyoto', name: 'Kyoto' },
     sideB: { id: 'team-osaka', name: 'Osaka' },
     ...overrides,
+    subResults: [...FOUGHT_BOUTS, ...(overrides.subResults || [])],
   };
 }
 

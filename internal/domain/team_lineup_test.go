@@ -358,3 +358,38 @@ func TestTeamLineupOrderedMembers_IdOnlySlotIsOccupied(t *testing.T) {
 	}
 	assert.Equal(t, []string{"Aoki", ""}, gotNames)
 }
+
+// PositionForBout names the position that fights numbered bout n, which the
+// team finish gate's refusal uses to label a five-person team's bouts.
+func TestPositionForBout(t *testing.T) {
+	pos, ok := domain.PositionForBout(5, 4)
+	require.True(t, ok)
+	assert.Equal(t, domain.PosFukusho, pos)
+	pos, ok = domain.PositionForBout(3, 3)
+	require.True(t, ok)
+	assert.Equal(t, domain.PositionNumbered(3), pos)
+	_, ok = domain.PositionForBout(3, 4)
+	assert.False(t, ok)
+	_, ok = domain.PositionForBout(5, 0)
+	assert.False(t, ok)
+}
+
+func TestPosition_Label(t *testing.T) {
+	tests := []struct {
+		pos  domain.Position
+		want string
+	}{
+		{domain.PosSenpo, "Senpo"},
+		{domain.PosJiho, "Jiho"},
+		{domain.PosChuken, "Chuken"},
+		{domain.PosFukusho, "Fukusho"},
+		{domain.PosTaisho, "Taisho"},
+		{domain.PositionNumbered(3), "3"},
+		{"1", "1"},
+		{"", ""},
+		{"unknown", "Unknown"},
+	}
+	for _, tc := range tests {
+		assert.Equal(t, tc.want, tc.pos.Label(), "position %q", tc.pos)
+	}
+}

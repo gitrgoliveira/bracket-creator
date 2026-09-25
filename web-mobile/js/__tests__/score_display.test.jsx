@@ -188,13 +188,17 @@ describe('formatIpponsScore', () => {
       expect(formatIpponsScore(['○', '○'], [], null, 'kiken-voluntary', null, false, 'left')).toBe('○○ vs Kiken');
     });
 
-    it('fusensho places NO side mark: the bout badge carries it (documented Excel divergence)', () => {
-      // internal/export/suffix.go SideMarks folds fusensho in as a winner-side
-      // "Fus." because Excel has no badges; the JS mirror deliberately does
-      // not. Pin the divergence from this side too so a future change folding
-      // "Fus." back into the string cannot land silently.
-      expect(formatIpponsScore(['M'], [], null, 'fusensho', null, false, 'left')).toBe('M vs –');
-      expect(formatIpponsScore([], [], null, 'fusensho', null, false, 'left')).toBe('○○ vs –');
+    it('fusensho places a winner-side "Fus." mark, mirroring internal/export/suffix.go SideMarks exactly (bc-tmfn)', () => {
+      // The earlier version of this test pinned a deliberate divergence: the
+      // Excel export folded fusensho in as a winner-side "Fus." (no badge to
+      // carry it there) while this surface omitted it on the theory that "the
+      // viewer surfaces it via a separate bout badge". No such badge exists
+      // for a MATCH-LEVEL fusensho decision, so that theory left a real
+      // default win with no mark anywhere on this surface. sideMarks now
+      // agrees with the Go mirror unconditionally; there is no divergence
+      // left to pin.
+      expect(formatIpponsScore(['M'], [], null, 'fusensho', null, false, 'left')).toBe('M Fus. vs –');
+      expect(formatIpponsScore([], [], null, 'fusensho', null, false, 'left')).toBe('○○ Fus. vs –');
     });
 
     it('kiken during overtime: loser mark plus the (E) middle', () => {

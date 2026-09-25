@@ -769,11 +769,17 @@ func (e *Engine) SwissStandings(compID string) ([]state.PlayerStanding, error) {
 		if sA == nil || sB == nil {
 			continue
 		}
-		if isTeam && len(m.SubResults) > 0 {
+		if isTeam {
 			// Team match: the parent carries no ippons of its own, so the
 			// tie-break columns (IV/IL/IT/PW/PL) come from the sub-bouts,
 			// via the same shared accrual the pool path uses in
-			// computeStandingsFrom.
+			// computeStandingsFrom. Unconditional, not gated on
+			// len(m.SubResults) > 0: routing is by isTeam alone (see
+			// computeStandingsFrom's twin comment), so a padding-less
+			// default-win match was never misrouted into the individual
+			// branch below -- the gap padding closes is CREDIT: without
+			// it, accrueTeamSubResults' loop over an empty slice is a
+			// no-op and silently contributes zero IV/PW for it.
 			accrueTeamSubResults(sA, sB, m)
 		} else {
 			// Individual scoring: ippons at match level, via countScoringIppons

@@ -13,34 +13,6 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestIsTiebreakerMatchID(t *testing.T) {
-	tests := []struct {
-		id   string
-		want bool
-	}{
-		{"Pool A-TB-0", true},
-		{"Pool A-TB-1", true},
-		{"Pool B-TB-42", true},
-		{"Pool A-East-TB-0", true}, // hyphenated pool name
-		{"Pool A-0", false},
-		{"Pool A-1", false},
-		{"Pool A-TB", false},    // no index after TB
-		{"Pool A-T-0", false},   // different prefix
-		{"Pool A-TBx-0", false}, // wrong prefix
-		{"TB-0", false},         // no pool name separator
-		{"", false},
-		// Same sibling scenario as IsPoolDaihyosenMatchID: a pool literally
-		// named "Pool A-TB-East" must not have its regular match ids
-		// misclassified as tiebreaker bouts.
-		{"Pool A-TB-East-0", false},
-	}
-	for _, tc := range tests {
-		t.Run(tc.id, func(t *testing.T) {
-			assert.Equal(t, tc.want, IsTiebreakerMatchID(tc.id))
-		})
-	}
-}
-
 // namesAt resolves a tied position group back to competitor names, for stable
 // assertions when the input was sorted by Points.
 func namesAt(standings []state.PlayerStanding, positions []int) []string {

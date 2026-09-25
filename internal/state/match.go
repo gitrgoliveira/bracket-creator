@@ -156,7 +156,14 @@ func DeriveQueuePositions(matches []MatchResult) []int {
 		})
 		counter := 0
 		for _, e := range entries {
-			if e.m.Status == MatchStatusScheduled {
+			// bc-cse: a scheduled match whose resolved side ids are
+			// currently barred (IneligibleSides, stamped by the caller
+			// BEFORE this runs -- see mobileapp.annotateIneligibleSides)
+			// is not queued: it cannot be started until the operator
+			// reinstates the barred side or records the default win, so
+			// "Next up" and on-deck alerts must skip it rather than
+			// present a match nobody can actually start next.
+			if e.m.Status == MatchStatusScheduled && e.m.IneligibleSides == nil {
 				counter++
 				positions[e.idx] = counter
 			}

@@ -50,9 +50,9 @@ const args = Object.fromEntries(process.argv.slice(2).map((token) => {
 // Chromium's text rasterisation follows the HOST's font and colour
 // configuration, so these pin it to one instead: greyscale antialiasing, no
 // hinting, sRGB. Load-bearing rather than tidy-up - removing them changes every
-// one of the 30 captures (measured), so the committed images ARE this
-// configuration's output and a host rendering any other way reports all 30 as
-// changed.
+// capture (measured when there were 30), so the committed images ARE this
+// configuration's output and a host rendering any other way reports every
+// capture as changed.
 const DETERMINISTIC_RENDERING = [
   '--disable-lcd-text',
   '--disable-font-subpixel-positioning',
@@ -108,7 +108,7 @@ function scoped(list, since) {
 // docs/screenshots holds this harness's own output: an unchanged surface
 // reproduces the committed file to within the tolerance png.mjs sets. So
 // "unchanged" means there is nothing to eyeball and nothing to copy, which is
-// what makes a 30-capture run reviewable. Dimensions are reported only when the
+// what makes a full run reviewable. Dimensions are reported only when the
 // pixels DID move, where they distinguish a layout change from a change in the
 // pixels inside it.
 function reportStill(recipe, file) {
@@ -286,7 +286,7 @@ async function main() {
 
   const results = [];
   // Record a capture as failed and remove its output from an EARLIER run. The
-  // console FAILED line scrolls past in a 33-recipe run, and contributing.md
+  // console FAILED line scrolls past in a 31-recipe run, and contributing.md
   // tells the operator to copy what is in out/ across to docs/ - so a stale
   // image left behind is one they would copy believing it fresh.
   const fail = (recipe, why) => {
@@ -383,7 +383,7 @@ async function main() {
   console.log(`\n${results.length} captured, ${failed.length} failed`);
   console.log(`${unchanged.length} unchanged, ${changed.length} changed, ${videos.length} video (not compared)`);
   // The point of the content compare: name the short list, so the operator
-  // reviews and copies those rather than re-checking all 30 by eye.
+  // reviews and copies those rather than re-checking every capture by eye.
   if (changed.length) {
     console.log('\nchanged - eyeball these, then copy them over docs/screenshots/:');
     for (const [name, v] of changed) console.log(`  ${name}: ${v.note}`);

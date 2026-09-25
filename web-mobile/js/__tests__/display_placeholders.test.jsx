@@ -67,3 +67,51 @@ describe('display helpers reject pool-origin placeholders (mp-turx)', () => {
     expect(findActiveCourts(tournament, [comp])).toContain('B');
   });
 });
+
+// bc-tmfn: findUpcomingOnCourt is a "what is next" picker (like the placeholder
+// rejection above), so it must skip a barred scheduled match (ineligible_match.jsx)
+// exactly like it skips a pool/"Winner of" placeholder -- neither can be fought
+// as scheduled.
+describe('findUpcomingOnCourt skips a barred match (bc-tmfn)', () => {
+  it('excludes a barred pool match, leaving its unbarred sibling', () => {
+    const comp = {
+      id: 'c1', name: 'Comp', format: 'mixed',
+      poolMatches: [
+        { id: 'p1', court: 'A', status: 'scheduled', sideA: 'Alice', sideB: 'Bob', ineligibleSides: { a: 'kiken-voluntary' } },
+        { id: 'p2', court: 'A', status: 'scheduled', sideA: 'Carol', sideB: 'Dave' },
+      ],
+      bracket: { rounds: [] },
+    };
+    const ids = findUpcomingOnCourt([comp], 'A', 10).map((m) => m.id);
+    expect(ids).not.toContain('p1');
+    expect(ids).toContain('p2');
+  });
+
+  it('excludes a barred bracket match', () => {
+    const comp = {
+      id: 'c2', name: 'Comp2', format: 'knockout',
+      poolMatches: [],
+      bracket: {
+        preview: false,
+        rounds: [[
+          { id: 'b0', court: 'A', status: 'scheduled', sideA: 'Alice', sideB: 'Bob', ineligibleSides: { b: 'fusenpai' } },
+        ]],
+      },
+    };
+    expect(findUpcomingOnCourt([comp], 'A', 10).map((m) => m.id)).not.toContain('b0');
+  });
+
+  it('does NOT exclude a match whose stamp is on a non-scheduled status (barredSides gates on status)', () => {
+    // Defensive: isBarredMatch itself already returns false off `scheduled`,
+    // so this just pins that findUpcomingOnCourt never sees a running/
+    // completed match here in the first place (its own status filter).
+    const comp = {
+      id: 'c3', name: 'Comp3', format: 'mixed',
+      poolMatches: [
+        { id: 'p1', court: 'A', status: 'running', sideA: 'Alice', sideB: 'Bob', ineligibleSides: { a: 'kiken-voluntary' } },
+      ],
+      bracket: { rounds: [] },
+    };
+    expect(findUpcomingOnCourt([comp], 'A', 10).map((m) => m.id)).not.toContain('p1');
+  });
+});

@@ -215,9 +215,7 @@ func excelRoundSizes(players []domain.Player) []int {
 		names[i] = p.Name
 	}
 	// Normalize through the slot codec exactly as NewKnockoutDraw does for the
-	// printed workbook: the raw CreateBalancedTree tree is riseless and
-	// classifies a phantom-risen pair a round late, which is the old geometry
-	// this test would otherwise re-assert.
+	// printed workbook, so this reads the tree the workbook prints.
 	tree := helper.BuildSlotTree(helper.SlotArray(helper.CreateBalancedTree(names)))
 	var sizes []int
 	for _, round := range helper.BuildEliminationMatchRounds(tree) {
@@ -290,12 +288,11 @@ func TestBracketDisplayMetadata_MatchesExcelRounds(t *testing.T) {
 
 // TestBracketDisplayMetadata_Feeders verifies the feeder graph is well formed
 // across roster sizes (including deep multi-level bye chains, e.g. 24 players):
-// every feeder ID resolves to a real, non-hidden match STRICTLY deeper in
-// DisplayRound, and every real match except the final is referenced exactly
-// once as a feeder. Strictly deeper, not exactly one: a phantom-risen pair
-// fights in round 1 and its winner byes across the skipped column straight
-// into a much later bout, exactly as the reference sheets draw the long
-// winner line (34th EKC Junior Male F2 into F4).
+// every feeder ID resolves to a real, non-hidden match exactly one DisplayRound
+// deeper, and every real match except the final is referenced exactly once as
+// a feeder. Exactly one because a bout's round is its distance from the final,
+// which is how the reference sheets number their columns (34th EKC Junior
+// Individual Male: P4 v P5, beside an empty pair, prints in column 2).
 func TestBracketDisplayMetadata_Feeders(t *testing.T) {
 	cases := []struct {
 		name        string
@@ -305,8 +302,12 @@ func TestBracketDisplayMetadata_Feeders(t *testing.T) {
 		{"5 players", 5, 0},
 		{"7 players", 7, 0},
 		{"8 players (pow2)", 8, 0},
+		// 9 and 19, like 5, hold a pair beside an empty pair, so they fail if
+		// that pair is classified anywhere but its distance from the final.
+		{"9 players", 9, 0},
 		{"12 players", 12, 0},
 		{"16 players (pow2)", 16, 0},
+		{"19 players", 19, 0},
 		{"24 players", 24, 0},
 		{"24 players 8 seeds", 24, 8},
 	}
@@ -335,8 +336,8 @@ func TestBracketDisplayMetadata_Feeders(t *testing.T) {
 					f, ok := byID[fid]
 					require.Truef(t, ok, "feeder %s must exist", fid)
 					assert.Falsef(t, f.Hidden, "feeder %s must be a real match", fid)
-					assert.Greaterf(t, f.DisplayRound, m.DisplayRound,
-						"feeder %s must be strictly deeper than its parent", fid)
+					assert.Equalf(t, m.DisplayRound+1, f.DisplayRound,
+						"feeder %s must be one DisplayRound deeper than its parent", fid)
 					refCount[fid]++
 				}
 			}

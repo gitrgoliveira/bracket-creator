@@ -172,7 +172,9 @@ func TestComputeTeamSummaryFromSubResults(t *testing.T) {
 		{Position: -1, Decision: string(domain.DecisionDaihyosen)},
 	}
 
-	a, b := ComputeTeamSummary(subs, sideA, sideB)
+	// domain.MatchSideNone: every bout above already carries its own result,
+	// so no default-win ruling could ever apply here regardless of credit.
+	a, b := ComputeTeamSummary(subs, sideA, sideB, domain.MatchSideNone)
 	assert.Equal(t, TeamSummary{IndividualWins: 1, PointsWon: 4}, a)
 	assert.Equal(t, TeamSummary{IndividualWins: 1, PointsWon: 3}, b)
 	assert.True(t, IsTied(TeamSummary{IndividualWins: a.IndividualWins, PointsWon: 0},

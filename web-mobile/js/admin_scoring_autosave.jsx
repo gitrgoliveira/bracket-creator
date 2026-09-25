@@ -102,6 +102,24 @@ export function useDebouncedRunningWrite({ isRunningRef, buildPatchRef, onSubmit
   // Clear on unmount so the closure can't fire after the component is gone.
   useEffectA(() => () => { cancelDebounce(); }, []);
 
+  // The running write itself, shared by the debounce timer and flushPending so
+  // the two can never apply different gates.
+  const fireRunningWrite = () => {
+    if (!mountedRef.current) return;
+    // gate 3: re-check running at FIRE time. If the match was completed
+    // during the debounce window (this operator's Finish cancels the timer,
+    // but an SSE update or another operator can complete it out from under
+    // us), isRunningRef has flipped false on re-render: sending a
+    // status:"running" autosave now would regress the completed result.
+    if (!isRunningRef.current) return;
+    // Fire-and-forget: errors swallowed; operator's explicit Finish is
+    // the authoritative write.
+    try {
+      const p = onSubmitRef.current(buildPatchRef.current("running"));
+      if (p && typeof p.catch === "function") p.catch(() => {});
+    } catch (_) { /* swallow */ }
+  };
+
   // markDirty: call from every user-driven mutation handler (addPt,
   // removePt, foul increment/decrement, draw toggle, encho change, team
   // sub-bout edits). Do NOT call from prop/SSE-driven state writes.
@@ -110,21 +128,20 @@ export function useDebouncedRunningWrite({ isRunningRef, buildPatchRef, onSubmit
     cancelDebounce();
     timerRef.current = setTimeout(() => {
       timerRef.current = null;
-      if (!mountedRef.current) return;
-      // gate 3: re-check running at FIRE time. If the match was completed
-      // during the debounce window (this operator's Finish cancels the timer,
-      // but an SSE update or another operator can complete it out from under
-      // us), isRunningRef has flipped false on re-render: sending a
-      // status:"running" autosave now would regress the completed result.
-      if (!isRunningRef.current) return;
-      // Fire-and-forget: errors swallowed; operator's explicit Finish is
-      // the authoritative write.
-      try {
-        const p = onSubmitRef.current(buildPatchRef.current("running"));
-        if (p && typeof p.catch === "function") p.catch(() => {});
-      } catch (_) { /* swallow */ }
+      fireRunningWrite();
     }, AUTOSAVE_DEBOUNCE_MS);
   };
 
-  return { markDirty, cancelDebounce };
+  // flushPending: save NOW instead of in 300ms (bc-dscn). Closing an editor on
+  // a running match calls this so an edit still inside the debounce window is
+  // written rather than dropped by the unmount's cancelDebounce. It fires
+  // whether or not a timer is pending, because not every edit arms one (the
+  // individual editor's encho counter does not call markDirty); the caller
+  // gates it on its own isDirty, so an untouched editor never writes.
+  const flushPending = () => {
+    cancelDebounce();
+    fireRunningWrite();
+  };
+
+  return { markDirty, cancelDebounce, flushPending };
 }

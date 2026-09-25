@@ -353,7 +353,7 @@ func TestDaihyosenHandler_HappyPath(t *testing.T) {
 // while every other call the endpoint makes stays production code.
 type startedAutoEngine struct{ *engine.Engine }
 
-func (startedAutoEngine) MaybeAutoCompletePools(string) (engine.AutoCompleteOutcome, error) {
+func (startedAutoEngine) MaybeAutoCompletePoolsAfterWrite(string, ...state.MatchResult) (engine.AutoCompleteOutcome, error) {
 	return engine.AutoCompleteStarted, nil
 }
 
@@ -626,18 +626,18 @@ func TestRemoveDaihyosen_PoolMatchWithStaleWinnerIDSucceeds(t *testing.T) {
 	}
 }
 
-// TestRemoveDaihyosen_CorruptOverrides_TerminalError is bc-pnum gap 3: DELETE
-// .../daihyosen writes through RecordMatchResultWithIneligibilityTx, exactly
-// as the previous test's pool-match removal does. When the parent match is a
-// POOL match under a MIXED competition (reachable only via a legacy/hand-
-// edited row carrying a Position=-1 sub, per that write's own doc comment --
-// AddDaihyosen itself rejects a pool id, so POST can never build this shape),
-// the mp-e2k1 mixed-pool guard's computeStandingsFrom call reaches the same
-// LoadOverrides call the score/decision endpoints already handle. Before this
-// fix that fell through to internalError's 500; the fix adds the shared
-// respondIfCorruptOverrides check between respondIfValidationError and the
-// default 500 arm.
-func TestRemoveDaihyosen_CorruptOverrides_TerminalError(t *testing.T) {
+// TestRemoveDaihyosen_RunningWriteReadsNoStandings: DELETE .../daihyosen
+// writes through RecordMatchResultWithIneligibilityTx with the match back to
+// RUNNING. When the parent is a POOL match under a MIXED competition
+// (reachable only via a legacy/hand-edited row carrying a Position=-1 sub,
+// since AddDaihyosen rejects a pool id), that write used to run the old
+// qualifier guard's standings read, so a corrupt overrides.json refused it
+// (bc-pnum gap 3 mapped that to 422). A running write leaves its pool
+// incomplete and so can move no qualifier: the requalification check skips
+// it before reading anything, and the removal lands whatever state
+// overrides.json is in. The 422 mapping stays for every write that does read
+// standings.
+func TestRemoveDaihyosen_RunningWriteReadsNoStandings(t *testing.T) {
 	r, store, _, _, dir := setupDaihyosenTestRouter(t)
 	compID := "corrupt-ov-rm-daihyosen"
 	require.NoError(t, store.SaveCompetition(&state.Competition{
@@ -653,6 +653,8 @@ func TestRemoveDaihyosen_CorruptOverrides_TerminalError(t *testing.T) {
 		},
 	}))
 
+	seatUnresolvedPoolAKnockout(t, store, compID)
+
 	overridesPath := filepath.Join(dir, "competitions", compID, "overrides.json")
 	require.NoError(t, os.WriteFile(overridesPath, []byte("{not valid json"), 0o600))
 
@@ -660,12 +662,11 @@ func TestRemoveDaihyosen_CorruptOverrides_TerminalError(t *testing.T) {
 		"/api/competitions/"+compID+"/matches/Pool%20A-0/daihyosen", nil)
 	w := httptest.NewRecorder()
 	r.ServeHTTP(w, req)
-	require.Equal(t, http.StatusUnprocessableEntity, w.Code, "body: %s", w.Body.String())
-	assert.Contains(t, w.Body.String(), "corrupt_overrides")
+	require.Equal(t, http.StatusOK, w.Code, "body: %s", w.Body.String())
 
 	matches, err := store.LoadPoolMatches(compID)
 	require.NoError(t, err)
 	require.Len(t, matches, 1)
-	require.Len(t, matches[0].SubResults, 1, "the rejected write must not have landed")
+	assert.Empty(t, matches[0].SubResults, "the daihyosen row is removed")
 	assert.Equal(t, state.MatchStatusRunning, matches[0].Status)
 }

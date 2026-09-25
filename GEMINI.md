@@ -67,7 +67,7 @@ Rankings within pools are determined by the following criteria:
 Individual encounters between teams are decided by:
 1. Highest number of individual winners (Victories).
 2. Highest number of points scored.
-3. If still tied, the match is a draw in pool play, or proceeds to a play-off in elimination rounds.
+3. If still tied, the match is a draw in pool play, or goes to a daihyosen (representative bout) in elimination rounds (FIK Article 8-1).
 
 ### Tie-marking Rule
 A match (individual or sub-match) is a tie when the operator enters **'X'** (or 'x') in the "vs" column, or when both sides' totals are equal and at least one score cell in the row is filled. The "vs" column is unlocked on all sheets.
@@ -144,10 +144,11 @@ On tree and knockout brackets, the player/team on the top of the bracket is alwa
 - **Review threads still appear — the repo owner posts them by hand.** Read and address them like any other review feedback. What is retired is the bot and the loop around it, not the reviewing.
 - **Never report a review round "clean" until a fresh fetch shows zero unresolved threads.** State the total unresolved count first, give every thread an explicit disposition (fix, or dismissal with a reason), then re-verify the count is zero. Report `resolved` and `outdated` threads separately: a query that filters out outdated-but-visible threads produces a false "clean" that contradicts what the user sees.
 - **Paginate when counting or resolving threads.** GitHub's `reviewThreads(first:100)` caps at 100; a capped lookup silently finds nothing past #100 and falsely prints "already resolved" while leaving them unresolved.
-- Run `make go/test` after fixes and before pushing: a red gate means fix-or-revert, never push.
+- Test review fixes with targeted tests while you work, and run the full `make go/test` once before saying the round is done (see **Gate cadence** below): a red gate means fix-or-revert, never push.
 
 ## Testing & Verification
 
+- **Gate cadence: targeted tests while iterating, the full gate before claiming completion.** `make go/test` takes about 3 minutes and keeps every core busy, slowing every other session on the machine. While iterating, run only what the change touches (`go -C <wt> test -run TestName ./internal/<pkg>/...`, `npm --prefix <wt>/web-mobile test -- js/__tests__/<file>.test.jsx`, `npm --prefix <wt>/web-mobile run test:render -- js/__tests__/render/<file>.render.test.jsx`). Run the full `make go/test` before any claim that the work is done, fixed or passing, before pushing, and before marking a PR ready; a change made after that run needs it again.
 - **Verify in the browser, never substitute API/curl calls.** Manual test-plan items and UAT must be executed through the actual UI.
 - **Test self-run / public features from the PUBLIC page, not the admin UI**: the public flow is what users hit; admin-side scoring proves nothing about it.
 - **File gap/UX issues incrementally as you find them**, not batched at the end of a UAT pass.

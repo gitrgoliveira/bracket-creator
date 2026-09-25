@@ -164,7 +164,7 @@ The **Participant list** panel (labelled **Team list** for team competitions) co
 - Without display name: `Name, Dojo[, Dan grade]`
 - With display name (zekken): `Name, Zekken display name, Dojo[, Dan grade]`
 
-Click **Paste clipboard** to read a tab-separated selection from the clipboard and convert it automatically. Click **Apply changes** to save the list; the box clears once the list is saved. The box is for a new or replacement list, not a copy of the saved roster: applying while a roster already exists asks you to confirm, because the new list replaces the current one (anyone not in the new list is removed, and names already on the roster keep their id and seed).
+Click **Paste clipboard** to read a tab-separated selection from the clipboard and convert it automatically. Click **Apply changes** to save the list; the box clears once the list is saved. The box is for a new or replacement list, not a copy of the saved roster: applying while a roster already exists asks you to confirm, because the new list replaces the current one. A competitor or team matched to one already on the roster, by name and dojo, keeps their id and seed; for a team, their team members and lineups are kept too. Anyone not in the new list is removed, and, while the competition is still in setup, a removed team's members and lineups are deleted with it.
 
 Applying the list gives every competitor a participant id. The id is not shown on the row; the **Overview** names any competitor still without one. Competitor numbers come later: every competition numbers its competitors when the draw is generated, pool by pool for a pooled competition or down the bracket for a knockout-only one, and nothing is shown before that. Refer to [Competitor numbers](pool-draw.md#competitor-numbers). A competition saved by an earlier version of the app whose list has no ids shows a notice on its **Overview** naming the competitors: apply the list once to assign them. The draw does not run until every competitor has an id.
 
@@ -227,9 +227,11 @@ A draw-ready competition is already listed on the shiai-jo operator views, since
 
 The **Pools** tab shows standings for every pool. Ranks are computed automatically from match results. Operators do not edit them by hand, with one exception: chusen (drawing lots), the last-resort tie-break for a consequential team-pool tie that a daihyosen cannot settle. Refer to [Recording decisions](../court-operators/recording-decisions.md). When a daihyosen settles a tie that determines pool advancement, the winning side carries a **DH** badge in the standings.
 
-Pool finishers move into the knockout bracket on their own: as soon as a pool's last match is scored, its qualifiers are seeded into their bracket slots. Those knockout matches can be scored without waiting for the other pools. Once the last pool is seeded, the competition moves to the knockout phase. The bracket updates in real time as results come in.
+Pool finishers move into the knockout bracket on their own: as soon as a pool's last match is scored, its qualifiers are seeded into their bracket slots. Those knockout matches can be scored without waiting for the other pools. Once the last pool is seeded, the competition moves to the knockout phase. The bracket updates in real time as results come in. A pool result corrected later still moves its qualifiers in the bracket; refer to [Correct a pool result after the knockout has started](../court-operators/scoring-a-match.md#correct-a-pool-result-after-the-knockout-has-started).
 
 ![The Pools tab: each pool as a card with its standings in draw order, every competitor carrying their number and a rank badge, the pool's matches with their results, and the head-to-head grid beneath.](../../screenshots/mobile-pool-standings.png)
+
+![The Bracket tab of a knockout of ten competitors, part-way through. The first column holds only the two first-round bouts, M1 and M2; everyone else first appears in a quarterfinal. M1 to M4 are scored, each winner ticked and joined to the row they fill. Quarterfinal M5 is marked NOW, the winners of M3 and M4 already face each other in semifinal M7, and the Final waits for the winners of M7 and M8.](../../screenshots/knockout-bracket-in-play.png)
 
 For the four competition formats and the Swiss round-by-round flow, refer to [Formats](formats.md).
 

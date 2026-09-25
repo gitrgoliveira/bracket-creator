@@ -63,12 +63,12 @@
             "id": "m-r1-0",
             "sideA": "Player01",
             "sideB": "Player02",
-            "displayRound": 3,
+            "displayRound": 2,
             "feeders": [
               "",
               ""
             ],
-            "matchNumber": 1
+            "matchNumber": 2
           },
           {
             "id": "m-r1-1",
@@ -91,7 +91,7 @@
               "",
               ""
             ],
-            "matchNumber": 2
+            "matchNumber": 1
           }
         ],
         [
@@ -219,32 +219,32 @@
       ]
     },
     {
-      "name": "knockout on 1 shiaijo",
+      "name": "knockout on 1 shiaijo, orderings disagree here",
       "entrants": 9,
-      "discriminating": false,
+      "discriminating": true,
       "rounds": [
         [
           {
             "id": "m-r1-0",
             "sideA": "Player01",
             "sideB": "Player02",
-            "displayRound": 4,
-            "feeders": [
-              "",
-              ""
-            ],
-            "matchNumber": 1
-          },
-          {
-            "id": "m-r1-1",
-            "sideA": "Player03",
-            "sideB": "Player04",
-            "displayRound": 4,
+            "displayRound": 3,
             "feeders": [
               "",
               ""
             ],
             "matchNumber": 2
+          },
+          {
+            "id": "m-r1-1",
+            "sideA": "Player03",
+            "sideB": "Player04",
+            "displayRound": 3,
+            "feeders": [
+              "",
+              ""
+            ],
+            "matchNumber": 3
           },
           {
             "id": "m-r1-2",
@@ -262,12 +262,12 @@
             "id": "m-r1-4",
             "sideA": "Player05",
             "sideB": "Player06",
-            "displayRound": 4,
+            "displayRound": 3,
             "feeders": [
               "",
               ""
             ],
-            "matchNumber": 3
+            "matchNumber": 4
           },
           {
             "id": "m-r1-5",
@@ -290,7 +290,7 @@
               "",
               ""
             ],
-            "matchNumber": 4
+            "matchNumber": 1
           }
         ],
         [
@@ -298,12 +298,12 @@
             "id": "m-r2-0",
             "sideA": "Winner of r4-m0",
             "sideB": "Winner of r4-m1",
-            "displayRound": 3,
+            "displayRound": 2,
             "feeders": [
               "m-r1-0",
               "m-r1-1"
             ],
-            "matchNumber": 5
+            "matchNumber": 6
           },
           {
             "id": "m-r2-1",
@@ -326,7 +326,7 @@
               "",
               "m-r1-7"
             ],
-            "matchNumber": 6
+            "matchNumber": 5
           }
         ],
         [
@@ -373,12 +373,12 @@
             "id": "m-r1-0",
             "sideA": "Player01",
             "sideB": "Player02",
-            "displayRound": 4,
+            "displayRound": 3,
             "feeders": [
               "",
               ""
             ],
-            "matchNumber": 1
+            "matchNumber": 4
           },
           {
             "id": "m-r1-1",
@@ -401,7 +401,7 @@
               "",
               ""
             ],
-            "matchNumber": 2
+            "matchNumber": 1
           },
           {
             "id": "m-r1-4",
@@ -418,7 +418,7 @@
               "",
               ""
             ],
-            "matchNumber": 3
+            "matchNumber": 2
           },
           {
             "id": "m-r1-6",
@@ -435,7 +435,7 @@
               "",
               ""
             ],
-            "matchNumber": 4
+            "matchNumber": 3
           }
         ],
         [
@@ -864,32 +864,32 @@
       ]
     },
     {
-      "name": "knockout on 1 shiaijo",
+      "name": "knockout on 1 shiaijo, orderings disagree here",
       "entrants": 19,
-      "discriminating": false,
+      "discriminating": true,
       "rounds": [
         [
           {
             "id": "m-r1-0",
             "sideA": "Player01",
             "sideB": "Player02",
-            "displayRound": 5,
+            "displayRound": 4,
             "feeders": [
               "",
               ""
             ],
-            "matchNumber": 1
+            "matchNumber": 4
           },
           {
             "id": "m-r1-1",
             "sideA": "Player03",
             "sideB": "Player04",
-            "displayRound": 5,
+            "displayRound": 4,
             "feeders": [
               "",
               ""
             ],
-            "matchNumber": 2
+            "matchNumber": 5
           },
           {
             "id": "m-r1-2",
@@ -907,12 +907,12 @@
             "id": "m-r1-4",
             "sideA": "Player05",
             "sideB": "Player06",
-            "displayRound": 5,
+            "displayRound": 4,
             "feeders": [
               "",
               ""
             ],
-            "matchNumber": 3
+            "matchNumber": 6
           },
           {
             "id": "m-r1-5",
@@ -935,18 +935,18 @@
               "",
               ""
             ],
-            "matchNumber": 4
+            "matchNumber": 1
           },
           {
             "id": "m-r1-8",
             "sideA": "Player10",
             "sideB": "Player11",
-            "displayRound": 5,
+            "displayRound": 4,
             "feeders": [
               "",
               ""
             ],
-            "matchNumber": 5
+            "matchNumber": 8
           },
           {
             "id": "m-r1-9",
@@ -969,18 +969,18 @@
               "",
               ""
             ],
-            "matchNumber": 6
+            "matchNumber": 2
           },
           {
             "id": "m-r1-12",
             "sideA": "Player15",
             "sideB": "Player16",
-            "displayRound": 5,
+            "displayRound": 4,
             "feeders": [
               "",
               ""
             ],
-            "matchNumber": 7
+            "matchNumber": 10
           },
           {
             "id": "m-r1-13",
@@ -1003,7 +1003,7 @@
               "",
               ""
             ],
-            "matchNumber": 8
+            "matchNumber": 3
           }
         ],
         [
@@ -1011,12 +1011,12 @@
             "id": "m-r2-0",
             "sideA": "Winner of r5-m0",
             "sideB": "Winner of r5-m1",
-            "displayRound": 4,
+            "displayRound": 3,
             "feeders": [
               "m-r1-0",
               "m-r1-1"
             ],
-            "matchNumber": 9
+            "matchNumber": 12
           },
           {
             "id": "m-r2-1",
@@ -1039,7 +1039,7 @@
               "",
               "m-r1-7"
             ],
-            "matchNumber": 10
+            "matchNumber": 7
           },
           {
             "id": "m-r2-4",
@@ -1056,7 +1056,7 @@
               "",
               "m-r1-11"
             ],
-            "matchNumber": 11
+            "matchNumber": 9
           },
           {
             "id": "m-r2-6",
@@ -1073,7 +1073,7 @@
               "",
               "m-r1-15"
             ],
-            "matchNumber": 12
+            "matchNumber": 11
           }
         ],
         [

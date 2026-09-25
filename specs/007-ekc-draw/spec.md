@@ -128,19 +128,25 @@ cell (2026 Men F9) is deliberately flipped against the page because the 2025 and
 sheets are mutually inconsistent at that position (see the fixture comment).
 
 Round-1 pairings and byes below are transcribed exactly as recorded in the bead. They
-are the observed sheet layout, not a derivation.
+are the observed sheet layout, not a derivation. The Junior Individual Male table was
+corrected on 2026-09-25 against the PDF itself (page 4): the bead had put a five-pool
+court's second pair in the first column.
 
 ### A. Junior Individual Male
 
 18 pools, **1 qualifier** per pool. Courts: **A**(1-5) **B**(6-10) **C**(11-14)
 **D**(15-18).
 
-| Region | Home pools | Round-1 |
+| Region | Home pools | First bouts |
 |---|---|---|
-| Court A | 1, 2, 3, 4, 5 | **P1 byes**, P2 v P3, P4 v P5 |
-| Court B | 6, 7, 8, 9, 10 | **P6 byes**, P7 v P8, P9 v P10 |
-| Court C | 11, 12, 13, 14 | P11 v P12, P13 v P14 |
-| Court D | 15, 16, 17, 18 | P15 v P16, P17 v P18 |
+| Court A | 1, 2, 3, 4, 5 | P2 v P3 in the first column; **P1 byes** to meet its winner, level with P4 v P5 |
+| Court B | 6, 7, 8, 9, 10 | P7 v P8 in the first column; **P6 byes** to meet its winner, level with P9 v P10 |
+| Court C | 11, 12, 13, 14 | P11 v P12, P13 v P14 (second column) |
+| Court D | 15, 16, 17, 18 | P15 v P16, P17 v P18 (second column) |
+
+The sheet's first column holds only P2 v P3 and P7 v P8. Every other first bout,
+courts C and D included, is printed one column later, the column before each court's
+final.
 
 **Demonstrates:**
 
@@ -680,6 +686,22 @@ unextrapolated here; the per-pool phase landed as crossedBigBlockSlots/crossedHa
   went from NO byes to the sheet's 8, two per court in the h1/h2, h1/h3 pattern);
   `bracket_match_numbers.json` regenerated, the SPA's JS mirror suite passing.
 
+**Superseded (2026-09-25): the second pass below misread the sheet and has been
+reversed.** The 2026 Junior Male sheet (PDF page 4) prints P2 v P3 alone in court A's
+first column and P4 v P5 in the second, level with P1 v Winner F1; court B prints P7 v
+P8 and P9 v P10 the same way, and the 2025 Men Team five-team courts (page 14) agree.
+Root-distance classification was right all along. `TraverseRounds` and
+`BuildEliminationMatchRounds` again place every bout by its distance from the final,
+the `Node.risen*` marks are slot geometry only (`SlotArray` and the tree pages' leaf
+offsets), `applySlotDisplayRounds` and `helper.SlotRoundMatches` are deleted, and a
+match's DisplayRound comes from its stored feeders (`state.Bracket.
+StampRoundsFromFeeders`), both when the draw is generated and when a stored bracket
+is loaded, so a bracket drawn while the second pass was in force (v2.0.0, v2.1.0) is
+corrected on load. The parity suites (`match_numbering_parity_test.go`,
+`excel_draw_parity_test.go`) pin the app's rounds and numbers to the printed workbook.
+The paragraph and bullets below are kept as the record of what was tried; do not
+restore them.
+
 **The phantom-column divergence is FIXED (2026-08-18, second pass).** The 2026 Junior
 Male sheet prints its phantom-risen pair (F2, P4 v P5) in the ROUND-1 column; our
 root-distance classification scheduled it a round late, on every surface. The collapse
@@ -950,8 +972,13 @@ already granted a bye count other than `q mod 2` before the pool set was subdivi
 half-blocks), and 61 do now. Per BLOCK the count is exact in both: 0 of 696.
 
 **Derivation.** EKC male court A has `q = 5` in an 8-slot region, so 3 empty slots. The
-sheet shows **P1 bye, P2 v P3, P4 v P5**: two round-1 matches and ONE named bye, with
-the other two empties consumed by a phantom pair and W(P4vP5) taking a round-2 bye. The
+sheet shows **P1 bye, P2 v P3, P4 v P5**: ONE named bye (P1, paired with the winner of
+P2 v P3), with the other two empties consumed by a phantom pair beside P4 v P5.
+*Corrected 2026-09-25 against the PDF (page 4):* this paragraph first read the sheet
+as two round-1 matches, but P4 v P5 is printed a column later, level with P1 v W(P2 v
+P3), so P2 v P3 is the court's only first-column bout. Read that way, the columns alone
+no longer separate the two constructions below: both put P4 v P5 and P1 v W(P2 v P3)
+level. The
 alternative construction, "pad to `NextPow2` and spread the empties", would have
 produced **three** named byes and one round-1 match, which is not what the sheet shows.
 All five observed occupancies (`q` = 1, 2, 3, 4, 5 across the three draws) are

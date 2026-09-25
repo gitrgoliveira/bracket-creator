@@ -348,3 +348,54 @@ describe('EngiScoreEditorModal number chip rides the first member only (bc-sccl)
     expect(shiroLines[1].querySelector('.num-prefix')).toBeNull();
   });
 });
+
+// bc-kbhn: the engi hint shares the `.scoring-shortcut-hint` class (so the
+// coarse-pointer rule hides it) and lists Esc only where the host can close.
+describe('bc-kbhn: EngiShortcutHint', () => {
+  it('carries the shared class and no inline display', () => {
+    render(<EngiScoreEditorModal match={makeMatch()} onClose={() => {}} onSubmit={() => {}} />);
+    const hint = screen.getByTestId('engi-shortcut-hint');
+    expect(hint.classList.contains('scoring-shortcut-hint')).toBe(true);
+    expect(hint.style.display).toBe('');
+  });
+
+  it('lists Esc when the host can close, and not on the court console', () => {
+    const { unmount } = render(<EngiScoreEditorModal match={makeMatch()} onClose={() => {}} onSubmit={() => {}} />);
+    expect(screen.getByTestId('engi-shortcut-hint').textContent).toContain('close');
+    unmount();
+    render(<EngiScoreEditorModal match={makeMatch()} onClose={() => {}} onSubmit={() => {}} variant="inline" canClose={false} />);
+    const t = screen.getByTestId('engi-shortcut-hint').textContent;
+    expect(t).not.toContain('close');
+    expect(t).not.toContain('prev/next');
+  });
+});
+
+// bc-kbhn: the Scores tab wires onPrev/onNext unconditionally, so on the first
+// or last match ← / → used to call a callback with no neighbour behind it
+// (scoreKeyOf(null) throws there). The keys and the hint now both require the
+// neighbour, as the individual and team editors do.
+describe('bc-kbhn: engi ←/→ need a neighbour match', () => {
+  it('callbacks wired but no neighbour: no arrows in the hint and the keys do nothing', () => {
+    const onPrev = vi.fn();
+    const onNext = vi.fn();
+    render(<EngiScoreEditorModal match={makeMatch()} onClose={() => {}} onSubmit={() => {}} onPrev={onPrev} onNext={onNext} />);
+    expect(screen.getByTestId('engi-shortcut-hint').textContent).not.toContain('prev/next');
+    fireEvent.keyDown(document.body, { key: 'ArrowLeft' });
+    fireEvent.keyDown(document.body, { key: 'ArrowRight' });
+    expect(onPrev).not.toHaveBeenCalled();
+    expect(onNext).not.toHaveBeenCalled();
+  });
+
+  it('a neighbour but no callback (a host with no nav): no arrows in the hint', () => {
+    render(<EngiScoreEditorModal match={makeMatch()} onClose={() => {}} onSubmit={() => {}} nextMatch={makeMatch({ id: 'e2' })} />);
+    expect(screen.getByTestId('engi-shortcut-hint').textContent).not.toContain('prev/next');
+  });
+
+  it('with a neighbour: the arrows are listed and the key moves', () => {
+    const onNext = vi.fn();
+    render(<EngiScoreEditorModal match={makeMatch()} onClose={() => {}} onSubmit={() => {}} nextMatch={makeMatch({ id: 'e2' })} onPrev={vi.fn()} onNext={onNext} />);
+    expect(screen.getByTestId('engi-shortcut-hint').textContent).toContain('prev/next');
+    fireEvent.keyDown(document.body, { key: 'ArrowRight' });
+    expect(onNext).toHaveBeenCalledTimes(1);
+  });
+});

@@ -13,7 +13,7 @@ import (
 // failure reading overrides.json. Standings computation deliberately fails
 // closed on a corrupt overrides file (a silently-dropped override could
 // resurrect a broken chusen or a stale manual rank), but every override
-// writer -- SaveRankOverrideChanged, SaveWinnerOverride, ResetOverrides --
+// writer -- SaveRankOverridesChanged, SaveWinnerOverride, ResetOverrides --
 // goes through modifyOverridesChanged, which LOADS the file first, so a
 // corrupt file has no writer that can repair it: even "reset" fails
 // identically. errors.Is(err, ErrCorruptOverrides) lets a caller (the HTTP
@@ -150,29 +150,66 @@ func (s *Store) modifyOverrides(compID string, fn func(*Overrides)) error {
 	return err
 }
 
-// SaveRankOverrideChanged saves a manual pool-rank override for one
-// competitor, identified by playerID ONLY, and reports whether the
-// overrides file actually changed. Use this to gate broadcasts.
+// SaveRankOverridesChanged saves manual pool-rank overrides for one or more
+// competitors of one pool (ranks maps playerID -> rank), each identified by
+// playerID ONLY, in ONE write, and reports whether the overrides file
+// actually changed. Use this to gate broadcasts. A group set together (a
+// chusen's whole order, engine.OverridePoolRanks) lands at once, so nothing
+// ever reads the pool with half of the new order applied.
 //
-// The override is keyed by helper.CompetitorKey(playerID, "", "") (bc-cse),
+// Each override is keyed by helper.CompetitorKey(playerID, "", "") (bc-cse),
 // which resolves to "id:"+playerID: playerID is REQUIRED (bc-pnum) by every
 // caller (the mobileapp override-rank handler rejects a request with no
 // playerId before this is ever reached), so the name/dojo composite branch
 // CompetitorKey falls back to for an empty id is dead code from this
 // caller's side and is not exposed here.
-func (s *Store) SaveRankOverrideChanged(compID, poolID, playerID string, rank int) (bool, error) {
-	key := helper.CompetitorKey(playerID, "", "")
+func (s *Store) SaveRankOverridesChanged(compID, poolID string, ranks map[string]int) (bool, error) {
 	return s.modifyOverridesChanged(compID, func(o *Overrides) {
 		if o.PoolRanks[poolID] == nil {
 			o.PoolRanks[poolID] = make(map[string]int)
 		}
-		o.PoolRanks[poolID][key] = rank
+		for playerID, rank := range ranks {
+			o.PoolRanks[poolID][helper.CompetitorKey(playerID, "", "")] = rank
+		}
 	})
 }
 
+// SaveRankOverride is SaveRankOverridesChanged for one competitor, discarding
+// whether it changed anything.
 func (s *Store) SaveRankOverride(compID, poolID, playerID string, rank int) error {
-	_, err := s.SaveRankOverrideChanged(compID, poolID, playerID, rank)
+	_, err := s.SaveRankOverridesChanged(compID, poolID, map[string]int{playerID: rank})
 	return err
+}
+
+// PriorRank is one competitor's pool-rank override as read before a change:
+// Rank when Present, else no override at all.
+type PriorRank struct {
+	Rank    int
+	Present bool
+}
+
+// RestoreRankOverrides puts pool-rank overrides back to the values read
+// before a change (prior maps playerID -> what it held), in ONE write. It is
+// the undo half of an override group the engine refused after writing it
+// (engine.OverridePoolRanks): overrides.json serializes on the store-wide
+// lock, not the per-competition one, so it is never staged in a transaction
+// and a refusal has to put it back by hand. A present prior is written back
+// under the participant-id key SaveRankOverridesChanged writes; an absent one
+// deletes that key.
+func (s *Store) RestoreRankOverrides(compID, poolID string, prior map[string]PriorRank) error {
+	return s.modifyOverrides(compID, func(o *Overrides) {
+		for playerID, p := range prior {
+			key := helper.CompetitorKey(playerID, "", "")
+			if !p.Present {
+				delete(o.PoolRanks[poolID], key)
+				continue
+			}
+			if o.PoolRanks[poolID] == nil {
+				o.PoolRanks[poolID] = make(map[string]int)
+			}
+			o.PoolRanks[poolID][key] = p.Rank
+		}
+	})
 }
 
 func (s *Store) SaveWinnerOverride(compID, matchID, winnerName string) error {

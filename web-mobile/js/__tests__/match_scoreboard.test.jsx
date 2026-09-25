@@ -831,4 +831,91 @@ describe('match_scoreboard components', () => {
     expect(dhRow.sub.teamB).toBe('White Team');
     expect(dhRow.sub.teamA).toBe('Red Team');
   });
+
+  // bc-tmfn: a team match a match-level default-win decision closed credits
+  // every numbered bout with no result of its own to the OTHER side from
+  // decisionBy. Kachinuki is unaffected (see kachinuki_scoreboard.test.jsx).
+  describe('TeamScoreboard: bc-tmfn default-win credit', () => {
+    const withdrawal = { status: 'completed', decision: 'kiken-voluntary', decisionBy: 'shiro' };
+
+    it('substitutes a synthesised fusensho row for an unfought numbered bout, "done" state', () => {
+      const subResults = [
+        { position: 1, ipponsB: ['M'], ipponsA: [] }, // actually fought: untouched
+      ];
+      const tree = runtime.mount(TeamScoreboard, {
+        subResults, lineupA: null, lineupB: null, teamSize: 3, showDH: false,
+        matchSideA: 'TeamA', matchSideB: 'TeamB', ...withdrawal,
+      });
+      const rows = boutRows(tree);
+      expect(rows.length).toBe(3);
+      // Bout 1 was fought for real: not touched.
+      expect(rows[0].sub).toMatchObject({ position: 1 });
+      expect(rows[0].sub.decision).not.toBe('fusensho');
+      expect(rows[0].state).toBe('done');
+      // Bouts 2 and 3 carry no result: credited to TeamA (Aka), the side
+      // OPPOSITE decisionBy="shiro" — synthesised as a fusensho row and
+      // rendered "done", exactly like a real per-bout fusensho.
+      expect(rows[1].sub).toMatchObject({ position: 2, decision: 'fusensho', winner: 'TeamA' });
+      expect(rows[1].state).toBe('done');
+      expect(rows[2].sub).toMatchObject({ position: 3, decision: 'fusensho', winner: 'TeamA' });
+      expect(rows[2].state).toBe('done');
+    });
+
+    it('does not credit while the match is still running', () => {
+      const tree = runtime.mount(TeamScoreboard, {
+        subResults: [], lineupA: null, lineupB: null, teamSize: 2, showDH: false,
+        matchSideA: 'TeamA', matchSideB: 'TeamB',
+        status: 'running', decision: 'kiken-voluntary', decisionBy: 'shiro',
+      });
+      const rows = boutRows(tree);
+      expect(rows.every(r => r.sub.decision !== 'fusensho')).toBe(true);
+      expect(rows.every(r => r.state !== 'done')).toBe(true);
+    });
+
+    it('does not credit a kachinuki match even with a matching decision', () => {
+      const tree = runtime.mount(TeamScoreboard, {
+        subResults: [], lineupA: null, lineupB: null, teamSize: 2, showDH: false,
+        matchSideA: 'TeamA', matchSideB: 'TeamB', kachinuki: true, ...withdrawal,
+      });
+      const rows = boutRows(tree);
+      expect(rows.every(r => r.sub.decision !== 'fusensho')).toBe(true);
+    });
+
+    it('does not credit a decision outside the default-win class', () => {
+      const tree = runtime.mount(TeamScoreboard, {
+        subResults: [], lineupA: null, lineupB: null, teamSize: 2, showDH: false,
+        matchSideA: 'TeamA', matchSideB: 'TeamB',
+        status: 'completed', decision: 'fought', decisionBy: 'shiro',
+      });
+      const rows = boutRows(tree);
+      expect(rows.every(r => r.sub.decision !== 'fusensho')).toBe(true);
+    });
+
+    it('the summary row places the withdrawn team\'s mark on the INNER side, a plain string prop the caller computed', () => {
+      const tree = runtime.mount(TeamScoreboard, {
+        subResults: [{ position: 1 }], lineupA: null, lineupB: null, teamSize: 1, showDH: false,
+        shiroName: 'White Team', akaName: 'Red Team',
+        shiroMark: 'Kiken',
+      });
+      const shiroMarkEl = findInTree(tree, n => n?.props?.['data-testid'] === 'team-summary-mark-shiro');
+      expect(shiroMarkEl).toBeTruthy();
+      expect(collectText(shiroMarkEl)).toBe('Kiken');
+      // Aka got no mark prop: nothing renders there.
+      const akaMarkEl = findInTree(tree, n => n?.props?.['data-testid'] === 'team-summary-mark-aka');
+      expect(akaMarkEl).toBeFalsy();
+    });
+
+    it('IV/PW aggregate (fallback, no server teamResult) includes the credited bouts', () => {
+      const subResults = [{ position: 1 }, { position: 2 }];
+      const tree = runtime.mount(TeamScoreboard, {
+        subResults, lineupA: null, lineupB: null, teamSize: 2, showDH: false,
+        matchSideA: 'TeamA', matchSideB: 'TeamB', ...withdrawal,
+      });
+      // Both bouts unfought → credited to TeamA (Aka): IV 0-2, PW 0-4.
+      const summary = findInTree(tree, n => n?.props?.['data-testid'] === 'team-summary');
+      expect(collectText(summary)).toContain('IV0');
+      expect(collectText(summary)).toContain('2');
+      expect(collectText(summary)).toContain('4');
+    });
+  });
 });

@@ -239,7 +239,7 @@ func TestTeamStandings_EmptySubSidesDrawNotFalseWin(t *testing.T) {
 			SubResults: []state.SubMatchResult{
 				{Position: 1, Winner: "TeamA"},
 				{Position: 2, Winner: "TeamB"},
-				{Position: 3, Winner: ""},
+				{Position: 3, Winner: "", Decision: state.DecisionDraw},
 			},
 		},
 	}
@@ -2633,7 +2633,9 @@ func TestAccrueTeamSubResults_SameNameBout(t *testing.T) {
 		assert.Equal(t, 0, sA.IndividualWins)
 		assert.Equal(t, 1, sA.IndividualLosses)
 
-		line := state.TeamResultFrom([]state.SubMatchResult{sub}, "Tora", "Kaze")
+		// domain.MatchSideNone: this bout already carries its own result, so no
+		// default-win ruling could ever apply here regardless of credit.
+		line := state.TeamResultFrom([]state.SubMatchResult{sub}, "Tora", "Kaze", domain.MatchSideNone)
 		require.NotNil(t, line)
 		assert.Equal(t, sB.IndividualWins, line.ShiroIV, "standings and summary must not disagree")
 		assert.Equal(t, sA.IndividualWins, line.AkaIV)
@@ -2649,7 +2651,9 @@ func TestAccrueTeamSubResults_SameNameBout(t *testing.T) {
 		assert.Equal(t, 0, sB.IndividualWins)
 		assert.Equal(t, 0, sA.IndividualDraws, "a bout with a winner is not a draw just because nobody could be credited")
 
-		line := state.TeamResultFrom([]state.SubMatchResult{sub}, "Tora", "Kaze")
+		// domain.MatchSideNone: this bout already carries its own result, so no
+		// default-win ruling could ever apply here regardless of credit.
+		line := state.TeamResultFrom([]state.SubMatchResult{sub}, "Tora", "Kaze", domain.MatchSideNone)
 		require.NotNil(t, line)
 		assert.Equal(t, 0, line.ShiroIV)
 		assert.Equal(t, 0, line.AkaIV)
@@ -2662,8 +2666,30 @@ func TestAccrueTeamSubResults_SameNameBout(t *testing.T) {
 		assert.Equal(t, 1, sB.IndividualWins)
 		assert.Equal(t, 1, sA.IndividualLosses)
 
-		dA, dB := accrue(state.SubMatchResult{Position: 1, SideA: "Sato", SideB: "Ito"})
+		dA, dB := accrue(state.SubMatchResult{Position: 1, SideA: "Sato", SideB: "Ito", Decision: state.DecisionDraw})
 		assert.Equal(t, 1, dA.IndividualDraws)
 		assert.Equal(t, 1, dB.IndividualDraws)
+
+		// A scored tie (1-1 at time) is a draw without a decision.
+		tA, tB := accrue(state.SubMatchResult{Position: 1, SideA: "Sato", SideB: "Ito", IpponsA: []string{"M"}, IpponsB: []string{"K"}})
+		assert.Equal(t, 1, tA.IndividualDraws)
+		assert.Equal(t, 1, tB.IndividualDraws)
+	})
+
+	// A row with no result was never fought, so it is not a draw either: an
+	// unfought bout kept on a match a withdrawal decided, or a placeholder row
+	// of unfilled slots. Counting it as IT for both teams inflated the team
+	// tie-break for bouts nobody fought.
+	t.Run("a bout with no result is not a draw", func(t *testing.T) {
+		for name, sub := range map[string]state.SubMatchResult{
+			"empty row":         {Position: 2},
+			"named, unfought":   {Position: 2, SideA: "Sato", SideB: "Ito"},
+			"placeholder slots": {Position: 2, IpponsA: []string{"•"}, IpponsB: []string{""}},
+		} {
+			uA, uB := accrue(sub)
+			assert.Zero(t, uA.IndividualDraws, name)
+			assert.Zero(t, uB.IndividualDraws, name)
+			assert.Zero(t, uA.IndividualWins+uA.IndividualLosses+uB.IndividualWins+uB.IndividualLosses, name)
+		}
 	})
 }

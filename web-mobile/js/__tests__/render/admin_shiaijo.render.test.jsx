@@ -13,11 +13,20 @@ import { DOWNSTREAM_KNOCKOUT_PLAYED_CANCELLED } from '../../write_result.jsx';
 // otherwise. The queued-vs-superseded split the offline-resolve test below
 // depends on is therefore the real one either way.
 
+// bc-cse: captures the LATEST ScoreEditorModal props so a test can drive
+// onSubmitAndNext/onAfterDecision directly (the chained-navigation tests
+// below), while the rendered markup stays exactly what the pre-existing
+// tests already query (data-testid="score-editor" data-match=...).
+const probe = { props: null };
+
 const STUBBED_GLOBALS = {
   // MODULE-EVAL-TIME: captured at import; set before dynamic import below
   AdminTopbar: ({ children }) => <div data-testid="topbar">{children}</div>,
   Breadcrumbs: () => null,
-  ScoreEditorModal: () => <div data-testid="score-editor" />,
+  // Carries the id of the match the panel is scoring, so a test can tell
+  // WHICH match the console selected (captured at import, so it cannot be
+  // swapped per test).
+  ScoreEditorModal: (props) => { probe.props = props; return <div data-testid="score-editor" data-match={props.match ? props.match.id : ''} />; },
   CourtPicker: () => null,
   BracketTree: () => null,
   Icon: ({ name }) => <span>{name}</span>,
@@ -33,6 +42,8 @@ const STUBBED_GLOBALS = {
     sendAnnouncement: vi.fn(),
     updateMatchTime: vi.fn(),
     startMatch: vi.fn(),
+    recordDecision: vi.fn().mockResolvedValue({ applied: true }),
+    reinstateCompetitor: vi.fn().mockResolvedValue({}),
   },
   startPatch: vi.fn(),
   confirmDialog: vi.fn().mockResolvedValue(true),
@@ -66,13 +77,13 @@ function makeMinimalTournament(overrides = {}) {
   };
 }
 
-function renderPage(tournament, court = 'A') {
+function renderPage(tournament, court = 'A', props = {}) {
   return render(
     <AdminShiaijoPage
       tournament={tournament}
       court={court}
       onBack={vi.fn()}
-      onEditScore={vi.fn()}
+      onEditScore={props.onEditScore || vi.fn()}
       onMoveCourt={vi.fn()}
       onLogout={vi.fn()}
       onViewerMode={vi.fn()}
@@ -573,6 +584,246 @@ describe('AdminShiaijoPage render-smoke', () => {
     }
   });
 
+  // UAT (bc-tmfn): the operator corrects a finished match, taps Clear
+  // withdrawal and reopen (the match is RUNNING again), scores the rest and
+  // taps Finish + Start Next. The console kept the old match pinned in
+  // CORRECTION mode and hid the match it had just started until "Back to
+  // court". A reopened correction is the court's live bout, so it becomes the
+  // live pick and the correction ends.
+  it('a reopened correction becomes the live match, so Finish + Start Next moves on to the match it started', async () => {
+    const side = (id, name) => ({ id, name });
+    const m1 = {
+      id: 'm1', compId: 'c1', compName: 'Cup', status: 'completed', phase: 'pool', poolName: 'Pool A',
+      court: 'A', scheduledAt: '09:00', modifiedAt: 1000,
+      sideA: side('p1', 'Yamada'), sideB: side('p2', 'Tanaka'), winner: side('p1', 'Yamada'),
+    };
+    const m2 = {
+      id: 'm2', compId: 'c1', compName: 'Cup', status: 'scheduled', phase: 'pool', poolName: 'Pool A',
+      court: 'A', scheduledAt: '09:05', sideA: side('p3', 'Sato'), sideB: side('p4', 'Kato'),
+    };
+    let current = [m1, m2];
+    window.tournamentMatches = () => current;
+    window.filterMatchesByCourt = (matches) => matches;
+    const prevFetch = window.API.fetchCourtMatches;
+    const prevSub = window.API.subscribeToEvents;
+    const prevRevert = window.API.revertMatchToQueue;
+    window.API.fetchCourtMatches = vi.fn().mockImplementation(() => Promise.resolve([{ id: 'c1', name: 'Cup' }]));
+    window.API.subscribeToEvents = () => () => {};
+    window.API.revertMatchToQueue = vi.fn().mockResolvedValue(true);
+    try {
+      let utils;
+      await act(async () => { utils = renderPage(makeMinimalTournament()); });
+      const editorMatch = () => utils.getByTestId('score-editor').getAttribute('data-match');
+      const heading = () => utils.container.querySelector('.shiaijo-context__toggle').textContent;
+      const refresh = async () => { await act(async () => { utils.getByRole('button', { name: /refresh/i }).click(); }); };
+
+      await act(async () => { utils.getByRole('button', { name: /^correct$/i }).click(); });
+      expect(editorMatch()).toBe('m1');
+      expect(heading()).toContain('Correcting');
+
+      // Clear withdrawal and reopen: m1 is running again.
+      current = [{ ...m1, status: 'running', winner: undefined }, m2];
+      await refresh();
+      expect(editorMatch()).toBe('m1');
+      expect(heading()).not.toContain('Correcting');
+
+      // Finish + Start Next: m1 is completed again and m2 is running.
+      current = [{ ...m1, status: 'completed', modifiedAt: 3000 }, { ...m2, status: 'running' }];
+      await refresh();
+      expect(editorMatch(), 'the panel must follow the match Finish + Start Next started').toBe('m2');
+      expect(utils.queryByRole('button', { name: /back to court/i })).toBeNull();
+      expect(heading()).not.toContain('Correcting');
+    } finally {
+      window.API.fetchCourtMatches = prevFetch;
+      window.API.subscribeToEvents = prevSub;
+      window.API.revertMatchToQueue = prevRevert;
+    }
+  });
+
+  // bc-cse #6: a reopen does not always land on "running". A match-level
+  // fusensho whose decisionBy side is STILL barred by an earlier, unrelated
+  // withdrawal reopens to "scheduled" instead (engine.reopenTargetStatus):
+  // starting it straight into "running" would strand the operator behind
+  // the eligibility gate. The correction must still end, or the panel stays
+  // pinned to the now-cleared correction and hides whatever the court's
+  // normal view would show -- here, the OTHER match already running on this
+  // same court -- until a reload.
+  it('a correction cleared to "scheduled" (still-barred fusensho) releases the panel back to the running bout', async () => {
+    const side = (id, name) => ({ id, name });
+    const m1 = {
+      id: 'm1', compId: 'c1', compName: 'Cup', status: 'completed', phase: 'pool', poolName: 'Pool A',
+      court: 'A', scheduledAt: '09:00', modifiedAt: 1000,
+      sideA: side('p1', 'Yamada'), sideB: side('p2', 'Tanaka'), winner: side('p1', 'Yamada'),
+      decision: 'fusensho', decisionBy: 'aka',
+    };
+    const m2 = {
+      id: 'm2', compId: 'c1', compName: 'Cup', status: 'running', phase: 'pool', poolName: 'Pool A',
+      court: 'A', scheduledAt: '09:05', sideA: side('p3', 'Sato'), sideB: side('p4', 'Kato'),
+    };
+    let current = [m1, m2];
+    window.tournamentMatches = () => current;
+    window.filterMatchesByCourt = (matches) => matches;
+    const prevFetch = window.API.fetchCourtMatches;
+    const prevSub = window.API.subscribeToEvents;
+    const prevRevert = window.API.revertMatchToQueue;
+    window.API.fetchCourtMatches = vi.fn().mockImplementation(() => Promise.resolve([{ id: 'c1', name: 'Cup' }]));
+    window.API.subscribeToEvents = () => () => {};
+    window.API.revertMatchToQueue = vi.fn().mockResolvedValue(true);
+    try {
+      let utils;
+      await act(async () => { utils = renderPage(makeMinimalTournament()); });
+      const editorMatch = () => utils.getByTestId('score-editor').getAttribute('data-match');
+      const heading = () => utils.container.querySelector('.shiaijo-context__toggle').textContent;
+      const refresh = async () => { await act(async () => { utils.getByRole('button', { name: /refresh/i }).click(); }); };
+
+      await act(async () => { utils.getByRole('button', { name: /^correct$/i }).click(); });
+      expect(editorMatch()).toBe('m1');
+      expect(heading()).toContain('Correcting');
+
+      // Clear the withdrawal and reopen: the barred fusensho side is still
+      // barred elsewhere, so the server sends m1 to "scheduled", not
+      // "running" (m2 keeps running throughout, on the same court).
+      current = [{ ...m1, status: 'scheduled', decision: '', decisionBy: '', winner: undefined }, m2];
+      await refresh();
+
+      // The correction must end: the panel falls back to the court's
+      // normal view -- the running bout (m2) -- instead of staying pinned
+      // to m1.
+      expect(editorMatch(), "the panel must release m1 and follow the court's running bout").toBe('m2');
+      expect(heading()).not.toContain('Correcting');
+    } finally {
+      window.API.fetchCourtMatches = prevFetch;
+      window.API.subscribeToEvents = prevSub;
+      window.API.revertMatchToQueue = prevRevert;
+    }
+  });
+
+  // UAT (bc-tmfn): a Start refused for an ineligible competitor
+  // ("kiken-voluntary at Pool A-2") stayed on screen after the withdrawal was
+  // cleared and eligibility restored, and after that match started it sat
+  // under the NEXT match. It must go once it may no longer apply (an
+  // eligibility change in its competition, or ANY change of Up next), and
+  // stay while it still does.
+  it('a refused Start is dropped when eligibility changes or Up next moves on, and kept while it still applies', async () => {
+    const side = (id, name) => ({ id, name });
+    const m1 = {
+      id: 'm1', compId: 'c1', compName: 'Cup', status: 'scheduled', phase: 'pool', poolName: 'Pool A',
+      court: 'A', scheduledAt: '09:00', sideA: side('p1', 'Yamada'), sideB: side('p2', 'Tanaka'),
+    };
+    const m2 = {
+      id: 'm2', compId: 'c1', compName: 'Cup', status: 'scheduled', phase: 'pool', poolName: 'Pool A',
+      court: 'A', scheduledAt: '09:05', sideA: side('p3', 'Sato'), sideB: side('p4', 'Kato'),
+    };
+    let current = [m1, m2];
+    window.tournamentMatches = () => current;
+    window.filterMatchesByCourt = (matches) => matches;
+    let emit = () => {};
+    const prevFetch = window.API.fetchCourtMatches;
+    const prevSub = window.API.subscribeToEvents;
+    window.API.fetchCourtMatches = vi.fn().mockImplementation(() => Promise.resolve([{ id: 'c1', name: 'Cup' }]));
+    window.API.subscribeToEvents = (cb) => { emit = cb; return () => {}; };
+    const onEditScore = vi.fn().mockRejectedValue(new Error('kiken-voluntary at Pool A-2'));
+    try {
+      let utils;
+      await act(async () => { utils = renderPage(makeMinimalTournament(), 'A', { onEditScore }); });
+      const refusal = () => utils.container.querySelector('.shiaijo-upnext__error');
+      // The Up next card's own Start (an Upcoming row carries one too).
+      const start = async () => {
+        const card = utils.container.querySelector('.shiaijo-upnext__card');
+        const btn = [...card.querySelectorAll('button')].find((b) => /start match/i.test(b.textContent));
+        await act(async () => { btn.click(); });
+      };
+      const refresh = async () => { await act(async () => { utils.getByRole('button', { name: /refresh/i }).click(); }); };
+      const send = async (event) => { await act(async () => { emit(event); }); };
+
+      // A Start refused for an UPCOMING row's match is not shown under Up
+      // next, which is a different match (the toast names it at the time).
+      await act(async () => { utils.container.querySelector('.shiaijo-row__pick').click(); });
+      expect(onEditScore).toHaveBeenCalledTimes(1);
+      expect(refusal()).toBeNull();
+
+      await start();
+      expect(refusal()?.textContent).toBe('kiken-voluntary at Pool A-2');
+
+      // Still applies: a refetch with the same Up next, an unrelated event, and
+      // an eligibility change in ANOTHER competition all leave it.
+      await refresh();
+      await send({ type: 'match_updated', data: { competitionId: 'c1', matchId: 'm9' } });
+      await send({ type: 'competitor_status_updated', data: { competitionId: 'other', status: {} } });
+      expect(refusal()?.textContent).toBe('kiken-voluntary at Pool A-2');
+
+      // The restore in this competition clears it.
+      await send({ type: 'competitor_status_updated', data: { competitionId: 'c1', status: { eligible: true } } });
+      expect(refusal()).toBeNull();
+
+      // Refused again, then m1 starts elsewhere: Up next is now m2, and the
+      // refusal must not sit under it.
+      await start();
+      expect(refusal()).not.toBeNull();
+      current = [{ ...m1, status: 'running' }, m2];
+      await refresh();
+      expect(utils.container.querySelector('.shiaijo-upnext__card').textContent).toContain('Sato');
+      expect(refusal()).toBeNull();
+
+      // Nor does it come back if m1 returns to the top of the queue.
+      current = [m1, m2];
+      await refresh();
+      expect(utils.container.querySelector('.shiaijo-upnext__card').textContent).toContain('Yamada');
+      expect(refusal()).toBeNull();
+    } finally {
+      window.API.fetchCourtMatches = prevFetch;
+      window.API.subscribeToEvents = prevSub;
+    }
+  });
+
+  // A Start refused for a match picked from further down the queue (here its
+  // competitor is fighting on another court) is kept keyed to that match. It
+  // used to come back when that match later reached Up next, although its
+  // cause was gone by then and nothing else clears it: a finished match sends
+  // no competitor_status_updated. Any change of Up next drops it.
+  it('a refused Start for a match further down the queue does not reappear when it becomes Up next', async () => {
+    const side = (id, name) => ({ id, name });
+    const m1 = {
+      id: 'm1', compId: 'c1', compName: 'Cup', status: 'scheduled', phase: 'pool', poolName: 'Pool A',
+      court: 'A', scheduledAt: '09:00', sideA: side('p1', 'Yamada'), sideB: side('p2', 'Tanaka'),
+    };
+    const m2 = {
+      id: 'm2', compId: 'c1', compName: 'Cup', status: 'scheduled', phase: 'pool', poolName: 'Pool A',
+      court: 'A', scheduledAt: '09:05', sideA: side('p3', 'Sato'), sideB: side('p4', 'Kato'),
+    };
+    let current = [m1, m2];
+    window.tournamentMatches = () => current;
+    window.filterMatchesByCourt = (matches) => matches;
+    const prevFetch = window.API.fetchCourtMatches;
+    const prevSub = window.API.subscribeToEvents;
+    window.API.fetchCourtMatches = vi.fn().mockImplementation(() => Promise.resolve([{ id: 'c1', name: 'Cup' }]));
+    window.API.subscribeToEvents = () => () => {};
+    const onEditScore = vi.fn().mockRejectedValue(new Error('Sato is fighting on shiaijo B'));
+    try {
+      let utils;
+      await act(async () => { utils = renderPage(makeMinimalTournament(), 'A', { onEditScore }); });
+      const refusal = () => utils.container.querySelector('.shiaijo-upnext__error');
+      const refresh = async () => { await act(async () => { utils.getByRole('button', { name: /refresh/i }).click(); }); };
+
+      // Picked from the queue below Up next and refused: not shown under Up
+      // next, which is m1.
+      await act(async () => { utils.container.querySelector('.shiaijo-row__pick').click(); });
+      expect(onEditScore).toHaveBeenCalledTimes(1);
+      expect(onEditScore.mock.calls[0][1]).toBe('m2');
+      expect(refusal()).toBeNull();
+
+      // m1 starts, so m2 is now Up next. The old refusal must not come back
+      // with it.
+      current = [{ ...m1, status: 'running' }, m2];
+      await refresh();
+      expect(utils.container.querySelector('.shiaijo-upnext__card').textContent).toContain('Sato');
+      expect(refusal()).toBeNull();
+    } finally {
+      window.API.fetchCourtMatches = prevFetch;
+      window.API.subscribeToEvents = prevSub;
+    }
+  });
+
   // Guard: verify that a missing window scope reference causes a render failure.
   // This is the exact class of bug that PR #271 introduced undetected:
   // requestMoveCourt was used in ShiaijoQueueGroup but not passed as a prop,
@@ -598,5 +849,175 @@ describe('AdminShiaijoPage render-smoke', () => {
       localError.mockRestore();
       localWarn.mockRestore();
     }
+  });
+});
+
+// bc-cse: a scheduled match a competitor is barred from (withdrew earlier)
+// cannot be fought. No auto-pick may offer it (Up Next, Finish + Start Next);
+// its queue row shows why and a one-tap way to resolve it instead of a Start
+// button the server would just refuse.
+describe('a barred match is skipped by every auto-pick (bc-cse)', () => {
+  const side = (id, name) => ({ id, name });
+  // Withdrawn on side B (Yama, kiken-voluntary): the default win goes to Umi.
+  const barredMatch = (over = {}) => ({
+    id: 'm-barred', compId: 'c1', compName: 'Cup', status: 'scheduled', phase: 'pool', poolName: 'Pool A',
+    court: 'A', scheduledAt: '09:05', sideA: side('u', 'Umi'), sideB: side('y', 'Yama'),
+    ineligibleSides: { b: 'kiken-voluntary' },
+    ...over,
+  });
+  const openMatch = {
+    id: 'm-open', compId: 'c1', compName: 'Cup', status: 'scheduled', phase: 'pool', poolName: 'Pool A',
+    court: 'A', scheduledAt: '09:10', sideA: side('s', 'Sato'), sideB: side('k', 'Kato'),
+  };
+
+  it('Up Next skips it, its queue row offers the default win instead of Start, and no Reinstate for a non-reinstateable withdrawal', async () => {
+    window.tournamentMatches = () => [barredMatch(), openMatch];
+    window.filterMatchesByCourt = (m) => m;
+    const recordDecision = vi.fn().mockResolvedValue({ applied: true });
+    const prevRD = window.API.recordDecision;
+    window.API.recordDecision = recordDecision;
+    try {
+      let utils;
+      await act(async () => { utils = renderPage(makeMinimalTournament()); });
+
+      // Up Next skips the barred match and offers the next fightable one.
+      const card = utils.container.querySelector('.shiaijo-upnext__card');
+      expect(card.textContent).toContain('Sato');
+      expect(card.textContent).not.toContain('Umi');
+      expect(card.textContent).not.toContain('Yama');
+
+      // The barred match's own row: the note, one action, no Start, no Reinstate.
+      const rows = [...utils.container.querySelectorAll('.shiaijo-qrow')];
+      const row = rows.find((r) => r.textContent.includes('Yama'));
+      expect(row).toBeTruthy();
+      expect(row.textContent).toContain('Yama withdrew: record the default win.');
+      const startBtn = [...row.querySelectorAll('button')].find((b) => /^start match$/i.test(b.textContent));
+      expect(startBtn).toBeUndefined();
+      expect(utils.queryByTestId('barred-match-reinstate')).toBeNull();
+      const awardBtn = utils.getByTestId('barred-match-default-win');
+      expect(awardBtn.textContent).toBe('Record default win for Umi');
+
+      await act(async () => { awardBtn.click(); });
+      expect(recordDecision).toHaveBeenCalledWith('c1', 'm-barred', {
+        decision: 'fusensho', decisionBy: 'shiro', decisionReason: 'auto: Yama withdrawn',
+      }, '');
+    } finally {
+      window.API.recordDecision = prevRD;
+    }
+  });
+
+  it('Finish + Start Next skips it when advancing to the next match on the same court', async () => {
+    const running = {
+      id: 'm-run', compId: 'c1', compName: 'Cup', status: 'running', phase: 'pool', poolName: 'Pool A',
+      court: 'A', sideA: side('p1', 'Yamada'), sideB: side('p2', 'Tanaka'),
+    };
+    window.tournamentMatches = () => [running, barredMatch(), openMatch];
+    window.filterMatchesByCourt = (m) => m;
+    const onEditScore = vi.fn().mockResolvedValue({ status: 'ok' });
+    await act(async () => { renderPage(makeMinimalTournament(), 'A', { onEditScore }); });
+    expect(probe.props.match?.id).toBe('m-run');
+    await act(async () => { await probe.props.onSubmitAndNext({ status: 'completed', winner: side('p1', 'Yamada') }); });
+    // The finishing write, then the start-next write -- skipping m-barred.
+    expect(onEditScore).toHaveBeenCalledTimes(2);
+    expect(onEditScore.mock.calls[0][0]).toBe('c1');
+    expect(onEditScore.mock.calls[0][1]).toBe('m-run');
+    expect(onEditScore.mock.calls[1][0]).toBe('c1');
+    expect(onEditScore.mock.calls[1][1]).toBe('m-open');
+  });
+
+  it('offers Reinstate for a reinstateable (kiken-injury) withdrawal', async () => {
+    window.tournamentMatches = () => [barredMatch({ ineligibleSides: { b: 'kiken-injury' } }), openMatch];
+    window.filterMatchesByCourt = (m) => m;
+    const reinstateCompetitor = vi.fn().mockResolvedValue({});
+    const prevR = window.API.reinstateCompetitor;
+    window.API.reinstateCompetitor = reinstateCompetitor;
+    try {
+      let utils;
+      await act(async () => { utils = renderPage(makeMinimalTournament()); });
+      const reinstateBtn = utils.getByTestId('barred-match-reinstate');
+      expect(reinstateBtn.textContent).toBe('Reinstate Yama');
+      await act(async () => { reinstateBtn.click(); });
+      expect(reinstateCompetitor).toHaveBeenCalledWith('c1', 'y', '');
+    } finally {
+      window.API.reinstateCompetitor = prevR;
+    }
+  });
+
+  // bc-cse: both sides barred on a POOL match (barredMatch's own phase) can
+  // be recorded as drawn -- neither single-sided default-win action fits,
+  // but the pool/league draw action does.
+  it('both sides barred: the note, and the draw action (no single-sided action)', async () => {
+    window.tournamentMatches = () => [barredMatch({ id: 'Pool A-2', ineligibleSides: { a: 'fusenpai', b: 'kiken-voluntary' } })];
+    window.filterMatchesByCourt = (m) => m;
+    let utils;
+    await act(async () => { utils = renderPage(makeMinimalTournament()); });
+    const notice = utils.getByTestId('barred-match-notice');
+    expect(notice.textContent).toContain('Both withdrew earlier: neither can fight this match.');
+    expect(utils.queryByTestId('barred-match-default-win')).toBeNull();
+    expect(utils.queryByTestId('barred-match-reinstate')).toBeNull();
+    expect(utils.getByTestId('barred-match-record-drawn').textContent).toBe('Record as drawn (neither can fight)');
+  });
+
+  // bc-cse: when EVERY scheduled match on the court is barred there is no
+  // Up Next card at all (upNext skips a barred match on purpose), so
+  // telling the operator to use it points at something not on screen. The
+  // placeholder must name the real remedy instead.
+  it('placeholder names the real remedy when every scheduled match is barred (no Up Next card)', async () => {
+    window.tournamentMatches = () => [barredMatch()];
+    window.filterMatchesByCourt = (m) => m;
+    let utils;
+    await act(async () => { utils = renderPage(makeMinimalTournament()); });
+    expect(utils.container.querySelector('.shiaijo-upnext__card')).toBeNull();
+    expect(utils.container.textContent).toContain(
+      'Every scheduled match on this court is barred. Resolve a withdrawal in the queue to bring one back.'
+    );
+    expect(utils.container.textContent).not.toContain('Start the next match from the Up Next card');
+  });
+
+  // bc-cse: the ordinary placeholder still applies when there is nothing
+  // scheduled for a reason OTHER than "everything is barred" -- here, a
+  // pending placeholder final with no real Up Next yet (same fixture shape
+  // as the "Later" row test above).
+  it('placeholder keeps the ordinary copy when nothing is scheduled for an unrelated reason', async () => {
+    const completedFeeder = {
+      id: 'r2-m0', compId: 'c1', compName: 'Cup', status: 'completed',
+      phase: 'bracket', matchNumber: 1, court: 'A',
+      sideA: { id: 'p1', name: 'Yamada' }, sideB: { id: 'p2', name: 'Tanaka' },
+      winner: { id: 'p1', name: 'Yamada' },
+    };
+    const pendingFinal = {
+      id: 'r3-m0', compId: 'c1', compName: 'Cup', status: 'scheduled',
+      phase: 'bracket', matchNumber: 3, court: 'A',
+      sideA: { id: '', name: 'Winner of r2-m0' },
+      sideB: { id: '', name: 'Winner of r2-m1' },
+    };
+    window.tournamentMatches = () => [completedFeeder, pendingFinal];
+    window.filterMatchesByCourt = (m) => m;
+    let utils;
+    await act(async () => { utils = renderPage(makeMinimalTournament()); });
+    expect(utils.container.textContent).toContain('Start the next match from the Up Next card');
+    expect(utils.container.textContent).not.toContain('Every scheduled match on this court is barred');
+  });
+
+  // bc-cse: a barred queue row offers only its own one-tap resolution --
+  // Call to court and Lineup, both meaningless for a match the server would
+  // refuse to start, are hidden.
+  it('a barred queue row hides Call to court and Lineup', async () => {
+    const teamBarred = {
+      id: 'm-team-barred', compId: 'c1', compName: 'Cup', status: 'scheduled', phase: 'pool', poolName: 'Pool A',
+      court: 'A', scheduledAt: '09:05', compKind: 'team', teamSize: 3,
+      sideA: { id: 'team-a', name: 'Team A' }, sideB: { id: 'team-b', name: 'Team B' },
+      ineligibleSides: { b: 'kiken-voluntary' },
+    };
+    window.tournamentMatches = () => [teamBarred, openMatch];
+    window.filterMatchesByCourt = (m) => m;
+    let utils;
+    await act(async () => { utils = renderPage(makeMinimalTournament()); });
+    const rows = [...utils.container.querySelectorAll('.shiaijo-qrow')];
+    const row = rows.find((r) => r.textContent.includes('Team A'));
+    expect(row).toBeTruthy();
+    const buttonText = [...row.querySelectorAll('button')].map((b) => b.textContent);
+    expect(buttonText).not.toContain('Lineup');
+    expect(buttonText.some((t) => /call to court/i.test(t))).toBe(false);
   });
 });

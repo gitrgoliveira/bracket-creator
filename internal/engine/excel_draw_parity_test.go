@@ -508,16 +508,12 @@ func assertWorkbookMatchesBracket(t *testing.T, eng *Engine, store *state.Store,
 	}
 
 	// The bouts a tree page cannot show are exactly the ones above the page
-	// roots (they belong to no single shiaijo); there are len(pages)-1 of them
-	// and, because both numbering walks run deepest round first, they are the
-	// last numbers.
+	// roots (they belong to no single shiaijo); there are len(pages)-1 of them.
 	assert.Equalf(t, len(engineBouts)-(len(pages)-1), len(printed),
 		"every bout except the %d above the page roots must be printed", len(pages)-1)
 	// A bout prints on a tree page exactly when its whole subtree lies on
-	// that page. The numbering follows the risen-aware walk, so a cross-page
-	// bout can hold ANY number -- including Match 1, when two lone-leaf pages'
-	// occupants fight in round 1 -- which is why this is a set equality
-	// against the bracket rather than a 1..N contiguity check.
+	// that page, so this compares sets against the bracket rather than
+	// assuming which numbers the bouts above the pages hold.
 	pageOfEntrant := map[string]string{}
 	for _, page := range pages {
 		for _, l := range page.leaves {
@@ -565,12 +561,8 @@ func assertWorkbookMatchesBracket(t *testing.T, eng *Engine, store *state.Store,
 			// The entrant's first bout is its parent junction, one level up,
 			// whose round counted from the page's own final is exactly the
 			// leaf's level. Level 0 (a page that is a lone entrant) means the
-			// first bout is above the page entirely -- the page cannot say
-			// which round that bout fights in (a cross-page pair may fight in
-			// round 1 under the risen walk), so it carries no offset evidence.
-			if l.level == 0 {
-				continue
-			}
+			// first bout sits directly above the page, so its round is the
+			// offset itself.
 			entryRound := l.level
 			got := firstDR[l.label] - entryRound
 			if offset < 0 {

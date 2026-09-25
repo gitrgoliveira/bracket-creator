@@ -1244,10 +1244,51 @@ a:hover {
   min-width: max-content;
 }
 
-/* The 3rd-place (bronze) section wrapper (.bracket-bronze-section) has no CSS
-   of its own: its width, horizontal offset (UNDER the final match card), and
-   top gap are set inline by bronzeUnderFinalStyle (bracket.jsx), since the
-   offset depends on the bracket's column count. The 3rd-place bout is a
+/* The admin Bracket page's tree narrows to fit the width it is given: each
+   column is 230px while there is room and shrinks to a 180px floor, with
+   tighter gaps and padding, so a four-round tree (9 to 16 competitors) fits
+   an iPad in landscape (1180px) without scrolling sideways. Below the floor
+   the canvas scrolls, as before. The connectors measure every gap and card
+   from the page, so they follow whatever width the columns take. */
+.bracket-canvas--fit .bracket-canvas__inner {
+  min-width: 0;
+  padding-left: 24px;
+  padding-right: 24px;
+}
+.bracket-canvas--fit .bc-tree {
+  gap: 32px;
+}
+.bracket-canvas--fit .bc-round {
+  flex: 0 1 230px;
+  min-width: 180px;
+}
+
+/* The admin page's 3rd-place (bronze) card sits in a row of column slots
+   sized by the same rules as the tree's columns, so the last slot is always
+   under the final whatever width the columns narrow to. */
+.bracket-bronze-row {
+  display: flex;
+  gap: 32px;
+  margin-top: 28px;
+}
+.bracket-bronze-row__slot {
+  flex: 0 1 230px;
+  min-width: 180px;
+}
+/* The label and the smaller card share one 210px box, centred in the slot
+   (display: block, because the card is an inline-block button and auto
+   margins do not centre one). */
+.bracket-bronze-row .bracket-bronze-section > * {
+  display: block;
+  width: min(210px, 100%);
+  margin-inline: auto;
+}
+
+/* On the public Bracket tab the 3rd-place (bronze) section wrapper
+   (.bracket-bronze-section) takes its width, horizontal offset (UNDER the
+   final match card), and top gap inline from bronzeUnderFinalStyle
+   (bracket.jsx), since the offset depends on the bracket's column count. On
+   the admin page it is the last slot of .bracket-bronze-row (above). The 3rd-place bout is a
    consolation match run alongside the final, so it renders smaller and beneath
    it, separated from the ladder above by the top gap + the label below. */
 
@@ -1395,42 +1436,6 @@ a:hover {
 .bc-bye-tag {
   color: var(--ink-4);
   margin-left: auto;
-}
-
-/* Structural-bye placeholder rendered in the upstream bracket column so the
-   tree gap is visible, matches the Excel Tree sheet's empty-slot treatment. */
-.bc-bye-slot {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 8px 10px 8px 13px;
-  min-height: 44px;
-  border: 1.5px dashed var(--line-strong);
-  border-radius: var(--r);
-  background: var(--line);
-  pointer-events: none;
-  user-select: none;
-  position: relative;
-  z-index: 1;
-}
-
-.bc-bye-slot__name {
-  flex: 1;
-  font-size: 13.5px;
-  font-weight: 500;
-  color: var(--ink-2);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.bc-bye-slot__tag {
-  font-size: 9px;
-  font-weight: 700;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-  color: var(--ink-4);
-  flex-shrink: 0;
 }
 
 .bc-side {
@@ -2218,45 +2223,14 @@ a:hover {
 }
 
 /* ---------- Running match panel (admin) ---------- */
-/* Bracket page layout: the tree and the winner-picker / scoring panel sit
-   side by side when there's room. The panel keeps a minimum width so the
-   reused inline scoring editor never squashes or clips; when the bracket and
-   that minimum can't both fit, the panel wraps to a full-width row BELOW the
-   bracket (flex line-break on basis 560 + 520 > available). */
+/* Bracket page layout: the tree takes the full width and the winner-picker /
+   scoring panel sits BELOW it (operator decision), since beside it the panel
+   left a four-round tree too little width at any desktop size. Picking a
+   match scrolls the panel into view (admin_competition_bracket.jsx). */
 .bracket-layout {
   display: flex;
-  flex-wrap: wrap;
+  flex-direction: column;
   gap: 14px;
-  align-items: flex-start;
-}
-.bracket-layout__bracket {
-  /* grows to fill; min-width:0 lets it shrink so .bracket-canvas scrolls
-     (overflow-x:auto) instead of forcing page overflow. */
-  flex: 1 1 560px;
-  min-width: 0;
-}
-.bracket-layout__panel {
-  /* Grows to fill its flex line. When it wraps below the bracket (the common
-     case at desktop widths) it fills the whole row, so its card lines up edge-
-     to-edge with the bracket card above, no max-width cap that would leave a
-     ragged right edge. min-width keeps the inline editor from squashing when
-     it DOES sit beside the bracket. */
-  flex: 1 1 520px;
-  /* min(500px, 100%): keep the 500px floor that stops the inline editor from
-     squashing, but never demand more than the row actually has. A flat 500px
-     pushed the panel outside its grid track on ~800px tablets (the track is
-     narrower than 500 there) and re-introduced page-level sideways scroll. */
-  min-width: min(500px, 100%);
-}
-/* Phones / small tablets: drop the minimum so the panel fills the single
-   column instead of overflowing; the editor's own coarse-pointer rules handle
-   compact sizing from here. */
-@media (max-width: 760px) {
-  .bracket-layout__panel {
-    flex-basis: 100%;
-    min-width: 0;
-    max-width: none;
-  }
 }
 
 .running-panel {
@@ -2313,7 +2287,7 @@ a:hover {
   color: var(--ink-2);
 }
 
-.ipt-btn:hover {
+.ipt-btn:hover:not(:disabled) {
   border-color: var(--ink-4);
 }
 
@@ -3047,6 +3021,13 @@ a.vlist-item {
   text-overflow: ellipsis;
   display: block;
 }
+/* A name carrying a side mark is a flex row (.msb-name--labelled) so the mark
+   keeps its width and only the name ellipsises. The display:block above
+   outranks that one-class rule, so it is restated here for this host. */
+.vsched-item__side .n.msb-name--labelled { display: flex; }
+/* The Shiro side's name sits toward the centre (text-align: right above),
+   which a flex row ignores, so it is restated as the row's alignment. */
+.vsched-item__side--shiro .n.msb-name--labelled { justify-content: flex-end; }
 
 .vsched-item__side .d {
   font-size: 11px;
@@ -3885,14 +3866,12 @@ button.vsched-item:not([data-clickable]) {
   display: grid;
   /* minmax(0, 1fr), NOT a bare 1fr. `1fr` means minmax(auto, 1fr), and that
      `auto` floors the content track at the item's MIN-CONTENT width. On the
-     bracket page the item is .bracket-layout, whose min-content is the two
-     flex bases side by side (~1150px), so the track grew to 1150 no matter
-     how narrow the window was: the row could then always fit on one line, so
-     flex-wrap never fired, the scoring panel never dropped below the bracket,
-     and .bracket-canvas was left the ~590px remainder while the whole admin
-     page scrolled sideways. Pinning the minimum to 0 lets the track take the
-     space that is actually available and leaves inner scroll containers
-     (.bracket-canvas has overflow:auto) to scroll their own overflow.
+     bracket page that was once the bracket and the scoring panel side by side
+     (~1150px), so the track grew to 1150 no matter how narrow the window was
+     and the whole admin page scrolled sideways. Pinning the minimum to 0 lets
+     the track take the space that is actually available and leaves inner
+     scroll containers (.bracket-canvas has overflow:auto) to scroll their own
+     overflow.
      200px: the rail's widest content is the "Other competitions" header at
      ~175px including its paddings; 240 was 65px of nothing on every page. */
   grid-template-columns: 200px minmax(0, 1fr);
@@ -5198,7 +5177,21 @@ button.vsched-item:not([data-clickable]) {
 }
 
 /* Keyboard-shortcut reminder (←/→ · Esc): meaningless on touch devices, so
-   it hides under coarse pointers (critique minor). */
+   it hides under coarse pointers (critique minor). The layout lives here and
+   NOT in an inline style: an inline display:flex beat the media query below
+   and showed the hint on the iPad (bc-kbhn). Keep this base rule BEFORE the
+   coarse-pointer one so the latter wins on equal specificity. */
+.scoring-shortcut-hint {
+  display: flex;
+  gap: 4px;
+  justify-content: center;
+  align-items: center;
+  flex-wrap: wrap;
+  margin-top: 6px;
+  font-size: 12px;
+  color: var(--ink-3);
+  text-align: center;
+}
 @media (pointer: coarse) {
   .scoring-shortcut-hint { display: none; }
 }
@@ -5287,6 +5280,42 @@ button.vsched-item:not([data-clickable]) {
      mid-word so it never forces the grid track wide. Spaced names still prefer
      to break at spaces first, so normal names are visually unchanged. */
   overflow-wrap: anywhere;
+}
+
+/* bc-kcsh: a recorded withdrawal's result mark (Kiken / Fus.) beside the
+   withdrawn side's name in both editor headers (WithdrawalMarkedName). The
+   same word the score strings put in that side's cell, set as a quieter
+   tag so it reads as a mark on the name rather than part of it. */
+.sb-result-mark {
+  font: 800 13px/1 var(--font-strong);
+  letter-spacing: 0.02em;
+  color: var(--ink-2);
+  white-space: nowrap;
+}
+
+/* bc-tmfn: the "Withdrawn" chip beside a barred competitor's name on a
+   still-scheduled match (ineligible_match.jsx's isBarredMatch / BARRED_CHIP,
+   composed in barred_chip.jsx). This names a STATE, not a side, so unlike
+   .num-prefix it is not tinted from currentColor; it borrows that chip's
+   radius/size convention (muted ink, small mono-ish label, border + faint
+   fill) instead. text-transform is set explicitly rather than left to
+   inherit: .bc-match-meta (the bracket card's meta strip) forces uppercase
+   on its own text, and this chip must read "Withdrawn" wherever it lands,
+   not "WITHDRAWN" -- which is also why it never renders inside that strip
+   (a fifth value there would violate the closed middle-mark set). */
+.barred-chip {
+  display: inline-block;
+  white-space: nowrap;
+  font-family: var(--font-strong);
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: none;
+  letter-spacing: 0.02em;
+  color: var(--ink-3);
+  background: color-mix(in srgb, var(--ink-3) 12%, transparent);
+  border: 1px solid color-mix(in srgb, var(--ink-3) 35%, transparent);
+  padding: 1px 5px;
+  border-radius: 4px;
 }
 
 /* Option D (harden): on the INDIVIDUAL scoring board only, scoped with
@@ -5428,6 +5457,22 @@ button.vsched-item:not([data-clickable]) {
   background: var(--accent);
   border-color: var(--accent);
   color: var(--accent-fg);
+}
+
+/* A mark or a letter the operator cannot change right now -- the bout is
+   already decided, a hantei stands, or it is the winner's default-win maru
+   while a recorded withdrawal is in force -- takes the disabled look every
+   other disabled control on this board already has (.btn:disabled,
+   .sb-draw-toggle:disabled). Without it the winner's read-only side looked
+   exactly like the withdrawer's side the operator was correcting, pointer
+   cursor and all (UAT, bc-tmfn). Opacity only: the fills and the side tint
+   keep their colours, so Shiro and Aka are still told apart by tint and
+   hatch, and the maru stays readable. The two hover rules skip a disabled
+   button, so it does not react to the pointer either. */
+.ipt-btn:disabled,
+.sb-slot:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
 }
 
 .sb-vs {
@@ -5698,7 +5743,9 @@ button.vsched-item:not([data-clickable]) {
 }
 
 /* Kachinuki running headline content: a bout-log fact ("X beat Y · stays
-   on"), never a verdict — the verdict appears only on completion. */
+   on"), never a verdict — the verdict appears only on completion. Also the
+   recorded decision ("Kiken – Voluntary") under the verdict of a match a
+   withdrawal ended (bc-kcsh). */
 .team-summary__fact {
   font-size: 13.5px;
   font-weight: 700;
@@ -6832,19 +6879,42 @@ button.vsched-item:not([data-clickable]) {
 .msb-name { flex: 1; min-width: 0; font-weight: 600; color: var(--ink-1);
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .msb-name--aka { text-align: right; color: var(--red); }
-/* A bout row's name cell carries a member label on the OUTER side, so the
-   cell holds TWO inline children. Ellipsis truncates the END of the run,
-   which on Aka is the label: a long name clipped Aka's label away while
-   Shiro's leading one always survived. Same mechanism the competitor-number
-   clip fix addressed (bc-dnst). Flex makes the NAME the only shrinkable
-   child, so the label survives on both sides and the name ellipsises
-   instead. Scoped to --labelled so the single-child name cells elsewhere
-   (and the --stacked name-over-dojo variant) keep the plain block flow. */
-.msb-name--labelled { display: flex; align-items: center; }
+/* A bout row's name cell carries a member label, or a Kiken/Fus./Withdrawn
+   mark, on the OUTER side, so the cell holds TWO inline children. Ellipsis
+   truncates the END of the run, which on Aka is the badge: a long name
+   clipped Aka's badge away while Shiro's leading one always survived. Same
+   mechanism the competitor-number clip fix addressed (bc-dnst). Flex makes
+   the NAME (or the NumberedName clip wrapper, when the name carries its own
+   number chip) the only shrinkable child, so the badge survives on both
+   sides and the name ellipsises instead. Scoped to --labelled so the
+   single-child name cells elsewhere (and the --stacked name-over-dojo
+   variant) keep the plain block flow.
+
+   gap (bc-cse), not the teamNameMark/barredNameMark {" "} text-node spacer
+   those two leaf functions still emit for their OTHER (non-flex) callers:
+   CSS Flexbox treats a whitespace-only text node between flex items as
+   ZERO-SIZED rather than a real item (it would collapse under ordinary
+   inline layout too), so once a host adopts --labelled that spacer renders
+   with no width at all and the badge touched the name. gap replaces it here;
+   the leaf functions are left alone since the SAME spacer is still load-
+   bearing for a caller that keeps the plain (non-flex) block/inline flow
+   (e.g. viewer_standings.jsx's wrapping, non-ellipsis name cell). */
+.msb-name--labelled { display: flex; align-items: center; gap: 0.35em; }
 .msb-name--labelled.msb-name--aka { justify-content: flex-end; }
 .msb-name--labelled .msb-name__text {
   min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.msb-name--labelled .msb-member-label { flex-shrink: 0; }
+/* The NumberedName clip wrapper (numbered_name.jsx) is itself display:
+   inline-flex with no min-width/flex-basis of its own, so as a CHILD of this
+   flex row it would size to its content and never actually shrink -- its own
+   internal ellipsis (.numbered-name--clip > .numbered-name__text) only ever
+   fires once ITS box is smaller than its content. This is what lets it.
+   It shrinks but never GROWS: a growing wrapper fills the row, so the row's
+   own alignment (justify-content) no longer places the name and a
+   right-aligned side reads left-aligned. */
+.msb-name--labelled .numbered-name--clip { min-width: 0; flex: 0 1 auto; }
+.msb-name--labelled .msb-member-label,
+.msb-name--labelled .sb-result-mark,
+.msb-name--labelled .barred-chip { flex-shrink: 0; }
 /* The decided winner's name. .msb-slots--win marks only an ippon-LESS result
    (hantei, or a default win), so without this an ordinary 2-0 or 1-0 win is
    emphasised nowhere. Set by IndividualScore from the same id-first winner key
@@ -7202,27 +7272,11 @@ abbr.msb-lab { text-decoration: none; cursor: help; }
   margin-top: 2px;
   color: var(--danger-ink);
 }
-/* The server's own words, kept verbatim underneath ours so nothing it said is
-   swallowed by the friendlier heading. */
-.reopen-conflict__msg {
-  margin-top: 4px;
-  color: var(--ink-3);
-  font-size: var(--fs-xs);
-}
 .reopen-conflict__actions {
   display: flex;
   gap: 6px;
   flex-wrap: wrap;
   margin-top: 8px;
-}
-
-/* The verdict about to be committed, shown above the reopen-reason prompt:
-   that prompt's Confirm IS the commit, and it hides the End button whose
-   armed label would otherwise carry this. */
-.reopen-reason__verdict {
-  font-size: var(--fs-sm);
-  color: var(--ink-2);
-  margin-bottom: 4px;
 }
 
 /* F5: pending-write banner, offline / transient queued terminal write */
@@ -7287,7 +7341,7 @@ abbr.msb-lab { text-decoration: none; cursor: help; }
   border-color: rgba(220, 38, 38, 0.3);
   font-weight: 800;
 }
-.ipt-btn--h:hover { background: rgba(220, 38, 38, 0.12); }
+.ipt-btn--h:hover:not(:disabled) { background: rgba(220, 38, 38, 0.12); }
 
 /* Touch: the "Send back to queue" control and the kiken/fusenpai disclosure
    toggles were the only operator controls that fell below the 44px touch target

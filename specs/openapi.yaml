@@ -1652,10 +1652,17 @@ paths:
       tags: [competitions]
       summary: Override pool rank
       description: >
-        Manually set a player's rank within a pool, overriding the computed
-        value. Used, among other callers, by the chusen (drawing-lots)
-        resolver (see `GET .../chusen-candidates`) to record a team's
-        finishing position once the operator has drawn lots.
+        Manually set one or more players' ranks within a pool, overriding the
+        computed value. Used, among other callers, by the chusen
+        (drawing-lots) resolver (see `GET .../chusen-candidates`) to record
+        the finishing order once the operator has drawn lots. Send either
+        `playerId` and `rank` (one player) or `ranks` (several players), never
+        both. A `ranks` group is recorded as ONE change: every rank lands
+        together, the knockout check below answers for the final order only,
+        and a refusal records none of them. Record a chusen's whole order as
+        one group, since setting its ranks one at a time passes through
+        orders nobody chose, which can name, and reopen, a knockout match
+        whose place the final order keeps.
       security:
         - TournamentPassword: []
       parameters:
@@ -1671,14 +1678,13 @@ paths:
           application/json:
             schema:
               type: object
-              required: [playerId, rank]
               properties:
                 playerId:
                   type: string
                   description: >
-                    Required. A pool-rank override is a record resolved by id
-                    only (operator ruling bc-pnum): playerId must name a
-                    competitor actually in this pool. There is no
+                    Required unless `ranks` is sent. A pool-rank override is a
+                    record resolved by id only (operator ruling bc-pnum):
+                    playerId must name a competitor actually in this pool. There is no
                     playerName/playerDojo narrowing left to select with two
                     pool members who share a display name from different
                     dojos (competitor identity is (name, dojo), never bare
@@ -1693,16 +1699,69 @@ paths:
                 rank:
                   type: integer
                   description: >
-                    1-based finishing rank within the pool; rejected if it
-                    exceeds the pool's player count.
+                    Required unless `ranks` is sent. 1-based finishing rank
+                    within the pool; rejected if it exceeds the pool's player
+                    count.
+                ranks:
+                  type: array
+                  minItems: 1
+                  description: >
+                    The group form, sent instead of `playerId` and `rank`:
+                    one entry per player, each checked as the single form is.
+                    No player and no rank may appear twice.
+                  items:
+                    type: object
+                    required: [playerId, rank]
+                    properties:
+                      playerId:
+                        type: string
+                        description: >
+                          A competitor in this pool, by id only.
+                      rank:
+                        type: integer
+                        description: >
+                          1-based finishing rank within the pool; rejected if
+                          it exceeds the pool's player count.
+                forceDownstreamReopen:
+                  type: boolean
+                  description: >
+                    The operator's confirmation of a 409
+                    `downstream_knockout_played` refusal: records the rank(s)
+                    and reopens the named knockout match(es) with the new
+                    qualifier seated. Never gets past
+                    `downstream_knockout_running`.
       responses:
         '200':
-          description: Rank override saved.
+          description: >
+            Rank override saved. In a mixed competition a new order that
+            moves who holds one of the pool's qualifying places repaints the
+            knockout slots that place feeds; `reopenedMatches` names the
+            knockout matches a confirmed override reopened (empty otherwise).
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  reopenedMatches:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        id:
+                          type: string
+                        number:
+                          type: integer
+                        label:
+                          type: string
+                          description: >
+                            The operator's name for the match, shown as is: its number and knockout round, e.g. `Match 3 (Final)`; `knockout Match 3` when the bracket records no round, `the 3rd-place match` for the bronze, the id when it has no number.
         '400':
           description: >
             playerId is missing, blank, or does not name a competitor in this
             pool; or rank is not a positive integer, exceeds the pool's
-            player count, or exceeds the absolute override cap.
+            player count, or exceeds the absolute override cap. For `ranks`,
+            the same checks per entry, plus: a player or a rank given twice,
+            or `ranks` sent together with `playerId` or `rank`.
           content:
             application/json:
               schema:
@@ -1716,7 +1775,49 @@ paths:
               schema:
                 $ref: '#/components/schemas/Error'
         '409':
-          description: Rank overrides are only accepted while the competition is in the pools stage.
+          description: >
+            Rank overrides are only accepted while the competition is in the
+            pools stage, or, for a mixed competition, in the knockout stage
+            too (`Error`). In a mixed competition the new order is
+            also answered like a pool result correction, with `matchId`
+            empty because no match is corrected:
+            `downstream_knockout_played` when it moves a qualifier out of a
+            knockout match the old one already fought (retry with
+            `forceDownstreamReopen: true`), and `downstream_knockout_running`
+            (`runningMatches`, not confirmable) when such a match is being
+            fought now. A refused override is not recorded (for `ranks`,
+            none of the group is).
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - $ref: '#/components/schemas/Error'
+                  - $ref: '#/components/schemas/DownstreamKnockoutPlayedError'
+                  - type: object
+                    required: [error]
+                    properties:
+                      error:
+                        type: string
+                        enum: [downstream_knockout_running]
+                      matchId:
+                        type: string
+                      runningMatches:
+                        type: array
+                        items:
+                          type: object
+                          properties:
+                            id:
+                              type: string
+                            number:
+                              type: integer
+                            label:
+                              type: string
+                              description: >
+                                The operator's name for the match, shown as is: its number and knockout round, e.g. `Match 3 (Final)`; `knockout Match 3` when the bracket records no round, `the 3rd-place match` for the bronze, the id when it has no number.
+                      message:
+                        type: string
+        '422':
+          description: overrides.json is corrupt (`corrupt_overrides`); repair it with `DELETE .../overrides`.
           content:
             application/json:
               schema:
@@ -1736,22 +1837,39 @@ paths:
         `PUT .../pools/{poolId}/override-rank`. Only consequential ties (ones
         that affect advancement/seeding) are returned. Admin-gated, unlike
         the public league-tiebreak candidates endpoint. Empty (not an error)
-        for a non-team competition, a competition not in the pools stage, or
-        when no group currently needs chusen.
+        for a non-team competition, a competition not in the pools stage (a
+        mixed competition's knockout stage counts, since a pool correction
+        made then can reopen a tie), or when no group currently needs chusen.
+        `recorded` lists the ties a chusen already settled (every tied team
+        carries a recorded rank), with those ranks, so a chusen recorded in
+        the wrong order can be changed through the same
+        `PUT .../override-rank`. It follows the same visibility rules as
+        `candidates`.
       security:
         - TournamentPassword: []
       parameters:
         - $ref: '#/components/parameters/CompetitionId'
       responses:
         '200':
-          description: Still-tied groups needing an operator lots-draw.
+          description: >
+            Still-tied groups needing an operator lots-draw, and the groups a
+            recorded chusen already settled.
           content:
             application/json:
               schema:
                 type: object
+                required: [candidates, recorded]
                 properties:
                   candidates:
                     type: array
+                    items:
+                      $ref: '#/components/schemas/ChusenCandidateGroup'
+                  recorded:
+                    type: array
+                    description: >
+                      Ties a recorded chusen settled. Each group's `teams` are
+                      in the recorded order and `ranks` carries each team's
+                      recorded finishing position.
                     items:
                       $ref: '#/components/schemas/ChusenCandidateGroup'
         '404':
@@ -2199,26 +2317,64 @@ paths:
                     required: [stale]
         '400':
           description: |
-            Invalid payload, or a completion that rewrites a result the
-            operator had already declared final without justifying it. The
-            latter needs a non-empty `correctionReason` in two cases:
-            - the match is already `completed` (a correction);
-            - the match carries `reopenPending`, i.e. it was reopened via
-              `POST .../reopen` without a reason. Its stored status is
-              `running`, so the write looks like a first completion, but the
-              finalized result it replaces was discarded by that reopen. A
-              successful completion records the reason and clears
-              `reopenPending`.
+            Invalid payload, or a correction of a match that is already
+            `completed` without a non-empty `correctionReason`. A match
+            reopened via `POST .../reopen` without a reason (`reopenPending`)
+            is NOT refused for one when it is completed again: a match can be
+            reopened without any reason, and nothing is gated on that. The
+            completion clears `reopenPending` and keeps a `correctionReason`
+            if one is sent.
+
+            A `completed` write on a team match (not kachinuki) is also
+            refused while a numbered bout (1..teamSize) has no result in
+            `subResults`: no winner, decision, ippon, foul or encho. A bout
+            missing from the payload has no result. Every position is gated,
+            whatever the lineups name: a position neither team fields is
+            recorded as a Tie (`decision` hikiwake). A withdrawal
+            (`decision` kiken or fusenpai) is not gated. The
+            `error` names the bouts, e.g. "Bout 5 (Taisho) has no result.
+            Record a score, a Tie, or a Fusensho before finishing."
+
+            A `completed` write whose `decision` is empty or `hikiwake` on a
+            match whose stored result is a completed withdrawal (kiken or
+            fusenpai) is a score sheet's correction, which cannot state a
+            decision: it keeps the withdrawal. It is not gated; its
+            `subResults`, `correctionReason` and stamp are saved; the recorded
+            withdrawal (`decision`, `decisionBy`, `decisionReason`, `winner`,
+            `winnerId`, `encho`) is kept as stored; and so is the winner's
+            default-win scoreline. On a single-bout match (no `subResults`)
+            the withdrawing side's `ipponsA`/`ipponsB` are taken from the write
+            (only real struck letters; an omitted side keeps the stored
+            letters), so a correction to the points struck before the
+            withdrawal is saved; a team write keeps the match-level scoreline
+            as stored. The competitor's eligibility is left untouched. To move
+            the withdrawal to the other side, use POST /decision; to clear a
+            withdrawal recorded by mistake, use POST .../reopen.
+
+            Any other `decision` (e.g. `fought`) on a write that lands over a
+            stored withdrawal REPLACES it, and the finish gate above applies
+            to it. Every competitor-status entry that match recorded is
+            restored to eligible, whatever the withdrawal was (kiken-voluntary
+            included), and the restore is broadcast as
+            `competitor_status_updated`. A kiken or fusenpai naming the OTHER
+            side moves the withdrawal, as POST /decision does: the new
+            withdrawer is made ineligible and only the competitor the first
+            entry barred is restored.
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/Error'
         '409':
           description: |
-            Conflict; one of six codes returned in the `error` field:
+            Conflict; one of seven codes returned in the `error` field:
             - `court_busy`: court already has a running match in this or another competition.
-              Extra fields: `court`, `matchId`, `compId`, `message`.
-            - `ineligible_competitor`: a participant is ineligible (kiken/fusenpai in a prior match).
+              Extra fields: `court`, `matchId`, `compId`, `label`, `message`.
+            - `ineligible_competitor`: a participant is ineligible (kiken/fusenpai in a prior match, or barred by
+              a decision recorded on a different match). `reasonHuman` is a full operator sentence naming the
+              competitor, the match, and what to do, e.g. "Alice withdrew in Pool A · Match 1 and cannot fight
+              again. Record the default win for Carol."; when BOTH sides of a knockout match are barred (the
+              only case a knockout cannot resolve with a draw), it instead reads "Neither Alice nor Bob can
+              fight Pool A · Match 1: correct the earlier withdrawal or the draw."
               Extra fields: `playerId`, `reason`, `reasonHuman`.
             - `already_ineligible`: participant was already marked ineligible before this match.
               Extra fields: `playerId`, `matchId`, `reason`, `reasonHuman`.
@@ -2226,8 +2382,23 @@ paths:
               Extra fields: `message`.
             - `side_mismatch`: the submitted winner does not match either side of the match.
               Extra fields: `message`.
-            - `downstream_knockout_scored`: a downstream elimination match was already scored.
-              Extra fields: `pool`, `finisher`, `matchId`, `message`.
+            - `downstream_knockout_played`: the write would change who a
+              knockout match that has a result of its own was fought by: a
+              knockout correction changing a winner already propagated into
+              the next round, or a pool correction in a mixed competition
+              moving a qualifying place whose holder has already fought in the
+              knockout. Nothing is written. Retry with
+              `forceDownstreamReopen: true` to apply it and reopen the named
+              matches, with the new qualifier seated. Same body as
+              DownstreamKnockoutPlayedError; `qualifierChange` names the pool
+              places that move.
+            - `downstream_knockout_running`: a pool correction in a mixed
+              competition would move a qualifier out of a knockout match being
+              fought now. Nothing is written, and `forceDownstreamReopen` does
+              not get past it: finish that match or send it back to the queue,
+              then save again. Extra fields: `matchId` (this match),
+              `runningMatches` (`[{id, number, label}]`), `message` (the operator's
+              sentence).
           content:
             application/json:
               schema:
@@ -2242,20 +2413,27 @@ paths:
                       - already_ineligible
                       - result_finalized
                       - side_mismatch
-                      - downstream_knockout_scored
+                      - downstream_knockout_played
+                      - downstream_knockout_running
                     description: Machine-readable conflict code.
                   court:
                     type: string
                     description: Court label (court_busy only).
                   matchId:
                     type: string
-                    description: Conflicting match ID (court_busy, already_ineligible, downstream_knockout_scored).
+                    description: Conflicting match ID (court_busy, already_ineligible); this match (downstream_knockout_played, downstream_knockout_running).
                   compId:
                     type: string
                     description: Conflicting competition ID (court_busy only).
+                  label:
+                    type: string
+                    description: >
+                      The conflicting match's operator label (court_busy
+                      only), e.g. `Pool A · Match 1`; see
+                      `engine.OperatorMatchLabel`.
                   message:
                     type: string
-                    description: Human-readable detail (court_busy, result_finalized, side_mismatch, downstream_knockout_scored).
+                    description: Human-readable detail (court_busy, result_finalized, side_mismatch, downstream_knockout_played, downstream_knockout_running).
                   playerId:
                     type: string
                     description: Ineligible participant ID (ineligible_competitor / already_ineligible).
@@ -2265,17 +2443,25 @@ paths:
                   reasonHuman:
                     type: string
                     description: Human-readable reason (ineligible_competitor / already_ineligible).
-                  pool:
-                    type: string
-                    description: Pool ID containing the scored downstream match (downstream_knockout_scored only).
-                  finisher:
-                    type: string
-                    description: Name of the pool finisher whose bracket placement is locked (downstream_knockout_scored only).
+                  runningMatches:
+                    type: array
+                    description: The knockout matches being fought (downstream_knockout_running only).
+                    items:
+                      type: object
+                      properties:
+                        id:
+                          type: string
+                        number:
+                          type: integer
+                        label:
+                          type: string
+                          description: >
+                            The operator's name for the match, shown as is: its number and knockout round, e.g. `Match 3 (Final)`; `knockout Match 3` when the bracket records no round, `the 3rd-place match` for the bronze, the id when it has no number.
         '422':
           description: |
             `corrupt_overrides`: this competition's overrides.json could not
-            be parsed, so pool standings (needed to check whether the write
-            would displace an already-scored bracket qualifier) cannot be
+            be parsed, so pool standings (needed to check whether a pool write
+            moves a qualifier the knockout has already seated) cannot be
             computed. This is a terminal, operator-recoverable state, not a
             transient failure: repair it via the reset-overrides endpoint
             (which resets overrides WITHOUT first parsing the corrupt file),
@@ -2330,33 +2516,72 @@ paths:
   /api/competitions/{id}/matches/{mid}/reopen:
     post:
       tags: [matches]
-      summary: Reopen a completed kachinuki match
+      summary: Reopen a completed kachinuki match, or clear a withdrawal
       description: |
-        Sanctioned "Reopen match" for a COMPLETED kachinuki team match:
-        status returns to `running`, the match-level winner/decision is
-        cleared, and the bout log (subResults) is kept, so the operator can
-        add more bouts and end the match again. Kachinuki competitions only;
-        for every other competition type the correction path (a completed
-        write with a `correctionReason`) remains the sole sanctioned edit of
-        a finished result. For a bracket match whose winner was already
-        propagated but not yet fought, the downstream slot is retracted to
-        its "Winner of rX-mY" generation placeholder. Reopening a finalized
-        result is an organiser action: the route stays main-password-gated
-        even in self-run mode (same class as override-winner), so a request
-        without a valid `X-Tournament-Password` gets 401. Broadcasts a
-        `match_updated` event.
+        Sanctioned "Reopen match" for a COMPLETED match that is either a
+        kachinuki team match, or any match (team or individual, pool or
+        knockout) whose stored `decision` is a withdrawal or default win
+        (kiken of any kind, fusenpai, or fusensho). Status returns to
+        `running` -- EXCEPT a match-level `fusensho` whose `decisionBy` side
+        is STILL barred by a decision recorded on a DIFFERENT match, which
+        returns to `scheduled` instead: going straight to `running` would
+        strand the operator behind the eligibility gate with no way to
+        start it. The identical fusensho reopens to `running` once that
+        competitor is reinstated. The match-level verdict
+        (winner, decision, default-win scoreline) is cleared, and what was
+        fought is kept: the bout log (subResults), or on a single-bout match
+        (an individual match, a pool daihyosen or tiebreaker bout) the letters
+        the withdrawing side had struck, the fouls, the overtime and, on a
+        team rep bout, who fought it (repPlayerA/B). The winner's letters from
+        before the withdrawal are not kept: recording the withdrawal replaced
+        them with the default-win maru, which the reopen clears. The operator
+        then scores the rest and completes the match through the score
+        endpoint. The reopen stamps the match's `modifiedAt` with the server's
+        time, so a write stamped before it (an offline-queued save replayed
+        afterwards) is refused as `superseded` rather than completing the
+        reopened match again.
+        This is how a withdrawal recorded by mistake is cleared: a withdrawal
+        gives the opponent the win by default, so without it the match was
+        never decided. For every other completed match the correction path (a
+        completed write with a `correctionReason`) remains the sole sanctioned
+        edit of a finished result. Reopening a finalized result is an
+        organiser action: the route stays main-password-gated even in self-run
+        mode (same class as override-winner), so a request without a valid
+        `X-Tournament-Password` gets 401. Broadcasts a `match_updated` event.
 
-        Discarding a finalized result is audited, but NOT at this step:
+        Reopening a match a withdrawal (kiken, fusenpai) ended REMOVES the
+        withdrawal: every competitor-status entry that match recorded is
+        restored to eligible, in the same transaction as the reopen, and the
+        restore is broadcast as `competitor_status_updated`.
+
+        Knockout matches: a winner already propagated into a next-round slot
+        that has not been fought is retracted to its "Winner of rX-mY"
+        generation placeholder (and a semifinal's loser is taken back out of
+        the bronze match). When that next match, or the bronze match, has
+        already been completed with a result of its own, the reopen is
+        refused with `downstream_knockout_played` naming it; a retry with
+        `forceDownstreamReopen: true` reopens that match too (back to
+        `scheduled`, its result and bouts cleared, to be fought again), and
+        the 200 response lists it in `reopenedMatches` with a `match_updated`
+        event for each. When a withdrawal had decided that reopened match, it
+        goes with its verdict: the competitor it barred is restored to
+        eligible and a `competitor_status_updated` event is broadcast, as for
+        the match being reopened. A next match that is in progress, or that a bye
+        resolved off this winner, is refused outright. A pool match is never
+        refused for the knockout its pool feeds: reopening it moves no
+        knockout slot. The write that finishes it is checked instead: the same
+        result is saved silently, and a different one that moves a qualifier
+        who has already fought in the knockout answers
+        `downstream_knockout_played` with `qualifierChange` (see PUT
+        .../score).
+
         `reason` is optional and the request body may be omitted entirely, so
         reopening is one tap for an operator who ended a match by mistake at a
-        shiaijo. When no reason is given the match is flagged `reopenPending`
-        and the justification is collected on the next completion instead: a
-        `PUT .../score` that completes a `reopenPending` match is rejected with
-        400 unless it carries a `correctionReason`, which then clears the flag.
-        The audit record is therefore written later than the action it
-        justifies, never skipped. A `reason` supplied here is recorded
-        immediately as the match's `correctionReason` and leaves nothing
-        outstanding (`reopenPending` stays false).
+        shiaijo, and ending the match again asks for no reason either. When no
+        reason is given the match is flagged `reopenPending`, which the next
+        completion clears (keeping a reason if that write sends one). A
+        `reason` supplied here is recorded immediately as the match's
+        `correctionReason` (`reopenPending` stays false).
       security:
         - TournamentPassword: []
       parameters:
@@ -2376,17 +2601,48 @@ paths:
                     Optional. Why the recorded result is being discarded (e.g.
                     "Ended too early"). Trimmed server-side; absent, empty or
                     whitespace-only all mean "no reason given", which sets
-                    `reopenPending` instead of rejecting the request. Same
+                    `reopenPending`; nothing is refused for it. Same
                     200-character cap as `decisionReason` /
                     `correctionReason`.
+                forceDownstreamReopen:
+                  type: boolean
+                  description: >
+                    Optional. The operator's confirmation after a 409
+                    `downstream_knockout_played`: also reopen the later
+                    knockout match(es) the refusal named.
       responses:
         '200':
           description: Match reopened (status back to `running`).
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  reopenedMatches:
+                    type: array
+                    description: >
+                      Later knockout matches reopened by a confirmed
+                      (`forceDownstreamReopen`) reopen; empty otherwise.
+                    items:
+                      type: object
+                      properties:
+                        id:
+                          type: string
+                        number:
+                          type: integer
+                          description: The match number; 0 when it has none.
+                        label:
+                          type: string
+                          description: >
+                            The operator's name for the match, shown as is: its number and knockout round, e.g. `Match 3 (Final)`; `knockout Match 3` when the bracket records no round, `the 3rd-place match` for the bronze, the id when it has no number.
         '400':
           description: >
             The `reason` is longer than 200 characters, the body is present but
-            malformed JSON, or the competition is not a kachinuki team
-            competition.
+            malformed JSON, or the match is neither a kachinuki team match nor
+            one a withdrawal or default win decided: "reopen is only for
+            kachinuki team matches and for matches decided by a withdrawal or
+            default win (kiken, kiken-injury, fusenpai, or fusensho); correct
+            other results via the score editor instead."
           content:
             application/json:
               schema:
@@ -2404,18 +2660,28 @@ paths:
           $ref: '#/components/responses/NotFound'
         '409':
           description: |
-            Conflict. Two body shapes, matching the score endpoint's:
+            Conflict. Four body shapes, matching the score endpoint's where one exists:
             - Plain sentence in `error`: the match is not completed (only a
-              completed kachinuki match can be reopened), or a downstream
-              knockout match fed by this match's winner has already started
-              or recorded a result.
+              completed match can be reopened).
+            - `error: downstream_knockout_played`: a later knockout match fed
+              by this result has a result of its own. Extra fields:
+              `matchId` (this match), `blockingMatchId`, `blockingMatches`
+              (`[{id, number, label}]`, two for a semifinal feeding the final and the
+              bronze match), `displaced` (the competitor in the slot this match
+              fed), `message`. Retry with `forceDownstreamReopen: true` to
+              reopen them too.
+            - `error: downstream_knockout_running`: a later knockout match fed
+              by this result is being fought right now, so it cannot be
+              reopened with it. Nothing is written. Extra fields: `matchId`
+              (this match), `runningMatches` (`[{id, number, label}]`),
+              `message`.
             - `error: court_busy` (machine code, sentence in `message`):
               another match is already running on this match's court, in this
               or another competition. Reopening would put a second match in
               progress on that court, so the operator must finish or requeue the
               running one first. Extra fields: `court`, `matchId`, `compId`,
-              `message`. Same shape as the score endpoint's `court_busy`, so
-              clients keep one branch for it.
+              `label`, `message`. Same shape as the score endpoint's
+              `court_busy`, so clients keep one branch for it.
           content:
             application/json:
               schema:
@@ -2437,19 +2703,50 @@ paths:
                       compId:
                         type: string
                         description: Competition owning that running match (may differ from this one).
+                      label:
+                        type: string
+                        description: The conflicting match's operator label, e.g. `Pool A · Match 1`.
                       message:
                         type: string
                         description: Human-readable sentence; what clients display.
+                  - $ref: '#/components/schemas/DownstreamKnockoutPlayedError'
+                  - type: object
+                    required: [error]
+                    description: Later knockout match(es) fed by this result are being fought right now.
+                    properties:
+                      error:
+                        type: string
+                        enum: [downstream_knockout_running]
+                      matchId:
+                        type: string
+                      runningMatches:
+                        type: array
+                        items:
+                          type: object
+                          properties:
+                            id:
+                              type: string
+                            number:
+                              type: integer
+                            label:
+                              type: string
+                              description: The operator's name for the match; see `engine.OperatorMatchLabel`.
+                      message:
+                        type: string
         '500':
           $ref: '#/components/responses/InternalError'
 
   /api/competitions/{id}/matches/{mid}/requeue-blocker-and-reopen:
     post:
       tags: [matches]
-      summary: Atomically requeue a blocking match and reopen a kachinuki match
+      summary: Atomically requeue a blocking match and reopen a match
       description: |
         The atomic remedy for a court_busy reopen. When reopening a finished
-        kachinuki match ({id}/{mid}, the target) is refused because ANOTHER
+        match ({id}/{mid}, the target: any match the reopen endpoint accepts
+        -- including one decided by a match-level default win, fusensho --
+        with the same gate and the same `downstream_knockout_played` /
+        `forceDownstreamReopen` / `downstream_knockout_running` handling,
+        checked BEFORE the blocker is touched) is refused because ANOTHER
         match holds its court, this requeues that blocking match AND reopens
         the target under ONE hold of the court-exclusivity lock, so no other
         match can take the freed court between the two steps. Because a court
@@ -2461,7 +2758,9 @@ paths:
         raced. On success the target returns to `running` (with `reopenPending`
         set when no `reason` is given, exactly like reopen) and the blocker
         returns to `scheduled` with its partial score cleared; a `match_updated`
-        event is broadcast for BOTH matches.
+        event is broadcast for BOTH matches. A target a withdrawal ended has
+        that withdrawal removed and its eligibility restored exactly as on
+        reopen, broadcast as `competitor_status_updated`.
 
         Doubly destructive (it discards the target's finalized result AND the
         blocker's partial score), so it is main-password-gated in self-run mode
@@ -2493,14 +2792,21 @@ paths:
                     reopen endpoint's: absent/empty leaves the target
                     `reopenPending`, a supplied reason is recorded as its
                     `correctionReason`.
+                forceDownstreamReopen:
+                  type: boolean
+                  description: Optional. As on the reopen endpoint.
       responses:
         '200':
-          description: Blocker requeued and target reopened (both broadcast).
+          description: >
+            Blocker requeued and target reopened (both broadcast). Same body as
+            the reopen endpoint's (`reopenedMatches`).
         '400':
           description: >
             `blockerCompId` is missing or malformed, `blockerMatchId` is missing
             or too long, the `reason` exceeds 200 characters, the body is
-            malformed JSON, or the target competition is not kachinuki.
+            malformed JSON, or the target is neither a kachinuki team match nor
+            one a withdrawal or default win decided (same message as
+            `POST .../reopen`'s 400).
           content:
             application/json:
               schema:
@@ -2522,10 +2828,15 @@ paths:
         '409':
           description: |
             Conflict. Plain sentence in `error` when the target is not completed,
-            a downstream knockout fed by the target has been fought, or the
-            BLOCKER was already completed (so it never held the court as running
-            and requeuing it is the wrong remedy). Or `error: court_busy` (same
-            shape as reopen: `court`, `matchId`, `compId`, `message`) when a
+            or the BLOCKER was already completed (so it never held the court as
+            running and requeuing it is the wrong remedy). `error:
+            downstream_knockout_played` (same shape as reopen's) when a later
+            knockout match has its own result and `forceDownstreamReopen` was
+            not set; the blocker is left untouched. `error:
+            downstream_knockout_running` (same shape as reopen's,
+            `runningMatches`) when a later knockout match fed by the target
+            is being fought now. Or `error: court_busy` (same shape as reopen:
+            `court`, `matchId`, `compId`, `label`, `message`) when a
             match OTHER than the one requeued has since taken the court — the
             client re-offers the remedy for that new blocker.
           content:
@@ -2545,6 +2856,32 @@ paths:
                         type: string
                       compId:
                         type: string
+                      label:
+                        type: string
+                        description: The conflicting match's operator label, e.g. `Pool A · Match 1`.
+                      message:
+                        type: string
+                  - $ref: '#/components/schemas/DownstreamKnockoutPlayedError'
+                  - type: object
+                    required: [error]
+                    description: Later knockout match(es) fed by the target are being fought right now.
+                    properties:
+                      error:
+                        type: string
+                        enum: [downstream_knockout_running]
+                      matchId:
+                        type: string
+                      runningMatches:
+                        type: array
+                        items:
+                          type: object
+                          properties:
+                            id:
+                              type: string
+                            number:
+                              type: integer
+                            label:
+                              type: string
                       message:
                         type: string
         '500':
@@ -2724,6 +3061,20 @@ paths:
         Records multiple match results in a single request. Processes each entry independently;
         partial success is allowed. Returns a count of successful updates and a list of errors
         for any that failed.
+
+        An entry that would complete a team match (not kachinuki) while a numbered bout
+        (1..teamSize) has no result is refused by the same rule as PUT /score's 400: no
+        winner, decision, ippon, foul or encho on that bout, a bout missing from
+        `subResults` counting as no result, every position gated whatever the lineups name
+        (a position neither team fields is recorded as a Tie), a withdrawal (`decision`
+        kiken or fusenpai) not gated, and a
+        correction whose `decision` is empty or `hikiwake` on a match a withdrawal ended not
+        gated either (it keeps the withdrawal, as on PUT /score; any other `decision`
+        replaces the withdrawal, is gated, and restores the competitor's eligibility). The
+        refusal is reported in `errors` (not as an HTTP 400, since this endpoint is always 200
+        with partial success) with that entry's `matchId` and an `error` naming the bouts, e.g.
+        "Bout 5 (Taisho) has no result. Record a score, a Tie, or a Fusensho before finishing."
+        Nothing is written for that entry, and other entries are unaffected.
       security:
         - TournamentPassword: []
       parameters:
@@ -2763,9 +3114,9 @@ paths:
                             classes `reason` names below.
                         reason:
                           type: string
-                          enum: [superseded, clock_skew, corrupt_overrides]
+                          enum: [superseded, clock_skew, corrupt_overrides, downstream_knockout_played, downstream_knockout_running]
                           description: >
-                            Machine-readable discriminator, present only for the three
+                            Machine-readable discriminator, present only for the
                             classes named here and omitted for every other failure, so
                             its presence always means the same thing. `superseded`: a
                             newer result for that match is already stored. `clock_skew`:
@@ -2780,9 +3131,16 @@ paths:
                             schema; unlike them, this endpoint never fails the whole
                             request over a corrupt overrides file (no terminal 422 the
                             way the single-result endpoints answer with, since bulk-score
-                            is always HTTP 200 with partial success). In all three cases
-                            the entry is excluded from `succeeded` and never broadcast.
-                            Other entries in the batch are unaffected.
+                            is always HTTP 200 with partial success).
+                            `downstream_knockout_played`: the entry would change who a
+                            knockout match with its own result was fought by (see PUT
+                            /score); retry that entry with `forceDownstreamReopen: true`
+                            to apply it and reopen those matches.
+                            `downstream_knockout_running`: the entry is a pool correction
+                            that would move a qualifier out of a knockout match being
+                            fought now; finish or requeue that match, then retry. In
+                            every case the entry is excluded from `succeeded` and never
+                            broadcast. Other entries in the batch are unaffected.
 
   /api/competitions/{id}/matches/{mid}/quick-score:
     put:
@@ -2855,11 +3213,23 @@ paths:
         or representative bout rather than ippon scoring.
 
 
-        A decision FINALIZES the match, so it is subject to the same audit
-        rule as `/score`: when the match carries `reopenPending` (it was
-        reopened without a reason), `decisionReason` becomes REQUIRED and the
-        request is rejected with 400 without it. The supplied reason is
-        persisted to `correctionReason` and `reopenPending` is cleared.
+        A decision on a match reopened without a reason (`reopenPending`)
+        needs no reason either: it clears `reopenPending`, and a
+        `decisionReason` it carries is also kept as the match's
+        `correctionReason`.
+
+
+        `decision: "hikiwake"` is accepted here ONLY as the one-tap remedy
+        for a SCHEDULED pool or league match (never a Swiss or knockout
+        match) whose BOTH sides are already barred by a decision recorded on
+        a different match: neither can fight, so it is recorded as a draw
+        with no winner and no new eligibility change. `decisionBy` is not
+        required for this one shape, unlike every other `decision` value;
+        any other `hikiwake` request is rejected with 400 ("use /score for
+        fought/hikiwake"). The equivalent knockout case, where the bracket
+        needs a winner and a draw cannot stand in, is refused instead with
+        409 `ineligible_competitor` naming both sides and pointing at the
+        earlier withdrawal or the draw.
       security:
         - TournamentPassword: []
       parameters:
@@ -2871,21 +3241,27 @@ paths:
           application/json:
             schema:
               type: object
-              required: [decision, decisionBy]
+              required: [decision]
               properties:
                 decision:
                   type: string
-                  enum: [kiken, kiken-voluntary, kiken-injury, fusenpai, fusensho, daihyosen]
+                  enum: [kiken, kiken-voluntary, kiken-injury, fusenpai, fusensho, hikiwake, daihyosen]
                 decisionBy:
                   type: string
                   enum: [shiro, aka]
+                  description: >
+                    Required for every `decision` except the both-sides-barred
+                    `hikiwake` described above, which needs no side: neither
+                    competitor can fight, so the write names no winner. Same
+                    semantics as `MatchResult.decisionBy`: names the side
+                    that withdrew, did not appear, or is barred, never the
+                    side favoured.
                 decisionReason:
                   type: string
                   maxLength: 200
                   description: >
-                    Free-text operator note. REQUIRED when the target match has
-                    `reopenPending: true`; optional otherwise. Whitespace-only
-                    does not satisfy the requirement.
+                    Free-text operator note. Optional, a reopened match
+                    included.
                 encho:
                   $ref: '#/components/schemas/EnchoMetadata'
                 modifiedAt:
@@ -2917,14 +3293,26 @@ paths:
                   - $ref: '#/components/schemas/RefusedWrite'
         '400':
           description: >
-            Invalid payload, or a missing `decisionReason` on a match that was
-            reopened without one (`reopenPending: true`).
+            Invalid payload.
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/Error'
         '409':
-          description: Competitor not eligible (ineligible_competitor).
+          description: >
+            Competitor not eligible (`ineligible_competitor`; `reasonHuman`
+            names the competitor, the match, and what to do, e.g. "Alice
+            withdrew in Pool A · Match 1 and cannot fight again. Record the
+            default win for Carol."; the knockout both-sides-barred case
+            reads "Neither Alice nor Bob can fight Pool A · Match 1: correct
+            the earlier withdrawal or the draw."), or a decision
+            that would change who a knockout match with its own result was
+            fought by (`downstream_knockout_played`, retry with
+            `forceDownstreamReopen: true`; `qualifierChange` names the pool
+            places a decision on a mixed competition's pool match moves), or
+            one that would move a qualifier out of a knockout match being
+            fought now (`downstream_knockout_running`, not confirmable). Same
+            bodies as PUT .../score.
           content:
             application/json:
               schema:
@@ -2932,8 +3320,8 @@ paths:
         '422':
           description: |
             `corrupt_overrides`: this competition's overrides.json could not
-            be parsed, so pool standings (needed by the mixed-pool
-            displaced-finisher guard) cannot be computed. Same
+            be parsed, so pool standings (needed by the pool
+            requalification check of a mixed competition) cannot be computed. Same
             operator-recoverable shape as `PUT .../score`'s 422 response:
             repair via `DELETE /api/competitions/{id}/overrides`, then
             resubmit the same decision.
@@ -3976,6 +4364,82 @@ components:
         error:
           type: string
 
+    DownstreamKnockoutPlayedError:
+      type: object
+      description: >
+        409 body when a write or reopen would change a result already
+        propagated into a later knockout match that has a result of its own,
+        or when a pool correction in a mixed competition would move a
+        qualifying place whose holder has already fought in the knockout
+        (`qualifierChange` names each place that moves). Retry with
+        `forceDownstreamReopen: true` to go ahead and reopen the named
+        match(es) for re-entry, with the new qualifier seated.
+      required: [error]
+      properties:
+        error:
+          type: string
+          enum: [downstream_knockout_played]
+        matchId:
+          type: string
+          description: The match being corrected or reopened; empty for a pool-rank override, which corrects none.
+        blockingMatchId:
+          type: string
+          description: The first blocking match (bronze before the next round).
+        blockingMatches:
+          type: array
+          description: Every blocking match, each with the number the operator knows it by.
+          items:
+            type: object
+            properties:
+              id:
+                type: string
+              number:
+                type: integer
+              label:
+                type: string
+                description: >
+                  The operator's name for the match, shown as is: its number and knockout round, e.g. `Match 3 (Final)`; `knockout Match 3` when the bracket records no round, `the 3rd-place match` for the bronze, the id when it has no number.
+        displaced:
+          type: string
+          description: The competitor in the slot this match fed, when there is one blocking match.
+        qualifierChange:
+          type: array
+          description: >
+            The pool places a pool correction moves, by rank. Always present;
+            empty for a knockout correction.
+          items:
+            type: object
+            properties:
+              pool:
+                type: string
+                description: Pool name, e.g. "Pool A".
+              rank:
+                type: integer
+              place:
+                type: string
+                description: The rank as the operator reads it, e.g. "1st".
+              from:
+                type: object
+                description: The competitor seated for this place now.
+                properties:
+                  name:
+                    type: string
+                  id:
+                    type: string
+              to:
+                type: object
+                description: The competitor the corrected standings put there; empty when `tied`.
+                properties:
+                  name:
+                    type: string
+                  id:
+                    type: string
+              tied:
+                type: boolean
+                description: The corrected standings leave this place tied until a tie-break is fought; its slot returns to its draw label.
+        message:
+          type: string
+
     Sponsor:
       type: object
       description: A single sponsor logo entry in the tournament's sponsor list (mp-c38).
@@ -4595,6 +5059,29 @@ components:
           items:
             $ref: '#/components/schemas/Player'
 
+    IneligibleSidesAnnotation:
+      type: object
+      readOnly: true
+      description: >
+        Read-only stamp attached to a SCHEDULED match, naming which side(s)
+        cannot be started because they are barred by a decision recorded on
+        a DIFFERENT match (a competitor already re-scoring their own prior
+        kiken/fusenpai is exempt, so that match is never stamped against
+        itself). Computed at request time only, never persisted: `a`/`b` are
+        each the barring decision code (`kiken`, `kiken-voluntary`,
+        `kiken-injury`, or `fusenpai`) when that side is barred, omitted
+        otherwise. Absent entirely on a running or completed match, and on a
+        scheduled match with neither side barred. A match carrying this
+        stamp also has `queuePosition` omitted; refer to
+        `MatchResult.queuePosition`.
+      properties:
+        a:
+          type: string
+          enum: [kiken, kiken-voluntary, kiken-injury, fusenpai]
+        b:
+          type: string
+          enum: [kiken, kiken-voluntary, kiken-injury, fusenpai]
+
     MatchResult:
       type: object
       properties:
@@ -4685,7 +5172,12 @@ components:
           enum: [none, fought, hikiwake, kiken, kiken-voluntary, kiken-injury, fusenpai, fusensho, daihyosen, kachinuki-exhaustion]
         decisionBy:
           type: string
-          description: Which side the decision favours (shiro = white = left, aka = red = right).
+          description: >
+            The side the decision names as the loser: who withdrew, did not
+            appear, or (for a match-level `fusensho`) is barred by a
+            decision recorded elsewhere (shiro = white = left, aka = red =
+            right). The write then makes the OTHER side the winner. NOT the
+            side the decision favours.
           enum: [shiro, aka]
         decisionReason:
           type: string
@@ -4697,9 +5189,10 @@ components:
           description: >
             Audit justification for rewriting a result the operator had already
             declared final. Required when the write completes a match that is
-            already `completed` (a correction) or that carries `reopenPending`;
-            otherwise it is dropped, so the field always means "this rewrote a
-            finalized result". A stored reason is carried forward across
+            already `completed` (a correction). Kept, but not required, when
+            the write completes a match that carries `reopenPending`.
+            Otherwise it is dropped, so the field always means "this rewrote
+            a finalized result". A stored reason is carried forward across
             subsequent writes.
 
             A correction does NOT exempt the write from the timestamp
@@ -4716,16 +5209,27 @@ components:
           readOnly: true
           description: >
             True when the match was reopened via `POST .../reopen` without a
-            reason and still owes its audit justification. While set, a write
-            that completes the match must carry a `correctionReason` (400
-            otherwise); a successful one records the reason and clears this
-            flag. Server-owned: a client-supplied value is ignored on every
-            write.
+            reason and has not been completed since. Nothing is refused for
+            it: the write that completes the match clears it, and keeps a
+            `correctionReason` if one is sent. Server-owned: a client-supplied
+            value is ignored on every write.
         encho:
           $ref: '#/components/schemas/EnchoMetadata'
         status:
           type: string
           enum: [scheduled, running, completed]
+        queuePosition:
+          type: integer
+          readOnly: true
+          description: >
+            1-based position in this court's scheduled queue; 0/absent when
+            not queued (not scheduled, or `ineligibleSides` is set: a barred
+            match is skipped exactly like an unqueued one, so it never
+            occupies a queue slot).
+        ineligibleSides:
+          readOnly: true
+          allOf:
+            - $ref: '#/components/schemas/IneligibleSidesAnnotation'
         court:
           type: string
           maxLength: 32
@@ -4774,8 +5278,12 @@ components:
         individual victories (IV) and points won (PW) per side. Shiro is sideB
         (rendered left), Aka is sideA (rendered right). The daihyosen
         (position -1) sub-bout is excluded, so a representative-bout-decided
-        tie reports the tied totals (for example IV 0-0). Absent on individual
-        matches. Never sent by clients.
+        tie reports the tied totals (for example IV 0-0). For a non-kachinuki
+        match decided by a match-level default win, these totals already
+        include the credit for every unfought numbered bout (one victory and
+        two points per bout, to the side `decisionBy` did not name); refer to
+        `MatchResult.decisionBy`. Absent on individual matches. Never sent by
+        clients.
       properties:
         shiroIV:
           type: integer
@@ -4905,6 +5413,10 @@ components:
         status:
           type: string
           enum: [scheduled, running, completed]
+        ineligibleSides:
+          readOnly: true
+          allOf:
+            - $ref: '#/components/schemas/IneligibleSidesAnnotation'
         court:
           type: string
           maxLength: 32
@@ -4950,6 +5462,12 @@ components:
           type: boolean
         queuePosition:
           type: integer
+          readOnly: true
+          description: >
+            1-based position in this court's scheduled queue; 0/absent when
+            not queued (not scheduled, or `ineligibleSides` is set: a barred
+            match is skipped exactly like an unqueued one, so it never
+            occupies a queue slot).
         matchNumber:
           type: integer
           readOnly: true
@@ -4964,6 +5482,7 @@ components:
         decisionBy:
           type: string
           enum: [shiro, aka]
+          description: The elimination-stage counterpart of `MatchResult.decisionBy`. Same semantics.
         decisionReason:
           type: string
           maxLength: 200
@@ -5004,9 +5523,8 @@ components:
           readOnly: true
           description: >
             Mirrors `MatchResult.reopenPending` for elimination-stage matches:
-            the match was reopened without a reason and still owes its audit
-            justification, so the next completing write must carry a
-            `correctionReason`. Persisted in bracket.json.
+            the match was reopened without a reason and has not been
+            completed since. Persisted in bracket.json.
         subResults:
           type: array
           description: >
@@ -5139,6 +5657,18 @@ components:
             bracket generated before this field existed (a legacy
             bracket.json); a competitor whose id is missing from this list
             was not drawn (e.g. excluded by check-in) and carries no number.
+        timesSettled:
+          type: boolean
+          readOnly: true
+          description: >
+            True once the scheduled times need no repair on load: set when the
+            draw is generated (each shiaijo is then scheduled in match-number
+            order), and when a bracket drawn by an earlier release is first
+            loaded (its times are handed out again in match-number order if
+            nothing has been played, and otherwise kept). Once set, the
+            times are never changed on load, so a match the operator moved
+            stays where it was put. Absent on a bracket not yet loaded by a
+            release that records it.
 
     PlayerStanding:
       type: object
@@ -5270,7 +5800,17 @@ components:
           type: object
           additionalProperties:
             type: string
-          description: Map of position label to player ID.
+          description: >
+            Map of position label to the fighter's display NAME (not an id).
+            The member id for each position goes in `memberIds`.
+        memberIds:
+          type: object
+          additionalProperties:
+            type: string
+          description: >
+            Map of position label to the team member's id, keyed by the same
+            positions as `positions`. Optional: a position without an entry
+            here is identified by its name alone.
 
     ScheduleEstimate:
       type: object
@@ -5308,7 +5848,8 @@ components:
       description: >
         One consequential team-pool tie that the daihyosen (representative
         bout) could not settle, so the operator must draw lots (chusen) and
-        record the finishing order via `PUT .../pools/{poolId}/override-rank`.
+        record the finishing order, as one `ranks` group, via
+        `PUT .../pools/{poolId}/override-rank`.
       properties:
         poolName:
           type: string
@@ -5349,6 +5890,14 @@ components:
         minPosition:
           type: integer
           description: 1-based finishing position of the best-placed member of this tied group.
+        ranks:
+          type: array
+          description: >
+            Present only on a group in `recorded`: each team's recorded
+            chusen finishing position, positionally parallel to teams. Absent
+            on a group still waiting for its chusen.
+          items:
+            type: integer
 
     LeagueTiebreakCandidateGroup:
       type: object

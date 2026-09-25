@@ -57,6 +57,13 @@ afterAll(() => restoreGlobals());
 
 beforeEach(() => { window.API.recordScore.mockClear(); });
 
+// bc-tmfn: every bout of a team match is fought, so Finish refuses while a
+// numbered bout has no result. Bouts 2 and 3 are recorded Ties; the test
+// strikes bout 1 itself, so there is still a SCORED row to check.
+const TIED_BOUTS = [2, 3].map((position) => ({
+  position, sideA: '', sideB: '', ipponsA: [], ipponsB: [], winner: '', decision: 'hikiwake',
+}));
+
 function makeMatch(overrides = {}) {
   return {
     id: 'm-pool-1',
@@ -70,6 +77,7 @@ function makeMatch(overrides = {}) {
     sideA: { id: 'team-kyoto', name: 'Kyoto' },
     sideB: { id: 'team-osaka', name: 'Osaka' },
     ...overrides,
+    subResults: [...TIED_BOUTS, ...(overrides.subResults || [])],
   };
 }
 

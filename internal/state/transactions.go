@@ -77,6 +77,17 @@ import (
 // helpers for any other ID would perform unlocked I/O.
 var ErrMismatchedTxCompID = errors.New("compID does not match transaction's competition")
 
+// ErrTxCommitted marks a WithTransaction error returned AFTER the
+// transaction's WAL was committed: its Apply then failed part-way. Such a
+// transaction is not dropped. The next startup replays the WAL, so its
+// staged writes land. Every other WithTransaction error means nothing was
+// committed. The difference matters to a caller that did work OUTSIDE the
+// WAL inside fn (overrides.json, which serializes on the store-wide lock, see
+// engine.OverridePoolRanks) and undoes it when the transaction fails: undoing
+// it after a commit would leave the replayed files describing a change the
+// undone file no longer holds. Test with errors.Is.
+var ErrTxCommitted = errors.New("transaction committed; its writes are replayed on restart")
+
 // StoreTx is the transactional handle passed to fn in WithTransaction.
 // Methods mirror the corresponding *Store methods but DO NOT re-acquire
 // the per-competition lock, that's already held by WithTransaction.
@@ -179,10 +190,11 @@ type StoreTx interface {
 // call sites below, and the package header above, which has always
 // documented it this way.
 //
-// This is load-bearing, not incidental: the mp-e2k1 guard inside
-// RecordMatchResultWithIneligibilityTx re-reads pool-matches.csv via
-// computeStandingsFrom AFTER staging the forward write, to compare the
-// qualifying finishers before and after. If that read fell through to
+// This is load-bearing, not incidental: the pool requalification check
+// inside RecordMatchResultWithIneligibilityTx (engine/pool_requalify.go)
+// re-reads pool-matches.csv via computeStandingsFrom AFTER staging the
+// forward write, to compare the corrected finishers with the knockout slots
+// they feed. If that read fell through to
 // disk it would compute post-write standings from pre-write bytes,
 // which is the stale-standings class the cache-invalidation notes
 // describe. The K3 rollback likewise re-enters UpdatePoolMatchByID
@@ -236,8 +248,10 @@ func (s *Store) WithTransaction(compID string, fn func(tx StoreTx) error) error 
 		// disk; the next Store.NewStore startup will replay it.
 		// Surface the error so the caller can react (e.g., HTTP
 		// 500), the next process startup is what guarantees
-		// completion.
-		return fmt.Errorf("WithTransaction %q: Apply: %w", compID, err)
+		// completion. Marked ErrTxCommitted so a caller holding work
+		// done outside the WAL can tell this from a dropped
+		// transaction.
+		return fmt.Errorf("WithTransaction %q: Apply: %w (%w)", compID, err, ErrTxCommitted)
 	}
 
 	// Cache reconciliation. In WAL mode, the savers populated the

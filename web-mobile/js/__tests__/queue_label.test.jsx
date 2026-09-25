@@ -90,6 +90,19 @@ describe('queueLabel (full form)', () => {
       }
     }
   });
+
+  // bc-tmfn: a scheduled match whose competitor is barred (withdrew earlier;
+  // ineligible_match.jsx) cannot be fought, so it never reads "Next up" /
+  // "N before yours" whatever its queuePosition says. queuePosition: 1 here
+  // is a realistic transient -- the client state before the recompute in
+  // patch.jsx catches up -- not just a defensive belt-and-braces value.
+  it('returns "" for a barred scheduled match even with queuePosition 1', () => {
+    expect(queueLabel({ status: 'scheduled', queuePosition: 1, ineligibleSides: { a: 'kiken-voluntary' } })).toBe('');
+  });
+
+  it('returns "" for a barred scheduled match falling back to scheduledAt', () => {
+    expect(queueLabel({ status: 'scheduled', scheduledAt: '10:30', ineligibleSides: { b: 'fusenpai' } })).toBe('');
+  });
 });
 
 describe('queueLabelCompact (pill form)', () => {
@@ -129,5 +142,11 @@ describe('queueLabelCompact (pill form)', () => {
 
   it('returns null for null input (defensive)', () => {
     expect(queueLabelCompact(null)).toBeNull();
+  });
+
+  // bc-tmfn: mirrors queueLabel's barred-match guard above -- TWMatch's pill
+  // and VSchedItem both read queueLabelCompact.
+  it('returns null for a barred scheduled match even with queuePosition 1', () => {
+    expect(queueLabelCompact({ status: 'scheduled', queuePosition: 1, ineligibleSides: { a: 'kiken-voluntary' } })).toBeNull();
   });
 });

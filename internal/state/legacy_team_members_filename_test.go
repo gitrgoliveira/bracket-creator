@@ -185,7 +185,14 @@ func TestLegacyUpgrade_UnreadableLegacyFileNeverMintsBlanksOverIt(t *testing.T) 
 	s, id := newTeamMemberTestStore(t, "team", 3, false)
 	dir := filepath.Join(s.GetFolder(), "competitions", id)
 	require.NoError(t, os.WriteFile(filepath.Join(dir, legacySquadsFilename), []byte("squads: [this is not a map\n"), 0o600))
-	require.NoError(t, s.SaveParticipants(id, []domain.Player{{Name: "Tora A", Dojo: "Tora Dojo"}}))
+	// ID fixed at "c1-p1" (matching v200SquadsYAML's own key below) on BOTH
+	// saves in this test, rather than left to auto-mint: this test's roster
+	// save also runs saveParticipantsNoLock's own-roster orphan prune
+	// (bc-tmfn), so a real caller's identity-preserving re-save -- the only
+	// realistic way two saves of "the same Tora A" happen -- is exactly what
+	// must be modeled here for the migration's recovered "c1-p1" entry to
+	// still match the roster the second save actually persists.
+	require.NoError(t, s.SaveParticipants(id, []domain.Player{{ID: "c1-p1", Name: "Tora A", Dojo: "Tora Dojo"}}))
 
 	s.EnsureLegacyUpgraded(id)
 
@@ -207,7 +214,8 @@ func TestLegacyUpgrade_UnreadableLegacyFileNeverMintsBlanksOverIt(t *testing.T) 
 	// And once the fault clears the adoption still happens, through a caller
 	// the stamp does not gate. A roster write is one; so is any squad mutator.
 	require.NoError(t, os.WriteFile(filepath.Join(dir, legacySquadsFilename), []byte(v200SquadsYAML), 0o600))
-	require.NoError(t, s.SaveParticipants(id, []domain.Player{{Name: "Tora A", Dojo: "Tora Dojo"}}))
+	// Same fixed ID as the first save above: the SAME Tora A, re-saved.
+	require.NoError(t, s.SaveParticipants(id, []domain.Player{{ID: "c1-p1", Name: "Tora A", Dojo: "Tora Dojo"}}))
 	members, err := s.LoadSquads(id)
 	require.NoError(t, err)
 	assert.Equal(t, "Haruki Tanaka", members["c1-p1"][0].Name, "the retry must recover the real names")
@@ -222,8 +230,15 @@ func TestLegacyUpgrade_RosterWriteAdoptsTheLegacyFileFirst(t *testing.T) {
 	dir := filepath.Join(s.GetFolder(), "competitions", id)
 	require.NoError(t, os.WriteFile(filepath.Join(dir, legacySquadsFilename), []byte(v200SquadsYAML), 0o600))
 
-	// A roster save, with no prior read of this competition.
-	require.NoError(t, s.SaveParticipants(id, []domain.Player{{Name: "Tora A", Dojo: "Tora Dojo"}}))
+	// A roster save, with no prior read of this competition. ID fixed at
+	// "c1-p1" (matching v200SquadsYAML's own key), same reasoning as
+	// TestLegacyUpgrade_UnreadableLegacyFileNeverMintsBlanksOverIt above:
+	// this save also runs saveParticipantsNoLock's own-roster orphan prune
+	// (bc-tmfn), so the roster it persists must carry the id the legacy
+	// file's adopted entry is keyed on, or the prune correctly (and
+	// unhelpfully, for what this test wants to observe) drops it right back
+	// out in the same call.
+	require.NoError(t, s.SaveParticipants(id, []domain.Player{{ID: "c1-p1", Name: "Tora A", Dojo: "Tora Dojo"}}))
 
 	members, err := s.LoadSquads(id)
 	require.NoError(t, err)

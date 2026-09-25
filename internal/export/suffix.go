@@ -12,6 +12,7 @@ import (
 	"strings"
 
 	"github.com/gitrgoliveira/bracket-creator/internal/domain"
+	"github.com/gitrgoliveira/bracket-creator/internal/helper"
 	"github.com/gitrgoliveira/bracket-creator/internal/state"
 )
 
@@ -69,26 +70,18 @@ func SideMarks(decision string, decidedByHantei bool) (winnerMark, loserMark str
 }
 
 // SideMarksLR resolves SideMarks into (left, right) on-sheet order for a
-// match between sideA and sideB. Default layout is SideA (Aka) on the left;
-// mirror swaps the sides physically, matching the leftIppons/rightIppons
-// swaps at the call sites. A missing or unmatchable winner (a draw, an
-// unfinished match, or drifted data) yields no marks: result marks hang off
-// a winner by definition.
+// match between sideA and sideB: Shiro (SideB) on the left, Aka (SideA) on
+// the right, through helper.WhiteLeft like the scores beside these marks. A
+// missing or unmatchable winner (a draw, an unfinished match, or drifted
+// data) yields no marks: result marks hang off a winner by definition.
 //
-// att carries the participant UUIDs, threaded from state.MatchResult where
-// available, and the names it always has. Pass the zero domain.WinnerAttribution{}
-// to fall back to the pre-existing name comparison — that is clearer than a
-// "", "", "" triple, which could not be told apart from a genuine empty id.
-// Sub-bouts have no id fields to thread at all; a bracket row now carries
-// SideAID/SideBID/WinnerID (bc-brid), but this export call path does not
-// thread them yet (internal/export/builder.go's bracket branch, a
-// deliberately deferred change -- see that bead's final report), so a
-// bracket row still reaches this function via the zero value too, for now.
-// Side attribution goes through domain.AttributeWinnerSide, the one owner
-// of "which side won": ids win over names when a same-name pair (legal: two
-// participants from different dojos may share a name) would otherwise pick
-// the wrong side.
-func SideMarksLR(decision string, decidedByHantei bool, att domain.WinnerAttribution, mirror bool) (left, right string) {
+// att carries the ids and names of the record being marked: a pool or
+// bracket row's SideAID/SideBID/WinnerID, or a sub-bout's member ids
+// (state.SubMatchResult.Attribution). Side attribution goes through
+// domain.AttributeWinnerSide, the one owner of "which side won": ids win over
+// names when a same-name pair (legal: two participants from different dojos
+// may share a name) would otherwise pick the wrong side.
+func SideMarksLR(decision string, decidedByHantei bool, att domain.WinnerAttribution) (left, right string) {
 	winnerMark, loserMark := SideMarks(decision, decidedByHantei)
 	if att.Winner == "" {
 		return "", "" // an empty winner must not string-match an empty side
@@ -102,10 +95,7 @@ func SideMarksLR(decision string, decidedByHantei bool, att domain.WinnerAttribu
 	default:
 		return "", ""
 	}
-	if mirror {
-		return bMark, aMark
-	}
-	return aMark, bMark
+	return helper.WhiteLeft(aMark, bMark)
 }
 
 // joinSp joins two display fragments with a single space, skipping empties, so
@@ -169,11 +159,10 @@ func FlagsScorePair(a, b int) (string, string) {
 // imported without it. Never applies to engi flag counts (callers gate)
 // or the loser.
 //
-// att carries the participant UUIDs (the zero domain.WinnerAttribution{} when
-// unavailable — sub-bouts carry no id fields at all, and a bracket row's own
-// SideAID/SideBID/WinnerID (bc-brid) are not yet threaded through this export
-// call path either, a deliberately deferred change) and the names it always
-// has, resolved through domain.AttributeWinnerSide, the SAME owner
+// att carries the ids and names of the record being marked (a pool or
+// bracket row's SideAID/SideBID/WinnerID, or a sub-bout's member ids via
+// state.SubMatchResult.Attribution), resolved through
+// domain.AttributeWinnerSide, the SAME owner
 // SideMarksLR uses: the two helpers compose one cell (score + result mark)
 // and must agree on which side won, or a same-name pair whose ids disagree
 // with the name order could print the maru fallback in one side's cell and

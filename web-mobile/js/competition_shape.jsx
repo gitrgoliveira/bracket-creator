@@ -1230,6 +1230,5 @@ export const COMPETITION_DEFAULTS = {
   // 0 means "unset, use the scheduler default" for both durations (T047).
   poolMatchDurationSeconds: 0,
   knockoutMatchDurationSeconds: 0,
-  mirror: true,
   startTime: "09:00",
 };

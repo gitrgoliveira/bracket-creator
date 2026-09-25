@@ -231,6 +231,8 @@ Pool finishers move into the knockout bracket on their own: as soon as a pool's 
 
 ![The Pools tab: each pool as a card with its standings in draw order, every competitor carrying their number and a rank badge, the pool's matches with their results, and the head-to-head grid beneath.](../../screenshots/mobile-pool-standings.png)
 
+![The Bracket tab of a knockout of ten competitors, part-way through. Six competitors in the first column are marked BYE. The two first-round bouts, M1 and M2, and the first two quarterfinals, M3 and M4, are scored, each winner ticked. Quarterfinal M5 is marked NOW, the winners of M3 and M4 already face each other in semifinal M7, and the Final waits for the winners of M7 and M8.](../../screenshots/knockout-bracket-in-play.png)
+
 For the four competition formats and the Swiss round-by-round flow, refer to [Formats](formats.md).
 
 For team lineups and team scoring rules, refer to [Team tournaments](team-tournaments.md).

@@ -25,6 +25,11 @@ Tap a competition to see its schedule, standings, and bracket. Aka (red) and Shi
   <figcaption>A competition's page: upcoming matches and recent results with waza-level scores.</figcaption>
 </figure>
 
+<figure class="bc-fig" markdown="span">
+  ![A knockout's Bracket tab on a phone. The first-round bouts and two quarterfinals are scored, each winner ticked, the next quarterfinal is marked NOW, and two winners already face each other in a semifinal. The later rounds continue off the right-hand edge.](../../screenshots/viewer-bracket.png){ .bc-phone }
+  <figcaption>The Bracket tab: results fill in the tree as matches are completed. Scroll sideways for the later rounds.</figcaption>
+</figure>
+
 ### Searching by competitor number
 
 Once the draw for a competition has run, its competitors are numbered. The number starts with a short prefix that belongs to that competition, so "K12" and "M12" are two different people in two different draws. Swiss competitions are the exception and use no numbers at all.

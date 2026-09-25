@@ -2,6 +2,7 @@ package engine
 
 import (
 	"math"
+	"sort"
 	"time"
 
 	"github.com/gitrgoliveira/bracket-creator/internal/state"
@@ -259,8 +260,8 @@ func assignPoolMatchSlots(matches []state.MatchResult, comp *state.Competition, 
 
 // assignBracketMatchSlots is the bracket analogue of
 // assignPoolMatchSlots. Bracket matches carry the same Court field
-// as pool matches; matches are walked round-by-round, court-by-
-// court, and each court's cursor advances by perMatchElapsedMinutes
+// as pool matches; matches are walked in match-number order (see the
+// body), and each court's cursor advances by perMatchElapsedMinutes
 // after every assignment. T150, T151.
 //
 // Auto-resolved bye matches (Status == Completed at generation time)
@@ -291,26 +292,43 @@ func assignBracketMatchSlots(rounds [][]state.BracketMatch, comp *state.Competit
 
 	perMatchMin := perMatchElapsedMinutes(comp, tournament, true /*isKnockout*/)
 
+	// Order of play follows the match numbers (state.Bracket.NumberMatches:
+	// deepest round first, then left to right), so a court plays Match 1
+	// before Match 2 and every round before the next. The storage order is
+	// not the order of play: a pair beside an empty pair sits in the first
+	// storage row but is fought a round later. Unnumbered matches (the draw's
+	// byes and empty pairs, and hand-built rounds that carry no numbers) keep
+	// storage order and go first; a bye takes no court time.
+	var ordered, numbered []*state.BracketMatch
 	for rIdx := range rounds {
 		round := rounds[rIdx]
 		for mIdx := range round {
-			m := &round[mIdx]
-			court := m.Court
-			cursor, ok := courtCursor[court]
-			if !ok {
-				cursor = dayStart.Add(time.Duration(openingMin) * time.Minute)
+			if m := &round[mIdx]; m.MatchNumber > 0 {
+				numbered = append(numbered, m)
+			} else {
+				ordered = append(ordered, m)
 			}
-			cursor = skipCeremonyBlocks(cursor, lunchStart, lunchMin)
-			m.ScheduledAt = cursor.Format(scheduleClockLayout)
-
-			// Don't advance the court cursor for auto-resolved byes.
-			// They occupy no real time on the court, the next round
-			// would otherwise inherit a phantom delay.
-			if m.Status != state.MatchStatusCompleted {
-				cursor = cursor.Add(time.Duration(perMatchMin) * time.Minute)
-			}
-			courtCursor[court] = cursor
 		}
+	}
+	sort.SliceStable(numbered, func(i, j int) bool { return numbered[i].MatchNumber < numbered[j].MatchNumber })
+	ordered = append(ordered, numbered...)
+
+	for _, m := range ordered {
+		court := m.Court
+		cursor, ok := courtCursor[court]
+		if !ok {
+			cursor = dayStart.Add(time.Duration(openingMin) * time.Minute)
+		}
+		cursor = skipCeremonyBlocks(cursor, lunchStart, lunchMin)
+		m.ScheduledAt = cursor.Format(scheduleClockLayout)
+
+		// Don't advance the court cursor for auto-resolved byes.
+		// They occupy no real time on the court, the next round
+		// would otherwise inherit a phantom delay.
+		if m.Status != state.MatchStatusCompleted {
+			cursor = cursor.Add(time.Duration(perMatchMin) * time.Minute)
+		}
+		courtCursor[court] = cursor
 	}
 
 	// Find the maximum end-cursor across all courts. Seed with dayStart

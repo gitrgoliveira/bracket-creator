@@ -333,16 +333,13 @@ func (e *Engine) buildBracketFromDraw(comp *state.Competition, draw *helper.Knoc
 		}
 	}
 
-	// Per-court slot assignment (T150) + ceremony-block skipping
-	// (T151). See pools.go for the same wiring; tournament load
-	// failures abort the start so the operator notices the missing
-	// schedule data rather than silently shipping a uniform-start
-	// bracket.
+	// Tournament load failures abort the start so the operator notices the
+	// missing schedule data rather than silently shipping a uniform-start
+	// bracket (the slots are assigned below, once the matches are numbered).
 	tournament, err := e.store.LoadTournament()
 	if err != nil {
 		return nil, err
 	}
-	assignBracketMatchSlots(bracket.Rounds, comp, tournament)
 
 	// Display metadata (mp-7f2w): label each match with its effective round and
 	// real feeders so the viewer renders the same effective-round columns as the
@@ -361,6 +358,11 @@ func (e *Engine) buildBracketFromDraw(comp *state.Competition, draw *helper.Knoc
 	// state.Bracket so the load-time restamp (RestampRoundsFromFeeders) numbers
 	// a stored bracket with this same body.
 	bracket.NumberMatches()
+
+	// Per-court slot assignment (T150) + ceremony-block skipping (T151), in
+	// match-number order, so it runs after the numbering above. See pools.go
+	// for the same wiring.
+	assignBracketMatchSlots(bracket.Rounds, comp, tournament)
 
 	// Bronze (3rd-place) knockout: only when this competition's format
 	// requires a single 3rd place (comp.RequiresSingleThirdPlace, the

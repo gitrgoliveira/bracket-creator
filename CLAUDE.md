@@ -409,10 +409,17 @@ Name[, Zekken/DisplayName], Dojo[, DanGrade][, source]
 - **Report `resolved` and `outdated` threads separately.** Never claim zero unresolved threads without checking for outdated-but-visible threads that the user can still see in the GitHub UI. A query that filters out outdated threads produces a false "clean" that contradicts what the user sees.
 - **Paginate when counting or resolving threads.** GitHub's `reviewThreads(first:100)` caps at 100; a capped lookup silently finds nothing for threads past #100 and falsely prints "already resolved" while leaving them unresolved, which then blocks merge under a ruleset with `required_review_thread_resolution:true`.
 - Deeper passes are run on request: `/tri-review`, `/code-review`, `/security-review`, `/impeccable critique`. A zero-findings result from a reviewer that never ran looks identical to a genuinely clean review; check for agent failures before trusting one.
-- Run `make go/test` after fixes and before pushing. A red gate means fix-or-revert, never push.
+- Test review fixes with targeted tests while you work, and run the full `make go/test` once before saying the round is done (see **Gate cadence** under Testing & Verification). A red gate means fix-or-revert, never push.
 
 ## Testing & Verification
 
+- **Gate cadence: targeted tests while iterating, the full gate before claiming completion** (operator ruling 2026-09-25). `make go/test` takes about 3 minutes and keeps every core busy, which slows every other session on the machine; a full run after each small fix is what made concurrent sessions look stuck. While iterating, run only what the change touches, each in seconds and without `cd`:
+  ```bash
+  go -C <wt> test -run TestName ./internal/<pkg>/...
+  npm --prefix <wt>/web-mobile test -- js/__tests__/<file>.test.jsx
+  npm --prefix <wt>/web-mobile run test:render -- js/__tests__/render/<file>.render.test.jsx
+  ```
+  Run the full `make go/test` before any claim that the work is done, fixed or passing, before pushing, and before marking a PR ready. A change made after that run needs it again before the next such claim. Brief subagents the same way: an implementer or fixer runs targeted tests, and whoever claims completion runs the full gate once, in the foreground.
 - **Verify in the browser; never substitute API/curl calls.** Manual test-plan items and UAT must be executed through the actual UI.
 - **Test self-run / public features from the PUBLIC page, not the admin UI**: the public flow is what users hit. Admin-side scoring proves nothing about it.
 - **File gap/UX issues incrementally as you find them**, not batched at the end of a UAT pass.

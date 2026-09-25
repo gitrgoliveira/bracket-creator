@@ -408,17 +408,16 @@ func respondDecisionEngineError(c *gin.Context, store CompetitionStore, compID, 
 // never fires for it -- and it never goes through StartMatchTx, which
 // would refuse it on either side's existing bar.
 //
-// It ends the match, so it owes a reason-less reopen's audit reason exactly
-// as the main flow does: a match reopened without one (engine.reopenPoolMatch
-// sets ReopenPending, and a fusensho whose barred side is still barred
-// reopens to scheduled, which is how a both-barred match can carry the flag)
-// is refused with ReopenNeedsReasonMessage when the request has no reason,
-// and otherwise discharged (dischargeReopenPendingUnderTx) in the same
-// transaction as the write.
+// A match can be reopened without a reason (operator ruling), and this door
+// is never refused for one. It does settle the reopen, through
+// dischargeReopenPendingUnderTx in the same transaction as the write:
+// a match reopened without a reason carries ReopenPending (engine.
+// reopenPoolMatch; a fusensho whose barred side is still barred reopens to
+// scheduled, which is how a both-barred match can carry it), and the draw
+// clears it and keeps the request's reason, if any, as the correction reason.
 //
-// Returns true when it fully answered the request (success, a refusal for a
-// missing reopen reason, or a failure of ITS OWN write once the shape
-// qualified); false when the shape does not
+// Returns true when it fully answered the request (success, or a failure of
+// ITS OWN write once the shape qualified); false when the shape does not
 // qualify, so the caller falls through to the ordinary /decision flow --
 // which, for any OTHER hikiwake, is req.Validate()'s existing 400 ("use
 // /score for fought/hikiwake"), unchanged from today.
@@ -428,10 +427,9 @@ func handleBothSidesBarredHikiwake(c *gin.Context, eng ScoringEngine, store Comp
 	}
 	reason := strings.TrimSpace(req.DecisionReason)
 	var (
-		applied       bool
-		reasonMissing bool
-		result        state.MatchResult
-		writeErr      error
+		applied  bool
+		result   state.MatchResult
+		writeErr error
 	)
 	txErr := txr.WithTransaction(compID, func(stx state.StoreTx) error {
 		poolMatches, err := stx.LoadPoolMatches(compID)
@@ -456,13 +454,6 @@ func handleBothSidesBarredHikiwake(c *gin.Context, eng ScoringEngine, store Comp
 		if a == nil || b == nil {
 			return nil
 		}
-		// Checked before the write, so a refusal writes nothing. The write
-		// below replaces the stored match whole, so without this it would
-		// clear ReopenPending with no reason ever recorded.
-		if m.ReopenPending && reason == "" {
-			reasonMissing = true
-			return nil
-		}
 		write := &state.MatchResult{
 			ID: matchID, SideA: m.SideA, SideB: m.SideB, SideAID: m.SideAID, SideBID: m.SideBID,
 			Status: state.MatchStatusCompleted, Decision: "hikiwake", DecisionReason: reason,
@@ -481,11 +472,6 @@ func handleBothSidesBarredHikiwake(c *gin.Context, eng ScoringEngine, store Comp
 	})
 	if txErr != nil {
 		internalError(c, txErr)
-		return true
-	}
-	if reasonMissing {
-		reasonErr := &ValidationError{Field: "decisionReason", Message: ReopenNeedsReasonMessage}
-		c.JSON(http.StatusBadRequest, gin.H{"error": reasonErr.Error()})
 		return true
 	}
 	if !applied {

@@ -141,6 +141,19 @@ describe('RemainingMatchesPanel.award (bc-rawm)', () => {
     expect(screen.getAllByText('Award default win to opponent')).toHaveLength(2);
   });
 
+  // Review finding: a detail read that predates the kiken write still shows
+  // the kiken's own match running. Listing it would offer a default win that
+  // replaces the kiken and restores the competitor it barred.
+  it('never lists the match the kiken was just recorded on', async () => {
+    window.compMatchesForCompetition = vi.fn().mockReturnValue([
+      remaining,
+      { ...match, id: 'm-r1-0', status: 'running', phase: 'knockout' },
+    ]);
+    await recordTanakaKiken();
+    await waitFor(() => expect(screen.getByText('Suzuki')).toBeTruthy());
+    expect(screen.getAllByText('Award default win to opponent')).toHaveLength(1);
+  });
+
   // bc-kpnl: the kiken completes the match, so a host that follows live court
   // state (the shiaijo console) moves on and unmounts this editor, panel and
   // all. onWithdrawal is the host's cue to pin the match; the panel's close

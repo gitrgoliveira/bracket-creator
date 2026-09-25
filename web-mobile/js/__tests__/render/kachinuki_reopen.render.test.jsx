@@ -682,6 +682,27 @@ describe('kachinuki Encho is offered only on the current tied bout', () => {
       if (hint) expect(hint.textContent).not.toContain('Encho keeps');
     });
 
+    // Review finding: the sheet loaded no lineup (none saved yet, or the fetch
+    // failed), so it offered Encho; by the tap a lineup is in force and the
+    // server would refuse. The tap reads the lineups again and refuses too,
+    // instead of applying an encho the sheet could never take back.
+    it('re-reads the lineups on the Encho tap and refuses a pairing they rule out', async () => {
+      let calls = 0;
+      window.API.fetchMatchLineup = vi.fn().mockImplementation(async (_c, teamId) => {
+        calls += 1;
+        if (calls <= 2) return null;
+        return teamId === 'team-A' ? lineupFor('A') : teamId === 'team-B' ? lineupFor('B') : null;
+      });
+      await renderEditor({
+        match: completedKachinukiMatch({ status: 'running', winner: null, subResults: [tiedBout(1)] }),
+      });
+      await waitFor(() => expect(window.API.fetchMatchLineup).toHaveBeenCalledTimes(2));
+      const encho = await screen.findByTestId('kachinuki-encho-button');
+      await act(async () => { fireEvent.click(encho); });
+      await waitFor(() => expect(screen.getByTestId('team-editor-error').textContent).toContain('only for the last bout'));
+      expect(document.body.textContent).not.toContain('(E)');
+    });
+
     it('offers Encho when the two taisho are tied', async () => {
       await renderEditor({
         match: completedKachinukiMatch({

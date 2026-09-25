@@ -408,10 +408,10 @@ export function pickMemberIdFromLineup(lineup, index, teamSize) {
 }
 
 
-// lineupTaisho / kachinukiTaishoPairing (bc-kten, operator ruling 2026-09-25):
-// in a kachinuki encounter only the very last bout, taisho against taisho,
-// may go to encho. JS twins of domain.TeamLineup.Taisho and
-// domain.KachinukiTaishoPairing; both are pinned by the shared table
+// kachinukiTaishoPairing (bc-kten, operator ruling 2026-09-25): in a
+// kachinuki encounter only the very last bout, taisho against taisho, may go
+// to encho. JS twin of domain.KachinukiTaishoPairing; both are pinned by the
+// shared table
 // internal/domain/testdata/kachinuki_taisho.json. The position walk mirrors
 // Go's canonicalPositionOrder EXACTLY (the five FIK names for a 5-person team,
 // else "1".."N"), so a 5-person lineup saved under numeric keys reads as
@@ -422,21 +422,20 @@ function taishoPositionKeys(teamSize) {
   return Array.from({ length: Math.max(0, teamSize || 0) }, (_, i) => String(i + 1));
 }
 
-// The lineup's taisho: its LAST occupied position ({name, memberId}), a
-// position being occupied when it carries a name OR a member id. null when
-// there is no lineup or nothing is placed.
-export function lineupTaisho(lineup, teamSize) {
-  if (!lineup) return null;
+// A lineup's occupied positions in canonical order ({name, memberId} each), a
+// position being occupied when it carries a name OR a member id. Mirrors
+// domain.TeamLineup.OrderedMembers.
+function occupiedPositions(lineup, teamSize) {
+  if (!lineup) return [];
   const positions = lineup.positions || {};
   const ids = lineup.memberIds || {};
-  let last = null;
+  const out = [];
   for (const key of taishoPositionKeys(teamSize)) {
     const name = positions[key] || "";
     const memberId = ids[key] || "";
-    if (!name && !memberId) continue;
-    last = { name, memberId };
+    if (name || memberId) out.push({ name, memberId });
   }
-  return last;
+  return out;
 }
 
 function taishoHolds(slot, fighter) {
@@ -444,15 +443,31 @@ function taishoHolds(slot, fighter) {
   return !!fighter.name && fighter.name === slot.name;
 }
 
+// Where one fighter stands in their team's lineup: "taisho" (the last
+// occupied slot), "before" (a team-mate is placed after them: provably not
+// the taisho) or "unknown" (no lineup, or a fighter it does not place: a
+// reserve, a free-typed name, or a lineup only partly entered, since the
+// kachinuki score sheet writes row 1 alone into a match lineup).
+function taishoStanding(lineup, teamSize, fighter) {
+  const slots = occupiedPositions(lineup, teamSize);
+  const i = slots.findIndex((slot) => taishoHolds(slot, fighter || {}));
+  if (i < 0) return "unknown";
+  return i === slots.length - 1 ? "taisho" : "before";
+}
+
 // Whether a kachinuki bout between fighters a (Aka) and b (Shiro) is taisho
-// against taisho. known is false when either side has no lineup or an empty
-// one: the app then cannot tell who the taisho is and must not withhold
-// Encho, since a tied knockout bout already has End match held back.
+// against taisho. known is true only when the lineups settle it: either
+// fighter placed before a team-mate (taisho false), or both holding their
+// lineup's last slot (taisho true). Anything else is unknown, and an unknown
+// pairing never withholds Encho: a tied knockout bout already has End match
+// held back, so hiding Encho on a guess would leave the court no way to
+// finish.
 export function kachinukiTaishoPairing({ teamSize, lineupA, lineupB, a, b }) {
-  const ta = lineupTaisho(lineupA, teamSize);
-  const tb = lineupTaisho(lineupB, teamSize);
-  if (!ta || !tb) return { taisho: false, known: false };
-  return { taisho: taishoHolds(ta, a || {}) && taishoHolds(tb, b || {}), known: true };
+  const sa = taishoStanding(lineupA, teamSize, a);
+  const sb = taishoStanding(lineupB, teamSize, b);
+  if (sa === "before" || sb === "before") return { taisho: false, known: true };
+  if (sa === "taisho" && sb === "taisho") return { taisho: true, known: true };
+  return { taisho: false, known: false };
 }
 
 // resolveBoutSideMemberId: which squad MEMBER ID identifies one side of a

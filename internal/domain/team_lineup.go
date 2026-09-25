@@ -190,18 +190,6 @@ func (t TeamLineup) OrderedMembers(teamSize int) []LineupSlot {
 	return out
 }
 
-// Taisho returns the lineup's taisho: its LAST occupied slot in canonical
-// position order (OrderedMembers' last element), the fighter the team fields
-// last. With a vacancy at the back the last fielded fighter is the taisho.
-// False when no position is occupied.
-func (t TeamLineup) Taisho(teamSize int) (LineupSlot, bool) {
-	members := t.OrderedMembers(teamSize)
-	if len(members) == 0 {
-		return LineupSlot{}, false
-	}
-	return members[len(members)-1], true
-}
-
 // BoutFighter is one side of a kachinuki bout as KachinukiTaishoPairing reads
 // it: the fighter's display name and squad member id (either may be empty).
 type BoutFighter struct {
@@ -219,29 +207,65 @@ func (s LineupSlot) holds(f BoutFighter) bool {
 	return f.Name != "" && f.Name == s.Name
 }
 
+// taishoStanding is where one fighter stands in their team's lineup, for
+// KachinukiTaishoPairing.
+type taishoStanding int
+
+const (
+	// standingUnknown: no lineup, an empty one, or a fighter the lineup does
+	// not place (a reserve, a free-typed name, or a lineup only partly
+	// entered: the kachinuki score sheet writes row 1 alone into a match
+	// lineup, so its one slot says nothing about who fights last).
+	standingUnknown taishoStanding = iota
+	// standingTaisho: the fighter holds the lineup's last occupied slot.
+	standingTaisho
+	// standingBeforeTaisho: the fighter holds a slot with a team-mate placed
+	// after it, so they are provably not the taisho.
+	standingBeforeTaisho
+)
+
+func standingIn(lineup *TeamLineup, teamSize int, f BoutFighter) taishoStanding {
+	if lineup == nil {
+		return standingUnknown
+	}
+	members := lineup.OrderedMembers(teamSize)
+	for i, slot := range members {
+		if slot.holds(f) {
+			if i == len(members)-1 {
+				return standingTaisho
+			}
+			return standingBeforeTaisho
+		}
+	}
+	return standingUnknown
+}
+
 // KachinukiTaishoPairing is the ONE rule for whether a kachinuki bout may go
 // to encho (operator ruling 2026-09-25, bc-kten): only the last bout, taisho
 // against taisho, may. Any other tie retires per the kachinuki mode in force.
-// taisho reports whether a and b are each their team's taisho (Taisho, from
-// the lineup in force for that side).
 //
-// known is false when either side has no lineup (nil) or an empty one: the
-// app then cannot tell who the taisho is, and callers must NOT refuse on it.
-// A tied knockout bout already has End match held back, so refusing encho on
-// a guess would leave the court with no way to finish.
+// known is true only when the lineups settle it: either fighter is placed
+// BEFORE a team-mate (provably not the taisho: taisho=false), or both hold
+// their lineup's last occupied slot (taisho=true). Anything else is unknown
+// (known=false): no lineup, an empty one, or a fighter the lineup does not
+// place. Callers must NOT refuse on unknown. A tied knockout bout already has
+// End match held back, so refusing encho on a guess would leave the court no
+// way to finish; permitting it on a lineup that is merely incomplete is the
+// safe error. A lineup's last entry reads as the taisho even when the rest
+// is simply not entered yet, since the app cannot tell that from a vacancy.
 //
 // JS twin: kachinukiTaishoPairing (web-mobile/js/lineup_resolver.jsx). Both
 // are pinned by internal/domain/testdata/kachinuki_taisho.json.
 func KachinukiTaishoPairing(teamSize int, lineupA, lineupB *TeamLineup, a, b BoutFighter) (taisho, known bool) {
-	if lineupA == nil || lineupB == nil {
-		return false, false
+	sa := standingIn(lineupA, teamSize, a)
+	sb := standingIn(lineupB, teamSize, b)
+	if sa == standingBeforeTaisho || sb == standingBeforeTaisho {
+		return false, true
 	}
-	ta, okA := lineupA.Taisho(teamSize)
-	tb, okB := lineupB.Taisho(teamSize)
-	if !okA || !okB {
-		return false, false
+	if sa == standingTaisho && sb == standingTaisho {
+		return true, true
 	}
-	return ta.holds(a) && tb.holds(b), true
+	return false, false
 }
 
 // PositionForBout returns the lineup Position that fights numbered bout

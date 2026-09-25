@@ -140,6 +140,7 @@ export function preserveStoredDaihyosenVerdict({ armed, pickedSide, tied, existi
 // re-exports them onward) continue to work.
 import { resolveMatchLineup, resolveLineupTeamId, resolveBoutSideName, resolveBoutSideMemberId, resolveSquadMember, squadMemberIdForUniqueName, squadRosterEntries, rosterWithoutPlacedElsewhere, resolveBoutSideDisplayName, buildInlineLineupWrite, kachinukiTaishoPairing, POS_KEYS_5, POS_LABELS_5 } from './lineup_resolver.jsx';
 import { DAIHYOSEN_POSITION } from './pool_ids.jsx';
+import { joinList } from './admin_helpers.jsx';
 // The shared owner of what an operator is told about unreadable data; the
 // editor gets the repair-oriented wording, the pool surfaces get theirs.
 import { matchDataUnreadable, UnreadableEditorNote } from './data_integrity.jsx';
@@ -263,7 +264,7 @@ export function unfinishedTeamBouts({ subs, teamSize }) {
 export function unfinishedTeamBoutsMessage(teamSize, bouts) {
   const labels = (bouts || []).map(b => `Bout ${b}${teamSize === 5 && b >= 1 && b <= 5 ? ` (${POS_LABELS_5[b - 1]})` : ""}`);
   if (labels.length === 0) return "";
-  const list = labels.length === 1 ? labels[0] : `${labels.slice(0, -1).join(", ")} and ${labels[labels.length - 1]}`;
+  const list = joinList(labels, "and", "");
   return `${list} ${labels.length === 1 ? "has" : "have"} no result. Record a score, a Tie, or a Fusensho before finishing.`;
 }
 
@@ -900,6 +901,9 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
   // lineup hasn't been submitted yet (404 → null).
   const [lineupA, setLineupA] = useStateA(null);
   const [lineupB, setLineupB] = useStateA(null);
+  // The lineup ids and round the mount effect resolved, so the Encho tap can
+  // read both lineups afresh (bc-kten, applyKachinukiEncho).
+  const lineupKeysRef = useRefA(null);
   // bc-pnum gap closure: each side's squad, so the inline lineup picker
   // below (submitInlineLineup / buildInlineLineupWrite) can resolve a
   // name typed or picked in THIS modal to its squad member id -- this is
@@ -1146,6 +1150,7 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
         || [];
       const teamAId = resolveLineupTeamId(sideAKey, players);
       const teamBId = resolveLineupTeamId(sideBKey, players);
+      if (!cancelled) lineupKeysRef.current = { teamAId, teamBId, round };
       if (teamAId) {
         const l = await resolveMatchLineup(m.compId, teamAId, m.id, round, window.API);
         if (!cancelled) setLineupA(l);
@@ -1806,10 +1811,35 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
   // then clear the tied outcome so the SAME pair keeps scoring that bout. The
   // guard mirrors kachinukiEnchoOffered so the keyboard/programmatic path can
   // never target a bout the encounter has already advanced past.
-  const applyKachinukiEncho = () => {
+  const applyKachinukiEncho = async () => {
     if (kachinukiLastScoredIdx < 0 || kachinukiLastScoredIdx !== kachinukiCurBoutIdx) return;
     // Read at call time, after the render declared it (below).
     if (!kachinukiEnchoPairingAllowed) return;
+    // bc-kten: judge the pairing again on lineups read NOW. The server judges
+    // it on the lineup in force at write time, so a lineup saved on another
+    // device since this sheet opened (or one that failed to load then) would
+    // otherwise let the sheet offer an encho the server refuses, and the
+    // sheet has no way to take an applied encho back.
+    const keys = lineupKeysRef.current;
+    if (keys) {
+      const [la, lb] = await Promise.all([
+        keys.teamAId ? resolveMatchLineup(m.compId, keys.teamAId, m.id, keys.round, window.API) : null,
+        keys.teamBId ? resolveMatchLineup(m.compId, keys.teamBId, m.id, keys.round, window.API) : null,
+      ]);
+      if (!mountedRef.current) return;
+      setLineupA(la);
+      setLineupB(lb);
+      const { aName, bName, aMemberId, bMemberId } = playerNamesForBout(kachinukiCurBoutIdx);
+      const { taisho, known } = kachinukiTaishoPairing({
+        teamSize, lineupA: la, lineupB: lb,
+        a: { name: aName, memberId: aMemberId },
+        b: { name: bName, memberId: bMemberId },
+      });
+      if (known && !taisho) {
+        setEditorErr("Encho is only for the last bout, the two taisho. Record the tie instead.");
+        return;
+      }
+    }
     setEnchoPeriodCount(cnt => cnt + 1);
     updateSub(kachinukiLastScoredIdx, prev => ({ ...prev, encho: (prev.encho || 0) + 1, draw: false, _preFusensho: undefined }));
     setEndArmed(false);
@@ -3635,6 +3665,7 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
               compID={m.compId}
               password={resolveDecisionPassword(password)}
               withdrawnPlayer={withdrawnPlayer}
+              withdrawnMatchId={m.id}
               onAwarded={() => { /* stay open; operator decides when to close */ }}
               onClose={() => { setWithdrawnPlayer(null); onClose(); }}
             />
@@ -3885,7 +3916,9 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
                   title={kachinukiEndOutcome?.kind === "blocked"
                     ? (kachinukiEndOutcome.reason === "no-bouts"
                         ? "Score a bout before ending the match"
-                        : "No draws in a knockout: continue (next bout or encho) until there is a point")
+                        : kachinukiEnchoShown
+                          ? "No draws in a knockout: continue (next bout or encho) until there is a point"
+                          : "No draws in a knockout: record the bout and continue until there is a point")
                     : "End the match on the last scored bout"}>
                   {submitting ? "Saving…"
                     : endArmed

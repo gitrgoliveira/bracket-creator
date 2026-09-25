@@ -1,125 +1,499 @@
 {
-  "_comment": "Shared Go/JS table for the kachinuki encho rule (bc-kten): only taisho against taisho may go to encho. Go: TestKachinukiTaishoPairingGolden (internal/domain). JS: kachinuki_taisho_golden.test.jsx. A lineup is the wire shape {positions, memberIds}; null means no lineup is in force for that side.",
+  "_comment": "Shared Go/JS table for the kachinuki encho rule (bc-kten): only taisho against taisho may go to encho. known is true only when the lineups settle it: a fighter placed before a team-mate is provably not the taisho; both fighters holding their lineup's last slot is taisho against taisho; anything else (no lineup, a fighter the lineup does not place) is unknown and never refused. Go: TestKachinukiTaishoPairingGolden (internal/domain). JS: kachinuki_taisho_golden.test.jsx. A lineup is the wire shape {positions, memberIds}; null means no lineup is in force.",
   "cases": [
     {
       "name": "5-person, both taisho, by member id",
       "teamSize": 5,
-      "lineupA": {"positions": {"senpo": "A1", "jiho": "A2", "chuken": "A3", "fukusho": "A4", "taisho": "A5"}, "memberIds": {"senpo": "a1", "jiho": "a2", "chuken": "a3", "fukusho": "a4", "taisho": "a5"}},
-      "lineupB": {"positions": {"senpo": "B1", "jiho": "B2", "chuken": "B3", "fukusho": "B4", "taisho": "B5"}, "memberIds": {"senpo": "b1", "jiho": "b2", "chuken": "b3", "fukusho": "b4", "taisho": "b5"}},
-      "a": {"name": "A5", "memberId": "a5"},
-      "b": {"name": "B5", "memberId": "b5"},
+      "lineupA": {
+        "positions": {
+          "senpo": "A1",
+          "jiho": "A2",
+          "chuken": "A3",
+          "fukusho": "A4",
+          "taisho": "A5"
+        },
+        "memberIds": {
+          "senpo": "a1",
+          "jiho": "a2",
+          "chuken": "a3",
+          "fukusho": "a4",
+          "taisho": "a5"
+        }
+      },
+      "lineupB": {
+        "positions": {
+          "senpo": "B1",
+          "jiho": "B2",
+          "chuken": "B3",
+          "fukusho": "B4",
+          "taisho": "B5"
+        },
+        "memberIds": {
+          "senpo": "b1",
+          "jiho": "b2",
+          "chuken": "b3",
+          "fukusho": "b4",
+          "taisho": "b5"
+        }
+      },
+      "a": {
+        "name": "A5",
+        "memberId": "a5"
+      },
+      "b": {
+        "name": "B5",
+        "memberId": "b5"
+      },
       "taisho": true,
       "known": true
     },
     {
       "name": "5-person, Aka's fukusho against Shiro's taisho",
       "teamSize": 5,
-      "lineupA": {"positions": {"senpo": "A1", "jiho": "A2", "chuken": "A3", "fukusho": "A4", "taisho": "A5"}, "memberIds": {"senpo": "a1", "jiho": "a2", "chuken": "a3", "fukusho": "a4", "taisho": "a5"}},
-      "lineupB": {"positions": {"senpo": "B1", "jiho": "B2", "chuken": "B3", "fukusho": "B4", "taisho": "B5"}, "memberIds": {"senpo": "b1", "jiho": "b2", "chuken": "b3", "fukusho": "b4", "taisho": "b5"}},
-      "a": {"name": "A4", "memberId": "a4"},
-      "b": {"name": "B5", "memberId": "b5"},
+      "lineupA": {
+        "positions": {
+          "senpo": "A1",
+          "jiho": "A2",
+          "chuken": "A3",
+          "fukusho": "A4",
+          "taisho": "A5"
+        },
+        "memberIds": {
+          "senpo": "a1",
+          "jiho": "a2",
+          "chuken": "a3",
+          "fukusho": "a4",
+          "taisho": "a5"
+        }
+      },
+      "lineupB": {
+        "positions": {
+          "senpo": "B1",
+          "jiho": "B2",
+          "chuken": "B3",
+          "fukusho": "B4",
+          "taisho": "B5"
+        },
+        "memberIds": {
+          "senpo": "b1",
+          "jiho": "b2",
+          "chuken": "b3",
+          "fukusho": "b4",
+          "taisho": "b5"
+        }
+      },
+      "a": {
+        "name": "A4",
+        "memberId": "a4"
+      },
+      "b": {
+        "name": "B5",
+        "memberId": "b5"
+      },
       "taisho": false,
       "known": true
     },
     {
       "name": "5-person, a mid-encounter pairing",
       "teamSize": 5,
-      "lineupA": {"positions": {"senpo": "A1", "jiho": "A2", "chuken": "A3", "fukusho": "A4", "taisho": "A5"}},
-      "lineupB": {"positions": {"senpo": "B1", "jiho": "B2", "chuken": "B3", "fukusho": "B4", "taisho": "B5"}},
-      "a": {"name": "A3", "memberId": ""},
-      "b": {"name": "B3", "memberId": ""},
+      "lineupA": {
+        "positions": {
+          "senpo": "A1",
+          "jiho": "A2",
+          "chuken": "A3",
+          "fukusho": "A4",
+          "taisho": "A5"
+        }
+      },
+      "lineupB": {
+        "positions": {
+          "senpo": "B1",
+          "jiho": "B2",
+          "chuken": "B3",
+          "fukusho": "B4",
+          "taisho": "B5"
+        }
+      },
+      "a": {
+        "name": "A3",
+        "memberId": ""
+      },
+      "b": {
+        "name": "B3",
+        "memberId": ""
+      },
       "taisho": false,
       "known": true
     },
     {
       "name": "3-person numbered positions, both last, by name (no ids)",
       "teamSize": 3,
-      "lineupA": {"positions": {"1": "A1", "2": "A2", "3": "A3"}},
-      "lineupB": {"positions": {"1": "B1", "2": "B2", "3": "B3"}},
-      "a": {"name": "A3", "memberId": ""},
-      "b": {"name": "B3", "memberId": ""},
+      "lineupA": {
+        "positions": {
+          "1": "A1",
+          "2": "A2",
+          "3": "A3"
+        }
+      },
+      "lineupB": {
+        "positions": {
+          "1": "B1",
+          "2": "B2",
+          "3": "B3"
+        }
+      },
+      "a": {
+        "name": "A3",
+        "memberId": ""
+      },
+      "b": {
+        "name": "B3",
+        "memberId": ""
+      },
       "taisho": true,
       "known": true
     },
     {
       "name": "taisho position vacant: the last fielded fighter is the taisho",
       "teamSize": 5,
-      "lineupA": {"positions": {"senpo": "A1", "jiho": "A2", "chuken": "A3", "fukusho": "A4"}},
-      "lineupB": {"positions": {"senpo": "B1", "jiho": "B2", "chuken": "B3", "fukusho": "B4", "taisho": "B5"}},
-      "a": {"name": "A4", "memberId": ""},
-      "b": {"name": "B5", "memberId": ""},
+      "lineupA": {
+        "positions": {
+          "senpo": "A1",
+          "jiho": "A2",
+          "chuken": "A3",
+          "fukusho": "A4"
+        }
+      },
+      "lineupB": {
+        "positions": {
+          "senpo": "B1",
+          "jiho": "B2",
+          "chuken": "B3",
+          "fukusho": "B4",
+          "taisho": "B5"
+        }
+      },
+      "a": {
+        "name": "A4",
+        "memberId": ""
+      },
+      "b": {
+        "name": "B5",
+        "memberId": ""
+      },
       "taisho": true,
       "known": true
     },
     {
       "name": "a slot picked by number and not yet named is still a placement",
       "teamSize": 3,
-      "lineupA": {"positions": {"1": "A1", "2": "A2", "3": ""}, "memberIds": {"1": "a1", "2": "a2", "3": "a3"}},
-      "lineupB": {"positions": {"1": "B1", "2": "B2", "3": "B3"}, "memberIds": {"1": "b1", "2": "b2", "3": "b3"}},
-      "a": {"name": "", "memberId": "a3"},
-      "b": {"name": "B3", "memberId": "b3"},
+      "lineupA": {
+        "positions": {
+          "1": "A1",
+          "2": "A2",
+          "3": ""
+        },
+        "memberIds": {
+          "1": "a1",
+          "2": "a2",
+          "3": "a3"
+        }
+      },
+      "lineupB": {
+        "positions": {
+          "1": "B1",
+          "2": "B2",
+          "3": "B3"
+        },
+        "memberIds": {
+          "1": "b1",
+          "2": "b2",
+          "3": "b3"
+        }
+      },
+      "a": {
+        "name": "",
+        "memberId": "a3"
+      },
+      "b": {
+        "name": "B3",
+        "memberId": "b3"
+      },
       "taisho": true,
       "known": true
     },
     {
-      "name": "the member id decides when both carry one, whatever the names say",
+      "name": "the member id decides where the fighter stands, whatever the name says",
       "teamSize": 3,
-      "lineupA": {"positions": {"1": "A1", "2": "A2", "3": "Sato"}, "memberIds": {"1": "a1", "2": "a2", "3": "a3"}},
-      "lineupB": {"positions": {"1": "B1", "2": "B2", "3": "B3"}, "memberIds": {"1": "b1", "2": "b2", "3": "b3"}},
-      "a": {"name": "Sato", "memberId": "a-other"},
-      "b": {"name": "B3", "memberId": "b3"},
+      "lineupA": {
+        "positions": {
+          "1": "A1",
+          "2": "A2",
+          "3": "Sato"
+        },
+        "memberIds": {
+          "1": "a1",
+          "2": "a2",
+          "3": "a3"
+        }
+      },
+      "lineupB": {
+        "positions": {
+          "1": "B1",
+          "2": "B2",
+          "3": "B3"
+        },
+        "memberIds": {
+          "1": "b1",
+          "2": "b2",
+          "3": "b3"
+        }
+      },
+      "a": {
+        "name": "Sato",
+        "memberId": "a1"
+      },
+      "b": {
+        "name": "B3",
+        "memberId": "b3"
+      },
       "taisho": false,
       "known": true
     },
     {
       "name": "a legacy slot with no id matches the fighter by name",
       "teamSize": 3,
-      "lineupA": {"positions": {"1": "A1", "2": "A2", "3": "A3"}, "memberIds": {"1": "a1", "2": "a2"}},
-      "lineupB": {"positions": {"1": "B1", "2": "B2", "3": "B3"}},
-      "a": {"name": "A3", "memberId": "a3"},
-      "b": {"name": "B3", "memberId": ""},
+      "lineupA": {
+        "positions": {
+          "1": "A1",
+          "2": "A2",
+          "3": "A3"
+        },
+        "memberIds": {
+          "1": "a1",
+          "2": "a2"
+        }
+      },
+      "lineupB": {
+        "positions": {
+          "1": "B1",
+          "2": "B2",
+          "3": "B3"
+        }
+      },
+      "a": {
+        "name": "A3",
+        "memberId": "a3"
+      },
+      "b": {
+        "name": "B3",
+        "memberId": ""
+      },
       "taisho": true,
       "known": true
     },
     {
-      "name": "an empty side is nobody's taisho",
+      "name": "a side with no fighter entered is unknown, never refused",
       "teamSize": 3,
-      "lineupA": {"positions": {"1": "A1", "2": "A2", "3": "A3"}},
-      "lineupB": {"positions": {"1": "B1", "2": "B2", "3": "B3"}},
-      "a": {"name": "", "memberId": ""},
-      "b": {"name": "B3", "memberId": ""},
+      "lineupA": {
+        "positions": {
+          "1": "A1",
+          "2": "A2",
+          "3": "A3"
+        }
+      },
+      "lineupB": {
+        "positions": {
+          "1": "B1",
+          "2": "B2",
+          "3": "B3"
+        }
+      },
+      "a": {
+        "name": "",
+        "memberId": ""
+      },
+      "b": {
+        "name": "B3",
+        "memberId": ""
+      },
       "taisho": false,
-      "known": true
+      "known": false
     },
     {
       "name": "no lineup in force for one side: unknown, never refused",
       "teamSize": 3,
-      "lineupA": {"positions": {"1": "A1", "2": "A2", "3": "A3"}},
+      "lineupA": {
+        "positions": {
+          "1": "A1",
+          "2": "A2",
+          "3": "A3"
+        }
+      },
       "lineupB": null,
-      "a": {"name": "A1", "memberId": ""},
-      "b": {"name": "B1", "memberId": ""},
+      "a": {
+        "name": "A3",
+        "memberId": ""
+      },
+      "b": {
+        "name": "B1",
+        "memberId": ""
+      },
       "taisho": false,
       "known": false
     },
     {
       "name": "a lineup with no occupied position: unknown",
       "teamSize": 3,
-      "lineupA": {"positions": {}},
-      "lineupB": {"positions": {"1": "B1", "2": "B2", "3": "B3"}},
-      "a": {"name": "A1", "memberId": ""},
-      "b": {"name": "B3", "memberId": ""},
+      "lineupA": {
+        "positions": {}
+      },
+      "lineupB": {
+        "positions": {
+          "1": "B1",
+          "2": "B2",
+          "3": "B3"
+        }
+      },
+      "a": {
+        "name": "A1",
+        "memberId": ""
+      },
+      "b": {
+        "name": "B3",
+        "memberId": ""
+      },
       "taisho": false,
       "known": false
     },
     {
       "name": "5-person lineup saved under numeric keys only: Go reads the FIK names alone, so unknown",
       "teamSize": 5,
-      "lineupA": {"positions": {"1": "A1", "2": "A2", "3": "A3", "4": "A4", "5": "A5"}},
-      "lineupB": {"positions": {"senpo": "B1", "jiho": "B2", "chuken": "B3", "fukusho": "B4", "taisho": "B5"}},
-      "a": {"name": "A5", "memberId": ""},
-      "b": {"name": "B5", "memberId": ""},
+      "lineupA": {
+        "positions": {
+          "1": "A1",
+          "2": "A2",
+          "3": "A3",
+          "4": "A4",
+          "5": "A5"
+        }
+      },
+      "lineupB": {
+        "positions": {
+          "senpo": "B1",
+          "jiho": "B2",
+          "chuken": "B3",
+          "fukusho": "B4",
+          "taisho": "B5"
+        }
+      },
+      "a": {
+        "name": "A5",
+        "memberId": ""
+      },
+      "b": {
+        "name": "B5",
+        "memberId": ""
+      },
       "taisho": false,
       "known": false
+    },
+    {
+      "name": "a partly entered lineup cannot name the real taisho: a fighter it does not place is unknown",
+      "teamSize": 3,
+      "lineupA": {
+        "positions": {
+          "1": "A1"
+        }
+      },
+      "lineupB": {
+        "positions": {
+          "1": "B1"
+        }
+      },
+      "a": {
+        "name": "A3",
+        "memberId": ""
+      },
+      "b": {
+        "name": "B3",
+        "memberId": ""
+      },
+      "taisho": false,
+      "known": false
+    },
+    {
+      "name": "a partly entered lineup's last entry reads as the taisho (the app cannot tell it from a vacancy)",
+      "teamSize": 3,
+      "lineupA": {
+        "positions": {
+          "1": "A1"
+        }
+      },
+      "lineupB": {
+        "positions": {
+          "1": "B1"
+        }
+      },
+      "a": {
+        "name": "A1",
+        "memberId": ""
+      },
+      "b": {
+        "name": "B1",
+        "memberId": ""
+      },
+      "taisho": true,
+      "known": true
+    },
+    {
+      "name": "a fighter placed before a team-mate is provably not the taisho, even in a partly entered lineup",
+      "teamSize": 3,
+      "lineupA": {
+        "positions": {
+          "1": "A1",
+          "2": "A2"
+        }
+      },
+      "lineupB": {
+        "positions": {
+          "1": "B1",
+          "2": "B2",
+          "3": "B3"
+        }
+      },
+      "a": {
+        "name": "A1",
+        "memberId": ""
+      },
+      "b": {
+        "name": "B3",
+        "memberId": ""
+      },
+      "taisho": false,
+      "known": true
+    },
+    {
+      "name": "one side provably not the taisho settles it even when the other side is unknown",
+      "teamSize": 3,
+      "lineupA": {
+        "positions": {
+          "1": "A1",
+          "2": "A2",
+          "3": "A3"
+        }
+      },
+      "lineupB": null,
+      "a": {
+        "name": "A2",
+        "memberId": ""
+      },
+      "b": {
+        "name": "B3",
+        "memberId": ""
+      },
+      "taisho": false,
+      "known": true
     }
   ]
 }

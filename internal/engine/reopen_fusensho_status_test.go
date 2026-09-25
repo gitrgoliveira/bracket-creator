@@ -192,3 +192,44 @@ func TestReopenMatch_OrdinaryFusenpai_GoesToRunning(t *testing.T) {
 		assert.True(t, st.Eligible, "the reopen restores the competitor this match barred")
 	}
 }
+
+// bc-kfup review: one status is kept per competitor, and a chained fusenpai
+// records none of its own. Clearing the match that DID record the bar must
+// not un-bar a competitor who still has a withdrawal on record elsewhere: the
+// bar moves to that match. Clearing that one too makes them eligible.
+func TestReopenMatch_ClearingTheOriginMovesTheBarToAChainedFusenpai(t *testing.T) {
+	eng, store, _ := setupTestEngine(t)
+	compID := "reopen-origin-rebar"
+	require.NoError(t, store.SaveCompetition(&state.Competition{ID: compID, Name: compID, Status: state.CompStatusPools}))
+	aliceID, bobID, carolID := helper.NewUUID4(), helper.NewUUID4(), helper.NewUUID4()
+	require.NoError(t, store.SaveParticipants(compID, []domain.Player{
+		{ID: aliceID, Name: "Alice", Dojo: "A"},
+		{ID: bobID, Name: "Bob", Dojo: "B"},
+		{ID: carolID, Name: "Carol", Dojo: "C"},
+	}))
+	require.NoError(t, store.SavePoolMatches(compID, []state.MatchResult{
+		{ID: "Pool A-0", SideA: "Alice", SideB: "Bob", SideAID: aliceID, SideBID: bobID, Status: state.MatchStatusScheduled},
+		{ID: "Pool A-1", SideA: "Alice", SideB: "Carol", SideAID: aliceID, SideBID: carolID, Status: state.MatchStatusScheduled},
+	}))
+	_, _, err := eng.RecordDecision(compID, "Pool A-0", "kiken-voluntary", "aka", "withdrew", nil, false)
+	require.NoError(t, err)
+	_, _, err = eng.RecordDecision(compID, "Pool A-1", "fusenpai", "aka", "did not appear", nil, false)
+	require.NoError(t, err)
+
+	restored, err := eng.ReopenMatch(compID, "Pool A-0", "")
+	require.NoError(t, err)
+	require.NotNil(t, restored)
+	statuses, err := store.LoadCompetitorStatus(compID)
+	require.NoError(t, err)
+	alice := statuses[aliceID]
+	assert.False(t, alice.Eligible, "Alice still has the Pool A-1 no-show on record")
+	assert.Equal(t, "Pool A-1", alice.MatchID, "the bar moves to the withdrawal still on record")
+	assert.Equal(t, "fusenpai at Pool A-1", alice.Reason)
+	assert.False(t, alice.Reinstateable)
+
+	_, err = eng.ReopenMatch(compID, "Pool A-1", "")
+	require.NoError(t, err)
+	statuses, err = store.LoadCompetitorStatus(compID)
+	require.NoError(t, err)
+	assert.True(t, statuses[aliceID].Eligible, "with no withdrawal left on record, Alice can fight again")
+}

@@ -1098,6 +1098,12 @@ func (e *Engine) restoreEligibilityRecordedByMatch(tx state.StoreTx, compID, mat
 			MatchID:    matchID,
 			RecordedAt: time.Now().UTC(),
 		}
+		// Unless another match still records a withdrawal by them: a
+		// fusenpai chained onto this bar (bc-kfup) wrote no status of its
+		// own, so the bar moves there rather than lapsing.
+		if rebar, ok := standingWithdrawalOf(tx, compID, playerID, matchID); ok {
+			restored = rebar
+		}
 		if werr := tx.SetCompetitorStatus(compID, restored); werr != nil {
 			log.Printf("engine: restoreEligibilityRecordedByMatch compId=%s matchId=%s: restoring playerId=%s: %v", compID, matchID, playerID, werr)
 			continue
@@ -1105,4 +1111,70 @@ func (e *Engine) restoreEligibilityRecordedByMatch(tx state.StoreTx, compID, mat
 		last = &restored
 	}
 	return last
+}
+
+// standingWithdrawalOf finds a completed match OTHER than excludeMatchID that
+// still records a withdrawal (kiken or fusenpai) by playerID, and returns the
+// status that withdrawal bars them with. One status is kept per competitor,
+// and a fusenpai chained onto an earlier bar (bc-kfup, alreadyBarredRefusal)
+// records none of its own, so when the match that DID record the bar is
+// cleared, the bar moves to the withdrawal still on record instead of
+// lapsing: the eligibility record follows the rulings on disk. ok is false
+// when there is none, or the matches cannot be read (logged; the caller then
+// restores as before).
+func standingWithdrawalOf(tx state.StoreTx, compID, playerID, excludeMatchID string) (domain.CompetitorStatus, bool) {
+	barsPlayer := func(r *state.MatchResult) bool {
+		if r.ID == excludeMatchID || r.Status != state.MatchStatusCompleted || !domain.IsWithdrawalDecisionStr(r.Decision) {
+			return false
+		}
+		id, _, ok := losingSide(r)
+		return ok && id == playerID
+	}
+	var found *state.MatchResult
+	pool, err := tx.LoadPoolMatches(compID)
+	if err != nil {
+		log.Printf("engine: standingWithdrawalOf compId=%s playerId=%s: LoadPoolMatches: %v", compID, playerID, err)
+		return domain.CompetitorStatus{}, false
+	}
+	for i := range pool {
+		if barsPlayer(&pool[i]) {
+			found = &pool[i]
+			break
+		}
+	}
+	if found == nil {
+		bracket, err := tx.LoadBracket(compID)
+		if err != nil {
+			log.Printf("engine: standingWithdrawalOf compId=%s playerId=%s: LoadBracket: %v", compID, playerID, err)
+			return domain.CompetitorStatus{}, false
+		}
+		if bracket != nil {
+			candidates := make([]*state.BracketMatch, 0)
+			for r := range bracket.Rounds {
+				for i := range bracket.Rounds[r] {
+					candidates = append(candidates, &bracket.Rounds[r][i])
+				}
+			}
+			if bracket.ThirdPlaceMatch != nil {
+				candidates = append(candidates, bracket.ThirdPlaceMatch)
+			}
+			for _, bm := range candidates {
+				if r := bracketMatchAsResult(bm); barsPlayer(r) {
+					found = r
+					break
+				}
+			}
+		}
+	}
+	if found == nil {
+		return domain.CompetitorStatus{}, false
+	}
+	return domain.CompetitorStatus{
+		PlayerID:      playerID,
+		Eligible:      false,
+		Reinstateable: found.Decision == string(domain.DecisionKikenInjury),
+		Reason:        fmt.Sprintf("%s at %s", found.Decision, found.ID),
+		MatchID:       found.ID,
+		RecordedAt:    time.Now().UTC(),
+	}, true
 }

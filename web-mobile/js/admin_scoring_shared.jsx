@@ -741,7 +741,11 @@ function DecisionPrompt({ kind, sideA, sideB, defaultSide, askReason, onCancel, 
 // /decision with decision=fusensho and decisionBy=<the withdrawn side>:
 // note: that's the side the WITHDRAWN player occupies in THAT match, not
 // the side they had in the originating match (sides can flip across matches).
-function RemainingMatchesPanel({ compID, password, withdrawnPlayer, onAwarded, onClose }) {
+// withdrawnMatchId is the match the kiken was just recorded on. It is never
+// listed: a detail read that predates the kiken write still shows it running,
+// and a default win recorded on it would REPLACE the kiken and restore the
+// competitor it barred.
+function RemainingMatchesPanel({ compID, password, withdrawnPlayer, withdrawnMatchId, onAwarded, onClose }) {
   const [matches, setMatches] = useStateA(null);
   const [err, setErr] = useStateA("");
   const [busyId, setBusyId] = useStateA("");
@@ -767,7 +771,7 @@ function RemainingMatchesPanel({ compID, password, withdrawnPlayer, onAwarded, o
           ? window.compMatchesForCompetition(detail.config || detail, detail)
           : [];
         const matchesForPlayer = all.filter(m => {
-          if (m.status === "completed") return false;
+          if (m.status === "completed" || m.id === withdrawnMatchId) return false;
           return sameCompetitor(m.sideA, withdrawnPlayer) || sameCompetitor(m.sideB, withdrawnPlayer);
         });
         setMatches(matchesForPlayer);
@@ -776,7 +780,7 @@ function RemainingMatchesPanel({ compID, password, withdrawnPlayer, onAwarded, o
       }
     })();
     return () => { cancelled = true; };
-  }, [compID, withdrawnPlayer?.id, withdrawnPlayer?.name]);
+  }, [compID, withdrawnPlayer?.id, withdrawnPlayer?.name, withdrawnMatchId]);
 
   const award = async (m) => {
     // Figure out which side the withdrawn player occupies in THIS match:
@@ -1621,19 +1625,26 @@ function RecordedWithdrawal({ match, ctl, disabled = false, singleBout = false }
   // pattern as laterDefaultWins above -- unknown (fetch failed, or no
   // matching row) reads as "still barred, not reinstateable", the more
   // conservative of the wrong guesses.
-  // Fetched for a fusenpai as well (bc-kfup): a fusenpai recorded against a
-  // competitor another match already barred chains onto that bar and records
-  // no status of its own, so its clear behaves exactly like a fusensho's
-  // (chainedLoss below) and the status record is how the editor tells it
-  // from an ordinary fusenpai, whose record names THIS match.
+  // Fetched for EVERY recorded withdrawal, not only a fusensho (bc-kfup): a
+  // fusenpai recorded against a competitor another match already barred
+  // chains onto that bar and records no status of its own, and a kiken whose
+  // competitor was reinstated and then withdrew again elsewhere no longer
+  // names this match either. In both, clearing this match restores nobody
+  // and the server returns it to the queue while the other bar holds
+  // (engine.reopenTargetStatus), exactly as for a fusensho; the status record
+  // is how the editor tells them from an ordinary withdrawal, whose record
+  // names THIS match. statusSettled holds the one-tap clear until the answer
+  // is in, so the copy beside it is never the wrong one.
   const [withdrawnStatus, setWithdrawnStatus] = useStateA(null);
-  const needsStatus = isDefaultWin || match.decision === "fusenpai";
+  const [statusSettled, setStatusSettled] = useStateA(false);
   useEffectA(() => {
-    if (!needsStatus || !withdrawn?.id || !match.compId) {
+    if (!withdrawn?.id || !match.compId) {
       setWithdrawnStatus(null);
+      setStatusSettled(true);
       return;
     }
     let cancelled = false;
+    setStatusSettled(false);
     (async () => {
       try {
         const statuses = await window.API.fetchCompetitorStatuses(match.compId);
@@ -1641,18 +1652,17 @@ function RecordedWithdrawal({ match, ctl, disabled = false, singleBout = false }
         setWithdrawnStatus((statuses || []).find(s => s.playerId === withdrawn.id) || null);
       } catch (_e) {
         if (!cancelled) setWithdrawnStatus(null);
+      } finally {
+        if (!cancelled) setStatusSettled(true);
       }
     })();
     return () => { cancelled = true; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [needsStatus, match.compId, withdrawn?.id]);
-  // A fusenpai chained onto another match's bar: the barred competitor's
-  // record names a DIFFERENT match, so clearing this one restores nobody and
-  // the server returns it to the queue while that bar holds
-  // (engine.reopenTargetStatus), exactly as for a fusensho.
-  const chainedLoss = !isDefaultWin && !!(withdrawnStatus && withdrawnStatus.eligible === false &&
+  }, [match.compId, withdrawn?.id]);
+  // The barred competitor's record names a DIFFERENT match (see above).
+  const barredElsewhere = !isDefaultWin && !!(withdrawnStatus && withdrawnStatus.eligible === false &&
     withdrawnStatus.matchId && withdrawnStatus.matchId !== match.id);
-  const clearsDefaultWin = isDefaultWin || chainedLoss;
+  const clearsDefaultWin = isDefaultWin || barredElsewhere;
   const canReinstate = !!(withdrawnStatus && withdrawnStatus.eligible === false && withdrawnStatus.reinstateable);
   // bc-cse: the barred competitor's own status record now reads eligible --
   // reinstated, or their earlier withdrawal cleared elsewhere -- so the
@@ -1685,7 +1695,7 @@ function RecordedWithdrawal({ match, ctl, disabled = false, singleBout = false }
           className="btn btn--sm"
           data-testid="clear-withdrawal-reopen"
           onClick={() => ctl.reopen("")}
-          disabled={disabled || ctl.busy || ctl.landed}
+          disabled={disabled || ctl.busy || ctl.landed || !statusSettled}
         >
               {/* bc-cse: "Clear default win" -- no "and reopen" -- because a
                   fusensho reopen no longer always lands running: the server
@@ -1693,7 +1703,8 @@ function RecordedWithdrawal({ match, ctl, disabled = false, singleBout = false }
                   is still barred (BarredMatchNotice shows again), and only
                   to running once they no longer are, so this button cannot
                   promise "and reopen" for either outcome uniformly. */}
-              {ctl.busy ? "Reopening…" : ctl.landed ? "Reopened" : clearsDefaultWin ? "Clear default win" : "Clear withdrawal and reopen"}
+              {ctl.busy ? "Reopening…" : ctl.landed ? "Reopened" : !clearsDefaultWin ? "Clear withdrawal and reopen"
+                : (isDefaultWin || match.decision === "fusenpai") ? "Clear default win" : "Clear withdrawal"}
         </button>
       </div>
           {clearsDefaultWin ? (

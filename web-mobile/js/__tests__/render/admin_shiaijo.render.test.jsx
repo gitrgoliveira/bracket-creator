@@ -1131,6 +1131,26 @@ describe('the kiken-decided match stays on the console until its panel is closed
     } finally { c.restore(); }
   });
 
+  // Review finding: the kiken is recorded for the wrong side, cleared and
+  // reopened (the pin lets go), then recorded for the right side on the SAME
+  // match while the feed still shows it running. The second pin must hold.
+  it('holds a second kiken pin on the same match after the first was released', async () => {
+    const c = await mountCourt([courtMatch('m1', 'running'), courtMatch('m2', 'scheduled')]);
+    try {
+      await act(async () => { probe.props.onWithdrawal({ id: 'm1-b', name: 'Shiro m1' }); });
+      c.feed.current = [courtMatch('m1', 'completed', { decision: 'kiken-voluntary', decisionBy: 'shiro' }), courtMatch('m2', 'scheduled')];
+      await c.refresh();
+      c.feed.current = [courtMatch('m1', 'running'), courtMatch('m2', 'scheduled')];
+      await c.refresh();
+      expect(c.editorMatch()).toBe('m1');
+      // The correct side withdraws; the feed has not caught up yet.
+      await act(async () => { probe.props.onWithdrawal({ id: 'm1-a', name: 'Aka m1' }); });
+      c.feed.current = [courtMatch('m1', 'completed', { decision: 'kiken-voluntary', decisionBy: 'aka' }), courtMatch('m2', 'running')];
+      await c.refresh();
+      expect(c.editorMatch(), 'the second pin must hold the panel').toBe('m1');
+    } finally { c.restore(); }
+  });
+
   it('every other onClose is still a no-op on the console', async () => {
     const c = await mountCourt([courtMatch('m1', 'running'), courtMatch('m2', 'scheduled')]);
     try {
@@ -1160,6 +1180,17 @@ describe('Send back to queue says what it discards and never discards fought bou
       const dialog = await tapSendBack(c);
       expect(dialog.textContent).toContain('will be discarded: 1 point and 1 foul.');
       expect(dialog.textContent).not.toContain('nothing will be lost');
+    } finally { c.restore(); }
+  });
+
+  it('names the engi flags on the board', async () => {
+    const c = await mountCourt([courtMatch('m1', 'running', { compEngi: true })]);
+    try {
+      await act(async () => {
+        probe.props.onBoardChange({ compId: 'c1', matchId: 'm1', points: 0, fouls: 0, flags: 3, overtime: false, draw: false, bouts: 0 });
+      });
+      const dialog = await tapSendBack(c);
+      expect(dialog.textContent).toContain('will be discarded: 3 flags.');
     } finally { c.restore(); }
   });
 
@@ -1197,6 +1228,24 @@ describe('Send back to queue says what it discards and never discards fought bou
         probe.props.onBoardChange({ compId: 'c1', matchId: 'm1', points: 0, fouls: 0, overtime: false, draw: false, bouts: 1 });
       });
       expect(c.utils.queryByRole('button', { name: /send back to queue/i })).toBeNull();
+    } finally { c.restore(); }
+  });
+
+  // Review finding: a mark taken back on a kachinuki bout never leaves the
+  // feed (the running write omits the now-unplayed row and the server keeps
+  // the stored one), so counting the feed would hide the requeue for good.
+  // The sheet's own count decides once it has reported.
+  it('offers the button again once the sheet reports the bout cleared, whatever the feed still holds', async () => {
+    const c = await mountCourt([courtMatch('m1', 'running', {
+      compKind: 'team', teamSize: 3,
+      subResults: [{ position: 1, sideA: 'A1', sideB: 'B1', ipponsA: ['M'], ipponsB: [] }],
+    })]);
+    try {
+      expect(c.utils.queryByRole('button', { name: /send back to queue/i })).toBeNull();
+      await act(async () => {
+        probe.props.onBoardChange({ compId: 'c1', matchId: 'm1', points: 0, fouls: 0, overtime: false, draw: false, bouts: 0 });
+      });
+      expect(c.utils.getByRole('button', { name: /send back to queue/i })).toBeTruthy();
     } finally { c.restore(); }
   });
 

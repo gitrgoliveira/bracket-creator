@@ -50,16 +50,3 @@ func TestKachinukiTaishoPairingGolden(t *testing.T) {
 		})
 	}
 }
-
-func TestTeamLineupTaisho(t *testing.T) {
-	_, ok := domain.TeamLineup{}.Taisho(5)
-	assert.False(t, ok, "an empty lineup has no taisho")
-
-	l := domain.TeamLineup{Positions: map[domain.Position]string{
-		domain.PosSenpo: "S", domain.PosChuken: "C", domain.PosTaisho: "T",
-	}}
-	slot, ok := l.Taisho(5)
-	require.True(t, ok)
-	assert.Equal(t, domain.PosTaisho, slot.Position)
-	assert.Equal(t, "T", slot.Name)
-}

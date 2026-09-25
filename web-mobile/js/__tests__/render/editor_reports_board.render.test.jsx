@@ -66,6 +66,22 @@ describe('the editors report their board to the host (bc-sbq)', () => {
     expect(lastReport(onBoardChange)).toMatchObject({ compId: 'c1', matchId: 'm1', points: 1 });
   });
 
+  // Review finding: engi flags are entered with no autosave, so only the
+  // board holds them until the match is finished.
+  it('the engi editor reports the flags on its board', async () => {
+    const onBoardChange = vi.fn();
+    await act(async () => {
+      render(<ScoreEditorModal
+        match={{
+          id: 'm3', compId: 'c1', status: 'running', phase: 'pool', poolName: 'Pool A', court: 'A', compEngi: true,
+          sideA: { id: 'p1', name: 'Yamada - Sato' }, sideB: { id: 'p2', name: 'Tanaka - Ito' },
+          flagsA: 2, flagsB: 1,
+        }}
+        onClose={vi.fn()} onSubmit={vi.fn().mockResolvedValue(undefined)} onBoardChange={onBoardChange} password="" />);
+    });
+    expect(lastReport(onBoardChange)).toMatchObject({ compId: 'c1', matchId: 'm3', flags: 3 });
+  });
+
   it('the team editor reports how many bouts carry a result', async () => {
     const onBoardChange = vi.fn();
     await act(async () => {

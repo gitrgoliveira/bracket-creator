@@ -15,6 +15,7 @@
 import { createTimerPool } from './timer_pool.jsx';
 import { realIppons } from './result_slot.jsx';
 import { subBoutHasResult } from './team_default_credit.jsx';
+import { joinList } from './admin_helpers.jsx';
 import { SideCell } from './side_cell.jsx';
 // Imported DIRECTLY from the leaf rather than read off `window`. Two of the
 // call sites below sit inside a `try { } catch (_e) { }` that swallows, so a
@@ -320,9 +321,9 @@ function recordOverrideWinner(compId, matchId, result, pw) {
 // feeder's two real competitors, and the write is audited (IsOverridden). If the
 // real feeder result arrives later it re-propagates over the assertion.
 // bc-sbq: what sending a running match back to the queue discards. A board is
-// { points, fouls, overtime, draw, bouts }: struck points, fouls on the
-// counters, a marked overtime, a toggled draw, and team bouts that carry a
-// result. Two sources describe a running match and neither is enough on its
+// { points, fouls, flags, overtime, draw, bouts }: struck points, fouls on the
+// counters, engi judges' flags, a marked overtime, a toggled draw, and team
+// bouts that carry a result. Two sources describe a running match and neither is enough on its
 // own: the court feed (boardFromMatch), which lags the editor because an
 // autosaved mark reaches it only on the next refetch, and the inline editor's
 // own board (its onBoardChange report), which is what the operator is looking
@@ -330,7 +331,7 @@ function recordOverrideWinner(compId, matchId, result, pw) {
 // larger of each, so a mark present in either one counts. Send back to queue
 // (whether it is offered, and its confirm) and pickMatch's silent defer of an
 // unscored bout all ask requeueLoss, so they cannot disagree.
-const EMPTY_BOARD = Object.freeze({ points: 0, fouls: 0, overtime: false, draw: false, bouts: 0 });
+const EMPTY_BOARD = Object.freeze({ points: 0, fouls: 0, flags: 0, overtime: false, draw: false, bouts: 0 });
 
 function boardFromMatch(mm) {
     const struck = realIppons(mm.ipponsA).length + realIppons(mm.ipponsB).length;
@@ -341,6 +342,7 @@ function boardFromMatch(mm) {
     return {
         points: Math.max(struck, scored),
         fouls,
+        flags: (mm.flagsA || 0) + (mm.flagsB || 0),
         overtime: window.enchoOn ? window.enchoOn(mm.encho) : (mm.encho?.periodCount || 0) > 0,
         draw: false,
         // subBoutHasResult, the wire-shape twin of the team sheet's own
@@ -352,18 +354,25 @@ function boardFromMatch(mm) {
 
 function requeueLoss(mm, live) {
     const feed = boardFromMatch(mm);
-    const here = live && live.compId === mm.compId && live.matchId === mm.id ? live : EMPTY_BOARD;
+    const here = live && live.compId === mm.compId && live.matchId === mm.id ? live : null;
+    const board = here || EMPTY_BOARD;
     return {
-        points: Math.max(feed.points, here.points || 0),
-        fouls: Math.max(feed.fouls, here.fouls || 0),
-        overtime: feed.overtime || !!here.overtime,
-        draw: feed.draw || !!here.draw,
-        bouts: Math.max(feed.bouts, here.bouts || 0),
+        points: Math.max(feed.points, board.points || 0),
+        fouls: Math.max(feed.fouls, board.fouls || 0),
+        flags: Math.max(feed.flags, board.flags || 0),
+        overtime: feed.overtime || !!board.overtime,
+        draw: feed.draw || !!board.draw,
+        // Fought bouts come from the team sheet whenever it has reported: it
+        // adopts every bout recorded elsewhere, and it alone knows a mark the
+        // operator took back, because a kachinuki running write leaves an
+        // unplayed row out and the server keeps the stored one, so the feed
+        // would go on counting that bout and never offer the requeue again.
+        bouts: here ? (here.bouts || 0) : feed.bouts,
     };
 }
 
 function requeueLossIsEmpty(loss) {
-    return !loss.points && !loss.fouls && !loss.overtime && !loss.draw && !loss.bouts;
+    return !loss.points && !loss.fouls && !loss.flags && !loss.overtime && !loss.draw && !loss.bouts;
 }
 
 // The confirm's account of what a requeue discards. Fought bouts are never
@@ -373,11 +382,11 @@ function requeueLossSentence(loss) {
     const parts = [];
     if (loss.points) parts.push(window.pluralize(loss.points, "point"));
     if (loss.fouls) parts.push(window.pluralize(loss.fouls, "foul"));
+    if (loss.flags) parts.push(window.pluralize(loss.flags, "flag"));
     if (loss.overtime) parts.push("the overtime");
     if (loss.draw) parts.push("the draw");
     if (!parts.length) return "No score has been entered, so nothing will be lost.";
-    const list = parts.length === 1 ? parts[0] : `${parts.slice(0, -1).join(", ")} and ${parts[parts.length - 1]}`;
-    return `The score on this bout will be discarded: ${list}.`;
+    return `The score on this bout will be discarded: ${joinList(parts, "and", "")}.`;
 }
 
 function ResolveFeedersModal({ match, comp, password, onClose, onResolved, onOptimisticResolve, showToast }) {
@@ -956,7 +965,10 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
     const withdrawalStatus = withdrawalMatch ? withdrawalMatch.status : null;
     const withdrawalSeenCompleted = useRefSh(null);
     useEffectSh(() => {
-        if (!withdrawalKey) return;
+        // Released (or never set): forget the match, so a later kiken on the
+        // SAME match (the correct side, after the wrong one was cleared) is
+        // held again until the feed shows it completed.
+        if (!withdrawalKey) { withdrawalSeenCompleted.current = null; return; }
         if (withdrawalStatus === "completed") { withdrawalSeenCompleted.current = withdrawalKey; return; }
         if (withdrawalStatus && withdrawalSeenCompleted.current !== withdrawalKey) return;
         if (withdrawalStatus === "running") setPickedKey(withdrawalKey);

@@ -681,6 +681,29 @@ describe('clearing a fusenpai chained onto an earlier withdrawal (bc-kfup)', () 
     expect(screen.getByTestId('clear-withdrawal-consequence').textContent).toContain('can compete again');
   });
 
+  // Review finding: a kiken whose competitor was reinstated and then withdrew
+  // again elsewhere no longer names this match, so its reopen also goes to
+  // the queue. The copy must not promise "back to running".
+  it('a kiken whose competitor is barred by another match also says the match goes back to the queue', async () => {
+    window.API.fetchCompetitorStatuses = vi.fn().mockResolvedValue([
+      { playerId: 'p2', eligible: false, matchId: 'Pool A-5' },
+    ]);
+    await mount(individualWithdrawal({ decision: 'kiken-voluntary' }));
+    await waitFor(() => expect(screen.getByTestId('clear-withdrawal-reopen').textContent).toBe('Clear withdrawal'));
+    expect(screen.getByTestId('clear-withdrawal-consequence').textContent).toContain('goes back to the queue');
+  });
+
+  // Review finding: the clear is one tap, so it waits for the status that
+  // decides its copy rather than acting under the wrong promise.
+  it('holds the clear until the competitor status is in', async () => {
+    let resolve;
+    window.API.fetchCompetitorStatuses = vi.fn().mockImplementation(() => new Promise((r) => { resolve = r; }));
+    await mount(individualWithdrawal());
+    expect(screen.getByTestId('clear-withdrawal-reopen').disabled).toBe(true);
+    await act(async () => { resolve([{ playerId: 'p2', eligible: false, matchId: 'm-r1-0' }]); });
+    await waitFor(() => expect(screen.getByTestId('clear-withdrawal-reopen').disabled).toBe(false));
+  });
+
   it("lists a chained fusenpai among the original withdrawal's later default wins", async () => {
     window.API.fetchCompetitionDetails = vi.fn().mockResolvedValue({ config: {} });
     window.compMatchesForCompetition = () => [{

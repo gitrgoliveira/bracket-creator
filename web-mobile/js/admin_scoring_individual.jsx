@@ -881,7 +881,7 @@ export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, on
   // only on the next refetch, so a confirm built from the feed alone told
   // the operator "nothing will be lost" with a point on the board. Keyed on
   // the VALUES, so a refetch that re-creates `m` reports nothing new. The
-  // team editor reports its own board; engi reports none.
+  // team and engi editors report their own boards.
   const boardPoints = realIppons(aPts).length + realIppons(bPts).length;
   const boardFouls = aFouls + bFouls;
   const boardOvertime = enchoPeriodCount > 0;
@@ -896,7 +896,7 @@ export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, on
   // editor is shown from the first render with no kendo-editor flash.
   // The team check is skipped for engi (engi is never a team).
   if (isEngi) {
-    return <EngiScoreEditorModal match={m} onClose={onClose} onSubmit={onSubmit} onSubmitAndNext={onSubmitAndNext} prevMatch={prevMatch} nextMatch={nextMatch} onPrev={onPrev} onNext={onNext} variant={variant} canClose={canClose} />;
+    return <EngiScoreEditorModal match={m} onClose={onClose} onSubmit={onSubmit} onSubmitAndNext={onSubmitAndNext} onBoardChange={onBoardChange} prevMatch={prevMatch} nextMatch={nextMatch} onPrev={onPrev} onNext={onNext} variant={variant} canClose={canClose} />;
   }
   // Team routing: forward to TeamScoreEditorModal.
   if (isTeam) {
@@ -1244,6 +1244,7 @@ export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, on
               compID={m.compId}
               password={resolveDecisionPassword(password)}
               withdrawnPlayer={withdrawnPlayer}
+              withdrawnMatchId={m.id}
               onAwarded={() => { /* stay open; operator decides when to close */ }}
               onClose={() => { setWithdrawnPlayer(null); onClose(); }}
             />

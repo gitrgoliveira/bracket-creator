@@ -28,14 +28,6 @@ import (
 // transaction, the same benign pre-write read the handler's other gates
 // make. Returns a *ValidationError naming the bout and its two fighters.
 func (e *Engine) KachinukiEnchoRefusal(compID, matchID string, incoming []state.SubMatchResult) error {
-	comp, err := e.store.LoadCompetition(compID)
-	if err != nil {
-		log.Printf("engine.KachinukiEnchoRefusal compId=%s matchId=%s: %v; not judging the pairing", compID, matchID, err)
-		return nil
-	}
-	if comp == nil || !comp.IsKachinuki() {
-		return nil
-	}
 	parent, _, roundIdx, err := e.findTeamMatch(compID, matchID)
 	if err != nil {
 		log.Printf("engine.KachinukiEnchoRefusal compId=%s matchId=%s: %v; not judging the pairing", compID, matchID, err)
@@ -48,8 +40,14 @@ func (e *Engine) KachinukiEnchoRefusal(compID, matchID string, incoming []state.
 	for _, s := range parent.SubResults {
 		stored[s.Position] = s
 	}
-	var lineupA, lineupB *domain.TeamLineup
-	resolved := false
+	// The new encho, if any, first: once an encounter's encho is on record,
+	// every later write of it carries that encho again and must not pay for
+	// the competition and lineup reads below.
+	type newEncho struct {
+		pos  int
+		a, b domain.BoutFighter
+	}
+	var judge []newEncho
 	for i := range incoming {
 		sub := incoming[i]
 		if sub.Position < 1 || !sub.Encho.On() {
@@ -59,22 +57,36 @@ func (e *Engine) KachinukiEnchoRefusal(compID, matchID string, incoming []state.
 		if had && prior.Encho.On() {
 			continue // already on record: a correction, never refused
 		}
-		if !resolved {
-			lineupFor := e.lineupInForce(compID, matchID, comp, roundIdx)
-			if l, ok := lineupFor(parent.SideA); ok {
-				lineupA = &l
-			}
-			if l, ok := lineupFor(parent.SideB); ok {
-				lineupB = &l
-			}
-			resolved = true
-		}
-		a := boutFighterOf(sub.SideA, sub.SideAMemberID, prior.SideA, prior.SideAMemberID)
-		b := boutFighterOf(sub.SideB, sub.SideBMemberID, prior.SideB, prior.SideBMemberID)
-		taisho, known := domain.KachinukiTaishoPairing(comp.TeamSize, lineupA, lineupB, a, b)
+		judge = append(judge, newEncho{
+			pos: sub.Position,
+			a:   boutFighterOf(sub.SideA, sub.SideAMemberID, prior.SideA, prior.SideAMemberID),
+			b:   boutFighterOf(sub.SideB, sub.SideBMemberID, prior.SideB, prior.SideBMemberID),
+		})
+	}
+	if len(judge) == 0 {
+		return nil
+	}
+	comp, err := e.store.LoadCompetition(compID)
+	if err != nil {
+		log.Printf("engine.KachinukiEnchoRefusal compId=%s matchId=%s: %v; not judging the pairing", compID, matchID, err)
+		return nil
+	}
+	if comp == nil || !comp.IsKachinuki() {
+		return nil
+	}
+	var lineupA, lineupB *domain.TeamLineup
+	lineupFor := e.lineupInForce(compID, matchID, comp, roundIdx)
+	if l, ok := lineupFor(parent.SideA); ok {
+		lineupA = &l
+	}
+	if l, ok := lineupFor(parent.SideB); ok {
+		lineupB = &l
+	}
+	for _, j := range judge {
+		taisho, known := domain.KachinukiTaishoPairing(comp.TeamSize, lineupA, lineupB, j.a, j.b)
 		if known && !taisho {
 			return validationErrorf("bout %d: encho is only for the last bout, taisho against taisho, and this pairing is %s against %s. Record the tie instead",
-				sub.Position, fighterLabel(b, "Shiro's fighter"), fighterLabel(a, "Aka's fighter"))
+				j.pos, fighterLabel(j.b, "Shiro's fighter"), fighterLabel(j.a, "Aka's fighter"))
 		}
 	}
 	return nil

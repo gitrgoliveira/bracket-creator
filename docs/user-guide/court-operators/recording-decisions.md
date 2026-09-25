@@ -112,7 +112,7 @@ Removing a withdrawal makes the withdrawn competitor or team eligible again, whi
 A fix can change who goes through to later matches, so the app warns you first and you can cancel or go ahead:
 
 - Recording the withdrawal for the other side warns you when either side has already started a later match.
-- Clearing a withdrawal in a knockout match warns you when the next match has already been played. If the winner had gone straight through a bye, they are taken out of the match after the bye too, and the warning is about that match. If you go ahead, that next match is reopened so it can be fought and scored again, and the editor names it once the reopen is done. A round after it that nobody has played yet stops showing its winner. If a withdrawal decided that next match, its withdrawn competitor is eligible again too.
+- Clearing a withdrawal in a knockout match warns you when the next match has already been played. If you go ahead, that next match is reopened so it can be fought and scored again, and the editor names it once the reopen is done. A round after it that nobody has played yet stops showing its winner. If a withdrawal decided that next match, its withdrawn competitor is eligible again too.
 
 In a knockout, a next match that is still in progress must be finished or sent back to the queue before a withdrawal can be cleared. If another match is running on this match's court, the app names it and offers to send it back to the queue, which clears any score entered for it.
 

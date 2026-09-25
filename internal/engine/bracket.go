@@ -209,13 +209,13 @@ func (e *Engine) buildBracketFromDraw(comp *state.Competition, draw *helper.Knoc
 	if draw == nil || draw.Root == nil {
 		return nil, fmt.Errorf("buildBracketFromDraw: no draw to build from")
 	}
-	// SlotArray, not TreeToLeafArray: the pow2 bracket must carry the draw's
-	// SLOT geometry so its round indices equal the printed Excel columns. The
-	// flat array tail-pads a vacancy block's bye pair into adjacency
-	// ([H10,C6,"",""] for the true [H10,"",C6,""]), which would fight a bout
-	// in round 1 that the sheet prints in round 2. Region widths are identical
-	// under both readings, so the spans and every court derivation are
-	// unaffected.
+	// SlotArray, not TreeToLeafArray: the pow2 bracket must hold every bout at
+	// the slots the draw tree gives it, or applySlotDisplayRounds cannot find
+	// the bout to stamp its printed round. The flat array tail-pads a vacancy
+	// block's bye pair into adjacency ([H10,C6,"",""] for the true
+	// [H10,"",C6,""]), which would fight a bout in round 1 that the sheet
+	// prints in round 2. Region widths are identical under both readings, so
+	// the spans and every court derivation are unaffected.
 	leaves := helper.SlotArray(draw.Root)
 	regionSpans := draw.RegionSpans()
 
@@ -633,14 +633,15 @@ func computeBracketDisplayMetadata(bracket *state.Bracket) {
 
 	// DisplayRound's provisional value is the match's POW2 round counted from
 	// the final (1 = Final); applySlotDisplayRounds then overrides every bout
-	// the draw tree knows with the round the risen-aware Excel walk fights it
-	// in, which is the printed column. The pow2 row alone is wrong for an
-	// assembly-level late bout that the pow2 padding parks in round-1
-	// adjacency, and the old feeder-graph walk was wrong the other way for a
-	// phantom-risen pair the sheets fight in round 1 (34th EKC Junior Male
-	// F2) -- the bracket graph cannot tell those two shapes apart, so neither
-	// recomputation can be the source. The draw tree can (Node.risen), and
-	// its walk is what the workbook prints.
+	// the draw tree knows with its distance from the final in that tree, the
+	// column the workbook prints it in. The two differ wherever an empty half
+	// was collapsed on a bout's path to the final: a pair beside a phantom
+	// pair sits in the first pow2 row but prints a column later (34th EKC
+	// Junior Individual Male, P4 v P5), and the pow2 padding parks an
+	// assembly-level late bout in round-1 adjacency. The real feeder graph
+	// gives the same rounds (TestBracketDisplayMetadata_Feeders pins one
+	// round per feeder step); the tree walk stays the source because it is
+	// what the workbook prints.
 	if !isReal(at(numRounds-1, 0)) {
 		return // degenerate bracket (e.g. < 2 competitors)
 	}
@@ -654,10 +655,10 @@ func computeBracketDisplayMetadata(bracket *state.Bracket) {
 }
 
 // applySlotDisplayRounds stamps each real bracket match with the round the
-// draw's risen-aware walk (helper.SlotRoundMatches) fights it in. A bout is
-// located by its first-round window: entrant width 2^(r+1) starting at slot
-// offset i*2^(r+1) identifies pow2 match (r, i) exactly, because the bracket
-// was built from helper.SlotArray of the same tree.
+// draw tree fights it in, its distance from the final (helper.SlotRoundMatches).
+// A bout is located by its first-round window: entrant width 2^(r+1) starting
+// at slot offset i*2^(r+1) identifies pow2 match (r, i) exactly, because the
+// bracket was built from helper.SlotArray of the same tree.
 func applySlotDisplayRounds(bracket *state.Bracket, draw *helper.KnockoutDraw) {
 	if bracket == nil || draw == nil || draw.Root == nil {
 		return

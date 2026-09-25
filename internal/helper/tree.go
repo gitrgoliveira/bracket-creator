@@ -26,21 +26,17 @@ type Node struct {
 
 	// risenAfter/risenBefore count the slot levels this node was lifted past
 	// when BuildSlotTree collapsed an EMPTY sibling (a phantom pair, or a
-	// bye's gap) sitting after respectively before it. Root distance alone
-	// then mis-states the round a match is fought in: the 34th EKC Junior
-	// Individual Male sheet prints its phantom-risen pair (F2, P4 v P5) in the
-	// ROUND-1 column, because the pair could always have been fought there --
-	// the rise is a fact about empty slots, not about the bout. TraverseRounds
-	// adds the rises back before classifying, which restores the slot-level
-	// round for the node and everything below it, and SlotArray uses the side
-	// split to reconstruct the exact slot array the tree was built from.
-	// Risen LEAVES (byes) are never classified, so the fields are inert on
-	// them there, but SlotArray still needs their sides.
+	// bye's gap) sitting after respectively before it. They are slot geometry
+	// only: SlotArray uses the side split to rebuild the exact slot array the
+	// tree came from, and leafArrayWidth/walkLeafOffsets count the rises in the
+	// slots a node spans, which the region spans and court stamping read.
 	//
-	// This is exactly the phantom-vs-vacancy distinction the collapsed tree
-	// otherwise loses (spec R6(c)): a vacancy block's bye pair (2025 Men Team
-	// F16) is built at its own slot level and never rises, so it keeps its
-	// round-2 column, while a phantom-risen pair returns to round 1.
+	// They do not move a bout's round, which is its distance from the root:
+	// the reference sheets count their columns back from the final. The 34th
+	// EKC Junior Individual Male sheet (court A) prints P2 v P3 alone in
+	// column 1 and P4 v P5, beside an empty pair, in column 2 with P1 v
+	// Winner F1; the 33rd EKC 2025 Men Team sheet prints its five-occupant
+	// courts the same way.
 	risenAfter  int
 	risenBefore int
 }
@@ -90,30 +86,10 @@ func PrintLeafNodes(node *Node, f *excelize.File, sheetName string, startCol int
 		return
 	}
 
-	// A risen MATCH shifts itself left into the column its slots occupy: the
-	// reference sheets fight a phantom-risen pair in the round-1 column with a
-	// long winner line across the skipped round (34th EKC Junior Male F2), and
-	// FillInMatches numbers it as a round-1 bout, so drawing it a column late
-	// would print Match 1 in the round-2 column. A risen LEAF stays put: a
-	// bye's name box prints where the competitor first fights, which IS the
-	// collapsed position, exactly as the sheets print byed entrants beside
-	// "Winner F..". Handled at entry rather than in the recursion so a PAGE
-	// whose root is a risen block (splitIntoSubtrees can cut one out) shifts
-	// the same way. Row-wise the content keeps its band, halved once per rise,
-	// at the top of the band for a trailing empty sibling and at the bottom
-	// for a leading one -- the slot reading of the same collapse.
-	if !node.LeafNode {
-		for i := 0; i < node.risenAfter; i++ {
-			startCol -= 2
-			depth--
-		}
-		for i := 0; i < node.risenBefore; i++ {
-			startCol -= 2
-			depth--
-			startRow += int(math.Pow(2, float64(depth-1)))
-		}
-	}
-
+	// Every node draws at its distance from the root, the column the reference
+	// sheets print it in (34th EKC Junior Individual Male, page 4: P4 v P5,
+	// whose neighbouring pair is empty, sits in column 2 beside P1 v Winner
+	// F1), and a byed entrant's name prints beside the bout they first fight.
 	size := int(math.Pow(2, float64(depth-1)))
 
 	if node.LeafNode {
@@ -175,10 +151,6 @@ func TraverseRounds(node *Node, depth int, maxDepth int) []*Node {
 		return []*Node{}
 	}
 
-	// A risen node (and its whole subtree) classifies at the slot level it was
-	// BUILT at, not the level the collapse of an empty sibling lifted it to.
-	depth += node.risenAfter + node.risenBefore
-
 	var matches []*Node
 
 	if depth == maxDepth {
@@ -207,11 +179,10 @@ func TraverseRounds(node *Node, depth int, maxDepth int) []*Node {
 // generators - the loop used to be copied at each call site, like the
 // tree-page rendering loop before RenderTreePages.
 func BuildEliminationMatchRounds(tree *Node) [][]*Node {
-	// Slot depth, not physical: a tree whose top is risen (a split page
-	// holding one risen block) is deeper in slot levels than in nodes, and
-	// the physical count would leave its bouts above every classification
-	// target.
-	depth := slotDepth(tree)
+	// Rounds count back from the final, as the reference sheets print their
+	// columns: a bout's round is its distance from the root, whatever empty
+	// slots were collapsed beside it (see Node.risenAfter).
+	depth := CalculateDepth(tree)
 	rounds := make([][]*Node, 0, max(depth-1, 0))
 	for i := depth; i > 1; i-- {
 		rounds = append(rounds, TraverseRounds(tree, 1, i-1))
@@ -319,10 +290,11 @@ func regionPages(region *Node, want int) []*Node {
 // tree was built from, EMPTY POSITIONS INCLUDED. TreeToLeafArray cannot do
 // that -- it pads a narrow side at its tail, so a vacancy block's bye pair
 // ([H10,"",C6,""], 2025 Men Team court D) comes back as the adjacent
-// [H10,C6,"",""], indistinguishable from a phantom-risen round-1 pair. The
-// risen side counts recorded by BuildSlotTree put each collapse back where it
-// was, which is what lets a pow2 bracket built from this array carry the SAME
-// round geometry as the printed Excel columns (engine buildBracketFromDraw).
+// [H10,C6,"",""], a pair followed by an empty pair. The risen side counts
+// recorded by BuildSlotTree put each collapse back where it was, so a pow2
+// bracket built from this array (engine buildBracketFromDraw) holds every bout
+// at the slots the draw tree gives it, which is how the engine finds each
+// bout's printed round (SlotRoundMatches).
 //
 // Trees not built from slot arrays (CreateBalancedTree) carry no rises and
 // come back with TreeToLeafArray's tail-padded geometry, which for them is

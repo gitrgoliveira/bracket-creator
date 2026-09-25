@@ -106,11 +106,11 @@ func TestByeGoesToTheHighestPrecedenceOccupantSweep(t *testing.T) {
 							// slot in round 2 or later: the competitor stands
 							// alone in a later column awaiting a bout's
 							// winner. A leaf-leaf pair sitting shallow is NOT
-							// a trigger -- at 1 qualifier it is a phantom-risen
-							// pair (Junior Male's P4 v P5, column 1 on the
-							// sheet), at 2+ it is a vacancy block's two byes
-							// meeting (2025 Men Team F16), and the tree cannot
-							// tell them apart (spec R6(c)).
+							// a trigger: it is two occupants whose first bout
+							// is against each other after round 1, beside a
+							// phantom pair at 1 qualifier (Junior Male's P4 v
+							// P5, column 2 on the sheet) or as a vacancy
+							// block's two byes at 2+ (2025 Men Team F16).
 							//
 							// Under the template a block byes SEVERAL
 							// occupants by design (its sub-block heads, plus

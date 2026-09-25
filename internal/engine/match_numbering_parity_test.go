@@ -52,8 +52,7 @@ func excelNumberBySignature(players []domain.Player) map[string]int {
 		names[i] = p.Name
 	}
 	// Same construction as cmd/create-knockout.go: NewKnockoutDraw normalizes
-	// the tree through the slot codec (a phantom-risen pair fights in round 1,
-	// as the reference sheets print), and the workbook numbers the rounds of
+	// the tree through the slot codec, and the workbook numbers the rounds of
 	// THAT tree.
 	tree := helper.BuildSlotTree(helper.SlotArray(helper.CreateBalancedTree(names)))
 	rounds := helper.BuildEliminationMatchRounds(tree)

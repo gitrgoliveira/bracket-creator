@@ -14,8 +14,8 @@ import (
 // (court blocks), R4 (crossing), R5 (separation), R6 (byes) and D4 (region
 // shape) are all pinned here by real reference data rather than by prose.
 //
-// Each case states, per shiaijo region, the round-1 pairings and the named
-// round-1 bye exactly as the sheet prints them.
+// Each case states, per shiaijo region, the first-layer pairings (who meets
+// whom first) and the named round-1 bye exactly as the sheet prints them.
 
 // ekcPool builds a named pool with size players. Sizes matter to R6 criterion 2
 // (oversized pools), so every reference pool is given the SAME size: the sheets
@@ -65,10 +65,12 @@ func courtsByRound(draw *KnockoutDraw) [][]string {
 	return out
 }
 
-// regionRound1 returns a region's round-1 layer exactly as D4 defines it: the
-// slot array paired (2i, 2i+1), with both-real pairs reported as matches, a
+// regionRound1 returns a region's first slot layer exactly as D4 lays it out:
+// the slot array paired (2i, 2i+1), with both-real pairs reported as matches, a
 // one-real pair as a NAMED BYE, and both-empty pairs (phantoms) dropped
-// entirely -- they are never printed or displayed.
+// entirely -- they are never printed or displayed. It pins who meets whom, not
+// when: a pair beside a phantom is fought a round later, at its distance from
+// the final (regionRounds; 34th EKC Junior Individual Male, P4 v P5).
 func regionRound1(region *Node) (matches []string, byes []string) {
 	slots := TreeToLeafArray(region)
 	matches, byes = []string{}, []string{}
@@ -84,7 +86,7 @@ func regionRound1(region *Node) (matches []string, byes []string) {
 		}
 	}
 	if len(slots) == 1 && slots[0] != "" {
-		// A one-occupant region has no round-1 layer at all: its occupant byes
+		// A one-occupant region has no first slot layer at all: its occupant byes
 		// straight into the region's parent (EKC Female court B).
 		byes = append(byes, slots[0])
 	}
@@ -122,8 +124,8 @@ func assertEKCRegions(t *testing.T, draw *KnockoutDraw, want []ekcRegion) {
 	for i, w := range want {
 		t.Run(w.court, func(t *testing.T) {
 			matches, byes := regionRound1(draw.Regions[i])
-			assert.Equal(t, w.matches, matches, "round-1 matches on shiaijo %s", w.court)
-			assert.Equal(t, w.byes, byes, "round-1 byes on shiaijo %s", w.court)
+			assert.Equal(t, w.matches, matches, "first-layer pairs on shiaijo %s", w.court)
+			assert.Equal(t, w.byes, byes, "first-layer byes on shiaijo %s", w.court)
 		})
 	}
 }
@@ -132,12 +134,12 @@ func assertEKCRegions(t *testing.T, draw *KnockoutDraw, want []ekcRegion) {
 // pool, four shiaijo A(1-5) B(6-10) C(11-14) D(15-18).
 //
 // It is the sharpest case in the spec. Courts A and B hold 5 pools each, and a
-// 5-occupant region is where the two candidate region constructions disagree:
-// the sheet prints ONE named bye and TWO round-1 matches (P1 byes, P2 v P3,
-// P4 v P5), with the round-2 bye falling to W(P4 v P5) rather than to P1.
-// Recursive halving would have put the bye on occupant 3, and
-// pad-to-NextPow2-and-spread would have produced three named byes and one
-// match. Only the greedy layout (D4) reproduces the sheet.
+// 5-occupant region is where the candidate region constructions disagree. The
+// sheet (page 4 of the 34th EKC 2026 drawings) pairs P2 v P3, P1 v W(P2 v P3)
+// and P4 v P5, and prints them by distance from the court final: P2 v P3 alone
+// in column 1, then P4 v P5 and P1 v Winner F1 together in column 2. The
+// greedy layout (D4) builds exactly those pairings; recursive halving would
+// have put the bye on occupant 3.
 //
 // It is also the case that refutes any blanket "round-1 opponents must come
 // from different courts" rule: at 1 qualifier nothing crosses (R4d) and P2 v P3
@@ -160,18 +162,15 @@ func TestEKCJuniorIndividualMale(t *testing.T) {
 		{court: "D", matches: []string{"Pool 15-1st v Pool 16-1st", "Pool 17-1st v Pool 18-1st"}, byes: []string{}},
 	})
 
-	// The worked ladder the spec calls out: court A is 5 -> 3 -> 2 -> 1, four
-	// matches in three rounds, and the round-2 bye belongs to the winner of
-	// P4 v P5, NOT to P1.
+	// Court A is 5 -> 4 -> 2 -> 1: four matches in three rounds, and P1's
+	// opponent is the winner of P2 v P3, not one of P4 and P5.
 	regionA := draw.Regions[0]
 	require.NotNil(t, regionA)
 	assert.Equal(t, 4, len(BuildEliminationMatchRounds(regionA)[0])+len(BuildEliminationMatchRounds(regionA)[1])+len(BuildEliminationMatchRounds(regionA)[2]),
 		"a 5-occupant region plays four matches")
-	assert.Equal(t, 4, CalculateDepth(regionA), "5 -> 3 -> 2 -> 1 is three rounds of matches")
-	// P1's second match is the round-2 bout, so P1 is NOT the round-2 bye; the
-	// bye sits on the branch holding P4 and P5.
+	assert.Equal(t, 4, CalculateDepth(regionA), "5 -> 4 -> 2 -> 1 is three rounds of matches")
 	assert.Equal(t, []string{"Pool 4-1st", "Pool 5-1st"}, TreeLeafLabels(regionA.Right),
-		"W(P4 v P5) takes the round-2 bye straight into the region final")
+		"P4 v P5 is the other half of the court final")
 
 	// R6: a region with no structural bye grants none whatever its precedence.
 	for _, i := range []int{2, 3} {
@@ -179,17 +178,17 @@ func TestEKCJuniorIndividualMale(t *testing.T) {
 		assert.Empty(t, byes, "a 4-occupant region has no bye to give")
 	}
 
-	// The sheet's COLUMNS, not just its pairings: F1 and F2 both sit in the
-	// round-1 column, so P4 v P5 is fought in round 1 even though its winner
-	// then byes round 2. The phantom collapse used to lift that bout into
-	// round 2 on every surface that reads rounds (Node.risen records the lift
-	// and TraverseRounds counts it back); the vacancy blocks of the 2025 Men
-	// Team sheet are the shape that must NOT be pulled forward the same way,
-	// and TestEKC2025MenTeamByes pins them.
+	// The sheet's COLUMNS, not just its pairings: F1 (P2 v P3) is alone in
+	// column 1, and F2 (P4 v P5) sits in column 2 beside F3 (P1 v Winner F1).
+	// Columns count back from the court final, so the pair beside the empty
+	// pair is fought in round 2, as the 2025 Men Team sheet's five-occupant
+	// courts also print (TestEKC2025MenTeamByes). An earlier reading put F2 in
+	// column 1 and pulled such pairs forward a round; the PDF does not. Within
+	// a column the order is the slot walk's, where the sheet stacks F2 above F3.
 	assert.Equal(t, [][]string{
-		{"Pool 2-1st v Pool 3-1st", "Pool 4-1st v Pool 5-1st"}, // F1, F2
-		{"Pool 1-1st v W"}, // F3
-		{"W v W"},          // F4
+		{"Pool 2-1st v Pool 3-1st"},                   // F1
+		{"Pool 1-1st v W", "Pool 4-1st v Pool 5-1st"}, // F3, F2
+		{"W v W"}, // F4
 	}, regionRounds(regionA), "the round each court-A bout is fought in, as the sheet prints it")
 }
 

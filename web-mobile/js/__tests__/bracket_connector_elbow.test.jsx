@@ -8,6 +8,12 @@ import { elbowXFor, connectorPath } from '../bracket.jsx';
 // landed the vertical run inside the skipped column's card, so the skipping
 // feeder read as feeding the skipped match instead of its real parent.
 //
+// A bracket generated now never skips: DisplayRound is the distance from the
+// final, so every feeder sits one column before its parent (pinned by
+// TestBracketDisplayMetadata_Feeders, internal/engine). The draw below was
+// generated while rounds were classified by slot level, and a bracket stored
+// then keeps those rounds, so this routing is still reachable.
+//
 // Numbers below are measured on the real render (tree-relative px) for a
 // 10-entrant, 2-shiaijo draw: M1 (round 1) and M5 (the quarterfinal) both
 // feed M7 (the semifinal); M1's winner skips the quarterfinal column

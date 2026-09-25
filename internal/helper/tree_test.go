@@ -1373,8 +1373,9 @@ func TestBlockByeNeverSkipsAHigherFinisher(t *testing.T) {
 // PURPOSE: the condition is the documented scope of the sheet evidence, so a
 // drift between the two is a real finding rather than test noise.
 //
-// Greedy blocks grant q%2 named round-1 byes and play floor(q/2) round-1
-// matches; a 6-occupant template block grants 2 and plays 2. The q=5 template
+// Greedy blocks grant q%2 named round-1 byes and hold floor(q/2) real pairs in
+// the first slot layer (a pair beside a phantom pair is fought a round later);
+// a 6-occupant template block grants 2 and plays 2 round-1 matches. The q=5 template
 // block (a VACANCY block) is reported skip=true: its bye pair collapses into a
 // shallow leaf-leaf match that a flat leaf array cannot reconstruct, so its
 // layout is pinned bout-for-bout by TestEKC2025MenTeamByes on the rounds view
@@ -1427,8 +1428,9 @@ func blockLayoutArithmetic(leaves []string) (byes, matches int, skip bool) {
 }
 
 // TestBlockByeCountMatchesTheLayout pins D4's arithmetic directly, per block
-// and per layout mode. Greedy: q mod 2 NAMED round-1 byes, floor(q/2) round-1
-// matches, every other empty slot phantom-paired and never printed. Template
+// and per layout mode. Greedy: q mod 2 NAMED round-1 byes, floor(q/2) real
+// pairs in the first slot layer, every other empty slot phantom-paired and
+// never printed. Template
 // (R6(c), the Men Team sheets): every empty slot pairs with a real occupant,
 // so a 6-occupant block grants TWO named byes -- its sub-block heads -- and
 // plays two round-1 matches. Recursive halving disagrees with both from q=6 up.
@@ -1461,7 +1463,7 @@ func TestBlockByeCountMatchesTheLayout(t *testing.T) {
 							}
 						}
 						if q == 1 {
-							// A one-occupant block has no round-1 layer at all.
+							// A one-occupant block has no first slot layer at all.
 							continue
 						}
 						wantByes, wantMatches, skip := blockLayoutArithmetic(TreeLeafLabels(block))
@@ -1469,7 +1471,7 @@ func TestBlockByeCountMatchesTheLayout(t *testing.T) {
 							continue
 						}
 						assert.Equalf(t, wantByes, byes, "block %d: %d occupants must grant %d named byes", c, q, wantByes)
-						assert.Equalf(t, wantMatches, matches, "block %d: %d occupants must play %d round-1 matches", c, q, wantMatches)
+						assert.Equalf(t, wantMatches, matches, "block %d: %d occupants must hold %d real first-layer pairs", c, q, wantMatches)
 					}
 				})
 			}

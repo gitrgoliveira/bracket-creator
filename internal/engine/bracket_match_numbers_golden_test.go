@@ -99,12 +99,13 @@ type bracketNumberGolden struct {
 // The marked cases were found by sweeping formats, entrant counts and shiaijo
 // counts for a bracket where the two orderings genuinely disagree; each one has
 // an effective round holding a DEEP match at a small position alongside a
-// SHALLOW match at a larger position. Slot-true display rounds (Node.risen,
-// 2026-08-18) removed that mixture from every KNOCKOUT shape -- a sweep of
-// 3-32 entrants found none -- because a knockout tree's effective rounds now
-// ARE its slot rounds. The pool-fed mixed draw still mixes (one effective
-// round can hold matches from several pow2 rounds), so the discriminating
-// fixture lives there.
+// SHALLOW match at a larger position. A bout's effective round is its
+// distance from the final, so a pair beside an empty pair shares an effective
+// round with bouts from a later pow2 round: at 9 entrants, DisplayRound 3
+// holds pow2 round-1 bouts at positions 0, 1 and 4 and a pow2 round-2 bout at
+// position 3. On one shiaijo, knockouts of 9, 10 and 17-22 entrants
+// discriminate (a sweep of 3-32); the table pins 9 and 19, and the pool-fed
+// mixed draw on 2 shiaijo.
 //
 // The flag below is an EXPECTATION, not an assertion of faith:
 // orderingsDisagree measures it on the bracket the engine actually built and
@@ -129,11 +130,11 @@ var bracketNumberCases = []struct {
 	{state.CompFormatKnockout, 4, 1, false},
 	{state.CompFormatKnockout, 5, 1, false},
 	{state.CompFormatKnockout, 8, 1, false},
-	{state.CompFormatKnockout, 9, 1, false},
+	{state.CompFormatKnockout, 9, 1, true},
 	{state.CompFormatKnockout, 11, 1, false},
 	{state.CompFormatKnockout, 13, 1, false},
 	{state.CompFormatKnockout, 16, 1, false},
-	{state.CompFormatKnockout, 19, 1, false},
+	{state.CompFormatKnockout, 19, 1, true},
 	// Mixed preview brackets: pool-origin placeholders rather than players, and
 	// the shape the court-region draw actually produces on several shiaijo.
 	{state.CompFormatMixed, 40, 2, true},

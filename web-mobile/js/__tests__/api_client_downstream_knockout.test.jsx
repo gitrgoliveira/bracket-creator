@@ -273,6 +273,95 @@ describe('API.recordDecision: downstream_knockout_played (bc-cse)', () => {
   });
 });
 
+// bc-rawm: recordDecision mirrors recordScore's mp-dc52 Phase 3 preference
+// order for a 409 the eligibility gate returns -- reasonHuman, then reason,
+// then the bare code -- instead of the fallback `new Error(err.error ...)`
+// this branch used before, which surfaced the raw "ineligible_competitor" /
+// "already_ineligible" token with the server's actual sentence discarded.
+describe('API.recordDecision: ineligible_competitor / already_ineligible (bc-rawm)', () => {
+  let originalFetch;
+  afterEach(() => { if (originalFetch) global.fetch = originalFetch; });
+
+  it.each(['ineligible_competitor', 'already_ineligible'])('prefers reasonHuman for a 409 %s', async (code) => {
+    originalFetch = global.fetch;
+    global.fetch = vi.fn().mockResolvedValue({
+      ok: false,
+      status: 409,
+      json: async () => ({ error: code, reason: 'raw reason', reasonHuman: 'Tanaka Ichiro is already ineligible: withdrew earlier in Pool A.' }),
+    });
+
+    const err = await API.recordDecision('c1', 'm1', { decision: 'fusensho', decisionBy: 'aka' }, 'pw').then(
+      () => { throw new Error('expected a rejection'); },
+      (e) => e,
+    );
+    expect(err.message).toBe('Tanaka Ichiro is already ineligible: withdrew earlier in Pool A.');
+    expect(err.message).not.toBe(code);
+  });
+
+  it('falls back to reason, then the bare code, when reasonHuman is absent', async () => {
+    originalFetch = global.fetch;
+    global.fetch = vi.fn().mockResolvedValue({
+      ok: false,
+      status: 409,
+      json: async () => ({ error: 'already_ineligible', reason: 'raw reason only' }),
+    });
+    const err = await API.recordDecision('c1', 'm1', { decision: 'fusensho', decisionBy: 'aka' }, 'pw').then(
+      () => { throw new Error('expected a rejection'); },
+      (e) => e,
+    );
+    expect(err.message).toBe('raw reason only');
+  });
+
+  it('falls back to the bare code when neither reasonHuman nor reason is sent', async () => {
+    originalFetch = global.fetch;
+    global.fetch = vi.fn().mockResolvedValue({
+      ok: false,
+      status: 409,
+      json: async () => ({ error: 'already_ineligible' }),
+    });
+    const err = await API.recordDecision('c1', 'm1', { decision: 'fusensho', decisionBy: 'aka' }, 'pw').then(
+      () => { throw new Error('expected a rejection'); },
+      (e) => e,
+    );
+    expect(err.message).toBe('already_ineligible');
+  });
+});
+
+// bc-rawm: recordScore's 409 court_busy refusal is built into an operator
+// sentence via write_result.jsx's courtBusyMessage (naming the shiaijo and
+// the blocking match's operator label), never the bare "court_busy" token
+// the fallback `new Error(data.error || ...)` used to throw.
+describe('API.recordScore: court_busy (bc-rawm)', () => {
+  let originalFetch;
+  afterEach(() => { if (originalFetch) global.fetch = originalFetch; });
+
+  it('throws the operator sentence built from court + label, not the bare code', async () => {
+    originalFetch = global.fetch;
+    global.fetch = vi.fn().mockResolvedValue({
+      ok: false,
+      status: 409,
+      json: async () => ({ error: 'court_busy', court: 'A', matchId: 'm-blk', compId: 'c1', label: 'Pool A · Match 2' }),
+    });
+    const err = await API.recordScore('c1', 'm1', { status: 'completed' }, 'pw').then(
+      () => { throw new Error('expected a rejection'); },
+      (e) => e,
+    );
+    expect(err.message).toBe('Shiaijo A is running Pool A · Match 2. Finish it or send it back to the queue first.');
+    expect(err.message).not.toBe('court_busy');
+    expect(err.code).toBe('court_busy');
+    expect(err.court).toBe('A');
+    expect(err.matchId).toBe('m-blk');
+    expect(err.compId).toBe('c1');
+    expect(err.label).toBe('Pool A · Match 2');
+  });
+
+  // bc-cse: no "This shiaijo"/"another match" fallback -- respondCourtBusy
+  // (handlers_match.go) always sends both `court` and a `label`
+  // (matchLabelOrID falls back to the raw match id rather than omitting it),
+  // so the two fallback strings courtBusyMessage used to carry for a missing
+  // court/label were dead code and were removed with them.
+});
+
 // A POOL correction in a mixed competition: the same played refusal carries
 // qualifierChange (who moves), and a knockout match being fought answers with
 // the terminal downstream_knockout_running, whose thrown message is the

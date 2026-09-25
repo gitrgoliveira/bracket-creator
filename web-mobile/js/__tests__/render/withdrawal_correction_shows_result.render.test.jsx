@@ -4,14 +4,17 @@
 // and the score editors are such surfaces. Two gaps this pins:
 //   - the TEAM band read its verdict off the bouts, which the withdrawal
 //     ended, so a won match read "DRAW"; it now states the recorded winner
-//     and decision while the withdrawal is in force (IV/PW stay the
-//     bout-derived standings figures, as on the viewer card);
+//     and decision while the withdrawal is in force. IV/PW (bc-tmfn) now
+//     include a default-win CREDIT for every numbered bout the withdrawal
+//     left with no result of its own -- IV+1/PW+2 to the OTHER side from
+//     decisionBy, same as every other surface (team_default_credit.jsx) --
+//     on top of whatever WAS actually fought before the withdrawal landed;
 //   - neither editor put the Kiken/Fus. result mark beside the withdrawn
 //     side. It rides beside that side's name (WithdrawalMarkedName, from
 //     sideMarks + withdrawnKeyOf), on the inner side, never in the centre.
 
 import React from 'react';
-import { render, act, screen } from '@testing-library/react';
+import { render, act, screen, fireEvent } from '@testing-library/react';
 import { describe, it, expect, vi, beforeAll, afterAll, beforeEach } from 'vitest';
 import { installWindowStubs } from '../helpers/stub_globals.js';
 
@@ -111,9 +114,12 @@ describe('team editor: correcting a match a withdrawal ended', () => {
     await mount(teamWithdrawal());
     expect(screen.getByTestId('team-summary-result').textContent).toBe('SHIRO WIN');
     expect(screen.getByTestId('team-summary-decision').textContent).toBe('Kiken – Voluntary');
-    // IV/PW are the bout-derived standings figures, as on the viewer card.
+    // bc-tmfn: bout 1 was actually fought (aka/Kyoto won it: IV 1, PW 1).
+    // Bouts 2 and 3 (teamSize=3) carry no result of their own, so they are
+    // credited to shiro/Osaka -- the OTHER side from decisionBy="aka" --
+    // IV+1/PW+2 each: IV 2, PW 4.
     const stats = [...document.querySelectorAll('.team-summary__stats')].map((n) => n.textContent);
-    expect(stats).toEqual(['IV: 0 · PW: 0', 'IV: 1 · PW: 1']);
+    expect(stats).toEqual(['IV: 2 · PW: 4', 'IV: 1 · PW: 1']);
   });
 
   it('marks the withdrawn team beside its name, never in the centre', async () => {
@@ -139,6 +145,30 @@ describe('team editor: correcting a match a withdrawal ended', () => {
   });
 });
 
+// bc-cse: a match-level fusensho (the OTHER competitor already withdrew
+// elsewhere, this match defaults to the opponent) is inside withdrawalInForce
+// too, but sideMarks' fusensho arm puts "Fus." on the WINNER, not the loser --
+// the opposite of kiken/fusenpai. WithdrawalMarkedName has to place whichever
+// mark belongs to the rendered side, not always read .loser.
+describe('a match-level fusensho marks the winner, not the barred competitor', () => {
+  it('team editor: the credited team carries Fus., not the barred one', async () => {
+    await mount(teamWithdrawal({
+      decision: 'fusensho', decisionBy: 'aka',
+      winner: { id: 'team-osaka', name: 'Osaka' },
+    }));
+    expect(screen.getByTestId('team-summary-result').textContent).toBe('SHIRO WIN');
+    expectMarkBeside('shiro', 'Fus.');
+  });
+
+  it('individual editor: the credited competitor carries Fus., not the barred one', async () => {
+    await mount(individualWithdrawal({
+      decision: 'fusensho', decisionBy: 'shiro',
+      winner: { id: 'p-aoki', name: 'Aoki Taro' }, ipponsA: [], ipponsB: [],
+    }));
+    expectMarkBeside('aka', 'Fus.');
+  });
+});
+
 describe('individual editor: correcting a match a withdrawal ended', () => {
   it('marks the withdrawn competitor beside their name, never in the centre', async () => {
     await mount(individualWithdrawal());
@@ -157,5 +187,49 @@ describe('individual editor: correcting a match a withdrawal ended', () => {
     await mount(individualWithdrawal({ status: 'running', decision: '', decisionBy: '', winner: null, ipponsA: [] }));
     expect(screen.queryByTestId('withdrawal-mark-aka')).toBeNull();
     expect(screen.queryByTestId('withdrawal-mark-shiro')).toBeNull();
+  });
+});
+
+// bc-tmfn: DecisionPrompt (admin_scoring_shared.jsx) has no slot for extra
+// copy, so the consequence is stated beside it in admin_scoring_team.jsx
+// instead -- generically (the credited TEAM's name isn't known until the
+// operator picks a side inside the prompt's own radio), naming the concrete
+// bout count.
+describe('team editor: the withdrawal confirm states the default-win consequence', () => {
+  it('names the bout count once a decision kind is picked', async () => {
+    // Running, no decision yet: bout 1 fought, bouts 2-3 (teamSize=3) not.
+    await mount(teamWithdrawal({ status: 'running', decision: '', decisionBy: '', winner: null, ipponsB: [] }));
+    fireEvent.click(screen.getByTestId('scoring-modal-kiken-voluntary-button'));
+    const note = screen.getByTestId('decision-consequence-note');
+    expect(note.textContent).toContain('2–0');
+    expect(note.textContent).toContain('each of the 2 bouts');
+  });
+
+  // bc-cse: team_default_credit.jsx excludes kachinuki from the default-win
+  // credit on purpose (bouts are appended one at a time; the encounter ends
+  // on an explicit End match, never a match-level decision standing in for
+  // unplayed slots), so this note must stay silent there even with unscored
+  // bouts on the board -- it would otherwise promise a credit that never
+  // lands.
+  it('is silent on a kachinuki encounter, which the default-win credit excludes', async () => {
+    await mount(teamWithdrawal({
+      status: 'running', decision: '', decisionBy: '', winner: null, ipponsB: [],
+      teamMatchType: 'kachinuki',
+    }));
+    fireEvent.click(screen.getByTestId('scoring-modal-kiken-voluntary-button'));
+    expect(screen.queryByTestId('decision-consequence-note')).toBeNull();
+  });
+
+  it('is silent once every bout already has a result', async () => {
+    await mount(teamWithdrawal({
+      status: 'running', decision: '', decisionBy: '', winner: null, ipponsB: [],
+      subResults: [
+        { position: 1, sideA: '', sideB: '', ipponsA: ['M'], ipponsB: [], winner: 'Kyoto', decision: '' },
+        { position: 2, sideA: '', sideB: '', ipponsA: [], ipponsB: ['K'], winner: 'Osaka', decision: '' },
+        { position: 3, sideA: '', sideB: '', ipponsA: ['D'], ipponsB: [], winner: 'Kyoto', decision: '' },
+      ],
+    }));
+    fireEvent.click(screen.getByTestId('scoring-modal-kiken-voluntary-button'));
+    expect(screen.queryByTestId('decision-consequence-note')).toBeNull();
   });
 });

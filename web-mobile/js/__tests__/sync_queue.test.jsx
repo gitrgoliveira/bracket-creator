@@ -1298,6 +1298,50 @@ describe('_flushQueue: downstream_knockout_played 409 on a queued correction (bc
     });
 });
 
+// bc-cse: a queued SCORE write can be replayed after the shiaijo it wants has
+// since been taken by a different match -- the server's 409 court_busy, which
+// falls through the generic non-retryable-4xx drop branch (same as
+// downstream_knockout_played above). Pre-fix this reported the bare
+// "court_busy" token; it must report the operator sentence instead.
+describe('_flushQueue: court_busy 409 on a queued score write (bc-cse)', () => {
+    it('drops the entry and reports the shiaijo + blocking match, not the raw token', async () => {
+        const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+        mockFetch(() => Promise.reject(new TypeError('offline')));
+        await API.recordScore('c1', 'mcorr', { status: 'completed', winner: 'A' }, 'pw', null);
+        expect(API.hasPendingTerminalWrite('c1', 'mcorr')).toBe(true);
+
+        const failures = [];
+        const unsubFail = mod.subscribeTerminalWriteFailed((info) => failures.push(info));
+        const alerts = [];
+        const unsubAlert = mod.subscribeQueueAlert((a) => alerts.push(a));
+
+        mockFetch(() => Promise.resolve({
+            ok: false,
+            status: 409,
+            json: () => Promise.resolve({
+                error: 'court_busy', court: 'A', matchId: 'm-blk', compId: 'c1', label: 'Pool A · Match 2',
+            }),
+        }));
+        window.dispatchEvent(new Event('online'));
+        await tick(50);
+        unsubFail();
+        unsubAlert();
+        warnSpy.mockRestore();
+
+        expect(API.hasPendingTerminalWrite('c1', 'mcorr')).toBe(false);
+
+        expect(failures.length).toBeGreaterThanOrEqual(1);
+        expect(failures[0].reason).toBe(
+            'Shiaijo A is running Pool A · Match 2. Finish it or send it back to the queue first.'
+        );
+        expect(failures[0].reason).not.toBe('court_busy');
+
+        const rejected = alerts.filter((a) => a.kind === 'rejected');
+        expect(rejected.length).toBeGreaterThanOrEqual(1);
+        expect(rejected[0].detail).not.toBe('court_busy');
+    });
+});
+
 // mp-y3nk: a queued override the server LWW-dropped (applied:false) must trigger
 // a bracketResync notification so stale optimistic local bracket state is replaced.
 // The queue entry is drained regardless (retry cannot change the outcome).

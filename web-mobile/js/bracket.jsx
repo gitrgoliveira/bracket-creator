@@ -13,9 +13,12 @@
 const { useRef, useLayoutEffect: useLayoutEffectBC, useState: useStateBC, useEffect: useEffectBC } = React;
 
 import { DAIHYOSEN_POSITION } from './pool_ids.jsx';
+import { barredSides } from './ineligible_match.jsx';
+import { BarredChip } from './barred_chip.jsx';
 import { realIppons } from './result_slot.jsx';
 import { sameCompetitor } from './competitor_identity.jsx';
 import { NumberedName } from './numbered_name.jsx';
+import { creditedBoutSide, isTeamDefaultWinDecision } from './team_default_credit.jsx';
 
 // TermBC: kendo-glossary tooltip wrapper. Lazy lookup so the script
 // load order between glossary.jsx and this module doesn't matter.
@@ -223,8 +226,9 @@ const joinSp = (a, b) => [a, b].filter(Boolean).join(" ");
 // resultSlot in result_slot.jsx — a separate leaf; the dependency reasoning is
 // stated ONCE, in that file's header. Flat score strings have no slots, so
 // they concatenate instead and never call it.
-const placeMarks = (marks, firstWins, secondWins) =>
-  firstWins ? [marks.winner, marks.loser] : secondWins ? [marks.loser, marks.winner] : ["", ""];
+function placeMarks(marks, firstWins, secondWins) {
+  return firstWins ? [marks.winner, marks.loser] : secondWins ? [marks.loser, marks.winner] : ["", ""];
+}
 
 // isDrawResult: a result is a draw when the recorded decision OR the
 // client-derived score.type says hikiwake (quick-score paths set only
@@ -232,8 +236,9 @@ const placeMarks = (marks, firstWins, secondWins) =>
 const isDrawResult = (decision, score) => isHikiwakeBC(decision) || isHikiwakeBC(score?.type);
 
 // isDefaultWinBC: the decisions that award the match points without a
-// technique. Mirrors domain.IsDefaultWinDecisionStr (Go).
-const isDefaultWinBC = (d) => isKikenDecisionBC(d) || d === "fusenpai" || d === "fusensho";
+// technique. Delegates to team_default_credit.jsx's isTeamDefaultWinDecision,
+// THE one JS owner of this class (bc-cse) -- see that function's own comment.
+const isDefaultWinBC = isTeamDefaultWinDecision;
 
 // defaultWinMaru: the maru cells a default win awards — one "○" per point,
 // per the FIK Regulations (Article 32 and the Score Board appendix p.15:
@@ -278,16 +283,64 @@ function matchMiddleMark(match) {
 //   hantei   → winner "Ht"    (FIK 7-5 / 29-6: judges picked the winner)
 //   kiken    → loser  "Kiken" (the competitor who withdrew)
 //   fusenpai → loser  "Fus."  (the no-show)
-// `fusensho` (the per-bout default WIN) is deliberately absent here: the
-// viewer surfaces it via a separate bout badge. The Excel export has no
-// badges, so its SideMarks (internal/export/suffix.go) folds fusensho in as
-// a winner-side "Fus." — the one deliberate divergence between the mirrors.
+//   fusensho → winner "Fus."  (the default WIN names the present side)
+// Mirrors internal/export/suffix.go SideMarks exactly (CLAUDE.md documents
+// the pair as one mirrored rule). bc-tmfn removed the earlier fusensho gap
+// here: this surface used to omit the winner-side "Fus." mark on the theory
+// that "the viewer surfaces it via a separate bout badge", but no such badge
+// exists for a MATCH-LEVEL fusensho decision (only a per-bout team row's ○○
+// fill, which is a different thing), so a match-level default win used to
+// render with no mark on this surface at all. There is no divergence left to
+// document: a fusensho match now reads identically here and in the export.
 function sideMarks(decision, decidedByHantei) {
   let winner = "", loser = "";
   if (isKikenDecisionBC(decision)) loser = "Kiken";
   else if (decision === "fusenpai") loser = "Fus.";
-  if (decidedByHantei) winner = "Ht"; // nothing above sets winner (fusensho is a badge here)
+  else if (decision === "fusensho") winner = "Fus.";
+  if (decidedByHantei) winner = joinSp(winner, "Ht");
   return { winner, loser };
+}
+
+// teamMatchMarks: the match-level Kiken/Fus. mark for EACH side of a TEAM
+// match a default-win decision closed -- the same sideMarks + placeMarks
+// pattern MatchCard already applies to an individual match's score cell
+// (aWin/bWin via sameCompetitor, then placeMarks), generalized for a caller
+// that renders a side's NAME separately from its score cell (a list row, a
+// TV headline) rather than inline in a flat score string. THE one place this
+// composition lives (bc-tmfn): every consumer below calls this rather than
+// re-deriving its own copy.
+//
+// `isTeamRow` is the caller's OWN team-match signal (a subResults array, a
+// compKind check, whatever it already has) -- this function has no way to
+// tell an individual match's kiken from a team one, so it never guesses.
+// Without it, an ordinary INDIVIDUAL kiken/fusenpai match would get this
+// mark TWICE: once here, once already inline in its own matchScoreStr
+// (formatIpponsScore's sideMarks call), since teamIVPWScore is deliberately
+// free of marks and an individual score string is not.
+//
+// bc-cse: OPTIONAL. Four callers (admin_schedule_score_editor.jsx,
+// viewer_match.jsx, viewer_schedule.jsx, viewer_standings.jsx) computed the
+// exact same `Array.isArray(m.subResults) && m.subResults.length > 0` before
+// calling in, so that default now lives here instead and those four callers
+// pass nothing. A caller with a BETTER signal (viewer_match.jsx's own
+// compKind/teamSize check, display_scoreboard.jsx's competition-format
+// isTeamMatch prop) still passes it explicitly to override the default --
+// e.g. a genuine team match with an empty subResults array (nothing fought
+// yet) would otherwise read as non-team here.
+//
+// Returns {} for a non-team row, a not-yet-completed match, or a decision
+// sideMarks has nothing to say about (returns "" for both sides, same as
+// the individual case).
+function teamMatchMarks(match, isTeamRow) {
+  const teamRow = isTeamRow === undefined
+    ? Array.isArray(match?.subResults) && match.subResults.length > 0
+    : isTeamRow;
+  if (!teamRow || !match || match.status !== "completed") return { shiro: "", aka: "" };
+  const marks = sideMarks(match.decision, !!match.decidedByHantei);
+  const aWin = sameCompetitor(match.winner, match.sideA);
+  const bWin = sameCompetitor(match.winner, match.sideB);
+  const [aMark, bMark] = placeMarks(marks, aWin, bWin);
+  return { shiro: bMark, aka: aMark };
 }
 
 // winnerSideLR: which DISPLAY side won, under the SHIRO-left convention every
@@ -408,9 +461,22 @@ function teamIVScore(m) {
   if (!Array.isArray(subs) || subs.length === 0) return null;
   const aName = typeof m.sideA === "object" ? m.sideA?.name : m.sideA;
   const bName = typeof m.sideB === "object" ? m.sideB?.name : m.sideB;
+  // bc-tmfn: a team match a match-level default-win decision closed credits
+  // every numbered bout with no result of its own to the OTHER side from
+  // decisionBy -- see team_default_credit.jsx for the whole rule. `kachinuki`
+  // best-effort reads m.teamMatchType, a viewer-list enrichment not every
+  // caller of this fallback carries (see that file's header); when absent
+  // this treats the match as non-kachinuki, which only matters at all when
+  // m.teamResult is ALSO absent (the server's own count wins whenever
+  // present, and it is present on every live payload once the concurrent
+  // Go-side change lands).
+  const matchCtx = { status: m.status, decision: m.decision, decisionBy: m.decisionBy, kachinuki: m.teamMatchType === "kachinuki" };
   let ivA = 0, ivB = 0;
   for (const sub of subs) {
     if (!sub || sub.position <= DAIHYOSEN_POSITION) continue; // skip the daihyosen sentinel (-1) and any malformed negative position
+    const creditSide = creditedBoutSide(sub, matchCtx);
+    if (creditSide === "a") { ivA++; continue; }
+    if (creditSide === "b") { ivB++; continue; }
     const w = sub.winner;
     if (!w) continue;                        // hikiwake / undecided → no IV
     if (w === aName || w === sub.sideA) ivA++;
@@ -439,7 +505,7 @@ function teamIVPWScore(m) {
   return iv == null ? null : `IV ${iv}`;
 }
 
-const PlayerLine = React.memo(({ player, isWinner, side, showDojo, score, isTBD, isEngi, slotLabel, feederId }) => {
+const PlayerLine = React.memo(({ player, isWinner, side, showDojo, score, isTBD, isEngi, slotLabel, feederId, barred }) => {
   if (!player || isTBD) {
     return (
       <div className={`bc-side bc-side--empty bc-side--${side}`}>
@@ -475,7 +541,12 @@ const PlayerLine = React.memo(({ player, isWinner, side, showDojo, score, isTBD,
             anywhere, so cards stay uniformly short. */}
         {showDojo ? <span className="bc-dojo">{player.dojo || <span aria-hidden="true">{"\u00A0"}</span>}</span> : null}
       </div>
-      {score != null ? <span className="bc-score">{score}</span> : null}
+      {/* score is null for a scheduled match (nothing struck yet), so a barred
+          side (ineligible_match.jsx) takes that same results-column slot: a
+          sibling of .bc-name-wrap in this flex row, never inside .bc-name's own
+          ellipsis. Mirrors where a completed match's Kiken/Fus./Ht mark rides
+          (cardMarks in MatchCard); the two can never both apply to one side. */}
+      {score != null ? <span className="bc-score">{score}</span> : barred ? <BarredChip /> : null}
     </div>
   );
 });
@@ -516,6 +587,10 @@ const MatchCard = React.memo(({ match, variant, showDojo, onClick, highlighted, 
   // that side's score slot — the node's "results column". The meta strip
   // above carries only the middle marks (X / (E) / (DH)).
   const cardMarks = isDone ? sideMarks(match.decision, !!match.decidedByHantei) : { winner: "", loser: "" };
+  // A barred side (ineligible_match.jsx) has no score yet -- barredSides
+  // requires `status === "scheduled"`, cardMarks above requires "completed"
+  // -- so this never competes with cardMarks for the same results-column slot.
+  const { a: barredA, b: barredB } = barredSides(match);
   const [aMark, bMark] = placeMarks(cardMarks, aWin, bWin);
   // realIppons strips the "Ht" mark from the letters before joining: the mark
   // is re-attached separately via cardMarks/aMark/bMark (sideMarks + placeMarks),
@@ -559,9 +634,9 @@ const MatchCard = React.memo(({ match, variant, showDojo, onClick, highlighted, 
       </div>
       {/* feeders is [A, B]: hand each side ITS feeder so an unresolved slot can
           be named after the match that will actually fill it (see makeSlotLabeller). */}
-      <PlayerLine player={match.sideA} isWinner={aWin} side="a" showDojo={showDojo} score={aScore} isTBD={aTBD} isEngi={isEngi} slotLabel={slotLabel} feederId={(match.feeders || [])[0]} />
+      <PlayerLine player={match.sideA} isWinner={aWin} side="a" showDojo={showDojo} score={aScore} isTBD={aTBD} isEngi={isEngi} slotLabel={slotLabel} feederId={(match.feeders || [])[0]} barred={!!barredA} />
       <div className="bc-divider"></div>
-      <PlayerLine player={match.sideB} isWinner={bWin} side="b" showDojo={showDojo} score={bScore} isTBD={bTBD} isEngi={isEngi} slotLabel={slotLabel} feederId={(match.feeders || [])[1]} />
+      <PlayerLine player={match.sideB} isWinner={bWin} side="b" showDojo={showDojo} score={bScore} isTBD={bTBD} isEngi={isEngi} slotLabel={slotLabel} feederId={(match.feeders || [])[1]} barred={!!barredB} />
     </button>
   );
 });
@@ -1348,5 +1423,14 @@ window.enchoOn = enchoOn;
 window.matchMiddleMark = matchMiddleMark;
 window.winnerSideLR = winnerSideLR;
 window.sideLabel = sideLabel;
+// sideMarks/placeMarks: the same MatchCard pattern (which side gets which
+// result mark), exposed for the window-global consumers that place a
+// match-level Kiken/Fus. mark beside a withdrawn TEAM's name (bc-tmfn) --
+// VSchedItem/TWMatch/PoolNumberedMatchRow/the admin Scores row -- none of
+// which ES-import bracket.jsx (see those files' own window.matchScoreStr /
+// window.boutMiddle usage for the pre-existing pattern this follows).
+window.sideMarks = sideMarks;
+window.placeMarks = placeMarks;
+window.teamMatchMarks = teamMatchMarks;
 
-export { formatIpponsScore, enchoLabel, boutMiddle, defaultWinMaru, matchMiddleMark, sideMarks, winnerSideLR, sideLabel, roundLabel, bracketRoundLabel, teamIVScore, teamIVPWScore, engiFlagScore, matchScoreStr, matchStateCell, buildDisplayModel, computeMetaTops, bronzeUnderFinalStyle, PlayerLine, slotDisplayName, makeSlotLabeller, bracketSlotLabeller, MatchCard, BracketTree, elbowXFor, connectorPath };
+export { formatIpponsScore, enchoLabel, boutMiddle, defaultWinMaru, matchMiddleMark, sideMarks, placeMarks, teamMatchMarks, winnerSideLR, sideLabel, roundLabel, bracketRoundLabel, teamIVScore, teamIVPWScore, engiFlagScore, matchScoreStr, matchStateCell, buildDisplayModel, computeMetaTops, bronzeUnderFinalStyle, PlayerLine, slotDisplayName, makeSlotLabeller, bracketSlotLabeller, MatchCard, BracketTree, elbowXFor, connectorPath };

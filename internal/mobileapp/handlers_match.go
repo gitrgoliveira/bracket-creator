@@ -188,13 +188,122 @@ func annotateBracketQueuePositions(b *state.Bracket) {
 
 		counter := 0
 		for _, e := range entries {
-			if e.m.Status == state.MatchStatusScheduled {
+			// bc-cse: mirrors state.DeriveQueuePositions' own IneligibleSides
+			// skip -- a scheduled match with a currently barred side is not
+			// queued (position 0), so "Next up" and on-deck alerts skip it.
+			if e.m.Status == state.MatchStatusScheduled && e.m.IneligibleSides == nil {
 				counter++
 				e.m.QueuePosition = counter
 			} else {
 				e.m.QueuePosition = 0
 			}
 		}
+	}
+}
+
+// anyScheduledMatchHasBothSides reports whether poolMatches or bracket carry
+// at least one SCHEDULED match with both side ids stamped -- the ONLY shape
+// annotateIneligibleSides can ever act on (engine.BarredSides needs an id to
+// look anyone up). Gates the LoadCompetitorStatus read in the viewer
+// handlers behind it, so a competition with no scheduled match yet (or one
+// whose scheduled rows are all byes/unresolved feeders) never pays for a
+// status-file read it cannot use.
+func anyScheduledMatchHasBothSides(poolMatches []state.MatchResult, bracket *state.Bracket) bool {
+	hasBoth := func(status state.MatchStatus, idA, idB string) bool {
+		return status == state.MatchStatusScheduled && idA != "" && idB != ""
+	}
+	for i := range poolMatches {
+		if hasBoth(poolMatches[i].Status, poolMatches[i].SideAID, poolMatches[i].SideBID) {
+			return true
+		}
+	}
+	if bracket == nil {
+		return false
+	}
+	for ri := range bracket.Rounds {
+		for mi := range bracket.Rounds[ri] {
+			bm := &bracket.Rounds[ri][mi]
+			if hasBoth(bm.Status, bm.SideAID, bm.SideBID) {
+				return true
+			}
+		}
+	}
+	if bm := bracket.ThirdPlaceMatch; bm != nil && hasBoth(bm.Status, bm.SideAID, bm.SideBID) {
+		return true
+	}
+	return false
+}
+
+// annotateIneligibleSides stamps state.IneligibleSidesAnnotation (bc-cse) on
+// every SCHEDULED pool match and bracket match whose resolved side ids are
+// currently barred by a withdrawal recorded on a DIFFERENT match
+// (engine.BarredSides, the SAME check StartMatchTx gates a write on), so a
+// match LIST can grey/skip the row without attempting the write first.
+//
+// Read-only, request-time only, exactly like annotateQueuePositions: called
+// on the copy a viewer endpoint is about to serve, NEVER on a slice/bracket
+// destined for a save, which is what keeps the annotation off
+// pool-matches.csv and bracket.json (see the field's own doc comment,
+// models.go). MUST run BEFORE annotateQueuePositions/
+// annotateBracketQueuePositions, which read the stamp back to decide
+// whether a barred match counts toward the queue (position 0 for one).
+func annotateIneligibleSides(poolMatches []state.MatchResult, bracket *state.Bracket, statuses map[string]domain.CompetitorStatus) {
+	if len(statuses) == 0 {
+		return
+	}
+	stamp := func(status state.MatchStatus, matchID, sideAID, sideBID string) *state.IneligibleSidesAnnotation {
+		if status != state.MatchStatusScheduled {
+			return nil
+		}
+		a, b := engine.BarredSides(statuses, matchID, sideAID, sideBID)
+		if a == nil && b == nil {
+			return nil
+		}
+		// A side is stamped ONLY when its barring reason actually parses
+		// (SplitStatusReason's ok); Go's IneligibleSidesAnnotation.A/B carry
+		// `json:"...,omitempty"`, so an unparsed side left at its zero value
+		// "" is indistinguishable on the wire from one never barred at all.
+		// A caller that checks the annotation by nil-ness alone (this
+		// match's row exists, so it must be barred) would then disagree
+		// with one that checks the field VALUE (no "a"/"b" key present, so
+		// not barred) -- bc-cse: stamping an all-unparsed, still-non-nil
+		// {} annotation is exactly that trap. When NEITHER side's reason
+		// parses, the whole annotation is left nil so both kinds of caller
+		// agree the match is not barred.
+		out := &state.IneligibleSidesAnnotation{}
+		parsed := false
+		if a != nil {
+			if decision, _, ok := domain.SplitStatusReason(a.Reason); ok {
+				out.A = decision
+				parsed = true
+			}
+		}
+		if b != nil {
+			if decision, _, ok := domain.SplitStatusReason(b.Reason); ok {
+				out.B = decision
+				parsed = true
+			}
+		}
+		if !parsed {
+			return nil
+		}
+		return out
+	}
+	for i := range poolMatches {
+		m := &poolMatches[i]
+		m.IneligibleSides = stamp(m.Status, m.ID, m.SideAID, m.SideBID)
+	}
+	if bracket == nil {
+		return
+	}
+	for ri := range bracket.Rounds {
+		for mi := range bracket.Rounds[ri] {
+			bm := &bracket.Rounds[ri][mi]
+			bm.IneligibleSides = stamp(bm.Status, bm.ID, bm.SideAID, bm.SideBID)
+		}
+	}
+	if bm := bracket.ThirdPlaceMatch; bm != nil {
+		bm.IneligibleSides = stamp(bm.Status, bm.ID, bm.SideAID, bm.SideBID)
 	}
 }
 
@@ -683,9 +792,26 @@ func RegisterMatchHandlers(r *gin.RouterGroup, eng *engine.Engine, store Competi
 				bulkErr := scoreError{MatchID: results[i].ID, Error: err.Error()}
 				var downstreamPlayedErr *engine.DownstreamKnockoutPlayedError
 				var downstreamRunningErr *engine.DownstreamKnockoutRunningError
+				var alreadyIneligErr *engine.AlreadyIneligibleError
 				switch {
 				case errors.Is(err, engine.ErrMatchSuperseded):
 					bulkErr.Reason = "superseded"
+				case errors.As(err, &alreadyIneligErr):
+					// bc-rawm/bc-cse: this batch shape has no dedicated 409 to
+					// answer with, so the operator sentence rides in Error
+					// itself (same class of fix as the single-match 409 body):
+					// without this, Error was err.Error()'s raw
+					// `competitor "<uuid>" already ineligible (match ...)`,
+					// naming an internal id and no remedy. Only
+					// *AlreadyIneligibleError is reachable here, never
+					// *IneligibleCompetitorError: bulk-score never calls
+					// StartMatchTx/checkEligibilityExcludingMatch (the only
+					// producers of that type besides the simultaneity gate,
+					// which this write path also never reaches), only the K2/K3
+					// concurrent-withdrawal checks inside
+					// RecordMatchResultWithIneligibilityTx, which return this
+					// type alone.
+					bulkErr.Error = reasonHumanForBarredCompetitor(store, id, results[i].ID, alreadyIneligErr.PlayerID, alreadyIneligErr.Reason, alreadyIneligErr.MatchID, alreadyIneligErr.Decision)
 				case errors.Is(err, state.ErrCorruptOverrides):
 					// The pool requalification check reaches computeStandingsFrom,
 					// which loads overrides.json -- reachable per-entry here the
@@ -1044,9 +1170,11 @@ func RegisterMatchHandlers(r *gin.RouterGroup, eng *engine.Engine, store Competi
 
 	// POST /competitions/:id/matches/:mid/reopen
 	// Sanctioned "Reopen match" for a COMPLETED kachinuki team match
-	// (mp-gmcg, spec 006 decision 4), and since bc-tmfn for any completed
-	// match a withdrawal (kiken, fusenpai) decided, team or individual: the
-	// way to clear a withdrawal recorded by mistake (engine.ReopenMatch).
+	// (mp-gmcg, spec 006 decision 4), and since bc-tmfn (widened to a
+	// match-level fusensho by bc-cse) for any completed match decided by a
+	// withdrawal or default win (domain.IsDefaultWinDecisionStr: kiken,
+	// kiken-injury, fusenpai, or fusensho), team or individual: the way to
+	// clear one recorded by mistake (engine.ReopenMatch).
 	// Status back to running, match-level winner/decision cleared, fought
 	// bouts kept, so the operator scores what is left and finishes again. A
 	// dedicated endpoint rather than a score-write flag so the score path's
@@ -1132,16 +1260,34 @@ func RegisterMatchHandlers(r *gin.RouterGroup, eng *engine.Engine, store Competi
 			var validationErr *engine.ValidationError
 			var courtBusyErr *engine.CourtBusyError
 			switch {
-			case errors.Is(err, engine.ErrReopenNotCompleted),
-				errors.Is(err, engine.ErrReopenDownstreamFought):
-				c.JSON(http.StatusConflict, gin.H{"error": err.Error()})
+			case errors.Is(err, engine.ErrReopenNotCompleted):
+				// bc-rawm/bc-cse: operator sentence naming the TARGET match
+				// by its label, not the raw sentinel text.
+				c.JSON(http.StatusConflict, gin.H{"error": fmt.Sprintf("%s is not completed yet, so there is nothing to reopen.", engine.SentenceCase(matchLabelOrID(store, id, mid)))})
+			case respondIfDownstreamKnockoutRunning(c, err):
+				// bc-cse: someone is fighting the downstream match right
+				// now -- 409 downstream_knockout_running, the SAME shape
+				// the pool-requalification refusal already uses.
+			case respondIfReopenDownstreamResolved(c, err):
+				// bc-cse: a downstream match auto-completed by a bye, not
+				// by being fought -- 409 downstream_knockout_resolved,
+				// terminal (never confirmable with forceDownstreamReopen).
 			case respondIfDownstreamKnockoutPlayed(c, err):
 				// A downstream knockout match has its own result: the
 				// operator is told and may retry with forceDownstreamReopen.
+			case errors.Is(err, engine.ErrReopenDownstreamFought):
+				// Defensive backstop only (retractPropagatedWinner's
+				// re-check at the mutation point); the two typed errors
+				// above already raise for every case reachable through this
+				// door in practice. Kept mapped to a 409, not internalError,
+				// so a genuine internal inconsistency still fails the write
+				// rather than surfacing as a 500 the offline queue retries
+				// forever (mp-q8c6).
+				c.JSON(http.StatusConflict, gin.H{"error": err.Error()})
 			case errors.As(err, &courtBusyErr):
 				// Same 409 shape as the score path so clients have one
 				// court_busy branch to handle (mp-gmcg).
-				respondCourtBusy(c, courtBusyErr, "reopening this one")
+				respondCourtBusy(c, store, courtBusyErr, courtBusyRemedyReopen)
 			case errors.As(err, &notFoundErr):
 				c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
 			case errors.As(err, &validationErr):
@@ -1255,18 +1401,32 @@ func RegisterMatchHandlers(r *gin.RouterGroup, eng *engine.Engine, store Competi
 				// sentinel's "correct a completed bout" (which names no match and
 				// points at the wrong fix). Still a 409 — a raw fall-through would
 				// 500, as the sentinel is not a ValidationError/NotFound/CourtBusy.
-				c.JSON(http.StatusConflict, gin.H{"error": fmt.Sprintf("the blocking match %q finished on its own, so its court is now free — retry the reopen", body.BlockerMatchID)})
-			case errors.Is(err, engine.ErrReopenNotCompleted),
-				errors.Is(err, engine.ErrReopenDownstreamFought):
-				// These name a bad TARGET (not completed, or its result already
-				// fed a fought knockout). The requeue-and-reopen path pre-checks
-				// both read-only BEFORE the destructive revert
-				// (checkTargetReopenable), so in the common path the blocker keeps
-				// its live score. A /decision or /bulk-score write racing between
-				// that pre-check and the reopen's own in-tx re-check can still
-				// surface these post-revert (see the NARROWS comment in engine's
-				// RequeueBlockerAndReopen) — i.e. with the blocker already
-				// requeued; rare, and bracket integrity still holds via the re-check.
+				// bc-rawm/bc-cse: operator sentence naming the blocker by
+				// its label, no internal id, no em-dash.
+				blockerLabel := engine.SentenceCase(matchLabelOrID(store, body.BlockerCompID, body.BlockerMatchID))
+				c.JSON(http.StatusConflict, gin.H{"error": fmt.Sprintf("%s finished on its own, so its court is now free. Retry the reopen.", blockerLabel)})
+			case errors.Is(err, engine.ErrReopenNotCompleted):
+				// Names a bad TARGET (not completed). The requeue-and-reopen
+				// path pre-checks this read-only BEFORE the destructive
+				// revert (checkTargetReopenable), so in the common path the
+				// blocker keeps its live score. A /decision or /bulk-score
+				// write racing between that pre-check and the reopen's own
+				// in-tx re-check can still surface this post-revert (see the
+				// NARROWS comment in engine's RequeueBlockerAndReopen) --
+				// i.e. with the blocker already requeued; rare, and bracket
+				// integrity still holds via the re-check. bc-rawm/bc-cse:
+				// operator sentence naming the target by its label.
+				c.JSON(http.StatusConflict, gin.H{"error": fmt.Sprintf("%s is not completed yet, so there is nothing to reopen.", engine.SentenceCase(matchLabelOrID(store, id, mid)))})
+			case respondIfDownstreamKnockoutRunning(c, err):
+				// bc-cse: same pre-check timing note as ErrReopenNotCompleted
+				// above; someone is fighting the downstream match right now.
+			case respondIfReopenDownstreamResolved(c, err):
+				// bc-cse: same pre-check timing note; a downstream match
+				// auto-completed by a bye, not by being fought.
+			case errors.Is(err, engine.ErrReopenDownstreamFought):
+				// Defensive backstop only; see the plain-reopen handler's
+				// identical case for why this should not be reachable
+				// through this door in practice.
 				c.JSON(http.StatusConflict, gin.H{"error": err.Error()})
 			case respondIfDownstreamKnockoutPlayed(c, err):
 				// Refused BEFORE the revert (checkTargetReopenable runs first),
@@ -1274,7 +1434,7 @@ func RegisterMatchHandlers(r *gin.RouterGroup, eng *engine.Engine, store Competi
 				// with forceDownstreamReopen once they have confirmed.
 			case errors.As(err, &courtBusyErr):
 				// A match OTHER than the one we requeued still holds the court.
-				respondCourtBusy(c, courtBusyErr, "reopening this one")
+				respondCourtBusy(c, store, courtBusyErr, courtBusyRemedyReopen)
 			case errors.As(err, &notFoundErr):
 				c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
 			case errors.As(err, &validationErr):
@@ -1336,8 +1496,12 @@ func RegisterMatchHandlers(r *gin.RouterGroup, eng *engine.Engine, store Competi
 			var notFoundErr *engine.NotFoundError
 			var validationErr *engine.ValidationError
 			switch {
-			case errors.Is(err, engine.ErrNoRemovableBout), errors.Is(err, engine.ErrRemoveBoutNotRunning):
-				c.JSON(http.StatusConflict, gin.H{"error": err.Error()})
+			case errors.Is(err, engine.ErrNoRemovableBout):
+				// bc-rawm/bc-cse: operator sentence naming the match by its
+				// label, not the raw sentinel text.
+				c.JSON(http.StatusConflict, gin.H{"error": fmt.Sprintf("%s has no unscored bout to remove; only an empty appended bout can be removed.", engine.SentenceCase(matchLabelOrID(store, id, mid)))})
+			case errors.Is(err, engine.ErrRemoveBoutNotRunning):
+				c.JSON(http.StatusConflict, gin.H{"error": fmt.Sprintf("%s is not running; reopen it before removing a bout.", engine.SentenceCase(matchLabelOrID(store, id, mid)))})
 			case errors.As(err, &notFoundErr):
 				c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
 			case errors.As(err, &validationErr):
@@ -1800,19 +1964,40 @@ func respondClockSkew(c *gin.Context, serverNowMs, aheadMs int64) {
 	})
 }
 
+// courtBusyRemedyStart / courtBusyRemedyReopen (bc-cse item 11e) are
+// respondCourtBusy's two `remedy` strings, each used at two call sites
+// (score start's two doors, the reopen family's two doors); named once so
+// the pair cannot drift apart the way a hand-copied literal eventually does.
+const (
+	courtBusyRemedyStart  = "Finish that match before starting a new one."
+	courtBusyRemedyReopen = "Clear its score, queue it, and reopen this one instead."
+)
+
 // respondCourtBusy writes the shared 409 court_busy body. The court-
 // exclusivity gate fires on three paths (score start, score reopen, and
-// kachinuki reopen); `action` names what the operator was attempting (e.g.
-// "starting a new one") so the sentence reads naturally. Keeping the
-// {error,court,matchId,compId,message} shape in ONE place means every client
-// court_busy branch stays in lockstep when the wire contract moves.
-func respondCourtBusy(c *gin.Context, err *engine.CourtBusyError, action string) {
+// kachinuki reopen); `remedy` names the one-step fix for THIS caller
+// (courtBusyRemedyStart or courtBusyRemedyReopen above) so the message reads
+// naturally for whichever action was attempted. Keeping the
+// {error,court,matchId,compId,label,message} shape in ONE place means every
+// client court_busy branch stays in lockstep when the wire contract moves.
+func respondCourtBusy(c *gin.Context, store CompetitionStore, err *engine.CourtBusyError, remedy string) {
+	// bc-cse: err.CompID is the BLOCKING match's own competition, which for
+	// a cross-competition conflict (courts are tournament-global) is not
+	// the competition this request targets -- the label must be resolved
+	// against it, never the target's.
+	label := matchLabelOrID(store, err.CompID, err.MatchID)
 	c.JSON(http.StatusConflict, gin.H{
 		"error":   "court_busy",
 		"court":   err.Court,
 		"matchId": err.MatchID,
 		"compId":  err.CompID,
-		"message": fmt.Sprintf("Court %s already has a running match (%s). Finish that match before %s.", err.Court, err.MatchID, action),
+		"label":   label,
+		// bc-rawm/bc-cse: the message names no internal id (the label
+		// stands in for it) and states the actual remedy for THIS caller --
+		// "reopening this one" used to say "finish that match", which is
+		// wrong for a reopen: the panel's own remedy is "Clear its score,
+		// queue it, and reopen", not finishing the blocker.
+		"message": fmt.Sprintf("Shiaijo %s already has %s running now. %s", err.Court, label, remedy),
 	})
 }
 
@@ -2494,7 +2679,7 @@ func registerScoreHandler(r *gin.RouterGroup, eng ScoringEngine, store Competiti
 			// infrastructure itself (WAL commit failure, etc.).
 			var courtBusyErr *engine.CourtBusyError
 			if errors.As(txErr, &courtBusyErr) {
-				respondCourtBusy(c, courtBusyErr, "starting a new one")
+				respondCourtBusy(c, store, courtBusyErr, courtBusyRemedyStart)
 				return
 			}
 			var notFoundErr *engine.NotFoundError
@@ -2565,14 +2750,33 @@ func registerScoreHandler(r *gin.RouterGroup, eng ScoringEngine, store Competiti
 			}
 			var ineligErr *engine.IneligibleCompetitorError
 			if errors.As(engErr, &ineligErr) {
-				// U1: reasonHuman alongside the raw kendo-term reason
-				// so operator UIs can show "withdrew from match m_12"
-				// instead of "kiken at m_12".
+				// bc-rawm/bc-cse: reasonHuman is ONE operator sentence, never
+				// the raw kendo-term reason. Simultaneous is how this error
+				// type tells its two producers apart: the simultaneity gate
+				// (checkSimultaneousMatchTx) already builds a complete
+				// operator sentence into Reason itself, while a barred-status
+				// refusal (engine.BarredSides) needs the shared builder to
+				// name the match and the remedy -- even when that refusal's
+				// own MatchID is empty (a status set directly via
+				// POST /competitor-status, with no match tied to it), which
+				// is why MatchID emptiness alone can no longer be the test.
+				reasonHuman := ineligErr.Reason
+				switch {
+				case ineligErr.Simultaneous:
+					// reasonHuman stays ineligErr.Reason, already complete.
+				case ineligErr.BothSidesBarred:
+					// bc-cse item 10: neither side has an opponent to hand the
+					// default win to, so the single-sided builder's remedy
+					// clauses do not apply.
+					reasonHuman = bothSidesBarredReasonHuman(store, id, mid)
+				default:
+					reasonHuman = reasonHumanForBarredCompetitor(store, id, mid, ineligErr.PlayerID, ineligErr.Reason, ineligErr.MatchID, ineligErr.Decision)
+				}
 				c.JSON(http.StatusConflict, gin.H{
 					"error":       "ineligible_competitor",
 					"playerId":    ineligErr.PlayerID,
 					"reason":      ineligErr.Reason,
-					"reasonHuman": domain.ResolveReasonHuman(ineligErr.Reason),
+					"reasonHuman": reasonHuman,
 				})
 				return
 			}
@@ -2583,13 +2787,13 @@ func registerScoreHandler(r *gin.RouterGroup, eng ScoringEngine, store Competiti
 					"playerId":    alreadyIneligErr.PlayerID,
 					"matchId":     alreadyIneligErr.MatchID,
 					"reason":      alreadyIneligErr.Reason,
-					"reasonHuman": domain.ResolveReasonHuman(alreadyIneligErr.Reason),
+					"reasonHuman": reasonHumanForBarredCompetitor(store, id, mid, alreadyIneligErr.PlayerID, alreadyIneligErr.Reason, alreadyIneligErr.MatchID, alreadyIneligErr.Decision),
 				})
 				return
 			}
 			var courtBusyErr *engine.CourtBusyError
 			if errors.As(engErr, &courtBusyErr) {
-				respondCourtBusy(c, courtBusyErr, "starting a new one")
+				respondCourtBusy(c, store, courtBusyErr, courtBusyRemedyStart)
 				return
 			}
 			// A pool correction that would move a qualifier out of a knockout

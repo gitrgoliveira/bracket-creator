@@ -14,11 +14,12 @@
 
 import { writeDidNotLand } from './write_result.jsx';
 import { SideLabel } from './side_cell.jsx';
-import { useTeamLineups, TeamScoreboard, IndividualScore, numberedParts } from './match_scoreboard.jsx';
+import { useTeamLineups, TeamScoreboard, IndividualScore, numberedParts, teamNameMark } from './match_scoreboard.jsx';
 import { NumberedName } from './numbered_name.jsx';
 import { TermV, poolLabel } from './viewer_utils.jsx';
 import { DAIHYOSEN_POSITION } from './pool_ids.jsx';
 import { sameCompetitor } from './competitor_identity.jsx';
+import { barredNameMark } from './barred_chip.jsx';
 
 const { useState, useRef: useRefV, useCallback } = React;
 
@@ -119,6 +120,17 @@ export function MatchDetailCard({ match, onClose, escapeToClose = true, slotLabe
   // TeamScoreboard additionally gates it on the match actually being tied.
   const showDH = isTeam && (match.subResults || []).some(s => s.position === DAIHYOSEN_POSITION);
 
+  // bc-tmfn: the match-level Kiken/Fus. mark for a TEAM match a default-win
+  // decision closed, beside the withdrawn team's name in the §277 summary
+  // row (TeamScoreboard). teamMatchMarks (bracket.jsx) is the ONE owner of
+  // this composition (sameCompetitor + sideMarks + placeMarks, the same
+  // pattern MatchCard already applies); reached via window like every other
+  // bracket.jsx primitive this file uses (see result_slot.jsx's header for
+  // the dependency reasoning). TeamScoreboard itself never learns this rule:
+  // it only renders the strings handed to it (team_default_credit.jsx's
+  // header states why).
+  const { shiro: teamShiroMark, aka: teamAkaMark } = window.teamMatchMarks ? window.teamMatchMarks(match, isTeam) : { shiro: "", aka: "" };
+
   return (
     <div className="match-detail-card">
       <div className="match-detail-card__head">
@@ -168,7 +180,9 @@ export function MatchDetailCard({ match, onClose, escapeToClose = true, slotLabe
             matchSideB={match.sideB?.name || (typeof match.sideB === "string" ? match.sideB : "")}
             squadA={squadA} squadB={squadB}
             numberA={match.sideA?.number || ""} numberB={match.sideB?.number || ""}
-            kachinuki={match.teamMatchType === "kachinuki"} />
+            kachinuki={match.teamMatchType === "kachinuki"}
+            decision={match.decision} decisionBy={match.decisionBy} status={match.status}
+            shiroMark={teamShiroMark} akaMark={teamAkaMark} />
         : <IndividualScore match={match} variant="card" showNames showDojo
             shiroName={bNameBare} akaName={aNameBare} />}
     </div>
@@ -193,6 +207,14 @@ export const VSchedItem = React.memo(({ m, tweaks, showCompetition, onClick, hig
   const scoreStr = (m.status === "completed" || isRunning)
     ? (window.matchScoreStr(m) || null)
     : null;
+  // bc-tmfn: a TEAM row's score cell (window.matchScoreStr → teamIVPWScore)
+  // is deliberately free of marks, so the match-level Kiken/Fus. a default
+  // win closed a team match with rides beside the withdrawn team's NAME
+  // instead — the ONE shared computation (window.teamMatchMarks,
+  // bracket.jsx), which derives its own team-row signal from m.subResults
+  // (bc-cse) so an individual match's own mark, already inline in its
+  // scoreStr above, is never doubled here.
+  const { shiro: teamShiroMark, aka: teamAkaMark } = window.teamMatchMarks ? window.teamMatchMarks(m) : { shiro: "", aka: "" };
   // FR-025: queue position is 1-indexed per court for scheduled matches;
   // running/completed are 0 (set server-side, omitempty in JSON → undefined
   // on older payloads). Treat null/undefined/0 as "don't render" so the UI
@@ -256,8 +278,15 @@ export const VSchedItem = React.memo(({ m, tweaks, showCompetition, onClick, hig
               an inline-flex box whose TEXT child carries the ellipsis and
               `min-width: 0`, so the name shrinks inside the flex row and the
               content never overflows `.n` for its `overflow: hidden` to clip.
-              Shiro is unaffected either way, its number being first. */}
-          <span className="n"><NumberedName side="shiro" clip {...numberedParts(m.sideB, undefined)} /></span>
+              Shiro is unaffected either way, its number being first.
+
+              bc-cse: msb-name--labelled turns `.n` itself into a flex row for
+              the SAME reason, one level out -- the Kiken/Fus./Withdrawn mark
+              teamNameMark/barredNameMark add is a SIBLING of the NumberedName
+              above, so without it a long name clipped that mark away (or, on
+              Aka, pushed its leading mark past the visible width) exactly as
+              the bare number once did. */}
+          <span className="n msb-name--labelled">{barredNameMark(m, "shiro", teamNameMark("shiro", teamShiroMark, <NumberedName side="shiro" clip {...numberedParts(m.sideB, undefined)} />))}</span>
           {tweaks.showDojo && m.sideB?.dojo ? <span className="d">{m.sideB.dojo}</span> : null}
         </div>
         {/* No score string (pending, or completed with no recorded cells) →
@@ -283,7 +312,7 @@ export const VSchedItem = React.memo(({ m, tweaks, showCompetition, onClick, hig
         )}
         <div className={`vsched-item__side vsched-item__side--aka ${aWin ? "vsched-item__side--w" : ""}`}>
           <SideLabel side="aka" />
-          <span className="n"><NumberedName side="aka" clip {...numberedParts(m.sideA, undefined)} /></span>
+          <span className="n msb-name--labelled">{barredNameMark(m, "aka", teamNameMark("aka", teamAkaMark, <NumberedName side="aka" clip {...numberedParts(m.sideA, undefined)} />))}</span>
           {tweaks.showDojo && m.sideA?.dojo ? <span className="d">{m.sideA.dojo}</span> : null}
         </div>
       </div>

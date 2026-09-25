@@ -474,3 +474,106 @@ func TestFindBestLineupAny_TieBreakDeterminism(t *testing.T) {
 		}
 	})
 }
+
+// bc-tmfn: a roster replace that drops a team must prune that team's
+// lineups.yaml entries too, the lineup sibling of
+// TestSaveParticipants_PrunesOrphanedTeamMembers (squad_test.go). A team
+// that stays (same id) must keep its lineup.
+func TestSaveParticipants_PrunesOrphanedTeamLineups(t *testing.T) {
+	s, id := newTeamMemberTestStore(t, "team", 5, false)
+	require.NoError(t, s.SaveParticipants(id, []domain.Player{
+		{Name: "Team Alpha", Dojo: "Alpha Dojo"},
+		{Name: "Team Beta", Dojo: "Beta Dojo"},
+	}))
+	stored, err := s.LoadParticipants(id, false)
+	require.NoError(t, err)
+	require.Len(t, stored, 2)
+	var alphaID, betaID string
+	for _, p := range stored {
+		switch p.Name {
+		case "Team Alpha":
+			alphaID = p.ID
+		case "Team Beta":
+			betaID = p.ID
+		}
+	}
+	require.NotEmpty(t, alphaID)
+	require.NotEmpty(t, betaID)
+
+	require.NoError(t, s.SetTeamLineup(id, fiveStarter(alphaID, 0), 5))
+	require.NoError(t, s.SetTeamLineup(id, fiveStarter(betaID, 0), 5))
+
+	before, err := s.LoadTeamLineups(id)
+	require.NoError(t, err)
+	require.Len(t, before, 2, "both teams' lineups must be recorded")
+
+	// Replace the roster, dropping Team Beta and keeping Team Alpha under
+	// its SAME id.
+	require.NoError(t, s.SaveParticipants(id, []domain.Player{
+		{ID: alphaID, Name: "Team Alpha", Dojo: "Alpha Dojo"},
+	}))
+
+	after, err := s.LoadTeamLineups(id)
+	require.NoError(t, err)
+	require.Len(t, after, 1, "Team Beta's lineup must be pruned; Team Alpha's must survive")
+	_, ok := after[teamLineupKey(alphaID, 0)]
+	assert.True(t, ok, "Team Alpha's lineup must still be keyed under its own id")
+	_, ok = after[teamLineupKey(betaID, 0)]
+	assert.False(t, ok, "Team Beta's lineup key must be gone")
+}
+
+// bc-tmfn follow-up: the lineup sibling of
+// TestSaveParticipants_DoesNotPruneTeamMembersOnceStarted (squad_test.go).
+// Once a draw exists, a fought bout can resolve a lineup position by member
+// id and the roster stays editable after the start by ruling (bc-pnum
+// ruling 1), so a roster replace on a STARTED competition must NOT prune a
+// removed team's lineups.yaml entry.
+func TestSaveParticipants_DoesNotPruneTeamLineupsOnceStarted(t *testing.T) {
+	s, id := newTeamMemberTestStore(t, "team", 5, false)
+	require.NoError(t, s.SaveParticipants(id, []domain.Player{
+		{Name: "Team Alpha", Dojo: "Alpha Dojo"},
+		{Name: "Team Beta", Dojo: "Beta Dojo"},
+	}))
+	stored, err := s.LoadParticipants(id, false)
+	require.NoError(t, err)
+	require.Len(t, stored, 2)
+	var alphaID, betaID string
+	for _, p := range stored {
+		switch p.Name {
+		case "Team Alpha":
+			alphaID = p.ID
+		case "Team Beta":
+			betaID = p.ID
+		}
+	}
+	require.NotEmpty(t, alphaID)
+	require.NotEmpty(t, betaID)
+
+	require.NoError(t, s.SetTeamLineup(id, fiveStarter(alphaID, 0), 5))
+	require.NoError(t, s.SetTeamLineup(id, fiveStarter(betaID, 0), 5))
+
+	before, err := s.LoadTeamLineups(id)
+	require.NoError(t, err)
+	require.Len(t, before, 2, "both teams' lineups must be recorded")
+
+	// Move the competition past setup, as a generated draw and a started
+	// competition would (e.g. pools).
+	comp, err := s.LoadCompetition(id)
+	require.NoError(t, err)
+	comp.Status = CompStatusPools
+	require.NoError(t, s.SaveCompetition(comp))
+
+	// Replace the roster, dropping Team Beta and keeping Team Alpha under
+	// its SAME id.
+	require.NoError(t, s.SaveParticipants(id, []domain.Player{
+		{ID: alphaID, Name: "Team Alpha", Dojo: "Alpha Dojo"},
+	}))
+
+	after, err := s.LoadTeamLineups(id)
+	require.NoError(t, err)
+	require.Len(t, after, 2, "Team Beta's lineup must survive once a draw exists: a fought bout may still reference it by id, so the prune must not run")
+	_, ok := after[teamLineupKey(alphaID, 0)]
+	assert.True(t, ok, "Team Alpha's lineup must still be present")
+	_, ok = after[teamLineupKey(betaID, 0)]
+	assert.True(t, ok, "Team Beta's lineup must still be present; the prune must not run once a draw exists")
+}

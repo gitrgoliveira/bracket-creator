@@ -54,7 +54,12 @@ func TestWithdrawalRemoved_DecisionReplacingATeamWithdrawalRestores(t *testing.T
 			assert.Equal(t, wrTeamAID, status.PlayerID)
 			assert.True(t, status.Eligible)
 			assert.True(t, wrEligible(t, store, compID, wrTeamAID), "a replaced withdrawal bars nobody")
-			require.Len(t, m.SubResults, 1, "the bout fought before it survives (preserveLoserScore)")
+			// bc-tmfn follow-up: seedPoolWithdrawal's own kiken-voluntary
+			// decision already padded bouts 2 and 3 (TeamSize 3, only bout 1
+			// was ever fought; state.PadDefaultWinBoutPositions), and that
+			// padded shape is inherited here via preserveLoserScore.
+			require.Len(t, m.SubResults, 3, "the bout fought before it survives (preserveLoserScore), plus the padded rows 2/3")
+			assert.Equal(t, []string{"M"}, m.SubResults[0].IpponsA, "the fought bout is unchanged")
 		})
 	}
 }

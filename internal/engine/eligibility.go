@@ -24,6 +24,35 @@ var ErrIneligibleCompetitor = errors.New("ineligible competitor")
 type IneligibleCompetitorError struct {
 	PlayerID string
 	Reason   string
+	// MatchID and Decision (bc-cse/bc-rawm) describe the CompetitorStatus
+	// record that barred PlayerID: the match they were barred IN (an
+	// operator label, via engine.OperatorMatchLabel, names it on the wire)
+	// and which withdrawal decision recorded it (domain.Decision, e.g.
+	// "kiken-voluntary"). Populated wherever this error is constructed from
+	// a barred status (BarredSides). MatchID may legitimately be empty even
+	// for a barred-status producer: a status set directly via
+	// POST /competitor-status carries no matchId. So MatchID alone cannot
+	// tell that producer apart from the OTHER producer, the simultaneity
+	// gate (checkSimultaneousMatchTx), which is not about a barred status at
+	// all -- Simultaneous is the explicit discriminator a handler checks
+	// instead (see reasonHumanForBarredCompetitor, mobileapp/errors.go).
+	MatchID  string
+	Decision string
+	// Simultaneous is true ONLY when this error was produced by the
+	// simultaneity gate (checkSimultaneousMatchTx), whose Reason is already
+	// a complete operator sentence. False (including for a barred-status
+	// refusal with no recorded MatchID) for every other producer, which
+	// needs reasonHumanForBarredCompetitor to build one instead of a
+	// handler echoing a raw, possibly free-text Reason to the operator.
+	Simultaneous bool
+	// BothSidesBarred is true when eligibilityErrorForSides found BOTH
+	// sides barred, not just the one this error otherwise names (bc-cse
+	// item 10). PlayerID/Reason/MatchID/Decision still describe side A
+	// alone (the tiebreak eligibilityErrorForSides has always used), but a
+	// handler checking this flag can build the "Neither X nor Y can fight"
+	// sentence instead of naming one side and silently dropping the other's
+	// own bar.
+	BothSidesBarred bool
 }
 
 func (e *IneligibleCompetitorError) Error() string {
@@ -70,10 +99,106 @@ type AlreadyIneligibleError struct {
 	PlayerID string
 	MatchID  string
 	Reason   string
+	// Decision mirrors IneligibleCompetitorError's own field (bc-cse),
+	// populated the same way from the barred status: the withdrawal
+	// decision that recorded MatchID's ineligibility. Both errors share ONE
+	// operator-sentence builder (reasonHumanForBarredCompetitor,
+	// mobileapp/errors.go), which needs the same facts from either. Always
+	// produced from a barred status with a real MatchID (that IS the point
+	// of this error: the loser is already ineligible from a DIFFERENT
+	// match), so unlike IneligibleCompetitorError this type carries no
+	// Simultaneous discriminator.
+	Decision string
 }
 
 func (e *AlreadyIneligibleError) Error() string {
 	return fmt.Sprintf("competitor %q already ineligible (match %s)", e.PlayerID, e.MatchID)
+}
+
+// BarredSides reports which of sideAID/sideBID currently carry a
+// CompetitorStatus{Eligible: false} recorded by a match OTHER than matchID
+// -- the "not eligible AND the status was recorded by a different match"
+// check, extracted to ONE place (bc-cse) from what used to be three
+// hand-copied loops: StartMatchTx (scoring_tx.go), checkEligibilityExcludingMatch
+// (below), and the mobileapp ineligibleSides read-time annotation
+// (annotateIneligibleSides, handlers_match.go), which needs the SAME
+// per-side answer to stamp a scheduled match without gating a write.
+//
+// A side is barred when it carries a non-empty id, a status entry exists
+// for it, that status is Eligible:false, AND the status's own MatchID does
+// not equal matchID -- the undo-path exemption (checkEligibilityExcludingMatch's
+// prior contract, and StartMatchTx's): a match may always be re-scored even
+// when ITS OWN prior kiken/fusenpai is what marked a participant ineligible.
+// a/b are independent: either, both, or neither may be non-nil. Returns a
+// COPY of the stored status (never an alias into the caller's map), so a
+// caller may safely hold onto it after the map goes out of scope.
+func BarredSides(statuses map[string]domain.CompetitorStatus, matchID, sideAID, sideBID string) (a, b *domain.CompetitorStatus) {
+	barred := func(pid string) *domain.CompetitorStatus {
+		if pid == "" {
+			return nil
+		}
+		if st, ok := statuses[pid]; ok && !st.Eligible && st.MatchID != matchID {
+			out := st
+			return &out
+		}
+		return nil
+	}
+	return barred(sideAID), barred(sideBID)
+}
+
+// eligibilityErrorForSides extracts (sideAID, sideBID) from ids -- always
+// exactly [sideAID, sideBID] from every caller's own participant-id
+// resolver, handled defensively rather than assumed to be length 2 -- and
+// applies BarredSides against matchID, returning *IneligibleCompetitorError
+// for the first barred side, A before B. Shared by StartMatchTx and
+// checkEligibilityExcludingMatch, the tx and non-tx pre-flight eligibility
+// gates, so the extraction and A-then-B ordering has one owner.
+func eligibilityErrorForSides(statuses map[string]domain.CompetitorStatus, matchID string, ids []string) error {
+	var sideAID, sideBID string
+	if len(ids) > 0 {
+		sideAID = ids[0]
+	}
+	if len(ids) > 1 {
+		sideBID = ids[1]
+	}
+	a, b := BarredSides(statuses, matchID, sideAID, sideBID)
+	if a != nil {
+		errA := ineligibleCompetitorErrorFor(sideAID, a)
+		errA.BothSidesBarred = b != nil
+		return errA
+	}
+	if b != nil {
+		return ineligibleCompetitorErrorFor(sideBID, b)
+	}
+	return nil
+}
+
+// ineligibleCompetitorErrorFor builds *IneligibleCompetitorError from a
+// barred status entry (a BarredSides return value), the ONE construction
+// site for this error from a barred status, so MatchID/Decision can never
+// drift out of sync with Reason at a hand-copied call site. Simultaneous is
+// left at its zero value (false): this producer is never the simultaneity
+// gate. st must be non-nil.
+func ineligibleCompetitorErrorFor(playerID string, st *domain.CompetitorStatus) *IneligibleCompetitorError {
+	decision, _, _ := domain.SplitStatusReason(st.Reason)
+	return &IneligibleCompetitorError{
+		PlayerID: playerID,
+		Reason:   st.Reason,
+		MatchID:  st.MatchID,
+		Decision: decision,
+	}
+}
+
+// alreadyIneligibleErrorFor is ineligibleCompetitorErrorFor's twin for
+// *AlreadyIneligibleError. st must be non-nil.
+func alreadyIneligibleErrorFor(playerID string, st *domain.CompetitorStatus) *AlreadyIneligibleError {
+	decision, _, _ := domain.SplitStatusReason(st.Reason)
+	return &AlreadyIneligibleError{
+		PlayerID: playerID,
+		MatchID:  st.MatchID,
+		Reason:   st.Reason,
+		Decision: decision,
+	}
 }
 
 // participantIDByName resolves name to a participant id against compID's
@@ -160,12 +285,13 @@ func (e *Engine) checkConcurrentIneligibility(h state.StoreTx, compID, matchID, 
 		log.Printf("engine: checkConcurrentIneligibility LoadCompetitorStatus compId=%s: %v (T105 guard skipped)", compID, err)
 		return nil
 	}
-	if st, ok := statuses[playerID]; ok && !st.Eligible && st.MatchID != matchID {
-		return &AlreadyIneligibleError{
-			PlayerID: playerID,
-			MatchID:  st.MatchID,
-			Reason:   st.Reason,
-		}
+	// This call site has only ONE candidate, not two match sides, so it
+	// passes playerID as sideA and "" as sideB: BarredSides is a per-side
+	// check and its sideB arm always returns nil for an empty id, so the
+	// A-side return is the only one that can ever fire here.
+	barred, _ := BarredSides(statuses, matchID, playerID, "")
+	if barred != nil {
+		return alreadyIneligibleErrorFor(playerID, barred)
 	}
 	return nil
 }
@@ -176,22 +302,6 @@ func (e *Engine) checkConcurrentIneligibility(h state.StoreTx, compID, matchID, 
 // the store, which means default-eligible per FR-034).
 //
 // FR-035.
-func (e *Engine) CheckEligibility(compID string, playerIDs []string) error {
-	statuses, err := e.store.LoadCompetitorStatus(compID)
-	if err != nil {
-		return err
-	}
-	for _, pid := range playerIDs {
-		if pid == "" {
-			continue
-		}
-		if st, ok := statuses[pid]; ok && !st.Eligible {
-			return &IneligibleCompetitorError{PlayerID: pid, Reason: st.Reason}
-		}
-	}
-	return nil
-}
-
 // StartMatch gates the scheduled → running transition by checking
 // every participant's competitor-status and ensuring that no participant
 // is already Running in a different match within the same competition
@@ -337,15 +447,7 @@ func (e *Engine) checkEligibilityExcludingMatch(compID string, playerIDs []strin
 	if err != nil {
 		return err
 	}
-	for _, pid := range playerIDs {
-		if pid == "" {
-			continue
-		}
-		if st, ok := statuses[pid]; ok && !st.Eligible && st.MatchID != excludeMatchID {
-			return &IneligibleCompetitorError{PlayerID: pid, Reason: st.Reason}
-		}
-	}
-	return nil
+	return eligibilityErrorForSides(statuses, excludeMatchID, playerIDs)
 }
 
 // RecordDecision auto-fills the scoreline from decision/decisionBy/encho
@@ -794,12 +896,11 @@ func (e *Engine) recordIneligibilityFromDecision(h state.StoreTx, compID, matchI
 	if err != nil {
 		return nil, err
 	}
-	if st, ok := statuses[playerID]; ok && !st.Eligible && st.MatchID != matchID {
-		return nil, &AlreadyIneligibleError{
-			PlayerID: playerID,
-			MatchID:  st.MatchID,
-			Reason:   st.Reason,
-		}
+	// This call site has only ONE candidate, not two match sides, so it
+	// passes playerID as sideA and "" as sideB (BarredSides is a per-side
+	// check whose sideB arm always returns nil for an empty id).
+	if barred, _ := BarredSides(statuses, matchID, playerID, ""); barred != nil {
+		return nil, alreadyIneligibleErrorFor(playerID, barred)
 	}
 	if err := h.SetCompetitorStatus(compID, status); err != nil {
 		return nil, err

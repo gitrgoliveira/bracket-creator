@@ -323,7 +323,17 @@ func RegisterDaihyosenHandlers(r *gin.RouterGroup, eng DaihyosenEngine, store Da
 				return nil
 			}
 
-			sideASummary, sideBSummary := engine.ComputeTeamSummary(match.SubResults, match.SideA, match.SideB)
+			// credit is state.DefaultWinCreditSide's answer for THIS match
+			// (bc-cse: ComputeTeamSummary's credit is no longer optional). It is
+			// always domain.MatchSideNone here in practice: AddDaihyosen only
+			// ever applies to a still-tied, still-RUNNING encounter (never a
+			// completed one), and DefaultWinCreditSide credits nobody unless the
+			// match is completed. Computed properly anyway rather than passed as
+			// a bare domain.MatchSideNone, so this call site goes through the
+			// same canonical derivation as every other TeamResult reader instead
+			// of hand-asserting the invariant.
+			credit := state.DefaultWinCreditSide(match.Status, match.Decision, match.DecisionBy, match.Attribution())
+			sideASummary, sideBSummary := engine.ComputeTeamSummary(match.SubResults, match.SideA, match.SideB, credit)
 
 			// Count eligible competitors per side under the same lock (CHK026).
 			// Pre-Slice-7 there are no explicit rosters; eligibility is tracked

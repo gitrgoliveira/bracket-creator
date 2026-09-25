@@ -15,6 +15,7 @@ import { describe, it, expect, vi, beforeAll, afterAll, beforeEach } from 'vites
 import { installWindowStubs } from '../helpers/stub_globals.js';
 import { readStylesheet, cssBlock } from '../helpers/source.js';
 import { DOWNSTREAM_KNOCKOUT_REOPEN_CANCELLED } from '../../write_result.jsx';
+import { withdrawalLabel } from '../../admin_scoring_shared.jsx';
 
 const STUBBED_GLOBALS = {
   isHikiwake: () => false,
@@ -223,6 +224,60 @@ describe.each([
     expect(window.API.requeueBlockerAndReopen).toHaveBeenCalledWith(
       'comp1', fixture().id, 'comp1', 'm-blk', 'secret', { reason: 'Withdrawal recorded by mistake', force: false },
     );
+  });
+
+  // bc-rawm: the heading must never fall back to the raw internal matchId,
+  // and the server's own raw refusal sentence (which named that same id and
+  // told the operator to "finish that match before reopening" -- the
+  // opposite of this panel's own button) is gone entirely.
+  it('the conflict heading never falls back to the raw match id, and drops the server sentence', async () => {
+    window.API.reopenMatch = vi.fn().mockRejectedValue(Object.assign(
+      new Error('Court A already has a running match (m-blk). Finish that match before reopening this one.'),
+      { code: 'court_busy', court: 'A', matchId: 'm-blk', compId: 'comp1' },
+    ));
+    await mount(fixture());
+    await clearAndConfirm();
+    const conflict = await waitFor(() => screen.getByTestId('withdrawal-reopen-conflict'));
+    expect(conflict.textContent).not.toContain('m-blk');
+    expect(conflict.textContent).toContain('Shiaijo A is running another match.');
+    expect(conflict.textContent).not.toContain('Finish that match before reopening');
+  });
+
+  // bc-cse: a server-sent `label` for the blocking match (the court_busy
+  // conflict reuses the score path's structured payload) names no
+  // COMPETITOR ("Pool A · Match 2"), so it is only the FALLBACK when the
+  // panel's own best-effort fetched blockerLabel has not resolved (still
+  // loading here: fetchCompetitionDetails resolves null in this file's
+  // default beforeEach, so the fetch effect never finds the blocker).
+  it('falls back to the server label while the fetched one has not resolved', async () => {
+    window.API.reopenMatch = vi.fn().mockRejectedValue(Object.assign(
+      new Error('server sentence'),
+      { code: 'court_busy', court: 'A', matchId: 'm-blk', compId: 'comp1', label: 'Pool A · Match 2' },
+    ));
+    await mount(fixture());
+    await clearAndConfirm();
+    const conflict = await waitFor(() => screen.getByTestId('withdrawal-reopen-conflict'));
+    expect(conflict.textContent).toContain('Shiaijo A is running Pool A · Match 2.');
+  });
+
+  // bc-cse: once the fetch DOES resolve, the panel prefers it -- naming the
+  // blocking match's COMPETITORS, the safety property the operator is about
+  // to wipe the score of, which the server's own bare "Pool A · Match 2"
+  // label never carries.
+  it('prefers the fetched label (with competitor names) over the server label once it resolves', async () => {
+    window.API.reopenMatch = vi.fn().mockRejectedValue(Object.assign(
+      new Error('server sentence'),
+      { code: 'court_busy', court: 'A', matchId: 'm-blk', compId: 'comp1', label: 'Pool A · Match 2' },
+    ));
+    window.API.fetchCompetitionDetails = vi.fn().mockResolvedValue({ id: 'comp1', config: {} });
+    window.compMatchesForCompetition = () => [
+      { id: 'm-blk', phase: 'pool', sideA: { name: 'Aoki Taro' }, sideB: { name: 'Endo Goro' } },
+    ];
+    await mount(fixture());
+    await clearAndConfirm();
+    const conflict = await waitFor(() => screen.getByTestId('withdrawal-reopen-conflict'));
+    await waitFor(() => expect(conflict.textContent).toContain('Endo Goro vs Aoki Taro'));
+    expect(conflict.textContent).not.toContain('Pool A · Match 2');
   });
 });
 
@@ -440,5 +495,184 @@ describe('Clear withdrawal and reopen: pool match feeding a knockout', () => {
     await act(async () => { fireEvent.click(screen.getByTestId('clear-withdrawal-reopen')); });
     expect(screen.getByTestId('clear-withdrawal-consequence')).toBeTruthy();
     expect(screen.queryByTestId('clear-withdrawal-qualifier-note')).toBeNull();
+  });
+});
+
+// bc-rawm: withdrawalInForce widened to the match-level DEFAULT-WIN class
+// (RemainingMatchesPanel.award writes a whole-match `decision: "fusensho"`
+// for a scheduled match against a competitor already withdrawn elsewhere,
+// since fusenpai there is refused with 409 already_ineligible). Same
+// RecordedWithdrawal door as kiken/fusenpai, different copy: the Recorded
+// line names the winner, and the reopen button reads "Clear default win and
+// reopen".
+describe('a match-level fusensho default win (bc-rawm)', () => {
+  // Yamada (aka) got the default win when Tanaka (shiro) withdrew elsewhere
+  // and RemainingMatchesPanel awarded this still-scheduled match to Yamada.
+  const defaultWin = (o = {}) => individualWithdrawal({
+    decision: 'fusensho', decisionBy: 'shiro', decisionReason: 'auto: Tanaka withdrawn',
+    ipponsA: ['○', '○'], ipponsB: [],
+    ...o,
+  });
+
+  it('names the winner in the Recorded line and offers "Clear default win"', async () => {
+    await mount(defaultWin());
+    const line = screen.getByTestId('recorded-withdrawal');
+    expect(line.textContent).toContain('Recorded: Default win (fusensho) for Yamada. Tanaka had withdrawn.');
+    const button = screen.getByTestId('clear-withdrawal-reopen');
+    // bc-cse: no "and reopen" -- a fusensho reopen does not always land
+    // running any more (see the consequence copy test below).
+    expect(button.textContent).toBe('Clear default win');
+  });
+
+  // bc-cse: the server returns the match to SCHEDULED, not running, when
+  // the barred competitor (Tanaka) is still barred -- almost always true,
+  // since whatever barred them elsewhere is still on record -- so the
+  // confirm says that plainly rather than promising "it goes back to
+  // running". No fetchCompetitorStatuses stub here (the untouched default
+  // API mock), so the reinstate clause is correctly absent: unknown reads
+  // as "not reinstateable", never as a promise that may not hold.
+  it('the reopen consequence says the match queues again and the default win must be re-recorded', async () => {
+    await mount(defaultWin());
+    await act(async () => { fireEvent.click(screen.getByTestId('clear-withdrawal-reopen')); });
+    const text = screen.getByTestId('clear-withdrawal-consequence').textContent;
+    expect(text).toBe('The match goes back to the queue. Tanaka is still withdrawn, so record the default win again.');
+    expect(text).not.toContain('reinstate');
+    expect(text).not.toContain('goes back to running');
+  });
+
+  // bc-cse: when a live check finds Tanaka reinstateable (kiken-injury,
+  // still ineligible), the confirm ALSO offers that route.
+  it('offers the reinstate route too when the barred competitor is still ineligible and reinstateable', async () => {
+    window.API.fetchCompetitorStatuses = vi.fn().mockResolvedValue([
+      { playerId: 'p2', eligible: false, reinstateable: true },
+    ]);
+    await mount(defaultWin());
+    await act(async () => { fireEvent.click(screen.getByTestId('clear-withdrawal-reopen')); });
+    await waitFor(() => expect(screen.getByTestId('clear-withdrawal-consequence').textContent).toContain('reinstate'));
+    const text = screen.getByTestId('clear-withdrawal-consequence').textContent;
+    expect(text).toBe('The match goes back to the queue. Tanaka is still withdrawn, so record the default win again, or reinstate Tanaka first to fight it.');
+  });
+
+  // Not reinstateable (e.g. kiken-voluntary) or no longer barred: no
+  // reinstate clause either way -- only kiken-injury/still-ineligible earns it.
+  it('does not offer reinstate when the status says it is not reinstateable', async () => {
+    window.API.fetchCompetitorStatuses = vi.fn().mockResolvedValue([
+      { playerId: 'p2', eligible: false, reinstateable: false },
+    ]);
+    await mount(defaultWin());
+    await act(async () => { fireEvent.click(screen.getByTestId('clear-withdrawal-reopen')); });
+    await waitFor(() => expect(window.API.fetchCompetitorStatuses).toHaveBeenCalled());
+    const text = screen.getByTestId('clear-withdrawal-consequence').textContent;
+    expect(text).not.toContain('reinstate');
+  });
+
+  // bc-cse: reinstated, or their earlier withdrawal cleared elsewhere --
+  // either way the barred competitor's own status now reads eligible, so
+  // the server reopens THIS match straight to running rather than the
+  // queue, and the copy says that instead of promising the queue and a
+  // re-recorded default win.
+  it('says the match reopens in progress when the barred competitor is eligible again', async () => {
+    window.API.fetchCompetitorStatuses = vi.fn().mockResolvedValue([
+      { playerId: 'p2', eligible: true },
+    ]);
+    await mount(defaultWin());
+    await act(async () => { fireEvent.click(screen.getByTestId('clear-withdrawal-reopen')); });
+    await waitFor(() => expect(window.API.fetchCompetitorStatuses).toHaveBeenCalled());
+    const text = screen.getByTestId('clear-withdrawal-consequence').textContent;
+    expect(text).toBe('Tanaka can fight again, so the match reopens in progress. Score it and finish it as usual.');
+    expect(text).not.toContain('goes back to the queue');
+    expect(text).not.toContain('reinstate');
+  });
+
+  it('reopens through the same door as kiken/fusenpai, with a default-win-flavoured reason', async () => {
+    const onClose = vi.fn();
+    await mountLive(defaultWin(), onClose);
+    await act(async () => { fireEvent.click(screen.getByTestId('clear-withdrawal-reopen')); });
+    // bc-cse: "Default win recorded by mistake", the leading (default)
+    // preset for THIS door -- "Withdrawal recorded by mistake" is the wrong
+    // first answer for a fusensho, which is not a withdrawal on this match.
+    expect(screen.getByText('Default win recorded by mistake')).toBeTruthy();
+    expect(screen.getByText('Why is this default win being cleared?')).toBeTruthy();
+    const confirm = [...document.querySelectorAll('.reason-prompt button')].find((b) => b.textContent === 'Confirm');
+    await act(async () => { fireEvent.click(confirm); });
+    expect(window.API.reopenMatch).toHaveBeenCalledWith(
+      'comp1', defaultWin().id, 'secret', { reason: 'Default win recorded by mistake', force: false },
+    );
+    await act(async () => { flip(REOPENED); });
+    expect(onClose).not.toHaveBeenCalled();
+    expect(screen.queryByTestId('recorded-withdrawal')).toBeNull();
+  });
+
+  // withdrawalLabel's short "fact" form, for the team-summary-decision slot
+  // (admin_scoring_team.jsx) and anywhere else that needs a label rather
+  // than the full winner-naming sentence RecordedWithdrawal composes itself.
+  it('withdrawalLabel gives the short "fact" form', () => {
+    expect(withdrawalLabel('fusensho')).toBe('Default win (fusensho)');
+  });
+});
+
+// bc-cse: clearing THIS withdrawal never touches a LATER match the same
+// withdrawn competitor's default win (RemainingMatchesPanel.award) already
+// closed -- that match keeps its own recorded result. The confirm lists it
+// as a consequence (a warning, not a lock, per the 2026-09-24 ruling): the
+// operator can still reopen it separately to fight it. Fetched the same way
+// RemainingMatchesPanel finds Tanaka/Kyoto's other matches.
+describe('Clear withdrawal and reopen: a later default win from the same withdrawal (bc-cse)', () => {
+  it('lists a later default win as a consequence, named by its scores-list label plus the pairing', async () => {
+    const laterMatch = {
+      id: 'Pool 2-0', compId: 'comp1', phase: 'pool', poolName: 'Pool 2', status: 'completed', decision: 'fusensho', decisionBy: 'shiro',
+      sideA: { id: 'team-osaka', name: 'Osaka' }, sideB: { id: 'team-kyoto', name: 'Kyoto' },
+    };
+    window.API.fetchCompetitionDetails = vi.fn().mockResolvedValue({ id: 'comp1', config: {} });
+    window.compMatchesForCompetition = vi.fn().mockReturnValue([laterMatch]);
+    await mount(teamWithdrawal());
+    await act(async () => { fireEvent.click(screen.getByTestId('clear-withdrawal-reopen')); });
+    await waitFor(() => expect(screen.getByTestId('clear-withdrawal-default-win-consequences')).toBeTruthy());
+    const line = screen.getByTestId(`clear-withdrawal-default-win-${laterMatch.id}`);
+    // bc-cse: named by scoreRowMatchLabel FIRST -- a pairing alone cannot be
+    // found in the scores list, which is where the operator has to go to
+    // reopen it -- joined to the pairing the same way ReopenFeedback's own
+    // fetched blockerLabel does ("<lead> · <pairing>").
+    expect(line.textContent).toBe('Pool 2 · Match 1 · Kyoto vs Osaka keeps its default win; reopen it to fight it.');
+  });
+
+  // bc-cse: a match carrying no number at all (drawn before numbering
+  // existed, or a supplementary DH/TB bout) falls back to the bare pairing
+  // scoreRowMatchLabel's own doc describes -- never a raw internal id.
+  it('falls back to the bare pairing when the later match carries no number', async () => {
+    const laterMatch = {
+      id: 'Pool 2-DH-0', compId: 'comp1', phase: 'pool', poolName: 'Pool 2', status: 'completed', decision: 'fusensho', decisionBy: 'shiro',
+      sideA: { id: 'team-osaka', name: 'Osaka' }, sideB: { id: 'team-kyoto', name: 'Kyoto' },
+    };
+    window.API.fetchCompetitionDetails = vi.fn().mockResolvedValue({ id: 'comp1', config: {} });
+    window.compMatchesForCompetition = vi.fn().mockReturnValue([laterMatch]);
+    await mount(teamWithdrawal());
+    await act(async () => { fireEvent.click(screen.getByTestId('clear-withdrawal-reopen')); });
+    await waitFor(() => expect(screen.getByTestId('clear-withdrawal-default-win-consequences')).toBeTruthy());
+    const line = screen.getByTestId(`clear-withdrawal-default-win-${laterMatch.id}`);
+    expect(line.textContent).toBe('Kyoto vs Osaka keeps its default win; reopen it to fight it.');
+    expect(line.textContent).not.toContain('Pool 2-DH-0');
+  });
+
+  it('a match already carrying a fusensho for a DIFFERENT competitor is not listed', async () => {
+    const unrelated = {
+      id: 'm-r2-1', compId: 'comp1', status: 'completed', decision: 'fusensho', decisionBy: 'aka',
+      sideA: { id: 'team-nagoya', name: 'Nagoya' }, sideB: { id: 'team-sendai', name: 'Sendai' },
+    };
+    window.API.fetchCompetitionDetails = vi.fn().mockResolvedValue({ id: 'comp1', config: {} });
+    window.compMatchesForCompetition = vi.fn().mockReturnValue([unrelated]);
+    await mount(teamWithdrawal());
+    await act(async () => { fireEvent.click(screen.getByTestId('clear-withdrawal-reopen')); });
+    await waitFor(() => expect(screen.getByTestId('clear-withdrawal-consequence')).toBeTruthy());
+    expect(screen.queryByTestId('clear-withdrawal-default-win-consequences')).toBeNull();
+  });
+
+  it('omits the block when there is no such later match', async () => {
+    window.API.fetchCompetitionDetails = vi.fn().mockResolvedValue({ id: 'comp1', config: {} });
+    window.compMatchesForCompetition = vi.fn().mockReturnValue([]);
+    await mount(teamWithdrawal());
+    await act(async () => { fireEvent.click(screen.getByTestId('clear-withdrawal-reopen')); });
+    await waitFor(() => expect(screen.getByTestId('clear-withdrawal-consequence')).toBeTruthy());
+    expect(screen.queryByTestId('clear-withdrawal-default-win-consequences')).toBeNull();
   });
 });

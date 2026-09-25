@@ -313,6 +313,9 @@ func (s *Store) EnsureLegacyUpgraded(compID string) {
 	if err := s.upgradeLineupMemberIDsLocked(compID, roster); err != nil {
 		log.Printf("state: legacy lineup-member-id upgrade for %s: %v", compID, err)
 	}
+	if err := s.upgradeTeamDefaultWinBoutPaddingLocked(compID, roster); err != nil {
+		log.Printf("state: legacy team-default-win-bout-padding upgrade for %s: %v", compID, err)
+	}
 	s.legacyUpgraded.Store(compID, struct{}{})
 }
 
@@ -1173,6 +1176,106 @@ func (s *Store) upgradeBracketSideIDsLocked(compID string, roster *legacyUpgrade
 		resolveSubs(bracket.ThirdPlaceMatch)
 	}
 
+	if !changed {
+		return nil
+	}
+	return s.saveBracketLocked(compID, bracket, s.directWrite)
+}
+
+// upgradeTeamDefaultWinBoutPaddingLocked pads a stored COMPLETED team match
+// that a default-win ruling (any kiken, fusenpai, or fusensho:
+// domain.IsDefaultWinDecisionStr) closed with fewer SubResults rows than the
+// competition's TeamSize -- e.g. a kiken recorded before the match's first
+// bout was ever scored, on a file saved before this padding existed -- with
+// an empty SubMatchResult row (Position only) for every missing numbered
+// position, via PadDefaultWinBoutPositions, the SAME function
+// engine.RecordMatchResultWithIneligibilityTx now applies on write. Without
+// this, a match recorded before that write-time padding existed keeps
+// contributing nothing to IV/PW forever: DefaultWinCreditSide's readers
+// (TeamResultFrom, engine.accrueTeamSubResults, the Excel export) can only
+// credit a Position actually present in SubResults.
+//
+// Independent of the roster/id repairs above (it touches Position/SubResults
+// shape only, never a name or id), so ordering relative to them does not
+// matter; it runs last purely because it is the newest, unrelated addition.
+// Caller holds the per-comp lock (EnsureLegacyUpgraded).
+func (s *Store) upgradeTeamDefaultWinBoutPaddingLocked(compID string, roster *legacyUpgradeRoster) error {
+	comp, err := roster.competition()
+	if err != nil || comp == nil || comp.TeamSize < 2 || comp.IsKachinuki() {
+		return err
+	}
+	if err := s.padTeamDefaultWinBoutsInPoolMatchesLocked(compID, comp.TeamSize); err != nil {
+		return err
+	}
+	return s.padTeamDefaultWinBoutsInBracketLocked(compID, comp.TeamSize)
+}
+
+// padTeamDefaultWinBoutsInPoolMatchesLocked is
+// upgradeTeamDefaultWinBoutPaddingLocked's pool-matches.csv half. Caller
+// holds the per-comp lock.
+func (s *Store) padTeamDefaultWinBoutsInPoolMatchesLocked(compID string, teamSize int) error {
+	path := s.compPath(compID, "pool-matches.csv")
+	parsed, err := parsePoolMatchesFile(path)
+	if err != nil {
+		return nil // missing/unreadable pool matches are the consumers' error to report
+	}
+	matches, _ := parsed.([]MatchResult)
+	if len(matches) == 0 {
+		return nil
+	}
+	changed := false
+	for i := range matches {
+		m := &matches[i]
+		if !NeedsDefaultWinBoutPadding(m.Status, m.Decision, m.SideA, m.SideB, m.ID, m.SubResults, m.SubResultsUnreadable, teamSize) {
+			continue
+		}
+		m.SubResults = PadDefaultWinBoutPositions(m.SubResults, teamSize)
+		changed = true
+	}
+	if !changed {
+		return nil
+	}
+	return s.savePoolMatchesLocked(compID, matches, s.directWrite)
+}
+
+// padTeamDefaultWinBoutsInBracketLocked is
+// upgradeTeamDefaultWinBoutPaddingLocked's bracket.json half. Caller holds
+// the per-comp lock. A bracket match id never carries the pool DH/TB suffix,
+// so IsPoolDaihyosenMatchID/IsTiebreakerMatchID are harmless (always false)
+// here -- checked anyway inside NeedsDefaultWinBoutPadding so the one
+// predicate serves both halves rather than one gated copy and one ungated.
+func (s *Store) padTeamDefaultWinBoutsInBracketLocked(compID string, teamSize int) error {
+	path := s.compPath(compID, "bracket.json")
+	parsed, err := parseBracketFile(path)
+	if err != nil {
+		return nil // missing/unreadable bracket is the consumers' error to report
+	}
+	bracket, _ := parsed.(*Bracket)
+	if bracket == nil || len(bracket.Rounds) == 0 {
+		return nil
+	}
+	changed := false
+	pad := func(m *BracketMatch) {
+		// bracket.json parses as one atomic JSON document, so there is no
+		// per-match "unreadable SubResults cell" shape here the way a
+		// pool-matches.csv row has (a parse failure fails the WHOLE file,
+		// caught by parseBracketFile above, and this loop never runs).
+		// false is therefore always correct, not a stand-in for a missing
+		// field.
+		if !NeedsDefaultWinBoutPadding(m.Status, m.Decision, m.SideA, m.SideB, m.ID, m.SubResults, false, teamSize) {
+			return
+		}
+		m.SubResults = PadDefaultWinBoutPositions(m.SubResults, teamSize)
+		changed = true
+	}
+	for i := range bracket.Rounds {
+		for j := range bracket.Rounds[i] {
+			pad(&bracket.Rounds[i][j])
+		}
+	}
+	if bracket.ThirdPlaceMatch != nil {
+		pad(bracket.ThirdPlaceMatch)
+	}
 	if !changed {
 		return nil
 	}

@@ -20,9 +20,11 @@ An injury kiken can be reinstated later by the operator if the competitor recove
 
 **Fusenpai** is a no-show default loss: the competitor who did not appear forfeits the match.
 
-**Fusensho** is a per-bout default win, used in team matches when the opposing team fields a vacant position. When neither team has a fighter for a position, there is no default win: record that bout as a **Tie**.
+**Fusensho** is a per-bout default win, used in team matches when the opposing team fields a vacant position. It is also what the app records for the match itself when you give the opponent of an already-barred competitor a default win; refer to [Matches after a competitor is barred](#matches-after-a-competitor-is-barred). When neither team has a fighter for a position, there is no default win: record that bout as a **Tie**.
 
 A default win (kiken, fusenpai, or fusensho) awards the winner the match points without a technique, and each awarded point is recorded as a circle. This follows the FIK Regulations of Kendo Shiai and Shinpan (Article 32 and the score board appendix). The winner's score shows two circles, or a single circle during overtime, when only the one deciding point is awarded. Any point the withdrawing side had already scored stays valid and is kept on the sheet. In a team match, the sub-bouts already fought are preserved and still count toward the standings.
+
+When the default win (kiken, fusenpai, or fusensho) decides a regular team match, every bout that has no result yet is also credited to the other team, 2-0 each: one individual victory and two points, the same figures a fusensho bout scores. This shows up wherever the match does: the individual victories and points totals, the standings, the bout rows, and the exported workbook. Bouts already fought keep their own results. Kachinuki encounters are unaffected, because they end on whichever bout the operator chooses, not on every position being filled.
 
 ## Hikiwake
 
@@ -32,13 +34,15 @@ A hikiwake is a draw. It applies in pool, league, and Swiss matches (not in the 
 
 Encho is the extra period played when a knockout match is level at the end of regulation. It follows ippon-shobu rules: the first competitor to score wins.
 
+An individual knockout match cannot be finished level. While the score is tied, the **Finish** button reads **Needs a winner** instead: fight encho, then record a hantei if the competitors are still level after it.
+
 In the score editor, open the **Overtime** control and tick **Encho started**. A counter appears so you can record how many overtime periods were fought, using the **+** and **-** buttons. The counter starts at 1 and has no upper limit. How many periods are fought, and how a match still level after them is finally settled, is the shimpan's call. That may be a judges' decision for an individual bout, or a daihyosen for a team encounter. Record what actually happened on court, however many periods that took.
 
 ![The score editor during a second overtime period: the Encho started box is ticked, the period counter reads two, and the header shows the overtime readout.](../../screenshots/mobile-encho-overtime.png)
 
 Completed results follow the paper score sheet's layout. The centre, between the two sides' points, only ever carries one mark: **vs** when no special mark applies, **X** for a tie, **(E)** for a match that went to overtime, or **(DH)** for a team encounter sent to a representative bout. The marks never combine: a match that went to encho cannot end in a tie, and a daihyosen has no overtime. A side with no points shows a plain dash. A match won by men in regulation reads **M vs –**, and the same win in overtime reads **M (E) –**, on the court console and the public viewer. The exported results workbook carries the same **(E)** marker in its centre column, but leaves a no-points cell blank rather than dashed. The marker is the same however many overtime periods were fought, because the counter records the number for the tournament log but results never show it.
 
-Everything else is a result, written beside the competitor it names: **Ht** next to the winner of a judges' decision, **Kiken** next to the competitor who withdrew, **Fus.** next to a no-show. A match decided by hantei after a tied overtime reads **M Ht (E) K**, with the winner's mark on the winner's side of the centre. A team encounter shows its team totals in the score cell instead, so for those the marks appear on the bracket and in the exported workbook.
+Everything else is a result, written beside the competitor it names: **Ht** next to the winner of a judges' decision, **Kiken** next to the competitor who withdrew, **Fus.** next to a no-show, and also **Fus.** next to the winner when the match itself was decided by a fusensho default win. A match decided by hantei after a tied overtime reads **M Ht (E) K**, with the winner's mark on the winner's side of the centre. A team encounter shows its team totals in the score cell instead, so for those the marks appear on the bracket and in the exported workbook.
 
 ![Completed results on the public viewer: an overtime win reading M, the E marker, then a dash for the side with no points, and a hantei result with the Ht mark beside the winner.](../../screenshots/viewer-result-encho.png)
 
@@ -77,9 +81,19 @@ A changed order can change who qualifies from the pool. The app treats it the sa
 
 A kiken or fusenpai marks the competitor who withdrew or did not appear as ineligible for further matches. The app blocks starting an ineligible competitor, so a withdrawn competitor cannot silently re-enter the draw. An injury kiken (FIK Article 30) can be reversed: once the operator reinstates the competitor, the eligibility block is lifted and they can fight again.
 
+### Matches after a competitor is barred
+
+A barred competitor's other scheduled matches cannot be started, so the app steers everyone around them instead of leaving a dead entry in the queue. They are skipped by **Up next**, **Finish + Start Next**, the shiai-jo display's next line, the lobby view, and on-deck alerts, so nobody is nudged to warm up for a bout that cannot be fought. On the public schedule, the pools, and the bracket, the barred competitor's name carries a **Withdrawn** mark.
+
+On the court console queue, the Scores tab, and the score editor, the match instead carries a note explaining why (for example "Kyoto withdrew: record the default win.") and a button naming the opponent, for example **Record default win for Sato**. One tap records the match as a fusensho for the opponent, without touching the barred competitor's eligibility record. For an injury kiken, a **Reinstate** button naming the barred competitor sits alongside it, restoring eligibility so the match can be fought instead of defaulted. Once recorded, the match reads, for example, "Recorded: Default win (fusensho) for Sato. Kyoto had withdrawn.", with a **Clear default win** action if it was recorded by mistake: it reopens the match, back to the queue if the competitor is still barred (record the default win again, or reinstate them first), or back to in progress, ready to score, if they have since been reinstated.
+
+If both competitors due to meet are already barred, neither can fight. In a pool or league match, record it as drawn with **Record as drawn (neither can fight)**: neither side receives a win or points. A knockout match has no equivalent, since the bracket needs a winner; correct the earlier withdrawal, or the draw, instead.
+
+**Clear withdrawal and reopen** on the original withdrawal (refer to [Correcting a withdrawal recorded by mistake](#correcting-a-withdrawal-recorded-by-mistake)) lists the later matches that were given a default win because of it, each with its pairing, so you know what is affected. Those matches keep their default win; reopen any of them individually with **Clear default win** once the competitor is eligible again.
+
 ## Correcting a withdrawal recorded by mistake
 
-A kiken or fusenpai entered in error can always be fixed. Open the match in the score editor. It shows what is recorded, for example "Recorded: Kiken – Voluntary, Kyoto withdrew", and marks the side that withdrew with **Kiken** or **Fus.** beside its name. In a team match the result below the bouts names the recorded winner and the decision, even though the bouts after the withdrawal were never fought. Pick the fix that matches what happened:
+A kiken or fusenpai entered in error can always be fixed. Open the match in the score editor. It shows what is recorded, for example "Recorded: Kiken – Voluntary, Kyoto withdrew", and marks the side that withdrew with **Kiken** or **Fus.** beside its name. In a team match the result below the bouts names the recorded winner and the decision, and the bouts after the withdrawal show as default wins for the other team, even though nobody actually fought them. Pick the fix that matches what happened:
 
 - **The wrong competitor or team was marked.** Record the withdrawal again for the other side. In an individual match, use the **Kiken – Voluntary**, **Kiken – Injury** or **Fusenpai** button in the editor's **Decision** row. In a team match, open **Withdrawal or no-show** and use the same buttons there. The side you first marked is eligible again, and the other side becomes the one that withdrew.
 - **Nobody withdrew.** Choose **Clear withdrawal and reopen** and give a reason. A withdrawal gives the opponent the win by default, so without it the match was never decided. The match goes back to in progress and the editor stays open on it. The withdrawn competitor or team can compete again. Score the rest of the match and finish it as usual.
@@ -104,4 +118,4 @@ In a knockout, a next match that is still in progress must be finished or sent b
 
 In a pool of a competition that ends in a knockout, clearing a withdrawal is not refused because of the knockout. Clearing it moves nobody in the bracket: the pool simply has an unfinished match again. When you finish that match, the app checks whether the result changes who qualifies from the pool. The same result is saved as usual. A result that moves someone who has already fought in the knockout is handled like any pool correction: you are shown who moves and which knockout matches are affected before anything is saved. Refer to [Correct a pool result after the knockout has started](scoring-a-match.md#correct-a-pool-result-after-the-knockout-has-started).
 
-Matches that were already awarded to the opponents of a withdrawn competitor keep their results. Correct them one by one if they need to change.
+Matches that were already given a default win because of the withdrawal keep it; refer to [Matches after a competitor is barred](#matches-after-a-competitor-is-barred) for how to list and correct them.

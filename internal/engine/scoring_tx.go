@@ -170,6 +170,68 @@ func (e *Engine) RecordMatchResultWithIneligibilityTx(tx state.StoreTx, compID, 
 		return nil, merr
 	}
 
+	// Default-win bout padding (bc-tmfn follow-up): a non-kachinuki team
+	// match a default-win ruling (any kiken, fusenpai, or fusensho:
+	// domain.IsDefaultWinDecisionStr) closes before every numbered bout has
+	// a result of its own -- most commonly a kiken declared before the
+	// match's first bout was ever scored -- gets an empty SubMatchResult row
+	// (Position only) for every missing position 1..TeamSize, via
+	// state.NeedsDefaultWinBoutPadding / state.PadDefaultWinBoutPositions, the
+	// SAME predicate and function the legacy-load repair uses
+	// (state.EnsureLegacyUpgraded). Without a row for every position,
+	// state.DefaultWinCreditSide's readers (TeamResultFrom,
+	// accrueTeamSubResults, the Excel export) have nothing to range over for
+	// the positions nobody fought and silently credit them zero.
+	//
+	// Gated on PRIOR's sides and unreadable flag, never result's: a client
+	// score payload commonly omits SideA/SideB and relies on reconcileSides
+	// (inside applyPoolWrite/applyBracketResultIn, called later via
+	// writeToPoolOrBracket) to backfill them from the stored row -- reading
+	// result.SideA/SideB here would skip padding on exactly that common case
+	// (a bare kiken payload). Likewise a stored SubResults cell that failed
+	// to parse must never be padded over: NeedsDefaultWinBoutPadding's
+	// subResultsUnreadable check keeps this branch from turning an empty
+	// result.SubResults into a non-empty padded one, which would defeat
+	// applyPoolWrite's own raw-bytes preservation (it only keeps
+	// SubResultsRaw when the incoming SubResults is still empty) and destroy
+	// the only copy of the corrupt cell. prior is guaranteed non-nil here:
+	// the lookupExistingResult error above already returned on a miss.
+	//
+	// The decision tested is result's own, OR -- covering a CORRECTION that
+	// KEEPS a stored withdrawal ruling -- prior's: such a write's own
+	// Decision is either empty (a score sheet states no decision) or an
+	// explicit "hikiwake" (KeepsWithdrawalRuling's own two accepted shapes),
+	// and applyPoolWrite/applyBracketResultIn only reinstate the stored
+	// decision AFTER this point (preserveWithdrawalRuling), so testing
+	// result.Decision alone would miss it here -- and nothing downstream
+	// pads again once this function returns. A correction can legitimately
+	// send fewer SubResults rows than TeamSize (e.g. a bout-level edit that
+	// only touches the rows it corrects), so this is the one place that
+	// still needs to catch it up.
+	//
+	// Excluded: a bye (either side empty -- a bye never carries a
+	// default-win decision in practice, but the padding shape assumes two
+	// real teams either way) and a pool daihyosen/tiebreaker row
+	// (IsPoolDaihyosenMatchID / IsTiebreakerMatchID), which is scored as a
+	// single individual representative bout, never the team's own numbered
+	// positions. Both checked inside NeedsDefaultWinBoutPadding.
+	if comp != nil && comp.TeamSize >= 2 && !comp.IsKachinuki() {
+		// KeepsWithdrawalRuling is checked UNCONDITIONALLY, not only when
+		// result.Decision == "": it is also true for an explicit incoming
+		// "hikiwake" over a stored default win (its own definition allows
+		// incoming.Decision to be "" OR "hikiwake"), and that write must
+		// still pad, since preserveWithdrawalRuling reinstates prior.Decision
+		// downstream regardless of which of the two the correction sent.
+		padDecision := result.Decision
+		if KeepsWithdrawalRuling(prior.Status, prior.Decision, result) {
+			padDecision = prior.Decision
+		}
+		if state.NeedsDefaultWinBoutPadding(result.Status, padDecision, prior.SideA, prior.SideB, matchID,
+			result.SubResults, prior.SubResultsUnreadable, comp.TeamSize) {
+			result.SubResults = state.PadDefaultWinBoutPositions(result.SubResults, comp.TeamSize)
+		}
+	}
+
 	// K3 ahead of the write: a withdrawal whose loser a DIFFERENT match has
 	// already made ineligible is refused before anything is written. The
 	// post-write check (recordIneligibilityFromDecision, below) still refuses
@@ -370,15 +432,7 @@ func (e *Engine) StartMatchTx(tx state.StoreTx, compID, matchID string) error {
 	if err != nil {
 		return err
 	}
-	for _, pid := range ids {
-		if pid == "" {
-			continue
-		}
-		if st, ok := statuses[pid]; ok && !st.Eligible && st.MatchID != matchID {
-			return &IneligibleCompetitorError{PlayerID: pid, Reason: st.Reason}
-		}
-	}
-	return nil
+	return eligibilityErrorForSides(statuses, matchID, ids)
 }
 
 // checkSimultaneousMatchTx returns *IneligibleCompetitorError if either
@@ -469,6 +523,26 @@ func (e *Engine) checkSimultaneousMatchTx(h state.StoreTx, compID, matchID strin
 		return name
 	}
 
+	// bc-cse: the operator sentence for the gate itself (comp/bracket are
+	// already the ones this call needs to name the OTHER match, m/bm below,
+	// not matchID). comp is loaded LAZILY, inside the closure, not above:
+	// every caller of checkSimultaneousMatchTx returns immediately on the
+	// first conflict found, so this closure runs AT MOST ONCE per call, and
+	// loading comp here means the common case (no conflict) never pays for
+	// it at all. comp is still best-effort: OperatorMatchLabel degrades to
+	// the pool's own name on a nil comp (no League-heading override), so a
+	// load failure still gates the write correctly, only the sentence's
+	// match name gets plainer -- but the error is logged rather than
+	// discarded, per the errcheck rule.
+	simultaneousReason := func(name, otherMatchID, court string) string {
+		comp, err := h.LoadCompetition(compID)
+		if err != nil {
+			log.Printf("engine: checkSimultaneousMatchTx: LoadCompetition compId=%s: %v (label degrades to pool-phase-only)", compID, err)
+		}
+		label := OperatorMatchLabel(comp, bracket, otherMatchID)
+		return fmt.Sprintf("%s is fighting now in %s on Shiaijo %s. Finish that match first.", name, label, court)
+	}
+
 	if poolErr == nil {
 		for _, m := range poolMatches {
 			if m.ID == matchID || m.Status != state.MatchStatusRunning {
@@ -476,14 +550,16 @@ func (e *Engine) checkSimultaneousMatchTx(h state.StoreTx, compID, matchID strin
 			}
 			if rawIDA != "" && (m.SideAID == rawIDA || m.SideBID == rawIDA) {
 				return &IneligibleCompetitorError{
-					PlayerID: playerIDFor(rawIDA, sideA),
-					Reason:   fmt.Sprintf("already fighting in match %s on court %s", m.ID, m.Court),
+					PlayerID:     playerIDFor(rawIDA, sideA),
+					Reason:       simultaneousReason(sideA, m.ID, m.Court),
+					Simultaneous: true,
 				}
 			}
 			if rawIDB != "" && (m.SideAID == rawIDB || m.SideBID == rawIDB) {
 				return &IneligibleCompetitorError{
-					PlayerID: playerIDFor(rawIDB, sideB),
-					Reason:   fmt.Sprintf("already fighting in match %s on court %s", m.ID, m.Court),
+					PlayerID:     playerIDFor(rawIDB, sideB),
+					Reason:       simultaneousReason(sideB, m.ID, m.Court),
+					Simultaneous: true,
 				}
 			}
 		}
@@ -493,14 +569,16 @@ func (e *Engine) checkSimultaneousMatchTx(h state.StoreTx, compID, matchID strin
 		checkBracketMatch := func(bm *state.BracketMatch) error {
 			if sideA != "" && matchesBracketSide(rawIDA, sideA, bm) {
 				return &IneligibleCompetitorError{
-					PlayerID: playerIDFor(rawIDA, sideA),
-					Reason:   fmt.Sprintf("already fighting in match %s on court %s", bm.ID, bm.Court),
+					PlayerID:     playerIDFor(rawIDA, sideA),
+					Reason:       simultaneousReason(sideA, bm.ID, bm.Court),
+					Simultaneous: true,
 				}
 			}
 			if sideB != "" && matchesBracketSide(rawIDB, sideB, bm) {
 				return &IneligibleCompetitorError{
-					PlayerID: playerIDFor(rawIDB, sideB),
-					Reason:   fmt.Sprintf("already fighting in match %s on court %s", bm.ID, bm.Court),
+					PlayerID:     playerIDFor(rawIDB, sideB),
+					Reason:       simultaneousReason(sideB, bm.ID, bm.Court),
+					Simultaneous: true,
 				}
 			}
 			return nil

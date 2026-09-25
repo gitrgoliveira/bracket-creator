@@ -10,6 +10,7 @@ import { usePrimaryWatch } from './viewer_schedule.jsx';
 import { poolNameOf, isPoolDaihyosenBout, teamMatchTypeFor } from './pool_ids.jsx';
 import { NumberedName } from './numbered_name.jsx';
 import { resultRecencyDesc } from './result_recency.jsx';
+import { isBarredMatch } from './ineligible_match.jsx';
 
 const { useState, useMemo, useRef: useRefV } = React;
 const StatusBadge = window.StatusBadge;
@@ -115,7 +116,10 @@ export function ViewerCompetition({ tournament, competition, pools, poolMatches,
       return matchInvolvesWatchedSet(m, highlightPlayers);
     };
     const running = allMatches.filter((m) => m.status === "running" && hasBothSides(m) && matchInvolvesWatched(m));
-    const upcoming = allMatches.filter((m) => m.status === "scheduled" && hasBothSides(m) && matchInvolvesWatched(m))
+    // A barred match (ineligible_match.jsx) cannot be fought as scheduled, so
+    // it is skipped here: currentMatch and the "Up next" section both derive
+    // from this filtered list, so neither ever picks one as the next match.
+    const upcoming = allMatches.filter((m) => m.status === "scheduled" && hasBothSides(m) && !isBarredMatch(m) && matchInvolvesWatched(m))
       .sort((a, b) => (a.scheduledAt || "99:99").localeCompare(b.scheduledAt || "99:99"))
       .slice(0, hasActiveFilter ? 20 : 3);
     // Reverse-chronological by scheduled time. allMatches arrives in

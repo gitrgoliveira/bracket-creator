@@ -352,6 +352,18 @@ export function downstreamKnockoutRunningMessage(runningMatches) {
     return `${subject}. Finish ${them} or send ${them} back to the queue, then save again.`;
 }
 
+// downstreamKnockoutRunningReopenMessage: the same refusal (409
+// downstream_knockout_running) met by a REOPEN rather than a score write
+// (bc-cse). "then save again" is wrong here -- a reopen has no save step to
+// retry, the operator taps Reopen again once the blocking match is out of
+// the way -- so this is a separate message, not a parameter on the one
+// above, the same split downstreamKnockoutPlayedConfirm's own `reopen` flag
+// already draws for the played-shape refusal.
+export function downstreamKnockoutRunningReopenMessage(runningMatches) {
+    const { subject, them } = runningParts(runningMatches);
+    return `${subject}. Finish ${them} or send ${them} back to the queue, then reopen again.`;
+}
+
 // downstreamKnockoutRunningQueueDrop: the same refusal met by a QUEUED replay,
 // in the { reason, advice } shape the not-saved banner renders as "Not saved:
 // <reason>. <advice>". The advice is the remedy for a write that is no longer
@@ -362,6 +374,20 @@ export function downstreamKnockoutRunningQueueDrop(runningMatches) {
         reason: subject,
         advice: `Finish ${them} or send ${them} back to the queue, then enter this result again.`,
     };
+}
+
+// courtBusyMessage (bc-rawm): the operator sentence for a 409 court_busy
+// refusal on a score write -- the shiaijo this match wants is not free, a
+// DIFFERENT match already holds it. Named the way the operator sees it, off
+// the server's own `label` field, never the internal matchId the body also
+// carries: unlike matchLabel's own id fallback (built for a match this app
+// names itself). bc-cse: no "This shiaijo"/"another match" fallback text --
+// respondCourtBusy (handlers_match.go) always sends both `court` and a
+// `label` (matchLabelOrID falls back to the raw match id itself rather than
+// omitting the field), so the fallbacks were dead code defending against a
+// shape the server never sends.
+export function courtBusyMessage({ court, label }) {
+    return `Shiaijo ${court} is running ${label}. Finish it or send it back to the queue first.`;
 }
 
 function runningParts(runningMatches) {

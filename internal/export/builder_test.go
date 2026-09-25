@@ -2459,7 +2459,7 @@ func TestScoreCellsCarryOutstandingHansokuTriangle(t *testing.T) {
 			{Position: 1, SideA: "Ann", SideB: "Ben", Winner: "Ann",
 				IpponsA: []string{"M", "K"}, HansokuB: 1},
 		}
-		writeTeamSubMatchScores(f, sheet, 1, 5, subs, 3, false, "", "")
+		writeTeamSubMatchScores(f, sheet, 1, 5, subs, 3, false, "", "", domain.MatchSideNone)
 		left, _ := f.GetCellValue(sheet, "B5")
 		right, _ := f.GetCellValue(sheet, "F5")
 		assert.Equal(t, "MK", left)
@@ -2481,10 +2481,30 @@ func TestScoreCellsCarryOutstandingHansokuTriangle(t *testing.T) {
 		subs := []state.SubMatchResult{
 			{Position: 1, SideA: "", SideB: "", Winner: "Tora A", Decision: "fusensho"},
 		}
-		writeTeamSubMatchScores(f, sheet, 1, 5, subs, 3, false, "Tora A", "Kenshi B")
+		writeTeamSubMatchScores(f, sheet, 1, 5, subs, 3, false, "Tora A", "Kenshi B", domain.MatchSideNone)
 		left, _ := f.GetCellValue(sheet, "B5")
 		assert.Contains(t, left, "Fus.", "the no-show mark must name the winning side")
 		assert.Contains(t, left, "○", "and the default win must still award its maru")
+	})
+
+	// bc-tmfn follow-up: a bout with NO result of its own (padded,
+	// state.PadDefaultWinBoutPositions) on a match a default-win ruling
+	// closed shows the maru via the credit parameter, but -- unlike the
+	// fixed-order fusensho row above, whose OWN Decision drives the mark --
+	// carries no per-row Kiken/Fus. mark: that mark names the withdrawer and
+	// already rides the match-level summary row (writeTeamSummaryCells).
+	t.Run("credited unfought row: maru with no per-row mark", func(t *testing.T) {
+		f := excelize.NewFile()
+		defer f.Close()
+		sheet := helper.SheetPoolMatches
+		f.NewSheet(sheet)
+
+		subs := []state.SubMatchResult{{Position: 1}}
+		writeTeamSubMatchScores(f, sheet, 1, 5, subs, 3, false, "Tora A", "Kenshi B", domain.MatchSideA)
+		left, _ := f.GetCellValue(sheet, "B5")
+		right, _ := f.GetCellValue(sheet, "F5")
+		assert.Equal(t, "○○", left, "the credited side's maru, and nothing else")
+		assert.Empty(t, right, "the other side's cell stays empty")
 	})
 }
 
@@ -2506,7 +2526,7 @@ func TestWriteTeamSubMatchScores_OutOfRangePositionSkipped(t *testing.T) {
 		{Position: 3, IpponsA: []string{"K"}},
 		{Position: 9, IpponsA: []string{"D"}}, // corrupted: > teamSize
 	}
-	writeTeamSubMatchScores(f, sheet, courtStartCol, subStartRow, subs, teamSize, false, "", "")
+	writeTeamSubMatchScores(f, sheet, courtStartCol, subStartRow, subs, teamSize, false, "", "", domain.MatchSideNone)
 
 	// Position 1 -> row 5, Position 3 -> row 7 (both written).
 	v1, _ := f.GetCellValue(sheet, "B5")

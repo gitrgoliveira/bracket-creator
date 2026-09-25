@@ -46,11 +46,19 @@ import {
   withdrawalInForce,
   withdrawnKeyOf,
   WithdrawalMarkedName,
+  BarredMatchNotice,
 } from './admin_scoring_shared.jsx';
+// bc-cse: a SCHEDULED match a competitor is barred from must never offer a
+// Start the server would refuse; isBarredMatch (ineligible_match.jsx) is the
+// one owner of that question.
+import { isBarredMatch } from './ineligible_match.jsx';
 
 import { SyncStatusPill, useDebouncedRunningWrite } from './admin_scoring_autosave.jsx';
 
-import { TeamScoreEditorModal } from './admin_scoring_team.jsx';
+// isKoTieBlocked: import-only, from the team editor's shared module. bc-rawm
+// reuses it here for the SAME tie rule (a knockout match cannot finish with
+// no winner), never a re-derivation of it; see canFinish below.
+import { TeamScoreEditorModal, isKoTieBlocked } from './admin_scoring_team.jsx';
 import { EngiScoreEditorModal } from './admin_scoring_engi.jsx';
 
 export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, onAfterDecision, prevMatch, nextMatch, onPrev, onNext, password, selfReport, variant = "modal", canClose = true }) {
@@ -643,7 +651,35 @@ export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, on
   // so the hikiwake toggle is suppressed in the bracket phase: m.phase ===
   // "bracket" is the in-modal KO signal (see TeamScoreEditorModal).
   const isKnockoutPhase = m.phase === "bracket";
-  const canFinish = !decidedByHantei && (isDrawToggled || aTotal > 0 || bTotal > 0);
+  // bc-rawm: a tied individual knockout bout (0 encho periods or several,
+  // 1-1 or any other equal score) has no winner, and the server refuses it
+  // outright -- validateBracketCompletion runs on a Finish AND on a later
+  // Save correction alike -- so this must block BOTH, not just the first
+  // Finish. That is why isComplete is always passed false below, unlike the
+  // team editor's own isKoTieBlocked call: a team tie is broken by an
+  // appended daihyosen bout, so a COMPLETED team encounter never carries a
+  // null teamWinner and isKoTieBlocked's isComplete exemption is safe there;
+  // an individual bout has no daihyosen, so the identical tie can recur
+  // under a correction (the operator removes a point and the score is tied
+  // again) and must stay blocked there too. A recorded withdrawal
+  // (lockedKey) already has a winner regardless of the scoreline, so it is
+  // exempt from the tie check, exactly as hantei is (decidedByHantei already
+  // disables Finish below; guarded out of koTieBlocked too so the button's
+  // label/title do not claim "needs a winner" while the hantei picker, the
+  // actual remedy, is on screen).
+  const individualWinner = lockedKey || (aTotal === bTotal ? null : (aTotal > bTotal ? "a" : "b"));
+  // bc-cse: hasPointsOrDraw gates koTieBlocked too, not just canFinish -- at
+  // a pristine 0-0 (or a still-SCHEDULED match, which reads 0-0 the same
+  // way) aTotal===bTotal is true by construction, so without this the
+  // button read "Needs a winner" on every knockout bout before anything was
+  // struck, including a scheduled barred match nobody has opened yet. The
+  // button was already disabled there via canFinish; only the WORDING was
+  // wrong, claiming a tie that never happened.
+  const hasPointsOrDraw = isDrawToggled || aTotal > 0 || bTotal > 0;
+  const koTieBlocked = !decidedByHantei && m.status !== "scheduled" && hasPointsOrDraw &&
+    isKoTieBlocked({ isKnockoutPhase, teamWinner: individualWinner, isComplete: false });
+  const KO_TIE_REASON = "Needs a winner: fight encho, then record hantei if still tied.";
+  const canFinish = !decidedByHantei && !koTieBlocked && hasPointsOrDraw;
 
   // Finish guard (see TeamScoreEditorModal): one tap ARMS the button — its label
   // becomes an explicit "Tap again to finish" INSTRUCTION (not a verdict), so the
@@ -1251,6 +1287,18 @@ export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, on
               )}
             </div>
           )}
+          {/* bc-cse: a barred match cannot be started as scheduled -- the
+              server would just refuse it -- so the ONE component that shows
+              why and offers the default-win/reinstate resolution
+              (BarredMatchNotice, admin_scoring_shared.jsx) stands where
+              Start would be. Lifted ABOVE .score-nav__actions (a centred
+              wrapping flex row of small buttons): the notice's own note text
+              plus its action buttons were squeezed into one flex item there
+              instead of reading as the full-width block it is everywhere
+              else this component renders. */}
+          {m.status === "scheduled" && isBarredMatch(m) && (
+            <BarredMatchNotice match={m} password={password} />
+          )}
           {/* While the correction prompt is open it owns the only Cancel/commit
               row: hide the footer's own nav+actions so the operator never sees
               two Cancels and two commit buttons at the highest-stakes moment
@@ -1262,7 +1310,7 @@ export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, on
             ) : <span />}
 
             <div className="score-nav__actions">
-              {m.status === "scheduled" && (
+              {m.status === "scheduled" && !isBarredMatch(m) && (
                 <button className="btn btn--sm" onClick={async () => {
                   // F5: this submits status:"running", the one shape
                   // _notifyScoreSuperseded (api_client.jsx) deliberately stays
@@ -1287,16 +1335,18 @@ export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, on
                   if (isComplete && !correctionReason) { setShowCorrectionPrompt(true); return; }
                   if (!isComplete && !finishArmed) { setFinishArmed(true); return; }
                   doSubmit(() => (isComplete ? onSubmit : onSubmitAndNext)(buildPatch("completed")));
-                }} disabled={submitting || !canFinish}>
-                  {submitting ? "Saving…" : isComplete ? "Save correction" : finishArmed ? "Tap again to finish →" : "Finish + Start Next →"}
+                }} disabled={submitting || !canFinish}
+                  title={koTieBlocked ? KO_TIE_REASON : undefined}>
+                  {submitting ? "Saving…" : koTieBlocked ? "Needs a winner" : isComplete ? "Save correction" : finishArmed ? "Tap again to finish →" : "Finish + Start Next →"}
                 </button>
               ) : (
                 <button className={`btn btn--primary ${finishArmed && !isComplete ? "btn--confirm" : ""}`} onClick={() => {
                   if (isComplete && !correctionReason) { setShowCorrectionPrompt(true); return; }
                   if (!isComplete && !finishArmed) { setFinishArmed(true); return; }
                   doSubmit(() => onSubmit(buildPatch("completed")));
-                }} disabled={submitting || !canFinish}>
-                  {submitting ? "Saving…" : isComplete ? "Save correction" : finishArmed ? "Tap again to finish" : "Finish"}
+                }} disabled={submitting || !canFinish}
+                  title={koTieBlocked ? KO_TIE_REASON : undefined}>
+                  {submitting ? "Saving…" : koTieBlocked ? "Needs a winner" : isComplete ? "Save correction" : finishArmed ? "Tap again to finish" : "Finish"}
                 </button>
               )}
             </div>

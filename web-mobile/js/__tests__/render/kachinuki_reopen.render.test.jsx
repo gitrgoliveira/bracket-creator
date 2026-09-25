@@ -344,8 +344,12 @@ describe('kachinuki reopen: a busy court gets a remedy, not a dead end', () => {
     // The warning is on screen, in words, BEFORE the operator commits.
     expect(screen.getByTestId('kachinuki-reopen-conflict-warning').textContent)
       .toContain('clears any score already entered for it');
-    // The server's own sentence is not swallowed by our friendlier heading.
-    expect(panel.textContent).toContain('Court A already has a running match (m-r1-1).');
+    // bc-rawm: the server's own raw sentence is GONE, not shown alongside the
+    // heading -- it named the same internal id and told the operator to
+    // "finish that match before reopening", the opposite of this panel's own
+    // remedy button.
+    expect(panel.textContent).not.toContain('Finish that match before reopening');
+    expect(panel.textContent).not.toContain('m-r1-1');
     expect(screen.getByTestId('kachinuki-reopen-requeue-button')).toBeTruthy();
   });
 
@@ -390,22 +394,34 @@ describe('kachinuki reopen: a busy court gets a remedy, not a dead end', () => {
 
   it('re-offers the remedy when a DIFFERENT match has since taken the court', async () => {
     // The atomic remedy fails with a court_busy naming a NEW blocker: the panel
-    // updates to that match rather than dead-ending.
+    // re-offers the remedy rather than dead-ending. bc-rawm: the panel no
+    // longer prints the blocking matchId as text (no label was sent for it
+    // here, and window.compMatchesForCompetition's fixture only knows
+    // 'm-r1-1', so the fetched blockerLabel cannot resolve the new one
+    // either), so this proves the new conflict took hold BEHAVIOURALLY:
+    // tapping the remedy again targets the NEW blocker's id, not the stale
+    // one.
     window.API.reopenMatch = vi.fn().mockRejectedValue(courtBusyError());
     const newBlocker = courtBusyError();
     newBlocker.matchId = 'm-r1-2';
     newBlocker.message = 'Court A already has a running match (m-r1-2). Finish that match before reopening this one.';
-    window.API.requeueBlockerAndReopen = vi.fn().mockRejectedValue(newBlocker);
+    window.API.requeueBlockerAndReopen = vi.fn()
+      .mockRejectedValueOnce(newBlocker)
+      .mockResolvedValue(true);
     await renderEditor();
     await act(async () => { fireEvent.click(screen.getByTestId('kachinuki-reopen-button')); });
     await screen.findByTestId('kachinuki-reopen-conflict');
 
     await act(async () => { fireEvent.click(screen.getByTestId('kachinuki-reopen-requeue-button')); });
 
-    // Still a conflict panel, now naming the new blocker — the remedy is re-offered.
-    const panel = await screen.findByTestId('kachinuki-reopen-conflict');
-    await waitFor(() => expect(panel.textContent).toContain('m-r1-2'));
+    // Still a conflict panel — the remedy is re-offered, not a dead end.
+    await screen.findByTestId('kachinuki-reopen-conflict');
     expect(screen.getByTestId('kachinuki-reopen-requeue-button')).toBeTruthy();
+
+    await act(async () => { fireEvent.click(screen.getByTestId('kachinuki-reopen-requeue-button')); });
+    expect(window.API.requeueBlockerAndReopen).toHaveBeenLastCalledWith(
+      'comp1', 'm1', 'comp1', 'm-r1-2', 'secret', { reason: '', force: false },
+    );
   });
 
   // POST /decision is the OTHER way to finalize a match, so the server demands

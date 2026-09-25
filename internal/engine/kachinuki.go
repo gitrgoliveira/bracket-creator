@@ -744,13 +744,16 @@ var (
 	// running match needs no reopen and a scheduled one has nothing to
 	// reopen.
 	ErrReopenNotCompleted = errors.New("match is not completed; only a completed match can be reopened")
-	// ErrReopenDownstreamFought: the reopened match's result already fed a
-	// downstream match that cannot be reopened with it: a knockout match in
-	// progress, one resolved by a bye off this winner, or (for a pool match)
-	// a started knockout match seeded from this pool. A downstream knockout
-	// match CLOSED with a result of its own is not this error: that one is
-	// the operator's to confirm (DownstreamKnockoutPlayedError, see
-	// reopenBracketDownstreamCheck).
+	// ErrReopenDownstreamFought is retractPropagatedWinner's own defensive
+	// backstop re-check at the actual mutation point (mp-gmcg review), not
+	// the primary interactive refusal: an operator reopening through the
+	// normal doors sees *DownstreamKnockoutRunningError or
+	// *ReopenDownstreamResolvedError instead (bc-cse), both raised earlier
+	// in the same transaction by reopenBracketDownstreamCheck, which this
+	// bare sentinel should therefore never actually reach a client through.
+	// A downstream knockout match CLOSED with a result of its own is not
+	// this error either: that one is the operator's to confirm
+	// (DownstreamKnockoutPlayedError, see reopenBracketDownstreamCheck).
 	ErrReopenDownstreamFought = errors.New("cannot reopen: a downstream knockout match has already started or recorded a result")
 	// ErrRemoveBoutNotRunning: bouts are removed from a RUNNING encounter only.
 	// A completed kachinuki match already had its trailing unscored bouts
@@ -766,14 +769,16 @@ var (
 
 // ReopenMatch is the sanctioned "Reopen match" path for a COMPLETED match
 // that is either a kachinuki team match (mp-gmcg, spec 006 decision 4) or
-// any match, team or individual, that a withdrawal (kiken, fusenpai) decided
-// (operator ruling 2026-09-24: "Everything should be able to be fixed, in
-// case of a wrong entry"): status back to running, the match-level verdict
-// cleared, the bouts already fought kept, so the operator scores what is
-// left and finishes the match again through the normal score path. For a
-// withdrawal that is the whole point: a withdrawal means the opponent
-// received the default score, so removing one means the match was never
-// decided. The gate is reopenResultPreconditionTx.
+// any match, team or individual, decided by a WITHDRAWAL or a DEFAULT WIN
+// (domain.IsDefaultWinDecisionStr: kiken/kiken-voluntary/kiken-injury,
+// fusenpai, or fusensho -- operator ruling 2026-09-24: "Everything should be
+// able to be fixed, in case of a wrong entry"; widened to fusensho by
+// bc-cse, "Clear default win and reopen"): status back to running, the
+// match-level verdict cleared, the bouts already fought kept, so the
+// operator scores what is left and finishes the match again through the
+// normal score path. For a withdrawal or default win that is the whole
+// point: the opponent received the default score, so removing one means the
+// match was never decided. The gate is reopenResultPreconditionTx.
 //
 // `reason` is an OPTIONAL audit justification, persisted as the match's
 // CorrectionReason when supplied. Reopening is the only way to rewrite a
@@ -819,9 +824,10 @@ var (
 // checkCourtExclusivityTx. Both are skipped when the match has no court
 // assigned.
 //
-// Any other completed match (not kachinuki, not decided by a withdrawal)
-// returns a *ValidationError (HTTP 400): the correction path (completed ->
-// completed with a correctionReason) remains its sanctioned edit. The score
+// Any other completed match (not kachinuki, not decided by a withdrawal or
+// default win) returns a *ValidationError (HTTP 400): the correction path
+// (completed -> completed with a correctionReason) remains its sanctioned
+// edit. The score
 // path's stale-write guard (a plain running write against a completed match
 // silently no-ops) is intentionally untouched; reopen is explicit and
 // separate.
@@ -840,7 +846,12 @@ var (
 // opts.Force it is reopened for re-entry (forceReopenDownstreamChain, one hop)
 // and its id reported through opts.Reopened. A downstream match that is
 // RUNNING, or was resolved by a bye off this winner, is still refused
-// outright with ErrReopenDownstreamFought: see reopenBracketDownstreamCheck.
+// outright -- through the operator-facing doors that is
+// *DownstreamKnockoutRunningError / *ReopenDownstreamResolvedError, raised by
+// reopenBracketDownstreamCheck earlier in the same transaction;
+// ErrReopenDownstreamFought is only the defensive re-check those same
+// conditions hit again at the actual mutation point (see its own doc
+// comment above), not what a client normally receives.
 //
 // ELIGIBILITY. A reopen clears the match's decision, so reopening a match a
 // withdrawal (kiken, fusenpai) ended removes that withdrawal, and the
@@ -849,7 +860,11 @@ var (
 // be able to be fixed, in case of a wrong entry"): the competitor it barred is
 // restored in the same transaction as the reopen, and the restored status is
 // returned so the handler broadcasts competitor_status_updated. nil when the
-// reopened result was not a withdrawal. A downstream match force-reopened
+// reopened result was not a withdrawal -- which now INCLUDES a match-level
+// fusensho (domain.IsWithdrawalDecisionStr, scoring_tx.go, deliberately
+// excludes it): recording a fusensho never wrote a CompetitorStatus for
+// anyone, so there is nothing to restore, and reopening one correctly
+// restores nobody's eligibility either. A downstream match force-reopened
 // with it gets the same treatment (restoreForceReopened), reported on its
 // opts.Reopened entry's Restored.
 //
@@ -973,7 +988,8 @@ func (e *Engine) reopenUnderCourtLock(compID string, comp *state.Competition, ma
 				// Who fought a team -DH-/-TB- rep bout is a fact of that bout
 				// too; a pool match is the only home that names them.
 				fight.RepPlayerA, fight.RepPlayerB = h.Pool.RepPlayerA, h.Pool.RepPlayerB
-				reopenPoolMatch(h.Pool, reason)
+				targetStatus := e.reopenTargetStatusTx(tx, compID, matchID, h.Pool.Decision, h.Pool.DecisionBy, h.Pool.SideAID, h.Pool.SideBID)
+				reopenPoolMatch(h.Pool, reason, targetStatus)
 				if single {
 					h.Pool.IpponsA, h.Pool.IpponsB = fight.IpponsA, fight.IpponsB
 					h.Pool.HansokuA, h.Pool.HansokuB = fight.HansokuA, fight.HansokuB
@@ -1016,7 +1032,8 @@ func (e *Engine) reopenUnderCourtLock(compID string, comp *state.Competition, ma
 			}
 			prior := h.Bracket.Decision
 			fight, single := singleBoutFightOf(h.Bracket.SubResults, h.Bracket.IpponsA, h.Bracket.IpponsB, h.Bracket.HansokuA, h.Bracket.HansokuB, h.Bracket.Encho)
-			reopenBracketMatch(h.Bracket, reason)
+			targetStatus := e.reopenTargetStatusTx(tx, compID, matchID, h.Bracket.Decision, h.Bracket.DecisionBy, h.Bracket.SideAID, h.Bracket.SideBID)
+			reopenBracketMatch(h.Bracket, reason, targetStatus)
 			if single {
 				h.Bracket.IpponsA, h.Bracket.IpponsB = fight.IpponsA, fight.IpponsB
 				h.Bracket.HansokuA, h.Bracket.HansokuB = fight.HansokuA, fight.HansokuB
@@ -1122,12 +1139,18 @@ func (e *Engine) RequeueBlockerAndReopen(targetComp, targetMatch, blockerComp, b
 // requires for one already-located match home, in this order:
 //
 //  1. the match must be COMPLETED (ErrReopenNotCompleted);
-//  2. it must be one a reopen is FOR: a kachinuki team match, or any match a
-//     withdrawal (kiken, fusenpai) decided (operator ruling 2026-09-24).
-//     Anything else is a *ValidationError (HTTP 400); its sanctioned edit is
-//     the correction path. This is the reopen's one entry gate, so both
-//     doors (ReopenMatch, RequeueBlockerAndReopen) apply it, and it reads the
-//     STORED decision under the tx, never a caller's claim about it;
+//  2. it must be one a reopen is FOR: a kachinuki team match, or any match
+//     decided by a withdrawal OR a default win (domain.IsDefaultWinDecisionStr:
+//     kiken/kiken-voluntary/kiken-injury, fusenpai, or fusensho -- operator
+//     ruling 2026-09-24, widened to fusensho by bc-cse so "Clear default win
+//     and reopen" works on a match-level fusensho too; a fusensho reopen
+//     restores nobody's eligibility, since recording one never barred anyone
+//     -- see restoreIfWithdrawalRemoved, scoring_tx.go, which stays scoped to
+//     domain.IsWithdrawalDecisionStr for exactly that reason). Anything else
+//     is a *ValidationError (HTTP 400); its sanctioned edit is the correction
+//     path. This is the reopen's one entry gate, so both doors (ReopenMatch,
+//     RequeueBlockerAndReopen) apply it, and it reads the STORED decision
+//     under the tx, never a caller's claim about it;
 //  3. for a bracket round, its result must not have fed a downstream it
 //     cannot unwind (reopenBracketDownstreamCheck), where force is the
 //     operator's confirmation for a downstream closed with its own result. A
@@ -1150,8 +1173,11 @@ func (e *Engine) reopenResultPreconditionTx(tx state.StoreTx, compID string, com
 	if status != state.MatchStatusCompleted {
 		return ErrReopenNotCompleted
 	}
-	if !comp.IsKachinuki() && !domain.IsWithdrawalDecisionStr(decision) {
-		return validationErrorf("reopen is only for kachinuki team matches and for matches a withdrawal (kiken or fusenpai) decided; correct other results via the score editor (correctionReason)")
+	if !comp.IsKachinuki() && !domain.IsDefaultWinDecisionStr(decision) {
+		// bc-cse item 14: no "(correctionReason)" jargon -- that named the
+		// internal API field, not anything the operator sees on the score
+		// editor's own correction-reason box.
+		return validationErrorf("reopen is only for kachinuki team matches and for matches decided by a withdrawal or default win (kiken, kiken-injury, fusenpai, or fusensho); correct other results via the score editor instead")
 	}
 	if h.Pool != nil {
 		// A pool reopen changes no knockout slot: the pool is incomplete
@@ -1173,15 +1199,21 @@ func (e *Engine) reopenResultPreconditionTx(tx state.StoreTx, compID string, com
 // reopenBracketDownstreamCheck decides, for a bracket ROUND match being
 // reopened, what its already-propagated result means for the matches it fed
 // (downstreamTargets: the next-round slot, and for a semifinal the bronze).
-// Three cases, the terminal ones checked FIRST so the operator is never asked
+// FOUR cases, the terminal ones checked FIRST so the operator is never asked
 // to confirm a reopen that would then be refused anyway:
 //
-//   - a downstream that is RUNNING, or was resolved by a bye off this winner
-//     (started or scored, but not closed with a result of its own): refused
-//     outright with ErrReopenDownstreamFought. Someone is fighting the first;
-//     the second completed and propagated further on its own, which
-//     retractPropagatedWinner does not unwind. Finish or requeue the running
-//     one, then reopen;
+//   - a downstream that is RUNNING (started or scored, but not closed with a
+//     result of its own): refused outright with *DownstreamKnockoutRunningError
+//     (bc-cse; the SAME 409 downstream_knockout_running shape the pool-
+//     requalification refusal already uses). Someone is fighting it now;
+//     finish it or send it back to the queue, then reopen;
+//   - a downstream that was resolved by a bye off this winner (completed,
+//     but not closed with a result of its own -- bracketMatchCarriesOwnResult
+//     false): refused with *ReopenDownstreamResolvedError (bc-cse, split out
+//     from the running case in the SAME sub-check because a bye has no
+//     "finish it or requeue it" remedy -- nobody fought it). Reopening does
+//     not unwind it: retractPropagatedWinner does not undo a completed
+//     downstream;
 //   - a downstream CLOSED with a result of its own
 //     (firstDownstreamWithOwnResult, the same one-hop rule a knockout
 //     correction uses): without force, *DownstreamKnockoutPlayedError naming
@@ -1191,10 +1223,40 @@ func (e *Engine) reopenResultPreconditionTx(tx state.StoreTx, compID string, com
 //   - otherwise (a merely filled, unfought slot): nil.
 func reopenBracketDownstreamCheck(bracket *state.Bracket, rIdx, mIdx int, force bool) error {
 	bronze, next := downstreamTargets(bracket, rIdx, mIdx)
+	var running, resolved []ReopenedMatch
 	for _, d := range []*state.BracketMatch{bronze, next} {
-		if d != nil && bracketMatchStartedOrScored(d) && !bracketMatchCarriesOwnResult(d) {
-			return ErrReopenDownstreamFought
+		if d == nil || !bracketMatchStartedOrScored(d) || bracketMatchCarriesOwnResult(d) {
+			continue
 		}
+		// bc-cse: the two terminal sub-cases get DIFFERENT typed errors
+		// (and so different operator sentences), because they call for
+		// different remedies: someone is fighting the running one right
+		// now (finish it or requeue it), while a bye-resolved one was never
+		// fought by anyone reopening this match's court could reach.
+		//
+		// resolved requires Status == Completed explicitly (bc-cse item 8),
+		// not just "not Running": bracketMatchStartedOrScored's other three
+		// disjuncts (Winner/SubResults/Ippons set) can be true on a
+		// SCHEDULED match too -- stray/transitional data a reopen should
+		// not confidently label "resolved by a bye" (that sentence promises
+		// a specific, clean completed-via-bye shape). Such a row falls
+		// through to neither bucket; firstDownstreamWithOwnResult below is
+		// gated on the SAME Completed precondition
+		// (bracketMatchCarriesOwnResult), so it will not flag it either --
+		// this function simply has nothing confident to say about it.
+		switch d.Status {
+		case state.MatchStatusRunning:
+			running = append(running, bracketMatchRef(d))
+		case state.MatchStatusCompleted:
+			resolved = append(resolved, bracketMatchRef(d))
+		}
+	}
+	matchID := bracket.Rounds[rIdx][mIdx].ID
+	if len(running) > 0 {
+		return &DownstreamKnockoutRunningError{MatchID: matchID, Running: running, Reopening: true}
+	}
+	if len(resolved) > 0 {
+		return &ReopenDownstreamResolvedError{MatchID: matchID, Resolved: resolved}
 	}
 	if blocking := firstDownstreamWithOwnResult(bracket, rIdx, mIdx); len(blocking) > 0 && !force {
 		return newDownstreamKnockoutPlayedError(&bracket.Rounds[rIdx][mIdx], blocking, mIdx)
@@ -1257,14 +1319,17 @@ func (e *Engine) requireBlockerHoldsCourt(targetComp, targetMatch, blockerComp, 
 		return err
 	}
 	if targetCourt == "" {
-		return validationErrorf("match %s has no court assigned, so no match can be blocking its court", targetMatch)
+		return validationErrorf("%s has no court assigned, so no match can be blocking it.", SentenceCase(e.operatorMatchLabel(targetComp, targetMatch)))
 	}
 	blockerCourt, err := e.lookupMatchCourt(blockerComp, blockerMatch)
 	if err != nil {
 		return err
 	}
 	if blockerCourt != targetCourt {
-		return validationErrorf("match %s is on court %q, not %s's court %q; requeuing it would not free the court", blockerMatch, blockerCourt, targetMatch, targetCourt)
+		// The second label is mid-sentence ("not %s's Shiaijo"), so only the
+		// first (sentence-initial) one is case-corrected.
+		return validationErrorf("%s is on Shiaijo %s, not %s's Shiaijo %s. Requeuing it would not free the court.",
+			SentenceCase(e.operatorMatchLabel(blockerComp, blockerMatch)), blockerCourt, e.operatorMatchLabel(targetComp, targetMatch), targetCourt)
 	}
 	status, found, err := e.store.MatchStatusByID(blockerComp, blockerMatch)
 	if err != nil {
@@ -1276,10 +1341,12 @@ func (e *Engine) requireBlockerHoldsCourt(targetComp, targetMatch, blockerComp, 
 		// between the two cached reads (DeleteCompetition takes the per-comp
 		// lock, not the court lock we hold) — a clearer message than the
 		// "not running (status \"\")" the check below would otherwise give.
-		return notFoundErrorf("blocker match %s not found in competition %s", blockerMatch, blockerComp)
+		// No label to resolve: the match is gone, so there is nothing to name
+		// it by beyond "it".
+		return notFoundErrorf("the blocking match could not be found; it may have been deleted. Retry the reopen.")
 	}
 	if status != state.MatchStatusRunning {
-		return validationErrorf("match %s is not running (status %q); it is not blocking the court, retry the reopen", blockerMatch, status)
+		return validationErrorf("%s is not running now, so it is not blocking the court. Retry the reopen.", SentenceCase(e.operatorMatchLabel(blockerComp, blockerMatch)))
 	}
 	return nil
 }
@@ -1494,8 +1561,62 @@ func findMatchHome(tx state.StoreTx, compID, matchID string, visit func(matchHom
 // requeueBracketMatch sets (mp-y3nk): a write stamped before the reopen, such
 // as an offline-queued Save correction replayed afterwards, is older than the
 // reopen and is refused as superseded instead of completing the match again.
-func reopenPoolMatch(m *state.MatchResult, reason string) {
-	m.Status = state.MatchStatusRunning
+// reopenTargetStatus decides RUNNING vs SCHEDULED for a reopen (bc-cse item
+// 9). Every reopen but one goes to RUNNING, as it always has: the operator
+// tapped Reopen to fight on. The exception is a match-level FUSENSHO
+// (domain.DecisionFusensho) recorded to close a barred competitor's
+// remaining match with a default win for the opponent -- fusensho itself
+// never writes a CompetitorStatus (recordIneligibilityFromDecision only
+// fires for domain.IsWithdrawalDecisionStr, which deliberately excludes it;
+// see ReopenMatch's ELIGIBILITY doc), so the bar this match's decisionBy
+// side carries, if any, was recorded by an EARLIER withdrawal elsewhere and
+// this reopen restores nothing. If that earlier bar still holds, the
+// competitor still cannot fight: reopening to RUNNING would only let
+// StartMatchTx refuse every later write on this match with no way forward,
+// so it goes to SCHEDULED instead, which re-shows the barred-match notice
+// (annotateIneligibleSides) exactly as it did before the fusensho was ever
+// recorded. Once the competitor is reinstated or the earlier withdrawal is
+// itself cleared, the SAME reopen goes to RUNNING like any other.
+//
+// decisionBy names the WITHDRAWING side (recordDecisionTx's own convention:
+// "aka" -> sideA lost, "shiro" -> sideB lost), so it is read against
+// BarredSides' A/B return the same way. statuses/matchID/sideAID/sideBID are
+// the reopened match's OWN identity, read before reopenPoolMatch/
+// reopenBracketMatch clear Decision/DecisionBy -- BarredSides' own
+// undo-path exemption (a status recorded BY matchID itself never bars it)
+// does not apply here, since fusensho never recorded one.
+func reopenTargetStatus(statuses map[string]domain.CompetitorStatus, matchID, decision, decisionBy, sideAID, sideBID string) state.MatchStatus {
+	if decision != string(domain.DecisionFusensho) {
+		return state.MatchStatusRunning
+	}
+	a, b := BarredSides(statuses, matchID, sideAID, sideBID)
+	stillBarred := (decisionBy == "aka" && a != nil) || (decisionBy == "shiro" && b != nil)
+	if stillBarred {
+		return state.MatchStatusScheduled
+	}
+	return state.MatchStatusRunning
+}
+
+// reopenTargetStatusTx is reopenTargetStatus's tx-aware wrapper: it loads
+// CompetitorStatus LAZILY, only when decision is a fusensho (the one case
+// reopenTargetStatus needs it for), through the live transaction handle. A
+// load failure is logged rather than discarded and defaults to RUNNING
+// (today's behaviour), since a read the operator cannot diagnose must never
+// silently trade one stuck state for another.
+func (e *Engine) reopenTargetStatusTx(tx state.StoreTx, compID, matchID, decision, decisionBy, sideAID, sideBID string) state.MatchStatus {
+	if decision != string(domain.DecisionFusensho) {
+		return state.MatchStatusRunning
+	}
+	statuses, err := tx.LoadCompetitorStatus(compID)
+	if err != nil {
+		log.Printf("engine: ReopenMatch: LoadCompetitorStatus compId=%s matchId=%s: %v (defaulting to running)", compID, matchID, err)
+		return state.MatchStatusRunning
+	}
+	return reopenTargetStatus(statuses, matchID, decision, decisionBy, sideAID, sideBID)
+}
+
+func reopenPoolMatch(m *state.MatchResult, reason string, targetStatus state.MatchStatus) {
+	m.Status = targetStatus
 	m.Winner = ""
 	m.WinnerID = ""
 	m.IpponsA = nil
@@ -1550,8 +1671,8 @@ func reopenPoolMatch(m *state.MatchResult, reason string) {
 // fences any stale pre-completion offline write via ApplyByTimestamp and
 // never blocks the re-End. If you add a match-level verdict field a
 // kachinuki result CAN carry, clear it here too.
-func reopenBracketMatch(bm *state.BracketMatch, reason string) {
-	bm.Status = state.MatchStatusRunning
+func reopenBracketMatch(bm *state.BracketMatch, reason string, targetStatus state.MatchStatus) {
+	bm.Status = targetStatus
 	bm.Winner = ""
 	bm.WinnerID = "" // bc-brid: the verdict's id half, cleared with the name.
 	bm.IpponsA = nil
@@ -1669,7 +1790,11 @@ func downstreamFoughtForRound(bracket *state.Bracket, rIdx, mIdx int) bool {
 // any is mutated, so a rejection leaves the bracket untouched. A
 // downstream match that has started, recorded bouts, or completed (which
 // includes a bye auto-resolution off this match's winner) rejects the
-// reopen with ErrReopenDownstreamFought.
+// reopen with ErrReopenDownstreamFought -- THIS function's own return, not
+// what an operator sees through the normal reopen doors, which are refused
+// earlier in the transaction by reopenBracketDownstreamCheck (see
+// ErrReopenDownstreamFought's own doc comment). Reaching this rejection is
+// therefore the defensive-backstop case: the earlier check missed it.
 func retractPropagatedWinner(bracket *state.Bracket, rIdx, mIdx int) error {
 	if downstreamFoughtForRound(bracket, rIdx, mIdx) {
 		return ErrReopenDownstreamFought

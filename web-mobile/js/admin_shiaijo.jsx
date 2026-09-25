@@ -35,6 +35,19 @@ import { NumberedName } from './numbered_name.jsx';
 // mp-jnvl: the recency rule is shared with the public viewer's Recent
 // results, so it lives in its own leaf rather than in this page.
 import { resultRecencyDesc } from './result_recency.jsx';
+// bc-cse: a scheduled match a competitor is barred from (withdrew earlier)
+// cannot be fought, so no auto-pick may offer it and the queue row shows the
+// default-win action instead of Start. One leaf owns the question
+// (ineligible_match.jsx); BarredMatchNotice (admin_scoring_shared.jsx) is the
+// one component that renders the note plus that action across every surface.
+import { isBarredMatch } from './ineligible_match.jsx';
+// Straight from its own leaf, NOT admin_scoring_shared.jsx: that module also
+// imports bracket.jsx (for sideMarks), and admin_shiaijo.jsx's render suite
+// stubs window.BracketTree before importing this file -- routing through
+// admin_scoring_shared.jsx pulled bracket.jsx's module body in ahead of that
+// stub taking effect and silently overwrote it. See barred_match_notice.jsx's
+// header.
+import { BarredMatchNotice } from './barred_match_notice.jsx';
 
 const { useState: useStateSh, useMemo: useMemoSh, useEffect: useEffectSh, useRef: useRefSh, useCallback: useCallbackSh } = React;
 
@@ -918,8 +931,19 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
         [showAllCompleted, filteredCompleted]
     );
 
-    // Up Next = the first scheduled match in the selected competition.
-    const upNext = filteredScheduled[0] || null;
+    // Up Next = the first scheduled match in the selected competition that
+    // can actually be fought. A barred match (isBarredMatch, bc-cse) is
+    // skipped by every auto-pick: the operator resolves it directly from its
+    // queue row (the default-win action, or Reinstate) rather than having it
+    // offered as the next thing to start.
+    const upNext = filteredScheduled.find((m) => !isBarredMatch(m)) || null;
+    // Everything else in Upcoming: the whole scheduled list minus whichever
+    // match became Up Next (by key, not index: Up Next may not be [0] when a
+    // barred match sits ahead of it). Any barred match stays here, rendered
+    // as a normal row that shows its own resolution instead of Start.
+    const upcomingQueueMatches = upNext
+        ? filteredScheduled.filter((m) => matchKey(m) !== matchKey(upNext))
+        : filteredScheduled;
     // A Start refusal describes ONE match at one moment. Whenever Up next
     // changes to a different match (that one started, was moved, the operator
     // switched competition, or the court moved on), any stored refusal is
@@ -956,7 +980,11 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
         const pool = [...running, ...scheduled].filter((x) => x.compId === m.compId);
         const idx = pool.findIndex((x) => matchKey(x) === matchKey(m));
         if (idx < 0) return null;
-        return pool.slice(idx + 1).find((x) => x.status !== "completed") || null;
+        // bc-cse: skip a barred match. Both Finish + Start Next and the
+        // after-decision advance feed this straight into a Start write, which
+        // the server would just refuse (409 ineligible_competitor); the
+        // barred match is left for its own queue row to resolve.
+        return pool.slice(idx + 1).find((x) => x.status !== "completed" && !isBarredMatch(x)) || null;
     };
 
     // Amber nudge banner logic (AC6): fires ONLY when the SELECTED competition
@@ -1478,14 +1506,15 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
                                 scoring panel on the right, so repeating it in the queue is
                                 redundant. */}
 
-                            {filteredScheduled.length > (upNext ? 1 : 0) && (
+                            {upcomingQueueMatches.length > 0 && (
                                 <ShiaijoQueueGroup
-                                    label="Upcoming" subGroup matches={upNext ? filteredScheduled.slice(1) : filteredScheduled}
+                                    label="Upcoming" subGroup matches={upcomingQueueMatches}
                                     courts={courts} onMoveCourt={requestMoveCourt}
                                     onMove={moveMatch} onEnterLineup={setLineupMatch}
                                     onPick={pickMatch}
                                     onCall={callToCourt} callingKey={callingKey} calledKey={calledKey} startingKey={startingKey}
                                     scheduled={filteredScheduled}
+                                    password={password}
                                 />
                             )}
 
@@ -1701,7 +1730,15 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
                                 <div className="empty shiaijo__placeholder">
                                     <h3>Ready when you are</h3>
                                     <p style={{ fontSize: 13, color: "var(--ink-3)" }}>
-                                        Start the next match from the Up Next card to begin scoring on this court.
+                                        {/* bc-cse: when every scheduled match here is barred there
+                                            is no Up Next card at all (upNext skips a barred match on
+                                            purpose), so telling the operator to use it points at
+                                            something not on screen. Name the actual remedy instead:
+                                            each barred row in the queue carries its own one-tap
+                                            resolution (BarredMatchNotice). */}
+                                        {!upNext && filteredScheduled.length > 0
+                                            ? "Every scheduled match on this court is barred. Resolve a withdrawal in the queue to bring one back."
+                                            : "Start the next match from the Up Next card to begin scoring on this court."}
                                     </p>
                                 </div>
                             )}
@@ -1848,13 +1885,14 @@ export function groupQueueMatches(matches) {
     return order.map((k) => byKey.get(k));
 }
 
-function ShiaijoQueueGroup({ label, matches, subGroup, scheduled, courts, onMoveCourt, onMove, onEnterLineup, onPick, onCorrect, onCall, callingKey, calledKey, startingKey }) {
+function ShiaijoQueueGroup({ label, matches, subGroup, scheduled, courts, onMoveCourt, onMove, onEnterLineup, onPick, onCorrect, onCall, callingKey, calledKey, startingKey, password }) {
     const renderRow = (m) => (
         <ShiaijoQueueRow
             key={matchKey(m)} m={m}
             scheduled={scheduled}
             courts={courts} onMoveCourt={onMoveCourt} onMove={onMove} onEnterLineup={onEnterLineup} onPick={onPick} onCorrect={onCorrect}
             onCall={onCall} callingKey={callingKey} calledKey={calledKey} startingKey={startingKey}
+            password={password}
         />
     );
     const groups = subGroup ? groupQueueMatches(matches) : null;
@@ -1879,8 +1917,12 @@ function ShiaijoQueueGroup({ label, matches, subGroup, scheduled, courts, onMove
     );
 }
 
-export function ShiaijoQueueRow({ m, scheduled, courts, onMoveCourt, onMove, onEnterLineup, onPick, onCorrect, onCall, callingKey, calledKey, startingKey, pending, onResolve, slotLabel }) {
+export function ShiaijoQueueRow({ m, scheduled, courts, onMoveCourt, onMove, onEnterLineup, onPick, onCorrect, onCall, callingKey, calledKey, startingKey, pending, onResolve, slotLabel, password }) {
     const isComplete = m.status === "completed";
+    // bc-cse: a scheduled match a competitor is barred from. `pending`
+    // placeholder finals are excluded on purpose: their sides are still
+    // feeder placeholders, not a resolved competitor the stamp could name.
+    const barred = !pending && isBarredMatch(m);
     // Slot text through the one shared rule (bracket.jsx). Actionable rows never
     // hold a placeholder (hasBothSides filtered them out), so this only ever
     // changes the `pending` "Later" rows; the fallbacks keep any other caller
@@ -1952,6 +1994,11 @@ export function ShiaijoQueueRow({ m, scheduled, courts, onMoveCourt, onMove, onE
                     <span className="shiaijo-qrow__name"><NumberedName side="aka" name={aName} number={m.sideA?.number} clip /></span>
                 </SideCell>
             </div>
+            {/* bc-cse: a barred match cannot be started (the server refuses it),
+                so the row shows why and the one-tap resolution here instead of a
+                dead Start button. BarredMatchNotice (admin_scoring_shared.jsx) is
+                the one component: same note/action/reinstate on every surface. */}
+            {barred && <BarredMatchNotice match={m} password={password} />}
             {/* Completed result on its own centred line BELOW the names: the
                 canonical "marks in the centre" position, but stacked so the
                 (often long) names keep the full-width line and never crowd. The
@@ -1982,7 +2029,11 @@ export function ShiaijoQueueRow({ m, scheduled, courts, onMoveCourt, onMove, onE
                             btnClassName="score-edit-row__court score-edit-row__court--btn"
                         />
                     )}
-                    {onEnterLineup && isTeamMatch(m) && (
+                    {/* bc-cse: never offered on a barred row -- the server
+                        would just refuse the Start this exists to prepare
+                        for, and BarredMatchNotice above already owns the
+                        one-tap resolution instead. */}
+                    {onEnterLineup && isTeamMatch(m) && !barred && (
                         <button type="button" className="btn btn--ghost btn--sm" onClick={() => onEnterLineup(m)} title="Set the team lineup before starting">Lineup</button>
                     )}
                     {onMove && (
@@ -1992,16 +2043,21 @@ export function ShiaijoQueueRow({ m, scheduled, courts, onMoveCourt, onMove, onE
                         </>
                     )}
                     {/* Optional announce: mirrors the Up Next card so any queued match is a
-                        complete view: call it to the floor, or start it directly. */}
-                    {onCall && window.API && typeof window.API.sendAnnouncement === "function" && (
+                        complete view: call it to the floor, or start it directly.
+                        bc-cse: never offered on a barred row -- there is nobody to
+                        call to the court for a match the server would refuse to
+                        start. */}
+                    {onCall && window.API && typeof window.API.sendAnnouncement === "function" && !barred && (
                         <button type="button" className="btn btn--ghost btn--sm" disabled={callingKey === matchKey(m)} onClick={() => onCall(m)} title="Announce this match to spectators and competitors">
                             {callingKey === matchKey(m) ? "Calling…" : (calledKey === matchKey(m) ? "Call again" : "Call to court")}
                         </button>
                     )}
                     {/* Start match is the primary per-row action: pushed to the end (the "go" slot).
                         Same pickMatch path as the Up Next card: defers an unscored running bout,
-                        blocks while one is being scored, then starts this match for scoring. */}
-                    {onPick && <button type="button" className="btn btn--primary btn--sm shiaijo-row__pick" disabled={startingKey === matchKey(m)} onClick={() => onPick(m)} title="Start this match now and begin scoring">{startingKey === matchKey(m) ? "Starting…" : "Start match"}</button>}
+                        blocks while one is being scored, then starts this match for scoring.
+                        bc-cse: never offered on a barred row -- BarredMatchNotice above owns its
+                        one-tap resolution instead, since the server would just refuse a Start. */}
+                    {onPick && !barred && <button type="button" className="btn btn--primary btn--sm shiaijo-row__pick" disabled={startingKey === matchKey(m)} onClick={() => onPick(m)} title="Start this match now and begin scoring">{startingKey === matchKey(m) ? "Starting…" : "Start match"}</button>}
                 </div>
             )}
             {/* Pending placeholder final: the ONLY affordance is the opt-in

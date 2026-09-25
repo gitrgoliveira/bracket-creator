@@ -13,6 +13,12 @@ import { DOWNSTREAM_KNOCKOUT_PLAYED_CANCELLED } from '../../write_result.jsx';
 // otherwise. The queued-vs-superseded split the offline-resolve test below
 // depends on is therefore the real one either way.
 
+// bc-cse: captures the LATEST ScoreEditorModal props so a test can drive
+// onSubmitAndNext/onAfterDecision directly (the chained-navigation tests
+// below), while the rendered markup stays exactly what the pre-existing
+// tests already query (data-testid="score-editor" data-match=...).
+const probe = { props: null };
+
 const STUBBED_GLOBALS = {
   // MODULE-EVAL-TIME: captured at import; set before dynamic import below
   AdminTopbar: ({ children }) => <div data-testid="topbar">{children}</div>,
@@ -20,7 +26,7 @@ const STUBBED_GLOBALS = {
   // Carries the id of the match the panel is scoring, so a test can tell
   // WHICH match the console selected (captured at import, so it cannot be
   // swapped per test).
-  ScoreEditorModal: ({ match }) => <div data-testid="score-editor" data-match={match ? match.id : ''} />,
+  ScoreEditorModal: (props) => { probe.props = props; return <div data-testid="score-editor" data-match={props.match ? props.match.id : ''} />; },
   CourtPicker: () => null,
   BracketTree: () => null,
   Icon: ({ name }) => <span>{name}</span>,
@@ -36,6 +42,8 @@ const STUBBED_GLOBALS = {
     sendAnnouncement: vi.fn(),
     updateMatchTime: vi.fn(),
     startMatch: vi.fn(),
+    recordDecision: vi.fn().mockResolvedValue({ applied: true }),
+    reinstateCompetitor: vi.fn().mockResolvedValue({}),
   },
   startPatch: vi.fn(),
   confirmDialog: vi.fn().mockResolvedValue(true),
@@ -783,5 +791,175 @@ describe('AdminShiaijoPage render-smoke', () => {
       localError.mockRestore();
       localWarn.mockRestore();
     }
+  });
+});
+
+// bc-cse: a scheduled match a competitor is barred from (withdrew earlier)
+// cannot be fought. No auto-pick may offer it (Up Next, Finish + Start Next);
+// its queue row shows why and a one-tap way to resolve it instead of a Start
+// button the server would just refuse.
+describe('a barred match is skipped by every auto-pick (bc-cse)', () => {
+  const side = (id, name) => ({ id, name });
+  // Withdrawn on side B (Yama, kiken-voluntary): the default win goes to Umi.
+  const barredMatch = (over = {}) => ({
+    id: 'm-barred', compId: 'c1', compName: 'Cup', status: 'scheduled', phase: 'pool', poolName: 'Pool A',
+    court: 'A', scheduledAt: '09:05', sideA: side('u', 'Umi'), sideB: side('y', 'Yama'),
+    ineligibleSides: { b: 'kiken-voluntary' },
+    ...over,
+  });
+  const openMatch = {
+    id: 'm-open', compId: 'c1', compName: 'Cup', status: 'scheduled', phase: 'pool', poolName: 'Pool A',
+    court: 'A', scheduledAt: '09:10', sideA: side('s', 'Sato'), sideB: side('k', 'Kato'),
+  };
+
+  it('Up Next skips it, its queue row offers the default win instead of Start, and no Reinstate for a non-reinstateable withdrawal', async () => {
+    window.tournamentMatches = () => [barredMatch(), openMatch];
+    window.filterMatchesByCourt = (m) => m;
+    const recordDecision = vi.fn().mockResolvedValue({ applied: true });
+    const prevRD = window.API.recordDecision;
+    window.API.recordDecision = recordDecision;
+    try {
+      let utils;
+      await act(async () => { utils = renderPage(makeMinimalTournament()); });
+
+      // Up Next skips the barred match and offers the next fightable one.
+      const card = utils.container.querySelector('.shiaijo-upnext__card');
+      expect(card.textContent).toContain('Sato');
+      expect(card.textContent).not.toContain('Umi');
+      expect(card.textContent).not.toContain('Yama');
+
+      // The barred match's own row: the note, one action, no Start, no Reinstate.
+      const rows = [...utils.container.querySelectorAll('.shiaijo-qrow')];
+      const row = rows.find((r) => r.textContent.includes('Yama'));
+      expect(row).toBeTruthy();
+      expect(row.textContent).toContain('Yama withdrew: record the default win.');
+      const startBtn = [...row.querySelectorAll('button')].find((b) => /^start match$/i.test(b.textContent));
+      expect(startBtn).toBeUndefined();
+      expect(utils.queryByTestId('barred-match-reinstate')).toBeNull();
+      const awardBtn = utils.getByTestId('barred-match-default-win');
+      expect(awardBtn.textContent).toBe('Record default win for Umi');
+
+      await act(async () => { awardBtn.click(); });
+      expect(recordDecision).toHaveBeenCalledWith('c1', 'm-barred', {
+        decision: 'fusensho', decisionBy: 'shiro', decisionReason: 'auto: Yama withdrawn',
+      }, '');
+    } finally {
+      window.API.recordDecision = prevRD;
+    }
+  });
+
+  it('Finish + Start Next skips it when advancing to the next match on the same court', async () => {
+    const running = {
+      id: 'm-run', compId: 'c1', compName: 'Cup', status: 'running', phase: 'pool', poolName: 'Pool A',
+      court: 'A', sideA: side('p1', 'Yamada'), sideB: side('p2', 'Tanaka'),
+    };
+    window.tournamentMatches = () => [running, barredMatch(), openMatch];
+    window.filterMatchesByCourt = (m) => m;
+    const onEditScore = vi.fn().mockResolvedValue({ status: 'ok' });
+    await act(async () => { renderPage(makeMinimalTournament(), 'A', { onEditScore }); });
+    expect(probe.props.match?.id).toBe('m-run');
+    await act(async () => { await probe.props.onSubmitAndNext({ status: 'completed', winner: side('p1', 'Yamada') }); });
+    // The finishing write, then the start-next write -- skipping m-barred.
+    expect(onEditScore).toHaveBeenCalledTimes(2);
+    expect(onEditScore.mock.calls[0][0]).toBe('c1');
+    expect(onEditScore.mock.calls[0][1]).toBe('m-run');
+    expect(onEditScore.mock.calls[1][0]).toBe('c1');
+    expect(onEditScore.mock.calls[1][1]).toBe('m-open');
+  });
+
+  it('offers Reinstate for a reinstateable (kiken-injury) withdrawal', async () => {
+    window.tournamentMatches = () => [barredMatch({ ineligibleSides: { b: 'kiken-injury' } }), openMatch];
+    window.filterMatchesByCourt = (m) => m;
+    const reinstateCompetitor = vi.fn().mockResolvedValue({});
+    const prevR = window.API.reinstateCompetitor;
+    window.API.reinstateCompetitor = reinstateCompetitor;
+    try {
+      let utils;
+      await act(async () => { utils = renderPage(makeMinimalTournament()); });
+      const reinstateBtn = utils.getByTestId('barred-match-reinstate');
+      expect(reinstateBtn.textContent).toBe('Reinstate Yama');
+      await act(async () => { reinstateBtn.click(); });
+      expect(reinstateCompetitor).toHaveBeenCalledWith('c1', 'y', '');
+    } finally {
+      window.API.reinstateCompetitor = prevR;
+    }
+  });
+
+  // bc-cse: both sides barred on a POOL match (barredMatch's own phase) can
+  // be recorded as drawn -- neither single-sided default-win action fits,
+  // but the pool/league draw action does.
+  it('both sides barred: the note, and the draw action (no single-sided action)', async () => {
+    window.tournamentMatches = () => [barredMatch({ id: 'Pool A-2', ineligibleSides: { a: 'fusenpai', b: 'kiken-voluntary' } })];
+    window.filterMatchesByCourt = (m) => m;
+    let utils;
+    await act(async () => { utils = renderPage(makeMinimalTournament()); });
+    const notice = utils.getByTestId('barred-match-notice');
+    expect(notice.textContent).toContain('Both withdrew earlier: neither can fight this match.');
+    expect(utils.queryByTestId('barred-match-default-win')).toBeNull();
+    expect(utils.queryByTestId('barred-match-reinstate')).toBeNull();
+    expect(utils.getByTestId('barred-match-record-drawn').textContent).toBe('Record as drawn (neither can fight)');
+  });
+
+  // bc-cse: when EVERY scheduled match on the court is barred there is no
+  // Up Next card at all (upNext skips a barred match on purpose), so
+  // telling the operator to use it points at something not on screen. The
+  // placeholder must name the real remedy instead.
+  it('placeholder names the real remedy when every scheduled match is barred (no Up Next card)', async () => {
+    window.tournamentMatches = () => [barredMatch()];
+    window.filterMatchesByCourt = (m) => m;
+    let utils;
+    await act(async () => { utils = renderPage(makeMinimalTournament()); });
+    expect(utils.container.querySelector('.shiaijo-upnext__card')).toBeNull();
+    expect(utils.container.textContent).toContain(
+      'Every scheduled match on this court is barred. Resolve a withdrawal in the queue to bring one back.'
+    );
+    expect(utils.container.textContent).not.toContain('Start the next match from the Up Next card');
+  });
+
+  // bc-cse: the ordinary placeholder still applies when there is nothing
+  // scheduled for a reason OTHER than "everything is barred" -- here, a
+  // pending placeholder final with no real Up Next yet (same fixture shape
+  // as the "Later" row test above).
+  it('placeholder keeps the ordinary copy when nothing is scheduled for an unrelated reason', async () => {
+    const completedFeeder = {
+      id: 'r2-m0', compId: 'c1', compName: 'Cup', status: 'completed',
+      phase: 'bracket', matchNumber: 1, court: 'A',
+      sideA: { id: 'p1', name: 'Yamada' }, sideB: { id: 'p2', name: 'Tanaka' },
+      winner: { id: 'p1', name: 'Yamada' },
+    };
+    const pendingFinal = {
+      id: 'r3-m0', compId: 'c1', compName: 'Cup', status: 'scheduled',
+      phase: 'bracket', matchNumber: 3, court: 'A',
+      sideA: { id: '', name: 'Winner of r2-m0' },
+      sideB: { id: '', name: 'Winner of r2-m1' },
+    };
+    window.tournamentMatches = () => [completedFeeder, pendingFinal];
+    window.filterMatchesByCourt = (m) => m;
+    let utils;
+    await act(async () => { utils = renderPage(makeMinimalTournament()); });
+    expect(utils.container.textContent).toContain('Start the next match from the Up Next card');
+    expect(utils.container.textContent).not.toContain('Every scheduled match on this court is barred');
+  });
+
+  // bc-cse: a barred queue row offers only its own one-tap resolution --
+  // Call to court and Lineup, both meaningless for a match the server would
+  // refuse to start, are hidden.
+  it('a barred queue row hides Call to court and Lineup', async () => {
+    const teamBarred = {
+      id: 'm-team-barred', compId: 'c1', compName: 'Cup', status: 'scheduled', phase: 'pool', poolName: 'Pool A',
+      court: 'A', scheduledAt: '09:05', compKind: 'team', teamSize: 3,
+      sideA: { id: 'team-a', name: 'Team A' }, sideB: { id: 'team-b', name: 'Team B' },
+      ineligibleSides: { b: 'kiken-voluntary' },
+    };
+    window.tournamentMatches = () => [teamBarred, openMatch];
+    window.filterMatchesByCourt = (m) => m;
+    let utils;
+    await act(async () => { utils = renderPage(makeMinimalTournament()); });
+    const rows = [...utils.container.querySelectorAll('.shiaijo-qrow')];
+    const row = rows.find((r) => r.textContent.includes('Team A'));
+    expect(row).toBeTruthy();
+    const buttonText = [...row.querySelectorAll('button')].map((b) => b.textContent);
+    expect(buttonText).not.toContain('Lineup');
+    expect(buttonText.some((t) => /call to court/i.test(t))).toBe(false);
   });
 });

@@ -971,6 +971,16 @@ func isWinForSide(subWinner, matchSide, subSide string) bool {
 // sub-bouts, or countScoringIppons feed the tie-break cannot silently diverge
 // between formats.
 func accrueTeamSubResults(sA, sB *state.PlayerStanding, m state.MatchResult) {
+	// The SAME crediting rule the wire summary uses (state.TeamResultFrom ->
+	// DefaultWinCreditSide), computed once for the whole match: a completed
+	// default-win ruling (any kiken, fusenpai, or fusensho) credits every
+	// numbered bout with no result of its own to the side the ruling
+	// credits, so a kiken declared before a team's bouts were scored still
+	// contributes IV/PW to standings instead of silently contributing
+	// nothing. domain.MatchSideNone for anything else, which makes
+	// SubBoutEffectiveResult below a no-op and reproduces the prior
+	// behaviour exactly.
+	credit := state.DefaultWinCreditSide(m.Status, m.Decision, m.DecisionBy, m.Attribution())
 	for _, sub := range m.SubResults {
 		// bc-pnum: the SAME owner the wire summary uses (state.TeamResultFrom
 		// -> SubBoutWinnerSide), so the IV a spectator reads and the IV this
@@ -979,7 +989,8 @@ func accrueTeamSubResults(sA, sB *state.PlayerStanding, m state.MatchResult) {
 		// for exactly one shape: a bout between two fighters sharing a display
 		// name, which the name comparison here credited to side A by case
 		// order while the summary credited the member id -- or neither.
-		switch state.SubBoutWinnerSide(sub, m.SideA, m.SideB) {
+		outcome := state.SubBoutEffectiveResult(sub, credit, m.SideA, m.SideB)
+		switch state.SubBoutWinnerSide(outcome, m.SideA, m.SideB) {
 		case domain.MatchSideA:
 			sA.IndividualWins++
 			sB.IndividualLosses++
@@ -989,11 +1000,15 @@ func accrueTeamSubResults(sA, sB *state.PlayerStanding, m state.MatchResult) {
 		default:
 			// A draw is a bout that HAS a result and names no winner: a Tie
 			// (hikiwake) or a scored tie. A row with no result was never
-			// fought (an unfought bout kept on a match a withdrawal decided),
-			// and counting it as IT for both teams credited a draw nobody
-			// fought. state.SubMatchResult.HasResult is the one played-bout
-			// predicate, the same one the team finish gate asks.
-			if sub.Winner == "" && sub.HasResult() {
+			// fought (an unfought bout kept on a match a withdrawal decided,
+			// and not credited above either -- an individual competition, or
+			// a match some other decision closed), and counting it as IT for
+			// both teams credited a draw nobody fought.
+			// state.SubMatchResult.HasResult is the one played-bout
+			// predicate, the same one the team finish gate asks; asked of
+			// outcome so a CREDITED bout (Winner now set, HasResult() true)
+			// never also falls into this branch.
+			if outcome.Winner == "" && outcome.HasResult() {
 				sA.IndividualDraws++
 				sB.IndividualDraws++
 			}
@@ -1004,10 +1019,10 @@ func accrueTeamSubResults(sA, sB *state.PlayerStanding, m state.MatchResult) {
 		// with the wire teamResult PW (state.TeamResultFrom uses the
 		// same rule) so the displayed points and the tie-break points
 		// cannot drift.
-		sA.PointsWon += countScoringIppons(sub.IpponsA)
-		sA.PointsLost += countScoringIppons(sub.IpponsB)
-		sB.PointsWon += countScoringIppons(sub.IpponsB)
-		sB.PointsLost += countScoringIppons(sub.IpponsA)
+		sA.PointsWon += countScoringIppons(outcome.IpponsA)
+		sA.PointsLost += countScoringIppons(outcome.IpponsB)
+		sB.PointsWon += countScoringIppons(outcome.IpponsB)
+		sB.PointsLost += countScoringIppons(outcome.IpponsA)
 	}
 }
 
@@ -1289,9 +1304,19 @@ func rulingOfBracketMatch(bm *state.BracketMatch) withdrawalRuling {
 // withdrawal already recorded on the match (operator ruling 2026-09-24, bc-tmfn:
 // "Save correction should just save what the operator enters"). It is scoped
 // by the WRITE's shape, and every clause is load-bearing:
-//   - stored completed with a withdrawal decision (domain.
-//     IsWithdrawalDecisionStr: any kiken, or fusenpai): there is a ruling to
-//     keep;
+//   - stored completed with a default-win decision (domain.
+//     IsDefaultWinDecisionStr: any kiken, fusenpai, or fusensho): there is a
+//     ruling to keep. Widened from IsWithdrawalDecisionStr (bc-tmfn follow-
+//     up) to also keep a stored FUSENSHO ruling on a correction: fusensho is
+//     a per-bout default win within a team encounter, not a withdrawal of
+//     the match it is recorded on, so it stays out of IsWithdrawalDecisionStr
+//     and its eligibility side effect (recordIneligibilityFromDecision is
+//     keyed on IsWithdrawalDecisionStr specifically, unaffected by this
+//     widening) -- but the RULING itself must survive a score correction
+//     exactly as a kiken/fusenpai's does, or a correction silently replaced
+//     a stored fusensho with an empty decision (the whole-struct overwrite
+//     in applyPoolWrite/applyBracketResultIn has nothing else to fall back
+//     on once this reports false);
 //   - incoming completed: a start, an autosave or a requeue never inherits;
 //   - incoming decision "" or "hikiwake", and nothing else: that is a score
 //     sheet's correction, and no score sheet can state a decision (the team
@@ -1316,7 +1341,7 @@ func rulingOfBracketMatch(bm *state.BracketMatch) withdrawalRuling {
 // of the condition there would drift from this one.
 func KeepsWithdrawalRuling(storedStatus state.MatchStatus, storedDecision string, incoming *state.MatchResult) bool {
 	return storedStatus == state.MatchStatusCompleted &&
-		domain.IsWithdrawalDecisionStr(storedDecision) &&
+		domain.IsDefaultWinDecisionStr(storedDecision) &&
 		incoming.Status == state.MatchStatusCompleted &&
 		(incoming.Decision == "" || incoming.Decision == string(domain.DecisionHikiwake))
 }
@@ -1776,7 +1801,18 @@ func (e *Engine) computeStandingsFrom(loader poolStandingsLoader, compId string)
 				sB.Draws++
 			}
 
-			if isTeam && len(m.SubResults) > 0 {
+			if isTeam {
+				// A team match's tie-break columns (IV/IL/IT/PW/PL) come from
+				// the sub-bouts, via accrueTeamSubResults -- unconditionally,
+				// not gated on len(m.SubResults) > 0. Routing is by isTeam (a
+				// competition-level property) alone, so a padding-less default
+				// win match was never misrouted into the individual branch
+				// below; the gap padding closes is CREDIT, not routing: a
+				// completed default-win match (kiken before any bout was
+				// scored) with no SubResults rows still reaches this branch,
+				// but accrueTeamSubResults' loop over an empty slice is then a
+				// no-op, silently contributing zero IV/PW for a decided match.
+				// state.PadDefaultWinBoutPositions gives it rows to credit.
 				accrueTeamSubResults(sA, sB, m)
 			} else {
 				// Individual scoring: ippons at match level. countScoringIppons
@@ -2334,9 +2370,12 @@ func applyMatchWrite(result *state.MatchResult, storedModifiedAt int64, policy m
 // AMENDMENT 2 choke point. It now has a single caller, applyBracketMatchResult,
 // which is itself the one per-match bracket write that both the round path and
 // the bronze fallback share, so there is nothing left here to drift.
-func validateBracketCompletion(matchID string, status state.MatchStatus, winner string) error {
+func validateBracketCompletion(bm *state.BracketMatch, status state.MatchStatus, winner string) error {
 	if status == state.MatchStatusCompleted && winner == "" {
-		return validationErrorf("bracket match %s: cannot mark completed with no winner; resolve the tie first (daihyosen, or encho on the final kachinuki bout)", matchID)
+		// MatchLabel(bracketMatchRef(bm)) is PURE (bm already carries
+		// Number/DisplayRound, no store read), so it is safe to call here
+		// even though this runs inside a live transaction (bc-cse item 14).
+		return validationErrorf("%s: cannot mark completed with no winner; resolve the tie first (daihyosen, or encho on the final kachinuki bout)", MatchLabel(bracketMatchRef(bm)))
 	}
 	return nil
 }
@@ -2363,7 +2402,9 @@ func applyBracketMatchResult(bm *state.BracketMatch, result *state.MatchResult, 
 	// (feeder pools/matches finished). This replaces the old bracket-wide Preview
 	// gate so the knockout fills in incrementally as pools qualify.
 	if !bracketMatchPlayable(bm) {
-		return false, validationErrorf("knockout match %s is not ready to score: a feeder pool or match has not finished", bm.ID)
+		// PURE (bm already carries Number/DisplayRound): safe inside a live
+		// transaction (bc-cse item 14).
+		return false, validationErrorf("%s is not ready to score: a feeder pool or match has not finished", SentenceCase(MatchLabel(bracketMatchRef(bm))))
 	}
 	// Match identity is fixed at seeding; a score must not rewrite the pairing.
 	// Backfill omitted sides so deriveDaihyosenWinner can map a representative
@@ -2440,7 +2481,7 @@ func applyBracketMatchResult(bm *state.BracketMatch, result *state.MatchResult, 
 	// Winner first and lean on updateBracketLocked skipping the save when the
 	// mutate callback errors — true (state/bracket.go), but a non-local property
 	// nothing at the write site stated. Ordering it here makes the discard local.
-	if err := validateBracketCompletion(bm.ID, status, result.Winner); err != nil {
+	if err := validateBracketCompletion(bm, status, result.Winner); err != nil {
 		return false, err
 	}
 	bm.Winner = result.Winner
@@ -2804,7 +2845,12 @@ func reopenDisplacedBracketMatch(m *state.BracketMatch, reason string) ReopenedM
 	// UpdateBracket callback, which on the bare store holds the
 	// non-reentrant per-competition lock a status write would take again.
 	priorDecision := m.Decision
-	reopenBracketMatch(m, reason)
+	// The Running placeholder here is immediately overridden to Scheduled
+	// below regardless of decision (this door never leaves a match
+	// RUNNING), so it needs none of reopenTargetStatus's fusensho-barred
+	// check -- that check exists only to pick RUNNING vs SCHEDULED, and this
+	// call site always ends up SCHEDULED either way.
+	reopenBracketMatch(m, reason, state.MatchStatusRunning)
 	// A downstream reopen leaves the match SCHEDULED, where the kachinuki
 	// reopen leaves it RUNNING, and the difference is who is standing at
 	// the shiaijo. Kachinuki reopens the encounter the operator has this
@@ -3035,6 +3081,7 @@ func newDownstreamKnockoutPlayedError(bm *state.BracketMatch, blocking []*state.
 	}
 	return &DownstreamKnockoutPlayedError{
 		MatchID:         bm.ID,
+		Label:           MatchLabel(bracketMatchRef(bm)),
 		BlockingMatchID: blocked[0].ID,
 		Blocking:        blocked,
 		Displaced:       displacedCompetitor(bm, blocking[0], mIdx),
@@ -3345,7 +3392,10 @@ func (e *Engine) OverrideBracketWinner(compId string, matchId string, winnerName
 				m := &bracket.Rounds[rIdx][mIdx]
 				if m.ID == matchId {
 					if !bracketMatchPlayable(m) {
-						return validationErrorf("knockout match %s is not ready to override: a feeder pool or match has not finished", matchId)
+						// PURE (m already carries Number/DisplayRound): safe
+						// inside UpdateBracket's mutate callback (bc-cse item
+						// 14), which holds the per-comp lock.
+						return validationErrorf("%s is not ready to override: a feeder pool or match has not finished", SentenceCase(MatchLabel(bracketMatchRef(m))))
 					}
 					// Timestamp last-write-wins (mp-y3nk): a reconnecting offline
 					// feeder assertion older than a newer stored result is dropped.
@@ -3393,7 +3443,8 @@ func (e *Engine) OverrideBracketWinner(compId string, matchId string, winnerName
 		if bracket.ThirdPlaceMatch != nil && bracket.ThirdPlaceMatch.ID == matchId {
 			bm := bracket.ThirdPlaceMatch
 			if !bracketMatchPlayable(bm) {
-				return validationErrorf("knockout match %s is not ready to override: a feeder pool or match has not finished", matchId)
+				// PURE, same reasoning as the round branch above.
+				return validationErrorf("%s is not ready to override: a feeder pool or match has not finished", SentenceCase(MatchLabel(bracketMatchRef(bm))))
 			}
 			// Same errLWWDropped mechanism as above.
 			if !domain.ApplyByTimestamp(modifiedAt, bm.ModifiedAt) {

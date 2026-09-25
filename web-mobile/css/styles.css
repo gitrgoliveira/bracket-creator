@@ -3047,6 +3047,13 @@ a.vlist-item {
   text-overflow: ellipsis;
   display: block;
 }
+/* A name carrying a side mark is a flex row (.msb-name--labelled) so the mark
+   keeps its width and only the name ellipsises. The display:block above
+   outranks that one-class rule, so it is restated here for this host. */
+.vsched-item__side .n.msb-name--labelled { display: flex; }
+/* The Shiro side's name sits toward the centre (text-align: right above),
+   which a flex row ignores, so it is restated as the row's alignment. */
+.vsched-item__side--shiro .n.msb-name--labelled { justify-content: flex-end; }
 
 .vsched-item__side .d {
   font-size: 11px;
@@ -5314,6 +5321,31 @@ button.vsched-item:not([data-clickable]) {
   white-space: nowrap;
 }
 
+/* bc-tmfn: the "Withdrawn" chip beside a barred competitor's name on a
+   still-scheduled match (ineligible_match.jsx's isBarredMatch / BARRED_CHIP,
+   composed in barred_chip.jsx). This names a STATE, not a side, so unlike
+   .num-prefix it is not tinted from currentColor; it borrows that chip's
+   radius/size convention (muted ink, small mono-ish label, border + faint
+   fill) instead. text-transform is set explicitly rather than left to
+   inherit: .bc-match-meta (the bracket card's meta strip) forces uppercase
+   on its own text, and this chip must read "Withdrawn" wherever it lands,
+   not "WITHDRAWN" -- which is also why it never renders inside that strip
+   (a fifth value there would violate the closed middle-mark set). */
+.barred-chip {
+  display: inline-block;
+  white-space: nowrap;
+  font-family: var(--font-strong);
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: none;
+  letter-spacing: 0.02em;
+  color: var(--ink-3);
+  background: color-mix(in srgb, var(--ink-3) 12%, transparent);
+  border: 1px solid color-mix(in srgb, var(--ink-3) 35%, transparent);
+  padding: 1px 5px;
+  border-radius: 4px;
+}
+
 /* Option D (harden): on the INDIVIDUAL scoring board only, scoped with
    :has(.sb-slots) so the team header (.sb-match/.sb-side carrying just a
    badge + name, no slots) is untouched, lay each side out as a SUBGRID that
@@ -6875,19 +6907,42 @@ button.vsched-item:not([data-clickable]) {
 .msb-name { flex: 1; min-width: 0; font-weight: 600; color: var(--ink-1);
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .msb-name--aka { text-align: right; color: var(--red); }
-/* A bout row's name cell carries a member label on the OUTER side, so the
-   cell holds TWO inline children. Ellipsis truncates the END of the run,
-   which on Aka is the label: a long name clipped Aka's label away while
-   Shiro's leading one always survived. Same mechanism the competitor-number
-   clip fix addressed (bc-dnst). Flex makes the NAME the only shrinkable
-   child, so the label survives on both sides and the name ellipsises
-   instead. Scoped to --labelled so the single-child name cells elsewhere
-   (and the --stacked name-over-dojo variant) keep the plain block flow. */
-.msb-name--labelled { display: flex; align-items: center; }
+/* A bout row's name cell carries a member label, or a Kiken/Fus./Withdrawn
+   mark, on the OUTER side, so the cell holds TWO inline children. Ellipsis
+   truncates the END of the run, which on Aka is the badge: a long name
+   clipped Aka's badge away while Shiro's leading one always survived. Same
+   mechanism the competitor-number clip fix addressed (bc-dnst). Flex makes
+   the NAME (or the NumberedName clip wrapper, when the name carries its own
+   number chip) the only shrinkable child, so the badge survives on both
+   sides and the name ellipsises instead. Scoped to --labelled so the
+   single-child name cells elsewhere (and the --stacked name-over-dojo
+   variant) keep the plain block flow.
+
+   gap (bc-cse), not the teamNameMark/barredNameMark {" "} text-node spacer
+   those two leaf functions still emit for their OTHER (non-flex) callers:
+   CSS Flexbox treats a whitespace-only text node between flex items as
+   ZERO-SIZED rather than a real item (it would collapse under ordinary
+   inline layout too), so once a host adopts --labelled that spacer renders
+   with no width at all and the badge touched the name. gap replaces it here;
+   the leaf functions are left alone since the SAME spacer is still load-
+   bearing for a caller that keeps the plain (non-flex) block/inline flow
+   (e.g. viewer_standings.jsx's wrapping, non-ellipsis name cell). */
+.msb-name--labelled { display: flex; align-items: center; gap: 0.35em; }
 .msb-name--labelled.msb-name--aka { justify-content: flex-end; }
 .msb-name--labelled .msb-name__text {
   min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.msb-name--labelled .msb-member-label { flex-shrink: 0; }
+/* The NumberedName clip wrapper (numbered_name.jsx) is itself display:
+   inline-flex with no min-width/flex-basis of its own, so as a CHILD of this
+   flex row it would size to its content and never actually shrink -- its own
+   internal ellipsis (.numbered-name--clip > .numbered-name__text) only ever
+   fires once ITS box is smaller than its content. This is what lets it.
+   It shrinks but never GROWS: a growing wrapper fills the row, so the row's
+   own alignment (justify-content) no longer places the name and a
+   right-aligned side reads left-aligned. */
+.msb-name--labelled .numbered-name--clip { min-width: 0; flex: 0 1 auto; }
+.msb-name--labelled .msb-member-label,
+.msb-name--labelled .sb-result-mark,
+.msb-name--labelled .barred-chip { flex-shrink: 0; }
 /* The decided winner's name. .msb-slots--win marks only an ippon-LESS result
    (hantei, or a default win), so without this an ordinary 2-0 or 1-0 win is
    emphasised nowhere. Set by IndividualScore from the same id-first winner key
@@ -7244,13 +7299,6 @@ abbr.msb-lab { text-decoration: none; cursor: help; }
 .reopen-conflict__warn {
   margin-top: 2px;
   color: var(--danger-ink);
-}
-/* The server's own words, kept verbatim underneath ours so nothing it said is
-   swallowed by the friendlier heading. */
-.reopen-conflict__msg {
-  margin-top: 4px;
-  color: var(--ink-3);
-  font-size: var(--fs-xs);
 }
 .reopen-conflict__actions {
   display: flex;

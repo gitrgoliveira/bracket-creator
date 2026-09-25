@@ -44,7 +44,7 @@ func TestTeamNameFallback_SheetAndStandingsDivergeOnANamedRow(t *testing.T) {
 	defer f.Close()
 	sheet := helper.SheetPoolMatches
 	f.NewSheet(sheet)
-	writeTeamSubMatchScores(f, sheet, 1, 5, []state.SubMatchResult{drifted}, 3, false, "Tora A", "Kenshi B")
+	writeTeamSubMatchScores(f, sheet, 1, 5, []state.SubMatchResult{drifted}, 3, false, "Tora A", "Kenshi B", domain.MatchSideNone)
 
 	left, err := f.GetCellValue(sheet, "B5")
 	assert.NoError(t, err)
@@ -65,7 +65,7 @@ func TestTeamNameFallback_SheetAndStandingsDivergeOnANamedRow(t *testing.T) {
 	g := excelize.NewFile()
 	defer g.Close()
 	g.NewSheet(sheet)
-	writeTeamSubMatchScores(g, sheet, 1, 5, []state.SubMatchResult{silent}, 3, false, "Tora A", "Kenshi B")
+	writeTeamSubMatchScores(g, sheet, 1, 5, []state.SubMatchResult{silent}, 3, false, "Tora A", "Kenshi B", domain.MatchSideNone)
 	marked, err := g.GetCellValue(sheet, "B5")
 	assert.NoError(t, err)
 	assert.Contains(t, marked, "Fus.", "control: a row naming no fighter DOES take the encounter's names")

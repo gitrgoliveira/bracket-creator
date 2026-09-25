@@ -2633,7 +2633,9 @@ func TestAccrueTeamSubResults_SameNameBout(t *testing.T) {
 		assert.Equal(t, 0, sA.IndividualWins)
 		assert.Equal(t, 1, sA.IndividualLosses)
 
-		line := state.TeamResultFrom([]state.SubMatchResult{sub}, "Tora", "Kaze")
+		// domain.MatchSideNone: this bout already carries its own result, so no
+		// default-win ruling could ever apply here regardless of credit.
+		line := state.TeamResultFrom([]state.SubMatchResult{sub}, "Tora", "Kaze", domain.MatchSideNone)
 		require.NotNil(t, line)
 		assert.Equal(t, sB.IndividualWins, line.ShiroIV, "standings and summary must not disagree")
 		assert.Equal(t, sA.IndividualWins, line.AkaIV)
@@ -2649,7 +2651,9 @@ func TestAccrueTeamSubResults_SameNameBout(t *testing.T) {
 		assert.Equal(t, 0, sB.IndividualWins)
 		assert.Equal(t, 0, sA.IndividualDraws, "a bout with a winner is not a draw just because nobody could be credited")
 
-		line := state.TeamResultFrom([]state.SubMatchResult{sub}, "Tora", "Kaze")
+		// domain.MatchSideNone: this bout already carries its own result, so no
+		// default-win ruling could ever apply here regardless of credit.
+		line := state.TeamResultFrom([]state.SubMatchResult{sub}, "Tora", "Kaze", domain.MatchSideNone)
 		require.NotNil(t, line)
 		assert.Equal(t, 0, line.ShiroIV)
 		assert.Equal(t, 0, line.AkaIV)

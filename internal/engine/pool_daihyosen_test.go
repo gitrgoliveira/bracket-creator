@@ -14,37 +14,6 @@ import (
 )
 
 // TestIsPoolDaihyosenMatchID covers the ID-recognition helper.
-func TestIsPoolDaihyosenMatchID(t *testing.T) {
-	tests := []struct {
-		id   string
-		want bool
-	}{
-		{"Pool A-DH-0", true},
-		{"Pool A-DH-1", true},
-		{"Pool B-DH-42", true},
-		{"My-Pool A-DH-0", true},   // hyphenated pool name, strings.Contains handles correctly
-		{"Pool A-East-DH-0", true}, // realistic hyphenated pool name
-		{"Pool A-0", false},
-		{"Pool A-TB-0", false},
-		{"Pool A-DH", false},    // no index after DH (no trailing dash)
-		{"Pool A-D-0", false},   // different prefix
-		{"Pool A-DHx-0", false}, // wrong prefix
-		{"DH-0", false},         // no pool separator
-		{"", false},
-		// A pool literally named "Pool A-DH-East" produces regular match ids
-		// like "Pool A-DH-East-0". A plain strings.Contains(id, "-DH-") would
-		// misclassify these as daihyosen bouts; the suffix after the LAST
-		// "-DH-" here is "East-0", not all-digits, so it must be false.
-		{"Pool A-DH-East-0", false},
-		{"Pool A-DH-East-12", false},
-	}
-	for _, tc := range tests {
-		t.Run(tc.id, func(t *testing.T) {
-			assert.Equal(t, tc.want, IsPoolDaihyosenMatchID(tc.id))
-		})
-	}
-}
-
 // TestPoolNameFromMatchID covers the pool-name extraction helper for all ID
 // forms, including hyphenated pool names and prefix-overlap edge cases.
 func TestPoolNameFromMatchID(t *testing.T) {

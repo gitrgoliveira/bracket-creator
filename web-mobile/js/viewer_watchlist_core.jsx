@@ -20,6 +20,7 @@
 import { competitorKey } from './competitor_identity.jsx';
 import { resultRecencyDesc } from './result_recency.jsx';
 import { parseWatchlistTokens, resolveFreshTokens, WATCHLIST_PARAM } from './watchlist_link.jsx';
+import { isBarredMatch } from './ineligible_match.jsx';
 
 const { useState } = React;
 
@@ -566,7 +567,12 @@ function indexFor(allMatches) {
 // match" with a court and a time, so a bout already fought arrived there as a
 // fixture still to come.
 export function buildPrimaryNextMatch(primaryEntry, roster, allMatches) {
-  const mine = matchesInvolving(primaryEntry, roster, allMatches, (m) => m.status !== "completed");
+  // A barred match (ineligible_match.jsx) cannot be fought as scheduled: a
+  // running match is never barred (barredSides is empty for anything but
+  // `scheduled`), so this filter only ever drops a real scheduled match the
+  // player cannot yet fight.
+  const mine = matchesInvolving(primaryEntry, roster, allMatches, (m) => m.status !== "completed")
+    .filter((m) => !isBarredMatch(m));
   mine.sort((a, b) => {
     const ao = a.status === "running" ? 0 : 1;
     const bo = b.status === "running" ? 0 : 1;

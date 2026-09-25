@@ -6,16 +6,21 @@
 const { useState: useStateA, useEffect: useEffectA, useRef: useRefA, useMemo: useMemoA } = React;
 const Icon = window.Icon;
 
-import { DAIHYOSEN_POSITION } from './pool_ids.jsx';
+import { DAIHYOSEN_POSITION, scoreRowMatchLabel } from './pool_ids.jsx';
 import {
-  writeDidNotLand, writeWasSuperseded, SUPERSEDED_REASON, SUPERSEDED_ADVICE,
+  writeDidNotLand, notLandedBanner,
   attemptScoreWrite, DOWNSTREAM_KNOCKOUT_PLAYED_CANCELLED, DOWNSTREAM_KNOCKOUT_REOPEN_CANCELLED, downstreamKnockoutReopenedNotice,
+  courtBusyMessage,
 } from './write_result.jsx';
 import { sameCompetitor } from './competitor_identity.jsx';
 import { sideWord } from './side_cell.jsx';
-import { isWithdrawalDecision } from './api_serializers.jsx';
 import { sideMarks } from './bracket.jsx';
 import { NumberedName, numberFollowsName } from './numbered_name.jsx';
+import { defaultWinDecisionBodyForSide, withdrawnSideKey } from './ineligible_match.jsx';
+import { isTeamDefaultWinDecision } from './team_default_credit.jsx';
+// BarredMatchNotice is a separate leaf (imports only ineligible_match.jsx +
+// write_result.jsx): re-exported below, see that file's header for why.
+import { BarredMatchNotice } from './barred_match_notice.jsx';
 
 // Kendo best-of-3 cap. Mirrors the server-side `maxIpponsPerSide` in
 // internal/mobileapp/validation.go: the bout ends when one side reaches
@@ -412,9 +417,11 @@ function makeSubmitDecision({
       // The score path already guards this way; a decision that advanced a
       // bracket on a winner the server discarded is the same failure.
       //
-      // Inert today: no server path answers /decision with applied:false (the
-      // request carries no modifiedAt, and respondClockSkew has no decision
-      // call site). It is the guard, not a live branch.
+      // LIVE since mp-jnvl: the /decision write now carries a real
+      // modifiedAt (recordDecision, api_client.jsx), so the server can
+      // genuinely answer with applied:false for either reason (superseded or
+      // clock_skew) -- this is no longer a defence against a shape it could
+      // not yet send.
       //
       // F5: enter pending-write mode so the banner shows in the footer, and
       // save the submit closure so "Retry now" can re-invoke it directly.
@@ -738,6 +745,7 @@ function RemainingMatchesPanel({ compID, password, withdrawnPlayer, onAwarded, o
   const [err, setErr] = useStateA("");
   const [busyId, setBusyId] = useStateA("");
   const mountedRef = useRefA(true);
+  const playerName = withdrawnPlayer?.name || "player";
 
   useEffectA(() => {
     return () => { mountedRef.current = false; };
@@ -770,11 +778,11 @@ function RemainingMatchesPanel({ compID, password, withdrawnPlayer, onAwarded, o
   }, [compID, withdrawnPlayer?.id, withdrawnPlayer?.name]);
 
   const award = async (m) => {
-    // Figure out which side the withdrawn player occupies in THIS match: 
-    // that's the side that gets the fusenpai (default loss). Pool matches:
-    // sideA = Aka, sideB = Shiro. Same wire mapping in bracket matches.
+    // Figure out which side the withdrawn player occupies in THIS match:
+    // that's the side that gets the default loss. Pool matches: sideA = Aka,
+    // sideB = Shiro. Same wire mapping in bracket matches.
     const isOnA = sameCompetitor(m.sideA, withdrawnPlayer);
-    const decisionBy = isOnA ? "aka" : "shiro";
+    const barredKey = isOnA ? "a" : "b";
     setBusyId(m.id);
     // Clear any previous verdict before this attempt. Without it the panel's
     // error is sticky: a refusal on match A stays on screen while the operator
@@ -783,22 +791,40 @@ function RemainingMatchesPanel({ compID, password, withdrawnPlayer, onAwarded, o
     // defect, so this covers both rather than only the new branch.
     setErr("");
     try {
-      const updated = await window.API.recordDecision(m.compId || compID, m.id, {
-        decision: "fusenpai",
-        decisionBy,
-        decisionReason: `auto: ${wname} withdrawn`,
-      }, password);
+      // bc-rawm: fusensho, not fusenpai. This panel exists BECAUSE the
+      // operator just recorded a withdrawal for this competitor, so every
+      // OTHER scheduled match of theirs is against an already-ineligible
+      // competitor: fusenpai there is refused with 409 already_ineligible
+      // (the concurrent-kiken guard). fusensho is the per-bout default win:
+      // it writes no ineligibility of its own, so it never trips that guard
+      // (engine.TestRecordDecision_FusenshoSkipsConcurrentCheck). decisionBy
+      // is unchanged: it still names the WITHDRAWN competitor's side, the
+      // side that gets the default loss, exactly as fusenpai's did.
+      // bc-cse: the body itself has ONE owner (ineligible_match.jsx), keyed
+      // directly by the barred side this panel already knows, so a default
+      // win's wire shape cannot drift between this panel and the other
+      // surfaces that build it off the server's `ineligibleSides` stamp.
+      const updated = await window.API.recordDecision(
+        m.compId || compID, m.id, defaultWinDecisionBodyForSide(barredKey, withdrawnPlayer), password,
+      );
       if (!mountedRef.current) return;
       // A default win the server REFUSED must not leave the list: dropping it
       // here would hide the one match the operator still has to resolve, and
       // nothing else on this panel would ever mention it again (bc-lww1).
-      // writeWasSuperseded, not writeDidNotLand, is the right ask: a QUEUED
+      // notLandedBanner, not writeDidNotLand, is the right ask: a QUEUED
       // award lands on reconnect, so an offline court must keep walking the
-      // list exactly as it does today. Inert today for the same reason as the
-      // guard in makeSubmitDecision above: nothing answers /decision with
-      // applied:false yet.
-      if (writeWasSuperseded(updated)) {
-        setErr(`Not saved: ${SUPERSEDED_REASON}. ${SUPERSEDED_ADVICE}`);
+      // list exactly as it does today (notLandedBanner is null for a queued
+      // write, same as writeWasSuperseded's old narrower check was). LIVE
+      // since mp-jnvl stamped the /decision write (see recordDecision,
+      // api_client.jsx): the server can genuinely answer with applied:false
+      // now, so this is no longer a defence against a shape it could not yet
+      // send. bc-cse: notLandedBanner over writeWasSuperseded alone -- that
+      // predicate is TRUE for both the superseded AND the clock_skew
+      // refusal, so it always showed the superseded copy even when the
+      // clock, not a newer result, was the reason.
+      const banner = notLandedBanner(updated);
+      if (banner) {
+        setErr(`Not saved: ${banner.reason}. ${banner.advice}`);
         return;
       }
       // Drop the awarded match from the list so the operator can keep walking.
@@ -811,8 +837,6 @@ function RemainingMatchesPanel({ compID, password, withdrawnPlayer, onAwarded, o
       if (mountedRef.current) setBusyId("");
     }
   };
-
-  const playerName = withdrawnPlayer?.name || "player";
 
   return (
     <div className="remaining-matches" style={{ border: "1px solid var(--line)", borderRadius: 6, padding: 12, marginTop: 12, background: "var(--bg-2)" }}>
@@ -849,7 +873,7 @@ function RemainingMatchesPanel({ compID, password, withdrawnPlayer, onAwarded, o
                   className="btn btn--sm"
                   onClick={() => award(m)}
                   disabled={busyId === m.id}
-                  title="Record fusenpai: opponent receives the default win"
+                  title="Record fusensho: opponent receives the default win"
                 >
                   {busyId === m.id ? "Saving…" : "Award default win to opponent"}
                 </button>
@@ -861,6 +885,13 @@ function RemainingMatchesPanel({ compID, password, withdrawnPlayer, onAwarded, o
     </div>
   );
 }
+
+// BarredMatchNotice lives in its own leaf (barred_match_notice.jsx): it
+// imports only ineligible_match.jsx and write_result.jsx, so a surface that
+// does not otherwise need this module's graph (which pulls in bracket.jsx
+// for sideMarks) can import it directly without that graph riding along --
+// see that file's header. Re-exported here so the editors' existing
+// `from './admin_scoring_shared.jsx'` import lists need no change.
 
 // sideColorName: the human-readable side name for a "shiro"/"aka" colour key.
 // Named for the colour it takes so it cannot be confused with admin_helpers.jsx's
@@ -1179,12 +1210,26 @@ const REOPEN_PRESETS = ["Ended by mistake", ...CORRECTION_PRESETS];
 // REOPEN_PRESETS is.
 const WITHDRAWAL_REOPEN_PRESETS = ["Withdrawal recorded by mistake", ...CORRECTION_PRESETS];
 
+// bc-cse: the sibling set for clearing a match-level FUSENSHO (a default win
+// awarded because the OTHER competitor was barred elsewhere), which is not a
+// withdrawal on THIS match at all, so "Withdrawal recorded by mistake" is the
+// wrong first answer for it -- derived the same way, first entry swapped.
+const DEFAULT_WIN_REOPEN_PRESETS = ["Default win recorded by mistake", ...CORRECTION_PRESETS];
+
 // withdrawalLabel: the operator's name for a match-level withdrawal decision,
 // the ONE copy of it: DecisionPrompt's title and the Recorded line in both
 // editors read it. Any kiken that is not the injury kind reads as voluntary,
 // the legacy bare "kiken" included, which the server loads as voluntary too.
 function withdrawalLabel(decision) {
   if (decision === "fusenpai") return "Fusenpai";
+  // bc-rawm: a match-level fusensho, the shape RemainingMatchesPanel.award
+  // writes for a scheduled match against an already-withdrawn competitor
+  // (see the file header there). Short label for the same "fact" slots
+  // kiken/fusenpai use (e.g. admin_scoring_team.jsx's team-summary-decision);
+  // the fuller "Default win (fusensho) for <winner>" sentence is composed in
+  // RecordedWithdrawal, which needs the winner's name this function does not
+  // have.
+  if (decision === "fusensho") return "Default win (fusensho)";
   return decision === "kiken-injury" ? "Kiken – Injury" : "Kiken – Voluntary";
 }
 
@@ -1204,11 +1249,7 @@ function withdrawnSideOf(m) {
 // withdrawnKeyOf: the same answer as withdrawnSideOf, as the editors' side key
 // ("a" = Aka/sideA, "b" = Shiro/sideB), or "" when the match cannot say.
 function withdrawnKeyOf(m) {
-  if (m.decisionBy === "aka") return "a";
-  if (m.decisionBy === "shiro") return "b";
-  if (m.winner && m.sideA && sameCompetitor(m.winner, m.sideA)) return "b";
-  if (m.winner && m.sideB && sameCompetitor(m.winner, m.sideB)) return "a";
-  return "";
+  return withdrawnSideKey(m);
 }
 
 // withdrawalInForce: the one statement of "a recorded withdrawal is in force
@@ -1220,7 +1261,20 @@ function withdrawnKeyOf(m) {
 // holding the moment the withdrawal is cleared, because the reopen puts the
 // match back to running.
 function withdrawalInForce(m) {
-  return m.status === "completed" && isWithdrawalDecision(m.decision);
+  // bc-rawm: widened to the default-win class. A match-level fusensho is
+  // RemainingMatchesPanel.award's shape for a SCHEDULED match against a
+  // competitor already withdrawn elsewhere (fusenpai is refused there with
+  // 409 already_ineligible, which is why that panel writes fusensho
+  // instead): same default-win outcome as a kiken/fusenpai on this match, so
+  // it belongs in the same "a recorded withdrawal decided this" class as
+  // isWithdrawalDecision's kiken/fusenpai, not a separate one. isWithdrawalDecision
+  // (api_serializers.jsx) itself stays narrow on purpose (it also answers for
+  // a TEAM match's per-BOUT fusensho, which is not a whole-match verdict);
+  // this question is scoped to the match-level default-win class alone,
+  // isTeamDefaultWinDecision (team_default_credit.jsx), THE one JS owner of
+  // it (bc-cse) -- kiken/fusenpai/fusensho are exactly that class, so this no
+  // longer ORs isWithdrawalDecision with a separate fusensho arm.
+  return m.status === "completed" && isTeamDefaultWinDecision(m.decision);
 }
 
 // useMatchReopen: the one client of POST .../reopen and its court-busy remedy
@@ -1257,8 +1311,14 @@ function useMatchReopen({ match, password, isComplete }) {
   // The server answered success; the match prop may not have flipped yet.
   const [landed, setLanded] = useStateA(false);
   const [err, setErr] = useStateA("");
-  // { court, matchId, compId, message, reason, force }: the match ALREADY
-  // running on this court, plus what the refused reopen carried.
+  // { court, matchId, compId, message, label, reason, force }: the match
+  // ALREADY running on this court, plus what the refused reopen carried.
+  // `label` is the server's operator-facing name for it, when sent -- it
+  // names no COMPETITOR (bc-cse), so ReopenFeedback prefers the fetched
+  // blockerLabel below over it. `message` is the server's raw refusal
+  // sentence, kept on the object but no longer rendered (see ReopenFeedback:
+  // it named an internal id and told the operator to finish that match,
+  // contradicting this panel's own button).
   const [conflict, setConflict] = useStateA(null);
   // Best-effort "Match 2 · Shiro vs Aka" for the blocking match. The operator
   // is about to wipe that match's score, so naming its competitors (not just
@@ -1293,6 +1353,14 @@ function useMatchReopen({ match, password, isComplete }) {
         matchId: e.matchId,
         compId: e.compId || match.compId,
         message: msg,
+        // The server's own operator label for the blocking match
+        // (api_client.jsx's reopenFailureError carries it through when
+        // present). bc-cse: it names no competitor ("Pool A · Match 2"), so
+        // ReopenFeedback prefers the best-effort FETCHED blockerLabel over
+        // it and falls back to this only when that fetch has not resolved;
+        // either way the heading never falls back to printing the raw
+        // matchId.
+        label: e.label || "",
         reason,
         force: confirmedRef.current,
       });
@@ -1379,17 +1447,28 @@ function useMatchReopen({ match, password, isComplete }) {
         if (cancelled || !mountedRef.current) return;
         // compMatchesForCompetition (viewer_utils.jsx) owns the recombination
         // of the details payload's config with its matches (mp-dej2).
-        const hit = (window.compMatchesForCompetition(detail.config || detail, detail) || []).find(x => x.id === conflict.matchId);
+        const hit = (window.compMatchesForCompetition
+          ? window.compMatchesForCompetition(detail.config || detail, detail)
+          : []).find(x => x.id === conflict.matchId);
         if (!hit) return;
         const shiro = hit.sideB?.name || hit.sideB || "";
         const aka = hit.sideA?.name || hit.sideA || "";
-        // Match number first: it is how the console labels every other match.
+        // bc-rawm: a POOL match has no matchNumber (bracket matches alone are
+        // numbered), so it fell through to the bare "Shiro vs Aka" -- correct
+        // but silent about which pool, unlike every bracket blocker, which
+        // names its round via matchNumber's "Match N". window.poolLabel is
+        // the one owner of that pool-name translation (mp-dej2; the same
+        // helper RemainingMatchesPanel above uses), so a pool blocker now
+        // leads with it exactly as a bracket blocker leads with its number.
+        const lead = hit.phase === "pool" && typeof window.poolLabel === "function"
+          ? window.poolLabel(hit)
+          : (hit.matchNumber ? `Match ${hit.matchNumber}` : "");
         const label = [
-          hit.matchNumber ? `Match ${hit.matchNumber}` : "",
+          lead,
           shiro && aka ? `${shiro} vs ${aka}` : "",
         ].filter(Boolean).join(" · ");
         if (label) setBlockerLabel(label);
-      } catch { /* best effort: the panel falls back to the match id */ }
+      } catch { /* best effort: the panel falls back to the server's own label, or "another match" */ }
     })();
     return () => { cancelled = true; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -1419,14 +1498,26 @@ function ReopenFeedback({ ctl, testIdPrefix }) {
       )}
       {c && (
         <div className="alert alert--error reopen-conflict" data-testid={`${testIdPrefix}-conflict`}>
+          {/* bc-cse: the best-effort FETCHED blockerLabel wins over the
+              server's own `label` -- the server always sends one, but it is
+              "Pool A · Match 2" with no names, never the "Match 2 · Shiro vs
+              Aka" this panel is about to wipe the score of; that safety
+              property only exists in the fetched label. Only when the fetch
+              cannot resolve it (still loading, or a DIFFERENT match has since
+              taken the court) does the server's label stand in, and only
+              "another match" when neither is available. Reuses
+              courtBusyMessage (write_result.jsx) rather than repeating its
+              sentence here. The raw c.message line that used to sit below
+              this heading is gone -- it named the internal id and told the
+              operator to "finish that match before reopening", the opposite
+              of the remedy this panel's own button offers. */}
           <div className="reopen-conflict__head">
-            Shiaijo {c.court || "?"} is running {ctl.blockerLabel || c.matchId}.
+            {courtBusyMessage({ court: c.court, label: ctl.blockerLabel || c.label || "another match" })}
           </div>
           <div className="reopen-conflict__warn" data-testid={`${testIdPrefix}-conflict-warning`}>
             Sending it back to the queue clears any score already entered for it. Finishing that
             match instead keeps its score.
           </div>
-          <div className="reopen-conflict__msg">{c.message}</div>
           <div className="reopen-conflict__actions">
             <button
               type="button"
@@ -1484,6 +1575,13 @@ function ReopenFeedback({ ctl, testIdPrefix }) {
 // that finishes it shows which knockout matches that affects before anything
 // is saved (the server's qualifierChange refusal, confirmed through
 // attemptScoreWrite like any other).
+//
+// bc-rawm: widened to the match-level DEFAULT-WIN class alongside kiken and
+// fusenpai (withdrawalInForce above), for a match RemainingMatchesPanel.award
+// closed with a fusensho because the competitor was already ineligible from
+// an earlier withdrawal. Reads and the reopen remedy are otherwise identical;
+// only the copy differs (the Recorded line names the winner, and "Clear
+// default win and reopen" replaces "Clear withdrawal and reopen").
 function RecordedWithdrawal({ match, ctl, disabled = false, singleBout = false }) {
   const [asking, setAsking] = useStateA(false);
   const withdrawnKey = withdrawnKeyOf(match);
@@ -1491,12 +1589,99 @@ function RecordedWithdrawal({ match, ctl, disabled = false, singleBout = false }
   const who = withdrawn?.name || "";
   const winner = withdrawnKey === "a" ? match.sideB : withdrawnKey === "b" ? match.sideA : null;
   const winnerName = winner?.name || "";
+  const isDefaultWin = match.decision === "fusensho";
   const what = match.decision === "fusenpai" ? "did not appear" : "withdrew";
   const feedsKnockout = match.phase === "pool" && match.compFormat === "mixed";
+
+  // bc-cse: "Everything should be able to be fixed... the operator just needs
+  // to be aware of the consequences" (operator ruling 2026-09-24) extends past
+  // THIS match: if the withdrawn competitor has LATER matches RemainingMatchesPanel
+  // already closed with a default win (fusensho, naming this competitor's side
+  // as the one that withdrew), clearing THIS withdrawal does not touch those --
+  // they keep their own recorded result and must be reopened separately to be
+  // fought. Fetched the same way RemainingMatchesPanel finds them (fetch +
+  // compMatchesForCompetition), only once the operator asks to clear (asking),
+  // never eagerly. Best-effort: a fetch failure just omits the list rather than
+  // blocking the reopen the operator came here to do.
+  const [laterDefaultWins, setLaterDefaultWins] = useStateA(null);
+  useEffectA(() => {
+    if (!asking || !withdrawn || !match.compId) { setLaterDefaultWins(null); return; }
+    let cancelled = false;
+    (async () => {
+      try {
+        const detail = await window.API.fetchCompetitionDetails(match.compId);
+        if (cancelled) return;
+        const all = window.compMatchesForCompetition
+          ? window.compMatchesForCompetition(detail.config || detail, detail)
+          : [];
+        const hits = all.filter(x => (
+          x.id !== match.id &&
+          x.status === "completed" &&
+          x.decision === "fusensho" &&
+          ((x.decisionBy === "aka" && sameCompetitor(x.sideA, withdrawn)) ||
+            (x.decisionBy === "shiro" && sameCompetitor(x.sideB, withdrawn)))
+        ));
+        if (!cancelled) setLaterDefaultWins(hits);
+      } catch (_e) {
+        if (!cancelled) setLaterDefaultWins([]);
+      }
+    })();
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [asking, match.compId, match.id, withdrawn?.id, withdrawn?.name]);
+
+  // bc-cse: whether the FUSENSHO's barred competitor (`withdrawn`, the side
+  // THIS match's decisionBy names -- barred elsewhere, not by anything on
+  // this match) is STILL barred, whether that withdrawal is reinstateable,
+  // or whether they are eligible again already (reinstated, or their
+  // earlier withdrawal cleared), so the confirm can offer the right remedy
+  // instead of guessing. isDefaultWin-only: a kiken/fusenpai clear on this
+  // match is an ordinary withdrawal, not another competitor's barring, so
+  // it never needs this. window.API.fetchCompetitorStatuses always exists
+  // in the app (api_client.jsx); best-effort is only about the FETCH, same
+  // pattern as laterDefaultWins above -- unknown (fetch failed, or no
+  // matching row) reads as "still barred, not reinstateable", the more
+  // conservative of the wrong guesses.
+  const [withdrawnStatus, setWithdrawnStatus] = useStateA(null);
+  useEffectA(() => {
+    if (!asking || !isDefaultWin || !withdrawn?.id || !match.compId) {
+      setWithdrawnStatus(null);
+      return;
+    }
+    let cancelled = false;
+    (async () => {
+      try {
+        const statuses = await window.API.fetchCompetitorStatuses(match.compId);
+        if (cancelled) return;
+        setWithdrawnStatus((statuses || []).find(s => s.playerId === withdrawn.id) || null);
+      } catch (_e) {
+        if (!cancelled) setWithdrawnStatus(null);
+      }
+    })();
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [asking, isDefaultWin, match.compId, withdrawn?.id]);
+  const canReinstate = !!(withdrawnStatus && withdrawnStatus.eligible === false && withdrawnStatus.reinstateable);
+  // bc-cse: the barred competitor's own status record now reads eligible --
+  // reinstated, or their earlier withdrawal cleared elsewhere -- so the
+  // server reopens THIS match straight to running rather than the queue
+  // (see the fusensho branch below).
+  const isEligibleAgain = !!(withdrawnStatus && withdrawnStatus.eligible === true);
+
   return (
     <div className="decision-recorded" data-testid="recorded-withdrawal" style={{ marginTop: 10, fontSize: 13 }}>
       <div>
-        <span>Recorded: {withdrawalLabel(match.decision)}{who ? `, ${who} ${what}` : ""}.</span>
+        {/* bc-rawm: a match-level fusensho (RemainingMatchesPanel.award) names
+            the WINNER first -- "Default win (fusensho) for <winner>" -- so the
+            operator sees who benefits from the same reading the wire's
+            decisionBy already carries, then names who had withdrawn as a
+            second sentence. withdrawalLabel cannot build this on its own: it
+            takes only the decision string, not the winner's name. */}
+        <span>
+          {isDefaultWin
+            ? `Recorded: Default win (fusensho) for ${winnerName || "the opponent"}. ${who || "The withdrawn competitor"} had withdrawn.`
+            : `Recorded: ${withdrawalLabel(match.decision)}${who ? `, ${who} ${what}` : ""}.`}
+        </span>
         {!asking && (
           <>
             {" "}
@@ -1507,16 +1692,41 @@ function RecordedWithdrawal({ match, ctl, disabled = false, singleBout = false }
               onClick={() => setAsking(true)}
               disabled={disabled || ctl.busy || ctl.landed}
             >
-              {ctl.busy ? "Reopening…" : ctl.landed ? "Reopened" : "Clear withdrawal and reopen"}
+              {/* bc-cse: "Clear default win" -- no "and reopen" -- because a
+                  fusensho reopen no longer always lands running: the server
+                  returns the match to SCHEDULED when the barred competitor
+                  is still barred (BarredMatchNotice shows again), and only
+                  to running once they no longer are, so this button cannot
+                  promise "and reopen" for either outcome uniformly. */}
+              {ctl.busy ? "Reopening…" : ctl.landed ? "Reopened" : isDefaultWin ? "Clear default win" : "Clear withdrawal and reopen"}
             </button>
           </>
         )}
       </div>
       {asking && (
         <>
-          {singleBout && match.decision === "fusenpai" ? (
-            // A no-show fought nothing, so there are no points to keep or
-            // lose: the reopen only removes the default win.
+          {isDefaultWin ? (
+            // bc-cse: a fusensho names the OTHER competitor as barred, not
+            // this match's own withdrawal, so clearing it does not simply
+            // "reopen to running" -- the barred competitor is almost always
+            // still barred (whatever withdrew them elsewhere is still on
+            // record), so that is the default the copy states; only when a
+            // live check finds them reinstateable does it also offer that
+            // route. When the live check instead finds them ELIGIBLE
+            // AGAIN (reinstated, or their earlier withdrawal cleared), the
+            // server reopens this match straight to running, so the copy
+            // says that instead of promising the queue.
+            <p data-testid="clear-withdrawal-consequence" style={{ margin: "6px 0 0" }}>
+              {isEligibleAgain
+                ? `${who || "The barred competitor"} can fight again, so the match reopens in progress. Score it and finish it as usual.`
+                : <>
+                  The match goes back to the queue. {who || "The barred competitor"} is still withdrawn, so
+                  record the default win again{canReinstate ? `, or reinstate ${who || "them"} first to fight it` : ""}.
+                </>}
+            </p>
+          ) : singleBout && match.decision === "fusenpai" ? (
+            // A no-show fought nothing: there are no points to keep or lose,
+            // so the reopen only removes the default win.
             <p data-testid="clear-withdrawal-consequence" style={{ margin: "6px 0 0" }}>
               This reopens the match: it goes back to running, the default win given
               to {winnerName || "the other side"} is removed, and {who || "the side marked absent"} can
@@ -1552,9 +1762,30 @@ function RecordedWithdrawal({ match, ctl, disabled = false, singleBout = false }
               matches it affects before anything is saved.
             </p>
           )}
+          {laterDefaultWins && laterDefaultWins.length > 0 && (
+            <div data-testid="clear-withdrawal-default-win-consequences" style={{ margin: "6px 0 0" }}>
+              {/* bc-cse: named by scoreRowMatchLabel first -- a pairing alone
+                  cannot be found in the scores list, which is where the
+                  operator has to go to reopen it -- with the pairing appended
+                  the same way ReopenFeedback's own fetched blockerLabel joins
+                  a lead onto a pairing ("Pool A · Match 2 · Shiro vs Aka"),
+                  so the two operator lines that name a match this way agree.
+                  Falls back to the bare pairing when the match carries no
+                  number at all (see scoreRowMatchLabel's own doc). */}
+              {laterDefaultWins.map((x) => {
+                const label = scoreRowMatchLabel(x);
+                const pairing = `${x.sideB?.name || "Shiro"} vs ${x.sideA?.name || "Aka"}`;
+                return (
+                  <p key={x.id} data-testid={`clear-withdrawal-default-win-${x.id}`} style={{ margin: "4px 0 0" }}>
+                    {label ? `${label} · ${pairing}` : pairing} keeps its default win; reopen it to fight it.
+                  </p>
+                );
+              })}
+            </div>
+          )}
           <ReasonPrompt
-            label="Why is this withdrawal being cleared?"
-            presets={WITHDRAWAL_REOPEN_PRESETS}
+            label={isDefaultWin ? "Why is this default win being cleared?" : "Why is this withdrawal being cleared?"}
+            presets={isDefaultWin ? DEFAULT_WIN_REOPEN_PRESETS : WITHDRAWAL_REOPEN_PRESETS}
             submitting={ctl.busy}
             onConfirm={(r) => { setAsking(false); ctl.reopen(r); }}
             onCancel={() => setAsking(false)}
@@ -1577,9 +1808,19 @@ function RecordedWithdrawal({ match, ctl, disabled = false, singleBout = false }
 // competitor. Both editors render their header names through here, the
 // individual board and the team encounter header alike.
 function WithdrawalMarkedName({ match, sideKey, side, name, number }) {
-  const mark = withdrawalInForce(match) && withdrawnKeyOf(match) === sideKey
-    ? sideMarks(match.decision, false).loser
-    : "";
+  // bc-cse: take BOTH marks once and place the right one on the right name,
+  // rather than always reading .loser -- for a match-level fusensho the
+  // withdrawal names the BARRED (losing) side, and sideMarks' fusensho arm
+  // puts its "Fus." on .winner, not .loser, so reading .loser alone showed
+  // NO mark at all on either header while the bracket, list rows, TV
+  // headline and export all marked the winner "Fus.".
+  const inForce = withdrawalInForce(match);
+  const withdrawnKey = inForce ? withdrawnKeyOf(match) : "";
+  let mark = "";
+  if (inForce && withdrawnKey) {
+    const marks = sideMarks(match.decision, false);
+    mark = sideKey === withdrawnKey ? marks.loser : marks.winner;
+  }
   if (!mark) return <NumberedName side={side} name={name} number={number} />;
   const markEl = <span className="sb-result-mark" data-testid={`withdrawal-mark-${side}`}>{mark}</span>;
   return numberFollowsName(side)
@@ -1707,6 +1948,7 @@ export {
   EnchoControl,
   DecisionPrompt,
   RemainingMatchesPanel,
+  BarredMatchNotice,
   FoulCounter,
   LineupNameInput,
   ReasonPrompt,

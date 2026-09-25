@@ -122,6 +122,49 @@ func TestDownstreamKnockoutCorrection_RefusedByDefault(t *testing.T) {
 		"a refused correction must not bump the file version")
 }
 
+// TestDownstreamKnockoutCorrection_RefusalMessageNamesTheOperatorLabelNotRawID
+// covers bc-cse item 14: DownstreamKnockoutPlayedError.Error() used to
+// interpolate the raw match id ("m-r1-0") into its "correcting match %q..."
+// sentence, which IS sent to the operator verbatim
+// (respondIfDownstreamKnockoutPlayed's "message" field). It must instead
+// name the match the way the operator sees it (MatchLabel), exactly like
+// every other operator-facing refusal in this family.
+func TestDownstreamKnockoutCorrection_RefusalMessageNamesTheOperatorLabelNotRawID(t *testing.T) {
+	eng, store, _ := setupTestEngine(t)
+	compID := "kcdg-label-not-id"
+	require.NoError(t, store.SaveCompetition(&state.Competition{
+		ID: compID, Name: compID, Status: state.CompStatusKnockout,
+	}))
+	b := &state.Bracket{
+		Rounds: [][]state.BracketMatch{
+			{
+				{ID: "m-r1-0", SideA: "Alice", SideB: "Bob", SideAID: "alice", SideBID: "bob",
+					Winner: "Alice", WinnerID: "alice", Status: state.MatchStatusCompleted,
+					IpponsA: []string{"M"}, MatchNumber: 1, DisplayRound: 2},
+			},
+			{
+				// The final carries its OWN result (ippons), so correcting
+				// m-r1-0 is blocked on it.
+				{ID: "m-r2-0", SideA: "Alice", SideB: "Dave", SideAID: "alice", SideBID: "dave",
+					Winner: "Alice", WinnerID: "alice", Status: state.MatchStatusCompleted,
+					IpponsA: []string{"M", "M"}, MatchNumber: 2, DisplayRound: 1},
+			},
+		},
+	}
+	require.NoError(t, store.SaveBracket(compID, b))
+
+	txErr := inTx(t, store, compID, func(tx state.StoreTx) error {
+		_, err := eng.RecordMatchResultWithIneligibilityTx(tx, compID, "m-r1-0", correctR1ToBob("fix"), ForceOptions{})
+		return err
+	})
+	var dkErr *DownstreamKnockoutPlayedError
+	require.ErrorAs(t, txErr, &dkErr)
+
+	msg := dkErr.Error()
+	assert.NotContains(t, msg, "m-r1-0", "the raw match id must not reach the operator")
+	assert.Contains(t, msg, "Match 1 (Semifinals)", "the corrected match is named by its operator label instead")
+}
+
 func TestDownstreamKnockoutCorrection_Force(t *testing.T) {
 	eng, store, _ := setupTestEngine(t)
 	compID := "kcdg-force"
@@ -256,6 +299,75 @@ func TestDownstreamKnockoutCorrection_ByeDoesNotBlock(t *testing.T) {
 	assert.Equal(t, "Bob", got.Rounds[1][0].SideA)
 	assert.Equal(t, "Bob", got.Rounds[1][0].Winner)
 	assert.Equal(t, state.MatchStatusCompleted, got.Rounds[1][0].Status)
+}
+
+// TestReopenMatch_ByeResolvedDownstream_RemedyNamesTheCorrectionDoor covers
+// bc-cse item 8: the REOPEN door on the SAME bye-completed-downstream shape
+// TestDownstreamKnockoutCorrection_ByeDoesNotBlock proves the CORRECTION
+// door sails through. Reopening m-r1-0 must still be refused
+// (*ReopenDownstreamResolvedError: there is nothing to finish, requeue, or
+// undo on a bye nobody fought), but the remedy it names must be the door
+// that is actually known to work here -- Save correction -- not "fix the
+// draw or seeding", which names no one-step fix at all.
+func TestReopenMatch_ByeResolvedDownstream_RemedyNamesTheCorrectionDoor(t *testing.T) {
+	eng, store, _ := setupTestEngine(t)
+	compID := "kcdg-bye-reopen"
+	require.NoError(t, store.SaveCompetition(&state.Competition{
+		ID: compID, Name: "kcdg-bye-reopen", Status: state.CompStatusKnockout,
+	}))
+	b := &state.Bracket{
+		Rounds: [][]state.BracketMatch{
+			{
+				// Decision must be a default-win one: reopenResultPreconditionTx
+				// refuses a reopen on any other decided-by-fight result for a
+				// non-kachinuki match, before it ever reaches the downstream
+				// check this test targets.
+				{ID: "m-r1-0", SideA: "Alice", SideB: "Bob", SideAID: "alice", SideBID: "bob",
+					Winner: "Alice", WinnerID: "alice", Status: state.MatchStatusCompleted,
+					Decision: "kiken-voluntary", MatchNumber: 1, DisplayRound: 2},
+			},
+			{
+				{ID: "m-r2-0", SideA: "Alice", SideB: "", SideAID: "alice",
+					Winner: "Alice", WinnerID: "alice", Status: state.MatchStatusCompleted,
+					MatchNumber: 2, DisplayRound: 1},
+			},
+		},
+	}
+	require.NoError(t, store.SaveBracket(compID, b))
+
+	_, err := eng.ReopenMatch(compID, "m-r1-0", "test reason")
+	require.Error(t, err)
+	var resolvedErr *ReopenDownstreamResolvedError
+	require.ErrorAs(t, err, &resolvedErr, "a bye-completed downstream must refuse the reopen")
+	assert.Equal(t,
+		"Match 2 (Final) already has a result from a bye, not from being fought, so reopening this match cannot undo it. "+
+			"Correct the result instead: Save correction on this match moves the new winner through the bye.",
+		resolvedErr.Error())
+	assert.NotContains(t, resolvedErr.Error(), "Fix the draw or seeding",
+		"that remedy names no one-step fix; Save correction is the door proven to work on this exact shape")
+}
+
+// TestReopenBracketDownstreamCheck_ScheduledWithStrayDataIsNotResolvedByBye
+// covers the second half of bc-cse item 8: bracketMatchStartedOrScored is
+// true on more than a completed match (Winner/SubResults/Ippons set is
+// enough), so a downstream row that is still SCHEDULED but carries stray
+// Winner data must not be classified "resolved by a bye" -- that label
+// promises the specific, clean completed-via-bye shape
+// TestReopenMatch_ByeResolvedDownstream_RemedyNamesTheCorrectionDoor pins,
+// and firstDownstreamWithOwnResult's OWN gate (bracketMatchCarriesOwnResult)
+// requires Completed too, so a scheduled row can never be "played" either.
+func TestReopenBracketDownstreamCheck_ScheduledWithStrayDataIsNotResolvedByBye(t *testing.T) {
+	bracket := &state.Bracket{
+		Rounds: [][]state.BracketMatch{
+			{{ID: "m-r1-0", SideA: "Alice", SideB: "Bob"}},
+			// Stray/transitional data: SCHEDULED but a Winner is already
+			// set (never happens on a normal write path; a hand-edited or
+			// mid-migration file is the reachable shape).
+			{{ID: "m-r2-0", SideA: "Alice", Winner: "Alice", Status: state.MatchStatusScheduled}},
+		},
+	}
+	err := reopenBracketDownstreamCheck(bracket, 0, 0, false)
+	assert.NoError(t, err, "a still-scheduled downstream row must not be labelled resolved-by-bye")
 }
 
 func TestDownstreamKnockoutCorrection_RestoreBypassesGuard(t *testing.T) {

@@ -246,49 +246,49 @@ var reasonHumanPatterns = []struct {
 }{
 	// "kiken at <matchID>" → "withdrew from match <matchID>"
 	{
-		re: regexp.MustCompile(`^kiken at (\S+)$`),
+		re: regexp.MustCompile(`^kiken at (.+)$`),
 		rewrite: func(m []string) string {
 			return "withdrew from match " + m[1]
 		},
 	},
 	// "kiken-voluntary at <matchID>" → "withdrew voluntarily from match <matchID>"
 	{
-		re: regexp.MustCompile(`^kiken-voluntary at (\S+)$`),
+		re: regexp.MustCompile(`^kiken-voluntary at (.+)$`),
 		rewrite: func(m []string) string {
 			return "withdrew voluntarily from match " + m[1]
 		},
 	},
 	// "kiken-injury at <matchID>" → "withdrew due to injury from match <matchID>"
 	{
-		re: regexp.MustCompile(`^kiken-injury at (\S+)$`),
+		re: regexp.MustCompile(`^kiken-injury at (.+)$`),
 		rewrite: func(m []string) string {
 			return "withdrew due to injury from match " + m[1]
 		},
 	},
 	// "fusenpai at <matchID>" → "no-show forfeit at match <matchID>"
 	{
-		re: regexp.MustCompile(`^fusenpai at (\S+)$`),
+		re: regexp.MustCompile(`^fusenpai at (.+)$`),
 		rewrite: func(m []string) string {
 			return "no-show forfeit at match " + m[1]
 		},
 	},
 	// "fusensho at <matchID>" → "bye-win at match <matchID>"
 	{
-		re: regexp.MustCompile(`^fusensho at (\S+)$`),
+		re: regexp.MustCompile(`^fusensho at (.+)$`),
 		rewrite: func(m []string) string {
 			return "bye-win at match " + m[1]
 		},
 	},
 	// "daihyosen at <matchID>" → "representative bout at match <matchID>"
 	{
-		re: regexp.MustCompile(`^daihyosen at (\S+)$`),
+		re: regexp.MustCompile(`^daihyosen at (.+)$`),
 		rewrite: func(m []string) string {
 			return "representative bout at match " + m[1]
 		},
 	},
 	// "kachinuki-exhaustion at <matchID>" → "team exhausted at match <matchID>"
 	{
-		re: regexp.MustCompile(`^kachinuki-exhaustion at (\S+)$`),
+		re: regexp.MustCompile(`^kachinuki-exhaustion at (.+)$`),
 		rewrite: func(m []string) string {
 			return "team exhausted at match " + m[1]
 		},
@@ -320,4 +320,28 @@ func ResolveReasonHuman(reason string) string {
 		return strings.ToLower(t.Short)
 	}
 	return ""
+}
+
+// SplitStatusReason parses a CompetitorStatus.Reason string of the shape
+// "<decision> at <matchId>" -- the one format
+// engine.recordIneligibilityFromDecision ever writes (fmt.Sprintf("%s at
+// %s", result.Decision, matchID)) -- into its two parts. ok is false for
+// anything else (a hand-edited or legacy reason with no " at " separator),
+// and decision/matchID are then "".
+//
+// The match id itself may contain a space (a pool id is "<pool
+// name>-<n>", and a pool is commonly named "Pool A"), so the split is on
+// the first literal " at " rather than on whitespace; a decision value
+// never contains a space (domain.Decision, decision.go), so the split
+// point is unambiguous. Used by engine's barred-competitor error
+// constructors (IneligibleCompetitorError/AlreadyIneligibleError) so a
+// refusal carries a machine-usable Decision/MatchID alongside the prose
+// Reason, without a second consumer re-deriving the same split.
+func SplitStatusReason(reason string) (decision, matchID string, ok bool) {
+	const sep = " at "
+	i := strings.Index(reason, sep)
+	if i < 0 {
+		return "", "", false
+	}
+	return reason[:i], reason[i+len(sep):], true
 }

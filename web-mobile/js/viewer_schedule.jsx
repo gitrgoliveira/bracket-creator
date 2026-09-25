@@ -3,12 +3,13 @@
 
 import { poolLabel, tournamentMatches, compareDmy } from './viewer_utils.jsx';
 import { matchParticipantIds, matchParticipantNames, useWatchlist, resolveEntryPlayerIds, resolveWatchedPlayers, findPrimaryEntry, buildRoster, buildWatchedSets, matchInvolvesWatchedSet } from './viewer_watchlist_core.jsx';
-import { withNumber } from './match_scoreboard.jsx';
+import { withNumber, teamNameMark } from './match_scoreboard.jsx';
 import { SideCell } from './side_cell.jsx';
 import { MatchViewerModal, localQueueLabelCompact } from './viewer_match.jsx';
 import { sameCompetitor, competitorKey } from './competitor_identity.jsx';
 import { competitorMatchesQuery, matchMentions } from './competitor_search.jsx';
 import { resultRecencyDesc } from './result_recency.jsx';
+import { barredNameMark } from './barred_chip.jsx';
 
 const { useState, useMemo, useRef: useRefV } = React;
 const EmptyState = window.EmptyState;
@@ -325,6 +326,14 @@ export function TWMatch({ m, highlight, onClick }) {
   // closed-set ruling in CLAUDE.md.
   const isRunning = m.status === "running";
   const scoreStr = (m.status === "completed" || isRunning) ? window.matchScoreStr(m) : null;
+  // bc-tmfn: a TEAM row's score cell (window.matchScoreStr → teamIVPWScore)
+  // is deliberately free of marks, so the match-level Kiken/Fus. a default
+  // win closed a team match with rides beside the withdrawn team's NAME
+  // instead -- the ONE shared computation (window.teamMatchMarks,
+  // bracket.jsx), which derives its own team-row signal from m.subResults
+  // (bc-cse) so an individual match's own mark, already inline in its
+  // scoreStr above, is never doubled here.
+  const { shiro: teamShiroMark, aka: teamAkaMark } = window.teamMatchMarks ? window.teamMatchMarks(m) : { shiro: "", aka: "" };
   // FR-025: per-court queue position: see VSchedItem for the contract.
   // Short pill form here because the tw-match row is denser than the
   // upcoming-list row in the per-competition viewer. Wording is owned
@@ -351,11 +360,18 @@ export function TWMatch({ m, highlight, onClick }) {
         {/* Side by CELL TINT, matching the admin twin in admin_schedule_page.jsx
             (bc-sccl); the S/A squares are gone and sr-only labels carry the side
             in text. */}
-        <SideCell side="shiro" density="mid" className={`tw-match__name ${bWin ? "tw-match__name--w" : ""}`}>
-          {withNumber(m.sideB)}
+        {/* bc-cse: teamNameMark (the ELEMENT form), not teamNameMarkStr --
+            baking the mark into the plain string left it inside the SAME
+            text run .tw-match__name ellipsises, so a long name clipped it
+            away exactly like the other three hosts fixed alongside this one
+            (see viewer_match.jsx's VSchedItem comment). The mark is now a
+            real sibling element, flex:none via msb-name--labelled, and the
+            name string is wrapped in msb-name__text so only IT ellipsises. */}
+        <SideCell side="shiro" density="mid" className={`tw-match__name msb-name--labelled ${bWin ? "tw-match__name--w" : ""}`}>
+          {barredNameMark(m, "shiro", teamNameMark("shiro", teamShiroMark, <span className="msb-name__text">{withNumber(m.sideB)}</span>))}
         </SideCell>
-        <SideCell side="aka" density="mid" className={`tw-match__name ${aWin ? "tw-match__name--w" : ""}`}>
-          {withNumber(m.sideA)}
+        <SideCell side="aka" density="mid" className={`tw-match__name msb-name--labelled ${aWin ? "tw-match__name--w" : ""}`}>
+          {barredNameMark(m, "aka", teamNameMark("aka", teamAkaMark, <span className="msb-name__text">{withNumber(m.sideA)}</span>))}
         </SideCell>
         <div className="tw-match__comp">{m.compName}</div>
       </div>

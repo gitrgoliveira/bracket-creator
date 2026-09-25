@@ -118,14 +118,16 @@ func refuseUnfinishedTeamFinish(store CompetitionStore, compID, matchID string, 
 
 // teamFinishRefusalUnderTx is the in-transaction half of the team finish gate:
 // it returns the refusal refuseUnfinishedTeamFinish computed, unless the write
-// keeps a withdrawal recorded on the match. That write is a correction to the
-// bouts of a match a withdrawal already ended, and it keeps the ruling
-// (engine.KeepsWithdrawalRuling, operator ruling 2026-09-24: "Save correction
-// should just save what the operator enters"), so the bouts nobody fought
-// after the withdrawal are not a finish it has to answer for. check is the
-// snapshot applyCorrectionReasonUnderTx read under the same lock the write
-// holds, so the stored decision this exemption reads is the one the engine
-// will see.
+// keeps a DEFAULT-WIN ruling recorded on the match -- any kiken, fusenpai, OR
+// fusensho, not withdrawal-only (engine.KeepsWithdrawalRuling was widened
+// from IsWithdrawalDecisionStr to domain.IsDefaultWinDecisionStr, bc-tmfn
+// follow-up: see its own doc comment, scoring.go). That write is a
+// correction to the bouts of a match a default-win ruling already ended, and
+// it keeps the ruling (operator ruling 2026-09-24: "Save correction should
+// just save what the operator enters"), so the bouts nobody fought after it
+// are not a finish it has to answer for. check is the snapshot
+// applyCorrectionReasonUnderTx read under the same lock the write holds, so
+// the stored decision this exemption reads is the one the engine will see.
 func teamFinishRefusalUnderTx(refusal *ValidationError, check correctionCheck, req *state.MatchResult) *ValidationError {
 	if refusal == nil || engine.KeepsWithdrawalRuling(check.StoredStatus, check.StoredDecision, req) {
 		return nil

@@ -1440,7 +1440,12 @@ func (s *Store) saveParticipantsNoLock(compID string, players []domain.Player, w
 		mintedByCompetitor[helper.CompetitorKey("", stamped[i].Name, stamped[i].Dojo)] = stamped[i].ID
 	}
 
-	if err := s.upgradeSquadsFromMetadataLocked(compID, &legacyUpgradeRoster{store: s, compID: compID}, mintedByCompetitor); err != nil {
+	// Hoisted into a variable (rather than a fresh literal per call) so the
+	// orphan prune below can reuse its cached competition() lookup: both
+	// steps need Kind/TeamSize, and loadComp() memoises the read for the
+	// life of this one saveParticipantsNoLock call.
+	roster := &legacyUpgradeRoster{store: s, compID: compID}
+	if err := s.upgradeSquadsFromMetadataLocked(compID, roster, mintedByCompetitor); err != nil {
 		log.Printf("state: saveParticipants %s: pre-write squad migration: %v", compID, err)
 	}
 
@@ -1480,6 +1485,34 @@ func (s *Store) saveParticipantsNoLock(compID string, players []domain.Player, w
 	// itself needs no external lock, and the NEXT EnsureLegacyUpgraded call
 	// will acquire that same per-comp lock before it re-checks the map.
 	s.legacyUpgraded.Delete(compID)
+
+	// bc-tmfn: prune team-members.yaml / lineups.yaml entries for a team no
+	// longer on the roster this write just persisted, now that the write has
+	// landed (pruning ahead of the write risks deleting a team's members over
+	// a write that then fails, leaving the roster and its members disagreeing
+	// about what the write actually reached). keepIDs is the POST-mint id set
+	// -- stamped, not players -- since a row that matched an existing
+	// participant above (see the id-carry-forward comment on the batch
+	// POST /participants handler, handlers_participants.go) keeps that
+	// existing id here too, and a genuinely new row's freshly minted id is
+	// only on stamped. Best-effort, same contract as the seeds-orphan prune
+	// next to this write's callers: a failure here is logged, not
+	// propagated, and the leftover orphan is retried on the next roster
+	// write.
+	keepIDs := make(map[string]bool, len(stamped))
+	for i := range stamped {
+		keepIDs[stamped[i].ID] = true
+	}
+	if comp, err := roster.competition(); err != nil {
+		log.Printf("state: saveParticipants %s: prune orphaned team data: load competition: %v", compID, err)
+	} else {
+		if err := s.pruneOrphanedTeamMembersLocked(compID, comp, keepIDs); err != nil {
+			log.Printf("state: saveParticipants %s: prune orphaned team members: %v", compID, err)
+		}
+		if err := s.pruneOrphanedTeamLineupsLocked(compID, comp, keepIDs); err != nil {
+			log.Printf("state: saveParticipants %s: prune orphaned team lineups: %v", compID, err)
+		}
+	}
 
 	return nil
 }

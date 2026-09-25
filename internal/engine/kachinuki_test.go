@@ -1862,7 +1862,9 @@ func TestReopenKachinukiMatch(t *testing.T) {
 			},
 		}))
 		err := reopenErr(eng, "reopen-blocked", "SF0", "operator error")
-		assert.ErrorIs(t, err, ErrReopenDownstreamFought)
+		// bc-cse: F0 is RUNNING, so this is DownstreamKnockoutRunningError
+		// now, not the bare ErrReopenDownstreamFought sentinel.
+		assert.ErrorIs(t, err, ErrDownstreamKnockoutRunning)
 
 		bracket, lerr := store.LoadBracket("reopen-blocked")
 		require.NoError(t, lerr)
@@ -2339,7 +2341,7 @@ func TestReopenKachinukiMatchCourtBusy(t *testing.T) {
 
 	// mp-gmcg review: an UNREOPENABLE target (its winner already fed a fought
 	// downstream) whose court is held by a running match in ANOTHER competition
-	// must report the permanent ErrReopenDownstreamFought, NOT a transient
+	// must report the permanent downstream reason, NOT a transient
 	// court_busy. Otherwise the admin remedy panel (which branches on
 	// code=="court_busy") offers to requeue the court's occupant for a target that
 	// can never reopen — a dead end. The plain-reopen entry pre-checks the result
@@ -2354,7 +2356,9 @@ func TestReopenKachinukiMatchCourtBusy(t *testing.T) {
 		}))
 
 		err := reopenErr(eng, "reopen-cross-ds-a", "SF0", "")
-		require.ErrorIs(t, err, ErrReopenDownstreamFought, "the permanent reason must win over a transient court_busy")
+		// bc-cse: foughtDownstreamBracket's F0 is RUNNING, so this is
+		// DownstreamKnockoutRunningError now, not the bare sentinel.
+		require.ErrorIs(t, err, ErrDownstreamKnockoutRunning, "the permanent reason must win over a transient court_busy")
 		var busy *CourtBusyError
 		require.NotErrorAs(t, err, &busy, "an unreopenable target must not surface as court_busy")
 
@@ -2474,7 +2478,9 @@ func TestRequeueBlockerAndReopenKachinuki(t *testing.T) {
 		require.NoError(t, store.SavePoolMatches("rq-ds-blocker", []state.MatchResult{scoredBlocker("B1-0", "A")}))
 
 		err := requeueReopenErr(eng, "rq-downstream", "SF0", "rq-ds-blocker", "B1-0", "")
-		assert.ErrorIs(t, err, ErrReopenDownstreamFought)
+		// bc-cse: foughtDownstreamBracket's F0 is RUNNING, so this is
+		// DownstreamKnockoutRunningError now, not the bare sentinel.
+		assert.ErrorIs(t, err, ErrDownstreamKnockoutRunning)
 
 		assertBlockerIntact(t, store, "rq-ds-blocker", "B1-0")
 

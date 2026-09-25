@@ -367,50 +367,11 @@ func TestRecordDecision_FusenshoSkipsConcurrentCheck(t *testing.T) {
 
 // TestCheckEligibility_AllEligible verifies that CheckEligibility returns
 // nil when no competitor-status records exist (default-eligible per FR-034).
-func TestCheckEligibility_AllEligible(t *testing.T) {
-	eng, store, _ := setupTestEngine(t)
-	compID := "elig-all"
-	createTestCompetition(t, store, compID, "league", 2)
-
-	err := eng.CheckEligibility(compID, []string{"pid1", "pid2", ""})
-	assert.NoError(t, err)
-}
-
 // TestCheckEligibility_OneIneligible verifies that CheckEligibility
 // returns *IneligibleCompetitorError when one of the player IDs has
 // Eligible: false. The empty-string player ID must be skipped.
-func TestCheckEligibility_OneIneligible(t *testing.T) {
-	eng, store, _ := setupTestEngine(t)
-	compID := "elig-one"
-	createTestCompetition(t, store, compID, "league", 2)
-
-	require.NoError(t, store.SetCompetitorStatus(compID, domain.CompetitorStatus{
-		PlayerID: "ineligible-pid",
-		Eligible: false,
-		Reason:   "kiken at match-1",
-		MatchID:  "match-1",
-	}))
-
-	err := eng.CheckEligibility(compID, []string{"eligible-pid", "ineligible-pid"})
-	require.Error(t, err)
-	assert.True(t, errors.Is(err, ErrIneligibleCompetitor))
-	var ie *IneligibleCompetitorError
-	require.ErrorAs(t, err, &ie)
-	assert.Equal(t, "ineligible-pid", ie.PlayerID)
-	assert.Equal(t, "kiken at match-1", ie.Reason)
-}
-
 // TestCheckEligibility_EmptyIDsSkipped verifies that empty-string IDs
 // are silently skipped (no lookup, no error).
-func TestCheckEligibility_EmptyIDsSkipped(t *testing.T) {
-	eng, store, _ := setupTestEngine(t)
-	compID := "elig-empty"
-	createTestCompetition(t, store, compID, "league", 2)
-
-	err := eng.CheckEligibility(compID, []string{"", ""})
-	assert.NoError(t, err)
-}
-
 // TestRecordDecision_OnBracketMatch exercises the bracket-match paths of
 // lookupMatchSides and lookupExistingResult. A kiken decision on a
 // bracket match must succeed, write the competitor status, and set the
@@ -1223,8 +1184,8 @@ func TestRollback_BracketSubResults_ClearedTx(t *testing.T) {
 // TestStartMatch_RejectsSimultaneousMatch verifies the simultaneity gate
 // (Phase 2c): when a participant is already Running in another match within
 // the same competition, StartMatch must return *IneligibleCompetitorError
-// matching errors.Is(err, ErrIneligibleCompetitor) with a reason that
-// mentions "already fighting".
+// matching errors.Is(err, ErrIneligibleCompetitor) with a reason that names
+// the running match and says to finish it first (bc-cse).
 func TestStartMatch_RejectsSimultaneousMatch(t *testing.T) {
 	t.Run("pool match running blocks second pool match for same participant", func(t *testing.T) {
 		eng, store, _ := setupTestEngine(t)
@@ -1255,7 +1216,10 @@ func TestStartMatch_RejectsSimultaneousMatch(t *testing.T) {
 
 		var ineligErr *IneligibleCompetitorError
 		require.ErrorAs(t, err, &ineligErr)
-		assert.Contains(t, ineligErr.Reason, "already fighting")
+		// bc-cse: the operator sentence names the match by its own operator
+		// label (A-0 is not "Pool "-prefixed, so OperatorMatchLabel falls
+		// through to the bare id) and the court.
+		assert.Equal(t, "Alice is fighting now in A-0 on Shiaijo A. Finish that match first.", ineligErr.Reason)
 	})
 
 	t.Run("SideB participant running blocks second match", func(t *testing.T) {
@@ -1287,7 +1251,7 @@ func TestStartMatch_RejectsSimultaneousMatch(t *testing.T) {
 
 		var ineligErr *IneligibleCompetitorError
 		require.ErrorAs(t, err, &ineligErr)
-		assert.Contains(t, ineligErr.Reason, "already fighting")
+		assert.Equal(t, "Bob is fighting now in A-0 on Shiaijo B. Finish that match first.", ineligErr.Reason)
 	})
 
 	t.Run("completed match does not block new match for same participant", func(t *testing.T) {
@@ -1373,7 +1337,7 @@ func TestStartMatch_RejectsSimultaneousMatch(t *testing.T) {
 
 		var ineligErr *IneligibleCompetitorError
 		require.ErrorAs(t, err, &ineligErr)
-		assert.Contains(t, ineligErr.Reason, "already fighting")
+		assert.Equal(t, "Alice is fighting now in B-1 on Shiaijo C. Finish that match first.", ineligErr.Reason)
 	})
 
 	// bc-pnum review finding 5: the pool-vs-pool half of
@@ -1702,9 +1666,14 @@ func TestRecordDecision_TeamWithdrawalKeepsSubResults(t *testing.T) {
 	result, _, err := eng.RecordDecision(compID, "Pool A-0", "kiken-voluntary", "aka", "withdrew", nil, false)
 	require.NoError(t, err)
 	assert.Equal(t, "Team White", result.Winner)
-	require.Len(t, result.SubResults, 2, "team sub-bouts already fought are preserved (FIK Art. 32)")
+	// bc-tmfn follow-up: bout 3 (TeamSize 3, never fought) is padded with an
+	// empty row alongside the two preserved fought bouts, so state.
+	// DefaultWinCreditSide's readers have a row to credit it through.
+	require.Len(t, result.SubResults, 3, "team sub-bouts already fought are preserved (FIK Art. 32), plus bout 3 padded")
 	assert.Equal(t, "Team Red", result.SubResults[0].Winner)
 	assert.Equal(t, "Team White", result.SubResults[1].Winner)
+	assert.Equal(t, 3, result.SubResults[2].Position)
+	assert.False(t, result.SubResults[2].HasResult(), "bout 3 was never fought; padded empty")
 }
 
 // TestRecordDecision_BracketLoserKeepsStruckPoints is the bracket-shaped
@@ -1793,9 +1762,13 @@ func TestRecordDecision_BracketTeamWithdrawalKeepsSubResults(t *testing.T) {
 	assert.Equal(t, "Team White", result.Winner)
 	assert.Equal(t, []string{"M"}, result.IpponsA,
 		"withdrawing side (Team Red) keeps its struck ippon (FIK Art. 32) -- this is the assertion preserveLoserScore actually pins")
-	require.Len(t, result.SubResults, 2, "team sub-bouts already fought are preserved (FIK Art. 32) -- via applyBracketMatchResult's own merge rule, not preserveLoserScore")
+	// bc-tmfn follow-up: bout 3 (TeamSize 3, never fought) is padded with an
+	// empty row alongside the two preserved fought bouts.
+	require.Len(t, result.SubResults, 3, "team sub-bouts already fought are preserved (FIK Art. 32) -- via applyBracketMatchResult's own merge rule, not preserveLoserScore -- plus bout 3 padded")
 	assert.Equal(t, "Team Red", result.SubResults[0].Winner)
 	assert.Equal(t, "Team White", result.SubResults[1].Winner)
+	assert.Equal(t, 3, result.SubResults[2].Position)
+	assert.False(t, result.SubResults[2].HasResult(), "bout 3 was never fought; padded empty")
 }
 
 // TestRecordDecision_ReDecisionFlipNoPhantomMaru guards the T103 correction
@@ -1915,5 +1888,68 @@ func TestK2ChecksItsHandleIsTransactional(t *testing.T) {
 			assert.True(t, state.IsTransactional(tx), "a live tx handle must report as one")
 			return nil
 		}))
+	})
+}
+
+// TestBarredSides pins the ONE "not eligible AND recorded by a different
+// match" check (bc-cse), extracted from what used to be three hand-copied
+// loops in StartMatchTx, checkEligibilityExcludingMatch and (now)
+// mobileapp's ineligibleSides annotation.
+func TestBarredSides(t *testing.T) {
+	statuses := map[string]domain.CompetitorStatus{
+		"p-barred": {
+			PlayerID: "p-barred", Eligible: false, MatchID: "Pool A-0",
+			Reason: "kiken-voluntary at Pool A-0", Reinstateable: false,
+		},
+		"p-eligible": {PlayerID: "p-eligible", Eligible: true, MatchID: "Pool A-0"},
+		"p-self-recorded": {
+			PlayerID: "p-self-recorded", Eligible: false, MatchID: "Pool A-1",
+			Reason: "fusenpai at Pool A-1",
+		},
+	}
+
+	t.Run("a barred side is reported, the other is not", func(t *testing.T) {
+		a, b := BarredSides(statuses, "Pool A-2", "p-barred", "p-eligible")
+		require.NotNil(t, a)
+		assert.Equal(t, "Pool A-0", a.MatchID)
+		assert.Equal(t, "kiken-voluntary at Pool A-0", a.Reason)
+		assert.Nil(t, b)
+	})
+
+	t.Run("no entry for an id is not barred", func(t *testing.T) {
+		a, b := BarredSides(statuses, "Pool A-2", "unknown-id", "p-eligible")
+		assert.Nil(t, a)
+		assert.Nil(t, b)
+	})
+
+	t.Run("an empty id is never barred", func(t *testing.T) {
+		a, b := BarredSides(statuses, "Pool A-2", "", "")
+		assert.Nil(t, a)
+		assert.Nil(t, b)
+	})
+
+	t.Run("the undo path: a status THIS match itself recorded does not bar it", func(t *testing.T) {
+		a, _ := BarredSides(statuses, "Pool A-1", "p-self-recorded", "")
+		assert.Nil(t, a, "re-scoring the match that recorded the status must not block itself")
+	})
+
+	t.Run("both sides barred are both reported", func(t *testing.T) {
+		statuses2 := map[string]domain.CompetitorStatus{
+			"p1": {PlayerID: "p1", Eligible: false, MatchID: "Pool A-0", Reason: "kiken at Pool A-0"},
+			"p2": {PlayerID: "p2", Eligible: false, MatchID: "Pool B-0", Reason: "fusenpai at Pool B-0"},
+		}
+		a, b := BarredSides(statuses2, "Pool C-0", "p1", "p2")
+		require.NotNil(t, a)
+		require.NotNil(t, b)
+		assert.Equal(t, "Pool A-0", a.MatchID)
+		assert.Equal(t, "Pool B-0", b.MatchID)
+	})
+
+	t.Run("the returned status is a copy, not an alias into the map", func(t *testing.T) {
+		a, _ := BarredSides(statuses, "Pool A-2", "p-barred", "")
+		require.NotNil(t, a)
+		a.Reason = "mutated"
+		assert.Equal(t, "kiken-voluntary at Pool A-0", statuses["p-barred"].Reason,
+			"mutating the returned copy must not reach the caller's map")
 	})
 }

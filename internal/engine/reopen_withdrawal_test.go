@@ -43,7 +43,11 @@ func TestReopenWithdrawal_TeamPoolMatch(t *testing.T) {
 			assert.Equal(t, "", m.Winner)
 			assert.Equal(t, "", m.WinnerID)
 			assert.Empty(t, m.IpponsB, "the default-win maru goes with the verdict")
-			require.Len(t, m.SubResults, 1, "the bout fought before the withdrawal is kept")
+			// bc-tmfn follow-up: the kiken padded bouts 2 and 3 (TeamSize 3);
+			// reopening clears the verdict but does not strip those rows --
+			// the same empty-position shape a fresh team match's Start write
+			// already stores.
+			require.Len(t, m.SubResults, 3, "the bout fought before the withdrawal is kept, plus the padded rows 2/3")
 			assert.Equal(t, []string{"M"}, m.SubResults[0].IpponsA)
 			assert.Equal(t, "Withdrawal recorded by mistake", m.CorrectionReason)
 			assert.False(t, m.ReopenPending, "a reason was given, so nothing is owed")
@@ -139,7 +143,9 @@ func TestReopenWithdrawal_KnockoutDownstreamIsWarnAndProceed(t *testing.T) {
 	r1 := after.Rounds[0][0]
 	assert.Equal(t, state.MatchStatusRunning, r1.Status)
 	assert.Equal(t, "", r1.Decision)
-	require.Len(t, r1.SubResults, 1, "the bout fought before the withdrawal is kept")
+	// bc-tmfn follow-up: the kiken padded bouts 2 and 3 (TeamSize 3); reopening
+	// clears the verdict but does not strip those rows.
+	require.Len(t, r1.SubResults, 3, "the bout fought before the withdrawal is kept, plus the padded rows 2/3")
 	final := after.Rounds[1][0]
 	assert.Equal(t, state.MatchStatusScheduled, final.Status, "the final is reopened for re-entry")
 	assert.Empty(t, final.Winner)
@@ -169,7 +175,9 @@ func TestReopenWithdrawal_RunningDownstreamIsRefused(t *testing.T) {
 
 	for _, force := range []bool{false, true} {
 		_, err = eng.ReopenMatch(compID, "m-r1-0", "Withdrawal recorded by mistake", ForceOptions{Force: force})
-		require.ErrorIs(t, err, ErrReopenDownstreamFought, "force=%v", force)
+		// bc-cse: m-r2-0 is RUNNING, so this is DownstreamKnockoutRunningError
+		// now, not the bare ErrReopenDownstreamFought sentinel.
+		require.ErrorIs(t, err, ErrDownstreamKnockoutRunning, "force=%v", force)
 	}
 	b, err := store.LoadBracket(compID)
 	require.NoError(t, err)
@@ -177,10 +185,13 @@ func TestReopenWithdrawal_RunningDownstreamIsRefused(t *testing.T) {
 	assert.Equal(t, state.MatchStatusRunning, b.Rounds[1][0].Status)
 }
 
-// The gate is unchanged for every other match: a completed non-kachinuki match
-// no withdrawal decided is corrected, not reopened.
+// The gate is unchanged for every other match: a completed non-kachinuki
+// match decided by neither a withdrawal nor a default win is corrected, not
+// reopened. fusensho is deliberately NOT in this list since bc-cse: see
+// TestReopenWithdrawal_FusenshoAcceptedRestoresNobody for its own (accepted)
+// case.
 func TestReopenWithdrawal_OtherMatchesAreStillRefused(t *testing.T) {
-	for _, decision := range []string{"", "fought", "hikiwake", "fusensho", "daihyosen"} {
+	for _, decision := range []string{"", "fought", "hikiwake", "daihyosen"} {
 		t.Run("decision "+decision, func(t *testing.T) {
 			eng, store, _ := setupTestEngine(t)
 			const compID = "rw-refused"
@@ -208,6 +219,27 @@ func TestReopenWithdrawal_OtherMatchesAreStillRefused(t *testing.T) {
 		_, err := eng.ReopenMatch(compID, "Pool A-0", "reason")
 		require.ErrorIs(t, err, ErrReopenNotCompleted)
 	})
+}
+
+// bc-cse: a match-level fusensho (default win) is now reopenable, exactly
+// like a withdrawal -- but fusensho never recorded a CompetitorStatus for
+// anyone (domain.IsWithdrawalDecisionStr excludes it, recordIneligibilityFromDecision
+// only fires for a withdrawal), so reopening one restores nobody's
+// eligibility: there was nothing to restore.
+func TestReopenWithdrawal_FusenshoAcceptedRestoresNobody(t *testing.T) {
+	eng, store, compID, _ := seedPoolWithdrawal(t, "fusensho")
+
+	status, err := eng.ReopenMatch(compID, "Pool A-0", "Default win recorded by mistake")
+	require.NoError(t, err, "fusensho must be reopenable (bc-cse)")
+	assert.Nil(t, status, "fusensho barred nobody, so nothing is restored")
+
+	m := wrPoolMatch(t, store, compID)
+	assert.Equal(t, state.MatchStatusRunning, m.Status)
+	assert.Equal(t, "", m.Decision)
+	assert.Equal(t, "", m.DecisionBy)
+	assert.Equal(t, "", m.Winner)
+	assert.Empty(t, m.IpponsB, "the default-win maru goes with the verdict")
+	assert.Equal(t, "Default win recorded by mistake", m.CorrectionReason)
 }
 
 // The warn-and-proceed is the reopen's one rule, so a kachinuki reopen whose

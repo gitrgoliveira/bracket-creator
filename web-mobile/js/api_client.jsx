@@ -40,7 +40,8 @@ import {
     writeDidNotLand, writeWasSuperseded, writeWasRefusedForClock,
     SUPERSEDED_REASON, SUPERSEDED_ADVICE,
     CLOCK_SKEW_REASON_TEXT, CLOCK_SKEW_ADVICE, CLOCK_SKEW_UNHEALED_ADVICE,
-    downstreamKnockoutPlayedQueueDrop, downstreamKnockoutRunningMessage, downstreamKnockoutRunningQueueDrop,
+    downstreamKnockoutPlayedQueueDrop, downstreamKnockoutRunningMessage, downstreamKnockoutRunningReopenMessage,
+    downstreamKnockoutRunningQueueDrop, courtBusyMessage,
 } from './write_result.jsx';
 
 // ---------------------------------------------------------------------------
@@ -81,9 +82,22 @@ async function reopenFailureError(res) {
     // `reopen` marks it as met by a reopen rather than a corrected result, for
     // the dialog's copy (write_result.jsx), the way overridePoolRank marks
     // `ranking`.
-    const downstream = _downstreamKnockoutPlayedError(err);
+    //
+    // bc-rawm: routed through the shared _downstreamRefusalError rather than
+    // _downstreamKnockoutPlayedError alone, so a kachinuki reopen blocked by a
+    // DOWNSTREAM MATCH STILL RUNNING (not yet played) gets a copy for THIS
+    // being a reopen (bc-cse: `{ reopen: true }` selects
+    // downstreamKnockoutRunningReopenMessage, "...then reopen again" rather
+    // than the score path's "...then save again", which has no save step to
+    // retry here), instead of falling through to the bare
+    // "downstream_knockout_running" token below. The PLAYED shape ALSO marks
+    // `reopen` on its own structured field below, for the confirm dialog's
+    // copy; the running shape carries no `.downstreamKnockoutPlayed` to mark,
+    // its message alone already says what to do about a match still being
+    // fought.
+    const downstream = _downstreamRefusalError(err, { reopen: true });
     if (downstream) {
-        downstream.downstreamKnockoutPlayed.reopen = true;
+        if (downstream.downstreamKnockoutPlayed) downstream.downstreamKnockoutPlayed.reopen = true;
         return downstream;
     }
     const e = new Error(err.message || err.error || "Failed to reopen match");
@@ -91,6 +105,13 @@ async function reopenFailureError(res) {
     if (err.court) e.court = err.court;
     if (err.matchId) e.matchId = err.matchId;
     if (err.compId) e.compId = err.compId;
+    // bc-rawm: the court-busy conflict reuses the score path's structured
+    // court_busy payload (see recordScore below), which now carries `label`
+    // -- the blocking match named the way the operator sees it. Carried
+    // through so ReopenFeedback (admin_scoring_shared.jsx) can prefer it over
+    // its own best-effort fetched label, and never fall back to printing the
+    // raw matchId.
+    if (err.label) e.label = err.label;
     return e;
 }
 
@@ -191,10 +212,15 @@ function _downstreamKnockoutPlayedError(body) {
 // thrown Error's message is the operator's copy (write_result.jsx's
 // downstreamKnockoutRunningMessage) rather than the bare code, which is what
 // every `new Error(data.error)` fallback below would otherwise show. Returns
-// null when the body is not this refusal.
-function _downstreamKnockoutRunningError(body) {
+// null when the body is not this refusal. bc-cse: `opts.reopen` swaps in
+// downstreamKnockoutRunningReopenMessage instead -- the score path's "then
+// save again" is wrong for a REOPEN, which has no save step to retry.
+function _downstreamKnockoutRunningError(body, opts) {
     if (!body || body.error !== 'downstream_knockout_running') return null;
-    const err = new Error(downstreamKnockoutRunningMessage(body.runningMatches));
+    const message = (opts && opts.reopen)
+        ? downstreamKnockoutRunningReopenMessage(body.runningMatches)
+        : downstreamKnockoutRunningMessage(body.runningMatches);
+    const err = new Error(message);
     err.code = body.error;
     err.downstreamKnockoutRunning = { matchId: body.matchId, runningMatches: body.runningMatches || [] };
     return err;
@@ -203,20 +229,46 @@ function _downstreamKnockoutRunningError(body) {
 // _downstreamRefusalError is the one parse every score/decision write throws
 // through for a knockout-consequence 409: the confirmable played refusal, or
 // the terminal running one.
-function _downstreamRefusalError(body) {
-    return _downstreamKnockoutPlayedError(body) || _downstreamKnockoutRunningError(body);
+function _downstreamRefusalError(body, opts) {
+    return _downstreamKnockoutPlayedError(body) || _downstreamKnockoutRunningError(body, opts);
+}
+
+// _courtBusyError (bc-rawm): the 409 court_busy refusal on a score write --
+// this match's shiaijo is not free, a DIFFERENT match already holds it. Built
+// into an operator sentence via write_result.jsx's courtBusyMessage rather
+// than echoing the server's own `message` field, so the sentence names the
+// blocking match the way the operator sees it (the server's `label`) and
+// never falls back to printing the internal id the body also carries.
+// Deliberately separate from _downstreamRefusalError: this is not a
+// downstream-knockout refusal, and reopenFailureError's own court_busy
+// handling (the "TWO 409 SHAPES" branch below) keeps using the server's raw
+// `message` for its own Error, unaffected by this helper.
+function _courtBusyError(body) {
+    if (!body || body.error !== 'court_busy') return null;
+    const err = new Error(courtBusyMessage({ court: body.court, label: body.label }));
+    err.code = body.error;
+    if (body.court) err.court = body.court;
+    if (body.matchId) err.matchId = body.matchId;
+    if (body.compId) err.compId = body.compId;
+    if (body.label) err.label = body.label;
+    return err;
 }
 
 // _downstreamQueueDropCopy is what a DROPPED queued write is reported with when
 // the server refused its replay for a knockout reason: the played refusal's
 // queue copy (it cannot be confirmed from the flush loop, nobody is there), or
-// the running refusal's. Both are write_result.jsx's words. null for any other
-// body.
+// the running refusal's. Both are write_result.jsx's words. bc-cse: also a
+// court_busy refusal (_courtBusyError, whose message is courtBusyMessage's),
+// so a queued write dropped for a busy shiaijo alerts the operator sentence
+// rather than the bare "court_busy" token both drop sites below used to fall
+// through to. null for any other body.
 function _downstreamQueueDropCopy(body) {
     const played = _downstreamKnockoutPlayedError(body);
     if (played) return downstreamKnockoutPlayedQueueDrop(played.downstreamKnockoutPlayed);
     const running = _downstreamKnockoutRunningError(body);
     if (running) return downstreamKnockoutRunningQueueDrop(running.downstreamKnockoutRunning.runningMatches);
+    const courtBusy = _courtBusyError(body);
+    if (courtBusy) return { reason: courtBusy.message };
     return null;
 }
 
@@ -2404,7 +2456,7 @@ const API = {
             if (retryBody.error === "ineligible_competitor" || retryBody.error === "already_ineligible") {
                 throw new Error(retryBody.reasonHuman || retryBody.reason || retryBody.error || "Failed to record score");
             }
-            throw _downstreamRefusalError(retryBody) || new Error(retryBody.error || "Failed to record score");
+            throw _courtBusyError(retryBody) || _downstreamRefusalError(retryBody) || new Error(retryBody.error || "Failed to record score");
         };
 
         let res;
@@ -2491,6 +2543,12 @@ const API = {
         if (data.error === "ineligible_competitor" || data.error === "already_ineligible") {
             throw new Error(data.reasonHuman || data.reason || data.error || "Failed to record score");
         }
+        // bc-rawm: 409 court_busy (the shiaijo this match wants is running a
+        // different match) is built into an operator sentence naming the
+        // shiaijo and the blocking match, never the bare "court_busy" token;
+        // see _courtBusyError above.
+        const courtBusy = _courtBusyError(data);
+        if (courtBusy) throw courtBusy;
         // bc-kcdg: 409 downstream_knockout_played (correcting a completed
         // knockout match whose later round already played) is parsed into a
         // structured error rather than a plain message; see
@@ -2551,6 +2609,18 @@ const API = {
             // can surface the error. The decision-locked-as-success rule is ONLY
             // for queued retries in _flushQueue, not for direct calls.
             const err = await res.json().catch(() => ({}));
+            // bc-rawm: the eligibility gate (mp-dc52 Phase 3) refuses a
+            // decision exactly as it refuses a score write -- 409
+            // ineligible_competitor / already_ineligible carrying a full
+            // operator sentence in reasonHuman -- so prefer it the same way
+            // recordScore does below: reasonHuman, then reason, then the bare
+            // code. Checked BEFORE the downstream parse: neither downstream
+            // helper matches these two codes, so without this branch the
+            // fallback `new Error(err.error ...)` would have thrown the raw
+            // machine token instead of the server's sentence.
+            if (err.error === "ineligible_competitor" || err.error === "already_ineligible") {
+                throw new Error(err.reasonHuman || err.reason || err.error || "Failed to record decision");
+            }
             // bc-cse: 409 downstream_knockout_played (a kiken/fusenpai/daihyosen
             // decision that corrects a completed knockout match whose later
             // round already played) gets the SAME structured parse as the
@@ -2564,26 +2634,26 @@ const API = {
             throw _downstreamRefusalError(err) || new Error(err.error || "Failed to record decision");
         }
         const data = await res.json();
-        // bc-cse defence in depth, and INERT today by construction: the
-        // /decision handler maps a superseded write to 200 {"applied": false},
-        // but RecordDecisionTx builds its MatchResult with no ModifiedAt, so the
-        // write takes ApplyByTimestamp's unstamped bypass and the server cannot
-        // currently emit this body. Asked anyway for the same reason the server
-        // maps it: a 200 the caller reads as success while nothing was stored is
-        // precisely bc-lww1, and a decision resolves a match, so swallowing it
-        // would leave the operator looking at a verdict the disk never held.
+        // bc-cse, LIVE since mp-jnvl: the /decision handler maps a superseded
+        // write to 200 {"applied": false}, and a decision now carries a real
+        // modifiedAt (stamped above, exactly as recordScore stamps its own
+        // payload) that reaches RecordDecisionTx through its variadic
+        // modifiedAt parameter, which the handler always passes. So
+        // ApplyByTimestamp's LWW guard runs on a decision exactly as it does
+        // on a score write, and the server can genuinely emit this body for
+        // either reason (superseded or clock_skew) -- this is no longer a
+        // defence against a shape the server cannot send. Handled for the
+        // same reason bc-lww1 exists at all: a 200 the caller reads as
+        // success while nothing was stored would leave the operator looking
+        // at a verdict the disk never held.
         //
-        // ONE verdict for every applied:false here, and deliberately NOT the
-        // terminal SCORE path's split. That path earns its clock-specific copy
-        // by healing the offset and RETRYING once: only after the retry is
-        // refused again may it tell the operator their clock cannot be
-        // reconciled. This path does neither -- a decision carries no
-        // modifiedAt to re-stamp, so there is nothing to heal and retry -- and
-        // saying "the device clock could not be reconciled" without having
-        // tried would be a verdict on an attempt that never happened. So the
-        // decision path REPORTS rather than recovering, with the plain
-        // superseded copy. The offset is still relearned, since a skewed
-        // device is worth correcting for the next write that IS stamped.
+        // ONE verdict for every applied:false here, unlike the terminal SCORE
+        // path's split: that path earns its clock-specific copy by healing
+        // the offset and RETRYING once before reporting. This path does not
+        // attempt that heal-and-resend, so a decision refused for either
+        // reason is reported with the plain superseded copy rather than the
+        // dedicated clock-skew one. The offset is still relearned either way,
+        // since a skewed device is worth correcting for the next write.
         if (writeWasSuperseded(data)) {
             _relearnClockThrottled();
             _notifyScoreSuperseded(compID, matchID);

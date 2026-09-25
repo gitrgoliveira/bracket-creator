@@ -12,8 +12,14 @@ import (
 // via hasNumericSuffixAfter (daihyosen.go) for the same reason as its
 // IsPoolDaihyosenMatchID sibling: a plain substring match would misclassify a
 // regular match in a pool whose name happens to contain "-TB-".
+// IsTiebreakerMatchID reports whether matchID identifies a supplementary
+// ippon-shobu tiebreaker match (IDs of the form "Pool X-TB-N").
+//
+// Delegates to state.IsTiebreakerMatchID, the id grammar's one owner (see
+// its IsPoolDaihyosenMatchID sibling's doc for why); kept here under the
+// engine-facing name every other file in this package already uses.
 func IsTiebreakerMatchID(matchID string) bool {
-	return hasNumericSuffixAfter(matchID, "-TB-")
+	return state.IsTiebreakerMatchID(matchID)
 }
 
 // teamStandingPoints and individualStandingPoints compute the single packed

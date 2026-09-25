@@ -48,4 +48,18 @@ describe('filterSecondaryOnDeck', () => {
     const m = { id: 'm1', status: 'running', sideA: { id: 'a', name: 'A' }, sideB: { id: 'b', name: 'B' } };
     expect(filterSecondaryOnDeck([m], [], noPrimary)).toEqual([]);
   });
+
+  // bc-tmfn: filterSecondaryOnDeck gates on isFollowedMatchOnDeck, which is
+  // false for a barred scheduled match (ineligible_match.jsx) whatever its
+  // queuePosition reads -- so a watched player's barred "next" match never
+  // lights the quiet on-deck banner.
+  it('excludes a barred scheduled match even at queuePosition 1', () => {
+    const watched = [{ id: 'sato-tokyo', name: 'Sato' }];
+    const barredMatch = {
+      id: 'm1', status: 'scheduled', queuePosition: 1,
+      ineligibleSides: { a: 'kiken-voluntary' },
+      sideA: { id: 'sato-tokyo', name: 'Sato' }, sideB: { id: 'other', name: 'Someone' },
+    };
+    expect(filterSecondaryOnDeck([barredMatch], watched, noPrimary)).toEqual([]);
+  });
 });

@@ -4,6 +4,7 @@
 
 import { withNumber, numberedParts } from './match_scoreboard.jsx';
 import { poolNameOf, isSupplementaryBout, swissRoundLabel } from './pool_ids.jsx';
+import { isBarredMatch } from './ineligible_match.jsx';
 
 // NOTE: this module is the shared *leaf* in the display graph: presentation
 // modules (scoreboard, lobby, streaming) import from here, not vice versa.
@@ -125,6 +126,7 @@ function findUpcomingOnCourt(competitions, court, limit = 2) {
             if ((m.court || "") !== court) continue;
             if (m.status !== "scheduled") continue;
             if (!bracketSidesReady(m)) continue;
+            if (isBarredMatch(m)) continue; // cannot be fought as scheduled
             out.push({ ...m, _comp: c });
         }
         const rounds = (c.bracket && c.bracket.rounds) || [];
@@ -132,6 +134,7 @@ function findUpcomingOnCourt(competitions, court, limit = 2) {
             if ((m.court || "") !== court) return;
             if (m.status !== "scheduled") return;
             if (!bracketSidesReady(m)) return; // skip "Pool X-Nth" / "Winner of …" placeholders
+            if (isBarredMatch(m)) return; // cannot be fought as scheduled
             out.push({ ...m, _comp: c, _isBracket: true, _roundIndex: ri, _totalRounds: rounds.length });
         }));
     }
@@ -226,6 +229,7 @@ function findActiveCourts(tournament, competitions) {
 function queueLabel(m) {
     if (!m) return "";
     if (m.status !== "scheduled") return "";
+    if (isBarredMatch(m)) return "";
     const qp = Number(m.queuePosition);
     if (Number.isFinite(qp) && qp > 0) {
         if (qp === 1) return "Next up";
@@ -243,6 +247,7 @@ function queueLabel(m) {
 function queueLabelCompact(m) {
     if (!m) return null;
     if (m.status !== "scheduled") return null;
+    if (isBarredMatch(m)) return null;
     const qp = Number(m.queuePosition);
     // Use Number.isFinite so Infinity/-Infinity are rejected alongside NaN:
     // matches queueLabel's guard. isNaN alone would let Infinity through and

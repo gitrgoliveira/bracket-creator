@@ -107,42 +107,18 @@ func poolNameFromMatchID(id string) (string, bool) {
 	return "", false
 }
 
-// hasNumericSuffixAfter reports whether id ends with marker followed by one
-// or more digits and nothing else, e.g. hasNumericSuffixAfter("Pool A-DH-3",
-// "-DH-") is true. A plain strings.Contains(id, marker) would also match a
-// REGULAR pool match whose pool name happens to contain the marker, e.g. a
-// pool literally named "Pool A-DH-East" produces regular match ids like
-// "Pool A-DH-East-0"; that id contains "-DH-" but is not a daihyosen bout
-// (its numeric suffix follows a later, unmarked "-"). Anchoring the digits to
-// the LAST occurrence of marker rejects that case: the suffix after it is
-// "East-0", not all-digits, so it correctly reports false. Mirrors the JS
-// twin's anchored regex (pool_ids.jsx DAIHYOSEN_BOUT_RE / SUPPLEMENTARY_BOUT_RE,
-// both /-DH-\d+$/ style), which was already correctly suffix-anchored.
-func hasNumericSuffixAfter(id, marker string) bool {
-	i := strings.LastIndex(id, marker)
-	if i < 0 {
-		return false
-	}
-	suffix := id[i+len(marker):]
-	if suffix == "" {
-		return false
-	}
-	for _, c := range suffix {
-		if c < '0' || c > '9' {
-			return false
-		}
-	}
-	return true
-}
-
 // IsPoolDaihyosenMatchID reports whether a match ID is a pool-stage
 // daihyosen bout (IDs of the form "Pool X-DH-N"). These are generated
 // by InjectPoolDaihyosenMatches when all team-pool matches complete with
 // a tie on all 8 ranking criteria. They are structurally pool matches
 // but scored as individual (one representative per side) rather than as
 // full team bouts.
+//
+// Delegates to state.IsPoolDaihyosenMatchID, the id grammar's one owner
+// (state cannot import engine, so the definition lives there and this is
+// the engine-facing name every other file in this package already uses).
 func IsPoolDaihyosenMatchID(matchID string) bool {
-	return hasNumericSuffixAfter(matchID, "-DH-")
+	return state.IsPoolDaihyosenMatchID(matchID)
 }
 
 // generatePoolDaihyosenMatches creates round-robin MatchResult entries for
@@ -340,11 +316,24 @@ func (e *Engine) InjectPoolDaihyosenMatches(compID string) ([]state.MatchResult,
 //
 // Pass the names from the parent MatchResult.SideA / SideB so the
 // caller's view of "left team" / "right team" is canonical.
-func ComputeTeamSummary(subResults []state.SubMatchResult, sideAName, sideBName string) (TeamSummary, TeamSummary) {
+//
+// credit is REQUIRED (bc-cse): a variadic credit let a caller silently skip
+// state.DefaultWinCreditSide's default-win rule, which
+// mobileapp/handlers_daihyosen.go's AddDaihyosen tie check did until this
+// change. That call site computes credit the same way MatchResult.TeamResult
+// does (state.DefaultWinCreditSide against the match's own
+// Status/Decision/DecisionBy/Attribution()) rather than passing
+// domain.MatchSideNone, even though the match it reads is never itself
+// completed-by-default-win at that point (AddDaihyosen only applies to a
+// still-tied, still-running encounter, so DefaultWinCreditSide already
+// answers MatchSideNone there) -- computing it properly costs nothing and
+// keeps every caller going through the one canonical derivation rather than
+// a caller hand-asserting "no ruling can be in force here".
+func ComputeTeamSummary(subResults []state.SubMatchResult, sideAName, sideBName string, credit domain.MatchSide) (TeamSummary, TeamSummary) {
 	// Delegate to the single source of truth in state (the same computation
 	// feeds the wire teamResult the frontend renders), so tie-break math and
 	// the displayed IV/PW never drift. SideA is Aka, SideB is Shiro.
-	line := state.TeamResultFrom(subResults, sideAName, sideBName)
+	line := state.TeamResultFrom(subResults, sideAName, sideBName, credit)
 	if line == nil {
 		return TeamSummary{}, TeamSummary{}
 	}

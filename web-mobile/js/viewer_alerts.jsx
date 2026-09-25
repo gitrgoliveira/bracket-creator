@@ -15,6 +15,7 @@
 // viewer_notifications.jsx loads after viewer_alerts.jsx, so the import resolves.
 
 import { LS_NOTIFICATIONS_ENABLED } from './notification_keys.jsx';
+import { isBarredMatch } from './ineligible_match.jsx';
 
 const { useState, useRef: useRefV, useEffect } = React;
 
@@ -170,6 +171,11 @@ function matchSideName(side, fallbackName) {
 // Exported for unit testing and mp-5px (service worker path must reuse this).
 export function isFollowedMatchOnDeck(m) {
   if (!m) return false;
+  // A barred match (ineligible_match.jsx) cannot be fought as scheduled, so
+  // it is never on deck whatever its queuePosition reads: defense-in-depth
+  // alongside the queue-position recompute (patch.jsx), which is what keeps
+  // queuePosition itself at 0 for one.
+  if (isBarredMatch(m)) return false;
   if (m.status === "running") return true;
   if (m.status === "scheduled" && Number(m.queuePosition) === 1) return true;
   return false;

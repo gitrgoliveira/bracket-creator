@@ -123,8 +123,15 @@ func TestWithdrawalRulingKept_PoolCorrection(t *testing.T) {
 			after := wrPoolMatch(t, store, compID)
 			assertRulingKept(t, rulingOfMatch(&before), rulingOfMatch(&after))
 			assert.Equal(t, domain.DefaultWinIppons(false), after.IpponsB, "the winner's maru survives")
-			require.Len(t, after.SubResults, 1)
+			// bc-tmfn follow-up: seedPoolWithdrawal's own kiken already padded
+			// bouts 2 and 3 (TeamSize 3, only bout 1 was ever fought), and this
+			// correction only touches bout 1, so the padded rows persist.
+			require.Len(t, after.SubResults, 3)
 			assert.Equal(t, []string{"K"}, after.SubResults[0].IpponsA, "the bout edit is saved")
+			assert.Equal(t, 2, after.SubResults[1].Position)
+			assert.False(t, after.SubResults[1].HasResult(), "bout 2 was never fought; stays a padded empty row")
+			assert.Equal(t, 3, after.SubResults[2].Position)
+			assert.False(t, after.SubResults[2].HasResult(), "bout 3 was never fought; stays a padded empty row")
 			assert.Equal(t, "Scoring error: wrong waza entered", after.CorrectionReason)
 			assert.Equal(t, string(statusBefore), string(readStatusFile(t, dir, compID)),
 				"the eligibility record is byte-for-byte unchanged, RecordedAt included")
@@ -299,8 +306,14 @@ func TestWithdrawalRulingKept_BracketCorrection(t *testing.T) {
 
 			after := wrBracketMatch(t, store, compID, bronze)
 			assertRulingKept(t, rulingOfBracketMatch(&before), rulingOfBracketMatch(&after))
-			require.Len(t, after.SubResults, 1)
+			// bc-tmfn follow-up: seedBracketWithdrawal's own kiken already
+			// padded bouts 2 and 3 (TeamSize 3, only bout 1 was ever fought),
+			// and this correction only touches bout 1, so the padded rows
+			// persist.
+			require.Len(t, after.SubResults, 3)
 			assert.Equal(t, []string{"K"}, after.SubResults[0].IpponsA, "the bout edit is saved")
+			assert.False(t, after.SubResults[1].HasResult(), "bout 2 was never fought; stays a padded empty row")
+			assert.False(t, after.SubResults[2].HasResult(), "bout 3 was never fought; stays a padded empty row")
 			assert.Equal(t, "Scoring error: wrong waza entered", after.CorrectionReason)
 			assert.Equal(t, string(statusBefore), string(readStatusFile(t, dir, compID)))
 			if !bronze {
@@ -333,7 +346,7 @@ func TestKeepsWithdrawalRuling(t *testing.T) {
 		{"over a fusenpai", state.MatchStatusCompleted, "fusenpai", correction(nil), true},
 		{"a hikiwake-mapped sheet still keeps it", state.MatchStatusCompleted, "kiken-injury", correction(func(r *state.MatchResult) { r.Decision = "hikiwake" }), true},
 		{"stored fought", state.MatchStatusCompleted, "", correction(nil), false},
-		{"stored per-bout default win is not a withdrawal", state.MatchStatusCompleted, "fusensho", correction(nil), false},
+		{"stored fusensho is kept exactly as a kiken/fusenpai (bc-tmfn follow-up: widened from IsWithdrawalDecisionStr to IsDefaultWinDecisionStr)", state.MatchStatusCompleted, "fusensho", correction(nil), true},
 		{"stored not completed", state.MatchStatusRunning, "kiken-voluntary", correction(nil), false},
 		{"incoming not completed", state.MatchStatusCompleted, "kiken-voluntary", correction(func(r *state.MatchResult) { r.Status = state.MatchStatusScheduled }), false},
 		{"an individual correction (no bout rows) keeps it", state.MatchStatusCompleted, "kiken-voluntary", correction(func(r *state.MatchResult) { r.SubResults = nil }), true},
@@ -435,7 +448,8 @@ func TestWithdrawalRulingKept_OtherSideStillFixesAWrongWithdrawal(t *testing.T) 
 	m := wrPoolMatch(t, store, compID)
 	assert.Equal(t, wrTeamA, m.Winner)
 	assert.Equal(t, "shiro", m.DecisionBy)
-	require.Len(t, m.SubResults, 1)
+	// bc-tmfn follow-up: the original kiken already padded bouts 2 and 3.
+	require.Len(t, m.SubResults, 3)
 	assert.Equal(t, []string{"K"}, m.SubResults[0].IpponsA, "the corrected bout survives the re-decision")
 	statuses, err := store.LoadCompetitorStatus(compID)
 	require.NoError(t, err)

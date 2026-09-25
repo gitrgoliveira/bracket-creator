@@ -121,6 +121,65 @@ describe('API.reopenMatch', () => {
     expect(err.compId).toBe('c1');
   });
 
+  // bc-rawm: the court-busy conflict reuses the score path's structured
+  // payload (see the test above), which now carries `label` too -- the
+  // blocking match's operator name. Carried through onto the thrown Error so
+  // ReopenFeedback (admin_scoring_shared.jsx) can prefer it over its own
+  // best-effort fetched blockerLabel and never fall back to the raw matchId.
+  it('carries the server label onto the court-busy Error for the reopen panel heading', async () => {
+    global.fetch = mockFetch(409, {
+      error: 'court_busy',
+      court: 'A',
+      matchId: 'm-r1-1',
+      compId: 'c1',
+      label: 'Pool A · Match 2',
+      message: 'Court A already has a running match (m-r1-1). Finish that match before reopening this one.',
+    });
+    const err = await API.reopenMatch('c1', 'm1', 'secret').then(
+      () => { throw new Error('expected a rejection'); },
+      (e) => e
+    );
+    expect(err.label).toBe('Pool A · Match 2');
+  });
+
+  it('carries no label when the server sends none', async () => {
+    global.fetch = mockFetch(409, {
+      error: 'court_busy', court: 'A', matchId: 'm-r1-1', compId: 'c1', message: 'x',
+    });
+    const err = await API.reopenMatch('c1', 'm1', 'secret').then(
+      () => { throw new Error('expected a rejection'); },
+      (e) => e
+    );
+    expect(err.label).toBeUndefined();
+  });
+
+  // bc-rawm: reopenFailureError now routes through the shared
+  // _downstreamRefusalError (both downstream_knockout_played AND
+  // downstream_knockout_running), not _downstreamKnockoutPlayedError alone,
+  // so a kachinuki reopen blocked by a downstream match STILL RUNNING (not
+  // yet played) gets its OWN copy instead of falling through to the bare
+  // "downstream_knockout_running" token below. bc-cse: that copy is now the
+  // REOPEN variant ("...then reopen again"), not the score path's "...then
+  // save again" -- a reopen has no save step to retry.
+  it('parses the downstream_knockout_running refusal with the REOPEN copy, not the score path\'s', async () => {
+    global.fetch = mockFetch(409, {
+      error: 'downstream_knockout_running',
+      matchId: 'm-r1-0',
+      runningMatches: [{ id: 'm-r2-0', label: 'Match 7 (Final)' }],
+      message: 'server copy',
+    });
+    const err = await API.reopenMatch('c1', 'm-r1-0', 'secret').then(
+      () => { throw new Error('expected a rejection'); },
+      (e) => e
+    );
+    expect(err.message).toBe('Match 7 (Final) is being fought now. Finish it or send it back to the queue, then reopen again.');
+    expect(err.code).toBe('downstream_knockout_running');
+    expect(err.downstreamKnockoutRunning).toEqual({ matchId: 'm-r1-0', runningMatches: [{ id: 'm-r2-0', label: 'Match 7 (Final)' }] });
+    // Not marked as a "played" refusal: the running shape carries nothing to
+    // mark .reopen on, and its own copy already says what to do.
+    expect(err.downstreamKnockoutPlayed).toBeUndefined();
+  });
+
   it('surfaces the plain-sentence 409s (not completed, downstream fought) verbatim', async () => {
     global.fetch = mockFetch(409, { error: 'cannot reopen: a downstream knockout match has already been fought' });
     await expect(API.reopenMatch('c1', 'm1', 'secret'))

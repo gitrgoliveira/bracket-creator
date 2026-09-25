@@ -8,6 +8,7 @@ import { notificationSupported } from './viewer_notifications.jsx';
 import { VSchedItem, MatchViewerModal } from './viewer_match.jsx';
 import { buildWatchlistUpcoming, usePrimaryWatch, WATCHED_UPCOMING_LIST_MAX } from './viewer_schedule.jsx';
 import { mirrorWatchlistParam } from './watchlist_link.jsx';
+import { isBarredMatch } from './ineligible_match.jsx';
 
 const { useState, useMemo, useRef: useRefV, useEffect } = React;
 const StatusBadge = window.StatusBadge;
@@ -246,7 +247,9 @@ export function ViewerHome({ tournament, onSelectCompetition, onAdminClick, onOp
   // the upcoming list / cards / detail view all reject placeholder
   // sides. Mirrors the upNext filter below.
   const running = allMatches.filter((m) => m.status === "running" && hasBothSides(m) && runningCompIds.has(m.compId) && (courtFilter === "all" || m.court === courtFilter));
-  let upNext = allMatches.filter((m) => m.status === "scheduled" && hasBothSides(m) && runningCompIds.has(m.compId) && (courtFilter === "all" || m.court === courtFilter));
+  // A barred match (ineligible_match.jsx) cannot be fought as scheduled, so
+  // it is excluded from Up next: mirrors ViewerCompetition's upcomingMatches.
+  let upNext = allMatches.filter((m) => m.status === "scheduled" && hasBothSides(m) && !isBarredMatch(m) && runningCompIds.has(m.compId) && (courtFilter === "all" || m.court === courtFilter));
   if (courtFilter === "all") upNext = upNext.slice(0, 3);
 
   // mp-xhaa: resolve the watchlist to a flat player set (dojo entries expand to

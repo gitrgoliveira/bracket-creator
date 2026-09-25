@@ -37,7 +37,12 @@ import {
   withdrawnKeyOf,
   withdrawalLabel,
   WithdrawalMarkedName,
+  BarredMatchNotice,
 } from './admin_scoring_shared.jsx';
+// bc-cse: a SCHEDULED match a competitor is barred from must never offer a
+// Start the server would refuse; isBarredMatch (ineligible_match.jsx) is the
+// one owner of that question.
+import { isBarredMatch } from './ineligible_match.jsx';
 
 import { useDebouncedRunningWrite, SyncStatusPill } from './admin_scoring_autosave.jsx';
 import { SideLabel } from './side_cell.jsx';
@@ -52,6 +57,7 @@ import { notLandedBanner } from './write_result.jsx';
 // chain (CLAUDE.md § Match Decision Types: the middle rule lives in ONE place).
 import { boutMiddle, winnerSideLR } from './bracket.jsx';
 import { realIppons, hanteiTied, hanteiSlot, hanteiWinnerKey, nameOf, sideSlotOrder, attributeWinnerSide, subBoutAttribution } from './result_slot.jsx';
+import { creditedSideKey, creditedTotals } from './team_default_credit.jsx';
 
 // bc-kbrw: how long after a fought kachinuki bout opens a further pointer tap
 // on the bout list is ignored, so the second tap of a double tap cannot land
@@ -1587,9 +1593,21 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
   // answer as the Recorded line and the header's Kiken/Fus. mark) in the
   // band's own wording, and the decision under it (withdrawalLabel). That is
   // also the result Save correction keeps (keepsWithdrawal writes m.winner).
-  // IV/PW stay the bout-derived figures, as on the viewer card's summary row
-  // (teamIVPWFrom): they are standings figures, not the verdict. teamWinner is
-  // left alone; the Finish gates read it.
+  // teamWinner itself is left alone (the Finish gates below read it, and
+  // Finish is refused while a withdrawal is in force anyway).
+  //
+  // bc-tmfn: IV/PW no longer "stay the bout-derived figures" while a
+  // withdrawal is in force -- every bout the withdrawal left with no result
+  // of its own IS a default win for the OTHER side, exactly as the header's
+  // Kiken/Fus. mark and every other surface (the viewer card's summary row,
+  // the TV headline, the list rows) already read it. The band below reads
+  // the SAME credited totals: `unscoredBouts`, computed once here, is fed
+  // to unfinishedTeamBoutsMessage's Finish-refusal gate below (which STILL
+  // never fires while a withdrawal is in force -- keepsWithdrawal blanks
+  // `unfinishedBouts`, not `unscoredBouts`) and to creditedTotals (the ONE
+  // owner of "what a credited bout is worth", team_default_credit.jsx),
+  // which awards the OTHER side from decisionBy, IV+1/PW+2 per bout.
+  const unscoredBouts = unfinishedTeamBouts({ subs, teamSize });
   const recordedWithdrawal = withdrawalInForce(m);
   const withdrawalWinner = recordedWithdrawal ? ({ a: "b", b: "a" }[withdrawnKeyOf(m)] || null) : null;
   const teamVerdictText = withdrawalWinner
@@ -1614,7 +1632,22 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
   // of its plain Reopen (canReopenKachinukiMatch), but no Save correction, so
   // keepsWithdrawal (which shapes that save) stays off for it.
   const keepsWithdrawal = recordedWithdrawal && !isKachinuki;
-  const unfinishedBouts = (isKachinuki || keepsWithdrawal) ? [] : unfinishedTeamBouts({ subs, teamSize });
+  // bc-tmfn: the band's IV/PW (ts.iv/ts.pw below, via teamSides) include the
+  // credited bouts while keepsWithdrawal holds. bc-cse: withdrawalInForce
+  // now DELEGATES to isTeamDefaultWinDecision (team_default_credit.jsx), so
+  // this is no longer narrower than the full default-win class -- it covers
+  // fusensho too, which the team editor CAN reach: BarredMatchNotice
+  // (mounted below) records a match-level fusensho for the opponent of a
+  // competitor already barred elsewhere. keepsWithdrawal stays !isKachinuki
+  // because that credit never applies to kachinuki (team_default_credit.jsx's
+  // own exclusion); it reuses the SAME condition that already governs the
+  // header's Kiken/Fus. mark (WithdrawalMarkedName) and the Recorded line
+  // (RecordedWithdrawal) here.
+  if (keepsWithdrawal) {
+    const credit = creditedTotals(unscoredBouts.length, creditedSideKey(m.decisionBy));
+    ivA += credit.ivA; ivB += credit.ivB; pwA += credit.pwA; pwB += credit.pwB;
+  }
+  const unfinishedBouts = (isKachinuki || keepsWithdrawal) ? [] : unscoredBouts;
   const [finishRefused, setFinishRefused] = useStateA(false);
   const finishRefusal = finishRefused && unfinishedBouts.length > 0
     ? unfinishedTeamBoutsMessage(teamSize, unfinishedBouts)
@@ -3556,6 +3589,25 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
           {decisionErr && (
             <div style={{ color: "var(--danger)", fontSize: 12, marginTop: 6 }}>{decisionErr}</div>
           )}
+          {/* bc-tmfn: DecisionPrompt (admin_scoring_shared.jsx) has no slot for
+              extra copy -- its side radio is local state the parent never
+              sees, so the credited TEAM cannot be named before the operator
+              picks a side inside the form. Stated generically instead, right
+              where the operator commits: the side they name here is the one
+              that stayed and is credited, not the one they pick as withdrawn
+              (the radio labels "Which side withdrew?"). Silent when nothing
+              is left to credit (every bout already has a result), and on a
+              KACHINUKI encounter (bc-cse): team_default_credit.jsx excludes
+              kachinuki from the default-win credit on purpose (bouts are
+              appended one at a time and the encounter ends on an explicit
+              End match, never a match-level decision standing in for
+              unplayed slots), so this note would promise a credit the
+              server never applies. */}
+          {decisionPromptKind && !isKachinuki && unscoredBouts.length > 0 && (
+            <div style={{ fontSize: 12, color: "var(--ink-3)", marginTop: 4 }} data-testid="decision-consequence-note">
+              A withdrawal credits the other team with a default win, 2–0, in {unscoredBouts.length === 1 ? "the 1 bout" : `each of the ${unscoredBouts.length} bouts`} with no result yet.
+            </div>
+          )}
           {decisionPromptKind && (
             <DecisionPrompt
               kind={decisionPromptKind}
@@ -3725,12 +3777,24 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
               <span>Not saved: {writeFailed.reason}. {writeFailed.advice || "Re-enter the result and submit again."}</span>
             </div>
           )}
+          {/* bc-cse: a barred match cannot be started as scheduled -- the
+              server would just refuse it -- so the ONE component that shows
+              why and offers the default-win/reinstate resolution
+              (BarredMatchNotice, admin_scoring_shared.jsx) stands where Start
+              would be. Lifted ABOVE .score-nav__actions (a centred wrapping
+              flex row of small buttons): the notice's own note text plus its
+              action buttons were squeezed into one flex item there instead
+              of reading as the full-width block it is everywhere else this
+              component renders. */}
+          {m.status === "scheduled" && isBarredMatch(m) && (
+            <BarredMatchNotice match={m} password={password} />
+          )}
           <div className="score-nav">
             {prevMatch ? (
               <button className="btn btn--sm score-nav__prev" onClick={onPrev} disabled={submitting}>← Prev</button>
             ) : <span />}
             <div className="score-nav__actions">
-              {m.status === "scheduled" && (
+              {m.status === "scheduled" && !isBarredMatch(m) && (
                 <button className="btn btn--sm" onClick={async () => {
                   // F5: submits status:"running", the shape
                   // _notifyScoreSuperseded (api_client.jsx) deliberately stays

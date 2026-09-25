@@ -185,6 +185,10 @@ func TestReopenHandler_IndividualPoolWithdrawal(t *testing.T) {
 	w = postReopen(t, r, compID, "Pool A-1", "Scoring error")
 	require.Equal(t, http.StatusBadRequest, w.Code, w.Body.String())
 	assert.Contains(t, w.Body.String(), "correct other results via the score editor")
+	// bc-cse item 14: no internal field-name jargon in an operator-facing
+	// refusal -- "correctionReason" names the API field, not anything the
+	// operator sees on the score editor's own correction-reason box.
+	assert.NotContains(t, w.Body.String(), "correctionReason")
 }
 
 // A withdrawal cleared with no reason owes one on the next completion, and a

@@ -2341,8 +2341,13 @@ paths:
           description: |
             Conflict; one of seven codes returned in the `error` field:
             - `court_busy`: court already has a running match in this or another competition.
-              Extra fields: `court`, `matchId`, `compId`, `message`.
-            - `ineligible_competitor`: a participant is ineligible (kiken/fusenpai in a prior match).
+              Extra fields: `court`, `matchId`, `compId`, `label`, `message`.
+            - `ineligible_competitor`: a participant is ineligible (kiken/fusenpai in a prior match, or barred by
+              a decision recorded on a different match). `reasonHuman` is a full operator sentence naming the
+              competitor, the match, and what to do, e.g. "Alice withdrew in Pool A · Match 1 and cannot fight
+              again. Record the default win for Carol."; when BOTH sides of a knockout match are barred (the
+              only case a knockout cannot resolve with a draw), it instead reads "Neither Alice nor Bob can
+              fight Pool A · Match 1: correct the earlier withdrawal or the draw."
               Extra fields: `playerId`, `reason`, `reasonHuman`.
             - `already_ineligible`: participant was already marked ineligible before this match.
               Extra fields: `playerId`, `matchId`, `reason`, `reasonHuman`.
@@ -2393,6 +2398,12 @@ paths:
                   compId:
                     type: string
                     description: Conflicting competition ID (court_busy only).
+                  label:
+                    type: string
+                    description: >
+                      The conflicting match's operator label (court_busy
+                      only), e.g. `Pool A · Match 1`; see
+                      `engine.OperatorMatchLabel`.
                   message:
                     type: string
                     description: Human-readable detail (court_busy, result_finalized, side_mismatch, downstream_knockout_played, downstream_knockout_running).
@@ -2482,8 +2493,14 @@ paths:
       description: |
         Sanctioned "Reopen match" for a COMPLETED match that is either a
         kachinuki team match, or any match (team or individual, pool or
-        knockout) whose stored `decision` is a withdrawal (kiken of any kind,
-        or fusenpai). Status returns to `running`, the match-level verdict
+        knockout) whose stored `decision` is a withdrawal or default win
+        (kiken of any kind, fusenpai, or fusensho). Status returns to
+        `running` -- EXCEPT a match-level `fusensho` whose `decisionBy` side
+        is STILL barred by a decision recorded on a DIFFERENT match, which
+        returns to `scheduled` instead: going straight to `running` would
+        strand the operator behind the eligibility gate with no way to
+        start it. The identical fusensho reopens to `running` once that
+        competitor is reinstated. The match-level verdict
         (winner, decision, default-win scoreline) is cleared, and what was
         fought is kept: the bout log (subResults), or on a single-bout match
         (an individual match, a pool daihyosen or tiebreaker bout) the letters
@@ -2599,7 +2616,10 @@ paths:
           description: >
             The `reason` is longer than 200 characters, the body is present but
             malformed JSON, or the match is neither a kachinuki team match nor
-            one a withdrawal decided.
+            one a withdrawal or default win decided: "reopen is only for
+            kachinuki team matches and for matches decided by a withdrawal or
+            default win (kiken, kiken-injury, fusenpai, or fusensho); correct
+            other results via the score editor instead."
           content:
             application/json:
               schema:
@@ -2617,11 +2637,9 @@ paths:
           $ref: '#/components/responses/NotFound'
         '409':
           description: |
-            Conflict. Three body shapes, matching the score endpoint's:
+            Conflict. Five body shapes, matching the score endpoint's where one exists:
             - Plain sentence in `error`: the match is not completed (only a
-              completed match can be reopened), or a later match fed by this
-              result cannot be reopened with it (a knockout match in
-              progress or resolved by a bye).
+              completed match can be reopened).
             - `error: downstream_knockout_played`: a later knockout match fed
               by this result has a result of its own. Extra fields:
               `matchId` (this match), `blockingMatchId`, `blockingMatches`
@@ -2629,13 +2647,24 @@ paths:
               bronze match), `displaced` (the competitor in the slot this match
               fed), `message`. Retry with `forceDownstreamReopen: true` to
               reopen them too.
+            - `error: downstream_knockout_running`: a later knockout match fed
+              by this result is being fought right now, so it cannot be
+              reopened with it. Nothing is written. Extra fields: `matchId`
+              (this match), `runningMatches` (`[{id, number, label}]`),
+              `message`.
+            - `error: downstream_knockout_resolved`: a later knockout match
+              fed by this result was resolved by a bye, not by being fought,
+              so reopening this match cannot undo it. Correct the result
+              instead: a `Save correction` on this match moves the new
+              winner through the bye. Extra fields: `matchId` (this match),
+              `resolvedMatches` (`[{id, number, label}]`), `message`.
             - `error: court_busy` (machine code, sentence in `message`):
               another match is already running on this match's court, in this
               or another competition. Reopening would put a second match in
               progress on that court, so the operator must finish or requeue the
               running one first. Extra fields: `court`, `matchId`, `compId`,
-              `message`. Same shape as the score endpoint's `court_busy`, so
-              clients keep one branch for it.
+              `label`, `message`. Same shape as the score endpoint's
+              `court_busy`, so clients keep one branch for it.
           content:
             application/json:
               schema:
@@ -2657,10 +2686,59 @@ paths:
                       compId:
                         type: string
                         description: Competition owning that running match (may differ from this one).
+                      label:
+                        type: string
+                        description: The conflicting match's operator label, e.g. `Pool A · Match 1`.
                       message:
                         type: string
                         description: Human-readable sentence; what clients display.
                   - $ref: '#/components/schemas/DownstreamKnockoutPlayedError'
+                  - type: object
+                    required: [error]
+                    description: Later knockout match(es) fed by this result are being fought right now.
+                    properties:
+                      error:
+                        type: string
+                        enum: [downstream_knockout_running]
+                      matchId:
+                        type: string
+                      runningMatches:
+                        type: array
+                        items:
+                          type: object
+                          properties:
+                            id:
+                              type: string
+                            number:
+                              type: integer
+                            label:
+                              type: string
+                              description: The operator's name for the match; see `engine.OperatorMatchLabel`.
+                      message:
+                        type: string
+                  - type: object
+                    required: [error]
+                    description: Later knockout match(es) fed by this result were resolved by a bye, not by being fought.
+                    properties:
+                      error:
+                        type: string
+                        enum: [downstream_knockout_resolved]
+                      matchId:
+                        type: string
+                      resolvedMatches:
+                        type: array
+                        items:
+                          type: object
+                          properties:
+                            id:
+                              type: string
+                            number:
+                              type: integer
+                            label:
+                              type: string
+                              description: The operator's name for the match; see `engine.OperatorMatchLabel`.
+                      message:
+                        type: string
         '500':
           $ref: '#/components/responses/InternalError'
 
@@ -2670,9 +2748,11 @@ paths:
       summary: Atomically requeue a blocking match and reopen a match
       description: |
         The atomic remedy for a court_busy reopen. When reopening a finished
-        match ({id}/{mid}, the target: any match the reopen endpoint accepts,
+        match ({id}/{mid}, the target: any match the reopen endpoint accepts
+        -- including one decided by a match-level default win, fusensho --
         with the same gate and the same `downstream_knockout_played` /
-        `forceDownstreamReopen` handling, checked BEFORE the blocker is
+        `forceDownstreamReopen` / `downstream_knockout_running` /
+        `downstream_knockout_resolved` handling, checked BEFORE the blocker is
         touched) is refused because ANOTHER
         match holds its court, this requeues that blocking match AND reopens
         the target under ONE hold of the court-exclusivity lock, so no other
@@ -2732,7 +2812,8 @@ paths:
             `blockerCompId` is missing or malformed, `blockerMatchId` is missing
             or too long, the `reason` exceeds 200 characters, the body is
             malformed JSON, or the target is neither a kachinuki team match nor
-            one a withdrawal decided.
+            one a withdrawal or default win decided (same message as
+            `POST .../reopen`'s 400).
           content:
             application/json:
               schema:
@@ -2754,13 +2835,16 @@ paths:
         '409':
           description: |
             Conflict. Plain sentence in `error` when the target is not completed,
-            a later match fed by the target cannot be reopened with it, or the
-            BLOCKER was already completed (so it never held the court as running
-            and requeuing it is the wrong remedy). `error:
+            or the BLOCKER was already completed (so it never held the court as
+            running and requeuing it is the wrong remedy). `error:
             downstream_knockout_played` (same shape as reopen's) when a later
             knockout match has its own result and `forceDownstreamReopen` was
-            not set; the blocker is left untouched. Or `error: court_busy` (same
-            shape as reopen: `court`, `matchId`, `compId`, `message`) when a
+            not set; the blocker is left untouched. `error:
+            downstream_knockout_running` / `error: downstream_knockout_resolved`
+            (same shapes as reopen's, `runningMatches`/`resolvedMatches`) when a
+            later knockout match fed by the target is being fought now, or was
+            resolved by a bye. Or `error: court_busy` (same shape as reopen:
+            `court`, `matchId`, `compId`, `label`, `message`) when a
             match OTHER than the one requeued has since taken the court — the
             client re-offers the remedy for that new blocker.
           content:
@@ -2780,9 +2864,56 @@ paths:
                         type: string
                       compId:
                         type: string
+                      label:
+                        type: string
+                        description: The conflicting match's operator label, e.g. `Pool A · Match 1`.
                       message:
                         type: string
                   - $ref: '#/components/schemas/DownstreamKnockoutPlayedError'
+                  - type: object
+                    required: [error]
+                    description: Later knockout match(es) fed by the target are being fought right now.
+                    properties:
+                      error:
+                        type: string
+                        enum: [downstream_knockout_running]
+                      matchId:
+                        type: string
+                      runningMatches:
+                        type: array
+                        items:
+                          type: object
+                          properties:
+                            id:
+                              type: string
+                            number:
+                              type: integer
+                            label:
+                              type: string
+                      message:
+                        type: string
+                  - type: object
+                    required: [error]
+                    description: Later knockout match(es) fed by the target were resolved by a bye, not by being fought.
+                    properties:
+                      error:
+                        type: string
+                        enum: [downstream_knockout_resolved]
+                      matchId:
+                        type: string
+                      resolvedMatches:
+                        type: array
+                        items:
+                          type: object
+                          properties:
+                            id:
+                              type: string
+                            number:
+                              type: integer
+                            label:
+                              type: string
+                      message:
+                        type: string
         '500':
           $ref: '#/components/responses/InternalError'
 
@@ -3117,6 +3248,19 @@ paths:
         reopened without a reason), `decisionReason` becomes REQUIRED and the
         request is rejected with 400 without it. The supplied reason is
         persisted to `correctionReason` and `reopenPending` is cleared.
+
+
+        `decision: "hikiwake"` is accepted here ONLY as the one-tap remedy
+        for a SCHEDULED pool or league match (never a Swiss or knockout
+        match) whose BOTH sides are already barred by a decision recorded on
+        a different match: neither can fight, so it is recorded as a draw
+        with no winner and no new eligibility change. `decisionBy` is not
+        required for this one shape, unlike every other `decision` value;
+        any other `hikiwake` request is rejected with 400 ("use /score for
+        fought/hikiwake"). The equivalent knockout case, where the bracket
+        needs a winner and a draw cannot stand in, is refused instead with
+        409 `ineligible_competitor` naming both sides and pointing at the
+        earlier withdrawal or the draw.
       security:
         - TournamentPassword: []
       parameters:
@@ -3128,14 +3272,21 @@ paths:
           application/json:
             schema:
               type: object
-              required: [decision, decisionBy]
+              required: [decision]
               properties:
                 decision:
                   type: string
-                  enum: [kiken, kiken-voluntary, kiken-injury, fusenpai, fusensho, daihyosen]
+                  enum: [kiken, kiken-voluntary, kiken-injury, fusenpai, fusensho, hikiwake, daihyosen]
                 decisionBy:
                   type: string
                   enum: [shiro, aka]
+                  description: >
+                    Required for every `decision` except the both-sides-barred
+                    `hikiwake` described above, which needs no side: neither
+                    competitor can fight, so the write names no winner. Same
+                    semantics as `MatchResult.decisionBy`: names the side
+                    that withdrew, did not appear, or is barred, never the
+                    side favoured.
                 decisionReason:
                   type: string
                   maxLength: 200
@@ -3182,7 +3333,12 @@ paths:
                 $ref: '#/components/schemas/Error'
         '409':
           description: >
-            Competitor not eligible (ineligible_competitor), or a decision
+            Competitor not eligible (`ineligible_competitor`; `reasonHuman`
+            names the competitor, the match, and what to do, e.g. "Alice
+            withdrew in Pool A · Match 1 and cannot fight again. Record the
+            default win for Carol."; the knockout both-sides-barred case
+            reads "Neither Alice nor Bob can fight Pool A · Match 1: correct
+            the earlier withdrawal or the draw."), or a decision
             that would change who a knockout match with its own result was
             fought by (`downstream_knockout_played`, retry with
             `forceDownstreamReopen: true`; `qualifierChange` names the pool
@@ -4936,6 +5092,29 @@ components:
           items:
             $ref: '#/components/schemas/Player'
 
+    IneligibleSidesAnnotation:
+      type: object
+      readOnly: true
+      description: >
+        Read-only stamp attached to a SCHEDULED match, naming which side(s)
+        cannot be started because they are barred by a decision recorded on
+        a DIFFERENT match (a competitor already re-scoring their own prior
+        kiken/fusenpai is exempt, so that match is never stamped against
+        itself). Computed at request time only, never persisted: `a`/`b` are
+        each the barring decision code (`kiken`, `kiken-voluntary`,
+        `kiken-injury`, or `fusenpai`) when that side is barred, omitted
+        otherwise. Absent entirely on a running or completed match, and on a
+        scheduled match with neither side barred. A match carrying this
+        stamp also has `queuePosition` omitted; refer to
+        `MatchResult.queuePosition`.
+      properties:
+        a:
+          type: string
+          enum: [kiken, kiken-voluntary, kiken-injury, fusenpai]
+        b:
+          type: string
+          enum: [kiken, kiken-voluntary, kiken-injury, fusenpai]
+
     MatchResult:
       type: object
       properties:
@@ -5026,7 +5205,12 @@ components:
           enum: [none, fought, hikiwake, kiken, kiken-voluntary, kiken-injury, fusenpai, fusensho, daihyosen, kachinuki-exhaustion]
         decisionBy:
           type: string
-          description: Which side the decision favours (shiro = white = left, aka = red = right).
+          description: >
+            The side the decision names as the loser: who withdrew, did not
+            appear, or (for a match-level `fusensho`) is barred by a
+            decision recorded elsewhere (shiro = white = left, aka = red =
+            right). The write then makes the OTHER side the winner. NOT the
+            side the decision favours.
           enum: [shiro, aka]
         decisionReason:
           type: string
@@ -5067,6 +5251,18 @@ components:
         status:
           type: string
           enum: [scheduled, running, completed]
+        queuePosition:
+          type: integer
+          readOnly: true
+          description: >
+            1-based position in this court's scheduled queue; 0/absent when
+            not queued (not scheduled, or `ineligibleSides` is set: a barred
+            match is skipped exactly like an unqueued one, so it never
+            occupies a queue slot).
+        ineligibleSides:
+          readOnly: true
+          allOf:
+            - $ref: '#/components/schemas/IneligibleSidesAnnotation'
         court:
           type: string
           maxLength: 32
@@ -5115,8 +5311,12 @@ components:
         individual victories (IV) and points won (PW) per side. Shiro is sideB
         (rendered left), Aka is sideA (rendered right). The daihyosen
         (position -1) sub-bout is excluded, so a representative-bout-decided
-        tie reports the tied totals (for example IV 0-0). Absent on individual
-        matches. Never sent by clients.
+        tie reports the tied totals (for example IV 0-0). For a non-kachinuki
+        match decided by a match-level default win, these totals already
+        include the credit for every unfought numbered bout (one victory and
+        two points per bout, to the side `decisionBy` did not name); refer to
+        `MatchResult.decisionBy`. Absent on individual matches. Never sent by
+        clients.
       properties:
         shiroIV:
           type: integer
@@ -5246,6 +5446,10 @@ components:
         status:
           type: string
           enum: [scheduled, running, completed]
+        ineligibleSides:
+          readOnly: true
+          allOf:
+            - $ref: '#/components/schemas/IneligibleSidesAnnotation'
         court:
           type: string
           maxLength: 32
@@ -5291,6 +5495,12 @@ components:
           type: boolean
         queuePosition:
           type: integer
+          readOnly: true
+          description: >
+            1-based position in this court's scheduled queue; 0/absent when
+            not queued (not scheduled, or `ineligibleSides` is set: a barred
+            match is skipped exactly like an unqueued one, so it never
+            occupies a queue slot).
         matchNumber:
           type: integer
           readOnly: true
@@ -5305,6 +5515,7 @@ components:
         decisionBy:
           type: string
           enum: [shiro, aka]
+          description: The elimination-stage counterpart of `MatchResult.decisionBy`. Same semantics.
         decisionReason:
           type: string
           maxLength: 200
@@ -5611,7 +5822,17 @@ components:
           type: object
           additionalProperties:
             type: string
-          description: Map of position label to player ID.
+          description: >
+            Map of position label to the fighter's display NAME (not an id).
+            The member id for each position goes in `memberIds`.
+        memberIds:
+          type: object
+          additionalProperties:
+            type: string
+          description: >
+            Map of position label to the team member's id, keyed by the same
+            positions as `positions`. Optional: a position without an entry
+            here is identified by its name alone.
 
     ScheduleEstimate:
       type: object

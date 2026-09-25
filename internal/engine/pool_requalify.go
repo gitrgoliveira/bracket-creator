@@ -390,7 +390,13 @@ func (e *Engine) answerRequalification(tx state.StoreTx, compID string, comp *st
 	if len(plan.affected) > 0 && !force {
 		undo()
 		return nil, &DownstreamKnockoutPlayedError{
-			MatchID:         matchID,
+			MatchID: matchID,
+			// PURE: comp is already loaded and passed in, so this needs no
+			// store read (bc-cse item 14 -- see the struct doc on Label for
+			// why that matters here, inside a live transaction). matchID=""
+			// (OverridePoolRank) resolves to "" too, harmlessly: Error()'s
+			// pool-rank-override branch never reads Label.
+			Label:           OperatorMatchLabel(comp, nil, matchID),
 			BlockingMatchID: plan.blocking[0].ID,
 			Blocking:        plan.blocking,
 			Displaced:       plan.displaced,

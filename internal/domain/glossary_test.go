@@ -173,6 +173,12 @@ func TestResolveReasonHuman(t *testing.T) {
 		{"daihyosen at match", "daihyosen at r3-m1", "representative bout at match r3-m1"},
 		{"kachinuki-exhaustion at match", "kachinuki-exhaustion at k_5", "team exhausted at match k_5"},
 
+		// bc-cse: a pool/league match id contains a space ("Pool A-0" is
+		// "Pool A" + "-0"), so the pattern must capture past the first
+		// space rather than stop at it.
+		{"kiken-voluntary at pool match id", "kiken-voluntary at Pool A-0", "withdrew voluntarily from match Pool A-0"},
+		{"fusenpai at pool match id", "fusenpai at Pool A-0", "no-show forfeit at match Pool A-0"},
+
 		// Bare-term fallback path, when the engine emits just the
 		// canonical decision name without a match context.
 		{"bare kiken", "kiken", "withdrawal"},
@@ -190,6 +196,31 @@ func TestResolveReasonHuman(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			got := domain.ResolveReasonHuman(tc.reason)
 			assert.Equal(t, tc.want, got)
+		})
+	}
+}
+
+func TestSplitStatusReason(t *testing.T) {
+	cases := []struct {
+		name      string
+		reason    string
+		wantDec   string
+		wantMatch string
+		wantOK    bool
+	}{
+		{"simple id", "kiken-voluntary at m_12", "kiken-voluntary", "m_12", true},
+		// A pool match id contains a space; the split is on the literal
+		// " at " separator, not on whitespace.
+		{"pool id with space", "kiken-injury at Pool A-0", "kiken-injury", "Pool A-0", true},
+		{"no separator", "kiken", "", "", false},
+		{"empty", "", "", "", false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			decision, matchID, ok := domain.SplitStatusReason(tc.reason)
+			assert.Equal(t, tc.wantOK, ok)
+			assert.Equal(t, tc.wantDec, decision)
+			assert.Equal(t, tc.wantMatch, matchID)
 		})
 	}
 }

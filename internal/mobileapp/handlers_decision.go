@@ -122,6 +122,14 @@ func RegisterDecisionHandlers(r *gin.RouterGroup, eng ScoringEngine, store Compe
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 			return
 		}
+		// bc-cse item 10: the ONE hikiwake shape this endpoint accepts, ahead
+		// of Validate() (which otherwise 400s every hikiwake -- "use /score
+		// for fought/hikiwake"). Any hikiwake that is not this exact
+		// both-barred pool/league shape falls through unchanged to that same
+		// 400.
+		if handleBothSidesBarredHikiwake(c, eng, store, tx, hub, id, mid, req) {
+			return
+		}
 		if err := req.Validate(); err != nil {
 			var verr *ValidationError
 			if errors.As(err, &verr) {
@@ -267,22 +275,40 @@ func RegisterDecisionHandlers(r *gin.RouterGroup, eng ScoringEngine, store Compe
 				respondSuperseded(c)
 			case errors.As(engErr, &alreadyIneligErr):
 				// T105/CHK047: concurrent kiken, another operator already
-				// recorded ineligibility for this player on a different match.
-				// U1: reasonHuman carries the volunteer-readable gloss
-				// alongside the raw kendo-term reason.
+				// recorded ineligibility for this player on a different
+				// match. bc-rawm/bc-cse: reasonHuman is ONE operator
+				// sentence naming the match and the remedy, not the raw
+				// kendo-term reason.
 				c.JSON(http.StatusConflict, gin.H{
 					"error":       "already_ineligible",
 					"playerId":    alreadyIneligErr.PlayerID,
 					"matchId":     alreadyIneligErr.MatchID,
 					"reason":      alreadyIneligErr.Reason,
-					"reasonHuman": domain.ResolveReasonHuman(alreadyIneligErr.Reason),
+					"reasonHuman": reasonHumanForBarredCompetitor(store, id, mid, alreadyIneligErr.PlayerID, alreadyIneligErr.Reason, alreadyIneligErr.MatchID, alreadyIneligErr.Decision),
 				})
 			case errors.As(engErr, &ineligErr):
+				// Simultaneous tells the simultaneity gate's sentence
+				// (already complete in Reason) apart from a barred-status
+				// refusal -- even one whose own MatchID is empty (a status
+				// set directly via POST /competitor-status) -- exactly as
+				// the /score handler discriminates.
+				reasonHuman := ineligErr.Reason
+				switch {
+				case ineligErr.Simultaneous:
+					// reasonHuman stays ineligErr.Reason, already complete.
+				case ineligErr.BothSidesBarred:
+					// bc-cse item 10: neither side has an opponent to hand the
+					// default win to, so the single-sided builder's remedy
+					// clauses do not apply.
+					reasonHuman = bothSidesBarredReasonHuman(store, id, mid)
+				default:
+					reasonHuman = reasonHumanForBarredCompetitor(store, id, mid, ineligErr.PlayerID, ineligErr.Reason, ineligErr.MatchID, ineligErr.Decision)
+				}
 				c.JSON(http.StatusConflict, gin.H{
 					"error":       "ineligible_competitor",
 					"playerId":    ineligErr.PlayerID,
 					"reason":      ineligErr.Reason,
-					"reasonHuman": domain.ResolveReasonHuman(ineligErr.Reason),
+					"reasonHuman": reasonHuman,
 				})
 			case errors.Is(engErr, engine.ErrDecisionLocked):
 				c.JSON(http.StatusConflict, gin.H{
@@ -344,4 +370,92 @@ func RegisterDecisionHandlers(r *gin.RouterGroup, eng ScoringEngine, store Compe
 
 		c.JSON(http.StatusOK, result)
 	})
+}
+
+// handleBothSidesBarredHikiwake handles bc-cse item 10's ONE accepted
+// exception on POST /decision: {"decision":"hikiwake"} for a SCHEDULED pool
+// or league match (engine.IsPoolMatchID covers both id shapes) whose BOTH
+// sides are already barred elsewhere (engine.BarredSides). Neither
+// competitor can fight, and there is no opponent to hand a default win to
+// (both are equally unable to show up), so the encounter is recorded as a
+// completed DRAW with no winner and no points. It writes no eligibility
+// status of its own -- hikiwake is not a withdrawal decision
+// (domain.IsWithdrawalDecisionStr excludes it), so
+// RecordMatchResultWithIneligibilityTx's recordIneligibilityFromDecision
+// never fires for it -- and it never goes through StartMatchTx, which
+// would refuse it on either side's existing bar.
+//
+// Returns true when it fully answered the request (success, or a failure of
+// ITS OWN write once the shape qualified); false when the shape does not
+// qualify, so the caller falls through to the ordinary /decision flow --
+// which, for any OTHER hikiwake, is req.Validate()'s existing 400 ("use
+// /score for fought/hikiwake"), unchanged from today.
+func handleBothSidesBarredHikiwake(c *gin.Context, eng ScoringEngine, store CompetitionStore, txr CompetitionTransactor, hub Broadcaster, compID, matchID string, req DecisionRequest) bool {
+	if req.Decision != "hikiwake" || !engine.IsPoolMatchID(matchID) {
+		return false
+	}
+	reason := strings.TrimSpace(req.DecisionReason)
+	var (
+		applied  bool
+		result   state.MatchResult
+		writeErr error
+	)
+	txErr := txr.WithTransaction(compID, func(stx state.StoreTx) error {
+		poolMatches, err := stx.LoadPoolMatches(compID)
+		if err != nil {
+			return err
+		}
+		var m *state.MatchResult
+		for i := range poolMatches {
+			if poolMatches[i].ID == matchID {
+				m = &poolMatches[i]
+				break
+			}
+		}
+		if m == nil || m.Status != state.MatchStatusScheduled {
+			return nil
+		}
+		statuses, err := stx.LoadCompetitorStatus(compID)
+		if err != nil {
+			return err
+		}
+		a, b := engine.BarredSides(statuses, matchID, m.SideAID, m.SideBID)
+		if a == nil || b == nil {
+			return nil
+		}
+		write := &state.MatchResult{
+			ID: matchID, SideA: m.SideA, SideB: m.SideB, SideAID: m.SideAID, SideBID: m.SideBID,
+			Status: state.MatchStatusCompleted, Decision: "hikiwake", DecisionReason: reason,
+			ModifiedAt: req.ModifiedAt,
+		}
+		if _, werr := eng.RecordMatchResultWithIneligibilityTx(stx, compID, matchID, write); werr != nil {
+			writeErr = werr
+			return nil
+		}
+		result = *write
+		applied = true
+		return nil
+	})
+	if txErr != nil {
+		internalError(c, txErr)
+		return true
+	}
+	if !applied {
+		if writeErr != nil {
+			// The shape qualified (both barred, scheduled pool/league match)
+			// but the write itself failed on its own terms -- answered
+			// directly rather than silently dropped to the 400 fallback,
+			// which would misreport this as "unsupported decision".
+			respondEngineError(c, writeErr)
+			return true
+		}
+		return false
+	}
+	hub.Broadcast(EventMatchUpdated, gin.H{
+		"competitionId": compID,
+		"results":       matchesForBroadcast([]state.MatchResult{result}),
+	})
+	tryAutoCompletePoolsAfterWrite(c, eng, hub, compID, result)
+	c.JSON(http.StatusOK, result)
+	return true
 }

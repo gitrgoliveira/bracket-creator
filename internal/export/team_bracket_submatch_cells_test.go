@@ -156,3 +156,122 @@ func TestBuildResultsWorkbook_TeamBracketSubMatchScoresLandInCorrectCells(t *tes
 	// SubResults) must stay untouched by either write.
 	assert.Empty(t, cellAt(lCol, headerExcelRow+4), "no stray content between the two populated sub-bout rows")
 }
+
+// TestBuildResultsWorkbook_TeamBracketDefaultWinCreditedBoutShowsMaruNoMark
+// pins the bc-tmfn follow-up export contract: a bracket team match a
+// default-win ruling (kiken/fusenpai/fusensho) closes before every numbered
+// bout has a result shows the FIK default-win maru on each credited bout row
+// (state.SubBoutEffectiveResult), but carries NO per-row Kiken mark there --
+// the mark names the ONE competitor who withdrew and already rides the
+// match-level summary row's IV cell (operator ruling; see
+// writeTeamSubMatchScores' and writeTeamSummaryCells' doc comments).
+func TestBuildResultsWorkbook_TeamBracketDefaultWinCreditedBoutShowsMaruNoMark(t *testing.T) {
+	t.Parallel()
+	dir, store, eng, compID := testSetup(t)
+	defer os.RemoveAll(dir)
+
+	comp, err := store.LoadCompetition(compID)
+	require.NoError(t, err)
+	comp.Kind = "team"
+	comp.TeamSize = 3
+	comp.Format = state.CompFormatMixed
+	require.NoError(t, store.SaveCompetition(comp))
+
+	pools := makeTeamPools()
+	require.NoError(t, store.SavePools(compID, pools))
+	poolResults := []state.MatchResult{
+		{
+			ID: "Pool A-0", SideA: "Red A", SideAID: "Red A", SideB: "Blue A", SideBID: "Blue A",
+			Status: state.MatchStatusCompleted, Winner: "Red A", WinnerID: "Red A",
+			SubResults: []state.SubMatchResult{
+				{Position: 1, SideA: "Red A", SideB: "Blue A", IpponsA: []string{"M", "K"}, Winner: "Red A"},
+				{Position: 2, SideA: "Red A", SideB: "Blue A", IpponsB: []string{"M"}, Winner: "Blue A"},
+				{Position: 3, SideA: "Red A", SideB: "Blue A", IpponsA: []string{"D"}, Winner: "Red A"},
+			},
+		},
+		{
+			ID: "Pool B-0", SideA: "Red B", SideAID: "Red B", SideB: "Blue B", SideBID: "Blue B",
+			Status: state.MatchStatusCompleted, Winner: "Red B", WinnerID: "Red B",
+			SubResults: []state.SubMatchResult{
+				{Position: 1, SideA: "Red B", SideB: "Blue B", IpponsA: []string{"M"}, Winner: "Red B"},
+				{Position: 2, SideA: "Red B", SideB: "Blue B", IpponsA: []string{"K"}, Winner: "Red B"},
+				{Position: 3, SideA: "Red B", SideB: "Blue B", IpponsB: []string{"M"}, Winner: "Blue B"},
+			},
+		},
+	}
+	require.NoError(t, store.SavePoolMatches(compID, poolResults))
+
+	// The final: Red B (bm.SideB) withdraws before any bout is fought.
+	// DecisionBy "shiro" credits Red A (aka = SideA) for all 3 bouts --
+	// state.PadDefaultWinBoutPositions is what a real kiken write applies
+	// (pinned end to end at the engine level, TestDefaultWinBoutCredit_
+	// BracketWritePads / _BracketTeamResult); this fixture builds the SAME
+	// post-write shape directly so the test stays scoped to export rendering.
+	bracket := &state.Bracket{
+		Rounds: [][]state.BracketMatch{
+			{
+				{
+					ID: "B1", SideA: "Red A", SideB: "Red B", Winner: "Red A",
+					Status: state.MatchStatusCompleted, MatchNumber: 1,
+					Decision: "kiken-voluntary", DecisionBy: "shiro",
+					SubResults: state.PadDefaultWinBoutPositions(nil, 3),
+				},
+			},
+		},
+	}
+	require.NoError(t, store.SaveBracket(compID, bracket))
+
+	data, err := BuildResultsWorkbook(store, eng, compID)
+	require.NoError(t, err)
+	f, err := excelize.OpenReader(bytes.NewReader(data))
+	require.NoError(t, err)
+	defer f.Close()
+
+	rows, err := f.GetRows(helper.SheetEliminationMatches)
+	require.NoError(t, err)
+
+	headerRow, headerCol := -1, -1
+	for r, row := range rows {
+		for c, cellVal := range row {
+			if parseRoundMatchLabel(cellVal) == 1 {
+				headerRow, headerCol = r, c
+			}
+		}
+		if headerRow >= 0 {
+			break
+		}
+	}
+	require.GreaterOrEqual(t, headerRow, 0, "Elimination Matches sheet must contain the 'Round _ - Match 1' header")
+
+	headerExcelRow := headerRow + 1
+	courtStartCol := headerCol + 1
+	lCol := colNum(courtStartCol + 1)
+	rCol := colNum(courtStartCol + 5)
+
+	cellAt := func(col string, row int) string {
+		v, cellErr := f.GetCellValue(helper.SheetEliminationMatches, fmt.Sprintf("%s%d", col, row))
+		require.NoError(t, cellErr)
+		return v
+	}
+
+	// Bouts 1-3 (rows H+3, H+4, H+5): the maru on Red A's (left) column, no
+	// "Kiken" text anywhere on the row -- not even on Red B's (right, empty)
+	// column, which is the side the mark would name.
+	for pos := 1; pos <= 3; pos++ {
+		row := headerExcelRow + 2 + pos
+		left := cellAt(lCol, row)
+		right := cellAt(rCol, row)
+		assert.Equal(t, "○○", left, "bout %d: the default-win maru, no per-row mark", pos)
+		assert.Empty(t, right, "bout %d: the credited side's opponent column stays empty", pos)
+		assert.NotContains(t, left, "Kiken", "bout %d: no per-row Kiken mark", pos)
+	}
+
+	// The summary row (H+5+teamSize=H+8) carries the ONE Kiken mark, on Red
+	// B's (right, the withdrawer) column, alongside Red A's IV=3 count with
+	// no mark on its own column.
+	summaryRow := headerExcelRow + 8
+	leftSummary := cellAt(lCol, summaryRow)
+	rightSummary := cellAt(rCol, summaryRow)
+	assert.Equal(t, "3", leftSummary, "Red A: IV 3, no mark on the credited side")
+	assert.Contains(t, rightSummary, "Kiken", "Red B: the withdrawer's mark rides the summary row")
+}

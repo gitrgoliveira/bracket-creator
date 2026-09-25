@@ -18,6 +18,7 @@ import {
     downstreamKnockoutReopenedNotice,
     downstreamKnockoutRunningMessage,
     matchLabel,
+    courtBusyMessage,
 } from '../write_result.jsx';
 
 describe('downstreamKnockoutPlayedRefusal', () => {
@@ -343,6 +344,21 @@ describe('downstreamKnockoutRunningMessage', () => {
         expect(downstreamKnockoutRunningMessage(undefined))
             .toBe('A knockout match is being fought now. Finish it or send it back to the queue, then save again.');
     });
+});
+
+// bc-rawm: the 409 court_busy sentence for a score write, built client-side
+// from the server's `court` + `label` rather than echoed from the server's
+// own `message` (api_client.jsx's recordScore, and reopenFailureError's
+// reuse of the same shape).
+describe('courtBusyMessage', () => {
+    it('names the shiaijo and the blocking match by its operator label', () => {
+        expect(courtBusyMessage({ court: 'A', label: 'Pool A · Match 2' }))
+            .toBe('Shiaijo A is running Pool A · Match 2. Finish it or send it back to the queue first.');
+    });
+    // bc-cse: no "This shiaijo"/"another match" fallback -- respondCourtBusy
+    // (handlers_match.go) always sends both `court` and a `label`
+    // (matchLabelOrID falls back to the raw match id rather than omitting
+    // it), so the two fallback strings were dead code and were removed.
 });
 
 // UAT (bc-tmfn): correcting "Pool A · Match 1" raised a dialog about "Match 1"

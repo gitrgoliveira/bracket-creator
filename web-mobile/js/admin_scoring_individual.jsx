@@ -61,7 +61,7 @@ import { SyncStatusPill, useDebouncedRunningWrite } from './admin_scoring_autosa
 import { TeamScoreEditorModal, isKoTieBlocked } from './admin_scoring_team.jsx';
 import { EngiScoreEditorModal } from './admin_scoring_engi.jsx';
 
-export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, onAfterDecision, prevMatch, nextMatch, onPrev, onNext, password, selfReport, variant = "modal", canClose = true }) {
+export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, onAfterDecision, onWithdrawal, onBoardChange, prevMatch, nextMatch, onPrev, onNext, password, selfReport, variant = "modal", canClose = true }) {
   const m = match;
   const isComplete = m.status === "completed";
   // Canonical team check (matches admin_pools.jsx and the lineup panel):
@@ -191,6 +191,16 @@ export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, on
   // gates the ReasonPrompt overlay; correctionReason carries the confirmed string.
   const [correctionReason, setCorrectionReason] = useStateA("");
   const [showCorrectionPrompt, setShowCorrectionPrompt] = useStateA(false);
+  // bc-htcr: the write the open ReasonPrompt confirms, handed the reason.
+  // null means the default correction (Save correction, Enter: the
+  // buildPatch("completed") write); submitHantei sets its own, because a
+  // hantei verdict is not a buildPatch write. Every opener goes through
+  // askCorrectionReason, so a pending action never outlives its prompt.
+  const correctionActionRef = useRefA(null);
+  const askCorrectionReason = (action = null) => {
+    correctionActionRef.current = action;
+    setShowCorrectionPrompt(true);
+  };
   // mp-62vr: for a team daihyosen/tiebreaker rep bout the sides are TEAM names;
   // the operator picks which player each team fields from its roster. repPlayerA
   // = Aka (sideA), repPlayerB = Shiro (sideB). Only rendered when m.repIsTeam.
@@ -262,7 +272,7 @@ export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, on
   const submitDecision = makeSubmitDecision({
     match: m, enchoPeriodCount, password, mountedRef,
     setDecisionSubmitting, setDecisionErr, setWithdrawnPlayer, setDecisionPromptKind,
-    onClose, onAfterDecision, isComplete, entityLabel: "competitors",
+    onClose, onAfterDecision, onWithdrawal, isComplete, entityLabel: "competitors",
     // F5: thread pending-write handles so the factory can show the sticky banner
     // when the decision write is only queued (offline / transient failure).
     setPendingWrite, pendingFnRef,
@@ -416,6 +426,17 @@ export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, on
       ...enchoBlock(),
       decidedByHantei: true,
     };
+    // bc-htcr: a hantei verdict on a completed match is a correction like
+    // any other, so it carries the audit reason the server requires, and
+    // asks for one first when none has been given, exactly as Save
+    // correction does. Without this the write was refused and the wrong
+    // verdict stood, with no other way to change it (Save correction is off
+    // while the hantei is set).
+    if (isComplete && !correctionReason) {
+      askCorrectionReason((r) => doSubmit(() => onSubmit({ ...patch, correctionReason: r })));
+      return undefined;
+    }
+    if (isComplete) patch.correctionReason = correctionReason;
     const submitFn = (!isComplete && onSubmitAndNext) ? onSubmitAndNext : onSubmit;
     return doSubmit(() => submitFn(patch));
   };
@@ -776,7 +797,7 @@ export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, on
   // Scoring shortcuts (Enter/M/K/D/T/H/X, plus S in Naginata) are skipped when any interactive
   // element (input, button, link, …) has focus so native activation still works.
   const kbRef = React.useRef(null);
-  kbRef.current = { delegated: isTeam || isEngi, submitting, canFinish, isDrawToggled, isKnockoutPhase, aTotal, bTotal, handleDismiss, canClose, onPrev, onNext, prevMatch, nextMatch, onSubmit, onSubmitAndNext, buildPatch, addPt, doSubmit, isNaginata, decidedByHantei, isComplete, correctionReason, setShowCorrectionPrompt, markScoringDirty, cancelScoringDebounce };
+  kbRef.current = { delegated: isTeam || isEngi, submitting, canFinish, isDrawToggled, isKnockoutPhase, aTotal, bTotal, handleDismiss, canClose, onPrev, onNext, prevMatch, nextMatch, onSubmit, onSubmitAndNext, buildPatch, addPt, doSubmit, isNaginata, decidedByHantei, isComplete, correctionReason, askCorrectionReason, markScoringDirty, cancelScoringDebounce };
 
   useEffectA(() => {
     const onKeyDown = (ev) => {
@@ -813,7 +834,7 @@ export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, on
       if (ev.key === "Enter" && s.canFinish) {
         ev.preventDefault();
         if (s.isComplete && !s.correctionReason) {
-          s.setShowCorrectionPrompt(true);
+          s.askCorrectionReason();
           return;
         }
         const patch = s.buildPatch("completed");
@@ -854,6 +875,21 @@ export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, on
     return () => window.removeEventListener("keydown", onKeyDown);
   }, []); // listener registered once; reads fresh state via kbRef
 
+  // bc-sbq: report what is on this board to a host that must say what a
+  // requeue would discard (the shiaijo console's Send back to queue). The
+  // host's court feed lags this editor, since an autosaved mark reaches it
+  // only on the next refetch, so a confirm built from the feed alone told
+  // the operator "nothing will be lost" with a point on the board. Keyed on
+  // the VALUES, so a refetch that re-creates `m` reports nothing new. The
+  // team editor reports its own board; engi reports none.
+  const boardPoints = realIppons(aPts).length + realIppons(bPts).length;
+  const boardFouls = aFouls + bFouls;
+  const boardOvertime = enchoPeriodCount > 0;
+  useEffectA(() => {
+    if (typeof onBoardChange !== "function" || isTeam || isEngi) return;
+    onBoardChange({ compId: m.compId, matchId: m.id, points: boardPoints, fouls: boardFouls, overtime: boardOvertime, draw: isDrawToggled, bouts: 0 });
+  }, [m.compId, m.id, boardPoints, boardFouls, boardOvertime, isDrawToggled, isTeam, isEngi, onBoardChange]);
+
   // Engi competition: delegate to the flag-count editor. This check runs after
   // all hooks so React's rules-of-hooks are satisfied. isEngi is derived
   // synchronously from m.compEngi (stamped at enrichment time), so the engi
@@ -864,7 +900,7 @@ export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, on
   }
   // Team routing: forward to TeamScoreEditorModal.
   if (isTeam) {
-    return <TeamScoreEditorModal match={m} teamSize={teamSize} onClose={onClose} onSubmit={onSubmit} onSubmitAndNext={onSubmitAndNext} onAfterDecision={onAfterDecision} prevMatch={prevMatch} nextMatch={nextMatch} onPrev={onPrev} onNext={onNext} password={password} selfReport={selfReport} variant={variant} canClose={canClose} />;
+    return <TeamScoreEditorModal match={m} teamSize={teamSize} onClose={onClose} onSubmit={onSubmit} onSubmitAndNext={onSubmitAndNext} onAfterDecision={onAfterDecision} onWithdrawal={onWithdrawal} onBoardChange={onBoardChange} prevMatch={prevMatch} nextMatch={nextMatch} onPrev={onPrev} onNext={onNext} password={password} selfReport={selfReport} variant={variant} canClose={canClose} />;
   }
 
   // a11y: label the dialog with the match/court context so screen readers
@@ -1227,6 +1263,11 @@ export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, on
               onConfirm={(r) => {
                 setCorrectionReason(r);
                 setShowCorrectionPrompt(false);
+                // A write that asked for this reason (the hantei buttons)
+                // runs itself; otherwise it is the default correction.
+                const action = correctionActionRef.current;
+                correctionActionRef.current = null;
+                if (action) { action(r); return; }
                 // Re-trigger submit with the now-populated reason.
                 // buildPatch reads correctionReason from state, but state
                 // updates are async: pass r inline via a local override
@@ -1234,7 +1275,7 @@ export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, on
                 const patch = { ...buildPatch("completed"), correctionReason: r };
                 doSubmit(() => onSubmit(patch));
               }}
-              onCancel={() => setShowCorrectionPrompt(false)}
+              onCancel={() => { correctionActionRef.current = null; setShowCorrectionPrompt(false); }}
             />
           )}
           {/* What Clear withdrawal and reopen came back with: the notice
@@ -1332,7 +1373,7 @@ export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, on
               {canClose && <button className="btn" onClick={handleDismiss} disabled={submitting}>Cancel</button>}
               {onSubmitAndNext ? (
                 <button className={`btn btn--primary ${finishArmed && !isComplete ? "btn--confirm" : ""}`} onClick={() => {
-                  if (isComplete && !correctionReason) { setShowCorrectionPrompt(true); return; }
+                  if (isComplete && !correctionReason) { askCorrectionReason(); return; }
                   if (!isComplete && !finishArmed) { setFinishArmed(true); return; }
                   doSubmit(() => (isComplete ? onSubmit : onSubmitAndNext)(buildPatch("completed")));
                 }} disabled={submitting || !canFinish}
@@ -1341,7 +1382,7 @@ export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, on
                 </button>
               ) : (
                 <button className={`btn btn--primary ${finishArmed && !isComplete ? "btn--confirm" : ""}`} onClick={() => {
-                  if (isComplete && !correctionReason) { setShowCorrectionPrompt(true); return; }
+                  if (isComplete && !correctionReason) { askCorrectionReason(); return; }
                   if (!isComplete && !finishArmed) { setFinishArmed(true); return; }
                   doSubmit(() => onSubmit(buildPatch("completed")));
                 }} disabled={submitting || !canFinish}

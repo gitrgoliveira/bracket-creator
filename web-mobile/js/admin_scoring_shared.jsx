@@ -389,6 +389,13 @@ function makeSubmitDecision({
   // to startMatch(next) so the operator advances without an extra tap.
   // Kiken always keeps the modal open for RemainingMatchesPanel chaining.
   onAfterDecision,
+  // bc-kpnl: optional callback invoked once a kiken has landed and the
+  // withdrawn player is set, i.e. the moment RemainingMatchesPanel opens.
+  // The kiken completes the match, so a host that picks its match from live
+  // court state (the shiaijo console's running[0]) would move on and unmount
+  // the editor, and the panel with it; this is the host's cue to pin the
+  // match until the panel is closed (its onClose).
+  onWithdrawal,
   isComplete,       // item 7: corrections (isComplete=true) must not auto-advance
   entityLabel = 'competitors',
   // F5: optional pending-write handles threaded in from ScoreEditorModal so
@@ -450,6 +457,7 @@ function makeSubmitDecision({
           : (match.sideB || { id: '', name: '' });
         setWithdrawnPlayer(loser);
         setDecisionPromptKind('');
+        if (typeof onWithdrawal === 'function') onWithdrawal(loser);
       } else if (!isComplete && onAfterDecision) {
         // Item 7: fusenpai (and any future non-kiken decision) advances to the
         // next match on the same court. The decision was already persisted via
@@ -726,9 +734,11 @@ function DecisionPrompt({ kind, sideA, sideB, defaultSide, askReason, onCancel, 
 }
 
 // T098: "Remaining matches for [player]" panel. After a kiken decision lands,
-// look up every scheduled match where the just-withdrawn player still appears
-// and offer a one-click "Award default win to opponent" for each. The button
-// calls /decision with decision=fusenpai and decisionBy=<the withdrawn side>:
+// look up every match not yet completed (scheduled, or already running: a
+// kiken recorded as a correction can land after the competitor's next match
+// started, bc-kfup) where the just-withdrawn player still appears and offer a
+// one-click "Award default win to opponent" for each. The button calls
+// /decision with decision=fusensho and decisionBy=<the withdrawn side>:
 // note: that's the side the WITHDRAWN player occupies in THAT match, not
 // the side they had in the originating match (sides can flip across matches).
 function RemainingMatchesPanel({ compID, password, withdrawnPlayer, onAwarded, onClose }) {
@@ -757,7 +767,7 @@ function RemainingMatchesPanel({ compID, password, withdrawnPlayer, onAwarded, o
           ? window.compMatchesForCompetition(detail.config || detail, detail)
           : [];
         const matchesForPlayer = all.filter(m => {
-          if (m.status !== "scheduled") return false;
+          if (m.status === "completed") return false;
           return sameCompetitor(m.sideA, withdrawnPlayer) || sameCompetitor(m.sideB, withdrawnPlayer);
         });
         setMatches(matchesForPlayer);
@@ -782,15 +792,17 @@ function RemainingMatchesPanel({ compID, password, withdrawnPlayer, onAwarded, o
     // defect, so this covers both rather than only the new branch.
     setErr("");
     try {
-      // bc-rawm: fusensho, not fusenpai. This panel exists BECAUSE the
-      // operator just recorded a withdrawal for this competitor, so every
-      // OTHER scheduled match of theirs is against an already-ineligible
-      // competitor: fusenpai there is refused with 409 already_ineligible
-      // (the concurrent-kiken guard). fusensho is the per-bout default win:
-      // it writes no ineligibility of its own, so it never trips that guard
-      // (engine.TestRecordDecision_FusenshoSkipsConcurrentCheck). decisionBy
-      // is unchanged: it still names the WITHDRAWN competitor's side, the
-      // side that gets the default loss, exactly as fusenpai's did.
+      // bc-rawm: fusensho, the match-level default win. This panel exists
+      // BECAUSE the operator just recorded a withdrawal for this competitor,
+      // so every OTHER match of theirs is against an already-ineligible
+      // competitor. fusensho writes no ineligibility of its own, so it never
+      // touches the status the withdrawal wrote
+      // (engine.TestRecordDecision_FusenshoSkipsConcurrentCheck). A fusenpai
+      // there was refused with 409 already_ineligible until bc-kfup; it is
+      // accepted now (the editor's own Fusenpai chains onto the existing
+      // bar), but this panel and the queue row's Record default win share
+      // one wire shape. decisionBy names the WITHDRAWN competitor's side,
+      // the side that gets the default loss.
       // bc-cse: the body itself has ONE owner (ineligible_match.jsx), keyed
       // directly by the barred side this panel already knows, so a default
       // win's wire shape cannot drift between this panel and the other
@@ -838,7 +850,7 @@ function RemainingMatchesPanel({ compID, password, withdrawnPlayer, onAwarded, o
       {err && <div style={{ color: "var(--danger)", fontSize: 12, marginBottom: 6 }}>{err}</div>}
       {matches === null && <div style={{ fontSize: 12, color: "var(--ink-3)" }}>Loading…</div>}
       {matches !== null && matches.length === 0 && (
-        <div style={{ fontSize: 12, color: "var(--ink-3)" }}>No remaining scheduled matches.</div>
+        <div style={{ fontSize: 12, color: "var(--ink-3)" }}>No remaining matches.</div>
       )}
       {matches && matches.length > 0 && (
         <ul style={{ listStyle: "none", padding: 0, margin: 0, display: "flex", flexDirection: "column", gap: 6 }}>
@@ -1228,10 +1240,10 @@ function withdrawnKeyOf(m) {
 // match back to running.
 function withdrawalInForce(m) {
   // bc-rawm: widened to the default-win class. A match-level fusensho is
-  // RemainingMatchesPanel.award's shape for a SCHEDULED match against a
-  // competitor already withdrawn elsewhere (fusenpai is refused there with
-  // 409 already_ineligible, which is why that panel writes fusensho
-  // instead): same default-win outcome as a kiken/fusenpai on this match, so
+  // RemainingMatchesPanel.award's shape for a match against a competitor
+  // already withdrawn elsewhere (the panel and the queue row's Record
+  // default win share it, defaultWinDecisionBodyForSide): same default-win
+  // outcome as a kiken/fusenpai on this match, so
   // it belongs in the same "a recorded withdrawal decided this" class as
   // kiken/fusenpai, not a separate one. So this asks the match-level
   // default-win class, whose one JS owner is isTeamDefaultWinDecision

@@ -743,7 +743,7 @@ export function reconcileRowsToPositions(rows, serverRows) {
   return serverRows.map(ss => byPos.get(ss._pos) || ss);
 }
 
-export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSubmitAndNext, onAfterDecision, prevMatch, nextMatch, onPrev, onNext, password, selfReport, variant = "modal", canClose = true }) {
+export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSubmitAndNext, onAfterDecision, onWithdrawal, onBoardChange, prevMatch, nextMatch, onPrev, onNext, password, selfReport, variant = "modal", canClose = true }) {
   // mp-gmcg: a successful [× Remove this bout] shrinks the SERVER bout log, and
   // the parent may not have caught up when this render runs. matchOverride
   // shadows the prop so the removed bout disappears at once, and is cleared
@@ -1378,7 +1378,7 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
   const submitDecision = makeSubmitDecision({
     match: m, enchoPeriodCount, password, mountedRef,
     setDecisionSubmitting, setDecisionErr, setWithdrawnPlayer, setDecisionPromptKind,
-    onClose, onAfterDecision, isComplete, entityLabel: "teams",
+    onClose, onAfterDecision, onWithdrawal, isComplete, entityLabel: "teams",
   });
 
   const existingSub = m.subResults || [];
@@ -1603,6 +1603,17 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
   // owner of "what a credited bout is worth", team_default_credit.jsx),
   // which awards the OTHER side from decisionBy, IV+1/PW+2 per bout.
   const unscoredBouts = unfinishedTeamBouts({ subs, teamSize });
+  // bc-sbq: report how many bouts on this sheet carry operator input (the
+  // daihyosen row included) to a host that must say what a requeue would
+  // discard: the shiaijo console withholds Send back to queue from a match
+  // with fought bouts, and its feed lags this sheet. subBoutHasBeenPlayed
+  // is this sheet's own played-bout predicate (the feed side asks the wire
+  // twin, subBoutHasResult). Keyed on the count, never on `m`.
+  const boardBouts = subs.filter(subBoutHasBeenPlayed).length;
+  useEffectA(() => {
+    if (typeof onBoardChange !== "function") return;
+    onBoardChange({ compId: m.compId, matchId: m.id, points: 0, fouls: 0, overtime: false, draw: false, bouts: boardBouts });
+  }, [m.compId, m.id, boardBouts, onBoardChange]);
   const recordedWithdrawal = withdrawalInForce(m);
   const withdrawalWinner = recordedWithdrawal ? ({ a: "b", b: "a" }[withdrawnKeyOf(m)] || null) : null;
   const teamVerdictText = withdrawalWinner

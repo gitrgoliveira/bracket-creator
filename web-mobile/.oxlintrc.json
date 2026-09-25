@@ -21,6 +21,7 @@
         "caughtErrorsIgnorePattern": "^_"
       }
     ],
+    "no-undef": "error",
     "no-unused-expressions": [
       "error",
       { "allowShortCircuit": true, "allowTernary": true }

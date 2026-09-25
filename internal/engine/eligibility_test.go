@@ -365,6 +365,120 @@ func TestRecordDecision_FusenshoSkipsConcurrentCheck(t *testing.T) {
 	assert.NoErrorf(t, err, "fusensho on an already-ineligible player must not trigger AlreadyIneligibleError; got %v", err)
 }
 
+// TestRecordDecision_FusenpaiChainsOntoExistingBar pins bc-kfup: once a
+// competitor withdraws, a fusenpai on each of their remaining matches is the
+// operator's exit (StartMatchTx refuses to start those matches), so it must
+// be recorded as their default loss rather than refused as already_ineligible.
+// The competitor-status record is left exactly as the withdrawal wrote it, so
+// its MatchID still names the match that barred them (the T103 undo keys on
+// it) and an injury kiken stays reinstateable. Both doors are covered: the
+// /decision door (RecordDecision, which runs the T105 pre-write guard) and
+// the /score door (RecordMatchResultWithIneligibility, whose K3 pre-write
+// probe and K2 check-and-set would each refuse it on their own).
+func TestRecordDecision_FusenpaiChainsOntoExistingBar(t *testing.T) {
+	eng, store, _ := setupTestEngine(t)
+	compID := "fusenpai-chain"
+	createTestCompetition(t, store, compID, "league", 2)
+
+	aliceID := helper.NewUUID4()
+	bobID := helper.NewUUID4()
+	carolID := helper.NewUUID4()
+	daveID := helper.NewUUID4()
+	require.NoError(t, store.SaveParticipants(compID, []domain.Player{
+		{ID: aliceID, Name: "Alice", Dojo: "A"},
+		{ID: bobID, Name: "Bob", Dojo: "B"},
+		{ID: carolID, Name: "Carol", Dojo: "C"},
+		{ID: daveID, Name: "Dave", Dojo: "D"},
+	}))
+	require.NoError(t, store.SavePoolMatches(compID, []state.MatchResult{
+		{ID: "Pool A-0", SideA: "Alice", SideAID: aliceID, SideB: "Bob", SideBID: bobID, Status: state.MatchStatusScheduled},
+		{ID: "Pool A-1", SideA: "Carol", SideAID: carolID, SideB: "Alice", SideBID: aliceID, Status: state.MatchStatusScheduled},
+		{ID: "Pool A-2", SideA: "Alice", SideAID: aliceID, SideB: "Dave", SideBID: daveID, Status: state.MatchStatusScheduled},
+	}))
+
+	// Alice withdraws injured in Pool A-0 (decisionBy=aka: Alice is sideA).
+	_, _, err := eng.RecordDecision(compID, "Pool A-0", "kiken-injury", "aka", "injury", nil, false)
+	require.NoError(t, err)
+	barred := func() domain.CompetitorStatus {
+		t.Helper()
+		statuses, err := store.LoadCompetitorStatus(compID)
+		require.NoError(t, err)
+		st, ok := statuses[aliceID]
+		require.True(t, ok, "Alice must still carry a competitor-status record")
+		return st
+	}
+	origin := barred()
+	require.Equal(t, "Pool A-0", origin.MatchID)
+
+	// /decision door: fusenpai on Alice (shiro, sideB) in Pool A-1.
+	res, status, err := eng.RecordDecision(compID, "Pool A-1", "fusenpai", "shiro", "did not appear", nil, false)
+	require.NoError(t, err, "a fusenpai against an already-withdrawn competitor is their default loss, not a second withdrawal")
+	assert.Nil(t, status, "the chained fusenpai bars nobody new, so it returns no status to broadcast")
+	require.NotNil(t, res)
+	assert.Equal(t, state.MatchStatusCompleted, res.Status)
+	assert.Equal(t, "fusenpai", res.Decision)
+	assert.Equal(t, carolID, res.WinnerID, "the opponent takes the default win")
+
+	// /score door: fusenpai on Alice (aka, sideA) in Pool A-2.
+	status, err = eng.RecordMatchResultWithIneligibility(compID, "Pool A-2", &state.MatchResult{
+		Winner:     "Dave",
+		WinnerID:   daveID,
+		WinnerSide: "B",
+		Status:     state.MatchStatusCompleted,
+		Decision:   "fusenpai",
+		DecisionBy: "aka",
+	})
+	require.NoError(t, err, "the /score door must chain the fusenpai exactly as /decision does")
+	assert.Nil(t, status)
+
+	after := barred()
+	assert.Equal(t, "Pool A-0", after.MatchID, "the status must still name the match that barred Alice")
+	assert.Equal(t, origin.Reason, after.Reason)
+	assert.False(t, after.Eligible)
+	assert.True(t, after.Reinstateable, "an injury kiken stays reinstateable after its chained default losses")
+
+	matches, err := store.LoadPoolMatches(compID)
+	require.NoError(t, err)
+	for _, m := range matches {
+		assert.Equalf(t, state.MatchStatusCompleted, m.Status, "%s must be closed", m.ID)
+	}
+
+	// A second KIKEN from another match is still the CHK047 conflict.
+	require.NoError(t, store.SavePoolMatches(compID, append(matches, state.MatchResult{
+		ID: "Pool A-3", SideA: "Bob", SideAID: bobID, SideB: "Alice", SideBID: aliceID, Status: state.MatchStatusScheduled,
+	})))
+	_, _, err = eng.RecordDecision(compID, "Pool A-3", "kiken-voluntary", "shiro", "second withdrawal", nil, false)
+	var alreadyErr *AlreadyIneligibleError
+	require.ErrorAs(t, err, &alreadyErr, "a kiken against a competitor already barred elsewhere is still refused")
+	assert.Equal(t, "Pool A-0", alreadyErr.MatchID)
+}
+
+// TestAlreadyBarredRefusal pins the one rule both T105 halves ask: which
+// withdrawal decision a loser barred by another match refuses.
+func TestAlreadyBarredRefusal(t *testing.T) {
+	barred := &domain.CompetitorStatus{PlayerID: "p1", Eligible: false, MatchID: "Pool A-0", Reason: "kiken-voluntary at Pool A-0"}
+	for _, tc := range []struct {
+		decision string
+		barred   *domain.CompetitorStatus
+		refused  bool
+	}{
+		{"kiken", barred, true},
+		{"kiken-voluntary", barred, true},
+		{"kiken-injury", barred, true},
+		{"fusenpai", barred, false},
+		{"kiken-voluntary", nil, false},
+		{"fusenpai", nil, false},
+	} {
+		err := alreadyBarredRefusal(tc.decision, "p1", tc.barred)
+		if tc.refused {
+			var alreadyErr *AlreadyIneligibleError
+			assert.ErrorAsf(t, err, &alreadyErr, "%s against a barred loser must be refused", tc.decision)
+		} else {
+			assert.NoErrorf(t, err, "%s (barred=%v) must not be refused", tc.decision, tc.barred != nil)
+		}
+	}
+}
+
 // TestCheckEligibility_AllEligible verifies that CheckEligibility returns
 // nil when no competitor-status records exist (default-eligible per FR-034).
 // TestCheckEligibility_OneIneligible verifies that CheckEligibility
@@ -682,7 +796,7 @@ func TestCheckConcurrentIneligibility_EmptyLoser(t *testing.T) {
 	eng, store, _ := setupTestEngine(t)
 	compID := "conc-empty-loser"
 	require.NoError(t, store.SaveCompetition(&state.Competition{ID: compID}))
-	err := eng.checkConcurrentIneligibility(eng.store, compID, "M1", "", "")
+	err := eng.checkConcurrentIneligibility(eng.store, compID, "M1", "kiken-voluntary", "", "")
 	assert.NoError(t, err, "both loserID and loserName empty should return nil")
 }
 
@@ -693,7 +807,7 @@ func TestCheckConcurrentIneligibility_PlayerNotInParticipants(t *testing.T) {
 	compID := "conc-unknown"
 	require.NoError(t, store.SaveCompetition(&state.Competition{ID: compID}))
 	// No participants saved → lookupPlayerID returns ""
-	err := eng.checkConcurrentIneligibility(eng.store, compID, "M1", "", "Ghost Player")
+	err := eng.checkConcurrentIneligibility(eng.store, compID, "M1", "kiken-voluntary", "", "Ghost Player")
 	assert.NoError(t, err, "unknown player should return nil without error")
 }
 
@@ -813,7 +927,7 @@ func TestCheckConcurrentIneligibility_AlreadyIneligible(t *testing.T) {
 		MatchID:  "M-prev",
 	}))
 
-	err := eng.checkConcurrentIneligibility(eng.store, compID, "M-new", "", "Alice")
+	err := eng.checkConcurrentIneligibility(eng.store, compID, "M-new", "kiken-voluntary", "", "Alice")
 	require.Error(t, err)
 	var alreadyErr *AlreadyIneligibleError
 	require.ErrorAs(t, err, &alreadyErr)
@@ -840,7 +954,7 @@ func TestCheckConcurrentIneligibility_SameMatchNotBlocked(t *testing.T) {
 		MatchID:  "M-current", // same as what we're re-scoring
 	}))
 
-	err := eng.checkConcurrentIneligibility(eng.store, compID, "M-current", "", "Bob")
+	err := eng.checkConcurrentIneligibility(eng.store, compID, "M-current", "kiken-voluntary", "", "Bob")
 	assert.NoError(t, err, "same-match ineligibility should not block re-scoring")
 }
 

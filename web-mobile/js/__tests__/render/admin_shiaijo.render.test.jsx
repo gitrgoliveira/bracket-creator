@@ -1021,3 +1021,179 @@ describe('a barred match is skipped by every auto-pick (bc-cse)', () => {
     expect(buttonText.some((t) => /call to court/i.test(t))).toBe(false);
   });
 });
+
+// Shared by the bc-kpnl and bc-sbq blocks below: a mutable court feed, a
+// Refresh that re-reads it, and the editor probe's current match.
+async function mountCourt(initial) {
+  const feed = { current: initial };
+  window.tournamentMatches = () => feed.current;
+  window.filterMatchesByCourt = (matches) => matches;
+  const prev = {
+    fetch: window.API.fetchCourtMatches,
+    sub: window.API.subscribeToEvents,
+    revert: window.API.revertMatchToQueue,
+  };
+  window.API.fetchCourtMatches = vi.fn().mockImplementation(() => Promise.resolve([{ id: 'c1', name: 'Cup' }]));
+  window.API.subscribeToEvents = () => () => {};
+  window.API.revertMatchToQueue = vi.fn().mockResolvedValue(true);
+  const showToast = vi.fn();
+  let utils;
+  await act(async () => {
+    utils = render(
+      <AdminShiaijoPage tournament={makeMinimalTournament()} court="A" onBack={vi.fn()} onEditScore={vi.fn()}
+        onMoveCourt={vi.fn()} onLogout={vi.fn()} onViewerMode={vi.fn()} password="" showToast={showToast}
+        tweaks={{}} onSwitchCourt={vi.fn()} />
+    );
+  });
+  return {
+    utils,
+    feed,
+    showToast,
+    editorMatch: () => { const el = utils.queryByTestId('score-editor'); return el ? el.getAttribute('data-match') : null; },
+    refresh: async () => { await act(async () => { utils.getByRole('button', { name: /refresh/i }).click(); }); },
+    restore: () => {
+      window.API.fetchCourtMatches = prev.fetch;
+      window.API.subscribeToEvents = prev.sub;
+      window.API.revertMatchToQueue = prev.revert;
+    },
+  };
+}
+
+const courtSide = (id, name) => ({ id, name });
+const courtMatch = (id, status, over = {}) => ({
+  id, compId: 'c1', compName: 'Cup', status, phase: 'pool', poolName: 'Pool A', court: 'A',
+  scheduledAt: `09:0${id.slice(-1)}`,
+  sideA: courtSide(`${id}-a`, `Aka ${id}`), sideB: courtSide(`${id}-b`, `Shiro ${id}`),
+  ...over,
+});
+
+// bc-kpnl: a kiken completes the match, so the console's running[0] moved on,
+// the editor (keyed on the match) unmounted and the Remaining matches panel,
+// which only the editor holds, went with it after about a second. The editor
+// now reports the kiken (onWithdrawal) and the console pins that match until
+// the panel is closed (the editor's onClose) or the operator leaves it.
+describe('the kiken-decided match stays on the console until its panel is closed (bc-kpnl)', () => {
+  it('stays through the refetch that completes it, then releases on the panel close', async () => {
+    const c = await mountCourt([courtMatch('m1', 'running'), courtMatch('m2', 'scheduled')]);
+    try {
+      expect(c.editorMatch()).toBe('m1');
+      await act(async () => { probe.props.onWithdrawal({ id: 'm1-a', name: 'Aka m1' }); });
+      // The kiken completed m1 and another device already started m2.
+      c.feed.current = [courtMatch('m1', 'completed', { decision: 'kiken-voluntary', decisionBy: 'aka' }), courtMatch('m2', 'running')];
+      await c.refresh();
+      expect(c.editorMatch(), 'the panel must stay on the kiken-decided match').toBe('m1');
+      // The panel's close releases the pin: the court's live bout returns.
+      await act(async () => { probe.props.onClose(); });
+      expect(c.editorMatch()).toBe('m2');
+    } finally { c.restore(); }
+  });
+
+  it("holds the editor open when the kiken was the court's last bout", async () => {
+    const c = await mountCourt([courtMatch('m1', 'running')]);
+    try {
+      await act(async () => { probe.props.onWithdrawal({ id: 'm1-a', name: 'Aka m1' }); });
+      c.feed.current = [courtMatch('m1', 'completed', { decision: 'kiken-voluntary', decisionBy: 'aka' })];
+      await c.refresh();
+      expect(c.editorMatch(), 'allDone must not unmount the pinned editor').toBe('m1');
+      expect(c.utils.queryByText(/complete on Shiaijo A/i)).toBeNull();
+      // Back to court is the console's own exit from the pin.
+      await act(async () => { c.utils.getByRole('button', { name: /back to court/i }).click(); });
+      expect(c.editorMatch()).toBeNull();
+      expect(c.utils.getByText(/complete on Shiaijo A/i)).toBeTruthy();
+    } finally { c.restore(); }
+  });
+
+  it('every other onClose is still a no-op on the console', async () => {
+    const c = await mountCourt([courtMatch('m1', 'running'), courtMatch('m2', 'scheduled')]);
+    try {
+      await act(async () => { probe.props.onClose(); });
+      expect(c.editorMatch()).toBe('m1');
+    } finally { c.restore(); }
+  });
+});
+
+// bc-sbq: Send back to queue clears the whole bout log. The confirm read what
+// would be lost from the court feed alone, which lags the editor, so it said
+// "nothing will be lost" with a point on the board; and on a reopened team
+// encounter it wiped every fought bout. The confirm now reads the editor's
+// board too, and the button is not offered once any team bout has a result.
+describe('Send back to queue says what it discards and never discards fought bouts (bc-sbq)', () => {
+  const tapSendBack = async (c) => {
+    await act(async () => { c.utils.getByRole('button', { name: /send back to queue/i }).click(); });
+    return c.utils.container.querySelector('.shiaijo-move-confirm[role="dialog"]');
+  };
+
+  it('names the point on the board even while the court feed still shows none', async () => {
+    const c = await mountCourt([courtMatch('m1', 'running')]);
+    try {
+      await act(async () => {
+        probe.props.onBoardChange({ compId: 'c1', matchId: 'm1', points: 1, fouls: 1, overtime: false, draw: false, bouts: 0 });
+      });
+      const dialog = await tapSendBack(c);
+      expect(dialog.textContent).toContain('will be discarded: 1 point and 1 foul.');
+      expect(dialog.textContent).not.toContain('nothing will be lost');
+    } finally { c.restore(); }
+  });
+
+  it("ignores a board reported for a different match", async () => {
+    const c = await mountCourt([courtMatch('m1', 'running')]);
+    try {
+      await act(async () => {
+        probe.props.onBoardChange({ compId: 'c1', matchId: 'm9', points: 2, fouls: 0, overtime: false, draw: false, bouts: 0 });
+      });
+      const dialog = await tapSendBack(c);
+      expect(dialog.textContent).toContain('No score has been entered, so nothing will be lost.');
+    } finally { c.restore(); }
+  });
+
+  it('is not offered on a team match whose feed carries a fought bout', async () => {
+    const reopened = courtMatch('m1', 'running', {
+      compKind: 'team', teamSize: 3, reopenPending: true,
+      subResults: [
+        { position: 1, sideA: 'A1', sideB: 'B1', ipponsA: ['M'], ipponsB: [], winner: 'A1' },
+        { position: 2, sideA: 'A2', sideB: 'B2', ipponsA: [], ipponsB: [] },
+      ],
+    });
+    const c = await mountCourt([reopened]);
+    try {
+      expect(c.editorMatch()).toBe('m1');
+      expect(c.utils.queryByRole('button', { name: /send back to queue/i })).toBeNull();
+    } finally { c.restore(); }
+  });
+
+  it("is withdrawn as soon as the sheet reports a fought bout the feed has not caught up with", async () => {
+    const c = await mountCourt([courtMatch('m1', 'running', { compKind: 'team', teamSize: 3, subResults: [] })]);
+    try {
+      expect(c.utils.getByRole('button', { name: /send back to queue/i })).toBeTruthy();
+      await act(async () => {
+        probe.props.onBoardChange({ compId: 'c1', matchId: 'm1', points: 0, fouls: 0, overtime: false, draw: false, bouts: 1 });
+      });
+      expect(c.utils.queryByRole('button', { name: /send back to queue/i })).toBeNull();
+    } finally { c.restore(); }
+  });
+
+  it('keeps the button on a team match whose autosaved rows carry no result', async () => {
+    const c = await mountCourt([courtMatch('m1', 'running', {
+      compKind: 'team', teamSize: 2,
+      subResults: [{ position: 1, sideA: 'A1', sideB: 'B1' }, { position: 2, sideA: 'A2', sideB: 'B2' }],
+    })]);
+    try {
+      const dialog = await tapSendBack(c);
+      expect(dialog.textContent).toContain('nothing will be lost');
+    } finally { c.restore(); }
+  });
+
+  it("pickMatch does not silently defer a bout whose point is only on the editor's board", async () => {
+    const c = await mountCourt([courtMatch('m1', 'running'), courtMatch('m2', 'scheduled')]);
+    try {
+      await act(async () => {
+        probe.props.onBoardChange({ compId: 'c1', matchId: 'm1', points: 1, fouls: 0, overtime: false, draw: false, bouts: 0 });
+      });
+      const startNext = c.utils.getAllByRole('button').find((b) => /^start/i.test(b.textContent.trim()));
+      expect(startNext, 'the Up Next card offers Start for m2').toBeTruthy();
+      await act(async () => { startNext.click(); });
+      expect(window.API.revertMatchToQueue).not.toHaveBeenCalled();
+      expect(c.showToast).toHaveBeenCalledWith('Finish or correct the bout in progress first', 'error');
+    } finally { c.restore(); }
+  });
+});

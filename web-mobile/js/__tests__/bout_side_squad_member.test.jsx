@@ -15,7 +15,7 @@
 // sees beside a bout row's fighter name -- not just of the two primitives in
 // isolation.
 
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, beforeEach } from 'vitest';
 import { resolveBoutSideMemberId, resolveSquadMember } from '../lineup_resolver.jsx';
 import { squadMemberLabel } from '../squad_member_label.jsx';
 

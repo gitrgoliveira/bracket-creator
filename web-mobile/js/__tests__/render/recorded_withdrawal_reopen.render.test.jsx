@@ -492,8 +492,7 @@ describe('Clear withdrawal and reopen: pool match feeding a knockout', () => {
 
 // bc-rawm: withdrawalInForce widened to the match-level DEFAULT-WIN class
 // (RemainingMatchesPanel.award writes a whole-match `decision: "fusensho"`
-// for a scheduled match against a competitor already withdrawn elsewhere,
-// since fusenpai there is refused with 409 already_ineligible). Same
+// for a match against a competitor already withdrawn elsewhere). Same
 // RecordedWithdrawal door as kiken/fusenpai, different copy: the Recorded
 // line names the winner, and the reopen button reads "Clear default win and
 // reopen".

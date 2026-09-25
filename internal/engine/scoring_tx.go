@@ -320,8 +320,9 @@ func (e *Engine) RecordMatchResultWithIneligibilityTx(tx state.StoreTx, compID, 
 // refuseConcurrentWithdrawal is K3's pre-write half: for a withdrawal decision
 // it names the loser the write would record and refuses with
 // AlreadyIneligibleError when a different match has already made them
-// ineligible (checkConcurrentIneligibility, the check recordDecisionTx makes
-// before its own write). The loser is read off a scratch copy with the stored
+// ineligible and the decision is a kiken (checkConcurrentIneligibility, the
+// check recordDecisionTx makes before its own write; a fusenpai there chains
+// onto the existing bar instead, alreadyBarredRefusal). The loser is read off a scratch copy with the stored
 // identity folded in by backfillMatchIdentity, the same fold the write
 // applies, so it is the loser the post-write check would name. A payload that
 // fold rejects, or whose losing side cannot be attributed, is left to the
@@ -338,7 +339,7 @@ func (e *Engine) refuseConcurrentWithdrawal(tx state.StoreTx, compID, matchID st
 	if !ok {
 		return nil
 	}
-	return e.checkConcurrentIneligibility(tx, compID, matchID, loserID, loserName)
+	return e.checkConcurrentIneligibility(tx, compID, matchID, result.Decision, loserID, loserName)
 }
 
 // restoreIfWithdrawalRemoved is the one statement of "the eligibility record
@@ -368,7 +369,7 @@ func (e *Engine) restoreIfWithdrawalRemoved(tx state.StoreTx, compID, matchID, p
 	keep := ""
 	if domain.IsWithdrawalDecisionStr(storedDecision) {
 		if loser == nil {
-			log.Printf("engine: restoreIfWithdrawalRemoved compId=%s matchId=%s: the write recorded %q but resolved no loser; restoring nobody (no entry this match recorded is provably stale)",
+			log.Printf("engine: restoreIfWithdrawalRemoved compId=%s matchId=%s: the write recorded %q but barred nobody new (a fusenpai chained onto an existing bar, or a loser it could not resolve); restoring nobody (no entry this match recorded is provably stale)",
 				compID, matchID, storedDecision)
 			return nil
 		}
@@ -915,7 +916,10 @@ func (e *Engine) recordDecisionTx(tx state.StoreTx, compID, matchID, decision, d
 	// T105/CHK047: reject concurrent kiken, if the intended loser is
 	// already ineligible from a *different* match, two operators are
 	// trying to kiken the same player simultaneously. Return 409 so the
-	// second operator sees the conflict before any write happens.
+	// second operator sees the conflict before any write happens. A
+	// fusenpai against such a loser is not refused: it is the default loss
+	// that closes their remaining match (bc-kfup; alreadyBarredRefusal owns
+	// which decision is refused).
 	//
 	// Only kiken and fusenpai actually mark the loser ineligible; for
 	// fusensho/daihyosen this check would surface a misleading
@@ -937,7 +941,7 @@ func (e *Engine) recordDecisionTx(tx state.StoreTx, compID, matchID, decision, d
 		loserID = sideAID
 	}
 	if domain.IsWithdrawalDecisionStr(decision) {
-		if cerr := e.checkConcurrentIneligibility(tx, compID, matchID, loserID, loserName); cerr != nil {
+		if cerr := e.checkConcurrentIneligibility(tx, compID, matchID, decision, loserID, loserName); cerr != nil {
 			return nil, nil, cerr
 		}
 	}

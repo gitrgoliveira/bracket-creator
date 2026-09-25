@@ -333,7 +333,6 @@ function recordOverrideWinner(compId, matchId, result, pw) {
 const EMPTY_BOARD = Object.freeze({ points: 0, fouls: 0, overtime: false, draw: false, bouts: 0 });
 
 function boardFromMatch(mm) {
-    if (!mm) return EMPTY_BOARD;
     const struck = realIppons(mm.ipponsA).length + realIppons(mm.ipponsB).length;
     const scored = (mm.score?.winnerPts || 0) + (mm.score?.loserPts || 0);
     // The same fouls can sit in both places (hansokuA/B and score.fouls), so
@@ -353,7 +352,7 @@ function boardFromMatch(mm) {
 
 function requeueLoss(mm, live) {
     const feed = boardFromMatch(mm);
-    const here = live && mm && live.compId === mm.compId && live.matchId === mm.id ? live : EMPTY_BOARD;
+    const here = live && live.compId === mm.compId && live.matchId === mm.id ? live : EMPTY_BOARD;
     return {
         points: Math.max(feed.points, here.points || 0),
         fouls: Math.max(feed.fouls, here.fouls || 0),
@@ -367,15 +366,13 @@ function requeueLossIsEmpty(loss) {
     return !loss.points && !loss.fouls && !loss.overtime && !loss.draw && !loss.bouts;
 }
 
-const countOf = (n, one) => `${n} ${one}${n === 1 ? "" : "s"}`;
-
 // The confirm's account of what a requeue discards. Fought bouts are never
 // listed: Send back to queue is not offered on a match that has any (ending
 // the match keeps them), so a confirm that reached this has none to name.
 function requeueLossSentence(loss) {
     const parts = [];
-    if (loss.points) parts.push(countOf(loss.points, "point"));
-    if (loss.fouls) parts.push(countOf(loss.fouls, "foul"));
+    if (loss.points) parts.push(window.pluralize(loss.points, "point"));
+    if (loss.fouls) parts.push(window.pluralize(loss.fouls, "foul"));
     if (loss.overtime) parts.push("the overtime");
     if (loss.draw) parts.push("the draw");
     if (!parts.length) return "No score has been entered, so nothing will be lost.";
@@ -1310,16 +1307,11 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
     // upcoming list. Allowed even when a score has been entered (the operator may
     // have started the wrong match after tapping a point); the confirm names
     // what will be discarded, from the editor's board as well as the court feed
-    // (requeueLoss). NOT allowed once a team bout has a result (bc-sbq): the
-    // requeue clears the whole bout log, so a reopened encounter lost every bout
-    // it had fought. The button is not offered then; this re-check catches a tap
-    // on a button a stale render still showed.
+    // (requeueLoss). NOT offered once a team bout has a result (bc-sbq, the
+    // button's own condition): the requeue clears the whole bout log, so a
+    // reopened encounter lost every bout it had fought.
     const requestRevert = (m) => {
         const loss = requeueLoss(m, liveBoard);
-        if (loss.bouts > 0) {
-            if (showToast) showToast(`${countOf(loss.bouts, "bout")} of this match ${loss.bouts === 1 ? "has" : "have"} a result, so it cannot be sent back to the queue. End the match to keep them.`, "error");
-            return;
-        }
         // Name BOTH competitors so the confirm identifies the match, not just
         // one side. Order mirrors the on-court display (Shiro/sideB vs Aka/sideA).
         const shiro = (m.sideB && m.sideB.name) || "";

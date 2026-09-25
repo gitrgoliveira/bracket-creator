@@ -49,6 +49,8 @@ const STUBBED_GLOBALS = {
   confirmDialog: vi.fn().mockResolvedValue(true),
   PoolsViewer: () => null,
   compMatches: () => [],
+  // LAZY: the requeue confirm counts what it discards (ui.jsx's pluralize).
+  pluralize: (count, singular, plural) => (count === 1 ? `${count} ${singular}` : `${count} ${plural || singular + 's'}`),
 };
 
 let restoreGlobals;

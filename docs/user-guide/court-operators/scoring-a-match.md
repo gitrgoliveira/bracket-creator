@@ -17,7 +17,9 @@ To take back a strike, tap the scored mark itself in the centre of the board. Th
 
 ## Send a match back to the queue
 
-If you start the wrong bout, use **Send back to queue** on the running match. The action clears any partial score, removes the match from the active view, and returns it to the Upcoming list so the correct match can start.
+If you start the wrong bout, use **Send back to queue** on the running match. The action clears any partial score, removes the match from the active view, and returns it to the Upcoming list so the correct match can start. The confirmation says what will be discarded, for example "The score on this bout will be discarded: 1 point and 1 foul.", counting what is on the score board in front of you even if the court list has not caught up with it yet.
+
+A team match is not offered **Send back to queue** once any of its bouts has a result, because sending it back would discard every bout fought. That includes an encounter you reopened to correct. End the match instead, which keeps them. If the bouts were entered on the wrong match, take their marks back first; the button returns once no bout has a result.
 
 !!! note
     Send back to queue only works on a running, unfinished match. A completed, scored match is not affected. To fix a result that has already been recorded, use **Correct** on the match in the Completed list (refer to [Correct a completed result](#correct-a-completed-result)).
@@ -30,7 +32,7 @@ Once a match is scored it moves to the **Completed** list on the court console, 
 
 What Correct offers depends on the format:
 
-- For most matches, the editor reopens with the recorded scores ready to edit. Adjust the ippons, fouls, or winner, then use **Save correction**. A short reason is required so the change stays traceable.
+- For most matches, the editor reopens with the recorded scores ready to edit. Adjust the ippons, fouls, or winner, then use **Save correction**. A short reason is required so the change stays traceable. A judges' decision (hantei) given to the wrong competitor is corrected by tapping the other competitor's hantei button; the same reason is asked for first, and the new decision replaces the old one.
 - For a kachinuki team encounter, the editor shows the recorded bouts with a **Reopen match** button. An encounter that ended with a withdrawal or a no-show shows **Clear withdrawal and reopen** instead; refer to [Correcting a withdrawal recorded by mistake](recording-decisions.md#correcting-a-withdrawal-recorded-by-mistake). Reopen is immediate: one tap returns the encounter to running with its bout log intact, so you can carry on or fix a bout. No reason is needed, and none is asked for when you end the match again, whether you finish on a scored bout or record a withdrawal or a no-show. Correcting a mistake never costs you more than a tap.
 
 Reopening puts the encounter back into play, and a court can only run one match at a time. If another match is already running on that court, the editor names it and offers two ways forward. Leave it running, or clear its score, send it back to the queue, and reopen in a single step. Sending a match back to the queue clears any score already entered for it, so if that match is part way through, finish it first instead.

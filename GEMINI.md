@@ -67,7 +67,7 @@ Rankings within pools are determined by the following criteria:
 Individual encounters between teams are decided by:
 1. Highest number of individual winners (Victories).
 2. Highest number of points scored.
-3. If still tied, the match is a draw in pool play, or proceeds to a play-off in elimination rounds.
+3. If still tied, the match is a draw in pool play, or goes to a daihyosen (representative bout) in elimination rounds (FIK Article 8-1).
 
 ### Tie-marking Rule
 A match (individual or sub-match) is a tie when the operator enters **'X'** (or 'x') in the "vs" column, or when both sides' totals are equal and at least one score cell in the row is filled. The "vs" column is unlocked on all sheets.

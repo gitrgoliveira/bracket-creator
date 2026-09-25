@@ -233,3 +233,32 @@ func TestReopenMatch_ClearingTheOriginMovesTheBarToAChainedFusenpai(t *testing.T
 	require.NoError(t, err)
 	assert.True(t, statuses[aliceID].Eligible, "with no withdrawal left on record, Alice can fight again")
 }
+
+// standingWithdrawalOf reads bracket matches too, through the same
+// bracketMatchAsResult projection and losingSide attribution a bracket
+// decision is written with (winner and side ids, bc-brid). A row carrying
+// neither ids nor a winner cannot be attributed, and is not a standing
+// withdrawal (the re-bar then does not happen, as before it existed).
+func TestStandingWithdrawalOf_ReadsBracketMatches(t *testing.T) {
+	_, store, _ := setupTestEngine(t)
+	compID := "standing-withdrawal-bracket"
+	require.NoError(t, store.SaveCompetition(&state.Competition{ID: compID, Name: compID}))
+	aliceID, bobID := helper.NewUUID4(), helper.NewUUID4()
+	require.NoError(t, store.SaveBracket(compID, &state.Bracket{Rounds: [][]state.BracketMatch{{
+		{ID: "r1-m0", SideA: "Alice", SideAID: aliceID, SideB: "Bob", SideBID: bobID,
+			Status: state.MatchStatusCompleted, Decision: "fusenpai", DecisionBy: "aka", Winner: "Bob", WinnerID: bobID},
+		{ID: "r1-m1", SideA: "Carol", SideB: "Dan", Status: state.MatchStatusCompleted, Decision: "fusenpai", DecisionBy: "aka"},
+	}}}))
+	require.NoError(t, store.WithTransaction(compID, func(tx state.StoreTx) error {
+		st, ok := standingWithdrawalOf(tx, compID, aliceID, "Pool A-0")
+		require.True(t, ok, "a bracket fusenpai is a standing withdrawal")
+		assert.Equal(t, "r1-m0", st.MatchID)
+		assert.False(t, st.Eligible)
+		assert.Equal(t, "fusenpai at r1-m0", st.Reason)
+		_, ok = standingWithdrawalOf(tx, compID, aliceID, "r1-m0")
+		assert.False(t, ok, "the match being cleared is never its own standing withdrawal")
+		_, ok = standingWithdrawalOf(tx, compID, bobID, "")
+		assert.False(t, ok, "the winner is not barred")
+		return nil
+	}))
+}

@@ -1561,6 +1561,10 @@ function ReopenFeedback({ ctl, testIdPrefix }) {
 // an earlier withdrawal. Reads and the reopen remedy are otherwise identical;
 // only the copy differs (the Recorded line names the winner, and "Clear
 // default win and reopen" replaces "Clear withdrawal and reopen").
+// How long RecordedWithdrawal holds its one-tap clear for the competitor
+// status that decides its copy, at most (see statusSettled there).
+export const STATUS_HOLD_MS = 2000;
+
 function RecordedWithdrawal({ match, ctl, disabled = false, singleBout = false }) {
   const withdrawnKey = withdrawnKeyOf(match);
   const withdrawn = withdrawnSideOf(match);
@@ -1645,6 +1649,11 @@ function RecordedWithdrawal({ match, ctl, disabled = false, singleBout = false }
     }
     let cancelled = false;
     setStatusSettled(false);
+    // The hold is brief by design: this fetch is best-effort and carries no
+    // timeout, and a request hanging on venue wifi must not keep the one-tap
+    // correction disabled. After the cap the tap is available with the copy
+    // an unknown status gives (the ordinary one), exactly as a failed fetch.
+    const cap = setTimeout(() => { if (!cancelled) setStatusSettled(true); }, STATUS_HOLD_MS);
     (async () => {
       try {
         const statuses = await window.API.fetchCompetitorStatuses(match.compId);
@@ -1656,7 +1665,7 @@ function RecordedWithdrawal({ match, ctl, disabled = false, singleBout = false }
         if (!cancelled) setStatusSettled(true);
       }
     })();
-    return () => { cancelled = true; };
+    return () => { cancelled = true; clearTimeout(cap); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [match.compId, withdrawn?.id]);
   // The barred competitor's record names a DIFFERENT match (see above).

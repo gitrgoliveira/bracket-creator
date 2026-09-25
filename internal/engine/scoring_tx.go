@@ -1119,9 +1119,11 @@ func (e *Engine) restoreEligibilityRecordedByMatch(tx state.StoreTx, compID, mat
 // and a fusenpai chained onto an earlier bar (bc-kfup, alreadyBarredRefusal)
 // records none of its own, so when the match that DID record the bar is
 // cleared, the bar moves to the withdrawal still on record instead of
-// lapsing: the eligibility record follows the rulings on disk. ok is false
-// when there is none, or the matches cannot be read (logged; the caller then
-// restores as before).
+// lapsing: the eligibility record follows the rulings on disk. The loser is
+// attributed by losingSide, pool and bracket alike (a bracket row through
+// bracketMatchAsResult); a legacy row with neither a winner nor side ids
+// cannot be attributed and is not counted. ok is false when there is none, or
+// the matches cannot be read (logged; the caller then restores as before).
 func standingWithdrawalOf(tx state.StoreTx, compID, playerID, excludeMatchID string) (domain.CompetitorStatus, bool) {
 	barsPlayer := func(r *state.MatchResult) bool {
 		if r.ID == excludeMatchID || r.Status != state.MatchStatusCompleted || !domain.IsWithdrawalDecisionStr(r.Decision) {

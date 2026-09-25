@@ -17,7 +17,7 @@ import { describe, it, expect, vi, beforeAll, afterAll, beforeEach } from 'vites
 import { installWindowStubs } from '../helpers/stub_globals.js';
 import { readStylesheet, cssBlock } from '../helpers/source.js';
 import { DOWNSTREAM_KNOCKOUT_REOPEN_CANCELLED } from '../../write_result.jsx';
-import { withdrawalLabel } from '../../admin_scoring_shared.jsx';
+import { withdrawalLabel, STATUS_HOLD_MS } from '../../admin_scoring_shared.jsx';
 
 const STUBBED_GLOBALS = {
   isHikiwake: () => false,
@@ -702,6 +702,16 @@ describe('clearing a fusenpai chained onto an earlier withdrawal (bc-kfup)', () 
     expect(screen.getByTestId('clear-withdrawal-reopen').disabled).toBe(true);
     await act(async () => { resolve([{ playerId: 'p2', eligible: false, matchId: 'm-r1-0' }]); });
     await waitFor(() => expect(screen.getByTestId('clear-withdrawal-reopen').disabled).toBe(false));
+  });
+
+  // The status fetch is best-effort with no timeout. A request that hangs
+  // must not keep the correction disabled: the hold is capped.
+  it('releases the clear after a short cap when the status request hangs', async () => {
+    window.API.fetchCompetitorStatuses = vi.fn().mockImplementation(() => new Promise(() => {}));
+    await mount(individualWithdrawal());
+    expect(screen.getByTestId('clear-withdrawal-reopen').disabled).toBe(true);
+    await waitFor(() => expect(screen.getByTestId('clear-withdrawal-reopen').disabled).toBe(false),
+      { timeout: STATUS_HOLD_MS + 1500 });
   });
 
   it("lists a chained fusenpai among the original withdrawal's later default wins", async () => {

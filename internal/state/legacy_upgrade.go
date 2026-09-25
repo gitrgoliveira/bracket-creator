@@ -1112,8 +1112,11 @@ func (s *Store) upgradeBracketLocked(compID string, roster *legacyUpgradeRoster)
 	if err != nil {
 		log.Printf("state: legacy bracket-side-id upgrade for %s: %v", compID, err)
 	}
+	settledBefore := bracket.TimesSettled
 	changes := s.upgradeBracketRoundsLocked(compID, bracket)
-	if !idsChanged && len(changes) == 0 {
+	// A bracket that only became TimesSettled moved no match but must still
+	// be saved, or its times are examined again on every load.
+	if !idsChanged && len(changes) == 0 && bracket.TimesSettled == settledBefore {
 		return nil
 	}
 	if err := s.saveBracketLocked(compID, bracket, s.directWrite); err != nil {

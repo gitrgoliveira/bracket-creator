@@ -56,3 +56,55 @@ func TestBracketOrderOfPlayFollowsMatchNumbers(t *testing.T) {
 		}
 	}
 }
+
+// TestBracketTimesTheOperatorMovedSurviveAReload: moving a match up the court
+// queue swaps two times (UpdateMatchTime) and marks nothing else on the
+// match. In a five-player draw, moving Match 2 above Match 1 leaves the
+// court's times rising in storage order, which is exactly what the old
+// scheduler left behind. The draw records its bracket as TimesSettled, so
+// the load-time repair of that old scheduling never takes the move back.
+func TestBracketTimesTheOperatorMovedSurviveAReload(t *testing.T) {
+	eng, store, dir := setupTestEngine(t)
+	const compID = "moved-times"
+	createTestCompetition(t, store, compID, state.CompFormatKnockout, 0, func(c *state.Competition) {
+		c.Courts = courtLabels(1)
+	})
+	require.NoError(t, store.SaveParticipants(compID, makePlayers(5)))
+	require.NoError(t, eng.GenerateDraw(compID))
+	bracket, err := store.LoadBracket(compID)
+	require.NoError(t, err)
+	require.True(t, bracket.TimesSettled, "a draw scheduled in match-number order owes the repair nothing")
+
+	var m1, m2 *state.BracketMatch
+	for ri := range bracket.Rounds {
+		for mi := range bracket.Rounds[ri] {
+			switch m := &bracket.Rounds[ri][mi]; m.MatchNumber {
+			case 1:
+				m1 = m
+			case 2:
+				m2 = m
+			}
+		}
+	}
+	require.NotNil(t, m1)
+	require.NotNil(t, m2)
+	first, second := m1.ScheduledAt, m2.ScheduledAt
+	require.Less(t, first, second, "fixture: Match 1 is played first")
+
+	// The operator moves Match 2 up the queue: the console swaps the times.
+	require.NoError(t, eng.UpdateMatchTime(compID, m2.ID, first))
+	require.NoError(t, eng.UpdateMatchTime(compID, m1.ID, second))
+
+	reloaded, err := state.NewStore(dir)
+	require.NoError(t, err)
+	got, err := reloaded.LoadBracket(compID)
+	require.NoError(t, err)
+	byID := map[string]string{}
+	for ri := range got.Rounds {
+		for _, m := range got.Rounds[ri] {
+			byID[m.ID] = m.ScheduledAt
+		}
+	}
+	require.Equal(t, first, byID[m2.ID], "Match 2 keeps the time it was moved to")
+	require.Equal(t, second, byID[m1.ID], "Match 1 keeps the time it was moved to")
+}

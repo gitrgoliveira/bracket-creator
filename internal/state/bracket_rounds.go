@@ -27,10 +27,17 @@ func BracketMatchLeafSlot(roundIdx, matchIdx int) int {
 // requires its walk to reach every one of them, so the two cannot disagree
 // about which matches count. At generation it equals !Hidden
 // (engine.computeBracketDisplayMetadata hides every match missing a side), and
-// it stays so because no write after the draw empties a side of a match in
-// Rounds: a result moves a name in, retracting it restores a "Winner of"
-// placeholder, and only the bronze, outside Rounds, is ever blanked. The side
-// check mirrors the Excel numbering's nil-node skip.
+// in every supported flow it stays so, because no write after the draw
+// empties a side of a match in Rounds: a result moves a name in, retracting it
+// restores a "Winner of" placeholder, and only the bronze, outside Rounds, is
+// ever blanked. The one exception is data no draw produces: a pool with fewer
+// ranked finishers than the places it sends (hand-edited or imported files)
+// has each missing place resolved to an empty side (engine.qualifierResolver).
+// Should that empty both sides of a real match, the walk from the final can
+// no longer pass through it, so StampRoundsFromFeeders refuses with
+// ErrBracketFeedersUnwalkable and the load-time repair leaves the bracket as
+// stored and logs why. The side check mirrors the Excel numbering's nil-node
+// skip.
 func (m *BracketMatch) numbered() bool {
 	return !m.Hidden && (m.SideA != "" || m.SideB != "")
 }
@@ -139,8 +146,9 @@ type BracketRoundChange struct {
 
 // RestampRoundsFromFeeders brings a STORED bracket's DisplayRound and
 // MatchNumber up to the rule generation applies, StampRoundsFromFeeders, puts
-// an unstarted bracket's times in match-number order, and returns what moved
-// (nil when nothing did, so a second call is a no-op).
+// an unstarted old bracket's times in match-number order, and returns what
+// moved (nil when nothing did, so a second call is a no-op). It may also set
+// TimesSettled with no match moving, which the caller must save too.
 // Store.EnsureLegacyUpgraded calls it once per load.
 //
 // Why it exists: DisplayRound and MatchNumber are stamped once, when the draw
@@ -163,13 +171,18 @@ type BracketRoundChange struct {
 //
 // Times: every release before this one scheduled a court in storage order, not
 // match-number order, so on a bracket with byes the court queue (ordered by
-// time) could list Match 2 before Match 1, renumbered or not. On a bracket
-// nobody has started (no real match started, scored or decided), a court
-// whose times still rise in storage order has them handed out again in match-
-// number order, the order a fresh draw is scheduled in; see
-// scheduleNumberedInNumberOrder. Once any real match has been touched the
-// times stay as stored, and a court whose times do not rise in storage order
-// (this release's own scheduling, or a time the operator moved) keeps them.
+// time) could list Match 2 before Match 1, renumbered or not. This is repaired
+// ONCE per bracket, on the first load of a bracket not yet TimesSettled (one
+// written by an older release; this release's draw sets it). If nobody has
+// started it (no real match started, scored or decided), a court whose times
+// still rise in storage order has them handed out again in match-number
+// order, the order a fresh draw is scheduled in; see
+// scheduleNumberedInNumberOrder. If any real match has been touched the times
+// stay as stored, and a court whose times do not rise in storage order (a
+// time the operator moved) keeps them. Either way the bracket is then
+// TimesSettled and its times are never looked at again, so a move the
+// operator makes later, which may well leave a court rising in storage
+// order, is not mistaken for the old scheduling.
 //
 // Only real matches move. Hidden matches keep their stored values, the bronze
 // (ThirdPlaceMatch, DisplayRound -1) is neither read nor written, and
@@ -209,8 +222,11 @@ func (b *Bracket) RestampRoundsFromFeeders() ([]BracketRoundChange, error) {
 	if err := b.StampRoundsFromFeeders(); err != nil {
 		return nil, err
 	}
-	if !b.anyNumberedMatchTouched() {
-		b.scheduleNumberedInNumberOrder()
+	if !b.TimesSettled {
+		if !b.anyNumberedMatchTouched() {
+			b.scheduleNumberedInNumberOrder()
+		}
+		b.TimesSettled = true
 	}
 
 	var changes []BracketRoundChange
@@ -246,7 +262,8 @@ func (b *Bracket) RestampRoundsFromFeeders() ([]BracketRoundChange, error) {
 // It reads Feeders and numbered() (Hidden, and whether both sides are empty),
 // never a side's contents, so it walks a bracket in play exactly as it walked
 // the fresh one: nothing after the draw rewrites Feeders or Hidden, and
-// numbered() says why its side check cannot change either.
+// numbered() says why its side check does not change either, and what
+// happens in the one case, outside any supported flow, where it can.
 //
 // Hidden matches and the bronze (ThirdPlaceMatch) are neither read nor
 // written. A bracket with no real match (fewer than two entrants) is left as
@@ -357,14 +374,14 @@ func (b *Bracket) anyNumberedMatchTouched() bool {
 // set of times is unchanged, only who holds which. Hidden matches and the
 // bronze keep theirs.
 //
-// It only touches a court whose times still carry the signature of the old
-// scheduler: every release before match-number scheduling handed a court its
-// times in STORAGE order (Rounds, then position), so they rise along it. A
-// court whose times do not (a fresh draw of this release, whose times rise
-// in number order instead, or a time the operator moved by hand) is left as
-// it is, and so is one where a real match carries no time or one that does
-// not read as a clock time. A court whose storage and number orders agree
-// comes back unchanged, which is what makes a second call a no-op.
+// It runs only on a bracket written by an older release (not TimesSettled,
+// see RestampRoundsFromFeeders), and only touches a court whose times still
+// carry the signature of the old scheduler: every release before match-number
+// scheduling handed a court its times in STORAGE order (Rounds, then
+// position), so they rise along it. A court whose times do not (a time the
+// operator moved by hand) is left as it is, and so is one where a real match
+// carries no time or one that does not read as a clock time. A court whose
+// storage and number orders agree comes back unchanged.
 func (b *Bracket) scheduleNumberedInNumberOrder() {
 	byCourt := make(map[string][]*BracketMatch)
 	var courts []string

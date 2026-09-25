@@ -39,11 +39,13 @@ func TestLegacyBracketRoundsUpgrade_V21BracketIsCorrectedOnLoadOnce(t *testing.T
 	assert.NotZero(t, first.FileVersion("c1", "bracket.json"),
 		"the rewrite goes through saveBracketLocked, which bumps the bracket's file version")
 
-	// The file on disk equals the v2.1 file with exactly these four fields
-	// changed: sides, ids, winners, the recorded P4 v P5 result, courts,
-	// scheduled times, Hidden rows, feeders and the draw order are identical.
+	// The file on disk equals the v2.1 file with exactly these four matches'
+	// rounds and numbers changed, and the bracket marked TimesSettled: sides,
+	// ids, winners, the recorded P4 v P5 result, courts, scheduled times,
+	// Hidden rows, feeders and the draw order are identical.
 	var want state.Bracket
 	require.NoError(t, json.Unmarshal(v21, &want))
+	want.TimesSettled = true
 	for id, rn := range map[string][2]int{
 		"m-r1-0": {2, 2},
 		"m-r1-3": {3, 1},
@@ -127,4 +129,49 @@ func TestLegacyBracketRoundsUpgrade_UnwalkableBracketIsLoggedOnce(t *testing.T) 
 	})
 	assert.Equal(t, 1, strings.Count(logged, "legacy bracket-rounds upgrade for c1"),
 		"the refusal is logged once, not once per roster write:\n%s", logged)
+}
+
+// A stored bracket whose rounds and numbers are already right but which
+// predates TimesSettled moves no match on load, and is still saved once with
+// the marker set: otherwise its times would be examined again on every load,
+// and a move the operator makes later could be mistaken for the old
+// scheduling. The v2.1 bracket here has been played (P4 v P5 is recorded),
+// so its times are kept as they are.
+func TestLegacyBracketRoundsUpgrade_OnlyTheMarkerIsSavedOnce(t *testing.T) {
+	dir, _ := newLegacyUpgradeFixture(t)
+	v21, err := os.ReadFile(filepath.FromSlash(v21FiveEntrantFixture))
+	require.NoError(t, err)
+	var stored state.Bracket
+	require.NoError(t, json.Unmarshal(v21, &stored))
+	for id, rn := range map[string][2]int{
+		"m-r1-0": {2, 2},
+		"m-r1-3": {3, 1},
+		"m-r2-1": {2, 3},
+		"m-r3-0": {1, 4},
+	} {
+		m := matchByID(t, &stored, id)
+		m.DisplayRound, m.MatchNumber = rn[0], rn[1]
+	}
+	require.False(t, stored.TimesSettled)
+	raw, err := json.Marshal(stored)
+	require.NoError(t, err)
+	path := filepath.Join(dir, "competitions", "c1", "bracket.json")
+	require.NoError(t, os.WriteFile(path, raw, 0o600))
+
+	first := freshLegacyUpgradeStore(t, dir)
+	_, err = first.LoadBracket("c1")
+	require.NoError(t, err)
+	assert.Equal(t, uint64(1), first.FileVersion("c1", "bracket.json"), "the marker alone is a change worth saving")
+	upgraded, err := os.ReadFile(path)
+	require.NoError(t, err)
+	var onDisk state.Bracket
+	require.NoError(t, json.Unmarshal(upgraded, &onDisk))
+	want := stored
+	want.TimesSettled = true
+	assert.Equal(t, want, onDisk, "nothing but the marker changes")
+
+	second := freshLegacyUpgradeStore(t, dir)
+	_, err = second.LoadBracket("c1")
+	require.NoError(t, err)
+	assert.Zero(t, second.FileVersion("c1", "bracket.json"), "a settled bracket is not saved again")
 }

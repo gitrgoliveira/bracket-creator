@@ -48,7 +48,7 @@ When asked to *plan*, *verify*, or *record a plan on a bead*: do NOT write code.
 ## Governance
 
 Before implementing features or making architectural decisions, read the project constitution:
-**`.specify/memory/constitution.md`**: defines the core principles (YAGNI, DRY, TDD, DDD, evidence-based decisions, bracket integrity, and live-tournament constraints) that all changes must comply with. The constitution is tracked in git. Feature plans under `specs/<n>-.../` are gitignored (only `specs/openapi.yaml` and `specs/*/screenshots/` are tracked), so a worktree or fresh clone has no plan file.
+**`.specify/memory/constitution.md`**: defines the core principles (YAGNI, DRY, TDD, DDD, evidence-based decisions, bracket integrity, and live-tournament constraints) that all changes must comply with. The constitution is tracked in git. Feature plans under `specs/<n>-.../` are gitignored (only `specs/openapi.yaml` and `specs/*/screenshots/` are tracked by the rules), so a worktree or fresh clone has no plan file, except the few that were force-added before the rule (`git ls-files specs` lists them, e.g. `specs/007-ekc-draw/spec.md`). Those are tracked and read, so a change that contradicts one corrects it in the same PR.
 
 ## Project Overview
 

@@ -5668,6 +5668,18 @@ components:
             bracket generated before this field existed (a legacy
             bracket.json); a competitor whose id is missing from this list
             was not drawn (e.g. excluded by check-in) and carries no number.
+        timesSettled:
+          type: boolean
+          readOnly: true
+          description: >
+            True once the scheduled times need no repair on load: set when the
+            draw is generated (each shiaijo is then scheduled in match-number
+            order), and when a bracket drawn by an earlier release is first
+            loaded (its times are handed out again in match-number order if
+            nothing has been played, and otherwise kept). Once set, the
+            times are never changed on load, so a match the operator moved
+            stays where it was put. Absent on a bracket not yet loaded by a
+            release that records it.
 
     PlayerStanding:
       type: object

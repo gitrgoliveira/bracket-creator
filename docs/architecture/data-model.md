@@ -239,6 +239,7 @@ classDiagram
         +BracketMatch[][] Rounds
         +BracketMatch ThirdPlaceMatch
         +string[] DrawOrder
+        +bool TimesSettled
     }
 
     class BracketMatch {

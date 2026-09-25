@@ -287,3 +287,63 @@ func TestDecisionHandler_BothSidesBarredHikiwake_SupersededNot500(t *testing.T) 
 	assert.Equal(t, state.MatchStatusScheduled, m2.Status, "the superseded write must not overwrite the stored match")
 	assert.Equal(t, storedStamp, m2.ModifiedAt, "the stored stamp is untouched")
 }
+
+// TestDecisionHandler_BothSidesBarredHikiwake_OwesTheReopenReason drives the
+// one way a both-barred match comes to carry ReopenPending: Carol's default
+// win over the barred Alice is reopened with no reason, which lands it
+// SCHEDULED because Alice is still barred (engine.reopenTargetStatus), and
+// Carol then withdraws from another match. Ending that match as drawn must
+// ask for the reopen's reason exactly as the main /decision flow does, and
+// store it when given, rather than clearing the flag with no reason at all.
+func TestDecisionHandler_BothSidesBarredHikiwake_OwesTheReopenReason(t *testing.T) {
+	compID := "both-barred-hikiwake-reopen"
+	r, store, _ := bothBarredPoolFixture(t, compID)
+
+	load := func() state.MatchResult {
+		t.Helper()
+		matches, err := store.LoadPoolMatches(compID)
+		require.NoError(t, err)
+		for _, m := range matches {
+			if m.ID == "Pool A-4" {
+				return m
+			}
+		}
+		t.Fatal("Pool A-4 not found")
+		return state.MatchResult{}
+	}
+
+	// Pool A-4 is Alice (aka, barred by Pool A-0) v Carol: the default win
+	// goes to Carol, then it is reopened with a one-tap empty body.
+	resp := postDecisionJSON(t, r, compID, "Pool A-4", DecisionRequest{
+		Decision: "fusensho", DecisionBy: "aka", DecisionReason: "Alice withdrew earlier",
+	})
+	require.Equal(t, http.StatusOK, resp.Code, resp.Body.String())
+	resp = postReopenRaw(t, r, compID, "Pool A-4", nil)
+	require.Equal(t, http.StatusOK, resp.Code, resp.Body.String())
+	reopened := load()
+	require.Equal(t, state.MatchStatusScheduled, reopened.Status, "Alice is still barred, so the reopen lands scheduled")
+	require.True(t, reopened.ReopenPending, "a reason-less reopen owes its reason to whatever ends the match next")
+
+	// Carol (shiro on Pool A-3) withdraws: both sides of Pool A-4 are barred.
+	resp = postDecisionJSON(t, r, compID, "Pool A-3", DecisionRequest{
+		Decision: "kiken-voluntary", DecisionBy: "shiro", DecisionReason: "test",
+	})
+	require.Equal(t, http.StatusOK, resp.Code, resp.Body.String())
+
+	resp = postDecisionJSON(t, r, compID, "Pool A-4", DecisionRequest{Decision: "hikiwake"})
+	require.Equal(t, http.StatusBadRequest, resp.Code, resp.Body.String())
+	assert.Contains(t, resp.Body.String(), ReopenNeedsReasonMessage)
+	refused := load()
+	assert.Equal(t, state.MatchStatusScheduled, refused.Status, "a refusal writes nothing")
+	assert.True(t, refused.ReopenPending, "a refusal leaves the reason still owed")
+
+	resp = postDecisionJSON(t, r, compID, "Pool A-4", DecisionRequest{
+		Decision: "hikiwake", DecisionReason: "both withdrew",
+	})
+	require.Equal(t, http.StatusOK, resp.Code, resp.Body.String())
+	drawn := load()
+	assert.Equal(t, state.MatchStatusCompleted, drawn.Status)
+	assert.Equal(t, "hikiwake", drawn.Decision)
+	assert.False(t, drawn.ReopenPending, "the reason is given, so nothing is owed")
+	assert.Equal(t, "both withdrew", drawn.CorrectionReason, "the reopen's reason is recorded, as the main flow records it")
+}

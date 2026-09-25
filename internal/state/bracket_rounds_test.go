@@ -33,6 +33,7 @@ func loadV21FiveEntrant(t *testing.T) *state.Bracket {
 	require.NoError(t, err)
 	var b state.Bracket
 	require.NoError(t, json.Unmarshal(raw, &b))
+	require.False(t, b.TimesSettled, "fixture: written by v2.1.0, before the times were settled")
 	// A bronze the restamp must neither read nor write. v2.1.0 draws one only
 	// for a format that needs a single 3rd place; adding it here keeps the
 	// "bronze untouched" rule under test without a second fixture.
@@ -72,10 +73,13 @@ func TestRestampRoundsFromFeeders_CorrectsTheV21FiveEntrantBracket(t *testing.T)
 		{ID: "m-r1-3", OldRound: 3, NewRound: 3, OldNumber: 2, NewNumber: 1, OldScheduledAt: "09:05", NewScheduledAt: "09:05"},
 	}, changes)
 
-	// The whole bracket equals the stored one with exactly these four fields
-	// set, so sides, ids, winners, results, courts, scheduled times, Hidden
-	// rows, feeders, the draw order and the bronze are all proved untouched.
+	// The whole bracket equals the stored one with exactly these four
+	// matches' rounds and numbers set, and the bracket marked TimesSettled
+	// (P4 v P5 has been fought, so its times are kept), so sides, ids,
+	// winners, results, courts, scheduled times, Hidden rows, feeders, the
+	// draw order and the bronze are all proved untouched.
 	want := loadV21FiveEntrant(t)
+	want.TimesSettled = true
 	for id, rn := range map[string][2]int{
 		"m-r1-0": {2, 2}, // P1 v P2: a semifinal, fought after P4 v P5
 		"m-r1-3": {3, 1}, // P4 v P5: the one first-round bout

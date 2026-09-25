@@ -356,8 +356,9 @@ func (e *Engine) buildBracketFromDraw(comp *state.Competition, draw *helper.Knoc
 	// (RestampRoundsFromFeeders) runs it too, and so a stored bracket and a
 	// fresh one cannot be stamped by different rules. It reads the Feeders and
 	// Hidden stamped above, never the sides' contents beyond whether both are
-	// empty (state.BracketMatch.numbered says why that cannot change after the
-	// draw), so it walks a bracket in play exactly as it walked this one. A
+	// empty (state.BracketMatch.numbered says why that does not change after
+	// the draw in any supported flow), so it walks a bracket in play exactly
+	// as it walked this one. A
 	// refusal here means the draw built a bracket its own feeders cannot
 	// describe: an internal fault, never an operator's.
 	if err := bracket.StampRoundsFromFeeders(); err != nil {
@@ -366,8 +367,10 @@ func (e *Engine) buildBracketFromDraw(comp *state.Competition, draw *helper.Knoc
 
 	// Per-court slot assignment (T150) + ceremony-block skipping (T151), in
 	// match-number order, so it runs after the numbering above. See pools.go
-	// for the same wiring.
+	// for the same wiring. Scheduled in number order, so the load-time repair
+	// of the old storage-order scheduling owes it nothing (TimesSettled).
 	assignBracketMatchSlots(bracket.Rounds, comp, tournament)
+	bracket.TimesSettled = true
 
 	// Bronze (3rd-place) knockout: only when this competition's format
 	// requires a single 3rd place (comp.RequiresSingleThirdPlace, the

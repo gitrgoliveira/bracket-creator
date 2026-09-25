@@ -1847,6 +1847,18 @@ type Bracket struct {
 	// this field existed has no draw order and yields NO numbers, by design;
 	// there is no name-based fallback.
 	DrawOrder []string `json:"drawOrder,omitempty"`
+	// TimesSettled records that the load-time repair of old scheduling
+	// (Bracket.RestampRoundsFromFeeders) owes this bracket's times nothing:
+	// the draw that built it scheduled every court in match-number order
+	// (engine.buildBracketFromDraw), or the repair has already run on it
+	// once, handing the times out again or, when play had already started,
+	// leaving them as they were. The repair runs only while it is false, so
+	// a time the operator moves afterwards is never taken back: moving a
+	// match up the court queue only swaps two times, and without this record
+	// the repair could not tell that swap from the old scheduler's storage
+	// order. Absent on a bracket written before it existed, which is exactly
+	// the bracket the repair is for.
+	TimesSettled bool `json:"timesSettled,omitempty"`
 }
 
 type Announcement struct {

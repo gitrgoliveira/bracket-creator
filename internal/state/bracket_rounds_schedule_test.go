@@ -7,7 +7,8 @@ package state_test
 // bracket nobody has started, a court whose times still rise in storage order
 // has its own times handed out again, earliest to the lowest match number;
 // once a real bout has been touched, or when a court's times are not the old
-// scheduler's, they stay exactly as stored.
+// scheduler's, they stay exactly as stored. Either way this happens once: the
+// bracket is then TimesSettled and its times are never examined again.
 
 import (
 	"testing"
@@ -56,6 +57,7 @@ func TestRestampRoundsFromFeeders_UnstartedBracketIsScheduledInNumberOrder(t *te
 	// P2) the next. Everything else, the Hidden rows' times and the bronze's
 	// included, is exactly as stored.
 	want := unstartedV21FiveEntrant(t)
+	want.TimesSettled = true
 	setRoundNumberTime(t, want, "m-r1-3", 3, 1, "09:00")
 	setRoundNumberTime(t, want, "m-r1-0", 2, 2, "09:05")
 	setRoundNumberTime(t, want, "m-r2-1", 2, 3, "09:10")
@@ -119,9 +121,11 @@ func TestRestampRoundsFromFeeders_StorageOrderTimesAreRepairedWithoutARenumberin
 	}, changes)
 }
 
-// A time the operator moved by hand is not undone on the next load: once a
-// court's times no longer rise in storage order they are not the old
-// scheduler's, and they stay.
+// A time the operator moved by hand is not undone on the next load: the
+// first pass settles the bracket, and a settled bracket's times stay as they
+// are. (engine's TestBracketTimesTheOperatorMovedSurviveAReload pins the move
+// that leaves a court rising in storage order again, which only the marker
+// tells apart from the old scheduling.)
 func TestRestampRoundsFromFeeders_HandMovedTimesSurvive(t *testing.T) {
 	b := unstartedV21FiveEntrant(t)
 	_, err := b.RestampRoundsFromFeeders()

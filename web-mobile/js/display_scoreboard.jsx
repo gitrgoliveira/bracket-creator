@@ -7,7 +7,7 @@
 import { findRunningOnCourt, findUpcomingOnCourt, countCourtMatches, sideLabelParts, phaseLabel, poolNameOf, isSupplementaryBout, phaseProgressOnCourt, bracketRoundSiblings, StreamingQR } from './display_helpers.jsx';
 import { NumberedName } from './numbered_name.jsx';
 import { teamMatchTypeFor, DAIHYOSEN_POSITION } from './pool_ids.jsx';
-import { TeamScoreboard, IndividualScore, useTeamLineups, teamIVPW, teamIVPWFrom, teamNameMark } from './match_scoreboard.jsx';
+import { TeamScoreboard, IndividualScore, useTeamLineups, teamIVPWFrom, teamNameMark } from './match_scoreboard.jsx';
 import { isBarredMatch } from './ineligible_match.jsx';
 import { subBoutHasResult } from './team_default_credit.jsx';
 
@@ -718,19 +718,14 @@ function TvDisplay({ court, tournament, competitions, withZekkenName, linkState 
 
     // mp-13y: DH (Daihyosen) row gating: shown when:
     //   1. All regular bouts are complete (every sub has ippons, hantei, or draw).
-    //   2. IV (Individual Victories) are tied.
-    //   3. PW (Points Won) are also tied.
-    //   4. It is a knockout phase (not a pool match).
+    //   2. It is a knockout phase (not a pool match).
+    //   3. IV (Individual Victories) and PW (Points Won) are both tied, which
+    //      TeamScoreboard checks itself (see the end of the memo below).
     // The DH sub-result (position === DAIHYOSEN_POSITION) may or may not exist
     // yet; when absent, TeamScoreboard renders a "Daihyosen pending" placeholder.
     const subResults = (promoted && promoted.match && promoted.match.subResults) || [];
     const isKnockoutPhase = !!(promoted && promoted.isBracket) ||
         !!(promoted && promoted.match && promoted.match.phase === "bracket");
-    // Extract stable string primitives from promoted.match.sideA/B so the
-    // useMemo below can dep on values rather than the promoted object literal
-    // (which is recreated on every render, defeating memoisation).
-    const promotedSideA = promoted?.match?.sideA?.name || (typeof promoted?.match?.sideA === "string" ? promoted.match.sideA : "");
-    const promotedSideB = promoted?.match?.sideB?.name || (typeof promoted?.match?.sideB === "string" ? promoted.match.sideB : "");
     const showDH = useMD(() => {
         if (!isTeamMatch || !isKnockoutPhase) return false;
         const regularSubs = subResults.filter(s => s.position > DAIHYOSEN_POSITION);
@@ -746,14 +741,13 @@ function TvDisplay({ court, tournament, competitions, withZekkenName, linkState 
         // this mirrors.
         const allDone = regularSubs.every(s => subBoutHasResult(s) ||
             (typeof window.isHikiwake === "function" && window.isHikiwake(s.score?.type)));
-        if (!allDone) return false;
-        // The match is tied (→ show DH) when IV and PW are level per side.
-        // teamIVPW already prefers an explicit `sub.winner` (which the server
-        // guarantees equals sideA/sideB), so a hantei-decided 0-0 bout is
-        // counted as an IV for its winner there: no extra hantei loop needed.
-        const { ivShiro, ivAka, pwShiro, pwAka } = teamIVPW(subResults, promotedSideA, promotedSideB);
-        return ivShiro === ivAka && pwShiro === pwAka;
-    }, [subResults, isTeamMatch, isKnockoutPhase, promotedSideA, promotedSideB]);
+        // Whether the encounter is TIED is not asked here: TeamScoreboard
+        // gates the row on showDH && its own tie test, which reads the
+        // server's teamResult first (teamIVPWFrom), exactly as the viewer
+        // card does. A second tie test here from the bout rows alone could
+        // only disagree with that one and hide a row the card shows.
+        return allDone;
+    }, [subResults, isTeamMatch, isKnockoutPhase]);
 
     // White scoreboard for any promoted match.
     // Team → TvWhiteBoard (IV/PW summary + bout grid). Individual → grouped

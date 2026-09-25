@@ -38,6 +38,7 @@ func loadV110NineEntrant(t *testing.T) *state.Bracket {
 	require.NoError(t, err)
 	var b state.Bracket
 	require.NoError(t, json.Unmarshal(raw, &b))
+	require.False(t, b.TimesSettled, "fixture: written by v1.1.0, before the times were settled")
 	return &b
 }
 
@@ -64,6 +65,7 @@ func v110NineEntrantCorrected(t *testing.T, b *state.Bracket) {
 	} {
 		setRoundNumberTime(t, b, id, want.round, want.number, want.at)
 	}
+	b.TimesSettled = true
 }
 
 func TestRestampRoundsFromFeeders_RenumbersTheV110NineEntrantBracket(t *testing.T) {

@@ -30,9 +30,6 @@ function toBackendStatus(s) { return STATUS_MAP[s] || s; }
 // Canonical draw value is "hikiwake". See specs/openapi.yaml for details.
 function isHikiwake(v) { return v === "hikiwake"; }
 function isKikenDecision(v) { return v === "kiken" || v === "kiken-voluntary" || v === "kiken-injury"; }
-// isWithdrawalDecision: a whole-match withdrawal, any kiken or fusenpai (not
-// the per-bout fusensho). Mirrors domain.IsWithdrawalDecisionStr.
-function isWithdrawalDecision(v) { return isKikenDecision(v) || v === "fusenpai"; }
 
 // Translate UI score patch into backend MatchResult shape.
 // UI sends: { winner: {id,name,...}, status, score: {type,winnerPts,loserPts,ippons,fouls,...} }
@@ -511,7 +508,7 @@ function normalizeCompetitionDetail(data) {
     return result;
 }
 
-export { toBackendStatus, isHikiwake, isKikenDecision, isWithdrawalDecision, toBackendMatchResult, normalizeMatch, buildPlayerMap, normalizePlayer, normalizeCompetitionDetail, buildPlayerMetadata };
+export { toBackendStatus, isHikiwake, isKikenDecision, toBackendMatchResult, normalizeMatch, buildPlayerMap, normalizePlayer, normalizeCompetitionDetail, buildPlayerMetadata };
 
 if (typeof window !== 'undefined') {
     window.toBackendStatus = toBackendStatus;

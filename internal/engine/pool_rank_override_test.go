@@ -158,7 +158,15 @@ func TestCalculatePoolStandings_Override_LegacyBareNameKeyIsUnresolvable(t *test
 	assert.False(t, byID["legacy-p2"].IsOverridden)
 }
 
-// undoAfterFailedTx is OverridePoolRank's decision after a failed
+// An empty group records nothing and asks nothing of the store.
+func TestOverridePoolRanks_EmptyGroupChangesNothing(t *testing.T) {
+	eng, _, _ := setupTestEngine(t)
+	changed, err := eng.OverridePoolRanks("no-such-comp", "Pool A", nil)
+	require.NoError(t, err)
+	assert.False(t, changed)
+}
+
+// undoAfterFailedTx is OverridePoolRanks' decision after a failed
 // transaction. A transaction that committed nothing takes the directly written
 // override back. One whose WAL committed before its Apply failed
 // (state.ErrTxCommitted, pinned on the real WAL by

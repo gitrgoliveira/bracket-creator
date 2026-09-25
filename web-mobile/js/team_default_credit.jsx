@@ -46,13 +46,15 @@
 // placeMarks, keyed off sameCompetitor(match.winner, match.sideA/sideB)),
 // not through this leaf.
 //
-// Imports realIppons/hanteiDecided from result_slot.jsx and withdrawnSideKey
-// from ineligible_match.jsx -- both leaves with no non-leaf imports of their
-// own -- so this file stays leaf-or-nothing per the dependency-hygiene rule
-// stated in result_slot.jsx's own header.
+// Imports realIppons/hanteiDecided/attributeWinnerSide from result_slot.jsx,
+// withdrawnSideKey from ineligible_match.jsx, and idOf/nameOf from
+// competitor_identity.jsx -- all three leaves with no non-leaf imports of
+// their own -- so this file stays leaf-or-nothing per the dependency-hygiene
+// rule stated in result_slot.jsx's own header.
 
-import { realIppons, hanteiDecided } from './result_slot.jsx';
+import { realIppons, hanteiDecided, attributeWinnerSide } from './result_slot.jsx';
 import { withdrawnSideKey } from './ineligible_match.jsx';
+import { idOf, nameOf } from './competitor_identity.jsx';
 
 // isTeamDefaultWinDecision: the default-win decision class -- every kiken
 // variant, fusenpai, or fusensho -- whose awarded points record as maru.
@@ -72,14 +74,30 @@ export function isTeamDefaultWinDecision(decision) {
 // withdrawnSideKey (bc-cse), the one owner of the aka/shiro <-> a/b mapping:
 // decisionBy "shiro" -> sideA/Aka wins, decisionBy "aka" -> sideB/Shiro wins
 // (mirroring engine.RecordDecisionTx's decisionBy -> Winner mapping: "decisionBy
-// names the WITHDRAWING side"). Kept accepting decisionBy alone, not a full
-// match, for its existing callers (teamDefaultWinCreditActive, creditedBoutSide),
-// which already know their match is completed and in the default-win class
-// before asking, so no winner-attribution fallback is needed here. Returns ""
-// for a missing/unrecognised decisionBy -- nothing to credit.
+// names the WITHDRAWING side"). With no decisionBy (a legacy row) it falls
+// back to the recorded winner's side through attributeWinnerSide
+// (result_slot.jsx), as Go's state.DefaultWinCreditSide falls back to
+// domain.AttributeWinnerSide, so this estimate and the server's teamResult
+// credit the same side. withdrawnSideKey's own name fallback is not a
+// substitute: it gives up where one side carries an id and the other does
+// not, which attributeWinnerSide still settles by name.
+//
+// Takes the match (`decisionBy`, and `winner`/`sideA`/`sideB` as `{id, name}`
+// objects or bare names); a context without the winner fields gets no
+// fallback. Returns "" when no side can be named: nothing to credit.
 const SIDE_COMPLEMENT = { a: "b", b: "a" };
-export function creditedSideKey(decisionBy) {
-  return SIDE_COMPLEMENT[withdrawnSideKey({ decisionBy })] || "";
+export function creditedSideKey(m) {
+  const ctx = m || {};
+  const byDecision = SIDE_COMPLEMENT[withdrawnSideKey({ decisionBy: ctx.decisionBy })] || "";
+  if (byDecision) return byDecision;
+  return attributeWinnerSide({
+    winnerId: idOf(ctx.winner),
+    sideAId: idOf(ctx.sideA),
+    sideBId: idOf(ctx.sideB),
+    winner: nameOf(ctx.winner),
+    sideA: nameOf(ctx.sideA),
+    sideB: nameOf(ctx.sideB),
+  }) || "";
 }
 
 // teamDefaultWinCreditActive(matchCtx): is match-level default-win crediting
@@ -91,9 +109,9 @@ export function creditedSideKey(decisionBy) {
 // call site below gates on team-shaped data first (a subResults array, or a
 // component that only ever mounts for a team match).
 export function teamDefaultWinCreditActive(matchCtx) {
-  const { status, decision, decisionBy, kachinuki } = matchCtx || {};
+  const { status, decision, kachinuki } = matchCtx || {};
   return status === "completed" && !kachinuki &&
-    isTeamDefaultWinDecision(decision) && !!creditedSideKey(decisionBy);
+    isTeamDefaultWinDecision(decision) && !!creditedSideKey(matchCtx);
 }
 
 // subBoutHasResult: the wire-level twin of Go's SubMatchResult.HasResult
@@ -132,7 +150,7 @@ export function subBoutHasResult(sub) {
 export function creditedBoutSide(sub, matchCtx) {
   if (!teamDefaultWinCreditActive(matchCtx)) return "";
   if (subBoutHasResult(sub)) return "";
-  return creditedSideKey(matchCtx.decisionBy);
+  return creditedSideKey(matchCtx);
 }
 
 // creditedTotals(missingCount, side): the IV/PW a default-win ruling adds on

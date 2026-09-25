@@ -21,8 +21,13 @@ import { matchLabel } from './write_result.jsx';
 
 // DAIHYOSEN_POSITION is the sentinel `position` value marking a sub-bout as
 // the daihyosen (representative bout) rather than a numbered roster bout
-// (real bouts use a non-negative position: fixed-format 0-based, kachinuki
-// 1-based). Negative so it never collides with a real bout index.
+// (real bouts are numbered from 1 in BOTH formats: the team editor sends
+// idx+1, quick-score counts up from 1, and kachinuki appends
+// LastBout.Position+1). Negative so it never collides with a real bout index.
+// An earlier revision of this comment claimed fixed-format was 0-based; it
+// is not, and no writer has ever emitted a 0 (the Excel export places a bout
+// at subStartExcelRow+(Position-1), so a real 0 would land one row above the
+// sub-match grid and the first bout would go missing from the sheet).
 // Mirrors state.DaihyosenSubPosition on the Go side. Use this instead of -1.
 export const DAIHYOSEN_POSITION = -1;
 

@@ -221,7 +221,7 @@ export function downstreamKnockoutPlayedConfirm({ blockingMatchId, blockingMatch
     // result, so "who moves in the knockout" is the consequence they cannot
     // see from where they are. Branched before the knockout defaults below,
     // whose `displaced` describes one slot only. `ranking` (set by
-    // api_client's overridePoolRank) is the same refusal for a pool rank
+    // api_client's overridePoolRanks) is the same refusal for a pool rank
     // recorded by hand (chusen), which corrects no result.
     if (qualifierChange && qualifierChange.length) {
         return {
@@ -410,10 +410,9 @@ export const DOWNSTREAM_KNOCKOUT_PLAYED_CANCELLED = 'Correction cancelled: the m
 export const DOWNSTREAM_KNOCKOUT_REOPEN_CANCELLED = 'Reopen cancelled: this match and the later result it depends on were left unchanged.';
 
 // The chusen panel's copy for the same declined confirmation when what was
-// refused is a pool rank recorded by hand (overridePoolRank): that rank was
-// not recorded, and the knockout match it would have reopened was left as it
-// was. Positions the panel recorded before it, for other members of the
-// group, stay recorded; the panel re-reads which still need one.
+// refused is a chusen order recorded by hand (overridePoolRanks): the order
+// is one write, so none of it was recorded, and the knockout match it would
+// have reopened was left as it was.
 export const DOWNSTREAM_KNOCKOUT_RANKING_CANCELLED = 'Ranking not recorded: the knockout match already fought was left unchanged.';
 
 // downstreamKnockoutPlayedQueueDrop (bc-cse): the copy for THIS refusal

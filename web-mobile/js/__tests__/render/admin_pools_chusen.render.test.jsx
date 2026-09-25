@@ -52,8 +52,8 @@
 //     non-colliding group is unaffected by any of the above.
 //   * "two tied groups in the same pool stay independent" -- pins groupKey
 //     scoping, orthogonal to the per-member keying scheme.
-//   * "a mid-loop failure reorders the group" -- pins step 3/4 closing the #2
-//     defect (the reorder reproduction).
+//   * "a failed write, then a re-fetch that reorders the group" -- pins step
+//     3/4 closing the #2 defect (the reorder reproduction).
 //   * "legacy (UUID-less) members" -- pins the #3/#4 blocker fix (bc-appx
 //     item 1): three empty-id members must not collapse onto one row,
 //     now enforced by checkinPid itself rather than a self-contained
@@ -156,7 +156,7 @@ const uniqueGroup = {
 function makeApi(candidates, recorded = []) {
   return {
     chusenCandidates: vi.fn().mockResolvedValue({ candidates, recorded }),
-    overridePoolRank: vi.fn().mockResolvedValue(true),
+    overridePoolRanks: vi.fn().mockResolvedValue(true),
   };
 }
 
@@ -192,12 +192,12 @@ describe('AdminPools chusen banner: same-name members are kept apart by index/id
     const recordBtn = screen.getByRole('button', { name: /Record chusen result/ });
     await act(async () => { fireEvent.click(recordBtn); });
 
-    await waitFor(() => expect(api.overridePoolRank).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(api.overridePoolRanks).toHaveBeenCalledTimes(1));
     // No validation error banner rendered for the group.
     expect(screen.queryByText(/Enter each of positions/)).toBeNull();
   });
 
-  it('sends one overridePoolRank call per member, each with its OWN playerId', async () => {
+  it('sends the group in one overridePoolRanks call, each member with its OWN playerId', async () => {
     const api = makeApi([samenameGroup]);
     await mountAdminPools({ api });
 
@@ -209,14 +209,16 @@ describe('AdminPools chusen banner: same-name members are kept apart by index/id
     const recordBtn = screen.getByRole('button', { name: /Record chusen result/ });
     await act(async () => { fireEvent.click(recordBtn); });
 
-    await waitFor(() => expect(api.overridePoolRank).toHaveBeenCalledTimes(2));
-    const calls = api.overridePoolRank.mock.calls;
-    // (compID, poolID, playerName, rank, password, playerId)
-    expect(calls[0]).toEqual(['c1', 'Pool A', 'Ryu Kan', 2, PASSWORD, 'team-1']);
-    expect(calls[1]).toEqual(['c1', 'Pool A', 'Ryu Kan', 1, PASSWORD, 'team-2']);
-    // The two calls must not carry the same identity: that was the defect
+    await waitFor(() => expect(api.overridePoolRanks).toHaveBeenCalledTimes(1));
+    // (compID, poolID, ranks, password, forceDownstreamReopen)
+    expect(api.overridePoolRanks.mock.calls[0]).toEqual(['c1', 'Pool A', [
+      { playerId: 'team-1', rank: 2 },
+      { playerId: 'team-2', rank: 1 },
+    ], PASSWORD, false]);
+    // The two entries must not carry the same identity: that was the defect
     // (both rows resolved through one identityByName['Ryu Kan'] entry).
-    expect(calls[0][5]).not.toBe(calls[1][5]);
+    const [first, second] = api.overridePoolRanks.mock.calls[0][2];
+    expect(first.playerId).not.toBe(second.playerId);
   });
 });
 
@@ -237,10 +239,11 @@ describe('AdminPools chusen banner: unique-name group regression guard', () => {
     const recordBtn = screen.getByRole('button', { name: /Record chusen result/ });
     await act(async () => { fireEvent.click(recordBtn); });
 
-    await waitFor(() => expect(api.overridePoolRank).toHaveBeenCalledTimes(2));
-    const calls = api.overridePoolRank.mock.calls;
-    expect(calls[0]).toEqual(['c1', 'Pool A', 'Alpha', 2, PASSWORD, 'team-a']);
-    expect(calls[1]).toEqual(['c1', 'Pool A', 'Beta', 1, PASSWORD, 'team-b']);
+    await waitFor(() => expect(api.overridePoolRanks).toHaveBeenCalledTimes(1));
+    expect(api.overridePoolRanks.mock.calls[0]).toEqual(['c1', 'Pool A', [
+      { playerId: 'team-a', rank: 2 },
+      { playerId: 'team-b', rank: 1 },
+    ], PASSWORD, false]);
   });
 
   it('still rejects an invalid permutation (regression guard on validation)', async () => {
@@ -257,7 +260,7 @@ describe('AdminPools chusen banner: unique-name group regression guard', () => {
     await act(async () => { fireEvent.click(recordBtn); });
 
     await screen.findByText(/Enter each of positions 1 to 2 exactly once/);
-    expect(api.overridePoolRank).not.toHaveBeenCalled();
+    expect(api.overridePoolRanks).not.toHaveBeenCalled();
   });
 });
 
@@ -332,12 +335,12 @@ describe('AdminPools chusen banner: two tied groups in the same pool stay indepe
     expect(recordButtons.length).toBe(2);
     await act(async () => { fireEvent.click(recordButtons[0]); }); // group 1's button
 
-    await waitFor(() => expect(api.overridePoolRank).toHaveBeenCalledTimes(2));
-    const calls = api.overridePoolRank.mock.calls;
-    expect(calls[0]).toEqual(['c1', 'Pool A', 'Alpha', 2, PASSWORD, 'team-a']);
-    expect(calls[1]).toEqual(['c1', 'Pool A', 'Beta', 1, PASSWORD, 'team-b']);
+    await waitFor(() => expect(api.overridePoolRanks).toHaveBeenCalledTimes(1));
     // Group 2 must never appear in the write: it was not submitted.
-    expect(calls.some((c) => c[2] === 'Gamma' || c[2] === 'Delta')).toBe(false);
+    expect(api.overridePoolRanks.mock.calls[0]).toEqual(['c1', 'Pool A', [
+      { playerId: 'team-a', rank: 2 },
+      { playerId: 'team-b', rank: 1 },
+    ], PASSWORD, false]);
 
     // Group 1's row is now gone (optimistically removed on success); only
     // group 2's row remains. Its inputs must still show the operator's
@@ -352,7 +355,7 @@ describe('AdminPools chusen banner: two tied groups in the same pool stay indepe
   });
 });
 
-describe('AdminPools chusen banner: a mid-loop failure reorders the group (bc-appx item 2/3)', () => {
+describe('AdminPools chusen banner: a failed write, then a re-fetch that reorders the group (bc-appx item 2/3)', () => {
   // Three DISTINCT ids (not the legacy/empty-id scenario below): this block
   // pins identity-keying surviving a REORDER, not the id-collision blocker.
   const initialGroup = {
@@ -369,9 +372,9 @@ describe('AdminPools chusen banner: a mid-loop failure reorders the group (bc-ap
   // server keeps a still-tied group's boundary stable across a reorder;
   // detectPoolTies groups by Points equality, and a rank override only
   // changes ORDER within that block), but Alpha and Beta have swapped
-  // places: a member carrying ANY override sorts ahead of one without,
-  // regardless of the override's value (engine/scoring.go), which is exactly
-  // what a partially-succeeded write produces.
+  // places, as any write to the pool between the two fetches can do (a
+  // member carrying ANY override sorts ahead of one without, regardless of
+  // the override's value, engine/scoring.go).
   const reorderedGroup = {
     ...initialGroup,
     teamNames: ['Beta', 'Alpha', 'Gamma'],
@@ -389,12 +392,8 @@ describe('AdminPools chusen banner: a mid-loop failure reorders the group (bc-ap
       chusenCandidates: vi.fn()
         .mockResolvedValueOnce({ candidates: [initialGroup], recorded: [] })
         .mockResolvedValueOnce({ candidates: [reorderedGroup], recorded: [] }),
-      // The FIRST overridePoolRank call in the submit loop -- Alpha's, since
-      // Alpha is members[0] in the order at the moment the operator clicks --
-      // rejects, simulating the mid-loop write failure. The loop is
-      // sequential and stops at the first rejection, so Beta's and Gamma's
-      // writes are never attempted.
-      overridePoolRank: vi.fn().mockRejectedValueOnce(new Error('conflict')),
+      // The group write rejects, so the catch block re-fetches.
+      overridePoolRanks: vi.fn().mockRejectedValueOnce(new Error('conflict')),
     };
     await mountAdminPools({ api });
     await screen.findByText('Chusen (drawing lots) required');
@@ -409,8 +408,8 @@ describe('AdminPools chusen banner: a mid-loop failure reorders the group (bc-ap
     const recordBtn = screen.getByRole('button', { name: /Record chusen result/ });
     await act(async () => { fireEvent.click(recordBtn); });
 
-    // The submit failed on Alpha's write; only that one call was attempted.
-    await waitFor(() => expect(api.overridePoolRank).toHaveBeenCalledTimes(1));
+    // The one group write failed.
+    await waitFor(() => expect(api.overridePoolRanks).toHaveBeenCalledTimes(1));
     // The failure handler re-fetches candidates; wait for that SECOND call
     // (the reordered payload) to land and the component to re-render.
     await waitFor(() => expect(api.chusenCandidates).toHaveBeenCalledTimes(2));
@@ -484,7 +483,7 @@ describe('AdminPools chusen banner: legacy (UUID-less) members share an empty id
     expect(gammaInput.value).toBe('3');
   });
 
-  // overridePoolRank now requires playerId (operator ruling bc-pnum): the
+  // overridePoolRanks requires playerId (operator ruling bc-pnum): the
   // server resolves a pool member by id only and 400s outright without
   // one. Before the idsMissing gate, this test clicked the (enabled)
   // button and asserted the resulting playerId:"" payload -- a request
@@ -500,7 +499,7 @@ describe('AdminPools chusen banner: legacy (UUID-less) members share an empty id
     expect(screen.getByText(/has no id in the pool draw/)).toBeTruthy();
 
     recordBtn.click();
-    expect(api.overridePoolRank).not.toHaveBeenCalled();
+    expect(api.overridePoolRanks).not.toHaveBeenCalled();
   });
 });
 
@@ -550,9 +549,8 @@ describe('AdminPools chusen banner: non-ASCII member keys do not collapse the DO
 // A recorded rank can move who holds a qualifying place after the knockout has
 // started, and the server refuses it like a pool result correction. The panel
 // must ask the operator (the same confirm the score editors use, naming who
-// moves and which match reopens) and, confirmed, resend THAT member's rank
-// with the confirmation before going on; declined, it records nothing more and
-// says so in the group.
+// moves and which match reopens) and, confirmed, resend the whole order with
+// the confirmation; declined, it records nothing and says so in the group.
 describe('AdminPools chusen banner: a rank that moves a knockout qualifier', () => {
   const refusal = () => {
     const e = new Error('downstream_knockout_played');
@@ -571,34 +569,35 @@ describe('AdminPools chusen banner: a rank that moves a knockout qualifier', () 
     await act(async () => { fireEvent.click(recordBtn); });
   }
 
-  it('asks, and on confirm resends that rank with the confirmation', async () => {
+  it('asks, and on confirm resends the order with the confirmation', async () => {
     const api = makeApi([uniqueGroup]);
-    api.overridePoolRank = vi.fn()
+    api.overridePoolRanks = vi.fn()
       .mockRejectedValueOnce(refusal())
       .mockResolvedValue(true);
     window.confirmDialog = vi.fn().mockResolvedValue(true);
     await recordDefaults(api);
 
-    await waitFor(() => expect(api.overridePoolRank).toHaveBeenCalledTimes(3));
+    await waitFor(() => expect(api.overridePoolRanks).toHaveBeenCalledTimes(2));
     expect(window.confirmDialog).toHaveBeenCalledTimes(1);
     const { message, confirmLabel } = window.confirmDialog.mock.calls[0][0];
     expect(message).toContain("Recording this ranking moves Pool A's 1st place from Beta to Alpha");
     expect(message).toContain('Match 9');
     expect(confirmLabel).toBe('Apply and reopen');
-    const calls = api.overridePoolRank.mock.calls;
-    expect(calls[0]).toEqual(['c1', 'Pool A', 'Alpha', 1, PASSWORD, 'team-a']);
-    expect(calls[1]).toEqual(['c1', 'Pool A', 'Alpha', 1, PASSWORD, 'team-a', true]);
-    expect(calls[2]).toEqual(['c1', 'Pool A', 'Beta', 2, PASSWORD, 'team-b']);
+    const order = [{ playerId: 'team-a', rank: 1 }, { playerId: 'team-b', rank: 2 }];
+    expect(api.overridePoolRanks.mock.calls).toEqual([
+      ['c1', 'Pool A', order, PASSWORD, false],
+      ['c1', 'Pool A', order, PASSWORD, true],
+    ]);
   });
 
-  it('declined, records nothing more and says so in the group', async () => {
+  it('declined, records nothing and says so in the group', async () => {
     const api = makeApi([uniqueGroup]);
-    api.overridePoolRank = vi.fn().mockRejectedValueOnce(refusal()).mockResolvedValue(true);
+    api.overridePoolRanks = vi.fn().mockRejectedValueOnce(refusal()).mockResolvedValue(true);
     window.confirmDialog = vi.fn().mockResolvedValue(false);
     await recordDefaults(api);
 
     await screen.findByText('Ranking not recorded: the knockout match already fought was left unchanged.');
-    expect(api.overridePoolRank).toHaveBeenCalledTimes(1);
+    expect(api.overridePoolRanks).toHaveBeenCalledTimes(1);
   });
 });
 
@@ -645,7 +644,9 @@ describe('AdminPools chusen banner: after the knockout has started', () => {
 // a rank, the tie leaves the "required" panel, so the Pools tab shows it as
 // recorded, in the recorded order, with Change. Change reopens the same entry
 // pre-filled with the recorded ranks and records the new order through the
-// same overridePoolRank path a first chusen uses.
+// same overridePoolRanks path a first chusen uses, as ONE write: sent one rank
+// at a time, the server answered for orders nobody chose, and a knockout match
+// whose place the new order keeps was named and reopened.
 describe('AdminPools chusen: a recorded chusen can be changed', () => {
   // The server sends the teams in standings order and each team's recorded
   // rank parallel to them; the order below is deliberately not by rank, so
@@ -662,7 +663,7 @@ describe('AdminPools chusen: a recorded chusen can be changed', () => {
     ranks: [2, 3, 1],
   };
 
-  it('shows the recorded order, and Change reopens the entry pre-filled and records the new order', async () => {
+  it('shows the recorded order, and Change reopens the entry pre-filled and records the new order in one request', async () => {
     const api = makeApi([], [recordedGroup]);
     await mountAdminPools({ api });
 
@@ -686,13 +687,15 @@ describe('AdminPools chusen: a recorded chusen can be changed', () => {
       fireEvent.click(screen.getByRole('button', { name: /Record chusen result/ }));
     });
 
-    await waitFor(() => expect(api.overridePoolRank).toHaveBeenCalledTimes(3));
-    // (compID, poolID, playerName, rank, password, playerId): the same call a
-    // first chusen makes, one per team.
-    expect(api.overridePoolRank.mock.calls).toEqual([
-      ['c1', 'Pool A', 'Alpha', 1, PASSWORD, 'id-alpha'],
-      ['c1', 'Pool A', 'Beta', 2, PASSWORD, 'id-beta'],
-      ['c1', 'Pool A', 'Gamma', 3, PASSWORD, 'id-gamma'],
+    await waitFor(() => expect(api.overridePoolRanks).toHaveBeenCalled());
+    // (compID, poolID, ranks, password, forceDownstreamReopen): the same call
+    // a first chusen makes, once, with the whole order.
+    expect(api.overridePoolRanks.mock.calls).toEqual([
+      ['c1', 'Pool A', [
+        { playerId: 'id-alpha', rank: 1 },
+        { playerId: 'id-beta', rank: 2 },
+        { playerId: 'id-gamma', rank: 3 },
+      ], PASSWORD, false],
     ]);
     await screen.findByText('Drawing lots: 1st Alpha, 2nd Beta, 3rd Gamma');
     expect(screen.queryAllByRole('spinbutton')).toHaveLength(0);
@@ -710,7 +713,7 @@ describe('AdminPools chusen: a recorded chusen can be changed', () => {
       fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
     });
 
-    expect(api.overridePoolRank).not.toHaveBeenCalled();
+    expect(api.overridePoolRanks).not.toHaveBeenCalled();
     expect(screen.getByText('Drawing lots: 1st Gamma, 2nd Alpha, 3rd Beta')).toBeTruthy();
     // Reopening starts again from the recorded order, not the abandoned edit.
     await act(async () => {

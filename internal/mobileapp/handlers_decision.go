@@ -122,6 +122,19 @@ func RegisterDecisionHandlers(r *gin.RouterGroup, eng ScoringEngine, store Compe
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 			return
 		}
+		// A stamp implausibly far in the server's future is refused outright,
+		// before either write path below opens a transaction, exactly as PUT
+		// /score refuses one: a decision competes on timestamps, so neither
+		// honouring nor zeroing such a stamp is safe (modifiedAtRefuseSkewMs).
+		// Nothing is written. It runs ahead of the both-barred carve-out,
+		// whose write competes on timestamps too.
+		if serverNowMs, aheadMs, refuse := clientClockSkew(req.ModifiedAt); refuse {
+			respondClockSkew(c, serverNowMs, aheadMs)
+			return
+		}
+		// A negative stamp is garbage; the clamp turns it into the unstamped
+		// bypass, which is always safe (mp-y3nk).
+		req.ModifiedAt = clampClientModifiedAt(req.ModifiedAt)
 		// bc-cse item 10: the ONE hikiwake shape this endpoint accepts, ahead
 		// of Validate() (which otherwise 400s every hikiwake -- "use /score
 		// for fought/hikiwake"). Any hikiwake that is not this exact
@@ -171,17 +184,6 @@ func RegisterDecisionHandlers(r *gin.RouterGroup, eng ScoringEngine, store Compe
 			// when req.ForceDownstreamReopen actually unblocked one.
 			reopenedDownstream []engine.ReopenedMatch
 		)
-		// A stamp implausibly far in the server's future is refused outright,
-		// before the transaction opens, exactly as PUT /score refuses one: a
-		// decision now competes on timestamps, so neither honouring nor zeroing
-		// such a stamp is safe (modifiedAtRefuseSkewMs). Nothing is written.
-		if serverNowMs, aheadMs, refuse := clientClockSkew(req.ModifiedAt); refuse {
-			respondClockSkew(c, serverNowMs, aheadMs)
-			return
-		}
-		// A negative stamp is garbage; the clamp turns it into the unstamped
-		// bypass, which is always safe (mp-y3nk).
-		req.ModifiedAt = clampClientModifiedAt(req.ModifiedAt)
 		reason := strings.TrimSpace(req.DecisionReason)
 		txErr := tx.WithTransaction(id, func(stx state.StoreTx) error {
 			// mp-gmcg: a reason-less reopen DEFERS its audit
@@ -249,101 +251,12 @@ func RegisterDecisionHandlers(r *gin.RouterGroup, eng ScoringEngine, store Compe
 			return
 		}
 		if engErr != nil {
-			// Map engine.ValidationError → 400, NotFoundError → 404,
-			// IneligibleCompetitorError → 409 (FR-035),
-			// ErrDecisionLocked → 409 (T103/CHK024).
-			var alreadyIneligErr *engine.AlreadyIneligibleError
-			var ineligErr *engine.IneligibleCompetitorError
-			var engNotFoundErr *engine.NotFoundError
-			switch {
-			case errors.Is(engErr, engine.ErrMatchSuperseded):
-				// bc-lww1. REACHABLE since mp-jnvl: the SPA stamps decision
-				// writes (api_client.recordDecision) and RecordDecisionTx puts
-				// that stamp on its MatchResult, so ApplyByTimestamp no longer
-				// takes the unstamped bypass and a decision can lose to a newer
-				// stored result -- the same way a score write can. An unstamped
-				// decision (an older client, or an engine-internal caller) still
-				// takes the bypass and always applies. Mapping it was already
-				// right for the reason the two daihyosen paths are: this is the
-				// LAST arm a future writer would remember to add, and the
-				// default below is internalError -> 500. The SPA queues
-				// /decision as a terminal write (_enqueueTerminalWrite, kind
-				// 'decision') and retries 5xx indefinitely, so an unmapped
-				// supersede here would not merely mis-report a dropped write,
-				// it would poison the offline queue with one that can never
-				// succeed.
-				respondSuperseded(c)
-			case errors.As(engErr, &alreadyIneligErr):
-				// T105/CHK047: concurrent kiken, another operator already
-				// recorded ineligibility for this player on a different
-				// match. bc-rawm/bc-cse: reasonHuman is ONE operator
-				// sentence naming the match and the remedy, not the raw
-				// kendo-term reason.
-				c.JSON(http.StatusConflict, gin.H{
-					"error":       "already_ineligible",
-					"playerId":    alreadyIneligErr.PlayerID,
-					"matchId":     alreadyIneligErr.MatchID,
-					"reason":      alreadyIneligErr.Reason,
-					"reasonHuman": reasonHumanForBarredCompetitor(store, id, mid, alreadyIneligErr.PlayerID, alreadyIneligErr.Reason, alreadyIneligErr.MatchID, alreadyIneligErr.Decision),
-				})
-			case errors.As(engErr, &ineligErr):
-				// Simultaneous tells the simultaneity gate's sentence
-				// (already complete in Reason) apart from a barred-status
-				// refusal -- even one whose own MatchID is empty (a status
-				// set directly via POST /competitor-status) -- exactly as
-				// the /score handler discriminates.
-				reasonHuman := ineligErr.Reason
-				switch {
-				case ineligErr.Simultaneous:
-					// reasonHuman stays ineligErr.Reason, already complete.
-				case ineligErr.BothSidesBarred:
-					// bc-cse item 10: neither side has an opponent to hand the
-					// default win to, so the single-sided builder's remedy
-					// clauses do not apply.
-					reasonHuman = bothSidesBarredReasonHuman(store, id, mid)
-				default:
-					reasonHuman = reasonHumanForBarredCompetitor(store, id, mid, ineligErr.PlayerID, ineligErr.Reason, ineligErr.MatchID, ineligErr.Decision)
-				}
-				c.JSON(http.StatusConflict, gin.H{
-					"error":       "ineligible_competitor",
-					"playerId":    ineligErr.PlayerID,
-					"reason":      ineligErr.Reason,
-					"reasonHuman": reasonHuman,
-				})
-			case errors.Is(engErr, engine.ErrDecisionLocked):
-				c.JSON(http.StatusConflict, gin.H{
-					"error":  "decision_locked",
-					"reason": engErr.Error(),
-				})
-			case respondIfDownstreamKnockoutRunning(c, engErr):
-				// A decision on a mixed competition's POOL match that would
-				// move a qualifier out of a knockout match being fought now:
-				// terminal, not confirmable (see
-				// respondIfDownstreamKnockoutRunning's doc comment).
-			case respondIfDownstreamKnockoutPlayed(c, engErr):
-				// bc-kcdg: this decision would change an already-propagated
-				// bracket winner while a downstream match carries a result of
-				// its own. Fixed wire contract, shared with every other
-				// knockout-correction write (see
-				// respondIfDownstreamKnockoutPlayed's doc comment);
-				// respondIfDownstreamKnockoutPlayed already wrote the response.
-				// Retry with forceDownstreamReopen:true once confirmed. A
-				// decision on a mixed competition's POOL match reaches this too
-				// when it moves a qualifier the knockout already played
-				// (qualifierChange names who moves).
-			case errors.As(engErr, &engNotFoundErr):
-				c.JSON(http.StatusNotFound, gin.H{"error": engNotFoundErr.Error()})
-			default:
-				// engine.ValidationError → 400 and a corrupt overrides.json → 422
-				// (computeStandingsFrom, reached via RecordDecisionTx ->
-				// RecordMatchResultWithIneligibilityTx's pool requalification
-				// check)
-				// both fall through respondIfEngineWriteError.
-				if respondIfEngineWriteError(c, engErr) {
-					return
-				}
-				internalError(c, engErr)
-			}
+			// bc-cse finding 3: shared with handleBothSidesBarredHikiwake's
+			// own write below, so both doors answer the sentinels they have
+			// in common (superseded, downstream_knockout_running/played,
+			// corrupt overrides) identically rather than the carve-out
+			// falling through respondEngineError's 500 default for them.
+			respondDecisionEngineError(c, store, id, mid, engErr)
 			return
 		}
 
@@ -370,6 +283,116 @@ func RegisterDecisionHandlers(r *gin.RouterGroup, eng ScoringEngine, store Compe
 
 		c.JSON(http.StatusOK, result)
 	})
+}
+
+// respondDecisionEngineError maps engErr from a write on the /decision
+// endpoint to its HTTP response. It is the ONE switch both the main decision
+// flow above and handleBothSidesBarredHikiwake's own write below call (bc-cse
+// finding 3): before this was extracted, the carve-out mapped its errors
+// through the generic respondEngineError, which only classifies
+// *engine.NotFoundError (404) and *engine.ValidationError (400) and defaults
+// everything else -- including engine.ErrMatchSuperseded,
+// *engine.DownstreamKnockoutPlayedError, *engine.DownstreamKnockoutRunningError,
+// and state.ErrCorruptOverrides -- to a 500. The SPA's offline write queue
+// retries 5xx forever (the mp-q8c6 poisoned-queue pattern), so a superseded
+// carve-out write could never win a retry, and the other three are terminal,
+// operator-actionable conflicts that must never look like a server fault.
+func respondDecisionEngineError(c *gin.Context, store CompetitionStore, compID, matchID string, engErr error) {
+	// Map engine.ValidationError → 400, NotFoundError → 404,
+	// IneligibleCompetitorError → 409 (FR-035),
+	// ErrDecisionLocked → 409 (T103/CHK024).
+	var alreadyIneligErr *engine.AlreadyIneligibleError
+	var ineligErr *engine.IneligibleCompetitorError
+	var engNotFoundErr *engine.NotFoundError
+	switch {
+	case errors.Is(engErr, engine.ErrMatchSuperseded):
+		// bc-lww1. REACHABLE since mp-jnvl: the SPA stamps decision
+		// writes (api_client.recordDecision) and RecordDecisionTx puts
+		// that stamp on its MatchResult, so ApplyByTimestamp no longer
+		// takes the unstamped bypass and a decision can lose to a newer
+		// stored result -- the same way a score write can. An unstamped
+		// decision (an older client, or an engine-internal caller) still
+		// takes the bypass and always applies. Mapping it was already
+		// right for the reason the two daihyosen paths are: this is the
+		// LAST arm a future writer would remember to add, and the
+		// default below is internalError -> 500. The SPA queues
+		// /decision as a terminal write (_enqueueTerminalWrite, kind
+		// 'decision') and retries 5xx indefinitely, so an unmapped
+		// supersede here would not merely mis-report a dropped write,
+		// it would poison the offline queue with one that can never
+		// succeed.
+		respondSuperseded(c)
+	case errors.As(engErr, &alreadyIneligErr):
+		// T105/CHK047: concurrent kiken, another operator already
+		// recorded ineligibility for this player on a different
+		// match. bc-rawm/bc-cse: reasonHuman is ONE operator
+		// sentence naming the match and the remedy, not the raw
+		// kendo-term reason.
+		c.JSON(http.StatusConflict, gin.H{
+			"error":       "already_ineligible",
+			"playerId":    alreadyIneligErr.PlayerID,
+			"matchId":     alreadyIneligErr.MatchID,
+			"reason":      alreadyIneligErr.Reason,
+			"reasonHuman": reasonHumanForBarredCompetitor(store, compID, matchID, alreadyIneligErr.PlayerID, alreadyIneligErr.Reason, alreadyIneligErr.MatchID, alreadyIneligErr.Decision),
+		})
+	case errors.As(engErr, &ineligErr):
+		// Simultaneous tells the simultaneity gate's sentence
+		// (already complete in Reason) apart from a barred-status
+		// refusal -- even one whose own MatchID is empty (a status
+		// set directly via POST /competitor-status) -- exactly as
+		// the /score handler discriminates.
+		reasonHuman := ineligErr.Reason
+		switch {
+		case ineligErr.Simultaneous:
+			// reasonHuman stays ineligErr.Reason, already complete.
+		case ineligErr.BothSidesBarred:
+			// bc-cse item 10: neither side has an opponent to hand the
+			// default win to, so the single-sided builder's remedy
+			// clauses do not apply.
+			reasonHuman = bothSidesBarredReasonHuman(store, compID, matchID)
+		default:
+			reasonHuman = reasonHumanForBarredCompetitor(store, compID, matchID, ineligErr.PlayerID, ineligErr.Reason, ineligErr.MatchID, ineligErr.Decision)
+		}
+		c.JSON(http.StatusConflict, gin.H{
+			"error":       "ineligible_competitor",
+			"playerId":    ineligErr.PlayerID,
+			"reason":      ineligErr.Reason,
+			"reasonHuman": reasonHuman,
+		})
+	case errors.Is(engErr, engine.ErrDecisionLocked):
+		c.JSON(http.StatusConflict, gin.H{
+			"error":  "decision_locked",
+			"reason": engErr.Error(),
+		})
+	case respondIfDownstreamKnockoutRunning(c, engErr):
+		// A decision on a mixed competition's POOL match that would
+		// move a qualifier out of a knockout match being fought now:
+		// terminal, not confirmable (see
+		// respondIfDownstreamKnockoutRunning's doc comment).
+	case respondIfDownstreamKnockoutPlayed(c, engErr):
+		// bc-kcdg: this decision would change an already-propagated
+		// bracket winner while a downstream match carries a result of
+		// its own. Fixed wire contract, shared with every other
+		// knockout-correction write (see
+		// respondIfDownstreamKnockoutPlayed's doc comment);
+		// respondIfDownstreamKnockoutPlayed already wrote the response.
+		// Retry with forceDownstreamReopen:true once confirmed. A
+		// decision on a mixed competition's POOL match reaches this too
+		// when it moves a qualifier the knockout already played
+		// (qualifierChange names who moves).
+	case errors.As(engErr, &engNotFoundErr):
+		c.JSON(http.StatusNotFound, gin.H{"error": engNotFoundErr.Error()})
+	default:
+		// engine.ValidationError → 400 and a corrupt overrides.json → 422
+		// (computeStandingsFrom, reached via RecordDecisionTx ->
+		// RecordMatchResultWithIneligibilityTx's pool requalification
+		// check)
+		// both fall through respondIfEngineWriteError.
+		if respondIfEngineWriteError(c, engErr) {
+			return
+		}
+		internalError(c, engErr)
+	}
 }
 
 // handleBothSidesBarredHikiwake handles bc-cse item 10's ONE accepted
@@ -445,8 +468,14 @@ func handleBothSidesBarredHikiwake(c *gin.Context, eng ScoringEngine, store Comp
 			// The shape qualified (both barred, scheduled pool/league match)
 			// but the write itself failed on its own terms -- answered
 			// directly rather than silently dropped to the 400 fallback,
-			// which would misreport this as "unsupported decision".
-			respondEngineError(c, writeErr)
+			// which would misreport this as "unsupported decision". Routed
+			// through the same respondDecisionEngineError the main decision
+			// flow uses (bc-cse finding 3), not the generic respondEngineError:
+			// this write can lose the timestamp LWW race (engine.ErrMatchSuperseded)
+			// or trip a downstream-knockout guard exactly like the main flow,
+			// and respondEngineError's 500 default for those would poison the
+			// SPA's offline write queue instead of answering them terminally.
+			respondDecisionEngineError(c, store, compID, matchID, writeErr)
 			return true
 		}
 		return false

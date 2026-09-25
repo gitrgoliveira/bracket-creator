@@ -1498,8 +1498,15 @@ func (e *Engine) writeMatchResult(h state.StoreTx, compId string, matchId string
 	// snapshot and its eligibility is the rolled-back write's caller's).
 	var priorDecision string
 	if policy == matchWriteForward {
-		if prior, perr := e.lookupExistingResult(h, compId, matchId); perr == nil && prior != nil {
+		// An unknown match is left to writeToPoolOrBracket, which answers
+		// it; a store that cannot be read is this write's error.
+		prior, perr := e.lookupExistingResult(h, compId, matchId)
+		var notFound *NotFoundError
+		switch {
+		case perr == nil:
 			priorDecision = prior.Decision
+		case !errors.As(perr, &notFound):
+			return perr
 		}
 	}
 	// force=false: RecordMatchResult (this function's only forward-policy
@@ -1512,6 +1519,18 @@ func (e *Engine) writeMatchResult(h state.StoreTx, compId string, matchId string
 	}
 	if sideMismatch {
 		return ErrMatchSideMismatch
+	}
+	// A RESTORE touches no eligibility. It replays the snapshot of a write
+	// that was refused (rollbackMatchResultTx: K3, or a pool requalification
+	// refusal), and both refusals fire before the refused write recorded
+	// any eligibility (recordIneligibilityFromDecision refuses K3 before its
+	// SetCompetitorStatus), so there is nothing of the refused write's to
+	// undo. Re-deriving eligibility from the snapshot is what this return
+	// stops: a snapshot holding a withdrawal re-barred its loser, so a
+	// kiken-injury competitor reinstated since was made ineligible again
+	// by a correction that never landed.
+	if policy == matchWriteRestore {
+		return nil
 	}
 	// A write that kept a recorded withdrawal (preserveWithdrawalRuling)
 	// changed no ruling, so it has no eligibility consequence to record.
@@ -2747,36 +2766,6 @@ func bracketMatchCarriesOwnResult(bm *state.BracketMatch) bool {
 		bm.IsOverridden
 }
 
-// firstDownstreamWithOwnResult returns the match ONE HOP down that this
-// result was propagated into and that is closed with a result of its own --
-// the next-round slot, or, for a semifinal, the bronze slot it also feeds.
-// Nil when neither is closed.
-//
-// ONE HOP, not the whole chain (operator ruling 2026-09-19): "if a correction
-// is applied then that match is completed and reopens the next one, if that
-// one is also completed". The deeper rounds are not this write's business and
-// are not silently unwound behind one confirmation. They are reached in their
-// own turn: once the operator re-fights the reopened match and enters THAT
-// result, the write propagates a round further, meets this same check against
-// the round after it, and asks again. One decision per round, each one the
-// operator's, instead of a single dialog quietly clearing three matches.
-//
-// Reuses downstreamTargets (kachinuki.go), the single owner of WHERE a winner
-// propagates, so this cannot drift from propagateBracketWinner's slot rule.
-func firstDownstreamWithOwnResult(bracket *state.Bracket, rIdx, mIdx int) []*state.BracketMatch {
-	var blocking []*state.BracketMatch
-	bronze, next := downstreamTargets(bracket, rIdx, mIdx)
-	// Bronze first: it is the slot the operator forgets, and naming it first
-	// keeps the order stable for the dialog and for the tests.
-	if bronze != nil && bracketMatchCarriesOwnResult(bronze) {
-		blocking = append(blocking, bronze)
-	}
-	if next != nil && bracketMatchCarriesOwnResult(next) {
-		blocking = append(blocking, next)
-	}
-	return blocking
-}
-
 // winnerActuallyChanged compares a bracket match's winner against what it held
 // before the write, by id when both sides carry one and by name otherwise
 // (bc-pnum: an id is authoritative when present, and the three id-less
@@ -2793,8 +2782,8 @@ func winnerActuallyChanged(priorWinner, priorWinnerID string, bm *state.BracketM
 	return priorWinner != bm.Winner
 }
 
-// forceReopenDownstreamChain reopens exactly what firstDownstreamWithOwnResult
-// named, and nothing else. It calls that same function rather than re-deriving
+// forceReopenDownstreamChain reopens exactly what propagatedDownstream.played
+// named, and nothing else. It asks that same method rather than re-deriving
 // the target, so the refusal and the confirmation can never disagree about
 // which matches are at stake.
 //
@@ -2805,10 +2794,11 @@ func winnerActuallyChanged(priorWinner, priorWinnerID string, bm *state.BracketM
 // longer changes, so repeating the correction raises nothing and the second
 // sibling would sit contradicting itself forever (verified against the running
 // app: re-saving the same correction returned 200 with the final still showing
-// the old winner). Rounds BEYOND the next are not reopened here. One nobody has
-// touched only stops showing the winner the reopened match had sent on
-// (retractIntoUntouched); one already played is asked about in its own turn,
-// when the re-fought result propagates into it.
+// the old winner). A bye the winner was passed through is not a hop: nobody
+// fought it, so the hop is the first match past it. Rounds BEYOND that are not
+// reopened here. One nobody has touched only stops showing the winner the
+// reopened match had sent on (retractIntoUntouched); one already played is
+// asked about in its own turn, when the re-fought result propagates into it.
 //
 // reopenBracketMatch, not requeueBracketMatch: the match was already played
 // and stays where it is, reopened in place, so the queue is left alone
@@ -2816,16 +2806,16 @@ func winnerActuallyChanged(priorWinner, priorWinnerID string, bm *state.BracketM
 // matches were already played"). It carries its own audit note rather than
 // owing one -- see downstreamReopenReason.
 func forceReopenDownstreamChain(bracket *state.Bracket, rIdx, mIdx int, correctedID string) []ReopenedMatch {
+	d := propagatedDownstreamOf(bracket, rIdx, mIdx)
 	var reopened []ReopenedMatch
-	_, next := downstreamTargets(bracket, rIdx, mIdx)
-	for _, m := range firstDownstreamWithOwnResult(bracket, rIdx, mIdx) {
+	for _, m := range d.played() {
 		reopened = append(reopened, reopenDisplacedBracketMatch(m, downstreamReopenReason(correctedID)))
 		// The reopened next-round match no longer has a winner, so what it
 		// had propagated comes back out of a round nobody has touched, the
 		// same retraction a pool correction's reopen applies
 		// (applyRequalification). The bronze match has no downstream.
-		if m == next {
-			retractIntoUntouched(bracket, rIdx+1, mIdx/2)
+		if m == d.next {
+			retractIntoUntouched(bracket, d.feed.R+1, d.feed.M/2)
 		}
 	}
 	return reopened
@@ -3158,11 +3148,12 @@ func guardDownstreamKnockoutCorrection(bracket *state.Bracket, rIdx, mIdx int, b
 	if !changed {
 		return nil
 	}
-	blocking := firstDownstreamWithOwnResult(bracket, rIdx, mIdx)
+	d := propagatedDownstreamOf(bracket, rIdx, mIdx)
+	blocking := d.played()
 	if len(blocking) == 0 {
 		return nil
 	}
-	return newDownstreamKnockoutPlayedError(bm, blocking, mIdx)
+	return newDownstreamKnockoutPlayedError(bm, blocking, d.displacedSlot(blocking, mIdx))
 }
 
 func (e *Engine) propagateBracketWinner(bracket *state.Bracket, rIdx, mIdx int) {
@@ -3349,11 +3340,12 @@ func guardOverrideDownstreamKnockoutCorrection(bracket *state.Bracket, rIdx, mId
 	if !changed {
 		return nil
 	}
-	blocking := firstDownstreamWithOwnResult(bracket, rIdx, mIdx)
+	d := propagatedDownstreamOf(bracket, rIdx, mIdx)
+	blocking := d.played()
 	if len(blocking) == 0 {
 		return nil
 	}
-	return newDownstreamKnockoutPlayedError(m, blocking, mIdx)
+	return newDownstreamKnockoutPlayedError(m, blocking, d.displacedSlot(blocking, mIdx))
 }
 
 // OverrideBracketWinner atomically loads the bracket, locates the

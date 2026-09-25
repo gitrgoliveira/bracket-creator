@@ -1267,13 +1267,10 @@ function withdrawalInForce(m) {
   // 409 already_ineligible, which is why that panel writes fusensho
   // instead): same default-win outcome as a kiken/fusenpai on this match, so
   // it belongs in the same "a recorded withdrawal decided this" class as
-  // isWithdrawalDecision's kiken/fusenpai, not a separate one. isWithdrawalDecision
-  // (api_serializers.jsx) itself stays narrow on purpose (it also answers for
-  // a TEAM match's per-BOUT fusensho, which is not a whole-match verdict);
-  // this question is scoped to the match-level default-win class alone,
-  // isTeamDefaultWinDecision (team_default_credit.jsx), THE one JS owner of
-  // it (bc-cse) -- kiken/fusenpai/fusensho are exactly that class, so this no
-  // longer ORs isWithdrawalDecision with a separate fusensho arm.
+  // kiken/fusenpai, not a separate one. So this asks the match-level
+  // default-win class, whose one JS owner is isTeamDefaultWinDecision
+  // (team_default_credit.jsx), rather than ORing a fusensho arm onto a
+  // narrower kiken/fusenpai check.
   return m.status === "completed" && isTeamDefaultWinDecision(m.decision);
 }
 

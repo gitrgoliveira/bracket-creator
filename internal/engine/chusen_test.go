@@ -41,8 +41,9 @@ func TestChusenCandidates_CycleNeedsChusen(t *testing.T) {
 		return sideA
 	})
 
-	cands, err := eng.ChusenCandidates(compID)
+	report, err := eng.ChusenStatus(compID)
 	require.NoError(t, err)
+	cands := report.Pending
 	require.Len(t, cands, 1, "an unresolved 3-way daihyosen cycle needs a chusen")
 	assert.Equal(t, "Pool A", cands[0].PoolName)
 	assert.Len(t, cands[0].Teams, 3)
@@ -65,8 +66,9 @@ func TestChusenCandidates_StrictOrderNeedsNoChusen(t *testing.T) {
 		return "Beta"
 	})
 
-	cands, err := eng.ChusenCandidates(compID)
+	report, err := eng.ChusenStatus(compID)
 	require.NoError(t, err)
+	cands := report.Pending
 	assert.Empty(t, cands, "a strictly-ordered daihyosen needs no chusen")
 }
 
@@ -107,8 +109,9 @@ func TestChusenCandidates_ResolvedByOverride(t *testing.T) {
 	eng.standingsCache.Delete(compID)
 	eng.standingsFlight.Delete(compID)
 
-	cands, err := eng.ChusenCandidates(compID)
+	report, err := eng.ChusenStatus(compID)
 	require.NoError(t, err)
+	cands := report.Pending
 	assert.Empty(t, cands, "a chusen recorded as a full rank override clears the candidate")
 }
 
@@ -235,8 +238,9 @@ func TestChusenCandidates_NonTeamHasNone(t *testing.T) {
 		ID: "chusen-indiv", Name: "Individual", Format: state.CompFormatLeague,
 		Status: state.CompStatusPools, Courts: []string{"A"}, TeamSize: 0,
 	}))
-	cands, err := eng.ChusenCandidates("chusen-indiv")
+	report, err := eng.ChusenStatus("chusen-indiv")
 	require.NoError(t, err)
+	cands := report.Pending
 	assert.Empty(t, cands)
 }
 
@@ -266,8 +270,9 @@ func TestChusenCandidates_PartialRoundNotPremature(t *testing.T) {
 	eng.standingsCache.Delete(compID)
 	eng.standingsFlight.Delete(compID)
 
-	cands, err := eng.ChusenCandidates(compID)
+	report, err := eng.ChusenStatus(compID)
 	require.NoError(t, err)
+	cands := report.Pending
 	assert.Empty(t, cands, "chusen must not surface mid-round (only 1 of 3 DH bouts scored)")
 }
 
@@ -296,8 +301,9 @@ func TestChusenCandidates_AllDrawnNeedsChusen(t *testing.T) {
 	eng.standingsCache.Delete(compID)
 	eng.standingsFlight.Delete(compID)
 
-	cands, err := eng.ChusenCandidates(compID)
+	report, err := eng.ChusenStatus(compID)
 	require.NoError(t, err)
+	cands := report.Pending
 	require.Len(t, cands, 1, "an all-drawn daihyosen round leaves the order undetermined -> chusen")
 }
 
@@ -345,8 +351,9 @@ func TestChusenCandidates_PartialTieWithoutCycleNeedsChusen(t *testing.T) {
 	// Final daihyosen wins: Alpha=3, Beta=1, Gamma=1, Delta=0 - a duplicate at
 	// 1 with no cyclic relationship anywhere in the results.
 
-	cands, err := eng.ChusenCandidates(compID)
+	report, err := eng.ChusenStatus(compID)
 	require.NoError(t, err)
+	cands := report.Pending
 	require.Len(t, cands, 1, "Beta and Gamma tie on daihyosen wins with no cycle present -> still needs chusen")
 	assert.Len(t, cands[0].Teams, 4)
 }
@@ -448,14 +455,14 @@ func TestChusen_KnockoutStatus_SeatsTheSlotAndStaysFixable(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, state.CompStatusKnockout, comp.Status)
 
-	cands, err := f.eng.ChusenCandidates(f.compID)
+	report, err := f.eng.ChusenStatus(f.compID)
 	require.NoError(t, err)
-	require.Len(t, cands, 1, "the chusen is offered in knockout status")
-	assert.Equal(t, "Pool A", cands[0].PoolName)
-	assert.Len(t, cands[0].Teams, 3)
+	require.Len(t, report.Pending, 1, "the chusen is offered in knockout status")
+	assert.Equal(t, "Pool A", report.Pending[0].PoolName)
+	assert.Len(t, report.Pending[0].Teams, 3)
 
 	for rank, team := range []string{"Alpha", "Beta", "Gamma"} {
-		changed, oerr := f.eng.OverridePoolRank(f.compID, "Pool A", rqID(team), rank+1)
+		changed, oerr := f.eng.OverridePoolRanks(f.compID, "Pool A", []RankOverride{{PlayerID: rqID(team), Rank: rank + 1}})
 		require.NoError(t, oerr)
 		assert.True(t, changed)
 	}
@@ -465,11 +472,9 @@ func TestChusen_KnockoutStatus_SeatsTheSlotAndStaysFixable(t *testing.T) {
 	name, id := sideOf(final, side)
 	assert.Equal(t, "Alpha", name, "the chusen seats the slot")
 	assert.Equal(t, rqID("Alpha"), id)
-	cands, err = f.eng.ChusenCandidates(f.compID)
+	report, err = f.eng.ChusenStatus(f.compID)
 	require.NoError(t, err)
-	assert.Empty(t, cands, "the recorded chusen clears the candidate")
-	report, err := f.eng.ChusenStatus(f.compID)
-	require.NoError(t, err)
+	assert.Empty(t, report.Pending, "the recorded chusen clears the candidate")
 	require.Len(t, report.Recorded, 1, "the recorded chusen is still reported in knockout status, so it can be changed")
 	assert.Equal(t, []string{"Alpha", "Beta", "Gamma"}, chusenTeamNames(report.Recorded[0]))
 	assert.Equal(t, []int{1, 2, 3}, report.Recorded[0].Ranks)
@@ -477,7 +482,7 @@ func TestChusen_KnockoutStatus_SeatsTheSlotAndStaysFixable(t *testing.T) {
 	// The final is fought, then the chusen turns out to have been misrecorded:
 	// Alpha drew 3rd, so Beta (2nd) holds Pool A's 1st place.
 	require.NoError(t, f.scoreKO(final.ID, "Alpha"))
-	_, err = f.eng.OverridePoolRank(f.compID, "Pool A", rqID("Alpha"), 3)
+	_, err = f.eng.OverridePoolRanks(f.compID, "Pool A", []RankOverride{{PlayerID: rqID("Alpha"), Rank: 3}})
 	var played *DownstreamKnockoutPlayedError
 	require.ErrorAs(t, err, &played)
 	require.Len(t, played.Blocking, 1)
@@ -487,7 +492,7 @@ func TestChusen_KnockoutStatus_SeatsTheSlotAndStaysFixable(t *testing.T) {
 	assert.Equal(t, 1, o.PoolRanks["Pool A"]["id:"+rqID("Alpha")], "the refused override is taken back")
 
 	var reopened []ReopenedMatch
-	changed, err := f.eng.OverridePoolRank(f.compID, "Pool A", rqID("Alpha"), 3, ForceOptions{Force: true, Reopened: &reopened})
+	changed, err := f.eng.OverridePoolRanks(f.compID, "Pool A", []RankOverride{{PlayerID: rqID("Alpha"), Rank: 3}}, ForceOptions{Force: true, Reopened: &reopened})
 	require.NoError(t, err)
 	assert.True(t, changed)
 	require.Len(t, reopened, 1)
@@ -497,4 +502,108 @@ func TestChusen_KnockoutStatus_SeatsTheSlotAndStaysFixable(t *testing.T) {
 	name, id = sideOf(*got, side)
 	assert.Equal(t, "Beta", name, "the corrected chusen seats the new 1st")
 	assert.Equal(t, rqID("Beta"), id)
+}
+
+// Changing a recorded chusen is ONE write, answered for on the final order.
+// Two qualifiers per pool, a three-way tie in Pool A recorded Alpha 1st, Beta
+// 2nd, Gamma 3rd, and the knockout matches both of Pool A's places feed
+// already fought. The lots were misread: the real order is Gamma, Beta,
+// Alpha. Only 1st place changes hands, so only its match may be named.
+//
+// Set one rank at a time, the first write (Alpha 3rd) leaves Alpha and Gamma
+// tied on 3 behind Beta: Beta read as 1st and 2nd place as moved too, so the
+// operator was asked to reopen BOTH fought matches and, confirming, had the
+// 2nd-place result cleared although Beta keeps 2nd. Declining left Alpha's
+// new rank recorded on its own.
+func TestOverridePoolRanks_ChangingAChusenNamesOnlyTheRealMove(t *testing.T) {
+	f := newRQFixture(t, "chusen-change", 2, [][]string{{"Alpha", "Beta", "Gamma"}, {"Delta", "Epsilon"}},
+		func(c *state.Competition) { c.Kind, c.TeamSize = "team", 2 })
+	for _, id := range []string{"Pool A-0", "Pool A-1", "Pool A-2"} {
+		m := loadPoolMatchByID(t, f.store, f.compID, id)
+		require.NoError(t, f.write(id, &state.MatchResult{
+			SideA: m.SideA, SideB: m.SideB, SideAID: m.SideAID, SideBID: m.SideBID,
+			Status: state.MatchStatusCompleted, Decision: string(domain.DecisionHikiwake),
+		}))
+	}
+	f.scorePool("Pool B-0", "Delta")
+	_, err := f.eng.MaybeAutoCompletePools(f.compID)
+	require.NoError(t, err)
+	// The daihyosen cycles: Alpha > Beta, Beta > Gamma, Gamma > Alpha.
+	scoreInjectedDH(t, f.eng, f.store, f.compID, func(sideA, sideB string) string {
+		pair := map[string]bool{sideA: true, sideB: true}
+		switch {
+		case pair["Alpha"] && pair["Beta"]:
+			return "Alpha"
+		case pair["Beta"] && pair["Gamma"]:
+			return "Beta"
+		}
+		return "Gamma"
+	})
+	report, err := f.eng.ChusenStatus(f.compID)
+	require.NoError(t, err)
+	require.Len(t, report.Pending, 1, "the cycle needs a chusen")
+
+	ranks := func(alpha, beta, gamma int) []RankOverride {
+		return []RankOverride{{rqID("Alpha"), alpha}, {rqID("Beta"), beta}, {rqID("Gamma"), gamma}}
+	}
+	recorded := func() map[string]int {
+		o, lerr := f.store.LoadOverrides(f.compID)
+		require.NoError(t, lerr)
+		return o.PoolRanks["Pool A"]
+	}
+	want := func(alpha, beta, gamma int) map[string]int {
+		return map[string]int{"id:" + rqID("Alpha"): alpha, "id:" + rqID("Beta"): beta, "id:" + rqID("Gamma"): gamma}
+	}
+
+	changed, err := f.eng.OverridePoolRanks(f.compID, "Pool A", ranks(1, 2, 3))
+	require.NoError(t, err)
+	require.True(t, changed)
+	outcome, err := f.eng.MaybeAutoCompletePools(f.compID)
+	require.NoError(t, err)
+	require.Equal(t, AutoCompleteKnockoutStarted, outcome)
+	first, firstSide := f.slot("Pool A-1st")
+	second, secondSide := f.slot("Pool A-2nd")
+	require.NotEqual(t, first.ID, second.ID)
+	name, _ := sideOf(first, firstSide)
+	require.Equal(t, "Alpha", name)
+	name, _ = sideOf(second, secondSide)
+	require.Equal(t, "Beta", name)
+	require.NoError(t, f.scoreKO(first.ID, "Alpha"))
+	require.NoError(t, f.scoreKO(second.ID, "Beta"))
+
+	// Refused: only 1st place moves, so only its match is named, and every
+	// rank of the group stays as it was recorded.
+	changed, err = f.eng.OverridePoolRanks(f.compID, "Pool A", ranks(3, 2, 1))
+	assert.False(t, changed)
+	var played *DownstreamKnockoutPlayedError
+	require.ErrorAs(t, err, &played)
+	require.Len(t, played.Blocking, 1, "the 2nd-place match keeps Beta and is not named")
+	assert.Equal(t, first.ID, played.Blocking[0].ID)
+	require.Len(t, played.QualifierChange, 1)
+	assert.Equal(t, 1, played.QualifierChange[0].Rank)
+	assert.Equal(t, QualifierIdentity{Name: "Alpha", ID: rqID("Alpha")}, played.QualifierChange[0].From)
+	assert.Equal(t, QualifierIdentity{Name: "Gamma", ID: rqID("Gamma")}, played.QualifierChange[0].To)
+	assert.Equal(t, want(1, 2, 3), recorded(), "the refusal takes back every rank of the group")
+	for _, id := range []string{first.ID, second.ID} {
+		assert.Equal(t, state.MatchStatusCompleted, findBracketMatchInBracket(f.bracket(), id).Status, "nothing reopened before the operator confirms")
+	}
+
+	// Confirmed: the 1st-place match reopens with Gamma seated; the
+	// 2nd-place match keeps its result.
+	var reopened []ReopenedMatch
+	changed, err = f.eng.OverridePoolRanks(f.compID, "Pool A", ranks(3, 2, 1), ForceOptions{Force: true, Reopened: &reopened})
+	require.NoError(t, err)
+	assert.True(t, changed)
+	assert.Equal(t, want(3, 2, 1), recorded())
+	require.Len(t, reopened, 1)
+	assert.Equal(t, first.ID, reopened[0].ID)
+	b := f.bracket()
+	got := findBracketMatchInBracket(b, first.ID)
+	assert.Equal(t, state.MatchStatusScheduled, got.Status)
+	name, id := sideOf(*got, firstSide)
+	assert.Equal(t, "Gamma", name)
+	assert.Equal(t, rqID("Gamma"), id)
+	kept := findBracketMatchInBracket(b, second.ID)
+	assert.Equal(t, state.MatchStatusCompleted, kept.Status, "Beta keeps 2nd, so its fought match keeps its result")
+	assert.Equal(t, "Beta", kept.Winner)
 }

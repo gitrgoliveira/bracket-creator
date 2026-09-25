@@ -1004,7 +1004,7 @@ func CanGenerateDraw(status CompetitionStatus) bool {
 // that the daihyosen cannot settle, and a chusen recorded by mistake has to
 // stay fixable (operator ruling: "Everything should be able to be fixed, in
 // case of a wrong entry"); what the new order does to the knockout is
-// answered by engine.OverridePoolRank's requalification. The one statement of
+// answered by engine.OverridePoolRanks' requalification. The one statement of
 // this rule, shared by the override-rank door and engine.ChusenStatus, so
 // the chusen panel is never offered a tie the door would refuse.
 func (c Competition) AcceptsPoolRankOverride() bool {

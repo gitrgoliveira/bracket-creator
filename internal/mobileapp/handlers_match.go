@@ -693,6 +693,17 @@ func RegisterMatchHandlers(r *gin.RouterGroup, eng *engine.Engine, store Competi
 		}
 		allowNumberedEncho := allowNumberedEnchoFromStore(store, id, batchHasNumberedEncho)
 
+		// bc-cse finding 13: the team finish gate's competition record is
+		// the SAME for every entry in this batch (one compID), so it is
+		// loaded ONCE here rather than once per entry the way a call
+		// through refuseUnfinishedTeamFinish would (mirrors the
+		// allowNumberedEncho resolve-once just above). A load failure is
+		// deterministic (same store, same id) so it would have failed
+		// identically for every entry under the old per-entry call too;
+		// compErr is propagated to each entry that reaches the gate below,
+		// exactly as an independent per-entry failure would have.
+		comp, compErr := store.LoadCompetition(id)
+
 		for i := range results {
 			// A stamp implausibly far in the future is refused per-entry, before
 			// this entry reaches the engine (see modifiedAtRefuseSkewMs). The
@@ -738,11 +749,18 @@ func RegisterMatchHandlers(r *gin.RouterGroup, eng *engine.Engine, store Competi
 			// it lands in errs naming the bouts, nothing is written for it,
 			// and the rest of the batch is unaffected (this endpoint is
 			// always 200, partial success).
-			finishRefusal, finishErr := refuseUnfinishedTeamFinish(store, id, results[i].ID, &results[i].MatchResult)
-			if finishErr != nil {
-				errs = append(errs, scoreError{MatchID: results[i].ID, Error: finishErr.Error()})
+			//
+			// bc-cse finding 13: routed through refuseUnfinishedTeamFinishForComp
+			// against the ONE comp loaded above the loop, rather than a call
+			// through refuseUnfinishedTeamFinish that would reload it for
+			// every entry. compErr mirrors what an independent per-entry
+			// LoadCompetition failure would have done (same store, same id,
+			// so a deterministic failure recurs identically for every entry).
+			if compErr != nil {
+				errs = append(errs, scoreError{MatchID: results[i].ID, Error: compErr.Error()})
 				continue
 			}
+			finishRefusal := refuseUnfinishedTeamFinishForComp(comp, results[i].ID, &results[i].MatchResult)
 
 			// mp-ic5b: the correction-reason gate and the write run under the
 			// same per-comp lock so the status read is race-free against a
@@ -997,19 +1015,50 @@ func RegisterMatchHandlers(r *gin.RouterGroup, eng *engine.Engine, store Competi
 			Status:     state.MatchStatusCompleted,
 			SubResults: subResults,
 		}
+		// The team finish gate (every bout of a non-kachinuki team match has a
+		// result or a decision) sees the rows this endpoint is about to store,
+		// as it does for /score and bulk-score, with the same exemption for a
+		// correction that keeps a recorded withdrawal (teamFinishRefusalUnderTx,
+		// read under the lock the write holds).
+		finishRefusal := refuseUnfinishedTeamFinishForComp(comp, mid, &result)
 		// bc-kcdg: reopenedDownstream collects the IDs of any downstream
 		// bracket match reopened by a forced correction, populated only when
 		// req.ForceDownstreamReopen actually unblocked one. Switched from the
 		// plain RecordMatchResult (which hard-refuses the downstream-knockout-
 		// correction guard with no override, see writeMatchResult's doc
-		// comment) to RecordMatchResultWithIneligibility, the same primitive
+		// comment) to RecordMatchResultWithIneligibilityTx, the same primitive
 		// /score and bulk-score already use, so this endpoint can honour the
 		// force flag at all.
-		var reopenedDownstream []engine.ReopenedMatch
-		engStatus, err := eng.RecordMatchResultWithIneligibility(id, mid, &result, engine.ForceOptions{
-			Force:    req.ForceDownstreamReopen,
-			Reopened: &reopenedDownstream,
+		var (
+			reopenedDownstream []engine.ReopenedMatch
+			engStatus          *domain.CompetitorStatus
+			refusal            *ValidationError
+		)
+		txErr := tx.WithTransaction(id, func(stx state.StoreTx) error {
+			if finishRefusal != nil {
+				snap, _, snapErr := matchSnapshotOrErr(stx, id, mid, "team-finish")
+				if snapErr != nil {
+					return snapErr
+				}
+				check := correctionCheck{StoredStatus: snap.Status, StoredDecision: snap.Decision}
+				if refusal = teamFinishRefusalUnderTx(finishRefusal, check, &result); refusal != nil {
+					return nil
+				}
+			}
+			engStatus, err = eng.RecordMatchResultWithIneligibilityTx(stx, id, mid, &result, engine.ForceOptions{
+				Force:    req.ForceDownstreamReopen,
+				Reopened: &reopenedDownstream,
+			})
+			return nil
 		})
+		if txErr != nil {
+			internalError(c, txErr)
+			return
+		}
+		if refusal != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": refusal.Error()})
+			return
+		}
 		if err != nil {
 			if errors.Is(err, engine.ErrMatchSuperseded) {
 				// bc-lww1. Unreachable from today's SPA (this endpoint's payload
@@ -1268,10 +1317,6 @@ func RegisterMatchHandlers(r *gin.RouterGroup, eng *engine.Engine, store Competi
 				// bc-cse: someone is fighting the downstream match right
 				// now -- 409 downstream_knockout_running, the SAME shape
 				// the pool-requalification refusal already uses.
-			case respondIfReopenDownstreamResolved(c, err):
-				// bc-cse: a downstream match auto-completed by a bye, not
-				// by being fought -- 409 downstream_knockout_resolved,
-				// terminal (never confirmable with forceDownstreamReopen).
 			case respondIfDownstreamKnockoutPlayed(c, err):
 				// A downstream knockout match has its own result: the
 				// operator is told and may retry with forceDownstreamReopen.
@@ -1420,9 +1465,6 @@ func RegisterMatchHandlers(r *gin.RouterGroup, eng *engine.Engine, store Competi
 			case respondIfDownstreamKnockoutRunning(c, err):
 				// bc-cse: same pre-check timing note as ErrReopenNotCompleted
 				// above; someone is fighting the downstream match right now.
-			case respondIfReopenDownstreamResolved(c, err):
-				// bc-cse: same pre-check timing note; a downstream match
-				// auto-completed by a bye, not by being fought.
 			case errors.Is(err, engine.ErrReopenDownstreamFought):
 				// Defensive backstop only; see the plain-reopen handler's
 				// identical case for why this should not be reachable

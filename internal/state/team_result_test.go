@@ -393,24 +393,60 @@ func TestPadDefaultWinBoutPositions(t *testing.T) {
 		}
 	})
 
-	t.Run("only missing positions are appended; existing rows are untouched", func(t *testing.T) {
+	t.Run("only missing positions are appended; existing rows are untouched, output ordered by Position", func(t *testing.T) {
 		existing := []SubMatchResult{
 			{Position: 1, Winner: "P1", IpponsA: []string{"M"}},
 			{Position: 3, Winner: "P3", IpponsA: []string{"K"}},
 		}
 		got := PadDefaultWinBoutPositions(existing, 3)
 		require.Len(t, got, 3)
+		// bc-cse finding 12: the output is ordered by Position ascending
+		// (1, 2, 3), not append order (1, 3, then the padded 2 tacked on at
+		// the end) -- TeamScoreboard reads a bout's lineup name by its ARRAY
+		// INDEX, so an out-of-position array put the wrong fighter's name on
+		// a scored row.
 		assert.Equal(t, existing[0], got[0], "position 1 is untouched")
-		assert.Equal(t, existing[1], got[1], "position 3 is untouched")
-		assert.Equal(t, SubMatchResult{Position: 2}, got[2], "only the missing position 2 is appended")
+		assert.Equal(t, SubMatchResult{Position: 2}, got[1], "the missing position 2 is appended IN ORDER, not at the end")
+		assert.Equal(t, existing[1], got[2], "position 3 is untouched")
 	})
 
-	t.Run("the daihyosen row (position < 1) is never padded and never counted as present for a real position", func(t *testing.T) {
+	t.Run("the daihyosen row (position < 1) is never padded, never counted as present for a real position, and sorts AFTER every numbered position", func(t *testing.T) {
 		got := PadDefaultWinBoutPositions([]SubMatchResult{{Position: DaihyosenSubPosition, Winner: "P1"}}, 2)
 		require.Len(t, got, 3, "the daihyosen row plus positions 1 and 2 padded")
-		assert.Equal(t, DaihyosenSubPosition, got[0].Position)
-		assert.Equal(t, 1, got[1].Position)
-		assert.Equal(t, 2, got[2].Position)
+		// bc-cse finding 12: never a plain Position sort of the whole slice,
+		// which would put -1 first; the daihyosen row keeps its place AFTER
+		// the numbered block instead.
+		assert.Equal(t, 1, got[0].Position)
+		assert.Equal(t, 2, got[1].Position)
+		assert.Equal(t, DaihyosenSubPosition, got[2].Position)
+		assert.Equal(t, "P1", got[2].Winner, "the daihyosen row's own data is untouched, only moved")
+	})
+
+	t.Run("bc-cse finding 12: a single stored row at position 2 of 5 is ordered 1..5, not [2,1,3,4,5]", func(t *testing.T) {
+		existing := []SubMatchResult{
+			{Position: 2, Winner: "P2", IpponsA: []string{"M", "K"}},
+		}
+		got := PadDefaultWinBoutPositions(existing, 5)
+		require.Len(t, got, 5)
+		for i, want := range []int{1, 2, 3, 4, 5} {
+			assert.Equal(t, want, got[i].Position, "row %d", i)
+		}
+		assert.Equal(t, existing[0], got[1], "position 2's own recorded row lands at array index 1, not index 0")
+		for i, idx := range []int{0, 2, 3, 4} {
+			assert.False(t, got[idx].HasResult(), "position %d is a placeholder", i)
+		}
+	})
+
+	t.Run("bc-cse finding 12: a stored numbered row plus a daihyosen row -- the DH row moves after the numbered block", func(t *testing.T) {
+		existing := []SubMatchResult{
+			{Position: DaihyosenSubPosition, Winner: "TeamA"},
+			{Position: 2, Winner: "P2", IpponsA: []string{"M", "K"}},
+		}
+		got := PadDefaultWinBoutPositions(existing, 3)
+		require.Len(t, got, 4, "positions 1..3 plus the daihyosen row")
+		assert.Equal(t, []int{1, 2, 3, DaihyosenSubPosition}, []int{got[0].Position, got[1].Position, got[2].Position, got[3].Position})
+		assert.Equal(t, existing[1], got[1], "position 2's own recorded row is untouched, only reordered")
+		assert.Equal(t, existing[0], got[3], "the daihyosen row's own data is untouched, only moved to the end")
 	})
 
 	t.Run("teamSize 0 pads nothing", func(t *testing.T) {
@@ -419,7 +455,7 @@ func TestPadDefaultWinBoutPositions(t *testing.T) {
 		assert.Equal(t, existing, got)
 	})
 
-	t.Run("already fully present is a no-op", func(t *testing.T) {
+	t.Run("already fully present is a no-op: no padding needed means no reordering either", func(t *testing.T) {
 		existing := []SubMatchResult{{Position: 1}, {Position: 2}}
 		got := PadDefaultWinBoutPositions(existing, 2)
 		assert.Equal(t, existing, got)

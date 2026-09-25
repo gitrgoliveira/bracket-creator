@@ -133,17 +133,17 @@ func reasonHumanForBarredCompetitor(store CompetitionStore, compID, thisMatchID,
 	if name == "" {
 		return fallback
 	}
-	comp, err := store.LoadCompetition(compID)
-	if err != nil || comp == nil {
-		return fallback
-	}
-	// A bracket-load failure degrades the LABEL (OperatorMatchLabel falls
-	// back to the bare match id with a nil bracket) rather than the whole
-	// sentence: the barring match is very unlikely to be a knockout one
-	// anyway (a withdrawal is almost always recorded in the pool phase), and
-	// even a bare id beats the generic fallback losing the name/remedy too.
-	bracket, _ := store.LoadBracket(compID)
-	label := engine.OperatorMatchLabel(comp, bracket, barringMatchID)
+	// matchLabelOrID (== engine.OperatorMatchLabelFromStore) loads the
+	// competition and the bracket itself, degrading -- and LOGGING -- a
+	// LoadBracket failure to a pool-phase-only label rather than losing the
+	// sentence's name/remedy: the barring match is very unlikely to be a
+	// knockout one anyway (a withdrawal is almost always recorded in the
+	// pool phase), and even a bare id beats the generic fallback losing the
+	// name/remedy too. bc-cse finding 7: this used to hand-roll that same
+	// load-then-degrade sequence, with the LoadBracket error discarded via
+	// a blank identifier (an errcheck violation) and a second, unlogged copy
+	// of what OperatorMatchLabelFromStore already does.
+	label := matchLabelOrID(store, compID, barringMatchID)
 	return barredCompetitorSentence(name, label, decision, opponent)
 }
 
@@ -398,29 +398,6 @@ func blockedMatchesPayload(blocking []engine.ReopenedMatch) []map[string]any {
 		out = append(out, map[string]any{"id": b.ID, "number": b.Number, "label": engine.MatchLabel(b)})
 	}
 	return out
-}
-
-// respondIfReopenDownstreamResolved maps *engine.ReopenDownstreamResolvedError
-// (bc-cse) onto the same wire SHAPE as respondIfDownstreamKnockoutRunning
-// (matchId, the blocked matches, and message), under its own `error` code
-// since it is a different refusal with a different remedy: a downstream
-// match auto-completed by a bye, not one being fought, so there is nothing
-// to finish or requeue. Terminal, like the running case: never confirmable
-// with forceDownstreamReopen. A 409, never a 5xx, so the offline write
-// queue drops a replay that meets it instead of retrying it forever
-// (mp-q8c6).
-func respondIfReopenDownstreamResolved(c *gin.Context, err error) bool {
-	var resolvedErr *engine.ReopenDownstreamResolvedError
-	if !errors.As(err, &resolvedErr) {
-		return false
-	}
-	c.JSON(http.StatusConflict, gin.H{
-		"error":           "downstream_knockout_resolved",
-		"matchId":         resolvedErr.MatchID,
-		"resolvedMatches": blockedMatchesPayload(resolvedErr.Resolved),
-		"message":         resolvedErr.Error(),
-	})
-	return true
 }
 
 // broadcastReopenedDownstream announces the downstream matches a confirmed

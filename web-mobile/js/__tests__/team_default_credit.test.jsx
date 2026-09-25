@@ -17,17 +17,57 @@ describe('isTeamDefaultWinDecision: the default-win decision class', () => {
   });
 });
 
-describe('creditedSideKey: the OTHER side from decisionBy', () => {
+describe('creditedSideKey: the OTHER side from decisionBy, else the winner (bc-cse #9)', () => {
   it('shiro withdrew -> aka (sideA) is credited', () => {
-    expect(creditedSideKey('shiro')).toBe('a');
+    expect(creditedSideKey({ decisionBy: 'shiro' })).toBe('a');
   });
   it('aka withdrew -> shiro (sideB) is credited', () => {
-    expect(creditedSideKey('aka')).toBe('b');
+    expect(creditedSideKey({ decisionBy: 'aka' })).toBe('b');
   });
-  it('returns "" for a missing/unrecognised decisionBy', () => {
-    expect(creditedSideKey('')).toBe('');
+  it('returns "" for a missing/unrecognised decisionBy and no winner to fall back to', () => {
+    expect(creditedSideKey({ decisionBy: '' })).toBe('');
+    expect(creditedSideKey({ decisionBy: undefined })).toBe('');
+    expect(creditedSideKey({ decisionBy: 'nonsense' })).toBe('');
     expect(creditedSideKey(undefined)).toBe('');
-    expect(creditedSideKey('nonsense')).toBe('');
+  });
+  it('decisionBy wins when set, even with a winner attribution present (Go: decisionBy checked first)', () => {
+    expect(creditedSideKey({
+      decisionBy: 'shiro',
+      winner: { id: 'p-shiro', name: 'Shiro Competitor' },
+      sideA: { id: 'p-aka', name: 'Aka Competitor' },
+      sideB: { id: 'p-shiro', name: 'Shiro Competitor' },
+    })).toBe('a');
+  });
+  it('empty decisionBy falls back to the winner side by id (legacy row, mirrors Go AttributeWinnerSide)', () => {
+    expect(creditedSideKey({
+      decisionBy: '',
+      winner: { id: 'p-aka' },
+      sideA: { id: 'p-aka', name: 'Aka Competitor' },
+      sideB: { id: 'p-shiro', name: 'Shiro Competitor' },
+    })).toBe('a');
+    expect(creditedSideKey({
+      decisionBy: '',
+      winner: { id: 'p-shiro' },
+      sideA: { id: 'p-aka', name: 'Aka Competitor' },
+      sideB: { id: 'p-shiro', name: 'Shiro Competitor' },
+    })).toBe('b');
+  });
+  it('empty decisionBy falls back to the winner side by name when no ids are present', () => {
+    expect(creditedSideKey({
+      decisionBy: '',
+      winner: 'Aka Competitor',
+      sideA: 'Aka Competitor',
+      sideB: 'Shiro Competitor',
+    })).toBe('a');
+  });
+  it('returns "" when neither decisionBy nor the winner attribution can name a side', () => {
+    expect(creditedSideKey({ decisionBy: '', winner: '', sideA: 'Aka Competitor', sideB: 'Shiro Competitor' })).toBe('');
+    expect(creditedSideKey({
+      decisionBy: '',
+      winner: { id: 'someone-else' },
+      sideA: { id: 'p-aka', name: 'Aka Competitor' },
+      sideB: { id: 'p-shiro', name: 'Shiro Competitor' },
+    })).toBe('');
   });
 });
 

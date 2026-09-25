@@ -5858,7 +5858,7 @@ func TestDeleteOverridesHandler_CorruptOverrides_ForceRepairs(t *testing.T) {
 }
 
 // TestChusenCandidatesHandler_CorruptOverrides_TerminalError is bc-pnum gap 3:
-// GET /api/competitions/:id/chusen-candidates calls engine.ChusenCandidates,
+// GET /api/competitions/:id/chusen-candidates calls engine.ChusenStatus,
 // which loads overrides.json directly (and also indirectly via
 // CalculatePoolStandings). Before this fix an unmapped state.ErrCorruptOverrides
 // fell through to the handler's own opaque-500 branch; the fix maps it to the

@@ -360,7 +360,7 @@ export function TWMatch({ m, highlight, onClick }) {
         {/* Side by CELL TINT, matching the admin twin in admin_schedule_page.jsx
             (bc-sccl); the S/A squares are gone and sr-only labels carry the side
             in text. */}
-        {/* bc-cse: teamNameMark (the ELEMENT form), not teamNameMarkStr --
+        {/* bc-cse: teamNameMark puts the mark in its own ELEMENT --
             baking the mark into the plain string left it inside the SAME
             text run .tw-match__name ellipsises, so a long name clipped it
             away exactly like the other three hosts fixed alongside this one

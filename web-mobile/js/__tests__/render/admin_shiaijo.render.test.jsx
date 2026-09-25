@@ -640,6 +640,64 @@ describe('AdminShiaijoPage render-smoke', () => {
     }
   });
 
+  // bc-cse #6: a reopen does not always land on "running". A match-level
+  // fusensho whose decisionBy side is STILL barred by an earlier, unrelated
+  // withdrawal reopens to "scheduled" instead (engine.reopenTargetStatus):
+  // starting it straight into "running" would strand the operator behind
+  // the eligibility gate. The correction must still end, or the panel stays
+  // pinned to the now-cleared correction and hides whatever the court's
+  // normal view would show -- here, the OTHER match already running on this
+  // same court -- until a reload.
+  it('a correction cleared to "scheduled" (still-barred fusensho) releases the panel back to the running bout', async () => {
+    const side = (id, name) => ({ id, name });
+    const m1 = {
+      id: 'm1', compId: 'c1', compName: 'Cup', status: 'completed', phase: 'pool', poolName: 'Pool A',
+      court: 'A', scheduledAt: '09:00', modifiedAt: 1000,
+      sideA: side('p1', 'Yamada'), sideB: side('p2', 'Tanaka'), winner: side('p1', 'Yamada'),
+      decision: 'fusensho', decisionBy: 'aka',
+    };
+    const m2 = {
+      id: 'm2', compId: 'c1', compName: 'Cup', status: 'running', phase: 'pool', poolName: 'Pool A',
+      court: 'A', scheduledAt: '09:05', sideA: side('p3', 'Sato'), sideB: side('p4', 'Kato'),
+    };
+    let current = [m1, m2];
+    window.tournamentMatches = () => current;
+    window.filterMatchesByCourt = (matches) => matches;
+    const prevFetch = window.API.fetchCourtMatches;
+    const prevSub = window.API.subscribeToEvents;
+    const prevRevert = window.API.revertMatchToQueue;
+    window.API.fetchCourtMatches = vi.fn().mockImplementation(() => Promise.resolve([{ id: 'c1', name: 'Cup' }]));
+    window.API.subscribeToEvents = () => () => {};
+    window.API.revertMatchToQueue = vi.fn().mockResolvedValue(true);
+    try {
+      let utils;
+      await act(async () => { utils = renderPage(makeMinimalTournament()); });
+      const editorMatch = () => utils.getByTestId('score-editor').getAttribute('data-match');
+      const heading = () => utils.container.querySelector('.shiaijo-context__toggle').textContent;
+      const refresh = async () => { await act(async () => { utils.getByRole('button', { name: /refresh/i }).click(); }); };
+
+      await act(async () => { utils.getByRole('button', { name: /^correct$/i }).click(); });
+      expect(editorMatch()).toBe('m1');
+      expect(heading()).toContain('Correcting');
+
+      // Clear the withdrawal and reopen: the barred fusensho side is still
+      // barred elsewhere, so the server sends m1 to "scheduled", not
+      // "running" (m2 keeps running throughout, on the same court).
+      current = [{ ...m1, status: 'scheduled', decision: '', decisionBy: '', winner: undefined }, m2];
+      await refresh();
+
+      // The correction must end: the panel falls back to the court's
+      // normal view -- the running bout (m2) -- instead of staying pinned
+      // to m1.
+      expect(editorMatch(), "the panel must release m1 and follow the court's running bout").toBe('m2');
+      expect(heading()).not.toContain('Correcting');
+    } finally {
+      window.API.fetchCourtMatches = prevFetch;
+      window.API.subscribeToEvents = prevSub;
+      window.API.revertMatchToQueue = prevRevert;
+    }
+  });
+
   // UAT (bc-tmfn): a Start refused for an ineligible competitor
   // ("kiken-voluntary at Pool A-2") stayed on screen after the withdrawal was
   // cleared and eligibility restored, and after that match started it sat

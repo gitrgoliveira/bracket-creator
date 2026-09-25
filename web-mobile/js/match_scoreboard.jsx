@@ -761,17 +761,6 @@ export function teamNameMark(side, mark, nameEl) {
   return numberFollowsName(side) ? <>{markEl}{" "}{nameEl}</> : <>{nameEl}{" "}{markEl}</>;
 }
 
-// teamNameMarkStr: the plain-string twin of teamNameMark, for a cell that
-// renders withNumber's flat string rather than a NumberedName element
-// (dense list rows -- TWMatch, PoolNumberedMatchRow, the admin Scores row --
-// that already render a plain string inside a tinted cell, mirroring
-// withNumber/NumberedName's own split for the number chip). Same rule, same
-// INNER placement (opposite the number, toward the row's centre score).
-export function teamNameMarkStr(side, mark, nameStr) {
-  if (!mark) return nameStr;
-  return numberFollowsName(side) ? `${mark} ${nameStr}` : `${nameStr} ${mark}`;
-}
-
 export function TeamScoreboard({ subResults, teamResult, lineupA, lineupB, teamSize, showDH, variant, shiroName, akaName, matchSideA, matchSideB, isRunning, kachinuki, squadA, squadB, numberA, numberB, decision, decisionBy, status, shiroMark, akaMark }) {
   // Real numbered bouts only: exclude the daihyosen sentinel and any malformed
   // negative position (mirrors the Go-side defensive skip).

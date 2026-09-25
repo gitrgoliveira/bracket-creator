@@ -83,7 +83,7 @@ var ErrMismatchedTxCompID = errors.New("compID does not match transaction's comp
 // staged writes land. Every other WithTransaction error means nothing was
 // committed. The difference matters to a caller that did work OUTSIDE the
 // WAL inside fn (overrides.json, which serializes on the store-wide lock, see
-// engine.OverridePoolRank) and undoes it when the transaction fails: undoing
+// engine.OverridePoolRanks) and undoes it when the transaction fails: undoing
 // it after a commit would leave the replayed files describing a change the
 // undone file no longer holds. Test with errors.Is.
 var ErrTxCommitted = errors.New("transaction committed; its writes are replayed on restart")

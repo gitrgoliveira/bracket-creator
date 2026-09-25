@@ -196,8 +196,8 @@ function AdminPools({ c, pools, poolMatches, standings, tweaks, onEditScore, pas
   // Per-member input values: keys are "${groupKey}::${identity}" -> string,
   // where groupKey is "${poolName}::${minPosition}" and identity is
   // checkinPid(member) (id when non-empty, else "name|dojo") -- never
-  // the member's index in the group, which reorders after a partial write
-  // (bc-appx item 2), and never the bare display name, which two members
+  // the member's index in the group, whose order is the server's standings
+  // order and can change between fetches (bc-appx item 2), and never the bare display name, which two members
   // can share.
   const [chusenInputs, setChusenInputs] = useStateA({});
   // Per-group busy flag: keyed by groupKey "${poolName}::${minPosition}" -> bool
@@ -336,7 +336,7 @@ function AdminPools({ c, pools, poolMatches, standings, tweaks, onEditScore, pas
   };
 
   // chusenEntry renders one tie's position entry: the team inputs, their
-  // validation and the overridePoolRank writes. The pending banner uses it for
+  // validation and the overridePoolRanks write. The pending banner uses it for
   // a first chusen; the recorded panel reuses it (changing=true) to change a
   // chusen recorded in the wrong order, so both go through the same path and
   // the same knockout warning.
@@ -368,7 +368,7 @@ function AdminPools({ c, pools, poolMatches, standings, tweaks, onEditScore, pas
     const groupKey = `${poolName}::${minPosition}`;
     const isBusy = !!chusenBusy[groupKey];
     const groupErrMsg = chusenGroupErr[groupKey] || null;
-    // overridePoolRank requires playerId (operator ruling bc-pnum: the
+    // overridePoolRanks requires playerId (operator ruling bc-pnum: the
     // server resolves a pool member by id only and 400s outright
     // without one). Disabling the button here, with NoIdHint's remedy,
     // replaces letting the operator click through to that 400. Mirrors
@@ -378,9 +378,9 @@ function AdminPools({ c, pools, poolMatches, standings, tweaks, onEditScore, pas
     // Effective value for a member's input, keyed by the member's
     // IDENTITY (checkinPid; data.jsx owns id-vs-name|dojo fallback rule),
     // never its position in `members`: the group order comes from the
-    // server's live standings sort, which reorders after a partial
-    // write, so an index-keyed lookup can read back a DIFFERENT team's
-    // typed value on retry. The operator's edit if present, else the
+    // server's standings sort, which can change between fetches (any
+    // write to the pool), so an index-keyed lookup can read back a
+    // DIFFERENT team's typed value on retry. The operator's edit if present, else the
     // displayed default (minPosition + index --
     // idx is still used here only to pick a distinct default rank per
     // position, not to key the input). Both validation and submit read
@@ -426,22 +426,21 @@ function AdminPools({ c, pools, poolMatches, standings, tweaks, onEditScore, pas
       setChusenGroupErr(prev => ({ ...prev, [groupKey]: null }));
       setChusenBusy(prev => ({ ...prev, [groupKey]: true }));
       try {
-        for (let i = 0; i < members.length; i++) {
-          const member = members[i];
-          // A rank that moves a qualifier out of a knockout match the old
-          // one already fought is refused with the names of who moves;
-          // attemptScoreWrite asks the operator and, confirmed, resends it
-          // with forceDownstreamReopen, which reopens that match. The
-          // confirmation is only passed when set, so an ordinary record
-          // keeps its six-argument call.
-          await attemptScoreWrite({
-            recordScore: (cId, pool, body, pwd) => (body.forceDownstreamReopen
-              ? window.API.overridePoolRank(cId, pool, member.name, body.rank, pwd, member.id, true)
-              : window.API.overridePoolRank(cId, pool, member.name, body.rank, pwd, member.id)),
-            confirmDialog: window.confirmDialog,
-            compId: c.id, matchId: poolName, result: { rank: effRank(member, i) }, password,
-          });
-        }
+        // The whole order is ONE write, so the server answers for the order
+        // entered and nothing else: sent one rank at a time, it passed
+        // through orders nobody chose, and a knockout match whose place the
+        // final order keeps was named and reopened. An order that moves a
+        // qualifier out of a knockout match the old one already fought is
+        // refused with the names of who moves; attemptScoreWrite asks the
+        // operator and, confirmed, resends it with forceDownstreamReopen,
+        // which reopens that match.
+        await attemptScoreWrite({
+          recordScore: (cId, pool, body, pwd) => window.API.overridePoolRanks(cId, pool, body.ranks, pwd, !!body.forceDownstreamReopen),
+          confirmDialog: window.confirmDialog,
+          compId: c.id, matchId: poolName,
+          result: { ranks: members.map((m, i) => ({ playerId: m.id, rank: effRank(m, i) })) },
+          password,
+        });
         if (changing) {
           // Show the new order at once and close the entry; the re-fetch
           // the new standings trigger reconciles it.
@@ -462,12 +461,11 @@ function AdminPools({ c, pools, poolMatches, standings, tweaks, onEditScore, pas
           ? DOWNSTREAM_KNOCKOUT_RANKING_CANCELLED
           : (e.message || "Failed to record chusen result");
         setChusenGroupErr(prev => ({ ...prev, [groupKey]: msg }));
-        // The per-member overridePoolRank writes are sequential, so a mid-loop
-        // failure may have persisted some ranks but not others. overridePoolRank
-        // is idempotent per member (retrying re-sends every rank), and the group
-        // stays visible on failure so the operator can retry. Re-fetch the
-        // candidates so the banner reflects exactly which teams still need a
-        // rank, rather than waiting for the next SSE-driven refresh.
+        // A refusal records none of the group, and a lost response may have
+        // recorded all of it. Re-fetch the candidates so the panel shows the
+        // order the server holds rather than waiting for the next SSE-driven
+        // refresh; the typed ranks are keyed by team, so they survive a
+        // reorder.
         if (window.API && typeof window.API.chusenCandidates === "function") {
           window.API.chusenCandidates(c.id, password)
             .then(applyChusen)
@@ -496,7 +494,8 @@ function AdminPools({ c, pools, poolMatches, standings, tweaks, onEditScore, pas
           // groupKey + member IDENTITY, not index: see the effRank/
           // checkinPid comments above -- the member array order is
           // not stable across a re-fetch, so an index-keyed input can
-          // silently attach to the WRONG team after a mid-loop failure.
+          // silently attach to the WRONG team after a failed write's
+          // re-fetch.
           const memberKey = checkinPid(member);
           const inputKey = `${groupKey}::${memberKey}`;
           const defaultVal = defaultRank(idx);

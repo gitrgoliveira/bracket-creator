@@ -228,8 +228,8 @@ func SubBoutEffectiveResult(sub SubMatchResult, credit domain.MatchSide, sideANa
 }
 
 // PadDefaultWinBoutPositions returns subResults with an EMPTY SubMatchResult
-// row (Position only; no winner, decision or ippons) appended for every
-// numbered position 1..teamSize it does not already carry. A position
+// row (Position only; no winner, decision or ippons) for every numbered
+// position 1..teamSize it does not already carry. A position
 // already present -- fought, previously padded, or otherwise recorded -- is
 // left untouched, and the daihyosen row (Position < 1) is never added here.
 //
@@ -242,18 +242,54 @@ func SubBoutEffectiveResult(sub SubMatchResult, credit domain.MatchSide, sideANa
 // missing from the slice entirely is invisible to every reader that ranges
 // over it (TeamResultFrom, engine.accrueTeamSubResults, the Excel export),
 // credit side or no.
+//
+// When it pads, the numbered rows come back in Position order, because the
+// team scoreboard names a bout's fighter by the row's array index
+// (TeamScoreboard's pickFromLineup, match_scoreboard.jsx): a stored
+// [Position 2] padded to [2, 1, 3, 4, 5] put the first fighter on the second
+// bout. Every other row (the daihyosen row at DaihyosenSubPosition, or a
+// malformed position) follows the numbered block in its original order, so
+// the daihyosen row never sorts first. A call with nothing to pad returns
+// subResults unchanged.
 func PadDefaultWinBoutPositions(subResults []SubMatchResult, teamSize int) []SubMatchResult {
 	present := make(map[int]bool, len(subResults))
 	for _, s := range subResults {
 		present[s.Position] = true
 	}
-	out := subResults
+	needsPadding := false
 	for pos := 1; pos <= teamSize; pos++ {
 		if !present[pos] {
-			out = append(out, SubMatchResult{Position: pos})
+			needsPadding = true
+			break
 		}
 	}
-	return out
+	if !needsPadding {
+		return subResults
+	}
+
+	byPosition := make(map[int][]SubMatchResult, teamSize)
+	var trailing []SubMatchResult
+	for _, s := range subResults {
+		if s.Position >= 1 && s.Position <= teamSize {
+			byPosition[s.Position] = append(byPosition[s.Position], s)
+			continue
+		}
+		// The daihyosen row (Position == DaihyosenSubPosition, -1), any
+		// other non-positive row, or a malformed Position > teamSize: kept,
+		// in its original relative order, after the ordered numbered block
+		// below.
+		trailing = append(trailing, s)
+	}
+
+	out := make([]SubMatchResult, 0, teamSize+len(trailing))
+	for pos := 1; pos <= teamSize; pos++ {
+		if rows, ok := byPosition[pos]; ok {
+			out = append(out, rows...)
+			continue
+		}
+		out = append(out, SubMatchResult{Position: pos})
+	}
+	return append(out, trailing...)
 }
 
 // NeedsDefaultWinBoutPadding reports whether a stored match needs

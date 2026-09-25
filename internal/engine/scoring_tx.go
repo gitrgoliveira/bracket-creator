@@ -467,34 +467,41 @@ func (e *Engine) StartMatchTx(tx state.StoreTx, compID, matchID string) error {
 func (e *Engine) checkSimultaneousMatchTx(h state.StoreTx, compID, matchID string) error {
 	var sideA, sideB, rawIDA, rawIDB string
 	isPoolMatch := false
+	// Load errors are returned as they are (see lookupExistingResult): an
+	// unreadable pool-matches.csv/bracket.json must not silently drop out of
+	// this check -- swallowing it let a corrupt file pass the simultaneity
+	// gate and start a competitor on a second court while their first match
+	// was still running.
 	poolMatches, poolErr := h.LoadPoolMatches(compID)
-	if poolErr == nil {
-		if m, ok := findPoolMatch(poolMatches, matchID); ok {
-			isPoolMatch = true
-			sideA, sideB = m.SideA, m.SideB
-			rawIDA, rawIDB = m.SideAID, m.SideBID
-		}
+	if poolErr != nil {
+		return poolErr
+	}
+	if m, ok := findPoolMatch(poolMatches, matchID); ok {
+		isPoolMatch = true
+		sideA, sideB = m.SideA, m.SideB
+		rawIDA, rawIDB = m.SideAID, m.SideBID
 	}
 
 	// Loaded once, reused below both for this match's OWN identity (bracket
 	// half only) and for the bracket-vs-bracket comparison loop.
 	bracket, berr := h.LoadBracket(compID)
+	if berr != nil {
+		return berr
+	}
 
 	if !isPoolMatch {
-		if berr == nil {
-			if bm := findBracketMatchInBracket(bracket, matchID); bm != nil {
-				sideA, sideB = bm.SideA, bm.SideB
-				rawIDA, rawIDB = bm.SideAID, bm.SideBID
-			}
+		if bm := findBracketMatchInBracket(bracket, matchID); bm != nil {
+			sideA, sideB = bm.SideA, bm.SideB
+			rawIDA, rawIDB = bm.SideAID, bm.SideBID
 		}
 		if sideA == "" && sideB == "" {
-			// Not found in the bracket read above (a berr load failure, or a
-			// genuinely unknown matchID): fall back to the general resolver,
-			// matching the previous behaviour.
+			// Not found in the bracket read above (a genuinely unknown
+			// matchID): fall back to the general resolver, matching the
+			// previous behaviour.
 			var err error
 			sideA, sideB, err = e.lookupMatchSides(h, compID, matchID)
 			if err != nil {
-				return nil
+				return err
 			}
 		}
 		// The row's OWN ids are preferred (above); the roster name scan only
@@ -543,29 +550,27 @@ func (e *Engine) checkSimultaneousMatchTx(h state.StoreTx, compID, matchID strin
 		return fmt.Sprintf("%s is fighting now in %s on Shiaijo %s. Finish that match first.", name, label, court)
 	}
 
-	if poolErr == nil {
-		for _, m := range poolMatches {
-			if m.ID == matchID || m.Status != state.MatchStatusRunning {
-				continue
+	for _, m := range poolMatches {
+		if m.ID == matchID || m.Status != state.MatchStatusRunning {
+			continue
+		}
+		if rawIDA != "" && (m.SideAID == rawIDA || m.SideBID == rawIDA) {
+			return &IneligibleCompetitorError{
+				PlayerID:     playerIDFor(rawIDA, sideA),
+				Reason:       simultaneousReason(sideA, m.ID, m.Court),
+				Simultaneous: true,
 			}
-			if rawIDA != "" && (m.SideAID == rawIDA || m.SideBID == rawIDA) {
-				return &IneligibleCompetitorError{
-					PlayerID:     playerIDFor(rawIDA, sideA),
-					Reason:       simultaneousReason(sideA, m.ID, m.Court),
-					Simultaneous: true,
-				}
-			}
-			if rawIDB != "" && (m.SideAID == rawIDB || m.SideBID == rawIDB) {
-				return &IneligibleCompetitorError{
-					PlayerID:     playerIDFor(rawIDB, sideB),
-					Reason:       simultaneousReason(sideB, m.ID, m.Court),
-					Simultaneous: true,
-				}
+		}
+		if rawIDB != "" && (m.SideAID == rawIDB || m.SideBID == rawIDB) {
+			return &IneligibleCompetitorError{
+				PlayerID:     playerIDFor(rawIDB, sideB),
+				Reason:       simultaneousReason(sideB, m.ID, m.Court),
+				Simultaneous: true,
 			}
 		}
 	}
 
-	if berr == nil && bracket != nil {
+	if bracket != nil {
 		checkBracketMatch := func(bm *state.BracketMatch) error {
 			if sideA != "" && matchesBracketSide(rawIDA, sideA, bm) {
 				return &IneligibleCompetitorError{

@@ -10,6 +10,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"testing"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/gitrgoliveira/bracket-creator/internal/domain"
@@ -202,4 +203,87 @@ func TestScoreHandler_BothSidesBarredKnockout_NeitherCanFightSentence(t *testing
 	assert.Contains(t, reasonHuman, "Alice")
 	assert.Contains(t, reasonHuman, "Dave")
 	assert.Contains(t, reasonHuman, "correct the earlier withdrawal or the draw")
+}
+
+// TestDecisionHandler_BothSidesBarredHikiwake_ClockSkewRefused pins bc-cse
+// finding 3: the clock-skew refusal runs BEFORE the both-sides-barred
+// hikiwake carve-out's own write, exactly as it does on the main /decision
+// path and on PUT /score. A device clock implausibly far in the future gets
+// the same {"applied":false,"reason":"clock_skew"} 200, and nothing is
+// written -- Pool A-2 stays scheduled.
+func TestDecisionHandler_BothSidesBarredHikiwake_ClockSkewRefused(t *testing.T) {
+	compID := "both-barred-hikiwake-clock-skew"
+	r, store, _ := bothBarredPoolFixture(t, compID)
+
+	future := time.Now().Add(time.Hour).UnixMilli()
+	resp := postDecisionJSON(t, r, compID, "Pool A-2", DecisionRequest{
+		Decision: "hikiwake", DecisionReason: "both competitors already withdrawn",
+		ModifiedAt: future,
+	})
+	require.Equal(t, http.StatusOK, resp.Code, resp.Body.String())
+
+	var body map[string]any
+	require.NoError(t, json.Unmarshal(resp.Body.Bytes(), &body))
+	assert.Equal(t, false, body["applied"])
+	assert.Equal(t, "clock_skew", body["reason"])
+
+	matches, err := store.LoadPoolMatches(compID)
+	require.NoError(t, err)
+	var m2 *state.MatchResult
+	for i := range matches {
+		if matches[i].ID == "Pool A-2" {
+			m2 = &matches[i]
+		}
+	}
+	require.NotNil(t, m2)
+	assert.Equal(t, state.MatchStatusScheduled, m2.Status, "nothing was written")
+}
+
+// TestDecisionHandler_BothSidesBarredHikiwake_SupersededNot500 pins bc-cse
+// finding 3's second half: the carve-out's own write competes on timestamps
+// exactly like the main /decision path, and losing that race must answer
+// 200 {"applied":false,"reason":"superseded"} -- never the 500
+// respondEngineError's default arm used to produce for
+// engine.ErrMatchSuperseded, which the SPA's offline write queue would
+// retry forever against a write that can never win.
+func TestDecisionHandler_BothSidesBarredHikiwake_SupersededNot500(t *testing.T) {
+	compID := "both-barred-hikiwake-superseded"
+	r, store, _ := bothBarredPoolFixture(t, compID)
+
+	// Stamp Pool A-2's STORED ModifiedAt into the future so the carve-out's
+	// own write (an older, still clock-valid stamp) loses the timestamp
+	// last-write-wins guard.
+	storedStamp := time.Now().Add(time.Hour).UnixMilli()
+	matches, err := store.LoadPoolMatches(compID)
+	require.NoError(t, err)
+	for i := range matches {
+		if matches[i].ID == "Pool A-2" {
+			matches[i].ModifiedAt = storedStamp
+		}
+	}
+	require.NoError(t, store.SavePoolMatches(compID, matches))
+
+	writeStamp := time.Now().Add(-time.Hour).UnixMilli()
+	resp := postDecisionJSON(t, r, compID, "Pool A-2", DecisionRequest{
+		Decision: "hikiwake", DecisionReason: "both competitors already withdrawn",
+		ModifiedAt: writeStamp,
+	})
+	require.Equal(t, http.StatusOK, resp.Code, resp.Body.String())
+
+	var body map[string]any
+	require.NoError(t, json.Unmarshal(resp.Body.Bytes(), &body))
+	assert.Equal(t, false, body["applied"])
+	assert.Equal(t, "superseded", body["reason"])
+
+	after, err := store.LoadPoolMatches(compID)
+	require.NoError(t, err)
+	var m2 *state.MatchResult
+	for i := range after {
+		if after[i].ID == "Pool A-2" {
+			m2 = &after[i]
+		}
+	}
+	require.NotNil(t, m2)
+	assert.Equal(t, state.MatchStatusScheduled, m2.Status, "the superseded write must not overwrite the stored match")
+	assert.Equal(t, storedStamp, m2.ModifiedAt, "the stored stamp is untouched")
 }

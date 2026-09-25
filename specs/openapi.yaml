@@ -1652,10 +1652,17 @@ paths:
       tags: [competitions]
       summary: Override pool rank
       description: >
-        Manually set a player's rank within a pool, overriding the computed
-        value. Used, among other callers, by the chusen (drawing-lots)
-        resolver (see `GET .../chusen-candidates`) to record a team's
-        finishing position once the operator has drawn lots.
+        Manually set one or more players' ranks within a pool, overriding the
+        computed value. Used, among other callers, by the chusen
+        (drawing-lots) resolver (see `GET .../chusen-candidates`) to record
+        the finishing order once the operator has drawn lots. Send either
+        `playerId` and `rank` (one player) or `ranks` (several players), never
+        both. A `ranks` group is recorded as ONE change: every rank lands
+        together, the knockout check below answers for the final order only,
+        and a refusal records none of them. Record a chusen's whole order as
+        one group, since setting its ranks one at a time passes through
+        orders nobody chose, which can name, and reopen, a knockout match
+        whose place the final order keeps.
       security:
         - TournamentPassword: []
       parameters:
@@ -1671,14 +1678,13 @@ paths:
           application/json:
             schema:
               type: object
-              required: [playerId, rank]
               properties:
                 playerId:
                   type: string
                   description: >
-                    Required. A pool-rank override is a record resolved by id
-                    only (operator ruling bc-pnum): playerId must name a
-                    competitor actually in this pool. There is no
+                    Required unless `ranks` is sent. A pool-rank override is a
+                    record resolved by id only (operator ruling bc-pnum):
+                    playerId must name a competitor actually in this pool. There is no
                     playerName/playerDojo narrowing left to select with two
                     pool members who share a display name from different
                     dojos (competitor identity is (name, dojo), never bare
@@ -1693,14 +1699,35 @@ paths:
                 rank:
                   type: integer
                   description: >
-                    1-based finishing rank within the pool; rejected if it
-                    exceeds the pool's player count.
+                    Required unless `ranks` is sent. 1-based finishing rank
+                    within the pool; rejected if it exceeds the pool's player
+                    count.
+                ranks:
+                  type: array
+                  minItems: 1
+                  description: >
+                    The group form, sent instead of `playerId` and `rank`:
+                    one entry per player, each checked as the single form is.
+                    No player and no rank may appear twice.
+                  items:
+                    type: object
+                    required: [playerId, rank]
+                    properties:
+                      playerId:
+                        type: string
+                        description: >
+                          A competitor in this pool, by id only.
+                      rank:
+                        type: integer
+                        description: >
+                          1-based finishing rank within the pool; rejected if
+                          it exceeds the pool's player count.
                 forceDownstreamReopen:
                   type: boolean
                   description: >
                     The operator's confirmation of a 409
-                    `downstream_knockout_played` refusal: records the rank and
-                    reopens the named knockout match(es) with the new
+                    `downstream_knockout_played` refusal: records the rank(s)
+                    and reopens the named knockout match(es) with the new
                     qualifier seated. Never gets past
                     `downstream_knockout_running`.
       responses:
@@ -1732,7 +1759,9 @@ paths:
           description: >
             playerId is missing, blank, or does not name a competitor in this
             pool; or rank is not a positive integer, exceeds the pool's
-            player count, or exceeds the absolute override cap.
+            player count, or exceeds the absolute override cap. For `ranks`,
+            the same checks per entry, plus: a player or a rank given twice,
+            or `ranks` sent together with `playerId` or `rank`.
           content:
             application/json:
               schema:
@@ -1756,7 +1785,8 @@ paths:
             knockout match the old one already fought (retry with
             `forceDownstreamReopen: true`), and `downstream_knockout_running`
             (`runningMatches`, not confirmable) when such a match is being
-            fought now. A refused override is not recorded.
+            fought now. A refused override is not recorded (for `ranks`,
+            none of the group is).
           content:
             application/json:
               schema:
@@ -2637,7 +2667,7 @@ paths:
           $ref: '#/components/responses/NotFound'
         '409':
           description: |
-            Conflict. Five body shapes, matching the score endpoint's where one exists:
+            Conflict. Four body shapes, matching the score endpoint's where one exists:
             - Plain sentence in `error`: the match is not completed (only a
               completed match can be reopened).
             - `error: downstream_knockout_played`: a later knockout match fed
@@ -2652,12 +2682,6 @@ paths:
               reopened with it. Nothing is written. Extra fields: `matchId`
               (this match), `runningMatches` (`[{id, number, label}]`),
               `message`.
-            - `error: downstream_knockout_resolved`: a later knockout match
-              fed by this result was resolved by a bye, not by being fought,
-              so reopening this match cannot undo it. Correct the result
-              instead: a `Save correction` on this match moves the new
-              winner through the bye. Extra fields: `matchId` (this match),
-              `resolvedMatches` (`[{id, number, label}]`), `message`.
             - `error: court_busy` (machine code, sentence in `message`):
               another match is already running on this match's court, in this
               or another competition. Reopening would put a second match in
@@ -2716,29 +2740,6 @@ paths:
                               description: The operator's name for the match; see `engine.OperatorMatchLabel`.
                       message:
                         type: string
-                  - type: object
-                    required: [error]
-                    description: Later knockout match(es) fed by this result were resolved by a bye, not by being fought.
-                    properties:
-                      error:
-                        type: string
-                        enum: [downstream_knockout_resolved]
-                      matchId:
-                        type: string
-                      resolvedMatches:
-                        type: array
-                        items:
-                          type: object
-                          properties:
-                            id:
-                              type: string
-                            number:
-                              type: integer
-                            label:
-                              type: string
-                              description: The operator's name for the match; see `engine.OperatorMatchLabel`.
-                      message:
-                        type: string
         '500':
           $ref: '#/components/responses/InternalError'
 
@@ -2751,9 +2752,8 @@ paths:
         match ({id}/{mid}, the target: any match the reopen endpoint accepts
         -- including one decided by a match-level default win, fusensho --
         with the same gate and the same `downstream_knockout_played` /
-        `forceDownstreamReopen` / `downstream_knockout_running` /
-        `downstream_knockout_resolved` handling, checked BEFORE the blocker is
-        touched) is refused because ANOTHER
+        `forceDownstreamReopen` / `downstream_knockout_running` handling,
+        checked BEFORE the blocker is touched) is refused because ANOTHER
         match holds its court, this requeues that blocking match AND reopens
         the target under ONE hold of the court-exclusivity lock, so no other
         match can take the freed court between the two steps. Because a court
@@ -2840,10 +2840,9 @@ paths:
             downstream_knockout_played` (same shape as reopen's) when a later
             knockout match has its own result and `forceDownstreamReopen` was
             not set; the blocker is left untouched. `error:
-            downstream_knockout_running` / `error: downstream_knockout_resolved`
-            (same shapes as reopen's, `runningMatches`/`resolvedMatches`) when a
-            later knockout match fed by the target is being fought now, or was
-            resolved by a bye. Or `error: court_busy` (same shape as reopen:
+            downstream_knockout_running` (same shape as reopen's,
+            `runningMatches`) when a later knockout match fed by the target
+            is being fought now. Or `error: court_busy` (same shape as reopen:
             `court`, `matchId`, `compId`, `label`, `message`) when a
             match OTHER than the one requeued has since taken the court — the
             client re-offers the remedy for that new blocker.
@@ -2880,28 +2879,6 @@ paths:
                       matchId:
                         type: string
                       runningMatches:
-                        type: array
-                        items:
-                          type: object
-                          properties:
-                            id:
-                              type: string
-                            number:
-                              type: integer
-                            label:
-                              type: string
-                      message:
-                        type: string
-                  - type: object
-                    required: [error]
-                    description: Later knockout match(es) fed by the target were resolved by a bye, not by being fought.
-                    properties:
-                      error:
-                        type: string
-                        enum: [downstream_knockout_resolved]
-                      matchId:
-                        type: string
-                      resolvedMatches:
                         type: array
                         items:
                           type: object
@@ -5870,7 +5847,8 @@ components:
       description: >
         One consequential team-pool tie that the daihyosen (representative
         bout) could not settle, so the operator must draw lots (chusen) and
-        record the finishing order via `PUT .../pools/{poolId}/override-rank`.
+        record the finishing order, as one `ranks` group, via
+        `PUT .../pools/{poolId}/override-rank`.
       properties:
         poolName:
           type: string

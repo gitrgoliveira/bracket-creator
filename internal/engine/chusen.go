@@ -156,13 +156,6 @@ func daihyosenLeftTied(group []state.PlayerStanding, allMatches []state.MatchRes
 	return false
 }
 
-// ChusenCandidates returns the consequential team-pool ties that still need a
-// chusen (drawing lots): the Pending half of ChusenStatus.
-func (e *Engine) ChusenCandidates(compID string) ([]ChusenGroup, error) {
-	report, err := e.ChusenStatus(compID)
-	return report.Pending, err
-}
-
 // ChusenStatus returns the consequential team-pool ties that the daihyosen
 // left undetermined, split into those that still need a chusen (drawing lots)
 // and those a recorded chusen already settled. It is the single source of

@@ -541,19 +541,29 @@ func (e *Engine) RecordDecisionWithOptions(compID, matchID, decision, decisionBy
 // bracket matches the BracketMatch fields are projected onto a
 // MatchResult so callers (losingSide, etc.) see a uniform shape;
 // only the fields the kiken-undo path needs are populated. Returns a
-// *NotFoundError when the match is unknown.
+// *NotFoundError when the match is unknown, and a store load error as it is.
 func (e *Engine) lookupExistingResult(h state.StoreTx, compID, matchID string) (*state.MatchResult, error) {
+	// A load error is the caller's error, never "not found": a missing file
+	// already loads as empty (a knockout-only competition has no pool file, a
+	// pool-only one no bracket), so an error here is a file that exists and
+	// cannot be read. Swallowing it answered a corrupt pool-matches.csv with
+	// a 404 "match not found", which the offline queue drops as final,
+	// instead of the corrupt-file 500 that names the file to repair.
 	poolMatches, err := h.LoadPoolMatches(compID)
-	if err == nil {
-		for i := range poolMatches {
-			if poolMatches[i].ID == matchID {
-				r := poolMatches[i]
-				return &r, nil
-			}
+	if err != nil {
+		return nil, err
+	}
+	for i := range poolMatches {
+		if poolMatches[i].ID == matchID {
+			r := poolMatches[i]
+			return &r, nil
 		}
 	}
 	bracket, err := h.LoadBracket(compID)
-	if err == nil && bracket != nil {
+	if err != nil {
+		return nil, err
+	}
+	if bracket != nil {
 		for _, round := range bracket.Rounds {
 			for i := range round {
 				if round[i].ID == matchID {
@@ -595,19 +605,26 @@ func (e *Engine) hasDownstreamMatchStarted(h state.StoreTx, compID string, playe
 	isStarted := func(s state.MatchStatus) bool {
 		return s == state.MatchStatusRunning || s == state.MatchStatusCompleted
 	}
+	// A load error is returned, not read as "nothing started" (see
+	// lookupExistingResult): this answer unlocks a kiken undo, so a file
+	// that cannot be read must not unlock it by default.
 	poolMatches, err := h.LoadPoolMatches(compID)
-	if err == nil {
-		for _, m := range poolMatches {
-			if m.ID == excludeMatchID {
-				continue
-			}
-			if isStarted(m.Status) && involvesAny(m.SideA, m.SideB) {
-				return true, nil
-			}
+	if err != nil {
+		return false, err
+	}
+	for _, m := range poolMatches {
+		if m.ID == excludeMatchID {
+			continue
+		}
+		if isStarted(m.Status) && involvesAny(m.SideA, m.SideB) {
+			return true, nil
 		}
 	}
 	bracket, err := h.LoadBracket(compID)
-	if err == nil && bracket != nil {
+	if err != nil {
+		return false, err
+	}
+	if bracket != nil {
 		for _, round := range bracket.Rounds {
 			for _, bm := range round {
 				if bm.ID == excludeMatchID {
@@ -644,28 +661,24 @@ func (e *Engine) hasDownstreamMatchStarted(h state.StoreTx, compID string, playe
 // other half of the same gate.
 func (e *Engine) matchSideParticipantIDs(h state.StoreTx, compID, matchID string) ([]string, error) {
 	var sideA, sideB, idA, idB string
-	found := false
-	if poolMatches, err := h.LoadPoolMatches(compID); err == nil {
-		if m, ok := findPoolMatch(poolMatches, matchID); ok {
-			sideA, sideB, idA, idB, found = m.SideA, m.SideB, m.SideAID, m.SideBID, true
-		}
+	// Load errors are returned as they are (see lookupExistingResult): an
+	// unreadable file is not a match that does not exist.
+	poolMatches, err := h.LoadPoolMatches(compID)
+	if err != nil {
+		return nil, err
 	}
-	if !found {
-		if bracket, err := h.LoadBracket(compID); err == nil {
-			if bm := findBracketMatchInBracket(bracket, matchID); bm != nil {
-				sideA, sideB, idA, idB, found = bm.SideA, bm.SideB, bm.SideAID, bm.SideBID, true
-			}
-		}
-	}
-	if !found {
-		// Neither store held the row under this id, or one of them failed to
-		// load: lookupMatchSides is the shared resolver that reports which,
-		// returning the not-found error this method's callers already surface.
-		var err error
-		sideA, sideB, err = e.lookupMatchSides(h, compID, matchID)
+	if m, ok := findPoolMatch(poolMatches, matchID); ok {
+		sideA, sideB, idA, idB = m.SideA, m.SideB, m.SideAID, m.SideBID
+	} else {
+		bracket, err := h.LoadBracket(compID)
 		if err != nil {
 			return nil, err
 		}
+		bm := findBracketMatchInBracket(bracket, matchID)
+		if bm == nil {
+			return nil, notFoundErrorf("match %q not found in competition %q", matchID, compID)
+		}
+		sideA, sideB, idA, idB = bm.SideA, bm.SideB, bm.SideAID, bm.SideBID
 	}
 	if idA == "" || idB == "" {
 		fallbackA, fallbackB := resolvePlayerIDs(h, compID, sideA, sideB)
@@ -692,24 +705,21 @@ func (e *Engine) resolveMatchParticipantIDs(compID, matchID string) ([]string, e
 // non-transactional (checkSimultaneousMatch, resolveMatchParticipantIDs,
 // test) callers share one body (bc-twin follow-up).
 func (e *Engine) lookupMatchSides(h state.StoreTx, compID, matchID string) (string, string, error) {
+	// Load errors are returned as they are (see lookupExistingResult): an
+	// unreadable file is not a match that does not exist.
 	poolMatches, err := h.LoadPoolMatches(compID)
-	if err == nil {
-		if m, ok := findPoolMatch(poolMatches, matchID); ok {
-			return m.SideA, m.SideB, nil
-		}
+	if err != nil {
+		return "", "", err
+	}
+	if m, ok := findPoolMatch(poolMatches, matchID); ok {
+		return m.SideA, m.SideB, nil
 	}
 	bracket, err := h.LoadBracket(compID)
-	if err == nil && bracket != nil {
-		for _, round := range bracket.Rounds {
-			for _, bm := range round {
-				if bm.ID == matchID {
-					return bm.SideA, bm.SideB, nil
-				}
-			}
-		}
-		if bracket.ThirdPlaceMatch != nil && bracket.ThirdPlaceMatch.ID == matchID {
-			return bracket.ThirdPlaceMatch.SideA, bracket.ThirdPlaceMatch.SideB, nil
-		}
+	if err != nil {
+		return "", "", err
+	}
+	if bm := findBracketMatchInBracket(bracket, matchID); bm != nil {
+		return bm.SideA, bm.SideB, nil
 	}
 	return "", "", notFoundErrorf("match %q not found in competition %q", matchID, compID)
 }

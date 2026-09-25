@@ -301,15 +301,17 @@ func TestDownstreamKnockoutCorrection_ByeDoesNotBlock(t *testing.T) {
 	assert.Equal(t, state.MatchStatusCompleted, got.Rounds[1][0].Status)
 }
 
-// TestReopenMatch_ByeResolvedDownstream_RemedyNamesTheCorrectionDoor covers
-// bc-cse item 8: the REOPEN door on the SAME bye-completed-downstream shape
-// TestDownstreamKnockoutCorrection_ByeDoesNotBlock proves the CORRECTION
-// door sails through. Reopening m-r1-0 must still be refused
-// (*ReopenDownstreamResolvedError: there is nothing to finish, requeue, or
-// undo on a bye nobody fought), but the remedy it names must be the door
-// that is actually known to work here -- Save correction -- not "fix the
-// draw or seeding", which names no one-step fix at all.
-func TestReopenMatch_ByeResolvedDownstream_RemedyNamesTheCorrectionDoor(t *testing.T) {
+// TestReopenMatch_ByeResolvedDownstream_IsUnwound: the REOPEN door on the
+// SAME bye-completed-downstream shape TestDownstreamKnockoutCorrection_ByeDoesNotBlock
+// proves the CORRECTION door sails through. It used to be refused (a 409
+// naming Save correction as the remedy), but a correction KEEPS a recorded
+// withdrawal (KeepsWithdrawalRuling), so a kiken
+// recorded by mistake whose winner went through a bye could not be removed by
+// any door. Nobody fought the bye, so the reopen unwinds it instead: the slot
+// returns to its feeder placeholder and the match to the completed,
+// winner-less shape generation gave it. reopen_bye_unwind_test.go covers the
+// same rule on a generated draw, with a played or running match past the bye.
+func TestReopenMatch_ByeResolvedDownstream_IsUnwound(t *testing.T) {
 	eng, store, _ := setupTestEngine(t)
 	compID := "kcdg-bye-reopen"
 	require.NoError(t, store.SaveCompetition(&state.Competition{
@@ -336,15 +338,17 @@ func TestReopenMatch_ByeResolvedDownstream_RemedyNamesTheCorrectionDoor(t *testi
 	require.NoError(t, store.SaveBracket(compID, b))
 
 	_, err := eng.ReopenMatch(compID, "m-r1-0", "test reason")
-	require.Error(t, err)
-	var resolvedErr *ReopenDownstreamResolvedError
-	require.ErrorAs(t, err, &resolvedErr, "a bye-completed downstream must refuse the reopen")
-	assert.Equal(t,
-		"Match 2 (Final) already has a result from a bye, not from being fought, so reopening this match cannot undo it. "+
-			"Correct the result instead: Save correction on this match moves the new winner through the bye.",
-		resolvedErr.Error())
-	assert.NotContains(t, resolvedErr.Error(), "Fix the draw or seeding",
-		"that remedy names no one-step fix; Save correction is the door proven to work on this exact shape")
+	require.NoError(t, err, "a bye nobody fought must not refuse the reopen")
+
+	got, err := store.LoadBracket(compID)
+	require.NoError(t, err)
+	assert.Equal(t, state.MatchStatusRunning, got.Rounds[0][0].Status)
+	bye := got.Rounds[1][0]
+	assert.Equal(t, winnerOfPlaceholder(2, 0), bye.SideA)
+	assert.Empty(t, bye.SideAID)
+	assert.Empty(t, bye.Winner)
+	assert.Empty(t, bye.WinnerID)
+	assert.Equal(t, state.MatchStatusCompleted, bye.Status, "back to the latent-bye shape generation gives it")
 }
 
 // TestReopenBracketDownstreamCheck_ScheduledWithStrayDataIsNotResolvedByBye
@@ -353,8 +357,8 @@ func TestReopenMatch_ByeResolvedDownstream_RemedyNamesTheCorrectionDoor(t *testi
 // enough), so a downstream row that is still SCHEDULED but carries stray
 // Winner data must not be classified "resolved by a bye" -- that label
 // promises the specific, clean completed-via-bye shape
-// TestReopenMatch_ByeResolvedDownstream_RemedyNamesTheCorrectionDoor pins,
-// and firstDownstreamWithOwnResult's OWN gate (bracketMatchCarriesOwnResult)
+// TestReopenMatch_ByeResolvedDownstream_IsUnwound pins,
+// and propagatedDownstream.played's OWN gate (bracketMatchCarriesOwnResult)
 // requires Completed too, so a scheduled row can never be "played" either.
 func TestReopenBracketDownstreamCheck_ScheduledWithStrayDataIsNotResolvedByBye(t *testing.T) {
 	bracket := &state.Bracket{

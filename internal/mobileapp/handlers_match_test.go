@@ -1530,6 +1530,88 @@ func TestQuickScoreHandler(t *testing.T) {
 		assert.Equal(t, http.StatusBadRequest, w.Code)
 		assert.Contains(t, w.Body.String(), "exceeds maximum")
 	})
+
+	// bc-cse finding 8: quick-score must run the SAME team finish gate as
+	// /score and bulk-score (refuseUnfinishedTeamFinish, operator ruling
+	// 2026-09-24: every bout of a non-kachinuki team match has a result or a
+	// decision), so a count that does not sum to teamSize is refused, not
+	// silently stored with missing rows a later Save correction would then
+	// itself refuse.
+	t.Run("bc-cse finding 8: 2+1+0 of 5 refused, nothing written", func(t *testing.T) {
+		fg := state.Competition{ID: "c1-finish-gate", TeamSize: 5}
+		require.NoError(t, store.SaveCompetition(&fg))
+		require.NoError(t, store.SavePoolMatches("c1-finish-gate", []state.MatchResult{
+			{ID: "PoolA-1", SideA: "TeamA", SideB: "TeamB"},
+		}))
+		body, _ := json.Marshal(map[string]any{
+			"sideA": "TeamA", "sideB": "TeamB",
+			"teamAWins": 2, "teamBWins": 1, "draws": 0,
+		})
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest("PUT", "/api/competitions/c1-finish-gate/matches/PoolA-1/quick-score", bytes.NewBuffer(body))
+		req.Header.Set("Content-Type", "application/json")
+		r.ServeHTTP(w, req)
+		require.Equal(t, http.StatusBadRequest, w.Code, w.Body.String())
+		// Same message shape as /score's own refusal (unfinishedTeamBoutsMessage).
+		assert.Contains(t, w.Body.String(), "no result")
+		assert.Contains(t, w.Body.String(), "Record a score, a Tie, or a Fusensho before finishing.")
+
+		matches, err := store.LoadPoolMatches("c1-finish-gate")
+		require.NoError(t, err)
+		require.Len(t, matches, 1)
+		assert.NotEqual(t, state.MatchStatusCompleted, matches[0].Status, "nothing written")
+		assert.Empty(t, matches[0].SubResults, "nothing written")
+	})
+
+	t.Run("bc-cse finding 8: 2+1+2 of 5 stored", func(t *testing.T) {
+		fg := state.Competition{ID: "c1-finish-gate-2", TeamSize: 5}
+		require.NoError(t, store.SaveCompetition(&fg))
+		require.NoError(t, store.SavePoolMatches("c1-finish-gate-2", []state.MatchResult{
+			{ID: "PoolA-1", SideA: "TeamA", SideB: "TeamB"},
+		}))
+		body, _ := json.Marshal(map[string]any{
+			"sideA": "TeamA", "sideB": "TeamB",
+			"teamAWins": 2, "teamBWins": 1, "draws": 2,
+		})
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest("PUT", "/api/competitions/c1-finish-gate-2/matches/PoolA-1/quick-score", bytes.NewBuffer(body))
+		req.Header.Set("Content-Type", "application/json")
+		r.ServeHTTP(w, req)
+		require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+
+		matches, err := store.LoadPoolMatches("c1-finish-gate-2")
+		require.NoError(t, err)
+		require.Len(t, matches, 1)
+		assert.Equal(t, state.MatchStatusCompleted, matches[0].Status)
+		assert.Len(t, matches[0].SubResults, 5)
+	})
+
+	// The one exemption /score and bulk-score make: a correction over a
+	// recorded withdrawal keeps the ruling, which credits the bouts nobody
+	// fought, so a short count is not a finish it has to answer for.
+	t.Run("a short count over a recorded kiken keeps the kiken", func(t *testing.T) {
+		fg := state.Competition{ID: "c1-finish-gate-kiken", TeamSize: 5}
+		require.NoError(t, store.SaveCompetition(&fg))
+		require.NoError(t, store.SavePoolMatches("c1-finish-gate-kiken", []state.MatchResult{{
+			ID: "PoolA-1", SideA: "TeamA", SideB: "TeamB", Winner: "TeamA",
+			Status: state.MatchStatusCompleted, Decision: "kiken-voluntary", DecisionBy: "shiro",
+		}}))
+		body, _ := json.Marshal(map[string]any{
+			"sideA": "TeamA", "sideB": "TeamB",
+			"teamAWins": 2, "teamBWins": 1, "draws": 0,
+		})
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest("PUT", "/api/competitions/c1-finish-gate-kiken/matches/PoolA-1/quick-score", bytes.NewBuffer(body))
+		req.Header.Set("Content-Type", "application/json")
+		r.ServeHTTP(w, req)
+		require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+
+		matches, err := store.LoadPoolMatches("c1-finish-gate-kiken")
+		require.NoError(t, err)
+		require.Len(t, matches, 1)
+		assert.Equal(t, "kiken-voluntary", matches[0].Decision)
+		assert.Len(t, matches[0].SubResults, 5, "the unfought bouts are padded for the default-win credit")
+	})
 }
 
 // TestScoreHandler_RevGuard validates the C2 monotonic-revision guard for

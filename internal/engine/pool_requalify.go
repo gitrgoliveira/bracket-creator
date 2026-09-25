@@ -3,7 +3,7 @@ package engine
 // pool_requalify.go keeps a mixed competition's knockout seated with the
 // competitors its pools actually produced when a pool result is CORRECTED
 // after the knockout has been seeded, or when a pool's order is set by hand
-// (a pool-rank override, OverridePoolRank). Both doors answer through
+// (a pool-rank override, OverridePoolRanks). Both doors answer through
 // answerRequalification; the bare-store resolver (ResolveQualifiedPools) is
 // only the safety net behind them, all-or-nothing per pool (resolveSlots).
 //
@@ -362,7 +362,7 @@ func (e *Engine) requalifyAfterPoolWrite(tx state.StoreTx, compID string, comp *
 
 // answerRequalification is the knockout rule shared by every door that moves
 // a pool's standings inside a transaction: a pool match written
-// (requalifyAfterPoolWrite) or a pool rank set by hand (OverridePoolRank). It
+// (requalifyAfterPoolWrite) or a pool rank set by hand (OverridePoolRanks). It
 // runs after the change landed and before anything else answers for it.
 // matchID is the pool match a correction wrote, "" for a door with no match;
 // reason is the note each reopened match carries; undo takes the change back
@@ -394,7 +394,7 @@ func (e *Engine) answerRequalification(tx state.StoreTx, compID string, comp *st
 			// PURE: comp is already loaded and passed in, so this needs no
 			// store read (bc-cse item 14 -- see the struct doc on Label for
 			// why that matters here, inside a live transaction). matchID=""
-			// (OverridePoolRank) resolves to "" too, harmlessly: Error()'s
+			// (OverridePoolRanks) resolves to "" too, harmlessly: Error()'s
 			// pool-rank-override branch never reads Label.
 			Label:           OperatorMatchLabel(comp, nil, matchID),
 			BlockingMatchID: plan.blocking[0].ID,

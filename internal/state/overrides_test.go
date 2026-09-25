@@ -35,7 +35,7 @@ func TestOverrides(t *testing.T) {
 	assert.Empty(t, overrides.Winners)
 
 	// 2. Save rank override, keyed by participant id (bc-pnum: playerID is
-	// the only identity SaveRankOverrideChanged accepts); the key is
+	// the only identity SaveRankOverridesChanged accepts); the key is
 	// helper.CompetitorKey("alice-id", "", ""), i.e. "id:alice-id" -- see
 	// Overrides.PoolRanks' doc comment. Same-name-different-dojo identity is
 	// verified in engine's TestCalculatePoolStandings_Override_SameNameDifferentDojo;
@@ -70,9 +70,10 @@ func TestOverrides(t *testing.T) {
 	assert.Empty(t, overrides.Winners)
 }
 
-// RestoreRankOverride is the undo of a refused override: it puts back the
-// value read before the change, or removes the key when there was none.
-func TestRestoreRankOverride(t *testing.T) {
+// RestoreRankOverrides is the undo of a refused override group: it puts back
+// the value each competitor held before the change, or removes the key when
+// there was none, in one write.
+func TestRestoreRankOverrides(t *testing.T) {
 	dir, err := os.MkdirTemp("", "overrides-restore-*")
 	require.NoError(t, err)
 	defer os.RemoveAll(dir)
@@ -81,6 +82,7 @@ func TestRestoreRankOverride(t *testing.T) {
 	compID := "comp-restore"
 	require.NoError(t, store.SaveCompetition(&Competition{ID: compID, Name: "Comp Restore"}))
 	key := helper.CompetitorKey("alice-id", "", "")
+	bobKey := helper.CompetitorKey("bob-id", "", "")
 	ranks := func() map[string]int {
 		o, lerr := store.LoadOverrides(compID)
 		require.NoError(t, lerr)
@@ -88,15 +90,56 @@ func TestRestoreRankOverride(t *testing.T) {
 	}
 
 	require.NoError(t, store.SaveRankOverride(compID, "Pool A", "alice-id", 2))
-	require.NoError(t, store.RestoreRankOverride(compID, "Pool A", "alice-id", 0, false))
+	require.NoError(t, store.RestoreRankOverrides(compID, "Pool A", map[string]PriorRank{"alice-id": {}}))
 	assert.NotContains(t, ranks(), key, "no prior override: the key is removed")
 
 	require.NoError(t, store.SaveRankOverride(compID, "Pool A", "alice-id", 3))
-	require.NoError(t, store.RestoreRankOverride(compID, "Pool B", "alice-id", 1, true))
+	require.NoError(t, store.RestoreRankOverrides(compID, "Pool B", map[string]PriorRank{"alice-id": {Rank: 1, Present: true}}))
 	o, err := store.LoadOverrides(compID)
 	require.NoError(t, err)
 	assert.Equal(t, 1, o.PoolRanks["Pool B"][key], "a prior override is put back, creating its pool's map")
 	assert.Equal(t, 3, ranks()[key], "another pool's override is untouched")
+
+	// A group: each member goes back to what IT held, present or not.
+	_, err = store.SaveRankOverridesChanged(compID, "Pool A", map[string]int{"alice-id": 1, "bob-id": 2})
+	require.NoError(t, err)
+	require.NoError(t, store.RestoreRankOverrides(compID, "Pool A", map[string]PriorRank{
+		"alice-id": {Rank: 3, Present: true},
+		"bob-id":   {},
+	}))
+	assert.Equal(t, map[string]int{key: 3}, ranks(), "alice back to 3, bob's new key removed")
+	assert.NotContains(t, ranks(), bobKey)
+}
+
+// SaveRankOverridesChanged writes a whole group in one write and reports a
+// change only when some rank in it actually moved.
+func TestSaveRankOverridesChanged_Group(t *testing.T) {
+	dir, err := os.MkdirTemp("", "overrides-group-*")
+	require.NoError(t, err)
+	defer os.RemoveAll(dir)
+	store, err := NewStore(dir)
+	require.NoError(t, err)
+	compID := "comp-group"
+	require.NoError(t, store.SaveCompetition(&Competition{ID: compID, Name: "Comp Group"}))
+	ranks := func() map[string]int {
+		o, lerr := store.LoadOverrides(compID)
+		require.NoError(t, lerr)
+		return o.PoolRanks["Pool A"]
+	}
+
+	changed, err := store.SaveRankOverridesChanged(compID, "Pool A", map[string]int{"a-id": 1, "b-id": 2, "c-id": 3})
+	require.NoError(t, err)
+	assert.True(t, changed)
+	assert.Equal(t, map[string]int{"id:a-id": 1, "id:b-id": 2, "id:c-id": 3}, ranks())
+
+	changed, err = store.SaveRankOverridesChanged(compID, "Pool A", map[string]int{"a-id": 1, "b-id": 2, "c-id": 3})
+	require.NoError(t, err)
+	assert.False(t, changed, "the same order again changes nothing")
+
+	changed, err = store.SaveRankOverridesChanged(compID, "Pool A", map[string]int{"a-id": 3, "b-id": 2, "c-id": 1})
+	require.NoError(t, err)
+	assert.True(t, changed)
+	assert.Equal(t, map[string]int{"id:a-id": 3, "id:b-id": 2, "id:c-id": 1}, ranks())
 }
 
 func TestSaveOverrides_InvalidDir(t *testing.T) {
@@ -156,7 +199,7 @@ func TestLoadOverrides_InvalidJSON(t *testing.T) {
 }
 
 // TestResetOverridesForce_RepairsCorruptFile is PR #416 finding 10: every
-// OTHER override writer (SaveRankOverrideChanged, SaveWinnerOverride,
+// OTHER override writer (SaveRankOverridesChanged, SaveWinnerOverride,
 // ResetOverridesChanged) goes through modifyOverridesChanged, which LOADS
 // the file first, so none of them can repair a corrupt overrides.json --
 // including "reset", which one might expect to be the escape hatch.
@@ -232,12 +275,12 @@ func TestModifyOverridesChanged_NoChange(t *testing.T) {
 	require.NoError(t, store.SaveCompetition(&Competition{ID: compID, Name: "No Change"}))
 
 	// First save sets a rank
-	changed1, err := store.SaveRankOverrideChanged(compID, "Pool1", "alice-id", 1)
+	changed1, err := store.SaveRankOverridesChanged(compID, "Pool1", map[string]int{"alice-id": 1})
 	require.NoError(t, err)
 	assert.True(t, changed1)
 
 	// Saving the same value again should return false (no change)
-	changed2, err := store.SaveRankOverrideChanged(compID, "Pool1", "alice-id", 1)
+	changed2, err := store.SaveRankOverridesChanged(compID, "Pool1", map[string]int{"alice-id": 1})
 	require.NoError(t, err)
 	assert.False(t, changed2)
 }

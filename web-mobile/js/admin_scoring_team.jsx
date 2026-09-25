@@ -1644,7 +1644,7 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
   // header's Kiken/Fus. mark (WithdrawalMarkedName) and the Recorded line
   // (RecordedWithdrawal) here.
   if (keepsWithdrawal) {
-    const credit = creditedTotals(unscoredBouts.length, creditedSideKey(m.decisionBy));
+    const credit = creditedTotals(unscoredBouts.length, creditedSideKey(m));
     ivA += credit.ivA; ivB += credit.ivB; pwA += credit.pwA; pwB += credit.pwB;
   }
   const unfinishedBouts = (isKachinuki || keepsWithdrawal) ? [] : unscoredBouts;

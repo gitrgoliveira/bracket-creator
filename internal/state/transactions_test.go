@@ -1522,7 +1522,7 @@ func TestStoreTx_PendingPaths(t *testing.T) {
 
 // A transaction whose Apply fails AFTER its WAL committed is not dropped: the
 // next startup replays it. Its error therefore carries ErrTxCommitted, so a
-// caller that did work outside the WAL (engine.OverridePoolRank's
+// caller that did work outside the WAL (engine.OverridePoolRanks'
 // overrides.json) keeps that work for the replay instead of undoing it. A
 // Commit that fails commits nothing and carries no such mark.
 func TestWithTransaction_ApplyFailureAfterCommitIsMarked(t *testing.T) {

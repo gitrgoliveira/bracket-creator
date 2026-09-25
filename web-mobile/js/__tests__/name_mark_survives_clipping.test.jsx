@@ -1,5 +1,5 @@
-// bc-cse (fix #4): teamNameMark/teamNameMarkStr (match_scoreboard.jsx) and
-// barredNameMark (barred_chip.jsx) wrap a NumberedName clip element inside a
+// bc-cse (fix #4): teamNameMark (match_scoreboard.jsx) and barredNameMark
+// (barred_chip.jsx) wrap a NumberedName clip element inside a
 // BLOCK-ELLIPSIS cell (VSchedItem's .n, TWMatch's .tw-match__name, the admin
 // Scores row's .name, the TV headline -- see the sibling render suite for the
 // latter two). A long Shiro name used to clip the trailing mark/chip away;
@@ -132,8 +132,9 @@ describe('a team-match name mark survives clipping (bc-cse #4)', () => {
       for (const cell of cells) expect(hasClass(cell, 'msb-name--labelled')).toBe(true);
 
       // Aka carries the Fus. mark. It must be its own element (this is the
-      // regression fix #4 closes for THIS host specifically: teamNameMarkStr
-      // used to bake it into the plain string).
+      // regression fix #4 closes for THIS host specifically: baking the mark
+      // into the plain string, rather than a separate sb-result-mark
+      // element, used to clip it away).
       const marks = findAll(tree, n => hasClass(n, 'sb-result-mark'));
       expect(marks).toHaveLength(1);
       expect(marks[0].props.children).toBe('Fus.');

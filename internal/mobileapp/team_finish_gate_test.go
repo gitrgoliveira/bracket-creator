@@ -440,6 +440,124 @@ func TestTeamFinishGate_BulkScore(t *testing.T) {
 	})
 }
 
+// TestTeamFinishGate_BulkScore_MultiEntryUsesOneCompLoad pins bc-cse finding
+// 13: the competition record backing the team finish gate is loaded ONCE for
+// the whole batch (not once per entry), and that ONE load still gates every
+// entry correctly and independently -- a refused entry and an accepted entry
+// in the SAME request, sharing the SAME loaded competition record.
+func TestTeamFinishGate_BulkScore_MultiEntryUsesOneCompLoad(t *testing.T) {
+	r, store := setupTeamFinishServer(t, 3, state.TeamMatchTypeFixed)
+	require.NoError(t, store.SavePoolMatches("tf", []state.MatchResult{
+		{ID: finishGateMatchID, SideA: finishGateTeamA, SideAID: finishGateTeamAID,
+			SideB: finishGateTeamB, SideBID: finishGateTeamBID, Status: state.MatchStatusRunning},
+		{ID: "Pool A-2", SideA: finishGateTeamA, SideAID: finishGateTeamAID,
+			SideB: finishGateTeamB, SideBID: finishGateTeamBID, Status: state.MatchStatusRunning},
+	}))
+
+	unfinished := finishPayload(wonBout(1), wonBout(2))
+	unfinished["id"] = finishGateMatchID
+	complete := finishPayload(wonBout(1), wonBout(2), wonBout(3))
+	complete["id"] = "Pool A-2"
+
+	body, err := json.Marshal([]map[string]any{unfinished, complete})
+	require.NoError(t, err)
+	req, err := http.NewRequest(http.MethodPost, "/api/competitions/tf/matches/bulk-score", bytes.NewBuffer(body))
+	require.NoError(t, err)
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+
+	var resp map[string]any
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+	assert.EqualValues(t, 1, resp["succeeded"])
+	errs, ok := resp["errors"].([]any)
+	require.True(t, ok)
+	require.Len(t, errs, 1)
+	entry := errs[0].(map[string]any)
+	assert.Equal(t, finishGateMatchID, entry["matchId"])
+
+	ms, err := store.LoadPoolMatches("tf")
+	require.NoError(t, err)
+	byID := map[string]state.MatchResult{}
+	for _, m := range ms {
+		byID[m.ID] = m
+	}
+	assert.Equal(t, state.MatchStatusRunning, byID[finishGateMatchID].Status, "the refused entry writes nothing")
+	assert.Equal(t, state.MatchStatusCompleted, byID["Pool A-2"].Status, "the complete entry, gated by the SAME loaded comp, is still stored")
+}
+
+// loadCompetitionCountingStore wraps a real CompetitionStore, counting calls
+// to LoadCompetition and delegating every other method unchanged (via
+// interface embedding), so a handler wired against it behaves identically
+// while this test can assert exactly how many times it read the competition
+// record. bc-cse finding 13.
+type loadCompetitionCountingStore struct {
+	CompetitionStore
+	loadCompetitionCalls int
+}
+
+func (s *loadCompetitionCountingStore) LoadCompetition(id string) (*state.Competition, error) {
+	s.loadCompetitionCalls++
+	return s.CompetitionStore.LoadCompetition(id)
+}
+
+// TestTeamFinishGate_BulkScore_LoadsCompetitionOnce pins bc-cse finding 13:
+// bulk-score's team finish gate loads the competition record ONCE for the
+// whole batch, not once per entry (refuseUnfinishedTeamFinishForComp is
+// called against the ONE comp loaded before the per-entry loop, rather than
+// through refuseUnfinishedTeamFinish, which would reload it for every
+// entry).
+func TestTeamFinishGate_BulkScore_LoadsCompetitionOnce(t *testing.T) {
+	realStore, err := state.NewStore(t.TempDir())
+	require.NoError(t, err)
+	eng := engine.New(realStore)
+	hub := NewHub()
+	const compID = "tf-once"
+	require.NoError(t, realStore.SaveCompetition(&state.Competition{
+		ID: compID, Kind: "team", Format: state.CompFormatMixed, Status: state.CompStatusPools,
+		TeamSize: 3, TeamMatchType: state.TeamMatchTypeFixed,
+	}))
+	require.NoError(t, realStore.SaveParticipants(compID, []domain.Player{
+		{ID: finishGateTeamAID, Name: finishGateTeamA, Dojo: "DojoR"},
+		{ID: finishGateTeamBID, Name: finishGateTeamB, Dojo: "DojoT"},
+	}))
+	require.NoError(t, realStore.SavePoolMatches(compID, []state.MatchResult{
+		{ID: "Pool A-1", SideA: finishGateTeamA, SideAID: finishGateTeamAID, SideB: finishGateTeamB, SideBID: finishGateTeamBID, Status: state.MatchStatusRunning},
+		{ID: "Pool A-2", SideA: finishGateTeamA, SideAID: finishGateTeamAID, SideB: finishGateTeamB, SideBID: finishGateTeamBID, Status: state.MatchStatusRunning},
+		{ID: "Pool A-3", SideA: finishGateTeamA, SideAID: finishGateTeamAID, SideB: finishGateTeamB, SideBID: finishGateTeamBID, Status: state.MatchStatusRunning},
+	}))
+
+	counting := &loadCompetitionCountingStore{CompetitionStore: realStore}
+
+	gin.SetMode(gin.TestMode)
+	r := gin.New()
+	admin := r.Group("/api")
+	RegisterMatchHandlers(admin, eng, counting, realStore, hub, NewFileVerifier(realStore), realStore)
+
+	var entries []map[string]any
+	for _, mid := range []string{"Pool A-1", "Pool A-2", "Pool A-3"} {
+		e := finishPayload(wonBout(1), wonBout(2), wonBout(3))
+		e["id"] = mid
+		entries = append(entries, e)
+	}
+	body, err := json.Marshal(entries)
+	require.NoError(t, err)
+	req, err := http.NewRequest(http.MethodPost, "/api/competitions/"+compID+"/matches/bulk-score", bytes.NewBuffer(body))
+	require.NoError(t, err)
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+
+	var resp map[string]any
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+	assert.EqualValues(t, 3, resp["succeeded"], "all three entries must still be gated correctly and stored")
+
+	assert.Equal(t, 1, counting.loadCompetitionCalls,
+		"the competition is loaded ONCE for the whole 3-entry batch, not once per entry")
+}
+
 func TestRefuseUnfinishedTeamFinish_Scope(t *testing.T) {
 	store, err := state.NewStore(t.TempDir())
 	require.NoError(t, err)

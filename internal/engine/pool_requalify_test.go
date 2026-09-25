@@ -676,7 +676,7 @@ func TestOverridePoolRank_AnswersForTheKnockout(t *testing.T) {
 			return nil
 		})
 	}))
-	_, err := f.eng.OverridePoolRank(f.compID, "Pool A", rqID("A2"), 1, ForceOptions{Force: true})
+	_, err := f.eng.OverridePoolRanks(f.compID, "Pool A", []RankOverride{{PlayerID: rqID("A2"), Rank: 1}}, ForceOptions{Force: true})
 	var running *DownstreamKnockoutRunningError
 	require.ErrorAs(t, err, &running)
 	assert.Empty(t, running.MatchID, "no match is being corrected")
@@ -684,7 +684,7 @@ func TestOverridePoolRank_AnswersForTheKnockout(t *testing.T) {
 	require.NoError(t, f.scoreKO(m1.ID, "A1"))
 
 	// Played: named, with the places that move, and taken back.
-	changed, err := f.eng.OverridePoolRank(f.compID, "Pool A", rqID("A2"), 1)
+	changed, err := f.eng.OverridePoolRanks(f.compID, "Pool A", []RankOverride{{PlayerID: rqID("A2"), Rank: 1}})
 	assert.False(t, changed)
 	var played *DownstreamKnockoutPlayedError
 	require.ErrorAs(t, err, &played)
@@ -700,7 +700,7 @@ func TestOverridePoolRank_AnswersForTheKnockout(t *testing.T) {
 
 	// Confirmed: reopened, repainted, nobody twice.
 	var reopened []ReopenedMatch
-	changed, err = f.eng.OverridePoolRank(f.compID, "Pool A", rqID("A2"), 1, ForceOptions{Force: true, Reopened: &reopened})
+	changed, err = f.eng.OverridePoolRanks(f.compID, "Pool A", []RankOverride{{PlayerID: rqID("A2"), Rank: 1}}, ForceOptions{Force: true, Reopened: &reopened})
 	require.NoError(t, err)
 	assert.True(t, changed)
 	assert.Equal(t, 1, ranks()[helper.CompetitorKey(rqID("A2"), "", "")])

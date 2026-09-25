@@ -847,10 +847,18 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
     // CORRECTION mode with the match it had just started hidden until "Back
     // to court" (UAT, bc-tmfn). Keyed on the status VALUE, never the match
     // object, which every refetch re-creates.
+    //
+    // A cleared match-level fusensho whose competitor is still barred
+    // reopens to "scheduled" instead (engine.reopenTargetStatus): there is
+    // no bout to pick, but the correction still ends, so the panel returns
+    // to the court's ordinary view rather than staying pinned to it.
     const correctingStatus = correctingMatch ? correctingMatch.status : null;
     useEffectSh(() => {
-        if (correctingKey && correctingStatus === "running") {
+        if (!correctingKey) return;
+        if (correctingStatus === "running") {
             setPickedKey(correctingKey);
+            setCorrectingKey(null);
+        } else if (correctingStatus === "scheduled") {
             setCorrectingKey(null);
         }
     }, [correctingKey, correctingStatus]);

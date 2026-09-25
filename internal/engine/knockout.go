@@ -239,7 +239,7 @@ func qualifierLabelPool(label string) string {
 // the name above that verdict is the defect the requalification planner exists
 // to prevent. That planner reopens such a match (with the operator's
 // confirmation) BEFORE calling this, so on its path nothing is left to skip,
-// and so does the pool-rank override door (OverridePoolRank). The skip is the
+// and so does the pool-rank override door (OverridePoolRanks). The skip is the
 // safety net for the bare-store door, where standings can still move without
 // either: a pool file edited by hand, or DELETE .../overrides (the corrupt-file
 // repair door) clearing a chusen. It is all-or-nothing per pool: one locked

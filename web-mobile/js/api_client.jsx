@@ -19,7 +19,7 @@
 // the 200 body (mp-y3nk), so the caller can tell a landed write from a stale
 // reconnect replay the server dropped.
 //
-// Empty-body methods (overridePoolRank,
+// Empty-body methods (overridePoolRanks,
 // resetOverrides, updateMatchTime, moveMatchCourt,
 // deleteCompetition) deliberately return `true`
 // rather than `res.json()`: calling res.json() on a 200/204 with no
@@ -80,7 +80,7 @@ async function reopenFailureError(res) {
     // knockout correction gets, parsed by the same helper, so the caller asks
     // downstreamKnockoutPlayedRefusal(e) and confirms before retrying with force.
     // `reopen` marks it as met by a reopen rather than a corrected result, for
-    // the dialog's copy (write_result.jsx), the way overridePoolRank marks
+    // the dialog's copy (write_result.jsx), the way overridePoolRanks marks
     // `ranking`.
     //
     // bc-rawm: routed through the shared _downstreamRefusalError rather than
@@ -1909,7 +1909,7 @@ const API = {
         }
         // Backend returns 204 No Content: calling .json() on an empty
         // body throws SyntaxError per the Fetch spec (same pattern as
-        // overridePoolRank etc. above).
+        // overridePoolRanks etc. above).
         return true;
     },
     // Set or rotate the elevated (destructive-ops) admin password (spec 004
@@ -2682,13 +2682,18 @@ const API = {
         }
         return res.json();
     },
-    // playerId is REQUIRED (operator ruling bc-pnum): the server resolves a
-    // pool member by id only (resolvePoolOverrideTarget,
+    // overridePoolRanks records a whole group of pool ranks, a chusen's order,
+    // as ONE write: ranks is [{ playerId, rank }], and the server records
+    // every rank together and answers for the final order only. Sent one rank
+    // at a time, the order passed through states nobody chose, so a knockout
+    // match whose place the final order keeps could be named and reopened.
+    //
+    // playerId is REQUIRED on every entry (operator ruling bc-pnum): the
+    // server resolves a pool member by id only (poolHasPlayerID,
     // handlers_competition.go) and rejects the request with 400 when it is
     // missing -- two pool members can legally share a display name from
-    // different dojos, so playerName alone can never disambiguate them.
-    // playerDojo is NOT sent: the server never read it (id-only resolution
-    // has no use for it), so a caller has nothing to gain by supplying it.
+    // different dojos, so a name can never disambiguate them. Neither a name
+    // nor a dojo is sent: the server never reads them.
     //
     // forceDownstreamReopen is the operator's confirmation of a 409
     // downstream_knockout_played refusal: a new order that moves a qualifier
@@ -2699,8 +2704,8 @@ const API = {
     // confirm-and-retry (write_result.jsx's attemptScoreWrite); `ranking`
     // marks the refusal as a rank change rather than a corrected result, for
     // the dialog's copy.
-    async overridePoolRank(compID, poolID, playerName, rank, password, playerId, forceDownstreamReopen) {
-        const body = { playerName, rank, playerId };
+    async overridePoolRanks(compID, poolID, ranks, password, forceDownstreamReopen) {
+        const body = { ranks };
         if (forceDownstreamReopen) body.forceDownstreamReopen = true;
         const res = await fetch(`/api/competitions/${compID}/pools/${poolID}/override-rank`, {
             method: 'PUT',
@@ -3556,7 +3561,7 @@ const API = {
 
     // chusenCandidates: GET /competitions/:id/chusen-candidates
     // Consequential team-pool ties the daihyosen could not settle; the operator
-    // resolves each by chusen (drawing lots), recorded via overridePoolRank.
+    // resolves each by chusen (drawing lots), recorded via overridePoolRanks.
     async chusenCandidates(compID, password) {
         // Lives in the admin-gated competition router, so it needs the
         // tournament password header (unlike the public league candidates GET).

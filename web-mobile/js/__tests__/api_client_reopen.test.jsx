@@ -66,7 +66,7 @@ describe('API.reopenMatch', () => {
       (e) => e
     );
     // `reopen` marks the refusal as met by a reopen rather than a corrected
-    // result, for the confirm dialog's copy (the way overridePoolRank marks
+    // result, for the confirm dialog's copy (the way overridePoolRanks marks
     // `ranking`).
     expect(err.downstreamKnockoutPlayed).toEqual({
       matchId: 'm-r1-0',

@@ -106,14 +106,38 @@ func refuseUnfinishedTeamFinish(store CompetitionStore, compID, matchID string, 
 	if err != nil {
 		return nil, err
 	}
+	return refuseUnfinishedTeamFinishForComp(comp, matchID, req), nil
+}
+
+// refuseUnfinishedTeamFinishForComp is the load-free core of the team finish
+// gate: the same check as refuseUnfinishedTeamFinish, for a caller that
+// already holds the competition record (bc-cse finding 13). It is the ONE
+// gate body /score, bulk-score, and quick-score all call:
+//
+//   - refuseUnfinishedTeamFinish (above) is the thin per-call wrapper /score
+//     and quick-score use, each loading the competition itself once per
+//     request.
+//   - bulk-score loads the competition ONCE before its per-entry loop and
+//     calls this directly for every entry, rather than re-loading it once
+//     per entry the way a call through refuseUnfinishedTeamFinish would.
+//
+// See refuseUnfinishedTeamFinish's own doc comment for what this checks and
+// what is deliberately out of scope.
+func refuseUnfinishedTeamFinishForComp(comp *state.Competition, matchID string, req *state.MatchResult) *ValidationError {
+	if req.Status != state.MatchStatusCompleted || domain.IsWithdrawalDecisionStr(req.Decision) {
+		return nil
+	}
+	if engine.IsPoolDaihyosenMatchID(matchID) || engine.IsTiebreakerMatchID(matchID) {
+		return nil
+	}
 	if comp == nil || comp.TeamSize < 2 || comp.IsKachinuki() {
-		return nil, nil
+		return nil
 	}
 	bouts := unfinishedTeamBouts(req.SubResults, comp.TeamSize)
 	if len(bouts) == 0 {
-		return nil, nil
+		return nil
 	}
-	return &ValidationError{Message: unfinishedTeamBoutsMessage(comp.TeamSize, bouts)}, nil
+	return &ValidationError{Message: unfinishedTeamBoutsMessage(comp.TeamSize, bouts)}
 }
 
 // teamFinishRefusalUnderTx is the in-transaction half of the team finish gate:

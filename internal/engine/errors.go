@@ -89,7 +89,7 @@ var ErrDownstreamKnockoutPlayed = errors.New("downstream knockout match already 
 // fought stands on it (requalifyAfterPoolWrite): MatchID is then the pool
 // match, Blocking the knockout matches fought, QualifierChange the places
 // that move, and Force reopens those matches with the new qualifier seated.
-// A pool-rank override (OverridePoolRank) is answered the same way, with an
+// A pool-rank override (OverridePoolRanks) is answered the same way, with an
 // empty MatchID: it moves the pool's order without correcting any match.
 type DownstreamKnockoutPlayedError struct {
 	// MatchID is the id of the match being corrected; "" for a pool-rank
@@ -177,7 +177,7 @@ func (e *DownstreamKnockoutPlayedError) Error() string {
 		pool := e.QualifierChange[0].Pool
 		change := fmt.Sprintf("correcting %s changes who qualified from %s", label, pool)
 		if e.MatchID == "" {
-			// A pool-rank override (OverridePoolRank) corrects no match.
+			// A pool-rank override (OverridePoolRanks) corrects no match.
 			change = fmt.Sprintf("changing the ranking of %s changes who qualified from it", pool)
 		}
 		return fmt.Sprintf("%s, and %s %s already fought by %s. Retry with forceDownstreamReopen to apply the change and reopen %s to be fought again",
@@ -223,7 +223,7 @@ var ErrDownstreamKnockoutRunning = errors.New("downstream knockout match is bein
 // operator is never asked to confirm something that would then be refused.
 type DownstreamKnockoutRunningError struct {
 	// MatchID is the pool match being corrected; "" for a pool-rank override
-	// (OverridePoolRank), which corrects none.
+	// (OverridePoolRanks), which corrects none.
 	MatchID string
 	// Running is every knockout match the move would reach that is being
 	// fought, each with the number the operator knows it by.
@@ -266,68 +266,6 @@ func (e *DownstreamKnockoutRunningError) Is(target error) bool {
 	return target == ErrDownstreamKnockoutRunning
 }
 
-// ErrReopenDownstreamResolved is the sentinel matched by errors.Is for
-// ReopenDownstreamResolvedError. Handlers should return HTTP 409.
-//
-// bc-cse.
-var ErrReopenDownstreamResolved = errors.New("cannot reopen: a downstream knockout match was already resolved automatically")
-
-// ReopenDownstreamResolvedError refuses a reopen (kachinuki.go,
-// reopenBracketDownstreamCheck) because a downstream match this match feeds
-// (the next round, or for a semifinal the bronze) auto-completed from a
-// BYE -- it carries no result of its own (bracketMatchCarriesOwnResult is
-// false: no ippons, sub-results, decision, or hansoku were ever recorded for
-// it), so it is neither "someone is fighting it now"
-// (DownstreamKnockoutRunningError, whose "finish it or requeue it" remedy
-// does not apply here -- nobody is fighting a bye) nor "closed with a result
-// of its own, which the operator may confirm past"
-// (DownstreamKnockoutPlayedError). Terminal like the running case: retrying
-// the SAME reopen is never the answer, since there is no bout to finish or
-// court to free -- but a SAVE CORRECTION on this match is: propagateBracketWinner
-// (scoring.go) reseats a bye-only downstream slot unconditionally, with no
-// guard and no confirmation (guardDownstreamKnockoutCorrection's blocking
-// check is firstDownstreamWithOwnResult, the SAME bracketMatchCarriesOwnResult
-// predicate, so a bye-only slot never blocks it), exactly matching
-// docs/user-guide/court-operators/scoring-a-match.md's documented contract
-// ("A later slot that was only filled by a bye, and never fought, does not
-// block a correction; it simply updates to follow the new winner"). So the
-// remedy for THIS refusal is the OTHER door, not the draw/seeding.
-type ReopenDownstreamResolvedError struct {
-	// MatchID is the id of the match being reopened.
-	MatchID string
-	// Resolved is every downstream match auto-completed by a bye that this
-	// reopen would strand (almost always one; a semifinal can feed both the
-	// final's slot and the bronze match, so it can be two).
-	Resolved []ReopenedMatch
-}
-
-// Error is the operator-facing sentence (mirrors
-// DownstreamKnockoutRunningError.Error's shape and pluralisation, but names
-// what actually happened -- a bye, not a fight -- and the different remedy:
-// there is nothing here for the operator to finish or requeue, so the fix is
-// the correction path, not this reopen; see the struct doc for why that door
-// is known to work here).
-func (e *ReopenDownstreamResolvedError) Error() string {
-	labels := make([]string, 0, len(e.Resolved))
-	for _, r := range e.Resolved {
-		labels = append(labels, MatchLabel(r))
-	}
-	subject := strings.Join(labels, " and ")
-	if subject == "" {
-		subject = "A downstream match"
-	}
-	verb, them := "has", "it"
-	if len(labels) > 1 {
-		verb, them = "have", "them"
-	}
-	return fmt.Sprintf("%s already %s a result from a bye, not from being fought, so reopening this match cannot undo %s. Correct the result instead: Save correction on this match moves the new winner through the bye.",
-		SentenceCase(subject), verb, them)
-}
-
-func (e *ReopenDownstreamResolvedError) Is(target error) bool {
-	return target == ErrReopenDownstreamResolved
-}
-
 // MatchLabel names a KNOCKOUT match the way the OPERATOR sees it: its match
 // number, the label on the score sheet, the bracket and the Excel tree sheet,
 // qualified by its round, "Match 3 (Final)". The round is what tells it apart
@@ -359,11 +297,11 @@ func (e *ReopenDownstreamResolvedError) Is(target error) bool {
 // (MatchLabel above, OperatorMatchLabel, operatorMatchLabel) deliberately
 // starts lowercase mid-sentence ("the 3rd-place match", "knockout Match 3",
 // a bare pool name), which reads wrong the moment one is interpolated at
-// the START of a sentence ("%s is not completed yet..."). Extracted from
-// two hand-rolled copies (DownstreamKnockoutRunningError.Error,
-// ReopenDownstreamResolvedError.Error below) so every OTHER sentence-initial
-// use -- in this package and in mobileapp, which already imports engine --
-// shares the one capitalisation rule instead of a third hand-rolled copy.
+// the START of a sentence ("%s is not completed yet..."). Extracted from a
+// hand-rolled copy (DownstreamKnockoutRunningError.Error) so every OTHER
+// sentence-initial use -- in this package and in mobileapp, which already
+// imports engine -- shares the one capitalisation rule instead of another
+// hand-rolled copy.
 func SentenceCase(s string) string {
 	if s == "" {
 		return s

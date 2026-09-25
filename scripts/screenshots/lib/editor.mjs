@@ -1,7 +1,7 @@
 // What every recipe that drives a score editor agrees on: which element the
 // editor IS, how a match is started, and how its Finish commits. Everything else about driving one
 // (how a bout is scored, how a fighter is named) differs between the
-// individual, fixed-order team and kachinuki editors, so it stays in the recipe
+// individual, team and kachinuki editors, so it stays in the recipe
 // that needs it; see the note at the end of lib/ui.mjs.
 
 // The editor dialog. Every overlay editor renders `.modal-backdrop
@@ -10,7 +10,17 @@
 // so the testid names the BACKDROP and the class names the dialog itself.
 export const EDITOR = '.editor-modal';
 
-// Finish is a two-tap guard on the individual and fixed-order team editors:
+// The same editor mounted INLINE, as the shiaijo page (/admin/shiaijo/:court)
+// does: admin_scoring_individual.jsx renders `variant="inline"` as
+// `<div class="scoring-panel editor-modal--compact">`, with no backdrop and no
+// `.editor-modal` class, so EDITOR matches nothing there. finishMatch takes
+// the editor's selector as `root` for that reason; the default keeps every
+// overlay caller unchanged. startMatch does not: on that page "Start match"
+// lives on the Up next card, outside the editor, and the card's button never
+// leaves (it moves on to the next match), so startMatch's wait would not hold.
+export const INLINE_EDITOR = '.scoring-panel';
+
+// Finish is a two-tap guard on the individual and (non-kachinuki) team editors:
 // the first tap arms the button ("Tap again to finish"), only the second
 // submits (admin_scoring_individual.jsx and admin_scoring_team.jsx, the
 // `finishArmed` label). Its label is "Finish + Start Next →" instead whenever
@@ -22,8 +32,8 @@ export const EDITOR = '.editor-modal';
 // mean. If it never appears the wait throws, because a Finish that did not arm
 // did not finish. Not for the engi editor ("Save result" commits in one tap)
 // or a correction ("Save correction" does not arm either).
-export async function finishMatch(page) {
-  const modal = page.locator(EDITOR).first();
+export async function finishMatch(page, root = EDITOR) {
+  const modal = page.locator(root).first();
   await modal.locator('button').filter({ hasText: /^Finish( \+ Start Next|$)/ }).first().click();
   const armed = modal.locator('button').filter({ hasText: /^Tap again to finish/ }).first();
   await armed.waitFor({ state: 'visible', timeout: 3000 });

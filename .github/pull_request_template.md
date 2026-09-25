@@ -60,6 +60,7 @@ read the diff. See CONTRIBUTING and CLAUDE.md.
 - [ ] `make go/test` passes (lint + security scan + tests)
 - [ ] New/updated unit tests cover the change
 - [ ] Manual browser verification (for `web-mobile/` or `web/` changes): describe what you exercised
+- [ ] `make e2e` green locally (any `web-mobile/` change)
 - [ ] Screenshots added above (REQUIRED for any UI-affecting change)
 - [ ] Docs updated under `docs/` for any new or changed user-facing feature, flag, command, or behavior (`make docs/build` passes)
 - [ ] Docs screenshots and videos recaptured for any change to what a user sees (`make docs/media SINCE=main`; the changed ones reviewed and copied into `docs/`, or "none changed")

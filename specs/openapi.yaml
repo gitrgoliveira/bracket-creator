@@ -128,9 +128,6 @@ paths:
                 determined:
                   type: string
                   enum: ["on", "off"]
-                mirror:
-                  type: string
-                  enum: ["on", "off"]
                 titlePrefix:
                   type: string
                 numberPrefix:
@@ -1066,7 +1063,7 @@ paths:
         on-disk record: `name`, `date`, `startTime`, `poolSize`,
         `poolWinners`, `poolSizeMode`, `poolFormat`, `extraQualifiers`,
         `courts`, `roundRobin`, `withZekkenName`, `teamSize`,
-        `numberPrefix`, `format`, `kind`, `mirror`,
+        `numberPrefix`, `format`, `kind`,
         `poolMatchDurationSeconds`, `knockoutMatchDurationSeconds`,
         `swissRounds`, `naginata`, `engi`, `teamMatchType`,
         `checkInEnabled`, `leagueTiebreakTopN`, `leagueTwoThirdPlaces`.
@@ -1088,8 +1085,8 @@ paths:
         `checkInEnabled`, `swissRounds` and `numberPrefix`) is editable
         regardless of status through this endpoint; `poolSize`, `poolWinners`,
         `poolSizeMode`, `poolFormat`, `extraQualifiers`, `courts`,
-        `roundRobin`, `teamSize`, `withZekkenName` and
-        `mirror` are additionally subject to the draw-ready
+        `roundRobin`, `teamSize` and `withZekkenName`
+        are additionally subject to the draw-ready
         output-affecting 409 (see below) while status is exactly
         `draw-ready`, but are not blocked once the competition has moved
         past it.
@@ -1223,7 +1220,7 @@ paths:
 
             * Output-affecting settings (format, courts, pool
               size/winners/mode, extra qualifiers, pool format, round-robin,
-              mirror, team size, kind, team match type, zekken
+              team size, kind, team match type, zekken
               display) were changed while the competition is in `draw-ready`
               state; discard the draw first. `numberPrefix` is NOT one of
               these: it can be changed in any status, including `draw-ready`
@@ -4330,8 +4327,6 @@ components:
             `completed` → finished; `invalid` → operator-declared invalid,
             prerequisite for deleting an already-started competition.
           enum: [setup, draw-ready, pools, knockout, completed, invalid, ""]
-        mirror:
-          type: boolean
         withZekkenName:
           type: boolean
         numberPrefix:

@@ -2610,7 +2610,6 @@ func TestPUTCompetition_LegacyUnrelatedFieldChangeHealsPoolsCSV(t *testing.T) {
 		"poolSize":       4,
 		"poolWinners":    2,
 		"roundRobin":     false,
-		"mirror":         false,
 		"checkInEnabled": true, // the only field this PUT actually changes
 		// numberPrefix deliberately omitted.
 	})
@@ -2837,7 +2836,7 @@ func TestPUTCompetition_GrandfathersUnmovedAmbiguousOrDuplicateStoredValues(t *t
 		body, _ := json.Marshal(map[string]any{
 			"id": "grandfather-k2", "name": "Grandfather K2", "format": state.CompFormatMixed,
 			"kind": "individual", "courts": []string{"A"}, "poolSize": 4, "poolWinners": 2,
-			"roundRobin": false, "mirror": false, "numberPrefix": "K2",
+			"roundRobin": false, "numberPrefix": "K2",
 			"date": "02-01-2026", // the only field this PUT actually changes
 		})
 		w := httptest.NewRecorder()
@@ -2860,7 +2859,7 @@ func TestPUTCompetition_GrandfathersUnmovedAmbiguousOrDuplicateStoredValues(t *t
 		body, _ := json.Marshal(map[string]any{
 			"id": "grandfather-k2", "name": "Grandfather K2", "format": state.CompFormatMixed,
 			"kind": "individual", "courts": []string{"A"}, "poolSize": 4, "poolWinners": 2,
-			"roundRobin": false, "mirror": false, "numberPrefix": "K9", // ambiguous with sibling "K"
+			"roundRobin": false, "numberPrefix": "K9", // ambiguous with sibling "K"
 		})
 		w := httptest.NewRecorder()
 		req, _ := http.NewRequest("PUT", "/api/competitions/grandfather-k2", bytes.NewBuffer(body))
@@ -2933,7 +2932,7 @@ func TestPUTCompetition_HealOnlyRenumberBroadcasts(t *testing.T) {
 	body, _ := json.Marshal(map[string]any{
 		"id": cid, "name": "Heal Only Broadcast", "format": state.CompFormatMixed,
 		"kind": "individual", "courts": []string{"A"}, "poolSize": 4, "poolWinners": 2,
-		"roundRobin": false, "mirror": false, "numberPrefix": "K",
+		"roundRobin": false, "numberPrefix": "K",
 	})
 	w := httptest.NewRecorder()
 	req, _ := http.NewRequest("PUT", "/api/competitions/"+cid, bytes.NewBuffer(body))
@@ -3021,7 +3020,7 @@ func TestPUTCompetition_SettingsOnlyResponseCarriesNoProvisionalNumbers(t *testi
 	body, _ := json.Marshal(map[string]any{
 		"id": cid, "name": "Settings No Provisional", "format": state.CompFormatMixed,
 		"kind": "individual", "courts": []string{"A"}, "poolSize": 4, "poolWinners": 2,
-		"roundRobin": false, "mirror": false, "numberPrefix": "X",
+		"roundRobin": false, "numberPrefix": "X",
 		// players deliberately OMITTED: this is a settings-only PUT.
 	})
 	w := httptest.NewRecorder()
@@ -4084,7 +4083,6 @@ func TestPUTCompetition_DrawReadyOutputAffectingGate(t *testing.T) {
 			"poolSize":    5, // changed from stored 4, output-affecting
 			"poolWinners": 2,
 			"roundRobin":  false,
-			"mirror":      false,
 		})
 		w := httptest.NewRecorder()
 		req, _ := http.NewRequest("PUT", "/api/competitions/"+cid, bytes.NewBuffer(body))
@@ -4116,7 +4114,6 @@ func TestPUTCompetition_DrawReadyOutputAffectingGate(t *testing.T) {
 			"poolSize":    4,
 			"poolWinners": 2,
 			"roundRobin":  false,
-			"mirror":      false,
 		})
 		w := httptest.NewRecorder()
 		req, _ := http.NewRequest("PUT", "/api/competitions/"+cid, bytes.NewBuffer(body))
@@ -4153,7 +4150,6 @@ func TestPUTCompetition_DrawReadyOutputAffectingGate(t *testing.T) {
 				"poolSize":    4,
 				"poolWinners": 2,
 				"roundRobin":  false,
-				"mirror":      false,
 				tc.field:      tc.value, // the only output-affecting change
 			})
 			w := httptest.NewRecorder()
@@ -4191,7 +4187,6 @@ func TestPUTCompetition_DrawReadyOutputAffectingGate(t *testing.T) {
 			"poolSize":     4,
 			"poolWinners":  2,
 			"roundRobin":   false,
-			"mirror":       false,
 			"numberPrefix": "X", // the only output-affecting-looking change
 		})
 		w := httptest.NewRecorder()
@@ -4233,7 +4228,6 @@ func TestPUTCompetition_DrawReadyOutputAffectingGate(t *testing.T) {
 			"poolSize":    4,     // same as stored
 			"poolWinners": 2,     // same as stored
 			"roundRobin":  false, // same as stored
-			"mirror":      false, // same as stored
 		})
 		w := httptest.NewRecorder()
 		req, _ := http.NewRequest("PUT", "/api/competitions/"+cid, bytes.NewBuffer(body))
@@ -4288,7 +4282,6 @@ func TestPUTCompetition_OmittedNumberPrefixInheritsStored(t *testing.T) {
 		"poolSize":    4,
 		"poolWinners": 2,
 		"roundRobin":  false,
-		"mirror":      false,
 		// numberPrefix deliberately OMITTED: the exact shape a client that
 		// has never heard of the field, or simply doesn't echo it back, sends.
 	})
@@ -4342,7 +4335,7 @@ func TestPUTCompetition_RenumberFailurePolicy(t *testing.T) {
 		body, _ := json.Marshal(map[string]any{
 			"id": cid, "name": "Renumber Fail Rename Renamed", "format": state.CompFormatMixed,
 			"kind": "individual", "courts": []string{"A"}, "poolSize": 4, "poolWinners": 2,
-			"roundRobin": false, "mirror": false, "numberPrefix": "K", // unchanged
+			"roundRobin": false, "numberPrefix": "K", // unchanged
 		})
 		w := httptest.NewRecorder()
 		req, _ := http.NewRequest("PUT", "/api/competitions/"+cid, bytes.NewBuffer(body))
@@ -4373,7 +4366,7 @@ func TestPUTCompetition_RenumberFailurePolicy(t *testing.T) {
 		body, _ := json.Marshal(map[string]any{
 			"id": cid, "name": "Renumber Fail Prefix", "format": state.CompFormatMixed,
 			"kind": "individual", "courts": []string{"A"}, "poolSize": 4, "poolWinners": 2,
-			"roundRobin": false, "mirror": false, "numberPrefix": "X", // moved
+			"roundRobin": false, "numberPrefix": "X", // moved
 		})
 		w := httptest.NewRecorder()
 		req, _ := http.NewRequest("PUT", "/api/competitions/"+cid, bytes.NewBuffer(body))
@@ -4420,7 +4413,7 @@ func TestPUTCompetition_RenumberFailurePolicy(t *testing.T) {
 		body, _ := json.Marshal(map[string]any{
 			"id": cid, "name": "Renumber Fail Omitted Renamed", "format": state.CompFormatMixed,
 			"kind": "individual", "courts": []string{"A"}, "poolSize": 4, "poolWinners": 2,
-			"roundRobin": false, "mirror": false,
+			"roundRobin": false,
 			// numberPrefix deliberately omitted: inherited as "K".
 		})
 		w := httptest.NewRecorder()
@@ -4564,7 +4557,6 @@ func TestUpdateCompetition_TeamMatchTypeLockedDrawReady(t *testing.T) {
 			"poolSize":      4,
 			"poolWinners":   2,
 			"roundRobin":    false,
-			"mirror":        false,
 		})
 		w := httptest.NewRecorder()
 		req, _ := http.NewRequest("PUT", "/api/competitions/"+cid, bytes.NewBuffer(body))
@@ -4595,7 +4587,6 @@ func TestUpdateCompetition_TeamMatchTypeLockedDrawReady(t *testing.T) {
 			"poolSize":      4,
 			"poolWinners":   2,
 			"roundRobin":    false,
-			"mirror":        false,
 		})
 		w := httptest.NewRecorder()
 		req, _ := http.NewRequest("PUT", "/api/competitions/"+cid, bytes.NewBuffer(body))
@@ -4655,7 +4646,6 @@ func TestUpdateCompetition_TeamMatchTypeDrawReadyOmittedAndLegacy(t *testing.T) 
 			"poolSize":    4,
 			"poolWinners": 2,
 			"roundRobin":  false,
-			"mirror":      false,
 		})
 		w := httptest.NewRecorder()
 		req, _ := http.NewRequest("PUT", "/api/competitions/"+cid, bytes.NewBuffer(body))
@@ -4700,7 +4690,6 @@ func TestUpdateCompetition_TeamMatchTypeDrawReadyOmittedAndLegacy(t *testing.T) 
 			"poolSize":      4,
 			"poolWinners":   2,
 			"roundRobin":    false,
-			"mirror":        false,
 		})
 		w := httptest.NewRecorder()
 		req, _ := http.NewRequest("PUT", "/api/competitions/"+cid, bytes.NewBuffer(body))
@@ -4876,7 +4865,6 @@ func TestUpdateCompetition_TeamMatchTypeLockedWhenStarted(t *testing.T) {
 			"poolSize":      4,
 			"poolWinners":   2,
 			"roundRobin":    false,
-			"mirror":        false,
 		}
 	}
 	put := func(payload map[string]any) *httptest.ResponseRecorder {

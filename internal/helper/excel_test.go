@@ -675,7 +675,7 @@ func TestPrintPoolMatchesCourts(t *testing.T) {
 			}
 			poolCoords, pCoords := makeTestPoolCoordMaps(pools)
 
-			matchWinners, _ := PrintPoolMatches(f, pools, 0, 1, CourtLabels(tt.numCourts), nil, false, poolCoords, pCoords, false)
+			matchWinners, _ := PrintPoolMatches(f, pools, 0, 1, CourtLabels(tt.numCourts), nil, poolCoords, pCoords, false)
 
 			// Must have one matchWinner per pool (position 1)
 			if len(matchWinners) != tt.numPools {
@@ -706,27 +706,22 @@ func TestMatchHeader(t *testing.T) {
 	sheet := "MatchHeaderSheet"
 	f.NewSheet(sheet)
 
-	// test no mirror
-	MatchHeader(f, sheet, "A", 1, "D", "G", false, false)
-	val1, _ := f.GetCellValue(sheet, "A1")
-	if val1 != "Red" {
-		t.Errorf("Expected 'Red', got '%s'", val1)
-	}
-	val2, _ := f.GetCellValue(sheet, "G1")
-	if val2 != "White" {
-		t.Errorf("Expected 'White', got '%s'", val2)
-	}
+	// White (Shiro) on the left, Red (Aka) on the right, each label in its
+	// own side's header style.
+	MatchHeader(f, sheet, "A", 1, "D", "G", false)
+	left, _ := f.GetCellValue(sheet, "A1")
+	assert.Equal(t, "White", left)
+	middle, _ := f.GetCellValue(sheet, "D1")
+	assert.Equal(t, "vs", middle)
+	right, _ := f.GetCellValue(sheet, "G1")
+	assert.Equal(t, "Red", right)
 
-	// test mirror
-	MatchHeader(f, sheet, "A", 2, "D", "G", true, false)
-	val3, _ := f.GetCellValue(sheet, "A2")
-	if val3 != "White" {
-		t.Errorf("Expected 'White', got '%s'", val3)
-	}
-	val4, _ := f.GetCellValue(sheet, "G2")
-	if val4 != "Red" {
-		t.Errorf("Expected 'Red', got '%s'", val4)
-	}
+	leftStyle, err := f.GetCellStyle(sheet, "A1")
+	require.NoError(t, err)
+	assert.Equal(t, getWhiteHeaderStyle(f), leftStyle, "the left label wears the white header style")
+	rightStyle, err := f.GetCellStyle(sheet, "G1")
+	require.NoError(t, err)
+	assert.Equal(t, getRedHeaderStyle(f), rightStyle, "the right label wears the red header style")
 }
 
 func TestSetupNamesToPrintLayout(t *testing.T) {

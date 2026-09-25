@@ -42,7 +42,6 @@ type ImportManifestComp struct {
 	NumberPrefix   string   `yaml:"number_prefix"`
 	WithZekkenName bool     `yaml:"with_zekken_name"`
 	TeamSize       int      `yaml:"team_size"`
-	Mirror         bool     `yaml:"mirror"`
 	StartTime      string   `yaml:"start_time"`
 	Date           string   `yaml:"date"`
 	// SwissRounds, number of Swiss rounds to play when format=swiss
@@ -208,7 +207,6 @@ func importCompetition(store *state.Store, eng *engine.Engine, entry ImportManif
 		NumberPrefix:   strings.TrimSpace(entry.NumberPrefix),
 		WithZekkenName: entry.WithZekkenName,
 		TeamSize:       entry.TeamSize,
-		Mirror:         entry.Mirror,
 		StartTime:      strings.TrimSpace(entry.StartTime),
 		Date:           strings.TrimSpace(entry.Date),
 		SwissRounds:    entry.SwissRounds,

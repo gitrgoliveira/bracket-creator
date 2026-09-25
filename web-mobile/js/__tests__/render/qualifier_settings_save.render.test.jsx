@@ -7,7 +7,7 @@ import { installSettingsHarness, mountSettings, makeSettingsCompetition } from '
 //
 // Standard's wire value is the empty string, which is falsy, so the settings
 // payload builder's habitual `effective.X || latestC.X || ""` idiom -- correct
-// for a field whose empty value means "unset" (mirror, teamMatchType) -- reads
+// for a field whose empty value means "unset" (teamMatchType) -- reads
 // the operator's explicit "Standard" pick as absent and re-sends the stored
 // non-standard value. Two operator-visible failures follow, and this file pins
 // both against the PUT payload rather than against the source text:

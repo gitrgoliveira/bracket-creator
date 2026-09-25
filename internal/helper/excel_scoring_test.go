@@ -13,8 +13,8 @@ import (
 // Individual (teamMatches=0), 2-player pool (1 match):
 //   Row 4: score input  B4=lV(Victories)  C4=lP(Points)  D4=vs  E4=rP  F4=rV
 //   Row 6: results header
-//   Row 7: Alice (SideA, left)  B7=W  C7=L  D7=T  E7=PW  F7=PL
-//   Row 8: Bob   (SideB, right) B8=W  C8=L  D8=T  E8=PW  F8=PL
+//   Row 7: Alice (SideA, right) B7=W  C7=L  D7=T  E7=PW  F7=PL
+//   Row 8: Bob   (SideB, left)  B8=W  C8=L  D8=T  E8=PW  F8=PL
 //
 // Individual, 3-player round-robin (3 matches):
 //   Row 4: Match 0 Alice vs Bob
@@ -24,7 +24,7 @@ import (
 //   Row 9: Alice, Row 10: Bob, Row 11: Carol
 //
 // Team (teamMatches=1), 2-player pool (1 match):
-//   Row 3: match header (Red/White)
+//   Row 3: match header (White/Red)
 //   Row 4: summary row   B4=IV_left  C4=PW_left  D4=vs  E4=PW_right  F4=IV_right
 //   Row 5: sub-match 1   B5=lV  C5=lP  D5=vs  E5=rP  F5=rV
 //   Row 8: Table 1 header (W/L/T at B8/C8/D8)
@@ -49,8 +49,8 @@ import (
 //
 //	Row 4: score input  B4=lV(Victories)  C4=lP(Points)  D4=vs  E4=rP  F4=rV
 //	Row 6: results header
-//	Row 7: Alice (SideA, left)  B7=W  C7=L  D7=T  E7=PW  F7=PL
-//	Row 8: Bob   (SideB, right) B8=W  C8=L  D8=T  E8=PW  F8=PL
+//	Row 7: Alice (SideA, right) B7=W  C7=L  D7=T  E7=PW  F7=PL
+//	Row 8: Bob   (SideB, left)  B8=W  C8=L  D8=T  E8=PW  F8=PL
 //
 // Individual (teamMatches=0), engi=true:
 //
@@ -82,7 +82,7 @@ func scoringSetup2Players(t *testing.T, teamMatches int, engi bool) *excelize.Fi
 	t.Cleanup(func() { f.Close() })
 	f.NewSheet(SheetPoolMatches)
 	f.NewSheet(SheetPoolDraw)
-	PrintPoolMatches(f, []Pool{pool}, teamMatches, 1, CourtLabels(1), nil, false, poolCoords, pCoords, engi)
+	PrintPoolMatches(f, []Pool{pool}, teamMatches, 1, CourtLabels(1), nil, poolCoords, pCoords, engi)
 	return f
 }
 
@@ -126,7 +126,7 @@ func scoringSetup3PlayerRoundRobin(t *testing.T, engi bool) *excelize.File {
 	t.Cleanup(func() { f.Close() })
 	f.NewSheet(SheetPoolMatches)
 	f.NewSheet(SheetPoolDraw)
-	PrintPoolMatches(f, []Pool{pool}, 0, 1, CourtLabels(1), nil, false, poolCoords, pCoords, engi)
+	PrintPoolMatches(f, []Pool{pool}, 0, 1, CourtLabels(1), nil, poolCoords, pCoords, engi)
 	return f
 }
 
@@ -153,22 +153,22 @@ func TestIndividualPoolScoringFormulas(t *testing.T) {
 	type tc struct {
 		name  string
 		setup func(*excelize.File)
-		alice expect // SideA, left, row 7
-		bob   expect // SideB, right, row 8
+		alice expect // SideA, right column, row 7
+		bob   expect // SideB, left column, row 8
 	}
 
 	cases := []tc{
 		{
 			name:  "left wins",
 			setup: func(f *excelize.File) { setScore(f, "B4", "M") },
-			alice: expect{"1", "0", "0", "1", "0"},
-			bob:   expect{"0", "1", "0", "0", "1"},
+			alice: expect{"0", "1", "0", "0", "1"},
+			bob:   expect{"1", "0", "0", "1", "0"},
 		},
 		{
 			name:  "right wins",
 			setup: func(f *excelize.File) { setScore(f, "F4", "M") },
-			alice: expect{"0", "1", "0", "0", "1"},
-			bob:   expect{"1", "0", "0", "1", "0"},
+			alice: expect{"1", "0", "0", "1", "0"},
+			bob:   expect{"0", "1", "0", "0", "1"},
 		},
 		{
 			name:  "tie by uppercase X",
@@ -194,8 +194,8 @@ func TestIndividualPoolScoringFormulas(t *testing.T) {
 				setScore(f, "B4", "MM") // 2 points for left
 				setScore(f, "F4", "K")  // 1 point for right
 			},
-			alice: expect{"1", "0", "0", "2", "1"},
-			bob:   expect{"0", "1", "0", "1", "2"},
+			alice: expect{"0", "1", "0", "1", "2"},
+			bob:   expect{"1", "0", "0", "2", "1"},
 		},
 		{
 			// Entering "0" in a score cell marks a 0-0 tie without awarding points.
@@ -270,8 +270,8 @@ func TestIndividualPoolScoringFormulas(t *testing.T) {
 //
 //	Row 4: score input  B4=left-flags  F4=right-flags
 //	Row 6: results header (W / Flags / Rank)
-//	Row 7: Alice (SideA, left)  B7=W  C7=blank  D7=Flags
-//	Row 8: Bob   (SideB, right) B8=W  C8=blank  D8=Flags
+//	Row 7: Alice (SideA, right) B7=W  C7=blank  D7=Flags
+//	Row 8: Bob   (SideB, left)  B8=W  C8=blank  D8=Flags
 func TestEngiPoolScoringFormulas(t *testing.T) {
 	type expect struct{ w, flags string }
 	type tc struct {
@@ -288,8 +288,8 @@ func TestEngiPoolScoringFormulas(t *testing.T) {
 				f.SetCellValue(SheetPoolMatches, "B4", 3)
 				f.SetCellValue(SheetPoolMatches, "F4", 2)
 			},
-			alice: expect{"1", "3"},
-			bob:   expect{"0", "2"},
+			alice: expect{"0", "2"},
+			bob:   expect{"1", "3"},
 		},
 		{
 			name: "left wins 5-0",
@@ -297,17 +297,18 @@ func TestEngiPoolScoringFormulas(t *testing.T) {
 				f.SetCellValue(SheetPoolMatches, "B4", 5)
 				f.SetCellValue(SheetPoolMatches, "F4", 0)
 			},
-			alice: expect{"1", "5"},
-			bob:   expect{"0", "0"},
+			alice: expect{"0", "0"},
+			bob:   expect{"1", "5"},
 		},
 		{
 			// Robustness: a played bout where one side holds a non-numeric
 			// string must treat that side as 0 flags. N() coercion guarantees
-			// N("x")=0, so Alice's 3 still beats Bob's stray text.
+			// N("x")=0, so Alice's 3 (right, SideA) still beats Bob's
+			// stray text.
 			name: "non-numeric opponent cell treated as zero flags",
 			setup: func(f *excelize.File) {
-				f.SetCellValue(SheetPoolMatches, "B4", 3)
-				f.SetCellValue(SheetPoolMatches, "F4", "x")
+				f.SetCellValue(SheetPoolMatches, "F4", 3)
+				f.SetCellValue(SheetPoolMatches, "B4", "x")
 			},
 			alice: expect{"1", "3"},
 			bob:   expect{"0", "0"},
@@ -362,18 +363,18 @@ func TestEngiPoolScoringFormulas(t *testing.T) {
 // A 3-player round-robin generates two match records per player, so the
 // joinFormulas sum must produce correct totals.
 func TestIndividualPoolScoringFormulas_MultiMatch(t *testing.T) {
-	// Match 0 (Alice left vs Bob right):   row 4
-	// Match 1 (Bob left vs Carol right):   row 5
-	// Match 2 (Alice left vs Carol right): row 6
+	// Match 0 (Bob left vs Alice right):   row 4
+	// Match 1 (Carol left vs Bob right):   row 5
+	// Match 2 (Carol left vs Alice right): row 6
 	// Results header: row 8
 	// Alice row 9, Bob row 10, Carol row 11
 
 	f := scoringSetup3PlayerRoundRobin(t, false)
 
 	// Alice wins both her matches; Bob beats Carol.
-	setScore(f, "B4", "M") // Alice beats Bob (Alice on left, B=lV)
-	setScore(f, "B5", "M") // Bob beats Carol (Bob on left)
-	setScore(f, "B6", "M") // Alice beats Carol (Alice on left)
+	setScore(f, "F4", "M") // Alice beats Bob (Alice is SideA, on the right, F=rV)
+	setScore(f, "F5", "M") // Bob beats Carol (Bob on the right)
+	setScore(f, "F6", "M") // Alice beats Carol (Alice on the right)
 
 	t.Run("Alice wins all", func(t *testing.T) {
 		assert.Equal(t, "2", calcScore(t, f, "B9"), "Alice W")
@@ -469,8 +470,8 @@ func TestTeamSummaryRowFormulas(t *testing.T) {
 // TestTeamWLTTableFormulas verifies the W/L/T cells in Table 1 of the team pool
 // results section (rows 9–10 for teamMatches=1):
 //
-//	Alice (left): B9=W, C9=L, D9=T
-//	Bob  (right): B10=W, C10=L, D10=T
+//	Alice (SideA, right): B9=W, C9=L, D9=T
+//	Bob   (SideB, left):  B10=W, C10=L, D10=T
 //
 // Team match outcome: higher IV wins; equal IV → higher PW wins; still equal →
 // the match is automatically a draw (T=1). "X" in D4 also forces a draw.
@@ -490,14 +491,14 @@ func TestTeamWLTTableFormulas(t *testing.T) {
 		{
 			name:  "left wins by IV",
 			setup: func(f *excelize.File) { setScore(f, "B5", "M") },
-			alice: expect{"1", "0", "0"},
-			bob:   expect{"0", "1", "0"},
+			alice: expect{"0", "1", "0"},
+			bob:   expect{"1", "0", "0"},
 		},
 		{
 			name:  "right wins by IV",
 			setup: func(f *excelize.File) { setScore(f, "F5", "M") },
-			alice: expect{"0", "1", "0"},
-			bob:   expect{"1", "0", "0"},
+			alice: expect{"1", "0", "0"},
+			bob:   expect{"0", "1", "0"},
 		},
 		{
 			// Organizer enters "X" in the SUMMARY row's vs column (D4) to record a team tie.
@@ -546,8 +547,8 @@ func TestTeamWLTTableFormulas(t *testing.T) {
 				setScore(f, "B5", "MK")
 				setScore(f, "F5", "M") // PW_left=2, PW_right=1
 			},
-			alice: expect{"1", "0", "0"},
-			bob:   expect{"0", "1", "0"},
+			alice: expect{"0", "1", "0"},
+			bob:   expect{"1", "0", "0"},
 		},
 	}
 
@@ -570,8 +571,8 @@ func TestTeamWLTTableFormulas(t *testing.T) {
 // TestTeamIVILITPWPLTableFormulas verifies the IV/IL/IT/PW/PL cells in Table 2
 // of the team pool results section (rows 13–14 for teamMatches=1):
 //
-//	Alice (left): B13=IV, C13=IL, D13=IT, E13=PW, F13=PL
-//	Bob  (right): B14=IV, C14=IL, D14=IT, E14=PW, F14=PL
+//	Alice (SideA, right): B13=IV, C13=IL, D13=IT, E13=PW, F13=PL
+//	Bob   (SideB, left):  B14=IV, C14=IL, D14=IT, E14=PW, F14=PL
 //
 // IV/IL are derived from the summary-row IV formulas (B4/F4); PW/PL reference
 // the summary-row PW columns (C4/E4). IT counts sub-match rows where "X"/"x"
@@ -593,13 +594,14 @@ func TestTeamIVILITPWPLTableFormulas(t *testing.T) {
 		{
 			name:  "left wins sub-match",
 			setup: func(f *excelize.File) { setScore(f, "B5", "M") },
-			// Alice: IV=1, IL=0, IT=0, PW=1 (M), PL=0
-			// Bob:   IV=0, IL=1, IT=0, PW=0, PL=1
-			alice: expect{"1", "0", "0", "1", "0"},
-			bob:   expect{"0", "1", "0", "0", "1"},
+			// The left column is Bob's (SideB).
+			// Alice: IV=0, IL=1, IT=0, PW=0, PL=1
+			// Bob:   IV=1, IL=0, IT=0, PW=1 (M), PL=0
+			alice: expect{"0", "1", "0", "0", "1"},
+			bob:   expect{"1", "0", "0", "1", "0"},
 		},
 		{
-			// Sub-match is tied (D5="X") and left scored one point (B5="M").
+			// Sub-match is tied (D5="X") and left (Bob) scored one point (B5="M").
 			// IT=1 for both; IV=0 because the tied sub is excluded from IV counts.
 			// PW uses total score letters regardless of D5; PL is the opponent's PW.
 			name: "tied sub-match counts in IT; score letters still count in PW",
@@ -607,8 +609,8 @@ func TestTeamIVILITPWPLTableFormulas(t *testing.T) {
 				setScore(f, "D5", "X") // sub tied, D5="X" alone sets played=true
 				setScore(f, "B5", "M")
 			},
-			alice: expect{"0", "0", "1", "1", "0"},
-			bob:   expect{"0", "0", "1", "0", "1"},
+			alice: expect{"0", "0", "1", "0", "1"},
+			bob:   expect{"0", "0", "1", "1", "0"},
 		},
 		{
 			// D5="X" alone (no score entries) marks the sub-match as played.
@@ -663,12 +665,12 @@ func TestTeamIVILITPWPLTableFormulas(t *testing.T) {
 // scores (Alice beats Bob 3-2; Carol beats Bob 4-1; Alice beats Carol 5-0) used
 // by the engi pool-scoring formula tests.
 func setEngi3PlayerMatchScores(f *excelize.File) {
-	f.SetCellValue(SheetPoolMatches, "B4", 3)
-	f.SetCellValue(SheetPoolMatches, "F4", 2)
-	f.SetCellValue(SheetPoolMatches, "B5", 1)
-	f.SetCellValue(SheetPoolMatches, "F5", 4)
-	f.SetCellValue(SheetPoolMatches, "B6", 5)
-	f.SetCellValue(SheetPoolMatches, "F6", 0)
+	f.SetCellValue(SheetPoolMatches, "F4", 3)
+	f.SetCellValue(SheetPoolMatches, "B4", 2)
+	f.SetCellValue(SheetPoolMatches, "F5", 1)
+	f.SetCellValue(SheetPoolMatches, "B5", 4)
+	f.SetCellValue(SheetPoolMatches, "F6", 5)
+	f.SetCellValue(SheetPoolMatches, "B6", 0)
 }
 
 // TestEngiPoolScoringFormulas_MultiMatch verifies that the W/Flags formula
@@ -679,9 +681,9 @@ func setEngi3PlayerMatchScores(f *excelize.File) {
 //
 // Match setup (Alice beats Bob 3-2; Carol beats Bob 4-1; Alice beats Carol 5-0):
 //
-//	Row 4: Alice (left, B4=3) vs Bob  (right, F4=2)
-//	Row 5: Bob   (left, B5=1) vs Carol(right, F5=4)
-//	Row 6: Alice (left, B6=5) vs Carol(right, F6=0)
+//	Row 4: Bob   (left, B4=2) vs Alice (right, F4=3)
+//	Row 5: Carol (left, B5=4) vs Bob   (right, F5=1)
+//	Row 6: Carol (left, B6=0) vs Alice (right, F6=5)
 //
 // Standings: Row 8 header; Row 9=Alice, Row 10=Bob, Row 11=Carol.
 // Columns: B=W, C=blank, D=Flags.
@@ -839,13 +841,14 @@ func TestEngiPoolScoringFormulas_BothCellsText(t *testing.T) {
 func TestEngiPoolScoringFormulas_NumericTextInput(t *testing.T) {
 	f := scoringSetup2Players(t, 0, true)
 
-	// B4 stored as text string "3"; F4 stored as numeric 2.
+	// Alice's cell (F4: SideA, on the right) stored as text string "3";
+	// Bob's (B4) stored as numeric 2.
 	// In real Excel: N("3")=0, so Alice would lose 0-2.
 	// In excelize's evaluator: N("3")=3, so Alice appears to win 3-2.
-	require.NoError(t, f.SetCellStr(SheetPoolMatches, "B4", "3"))
-	f.SetCellValue(SheetPoolMatches, "F4", 2)
+	require.NoError(t, f.SetCellStr(SheetPoolMatches, "F4", "3"))
+	f.SetCellValue(SheetPoolMatches, "B4", 2)
 
-	// ISNUMBER(F4)=TRUE → played=TRUE (OR gate). Both sides are evaluated.
+	// ISNUMBER(B4)=TRUE → played=TRUE (OR gate). Both sides are evaluated.
 	// excelize evaluator: N("3")=3, N(2)=2 → Alice "wins" 3-2.
 	t.Run("Alice W=1 Flags=3 (excelize evaluator quirk: N(text)=number), L blank", func(t *testing.T) {
 		assert.Equal(t, "1", calcScore(t, f, "B7"), "Alice W")
@@ -926,8 +929,8 @@ func TestEngiPoolStandings_NoPWPLCells(t *testing.T) {
 // Layout (court 1, 2-player pool, individual):
 //
 //	Row 2: Pool A name header
-//	Row 3: Red (A) | vs (D) | White (G) header; B3=lV, F3=rV
-//	Row 4: score row (Alice left, Bob right)
+//	Row 3: White (A) | vs (D) | Red (G) header; B3=lV, F3=rV
+//	Row 4: score row (Bob left, Alice right)
 func TestEngiMatchHeaderFlags_Pool(t *testing.T) {
 	t.Run("engi=true writes the Fl caption in lV and rV of pool match header", func(t *testing.T) {
 		f := scoringSetup2Players(t, 0, true)
@@ -953,7 +956,7 @@ func TestEngiMatchHeaderFlags_Pool(t *testing.T) {
 // A 1-match, 1-court elimination (startRow=2):
 //
 //	Row 2: "Round 1 - Match 1" title
-//	Row 3: Red/White header; B3=lV, F3=rV
+//	Row 3: White/Red header; B3=lV, F3=rV
 func TestEngiMatchHeaderFlags_Elimination(t *testing.T) {
 	nodeA := &Node{LeafNode: true, LeafVal: "Pool A", matchNum: 1}
 	nodeB := &Node{LeafNode: true, LeafVal: "Pool B", matchNum: 1}
@@ -971,7 +974,7 @@ func TestEngiMatchHeaderFlags_Elimination(t *testing.T) {
 		f.NewSheet(SheetEliminationMatches)
 		f.NewSheet("Pool Results")
 
-		PrintTeamEliminationMatches(f, poolMatchWinners, eliminationMatchRounds, 0, CourtPlan{Draw: testDrawFor(eliminationMatchRounds, 1)}, false, true)
+		PrintTeamEliminationMatches(f, poolMatchWinners, eliminationMatchRounds, 0, CourtPlan{Draw: testDrawFor(eliminationMatchRounds, 1)}, true)
 
 		lV, _ := f.GetCellValue(SheetEliminationMatches, "B3")
 		rV, _ := f.GetCellValue(SheetEliminationMatches, "F3")
@@ -985,7 +988,7 @@ func TestEngiMatchHeaderFlags_Elimination(t *testing.T) {
 		f.NewSheet(SheetEliminationMatches)
 		f.NewSheet("Pool Results")
 
-		PrintTeamEliminationMatches(f, poolMatchWinners, eliminationMatchRounds, 0, CourtPlan{Draw: testDrawFor(eliminationMatchRounds, 1)}, false, false)
+		PrintTeamEliminationMatches(f, poolMatchWinners, eliminationMatchRounds, 0, CourtPlan{Draw: testDrawFor(eliminationMatchRounds, 1)}, false)
 
 		lV, _ := f.GetCellValue(SheetEliminationMatches, "B3")
 		rV, _ := f.GetCellValue(SheetEliminationMatches, "F3")
@@ -1000,14 +1003,14 @@ func TestEngiMatchHeaderFlags_Elimination(t *testing.T) {
 // Block at startRow=2:
 //
 //	Row 2: "3rd Place" title
-//	Row 3: Red/White header; B3=lV, F3=rV
+//	Row 3: White/Red header; B3=lV, F3=rV
 func TestEngiMatchHeaderFlags_ThirdPlace(t *testing.T) {
 	t.Run("engi=true writes the Fl caption in lV and rV of 3rd place header", func(t *testing.T) {
 		f := excelize.NewFile()
 		t.Cleanup(func() { f.Close() })
 		f.NewSheet(SheetEliminationMatches)
 
-		PrintThirdPlaceBlock(f, 1, 2, 0, false, true, 0, 0, nil)
+		PrintThirdPlaceBlock(f, 1, 2, 0, true, 0, 0, nil)
 
 		lV, _ := f.GetCellValue(SheetEliminationMatches, "B3")
 		rV, _ := f.GetCellValue(SheetEliminationMatches, "F3")
@@ -1020,7 +1023,7 @@ func TestEngiMatchHeaderFlags_ThirdPlace(t *testing.T) {
 		t.Cleanup(func() { f.Close() })
 		f.NewSheet(SheetEliminationMatches)
 
-		PrintThirdPlaceBlock(f, 1, 2, 0, false, false, 0, 0, nil)
+		PrintThirdPlaceBlock(f, 1, 2, 0, false, 0, 0, nil)
 
 		lV, _ := f.GetCellValue(SheetEliminationMatches, "B3")
 		rV, _ := f.GetCellValue(SheetEliminationMatches, "F3")

@@ -143,7 +143,7 @@ func (e *Engine) RenderCompetitionWorkbook(
 	//    instead of a live link to the pool's actual result.
 	matchWinners, poolsByCourt := helper.PrintPoolMatches(
 		f, pools, comp.TeamSize, comp.MatchWinnerRanksNeeded(), courts, courtOfPool,
-		comp.Mirror, poolCoords, playerCoords, comp.Engi,
+		poolCoords, playerCoords, comp.Engi,
 	)
 
 	// hasBronze: a third-place bout exists only for a competition that cannot
@@ -187,7 +187,7 @@ func (e *Engine) RenderCompetitionWorkbook(
 			return nil, nil, fmt.Errorf("render workbook: %w", err)
 		}
 		helper.PrintEliminationWithBronze(f, matchWinners, eliminationMatchRounds, comp.TeamSize,
-			plan, comp.Mirror, comp.Engi, hasBronze)
+			plan, comp.Engi, hasBronze)
 	} else if comp.IsKnockoutEnabled() && bracketHasKnockoutContent(bracket) {
 		// The stored bracket already carries knockout content -- a
 		// third-place bout, or at least one round-1-or-later match -- but

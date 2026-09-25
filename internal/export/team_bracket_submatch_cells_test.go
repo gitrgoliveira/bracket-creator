@@ -135,24 +135,26 @@ func TestBuildResultsWorkbook_TeamBracketSubMatchScoresLandInCorrectCells(t *tes
 		return v
 	}
 
-	// Position 1 (fixed-order): row H+2+1 = H+3. Red A (bm.SideA) won by
-	// fusensho, so the LEFT column carries the default-win maru + Fus. mark
-	// and the RIGHT column carries neither. Swapping bm.SideA/bm.SideB at
-	// the call site flips this onto the right column instead.
+	// Position 1 (fixed-order): row H+2+1 = H+3. Red A (bm.SideA, Aka) won
+	// by fusensho, so the RIGHT column carries the default-win maru + Fus.
+	// mark and the LEFT column carries neither. Swapping bm.SideA/bm.SideB
+	// at the call site flips this onto the left column instead.
 	pos1Row := headerExcelRow + 3
 	left1 := cellAt(lCol, pos1Row)
 	right1 := cellAt(rCol, pos1Row)
-	assert.Contains(t, left1, "Fus.", "Red A (bm.SideA) is the encounter's actual winner and sits in the LEFT column")
-	assert.Contains(t, left1, "○", "and carries the default-win maru")
-	assert.Empty(t, right1, "the losing side's column must carry neither mark nor maru")
+	assert.Contains(t, right1, "Fus.", "Red A (bm.SideA) is the encounter's actual winner and sits in the RIGHT column")
+	assert.Contains(t, right1, "○", "and carries the default-win maru")
+	assert.Empty(t, left1, "the losing side's column must carry neither mark nor maru")
 
-	// Position 3 (named row): row H+2+3 = H+5, ippon letters "MK" verbatim.
-	// A wrong row derivation (e.g. an off-by-one at the call site) leaves
-	// this cell empty and plants "MK" one row away instead.
+	// Position 3 (named row): row H+2+3 = H+5, SideA's ippon letters "MK"
+	// verbatim, in the RIGHT (Aka) column. A wrong row derivation (e.g. an
+	// off-by-one at the call site) leaves this cell empty and plants "MK"
+	// one row away instead.
 	pos3Row := headerExcelRow + 5
-	assert.Equal(t, "MK", cellAt(lCol, pos3Row), "position 3's ippon letters must land at H+2+Position")
+	assert.Equal(t, "MK", cellAt(rCol, pos3Row), "position 3's ippon letters must land at H+2+Position")
 
 	// The row between the two populated sub-bouts (position 2, absent from
 	// SubResults) must stay untouched by either write.
+	assert.Empty(t, cellAt(rCol, headerExcelRow+4), "no stray content between the two populated sub-bout rows")
 	assert.Empty(t, cellAt(lCol, headerExcelRow+4), "no stray content between the two populated sub-bout rows")
 }

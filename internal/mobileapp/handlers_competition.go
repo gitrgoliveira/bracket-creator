@@ -1779,7 +1779,6 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 							formatChanged ||
 							comp.PoolFormat != current.PoolFormat ||
 							comp.RoundRobin != current.RoundRobin ||
-							comp.Mirror != current.Mirror ||
 							comp.TeamSize != current.TeamSize ||
 							kindChanged ||
 							// TeamMatchType selects fixed vs kachinuki bout sequencing; changing
@@ -2021,7 +2020,6 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 				current.Format = comp.Format
 				current.PoolFormat = comp.PoolFormat
 				current.Kind = comp.Kind
-				current.Mirror = comp.Mirror
 				// Seconds are the only duration representation that crosses the
 				// wire. The retired whole-minute fields are not merged: `current`
 				// was migrated to seconds when it was loaded, and its legacy
@@ -2132,7 +2130,7 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 			return
 		}
 		if drawReadyFlag {
-			c.JSON(http.StatusConflict, gin.H{"error": "cannot modify output-affecting settings (format, courts, pool size/winners/mode, extra qualifiers, pool format, round-robin, mirror, team size, kind, team match type, zekken display) while a draw is pending; discard the draw first"})
+			c.JSON(http.StatusConflict, gin.H{"error": "cannot modify output-affecting settings (format, courts, pool size/winners/mode, extra qualifiers, pool format, round-robin, team size, kind, team match type, zekken display) while a draw is pending; discard the draw first"})
 			return
 		}
 		if teamMatchTypeStartedFlag {

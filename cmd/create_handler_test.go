@@ -339,14 +339,14 @@ func TestCreateHandler_NaginataKnockout_ThirdPlaceBlock_EntrantFormulas(t *testi
 	rightFormula, err := f.GetCellFormula("Elimination Matches", fmt.Sprintf("G%d", scoreExcelRow))
 	require.NoError(t, err)
 
-	// Both cells together must reference both semifinal match numbers ("M 1" and
-	// "M 2" for a 4-player bracket) via CONCATENATE formulas. With mirror=true
-	// (hardcoded for the knockout web handler) the two formulas swap sides, so we
-	// assert the pair rather than a specific cell.
-	combined := leftFormula + " " + rightFormula
-	assert.Contains(t, combined, "CONCATENATE", "bronze entrant cells must carry CONCATENATE formulas referencing semifinal losers")
-	assert.Contains(t, combined, "M 1", "bronze entrant formulas must reference semifinal M 1")
-	assert.Contains(t, combined, "M 2", "bronze entrant formulas must reference semifinal M 2")
+	// Both cells must reference a semifinal loser ("M 1" and "M 2" for a
+	// 4-player bracket) via CONCATENATE formulas. The upper semi's loser is
+	// the bronze's Aka side, so it sits on the RIGHT; the lower semi's loser
+	// (Shiro) on the LEFT.
+	assert.Contains(t, leftFormula, "CONCATENATE", "bronze entrant cells must carry CONCATENATE formulas referencing semifinal losers")
+	assert.Contains(t, rightFormula, "CONCATENATE", "bronze entrant cells must carry CONCATENATE formulas referencing semifinal losers")
+	assert.Contains(t, leftFormula, `"M 2 "`, "the left (Shiro) bronze entrant is the loser of semifinal M 2")
+	assert.Contains(t, rightFormula, `"M 1 "`, "the right (Aka) bronze entrant is the loser of semifinal M 1")
 }
 
 // findResultsRow returns the 1-based Excel row index of the first row whose

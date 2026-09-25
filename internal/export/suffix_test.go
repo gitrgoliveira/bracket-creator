@@ -164,15 +164,13 @@ func TestSideMarksLR(t *testing.T) {
 		hantei                     bool
 		winnerID, sideAID, sideBID string
 		winner                     string
-		mirror                     bool
 		wantLeft, wantRight        string
 	}{
-		// Default layout: SideA (Aka) left, SideB right. No ids: name fallback.
-		{name: "hantei, A wins", decision: "fought", hantei: true, winner: "A", wantLeft: "Ht", wantRight: ""},
-		{name: "hantei, B wins", decision: "fought", hantei: true, winner: "B", wantLeft: "", wantRight: "Ht"},
-		{name: "hantei, B wins, mirrored", decision: "fought", hantei: true, winner: "B", mirror: true, wantLeft: "Ht", wantRight: ""},
-		{name: "kiken, A wins marks B", decision: "kiken-voluntary", winner: "A", wantLeft: "", wantRight: "Kiken"},
-		{name: "kiken, A wins, mirrored", decision: "kiken-voluntary", winner: "A", mirror: true, wantLeft: "Kiken", wantRight: ""},
+		// The one layout: SideB (Shiro) left, SideA (Aka) right. No ids: name
+		// fallback.
+		{name: "hantei, A wins", decision: "fought", hantei: true, winner: "A", wantLeft: "", wantRight: "Ht"},
+		{name: "hantei, B wins", decision: "fought", hantei: true, winner: "B", wantLeft: "Ht", wantRight: ""},
+		{name: "kiken, A wins marks B", decision: "kiken-voluntary", winner: "A", wantLeft: "Kiken", wantRight: ""},
 		{name: "no winner recorded: marks have no home", decision: "kiken-voluntary", winner: "", wantLeft: "", wantRight: ""},
 		{name: "drifted winner name: no marks rather than a guess", decision: "kiken-voluntary", winner: "C", wantLeft: "", wantRight: ""},
 		// Ids present: ids win over names, even on a same-name pair (legal:
@@ -184,13 +182,13 @@ func TestSideMarksLR(t *testing.T) {
 			name:     "same-name pair: ids attribute the mark to B, not A",
 			decision: "fought", hantei: true,
 			winnerID: "id-b", sideAID: "id-a", sideBID: "id-b",
-			winner: "A", wantLeft: "", wantRight: "Ht",
+			winner: "A", wantLeft: "Ht", wantRight: "",
 		},
 		{
 			name:     "same-name pair: ids attribute the mark to A",
 			decision: "fought", hantei: true,
 			winnerID: "id-a", sideAID: "id-a", sideBID: "id-b",
-			winner: "A", wantLeft: "Ht", wantRight: "",
+			winner: "A", wantLeft: "", wantRight: "Ht",
 		},
 		{
 			name:     "ids present but winnerID matches neither side: unattributable",
@@ -207,7 +205,7 @@ func TestSideMarksLR(t *testing.T) {
 			l, r := SideMarksLR(tc.decision, tc.hantei, domain.WinnerAttribution{
 				WinnerID: tc.winnerID, SideAID: tc.sideAID, SideBID: tc.sideBID,
 				Winner: tc.winner, SideA: "A", SideB: "B",
-			}, tc.mirror)
+			})
 			assert.Equal(t, tc.wantLeft, l, "left mark")
 			assert.Equal(t, tc.wantRight, r, "right mark")
 		})

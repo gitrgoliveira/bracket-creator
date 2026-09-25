@@ -256,7 +256,6 @@ function buildEmptyCompetition(args) {
     // sample-data generators below, and anything not yet taught about the
     // field) still gets it.
     roundRobin: roundRobin ?? COMPETITION_DEFAULTS.roundRobin,
-    mirror: COMPETITION_DEFAULTS.mirror,
     withZekkenName: withZekkenName || COMPETITION_DEFAULTS.withZekkenName,
     numberPrefix: numberPrefix || COMPETITION_DEFAULTS.numberPrefix,
     checkInEnabled: checkInEnabled || COMPETITION_DEFAULTS.checkInEnabled,

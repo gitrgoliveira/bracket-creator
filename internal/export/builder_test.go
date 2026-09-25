@@ -6,6 +6,7 @@ import (
 	"maps"
 	"os"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"strconv"
 	"strings"
@@ -387,8 +388,9 @@ func TestBuildResultsWorkbook_BracketHanteiScoreCell(t *testing.T) {
 	rows, err := f.GetRows(helper.SheetEliminationMatches)
 	require.NoError(t, err)
 
-	left, _ := bracketVictoryCells(t, rows, "Round 1 - Match 1")
-	assert.Equal(t, "M Ht", left,
+	// Alice is SideA (Aka), so her cell is the RIGHT one.
+	_, right := bracketVictoryCells(t, rows, "Round 1 - Match 1")
+	assert.Equal(t, "M Ht", right,
 		"the winner's bracket cell must render the score plus one Ht mark, mirroring the pool cell")
 	assert.False(t, sheetContainsCell(rows, "MHt Ht"),
 		"the judges'-decision mark must not be double-printed")
@@ -1663,7 +1665,8 @@ func TestBuildResultsWorkbook_RaggedKnockoutScoresLandInTheRightBlocks(t *testin
 	// (2) Read the score blocks back and check each against the bout the TREE
 	//     says carries that number. Individual layout, one court: the header at
 	//     row H puts entrant names in columns A and G of row H+2, with their
-	//     scores in B and F (overlayKnockoutBracketNames / writeScoreRowCells).
+	//     scores in B and F (overlayKnockoutBracketNames / writeScoreRowCells):
+	//     SideB (Shiro) on the left, SideA (Aka) on the right.
 	elimRows, err := f.GetRows(helper.SheetEliminationMatches)
 	require.NoError(t, err)
 	cellAt := func(row, col int) string {
@@ -1684,11 +1687,11 @@ func TestBuildResultsWorkbook_RaggedKnockoutScoresLandInTheRightBlocks(t *testin
 			j, ok := junctions[num]
 			require.Truef(t, ok, "block %q has no junction on the tree page", cell)
 
-			scoreRow := rowIdx + 2 // header, Red/White labels, then names+scores
-			nameA := cellAt(scoreRow, headerCol)
-			nameB := cellAt(scoreRow, headerCol+6)
-			scoreA := cellAt(scoreRow, headerCol+1)
-			scoreB := cellAt(scoreRow, headerCol+5)
+			scoreRow := rowIdx + 2 // header, White/Red labels, then names+scores
+			nameB := cellAt(scoreRow, headerCol)
+			nameA := cellAt(scoreRow, headerCol+6)
+			scoreB := cellAt(scoreRow, headerCol+1)
+			scoreA := cellAt(scoreRow, headerCol+5)
 
 			// The block's competitors must be ones the tree's junction of this
 			// number sits above. This is the assertion the defect broke: under
@@ -1704,10 +1707,10 @@ func TestBuildResultsWorkbook_RaggedKnockoutScoresLandInTheRightBlocks(t *testin
 					"junction %d sits above %v instead", name, num, num, slices.Sorted(maps.Keys(under)))
 			}
 
-			assert.Equal(t, bm.SideA, nameA, "Match %d left entrant", num)
-			assert.Equal(t, bm.SideB, nameB, "Match %d right entrant", num)
-			assert.Equal(t, IpponsScore(bm.IpponsA), scoreA, "Match %d left score", num)
-			assert.Equal(t, IpponsScore(bm.IpponsB), scoreB, "Match %d right score", num)
+			assert.Equal(t, bm.SideB, nameB, "Match %d left entrant", num)
+			assert.Equal(t, bm.SideA, nameA, "Match %d right entrant", num)
+			assert.Equal(t, IpponsScore(bm.IpponsB), scoreB, "Match %d left score", num)
+			assert.Equal(t, IpponsScore(bm.IpponsA), scoreA, "Match %d right score", num)
 			checked++
 		}
 	}
@@ -2232,7 +2235,13 @@ func TestBuildResultsWorkbook_TeamResults(t *testing.T) {
 	}
 	require.NoError(t, store.SavePoolMatches(compID, results))
 
-	// Team elimination: Red A vs Red B tied 1-1 on IV, decided by daihyosen; Red A wins.
+	// Team elimination: Red A (Aka) beats Red B (Shiro) 2-1 on individual
+	// victories, 3-1 on points. The daihyosen placeholder/decision is kept
+	// only to pin the "(DH)" middle mark below; it does not need a real tie
+	// (BuildResultsWorkbook renders whatever is stored, it does not
+	// re-validate the tie rule that would normally trigger one), and an
+	// unequal IV/PW split is what makes the left/right assertions below
+	// actually distinguish Shiro's column from Aka's.
 	bracket := &state.Bracket{
 		Rounds: [][]state.BracketMatch{
 			{
@@ -2241,9 +2250,9 @@ func TestBuildResultsWorkbook_TeamResults(t *testing.T) {
 					Status: state.MatchStatusCompleted, MatchNumber: 1,
 					Decision: string(domain.DecisionDaihyosen),
 					SubResults: []state.SubMatchResult{
-						{Position: 1, SideA: "Red A", SideB: "Red B", IpponsA: []string{"M"}, Winner: "Red A"},
-						{Position: 2, SideA: "Red A", SideB: "Red B", IpponsB: []string{"K"}, Winner: "Red B"},
-						{Position: 3, SideA: "Red A", SideB: "Red B", Decision: state.DecisionDraw},
+						{Position: 1, SideA: "Red A", SideB: "Red B", IpponsA: []string{"M", "K"}, Winner: "Red A"},
+						{Position: 2, SideA: "Red A", SideB: "Red B", IpponsA: []string{"M"}, Winner: "Red A"},
+						{Position: 3, SideA: "Red A", SideB: "Red B", IpponsB: []string{"M"}, Winner: "Red B"},
 						{Position: -1, Decision: string(domain.DecisionDaihyosen)},
 					},
 				},
@@ -2296,7 +2305,10 @@ func TestBuildResultsWorkbook_TeamResults(t *testing.T) {
 	elimRows, err := f.GetRows(helper.SheetEliminationMatches)
 	require.NoError(t, err)
 
-	// The "Victories / Points" tally row holds literal IV/PW; Red A (left) IV = 1.
+	// The "Victories / Points" tally row holds literal IV/PW, Shiro (Red B) on
+	// the LEFT and Aka (Red A) on the RIGHT (helper.WhiteLeft). The fixture's
+	// unequal split (Aka IV=2/PW=3, Shiro IV=1/PW=1) means a swapped pair
+	// would fail these, not just pass either way.
 	vp := -1
 	vpCol := -1
 	for r, row := range elimRows {
@@ -2311,8 +2323,11 @@ func TestBuildResultsWorkbook_TeamResults(t *testing.T) {
 		}
 	}
 	require.GreaterOrEqual(t, vp, 0, "elimination sheet must contain a 'Victories / Points' summary row")
-	require.Greater(t, len(elimRows[vp]), vpCol+1)
-	assert.Equal(t, "1", elimRows[vp][vpCol+1], "Red A bracket IV must be literal 1 on the summary row")
+	require.Greater(t, len(elimRows[vp]), vpCol+5)
+	assert.Equal(t, "1", elimRows[vp][vpCol+1], "Red B (Shiro) bracket IV must be literal 1 on the LEFT summary cell")
+	assert.Equal(t, "2", elimRows[vp][vpCol+5], "Red A (Aka) bracket IV must be literal 2 on the RIGHT summary cell")
+	assert.Equal(t, "1", elimRows[vp][vpCol+2], "Red B (Shiro) bracket PW must be literal 1 on the LEFT summary cell")
+	assert.Equal(t, "3", elimRows[vp][vpCol+4], "Red A (Aka) bracket PW must be literal 3 on the RIGHT summary cell")
 
 	assert.True(t, sheetContainsCell(elimRows, "(DH)"), "the '(DH)' middle mark must appear on the team encounter")
 	assert.True(t, sheetContainsCell(elimRows, "Red A"), "winner 'Red A' must be written as a literal")
@@ -2423,7 +2438,7 @@ func TestBuildResultsWorkbook_MultiPageTreePopulated(t *testing.T) {
 func TestScoreCellsCarryOutstandingHansokuTriangle(t *testing.T) {
 	t.Parallel()
 
-	t.Run("individual row, both orientations", func(t *testing.T) {
+	t.Run("individual row", func(t *testing.T) {
 		f := excelize.NewFile()
 		defer f.Close()
 		sheet := helper.SheetPoolMatches
@@ -2435,18 +2450,11 @@ func TestScoreCellsCarryOutstandingHansokuTriangle(t *testing.T) {
 			IpponsB: []string{"K", "H"}, HansokuB: 2, // discharged: already B's... A's H to B
 			Status: state.MatchStatusCompleted,
 		}
-		writeScoreRowCells(f, sheet, 1, 5, "M", "KH", mr, false)
+		writeScoreRowCells(f, sheet, 1, 5, "M", "KH", mr)
 		left, _ := f.GetCellValue(sheet, "B5")
 		right, _ := f.GetCellValue(sheet, "F5")
-		assert.Equal(t, "▲ M", left, "A's standing foul rides the left cell's outer edge")
-		assert.Equal(t, "KH", right, "an even count is already discharged into the H ippon: no triangle")
-
-		// Mirrored band: the foul must follow its side across the swap.
-		writeScoreRowCells(f, sheet, 1, 6, "M", "KH", mr, true)
-		left, _ = f.GetCellValue(sheet, "B6")
-		right, _ = f.GetCellValue(sheet, "F6")
-		assert.Equal(t, "KH", left)
-		assert.Equal(t, "M ▲", right, "mirroring swaps sides; the outer edge is now the right")
+		assert.Equal(t, "KH", left, "an even count is already discharged into the H ippon: no triangle")
+		assert.Equal(t, "M ▲", right, "A (Aka) scores on the right, so its standing foul rides that cell's outer edge")
 	})
 
 	t.Run("team sub-bout row", func(t *testing.T) {
@@ -2459,11 +2467,11 @@ func TestScoreCellsCarryOutstandingHansokuTriangle(t *testing.T) {
 			{Position: 1, SideA: "Ann", SideB: "Ben", Winner: "Ann",
 				IpponsA: []string{"M", "K"}, HansokuB: 1},
 		}
-		writeTeamSubMatchScores(f, sheet, 1, 5, subs, 3, false, "", "")
+		writeTeamSubMatchScores(f, sheet, 1, 5, subs, 3, "", "")
 		left, _ := f.GetCellValue(sheet, "B5")
 		right, _ := f.GetCellValue(sheet, "F5")
-		assert.Equal(t, "MK", left)
-		assert.Equal(t, "▲", right, "a bout the offender lost 0-2 still records the standing foul")
+		assert.Equal(t, "▲", left, "a bout the offender lost 0-2 still records the standing foul")
+		assert.Equal(t, "MK", right)
 	})
 
 	// bc-dnst: a FIXED-ORDER bout records no fighter name, so its row names
@@ -2481,10 +2489,11 @@ func TestScoreCellsCarryOutstandingHansokuTriangle(t *testing.T) {
 		subs := []state.SubMatchResult{
 			{Position: 1, SideA: "", SideB: "", Winner: "Tora A", Decision: "fusensho"},
 		}
-		writeTeamSubMatchScores(f, sheet, 1, 5, subs, 3, false, "Tora A", "Kenshi B")
-		left, _ := f.GetCellValue(sheet, "B5")
-		assert.Contains(t, left, "Fus.", "the no-show mark must name the winning side")
-		assert.Contains(t, left, "○", "and the default win must still award its maru")
+		writeTeamSubMatchScores(f, sheet, 1, 5, subs, 3, "Tora A", "Kenshi B")
+		// The winner is SideA (Aka), whose cell is the RIGHT one.
+		right, _ := f.GetCellValue(sheet, "F5")
+		assert.Contains(t, right, "Fus.", "the no-show mark must name the winning side")
+		assert.Contains(t, right, "○", "and the default win must still award its maru")
 	})
 }
 
@@ -2506,15 +2515,16 @@ func TestWriteTeamSubMatchScores_OutOfRangePositionSkipped(t *testing.T) {
 		{Position: 3, IpponsA: []string{"K"}},
 		{Position: 9, IpponsA: []string{"D"}}, // corrupted: > teamSize
 	}
-	writeTeamSubMatchScores(f, sheet, courtStartCol, subStartRow, subs, teamSize, false, "", "")
+	writeTeamSubMatchScores(f, sheet, courtStartCol, subStartRow, subs, teamSize, "", "")
 
-	// Position 1 -> row 5, Position 3 -> row 7 (both written).
-	v1, _ := f.GetCellValue(sheet, "B5")
-	v3, _ := f.GetCellValue(sheet, "B7")
+	// Position 1 -> row 5, Position 3 -> row 7 (both written). IpponsA is
+	// Aka's, so it lands in the RIGHT cell (column F).
+	v1, _ := f.GetCellValue(sheet, "F5")
+	v3, _ := f.GetCellValue(sheet, "F7")
 	assert.Equal(t, "M", v1)
 	assert.Equal(t, "K", v3)
 	// Position 9 would land at row subStartRow+8 = 13; it must NOT be written.
-	v9, _ := f.GetCellValue(sheet, "B13")
+	v9, _ := f.GetCellValue(sheet, "F13")
 	assert.Empty(t, v9, "an out-of-range sub.Position must be skipped, not written into a neighbouring block")
 }
 
@@ -2677,8 +2687,10 @@ func TestBuildResultsWorkbook_NonEngiWithZekkenStillWorks(t *testing.T) {
 
 // firstPoolMatchScoreRow returns the row from `rows` that holds the first match's
 // score cells for the pool assigned to the court band starting at 0-based column
-// `bandStart` ("Red" or "White" marks that column). The match row is one row below
-// the Red/White header. Returns nil if no such header exists.
+// `bandStart` ("White" marks that column, the LEFT side-label; helper.WhiteLeft
+// puts White there unconditionally, so it is the one label this scan needs).
+// The match row is one row below the White/Red header. Returns nil if no such
+// header exists.
 // Column layout within the band (0-based absolute): bandStart+1 = left score,
 // bandStart+3 = vs/middle, bandStart+5 = right score.
 func firstPoolMatchScoreRow(rows [][]string, bandStart int) []string {
@@ -2686,7 +2698,7 @@ func firstPoolMatchScoreRow(rows [][]string, bandStart int) []string {
 		if bandStart >= len(row) {
 			continue
 		}
-		if row[bandStart] == "Red" || row[bandStart] == "White" {
+		if row[bandStart] == "White" {
 			if ri+1 < len(rows) {
 				return rows[ri+1]
 			}
@@ -2712,15 +2724,16 @@ func TestBuildResultsWorkbook_EngiPoolFlagScoreCells(t *testing.T) {
 		wantRight  string
 		wantStands string // expected value in the Flags standings column
 	}{
+		// FlagsA is Aka's (SideA, right), FlagsB Shiro's (SideB, left).
 		{
 			name: "3-2", flagsA: 3, flagsB: 2,
-			wantLeft: "3", wantRight: "2", wantStands: "3",
+			wantLeft: "2", wantRight: "3", wantStands: "3",
 		},
 		{
 			// 5-0 shutout: the loser's "0" is a real score, distinguishing it from
 			// a kiken/fusenpai where no flags were recorded.
 			name: "5-0 shutout", flagsA: 5, flagsB: 0,
-			wantLeft: "5", wantRight: "0", wantStands: "5",
+			wantLeft: "0", wantRight: "5", wantStands: "5",
 		},
 	}
 
@@ -2765,11 +2778,11 @@ func TestBuildResultsWorkbook_EngiPoolFlagScoreCells(t *testing.T) {
 			rows, err := f.GetRows(helper.SheetPoolMatches)
 			require.NoError(t, err)
 
-			// Assert the MATCH ROW score cells specifically: left score (FlagsA) at
-			// bandStart+1 and right score (FlagsB) at bandStart+5 (vs is at bandStart+3).
+			// Assert the MATCH ROW score cells specifically: left score (FlagsB) at
+			// bandStart+1 and right score (FlagsA) at bandStart+5 (vs is at bandStart+3).
 			// Using containsCell alone would be satisfied by the standings overlay alone.
 			matchRow := firstPoolMatchScoreRow(rows, 0)
-			require.NotNil(t, matchRow, "match score row must exist (Red/White header must be present)")
+			require.NotNil(t, matchRow, "match score row must exist (White/Red header must be present)")
 			require.Greater(t, len(matchRow), 5, "match score row must have at least 6 columns")
 			assert.Equal(t, tc.wantLeft, matchRow[1],
 				"left score cell (2 before vs at col 3) must be %q", tc.wantLeft)
@@ -2861,9 +2874,8 @@ func bracketVictoryCells(t *testing.T, rows [][]string, label string) (left, rig
 // sheet renders the flag counts ("3"/"2") in the victory cells, NOT the ippon
 // letters carried in IpponsA/IpponsB (which do not apply to engi). The assertion is
 // column-precise (it reads the exact victory cell under the match header) so an
-// incidental "3"/"2" elsewhere cannot mask a regression. Both the default
-// (non-mirror) and mirror layouts are exercised: mirror swaps which victory
-// column carries FlagsA vs FlagsB, so the two cases must be column-mirror images.
+// incidental "3"/"2" elsewhere cannot mask a regression. FlagsA is Aka's
+// (SideA), so it lands in the RIGHT victory column and FlagsB in the LEFT.
 //
 // Previously broken because overlayBracketScores used ScoreA/ScoreB directly,
 // which for engi are the (inapplicable) ippon letters, and never consulted
@@ -2873,7 +2885,6 @@ func TestBuildResultsWorkbook_EngiBracketFlagScoreCells(t *testing.T) {
 
 	cases := []struct {
 		name              string
-		mirror            bool
 		flagsA            int
 		flagsB            int
 		ipponsA           []string
@@ -2882,14 +2893,11 @@ func TestBuildResultsWorkbook_EngiBracketFlagScoreCells(t *testing.T) {
 		wantRight         string
 		forbiddenIpponVal string
 	}{
-		// Default (non-mirror): left column (Red/SideA) carries FlagsA=3, right
-		// column (White/SideB) carries FlagsB=2.
-		{name: "default", mirror: false, flagsA: 3, flagsB: 2, ipponsA: []string{"M", "K"}, ipponsB: []string{"M"}, wantLeft: "3", wantRight: "2", forbiddenIpponVal: "MK"},
-		// Mirror: the two victory columns are swapped, so left carries FlagsB=2
-		// and right carries FlagsA=3.
-		{name: "mirror", mirror: true, flagsA: 3, flagsB: 2, ipponsA: []string{"M", "K"}, ipponsB: []string{"M"}, wantLeft: "2", wantRight: "3", forbiddenIpponVal: "MK"},
+		// The left column (White/SideB) carries FlagsB=2, the right column
+		// (Red/SideA) carries FlagsA=3.
+		{name: "3-2", flagsA: 3, flagsB: 2, ipponsA: []string{"M", "K"}, ipponsB: []string{"M"}, wantLeft: "2", wantRight: "3", forbiddenIpponVal: "MK"},
 		// 5-0 shutout: the loser's cell must be "0", not blank (pairwise write rule).
-		{name: "5-0 shutout", mirror: false, flagsA: 5, flagsB: 0, ipponsA: []string{"M", "K"}, wantLeft: "5", wantRight: "0", forbiddenIpponVal: "MK"},
+		{name: "5-0 shutout", flagsA: 5, flagsB: 0, ipponsA: []string{"M", "K"}, wantLeft: "0", wantRight: "5", forbiddenIpponVal: "MK"},
 	}
 
 	for _, tc := range cases {
@@ -2904,7 +2912,6 @@ func TestBuildResultsWorkbook_EngiBracketFlagScoreCells(t *testing.T) {
 			require.NoError(t, err)
 			comp.Format = state.CompFormatMixed
 			comp.Engi = true
-			comp.Mirror = tc.mirror
 			require.NoError(t, store.SaveCompetition(comp))
 
 			pools := makeEngiPools()
@@ -3088,7 +3095,7 @@ func TestBuildResultsWorkbook_NonEngiStandingsHeadersUnchanged(t *testing.T) {
 
 // TestBuildResultsWorkbook_EngiKikenMarkPlacement characterizes the result-mark
 // placement for a kiken-voluntary engi match: "Kiken" rides in the WITHDRAWING
-// pair's score cell (the loser, SideB, right of the vs column), the winner's
+// pair's score cell (the loser, SideB, left of the vs column), the winner's
 // score cell stays blank (FlagsScorePair returns ("", "") when neither side
 // scored flags), and the middle cell keeps its template "vs" (kiken is a
 // result, not a middle mark).
@@ -3134,22 +3141,33 @@ func TestBuildResultsWorkbook_EngiKikenMarkPlacement(t *testing.T) {
 	assert.True(t, sheetContainsCell(rows, "Kiken"),
 		"the withdrawing pair's score cell must render 'Kiken' for a kiken-voluntary engi match")
 
-	// Geometry: the loser (SideB) sits RIGHT of the vs column, so from the
-	// Kiken cell the middle is 2 columns left (template "vs") and the
-	// winner's score cell 4 columns left (blank: no flags were scored).
+	// Geometry: the loser (SideB, Shiro) sits LEFT of the vs column, so from
+	// the Kiken cell the middle is 2 columns right (template "vs") and the
+	// winner's score cell 4 columns right (blank: no flags were scored).
+	found := 0
 	for _, row := range rows {
 		for j, cell := range row {
 			if cell != "Kiken" {
 				continue
 			}
-			require.GreaterOrEqual(t, j, 4,
-				"Kiken must sit in the right-hand score cell, not the first columns")
-			assert.Contains(t, []string{"", "vs"}, row[j-2],
+			found++
+			// GetRows trims trailing empty cells, so a blank cell to the
+			// right may be past the row's end: read it as "".
+			at := func(c int) string {
+				if c < len(row) {
+					return row[c]
+				}
+				return ""
+			}
+			assert.Equal(t, 1, j%helper.CourtsColumnsPerCourt,
+				"Kiken must sit in the band's left score cell (start column + 1)")
+			assert.Contains(t, []string{"", "vs"}, at(j+2),
 				"the middle cell must stay untouched (template text): kiken is a result, not a middle mark")
-			assert.Equal(t, "", row[j-4],
+			assert.Equal(t, "", at(j+4),
 				"the winner's score cell must be blank for kiken with FlagsA=0")
 		}
 	}
+	assert.Equal(t, 1, found, "exactly one Kiken mark")
 }
 
 // TestBuildResultsWorkbook_EngiPartialPoolScoring characterizes partial scoring:
@@ -3215,16 +3233,17 @@ func TestBuildResultsWorkbook_EngiPartialPoolScoring(t *testing.T) {
 	rows, err := f.GetRows(helper.SheetPoolMatches)
 	require.NoError(t, err)
 
-	// Assert the pool A MATCH ROW score cells specifically: left score (FlagsA) at
-	// bandStart+1 and right score (FlagsB) at bandStart+5 (vs is at bandStart+3).
-	// containsCell alone is vacuous: it would be satisfied by the standings overlay.
+	// Assert the pool A MATCH ROW score cells specifically: left score (FlagsB,
+	// Shiro) at bandStart+1 and right score (FlagsA, Aka) at bandStart+5 (vs is
+	// at bandStart+3). containsCell alone is vacuous: it would be satisfied by
+	// the standings overlay.
 	matchRow := firstPoolMatchScoreRow(rows, 0)
-	require.NotNil(t, matchRow, "pool A match score row must exist (Red/White header must be present)")
+	require.NotNil(t, matchRow, "pool A match score row must exist (White/Red header must be present)")
 	require.Greater(t, len(matchRow), 5, "match score row must have at least 6 columns")
-	assert.Equal(t, "3", matchRow[1],
-		"left score cell (2 before vs) must be '3' (FlagsA=3 for pool A)")
-	assert.Equal(t, "2", matchRow[5],
-		"right score cell (2 after vs) must be '2' (FlagsB=2 for pool A)")
+	assert.Equal(t, "2", matchRow[1],
+		"left score cell (2 before vs) must be '2' (FlagsB=2 for pool A)")
+	assert.Equal(t, "3", matchRow[5],
+		"right score cell (2 after vs) must be '3' (FlagsA=3 for pool A)")
 
 	// The winner's accumulated flag total must appear under the "Flags" standings header.
 	assert.True(t, columnHasValueUnderHeader(rows, helper.ColHeaderFlags, "3"),
@@ -3671,16 +3690,18 @@ func TestBuildResultsWorkbook_NaginataThirdPlaceEntrantFormulas(t *testing.T) {
 	rightFormula, err := f.GetCellFormula(helper.SheetEliminationMatches, fmt.Sprintf("G%d", scoreExcelRow))
 	require.NoError(t, err)
 
-	// Both cells together must hold CONCATENATE formulas referencing the two
-	// semifinal losers. For a 4-player bracket the semis are M 1 and M 2;
-	// the pair covers both because mirror may swap which cell holds which.
-	combined := leftFormula + " " + rightFormula
-	assert.Contains(t, combined, "CONCATENATE",
+	// Both cells must hold CONCATENATE formulas referencing the two semifinal
+	// losers. For a 4-player bracket the semis are M 1 (upper) and M 2
+	// (lower); the upper semi's loser is the bronze's SideA (Aka), so it sits
+	// on the RIGHT and the lower semi's loser on the LEFT.
+	assert.Contains(t, leftFormula, "CONCATENATE",
 		"bronze entrant cells must carry CONCATENATE formulas (no scoring yet, no literal names)")
-	assert.Contains(t, combined, "M 1",
-		"bronze entrant formulas must reference the loser of semifinal M 1")
-	assert.Contains(t, combined, "M 2",
-		"bronze entrant formulas must reference the loser of semifinal M 2")
+	assert.Contains(t, rightFormula, "CONCATENATE",
+		"bronze entrant cells must carry CONCATENATE formulas (no scoring yet, no literal names)")
+	assert.Contains(t, leftFormula, `"M 2 "`,
+		"the left (Shiro) bronze entrant is the loser of semifinal M 2")
+	assert.Contains(t, rightFormula, `"M 1 "`,
+		"the right (Aka) bronze entrant is the loser of semifinal M 1")
 }
 
 // TestBuildResultsWorkbook_EngiEliminationHeaderFlags verifies that when a
@@ -4119,9 +4140,9 @@ func TestBuildResultsWorkbook_ClampedShiaijoBands(t *testing.T) {
 	assert.Equal(t, []string{"A", "B"}, readCourtBandLetters(t, rows, helper.SheetPoolMatches),
 		"%s must be banded for the shiaijo the pools actually run on", helper.SheetPoolMatches)
 
-	// writeScoreRowCells puts SideA's (Red, left) score at the band's start
-	// column + 1. Band c starts at 0-based column c*CourtsColumnsPerCourt.
-	scoreCol := func(court int) int { return court*helper.CourtsColumnsPerCourt + 1 }
+	// writeScoreRowCells puts SideA's (Red, right) score at the band's start
+	// column + 5. Band c starts at 0-based column c*CourtsColumnsPerCourt.
+	scoreCol := func(court int) int { return court*helper.CourtsColumnsPerCourt + 5 }
 	assert.Truef(t, columnContains(rows, scoreCol(0), "M"),
 		"Pool A's ippon must land in the shiaijo A band (column %d)", scoreCol(0)+1)
 	assert.Truef(t, columnContains(rows, scoreCol(0), "K"),
@@ -4188,4 +4209,233 @@ func TestBuildResultsWorkbook_BracketMarksFollowTheSideIDs(t *testing.T) {
 		"the same-name pairing's LOSING cell must sit where its distinguishable twin's does")
 	assert.Equal(t, ctlRight, subRight,
 		"the same-name pairing's WINNING cell must sit where its distinguishable twin's does")
+}
+
+// TestBuildResultsWorkbook_WhiteOnTheLeftRedOnTheRight pins the FIK scoreboard
+// layout on the tournament app's export: White (Shiro) in the LEFT column and
+// Red (Aka) in the RIGHT, on the pool sheet and the elimination sheet alike,
+// with no setting that can turn it around. A pool match's SideA and a knockout
+// match's upper-bracket side are Aka, so every LEFT cell holds SideB.
+//
+// The competition is testSetup's, untouched, so it carries no orientation
+// setting at all. A legacy config.md that still holds a `mirror: false` key
+// from before that per-competition switch was removed loads the same way:
+// unknown YAML keys are ignored, as internal/state/testdata/legacy_playoffs_config.md
+// (a fixture kept for exactly this) demonstrates.
+func TestBuildResultsWorkbook_WhiteOnTheLeftRedOnTheRight(t *testing.T) {
+	t.Parallel()
+
+	t.Run("pool", func(t *testing.T) {
+		t.Parallel()
+		dir, store, eng, compID := testSetup(t)
+		defer os.RemoveAll(dir)
+
+		require.NoError(t, store.SavePools(compID, makePools()))
+		// Alice (SideA, Aka) beats Bob (SideB, Shiro) MK to D. Both sides
+		// score, so a blank cell cannot pass for either one.
+		require.NoError(t, store.SavePoolMatches(compID, []state.MatchResult{{
+			ID: "Pool A-0", SideA: "Alice", SideAID: "Alice", SideB: "Bob", SideBID: "Bob",
+			IpponsA: []string{"M", "K"}, IpponsB: []string{"D"},
+			Decision: "fought", Status: state.MatchStatusCompleted,
+			Winner: "Alice", WinnerID: "Alice",
+		}}))
+
+		data, err := BuildResultsWorkbook(store, eng, compID)
+		require.NoError(t, err)
+		f, err := excelize.OpenReader(bytes.NewReader(data))
+		require.NoError(t, err)
+		defer f.Close()
+		rows, err := f.GetRows(helper.SheetPoolMatches)
+		require.NoError(t, err)
+
+		// One court band, Pool A first: its header is the first row whose
+		// column A carries a side label, and match 0 is the row below it.
+		hdr := slices.IndexFunc(rows, func(row []string) bool {
+			return len(row) > 0 && (row[0] == "White" || row[0] == "Red")
+		})
+		require.GreaterOrEqual(t, hdr, 0, "the pool sheet must carry a side-label header")
+		at := func(r, c int) string {
+			if r >= len(rows) || c >= len(rows[r]) {
+				return ""
+			}
+			return rows[r][c]
+		}
+		assert.Equal(t, "White", at(hdr, 0), "the header's LEFT label")
+		assert.Equal(t, "Red", at(hdr, 6), "the header's RIGHT label")
+		assert.Equal(t, "D", at(hdr+1, 1), "the LEFT score cell is Shiro's (SideB)")
+		assert.Equal(t, "MK", at(hdr+1, 5), "the RIGHT score cell is Aka's (SideA)")
+
+		matchRow := hdr + 2 // 1-based Excel row of match 0
+		assert.Equal(t, "Bob", resolvedCellText(t, f, helper.SheetPoolMatches, fmt.Sprintf("A%d", matchRow)),
+			"the LEFT entrant is SideB (Shiro)")
+		assert.Equal(t, "Alice", resolvedCellText(t, f, helper.SheetPoolMatches, fmt.Sprintf("G%d", matchRow)),
+			"the RIGHT entrant is SideA (Aka)")
+	})
+
+	t.Run("knockout", func(t *testing.T) {
+		t.Parallel()
+		dir, store, eng, compID := testSetup(t)
+		defer os.RemoveAll(dir)
+
+		comp, err := store.LoadCompetition(compID)
+		require.NoError(t, err)
+		comp.Kind = "individual"
+		comp.Format = state.CompFormatKnockout
+		comp.Status = "setup"
+		require.NoError(t, store.SaveCompetition(comp))
+		require.NoError(t, store.SaveParticipants(compID, []domain.Player{
+			{Name: "Alice", Dojo: "D1"}, {Name: "Bob", Dojo: "D2"},
+			{Name: "Carol", Dojo: "D3"}, {Name: "Dave", Dojo: "D4"},
+		}))
+		require.NoError(t, eng.StartCompetition(compID))
+
+		// Every bout whose two sides are resolved competitors (an id is
+		// present exactly then; a "Winner of ..." feeder carries none): the
+		// upper-bracket side (SideA, Aka) wins MK to D.
+		br, err := store.LoadBracket(compID)
+		require.NoError(t, err)
+		require.NotNil(t, br)
+		byNumber := map[int]state.BracketMatch{}
+		for ri := range br.Rounds {
+			for mi := range br.Rounds[ri] {
+				m := &br.Rounds[ri][mi]
+				if m.MatchNumber <= 0 || m.SideAID == "" || m.SideBID == "" {
+					continue
+				}
+				m.Winner, m.WinnerID = m.SideA, m.SideAID
+				m.IpponsA, m.IpponsB = []string{"M", "K"}, []string{"D"}
+				m.Decision = "fought"
+				m.Status = state.MatchStatusCompleted
+				byNumber[m.MatchNumber] = *m
+			}
+		}
+		require.NotEmpty(t, byNumber, "the fixture must score at least one bout")
+		require.NoError(t, store.SaveBracket(compID, br))
+
+		data, err := BuildResultsWorkbook(store, eng, compID)
+		require.NoError(t, err)
+		f, err := excelize.OpenReader(bytes.NewReader(data))
+		require.NoError(t, err)
+		defer f.Close()
+		rows, err := f.GetRows(helper.SheetEliminationMatches)
+		require.NoError(t, err)
+		at := func(r, c int) string {
+			if r >= len(rows) || c >= len(rows[r]) {
+				return ""
+			}
+			return rows[r][c]
+		}
+
+		// Blocks are found by their printed number: round numbers count down
+		// toward the final, so a fixed "Round 1" label would name the wrong bout.
+		checked := 0
+		for rowIdx, row := range rows {
+			for headerCol, cell := range row {
+				num := parseRoundMatchLabel(cell)
+				bm, ok := byNumber[num]
+				if num <= 0 || !ok {
+					continue
+				}
+				assert.Equalf(t, "White", at(rowIdx+1, headerCol), "Match %d header's LEFT label", num)
+				assert.Equalf(t, "Red", at(rowIdx+1, headerCol+6), "Match %d header's RIGHT label", num)
+				assert.Equalf(t, bm.SideB, at(rowIdx+2, headerCol), "Match %d LEFT entrant is the lower-bracket side (SideB)", num)
+				assert.Equalf(t, bm.SideA, at(rowIdx+2, headerCol+6), "Match %d RIGHT entrant is the upper-bracket side (SideA)", num)
+				assert.Equalf(t, "D", at(rowIdx+2, headerCol+1), "Match %d LEFT score cell is Shiro's (SideB)", num)
+				assert.Equalf(t, "MK", at(rowIdx+2, headerCol+5), "Match %d RIGHT score cell is Aka's (SideA)", num)
+				checked++
+			}
+		}
+		assert.Equal(t, len(byNumber), checked, "every scored bout must have exactly one block")
+	})
+}
+
+// TestBuildResultsWorkbook_BronzeEntrantsWhiteOnTheLeft pins
+// writeThirdPlaceEntrants' side placement once the bronze match's entrants
+// are RESOLVED (SideA/SideB stamped onto ThirdPlaceMatch from the semifinal
+// losers, the same "resolved entrants" shape assertBronzeEntrantsPopulated
+// and TestBuildResultsWorkbook_NaginataThirdPlaceNamesBeforeBronze already
+// exercise): Shiro (SideB) must land in the LEFT entrant cell and Aka
+// (SideA) in the RIGHT one, matching every other entrant pair on this sheet
+// (helper.WhiteLeft). Those existing bronze tests only ever check that BOTH
+// cells are non-empty or exercise the unplayed CONCATENATE-formula path;
+// neither pins WHICH side lands where, so a swapped pair there would pass
+// them both.
+func TestBuildResultsWorkbook_BronzeEntrantsWhiteOnTheLeft(t *testing.T) {
+	t.Parallel()
+	dir, store, eng, compID := testSetup(t)
+	defer os.RemoveAll(dir)
+
+	setNaginataKnockout(t, store, compID, false)
+	bracket := startNaginataWith4Players(t, store, eng, compID, false)
+
+	sfIdx := len(bracket.Rounds) - 2
+	sf := bracket.Rounds[sfIdx]
+	require.Len(t, sf, 2, "expected 2 semifinals for 4 players")
+
+	// Score both SFs so the engine resolves ThirdPlaceMatch.SideA/SideB to
+	// the two losers' names.
+	require.NoError(t, eng.RecordMatchResult(compID, sf[0].ID, &state.MatchResult{
+		Winner:  sf[0].SideA,
+		IpponsA: []string{"M"},
+		Status:  state.MatchStatusCompleted,
+	}))
+	require.NoError(t, eng.RecordMatchResult(compID, sf[1].ID, &state.MatchResult{
+		Winner:  sf[1].SideB,
+		IpponsB: []string{"K"},
+		Status:  state.MatchStatusCompleted,
+	}))
+
+	b2, err := store.LoadBracket(compID)
+	require.NoError(t, err)
+	require.NotEmpty(t, b2.ThirdPlaceMatch.SideA, "engine must populate ThirdPlaceMatch.SideA after SFs")
+	require.NotEmpty(t, b2.ThirdPlaceMatch.SideB, "engine must populate ThirdPlaceMatch.SideB after SFs")
+	aka, shiro := b2.ThirdPlaceMatch.SideA, b2.ThirdPlaceMatch.SideB
+
+	data, err := BuildResultsWorkbook(store, eng, compID)
+	require.NoError(t, err)
+	f, err := excelize.OpenReader(bytes.NewReader(data))
+	require.NoError(t, err)
+	defer f.Close()
+
+	rows, err := f.GetRows(helper.SheetEliminationMatches)
+	require.NoError(t, err)
+	// FindCellRow is 0-based; the entrant row sits 2 rows below the header
+	// (header, side-label row, entrant row), so the 1-based Excel row is
+	// headerIdx + 1 (to 1-based) + 2 (down to the entrant row).
+	entrantExcelRow := bctest.FindCellRow(rows, helper.ThirdPlaceLabel) + 3
+
+	assert.Equal(t, shiro, resolvedCellText(t, f, helper.SheetEliminationMatches, fmt.Sprintf("A%d", entrantExcelRow)),
+		"the bronze LEFT entrant is SideB (Shiro)")
+	assert.Equal(t, aka, resolvedCellText(t, f, helper.SheetEliminationMatches, fmt.Sprintf("G%d", entrantExcelRow)),
+		"the bronze RIGHT entrant is SideA (Aka)")
+}
+
+// resolvedCellText returns the text a cell displays, following its formula
+// reference when it has one. The pool skeleton writes entrant cells as
+// references into the draw's sheets, and excelize reads back no value for a
+// formula it never evaluated, so the reference is chased to a literal. A
+// numbered entrant's formula joins its number cell and its name cell; the LAST
+// reference is the name.
+func resolvedCellText(t *testing.T, f *excelize.File, sheet, ref string) string {
+	t.Helper()
+	refRE := regexp.MustCompile(`(?:'([^']+)'|([A-Za-z0-9_.]+))!\$?([A-Z]+)\$?([0-9]+)`)
+	for hop := 0; hop < 5; hop++ {
+		formula, err := f.GetCellFormula(sheet, ref)
+		require.NoError(t, err)
+		if formula == "" {
+			v, err := f.GetCellValue(sheet, ref)
+			require.NoError(t, err)
+			return v
+		}
+		refs := refRE.FindAllStringSubmatch(formula, -1)
+		require.NotEmptyf(t, refs, "formula %q in %s!%s references no cell", formula, sheet, ref)
+		last := refs[len(refs)-1]
+		sheet = last[1]
+		if sheet == "" {
+			sheet = last[2]
+		}
+		ref = last[3] + last[4]
+	}
+	t.Fatalf("%s!%s: formula chain longer than 5 hops", sheet, ref)
+	return ""
 }

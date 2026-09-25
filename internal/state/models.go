@@ -330,7 +330,6 @@ type Competition struct {
 	StartTime         string            `yaml:"start_time" json:"startTime"`
 	Date              string            `yaml:"date" json:"date"`
 	Status            CompetitionStatus `yaml:"status" json:"status"`
-	Mirror            bool              `yaml:"mirror" json:"mirror"`
 	WithZekkenName    bool              `yaml:"with_zekken_name" json:"withZekkenName"`
 	NumberPrefix      string            `yaml:"number_prefix,omitempty" json:"numberPrefix,omitempty"`
 	HasParticipantIDs bool              `yaml:"has_participant_ids,omitempty" json:"hasParticipantIDs,omitempty"`

@@ -235,7 +235,7 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast, o
       }
       return next;
     });
-  }, [c.id, c.name, c.date, c.startTime, c.poolSize, c.poolWinners, c.poolSizeMode, c.courts, c.roundRobin, c.withZekkenName, c.teamSize, c.numberPrefix, c.format, c.kind, c.mirror, c.status, c.poolFormat, c.poolMatchDurationSeconds, c.knockoutMatchDurationSeconds, c.swissRounds, c.swissCurrentRound, c.naginata, c.engi, c.checkInEnabled, c.leagueTiebreakTopN, c.leagueTwoThirdPlaces, c.twoThirdPlaces, c.teamMatchType]);
+  }, [c.id, c.name, c.date, c.startTime, c.poolSize, c.poolWinners, c.poolSizeMode, c.courts, c.roundRobin, c.withZekkenName, c.teamSize, c.numberPrefix, c.format, c.kind, c.status, c.poolFormat, c.poolMatchDurationSeconds, c.knockoutMatchDurationSeconds, c.swissRounds, c.swissCurrentRound, c.naginata, c.engi, c.checkInEnabled, c.leagueTiebreakTopN, c.leagueTwoThirdPlaces, c.twoThirdPlaces, c.teamMatchType]);
 
   const saveNow = () => {
     // Build `effective` from the LATEST server-known state (cRef.current)
@@ -256,7 +256,7 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast, o
     // rather than trusting latestC.twoThirdPlaces raw -- a legacy competition
     // has no stored value at all, and sending `false` for one on every
     // unrelated settings save (this field is round-tripped unconditionally
-    // below, like naginata/mirror/teamMatchType) would silently flip its
+    // below, like naginata/teamMatchType) would silently flip its
     // effective rule from "on" (via the !naginata fallback) to an explicit
     // "off" the operator never chose.
     effective.twoThirdPlaces = editedFieldsRef.current.has("twoThirdPlaces")
@@ -339,14 +339,6 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast, o
     // hasParticipantIDs) are deliberately excluded. If a new settings
     // field is added to the JSX or the OpenAPI settings list, also add
     // it here.
-    //
-    // `mirror` is in the allowlist even though AdminSettings doesn't
-    // expose it as an editable control. data.jsx:200 (buildEmptyCompetition)
-    // defaults new competitions to `mirror: true`; the backend transform
-    // unconditionally applies `current.Mirror = comp.Mirror`, so an
-    // omitted field would JSON-encode to false and clobber the disk
-    // value on every settings save. Round-tripping `effective.mirror`
-    // (sourced from latestC unless the user edited it) preserves the value.
     //
     // safeInt for the numeric fields: decideNumericUpdate stores NaN in
     // local state when the user clears a number input (so the render
@@ -450,7 +442,6 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast, o
       numberPrefix: trimmedPrefix,
       format: effective.format,
       kind: effective.kind,
-      mirror: effective.mirror,
       // FR-050 / T044: round-robin shape selector. Only meaningful when
       // the format runs pool play; the backend's validateCompetitionFormat
       // accepts the empty value, so a non-pool format can safely PUT "".
@@ -470,7 +461,7 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast, o
       swissRounds: safeInt(effective.swissRounds, latestC.swissRounds || 0),
       naginata: !!effective.naginata,
       // Engi (flag-scoring kata pairs). Round-tripped for the same reason as
-      // `mirror` and `teamMatchType`: the backend transform unconditionally
+      // `teamMatchType`: the backend transform unconditionally
       // applies `current.Engi = comp.Engi`, so omitting the field JSON-encodes
       // to false and either silently converts an engi competition to kendo
       // ippon scoring (status=setup, where the change guard doesn't fire) or
@@ -488,8 +479,8 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast, o
       // the backend's PUT allowlist ignores unknown fields.
       leagueTiebreakTopN: safeInt(effective.leagueTiebreakTopN, latestC.leagueTiebreakTopN || 0),
       // twoThirdPlaces (bc-3rdp): round-tripped unconditionally, like
-      // naginata/mirror/teamMatchType above, so an untouched control never
-      // clobbers the stored rule -- `effective.twoThirdPlaces` was already
+      // naginata above (and teamMatchType below), so an untouched control
+      // never clobbers the stored rule -- `effective.twoThirdPlaces` was already
       // resolved to a real boolean above (the operator's edit, or the
       // derived effective default), never the possibly-absent raw value.
       // LeagueTwoThirdPlaces itself is legacy read-only and is never sent.
@@ -497,7 +488,7 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast, o
       // teamMatchType is edited via the Team match format pills above; the
       // merge is a full replace: omitting it would clobber a kachinuki
       // competition's value to "" (fixed) on any save. Round-trip it like
-      // `mirror` above to preserve the stored value. Reads from `shaped`:
+      // `engi` above to preserve the stored value. Reads from `shaped`:
       // normalizeConfigForKind stages "fixed" (never "") going individual --
       // see that function's own comment for why "" would be re-filled from
       // latestC.teamMatchType here and the rejected kachinuki would come
@@ -505,7 +496,7 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast, o
       teamMatchType: shaped.teamMatchType || latestC.teamMatchType || "",
       // bc-qual LP-5a: knockout qualifiers, edited by the "Knockout
       // qualifiers" pills below. Included for the same reason as
-      // mirror/teamMatchType/naginata above: the backend transform
+      // teamMatchType/naginata above: the backend transform
       // unconditionally applies `current.ExtraQualifiers =
       // comp.ExtraQualifiers`, so omitting the field would clobber a stored
       // non-standard value to "" on every settings save.
@@ -737,7 +728,7 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast, o
   };
 
   // draw-ready lock: output-affecting fields: those that reach the Excel
-  // generator (pools, courts, format, kind, team size, mirror,
+  // generator (pools, courts, format, kind, team size,
   // withZekkenName): are disabled while a draw exists. Fields that do NOT
   // affect the generated workbook (name, date, startTime, checkInEnabled)
   // remain editable. Discard the draw from the competition header to

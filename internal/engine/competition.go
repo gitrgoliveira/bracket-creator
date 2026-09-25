@@ -1047,8 +1047,8 @@ func (e *Engine) runDrawPipeline(id string) error {
 	// per pool). It is therefore snapshotted and validated in the atomic commit
 	// below, but ONLY for mixed format, for other formats it still doesn't
 	// drive generation, so admin's concurrent change is preserved by leaving
-	// current.PoolWinners alone. Mirror (export-only), Name, Date, Venue are
-	// still NOT snapshotted (UI-only, never read during generation).
+	// current.PoolWinners alone. Name, Date, Venue are still NOT
+	// snapshotted (UI-only, never read during generation).
 	//
 	// Roster/seed mtimes. Settings drift is detected via the field-by-
 	// field snapshot above; participants and seeds live in separate
@@ -1293,7 +1293,7 @@ func (e *Engine) runDrawPipeline(id string) error {
 		//   - Courts (court labels assigned to generated matches)
 		//   - Kind / WithZekkenName (participants loading)
 		//   - CheckInEnabled (decides which participants are included)
-		// Other config fields (TeamSize, Name, Date, Venue, Mirror) are NOT
+		// Other config fields (TeamSize, Name, Date, Venue) are NOT
 		// validated, they don't drive generation, so admin's concurrent
 		// change to them doesn't invalidate the pools.csv / bracket.json we
 		// just wrote. Their values are preserved by leaving `current.X` alone

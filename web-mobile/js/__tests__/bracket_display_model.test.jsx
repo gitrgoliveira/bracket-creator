@@ -189,51 +189,74 @@ describe('buildDisplayModel', () => {
 
 describe('computeMetaTops', () => {
   // bc-tmfn: with no placeholder cards, a parent can have 0, 1 or 2 feeders.
-  it('stacks a zero-feeder card like a first-round bout, levels a one-feeder parent with its feeder, centres a two-feeder parent', () => {
-    const model = buildDisplayModel(fivePlayerRounds());
-    const heights = { 'm-r1-0': 100, 'm-r1-3': 100, 'm-r2-1': 100, 'm-r3-0': 100 };
-    const tops = computeMetaTops(model.columns, model.feedersById, heights);
-    const centre = (id) => tops[id] + heights[id] / 2;
-    // Every drawn card is placed, at a real position.
+  // 100px cards with the seam at 50: the Aka row's centre sits at 25, the
+  // Shiro row's at 75, so a one-fed card shifts 25px against its feeder, more
+  // than the 16px gap between stacked cards.
+  const heights = { 'm-r1-0': 100, 'm-r1-3': 100, 'm-r2-1': 100, 'm-r3-0': 100 };
+  const offsets = { 'm-r1-0': 50, 'm-r1-3': 50, 'm-r2-1': 50, 'm-r3-0': 50 };
+  const GAP = 16;
+
+  it('puts a one-fed card\'s Shiro row level with its feeder, and keeps the card clear of the one above', () => {
+    const model = buildDisplayModel(fivePlayerRounds()); // Carol's SF is fed on sideB
+    const tops = computeMetaTops(model.columns, model.feedersById, heights, offsets, { 'm-r2-1': 75 });
+    const anchor = (id) => tops[id] + offsets[id];
     expect(Object.keys(tops).sort()).toEqual(['m-r1-0', 'm-r1-3', 'm-r2-1', 'm-r3-0']);
-    Object.values(tops).forEach((t) => expect(Number.isFinite(t)).toBe(true));
-    // Alice/Bob's SF has no feeder (both come straight in): it is stacked at
-    // the top of its own column, first in depth-first order from the final.
+    // Alice/Bob's SF, fed by nothing, is stacked first.
     expect(tops['m-r1-0']).toBe(0);
-    // Dave/Eve is stacked next (GAP 16 below Alice/Bob), in the first column.
-    expect(tops['m-r1-3']).toBe(116);
-    // Carol's SF is fed by Dave/Eve alone: it sits level with that one feeder.
-    expect(centre('m-r2-1')).toBe(centre('m-r1-3'));
-    // Its column neighbour does not overlap it.
-    expect(tops['m-r2-1']).toBeGreaterThanOrEqual(tops['m-r1-0'] + heights['m-r1-0']);
-    // Final is centred between Alice/Bob and Carol's SF.
-    expect(centre('m-r3-0')).toBeCloseTo((centre('m-r1-0') + centre('m-r2-1')) / 2, 5);
+    // Carol's SF: its Shiro row centre is level with Dave/Eve's anchor, so the
+    // line between them is straight.
+    expect(tops['m-r2-1'] + 75).toBe(anchor('m-r1-3'));
+    // It rose 25px against Dave/Eve, and still keeps the full gap below
+    // Alice/Bob in their shared column: Dave/Eve was stacked lower instead.
+    expect(tops['m-r2-1']).toBe(tops['m-r1-0'] + heights['m-r1-0'] + GAP);
+    expect(tops['m-r1-3']).toBe(tops['m-r2-1'] + 25);
+    // The final is centred on the two semifinal anchors.
+    expect(anchor('m-r3-0')).toBeCloseTo((anchor('m-r1-0') + anchor('m-r2-1')) / 2, 5);
+  });
+
+  it('puts a one-fed card\'s Aka row level with its feeder, and keeps what is stacked after it clear', () => {
+    // Carol's SF fed on sideA, and first under the final, so Alice/Bob's SF is
+    // stacked after it in the same column.
+    const rounds = fivePlayerRounds();
+    rounds[1][1] = { ...rounds[1][1], sideA: 'Winner of r3-m3', sideB: 'Carol', feeders: ['m-r1-3', ''] };
+    rounds[2][0] = { ...rounds[2][0], feeders: ['m-r2-1', 'm-r1-0'] };
+    const model = buildDisplayModel(rounds);
+    const tops = computeMetaTops(model.columns, model.feedersById, heights, offsets, { 'm-r2-1': 25 });
+    const anchor = (id) => tops[id] + offsets[id];
+    expect(tops['m-r1-3']).toBe(0);
+    // The Aka row centre is level with Dave/Eve's anchor: the card dropped 25px.
+    expect(tops['m-r2-1'] + 25).toBe(anchor('m-r1-3'));
+    expect(tops['m-r2-1']).toBe(25);
+    // Alice/Bob's SF, stacked next in the same column, keeps the full gap.
+    expect(tops['m-r1-0']).toBe(tops['m-r2-1'] + heights['m-r2-1'] + GAP);
+  });
+
+  it('levels a one-fed card at its seam when no fed-row centre is given', () => {
+    const model = buildDisplayModel(fivePlayerRounds());
+    const tops = computeMetaTops(model.columns, model.feedersById, heights, offsets);
+    expect(tops['m-r2-1'] + offsets['m-r2-1']).toBe(tops['m-r1-3'] + offsets['m-r1-3']);
   });
 
   // mp-ydk7: connectors anchor at each card's sides-block midline, which sits
   // BELOW the geometric centre by the meta header, and cards differ in height
   // (a filled name+dojo card is taller than a TBD one). Centring a parent on
   // its feeders' GEOMETRIC centres would leave its seam off the feeders'
-  // seams. Passing per-card `offsets` must place each parent so its OWN
-  // anchor equals the mean of its feeders' anchors: delta 0 for every parent,
-  // the one-feeder parent included (its anchor IS its feeder's).
+  // seams. Passing per-card `offsets` must place each two-fed parent so its
+  // OWN anchor equals the mean of its feeders' anchors, and a one-fed parent
+  // so its fed row equals its feeder's anchor.
   it('zeroes feeder-vs-child delta under asymmetric card heights and anchor offsets', () => {
     const model = buildDisplayModel(fivePlayerRounds());
-    const heights = { 'm-r1-0': 118, 'm-r1-3': 118, 'm-r2-1': 104, 'm-r3-0': 104 };
-    const offsets = { 'm-r1-0': 66, 'm-r1-3': 66, 'm-r2-1': 59, 'm-r3-0': 59 };
-    const tops = computeMetaTops(model.columns, model.feedersById, heights, offsets);
-    const anchor = (id) => tops[id] + offsets[id]; // the y the SVG connectors join at
-    let parents = 0;
-    for (const [childId, feeders] of Object.entries(model.feedersById)) {
-      if (!feeders.length) continue;
-      parents++;
-      const mean = feeders.reduce((s, fid) => s + anchor(fid), 0) / feeders.length;
-      expect(anchor(childId)).toBeCloseTo(mean, 5);
-    }
-    expect(parents).toBe(2); // Carol's SF (one feeder) and the final (two)
-    expect(anchor('m-r2-1')).toBeCloseTo(anchor('m-r1-3'), 5);
+    const h = { 'm-r1-0': 118, 'm-r1-3': 118, 'm-r2-1': 104, 'm-r3-0': 104 };
+    const off = { 'm-r1-0': 66, 'm-r1-3': 66, 'm-r2-1': 59, 'm-r3-0': 59 };
+    const tops = computeMetaTops(model.columns, model.feedersById, h, off, { 'm-r2-1': 81 });
+    const anchor = (id) => tops[id] + off[id]; // the y the SVG connectors join at
+    // The final, fed by two: its anchor is the mean of theirs.
+    expect(anchor('m-r3-0')).toBeCloseTo((anchor('m-r1-0') + anchor('m-r2-1')) / 2, 5);
+    // Carol's SF, fed by one on its Shiro row: that row is level with it.
+    expect(tops['m-r2-1'] + 81).toBeCloseTo(anchor('m-r1-3'), 5);
     // Sanity: the case under test really is asymmetric; the final's two
     // feeders carry different offsets.
-    expect(offsets['m-r1-0']).not.toBe(offsets['m-r2-1']);
+    expect(off['m-r1-0']).not.toBe(off['m-r2-1']);
   });
 });
+

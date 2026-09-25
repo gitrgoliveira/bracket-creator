@@ -194,7 +194,19 @@ RunningMatchPanel.displayName = "RunningMatchPanel";
 function AdminBracket({ c, t, bracket, onMoveCourt, onEditScore, tweaks, password }) {
   const [selected, setSelected] = useStateA(null);
   const scrollRef = useRefA(null);
+  const panelRef = useRefA(null);
   const [autoScrollId, setAutoScrollId] = useStateA(null);
+
+  // The scoring panel sits BELOW the bracket (operator decision), so picking a
+  // match brings it into view. Keyed on the picked match's id, so a re-render
+  // of the same pick (an SSE update) does not scroll the page back to it.
+  const selectedId = selected?.matchId;
+  useEffectA(() => {
+    if (!selectedId || !panelRef.current) return;
+    const reduce = typeof window.matchMedia === "function" &&
+      window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    panelRef.current.scrollIntoView({ block: "start", behavior: reduce ? "auto" : "smooth" });
+  }, [selectedId]);
 
   // Recenter on the running match whenever it changes (initial bracket
   // load, or one match finishing and the next starting). Empty deps would
@@ -301,10 +313,10 @@ function AdminBracket({ c, t, bracket, onMoveCourt, onEditScore, tweaks, passwor
   // bye-containing brackets legitimately have.
   const hasUnseededPools = bracket.rounds.some(r => (r || []).some(m => hasPoolOriginPlaceholder(m)));
   return (
-    // Flex-wrap rather than a fixed 2-col grid (see .bracket-layout in
-    // styles.css): the scoring panel keeps a minimum width so the reused inline
-    // editor never squashes/clips, and when the bracket + that min width can't
-    // sit side by side, the panel wraps to a full-width row BELOW the bracket.
+    // The bracket takes the full width and the scoring panel sits below it
+    // (operator decision; see .bracket-layout in styles.css): beside it, the
+    // panel left a four-round tree too little width at any desktop size. The
+    // tree's columns narrow to fit (.bracket-canvas--fit).
     <div className="bracket-layout">
       <div className="bracket-layout__bracket">
         {hasUnseededPools && (
@@ -312,7 +324,7 @@ function AdminBracket({ c, t, bracket, onMoveCourt, onEditScore, tweaks, passwor
             <strong>Knockout filling in</strong>: this bracket fills in automatically as each pool finishes. Matches start once both sides are decided.
           </div>
         )}
-        <div className="bracket-canvas" ref={scrollRef}>
+        <div className="bracket-canvas bracket-canvas--fit" ref={scrollRef}>
           <div className="bracket-canvas__inner">
             <window.BracketTree
               rounds={bracket.rounds}
@@ -330,29 +342,40 @@ function AdminBracket({ c, t, bracket, onMoveCourt, onEditScore, tweaks, passwor
               const isHighlighted = selected?.matchId === bm.id;
               // The "3rd Place Match" section header identifies the lone bronze
               // card, so the card omits a per-card meta badge (no redundant
-              // "3RD" repeating the header). It renders smaller and offset UNDER
-              // the final match card (bronzeUnderFinalStyle) — the two "end"
-              // matches read together, and it can't be misread as a semifinal.
+              // "3RD" repeating the header). It renders smaller and UNDER the
+              // final match card, so the two "end" matches read together and it
+              // can't be misread as a semifinal. The tree's columns narrow to
+              // fit here, so the bronze sits in a row of column slots sized by
+              // the same rules (.bracket-bronze-row), the last one under the
+              // final, rather than at a fixed offset.
+              const slots = window.bracketColumnCount(bracket.rounds);
               return (
-                <div className="bracket-bronze-section" style={{ marginTop: 28, ...window.bronzeUnderFinalStyle(bracket.rounds) }} data-testid="bracket-bronze-match">
-                  <div className="bracket-bronze-label">
-                    3rd Place Match
+                <div className="bracket-bronze-row" data-testid="bracket-bronze-match">
+                  {Array.from({ length: Math.max(0, slots - 1) }, (_, i) => (
+                    // Empty column slots, never reordered: the index is the key.
+                    // oxlint-disable-next-line react/no-array-index-key
+                    <div key={i} className="bracket-bronze-row__slot" aria-hidden="true" />
+                  ))}
+                  <div className="bracket-bronze-row__slot bracket-bronze-section">
+                    <div className="bracket-bronze-label">
+                      3rd Place Match
+                    </div>
+                    <window.MatchCard
+                      match={bm}
+                      isEngi={!!c.engi}
+                      variant={tweaks.cardVariant}
+                      showDojo={tweaks.showDojo}
+                      highlighted={isHighlighted}
+                      onClick={isReady ? () => select(bm, -1, 0) : undefined}
+                    />
                   </div>
-                  <window.MatchCard
-                    match={bm}
-                    isEngi={!!c.engi}
-                    variant={tweaks.cardVariant}
-                    showDojo={tweaks.showDojo}
-                    highlighted={isHighlighted}
-                    onClick={isReady ? () => select(bm, -1, 0) : undefined}
-                  />
                 </div>
               );
             })()}
           </div>
         </div>
       </div>
-      <div className="bracket-layout__panel">
+      <div className="bracket-layout__panel" ref={panelRef}>
         {hasBothSides(selectedMatch) ? (
           <RunningMatchPanel
             match={scoringMatch}

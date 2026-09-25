@@ -99,6 +99,8 @@ let AdminShiaijoPage, AdminPools, AdminBracket, AdminScoreEditor, MatchViewerMod
 beforeAll(async () => {
   // jsdom doesn't implement scrollTo; the schedule surface calls it on open.
   window.scrollTo = vi.fn();
+  // Nor scrollIntoView; the bracket page scrolls its panel into view on a pick.
+  Element.prototype.scrollIntoView = vi.fn();
   restoreGlobals = installWindowStubs(STUBBED_GLOBALS);
   await import('../../admin_shiaijo.jsx');
   await import('../../admin_pools.jsx');

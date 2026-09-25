@@ -842,10 +842,22 @@ function buildDisplayModel(rounds) {
 // the mean of its feeders' seams whatever their heights. `offsets` defaults to
 // h/2 for any id it omits, so a caller that passes only heights gets the
 // geometric-centre layout.
-function computeMetaTops(columns, feedersById, heights, offsets = {}) {
+// computeMetaTops places every card: a card no match feeds is stacked down the
+// page in depth-first order from the final, and a card two matches feed is
+// centred on their anchors (each card's anchor is the seam between its two
+// rows, `offsets`). A card ONE match feeds (oneSidedFeed) is placed so the
+// centre of the row that match fills, `fedRowMids[id]` from the card's top,
+// is level with the feeder's anchor, so the line between them runs straight.
+// That row sits half a row above or below the card's seam, so the card is
+// shifted by that much against its feeder, and the stacking cursor moves by
+// the same amount so the shifted card keeps clear of the cards stacked before
+// and after it. Without a fedRowMids entry the card is levelled at its seam.
+function computeMetaTops(columns, feedersById, heights, offsets = {}, fedRowMids = {}) {
   const GAP = 16;
   const DEFAULT_H = 110;
   const offsetOf = (id) => offsets[id] ?? (heights[id] || DEFAULT_H) / 2;
+  const rawFeedersOf = {};
+  columns.forEach((col) => col.forEach((m) => { rawFeedersOf[m.id] = m.feeders; }));
   const anchorOf = {};
   const inProgress = new Set();
   let cursor = 0;
@@ -857,6 +869,21 @@ function computeMetaTops(columns, feedersById, heights, offsets = {}) {
     // bracket.json must not crash the renderer: break the cycle and return 0.
     if (inProgress.has(id)) return 0;
     inProgress.add(id);
+    const one = oneSidedFeed(rawFeedersOf[id]);
+    if (one && fedRowMids[id] != null) {
+      // How far the fed row's centre sits below the seam: positive for the
+      // Shiro row (the card rises against its feeder), negative for the Aka
+      // row (it drops). Rising, the feeder's subtree is stacked that much
+      // lower first, so the card itself lands where it would have been; dropping,
+      // what is stacked after it starts that much lower.
+      const shift = fedRowMids[id] - offsetOf(id);
+      if (shift > 0) cursor += shift;
+      const a = visit(one.fid) - shift;
+      if (shift < 0) cursor -= shift;
+      anchorOf[id] = a;
+      inProgress.delete(id);
+      return a;
+    }
     const fs = (feedersById[id] || []).filter(Boolean);
     const h = heights[id] || DEFAULT_H;
     if (fs.length === 0) {
@@ -935,11 +962,23 @@ function connectorPath({ fRight, fMidY, mLeft, mMidY, elbowX }) {
 // needs it. Pure apart from that callback, so it is unit-testable without a
 // layout engine, like elbowXFor/connectorPath above.
 function connectorTargetY({ feeders, fid, cardAnchorY, rowMidY }) {
+  const one = oneSidedFeed(feeders);
+  if (!one || one.fid !== fid) return cardAnchorY;
+  const y = rowMidY(one.side);
+  return y == null ? cardAnchorY : y;
+}
+
+// oneSidedFeed: for a card's RAW [sideA, sideB] feeder pair, the one match
+// that feeds it when exactly one does, as { side: "a" (sideA, the Aka row) or
+// "b" (sideB, the Shiro row), fid }, else null. The ONE statement of "a card
+// fed by one match": connectorTargetY ends that match's line on the fed row,
+// and computeMetaTops places the card so the fed row is level with the
+// feeder, which is what makes that line straight.
+function oneSidedFeed(feeders) {
   const fed = [];
   (feeders || []).forEach((f, i) => { if (f) fed.push(i); });
-  if (fed.length !== 1 || fed[0] > 1 || feeders[fed[0]] !== fid) return cardAnchorY;
-  const y = rowMidY(fed[0] === 0 ? "a" : "b");
-  return y == null ? cardAnchorY : y;
+  if (fed.length !== 1 || fed[0] > 1) return null;
+  return { side: fed[0] === 0 ? "a" : "b", fid: feeders[fed[0]] };
 }
 
 // columnRightEdge: the right edge (tree-relative px) of the first mounted
@@ -965,7 +1004,9 @@ function columnRightEdge(col, refMap, treeRect) {
 // correctly. Only real matches are in the feeder graph, so a side whose
 // competitor skipped the earlier rounds receives no connector at all; where
 // such a side leaves a card fed by ONE match, that connector ends on the row
-// the match fills rather than at the card's seam (connectorTargetY).
+// the match fills rather than at the card's seam (connectorTargetY), and the
+// card is placed with that row level with the feeder (computeMetaTops), so
+// the connector runs straight across.
 //
 // Every elbow routes through the gap immediately before the PARENT's column
 // (elbowXFor), measured from the DOM rather than the CSS `.bc-tree` gap
@@ -1029,7 +1070,20 @@ function BracketConnectorsMeta({ columns, feedersById, treeRef, refMap, version,
         });
       });
       setPaths(out);
-      setSize({ w: tree.scrollWidth, h: tree.scrollHeight });
+      // Sized to the cards' own extent, not to tree.scrollWidth/scrollHeight:
+      // those include this SVG, so once drawn wide it would hold the tree at
+      // that width, and a tree whose columns narrow to fit
+      // (.bracket-canvas--fit) would keep scrolling after it had shrunk.
+      let w = 0;
+      let h = 0;
+      columns.forEach((col) => col.forEach((m) => {
+        const el = refMap.current[m.id];
+        if (!el) return;
+        const r = el.getBoundingClientRect();
+        w = Math.max(w, r.right - treeRect.left);
+        h = Math.max(h, r.bottom - treeRect.top);
+      }));
+      setSize({ w, h });
     };
     compute();
     const ro = new ResizeObserver(compute);
@@ -1078,12 +1132,22 @@ function BracketTreeMeta({ columns, feedersById, matchNumById, slotLabel, varian
       if (!tree || !columns || columns.length === 0) return;
       const heights = {};
       const offsets = {};
+      const fedRowMids = {};
       for (const col of columns) {
         for (const m of col) {
           const el = refMap.current[m.id];
           if (!el) return;
           const rect = el.getBoundingClientRect();
           heights[m.id] = rect.height;
+          // A card fed by ONE match: the centre of the row that match fills,
+          // which computeMetaTops levels with the feeder. Both PlayerLine
+          // shapes carry bc-side--a / bc-side--b, the empty (TBD) row included.
+          const one = oneSidedFeed(m.feeders);
+          const fedRow = one && el.querySelector(`.bc-side--${one.side}`);
+          if (fedRow) {
+            const r = fedRow.getBoundingClientRect();
+            fedRowMids[m.id] = (r.top + r.bottom) / 2 - rect.top;
+          }
           // Anchor offset from the card top: the y the SVG connectors join at.
           // Mirrors anchorY(): the sides-block midline, falling back to the
           // geometric centre for a card without two .bc-side rows. Passing this
@@ -1100,7 +1164,7 @@ function BracketTreeMeta({ columns, feedersById, matchNumById, slotLabel, varian
           }
         }
       }
-      const tops = computeMetaTops(columns, feedersById, heights, offsets);
+      const tops = computeMetaTops(columns, feedersById, heights, offsets, fedRowMids);
       // Every column is absolutely positioned, so the flow height of each
       // round-matches container is 0 and the tree would collapse. Derive the
       // overall content height from the lowest card bottom and pin it on the
@@ -1389,24 +1453,34 @@ function matchStateCell(m) {
 // min-width (COL) + .bc-tree's gap (GAP). numCols comes from the same
 // buildDisplayModel the tree renders from, so phantom bye columns are counted
 // and the offset stays correct for any bracket size. The smaller card (CARD) is
-// centred under the full-width final column.
+// centred under the full-width final column. For the tree's fixed 230px
+// columns (the public Bracket tab); the admin Bracket page, whose columns
+// narrow to fit (.bracket-canvas--fit), places its bronze in a row of column
+// slots instead (.bracket-bronze-row, admin_competition_bracket.jsx).
 function bronzeUnderFinalStyle(rounds) {
   // CARD (210) is the smallest width that still fits a typical winner name
   // without ellipsis truncation (measured live: "Haruto Watanabe" fits at 210,
   // truncates at 205), while staying visibly smaller than the 230px final it
   // sits under. COL/GAP mirror .bc-round min-width / .bc-tree gap.
   const COL = 230, GAP = 56, CARD = 210;
+  const colOffset = Math.max(0, bracketColumnCount(rounds) - 1) * (COL + GAP);
+  return { width: CARD, marginLeft: colOffset + (COL - CARD) / 2 };
+}
+
+// bracketColumnCount: how many columns the tree draws for these rounds, from
+// the same buildDisplayModel the tree renders from (effective rounds when the
+// engine supplied display metadata, the raw rounds otherwise).
+function bracketColumnCount(rounds) {
   const model = buildDisplayModel(rounds);
-  const numCols = (model && model.hasMeta && Array.isArray(model.columns))
+  return (model && model.hasMeta && Array.isArray(model.columns))
     ? model.columns.length
     : (Array.isArray(rounds) ? rounds.length : 1);
-  const colOffset = Math.max(0, numCols - 1) * (COL + GAP);
-  return { width: CARD, marginLeft: colOffset + (COL - CARD) / 2 };
 }
 
 window.BracketTree = BracketTree;
 window.MatchCard = MatchCard;
 window.bronzeUnderFinalStyle = bronzeUnderFinalStyle;
+window.bracketColumnCount = bracketColumnCount;
 window.roundLabel = roundLabel;
 // Exposed so every surface that labels a bracket MATCH (viewer rows, admin
 // score editor, TV/display boards) uses the effective-round rule rather than
@@ -1444,4 +1518,4 @@ window.sideMarks = sideMarks;
 window.placeMarks = placeMarks;
 window.teamMatchMarks = teamMatchMarks;
 
-export { formatIpponsScore, enchoLabel, boutMiddle, defaultWinMaru, matchMiddleMark, sideMarks, placeMarks, teamMatchMarks, winnerSideLR, sideLabel, roundLabel, bracketRoundLabel, teamIVScore, teamIVPWScore, engiFlagScore, matchScoreStr, matchStateCell, buildDisplayModel, computeMetaTops, bronzeUnderFinalStyle, PlayerLine, slotDisplayName, makeSlotLabeller, bracketSlotLabeller, MatchCard, BracketTree, elbowXFor, connectorPath, connectorTargetY };
+export { formatIpponsScore, enchoLabel, boutMiddle, defaultWinMaru, matchMiddleMark, sideMarks, placeMarks, teamMatchMarks, winnerSideLR, sideLabel, roundLabel, bracketRoundLabel, teamIVScore, teamIVPWScore, engiFlagScore, matchScoreStr, matchStateCell, buildDisplayModel, computeMetaTops, bronzeUnderFinalStyle, bracketColumnCount, PlayerLine, slotDisplayName, makeSlotLabeller, bracketSlotLabeller, MatchCard, BracketTree, elbowXFor, connectorPath, connectorTargetY };

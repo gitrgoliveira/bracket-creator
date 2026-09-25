@@ -178,8 +178,8 @@ const TREE_READY = '.bc-round-matches--abs';
 
 export const recipes = [
   {
-    // The admin Bracket page, cropped to the bracket card. At 1200 the scoring
-    // panel wraps below the card, so the card takes the whole content width.
+    // The admin Bracket page, cropped to the bracket card. The scoring panel
+    // sits below the card, so the card takes the whole content width.
     name: 'knockout-bracket-five',
     family: 'knockoutDraw',
     route: `/admin/competition/${FIVE_ID}/bracket`,
@@ -193,14 +193,10 @@ export const recipes = [
     },
   },
   {
-    // The PUBLIC Bracket tab at a desktop width, not the admin Bracket page. A
-    // four-round tree is 1152px wide, and the admin bracket card is never wider
-    // than about 1093px: the scoring panel sits beside the card as soon as
-    // there is room for both (560px + 520px, .bracket-layout), which then
-    // squeezes the card to under 600px. So the admin card always scrolls a
-    // sixteen-slot draw sideways, and the viewer, whose bracket tab widens its
-    // shell to 1440px, is the one page that shows it whole. 1265 is the width
-    // of mobile-pool-standings, the image this sits beside.
+    // The PUBLIC Bracket tab at a desktop width: a draw part-way through, as
+    // spectators follow it (the tab widens its shell to 1440px, so a
+    // sixteen-slot tree shows whole). 1265 is the width of
+    // mobile-pool-standings, the image this sits beside.
     name: 'knockout-bracket-in-play',
     family: 'knockoutPlay',
     route: `/competition/${TEN_ID}/bracket`,

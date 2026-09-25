@@ -251,7 +251,7 @@ func EliminationDraw(store *state.Store, comp *state.Competition, pools []helper
 // "Round N - Match N" numbering equal to the stored bracket's MatchNumber even
 // when seeds.csv has drifted, so overlayBracketScores writes each score into the
 // right block. The two numbering walks are equal-by-contract
-// (assignBracketMatchNumbers vs helper.AssignMatchNumbers), but only over the
+// (state.Bracket.NumberMatches vs helper.AssignMatchNumbers), but only over the
 // same SHAPE: the leaf order alone is not enough, the rebuild must also collapse
 // the "" slots below, or the numbering walks over a tree with extra nodes in it
 // (see EliminationDraw). Returns nil for a nil/empty bracket (e.g. a knockout

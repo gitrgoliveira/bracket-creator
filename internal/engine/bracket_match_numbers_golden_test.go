@@ -18,7 +18,7 @@ import (
 // Bracket match numbers are a CROSS-LANGUAGE contract, and until this file
 // nothing pinned it.
 //
-// assignBracketMatchNumbers (bracket.go) stamps MatchNumber on every real match
+// state.Bracket.NumberMatches stamps MatchNumber on every real match
 // and the SPA re-derives the same numbering independently, in buildDisplayModel
 // (web-mobile/js/bracket.jsx), to label its cards "M1", "M2". A referee holding
 // the printed Excel sheet and looking at the operator's screen has to read the

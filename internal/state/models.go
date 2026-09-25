@@ -1751,6 +1751,10 @@ type BracketMatch struct {
 	// real bout and must not be drawn as a match card. Feeders holds the IDs of
 	// the two real feeder matches whose winners meet here, in [A, B] order; an
 	// empty string means that side is a seeded entrant / bye (no connector line).
+	// DisplayRound and MatchNumber are also recomputed from Feeders once on load
+	// (Bracket.RestampRoundsFromFeeders, via Store.EnsureLegacyUpgraded), which
+	// corrects a bracket drawn by v2.0.0 or v2.1.0 and changes nothing on one
+	// the current generator drew.
 	DisplayRound int      `json:"displayRound,omitempty"`
 	Hidden       bool     `json:"hidden,omitempty"`
 	Feeders      []string `json:"feeders,omitempty"`

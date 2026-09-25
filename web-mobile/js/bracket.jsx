@@ -782,7 +782,7 @@ function buildDisplayModel(rounds) {
     // and "Match 12" there must name the same bout.
     //
     // The SERVED number is the answer whenever the bracket carries one: the
-    // engine already computed it (engine.assignBracketMatchNumbers →
+    // server already computed it (state.Bracket.NumberMatches →
     // state.BracketMatch.MatchNumber, on the wire as matchNumber) and the whole
     // payload reaches us untouched (normalizeMatch spreads the match). Deriving
     // it a second time here only bought a second thing to drift from the sheet,

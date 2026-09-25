@@ -281,7 +281,7 @@ func (e *DownstreamKnockoutRunningError) Is(target error) bool {
 // words and the format is decided here only.
 //
 // The 3rd-place match is the one match that has a NAME instead of a number:
-// assignBracketMatchNumbers walks Bracket.Rounds, and the bronze hangs off the
+// state.Bracket.NumberMatches walks Bracket.Rounds, and the bronze hangs off the
 // separate ThirdPlaceMatch field, so it is numbered neither here nor on the
 // printed tree (helper.AssignMatchNumbers walks the same rounds). It is called
 // the 3rd-place match on every surface an operator sees, so that is what this

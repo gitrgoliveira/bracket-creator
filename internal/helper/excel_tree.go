@@ -334,7 +334,7 @@ func AddPoolsToTree(f *excelize.File, sheetName string, pools []Pool, poolCoords
 // node's matchNum field is set in-place.
 //
 // This is the authoritative numbering for the printed Excel Tree sheet. The web
-// API has a SEPARATE implementation, engine.assignBracketMatchNumbers, which
+// API has a SEPARATE implementation, state.Bracket.NumberMatches, which
 // operates on *state.Bracket (a different type) instead of []*Node, the two are
 // NOT a literally-shared function. They are kept equal-by-contract: skip the same
 // positions (a nil node here == a Hidden-or-both-sides-empty match there) and

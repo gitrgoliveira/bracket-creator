@@ -7,7 +7,7 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-// The 3rd-place match is numbered neither by assignBracketMatchNumbers (which
+// The 3rd-place match is numbered neither by state.Bracket.NumberMatches (which
 // walks Bracket.Rounds) nor by the printed tree, so without a name of its own
 // MatchLabel's id fallback would put "m-bronze" in front of an operator.
 func TestMatchLabel_NamesTheBronzeRatherThanItsID(t *testing.T) {

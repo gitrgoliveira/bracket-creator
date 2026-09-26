@@ -13,7 +13,7 @@
 // local-only UI (per the brief; backend persistence is a follow-up).
 
 import { createTimerPool } from './timer_pool.jsx';
-import { applyPatch, keepNewerMatches } from './patch.jsx';
+import { applyPatch, keepNewerCompetitions } from './patch.jsx';
 import { SideCell } from './side_cell.jsx';
 // Imported DIRECTLY from the leaf rather than read off `window`. Two of the
 // call sites below sit inside a `try { } catch (_e) { }` that swallows, so a
@@ -492,14 +492,6 @@ function matchInComp(comp, id) {
     return b.thirdPlaceMatch && b.thirdPlaceMatch.id === id ? b.thirdPlaceMatch : null;
 }
 
-// The feed a refetch answered with, competition by competition, keeping any
-// row the court already shows from a NEWER write (keepNewerMatches, patch.jsx,
-// where the reason is stated): the rule showRunningPush applies to a push.
-function keepNewerRows(held, fetched) {
-    if (!Array.isArray(held)) return fetched; // the first fetch: nothing shown yet
-    return fetched.map((comp) => keepNewerMatches(held.find((c) => c.id === comp.id), comp));
-}
-
 function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, onMoveCourt, onLogout, onViewerMode, password, showToast, tweaks, onSwitchCourt }) {
     // Normalize once: filterMatchesByCourt trims its param, so a bookmarked URL
     // with stray whitespace must use the trimmed value everywhere.
@@ -538,7 +530,10 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
     const refreshCourt = useCallbackSh(() => {
         if (!court || !window.API || typeof window.API.fetchCourtMatches !== "function") return Promise.resolve();
         return window.API.fetchCourtMatches(court)
-            .then(comps => { if (mountedRef.current) setCourtComps((prev) => keepNewerRows(prev, comps)); })
+            // A refetch never puts a row back to an older state
+            // (keepNewerCompetitions, patch.jsx): the rule showRunningPush
+            // applies to a push.
+            .then(comps => { if (mountedRef.current) setCourtComps((prev) => keepNewerCompetitions(prev, comps)); })
             .catch(err => console.error("Failed to fetch court matches", err));
     }, [court]);
     // Operator-triggered re-sync: the last-resort recovery when a court's tablet

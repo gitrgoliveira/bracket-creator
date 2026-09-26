@@ -1,5 +1,8 @@
 import { describe, it, expect } from 'vitest';
-import { applyPatch, recomputeQueuePositions, recomputeBracketQueuePositions, keepNewerMatches, keepNewerDetail } from '../patch.jsx';
+import {
+  applyPatch, recomputeQueuePositions, recomputeBracketQueuePositions,
+  keepNewerMatches, keepNewerDetail, keepNewerCompetitions, keepNewerTournament,
+} from '../patch.jsx';
 
 // Tests for the centralised SSE-patch applier (Slice 0 / NFR-006).
 // applyPatch composes mergeMatchPatch (covered in mergeMatchPatch.test.jsx)
@@ -772,6 +775,17 @@ describe('keepNewerMatches', () => {
     expect(out.poolMatches[1].ipponsA).toEqual([]);
   });
 
+  // A draw discarded and drawn again reuses the match ids, and its matches
+  // carry no stamp until something is written to them.
+  it('takes a fetched match nothing has written since it was built', () => {
+    const played = { ...row('P1', 300, ['M', 'K']), status: 'completed', sideA: 'Old' };
+    const rebuilt = { ...row('P1', 0), status: 'scheduled', sideA: 'New' };
+    delete rebuilt.modifiedAt;
+    const out = keepNewerMatches(comp([played]), comp([rebuilt]));
+    expect(out.poolMatches[0].sideA).toBe('New');
+    expect(out.poolMatches[0].status).toBe('scheduled');
+  });
+
   it('takes the fetch whole when nothing is held yet', () => {
     const fetched = comp([row('P1', 100)]);
     expect(keepNewerMatches(undefined, fetched)).toBe(fetched);
@@ -789,5 +803,33 @@ describe('keepNewerDetail', () => {
     const fetched = detail('c2', 100, []);
     expect(keepNewerDetail(detail('c1', 300, ['M']), fetched)).toBe(fetched);
     expect(keepNewerDetail(null, fetched)).toBe(fetched);
+  });
+});
+
+describe('keepNewerCompetitions / keepNewerTournament', () => {
+  const comp = (id, modifiedAt, ipponsA) => ({ id, poolMatches: [{ id: 'Pool A-0', status: 'running', modifiedAt, ipponsA }] });
+
+  it('pairs competitions by id, so a match id repeated in another competition is not confused with it', () => {
+    const held = [comp('c1', 300, ['M', 'K']), comp('c2', 100, [])];
+    const out = keepNewerCompetitions(held, [comp('c1', 200, ['M']), comp('c2', 200, ['D'])]);
+    expect(out[0].poolMatches[0].ipponsA, 'c1 keeps its newer match').toEqual(['M', 'K']);
+    expect(out[1].poolMatches[0].ipponsA, 'c2 takes its newer fetch').toEqual(['D']);
+  });
+
+  it('takes the list whole when nothing is held yet, and drops a competition the fetch no longer has', () => {
+    const fetched = [comp('c1', 100, [])];
+    expect(keepNewerCompetitions(null, fetched)).toBe(fetched);
+    expect(keepNewerCompetitions([comp('c9', 900, ['M'])], fetched).map((c) => c.id)).toEqual(['c1']);
+  });
+
+  it('keeps the tournament fields from the fetch and the newer matches in its competitions', () => {
+    const out = keepNewerTournament(
+      { name: 'Old name', competitions: [comp('c1', 300, ['M', 'K'])] },
+      { name: 'New name', competitions: [comp('c1', 200, ['M'])] },
+    );
+    expect(out.name).toBe('New name');
+    expect(out.competitions[0].poolMatches[0].ipponsA).toEqual(['M', 'K']);
+    const first = { name: 'T', competitions: [] };
+    expect(keepNewerTournament(null, first)).toBe(first);
   });
 });

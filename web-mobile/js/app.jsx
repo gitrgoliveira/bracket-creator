@@ -1,7 +1,7 @@
 // Main App: single tournament per app/url. Tournament has multiple Competitions
 // (Men's Individual, Women's Individual, Teams, etc.). Auth gates admin mode.
 
-import { applyPatch as patchCompetitionData, checkSeqGap, keepNewerDetail } from './patch.jsx';
+import { applyPatch as patchCompetitionData, checkSeqGap, keepNewerDetail, keepNewerTournament } from './patch.jsx';
 import { createTimerPool } from './timer_pool.jsx';
 import { setCachedAuthConfig } from './admin_helpers.jsx';
 import { LS_NOTIFICATIONS_ENABLED } from './notification_keys.jsx';
@@ -699,6 +699,11 @@ function App() {
     return () => { delete window.requestReauth; };
   }, []);
 
+  // A refreshed tournament never puts a match back to an older state
+  // (keepNewerTournament, patch.jsx): the admin's refreshes and this load all
+  // land here, and two of them can be in flight at once.
+  const updateTournament = useC((next) => setTournament((prev) => keepNewerTournament(prev, next)), []);
+
   const load = async () => {
     try {
       const t = await window.API.fetchTournament();
@@ -710,7 +715,7 @@ function App() {
       } else {
         const comps = await window.API.fetchCompetitions();
         t.competitions = comps;
-        setTournament(t);
+        updateTournament(t);
         applyTheme(t.theme); // mp-scf: apply custom colors
       }
     } catch (e) {
@@ -1427,7 +1432,7 @@ function App() {
       <>
         <window.AdminApp
           tournament={tournament}
-          onUpdate={setTournament}
+          onUpdate={updateTournament}
           onLogout={onLogout}
           onViewerMode={() => setMode("viewer")}
           onPasswordChange={setPassword}

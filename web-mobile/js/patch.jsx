@@ -512,9 +512,15 @@ function keepNewerMatches(held, fetched) {
     const hb = held.bracket;
     for (const round of (hb && hb.rounds) || []) for (const m of round) heldById.set(m.id, m);
     if (hb && hb.thirdPlaceMatch) heldById.set(hb.thirdPlaceMatch.id, hb.thirdPlaceMatch);
+    // Only a STAMPED fetched row can be the stale one: every write the server
+    // stores stamps the row at least as new as the push it made, so a copy
+    // read before that write carries an older stamp. An unstamped row is one
+    // nothing has written since it was built, e.g. a draw discarded and drawn
+    // again, which reuses the match ids: it replaces whatever was held, or the
+    // old draw's played matches would stay on screen over the new one.
     const newer = (row) => {
         const h = heldById.get(row.id);
-        return h && (h.modifiedAt || 0) > (row.modifiedAt || 0) ? h : row;
+        return h && row.modifiedAt > 0 && (h.modifiedAt || 0) > row.modifiedAt ? h : row;
     };
     const b = fetched.bracket;
     return {
@@ -535,4 +541,23 @@ function keepNewerDetail(held, fetched) {
     return held && held.config.id === fetched.config.id ? keepNewerMatches(held, fetched) : fetched;
 }
 
-export { applyPatch, applyPatchOrdered, checkSeqGap, recomputeQueuePositions, recomputeBracketQueuePositions, keepNewerMatches, keepNewerDetail };
+// keepNewerCompetitions is keepNewerMatches over a list of competitions (the
+// court console's feed, the tournament's competitions), paired by id. No held
+// list yet means nothing to keep.
+function keepNewerCompetitions(held, fetched) {
+    if (!Array.isArray(held)) return fetched;
+    return fetched.map((comp) => keepNewerMatches(held.find((c) => c.id === comp.id), comp));
+}
+
+// keepNewerTournament applies it to the tournament's competitions. Its
+// refreshes come from two sources that can be in flight together (the one
+// after each save and the one after each server event), so an answer that
+// read the data earlier can land later.
+function keepNewerTournament(held, fetched) {
+    return held && fetched ? { ...fetched, competitions: keepNewerCompetitions(held.competitions, fetched.competitions) } : fetched;
+}
+
+export {
+    applyPatch, applyPatchOrdered, checkSeqGap, recomputeQueuePositions, recomputeBracketQueuePositions,
+    keepNewerMatches, keepNewerDetail, keepNewerCompetitions, keepNewerTournament,
+};

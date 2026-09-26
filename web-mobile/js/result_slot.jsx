@@ -166,6 +166,16 @@ export function sideSlotOrder(side) {
 // wire validator now call — that pair no longer needs a keep-in-sync comment.)
 export const realIppons = (arr) => (arr || []).filter(x => x && x !== IPPON_PLACEHOLDER && x !== HANTEI_MARK);
 
+// DEFAULT_WIN_IPPON: the maru circle a default win awards, one per point
+// (domain.DefaultWinIppon). It counts as a point, but nobody struck it.
+export const DEFAULT_WIN_IPPON = "○";
+
+// struckIppons: the points a side actually STRUCK, i.e. realIppons minus the
+// default-win maru. Go twin: engine.struckIppons. A default win keeps what the
+// other side had already struck (FIK Art. 32), and undoing one must drop its
+// circles without touching those strikes; this is how both tell them apart.
+export const struckIppons = (arr) => realIppons(arr).filter(x => x !== DEFAULT_WIN_IPPON);
+
 // containsHt / placeHt / stripHt: the wire-serializer's half of the same
 // Ht-as-a-real-ippon-slice-entry contract realIppons reads. Moved here from
 // api_serializers.jsx: that made the serializer a fourth consumer of this

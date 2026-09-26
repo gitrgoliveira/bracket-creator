@@ -2,7 +2,7 @@
 //
 // Tapping a fought bout row expands it for correction under the finger, so
 // the second tap of a double tap landed on whatever moved there and opened
-// ANOTHER bout. For DONE_BOUT_OPEN_TAP_GUARD_MS after a row opens, a pointer
+// ANOTHER bout. For TAP_BOUNCE_MS after a row opens, a pointer
 // click on the bout list is swallowed in the capture phase. Pointer clicks
 // carry detail >= 1 (fireEvent.click defaults to 0, which is what a click
 // synthesized from the keyboard carries, so the tests pass detail explicitly).
@@ -10,7 +10,7 @@ import React from 'react';
 import { render, act, fireEvent, screen } from '@testing-library/react';
 import { describe, it, expect, vi, beforeAll, afterAll, beforeEach, afterEach } from 'vitest';
 import { installWindowStubs } from '../helpers/stub_globals.js';
-import { DONE_BOUT_OPEN_TAP_GUARD_MS } from '../../admin_scoring_team.jsx';
+import { TAP_BOUNCE_MS } from '../../tap_guard.jsx';
 
 const STUBBED_GLOBALS = {
   isHikiwake: (_type) => false,
@@ -95,7 +95,7 @@ describe('bc-kbrw: a double tap on a fought bout opens that bout only', () => {
   it('a deliberate tap after the window opens the other bout', async () => {
     await renderEncounter();
     await tap(screen.getByTestId('kachinuki-done-bout-1'));
-    await act(async () => { vi.advanceTimersByTime(DONE_BOUT_OPEN_TAP_GUARD_MS + 50); });
+    await act(async () => { vi.advanceTimersByTime(TAP_BOUNCE_MS + 50); });
     await tap(screen.getByTestId('kachinuki-done-bout-0'));
     expect(isOpen(0)).toBe(true);
     expect(isOpen(1)).toBe(false);

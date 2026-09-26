@@ -16,6 +16,7 @@ import { sameCompetitor } from './competitor_identity.jsx';
 // its host and by unit tests that never load api_client, and write_result.jsx
 // is import-only so it can be reached directly (see its header).
 import { notLandedBanner } from './write_result.jsx';
+import { useArmedConfirm, tapIsBounce, stampTap, clearTap } from './tap_guard.jsx';
 
 import {
   MAX_IPPONS_PER_SIDE,
@@ -320,6 +321,18 @@ export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, on
   const aTotal = realIppons(aPts).length;
   const bTotal = realIppons(bPts).length;
 
+  // bc-dtip: a bouncing thumb recorded M M from one tap. The ippon BUTTONS
+  // ignore a repeat pointer tap on the same side within TAP_BOUNCE_MS (two
+  // real ippon calls can never arrive that close); the guard sits at the
+  // button, not in addPt, so the keyboard shortcuts stay direct. Keyed by
+  // side: a bounce can land on the same side's neighbouring letter, while the
+  // other side's button is a different action.
+  const ipponTapRef = useRefA(null);
+  const tapIppon = (ev, side, letter) => {
+    if (tapIsBounce(ipponTapRef, ev, side)) return;
+    stampTap(ipponTapRef, side);
+    addPt(side, letter);
+  };
   const addPt = (side, letter) => {
     // No-op when the side is already at the 2-ippon max: don't mark dirty or
     // schedule an autosave PUT / SSE fan-out for a tap that changes nothing.
@@ -349,6 +362,8 @@ export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, on
     const cur = side === "a" ? aPts : bPts;
     if (cur[idx] === undefined) return; // fast no-op path: don't mark dirty / autosave
     if (side === lockedKey) return; // the recorded default-win maru is not the operator's to remove
+    // Taking a mark back off, then tapping the right letter, is never a bounce.
+    clearTap(ipponTapRef, side);
     if (side === "a") setAPts((p) => p.filter((_, i) => i !== idx));
     else setBPts((p) => p.filter((_, i) => i !== idx));
     markScoringDirty(); // C1
@@ -716,7 +731,9 @@ export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, on
   // confirmed. Keyboard Enter stays direct (deliberate, not an accidental tablet
   // brush). The result itself is verified from the score slots above, not the
   // button; a lossy "SHIRO WIN 1–0" caption is not a check.
-  const [finishArmed, setFinishArmed] = useStateA(false);
+  // bc-dtfn: the arm-then-confirm guard with a dwell, so the bounce of the
+  // arming tap cannot commit (tap_guard.jsx).
+  const { armed: finishArmed, setArmed: setFinishArmed, confirm: confirmFinish } = useArmedConfirm();
   useEffectA(() => { setFinishArmed(false); }, [aTotal, bTotal, isDrawToggled]);
 
   // "Has the OPERATOR changed anything", which gates the discard prompt — so
@@ -1004,7 +1021,7 @@ export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, on
                       </div>
                       <div className="sb-points-grid">
                         {getIpponButtons(isNaginata).map((cc) => (
-                          <button key={cc} className={`ipt-btn ${cc === "H" ? "ipt-btn--h" : ""}`} onClick={() => addPt(s.key, cc)} disabled={boutDecided || decidedByHantei || s.key === lockedKey}>{cc}</button>
+                          <button key={cc} className={`ipt-btn ${cc === "H" ? "ipt-btn--h" : ""}`} onClick={(ev) => tapIppon(ev, s.key, cc)} disabled={boutDecided || decidedByHantei || s.key === lockedKey}>{cc}</button>
                         ))}
                       </div>
                     </div>
@@ -1358,18 +1375,18 @@ export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, on
               )}
               {canClose && <button className="btn" onClick={handleDismiss} disabled={submitting}>Cancel</button>}
               {onSubmitAndNext ? (
-                <button className={`btn btn--primary ${finishArmed && !isComplete ? "btn--confirm" : ""}`} onClick={() => {
+                <button className={`btn btn--primary ${finishArmed && !isComplete ? "btn--confirm" : ""}`} onClick={(ev) => {
                   if (isComplete && !correctionReason) { askCorrectionReason(); return; }
-                  if (!isComplete && !finishArmed) { setFinishArmed(true); return; }
+                  if (!isComplete && !confirmFinish(ev)) return;
                   doSubmit(() => (isComplete ? onSubmit : onSubmitAndNext)(buildPatch("completed")));
                 }} disabled={submitting || !canFinish}
                   title={koTieBlocked ? KO_TIE_REASON : undefined}>
                   {submitting ? "Saving…" : koTieBlocked ? "Needs a winner" : isComplete ? "Save correction" : finishArmed ? "Tap again to finish →" : "Finish + Start Next →"}
                 </button>
               ) : (
-                <button className={`btn btn--primary ${finishArmed && !isComplete ? "btn--confirm" : ""}`} onClick={() => {
+                <button className={`btn btn--primary ${finishArmed && !isComplete ? "btn--confirm" : ""}`} onClick={(ev) => {
                   if (isComplete && !correctionReason) { askCorrectionReason(); return; }
-                  if (!isComplete && !finishArmed) { setFinishArmed(true); return; }
+                  if (!isComplete && !confirmFinish(ev)) return;
                   doSubmit(() => onSubmit(buildPatch("completed")));
                 }} disabled={submitting || !canFinish}
                   title={koTieBlocked ? KO_TIE_REASON : undefined}>

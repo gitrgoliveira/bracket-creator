@@ -23,7 +23,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { settle, withAdminPage } from '../lib/ui.mjs';
 import { POSITIONS } from '../lib/api.mjs';
-import { EDITOR, finishMatch, startMatch } from '../lib/editor.mjs';
+import { EDITOR, TAP_DWELL_MS, finishMatch, startMatch } from '../lib/editor.mjs';
 import { assertLineupIds, assertIndividualBoutPoints, csvRows } from '../lib/fixture.mjs';
 import { SCORE_EDITOR_SOURCES, VIEWER_SOURCES } from '../lib/scope.mjs';
 
@@ -170,7 +170,9 @@ async function scoreIndividualBout(editor, page, i) {
   }
   const win = editor.locator(`.sb-side--${winner}`);
   await ipponButton(win, i % 3 === 0 ? 'M' : 'K').click();
-  await settle(page, 100);
+  // The winner's two points are two taps on the same side: wait out the
+  // editor's bounce window, or the second is dropped (lib/editor.mjs).
+  await settle(page, TAP_DWELL_MS);
   await ipponButton(win, i % 3 === 1 ? 'D' : 'M').click();
   await settle(page, 100);
 }
@@ -205,7 +207,7 @@ async function scoreTeamEncounter(editor, page, i) {
     } else {
       const winner = outcome === 'aka' ? aka : shiro;
       await ipponButton(winner, 'M').click();
-      await settle(page, 120);
+      await settle(page, TAP_DWELL_MS);
       await ipponButton(winner, 'K').click();
     }
     await settle(page, 150);

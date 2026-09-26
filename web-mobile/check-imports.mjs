@@ -37,11 +37,17 @@ function stripComments(s) {
 // esbuild transpile-only and vitest silently (see the file header above) --
 // exactly the drift class this checker exists to catch, and exactly the two
 // surfaces the bc-symm operator ruling requires to stay in lockstep.
+//
+// admin_scoring_shared.jsx and bracket.jsx were added by bc-fsnp/bc-dtfn: the
+// scoring editors' shared helpers now import struckIppons/DEFAULT_WIN_IPPON
+// from result_slot.jsx, and the editors import the tap_guard.jsx leaf.
 const CHECK_MODULES = [
   'admin_scoring_modal.jsx',
   'admin_scoring_individual.jsx',
   'admin_scoring_team.jsx',
+  'admin_scoring_shared.jsx',
   'admin_scoring_autosave.jsx',
+  'bracket.jsx',
   'admin_setup.jsx',
   'admin_competition_settings.jsx',
 ];

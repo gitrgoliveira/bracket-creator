@@ -18,6 +18,8 @@ import { sideMarks } from './bracket.jsx';
 import { NumberedName, numberFollowsName } from './numbered_name.jsx';
 import { withdrawnSideKey } from './ineligible_match.jsx';
 import { isTeamDefaultWinDecision } from './team_default_credit.jsx';
+import { struckIppons, DEFAULT_WIN_IPPON } from './result_slot.jsx';
+import { tapIsBounce, stampTap } from './tap_guard.jsx';
 // BarredMatchNotice is a separate leaf (imports only ineligible_match.jsx +
 // write_result.jsx): re-exported below, see that file's header for why.
 import { BarredMatchNotice } from './barred_match_notice.jsx';
@@ -164,42 +166,79 @@ function ScoringShortcutHint({ pointKeys = "", hasNav = false, canClose = false 
 }
 
 // applyFusenshoToggle: pure reducer for the per-bout Fusensho button in
-// TeamScoreEditorModal. Implements three behaviours on top of a sub-bout
-// object {aPts, bPts, aFouls, bFouls, fusensho, _preFusensho?, ...}:
+// TeamScoreEditorModal, over a sub-bout {aPts, bPts, aFouls, bFouls,
+// fusensho, _preFusensho?, ...}. `side` is the side the default win goes TO.
+// A default win gives that side its maru and leaves the OTHER side the points
+// it had already struck (FIK Art. 32; engine.preserveLoserScore is the
+// match-level twin). Three branches:
 //   1. Toggle-on from a clean state: snapshot {aPts,bPts,aFouls,bFouls}
 //      into _preFusensho, then write the default win.
-//   2. Side-switch (fusensho is already on the other side): preserve
-//      the original _preFusensho so a later untoggle restores the
-//      genuine pre-fusensho score, not the intermediate default win.
-//   3. Toggle-off (re-clicking the active side): restore from
-//      _preFusensho and clear it. If no snapshot exists (e.g. modal
-//      reopened from saved state: initSubs doesn't round-trip the
-//      snapshot), just clear the flag.
+//   2. Side-switch (fusensho is already on the other side): keep the
+//      original _preFusensho and build from IT, so the new loser keeps what
+//      it struck before any fusensho, never the circles it was just given,
+//      and a later untoggle restores the genuine pre-fusensho score.
+//   3. Toggle-off (re-clicking the active side): restore from _preFusensho.
+//      With no snapshot (the editor was reopened from saved state, which does
+//      not carry one), drop the circles through clearFusensho: struck points
+//      stay, and the circles never survive as ordinary points. The winner's
+//      own pre-fusensho strikes cannot come back then (the default win
+//      replaced them), as for a match-level default win.
+// A fusensho against a side that already won the bout is refused
+// (fusenshoAllowed): circles against two struck points would be a 2-2.
 // EVERY branch spreads `...prev` so per-sub fields this reducer does NOT
 // own survive the toggle — notably the kachinuki `encho` marker (mp-gmcg)
 // and manually typed side names. A bespoke object literal silently dropped
 // them, which erased the (E) audit mark and inflated an encho default win
 // from one maru to two. draw and fusensho are mutually exclusive, so a set
 // draw is cleared when fusensho is applied.
-// Manual pts/fouls edits clear _preFusensho separately (handled in
-// the setPts/setFouls closures): once the operator hand-edits, the
-// snapshot is stale.
+// Any other edit on the row ends the fusensho through clearFusensho, which
+// also discards the snapshot: once the operator hand-edits, it is stale.
 function applyFusenshoToggle(prev, side) {
   if (prev.fusensho === side) {
     const snap = prev._preFusensho;
     if (snap) return { ...prev, aPts: snap.aPts, bPts: snap.bPts, aFouls: snap.aFouls, bFouls: snap.bFouls, fusensho: "", _preFusensho: undefined };
-    return { ...prev, fusensho: "", _preFusensho: undefined };
+    return clearFusensho(prev);
   }
-  const snap = prev._preFusensho || { aPts: prev.aPts, bPts: prev.bPts, aFouls: prev.aFouls, bFouls: prev.bFouls };
+  if (!fusenshoAllowed(prev, side)) return prev;
+  const snap = fusenshoBase(prev);
   // The maru cells come from the shared count rule (defaultWinMaru in
   // bracket.jsx): one maru per point, so two in regulation but ONE in encho.
   // Pass THIS bout's encho period — a per-bout fusensho can land on a pairing
   // already fighting on in overtime — and let the shared rule decide; a zero or
   // absent period reads as regulation there, so no local branch is needed.
-  const maru = window.defaultWinMaru ? window.defaultWinMaru({ periodCount: prev.encho }) : ["○", "○"];
+  const maru = window.defaultWinMaru ? window.defaultWinMaru({ periodCount: prev.encho }) : [DEFAULT_WIN_IPPON, DEFAULT_WIN_IPPON];
   const base = { ...prev, aFouls: 0, bFouls: 0, _preFusensho: snap, ...(prev.draw ? { draw: false } : {}) };
-  if (side === "a") return { ...base, aPts: maru, bPts: [], fusensho: "a" };
-  return { ...base, aPts: [], bPts: maru, fusensho: "b" };
+  if (side === "a") return { ...base, aPts: maru, bPts: struckIppons(snap.bPts), fusensho: "a" };
+  return { ...base, aPts: struckIppons(snap.aPts), bPts: maru, fusensho: "b" };
+}
+
+// fusenshoBase: the genuine pre-fusensho state of a sub-bout, i.e. the
+// snapshot a fusensho already took, else the row as it stands.
+const fusenshoBase = (prev) =>
+  prev._preFusensho || { aPts: prev.aPts, bPts: prev.bPts, aFouls: prev.aFouls, bFouls: prev.bFouls };
+
+// fusenshoAllowed: can a default win go to `side` on this sub-bout? Not when
+// the other side had already struck MAX_IPPONS_PER_SIDE points: that side has
+// won the bout, and circles against its two points would be an impossible
+// 2-2 (validateIppons refuses it on every save). Undoing an active fusensho
+// is always allowed.
+function fusenshoAllowed(prev, side) {
+  if (prev.fusensho === side) return true;
+  const base = fusenshoBase(prev);
+  const other = side === "a" ? base.bPts : base.aPts;
+  return struckIppons(other).length < MAX_IPPONS_PER_SIDE;
+}
+
+// clearFusensho: end a sub-bout's fusensho without restoring a snapshot. The
+// winner's default-win circles go (struckIppons over that side), struck points
+// on both sides stay, and the flag and snapshot are cleared. The identity on
+// pts when no fusensho is set, so every edit on a team bout row can end
+// through it. Apply the edit FIRST and this LAST: an edit computed from the
+// rendered pts can still carry a circle, and clearing last strips it.
+function clearFusensho(prev) {
+  if (!prev.fusensho) return { ...prev, _preFusensho: undefined };
+  const key = prev.fusensho === "a" ? "aPts" : "bPts";
+  return { ...prev, [key]: struckIppons(prev[key]), fusensho: "", _preFusensho: undefined };
 }
 
 // applyFoulIncrement: pure helper modelling a single `+` press on a
@@ -740,6 +779,16 @@ function sideColorName(color) {
 // 2-foul auto-award the awarded H lives in the opponent's pts array, so
 // the counter shows only "outstanding fouls not yet discharged."
 function FoulCounter({ fouls, setFouls, onIncrement, color, disabled }) {
+  // bc-dtip: a double tap on `+` recorded two fouls, and the second one awards
+  // an H to the opponent. A repeat pointer tap within TAP_BOUNCE_MS is the
+  // bounce, not a second foul. `−` is not guarded: one foul too few is visible
+  // and one tap to undo, and nobody gains a point from it.
+  const incTapRef = useRefA(null);
+  const onIncrementTap = (ev) => {
+    if (tapIsBounce(incTapRef, ev)) return;
+    stampTap(incTapRef);
+    onIncrement();
+  };
   // color is "shiro" or "aka": surface as data-testid so Playwright probes
   // (T023a) can target each side without depending on the className.
   // `disabled` freezes the `+` button when the bout is already decided:
@@ -758,7 +807,7 @@ function FoulCounter({ fouls, setFouls, onIncrement, color, disabled }) {
         <div className="foul-counter__count">
           <span className={`foul-counter__num ${fouls >= 1 ? "foul-counter__num--warn" : ""}`}>{fouls}</span>
         </div>
-        <button type="button" className="foul-counter__btn foul-counter__btn--inc" aria-label={`Add a ${sideColorName(color)} foul`} onClick={onIncrement} disabled={disabled}>+</button>
+        <button type="button" className="foul-counter__btn foul-counter__btn--inc" aria-label={`Add a ${sideColorName(color)} foul`} onClick={onIncrementTap} disabled={disabled}>+</button>
       </div>
     </div>
   );
@@ -1749,6 +1798,8 @@ export {
   IpponLegend,
   ScoringShortcutHint,
   applyFusenshoToggle,
+  fusenshoAllowed,
+  clearFusensho,
   applyFoulIncrement,
   reconcileFoulsAtOpen,
   nextFoulOnDecrement,

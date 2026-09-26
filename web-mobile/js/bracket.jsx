@@ -15,7 +15,7 @@ const { useRef, useLayoutEffect: useLayoutEffectBC, useState: useStateBC, useEff
 import { DAIHYOSEN_POSITION } from './pool_ids.jsx';
 import { barredSides } from './ineligible_match.jsx';
 import { BarredChip } from './barred_chip.jsx';
-import { realIppons } from './result_slot.jsx';
+import { realIppons, DEFAULT_WIN_IPPON } from './result_slot.jsx';
 import { sameCompetitor } from './competitor_identity.jsx';
 import { NumberedName } from './numbered_name.jsx';
 import { creditedBoutSide, isTeamDefaultWinDecision } from './team_default_credit.jsx';
@@ -249,7 +249,7 @@ const isDefaultWinBC = isTeamDefaultWinDecision;
 // shape). The canonical record is the engine's RecordDecision fill via
 // domain.DefaultWinIppons — displays only fall back to this for winners
 // whose recorded cells are empty (byes, legacy data).
-const defaultWinMaru = (encho) => (enchoOn(encho) ? ["○"] : ["○", "○"]);
+const defaultWinMaru = (encho) => (enchoOn(encho) ? [DEFAULT_WIN_IPPON] : [DEFAULT_WIN_IPPON, DEFAULT_WIN_IPPON]);
 
 // boutMiddle: THE single source for what a bout's middle can read —
 // "vs" (plain, including unplayed/pending), "X" (tie), "(E)" (overtime),

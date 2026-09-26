@@ -9,7 +9,7 @@
 // than photograph the wrong moment.
 import { settle, withAdminPage } from '../lib/ui.mjs';
 import { roster } from '../lib/api.mjs';
-import { EDITOR, finishMatch, startMatch } from '../lib/editor.mjs';
+import { EDITOR, TAP_DWELL_MS, finishMatch, startMatch } from '../lib/editor.mjs';
 import { assertBoutPoints, assertLineupIds } from '../lib/fixture.mjs';
 import { SCORE_EDITOR_SOURCES } from '../lib/scope.mjs';
 
@@ -73,7 +73,8 @@ export const families = {
           await startMatch(page);
           for (let i = 0; i < 2; i += 1) {
             await page.locator('.sb-side--shiro .ipt-btn').filter({ hasText: /^M$/ }).first().click();
-            await page.waitForTimeout(250);
+            // Same side twice: wait out the bounce window (lib/editor.mjs).
+            await page.waitForTimeout(TAP_DWELL_MS);
           }
           await finishMatch(page);
         }

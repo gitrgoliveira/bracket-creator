@@ -1498,8 +1498,7 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
   // row that is not theirs to edit, without a second mechanism racing the
   // render to commit the shape first.
   const updateSub = (idx, fn) => {
-    const pos = subs[idx]?._pos;
-    if (pos != null) lastRowEditRef.current.set(pos, Date.now());
+    lastRowEditRef.current.set(subs[idx]._pos, Date.now());
     setSubsByOperator(prev => {
       const rows = reconcileRowsToPositions(prev, serverSubs);
       return rows.map((s, i) => i === idx ? fn(s) : s);

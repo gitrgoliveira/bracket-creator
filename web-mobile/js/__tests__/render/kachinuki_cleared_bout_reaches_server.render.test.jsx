@@ -50,8 +50,8 @@ afterAll(() => restoreGlobals());
 beforeEach(() => { vi.useFakeTimers(); });
 afterEach(() => { vi.useRealTimers(); });
 
-const kachinukiMatch = (subResults) => ({
-  id: 'k1', compId: 'comp1', status: 'running', phase: 'pool', poolName: 'Pool 1', court: 'A',
+const kachinukiMatch = (subResults, modifiedAt = 0) => ({
+  id: 'k1', compId: 'comp1', status: 'running', phase: 'pool', poolName: 'Pool 1', court: 'A', modifiedAt,
   compKind: 'team', teamSize: 3, compFormat: 'mixed', teamMatchType: 'kachinuki',
   sideA: { id: 'team-A', name: 'Team A' },
   sideB: { id: 'team-B', name: 'Team B' },
@@ -119,6 +119,33 @@ describe('a mark taken back on a kachinuki bout reaches the server (bc-kclr)', (
   });
 
   it('a lagging snapshot carrying the point does not put it back', async () => {
+    // Each write is stamped when it is sent (server_clock.jsx's frame; the
+    // offset is 0 here), and a snapshot of it carries that stamp.
+    const sentAt = [];
+    const onSubmit = vi.fn().mockImplementation(() => { sentAt.push(Date.now()); return Promise.resolve(undefined); });
+    let utils;
+    const el = (match) => <ScoreEditorModal match={match} onClose={vi.fn()} onSubmit={onSubmit} password="" />;
+    await act(async () => { utils = render(el(kachinukiMatch([]))); });
+    await strikeAkaMen();
+    await act(async () => { vi.advanceTimersByTime(400); });
+    await tapMark('aka', 'M');
+    // The feed now delivers the snapshot of the EARLIER write, with the point:
+    // written before the clear, so it cannot know about it.
+    await act(async () => { vi.advanceTimersByTime(150); });
+    await act(async () => {
+      utils.rerender(el(kachinukiMatch([{ position: 1, sideA: '', sideB: '', ipponsA: ['M'], ipponsB: [] }], sentAt[0])));
+    });
+    const filled = document.querySelectorAll('.team-sub-match:not(.team-sub-match--readonly) .tsm-center-pts--aka .editor-side__pt--filled');
+    expect(filled.length, 'the point taken back stays taken back').toBe(0);
+    await act(async () => { vi.advanceTimersByTime(400); });
+    expect(rowAt(lastPatch(onSubmit), 1).ipponsA, 'and the write carries the clear, not the stale point').toEqual([]);
+  });
+
+  // Review finding: the guard used to be a time window, so a change another
+  // device saved to the same bout right after the operator's edit was never
+  // adopted. It is keyed on the snapshot's stamp now: written after the edit,
+  // it is news, and a row the operator has put back where it was follows it.
+  it('a change saved on another device after the edit is adopted', async () => {
     const onSubmit = vi.fn().mockResolvedValue(undefined);
     let utils;
     const el = (match) => <ScoreEditorModal match={match} onClose={vi.fn()} onSubmit={onSubmit} password="" />;
@@ -126,15 +153,13 @@ describe('a mark taken back on a kachinuki bout reaches the server (bc-kclr)', (
     await strikeAkaMen();
     await act(async () => { vi.advanceTimersByTime(400); });
     await tapMark('aka', 'M');
-    // The feed now delivers the snapshot of the EARLIER write, with the point.
-    await act(async () => { vi.advanceTimersByTime(150); });
-    await act(async () => {
-      utils.rerender(el(kachinukiMatch([{ position: 1, sideA: '', sideB: '', ipponsA: ['M'], ipponsB: [] }])));
-    });
-    const filled = document.querySelectorAll('.team-sub-match:not(.team-sub-match--readonly) .tsm-center-pts--aka .editor-side__pt--filled');
-    expect(filled.length, 'the point taken back stays taken back').toBe(0);
     await act(async () => { vi.advanceTimersByTime(400); });
-    expect(rowAt(lastPatch(onSubmit), 1).ipponsA, 'and the write carries the clear, not the stale point').toEqual([]);
+    // Another device records Shiro's K on bout 1, well inside the old window.
+    await act(async () => {
+      utils.rerender(el(kachinukiMatch([{ position: 1, sideA: '', sideB: '', ipponsA: [], ipponsB: ['K'] }], Date.now())));
+    });
+    const shiroFilled = document.querySelectorAll('.team-sub-match:not(.team-sub-match--readonly) .tsm-center-pts--shiro .editor-side__pt--filled');
+    expect(shiroFilled.length, "the other device's point shows").toBe(1);
   });
 
   // The close prompt existed because a cleared bout could not be flushed

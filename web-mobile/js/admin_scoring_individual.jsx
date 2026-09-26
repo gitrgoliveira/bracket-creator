@@ -28,13 +28,11 @@ import {
   reconcileFoulsAtOpen,
   TermAS,
   GlossaryHintAS,
-  resolveDecisionPassword,
   makeSubmitDecision,
   decideDrawToggle,
   shouldBlockScoringKeys,
   EnchoControl,
   DecisionPrompt,
-  RemainingMatchesPanel,
   FoulCounter,
   ReasonPrompt,
   CORRECTION_PRESETS,
@@ -61,7 +59,7 @@ import { SyncStatusPill, useDebouncedRunningWrite } from './admin_scoring_autosa
 import { TeamScoreEditorModal, isKoTieBlocked } from './admin_scoring_team.jsx';
 import { EngiScoreEditorModal } from './admin_scoring_engi.jsx';
 
-export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, onAfterDecision, onWithdrawal, started = false, prevMatch, nextMatch, onPrev, onNext, password, selfReport, variant = "modal", canClose = true }) {
+export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, onAfterDecision, started = false, prevMatch, nextMatch, onPrev, onNext, password, selfReport, variant = "modal", canClose = true }) {
   // bc-strt: a match whose start has landed is RUNNING, even while the host's
   // list still says scheduled (it refetches a moment after each save). The
   // editors autosave only a match they see as running, so a point struck in
@@ -194,12 +192,10 @@ export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, on
   const isEngi = !!m.compEngi;
   // T093–T098: decision (kiken/fusenpai) prompt state. promptKind is
   // "" | "kiken-voluntary" | "kiken-injury" | "fusenpai"; when non-empty the inline prompt replaces the
-  // bottom controls. After the POST /decision succeeds, withdrawnPlayer holds
-  // the side that lost so the "Remaining matches" panel can render below.
+  // bottom controls.
   const [decisionPromptKind, setDecisionPromptKind] = useStateA("");
   const [decisionSubmitting, setDecisionSubmitting] = useStateA(false);
   const [decisionErr, setDecisionErr] = useStateA("");
-  const [withdrawnPlayer, setWithdrawnPlayer] = useStateA(null);
   // Audit reason collected when correcting a completed match. correctionPrompt
   // is the open ReasonPrompt (null when closed); correctionReason carries the
   // confirmed string. bc-htcr: the prompt holds the write it confirms, handed
@@ -264,24 +260,26 @@ export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, on
   // - decisionBy is "shiro" or "aka" per the server contract.
   // - encho rides along when the operator has marked overtime so the server
   //   can attach the periodCount metadata to the resulting MatchResult.
-  // - On success we close the modal (matching the Save button contract) UNLESS
-  //   the decision is kiken: in that case we keep the modal open and surface
-  //   the RemainingMatchesPanel so the operator can chain default-win awards.
+  // - On success we close the modal (matching the Save button contract),
+  //   unless the host provides onAfterDecision and this isn't a correction,
+  //   in which case we advance to the next match instead (item 7). Kiken
+  //   follows this exact rule too now (operator ruling 2026-09-26):
+  //   recording a withdrawal changes only the match it was recorded on.
   // - T103/CHK024: when the server replies 409 decision_locked (the
   //   prior kiken on this match can't be safely overwritten because a
   //   subsequent match for either side has started), prompt the
   //   operator to confirm and re-send with force=true.
   // Shared factory (admin_scoring_shared.jsx): the individual + team modals had
   // byte-identical copies; "competitors" is the only per-modal wording.
-  // Item 7: a non-kiken decision (fusenpai) routes through onAfterDecision when
-  // the host page provides it (and this isn't a correction) so the court
-  // advances to the next match: mirroring the Finish + Start Next flow. Hantei
-  // advance is handled separately in submitHantei below. Kiken keeps the modal
-  // open for RemainingMatchesPanel regardless.
+  // Item 7: a decision (fusenpai, kiken, or any future non-points decision)
+  // routes through onAfterDecision when the host page provides it (and this
+  // isn't a correction) so the court advances to the next match: mirroring
+  // the Finish + Start Next flow. Hantei advance is handled separately in
+  // submitHantei below.
   const submitDecision = makeSubmitDecision({
     match: m, enchoPeriodCount, password, mountedRef,
-    setDecisionSubmitting, setDecisionErr, setWithdrawnPlayer, setDecisionPromptKind,
-    onClose, onAfterDecision, onWithdrawal, isComplete, entityLabel: "competitors",
+    setDecisionSubmitting, setDecisionErr,
+    onClose, onAfterDecision, isComplete, entityLabel: "competitors",
     // F5: thread pending-write handles so the factory can show the sticky banner
     // when the decision write is only queued (offline / transient failure).
     setPendingWrite, pendingFnRef,
@@ -894,7 +892,7 @@ export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, on
   }
   // Team routing: forward to TeamScoreEditorModal.
   if (isTeam) {
-    return <TeamScoreEditorModal match={m} teamSize={teamSize} onClose={onClose} onSubmit={onSubmit} onSubmitAndNext={onSubmitAndNext} onAfterDecision={onAfterDecision} onWithdrawal={onWithdrawal} onStartLanded={() => setStartedFrom({ at: match.modifiedAt })} prevMatch={prevMatch} nextMatch={nextMatch} onPrev={onPrev} onNext={onNext} password={password} selfReport={selfReport} variant={variant} canClose={canClose} />;
+    return <TeamScoreEditorModal match={m} teamSize={teamSize} onClose={onClose} onSubmit={onSubmit} onSubmitAndNext={onSubmitAndNext} onAfterDecision={onAfterDecision} onStartLanded={() => setStartedFrom({ at: match.modifiedAt })} prevMatch={prevMatch} nextMatch={nextMatch} onPrev={onPrev} onNext={onNext} password={password} selfReport={selfReport} variant={variant} canClose={canClose} />;
   }
 
   // a11y: label the dialog with the match/court context so screen readers
@@ -1104,9 +1102,9 @@ export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, on
               Hantei keeps its own tied-scoreline condition so it still surfaces
               in self-report mode, where the admin-only controls below are hidden.
               Sits between the scoring board and the footer so the flow is: enter
-              score OR record a decision → either way the modal closes (or
-              surfaces the remaining-matches list for kiken). */}
-          {(aTotal === bTotal || (!withdrawnPlayer && !decisionPromptKind && !selfReport)) && (
+              score OR record a decision, either way the modal closes or
+              advances, same as any other decision. */}
+          {(aTotal === bTotal || (!decisionPromptKind && !selfReport)) && (
             <div className="decision-controls decision-controls--stacked" style={{ marginTop: 12, fontSize: 12 }}>
               <span className="decision-controls__label" style={{ color: "var(--ink-3)", fontWeight: 600 }}>Decision:</span>
               {/* A tied match may be decided by referee hantei. The winner is
@@ -1180,7 +1178,7 @@ export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, on
                   )}
                 </div>
               )}
-              {!withdrawnPlayer && !decisionPromptKind && !selfReport && (
+              {!decisionPromptKind && !selfReport && (
                 <div className="decision-controls__group">
                   <div className="decision-btn-group">
                     <button data-testid="scoring-modal-kiken-voluntary-button" type="button" className="btn btn--sm" onClick={() => { setDecisionErr(""); setDecisionPromptKind("kiken-voluntary"); }} disabled={submitting || decisionSubmitting}>
@@ -1215,7 +1213,7 @@ export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, on
           )}
           {/* Correcting a match a withdrawal ended: what is recorded, and the
               way to remove it when it was a wrong entry. */}
-          {recordedWithdrawal && !decisionPromptKind && !withdrawnPlayer && !selfReport && (
+          {recordedWithdrawal && !decisionPromptKind && !selfReport && (
             <RecordedWithdrawal match={m} ctl={reopenCtl} disabled={submitting || decisionSubmitting} singleBout />
           )}
           {decisionErr && (
@@ -1233,17 +1231,6 @@ export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, on
               onSubmit={({ decisionBy, decisionReason }) => submitDecision(decisionPromptKind, { decisionBy, decisionReason })}
             />
           )}
-          {withdrawnPlayer && (
-            <RemainingMatchesPanel
-              compID={m.compId}
-              password={resolveDecisionPassword(password)}
-              withdrawnPlayer={withdrawnPlayer}
-              withdrawnMatchId={m.id}
-              onAwarded={() => { /* stay open; operator decides when to close */ }}
-              onClose={() => { setWithdrawnPlayer(null); onClose(); }}
-            />
-          )}
-
         </div>
 
         {/* Sticky navigation + action footer */}

@@ -42,17 +42,13 @@ func TestDownstreamGuard_StatusOmittedWriteIsStillGuarded(t *testing.T) {
 		"the refused write must not have repainted the played next round")
 }
 
-// TestDownstreamGuard_ReopenClearsTheOldPairingsBouts pins what a reopened
-// match keeps and what it loses.
-//
-// The reopen reuses reopenBracketMatch, which KEEPS SubResults on purpose: it
-// serves kachinuki, where the same two teams fight on and every bout already
-// fought is a fact about them. Here the correction repaints this match's side,
-// so those bouts belong to a pairing that is no longer in it, and leaving them
-// filed one team's bouts under the name of the team that replaced them. The
-// operator is promised otherwise in both the guide and the confirm dialog
-// ("its recorded result, including its bouts, is cleared").
-func TestDownstreamGuard_ReopenClearsTheOldPairingsBouts(t *testing.T) {
+// TestDownstreamGuard_ReopenKeepsTheFight pins what a reopened match keeps
+// and what it loses. The correction puts a different competitor in this
+// match's slot and discards only the verdict: its bouts and an engi panel's
+// flags stay (operator ruling 2026-09-26: scores are never cleared, the
+// operator removes a wrong mark), exactly as a match still waiting in the
+// queue keeps its points when the name in it changes.
+func TestDownstreamGuard_ReopenKeepsTheFight(t *testing.T) {
 	eng, store, _ := setupTestEngine(t)
 	compID := "kcdg-reopen-bouts"
 	seedThreeRoundBracket(t, store, compID)
@@ -81,9 +77,11 @@ func TestDownstreamGuard_ReopenClearsTheOldPairingsBouts(t *testing.T) {
 	require.NoError(t, err)
 	next := got.Rounds[1][0]
 	assert.Equal(t, "Bob", next.SideA, "precondition: the slot was repainted")
-	assert.Empty(t, next.SubResults, "the previous pairing's bouts must not survive under the new competitor's name")
-	assert.Zero(t, next.FlagsA, "nor an engi panel's flags for the pair that was in the slot")
-	assert.Zero(t, next.FlagsB)
+	assert.Empty(t, next.Winner, "the verdict goes")
+	require.Len(t, next.SubResults, 1, "the bouts stay")
+	assert.Equal(t, []string{"M"}, next.SubResults[0].IpponsA)
+	assert.Equal(t, 3, next.FlagsA, "and the engi flags")
+	assert.Equal(t, 2, next.FlagsB)
 }
 
 // TestDownstreamGuard_RefusalNamesNoOneWhenTwoMatchesBlock pins the scope of

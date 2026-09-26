@@ -405,10 +405,8 @@ func subBoutNeedsNumberedEnchoAllowance(sr *state.SubMatchResult) bool {
 // allowNumberedEnchoFromStore (handlers_match.go). The exception applies in
 // EVERY phase: whether the final pairing must produce a result (e.g. the
 // taisho must be defeated) is operator discretion, never derivable from
-// pool-vs-bracket. Which PAIRING may (only taisho against taisho, bc-kten)
-// needs the stored match and the lineups, so it is judged after this shape
-// check, by engine.KachinukiEnchoRefusal. The hantei gate is NOT relaxed:
-// kachinuki bouts are never decided by hantei.
+// pool-vs-bracket. The hantei gate is NOT relaxed: kachinuki bouts are
+// never decided by hantei.
 //
 // The winner and tied-scoreline checks here are the same rules the top-level
 // DecidedByHantei block in ScoreRequest.Validate applies; both now call the

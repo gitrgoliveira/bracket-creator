@@ -203,7 +203,7 @@ func annotateBracketQueuePositions(b *state.Bracket) {
 
 // anyScheduledMatchHasBothSides reports whether poolMatches or bracket carry
 // at least one SCHEDULED match with both side ids stamped -- the ONLY shape
-// annotateIneligibleSides can ever act on (engine.BarredSides needs an id to
+// annotateEligibility can ever act on (engine.BarredSides needs an id to
 // look anyone up). Gates the LoadCompetitorStatus read in the viewer
 // handlers behind it, so a competition with no scheduled match yet (or one
 // whose scheduled rows are all byes/unresolved feeders) never pays for a
@@ -234,11 +234,15 @@ func anyScheduledMatchHasBothSides(poolMatches []state.MatchResult, bracket *sta
 	return false
 }
 
-// annotateIneligibleSides stamps state.IneligibleSidesAnnotation (bc-cse) on
+// annotateEligibility stamps state.IneligibleSidesAnnotation (bc-cse) on
 // every SCHEDULED pool match and bracket match whose resolved side ids are
 // currently barred by a withdrawal recorded on a DIFFERENT match
 // (engine.BarredSides, the SAME check StartMatchTx gates a write on), so a
-// match LIST can grey/skip the row without attempting the write first.
+// match LIST can grey/skip the row without attempting the write first. On a
+// COMPLETED match a withdrawal or default win decided it stamps
+// state.WithdrawnStatusAnnotation instead: where the withdrawn side's
+// competitor status stands now, which the editor's clear control words its
+// consequence from.
 //
 // Read-only, request-time only, exactly like annotateQueuePositions: called
 // on the copy a viewer endpoint is about to serve, NEVER on a slice/bracket
@@ -247,7 +251,7 @@ func anyScheduledMatchHasBothSides(poolMatches []state.MatchResult, bracket *sta
 // models.go). MUST run BEFORE annotateQueuePositions/
 // annotateBracketQueuePositions, which read the stamp back to decide
 // whether a barred match counts toward the queue (position 0 for one).
-func annotateIneligibleSides(poolMatches []state.MatchResult, bracket *state.Bracket, statuses map[string]domain.CompetitorStatus) {
+func annotateEligibility(poolMatches []state.MatchResult, bracket *state.Bracket, statuses map[string]domain.CompetitorStatus) {
 	if len(statuses) == 0 {
 		return
 	}
@@ -289,21 +293,48 @@ func annotateIneligibleSides(poolMatches []state.MatchResult, bracket *state.Bra
 		}
 		return out
 	}
+	// The withdrawn side is the one decisionBy names, else the side that did
+	// not win (withdrawnSideKey, ineligible_match.jsx, reads it the same way).
+	withdrawn := func(status state.MatchStatus, decision, decisionBy, winnerID, sideAID, sideBID string) *state.WithdrawnStatusAnnotation {
+		if status != state.MatchStatusCompleted || !domain.IsDefaultWinDecisionStr(decision) {
+			return nil
+		}
+		var id string
+		switch {
+		case decisionBy == "aka":
+			id = sideAID
+		case decisionBy == "shiro":
+			id = sideBID
+		case winnerID != "" && winnerID == sideAID:
+			id = sideBID
+		case winnerID != "" && winnerID == sideBID:
+			id = sideAID
+		}
+		st, ok := statuses[id]
+		if id == "" || !ok {
+			return nil
+		}
+		return &state.WithdrawnStatusAnnotation{Eligible: st.Eligible, MatchID: st.MatchID, Reinstateable: st.Reinstateable}
+	}
 	for i := range poolMatches {
 		m := &poolMatches[i]
 		m.IneligibleSides = stamp(m.Status, m.ID, m.SideAID, m.SideBID)
+		m.WithdrawnStatus = withdrawn(m.Status, m.Decision, m.DecisionBy, m.WinnerID, m.SideAID, m.SideBID)
 	}
 	if bracket == nil {
 		return
 	}
+	stampBracket := func(bm *state.BracketMatch) {
+		bm.IneligibleSides = stamp(bm.Status, bm.ID, bm.SideAID, bm.SideBID)
+		bm.WithdrawnStatus = withdrawn(bm.Status, bm.Decision, bm.DecisionBy, bm.WinnerID, bm.SideAID, bm.SideBID)
+	}
 	for ri := range bracket.Rounds {
 		for mi := range bracket.Rounds[ri] {
-			bm := &bracket.Rounds[ri][mi]
-			bm.IneligibleSides = stamp(bm.Status, bm.ID, bm.SideAID, bm.SideBID)
+			stampBracket(&bracket.Rounds[ri][mi])
 		}
 	}
 	if bm := bracket.ThirdPlaceMatch; bm != nil {
-		bm.IneligibleSides = stamp(bm.Status, bm.ID, bm.SideAID, bm.SideBID)
+		stampBracket(bm)
 	}
 }
 
@@ -343,11 +374,6 @@ func anyNumberedBoutHasEncho(subResults []state.SubMatchResult) bool {
 // encounter-level no-draw rule for brackets lives in validateBracketCompletion,
 // not here. Both the single-score and bulk-score paths must route through
 // this helper rather than re-deriving the rule.
-//
-// WHICH bout may go to encho is a separate axis from the phase: only the last
-// bout, taisho against taisho (operator ruling 2026-09-25, bc-kten). That is
-// judged after this shape gate, by engine.KachinukiEnchoRefusal, which both
-// score paths call exactly when this returns true.
 //
 // FAIL CLOSED: any load failure keeps the STRICT daihyosen-only gate. The
 // error is logged rather than swallowed (errcheck) and rather than returned:
@@ -737,14 +763,6 @@ func RegisterMatchHandlers(r *gin.RouterGroup, eng *engine.Engine, store Competi
 			if err := validateBulkScoreLengths(&results[i].MatchResult, allowNumberedEncho); err != nil {
 				errs = append(errs, scoreError{MatchID: results[i].ID, Error: err.Error()})
 				continue
-			}
-			// bc-kten: in kachinuki only taisho against taisho may go to
-			// encho (same gate as the single-score path).
-			if allowNumberedEncho && anyNumberedBoutHasEncho(results[i].SubResults) {
-				if err := eng.KachinukiEnchoRefusal(id, results[i].ID, results[i].SubResults); err != nil {
-					errs = append(errs, scoreError{MatchID: results[i].ID, Error: err.Error()})
-					continue
-				}
 			}
 
 			// mp-62vr: rep-player names belong only on a pool daihyosen/tiebreaker
@@ -1247,7 +1265,7 @@ func RegisterMatchHandlers(r *gin.RouterGroup, eng *engine.Engine, store Competi
 	// 409 downstream_knockout_played (the same wire contract as a knockout
 	// correction's, respondIfDownstreamKnockoutPlayed): the knockout match
 	// this one fed already has a result of its own, and confirming reopens it
-	// too, to be fought again. The response then names every match that was
+	// too, its winner cleared and its points kept. The response then names every match that was
 	// reopened that way ({"reopenedMatches": [{id, number, label}]}).
 	//
 	// The reason is OPTIONAL, and an absent body is equally
@@ -2457,15 +2475,6 @@ func registerScoreHandler(r *gin.RouterGroup, eng ScoringEngine, store Competiti
 			}
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 			return
-		}
-		// bc-kten: in kachinuki only taisho against taisho may go to encho.
-		// allowNumberedEncho is true exactly when this is a kachinuki payload
-		// carrying a numbered-bout encho, so no other write pays the reads.
-		if allowNumberedEncho {
-			if err := eng.KachinukiEnchoRefusal(id, mid, req.SubResults); err != nil {
-				c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-				return
-			}
 		}
 		// bc-tmfn: a team match cannot be finished while a numbered bout has
 		// no result (every bout is fought). This handler is the door every

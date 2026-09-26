@@ -13,6 +13,7 @@
 // local-only UI (per the brief; backend persistence is a follow-up).
 
 import { createTimerPool } from './timer_pool.jsx';
+import { applyPatch } from './patch.jsx';
 import { SideCell } from './side_cell.jsx';
 // Imported DIRECTLY from the leaf rather than read off `window`. Two of the
 // call sites below sit inside a `try { } catch (_e) { }` that swallows, so a
@@ -478,6 +479,19 @@ function ResolveFeedersModal({ match, comp, password, onClose, onResolved, onOpt
     );
 }
 
+// The match with id in one competition of the court feed, pool or knockout.
+function matchInComp(comp, id) {
+    const pool = (comp.poolMatches || []).find((m) => m.id === id);
+    if (pool) return pool;
+    const b = comp.bracket;
+    if (!b) return null;
+    for (const round of b.rounds || []) {
+        const m = round.find((x) => x.id === id);
+        if (m) return m;
+    }
+    return b.thirdPlaceMatch && b.thirdPlaceMatch.id === id ? b.thirdPlaceMatch : null;
+}
+
 function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, onMoveCourt, onLogout, onViewerMode, password, showToast, tweaks, onSwitchCourt }) {
     // Normalize once: filterMatchesByCourt trims its param, so a bookmarked URL
     // with stray whitespace must use the trimmed value everywhere.
@@ -503,6 +517,10 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
     // feed, not in the subscription. Until the first fetch resolves it falls back
     // to the prop aggregate so the queue is never momentarily blank.
     const [courtComps, setCourtComps] = useStateSh(null);
+    // The feed as of this render, for the event handler below, whose closure
+    // outlives renders.
+    const courtCompsRef = useRefSh(null);
+    courtCompsRef.current = courtComps;
     // True while a manual "Refresh" is in flight (button feedback only).
     const [refreshing, setRefreshing] = useStateSh(false);
     // Refetch this court's live feed. Hoisted (not an effect-local closure) so
@@ -585,7 +603,30 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
         if (!court || !window.API || typeof window.API.fetchCourtMatches !== "function") return;
         let cancelled = false;
         const timerPool = createTimerPool();
-        const scheduleRefresh = () => timerPool.schedule(() => { if (!cancelled) refreshCourt(); }, 200 + Math.random() * 400);
+        // One refetch per burst of events, not one per event: a running match
+        // broadcasts every saved point, and each used to schedule its own
+        // full fetch of the court's feed.
+        let refreshPending = false;
+        const scheduleRefresh = () => {
+            if (refreshPending) return;
+            refreshPending = true;
+            timerPool.schedule(() => { refreshPending = false; if (!cancelled) refreshCourt(); }, 200 + Math.random() * 400);
+        };
+        // A running match's score update changes only its own row, so the
+        // pushed result is shown at once rather than after the refetch. The
+        // refetch still follows (once per burst): it carries what a push
+        // cannot, such as another row a finish moves, and a running update the
+        // server coalesced away. A push older than the row it would replace is
+        // not applied: a newer state is already shown.
+        const showRunningPush = (event) => {
+            const cid = event.data && event.data.competitionId;
+            const r = event.data && event.data.result;
+            const comp = cid && r && r.status === "running" && Array.isArray(courtCompsRef.current)
+                ? courtCompsRef.current.find((c) => c.id === cid) : null;
+            const row = comp && matchInComp(comp, r.id);
+            if (!row || row.status !== "running" || (r.modifiedAt || 0) < (row.modifiedAt || 0)) return;
+            setCourtComps((prev) => (Array.isArray(prev) ? prev.map((c) => (c.id === cid ? applyPatch(c, event) : c)) : prev));
+        };
         refreshCourt();
         let unsub = () => {};
         if (typeof window.API.subscribeToEvents === "function") {
@@ -615,6 +656,7 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
                         const cid = event.data && event.data.competitionId;
                         setStartError((prev) => (prev && (!cid || prev.compId === cid) ? null : prev));
                     }
+                    if (event.type === "match_updated") showRunningPush(event);
                     scheduleRefresh();
                 },
                 onStatus
@@ -707,16 +749,6 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
     // is reopened (see the effect beside correctingMatch below): a running
     // match is the live bout, not a correction. null = not correcting anything.
     const [correctingKey, setCorrectingKey] = useStateSh(null);
-    // The match a kiken was just recorded on, pinned while the editor's
-    // Remaining matches panel is open (bc-kpnl). The kiken completes the
-    // match, so without the pin the panel follows running[0] away from it and
-    // the editor, keyed on the match, unmounts and takes the panel with it.
-    // Set by the editor's onWithdrawal, cleared by its onClose (the panel's
-    // close), by Back to court, and by any deliberate move to another match
-    // (pickMatch, correctMatch). Kept apart from correctingKey, whose lead
-    // reads "Correcting", and from pickedKey, whose completed filter is what
-    // hands a finished pick on to the next bout.
-    const [withdrawalKey, setWithdrawalKey] = useStateSh(null);
     // Pending court reassignment, awaiting operator confirmation. Moving a match
     // off this shiaijo is disruptive (it leaves the court and joins another's
     // queue), so it's gated behind a confirm step. {compId, matchId, to, label, from}.
@@ -872,40 +904,11 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
             setCorrectingKey(null);
         }
     }, [correctingKey, correctingStatus]);
-    // The kiken-decided match (see withdrawalKey). No status filter, like
-    // correctingMatch: it is completed by the time it matters.
-    const withdrawalMatch = useMemoSh(
-        () => withdrawalKey ? sorted.find((x) => matchKey(x) === withdrawalKey) || null : null,
-        [withdrawalKey, sorted]
-    );
-    // The kiken pin is for a kiken-COMPLETED match. Once that match leaves
-    // "completed" (Clear withdrawal and reopen, here or on another device) it
-    // is no longer what the Remaining matches panel was opened for, so the pin
-    // ends the way a correction does: a running match becomes the live pick
-    // (same key, so the editor does not remount), a scheduled or vanished one
-    // simply releases. It waits until the feed has shown the match completed
-    // at least once: the pin is set the moment the kiken lands, while the feed
-    // still shows the match running, and releasing on that would drop the
-    // panel it exists to keep. Keyed on the status VALUE, never the object.
-    const withdrawalStatus = withdrawalMatch ? withdrawalMatch.status : null;
-    const withdrawalSeenCompleted = useRefSh(null);
-    useEffectSh(() => {
-        // Released (or never set): forget the match, so a later kiken on the
-        // SAME match (the correct side, after the wrong one was cleared) is
-        // held again until the feed shows it completed.
-        if (!withdrawalKey) { withdrawalSeenCompleted.current = null; return; }
-        if (withdrawalStatus === "completed") { withdrawalSeenCompleted.current = withdrawalKey; return; }
-        if (withdrawalStatus && withdrawalSeenCompleted.current !== withdrawalKey) return;
-        if (withdrawalStatus === "running") setPickedKey(withdrawalKey);
-        setWithdrawalKey(null);
-    }, [withdrawalKey, withdrawalStatus]);
-    // A match the operator deliberately holds on the panel: a correction, or
-    // the kiken whose Remaining matches panel is open. It outranks the pick
-    // and the live bout, so while one is set it IS selectedMatch.
-    const pinnedMatch = correctingMatch || withdrawalMatch;
+    // A match the operator deliberately holds open: a correction. It outranks
+    // the pick and the live bout, so while one is set it IS selectedMatch.
     const selectedMatch = useMemoSh(
-        () => pinnedMatch || pickedMatch || running[0] || null,
-        [pinnedMatch, pickedMatch, running]
+        () => correctingMatch || pickedMatch || running[0] || null,
+        [correctingMatch, pickedMatch, running]
     );
 
     // For pool daihyosen/tiebreaker bouts, enrich the selected match with
@@ -1158,9 +1161,6 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
             setStartedFrom({ key: matchKey(m), at: m.modifiedAt });
         }
         setPickedKey(matchKey(m));
-        // A deliberate move to another bout ends the kiken pin: the operator
-        // has left the Remaining matches panel for the court.
-        setWithdrawalKey(null);
     };
 
     // correctMatch: open a COMPLETED match to correct it in place, mirroring the
@@ -1177,15 +1177,12 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
     const correctMatch = (m) => {
         if (!m || m.status !== "completed") return;
         setCorrectingKey(matchKey(m));
-        setWithdrawalKey(null);
     };
-    // Leave the correction (or the kiken pin) and return to the live court
-    // (running bout or the done state). Only offered on a COMPLETED pinned
-    // match: once it is reopened it is the live bout, finished via End match /
-    // Finish or sent back to the queue like any other. Clears both pins: a
-    // kiken recorded while correcting pins the same match twice, and leaving
-    // one pin set would keep the panel on it.
-    const stopCorrecting = () => { setCorrectingKey(null); setWithdrawalKey(null); };
+    // Leave the correction and return to the live court (running bout or the
+    // done state). Only offered on a COMPLETED correction: once it is
+    // reopened it is the live bout, finished via End match / Finish or sent
+    // back to the queue like any other.
+    const stopCorrecting = () => { setCorrectingKey(null); };
 
     // Call to court: optional. Broadcasts a tournament announcement so the
     // competitors (and anyone watching the public app) are notified they're
@@ -1277,9 +1274,8 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
             // to pickedKey (cleared above) once the refetch shows it running, but
             // one sent back before that refetch landed would otherwise re-pin the
             // panel to a now-scheduled match with no exit. Harmless (no-op) when
-            // reverting a plain running bout. The kiken pin likewise.
+            // reverting a plain running bout.
             setCorrectingKey(null);
-            setWithdrawalKey(null);
         } catch (e) {
             if (mountedRef.current) {
                 if (showToast) showToast((e && e.message) || "Could not send match back to queue", "error");
@@ -1629,7 +1625,7 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
                                     <span className="shiaijo-nudge__cta" aria-hidden="true">Switch →</span>
                                 </button>
                             )}
-                            {allDone && !pinnedMatch && (
+                            {allDone && !correctingMatch && (
                                 <div className="empty">
                                     <h3>{selectedCompName ? `${selectedCompName} is complete on Shiaijo ${court}` : `All matches complete on Shiaijo ${court}`}</h3>
                                     <p style={{ fontSize: 13, color: "var(--ink-3)" }}>
@@ -1654,10 +1650,10 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
                                 </div>
                             )}
 
-                            {/* pinnedMatch too: a kiken on the court's last
+                            {/* correctingMatch too: correcting the court's last
                                 bout makes allDone true, and the pin must still
-                                hold the editor (and its panel) open. */}
-                            {(!allDone || pinnedMatch) && selectedMatch && (
+                                hold the editor open. */}
+                            {(!allDone || correctingMatch) && selectedMatch && (
                                 <ScoreEditorModal
                                     // No subResults.length: see the same key in
                                     // admin_competition_bracket.jsx. Remounting
@@ -1667,13 +1663,9 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
                                     key={matchKey(selectedMatch)}
                                     variant="inline"
                                     match={editorMatch}
-                                    // The inline editor never closes itself;
-                                    // its onClose releases only the kiken
-                                    // pin (the Remaining matches panel's
-                                    // close). Every other caller of onClose
-                                    // is a no-op here, as before.
-                                    onClose={() => setWithdrawalKey(null)}
-                                    onWithdrawal={() => setWithdrawalKey(matchKey(selectedMatch))}
+                                    // The inline editor never closes itself; every
+                                    // caller of onClose is a no-op here.
+                                    onClose={() => {}}
                                     started={!!startedFrom && startedFrom.key === matchKey(selectedMatch) && startedFrom.at === selectedMatch.modifiedAt}
                                     canClose={false}
                                     onSubmit={async (patch) => {
@@ -1737,15 +1729,13 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
                                 />
                             )}
 
-                            {pinnedMatch && pinnedMatch.status === "completed" && (
+                            {correctingMatch && correctingMatch.status === "completed" && (
                                 <div className="shiaijo-revert">
                                     <button
                                         type="button"
                                         className="btn btn--sm btn--ghost"
                                         onClick={stopCorrecting}
-                                        title={correctingMatch
-                                            ? "Stop correcting this completed match and return to the live court"
-                                            : "Close the withdrawn competitor's remaining matches and return to the live court"}
+                                        title="Stop correcting this completed match and return to the live court"
                                     >
                                         ← Back to court
                                     </button>

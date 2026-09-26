@@ -56,13 +56,13 @@ func TestAnnotateIneligibleSides(t *testing.T) {
 
 	t.Run("no statuses: no-op, whatever the matches", func(t *testing.T) {
 		ms := []state.MatchResult{{ID: "Pool A-1", Status: state.MatchStatusScheduled, SideAID: "alice", SideBID: "carol"}}
-		annotateIneligibleSides(ms, nil, nil)
+		annotateEligibility(ms, nil, nil)
 		assert.Nil(t, ms[0].IneligibleSides)
 	})
 
 	t.Run("scheduled match with a barred side A is stamped", func(t *testing.T) {
 		ms := []state.MatchResult{{ID: "Pool A-1", Status: state.MatchStatusScheduled, SideAID: "alice", SideBID: "carol"}}
-		annotateIneligibleSides(ms, nil, statuses)
+		annotateEligibility(ms, nil, statuses)
 		require.NotNil(t, ms[0].IneligibleSides)
 		assert.Equal(t, "kiken-voluntary", ms[0].IneligibleSides.A)
 		assert.Empty(t, ms[0].IneligibleSides.B)
@@ -70,7 +70,7 @@ func TestAnnotateIneligibleSides(t *testing.T) {
 
 	t.Run("scheduled match with a barred side B is stamped", func(t *testing.T) {
 		ms := []state.MatchResult{{ID: "Pool A-1", Status: state.MatchStatusScheduled, SideAID: "carol", SideBID: "alice"}}
-		annotateIneligibleSides(ms, nil, statuses)
+		annotateEligibility(ms, nil, statuses)
 		require.NotNil(t, ms[0].IneligibleSides)
 		assert.Empty(t, ms[0].IneligibleSides.A)
 		assert.Equal(t, "kiken-voluntary", ms[0].IneligibleSides.B)
@@ -78,7 +78,7 @@ func TestAnnotateIneligibleSides(t *testing.T) {
 
 	t.Run("the undo path: a match barred by ITS OWN prior decision is not stamped", func(t *testing.T) {
 		ms := []state.MatchResult{{ID: "Pool A-0", Status: state.MatchStatusScheduled, SideAID: "alice", SideBID: "bob"}}
-		annotateIneligibleSides(ms, nil, statuses)
+		annotateEligibility(ms, nil, statuses)
 		assert.Nil(t, ms[0].IneligibleSides, "Pool A-0 recorded alice's own status; it must not bar itself")
 	})
 
@@ -87,14 +87,14 @@ func TestAnnotateIneligibleSides(t *testing.T) {
 			{ID: "Pool A-2", Status: state.MatchStatusRunning, SideAID: "alice", SideBID: "carol"},
 			{ID: "Pool A-3", Status: state.MatchStatusCompleted, SideAID: "alice", SideBID: "carol"},
 		}
-		annotateIneligibleSides(ms, nil, statuses)
+		annotateEligibility(ms, nil, statuses)
 		assert.Nil(t, ms[0].IneligibleSides)
 		assert.Nil(t, ms[1].IneligibleSides)
 	})
 
 	t.Run("no barred side: not stamped", func(t *testing.T) {
 		ms := []state.MatchResult{{ID: "Pool A-4", Status: state.MatchStatusScheduled, SideAID: "bob", SideBID: "carol"}}
-		annotateIneligibleSides(ms, nil, statuses)
+		annotateEligibility(ms, nil, statuses)
 		assert.Nil(t, ms[0].IneligibleSides)
 	})
 
@@ -102,7 +102,7 @@ func TestAnnotateIneligibleSides(t *testing.T) {
 		b := &state.Bracket{Rounds: [][]state.BracketMatch{{
 			{ID: "m-r1-0", Status: state.MatchStatusScheduled, SideAID: "alice", SideBID: "carol"},
 		}}}
-		annotateIneligibleSides(nil, b, statuses)
+		annotateEligibility(nil, b, statuses)
 		require.NotNil(t, b.Rounds[0][0].IneligibleSides)
 		assert.Equal(t, "kiken-voluntary", b.Rounds[0][0].IneligibleSides.A)
 	})
@@ -111,7 +111,7 @@ func TestAnnotateIneligibleSides(t *testing.T) {
 		b := &state.Bracket{ThirdPlaceMatch: &state.BracketMatch{
 			ID: "m-bronze", Status: state.MatchStatusScheduled, SideAID: "alice", SideBID: "carol",
 		}}
-		annotateIneligibleSides(nil, b, statuses)
+		annotateEligibility(nil, b, statuses)
 		require.NotNil(t, b.ThirdPlaceMatch.IneligibleSides)
 	})
 
@@ -127,7 +127,7 @@ func TestAnnotateIneligibleSides(t *testing.T) {
 			"dave": {PlayerID: "dave", Eligible: false, Reason: "disqualified for unsporting conduct"},
 		}
 		ms := []state.MatchResult{{ID: "Pool A-9", Status: state.MatchStatusScheduled, SideAID: "dave", SideBID: "carol"}}
-		annotateIneligibleSides(ms, nil, freeTextStatuses)
+		annotateEligibility(ms, nil, freeTextStatuses)
 		assert.Nil(t, ms[0].IneligibleSides, "an unparseable barring reason must leave the annotation nil, not an empty {}")
 	})
 
@@ -137,7 +137,7 @@ func TestAnnotateIneligibleSides(t *testing.T) {
 			"dave":  {PlayerID: "dave", Eligible: false, Reason: "disqualified for unsporting conduct"},
 		}
 		ms := []state.MatchResult{{ID: "Pool A-9", Status: state.MatchStatusScheduled, SideAID: "alice", SideBID: "dave"}}
-		annotateIneligibleSides(ms, nil, mixedStatuses)
+		annotateEligibility(ms, nil, mixedStatuses)
 		require.NotNil(t, ms[0].IneligibleSides)
 		assert.Equal(t, "kiken-voluntary", ms[0].IneligibleSides.A)
 		assert.Empty(t, ms[0].IneligibleSides.B, "dave's reason does not parse, so his side is not stamped")

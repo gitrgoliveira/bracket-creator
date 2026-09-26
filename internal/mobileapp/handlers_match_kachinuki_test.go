@@ -559,25 +559,23 @@ func TestScoreHandler_KachinukiEnchoFinalBoutPersists(t *testing.T) {
 	assert.Equal(t, "Ryu", bracket.Rounds[1][0].SideA, "winner must propagate to the next round")
 }
 
-// TestScoreHandler_KachinukiPoolBoutEnchoAccepted pins the PHASE scope of the
+// TestScoreHandler_KachinukiPoolBoutEnchoAccepted pins the SCOPE of the
 // kachinuki bout-level encho exception (allowNumberedEnchoFromStore): it applies
 // in EVERY phase, pools included. Whether the final pairing must produce a
-// result (e.g. the taisho must be defeated) is OPERATOR DISCRETION, never
-// hard-coded by phase (operator ruling superseding an earlier bracket-only
-// scoping). WHICH bout may go to encho is a separate axis: only taisho
-// against taisho (bc-kten, TestScoreHandler_KachinukiEnchoOnlyForTaisho), so
-// this encho is on bout 3, the two taisho.
+// result (e.g. the taisho must be defeated) is OPERATOR DISCRETION — the
+// operator may fight a tied pool pairing on in overtime rather than accept
+// the draw, and the app must never hard-code that rule by phase (operator
+// ruling superseding an earlier bracket-only scoping). Nor by pairing: this is
+// the first fighters' bout, and any tied pair may go to encho (operator ruling
+// 2026-09-26: the operator decides how a match is run, the app records it; a
+// taisho-only rule was tried the day before and reversed).
 func TestScoreHandler_KachinukiPoolBoutEnchoAccepted(t *testing.T) {
 	compID := "kachinuki-pool-encho-accepted"
 	r, store := setupKachinukiScoreServer(t, compID)
 	require.NoError(t, store.SavePoolMatches(compID, []state.MatchResult{
 		{
 			ID: "Pool 1-0", SideA: "Ryu", SideB: "Tora", Status: state.MatchStatusRunning,
-			SubResults: []state.SubMatchResult{
-				{Position: 1, SideA: "R-1", SideB: "W-1", Decision: "hikiwake"},
-				{Position: 2, SideA: "R-2", SideB: "W-2", Decision: "hikiwake"},
-				{Position: 3, SideA: "R-3", SideB: "W-3"},
-			},
+			SubResults: []state.SubMatchResult{{Position: 1, SideA: "R-1", SideB: "W-1"}},
 		},
 	}))
 
@@ -586,12 +584,10 @@ func TestScoreHandler_KachinukiPoolBoutEnchoAccepted(t *testing.T) {
 		"sideB":  "Tora",
 		"status": "running",
 		"subResults": []map[string]any{
-			kachinukiSub(1, "R-1", "W-1", nil, "", "hikiwake"),
-			kachinukiSub(2, "R-2", "W-2", nil, "", "hikiwake"),
 			{
-				"position": 3,
-				"sideA":    "R-3",
-				"sideB":    "W-3",
+				"position": 1,
+				"sideA":    "R-1",
+				"sideB":    "W-1",
 				"ipponsA":  []string{"M"},
 				"ipponsB":  []string{"K"},
 				"encho":    map[string]any{"periodCount": 1},
@@ -600,68 +596,13 @@ func TestScoreHandler_KachinukiPoolBoutEnchoAccepted(t *testing.T) {
 	})
 	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
 
-	m := loadPoolMatch(t, store, compID, "Pool 1-0")
-	var bout3 *state.SubMatchResult
-	for i := range m.SubResults {
-		if m.SubResults[i].Position == 3 {
-			bout3 = &m.SubResults[i]
-		}
-	}
-	require.NotNil(t, bout3)
-	require.NotNil(t, bout3.Encho, "the overtime marker must persist on the taisho bout, in a pool as in a knockout")
-	assert.Equal(t, 1, bout3.Encho.PeriodCount)
-}
-
-// TestScoreHandler_KachinukiEnchoOnlyForTaisho pins bc-kten (operator ruling
-// 2026-09-25): only the last bout, taisho against taisho, may go to encho.
-// A new encho on any other pairing is refused on both score doors, naming
-// the bout and its fighters; the lineups in force say who each taisho is.
-func TestScoreHandler_KachinukiEnchoOnlyForTaisho(t *testing.T) {
-	compID := "kachinuki-encho-only-taisho"
-	r, store := setupKachinukiScoreServer(t, compID)
-	running := state.MatchResult{
-		ID: "Pool 1-0", SideA: "Ryu", SideB: "Tora", Status: state.MatchStatusRunning,
-		SubResults: []state.SubMatchResult{{Position: 1, SideA: "R-1", SideB: "W-1"}},
-	}
-	require.NoError(t, store.SavePoolMatches(compID, []state.MatchResult{running}))
-
-	w := putScore(t, r, compID, "Pool 1-0", map[string]any{
-		"sideA":  "Ryu",
-		"sideB":  "Tora",
-		"status": "running",
-		"subResults": []map[string]any{{
-			"position": 1, "sideA": "R-1", "sideB": "W-1",
-			"ipponsA": []string{"M"}, "ipponsB": []string{"K"},
-			"encho": map[string]any{"periodCount": 1},
-		}},
-	})
-	require.Equal(t, http.StatusBadRequest, w.Code, w.Body.String())
-	assert.Contains(t, w.Body.String(), "taisho against taisho")
-	assert.Contains(t, w.Body.String(), "W-1 against R-1")
-	m := loadPoolMatch(t, store, compID, "Pool 1-0")
-	require.Len(t, m.SubResults, 1)
-	assert.Nil(t, m.SubResults[0].Encho, "a refused write stores nothing")
-
-	body, err := json.Marshal([]state.MatchResult{{
-		ID: "Pool 1-0", SideA: "Ryu", SideB: "Tora", Status: state.MatchStatusRunning,
-		SubResults: []state.SubMatchResult{{
-			Position: 1, SideA: "R-1", SideB: "W-1", IpponsA: []string{"M"}, IpponsB: []string{"K"},
-			Encho: &state.EnchoMetadata{PeriodCount: 1},
-		}},
-	}})
+	matches, err := store.LoadPoolMatches(compID)
 	require.NoError(t, err)
-	bw := httptest.NewRecorder()
-	req, err := http.NewRequest("POST", "/api/competitions/"+compID+"/matches/bulk-score", bytes.NewBuffer(body))
-	require.NoError(t, err)
-	req.Header.Set("Content-Type", "application/json")
-	r.ServeHTTP(bw, req)
-	require.Equal(t, http.StatusOK, bw.Code, bw.Body.String())
-	var res struct {
-		Succeeded int `json:"succeeded"`
-	}
-	require.NoError(t, json.Unmarshal(bw.Body.Bytes(), &res))
-	assert.Equal(t, 0, res.Succeeded, "bulk-score refuses the same pairing")
-	assert.Contains(t, bw.Body.String(), "taisho against taisho")
+	require.Len(t, matches, 1)
+	require.Len(t, matches[0].SubResults, 1)
+	require.NotNil(t, matches[0].SubResults[0].Encho,
+		"the overtime marker must persist on the pool bout")
+	assert.Equal(t, 1, matches[0].SubResults[0].Encho.PeriodCount)
 }
 
 // TestScoreHandler_KachinukiSimultaneousExhaustionNoWinnerIs400: a

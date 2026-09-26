@@ -278,11 +278,11 @@ export function downstreamKnockoutPlayedConfirm({ blockingMatchId, blockingMatch
         return {
             message: many
                 ? `${blocking} were built on this match's current result and have already been played. ` +
-                  'Reopening this match also reopens both for re-entry: their recorded results are cleared, ' +
-                  'and they must be fought and scored again.'
+                  'Reopening this match also reopens both: their winners are cleared and their points are ' +
+                  'kept, so check them and take back any that no longer apply.'
                 : `${who} already played ${blocking}, which was built on this match's current result. ` +
-                  `Reopening this match also reopens ${blocking} for re-entry: its recorded result is ` +
-                  'cleared, and it must be fought and scored again.',
+                  `Reopening this match also reopens ${blocking}: its winner is cleared and its points are ` +
+                  'kept, so check them and take back any that no longer apply.',
             confirmLabel: many ? 'Reopen all of them' : 'Reopen both',
             danger: true,
         };
@@ -290,11 +290,11 @@ export function downstreamKnockoutPlayedConfirm({ blockingMatchId, blockingMatch
     return {
         message: many
             ? `${blocking} were built on this match's current result and have already been played. ` +
-              'Applying this correction reopens both for re-entry: their recorded results are cleared, ' +
-              'and they must be fought and scored again.'
+              'Applying this correction reopens both with the new competitors in them: their winners are ' +
+              'cleared and their points are kept, so check them and take back any that no longer apply.'
             : `${who} already played ${blocking}, which was built on this match's current result. ` +
-              `Applying this correction reopens ${blocking} for re-entry: its recorded result is ` +
-              'cleared, and it must be fought and scored again.',
+              `Applying this correction reopens ${blocking} with the new competitor in it: its winner is ` +
+              'cleared and its points are kept, so check them and take back any that no longer apply.',
         confirmLabel: 'Apply correction and reopen',
         danger: true,
     };
@@ -342,15 +342,15 @@ function qualifierMoveConfirmMessage(changes, blockingMatches, blockingMatchId, 
     const places = tied > 1 ? 'the places' : 'the place';
     let refight;
     if (tied === changes.length) {
-        refight = `fought once the tie-break decides ${places}`;
+        refight = `finished once the tie-break decides ${places}`;
     } else if (tied > 0) {
-        refight = 'fought again; a match on a tied place waits for the tie-break to decide it';
+        refight = 'finished again; a match on a tied place waits for the tie-break to decide it';
     } else {
-        refight = many ? 'they must be fought again' : 'it must be fought again';
+        refight = many ? 'they must be finished again' : 'it must be finished again';
     }
     const fought = many
-        ? `${Blocking} were already fought with the competitors being replaced: they will be reopened, their results cleared, and ${refight}.`
-        : `${Blocking} was already fought${displaced ? ` with ${displaced}` : ''}: it will be reopened, its result cleared, and ${refight}.`;
+        ? `${Blocking} were already fought with the competitors being replaced: they will be reopened with their winners cleared and their points kept, and ${refight}.`
+        : `${Blocking} was already fought${displaced ? ` with ${displaced}` : ''}: it will be reopened with its winner cleared and its points kept, and ${refight}.`;
     return `${moves} ${fought}`;
 }
 
@@ -468,8 +468,8 @@ export function downstreamKnockoutReopenedNotice(matches) {
     if (!list.length) return null;
     const named = matchLabelList(list);
     return list.length === 1
-        ? `${named} was reopened: it must be fought and scored again.`
-        : `${named} were reopened: they must be fought and scored again.`;
+        ? `${named} was reopened with its points kept: check them, then finish it again.`
+        : `${named} were reopened with their points kept: check them, then finish them again.`;
 }
 
 // attemptScoreWrite (bc-kcdg / bc-cse): the generic confirm+retry loop for the

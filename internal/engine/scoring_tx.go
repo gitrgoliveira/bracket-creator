@@ -113,7 +113,12 @@ func (e *Engine) RecordMatchResultWithIneligibilityTx(tx state.StoreTx, compID, 
 	// callers do, so gating on Status == completed would have silently stopped
 	// stamping winners -- caught by TestWinnerIDInvariant_EveryWritePathStampsASideID).
 	engiStartWrite := result.FlagsA == 0 && result.FlagsB == 0 && result.Status != state.MatchStatusCompleted
-	if comp != nil && comp.Engi && !engiStartWrite {
+	// A RUNNING write is not judged either: it carries the flags entered so
+	// far, which are saved as entered (operator ruling 2026-09-26) so a match
+	// sent back to the queue or switched away from keeps them, and a panel
+	// part-way through its count has no valid total yet.
+	engiRunningWrite := result.Status == state.MatchStatusRunning
+	if comp != nil && comp.Engi && !engiStartWrite && !engiRunningWrite {
 		// A pool write in a mixed engi competition answers for the knockout
 		// its pool feeds exactly as a kendo one does (below): prior is read
 		// first, so a refusal can put the pool row back. Only a pool write in

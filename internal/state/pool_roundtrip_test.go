@@ -39,9 +39,12 @@ var notPersistedInPoolCSV = map[string]string{
 		"(DeriveQueuePositions), never authored, so persisting it would create a " +
 		"second source of truth that could disagree with the schedule.",
 	"IneligibleSides": "request-time-only annotation (bc-cse), stamped by " +
-		"mobileapp.annotateIneligibleSides on the served copy from the " +
+		"mobileapp.annotateEligibility on the served copy from the " +
 		"competitor-status store, never authored onto the object a write " +
 		"persists -- same discipline as QueuePosition above.",
+	"WithdrawnStatus": "request-time-only annotation stamped with IneligibleSides " +
+		"by mobileapp.annotateEligibility on the served copy, from the " +
+		"competitor-status store; never persisted, same discipline.",
 	"WinnerSide": "derived: the winner name compared against SideA/SideB.",
 	"SubResultsRaw": "the SubResults cell's UNPARSED bytes, retained only when " +
 		"that cell failed to parse so the whole-file rewrite cannot destroy an " +

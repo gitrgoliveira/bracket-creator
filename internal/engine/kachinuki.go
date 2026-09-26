@@ -19,8 +19,8 @@
 //     domain.DecisionKachinukiExhaustion.
 //   - A tied final bout is a drawn encounter in pools/league; a knockout
 //     tie is resolved by encho on that same bout (daihyosen does not
-//     exist in kachinuki). Only the last bout, taisho against taisho, may
-//     go to encho (bc-kten, KachinukiEnchoRefusal).
+//     exist in kachinuki). Whether a tied pair fights on in encho is the
+//     operator's call; the app records it (operator ruling 2026-09-26).
 //
 // AdvanceKachinuki encapsulates the pure decision logic. Callers
 // (typically a score handler, see handlers_match.go) pass a snapshot
@@ -1068,13 +1068,7 @@ func (e *Engine) reopenUnderCourtLock(compID string, comp *state.Competition, ma
 				}
 			}
 			prior := h.Bracket.Decision
-			fight, single := singleBoutFightOf(h.Bracket.SubResults, h.Bracket.IpponsA, h.Bracket.IpponsB, h.Bracket.HansokuA, h.Bracket.HansokuB, h.Bracket.Encho)
-			reopenBracketMatch(h.Bracket, reason, targetStatus)
-			if single {
-				h.Bracket.IpponsA, h.Bracket.IpponsB = fight.IpponsA, fight.IpponsB
-				h.Bracket.HansokuA, h.Bracket.HansokuB = fight.HansokuA, fight.HansokuB
-				h.Bracket.Encho = fight.Encho
-			}
+			reopenBracketMatchKeepingTheFight(h.Bracket, reason, targetStatus)
 			if serr := h.Save(); serr != nil {
 				return serr
 			}
@@ -1609,7 +1603,7 @@ func findMatchHome(tx state.StoreTx, compID, matchID string, visit func(matchHom
 // the competitor still cannot fight: reopening to RUNNING would only let
 // StartMatchTx refuse every later write on this match with no way forward,
 // so it goes to SCHEDULED instead, which re-shows the barred-match notice
-// (annotateIneligibleSides) exactly as it did before the default win was
+// (annotateEligibility) exactly as it did before the default win was
 // ever recorded, and, taking no court, is not refused for a busy one (see
 // the COURT GATE note on ReopenMatch). Once the competitor is reinstated or
 // the earlier withdrawal is itself cleared, the SAME reopen goes to RUNNING
@@ -1722,9 +1716,12 @@ func reopenPoolMatch(m *state.MatchResult, reason string, targetStatus state.Mat
 // the reopen threw away.
 //
 // This clears the verdict fields RevertMatchToQueue clears (engine/scoring.go)
-// that a kachinuki result can actually carry, MINUS SubResults (which requeue
-// drops and reopen exists to preserve) and CorrectionReason/ReopenPending
-// (which the reopen is itself setting). Match-level HansokuA/B ARE mirrored
+// that a kachinuki result can actually carry, plus the match-level scoreline,
+// fouls and overtime, which on a kachinuki encounter are a verdict about the
+// bouts (a reopen of a single-bout match puts its fight back through
+// reopenBracketMatchKeepingTheFight). SubResults stay, as a requeue keeps them
+// too, and CorrectionReason/ReopenPending are what the reopen itself sets.
+// Match-level HansokuA/B ARE mirrored
 // here, even though today's team-editor wire path never sets them on a
 // kachinuki match: NormalizeLegacy (state/legacy_hantei.go) folds a legacy
 // ScoreA/ScoreB string into IpponsA/HansokuA on every bracket read, and
@@ -1760,6 +1757,22 @@ func reopenBracketMatch(bm *state.BracketMatch, reason string, targetStatus stat
 	// (ReopenMatch, RequeueBlockerAndReopen, forceReopenDownstreamChain) ends
 	// here, so a write stamped before the reopen is refused as superseded.
 	bm.ModifiedAt = time.Now().UnixMilli()
+}
+
+// reopenBracketMatchKeepingTheFight is reopenBracketMatch for a reopen that
+// keeps what was fought. A team match's bouts already survive
+// reopenBracketMatch; on a single-bout match (an individual match) the
+// match-level scoreline IS the fight, so the letters actually struck, the
+// fouls and the overtime are put back (singleBoutFightOf; a default win's
+// maru go with the verdict). Engi flags are never touched by the reopen.
+func reopenBracketMatchKeepingTheFight(bm *state.BracketMatch, reason string, targetStatus state.MatchStatus) {
+	fight, single := singleBoutFightOf(bm.SubResults, bm.IpponsA, bm.IpponsB, bm.HansokuA, bm.HansokuB, bm.Encho)
+	reopenBracketMatch(bm, reason, targetStatus)
+	if single {
+		bm.IpponsA, bm.IpponsB = fight.IpponsA, fight.IpponsB
+		bm.HansokuA, bm.HansokuB = fight.HansokuA, fight.HansokuB
+		bm.Encho = fight.Encho
+	}
 }
 
 // reopenPending reports whether a reopen was made without an audit reason:

@@ -216,7 +216,8 @@ func TestDownstreamKnockoutCorrection_Force(t *testing.T) {
 	assert.Equal(t, state.MatchStatusScheduled, next.Status,
 		"reopened IN PLACE (the queue is not touched) and waiting to be fought again, NOT claimed as in progress")
 	assert.Empty(t, next.Winner, "its winner is cleared")
-	assert.Empty(t, next.IpponsA, "its ippons are cleared")
+	assert.Equal(t, []string{"M", "M"}, next.IpponsA,
+		"its points are kept (operator ruling 2026-09-26): the operator removes a wrong mark")
 	assert.Contains(t, next.CorrectionReason, "m-r1-0",
 		"its audit note describes its OWN reopen and names the correction that caused it")
 	assert.False(t, next.ReopenPending,

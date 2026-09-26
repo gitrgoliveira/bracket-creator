@@ -158,7 +158,7 @@ func DeriveQueuePositions(matches []MatchResult) []int {
 		for _, e := range entries {
 			// bc-cse: a scheduled match whose resolved side ids are
 			// currently barred (IneligibleSides, stamped by the caller
-			// BEFORE this runs -- see mobileapp.annotateIneligibleSides)
+			// BEFORE this runs -- see mobileapp.annotateEligibility)
 			// is not queued: it cannot be started until the operator
 			// reinstates the barred side or records the default win, so
 			// "Next up" and on-deck alerts must skip it rather than

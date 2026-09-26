@@ -121,7 +121,7 @@ func (e *AlreadyIneligibleError) Error() string {
 // check, extracted to ONE place (bc-cse) from what used to be three
 // hand-copied loops: StartMatchTx (scoring_tx.go), checkEligibilityExcludingMatch
 // (below), and the mobileapp ineligibleSides read-time annotation
-// (annotateIneligibleSides, handlers_match.go), which needs the SAME
+// (annotateEligibility, handlers_match.go), which needs the SAME
 // per-side answer to stamp a scheduled match without gating a write.
 //
 // A side is barred when it carries a non-empty id, a status entry exists

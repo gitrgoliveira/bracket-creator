@@ -36,6 +36,8 @@
 
 import { normalizeCompetitionDetail, normalizePlayer, toBackendMatchResult, buildPlayerMetadata } from './api_serializers.jsx';
 import { bridge as _bridge } from './court_bridge.jsx';
+// The offset lives in a leaf so a score editor can read the same clock (server_clock.jsx).
+import { serverNowMs, serverClockOffsetMs, setServerClockOffsetMs } from './server_clock.jsx';
 import {
     writeDidNotLand, writeWasSuperseded, writeWasRefusedForClock,
     SUPERSEDED_REASON, SUPERSEDED_ADVICE,
@@ -283,7 +285,6 @@ function _downstreamQueueDropCopy(body) {
 // arrival-order, and a small offset error only matters for genuinely concurrent
 // same-field edits, so the degradation is graceful.
 // ---------------------------------------------------------------------------
-let _serverClockOffsetMs = 0;
 // bc-cse: has ANY learn ever succeeded? The load-time retry chain below stops
 // scheduling once this flips, and it never flips back: a later failed refresh
 // keeps the last good offset rather than reopening the retry chain.
@@ -313,7 +314,7 @@ async function _learnServerClockOffsetOnce() {
         if (typeof body.nowMs !== 'number') return;
         // Net out the round-trip: estimate the server clock at the response
         // arrival by adding half the RTT to the reported time.
-        _serverClockOffsetMs = (body.nowMs + Math.round((t1 - t0) / 2)) - t1;
+        setServerClockOffsetMs((body.nowMs + Math.round((t1 - t0) / 2)) - t1);
         _clockOffsetLearned = true;
     } catch (_e) {
         // Offline / timeout: keep the last known offset (0 on first ever call).
@@ -363,7 +364,7 @@ function _relearnClockThrottled() {
 // _serverNowMs returns the current time in the server's clock frame. Never
 // negative-guarded: callers only compare relative order, so a monotonic-ish
 // value is what matters.
-function _serverNowMs() { return Date.now() + _serverClockOffsetMs; }
+function _serverNowMs() { return serverNowMs(); }
 
 // Monotonic reading, or null where performance.now() is unavailable (older
 // embedded webviews, and the non-browser imports the test harness does). Null
@@ -944,7 +945,7 @@ async function _restampQueuedEntryForSkew(descriptor) {
 // silently, and that overwrite is the entire reason bc-lww1 exists. So where the
 // two disagree we always prefer the direction whose failure is recoverable.
 function _restampFor(enqueuedAt, perfAtEnqueue) {
-    const wall = enqueuedAt + _serverClockOffsetMs;
+    const wall = enqueuedAt + serverClockOffsetMs();
     const perfNow = _perfNow();
     if (perfNow === null || !Number.isFinite(perfAtEnqueue)) return wall;
     const ageMs = perfNow - perfAtEnqueue;

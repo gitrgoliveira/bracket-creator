@@ -2549,6 +2549,11 @@ func applyBracketMatchResult(bm *state.BracketMatch, result *state.MatchResult, 
 	bm.DecisionBy = result.DecisionBy
 	bm.DecisionReason = result.DecisionReason
 	bm.Encho = result.Encho
+	// Engi flags, as entered: a running engi write carries the flags so far
+	// (saved as entered, operator ruling 2026-09-26), and a rollback restores
+	// the snapshot's (bracketMatchAsResult). A completing engi write takes the
+	// engi seam instead, and a kendo match has none.
+	bm.FlagsA, bm.FlagsB = result.FlagsA, result.FlagsB
 	// Set-if-non-empty on the FORWARD path: a client payload that omits either
 	// field is inheriting stored context, not clearing it. Under restore the
 	// snapshot is authoritative, so both are assigned straight through — an
@@ -2808,7 +2813,7 @@ func winnerActuallyChanged(priorWinner, priorWinnerID string, bm *state.BracketM
 // reopened match had sent on (retractIntoUntouched); one already played is
 // asked about in its own turn, when the re-fought result propagates into it.
 //
-// reopenBracketMatch, not requeueBracketMatch: the match was already played
+// A reopen (reopenDisplacedBracketMatch), not requeueBracketMatch: the match was already played
 // and stays where it is, reopened in place, so the queue is left alone
 // (operator ruling 2026-09-19: "no changes in the queue necessary if the
 // matches were already played"). It carries its own audit note rather than
@@ -2837,23 +2842,17 @@ func forceReopenDownstreamChain(bracket *state.Bracket, rIdx, mIdx int, correcte
 // qualified into it), so the two cannot drift on what "reopened because its
 // competitor was replaced" leaves behind.
 func reopenDisplacedBracketMatch(m *state.BracketMatch, reason string) ReopenedMatch {
-	// Captured before reopenBracketMatch clears it, for the eligibility
+	// Captured before the reopen clears it, for the eligibility
 	// restore the caller runs once the bracket is saved
 	// (restoreForceReopened). It cannot run here: this runs inside an
 	// UpdateBracket callback, which on the bare store holds the
 	// non-reentrant per-competition lock a status write would take again.
 	priorDecision := m.Decision
-	// The Running placeholder here is immediately overridden to Scheduled
-	// below regardless of decision (this door never leaves a match
-	// RUNNING), so it needs none of reopenTargetStatus's fusensho-barred
-	// check -- that check exists only to pick RUNNING vs SCHEDULED, and this
-	// call site always ends up SCHEDULED either way.
-	reopenBracketMatch(m, reason, state.MatchStatusRunning)
 	// A downstream reopen leaves the match SCHEDULED, where the kachinuki
 	// reopen leaves it RUNNING, and the difference is who is standing at
 	// the shiaijo. Kachinuki reopens the encounter the operator has this
 	// second, to fight on; this one reopens a match that was played
-	// earlier and must be fought AGAIN, with nobody on the court yet.
+	// earlier, with nobody on the court yet.
 	//
 	// Running is not merely inaccurate here, it is unusable: a running
 	// match holds its court, and a semifinal reopens BOTH the final and
@@ -2868,25 +2867,13 @@ func reopenDisplacedBracketMatch(m *state.BracketMatch, reason string) ReopenedM
 	// (operator ruling 2026-09-19, "no changes in the queue necessary if
 	// the matches were already played"), it simply is not claimed as in
 	// progress until someone starts it.
-	m.Status = state.MatchStatusScheduled
-	// The BOUT LOG goes too, which is the other place this parts company
-	// with the kachinuki reopen. That one keeps SubResults on purpose:
-	// the same two teams are still fighting and every bout already fought
-	// is a fact about them. Here the correction REPAINTS this match's
-	// side, so the bouts describe a pairing that is no longer in it, and
-	// leaving them behind files one team's bouts under the name of the
-	// team that replaced them. The operator is told this is what happens
-	// ("its recorded result, including its bouts, is cleared" -- the
-	// court-operator guide, and the confirm dialog says the same), so the
-	// record has to match the promise.
 	//
-	// Engi flags go for the same reason: an engi bracket match carries
-	// its panel's flag counts, which belong to the pair that was in the
-	// slot. reopenBracketMatch leaves both alone because it serves
-	// kachinuki, where neither can be stale.
-	m.SubResults = nil
-	m.FlagsA = 0
-	m.FlagsB = 0
+	// The fight stays: what was struck, its bouts and its engi flags (operator
+	// ruling 2026-09-26: scores are never cleared, the operator removes a wrong
+	// mark). The correction puts a different competitor in this match's slot
+	// and discards only the verdict, exactly as a match still waiting in the
+	// queue keeps its points when the name in it changes.
+	reopenBracketMatchKeepingTheFight(m, reason, state.MatchStatusScheduled)
 	ref := bracketMatchRef(m)
 	ref.PriorDecision = priorDecision
 	return ref
@@ -2930,10 +2917,10 @@ func downstreamReopenReason(correctedID string) string {
 // Sole caller today. bc-kcdg's forced correction briefly used it too, until
 // the operator ruled that a downstream match invalidated by a correction was
 // already played and should be reopened where it is, leaving the queue alone
-// (see forceReopenDownstreamChain, which calls reopenBracketMatch instead).
-// Keep the two distinct: requeue is "this match is not finished, carry on
-// from where it stopped", reopen is "this match finished and must happen
-// again".
+// (see reopenDisplacedBracketMatch, which forceReopenDownstreamChain calls
+// instead). Keep the two distinct: requeue is "this match is not finished,
+// carry on from where it stopped", reopen is "this match finished and its
+// verdict no longer stands". Both keep what was scored.
 func requeueBracketMatch(m *state.BracketMatch) {
 	m.Status = state.MatchStatusScheduled
 	m.Winner = ""

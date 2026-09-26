@@ -93,11 +93,9 @@ export function awaitedDefaultWin(m) {
 }
 
 // The /decision body for a default win, keyed directly by which side is
-// barred and who they are. Callers who already know the barred side without
-// reading the `ineligibleSides` stamp (RemainingMatchesPanel walks the
-// withdrawn competitor's OTHER scheduled matches directly) build the body
-// here too, so a default win has ONE wire shape regardless of how the
-// caller found the barred side.
+// barred and who they are. defaultWinDecisionBody (below) is its only
+// caller, deriving the barred side from the `ineligibleSides` stamp via
+// awaitedDefaultWin.
 export function defaultWinDecisionBodyForSide(barredKey, barredSide) {
     return {
         decision: "fusensho",

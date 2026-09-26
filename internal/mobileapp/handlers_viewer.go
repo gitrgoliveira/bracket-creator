@@ -377,7 +377,7 @@ func buildViewerCompetitionPayload(store *state.Store, compID, courtFilter strin
 		if stErr != nil {
 			log.Printf("mobileapp: viewer payload %s: load competitor status: %v", compID, stErr)
 		} else {
-			annotateIneligibleSides(poolMatches, bracket, statuses)
+			annotateEligibility(poolMatches, bracket, statuses)
 		}
 	}
 
@@ -796,7 +796,7 @@ func RegisterViewerHandlers(r *gin.RouterGroup, store *state.Store, eng *engine.
 				if stErr != nil {
 					log.Printf("mobileapp: viewer payload %s: load competitor status: %v", id, stErr)
 				} else {
-					annotateIneligibleSides(poolMatches, bracket, statuses)
+					annotateEligibility(poolMatches, bracket, statuses)
 				}
 			}
 

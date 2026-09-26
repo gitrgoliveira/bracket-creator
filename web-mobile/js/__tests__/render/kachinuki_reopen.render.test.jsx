@@ -224,7 +224,7 @@ describe('kachinuki reopen: a later knockout match already fought', () => {
     await waitFor(() => expect(window.API.reopenMatch).toHaveBeenCalledTimes(2));
     expect(window.API.reopenMatch.mock.calls[1][3]).toEqual({ reason: '', force: true });
     await waitFor(() => expect(screen.getByTestId('kachinuki-reopen-notice').textContent)
-      .toBe('Match 3 was reopened: it must be fought and scored again.'));
+      .toBe('Match 3 was reopened with its points kept: check them, then finish it again.'));
     expect(onClose).not.toHaveBeenCalled();
 
     // The notice is read once the match is running again, which is when the
@@ -237,7 +237,7 @@ describe('kachinuki reopen: a later knockout match already fought', () => {
     });
     expect(screen.queryByTestId('kachinuki-reopen-button')).toBeNull();
     expect(screen.getByTestId('kachinuki-reopen-notice').textContent)
-      .toBe('Match 3 was reopened: it must be fought and scored again.');
+      .toBe('Match 3 was reopened with its points kept: check them, then finish it again.');
     expect(onClose).not.toHaveBeenCalled();
   });
 
@@ -705,120 +705,22 @@ describe('kachinuki Encho is offered only on the current tied bout', () => {
     expect(screen.queryByTestId('kachinuki-encho-undo-button')).toBeNull();
   });
 
-  // bc-kten (operator ruling 2026-09-25): only the last bout, taisho against
-  // taisho, may go to encho. With both lineups in force the editor knows who
-  // each taisho is (kachinukiTaishoPairing, the twin of the server's rule).
-  describe('only taisho against taisho (bc-kten)', () => {
+  // Operator ruling 2026-09-26: whether a tied pair fights on is the
+  // operator's call, the app records it. A taisho-only rule (bc-kten) was
+  // tried the day before and reversed, so with both lineups in force a tie
+  // between the FIRST fighters still offers Encho, and the tap records it.
+  it('offers Encho on a tie between any pair, lineups in force', async () => {
     const lineupFor = (p) => ({ positions: { 1: `${p}1`, 2: `${p}2`, 3: `${p}3` } });
-    beforeEach(() => {
-      window.API.fetchMatchLineup = vi.fn().mockImplementation(async (_c, teamId) => (
-        teamId === 'team-A' ? lineupFor('A') : teamId === 'team-B' ? lineupFor('B') : null
-      ));
+    window.API.fetchMatchLineup = vi.fn().mockImplementation(async (_c, teamId) => (
+      teamId === 'team-A' ? lineupFor('A') : teamId === 'team-B' ? lineupFor('B') : null
+    ));
+    await renderEditor({
+      match: completedKachinukiMatch({ status: 'running', winner: null, subResults: [tiedBout(1)] }),
     });
-    const drawn = (pos) => ({ position: pos, sideA: `A${pos}`, sideB: `B${pos}`, ipponsA: [], ipponsB: [], decision: 'hikiwake' });
-
-    it('withholds Encho from a tie between the first fighters', async () => {
-      await renderEditor({
-        match: completedKachinukiMatch({ status: 'running', winner: null, subResults: [tiedBout(1)] }),
-      });
-      await waitFor(() => expect(window.API.fetchMatchLineup).toHaveBeenCalledTimes(2));
-      await waitFor(() => expect(screen.queryByTestId('kachinuki-encho-button')).toBeNull());
-      const hint = screen.queryByTestId('kachinuki-end-hint');
-      if (hint) expect(hint.textContent).not.toContain('Encho keeps');
-    });
-
-    // Review finding: the sheet loaded no lineup (none saved yet, or the fetch
-    // failed), so it offered Encho; by the tap a lineup is in force and the
-    // server would refuse. The tap reads the lineups again and refuses too,
-    // instead of applying an encho the sheet could never take back.
-    it('re-reads the lineups on the Encho tap and refuses a pairing they rule out', async () => {
-      let calls = 0;
-      window.API.fetchMatchLineup = vi.fn().mockImplementation(async (_c, teamId) => {
-        calls += 1;
-        if (calls <= 2) return null;
-        return teamId === 'team-A' ? lineupFor('A') : teamId === 'team-B' ? lineupFor('B') : null;
-      });
-      await renderEditor({
-        match: completedKachinukiMatch({ status: 'running', winner: null, subResults: [tiedBout(1)] }),
-      });
-      await waitFor(() => expect(window.API.fetchMatchLineup).toHaveBeenCalledTimes(2));
-      const encho = await screen.findByTestId('kachinuki-encho-button');
-      await act(async () => { fireEvent.click(encho); });
-      await waitFor(() => expect(screen.getByTestId('team-editor-error').textContent).toContain('only for the last bout'));
-      expect(document.body.textContent).not.toContain('(E)');
-    });
-
-    it('offers Encho when the two taisho are tied', async () => {
-      await renderEditor({
-        match: completedKachinukiMatch({
-          status: 'running', winner: null,
-          subResults: [drawn(1), drawn(2), tiedBout(3, 'A3', 'B3')],
-        }),
-      });
-      await waitFor(() => expect(window.API.fetchMatchLineup).toHaveBeenCalledTimes(2));
-      expect(screen.getByTestId('kachinuki-encho-button')).toBeTruthy();
-    });
-
-    // A later bout's fighter may be picked out of lineup order. A3 fought
-    // bout 2, so A2, placed before A3, is Aka's last fighter, and bout 3 is
-    // the last bout: its tie may go to encho.
-    it('offers Encho on the last bout when a fighter was picked out of lineup order', async () => {
-      await renderEditor({
-        match: completedKachinukiMatch({
-          status: 'running', winner: null,
-          subResults: [drawn(1), { ...drawn(2), sideA: 'A3' }, tiedBout(3, 'A2', 'B3')],
-        }),
-      });
-      await waitFor(() => expect(window.API.fetchMatchLineup).toHaveBeenCalledTimes(2));
-      expect(screen.getByTestId('kachinuki-encho-button')).toBeTruthy();
-    });
-
-    // The tap's re-read cannot tell a failed read from no lineup (both come
-    // back empty), so a failure on venue wifi must not wipe the lineups the
-    // sheet loaded: row 1 takes its fighters' names from them.
-    it('keeps the loaded lineups when the re-read on the tap fails', async () => {
-      let calls = 0;
-      window.API.fetchMatchLineup = vi.fn().mockImplementation(async (_c, teamId) => {
-        calls += 1;
-        if (calls > 2) throw new Error('network');
-        return teamId === 'team-A' ? lineupFor('A') : teamId === 'team-B' ? lineupFor('B') : null;
-      });
-      window.API.fetchTeamLineup = vi.fn().mockRejectedValue(new Error('network'));
-      await renderEditor({
-        match: completedKachinukiMatch({
-          status: 'running', winner: null,
-          subResults: [{ ...drawn(1), sideA: '', sideB: '' }, drawn(2), tiedBout(3, 'A3', 'B3')],
-        }),
-      });
-      await waitFor(() => expect(document.body.textContent).toContain('A1'));
-      await act(async () => { fireEvent.click(screen.getByTestId('kachinuki-encho-button')); });
-      await waitFor(() => expect(document.body.textContent).toContain('(E)'));
-      expect(document.body.textContent, 'row 1 still names its fighters from the lineup').toContain('A1');
-    });
-
-    it('a second tap while the lineups are read adds one period, not two', async () => {
-      let calls = 0;
-      const pending = [];
-      window.API.fetchMatchLineup = vi.fn().mockImplementation((_c, teamId) => {
-        calls += 1;
-        const l = teamId === 'team-A' ? lineupFor('A') : teamId === 'team-B' ? lineupFor('B') : null;
-        if (calls <= 2) return Promise.resolve(l);
-        return new Promise((r) => { pending.push(() => r(l)); });
-      });
-      await renderEditor({
-        match: completedKachinukiMatch({
-          status: 'running', winner: null,
-          subResults: [drawn(1), drawn(2), tiedBout(3, 'A3', 'B3')],
-        }),
-      });
-      const encho = await screen.findByTestId('kachinuki-encho-button');
-      await act(async () => { fireEvent.click(encho); });
-      await act(async () => { fireEvent.click(encho); });
-      await act(async () => { pending.forEach((r) => r()); });
-      await waitFor(() => expect(document.body.textContent).toContain('(E)'));
-      await act(async () => { fireEvent.click(screen.getByTestId('kachinuki-encho-undo-button')); });
-      expect(document.body.textContent, 'one undo takes the only period back').not.toContain('(E)');
-    });
+    await waitFor(() => expect(window.API.fetchMatchLineup).toHaveBeenCalledTimes(2));
+    const encho = screen.getByTestId('kachinuki-encho-button');
+    await act(async () => { fireEvent.click(encho); });
+    expect(document.body.textContent).toContain('(E)');
   });
 });
 

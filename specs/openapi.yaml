@@ -5068,6 +5068,21 @@ components:
           items:
             $ref: '#/components/schemas/Player'
 
+    WithdrawnStatusAnnotation:
+      type: object
+      description: >
+        Request-time only, never stored. On a completed match a withdrawal or
+        default win decided: where the withdrawn side's competitor status
+        stands now.
+      properties:
+        eligible:
+          type: boolean
+        matchId:
+          type: string
+          description: The match whose withdrawal the status records.
+        reinstateable:
+          type: boolean
+          description: True after an injury withdrawal the operator can reinstate.
     IneligibleSidesAnnotation:
       type: object
       readOnly: true
@@ -5239,6 +5254,10 @@ components:
           readOnly: true
           allOf:
             - $ref: '#/components/schemas/IneligibleSidesAnnotation'
+        withdrawnStatus:
+          readOnly: true
+          allOf:
+            - $ref: '#/components/schemas/WithdrawnStatusAnnotation'
         court:
           type: string
           maxLength: 32
@@ -5426,6 +5445,10 @@ components:
           readOnly: true
           allOf:
             - $ref: '#/components/schemas/IneligibleSidesAnnotation'
+        withdrawnStatus:
+          readOnly: true
+          allOf:
+            - $ref: '#/components/schemas/WithdrawnStatusAnnotation'
         court:
           type: string
           maxLength: 32

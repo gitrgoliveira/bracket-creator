@@ -1022,8 +1022,8 @@ describe('a barred match is skipped by every auto-pick (bc-cse)', () => {
   });
 });
 
-// Shared by the bc-kpnl and bc-sbq blocks below: a mutable court feed, a
-// Refresh that re-reads it, and the editor probe's current match.
+// Shared by the render tests below: a mutable court feed, a Refresh that
+// re-reads it, and the editor probe's current match.
 async function mountCourt(initial) {
   const feed = { current: initial };
   window.tournamentMatches = () => feed.current;
@@ -1065,97 +1065,6 @@ const courtMatch = (id, status, over = {}) => ({
   scheduledAt: `09:0${id.slice(-1)}`,
   sideA: courtSide(`${id}-a`, `Aka ${id}`), sideB: courtSide(`${id}-b`, `Shiro ${id}`),
   ...over,
-});
-
-// bc-kpnl: a kiken completes the match, so the console's running[0] moved on,
-// the editor (keyed on the match) unmounted and the Remaining matches panel,
-// which only the editor holds, went with it after about a second. The editor
-// now reports the kiken (onWithdrawal) and the console pins that match until
-// the panel is closed (the editor's onClose) or the operator leaves it.
-describe('the kiken-decided match stays on the console until its panel is closed (bc-kpnl)', () => {
-  it('stays through the refetch that completes it, then releases on the panel close', async () => {
-    const c = await mountCourt([courtMatch('m1', 'running'), courtMatch('m2', 'scheduled')]);
-    try {
-      expect(c.editorMatch()).toBe('m1');
-      await act(async () => { probe.props.onWithdrawal({ id: 'm1-a', name: 'Aka m1' }); });
-      // The kiken completed m1 and another device already started m2.
-      c.feed.current = [courtMatch('m1', 'completed', { decision: 'kiken-voluntary', decisionBy: 'aka' }), courtMatch('m2', 'running')];
-      await c.refresh();
-      expect(c.editorMatch(), 'the panel must stay on the kiken-decided match').toBe('m1');
-      // The panel's close releases the pin: the court's live bout returns.
-      await act(async () => { probe.props.onClose(); });
-      expect(c.editorMatch()).toBe('m2');
-    } finally { c.restore(); }
-  });
-
-  it("holds the editor open when the kiken was the court's last bout", async () => {
-    const c = await mountCourt([courtMatch('m1', 'running')]);
-    try {
-      await act(async () => { probe.props.onWithdrawal({ id: 'm1-a', name: 'Aka m1' }); });
-      c.feed.current = [courtMatch('m1', 'completed', { decision: 'kiken-voluntary', decisionBy: 'aka' })];
-      await c.refresh();
-      expect(c.editorMatch(), 'allDone must not unmount the pinned editor').toBe('m1');
-      expect(c.utils.queryByText(/complete on Shiaijo A/i)).toBeNull();
-      // Back to court is the console's own exit from the pin.
-      await act(async () => { c.utils.getByRole('button', { name: /back to court/i }).click(); });
-      expect(c.editorMatch()).toBeNull();
-      expect(c.utils.getByText(/complete on Shiaijo A/i)).toBeTruthy();
-    } finally { c.restore(); }
-  });
-
-  // The pin is for a kiken-COMPLETED match. Reopened (Clear withdrawal and
-  // reopen) it is the court's live bout, so it becomes the pick and the pin
-  // ends: Finish + Start Next then moves on to the match it started, as it
-  // does after a reopened correction (bc-tmfn). Without the release the
-  // panel stayed pinned on the old match and hid the one just started.
-  it('releases once the match is reopened, so Finish + Start Next moves on', async () => {
-    const c = await mountCourt([courtMatch('m1', 'running'), courtMatch('m2', 'scheduled')]);
-    try {
-      await act(async () => { probe.props.onWithdrawal({ id: 'm1-a', name: 'Aka m1' }); });
-      // The feed has not caught up with the kiken yet: the pin must hold.
-      expect(c.editorMatch()).toBe('m1');
-      c.feed.current = [courtMatch('m1', 'completed', { decision: 'kiken-voluntary', decisionBy: 'aka' }), courtMatch('m2', 'scheduled')];
-      await c.refresh();
-      expect(c.editorMatch()).toBe('m1');
-      // Clear withdrawal and reopen: m1 is running again.
-      c.feed.current = [courtMatch('m1', 'running'), courtMatch('m2', 'scheduled')];
-      await c.refresh();
-      expect(c.editorMatch()).toBe('m1');
-      expect(c.utils.queryByRole('button', { name: /back to court/i })).toBeNull();
-      // Finish + Start Next: m1 completed again and m2 running.
-      c.feed.current = [courtMatch('m1', 'completed'), courtMatch('m2', 'running')];
-      await c.refresh();
-      expect(c.editorMatch(), 'the panel must follow the match Finish + Start Next started').toBe('m2');
-    } finally { c.restore(); }
-  });
-
-  // Review finding: the kiken is recorded for the wrong side, cleared and
-  // reopened (the pin lets go), then recorded for the right side on the SAME
-  // match while the feed still shows it running. The second pin must hold.
-  it('holds a second kiken pin on the same match after the first was released', async () => {
-    const c = await mountCourt([courtMatch('m1', 'running'), courtMatch('m2', 'scheduled')]);
-    try {
-      await act(async () => { probe.props.onWithdrawal({ id: 'm1-b', name: 'Shiro m1' }); });
-      c.feed.current = [courtMatch('m1', 'completed', { decision: 'kiken-voluntary', decisionBy: 'shiro' }), courtMatch('m2', 'scheduled')];
-      await c.refresh();
-      c.feed.current = [courtMatch('m1', 'running'), courtMatch('m2', 'scheduled')];
-      await c.refresh();
-      expect(c.editorMatch()).toBe('m1');
-      // The correct side withdraws; the feed has not caught up yet.
-      await act(async () => { probe.props.onWithdrawal({ id: 'm1-a', name: 'Aka m1' }); });
-      c.feed.current = [courtMatch('m1', 'completed', { decision: 'kiken-voluntary', decisionBy: 'aka' }), courtMatch('m2', 'running')];
-      await c.refresh();
-      expect(c.editorMatch(), 'the second pin must hold the panel').toBe('m1');
-    } finally { c.restore(); }
-  });
-
-  it('every other onClose is still a no-op on the console', async () => {
-    const c = await mountCourt([courtMatch('m1', 'running'), courtMatch('m2', 'scheduled')]);
-    try {
-      await act(async () => { probe.props.onClose(); });
-      expect(c.editorMatch()).toBe('m1');
-    } finally { c.restore(); }
-  });
 });
 
 // bc-sbq (operator ruling 2026-09-26): a match sent back to the queue keeps
@@ -1264,6 +1173,59 @@ describe('the editor is told a match the console started is running (bc-strt)', 
     } finally {
       window.API.fetchCourtMatches = prevFetch;
       window.API.subscribeToEvents = prevSub;
+    }
+  });
+});
+
+// The console used to refetch its whole court feed for every event, and a
+// running match broadcasts every saved point. A running match's score update
+// changes only its own row, so the pushed result is shown at once, a push
+// older than the row it would replace is ignored, and the refetch that still
+// follows (for what a push cannot carry) happens once per burst.
+describe('the court console shows a pushed running score at once', () => {
+  it('applies the push to its row, ignores a stale one, and refetches once per burst', async () => {
+    vi.useFakeTimers();
+    const side = (id, name) => ({ id, name });
+    const running = (o = {}) => ({
+      id: 'm1', status: 'running', phase: 'pool', poolName: 'Pool A', court: 'A', scheduledAt: '09:00',
+      sideA: side('p1', 'Yamada'), sideB: side('p2', 'Tanaka'), ipponsA: [], ipponsB: [], modifiedAt: 100, ...o,
+    });
+    const comp = { id: 'c1', name: 'Cup', status: 'pools', poolMatches: [running()] };
+    let emit = () => {};
+    const prev = {
+      fetch: window.API.fetchCourtMatches, sub: window.API.subscribeToEvents,
+      tm: window.tournamentMatches, fbc: window.filterMatchesByCourt,
+    };
+    const fetchCourtMatches = vi.fn().mockResolvedValue([comp]);
+    window.API.fetchCourtMatches = fetchCourtMatches;
+    window.API.subscribeToEvents = (cb) => { emit = cb; return () => {}; };
+    window.tournamentMatches = (t) => (t.competitions || [])
+      .flatMap((c) => (c.poolMatches || []).map((m) => ({ ...m, compId: c.id, compName: c.name })));
+    window.filterMatchesByCourt = (matches) => matches;
+    try {
+      await act(async () => { renderPage(makeMinimalTournament(), 'A'); });
+      await act(async () => { await Promise.resolve(); });
+      expect(probe.props.match?.id).toBe('m1');
+      const fetchesBefore = fetchCourtMatches.mock.calls.length;
+      const push = (o) => act(async () => {
+        emit({ type: 'match_updated', data: { competitionId: 'c1', matchId: 'm1', result: running(o) } });
+      });
+
+      await push({ ipponsA: ['M'], modifiedAt: 200 });
+      expect(probe.props.match.ipponsA, 'shown at once, before any refetch').toEqual(['M']);
+      await push({ ipponsA: ['M', 'K'], modifiedAt: 300 });
+      await push({ ipponsA: [], modifiedAt: 250 });
+      expect(probe.props.match.ipponsA, 'a push older than the row is not applied').toEqual(['M', 'K']);
+      expect(fetchCourtMatches.mock.calls.length, 'nothing refetched yet').toBe(fetchesBefore);
+
+      await act(async () => { vi.advanceTimersByTime(700); });
+      expect(fetchCourtMatches.mock.calls.length, 'one refetch for the burst of three').toBe(fetchesBefore + 1);
+    } finally {
+      window.API.fetchCourtMatches = prev.fetch;
+      window.API.subscribeToEvents = prev.sub;
+      window.tournamentMatches = prev.tm;
+      window.filterMatchesByCourt = prev.fbc;
+      vi.useRealTimers();
     }
   });
 });

@@ -200,7 +200,7 @@ func TestRequalify_FirstSecondSwap_WarnsThenReopensAndRepaints(t *testing.T) {
 	got := findBracketMatchInBracket(b, m1.ID)
 	assert.Equal(t, state.MatchStatusScheduled, got.Status)
 	assert.Empty(t, got.Winner)
-	assert.Empty(t, got.IpponsA)
+	assert.Equal(t, []string{"M"}, got.IpponsA, "its points are kept (operator ruling 2026-09-26)")
 	n, id := sideOf(*got, s1)
 	assert.Equal(t, "A2", n)
 	assert.Equal(t, rqID("A2"), id)

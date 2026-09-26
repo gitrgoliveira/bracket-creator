@@ -363,10 +363,9 @@ function requeueLoss(mm, live) {
         overtime: feed.overtime || !!board.overtime,
         draw: feed.draw || !!board.draw,
         // Fought bouts come from the team sheet whenever it has reported: it
-        // adopts every bout recorded elsewhere, and it alone knows a mark the
-        // operator took back, because a kachinuki running write leaves an
-        // unplayed row out and the server keeps the stored one, so the feed
-        // would go on counting that bout and never offer the requeue again.
+        // adopts every bout recorded elsewhere, and it knows at once a mark
+        // the operator took back, while the feed goes on counting that bout
+        // until the clear has saved (bc-kclr) and the court has refetched.
         bouts: here ? (here.bouts || 0) : feed.bouts,
     };
 }

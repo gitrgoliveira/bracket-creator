@@ -43,7 +43,7 @@ import {
 // one owner of that question.
 import { isBarredMatch } from './ineligible_match.jsx';
 
-import { useDebouncedRunningWrite, SyncStatusPill } from './admin_scoring_autosave.jsx';
+import { useDebouncedRunningWrite, SyncStatusPill, AUTOSAVE_DEBOUNCE_MS } from './admin_scoring_autosave.jsx';
 import { SideLabel } from './side_cell.jsx';
 
 // Imported from the leaf, not read off `window`, for the same reason
@@ -745,6 +745,15 @@ export function reconcileRowsToPositions(rows, serverRows) {
   const byPos = new Map(rows.map(s => [s._pos, s]));
   return serverRows.map(ss => byPos.get(ss._pos) || ss);
 }
+
+// bc-kclr: how long a bout row the operator just edited keeps its local value
+// against an incoming server snapshot, in ms: the autosave debounce plus a
+// court-feed round trip, so a snapshot that predates the operator's write
+// (the feed lags the editor) cannot put back what they just changed. Past it
+// the ordinary per-row rule applies: a row equal to the server's previous
+// value follows the server. Bounded on purpose; a genuine edit made on
+// another device to the same bout is adopted once the window has passed.
+const RECENT_EDIT_GUARD_MS = AUTOSAVE_DEBOUNCE_MS + 1200;
 
 export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSubmitAndNext, onAfterDecision, onWithdrawal, onBoardChange, prevMatch, nextMatch, onPrev, onNext, password, selfReport, variant = "modal", canClose = true }) {
   // mp-gmcg: a successful [× Remove this bout] shrinks the SERVER bout log, and
@@ -1476,6 +1485,9 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
   // that reaches for setSubs directly is therefore visibly out of pattern.
   const [operatorEditSeq, setOperatorEditSeq] = useStateA(0);
   const setSubsByOperator = (updater) => { setSubs(updater); setOperatorEditSeq(n => n + 1); };
+  // bc-kclr: when the operator last edited each bout row (position -> ms),
+  // read by the per-row adopt below. See RECENT_EDIT_GUARD_MS.
+  const lastRowEditRef = useRefA(new Map());
   // C1: updateSub is the single choke-point for all sub-bout state
   // mutations. Calling markScoringDirty() here captures every edit
   // (pts add/remove, fouls, fusensho, draw) without repetition.
@@ -1486,6 +1498,8 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
   // row that is not theirs to edit, without a second mechanism racing the
   // render to commit the shape first.
   const updateSub = (idx, fn) => {
+    const pos = subs[idx]?._pos;
+    if (pos != null) lastRowEditRef.current.set(pos, Date.now());
     setSubsByOperator(prev => {
       const rows = reconcileRowsToPositions(prev, serverSubs);
       return rows.map((s, i) => i === idx ? fn(s) : s);
@@ -2259,6 +2273,26 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
   // the explicit "Record bout" action (never for autosave, Start, Finish or
   // corrections). The server advances the kachinuki sequence only on
   // flagged writes (handlers_match.go scoreRequestBody).
+  // bc-kclr: which kachinuki rows a patch carries. The patch leaves unplayed
+  // rows out (untouched trailing positions must never reach the wire), but the
+  // server merge (mergeKachinukiSubResults) keeps any stored row a payload
+  // omits, so a bout the operator CLEARED back to 0-0 kept the point it was
+  // cleared of: it came back on reload, on every other surface, and under End
+  // match. So a row goes out, played or not, when it is:
+  //   - the bout being fought (kachinukiCurBoutIdx) or the earlier bout being
+  //     corrected in place (editingDoneBoutIdx): the rows an operator edits.
+  //     This cannot ask what the server holds, because the court feed lags
+  //     the editor: a point autosaved a moment ago is stored while this board's
+  //     copy of the server row (serverSubs) still reads 0-0, and a clear made
+  //     then would read as "nothing to clear". An unscored pairing row is also
+  //     a shape the server already holds after every append, so storing the
+  //     current bout early changes nothing else;
+  //   - any other row whose stored copy still carries a result this board no
+  //     longer shows (kachinukiRowCleared).
+  const kachinukiRowCleared = (idx) =>
+    !subBoutHasBeenPlayed(subs[idx]) && subBoutHasBeenPlayed(serverSubs[idx]);
+  const kachinukiRowSent = (idx) =>
+    subBoutHasBeenPlayed(subs[idx]) || idx === kachinukiCurBoutIdx || idx === editingDoneBoutIdx || kachinukiRowCleared(idx);
   const buildPatch = (targetStatus, opts = {}) => {
     if (targetStatus === "scheduled") return { winner: null, status: "scheduled", score: null, ipponsA: [], ipponsB: [], subResults: [] };
     // ONE preserve verdict for this save: the sub-row overlay and the
@@ -2447,11 +2481,12 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
       return entry;
     });
     // Kachinuki appends bouts dynamically, so the all-positions map above leaves
-    // untouched trailing positions. Drop them (keep the daihyosen and any played
-    // bout): see subBoutHasBeenPlayed. Team matches keep every position; an
-    // unplayed one carries decision "" and Finish refuses until it has a result.
+    // untouched trailing positions. Drop them, keeping the daihyosen and every
+    // row kachinukiRowSent names above (see subBoutHasBeenPlayed). Team matches
+    // keep every position; an unplayed one carries decision "" and Finish
+    // refuses until it has a result.
     if (isKachinuki) {
-      subResults = subResults.filter((_entry, idx) => idx === daihyosenIdx || subBoutHasBeenPlayed(subs[idx]));
+      subResults = subResults.filter((_entry, idx) => idx === daihyosenIdx || kachinukiRowSent(idx));
     }
     // While an unattributable stored verdict is being preserved (armed,
     // unpicked), the MATCH-level result must survive too: deriving winner
@@ -2591,14 +2626,16 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
   // hantei arm (see daihyosenResultDirty).
   const scoringDirty = JSON.stringify(subs) !== serverSubsSig || daihyosenResultDirty;
   // bc-dscn: an edit the running patch would NOT carry. Under kachinuki
-  // buildPatch drops every row subBoutHasBeenPlayed rejects, so a changed but
-  // unplayed row (a fighter picked on the current bout past the first, which
-  // rides the bout and not a lineup PUT, or a bout cleared back to 0-0) never
-  // reaches the server by a flush. Closing would lose it, so it keeps the
-  // prompt. Same per-row server comparison isDirty makes: subs is aligned to
-  // serverSubs by reconcileRowsToPositions, so index idx is the same position.
+  // buildPatch drops every row kachinukiRowSent does not name, so a changed
+  // row it leaves out never reaches the server by a flush. Closing would lose
+  // it, so it keeps the prompt. Since bc-kclr the current bout and the bout
+  // being corrected are always sent, so a fighter picked on the current bout
+  // or a bout cleared back to 0-0 is no longer such an edit. Same per-row
+  // server comparison isDirty makes: subs is aligned to serverSubs by
+  // reconcileRowsToPositions, so index idx is the same position.
   const runningPatchDropsAnEdit = isKachinuki && subs.some((s, idx) =>
-    idx !== daihyosenIdx && !subBoutHasBeenPlayed(s) && JSON.stringify(s) !== JSON.stringify(serverSubs[idx]));
+    idx !== daihyosenIdx && !kachinukiRowSent(idx)
+    && JSON.stringify(s) !== JSON.stringify(serverSubs[idx]));
   // RE-SEED the bout rows when the stored result moves, PER ROW.
   //
   // Without this an editor left open kept showing the board it opened with
@@ -2633,6 +2670,14 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
         return serverSubs.map(ss => {
           const local = localByPos.get(ss._pos);
           if (!local) return ss;
+          // bc-kclr: a row the operator edited a moment ago is theirs,
+          // whatever it now equals. Striking a point and taking it back
+          // returns the row to the value the server showed BEFORE the strike,
+          // so the untouched test below read it as untouched, and the court
+          // feed's lagging snapshot carrying the autosaved point was adopted
+          // over the clear (and, inside the autosave window, written back).
+          const editedAt = lastRowEditRef.current.get(ss._pos);
+          if (editedAt !== undefined && Date.now() - editedAt < RECENT_EDIT_GUARD_MS) return local;
           const prior = priorByPos.get(ss._pos);
           // Untouched: the operator's row still equals what the server last
           // said, so there is nothing of theirs to keep — take the new value.

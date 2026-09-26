@@ -1231,10 +1231,10 @@ describe('Send back to queue says what it discards and never discards fought bou
     } finally { c.restore(); }
   });
 
-  // Review finding: a mark taken back on a kachinuki bout never leaves the
-  // feed (the running write omits the now-unplayed row and the server keeps
-  // the stored one), so counting the feed would hide the requeue for good.
-  // The sheet's own count decides once it has reported.
+  // Review finding: a mark taken back on a kachinuki bout stays in the feed
+  // until the clear has saved and the court has refetched, so counting the
+  // feed would hide the requeue meanwhile. The sheet's own count decides
+  // once it has reported.
   it('offers the button again once the sheet reports the bout cleared, whatever the feed still holds', async () => {
     const c = await mountCourt([courtMatch('m1', 'running', {
       compKind: 'team', teamSize: 3,

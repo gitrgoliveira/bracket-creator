@@ -458,8 +458,8 @@ export function kachinukiEndOutcomeLabel(outcome) {
 // defeated, is OPERATOR DISCRETION, never derived from the phase). Not
 // available when nothing is recorded or when the last bout already has a
 // winner. This is the OUTCOME half only: WHICH pairing may go to encho (only
-// taisho against taisho, bc-kten) is kachinukiEnchoPairingAllowed in the
-// editor, applied on top of it.
+// taisho against taisho, bc-kten) is kachinukiEnchoShown in the editor,
+// applied on top of it.
 export function kachinukiEnchoAvailable(outcome) {
   if (!outcome) return false;
   return outcome.kind === "draw" || (outcome.kind === "blocked" && outcome.reason === "knockout-tie");
@@ -1814,14 +1814,15 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
   // guard mirrors kachinukiEnchoOffered so the keyboard/programmatic path can
   // never target a bout the encounter has already advanced past.
   const applyKachinukiEncho = async () => {
-    if (kachinukiLastScoredIdx < 0 || kachinukiLastScoredIdx !== kachinukiCurBoutIdx) return;
-    // Read at call time, after the render declared it (below).
-    if (!kachinukiEnchoPairingAllowed) return;
+    // Read at call time, after the render declared it (below). It implies
+    // kachinukiEnchoOffered, so the tap can never target a bout the encounter
+    // has already advanced past.
+    if (!kachinukiEnchoShown) return;
     // bc-kten: judge the pairing again on lineups read NOW. The server judges
     // it on the lineup in force at write time, so a lineup saved on another
     // device since this sheet opened (or one that failed to load then) would
-    // otherwise let the sheet offer an encho the server refuses, and the
-    // sheet has no way to take an applied encho back.
+    // otherwise let the sheet apply an encho the server then refuses, leaving
+    // the operator a refused save to notice and an Undo encho to find.
     const keys = lineupKeysRef.current;
     if (keys) {
       const [la, lb] = await Promise.all([
@@ -1831,12 +1832,7 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
       if (!mountedRef.current) return;
       setLineupA(la);
       setLineupB(lb);
-      const { aName, bName, aMemberId, bMemberId } = playerNamesForBout(kachinukiCurBoutIdx);
-      const { taisho, known } = kachinukiTaishoPairing({
-        teamSize, lineupA: la, lineupB: lb,
-        a: { name: aName, memberId: aMemberId },
-        b: { name: bName, memberId: bMemberId },
-      });
+      const { taisho, known } = curBoutTaishoPairing(la, lb);
       if (known && !taisho) {
         setEditorErr("Encho is only for the last bout, the two taisho. Record the tie instead.");
         return;
@@ -1852,9 +1848,9 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
   // period, offered while the bout is still level (nothing decided in encho).
   // Taking back the last period restores the tie: Encho is only ever offered
   // on a tied bout, and applying it cleared the Tie toggle.
-  const kachinukiCurBout = kachinukiBoutMode && kachinukiCurBoutIdx >= 0 ? subs[kachinukiCurBoutIdx] : null;
-  const kachinukiEnchoUndoable = !!kachinukiCurBout && (kachinukiCurBout.encho || 0) > 0
-    && kachinukiCurBout.aPts.length === kachinukiCurBout.bPts.length;
+  // Level is counted through subTotals (realIppons), the file's one count.
+  const kachinukiEnchoUndoable = kachinukiCurBoutIdx >= 0 && (subs[kachinukiCurBoutIdx].encho || 0) > 0
+    && subTotals[kachinukiCurBoutIdx].aTotal === subTotals[kachinukiCurBoutIdx].bTotal;
   const undoKachinukiEncho = () => {
     if (!kachinukiEnchoUndoable) return;
     setEnchoPeriodCount(cnt => Math.max(0, cnt - 1));
@@ -2097,18 +2093,18 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
   // An unknown roster (a side with no lineup) never withholds Encho: a tied
   // knockout bout already has End match held back, so hiding Encho on a guess
   // would leave the court no way to finish. Declared after playerNamesForBout,
-  // which it calls; kachinukiEnchoShown is what the button and hint read.
-  const kachinukiEnchoPairingAllowed = (() => {
-    if (!kachinukiEnchoOffered) return false;
+  // which it calls. curBoutTaishoPairing takes the lineups as arguments
+  // because the Encho tap asks it again on lineups read at that moment.
+  const curBoutTaishoPairing = (la, lb) => {
     const { aName, bName, aMemberId, bMemberId } = playerNamesForBout(kachinukiCurBoutIdx);
-    const { taisho, known } = kachinukiTaishoPairing({
-      teamSize, lineupA, lineupB,
+    return kachinukiTaishoPairing({
+      teamSize, lineupA: la, lineupB: lb,
       a: { name: aName, memberId: aMemberId },
       b: { name: bName, memberId: bMemberId },
     });
-    return !known || taisho;
-  })();
-  const kachinukiEnchoShown = kachinukiEnchoOffered && kachinukiEnchoPairingAllowed;
+  };
+  const enchoPairing = kachinukiEnchoOffered ? curBoutTaishoPairing(lineupA, lineupB) : null;
+  const kachinukiEnchoShown = !!enchoPairing && (!enchoPairing.known || enchoPairing.taisho);
 
   // bc-pnum: the squad member label beside a bout row's fighter name (the
   // SAME "T10.1" identifier the round-scoped Lineups page shows --
@@ -2294,11 +2290,10 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
   //     a shape the server already holds after every append, so storing the
   //     current bout early changes nothing else;
   //   - any other row whose stored copy still carries a result this board no
-  //     longer shows (kachinukiRowCleared).
-  const kachinukiRowCleared = (idx) =>
-    !subBoutHasBeenPlayed(subs[idx]) && subBoutHasBeenPlayed(serverSubs[idx]);
+  //     longer shows.
   const kachinukiRowSent = (idx) =>
-    subBoutHasBeenPlayed(subs[idx]) || idx === kachinukiCurBoutIdx || idx === editingDoneBoutIdx || kachinukiRowCleared(idx);
+    subBoutHasBeenPlayed(subs[idx]) || idx === kachinukiCurBoutIdx || idx === editingDoneBoutIdx
+    || subBoutHasBeenPlayed(serverSubs[idx]);
   const buildPatch = (targetStatus, opts = {}) => {
     if (targetStatus === "scheduled") return { winner: null, status: "scheduled", score: null, ipponsA: [], ipponsB: [], subResults: [] };
     // ONE preserve verdict for this save: the sub-row overlay and the

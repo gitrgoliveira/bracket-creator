@@ -20,6 +20,7 @@ import { TermV, poolLabel } from './viewer_utils.jsx';
 import { DAIHYOSEN_POSITION } from './pool_ids.jsx';
 import { sameCompetitor } from './competitor_identity.jsx';
 import { barredNameMark } from './barred_chip.jsx';
+import { matchShowsScore } from './match_shows_score.jsx';
 
 const { useState, useRef: useRefV, useCallback } = React;
 
@@ -203,12 +204,10 @@ export const VSchedItem = React.memo(({ m, tweaks, showCompetition, onClick, hig
   // Score string for completed matches (final) and running matches (live, once
   // at least one ippon has landed). matchScoreStr returns "" before any score
   // exists, so a just-started running match falls through to the "vs" render.
-  // matchShowsScore (bracket.jsx) is the gate: a match sent back to the queue
-  // keeps its score but reads as not started (bc-sbq). Guarded for the reason
-  // the boutMiddle call below states: this row renders for SCHEDULED matches
-  // too, and a mount without bracket.js must degrade to "vs", not throw.
+  // matchShowsScore is the gate: a match sent back to the queue keeps its
+  // score but reads as not started (bc-sbq).
   const isRunning = m.status === "running";
-  const showsScore = !!window.matchShowsScore && window.matchShowsScore(m);
+  const showsScore = matchShowsScore(m);
   const scoreStr = showsScore
     ? (window.matchScoreStr(m) || null)
     : null;

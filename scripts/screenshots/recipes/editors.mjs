@@ -426,7 +426,7 @@ export const recipes = [
       await startMatch(page);
       // admin_scoring_team.jsx - the current bout's own "Tie (hikiwake)" toggle.
       const tie = async () => {
-        const btn = page.locator('[data-testid="scoring-modal-tie-button"]').first();
+        const btn = teamBtn(page, 'scoring-modal-tie-button');
         if ((await btn.getAttribute('class') || '').indexOf('btn--primary') === -1) {
           await btn.click();
           await page.waitForTimeout(900);

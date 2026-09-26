@@ -23,8 +23,10 @@ import (
 // End match held back, so a refusal on a guess would strand the court.
 //
 // Callers are the score handlers, and only for a kachinuki payload that
-// carries a numbered-bout encho (allowNumberedEnchoFromStore), so the hot
-// scoring path never pays these reads. They run outside the write's
+// carries a numbered-bout encho (allowNumberedEnchoFromStore), so a write with
+// no encho never pays these reads. Once an encho is on record every write of
+// that encounter carries it again: those look up the stored match (a cached
+// copy) and stop there, before the competition and lineup reads. They run outside the write's
 // transaction, the same benign pre-write read the handler's other gates
 // make. Returns a *ValidationError naming the bout and its two fighters.
 func (e *Engine) KachinukiEnchoRefusal(compID, matchID string, incoming []state.SubMatchResult) error {

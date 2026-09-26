@@ -24,6 +24,7 @@ import { sideLookupKey } from './competitor_identity.jsx';
 import { NumberedName, numberFollowsName } from './numbered_name.jsx';
 import { creditedBoutSide, subBoutHasResult } from './team_default_credit.jsx';
 import { barredNameMark } from './barred_chip.jsx';
+import { matchShowsScore } from './match_shows_score.jsx';
 
 // bc-pnum: inline style for the squad member label riding beside a bout
 // row's fighter name (BoutSubRow below), the public twin of
@@ -621,13 +622,11 @@ export function IndividualScore({ match, variant, showNames, withZekkenName, shi
   const bKey = sideId(match.sideB) || nameOf(match.sideB);
   const ambiguous = !!aKey && aKey === bKey;
   // bc-sbq: a match waiting in the queue keeps its score on the server but is
-  // shown NOT STARTED (matchShowsScore, bracket.jsx): the pairing with empty
+  // shown NOT STARTED (matchShowsScore): the pairing with empty
   // slots, no marks, no penalty triangle, a plain "vs" centre. Gated here,
   // inside the component, so every host (TV board, lobby, viewer card)
   // inherits it; `result` is the one source every score field below reads.
-  // Through window like this file's other bracket.jsx reads (see the header);
-  // a mount without bracket.jsx keeps the score rather than hiding a real one.
-  const shows = typeof window.matchShowsScore === "function" ? window.matchShowsScore(match) : true;
+  const shows = matchShowsScore(match);
   const result = shows ? match : {};
   const sub = {
     ipponsA: result.ipponsA || [],
@@ -772,16 +771,14 @@ export function teamNameMark(side, mark, nameEl) {
 
 export function TeamScoreboard({ subResults: recordedSubResults, teamResult: recordedTeamResult, lineupA, lineupB, teamSize, showDH: showDHProp, variant, shiroName, akaName, matchSideA, matchSideB, isRunning, kachinuki, squadA, squadB, numberA, numberB, decision, decisionBy, status, shiroMark, akaMark }) {
   // bc-sbq: a match waiting in the queue keeps its fought bouts on the server
-  // but is shown NOT STARTED (matchShowsScore, bracket.jsx): every bout row
+  // but is shown NOT STARTED (matchShowsScore): every bout row
   // queued with empty slots, no marks, IV/PW 0, exactly as a match that never
   // began. So a non-shown match renders from NO bouts and NO aggregate, and
   // its Daihyosen row is withheld too: with the bouts blanked the aggregate
   // reads tied, and a host's showDH (computed from the REAL bouts) would
   // otherwise print "Daihyosen pending" on a match that has not started.
-  // `status` is therefore required of every host. Through window like this
-  // file's other bracket.jsx reads; a mount without bracket.jsx keeps the
-  // score rather than hiding a real one.
-  const shows = typeof window.matchShowsScore === "function" ? window.matchShowsScore({ status }) : true;
+  // `status` is therefore required of every host.
+  const shows = matchShowsScore({ status });
   const subResults = shows ? recordedSubResults : [];
   const teamResult = shows ? recordedTeamResult : null;
   const showDH = shows && showDHProp;

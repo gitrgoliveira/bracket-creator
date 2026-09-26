@@ -10,6 +10,7 @@ import { teamMatchTypeFor, DAIHYOSEN_POSITION } from './pool_ids.jsx';
 import { TeamScoreboard, IndividualScore, useTeamLineups, teamIVPWFrom, teamNameMark } from './match_scoreboard.jsx';
 import { isBarredMatch } from './ineligible_match.jsx';
 import { subBoutHasResult } from './team_default_credit.jsx';
+import { matchShowsScore } from './match_shows_score.jsx';
 
 const { useMemo: useMD } = React;
 
@@ -117,13 +118,13 @@ function TvWhiteBoard({ tournament, court, linkState = 'connected', promoted, is
     // not in force.
     const matchCtx = { status: promoted.match?.status, decision: promoted.match?.decision, decisionBy: promoted.match?.decisionBy, kachinuki: isKachinuki };
     // bc-sbq: an up-next match sent back to the queue keeps its fought bouts,
-    // but reads NOT STARTED (matchShowsScore, bracket.jsx), so its headline
+    // but reads NOT STARTED (matchShowsScore), so its headline
     // IV/PW is the 0/0 of a match that never began: the same gate
     // TeamScoreboard applies to itself below, so the two cannot disagree.
-    const showsScore = window.matchShowsScore ? window.matchShowsScore(promoted.match) : true;
-    const { ivShiro, ivAka, pwShiro, pwAka } = showsScore
-        ? teamIVPWFrom(promoted.match?.teamResult, subResults, matchSideA, matchSideB, matchCtx)
-        : teamIVPWFrom(null, [], matchSideA, matchSideB, matchCtx);
+    const showsScore = matchShowsScore(promoted.match);
+    const { ivShiro, ivAka, pwShiro, pwAka } = teamIVPWFrom(
+        showsScore ? promoted.match?.teamResult : null, showsScore ? subResults : [],
+        matchSideA, matchSideB, matchCtx);
     // bc-tmfn: the match-level Kiken/Fus. mark for a team a default-win
     // decision withdrew/barred, placed beside the headline name -- the SAME
     // pattern MatchCard (bracket.jsx) uses (sameCompetitor + sideMarks +

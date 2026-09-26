@@ -4,7 +4,8 @@
 import { findRunningOnCourt, findUpcomingOnCourt, findActiveCourts, phaseLabel, phaseProgressOnCourt } from './display_helpers.jsx';
 import { IndividualScore, numberedParts } from './match_scoreboard.jsx';
 import { NumberedName } from './numbered_name.jsx';
-import { teamIVPWScore, matchShowsScore } from './bracket.jsx';
+import { teamIVPWScore } from './bracket.jsx';
+import { matchShowsScore } from './match_shows_score.jsx';
 import { isSupplementaryBout } from './pool_ids.jsx';
 
 const { useState: useSD, useEffect: useED, useMemo: useMD } = React;
@@ -119,7 +120,7 @@ function buildCourtSlots(competitions, court) {
 // owns no middle mark even when the aggregate itself is tied (CLAUDE.md: the
 // summary centre is a deliberate spacer and NO mark ever goes in it).
 //
-// It is gated on matchShowsScore (bracket.jsx): a match sent back to the queue
+// It is gated on matchShowsScore: a match sent back to the queue
 // keeps its fought bouts, so teamIVPWScore would print their aggregate on an
 // encounter that must read as not started (bc-sbq). Past the gate,
 // teamIVPWScore is null until a bout is scored, which covers the normal gap

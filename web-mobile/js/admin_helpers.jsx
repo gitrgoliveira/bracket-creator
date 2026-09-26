@@ -417,9 +417,8 @@ const SHIAIJO_RULE_IS_PER_COMPETITION = "This is a rule about each competition, 
 // One list joiner behind every enumeration this module renders: Oxford-comma-
 // free, ", " between all but the last, the conjunction before it. The separator
 // and the singleton handling are console microcopy, so they are decided once
-// here rather than restated per message. Exported so the other console
-// surfaces that enumerate (the requeue confirm, the team Finish refusal) use
-// this one rather than their own copies.
+// here rather than restated per message. Exported so the team Finish refusal
+// uses this one rather than its own copy.
 export function joinList(list, conjunction, empty) {
   if (!list.length) return empty;
   if (list.length === 1) return String(list[0] ?? "");

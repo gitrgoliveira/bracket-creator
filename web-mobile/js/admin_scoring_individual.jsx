@@ -200,20 +200,16 @@ export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, on
   const [decisionSubmitting, setDecisionSubmitting] = useStateA(false);
   const [decisionErr, setDecisionErr] = useStateA("");
   const [withdrawnPlayer, setWithdrawnPlayer] = useStateA(null);
-  // Audit reason collected when correcting a completed match. showCorrectionPrompt
-  // gates the ReasonPrompt overlay; correctionReason carries the confirmed string.
+  // Audit reason collected when correcting a completed match. correctionPrompt
+  // is the open ReasonPrompt (null when closed); correctionReason carries the
+  // confirmed string. bc-htcr: the prompt holds the write it confirms, handed
+  // the reason. A null action is the default correction (Save correction,
+  // Enter: the buildPatch("completed") write); submitHantei passes its own,
+  // because a hantei verdict is not a buildPatch write. Wrapped in an object:
+  // a bare function handed to a state setter would run as an updater.
   const [correctionReason, setCorrectionReason] = useStateA("");
-  const [showCorrectionPrompt, setShowCorrectionPrompt] = useStateA(false);
-  // bc-htcr: the write the open ReasonPrompt confirms, handed the reason.
-  // null means the default correction (Save correction, Enter: the
-  // buildPatch("completed") write); submitHantei sets its own, because a
-  // hantei verdict is not a buildPatch write. Every opener goes through
-  // askCorrectionReason, so a pending action never outlives its prompt.
-  const correctionActionRef = useRefA(null);
-  const askCorrectionReason = (action = null) => {
-    correctionActionRef.current = action;
-    setShowCorrectionPrompt(true);
-  };
+  const [correctionPrompt, setCorrectionPrompt] = useStateA(null);
+  const askCorrectionReason = (action = null) => setCorrectionPrompt({ action });
   // mp-62vr: for a team daihyosen/tiebreaker rep bout the sides are TEAM names;
   // the operator picks which player each team fields from its roster. repPlayerA
   // = Aka (sideA), repPlayerB = Shiro (sideB). Only rendered when m.repIsTeam.
@@ -1254,18 +1250,17 @@ export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, on
         <div className="editor-modal__foot editor-modal__foot--nav">
           {/* Audit reason prompt: shown when correcting a completed match.
               Operator must confirm a reason before the patch is submitted. */}
-          {isComplete && showCorrectionPrompt && (
+          {isComplete && correctionPrompt && (
             <ReasonPrompt
               label="Reason for correction"
               presets={CORRECTION_PRESETS}
               submitting={submitting}
               onConfirm={(r) => {
                 setCorrectionReason(r);
-                setShowCorrectionPrompt(false);
+                setCorrectionPrompt(null);
                 // A write that asked for this reason (the hantei buttons)
                 // runs itself; otherwise it is the default correction.
-                const action = correctionActionRef.current;
-                correctionActionRef.current = null;
+                const { action } = correctionPrompt;
                 if (action) { action(r); return; }
                 // Re-trigger submit with the now-populated reason.
                 // buildPatch reads correctionReason from state, but state
@@ -1274,7 +1269,7 @@ export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, on
                 const patch = { ...buildPatch("completed"), correctionReason: r };
                 doSubmit(() => onSubmit(patch));
               }}
-              onCancel={() => { correctionActionRef.current = null; setShowCorrectionPrompt(false); }}
+              onCancel={() => setCorrectionPrompt(null)}
             />
           )}
           {/* What Clear withdrawal and reopen came back with: the notice
@@ -1343,7 +1338,7 @@ export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, on
               row: hide the footer's own nav+actions so the operator never sees
               two Cancels and two commit buttons at the highest-stakes moment
               (amending a recorded result). Mirrored in EngiScoreEditorModal. */}
-          {!(isComplete && showCorrectionPrompt) && (
+          {!(isComplete && correctionPrompt) && (
           <div className="score-nav">
             {prevMatch ? (
               <button className="btn btn--sm score-nav__prev" onClick={onPrev} disabled={submitting} title={prevMatch.sideA?.name + " vs " + prevMatch.sideB?.name}>← Prev</button>

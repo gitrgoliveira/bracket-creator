@@ -1524,6 +1524,10 @@ function ReopenFeedback({ ctl, testIdPrefix }) {
   );
 }
 
+// How long RecordedWithdrawal holds its one-tap clear for the competitor
+// status that decides its copy, at most (see statusSettled there).
+export const STATUS_HOLD_MS = 2000;
+
 // RecordedWithdrawal: what a correction of a withdrawal-decided match shows
 // about the withdrawal, and the one way to remove it, identical in the
 // individual and team editors (operator ruling 2026-09-24: "Everything should
@@ -1559,12 +1563,10 @@ function ReopenFeedback({ ctl, testIdPrefix }) {
 // fusenpai (withdrawalInForce above), for a match RemainingMatchesPanel.award
 // closed with a fusensho because the competitor was already ineligible from
 // an earlier withdrawal. Reads and the reopen remedy are otherwise identical;
-// only the copy differs (the Recorded line names the winner, and "Clear
-// default win and reopen" replaces "Clear withdrawal and reopen").
-// How long RecordedWithdrawal holds its one-tap clear for the competitor
-// status that decides its copy, at most (see statusSettled there).
-export const STATUS_HOLD_MS = 2000;
-
+// only the copy differs: the Recorded line names the winner, and the clear
+// button drops "and reopen" ("Clear default win", or "Clear withdrawal" for a
+// kiken whose competitor is barred by another match), because such a match
+// may go back to the queue rather than onto the court.
 function RecordedWithdrawal({ match, ctl, disabled = false, singleBout = false }) {
   const withdrawnKey = withdrawnKeyOf(match);
   const withdrawn = withdrawnSideOf(match);
@@ -1622,9 +1624,7 @@ function RecordedWithdrawal({ match, ctl, disabled = false, singleBout = false }
   // this match) is STILL barred, whether that withdrawal is reinstateable,
   // or whether they are eligible again already (reinstated, or their
   // earlier withdrawal cleared), so the consequence can name the right
-  // remedy instead of guessing. isDefaultWin-only: a kiken/fusenpai clear on this
-  // match is an ordinary withdrawal, not another competitor's barring, so
-  // it never needs this. window.API.fetchCompetitorStatuses always exists
+  // remedy instead of guessing. window.API.fetchCompetitorStatuses always exists
   // in the app (api_client.jsx); best-effort is only about the FETCH, same
   // pattern as laterDefaultWins above -- unknown (fetch failed, or no
   // matching row) reads as "still barred, not reinstateable", the more
@@ -1669,7 +1669,7 @@ function RecordedWithdrawal({ match, ctl, disabled = false, singleBout = false }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [match.compId, withdrawn?.id]);
   // The barred competitor's record names a DIFFERENT match (see above).
-  const barredElsewhere = !isDefaultWin && !!(withdrawnStatus && withdrawnStatus.eligible === false &&
+  const barredElsewhere = !!(withdrawnStatus && withdrawnStatus.eligible === false &&
     withdrawnStatus.matchId && withdrawnStatus.matchId !== match.id);
   const clearsDefaultWin = isDefaultWin || barredElsewhere;
   const canReinstate = !!(withdrawnStatus && withdrawnStatus.eligible === false && withdrawnStatus.reinstateable);

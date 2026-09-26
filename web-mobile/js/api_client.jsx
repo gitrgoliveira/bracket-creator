@@ -2303,13 +2303,7 @@ const API = {
         // rev/revSession are stripped so internal write-ordering metadata is not
         // propagated to the display tab.
         const _broadcastPatch = (fields) => {
-            const { rev: _r, revSession: _rs, startOnly, ...rest } = fields || {};
-            // A start keeps the stored score (bc-sbq), so the empty scoreline
-            // it carries is not the match's: the display tab keeps its own.
-            if (startOnly) {
-                delete rest.ipponsA; delete rest.ipponsB;
-                delete rest.hansokuA; delete rest.hansokuB;
-            }
+            const { rev: _r, revSession: _rs, ...rest } = fields || {};
             const court = (match && match.court) || '';
             // Do not emit an unscoped (court-less) broadcast: a display can only
             // safely apply a patch it can attribute to its court, and the display

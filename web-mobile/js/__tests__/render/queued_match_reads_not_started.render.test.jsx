@@ -2,7 +2,7 @@
 // its score on the server (points, penalties, overtime, team bouts), but while
 // it waits in the queue every screen shows it as NOT STARTED: the pairing, a
 // plain "vs", empty slots, no penalty triangle, no IV/PW. The kept score
-// reappears once the match runs again. matchShowsScore (bracket.jsx) is the
+// reappears once the match runs again. matchShowsScore (match_shows_score.jsx) is the
 // one predicate; the shared scoreboard components gate themselves on it, so
 // every host inherits the rule. Each describe below pins one host: the queued
 // case hides the kept score, and the SAME match running shows it, so the
@@ -10,8 +10,9 @@
 // carried a score.
 //
 // bracket.jsx is imported first: it publishes the window.* globals
-// (matchShowsScore, matchMiddleMark, matchScoreStr, boutMiddle, ...) the
-// scoreboard and the viewer rows reach bracket.jsx through.
+// (matchMiddleMark, matchScoreStr, boutMiddle, ...) the scoreboard and the
+// viewer rows reach bracket.jsx through. matchShowsScore itself is a leaf
+// every host imports directly.
 import React from 'react';
 import { render, cleanup } from '@testing-library/react';
 import { describe, it, expect, beforeAll, afterAll, afterEach, vi } from 'vitest';

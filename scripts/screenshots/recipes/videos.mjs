@@ -316,21 +316,16 @@ export const recipes = [
       // Not tolerant: if focus fails the key presses go nowhere and the clip
       // records a board that never scores.
       const focus = () => page.locator('.sb-match, .team-summary').first().click({ timeout: 2000 });
-      const aka = async (n = 1) => {
+      const strike = (key) => async (n = 1) => {
         await focus();
         for (let i = 0; i < n; i++) {
-          await page.keyboard.press('Shift+M');
+          await page.keyboard.press(key);
           await page.waitForTimeout(600);
         }
       };
+      const aka = strike('Shift+M');
       // Plain M is a Shiro men (the same key handler, no Shift).
-      const shiro = async (n = 1) => {
-        await focus();
-        for (let i = 0; i < n; i++) {
-          await page.keyboard.press('M');
-          await page.waitForTimeout(600);
-        }
-      };
+      const shiro = strike('M');
       // Names the selector on failure: the runner prints only the error, and
       // a bare "locator.click: Timeout" does not say which step broke.
       const click = async (sel, ms = 1100) => {

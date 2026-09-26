@@ -97,7 +97,7 @@ export function EngiScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext
   const [submitting, setSubmitting] = useStateE(false);
   const [err, setErr] = useStateE("");
   // Audit reason collected when correcting a completed match, mirroring
-  // ScoreEditorModal's showCorrectionPrompt/correctionReason pair.
+  // ScoreEditorModal's correctionPrompt/correctionReason pair.
   const [correctionReason, setCorrectionReason] = useStateE("");
   const [showCorrectionPrompt, setShowCorrectionPrompt] = useStateE(false);
 

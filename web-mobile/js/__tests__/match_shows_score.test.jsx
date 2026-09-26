@@ -1,11 +1,12 @@
-// bc-sbq: matchShowsScore (bracket.jsx) is the one answer to "does a display
+// bc-sbq: matchShowsScore (match_shows_score.jsx) is the one answer to "does a display
 // show this match's recorded score". A match sent back to the queue keeps its
 // score on the server but reads as NOT STARTED until it runs again (operator
 // ruling 2026-09-26). The render suite pins each host
 // (render/queued_match_reads_not_started.render.test.jsx); this pins the
 // predicate itself and matchStateCell, the pool-list centre cell built on it.
 import { describe, it, expect } from 'vitest';
-import { matchShowsScore, matchStateCell } from '../bracket.jsx';
+import { matchShowsScore } from '../match_shows_score.jsx';
+import { matchStateCell } from '../bracket.jsx';
 
 describe('matchShowsScore', () => {
   it('shows the score of a running or a completed match', () => {

@@ -322,6 +322,22 @@ func alreadyBarredRefusal(decision, playerID string, barred *domain.CompetitorSt
 	return alreadyIneligibleErrorFor(playerID, barred)
 }
 
+// withdrawalStatus is the bar a withdrawal decision on matchID records
+// against playerID: not eligible, and reinstateable only after an injury kiken
+// (FIK Art. 30). recordIneligibilityFromDecision writes it when the decision
+// is recorded; standingWithdrawalOf rebuilds it when the bar moves to a
+// withdrawal still on record.
+func withdrawalStatus(playerID, decision, matchID string) domain.CompetitorStatus {
+	return domain.CompetitorStatus{
+		PlayerID:      playerID,
+		Eligible:      false,
+		Reinstateable: decision == string(domain.DecisionKikenInjury),
+		Reason:        fmt.Sprintf("%s at %s", decision, matchID),
+		MatchID:       matchID,
+		RecordedAt:    time.Now().UTC(),
+	}
+}
+
 // CheckEligibility consults the competitor-status store for compID and
 // returns *IneligibleCompetitorError for the first playerID found with
 // Eligible: false; nil when all playerIDs are eligible (or unknown to
@@ -896,14 +912,7 @@ func (e *Engine) recordIneligibilityFromDecision(h state.StoreTx, compID, matchI
 		}
 		playerID = found
 	}
-	status := domain.CompetitorStatus{
-		PlayerID:      playerID,
-		Eligible:      false,
-		Reinstateable: result.Decision == string(domain.DecisionKikenInjury),
-		Reason:        fmt.Sprintf("%s at %s", result.Decision, matchID),
-		MatchID:       matchID,
-		RecordedAt:    time.Now().UTC(),
-	}
+	status := withdrawalStatus(playerID, result.Decision, matchID)
 	// K2/CHK047: check-and-set — the load, the check and the write MUST happen
 	// under one per-competition lock acquire, or two concurrent kiken writes on
 	// the same player from different matches can both pass the check (TOCTOU).

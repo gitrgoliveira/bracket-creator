@@ -900,9 +900,13 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
         if (withdrawalStatus === "running") setPickedKey(withdrawalKey);
         setWithdrawalKey(null);
     }, [withdrawalKey, withdrawalStatus]);
+    // A match the operator deliberately holds on the panel: a correction, or
+    // the kiken whose Remaining matches panel is open. It outranks the pick
+    // and the live bout, so while one is set it IS selectedMatch.
+    const pinnedMatch = correctingMatch || withdrawalMatch;
     const selectedMatch = useMemoSh(
-        () => correctingMatch || withdrawalMatch || pickedMatch || running[0] || null,
-        [correctingMatch, withdrawalMatch, pickedMatch, running]
+        () => pinnedMatch || pickedMatch || running[0] || null,
+        [pinnedMatch, pickedMatch, running]
     );
 
     // For pool daihyosen/tiebreaker bouts, enrich the selected match with
@@ -1626,7 +1630,7 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
                                     <span className="shiaijo-nudge__cta" aria-hidden="true">Switch →</span>
                                 </button>
                             )}
-                            {allDone && !correctingMatch && !withdrawalMatch && (
+                            {allDone && !pinnedMatch && (
                                 <div className="empty">
                                     <h3>{selectedCompName ? `${selectedCompName} is complete on Shiaijo ${court}` : `All matches complete on Shiaijo ${court}`}</h3>
                                     <p style={{ fontSize: 13, color: "var(--ink-3)" }}>
@@ -1651,10 +1655,10 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
                                 </div>
                             )}
 
-                            {/* withdrawalMatch too: a kiken on the court's last
+                            {/* pinnedMatch too: a kiken on the court's last
                                 bout makes allDone true, and the pin must still
                                 hold the editor (and its panel) open. */}
-                            {(!allDone || correctingMatch || withdrawalMatch) && selectedMatch && (
+                            {(!allDone || pinnedMatch) && selectedMatch && (
                                 <ScoreEditorModal
                                     // No subResults.length: see the same key in
                                     // admin_competition_bracket.jsx. Remounting
@@ -1732,7 +1736,7 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
                                 />
                             )}
 
-                            {(correctingMatch || withdrawalMatch) && selectedMatch && selectedMatch.status === "completed" && (
+                            {pinnedMatch && pinnedMatch.status === "completed" && (
                                 <div className="shiaijo-revert">
                                     <button
                                         type="button"

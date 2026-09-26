@@ -1879,6 +1879,9 @@ describe('startOnly reaches the wire only from startPatch (bc-sbq)', () => {
     const wire = toBackendMatchResult(patch, { sideA: 'Alice', sideB: 'Bob' });
     expect(wire.startOnly).toBe(true);
     expect(wire.status).toBe('running');
+    // A start sends no scoreline: the server keeps the stored one.
+    expect(wire.ipponsA).toBeUndefined();
+    expect(wire.hansokuB).toBeUndefined();
   });
 
   it('an editor board sent as running is not flagged', () => {

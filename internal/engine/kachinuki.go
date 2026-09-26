@@ -1959,8 +1959,8 @@ func (d propagatedDownstream) displacedSlot(blocking []*state.BracketMatch, mIdx
 // case: the earlier check missed it.
 func retractPropagatedWinner(bracket *state.Bracket, rIdx, mIdx int) error {
 	d := propagatedDownstreamOf(bracket, rIdx, mIdx)
-	if (d.bronze != nil && bracketMatchStartedOrScored(d.bronze)) ||
-		(d.next != nil && bracketMatchStartedOrScored(d.next)) {
+	if (d.bronze != nil && bracketMatchStartedOrDecided(d.bronze)) ||
+		(d.next != nil && bracketMatchStartedOrDecided(d.next)) {
 		return ErrReopenDownstreamFought
 	}
 	clearPropagatedSlots(bracket, rIdx, mIdx, d.bronze, nil)
@@ -2012,7 +2012,7 @@ func (d propagatedDownstream) unwindChain(bracket *state.Bracket, rIdx, mIdx int
 func retractIntoUntouched(bracket *state.Bracket, rIdx, mIdx int) {
 	d := propagatedDownstreamOf(bracket, rIdx, mIdx)
 	kept := func(t *state.BracketMatch) bool {
-		if t == nil || !bracketMatchStartedOrScored(t) {
+		if t == nil || !bracketMatchStartedOrDecided(t) {
 			return false
 		}
 		log.Printf("engine: bracket match %s keeps the winner propagated into it: it is %s, so the reopened match %s does not retract it", t.ID, t.Status, bracket.Rounds[rIdx][mIdx].ID)
@@ -2064,14 +2064,14 @@ func clearPropagatedSlots(bracket *state.Bracket, rIdx, mIdx int, bronze, next *
 	}
 }
 
-// bracketMatchStartedOrScored reports whether a downstream bracket match
+// bracketMatchStartedOrDecided reports whether a downstream bracket match
 // is being or has been fought: running or completed, or carrying a winner.
 // A QUEUED match's points and bouts do not count: a match sent back to the
 // queue keeps its score, and when the match feeding it is corrected or
 // reopened it takes the new name with its points kept (operator ruling
 // 2026-09-26, bc-sbq). Judging those points as "fought" refused the reopen
 // and left the old winner seated in the match.
-func bracketMatchStartedOrScored(bm *state.BracketMatch) bool {
+func bracketMatchStartedOrDecided(bm *state.BracketMatch) bool {
 	return bm.Status == state.MatchStatusRunning ||
 		bm.Status == state.MatchStatusCompleted ||
 		bm.Winner != ""

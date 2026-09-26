@@ -338,12 +338,9 @@ func keepQueuedScore(prior, result *state.MatchResult) {
 	result.IpponsA = append([]string(nil), prior.IpponsA...)
 	result.IpponsB = append([]string(nil), prior.IpponsB...)
 	result.HansokuA, result.HansokuB = prior.HansokuA, prior.HansokuB
-	result.Encho = nil
-	if prior.Encho != nil {
-		encho := *prior.Encho
-		result.Encho = &encho
-	}
-	result.SubResults = append([]state.SubMatchResult(nil), prior.SubResults...)
+	// Deep copies: prior is also the rollback snapshot.
+	result.Encho = prior.Encho.Clone()
+	result.SubResults = state.CloneSubResults(prior.SubResults)
 	result.FlagsA, result.FlagsB = prior.FlagsA, prior.FlagsB
 	result.RepPlayerA, result.RepPlayerB = prior.RepPlayerA, prior.RepPlayerB
 }
@@ -1182,32 +1179,29 @@ func standingWithdrawalOf(tx state.StoreTx, compID, playerID, excludeMatchID str
 			return domain.CompetitorStatus{}, false
 		}
 		if bracket != nil {
-			candidates := make([]*state.BracketMatch, 0)
-			for r := range bracket.Rounds {
-				for i := range bracket.Rounds[r] {
-					candidates = append(candidates, &bracket.Rounds[r][i])
-				}
-			}
-			if bracket.ThirdPlaceMatch != nil {
-				candidates = append(candidates, bracket.ThirdPlaceMatch)
-			}
-			for _, bm := range candidates {
-				if r := bracketMatchAsResult(bm); barsPlayer(r) {
-					found = r
-					break
-				}
-			}
+			found = firstBracketResult(bracket, barsPlayer)
 		}
 	}
 	if found == nil {
 		return domain.CompetitorStatus{}, false
 	}
-	return domain.CompetitorStatus{
-		PlayerID:      playerID,
-		Eligible:      false,
-		Reinstateable: found.Decision == string(domain.DecisionKikenInjury),
-		Reason:        fmt.Sprintf("%s at %s", found.Decision, found.ID),
-		MatchID:       found.ID,
-		RecordedAt:    time.Now().UTC(),
-	}, true
+	return withdrawalStatus(playerID, found.Decision, found.ID), true
+}
+
+// firstBracketResult returns the first bracket match, round by round and then
+// the 3rd-place match, whose result projection satisfies want, or nil.
+func firstBracketResult(b *state.Bracket, want func(*state.MatchResult) bool) *state.MatchResult {
+	for r := range b.Rounds {
+		for i := range b.Rounds[r] {
+			if res := bracketMatchAsResult(&b.Rounds[r][i]); want(res) {
+				return res
+			}
+		}
+	}
+	if b.ThirdPlaceMatch != nil {
+		if res := bracketMatchAsResult(b.ThirdPlaceMatch); want(res) {
+			return res
+		}
+	}
+	return nil
 }

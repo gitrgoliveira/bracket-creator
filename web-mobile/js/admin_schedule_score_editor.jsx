@@ -21,6 +21,7 @@ import { isBarredMatch } from './ineligible_match.jsx';
 // imports bracket.jsx): see barred_match_notice.jsx's header for why that
 // matters for this file's own render suite.
 import { BarredMatchNotice } from './barred_match_notice.jsx';
+import { matchShowsScore } from './match_shows_score.jsx';
 
 const { useState: useStateA, useMemo: useMemoA, useEffect: useEffectA, useRef: useRefA } = React;
 
@@ -84,9 +85,10 @@ function ScoreEditCourtBtn({ m, courts, onMoveCourt }) {
 
 // Module-level factory so admin_shiaijo.jsx can consume it via window.startPatch.
 // startOnly (bc-sbq): this write only starts the match, so the server keeps the
-// score the match already holds (a match sent back to the queue keeps one)
-// instead of storing the empty scoreline below. The editors' own Start sends
-// their board unflagged, so an operator who cleared every mark still clears it.
+// score the match already holds (a match sent back to the queue keeps one);
+// toBackendMatchResult leaves the empty scoreline below off the wire. The
+// editors' own Start sends their board unflagged, so an operator who cleared
+// every mark still clears it.
 export function startPatch() {
   return {
     startOnly: true,
@@ -226,11 +228,10 @@ export function AdminScoreEditor({ t, c, onEditScore, onMoveCourt, restrictToCom
           const { shiro: teamShiroMark, aka: teamAkaMark } = window.teamMatchMarks ? window.teamMatchMarks(m) : { shiro: "", aka: "" };
           // Show the live ippon score for a running bout too (not just completed)
           // so the list reflects scoring in progress; "vs" only before it starts.
-          // matchShowsScore (bracket.jsx) is the one gate: a match sent back to
-          // the queue keeps its score, but this row shows it as not started,
-          // penalty marks included, until it restarts (bc-sbq). Guarded like
-          // the boutMiddle read below: a scheduled row needs no bracket.js.
-          const showScore = !!window.matchShowsScore && window.matchShowsScore(m);
+          // matchShowsScore is the one gate: a match sent back to the queue
+          // keeps its score, but this row shows it as not started, penalty
+          // marks included, until it restarts (bc-sbq).
+          const showScore = matchShowsScore(m);
           // Outstanding single hansoku → red ▲ next to the offending side (same
           // mark as the scoresheet). hansoku may live on the match or under
           // score.fouls depending on the source; fall back across both.

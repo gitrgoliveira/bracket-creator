@@ -2710,9 +2710,9 @@ func (e *Engine) applyBracketResultIn(bracket *state.Bracket, compID, matchID st
 // slot through (operator ruling bc-kcdg #2: a bye must never block a
 // correction).
 //
-// This is deliberately narrower than bracketMatchStartedOrScored
-// (kachinuki.go), which asks whether a match has been touched at all, a bye
-// completion included; the retractions no longer apply it to a bye, which
+// This is deliberately narrower than bracketMatchStartedOrDecided
+// (kachinuki.go), which asks whether a match is being or has been fought
+// (running, completed, or carrying a winner), a bye completion included; the retractions no longer apply it to a bye, which
 // they unwind instead (propagatedDownstreamOf). The two predicates answer
 // different questions for different rules; do not merge them.
 //

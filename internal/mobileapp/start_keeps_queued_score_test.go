@@ -9,7 +9,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// bc-sbq: the SPA's startPatch sends empty ippon arrays plus startOnly, and
+// bc-sbq: the SPA's startPatch sends startOnly and no scoreline, and
 // the /score handler must hand that flag to the engine so the stored score
 // of a queued match survives its start (engine.keepQueuedScore). The same
 // payload without the flag is an operator clearing every mark.
@@ -23,10 +23,12 @@ func TestScoreHandler_StartOnlyKeepsTheQueuedScore(t *testing.T) {
 		{ID: "P1-0", SideA: "Alice", SideB: "Bob", Status: state.MatchStatusScheduled, IpponsA: []string{"M"}, HansokuB: 1},
 		{ID: "P1-1", SideA: "Carol", SideB: "Dave", Status: state.MatchStatusScheduled, IpponsA: []string{"K"}, HansokuB: 1},
 	}))
+	// The two payloads the SPA sends: startPatch's (startOnly, no scoreline,
+	// toBackendMatchResult) and an editor board cleared to nothing.
 	start := func(id, a, b string, flag bool) {
-		payload := map[string]any{"sideA": a, "sideB": b, "status": "running", "ipponsA": []string{}, "ipponsB": []string{}, "hansokuA": 0, "hansokuB": 0}
-		if flag {
-			payload["startOnly"] = true
+		payload := map[string]any{"sideA": a, "sideB": b, "status": "running", "startOnly": true}
+		if !flag {
+			payload = map[string]any{"sideA": a, "sideB": b, "status": "running", "ipponsA": []string{}, "ipponsB": []string{}, "hansokuA": 0, "hansokuB": 0}
 		}
 		w := putScore(t, r, compID, id, payload)
 		require.Equal(t, http.StatusOK, w.Code, w.Body.String())

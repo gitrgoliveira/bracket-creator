@@ -1644,7 +1644,9 @@ func reopenTargetStatus(statuses map[string]domain.CompetitorStatus, matchID, de
 // reopenTargetStatus needs it for), through the live transaction handle. A
 // load failure is logged rather than discarded and defaults to RUNNING
 // (today's behaviour), since a read the operator cannot diagnose must never
-// silently trade one stuck state for another.
+// silently trade one stuck state for another. For a withdrawal it hands
+// reopenTargetStatus the statuses as the reopen's restore will leave them
+// (restoredStatus), so a bar that moves onto a chained fusenpai counts.
 func (e *Engine) reopenTargetStatusTx(tx state.StoreTx, compID, matchID, decision, decisionBy, sideAID, sideBID string) state.MatchStatus {
 	if !domain.IsDefaultWinDecisionStr(decision) {
 		return state.MatchStatusRunning

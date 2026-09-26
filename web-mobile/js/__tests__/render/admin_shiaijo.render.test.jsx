@@ -1229,3 +1229,32 @@ describe('the court console shows a pushed running score at once', () => {
     }
   });
 });
+
+// Recording a withdrawal advances the court like any other decision (operator
+// ruling 2026-09-26). This court's list does not show the withdrawn
+// competitor's matches barred until it is refetched, so the advance passes
+// over them itself rather than starting one the server then refuses.
+describe('the court moves on past the withdrawn competitor', () => {
+  it('starts the next match the withdrawn competitor is not in', async () => {
+    const side = (id, name) => ({ id, name });
+    const row = (id, a, b, status, at) => ({
+      id, compId: 'c1', compName: 'Cup', status, phase: 'pool', poolName: 'Pool A', court: 'A', scheduledAt: at, sideA: a, sideB: b,
+    });
+    const aoki = side('p1', 'Aoki');
+    const run = row('m1', aoki, side('p2', 'Baba'), 'running', '09:00');
+    window.tournamentMatches = () => [run, row('m2', side('p3', 'Endo'), aoki, 'scheduled', '09:05'), row('m3', side('p4', 'Doi'), side('p5', 'Fujii'), 'scheduled', '09:10')];
+    window.filterMatchesByCourt = (matches) => matches;
+    const onEditScore = vi.fn().mockResolvedValue({ status: 'running' });
+    await act(async () => { renderPage(makeMinimalTournament(), 'A', { onEditScore }); });
+    expect(probe.props.match?.id).toBe('m1');
+    await act(async () => {
+      // What /decision answers with: the stored match, sides as bare names.
+      await probe.props.onAfterDecision({
+        id: 'm1', sideA: 'Aoki', sideB: 'Baba', sideAId: 'p1', sideBId: 'p2', winner: 'Baba', winnerId: 'p2',
+        status: 'completed', decision: 'kiken-voluntary', decisionBy: 'aka',
+      });
+    });
+    expect(onEditScore).toHaveBeenCalledTimes(1);
+    expect(onEditScore.mock.calls[0][1], "Aoki's next match is passed over").toBe('m3');
+  });
+});

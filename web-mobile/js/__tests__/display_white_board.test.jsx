@@ -55,6 +55,10 @@ function teamPromoted(promotedKind = 'running') {
     kind: promotedKind,
     match: {
       id: 'm1', round: 'Round 1',
+      // The board shows a match's score only while it is running or
+      // completed (matchShowsScore; bc-sbq), and an up-next
+      // match is a scheduled one.
+      status: promotedKind === 'running' ? 'running' : 'scheduled',
       sideA: { name: 'Red Team' }, sideB: { name: 'White Team' },
       subResults: [
         { position: 1, ipponsB: ['M'], ipponsA: [] },

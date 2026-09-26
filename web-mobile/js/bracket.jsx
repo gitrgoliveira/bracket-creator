@@ -19,6 +19,7 @@ import { realIppons } from './result_slot.jsx';
 import { sameCompetitor } from './competitor_identity.jsx';
 import { NumberedName } from './numbered_name.jsx';
 import { creditedBoutSide, isTeamDefaultWinDecision } from './team_default_credit.jsx';
+import { matchShowsScore } from './match_shows_score.jsx';
 
 // TermBC: kendo-glossary tooltip wrapper. Lazy lookup so the script
 // load order between glossary.jsx and this module doesn't matter.
@@ -611,7 +612,9 @@ const MatchCard = React.memo(({ match, variant, showDojo, onClick, highlighted, 
 
   // Meta-strip middle mark: X | (E) | (DH), mutually exclusive (see
   // middleMark). The X chip keeps its dedicated span below for styling.
-  const metaMid = matchMiddleMark(match);
+  // Gated on matchShowsScore: a queued match keeps its overtime, and its card
+  // must still read as not started (bc-sbq).
+  const metaMid = matchShowsScore(match) ? matchMiddleMark(match) : "";
   return (
     <button
       ref={matchRef}
@@ -1435,14 +1438,16 @@ function matchScoreStr(m) {
 // A running TEAM match has no such risk (its aggregate is mark-free), so it
 // gets the live update the underlying bug is actually about; a running
 // individual match keeps the plain "vs" middle until it completes.
-// Everything else → boutMiddle (normally the plain "vs"); the row's
-// .is-running highlight is the "now" signal, NOT a centre glyph, and the
-// labelled "● NOW" badge elsewhere is a separate affordance.
+// Everything else → the plain "vs" (matchShowsScore, match_shows_score.jsx): a queued match
+// keeps its score, including an overtime whose (E) boutMiddle would otherwise
+// print, and must still read as not started (bc-sbq). The row's .is-running
+// highlight is the "now" signal, NOT a centre glyph, and the labelled
+// "● NOW" badge elsewhere is a separate affordance.
 function matchStateCell(m) {
+  if (!matchShowsScore(m)) return "vs";
   const mid = boutMiddle(m.decision, m.encho, m.score);
   if (m.status === "completed") return matchScoreStr(m) || mid;
-  if (m.status === "running") return teamIVPWScore(m) || mid;
-  return mid;
+  return teamIVPWScore(m) || mid;
 }
 
 // bronzeUnderFinalStyle: inline style that places the 3rd-place (bronze) card

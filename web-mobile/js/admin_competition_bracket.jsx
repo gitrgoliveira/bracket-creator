@@ -4,6 +4,7 @@
 // loadScoreboardPoints are ES-exported and re-exported by the entry for tests.
 
 import { realIppons } from './result_slot.jsx';
+import { writeKeepsEditorOpen } from './write_result.jsx';
 const { useState: useStateA, useEffect: useEffectA, useRef: useRefA } = React;
 
 const hasBothSides = window.hasBothSides;
@@ -165,8 +166,13 @@ const RunningMatchPanel = React.memo(({ match, compId, courts, matchNum, onMoveC
             onClose={() => setEditing(false)}
             onSubmit={async (patch) => {
               try {
-                await onEditScore(compId, match.id, patch, match);
-                setEditing(false); // recorded → fall back to the result card
+                const res = await onEditScore(compId, match.id, patch, match);
+                // Recorded → fall back to the result card, unless the editor's
+                // job is not done (writeKeepsEditorOpen).
+                if (!writeKeepsEditorOpen(patch, res)) setEditing(false);
+                // What the write came back with: a refused one threw and
+                // returns nothing, which is how the editor tells them apart.
+                return res;
               } catch (_e) { /* surfaced via toast in the parent */ }
             }}
             onSubmitAndNext={null}

@@ -149,7 +149,7 @@ func TestReopenWithdrawal_KnockoutDownstreamIsWarnAndProceed(t *testing.T) {
 	final := after.Rounds[1][0]
 	assert.Equal(t, state.MatchStatusScheduled, final.Status, "the final is reopened for re-entry")
 	assert.Empty(t, final.Winner)
-	assert.Empty(t, final.SubResults, "its bouts belonged to a pairing no longer in it")
+	require.Len(t, final.SubResults, 1, "its bouts are kept (operator ruling 2026-09-26): the operator removes a wrong one")
 	assert.Equal(t, "Winner of r2-m0", final.SideA, "the retracted slot waits for this match again")
 	assert.Equal(t, wrTeamC, final.SideB)
 }

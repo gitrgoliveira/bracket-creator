@@ -10,6 +10,7 @@ import { teamMatchTypeFor, DAIHYOSEN_POSITION } from './pool_ids.jsx';
 import { TeamScoreboard, IndividualScore, useTeamLineups, teamIVPWFrom, teamNameMark } from './match_scoreboard.jsx';
 import { isBarredMatch } from './ineligible_match.jsx';
 import { subBoutHasResult } from './team_default_credit.jsx';
+import { matchShowsScore } from './match_shows_score.jsx';
 
 const { useMemo: useMD } = React;
 
@@ -116,7 +117,14 @@ function TvWhiteBoard({ tournament, court, linkState = 'connected', promoted, is
     // TeamScoreboard/teamIVPWFrom, so this is a no-op wherever the ruling is
     // not in force.
     const matchCtx = { status: promoted.match?.status, decision: promoted.match?.decision, decisionBy: promoted.match?.decisionBy, kachinuki: isKachinuki };
-    const { ivShiro, ivAka, pwShiro, pwAka } = teamIVPWFrom(promoted.match?.teamResult, subResults, matchSideA, matchSideB, matchCtx);
+    // bc-sbq: an up-next match sent back to the queue keeps its fought bouts,
+    // but reads NOT STARTED (matchShowsScore), so its headline
+    // IV/PW is the 0/0 of a match that never began: the same gate
+    // TeamScoreboard applies to itself below, so the two cannot disagree.
+    const showsScore = matchShowsScore(promoted.match);
+    const { ivShiro, ivAka, pwShiro, pwAka } = teamIVPWFrom(
+        showsScore ? promoted.match?.teamResult : null, showsScore ? subResults : [],
+        matchSideA, matchSideB, matchCtx);
     // bc-tmfn: the match-level Kiken/Fus. mark for a team a default-win
     // decision withdrew/barred, placed beside the headline name -- the SAME
     // pattern MatchCard (bracket.jsx) uses (sameCompetitor + sideMarks +
@@ -237,10 +245,11 @@ function TvWhiteBoard({ tournament, court, linkState = 'connected', promoted, is
                 its own §277 summary row, because the team-name row above now
                 carries the pairing and each side's IV/PW (bc-lbty operator
                 decision 2026-09-19: the two rows duplicated the team name, and
-                the summary row was the redundant one, not the headline). Up-next
-                matches have no bouts yet: TeamScoreboard renders numbered/roster
-                rows (mp-13y #6) so the board reads as a real scoreboard rather
-                than an empty grid. */}
+                the summary row was the redundant one, not the headline). An
+                up-next match shows no bouts, even one sent back to the queue
+                that kept them (TeamScoreboard gates on matchShowsScore, bc-sbq):
+                it renders numbered/roster rows (mp-13y #6) so the board reads as
+                a real scoreboard rather than an empty grid. */}
             {isTeamMatch ? (
                 <div style={{ flex: 1 }} data-testid="tvd-team-bouts">
                     {/* tri-review #1: thread the team names so the Daihyosen

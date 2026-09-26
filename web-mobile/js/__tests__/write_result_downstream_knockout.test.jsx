@@ -58,14 +58,15 @@ describe('downstreamKnockoutPlayedConfirm', () => {
         expect(message).not.toContain('m-r2-0');
         // Names the displaced competitor.
         expect(message).toContain('Suzuki Ichiro');
-        // States plainly what confirming DOES to the later match -- reopens it,
-        // clearing its recorded result -- rather than just "proceed anyway".
-        // The wording says reopen, not "back to the queue", because the match
-        // was already played and is reopened IN PLACE: the queue is untouched
-        // (operator ruling 2026-09-19).
+        // States plainly what confirming DOES to the later match -- reopens it
+        // with its winner cleared and its points kept (operator ruling
+        // 2026-09-26) -- rather than just "proceed anyway". The wording says
+        // reopen, not "back to the queue", because the match was already
+        // played and is reopened IN PLACE: the queue is untouched (operator
+        // ruling 2026-09-19).
         expect(message.toLowerCase()).toContain('reopens match');
-        expect(message.toLowerCase()).toContain('re-entry');
-        expect(message.toLowerCase()).toContain('cleared');
+        expect(message.toLowerCase()).toContain('winner is cleared');
+        expect(message.toLowerCase()).toContain('points are kept');
         // Never the word "mat" (kendo has no mats -- CLAUDE.md).
         expect(message.toLowerCase()).not.toMatch(/\bmat\b/);
         expect(confirmLabel).toBeTruthy();
@@ -177,7 +178,7 @@ describe('downstreamKnockoutReopenedNotice', () => {
     // settle.
     it('names the single match that was reopened, by its number', () => {
         expect(downstreamKnockoutReopenedNotice([{ id: 'm-r2-0', number: 3 }]))
-            .toBe('Match 3 was reopened: it must be fought and scored again.');
+            .toBe('Match 3 was reopened with its points kept: check them, then finish it again.');
     });
 
     it('falls back to the id when a match carries no number', () => {
@@ -242,7 +243,7 @@ describe('downstreamKnockoutPlayedConfirm with a qualifier change', () => {
         });
         expect(message).toBe(
             "Changing this result moves Pool A's 1st place from Aoki Taro to Bob, who takes Aoki Taro's place in the knockout. " +
-            'Match 9 was already fought with Aoki Taro: it will be reopened, its result cleared, and it must be fought again.',
+            'Match 9 was already fought with Aoki Taro: it will be reopened with its winner cleared and its points kept, and it must be finished again.',
         );
         expect(message).not.toMatch(/\n/);
         expect(confirmLabel).toBe('Apply and reopen');
@@ -261,7 +262,7 @@ describe('downstreamKnockoutPlayedConfirm with a qualifier change', () => {
         });
         expect(message).toBe(
             "Changing this result changes who holds Pool A's 1st place (Aoki Taro to Bob) and Pool A's 2nd place (Bob to Aoki Taro), and the knockout is changed to match. " +
-            'Match 9 and Match 10 were already fought with the competitors being replaced: they will be reopened, their results cleared, and they must be fought again.',
+            'Match 9 and Match 10 were already fought with the competitors being replaced: they will be reopened with their winners cleared and their points kept, and they must be finished again.',
         );
     });
 
@@ -273,7 +274,7 @@ describe('downstreamKnockoutPlayedConfirm with a qualifier change', () => {
         });
         expect(message).toBe(
             "Changing this result leaves Pool A's 1st place tied, to be settled by a tie-break, so Aoki Taro no longer holds it in the knockout. " +
-            'Match 9 was already fought with Aoki Taro: it will be reopened, its result cleared, and fought once the tie-break decides the place.',
+            'Match 9 was already fought with Aoki Taro: it will be reopened with its winner cleared and its points kept, and finished once the tie-break decides the place.',
         );
     });
 
@@ -290,9 +291,9 @@ describe('downstreamKnockoutPlayedConfirm with a qualifier change', () => {
             ],
         });
         expect(allTied.message).toContain(
-            'Match 9 and Match 10 were already fought with the competitors being replaced: they will be reopened, their results cleared, and fought once the tie-break decides the places.',
+            'Match 9 and Match 10 were already fought with the competitors being replaced: they will be reopened with their winners cleared and their points kept, and finished once the tie-break decides the places.',
         );
-        expect(allTied.message).not.toContain('must be fought again');
+        expect(allTied.message).not.toContain('must be finished again');
 
         const mixed = downstreamKnockoutPlayedConfirm({
             ...blocking,
@@ -303,7 +304,7 @@ describe('downstreamKnockoutPlayedConfirm with a qualifier change', () => {
             ],
         });
         expect(mixed.message).toContain(
-            'Match 9 was already fought with Aoki Taro: it will be reopened, its result cleared, and fought again; a match on a tied place waits for the tie-break to decide it.',
+            'Match 9 was already fought with Aoki Taro: it will be reopened with its winner cleared and its points kept, and finished again; a match on a tied place waits for the tie-break to decide it.',
         );
     });
 
@@ -318,7 +319,7 @@ describe('downstreamKnockoutPlayedConfirm with a qualifier change', () => {
         });
         expect(message).toBe(
             "Recording this ranking moves Pool A's 1st place from Aoki Taro to Bob, who takes Aoki Taro's place in the knockout. " +
-            'Match 9 was already fought with Aoki Taro: it will be reopened, its result cleared, and it must be fought again.',
+            'Match 9 was already fought with Aoki Taro: it will be reopened with its winner cleared and its points kept, and it must be finished again.',
         );
         expect(confirmLabel).toBe('Apply and reopen');
     });
@@ -395,12 +396,12 @@ describe('a server-named knockout match keeps its round in every message', () =>
             displaced: 'Goto Ken',
         });
         expect(message).toContain('Goto Ken already played Match 3 (Final)');
-        expect(message).toContain('reopens Match 3 (Final) for re-entry');
+        expect(message).toContain('reopens Match 3 (Final) with the new competitor in it');
     });
 
     it('the reopened notice and the running refusal name it the same way', () => {
         expect(downstreamKnockoutReopenedNotice([semi]))
-            .toBe('Match 1 (Semifinals) was reopened: it must be fought and scored again.');
+            .toBe('Match 1 (Semifinals) was reopened with its points kept: check them, then finish it again.');
         expect(downstreamKnockoutRunningMessage([semi]))
             .toBe('Match 1 (Semifinals) is being fought now. Finish it or send it back to the queue, then save again.');
         // A bracket saved before rounds were recorded is named "knockout Match

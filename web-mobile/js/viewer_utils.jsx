@@ -73,8 +73,9 @@ export const compareDmy = (a, b) => window.compareDmy(a, b);
 // "setup" early return below before a single match is read.
 //
 // That is not hypothetical, and it had already bitten twice by the time this
-// helper existed. admin_scoring_shared.jsx's withdrawal panel did exactly this,
-// so after a kiken it listed no remaining matches to award, on every format.
+// helper existed. admin_scoring_shared.jsx's withdrawal panel (since removed)
+// did exactly this, so after a kiken it listed no remaining matches to award,
+// on every format.
 // admin_scoring_team.jsx's reopen-conflict panel hit the same wall earlier and
 // worked around it with its own inline recombination, so the console named a
 // blocking match by its raw id until someone noticed. Two hand-rolled copies

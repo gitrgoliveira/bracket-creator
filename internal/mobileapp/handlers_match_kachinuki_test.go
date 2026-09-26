@@ -565,7 +565,10 @@ func TestScoreHandler_KachinukiEnchoFinalBoutPersists(t *testing.T) {
 // result (e.g. the taisho must be defeated) is OPERATOR DISCRETION — the
 // operator may fight a tied pool pairing on in overtime rather than accept
 // the draw, and the app must never hard-code that rule by phase (operator
-// ruling superseding an earlier bracket-only scoping).
+// ruling superseding an earlier bracket-only scoping). Nor by pairing: this is
+// the first fighters' bout, and any tied pair may go to encho (operator ruling
+// 2026-09-26: the operator decides how a match is run, the app records it; a
+// taisho-only rule was tried the day before and reversed).
 func TestScoreHandler_KachinukiPoolBoutEnchoAccepted(t *testing.T) {
 	compID := "kachinuki-pool-encho-accepted"
 	r, store := setupKachinukiScoreServer(t, compID)
@@ -1560,8 +1563,8 @@ func TestReopenHandler_DecisionEndsAReopenedBracketMatch(t *testing.T) {
 }
 
 // TestDecisionHandler_UnreopenedMatchNeedsNoReason: the ordinary kiken/fusenpai
-// flow (by far the common case, and the one RemainingMatchesPanel drives in
-// bulk) needs no reason, and a first finalization records no correction.
+// flow (by far the common case) needs no reason, and a first finalization
+// records no correction.
 func TestDecisionHandler_UnreopenedMatchNeedsNoReason(t *testing.T) {
 	compID := "kachinuki-decision-no-reopen"
 	r, store := setupKachinukiScoreServer(t, compID)

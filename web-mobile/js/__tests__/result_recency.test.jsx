@@ -20,9 +20,9 @@ describe('resultRecencyDesc; newest result first', () => {
     expect([...rows].sort(resultRecencyDesc).map((m) => m.id)).toEqual(['stamped', 'unstamped']);
   });
 
-  // The reachable unstamped case is a match that was NEVER started: the
-  // withdrawal panel lists only `scheduled` matches, so the default win it
-  // awards has no earlier write to inherit a stamp from.
+  // The reachable unstamped case is a match that was NEVER started: a queue
+  // row's Record default win closes a match still `scheduled`, which has no
+  // earlier write to inherit a stamp from.
   it('ranks a never-started default win below a bout carrying a stamp', () => {
     const rows = [at('default-win', '09:30'), at('fought', '09:00', 5)];
     expect([...rows].sort(resultRecencyDesc).map((m) => m.id)).toEqual(['fought', 'default-win']);

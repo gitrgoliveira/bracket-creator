@@ -11,9 +11,9 @@ import (
 )
 
 // A decision closes a match, and until mp-jnvl it was the one completion that
-// could carry no time at all: the withdrawal panel lists only `scheduled`
-// matches, so the match it closes was never started and had no stored stamp to
-// inherit. Nothing downstream could then order that result against the bouts
+// could carry no time at all: a queue row's Record default win closes a match
+// that is still `scheduled`, which was never started and had no stored stamp
+// to inherit. Nothing downstream could then order that result against the bouts
 // around it. RecordDecision now takes the client's write stamp.
 func TestRecordDecision_StoresTheClientWriteStamp(t *testing.T) {
 	setup := func(t *testing.T) (*Engine, *state.Store, string) {

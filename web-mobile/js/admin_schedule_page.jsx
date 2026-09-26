@@ -14,6 +14,7 @@ import { DurationInput } from './duration.jsx';
 import { sameCompetitor } from './competitor_identity.jsx';
 import { SideCell } from './side_cell.jsx';
 import { NumberedName } from './numbered_name.jsx';
+import { matchShowsScore } from './match_shows_score.jsx';
 
 const { useState: useStateA, useMemo: useMemoA } = React;
 
@@ -30,7 +31,9 @@ const AdminTWMatch = React.memo(({ m, highlight, courts, onMove, onTimeChange })
   // once both are id-less).
   const aWin = !!m.winner && !!m.sideA && sameCompetitor(m.winner, m.sideA);
   const bWin = !!m.winner && !!m.sideB && sameCompetitor(m.winner, m.sideB);
-  const scoreStr = (m.status === "completed" || m.status === "running") ? window.matchScoreStr(m) : "";
+  // matchShowsScore is the gate: a queued match keeps its score but reads as
+  // not started (bc-sbq).
+  const scoreStr = matchShowsScore(m) ? window.matchScoreStr(m) : "";
   const submitTime = (e) => {
     e.preventDefault();
     setEditingTime(false);

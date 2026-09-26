@@ -496,4 +496,74 @@ function applyPatch(prev, event) {
     return changed ? next : prev;
 }
 
-export { applyPatch, applyPatchOrdered, checkSeqGap, recomputeQueuePositions, recomputeBracketQueuePositions };
+// keepNewerMatches: the competition a refetch answered with, keeping a running
+// match the caller already holds from a NEWER write -- a live score never goes
+// back in time under a score editor. A holder applies a push at once
+// (applyPatch) and refetches a moment later, and two refetches can be in
+// flight together, so an answer that read the data just before a write
+// committed can land after that write is shown. Taken whole, it put the older
+// scoreline back, and an open score editor that had caught up adopted it, so
+// its next save wrote the lost point away. Only the holders a score editor
+// reads from use it; a display takes a refetch whole. `held` and
+// `fetched` are the SAME competition (match ids repeat across competitions);
+// no held copy yet means nothing to keep.
+function keepNewerMatches(held, fetched) {
+    if (!held) return fetched;
+    const heldById = new Map();
+    for (const m of held.poolMatches || []) heldById.set(m.id, m);
+    const hb = held.bracket;
+    for (const round of (hb && hb.rounds) || []) for (const m of round) heldById.set(m.id, m);
+    if (hb && hb.thirdPlaceMatch) heldById.set(hb.thirdPlaceMatch.id, hb.thirdPlaceMatch);
+    // Only a RUNNING match is kept, and only over a RUNNING fetched copy with
+    // an older stamp: that is the whole harm (a live score going back under an
+    // open editor). Stamps come from two clocks: a client write carries the
+    // device's estimate of server time, which the server accepts up to 5s
+    // ahead, while a reopen, requeue or send-back is stamped by the server's
+    // own clock, so a newer server stamp can read older than the write before
+    // it. Every server-stamped change moves the status, so comparing only
+    // running with running never weighs one clock against the other. An
+    // unstamped fetched copy (a draw discarded and drawn again, reusing the
+    // match ids) always replaces too.
+    const newer = (row) => {
+        const h = heldById.get(row.id);
+        return h && h.status === "running" && row.status === "running" && row.modifiedAt > 0 && (h.modifiedAt || 0) > row.modifiedAt ? h : row;
+    };
+    const b = fetched.bracket;
+    return {
+        ...fetched,
+        poolMatches: fetched.poolMatches && fetched.poolMatches.map(newer),
+        bracket: b && {
+            ...b,
+            rounds: b.rounds && b.rounds.map((round) => round.map(newer)),
+            thirdPlaceMatch: b.thirdPlaceMatch && newer(b.thirdPlaceMatch),
+        },
+    };
+}
+
+// keepNewerDetail is keepNewerMatches for a competition-detail response
+// ({config, poolMatches, bracket, ...}): the held copy counts only when it is
+// the same competition, so a refetch after navigating elsewhere is taken whole.
+function keepNewerDetail(held, fetched) {
+    return held && held.config.id === fetched.config.id ? keepNewerMatches(held, fetched) : fetched;
+}
+
+// keepNewerCompetitions is keepNewerMatches over a list of competitions (the
+// court console's feed, the tournament's competitions), paired by id. No held
+// list yet means nothing to keep.
+function keepNewerCompetitions(held, fetched) {
+    if (!Array.isArray(held)) return fetched;
+    return fetched.map((comp) => keepNewerMatches(held.find((c) => c.id === comp.id), comp));
+}
+
+// keepNewerTournament applies it to the tournament's competitions. Its
+// refreshes come from two sources that can be in flight together (the one
+// after each save and the one after each server event), so an answer that
+// read the data earlier can land later.
+function keepNewerTournament(held, fetched) {
+    return held ? { ...fetched, competitions: keepNewerCompetitions(held.competitions, fetched.competitions) } : fetched;
+}
+
+export {
+    applyPatch, applyPatchOrdered, checkSeqGap, recomputeQueuePositions, recomputeBracketQueuePositions,
+    keepNewerMatches, keepNewerDetail, keepNewerCompetitions, keepNewerTournament,
+};

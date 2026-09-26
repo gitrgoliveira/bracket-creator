@@ -10,6 +10,7 @@ import { sameCompetitor, competitorKey } from './competitor_identity.jsx';
 import { competitorMatchesQuery, matchMentions } from './competitor_search.jsx';
 import { resultRecencyDesc } from './result_recency.jsx';
 import { barredNameMark } from './barred_chip.jsx';
+import { matchShowsScore } from './match_shows_score.jsx';
 
 const { useState, useMemo, useRef: useRefV } = React;
 const EmptyState = window.EmptyState;
@@ -324,8 +325,9 @@ export function TWMatch({ m, highlight, onClick }) {
   // while these two schedule rows are single surfaces already shipping that
   // shape for completed matches. Do not "unify" them without re-reading the
   // closed-set ruling in CLAUDE.md.
-  const isRunning = m.status === "running";
-  const scoreStr = (m.status === "completed" || isRunning) ? window.matchScoreStr(m) : null;
+  // matchShowsScore is the gate: a queued match keeps its score but reads as
+  // not started (bc-sbq).
+  const scoreStr = matchShowsScore(m) ? window.matchScoreStr(m) : null;
   // bc-tmfn: a TEAM row's score cell (window.matchScoreStr → teamIVPWScore)
   // is deliberately free of marks, so the match-level Kiken/Fus. a default
   // win closed a team match with rides beside the withdrawn team's NAME

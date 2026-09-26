@@ -16,7 +16,7 @@
 // reason -- a synthetic fixture with no semicolon in it is exactly what let
 // this bug ship the first time.
 
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { API } from '../api_client.jsx';
 
 function mockFetchBlob(status, { headers = {}, blob = new Blob([]), jsonBody = {} } = {}) {

@@ -2265,6 +2265,13 @@ paths:
         - $ref: '#/components/parameters/MatchId'
       requestBody:
         required: true
+        description: |
+          A MatchResult. Request-only, never stored: `startOnly: true` marks a
+          write that only starts the match (sets it running): the score the
+          stored match already holds (a match sent back to the queue keeps
+          one) is kept rather than replaced by the payload's empty scoreline.
+          Without it, an empty scoreline clears the stored one. `startOnly`
+          with any status other than `running` is a 400.
         content:
           application/json:
             schema:
@@ -2485,10 +2492,12 @@ paths:
       tags: [matches]
       summary: Send a running match back to the queue
       description: |
-        Reverts a running (not-yet-completed) match to the `scheduled` state,
-        discarding any partial score and audit metadata, so an operator who
-        started the wrong bout can start the correct one instead. Idempotent: an
-        already-scheduled match is normalised to a clean scheduled match.
+        Reverts a running (not-yet-completed) match to the `scheduled` state.
+        The match KEEPS its score (points, penalties, overtime, bouts, flags,
+        rep-bout fighters); only its verdict and audit metadata are cleared.
+        Starting it again with `startOnly` carries on from that score, and the
+        operator removes a wrong mark themselves. Idempotent: an
+        already-scheduled match keeps its score and loses any stale verdict.
         Broadcasts a `match_updated` event so viewers drop it from the current-matches view.
         Intentionally accessible to court operators in self-run mode (operational
         play, the inverse of starting a match).
@@ -2757,13 +2766,13 @@ paths:
         client's former two separate calls (revert-to-queue then reopen), which
         raced. On success the target returns to `running` (with `reopenPending`
         set when no `reason` is given, exactly like reopen) and the blocker
-        returns to `scheduled` with its partial score cleared; a `match_updated`
+        returns to `scheduled` with its score kept; a `match_updated`
         event is broadcast for BOTH matches. A target a withdrawal ended has
         that withdrawal removed and its eligibility restored exactly as on
         reopen, broadcast as `competitor_status_updated`.
 
-        Doubly destructive (it discards the target's finalized result AND the
-        blocker's partial score), so it is main-password-gated in self-run mode
+        Destructive (it discards the target's finalized result; the blocker
+        keeps its score), so it is main-password-gated in self-run mode
         via the central allowlist, the same class as reopen and override-winner.
       security:
         - TournamentPassword: []
@@ -5059,6 +5068,22 @@ components:
           items:
             $ref: '#/components/schemas/Player'
 
+    WithdrawnStatusAnnotation:
+      type: object
+      description: >
+        Request-time only, never stored. On a completed match a withdrawal or
+        default win decided: where the withdrawn side's competitor status
+        stands now. Set on the viewer payloads, and on the result a /decision,
+        /score or bulk-score write returns and pushes.
+      properties:
+        eligible:
+          type: boolean
+        matchId:
+          type: string
+          description: The match whose withdrawal the status records.
+        reinstateable:
+          type: boolean
+          description: True after an injury withdrawal the operator can reinstate.
     IneligibleSidesAnnotation:
       type: object
       readOnly: true
@@ -5230,6 +5255,10 @@ components:
           readOnly: true
           allOf:
             - $ref: '#/components/schemas/IneligibleSidesAnnotation'
+        withdrawnStatus:
+          readOnly: true
+          allOf:
+            - $ref: '#/components/schemas/WithdrawnStatusAnnotation'
         court:
           type: string
           maxLength: 32
@@ -5417,6 +5446,10 @@ components:
           readOnly: true
           allOf:
             - $ref: '#/components/schemas/IneligibleSidesAnnotation'
+        withdrawnStatus:
+          readOnly: true
+          allOf:
+            - $ref: '#/components/schemas/WithdrawnStatusAnnotation'
         court:
           type: string
           maxLength: 32

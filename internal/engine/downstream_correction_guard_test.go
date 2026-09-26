@@ -216,7 +216,8 @@ func TestDownstreamKnockoutCorrection_Force(t *testing.T) {
 	assert.Equal(t, state.MatchStatusScheduled, next.Status,
 		"reopened IN PLACE (the queue is not touched) and waiting to be fought again, NOT claimed as in progress")
 	assert.Empty(t, next.Winner, "its winner is cleared")
-	assert.Empty(t, next.IpponsA, "its ippons are cleared")
+	assert.Equal(t, []string{"M", "M"}, next.IpponsA,
+		"its points are kept (operator ruling 2026-09-26): the operator removes a wrong mark")
 	assert.Contains(t, next.CorrectionReason, "m-r1-0",
 		"its audit note describes its OWN reopen and names the correction that caused it")
 	assert.False(t, next.ReopenPending,
@@ -352,9 +353,9 @@ func TestReopenMatch_ByeResolvedDownstream_IsUnwound(t *testing.T) {
 }
 
 // TestReopenBracketDownstreamCheck_ScheduledWithStrayDataIsNotResolvedByBye
-// covers the second half of bc-cse item 8: bracketMatchStartedOrScored is
-// true on more than a completed match (Winner/SubResults/Ippons set is
-// enough), so a downstream row that is still SCHEDULED but carries stray
+// covers the second half of bc-cse item 8: bracketMatchStartedOrDecided is
+// true on more than a completed match (a Winner set is enough), so a
+// downstream row that is still SCHEDULED but carries stray
 // Winner data must not be classified "resolved by a bye" -- that label
 // promises the specific, clean completed-via-bye shape
 // TestReopenMatch_ByeResolvedDownstream_IsUnwound pins,

@@ -21,7 +21,7 @@ describe('msb-vs centre cell (centre separator)', () => {
 
   it('renders a plain "vs" msb-sep span when there is no draw/hantei mark', () => {
     const { container } = render(
-      <IndividualScore match={{ sideA: { name: 'A' }, sideB: { name: 'B' }, ipponsA: ['M'], ipponsB: [] }} variant="tv" showNames />
+      <IndividualScore match={{ sideA: { name: 'A' }, sideB: { name: 'B' }, status: 'running', ipponsA: ['M'], ipponsB: [] }} variant="tv" showNames />
     );
     const vs = container.querySelector('.msb-vs');
     expect(vs).toBeTruthy();
@@ -45,7 +45,7 @@ describe('msb-vs centre cell (centre separator)', () => {
 
   it('renders the draw X and no msb-sep on a hikiwake → no separator collision', () => {
     const { container } = render(
-      <IndividualScore match={{ sideA: { name: 'A' }, sideB: { name: 'B' }, ipponsA: [], ipponsB: [], decision: 'hikiwake' }} variant="tv" showNames />
+      <IndividualScore match={{ sideA: { name: 'A' }, sideB: { name: 'B' }, ipponsA: [], ipponsB: [], decision: 'hikiwake', status: 'completed' }} variant="tv" showNames />
     );
     const vs = container.querySelector('.msb-vs');
     expect(vs.textContent).toContain('X');

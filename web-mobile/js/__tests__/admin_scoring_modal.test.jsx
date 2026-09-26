@@ -1281,7 +1281,6 @@ describe('item 7: non-points decisions advance to next match', () => {
       mountedRef: { current: true },
       setDecisionSubmitting: vi.fn(),
       setDecisionErr: vi.fn(),
-      setWithdrawnPlayer: vi.fn(),
       setDecisionPromptKind: vi.fn(),
     });
 
@@ -1339,47 +1338,34 @@ describe('item 7: non-points decisions advance to next match', () => {
       expect(onAfterDecision).not.toHaveBeenCalled();
     });
 
-    it('does NOT call onAfterDecision for a kiken decision (modal stays open for RemainingMatchesPanel)', async () => {
+    // Operator ruling 2026-09-26: recording a withdrawal changes only the
+    // match it is recorded on. Kiken no longer parks the modal on a
+    // "remaining matches" panel; it follows the exact same onAfterDecision /
+    // onClose rule as any other decision.
+    it('calls onAfterDecision for a kiken decision, same as any other, when not a correction', async () => {
       const onAfterDecision = vi.fn().mockResolvedValue(undefined);
       const onClose = vi.fn();
-      const setWithdrawnPlayer = vi.fn();
       const submit = makeSubmitDecision({
         match: makeMatch('m4'), enchoPeriodCount: 0, password: 'pw',
-        ...makeSetters(), setWithdrawnPlayer, onClose, onAfterDecision, isComplete: false,
+        ...makeSetters(), onClose, onAfterDecision, isComplete: false,
         entityLabel: 'competitors',
       });
       await submit('kiken-voluntary', { decisionBy: 'aka', decisionReason: '' });
-      // Kiken neither advances nor closes; it parks on RemainingMatchesPanel.
-      expect(onAfterDecision).not.toHaveBeenCalled();
+      expect(onAfterDecision).toHaveBeenCalled();
       expect(onClose).not.toHaveBeenCalled();
-      expect(setWithdrawnPlayer).toHaveBeenCalled();
     });
 
-    // bc-pnum: the loser used to be re-derived from the /decision response's
-    // plain winner/sideA/sideB NAME strings. Two participants sharing a
-    // display name from different dojos make those strings identical on
-    // both sides, so a name compare always resolves to the SAME side
-    // regardless of who actually withdrew. decisionBy ("aka"/"shiro")
-    // already names the withdrawn side unambiguously and matches the
-    // server's own attribution (scoring_tx.go: aka=sideA, shiro=sideB).
-    it('resolves the withdrawn player by decisionBy, not by name, when both sides share a display name', async () => {
-      window.API.recordDecision = vi.fn().mockResolvedValue({
-        winner: 'Sato', sideA: 'Sato', sideB: 'Sato',
-      });
-      const match = {
-        compId: 'c1', id: 'm5',
-        sideA: { id: 'S1', name: 'Sato', dojo: 'Tokyo' },
-        sideB: { id: 'S2', name: 'Sato', dojo: 'Osaka' },
-      };
-      const setWithdrawnPlayer = vi.fn();
+    it('falls back to onClose for a kiken correction (isComplete=true)', async () => {
+      const onAfterDecision = vi.fn().mockResolvedValue(undefined);
+      const onClose = vi.fn();
       const submit = makeSubmitDecision({
-        match, enchoPeriodCount: 0, password: 'pw',
-        ...makeSetters(), setWithdrawnPlayer, onClose: vi.fn(), isComplete: false,
+        match: makeMatch('m4b'), enchoPeriodCount: 0, password: 'pw',
+        ...makeSetters(), onClose, onAfterDecision, isComplete: true,
         entityLabel: 'competitors',
       });
-      // Shiro withdrew: the loser is sideB (Osaka), never sideA (Tokyo).
-      await submit('kiken-voluntary', { decisionBy: 'shiro', decisionReason: '' });
-      expect(setWithdrawnPlayer).toHaveBeenCalledWith(match.sideB);
+      await submit('kiken-voluntary', { decisionBy: 'aka', decisionReason: '' });
+      expect(onClose).toHaveBeenCalled();
+      expect(onAfterDecision).not.toHaveBeenCalled();
     });
   });
 });
@@ -1465,7 +1451,6 @@ describe('submitDecisionRequest / makeSubmitDecision: downstream_knockout_played
       mountedRef: { current: true },
       setDecisionSubmitting: vi.fn(),
       setDecisionErr,
-      setWithdrawnPlayer: vi.fn(),
       setDecisionPromptKind: vi.fn(),
       onClose: vi.fn(),
       isComplete: true, // correcting an already-completed match
@@ -1504,16 +1489,15 @@ describe('submitDecisionRequest / makeSubmitDecision: downstream_knockout_played
       mountedRef: { current: true },
       setDecisionSubmitting: vi.fn(),
       setDecisionErr,
-      setWithdrawnPlayer: vi.fn(),
       setDecisionPromptKind: vi.fn(),
       onClose,
       isComplete: true,
       entityLabel: 'competitors',
     });
 
-    // fusenpai (not kiken): kiken always parks on RemainingMatchesPanel
-    // regardless of isComplete, so a correction that should close the modal
-    // needs a non-kiken decision to exercise the else-branch onClose() path.
+    // fusenpai here, but kiken takes the identical isComplete gate now
+    // (operator ruling 2026-09-26): any decision on a correction closes via
+    // the else-branch onClose() path.
     await submit('fusenpai', { decisionBy: 'aka', decisionReason: '' });
 
     expect(window.API.recordDecision).toHaveBeenCalledTimes(2);
@@ -1523,13 +1507,13 @@ describe('submitDecisionRequest / makeSubmitDecision: downstream_knockout_played
   });
 });
 
-// bc-pnum: RemainingMatchesPanel's match filter, award() side resolution,
-// and its opponent-render lookup all call sameCompetitor (competitor_
-// identity.jsx) directly to decide whether a match side is the withdrawn
-// player -- never an OR that could count a name hit even when both sides
-// carry ids and differ. These fixtures pin that call-site usage, on top of
+// bc-pnum: RecordedWithdrawal's laterDefaultWins fetch (admin_scoring_
+// shared.jsx) calls sameCompetitor (competitor_identity.jsx) directly to
+// decide whether a later match's side is the withdrawn competitor -- never
+// an OR that could count a name hit even when both sides carry ids and
+// differ. These fixtures pin that call-site usage, on top of
 // sameCompetitor's own coverage in competitor_identity.test.jsx.
-describe('sameCompetitor (RemainingMatchesPanel identity, bc-pnum)', () => {
+describe('sameCompetitor (default-win identity matching, bc-pnum)', () => {
   it('decides by id when both the withdrawn player and the side carry one', () => {
     const side = { id: 'S2', name: 'Sato' };
     // Same name, different id: an id compare must say "no", never fall
@@ -1562,25 +1546,24 @@ describe('sameCompetitor (RemainingMatchesPanel identity, bc-pnum)', () => {
   });
 
   // Item 7 (UI-reachable fixture): the same mixed-case refusal, exercised
-  // through the SAME shape RemainingMatchesPanel actually builds --
-  // withdrawnPlayer as resolved by makeSubmitDecision's kiken branch
-  // (match.sideA/sideB, an {id,name} object with a real UUID) against a
-  // remaining match's side that resolveSide left id-less (a bracket row
-  // api_serializers.jsx could not resolve at all).
-  it('UI-reachable: a kiken-resolved withdrawn player never lights an id-less remaining-match side sharing its name', () => {
-    // Shape makeSubmitDecision's kiken branch actually produces (see that
-    // test file's own withdrawn-player assertions): match.sideA/sideB.
+  // through the SAME shape RecordedWithdrawal's laterDefaultWins fetch
+  // actually builds -- the withdrawn side (an {id,name} object with a real
+  // UUID, taken from the originating match's sideA/sideB via withdrawnSideOf)
+  // against a later match's side that resolveSide left id-less (a bracket
+  // row api_serializers.jsx could not resolve at all).
+  it('UI-reachable: a withdrawn competitor never lights an id-less later-match side sharing its name', () => {
+    // Shape withdrawnSideOf actually produces: match.sideA/sideB.
     const originatingMatch = {
       sideA: { id: 'S1', name: 'Sato', dojo: 'Tokyo' },
       sideB: { id: 'S9', name: 'Someone Else', dojo: 'Nagoya' },
     };
-    const withdrawnPlayer = originatingMatch.sideA; // aka withdrew.
+    const withdrawnSide = originatingMatch.sideA; // aka withdrew.
     // A different, later bracket round match whose side never got a real id
     // (resolveSide's own residual "not found" fallback would invent one from
     // the name in production; here we model the ALREADY id-less shape a
     // caller must not misattribute).
     const remainingMatchSide = { id: '', name: 'Sato' };
-    expect(sameCompetitor(remainingMatchSide, withdrawnPlayer)).toBe(false);
+    expect(sameCompetitor(remainingMatchSide, withdrawnSide)).toBe(false);
   });
 });
 

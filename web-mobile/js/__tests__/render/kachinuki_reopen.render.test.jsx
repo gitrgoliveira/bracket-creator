@@ -224,7 +224,7 @@ describe('kachinuki reopen: a later knockout match already fought', () => {
     await waitFor(() => expect(window.API.reopenMatch).toHaveBeenCalledTimes(2));
     expect(window.API.reopenMatch.mock.calls[1][3]).toEqual({ reason: '', force: true });
     await waitFor(() => expect(screen.getByTestId('kachinuki-reopen-notice').textContent)
-      .toBe('Match 3 was reopened: it must be fought and scored again.'));
+      .toBe('Match 3 was reopened with its points kept: check them, then finish it again.'));
     expect(onClose).not.toHaveBeenCalled();
 
     // The notice is read once the match is running again, which is when the
@@ -237,7 +237,7 @@ describe('kachinuki reopen: a later knockout match already fought', () => {
     });
     expect(screen.queryByTestId('kachinuki-reopen-button')).toBeNull();
     expect(screen.getByTestId('kachinuki-reopen-notice').textContent)
-      .toBe('Match 3 was reopened: it must be fought and scored again.');
+      .toBe('Match 3 was reopened with its points kept: check them, then finish it again.');
     expect(onClose).not.toHaveBeenCalled();
   });
 
@@ -308,12 +308,12 @@ describe('kachinuki reopen: a busy court gets a remedy, not a dead end', () => {
 
     const panel = await screen.findByTestId('kachinuki-reopen-conflict');
     // The blocking match, by court and by competitors: acting on an opaque
-    // match id alone is how the wrong score gets wiped.
+    // match id alone is how the wrong match gets taken off the court.
     await waitFor(() => expect(panel.textContent).toContain('Team D vs Team C'));
     expect(panel.textContent).toContain('Shiaijo A');
     // The warning is on screen, in words, BEFORE the operator commits.
     expect(screen.getByTestId('kachinuki-reopen-conflict-warning').textContent)
-      .toContain('clears any score already entered for it');
+      .toContain('keeps any score already entered for it');
     // bc-rawm: the server's own raw sentence is GONE, not shown alongside the
     // heading -- it named the same internal id and told the operator to
     // "finish that match before reopening", the opposite of this panel's own
@@ -658,6 +658,69 @@ describe('kachinuki Encho is offered only on the current tied bout', () => {
     // The hint must not advertise the now-hidden button either.
     const hint = screen.queryByTestId('kachinuki-end-hint');
     if (hint) expect(hint.textContent).not.toContain('Encho keeps');
+  });
+
+  // bc-kenu (operator ruling 2026-09-26): the operator is tired and clumsy, so
+  // every mistake is undoable in one step. Bout mode hides the overtime
+  // stepper, so a mistaken or double-tapped Encho needs its own undo.
+  it('takes back a double-tapped Encho one period at a time, back to the tie', async () => {
+    await renderEditor({
+      match: completedKachinukiMatch({ status: 'running', winner: null, subResults: [tiedBout(1)] }),
+    });
+    expect(screen.queryByTestId('kachinuki-encho-undo-button')).toBeNull();
+    await act(async () => { fireEvent.click(screen.getByTestId('kachinuki-encho-button')); });
+    await act(async () => { fireEvent.click(screen.getByTestId('kachinuki-encho-button')); });
+    expect(document.body.textContent).toContain('(E)');
+
+    const undo = () => act(async () => { fireEvent.click(screen.getByTestId('kachinuki-encho-undo-button')); });
+    await undo();
+    expect(document.body.textContent, 'one period still on').toContain('(E)');
+    await undo();
+    expect(document.body.textContent).not.toContain('(E)');
+    expect(screen.queryByTestId('kachinuki-encho-undo-button')).toBeNull();
+    // Back to the tie it was: Encho is offered again.
+    expect(screen.getByTestId('kachinuki-encho-button')).toBeTruthy();
+  });
+
+  it('undoing the only period of a 0-0 tie restores the Tie', async () => {
+    await renderEditor({
+      match: completedKachinukiMatch({
+        status: 'running', winner: null,
+        subResults: [{ position: 1, sideA: 'A1', sideB: 'B1', ipponsA: [], ipponsB: [], decision: 'hikiwake' }],
+      }),
+    });
+    await act(async () => { fireEvent.click(screen.getByTestId('kachinuki-encho-button')); });
+    await act(async () => { fireEvent.click(screen.getByTestId('kachinuki-encho-undo-button')); });
+    expect(screen.getByTestId('scoring-modal-tie-button').textContent).toContain('✓');
+    expect(screen.getByTestId('kachinuki-encho-button'), 'still a tied bout, so Encho is offered again').toBeTruthy();
+  });
+
+  it('offers no undo once a point has been struck in encho', async () => {
+    await renderEditor({
+      match: completedKachinukiMatch({ status: 'running', winner: null, subResults: [tiedBout(1)] }),
+    });
+    await act(async () => { fireEvent.click(screen.getByTestId('kachinuki-encho-button')); });
+    expect(screen.getByTestId('kachinuki-encho-undo-button')).toBeTruthy();
+    await act(async () => { fireEvent.keyDown(window, { key: 'K', shiftKey: true }); });
+    expect(screen.queryByTestId('kachinuki-encho-undo-button')).toBeNull();
+  });
+
+  // Operator ruling 2026-09-26: whether a tied pair fights on is the
+  // operator's call, the app records it. A taisho-only rule (bc-kten) was
+  // tried the day before and reversed, so with both lineups in force a tie
+  // between the FIRST fighters still offers Encho, and the tap records it.
+  it('offers Encho on a tie between any pair, lineups in force', async () => {
+    const lineupFor = (p) => ({ positions: { 1: `${p}1`, 2: `${p}2`, 3: `${p}3` } });
+    window.API.fetchMatchLineup = vi.fn().mockImplementation(async (_c, teamId) => (
+      teamId === 'team-A' ? lineupFor('A') : teamId === 'team-B' ? lineupFor('B') : null
+    ));
+    await renderEditor({
+      match: completedKachinukiMatch({ status: 'running', winner: null, subResults: [tiedBout(1)] }),
+    });
+    await waitFor(() => expect(window.API.fetchMatchLineup).toHaveBeenCalledTimes(2));
+    const encho = screen.getByTestId('kachinuki-encho-button');
+    await act(async () => { fireEvent.click(encho); });
+    expect(document.body.textContent).toContain('(E)');
   });
 });
 

@@ -1157,10 +1157,10 @@ func restoredStatus(tx state.StoreTx, compID, playerID, matchID string) domain.C
 //
 // Only a fusenpai, never a kiken: a second kiken is refused while a bar
 // stands, so a kiken still on record beside the bar being cleared was lifted
-// before that bar was recorded (a doctor's reinstatement after kiken-injury),
+// before that bar was recorded (the operator reinstated an injury withdrawal),
 // and moving the bar onto it would undo the reinstatement. The one shape this
-// cannot see is a fusenpai chained onto an injury bar that the doctor lifted
-// afterwards: clearing a LATER withdrawal then moves the bar onto it.
+// cannot see is a fusenpai chained onto an injury bar that the operator
+// reinstated afterwards: clearing a LATER withdrawal then moves the bar onto it.
 //
 // The loser is attributed by losingSide, pool and bracket alike (a bracket row through
 // bracketMatchAsResult); a legacy row with neither a winner nor side ids

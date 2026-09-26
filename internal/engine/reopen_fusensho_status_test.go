@@ -245,9 +245,9 @@ func TestReopenMatch_ClearingTheOriginMovesTheBarToAChainedFusenpai(t *testing.T
 // A kiken on another match is never a bar to move to: a second kiken is
 // refused while a bar stands (alreadyBarredRefusal), so one still on record
 // beside a later bar was lifted before that bar was recorded. Here the
-// doctor reinstated Alice after an injury; clearing a later withdrawal
-// recorded by mistake must leave her able to fight, not bar her again from
-// the injury she was cleared of.
+// operator reinstated Alice after an injury withdrawal; clearing a later
+// withdrawal recorded by mistake must leave her able to fight, not bar her
+// again from the withdrawal she was reinstated after.
 func TestReopenMatch_ClearingAWithdrawalAfterAReinstatementLeavesThemEligible(t *testing.T) {
 	eng, store, _ := setupTestEngine(t)
 	compID := "reopen-after-reinstatement"
@@ -274,7 +274,7 @@ func TestReopenMatch_ClearingAWithdrawalAfterAReinstatementLeavesThemEligible(t 
 
 	statuses, err := store.LoadCompetitorStatus(compID)
 	require.NoError(t, err)
-	assert.True(t, statuses[aliceID].Eligible, "the doctor cleared Alice; clearing the mistaken withdrawal must not bar her again")
+	assert.True(t, statuses[aliceID].Eligible, "Alice was reinstated; clearing the mistaken withdrawal must not bar her again")
 }
 
 // standingWithdrawalOf reads bracket matches too, through the same

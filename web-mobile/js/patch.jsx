@@ -496,13 +496,15 @@ function applyPatch(prev, event) {
     return changed ? next : prev;
 }
 
-// keepNewerMatches: the competition a refetch answered with, keeping every
-// match the caller already holds from a NEWER write -- a match never goes back
-// in time. Every holder here applies a push at once (applyPatch) and refetches
-// a moment later, and a refetch can read the data just before a write commits
-// yet answer after that write's push was applied. Taken whole, it put the
-// older scoreline back, and an open score editor that had caught up with the
-// push adopted it, so its next save wrote the lost point away. `held` and
+// keepNewerMatches: the competition a refetch answered with, keeping a running
+// match the caller already holds from a NEWER write -- a live score never goes
+// back in time under a score editor. A holder applies a push at once
+// (applyPatch) and refetches a moment later, and two refetches can be in
+// flight together, so an answer that read the data just before a write
+// committed can land after that write is shown. Taken whole, it put the older
+// scoreline back, and an open score editor that had caught up adopted it, so
+// its next save wrote the lost point away. Only the holders a score editor
+// reads from use it; a display takes a refetch whole. `held` and
 // `fetched` are the SAME competition (match ids repeat across competitions);
 // no held copy yet means nothing to keep.
 function keepNewerMatches(held, fetched) {
@@ -512,15 +514,19 @@ function keepNewerMatches(held, fetched) {
     const hb = held.bracket;
     for (const round of (hb && hb.rounds) || []) for (const m of round) heldById.set(m.id, m);
     if (hb && hb.thirdPlaceMatch) heldById.set(hb.thirdPlaceMatch.id, hb.thirdPlaceMatch);
-    // Only a STAMPED fetched row can be the stale one: every write the server
-    // stores stamps the row at least as new as the push it made, so a copy
-    // read before that write carries an older stamp. An unstamped row is one
-    // nothing has written since it was built, e.g. a draw discarded and drawn
-    // again, which reuses the match ids: it replaces whatever was held, or the
-    // old draw's played matches would stay on screen over the new one.
+    // Only a RUNNING match is kept, and only over a RUNNING fetched copy with
+    // an older stamp: that is the whole harm (a live score going back under an
+    // open editor). Stamps come from two clocks: a client write carries the
+    // device's estimate of server time, which the server accepts up to 5s
+    // ahead, while a reopen, requeue or send-back is stamped by the server's
+    // own clock, so a newer server stamp can read older than the write before
+    // it. Every server-stamped change moves the status, so comparing only
+    // running with running never weighs one clock against the other. An
+    // unstamped fetched copy (a draw discarded and drawn again, reusing the
+    // match ids) always replaces too.
     const newer = (row) => {
         const h = heldById.get(row.id);
-        return h && row.modifiedAt > 0 && (h.modifiedAt || 0) > row.modifiedAt ? h : row;
+        return h && h.status === "running" && row.status === "running" && row.modifiedAt > 0 && (h.modifiedAt || 0) > row.modifiedAt ? h : row;
     };
     const b = fetched.bracket;
     return {

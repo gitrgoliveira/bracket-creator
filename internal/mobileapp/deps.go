@@ -58,8 +58,8 @@ type CompetitionStore interface {
 	// backfill a score payload's sides/ids ahead of the request-boundary
 	// legacy-hantei fold and the hantei mark-placement validation, both of
 	// which run before the engine's own reconcileSides/backfillMatchIdentity
-	// backfill. sideAID/sideBID are always "" for a bracket match (it
-	// persists no ids).
+	// backfill. sideAID/sideBID are "" for a bracket side that is not a
+	// resolved competitor yet (a bye slot or an unresolved feeder).
 	MatchSidesByID(compID, matchID string) (sideA, sideB, sideAID, sideBID string, found bool, err error)
 	// LoadCompetitorStatus returns the competition's eligibility records,
 	// keyed by participant id. Mirrors state.Store.LoadCompetitorStatus; a

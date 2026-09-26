@@ -786,6 +786,20 @@ describe('keepNewerMatches', () => {
     expect(out.poolMatches[0].status).toBe('scheduled');
   });
 
+  // A send-back or a reopen is stamped by the server's clock, which can read
+  // older than the device-stamped write just before it (the server accepts a
+  // device stamp up to 5s ahead). Both move the status, and only a running
+  // match over a running copy is ever kept.
+  it('takes a send-back whose server stamp reads older than the running match held', () => {
+    const out = keepNewerMatches(comp([row('P1', 300, ['M'])]), comp([{ ...row('P1', 250, ['M']), status: 'scheduled' }]));
+    expect(out.poolMatches[0].status).toBe('scheduled');
+  });
+
+  it('takes a reopen whose server stamp reads older than the finished match held', () => {
+    const out = keepNewerMatches(comp([{ ...row('P1', 300, ['M']), status: 'completed' }]), comp([row('P1', 250, ['M'])]));
+    expect(out.poolMatches[0].status).toBe('running');
+  });
+
   it('takes the fetch whole when nothing is held yet', () => {
     const fetched = comp([row('P1', 100)]);
     expect(keepNewerMatches(undefined, fetched)).toBe(fetched);

@@ -2574,7 +2574,7 @@ const API = {
         // Stamp in server-relative time, exactly as recordScore does (mp-y3nk).
         // Stamped BEFORE the send so a queued replay carries the time the
         // operator acted, not the time the network came back. Without it a
-        // match closed while still `scheduled` - the withdrawal panel's default
+        // match closed while still `scheduled` - a queue row's Record default
         // win - was the one completion carrying no time at all, so no surface
         // could order it against the bouts around it (mp-jnvl).
         const payload = { ...body, modifiedAt: _serverNowMs() };

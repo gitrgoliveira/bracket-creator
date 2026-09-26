@@ -1563,8 +1563,8 @@ func TestReopenHandler_DecisionEndsAReopenedBracketMatch(t *testing.T) {
 }
 
 // TestDecisionHandler_UnreopenedMatchNeedsNoReason: the ordinary kiken/fusenpai
-// flow (by far the common case, and the one RemainingMatchesPanel drives in
-// bulk) needs no reason, and a first finalization records no correction.
+// flow (by far the common case) needs no reason, and a first finalization
+// records no correction.
 func TestDecisionHandler_UnreopenedMatchNeedsNoReason(t *testing.T) {
 	compID := "kachinuki-decision-no-reopen"
 	r, store := setupKachinukiScoreServer(t, compID)

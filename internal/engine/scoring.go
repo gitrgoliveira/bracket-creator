@@ -2727,10 +2727,9 @@ func (e *Engine) applyBracketResultIn(bracket *state.Bracket, compID, matchID st
 //
 // There is deliberately no exemption for a match this bead's own forced
 // correction has already dealt with. forceReopenDownstreamChain REQUEUES its
-// downstream matches (reopenBracketMatch: reopened in place, no verdict, no
-// marks),
-// so they fail both arms naturally and the operator's re-entry is never
-// refused. An earlier fix instead left them RUNNING and exempted them by their
+// downstream matches (reopenDisplacedBracketMatch: reopened in place as
+// scheduled, no verdict, its points kept), so they fail the closed
+// precondition and the operator's re-entry is never refused. An earlier fix instead left them RUNNING and exempted them by their
 // ReopenPending flag, which had to be unpicked twice: the flag alone also
 // exempted a match PART WAY through its re-fight, so a second correction
 // silently repainted it while keeping the ippons already struck for the
@@ -2874,9 +2873,27 @@ func reopenDisplacedBracketMatch(m *state.BracketMatch, reason string) ReopenedM
 	// and discards only the verdict, exactly as a match still waiting in the
 	// queue keeps its points when the name in it changes.
 	reopenBracketMatchKeepingTheFight(m, reason, state.MatchStatusScheduled)
+	clearDaihyosenVerdict(m.SubResults)
 	ref := bracketMatchRef(m)
 	ref.PriorDecision = priorDecision
 	return ref
+}
+
+// clearDaihyosenVerdict drops the verdict a daihyosen row carries, its
+// winner and a hantei mark, and keeps the points struck in it. The row
+// settles the encounter on its own: the next write copies its winner to the
+// match (deriveDaihyosenWinner), matching it through the row's own side
+// names. After a correction those still name the competitor the correction
+// took out, so the one put in their place would inherit a win they never
+// fought. Only the verdict goes, exactly as at match level.
+func clearDaihyosenVerdict(subs []state.SubMatchResult) {
+	for i := range subs {
+		if subs[i].Position != state.DaihyosenSubPosition {
+			continue
+		}
+		subs[i].Winner, subs[i].WinnerMemberID = "", ""
+		subs[i].IpponsA, subs[i].IpponsB = struckIppons(subs[i].IpponsA), struckIppons(subs[i].IpponsB)
+	}
 }
 
 // restoreForceReopened is the eligibility half of forceReopenDownstreamChain.

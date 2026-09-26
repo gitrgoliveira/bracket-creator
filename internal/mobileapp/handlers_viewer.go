@@ -369,10 +369,10 @@ func buildViewerCompetitionPayload(store *state.Store, compID, courtFilter strin
 
 	// bc-cse: stamp ineligibleSides BEFORE the queue-position derivation
 	// below, which reads the stamp back to skip a barred scheduled match.
-	// Gated on anyScheduledMatchHasBothSides so a competition with nothing
+	// Gated on anyMatchToAnnotate so a competition with nothing
 	// this annotation could ever act on never pays for the
 	// LoadCompetitorStatus read.
-	if anyScheduledMatchHasBothSides(poolMatches, bracket) {
+	if anyMatchToAnnotate(poolMatches, bracket) {
 		statuses, stErr := store.LoadCompetitorStatus(compID)
 		if stErr != nil {
 			log.Printf("mobileapp: viewer payload %s: load competitor status: %v", compID, stErr)
@@ -790,8 +790,8 @@ func RegisterViewerHandlers(r *gin.RouterGroup, store *state.Store, eng *engine.
 
 			// bc-cse: same gate and ordering as buildViewerCompetitionPayload's
 			// own ineligibleSides stamp (this endpoint's sibling aggregate);
-			// see anyScheduledMatchHasBothSides for why the read is gated.
-			if anyScheduledMatchHasBothSides(poolMatches, bracket) {
+			// see anyMatchToAnnotate for why the read is gated.
+			if anyMatchToAnnotate(poolMatches, bracket) {
 				statuses, stErr := store.LoadCompetitorStatus(id)
 				if stErr != nil {
 					log.Printf("mobileapp: viewer payload %s: load competitor status: %v", id, stErr)

@@ -1811,11 +1811,12 @@ type singleBoutFight struct {
 // own letters from before the withdrawal are NOT recoverable here: the
 // withdrawal replaced them with the maru when it was recorded.
 //
-// Called by reopenUnderCourtLock for the match being reopened ONLY. The
-// primitives reopenPoolMatch/reopenBracketMatch stay "discard the verdict"
-// and nothing more, because forceReopenDownstreamChain also uses
-// reopenBracketMatch on a DOWNSTREAM match whose sides were just repainted,
-// where every letter belongs to a pairing no longer in it.
+// Called through reopenBracketMatchKeepingTheFight, by reopenUnderCourtLock
+// for the match being reopened and by reopenDisplacedBracketMatch for a
+// DOWNSTREAM match whose sides were just repainted (operator ruling
+// 2026-09-26: its points are kept too, and the operator takes back any that
+// no longer apply). The primitives reopenPoolMatch/reopenBracketMatch stay
+// "discard the verdict" and nothing more.
 func singleBoutFightOf(subs []state.SubMatchResult, ipponsA, ipponsB []string, hansokuA, hansokuB int, encho *state.EnchoMetadata) (singleBoutFight, bool) {
 	if len(subs) > 0 {
 		return singleBoutFight{}, false

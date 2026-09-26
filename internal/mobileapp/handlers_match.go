@@ -201,19 +201,27 @@ func annotateBracketQueuePositions(b *state.Bracket) {
 	}
 }
 
-// anyScheduledMatchHasBothSides reports whether poolMatches or bracket carry
-// at least one SCHEDULED match with both side ids stamped -- the ONLY shape
-// annotateEligibility can ever act on (engine.BarredSides needs an id to
-// look anyone up). Gates the LoadCompetitorStatus read in the viewer
-// handlers behind it, so a competition with no scheduled match yet (or one
-// whose scheduled rows are all byes/unresolved feeders) never pays for a
-// status-file read it cannot use.
-func anyScheduledMatchHasBothSides(poolMatches []state.MatchResult, bracket *state.Bracket) bool {
-	hasBoth := func(status state.MatchStatus, idA, idB string) bool {
-		return status == state.MatchStatusScheduled && idA != "" && idB != ""
+// anyMatchToAnnotate reports whether poolMatches or bracket carry a match
+// annotateEligibility can act on: a SCHEDULED match with both side ids
+// stamped (its ineligibleSides stamp; engine.BarredSides needs an id to look
+// anyone up), or a COMPLETED match a withdrawal or default win decided (its
+// withdrawnStatus stamp, which the score editor words its clear from, so it
+// must be there once every match is finished too). Gates the
+// LoadCompetitorStatus read in the viewer handlers behind it, so a
+// competition with neither never pays for a status-file read it cannot use.
+func anyMatchToAnnotate(poolMatches []state.MatchResult, bracket *state.Bracket) bool {
+	acts := func(status state.MatchStatus, decision, idA, idB string) bool {
+		switch status {
+		case state.MatchStatusScheduled:
+			return idA != "" && idB != ""
+		case state.MatchStatusCompleted:
+			return domain.IsDefaultWinDecisionStr(decision)
+		}
+		return false
 	}
 	for i := range poolMatches {
-		if hasBoth(poolMatches[i].Status, poolMatches[i].SideAID, poolMatches[i].SideBID) {
+		m := &poolMatches[i]
+		if acts(m.Status, m.Decision, m.SideAID, m.SideBID) {
 			return true
 		}
 	}
@@ -223,12 +231,12 @@ func anyScheduledMatchHasBothSides(poolMatches []state.MatchResult, bracket *sta
 	for ri := range bracket.Rounds {
 		for mi := range bracket.Rounds[ri] {
 			bm := &bracket.Rounds[ri][mi]
-			if hasBoth(bm.Status, bm.SideAID, bm.SideBID) {
+			if acts(bm.Status, bm.Decision, bm.SideAID, bm.SideBID) {
 				return true
 			}
 		}
 	}
-	if bm := bracket.ThirdPlaceMatch; bm != nil && hasBoth(bm.Status, bm.SideAID, bm.SideBID) {
+	if bm := bracket.ThirdPlaceMatch; bm != nil && acts(bm.Status, bm.Decision, bm.SideAID, bm.SideBID) {
 		return true
 	}
 	return false

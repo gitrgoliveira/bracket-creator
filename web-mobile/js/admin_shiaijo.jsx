@@ -492,6 +492,34 @@ function matchInComp(comp, id) {
     return b.thirdPlaceMatch && b.thirdPlaceMatch.id === id ? b.thirdPlaceMatch : null;
 }
 
+// The feed a refetch answered with, keeping any row the court already shows
+// from a NEWER write: a row never goes back in time, the rule showRunningPush
+// applies to a push. A refetch can read the data just before a write commits
+// and answer after that write's push was shown. Taken whole, it put the older
+// scoreline back, and an editor that had just caught up with the push adopted
+// it, so its next save wrote the lost point away.
+function keepNewerRows(held, fetched) {
+    if (!Array.isArray(held) || !Array.isArray(fetched)) return fetched;
+    return fetched.map((comp) => {
+        const heldComp = held.find((c) => c.id === comp.id);
+        if (!heldComp) return comp;
+        const newer = (row) => {
+            const h = matchInComp(heldComp, row.id);
+            return h && (h.modifiedAt || 0) > (row.modifiedAt || 0) ? h : row;
+        };
+        const b = comp.bracket;
+        return {
+            ...comp,
+            poolMatches: comp.poolMatches && comp.poolMatches.map(newer),
+            bracket: b && {
+                ...b,
+                rounds: b.rounds && b.rounds.map((round) => round.map(newer)),
+                thirdPlaceMatch: b.thirdPlaceMatch && newer(b.thirdPlaceMatch),
+            },
+        };
+    });
+}
+
 function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, onMoveCourt, onLogout, onViewerMode, password, showToast, tweaks, onSwitchCourt }) {
     // Normalize once: filterMatchesByCourt trims its param, so a bookmarked URL
     // with stray whitespace must use the trimmed value everywhere.
@@ -530,7 +558,7 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
     const refreshCourt = useCallbackSh(() => {
         if (!court || !window.API || typeof window.API.fetchCourtMatches !== "function") return Promise.resolve();
         return window.API.fetchCourtMatches(court)
-            .then(comps => { if (mountedRef.current) setCourtComps(comps); })
+            .then(comps => { if (mountedRef.current) setCourtComps((prev) => keepNewerRows(prev, comps)); })
             .catch(err => console.error("Failed to fetch court matches", err));
     }, [court]);
     // Operator-triggered re-sync: the last-resort recovery when a court's tablet

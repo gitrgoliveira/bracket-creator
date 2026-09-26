@@ -3,6 +3,7 @@ package engine
 import (
 	"testing"
 
+	"github.com/gitrgoliveira/bracket-creator/internal/domain"
 	"github.com/gitrgoliveira/bracket-creator/internal/state"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -82,6 +83,56 @@ func TestDownstreamGuard_ReopenKeepsTheFight(t *testing.T) {
 	assert.Equal(t, []string{"M"}, next.SubResults[0].IpponsA)
 	assert.Equal(t, 3, next.FlagsA, "and the engi flags")
 	assert.Equal(t, 2, next.FlagsB)
+}
+
+// A daihyosen row settles the encounter on its own, and after the correction
+// its winner is the competitor taken out. The reopen keeps its points and
+// drops that verdict, so starting the match again does not hand the win to the
+// competitor put in, who never fought it.
+func TestDownstreamGuard_ReopenDropsTheDaihyosenVerdict(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		ippons     []string
+		wantIppons []string
+	}{
+		{"won by a point", []string{"M"}, []string{"M"}},
+		{"won by hantei", []string{domain.HanteiMark}, nil},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			eng, store, _ := setupTestEngine(t)
+			compID := "kcdg-reopen-dh"
+			seedThreeRoundBracket(t, store, compID)
+			require.NoError(t, store.UpdateBracket(compID, func(b *state.Bracket) error {
+				b.Rounds[1][0].SubResults = []state.SubMatchResult{
+					{Position: 1, SideA: "Alice A", SideB: "Charlie A", Decision: "hikiwake"},
+					{Position: state.DaihyosenSubPosition, SideA: "Alice", SideB: "Charlie", Winner: "Alice", IpponsA: tc.ippons},
+				}
+				return nil
+			}))
+
+			var reopened []ReopenedMatch
+			require.NoError(t, inTx(t, store, compID, func(tx state.StoreTx) error {
+				_, err := eng.RecordMatchResultWithIneligibilityTx(tx, compID, "m-r1-0", correctR1ToBob("confirmed"),
+					ForceOptions{Force: true, Reopened: &reopened})
+				return err
+			}))
+			require.Equal(t, []string{"m-r2-0"}, reopenedIDs(reopened))
+
+			got, err := store.LoadBracket(compID)
+			require.NoError(t, err)
+			require.Len(t, got.Rounds[1][0].SubResults, 2, "the bouts stay")
+			dh := got.Rounds[1][0].SubResults[1]
+			assert.Empty(t, dh.Winner, "the daihyosen's verdict goes")
+			assert.Equal(t, tc.wantIppons, dh.IpponsA, "its struck points stay, a hantei mark goes")
+
+			_, err = eng.RecordMatchResultWithIneligibility(compID, "m-r2-0", startWrite(), ForceOptions{StartOnly: true})
+			require.NoError(t, err)
+			got, err = store.LoadBracket(compID)
+			require.NoError(t, err)
+			assert.Equal(t, state.MatchStatusRunning, got.Rounds[1][0].Status)
+			assert.Empty(t, got.Rounds[1][0].Winner, "starting it again hands Bob no win he never fought")
+		})
+	}
 }
 
 // TestDownstreamGuard_RefusalNamesNoOneWhenTwoMatchesBlock pins the scope of

@@ -1425,8 +1425,11 @@ function RecordedWithdrawal({ match, ctl, disabled = false, singleBout = false }
   // the server returns it to the queue while the other bar holds
   // (engine.reopenTargetStatus), exactly as for a fusensho; the status record
   // is how the editor tells them from an ordinary withdrawal, whose record
-  // names THIS match. No stamp reads as "still barred, not reinstateable",
-  // the more conservative of the wrong guesses.
+  // names THIS match. The server stamps every completed withdrawal or default
+  // win whose withdrawn side has a status record, a finished competition
+  // included, so no stamp means no record: nobody bars them, and the plain
+  // copy (the match reopens running) is the true one. A row taken from a push
+  // carries no stamp until the refetch that follows it.
   const withdrawnStatus = match.withdrawnStatus || null;
   //
   // The later list decides the copy beside the one-tap clear too (a chained

@@ -1219,7 +1219,18 @@ describe('the court console shows a pushed running score at once', () => {
       expect(fetchCourtMatches.mock.calls.length, 'nothing refetched yet').toBe(fetchesBefore);
 
       await act(async () => { vi.advanceTimersByTime(700); });
+      await act(async () => { await Promise.resolve(); });
       expect(fetchCourtMatches.mock.calls.length, 'one refetch for the burst of three').toBe(fetchesBefore + 1);
+      // That refetch answers with the row as it stood before the pushes (it
+      // read the data before the writes committed): the newer row stays.
+      expect(probe.props.match.ipponsA, 'a refetch older than the row does not put the old score back').toEqual(['M', 'K']);
+
+      // A refetch as new as the row, or newer, replaces it as before.
+      fetchCourtMatches.mockResolvedValue([{ ...comp, poolMatches: [running({ ipponsA: ['M', 'K'], ipponsB: ['D'], modifiedAt: 400 })] }]);
+      await act(async () => { emit({ type: 'schedule_updated', data: {} }); });
+      await act(async () => { vi.advanceTimersByTime(700); });
+      await act(async () => { await Promise.resolve(); });
+      expect(probe.props.match.ipponsB, 'a newer refetch is taken').toEqual(['D']);
     } finally {
       window.API.fetchCourtMatches = prev.fetch;
       window.API.subscribeToEvents = prev.sub;

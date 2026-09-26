@@ -554,7 +554,7 @@ function keepNewerCompetitions(held, fetched) {
 // after each save and the one after each server event), so an answer that
 // read the data earlier can land later.
 function keepNewerTournament(held, fetched) {
-    return held && fetched ? { ...fetched, competitions: keepNewerCompetitions(held.competitions, fetched.competitions) } : fetched;
+    return held ? { ...fetched, competitions: keepNewerCompetitions(held.competitions, fetched.competitions) } : fetched;
 }
 
 export {

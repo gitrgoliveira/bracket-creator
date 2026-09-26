@@ -1733,10 +1733,9 @@ func reopenPoolMatch(m *state.MatchResult, reason string, targetStatus state.Mat
 // applyHansokuIppons fold a stale count into the H ippons of a scoreline the
 // reopen just cleared. FlagsA/B remain unmirrored: they are engi-only, and
 // engi has no kachinuki, so neither reopen path ever sees them populated.
-// ModifiedAt is left at the completion stamp on purpose — it still
-// fences any stale pre-completion offline write via ApplyByTimestamp and
-// never blocks the re-End. If you add a match-level verdict field a
-// kachinuki result CAN carry, clear it here too.
+// ModifiedAt is stamped with the server's clock (the revert fence below), so a
+// write stamped before the reopen is refused as superseded. If you add a
+// match-level verdict field a kachinuki result CAN carry, clear it here too.
 func reopenBracketMatch(bm *state.BracketMatch, reason string, targetStatus state.MatchStatus) {
 	bm.Status = targetStatus
 	bm.Winner = ""

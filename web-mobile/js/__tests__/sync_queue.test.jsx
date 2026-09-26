@@ -2230,3 +2230,71 @@ describe('_enqueueTerminalWrite: a queued write never carries the downstream con
         expect(failures[0].advice).toBe('Finish it or send it back to the queue, then enter this result again.');
     });
 });
+
+// bc-sync: an edit a score editor is still holding in its autosave debounce is
+// unsent work, so the pill must not read "Synced" over it; and when the page is
+// going away that edit must reach the persisted outbox synchronously, because a
+// fetch started from pagehide dies with the document before its failure path
+// could queue it.
+describe('bc-sync: pending edits and durable running writes', () => {
+    it('a pending edit reads as syncing until it is released', () => {
+        const states = [];
+        subscribeSyncStatus((s) => states.push(s));
+        const token = {};
+        API.notePendingEdit(token, true);
+        expect(states[states.length - 1]).toBe('syncing');
+        API.notePendingEdit(token, false);
+        expect(states[states.length - 1]).toBe('synced');
+    });
+
+    it('two editors hold separate pending edits', () => {
+        let status;
+        subscribeSyncStatus((s) => { status = s; });
+        const a = {}, b = {};
+        API.notePendingEdit(a, true);
+        API.notePendingEdit(b, true);
+        API.notePendingEdit(a, false);
+        expect(status).toBe('syncing');
+        API.notePendingEdit(b, false);
+        expect(status).toBe('synced');
+    });
+
+    it('inside runDurably a running write is persisted to the outbox before any fetch answers', async () => {
+        // A fetch that never answers: the direct path would hang on it.
+        mockFetch(() => new Promise(() => {}));
+        const p = API.runDurably(() => API.recordScore('c1', 'm1', { status: 'running' }, 'pw', null));
+        // Synchronously, before anything is awaited.
+        const stored = JSON.parse(localStorage.getItem('bc_write_queue') || 'null');
+        expect(stored).not.toBeNull();
+        expect(JSON.stringify(stored)).toContain('m1');
+        await flushMicrotasks();
+        await expect(p).resolves.toMatchObject({ queued: true });
+    });
+
+    it('a durable write leaves the in-flight count balanced', async () => {
+        let status;
+        subscribeSyncStatus((s) => { status = s; });
+        let resolveFlush;
+        mockFetch(() => new Promise((r) => { resolveFlush = r; }));
+        await API.runDurably(() => API.recordScore('c1', 'm1', { status: 'running' }, 'pw', null));
+        await flushMicrotasks();
+        expect(status).toBe('syncing'); // queued, and the flush is sending it
+        resolveFlush({ ok: true, json: () => Promise.resolve({}) });
+        await flushMicrotasks();
+        expect(status).toBe('synced'); // nothing stuck on "Syncing..."
+    });
+
+    it('outside runDurably a running write still goes by fetch', async () => {
+        mockFetch(() => Promise.resolve({ ok: true, json: () => Promise.resolve({}) }));
+        await API.recordScore('c1', 'm1', { status: 'running' }, 'pw', null);
+        expect(localStorage.getItem('bc_write_queue')).toBeNull();
+        expect(writeCallCount()).toBe(1);
+    });
+
+    it('runDurably does not change a completed write', async () => {
+        mockFetch(() => Promise.resolve({ ok: true, json: () => Promise.resolve({}) }));
+        await API.runDurably(() => API.recordScore('c1', 'm1', { status: 'completed' }, 'pw', null));
+        expect(writeCallCount()).toBe(1);
+        expect(localStorage.getItem('bc_write_queue')).toBeNull();
+    });
+});

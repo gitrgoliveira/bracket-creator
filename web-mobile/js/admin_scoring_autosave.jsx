@@ -13,7 +13,9 @@ export const AUTOSAVE_DEBOUNCE_MS = 300;
 // running. Subscribes to the write-queue sync status from api_client.jsx
 // (via window.subscribeSyncStatus) and reflects:
 //   synced        : last write landed; no queue pending
-//   syncing       : write in flight / in queue
+//   syncing       : an edit waiting in the autosave window
+//                   (useDebouncedRunningWrite registers it, bc-sync), or a
+//                   write in flight / in queue
 //   offline       : network down; queue retrying with backoff
 //   auth-required : write refused with 401; parked, still queued, needs the
 //                   operator to sign in again to save (403 is a different
@@ -87,37 +89,76 @@ export function SyncStatusPill({ isRunning }) {
   );
 }
 
+// useDebouncedRunningWrite: the running-match autosave. Every edit is held
+// for AUTOSAVE_DEBOUNCE_MS and then written as one status:"running" PUT.
+//
+// bc-sync: that held edit exists nowhere but this hook's timer, so two things
+// are done for it. It is REPORTED: markDirty registers a pending-edit token
+// with api_client (API.notePendingEdit), so the sync pill reads "Syncing..."
+// from the first tap instead of "Synced" over unsent work, and the token is
+// released only once the write has been handed to onSubmit (by then
+// recordScore counts it as in flight). And it is KEPT when the page goes away:
+// on pagehide, or the tab being hidden, a pending edit is written through
+// API.runDurably, which puts it straight into the persisted outbox. A reload
+// used to cancel the timer and lose the edit.
 export function useDebouncedRunningWrite({ isRunningRef, buildPatchRef, onSubmitRef, mountedRef }) {
   const timerRef = useRefA(null);
+  // One token per editor instance, so two open editors never release each
+  // other's pending edit.
+  const pendingTokenRef = useRefA(null);
+  if (pendingTokenRef.current === null) pendingTokenRef.current = {};
+  // Existing test stubs of window.API predate notePendingEdit, so ask first.
+  const notePending = (on) => {
+    const api = window.API;
+    if (api && typeof api.notePendingEdit === "function") api.notePendingEdit(pendingTokenRef.current, on);
+  };
+
+  // clearTimer: stop the debounce timer and nothing else. The pending edit
+  // stays registered; whoever clears the timer decides when it is released.
+  const clearTimer = () => {
+    if (timerRef.current === null) return false;
+    clearTimeout(timerRef.current);
+    timerRef.current = null;
+    return true;
+  };
 
   // cancelDebounce: call this before any explicit submit (Start / Finish /
-  // Hantei / Decision) so the queued timer can't fire afterward.
+  // Hantei / Decision) so the queued timer can't fire afterward. Nothing of
+  // this hook's is left pending then, so the pending edit is released too.
   const cancelDebounce = () => {
-    if (timerRef.current !== null) {
-      clearTimeout(timerRef.current);
-      timerRef.current = null;
-    }
+    if (clearTimer()) notePending(false);
   };
 
   // Clear on unmount so the closure can't fire after the component is gone.
+  // Unmount keeps its CANCEL semantics: the discard prompt unmounts after the
+  // operator chose to discard, and closing a running editor flushes explicitly
+  // (flushPending). A reload never unmounts; the pagehide listener below is
+  // what keeps an edit across one.
   useEffectA(() => () => { cancelDebounce(); }, []);
 
   // The running write itself, shared by the debounce timer and flushPending so
   // the two can never apply different gates.
   const fireRunningWrite = () => {
-    if (!mountedRef.current) return;
-    // gate 3: re-check running at FIRE time. If the match was completed
-    // during the debounce window (this operator's Finish cancels the timer,
-    // but an SSE update or another operator can complete it out from under
-    // us), isRunningRef has flipped false on re-render: sending a
-    // status:"running" autosave now would regress the completed result.
-    if (!isRunningRef.current) return;
-    // Fire-and-forget: errors swallowed; operator's explicit Finish is
-    // the authoritative write.
     try {
-      const p = onSubmitRef.current(buildPatchRef.current("running"));
-      if (p && typeof p.catch === "function") p.catch(() => {});
-    } catch (_) { /* swallow */ }
+      if (!mountedRef.current) return;
+      // gate 3: re-check running at FIRE time. If the match was completed
+      // during the debounce window (this operator's Finish cancels the timer,
+      // but an SSE update or another operator can complete it out from under
+      // us), isRunningRef has flipped false on re-render: sending a
+      // status:"running" autosave now would regress the completed result.
+      if (!isRunningRef.current) return;
+      // Fire-and-forget: errors swallowed; operator's explicit Finish is
+      // the authoritative write. The pending edit is released only AFTER the
+      // write is dispatched (the finally below): recordScore counts it as in
+      // flight before its first await, so the status stays "syncing" through
+      // the hand-over instead of flickering to "synced" and back.
+      try {
+        const p = onSubmitRef.current(buildPatchRef.current("running"));
+        if (p && typeof p.catch === "function") p.catch(() => {});
+      } catch (_) { /* swallow */ }
+    } finally {
+      notePending(false);
+    }
   };
 
   // markDirty: call from every user-driven mutation handler (addPt,
@@ -125,7 +166,11 @@ export function useDebouncedRunningWrite({ isRunningRef, buildPatchRef, onSubmit
   // sub-bout edits). Do NOT call from prop/SSE-driven state writes.
   const markDirty = () => {
     if (!isRunningRef.current) return; // gate 1: never auto-start a scheduled match
-    cancelDebounce();
+    // Re-arm WITHOUT releasing the pending edit (not cancelDebounce): the edit
+    // is still pending, and a release here would publish synced-then-syncing
+    // on every tap inside the window.
+    clearTimer();
+    notePending(true);
     timerRef.current = setTimeout(() => {
       timerRef.current = null;
       fireRunningWrite();
@@ -139,9 +184,32 @@ export function useDebouncedRunningWrite({ isRunningRef, buildPatchRef, onSubmit
   // individual editor's encho counter does not call markDirty); the caller
   // gates it on its own isDirty, so an untouched editor never writes.
   const flushPending = () => {
-    cancelDebounce();
+    // clearTimer, not cancelDebounce: the pending edit is released by
+    // fireRunningWrite once the write is dispatched, never before it.
+    clearTimer();
     fireRunningWrite();
   };
+
+  // bc-sync: the page is going away (a reload, a closed tab, the iPad locking
+  // or switching app). An edit still in the debounce window is written NOW,
+  // durably: API.runDurably puts it into the persisted outbox, because a fetch
+  // started here would die with the document. Only a PENDING edit is written;
+  // with nothing pending there is nothing to lose and nothing is sent.
+  const flushPendingRef = useRefA(flushPending);
+  flushPendingRef.current = flushPending;
+  useEffectA(() => {
+    const flushDurably = () => {
+      if (timerRef.current === null) return;
+      window.API.runDurably(() => flushPendingRef.current());
+    };
+    const onVisibility = () => { if (document.visibilityState === "hidden") flushDurably(); };
+    window.addEventListener("pagehide", flushDurably);
+    document.addEventListener("visibilitychange", onVisibility);
+    return () => {
+      window.removeEventListener("pagehide", flushDurably);
+      document.removeEventListener("visibilitychange", onVisibility);
+    };
+  }, []);
 
   return { markDirty, cancelDebounce, flushPending };
 }

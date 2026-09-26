@@ -671,6 +671,16 @@ const _syncListeners = new Set();
 // even when the queue is empty (i.e. the write succeeded and was removed from
 // the queue but the fetch hasn't resolved yet).
 let _inflightRunning = 0;
+// bc-sync: the stage BEFORE a running write exists. A score editor holds each
+// edit for its autosave debounce (AUTOSAVE_DEBOUNCE_MS) and registers a token
+// here for that window (API.notePendingEdit), so the pill reads "Syncing..."
+// from the first tap rather than "Synced" over an edit nothing has sent yet.
+const _pendingEdits = new Set();
+// bc-sync: > 0 while API.runDurably is running its callback. A running score
+// write issued then goes straight into the persisted outbox instead of a fetch
+// (see recordScore), because the page is being hidden or torn down and a fetch
+// started now would be cancelled with it.
+let _durableDepth = 0;
 // Set to true ONLY when a flush attempt ends with at least one true NETWORK
 // failure (fetch rejected: connection down). A non-2xx server response (e.g. a
 // transient 5xx/429) keeps the write queued for retry but is NOT "offline": the
@@ -807,7 +817,9 @@ function _hasServerErroringQueued() {
  *   auth-required : a queued write is parked awaiting re-authentication
  *   server-error  : a queued write has passed the server-rejection notice
  *                   threshold; it is STILL QUEUED and still being retried
- *   syncing       : any in-flight running write OR the queue is non-empty
+ *   syncing       : any in-flight running write, the queue is non-empty, OR an
+ *                   edit is still waiting in an editor's autosave window
+ *                   (API.notePendingEdit, bc-sync)
  *   synced        : otherwise
  *
  * bc-qttl: the two middle states exist because writes are no longer discarded
@@ -824,7 +836,7 @@ function _recomputeSyncStatus() {
     if (_offlineFlag && _writeQueue.size > 0) { _setSyncStatus('offline'); return; }
     if (_hasAuthBlockedQueued()) { _setSyncStatus('auth-required'); return; }
     if (_hasServerErroringQueued()) { _setSyncStatus('server-error'); return; }
-    _setSyncStatus((_inflightRunning > 0 || _writeQueue.size > 0) ? 'syncing' : 'synced');
+    _setSyncStatus((_inflightRunning > 0 || _writeQueue.size > 0 || _pendingEdits.size > 0) ? 'syncing' : 'synced');
 }
 
 /**
@@ -2325,6 +2337,21 @@ const API = {
 
         const scoreUrl = `/api/competitions/${compID}/matches/${matchID}/score`;
 
+        // bc-sync: inside API.runDurably (the page is being hidden or unloaded)
+        // a running write goes straight into the persisted outbox rather than
+        // a fetch the browser would cancel with the page. It is exactly the
+        // state a failed fetch leaves: persisted synchronously by
+        // _commitEnqueue, replayed on reconnect or on the next load, with the
+        // rev guard, the clock-skew re-stamp and the TTL all applying. Every
+        // score editor host reaches this line synchronously from its onSubmit
+        // (no await in front of recordScore), which is what makes it durable.
+        if (isRunning && _durableDepth > 0) {
+            _inflightRunning--;
+            enqueueRunningWrite(compID, matchID, payload, password);
+            _broadcastPatch(payload);
+            return { queued: true };
+        }
+
         // Everything a 2xx can mean, in one place, because bc-cse gave this
         // response TWO producers: the first attempt, and the clock-skew resend
         // below. `allowSkewRetry` is what stops the two from ping-ponging - the
@@ -3696,6 +3723,37 @@ const API = {
      * results that never reached the server.
      * @returns {{total: number, terminal: number, authBlocked: number}}
      */
+    /**
+     * bc-sync: register (on=true) or release (on=false) an edit that a score
+     * editor is still holding in its autosave debounce, so the sync status
+     * reads 'syncing' until the write it becomes has been sent.
+     * @param {object} token  one per editor instance
+     * @param {boolean} on
+     */
+    notePendingEdit(token, on) {
+        if (on) _pendingEdits.add(token);
+        else _pendingEdits.delete(token);
+        _recomputeSyncStatus();
+    },
+
+    /**
+     * bc-sync: run fn with running score writes made DURABLE: each one goes
+     * straight into the persisted outbox (localStorage) instead of a fetch. For
+     * a page that is being hidden or unloaded, where a fetch started now dies
+     * with the document before its failure path can queue it.
+     * @template T
+     * @param {() => T} fn
+     * @returns {T}
+     */
+    runDurably(fn) {
+        _durableDepth++;
+        try {
+            return fn();
+        } finally {
+            _durableDepth--;
+        }
+    },
+
     unsentWrites() {
         let total = 0, terminal = 0, authBlocked = 0;
         for (const d of _writeQueue.values()) {

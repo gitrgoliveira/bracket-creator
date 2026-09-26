@@ -411,33 +411,22 @@ export const recipes = [
     },
   },
   {
-    // A knockout can't end level, so a tied bout between the two taisho
-    // offers Encho instead of End match - the footer says so and End match is
-    // disabled. Only the last bout, taisho against taisho, may go to encho
-    // (bc-kten), so the first four pairings are drawn first (a tie retires
-    // both fighters), which brings the two taisho up for bout 5.
+    // A knockout can't end level, so a tied bout offers Encho instead of End
+    // match - the footer says so and End match is disabled.
     name: 'kachinuki-knockout-tie-encho',
     family: 'editors',
-    viewport: { width: 520, height: 1450 },
+    viewport: { width: 520, height: 1250 },
     capture: { selector: EDITOR },
     auth: 'admin',
     drive: async ({ page, base, fixture }) => {
       await openScoreEditorRow(page, base, fixture.ko.a, fixture.ko.b);
       await startMatch(page);
-      // admin_scoring_team.jsx - the current bout's own "Tie (hikiwake)" toggle.
-      const tie = async () => {
-        const btn = teamBtn(page, 'scoring-modal-tie-button');
-        if ((await btn.getAttribute('class') || '').indexOf('btn--primary') === -1) {
-          await btn.click();
-          await page.waitForTimeout(900);
-        }
-      };
-      while (await fought(page) < 4) {
-        await tie();
-        await recordBout(page);
+      // admin_scoring_team.jsx:3159 - the bout's own "Tie (hikiwake)" toggle.
+      const tie = page.locator('[data-testid="scoring-modal-tie-button"]').first();
+      if ((await tie.getAttribute('class') || '').indexOf('btn--primary') === -1) {
+        await tie.click();
+        await page.waitForTimeout(900);
       }
-      await tie();
-      await teamBtn(page, 'kachinuki-encho-button').waitFor({ state: 'visible', timeout: 10000 });
     },
   },
   {

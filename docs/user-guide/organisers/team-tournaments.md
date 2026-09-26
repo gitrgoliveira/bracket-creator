@@ -117,10 +117,10 @@ The following clip walks through the flows end to end, recorded from the score e
   Your browser does not support the video tag.
 </video>
 
-1. **Winner stays on** (0:02): each win keeps the winner on to face the losing team's next fighter, and a tie retires both fighters. A won bout reads **vs** in the centre and a tied one **X**.
-2. **A knockout tie and Encho** (0:10): when the two taisho tie, a knockout cannot end in a draw, so **End match** is held back and **Encho** is offered: the same pair fights on, marked **(E)**, until a point lands.
-3. **A drawn encounter in a league** (0:17): the same tie in a league is simply ended as a draw, marked **X**.
-4. **Reopen** (0:23): a completed encounter is reopened with all its bouts intact, then ended again.
+1. **Winner stays on** (0:02): each win keeps the winner on to face the losing team's next fighter, and every fought bout reads **vs** in the centre.
+2. **A knockout tie and Encho** (0:08): a knockout cannot end in a draw, so a tied bout holds **End match** back and offers **Encho**: the same pair fights on, marked **(E)**, until a point lands.
+3. **A drawn encounter in a league** (0:15): the same tie in a league is simply ended as a draw, marked **X**.
+4. **Reopen** (0:21): a completed encounter is reopened with all its bouts intact, then ended again.
 
 ### Choosing the team match format
 
@@ -149,7 +149,7 @@ When the last bout is tied, the editor offers every legitimate way forward and y
 - **Encho** keeps the same pair fighting on that bout until one of them takes a point. It is offered on any tied bout: whether a pair fights on is your call, and the app records it. Use it whenever your rules say the pairing must have a result, in any stage. Tapped Encho by mistake, or twice? **Undo encho**, beside it, takes back one overtime period per tap while nothing has been scored in overtime; taking back the last one returns the bout to its tie.
 - **End match** finishes the encounter on the tie. In pools and leagues this records a drawn encounter. In a knockout the bracket needs a winner, so End match is held back while the last bout is tied; continue with Record bout or Encho instead.
 
-![The kachinuki score editor on a tied knockout bout between the two taisho, after four drawn bouts, showing the notice that a knockout cannot end in a draw with an Encho button, and the End match button held back.](../../screenshots/kachinuki-knockout-tie-encho.png)
+![The kachinuki score editor on a tied knockout bout, showing the notice that a knockout cannot end in a draw with an Encho button, and the End match button held back.](../../screenshots/kachinuki-knockout-tie-encho.png)
 
 There is no representative bout (daihyosen) in kachinuki: a tied pairing that must produce a result is settled by encho on that same bout, not by a separate rep bout.
 

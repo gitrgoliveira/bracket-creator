@@ -92,17 +92,17 @@ const KACHI_TEAMS = {
   Minami: { dojo: 'Minami Dojo', fighters: ['Imai', 'Kojima', 'Miura', 'Nakano', 'Shimizu'] },
 };
 
-async function seedKachinukiComp(api, id, name, format, teamA, teamB, court, teamSize = 5) {
+async function seedKachinukiComp(api, id, name, format, teamA, teamB, court) {
   // Through api.competition rather than a raw POST, so the competition gets
   // the start time every other seed gets.
   await api.competition(id, name, {
-    format, teamSize, teamMatchType: 'kachinuki', courts: [court],
+    format, teamSize: 5, teamMatchType: 'kachinuki', courts: [court],
   });
   await api.participants(id, [teamA, teamB].map((t) => ({ name: t, dojo: KACHI_TEAMS[t].dojo })));
   // The numbered members exist only once the draw has run.
   await api.generateDraw(id);
   for (const p of await api.get(`/api/competitions/${id}/participants`)) {
-    await api.lineup(id, p.id, await api.nameMembers(id, p.id, KACHI_TEAMS[p.name].fighters.slice(0, teamSize)), teamSize);
+    await api.lineup(id, p.id, await api.nameMembers(id, p.id, KACHI_TEAMS[p.name].fighters));
   }
   await api.start(id);
   return id;
@@ -196,10 +196,7 @@ export const families = {
     seed: async ({ api }) => {
       await tournament(api);
       const court = COURTS[0];
-      // Three-person teams in the knockout: only the two taisho may go to
-      // encho (bc-kten), and three fighters a side reach them in four bouts,
-      // which the clip's frame still shows whole when the match is reopened.
-      await seedKachinukiComp(api, KACHI_KO, 'KO Demo', 'knockout', 'Kaze', 'Nami', court, 3);
+      await seedKachinukiComp(api, KACHI_KO, 'KO Demo', 'knockout', 'Kaze', 'Nami', court);
       await seedKachinukiComp(api, KACHI_LEAGUE, 'League Demo', 'league', 'Kita', 'Minami', court);
       return { ko: KACHI_KO, lg: KACHI_LEAGUE };
     },
@@ -316,21 +313,15 @@ export const recipes = [
       // Not tolerant: if focus fails the key presses go nowhere and the clip
       // records a board that never scores.
       const focus = () => page.locator('.sb-match, .team-summary').first().click({ timeout: 2000 });
-      const strike = (key) => async (n = 1) => {
+      const aka = async (n = 1) => {
         await focus();
         for (let i = 0; i < n; i++) {
-          await page.keyboard.press(key);
+          await page.keyboard.press('Shift+M');
           await page.waitForTimeout(600);
         }
       };
-      const aka = strike('Shift+M');
-      // Plain M is a Shiro men (the same key handler, no Shift).
-      const shiro = strike('M');
-      // Names the selector on failure: the runner prints only the error, and
-      // a bare "locator.click: Timeout" does not say which step broke.
       const click = async (sel, ms = 1100) => {
-        await page.locator(sel).first().click({ timeout: 5000 })
-          .catch((e) => { throw new Error(`${sel} (after ${marks.map((m) => m[1]).join(', ') || 'start'}): ${e.message}`); });
+        await page.locator(sel).first().click({ timeout: 5000 });
         await page.waitForTimeout(ms);
       };
       // Tolerant variant, for controls that genuinely only exist in some
@@ -355,20 +346,14 @@ export const recipes = [
         await page.waitForTimeout(1500);
       };
 
-      // 1: winner stays on, and a tie retires both (three-person teams). Aka's
-      // first fighter beats Shiro's first and stays on; a tie with Shiro's
-      // second retires both; Shiro's taisho beats Aka's second. That brings
-      // the two taisho up, the only pairing that may go to encho (bc-kten).
+      // 1: winner stays on. Every fought bout reads "vs" in its centre.
       await openScore(ko);
       mark('P1 winner-stays');
       await aka(2); await click('button:has-text("Record bout")');
-      await click('[data-testid="scoring-modal-tie-button"]', 900);
-      await click('button:has-text("Record bout")');
-      await shiro(2); await click('button:has-text("Record bout")');
+      await aka(2); await click('button:has-text("Record bout")');
       await page.waitForTimeout(1300);
 
-      // 2: the two taisho tie; a knockout holds End match back and offers
-      // Encho, marked "(E)".
+      // 2: a knockout tie holds End match back and offers Encho, marked "(E)".
       mark('P2 knockout tie -> encho');
       await click('[data-testid="scoring-modal-tie-button"]', 1500);
       await click('button:has-text("Encho")', 1300);

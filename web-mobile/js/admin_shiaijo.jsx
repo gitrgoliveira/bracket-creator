@@ -499,7 +499,7 @@ function matchInComp(comp, id) {
 // scoreline back, and an editor that had just caught up with the push adopted
 // it, so its next save wrote the lost point away.
 function keepNewerRows(held, fetched) {
-    if (!Array.isArray(held) || !Array.isArray(fetched)) return fetched;
+    if (!Array.isArray(held)) return fetched; // the first fetch: nothing shown yet
     return fetched.map((comp) => {
         const heldComp = held.find((c) => c.id === comp.id);
         if (!heldComp) return comp;

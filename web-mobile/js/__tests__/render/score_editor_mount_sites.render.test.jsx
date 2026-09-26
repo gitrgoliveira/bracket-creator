@@ -135,22 +135,120 @@ function runningMatch(overrides = {}) {
   };
 }
 
+// ── the five surfaces, each driven until its editor mounts ───────────────────
+// onEditScore is the write every admin host routes through; the public
+// self-run surface calls window.API.recordScore itself instead.
+
+async function mountShiaijo(onEditScore = vi.fn()) {
+  window.tournamentMatches = () => [runningMatch()];
+  await act(async () => {
+    render(
+      <AdminShiaijoPage
+        tournament={{ name: 'T', courts: ['A'], competitions: [] }}
+        court="A"
+        onBack={vi.fn()} onEditScore={onEditScore} onMoveCourt={vi.fn()}
+        onLogout={vi.fn()} onViewerMode={vi.fn()} password="pw"
+        showToast={vi.fn()} tweaks={{}} onSwitchCourt={vi.fn()}
+      />
+    );
+  });
+}
+
+async function mountPools(onEditScore = vi.fn()) {
+  const rawPoolMatch = {
+    id: 'Pool 1-1', status: 'scheduled',
+    sideA: { id: 'p1', name: 'Yamada' }, sideB: { id: 'p2', name: 'Tanaka' },
+  };
+  // PoolsViewer probe: expose the surface's onMatchClick as a button.
+  window.PoolsViewer = (props) => (
+    <button data-testid="open-pool-match" onClick={() => props.onMatchClick(rawPoolMatch)}>open</button>
+  );
+  // rawPoolMatch must be IN poolMatches below: the real PoolsViewer renders
+  // its rows from that list, and AdminPools now re-resolves the open match
+  // out of it every render rather than keeping the clicked object, so a
+  // fixture clicking a match the list does not contain opens nothing.
+  await act(async () => {
+    render(
+      <AdminPools
+        c={{ id: 'c1', name: 'Comp', format: 'mixed', kind: 'individual', status: 'started' }}
+        pools={[{ name: 'Pool 1', players: [] }]}
+        poolMatches={[rawPoolMatch]}
+        standings={[]}
+        tweaks={{}}
+        onEditScore={onEditScore}
+        password="pw"
+      />
+    );
+  });
+  await act(async () => {
+    fireEvent.click(screen.getByTestId('open-pool-match'));
+  });
+}
+
+async function mountBracket(onEditScore = vi.fn()) {
+  // Raw bracket.rounds entries carry no phase/pool stamps: strip them so the
+  // panel's own enrichment (phase: "bracket") is what reaches the editor.
+  const bm = runningMatch({ id: 'bm1' });
+  delete bm.phase;
+  delete bm.poolName;
+  // BracketTree probe: expose the tree's onMatchClick as a button.
+  window.BracketTree = (props) => (
+    <button data-testid="open-bracket-match" onClick={() => props.onMatchClick(bm, 0, 0)}>open</button>
+  );
+  await act(async () => {
+    render(
+      <AdminBracket
+        c={{ id: 'c1', name: 'Comp', engi: false }}
+        t={{ courts: ['A'] }}
+        bracket={{ rounds: [[bm]] }}
+        onMoveCourt={vi.fn()}
+        onEditScore={onEditScore}
+        tweaks={{}}
+        password="pw"
+      />
+    );
+  });
+  await act(async () => {
+    fireEvent.click(screen.getByTestId('open-bracket-match'));
+  });
+}
+
+async function mountSchedule(onEditScore = vi.fn(), matches = [runningMatch(), runningMatch({ id: 'm2', status: 'scheduled' })]) {
+  window.compMatches = () => matches;
+  await act(async () => {
+    render(
+      <AdminScoreEditor
+        t={{ competitions: [{ id: 'c1', name: 'Comp' }] }}
+        onEditScore={onEditScore}
+        onMoveCourt={null}
+        password="pw"
+        showToast={vi.fn()}
+      />
+    );
+  });
+}
+
+async function mountSelfRun() {
+  await act(async () => {
+    render(
+      <MatchViewerModal
+        match={runningMatch()}
+        onClose={vi.fn()}
+        tournament={{ mode: 'self-run' }}
+        compId="c1"
+      />
+    );
+  });
+  await act(async () => {
+    fireEvent.click(screen.getByRole('button', { name: 'Report result' }));
+  });
+}
+
 // ── 1. admin_shiaijo.jsx: inline court console ───────────────────────────────
 
 describe('mount site: admin_shiaijo.jsx (court console)', () => {
   it('wires Finish+StartNext and after-decision advance; inline, cannot close, NO Prev/Next', async () => {
-    window.tournamentMatches = () => [runningMatch()];
-    await act(async () => {
-      render(
-        <AdminShiaijoPage
-          tournament={{ name: 'T', courts: ['A'], competitions: [] }}
-          court="A"
-          onBack={vi.fn()} onEditScore={vi.fn()} onMoveCourt={vi.fn()}
-          onLogout={vi.fn()} onViewerMode={vi.fn()} password="pw"
-          showToast={vi.fn()} tweaks={{}} onSwitchCourt={vi.fn()}
-        />
-      );
-    });
+    await mountShiaijo();
     expect(screen.getByTestId('probe-score-editor')).toBeTruthy();
     expect(wiringOf(probe.props)).toEqual({
       onSubmit: 'fn',
@@ -173,34 +271,7 @@ describe('mount site: admin_shiaijo.jsx (court console)', () => {
 
 describe('mount site: admin_pools.jsx (pools tab)', () => {
   it('wires a bare modal: NO chaining (onSubmitAndNext null) and NO Prev/Next', async () => {
-    const rawPoolMatch = {
-      id: 'Pool 1-1', status: 'scheduled',
-      sideA: { id: 'p1', name: 'Yamada' }, sideB: { id: 'p2', name: 'Tanaka' },
-    };
-    // PoolsViewer probe: expose the surface's onMatchClick as a button.
-    window.PoolsViewer = (props) => (
-      <button data-testid="open-pool-match" onClick={() => props.onMatchClick(rawPoolMatch)}>open</button>
-    );
-    // rawPoolMatch must be IN poolMatches below: the real PoolsViewer renders
-    // its rows from that list, and AdminPools now re-resolves the open match
-    // out of it every render rather than keeping the clicked object, so a
-    // fixture clicking a match the list does not contain opens nothing.
-    await act(async () => {
-      render(
-        <AdminPools
-          c={{ id: 'c1', name: 'Comp', format: 'mixed', kind: 'individual', status: 'started' }}
-          pools={[{ name: 'Pool 1', players: [] }]}
-          poolMatches={[rawPoolMatch]}
-          standings={[]}
-          tweaks={{}}
-          onEditScore={vi.fn()}
-          password="pw"
-        />
-      );
-    });
-    await act(async () => {
-      fireEvent.click(screen.getByTestId('open-pool-match'));
-    });
+    await mountPools();
     expect(screen.getByTestId('probe-score-editor')).toBeTruthy();
     expect(wiringOf(probe.props)).toEqual({
       onSubmit: 'fn',
@@ -223,31 +294,7 @@ describe('mount site: admin_pools.jsx (pools tab)', () => {
 
 describe('mount site: admin_competition_bracket.jsx (bracket panel)', () => {
   it('wires an inline no-chain editor; close only when the match is complete', async () => {
-    // Raw bracket.rounds entries carry no phase/pool stamps: strip them so the
-    // panel's own enrichment (phase: "bracket") is what reaches the editor.
-    const bm = runningMatch({ id: 'bm1' });
-    delete bm.phase;
-    delete bm.poolName;
-    // BracketTree probe: expose the tree's onMatchClick as a button.
-    window.BracketTree = (props) => (
-      <button data-testid="open-bracket-match" onClick={() => props.onMatchClick(bm, 0, 0)}>open</button>
-    );
-    await act(async () => {
-      render(
-        <AdminBracket
-          c={{ id: 'c1', name: 'Comp', engi: false }}
-          t={{ courts: ['A'] }}
-          bracket={{ rounds: [[bm]] }}
-          onMoveCourt={vi.fn()}
-          onEditScore={vi.fn()}
-          tweaks={{}}
-          password="pw"
-        />
-      );
-    });
-    await act(async () => {
-      fireEvent.click(screen.getByTestId('open-bracket-match'));
-    });
+    await mountBracket();
     expect(screen.getByTestId('probe-score-editor')).toBeTruthy();
     expect(wiringOf(probe.props)).toEqual({
       onSubmit: 'fn',
@@ -273,20 +320,7 @@ describe('mount site: admin_competition_bracket.jsx (bracket panel)', () => {
 
 describe('mount site: admin_schedule_score_editor.jsx (Scores tab)', () => {
   it('wires the FULL navigation set: Prev/Next, Finish+StartNext, after-decision', async () => {
-    const m1 = runningMatch();
-    const m2 = runningMatch({ id: 'm2', status: 'scheduled' });
-    window.compMatches = () => [m1, m2];
-    await act(async () => {
-      render(
-        <AdminScoreEditor
-          t={{ competitions: [{ id: 'c1', name: 'Comp' }] }}
-          onEditScore={vi.fn()}
-          onMoveCourt={null}
-          password="pw"
-          showToast={vi.fn()}
-        />
-      );
-    });
+    await mountSchedule();
     // Open the first (running) match via its row button.
     const openBtns = document.querySelectorAll('button.test-score-open');
     expect(openBtns.length).toBe(2);
@@ -312,15 +346,7 @@ describe('mount site: admin_schedule_score_editor.jsx (Scores tab)', () => {
   });
 
   it('onSubmitAndNext is NULL when no same-court active match remains', async () => {
-    window.compMatches = () => [runningMatch()];
-    await act(async () => {
-      render(
-        <AdminScoreEditor
-          t={{ competitions: [{ id: 'c1', name: 'Comp' }] }}
-          onEditScore={vi.fn()} onMoveCourt={null} password="pw" showToast={vi.fn()}
-        />
-      );
-    });
+    await mountSchedule(vi.fn(), [runningMatch()]);
     await act(async () => { fireEvent.click(document.querySelector('button.test-score-open')); });
     const w = wiringOf(probe.props);
     expect(w.onSubmitAndNext).toBe('null');
@@ -337,19 +363,7 @@ describe('mount site: viewer_match.jsx (public self-run)', () => {
     // dispatch gap (the engi branch drops selfReport entirely: see
     // score_editor_dispatch.render.test.jsx), the self-run affordance set is
     // ruled on by mp-yqxn.5.
-    await act(async () => {
-      render(
-        <MatchViewerModal
-          match={runningMatch()}
-          onClose={vi.fn()}
-          tournament={{ mode: 'self-run' }}
-          compId="c1"
-        />
-      );
-    });
-    await act(async () => {
-      fireEvent.click(screen.getByRole('button', { name: 'Report result' }));
-    });
+    await mountSelfRun();
     expect(screen.getByTestId('probe-score-editor')).toBeTruthy();
     expect(wiringOf(probe.props)).toEqual({
       onSubmit: 'fn',
@@ -365,5 +379,110 @@ describe('mount site: viewer_match.jsx (public self-run)', () => {
       password: '',                // public surface authenticates nothing
       selfReport: true,
     });
+  });
+});
+
+// ── every surface: what a write came back with ───────────────────────────────
+// bc-strt: the editor's own Start match treats the match as running only for
+// a write that reached the server. A refused one (court busy, a withdrawn
+// competitor) throws inside the host, which reports it and hands back
+// nothing. So every host must hand back what a landed write came back with,
+// or no start made from its editor could ever count as landed.
+
+describe('every mount site hands the editor what a write came back with (bc-strt)', () => {
+  const openSchedule = async (onEditScore) => {
+    await mountSchedule(onEditScore);
+    await act(async () => { fireEvent.click(document.querySelector('button.test-score-open')); });
+  };
+  const sites = [
+    ['admin_shiaijo.jsx', mountShiaijo],
+    ['admin_pools.jsx', mountPools],
+    ['admin_competition_bracket.jsx', mountBracket],
+    ['admin_schedule_score_editor.jsx', openSchedule],
+    ['viewer_match.jsx', async (write) => {
+      window.API.recordScore = write;
+      await mountSelfRun();
+    }],
+  ];
+
+  it.each(sites)('%s', async (_name, mount) => {
+    const landed = { status: 'running' };
+    const write = vi.fn().mockResolvedValueOnce(landed).mockRejectedValueOnce(new Error('court busy'));
+    // The self-run surface reports a refused write itself (it has no toast).
+    const alert = vi.spyOn(window, 'alert').mockImplementation(() => {});
+    const logError = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const recordScore = window.API.recordScore;
+    try {
+      await mount(write);
+      const onSubmit = probe.props.onSubmit;
+      let res;
+      await act(async () => { res = await onSubmit({ status: 'running', winner: null }); });
+      expect(res, 'a landed write').toBe(landed);
+      await act(async () => { res = await onSubmit({ status: 'running', winner: null }); });
+      expect(res, 'a refused write').toBeUndefined();
+      expect(write).toHaveBeenCalledTimes(2);
+    } finally {
+      window.API.recordScore = recordScore;
+      alert.mockRestore();
+      logError.mockRestore();
+    }
+  });
+});
+
+// ── when an editor closes ────────────────────────────────────────────────────
+// A start, each autosaved point and a kachinuki Record bout are running writes
+// the operator keeps scoring after, so an editor that closed on every landed
+// write dropped them out of the match after one point. And a write that did
+// not land (queued offline, or superseded) must not look saved.
+
+describe('the pools and bracket editors close only on a saved result', () => {
+  const editorOpen = () => !!screen.queryByTestId('probe-score-editor');
+  const submit = async (patch) => { await act(async () => { await probe.props.onSubmit(patch); }); };
+
+  it('admin_pools.jsx stays open through running writes and a write that did not land', async () => {
+    const write = vi.fn()
+      .mockResolvedValueOnce({ status: 'running' })
+      .mockResolvedValueOnce({ status: 'running' })
+      .mockResolvedValueOnce({ queued: true })
+      .mockResolvedValueOnce({ status: 'completed' });
+    await mountPools(write);
+    await submit({ status: 'running', winner: null });
+    expect(editorOpen(), 'after Start').toBe(true);
+    await submit({ status: 'running', ipponsA: ['M'] });
+    expect(editorOpen(), 'after an autosaved point').toBe(true);
+    await submit({ status: 'completed', winner: { id: 'p1', name: 'Yamada' } });
+    expect(editorOpen(), 'after a finish that only queued').toBe(true);
+    await submit({ status: 'completed', winner: { id: 'p1', name: 'Yamada' } });
+    expect(editorOpen(), 'after a saved finish').toBe(false);
+  });
+
+  it('admin_competition_bracket.jsx keeps the editor on a correction that did not land', async () => {
+    const bm = runningMatch({ id: 'bm1', status: 'completed', winner: { id: 'p1', name: 'Yamada' } });
+    delete bm.phase;
+    delete bm.poolName;
+    window.BracketTree = (props) => (
+      <button data-testid="open-bracket-match" onClick={() => props.onMatchClick(bm, 0, 0)}>open</button>
+    );
+    const write = vi.fn().mockResolvedValueOnce({ queued: true }).mockResolvedValueOnce({ status: 'completed' });
+    await act(async () => {
+      render(
+        <AdminBracket
+          c={{ id: 'c1', name: 'Comp', engi: false }}
+          t={{ courts: ['A'] }}
+          bracket={{ rounds: [[bm]] }}
+          onMoveCourt={vi.fn()}
+          onEditScore={write}
+          tweaks={{}}
+          password="pw"
+        />
+      );
+    });
+    await act(async () => { fireEvent.click(screen.getByTestId('open-bracket-match')); });
+    await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Edit result' })); });
+    expect(editorOpen(), 'the correction editor is open').toBe(true);
+    await submit({ status: 'completed', winner: { id: 'p2', name: 'Tanaka' } });
+    expect(editorOpen(), 'after a correction that only queued').toBe(true);
+    await submit({ status: 'completed', winner: { id: 'p2', name: 'Tanaka' } });
+    expect(editorOpen(), 'after a saved correction').toBe(false);
   });
 });

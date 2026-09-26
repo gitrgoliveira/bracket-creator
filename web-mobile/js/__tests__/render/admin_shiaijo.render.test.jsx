@@ -1266,26 +1266,4 @@ describe('the editor is told a match the console started is running (bc-strt)', 
       window.API.subscribeToEvents = prevSub;
     }
   });
-
-  // The editor's own Start match treats the match as running only for a
-  // write that reached the server. A refused one (court busy, a withdrawn
-  // competitor) throws: the host reports it and hands back nothing, which is
-  // how the editor tells the two apart.
-  it('hands the editor what a write came back with, and nothing for a refused one', async () => {
-    const side = (id, name) => ({ id, name });
-    window.tournamentMatches = () => [{
-      id: 'm1', compId: 'c1', compName: 'Cup', status: 'running', phase: 'pool', poolName: 'Pool A',
-      court: 'A', sideA: side('p1', 'Yamada'), sideB: side('p2', 'Tanaka'),
-    }];
-    window.filterMatchesByCourt = (matches) => matches;
-    const landed = { status: 'running' };
-    const onEditScore = vi.fn().mockResolvedValueOnce(landed).mockRejectedValueOnce(new Error('court busy'));
-    await act(async () => { renderPage(makeMinimalTournament(), 'A', { onEditScore }); });
-    expect(probe.props.match?.id).toBe('m1');
-    let res;
-    await act(async () => { res = await probe.props.onSubmit({ status: 'running' }); });
-    expect(res).toBe(landed);
-    await act(async () => { res = await probe.props.onSubmit({ status: 'running' }); });
-    expect(res).toBeUndefined();
-  });
 });

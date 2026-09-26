@@ -1999,13 +1999,20 @@ func TestRevertMatchToQueue(t *testing.T) {
 	compID := "revert-comp"
 	require.NoError(t, store.SaveCompetition(&state.Competition{ID: compID, Name: "Revert Test"}))
 
-	t.Run("running pool match reverts to scheduled", func(t *testing.T) {
+	// bc-sbq (operator ruling 2026-09-26): sending a match back to the queue
+	// never clears its score. The operator removes a wrong mark themselves.
+	// What a running write can carry stays (points, penalties, overtime,
+	// bouts, flags, rep-bout fighters); the verdict and the audit notes go.
+	t.Run("running pool match reverts to scheduled and keeps its score", func(t *testing.T) {
 		matches := []state.MatchResult{
 			{
 				ID: "P1-run", SideA: "Alice", SideB: "Bob",
 				Status:           state.MatchStatusRunning,
 				IpponsA:          []string{"M"},
 				HansokuB:         1,
+				Encho:            &state.EnchoMetadata{PeriodCount: 1},
+				FlagsA:           2,
+				SubResults:       []state.SubMatchResult{{Position: 1, SideA: "A1", SideB: "B1", IpponsA: []string{"K"}}},
 				Decision:         "fought",
 				ResultSource:     "admin",
 				CorrectionReason: "Scoring error: wrong waza",
@@ -2022,25 +2029,29 @@ func TestRevertMatchToQueue(t *testing.T) {
 		require.NoError(t, err)
 		require.Len(t, updated, 1)
 		assert.Equal(t, state.MatchStatusScheduled, updated[0].Status)
+		assert.Equal(t, []string{"M"}, updated[0].IpponsA, "the point stays")
+		assert.Equal(t, 1, updated[0].HansokuB, "the penalty stays")
+		require.NotNil(t, updated[0].Encho, "the overtime stays")
+		assert.Equal(t, 1, updated[0].Encho.PeriodCount)
+		assert.Equal(t, 2, updated[0].FlagsA, "the flags stay")
+		require.Len(t, updated[0].SubResults, 1, "the bouts stay")
+		assert.Equal(t, []string{"K"}, updated[0].SubResults[0].IpponsA)
+		assert.Equal(t, "Alice-rep", updated[0].RepPlayerA, "the rep-bout fighters stay")
+		assert.Equal(t, "Bob-rep", updated[0].RepPlayerB)
+		// The verdict and the audit notes do not describe a queued match.
 		assert.Empty(t, updated[0].Winner)
-		assert.Nil(t, updated[0].IpponsA)
-		assert.Equal(t, 0, updated[0].HansokuB)
 		assert.Empty(t, updated[0].Decision)
-		// Provenance/audit fields must be cleared so a requeued match carries
-		// no misleading result metadata.
 		assert.Empty(t, updated[0].ResultSource)
 		assert.Empty(t, updated[0].CorrectionReason)
-		assert.Empty(t, updated[0].RepPlayerA)
-		assert.Empty(t, updated[0].RepPlayerB)
 		// Identity fields must be preserved
 		assert.Equal(t, "Alice", updated[0].SideA)
 		assert.Equal(t, "Bob", updated[0].SideB)
 	})
 
-	t.Run("already-scheduled match with stale metadata is cleaned", func(t *testing.T) {
-		// A scheduled match that still carries stale score/audit data from an
-		// earlier partial write must be normalised to a clean scheduled match,
-		// not left as-is.
+	t.Run("already-scheduled match with stale metadata loses the verdict, keeps the score", func(t *testing.T) {
+		// A scheduled match that still carries a stale verdict or audit note
+		// from an earlier partial write is normalised: those go, the score
+		// stays.
 		matches := []state.MatchResult{
 			{
 				ID: "P1-stale", SideA: "Ivan", SideB: "Judy",
@@ -2066,18 +2077,21 @@ func TestRevertMatchToQueue(t *testing.T) {
 		}
 		assert.Equal(t, state.MatchStatusScheduled, m.Status)
 		assert.Empty(t, m.Winner)
-		assert.Nil(t, m.IpponsA)
+		assert.Equal(t, []string{"K"}, m.IpponsA)
 		assert.Empty(t, m.Decision)
 		assert.Empty(t, m.ResultSource)
 		assert.Equal(t, "Ivan", m.SideA) // identity preserved
 	})
 
-	t.Run("running bracket match reverts to scheduled, downstream untouched", func(t *testing.T) {
+	t.Run("running bracket match reverts to scheduled keeping its score, downstream untouched", func(t *testing.T) {
 		bracket := &state.Bracket{
 			Rounds: [][]state.BracketMatch{
 				{
 					{ID: "B-run", SideA: "Carol", SideB: "Dave",
-						Status: state.MatchStatusRunning, IpponsA: []string{"M"}, Decision: "fought"},
+						Status: state.MatchStatusRunning, IpponsA: []string{"M"}, HansokuB: 1,
+						Encho: &state.EnchoMetadata{PeriodCount: 1}, FlagsB: 3,
+						SubResults: []state.SubMatchResult{{Position: 1, SideA: "C1", SideB: "D1", IpponsB: []string{"D"}}},
+						Decision:   "fought"},
 					{ID: "B-other", SideA: "Eve", SideB: "Frank",
 						Status: state.MatchStatusScheduled},
 				},
@@ -2090,10 +2104,16 @@ func TestRevertMatchToQueue(t *testing.T) {
 
 		updated, err := store.LoadBracket(compID)
 		require.NoError(t, err)
-		assert.Equal(t, state.MatchStatusScheduled, updated.Rounds[0][0].Status)
-		assert.Empty(t, updated.Rounds[0][0].Winner)
-		assert.Nil(t, updated.Rounds[0][0].IpponsA)
-		assert.Empty(t, updated.Rounds[0][0].Decision)
+		requeued := updated.Rounds[0][0]
+		assert.Equal(t, state.MatchStatusScheduled, requeued.Status)
+		assert.Empty(t, requeued.Winner)
+		assert.Empty(t, requeued.Decision)
+		assert.Equal(t, []string{"M"}, requeued.IpponsA, "the point stays")
+		assert.Equal(t, 1, requeued.HansokuB, "the penalty stays")
+		require.NotNil(t, requeued.Encho, "the overtime stays")
+		assert.Equal(t, 3, requeued.FlagsB, "the flags stay")
+		require.Len(t, requeued.SubResults, 1, "the bouts stay")
+		assert.Equal(t, []string{"D"}, requeued.SubResults[0].IpponsB)
 		assert.Equal(t, "Carol", updated.Rounds[0][0].SideA)
 		assert.Equal(t, "Dave", updated.Rounds[0][0].SideB)
 		// Downstream match must be untouched

@@ -183,8 +183,8 @@ export function teamMatchTypeHint(isKachinuki) {
 // because its own fallback ("Pool") differs from leagueAwareLabel's.
 //
 // A render site that reaches past both layers for a raw m.poolName prints the
-// synthetic id: that is what admin_scoring_shared.jsx's withdrawal panel did
-// until it was moved onto poolLabel. If you add one, use poolLabel.
+// synthetic id: that is what admin_scoring_shared.jsx's withdrawal panel
+// (since removed) did until it was moved onto poolLabel. If you add one, use poolLabel.
 export function swissRoundLabel(poolName) {
     const m = /^Swiss-R(\d+)$/.exec(poolName || "");
     return m ? `Round ${m[1]}` : (poolName || "");

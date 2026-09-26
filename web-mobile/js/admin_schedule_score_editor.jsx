@@ -1,7 +1,7 @@
 // Score editor components extracted from admin_schedule.jsx (mp-d7tl).
 // startPatch, ScoreEditCourtBtn (local), AdminScoreEditor, AdminScoreEditorPage.
 
-import { writeDidNotLand } from './write_result.jsx';
+import { writeDidNotLand, writeKeepsEditorOpen } from './write_result.jsx';
 import { matchMentions } from './competitor_search.jsx';
 import { SideCell } from './side_cell.jsx';
 import { allMatchesCompleted } from './admin_schedule_utils.jsx';
@@ -16,11 +16,12 @@ import { NumberedName } from './numbered_name.jsx';
 // no auto-pick may offer it and its row shows the default-win action
 // instead. One leaf owns the question (ineligible_match.jsx); BarredMatchNotice
 // (admin_scoring_shared.jsx) is the one component that renders it everywhere.
-import { isBarredMatch } from './ineligible_match.jsx';
+import { isBarredMatch, sideBarredByDecision, involvesCompetitor } from './ineligible_match.jsx';
 // Straight from its own leaf, not admin_scoring_shared.jsx (which also
 // imports bracket.jsx): see barred_match_notice.jsx's header for why that
 // matters for this file's own render suite.
 import { BarredMatchNotice } from './barred_match_notice.jsx';
+import { matchShowsScore } from './match_shows_score.jsx';
 
 const { useState: useStateA, useMemo: useMemoA, useEffect: useEffectA, useRef: useRefA } = React;
 
@@ -83,8 +84,14 @@ function ScoreEditCourtBtn({ m, courts, onMoveCourt }) {
 }
 
 // Module-level factory so admin_shiaijo.jsx can consume it via window.startPatch.
+// startOnly (bc-sbq): this write only starts the match, so the server keeps the
+// score the match already holds (a match sent back to the queue keeps one);
+// toBackendMatchResult leaves the empty scoreline below off the wire. The
+// editors' own Start sends their board unflagged, so an operator who cleared
+// every mark still clears it.
 export function startPatch() {
   return {
+    startOnly: true,
     status: "running", winner: null, ipponsA: [], ipponsB: [], hansokuA: 0, hansokuB: 0,
     score: { type: "ippon", winnerPts: 0, loserPts: 0, ippons: [], fouls: { a: 0, b: 0 }, live: true, corrected: false },
   };
@@ -219,14 +226,17 @@ export function AdminScoreEditor({ t, c, onEditScore, onMoveCourt, restrictToCom
           // match's own mark, already inline in its score string below, is
           // never doubled here.
           const { shiro: teamShiroMark, aka: teamAkaMark } = window.teamMatchMarks ? window.teamMatchMarks(m) : { shiro: "", aka: "" };
+          // Show the live ippon score for a running bout too (not just completed)
+          // so the list reflects scoring in progress; "vs" only before it starts.
+          // matchShowsScore is the one gate: a match sent back to the queue
+          // keeps its score, but this row shows it as not started, penalty
+          // marks included, until it restarts (bc-sbq).
+          const showScore = matchShowsScore(m);
           // Outstanding single hansoku → red ▲ next to the offending side (same
           // mark as the scoresheet). hansoku may live on the match or under
           // score.fouls depending on the source; fall back across both.
-          const foulB = boutHansokuMark(m.hansokuB ?? m.score?.fouls?.b ?? 0);
-          const foulA = boutHansokuMark(m.hansokuA ?? m.score?.fouls?.a ?? 0);
-          // Show the live ippon score for a running bout too (not just completed)
-          // so the list reflects scoring in progress; "vs" only before it starts.
-          const showScore = m.status === "completed" || m.status === "running";
+          const foulB = showScore ? boutHansokuMark(m.hansokuB ?? m.score?.fouls?.b ?? 0) : "";
+          const foulA = showScore ? boutHansokuMark(m.hansokuA ?? m.score?.fouls?.a ?? 0) : "";
           // A just-started running bout is 0–0, where formatIpponsScore returns "".
           // Fall back so the cell is never blank: an empty score renders the
           // boutMiddle placeholder (normally "vs"). Live techniques show once present.
@@ -270,7 +280,7 @@ export function AdminScoreEditor({ t, c, onEditScore, onMoveCourt, restrictToCom
                   <div className="score-edit-row__score">
                     <span className="score-edit-row__foul">{foulB && <span className="msb-hansoku" data-testid="foul-mark-b">{foulB}</span>}</span>
                     <span className="score-edit-row__scoreval">
-                      {seScore || <span style={{ fontSize: 11, color: "var(--ink-3)" }}>{window.boutMiddle ? window.boutMiddle(m.decision, m.encho, m.score) : "vs"}</span>}
+                      {seScore || <span style={{ fontSize: 11, color: "var(--ink-3)" }}>{showScore && window.boutMiddle ? window.boutMiddle(m.decision, m.encho, m.score) : "vs"}</span>}
                     </span>
                     <span className="score-edit-row__foul">{foulA && <span className="msb-hansoku" data-testid="foul-mark-a">{foulA}</span>}</span>
                   </div>
@@ -361,9 +371,18 @@ export function AdminScoreEditor({ t, c, onEditScore, onMoveCourt, restrictToCom
         // bc-cse: skip a barred match (isBarredMatch, ineligible_match.jsx):
         // Finish + Start Next and the after-decision advance both feed this
         // straight into a Start write, which the server would just refuse.
-        const nextActiveMatch = openIdx >= 0
-          ? sameCourt.slice(openIdx + 1).find(m => m.status !== 'completed' && !isBarredMatch(m)) || null
+        // `withdrawn` is a competitor a decision just barred
+        // (sideBarredByDecision): this list shows their matches barred only
+        // after it refreshes, so the after-decision advance skips them itself.
+        // The AUTOMATIC advance also stays in the open match's competition
+        // (operator ruling 2026-09-26: an operator view never switches
+        // competition or court by itself), as the court console's does; this
+        // page can list every competition, and Prev/Next, which the operator
+        // taps, still move along the whole court.
+        const nextActiveFrom = (withdrawn = null) => openIdx >= 0
+          ? sameCourt.slice(openIdx + 1).find(m => m.compId === openMatch.compId && m.status !== 'completed' && !isBarredMatch(m) && !involvesCompetitor(m, withdrawn)) || null
           : null;
+        const nextActiveMatch = nextActiveFrom();
         // Minimal "start" patch (status → running, empty score). Mirrors the
         // modal's own buildPatch("running") for an unscored match and works for
         // both individual and team matches (subResults is omitted, which the
@@ -384,11 +403,12 @@ export function AdminScoreEditor({ t, c, onEditScore, onMoveCourt, restrictToCom
               try {
                 const res = await onEditScore(openMatch.compId, openMatch.id, patch, openMatch);
                 if (!mountedRef.current) return res;
-                // A write that did not land must not CLOSE the modal: doing so
-                // is a false success. Queued (F5) or superseded (bc-lww1) alike,
-                // the editor keeps the operator's entry on screen with its
-                // not-saved banner.
-                if (writeDidNotLand(res)) return res;
+                // Whether the modal stays open is writeKeepsEditorOpen's
+                // (write_result.jsx), the rule every host asks. A write that did
+                // not land must not CLOSE the modal: doing so is a false
+                // success. Queued (F5) or superseded (bc-lww1) alike, the editor
+                // keeps the operator's entry on screen with its not-saved banner.
+                //
                 // ▶ Start Match: keep the operator IN the scoring surface rather
                 // than dumping them back to the list (which forced a re-find +
                 // reopen per match). A "start" patch is status:running with no
@@ -408,7 +428,7 @@ export function AdminScoreEditor({ t, c, onEditScore, onMoveCourt, restrictToCom
                 // two `setOpenMatch(prev => ({...prev, status:"running"}))`
                 // patches that used to sit here (and the freshSubs they carried)
                 // were compensating for the snapshot, partially.
-                if (patch.status === "running" && !patch.winner) {
+                if (writeKeepsEditorOpen(patch, res)) {
                   // mp-gmcg review C1: also hand `res` back to the modal itself. A
                   // prior [Remove this bout] can leave the modal's local
                   // matchOverride shadowing THIS prop, and a Record-bout append can
@@ -442,7 +462,8 @@ export function AdminScoreEditor({ t, c, onEditScore, onMoveCourt, restrictToCom
                 // buried the message that actually explains what happened.
                 if (writeDidNotLand(res)) return res;
                 // "Finish + Start Next →": land on the next match on the SAME
-                // shiaijo AND actually start it (honest to the label). If the
+                // shiaijo in the SAME competition AND actually start it
+                // (honest to the label). If the
                 // next match is already running/completed, just open it. Start
                 // gating runs server-side (StartMatchTx); a 409 throws: we
                 // catch it so the operator still lands on the next match (in
@@ -456,15 +477,19 @@ export function AdminScoreEditor({ t, c, onEditScore, onMoveCourt, restrictToCom
                 }
               } catch (_err) { /* keep modal open on error */ }
             } : null}
-            onAfterDecision={nextActiveMatch ? async () => {
+            onAfterDecision={nextActiveMatch ? async (result) => {
               // A kiken/fusenpai decision already persisted the bout via the
               // /decision POST: no score PUT here. Mirror onSubmitAndNext's
-              // start-next so a fusenpai advances the operator to (and starts)
-              // the next same-court match.
-              if (nextActiveMatch.status === "scheduled") {
+              // start-next so a decision advances the operator to (and starts)
+              // the next same-court match, passing over the matches of the
+              // competitor it barred. With none left, close as a decision with
+              // no next match does.
+              const next = nextActiveFrom(sideBarredByDecision(result, openMatch));
+              if (!next) { if (mountedRef.current) setOpenKey(null); return; }
+              if (next.status === "scheduled") {
                 try {
-                  await onEditScore(nextActiveMatch.compId, nextActiveMatch.id, startPatch(), nextActiveMatch);
-                  if (mountedRef.current) setOpenKey(scoreKeyOf(nextActiveMatch));
+                  await onEditScore(next.compId, next.id, startPatch(), next);
+                  if (mountedRef.current) setOpenKey(scoreKeyOf(next));
                 } catch (_startErr) { /* gate rejected the start; leave the operator where they are */ }
               }
             } : null}

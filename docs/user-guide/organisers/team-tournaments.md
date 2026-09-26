@@ -146,7 +146,7 @@ If your correction changes who won that bout, the bouts after it were fought on 
 When the last bout is tied, the editor offers every legitimate way forward and you choose, according to the [kachinuki mode](#kachinuki-modes) in force; the app never decides it from the stage:
 
 - **Record bout** retires both fighters and brings the next pair up.
-- **Encho** keeps the same pair fighting on that bout until one of them takes a point. Use it whenever your rules say this pairing must have a result, in any stage.
+- **Encho** keeps the same pair fighting on that bout until one of them takes a point. It is offered on any tied bout: whether a pair fights on is your call, and the app records it. Use it whenever your rules say the pairing must have a result, in any stage. Tapped Encho by mistake, or twice? **Undo encho**, beside it, takes back one overtime period per tap while nothing has been scored in overtime; taking back the last one returns the bout to its tie.
 - **End match** finishes the encounter on the tie. In pools and leagues this records a drawn encounter. In a knockout the bracket needs a winner, so End match is held back while the last bout is tied; continue with Record bout or Encho instead.
 
 ![The kachinuki score editor on a tied knockout bout, showing the notice that a knockout cannot end in a draw with an Encho button, and the End match button held back.](../../screenshots/kachinuki-knockout-tie-encho.png)

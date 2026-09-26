@@ -621,7 +621,7 @@ func TestSaveBracket_DrawOrderRoundTrip(t *testing.T) {
 // each SubMatchResult's IpponsA/IpponsB/Encho). A shallow copy would alias the
 // cached backing array/pointers, so a caller mutating a returned match in place
 // could silently corrupt cached state without going through Save/UpdateBracket.
-// Mirrors the pool-match copy path (copyMatchResults / cloneSubResults).
+// Mirrors the pool-match copy path (copyMatchResults / CloneSubResults).
 func TestLoadBracket_DeepCopyIsolation(t *testing.T) {
 	store, err := NewStore(t.TempDir())
 	require.NoError(t, err)

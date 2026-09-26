@@ -40,7 +40,7 @@ type DecisionRequest struct {
 	// /score carries (mp-y3nk). Sending it puts decision writes under the
 	// timestamp last-write-wins guard instead of its unstamped bypass, and
 	// gives a decision-completed match a recency the UI can order by: a match
-	// closed while still `scheduled` (the withdrawal panel's default win) was
+	// closed while still `scheduled` (a queue row's Record default win) was
 	// otherwise the one completion that carried no time at all (mp-jnvl).
 	ModifiedAt int64 `json:"modifiedAt,omitempty"`
 	// ForceDownstreamReopen bypasses bc-kcdg's downstream-knockout-correction
@@ -243,6 +243,7 @@ func RegisterDecisionHandlers(r *gin.RouterGroup, eng ScoringEngine, store Compe
 			return
 		}
 
+		stampWithdrawnStatus(store, id, result)
 		hub.Broadcast(EventMatchUpdated, gin.H{
 			"competitionId": id,
 			"matchId":       mid,

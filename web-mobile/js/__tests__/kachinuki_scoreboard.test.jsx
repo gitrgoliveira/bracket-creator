@@ -70,7 +70,7 @@ describe('T4 kachinuki: TeamScoreboard row count', () => {
       { position: 3, sideA: 'WinnerA3', sideB: 'WinnerB3', ipponsB: ['D'], ipponsA: [] },
     ];
     const tree = runtime.mount(TeamScoreboard, {
-      subResults, lineupA: linupA, lineupB: linupB, teamSize: 5,
+      subResults, lineupA: linupA, lineupB: linupB, teamSize: 5, status: 'running',
       kachinuki: true, shiroName: 'ShiroTeam', akaName: 'AkaTeam',
     });
     const rows = boutRows(tree);
@@ -85,7 +85,7 @@ describe('T4 kachinuki: TeamScoreboard row count', () => {
       ipponsA: [], ipponsB: [],
     }));
     const tree = runtime.mount(TeamScoreboard, {
-      subResults, lineupA: linupA, lineupB: linupB, teamSize: 5,
+      subResults, lineupA: linupA, lineupB: linupB, teamSize: 5, status: 'running',
       kachinuki: true, shiroName: 'ShiroTeam', akaName: 'AkaTeam',
     });
     expect(boutRows(tree)).toHaveLength(7);
@@ -98,7 +98,7 @@ describe('T4 kachinuki: TeamScoreboard row count', () => {
       { position: 3, ipponsB: [], ipponsA: [] },
     ];
     const tree = runtime.mount(TeamScoreboard, {
-      subResults, lineupA: linupA, lineupB: linupB, teamSize: 5,
+      subResults, lineupA: linupA, lineupB: linupB, teamSize: 5, status: 'running',
       kachinuki: false, shiroName: 'ShiroTeam', akaName: 'AkaTeam',
     });
     expect(boutRows(tree)).toHaveLength(5);

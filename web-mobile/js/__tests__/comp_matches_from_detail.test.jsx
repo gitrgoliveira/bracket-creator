@@ -60,10 +60,10 @@ describe('compMatchesForCompetition; recombines the split viewer detail payload'
   });
 
   it('is published on window, which two admin surfaces depend on', () => {
-    // admin_scoring_shared.jsx's withdrawal panel and admin_scoring_team.jsx's
-    // reopen-conflict panel both read this off window rather than importing it
-    // (the same way they already read window.compMatches), and the team one
-    // GUARDS on it: if the publish ever disappeared, that panel would silently
+    // admin_scoring_shared.jsx's reopen-conflict panel and RecordedWithdrawal's
+    // list of later default wins both read this off window rather than
+    // importing it (the same way they already read window.compMatches), and
+    // the conflict panel GUARDS on it: if the publish ever disappeared, that panel would silently
     // return early and go back to naming a blocker by its raw match id.
     expect(typeof window.compMatchesForCompetition).toBe('function');
     expect(window.compMatchesForCompetition(detail().config, detail()).map((m) => m.id))

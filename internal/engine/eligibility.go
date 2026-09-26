@@ -121,7 +121,7 @@ func (e *AlreadyIneligibleError) Error() string {
 // check, extracted to ONE place (bc-cse) from what used to be three
 // hand-copied loops: StartMatchTx (scoring_tx.go), checkEligibilityExcludingMatch
 // (below), and the mobileapp ineligibleSides read-time annotation
-// (annotateIneligibleSides, handlers_match.go), which needs the SAME
+// (annotateEligibility, handlers_match.go), which needs the SAME
 // per-side answer to stamp a scheduled match without gating a write.
 //
 // A side is barred when it carries a non-empty id, a status entry exists
@@ -263,8 +263,12 @@ func participantIDByName(h state.StoreTx, compID, name string) (string, error) {
 // recordIneligibilityFromDecision), so unlike that function this one
 // does not need to assert h is transactional.
 //
+// decision is the withdrawal being recorded: alreadyBarredRefusal decides
+// whether a loser barred elsewhere refuses it (a kiken) or chains onto the
+// existing bar (a fusenpai, bc-kfup).
+//
 // CHK047, T105.
-func (e *Engine) checkConcurrentIneligibility(h state.StoreTx, compID, matchID, loserID, loserName string) error {
+func (e *Engine) checkConcurrentIneligibility(h state.StoreTx, compID, matchID, decision, loserID, loserName string) error {
 	if loserID == "" && loserName == "" {
 		return nil
 	}
@@ -290,10 +294,48 @@ func (e *Engine) checkConcurrentIneligibility(h state.StoreTx, compID, matchID, 
 	// check and its sideB arm always returns nil for an empty id, so the
 	// A-side return is the only one that can ever fire here.
 	barred, _ := BarredSides(statuses, matchID, playerID, "")
-	if barred != nil {
-		return alreadyIneligibleErrorFor(playerID, barred)
+	return alreadyBarredRefusal(decision, playerID, barred)
+}
+
+// alreadyBarredRefusal is the ONE statement of what a withdrawal decision
+// does when its loser is already barred by a DIFFERENT match (barred, from
+// BarredSides; nil means they are not). Both T105 halves ask it: the
+// pre-write guard (checkConcurrentIneligibility) and the K2 check-and-set in
+// recordIneligibilityFromDecision, so the two cannot disagree about which
+// decision is refused.
+//
+//   - A kiken is refused with *AlreadyIneligibleError: a competitor withdraws
+//     once, so a second kiken from another match is two operators recording
+//     the same withdrawal (the CHK047 race the guard exists for).
+//   - A fusenpai is NOT refused (bc-kfup). Against a competitor already
+//     barred it is the default loss that closes one of their remaining
+//     matches, the operator's intended exit once StartMatchTx refuses to
+//     start that match. The caller records the loss and leaves the existing
+//     CompetitorStatus untouched, so its MatchID still names the match that
+//     barred them, which the T103 undo keys on. Reopening such a match
+//     restores nobody (the status is not this match's), so
+//     reopenTargetStatus sends it back to the queue while the bar holds.
+func alreadyBarredRefusal(decision, playerID string, barred *domain.CompetitorStatus) error {
+	if barred == nil || decision == string(domain.DecisionFusenpai) {
+		return nil
 	}
-	return nil
+	return alreadyIneligibleErrorFor(playerID, barred)
+}
+
+// withdrawalStatus is the bar a withdrawal decision on matchID records
+// against playerID: not eligible, and reinstateable only after an injury kiken
+// (FIK Art. 30). recordIneligibilityFromDecision writes it when the decision
+// is recorded; standingWithdrawalOf rebuilds it when the bar moves to a
+// fusenpai still on record.
+func withdrawalStatus(playerID, decision, matchID string) domain.CompetitorStatus {
+	return domain.CompetitorStatus{
+		PlayerID:      playerID,
+		Eligible:      false,
+		Reinstateable: decision == string(domain.DecisionKikenInjury),
+		Reason:        fmt.Sprintf("%s at %s", decision, matchID),
+		MatchID:       matchID,
+		RecordedAt:    time.Now().UTC(),
+	}
 }
 
 // CheckEligibility consults the competitor-status store for compID and
@@ -820,10 +862,12 @@ func combinedPlayerPool(compPlayers []domain.Player, participants []domain.Playe
 //
 // Returns the persisted CompetitorStatus when a status was written
 // (so the handler layer can broadcast the corresponding
-// `competitor-status-updated` SSE event), (nil, nil) when no status change
-// applies (non-kiken/fusenpai decision, unresolvable loser, or unknown
-// player), or a non-nil error when the row's own ids prove the loser
-// ambiguous.
+// `competitor-status-updated` SSE event), or, for a fusenpai against a
+// competitor another match already barred (alreadyBarredRefusal chains it
+// onto that bar), their existing status, unchanged; (nil, nil) when no
+// status applies (non-kiken/fusenpai decision, unresolvable loser, or
+// unknown player); or a non-nil error when the row's own ids prove the loser
+// ambiguous or a kiken finds them already barred elsewhere.
 //
 // FR-036, contracts/match-decisions.md §side-effects.
 func (e *Engine) recordIneligibilityFromDecision(h state.StoreTx, compID, matchID string, result *state.MatchResult) (*domain.CompetitorStatus, error) {
@@ -868,14 +912,7 @@ func (e *Engine) recordIneligibilityFromDecision(h state.StoreTx, compID, matchI
 		}
 		playerID = found
 	}
-	status := domain.CompetitorStatus{
-		PlayerID:      playerID,
-		Eligible:      false,
-		Reinstateable: result.Decision == string(domain.DecisionKikenInjury),
-		Reason:        fmt.Sprintf("%s at %s", result.Decision, matchID),
-		MatchID:       matchID,
-		RecordedAt:    time.Now().UTC(),
-	}
+	status := withdrawalStatus(playerID, result.Decision, matchID)
 	// K2/CHK047: check-and-set — the load, the check and the write MUST happen
 	// under one per-competition lock acquire, or two concurrent kiken writes on
 	// the same player from different matches can both pass the check (TOCTOU).
@@ -910,7 +947,18 @@ func (e *Engine) recordIneligibilityFromDecision(h state.StoreTx, compID, matchI
 	// passes playerID as sideA and "" as sideB (BarredSides is a per-side
 	// check whose sideB arm always returns nil for an empty id).
 	if barred, _ := BarredSides(statuses, matchID, playerID, ""); barred != nil {
-		return nil, alreadyIneligibleErrorFor(playerID, barred)
+		if err := alreadyBarredRefusal(result.Decision, playerID, barred); err != nil {
+			return nil, err
+		}
+		// A fusenpai chained onto an existing bar (bc-kfup): the match
+		// records the default loss and the status that barred them stays
+		// exactly as it was, still naming its own match. It is returned,
+		// unchanged, as the loser's status in force: restoreIfWithdrawalRemoved
+		// reads a nil loser as "could not resolve who lost" and restores
+		// nobody, so a nil here would leave barred the competitor a wrong
+		// kiken on THIS match had marked, when the operator corrects it to
+		// this fusenpai. Broadcasting it again changes nothing.
+		return barred, nil
 	}
 	if err := h.SetCompetitorStatus(compID, status); err != nil {
 		return nil, err

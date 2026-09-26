@@ -660,6 +660,51 @@ describe('kachinuki Encho is offered only on the current tied bout', () => {
     if (hint) expect(hint.textContent).not.toContain('Encho keeps');
   });
 
+  // bc-kenu (operator ruling 2026-09-26): the operator is tired and clumsy, so
+  // every mistake is undoable in one step. Bout mode hides the overtime
+  // stepper, so a mistaken or double-tapped Encho needs its own undo.
+  it('takes back a double-tapped Encho one period at a time, back to the tie', async () => {
+    await renderEditor({
+      match: completedKachinukiMatch({ status: 'running', winner: null, subResults: [tiedBout(1)] }),
+    });
+    expect(screen.queryByTestId('kachinuki-encho-undo-button')).toBeNull();
+    await act(async () => { fireEvent.click(screen.getByTestId('kachinuki-encho-button')); });
+    await act(async () => { fireEvent.click(screen.getByTestId('kachinuki-encho-button')); });
+    expect(document.body.textContent).toContain('(E)');
+
+    const undo = () => act(async () => { fireEvent.click(screen.getByTestId('kachinuki-encho-undo-button')); });
+    await undo();
+    expect(document.body.textContent, 'one period still on').toContain('(E)');
+    await undo();
+    expect(document.body.textContent).not.toContain('(E)');
+    expect(screen.queryByTestId('kachinuki-encho-undo-button')).toBeNull();
+    // Back to the tie it was: Encho is offered again.
+    expect(screen.getByTestId('kachinuki-encho-button')).toBeTruthy();
+  });
+
+  it('undoing the only period of a 0-0 tie restores the Tie', async () => {
+    await renderEditor({
+      match: completedKachinukiMatch({
+        status: 'running', winner: null,
+        subResults: [{ position: 1, sideA: 'A1', sideB: 'B1', ipponsA: [], ipponsB: [], decision: 'hikiwake' }],
+      }),
+    });
+    await act(async () => { fireEvent.click(screen.getByTestId('kachinuki-encho-button')); });
+    await act(async () => { fireEvent.click(screen.getByTestId('kachinuki-encho-undo-button')); });
+    expect(screen.getByTestId('scoring-modal-tie-button').textContent).toContain('✓');
+    expect(screen.getByTestId('kachinuki-encho-button'), 'still a tied bout, so Encho is offered again').toBeTruthy();
+  });
+
+  it('offers no undo once a point has been struck in encho', async () => {
+    await renderEditor({
+      match: completedKachinukiMatch({ status: 'running', winner: null, subResults: [tiedBout(1)] }),
+    });
+    await act(async () => { fireEvent.click(screen.getByTestId('kachinuki-encho-button')); });
+    expect(screen.getByTestId('kachinuki-encho-undo-button')).toBeTruthy();
+    await act(async () => { fireEvent.keyDown(window, { key: 'K', shiftKey: true }); });
+    expect(screen.queryByTestId('kachinuki-encho-undo-button')).toBeNull();
+  });
+
   // bc-kten (operator ruling 2026-09-25): only the last bout, taisho against
   // taisho, may go to encho. With both lineups in force the editor knows who
   // each taisho is (kachinukiTaishoPairing, the twin of the server's rule).

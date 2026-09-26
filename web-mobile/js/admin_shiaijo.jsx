@@ -767,6 +767,9 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
     // scoring panel instead; the find() in pickedMatch guards staleness, so a
     // pick that completes or vanishes falls back to running[0] automatically.
     const [pickedKey, setPickedKey] = useStateSh(null);
+    // The match pickMatch started, and the scheduled snapshot it started
+    // from: see ScoreEditorModal's `started` (bc-strt).
+    const [startedFrom, setStartedFrom] = useStateSh(null);
     // The COMPLETED match the operator has opened to correct in place (parity
     // with the Scores page's "Correct" button). Kept separate from pickedKey so
     // it takes priority over the running bout WITHOUT disturbing it, and so it
@@ -1238,6 +1241,9 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
         if (m.status === "scheduled") {
             const ok = await startMatch(m);
             if (!ok || !mountedRef.current) return;
+            // bc-strt: the editor treats this snapshot as running, so a point
+            // struck before the refetch shows it running saves at once.
+            setStartedFrom({ key: matchKey(m), at: m.modifiedAt });
         }
         setPickedKey(matchKey(m));
         // A deliberate move to another bout ends the kiken pin: the operator
@@ -1761,6 +1767,7 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
                                     onClose={() => setWithdrawalKey(null)}
                                     onWithdrawal={() => setWithdrawalKey(matchKey(selectedMatch))}
                                     onBoardChange={setLiveBoard}
+                                    started={!!startedFrom && startedFrom.key === matchKey(selectedMatch) && startedFrom.at === selectedMatch.modifiedAt}
                                     canClose={false}
                                     onSubmit={async (patch) => {
                                         try {

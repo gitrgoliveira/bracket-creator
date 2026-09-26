@@ -3,7 +3,7 @@
 // (imported from admin_scoring_team.jsx).
 // Extracted from admin_scoring_modal.jsx (mp-zac3).
 
-const { useState: useStateA, useEffect: useEffectA, useRef: useRefA } = React;
+const { useState: useStateA, useEffect: useEffectA, useRef: useRefA, useMemo: useMemoA } = React;
 
 // Leaf module (no side effects): safe to ES-import. The DH label is
 // daihyosen-specific; the rep pickers below stay gated on m.repIsTeam (a "-TB-"
@@ -61,8 +61,21 @@ import { SyncStatusPill, useDebouncedRunningWrite } from './admin_scoring_autosa
 import { TeamScoreEditorModal, isKoTieBlocked } from './admin_scoring_team.jsx';
 import { EngiScoreEditorModal } from './admin_scoring_engi.jsx';
 
-export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, onAfterDecision, onWithdrawal, onBoardChange, prevMatch, nextMatch, onPrev, onNext, password, selfReport, variant = "modal", canClose = true }) {
-  const m = match;
+export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, onAfterDecision, onWithdrawal, onBoardChange, started = false, prevMatch, nextMatch, onPrev, onNext, password, selfReport, variant = "modal", canClose = true }) {
+  // bc-strt: a match whose start has landed is RUNNING, even while the host's
+  // list still says scheduled (it refetches a moment after each save). The
+  // editors autosave only a match they see as running, so a point struck in
+  // that moment stayed on this board alone, and every other screen showed
+  // 0-0 until the next save. startedFrom is this editor's own Start match;
+  // `started` is the host's (the court console's Up next card). Each names
+  // the scheduled snapshot the start was made from, so the override lasts
+  // only while the feed still shows THAT snapshot: the next one (running, or
+  // a later send back to the queue, which stamps the match) ends it. A
+  // refused start sets neither.
+  const [startedFrom, setStartedFrom] = useStateA(null);
+  const treatAsRunning = match.status === "scheduled"
+    && (started || (startedFrom !== null && startedFrom.at === match.modifiedAt));
+  const m = useMemoA(() => (treatAsRunning ? { ...match, status: "running" } : match), [match, treatAsRunning]);
   const isComplete = m.status === "completed";
   // Canonical team check (matches admin_pools.jsx and the lineup panel):
   // compKind OR a positive teamSize. A team competition created with only
@@ -900,7 +913,7 @@ export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, on
   }
   // Team routing: forward to TeamScoreEditorModal.
   if (isTeam) {
-    return <TeamScoreEditorModal match={m} teamSize={teamSize} onClose={onClose} onSubmit={onSubmit} onSubmitAndNext={onSubmitAndNext} onAfterDecision={onAfterDecision} onWithdrawal={onWithdrawal} onBoardChange={onBoardChange} prevMatch={prevMatch} nextMatch={nextMatch} onPrev={onPrev} onNext={onNext} password={password} selfReport={selfReport} variant={variant} canClose={canClose} />;
+    return <TeamScoreEditorModal match={m} teamSize={teamSize} onClose={onClose} onSubmit={onSubmit} onSubmitAndNext={onSubmitAndNext} onAfterDecision={onAfterDecision} onWithdrawal={onWithdrawal} onBoardChange={onBoardChange} onStartLanded={() => setStartedFrom({ at: match.modifiedAt })} prevMatch={prevMatch} nextMatch={nextMatch} onPrev={onPrev} onNext={onNext} password={password} selfReport={selfReport} variant={variant} canClose={canClose} />;
   }
 
   // a11y: label the dialog with the match/court context so screen readers
@@ -1367,6 +1380,7 @@ export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, on
                   // lives in notLandedBanner; see write_result.jsx.
                   const banner = notLandedBanner(res);
                   if (banner) setWriteFailed(banner);
+                  else setStartedFrom({ at: match.modifiedAt });
                 }} disabled={submitting}>
                   Start match
                 </button>

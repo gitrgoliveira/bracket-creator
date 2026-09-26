@@ -755,7 +755,7 @@ export function reconcileRowsToPositions(rows, serverRows) {
 // another device to the same bout is adopted once the window has passed.
 const RECENT_EDIT_GUARD_MS = AUTOSAVE_DEBOUNCE_MS + 1200;
 
-export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSubmitAndNext, onAfterDecision, onWithdrawal, onBoardChange, prevMatch, nextMatch, onPrev, onNext, password, selfReport, variant = "modal", canClose = true }) {
+export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSubmitAndNext, onAfterDecision, onWithdrawal, onBoardChange, onStartLanded, prevMatch, nextMatch, onPrev, onNext, password, selfReport, variant = "modal", canClose = true }) {
   // mp-gmcg: a successful [× Remove this bout] shrinks the SERVER bout log, and
   // the parent may not have caught up when this render runs. matchOverride
   // shadows the prop so the removed bout disappears at once, and is cleared
@@ -1855,6 +1855,24 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
     }
     setEnchoPeriodCount(cnt => cnt + 1);
     updateSub(kachinukiLastScoredIdx, prev => ({ ...prev, encho: (prev.encho || 0) + 1, draw: false, _preFusensho: undefined }));
+    setEndArmed(false);
+  };
+  // bc-kenu (operator ruling 2026-09-26: every mistake undoable in one step):
+  // bout mode hides the overtime stepper, so an Encho tapped by mistake (or
+  // twice) had no way back while the bout was fought. Undo takes back one
+  // period, offered while the bout is still level (nothing decided in encho).
+  // Taking back the last period restores the tie: Encho is only ever offered
+  // on a tied bout, and applying it cleared the Tie toggle.
+  const kachinukiCurBout = kachinukiBoutMode && kachinukiCurBoutIdx >= 0 ? subs[kachinukiCurBoutIdx] : null;
+  const kachinukiEnchoUndoable = !!kachinukiCurBout && (kachinukiCurBout.encho || 0) > 0
+    && kachinukiCurBout.aPts.length === kachinukiCurBout.bPts.length;
+  const undoKachinukiEncho = () => {
+    if (!kachinukiEnchoUndoable) return;
+    setEnchoPeriodCount(cnt => Math.max(0, cnt - 1));
+    updateSub(kachinukiCurBoutIdx, prev => {
+      const encho = (prev.encho || 0) - 1;
+      return encho > 0 ? { ...prev, encho } : { ...prev, encho: 0, draw: true };
+    });
     setEndArmed(false);
   };
   // Manual next bout (mp-gmcg): the server auto-append can only pair
@@ -3859,6 +3877,9 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
                   // lives in notLandedBanner; see write_result.jsx.
                   const banner = notLandedBanner(res);
                   if (banner) setWriteFailed(banner);
+                  // bc-strt: the start landed, so ScoreEditorModal treats the
+                  // match as running before the host's list catches up.
+                  else if (typeof onStartLanded === "function") onStartLanded();
                 }} disabled={submitting}>Start match</button>
               )}
               {/* mp-gmcg: mistake recovery on a completed kachinuki match:
@@ -3950,6 +3971,18 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
                     title="Overtime: the same pair keeps fighting this bout"
                   >
                     Encho
+                  </button>
+                )}
+                {kachinukiEnchoUndoable && (
+                  <button
+                    type="button"
+                    className="btn btn--ghost"
+                    data-testid="kachinuki-encho-undo-button"
+                    onClick={undoKachinukiEncho}
+                    disabled={submitting}
+                    title="Take back one overtime period on this bout"
+                  >
+                    Undo encho
                   </button>
                 )}
                 <button type="button" className={`btn ${endArmed ? "btn--confirm" : ""}`} data-testid="kachinuki-end-match-button" onClick={() => {

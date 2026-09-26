@@ -1274,3 +1274,61 @@ describe('Send back to queue says what it discards and never discards fought bou
     } finally { c.restore(); }
   });
 });
+
+// bc-strt: the console opens a match its Up next card started while the court
+// list still says scheduled. It tells the editor so (`started`), for the
+// scheduled snapshot the start was made from and no other, so a point struck
+// before the refetch saves at once and a later send back to the queue is not
+// mistaken for a start.
+describe('the editor is told a match the console started is running (bc-strt)', () => {
+  it('passes started for the snapshot it started, and only that one', async () => {
+    const side = (id, name) => ({ id, name });
+    const m1 = {
+      id: 'm1', compId: 'c1', compName: 'Cup', status: 'scheduled', phase: 'pool', poolName: 'Pool A',
+      court: 'A', scheduledAt: '09:00', sideA: side('p1', 'Yamada'), sideB: side('p2', 'Tanaka'), modifiedAt: 100,
+    };
+    const m2 = { ...m1, id: 'm2', scheduledAt: '09:05', sideA: side('p3', 'Sato'), sideB: side('p4', 'Kato') };
+    let current = [m1, m2];
+    window.tournamentMatches = () => current;
+    const prevFetch = window.API.fetchCourtMatches;
+    const prevSub = window.API.subscribeToEvents;
+    window.API.fetchCourtMatches = vi.fn().mockImplementation(() => Promise.resolve([{ id: 'c1', name: 'Cup' }]));
+    window.API.subscribeToEvents = () => () => {};
+    let startResult = { applied: false, reason: 'clock_skew' };
+    const onEditScore = vi.fn().mockImplementation(() => Promise.resolve(startResult));
+    try {
+      let utils;
+      await act(async () => { utils = renderPage(makeMinimalTournament(), 'A', { onEditScore }); });
+      const start = async () => {
+        const card = utils.container.querySelector('.shiaijo-upnext__card');
+        const btn = [...card.querySelectorAll('button')].find((b) => /start match/i.test(b.textContent));
+        await act(async () => { btn.click(); });
+      };
+      const refresh = async () => { await act(async () => { utils.getByRole('button', { name: /refresh/i }).click(); }); };
+
+      // A refused start is no start.
+      await start();
+      expect(onEditScore).toHaveBeenCalledTimes(1);
+      expect(probe.props?.started || false).toBe(false);
+
+      startResult = { applied: true };
+      await start();
+      expect(probe.props.match.id).toBe('m1');
+      expect(probe.props.match.status, 'the list has not caught up yet').toBe('scheduled');
+      expect(probe.props.started).toBe(true);
+
+      // The list catches up; later the match goes back to the queue, which
+      // stamps it. That scheduled snapshot was not started.
+      current = [{ ...m1, status: 'running', modifiedAt: 200 }, m2];
+      await refresh();
+      current = [{ ...m1, modifiedAt: 300 }, m2];
+      await refresh();
+      expect(probe.props.match.id, 'the pick still holds the panel').toBe('m1');
+      expect(probe.props.match.status).toBe('scheduled');
+      expect(probe.props.started).toBe(false);
+    } finally {
+      window.API.fetchCourtMatches = prevFetch;
+      window.API.subscribeToEvents = prevSub;
+    }
+  });
+});

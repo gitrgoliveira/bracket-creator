@@ -1,7 +1,7 @@
 // Score editor components extracted from admin_schedule.jsx (mp-d7tl).
 // startPatch, ScoreEditCourtBtn (local), AdminScoreEditor, AdminScoreEditorPage.
 
-import { writeDidNotLand } from './write_result.jsx';
+import { writeDidNotLand, writeKeepsEditorOpen } from './write_result.jsx';
 import { matchMentions } from './competitor_search.jsx';
 import { SideCell } from './side_cell.jsx';
 import { allMatchesCompleted } from './admin_schedule_utils.jsx';
@@ -394,11 +394,12 @@ export function AdminScoreEditor({ t, c, onEditScore, onMoveCourt, restrictToCom
               try {
                 const res = await onEditScore(openMatch.compId, openMatch.id, patch, openMatch);
                 if (!mountedRef.current) return res;
-                // A write that did not land must not CLOSE the modal: doing so
-                // is a false success. Queued (F5) or superseded (bc-lww1) alike,
-                // the editor keeps the operator's entry on screen with its
-                // not-saved banner.
-                if (writeDidNotLand(res)) return res;
+                // Whether the modal stays open is writeKeepsEditorOpen's
+                // (write_result.jsx), the rule every host asks. A write that did
+                // not land must not CLOSE the modal: doing so is a false
+                // success. Queued (F5) or superseded (bc-lww1) alike, the editor
+                // keeps the operator's entry on screen with its not-saved banner.
+                //
                 // ▶ Start Match: keep the operator IN the scoring surface rather
                 // than dumping them back to the list (which forced a re-find +
                 // reopen per match). A "start" patch is status:running with no
@@ -418,7 +419,7 @@ export function AdminScoreEditor({ t, c, onEditScore, onMoveCourt, restrictToCom
                 // two `setOpenMatch(prev => ({...prev, status:"running"}))`
                 // patches that used to sit here (and the freshSubs they carried)
                 // were compensating for the snapshot, partially.
-                if (patch.status === "running" && !patch.winner) {
+                if (writeKeepsEditorOpen(patch, res)) {
                   // mp-gmcg review C1: also hand `res` back to the modal itself. A
                   // prior [Remove this bout] can leave the modal's local
                   // matchOverride shadowing THIS prop, and a Record-bout append can

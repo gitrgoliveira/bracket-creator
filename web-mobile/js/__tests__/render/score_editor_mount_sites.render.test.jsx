@@ -435,7 +435,7 @@ describe('every mount site hands the editor what a write came back with (bc-strt
 // write dropped them out of the match after one point. And a write that did
 // not land (queued offline, or superseded) must not look saved.
 
-describe('the pools and bracket editors close only on a saved result', () => {
+describe('the pools and bracket editors close only on a saved result (bc-plcl)', () => {
   const editorOpen = () => !!screen.queryByTestId('probe-score-editor');
   const submit = async (patch) => { await act(async () => { await probe.props.onSubmit(patch); }); };
 

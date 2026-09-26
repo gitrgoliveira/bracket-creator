@@ -18,7 +18,7 @@ import { NO_ID_POOL_HINT, NoIdHint } from './data_integrity.jsx';
 // has started, and the server refuses it like a pool result correction
 // (downstream_knockout_played): the chusen writes go through the same
 // confirm-and-retry every score write uses.
-import { attemptScoreWrite, DOWNSTREAM_KNOCKOUT_RANKING_CANCELLED, writeDidNotLand } from './write_result.jsx';
+import { attemptScoreWrite, DOWNSTREAM_KNOCKOUT_RANKING_CANCELLED, writeKeepsEditorOpen } from './write_result.jsx';
 import { rankOrdinal } from './viewer_standings.jsx';
 
 const { useState: useStateA, useEffect: useEffectA, useRef: useRefA, useMemo: useMemoA } = React;
@@ -736,13 +736,9 @@ function AdminPools({ c, pools, poolMatches, standings, tweaks, onEditScore, pas
       onSubmit={async (patch) => {
         try {
           const res = await onEditScore(c.id, scoreOpenMatch.id, patch, scoreOpenMatch);
-          // Close only on a saved result. A start, each autosaved point and a
-          // kachinuki Record bout are running writes the operator keeps
-          // scoring after, and a write that did not land must not look saved
-          // (the Scores tab's rule, admin_schedule_score_editor.jsx).
-          if (mountedRef.current && patch.status !== "running" && !writeDidNotLand(res)) setScoreOpenId(null);
           // What the write came back with: a refused one threw and returns
           // nothing, which is how the editor tells them apart.
+          if (mountedRef.current && !writeKeepsEditorOpen(patch, res)) setScoreOpenId(null);
           return res;
         } catch (_err) { /* keep modal open on error */ }
       }}

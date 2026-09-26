@@ -40,6 +40,19 @@ export function writeDidNotLand(res) {
     return !!res && (res.queued === true || res.applied === false);
 }
 
+// writeKeepsEditorOpen: does a score editor's host leave the editor open after
+// this write (bc-plcl)? Every host asks it, so none hand-writes its own answer
+// (the Pools tab once closed on every write and the bracket panel on a
+// correction that never landed).
+//   - A write that did not land (queued, superseded, clock_skew) keeps the
+//     entry on screen with its not-saved banner.
+//   - A running write with no winner (Start match, a per-point autosave, a
+//     kachinuki Record bout) leaves the bout live on the board.
+//   - Anything else (a finish, a correction, a draw) is the editor's job done.
+export function writeKeepsEditorOpen(patch, res) {
+    return writeDidNotLand(res) || (!!patch && patch.status === "running" && !patch.winner);
+}
+
 // SUPERSEDED_REASON / SUPERSEDED_ADVICE: the copy for the one case where
 // re-entering is the wrong move (bc-lww1). Every OTHER write failure ends in
 // "re-enter the result", and here that is actively wrong: re-entering

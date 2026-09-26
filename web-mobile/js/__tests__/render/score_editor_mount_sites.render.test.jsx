@@ -353,6 +353,38 @@ describe('mount site: admin_schedule_score_editor.jsx (Scores tab)', () => {
     expect(w.onAfterDecision).toBe('null');
   });
 
+  // The automatic next match stays in the open match's competition (operator
+  // ruling 2026-09-26: an operator view never switches competition or court by
+  // itself). This page lists every competition, so another competition's match
+  // can come next on the same court; Prev/Next, which the operator taps, still
+  // move along the whole court.
+  describe('the automatic next match stays in the competition', () => {
+    const others = () => [
+      runningMatch(),
+      runningMatch({ id: 'x1', compId: 'c2', compName: 'Other', status: 'scheduled', sideA: { id: 'q1', name: 'Kudo' }, sideB: { id: 'q2', name: 'Mori' } }),
+      runningMatch({ id: 'm3', status: 'scheduled', sideA: { id: 'p3', name: 'Suzuki' }, sideB: { id: 'p4', name: 'Ito' } }),
+    ];
+    const openFirst = async (onEditScore) => {
+      await mountSchedule(onEditScore, others());
+      await act(async () => { fireEvent.click(document.querySelector('button.test-score-open')); });
+    };
+
+    it('Finish + Start Next starts the next match of the same competition', async () => {
+      const onEditScore = vi.fn().mockResolvedValue({ status: 'running' });
+      await openFirst(onEditScore);
+      expect(probe.props.nextMatch.id, 'Next still moves along the whole court').toBe('x1');
+      await act(async () => { await probe.props.onSubmitAndNext({ status: 'completed', winner: 'Yamada' }); });
+      expect(onEditScore.mock.calls.map((c) => c[1])).toEqual(['m1', 'm3']);
+    });
+
+    it('the start after a decision picks the next match of the same competition', async () => {
+      const onEditScore = vi.fn().mockResolvedValue({ status: 'running' });
+      await openFirst(onEditScore);
+      await act(async () => { await probe.props.onAfterDecision({ id: 'm1', status: 'completed', decision: 'hikiwake' }); });
+      expect(onEditScore.mock.calls.map((c) => c[1])).toEqual(['m3']);
+    });
+  });
+
   // Recording a withdrawal starts the court's next match, as a no-show does
   // (mp-nwds item 7). The list shows the withdrawn competitor's own matches
   // barred only after it refreshes, so the advance passes over them itself.

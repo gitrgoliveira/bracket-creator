@@ -374,8 +374,13 @@ export function AdminScoreEditor({ t, c, onEditScore, onMoveCourt, restrictToCom
         // `withdrawn` is a competitor a decision just barred
         // (sideBarredByDecision): this list shows their matches barred only
         // after it refreshes, so the after-decision advance skips them itself.
+        // The AUTOMATIC advance also stays in the open match's competition
+        // (operator ruling 2026-09-26: an operator view never switches
+        // competition or court by itself), as the court console's does; this
+        // page can list every competition, and Prev/Next, which the operator
+        // taps, still move along the whole court.
         const nextActiveFrom = (withdrawn = null) => openIdx >= 0
-          ? sameCourt.slice(openIdx + 1).find(m => m.status !== 'completed' && !isBarredMatch(m) && !involvesCompetitor(m, withdrawn)) || null
+          ? sameCourt.slice(openIdx + 1).find(m => m.compId === openMatch.compId && m.status !== 'completed' && !isBarredMatch(m) && !involvesCompetitor(m, withdrawn)) || null
           : null;
         const nextActiveMatch = nextActiveFrom();
         // Minimal "start" patch (status → running, empty score). Mirrors the
@@ -457,7 +462,8 @@ export function AdminScoreEditor({ t, c, onEditScore, onMoveCourt, restrictToCom
                 // buried the message that actually explains what happened.
                 if (writeDidNotLand(res)) return res;
                 // "Finish + Start Next →": land on the next match on the SAME
-                // shiaijo AND actually start it (honest to the label). If the
+                // shiaijo in the SAME competition AND actually start it
+                // (honest to the label). If the
                 // next match is already running/completed, just open it. Start
                 // gating runs server-side (StartMatchTx); a 409 throws: we
                 // catch it so the operator still lands on the next match (in

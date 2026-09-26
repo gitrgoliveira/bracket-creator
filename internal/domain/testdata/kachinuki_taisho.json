@@ -1,5 +1,5 @@
 {
-  "_comment": "Shared Go/JS table for the kachinuki encho rule (bc-kten): only taisho against taisho may go to encho. known is true only when the lineups settle it: a fighter placed before a team-mate is provably not the taisho; both fighters holding their lineup's last slot is taisho against taisho; anything else (no lineup, a fighter the lineup does not place) is unknown and never refused. Go: TestKachinukiTaishoPairingGolden (internal/domain). JS: kachinuki_taisho_golden.test.jsx. A lineup is the wire shape {positions, memberIds}; null means no lineup is in force.",
+  "_comment": "Shared Go/JS table for the kachinuki encho rule (bc-kten): only taisho against taisho may go to encho. known is true only when the lineups settle it: a fighter with a team-mate placed after them who has not fought yet in this encounter (foughtA/foughtB: the fighters each team put up in the bouts before this one; omitted means none) is provably not in the last bout; both fighters with nobody placed after them still to fight is taisho against taisho; anything else (no lineup, a fighter the lineup does not place) is unknown and never refused. Go: TestKachinukiTaishoPairingGolden (internal/domain). JS: kachinuki_taisho_golden.test.jsx. A lineup is the wire shape {positions, memberIds}; null means no lineup is in force.",
   "cases": [
     {
       "name": "5-person, both taisho, by member id",
@@ -493,6 +493,267 @@
         "memberId": ""
       },
       "taisho": false,
+      "known": true
+    },
+    {
+      "name": "a mid-encounter pairing in lineup order: the team-mates still to come settle it",
+      "teamSize": 5,
+      "lineupA": {
+        "positions": {
+          "senpo": "A1",
+          "jiho": "A2",
+          "chuken": "A3",
+          "fukusho": "A4",
+          "taisho": "A5"
+        },
+        "memberIds": {
+          "senpo": "a1",
+          "jiho": "a2",
+          "chuken": "a3",
+          "fukusho": "a4",
+          "taisho": "a5"
+        }
+      },
+      "lineupB": {
+        "positions": {
+          "senpo": "B1",
+          "jiho": "B2",
+          "chuken": "B3",
+          "fukusho": "B4",
+          "taisho": "B5"
+        },
+        "memberIds": {
+          "senpo": "b1",
+          "jiho": "b2",
+          "chuken": "b3",
+          "fukusho": "b4",
+          "taisho": "b5"
+        }
+      },
+      "a": {
+        "name": "A2",
+        "memberId": "a2"
+      },
+      "b": {
+        "name": "B1",
+        "memberId": "b1"
+      },
+      "foughtA": [
+        {
+          "name": "A1",
+          "memberId": "a1"
+        }
+      ],
+      "foughtB": [],
+      "taisho": false,
+      "known": true
+    },
+    {
+      "name": "out of lineup order: every team-mate placed after the fighter has fought, so this is the last bout",
+      "teamSize": 5,
+      "lineupA": {
+        "positions": {
+          "senpo": "A1",
+          "jiho": "A2",
+          "chuken": "A3",
+          "fukusho": "A4",
+          "taisho": "A5"
+        },
+        "memberIds": {
+          "senpo": "a1",
+          "jiho": "a2",
+          "chuken": "a3",
+          "fukusho": "a4",
+          "taisho": "a5"
+        }
+      },
+      "lineupB": {
+        "positions": {
+          "senpo": "B1",
+          "jiho": "B2",
+          "chuken": "B3",
+          "fukusho": "B4",
+          "taisho": "B5"
+        },
+        "memberIds": {
+          "senpo": "b1",
+          "jiho": "b2",
+          "chuken": "b3",
+          "fukusho": "b4",
+          "taisho": "b5"
+        }
+      },
+      "a": {
+        "name": "A2",
+        "memberId": "a2"
+      },
+      "b": {
+        "name": "B5",
+        "memberId": "b5"
+      },
+      "foughtA": [
+        {
+          "name": "A1",
+          "memberId": "a1"
+        },
+        {
+          "name": "A5",
+          "memberId": "a5"
+        },
+        {
+          "name": "A3",
+          "memberId": "a3"
+        },
+        {
+          "name": "A4",
+          "memberId": "a4"
+        }
+      ],
+      "foughtB": [
+        {
+          "name": "B1",
+          "memberId": "b1"
+        },
+        {
+          "name": "B2",
+          "memberId": "b2"
+        },
+        {
+          "name": "B3",
+          "memberId": "b3"
+        },
+        {
+          "name": "B4",
+          "memberId": "b4"
+        }
+      ],
+      "taisho": true,
+      "known": true
+    },
+    {
+      "name": "out of lineup order: one team-mate placed after the fighter is still to fight",
+      "teamSize": 5,
+      "lineupA": {
+        "positions": {
+          "senpo": "A1",
+          "jiho": "A2",
+          "chuken": "A3",
+          "fukusho": "A4",
+          "taisho": "A5"
+        },
+        "memberIds": {
+          "senpo": "a1",
+          "jiho": "a2",
+          "chuken": "a3",
+          "fukusho": "a4",
+          "taisho": "a5"
+        }
+      },
+      "lineupB": {
+        "positions": {
+          "senpo": "B1",
+          "jiho": "B2",
+          "chuken": "B3",
+          "fukusho": "B4",
+          "taisho": "B5"
+        },
+        "memberIds": {
+          "senpo": "b1",
+          "jiho": "b2",
+          "chuken": "b3",
+          "fukusho": "b4",
+          "taisho": "b5"
+        }
+      },
+      "a": {
+        "name": "A2",
+        "memberId": "a2"
+      },
+      "b": {
+        "name": "B5",
+        "memberId": "b5"
+      },
+      "foughtA": [
+        {
+          "name": "A1",
+          "memberId": "a1"
+        },
+        {
+          "name": "A5",
+          "memberId": "a5"
+        },
+        {
+          "name": "A3",
+          "memberId": "a3"
+        }
+      ],
+      "foughtB": [
+        {
+          "name": "B1",
+          "memberId": "b1"
+        },
+        {
+          "name": "B2",
+          "memberId": "b2"
+        },
+        {
+          "name": "B3",
+          "memberId": "b3"
+        },
+        {
+          "name": "B4",
+          "memberId": "b4"
+        }
+      ],
+      "taisho": false,
+      "known": true
+    },
+    {
+      "name": "a team-mate who fought is matched by name when the bout row carries no member id",
+      "teamSize": 3,
+      "lineupA": {
+        "positions": {
+          "1": "A1",
+          "2": "A2",
+          "3": "A3"
+        }
+      },
+      "lineupB": {
+        "positions": {
+          "1": "B1",
+          "2": "B2",
+          "3": "B3"
+        }
+      },
+      "a": {
+        "name": "A1",
+        "memberId": ""
+      },
+      "b": {
+        "name": "B3",
+        "memberId": ""
+      },
+      "foughtA": [
+        {
+          "name": "A3",
+          "memberId": ""
+        },
+        {
+          "name": "A2",
+          "memberId": ""
+        }
+      ],
+      "foughtB": [
+        {
+          "name": "B1",
+          "memberId": ""
+        },
+        {
+          "name": "B2",
+          "memberId": ""
+        }
+      ],
+      "taisho": true,
       "known": true
     }
   ]

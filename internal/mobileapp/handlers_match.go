@@ -2420,6 +2420,13 @@ func registerScoreHandler(r *gin.RouterGroup, eng ScoringEngine, store Competiti
 			return
 		}
 		req := body.ScoreRequest
+		// startOnly keeps the stored score in place of the payload's, after
+		// the payload is validated, so on anything but a start the verdict
+		// would rest on a scoreline nothing checked it against.
+		if body.StartOnly && req.Status != state.MatchStatusRunning {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "startOnly is only for a write that starts the match (status running)"})
+			return
+		}
 		// Kachinuki exception (mp-gmcg): a tied kachinuki pairing may be
 		// fought on in overtime on that same bout, in ANY phase — whether the
 		// final pairing must produce a result is operator discretion

@@ -69,6 +69,11 @@ const el = (match, onSubmit, props = {}) => (
   <ScoreEditorModal match={match} onClose={vi.fn()} onSubmit={onSubmit} password="" {...props} />
 );
 
+// What a host returns for a write that reached the server: the stored
+// match. A refused write throws inside the host, which reports it and
+// returns nothing.
+const LANDED = { status: 'running' };
+
 // The writes after the Start match one: the autosaves.
 const autosaves = (onSubmit) => onSubmit.mock.calls.map((c) => c[0]).filter((p) => p.status === 'running').slice(1);
 
@@ -86,7 +91,7 @@ const strikeKachinukiAkaMen = async () => {
 
 describe('a point struck right after Start match saves at once (bc-strt)', () => {
   it('individual: the editor\'s own start lands, the list still says scheduled', async () => {
-    const onSubmit = vi.fn().mockResolvedValue(undefined);
+    const onSubmit = vi.fn().mockResolvedValue(LANDED);
     await act(async () => { render(el(individual(), onSubmit)); });
     await tapStart();
     expect(onSubmit.mock.calls[0][0].status, 'precondition: Start match wrote running').toBe('running');
@@ -122,7 +127,7 @@ describe('a point struck right after Start match saves at once (bc-strt)', () =>
   });
 
   it('a later snapshot of the match (sent back to the queue) ends it', async () => {
-    const onSubmit = vi.fn().mockResolvedValue(undefined);
+    const onSubmit = vi.fn().mockResolvedValue(LANDED);
     let utils;
     await act(async () => { utils = render(el(individual(), onSubmit)); });
     await tapStart();
@@ -141,7 +146,7 @@ describe('a point struck right after Start match saves at once (bc-strt)', () =>
   });
 
   it('kachinuki: the team editor\'s start lands, the list still says scheduled', async () => {
-    const onSubmit = vi.fn().mockResolvedValue(undefined);
+    const onSubmit = vi.fn().mockResolvedValue(LANDED);
     await act(async () => { render(el(kachinuki(), onSubmit)); });
     await tapStart();
     expect(onSubmit.mock.calls[0][0].status, 'precondition: Start match wrote running').toBe('running');
@@ -151,5 +156,28 @@ describe('a point struck right after Start match saves at once (bc-strt)', () =>
     expect(saves.length, 'the point is autosaved without waiting for the list').toBe(1);
     const bout1 = (saves[0].subResults || []).find((s) => s.position === 1);
     expect(bout1 && bout1.ipponsA).toEqual(['M']);
+  });
+
+  // The court is busy or a competitor is withdrawn: the server answers with
+  // an error, the host shows it and returns nothing. Nothing was stored, so
+  // the match is still waiting and a point struck now is not a running write.
+  it('individual: a start the server refused with an error leaves the match scheduled', async () => {
+    const onSubmit = vi.fn().mockResolvedValue(undefined);
+    await act(async () => { render(el(individual(), onSubmit)); });
+    await tapStart();
+    expect(onSubmit).toHaveBeenCalledTimes(1);
+    expect(screen.getByText('Start match'), 'the operator can try again').toBeTruthy();
+    await strikeIndividualMen();
+    expect(onSubmit, 'nothing was started, so nothing autosaves').toHaveBeenCalledTimes(1);
+  });
+
+  it('kachinuki: a start the server refused with an error leaves the match scheduled', async () => {
+    const onSubmit = vi.fn().mockResolvedValue(undefined);
+    await act(async () => { render(el(kachinuki(), onSubmit)); });
+    await tapStart();
+    expect(onSubmit).toHaveBeenCalledTimes(1);
+    expect(screen.getByText('Start match'), 'the operator can try again').toBeTruthy();
+    await strikeKachinukiAkaMen();
+    expect(onSubmit, 'nothing was started, so nothing autosaves').toHaveBeenCalledTimes(1);
   });
 });

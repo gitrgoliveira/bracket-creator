@@ -825,10 +825,9 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
 
     // The scoring panel shows the match the operator is officiating. By default
     // that's the running (NOW) bout, but the operator may pick any upcoming
-    // match to run out of order via its "Score" button (pickMatch). Picking is
-    // governed by two rules in pickMatch: it is BLOCKED while the current bout
-    // has scoring in progress (you must finish or correct it first), and an
-    // unscored current bout is DEFERRED one slot before the new pick starts.
+    // match to run out of order via its "Score" button (pickMatch). A running
+    // current bout is sent back to the queue first, keeping any score entered
+    // for it (bc-sbq), so the court never has two running bouts.
     // A pickedMatch that completes (or vanishes) falls back to running[0]: the
     // find() filters out completed matches and the `pickedMatch || running[0]`
     // expression covers the null case. This keeps the finish-advance flow clean
@@ -1688,10 +1687,12 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
                                             // them to go and check. A queued write still advances (it
                                             // reconciles on reconnect); see writeWasSuperseded.
                                             if (!writeWasSuperseded(res)) maybeAdvanceLocal(selectedMatch, patch);
-                                            // A write that did not land (queued, F5; or superseded by a
-                                            // newer stored result, bc-lww1) returns its signal so the
-                                            // editor shows the not-saved banner rather than looking saved.
-                                            if (writeDidNotLand(res)) return res;
+                                            // What the write came back with, so the editor shows the
+                                            // not-saved banner for one that did not land (queued, F5; or
+                                            // superseded by a newer stored result, bc-lww1) and tells a
+                                            // landed start from a refused one, which threw and returns
+                                            // nothing.
+                                            return res;
                                         }
                                         catch (_e) { /* surfaced via toast */ }
                                     }}

@@ -46,3 +46,23 @@ func TestScoreHandler_StartOnlyKeepsTheQueuedScore(t *testing.T) {
 	assert.Empty(t, cleared.IpponsA, "without the flag the empty board is the operator's word")
 	assert.Equal(t, 0, cleared.HansokuB)
 }
+
+// startOnly swaps the stored score in after validation, so a write that also
+// completes the match would store a winner on a scoreline nothing checked.
+func TestScoreHandler_StartOnlyIsOnlyForAStart(t *testing.T) {
+	const compID = "start-only-completes"
+	r, store := setupKachinukiScoreServer(t, compID)
+	require.NoError(t, store.SaveCompetition(&state.Competition{ID: compID, Format: state.CompFormatMixed, Status: state.CompStatusPools}))
+	require.NoError(t, store.SavePoolMatches(compID, []state.MatchResult{
+		{ID: "P1-0", SideA: "Alice", SideB: "Bob", Status: state.MatchStatusScheduled, IpponsB: []string{"M"}},
+	}))
+
+	w := putScore(t, r, compID, "P1-0", map[string]any{
+		"sideA": "Alice", "sideB": "Bob", "status": "completed", "winner": "Alice",
+		"ipponsA": []string{"M", "K"}, "ipponsB": []string{}, "startOnly": true,
+	})
+	require.Equal(t, http.StatusBadRequest, w.Code, w.Body.String())
+	m := loadPoolMatch(t, store, compID, "P1-0")
+	assert.Equal(t, state.MatchStatusScheduled, m.Status, "nothing was stored")
+	assert.Empty(t, m.Winner)
+}

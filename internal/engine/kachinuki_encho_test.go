@@ -71,6 +71,19 @@ func TestKachinukiEnchoRefusal_TaishoAgainstTaishoIsAccepted(t *testing.T) {
 	assert.NoError(t, err)
 }
 
+// The operator may pick a later bout's fighter out of lineup order. Here R3
+// fought bout 2, so R2, placed before R3, is Red's last fighter and bout 3 is
+// the last bout: refusing its encho would leave a tied knockout no way to
+// finish. The write carries bout 3 alone, so who fought is read from the
+// stored bouts.
+func TestKachinukiEnchoRefusal_LastBoutAfterAnOutOfOrderPickIsAccepted(t *testing.T) {
+	eng := kachinukiEnchoFixture(t, "kten-out-of-order", true, []state.SubMatchResult{
+		drawnFirstBout(), {Position: 2, SideA: "R3", SideB: "W2", Decision: "hikiwake"}, {Position: 3, SideA: "R2", SideB: "W3"},
+	})
+	err := eng.KachinukiEnchoRefusal("kten-out-of-order", "P1-0", []state.SubMatchResult{enchoBout(3, "R2", "W3")})
+	assert.NoError(t, err)
+}
+
 // The names can ride only on the stored row (the server appended the
 // pairing); the check still judges the real fighters.
 func TestKachinukiEnchoRefusal_FightersReadFromTheStoredRow(t *testing.T) {

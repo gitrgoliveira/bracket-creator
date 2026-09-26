@@ -758,6 +758,67 @@ describe('kachinuki Encho is offered only on the current tied bout', () => {
       await waitFor(() => expect(window.API.fetchMatchLineup).toHaveBeenCalledTimes(2));
       expect(screen.getByTestId('kachinuki-encho-button')).toBeTruthy();
     });
+
+    // A later bout's fighter may be picked out of lineup order. A3 fought
+    // bout 2, so A2, placed before A3, is Aka's last fighter, and bout 3 is
+    // the last bout: its tie may go to encho.
+    it('offers Encho on the last bout when a fighter was picked out of lineup order', async () => {
+      await renderEditor({
+        match: completedKachinukiMatch({
+          status: 'running', winner: null,
+          subResults: [drawn(1), { ...drawn(2), sideA: 'A3' }, tiedBout(3, 'A2', 'B3')],
+        }),
+      });
+      await waitFor(() => expect(window.API.fetchMatchLineup).toHaveBeenCalledTimes(2));
+      expect(screen.getByTestId('kachinuki-encho-button')).toBeTruthy();
+    });
+
+    // The tap's re-read cannot tell a failed read from no lineup (both come
+    // back empty), so a failure on venue wifi must not wipe the lineups the
+    // sheet loaded: row 1 takes its fighters' names from them.
+    it('keeps the loaded lineups when the re-read on the tap fails', async () => {
+      let calls = 0;
+      window.API.fetchMatchLineup = vi.fn().mockImplementation(async (_c, teamId) => {
+        calls += 1;
+        if (calls > 2) throw new Error('network');
+        return teamId === 'team-A' ? lineupFor('A') : teamId === 'team-B' ? lineupFor('B') : null;
+      });
+      window.API.fetchTeamLineup = vi.fn().mockRejectedValue(new Error('network'));
+      await renderEditor({
+        match: completedKachinukiMatch({
+          status: 'running', winner: null,
+          subResults: [{ ...drawn(1), sideA: '', sideB: '' }, drawn(2), tiedBout(3, 'A3', 'B3')],
+        }),
+      });
+      await waitFor(() => expect(document.body.textContent).toContain('A1'));
+      await act(async () => { fireEvent.click(screen.getByTestId('kachinuki-encho-button')); });
+      await waitFor(() => expect(document.body.textContent).toContain('(E)'));
+      expect(document.body.textContent, 'row 1 still names its fighters from the lineup').toContain('A1');
+    });
+
+    it('a second tap while the lineups are read adds one period, not two', async () => {
+      let calls = 0;
+      const pending = [];
+      window.API.fetchMatchLineup = vi.fn().mockImplementation((_c, teamId) => {
+        calls += 1;
+        const l = teamId === 'team-A' ? lineupFor('A') : teamId === 'team-B' ? lineupFor('B') : null;
+        if (calls <= 2) return Promise.resolve(l);
+        return new Promise((r) => { pending.push(() => r(l)); });
+      });
+      await renderEditor({
+        match: completedKachinukiMatch({
+          status: 'running', winner: null,
+          subResults: [drawn(1), drawn(2), tiedBout(3, 'A3', 'B3')],
+        }),
+      });
+      const encho = await screen.findByTestId('kachinuki-encho-button');
+      await act(async () => { fireEvent.click(encho); });
+      await act(async () => { fireEvent.click(encho); });
+      await act(async () => { pending.forEach((r) => r()); });
+      await waitFor(() => expect(document.body.textContent).toContain('(E)'));
+      await act(async () => { fireEvent.click(screen.getByTestId('kachinuki-encho-undo-button')); });
+      expect(document.body.textContent, 'one undo takes the only period back').not.toContain('(E)');
+    });
   });
 });
 

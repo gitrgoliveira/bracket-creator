@@ -326,7 +326,7 @@ func alreadyBarredRefusal(decision, playerID string, barred *domain.CompetitorSt
 // against playerID: not eligible, and reinstateable only after an injury kiken
 // (FIK Art. 30). recordIneligibilityFromDecision writes it when the decision
 // is recorded; standingWithdrawalOf rebuilds it when the bar moves to a
-// withdrawal still on record.
+// fusenpai still on record.
 func withdrawalStatus(playerID, decision, matchID string) domain.CompetitorStatus {
 	return domain.CompetitorStatus{
 		PlayerID:      playerID,

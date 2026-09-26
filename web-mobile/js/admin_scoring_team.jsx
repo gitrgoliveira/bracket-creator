@@ -751,8 +751,10 @@ export function reconcileRowsToPositions(rows, serverRows) {
 // court-feed round trip, so a snapshot that predates the operator's write
 // (the feed lags the editor) cannot put back what they just changed. Past it
 // the ordinary per-row rule applies: a row equal to the server's previous
-// value follows the server. Bounded on purpose; a genuine edit made on
-// another device to the same bout is adopted once the window has passed.
+// value follows the server. A change another device makes to the same bout
+// INSIDE the window is not adopted, then or later: the operator touched that
+// row, so it stays theirs, the same outcome as any bout two people edit at
+// once (see the per-row adopt, which leaves that conflict to them).
 const RECENT_EDIT_GUARD_MS = AUTOSAVE_DEBOUNCE_MS + 1200;
 
 export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSubmitAndNext, onAfterDecision, onWithdrawal, onStartLanded, prevMatch, nextMatch, onPrev, onNext, password, selfReport, variant = "modal", canClose = true }) {
@@ -1813,11 +1815,14 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
   // then clear the tied outcome so the SAME pair keeps scoring that bout. The
   // guard mirrors kachinukiEnchoOffered so the keyboard/programmatic path can
   // never target a bout the encounter has already advanced past.
+  // A second tap while the first is still reading the lineups is the same
+  // tap: it must not add a second period.
+  const enchoInFlightRef = useRefA(false);
   const applyKachinukiEncho = async () => {
     // Read at call time, after the render declared it (below). It implies
     // kachinukiEnchoOffered, so the tap can never target a bout the encounter
     // has already advanced past.
-    if (!kachinukiEnchoShown) return;
+    if (!kachinukiEnchoShown || enchoInFlightRef.current) return;
     // bc-kten: judge the pairing again on lineups read NOW. The server judges
     // it on the lineup in force at write time, so a lineup saved on another
     // device since this sheet opened (or one that failed to load then) would
@@ -1825,11 +1830,21 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
     // the operator a refused save to notice and an Undo encho to find.
     const keys = lineupKeysRef.current;
     if (keys) {
-      const [la, lb] = await Promise.all([
-        keys.teamAId ? resolveMatchLineup(m.compId, keys.teamAId, m.id, keys.round, window.API) : null,
-        keys.teamBId ? resolveMatchLineup(m.compId, keys.teamBId, m.id, keys.round, window.API) : null,
-      ]);
+      enchoInFlightRef.current = true;
+      let la, lb;
+      try {
+        [la, lb] = await Promise.all([
+          keys.teamAId ? resolveMatchLineup(m.compId, keys.teamAId, m.id, keys.round, window.API) : null,
+          keys.teamBId ? resolveMatchLineup(m.compId, keys.teamBId, m.id, keys.round, window.API) : null,
+        ]);
+      } finally {
+        enchoInFlightRef.current = false;
+      }
       if (!mountedRef.current) return;
+      // resolveMatchLineup answers null for a failed read as well as for no
+      // lineup, so only a lineup it found replaces the one the sheet loaded.
+      la = la || lineupA;
+      lb = lb || lineupB;
       setLineupA(la);
       setLineupB(lb);
       const { taisho, known } = curBoutTaishoPairing(la, lb);
@@ -2097,10 +2112,21 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
   // because the Encho tap asks it again on lineups read at that moment.
   const curBoutTaishoPairing = (la, lb) => {
     const { aName, bName, aMemberId, bMemberId } = playerNamesForBout(kachinukiCurBoutIdx);
+    // Who each team put up in the bouts before this one: a later bout's
+    // fighter may have been picked out of lineup order.
+    const foughtA = [];
+    const foughtB = [];
+    for (let i = 0; i < kachinukiCurBoutIdx; i++) {
+      if (i === daihyosenIdx) continue;
+      const p = playerNamesForBout(i);
+      foughtA.push({ name: p.aName, memberId: p.aMemberId });
+      foughtB.push({ name: p.bName, memberId: p.bMemberId });
+    }
     return kachinukiTaishoPairing({
       teamSize, lineupA: la, lineupB: lb,
       a: { name: aName, memberId: aMemberId },
       b: { name: bName, memberId: bMemberId },
+      foughtA, foughtB,
     });
   };
   const enchoPairing = kachinukiEnchoOffered ? curBoutTaishoPairing(lineupA, lineupB) : null;
@@ -3856,6 +3882,10 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
                   // silent for. Start match is an explicit operator tap, not
                   // an autosave, so check the awaited result directly.
                   const res = await doSubmit(() => onSubmit(buildPatch("running")));
+                  // A refused start (the court is busy, a competitor is
+                  // withdrawn) stored nothing: the host reported it and
+                  // returns nothing, so the match must not read as started.
+                  if (!res) return;
                   // bc-cse: which not-saved banner, if any. The clock-vs-
                   // supersede ordering (and the silence on a queued write)
                   // lives in notLandedBanner; see write_result.jsx.

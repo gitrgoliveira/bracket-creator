@@ -2270,7 +2270,8 @@ paths:
           write that only starts the match (sets it running): the score the
           stored match already holds (a match sent back to the queue keeps
           one) is kept rather than replaced by the payload's empty scoreline.
-          Without it, an empty scoreline clears the stored one.
+          Without it, an empty scoreline clears the stored one. `startOnly`
+          with any status other than `running` is a 400.
         content:
           application/json:
             schema:

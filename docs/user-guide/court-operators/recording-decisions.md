@@ -109,7 +109,7 @@ What the reopen keeps depends on the match:
 
 A kachinuki team match that ended with a withdrawal or no-show shows the same **Clear withdrawal and reopen** in place of its **Reopen match** button, because the reopen also makes the withdrawn team eligible again. A kachinuki match that ended any other way keeps **Reopen match**.
 
-Removing a withdrawal makes the withdrawn competitor or team eligible again, whichever kind of withdrawal it was, because a withdrawal entered by mistake never happened. This includes a voluntary kiken, which otherwise cannot be reversed. The one exception is a competitor who also has a **Fusenpai** recorded on another match: they did not appear there either, so they stay withdrawn, now because of that match.
+Removing a withdrawal makes the withdrawn competitor or team eligible again, whichever kind of withdrawal it was, because a withdrawal entered by mistake never happened. This includes a voluntary kiken, which otherwise cannot be reversed. The one exception is a competitor who also has a **Fusenpai** recorded on another match: they did not appear there either, so they stay withdrawn, now because of that match, and the match you cleared goes back to the queue instead of in progress. The editor says so beside the button, before you tap it.
 
 **Save correction** on its own never removes a withdrawal. It saves the points or bouts you enter and keeps the withdrawal, its winner and the competitor's eligibility as they were recorded. In an individual match the winner's default-win circles are shown but cannot be changed. Only the withdrawn competitor's points can be corrected, and they are limited to one point, because a competitor with two points has already won the bout.
 

@@ -165,8 +165,11 @@ const RunningMatchPanel = React.memo(({ match, compId, courts, matchNum, onMoveC
             onClose={() => setEditing(false)}
             onSubmit={async (patch) => {
               try {
-                await onEditScore(compId, match.id, patch, match);
+                const res = await onEditScore(compId, match.id, patch, match);
                 setEditing(false); // recorded → fall back to the result card
+                // What the write came back with: a refused one threw and
+                // returns nothing, which is how the editor tells them apart.
+                return res;
               } catch (_e) { /* surfaced via toast in the parent */ }
             }}
             onSubmitAndNext={null}

@@ -735,8 +735,11 @@ function AdminPools({ c, pools, poolMatches, standings, tweaks, onEditScore, pas
       onClose={() => setScoreOpenId(null)}
       onSubmit={async (patch) => {
         try {
-          await onEditScore(c.id, scoreOpenMatch.id, patch, scoreOpenMatch);
+          const res = await onEditScore(c.id, scoreOpenMatch.id, patch, scoreOpenMatch);
           if (mountedRef.current) setScoreOpenId(null);
+          // What the write came back with: a refused one threw and returns
+          // nothing, which is how the editor tells them apart.
+          return res;
         } catch (_err) { /* keep modal open on error */ }
       }}
       onSubmitAndNext={null}

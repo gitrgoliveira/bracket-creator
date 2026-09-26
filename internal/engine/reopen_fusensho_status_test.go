@@ -226,12 +226,55 @@ func TestReopenMatch_ClearingTheOriginMovesTheBarToAChainedFusenpai(t *testing.T
 	assert.Equal(t, "Pool A-1", alice.MatchID, "the bar moves to the withdrawal still on record")
 	assert.Equal(t, "fusenpai at Pool A-1", alice.Reason)
 	assert.False(t, alice.Reinstateable)
+	matches, err := store.LoadPoolMatches(compID)
+	require.NoError(t, err)
+	for _, m := range matches {
+		if m.ID == "Pool A-0" {
+			assert.Equal(t, state.MatchStatusScheduled, m.Status,
+				"Alice is barred by Pool A-1 once the bar moves; RUNNING would strand the operator behind StartMatchTx")
+		}
+	}
 
 	_, err = eng.ReopenMatch(compID, "Pool A-1", "")
 	require.NoError(t, err)
 	statuses, err = store.LoadCompetitorStatus(compID)
 	require.NoError(t, err)
 	assert.True(t, statuses[aliceID].Eligible, "with no withdrawal left on record, Alice can fight again")
+}
+
+// A kiken on another match is never a bar to move to: a second kiken is
+// refused while a bar stands (alreadyBarredRefusal), so one still on record
+// beside a later bar was lifted before that bar was recorded. Here the
+// doctor reinstated Alice after an injury; clearing a later withdrawal
+// recorded by mistake must leave her able to fight, not bar her again from
+// the injury she was cleared of.
+func TestReopenMatch_ClearingAWithdrawalAfterAReinstatementLeavesThemEligible(t *testing.T) {
+	eng, store, _ := setupTestEngine(t)
+	compID := "reopen-after-reinstatement"
+	require.NoError(t, store.SaveCompetition(&state.Competition{ID: compID, Name: compID, Status: state.CompStatusPools}))
+	aliceID, bobID, carolID := helper.NewUUID4(), helper.NewUUID4(), helper.NewUUID4()
+	require.NoError(t, store.SaveParticipants(compID, []domain.Player{
+		{ID: aliceID, Name: "Alice", Dojo: "A"},
+		{ID: bobID, Name: "Bob", Dojo: "B"},
+		{ID: carolID, Name: "Carol", Dojo: "C"},
+	}))
+	require.NoError(t, store.SavePoolMatches(compID, []state.MatchResult{
+		{ID: "Pool A-0", SideA: "Alice", SideB: "Bob", SideAID: aliceID, SideBID: bobID, Status: state.MatchStatusScheduled},
+		{ID: "Pool A-1", SideA: "Alice", SideB: "Carol", SideAID: aliceID, SideBID: carolID, Status: state.MatchStatusScheduled},
+	}))
+	_, _, err := eng.RecordDecision(compID, "Pool A-0", "kiken-injury", "aka", "injured", nil, false)
+	require.NoError(t, err)
+	_, err = eng.ReinstateCompetitor(compID, aliceID)
+	require.NoError(t, err)
+	_, _, err = eng.RecordDecision(compID, "Pool A-1", "kiken-voluntary", "aka", "wrong match", nil, false)
+	require.NoError(t, err)
+
+	_, err = eng.ReopenMatch(compID, "Pool A-1", "")
+	require.NoError(t, err)
+
+	statuses, err := store.LoadCompetitorStatus(compID)
+	require.NoError(t, err)
+	assert.True(t, statuses[aliceID].Eligible, "the doctor cleared Alice; clearing the mistaken withdrawal must not bar her again")
 }
 
 // standingWithdrawalOf reads bracket matches too, through the same

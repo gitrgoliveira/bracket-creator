@@ -1355,6 +1355,10 @@ export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, on
                   // button having saved nothing. Check the awaited result
                   // directly instead of relying on the broadcast.
                   const res = await doSubmit(() => onSubmit(buildPatch("running")));
+                  // A refused start (the court is busy, a competitor is
+                  // withdrawn) stored nothing: the host reported it and
+                  // returns nothing, so the match must not read as started.
+                  if (!res) return;
                   // bc-cse: which not-saved banner, if any. The clock-vs-
                   // supersede ordering (and the silence on a queued write)
                   // lives in notLandedBanner; see write_result.jsx.

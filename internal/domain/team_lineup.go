@@ -217,38 +217,64 @@ const (
 	// entered: the kachinuki score sheet writes row 1 alone into a match
 	// lineup, so its one slot says nothing about who fights last).
 	standingUnknown taishoStanding = iota
-	// standingTaisho: the fighter holds the lineup's last occupied slot.
+	// standingTaisho: nobody placed after the fighter is still to fight: they
+	// hold the lineup's last occupied slot, or every team-mate placed after
+	// them has already fought in this encounter.
 	standingTaisho
-	// standingBeforeTaisho: the fighter holds a slot with a team-mate placed
-	// after it, so they are provably not the taisho.
+	// standingBeforeTaisho: a team-mate placed after the fighter has not
+	// fought yet, so this is provably not the last bout.
 	standingBeforeTaisho
 )
 
-func standingIn(lineup *TeamLineup, teamSize int, f BoutFighter) taishoStanding {
+// standingIn places fighter f in their team's lineup. fought is who has
+// already fought for that team in this encounter: the operator may pick a
+// later bout's fighter out of lineup order, so a team-mate placed after f
+// who has already fought is no longer to come.
+func standingIn(lineup *TeamLineup, teamSize int, f BoutFighter, fought []BoutFighter) taishoStanding {
 	if lineup == nil {
 		return standingUnknown
 	}
 	members := lineup.OrderedMembers(teamSize)
 	for i, slot := range members {
-		if slot.holds(f) {
-			if i == len(members)-1 {
-				return standingTaisho
-			}
-			return standingBeforeTaisho
+		if !slot.holds(f) {
+			continue
 		}
+		for _, later := range members[i+1:] {
+			if !slotHoldsAny(later, fought) {
+				return standingBeforeTaisho
+			}
+		}
+		return standingTaisho
 	}
 	return standingUnknown
+}
+
+func slotHoldsAny(s LineupSlot, fighters []BoutFighter) bool {
+	for _, f := range fighters {
+		if s.holds(f) {
+			return true
+		}
+	}
+	return false
 }
 
 // KachinukiTaishoPairing is the ONE rule for whether a kachinuki bout may go
 // to encho (operator ruling 2026-09-25, bc-kten): only the last bout, taisho
 // against taisho, may. Any other tie retires per the kachinuki mode in force.
 //
-// known is true only when the lineups settle it: either fighter is placed
-// BEFORE a team-mate (provably not the taisho: taisho=false), or both hold
-// their lineup's last occupied slot (taisho=true). Anything else is unknown
-// (known=false): no lineup, an empty one, or a fighter the lineup does not
-// place. Callers must NOT refuse on unknown. A tied knockout bout already has
+// foughtA and foughtB are the fighters each team has already put up in this
+// encounter, the bouts before this one. The last bout is the one where
+// neither team has anyone left to come, so a fighter placed before a
+// team-mate is provably not in it only while that team-mate has not fought:
+// the operator may pick a later bout's fighter out of lineup order, and
+// refusing encho on the real last bout would leave a tied knockout with no
+// way to finish.
+//
+// known is true only when the lineups settle it: either fighter has a
+// team-mate placed after them who has not fought yet (taisho=false), or both
+// have nobody placed after them still to fight (taisho=true). Anything else
+// is unknown (known=false): no lineup, an empty one, or a fighter the lineup
+// does not place. Callers must NOT refuse on unknown. A tied knockout bout already has
 // End match held back, so refusing encho on a guess would leave the court no
 // way to finish; permitting it on a lineup that is merely incomplete is the
 // safe error. A lineup's last entry reads as the taisho even when the rest
@@ -256,9 +282,9 @@ func standingIn(lineup *TeamLineup, teamSize int, f BoutFighter) taishoStanding 
 //
 // JS twin: kachinukiTaishoPairing (web-mobile/js/lineup_resolver.jsx). Both
 // are pinned by internal/domain/testdata/kachinuki_taisho.json.
-func KachinukiTaishoPairing(teamSize int, lineupA, lineupB *TeamLineup, a, b BoutFighter) (taisho, known bool) {
-	sa := standingIn(lineupA, teamSize, a)
-	sb := standingIn(lineupB, teamSize, b)
+func KachinukiTaishoPairing(teamSize int, lineupA, lineupB *TeamLineup, a, b BoutFighter, foughtA, foughtB []BoutFighter) (taisho, known bool) {
+	sa := standingIn(lineupA, teamSize, a, foughtA)
+	sb := standingIn(lineupB, teamSize, b, foughtB)
 	if sa == standingBeforeTaisho || sb == standingBeforeTaisho {
 		return false, true
 	}

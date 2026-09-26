@@ -26,7 +26,10 @@ describe('kachinuki taisho pairing: the shared Go/JS table', () => {
   });
 
   it.each(table.cases.map((c) => [c.name, c]))('%s', (_name, c) => {
-    const got = kachinukiTaishoPairing({ teamSize: c.teamSize, lineupA: c.lineupA, lineupB: c.lineupB, a: c.a, b: c.b });
+    const got = kachinukiTaishoPairing({
+      teamSize: c.teamSize, lineupA: c.lineupA, lineupB: c.lineupB, a: c.a, b: c.b,
+      foughtA: c.foughtA || [], foughtB: c.foughtB || [],
+    });
     expect(got).toEqual({ taisho: c.taisho, known: c.known });
   });
 });

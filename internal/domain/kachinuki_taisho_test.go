@@ -33,8 +33,10 @@ func TestKachinukiTaishoPairingGolden(t *testing.T) {
 				Name     string `json:"name"`
 				MemberID string `json:"memberId"`
 			} `json:"b"`
-			Taisho bool `json:"taisho"`
-			Known  bool `json:"known"`
+			FoughtA []domain.BoutFighter `json:"foughtA"`
+			FoughtB []domain.BoutFighter `json:"foughtB"`
+			Taisho  bool                 `json:"taisho"`
+			Known   bool                 `json:"known"`
 		} `json:"cases"`
 	}
 	require.NoError(t, json.Unmarshal(raw, &table))
@@ -44,7 +46,8 @@ func TestKachinukiTaishoPairingGolden(t *testing.T) {
 		t.Run(tc.Name, func(t *testing.T) {
 			taisho, known := domain.KachinukiTaishoPairing(tc.TeamSize, tc.LineupA, tc.LineupB,
 				domain.BoutFighter{Name: tc.A.Name, MemberID: tc.A.MemberID},
-				domain.BoutFighter{Name: tc.B.Name, MemberID: tc.B.MemberID})
+				domain.BoutFighter{Name: tc.B.Name, MemberID: tc.B.MemberID},
+				tc.FoughtA, tc.FoughtB)
 			assert.Equal(t, tc.Known, known, "known")
 			assert.Equal(t, tc.Taisho, taisho, "taisho")
 		})

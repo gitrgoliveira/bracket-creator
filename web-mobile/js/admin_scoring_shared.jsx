@@ -1524,8 +1524,8 @@ function ReopenFeedback({ ctl, testIdPrefix }) {
   );
 }
 
-// How long RecordedWithdrawal holds its one-tap clear for the competitor
-// status that decides its copy, at most (see statusSettled there).
+// How long RecordedWithdrawal holds its one-tap clear for the answers that
+// decide its copy, at most (see `settled` there).
 export const STATUS_HOLD_MS = 2000;
 
 // RecordedWithdrawal: what a correction of a withdrawal-decided match shows
@@ -1589,11 +1589,45 @@ function RecordedWithdrawal({ match, ctl, disabled = false, singleBout = false }
   // stated beside the button, before it is tapped, rather than in a confirm
   // step. Best-effort: a fetch failure just omits the list rather than
   // blocking the reopen the operator came here to do.
+  //
+  // bc-cse: whether the FUSENSHO's barred competitor (`withdrawn`, the side
+  // THIS match's decisionBy names -- barred elsewhere, not by anything on
+  // this match) is STILL barred, whether that withdrawal is reinstateable,
+  // or whether they are eligible again already (reinstated, or their
+  // earlier withdrawal cleared), so the consequence can name the right
+  // remedy instead of guessing. window.API.fetchCompetitorStatuses always exists
+  // in the app (api_client.jsx); best-effort is only about the FETCH, same
+  // pattern as laterDefaultWins above -- unknown (fetch failed, or no
+  // matching row) reads as "still barred, not reinstateable", the more
+  // conservative of the wrong guesses.
+  // Fetched for EVERY recorded withdrawal, not only a fusensho (bc-kfup): a
+  // fusenpai recorded against a competitor another match already barred
+  // chains onto that bar and records no status of its own, and a kiken whose
+  // competitor was reinstated and then withdrew again elsewhere no longer
+  // names this match either. In both, clearing this match restores nobody
+  // and the server returns it to the queue while the other bar holds
+  // (engine.reopenTargetStatus), exactly as for a fusensho; the status record
+  // is how the editor tells them from an ordinary withdrawal, whose record
+  // names THIS match.
+  //
+  // Both answers decide the copy beside the one-tap clear (a chained fusenpai
+  // in the later list moves the bar too, see barMovesOn), so `settled` holds
+  // the clear until BOTH are in and the copy is never the wrong one.
   const [laterDefaultWins, setLaterDefaultWins] = useStateA(null);
+  const [withdrawnStatus, setWithdrawnStatus] = useStateA(null);
+  const [settled, setSettled] = useStateA(false);
   useEffectA(() => {
-    if (!withdrawn || !match.compId) { setLaterDefaultWins(null); return; }
+    setLaterDefaultWins(null);
+    setWithdrawnStatus(null);
+    if (!withdrawn || !match.compId) { setSettled(true); return; }
     let cancelled = false;
-    (async () => {
+    setSettled(false);
+    // The hold is brief by design: both fetches are best-effort and carry no
+    // timeout, and a request hanging on venue wifi must not keep the one-tap
+    // correction disabled. After the cap the tap is available with the copy
+    // an unknown answer gives (the ordinary one), exactly as a failed fetch.
+    const cap = setTimeout(() => { if (!cancelled) setSettled(true); }, STATUS_HOLD_MS);
+    const later = (async () => {
       try {
         const detail = await window.API.fetchCompetitionDetails(match.compId);
         if (cancelled) return;
@@ -1615,59 +1649,20 @@ function RecordedWithdrawal({ match, ctl, disabled = false, singleBout = false }
         if (!cancelled) setLaterDefaultWins([]);
       }
     })();
-    return () => { cancelled = true; };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [match.compId, match.id, withdrawn?.id, withdrawn?.name]);
-
-  // bc-cse: whether the FUSENSHO's barred competitor (`withdrawn`, the side
-  // THIS match's decisionBy names -- barred elsewhere, not by anything on
-  // this match) is STILL barred, whether that withdrawal is reinstateable,
-  // or whether they are eligible again already (reinstated, or their
-  // earlier withdrawal cleared), so the consequence can name the right
-  // remedy instead of guessing. window.API.fetchCompetitorStatuses always exists
-  // in the app (api_client.jsx); best-effort is only about the FETCH, same
-  // pattern as laterDefaultWins above -- unknown (fetch failed, or no
-  // matching row) reads as "still barred, not reinstateable", the more
-  // conservative of the wrong guesses.
-  // Fetched for EVERY recorded withdrawal, not only a fusensho (bc-kfup): a
-  // fusenpai recorded against a competitor another match already barred
-  // chains onto that bar and records no status of its own, and a kiken whose
-  // competitor was reinstated and then withdrew again elsewhere no longer
-  // names this match either. In both, clearing this match restores nobody
-  // and the server returns it to the queue while the other bar holds
-  // (engine.reopenTargetStatus), exactly as for a fusensho; the status record
-  // is how the editor tells them from an ordinary withdrawal, whose record
-  // names THIS match. statusSettled holds the one-tap clear until the answer
-  // is in, so the copy beside it is never the wrong one.
-  const [withdrawnStatus, setWithdrawnStatus] = useStateA(null);
-  const [statusSettled, setStatusSettled] = useStateA(false);
-  useEffectA(() => {
-    if (!withdrawn?.id || !match.compId) {
-      setWithdrawnStatus(null);
-      setStatusSettled(true);
-      return;
-    }
-    let cancelled = false;
-    setStatusSettled(false);
-    // The hold is brief by design: this fetch is best-effort and carries no
-    // timeout, and a request hanging on venue wifi must not keep the one-tap
-    // correction disabled. After the cap the tap is available with the copy
-    // an unknown status gives (the ordinary one), exactly as a failed fetch.
-    const cap = setTimeout(() => { if (!cancelled) setStatusSettled(true); }, STATUS_HOLD_MS);
-    (async () => {
+    const status = (async () => {
+      if (!withdrawn.id) return;
       try {
         const statuses = await window.API.fetchCompetitorStatuses(match.compId);
         if (cancelled) return;
         setWithdrawnStatus((statuses || []).find(s => s.playerId === withdrawn.id) || null);
       } catch (_e) {
         if (!cancelled) setWithdrawnStatus(null);
-      } finally {
-        if (!cancelled) setStatusSettled(true);
       }
     })();
+    Promise.all([later, status]).then(() => { if (!cancelled) setSettled(true); });
     return () => { cancelled = true; clearTimeout(cap); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [match.compId, withdrawn?.id]);
+  }, [match.compId, match.id, withdrawn?.id, withdrawn?.name]);
   // The barred competitor's record names a DIFFERENT match (see above).
   const barredElsewhere = !!(withdrawnStatus && withdrawnStatus.eligible === false &&
     withdrawnStatus.matchId && withdrawnStatus.matchId !== match.id);
@@ -1678,6 +1673,12 @@ function RecordedWithdrawal({ match, ctl, disabled = false, singleBout = false }
   // server reopens THIS match straight to running rather than the queue
   // (see the fusensho branch below).
   const isEligibleAgain = !!(withdrawnStatus && withdrawnStatus.eligible === true);
+  // bc-kfup: the bar THIS match recorded moves on instead of lifting when a
+  // fusenpai chained onto it is still on record (engine.standingWithdrawalOf):
+  // the competitor stays withdrawn because of that match, so the server
+  // returns this one to the queue too (engine.reopenTargetStatusTx).
+  const barMovesOn = !clearsDefaultWin && !!laterDefaultWins
+    && laterDefaultWins.some(x => x.decision === "fusenpai");
 
   return (
     <div className="decision-recorded" data-testid="recorded-withdrawal" style={{ marginTop: 10, fontSize: 13 }}>
@@ -1704,7 +1705,7 @@ function RecordedWithdrawal({ match, ctl, disabled = false, singleBout = false }
           className="btn btn--sm"
           data-testid="clear-withdrawal-reopen"
           onClick={() => ctl.reopen("")}
-          disabled={disabled || ctl.busy || ctl.landed || !statusSettled}
+          disabled={disabled || ctl.busy || ctl.landed || !settled}
         >
               {/* bc-cse: "Clear default win" -- no "and reopen" -- because a
                   fusensho reopen no longer always lands running: the server
@@ -1712,7 +1713,7 @@ function RecordedWithdrawal({ match, ctl, disabled = false, singleBout = false }
                   is still barred (BarredMatchNotice shows again), and only
                   to running once they no longer are, so this button cannot
                   promise "and reopen" for either outcome uniformly. */}
-              {ctl.busy ? "Reopening…" : ctl.landed ? "Reopened" : !clearsDefaultWin ? "Clear withdrawal and reopen"
+              {ctl.busy ? "Reopening…" : ctl.landed ? "Reopened" : !(clearsDefaultWin || barMovesOn) ? "Clear withdrawal and reopen"
                 : (isDefaultWin || match.decision === "fusenpai") ? "Clear default win" : "Clear withdrawal"}
         </button>
       </div>
@@ -1734,6 +1735,11 @@ function RecordedWithdrawal({ match, ctl, disabled = false, singleBout = false }
                   The match goes back to the queue. {who || "The barred competitor"} is still withdrawn, so
                   record the default win again{canReinstate ? `, or reinstate ${who || "them"} first to fight it` : ""}.
                 </>}
+            </p>
+          ) : barMovesOn ? (
+            <p data-testid="clear-withdrawal-consequence" style={{ margin: "6px 0 0" }}>
+              The match goes back to the queue. {who || "The withdrawn competitor"} also did not
+              appear for a later match, listed below, so they are still withdrawn because of it.
             </p>
           ) : singleBout && match.decision === "fusenpai" ? (
             // A no-show fought nothing: there are no points to keep or lose,

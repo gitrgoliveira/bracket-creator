@@ -84,8 +84,30 @@ func (e *Engine) KachinukiEnchoRefusal(compID, matchID string, incoming []state.
 	if l, ok := lineupFor(parent.SideB); ok {
 		lineupB = &l
 	}
+	// Who each team has already put up: the bouts before the one judged, as
+	// this write has them, else as stored (a running write may leave out a
+	// bout it did not change).
+	rows := make(map[int]state.SubMatchResult, len(stored)+len(incoming))
+	for pos, s := range stored {
+		rows[pos] = s
+	}
+	for _, s := range incoming {
+		rows[s.Position] = s
+	}
+	foughtBefore := func(pos int) (a, b []domain.BoutFighter) {
+		for p, s := range rows {
+			if p < 1 || p >= pos {
+				continue
+			}
+			prior := stored[p]
+			a = append(a, boutFighterOf(s.SideA, s.SideAMemberID, prior.SideA, prior.SideAMemberID))
+			b = append(b, boutFighterOf(s.SideB, s.SideBMemberID, prior.SideB, prior.SideBMemberID))
+		}
+		return a, b
+	}
 	for _, j := range judge {
-		taisho, known := domain.KachinukiTaishoPairing(comp.TeamSize, lineupA, lineupB, j.a, j.b)
+		foughtA, foughtB := foughtBefore(j.pos)
+		taisho, known := domain.KachinukiTaishoPairing(comp.TeamSize, lineupA, lineupB, j.a, j.b, foughtA, foughtB)
 		if known && !taisho {
 			return validationErrorf("bout %d: encho is only for the last bout, taisho against taisho, and this pairing is %s against %s. Record the tie instead",
 				j.pos, fighterLabel(j.b, "Shiro's fighter"), fighterLabel(j.a, "Aka's fighter"))

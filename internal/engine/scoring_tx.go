@@ -1117,21 +1117,7 @@ func (e *Engine) restoreEligibilityRecordedByMatch(tx state.StoreTx, compID, mat
 		if st.MatchID != matchID || st.Eligible || playerID == keepPlayerID {
 			continue
 		}
-		// A fresh minimal status, not the stale record with Eligible
-		// flipped: Reason/Reinstateable describe why the player WAS
-		// ineligible, which no longer applies once restored.
-		restored := domain.CompetitorStatus{
-			PlayerID:   playerID,
-			Eligible:   true,
-			MatchID:    matchID,
-			RecordedAt: time.Now().UTC(),
-		}
-		// Unless another match still records a withdrawal by them: a
-		// fusenpai chained onto this bar (bc-kfup) wrote no status of its
-		// own, so the bar moves there rather than lapsing.
-		if rebar, ok := standingWithdrawalOf(tx, compID, playerID, matchID); ok {
-			restored = rebar
-		}
+		restored := restoredStatus(tx, compID, playerID, matchID)
 		if werr := tx.SetCompetitorStatus(compID, restored); werr != nil {
 			log.Printf("engine: restoreEligibilityRecordedByMatch compId=%s matchId=%s: restoring playerId=%s: %v", compID, matchID, playerID, werr)
 			continue
@@ -1141,20 +1127,48 @@ func (e *Engine) restoreEligibilityRecordedByMatch(tx state.StoreTx, compID, mat
 	return last
 }
 
+// restoredStatus is what the restore writes for a competitor whose bar
+// matchID recorded, once that withdrawal is removed: eligible again, unless a
+// fusenpai chained onto the bar (bc-kfup) is still on record, which then
+// carries it (standingWithdrawalOf). The reopen asks it too
+// (reopenTargetStatusTx), so it judges the bars the restore will leave.
+func restoredStatus(tx state.StoreTx, compID, playerID, matchID string) domain.CompetitorStatus {
+	if rebar, ok := standingWithdrawalOf(tx, compID, playerID, matchID); ok {
+		return rebar
+	}
+	// A fresh minimal status, not the stale record with Eligible flipped:
+	// Reason/Reinstateable describe why the player WAS ineligible, which no
+	// longer applies once restored.
+	return domain.CompetitorStatus{
+		PlayerID:   playerID,
+		Eligible:   true,
+		MatchID:    matchID,
+		RecordedAt: time.Now().UTC(),
+	}
+}
+
 // standingWithdrawalOf finds a completed match OTHER than excludeMatchID that
-// still records a withdrawal (kiken or fusenpai) by playerID, and returns the
-// status that withdrawal bars them with. One status is kept per competitor,
-// and a fusenpai chained onto an earlier bar (bc-kfup, alreadyBarredRefusal)
-// records none of its own, so when the match that DID record the bar is
-// cleared, the bar moves to the withdrawal still on record instead of
-// lapsing: the eligibility record follows the rulings on disk. The loser is
-// attributed by losingSide, pool and bracket alike (a bracket row through
+// still records a fusenpai against playerID, and returns the status that
+// fusenpai bars them with. One status is kept per competitor, and a fusenpai
+// chained onto an earlier bar (bc-kfup, alreadyBarredRefusal) records none of
+// its own, so when the match that DID record the bar is cleared, the bar moves
+// to the fusenpai still on record instead of lapsing: the eligibility record
+// follows the rulings on disk.
+//
+// Only a fusenpai, never a kiken: a second kiken is refused while a bar
+// stands, so a kiken still on record beside the bar being cleared was lifted
+// before that bar was recorded (a doctor's reinstatement after kiken-injury),
+// and moving the bar onto it would undo the reinstatement. The one shape this
+// cannot see is a fusenpai chained onto an injury bar that the doctor lifted
+// afterwards: clearing a LATER withdrawal then moves the bar onto it.
+//
+// The loser is attributed by losingSide, pool and bracket alike (a bracket row through
 // bracketMatchAsResult); a legacy row with neither a winner nor side ids
 // cannot be attributed and is not counted. ok is false when there is none, or
 // the matches cannot be read (logged; the caller then restores as before).
 func standingWithdrawalOf(tx state.StoreTx, compID, playerID, excludeMatchID string) (domain.CompetitorStatus, bool) {
 	barsPlayer := func(r *state.MatchResult) bool {
-		if r.ID == excludeMatchID || r.Status != state.MatchStatusCompleted || !domain.IsWithdrawalDecisionStr(r.Decision) {
+		if r.ID == excludeMatchID || r.Status != state.MatchStatusCompleted || r.Decision != string(domain.DecisionFusenpai) {
 			return false
 		}
 		id, _, ok := losingSide(r)

@@ -725,8 +725,28 @@ describe('clearing a fusenpai chained onto an earlier withdrawal (bc-kfup)', () 
       await mount(individualWithdrawal({ decision: 'kiken-voluntary' }));
       await waitFor(() => expect(screen.getByTestId('clear-withdrawal-default-win-Pool A-3')).toBeTruthy());
       expect(screen.getByTestId('clear-withdrawal-default-win-Pool A-3').textContent).toContain('keeps its default win');
+      // Clearing this kiken moves the bar onto that no-show (the server's
+      // standingWithdrawalOf), so the match goes to the queue, not the court.
+      expect(screen.getByTestId('clear-withdrawal-consequence').textContent).toBe(
+        'The match goes back to the queue. Tanaka also did not appear for a later match, listed below, so they are still withdrawn because of it.');
+      expect(screen.getByTestId('clear-withdrawal-reopen').textContent).toBe('Clear withdrawal');
     } finally {
       window.compMatchesForCompetition = STUBBED_GLOBALS.compMatchesForCompetition;
     }
+  });
+
+  // A chained no-show in the later list changes the copy too, so the clear
+  // waits for that list as well as for the status.
+  it('holds the clear until the later matches are in', async () => {
+    // The editor fetches the competition from more than one place; release
+    // every call.
+    const pending = [];
+    window.API.fetchCompetitorStatuses = vi.fn().mockResolvedValue([{ playerId: 'p2', eligible: false, matchId: 'm-r1-0' }]);
+    window.API.fetchCompetitionDetails = vi.fn().mockImplementation(() => new Promise((r) => { pending.push(r); }));
+    await mount(individualWithdrawal({ decision: 'kiken-voluntary' }));
+    await waitFor(() => expect(window.API.fetchCompetitorStatuses).toHaveBeenCalled());
+    expect(screen.getByTestId('clear-withdrawal-reopen').disabled).toBe(true);
+    await act(async () => { pending.forEach((r) => r({ config: {} })); });
+    await waitFor(() => expect(screen.getByTestId('clear-withdrawal-reopen').disabled).toBe(false));
   });
 });

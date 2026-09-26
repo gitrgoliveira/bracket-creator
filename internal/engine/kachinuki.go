@@ -1304,8 +1304,8 @@ func reopenBracketDownstreamCheck(bracket *state.Bracket, rIdx, mIdx int, force 
 // the pre-check passed (the accepted window the requeue comment documents).
 //
 // It also reports whether the reopen lands SCHEDULED (reopenTargetStatus: a
-// match-level fusensho whose decisionBy side is still barred), read in the same
-// tx. Such a reopen takes no court, so reopenUnderCourtLock skips both court
+// default win whose decisionBy side stays barred by another match), read in
+// the same tx. Such a reopen takes no court, so reopenUnderCourtLock skips both court
 // gates for it and holds it to scheduled even if the bar lifts in between (see
 // the COURT GATE note on ReopenMatch).
 func (e *Engine) checkTargetReopenable(compID string, comp *state.Competition, matchID string, force bool) (bool, error) {
@@ -1613,10 +1613,14 @@ func findMatchHome(tx state.StoreTx, compID, matchID string, visit func(matchHom
 // ever recorded, and, taking no court, is not refused for a busy one (see
 // the COURT GATE note on ReopenMatch). Once the competitor is reinstated or
 // the earlier withdrawal is itself cleared, the SAME reopen goes to RUNNING
-// like any other. An ordinary kiken or fusenpai is unaffected: the status
+// like any other. An ordinary kiken or fusenpai goes to RUNNING: the status
 // it recorded names THIS match, which BarredSides' undo-path exemption (a
 // status recorded BY matchID never bars it) ignores, and which the reopen
-// restores.
+// restores. The third SCHEDULED case is that restore moving the bar instead:
+// a fusenpai chained onto it is still on record, so the competitor stays
+// barred by THAT match. reopenTargetStatusTx hands this function the
+// statuses as the restore will leave them, so it reads the moved bar like
+// any other.
 //
 // decisionBy names the WITHDRAWING side (recordDecisionTx's own convention:
 // "aka" -> sideA lost, "shiro" -> sideB lost), so it is read against
@@ -1649,6 +1653,20 @@ func (e *Engine) reopenTargetStatusTx(tx state.StoreTx, compID, matchID, decisio
 	if err != nil {
 		log.Printf("engine: ReopenMatch: LoadCompetitorStatus compId=%s matchId=%s: %v (defaulting to running)", compID, matchID, err)
 		return state.MatchStatusRunning
+	}
+	// Judge the bars the reopen will leave, not the ones it finds: clearing a
+	// withdrawal this match recorded restores its loser, unless a fusenpai
+	// chained onto that bar is still on record, which then carries it
+	// (restoredStatus). A copy, since the loaded map may be the store's own.
+	if domain.IsWithdrawalDecisionStr(decision) {
+		after := make(map[string]domain.CompetitorStatus, len(statuses))
+		for id, st := range statuses {
+			if st.MatchID == matchID && !st.Eligible {
+				st = restoredStatus(tx, compID, id, matchID)
+			}
+			after[id] = st
+		}
+		statuses = after
 	}
 	return reopenTargetStatus(statuses, matchID, decision, decisionBy, sideAID, sideBID)
 }
@@ -2515,11 +2533,11 @@ func (e *Engine) kachinukiRemainingRoster(compID, matchID string, comp *state.Co
 // match-scoped lineup first, else the round-scoped one for roundIdx, per
 // state.FindBestLineupAny's tiers. The resolver answers false when the side
 // has no saved lineup, including when the lineups could not be loaded (the
-// error is logged under the name of its one caller, kachinukiRemainingRoster).
+// error is logged).
 func (e *Engine) lineupInForce(compID, matchID string, comp *state.Competition, roundIdx int) func(teamName string) (domain.TeamLineup, bool) {
 	lineups, err := e.store.LoadTeamLineups(compID)
 	if err != nil {
-		log.Printf("engine.kachinukiRemainingRoster compId=%s matchId=%s: lineup load error: %v; resolving no lineup", compID, matchID, err)
+		log.Printf("engine.lineupInForce compId=%s matchId=%s: lineup load error: %v; resolving no lineup", compID, matchID, err)
 		lineups = nil
 	}
 
@@ -2532,7 +2550,7 @@ func (e *Engine) lineupInForce(compID, matchID string, comp *state.Competition, 
 	if len(lineups) > 0 {
 		participants, err = e.store.LoadParticipants(compID, comp.EffectiveWithZekkenName())
 		if err != nil {
-			log.Printf("engine.kachinukiRemainingRoster compId=%s matchId=%s: participant load error: %v; lineup lookup degrades to name-only", compID, matchID, err)
+			log.Printf("engine.lineupInForce compId=%s matchId=%s: participant load error: %v; lineup lookup degrades to name-only", compID, matchID, err)
 			participants = nil
 		}
 	}

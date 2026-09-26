@@ -443,28 +443,34 @@ function taishoHolds(slot, fighter) {
   return !!fighter.name && fighter.name === slot.name;
 }
 
-// Where one fighter stands in their team's lineup: "taisho" (the last
-// occupied slot), "before" (a team-mate is placed after them: provably not
-// the taisho) or "unknown" (no lineup, or a fighter it does not place: a
-// reserve, a free-typed name, or a lineup only partly entered, since the
-// kachinuki score sheet writes row 1 alone into a match lineup).
-function taishoStanding(lineup, teamSize, fighter) {
+// Where one fighter stands in their team's lineup: "taisho" (nobody placed
+// after them is still to fight: the last occupied slot, or every team-mate
+// placed after them has already fought), "before" (a team-mate placed after
+// them has not fought yet: provably not the last bout) or "unknown" (no
+// lineup, or a fighter it does not place: a reserve, a free-typed name, or a
+// lineup only partly entered, since the kachinuki score sheet writes row 1
+// alone into a match lineup). `fought` is who that team has already put up
+// in this encounter: a later bout's fighter may be picked out of order.
+function taishoStanding(lineup, teamSize, fighter, fought) {
   const slots = occupiedPositions(lineup, teamSize);
   const i = slots.findIndex((slot) => taishoHolds(slot, fighter || {}));
   if (i < 0) return "unknown";
-  return i === slots.length - 1 ? "taisho" : "before";
+  const stillToCome = slots.slice(i + 1).some((slot) => !fought.some((f) => taishoHolds(slot, f)));
+  return stillToCome ? "before" : "taisho";
 }
 
 // Whether a kachinuki bout between fighters a (Aka) and b (Shiro) is taisho
-// against taisho. known is true only when the lineups settle it: either
-// fighter placed before a team-mate (taisho false), or both holding their
-// lineup's last slot (taisho true). Anything else is unknown, and an unknown
-// pairing never withholds Encho: a tied knockout bout already has End match
-// held back, so hiding Encho on a guess would leave the court no way to
-// finish.
-export function kachinukiTaishoPairing({ teamSize, lineupA, lineupB, a, b }) {
-  const sa = taishoStanding(lineupA, teamSize, a);
-  const sb = taishoStanding(lineupB, teamSize, b);
+// against taisho: the last bout, neither team with anyone left to come.
+// foughtA/foughtB are the fighters each team put up in the bouts before this
+// one. known is true only when the lineups settle it: either fighter has a
+// team-mate placed after them who has not fought yet (taisho false), or both
+// have nobody placed after them still to fight (taisho true). Anything else
+// is unknown, and an unknown pairing never withholds Encho: a tied knockout
+// bout already has End match held back, so hiding Encho on a guess would
+// leave the court no way to finish.
+export function kachinukiTaishoPairing({ teamSize, lineupA, lineupB, a, b, foughtA, foughtB }) {
+  const sa = taishoStanding(lineupA, teamSize, a, foughtA);
+  const sb = taishoStanding(lineupB, teamSize, b, foughtB);
   if (sa === "before" || sb === "before") return { taisho: false, known: true };
   if (sa === "taisho" && sb === "taisho") return { taisho: true, known: true };
   return { taisho: false, known: false };

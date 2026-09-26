@@ -55,6 +55,28 @@ export function withdrawnSideKey(m) {
     return "";
 }
 
+// The competitor a decision just recorded on `match` bars from their other
+// matches: the side a withdrawal (any kiken) or a no-show names. Null for any
+// other decision, and for a write that did not come back (a queued write
+// answers { queued: true }). The side comes from the caller's own copy of the
+// match, because the /decision response is the stored match, whose sides are
+// bare name strings. A court list shows that competitor's other matches
+// barred only after it refreshes, so a surface that moves on straight after
+// the decision skips them itself, through involvesCompetitor below.
+// window.isKikenDecision is api_serializers.jsx's, read at call time so this
+// leaf takes no import for it.
+export function sideBarredByDecision(result, match) {
+    const d = result && result.decision;
+    if (!d || !(window.isKikenDecision(d) || d === "fusenpai")) return null;
+    const key = withdrawnSideKey(result);
+    return key === "a" ? match.sideA : key === "b" ? match.sideB : null;
+}
+
+// Whether `side` fights in match `m`. False when there is no side.
+export function involvesCompetitor(m, side) {
+    return !!side && (sameCompetitor(m.sideA, side) || sameCompetitor(m.sideB, side));
+}
+
 function nameOf(side) {
     return side?.name || "";
 }

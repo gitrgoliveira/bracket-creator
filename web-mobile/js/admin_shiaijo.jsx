@@ -40,8 +40,7 @@ import { resultRecencyDesc } from './result_recency.jsx';
 // default-win action instead of Start. One leaf owns the question
 // (ineligible_match.jsx); BarredMatchNotice (admin_scoring_shared.jsx) is the
 // one component that renders the note plus that action across every surface.
-import { isBarredMatch, withdrawnSideKey } from './ineligible_match.jsx';
-import { sameCompetitor } from './competitor_identity.jsx';
+import { isBarredMatch, sideBarredByDecision, involvesCompetitor } from './ineligible_match.jsx';
 // Straight from its own leaf, NOT admin_scoring_shared.jsx: that module also
 // imports bracket.jsx (for sideMarks), and admin_shiaijo.jsx's render suite
 // stubs window.BracketTree before importing this file -- routing through
@@ -1040,10 +1039,10 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
         // after-decision advance feed this straight into a Start write, which
         // the server would just refuse (409 ineligible_competitor); the
         // barred match is left for its own queue row to resolve. `withdrawn`
-        // is a competitor the decision just barred: this court's list does
-        // not show their matches barred until it is refetched.
-        const isTheirs = (x) => !!withdrawn && (sameCompetitor(x.sideA, withdrawn) || sameCompetitor(x.sideB, withdrawn));
-        return pool.slice(idx + 1).find((x) => x.status !== "completed" && !isBarredMatch(x) && !isTheirs(x)) || null;
+        // is a competitor the decision just barred (sideBarredByDecision):
+        // this court's list does not show their matches barred until it is
+        // refetched.
+        return pool.slice(idx + 1).find((x) => x.status !== "completed" && !isBarredMatch(x) && !involvesCompetitor(x, withdrawn)) || null;
     };
 
     // Amber nudge banner logic (AC6): fires ONLY when the SELECTED competition
@@ -1725,12 +1724,7 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
                                         // Then start the next scheduled match so the panel advances
                                         // (mirrors onSubmitAndNext), passing over the matches of a
                                         // competitor a withdrawal or no-show has just barred.
-                                        const d = result && result.decision;
-                                        const barredKey = d && (window.isKikenDecision(d) || d === "fusenpai") ? withdrawnSideKey(result) : "";
-                                        // The side itself from this court's own match: the /decision
-                                        // response is the stored match, whose sides are bare names.
-                                        const withdrawn = barredKey === "a" ? selectedMatch.sideA : barredKey === "b" ? selectedMatch.sideB : null;
-                                        const next = nextActiveAfter(selectedMatch, withdrawn);
+                                        const next = nextActiveAfter(selectedMatch, sideBarredByDecision(result, selectedMatch));
                                         if (next && next.status === "scheduled") {
                                             try { await onEditScore(next.compId, next.id, startPatch(), next); } catch (_s) { /* gate */ }
                                         }

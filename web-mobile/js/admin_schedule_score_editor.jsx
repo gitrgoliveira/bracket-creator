@@ -16,7 +16,7 @@ import { NumberedName } from './numbered_name.jsx';
 // no auto-pick may offer it and its row shows the default-win action
 // instead. One leaf owns the question (ineligible_match.jsx); BarredMatchNotice
 // (admin_scoring_shared.jsx) is the one component that renders it everywhere.
-import { isBarredMatch } from './ineligible_match.jsx';
+import { isBarredMatch, sideBarredByDecision, involvesCompetitor } from './ineligible_match.jsx';
 // Straight from its own leaf, not admin_scoring_shared.jsx (which also
 // imports bracket.jsx): see barred_match_notice.jsx's header for why that
 // matters for this file's own render suite.
@@ -371,9 +371,13 @@ export function AdminScoreEditor({ t, c, onEditScore, onMoveCourt, restrictToCom
         // bc-cse: skip a barred match (isBarredMatch, ineligible_match.jsx):
         // Finish + Start Next and the after-decision advance both feed this
         // straight into a Start write, which the server would just refuse.
-        const nextActiveMatch = openIdx >= 0
-          ? sameCourt.slice(openIdx + 1).find(m => m.status !== 'completed' && !isBarredMatch(m)) || null
+        // `withdrawn` is a competitor a decision just barred
+        // (sideBarredByDecision): this list shows their matches barred only
+        // after it refreshes, so the after-decision advance skips them itself.
+        const nextActiveFrom = (withdrawn = null) => openIdx >= 0
+          ? sameCourt.slice(openIdx + 1).find(m => m.status !== 'completed' && !isBarredMatch(m) && !involvesCompetitor(m, withdrawn)) || null
           : null;
+        const nextActiveMatch = nextActiveFrom();
         // Minimal "start" patch (status → running, empty score). Mirrors the
         // modal's own buildPatch("running") for an unscored match and works for
         // both individual and team matches (subResults is omitted, which the
@@ -467,15 +471,19 @@ export function AdminScoreEditor({ t, c, onEditScore, onMoveCourt, restrictToCom
                 }
               } catch (_err) { /* keep modal open on error */ }
             } : null}
-            onAfterDecision={nextActiveMatch ? async () => {
+            onAfterDecision={nextActiveMatch ? async (result) => {
               // A kiken/fusenpai decision already persisted the bout via the
               // /decision POST: no score PUT here. Mirror onSubmitAndNext's
-              // start-next so a fusenpai advances the operator to (and starts)
-              // the next same-court match.
-              if (nextActiveMatch.status === "scheduled") {
+              // start-next so a decision advances the operator to (and starts)
+              // the next same-court match, passing over the matches of the
+              // competitor it barred. With none left, close as a decision with
+              // no next match does.
+              const next = nextActiveFrom(sideBarredByDecision(result, openMatch));
+              if (!next) { if (mountedRef.current) setOpenKey(null); return; }
+              if (next.status === "scheduled") {
                 try {
-                  await onEditScore(nextActiveMatch.compId, nextActiveMatch.id, startPatch(), nextActiveMatch);
-                  if (mountedRef.current) setOpenKey(scoreKeyOf(nextActiveMatch));
+                  await onEditScore(next.compId, next.id, startPatch(), next);
+                  if (mountedRef.current) setOpenKey(scoreKeyOf(next));
                 } catch (_startErr) { /* gate rejected the start; leave the operator where they are */ }
               }
             } : null}

@@ -352,6 +352,41 @@ describe('mount site: admin_schedule_score_editor.jsx (Scores tab)', () => {
     expect(w.onSubmitAndNext).toBe('null');
     expect(w.onAfterDecision).toBe('null');
   });
+
+  // Recording a withdrawal starts the court's next match, as a no-show does
+  // (mp-nwds item 7). The list shows the withdrawn competitor's own matches
+  // barred only after it refreshes, so the advance passes over them itself.
+  describe('the advance after a withdrawal', () => {
+    const yamada = { id: 'p1', name: 'Yamada' };
+    const tanaka = { id: 'p2', name: 'Tanaka' };
+    const suzuki = { id: 'p3', name: 'Suzuki' };
+    // What /decision answers with: the stored match, sides as bare names.
+    const kikenByYamada = {
+      id: 'm1', sideA: 'Yamada', sideB: 'Tanaka', sideAId: 'p1', sideBId: 'p2', winner: 'Tanaka', winnerId: 'p2',
+      status: 'completed', decision: 'kiken-voluntary', decisionBy: 'aka',
+    };
+    const yamadaNext = runningMatch({ id: 'm2', status: 'scheduled', sideA: suzuki, sideB: yamada });
+    const openFirst = async (onEditScore, matches) => {
+      await mountSchedule(onEditScore, matches);
+      await act(async () => { fireEvent.click(document.querySelector('button.test-score-open')); });
+    };
+
+    it('starts the next match the withdrawn competitor is not in', async () => {
+      const onEditScore = vi.fn().mockResolvedValue({ status: 'running' });
+      await openFirst(onEditScore, [runningMatch(), yamadaNext, runningMatch({ id: 'm3', status: 'scheduled', sideA: suzuki, sideB: tanaka })]);
+      await act(async () => { await probe.props.onAfterDecision(kikenByYamada); });
+      expect(onEditScore).toHaveBeenCalledTimes(1);
+      expect(onEditScore.mock.calls[0][1], "Yamada's next match is passed over").toBe('m3');
+    });
+
+    it('closes the editor when only the withdrawn competitor\'s matches are left', async () => {
+      const onEditScore = vi.fn();
+      await openFirst(onEditScore, [runningMatch(), yamadaNext]);
+      await act(async () => { await probe.props.onAfterDecision(kikenByYamada); });
+      expect(onEditScore).not.toHaveBeenCalled();
+      expect(screen.queryByTestId('probe-score-editor')).toBeNull();
+    });
+  });
 });
 
 // ── 5. viewer_match.jsx: public self-run surface ─────────────────────────────

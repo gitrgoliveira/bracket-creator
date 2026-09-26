@@ -1380,7 +1380,7 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
   // match it was recorded on.
   const submitDecision = makeSubmitDecision({
     match: m, enchoPeriodCount, password, mountedRef,
-    setDecisionSubmitting, setDecisionErr,
+    setDecisionSubmitting, setDecisionErr, setDecisionPromptKind,
     onClose, onAfterDecision, isComplete, entityLabel: "teams",
   });
 

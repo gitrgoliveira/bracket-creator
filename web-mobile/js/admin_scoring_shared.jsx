@@ -379,6 +379,7 @@ function makeSubmitDecision({
   mountedRef,
   setDecisionSubmitting,
   setDecisionErr,
+  setDecisionPromptKind,
   onClose,
   // item 7: optional zero-arg callback invoked after a decision succeeds and
   // the match is not a correction. The shiaijo page wires this to
@@ -431,6 +432,11 @@ function makeSubmitDecision({
         }
         return;
       }
+      // The decision is stored, so its form closes whatever the host does
+      // next: a host that cannot move on (the next match's start refused, or
+      // no next match to start) leaves this match on screen, where the open
+      // form would offer Record again and hide the recorded decision.
+      setDecisionPromptKind('');
       if (!isComplete && onAfterDecision) {
         // Item 7: fusenpai, kiken (operator ruling 2026-09-26) and any other
         // decision advances to the next match on the same court. The

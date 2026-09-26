@@ -278,7 +278,7 @@ export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, on
   // submitHantei below.
   const submitDecision = makeSubmitDecision({
     match: m, enchoPeriodCount, password, mountedRef,
-    setDecisionSubmitting, setDecisionErr,
+    setDecisionSubmitting, setDecisionErr, setDecisionPromptKind,
     onClose, onAfterDecision, isComplete, entityLabel: "competitors",
     // F5: thread pending-write handles so the factory can show the sticky banner
     // when the decision write is only queued (offline / transient failure).

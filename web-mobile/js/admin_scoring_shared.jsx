@@ -14,12 +14,12 @@ import {
 } from './write_result.jsx';
 import { sameCompetitor } from './competitor_identity.jsx';
 import { sideWord } from './side_cell.jsx';
-import { sideMarks } from './bracket.jsx';
+import { sideMarks, defaultWinMaru } from './bracket.jsx';
 import { NumberedName, numberFollowsName } from './numbered_name.jsx';
 import { withdrawnSideKey } from './ineligible_match.jsx';
 import { isTeamDefaultWinDecision } from './team_default_credit.jsx';
-import { struckIppons, DEFAULT_WIN_IPPON } from './result_slot.jsx';
-import { tapIsBounce, stampTap } from './tap_guard.jsx';
+import { struckIppons } from './result_slot.jsx';
+import { acceptTap } from './tap_guard.jsx';
 // BarredMatchNotice is a separate leaf (imports only ineligible_match.jsx +
 // write_result.jsx): re-exported below, see that file's header for why.
 import { BarredMatchNotice } from './barred_match_notice.jsx';
@@ -206,7 +206,7 @@ function applyFusenshoToggle(prev, side) {
   // Pass THIS bout's encho period — a per-bout fusensho can land on a pairing
   // already fighting on in overtime — and let the shared rule decide; a zero or
   // absent period reads as regulation there, so no local branch is needed.
-  const maru = window.defaultWinMaru ? window.defaultWinMaru({ periodCount: prev.encho }) : [DEFAULT_WIN_IPPON, DEFAULT_WIN_IPPON];
+  const maru = defaultWinMaru({ periodCount: prev.encho });
   const base = { ...prev, aFouls: 0, bFouls: 0, _preFusensho: snap, ...(prev.draw ? { draw: false } : {}) };
   if (side === "a") return { ...base, aPts: maru, bPts: struckIppons(snap.bPts), fusensho: "a" };
   return { ...base, aPts: struckIppons(snap.aPts), bPts: maru, fusensho: "b" };
@@ -785,9 +785,7 @@ function FoulCounter({ fouls, setFouls, onIncrement, color, disabled }) {
   // and one tap to undo, and nobody gains a point from it.
   const incTapRef = useRefA(null);
   const onIncrementTap = (ev) => {
-    if (tapIsBounce(incTapRef, ev)) return;
-    stampTap(incTapRef);
-    onIncrement();
+    if (acceptTap(incTapRef, ev)) onIncrement();
   };
   // color is "shiro" or "aka": surface as data-testid so Playwright probes
   // (T023a) can target each side without depending on the className.

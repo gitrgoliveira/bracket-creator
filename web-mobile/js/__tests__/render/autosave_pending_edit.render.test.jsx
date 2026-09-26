@@ -4,7 +4,7 @@
 // in that window cancelled the timer and lost the edit. The hook now
 // registers the pending edit with api_client (API.notePendingEdit) from the
 // first tap until the write is dispatched, and on pagehide (or the tab being
-// hidden) writes a pending edit through API.runDurably, which puts it
+// hidden) writes a pending edit at once with `durable: true`, which puts it
 // straight into the persisted outbox.
 
 import React from 'react';
@@ -14,9 +14,8 @@ import { installWindowStubs } from '../helpers/stub_globals.js';
 import { AUTOSAVE_DEBOUNCE_MS } from '../../admin_scoring_autosave.jsx';
 
 // The log of what happened, in order, so a test can say whether the write was
-// dispatched before the pending edit was released, and inside runDurably.
+// dispatched before the pending edit was released, and whether it was durable.
 let events;
-let durable;
 
 const STUBBED_GLOBALS = {
   isHikiwake: () => false,
@@ -34,7 +33,6 @@ const STUBBED_GLOBALS = {
     putMatchLineup: vi.fn(),
     recordDecision: vi.fn(),
     notePendingEdit: vi.fn(),
-    runDurably: vi.fn(),
   },
   AdminLineupHelpers: { rosterFor: vi.fn().mockReturnValue([]) },
   compMatches: () => [],
@@ -55,19 +53,13 @@ afterAll(() => restoreGlobals());
 
 beforeEach(() => {
   events = [];
-  durable = false;
   window.API.recordScore.mockReset();
   window.API.recordScore.mockImplementation((_c, _m, patch) => {
-    events.push(`write:${patch.status}${durable ? ':durable' : ''}`);
+    events.push(`write:${patch.status}${patch.durable ? ':durable' : ''}`);
     return Promise.resolve(undefined);
   });
   window.API.notePendingEdit.mockReset();
   window.API.notePendingEdit.mockImplementation((_token, on) => { events.push(on ? 'pending' : 'released'); });
-  window.API.runDurably.mockReset();
-  window.API.runDurably.mockImplementation((fn) => {
-    durable = true;
-    try { return fn(); } finally { durable = false; }
-  });
   vi.useFakeTimers();
 });
 
@@ -126,7 +118,7 @@ describe('bc-sync: the autosave reports a pending edit', () => {
 });
 
 describe('bc-sync: a pending edit survives the page going away', () => {
-  it('pagehide writes it at once, inside runDurably', async () => {
+  it('pagehide writes it at once, marked durable', async () => {
     await mount(running());
     await tapM();
     await act(async () => { window.dispatchEvent(new Event('pagehide')); });
@@ -159,6 +151,5 @@ describe('bc-sync: a pending edit survives the page going away', () => {
     window.API.recordScore.mockClear();
     await act(async () => { window.dispatchEvent(new Event('pagehide')); });
     expect(window.API.recordScore).not.toHaveBeenCalled();
-    expect(window.API.runDurably).not.toHaveBeenCalled();
   });
 });

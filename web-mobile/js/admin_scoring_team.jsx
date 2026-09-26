@@ -60,7 +60,7 @@ import { boutMiddle, winnerSideLR } from './bracket.jsx';
 import { realIppons, hanteiTied, hanteiSlot, hanteiWinnerKey, nameOf, sideSlotOrder, attributeWinnerSide, subBoutAttribution, DEFAULT_WIN_IPPON } from './result_slot.jsx';
 import { creditedSideKey, creditedTotals } from './team_default_credit.jsx';
 // bc-dtfn: the one owner of "is this tap the bounce of the previous one".
-import { stampTap, clearTap, tapIsBounce, swallowBounce, useArmedConfirm } from './tap_guard.jsx';
+import { stampTap, clearTap, acceptTap, swallowBounce, useArmedConfirm } from './tap_guard.jsx';
 
 // renderTeamBoutMiddle: the ONE place the editor turns a sub-bout into its
 // centre value, for BOTH the read-only done row and the live entry row. Derives
@@ -684,7 +684,7 @@ export function fusenshoSideFromSub(sub) {
 // do. `rs` is a rowSides entry (key "a"/"b", label "AKA"/"SHIRO"). The other
 // side keeps its struck points (applyFusenshoToggle), and a refused fusensho
 // (fusenshoAllowed) names the side that already won the bout.
-export function fusenshoButtonTitle(sub, rs) {
+function fusenshoButtonTitle(sub, rs) {
   if (sub.fusensho === rs.key) {
     return sub._preFusensho
       ? "Click to undo fusensho: restores the previous score"
@@ -1509,6 +1509,17 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
     markScoringDirty();
   };
 
+  // updateSubScore: a scoring edit on a bout row (points, fouls, a keyboard
+  // waza). A fought score is neither a default win nor a draw, so it ends the
+  // row's fusensho through clearFusensho and clears the draw, applying the
+  // edit FIRST and clearFusensho LAST: an edit computed from the rendered pts
+  // can still carry a circle, and clearing last strips it. An edit that
+  // changes nothing (a waza past the 2-ippon cap) leaves the row as it was.
+  const updateSubScore = (idx, fn) => updateSub(idx, prev => {
+    const next = fn(prev);
+    return next === prev ? prev : { ...clearFusensho(next), draw: false };
+  });
+
   // T096/FR-031: per-bout Fusensho: award a default win to the present
   // side; the other side keeps what it had struck (applyFusenshoToggle).
   // Re-clicking the active side undoes the fusensho and restores the score
@@ -1516,12 +1527,9 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
   // active button is "undo this"). Clicking the OTHER side while fusensho
   // is active is a side-switch; the original pre-fusensho snapshot is
   // preserved so a later untoggle still restores the genuine prior state.
-  // A refused fusensho (the other side already won the bout) returns before
-  // updateSub: a tap that changes nothing must not send a write.
-  const setFusenshoFor = (idx, side) => {
-    if (!fusenshoAllowed(subs[idx], side)) return;
-    updateSub(idx, prev => applyFusenshoToggle(prev, side));
-  };
+  // A refused fusensho (the other side already won the bout) never gets here:
+  // its button is disabled (fusenshoAllowed).
+  const setFusenshoFor = (idx, side) => updateSub(idx, prev => applyFusenshoToggle(prev, side));
 
   // Toggle an operator-marked hikiwake (draw) for a sub-bout. Marking a draw
   // clears any fusensho; editing scores/fouls later clears the draw flag (see
@@ -1775,11 +1783,9 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
     // impossible 2-2), and never append past MAX_IPPONS_PER_SIDE per side.
     if (isBoutDecided(cur.aPts, cur.bPts)) return;
     const key = side === "a" ? "aPts" : "bPts";
-    updateSub(kachinukiCurBoutIdx, prev => (
-      prev[key].length >= MAX_IPPONS_PER_SIDE
-        ? prev
-        // Mirror setPts's clear-tail: a fresh strike clears a pending fusensho/draw.
-        : { ...clearFusensho({ ...prev, [key]: [...prev[key], waza] }), draw: false }
+    // A fresh strike ends a pending fusensho/draw, as a tapped one does.
+    updateSubScore(kachinukiCurBoutIdx, prev => (
+      prev[key].length >= MAX_IPPONS_PER_SIDE ? prev : { ...prev, [key]: [...prev[key], waza] }
     ));
   };
 
@@ -2155,24 +2161,18 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
   const boutListTapRef = useRefA(null);
   // bc-dtip: a bouncing thumb recorded two ippons (or two fouls, the second
   // awarding an H to the opponent) from one tap. A repeat POINTER tap on the
-  // same bout side within TAP_BOUNCE_MS is ignored; keyed `${idx}:${side}`,
-  // so the other side and other bouts are never refused. The keyboard path
-  // (scoreCurrentBoutWaza) stays direct. setPts reads the render's pts; with
-  // the guard two accepted taps are at least TAP_BOUNCE_MS apart, so a render
-  // always lands between them.
+  // same bout side within TAP_BOUNCE_MS is ignored; keyed by the row side's
+  // tapKey (`${idx}:${side}`), so the other side and other bouts are never
+  // refused. The keyboard path (scoreCurrentBoutWaza) stays direct. setPts
+  // reads the render's pts; with the guard two accepted taps are at least
+  // TAP_BOUNCE_MS apart, so a render always lands between them.
   const ipponTapRef = useRefA(null);
   const foulTapRef = useRefA(null);
-  const tapIppon = (ev, idx, rs, cc) => {
-    const key = `${idx}:${rs.key}`;
-    if (tapIsBounce(ipponTapRef, ev, key)) return;
-    stampTap(ipponTapRef, key);
-    rs.setPts(rs.pts.length < MAX_IPPONS_PER_SIDE ? [...rs.pts, cc] : rs.pts);
+  const tapIppon = (ev, rs, cc) => {
+    if (acceptTap(ipponTapRef, ev, rs.tapKey)) rs.setPts(rs.pts.length < MAX_IPPONS_PER_SIDE ? [...rs.pts, cc] : rs.pts);
   };
-  const tapFoulIncrement = (ev, idx, rs) => {
-    const key = `${idx}:${rs.key}`;
-    if (tapIsBounce(foulTapRef, ev, key)) return;
-    stampTap(foulTapRef, key);
-    rs.onIncrement();
+  const tapFoulIncrement = (ev, rs) => {
+    if (acceptTap(foulTapRef, ev, rs.tapKey)) rs.onIncrement();
   };
   const closeDoneBoutEdit = () => { editingDoneOriginalRef.current = null; setEditingDoneBoutIdx(-1); };
 
@@ -3043,12 +3043,11 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
 
             // Each row: [left side, center score, right side]: left=SHIRO, right=AKA
             // T096/FR-031: manual pts/fouls edits end the per-bout fusensho
-            // through clearFusensho (the default-win circles go, struck points
-            // stay, the _preFusensho snapshot is discarded) so the bout becomes
-            // a regular fought score once the operator intervenes. The edit is
-            // applied FIRST and clearFusensho LAST, so a circle carried in from
-            // the rendered pts is stripped too. Re-applying via the Fusensho
-            // button captures a fresh snapshot from the current state.
+            // (updateSubScore: the default-win circles go, struck points stay,
+            // the _preFusensho snapshot is discarded) so the bout becomes a
+            // regular fought score once the operator intervenes. Re-applying
+            // via the Fusensho button captures a fresh snapshot from the
+            // current state.
             // onIncrement applies the FIK 2-foul rule via applyFoulIncrement:
             // the 2nd foul auto-awards an H to the OPPONENT and resets this
             // side's foul counter; it ends a fusensho the same way.
@@ -3061,12 +3060,12 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
             // of roster/forceInput so the box always renders for it.
             const rowSides = [
               {
-                key: "b", pts: s.bPts, fouls: s.bFouls,
-                setPts: (pts) => updateSub(idx, prev => ({ ...clearFusensho({ ...prev, bPts: pts }), draw: false })),
-                setFouls: (f) => updateSub(idx, prev => ({ ...clearFusensho({ ...prev, bFouls: f }), draw: false })),
-                onIncrement: () => updateSub(idx, prev => {
+                key: "b", tapKey: `${idx}:b`, pts: s.bPts, fouls: s.bFouls,
+                setPts: (pts) => updateSubScore(idx, prev => ({ ...prev, bPts: pts })),
+                setFouls: (f) => updateSubScore(idx, prev => ({ ...prev, bFouls: f })),
+                onIncrement: () => updateSubScore(idx, prev => {
                   const r = applyFoulIncrement(prev.bFouls, prev.aPts, prev.bPts);
-                  return { ...clearFusensho({ ...prev, bFouls: r.fouls, aPts: r.opponentPts }), draw: false };
+                  return { ...prev, bFouls: r.fouls, aPts: r.opponentPts };
                 }),
                 color: "shiro", label: "SHIRO",
                 // The daihyosen is a representative bout, not a lineup position:
@@ -3089,12 +3088,12 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
                 onSelectName: manualPathB ? pickManual("bName", "bMemberIdOverride", squadB, setSquadB, teamIdB) : pickPlayer(teamIdB, lineupB, squadB, setSquadB),
               },
               {
-                key: "a", pts: s.aPts, fouls: s.aFouls,
-                setPts: (pts) => updateSub(idx, prev => ({ ...clearFusensho({ ...prev, aPts: pts }), draw: false })),
-                setFouls: (f) => updateSub(idx, prev => ({ ...clearFusensho({ ...prev, aFouls: f }), draw: false })),
-                onIncrement: () => updateSub(idx, prev => {
+                key: "a", tapKey: `${idx}:a`, pts: s.aPts, fouls: s.aFouls,
+                setPts: (pts) => updateSubScore(idx, prev => ({ ...prev, aPts: pts })),
+                setFouls: (f) => updateSubScore(idx, prev => ({ ...prev, aFouls: f })),
+                onIncrement: () => updateSubScore(idx, prev => {
                   const r = applyFoulIncrement(prev.aFouls, prev.bPts, prev.aPts);
-                  return { ...clearFusensho({ ...prev, aFouls: r.fouls, bPts: r.opponentPts }), draw: false };
+                  return { ...prev, aFouls: r.fouls, bPts: r.opponentPts };
                 }),
                 color: "aka", label: "AKA",
                 // See SHIRO note above: no lineup picker on the daihyosen row.
@@ -3147,7 +3146,7 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
                       if (mark === undefined || defaultWin) return;
                       // Taking a mark back off, then tapping the right letter,
                       // is never a bounce (bc-dtip).
-                      clearTap(ipponTapRef, `${idx}:${rs.key}`);
+                      clearTap(ipponTapRef, rs.tapKey);
                       rs.setPts(rs.pts.filter((_, j) => j !== i));
                     }}
                     title={isHt ? "Hantei winner: click to undo" : !mark ? undefined : defaultWin ? "Default win: use Fusensho to undo" : "Click to remove"}>
@@ -3239,7 +3238,7 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
                             in styles.css). T096/FR-031: Fusensho awards the bout
                             to this side by default; the other side keeps what it
                             struck. Re-clicking the active side undoes it; manual
-                            pts/fouls edits while active end it (clearFusensho). */}
+                            pts/fouls edits while active end it (updateSubScore). */}
                         <div className="tsm-row-1">
                           {/* Buttons only: the scored ippon letters show in the
                               centre column (between the two competitors), like an
@@ -3247,7 +3246,7 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
                           <div className="team-sub-match__btns">
                             {getIpponButtons(isNaginataTeam).map(cc => (
                               <button key={cc} className={`ipt-btn ipt-btn--sm ${cc === "H" ? "ipt-btn--h" : ""}`}
-                                onClick={(ev) => tapIppon(ev, idx, rs, cc)}
+                                onClick={(ev) => tapIppon(ev, rs, cc)}
                                 disabled={subBoutDecided}>{cc}</button>
                             ))}
                           </div>
@@ -3274,7 +3273,7 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
                           <div className="tsm-fouls__controls">
                             <button className="tsm-fouls__btn" aria-label={`Remove a ${rs.label} foul`} onClick={() => rs.setFouls(nextFoulOnDecrement(rs.fouls))} disabled={rs.fouls === 0}>−</button>
                             <span className={`tsm-fouls__count ${rs.fouls >= 1 ? "tsm-fouls__count--warn" : ""}`}>{rs.fouls}</span>
-                            <button className="tsm-fouls__btn" aria-label={`Add a ${rs.label} foul`} onClick={(ev) => tapFoulIncrement(ev, idx, rs)} disabled={subBoutDecided}>+</button>
+                            <button className="tsm-fouls__btn" aria-label={`Add a ${rs.label} foul`} onClick={(ev) => tapFoulIncrement(ev, rs)} disabled={subBoutDecided}>+</button>
                           </div>
                         </div>
                       </div>

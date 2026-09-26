@@ -39,8 +39,8 @@ function stripComments(s) {
 // surfaces the bc-symm operator ruling requires to stay in lockstep.
 //
 // admin_scoring_shared.jsx and bracket.jsx were added by bc-fsnp/bc-dtfn: the
-// scoring editors' shared helpers now import struckIppons/DEFAULT_WIN_IPPON
-// from result_slot.jsx, and the editors import the tap_guard.jsx leaf.
+// scoring editors' shared helpers now import struckIppons from result_slot.jsx
+// and defaultWinMaru from bracket.jsx, and the editors import the tap_guard.jsx leaf.
 const CHECK_MODULES = [
   'admin_scoring_modal.jsx',
   'admin_scoring_individual.jsx',

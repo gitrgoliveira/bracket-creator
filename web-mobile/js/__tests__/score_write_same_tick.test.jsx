@@ -1,10 +1,10 @@
-// bc-sync: API.runDurably makes a running score write durable by putting it
-// into the persisted outbox, and that only works if the write reaches
-// API.recordScore INSIDE the runDurably callback, i.e. synchronously. The
-// score editor hosts call editMatchScore (admin.jsx), which calls
-// attemptScoreWrite first thing; this pins that attemptScoreWrite hands the
-// write to recordScore in the same tick. An `await` added in front of that
-// call would silently make every pagehide flush a plain fetch again.
+// bc-sync: on pagehide the autosave writes a pending edit marked `durable`,
+// and recordScore puts it into the persisted outbox. That only lands if the
+// write reaches API.recordScore before the page goes. The score editor hosts
+// call editMatchScore (admin.jsx), which calls attemptScoreWrite first thing;
+// this pins that attemptScoreWrite hands the write to recordScore in the same
+// tick. An `await` on I/O added in front of that call would let the page go
+// first and silently lose the edit again.
 import { describe, it, expect, vi } from 'vitest';
 import { attemptScoreWrite } from '../write_result.jsx';
 

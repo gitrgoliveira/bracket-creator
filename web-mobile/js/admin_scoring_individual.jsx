@@ -16,7 +16,7 @@ import { sameCompetitor } from './competitor_identity.jsx';
 // its host and by unit tests that never load api_client, and write_result.jsx
 // is import-only so it can be reached directly (see its header).
 import { notLandedBanner } from './write_result.jsx';
-import { useArmedConfirm, tapIsBounce, stampTap, clearTap } from './tap_guard.jsx';
+import { useArmedConfirm, acceptTap, clearTap } from './tap_guard.jsx';
 
 import {
   MAX_IPPONS_PER_SIDE,
@@ -329,9 +329,7 @@ export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, on
   // other side's button is a different action.
   const ipponTapRef = useRefA(null);
   const tapIppon = (ev, side, letter) => {
-    if (tapIsBounce(ipponTapRef, ev, side)) return;
-    stampTap(ipponTapRef, side);
-    addPt(side, letter);
+    if (acceptTap(ipponTapRef, ev, side)) addPt(side, letter);
   };
   const addPt = (side, letter) => {
     // No-op when the side is already at the 2-ippon max: don't mark dirty or

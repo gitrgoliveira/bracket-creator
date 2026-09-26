@@ -98,15 +98,14 @@ export function SyncStatusPill({ isRunning }) {
 // from the first tap instead of "Synced" over unsent work, and the token is
 // released only once the write has been handed to onSubmit (by then
 // recordScore counts it as in flight). And it is KEPT when the page goes away:
-// on pagehide, or the tab being hidden, a pending edit is written through
-// API.runDurably, which puts it straight into the persisted outbox. A reload
-// used to cancel the timer and lose the edit.
+// on pagehide, or the tab being hidden, a pending edit is written at once
+// with `durable: true` on the patch, which makes recordScore put it straight
+// into the persisted outbox. A reload used to cancel the timer and lose it.
 export function useDebouncedRunningWrite({ isRunningRef, buildPatchRef, onSubmitRef, mountedRef }) {
   const timerRef = useRefA(null);
   // One token per editor instance, so two open editors never release each
   // other's pending edit.
-  const pendingTokenRef = useRefA(null);
-  if (pendingTokenRef.current === null) pendingTokenRef.current = {};
+  const pendingTokenRef = useRefA({});
   // Existing test stubs of window.API predate notePendingEdit, so ask first.
   const notePending = (on) => {
     const api = window.API;
@@ -136,9 +135,10 @@ export function useDebouncedRunningWrite({ isRunningRef, buildPatchRef, onSubmit
   // what keeps an edit across one.
   useEffectA(() => () => { cancelDebounce(); }, []);
 
-  // The running write itself, shared by the debounce timer and flushPending so
-  // the two can never apply different gates.
-  const fireRunningWrite = () => {
+  // The running write itself, shared by the debounce timer, flushPending and
+  // the page-hide flush so they can never apply different gates. `durable`
+  // asks recordScore to queue the write rather than fetch it (bc-sync).
+  const fireRunningWrite = (durable) => {
     try {
       if (!mountedRef.current) return;
       // gate 3: re-check running at FIRE time. If the match was completed
@@ -153,7 +153,8 @@ export function useDebouncedRunningWrite({ isRunningRef, buildPatchRef, onSubmit
       // flight before its first await, so the status stays "syncing" through
       // the hand-over instead of flickering to "synced" and back.
       try {
-        const p = onSubmitRef.current(buildPatchRef.current("running"));
+        const patch = buildPatchRef.current("running");
+        const p = onSubmitRef.current(durable ? { ...patch, durable: true } : patch);
         if (p && typeof p.catch === "function") p.catch(() => {});
       } catch (_) { /* swallow */ }
     } finally {
@@ -192,15 +193,14 @@ export function useDebouncedRunningWrite({ isRunningRef, buildPatchRef, onSubmit
 
   // bc-sync: the page is going away (a reload, a closed tab, the iPad locking
   // or switching app). An edit still in the debounce window is written NOW,
-  // durably: API.runDurably puts it into the persisted outbox, because a fetch
-  // started here would die with the document. Only a PENDING edit is written;
-  // with nothing pending there is nothing to lose and nothing is sent.
-  const flushPendingRef = useRefA(flushPending);
-  flushPendingRef.current = flushPending;
+  // durably: recordScore puts a `durable` write into the persisted outbox,
+  // because a fetch started here would die with the document. Only a PENDING
+  // edit is written; with nothing pending there is nothing to lose. The
+  // mount-time closures are safe here: everything they read is a ref.
   useEffectA(() => {
     const flushDurably = () => {
-      if (timerRef.current === null) return;
-      window.API.runDurably(() => flushPendingRef.current());
+      if (!clearTimer()) return;
+      fireRunningWrite(true);
     };
     const onVisibility = () => { if (document.visibilityState === "hidden") flushDurably(); };
     window.addEventListener("pagehide", flushDurably);

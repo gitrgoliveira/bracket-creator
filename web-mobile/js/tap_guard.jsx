@@ -53,6 +53,17 @@ export function tapIsBounce(ref, ev, key = KEYLESS) {
   return at !== undefined && Date.now() - at < TAP_BOUNCE_MS;
 }
 
+// acceptTap: the check-then-stamp every guarded button runs. False for a
+// bounce; otherwise it records the tap as accepted and returns true. One call,
+// so a site can never stamp before it checks (which would read every tap as
+// its own bounce).
+//   onClick={(ev) => { if (!acceptTap(ref, ev, key)) return; act(); }}
+export function acceptTap(ref, ev, key = KEYLESS) {
+  if (tapIsBounce(ref, ev, key)) return false;
+  stampTap(ref, key);
+  return true;
+}
+
 // swallowBounce: an onClickCapture handler that stops a bounce before it
 // reaches any control under the container (bc-kbrw: opening a fought bout
 // moves the rows under the finger, so the second tap would land on another).
@@ -69,20 +80,17 @@ export const swallowBounce = (ref, key = KEYLESS) => (ev) => {
 //   onClick={(ev) => { if (!confirm(ev)) return; commit(); }}
 // confirm(ev) arms and returns false on an unarmed button, returns false for a
 // bounce, and true otherwise. setArmed(false) disarms as before, and
-// setArmed(true) stamps the time. `armed` is mirrored in a ref so the decision
-// never reads a stale render closure.
+// setArmed(true) stamps the time. The arming time lives in a ref (null while
+// disarmed), so the decision never reads a stale render closure.
 export function useArmedConfirm() {
   const [armed, setArmedState] = React.useState(false);
-  const armedRef = React.useRef(false);
-  const armedAtRef = React.useRef(0);
+  const armedAtRef = React.useRef(null);
   const setArmed = React.useCallback((next) => {
-    const on = !!next;
-    armedRef.current = on;
-    if (on) armedAtRef.current = Date.now();
-    setArmedState(on);
+    armedAtRef.current = next ? Date.now() : null;
+    setArmedState(!!next);
   }, []);
   const confirm = (ev) => {
-    if (!armedRef.current) { setArmed(true); return false; }
+    if (armedAtRef.current === null) { setArmed(true); return false; }
     if (isPointerTap(ev) && Date.now() - armedAtRef.current < TAP_BOUNCE_MS) return false;
     return true;
   };

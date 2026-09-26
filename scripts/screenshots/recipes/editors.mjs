@@ -72,10 +72,12 @@ export const families = {
           await page.locator(EDITOR).waitFor({ state: 'visible', timeout: 15000 });
           await startMatch(page);
           for (let i = 0; i < 2; i += 1) {
+            // Same side twice: the second tap waits out the bounce window
+            // (lib/editor.mjs).
+            if (i > 0) await page.waitForTimeout(TAP_DWELL_MS);
             await page.locator('.sb-side--shiro .ipt-btn').filter({ hasText: /^M$/ }).first().click();
-            // Same side twice: wait out the bounce window (lib/editor.mjs).
-            await page.waitForTimeout(TAP_DWELL_MS);
           }
+          await page.waitForTimeout(250);
           await finishMatch(page);
         }
       });

@@ -27,7 +27,6 @@ import { DOWNSTREAM_KNOCKOUT_PLAYED_CANCELLED } from '../write_result.jsx';
 import { sameCompetitor } from '../competitor_identity.jsx';
 import { preserveStoredDaihyosenVerdict } from '../admin_scoring_team.jsx';
 import { hanteiWinnerKey, hanteiSlot } from '../result_slot.jsx';
-import { defaultWinMaru } from '../bracket.jsx';
 // teamEncounterHasResult is a module-internal helper of admin_scoring_team.jsx
 // (not part of the thin-entry consumer barrel), imported directly like the
 // resolveMatchLineup tests do.
@@ -761,11 +760,6 @@ describe('nextFoulOnDecrement (team `−` button regression)', () => {
 });
 
 describe('applyFusenshoToggle', () => {
-  // The toggle takes its maru cells from the shared count rule; register
-  // the REAL source so these tests pin it, not the window-absent fallback.
-  beforeEach(() => { global.window.defaultWinMaru = defaultWinMaru; });
-  afterEach(() => { delete global.window.defaultWinMaru; });
-
   // Per-bout Fusensho is a toggle in TeamScoreEditorModal. Toggle-on
   // gives the chosen side its default-win maru and leaves the other side the
   // points it had already struck (FIK Art. 32, bc-fsnp); the pre-fusensho

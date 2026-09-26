@@ -48,9 +48,12 @@ export function sameSideTapPacer() {
 export async function finishMatch(page) {
   const modal = page.locator(EDITOR).first();
   await modal.locator('button').filter({ hasText: /^Finish( \+ Start Next|$)/ }).first().click();
+  // The bounce window runs from the arming tap, so the wait for the arm label
+  // counts towards it.
+  const armedAt = Date.now();
   const armed = modal.locator('button').filter({ hasText: /^Tap again to finish/ }).first();
   await armed.waitFor({ state: 'visible', timeout: 3000 });
-  await page.waitForTimeout(TAP_DWELL_MS);
+  await page.waitForTimeout(Math.max(0, TAP_DWELL_MS - (Date.now() - armedAt)));
   await armed.click();
   // Return once the write has landed, not after a guessed pause. The button
   // reads "Saving…" from the second tap until the server answers, then either

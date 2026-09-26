@@ -2,7 +2,7 @@
 // (bc-dtfn). The hook (useArmedConfirm) is pinned through the editors in
 // render/finish_arm_dwell.render.test.jsx; this pins the pure helpers.
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { TAP_BOUNCE_MS, isPointerTap, stampTap, clearTap, tapIsBounce, swallowBounce } from '../tap_guard.jsx';
+import { TAP_BOUNCE_MS, isPointerTap, stampTap, clearTap, tapIsBounce, acceptTap, swallowBounce } from '../tap_guard.jsx';
 
 const pointer = { detail: 1 };
 const keyboard = { detail: 0 };
@@ -51,6 +51,23 @@ describe('tapIsBounce', () => {
     stampTap(ref, 'a');
     clearTap(ref, 'a');
     expect(tapIsBounce(ref, pointer, 'a')).toBe(false);
+  });
+});
+
+describe('acceptTap', () => {
+  it('accepts and stamps a tap, then refuses its bounce', () => {
+    const ref = { current: null };
+    expect(acceptTap(ref, pointer, 'a')).toBe(true);
+    expect(acceptTap(ref, pointer, 'a')).toBe(false);
+    // A refused bounce does not re-stamp: the window still runs from the tap.
+    vi.advanceTimersByTime(TAP_BOUNCE_MS);
+    expect(acceptTap(ref, pointer, 'a')).toBe(true);
+  });
+
+  it('accepts a keyboard click inside the window', () => {
+    const ref = { current: null };
+    acceptTap(ref, pointer);
+    expect(acceptTap(ref, keyboard)).toBe(true);
   });
 });
 

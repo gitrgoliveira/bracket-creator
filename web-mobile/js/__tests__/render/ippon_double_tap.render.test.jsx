@@ -7,14 +7,15 @@
 // (tap_guard.jsx). The same holds for the foul "+", whose second foul awards
 // an H to the opponent. Keyboard input (detail 0) is never swallowed.
 //
-// fireEvent.click defaults to detail 0, which the guard exempts, so every
-// pointer tap here passes detail: 1 explicitly or the tests could never fail.
+// Pointer taps pass detail: 1 (helpers/tap_events.js): fireEvent.click's
+// default of 0 is what the guard exempts, so the tests could never fail.
 
 import React from 'react';
-import { render, act, fireEvent, cleanup } from '@testing-library/react';
+import { render, act, cleanup } from '@testing-library/react';
 import { describe, it, expect, vi, beforeAll, afterAll, beforeEach, afterEach } from 'vitest';
 import { installWindowStubs } from '../helpers/stub_globals.js';
 import { TAP_BOUNCE_MS } from '../../tap_guard.jsx';
+import { pointerTap, keyboardClick } from '../helpers/tap_events.js';
 
 const STUBBED_GLOBALS = {
   isHikiwake: () => false,
@@ -55,8 +56,6 @@ beforeEach(() => {
 });
 afterEach(() => { cleanup(); vi.useRealTimers(); });
 
-const pointerTap = (el) => act(async () => { fireEvent.click(el, { detail: 1 }); });
-const keyboardClick = (el) => act(async () => { fireEvent.click(el, { detail: 0 }); });
 const wait = (ms) => act(async () => { vi.advanceTimersByTime(ms); });
 
 async function mount(match) {

@@ -7,10 +7,11 @@
 // carry detail >= 1 (fireEvent.click defaults to 0, which is what a click
 // synthesized from the keyboard carries, so the tests pass detail explicitly).
 import React from 'react';
-import { render, act, fireEvent, screen } from '@testing-library/react';
+import { render, act, screen } from '@testing-library/react';
 import { describe, it, expect, vi, beforeAll, afterAll, beforeEach, afterEach } from 'vitest';
 import { installWindowStubs } from '../helpers/stub_globals.js';
 import { TAP_BOUNCE_MS } from '../../tap_guard.jsx';
+import { pointerTap as tap, keyboardClick } from '../helpers/tap_events.js';
 
 const STUBBED_GLOBALS = {
   isHikiwake: (_type) => false,
@@ -77,7 +78,6 @@ async function renderEncounter() {
   });
 }
 
-const tap = (el) => act(async () => { fireEvent.click(el, { detail: 1 }); });
 const isOpen = (idx) => !!screen.queryByTestId(`kachinuki-done-collapse-${idx}`);
 
 describe('bc-kbrw: a double tap on a fought bout opens that bout only', () => {
@@ -104,7 +104,7 @@ describe('bc-kbrw: a double tap on a fought bout opens that bout only', () => {
   it('a keyboard-synthesized click (detail 0) is never swallowed', async () => {
     await renderEncounter();
     await tap(screen.getByTestId('kachinuki-done-bout-1'));
-    await act(async () => { fireEvent.click(screen.getByTestId('kachinuki-done-bout-0'), { detail: 0 }); });
+    await keyboardClick(screen.getByTestId('kachinuki-done-bout-0'));
     expect(isOpen(0)).toBe(true);
   });
 });

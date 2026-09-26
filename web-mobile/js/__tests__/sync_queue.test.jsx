@@ -2259,14 +2259,16 @@ describe('bc-sync: pending edits and durable running writes', () => {
         expect(status).toBe('synced');
     });
 
-    it('inside runDurably a running write is persisted to the outbox before any fetch answers', async () => {
+    it('a durable running write is persisted to the outbox before any fetch answers', async () => {
         // A fetch that never answers: the direct path would hang on it.
         mockFetch(() => new Promise(() => {}));
-        const p = API.runDurably(() => API.recordScore('c1', 'm1', { status: 'running' }, 'pw', null));
+        const p = API.recordScore('c1', 'm1', { status: 'running', durable: true }, 'pw', null);
         // Synchronously, before anything is awaited.
-        const stored = JSON.parse(localStorage.getItem('bc_write_queue') || 'null');
+        const stored = localStorage.getItem('bc_write_queue');
         expect(stored).not.toBeNull();
-        expect(JSON.stringify(stored)).toContain('m1');
+        expect(stored).toContain('m1');
+        // The flag asks for the outbox; it is never part of the write itself.
+        expect(stored).not.toContain('durable');
         await flushMicrotasks();
         await expect(p).resolves.toMatchObject({ queued: true });
     });
@@ -2276,7 +2278,7 @@ describe('bc-sync: pending edits and durable running writes', () => {
         subscribeSyncStatus((s) => { status = s; });
         let resolveFlush;
         mockFetch(() => new Promise((r) => { resolveFlush = r; }));
-        await API.runDurably(() => API.recordScore('c1', 'm1', { status: 'running' }, 'pw', null));
+        await API.recordScore('c1', 'm1', { status: 'running', durable: true }, 'pw', null);
         await flushMicrotasks();
         expect(status).toBe('syncing'); // queued, and the flush is sending it
         resolveFlush({ ok: true, json: () => Promise.resolve({}) });
@@ -2284,16 +2286,16 @@ describe('bc-sync: pending edits and durable running writes', () => {
         expect(status).toBe('synced'); // nothing stuck on "Syncing..."
     });
 
-    it('outside runDurably a running write still goes by fetch', async () => {
+    it('a running write without the flag still goes by fetch', async () => {
         mockFetch(() => Promise.resolve({ ok: true, json: () => Promise.resolve({}) }));
         await API.recordScore('c1', 'm1', { status: 'running' }, 'pw', null);
         expect(localStorage.getItem('bc_write_queue')).toBeNull();
         expect(writeCallCount()).toBe(1);
     });
 
-    it('runDurably does not change a completed write', async () => {
+    it('the flag does not change a completed write', async () => {
         mockFetch(() => Promise.resolve({ ok: true, json: () => Promise.resolve({}) }));
-        await API.runDurably(() => API.recordScore('c1', 'm1', { status: 'completed' }, 'pw', null));
+        await API.recordScore('c1', 'm1', { status: 'completed', durable: true }, 'pw', null);
         expect(writeCallCount()).toBe(1);
         expect(localStorage.getItem('bc_write_queue')).toBeNull();
     });

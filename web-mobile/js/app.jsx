@@ -1,7 +1,7 @@
 // Main App: single tournament per app/url. Tournament has multiple Competitions
 // (Men's Individual, Women's Individual, Teams, etc.). Auth gates admin mode.
 
-import { applyPatch as patchCompetitionData, checkSeqGap } from './patch.jsx';
+import { applyPatch as patchCompetitionData, checkSeqGap, keepNewerDetail } from './patch.jsx';
 import { createTimerPool } from './timer_pool.jsx';
 import { setCachedAuthConfig } from './admin_helpers.jsx';
 import { LS_NOTIFICATIONS_ENABLED } from './notification_keys.jsx';
@@ -1134,7 +1134,7 @@ function App() {
             // for any view that caches its own derived state.
             if (viewerCompId === event.data?.competitionId) {
                 setSelectedCompData(prev => patchCompetitionData(prev, event));
-                jitteredTimeout(() => window.API.fetchCompetitionDetails(viewerCompId).then(setSelectedCompData).catch(err => console.error('SSE refresh failed:', err)), detailJitter);
+                jitteredTimeout(() => window.API.fetchCompetitionDetails(viewerCompId).then((data) => setSelectedCompData((prev) => keepNewerDetail(prev, data))).catch(err => console.error('SSE refresh failed:', err)), detailJitter);
             }
             // competitor_status_updated is a list-level event (eligibility
             // badges on the lobby): always refresh the full list.
@@ -1160,7 +1160,7 @@ function App() {
                 // Refresh current competition detail (jittered): the backend
                 // has already persisted the new status before broadcasting, so
                 // this fetch deterministically picks up the transition.
-                jitteredTimeout(() => window.API.fetchCompetitionDetails(viewerCompId).then(setSelectedCompData).catch(err => console.error('SSE refresh failed:', err)), detailJitter);
+                jitteredTimeout(() => window.API.fetchCompetitionDetails(viewerCompId).then((data) => setSelectedCompData((prev) => keepNewerDetail(prev, data))).catch(err => console.error('SSE refresh failed:', err)), detailJitter);
             }
             // P1 (mp-9afd): fire a full-list refetch for list-level
             // transitions (competition_started / competition_completed change
@@ -1182,7 +1182,7 @@ function App() {
             // Court/time move: no competitionId in payload, so refresh the
             // currently selected competition (if any) and the tournament list.
             if (viewerCompId) {
-                jitteredTimeout(() => window.API.fetchCompetitionDetails(viewerCompId).then(setSelectedCompData).catch(err => console.error('SSE refresh failed:', err)), detailJitter);
+                jitteredTimeout(() => window.API.fetchCompetitionDetails(viewerCompId).then((data) => setSelectedCompData((prev) => keepNewerDetail(prev, data))).catch(err => console.error('SSE refresh failed:', err)), detailJitter);
             }
             jitteredTimeout(maybeLoad, listJitter);
         } else if (event.type === "draw_generated" || event.type === "draw_discarded") {
@@ -1190,7 +1190,7 @@ function App() {
             // details (new pools/bracket data or cleared state) and the
             // tournament list so status badges update.
             if (viewerCompId === event.data?.competitionId) {
-                jitteredTimeout(() => window.API.fetchCompetitionDetails(viewerCompId).then(setSelectedCompData).catch(err => console.error('SSE refresh failed:', err)), detailJitter);
+                jitteredTimeout(() => window.API.fetchCompetitionDetails(viewerCompId).then((data) => setSelectedCompData((prev) => keepNewerDetail(prev, data))).catch(err => console.error('SSE refresh failed:', err)), detailJitter);
             }
             jitteredTimeout(maybeLoad, listJitter);
         } else if (event.type === "swiss_round_generated") {
@@ -1202,7 +1202,7 @@ function App() {
             // / participants_updated pattern: no separate display-mode branch
             // needed because the unconditional load() at the end covers it.
             if (viewerCompId === event.data?.competitionId) {
-                jitteredTimeout(() => window.API.fetchCompetitionDetails(viewerCompId).then(setSelectedCompData).catch(err => console.error('SSE refresh failed:', err)), detailJitter);
+                jitteredTimeout(() => window.API.fetchCompetitionDetails(viewerCompId).then((data) => setSelectedCompData((prev) => keepNewerDetail(prev, data))).catch(err => console.error('SSE refresh failed:', err)), detailJitter);
             }
             // swiss_round_generated updates the tournament list (swissCurrentRound
             // counter): always do one list refresh: covers display mode, home-
@@ -1214,7 +1214,7 @@ function App() {
             // event targets it; also refresh the tournament list so participant
             // counts stay accurate.
             if (viewerCompId === event.data?.competitionId) {
-                jitteredTimeout(() => window.API.fetchCompetitionDetails(viewerCompId).then(setSelectedCompData).catch(err => console.error('SSE refresh failed:', err)), detailJitter);
+                jitteredTimeout(() => window.API.fetchCompetitionDetails(viewerCompId).then((data) => setSelectedCompData((prev) => keepNewerDetail(prev, data))).catch(err => console.error('SSE refresh failed:', err)), detailJitter);
             }
             jitteredTimeout(maybeLoad, listJitter);
         } else if (event.type === "lineup_updated") {
@@ -1280,7 +1280,7 @@ function App() {
       window.API.fetchCompetitionDetails(viewerCompId)
         .then(data => {
           if (cancelled) return;
-          setSelectedCompData(data);
+          setSelectedCompData((prev) => keepNewerDetail(prev, data));
           setLoading(false);
         })
         .catch(err => {

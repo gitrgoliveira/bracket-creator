@@ -1428,8 +1428,9 @@ function RecordedWithdrawal({ match, ctl, disabled = false, singleBout = false }
   // names THIS match. The server stamps every completed withdrawal or default
   // win whose withdrawn side has a status record, a finished competition
   // included, so no stamp means no record: nobody bars them, and the plain
-  // copy (the match reopens running) is the true one. A row taken from a push
-  // carries no stamp until the refetch that follows it.
+  // copy (the match reopens running) is the true one. The pushes of the writes
+  // that record one carry it too (stampWithdrawnStatus), so a row taken from a
+  // push reads the same as its refetch.
   const withdrawnStatus = match.withdrawnStatus || null;
   //
   // The later list decides the copy beside the one-tap clear too (a chained

@@ -703,6 +703,10 @@ func (f *fixedSidesCompetitionStore) MatchSidesByID(string, string) (string, str
 	return f.sideA, f.sideB, f.sideAID, f.sideBID, f.found, f.sidesErr
 }
 
+func (fixedSidesCompetitionStore) LoadCompetitorStatus(string) (map[string]domain.CompetitorStatus, error) {
+	return nil, nil
+}
+
 // TestBackfillMatchIdentityForHantei is a table-driven unit test of the
 // merged helper (bc-qual + bc-dmsr reviews; this replaced two hand-copied
 // twins, backfillMatchLevelSidesForLegacyHantei which backfilled only
@@ -2622,6 +2626,10 @@ func (f failingCompetitionStore) MatchStatusByID(string, string) (state.MatchSta
 
 func (f failingCompetitionStore) MatchSidesByID(string, string) (string, string, string, string, bool, error) {
 	return "", "", "", "", false, f.err
+}
+
+func (f failingCompetitionStore) LoadCompetitorStatus(string) (map[string]domain.CompetitorStatus, error) {
+	return nil, f.err
 }
 
 // TestAnnotateQueuePositions_NonEmpty verifies that annotateQueuePositions

@@ -13,7 +13,7 @@
 // local-only UI (per the brief; backend persistence is a follow-up).
 
 import { createTimerPool } from './timer_pool.jsx';
-import { applyPatch } from './patch.jsx';
+import { applyPatch, keepNewerMatches } from './patch.jsx';
 import { SideCell } from './side_cell.jsx';
 // Imported DIRECTLY from the leaf rather than read off `window`. Two of the
 // call sites below sit inside a `try { } catch (_e) { }` that swallows, so a
@@ -492,32 +492,12 @@ function matchInComp(comp, id) {
     return b.thirdPlaceMatch && b.thirdPlaceMatch.id === id ? b.thirdPlaceMatch : null;
 }
 
-// The feed a refetch answered with, keeping any row the court already shows
-// from a NEWER write: a row never goes back in time, the rule showRunningPush
-// applies to a push. A refetch can read the data just before a write commits
-// and answer after that write's push was shown. Taken whole, it put the older
-// scoreline back, and an editor that had just caught up with the push adopted
-// it, so its next save wrote the lost point away.
+// The feed a refetch answered with, competition by competition, keeping any
+// row the court already shows from a NEWER write (keepNewerMatches, patch.jsx,
+// where the reason is stated): the rule showRunningPush applies to a push.
 function keepNewerRows(held, fetched) {
     if (!Array.isArray(held)) return fetched; // the first fetch: nothing shown yet
-    return fetched.map((comp) => {
-        const heldComp = held.find((c) => c.id === comp.id);
-        if (!heldComp) return comp;
-        const newer = (row) => {
-            const h = matchInComp(heldComp, row.id);
-            return h && (h.modifiedAt || 0) > (row.modifiedAt || 0) ? h : row;
-        };
-        const b = comp.bracket;
-        return {
-            ...comp,
-            poolMatches: comp.poolMatches && comp.poolMatches.map(newer),
-            bracket: b && {
-                ...b,
-                rounds: b.rounds && b.rounds.map((round) => round.map(newer)),
-                thirdPlaceMatch: b.thirdPlaceMatch && newer(b.thirdPlaceMatch),
-            },
-        };
-    });
+    return fetched.map((comp) => keepNewerMatches(held.find((c) => c.id === comp.id), comp));
 }
 
 function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, onMoveCourt, onLogout, onViewerMode, password, showToast, tweaks, onSwitchCourt }) {

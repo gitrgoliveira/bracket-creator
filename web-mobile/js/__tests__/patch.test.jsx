@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { applyPatch, recomputeQueuePositions, recomputeBracketQueuePositions } from '../patch.jsx';
+import { applyPatch, recomputeQueuePositions, recomputeBracketQueuePositions, keepNewerMatches, keepNewerDetail } from '../patch.jsx';
 
 // Tests for the centralised SSE-patch applier (Slice 0 / NFR-006).
 // applyPatch composes mergeMatchPatch (covered in mergeMatchPatch.test.jsx)
@@ -745,5 +745,49 @@ describe('recomputeBracketQueuePositions: bronze participates in its court queue
     const out = recomputeBracketQueuePositions(bracket);
     expect(out.thirdPlaceMatch.queuePosition).toBe(1); // bronze first
     expect(out.rounds[1][0].queuePosition).toBe(2); // final second
+  });
+});
+
+// A refetch can read the data just before a write commits and answer after
+// that write's push was applied: the match it carries is older than the one
+// already held, and must not replace it.
+describe('keepNewerMatches', () => {
+  const row = (id, modifiedAt, ipponsA = []) => ({ id, status: 'running', modifiedAt, ipponsA });
+  const comp = (pool, rounds = [], third = null) => ({ id: 'c1', poolMatches: pool, bracket: { rounds, thirdPlaceMatch: third } });
+
+  it('keeps a held match newer than the fetched one, everywhere a match lives', () => {
+    const held = comp([row('P1', 300, ['M', 'K'])], [[row('K1', 300, ['D'])]], row('B3', 300, ['T']));
+    const fetched = comp([row('P1', 200, ['M'])], [[row('K1', 200)]], row('B3', 200));
+    const out = keepNewerMatches(held, fetched);
+    expect(out.poolMatches[0].ipponsA).toEqual(['M', 'K']);
+    expect(out.bracket.rounds[0][0].ipponsA).toEqual(['D']);
+    expect(out.bracket.thirdPlaceMatch.ipponsA).toEqual(['T']);
+  });
+
+  it('takes the fetched match when it is as new as the held one or newer', () => {
+    const held = comp([row('P1', 300, ['M']), row('P2', 300, ['M'])]);
+    const fetched = comp([row('P1', 300, ['M', 'K']), row('P2', 400, [])]);
+    const out = keepNewerMatches(held, fetched);
+    expect(out.poolMatches[0].ipponsA).toEqual(['M', 'K']);
+    expect(out.poolMatches[1].ipponsA).toEqual([]);
+  });
+
+  it('takes the fetch whole when nothing is held yet', () => {
+    const fetched = comp([row('P1', 100)]);
+    expect(keepNewerMatches(undefined, fetched)).toBe(fetched);
+  });
+});
+
+describe('keepNewerDetail', () => {
+  const detail = (id, modifiedAt, ipponsA) => ({ config: { id }, poolMatches: [{ id: 'Pool A-0', status: 'running', modifiedAt, ipponsA }] });
+
+  it('keeps the newer held match of the same competition', () => {
+    expect(keepNewerDetail(detail('c1', 300, ['M', 'K']), detail('c1', 200, ['M'])).poolMatches[0].ipponsA).toEqual(['M', 'K']);
+  });
+
+  it('takes the fetch whole for another competition, whose match ids may repeat', () => {
+    const fetched = detail('c2', 100, []);
+    expect(keepNewerDetail(detail('c1', 300, ['M']), fetched)).toBe(fetched);
+    expect(keepNewerDetail(null, fetched)).toBe(fetched);
   });
 });

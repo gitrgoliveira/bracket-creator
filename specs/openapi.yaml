@@ -5073,7 +5073,8 @@ components:
       description: >
         Request-time only, never stored. On a completed match a withdrawal or
         default win decided: where the withdrawn side's competitor status
-        stands now.
+        stands now. Set on the viewer payloads, and on the result a /decision,
+        /score or bulk-score write returns and pushes.
       properties:
         eligible:
           type: boolean

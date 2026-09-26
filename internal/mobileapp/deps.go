@@ -61,6 +61,11 @@ type CompetitionStore interface {
 	// backfill. sideAID/sideBID are always "" for a bracket match (it
 	// persists no ids).
 	MatchSidesByID(compID, matchID string) (sideA, sideB, sideAID, sideBID string, found bool, err error)
+	// LoadCompetitorStatus returns the competition's eligibility records,
+	// keyed by participant id. Mirrors state.Store.LoadCompetitorStatus; a
+	// match write reads it to stamp the withdrawal it pushes
+	// (stampWithdrawnStatus).
+	LoadCompetitorStatus(compID string) (map[string]domain.CompetitorStatus, error)
 }
 
 // ScoringEngine is the consumer-boundary view of engine.Engine used by

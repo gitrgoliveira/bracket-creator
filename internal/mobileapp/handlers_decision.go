@@ -243,6 +243,7 @@ func RegisterDecisionHandlers(r *gin.RouterGroup, eng ScoringEngine, store Compe
 			return
 		}
 
+		stampWithdrawnStatus(store, id, result)
 		hub.Broadcast(EventMatchUpdated, gin.H{
 			"competitionId": id,
 			"matchId":       mid,

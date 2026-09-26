@@ -496,4 +496,43 @@ function applyPatch(prev, event) {
     return changed ? next : prev;
 }
 
-export { applyPatch, applyPatchOrdered, checkSeqGap, recomputeQueuePositions, recomputeBracketQueuePositions };
+// keepNewerMatches: the competition a refetch answered with, keeping every
+// match the caller already holds from a NEWER write -- a match never goes back
+// in time. Every holder here applies a push at once (applyPatch) and refetches
+// a moment later, and a refetch can read the data just before a write commits
+// yet answer after that write's push was applied. Taken whole, it put the
+// older scoreline back, and an open score editor that had caught up with the
+// push adopted it, so its next save wrote the lost point away. `held` and
+// `fetched` are the SAME competition (match ids repeat across competitions);
+// no held copy yet means nothing to keep.
+function keepNewerMatches(held, fetched) {
+    if (!held) return fetched;
+    const heldById = new Map();
+    for (const m of held.poolMatches || []) heldById.set(m.id, m);
+    const hb = held.bracket;
+    for (const round of (hb && hb.rounds) || []) for (const m of round) heldById.set(m.id, m);
+    if (hb && hb.thirdPlaceMatch) heldById.set(hb.thirdPlaceMatch.id, hb.thirdPlaceMatch);
+    const newer = (row) => {
+        const h = heldById.get(row.id);
+        return h && (h.modifiedAt || 0) > (row.modifiedAt || 0) ? h : row;
+    };
+    const b = fetched.bracket;
+    return {
+        ...fetched,
+        poolMatches: fetched.poolMatches && fetched.poolMatches.map(newer),
+        bracket: b && {
+            ...b,
+            rounds: b.rounds && b.rounds.map((round) => round.map(newer)),
+            thirdPlaceMatch: b.thirdPlaceMatch && newer(b.thirdPlaceMatch),
+        },
+    };
+}
+
+// keepNewerDetail is keepNewerMatches for a competition-detail response
+// ({config, poolMatches, bracket, ...}): the held copy counts only when it is
+// the same competition, so a refetch after navigating elsewhere is taken whole.
+function keepNewerDetail(held, fetched) {
+    return held && held.config && held.config.id === fetched.config.id ? keepNewerMatches(held, fetched) : fetched;
+}
+
+export { applyPatch, applyPatchOrdered, checkSeqGap, recomputeQueuePositions, recomputeBracketQueuePositions, keepNewerMatches, keepNewerDetail };

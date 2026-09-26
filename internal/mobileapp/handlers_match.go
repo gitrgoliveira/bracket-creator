@@ -346,6 +346,26 @@ func annotateEligibility(poolMatches []state.MatchResult, bracket *state.Bracket
 	}
 }
 
+// stampWithdrawnStatus gives a match write's result, before it is pushed, the
+// withdrawnStatus stamp the viewer payloads carry (annotateEligibility). A
+// host applies the push at once and refetches a moment later, so without it a
+// score editor left on a withdrawal it had just recorded worded the clear from
+// no stamp until the refetch landed. Only a completed withdrawal or default
+// win carries the stamp, so only those pay for the status read.
+func stampWithdrawnStatus(store CompetitionStore, compID string, r *state.MatchResult) {
+	if r.Status != state.MatchStatusCompleted || !domain.IsDefaultWinDecisionStr(r.Decision) {
+		return
+	}
+	statuses, err := store.LoadCompetitorStatus(compID)
+	if err != nil {
+		log.Printf("mobileapp: push %s/%s: load competitor status: %v", compID, r.ID, err)
+		return
+	}
+	one := []state.MatchResult{*r}
+	annotateEligibility(one, nil, statuses)
+	r.WithdrawnStatus = one[0].WithdrawnStatus
+}
+
 // anyNumberedBoutHasEncho reports whether any NUMBERED sub-result (a real
 // team bout, not the position -1 daihyosen) carries an encho marker. Used
 // by the score endpoints to decide whether the kachinuki numbered-bout
@@ -912,6 +932,9 @@ func RegisterMatchHandlers(r *gin.RouterGroup, eng *engine.Engine, store Competi
 		}
 
 		if len(successful) > 0 {
+			for i := range successful {
+				stampWithdrawnStatus(store, id, &successful[i])
+			}
 			hub.Broadcast(EventMatchUpdated, gin.H{
 				"competitionId": id,
 				"results":       matchesForBroadcast(successful),
@@ -2925,6 +2948,7 @@ func registerScoreHandler(r *gin.RouterGroup, eng ScoringEngine, store Competiti
 			runningRevStore.Delete(matchKey)
 		}
 		if coalescer.Allow(matchKey, isRunning) {
+			stampWithdrawnStatus(store, id, result)
 			hub.Broadcast(EventMatchUpdated, gin.H{
 				"competitionId": id,
 				"matchId":       mid,

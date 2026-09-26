@@ -308,12 +308,12 @@ describe('kachinuki reopen: a busy court gets a remedy, not a dead end', () => {
 
     const panel = await screen.findByTestId('kachinuki-reopen-conflict');
     // The blocking match, by court and by competitors: acting on an opaque
-    // match id alone is how the wrong score gets wiped.
+    // match id alone is how the wrong match gets taken off the court.
     await waitFor(() => expect(panel.textContent).toContain('Team D vs Team C'));
     expect(panel.textContent).toContain('Shiaijo A');
     // The warning is on screen, in words, BEFORE the operator commits.
     expect(screen.getByTestId('kachinuki-reopen-conflict-warning').textContent)
-      .toContain('clears any score already entered for it');
+      .toContain('keeps any score already entered for it');
     // bc-rawm: the server's own raw sentence is GONE, not shown alongside the
     // heading -- it named the same internal id and told the operator to
     // "finish that match before reopening", the opposite of this panel's own

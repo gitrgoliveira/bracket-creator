@@ -1866,3 +1866,23 @@ describe('normalizeMatch: same-name winner attribution is arbitrary but CONSISTE
     expect(norm.winner.id).toBe('uuid-s');
   });
 });
+
+// bc-sbq: the court console's Start carries startOnly so the server keeps the
+// score a queued match already holds; the wire has no other way to say "no
+// score sent", since the start's empty arrays are the same bytes as an
+// operator clearing every mark.
+describe('startOnly reaches the wire only from startPatch (bc-sbq)', () => {
+  it('startPatch is flagged, and the serializer carries the flag', async () => {
+    const { startPatch } = await import('../admin_schedule_score_editor.jsx');
+    const patch = startPatch();
+    expect(patch.startOnly).toBe(true);
+    const wire = toBackendMatchResult(patch, { sideA: 'Alice', sideB: 'Bob' });
+    expect(wire.startOnly).toBe(true);
+    expect(wire.status).toBe('running');
+  });
+
+  it('an editor board sent as running is not flagged', () => {
+    const wire = toBackendMatchResult({ status: 'running', ipponsA: [], ipponsB: [] }, { sideA: 'Alice', sideB: 'Bob' });
+    expect(wire.startOnly).toBeUndefined();
+  });
+});

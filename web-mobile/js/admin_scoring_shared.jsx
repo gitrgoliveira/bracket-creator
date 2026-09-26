@@ -1389,9 +1389,9 @@ function useMatchReopen({ match, password, isComplete }) {
   };
 
   // The remedy: send the blocking match back to the queue and reopen this one,
-  // in ONE server call under one court lock (mp-gmcg review A4). DESTRUCTIVE:
-  // revert-to-queue clears that match's partial score, which is why the panel
-  // spells the consequence out before this can be tapped.
+  // in ONE server call under one court lock (mp-gmcg review A4). The blocking
+  // match keeps its score in the queue (bc-sbq), and the panel says so before
+  // this can be tapped, because it takes that match off the court.
   const requeueBlocker = async () => {
     const c = conflict;
     if (!c || busy || landed) return;
@@ -1494,8 +1494,8 @@ function ReopenFeedback({ ctl, testIdPrefix }) {
             {courtBusyMessage({ court: c.court, label: ctl.blockerLabel || c.label || "another match" })}
           </div>
           <div className="reopen-conflict__warn" data-testid={`${testIdPrefix}-conflict-warning`}>
-            Sending it back to the queue clears any score already entered for it. Finishing that
-            match instead keeps its score.
+            Sending it back to the queue keeps any score already entered for it: it carries on
+            from there when it is started again.
           </div>
           <div className="reopen-conflict__actions">
             <button
@@ -1504,9 +1504,9 @@ function ReopenFeedback({ ctl, testIdPrefix }) {
               data-testid={`${testIdPrefix}-requeue-button`}
               onClick={ctl.requeueBlocker}
               disabled={ctl.busy}
-              title="Clears that match's score, returns it to the queue, then reopens this one"
+              title="Returns that match to the queue with its score, then reopens this one"
             >
-              {ctl.busy ? "Working…" : "Clear its score, queue it, and reopen"}
+              {ctl.busy ? "Working…" : "Queue it and reopen"}
             </button>
             <button
               type="button"

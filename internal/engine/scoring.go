@@ -604,6 +604,14 @@ type ForceOptions struct {
 	// false, or when nothing needed reopening). The caller uses it to
 	// broadcast match_updated for each one, not just the corrected match.
 	Reopened *[]ReopenedMatch
+	// StartOnly marks a write that only STARTS the match (the court console's
+	// Start match and Finish + Start Next, which have no score board of their
+	// own): it changes the status and keeps whatever score the stored match
+	// holds (keepQueuedScore). It exists because the wire cannot say "no score
+	// sent": such a write carries empty ippon arrays and zero counts, the same
+	// bytes as an operator clearing every mark on an editor board, which must
+	// still clear them.
+	StartOnly bool
 }
 
 // firstForceOptions returns the caller's ForceOptions, or the zero value
@@ -2913,8 +2921,9 @@ func downstreamReopenReason(correctedID string) string {
 	return fmt.Sprintf("reopened: the result of match %s was corrected", correctedID)
 }
 
-// requeueBracketMatch normalises a bracket match to a CLEAN SCHEDULED match:
-// no verdict, no scoreline, no provenance, no reopen flag. It is
+// requeueBracketMatch sends a bracket match back to the queue: scheduled, no
+// verdict, no provenance, no reopen flag, and its score KEPT (points,
+// penalties, overtime, bouts, flags; operator ruling 2026-09-26, bc-sbq). It is
 // RevertMatchToQueue's bracket branch, extracted so the body has a name and a
 // doc rather than sitting inline in a closure.
 //
@@ -2922,23 +2931,16 @@ func downstreamReopenReason(correctedID string) string {
 // the operator ruled that a downstream match invalidated by a correction was
 // already played and should be reopened where it is, leaving the queue alone
 // (see forceReopenDownstreamChain, which calls reopenBracketMatch instead).
-// Keep the two distinct: requeue is "this match has not happened", reopen is
-// "this match happened and must happen again".
+// Keep the two distinct: requeue is "this match is not finished, carry on
+// from where it stopped", reopen is "this match finished and must happen
+// again".
 func requeueBracketMatch(m *state.BracketMatch) {
 	m.Status = state.MatchStatusScheduled
 	m.Winner = ""
 	m.WinnerID = "" // bc-brid: the verdict's id half, cleared with the name.
-	m.IpponsA = nil
-	m.IpponsB = nil
-	m.HansokuA = 0
-	m.HansokuB = 0
 	m.Decision = ""
 	m.DecisionBy = ""
 	m.DecisionReason = ""
-	m.Encho = nil
-	m.SubResults = nil
-	m.FlagsA = 0
-	m.FlagsB = 0
 	m.IsOverridden = false
 	m.ResultSource = ""
 	m.CorrectionReason = ""
@@ -3485,8 +3487,9 @@ func (e *Engine) UpdateMatchTime(compId string, matchId string, scheduledAt stri
 }
 
 // RevertMatchToQueue reverts a running match back to the scheduled (queued)
-// state, clearing any partial score so the bout can be restarted correctly.
-// It is idempotent for already-scheduled matches (no-op success). Completed
+// state. It keeps the match's score: a match sent back to the queue never
+// loses what was entered, and starting it again carries on from it (the
+// StartOnly write, keepQueuedScore). It is idempotent for already-scheduled matches (no-op success). Completed
 // matches return ErrMatchAlreadyCompleted (HTTP 409); the operator must use
 // the score editor to correct a recorded result instead.
 //
@@ -3516,23 +3519,19 @@ func (e *Engine) RevertMatchToQueue(compId, matchId string) error {
 			return nil
 		}
 		// Any non-completed match (running, or an already-scheduled match that
-		// still carries stale score/audit metadata from an earlier partial
-		// write) is normalised to a CLEAN scheduled match. Idempotent: a
-		// pristine scheduled match is left effectively unchanged.
+		// still carries a stale verdict or audit note from an earlier partial
+		// write) goes back to the queue WITH ITS SCORE: points, penalties,
+		// overtime, bouts, flags and rep-bout fighters stay (keepQueuedScore
+		// names them), and the operator removes a wrong mark themselves
+		// (operator ruling 2026-09-26, bc-sbq). Only the verdict and the
+		// audit notes go. Idempotent: a pristine scheduled match is left
+		// effectively unchanged.
 		r.Status = state.MatchStatusScheduled
 		r.Winner = ""
 		r.WinnerID = ""
-		r.IpponsA = nil
-		r.IpponsB = nil
-		r.HansokuA = 0
-		r.HansokuB = 0
 		r.Decision = ""
 		r.DecisionBy = ""
 		r.DecisionReason = ""
-		r.Encho = nil
-		r.SubResults = nil
-		r.FlagsA = 0
-		r.FlagsB = 0
 		r.ResultSource = ""
 		r.CorrectionReason = ""
 		// ReopenPending is a match-level field a reopened result carries
@@ -3541,11 +3540,6 @@ func (e *Engine) RevertMatchToQueue(compId, matchId string) error {
 		// queue. reopenBracketMatch's doc names this mirror obligation on
 		// RevertMatchToQueue.
 		r.ReopenPending = false
-		// Rep-bout nominations name who fought a pool/league daihyosen; they are
-		// result data for that supplementary bout, so a requeued match must not
-		// keep them (bracket matches have no rep fields).
-		r.RepPlayerA = ""
-		r.RepPlayerB = ""
 		// Revert fence, the same one the bracket branch sets
 		// (requeueBracketMatch, mp-y3nk): a write stamped before the requeue,
 		// such as an offline-queued score replayed afterwards, loses the
@@ -3572,9 +3566,9 @@ func (e *Engine) RevertMatchToQueue(compId, matchId string) error {
 			alreadyCompleted = true
 			return
 		}
-		// Same contract as the pool path: normalise any non-completed match to
-		// a clean scheduled match, clearing stale score/provenance/audit fields
-		// even if it was already scheduled.
+		// Same contract as the pool path: any non-completed match goes back
+		// to the queue with its score, losing only the verdict and the audit
+		// notes, even if it was already scheduled.
 		requeueBracketMatch(m)
 	}); err != nil {
 		// Neither pool nor bracket holds this match: surface a typed

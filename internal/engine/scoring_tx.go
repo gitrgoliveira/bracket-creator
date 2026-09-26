@@ -157,6 +157,9 @@ func (e *Engine) RecordMatchResultWithIneligibilityTx(tx state.StoreTx, compID, 
 	if err != nil {
 		return nil, err
 	}
+	if fo.StartOnly {
+		keepQueuedScore(prior, result)
+	}
 
 	// Kachinuki bout logs merge BY POSITION rather than replace wholesale
 	// (ACID: a client whose local log is behind the server must never
@@ -315,6 +318,34 @@ func (e *Engine) RecordMatchResultWithIneligibilityTx(tx state.StoreTx, compID, 
 		}
 	}
 	return status, nil
+}
+
+// keepQueuedScore makes a StartOnly write carry the score the stored match
+// already holds, so starting a match never wipes it (operator ruling
+// 2026-09-26, bc-sbq: a match sent back to the queue keeps its score, and
+// starting it again carries on from there). What it copies is exactly what a
+// running write can carry and RevertMatchToQueue keeps: points, penalties,
+// overtime, bouts, flags and rep-bout fighters.
+//
+// Any stored status but completed: a court list a moment behind can show as
+// scheduled a match another device has already started and scored, and the
+// start must not wipe those points either. A completed match is left to the
+// write as it always was.
+func keepQueuedScore(prior, result *state.MatchResult) {
+	if prior.Status == state.MatchStatusCompleted {
+		return
+	}
+	result.IpponsA = append([]string(nil), prior.IpponsA...)
+	result.IpponsB = append([]string(nil), prior.IpponsB...)
+	result.HansokuA, result.HansokuB = prior.HansokuA, prior.HansokuB
+	result.Encho = nil
+	if prior.Encho != nil {
+		encho := *prior.Encho
+		result.Encho = &encho
+	}
+	result.SubResults = append([]state.SubMatchResult(nil), prior.SubResults...)
+	result.FlagsA, result.FlagsB = prior.FlagsA, prior.FlagsB
+	result.RepPlayerA, result.RepPlayerB = prior.RepPlayerA, prior.RepPlayerB
 }
 
 // refuseConcurrentWithdrawal is K3's pre-write half: for a withdrawal decision

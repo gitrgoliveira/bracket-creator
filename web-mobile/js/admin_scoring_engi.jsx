@@ -87,7 +87,7 @@ function deriveWinner(flagsA, flagsB) {
 // EngiScoreEditorModal: full engi flag-counter editor.
 // Props mirror the individual ScoreEditorModal surface so the dispatch in
 // admin_scoring_individual.jsx can forward the same prop bag.
-export function EngiScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, onBoardChange, prevMatch, nextMatch, onPrev, onNext, variant = "modal", canClose = true }) {
+export function EngiScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, prevMatch, nextMatch, onPrev, onNext, variant = "modal", canClose = true }) {
   const m = match;
   const isComplete = m.status === "completed";
   const initialFlagsA = m.flagsA || 0;
@@ -116,14 +116,6 @@ export function EngiScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext
   const [writeFailed, setWriteFailed] = useStateE(null); // { reason, advice? } | null
 
   const total = flagsA + flagsB;
-  // bc-sbq: report the flags on this board to a host that must say what a
-  // requeue would discard (the shiaijo console). Engi flags are entered with
-  // no autosave, so the court feed never holds them until the match is
-  // finished; this board is the only source. Keyed on the values.
-  useEffectE(() => {
-    if (typeof onBoardChange !== "function") return;
-    onBoardChange({ compId: m.compId, matchId: m.id, points: 0, fouls: 0, flags: total, overtime: false, draw: false, bouts: 0 });
-  }, [m.compId, m.id, total, onBoardChange]);
   const isValidTotal = VALID_TOTALS.has(total);
   // winnerSide drives the per-side winner highlight below. A valid total is
   // always odd ({1,3,5}), so it already implies a strict winner; canSubmit

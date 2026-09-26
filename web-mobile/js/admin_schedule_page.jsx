@@ -30,7 +30,10 @@ const AdminTWMatch = React.memo(({ m, highlight, courts, onMove, onTimeChange })
   // once both are id-less).
   const aWin = !!m.winner && !!m.sideA && sameCompetitor(m.winner, m.sideA);
   const bWin = !!m.winner && !!m.sideB && sameCompetitor(m.winner, m.sideB);
-  const scoreStr = (m.status === "completed" || m.status === "running") ? window.matchScoreStr(m) : "";
+  // matchShowsScore (bracket.jsx) is the gate: a queued match keeps its score
+  // but reads as not started (bc-sbq). Guarded because this row renders for
+  // scheduled matches, which never needed bracket.js before.
+  const scoreStr = (!!window.matchShowsScore && window.matchShowsScore(m)) ? window.matchScoreStr(m) : "";
   const submitTime = (e) => {
     e.preventDefault();
     setEditingTime(false);

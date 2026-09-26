@@ -353,8 +353,8 @@ func TestReopenMatch_ByeResolvedDownstream_IsUnwound(t *testing.T) {
 
 // TestReopenBracketDownstreamCheck_ScheduledWithStrayDataIsNotResolvedByBye
 // covers the second half of bc-cse item 8: bracketMatchStartedOrScored is
-// true on more than a completed match (Winner/SubResults/Ippons set is
-// enough), so a downstream row that is still SCHEDULED but carries stray
+// true on more than a completed match (a Winner set is enough), so a
+// downstream row that is still SCHEDULED but carries stray
 // Winner data must not be classified "resolved by a bye" -- that label
 // promises the specific, clean completed-via-bye shape
 // TestReopenMatch_ByeResolvedDownstream_IsUnwound pins,

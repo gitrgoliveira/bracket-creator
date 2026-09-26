@@ -1181,8 +1181,8 @@ func RegisterMatchHandlers(r *gin.RouterGroup, eng *engine.Engine, store Competi
 	})
 
 	// POST /competitions/:id/matches/:mid/revert-to-queue
-	// Reverts a running match back to the scheduled (queued) state, discarding
-	// any partial score so the operator can restart the correct bout. Idempotent
+	// Reverts a running match back to the scheduled (queued) state, keeping its
+	// score: starting it again carries on from it (bc-sbq). Idempotent
 	// for already-scheduled matches. Completed matches return 409 (use the score
 	// editor to correct a recorded result); an unknown match id returns 404.
 	//
@@ -1388,8 +1388,8 @@ func RegisterMatchHandlers(r *gin.RouterGroup, eng *engine.Engine, store Competi
 	// between the two steps the old two-call client flow made. The blocker may
 	// be in the same competition (competitions run across several courts, so a
 	// sibling match can hold this one's court) or in a different one — the body
-	// carries whichever competition owns it. Destructive (the blocker loses any
-	// partial score), so it is main-password-gated in self-run mode via the
+	// carries whichever competition owns it. It reopens a recorded result (the
+	// blocker keeps its score), so it is main-password-gated in self-run mode via the
 	// central allowlist, the same class as reopen/override-winner.
 	// Body: {blockerCompId, blockerMatchId, reason?, forceDownstreamReopen?} —
 	// reason and forceDownstreamReopen optional, exactly like reopen (an
@@ -2340,6 +2340,10 @@ type scoreRequestBody struct {
 	// (engine.requalifyAfterPoolWrite): confirmed, those knockout matches are
 	// reopened and the new qualifier is seated.
 	ForceDownstreamReopen bool `json:"forceDownstreamReopen"`
+	// StartOnly marks a write that only starts the match (the SPA's
+	// startPatch): the score the stored match holds is kept rather than
+	// replaced by the payload's empty one (engine.ForceOptions.StartOnly).
+	StartOnly bool `json:"startOnly"`
 }
 
 // scoreResponseWithReopened is the score write's reply: the stored
@@ -2696,8 +2700,9 @@ func registerScoreHandler(r *gin.RouterGroup, eng ScoringEngine, store Competiti
 					}
 				}
 				engStatus, engErr = eng.RecordMatchResultWithIneligibilityTx(stx, id, mid, result, engine.ForceOptions{
-					Force:    body.ForceDownstreamReopen,
-					Reopened: &reopenedDownstream,
+					Force:     body.ForceDownstreamReopen,
+					Reopened:  &reopenedDownstream,
+					StartOnly: body.StartOnly,
 				})
 				// engErr is a normal application-level signal (AlreadyIneligible
 				// → 409, validation/not-found → other codes); we surface it

@@ -83,8 +83,13 @@ function ScoreEditCourtBtn({ m, courts, onMoveCourt }) {
 }
 
 // Module-level factory so admin_shiaijo.jsx can consume it via window.startPatch.
+// startOnly (bc-sbq): this write only starts the match, so the server keeps the
+// score the match already holds (a match sent back to the queue keeps one)
+// instead of storing the empty scoreline below. The editors' own Start sends
+// their board unflagged, so an operator who cleared every mark still clears it.
 export function startPatch() {
   return {
+    startOnly: true,
     status: "running", winner: null, ipponsA: [], ipponsB: [], hansokuA: 0, hansokuB: 0,
     score: { type: "ippon", winnerPts: 0, loserPts: 0, ippons: [], fouls: { a: 0, b: 0 }, live: true, corrected: false },
   };
@@ -219,14 +224,18 @@ export function AdminScoreEditor({ t, c, onEditScore, onMoveCourt, restrictToCom
           // match's own mark, already inline in its score string below, is
           // never doubled here.
           const { shiro: teamShiroMark, aka: teamAkaMark } = window.teamMatchMarks ? window.teamMatchMarks(m) : { shiro: "", aka: "" };
+          // Show the live ippon score for a running bout too (not just completed)
+          // so the list reflects scoring in progress; "vs" only before it starts.
+          // matchShowsScore (bracket.jsx) is the one gate: a match sent back to
+          // the queue keeps its score, but this row shows it as not started,
+          // penalty marks included, until it restarts (bc-sbq). Guarded like
+          // the boutMiddle read below: a scheduled row needs no bracket.js.
+          const showScore = !!window.matchShowsScore && window.matchShowsScore(m);
           // Outstanding single hansoku → red ▲ next to the offending side (same
           // mark as the scoresheet). hansoku may live on the match or under
           // score.fouls depending on the source; fall back across both.
-          const foulB = boutHansokuMark(m.hansokuB ?? m.score?.fouls?.b ?? 0);
-          const foulA = boutHansokuMark(m.hansokuA ?? m.score?.fouls?.a ?? 0);
-          // Show the live ippon score for a running bout too (not just completed)
-          // so the list reflects scoring in progress; "vs" only before it starts.
-          const showScore = m.status === "completed" || m.status === "running";
+          const foulB = showScore ? boutHansokuMark(m.hansokuB ?? m.score?.fouls?.b ?? 0) : "";
+          const foulA = showScore ? boutHansokuMark(m.hansokuA ?? m.score?.fouls?.a ?? 0) : "";
           // A just-started running bout is 0–0, where formatIpponsScore returns "".
           // Fall back so the cell is never blank: an empty score renders the
           // boutMiddle placeholder (normally "vs"). Live techniques show once present.
@@ -270,7 +279,7 @@ export function AdminScoreEditor({ t, c, onEditScore, onMoveCourt, restrictToCom
                   <div className="score-edit-row__score">
                     <span className="score-edit-row__foul">{foulB && <span className="msb-hansoku" data-testid="foul-mark-b">{foulB}</span>}</span>
                     <span className="score-edit-row__scoreval">
-                      {seScore || <span style={{ fontSize: 11, color: "var(--ink-3)" }}>{window.boutMiddle ? window.boutMiddle(m.decision, m.encho, m.score) : "vs"}</span>}
+                      {seScore || <span style={{ fontSize: 11, color: "var(--ink-3)" }}>{showScore && window.boutMiddle ? window.boutMiddle(m.decision, m.encho, m.score) : "vs"}</span>}
                     </span>
                     <span className="score-edit-row__foul">{foulA && <span className="msb-hansoku" data-testid="foul-mark-a">{foulA}</span>}</span>
                   </div>

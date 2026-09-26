@@ -611,7 +611,9 @@ const MatchCard = React.memo(({ match, variant, showDojo, onClick, highlighted, 
 
   // Meta-strip middle mark: X | (E) | (DH), mutually exclusive (see
   // middleMark). The X chip keeps its dedicated span below for styling.
-  const metaMid = matchMiddleMark(match);
+  // Gated on matchShowsScore: a queued match keeps its overtime, and its card
+  // must still read as not started (bc-sbq).
+  const metaMid = matchShowsScore(match) ? matchMiddleMark(match) : "";
   return (
     <button
       ref={matchRef}
@@ -1435,14 +1437,32 @@ function matchScoreStr(m) {
 // A running TEAM match has no such risk (its aggregate is mark-free), so it
 // gets the live update the underlying bug is actually about; a running
 // individual match keeps the plain "vs" middle until it completes.
-// Everything else → boutMiddle (normally the plain "vs"); the row's
-// .is-running highlight is the "now" signal, NOT a centre glyph, and the
-// labelled "● NOW" badge elsewhere is a separate affordance.
+// Everything else → the plain "vs" (matchShowsScore below): a queued match
+// keeps its score, including an overtime whose (E) boutMiddle would otherwise
+// print, and must still read as not started (bc-sbq). The row's .is-running
+// highlight is the "now" signal, NOT a centre glyph, and the labelled
+// "● NOW" badge elsewhere is a separate affordance.
 function matchStateCell(m) {
+  if (!matchShowsScore(m)) return "vs";
   const mid = boutMiddle(m.decision, m.encho, m.score);
   if (m.status === "completed") return matchScoreStr(m) || mid;
-  if (m.status === "running") return teamIVPWScore(m) || mid;
-  return mid;
+  return teamIVPWScore(m) || mid;
+}
+
+// matchShowsScore: THE one answer to "does a display show this match's
+// recorded score", true only for a running or a completed match. A match sent
+// back to the queue KEEPS its score on the server (points, penalties,
+// overtime, team bouts, engi flags; operator ruling 2026-09-26, bc-sbq), but
+// while it waits in the queue every screen shows it as NOT STARTED: a plain
+// "vs", empty slots, no marks. The kept score reappears once the match is
+// started again. Every display surface asks this before it draws a score, a
+// penalty mark, a middle mark or an IV/PW aggregate (the shared scoreboard
+// components gate themselves on it, so every host inherits the rule). The
+// score EDITORS are the one exception and never ask this: an editor opened on
+// a queued match shows the kept marks, because that is where the operator
+// removes a wrong one.
+function matchShowsScore(m) {
+  return !!m && (m.status === "running" || m.status === "completed");
 }
 
 // bronzeUnderFinalStyle: inline style that places the 3rd-place (bronze) card
@@ -1502,6 +1522,7 @@ window.teamIVPWScore = teamIVPWScore;
 window.engiFlagScore = engiFlagScore;
 window.matchScoreStr = matchScoreStr;
 window.matchStateCell = matchStateCell;
+window.matchShowsScore = matchShowsScore;
 window.boutMiddle = boutMiddle;
 window.defaultWinMaru = defaultWinMaru;
 window.enchoOn = enchoOn;
@@ -1518,4 +1539,4 @@ window.sideMarks = sideMarks;
 window.placeMarks = placeMarks;
 window.teamMatchMarks = teamMatchMarks;
 
-export { formatIpponsScore, enchoLabel, boutMiddle, defaultWinMaru, matchMiddleMark, sideMarks, placeMarks, teamMatchMarks, winnerSideLR, sideLabel, roundLabel, bracketRoundLabel, teamIVScore, teamIVPWScore, engiFlagScore, matchScoreStr, matchStateCell, buildDisplayModel, computeMetaTops, bronzeUnderFinalStyle, bracketColumnCount, PlayerLine, slotDisplayName, makeSlotLabeller, bracketSlotLabeller, MatchCard, BracketTree, elbowXFor, connectorPath, connectorTargetY };
+export { formatIpponsScore, enchoLabel, boutMiddle, defaultWinMaru, matchMiddleMark, sideMarks, placeMarks, teamMatchMarks, winnerSideLR, sideLabel, roundLabel, bracketRoundLabel, teamIVScore, teamIVPWScore, engiFlagScore, matchScoreStr, matchStateCell, matchShowsScore, buildDisplayModel, computeMetaTops, bronzeUnderFinalStyle, bracketColumnCount, PlayerLine, slotDisplayName, makeSlotLabeller, bracketSlotLabeller, MatchCard, BracketTree, elbowXFor, connectorPath, connectorTargetY };

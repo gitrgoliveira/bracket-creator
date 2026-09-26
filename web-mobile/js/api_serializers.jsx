@@ -180,6 +180,10 @@ function toBackendMatchResult(patch, match) {
     // only on flagged writes (handlers_match.go scoreRequestBody); it is
     // never persisted on the match.
     if (patch.kachinukiBoutFinal) result.kachinukiBoutFinal = true;
+    // bc-sbq: transient request-only flag marking a write that only starts the
+    // match (startPatch): the server keeps the stored score rather than the
+    // empty scoreline this payload carries. Never persisted.
+    if (patch.startOnly) result.startOnly = true;
     // mp-62vr: rep-player names for a team daihyosen/tiebreaker rep bout. Only
     // forward non-empty values: the engine preserves a prior pick on empty
     // (backfillMatchIdentity), so omitting an unset side never wipes it.

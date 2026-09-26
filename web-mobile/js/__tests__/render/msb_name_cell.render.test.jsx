@@ -114,7 +114,7 @@ describe('msb name cell (dojo line + winner emphasis)', () => {
     // win), which is why an ordinary 2-0 needs this.
     it('marks the winner name on a plain ippon win', () => {
       const { container } = render(
-        <IndividualScore match={{ ...sides, winner: { id: 'pA', name: 'Alice' }, ipponsA: ['M', 'K'], ipponsB: [] }}
+        <IndividualScore match={{ ...sides, status: 'completed', winner: { id: 'pA', name: 'Alice' }, ipponsA: ['M', 'K'], ipponsB: [] }}
           variant="card" showNames />
       );
       expect(akaCell(container).className).toContain('msb-name--win');
@@ -123,7 +123,7 @@ describe('msb name cell (dojo line + winner emphasis)', () => {
 
     it('marks the Shiro side when Shiro won', () => {
       const { container } = render(
-        <IndividualScore match={{ ...sides, winner: { id: 'pB', name: 'Bob' }, ipponsA: [], ipponsB: ['M'] }}
+        <IndividualScore match={{ ...sides, status: 'completed', winner: { id: 'pB', name: 'Bob' }, ipponsA: [], ipponsB: ['M'] }}
           variant="card" showNames />
       );
       expect(shiroCell(container).className).toContain('msb-name--win');
@@ -132,7 +132,7 @@ describe('msb name cell (dojo line + winner emphasis)', () => {
 
     it('marks neither side while the match is undecided', () => {
       const { container } = render(
-        <IndividualScore match={{ ...sides, ipponsA: ['M'], ipponsB: [] }} variant="card" showNames />
+        <IndividualScore match={{ ...sides, status: 'running', ipponsA: ['M'], ipponsB: [] }} variant="card" showNames />
       );
       expect(container.querySelectorAll('.msb-name--win')).toHaveLength(0);
     });
@@ -144,7 +144,7 @@ describe('msb name cell (dojo line + winner emphasis)', () => {
       const { container } = render(
         <IndividualScore
           match={{ sideA: { name: 'Alice' }, sideB: { name: 'Alice' }, winner: { name: 'Alice' },
-                   ipponsA: [], ipponsB: [] }}
+                   status: 'completed', ipponsA: [], ipponsB: [] }}
           variant="card" showNames />
       );
       expect(container.querySelectorAll('.msb-name--win')).toHaveLength(0);

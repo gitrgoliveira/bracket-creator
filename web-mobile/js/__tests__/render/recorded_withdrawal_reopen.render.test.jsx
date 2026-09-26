@@ -218,7 +218,7 @@ describe.each([
     await mount(fixture());
     await clearWithdrawal();
     await waitFor(() => expect(screen.getByTestId('withdrawal-reopen-conflict')).toBeTruthy());
-    expect(screen.getByTestId('withdrawal-reopen-conflict-warning').textContent).toMatch(/clears any score already entered/);
+    expect(screen.getByTestId('withdrawal-reopen-conflict-warning').textContent).toMatch(/keeps any score already entered/);
     await act(async () => { fireEvent.click(screen.getByTestId('withdrawal-reopen-requeue-button')); });
     expect(window.API.requeueBlockerAndReopen).toHaveBeenCalledWith(
       'comp1', fixture().id, 'comp1', 'm-blk', 'secret', { reason: '', force: false },

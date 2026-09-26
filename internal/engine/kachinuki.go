@@ -1141,18 +1141,20 @@ func (e *Engine) RequeueBlockerAndReopen(targetComp, targetMatch, blockerComp, b
 			return verr
 		}
 		// Pre-check the TARGET's RESULT preconditions (completed +
-		// downstream-not-fought) read-only BEFORE the destructive revert, so a
-		// target that cannot be reopened — because its result already fed a
-		// fought knockout — does not cost the blocker its live on-court score
-		// (mp-gmcg review). The court half is deliberately NOT checked here: the
-		// revert is what frees the court, so the reopen's own court gate is the
-		// authoritative one. This NARROWS the wipe window but does NOT close it:
+		// downstream-not-fought) read-only BEFORE the revert, so a target that
+		// cannot be reopened — because its result already fed a fought
+		// knockout — does not send the blocker off the court for nothing
+		// (mp-gmcg review; the blocker keeps its score either way, bc-sbq).
+		// The court half is deliberately NOT checked here: the revert is what
+		// frees the court, so the reopen's own court gate is the authoritative
+		// one. This NARROWS that window but does NOT close it:
 		// PUT /score takes the court lock we hold, but POST /decision and POST
 		// /bulk-score complete a match under the per-comp lock alone (see the
 		// ErrMatchAlreadyCompleted case in the requeue handler), so a downstream
 		// write landing between
 		// this pre-check's tx close and the reopen's own in-tx re-check can still
-		// make the reopen fail AFTER the revert — costing the blocker its score.
+		// make the reopen fail AFTER the revert — leaving the blocker in the queue
+		// (its score kept) to be started again.
 		// The reopen's re-check is the backstop that preserves bracket integrity
 		// in that race regardless; closing the residual window deterministically
 		// would need the pre-check, revert, and reopen under one target-comp
@@ -1164,7 +1166,7 @@ func (e *Engine) RequeueBlockerAndReopen(targetComp, targetMatch, blockerComp, b
 		}
 		// A target that reopens to SCHEDULED (a default win whose barred
 		// competitor is still barred) takes no court, so requeuing the
-		// blocker would wipe its live score to free a court nobody needs.
+		// blocker would take it off the court to free a court nobody needs.
 		// Refused before the revert, naming the one step that works: the
 		// plain reopen, which no busy court refuses for such a target.
 		if landsScheduled {
@@ -2063,15 +2065,16 @@ func clearPropagatedSlots(bracket *state.Bracket, rIdx, mIdx int, bronze, next *
 }
 
 // bracketMatchStartedOrScored reports whether a downstream bracket match
-// is anything other than an untouched scheduled slot: running/completed
-// status, a winner, recorded bouts, or a scoreline all block a reopen.
+// is being or has been fought: running or completed, or carrying a winner.
+// A QUEUED match's points and bouts do not count: a match sent back to the
+// queue keeps its score, and when the match feeding it is corrected or
+// reopened it takes the new name with its points kept (operator ruling
+// 2026-09-26, bc-sbq). Judging those points as "fought" refused the reopen
+// and left the old winner seated in the match.
 func bracketMatchStartedOrScored(bm *state.BracketMatch) bool {
 	return bm.Status == state.MatchStatusRunning ||
 		bm.Status == state.MatchStatusCompleted ||
-		bm.Winner != "" ||
-		len(bm.SubResults) > 0 ||
-		len(bm.IpponsA) > 0 ||
-		len(bm.IpponsB) > 0
+		bm.Winner != ""
 }
 
 // applyKachinukiMerge merges an incoming kachinuki bout log into the stored

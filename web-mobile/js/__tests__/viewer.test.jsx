@@ -1528,7 +1528,7 @@ describe('VSchedItem live score rendering (mp-42rg)', () => {
   let runtime;
   let VSchedItemComp;
   const savedGlobals = {};
-  const STUBBED = ['matchScoreStr', 'roundLabel', 'bracketRoundLabel', 'pluralize', 'queueLabelCompact'];
+  const STUBBED = ['matchScoreStr', 'matchShowsScore', 'roundLabel', 'bracketRoundLabel', 'pluralize', 'queueLabelCompact'];
 
   function findNode(node, pred) {
     if (!node || typeof node !== 'object') return null;
@@ -1560,6 +1560,9 @@ describe('VSchedItem live score rendering (mp-42rg)', () => {
         ? { had: true, val: global.window[k] } : { had: false };
     });
     global.window.matchScoreStr = vi.fn(() => '');
+    // bc-sbq: VSchedItem asks bracket.jsx's matchShowsScore before it shows a
+    // score. Every match here is running or completed, which it shows.
+    global.window.matchShowsScore = vi.fn(() => true);
     global.window.roundLabel = vi.fn((i) => `Round ${i + 1}`);
     global.window.bracketRoundLabel = (_m, i, n) => global.window.roundLabel(i, n);
     global.window.pluralize = vi.fn((n, s) => `${n} ${s}`);

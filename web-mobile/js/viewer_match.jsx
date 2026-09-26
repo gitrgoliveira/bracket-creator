@@ -203,8 +203,13 @@ export const VSchedItem = React.memo(({ m, tweaks, showCompetition, onClick, hig
   // Score string for completed matches (final) and running matches (live, once
   // at least one ippon has landed). matchScoreStr returns "" before any score
   // exists, so a just-started running match falls through to the "vs" render.
+  // matchShowsScore (bracket.jsx) is the gate: a match sent back to the queue
+  // keeps its score but reads as not started (bc-sbq). Guarded for the reason
+  // the boutMiddle call below states: this row renders for SCHEDULED matches
+  // too, and a mount without bracket.js must degrade to "vs", not throw.
   const isRunning = m.status === "running";
-  const scoreStr = (m.status === "completed" || isRunning)
+  const showsScore = !!window.matchShowsScore && window.matchShowsScore(m);
+  const scoreStr = showsScore
     ? (window.matchScoreStr(m) || null)
     : null;
   // bc-tmfn: a TEAM row's score cell (window.matchScoreStr → teamIVPWScore)
@@ -293,8 +298,10 @@ export const VSchedItem = React.memo(({ m, tweaks, showCompetition, onClick, hig
             the bout MIDDLE, derived from the single source boutMiddle
             (bracket.jsx): "vs" / "X" / "(E)" / "(DH)" and nothing else. A dash
             is never a valid middle (it is a CELL value only), so both the
-            pending and the completed-but-scoreless cases go through the same
-            call rather than being branched by status here.
+            running and the completed-but-scoreless cases go through the same
+            call. A SCHEDULED row takes the plain "vs" without asking it
+            (showsScore above): a match sent back to the queue keeps its
+            overtime, and its (E) must not show before it restarts (bc-sbq).
 
             Guarded like the twin call in admin_schedule_score_editor.jsx, and
             unlike matchScoreStr above, because this branch also renders for
@@ -308,7 +315,7 @@ export const VSchedItem = React.memo(({ m, tweaks, showCompetition, onClick, hig
         {scoreStr ? (
           <span className={`vsched-item__score${isRunning ? " vsched-item__score--live" : ""}`}>{scoreStr}</span>
         ) : (
-          <span className="vsched-item__vs">{window.boutMiddle ? window.boutMiddle(m.decision, m.encho, m.score) : "vs"}</span>
+          <span className="vsched-item__vs">{showsScore && window.boutMiddle ? window.boutMiddle(m.decision, m.encho, m.score) : "vs"}</span>
         )}
         <div className={`vsched-item__side vsched-item__side--aka ${aWin ? "vsched-item__side--w" : ""}`}>
           <SideLabel side="aka" />

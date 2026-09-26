@@ -13,9 +13,6 @@
 // local-only UI (per the brief; backend persistence is a follow-up).
 
 import { createTimerPool } from './timer_pool.jsx';
-import { realIppons } from './result_slot.jsx';
-import { subBoutHasResult } from './team_default_credit.jsx';
-import { joinList } from './admin_helpers.jsx';
 import { SideCell } from './side_cell.jsx';
 // Imported DIRECTLY from the leaf rather than read off `window`. Two of the
 // call sites below sit inside a `try { } catch (_e) { }` that swallows, so a
@@ -320,74 +317,6 @@ function recordOverrideWinner(compId, matchId, result, pw) {
 // NOT a way to fabricate the final directly: the winner must be one of the
 // feeder's two real competitors, and the write is audited (IsOverridden). If the
 // real feeder result arrives later it re-propagates over the assertion.
-// bc-sbq: what sending a running match back to the queue discards. A board is
-// { points, fouls, flags, overtime, draw, bouts }: struck points, fouls on the
-// counters, engi judges' flags, a marked overtime, a toggled draw, and team
-// bouts that carry a result. Two sources describe a running match and neither is enough on its
-// own: the court feed (boardFromMatch), which lags the editor because an
-// autosaved mark reaches it only on the next refetch, and the inline editor's
-// own board (its onBoardChange report), which is what the operator is looking
-// at but exists only for the match the editor shows. requeueLoss takes the
-// larger of each, so a mark present in either one counts. Send back to queue
-// (whether it is offered, and its confirm) and pickMatch's silent defer of an
-// unscored bout all ask requeueLoss, so they cannot disagree.
-const EMPTY_BOARD = Object.freeze({ points: 0, fouls: 0, flags: 0, overtime: false, draw: false, bouts: 0 });
-
-function boardFromMatch(mm) {
-    const struck = realIppons(mm.ipponsA).length + realIppons(mm.ipponsB).length;
-    const scored = (mm.score?.winnerPts || 0) + (mm.score?.loserPts || 0);
-    // The same fouls can sit in both places (hansokuA/B and score.fouls), so
-    // take the larger rather than adding them.
-    const fouls = Math.max((mm.hansokuA || 0) + (mm.hansokuB || 0), (mm.score?.fouls?.a || 0) + (mm.score?.fouls?.b || 0));
-    return {
-        points: Math.max(struck, scored),
-        fouls,
-        flags: (mm.flagsA || 0) + (mm.flagsB || 0),
-        overtime: window.enchoOn ? window.enchoOn(mm.encho) : (mm.encho?.periodCount || 0) > 0,
-        draw: false,
-        // subBoutHasResult, the wire-shape twin of the team sheet's own
-        // played-bout predicate: a row the running autosave wrote with no
-        // result was never fought and discards nothing.
-        bouts: (mm.subResults || []).filter(subBoutHasResult).length,
-    };
-}
-
-function requeueLoss(mm, live) {
-    const feed = boardFromMatch(mm);
-    const here = live && live.compId === mm.compId && live.matchId === mm.id ? live : null;
-    const board = here || EMPTY_BOARD;
-    return {
-        points: Math.max(feed.points, board.points || 0),
-        fouls: Math.max(feed.fouls, board.fouls || 0),
-        flags: Math.max(feed.flags, board.flags || 0),
-        overtime: feed.overtime || !!board.overtime,
-        draw: feed.draw || !!board.draw,
-        // Fought bouts come from the team sheet whenever it has reported: it
-        // adopts every bout recorded elsewhere, and it knows at once a mark
-        // the operator took back, while the feed goes on counting that bout
-        // until the clear has saved (bc-kclr) and the court has refetched.
-        bouts: here ? (here.bouts || 0) : feed.bouts,
-    };
-}
-
-function requeueLossIsEmpty(loss) {
-    return !loss.points && !loss.fouls && !loss.flags && !loss.overtime && !loss.draw && !loss.bouts;
-}
-
-// The confirm's account of what a requeue discards. Fought bouts are never
-// listed: Send back to queue is not offered on a match that has any (ending
-// the match keeps them), so a confirm that reached this has none to name.
-function requeueLossSentence(loss) {
-    const parts = [];
-    if (loss.points) parts.push(window.pluralize(loss.points, "point"));
-    if (loss.fouls) parts.push(window.pluralize(loss.fouls, "foul"));
-    if (loss.flags) parts.push(window.pluralize(loss.flags, "flag"));
-    if (loss.overtime) parts.push("the overtime");
-    if (loss.draw) parts.push("the draw");
-    if (!parts.length) return "No score has been entered, so nothing will be lost.";
-    return `The score on this bout will be discarded: ${joinList(parts, "and", "")}.`;
-}
-
 function ResolveFeedersModal({ match, comp, password, onClose, onResolved, onOptimisticResolve, showToast }) {
     const rounds = (comp && comp.bracket && comp.bracket.rounds) || [];
     const slots = useMemoSh(() => pendingFeederSlots(match, rounds), [match, rounds]);
@@ -803,13 +732,8 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
     const [resolveMatch, setResolveMatch] = useStateSh(null);
     // Pending revert-to-queue confirmation. Set when the operator clicks
     // "Send back to queue" on a running bout. Cleared on confirm or cancel.
-    // Shape: {compId, matchId, label, loss} where `loss` (requeueLoss, taken
-    // when the button is tapped) is what the confirm says will be discarded.
+    // Shape: {compId, matchId, label}.
     const [pendingRevert, setPendingRevert] = useStateSh(null);
-    // bc-sbq: the inline editor's own board, as it last reported it
-    // ({compId, matchId, points, fouls, overtime, draw, bouts}; see
-    // requeueLoss). null until an editor reports.
-    const [liveBoard, setLiveBoard] = useStateSh(null);
     const [reverting, setReverting] = useStateSh(false);
     // Selected competition for filtering the queue. Default: running match's comp,
     // else first comp with scheduled matches here, else any comp with matches here.
@@ -1192,24 +1116,14 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
         }
     };
 
-    // scoringStarted: has the current running bout had ANY score entered? Used
-    // by pickMatch to decide whether switching away is safe: a bout with any
-    // entered state must be finished or corrected first (you can't abandon a
-    // half-scored bout, and the defer/un-start path would discard it).
-    // requeueLoss counts real ippons, points, fouls, a marked overtime, a
-    // toggled draw and fought team bouts, from the court feed AND the
-    // editor's board (bc-sbq: the feed alone lags, so a just-struck point
-    // read as "nothing entered" and the bout was deferred with no dialog).
-    const scoringStarted = (mm) => !!mm && mm.status === "running" && !requeueLossIsEmpty(requeueLoss(mm, liveBoard));
-
     // pickMatch: run an upcoming match out of order. Rules:
     //   • Completed matches are never picked here — correcting them is a
     //     separate deliberate action (see correctMatch), so this returns early.
-    //   • If a DIFFERENT bout is running with scoring already started, block:
-    //     finish or correct it first (can't abandon a half-scored bout).
-    //   • If a DIFFERENT bout is running but unscored, defer it: un-start it
-    //     (back to scheduled) so the court is never left with two running bouts.
-    //     The deferred bout returns to the queue and runs after the picked one.
+    //   • If a DIFFERENT bout is running, defer it: send it back to the queue
+    //     so the court is never left with two running bouts. It keeps its
+    //     score (operator ruling 2026-09-26, bc-sbq: switch, keeping the
+    //     score), so a mistaken switch is undone with one tap on its Start,
+    //     and it runs after the picked one.
     //   • A scheduled pick is started (through the eligibility gate); a pick
     //     that's already running just takes the panel.
     const pickMatch = async (m) => {
@@ -1217,18 +1131,13 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
         const cur = running[0] || null;
         const isSame = cur && matchKey(cur) === matchKey(m);
         if (cur && !isSame) {
-            if (scoringStarted(cur)) {
-                if (showToast) showToast("Finish or correct the bout in progress first", "error");
-                return;
-            }
-            // Unscored current bout: un-start it back to scheduled, otherwise the
-            // pick below would leave the court with two running bouts. Route
-            // through the dedicated revert-to-queue endpoint (not a scheduled
-            // /score write): it clears every score field server-side AND skips the
-            // StartMatchTx eligibility gate, so a stale cross-match ineligibility
-            // can't silently 409 the defer. scoringStarted (above) already
-            // guarantees this bout has no entered state. If the revert fails we
-            // surface a toast and must NOT start the pick.
+            // Send the current bout back to the queue, otherwise the pick below
+            // would leave the court with two running bouts. Route through the
+            // dedicated revert-to-queue endpoint (not a scheduled /score write):
+            // it keeps the bout's score server-side AND skips the StartMatchTx
+            // eligibility gate, so a stale cross-match ineligibility can't
+            // silently 409 the defer. If the revert fails we surface a toast and
+            // must NOT start the pick.
             if (!window.API || typeof window.API.revertMatchToQueue !== "function") return;
             try {
                 await window.API.revertMatchToQueue(cur.compId, cur.id, password);
@@ -1339,20 +1248,16 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
     // Revert a running bout back to the queue. Gated behind a confirm dialog
     // (same pattern as court reassignment) because discarding the running state
     // is disruptive: viewers drop the match from "Now" and it reappears in the
-    // upcoming list. Allowed even when a score has been entered (the operator may
-    // have started the wrong match after tapping a point); the confirm names
-    // what will be discarded, from the editor's board as well as the court feed
-    // (requeueLoss). NOT offered once a team bout has a result (bc-sbq, the
-    // button's own condition): the requeue clears the whole bout log, so a
-    // reopened encounter lost every bout it had fought.
+    // upcoming list. Always offered on a running bout, and the match keeps its
+    // score (operator ruling 2026-09-26, bc-sbq): starting it again carries on
+    // from it, and the operator removes a wrong mark themselves.
     const requestRevert = (m) => {
-        const loss = requeueLoss(m, liveBoard);
         // Name BOTH competitors so the confirm identifies the match, not just
         // one side. Order mirrors the on-court display (Shiro/sideB vs Aka/sideA).
         const shiro = (m.sideB && m.sideB.name) || "";
         const aka = (m.sideA && m.sideA.name) || "";
         const label = (shiro && aka) ? `${shiro} vs ${aka}` : (shiro || aka || "this match");
-        setPendingRevert({ compId: m.compId, matchId: m.id, label, loss });
+        setPendingRevert({ compId: m.compId, matchId: m.id, label });
     };
     const confirmRevert = async () => {
         if (!pendingRevert || reverting) return;
@@ -1766,7 +1671,6 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
                                     // is a no-op here, as before.
                                     onClose={() => setWithdrawalKey(null)}
                                     onWithdrawal={() => setWithdrawalKey(matchKey(selectedMatch))}
-                                    onBoardChange={setLiveBoard}
                                     started={!!startedFrom && startedFrom.key === matchKey(selectedMatch) && startedFrom.at === selectedMatch.modifiedAt}
                                     canClose={false}
                                     onSubmit={async (patch) => {
@@ -1854,13 +1758,10 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
                                 to court could strand a result-less bout behind
                                 another running match). `status === "running"`
                                 alone keeps this off a still-completed correction,
-                                which shows "Back to court" instead. NOT offered
-                                once any team bout has a result (bc-sbq): the
-                                requeue clears the whole bout log, so a reopened
-                                kachinuki encounter lost every bout it had fought.
-                                Ending the match (End match / Finish) is the exit
-                                there, and it keeps them. */}
-                            {!allDone && selectedMatch && selectedMatch.status === "running" && requeueLoss(selectedMatch, liveBoard).bouts === 0 && window.API && typeof window.API.revertMatchToQueue === "function" && (
+                                which shows "Back to court" instead. Offered
+                                whatever has been scored: the match keeps its
+                                score in the queue (bc-sbq). */}
+                            {!allDone && selectedMatch && selectedMatch.status === "running" && window.API && typeof window.API.revertMatchToQueue === "function" && (
                                 <div className="shiaijo-revert">
                                     <button
                                         type="button"
@@ -1935,7 +1836,7 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
                         </h3>
                         <p className="shiaijo-move-confirm__body">
                             <strong>{pendingRevert.label}</strong> will be returned to the upcoming queue.
-                            {" " + requeueLossSentence(pendingRevert.loss)}
+                            {" Any score entered is kept: starting it again carries on from there."}
                         </p>
                         <div className="shiaijo-move-confirm__actions">
                             <button type="button" className="btn" onClick={() => setPendingRevert(null)} disabled={reverting}>

@@ -324,8 +324,9 @@ export function TWMatch({ m, highlight, onClick }) {
   // while these two schedule rows are single surfaces already shipping that
   // shape for completed matches. Do not "unify" them without re-reading the
   // closed-set ruling in CLAUDE.md.
-  const isRunning = m.status === "running";
-  const scoreStr = (m.status === "completed" || isRunning) ? window.matchScoreStr(m) : null;
+  // matchShowsScore (bracket.jsx) is the gate, guarded as VSchedItem's is: a
+  // queued match keeps its score but reads as not started (bc-sbq).
+  const scoreStr = (!!window.matchShowsScore && window.matchShowsScore(m)) ? window.matchScoreStr(m) : null;
   // bc-tmfn: a TEAM row's score cell (window.matchScoreStr → teamIVPWScore)
   // is deliberately free of marks, so the match-level Kiken/Fus. a default
   // win closed a team match with rides beside the withdrawn team's NAME

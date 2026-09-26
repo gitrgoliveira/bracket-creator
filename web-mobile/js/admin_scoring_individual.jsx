@@ -61,7 +61,7 @@ import { SyncStatusPill, useDebouncedRunningWrite } from './admin_scoring_autosa
 import { TeamScoreEditorModal, isKoTieBlocked } from './admin_scoring_team.jsx';
 import { EngiScoreEditorModal } from './admin_scoring_engi.jsx';
 
-export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, onAfterDecision, onWithdrawal, onBoardChange, started = false, prevMatch, nextMatch, onPrev, onNext, password, selfReport, variant = "modal", canClose = true }) {
+export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, onAfterDecision, onWithdrawal, started = false, prevMatch, nextMatch, onPrev, onNext, password, selfReport, variant = "modal", canClose = true }) {
   // bc-strt: a match whose start has landed is RUNNING, even while the host's
   // list still says scheduled (it refetches a moment after each save). The
   // editors autosave only a match they see as running, so a point struck in
@@ -888,32 +888,17 @@ export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, on
     return () => window.removeEventListener("keydown", onKeyDown);
   }, []); // listener registered once; reads fresh state via kbRef
 
-  // bc-sbq: report what is on this board to a host that must say what a
-  // requeue would discard (the shiaijo console's Send back to queue). The
-  // host's court feed lags this editor, since an autosaved mark reaches it
-  // only on the next refetch, so a confirm built from the feed alone told
-  // the operator "nothing will be lost" with a point on the board. Keyed on
-  // the VALUES, so a refetch that re-creates `m` reports nothing new. The
-  // team and engi editors report their own boards.
-  const boardPoints = realIppons(aPts).length + realIppons(bPts).length;
-  const boardFouls = aFouls + bFouls;
-  const boardOvertime = enchoPeriodCount > 0;
-  useEffectA(() => {
-    if (typeof onBoardChange !== "function" || isTeam || isEngi) return;
-    onBoardChange({ compId: m.compId, matchId: m.id, points: boardPoints, fouls: boardFouls, overtime: boardOvertime, draw: isDrawToggled, bouts: 0 });
-  }, [m.compId, m.id, boardPoints, boardFouls, boardOvertime, isDrawToggled, isTeam, isEngi, onBoardChange]);
-
   // Engi competition: delegate to the flag-count editor. This check runs after
   // all hooks so React's rules-of-hooks are satisfied. isEngi is derived
   // synchronously from m.compEngi (stamped at enrichment time), so the engi
   // editor is shown from the first render with no kendo-editor flash.
   // The team check is skipped for engi (engi is never a team).
   if (isEngi) {
-    return <EngiScoreEditorModal match={m} onClose={onClose} onSubmit={onSubmit} onSubmitAndNext={onSubmitAndNext} onBoardChange={onBoardChange} prevMatch={prevMatch} nextMatch={nextMatch} onPrev={onPrev} onNext={onNext} variant={variant} canClose={canClose} />;
+    return <EngiScoreEditorModal match={m} onClose={onClose} onSubmit={onSubmit} onSubmitAndNext={onSubmitAndNext} prevMatch={prevMatch} nextMatch={nextMatch} onPrev={onPrev} onNext={onNext} variant={variant} canClose={canClose} />;
   }
   // Team routing: forward to TeamScoreEditorModal.
   if (isTeam) {
-    return <TeamScoreEditorModal match={m} teamSize={teamSize} onClose={onClose} onSubmit={onSubmit} onSubmitAndNext={onSubmitAndNext} onAfterDecision={onAfterDecision} onWithdrawal={onWithdrawal} onBoardChange={onBoardChange} onStartLanded={() => setStartedFrom({ at: match.modifiedAt })} prevMatch={prevMatch} nextMatch={nextMatch} onPrev={onPrev} onNext={onNext} password={password} selfReport={selfReport} variant={variant} canClose={canClose} />;
+    return <TeamScoreEditorModal match={m} teamSize={teamSize} onClose={onClose} onSubmit={onSubmit} onSubmitAndNext={onSubmitAndNext} onAfterDecision={onAfterDecision} onWithdrawal={onWithdrawal} onStartLanded={() => setStartedFrom({ at: match.modifiedAt })} prevMatch={prevMatch} nextMatch={nextMatch} onPrev={onPrev} onNext={onNext} password={password} selfReport={selfReport} variant={variant} canClose={canClose} />;
   }
 
   // a11y: label the dialog with the match/court context so screen readers

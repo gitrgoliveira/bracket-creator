@@ -620,21 +620,30 @@ export function IndividualScore({ match, variant, showNames, withZekkenName, shi
   const aKey = sideId(match.sideA) || nameOf(match.sideA);
   const bKey = sideId(match.sideB) || nameOf(match.sideB);
   const ambiguous = !!aKey && aKey === bKey;
+  // bc-sbq: a match waiting in the queue keeps its score on the server but is
+  // shown NOT STARTED (matchShowsScore, bracket.jsx): the pairing with empty
+  // slots, no marks, no penalty triangle, a plain "vs" centre. Gated here,
+  // inside the component, so every host (TV board, lobby, viewer card)
+  // inherits it; `result` is the one source every score field below reads.
+  // Through window like this file's other bracket.jsx reads (see the header);
+  // a mount without bracket.jsx keeps the score rather than hiding a real one.
+  const shows = typeof window.matchShowsScore === "function" ? window.matchShowsScore(match) : true;
+  const result = shows ? match : {};
   const sub = {
-    ipponsA: match.ipponsA || [],
-    ipponsB: match.ipponsB || [],
-    hansokuA: match.hansokuA, hansokuB: match.hansokuB,
-    decidedByHantei: match.decidedByHantei, score: match.score, decision: match.decision,
+    ipponsA: result.ipponsA || [],
+    ipponsB: result.ipponsB || [],
+    hansokuA: result.hansokuA, hansokuB: result.hansokuB,
+    decidedByHantei: result.decidedByHantei, score: result.score, decision: result.decision,
     // encho MUST be threaded: without it matchMiddleMark can never yield (E) on
     // an individual row, and defaultWinMaru would award the regulation ○○ for a
     // default win that actually happened in overtime, where the rulebook marks
     // a single ○. This row centre is the mark's ONE home (operator ruling):
     // the TV/lobby header chips that used to duplicate X/(E)/(DH) above it
     // were removed; only the OBS overlay, which renders no row, keeps a chip.
-    encho: match.encho,
-    winner: ambiguous ? "" : (sideId(match.winner) || nameOf(match.winner)),
+    encho: result.encho,
+    winner: ambiguous ? "" : (sideId(result.winner) || nameOf(result.winner)),
     sideA: aKey, sideB: bKey,
-    flagsA: match.flagsA, flagsB: match.flagsB,
+    flagsA: result.flagsA, flagsB: result.flagsB,
   };
   // showNames fills the (otherwise empty) name spans with the two competitors,
   // colour-coded Shiro dark / Aka red: used by the TV pool/round list where each
@@ -761,7 +770,21 @@ export function teamNameMark(side, mark, nameEl) {
   return numberFollowsName(side) ? <>{markEl}{" "}{nameEl}</> : <>{nameEl}{" "}{markEl}</>;
 }
 
-export function TeamScoreboard({ subResults, teamResult, lineupA, lineupB, teamSize, showDH, variant, shiroName, akaName, matchSideA, matchSideB, isRunning, kachinuki, squadA, squadB, numberA, numberB, decision, decisionBy, status, shiroMark, akaMark }) {
+export function TeamScoreboard({ subResults: recordedSubResults, teamResult: recordedTeamResult, lineupA, lineupB, teamSize, showDH: showDHProp, variant, shiroName, akaName, matchSideA, matchSideB, isRunning, kachinuki, squadA, squadB, numberA, numberB, decision, decisionBy, status, shiroMark, akaMark }) {
+  // bc-sbq: a match waiting in the queue keeps its fought bouts on the server
+  // but is shown NOT STARTED (matchShowsScore, bracket.jsx): every bout row
+  // queued with empty slots, no marks, IV/PW 0, exactly as a match that never
+  // began. So a non-shown match renders from NO bouts and NO aggregate, and
+  // its Daihyosen row is withheld too: with the bouts blanked the aggregate
+  // reads tied, and a host's showDH (computed from the REAL bouts) would
+  // otherwise print "Daihyosen pending" on a match that has not started.
+  // `status` is therefore required of every host. Through window like this
+  // file's other bracket.jsx reads; a mount without bracket.jsx keeps the
+  // score rather than hiding a real one.
+  const shows = typeof window.matchShowsScore === "function" ? window.matchShowsScore({ status }) : true;
+  const subResults = shows ? recordedSubResults : [];
+  const teamResult = shows ? recordedTeamResult : null;
+  const showDH = shows && showDHProp;
   // Real numbered bouts only: exclude the daihyosen sentinel and any malformed
   // negative position (mirrors the Go-side defensive skip).
   const regular = (subResults || []).filter(s => s.position > DAIHYOSEN_POSITION);

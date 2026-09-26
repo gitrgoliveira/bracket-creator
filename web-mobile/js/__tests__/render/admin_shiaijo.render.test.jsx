@@ -49,8 +49,6 @@ const STUBBED_GLOBALS = {
   confirmDialog: vi.fn().mockResolvedValue(true),
   PoolsViewer: () => null,
   compMatches: () => [],
-  // LAZY: the requeue confirm counts what it discards (ui.jsx's pluralize).
-  pluralize: (count, singular, plural) => (count === 1 ? `${count} ${singular}` : `${count} ${plural || singular + 's'}`),
 };
 
 let restoreGlobals;
@@ -1160,117 +1158,51 @@ describe('the kiken-decided match stays on the console until its panel is closed
   });
 });
 
-// bc-sbq: Send back to queue clears the whole bout log. The confirm read what
-// would be lost from the court feed alone, which lags the editor, so it said
-// "nothing will be lost" with a point on the board; and on a reopened team
-// encounter it wiped every fought bout. The confirm now reads the editor's
-// board too, and the button is not offered once any team bout has a result.
-describe('Send back to queue says what it discards and never discards fought bouts (bc-sbq)', () => {
+// bc-sbq (operator ruling 2026-09-26): a match sent back to the queue keeps
+// its score, so Send back to queue is always offered, its confirm says the
+// score is kept, and picking another bout sends a scored one back rather than
+// refusing to switch (a mistaken switch is undone with one tap on its Start).
+describe('Send back to queue keeps the score and is always offered (bc-sbq)', () => {
   const tapSendBack = async (c) => {
     await act(async () => { c.utils.getByRole('button', { name: /send back to queue/i }).click(); });
     return c.utils.container.querySelector('.shiaijo-move-confirm[role="dialog"]');
   };
 
-  it('names the point on the board even while the court feed still shows none', async () => {
-    const c = await mountCourt([courtMatch('m1', 'running')]);
-    try {
-      await act(async () => {
-        probe.props.onBoardChange({ compId: 'c1', matchId: 'm1', points: 1, fouls: 1, overtime: false, draw: false, bouts: 0 });
-      });
-      const dialog = await tapSendBack(c);
-      expect(dialog.textContent).toContain('will be discarded: 1 point and 1 foul.');
-      expect(dialog.textContent).not.toContain('nothing will be lost');
-    } finally { c.restore(); }
-  });
-
-  it('names the engi flags on the board', async () => {
-    const c = await mountCourt([courtMatch('m1', 'running', { compEngi: true })]);
-    try {
-      await act(async () => {
-        probe.props.onBoardChange({ compId: 'c1', matchId: 'm1', points: 0, fouls: 0, flags: 3, overtime: false, draw: false, bouts: 0 });
-      });
-      const dialog = await tapSendBack(c);
-      expect(dialog.textContent).toContain('will be discarded: 3 flags.');
-    } finally { c.restore(); }
-  });
-
-  it("ignores a board reported for a different match", async () => {
-    const c = await mountCourt([courtMatch('m1', 'running')]);
-    try {
-      await act(async () => {
-        probe.props.onBoardChange({ compId: 'c1', matchId: 'm9', points: 2, fouls: 0, overtime: false, draw: false, bouts: 0 });
-      });
-      const dialog = await tapSendBack(c);
-      expect(dialog.textContent).toContain('No score has been entered, so nothing will be lost.');
-    } finally { c.restore(); }
-  });
-
-  it('is not offered on a team match whose feed carries a fought bout', async () => {
-    const reopened = courtMatch('m1', 'running', {
+  it('is offered on a team match with a fought bout, and says the score is kept', async () => {
+    const c = await mountCourt([courtMatch('m1', 'running', {
       compKind: 'team', teamSize: 3, reopenPending: true,
       subResults: [
         { position: 1, sideA: 'A1', sideB: 'B1', ipponsA: ['M'], ipponsB: [], winner: 'A1' },
         { position: 2, sideA: 'A2', sideB: 'B2', ipponsA: [], ipponsB: [] },
       ],
-    });
-    const c = await mountCourt([reopened]);
+    })]);
     try {
       expect(c.editorMatch()).toBe('m1');
-      expect(c.utils.queryByRole('button', { name: /send back to queue/i })).toBeNull();
-    } finally { c.restore(); }
-  });
-
-  it("is withdrawn as soon as the sheet reports a fought bout the feed has not caught up with", async () => {
-    const c = await mountCourt([courtMatch('m1', 'running', { compKind: 'team', teamSize: 3, subResults: [] })]);
-    try {
-      expect(c.utils.getByRole('button', { name: /send back to queue/i })).toBeTruthy();
-      await act(async () => {
-        probe.props.onBoardChange({ compId: 'c1', matchId: 'm1', points: 0, fouls: 0, overtime: false, draw: false, bouts: 1 });
-      });
-      expect(c.utils.queryByRole('button', { name: /send back to queue/i })).toBeNull();
-    } finally { c.restore(); }
-  });
-
-  // Review finding: a mark taken back on a kachinuki bout stays in the feed
-  // until the clear has saved and the court has refetched, so counting the
-  // feed would hide the requeue meanwhile. The sheet's own count decides
-  // once it has reported.
-  it('offers the button again once the sheet reports the bout cleared, whatever the feed still holds', async () => {
-    const c = await mountCourt([courtMatch('m1', 'running', {
-      compKind: 'team', teamSize: 3,
-      subResults: [{ position: 1, sideA: 'A1', sideB: 'B1', ipponsA: ['M'], ipponsB: [] }],
-    })]);
-    try {
-      expect(c.utils.queryByRole('button', { name: /send back to queue/i })).toBeNull();
-      await act(async () => {
-        probe.props.onBoardChange({ compId: 'c1', matchId: 'm1', points: 0, fouls: 0, overtime: false, draw: false, bouts: 0 });
-      });
-      expect(c.utils.getByRole('button', { name: /send back to queue/i })).toBeTruthy();
-    } finally { c.restore(); }
-  });
-
-  it('keeps the button on a team match whose autosaved rows carry no result', async () => {
-    const c = await mountCourt([courtMatch('m1', 'running', {
-      compKind: 'team', teamSize: 2,
-      subResults: [{ position: 1, sideA: 'A1', sideB: 'B1' }, { position: 2, sideA: 'A2', sideB: 'B2' }],
-    })]);
-    try {
       const dialog = await tapSendBack(c);
-      expect(dialog.textContent).toContain('nothing will be lost');
+      expect(dialog.textContent).toContain('Any score entered is kept');
+      expect(dialog.textContent).not.toMatch(/discard|lost/i);
     } finally { c.restore(); }
   });
 
-  it("pickMatch does not silently defer a bout whose point is only on the editor's board", async () => {
-    const c = await mountCourt([courtMatch('m1', 'running'), courtMatch('m2', 'scheduled')]);
+  it('sends a scored bout back when confirmed', async () => {
+    const c = await mountCourt([courtMatch('m1', 'running', { ipponsA: ['M'], hansokuB: 1 })]);
     try {
-      await act(async () => {
-        probe.props.onBoardChange({ compId: 'c1', matchId: 'm1', points: 1, fouls: 0, overtime: false, draw: false, bouts: 0 });
-      });
+      await tapSendBack(c);
+      const confirm = [...c.utils.container.querySelectorAll('.shiaijo-move-confirm button')]
+        .find((b) => /send back to queue/i.test(b.textContent));
+      await act(async () => { confirm.click(); });
+      expect(window.API.revertMatchToQueue).toHaveBeenCalledWith('c1', 'm1', '');
+    } finally { c.restore(); }
+  });
+
+  it('picking another bout sends a scored one back to the queue and starts the pick', async () => {
+    const c = await mountCourt([courtMatch('m1', 'running', { ipponsA: ['M'] }), courtMatch('m2', 'scheduled')]);
+    try {
       const startNext = c.utils.getAllByRole('button').find((b) => /^start/i.test(b.textContent.trim()));
       expect(startNext, 'the Up Next card offers Start for m2').toBeTruthy();
       await act(async () => { startNext.click(); });
-      expect(window.API.revertMatchToQueue).not.toHaveBeenCalled();
-      expect(c.showToast).toHaveBeenCalledWith('Finish or correct the bout in progress first', 'error');
+      expect(window.API.revertMatchToQueue).toHaveBeenCalledWith('c1', 'm1', '');
+      expect(c.showToast).not.toHaveBeenCalledWith('Finish or correct the bout in progress first', 'error');
     } finally { c.restore(); }
   });
 });
@@ -1282,6 +1214,9 @@ describe('Send back to queue says what it discards and never discards fought bou
 // mistaken for a start.
 describe('the editor is told a match the console started is running (bc-strt)', () => {
   it('passes started for the snapshot it started, and only that one', async () => {
+    // The probe is module-wide: drop a previous test's editor, or the refused
+    // start below (which mounts no editor) would read that one's props.
+    probe.props = null;
     const side = (id, name) => ({ id, name });
     const m1 = {
       id: 'm1', compId: 'c1', compName: 'Cup', status: 'scheduled', phase: 'pool', poolName: 'Pool A',

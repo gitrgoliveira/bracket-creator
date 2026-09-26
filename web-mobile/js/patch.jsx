@@ -532,7 +532,7 @@ function keepNewerMatches(held, fetched) {
 // ({config, poolMatches, bracket, ...}): the held copy counts only when it is
 // the same competition, so a refetch after navigating elsewhere is taken whole.
 function keepNewerDetail(held, fetched) {
-    return held && held.config && held.config.id === fetched.config.id ? keepNewerMatches(held, fetched) : fetched;
+    return held && held.config.id === fetched.config.id ? keepNewerMatches(held, fetched) : fetched;
 }
 
 export { applyPatch, applyPatchOrdered, checkSeqGap, recomputeQueuePositions, recomputeBracketQueuePositions, keepNewerMatches, keepNewerDetail };

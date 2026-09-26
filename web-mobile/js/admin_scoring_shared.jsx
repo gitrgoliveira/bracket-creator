@@ -697,7 +697,7 @@ function DecisionPrompt({ kind, sideA, sideB, defaultSide, askReason, onCancel, 
               maxLength={200}
               value={reason}
               onInput={(e) => setReason(e.target.value)}
-              placeholder="e.g. injury, no-show, doctor's stop"
+              placeholder="e.g. injury, no-show"
               data-testid="decision-reason"
             />
           </label>

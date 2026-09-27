@@ -2,9 +2,14 @@
 // `/api/competitions/:cid/teams/:tid/lineups/:round` endpoints
 // (Slice 7.B / T127).
 //
-// GET returns the lineup for a (team, round) tuple, PUT sets/replaces
-// it, DELETE removes it. Lineups are always editable, including while
-// a match is running or completed (mp-q722).
+// GET returns the lineup for a (team, round) tuple. It always answers 200
+// when the competition exists: the body carries `saved: false` and an
+// empty lineup when nothing has been submitted for that key, never a 404
+// (bc-k404, operator decision 2026-09-27: "there either is one or there
+// isn't and it's empty"). A 404 here means the competition itself does
+// not exist. PUT sets/replaces the lineup, DELETE removes it. Lineups
+// are always editable, including while a match is running or completed
+// (mp-q722).
 //
 // All store I/O goes through the TeamLineupStore + CompetitionStore
 // interfaces (deps.go) rather than the concrete *state.Store
@@ -12,7 +17,9 @@
 // competition's TeamSize, which TeamLineup.ValidatePositions uses to
 // check that submitted position KEYS are valid for that size — it
 // enforces no completeness or vacancy rule (mp-gmcg: team sizes are
-// unregulated and a partial lineup must be persistable).
+// unregulated and a partial lineup must be persistable). The public GETs
+// also use it to turn an unknown competition id into a 404, rather than
+// silently reading an empty map off a directory that was never created.
 package mobileapp
 
 import (
@@ -71,36 +78,36 @@ type LineupRequest struct {
 	MemberIDs map[domain.Position]string `json:"memberIds,omitempty"`
 }
 
-// RegisterLineupHandlers wires the GET/PUT/DELETE lineup endpoints
-// under the admin group. Slice 7.B / T127.
+// RegisterPublicLineupHandlers wires the read-only GET
+// /competitions/:id/teams/:tid/lineups/:round and
+// /competitions/:id/teams/:tid/match-lineups/:matchId endpoints on an
+// unauthenticated router group. Lineup data (position assignments) is not
+// sensitive, coaches and viewers can see who plays where, and the
+// AdminLineup form needs to load the current lineup without holding
+// admin credentials for the initial read. PUT and DELETE remain on the
+// admin group via RegisterLineupHandlers.
 //
-// DELETE is manager-only per the spec; for now we rely on the
-// existing AuthMiddleware (mounted on the admin router group in
-// server.go) as the auth boundary. A richer role check lands when
-// per-role auth is implemented.
-//
-// The third parameter (`tx CompetitionTransactor`) is the T156 hook.
-// The PUT body wraps its three store calls; load comp (for teamSize),
-// set lineup, reload lineup (for the response), all run in one
-// WithTransaction so they all commit under a single per-comp lock
-// acquire. The GET and DELETE paths stay on the lock-per-call form
-// because they're single-operation flows where the extra primitive
-// would just be ceremony. `*state.Store` satisfies all three
-// interfaces (TeamLineupStore + CompetitionStore + CompetitionTransactor)
-// so wiring stays drop-in.
-// RegisterPublicLineupHandlers wires the read-only
-// GET /competitions/:id/teams/:tid/lineups/:round endpoint on an
-// unauthenticated router group. Lineup data (position assignments)
-// is not sensitive, coaches and viewers can see who plays where,
-// and the AdminLineup form needs to load the current lineup without
-// holding admin credentials for the initial read.  PUT and DELETE
-// remain on the admin group via RegisterLineupHandlers.
+// Contract (bc-k404, operator decision 2026-09-27): both GETs answer 200
+// whenever the competition exists, carrying today's TeamLineup shape plus
+// one new field, `saved`. `saved: true` means the lineup stored at the
+// level asked for. `saved: false` means nothing is stored there, and the
+// body is the empty lineup for the KEY ASKED (round route: the requested
+// round, empty positions; match route: the requested matchId, empty
+// positions, round 0). `positions` is always an object, never null.
+// `saved` is the ONE marker: an empty positions map is not (a saved
+// lineup can itself be empty), and echoing the requested round/matchId is
+// not (the unsaved body echoes it too). A 404
+// (`{"error": "competition not found"}`) is reserved for a competition id
+// that names nothing at all.
 //
 // Slice 7.B / T127.
-func RegisterPublicLineupHandlers(r *gin.RouterGroup, store TeamLineupStore) {
+func RegisterPublicLineupHandlers(r *gin.RouterGroup, store TeamLineupStore, comps CompetitionStore) {
 	r.GET("/competitions/:id/teams/:tid/lineups/:round", func(c *gin.Context) {
 		compID, teamID, round, ok := parseLineupParams(c)
 		if !ok {
+			return
+		}
+		if !requireExistingCompetition(c, comps, compID) {
 			return
 		}
 		lineups, err := store.LoadTeamLineups(compID)
@@ -113,27 +120,40 @@ func RegisterPublicLineupHandlers(r *gin.RouterGroup, store TeamLineupStore) {
 			// Best-effort mode, the client-side twin of AMENDMENT 1: the
 			// scoring modal asks for the match's own round index, but
 			// operators typically save one round-0 lineup for the whole
-			// day, so a knockout final (round 1+) would 404 and leave the
-			// modal without names. Resolve via the FindBestLineup round
-			// tiers (highest round <= requested, else highest overall;
-			// match-scoped entries are skipped by passing an empty
-			// matchID). Default behavior without the param stays exact +
-			// 404 so the lineup editor's "no lineup submitted for THIS
-			// round" semantics are untouched.
+			// day, so a knockout final (round 1+) would find nothing saved
+			// and leave the modal without names. Resolve via the
+			// FindBestLineup round tiers (highest round <= requested, else
+			// highest overall; match-scoped entries are skipped by passing
+			// an empty matchID). Default behavior without the param stays
+			// exact: nothing saved for THIS round is reported as such
+			// (saved: false), never silently swapped for another round.
 			lineup, found = state.FindBestLineup(lineups, teamID, "", round)
 		}
 		if !found {
-			c.JSON(http.StatusNotFound, gin.H{"error": "no lineup submitted for this team and round"})
+			c.JSON(http.StatusOK, teamLineupRead{
+				TeamLineup: domain.TeamLineup{
+					TeamID:        teamID,
+					CompetitionID: compID,
+					Round:         round,
+					Positions:     map[domain.Position]string{},
+				},
+				Saved: false,
+			})
 			return
 		}
-		c.JSON(http.StatusOK, lineup)
+		c.JSON(http.StatusOK, teamLineupRead{TeamLineup: lineup, Saved: true})
 	})
 
-	// Match-scoped read (mp-825). 404 lets the caller fall back to the
-	// round-scoped endpoint above.
+	// Match-scoped read (mp-825). The server never falls back to the
+	// round-scoped lineup on this route: that tier belongs to the CLIENT
+	// (resolveMatchLineup), which reads `saved: false` here and asks the
+	// round-scoped route above itself.
 	r.GET("/competitions/:id/teams/:tid/match-lineups/:matchId", func(c *gin.Context) {
 		compID, teamID, matchID, ok := parseMatchLineupParams(c)
 		if !ok {
+			return
+		}
+		if !requireExistingCompetition(c, comps, compID) {
 			return
 		}
 		lineups, err := store.LoadTeamLineups(compID)
@@ -143,11 +163,40 @@ func RegisterPublicLineupHandlers(r *gin.RouterGroup, store TeamLineupStore) {
 		}
 		lineup, found := findMatchLineup(lineups, teamID, matchID)
 		if !found {
-			c.JSON(http.StatusNotFound, gin.H{"error": "no lineup submitted for this team and match"})
+			c.JSON(http.StatusOK, teamLineupRead{
+				TeamLineup: domain.TeamLineup{
+					TeamID:        teamID,
+					CompetitionID: compID,
+					MatchID:       matchID,
+					Positions:     map[domain.Position]string{},
+				},
+				Saved: false,
+			})
 			return
 		}
-		c.JSON(http.StatusOK, lineup)
+		c.JSON(http.StatusOK, teamLineupRead{TeamLineup: lineup, Saved: true})
 	})
+}
+
+// teamLineupRead is the response body for both public lineup GETs (bc-k404,
+// operator decision 2026-09-27: "there either is one or there isn't and
+// it's empty"). It embeds domain.TeamLineup and adds ONE field, Saved:
+// whether a lineup is actually stored at the (team, round) or (team,
+// matchId) key asked for. `saved` is the sole marker of "nothing here" --
+// an empty positions map is not one (a saved lineup can legitimately be
+// empty), and echoing the requested round/matchId is not one either (the
+// unsaved body does that too, so the caller can tell what it asked for).
+// Never omitempty: the caller must always be able to read it.
+//
+// Embedding domain.TeamLineup is safe today because neither it nor
+// domain.Position implements MarshalJSON, so its fields are promoted into
+// the flat JSON object rather than nested under a "TeamLineup" key. The
+// handler tests decode the RAW response body (map[string]any) rather than
+// through this struct specifically so that a future MarshalJSON silently
+// dropping `saved` would fail them rather than pass unnoticed.
+type teamLineupRead struct {
+	domain.TeamLineup
+	Saved bool `json:"saved"`
 }
 
 // findMatchLineup scans the loaded lineup map for the match-scoped entry

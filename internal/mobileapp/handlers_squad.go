@@ -70,7 +70,7 @@ func RegisterSquadHandlers(r *gin.RouterGroup, store SquadStore, comps Competiti
 		if !ok {
 			return
 		}
-		if !requireExistingCompetitionForSquad(c, comps, compID) {
+		if !requireExistingCompetition(c, comps, compID) {
 			return
 		}
 		squads, err := store.LoadSquads(compID)
@@ -86,7 +86,7 @@ func RegisterSquadHandlers(r *gin.RouterGroup, store SquadStore, comps Competiti
 		if !ok {
 			return
 		}
-		if !requireExistingCompetitionForSquad(c, comps, compID) {
+		if !requireExistingCompetition(c, comps, compID) {
 			return
 		}
 		var req SquadMemberRequest
@@ -111,7 +111,7 @@ func RegisterSquadHandlers(r *gin.RouterGroup, store SquadStore, comps Competiti
 		if !ok {
 			return
 		}
-		if !requireExistingCompetitionForSquad(c, comps, compID) {
+		if !requireExistingCompetition(c, comps, compID) {
 			return
 		}
 		memberID := c.Param("memberId")
@@ -148,7 +148,7 @@ func RegisterSquadHandlers(r *gin.RouterGroup, store SquadStore, comps Competiti
 		if !ok {
 			return
 		}
-		if !requireExistingCompetitionForSquad(c, comps, compID) {
+		if !requireExistingCompetition(c, comps, compID) {
 			return
 		}
 		memberID := c.Param("memberId")
@@ -165,13 +165,16 @@ func RegisterSquadHandlers(r *gin.RouterGroup, store SquadStore, comps Competiti
 	})
 }
 
-// requireExistingCompetitionForSquad 404s when compID names no competition,
-// and 500s on an unreadable config.md. compID has already passed
+// requireExistingCompetition 404s when compID names no competition, and
+// 500s on an unreadable config.md. compID has already passed
 // requireValidCompID (format only), so this is the existence check that
-// turns a bad id into "competition not found" instead of falling through to
-// a store write that would fail with a bare, unmappable I/O error (no
-// competition directory to write team-members.yaml into).
-func requireExistingCompetitionForSquad(c *gin.Context, comps CompetitionStore, compID string) bool {
+// turns a bad id into "competition not found" instead of falling through
+// to a store write that would fail with a bare, unmappable I/O error (no
+// competition directory to write team-members.yaml into) -- or, for the
+// public lineup GETs (bc-k404), instead of a lineup read silently
+// answering an empty "nothing saved" lineup for a competition that does
+// not exist at all.
+func requireExistingCompetition(c *gin.Context, comps CompetitionStore, compID string) bool {
 	comp, err := comps.LoadCompetition(compID)
 	if err != nil {
 		internalError(c, err)

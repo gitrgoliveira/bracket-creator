@@ -149,7 +149,7 @@ describe('lineup_resolver: resolveMatchLineup', () => {
   it('returns null when both fetchers throw/reject', async () => {
     const fetchers = {
       fetchMatchLineup: vi.fn().mockRejectedValue(new Error('network')),
-      fetchTeamLineup: vi.fn().mockRejectedValue(new Error('404')),
+      fetchTeamLineup: vi.fn().mockRejectedValue(new Error('competition not found')),
     };
     const result = await resolveMatchLineup('c1', 't1', 'm1', 0, fetchers);
     expect(result).toBeNull();

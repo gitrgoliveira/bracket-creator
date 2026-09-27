@@ -158,11 +158,12 @@ func NewRouterWithHub(store *state.Store, eng *engine.Engine, res *resources.Res
 	// GET /competitions/:id/competitor-status, eligibility state is
 	// derivable from public match results; viewer/display surfaces need it
 	// without admin credentials.
-	// GET /competitions/:id/teams/:tid/lineups/:round, lineup assignments
-	// are visible to coaches and spectators; AdminLineup loads them before
-	// the operator has entered the admin password.
+	// GET /competitions/:id/teams/:tid/lineups/:round and
+	// .../match-lineups/:matchId, lineup assignments are visible to
+	// coaches and spectators; AdminLineup loads them before the operator
+	// has entered the admin password.
 	RegisterPublicEligibilityHandlers(api, store)
-	RegisterPublicLineupHandlers(api, store)
+	RegisterPublicLineupHandlers(api, store, store)
 	RegisterPublicSwissHandlers(api, store, eng)
 	RegisterPublicLeagueHandlers(api, eng)
 	RegisterPublicAnnouncementHandlers(api, store)

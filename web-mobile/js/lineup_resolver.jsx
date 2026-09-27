@@ -260,16 +260,17 @@ export async function buildInlineLineupWrite(compId, teamId, lineup, squad, posK
 
 // resolveMatchLineup: prefer the per-match lineup endpoint (GET
 // match-lineups/:matchId); fall back to the round lineup when no per-match
-// entry exists (404 → null → round lookup). Network errors on either
-// endpoint are swallowed so the caller degrades gracefully.
+// entry exists (saved: false -> null -> round lookup). Network errors on
+// either endpoint are swallowed so the caller degrades gracefully.
 //
 // The round step passes { fallback: true }: match-scoring surfaces are the
-// client-side twin of AMENDMENT 1, so when the match's own round has no
-// saved lineup the server resolves the closest saved round instead of 404
-// (operators typically save one round-0 lineup for the whole day; without
-// this, a knockout final at round index 1 got no names and kachinuki bout 1
-// was submitted with empty sides). The lineup EDITOR calls fetchTeamLineup
-// directly without the flag, so its exact + 404 semantics are unchanged.
+// client-side twin of AMENDMENT 1, so when the match's own round has
+// nothing saved the server resolves the closest saved round instead of
+// answering unsaved (operators typically save one round-0 lineup for the
+// whole day; without this, a knockout final at round index 1 got no names
+// and kachinuki bout 1 was submitted with empty sides). The lineup EDITOR
+// calls fetchTeamLineup directly without the flag, so its exact-round,
+// nothing-saved-is-null semantics are unchanged.
 //
 // mp-bkg regression guard: the per-match endpoint must win when it returns a
 // non-null result (the whole point of the per-match API). This function is
@@ -281,7 +282,7 @@ export async function resolveMatchLineup(compId, teamId, matchId, round, { fetch
   } catch (_e) { /* network: fall through */ }
   try {
     return await fetchTeamLineup(compId, teamId, round, { fallback: true });
-  } catch (_e) { /* 404 / network: ignore */ }
+  } catch (_e) { /* competition missing / network: ignore */ }
   return null;
 }
 
@@ -293,10 +294,10 @@ export async function resolveMatchLineup(compId, teamId, matchId, round, { fetch
 // so an unresolved side (id "") still falls through to its NAME here, and
 // TeamLineups are keyed server-side by whatever team key was used when the
 // lineup was saved; in practice, that's the participant's real id. Passing
-// a bare name straight through can make the lineup GET 404 and the
-// per-match (and round) lineup never reaches the scoring grid. We look the
-// side up in the competition's participant list by id OR name and return
-// its real id, falling back to the original key when unmatched.
+// a bare name straight through can make the lineup GET read nothing saved,
+// and the per-match (and round) lineup never reaches the scoring grid.
+// We look the side up in the competition's participant list by id OR name
+// and return its real id, falling back to the original key when unmatched.
 //
 // bc-pnum: callers pass sideLookupKey(side) deliberately -- the name arm
 // recovers a real id for an id-less side. No object overload (YAGNI).

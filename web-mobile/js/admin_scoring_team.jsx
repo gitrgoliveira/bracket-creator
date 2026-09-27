@@ -922,7 +922,7 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
   const editingDoneOriginalRef = useRefA(null);
   // T131: lineup data so each bout cell can show the assigned player
   // name + canonical position label. Falls back gracefully when the
-  // lineup hasn't been submitted yet (404 → null).
+  // lineup hasn't been submitted yet (saved: false -> null, bc-k404).
   const [lineupA, setLineupA] = useStateA(null);
   const [lineupB, setLineupB] = useStateA(null);
   // bc-pnum gap closure: each side's squad, so the inline lineup picker
@@ -1162,9 +1162,10 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
         console.warn("Competition fetch for team modal failed:", e);
       }
       // mp-bkg: prefer per-match lineup (GET match-lineups/:matchId); fall
-      // back to round lineup when no per-match entry exists (404 → null →
-      // round lookup). Map the name-keyed side to the participant id the
-      // lineup is stored under first: otherwise every GET 404s.
+      // back to round lineup when no per-match entry exists (saved: false
+      // -> null -> round lookup). Map the name-keyed side to the
+      // participant id the lineup is stored under first: otherwise every
+      // GET reads nothing saved.
       // The detail payload carries participants under config.players; the
       // top-level players array is often an empty (but truthy) [] in this
       // shape, so prefer whichever list is non-empty.

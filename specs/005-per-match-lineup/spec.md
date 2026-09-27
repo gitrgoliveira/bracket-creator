@@ -73,8 +73,9 @@ Add an optional `MatchID string` to `TeamLineup`.
 New, match-scoped (added alongside, both live one release):
 `GET/PUT/DELETE /api/competitions/:id/teams/:tid/match-lineups/:matchId`
 
-`GET` returns 404 when no match-scoped lineup exists (caller may fall back to the
-round-scoped endpoint).
+`GET` answers 200 with an empty lineup marked `saved: false` when no match-scoped
+lineup exists; the caller then falls back to the round-scoped endpoint (operator
+decision 2026-09-27, bc-k404).
 
 ## Out of scope (follow-up beads)
 

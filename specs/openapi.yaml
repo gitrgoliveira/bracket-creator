@@ -19,6 +19,7 @@ info:
     - **`GET /api/schedule/estimate`**: stateless schedule calculator; always public.
     - **`GET /api/competitions/{id}/competitor-status`**: public read; the `POST` write is protected.
     - **`GET /api/competitions/{id}/teams/{tid}/lineups/{round}`**: public read; `PUT`/`DELETE` are protected.
+    - **`GET /api/competitions/{id}/teams/{tid}/match-lineups/{matchId}`**: public read; `PUT`/`DELETE` are protected.
     - **`GET /api/competitions/{id}/swiss/standings`**: public read; always public.
     - **`GET /api/tournament/announcement`**: public read; returns the currently active admin broadcast announcement (204 when none/expired).
 
@@ -3531,6 +3532,14 @@ paths:
     get:
       tags: [competitions]
       summary: Get team lineup for round
+      description: |
+        Always answers 200 while the competition exists (bc-k404, operator decision
+        2026-09-27: a lineup either exists or it doesn't, and empty is a normal state,
+        not a missing resource). The response's `saved` field is the marker: `true`
+        means the lineup stored at the round asked for (or, with `fallback=best`, the
+        resolved round); `false` means nothing is stored there, and the body echoes the
+        requested round with empty `positions`. 404 is reserved for a competition id
+        that names no competition at all.
       security: []
       parameters:
         - in: query
@@ -3542,19 +3551,26 @@ paths:
           description: >
             When fallback=best the server resolves the best available lineup when none
             exists for the exact round (the highest round at or below the requested one,
-            then the team's latest lineup) and only 404s when the team has no lineups at
-            all. This round-scoped endpoint has no matchId, so match-scoped lineups are
-            not consulted. Without this parameter the endpoint keeps exact-round semantics
-            (404 when that round has no lineup). PUT and DELETE are unaffected.
+            then the team's latest lineup), answering `saved: false` only when the team
+            has no round-scoped lineups at all. This round-scoped endpoint has no
+            matchId, so match-scoped lineups are never consulted. Without this parameter
+            the endpoint keeps exact-round semantics (saved: false when that round has
+            nothing saved). PUT and DELETE are unaffected.
       responses:
         '200':
-          description: Team lineup.
+          description: Team lineup, saved or not (see `saved`).
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/TeamLineup'
+                $ref: '#/components/schemas/TeamLineupRead'
+        '400':
+          $ref: '#/components/responses/BadRequest'
         '404':
-          $ref: '#/components/responses/NotFound'
+          description: Competition not found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
     put:
       tags: [competitions]
       summary: Save team lineup for round
@@ -3609,18 +3625,28 @@ paths:
       tags: [competitions]
       summary: Get team lineup for a specific match
       description: |
-        Match-scoped lineup (mp-825). A 404 lets the caller fall back to the
-        round-scoped endpoint.
+        Match-scoped lineup (mp-825). Always answers 200 while the competition exists
+        (bc-k404): `saved: false` and empty `positions` when no match-scoped entry
+        exists, never a 404. The server never falls back to the round-scoped lineup on
+        this route; that tier belongs to the CALLER, which reads `saved: false` and
+        asks the round-scoped endpoint above itself. 404 is reserved for a competition
+        id that names no competition at all.
       security: []
       responses:
         '200':
-          description: Team lineup.
+          description: Team lineup, saved or not (see `saved`).
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/TeamLineup'
+                $ref: '#/components/schemas/TeamLineupRead'
+        '400':
+          $ref: '#/components/responses/BadRequest'
         '404':
-          $ref: '#/components/responses/NotFound'
+          description: Competition not found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
     put:
       tags: [competitions]
       summary: Save team lineup for a specific match
@@ -4165,6 +4191,7 @@ components:
         the public read endpoints `GET /api/schedule/estimate`,
         `GET /api/competitions/{id}/competitor-status`,
         `GET /api/competitions/{id}/teams/{tid}/lineups/{round}`,
+        `GET /api/competitions/{id}/teams/{tid}/match-lineups/{matchId}`,
         `GET /api/competitions/{id}/swiss/standings`, and
         `GET /api/tournament/announcement`,
         and (in file mode only) the bootstrap PUT/POST `/api/tournament`
@@ -5844,6 +5871,27 @@ components:
             Map of position label to the team member's id, keyed by the same
             positions as `positions`. Optional: a position without an entry
             here is identified by its name alone.
+
+    TeamLineupRead:
+      description: >
+        The response body for the two public lineup GETs (bc-k404, operator decision
+        2026-09-27). Everything TeamLineup carries, plus one required field, `saved`,
+        which is the ONE marker of whether a lineup is actually stored at the key
+        asked for: an empty `positions` map is not that marker (a saved lineup can
+        itself be empty), and an echoed round/matchId is not either (the unsaved body
+        echoes the requested key too).
+      allOf:
+        - $ref: '#/components/schemas/TeamLineup'
+        - type: object
+          required: [saved]
+          properties:
+            saved:
+              type: boolean
+              description: >
+                true when a lineup is stored at the round/matchId asked for (or, with
+                fallback=best, the round it resolved to); false when nothing is stored
+                there, in which case `positions` is empty and the round/matchId in the
+                body is the one requested, not a fallback.
 
     ScheduleEstimate:
       type: object

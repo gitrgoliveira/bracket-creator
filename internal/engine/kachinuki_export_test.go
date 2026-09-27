@@ -158,6 +158,36 @@ func TestBuildKachinukiDetail(t *testing.T) {
 	assert.Equal(t, 1, detail.EliminationB)
 }
 
+// TestBuildKachinukiDetail_FusenshoMarksTheWinnerBesideItsScore pins the
+// engine half of the per-bout default-win rule (bc-kdsc change 8b): a
+// per-bout fusensho (the exhaustion walkover's default win) sets MarkA on
+// the present side alone -- domain.SideMarksAB attributes it by the bout's
+// own SideA/SideB/Winner -- leaves MarkB empty, and leaves Middle untouched
+// (a default win is not a middle-mark decision; the closed set stays vs).
+func TestBuildKachinukiDetail_FusenshoMarksTheWinnerBesideItsScore(t *testing.T) {
+	m := &state.MatchResult{
+		SideA: "RedTeam",
+		SideB: "WhiteTeam",
+		SubResults: []state.SubMatchResult{
+			{
+				Position: 1,
+				SideA:    "R-Senpo", SideB: "W-Senpo",
+				IpponsA:  domain.DefaultWinIppons(false),
+				Winner:   "R-Senpo",
+				Decision: "fusensho",
+			},
+		},
+	}
+
+	detail := buildKachinukiDetail(m, "Pool Match 1", map[string]string{}, map[string]string{}, map[string][]domain.TeamMember{})
+
+	require.Len(t, detail.Bouts, 1)
+	assert.Equal(t, "Fus.", detail.Bouts[0].MarkA, "the present side's own mark names the default win")
+	assert.Equal(t, "", detail.Bouts[0].MarkB, "fusensho marks only the winner, never the no-show's own cell")
+	assert.Equal(t, "", detail.Bouts[0].Middle, "a default win is not a middle-mark decision")
+	assert.Equal(t, "○○", detail.Bouts[0].ScoreA, "the FIK default-win maru, joined from the stored ippons")
+}
+
 // TestBuildKachinukiDetail_NoPositions verifies graceful handling when
 // the position map is empty (positions render as empty strings).
 func TestBuildKachinukiDetail_NoPositions(t *testing.T) {

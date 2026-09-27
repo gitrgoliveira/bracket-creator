@@ -338,6 +338,44 @@ func TestKachinukiDetailBoutRows_WithSquadLabel(t *testing.T) {
 	assert.Equal(t, "Bob (Senpo)", sideBCell, "no label recorded for Side B: falls back to name + position, unchanged")
 }
 
+// TestKachinukiDetailBoutRow_FusenshoMarkBesideScore pins the per-bout
+// default-win mark (bc-kdsc change 8b): the winner's result mark (e.g. the
+// exhaustion walkover's Fus.) rides beside its OWN score cell, composed with
+// the same score+mark join the main sheets use, never in the centre column,
+// which the closed-set middle-mark rule reserves for vs/X/(E)/(DH).
+func TestKachinukiDetailBoutRow_FusenshoMarkBesideScore(t *testing.T) {
+	f := excelize.NewFile()
+	defer func() { _ = f.Close() }()
+
+	match := KachinukiMatchDetail{
+		Label:     "Pool A - Match 1",
+		SideATeam: "Team Alpha",
+		SideBTeam: "Team Bravo",
+		Bouts: []KachinukiBout{
+			// Aka (SideA) wins by default: MarkA rides beside ScoreA.
+			{Position: 1, SideAName: "Ivy", SideBName: "Jack", ScoreA: "○○", MarkA: "Fus."},
+		},
+	}
+	require.NoError(t, WriteKachinukiDetailSheet(f, []KachinukiMatchDetail{match}))
+
+	firstBoutRow := 4
+	// Aka (SideA) is RIGHT (column E): score and mark compose one cell.
+	rightScore, err := f.GetCellValue(SheetKachinukiDetail, "E"+intToString(firstBoutRow))
+	require.NoError(t, err)
+	assert.Equal(t, "○○ Fus.", rightScore, "the winner's maru and Fus. mark ride together in its own score cell")
+
+	// The loser's cell (Shiro, column C) carries neither score nor mark.
+	leftScore, err := f.GetCellValue(SheetKachinukiDetail, "C"+intToString(firstBoutRow))
+	require.NoError(t, err)
+	assert.Empty(t, leftScore, "fusensho marks only the winner; the no-show's own cell stays blank")
+
+	// The centre stays untouched: no bout.Middle set, so it falls back to
+	// the template's own "vs" -- a default win is not a middle-mark decision.
+	middle, err := f.GetCellValue(SheetKachinukiDetail, "D"+intToString(firstBoutRow))
+	require.NoError(t, err)
+	assert.Equal(t, "vs", middle, "a default-win mark never reaches the centre column")
+}
+
 // TestKachinukiDetailSummaryRow is T197: the summary row shows total
 // eliminations per team, Shiro (SideB) left and Aka (SideA) right through
 // WhiteLeft like every other row on this sheet. There is no Winner or

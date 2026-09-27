@@ -2300,3 +2300,95 @@ describe('bc-sync: pending edits and durable running writes', () => {
         expect(localStorage.getItem('bc_write_queue')).toBeNull();
     });
 });
+
+describe('bc-sync: the stored outbox is shared by every tab', () => {
+    // Two module instances over one localStorage are two tabs of the app: the
+    // beforeEach import is tab A, and a second import after resetModules is
+    // tab B. A persist used to write this tab's queue over the stored one, so
+    // a result queued in another tab was dropped from storage (and lost if
+    // that tab then closed), and an emptied queue removed the key outright.
+    const offline = () => Promise.reject(new TypeError('offline'));
+    // Tab B's retries must neither land nor fail while a test watches tab A:
+    // either would make tab B save its own queue again and hide what A did.
+    const hang = () => new Promise(() => {});
+    const landed = () => Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve({}) });
+    const stored = () => JSON.parse(localStorage.getItem('bc_write_queue') || '[]').map(([, d]) => d);
+    const storedMatchIds = () => stored().map((d) => d.matchID).sort();
+
+    async function openTabB() {
+        vi.resetModules();
+        return (await import('../api_client.jsx')).API;
+    }
+
+    it('a tab saving its own write keeps the write another tab queued', async () => {
+        mockFetch(offline);
+        const tabB = await openTabB();
+        await tabB.recordScore('c1', 'mB', { status: 'completed', winner: 'B' }, 'pw', null);
+        await API.recordScore('c1', 'mA', { status: 'completed', winner: 'A' }, 'pw', null);
+        await flushMicrotasks();
+        expect(storedMatchIds()).toEqual(['mA', 'mB']);
+    });
+
+    it('a write that lands leaves storage, and the other tab\'s stays', async () => {
+        mockFetch(offline);
+        const tabB = await openTabB();
+        await tabB.recordScore('c1', 'mB', { status: 'completed', winner: 'B' }, 'pw', null);
+        await API.recordScore('c1', 'mA', { status: 'completed', winner: 'A' }, 'pw', null);
+        await flushMicrotasks();
+        mockFetch((url) => (String(url).includes('/matches/mA/') ? landed() : hang()));
+        await tick(10000);
+        expect(API.hasPendingTerminalWrite('c1', 'mA')).toBe(false);
+        expect(storedMatchIds()).toEqual(['mB']);
+    });
+
+    it('a landed write never removes a newer entry another tab stored under the same match', async () => {
+        mockFetch(offline);
+        const tabB = await openTabB();
+        await API.recordScore('c1', 'm1', { status: 'completed', winner: 'A' }, 'pw', null);
+        await flushMicrotasks();
+        vi.advanceTimersByTime(1000);
+        await tabB.recordScore('c1', 'm1', { status: 'completed', winner: 'B' }, 'pw', null);
+        await flushMicrotasks();
+        // Tab A's older write lands; tab B's newer one for the same match is
+        // still queued there and must stay stored.
+        mockFetch((url, opts) => (JSON.parse(opts.body).winner === 'A' ? landed() : hang()));
+        await tick(10000);
+        expect(API.hasPendingTerminalWrite('c1', 'm1')).toBe(false);
+        expect(stored().map((d) => d.payload.winner)).toEqual(['B']);
+    });
+
+    it('a landed write is still pruned when the save after it failed', async () => {
+        // Browser storage full at the moment the write landed: the entries this
+        // tab settled must still be taken out by the next save that succeeds,
+        // or the landed write would come back from storage and be replayed.
+        mockFetch(offline);
+        const tabB = await openTabB();
+        await tabB.recordScore('c1', 'mB', { status: 'completed', winner: 'B' }, 'pw', null);
+        await API.recordScore('c1', 'mA', { status: 'completed', winner: 'A' }, 'pw', null);
+        await flushMicrotasks();
+        const setItem = localStorage.setItem;
+        localStorage.setItem = () => { throw new Error('QuotaExceededError'); };
+        mockFetch((url) => (String(url).includes('/matches/mA/') ? landed() : hang()));
+        await tick(10000);
+        expect(API.hasPendingTerminalWrite('c1', 'mA')).toBe(false);
+        localStorage.setItem = setItem;
+        mockFetch((url) => (String(url).includes('/matches/mC/') ? offline() : hang()));
+        await API.recordScore('c1', 'mC', { status: 'completed', winner: 'C' }, 'pw', null);
+        await flushMicrotasks();
+        expect(storedMatchIds()).toEqual(['mB', 'mC']);
+    });
+
+    it('an unreadable entry dropped on load leaves storage, so it is announced once', async () => {
+        const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+        localStorage.setItem('bc_write_queue', JSON.stringify([['c1:m1', {
+            compID: 'c1', matchID: 'm1', payload: {}, password: 'pw',
+            kind: 'score', terminal: true, method: 'PUT',
+            url: '/api/competitions/c1/matches/m1/score', enqueuedAt: 'not-a-time',
+        }]]));
+        mockFetch(offline);
+        vi.resetModules();
+        await import('../api_client.jsx');
+        expect(localStorage.getItem('bc_write_queue')).toBeNull();
+        warnSpy.mockRestore();
+    });
+});

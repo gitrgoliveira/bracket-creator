@@ -169,11 +169,12 @@ being photographed. Two severities, treated differently on purpose:
 
 - An **uncaught exception** fails the capture. The surface is broken and the
   screenshot would record that as though it were the product working.
-- A **console error** is reported after the run but does not fail it. The SPA
-  asks for a team's lineup before one exists and the server answers 404, which
-  the client handles; that is normal on seven screenshots and the kachinuki
-  video here. Failing on it would fire on every team surface, and a gate that
-  always fires is one the operator learns to skip.
+- A **console error or a failed request** (HTTP status 400 and above) is
+  reported after the run but does not fail it, named by method and route (a
+  "Failed to load resource" console line carries its path too). No request on
+  a capture surface is expected to fail: the team lineup reads that used to
+  answer 404 until a lineup was saved now answer an empty lineup instead, so a
+  line here is a finding, not noise.
 
 A run with any failed capture exits non-zero, so the target can gate a script.
 

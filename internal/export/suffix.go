@@ -12,100 +12,47 @@ import (
 	"strings"
 
 	"github.com/gitrgoliveira/bracket-creator/internal/domain"
+	"github.com/gitrgoliveira/bracket-creator/internal/helper"
 	"github.com/gitrgoliveira/bracket-creator/internal/state"
 )
 
 // MiddleMark returns the ONE mark the centre "vs" cell may carry for a
-// completed match. The middle column of a score sheet can only ever read:
-//
-//	vs     not yet decided (the template's own text; we return "" and leave it)
-//	X      a tie (hikiwake)
-//	(E)    the match went to overtime
-//	(DH)   a team encounter sent to a representative bout
-//
-// The marks are mutually exclusive by rule, not by accident: X means a tie
-// and a match that went to encho cannot end tied (encho runs until someone
-// scores), so X beats (E) if stale data carries both; and a daihyosen bout is
-// one-point sudden death, so DH bouts do not have encho and (DH) beats (E).
-//
-// Everything else — Kiken, Fus., Ht — is a RESULT, not a middle mark, and
-// belongs beside the competitor it names: see SideMarks. Mirrors
-// middleMark()/formatIpponsScore in web-mobile/js/bracket.jsx.
+// completed match: "" (not yet decided, the template's own "vs" survives),
+// "X" (hikiwake), "(E)" (overtime), or "(DH)" (a team encounter sent to a
+// representative bout). A one-line delegate to domain.MiddleMark, the shared
+// owner the Kachinuki Detail sheet also delegates to (internal/helper), kept
+// here so this exported signature (state.EnchoMetadata, which domain may not
+// import) and its pinning test (middle_closed_set_test.go) stay put. See
+// domain.MiddleMark's doc comment for the full rule and SideMarks for
+// everything the middle may NOT carry.
 func MiddleMark(decision string, encho *state.EnchoMetadata) string {
-	switch {
-	case state.IsDraw(decision):
-		return "X"
-	case decision == string(domain.DecisionDaihyosen):
-		return "(DH)"
-	default:
-		return enchoLabel(encho)
-	}
+	return domain.MiddleMark(decision, encho.On())
 }
 
 // SideMarks returns the per-side result marks for a decision: winnerMark goes
-// in the winning side's score cell, loserMark in the losing side's.
-//
-//	hantei    -> winner "Ht"   (FIK 7-5 / 29-6: judges picked the winner)
-//	kiken     -> loser  "Kiken" (the mark names the competitor who withdrew)
-//	fusenpai  -> loser  "Fus."  (the mark names the no-show)
-//	fusensho  -> winner "Fus."  (the default WIN names the present side)
-//
-// The JS viewer surfaces fusensho via a separate bout badge, so its
-// sideMarks() omits it; a flat spreadsheet cell has no badge, so this export
-// keeps the "Fus." mark (deliberate divergence, mirrored in the JS docstring).
+// in the winning side's score cell, loserMark in the losing side's. A
+// one-line delegate to domain.SideMarks; see its doc comment for the rule.
 func SideMarks(decision string, decidedByHantei bool) (winnerMark, loserMark string) {
-	switch {
-	case domain.IsKikenDecisionStr(decision):
-		loserMark = "Kiken"
-	case decision == string(domain.DecisionFusenpai):
-		loserMark = "Fus."
-	case decision == string(domain.DecisionFusensho):
-		winnerMark = "Fus."
-	}
-	if decidedByHantei {
-		winnerMark = joinSp(winnerMark, "Ht")
-	}
-	return winnerMark, loserMark
+	return domain.SideMarks(decision, decidedByHantei)
 }
 
 // SideMarksLR resolves SideMarks into (left, right) on-sheet order for a
-// match between sideA and sideB. Default layout is SideA (Aka) on the left;
-// mirror swaps the sides physically, matching the leftIppons/rightIppons
-// swaps at the call sites. A missing or unmatchable winner (a draw, an
-// unfinished match, or drifted data) yields no marks: result marks hang off
-// a winner by definition.
+// match between sideA and sideB: Shiro (SideB) on the left, Aka (SideA) on
+// the right, through helper.WhiteLeft like the scores beside these marks.
+// domain.SideMarksAB owns the decision+attribution part (SIDE order, shared
+// with the Kachinuki Detail sheet); this function's own job is only the
+// White-left placement domain may not perform (domain does not import
+// helper).
 //
-// att carries the participant UUIDs, threaded from state.MatchResult where
-// available, and the names it always has. Pass the zero domain.WinnerAttribution{}
-// to fall back to the pre-existing name comparison — that is clearer than a
-// "", "", "" triple, which could not be told apart from a genuine empty id.
-// Sub-bouts have no id fields to thread at all; a bracket row now carries
-// SideAID/SideBID/WinnerID (bc-brid), but this export call path does not
-// thread them yet (internal/export/builder.go's bracket branch, a
-// deliberately deferred change -- see that bead's final report), so a
-// bracket row still reaches this function via the zero value too, for now.
-// Side attribution goes through domain.AttributeWinnerSide, the one owner
-// of "which side won": ids win over names when a same-name pair (legal: two
-// participants from different dojos may share a name) would otherwise pick
-// the wrong side.
-func SideMarksLR(decision string, decidedByHantei bool, att domain.WinnerAttribution, mirror bool) (left, right string) {
-	winnerMark, loserMark := SideMarks(decision, decidedByHantei)
-	if att.Winner == "" {
-		return "", "" // an empty winner must not string-match an empty side
-	}
-	var aMark, bMark string
-	switch domain.AttributeWinnerSide(att) {
-	case domain.MatchSideA:
-		aMark, bMark = winnerMark, loserMark
-	case domain.MatchSideB:
-		aMark, bMark = loserMark, winnerMark
-	default:
-		return "", ""
-	}
-	if mirror {
-		return bMark, aMark
-	}
-	return aMark, bMark
+// att carries the ids and names of the record being marked: a pool or
+// bracket row's SideAID/SideBID/WinnerID, or a sub-bout's member ids
+// (state.SubMatchResult.Attribution). Side attribution goes through
+// domain.AttributeWinnerSide, the one owner of "which side won": ids win over
+// names when a same-name pair (legal: two participants from different dojos
+// may share a name) would otherwise pick the wrong side.
+func SideMarksLR(decision string, decidedByHantei bool, att domain.WinnerAttribution) (left, right string) {
+	aMark, bMark := domain.SideMarksAB(decision, decidedByHantei, att)
+	return helper.WhiteLeft(aMark, bMark)
 }
 
 // joinSp joins two display fragments with a single space, skipping empties, so
@@ -123,23 +70,13 @@ func joinSp(a, b string) string {
 }
 
 // enchoLabel renders the overtime marker for an encho block: "" when no
-// overtime ran, "(E)" otherwise — always bare, never a count.
-//
-// mp-m4bn: encho is just encho. The stepper records how many periods were
-// fought (PeriodCount persists for the tournament log), but the result
-// marking deliberately never carries the number: operator feedback is that
-// counted markers ("(E×3)") confuse readers of brackets and result sheets.
-// Do not reintroduce the count here. Mirrors enchoLabel() in
-// web-mobile/js/bracket.jsx, pinned by the shared table in
-// testdata/encho_labels.json (which includes multi-digit counts precisely to
-// pin that digits never leak into the marker). The editors' "· (E) Overtime
-// ×N" eyebrow is different on purpose: a live readout of the stepper the
-// operator is using, not a result marking.
+// overtime ran, "(E)" otherwise — always bare, never a count. A one-line
+// delegate to domain.EnchoLabel; see its doc comment for the full rule
+// (mp-m4bn: no count). The editors' "· (E) Overtime ×N" eyebrow is different
+// on purpose: a live readout of the stepper the operator is using, not a
+// result marking.
 func enchoLabel(encho *state.EnchoMetadata) string {
-	if !encho.On() {
-		return ""
-	}
-	return "(E)"
+	return domain.EnchoLabel(encho.On())
 }
 
 // FlagsScorePair returns the display strings for both sides of an engi bout.
@@ -169,11 +106,10 @@ func FlagsScorePair(a, b int) (string, string) {
 // imported without it. Never applies to engi flag counts (callers gate)
 // or the loser.
 //
-// att carries the participant UUIDs (the zero domain.WinnerAttribution{} when
-// unavailable — sub-bouts carry no id fields at all, and a bracket row's own
-// SideAID/SideBID/WinnerID (bc-brid) are not yet threaded through this export
-// call path either, a deliberately deferred change) and the names it always
-// has, resolved through domain.AttributeWinnerSide, the SAME owner
+// att carries the ids and names of the record being marked (a pool or
+// bracket row's SideAID/SideBID/WinnerID, or a sub-bout's member ids via
+// state.SubMatchResult.Attribution), resolved through
+// domain.AttributeWinnerSide, the SAME owner
 // SideMarksLR uses: the two helpers compose one cell (score + result mark)
 // and must agree on which side won, or a same-name pair whose ids disagree
 // with the name order could print the maru fallback in one side's cell and
@@ -212,15 +148,9 @@ func HansokuMark(fouls int) string {
 }
 
 // IpponsScore formats an ippon slice as a readable score string: ["M","K"] ->
-// "MK", nil/empty -> "". Mirrors the character-join behaviour in
-// formatIpponsScore (bracket.jsx) without the full display logic (bye/hikiwake
-// special cases live in the caller).
+// "MK", nil/empty -> "". A one-line delegate to domain.IpponsScore; see its
+// doc comment for the full rule (bye/hikiwake special cases live in the
+// caller).
 func IpponsScore(ippons []string) string {
-	result := ""
-	for _, s := range ippons {
-		if domain.IsScoringIppon(s) {
-			result += s
-		}
-	}
-	return result
+	return domain.IpponsScore(ippons)
 }

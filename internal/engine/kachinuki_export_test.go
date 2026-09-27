@@ -10,6 +10,7 @@ import (
 	"github.com/gitrgoliveira/bracket-creator/internal/state"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	excelize "github.com/xuri/excelize/v2"
 	"gopkg.in/yaml.v3"
 )
 
@@ -139,7 +140,6 @@ func TestBuildKachinukiDetail(t *testing.T) {
 	assert.Equal(t, "Pool Match 1", detail.Label)
 	assert.Equal(t, "RedTeam", detail.SideATeam)
 	assert.Equal(t, "WhiteTeam", detail.SideBTeam)
-	assert.Equal(t, "RedTeam", detail.Winner)
 	require.Len(t, detail.Bouts, 1)
 	assert.Equal(t, 1, detail.Bouts[0].Position)
 	assert.Equal(t, "R-Senpo", detail.Bouts[0].SideAName)
@@ -148,10 +148,44 @@ func TestBuildKachinukiDetail(t *testing.T) {
 	assert.Equal(t, "", detail.Bouts[0].ScoreB)
 	assert.Equal(t, "W-Senpo", detail.Bouts[0].SideBName)
 	assert.Equal(t, "Senpo", detail.Bouts[0].SideBPos)
-	assert.Equal(t, "R-Senpo", detail.Bouts[0].Winner)
+	// A fought bout with no encho and no hantei carries no middle mark and
+	// no side mark.
+	assert.Equal(t, "", detail.Bouts[0].Middle)
+	assert.Equal(t, "", detail.Bouts[0].MarkA)
+	assert.Equal(t, "", detail.Bouts[0].MarkB)
 	// Elimination tally: W-Senpo lost so b=1, R-Senpo won so a=0.
 	assert.Equal(t, 0, detail.EliminationA)
 	assert.Equal(t, 1, detail.EliminationB)
+}
+
+// TestBuildKachinukiDetail_FusenshoMarksTheWinnerBesideItsScore pins the
+// engine half of the per-bout default-win rule (bc-kdsc change 8b): a
+// per-bout fusensho (the exhaustion walkover's default win) sets MarkA on
+// the present side alone -- domain.SideMarksAB attributes it by the bout's
+// own SideA/SideB/Winner -- leaves MarkB empty, and leaves Middle untouched
+// (a default win is not a middle-mark decision; the closed set stays vs).
+func TestBuildKachinukiDetail_FusenshoMarksTheWinnerBesideItsScore(t *testing.T) {
+	m := &state.MatchResult{
+		SideA: "RedTeam",
+		SideB: "WhiteTeam",
+		SubResults: []state.SubMatchResult{
+			{
+				Position: 1,
+				SideA:    "R-Senpo", SideB: "W-Senpo",
+				IpponsA:  domain.DefaultWinIppons(false),
+				Winner:   "R-Senpo",
+				Decision: "fusensho",
+			},
+		},
+	}
+
+	detail := buildKachinukiDetail(m, "Pool Match 1", map[string]string{}, map[string]string{}, map[string][]domain.TeamMember{})
+
+	require.Len(t, detail.Bouts, 1)
+	assert.Equal(t, "Fus.", detail.Bouts[0].MarkA, "the present side's own mark names the default win")
+	assert.Equal(t, "", detail.Bouts[0].MarkB, "fusensho marks only the winner, never the no-show's own cell")
+	assert.Equal(t, "", detail.Bouts[0].Middle, "a default win is not a middle-mark decision")
+	assert.Equal(t, "○○", detail.Bouts[0].ScoreA, "the FIK default-win maru, joined from the stored ippons")
 }
 
 // TestBuildKachinukiDetail_NoPositions verifies graceful handling when
@@ -380,12 +414,10 @@ func TestCollectKachinukiMatches_BracketWithSubResults(t *testing.T) {
 	assert.Equal(t, "Bracket R1-M1", out[0].Label)
 	assert.Equal(t, "RedTeam", out[0].SideATeam)
 	assert.Equal(t, "WhiteTeam", out[0].SideBTeam)
-	assert.Equal(t, "RedTeam", out[0].Winner)
 	require.Len(t, out[0].Bouts, 3, "three bouts should be present")
 	assert.Equal(t, 1, out[0].Bouts[0].Position)
 	assert.Equal(t, "R-Senpo", out[0].Bouts[0].SideAName)
 	assert.Equal(t, "W-Senpo", out[0].Bouts[0].SideBName)
-	assert.Equal(t, "R-Senpo", out[0].Bouts[0].Winner)
 	assert.Equal(t, 3, out[0].Bouts[2].Position)
 }
 
@@ -415,9 +447,13 @@ func TestCollectKachinukiMatches_BronzeWithSubResults(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, out, 1, "bronze match with 2 bouts should produce one detail entry")
 	assert.Equal(t, "3rd Place Match", out[0].Label)
-	assert.Equal(t, "BlueTeam", out[0].Winner)
 	require.Len(t, out[0].Bouts, 2)
-	assert.Equal(t, "B1", out[0].Bouts[0].Winner)
+	assert.Equal(t, "R1", out[0].Bouts[0].SideAName)
+	assert.Equal(t, "B1", out[0].Bouts[0].SideBName)
+	// A fought bout carries no middle or side mark.
+	assert.Equal(t, "", out[0].Bouts[0].Middle)
+	assert.Equal(t, "", out[0].Bouts[0].MarkA)
+	assert.Equal(t, "", out[0].Bouts[0].MarkB)
 }
 
 // TestCollectKachinukiMatches_BronzeStub verifies the Naginata 3rd-place
@@ -553,8 +589,6 @@ func TestKachinukiDetailMatches_PoolMatchWithSubResults(t *testing.T) {
 	assert.Equal(t, "Pool Match 1", detail.Label)
 	assert.Equal(t, "RedTeam", detail.SideATeam)
 	assert.Equal(t, "WhiteTeam", detail.SideBTeam)
-	assert.Equal(t, "RedTeam", detail.Winner)
-	assert.Equal(t, "fought", detail.Decision)
 
 	require.Len(t, detail.Bouts, 2)
 	assert.Equal(t, 1, detail.Bouts[0].Position)
@@ -562,8 +596,14 @@ func TestKachinukiDetailMatches_PoolMatchWithSubResults(t *testing.T) {
 	assert.Equal(t, "MK", detail.Bouts[0].ScoreA, "IpponsA must be joined into one string")
 	assert.Equal(t, "W-Senpo", detail.Bouts[0].SideBName)
 	assert.Equal(t, "D", detail.Bouts[0].ScoreB, "IpponsB must be joined into one string")
-	assert.Equal(t, "R-Senpo", detail.Bouts[0].Winner)
-	assert.Equal(t, "fought", detail.Bouts[0].Decision)
+	// Bout 1 is fought, no encho, no hantei: no middle or side mark.
+	assert.Equal(t, "", detail.Bouts[0].Middle)
+	assert.Equal(t, "", detail.Bouts[0].MarkA)
+	assert.Equal(t, "", detail.Bouts[0].MarkB)
+	// Bout 2 is the fixture's hikiwake: centre X, still no side mark.
+	assert.Equal(t, "X", detail.Bouts[1].Middle)
+	assert.Equal(t, "", detail.Bouts[1].MarkA)
+	assert.Equal(t, "", detail.Bouts[1].MarkB)
 
 	// Bout 1: R-Senpo (SideA) wins, so W-Senpo (SideB) retires.
 	// Bout 2 is a hikiwake, which retires one player from EACH side:
@@ -720,6 +760,62 @@ func TestResolveKachinukiDisplayName(t *testing.T) {
 		"no member id recorded on the row: stored text stands")
 	assert.Equal(t, "Old Spelling", resolveKachinukiDisplayName(squads, "", "m1", "Old Spelling"),
 		"no team id recorded on the row: stored text stands")
+}
+
+// TestBuildKachinukiDetail_NamelessFighterPickedByNumberStillPrints is the
+// bc-kdsc fold-in f repro: a fighter picked by squad number and never named
+// (bc-dnst) has a bout row whose own SideA stays "" -- so
+// resolveKachinukiDisplayName has nothing newer than that empty stored text
+// to show -- while resolveKachinukiMemberLabel still resolves a real label
+// from the squad slot's index alone, independent of its (blank) name. This
+// drives the REAL export path end to end (buildKachinukiDetail ->
+// helper.WriteKachinukiDetailSheet) and reads the rendered cell, because the
+// bug (or its absence) lives in formatKachinukiPlayer's response to a
+// label-but-no-name bout, which only the sheet renderer can confirm.
+func TestBuildKachinukiDetail_NamelessFighterPickedByNumberStillPrints(t *testing.T) {
+	squads := map[string][]domain.TeamMember{
+		"RedTeam": {
+			{ID: "m-red-3", Index: 3, Name: ""}, // picked by number, never named
+		},
+	}
+	teamNumbers := map[string]string{"RedTeam": "T10"}
+	positions := map[string]string{
+		lineupKey("RedTeam", memberKey("m-red-3")): "Chuken",
+	}
+
+	m := &state.MatchResult{
+		SideA:   "RedTeam",
+		SideB:   "WhiteTeam",
+		SideAID: "RedTeam",
+		Status:  state.MatchStatusCompleted,
+		SubResults: []state.SubMatchResult{
+			{
+				Position:      1,
+				SideA:         "", // never named: picked by squad number alone
+				SideAMemberID: "m-red-3",
+				SideB:         "W-Senpo",
+				IpponsA:       []string{"M"},
+				Decision:      "fought",
+			},
+		},
+	}
+
+	detail := buildKachinukiDetail(m, "Pool Match 1", positions, teamNumbers, squads)
+	require.Len(t, detail.Bouts, 1)
+	// The data buildKachinukiDetail hands the renderer: a real label, no name.
+	assert.Equal(t, "", detail.Bouts[0].SideAName, "the stored name stays empty: nothing newer to show")
+	assert.Equal(t, "T10.3", detail.Bouts[0].SideALabel, "the label still resolves from the squad slot's index")
+	assert.Equal(t, "Chuken", detail.Bouts[0].SideAPos)
+
+	f := excelize.NewFile()
+	defer func() { _ = f.Close() }()
+	require.NoError(t, helper.WriteKachinukiDetailSheet(f, []helper.KachinukiMatchDetail{detail}))
+
+	// Side A (Aka) sits in the RIGHT column (F) per helper.WhiteLeft.
+	cell, err := f.GetCellValue(helper.SheetKachinukiDetail, "F4")
+	require.NoError(t, err)
+	assert.NotEmptyf(t, cell, "a fighter picked by number and never named must not print a blank cell (got %q)", cell)
+	assert.Contains(t, cell, "T10.3", "the printed cell should at least show the known label")
 }
 
 // TestBuildKachinukiDetail_DisplayNameFollowsRename verifies the export

@@ -34,7 +34,7 @@ func TestPrintPoolMatchesEdgeCourts(t *testing.T) {
 		f.NewSheet(SheetPoolDraw)
 
 		pools := []Pool{poolA}
-		matchWinners, _ := PrintPoolMatches(f, pools, 0, 1, CourtLabels(0), nil, false, poolCoords, pCoords, false)
+		matchWinners, _ := PrintPoolMatches(f, pools, 0, 1, CourtLabels(0), nil, poolCoords, pCoords, false)
 		if len(matchWinners) == 0 {
 			t.Errorf("expected match winners even with 0 courts, got %d", len(matchWinners))
 		}
@@ -56,7 +56,7 @@ func TestPrintPoolMatchesEdgeCourts(t *testing.T) {
 		require.Equal(t, 1, EffectiveDrawCourts(len(pools), numCourts),
 			"one pool must clamp to one shiaijo for this case to test the clamp")
 
-		matchWinners, _ := PrintPoolMatches(f, pools, 0, 1, CourtLabels(numCourts), nil, false, poolCoords, pCoords, false)
+		matchWinners, _ := PrintPoolMatches(f, pools, 0, 1, CourtLabels(numCourts), nil, poolCoords, pCoords, false)
 		if len(matchWinners) != 1 {
 			t.Errorf("expected 1 match winner, got %d", len(matchWinners))
 		}
@@ -95,7 +95,7 @@ func TestPrintPoolMatchesEdgeTournament(t *testing.T) {
 			playerCoordKey(*playerA1): {cellCoord: cellCoord{sheetName: SheetPoolDraw, cell: "A1"}},
 		}
 		pools := []Pool{poolA}
-		matchWinners, _ := PrintPoolMatches(f, pools, 0, 1, CourtLabels(1), nil, false, poolCoords, pCoords, false)
+		matchWinners, _ := PrintPoolMatches(f, pools, 0, 1, CourtLabels(1), nil, poolCoords, pCoords, false)
 		if len(matchWinners) != 1 {
 			t.Errorf("expected 1 match winner, got %d", len(matchWinners))
 		}
@@ -112,7 +112,7 @@ func TestPrintPoolMatchesEdgeTournament(t *testing.T) {
 		f.NewSheet(SheetPoolDraw)
 
 		var pools []Pool
-		matchWinners, _ := PrintPoolMatches(f, pools, 0, 1, CourtLabels(1), nil, false, nil, nil, false)
+		matchWinners, _ := PrintPoolMatches(f, pools, 0, 1, CourtLabels(1), nil, nil, nil, false)
 		if len(matchWinners) != 0 {
 			t.Errorf("expected 0 match winners, got %d", len(matchWinners))
 		}
@@ -141,7 +141,7 @@ func TestPrintPoolMatchesEdgeTeamMatches(t *testing.T) {
 		f.NewSheet(SheetPoolMatches)
 		f.NewSheet(SheetPoolDraw)
 
-		PrintPoolMatches(f, pools, 1, 1, CourtLabels(1), nil, false, poolCoords, pCoords, false)
+		PrintPoolMatches(f, pools, 1, 1, CourtLabels(1), nil, poolCoords, pCoords, false)
 		val, _ := f.GetCellValue(SheetPoolMatches, "F18")
 		assert.Equalf(t, "1.", val, "expected result 1. at F18 for teamMatches=1, got '%s'", val)
 	})
@@ -167,13 +167,16 @@ func TestPrintPoolMatchesEdgeTeamMatches(t *testing.T) {
 		f.NewSheet(SheetPoolMatches)
 		f.NewSheet(SheetPoolDraw)
 
-		PrintPoolMatches(f, pools, 10, 1, CourtLabels(1), nil, false, poolCoords, pCoords, false)
+		PrintPoolMatches(f, pools, 10, 1, CourtLabels(1), nil, poolCoords, pCoords, false)
 		val, _ := f.GetCellValue(SheetPoolMatches, "F27")
 		assert.Equalf(t, "1.", val, "expected result 1. at F27 for teamMatches=10, got '%s'", val)
 	})
 }
 
-func TestPrintPoolMatchesMirroring(t *testing.T) {
+// TestPrintPoolMatchesWhiteLeft pins the FIK scoreboard layout on the pool
+// sheet: White (Shiro, SideB) in the left column, Red (Aka, SideA) in the
+// right, with no switch to turn it around.
+func TestPrintPoolMatchesWhiteLeft(t *testing.T) {
 	playerA1 := &Player{Name: "Alice"}
 	playerA2 := &Player{Name: "Bob"}
 	poolA := Pool{
@@ -190,33 +193,23 @@ func TestPrintPoolMatchesMirroring(t *testing.T) {
 		playerCoordKey(*playerA2): {cellCoord: cellCoord{sheetName: SheetPoolDraw, cell: "A2"}},
 	}
 
-	t.Run("mirror = true (default behavior)", func(t *testing.T) {
-		f := excelize.NewFile()
-		defer f.Close()
-		f.NewSheet(SheetPoolMatches)
-		f.NewSheet(SheetPoolDraw)
+	f := excelize.NewFile()
+	defer f.Close()
+	f.NewSheet(SheetPoolMatches)
+	f.NewSheet(SheetPoolDraw)
 
-		PrintPoolMatches(f, pools, 0, 1, CourtLabels(1), nil, true, poolCoords, pCoords, false)
-		// Header row should be White vs Red
-		val, _ := f.GetCellValue(SheetPoolMatches, "A3")
-		assert.Equal(t, "White", val, "expected White on left (mirror=true)")
-		val, _ = f.GetCellValue(SheetPoolMatches, "G3")
-		assert.Equal(t, "Red", val, "expected Red on right (mirror=true)")
-	})
+	PrintPoolMatches(f, pools, 0, 1, CourtLabels(1), nil, poolCoords, pCoords, false)
+	val, _ := f.GetCellValue(SheetPoolMatches, "A3")
+	assert.Equal(t, "White", val, "the header reads White on the left")
+	val, _ = f.GetCellValue(SheetPoolMatches, "G3")
+	assert.Equal(t, "Red", val, "and Red on the right")
 
-	t.Run("mirror = false", func(t *testing.T) {
-		f := excelize.NewFile()
-		defer f.Close()
-		f.NewSheet(SheetPoolMatches)
-		f.NewSheet(SheetPoolDraw)
-
-		PrintPoolMatches(f, pools, 0, 1, CourtLabels(1), nil, false, poolCoords, pCoords, false)
-		// Header row should be Red vs White
-		val, _ := f.GetCellValue(SheetPoolMatches, "A3")
-		assert.Equal(t, "Red", val, "expected Red on left (mirror=false)")
-		val, _ = f.GetCellValue(SheetPoolMatches, "G3")
-		assert.Equal(t, "White", val, "expected White on right (mirror=false)")
-	})
+	// The match row under it: SideB (Bob, 'Pool Draw'!A2) left, SideA
+	// (Alice, 'Pool Draw'!A1) right.
+	left, _ := f.GetCellFormula(SheetPoolMatches, "A4")
+	assert.Equal(t, sheetRef(SheetPoolDraw, "A2"), left, "the left entrant is SideB (Shiro)")
+	right, _ := f.GetCellFormula(SheetPoolMatches, "G4")
+	assert.Equal(t, sheetRef(SheetPoolDraw, "A1"), right, "the right entrant is SideA (Aka)")
 }
 
 // testDrawFor builds the draw a hand-written rounds slice describes: the final
@@ -230,7 +223,10 @@ func testDrawFor(rounds [][]*Node, numCourts int) *KnockoutDraw {
 	return NewKnockoutDraw(rounds[len(rounds)-1][0], numCourts)
 }
 
-func TestPrintTeamEliminationMatchesMirroring(t *testing.T) {
+// TestPrintTeamEliminationMatchesWhiteLeft pins the FIK scoreboard layout on
+// the elimination sheet: White (Shiro, the lower-bracket side, node.Right) in
+// the left column, Red (Aka, node.Left) in the right.
+func TestPrintTeamEliminationMatchesWhiteLeft(t *testing.T) {
 	// LeafNode: true mirrors real construction (CreateBalancedTree always sets it
 	// for true leaves); printSingleEliminationMatch now branches on this field
 	// rather than parsing LeafVal as a cell reference (mp-uagg).
@@ -244,33 +240,25 @@ func TestPrintTeamEliminationMatchesMirroring(t *testing.T) {
 		"Pool B": {cellCoord: cellCoord{sheetName: "Pool Results", cell: "B1"}},
 	}
 
-	t.Run("mirror = true (default behavior)", func(t *testing.T) {
+	t.Run("White left, Red right", func(t *testing.T) {
 		f := excelize.NewFile()
 		defer f.Close()
 		f.NewSheet(SheetEliminationMatches)
 		f.NewSheet("Pool Results")
 
-		PrintTeamEliminationMatches(f, poolMatchWinners, eliminationMatchRounds, 3, CourtPlan{Draw: testDrawFor(eliminationMatchRounds, 2)}, true, false)
-		// Match header row (Red/White labels) should be swapped: White vs Red
-		// Round header was removed, first match header at row 3
+		PrintTeamEliminationMatches(f, poolMatchWinners, eliminationMatchRounds, 3, CourtPlan{Draw: testDrawFor(eliminationMatchRounds, 2)}, false)
+		// First match header at row 3 (the round header was removed).
 		val, _ := f.GetCellValue(SheetEliminationMatches, "A3")
-		assert.Equal(t, "White", val, "expected White on left (mirror=true)")
+		assert.Equal(t, "White", val, "the header reads White on the left")
 		val, _ = f.GetCellValue(SheetEliminationMatches, "G3")
-		assert.Equal(t, "Red", val, "expected Red on right (mirror=true)")
-	})
+		assert.Equal(t, "Red", val, "and Red on the right")
 
-	t.Run("mirror = false", func(t *testing.T) {
-		f := excelize.NewFile()
-		defer f.Close()
-		f.NewSheet(SheetEliminationMatches)
-		f.NewSheet("Pool Results")
-
-		PrintTeamEliminationMatches(f, poolMatchWinners, eliminationMatchRounds, 3, CourtPlan{Draw: testDrawFor(eliminationMatchRounds, 2)}, false, false)
-		// Match header row should be Red vs White
-		val, _ := f.GetCellValue(SheetEliminationMatches, "A3")
-		assert.Equal(t, "Red", val, "expected Red on left (mirror=false)")
-		val, _ = f.GetCellValue(SheetEliminationMatches, "G3")
-		assert.Equal(t, "White", val, "expected White on right (mirror=false)")
+		// The entrant row under it: node.Right (Pool B) left, node.Left
+		// (Pool A) right.
+		left, _ := f.GetCellFormula(SheetEliminationMatches, "A4")
+		assert.Contains(t, left, `"Pool B "`, "the left entrant is the lower-bracket side (node.Right)")
+		right, _ := f.GetCellFormula(SheetEliminationMatches, "G4")
+		assert.Contains(t, right, `"Pool A "`, "the right entrant is the upper-bracket side (node.Left)")
 	})
 
 	t.Run("multiple courts", func(t *testing.T) {
@@ -304,7 +292,7 @@ func TestPrintTeamEliminationMatchesMirroring(t *testing.T) {
 		// Named shiaijo, and NOT the first four letters: this competition runs on
 		// C, D, E, F. Positional naming would title these bands A and B.
 		courts := []string{"C", "D", "E", "F"}
-		PrintTeamEliminationMatches(f, poolMatchWinners, eliminationMatchRoundsMulti, 0, CourtPlan{Draw: draw, Courts: courts}, false, false)
+		PrintTeamEliminationMatches(f, poolMatchWinners, eliminationMatchRoundsMulti, 0, CourtPlan{Draw: draw, Courts: courts}, false)
 
 		// Every region holds ONE qualifier here, so these two bouts already merge
 		// region pairs: they are the semi-finals, and CourtForSpan puts them on
@@ -410,7 +398,7 @@ func TestEliminationMatchSameSheetFormulas(t *testing.T) {
 	f.NewSheet(SheetEliminationMatches)
 
 	poolWinners := 2
-	matchWinners, _ := PrintPoolMatches(f, pools, 0, poolWinners, CourtLabels(1), nil, false, poolCoords, pCoords, false)
+	matchWinners, _ := PrintPoolMatches(f, pools, 0, poolWinners, CourtLabels(1), nil, poolCoords, pCoords, false)
 
 	tree := BuildKnockoutDraw(pools, poolWinners, 1).Root
 	depth := CalculateDepth(tree)
@@ -419,7 +407,7 @@ func TestEliminationMatchSameSheetFormulas(t *testing.T) {
 		rounds[depth-i] = TraverseRounds(tree, 1, i-1)
 	}
 
-	PrintTeamEliminationMatches(f, matchWinners, rounds, 0, CourtPlan{Draw: testDrawFor(rounds, 1)}, false, false)
+	PrintTeamEliminationMatches(f, matchWinners, rounds, 0, CourtPlan{Draw: testDrawFor(rounds, 1)}, false)
 
 	// Collect all formula cells in the Elimination Matches sheet.
 	rows, err := f.GetRows(SheetEliminationMatches)
@@ -489,7 +477,7 @@ func TestPoolWinnerFormulaReferences(t *testing.T) {
 	f.NewSheet(SheetEliminationMatches)
 
 	poolWinners := 2
-	matchWinners, _ := PrintPoolMatches(f, pools, 0, poolWinners, CourtLabels(1), nil, false, poolCoords, pCoords, false)
+	matchWinners, _ := PrintPoolMatches(f, pools, 0, poolWinners, CourtLabels(1), nil, poolCoords, pCoords, false)
 
 	// Build elimination tree using the same LeafVal format as in production.
 	tree := BuildKnockoutDraw(pools, poolWinners, 1).Root
@@ -499,7 +487,7 @@ func TestPoolWinnerFormulaReferences(t *testing.T) {
 		eliminationMatchRounds[depth-i] = TraverseRounds(tree, 1, i-1)
 	}
 
-	PrintTeamEliminationMatches(f, matchWinners, eliminationMatchRounds, 0, CourtPlan{Draw: testDrawFor(eliminationMatchRounds, 1)}, false, false)
+	PrintTeamEliminationMatches(f, matchWinners, eliminationMatchRounds, 0, CourtPlan{Draw: testDrawFor(eliminationMatchRounds, 1)}, false)
 
 	// The first round has 2 matches; each match's player row is at startRow+2=4.
 	// Left player is in column A (col 1), right player in column G (col 7).
@@ -548,7 +536,7 @@ func TestPrintTeamEliminationMatches_CellRefLikeLeafNames(t *testing.T) {
 	}
 
 	matchWinners := ConvertPlayersToWinners(players, false, pCoords)
-	PrintTeamEliminationMatches(f, matchWinners, eliminationMatchRounds, 0, CourtPlan{Draw: testDrawFor(eliminationMatchRounds, 1)}, false, false)
+	PrintTeamEliminationMatches(f, matchWinners, eliminationMatchRounds, 0, CourtPlan{Draw: testDrawFor(eliminationMatchRounds, 1)}, false)
 
 	rows, err := f.GetRows(SheetEliminationMatches)
 	require.NoError(t, err)

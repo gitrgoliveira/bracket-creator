@@ -347,7 +347,7 @@ func (o *poolOptions) createPools(entries []string) error {
 	// result. Reuses state's single owner of the rule (mirrors the engine's
 	// two Excel export paths) rather than restating "+1" here.
 	printPoolMatchesWinners := (state.Competition{PoolWinners: o.poolWinners, ExtraQualifiers: o.extraQualifiers}).MatchWinnerRanksNeeded()
-	matchWinners, _ := helper.PrintPoolMatches(f, pools, o.teamMatches, printPoolMatchesWinners, courtNames, nil, true, poolCoords, playerCoords, o.engi)
+	matchWinners, _ := helper.PrintPoolMatches(f, pools, o.teamMatches, printPoolMatchesWinners, courtNames, nil, poolCoords, playerCoords, o.engi)
 
 	// Court-first pool-to-knockout draw (specs/007-ekc-draw): one bracket
 	// region per shiaijo, 2nd places crossing to the partner court, byes

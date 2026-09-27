@@ -185,6 +185,74 @@ func TestSaveConvergesLegacyConfigOnDisk(t *testing.T) {
 	assert.NotContains(t, string(raw), "playoff_match_duration")
 }
 
+// TestSaveConvergesLegacyMirrorKeyOnDisk pins bc-xlcl's storage-compat claim:
+// a config.md written before the per-competition `mirror` switch was removed
+// (state.Competition carries no Mirror field any more) still loads -- the
+// unknown YAML key is simply ignored, as every decode in this tree does, no
+// KnownFields/DisallowUnknownFields/UnmarshalStrict exists anywhere in the
+// Go tree -- and the next real save converges the on-disk file onto the
+// current shape with no `mirror:` line at all. Same load-then-save pattern as
+// TestSaveConvergesLegacyConfigOnDisk, which already exercises this exact
+// fixture's OTHER legacy keys; this test's job is the mirror key specifically,
+// for both the value the fixture already holds (false) and the one it
+// doesn't (true), so a fold that only special-cased one value would still be
+// caught.
+func TestSaveConvergesLegacyMirrorKeyOnDisk(t *testing.T) {
+	assertNoMirrorLine := func(t *testing.T, raw []byte) {
+		t.Helper()
+		for _, line := range strings.Split(string(raw), "\n") {
+			assert.Falsef(t, strings.HasPrefix(line, "mirror:"), "re-saved config.md must carry no mirror: line, got %q", line)
+		}
+	}
+
+	t.Run("mirror: false", func(t *testing.T) {
+		dir := t.TempDir()
+		s, err := state.NewStore(dir)
+		require.NoError(t, err)
+
+		compDir := filepath.Join(dir, "competitions", "bracket-court-d")
+		require.NoError(t, os.MkdirAll(compDir, 0o700))
+		fixture, err := os.ReadFile(filepath.Join("testdata", "legacy_playoffs_config.md"))
+		require.NoError(t, err)
+		require.Contains(t, string(fixture), "mirror: false", "fixture must still exercise the false case")
+		require.NoError(t, os.WriteFile(filepath.Join(compDir, "config.md"), fixture, 0o600))
+
+		comp, err := s.LoadCompetition("bracket-court-d")
+		require.NoError(t, err, "a stale mirror key must not stop the file loading")
+		require.NoError(t, s.SaveCompetition(comp))
+
+		raw, err := os.ReadFile(filepath.Join(compDir, "config.md"))
+		require.NoError(t, err)
+		assertNoMirrorLine(t, raw)
+	})
+
+	t.Run("mirror: true", func(t *testing.T) {
+		dir := t.TempDir()
+		s, err := state.NewStore(dir)
+		require.NoError(t, err)
+
+		compDir := filepath.Join(dir, "competitions", "c1")
+		require.NoError(t, os.MkdirAll(compDir, 0o700))
+		legacy := "---\n" +
+			"id: c1\n" +
+			"name: C1\n" +
+			"kind: individual\n" +
+			"format: knockout\n" +
+			"status: knockout\n" +
+			"mirror: true\n" +
+			"---\n"
+		require.NoError(t, os.WriteFile(filepath.Join(compDir, "config.md"), []byte(legacy), 0o600))
+
+		comp, err := s.LoadCompetition("c1")
+		require.NoError(t, err, "a stale mirror key must not stop the file loading")
+		require.NoError(t, s.SaveCompetition(comp))
+
+		raw, err := os.ReadFile(filepath.Join(compDir, "config.md"))
+		require.NoError(t, err)
+		assertNoMirrorLine(t, raw)
+	})
+}
+
 // TestLoadCompetitionWithMismatchedIDDoesNotCorruptAnotherCompetition is a
 // regression test for bug 1 in the deleted migration:
 // upgradeCompetitionFormatLocked read a competition by its DIRECTORY

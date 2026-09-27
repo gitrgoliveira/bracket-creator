@@ -28,7 +28,7 @@ func TestBronzeBlockBandSelection(t *testing.T) {
 		_, err := f.NewSheet(SheetEliminationMatches)
 		require.NoError(t, err)
 
-		PrintBronzeBlockWithPrintArea(f, 2, 0, false, false, bands, bronzeCourt, nil, nil)
+		PrintBronzeBlockWithPrintArea(f, 2, 0, false, bands, bronzeCourt, nil, nil)
 
 		merged, err := f.GetMergeCells(SheetEliminationMatches)
 		require.NoError(t, err)
@@ -95,7 +95,7 @@ func TestEliminationBandsIgnoreTheBronzeCourtWhenNoBronzePrints(t *testing.T) {
 		// a third one, which is the shiaijo that must not appear unless the
 		// bronze block itself does.
 		plan := CourtPlan{Draw: draw, Courts: []string{"A", "B", "C"}, Bronze: "C"}
-		PrintEliminationWithBronze(f, nil, rounds, 0, plan, false, false, includeBronze)
+		PrintEliminationWithBronze(f, nil, rounds, 0, plan, false, includeBronze)
 
 		rows, err := f.GetRows(SheetEliminationMatches)
 		require.NoError(t, err)
@@ -152,7 +152,7 @@ func TestEliminationRoundsToleratesANilEntry(t *testing.T) {
 		}
 
 		plan := CourtPlan{Draw: draw, Courts: []string{"A", "B"}}
-		PrintEliminationWithBronze(f, nil, rounds, 0, plan, false, false, false)
+		PrintEliminationWithBronze(f, nil, rounds, 0, plan, false, false)
 
 		rows, err := f.GetRows(SheetEliminationMatches)
 		require.NoError(t, err)

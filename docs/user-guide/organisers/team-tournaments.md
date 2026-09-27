@@ -161,7 +161,7 @@ Reopening is refused while another match is already running on the same court, b
 
 ![The score editor for a completed kachinuki match, showing the recorded bouts and the Reopen match button, the correction control for a kachinuki match that did not end with a withdrawal.](../../screenshots/kachinuki-reopen.png)
 
-The results workbook (**Export & print**, then **Download results (.xlsx)**) includes a **Kachinuki Detail** sheet with the bout-by-bout record for every kachinuki encounter: who fought whom, scores, draws, and each fighter's lineup position.
+The results workbook (**Export & print**, then **Download results (.xlsx)**) includes a **Kachinuki Detail** sheet with the bout-by-bout record for every kachinuki encounter. Each side's columns are headed by its own team's name: Shiro (White) on the left in a white header, Aka (Red) on the right in a red one, matching the scoreboard. Each bout row shows who fought whom, the score, each fighter's lineup position, a tie or overtime in the centre column, and a default win marked beside the winning score.
 
 ## Team standings and tie-breaks
 

@@ -13,7 +13,6 @@ import (
 	"fmt"
 	"maps"
 	"slices"
-	"strings"
 
 	"github.com/gitrgoliveira/bracket-creator/internal/domain"
 	"github.com/gitrgoliveira/bracket-creator/internal/helper"
@@ -226,26 +225,41 @@ func resolveKachinukiDisplayName(squads map[string][]domain.TeamMember, teamID, 
 }
 
 // buildKachinukiDetail converts a single state.MatchResult into the
-// helper-layer detail struct, including eliminations and the final
-// decision.
+// helper-layer detail struct, including eliminations. The match's own
+// Winner/Decision are no longer carried (operator decision 2026-09-27, no
+// Winner or Decision column): that result already rides the match's own Pool
+// or Elimination Matches row.
 func buildKachinukiDetail(m *state.MatchResult, label string, positions map[string]string, teamNumbers map[string]string, squads map[string][]domain.TeamMember) helper.KachinukiMatchDetail {
 	resolvePos := func(team, memberID, player string) string {
 		return resolveKachinukiBoutPosition(positions, m.ID, team, memberID, player)
 	}
 	bouts := make([]helper.KachinukiBout, 0, len(m.SubResults))
 	for _, sub := range m.SubResults {
+		// The per-side result mark's attribution goes through
+		// domain.SubBoutAttribution, the SAME rule writeTeamSubMatchScores
+		// (internal/export/builder.go) applies to the main sheets' team
+		// sub-bout rows: two opposing fighters may legally share a display
+		// name, so a same-name pair that no id can settle gets NO mark
+		// rather than one beside whichever fighter happens to be written
+		// first.
+		att := domain.SubBoutAttribution(sub.Attribution())
+		markA, markB := domain.SideMarksAB(sub.Decision, sub.HanteiDecided(), att)
 		bouts = append(bouts, helper.KachinukiBout{
 			Position:   sub.Position,
 			SideAName:  resolveKachinukiDisplayName(squads, m.SideAID, sub.SideAMemberID, sub.SideA),
 			SideALabel: resolveKachinukiMemberLabel(teamNumbers, squads, m.SideAID, sub.SideAMemberID),
 			SideAPos:   resolvePos(m.SideA, sub.SideAMemberID, sub.SideA),
-			ScoreA:     strings.Join(sub.IpponsA, ""),
+			// domain.IpponsScore, not a raw strings.Join: drops a
+			// placeholder dot or a judges'-decision mark from the printed
+			// cell, the same non-scoring filter the main sheets apply.
+			ScoreA:     domain.IpponsScore(sub.IpponsA),
 			SideBName:  resolveKachinukiDisplayName(squads, m.SideBID, sub.SideBMemberID, sub.SideB),
 			SideBLabel: resolveKachinukiMemberLabel(teamNumbers, squads, m.SideBID, sub.SideBMemberID),
 			SideBPos:   resolvePos(m.SideB, sub.SideBMemberID, sub.SideB),
-			ScoreB:     strings.Join(sub.IpponsB, ""),
-			Winner:     sub.Winner,
-			Decision:   sub.Decision,
+			ScoreB:     domain.IpponsScore(sub.IpponsB),
+			Middle:     domain.MiddleMark(sub.Decision, sub.Encho.On()),
+			MarkA:      markA,
+			MarkB:      markB,
 		})
 	}
 
@@ -256,8 +270,6 @@ func buildKachinukiDetail(m *state.MatchResult, label string, positions map[stri
 		SideATeam:    m.SideA,
 		SideBTeam:    m.SideB,
 		Bouts:        bouts,
-		Winner:       m.Winner,
-		Decision:     m.Decision,
 		EliminationA: elimA,
 		EliminationB: elimB,
 	}

@@ -27,6 +27,7 @@ import { useEscapeToClose, confirmDialog } from './ui.jsx';
 // NumberedName: single owner of the number-chip-on-the-outer-side rule.
 import { NumberedName } from './numbered_name.jsx';
 import { SideCell } from './side_cell.jsx';
+import { useArmedConfirm } from './tap_guard.jsx';
 
 const MAX_FLAGS = 5;
 // Valid totals: 1, 3, 5 (odd, guarantees a winner).
@@ -122,19 +123,23 @@ export function EngiScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext
   const autosaveIsRunningRef = useRefE(false);
   const autosaveBuildPatchRef = useRefE(null);
   const autosaveOnSubmitRef = useRefE(null);
-  const { markDirty, cancelDebounce, flushPending } = useDebouncedRunningWrite({
+  const { markDirty, cancelDebounce } = useDebouncedRunningWrite({
     isRunningRef: autosaveIsRunningRef,
     buildPatchRef: autosaveBuildPatchRef,
     onSubmitRef: autosaveOnSubmitRef,
-    mountedRef,
   });
   autosaveIsRunningRef.current = m.status === "running";
   autosaveBuildPatchRef.current = (status) => ({ flagsA, flagsB, status });
   autosaveOnSubmitRef.current = onSubmit;
   // An operator change to either count: the value, then the save it schedules.
-  // A count adopted from the server does not come through here.
+  // A count adopted from the server does not come through here. A key pressed
+  // at a bound (a/s at MAX_FLAGS, Backspace at 0; the buttons are disabled
+  // there) changes nothing, so it must not write either: a running write
+  // stamped now can beat another device's older queued result (bc-rvfx).
   const changeFlags = (side, n) => {
-    (side === "a" ? setFlagsA : setFlagsB)(clamp(n));
+    const next = clamp(n);
+    if (next === (side === "a" ? flagsA : flagsB)) return;
+    (side === "a" ? setFlagsA : setFlagsB)(next);
     markDirty();
   };
 
@@ -167,19 +172,24 @@ export function EngiScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext
     isDirty,
   });
 
-  const handleDismiss = async () => {
+  // Every way out that is not a write, Close and Prev/Next alike (operator
+  // ruling 2026-09-27: Prev/Next ask as Close does).
+  const leaveEditor = async (go) => {
     if (submitting) return;
-    // A running match's flags are saved as entered: save any still pending
-    // and close, with nothing to discard.
+    // A running match's flags are saved as entered, and the unmount writes a
+    // change still inside the autosave window, so there is nothing to discard.
     if (m.status === "running") {
-      if (isDirty) flushPending();
-      onClose();
+      go();
       return;
     }
+    // Not running, so nothing is autosaved and nothing waits to be written.
     if (isDirty && !(await confirmDialog({ message: "Discard unsaved scoring changes?", confirmLabel: "Discard changes", danger: true }))) return;
-    onClose();
+    go();
   };
+  const handleDismiss = () => leaveEditor(onClose);
   useEscapeToClose(canClose ? handleDismiss : undefined);
+  const goPrev = () => leaveEditor(onPrev);
+  const goNext = () => leaveEditor(onNext);
 
   // Pair names: the side's name holds both members combined ("Name 1 - Name 2");
   // split so member 2 renders under member 1. Both sides of an engi match are
@@ -258,6 +268,16 @@ export function EngiScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext
     return unsub;
   }, [m.compId, m.id]);
 
+  // Save guard, the same as the individual and team editors' Finish (bc-dtfn,
+  // operator ruling 2026-09-27 that the editors behave alike): a tap ARMS the
+  // button, whose label then says to tap again, and a second tap after
+  // TAP_BOUNCE_MS saves, so the bounce of the arming tap can neither save nor
+  // start the next match. Any flag change disarms it, so a stale count cannot
+  // be confirmed. A correction ("Save correction") and keyboard Enter save
+  // directly, as there.
+  const { armed: saveArmed, setArmed: setSaveArmed, confirm: confirmSave } = useArmedConfirm();
+  useEffectE(() => { setSaveArmed(false); }, [flagsA, flagsB]);
+
   // F5: surface a PERMANENT terminal-write failure (non-retryable 4xx on a
   // queued retry) as an explicit "not saved" state, else the write is silently
   // dropped and the pending banner clears to look saved.
@@ -269,6 +289,9 @@ export function EngiScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext
       if (!info || info.compID !== m.compId || info.matchID !== m.id) return;
       setWriteFailed({ reason: info.reason || `save rejected (${info.status || "error"})`, advice: info.advice });
       setPendingWrite(false);
+      // Re-sending a failed save has to be deliberate: disarm, as the
+      // individual editor does.
+      setSaveArmed(false);
     });
     return unsub;
   }, [m.compId, m.id]);
@@ -307,7 +330,7 @@ export function EngiScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext
   // fresh state via kbRef. Escape stays owned by useEscapeToClose above.
   const kbRef = useRefE(null);
   const lastSideRef = useRefE(null); // "a" | "s" | null: which side Backspace undoes
-  kbRef.current = { submitting, canSubmit, showCorrectionPrompt, flagsA, flagsB, changeFlags, handleSubmit, onPrev, onNext, prevMatch, nextMatch };
+  kbRef.current = { submitting, canSubmit, showCorrectionPrompt, flagsA, flagsB, changeFlags, handleSubmit, onPrev, onNext, goPrev, goNext, prevMatch, nextMatch };
   useEffectE(() => {
     const onKeyDown = (ev) => {
       const s = kbRef.current;
@@ -322,8 +345,8 @@ export function EngiScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext
       // Keyed on the neighbour match as well as the callback: the Scores tab
       // wires onPrev/onNext unconditionally, and with no neighbour they call
       // scoreKeyOf(null), which throws. Same condition as the hint's hasNav.
-      if (ev.key === "ArrowLeft" && s.onPrev && s.prevMatch) { ev.preventDefault(); s.onPrev(); return; }
-      if (ev.key === "ArrowRight" && s.onNext && s.nextMatch) { ev.preventDefault(); s.onNext(); return; }
+      if (ev.key === "ArrowLeft" && s.onPrev && s.prevMatch) { ev.preventDefault(); s.goPrev(); return; }
+      if (ev.key === "ArrowRight" && s.onNext && s.nextMatch) { ev.preventDefault(); s.goNext(); return; }
 
       if (ev.key === "Enter") {
         // Let a focused button/link/input handle its own Enter (e.g. Cancel).
@@ -533,23 +556,25 @@ export function EngiScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext
         {!(isComplete && showCorrectionPrompt) && (
           <div className="score-nav">
             {prevMatch ? (
-              <button type="button" className="btn btn--sm score-nav__prev" onClick={onPrev} disabled={submitting} title={(prevMatch.sideA?.name || "") + " vs " + (prevMatch.sideB?.name || "")}>← Prev</button>
+              <button type="button" className="btn btn--sm score-nav__prev" onClick={goPrev} disabled={submitting} title={(prevMatch.sideA?.name || "") + " vs " + (prevMatch.sideB?.name || "")}>← Prev</button>
             ) : <span />}
             <div className="score-nav__actions">
               {canClose && <button type="button" className="btn" onClick={handleDismiss} disabled={submitting}>Cancel</button>}
               <button
                 type="button"
-                className="btn btn--primary"
-                onClick={handleSubmit}
+                className={`btn btn--primary ${saveArmed && !isComplete ? "btn--confirm" : ""}`}
+                onClick={(ev) => { if (!isComplete && !confirmSave(ev)) return; handleSubmit(); }}
                 disabled={!canSubmit}
                 data-testid="engi-submit"
                 style={invalidOutline ? { outline: "2px solid var(--danger)" } : null}
               >
-                {submitting ? "Saving…" : isComplete ? "Save correction" : (onSubmitAndNext ? "Finish + Start Next →" : "Save result")}
+                {submitting ? "Saving…" : isComplete ? "Save correction"
+                  : saveArmed ? (onSubmitAndNext ? "Tap again to finish →" : "Tap again to save")
+                  : (onSubmitAndNext ? "Finish + Start Next →" : "Save result")}
               </button>
             </div>
             {nextMatch ? (
-              <button type="button" className="btn btn--sm score-nav__next" onClick={onNext} disabled={submitting} title={(nextMatch.sideA?.name || "") + " vs " + (nextMatch.sideB?.name || "")}>Next →</button>
+              <button type="button" className="btn btn--sm score-nav__next" onClick={goNext} disabled={submitting} title={(nextMatch.sideA?.name || "") + " vs " + (nextMatch.sideB?.name || "")}>Next →</button>
             ) : <span />}
           </div>
         )}

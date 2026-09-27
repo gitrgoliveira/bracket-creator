@@ -19,7 +19,7 @@
 //      deliberate and are sized against the committed files' durations rather
 //      than trimmed to the minimum the DOM needs.
 import { authAdmin } from '../lib/ui.mjs';
-import { EDITOR } from '../lib/editor.mjs';
+import { EDITOR, TAP_DWELL_MS, sameSideTapPacer } from '../lib/editor.mjs';
 import { SCORE_EDITOR_SOURCES, VIEWER_SOURCES } from '../lib/scope.mjs';
 
 // ---------------------------------------------------------------------------
@@ -55,7 +55,8 @@ function finishBtn(page) {
 async function finishMatch(page, gap = 550) {
   const btn = finishBtn(page);
   await btn.click();
-  await page.waitForTimeout(gap);
+  // A confirming tap inside the bounce window is dropped (lib/editor.mjs).
+  await page.waitForTimeout(Math.max(gap, TAP_DWELL_MS));
   await btn.click();
   await page.waitForTimeout(gap * 2);
 }
@@ -160,7 +161,11 @@ const LIVE_ROSTER = [
 // with their slots, which is what makes a result read "MK vs D" rather than a
 // bare winner. Quick-scoring the same match over HTTP records no ippon arrays.
 async function scoreOpenMatch(page, taps, gap = 220) {
+  // Two taps on the same side closer than the bounce window count as one, so
+  // a side's next tap waits it out however short `gap` is (lib/editor.mjs).
+  const pace = sameSideTapPacer();
   for (const [side, waza] of taps) {
+    await pace(page, side);
     await ipponBtn(page, side, waza).click();
     await page.waitForTimeout(gap);
   }

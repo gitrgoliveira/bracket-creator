@@ -100,6 +100,18 @@ describe('clock-skew re-stamp takes the older reconstruction (bc-cse)', () => {
         expect(stamp).toBeLessThan(NOW);
     });
 
+    it('stamps whole milliseconds from a fractional monotonic reading', () => {
+        // performance.now() reads in fractions of a millisecond, and the server
+        // reads modifiedAt as an int64: a fractional stamp is refused with a
+        // 400, so the re-stamped retry would be dropped instead of sent. The
+        // age rounds UP (60000.5 -> 60001), so the stamp stays on the safe,
+        // older side.
+        const stamp = withPerfNow(500_000.7, () =>
+            _restampFor(NOW + 600_000, 440_000.2));
+        expect(Number.isInteger(stamp)).toBe(true);
+        expect(stamp).toBe(NOW - 60_001);
+    });
+
     it('prefers the wall clock when the monotonic reading froze', () => {
         // The counter-case, and the reason this is min() and not "use perf when
         // present". A tablet suspended for 10 minutes whose performance.now()

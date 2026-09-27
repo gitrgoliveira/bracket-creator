@@ -412,3 +412,94 @@ describe('bc-rvfx: tapping an EMPTY ippon slot is a no-op', () => {
     expect(window.API.recordScore).toHaveBeenCalledTimes(2);
   });
 });
+
+// bc-emsl: the team sheet's twin of the rule above. A tap on an empty mark
+// slot, or on a default-win circle, went through setPts, which ends a Tie or a
+// Fusensho and autosaves: one stray tap silently un-tied a bout on the server.
+describe('bc-emsl: a team-sheet tap that clears nothing writes nothing', () => {
+  const teamMatch = () => ({
+    id: 'tm-emsl', status: 'running', phase: 'pool', poolName: 'Pool 1', court: 'A',
+    compKind: 'team', teamSize: 3,
+    sideA: { id: 'teamA', name: 'Team A' },
+    sideB: { id: 'teamB', name: 'Team B' },
+  });
+  const bout1 = () => document.querySelectorAll('.team-sub-match')[0];
+  const slots = (color) => [...bout1().querySelectorAll(`.tsm-center-pts--${color} button.editor-side__pt`)];
+
+  it('tapping an EMPTY mark slot keeps the bout\'s Tie and sends nothing', async () => {
+    renderModal(teamMatch());
+    await act(async () => { fireEvent.click(bout1().querySelector('[data-testid="scoring-modal-tie-button"]')); });
+    await act(async () => { vi.advanceTimersByTime(350); });
+    expect(window.API.recordScore).toHaveBeenCalledTimes(1);
+
+    const empty = slots('shiro').find((b) => b.textContent === '·');
+    expect(empty).toBeTruthy();
+    await act(async () => { fireEvent.click(empty); });
+    await act(async () => { vi.advanceTimersByTime(350); });
+
+    expect(window.API.recordScore).toHaveBeenCalledTimes(1);
+    expect(bout1().querySelector('[data-testid="scoring-modal-tie-button"]').textContent).toContain('✓ Tie');
+  });
+
+  it('tapping a default-win circle keeps the Fusensho and sends nothing', async () => {
+    renderModal(teamMatch());
+    const akaFusensho = bout1().querySelector('.team-sub-match__side--aka [data-testid="scoring-modal-fusensho-button"]');
+    await act(async () => { fireEvent.click(akaFusensho); });
+    await act(async () => { vi.advanceTimersByTime(350); });
+    expect(window.API.recordScore).toHaveBeenCalledTimes(1);
+
+    const circle = slots('aka').find((b) => b.textContent === '\u25CB');
+    expect(circle).toBeTruthy();
+    expect(circle.title).toBe('Default win: use Fusensho to undo');
+    await act(async () => { fireEvent.click(circle); });
+    await act(async () => { vi.advanceTimersByTime(350); });
+
+    expect(window.API.recordScore).toHaveBeenCalledTimes(1);
+    expect(bout1().querySelector('.team-sub-match__side--aka [data-testid="scoring-modal-fusensho-button"]').textContent).toContain('✓ Fusensho');
+  });
+
+  it('still removes a real mark and autosaves', async () => {
+    renderModal(teamMatch());
+    const shiroM = [...bout1().querySelectorAll('.team-sub-match__side--shiro button.ipt-btn')].find((b) => b.textContent === 'M');
+    await act(async () => { fireEvent.click(shiroM); });
+    await act(async () => { vi.advanceTimersByTime(350); });
+    expect(window.API.recordScore).toHaveBeenCalledTimes(1);
+
+    const mark = slots('shiro').find((b) => b.textContent === 'M');
+    expect(mark.title).toBe('Click to remove');
+    await act(async () => { fireEvent.click(mark); });
+    await act(async () => { vi.advanceTimersByTime(350); });
+    expect(window.API.recordScore).toHaveBeenCalledTimes(2);
+    expect(slots('shiro').some((b) => b.textContent === 'M')).toBe(false);
+  });
+});
+
+describe('an edit inside the autosave window survives Prev/Next', () => {
+  // Prev/Next re-key the editor in its host, which unmounts it, and the unmount
+  // cancels the debounce timer. An ippon tapped just before either one was
+  // never written; now the editor saves it first, as closing does.
+  const neighbour = { id: 'm-next', sideA: { name: 'Sato' }, sideB: { name: 'Ito' } };
+  const teamMatch = () => makeRunningMatch({
+    id: 'tm-running', compKind: 'team', teamSize: 3,
+    sideA: { id: 'teamA', name: 'Team A' }, sideB: { id: 'teamB', name: 'Team B' },
+  });
+  const viaButton = async () => { fireEvent.click(screen.getByText('Next →')); };
+  const viaKey = async () => { fireEvent.keyDown(window, { key: 'ArrowRight' }); };
+
+  it.each([
+    ['individual', 'the Next button', makeRunningMatch, viaButton],
+    ['individual', 'the → key', makeRunningMatch, viaKey],
+    ['team', 'the Next button', teamMatch, viaButton],
+    ['team', 'the → key', teamMatch, viaKey],
+  ])('%s editor: %s within 300ms of a tap writes the tap', async (_kind, _via, match, goNext) => {
+    let view;
+    const onNext = vi.fn(() => view.unmount());
+    view = renderModal(match(), { nextMatch: neighbour, onNext });
+    await act(async () => { fireEvent.click(screen.getAllByText('M')[0]); });
+    await act(goNext);
+    await act(async () => { vi.advanceTimersByTime(350); });
+    expect(onNext).toHaveBeenCalledTimes(1);
+    expect(window.API.recordScore).toHaveBeenCalledTimes(1);
+    expect(window.API.recordScore.mock.calls[0][2].status).toBe('running');
+  });
+});

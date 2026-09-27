@@ -3,7 +3,7 @@
 // (admin_scoring_team.jsx): a result mark naming one competitor fills that
 // side's next FREE ippon slot, outside-to-inside, and never the shared centre.
 import { describe, it, expect } from 'vitest';
-import { resultSlot, sideSlotOrder, attributeWinnerSide, placeHtForWinner } from '../result_slot.jsx';
+import { resultSlot, sideSlotOrder, attributeWinnerSide, placeHtForWinner, struckIppons, DEFAULT_WIN_IPPON } from '../result_slot.jsx';
 
 describe('resultSlot (which slot a result mark takes)', () => {
   it('takes the outer slot when the side has no points (a 0-0 bout)', () => {
@@ -197,5 +197,17 @@ describe('placeHtForWinner (delegates side attribution to attributeWinnerSide)',
     const [a, b] = placeHtForWinner('A', 'A', 'B', ['M'], ['K']);
     expect(a).toEqual(['M', 'Ht']);
     expect(b).toEqual(['K']);
+  });
+});
+
+describe('struckIppons (bc-fsnp)', () => {
+  it('keeps letters and H, and drops the default-win circle, Ht and placeholders', () => {
+    // Go twin: engine.struckIppons. A default win's circles count as points
+    // but nobody struck them, so undoing the default win must drop them.
+    expect(DEFAULT_WIN_IPPON).toBe('\u25CB');
+    expect(struckIppons(['M', 'H'])).toEqual(['M', 'H']);
+    expect(struckIppons([DEFAULT_WIN_IPPON, DEFAULT_WIN_IPPON])).toEqual([]);
+    expect(struckIppons(['K', DEFAULT_WIN_IPPON, 'Ht', '•', ''])).toEqual(['K']);
+    expect(struckIppons(undefined)).toEqual([]);
   });
 });

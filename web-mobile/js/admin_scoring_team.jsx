@@ -12,6 +12,9 @@ import {
   IpponLegend,
   ScoringShortcutHint,
   applyFusenshoToggle,
+  fusenshoAllowed,
+  clearFusensho,
+  applyBoutScoreEdit,
   applyFoulIncrement,
   reconcileFoulsAtOpen,
   nextFoulOnDecrement,
@@ -55,14 +58,10 @@ import { notLandedBanner } from './write_result.jsx';
 // the editor derives its per-bout middle from it rather than restating the
 // chain (CLAUDE.md § Match Decision Types: the middle rule lives in ONE place).
 import { boutMiddle, winnerSideLR } from './bracket.jsx';
-import { realIppons, hanteiTied, hanteiSlot, hanteiWinnerKey, nameOf, sideSlotOrder, attributeWinnerSide, subBoutAttribution } from './result_slot.jsx';
+import { realIppons, hanteiTied, hanteiSlot, hanteiWinnerKey, nameOf, sideSlotOrder, attributeWinnerSide, subBoutAttribution, DEFAULT_WIN_IPPON } from './result_slot.jsx';
 import { creditedSideKey, creditedTotals } from './team_default_credit.jsx';
-
-// bc-kbrw: how long after a fought kachinuki bout opens a further pointer tap
-// on the bout list is ignored, so the second tap of a double tap cannot land
-// on the row that moved under the finger. Longer than a double tap's gap,
-// shorter than a deliberate second tap. Exported for the render test.
-export const DONE_BOUT_OPEN_TAP_GUARD_MS = 400;
+// bc-dtfn: the one owner of "is this tap the bounce of the previous one".
+import { stampTap, clearTap, acceptTap, swallowBounce, useArmedConfirm } from './tap_guard.jsx';
 
 // renderTeamBoutMiddle: the ONE place the editor turns a sub-bout into its
 // centre value, for BOTH the read-only done row and the live entry row. Derives
@@ -669,7 +668,7 @@ export async function pickManualBoutName({ sub, idx, sideKey, memberIdKey, squad
 // "(fusensho)" affordance vanished on every Reopen and Record-bout remount.
 export function fusenshoSideFromSub(sub) {
   if (!sub || sub.decision !== "fusensho") return "";
-  const allMaru = (arr) => Array.isArray(arr) && arr.length > 0 && arr.every(x => x === "○");
+  const allMaru = (arr) => Array.isArray(arr) && arr.length > 0 && arr.every(x => x === DEFAULT_WIN_IPPON);
   // bc-pnum: through the shared owner, so the row's member ids decide and two
   // fighters sharing a display name fall through to the maru test below
   // rather than being resolved by name order. That fall-through is the point:
@@ -680,6 +679,26 @@ export function fusenshoSideFromSub(sub) {
   if (allMaru(sub.ipponsA) && !allMaru(sub.ipponsB)) return "a";
   if (allMaru(sub.ipponsB) && !allMaru(sub.ipponsA)) return "b";
   return "";
+}
+
+// fusenshoButtonTitle: what a sub-bout's Fusensho button for side `rs` will
+// do. `rs` and `other` are the row's two rowSides entries (key "a"/"b", label
+// "AKA"/"SHIRO"). The other side keeps its struck points
+// (applyFusenshoToggle), and a refused fusensho (fusenshoAllowed) names the
+// side that already won the bout. That win can sit under the winner's own
+// fusensho, whose circles are not tapped away, so its undo is named first.
+function fusenshoButtonTitle(sub, rs, other) {
+  if (sub.fusensho === rs.key) {
+    return sub._preFusensho
+      ? "Click to undo fusensho: restores the previous score"
+      : "Click to undo fusensho: removes the default-win circles; points already scored stay";
+  }
+  if (!fusenshoAllowed(sub, rs.key)) {
+    return sub.fusensho === other.key
+      ? `${other.label} already won this bout: undo their fusensho, then clear their points`
+      : `${other.label} already won this bout: clear their points first`;
+  }
+  return `Mark bout as fusensho: default win to ${rs.label}; points already scored stay`;
 }
 
 // subBoutHasBeenPlayed: true once a sub-bout carries any operator input
@@ -832,12 +851,19 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
   // below, so without an adopt an overtime count recorded on another device left
   // this editor showing the old one AND permanently dirty — which fires the
   // discard prompt on an editor nobody touched, and would have held the re-seed
-  // gate shut for the rest of the session. Unconditional for the same reason as
-  // the hantei channel beside it: keyed on the server's value, a local bump does
-  // not move it, so the operator's own count stands.
+  // gate shut for the rest of the session. An untouched editor (its count equals
+  // the server's) still follows the server, which covers both. It keeps a count
+  // the operator changed, as the individual editor's re-seed does, because on a
+  // running match every change is saved as it is made (changeEnchoPeriodCount,
+  // and the kachinuki Encho through updateSub): the save of one tap
+  // coming back must not undo a second tap made before it arrived. The count
+  // stays the operator's until the server holds it, as the daihyosen verdict
+  // does (its adopt below).
   useAdoptFromServer({
     signature: initialEnchoPeriods,
     apply: () => setEnchoPeriodCount(initialEnchoPeriods),
+    keepLocalEdits: true,
+    isDirty: enchoPeriodCount !== initialEnchoPeriods,
   });
   const [submitting, setSubmitting] = useStateA(false);
   // F5 (mirrors ScoreEditorModal): explicit "not saved" state for THIS match.
@@ -928,6 +954,10 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
   // (see submitInlineLineup below). Deliberately separate from editorErr:
   // the save did not fail, so it must never read like that channel.
   const [editorWarning, setEditorWarning] = useStateA("");
+  // The bout side (rowSides tapKey) whose refused Fusensho was last tapped:
+  // its reason shows under that row (bc-fsnp). A title alone never shows on a
+  // touchscreen, so the button stays tappable and explains itself instead.
+  const [fusenshoRefusal, setFusenshoRefusal] = useStateA("");
   const [daihyosenBusy, setDaihyosenBusy] = useStateA(false);
   // mp-4pc: the daihyosen is the only team sub-bout that may be decided
   // by hantei (judges' decision on a tied bout, FIK 7-5 / 29-6: encho
@@ -963,12 +993,19 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
   // stored verdict, an explicit `false` from it is always the operator ruling
   // on something in front of them, which is what let buildPatch's hanteiKnown
   // guard go away entirely.
+  //
+  // It keeps a side the operator picked until the server holds it: a pick is
+  // saved as it is made (pickDaihyosenHantei), so the save of one pick coming
+  // back must not undo a second made before it arrived. An arm with no side is
+  // a mode, not an edit, and does not hold the verdict back.
   useAdoptFromServer({
     signature: JSON.stringify([daihyosenHanteiRecorded, recordedDaihyosenSide]),
     apply: () => {
       setDaihyosenHanteiArmed(daihyosenHanteiRecorded);
       setDaihyosenHantei(recordedDaihyosenSide);
     },
+    keepLocalEdits: true,
+    isDirty: daihyosenHantei !== recordedDaihyosenSide,
   });
   // Shared by daihyosenTouched (buildPatch) and isDirty: whether the operator
   // has moved the daihyosen VERDICT (encho count, hantei pick, or hantei arm)
@@ -990,33 +1027,26 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
   // and invisible on the wire. Hoisting the shared terms into this one const
   // makes that impossible: both callers see the same verdict-dirty answer by
   // construction.
-  //
-  // daihyosenResultDirty is the same test WITHOUT the hantei arm, which is a
-  // mode rather than a result (bc-dscn): closing a running match flushes on
-  // it, so an arm alone never sends a freshly stamped write whose scoreline is
-  // unchanged, which could win last-write-wins over another device's older
-  // queued result. daihyosenVerdictDirty is built FROM it, so the two cannot
-  // disagree about anything but the arm.
-  const daihyosenResultDirty =
-    enchoPeriodCount !== initialEnchoPeriods ||
-    daihyosenHantei !== recordedDaihyosenSide;
   const daihyosenVerdictDirty =
-    daihyosenResultDirty ||
+    enchoPeriodCount !== initialEnchoPeriods ||
+    daihyosenHantei !== recordedDaihyosenSide ||
     daihyosenHanteiArmed !== daihyosenHanteiRecorded;
-  // The ONE hantei undo, shared by the Ht chip and the panel Cancel so the
-  // two paths cannot drift. Like the pick buttons, it is LOCAL state only:
-  // hantei is an explicit-submit channel (autosave contract), so the verdict
-  // - picked, re-picked or withdrawn - rides the NEXT write of this match
-  // (any point edit's autosave, Finish, or Save correction) as part of the
-  // full subResults snapshot. Deliberately NO markScoringDirty here: a
-  // cancel-then-repick must not race a strip write against a repick that
-  // writes nothing, and a lone dirty-mark was dead on completed matches
-  // anyway (the debounced write only fires while running). If the operator
-  // abandons the editor entirely, the server keeps its verdict and the chip
-  // re-seeds from it on reopen - same as every other unsaved local edit.
+  // The daihyosen verdict is saved like a point (bc-sync): picking a side,
+  // re-picking, and withdrawing it (clearHantei, the ONE undo, shared by the
+  // Ht chip and the panel Cancel so the two paths cannot drift) each schedule
+  // the autosave, so on a running match the verdict rides the running write
+  // and leaving the editor keeps it. A cancel then a re-pick inside the
+  // debounce window is one write; further apart, two writes that land in the
+  // order they were made. The ARM alone is a mode and saves nothing. On a
+  // completed match nothing autosaves: the verdict rides Save correction.
+  const pickDaihyosenHantei = (side) => {
+    setDaihyosenHantei(side);
+    markScoringDirty();
+  };
   const clearHantei = () => {
     setDaihyosenHanteiArmed(false);
     setDaihyosenHantei("");
+    markScoringDirty();
   };
   // Same teardown-race guard as ScoreEditorModal: covers external/
   // parent-driven unmount during in-flight save.
@@ -1027,11 +1057,10 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
   const _autosaveIsRunningRef = useRefA(false);
   const _autosaveBuildPatchRef = useRefA(null);
   const _autosaveOnSubmitRef = useRefA(null);
-  const { markDirty: markScoringDirty, cancelDebounce: cancelScoringDebounce, flushPending: flushScoringAutosave } = useDebouncedRunningWrite({
+  const { markDirty: markScoringDirty, cancelDebounce: cancelScoringDebounce } = useDebouncedRunningWrite({
     isRunningRef: _autosaveIsRunningRef,
     buildPatchRef: _autosaveBuildPatchRef,
     onSubmitRef: _autosaveOnSubmitRef,
-    mountedRef,
   });
 
   // T141: remove an unscored daihyosen placeholder. Defined at component
@@ -1485,28 +1514,43 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
   // the tap is silently lost. Doing it here means the operator can never edit a
   // row that is not theirs to edit, without a second mechanism racing the
   // render to commit the shape first.
+  // The same edit ends a refused Fusensho's explanation (fusenshoRefusal): it
+  // shows from the refused tap until the operator next edits any bout row, so
+  // re-entering the points that caused the refusal does not bring it back
+  // untapped. The server re-seed never comes through here (it uses setSubs).
   const updateSub = (idx, fn) => {
     lastRowEditRef.current.set(subs[idx]._pos, serverNowMs());
     setSubsByOperator(prev => {
       const rows = reconcileRowsToPositions(prev, serverSubs);
       return rows.map((s, i) => i === idx ? fn(s) : s);
     });
+    setFusenshoRefusal("");
     markScoringDirty();
   };
 
-  // T096/FR-031: per-bout Fusensho: award a 2-0 default win to the
-  // present side. Re-clicking the active side undoes the fusensho and
-  // restores the score that existed before fusensho was applied (the
-  // operator's intent on the active button is "undo this"). Clicking
-  // the OTHER side while fusensho is active is a side-switch; the
-  // original pre-fusensho snapshot is preserved so a later untoggle
-  // still restores the genuine prior state, not the intermediate 2-0.
+  // updateSubScore: a scoring edit on a bout row (points, fouls, a keyboard
+  // waza). applyBoutScoreEdit decides what it leaves: a fought score ends the
+  // row's fusensho and its draw, except taking a mark off the side the
+  // fusensho went against, a correction that keeps it.
+  const updateSubScore = (idx, fn) => updateSub(idx, prev => applyBoutScoreEdit(prev, fn(prev)));
+
+  // T096/FR-031: per-bout Fusensho: award a default win to the present
+  // side; the other side keeps what it had struck (applyFusenshoToggle).
+  // Re-clicking the active side undoes the fusensho and restores the score
+  // that existed before fusensho was applied (the operator's intent on the
+  // active button is "undo this"). Clicking the OTHER side while fusensho
+  // is active is a side-switch; the original pre-fusensho snapshot is
+  // preserved so a later untoggle still restores the genuine prior state.
+  // A refused fusensho (the other side already won the bout) never gets here:
+  // its button stays tappable (aria-disabled, fusenshoAllowed), and the tap
+  // shows the reason under that side instead (fusenshoRefusal) until the next
+  // bout-row edit clears it (updateSub).
   const setFusenshoFor = (idx, side) => updateSub(idx, prev => applyFusenshoToggle(prev, side));
 
   // Toggle an operator-marked hikiwake (draw) for a sub-bout. Marking a draw
   // clears any fusensho; editing scores/fouls later clears the draw flag (see
   // rowSides setters), mirroring how fusensho behaves.
-  const setDrawFor = (idx) => updateSub(idx, prev => ({ ...prev, draw: !prev.draw, fusensho: "", _preFusensho: undefined }));
+  const setDrawFor = (idx) => updateSub(idx, prev => ({ ...clearFusensho(prev), draw: !prev.draw }));
 
   // Hansoku Hs are already in the pts arrays (folded in by
   // applyFoulIncrement at the 2-foul boundary), so totals are just the
@@ -1578,7 +1622,9 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
   // confirm a stale verdict. Keyboard Enter is left direct: it's deliberate,
   // unlike an accidental brush on a tablet. (a-vs-b is AKA-vs-SHIRO; the band
   // and this label read SHIRO–AKA to match the sheet's left-right order.)
-  const [finishArmed, setFinishArmed] = useStateA(false);
+  // bc-dtfn: the arm-then-confirm guards dwell, so the bounce of the arming
+  // tap cannot commit (tap_guard.jsx).
+  const { armed: finishArmed, setArmed: setFinishArmed, confirm: confirmFinish } = useArmedConfirm();
   // A knockout encounter cannot end in a draw: a tie is resolved by a
   // representative bout (daihyosen), not recorded as hikiwake. So in a KO phase
   // a null teamWinner is never "DRAW": it's "DAIHYOSEN" once there's a scored
@@ -1753,11 +1799,9 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
     // impossible 2-2), and never append past MAX_IPPONS_PER_SIDE per side.
     if (isBoutDecided(cur.aPts, cur.bPts)) return;
     const key = side === "a" ? "aPts" : "bPts";
-    updateSub(kachinukiCurBoutIdx, prev => (
-      prev[key].length >= MAX_IPPONS_PER_SIDE
-        ? prev
-        // Mirror setPts's clear-tail: a fresh strike clears a pending fusensho/draw.
-        : { ...prev, [key]: [...prev[key], waza], fusensho: "", _preFusensho: undefined, draw: false }
+    // A fresh strike ends a pending fusensho/draw, as a tapped one does.
+    updateSubScore(kachinukiCurBoutIdx, prev => (
+      prev[key].length >= MAX_IPPONS_PER_SIDE ? prev : { ...prev, [key]: [...prev[key], waza] }
     ));
   };
 
@@ -1767,7 +1811,7 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
   // exactly the bouts subBoutHasBeenPlayed admits, so End derivation, the
   // wire filter, and the encho target below all agree on which bout is the
   // last one.
-  const [endArmed, setEndArmed] = useStateA(false);
+  const { armed: endArmed, setArmed: setEndArmed, confirm: confirmEnd } = useArmedConfirm();
   const kachinukiEndOutcome = kachinukiBoutMode
     ? deriveKachinukiEndOutcome({
         subResults: buildKachinukiEndEntries(subs, daihyosenIdx),
@@ -1971,6 +2015,14 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
   // sub-bout (attached per-sub in buildPatch), so suppress the top-level
   // encho to avoid duplicate/ambiguous semantics on the team match.
   const enchoBlock = () => (enchoPeriodCount > 0 && !hasDaihyosen) ? { encho: { periodCount: enchoPeriodCount } } : {};
+  // An operator change to the overtime count from EnchoControl: the value (a
+  // number, or the updater its stepper hands over), then the save it
+  // schedules, as for a point. The count rides the running write either way:
+  // the match's (enchoBlock) or, once a daihyosen exists, that bout's
+  // (daihyosenEnchoFields). The count adopted from the server does not come
+  // through here, and the kachinuki Encho/Undo encho already save through
+  // updateSub.
+  const changeEnchoPeriodCount = (v) => { setEnchoPeriodCount(v); markScoringDirty(); };
 
   // Per-bout competitor names. Single choke point shared by the row
   // renderer and buildPatch (via resolveKachinukiBoutSides) so display and
@@ -2119,22 +2171,32 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
   const openDoneBoutEdit = (idx) => {
     const t = subTotals[idx];
     editingDoneOriginalRef.current = { winner: t ? t.winner : null };
-    doneBoutOpenedAtRef.current = Date.now();
+    stampTap(boutListTapRef);
     setEditingDoneBoutIdx(idx);
   };
   // bc-kbrw: opening a fought bout expands it under the finger, so the second
   // tap of a double tap landed on whatever moved there: another bout, or a
-  // control of the row just opened. For DONE_BOUT_OPEN_TAP_GUARD_MS after a
-  // row opens, a pointer click anywhere in the bout list is swallowed in the
-  // capture phase, before it reaches any row. A ref, not state, so a batched
-  // double tap cannot read a stale value. Keyboard activation is never
-  // swallowed: a click synthesized from Enter/Space carries detail === 0.
-  const doneBoutOpenedAtRef = useRefA(0);
-  const swallowDoubleTapAfterOpen = (ev) => {
-    if (ev.detail === 0) return;
-    if (Date.now() - doneBoutOpenedAtRef.current >= DONE_BOUT_OPEN_TAP_GUARD_MS) return;
-    ev.stopPropagation();
-    ev.preventDefault();
+  // control of the row just opened. For TAP_BOUNCE_MS after a row opens, a
+  // pointer click anywhere in the bout list is swallowed in the capture phase,
+  // before it reaches any row (swallowBounce, tap_guard.jsx). A ref, not
+  // state, so a batched double tap cannot read a stale value. Keyboard
+  // activation is never swallowed: a click synthesized from Enter/Space
+  // carries detail === 0.
+  const boutListTapRef = useRefA(null);
+  // bc-dtip: a bouncing thumb recorded two ippons (or two fouls, the second
+  // awarding an H to the opponent) from one tap. A repeat POINTER tap on the
+  // same bout side within TAP_BOUNCE_MS is ignored; keyed by the row side's
+  // tapKey (`${idx}:${side}`), so the other side and other bouts are never
+  // refused. The keyboard path (scoreCurrentBoutWaza) stays direct. setPts
+  // reads the render's pts; with the guard two accepted taps are at least
+  // TAP_BOUNCE_MS apart, so a render always lands between them.
+  const ipponTapRef = useRefA(null);
+  const foulTapRef = useRefA(null);
+  const tapIppon = (ev, rs, cc) => {
+    if (acceptTap(ipponTapRef, ev, rs.tapKey)) rs.setPts(rs.pts.length < MAX_IPPONS_PER_SIDE ? [...rs.pts, cc] : rs.pts);
+  };
+  const tapFoulIncrement = (ev, rs) => {
+    if (acceptTap(foulTapRef, ev, rs.tapKey)) rs.onIncrement();
   };
   const closeDoneBoutEdit = () => { editingDoneOriginalRef.current = null; setEditingDoneBoutIdx(-1); };
 
@@ -2569,9 +2631,6 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
   // repetition on the busiest path in the file.
   const serverSubsSig = JSON.stringify(serverSubs);
   const isDirty = JSON.stringify(subs) !== serverSubsSig || daihyosenVerdictDirty;
-  // bc-dscn: what closing a RUNNING match may flush. isDirty without the
-  // hantei arm (see daihyosenResultDirty).
-  const scoringDirty = JSON.stringify(subs) !== serverSubsSig || daihyosenResultDirty;
   // bc-dscn: an edit the running patch would NOT carry. Under kachinuki
   // buildPatch drops every row kachinukiRowSent does not name, so a changed
   // row it leaves out never reaches the server by a flush. Closing would lose
@@ -2611,9 +2670,15 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
   useAdoptFromServer({
     signature: serverSubsSig,
     apply: () => {
+      // The previous board is read HERE, not inside the updater: a renderer
+      // may run the updater a render later (React does when another adopt has
+      // already queued a state change in this commit; the render tests run on
+      // React), and by then the effect below has moved the ref on, so every
+      // untouched row would read as edited, keep its stale value, and be
+      // written back over the server's by the next save.
+      const priorByPos = new Map((prevServerSubsRef.current || []).map(s => [s._pos, s]));
       setSubs(prev => {
         const localByPos = new Map(prev.map(s => [s._pos, s]));
-        const priorByPos = new Map((prevServerSubsRef.current || []).map(s => [s._pos, s]));
         return serverSubs.map(ss => {
           const local = localByPos.get(ss._pos);
           if (!local) return ss;
@@ -2660,37 +2725,43 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
   // (setState-after-unmount), AND confirm-then-discard when the user has
   // unsaved sub-match edits. The earlier version only checked submitting,
   // so an accidental backdrop/Esc silently lost up to 9 sub-match scores.
-  const handleDismiss = async () => {
+  // leaveEditor is every way out that is not a write, Close and Prev/Next
+  // alike (operator ruling 2026-09-27: Prev/Next ask as Close does).
+  const leaveEditor = async (go) => {
     // Same contract as ScoreEditorModal: never close while a save,
     // decision, or daihyosen request is mid-flight.
     if (submitting || decisionSubmitting || daihyosenBusy) return;
-    // bc-dscn: a host that cannot close (the inline court console) has nothing
-    // to discard INTO, so it never prompts either.
-    if (!canClose) return;
-    // bc-dscn: on a RUNNING match every scoring edit is autosaved, so closing
-    // discards nothing: save any edit still inside the debounce window now and
-    // close without asking. buildPatch("running") carries what scoringDirty
-    // compares: every played bout row in subResults, match-level encho, and
-    // the daihyosen verdict (encho count and hantei pick via
-    // daihyosenEnchoFields). Not carried, and handled here: a hantei ARM with
-    // no side picked is only a mode, not a result, so it is dropped with no
-    // write (the individual editor's rule too); and a kachinuki row the
-    // played-row filter drops (runningPatchDropsAnEdit) keeps the prompt.
+    // bc-dscn: on a RUNNING match every scoring edit is autosaved, and the
+    // unmount writes one still inside the debounce window
+    // (useDebouncedRunningWrite), so leaving discards nothing and asks
+    // nothing. buildPatch("running") carries every played bout row in
+    // subResults, match-level encho, and the daihyosen verdict (encho count
+    // and hantei pick via daihyosenEnchoFields). Not carried, and handled
+    // here: a hantei ARM with no side picked is only a mode, not a result, so
+    // it is dropped with no write (the individual editor's rule too); and a
+    // kachinuki row the played-row filter drops (runningPatchDropsAnEdit)
+    // keeps the prompt.
     if (m.status === "running" && !runningPatchDropsAnEdit) {
-      if (scoringDirty) flushScoringAutosave();
-      onClose();
+      go();
       return;
     }
     if (isDirty && !(await window.confirmDialog({ message: "Discard unsaved scoring changes?", confirmLabel: "Discard changes", danger: true }))) return;
-    onClose();
+    // Discarded: the unmount must not write the edit the operator threw away.
+    cancelScoringDebounce();
+    go();
   };
+  // bc-dscn: a host that cannot close (the inline court console) has nothing
+  // to discard INTO, so it never prompts either.
+  const handleDismiss = () => (canClose ? leaveEditor(onClose) : undefined);
+  const goPrev = () => leaveEditor(onPrev);
+  const goNext = () => leaveEditor(onNext);
 
   // Esc-to-close + ←/→ match nav, matching ScoreEditorModal. M/K/D/T/H ippon
   // shortcuts are wired ONLY for kachinuki bout mode (one current bout, an
   // unambiguous target — see scoreCurrentBoutWaza); fixed-format team scoring
   // is many sub-matches and stays tap-only, and Enter-to-finish isn't wired.
   const kbRef = React.useRef(null);
-  kbRef.current = { submitting, handleDismiss, canClose, onPrev, onNext, prevMatch, nextMatch, kachinukiBoutMode, isNaginataTeam, scoreCurrentBoutWaza };
+  kbRef.current = { submitting, handleDismiss, canClose, onPrev, onNext, goPrev, goNext, prevMatch, nextMatch, kachinukiBoutMode, isNaginataTeam, scoreCurrentBoutWaza };
   useEffectA(() => {
     const onKeyDown = (ev) => {
       const s = kbRef.current;
@@ -2704,8 +2775,8 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
       // Keyed on the neighbour match as well as the callback, as in
       // ScoreEditorModal: the Scores tab wires onPrev/onNext unconditionally,
       // and with no neighbour they call scoreKeyOf(null), which throws.
-      if (ev.key === "ArrowLeft" && s.onPrev && s.prevMatch) { ev.preventDefault(); s.onPrev(); return; }
-      if (ev.key === "ArrowRight" && s.onNext && s.nextMatch) { ev.preventDefault(); s.onNext(); return; }
+      if (ev.key === "ArrowLeft" && s.onPrev && s.prevMatch) { ev.preventDefault(); s.goPrev(); return; }
+      if (ev.key === "ArrowRight" && s.onNext && s.nextMatch) { ev.preventDefault(); s.goNext(); return; }
       // mp-gmcg: keyboard ippon entry, KACHINUKI bout mode only (one current
       // bout → unambiguous target; the general team editor has many). Mirrors
       // the individual editor: blocked when any interactive element
@@ -2822,7 +2893,7 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
               The .team-bouts-scroll wrapper gives the roomy (non-compact)
               layout an independent scroll region for the bout list so the
               team header / summary / decision / footer stay anchored. */}
-          <div className="team-bouts-scroll" onClickCapture={swallowDoubleTapAfterOpen}>
+          <div className="team-bouts-scroll" onClickCapture={swallowBounce(boutListTapRef)}>
           {[
             // mp-gmcg: operator-led completion. The banner reads "ended"
             // ONLY for a completed match (correction view): a running
@@ -3004,16 +3075,16 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
             const manualPathA = isManualRow || kachinukiPastFirst || freeNameA;
 
             // Each row: [left side, center score, right side]: left=SHIRO, right=AKA
-            // T096/FR-031: manual pts/fouls edits clear the per-bout fusensho
-            // flag AND discard the _preFusensho snapshot so the bout becomes
-            // a regular fought score once the operator intervenes. Re-applying
-            // via the Fusensho button captures a fresh snapshot from the
-            // current (manually-edited) state.
+            // T096/FR-031: manual pts/fouls edits end the per-bout fusensho
+            // (updateSubScore: the default-win circles go, struck points stay,
+            // the _preFusensho snapshot is discarded) so the bout becomes a
+            // regular fought score once the operator intervenes. Taking a mark
+            // off the side the fusensho went against is a correction and keeps
+            // it (applyBoutScoreEdit). Re-applying via the Fusensho button
+            // captures a fresh snapshot from the current state.
             // onIncrement applies the FIK 2-foul rule via applyFoulIncrement:
             // the 2nd foul auto-awards an H to the OPPONENT and resets this
-            // side's foul counter. The auto-award also invalidates the
-            // _preFusensho snapshot: once an H lands in the slot the prior
-            // pre-fusensho state is stale.
+            // side's foul counter; it ends a fusensho the same way.
             // bc-dnst (operator ruling 2026-09-15): every numbered bout
             // position (not the daihyosen rep bout) shows a typeable name
             // box even when the team has no roster metadata to offer -- a
@@ -3023,12 +3094,12 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
             // of roster/forceInput so the box always renders for it.
             const rowSides = [
               {
-                key: "b", pts: s.bPts, fouls: s.bFouls,
-                setPts: (pts) => updateSub(idx, prev => ({ ...prev, bPts: pts, fusensho: "", _preFusensho: undefined, draw: false })),
-                setFouls: (f) => updateSub(idx, prev => ({ ...prev, bFouls: f, fusensho: "", _preFusensho: undefined, draw: false })),
-                onIncrement: () => updateSub(idx, prev => {
+                key: "b", tapKey: `${idx}:b`, pts: s.bPts, fouls: s.bFouls,
+                setPts: (pts) => updateSubScore(idx, prev => ({ ...prev, bPts: pts })),
+                setFouls: (f) => updateSubScore(idx, prev => ({ ...prev, bFouls: f })),
+                onIncrement: () => updateSubScore(idx, prev => {
                   const r = applyFoulIncrement(prev.bFouls, prev.aPts, prev.bPts);
-                  return { ...prev, bFouls: r.fouls, aPts: r.opponentPts, fusensho: "", _preFusensho: undefined, draw: false };
+                  return { ...prev, bFouls: r.fouls, aPts: r.opponentPts };
                 }),
                 color: "shiro", label: "SHIRO",
                 // The daihyosen is a representative bout, not a lineup position:
@@ -3051,12 +3122,12 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
                 onSelectName: manualPathB ? pickManual("bName", "bMemberIdOverride", squadB, setSquadB, teamIdB) : pickPlayer(teamIdB, lineupB, squadB, setSquadB),
               },
               {
-                key: "a", pts: s.aPts, fouls: s.aFouls,
-                setPts: (pts) => updateSub(idx, prev => ({ ...prev, aPts: pts, fusensho: "", _preFusensho: undefined, draw: false })),
-                setFouls: (f) => updateSub(idx, prev => ({ ...prev, aFouls: f, fusensho: "", _preFusensho: undefined, draw: false })),
-                onIncrement: () => updateSub(idx, prev => {
+                key: "a", tapKey: `${idx}:a`, pts: s.aPts, fouls: s.aFouls,
+                setPts: (pts) => updateSubScore(idx, prev => ({ ...prev, aPts: pts })),
+                setFouls: (f) => updateSubScore(idx, prev => ({ ...prev, aFouls: f })),
+                onIncrement: () => updateSubScore(idx, prev => {
                   const r = applyFoulIncrement(prev.aFouls, prev.bPts, prev.aPts);
-                  return { ...prev, aFouls: r.fouls, bPts: r.opponentPts, fusensho: "", _preFusensho: undefined, draw: false };
+                  return { ...prev, aFouls: r.fouls, bPts: r.opponentPts };
                 }),
                 color: "aka", label: "AKA",
                 // See SHIRO note above: no lineup picker on the daihyosen row.
@@ -3085,19 +3156,35 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
               // applies, so the editor and the board can never disagree about
               // which cell is a side's outer (name-side) one.
               const order = sideSlotOrder(rs.color);
+              // A default win's circles are not the operator's to remove one by
+              // one: the pressed Fusensho button is their undo (bc-emsl).
+              const defaultWin = s.fusensho === rs.key;
               return order.map(i => {
                 const isHt = htSlot === i;
+                const mark = rs.pts[i];
                 return (
-                  <button key={i} className={`editor-side__pt ${(isHt || rs.pts[i]) ? "editor-side__pt--filled" : ""}`}
+                  <button key={i} className={`editor-side__pt ${(isHt || mark) ? "editor-side__pt--filled" : ""}`}
                     data-testid={isHt ? `team-daihyosen-ht-${rs.color}` : undefined}
                     // The Ht chip mutates the hantei verdict, so it obeys the
                     // same submit-time freeze as the arm/pick/Cancel controls;
                     // an un-guarded click mid-save would clear the local
                     // verdict while the in-flight patch records it.
                     disabled={isHt && (submitting || decisionSubmitting)}
-                    onClick={() => (isHt ? clearHantei() : rs.setPts(rs.pts.filter((_, j) => j !== i)))}
-                    title={isHt ? "Hantei winner: click to undo" : "Click to remove"}>
-                    {isHt ? "Ht" : (rs.pts[i] || "·")}
+                    onClick={() => {
+                      if (isHt) { clearHantei(); return; }
+                      // bc-emsl: a tap on an EMPTY slot, or on a default-win
+                      // circle, clears nothing, so it must write nothing. setPts
+                      // ends a Tie or a Fusensho and autosaves, which silently
+                      // un-tied a bout. Same rule as the individual editor's
+                      // removePt; the slot stays enabled, the tap is inert.
+                      if (mark === undefined || defaultWin) return;
+                      // Taking a mark back off, then tapping the right letter,
+                      // is never a bounce (bc-dtip).
+                      clearTap(ipponTapRef, rs.tapKey);
+                      rs.setPts(rs.pts.filter((_, j) => j !== i));
+                    }}
+                    title={isHt ? "Hantei winner: click to undo" : !mark ? undefined : defaultWin ? "Default win: use Fusensho to undo" : "Click to remove"}>
+                    {isHt ? "Ht" : (mark || "·")}
                   </button>
                 );
               });
@@ -3183,9 +3270,10 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
                         {/* Row 1: the ippon mark buttons and the per-bout
                             Fusensho button (layout: the .tsm-row-1 compact rules
                             in styles.css). T096/FR-031: Fusensho awards the bout
-                            2-0 to this side. Re-clicking the active side undoes
-                            it; manual pts/fouls edits while active clear the flag
-                            and discard the snapshot. */}
+                            to this side by default; the other side keeps what it
+                            struck. Re-clicking the active side undoes it; manual
+                            pts/fouls edits while active end it, except taking a
+                            mark off the other side (updateSubScore). */}
                         <div className="tsm-row-1">
                           {/* Buttons only: the scored ippon letters show in the
                               centre column (between the two competitors), like an
@@ -3193,7 +3281,7 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
                           <div className="team-sub-match__btns">
                             {getIpponButtons(isNaginataTeam).map(cc => (
                               <button key={cc} className={`ipt-btn ipt-btn--sm ${cc === "H" ? "ipt-btn--h" : ""}`}
-                                onClick={() => rs.setPts(rs.pts.length < MAX_IPPONS_PER_SIDE ? [...rs.pts, cc] : rs.pts)}
+                                onClick={(ev) => tapIppon(ev, rs, cc)}
                                 disabled={subBoutDecided}>{cc}</button>
                             ))}
                           </div>
@@ -3202,15 +3290,19 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
                               data-testid="scoring-modal-fusensho-button"
                               type="button"
                               className={`btn btn--sm ${s.fusensho === rs.key ? "btn--primary" : ""}`}
-                              onClick={() => setFusenshoFor(idx, rs.key)}
-                              title={s.fusensho === rs.key
-                                ? `Click to undo fusensho: restores the previous score`
-                                : `Mark bout as fusensho: default win 2-0 to ${rs.label}`}
+                              onClick={() => (fusenshoAllowed(s, rs.key) ? setFusenshoFor(idx, rs.key) : setFusenshoRefusal(rs.tapKey))}
+                              aria-disabled={fusenshoAllowed(s, rs.key) ? undefined : "true"}
+                              title={fusenshoButtonTitle(s, rs, rowSides[1 - rsIdx])}
                             >
                               {s.fusensho === rs.key ? "✓ Fusensho" : "Fusensho"}
                             </button>
                           </div>
                         </div>
+                        {fusenshoRefusal === rs.tapKey && !fusenshoAllowed(s, rs.key) && (
+                          <div className="tsm-fusensho-why" role="status" data-testid="scoring-modal-fusensho-refused">
+                            {fusenshoButtonTitle(s, rs, rowSides[1 - rsIdx])}
+                          </div>
+                        )}
                         {/* The independent foul stepper. The `+` button
                             calls onIncrement which applies the FIK 2-foul rule
                             via applyFoulIncrement (auto-award H to opponent,
@@ -3221,7 +3313,7 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
                           <div className="tsm-fouls__controls">
                             <button className="tsm-fouls__btn" aria-label={`Remove a ${rs.label} foul`} onClick={() => rs.setFouls(nextFoulOnDecrement(rs.fouls))} disabled={rs.fouls === 0}>−</button>
                             <span className={`tsm-fouls__count ${rs.fouls >= 1 ? "tsm-fouls__count--warn" : ""}`}>{rs.fouls}</span>
-                            <button className="tsm-fouls__btn" aria-label={`Add a ${rs.label} foul`} onClick={rs.onIncrement} disabled={subBoutDecided}>+</button>
+                            <button className="tsm-fouls__btn" aria-label={`Add a ${rs.label} foul`} onClick={(ev) => tapFoulIncrement(ev, rs)} disabled={subBoutDecided}>+</button>
                           </div>
                         </div>
                       </div>
@@ -3451,9 +3543,9 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
                 {daihyosenHanteiArmed && (
                   <div style={{ marginLeft: "auto", display: "flex", gap: 6 }}>
                     <button type="button" className={`btn btn--sm ${daihyosenHantei === "b" ? "btn--primary" : ""}`} data-testid="team-daihyosen-hantei-shiro"
-                      onClick={() => setDaihyosenHantei("b")} disabled={submitting || decisionSubmitting}>SHIRO wins</button>
+                      onClick={() => pickDaihyosenHantei("b")} disabled={submitting || decisionSubmitting}>SHIRO wins</button>
                     <button type="button" className={`btn btn--sm ${daihyosenHantei === "a" ? "btn--primary" : ""}`} data-testid="team-daihyosen-hantei-aka"
-                      onClick={() => setDaihyosenHantei("a")} disabled={submitting || decisionSubmitting}>AKA wins</button>
+                      onClick={() => pickDaihyosenHantei("a")} disabled={submitting || decisionSubmitting}>AKA wins</button>
                     <button type="button" className="btn btn--ghost btn--sm" data-testid="team-daihyosen-hantei-cancel"
                       onClick={clearHantei} disabled={submitting || decisionSubmitting}>Cancel</button>
                   </div>
@@ -3667,7 +3759,7 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
           {!kachinukiBoutMode && (
             <EnchoControl
               enchoPeriodCount={enchoPeriodCount}
-              setEnchoPeriodCount={setEnchoPeriodCount}
+              setEnchoPeriodCount={changeEnchoPeriodCount}
             />
           )}
 
@@ -3785,7 +3877,7 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
           )}
           <div className="score-nav">
             {prevMatch ? (
-              <button className="btn btn--sm score-nav__prev" onClick={onPrev} disabled={submitting}>← Prev</button>
+              <button className="btn btn--sm score-nav__prev" onClick={goPrev} disabled={submitting}>← Prev</button>
             ) : <span />}
             <div className="score-nav__actions">
               {m.status === "scheduled" && !isBarredMatch(m) && (
@@ -3912,9 +4004,9 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
                     Undo encho
                   </button>
                 )}
-                <button type="button" className={`btn ${endArmed ? "btn--confirm" : ""}`} data-testid="kachinuki-end-match-button" onClick={() => {
+                <button type="button" className={`btn ${endArmed ? "btn--confirm" : ""}`} data-testid="kachinuki-end-match-button" onClick={(ev) => {
                   if (kachinukiEndOutcome?.kind === "blocked") return;
-                  if (!endArmed) { setEndArmed(true); setFinishArmed(false); return; }
+                  if (!confirmEnd(ev)) { setFinishArmed(false); return; }
                   doSubmit(() => onSubmit(buildPatch("completed", { endOutcome: kachinukiEndOutcome })));
                 }} disabled={submitting || kachinukiEndOutcome?.kind === "blocked"}
                   title={kachinukiEndOutcome?.kind === "blocked"
@@ -3940,20 +4032,20 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
                 // result therefore goes through Reopen (above): back to bout
                 // mode, then End match re-derives from the last bout. Only
                 // non-kachinuki completed matches keep the generic correction.
-                <button className={`btn btn--primary ${finishArmed && !isComplete ? "btn--confirm" : ""}`} onClick={() => {
+                <button className={`btn btn--primary ${finishArmed && !isComplete ? "btn--confirm" : ""}`} onClick={(ev) => {
                   if (refuseUnfinishedFinish()) return;
                   if (isComplete && !correctionReason) { setReasonPromptKind("correction"); return; }
-                  if (!isComplete && !finishArmed) { setFinishArmed(true); return; }
+                  if (!isComplete && !confirmFinish(ev)) return;
                   doSubmit(() => (isComplete ? onSubmit : onSubmitAndNext)(buildPatch("completed")));
                 }} disabled={submitting || koTieBlocked}
                   title={koTieBlocked ? "A knockout match can't be a draw: add and score a daihyosen to decide a winner" : undefined}>
                   {submitting ? "Saving…" : isComplete ? "Save correction" : koTieBlocked ? "Needs a winner" : finishArmed ? "Tap again to finish →" : "Finish + Start Next →"}
                 </button>
               ) : (
-                <button className={`btn btn--primary ${finishArmed && !isComplete ? "btn--confirm" : ""}`} onClick={() => {
+                <button className={`btn btn--primary ${finishArmed && !isComplete ? "btn--confirm" : ""}`} onClick={(ev) => {
                   if (refuseUnfinishedFinish()) return;
                   if (isComplete && !correctionReason) { setReasonPromptKind("correction"); return; }
-                  if (!isComplete && !finishArmed) { setFinishArmed(true); return; }
+                  if (!isComplete && !confirmFinish(ev)) return;
                   doSubmit(() => onSubmit(buildPatch("completed")));
                 }} disabled={submitting || koTieBlocked}
                   title={koTieBlocked ? "A knockout match can't be a draw: add and score a daihyosen to decide a winner" : undefined}>
@@ -3962,7 +4054,7 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
               )}
             </div>
             {nextMatch ? (
-              <button className="btn btn--sm score-nav__next" onClick={onNext} disabled={submitting}>Next →</button>
+              <button className="btn btn--sm score-nav__next" onClick={goNext} disabled={submitting}>Next →</button>
             ) : <span />}
           </div>
           </>

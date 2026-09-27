@@ -3,7 +3,7 @@
 // delegation tests in viewer.test.jsx / display_white_board.test.jsx don't see.
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { makeReactive } from './helpers/reactive_react.js';
-import { matchMiddleMark, defaultWinMaru } from '../bracket.jsx';
+import { matchMiddleMark } from '../bracket.jsx';
 import { boutRows, findInTree, collectText, hasClass } from './helpers/vdom.js';
 
 describe('match_scoreboard: withNumber', () => {
@@ -421,7 +421,6 @@ describe('match_scoreboard components', () => {
     // FIK marks a default win with one maru per awarded point: two in
     // regulation, ONE in encho. Without the encho passthrough every default win
     // rendered the regulation pair.
-    global.window.defaultWinMaru = defaultWinMaru;
     const match = {
       sideA: { id: 'p1', name: 'Aka' }, sideB: { id: 'p2', name: 'Shiro' },
       ipponsA: [], ipponsB: [], winner: { id: 'p1', name: 'Aka' },
@@ -433,14 +432,12 @@ describe('match_scoreboard components', () => {
     expect(findInTree(tree, n => n?.props?.['data-testid'] === 'sub-win-a')).toBeTruthy();
     expect(collectText(findInTree(tree, n =>
       typeof n?.props?.className === 'string' && n.props.className.includes('msb-slots--aka')))).toBe('\u25cb');
-    delete global.window.defaultWinMaru;
   });
 
   it('IndividualScore: a default win in REGULATION is the maru pair', () => {
     // The control for the test above: same match without encho keeps ○○, so
     // the single ○ there is attributable to the passthrough and not to the
     // helper always returning one.
-    global.window.defaultWinMaru = defaultWinMaru;
     const match = {
       sideA: { id: 'p1', name: 'Aka' }, sideB: { id: 'p2', name: 'Shiro' },
       ipponsA: [], ipponsB: [], winner: { id: 'p1', name: 'Aka' },
@@ -449,7 +446,29 @@ describe('match_scoreboard components', () => {
     const tree = runtime.mount(IndividualScore, { match });
     expect(collectText(findInTree(tree, n =>
       typeof n?.props?.className === 'string' && n.props.className.includes('msb-slots--aka')))).toBe('\u25cb\u25cb');
-    delete global.window.defaultWinMaru;
+  });
+
+  it('BoutSubRow: a fusensho bout in encho is ONE maru, in regulation the pair, with NO window.defaultWinMaru stub', () => {
+    // bc-fsnp: match_scoreboard.jsx read window.defaultWinMaru and fell back to
+    // the regulation pair when it was unset. This file's import of bracket.jsx
+    // sets that global, which hid the fallback from every other test here, so
+    // it is cleared: the count must come from the scoreboard's own import.
+    const leaked = window.defaultWinMaru;
+    delete window.defaultWinMaru;
+    try {
+      const encho = { position: 1, sideA: 'Aka Player', sideB: 'Shiro Player', winner: 'Aka Player', ipponsA: [], ipponsB: [], decision: 'fusensho', encho: { periodCount: 1 } };
+      const enchoTree = runtime.mount(BoutSubRow, { sub: encho, index: 0, lineupA: null, lineupB: null, teamSize: 5 });
+      expect(collectText(findInTree(enchoTree, n =>
+        typeof n?.props?.className === 'string' && n.props.className.includes('msb-slots--aka')))).toBe('○');
+      runtime.unmount();
+
+      const regulation = { position: 1, sideA: 'Aka Player', sideB: 'Shiro Player', winner: 'Aka Player', ipponsA: [], ipponsB: [], decision: 'fusensho', encho: null };
+      const regTree = runtime.mount(BoutSubRow, { sub: regulation, index: 0, lineupA: null, lineupB: null, teamSize: 5 });
+      expect(collectText(findInTree(regTree, n =>
+        typeof n?.props?.className === 'string' && n.props.className.includes('msb-slots--aka')))).toBe('○○');
+    } finally {
+      window.defaultWinMaru = leaked;
+    }
   });
 
   it('does not fabricate an Ht on an UNTIED drifted scoreline', () => {

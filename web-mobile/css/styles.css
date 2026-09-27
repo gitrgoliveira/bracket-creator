@@ -5408,6 +5408,15 @@ button.vsched-item:not([data-clickable]) {
   margin: 0 0 8px;
 }
 
+/* Why a bout side's Fusensho refused, shown under that side after a tap on
+   the refused button (a title never shows on a touchscreen). */
+.tsm-fusensho-why {
+  text-align: center;
+  font-size: 11px;
+  color: var(--ink-2);
+  margin: 2px 0 0;
+}
+
 .sb-slots {
   display: flex;
   gap: 12px;
@@ -6788,9 +6797,16 @@ button.vsched-item:not([data-clickable]) {
   margin-right: 6px;
 }
 
-.btn:disabled {
+.btn:disabled,
+.btn[aria-disabled="true"] {
   opacity: 0.6;
   cursor: not-allowed;
+}
+
+/* An aria-disabled button stays tappable so it can say why it refuses (the
+   team sheet's Fusensho), so it must not look pressed either. */
+.btn[aria-disabled="true"]:active {
+  transform: none;
 }
 
 /* ========================================

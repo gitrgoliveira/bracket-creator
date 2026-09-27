@@ -141,7 +141,8 @@ Key client mechanisms (all in `web-mobile/js/api_client.jsx` + consumers):
 |---|---|
 | Half-open / stalled sockets | 12s write timeouts, 35s SSE silence watchdog (armed at connect, not only `onopen`) |
 | Reconnect storms | exponential backoff + jitter (vs. a fixed delay) |
-| Lost writes | durable outbox persisted to `localStorage` (12h TTL), retried; survives tab refresh |
+| Lost writes | durable outbox persisted to `localStorage` (12h TTL), retried; survives tab refresh. Every tab of the app shares the stored outbox. A tab saving its queue merges into it: it adds its own writes, keeps the newer write where two tabs hold one for the same match, and removes only the writes it settled. Each tab also takes up the writes another tab stores, so a write queued in a tab that then closes is still sent by a tab left open. A write two tabs hold can be sent by both, which is harmless: the server keeps the newer one by its timestamp |
+| Edits not yet sent | a score editor holds each edit for a short autosave window (300ms) before it writes it. The sync pill reads "Syncing…" from the first tap, not "Synced". If the editor goes away inside that window (closed, Prev/Next, another match picked, a court switch), the edit is written at once. If the tab is hidden or unloaded inside it, the edit is written straight into the outbox, so a reload does not lose it. An autosave carries the time of the tap, not the time it is sent, so it never outranks a result another device recorded after the tap. A running write already sent but not yet answered is also kept when the page goes away, which cancels its request; while the request is still open, that copy is not sent |
 | Server errors (5xx / 429), and 403 | write stays queued and keeps retrying for as long as the tab stays open (the TTL is applied at page load, not during a session); after 10 consecutive rejections the operator gets a notice and the sync pill shows "Not saving". On this server 403 is never a bad credential (that is 401): it means the tournament is not configured yet, or is missing its password. Only an admin fixing the server state clears it, so signing in again cannot help and the write keeps retrying instead of parking |
 | Invalid credential (401) | the one 4xx a retry can fix: the write is parked, not discarded, stops retrying, and shows "Sign in to save"; signing in again re-sends it with the new credential |
 | Other non-retryable 4xx (400 validation, 413, generic 409) | write is discarded (it can never succeed on retry), and the operator always gets a visible notice naming the match and the server's reason |
@@ -149,7 +150,7 @@ Key client mechanisms (all in `web-mobile/js/api_client.jsx` + consumers):
 | Tab resume | `visibilitychange` → force reconnect + refetch |
 | False success | terminal writes show pending / parked / still-retrying / failure state, never a false "saved"; a write dropped for exceeding the TTL, or because the stored entry was corrupt, also raises a visible notice at page load, never a silent loss |
 | Storage full | if the browser can't persist the queue (storage quota exhausted), that is surfaced to the operator rather than swallowed |
-| Credential change | queue cleared on logout (the operator is asked to confirm first if writes are still unsent) or on `password_reset` (no stale-password retries) |
+| Credential change | queue cleared on logout (the operator is asked to confirm first if writes are still unsent). On `password_reset` the queued writes are parked instead: the old password is removed from every stored write, every tab's included, and they are re-sent once the operator signs in again (no stale-password retries) |
 
 ## 5. Authentication on the network
 

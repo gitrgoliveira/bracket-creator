@@ -376,6 +376,25 @@ function _perfNow() {
         : null;
 }
 
+// _editAge: how long ago the edit a score editor's autosave carries was made,
+// from the monotonic reading of its last tap (`editedPerf` on the patch, set
+// by useDebouncedRunningWrite and never sent: toBackendMatchResult copies
+// named fields only). Monotonic, so a wall clock stepped in between cannot
+// skew it. Zero for every other write.
+function _editAge(result) {
+    return (result && _perfAgeMs(result.editedPerf)) || 0;
+}
+
+// _perfAgeMs: whole milliseconds since a monotonic reading, or null when there
+// is none (no reading, or no performance.now()). Rounded UP, for two reasons:
+// the server reads modifiedAt as an int64 and refuses a fraction with a 400,
+// and a stamp built as "server now minus this age" then never lands later than
+// the moment it stands for, which is the safe direction (see _restampFor).
+function _perfAgeMs(reading) {
+    const now = _perfNow();
+    return (now === null || !Number.isFinite(reading)) ? null : Math.ceil(now - reading);
+}
+
 // ---------------------------------------------------------------------------
 // bc-cse: clock-skew REFUSAL (the server half of this change)
 // ---------------------------------------------------------------------------
@@ -617,6 +636,14 @@ let _storageFullAnnounced = false;
  * Persist the queue. Returns true when the queue's current state is safely on
  * disk, false when it could not be written.
  *
+ * The stored queue is shared by every tab of this origin, so a persist MERGES
+ * into what storage holds rather than overwriting it: this tab's entries are
+ * written into it (a key both hold keeps the newer write), the entries this
+ * tab settled since the last persist are taken out of it (_settled), and
+ * anything else, another tab's queued writes, is left alone. A whole-map overwrite dropped the other tab's entries, and an
+ * empty queue removed the key under them, so a result queued in one tab was
+ * lost when another tab saved or reloaded (bc-sync).
+ *
  * bc-qttl: the failure is no longer swallowed. A queue that cannot persist is a
  * queue that a reload will silently lose, which is precisely the durability
  * promise the outbox exists to make: with no size cap, a long offline run can
@@ -630,8 +657,23 @@ function _persistQueue() {
         // storage churn and, critically, prevents an in-flight flush that reaches
         // _persistQueue() after clearQueue() from re-creating an empty bc_write_queue,
         // which would undermine the credential-revocation intent of removing it.
-        if (_writeQueue.size === 0) {
+        const merged = _storedQueue();
+        for (const [k, at] of _settled) {
+            const stored = merged.get(k);
+            // A newer entry another tab wrote under the same key since is theirs.
+            if (stored && !_enqueuedAfter(stored, at)) merged.delete(k);
+        }
+        // A key both hold keeps the newer write. This tab's copy can be one it
+        // took from storage (on load, or from another tab), and writing it back
+        // over a later write the other tab stored since, such as a queued
+        // Finish replacing an autosave, would drop that write from storage:
+        // lost, if that tab then closed or reloaded before sending it.
+        for (const [k, d] of _writeQueue) {
+            if (!_enqueuedAfter(merged.get(k), d.enqueuedAt)) merged.set(k, d);
+        }
+        if (merged.size === 0) {
             localStorage.removeItem(QUEUE_STORAGE_KEY);
+            _settled.clear();
             _storageFullAnnounced = false;
             return true;
         }
@@ -642,10 +684,13 @@ function _persistQueue() {
         // rather than at the read side so there is one place to reason about,
         // and so an entry written by an older build behaves identically to a
         // rehydrated one: no anchor, wall-clock reconstruction only.
-        const entries = [..._writeQueue.entries()].map(
+        const entries = [...merged.entries()].map(
             ([k, d]) => [k, { ...d, perfAtEnqueue: undefined }]
         );
         localStorage.setItem(QUEUE_STORAGE_KEY, JSON.stringify(entries));
+        // Only once the write has landed: a failed one must still prune these
+        // entries next time, or a settled write would come back from storage.
+        _settled.clear();
         _storageFullAnnounced = false;
         return true;
     } catch (_e) {
@@ -664,6 +709,108 @@ function _persistQueue() {
 
 /** @type {Map<string, WriteDescriptor>} */
 const _writeQueue = new Map(); // queue key → pending write descriptor
+
+// Entries this tab has taken out of its queue since the last persist: queue
+// key → the enqueuedAt of the entry removed (Infinity when it carried none).
+// _persistQueue prunes them from storage, which it otherwise leaves to the
+// tabs that wrote them.
+const _settled = new Map();
+
+// Descriptors this tab took up from another tab's write to the stored queue
+// (_onStoredQueueChanged) rather than queued itself.
+const _adopted = new WeakSet();
+
+function _markSettled(key, descriptor) {
+    const at = descriptor && typeof descriptor.enqueuedAt === 'number' ? descriptor.enqueuedAt : Infinity;
+    _settled.set(key, Math.max(_settled.get(key) ?? -Infinity, at));
+}
+
+// _dequeue: the ONE way out of the queue. Removes `key`, only while it still
+// holds `descriptor` when one is given (a newer write may have replaced it
+// mid-flush), and marks it settled so the next persist drops it from storage
+// too. A bare _writeQueue.delete would leave the stored copy for the merge to
+// keep, and the write would be replayed on the next load.
+function _dequeue(key, descriptor) {
+    const d = _writeQueue.get(key);
+    if (!d || (descriptor && d !== descriptor)) return false;
+    _writeQueue.delete(key);
+    _markSettled(key, d);
+    return true;
+}
+
+// What storage holds now, keyed. Unreadable storage reads as empty, so the
+// persist writes this tab's queue alone, which is what it always did; the
+// rehydrate is where a corrupt queue is counted and reported. Items without a
+// key are left out; every other stored descriptor is kept verbatim for the
+// next rehydrate to judge.
+function _storedQueue() {
+    try {
+        return _parseStoredQueue(localStorage.getItem(QUEUE_STORAGE_KEY));
+    } catch (_e) {
+        return new Map();
+    }
+}
+
+// The stored queue's serialized form (a `storage` event carries it as a
+// string), keyed, with the same leniency as _storedQueue.
+function _parseStoredQueue(raw) {
+    try {
+        const entries = raw ? JSON.parse(raw) : [];
+        if (!Array.isArray(entries)) return new Map();
+        return new Map(entries.filter((e) => Array.isArray(e) && e.length >= 2 && e[0]));
+    } catch (_e) {
+        return new Map();
+    }
+}
+
+// _enqueuedAfter: was queue entry `d` queued after time `at`? The shared
+// outbox's one "which write is newer" test. An entry with no numeric stamp is
+// never the newer one.
+function _enqueuedAfter(d, at) {
+    return !!d && typeof d.enqueuedAt === 'number' && typeof at === 'number' && d.enqueuedAt > at;
+}
+
+// _storedEntryProblem: why a stored queue entry cannot be replayed ('unreadable'
+// or 'expired'), or null when it can. The checks a rehydrate applies, stated
+// once so taking up another tab's entries (_onStoredQueueChanged) applies them
+// too.
+function _storedEntryProblem(descriptor, now) {
+    if (!descriptor || typeof descriptor !== 'object') return 'unreadable';
+    // enqueuedAt must be a finite positive number: a tampered/corrupt entry
+    // could set it to a non-numeric truthy value (e.g. a string), making
+    // (now - enqueuedAt) NaN so the TTL comparison is false and an
+    // arbitrarily old write slips through. Validate the type FIRST, and
+    // separately from the age test below: an unparseable stamp is a corrupt
+    // entry, not an old one, and conflating them would report a tampered
+    // queue to the operator as ordinary expiry.
+    if (typeof descriptor.enqueuedAt !== 'number'
+        || !Number.isFinite(descriptor.enqueuedAt)
+        || descriptor.enqueuedAt <= 0) return 'unreadable';
+    if ((now - descriptor.enqueuedAt) > QUEUE_TTL_MS) return 'expired';
+    // Defense-in-depth: localStorage is tamperable. Reject terminal entries
+    // whose method/url fall outside the queue allowlist (PUT/POST to
+    // /api/competitions/…) before they can ever reach fetch on replay.
+    if (descriptor.terminal && !_isAllowedTerminalRequest(descriptor.method, descriptor.url)) return 'unreadable';
+    return null;
+}
+
+// _parkStoredEntries: blank the password on every STORED entry and park it
+// (authBlocked), another tab's included, for a revoked credential
+// (parkQueueForReauth). The merge keeps what this tab did not write, so
+// persisting this tab's scrubbed queue alone would leave the revoked
+// plaintext password in storage under the other tab's entries.
+function _parkStoredEntries() {
+    const stored = _storedQueue();
+    if (stored.size === 0) return;
+    for (const d of stored.values()) {
+        if (!d || typeof d !== 'object') continue;
+        d.password = '';
+        d.authBlocked = true;
+    }
+    try {
+        localStorage.setItem(QUEUE_STORAGE_KEY, JSON.stringify([...stored.entries()]));
+    } catch (_e) { /* unwritable storage: the persist that follows reports it */ }
+}
 let _syncStatus = /** @type {SyncStatusValue} */ ('synced');
 const _syncListeners = new Set();
 
@@ -671,6 +818,16 @@ const _syncListeners = new Set();
 // even when the queue is empty (i.e. the write succeeded and was removed from
 // the queue but the fetch hasn't resolved yet).
 let _inflightRunning = 0;
+// bc-sync: the running writes being sent right now, keyed like the queue: the
+// latest per match, with the time it was sent. Until its fetch settles nothing
+// else holds such a write, and a page going away cancels that fetch, so the
+// page-hide handler below keeps what is here (_keepInflightRunning).
+const _inflightRunningWrites = new Map(); // queue key → {compID, matchID, payload, password, sentAt}
+// bc-sync: the stage BEFORE a running write exists. A score editor holds each
+// edit for its autosave debounce (AUTOSAVE_DEBOUNCE_MS) and registers a token
+// here for that window (API.notePendingEdit), so the pill reads "Syncing..."
+// from the first tap rather than "Synced" over an edit nothing has sent yet.
+const _pendingEdits = new Set();
 // Set to true ONLY when a flush attempt ends with at least one true NETWORK
 // failure (fetch rejected: connection down). A non-2xx server response (e.g. a
 // transient 5xx/429) keeps the write queued for retry but is NOT "offline": the
@@ -807,7 +964,9 @@ function _hasServerErroringQueued() {
  *   auth-required : a queued write is parked awaiting re-authentication
  *   server-error  : a queued write has passed the server-rejection notice
  *                   threshold; it is STILL QUEUED and still being retried
- *   syncing       : any in-flight running write OR the queue is non-empty
+ *   syncing       : any in-flight running write, the queue is non-empty, OR an
+ *                   edit is still waiting in an editor's autosave window
+ *                   (API.notePendingEdit, bc-sync)
  *   synced        : otherwise
  *
  * bc-qttl: the two middle states exist because writes are no longer discarded
@@ -824,7 +983,7 @@ function _recomputeSyncStatus() {
     if (_offlineFlag && _writeQueue.size > 0) { _setSyncStatus('offline'); return; }
     if (_hasAuthBlockedQueued()) { _setSyncStatus('auth-required'); return; }
     if (_hasServerErroringQueued()) { _setSyncStatus('server-error'); return; }
-    _setSyncStatus((_inflightRunning > 0 || _writeQueue.size > 0) ? 'syncing' : 'synced');
+    _setSyncStatus((_inflightRunning > 0 || _writeQueue.size > 0 || _pendingEdits.size > 0) ? 'syncing' : 'synced');
 }
 
 /**
@@ -946,13 +1105,11 @@ async function _restampQueuedEntryForSkew(descriptor) {
 // two disagree we always prefer the direction whose failure is recoverable.
 function _restampFor(enqueuedAt, perfAtEnqueue) {
     const wall = enqueuedAt + serverClockOffsetMs();
-    const perfNow = _perfNow();
-    if (perfNow === null || !Number.isFinite(perfAtEnqueue)) return wall;
-    const ageMs = perfNow - perfAtEnqueue;
+    const ageMs = _perfAgeMs(perfAtEnqueue);
     // A negative age is not a clock step, it is two readings from different time
     // origins (a rehydrated entry that predates the strip, a hand-edited store).
     // There is no true age to recover, so fall back rather than invent one.
-    if (!(ageMs >= 0)) return wall;
+    if (ageMs === null || !(ageMs >= 0)) return wall;
     return Math.min(wall, _serverNowMs() - ageMs);
 }
 
@@ -1001,6 +1158,10 @@ async function _flushQueue() {
                 // QUEUED, it is not dropped) so a parked entry costs no requests and
                 // cannot hold the flush loop in a retry cycle it can never win.
                 if (descriptor.authBlocked) continue;
+                // The page-hide copy of a running write whose own fetch is still
+                // open: that fetch lands it or queues it anew, so sending the copy
+                // too would send the write twice.
+                if (_heldByOpenFetch(key, descriptor)) continue;
                 const { compID, matchID, payload, password, terminal, kind, method, url } = descriptor;
                 // Running score writes (terminal=false) don't store method/url and
                 // always PUT to the score endpoint. Terminal entries carry their own
@@ -1019,7 +1180,7 @@ async function _flushQueue() {
                         // channel above only reaches an operator who happens to have
                         // this exact match open.
                         _notifyQueueAlert({ kind: 'unreadable', count: 1, terminalCount: 1, compID, matchID });
-                        if (_writeQueue.get(key) === descriptor) _writeQueue.delete(key);
+                        _dequeue(key, descriptor);
                         continue;
                     }
                     effectiveMethod = method;
@@ -1084,7 +1245,7 @@ async function _flushQueue() {
                                     // the server state is right), here it is a failure
                                     // AND the local bracket is wrong.
                                     if (kind === 'override') _notifyBracketResync({ compID, matchID, reason: CLOCK_SKEW_REASON });
-                                    if (_writeQueue.get(key) === descriptor) _writeQueue.delete(key);
+                                    _dequeue(key, descriptor);
                                     continue;
                                 }
                                 await _restampQueuedEntryForSkew(descriptor);
@@ -1171,8 +1332,7 @@ async function _flushQueue() {
                                 console.warn(`[sync] dropping queued running write for ${matchID} refused twice for clock skew (serverNowMs=${body.serverNowMs}); a pending kachinuki advancement may need re-pressing`);
                             }
                         }
-                        if (_writeQueue.get(key) === descriptor) {
-                            _writeQueue.delete(key);
+                        if (_dequeue(key, descriptor)) {
                             // A confirmed terminal score write needs no further rev
                             // tracking: drop its counter (mirrors recordScore's online
                             // completed path) so _matchRevCounters doesn't grow for the
@@ -1284,7 +1444,7 @@ async function _flushQueue() {
                                 detail: reason,
                             });
                         }
-                        if (_writeQueue.get(key) === descriptor) _writeQueue.delete(key);
+                        _dequeue(key, descriptor);
                     } else {
                         // Non-retryable response: 400 validation, 413, generic 409
                         // conflict, etc. NOTE neither auth-ish status reaches here any
@@ -1329,7 +1489,7 @@ async function _flushQueue() {
                             kind: 'rejected', count: 1, terminalCount: terminal ? 1 : 0, compID, matchID,
                             detail: reason,
                         });
-                        if (_writeQueue.get(key) === descriptor) _writeQueue.delete(key);
+                        _dequeue(key, descriptor);
                     }
                 } catch (_) {
                     // fetch rejected (network down) or aborted by fetchWithTimeout.
@@ -1421,18 +1581,24 @@ function _commitEnqueue(key, descriptor) {
  * bails when the last numbered bout has no outcome or the match is completed.
  */
 function enqueueRunningWrite(compID, matchID, payload, password) {
-    const key = _revKey(compID, matchID);
-    const prev = _writeQueue.get(key);
+    _commitEnqueue(_revKey(compID, matchID), _runningDescriptor(compID, matchID, payload, password, Date.now()));
+}
+
+// The queue entry for a running write, carrying a queued kachinukiBoutFinal
+// forward (enqueueRunningWrite's comment says why). Shared with the page-hide
+// copy of a write still being sent (_keepInflightRunning).
+function _runningDescriptor(compID, matchID, payload, password, enqueuedAt) {
+    const prev = _writeQueue.get(_revKey(compID, matchID));
     if (prev && !prev.terminal && prev.kind === 'score'
         && prev.payload && prev.payload.kachinukiBoutFinal
         && payload && !payload.kachinukiBoutFinal) {
         payload = { ...payload, kachinukiBoutFinal: true };
     }
-    _commitEnqueue(key, {
+    return {
         compID, matchID, payload, password,
         kind: 'score', terminal: false,
-        enqueuedAt: Date.now(),
-    });
+        enqueuedAt,
+    };
 }
 
 // _withoutDownstreamConfirmation is the ONE owner of "a queued write NEVER
@@ -1474,6 +1640,114 @@ function _enqueueTerminalWrite(key, kind, method, url, payload, password, compID
         method, url,
         enqueuedAt: Date.now(),
     });
+}
+
+// bc-sync: a page going away (a reload, a closed tab, the iPad locking or
+// switching app) cancels every fetch still open, so a running write already
+// sent but not yet answered, up to fetchWithTimeout's 12s on bad Wi-Fi, would
+// be lost with it. A copy of each goes into the persisted outbox now, so the
+// next load sends it. A copy of a write that did land is harmless there: the
+// server takes an equal rev again and drops a lower one. A match whose queued entry
+// was added after this write was sent keeps it: that entry is newer (a failed
+// later edit, or a queued Finish). The editors' own page-hide flush of a
+// pending edit runs after this one (their listeners are added later), so its
+// newer write replaces this one in the queue.
+function _keepInflightRunning() {
+    let kept = false;
+    for (const [key, w] of _inflightRunningWrites) {
+        const queued = _writeQueue.get(key);
+        if (queued && queued.enqueuedAt >= w.sentAt) continue;
+        // Dated when it was sent, as the clock-skew re-stamp needs: hide time
+        // would date it up to the fetch timeout later than it was made.
+        w.kept = _runningDescriptor(w.compID, w.matchID, w.payload, w.password, w.sentAt);
+        w.kept.perfAtEnqueue = w.perfAtSend;
+        _writeQueue.set(key, w.kept);
+        kept = true;
+    }
+    // Stored, not sent: the fetch holding each copy is still open, so the
+    // flush leaves the copy alone (_heldByOpenFetch) and the fetch's own
+    // outcome removes or replaces it (recordScore). A page that goes away takes
+    // the fetch with it and leaves the copy for the next load; a tab that was
+    // only hidden and comes back never sends the write twice.
+    if (kept) {
+        _persistQueue();
+        _recomputeSyncStatus();
+    }
+}
+
+// A queue entry that is the page-hide copy of a running write whose fetch is
+// still open (_keepInflightRunning): the flush skips it.
+function _heldByOpenFetch(key, descriptor) {
+    return _inflightRunningWrites.get(key)?.kept === descriptor;
+}
+
+// Remove-then-add for the same reason as the online handler below.
+if (typeof window !== 'undefined') {
+    if (window.__bcKeepInflightHandlers) {
+        window.removeEventListener('pagehide', window.__bcKeepInflightHandlers.pagehide);
+        document.removeEventListener('visibilitychange', window.__bcKeepInflightHandlers.visibility);
+    }
+    const handlers = {
+        pagehide: _keepInflightRunning,
+        visibility: () => { if (document.visibilityState === 'hidden') _keepInflightRunning(); },
+    };
+    window.__bcKeepInflightHandlers = handlers;
+    window.addEventListener('pagehide', handlers.pagehide);
+    document.addEventListener('visibilitychange', handlers.visibility);
+}
+
+// bc-sync: another tab changed the stored queue. Each tab sends only what it
+// holds, so without this a write queued in a tab that then closed (while
+// offline, say) waited in storage for the next page load, while the tabs
+// still open read "Synced". `storage` fires in every OTHER tab when one writes
+// the key, so each tab follows the others:
+//   - an entry it does not hold, or holds an older copy of, is taken up
+//     (after the rehydrate's checks) and sent like its own;
+//   - its copy of an entry the writer took out of storage (in the old value,
+//     gone from the new one, same enqueuedAt) is dropped: the merge only ever
+//     removes what a tab settled (landed, refused, or dropped on load), so
+//     there is nothing left to send;
+//   - a removed key (the writer's queue went empty, or was wiped at logout)
+//     drops only the entries taken up this way; this tab's own are written
+//     back by its next persist.
+// A write two tabs hold can be sent by both, which is harmless: the server
+// takes an equal stamp again and refuses an older one (last-write-wins).
+function _onStoredQueueChanged(oldRaw, newRaw) {
+    const before = _parseStoredQueue(oldRaw);
+    const after = newRaw === null ? null : _parseStoredQueue(newRaw);
+    let changed = false, adopted = false;
+    for (const [k, d] of _writeQueue) {
+        const gone = after === null
+            ? _adopted.has(d)
+            : !after.has(k) && before.get(k)?.enqueuedAt === d.enqueuedAt;
+        if (gone && _dequeue(k, d)) changed = true;
+    }
+    const now = Date.now();
+    for (const [k, d] of after || []) {
+        const held = _writeQueue.get(k);
+        if (held && !_enqueuedAfter(d, held.enqueuedAt)) continue;
+        if (_storedEntryProblem(d, now)) continue;
+        _writeQueue.set(k, d);
+        _adopted.add(d);
+        changed = adopted = true;
+    }
+    if (!changed) return;
+    _recomputeSyncStatus();
+    if (adopted) {
+        _flushAttempt = 0;
+        if (_flushTimer !== null) { clearTimeout(_flushTimer); _flushTimer = null; }
+        _flushQueue();
+    }
+}
+
+// Remove-then-add for the same reason as the online handler below.
+if (typeof window !== 'undefined') {
+    if (window.__bcStoredQueueHandler) window.removeEventListener('storage', window.__bcStoredQueueHandler);
+    const onStorage = (e) => {
+        if (e.key === QUEUE_STORAGE_KEY) _onStoredQueueChanged(e.oldValue, e.newValue);
+    };
+    window.__bcStoredQueueHandler = onStorage;
+    window.addEventListener('storage', onStorage);
 }
 
 // Flush the queue whenever the browser comes back online.
@@ -1565,34 +1839,29 @@ if (typeof fetch === 'function') {
         // finished result.
         let expired = 0, expiredTerminal = 0;
         let unreadable = 0, unreadableTerminal = 0;
-        const dropUnreadable = (d) => { unreadable++; if (d && d.terminal) unreadableTerminal++; };
+        // A dropped entry is marked settled, so the persist below takes it out
+        // of storage: the merge otherwise keeps what this tab did not write.
+        const dropUnreadable = (key, d) => {
+            unreadable++;
+            if (d && d.terminal) unreadableTerminal++;
+            if (key) _markSettled(key, d);
+        };
         for (const item of entries) {
             // Defensive: a single malformed element (corrupt/tampered storage) must
             // not throw and abort the whole rehydrate: destructuring a non-array in
             // the for-of header would do exactly that, dropping ALL valid queued
             // writes. Validate the tuple shape first and skip bad items individually.
-            if (!Array.isArray(item) || item.length < 2) { dropUnreadable(null); continue; }
+            if (!Array.isArray(item) || item.length < 2) { dropUnreadable(null, null); continue; }
             const [key, descriptor] = item;
-            if (!key || !descriptor || typeof descriptor !== 'object') { dropUnreadable(null); continue; }
-            // enqueuedAt must be a finite positive number: a tampered/corrupt entry
-            // could set it to a non-numeric truthy value (e.g. a string), making
-            // (now - enqueuedAt) NaN so the TTL comparison is false and an
-            // arbitrarily old write slips through. Validate the type FIRST, and
-            // separately from the age test below: an unparseable stamp is a corrupt
-            // entry, not an old one, and conflating them would report a tampered
-            // queue to the operator as ordinary expiry.
-            if (typeof descriptor.enqueuedAt !== 'number'
-                || !Number.isFinite(descriptor.enqueuedAt)
-                || descriptor.enqueuedAt <= 0) { dropUnreadable(descriptor); continue; }
-            if ((now - descriptor.enqueuedAt) > QUEUE_TTL_MS) {
+            if (!key || !descriptor || typeof descriptor !== 'object') { dropUnreadable(key, null); continue; }
+            const problem = _storedEntryProblem(descriptor, now);
+            if (problem === 'expired') {
                 expired++;
                 if (descriptor.terminal) expiredTerminal++;
+                _markSettled(key, descriptor);
                 continue;
             }
-            // Defense-in-depth: localStorage is tamperable. Reject terminal entries
-            // whose method/url fall outside the queue allowlist (PUT/POST to
-            // /api/competitions/…) before they can ever reach fetch on replay.
-            if (descriptor.terminal && !_isAllowedTerminalRequest(descriptor.method, descriptor.url)) { dropUnreadable(descriptor); continue; }
+            if (problem) { dropUnreadable(key, descriptor); continue; }
             // Only restore if not already superseded by a same-session write.
             if (!_writeQueue.has(key)) {
                 _writeQueue.set(key, descriptor);
@@ -2266,12 +2535,21 @@ const API = {
     async recordScore(compID, matchID, result, password, match) {
         const payload = toBackendMatchResult(result, match || result);
         // mp-y3nk: stamp in server-relative time for last-write-wins reconciliation.
-        payload.modifiedAt = _serverNowMs();
+        // An autosave is stamped with the time of the EDIT it carries, not of
+        // its sending (operator ruling 2026-09-27): a tap made before another
+        // device finished the match stays older than that finish however late
+        // the autosave goes out (its debounce, or the editor going away).
+        payload.modifiedAt = _serverNowMs() - _editAge(result);
 
         // C2: stamp monotonic rev on running-status writes so the server's
         // rev-guard can drop out-of-order deliveries (e.g. from reconnect flush).
         // Completed writes do not need a rev: the guard is gated on status=running.
         const isRunning = payload?.status === 'running';
+        // bc-sync: a running write the editor marks `durable` (the page is
+        // being hidden or unloaded) is queued, not fetched (below), so it is
+        // never in flight. The flag is read from the patch and never sent:
+        // toBackendMatchResult copies named fields only.
+        const durable = isRunning && result.durable === true;
         if (isRunning) {
             // Absorb a pending kachinukiBoutFinal from a QUEUED flagged running
             // write for this match: when connectivity returns mid-backoff, this
@@ -2289,8 +2567,11 @@ const API = {
             }
             payload.rev = _nextRev(compID, matchID);
             payload.revSession = _revSession;
-            _inflightRunning++;
-            _recomputeSyncStatus();
+            if (!durable) {
+                _inflightRunning++;
+                _inflightRunningWrites.set(_revKey(compID, matchID), { compID, matchID, payload, password, sentAt: Date.now(), perfAtSend: _perfNow(), kept: null });
+                _recomputeSyncStatus();
+            }
         }
 
         // mp-9ukk Phase 2: broadcast helper. Publishes a match patch on the
@@ -2325,6 +2606,20 @@ const API = {
 
         const scoreUrl = `/api/competitions/${compID}/matches/${matchID}/score`;
 
+        // bc-sync: a durable running write (the page is being hidden or
+        // unloaded) goes straight into the persisted outbox rather than a
+        // fetch the browser would cancel with the page. It is exactly the
+        // state a failed fetch leaves: persisted synchronously by
+        // _commitEnqueue, replayed on reconnect or on the next load, with the
+        // rev guard, the clock-skew re-stamp and the TTL all applying. It
+        // lands only if the editor's host reaches this line before the page
+        // goes, i.e. with no await on I/O in front of recordScore.
+        if (durable) {
+            enqueueRunningWrite(compID, matchID, payload, password);
+            _broadcastPatch(payload);
+            return { queued: true };
+        }
+
         // Everything a 2xx can mean, in one place, because bc-cse gave this
         // response TWO producers: the first attempt, and the clock-skew resend
         // below. `allowSkewRetry` is what stops the two from ping-ponging - the
@@ -2346,7 +2641,7 @@ const API = {
                 // same unreconciled clock as the write just refused, so it would be
                 // refused in its turn, and the completed write is retried here with a
                 // corrected stamp anyway.
-                if (_writeQueue.delete(_revKey(compID, matchID))) {
+                if (_dequeue(_revKey(compID, matchID))) {
                     _persistQueue();
                     _recomputeSyncStatus();
                 }
@@ -2508,6 +2803,17 @@ const API = {
         } finally {
             if (isRunning) {
                 _inflightRunning--;
+                // Settled: landed, or its failure path above queued it. A later
+                // write for the match may have taken the slot; leave that one.
+                // A copy page-hide queued of this write goes with it: an answer
+                // settles it here, a failure has already replaced it in the
+                // queue (and the retryable-status path below queues it anew).
+                const key = _revKey(compID, matchID);
+                const w = _inflightRunningWrites.get(key);
+                if (w?.payload === payload) {
+                    _inflightRunningWrites.delete(key);
+                    if (w.kept && _dequeue(key, w.kept)) _persistQueue();
+                }
                 _recomputeSyncStatus();
             }
         }
@@ -3708,6 +4014,19 @@ const API = {
     },
 
     /**
+     * bc-sync: register (on=true) or release (on=false) an edit that a score
+     * editor is still holding in its autosave debounce, so the sync status
+     * reads 'syncing' until the write it becomes has been sent.
+     * @param {object} token  one per editor instance
+     * @param {boolean} on
+     */
+    notePendingEdit(token, on) {
+        if (on) _pendingEdits.add(token);
+        else _pendingEdits.delete(token);
+        _recomputeSyncStatus();
+    },
+
+    /**
      * bc-qttl: un-park writes held on a 401 and retry them with a freshly
      * authenticated credential.
      *
@@ -3773,6 +4092,8 @@ const API = {
         if (_flushTimer !== null) { clearTimeout(_flushTimer); _flushTimer = null; }
         _flushAttempt = 0;
         _offlineFlag = false;
+        // Every stored entry too, whether or not this tab holds any.
+        _parkStoredEntries();
         if (parked > 0) {
             _persistQueue();
             _notifyQueueAlert({ kind: 'auth_required', count: parked, terminalCount: _countTerminalQueued() });
@@ -3798,7 +4119,10 @@ const API = {
         // a network write) aborts instead of sending the rest of its snapshot with
         // the now-revoked password.
         _queueGen++;
+        // A hard wipe, every tab's entries included: the credential they carry
+        // is revoked, so nothing of the merge's is kept.
         _writeQueue.clear();
+        _settled.clear();
         try { localStorage.removeItem(QUEUE_STORAGE_KEY); } catch (_e) { /* ignore */ }
         if (_flushTimer !== null) { clearTimeout(_flushTimer); _flushTimer = null; }
         _flushAttempt = 0;

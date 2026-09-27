@@ -90,10 +90,13 @@ function teamMatch(status) {
   };
 }
 
+// Closing unmounts the editor, as every host does: the unmount is what writes
+// an edit still inside the autosave window.
 function mount(match, props = {}) {
   const onSubmit = vi.fn().mockResolvedValue(undefined);
-  const onClose = vi.fn();
-  const utils = render(
+  let utils;
+  const onClose = vi.fn(() => utils.unmount());
+  utils = render(
     <ScoreEditorModal match={match} onSubmit={onSubmit} password="" {...props} onClose={onClose} />,
   );
   return { ...utils, onSubmit, onClose };

@@ -15,7 +15,7 @@ const { useRef, useLayoutEffect: useLayoutEffectBC, useState: useStateBC, useEff
 import { DAIHYOSEN_POSITION } from './pool_ids.jsx';
 import { barredSides } from './ineligible_match.jsx';
 import { BarredChip } from './barred_chip.jsx';
-import { realIppons } from './result_slot.jsx';
+import { realIppons, enchoOn, defaultWinMaru } from './result_slot.jsx';
 import { sameCompetitor } from './competitor_identity.jsx';
 import { NumberedName } from './numbered_name.jsx';
 import { creditedBoutSide, isTeamDefaultWinDecision } from './team_default_credit.jsx';
@@ -187,13 +187,6 @@ function enchoLabel(encho) {
   return enchoOn(encho) ? "(E)" : "";
 }
 
-// enchoOn: THE single predicate for "did this result happen in encho" —
-// a non-degenerate block with a positive periodCount. The (E) label and
-// the default-win maru count both key on it, so a stray
-// {periodCount: 0} block can never make one surface claim overtime
-// while another denies it. Mirrors state.EnchoMetadata.On (Go).
-const enchoOn = (encho) => (encho?.periodCount || 0) > 0;
-
 // middleMark: the ONE mark the centre of a score may carry. The middle column
 // of a score sheet can only ever read:
 //   vs     not yet decided (callers render the plain "vs" middle)
@@ -240,16 +233,6 @@ const isDrawResult = (decision, score) => isHikiwakeBC(decision) || isHikiwakeBC
 // technique. Delegates to team_default_credit.jsx's isTeamDefaultWinDecision,
 // THE one JS owner of this class (bc-cse) -- see that function's own comment.
 const isDefaultWinBC = isTeamDefaultWinDecision;
-
-// defaultWinMaru: the maru cells a default win awards — one "○" per point,
-// per the FIK Regulations (Article 32 and the Score Board appendix p.15:
-// "put one mark in case of Encho"): the two-point pair in regulation, the
-// single deciding point in encho (sudden death). THE single JS source of
-// the maru-count rule; mirrors domain.DefaultWinIppons (Go, same cells
-// shape). The canonical record is the engine's RecordDecision fill via
-// domain.DefaultWinIppons — displays only fall back to this for winners
-// whose recorded cells are empty (byes, legacy data).
-const defaultWinMaru = (encho) => (enchoOn(encho) ? ["○"] : ["○", "○"]);
 
 // boutMiddle: THE single source for what a bout's middle can read —
 // "vs" (plain, including unplayed/pending), "X" (tie), "(E)" (overtime),

@@ -16,6 +16,7 @@ import { sameCompetitor } from './competitor_identity.jsx';
 // its host and by unit tests that never load api_client, and write_result.jsx
 // is import-only so it can be reached directly (see its header).
 import { notLandedBanner } from './write_result.jsx';
+import { useArmedConfirm, acceptTap, clearTap } from './tap_guard.jsx';
 
 import {
   MAX_IPPONS_PER_SIDE,
@@ -220,9 +221,24 @@ export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, on
   // it does NOT protect is a mount-time value that has since been CHANGED
   // elsewhere: "an explicit value in result always wins", so this editor would
   // put its stale name back. That is the case this closes.
+  //
+  // A pick the operator made stands until the server holds it. Each pick is
+  // saved as it is made (markScoringDirty in the pickers), so the save of one
+  // pick coming back must not undo a second pick made before it arrived. One
+  // adopt per side, so a pick still being saved on one side does not stop the
+  // other side following the server. An empty pick never counts as unsaved:
+  // the server keeps a name over "", so it would read unsaved forever.
   useAdoptFromServer({
-    signature: JSON.stringify([m.repPlayerA || "", m.repPlayerB || ""]),
-    apply: () => { setRepPlayerA(m.repPlayerA || ""); setRepPlayerB(m.repPlayerB || ""); },
+    signature: m.repPlayerA || "",
+    apply: () => setRepPlayerA(m.repPlayerA || ""),
+    keepLocalEdits: true,
+    isDirty: repPlayerA !== "" && repPlayerA !== (m.repPlayerA || ""),
+  });
+  useAdoptFromServer({
+    signature: m.repPlayerB || "",
+    apply: () => setRepPlayerB(m.repPlayerB || ""),
+    keepLocalEdits: true,
+    isDirty: repPlayerB !== "" && repPlayerB !== (m.repPlayerB || ""),
   });
   // doSubmit's setSubmitting(false) in finally fires post-await; if the
   // parent unmounts the modal during the in-flight save (e.g.
@@ -238,11 +254,10 @@ export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, on
   const _autosaveIsRunningRef = useRefA(false);
   const _autosaveBuildPatchRef = useRefA(null);
   const _autosaveOnSubmitRef = useRefA(null);
-  const { markDirty: markScoringDirty, cancelDebounce: cancelScoringDebounce, flushPending: flushScoringAutosave } = useDebouncedRunningWrite({
+  const { markDirty: markScoringDirty, cancelDebounce: cancelScoringDebounce } = useDebouncedRunningWrite({
     isRunningRef: _autosaveIsRunningRef,
     buildPatchRef: _autosaveBuildPatchRef,
     onSubmitRef: _autosaveOnSubmitRef,
-    mountedRef,
   });
 
   useEffectA(() => {
@@ -320,6 +335,16 @@ export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, on
   const aTotal = realIppons(aPts).length;
   const bTotal = realIppons(bPts).length;
 
+  // bc-dtip: a bouncing thumb recorded M M from one tap. The ippon BUTTONS
+  // ignore a repeat pointer tap on the same side within TAP_BOUNCE_MS (two
+  // real ippon calls can never arrive that close); the guard sits at the
+  // button, not in addPt, so the keyboard shortcuts stay direct. Keyed by
+  // side: a bounce can land on the same side's neighbouring letter, while the
+  // other side's button is a different action.
+  const ipponTapRef = useRefA(null);
+  const tapIppon = (ev, side, letter) => {
+    if (acceptTap(ipponTapRef, ev, side)) addPt(side, letter);
+  };
   const addPt = (side, letter) => {
     // No-op when the side is already at the 2-ippon max: don't mark dirty or
     // schedule an autosave PUT / SSE fan-out for a tap that changes nothing.
@@ -349,6 +374,8 @@ export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, on
     const cur = side === "a" ? aPts : bPts;
     if (cur[idx] === undefined) return; // fast no-op path: don't mark dirty / autosave
     if (side === lockedKey) return; // the recorded default-win maru is not the operator's to remove
+    // Taking a mark back off, then tapping the right letter, is never a bounce.
+    clearTap(ipponTapRef, side);
     if (side === "a") setAPts((p) => p.filter((_, i) => i !== idx));
     else setBPts((p) => p.filter((_, i) => i !== idx));
     markScoringDirty(); // C1
@@ -358,6 +385,10 @@ export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, on
   // to non-"reset" patches. periodCount=0 means "no overtime"; emitting the
   // field as undefined keeps the wire payload clean (omitempty server-side).
   const enchoBlock = () => enchoPeriodCount > 0 ? { encho: { periodCount: enchoPeriodCount } } : {};
+  // An operator change to the overtime count: the value (a number, or the
+  // updater EnchoControl's stepper hands over), then the save it schedules, as
+  // for a point. The count adopted from the server does not come through here.
+  const changeEnchoPeriodCount = (v) => { setEnchoPeriodCount(v); markScoringDirty(); };
   // decidedByHantei is only set via the dedicated submitHantei path
   // (SHIRO/AKA hantei buttons). The regular Finish/Enter buildPatch
   // explicitly clears the flag (sends false) when the match was previously
@@ -716,7 +747,9 @@ export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, on
   // confirmed. Keyboard Enter stays direct (deliberate, not an accidental tablet
   // brush). The result itself is verified from the score slots above, not the
   // button; a lossy "SHIRO WIN 1–0" caption is not a check.
-  const [finishArmed, setFinishArmed] = useStateA(false);
+  // bc-dtfn: the arm-then-confirm guard with a dwell, so the bounce of the
+  // arming tap cannot commit (tap_guard.jsx).
+  const { armed: finishArmed, setArmed: setFinishArmed, confirm: confirmFinish } = useArmedConfirm();
   useEffectA(() => { setFinishArmed(false); }, [aTotal, bTotal, isDrawToggled]);
 
   // "Has the OPERATOR changed anything", which gates the discard prompt — so
@@ -726,22 +759,14 @@ export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, on
   // is not an unsaved change of theirs, and prompting "discard unsaved scoring
   // changes?" on an editor nobody touched trains operators to dismiss the one
   // prompt that protects real work.
-  //
-  // scoringDirty is what closing a RUNNING match may flush (bc-dscn): isDirty
-  // without the hantei ARM, which is a mode rather than a result. Flushing on
-  // an arm alone would send a freshly stamped write with an unchanged
-  // scoreline, which could win last-write-wins over another device's older
-  // queued result. Withdrawing a RECORDED verdict is a result, not the arm,
-  // and buildPatch carries it (hanteiClear), so that term stays.
-  const scoringDirty =
+  const isDirty =
     !window.arraysEqual(aPts, initialAPts) ||
     !window.arraysEqual(bPts, initialBPts) ||
     aFouls !== initialAFouls ||
     bFouls !== initialBFouls ||
     isDrawToggled !== initialIsDrawToggled ||
     enchoPeriodCount !== initialEnchoPeriods ||
-    (hanteiRecorded && !decidedByHantei);
-  const isDirty = scoringDirty || decidedByHantei !== hanteiRecorded;
+    decidedByHantei !== hanteiRecorded;
   // The scoreline half of the same rule, declared HERE because the hook needs
   // isDirty: it reads the value from the render BEFORE the server change (see
   // useAdoptFromServer). It self-corrects: a re-seed makes the next render's
@@ -767,30 +792,35 @@ export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, on
     applyServerScore();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [lockedKey]);
-  const handleDismiss = async () => {
-    // Don't close while any save/decision request is in flight: letting
+  // leaveEditor: every way out of the editor that is not a write, Close and
+  // Prev/Next alike (operator ruling 2026-09-27: Prev/Next ask as Close does).
+  const leaveEditor = async (go) => {
+    // Don't leave while any save/decision request is in flight: letting
     // the modal unmount would orphan the pending fetch and lose the
     // setState landing.
     if (submitting || decisionSubmitting) return;
-    // bc-dscn: a host that cannot close (the inline court console) has nothing
-    // to discard INTO, so it never prompts either.
-    if (!canClose) return;
-    // bc-dscn: on a RUNNING match every scoring edit is autosaved, so closing
-    // discards nothing: save any edit still inside the debounce window now and
-    // close without asking. Two local states are NOT in buildPatch("running")
-    // and so are not saved by it: the hantei ARM, which is only a mode (the
-    // verdict is committed by the side buttons, submitHantei) and is dropped
-    // with no write (scoringDirty excludes it), and the hikiwake toggle, which
-    // is a result the operator entered; that one keeps the prompt below,
-    // because closing would lose it.
+    // bc-dscn: on a RUNNING match every scoring edit is autosaved, and the
+    // unmount writes one still inside the debounce window
+    // (useDebouncedRunningWrite), so leaving discards nothing and asks
+    // nothing. Two local states are NOT in buildPatch("running"): the hantei
+    // ARM, which is only a mode (the verdict is committed by the side buttons,
+    // submitHantei) and is dropped with no write (it never marks dirty), and
+    // the hikiwake toggle, which is a result the operator entered; that one
+    // keeps the prompt below, because leaving would lose it.
     if (m.status === "running" && isDrawToggled === initialIsDrawToggled) {
-      if (scoringDirty) flushScoringAutosave();
-      onClose();
+      go();
       return;
     }
     if (isDirty && !(await window.confirmDialog({ message: "Discard unsaved scoring changes?", confirmLabel: "Discard changes", danger: true }))) return;
-    onClose();
+    // Discarded: the unmount must not write the edit the operator threw away.
+    cancelScoringDebounce();
+    go();
   };
+  // bc-dscn: a host that cannot close (the inline court console) has nothing
+  // to discard INTO, so it never prompts either.
+  const handleDismiss = () => (canClose ? leaveEditor(onClose) : undefined);
+  const goPrev = () => leaveEditor(onPrev);
+  const goNext = () => leaveEditor(onNext);
 
   // Keyboard shortcuts:
   //   Shift+M/K/D/T/H  → award point to AKA (red, sideA)
@@ -804,7 +834,7 @@ export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, on
   // Scoring shortcuts (Enter/M/K/D/T/H/X, plus S in Naginata) are skipped when any interactive
   // element (input, button, link, …) has focus so native activation still works.
   const kbRef = React.useRef(null);
-  kbRef.current = { delegated: isTeam || isEngi, submitting, canFinish, isDrawToggled, isKnockoutPhase, aTotal, bTotal, handleDismiss, canClose, onPrev, onNext, prevMatch, nextMatch, onSubmit, onSubmitAndNext, buildPatch, addPt, doSubmit, isNaginata, decidedByHantei, isComplete, correctionReason, askCorrectionReason, markScoringDirty, cancelScoringDebounce };
+  kbRef.current = { delegated: isTeam || isEngi, submitting, canFinish, isDrawToggled, isKnockoutPhase, aTotal, bTotal, handleDismiss, canClose, onPrev, onNext, goPrev, goNext, prevMatch, nextMatch, onSubmit, onSubmitAndNext, buildPatch, addPt, doSubmit, isNaginata, decidedByHantei, isComplete, correctionReason, askCorrectionReason, markScoringDirty, cancelScoringDebounce };
 
   useEffectA(() => {
     const onKeyDown = (ev) => {
@@ -831,8 +861,8 @@ export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, on
         // wires onPrev/onNext unconditionally, and with no neighbour they
         // call scoreKeyOf(null), which throws. Same condition as the nav
         // buttons and the shortcut hint's hasNav.
-        if (ev.key === "ArrowLeft" && s.onPrev && s.prevMatch) { ev.preventDefault(); s.onPrev(); return; }
-        if (ev.key === "ArrowRight" && s.onNext && s.nextMatch) { ev.preventDefault(); s.onNext(); return; }
+        if (ev.key === "ArrowLeft" && s.onPrev && s.prevMatch) { ev.preventDefault(); s.goPrev(); return; }
+        if (ev.key === "ArrowRight" && s.onNext && s.nextMatch) { ev.preventDefault(); s.goNext(); return; }
       }
 
       // Scoring shortcuts blocked when any interactive element has focus
@@ -945,7 +975,9 @@ export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, on
           {/* mp-62vr: rep-player pickers for a team daihyosen/tiebreaker rep
               bout. The sides are TEAM names; the operator records which player
               each team fields, picked from that team's roster. Shiro = sideB,
-              Aka = sideA, matching the scoreboard's colour assignment. */}
+              Aka = sideA, matching the scoreboard's colour assignment. A pick
+              rides every running write (repBlock), so it is saved like a
+              point, not held until the next one. */}
           {m.repIsTeam && (
             <div data-testid="rep-bout-picker" className="rep-bout-picker" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 14 }}>
               <label style={{ display: "flex", flexDirection: "column", gap: 4, fontSize: 12, fontWeight: 700, color: "var(--ink-2)" }}>
@@ -955,7 +987,7 @@ export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, on
                   className="input"
                   value={repPlayerB}
                   disabled={submitting}
-                  onChange={(e) => setRepPlayerB(e.target.value)}
+                  onChange={(e) => { setRepPlayerB(e.target.value); markScoringDirty(); }}
                   style={{ padding: "6px 8px", fontSize: 14 }}
                 >
                   <option value="">Select player</option>
@@ -969,7 +1001,7 @@ export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, on
                   className="input"
                   value={repPlayerA}
                   disabled={submitting}
-                  onChange={(e) => setRepPlayerA(e.target.value)}
+                  onChange={(e) => { setRepPlayerA(e.target.value); markScoringDirty(); }}
                   style={{ padding: "6px 8px", fontSize: 14 }}
                 >
                   <option value="">Select player</option>
@@ -1004,7 +1036,7 @@ export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, on
                       </div>
                       <div className="sb-points-grid">
                         {getIpponButtons(isNaginata).map((cc) => (
-                          <button key={cc} className={`ipt-btn ${cc === "H" ? "ipt-btn--h" : ""}`} onClick={() => addPt(s.key, cc)} disabled={boutDecided || decidedByHantei || s.key === lockedKey}>{cc}</button>
+                          <button key={cc} className={`ipt-btn ${cc === "H" ? "ipt-btn--h" : ""}`} onClick={(ev) => tapIppon(ev, s.key, cc)} disabled={boutDecided || decidedByHantei || s.key === lockedKey}>{cc}</button>
                         ))}
                       </div>
                     </div>
@@ -1087,7 +1119,7 @@ export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, on
           <div className="encho-center">
             <EnchoControl
               enchoPeriodCount={enchoPeriodCount}
-              setEnchoPeriodCount={setEnchoPeriodCount}
+              setEnchoPeriodCount={changeEnchoPeriodCount}
             />
           </div>
 
@@ -1328,7 +1360,7 @@ export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, on
           {!(isComplete && correctionPrompt) && (
           <div className="score-nav">
             {prevMatch ? (
-              <button className="btn btn--sm score-nav__prev" onClick={onPrev} disabled={submitting} title={prevMatch.sideA?.name + " vs " + prevMatch.sideB?.name}>← Prev</button>
+              <button className="btn btn--sm score-nav__prev" onClick={goPrev} disabled={submitting} title={prevMatch.sideA?.name + " vs " + prevMatch.sideB?.name}>← Prev</button>
             ) : <span />}
 
             <div className="score-nav__actions">
@@ -1358,18 +1390,18 @@ export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, on
               )}
               {canClose && <button className="btn" onClick={handleDismiss} disabled={submitting}>Cancel</button>}
               {onSubmitAndNext ? (
-                <button className={`btn btn--primary ${finishArmed && !isComplete ? "btn--confirm" : ""}`} onClick={() => {
+                <button className={`btn btn--primary ${finishArmed && !isComplete ? "btn--confirm" : ""}`} onClick={(ev) => {
                   if (isComplete && !correctionReason) { askCorrectionReason(); return; }
-                  if (!isComplete && !finishArmed) { setFinishArmed(true); return; }
+                  if (!isComplete && !confirmFinish(ev)) return;
                   doSubmit(() => (isComplete ? onSubmit : onSubmitAndNext)(buildPatch("completed")));
                 }} disabled={submitting || !canFinish}
                   title={koTieBlocked ? KO_TIE_REASON : undefined}>
                   {submitting ? "Saving…" : koTieBlocked ? "Needs a winner" : isComplete ? "Save correction" : finishArmed ? "Tap again to finish →" : "Finish + Start Next →"}
                 </button>
               ) : (
-                <button className={`btn btn--primary ${finishArmed && !isComplete ? "btn--confirm" : ""}`} onClick={() => {
+                <button className={`btn btn--primary ${finishArmed && !isComplete ? "btn--confirm" : ""}`} onClick={(ev) => {
                   if (isComplete && !correctionReason) { askCorrectionReason(); return; }
-                  if (!isComplete && !finishArmed) { setFinishArmed(true); return; }
+                  if (!isComplete && !confirmFinish(ev)) return;
                   doSubmit(() => onSubmit(buildPatch("completed")));
                 }} disabled={submitting || !canFinish}
                   title={koTieBlocked ? KO_TIE_REASON : undefined}>
@@ -1379,7 +1411,7 @@ export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, on
             </div>
 
             {nextMatch ? (
-              <button className="btn btn--sm score-nav__next" onClick={onNext} disabled={submitting} title={nextMatch.sideA?.name + " vs " + nextMatch.sideB?.name}>Next →</button>
+              <button className="btn btn--sm score-nav__next" onClick={goNext} disabled={submitting} title={nextMatch.sideA?.name + " vs " + nextMatch.sideB?.name}>Next →</button>
             ) : <span />}
           </div>
           )}

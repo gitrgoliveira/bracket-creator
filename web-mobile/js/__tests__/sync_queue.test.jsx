@@ -2230,3 +2230,396 @@ describe('_enqueueTerminalWrite: a queued write never carries the downstream con
         expect(failures[0].advice).toBe('Finish it or send it back to the queue, then enter this result again.');
     });
 });
+
+// bc-sync: an edit a score editor is still holding in its autosave debounce is
+// unsent work, so the pill must not read "Synced" over it; and when the page is
+// going away that edit must reach the persisted outbox synchronously, because a
+// fetch started from pagehide dies with the document before its failure path
+// could queue it.
+describe('bc-sync: pending edits and durable running writes', () => {
+    it('a pending edit reads as syncing until it is released', () => {
+        const states = [];
+        subscribeSyncStatus((s) => states.push(s));
+        const token = {};
+        API.notePendingEdit(token, true);
+        expect(states[states.length - 1]).toBe('syncing');
+        API.notePendingEdit(token, false);
+        expect(states[states.length - 1]).toBe('synced');
+    });
+
+    it('two editors hold separate pending edits', () => {
+        let status;
+        subscribeSyncStatus((s) => { status = s; });
+        const a = {}, b = {};
+        API.notePendingEdit(a, true);
+        API.notePendingEdit(b, true);
+        API.notePendingEdit(a, false);
+        expect(status).toBe('syncing');
+        API.notePendingEdit(b, false);
+        expect(status).toBe('synced');
+    });
+
+    it('a durable running write is persisted to the outbox before any fetch answers', async () => {
+        // A fetch that never answers: the direct path would hang on it.
+        mockFetch(() => new Promise(() => {}));
+        const p = API.recordScore('c1', 'm1', { status: 'running', durable: true }, 'pw', null);
+        // Synchronously, before anything is awaited.
+        const stored = localStorage.getItem('bc_write_queue');
+        expect(stored).not.toBeNull();
+        expect(stored).toContain('m1');
+        // The flag asks for the outbox; it is never part of the write itself.
+        expect(stored).not.toContain('durable');
+        await flushMicrotasks();
+        await expect(p).resolves.toMatchObject({ queued: true });
+    });
+
+    it('a durable write leaves the in-flight count balanced', async () => {
+        let status;
+        subscribeSyncStatus((s) => { status = s; });
+        let resolveFlush;
+        mockFetch(() => new Promise((r) => { resolveFlush = r; }));
+        await API.recordScore('c1', 'm1', { status: 'running', durable: true }, 'pw', null);
+        await flushMicrotasks();
+        expect(status).toBe('syncing'); // queued, and the flush is sending it
+        resolveFlush({ ok: true, json: () => Promise.resolve({}) });
+        await flushMicrotasks();
+        expect(status).toBe('synced'); // nothing stuck on "Syncing..."
+    });
+
+    it('a running write without the flag still goes by fetch', async () => {
+        mockFetch(() => Promise.resolve({ ok: true, json: () => Promise.resolve({}) }));
+        await API.recordScore('c1', 'm1', { status: 'running' }, 'pw', null);
+        expect(localStorage.getItem('bc_write_queue')).toBeNull();
+        expect(writeCallCount()).toBe(1);
+    });
+
+    it('the flag does not change a completed write', async () => {
+        mockFetch(() => Promise.resolve({ ok: true, json: () => Promise.resolve({}) }));
+        await API.recordScore('c1', 'm1', { status: 'completed', durable: true }, 'pw', null);
+        expect(writeCallCount()).toBe(1);
+        expect(localStorage.getItem('bc_write_queue')).toBeNull();
+    });
+});
+
+describe('bc-sync: the stored outbox is shared by every tab', () => {
+    // Two module instances over one localStorage are two tabs of the app: the
+    // beforeEach import is tab A, and a second import after resetModules is
+    // tab B. A persist used to write this tab's queue over the stored one, so
+    // a result queued in another tab was dropped from storage (and lost if
+    // that tab then closed), and an emptied queue removed the key outright.
+    const offline = () => Promise.reject(new TypeError('offline'));
+    // Tab B's retries must neither land nor fail while a test watches tab A:
+    // either would make tab B save its own queue again and hide what A did.
+    const hang = () => new Promise(() => {});
+    const landed = () => Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve({}) });
+    const stored = () => JSON.parse(localStorage.getItem('bc_write_queue') || '[]').map(([, d]) => d);
+    const storedMatchIds = () => stored().map((d) => d.matchID).sort();
+
+    async function openTabB() {
+        vi.resetModules();
+        return (await import('../api_client.jsx')).API;
+    }
+
+    it('a tab saving its own write keeps the write another tab queued', async () => {
+        mockFetch(offline);
+        const tabB = await openTabB();
+        await tabB.recordScore('c1', 'mB', { status: 'completed', winner: 'B' }, 'pw', null);
+        await API.recordScore('c1', 'mA', { status: 'completed', winner: 'A' }, 'pw', null);
+        await flushMicrotasks();
+        expect(storedMatchIds()).toEqual(['mA', 'mB']);
+    });
+
+    it('a write that lands leaves storage, and the other tab\'s stays', async () => {
+        mockFetch(offline);
+        const tabB = await openTabB();
+        await tabB.recordScore('c1', 'mB', { status: 'completed', winner: 'B' }, 'pw', null);
+        await API.recordScore('c1', 'mA', { status: 'completed', winner: 'A' }, 'pw', null);
+        await flushMicrotasks();
+        mockFetch((url) => (String(url).includes('/matches/mA/') ? landed() : hang()));
+        await tick(10000);
+        expect(API.hasPendingTerminalWrite('c1', 'mA')).toBe(false);
+        expect(storedMatchIds()).toEqual(['mB']);
+    });
+
+    it('a landed write never removes a newer entry another tab stored under the same match', async () => {
+        mockFetch(offline);
+        const tabB = await openTabB();
+        await API.recordScore('c1', 'm1', { status: 'completed', winner: 'A' }, 'pw', null);
+        await flushMicrotasks();
+        vi.advanceTimersByTime(1000);
+        await tabB.recordScore('c1', 'm1', { status: 'completed', winner: 'B' }, 'pw', null);
+        await flushMicrotasks();
+        // Tab A's older write lands; tab B's newer one for the same match is
+        // still queued there and must stay stored.
+        mockFetch((url, opts) => (JSON.parse(opts.body).winner === 'A' ? landed() : hang()));
+        await tick(10000);
+        expect(API.hasPendingTerminalWrite('c1', 'm1')).toBe(false);
+        expect(stored().map((d) => d.payload.winner)).toEqual(['B']);
+    });
+
+    it('a landed write is still pruned when the save after it failed', async () => {
+        // Browser storage full at the moment the write landed: the entries this
+        // tab settled must still be taken out by the next save that succeeds,
+        // or the landed write would come back from storage and be replayed.
+        mockFetch(offline);
+        const tabB = await openTabB();
+        await tabB.recordScore('c1', 'mB', { status: 'completed', winner: 'B' }, 'pw', null);
+        await API.recordScore('c1', 'mA', { status: 'completed', winner: 'A' }, 'pw', null);
+        await flushMicrotasks();
+        const setItem = localStorage.setItem;
+        localStorage.setItem = () => { throw new Error('QuotaExceededError'); };
+        mockFetch((url) => (String(url).includes('/matches/mA/') ? landed() : hang()));
+        await tick(10000);
+        expect(API.hasPendingTerminalWrite('c1', 'mA')).toBe(false);
+        localStorage.setItem = setItem;
+        mockFetch((url) => (String(url).includes('/matches/mC/') ? offline() : hang()));
+        await API.recordScore('c1', 'mC', { status: 'completed', winner: 'C' }, 'pw', null);
+        await flushMicrotasks();
+        expect(storedMatchIds()).toEqual(['mB', 'mC']);
+    });
+
+    it('an unreadable entry dropped on load leaves storage, so it is announced once', async () => {
+        const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+        localStorage.setItem('bc_write_queue', JSON.stringify([['c1:m1', {
+            compID: 'c1', matchID: 'm1', payload: {}, password: 'pw',
+            kind: 'score', terminal: true, method: 'PUT',
+            url: '/api/competitions/c1/matches/m1/score', enqueuedAt: 'not-a-time',
+        }]]));
+        mockFetch(offline);
+        vi.resetModules();
+        await import('../api_client.jsx');
+        expect(localStorage.getItem('bc_write_queue')).toBeNull();
+        warnSpy.mockRestore();
+    });
+
+    it('a tab saving an older copy keeps the newer write another tab stored under the same match', async () => {
+        // Tab B loads while tab A holds a queued autosave and takes it up; tab
+        // A then queues its Finish for the same match. Tab B's next save used
+        // to write its older copy over the Finish, which was then lost if tab
+        // A reloaded before sending it.
+        mockFetch(offline);
+        await API.recordScore('c1', 'm1', { status: 'running', ipponsA: ['M'] }, 'pw', null);
+        await flushMicrotasks();
+        await openTabB();
+        vi.advanceTimersByTime(1000);
+        await API.recordScore('c1', 'm1', { status: 'completed', ipponsA: ['M', 'M'], winner: 'A' }, 'pw', null);
+        await flushMicrotasks();
+        // Tab B's retry of the autosave fails and it saves its queue; tab A's
+        // retry of the Finish hangs, so tab A never saves again to repair it.
+        mockFetch((url, opts) => (JSON.parse(opts.body).status === 'running' ? offline() : hang()));
+        await tick(10000);
+        expect(stored()).toEqual([expect.objectContaining({ terminal: true, payload: expect.objectContaining({ winner: 'A' }) })]);
+    });
+
+    it('a revoked password is scrubbed from every stored entry, another tab\'s included', async () => {
+        mockFetch(offline);
+        const tabB = await openTabB();
+        await tabB.recordScore('c1', 'mB', { status: 'completed', winner: 'B' }, 'pw', null);
+        await flushMicrotasks();
+        // This tab holds nothing of its own when the password_reset arrives.
+        API.parkQueueForReauth();
+        expect(stored()).toEqual([expect.objectContaining({ matchID: 'mB', password: '', authBlocked: true })]);
+    });
+});
+
+describe('bc-sync: a tab follows the writes other tabs store', () => {
+    // `storage` fires in every OTHER tab when one writes the key. Dispatched by
+    // hand here (the test's localStorage is a plain object) with what the
+    // writing tab's save would carry.
+    const offline = () => Promise.reject(new TypeError('offline'));
+    const landed = () => Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve({}) });
+    const entry = (matchID, over = {}) => [`c1:${matchID}`, {
+        compID: 'c1', matchID, payload: { status: 'completed', winner: matchID }, password: 'pw',
+        kind: 'score', terminal: true, method: 'PUT', url: `/api/competitions/c1/matches/${matchID}/score`,
+        enqueuedAt: Date.now(), ...over,
+    }];
+    const otherTabSaved = (oldValue, newValue) => window.dispatchEvent(
+        new StorageEvent('storage', { key: 'bc_write_queue', oldValue, newValue }));
+
+    it('takes up and sends a write another tab queued', async () => {
+        // The other tab queued a Finish while offline and was then closed.
+        const sent = [];
+        mockFetch((url, opts) => { sent.push(JSON.parse(opts.body).winner); return landed(); });
+        otherTabSaved(null, JSON.stringify([entry('mB')]));
+        await tick(0);
+        expect(sent).toEqual(['mB']);
+        expect(API.hasPendingTerminalWrite('c1', 'mB')).toBe(false);
+    });
+
+    it('drops its copy of a write the other tab settled', async () => {
+        mockFetch(offline);
+        const v1 = JSON.stringify([entry('mB')]);
+        otherTabSaved(null, v1);
+        await flushMicrotasks();
+        expect(API.hasPendingTerminalWrite('c1', 'mB')).toBe(true);
+        // The other tab sent mB and took it out of storage; its mC stays.
+        otherTabSaved(v1, JSON.stringify([entry('mC')]));
+        expect(API.hasPendingTerminalWrite('c1', 'mB')).toBe(false);
+        expect(API.hasPendingTerminalWrite('c1', 'mC')).toBe(true);
+    });
+
+    it('a removed key drops the writes taken up from the other tab, not this tab\'s own', async () => {
+        mockFetch(offline);
+        await API.recordScore('c1', 'mA', { status: 'completed', winner: 'A' }, 'pw', null);
+        const v1 = JSON.stringify([entry('mB')]);
+        otherTabSaved(null, v1);
+        await flushMicrotasks();
+        otherTabSaved(v1, null);
+        expect(API.hasPendingTerminalWrite('c1', 'mB')).toBe(false);
+        expect(API.hasPendingTerminalWrite('c1', 'mA')).toBe(true);
+    });
+
+    it('an older copy the other tab stores does not replace this tab\'s newer write', async () => {
+        mockFetch(offline);
+        await API.recordScore('c1', 'm1', { status: 'completed', winner: 'A' }, 'pw', null);
+        otherTabSaved(null, JSON.stringify([entry('m1', { payload: { status: 'completed', winner: 'stale' }, enqueuedAt: Date.now() - 1000 })]));
+        const sent = [];
+        mockFetch((url, opts) => { sent.push(JSON.parse(opts.body).winner); return landed(); });
+        await tick(10000);
+        expect(sent).toEqual(['A']);
+    });
+
+    it('does not take up an entry a load would drop', async () => {
+        mockFetch(offline);
+        otherTabSaved(null, JSON.stringify([entry('mB', { enqueuedAt: 'not-a-time' })]));
+        expect(API.hasPendingTerminalWrite('c1', 'mB')).toBe(false);
+    });
+});
+
+describe('bc-sync: a running write still being sent when the page goes away is kept', () => {
+    // The page going away cancels an open fetch, so a running write the server
+    // has not answered yet (up to 12s on bad Wi-Fi) was lost with it.
+    const hang = () => new Promise(() => {});
+    const storedEntries = () => JSON.parse(localStorage.getItem('bc_write_queue') || '[]').map(([, d]) => d);
+    const hideTab = () => {
+        Object.defineProperty(document, 'visibilityState', { configurable: true, get: () => 'hidden' });
+        document.dispatchEvent(new Event('visibilitychange'));
+        delete document.visibilityState;
+    };
+
+    it('pagehide puts it into the stored outbox', async () => {
+        mockFetch(hang);
+        API.recordScore('c1', 'm1', { status: 'running', ipponsA: ['M'] }, 'pw', null);
+        await flushMicrotasks();
+        expect(localStorage.getItem('bc_write_queue')).toBeNull();
+        window.dispatchEvent(new Event('pagehide'));
+        const [entry] = storedEntries();
+        expect(entry).toMatchObject({ matchID: 'm1', terminal: false, payload: { status: 'running', ipponsA: ['M'] } });
+    });
+
+    it('the tab being hidden does the same', async () => {
+        mockFetch(hang);
+        API.recordScore('c1', 'm1', { status: 'running', ipponsA: ['M'] }, 'pw', null);
+        await flushMicrotasks();
+        hideTab();
+        expect(storedEntries().map((d) => d.matchID)).toEqual(['m1']);
+    });
+
+    it('a queued Finish made after it was sent is not replaced', async () => {
+        mockFetch((url, opts) => (JSON.parse(opts.body).status === 'running' ? hang() : Promise.reject(new TypeError('offline'))));
+        API.recordScore('c1', 'm1', { status: 'running', ipponsA: ['M'] }, 'pw', null);
+        await flushMicrotasks();
+        vi.advanceTimersByTime(50);
+        await API.recordScore('c1', 'm1', { status: 'completed', ipponsA: ['M', 'M'], winner: 'A' }, 'pw', null);
+        window.dispatchEvent(new Event('pagehide'));
+        expect(API.hasPendingTerminalWrite('c1', 'm1')).toBe(true);
+        expect(storedEntries()).toEqual([expect.objectContaining({ terminal: true })]);
+    });
+
+    it('a write that already landed is not queued again', async () => {
+        mockFetch(() => Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve({}) }));
+        await API.recordScore('c1', 'm1', { status: 'running', ipponsA: ['M'] }, 'pw', null);
+        await flushMicrotasks();
+        window.dispatchEvent(new Event('pagehide'));
+        expect(localStorage.getItem('bc_write_queue')).toBeNull();
+    });
+
+    it('a tab that is only hidden does not send the write a second time', async () => {
+        mockFetch(hang);
+        API.recordScore('c1', 'm1', { status: 'running', ipponsA: ['M'] }, 'pw', null);
+        await flushMicrotasks();
+        hideTab();
+        // Anything that flushes the queue meanwhile leaves the copy alone.
+        window.dispatchEvent(new Event('online'));
+        await tick(5000);
+        expect(writeCallCount()).toBe(1);
+    });
+
+    it('the kept copy leaves the outbox once the write is answered', async () => {
+        let answer;
+        mockFetch(() => new Promise((r) => { answer = r; }));
+        API.recordScore('c1', 'm1', { status: 'running', ipponsA: ['M'] }, 'pw', null);
+        await flushMicrotasks();
+        hideTab();
+        expect(storedEntries()).toHaveLength(1);
+        answer({ ok: true, status: 200, json: () => Promise.resolve({}) });
+        await flushMicrotasks();
+        expect(localStorage.getItem('bc_write_queue')).toBeNull();
+        expect(writeCallCount()).toBe(1);
+    });
+
+    it('a write whose fetch fails after the tab was hidden is still sent', async () => {
+        // Its failure path queues it anew while a flush is already sending
+        // another match's write, so the retry waits in the queue for that
+        // flush's rerun: removing the kept copy must not take the retry too.
+        const ok = () => ({ ok: true, status: 200, json: () => Promise.resolve({}) });
+        let failM1, answerM2;
+        const m1Bodies = [];
+        let m1Calls = 0;
+        mockFetch((url, opts) => {
+            if (String(url).includes('/matches/m2/')) return new Promise((r) => { answerM2 = r; });
+            m1Calls++;
+            m1Bodies.push(JSON.parse(opts.body));
+            return m1Calls === 1 ? new Promise((_, reject) => { failM1 = reject; }) : Promise.resolve(ok());
+        });
+        enqueueRunningWrite('c1', 'm2', { status: 'running', ipponsA: ['K'] }, 'pw');
+        await flushMicrotasks();
+        API.recordScore('c1', 'm1', { status: 'running', ipponsA: ['M'] }, 'pw', null);
+        await flushMicrotasks();
+        hideTab();
+        failM1(new TypeError('offline'));
+        await flushMicrotasks();
+        answerM2(ok());
+        await tick(10000);
+        expect(m1Bodies.map((b) => b.ipponsA)).toEqual([['M'], ['M']]);
+        expect(localStorage.getItem('bc_write_queue')).toBeNull();
+    });
+
+    it('the kept copy is dated when the write was sent, not when the tab was hidden', async () => {
+        mockFetch(hang);
+        const sentAt = Date.now();
+        API.recordScore('c1', 'm1', { status: 'running', ipponsA: ['M'] }, 'pw', null);
+        await flushMicrotasks();
+        vi.advanceTimersByTime(5000);
+        hideTab();
+        expect(storedEntries()[0].enqueuedAt).toBe(sentAt);
+    });
+});
+
+describe('bc-sync: an autosave is stamped with the time of its edit (operator ruling 2026-09-27)', () => {
+    it('takes the edit\'s age off the stamp, and never sends the reading itself', async () => {
+        let body;
+        mockFetch((url, opts) => { body = JSON.parse(opts.body); return Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve({}) }); });
+        const realPerformance = global.performance;
+        // The last tap was 250.5 ms ago on the monotonic clock, which reads in
+        // fractions of a millisecond, as a browser's does.
+        global.performance = { now: () => 1250.7 };
+        try {
+            await API.recordScore('c1', 'm1', { status: 'running', ipponsA: ['M'], editedPerf: 1000.2 }, 'pw', null);
+        } finally {
+            global.performance = realPerformance;
+        }
+        // Whole milliseconds (the server reads an int64 and refuses a
+        // fraction with a 400), the age rounded up so the stamp is never later
+        // than the tap.
+        expect(body.modifiedAt).toBe(Date.now() - 251);
+        expect(body).not.toHaveProperty('editedPerf');
+    });
+
+    it('a write without the reading is stamped now', async () => {
+        let body;
+        mockFetch((url, opts) => { body = JSON.parse(opts.body); return Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve({}) }); });
+        await API.recordScore('c1', 'm1', { status: 'completed', ipponsA: ['M', 'M'], winner: 'A' }, 'pw', null);
+        expect(body.modifiedAt).toBe(Date.now());
+    });
+});

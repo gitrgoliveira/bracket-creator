@@ -19,7 +19,7 @@
 
 import { resolveMatchLineup, resolveLineupTeamId, pickFromLineup, pickMemberIdFromLineup, boutSideView, kachinukiHidesLineupPosition, resolveBoutSideSquadLabel } from './lineup_resolver.jsx';
 import { DAIHYOSEN_POSITION } from './pool_ids.jsx';
-import { resultSlot, sideSlotOrder, realIppons, hanteiTied, nameOf, attributeWinnerSide, subBoutAttribution } from './result_slot.jsx';
+import { resultSlot, sideSlotOrder, realIppons, hanteiTied, nameOf, attributeWinnerSide, subBoutAttribution, defaultWinMaru } from './result_slot.jsx';
 import { sideLookupKey } from './competitor_identity.jsx';
 import { NumberedName, numberFollowsName } from './numbered_name.jsx';
 import { creditedBoutSide, subBoutHasResult } from './team_default_credit.jsx';
@@ -363,7 +363,7 @@ function centreMarks(sub, matchSideA, matchSideB) {
   // the mark then renders inboard of them rather than being dropped.
   const resultCells = (letters) => {
     if (!sub.decidedByHantei) {
-      return { cells: window.defaultWinMaru ? window.defaultWinMaru(sub.encho) : ["○", "○"], loose: false };
+      return { cells: defaultWinMaru(sub.encho), loose: false };
     }
     const cells = letters.slice(0, 2);
     const { slot, loose } = resultSlot(cells);

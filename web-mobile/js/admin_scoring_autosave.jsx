@@ -137,7 +137,14 @@ export function useDebouncedRunningWrite({ isRunningRef, buildPatchRef, onSubmit
   // threw away. Nothing of this hook's is left pending then, so the pending
   // edit is released too.
   const cancelDebounce = () => {
-    if (clearTimer()) notePending(false);
+    // bc-dhas: report whether a timer was actually pending, so a caller that
+    // must decide "is there an unsaved edit" (onRemoveDaihyosen) can ask this
+    // instead of re-deriving it. Every other caller (doSubmit, leaveEditor's
+    // Discard branch, the individual editor's own C1 submit) still just
+    // calls this for effect and ignores the return value.
+    const hadPending = clearTimer();
+    if (hadPending) notePending(false);
+    return hadPending;
   };
 
   // The running write itself, shared by the debounce timer, the unmount and

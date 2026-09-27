@@ -475,9 +475,11 @@ describe('bc-emsl: a team-sheet tap that clears nothing writes nothing', () => {
 });
 
 describe('an edit inside the autosave window survives Prev/Next', () => {
-  // Prev/Next re-key the editor in its host, which unmounts it, and the unmount
-  // cancels the debounce timer. An ippon tapped just before either one was
-  // never written; now the editor saves it first, as closing does.
+  // Prev/Next re-key the editor in its host, which unmounts it. Leaving a
+  // RUNNING match (leaveEditor's common case) does not cancel the debounce
+  // itself; the unmount effect inside useDebouncedRunningWrite is what fires
+  // the pending write, the same mechanism the page-hide flush uses. An ippon
+  // tapped just before either one used to be lost; now the unmount writes it.
   const neighbour = { id: 'm-next', sideA: { name: 'Sato' }, sideB: { name: 'Ito' } };
   const teamMatch = () => makeRunningMatch({
     id: 'tm-running', compKind: 'team', teamSize: 3,
@@ -501,5 +503,294 @@ describe('an edit inside the autosave window survives Prev/Next', () => {
     expect(onNext).toHaveBeenCalledTimes(1);
     expect(window.API.recordScore).toHaveBeenCalledTimes(1);
     expect(window.API.recordScore.mock.calls[0][2].status).toBe('running');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// bc-dhas: Add/Remove representative bout races the pending autosave
+// ---------------------------------------------------------------------------
+//
+// onDaihyosen (Add) and onRemoveDaihyosen (Remove) are explicit writes, like
+// Finish, so each must cancel a pending debounced autosave FIRST (as
+// doSubmit does) rather than let a stale timer fire afterward with a
+// snapshot built before the row changed. Both directions raced: an Add
+// followed at once by a scoring tap could have the tap's own stale write
+// erase the just-added row (the bead's own repro); a Remove sent with an
+// edit still pending could have that edit's later write resurrect the row
+// the operator just removed (R1/R2 in the bead's plan).
+//
+// These mount the REAL TeamScoreEditorModal (via the ScoreEditorModal
+// dispatcher, the same route every production mount site uses) under fake
+// timers. `settle` flushes the handlers' internal awaits: Promise
+// microtasks run for real even under vi.useFakeTimers(), so repeated
+// `await act(async () => { await Promise.resolve(); })` ticks drain a
+// chain of resolved-mock awaits without a real wait (the same idiom
+// admin_shiaijo.render.test.jsx uses under fake timers; `waitFor`'s own
+// polling never fires here since it schedules through the faked clock).
+
+function makeKnockoutTeamMatch(overrides = {}) {
+  return {
+    id: 'tm-ko', compId: 'comp1', status: 'running', phase: 'bracket', round: 'Final',
+    court: 'A', compKind: 'team', teamSize: 3, compFormat: 'knockout', teamMatchType: 'fixed',
+    sideA: { id: 'team-A', name: 'Team A' }, sideB: { id: 'team-B', name: 'Team B' },
+    subResults: [],
+    ...overrides,
+  };
+}
+
+function daihyosenRow(overrides = {}) {
+  return {
+    position: -1, sideA: 'Team A', sideB: 'Team B', ipponsA: [], ipponsB: [], winner: '',
+    decision: 'daihyosen',
+    ...overrides,
+  };
+}
+
+function makeMatchWithDaihyosen(overrides = {}) {
+  return makeKnockoutTeamMatch({ subResults: [daihyosenRow()], ...overrides });
+}
+
+async function settle(times = 8) {
+  for (let i = 0; i < times; i++) {
+    await act(async () => { await Promise.resolve(); });
+  }
+}
+
+function subMatchRows() { return [...document.querySelectorAll('.team-sub-match')]; }
+function tieBoutButton(idx) { return subMatchRows()[idx].querySelector('[data-testid="scoring-modal-tie-button"]'); }
+function ipponButton(rowEl, color, letter) {
+  return [...rowEl.querySelectorAll(`.team-sub-match__side--${color} button.ipt-btn`)].find((b) => b.textContent === letter);
+}
+function markSlot(rowEl, color, letter) {
+  return [...rowEl.querySelectorAll(`.tsm-center-pts--${color} button.editor-side__pt`)].find((b) => b.textContent === letter);
+}
+
+describe('bc-dhas: Add/Remove representative bout races the pending autosave', () => {
+  beforeEach(() => {
+    // Reset per test: the file-level beforeEach only clears recordScore.
+    window.API.recordDaihyosen = vi.fn();
+    window.API.removeDaihyosen = vi.fn();
+  });
+
+  it('T1: Add inside the debounce window cancels the pending autosave first', async () => {
+    window.API.recordDaihyosen.mockResolvedValue({ result: { ...makeKnockoutTeamMatch(), subResults: [daihyosenRow()] } });
+    renderModal(makeKnockoutTeamMatch());
+
+    // Tie every bout, the last tap right before Add (mirrors the bead's own
+    // three-Ties-then-Add repro): one pending autosave timer is left armed.
+    await act(async () => { fireEvent.click(tieBoutButton(0)); });
+    await act(async () => { fireEvent.click(tieBoutButton(1)); });
+    await act(async () => { fireEvent.click(tieBoutButton(2)); });
+
+    await act(async () => { fireEvent.click(screen.getByTestId('scoring-modal-daihyosen-button')); });
+    await settle();
+
+    // The explicit save landed; recordDaihyosen was posted.
+    expect(window.API.recordScore).toHaveBeenCalledTimes(1);
+    expect(window.API.recordDaihyosen).toHaveBeenCalledTimes(1);
+
+    // Red on e7cb3af0: the pending timer (armed by the last Tie, never
+    // cancelled by onDaihyosen) fires here with a snapshot built before the
+    // row existed.
+    await act(async () => { vi.advanceTimersByTime(350); });
+    await settle();
+    expect(window.API.recordScore).toHaveBeenCalledTimes(1);
+  });
+
+  it('T2: a tap right after the add carries the DH row (adopted via setMatchOverride)', async () => {
+    window.API.recordDaihyosen.mockResolvedValue({ result: { ...makeKnockoutTeamMatch(), subResults: [daihyosenRow()] } });
+    renderModal(makeKnockoutTeamMatch());
+
+    await act(async () => { fireEvent.click(tieBoutButton(2)); });
+    await act(async () => { fireEvent.click(screen.getByTestId('scoring-modal-daihyosen-button')); });
+    await settle();
+    window.API.recordScore.mockClear();
+
+    // A tap made AFTER the add resolves: its debounced write, 350ms later,
+    // must carry the newly adopted position -1 row.
+    await act(async () => { fireEvent.click(tieBoutButton(0)); });
+    await act(async () => { vi.advanceTimersByTime(350); });
+    await settle();
+
+    expect(window.API.recordScore).toHaveBeenCalledTimes(1);
+    const [, , patch] = window.API.recordScore.mock.calls[0];
+    // Red on e7cb3af0: matchOverride is never set, so the local board still
+    // has no daihyosen row (and the Add button, not Remove, would still show).
+    expect(patch.subResults.some((s) => s.position === -1)).toBe(true);
+  });
+
+  it('T2b: a tap made while the add request is still in flight is kept, with the row', async () => {
+    let view;
+    // Same pattern as "an edit inside the autosave window survives Prev/Next"
+    // above: a host whose onClose unmounts the editor.
+    const onClose = vi.fn(() => view.unmount());
+    let resolveDaihyosen;
+    window.API.recordDaihyosen.mockImplementation(() => new Promise((resolve) => { resolveDaihyosen = resolve; }));
+    view = renderModal(makeKnockoutTeamMatch(), { onClose });
+
+    await act(async () => { fireEvent.click(screen.getByTestId('scoring-modal-daihyosen-button')); });
+    await settle(); // the explicit save lands; recordDaihyosen is still pending
+
+    // A tap made WHILE the POST is in flight.
+    await act(async () => { fireEvent.click(tieBoutButton(0)); });
+
+    await act(async () => {
+      resolveDaihyosen({ result: { ...makeKnockoutTeamMatch(), subResults: [daihyosenRow()] } });
+    });
+    await settle();
+
+    // Red on e7cb3af0: onDaihyosen calls onClose() on success, which
+    // unmounts this host; the unmount effect then fires the pending tap
+    // built from the pre-adopt state (no row).
+    expect(onClose).not.toHaveBeenCalled();
+
+    window.API.recordScore.mockClear();
+    await act(async () => { vi.advanceTimersByTime(350); });
+    await settle();
+
+    expect(onClose).not.toHaveBeenCalled();
+    expect(window.API.recordScore).toHaveBeenCalledTimes(1);
+    const [, , patch] = window.API.recordScore.mock.calls[0];
+    expect(patch.subResults.some((s) => s.position === -1)).toBe(true);
+    expect(patch.subResults.find((s) => s.position === 1)?.decision).toBe('hikiwake');
+  });
+
+  it('T3a: Remove inside the debounce window stays removed (onClose does not unmount)', async () => {
+    window.API.removeDaihyosen.mockResolvedValue({ subResults: [] });
+    const onClose = vi.fn();
+    renderModal(makeMatchWithDaihyosen(), { onClose });
+
+    // A point on bout 1 (not the DH row) arms the debounce; Remove at once.
+    await act(async () => { fireEvent.click(ipponButton(subMatchRows()[0], 'shiro', 'M')); });
+    await act(async () => { fireEvent.click(screen.getByTestId('team-daihyosen-remove')); });
+    await settle();
+
+    // Red on e7cb3af0: onRemoveDaihyosen never saves first, so this is 0.
+    expect(window.API.recordScore).toHaveBeenCalledTimes(1);
+    expect(window.API.removeDaihyosen).toHaveBeenCalledTimes(1);
+    const saveOrder = window.API.recordScore.mock.invocationCallOrder[0];
+    const deleteOrder = window.API.removeDaihyosen.mock.invocationCallOrder[0];
+    expect(saveOrder).toBeLessThan(deleteOrder);
+    // Red on e7cb3af0: the old code always calls onClose() after a
+    // successful remove.
+    expect(onClose).not.toHaveBeenCalled();
+
+    // The debounce was cancelled before the pre-remove save, so nothing is
+    // left pending to fire a stale write after the delete.
+    await act(async () => { vi.advanceTimersByTime(350); });
+    await settle();
+    expect(window.API.recordScore).toHaveBeenCalledTimes(1);
+    expect(onClose).not.toHaveBeenCalled();
+  });
+
+  it('T3b: Remove inside the debounce window stays removed (onClose unmounts the host)', async () => {
+    window.API.removeDaihyosen.mockResolvedValue({ subResults: [] });
+    let view;
+    const onClose = vi.fn(() => view.unmount());
+    view = renderModal(makeMatchWithDaihyosen(), { onClose });
+
+    await act(async () => { fireEvent.click(ipponButton(subMatchRows()[0], 'shiro', 'M')); });
+    await act(async () => { fireEvent.click(screen.getByTestId('team-daihyosen-remove')); });
+    await settle();
+
+    expect(window.API.recordScore).toHaveBeenCalledTimes(1);
+    expect(window.API.removeDaihyosen).toHaveBeenCalledTimes(1);
+    const saveOrder = window.API.recordScore.mock.invocationCallOrder[0];
+    const deleteOrder = window.API.removeDaihyosen.mock.invocationCallOrder[0];
+    expect(saveOrder).toBeLessThan(deleteOrder);
+    // Red on e7cb3af0: onClose() unmounts this host at once, and the
+    // unmount's own write (built from the pre-removal state) resurrects
+    // the row server-side (R1).
+    expect(onClose).not.toHaveBeenCalled();
+
+    await act(async () => { vi.advanceTimersByTime(350); });
+    await settle();
+    expect(window.API.recordScore).toHaveBeenCalledTimes(1);
+    expect(onClose).not.toHaveBeenCalled();
+  });
+
+  it('T4: a pending DH point take-back is saved before the DELETE', async () => {
+    window.API.removeDaihyosen.mockResolvedValue({ subResults: [] });
+    const match = makeMatchWithDaihyosen();
+    const { rerender } = renderModal(match);
+    const dhRowEl = () => subMatchRows()[3]; // bout1, bout2, bout3, then DH
+
+    // Strike a point on the DH row itself and let it autosave.
+    await act(async () => { fireEvent.click(ipponButton(dhRowEl(), 'shiro', 'M')); });
+    await act(async () => { vi.advanceTimersByTime(350); });
+    await settle();
+    expect(window.API.recordScore).toHaveBeenCalledTimes(1);
+    const [, , firstPatch] = window.API.recordScore.mock.calls[0];
+    const dhAfterStrike = firstPatch.subResults.find((s) => s.position === -1);
+
+    // The server round-trips the struck point back as the new baseline.
+    const recordedMatch = makeMatchWithDaihyosen({ subResults: [dhAfterStrike] });
+    await act(async () => {
+      rerender(
+        <ScoreEditorModal match={recordedMatch} onClose={vi.fn()} onSubmit={makeOnSubmit(recordedMatch)} password="" />
+      );
+    });
+    window.API.recordScore.mockClear();
+
+    // Take the point back, then Remove at once.
+    await act(async () => { fireEvent.click(markSlot(dhRowEl(), 'shiro', 'M')); });
+    await act(async () => { fireEvent.click(screen.getByTestId('team-daihyosen-remove')); });
+    await settle();
+
+    // Red on e7cb3af0: the DELETE goes first, so the take-back is lost.
+    expect(window.API.recordScore).toHaveBeenCalledTimes(1);
+    const [, , patch] = window.API.recordScore.mock.calls[0];
+    const dh = patch.subResults.find((s) => s.position === -1);
+    expect(dh.ipponsA).toEqual([]);
+    expect(dh.ipponsB).toEqual([]);
+    const saveOrder = window.API.recordScore.mock.invocationCallOrder[0];
+    const deleteOrder = window.API.removeDaihyosen.mock.invocationCallOrder[0];
+    expect(saveOrder).toBeLessThan(deleteOrder);
+  });
+
+  it('T4b: a pending DH hantei cancel is saved before the DELETE (markless arrays, not omitted)', async () => {
+    window.API.removeDaihyosen.mockResolvedValue({ subResults: [] });
+    const match = makeMatchWithDaihyosen();
+    const { rerender } = renderModal(match);
+
+    // Pick a hantei winner (SHIRO = pickDaihyosenHantei("b") = sideB) and
+    // let it autosave.
+    await act(async () => { fireEvent.click(screen.getByTestId('team-daihyosen-hantei-arm')); });
+    await act(async () => { fireEvent.click(screen.getByTestId('team-daihyosen-hantei-shiro')); });
+    await act(async () => { vi.advanceTimersByTime(350); });
+    await settle();
+    expect(window.API.recordScore).toHaveBeenCalledTimes(1);
+
+    // The server round-trips the recorded verdict back as the new baseline
+    // (the normalizeMatch-derived shape every real mount receives, same
+    // fixture convention as team_daihyosen_silence.render.test.jsx).
+    const recordedMatch = makeMatchWithDaihyosen({
+      subResults: [daihyosenRow({ winner: 'Team B', ipponsB: ['Ht'], decidedByHantei: true })],
+    });
+    await act(async () => {
+      rerender(
+        <ScoreEditorModal match={recordedMatch} onClose={vi.fn()} onSubmit={makeOnSubmit(recordedMatch)} password="" />
+      );
+    });
+    window.API.recordScore.mockClear();
+
+    // Cancel the verdict, then Remove at once.
+    await act(async () => { fireEvent.click(screen.getByTestId('team-daihyosen-hantei-cancel')); });
+    await act(async () => { fireEvent.click(screen.getByTestId('team-daihyosen-remove')); });
+    await settle();
+
+    // Red on e7cb3af0: the DELETE goes first, so the cancel is lost.
+    expect(window.API.recordScore).toHaveBeenCalledTimes(1);
+    const [, , patch] = window.API.recordScore.mock.calls[0];
+    const dh = patch.subResults.find((s) => s.position === -1);
+    // Touched (armed flipped true -> false): explicit arrays, not omitted
+    // (the daihyosenSilent branch is for a row nothing is known about).
+    expect('ipponsA' in dh).toBe(true);
+    expect('ipponsB' in dh).toBe(true);
+    expect(dh.ipponsA.includes('Ht')).toBe(false);
+    expect(dh.ipponsB.includes('Ht')).toBe(false);
+    const saveOrder = window.API.recordScore.mock.invocationCallOrder[0];
+    const deleteOrder = window.API.removeDaihyosen.mock.invocationCallOrder[0];
+    expect(saveOrder).toBeLessThan(deleteOrder);
   });
 });

@@ -256,24 +256,24 @@ func TestBuildResultsWorkbook_TeamBracketDefaultWinCreditedBoutShowsMaruNoMark(t
 		return v
 	}
 
-	// Bouts 1-3 (rows H+3, H+4, H+5): the maru on Red A's (left) column, no
-	// "Kiken" text anywhere on the row -- not even on Red B's (right, empty)
-	// column, which is the side the mark would name.
+	// Bouts 1-3 (rows H+3, H+4, H+5): the maru on Red A's (right, Aka) column,
+	// no "Kiken" text anywhere on the row -- not even on Red B's (left, Shiro,
+	// empty) column, which is the side the mark would name.
 	for pos := 1; pos <= 3; pos++ {
 		row := headerExcelRow + 2 + pos
 		left := cellAt(lCol, row)
 		right := cellAt(rCol, row)
-		assert.Equal(t, "○○", left, "bout %d: the default-win maru, no per-row mark", pos)
-		assert.Empty(t, right, "bout %d: the credited side's opponent column stays empty", pos)
-		assert.NotContains(t, left, "Kiken", "bout %d: no per-row Kiken mark", pos)
+		assert.Equal(t, "○○", right, "bout %d: the default-win maru, no per-row mark", pos)
+		assert.Empty(t, left, "bout %d: the credited side's opponent column stays empty", pos)
+		assert.NotContains(t, right, "Kiken", "bout %d: no per-row Kiken mark", pos)
 	}
 
 	// The summary row (H+5+teamSize=H+8) carries the ONE Kiken mark, on Red
-	// B's (right, the withdrawer) column, alongside Red A's IV=3 count with
-	// no mark on its own column.
+	// B's (left, Shiro, the withdrawer) column, alongside Red A's IV=3 count
+	// with no mark on its own (right, Aka) column.
 	summaryRow := headerExcelRow + 8
 	leftSummary := cellAt(lCol, summaryRow)
 	rightSummary := cellAt(rCol, summaryRow)
-	assert.Equal(t, "3", leftSummary, "Red A: IV 3, no mark on the credited side")
-	assert.Contains(t, rightSummary, "Kiken", "Red B: the withdrawer's mark rides the summary row")
+	assert.Equal(t, "3", rightSummary, "Red A: IV 3, no mark on the credited side")
+	assert.Contains(t, leftSummary, "Kiken", "Red B: the withdrawer's mark rides the summary row")
 }

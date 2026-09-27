@@ -2512,8 +2512,9 @@ func TestScoreCellsCarryOutstandingHansokuTriangle(t *testing.T) {
 		writeTeamSubMatchScores(f, sheet, 1, 5, subs, 3, "Tora A", "Kenshi B", domain.MatchSideA)
 		left, _ := f.GetCellValue(sheet, "B5")
 		right, _ := f.GetCellValue(sheet, "F5")
-		assert.Equal(t, "○○", left, "the credited side's maru, and nothing else")
-		assert.Empty(t, right, "the other side's cell stays empty")
+		// The credited side is SideA (Aka), whose cell is the RIGHT one.
+		assert.Equal(t, "○○", right, "the credited side's maru, and nothing else")
+		assert.Empty(t, left, "the other side's cell stays empty")
 	})
 }
 

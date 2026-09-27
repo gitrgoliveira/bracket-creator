@@ -348,7 +348,7 @@ func overlayPoolScores(f *excelize.File, pools []helper.Pool, resultByID map[str
 			if startColIdx >= len(row) {
 				continue
 			}
-			if row[startColIdx] != "White" {
+			if row[startColIdx] != helper.MatchHeaderLeftLabel() {
 				continue
 			}
 
@@ -437,7 +437,7 @@ func overlayTeamPoolScores(f *excelize.File, pools []helper.Pool, resultByID map
 			if startColIdx >= len(row) {
 				continue
 			}
-			if row[startColIdx] != "White" {
+			if row[startColIdx] != helper.MatchHeaderLeftLabel() {
 				continue
 			}
 
@@ -568,10 +568,7 @@ func writeTeamSummaryCells(f *excelize.File, sheetName string, courtStartCol, ex
 func writeScoreRowCells(f *excelize.File, sheetName string, courtStartCol, excelRow int, scoreA, scoreB string, mr state.MatchResult) {
 	leftScore, rightScore := helper.WhiteLeft(scoreA, scoreB)
 	lFoul, rFoul := helper.WhiteLeft(HansokuMark(mr.HansokuA), HansokuMark(mr.HansokuB))
-	lMark, rMark := SideMarksLR(mr.Decision, mr.HanteiDecided(), domain.WinnerAttribution{
-		WinnerID: mr.WinnerID, SideAID: mr.SideAID, SideBID: mr.SideBID,
-		Winner: mr.Winner, SideA: mr.SideA, SideB: mr.SideB,
-	})
+	lMark, rMark := SideMarksLR(mr.Decision, mr.HanteiDecided(), mr.Attribution())
 	// The outstanding-hansoku ▲ rides the cell's OUTER edge — nearest that
 	// side's name column — per FIK Table 2 (White's ▲ far left, Red's far
 	// right) and matching the scoreboard's placement between name and slots.

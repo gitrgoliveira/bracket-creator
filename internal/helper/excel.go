@@ -1163,10 +1163,28 @@ func MatchHeader(f *excelize.File, sheetName string, startColName string, poolRo
 	matchHeaderWithStyles(f, sheetName, startColName, poolRow, middleColName, endColName, getRedHeaderStyle(f), getTextStyle(f), getWhiteHeaderStyle(f), engi)
 }
 
+// matchHeaderLabels is the ONE place the "White"/"Red" side-label text lives:
+// matchHeaderWithStyles writes it, and MatchHeaderLeftLabel exports the left
+// member so a reader outside this package can identify the row by the same
+// text rather than restating the literal.
+func matchHeaderLabels() (left, right string) {
+	return WhiteLeft("Red", "White")
+}
+
+// MatchHeaderLeftLabel is the text a match's side-label header row carries in
+// its LEFT column. internal/export's overlayPoolScores and
+// overlayTeamPoolScores identify that row by this text; they read it from
+// here instead of restating the literal "White", so a wording change to
+// matchHeaderLabels cannot make them silently stop matching every block.
+func MatchHeaderLeftLabel() string {
+	left, _ := matchHeaderLabels()
+	return left
+}
+
 // matchHeaderWithStyles writes a match's side-label row: "White | vs | Red",
 // each label in its own side's header style (WhiteLeft's layout).
 func matchHeaderWithStyles(f *excelize.File, sheetName string, startColName string, poolRow int, middleColName string, endColName string, redHeaderStyle int, textStyle int, whiteHeaderStyle int, engi bool) {
-	leftLabel, rightLabel := WhiteLeft("Red", "White")
+	leftLabel, rightLabel := matchHeaderLabels()
 	leftStyle, rightStyle := WhiteLeft(redHeaderStyle, whiteHeaderStyle)
 
 	handleExcelError("SetCellValue", f.SetCellValue(sheetName, fmt.Sprintf("%s%d", startColName, poolRow), leftLabel))

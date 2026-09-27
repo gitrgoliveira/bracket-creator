@@ -123,7 +123,7 @@ export function EngiScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext
   const autosaveIsRunningRef = useRefE(false);
   const autosaveBuildPatchRef = useRefE(null);
   const autosaveOnSubmitRef = useRefE(null);
-  const { markDirty, cancelDebounce, flushPending } = useDebouncedRunningWrite({
+  const { markDirty, cancelDebounce, flushPending, leaveAfterSaving } = useDebouncedRunningWrite({
     isRunningRef: autosaveIsRunningRef,
     buildPatchRef: autosaveBuildPatchRef,
     onSubmitRef: autosaveOnSubmitRef,
@@ -190,15 +190,9 @@ export function EngiScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext
   };
   useEscapeToClose(canClose ? handleDismiss : undefined);
 
-  // Prev/Next re-key this editor in its host, which unmounts it, and the
-  // unmount cancels the autosave timer: flags still inside the window are
-  // saved first, as closing saves them (handleDismiss).
-  const leaveTo = (go) => () => {
-    if (m.status === "running" && isDirty) flushPending();
-    go();
-  };
-  const goPrev = leaveTo(onPrev);
-  const goNext = leaveTo(onNext);
+  // Prev/Next save flags still inside the autosave window first.
+  const goPrev = () => leaveAfterSaving(isDirty, onPrev);
+  const goNext = () => leaveAfterSaving(isDirty, onNext);
 
   // Pair names: the side's name holds both members combined ("Name 1 - Name 2");
   // split so member 2 renders under member 1. Both sides of an engi match are

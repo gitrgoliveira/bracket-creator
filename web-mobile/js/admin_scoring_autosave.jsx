@@ -131,8 +131,8 @@ export function useDebouncedRunningWrite({ isRunningRef, buildPatchRef, onSubmit
   // Clear on unmount so the closure can't fire after the component is gone.
   // Unmount keeps its CANCEL semantics, because the discard prompt unmounts
   // after the operator chose to discard. Every other way out of a running
-  // editor saves first: closing it and its Prev/Next each call flushPending
-  // before they unmount it. A reload never unmounts; the pagehide listener
+  // editor saves first: closing it calls flushPending, and its Prev/Next go
+  // through leaveAfterSaving (below), before they unmount it. A reload never unmounts; the pagehide listener
   // below is what keeps an edit across one.
   useEffectA(() => () => { cancelDebounce(); }, []);
 
@@ -212,5 +212,14 @@ export function useDebouncedRunningWrite({ isRunningRef, buildPatchRef, onSubmit
     };
   }, []);
 
-  return { markDirty, cancelDebounce, flushPending };
+  // leaveAfterSaving: Prev/Next re-key an editor in its host, which unmounts
+  // it, and the unmount only cancels (above). So an edit still inside the
+  // window is saved first, as closing saves it, and then `go` runs. `dirty` is
+  // the editor's own "not yet on the server" test, the one its close asks.
+  const leaveAfterSaving = (dirty, go) => {
+    if (isRunningRef.current && dirty) flushPending();
+    go();
+  };
+
+  return { markDirty, cancelDebounce, flushPending, leaveAfterSaving };
 }

@@ -1050,7 +1050,7 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
   const _autosaveIsRunningRef = useRefA(false);
   const _autosaveBuildPatchRef = useRefA(null);
   const _autosaveOnSubmitRef = useRefA(null);
-  const { markDirty: markScoringDirty, cancelDebounce: cancelScoringDebounce, flushPending: flushScoringAutosave } = useDebouncedRunningWrite({
+  const { markDirty: markScoringDirty, cancelDebounce: cancelScoringDebounce, flushPending: flushScoringAutosave, leaveAfterSaving } = useDebouncedRunningWrite({
     isRunningRef: _autosaveIsRunningRef,
     buildPatchRef: _autosaveBuildPatchRef,
     onSubmitRef: _autosaveOnSubmitRef,
@@ -2726,15 +2726,9 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
     onClose();
   };
 
-  // Prev/Next re-key this editor in its host, which unmounts it, and the
-  // unmount cancels the autosave timer: an edit still inside the window is
-  // saved first, as closing saves it (handleDismiss).
-  const leaveTo = (go) => () => {
-    if (m.status === "running" && scoringDirty) flushScoringAutosave();
-    go();
-  };
-  const goPrev = leaveTo(onPrev);
-  const goNext = leaveTo(onNext);
+  // Prev/Next save an edit still inside the autosave window first.
+  const goPrev = () => leaveAfterSaving(scoringDirty, onPrev);
+  const goNext = () => leaveAfterSaving(scoringDirty, onNext);
 
   // Esc-to-close + ←/→ match nav, matching ScoreEditorModal. M/K/D/T/H ippon
   // shortcuts are wired ONLY for kachinuki bout mode (one current bout, an

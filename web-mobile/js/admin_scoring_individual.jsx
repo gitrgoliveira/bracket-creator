@@ -239,7 +239,7 @@ export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, on
   const _autosaveIsRunningRef = useRefA(false);
   const _autosaveBuildPatchRef = useRefA(null);
   const _autosaveOnSubmitRef = useRefA(null);
-  const { markDirty: markScoringDirty, cancelDebounce: cancelScoringDebounce, flushPending: flushScoringAutosave } = useDebouncedRunningWrite({
+  const { markDirty: markScoringDirty, cancelDebounce: cancelScoringDebounce, flushPending: flushScoringAutosave, leaveAfterSaving } = useDebouncedRunningWrite({
     isRunningRef: _autosaveIsRunningRef,
     buildPatchRef: _autosaveBuildPatchRef,
     onSubmitRef: _autosaveOnSubmitRef,
@@ -807,15 +807,9 @@ export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, on
     onClose();
   };
 
-  // Prev/Next re-key this editor in its host, which unmounts it, and the
-  // unmount cancels the autosave timer: an edit still inside the window is
-  // saved first, as closing saves it (handleDismiss).
-  const leaveTo = (go) => () => {
-    if (m.status === "running" && scoringDirty) flushScoringAutosave();
-    go();
-  };
-  const goPrev = leaveTo(onPrev);
-  const goNext = leaveTo(onNext);
+  // Prev/Next save an edit still inside the autosave window first.
+  const goPrev = () => leaveAfterSaving(scoringDirty, onPrev);
+  const goNext = () => leaveAfterSaving(scoringDirty, onNext);
 
   // Keyboard shortcuts:
   //   Shift+M/K/D/T/H  → award point to AKA (red, sideA)

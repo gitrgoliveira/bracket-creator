@@ -1618,7 +1618,7 @@ func PrintThirdPlaceBlock(f *excelize.File, courtStartCol, startRow, numTeamMatc
 // startRow (deriving the two semifinal match numbers from rounds) and extends the
 // Elimination Matches print area to cover it. It bundles the three-call bronze
 // protocol shared by every bronze render path (CLI generators, results workbook,
-// blank-template export). nil rounds derive zero semi numbers, leaving both
+// stored-draw export). nil rounds derive zero semi numbers, leaving both
 // entrant slots hand-fillable.
 func PrintBronzeBlockWithPrintArea(f *excelize.File, startRow, numTeamMatches int, engi bool, bands []string, bronzeCourt string, rounds [][]*Node, matchWinners map[string]MatchWinner) {
 	semiA, semiB := SemifinalMatchNumbers(rounds)
@@ -2202,8 +2202,10 @@ func ProtectSheets(f *excelize.File, sheetNames []string) {
 // The score-entry sheets have explicitly unlocked cells for data entry.
 func ProtectAllSheets(f *excelize.File) {
 	for _, name := range f.GetSheetList() {
-		// Data, Time Estimator, and Pool Draw remain fully editable.
-		if name == SheetData || name == SheetTimeEstimator || name == SheetPoolDraw {
+		// Data, Time Estimator, and Pool Draw remain fully editable, and so
+		// does Kachinuki Detail: it holds no formula to protect, and its
+		// empty bout rows are there to be filled in.
+		if name == SheetData || name == SheetTimeEstimator || name == SheetPoolDraw || name == SheetKachinukiDetail {
 			continue
 		}
 		ProtectSheets(f, []string{name})

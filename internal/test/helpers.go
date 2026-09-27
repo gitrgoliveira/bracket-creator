@@ -38,6 +38,61 @@ func FindCellRow(rows [][]string, val string) int {
 	return -1
 }
 
+// CellAt safely reads rows[r][c], returning "" when r or c falls outside
+// rows in either direction: a negative index, a row past the end, or a
+// column past a row's end (GetRows trims each row's trailing empty cells,
+// so a blank cell past a short row's length is legitimately "").
+func CellAt(rows [][]string, r, c int) string {
+	if r < 0 || r >= len(rows) || c < 0 || c >= len(rows[r]) {
+		return ""
+	}
+	return rows[r][c]
+}
+
+// FirstRowWith returns the 0-based index of the first row whose cell at col
+// equals val, or -1. rows is the excelize GetRows shape.
+func FirstRowWith(rows [][]string, col int, val string) int {
+	for r, row := range rows {
+		if col < len(row) && row[col] == val {
+			return r
+		}
+	}
+	return -1
+}
+
+// NumberedRowsFrom counts the consecutive rows from 0-based row from whose
+// cell at col carries the bout numbers 1, 2, 3, ... in order: the bout rows
+// of a team block.
+func NumberedRowsFrom(rows [][]string, from, col int) int {
+	n := 0
+	for r := from; r < len(rows); r++ {
+		if col >= len(rows[r]) || rows[r][col] != strconv.Itoa(n+1) {
+			break
+		}
+		n++
+	}
+	return n
+}
+
+// TallySpanError reports what is wrong, if anything, with a team block's IV
+// tally formula: it must add one clause per bout row, rows firstBout to
+// firstBout+boutRows-1 (1-based; each clause reads the bout's centre cell in
+// column D), and read no row past the block.
+func TallySpanError(formula string, firstBout, boutRows int) error {
+	if n := strings.Count(formula, "IF(UPPER("); n != boutRows {
+		return fmt.Errorf("%d IV clauses for %d bout rows", n, boutRows)
+	}
+	for _, r := range []int{firstBout, firstBout + boutRows - 1} {
+		if !strings.Contains(formula, fmt.Sprintf("UPPER(D%d)", r)) {
+			return fmt.Errorf("the tally does not read bout row %d", r)
+		}
+	}
+	if past := firstBout + boutRows; strings.Contains(formula, fmt.Sprintf("UPPER(D%d)", past)) {
+		return fmt.Errorf("the tally reads row %d, past its block", past)
+	}
+	return nil
+}
+
 // ShiaijoHeaderPrefix is what the workbook writer puts in front of the court
 // letter in a column band's row-1 header ("Shiaijo A"). Every producer goes
 // through helper.ShiaijoLabel, so one reader recognises them all.

@@ -143,6 +143,32 @@ paths:
                 teamMatches:
                   type: integer
                   default: 0
+                  description: Team size; 0 draws an individual competition.
+                teamMatchType:
+                  type: string
+                  enum: [fixed, kachinuki]
+                  description: >-
+                    Team match format; absent is fixed. kachinuki (teams of two
+                    or more, else 400) gives every team block a row for each
+                    bout an encounter can take, 2 x teamMatches - 1, and adds a
+                    Kachinuki Detail sheet with an empty section for every match
+                    of the draw.
+                engi:
+                  type: string
+                  enum: ["on", "off"]
+                thirdPlaceMatch:
+                  type: string
+                  enum: ["on", "off"]
+                  description: >-
+                    Adds a 3rd-place match after the semifinals. The legacy
+                    field name naginata=on is accepted as an alias.
+                poolFormat:
+                  type: string
+                  enum: [full, partial]
+                  description: partial draws the path-graph match set; otherwise roundRobin decides.
+                extraQualifiers:
+                  type: string
+                  enum: ["", larger-pools, fill-bracket]
                 winnersPerPool:
                   type: integer
                   default: 2
@@ -154,7 +180,7 @@ paths:
                   enum: ["on", "off"]
                 poolSizeMode:
                   type: string
-                  enum: [max, exact]
+                  enum: [min, max]
                 courts:
                   type: integer
                   default: 2

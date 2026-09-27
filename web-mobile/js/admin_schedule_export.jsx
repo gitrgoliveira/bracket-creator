@@ -23,9 +23,9 @@ const csvField = (s) => {
 // buildXlsxBody constructs the URLSearchParams body for POST /create from a
 // competition config object (cfg) and a player list. Extracted for testing.
 // cfg fields used: format, poolSize, poolWinners, poolSizeMode, courts,
-//   teamSize, name, numberPrefix, roundRobin, poolFormat, withZekkenName,
-//   engi, and (via effectiveTwoThirdPlaces) twoThirdPlaces, naginata,
-//   leagueTwoThirdPlaces.
+//   teamSize, teamMatchType, name, numberPrefix, roundRobin, poolFormat,
+//   withZekkenName, engi, and (via effectiveTwoThirdPlaces) twoThirdPlaces,
+//   naginata, leagueTwoThirdPlaces.
 // cName is the display name for the competition (used as titlePrefix).
 export function buildXlsxBody(cfg, cName, players) {
   const isKnockout = cfg.format === "knockout";
@@ -83,6 +83,11 @@ export function buildXlsxBody(cfg, cName, players) {
   if (cfg.poolFormat === "partial") body.set("poolFormat", "partial");
   if (effectiveZekken) body.set("withZekkenName", "on");
   if (cfg.engi) body.set("engi", "on");
+  // A kachinuki competition (state.Competition.IsKachinuki: teams of two or
+  // more) says so; the server then sizes every team block for the most bouts
+  // an encounter can take and adds the Kachinuki Detail sheet. teamMatches
+  // stays the team size.
+  if (cfg.teamMatchType === "kachinuki" && Number(cfg.teamSize) >= 2) body.set("teamMatchType", "kachinuki");
   // thirdPlaceMatch: the blank workbook needs a bronze (3rd-place) block
   // exactly when this competition does NOT award joint 3rd places -- i.e.
   // RequiresSingleThirdPlace, the exact negation of effectiveTwoThirdPlaces

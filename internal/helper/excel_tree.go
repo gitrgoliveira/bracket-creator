@@ -51,7 +51,7 @@ func SetTreePageLayout(f *excelize.File, sheetName string, depth, lastRow int) {
 // its shiaijo, renders the subtree's leaves, overlays that court's pool rosters
 // (when pools are provided), and bounds the page's print area to the drawn
 // region. This is the single implementation behind the CLI (create-pools /
-// create-knockout), the blank-template export (engine), and the results
+// create-knockout), the stored-draw export (engine), and the results
 // workbook (export) - the loop used to be copied at each call site, and a
 // geometry fix in one had to be replicated by hand into the others.
 //

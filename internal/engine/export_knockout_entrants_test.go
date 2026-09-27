@@ -16,10 +16,11 @@ import (
 )
 
 // TestExportCompetitionXlsx_KnockoutEntrantsNameTheirCompetitors pins the
-// knockout-only blank template's Elimination Matches entrants: a competitor
-// entering the bracket references its name on the data sheet, as the CLI
-// knockout does, where it used to be an empty ”! reference (Err:501 in
-// LibreOffice). An entrant an earlier match decides stays "M n".
+// stored-draw export's Elimination Matches entrants for a knockout-only
+// competition: a competitor entering the bracket references its name on the
+// data sheet, as the CLI knockout does, where it used to be an empty ”!
+// reference (Err:501 in LibreOffice). An entrant an earlier match decides
+// stays "M n".
 func TestExportCompetitionXlsx_KnockoutEntrantsNameTheirCompetitors(t *testing.T) {
 	eng, store, _ := setupTestEngine(t)
 	compID := "ko-entrants"

@@ -15,7 +15,8 @@ import (
 
 // RenderCompetitionWorkbook renders the sheet pipeline shared by both
 // workbook exports of one competition (mp-yuy8): Engine.ExportCompetitionXlsx
-// (internal/engine/export.go, the blank-template export) and
+// (internal/engine/export.go, the stored-draw export behind
+// GET /api/competitions/:id/export and the PDF prints) and
 // export.BuildResultsWorkbook (internal/export/builder.go, the results-
 // archive export). Both used to hand-copy the same sheet sequence; a sheet
 // added to one and not the other has already shipped as a real bug (mp-8b1b
@@ -43,7 +44,7 @@ import (
 //  7. Kachinuki Detail sheet (helper.WriteKachinukiDetailSheet)
 //
 // Every caller-specific extra rides OUTSIDE this function, called by the
-// caller before or after: the blank-template export's Tags sheet (needs the
+// caller before or after: the stored-draw export's Tags sheet (needs the
 // tournament's publicURL, which this function deliberately does not take --
 // see the parameter doc below), and the results export's score/standings/
 // bracket-name literal overlays. The overlays write onto the Pool Matches and
@@ -66,7 +67,7 @@ import (
 //     here (they need numCourts, courts derived from comp, for it too).
 //   - kachinukiMatches is the caller's own bout-log read: the two callers use
 //     different Engine methods over different inputs (collectKachinukiMatches
-//     takes an id+comp pair scoped for the blank-template path;
+//     takes an id+comp pair scoped for the stored-draw path;
 //     KachinukiDetailMatches takes only the id), so the DATA differs even
 //     though the RENDERING (step 7) does not.
 //
@@ -94,7 +95,7 @@ import (
 // caller-specific left to preserve by keeping it a parameter -- deriving it
 // here instead is what makes it impossible for the two callers' Data /
 // Names-to-Print sheets to disagree on whether this shape applies. Before
-// this branch existed at all, the blank-template export called
+// this branch existed at all, the stored-draw export called
 // helper.AddPoolDataToSheet here (over the empty pools slice, writing only
 // headers) and THEN called helper.AddPlayerDataToSheet a second time,
 // itself, after this function returned -- two writers of the same sheet,
@@ -170,7 +171,7 @@ func (e *Engine) RenderCompetitionWorkbook(
 	// RequiresSingleThirdPlace() was true at draw time, and testing it directly
 	// is equivalent to (comp.RequiresSingleThirdPlace() || isPureKnockout(comp,
 	// pools)) && bracket != nil && bracket.ThirdPlaceMatch != nil, the
-	// formula the blank-template export used pre-extraction -- the extra
+	// formula the stored-draw export used pre-extraction -- the extra
 	// disjunct was redundant against the writer (mp-yuy8 criterion 5). This
 	// is also exactly the condition the results export already used
 	// unconditionally for its includeBronze flag below, so using it here
@@ -320,8 +321,8 @@ func bracketHasKnockoutContent(bracket *state.Bracket) bool {
 // the ONE source both workbook exports draw the Pool Matches grid from.
 // pools.csv (Store.LoadPools) records pool membership only, so the grid must
 // never rely on a Matches slice an earlier call happened to leave in the
-// store's cache: that one is gone after a restart, and the blank template used
-// to lose every match block with it. Any Matches already on pools is replaced.
+// store's cache: that one is gone after a restart, which would leave the
+// sheet without a single match block. Any Matches already on pools is replaced.
 //
 // Because an unresolvable match is SKIPPED (see below), pool.Matches can be
 // non-contiguous relative to the stored "<Pool>-<suffix>" IDs, so this returns

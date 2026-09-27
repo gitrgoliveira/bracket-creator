@@ -14,6 +14,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/gitrgoliveira/bracket-creator/internal/domain"
 	"github.com/gitrgoliveira/bracket-creator/internal/helper"
+	"github.com/gitrgoliveira/bracket-creator/internal/state"
 )
 
 // createTournamentHandler generates a tournament Excel workbook from a posted
@@ -64,6 +65,14 @@ func createTournamentHandler(c *gin.Context) {
 	teamMatches, err := strconv.Atoi(c.PostForm("teamMatches"))
 	if err != nil {
 		teamMatches = 0
+	}
+	// teamMatchType "kachinuki" is the app's blank template of a kachinuki
+	// competition; absent or "fixed" is a team match. The same rule as the
+	// competition's own setting: kachinuki needs teams of two or more.
+	teamMatchType := state.TeamMatchType(c.PostForm("teamMatchType"))
+	if err := state.ValidateTeamMatchType(teamMatchType, teamMatches); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
 	}
 
 	tournamentType := c.PostForm("tournamentType")
@@ -166,6 +175,7 @@ func createTournamentHandler(c *gin.Context) {
 			thirdPlaceMatch: thirdPlaceMatch,
 			determined:      determined,
 			teamMatches:     teamMatches,
+			teamMatchType:   teamMatchType,
 			roundRobin:      roundRobin,
 			poolFormat:      poolFormat,
 			numPlayers:      numPlayers,
@@ -206,6 +216,7 @@ func createTournamentHandler(c *gin.Context) {
 			engi:            engi,
 			determined:      determined,
 			teamMatches:     teamMatches,
+			teamMatchType:   teamMatchType,
 			courts:          courts,
 			titlePrefix:     titlePrefix,
 			numberPrefix:    numberPrefix,

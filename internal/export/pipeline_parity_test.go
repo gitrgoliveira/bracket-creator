@@ -19,7 +19,7 @@ import (
 )
 
 // engineOnlySheets lists sheets legitimately produced by ONLY the
-// blank-template export (Engine.ExportCompetitionXlsx), never by
+// stored-draw export (Engine.ExportCompetitionXlsx), never by
 // BuildResultsWorkbook. A future sheet addition that is intentionally
 // one-sided belongs here, with a comment explaining why; anything else
 // showing up as a delta is the bug TestExportPipelineSheetParity exists to
@@ -35,7 +35,7 @@ var engineOnlySheets = []string{helper.SheetTags}
 // walk the "data / Pool Draw / Pool Matches / Elimination Matches / Tree N /
 // Names to Print X / Kachinuki Detail / ..." sheet pipeline for one
 // competition: Engine.ExportCompetitionXlsx (internal/engine/export.go, the
-// blank-template export) and BuildResultsWorkbook (internal/export/builder.go,
+// stored-draw export) and BuildResultsWorkbook (internal/export/builder.go,
 // the results export). Before mp-yuy8 the two functions were hand-maintained
 // parallel copies of the same sheet sequence, and a sheet added to one and
 // not the other shipped as a real bug (mp-8b1b finding R8: the Kachinuki
@@ -51,7 +51,7 @@ var engineOnlySheets = []string{helper.SheetTags}
 // sheet pipeline mp-yuy8 extracted. That extraction does NOT make this guard
 // a tautology, and it must not be simplified away or deleted: both builders
 // still add their OWN path-specific extras around the shared pipeline (the
-// blank-template export's Tags sheet, the results export's score/standings
+// stored-draw export's Tags sheet, the results export's score/standings
 // overlays, and whatever either grows later), so this test keeps asserting
 // that those extras never silently diverge. The extraction made the test
 // pass more trivially for the SHARED steps, not pointless: it is what caught
@@ -205,7 +205,7 @@ func TestExportPipelineSheetParity(t *testing.T) {
 			},
 			// "Names to Print A" pins GAP 1's fix directly: a pure knockout
 			// competition (no pools.csv) with a number prefix must get the
-			// sheet from BOTH builders, not just the blank-template export.
+			// sheet from BOTH builders, not just the stored-draw export.
 			mustAppearInBoth: []string{"Tree 1", "Names to Print A"},
 		},
 	}
@@ -326,7 +326,7 @@ func TestExportPipeline_BronzeOnlyMismatchErrorsInBothBuilders(t *testing.T) {
 
 	_, err = eng.ExportCompetitionXlsx(compID)
 	assert.ErrorIsf(t, err, engine.ErrBracketDrawMismatch,
-		"blank-template export: must refuse the bronze-only-mismatch shape, not render it partially")
+		"stored-draw export: must refuse the bronze-only-mismatch shape, not render it partially")
 
 	_, err = BuildResultsWorkbook(store, eng, compID)
 	assert.ErrorIsf(t, err, engine.ErrBracketDrawMismatch,

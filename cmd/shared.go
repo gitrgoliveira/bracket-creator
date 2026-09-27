@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/gitrgoliveira/bracket-creator/internal/helper"
+	"github.com/gitrgoliveira/bracket-creator/internal/state"
 	excelize "github.com/xuri/excelize/v2"
 )
 
@@ -60,13 +61,25 @@ func blankWorkbookCourtPlan(draw *helper.KnockoutDraw, courtNames []string) help
 	return helper.CourtPlan{Draw: draw, Courts: courtNames}
 }
 
-// printEliminationWithBronze renders the team elimination sheet and, for a
-// bracket that requires a single 3rd place (thirdPlaceMatch) with a real
-// semifinal round, the bronze (3rd-place) block with its print area. Shared by
-// create-pools and create-knockout, which both run the bronze on the same
-// court set.
-func printEliminationWithBronze(f *excelize.File, matchWinners map[string]helper.MatchWinner, rounds [][]*helper.Node, teamMatches int, plan helper.CourtPlan, engi, thirdPlaceMatch bool) {
-	helper.PrintEliminationWithBronze(f, matchWinners, rounds, teamMatches, plan, engi, helper.NeedsBronzeBlock(thirdPlaceMatch, len(rounds)))
+// printEliminationWithBronze renders the team elimination sheet, boutRows
+// numbered bout rows to a team block, and, for a bracket that requires a
+// single 3rd place (thirdPlaceMatch) with a real semifinal round, the bronze
+// (3rd-place) block with its print area. Shared by create-pools and
+// create-knockout, which both run the bronze on the same court set.
+func printEliminationWithBronze(f *excelize.File, matchWinners map[string]helper.MatchWinner, rounds [][]*helper.Node, boutRows int, plan helper.CourtPlan, engi, thirdPlaceMatch bool) {
+	helper.PrintEliminationWithBronze(f, matchWinners, rounds, boutRows, plan, engi, helper.NeedsBronzeBlock(thirdPlaceMatch, len(rounds)))
+}
+
+// writeBlankKachinukiDetail adds the Kachinuki Detail sheet to a kachinuki
+// competition's blank workbook: an empty section, a row for every bout an
+// encounter can take, for each match of the draw (pools, then rounds, then the
+// bronze printEliminationWithBronze printed). Any other competition gets none.
+func writeBlankKachinukiDetail(f *excelize.File, team *state.Competition, pools []helper.Pool, rounds [][]*helper.Node, thirdPlaceMatch bool) error {
+	if !team.IsKachinuki() {
+		return nil
+	}
+	sections := helper.BlankKachinukiSections(pools, rounds, helper.NeedsBronzeBlock(thirdPlaceMatch, len(rounds)), team.TeamBoutRows())
+	return helper.WriteKachinukiDetailSheet(f, sections)
 }
 
 // finishKnockoutPages runs the CLI epilogue shared by create-pools and

@@ -571,18 +571,11 @@ func (c *Competition) IsKachinuki() bool {
 	return c != nil && c.TeamSize >= 2 && c.TeamMatchType == TeamMatchTypeKachinuki
 }
 
-// KachinukiMaxBouts is the most bouts a kachinuki encounter between teams of
-// teamSize can take: every bout retires at least one fighter and the
-// encounter ends when one team is out, so at most all of one team and all but
-// one of the other, 2*teamSize-1.
-func KachinukiMaxBouts(teamSize int) int {
-	return 2*teamSize - 1
-}
-
 // TeamBoutRows is the number of numbered bout rows a team match's block has
 // on the score sheets, and the ONE owner of that count: 0 for an individual
-// competition, TeamSize for a team match, and KachinukiMaxBouts for
-// kachinuki. Every workbook consumer asks here: the Pool Matches and
+// competition, TeamSize for a team match, and domain.KachinukiMaxBouts for
+// kachinuki. Every workbook asks here, the app's exports and the blank
+// template the /create generator draws alike: the Pool Matches and
 // Elimination Matches blocks (the 3rd-place block included), their IV/PW
 // formula ranges, the results overlay's row mapping, and the Kachinuki
 // Detail sheet's empty rows for hand entry.
@@ -591,7 +584,7 @@ func (c *Competition) TeamBoutRows() int {
 	case c == nil || c.TeamSize <= 0:
 		return 0
 	case c.IsKachinuki():
-		return KachinukiMaxBouts(c.TeamSize)
+		return domain.KachinukiMaxBouts(c.TeamSize)
 	default:
 		return c.TeamSize
 	}

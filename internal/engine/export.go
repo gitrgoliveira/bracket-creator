@@ -9,6 +9,12 @@ import (
 	"github.com/gitrgoliveira/bracket-creator/internal/state"
 )
 
+// ExportCompetitionXlsx renders the competition's stored draw (pools.csv,
+// pool-matches.csv, bracket.json) as a workbook with no results: the
+// stored-draw export behind GET /api/competitions/:id/export and the PDF print
+// export (ExportTournamentWorkbooks). The app's "Download blank template"
+// button does not come here: it posts the roster to /create, which draws the
+// workbook afresh (cmd/create_handler.go).
 func (e *Engine) ExportCompetitionXlsx(id string) ([]byte, error) {
 	comp, err := e.store.LoadCompetition(id)
 	if err != nil {
@@ -136,7 +142,7 @@ func (e *Engine) ExportCompetitionXlsx(id string) ([]byte, error) {
 		return nil, err
 	}
 
-	// Tags sheet, blank-template-export-only extra: pass publicURL so numbered
+	// Tags sheet, the stored-draw export's own extra: pass publicURL so numbered
 	// tags get an embedded QR code. tourn (loaded once, strictly, above) may
 	// legitimately be nil for a competition with no tournament record yet,
 	// which simply omits QR codes without aborting the export. CreateTagsSheet

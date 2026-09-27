@@ -2,6 +2,8 @@ package test
 
 import (
 	"bytes"
+	"fmt"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -162,4 +164,65 @@ func TestRowBreaks(t *testing.T) {
 	assert.Error(t, err, "an unknown sheet")
 	_, err = RowBreaks([]byte("not a workbook"), "Scores")
 	assert.Error(t, err, "bytes that are not an xlsx")
+}
+
+func TestCellAt(t *testing.T) {
+	rows := [][]string{{"a", "b"}, {"c"}}
+	assert.Equal(t, "b", CellAt(rows, 0, 1))
+	assert.Empty(t, CellAt(rows, 1, 1), "past a short row's end")
+	assert.Empty(t, CellAt(rows, 2, 0), "past the last row")
+	assert.Empty(t, CellAt(rows, -1, 0), "a negative row")
+	assert.Empty(t, CellAt(rows, 0, -1), "a negative column")
+}
+
+func TestFirstRowWith(t *testing.T) {
+	rows := [][]string{{"x", "Round 1"}, {"Round 1"}, {"Round 1"}}
+	assert.Equal(t, 1, FirstRowWith(rows, 0, "Round 1"), "the first row carrying it in that column")
+	assert.Equal(t, 0, FirstRowWith(rows, 1, "Round 1"))
+	assert.Equal(t, -1, FirstRowWith(rows, 2, "Round 1"), "a column no row reaches")
+	assert.Equal(t, -1, FirstRowWith(rows, 0, "Round 2"), "an absent value")
+}
+
+func TestNumberedRowsFrom(t *testing.T) {
+	rows := [][]string{{"White"}, {"1"}, {"2"}, {"3"}, {""}, {"4"}}
+	assert.Equal(t, 3, NumberedRowsFrom(rows, 1, 0), "the run ends at the first row that breaks it")
+	assert.Equal(t, 0, NumberedRowsFrom(rows, 2, 0), "a run starts at 1")
+	assert.Equal(t, 0, NumberedRowsFrom(rows, 1, 1), "a column the rows do not reach")
+	assert.Equal(t, 0, NumberedRowsFrom(rows, 9, 0), "past the last row")
+}
+
+func TestTallySpanError(t *testing.T) {
+	// tally is an IV formula with one clause per listed bout row, shaped like
+	// the workbook's own.
+	tally := func(boutRows ...int) string {
+		clauses := make([]string, len(boutRows))
+		for i, r := range boutRows {
+			clauses[i] = fmt.Sprintf(`IF(UPPER(D%d)="X",0,1)`, r)
+		}
+		return strings.Join(clauses, "+")
+	}
+	assert.NoError(t, TallySpanError(tally(5, 6, 7), 5, 3))
+	assert.EqualError(t, TallySpanError(tally(5, 6), 5, 3), "2 IV clauses for 3 bout rows")
+	assert.EqualError(t, TallySpanError(tally(6, 7, 8), 5, 3), "the tally does not read bout row 5")
+	assert.EqualError(t, TallySpanError(tally(4, 5, 6), 5, 3), "the tally does not read bout row 7")
+	assert.EqualError(t, TallySpanError(tally(5, 7, 8), 5, 3), "the tally reads row 8, past its block")
+}
+
+func TestHanteiExplicit(t *testing.T) {
+	for _, v := range []bool{true, false} {
+		p := HanteiExplicit(v)
+		require.NotNil(t, p)
+		assert.Equal(t, v, *p)
+	}
+	assert.NotSame(t, HanteiExplicit(true), HanteiExplicit(true), "each call returns its own pointer")
+}
+
+func TestLegalShiaijoCount(t *testing.T) {
+	var legal []int
+	for n := -1; n <= 17; n++ {
+		if LegalShiaijoCount(n) {
+			legal = append(legal, n)
+		}
+	}
+	assert.Equal(t, []int{1, 2, 4, 8, 16}, legal)
 }

@@ -4,6 +4,7 @@ import (
 	"math"
 	"time"
 
+	"github.com/gitrgoliveira/bracket-creator/internal/domain"
 	"github.com/gitrgoliveira/bracket-creator/internal/helper"
 	"github.com/gitrgoliveira/bracket-creator/internal/state"
 )
@@ -171,7 +172,7 @@ func kachinukiBoutRange(n int) (best, avg, worst float64) {
 		return 0, 0, 0
 	}
 	best = float64(n)
-	worst = float64(state.KachinukiMaxBouts(n))
+	worst = float64(domain.KachinukiMaxBouts(n))
 	avg = (best + worst) / 2
 	return best, avg, worst
 }

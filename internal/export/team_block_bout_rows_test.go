@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"os"
 	"slices"
-	"strconv"
 	"strings"
 	"testing"
 
@@ -53,41 +52,14 @@ func startMixedComp(t *testing.T, store *state.Store, eng *engine.Engine, compID
 	require.NoError(t, eng.StartCompetition(compID))
 }
 
-// firstRowWith returns the 0-based index of the first row whose cell at col
-// equals val, or -1.
-func firstRowWith(rows [][]string, col int, val string) int {
-	for r, row := range rows {
-		if col < len(row) && row[col] == val {
-			return r
-		}
-	}
-	return -1
-}
-
-// numberedRowsFrom counts the consecutive rows from 0-based row `from` whose
-// cell at col carries the bout numbers 1, 2, 3, ... in order.
-func numberedRowsFrom(rows [][]string, from, col int) int {
-	n := 0
-	for r := from; r < len(rows); r++ {
-		if col >= len(rows[r]) || rows[r][col] != strconv.Itoa(n+1) {
-			break
-		}
-		n++
-	}
-	return n
-}
-
 // assertTallyFormulaSpans checks the IV formula in the first victories
-// column (B) of 1-based row tallyRow adds exactly one clause per bout row,
-// firstBout..firstBout+wantRows-1, and reaches no row past the block.
+// column (B) of 1-based row tallyRow spans exactly the block's bout rows,
+// firstBout..firstBout+wantRows-1.
 func assertTallyFormulaSpans(t *testing.T, f *excelize.File, sheet string, tallyRow, firstBout, wantRows int, block string) {
 	t.Helper()
 	formula, err := f.GetCellFormula(sheet, fmt.Sprintf("B%d", tallyRow))
 	require.NoError(t, err)
-	assert.Equal(t, wantRows, strings.Count(formula, "IF(UPPER("), "%s: one IV clause per bout row", block)
-	assert.Contains(t, formula, fmt.Sprintf(`UPPER(D%d)`, firstBout), "%s: the tally starts at the first bout row", block)
-	assert.Contains(t, formula, fmt.Sprintf(`UPPER(D%d)`, firstBout+wantRows-1), "%s: the tally reaches the last bout row", block)
-	assert.NotContains(t, formula, fmt.Sprintf(`UPPER(D%d)`, firstBout+wantRows), "%s: the tally stops at its own block", block)
+	assert.NoError(t, bctest.TallySpanError(formula, firstBout, wantRows), block)
 }
 
 // TestTeamBlockBoutRows pins the one bout-row count (state.Competition.
@@ -111,7 +83,7 @@ func TestTeamBlockBoutRows(t *testing.T) {
 		name  string
 		build func(*state.Store, *engine.Engine, string) ([]byte, error)
 	}{
-		{name: "blank template", build: func(_ *state.Store, eng *engine.Engine, id string) ([]byte, error) {
+		{name: "stored-draw export", build: func(_ *state.Store, eng *engine.Engine, id string) ([]byte, error) {
 			return eng.ExportCompetitionXlsx(id)
 		}},
 		{name: "results", build: BuildResultsWorkbook},
@@ -136,9 +108,9 @@ func TestTeamBlockBoutRows(t *testing.T) {
 				// header, with no bout numbers.
 				poolRows, err := f.GetRows(helper.SheetPoolMatches)
 				require.NoError(t, err)
-				hdr := firstRowWith(poolRows, 0, helper.MatchHeaderLeftLabel())
+				hdr := bctest.FirstRowWith(poolRows, 0, helper.MatchHeaderLeftLabel())
 				require.GreaterOrEqual(t, hdr, 0, "Pool Matches must carry a match block")
-				assert.Equal(t, tc.wantRows, numberedRowsFrom(poolRows, hdr+2, 0), "pool block bout rows")
+				assert.Equal(t, tc.wantRows, bctest.NumberedRowsFrom(poolRows, hdr+2, 0), "pool block bout rows")
 				if tc.wantRows > 0 {
 					// Tally on the team names row (1-based hdr+2); bouts from 1-based hdr+3.
 					assertTallyFormulaSpans(t, f, helper.SheetPoolMatches, hdr+2, hdr+3, tc.wantRows, "pool block")
@@ -150,9 +122,9 @@ func TestTeamBlockBoutRows(t *testing.T) {
 				elimRows, err := f.GetRows(helper.SheetEliminationMatches)
 				require.NoError(t, err)
 				for _, block := range []string{"Round 1 - Match 1", helper.ThirdPlaceLabel} {
-					h := firstRowWith(elimRows, 0, block)
+					h := bctest.FirstRowWith(elimRows, 0, block)
 					require.GreaterOrEqual(t, h, 0, "Elimination Matches must carry %q", block)
-					assert.Equal(t, tc.wantRows, numberedRowsFrom(elimRows, h+3, 0), "%s bout rows", block)
+					assert.Equal(t, tc.wantRows, bctest.NumberedRowsFrom(elimRows, h+3, 0), "%s bout rows", block)
 					if tc.wantRows > 0 {
 						tallyRow := h + 1 + 5 + tc.wantRows
 						assert.Equal(t, "Victories / Points", cellAt(elimRows, tallyRow-1, 0), "%s tally row", block)
@@ -209,9 +181,9 @@ func TestKachinukiResultFillsTheBoutsFoughtInOrder(t *testing.T) {
 
 			rows, err := f.GetRows(helper.SheetPoolMatches)
 			require.NoError(t, err)
-			hdr := firstRowWith(rows, 0, helper.MatchHeaderLeftLabel())
+			hdr := bctest.FirstRowWith(rows, 0, helper.MatchHeaderLeftLabel())
 			require.GreaterOrEqual(t, hdr, 0)
-			require.Equal(t, 5, numberedRowsFrom(rows, hdr+2, 0), "the kachinuki block has 2*3-1 bout rows")
+			require.Equal(t, 5, bctest.NumberedRowsFrom(rows, hdr+2, 0), "the kachinuki block has 2*3-1 bout rows")
 
 			// SideA is Aka, the RIGHT victories column (F, index 5).
 			for b := 0; b < 5; b++ {
@@ -295,9 +267,9 @@ func TestKachinukiBracketOverlayRowsFollowTheBlock(t *testing.T) {
 	at := func(r, c int) string { return cellAt(rows, r, c) }
 
 	// 0-based: header h, bouts from h+3; names repeat at h+4+5; tally h+5+5.
-	final := firstRowWith(rows, 0, "Round 2 - Match 3")
+	final := bctest.FirstRowWith(rows, 0, "Round 2 - Match 3")
 	require.GreaterOrEqual(t, final, 0)
-	assert.Equal(t, 5, numberedRowsFrom(rows, final+3, 0))
+	assert.Equal(t, 5, bctest.NumberedRowsFrom(rows, final+3, 0))
 	assert.Equal(t, "MK", at(final+3, 5), "bout 1: Ryu (Aka) on the right")
 	assert.Equal(t, "D", at(final+4, 1), "bout 2: Kame (Shiro) on the left")
 	for r := final + 5; r < final+3+5; r++ {
@@ -310,9 +282,9 @@ func TestKachinukiBracketOverlayRowsFollowTheBlock(t *testing.T) {
 	assert.Equal(t, "1", at(final+5+5, 5), "Ryu IV on the tally row")
 	assert.Equal(t, "2", at(final+5+5, 4), "Ryu PW on the tally row")
 
-	bronze := firstRowWith(rows, 0, helper.ThirdPlaceLabel)
+	bronze := bctest.FirstRowWith(rows, 0, helper.ThirdPlaceLabel)
 	require.GreaterOrEqual(t, bronze, 0)
-	assert.Equal(t, 5, numberedRowsFrom(rows, bronze+3, 0))
+	assert.Equal(t, 5, bctest.NumberedRowsFrom(rows, bronze+3, 0))
 	for i, want := range []string{"M", "K", "T"} {
 		assert.Equal(t, want, at(bronze+3+i, 1), "3rd place bout %d: Taka (Shiro) on the left", i+1)
 	}

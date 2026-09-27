@@ -1,7 +1,7 @@
 // Package export builds results-populated XLSX workbooks from live mobile-app
-// tournament state. It is a SEPARATE path from the blank-template export in
-// internal/engine/export.go; the existing ExportCompetitionXlsx and
-// GET /api/competitions/:id/export endpoint are not modified.
+// tournament state. It is a SEPARATE path from the stored-draw export in
+// internal/engine/export.go (Engine.ExportCompetitionXlsx, behind
+// GET /api/competitions/:id/export and the PDF prints).
 //
 // The single public entry point is BuildResultsWorkbook. Follow-up agents
 // (CLI command + HTTP handler) call it to get the xlsx bytes.

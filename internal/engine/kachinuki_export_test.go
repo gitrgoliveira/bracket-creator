@@ -576,7 +576,7 @@ func TestCollectKachinukiMatches_BronzeStub(t *testing.T) {
 	assert.Equal(t, 9, out[0].BlankBoutRows)
 }
 
-// TestCollectKachinukiMatches_BlankTemplateCoversTheDraw pins the hand-entry
+// TestCollectKachinukiMatches_UnfoughtDrawCoversEveryMatch pins the hand-entry
 // rule on real draws (operator decision 2026-09-27, bc-kdsc): before any bout
 // is recorded, every match of the draw has a section of 2*teamSize-1 empty
 // rows -- each pool match, each numbered bracket match including the later
@@ -584,7 +584,7 @@ func TestCollectKachinukiMatches_BronzeStub(t *testing.T) {
 // bye has none. A side an earlier match decides is named the way the
 // Elimination Matches sheet prints it, "M <n>"; a pool placeholder as it
 // stands.
-func TestCollectKachinukiMatches_BlankTemplateCoversTheDraw(t *testing.T) {
+func TestCollectKachinukiMatches_UnfoughtDrawCoversEveryMatch(t *testing.T) {
 	singleThird := false
 	cases := []struct {
 		name     string

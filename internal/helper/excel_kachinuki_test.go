@@ -669,3 +669,44 @@ func intToString(n int) string {
 	}
 	return string(buf[i:])
 }
+
+// TestBlankKachinukiSections pins the blank template's Kachinuki Detail
+// sections: every pool match in order, then every knockout match round by
+// round, titled and sided as its Elimination Matches block (a match's winner
+// as "M n"), then the 3rd-place match between the semifinals' losers, each
+// with the rows asked for. A bye is no match, so it gets no section.
+func TestBlankKachinukiSections(t *testing.T) {
+	ryu, tora, kame := Player{Name: "Ryu"}, Player{Name: "Tora"}, Player{Name: "Kame"}
+	pools := []Pool{
+		{PoolName: "Pool A", Matches: []Match{{SideA: &ryu, SideB: &tora}, {SideA: &ryu, SideB: &kame}}},
+		{PoolName: "Pool B", Matches: []Match{{SideA: &tora, SideB: &kame}}},
+	}
+	rounds := func(leaves ...string) [][]*Node {
+		r := BuildEliminationMatchRounds(CreateBalancedTree(leaves))
+		AssignMatchNumbers(r)
+		return r
+	}
+	blank := func(label, sideA, sideB string) KachinukiMatchDetail {
+		return KachinukiMatchDetail{Label: label, SideATeam: sideA, SideBTeam: sideB, BlankBoutRows: 5}
+	}
+
+	t.Run("pools, then the rounds, then the 3rd place", func(t *testing.T) {
+		got := BlankKachinukiSections(pools, rounds("Pool A-1st", "Pool B-2nd", "Pool B-1st", "Pool A-2nd"), true, 5)
+		assert.Equal(t, []KachinukiMatchDetail{
+			blank("Pool Match 1", "Ryu", "Tora"),
+			blank("Pool Match 2", "Ryu", "Kame"),
+			blank("Pool Match 3", "Tora", "Kame"),
+			blank("Round 1 - Match 1", "Pool A-1st", "Pool B-2nd"),
+			blank("Round 1 - Match 2", "Pool B-1st", "Pool A-2nd"),
+			blank("Round 2 - Match 3", "M 1", "M 2"),
+			blank(ThirdPlaceLabel, "M 1", "M 2"),
+		}, got)
+	})
+	t.Run("a bye gets no section", func(t *testing.T) {
+		got := BlankKachinukiSections(nil, rounds("Ryu", "Tora", "Kame"), false, 5)
+		assert.Equal(t, []KachinukiMatchDetail{
+			blank("Round 1 - Match 1", "Tora", "Kame"),
+			blank("Round 2 - Match 2", "Ryu", "M 1"),
+		}, got)
+	})
+}

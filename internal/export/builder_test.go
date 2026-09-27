@@ -829,16 +829,8 @@ func columnContains(rows [][]string, col int, want string) bool {
 	return false
 }
 
-// cellAt safely reads rows[r][c], returning "" when r or c falls outside
-// rows in either direction: a negative index, a row past the end, or a
-// column past a row's end (GetRows trims each row's trailing empty cells,
-// so a blank cell past a short row's length is legitimately "").
-func cellAt(rows [][]string, r, c int) string {
-	if r < 0 || r >= len(rows) || c < 0 || c >= len(rows[r]) {
-		return ""
-	}
-	return rows[r][c]
-}
+// cellAt is bctest.CellAt under the name this package's tests use.
+var cellAt = bctest.CellAt
 
 // TestBuildResultsWorkbook_LeagueNoPhantomBracket is the regression test for the
 // phantom-bracket bug: the draw returns placeholder "Pool A-1st" finalist
@@ -3944,7 +3936,7 @@ func TestBuildResultsWorkbook_FixedFormatNoKachinukiSheet(t *testing.T) {
 // readCourtBandLetters reads a court-banded sheet's shiaijo band headers back
 // out of the rendered workbook, in column order, and asserts each band sits on
 // the court grid and is non-empty. bctest.ReadCourtBands does the reading (the
-// same reader serves internal/engine's blank-template parity tests); the
+// same reader serves internal/engine's stored-draw parity tests); the
 // assertions stay here because the wording is this sheet's.
 //
 // An EMPTY band is a shiaijo header printed over nothing: a score sheet naming
@@ -3968,7 +3960,7 @@ func readCourtBandLetters(t *testing.T, rows [][]string, sheet string) []string 
 }
 
 // TestBuildResultsWorkbook_ClampedShiaijoBands is the results-workbook half of
-// the export banding bug (the blank-template half lives in
+// the export banding bug (the stored-draw half lives in
 // internal/engine/excel_draw_parity_test.go).
 //
 // THREE pools on a FOUR-shiaijo allocation is the clamped regime: three pools

@@ -7,8 +7,9 @@ package helper
 // kachinuki team matches using the existing 8-column-per-court layout
 // (CourtsColumnsPerCourt = 8 in constants.go). This separate sheet uses a
 // flexible 6-column layout chosen for readability, NOT bound by
-// CourtsColumnsPerCourt, and is emitted by both workbook exports when a
-// competition has teamMatchType=kachinuki and a draw with matches in it.
+// CourtsColumnsPerCourt. A competition with teamMatchType=kachinuki and a
+// draw with matches in it gets it in both of the app's workbook exports and
+// in the blank template the /create generator draws.
 //
 // Layout per match section (rows are 1-based relative to the section start),
 // Shiro (SideB) LEFT and Aka (SideA) RIGHT throughout, per helper.WhiteLeft
@@ -86,7 +87,7 @@ type KachinukiBout struct {
 // summary metadata. One section is rendered per entry in
 // WriteKachinukiDetailSheet.
 type KachinukiMatchDetail struct {
-	Label        string // human-readable match identifier (e.g. "Pool A - Match 1")
+	Label        string // section title, e.g. "Pool Match 1" or "Round 2 - Match 3"
 	SideATeam    string // team name on Side A (Aka)
 	SideBTeam    string // team name on Side B (Shiro)
 	Bouts        []KachinukiBout
@@ -109,6 +110,61 @@ func (m KachinukiMatchDetail) sectionBouts() []KachinukiBout {
 		blank[i].Position = i + 1
 	}
 	return blank
+}
+
+// PoolMatchLabel titles the Kachinuki Detail section of a competition's nth
+// pool match, n counted from 1 across its pool matches in order.
+func PoolMatchLabel(n int) string {
+	return fmt.Sprintf("Pool Match %d", n)
+}
+
+// BlankKachinukiSections lists an empty Kachinuki Detail section of boutRows
+// numbered rows for every match of a draw with nothing recorded yet: each pool
+// match in order, then each knockout match round by round, then the 3rd-place
+// match when includeBronze. A knockout section carries the title its block has
+// on the Elimination Matches sheet and names its sides as that block does: a
+// qualifier or competitor by its tree label, the winner of an earlier match as
+// that match's MatchRefLabel, and each 3rd-place entrant by the semifinal it
+// lost. rounds holds only matches with two entrants (a bye is no node), so no
+// bye gets a section.
+func BlankKachinukiSections(pools []Pool, rounds [][]*Node, includeBronze bool, boutRows int) []KachinukiMatchDetail {
+	var out []KachinukiMatchDetail
+	add := func(label, sideA, sideB string) {
+		out = append(out, KachinukiMatchDetail{Label: label, SideATeam: sideA, SideBTeam: sideB, BlankBoutRows: boutRows})
+	}
+	n := 0
+	for _, pool := range pools {
+		for _, m := range pool.Matches {
+			n++
+			add(PoolMatchLabel(n), m.SideA.Name, m.SideB.Name)
+		}
+	}
+	entrant := func(node *Node) string {
+		if node.LeafNode {
+			return node.LeafVal
+		}
+		return MatchRefLabel(int(node.MatchNum()))
+	}
+	for roundIdx, round := range rounds {
+		for _, match := range round {
+			if match == nil {
+				continue
+			}
+			// Left is side A (Aka), as printSingleEliminationMatch hands it to WhiteLeft.
+			add(EliminationMatchTitle(roundIdx+1, int(match.MatchNum())), entrant(match.Left), entrant(match.Right))
+		}
+	}
+	if includeBronze {
+		loser := func(semi int) string {
+			if semi == 0 {
+				return ""
+			}
+			return MatchRefLabel(semi)
+		}
+		semiA, semiB := SemifinalMatchNumbers(rounds)
+		add(ThirdPlaceLabel, loser(semiA), loser(semiB))
+	}
+	return out
 }
 
 // kachinukiDetailColumns enumerates the column letters used on the detail

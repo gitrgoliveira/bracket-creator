@@ -75,7 +75,7 @@ func drawPositions(drawOrder []string) map[string]int {
 // competition has no prefix, so a caller does not have to special-case that
 // itself. mobileapp.numbersFromDrawWithBracket / applyDrawNumbers and
 // NumberedParticipantsFor below are this function's two callers, so the
-// viewer/display merge and the blank-template export cannot silently drift
+// viewer/display merge and the stored-draw export cannot silently drift
 // apart on how a knockout-only competitor's number is composed.
 func NumberKnockoutParticipants(comp *state.Competition, drawOrder []string, players []domain.Player) {
 	prefix := comp.EffectiveNumberPrefix()
@@ -127,7 +127,7 @@ func orderPlayersByDraw(players []domain.Player, pos map[string]int) []domain.Pl
 // NumberedParticipantsFor returns comp's roster, loaded fresh, numbered from
 // the bracket's DrawOrder and returned in DRAW order (orderPlayersByDraw):
 // numbered players first, top to bottom of the bracket, unnumbered players
-// (never drawn) after, in roster order. Used by the blank-template export,
+// (never drawn) after, in roster order. Used by the stored-draw export,
 // which (unlike the viewer/display merge) has no already-loaded roster to
 // mutate in place.
 //
@@ -165,14 +165,14 @@ func (e *Engine) NumberedParticipantsFor(comp *state.Competition, bracket *state
 // the pipeline there is a numbered roster worth printing at all.
 //
 // RenderCompetitionWorkbook calls this directly now, so both of its callers
-// -- Engine.ExportCompetitionXlsx (blank-template) and
+// -- Engine.ExportCompetitionXlsx (stored draw) and
 // export.BuildResultsWorkbook (results archive) -- get it without deriving
 // it themselves; ExportCompetitionXlsx also calls it a second time, on its
 // own, for its Tags-sheet extra, which needs the identical numbered roster
 // after the shared pipeline has already returned. Before this was
-// extracted, only the blank-template export derived it and the results
+// extracted, only the stored-draw export derived it and the results
 // export always passed nil, so a knockout-only competition's results
-// workbook was silently missing the sheet the blank-template export had --
+// workbook was silently missing the sheet the stored-draw export had --
 // every such competition carries a prefix (comp.NumberPrefix is never left
 // blank once a competition is created), so the gap was not a rare edge case
 // but the ordinary shape.
@@ -190,7 +190,7 @@ func (e *Engine) NumberedParticipantsFor(comp *state.Competition, bracket *state
 //
 // Deliberately checks EffectiveFormat directly rather than
 // DrawSourceFor(comp) == DrawInBracket: ExportCompetitionXlsx (the
-// blank-template export) is reachable BEFORE a draw exists, precisely so an
+// stored-draw export) is reachable BEFORE a draw exists, precisely so an
 // operator can print name tags and blank score sheets ahead of the
 // tournament, and DrawSourceFor returns DrawNone for a not-yet-drawn
 // knockout competition exactly as it does for one with no draw at all --

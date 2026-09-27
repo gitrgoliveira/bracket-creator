@@ -10,7 +10,7 @@ import (
 // Knockout elimination-skeleton derivation, shared by both workbook builders so a
 // pure-knockout competition (no pools, so the pool-fed draw returns nothing)
 // still renders a bracket. The results export (internal/export) overlays scores
-// onto it; the blank-template export (Engine.ExportCompetitionXlsx) prints it
+// onto it; the stored-draw export (Engine.ExportCompetitionXlsx) prints it
 // empty. Both MUST derive it the same way or the two exports of one competition
 // would disagree (mp-ndfu). This lives in engine, the layer that owns bracket
 // generation, because internal/export already imports engine (the reverse import
@@ -186,7 +186,7 @@ func extraQualifierOverrides(comp *state.Competition, pools []helper.Pool, poolW
 
 // EliminationDraw returns the knockout tree AND its per-shiaijo regions for a
 // competition's workbook export. It is the single owner of that derivation, so
-// the blank-template export (Engine.ExportCompetitionXlsx) and the results
+// the stored-draw export (Engine.ExportCompetitionXlsx) and the results
 // export (internal/export) of one competition always render the identical
 // bracket (mp-ndfu).
 //

@@ -33,7 +33,7 @@ import (
 // the viewer payload does (that shared helper calls the engine function
 // directly -- a plain package-level function, not threaded through as a
 // parameter -- so this file needs no engine reference of its own), the SAME
-// derivation the blank-template export uses, so this surface's numbers
+// derivation the stored-draw export uses, so this surface's numbers
 // cannot silently disagree with either of those.
 func RegisterDisplayHandlers(r *gin.RouterGroup, store *state.Store) {
 	// P2 (mp-9afd style): singleflight group for the court-scoped match feed,

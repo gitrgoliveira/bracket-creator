@@ -17,6 +17,7 @@ type poolOptions struct {
 	maxPlayers      int
 	poolWinners     int
 	teamMatches     int
+	teamMatchType   state.TeamMatchType // teamMatchType: kachinuki gives every team block a row for each bout an encounter can take and adds the Kachinuki Detail sheet. Set ONLY by the web /create handler (the app's blank template); deliberately NOT a CLI flag (owner decision: no new CLI options).
 	courts          int
 	filePath        string
 	outputPath      string
@@ -347,7 +348,11 @@ func (o *poolOptions) createPools(entries []string) error {
 	// result. Reuses state's single owner of the rule (mirrors the engine's
 	// two Excel export paths) rather than restating "+1" here.
 	printPoolMatchesWinners := (state.Competition{PoolWinners: o.poolWinners, ExtraQualifiers: o.extraQualifiers}).MatchWinnerRanksNeeded()
-	matchWinners, _ := helper.PrintPoolMatches(f, pools, o.teamMatches, printPoolMatchesWinners, courtNames, nil, poolCoords, playerCoords, o.engi)
+	// Every team block is sized by the owner the app's exports ask
+	// (state.Competition.TeamBoutRows), so a kachinuki one gets a row for
+	// every bout an encounter can take.
+	team := &state.Competition{TeamSize: o.teamMatches, TeamMatchType: o.teamMatchType}
+	matchWinners, _ := helper.PrintPoolMatches(f, pools, team.TeamBoutRows(), printPoolMatchesWinners, courtNames, nil, poolCoords, playerCoords, o.engi)
 
 	// Court-first pool-to-knockout draw (specs/007-ekc-draw): one bracket
 	// region per shiaijo, 2nd places crossing to the partner court, byes
@@ -445,10 +450,13 @@ func (o *poolOptions) createPools(entries []string) error {
 		totalPoolMatches += len(p.Matches)
 	}
 
-	printEliminationWithBronze(f, matchWinners, eliminationMatchRounds, o.teamMatches, plan, o.engi, o.thirdPlaceMatch)
+	printEliminationWithBronze(f, matchWinners, eliminationMatchRounds, team.TeamBoutRows(), plan, o.engi, o.thirdPlaceMatch)
+	if err := writeBlankKachinukiDetail(f, team, pools, eliminationMatchRounds, o.thirdPlaceMatch); err != nil {
+		return err
+	}
 	helper.FillEstimations(f, int64(len(pools)), int64(totalPoolMatches), int64(o.teamMatches), int64(totalQualifiers-1), o.courts)
 
-	// Apply sheet protection to all sheets except data and Time Estimator
+	// Protect every sheet but the editable ones (helper.ProtectAllSheets).
 	helper.ProtectAllSheets(f)
 
 	// Save the spreadsheet file

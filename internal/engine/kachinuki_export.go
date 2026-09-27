@@ -85,7 +85,7 @@ func (e *Engine) collectKachinukiMatches(compID string, comp *state.Competition)
 		if len(m.SubResults) == 0 && (IsPoolDaihyosenMatchID(m.ID) || IsTiebreakerMatchID(m.ID)) {
 			continue
 		}
-		out = append(out, section(m, fmt.Sprintf("Pool Match %d", i+1)))
+		out = append(out, section(m, helper.PoolMatchLabel(i+1)))
 	}
 
 	// Bracket matches round by round, then the 3rd-place match (a sibling of

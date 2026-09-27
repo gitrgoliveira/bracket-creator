@@ -283,7 +283,7 @@ func respondIfCorruptOverrides(c *gin.Context, err error) bool {
 // draw, restore the settings, or use the live standings view), not server
 // faults, hence 422 rather than 500.
 //
-// Shared by the blank-template export route (GET .../export,
+// Shared by the stored-draw export route (GET .../export,
 // handlers_competition.go) and the results-archive export route (GET
 // .../export-results, handlers_export.go) so the same two-sentinel mapping
 // does not drift into two hand-copied bodies -- mirrors

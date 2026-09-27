@@ -40,9 +40,8 @@ var ErrCompetitionNotFound = errors.New("competition not found")
 // + standings) and elimination bracket results are included as literal values,
 // so the workbook is suitable for archiving after a live event.
 //
-// This is a SEPARATE path from Engine.ExportCompetitionXlsx (the blank-template
-// export). That function and the existing GET /api/competitions/:id/export
-// endpoint are not modified.
+// This is a SEPARATE path from Engine.ExportCompetitionXlsx, the stored-draw
+// export behind GET /api/competitions/:id/export and the PDF prints.
 //
 // Download filename served by the handler: "results-<compID>.xlsx".
 func BuildResultsWorkbook(store *state.Store, eng *engine.Engine, compID string) ([]byte, error) {
@@ -56,7 +55,7 @@ func BuildResultsWorkbook(store *state.Store, eng *engine.Engine, compID string)
 
 	// Swiss has no pools and no static bracket (results are per-round pairings and
 	// a running standings table), so there is nothing to render into the pool/tree
-	// layout this builder produces. Block it explicitly, matching the blank-template
+	// layout this builder produces. Block it explicitly, matching the stored-draw
 	// export, rather than emitting an empty workbook. A dedicated Swiss sheet is
 	// tracked as follow-up work.
 	if comp.Format == state.CompFormatSwiss {
@@ -76,7 +75,7 @@ func BuildResultsWorkbook(store *state.Store, eng *engine.Engine, compID string)
 	// LoadPools restores only pool membership (pools.csv), not matches
 	// (pool-matches.csv). PrintPoolMatches renders the per-match grid from
 	// pool.Matches, so reconstruct it from the stored results before rendering,
-	// the same way the blank-template export does, otherwise the grid (and the
+	// the same way the stored-draw export does, otherwise the grid (and the
 	// scores overlaid onto it) is empty.
 	poolOrdinals := engine.AttachPoolMatches(pools, matchResults)
 
@@ -91,7 +90,7 @@ func BuildResultsWorkbook(store *state.Store, eng *engine.Engine, compID string)
 	}
 
 	// The tournament, loaded ONCE and strictly (mp-yuy8 criterion 6), matching
-	// the blank-template export (Engine.ExportCompetitionXlsx): a corrupt
+	// the stored-draw export (Engine.ExportCompetitionXlsx): a corrupt
 	// tournament.md now aborts this export instead of CompetitionCourts
 	// silently degrading to the competition's own court list -- which prints
 	// the WRONG shiaijo names on every sheet for exactly the legacy records
@@ -109,7 +108,7 @@ func BuildResultsWorkbook(store *state.Store, eng *engine.Engine, compID string)
 		matchResultByID[mr.ID] = mr
 	}
 
-	// The shiaijo BY NAME, mirroring the blank-template export: a competition
+	// The shiaijo BY NAME, mirroring the stored-draw export: a competition
 	// allocated C and D must not have its sheets titled A and B. The count is
 	// read off the same list rather than derived a second time.
 	courts := engine.CompetitionCourts(comp, tourn)
@@ -120,14 +119,14 @@ func BuildResultsWorkbook(store *state.Store, eng *engine.Engine, compID string)
 
 	// EliminationDraw owns the leaf order -- pool winners, or the frozen
 	// bracket's own leaves for a pure knockout competition -- and is shared
-	// with the blank-template export so the two exports of one competition
+	// with the stored-draw export so the two exports of one competition
 	// render the identical bracket, with numbering that matches the stored
 	// bracket overlayBracketScores fills in (mp-ndfu).
 	draw := engine.EliminationDraw(store, comp, pools, bracket, numCourts)
 
 	// Kachinuki Detail sheet's bout log (GAP 6): bout-by-bout log for
-	// kachinuki team competitions. Same opt-in semantics as the blank-
-	// template export (Engine.ExportCompetitionXlsx): the renderer is a
+	// kachinuki team competitions. Same opt-in semantics as the stored-draw
+	// export (Engine.ExportCompetitionXlsx): the renderer is a
 	// no-op for empty input, so fixed-format and individual comps are
 	// unaffected. Without this, the admin "Download results" workbook
 	// (which builds HERE, not via ExportCompetitionXlsx) had no bout log.
@@ -160,7 +159,7 @@ func BuildResultsWorkbook(store *state.Store, eng *engine.Engine, compID string)
 	// snapshot and the pool-oriented renderer's formula references have
 	// nowhere valid to point without a pool data sheet.
 	// The second return value (the knockout-only numbered roster) is the
-	// blank-template export's own extra (its Tags sheet); this results
+	// stored-draw export's own extra (its Tags sheet); this results
 	// export has no such extra and discards it.
 	poolsByCourt, _, err := eng.RenderCompetitionWorkbook(f, comp, pools, bracket, courts, courtOfPool, draw, kachinukiMatches)
 	if err != nil {

@@ -1,6 +1,6 @@
 package engine
 
-// Regression coverage for the blank-template export's Tree sheets
+// Regression coverage for the stored-draw export's Tree sheets
 // (Engine.ExportCompetitionXlsx, step 4). The previous implementation created
 // one sheet per bracket page but only ever RENDERED page 1, so "Tree 2"+ were
 // emitted completely blank and those entrants' half of the draw was silently
@@ -102,7 +102,7 @@ func countEliminationMatchBlocks(rows [][]string) int {
 	return headers
 }
 
-// openExportedWorkbook exports compID as the blank template and opens it.
+// openExportedWorkbook exports compID's stored draw and opens it.
 func openExportedWorkbook(t *testing.T, eng *Engine, compID string) *excelize.File {
 	t.Helper()
 	data, err := eng.ExportCompetitionXlsx(compID)
@@ -361,7 +361,7 @@ func TestExportCompetitionXlsx_LeagueHasNoTreeSheet(t *testing.T) {
 
 // TestExportCompetitionXlsx_PureKnockoutRendersBracket pins mp-ndfu: a pure
 // knockout competition has NO pools, so the pool-fed draw returns nothing and
-// the blank-template export used to skip the entire knockout block -- shipping a
+// the stored-draw export used to skip the entire knockout block -- shipping a
 // workbook (and PDF booklet) with no tree pages and an empty Elimination Matches
 // sheet. The fix derives the elimination leaves from the stored bracket
 // (KnockoutLeavesFromBracket), exactly as the results workbook does, so the two
@@ -555,7 +555,7 @@ func TestExportCompetitionXlsx_PureKnockoutRendersTagsAndNamesToPrint(t *testing
 
 // TestExportCompetitionXlsx_PreDrawKnockoutNamesToPrintUnnumbered pins the
 // deliberate pre-draw exception documented on KnockoutNamesToPrint
-// (numbering.go): the blank-template export is reachable BEFORE a draw
+// (numbering.go): the stored-draw export is reachable BEFORE a draw
 // exists, precisely so an operator can print name tags and blank score
 // sheets ahead of the tournament. A never-started, setup-status
 // knockout-only competition must still get its Names to Print sheet, with
@@ -735,7 +735,7 @@ func TestExportTournamentWorkbooks_MultiPageTree(t *testing.T) {
 
 // TestExportCompetitionXlsx_UnsetPoolWinnersRendersKnockout pins mp-0yd8: an
 // unset (<=0) PoolWinners runs a 2-winner knockout everywhere else in the
-// engine via EffectivePoolWinners, but the blank-template export fed the raw
+// engine via EffectivePoolWinners, but the stored-draw export fed the raw
 // zero into the draw, rendering a workbook with no tree pages for the
 // knockout the tournament is actually running.
 func TestExportCompetitionXlsx_UnsetPoolWinnersRendersKnockout(t *testing.T) {

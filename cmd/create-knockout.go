@@ -8,11 +8,13 @@ import (
 	"github.com/gitrgoliveira/bracket-creator/internal/domain"
 	"github.com/gitrgoliveira/bracket-creator/internal/excel"
 	"github.com/gitrgoliveira/bracket-creator/internal/helper"
+	"github.com/gitrgoliveira/bracket-creator/internal/state"
 	"github.com/spf13/cobra"
 )
 
 type knockoutOptions struct {
 	teamMatches     int
+	teamMatchType   state.TeamMatchType // teamMatchType: kachinuki gives every team block a row for each bout an encounter can take and adds the Kachinuki Detail sheet. Set ONLY by the web /create handler (the app's blank template); deliberately NOT a CLI flag (owner decision: no new CLI options).
 	courts          int
 	filePath        string
 	outputPath      string
@@ -224,10 +226,14 @@ func (o *knockoutOptions) createKnockout(entries []string) error {
 	matchWinners = helper.ConvertPlayersToWinners(players, o.withZekkenName, playerCoords)
 	helper.CreateNamesToPrint(f, players, o.withZekkenName, courtNames, playerCoords, o.numberPrefix)
 
-	printEliminationWithBronze(f, matchWinners, eliminationMatchRounds, o.teamMatches, plan, o.engi, o.thirdPlaceMatch)
+	team := &state.Competition{TeamSize: o.teamMatches, TeamMatchType: o.teamMatchType}
+	printEliminationWithBronze(f, matchWinners, eliminationMatchRounds, team.TeamBoutRows(), plan, o.engi, o.thirdPlaceMatch)
+	if err := writeBlankKachinukiDetail(f, team, nil, eliminationMatchRounds, o.thirdPlaceMatch); err != nil {
+		return err
+	}
 	helper.FillEstimations(f, 0, 0, int64(o.teamMatches), int64(len(names)-1), o.courts)
 
-	// Apply sheet protection to all sheets except data and Time Estimator
+	// Protect every sheet but the editable ones (helper.ProtectAllSheets).
 	helper.ProtectAllSheets(f)
 
 	// Save the spreadsheet file

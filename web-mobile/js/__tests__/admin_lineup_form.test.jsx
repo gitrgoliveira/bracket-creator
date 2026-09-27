@@ -71,7 +71,7 @@ describe('AdminLineup form (competition-admin Lineups, bc-tmid pass 3)', () => {
     origConfirmDialog = global.window.confirmDialog;
     global.window.compMatches = () => [];
     global.window.API = {
-      fetchTeamLineup: vi.fn().mockResolvedValue(null), // 404 → fresh form
+      fetchTeamLineup: vi.fn().mockResolvedValue(null), // nothing saved -> fresh form
       fetchSquads: vi.fn().mockResolvedValue({}),
       addTeamMember: vi.fn(),
       renameTeamMember: vi.fn().mockResolvedValue(true),

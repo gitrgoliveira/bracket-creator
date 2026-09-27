@@ -434,8 +434,8 @@ function AdminLineup({ comp, team, round, password, showToast, onClose }) {
   const memberIdsRef = useRefA(memberIds);
   memberIdsRef.current = memberIds;
 
-  // Load the existing lineup: positions/memberIds. 404 -> fresh form
-  // (server contract, unchanged).
+  // Load the existing lineup: positions/memberIds. nothing saved -> fresh
+  // form (server contract, unchanged).
   useEffectA(() => {
     let cancelled = false;
     if (!compId || !teamId) {

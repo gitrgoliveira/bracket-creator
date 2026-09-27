@@ -25,14 +25,14 @@ function read(dataDir, compId, file) {
 // `omitempty` `memberIds`, two parallel maps). This used to hand-parse
 // lineups.yaml by indentation and compare FILE-WIDE totals, so one lineup's
 // spare id could hide another's missing one. A team with no lineup yet is
-// skipped (the server answers 404 by design); no lineup at all is a failure.
+// skipped (saved: false in the response); no lineup at all is a failure.
 // Returns how many positions carry an id, for a recipe that checks the count.
 export async function assertLineupIds(api, compId) {
   let ids = 0;
   let lineups = 0;
   for (const team of await api.get(`/api/competitions/${compId}/participants`)) {
-    const lineup = await api.find(`/api/competitions/${compId}/teams/${team.id}/lineups/0`);
-    if (!lineup) continue;
+    const lineup = await api.get(`/api/competitions/${compId}/teams/${team.id}/lineups/0`);
+    if (lineup.saved === false) continue;
     lineups += 1;
     const memberIds = lineup.memberIds || {};
     const filled = Object.keys(lineup.positions || {}).filter((pos) => lineup.positions[pos] || memberIds[pos]);

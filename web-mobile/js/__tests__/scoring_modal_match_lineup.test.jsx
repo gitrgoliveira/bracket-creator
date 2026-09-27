@@ -1,13 +1,15 @@
 // mp-bkg regression guard: resolveMatchLineup must prefer the per-match
 // lineup endpoint (match-lineups/:matchId) over the round lineup, and fall
-// back to the round lineup only when the per-match GET returns null (404).
+// back to the round lineup only when the per-match GET returns null
+// (nothing saved, bc-k404).
 //
 // Without this test the "preferred match lineup" change in
 // TeamScoreEditorModal is invisible. The component mounts, fires the
 // useEffect, but since vitest stubs hooks we test the pure helper directly.
 
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { resolveMatchLineup, resolveLineupTeamId } from '../admin_scoring_modal.jsx';
+import { API } from '../api_client.jsx';
 
 describe('resolveMatchLineup (mp-bkg regression guard)', () => {
   const COMP_ID = 'comp1';
@@ -38,15 +40,15 @@ describe('resolveMatchLineup (mp-bkg regression guard)', () => {
     expect(api.fetchTeamLineup).not.toHaveBeenCalled();
   });
 
-  it('falls back to round lineup when per-match GET returns null (404)', async () => {
+  it('falls back to round lineup when per-match GET returns null (nothing saved)', async () => {
     const api = makeAPI({ matchResult: null, roundResult: roundLineup });
     const result = await resolveMatchLineup(COMP_ID, TEAM_ID, MATCH_ID, ROUND, api);
     expect(result).toEqual(roundLineup);
     expect(api.fetchMatchLineup).toHaveBeenCalledWith(COMP_ID, TEAM_ID, MATCH_ID);
     // The round step asks the server for best-effort resolution: operators
     // typically save one round-0 lineup for the whole day, so an exact-only
-    // GET would 404 for every round after the first (UAT: the final's
-    // kachinuki bout 1 was submitted with empty side names).
+    // GET would answer nothing saved for every round after the first (UAT:
+    // the final's kachinuki bout 1 was submitted with empty side names).
     expect(api.fetchTeamLineup).toHaveBeenCalledWith(COMP_ID, TEAM_ID, ROUND, { fallback: true });
   });
 
@@ -125,5 +127,74 @@ describe('resolveLineupTeamId (mp-bkg: name-keyed side → participant UUID)', (
   it('returns "" for an empty side key and tolerates a missing player list', () => {
     expect(resolveLineupTeamId('', PLAYERS)).toBe('');
     expect(resolveLineupTeamId('Red Dojo', undefined)).toBe('Red Dojo');
+  });
+});
+
+// resolveMatchLineup through the REAL api_client (bc-k404): the mocked-API
+// tests above prove the fall-through logic in isolation, but fetchMatchLineup
+// and fetchTeamLineup are what actually turn a `saved: false` body into null
+// (and now throw on a genuine 404). This exercises the real boundary against
+// a fetch stub routed by URL, so a regression in either function's mapping
+// shows up here even if resolveMatchLineup's own logic is untouched.
+describe('resolveMatchLineup through the real api_client (bc-k404)', () => {
+  let originalFetch;
+  beforeEach(() => { originalFetch = global.fetch; });
+  afterEach(() => { global.fetch = originalFetch; });
+
+  // Routes a URL to a 200 JSON body; anything unmatched answers 404 with
+  // "competition not found", the real server's shape for a route this test
+  // never stubs.
+  function routeFetch(routes) {
+    return vi.fn((url) => {
+      for (const [pattern, body] of routes) {
+        const hit = typeof pattern === 'string' ? url === pattern : pattern.test(url);
+        if (hit) {
+          return Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve(body) });
+        }
+      }
+      return Promise.resolve({
+        ok: false, status: 404, json: () => Promise.resolve({ error: 'competition not found' }),
+      });
+    });
+  }
+
+  it('(a) match route saved false, round route (fallback=best) saved true: returns the round lineup', async () => {
+    const roundLineup = { teamId: 't1', round: 0, positions: { senpo: 'Alice' }, saved: true };
+    global.fetch = routeFetch([
+      ['/api/competitions/c1/teams/t1/match-lineups/m1', { teamId: 't1', matchId: 'm1', positions: {}, saved: false }],
+      ['/api/competitions/c1/teams/t1/lineups/1?fallback=best', roundLineup],
+    ]);
+    const result = await resolveMatchLineup('c1', 't1', 'm1', 1, API);
+    expect(result).toEqual(roundLineup);
+    // The round step must ask with ?fallback=best, not a bare exact GET.
+    const roundCall = global.fetch.mock.calls.map(([u]) => u).find((u) => u.includes('/lineups/1'));
+    expect(roundCall).toBe('/api/competitions/c1/teams/t1/lineups/1?fallback=best');
+  });
+
+  it('(b) both routes saved false: returns null', async () => {
+    global.fetch = routeFetch([
+      ['/api/competitions/c1/teams/t1/match-lineups/m1', { teamId: 't1', matchId: 'm1', positions: {}, saved: false }],
+      ['/api/competitions/c1/teams/t1/lineups/1?fallback=best', { teamId: 't1', round: 1, positions: {}, saved: false }],
+    ]);
+    const result = await resolveMatchLineup('c1', 't1', 'm1', 1, API);
+    expect(result).toBeNull();
+  });
+
+  it('(c) match route saved true with EMPTY positions wins; the round URL is never fetched (mp-bkg guard)', async () => {
+    const matchLineup = { teamId: 't1', matchId: 'm1', positions: {}, saved: true };
+    global.fetch = routeFetch([
+      ['/api/competitions/c1/teams/t1/match-lineups/m1', matchLineup],
+    ]);
+    const result = await resolveMatchLineup('c1', 't1', 'm1', 1, API);
+    expect(result).toEqual(matchLineup);
+    expect(global.fetch.mock.calls.some(([u]) => u.includes('/lineups/1'))).toBe(false);
+  });
+
+  it('(d) match route 404 (competition missing): falls through; round route saved false: returns null', async () => {
+    global.fetch = routeFetch([
+      ['/api/competitions/c1/teams/t1/lineups/1?fallback=best', { teamId: 't1', round: 1, positions: {}, saved: false }],
+    ]);
+    const result = await resolveMatchLineup('c1', 't1', 'm1', 1, API);
+    expect(result).toBeNull();
   });
 });

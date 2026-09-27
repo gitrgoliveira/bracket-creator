@@ -3398,23 +3398,33 @@ const API = {
         }
         return res.json();
     },
-    // T129/T130: per-round team lineups (FR-040). GET returns the persisted
-    // TeamLineup for (compId, teamId, round): 404 when no lineup has been
-    // submitted yet, which the form treats as "blank, editable". PUT replaces
-    // the lineup. DELETE clears it so an operator can revise.
+    // T129/T130: per-round team lineups (FR-040). GET always answers 200
+    // when the competition exists; a round with nothing saved answers with
+    // `saved: false` and empty positions rather than 404 (bc-k404: a lineup
+    // either exists or it doesn't, and empty is a normal state, not a
+    // missing resource). This is the ONE place that turns `saved: false`
+    // into null -- callers that read null as "nothing submitted"
+    // (isMatchOverride, pickCopySource) would otherwise misread an
+    // empty-but-saved lineup as unsaved. PUT replaces the lineup. DELETE
+    // clears it so an operator can revise. A 404 now means the competition
+    // itself does not exist and throws like any other error.
     // opts.fallback: best-effort resolution for match-scoring surfaces: when
-    // the exact round has no lineup the server falls back to the closest
-    // saved round (highest <= requested, else highest overall) instead of
-    // 404. The lineup EDITOR must NOT pass this: 404 means "blank, editable".
+    // the exact round has nothing saved the server falls back to the
+    // closest saved round (highest <= requested, else highest overall). The
+    // lineup EDITOR must NOT pass this: it reads the exact round with no
+    // fallback, so nothing saved there is null ("blank, editable").
     async fetchTeamLineup(compID, teamId, round, opts) {
         const qs = opts && opts.fallback ? "?fallback=best" : "";
         const res = await fetch(`/api/competitions/${compID}/teams/${teamId}/lineups/${round}${qs}`);
-        if (res.status === 404) return null;
         if (!res.ok) {
             const err = await res.json().catch(() => ({}));
             throw new Error(err.error || "Failed to load lineup");
         }
-        return res.json();
+        const body = await res.json();
+        // Strict === false: a body that does not SAY it is unsaved is a
+        // lineup, so a stub/older-shape response with no `saved` field at
+        // all still resolves as a lineup rather than being swallowed.
+        return body.saved === false ? null : body;
     },
     // memberIds (bc-tmid pass 3) is optional and keyed by the same position
     // as positions: the squad member id half of a lineup, sent alongside
@@ -3546,15 +3556,18 @@ const API = {
     // mp-825 / mp-bkg: per-match lineup endpoints. Match ID takes the
     // place of the round key: successive encounters between the same
     // two teams each carry an independent lineup entry.
-    // 404 → null (no lineup saved yet; form treats as blank/editable).
+    // `saved: false` -> null (bc-k404: nothing saved for this match is a
+    // 200, not a 404; resolveMatchLineup falls back to the round-scoped GET
+    // above on null, never the server). A 404 here means the competition
+    // does not exist.
     async fetchMatchLineup(compID, teamId, matchId) {
         const res = await fetch(`/api/competitions/${compID}/teams/${teamId}/match-lineups/${matchId}`);
-        if (res.status === 404) return null;
         if (!res.ok) {
             const err = await res.json().catch(() => ({}));
             throw new Error(err.error || "Failed to load match lineup");
         }
-        return res.json();
+        const body = await res.json();
+        return body.saved === false ? null : body;
     },
     // memberIds (bc-pnum gap closure) is optional and keyed by the same
     // position as positions, exactly like putTeamLineup's own memberIds

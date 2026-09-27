@@ -221,9 +221,24 @@ export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, on
   // it does NOT protect is a mount-time value that has since been CHANGED
   // elsewhere: "an explicit value in result always wins", so this editor would
   // put its stale name back. That is the case this closes.
+  //
+  // A pick the operator made stands until the server holds it. Each pick is
+  // saved as it is made (markScoringDirty in the pickers), so the save of one
+  // pick coming back must not undo a second pick made before it arrived. One
+  // adopt per side, so a pick still being saved on one side does not stop the
+  // other side following the server. An empty pick never counts as unsaved:
+  // the server keeps a name over "", so it would read unsaved forever.
   useAdoptFromServer({
-    signature: JSON.stringify([m.repPlayerA || "", m.repPlayerB || ""]),
-    apply: () => { setRepPlayerA(m.repPlayerA || ""); setRepPlayerB(m.repPlayerB || ""); },
+    signature: m.repPlayerA || "",
+    apply: () => setRepPlayerA(m.repPlayerA || ""),
+    keepLocalEdits: true,
+    isDirty: repPlayerA !== "" && repPlayerA !== (m.repPlayerA || ""),
+  });
+  useAdoptFromServer({
+    signature: m.repPlayerB || "",
+    apply: () => setRepPlayerB(m.repPlayerB || ""),
+    keepLocalEdits: true,
+    isDirty: repPlayerB !== "" && repPlayerB !== (m.repPlayerB || ""),
   });
   // doSubmit's setSubmitting(false) in finally fires post-await; if the
   // parent unmounts the modal during the in-flight save (e.g.
@@ -239,11 +254,10 @@ export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, on
   const _autosaveIsRunningRef = useRefA(false);
   const _autosaveBuildPatchRef = useRefA(null);
   const _autosaveOnSubmitRef = useRefA(null);
-  const { markDirty: markScoringDirty, cancelDebounce: cancelScoringDebounce, flushPending: flushScoringAutosave, leaveAfterSaving } = useDebouncedRunningWrite({
+  const { markDirty: markScoringDirty, cancelDebounce: cancelScoringDebounce } = useDebouncedRunningWrite({
     isRunningRef: _autosaveIsRunningRef,
     buildPatchRef: _autosaveBuildPatchRef,
     onSubmitRef: _autosaveOnSubmitRef,
-    mountedRef,
   });
 
   useEffectA(() => {
@@ -371,6 +385,10 @@ export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, on
   // to non-"reset" patches. periodCount=0 means "no overtime"; emitting the
   // field as undefined keeps the wire payload clean (omitempty server-side).
   const enchoBlock = () => enchoPeriodCount > 0 ? { encho: { periodCount: enchoPeriodCount } } : {};
+  // An operator change to the overtime count: the value (a number, or the
+  // updater EnchoControl's stepper hands over), then the save it schedules, as
+  // for a point. The count adopted from the server does not come through here.
+  const changeEnchoPeriodCount = (v) => { setEnchoPeriodCount(v); markScoringDirty(); };
   // decidedByHantei is only set via the dedicated submitHantei path
   // (SHIRO/AKA hantei buttons). The regular Finish/Enter buildPatch
   // explicitly clears the flag (sends false) when the match was previously
@@ -741,22 +759,14 @@ export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, on
   // is not an unsaved change of theirs, and prompting "discard unsaved scoring
   // changes?" on an editor nobody touched trains operators to dismiss the one
   // prompt that protects real work.
-  //
-  // scoringDirty is what closing a RUNNING match may flush (bc-dscn): isDirty
-  // without the hantei ARM, which is a mode rather than a result. Flushing on
-  // an arm alone would send a freshly stamped write with an unchanged
-  // scoreline, which could win last-write-wins over another device's older
-  // queued result. Withdrawing a RECORDED verdict is a result, not the arm,
-  // and buildPatch carries it (hanteiClear), so that term stays.
-  const scoringDirty =
+  const isDirty =
     !window.arraysEqual(aPts, initialAPts) ||
     !window.arraysEqual(bPts, initialBPts) ||
     aFouls !== initialAFouls ||
     bFouls !== initialBFouls ||
     isDrawToggled !== initialIsDrawToggled ||
     enchoPeriodCount !== initialEnchoPeriods ||
-    (hanteiRecorded && !decidedByHantei);
-  const isDirty = scoringDirty || decidedByHantei !== hanteiRecorded;
+    decidedByHantei !== hanteiRecorded;
   // The scoreline half of the same rule, declared HERE because the hook needs
   // isDirty: it reads the value from the render BEFORE the server change (see
   // useAdoptFromServer). It self-corrects: a re-seed makes the next render's
@@ -782,34 +792,35 @@ export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, on
     applyServerScore();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [lockedKey]);
-  const handleDismiss = async () => {
-    // Don't close while any save/decision request is in flight: letting
+  // leaveEditor: every way out of the editor that is not a write, Close and
+  // Prev/Next alike (operator ruling 2026-09-27: Prev/Next ask as Close does).
+  const leaveEditor = async (go) => {
+    // Don't leave while any save/decision request is in flight: letting
     // the modal unmount would orphan the pending fetch and lose the
     // setState landing.
     if (submitting || decisionSubmitting) return;
-    // bc-dscn: a host that cannot close (the inline court console) has nothing
-    // to discard INTO, so it never prompts either.
-    if (!canClose) return;
-    // bc-dscn: on a RUNNING match every scoring edit is autosaved, so closing
-    // discards nothing: save any edit still inside the debounce window now and
-    // close without asking. Two local states are NOT in buildPatch("running")
-    // and so are not saved by it: the hantei ARM, which is only a mode (the
-    // verdict is committed by the side buttons, submitHantei) and is dropped
-    // with no write (scoringDirty excludes it), and the hikiwake toggle, which
-    // is a result the operator entered; that one keeps the prompt below,
-    // because closing would lose it.
+    // bc-dscn: on a RUNNING match every scoring edit is autosaved, and the
+    // unmount writes one still inside the debounce window
+    // (useDebouncedRunningWrite), so leaving discards nothing and asks
+    // nothing. Two local states are NOT in buildPatch("running"): the hantei
+    // ARM, which is only a mode (the verdict is committed by the side buttons,
+    // submitHantei) and is dropped with no write (it never marks dirty), and
+    // the hikiwake toggle, which is a result the operator entered; that one
+    // keeps the prompt below, because leaving would lose it.
     if (m.status === "running" && isDrawToggled === initialIsDrawToggled) {
-      if (scoringDirty) flushScoringAutosave();
-      onClose();
+      go();
       return;
     }
     if (isDirty && !(await window.confirmDialog({ message: "Discard unsaved scoring changes?", confirmLabel: "Discard changes", danger: true }))) return;
-    onClose();
+    // Discarded: the unmount must not write the edit the operator threw away.
+    cancelScoringDebounce();
+    go();
   };
-
-  // Prev/Next save an edit still inside the autosave window first.
-  const goPrev = () => leaveAfterSaving(scoringDirty, onPrev);
-  const goNext = () => leaveAfterSaving(scoringDirty, onNext);
+  // bc-dscn: a host that cannot close (the inline court console) has nothing
+  // to discard INTO, so it never prompts either.
+  const handleDismiss = () => (canClose ? leaveEditor(onClose) : undefined);
+  const goPrev = () => leaveEditor(onPrev);
+  const goNext = () => leaveEditor(onNext);
 
   // Keyboard shortcuts:
   //   Shift+M/K/D/T/H  → award point to AKA (red, sideA)
@@ -964,7 +975,9 @@ export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, on
           {/* mp-62vr: rep-player pickers for a team daihyosen/tiebreaker rep
               bout. The sides are TEAM names; the operator records which player
               each team fields, picked from that team's roster. Shiro = sideB,
-              Aka = sideA, matching the scoreboard's colour assignment. */}
+              Aka = sideA, matching the scoreboard's colour assignment. A pick
+              rides every running write (repBlock), so it is saved like a
+              point, not held until the next one. */}
           {m.repIsTeam && (
             <div data-testid="rep-bout-picker" className="rep-bout-picker" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 14 }}>
               <label style={{ display: "flex", flexDirection: "column", gap: 4, fontSize: 12, fontWeight: 700, color: "var(--ink-2)" }}>
@@ -974,7 +987,7 @@ export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, on
                   className="input"
                   value={repPlayerB}
                   disabled={submitting}
-                  onChange={(e) => setRepPlayerB(e.target.value)}
+                  onChange={(e) => { setRepPlayerB(e.target.value); markScoringDirty(); }}
                   style={{ padding: "6px 8px", fontSize: 14 }}
                 >
                   <option value="">Select player</option>
@@ -988,7 +1001,7 @@ export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, on
                   className="input"
                   value={repPlayerA}
                   disabled={submitting}
-                  onChange={(e) => setRepPlayerA(e.target.value)}
+                  onChange={(e) => { setRepPlayerA(e.target.value); markScoringDirty(); }}
                   style={{ padding: "6px 8px", fontSize: 14 }}
                 >
                   <option value="">Select player</option>
@@ -1106,7 +1119,7 @@ export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, on
           <div className="encho-center">
             <EnchoControl
               enchoPeriodCount={enchoPeriodCount}
-              setEnchoPeriodCount={setEnchoPeriodCount}
+              setEnchoPeriodCount={changeEnchoPeriodCount}
             />
           </div>
 

@@ -102,11 +102,15 @@ describe('bc-sync: the autosave reports a pending edit', () => {
     expect(events).toEqual(['pending', 'pending', 'write:running', 'released']);
   });
 
-  it('releases it when the editor unmounts with the edit still pending', async () => {
+  it('writes it when the editor unmounts with the edit still pending, then releases it', async () => {
+    // Operator ruling 2026-09-27: every way out of the editor keeps the tap.
     const { unmount } = await mount(running());
     await tapM();
     await act(async () => { unmount(); });
-    expect(events).toEqual(['pending', 'released']);
+    expect(events).toEqual(['pending', 'write:running', 'released']);
+    // Written once: no timer is left to fire it again.
+    await wait(AUTOSAVE_DEBOUNCE_MS + 50);
+    expect(events).toEqual(['pending', 'write:running', 'released']);
   });
 
   it('never registers one on a scheduled match', async () => {

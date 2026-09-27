@@ -48,7 +48,11 @@
 // shared display module whose imports are deliberately small leaves
 // (pool_ids.jsx, lineup_resolver.jsx), and it reaches bracket's display
 // primitives through window globals rather than importing that 3000-line module
-// for two pure functions.
+// for a pure function like matchMiddleMark. `enchoOn` and `defaultWinMaru`
+// (below) were two more such primitives and now live in this leaf (bc-fsnp),
+// so match_scoreboard imports defaultWinMaru directly; bracket.jsx imports
+// both from here and still exports and window-mirrors them for the callers
+// that reach it that way.
 //
 // The third rationale, deleted here, was "bracket's module identity is fragile
 // anyway — index.html ALSO script-tags /dist/bracket.js?v=6, so the file
@@ -169,6 +173,24 @@ export const realIppons = (arr) => (arr || []).filter(x => x && x !== IPPON_PLAC
 // DEFAULT_WIN_IPPON: the maru circle a default win awards, one per point
 // (domain.DefaultWinIppon). It counts as a point, but nobody struck it.
 export const DEFAULT_WIN_IPPON = "○";
+
+// enchoOn: THE single predicate for "did this result happen in encho" — a
+// non-degenerate block with a positive periodCount. The (E) label
+// (enchoLabel, bracket.jsx) and the default-win maru count (defaultWinMaru,
+// just below) both key on it, so a stray {periodCount: 0} block can never
+// make one surface claim overtime while another denies it. Mirrors
+// state.EnchoMetadata.On (Go).
+export const enchoOn = (encho) => (encho?.periodCount || 0) > 0;
+
+// defaultWinMaru: the maru cells a default win awards — one "○" per point,
+// per the FIK Regulations (Article 32 and the Score Board appendix p.15:
+// "put one mark in case of Encho"): the two-point pair in regulation, the
+// single deciding point in encho (sudden death). THE single JS source of
+// the maru-count rule; mirrors domain.DefaultWinIppons (Go, same cells
+// shape). The canonical record is the engine's RecordDecision fill via
+// domain.DefaultWinIppons — displays only fall back to this for winners
+// whose recorded cells are empty (byes, legacy data).
+export const defaultWinMaru = (encho) => (enchoOn(encho) ? [DEFAULT_WIN_IPPON] : [DEFAULT_WIN_IPPON, DEFAULT_WIN_IPPON]);
 
 // struckIppons: the points a side actually STRUCK, i.e. realIppons minus the
 // default-win maru. Go twin: engine.struckIppons. A default win keeps what the

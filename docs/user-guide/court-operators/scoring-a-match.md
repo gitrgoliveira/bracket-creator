@@ -13,6 +13,8 @@ Open a match from the Upcoming list to start scoring it; the score editor opens 
 
 On a laptop you can score without the mouse. When scoring an individual match or a kachinuki bout, press **M**, **K**, **D**, **T**, or **H** to award that strike to Shiro (White). Hold **Shift** with the same key to award it to Aka (Red). **Left** and **Right** move to the previous or next match on the court, and **Esc** closes the editor. On a tablet, use the on-screen buttons.
 
+Everything you enter on a running match is saved as you go, so closing the editor or moving to another match keeps it, even straight after a tap. Two things are only kept when you press **Finish** or save a correction: a **Mark draw** on a running match, and changes to a finished match. If you close the editor or move to another match with one of those not yet saved, the app asks first: **Discard changes** drops it, and **Cancel** keeps you on the match.
+
 To take back a strike, tap the scored mark itself in the centre of the board. The editor says so while any mark is scored: under the marks on an individual match, and once above the first bout on a team match. Taking one back frees a cell, and the next strike you award fills it. Take both back and the next two strikes fill the cells in the order you award them, from the outside in.
 
 ## Send a match back to the queue

@@ -851,12 +851,19 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
   // below, so without an adopt an overtime count recorded on another device left
   // this editor showing the old one AND permanently dirty — which fires the
   // discard prompt on an editor nobody touched, and would have held the re-seed
-  // gate shut for the rest of the session. Unconditional for the same reason as
-  // the hantei channel beside it: keyed on the server's value, a local bump does
-  // not move it, so the operator's own count stands.
+  // gate shut for the rest of the session. An untouched editor (its count equals
+  // the server's) still follows the server, which covers both. It keeps a count
+  // the operator changed, as the individual editor's re-seed does, because on a
+  // running match every change is saved as it is made (changeEnchoPeriodCount,
+  // and the kachinuki Encho through updateSub): the save of one tap
+  // coming back must not undo a second tap made before it arrived. The count
+  // stays the operator's until the server holds it, as the daihyosen verdict
+  // does (its adopt below).
   useAdoptFromServer({
     signature: initialEnchoPeriods,
     apply: () => setEnchoPeriodCount(initialEnchoPeriods),
+    keepLocalEdits: true,
+    isDirty: enchoPeriodCount !== initialEnchoPeriods,
   });
   const [submitting, setSubmitting] = useStateA(false);
   // F5 (mirrors ScoreEditorModal): explicit "not saved" state for THIS match.
@@ -986,12 +993,19 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
   // stored verdict, an explicit `false` from it is always the operator ruling
   // on something in front of them, which is what let buildPatch's hanteiKnown
   // guard go away entirely.
+  //
+  // It keeps a side the operator picked until the server holds it: a pick is
+  // saved as it is made (pickDaihyosenHantei), so the save of one pick coming
+  // back must not undo a second made before it arrived. An arm with no side is
+  // a mode, not an edit, and does not hold the verdict back.
   useAdoptFromServer({
     signature: JSON.stringify([daihyosenHanteiRecorded, recordedDaihyosenSide]),
     apply: () => {
       setDaihyosenHanteiArmed(daihyosenHanteiRecorded);
       setDaihyosenHantei(recordedDaihyosenSide);
     },
+    keepLocalEdits: true,
+    isDirty: daihyosenHantei !== recordedDaihyosenSide,
   });
   // Shared by daihyosenTouched (buildPatch) and isDirty: whether the operator
   // has moved the daihyosen VERDICT (encho count, hantei pick, or hantei arm)
@@ -1013,33 +1027,26 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
   // and invisible on the wire. Hoisting the shared terms into this one const
   // makes that impossible: both callers see the same verdict-dirty answer by
   // construction.
-  //
-  // daihyosenResultDirty is the same test WITHOUT the hantei arm, which is a
-  // mode rather than a result (bc-dscn): closing a running match flushes on
-  // it, so an arm alone never sends a freshly stamped write whose scoreline is
-  // unchanged, which could win last-write-wins over another device's older
-  // queued result. daihyosenVerdictDirty is built FROM it, so the two cannot
-  // disagree about anything but the arm.
-  const daihyosenResultDirty =
-    enchoPeriodCount !== initialEnchoPeriods ||
-    daihyosenHantei !== recordedDaihyosenSide;
   const daihyosenVerdictDirty =
-    daihyosenResultDirty ||
+    enchoPeriodCount !== initialEnchoPeriods ||
+    daihyosenHantei !== recordedDaihyosenSide ||
     daihyosenHanteiArmed !== daihyosenHanteiRecorded;
-  // The ONE hantei undo, shared by the Ht chip and the panel Cancel so the
-  // two paths cannot drift. Like the pick buttons, it is LOCAL state only:
-  // hantei is an explicit-submit channel (autosave contract), so the verdict
-  // - picked, re-picked or withdrawn - rides the NEXT write of this match
-  // (any point edit's autosave, Finish, or Save correction) as part of the
-  // full subResults snapshot. Deliberately NO markScoringDirty here: a
-  // cancel-then-repick must not race a strip write against a repick that
-  // writes nothing, and a lone dirty-mark was dead on completed matches
-  // anyway (the debounced write only fires while running). If the operator
-  // abandons the editor entirely, the server keeps its verdict and the chip
-  // re-seeds from it on reopen - same as every other unsaved local edit.
+  // The daihyosen verdict is saved like a point (bc-sync): picking a side,
+  // re-picking, and withdrawing it (clearHantei, the ONE undo, shared by the
+  // Ht chip and the panel Cancel so the two paths cannot drift) each schedule
+  // the autosave, so on a running match the verdict rides the running write
+  // and leaving the editor keeps it. A cancel then a re-pick inside the
+  // debounce window is one write; further apart, two writes that land in the
+  // order they were made. The ARM alone is a mode and saves nothing. On a
+  // completed match nothing autosaves: the verdict rides Save correction.
+  const pickDaihyosenHantei = (side) => {
+    setDaihyosenHantei(side);
+    markScoringDirty();
+  };
   const clearHantei = () => {
     setDaihyosenHanteiArmed(false);
     setDaihyosenHantei("");
+    markScoringDirty();
   };
   // Same teardown-race guard as ScoreEditorModal: covers external/
   // parent-driven unmount during in-flight save.
@@ -1050,11 +1057,10 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
   const _autosaveIsRunningRef = useRefA(false);
   const _autosaveBuildPatchRef = useRefA(null);
   const _autosaveOnSubmitRef = useRefA(null);
-  const { markDirty: markScoringDirty, cancelDebounce: cancelScoringDebounce, flushPending: flushScoringAutosave, leaveAfterSaving } = useDebouncedRunningWrite({
+  const { markDirty: markScoringDirty, cancelDebounce: cancelScoringDebounce } = useDebouncedRunningWrite({
     isRunningRef: _autosaveIsRunningRef,
     buildPatchRef: _autosaveBuildPatchRef,
     onSubmitRef: _autosaveOnSubmitRef,
-    mountedRef,
   });
 
   // T141: remove an unscored daihyosen placeholder. Defined at component
@@ -1508,12 +1514,17 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
   // the tap is silently lost. Doing it here means the operator can never edit a
   // row that is not theirs to edit, without a second mechanism racing the
   // render to commit the shape first.
+  // The same edit ends a refused Fusensho's explanation (fusenshoRefusal): it
+  // shows from the refused tap until the operator next edits any bout row, so
+  // re-entering the points that caused the refusal does not bring it back
+  // untapped. The server re-seed never comes through here (it uses setSubs).
   const updateSub = (idx, fn) => {
     lastRowEditRef.current.set(subs[idx]._pos, serverNowMs());
     setSubsByOperator(prev => {
       const rows = reconcileRowsToPositions(prev, serverSubs);
       return rows.map((s, i) => i === idx ? fn(s) : s);
     });
+    setFusenshoRefusal("");
     markScoringDirty();
   };
 
@@ -1531,7 +1542,9 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
   // is active is a side-switch; the original pre-fusensho snapshot is
   // preserved so a later untoggle still restores the genuine prior state.
   // A refused fusensho (the other side already won the bout) never gets here:
-  // its button is disabled (fusenshoAllowed).
+  // its button stays tappable (aria-disabled, fusenshoAllowed), and the tap
+  // shows the reason under that side instead (fusenshoRefusal) until the next
+  // bout-row edit clears it (updateSub).
   const setFusenshoFor = (idx, side) => updateSub(idx, prev => applyFusenshoToggle(prev, side));
 
   // Toggle an operator-marked hikiwake (draw) for a sub-bout. Marking a draw
@@ -2002,6 +2015,14 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
   // sub-bout (attached per-sub in buildPatch), so suppress the top-level
   // encho to avoid duplicate/ambiguous semantics on the team match.
   const enchoBlock = () => (enchoPeriodCount > 0 && !hasDaihyosen) ? { encho: { periodCount: enchoPeriodCount } } : {};
+  // An operator change to the overtime count from EnchoControl: the value (a
+  // number, or the updater its stepper hands over), then the save it
+  // schedules, as for a point. The count rides the running write either way:
+  // the match's (enchoBlock) or, once a daihyosen exists, that bout's
+  // (daihyosenEnchoFields). The count adopted from the server does not come
+  // through here, and the kachinuki Encho/Undo encho already save through
+  // updateSub.
+  const changeEnchoPeriodCount = (v) => { setEnchoPeriodCount(v); markScoringDirty(); };
 
   // Per-bout competitor names. Single choke point shared by the row
   // renderer and buildPatch (via resolveKachinukiBoutSides) so display and
@@ -2610,9 +2631,6 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
   // repetition on the busiest path in the file.
   const serverSubsSig = JSON.stringify(serverSubs);
   const isDirty = JSON.stringify(subs) !== serverSubsSig || daihyosenVerdictDirty;
-  // bc-dscn: what closing a RUNNING match may flush. isDirty without the
-  // hantei arm (see daihyosenResultDirty).
-  const scoringDirty = JSON.stringify(subs) !== serverSubsSig || daihyosenResultDirty;
   // bc-dscn: an edit the running patch would NOT carry. Under kachinuki
   // buildPatch drops every row kachinukiRowSent does not name, so a changed
   // row it leaves out never reaches the server by a flush. Closing would lose
@@ -2652,9 +2670,15 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
   useAdoptFromServer({
     signature: serverSubsSig,
     apply: () => {
+      // The previous board is read HERE, not inside the updater: a renderer
+      // may run the updater a render later (React does when another adopt has
+      // already queued a state change in this commit; the render tests run on
+      // React), and by then the effect below has moved the ref on, so every
+      // untouched row would read as edited, keep its stale value, and be
+      // written back over the server's by the next save.
+      const priorByPos = new Map((prevServerSubsRef.current || []).map(s => [s._pos, s]));
       setSubs(prev => {
         const localByPos = new Map(prev.map(s => [s._pos, s]));
-        const priorByPos = new Map((prevServerSubsRef.current || []).map(s => [s._pos, s]));
         return serverSubs.map(ss => {
           const local = localByPos.get(ss._pos);
           if (!local) return ss;
@@ -2701,34 +2725,36 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
   // (setState-after-unmount), AND confirm-then-discard when the user has
   // unsaved sub-match edits. The earlier version only checked submitting,
   // so an accidental backdrop/Esc silently lost up to 9 sub-match scores.
-  const handleDismiss = async () => {
+  // leaveEditor is every way out that is not a write, Close and Prev/Next
+  // alike (operator ruling 2026-09-27: Prev/Next ask as Close does).
+  const leaveEditor = async (go) => {
     // Same contract as ScoreEditorModal: never close while a save,
     // decision, or daihyosen request is mid-flight.
     if (submitting || decisionSubmitting || daihyosenBusy) return;
-    // bc-dscn: a host that cannot close (the inline court console) has nothing
-    // to discard INTO, so it never prompts either.
-    if (!canClose) return;
-    // bc-dscn: on a RUNNING match every scoring edit is autosaved, so closing
-    // discards nothing: save any edit still inside the debounce window now and
-    // close without asking. buildPatch("running") carries what scoringDirty
-    // compares: every played bout row in subResults, match-level encho, and
-    // the daihyosen verdict (encho count and hantei pick via
-    // daihyosenEnchoFields). Not carried, and handled here: a hantei ARM with
-    // no side picked is only a mode, not a result, so it is dropped with no
-    // write (the individual editor's rule too); and a kachinuki row the
-    // played-row filter drops (runningPatchDropsAnEdit) keeps the prompt.
+    // bc-dscn: on a RUNNING match every scoring edit is autosaved, and the
+    // unmount writes one still inside the debounce window
+    // (useDebouncedRunningWrite), so leaving discards nothing and asks
+    // nothing. buildPatch("running") carries every played bout row in
+    // subResults, match-level encho, and the daihyosen verdict (encho count
+    // and hantei pick via daihyosenEnchoFields). Not carried, and handled
+    // here: a hantei ARM with no side picked is only a mode, not a result, so
+    // it is dropped with no write (the individual editor's rule too); and a
+    // kachinuki row the played-row filter drops (runningPatchDropsAnEdit)
+    // keeps the prompt.
     if (m.status === "running" && !runningPatchDropsAnEdit) {
-      if (scoringDirty) flushScoringAutosave();
-      onClose();
+      go();
       return;
     }
     if (isDirty && !(await window.confirmDialog({ message: "Discard unsaved scoring changes?", confirmLabel: "Discard changes", danger: true }))) return;
-    onClose();
+    // Discarded: the unmount must not write the edit the operator threw away.
+    cancelScoringDebounce();
+    go();
   };
-
-  // Prev/Next save an edit still inside the autosave window first.
-  const goPrev = () => leaveAfterSaving(scoringDirty, onPrev);
-  const goNext = () => leaveAfterSaving(scoringDirty, onNext);
+  // bc-dscn: a host that cannot close (the inline court console) has nothing
+  // to discard INTO, so it never prompts either.
+  const handleDismiss = () => (canClose ? leaveEditor(onClose) : undefined);
+  const goPrev = () => leaveEditor(onPrev);
+  const goNext = () => leaveEditor(onNext);
 
   // Esc-to-close + ←/→ match nav, matching ScoreEditorModal. M/K/D/T/H ippon
   // shortcuts are wired ONLY for kachinuki bout mode (one current bout, an
@@ -3517,9 +3543,9 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
                 {daihyosenHanteiArmed && (
                   <div style={{ marginLeft: "auto", display: "flex", gap: 6 }}>
                     <button type="button" className={`btn btn--sm ${daihyosenHantei === "b" ? "btn--primary" : ""}`} data-testid="team-daihyosen-hantei-shiro"
-                      onClick={() => setDaihyosenHantei("b")} disabled={submitting || decisionSubmitting}>SHIRO wins</button>
+                      onClick={() => pickDaihyosenHantei("b")} disabled={submitting || decisionSubmitting}>SHIRO wins</button>
                     <button type="button" className={`btn btn--sm ${daihyosenHantei === "a" ? "btn--primary" : ""}`} data-testid="team-daihyosen-hantei-aka"
-                      onClick={() => setDaihyosenHantei("a")} disabled={submitting || decisionSubmitting}>AKA wins</button>
+                      onClick={() => pickDaihyosenHantei("a")} disabled={submitting || decisionSubmitting}>AKA wins</button>
                     <button type="button" className="btn btn--ghost btn--sm" data-testid="team-daihyosen-hantei-cancel"
                       onClick={clearHantei} disabled={submitting || decisionSubmitting}>Cancel</button>
                   </div>
@@ -3733,7 +3759,7 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
           {!kachinukiBoutMode && (
             <EnchoControl
               enchoPeriodCount={enchoPeriodCount}
-              setEnchoPeriodCount={setEnchoPeriodCount}
+              setEnchoPeriodCount={changeEnchoPeriodCount}
             />
           )}
 

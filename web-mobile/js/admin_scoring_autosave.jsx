@@ -6,6 +6,10 @@ const { useState: useStateA, useEffect: useEffectA, useRef: useRefA } = React;
 
 export const AUTOSAVE_DEBOUNCE_MS = 300;
 
+// The monotonic clock an edit is read on, or null where there is none (the
+// write is then stamped when it is sent).
+const perfNow = () => (typeof performance !== "undefined" && typeof performance.now === "function" ? performance.now() : null);
+
 // ---------------------------------------------------------------------------
 // C2: SyncStatusPill
 // ---------------------------------------------------------------------------
@@ -92,17 +96,23 @@ export function SyncStatusPill({ isRunning }) {
 // useDebouncedRunningWrite: the running-match autosave. Every edit is held
 // for AUTOSAVE_DEBOUNCE_MS and then written as one status:"running" PUT.
 //
-// bc-sync: that held edit exists nowhere but this hook's timer, so two things
-// are done for it. It is REPORTED: markDirty registers a pending-edit token
-// with api_client (API.notePendingEdit), so the sync pill reads "Syncing..."
-// from the first tap instead of "Synced" over unsent work, and the token is
+// bc-sync: that held edit exists nowhere but this hook's timer, so it is
+// REPORTED and KEPT. Reported: markDirty registers a pending-edit token with
+// api_client (API.notePendingEdit), so the sync pill reads "Syncing..." from
+// the first tap instead of "Synced" over unsent work, and the token is
 // released only once the write has been handed to onSubmit (by then
-// recordScore counts it as in flight). And it is KEPT when the page goes away:
-// on pagehide, or the tab being hidden, a pending edit is written at once
-// with `durable: true` on the patch, which makes recordScore put it straight
-// into the persisted outbox. A reload used to cancel the timer and lose it.
-export function useDebouncedRunningWrite({ isRunningRef, buildPatchRef, onSubmitRef, mountedRef }) {
+// recordScore counts it as in flight). Kept when the editor goes away: the
+// unmount writes it. Kept when the page goes away: on pagehide, or the tab
+// being hidden, a pending edit is written at once with `durable: true` on the
+// patch, which makes recordScore put it straight into the persisted outbox.
+// Every write carries the time of the edit it saves (editedPerf), so however
+// late it goes out, it is never newer than a result recorded after the tap.
+export function useDebouncedRunningWrite({ isRunningRef, buildPatchRef, onSubmitRef }) {
   const timerRef = useRefA(null);
+  // The monotonic reading of the last edit, sent on the patch as `editedPerf`
+  // (never on the wire) so recordScore stamps the write with the time of that
+  // edit, not of its sending (api_client.jsx _editAge).
+  const editPerfRef = useRefA(null);
   // One token per editor instance, so two open editors never release each
   // other's pending edit.
   const pendingTokenRef = useRefA({});
@@ -122,26 +132,19 @@ export function useDebouncedRunningWrite({ isRunningRef, buildPatchRef, onSubmit
   };
 
   // cancelDebounce: call this before any explicit submit (Start / Finish /
-  // Hantei / Decision) so the queued timer can't fire afterward. Nothing of
-  // this hook's is left pending then, so the pending edit is released too.
+  // Hantei / Decision) so the queued timer can't fire afterward, and before
+  // closing on the operator's Discard, so the unmount does not write what they
+  // threw away. Nothing of this hook's is left pending then, so the pending
+  // edit is released too.
   const cancelDebounce = () => {
     if (clearTimer()) notePending(false);
   };
 
-  // Clear on unmount so the closure can't fire after the component is gone.
-  // Unmount keeps its CANCEL semantics, because the discard prompt unmounts
-  // after the operator chose to discard. Every other way out of a running
-  // editor saves first: closing it calls flushPending, and its Prev/Next go
-  // through leaveAfterSaving (below), before they unmount it. A reload never unmounts; the pagehide listener
-  // below is what keeps an edit across one.
-  useEffectA(() => () => { cancelDebounce(); }, []);
-
-  // The running write itself, shared by the debounce timer, flushPending and
+  // The running write itself, shared by the debounce timer, the unmount and
   // the page-hide flush so they can never apply different gates. `durable`
   // asks recordScore to queue the write rather than fetch it (bc-sync).
   const fireRunningWrite = (durable) => {
     try {
-      if (!mountedRef.current) return;
       // gate 3: re-check running at FIRE time. If the match was completed
       // during the debounce window (this operator's Finish cancels the timer,
       // but an SSE update or another operator can complete it out from under
@@ -154,7 +157,7 @@ export function useDebouncedRunningWrite({ isRunningRef, buildPatchRef, onSubmit
       // flight before its first await, so the status stays "syncing" through
       // the hand-over instead of flickering to "synced" and back.
       try {
-        const patch = buildPatchRef.current("running");
+        const patch = { ...buildPatchRef.current("running"), editedPerf: editPerfRef.current };
         const p = onSubmitRef.current(durable ? { ...patch, durable: true } : patch);
         if (p && typeof p.catch === "function") p.catch(() => {});
       } catch (_) { /* swallow */ }
@@ -163,9 +166,21 @@ export function useDebouncedRunningWrite({ isRunningRef, buildPatchRef, onSubmit
     }
   };
 
+  // Unmount writes an edit still inside the window, whatever unmounted the
+  // editor (operator ruling 2026-09-27): Close, Prev/Next or their keys,
+  // another match picked, a correction opened, a court switch, or the host
+  // moving on by itself because another device finished the match. That last
+  // one is why the write carries the time of the tap (editedPerf): the tap is
+  // older than that finish, so the server keeps the finish. Discarding is the
+  // one way out that saves nothing: the editor cancels first (cancelDebounce).
+  // A reload never unmounts; the pagehide listener below keeps an edit across
+  // one. Everything this reads is a ref, so the mount-time closure is safe.
+  useEffectA(() => () => { if (clearTimer()) fireRunningWrite(); }, []);
+
   // markDirty: call from every user-driven mutation handler (addPt,
   // removePt, foul increment/decrement, draw toggle, encho change, team
-  // sub-bout edits). Do NOT call from prop/SSE-driven state writes.
+  // sub-bout edits). Do NOT call from prop/SSE-driven state writes. An edit
+  // that does not call it is not saved by the unmount or the page-hide flush.
   const markDirty = () => {
     if (!isRunningRef.current) return; // gate 1: never auto-start a scheduled match
     // Re-arm WITHOUT releasing the pending edit (not cancelDebounce): the edit
@@ -173,23 +188,11 @@ export function useDebouncedRunningWrite({ isRunningRef, buildPatchRef, onSubmit
     // on every tap inside the window.
     clearTimer();
     notePending(true);
+    editPerfRef.current = perfNow();
     timerRef.current = setTimeout(() => {
       timerRef.current = null;
       fireRunningWrite();
     }, AUTOSAVE_DEBOUNCE_MS);
-  };
-
-  // flushPending: save NOW instead of in 300ms (bc-dscn). Closing an editor on
-  // a running match calls this so an edit still inside the debounce window is
-  // written rather than dropped by the unmount's cancelDebounce. It fires
-  // whether or not a timer is pending, because not every edit arms one (the
-  // individual editor's encho counter does not call markDirty); the caller
-  // gates it on its own isDirty, so an untouched editor never writes.
-  const flushPending = () => {
-    // clearTimer, not cancelDebounce: the pending edit is released by
-    // fireRunningWrite once the write is dispatched, never before it.
-    clearTimer();
-    fireRunningWrite();
   };
 
   // bc-sync: the page is going away (a reload, a closed tab, the iPad locking
@@ -212,14 +215,5 @@ export function useDebouncedRunningWrite({ isRunningRef, buildPatchRef, onSubmit
     };
   }, []);
 
-  // leaveAfterSaving: Prev/Next re-key an editor in its host, which unmounts
-  // it, and the unmount only cancels (above). So an edit still inside the
-  // window is saved first, as closing saves it, and then `go` runs. `dirty` is
-  // the editor's own "not yet on the server" test, the one its close asks.
-  const leaveAfterSaving = (dirty, go) => {
-    if (isRunningRef.current && dirty) flushPending();
-    go();
-  };
-
-  return { markDirty, cancelDebounce, flushPending, leaveAfterSaving };
+  return { markDirty, cancelDebounce };
 }

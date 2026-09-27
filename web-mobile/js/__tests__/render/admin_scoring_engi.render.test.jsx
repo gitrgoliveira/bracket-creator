@@ -422,7 +422,7 @@ describe('EngiScoreEditorModal saves flags as they are entered', () => {
     fireEvent.click(screen.getByTestId('engi-shiro-inc'));
     await act(async () => { vi.advanceTimersByTime(400); });
     expect(onSubmit).toHaveBeenCalledTimes(1);
-    expect(onSubmit).toHaveBeenCalledWith({ flagsA: 1, flagsB: 1, status: 'running' });
+    expect(onSubmit).toHaveBeenCalledWith({ flagsA: 1, flagsB: 1, status: 'running', editedPerf: expect.any(Number) });
   });
 
   it('a keyboard change saves too', async () => {
@@ -430,7 +430,7 @@ describe('EngiScoreEditorModal saves flags as they are entered', () => {
     render(<EngiScoreEditorModal match={makeMatch({ status: 'running' })} onClose={() => {}} onSubmit={onSubmit} />);
     await act(async () => { fireEvent.keyDown(window, { key: 's' }); });
     await act(async () => { vi.advanceTimersByTime(400); });
-    expect(onSubmit).toHaveBeenCalledWith({ flagsA: 0, flagsB: 1, status: 'running' });
+    expect(onSubmit).toHaveBeenCalledWith({ flagsA: 0, flagsB: 1, status: 'running', editedPerf: expect.any(Number) });
   });
 
   it('a match not yet started writes nothing until the result is saved', async () => {
@@ -443,11 +443,13 @@ describe('EngiScoreEditorModal saves flags as they are entered', () => {
 
   it('closing a running match with a change still pending saves it and asks nothing', async () => {
     const onSubmit = vi.fn().mockResolvedValue({ status: 'running' });
-    const onClose = vi.fn();
-    render(<EngiScoreEditorModal match={makeMatch({ status: 'running' })} onClose={onClose} onSubmit={onSubmit} />);
+    // Closing unmounts the editor, as every host does; the unmount writes it.
+    let view;
+    const onClose = vi.fn(() => view.unmount());
+    view = render(<EngiScoreEditorModal match={makeMatch({ status: 'running' })} onClose={onClose} onSubmit={onSubmit} />);
     fireEvent.click(screen.getByTestId('engi-aka-inc'));
     await act(async () => { fireEvent.click(screen.getByTestId('engi-close-btn')); });
-    expect(onSubmit).toHaveBeenCalledWith({ flagsA: 1, flagsB: 0, status: 'running' });
+    expect(onSubmit).toHaveBeenCalledWith({ flagsA: 1, flagsB: 0, status: 'running', editedPerf: expect.any(Number) });
     expect(onClose).toHaveBeenCalled();
   });
 });
@@ -471,7 +473,7 @@ describe('a flag change inside the autosave window survives Prev/Next', () => {
     await act(async () => { goNext(); });
     await act(async () => { vi.advanceTimersByTime(400); });
     expect(onNext).toHaveBeenCalledTimes(1);
-    expect(onSubmit).toHaveBeenCalledWith({ flagsA: 1, flagsB: 0, status: 'running' });
+    expect(onSubmit).toHaveBeenCalledWith({ flagsA: 1, flagsB: 0, status: 'running', editedPerf: expect.any(Number) });
   });
 });
 

@@ -119,9 +119,10 @@ and Shiro (white):
   flags any other total and does not let you save it.
 - The side with more flags wins the bout.
 - **Save result** (or **Finish + Start Next**) takes two taps, as **Finish**
-  does in the kendo editor: the first changes it to **Tap again to save**, and
-  the second saves. A quick double tap only does the first. **`Enter`** saves at
-  once.
+  does in the kendo editor: the first tap changes the button to **Tap again to
+  save** (or **Tap again to finish** when the button reads **Finish + Start
+  Next**), and the second tap saves. A quick double tap only does the first.
+  **`Enter`** saves at once.
 
 ### Standings
 

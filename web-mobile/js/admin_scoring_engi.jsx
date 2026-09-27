@@ -123,19 +123,23 @@ export function EngiScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext
   const autosaveIsRunningRef = useRefE(false);
   const autosaveBuildPatchRef = useRefE(null);
   const autosaveOnSubmitRef = useRefE(null);
-  const { markDirty, cancelDebounce, flushPending, leaveAfterSaving } = useDebouncedRunningWrite({
+  const { markDirty, cancelDebounce } = useDebouncedRunningWrite({
     isRunningRef: autosaveIsRunningRef,
     buildPatchRef: autosaveBuildPatchRef,
     onSubmitRef: autosaveOnSubmitRef,
-    mountedRef,
   });
   autosaveIsRunningRef.current = m.status === "running";
   autosaveBuildPatchRef.current = (status) => ({ flagsA, flagsB, status });
   autosaveOnSubmitRef.current = onSubmit;
   // An operator change to either count: the value, then the save it schedules.
-  // A count adopted from the server does not come through here.
+  // A count adopted from the server does not come through here. A key pressed
+  // at a bound (a/s at MAX_FLAGS, Backspace at 0; the buttons are disabled
+  // there) changes nothing, so it must not write either: a running write
+  // stamped now can beat another device's older queued result (bc-rvfx).
   const changeFlags = (side, n) => {
-    (side === "a" ? setFlagsA : setFlagsB)(clamp(n));
+    const next = clamp(n);
+    if (next === (side === "a" ? flagsA : flagsB)) return;
+    (side === "a" ? setFlagsA : setFlagsB)(next);
     markDirty();
   };
 
@@ -168,23 +172,24 @@ export function EngiScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext
     isDirty,
   });
 
-  const handleDismiss = async () => {
+  // Every way out that is not a write, Close and Prev/Next alike (operator
+  // ruling 2026-09-27: Prev/Next ask as Close does).
+  const leaveEditor = async (go) => {
     if (submitting) return;
-    // A running match's flags are saved as entered: save any still pending
-    // and close, with nothing to discard.
+    // A running match's flags are saved as entered, and the unmount writes a
+    // change still inside the autosave window, so there is nothing to discard.
     if (m.status === "running") {
-      if (isDirty) flushPending();
-      onClose();
+      go();
       return;
     }
+    // Not running, so nothing is autosaved and nothing waits to be written.
     if (isDirty && !(await confirmDialog({ message: "Discard unsaved scoring changes?", confirmLabel: "Discard changes", danger: true }))) return;
-    onClose();
+    go();
   };
+  const handleDismiss = () => leaveEditor(onClose);
   useEscapeToClose(canClose ? handleDismiss : undefined);
-
-  // Prev/Next save flags still inside the autosave window first.
-  const goPrev = () => leaveAfterSaving(isDirty, onPrev);
-  const goNext = () => leaveAfterSaving(isDirty, onNext);
+  const goPrev = () => leaveEditor(onPrev);
+  const goNext = () => leaveEditor(onNext);
 
   // Pair names: the side's name holds both members combined ("Name 1 - Name 2");
   // split so member 2 renders under member 1. Both sides of an engi match are

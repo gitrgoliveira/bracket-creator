@@ -168,9 +168,11 @@ describe('a mark taken back on a kachinuki bout reaches the server (bc-kclr)', (
   it('closing right after the clear flushes it with no discard prompt', async () => {
     window.confirmDialog = vi.fn().mockResolvedValue(false);
     const onSubmit = vi.fn().mockResolvedValue(undefined);
-    const onClose = vi.fn();
+    // Closing unmounts the editor, as every host does; the unmount writes it.
+    let view;
+    const onClose = vi.fn(() => view.unmount());
     await act(async () => {
-      render(<ScoreEditorModal match={kachinukiMatch([
+      view = render(<ScoreEditorModal match={kachinukiMatch([
         { position: 1, sideA: 'Aka 1', sideB: 'Shiro 1', ipponsA: ['M'], ipponsB: [] },
       ])} onClose={onClose} onSubmit={onSubmit} password="" />);
     });

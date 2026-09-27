@@ -27,7 +27,7 @@ import { useEscapeToClose, confirmDialog } from './ui.jsx';
 // NumberedName: single owner of the number-chip-on-the-outer-side rule.
 import { NumberedName } from './numbered_name.jsx';
 import { SideCell } from './side_cell.jsx';
-import { acceptTap } from './tap_guard.jsx';
+import { useArmedConfirm } from './tap_guard.jsx';
 
 const MAX_FLAGS = 5;
 // Valid totals: 1, 3, 5 (odd, guarantees a winner).
@@ -137,14 +137,6 @@ export function EngiScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext
   const changeFlags = (side, n) => {
     (side === "a" ? setFlagsA : setFlagsB)(clamp(n));
     markDirty();
-  };
-  // A side's "+" button: a bounced double tap is one flag, not two (bc-dtip;
-  // tap_guard.jsx), so a count the referees never showed cannot sneak in.
-  // The keyboard's a/s keys are never a bounce and do not come through here.
-  const flagTapRef = useRefE(null);
-  const addFlag = (ev, side) => {
-    if (!acceptTap(flagTapRef, ev, side)) return;
-    changeFlags(side, (side === "a" ? flagsA : flagsB) + 1);
   };
 
   const total = flagsA + flagsB;
@@ -271,6 +263,16 @@ export function EngiScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext
     return unsub;
   }, [m.compId, m.id]);
 
+  // Save guard, the same as the individual and team editors' Finish (bc-dtfn,
+  // operator ruling 2026-09-27 that the editors behave alike): a tap ARMS the
+  // button, whose label then says to tap again, and a second tap after
+  // TAP_BOUNCE_MS saves, so the bounce of the arming tap can neither save nor
+  // start the next match. Any flag change disarms it, so a stale count cannot
+  // be confirmed. A correction ("Save correction") and keyboard Enter save
+  // directly, as there.
+  const { armed: saveArmed, setArmed: setSaveArmed, confirm: confirmSave } = useArmedConfirm();
+  useEffectE(() => { setSaveArmed(false); }, [flagsA, flagsB]);
+
   // F5: surface a PERMANENT terminal-write failure (non-retryable 4xx on a
   // queued retry) as an explicit "not saved" state, else the write is silently
   // dropped and the pending banner clears to look saved.
@@ -282,6 +284,9 @@ export function EngiScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext
       if (!info || info.compID !== m.compId || info.matchID !== m.id) return;
       setWriteFailed({ reason: info.reason || `save rejected (${info.status || "error"})`, advice: info.advice });
       setPendingWrite(false);
+      // Re-sending a failed save has to be deliberate: disarm, as the
+      // individual editor does.
+      setSaveArmed(false);
     });
     return unsub;
   }, [m.compId, m.id]);
@@ -430,7 +435,7 @@ export function EngiScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext
               <button
                 type="button"
                 className="btn engi-counter__btn"
-                onClick={(ev) => addFlag(ev, "b")}
+                onClick={() => changeFlags("b", flagsB + 1)}
                 disabled={flagsB >= MAX_FLAGS}
                 aria-label="Shiro plus one flag"
                 data-testid="engi-shiro-inc"
@@ -470,7 +475,7 @@ export function EngiScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext
               <button
                 type="button"
                 className="btn engi-counter__btn"
-                onClick={(ev) => addFlag(ev, "a")}
+                onClick={() => changeFlags("a", flagsA + 1)}
                 disabled={flagsA >= MAX_FLAGS}
                 aria-label="Aka plus one flag"
                 data-testid="engi-aka-inc"
@@ -552,13 +557,15 @@ export function EngiScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext
               {canClose && <button type="button" className="btn" onClick={handleDismiss} disabled={submitting}>Cancel</button>}
               <button
                 type="button"
-                className="btn btn--primary"
-                onClick={handleSubmit}
+                className={`btn btn--primary ${saveArmed && !isComplete ? "btn--confirm" : ""}`}
+                onClick={(ev) => { if (!isComplete && !confirmSave(ev)) return; handleSubmit(); }}
                 disabled={!canSubmit}
                 data-testid="engi-submit"
                 style={invalidOutline ? { outline: "2px solid var(--danger)" } : null}
               >
-                {submitting ? "Saving…" : isComplete ? "Save correction" : (onSubmitAndNext ? "Finish + Start Next →" : "Save result")}
+                {submitting ? "Saving…" : isComplete ? "Save correction"
+                  : saveArmed ? (onSubmitAndNext ? "Tap again to finish →" : "Tap again to save")
+                  : (onSubmitAndNext ? "Finish + Start Next →" : "Save result")}
               </button>
             </div>
             {nextMatch ? (

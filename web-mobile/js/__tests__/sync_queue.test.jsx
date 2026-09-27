@@ -2392,3 +2392,52 @@ describe('bc-sync: the stored outbox is shared by every tab', () => {
         warnSpy.mockRestore();
     });
 });
+
+describe('bc-sync: a running write still being sent when the page goes away is kept', () => {
+    // The page going away cancels an open fetch, so a running write the server
+    // has not answered yet (up to 12s on bad Wi-Fi) was lost with it.
+    const hang = () => new Promise(() => {});
+    const storedEntries = () => JSON.parse(localStorage.getItem('bc_write_queue') || '[]').map(([, d]) => d);
+    const hideTab = () => {
+        Object.defineProperty(document, 'visibilityState', { configurable: true, get: () => 'hidden' });
+        document.dispatchEvent(new Event('visibilitychange'));
+        delete document.visibilityState;
+    };
+
+    it('pagehide puts it into the stored outbox', async () => {
+        mockFetch(hang);
+        API.recordScore('c1', 'm1', { status: 'running', ipponsA: ['M'] }, 'pw', null);
+        await flushMicrotasks();
+        expect(localStorage.getItem('bc_write_queue')).toBeNull();
+        window.dispatchEvent(new Event('pagehide'));
+        const [entry] = storedEntries();
+        expect(entry).toMatchObject({ matchID: 'm1', terminal: false, payload: { status: 'running', ipponsA: ['M'] } });
+    });
+
+    it('the tab being hidden does the same', async () => {
+        mockFetch(hang);
+        API.recordScore('c1', 'm1', { status: 'running', ipponsA: ['M'] }, 'pw', null);
+        await flushMicrotasks();
+        hideTab();
+        expect(storedEntries().map((d) => d.matchID)).toEqual(['m1']);
+    });
+
+    it('a queued Finish made after it was sent is not replaced', async () => {
+        mockFetch((url, opts) => (JSON.parse(opts.body).status === 'running' ? hang() : Promise.reject(new TypeError('offline'))));
+        API.recordScore('c1', 'm1', { status: 'running', ipponsA: ['M'] }, 'pw', null);
+        await flushMicrotasks();
+        vi.advanceTimersByTime(50);
+        await API.recordScore('c1', 'm1', { status: 'completed', ipponsA: ['M', 'M'], winner: 'A' }, 'pw', null);
+        window.dispatchEvent(new Event('pagehide'));
+        expect(API.hasPendingTerminalWrite('c1', 'm1')).toBe(true);
+        expect(storedEntries()).toEqual([expect.objectContaining({ terminal: true })]);
+    });
+
+    it('a write that already landed is not queued again', async () => {
+        mockFetch(() => Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve({}) }));
+        await API.recordScore('c1', 'm1', { status: 'running', ipponsA: ['M'] }, 'pw', null);
+        await flushMicrotasks();
+        window.dispatchEvent(new Event('pagehide'));
+        expect(localStorage.getItem('bc_write_queue')).toBeNull();
+    });
+});

@@ -64,6 +64,8 @@ describe('EngiScoreEditorModal orientation', () => {
     fireEvent.click(screen.getByTestId('engi-aka-inc'));
     fireEvent.click(screen.getByTestId('engi-aka-inc'));
     fireEvent.click(screen.getByTestId('engi-aka-inc'));
+    // Save is a two-tap guard: the first tap arms it, the second saves.
+    fireEvent.click(screen.getByTestId('engi-submit'));
     fireEvent.click(screen.getByTestId('engi-submit'));
     expect(onSubmit).toHaveBeenCalledWith({ flagsA: 3, flagsB: 0, status: 'completed' });
   });
@@ -120,6 +122,8 @@ describe('EngiScoreEditorModal Finish + Start Next (impeccable critique P2)', ()
 
     const submit = screen.getByTestId('engi-submit');
     expect(submit.textContent).toContain('Finish + Start Next');
+    fireEvent.click(submit);
+    expect(submit.textContent).toBe('Tap again to finish →');
     fireEvent.click(submit);
     await waitFor(() => expect(onSubmitAndNext).toHaveBeenCalledWith({ flagsA: 3, flagsB: 0, status: 'completed' }));
     expect(onSubmit).not.toHaveBeenCalled();
@@ -212,6 +216,7 @@ describe('EngiScoreEditorModal offline safety net (impeccable critique P2)', () 
     const onSubmit = vi.fn().mockResolvedValue({ queued: true });
     render(<EngiScoreEditorModal match={makeMatch({ flagsA: 3, flagsB: 0 })} onClose={() => {}} onSubmit={onSubmit} />);
 
+    fireEvent.click(screen.getByTestId('engi-submit'));
     fireEvent.click(screen.getByTestId('engi-submit'));
     await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(1));
     // Pending banner is shown and the commit control is still available (modal
@@ -447,30 +452,6 @@ describe('EngiScoreEditorModal saves flags as they are entered', () => {
   });
 });
 
-describe('bc-dtip: a bounced tap on an engi "+" adds one flag', () => {
-  beforeEach(() => { vi.useFakeTimers(); });
-  afterEach(() => { vi.useRealTimers(); });
-
-  it('a double tap on one side\'s "+" adds one flag; a deliberate second tap adds another', async () => {
-    render(<EngiScoreEditorModal match={makeMatch()} onClose={() => {}} onSubmit={() => {}} />);
-    const plus = screen.getByTestId('engi-aka-inc');
-    await pointerTap(plus);
-    await pointerTap(plus);
-    expect(screen.getByTestId('engi-aka-count').textContent).toBe('1');
-    await act(async () => { vi.advanceTimersByTime(TAP_BOUNCE_MS + 50); });
-    await pointerTap(plus);
-    expect(screen.getByTestId('engi-aka-count').textContent).toBe('2');
-  });
-
-  it('the other side\'s "+" is never refused', async () => {
-    render(<EngiScoreEditorModal match={makeMatch()} onClose={() => {}} onSubmit={() => {}} />);
-    await pointerTap(screen.getByTestId('engi-aka-inc'));
-    await pointerTap(screen.getByTestId('engi-shiro-inc'));
-    expect(screen.getByTestId('engi-aka-count').textContent).toBe('1');
-    expect(screen.getByTestId('engi-shiro-count').textContent).toBe('1');
-  });
-});
-
 describe('a flag change inside the autosave window survives Prev/Next', () => {
   beforeEach(() => { vi.useFakeTimers(); });
   afterEach(() => { vi.useRealTimers(); });
@@ -491,5 +472,54 @@ describe('a flag change inside the autosave window survives Prev/Next', () => {
     await act(async () => { vi.advanceTimersByTime(400); });
     expect(onNext).toHaveBeenCalledTimes(1);
     expect(onSubmit).toHaveBeenCalledWith({ flagsA: 1, flagsB: 0, status: 'running' });
+  });
+});
+
+describe('bc-dtfn: the engi Save is a two-tap guard, as Finish is in the other editors', () => {
+  // Operator ruling 2026-09-27: the editors behave alike. A bouncing thumb on
+  // "Finish + Start Next" used to save AND start the next match.
+  beforeEach(() => { vi.useFakeTimers(); });
+  afterEach(() => { vi.useRealTimers(); });
+
+  const mount = (props = {}) => {
+    const onSubmit = vi.fn().mockResolvedValue(undefined);
+    render(<EngiScoreEditorModal match={makeMatch({ flagsA: 3, flagsB: 0 })} onClose={() => {}} onSubmit={onSubmit} {...props} />);
+    return { onSubmit, save: screen.getByTestId('engi-submit') };
+  };
+
+  it('a double tap only arms it', async () => {
+    const onSubmitAndNext = vi.fn().mockResolvedValue(undefined);
+    const { onSubmit, save } = mount({ onSubmitAndNext });
+    await pointerTap(save);
+    await pointerTap(save);
+    expect(save.textContent).toBe('Tap again to finish →');
+    expect(onSubmit).not.toHaveBeenCalled();
+    expect(onSubmitAndNext).not.toHaveBeenCalled();
+  });
+
+  it('a deliberate second tap after the window saves once', async () => {
+    const { onSubmit, save } = mount();
+    await pointerTap(save);
+    expect(save.textContent).toBe('Tap again to save');
+    await act(async () => { vi.advanceTimersByTime(TAP_BOUNCE_MS + 50); });
+    await pointerTap(save);
+    expect(onSubmit).toHaveBeenCalledTimes(1);
+    expect(onSubmit).toHaveBeenCalledWith({ flagsA: 3, flagsB: 0, status: 'completed' });
+  });
+
+  it('a flag change disarms it', async () => {
+    const { onSubmit, save } = mount();
+    await pointerTap(save);
+    fireEvent.click(screen.getByTestId('engi-aka-inc'));
+    expect(save.textContent).toBe('Save result');
+    await act(async () => { vi.advanceTimersByTime(TAP_BOUNCE_MS + 50); });
+    await pointerTap(save);
+    expect(onSubmit).not.toHaveBeenCalled();
+  });
+
+  it('keyboard Enter saves directly', async () => {
+    const { onSubmit } = mount();
+    await act(async () => { fireEvent.keyDown(window, { key: 'Enter' }); });
+    expect(onSubmit).toHaveBeenCalledTimes(1);
   });
 });

@@ -733,6 +733,11 @@ const _syncListeners = new Set();
 // even when the queue is empty (i.e. the write succeeded and was removed from
 // the queue but the fetch hasn't resolved yet).
 let _inflightRunning = 0;
+// bc-sync: the running writes being sent right now, keyed like the queue: the
+// latest per match, with the time it was sent. Until its fetch settles nothing
+// else holds such a write, and a page going away cancels that fetch, so the
+// page-hide handler below keeps what is here (_keepInflightRunning).
+const _inflightRunningWrites = new Map(); // queue key → {compID, matchID, payload, password, sentAt}
 // bc-sync: the stage BEFORE a running write exists. A score editor holds each
 // edit for its autosave debounce (AUTOSAVE_DEBOUNCE_MS) and registers a token
 // here for that window (API.notePendingEdit), so the pill reads "Syncing..."
@@ -1542,6 +1547,39 @@ function _enqueueTerminalWrite(key, kind, method, url, payload, password, compID
         method, url,
         enqueuedAt: Date.now(),
     });
+}
+
+// bc-sync: a page going away (a reload, a closed tab, the iPad locking or
+// switching app) cancels every fetch still open, so a running write already
+// sent but not yet answered, up to fetchWithTimeout's 12s on bad Wi-Fi, would
+// be lost with it. Each goes into the persisted outbox now, exactly as a
+// failed fetch would put it. A copy that did land is harmless: the server
+// takes an equal rev again and drops a lower one. A match whose queued entry
+// was added after this write was sent keeps it: that entry is newer (a failed
+// later edit, or a queued Finish). The editors' own page-hide flush of a
+// pending edit runs after this one (their listeners are added later), so its
+// newer write replaces this one in the queue.
+function _keepInflightRunning() {
+    for (const [key, w] of _inflightRunningWrites) {
+        const queued = _writeQueue.get(key);
+        if (queued && queued.enqueuedAt >= w.sentAt) continue;
+        enqueueRunningWrite(w.compID, w.matchID, w.payload, w.password);
+    }
+}
+
+// Remove-then-add for the same reason as the online handler below.
+if (typeof window !== 'undefined') {
+    if (window.__bcKeepInflightHandlers) {
+        window.removeEventListener('pagehide', window.__bcKeepInflightHandlers.pagehide);
+        document.removeEventListener('visibilitychange', window.__bcKeepInflightHandlers.visibility);
+    }
+    const handlers = {
+        pagehide: _keepInflightRunning,
+        visibility: () => { if (document.visibilityState === 'hidden') _keepInflightRunning(); },
+    };
+    window.__bcKeepInflightHandlers = handlers;
+    window.addEventListener('pagehide', handlers.pagehide);
+    document.addEventListener('visibilitychange', handlers.visibility);
 }
 
 // Flush the queue whenever the browser comes back online.
@@ -2371,6 +2409,7 @@ const API = {
             payload.revSession = _revSession;
             if (!durable) {
                 _inflightRunning++;
+                _inflightRunningWrites.set(_revKey(compID, matchID), { compID, matchID, payload, password, sentAt: Date.now() });
                 _recomputeSyncStatus();
             }
         }
@@ -2604,6 +2643,10 @@ const API = {
         } finally {
             if (isRunning) {
                 _inflightRunning--;
+                // Settled: landed, or its failure path above queued it. A later
+                // write for the match may have taken the slot; leave that one.
+                const key = _revKey(compID, matchID);
+                if (_inflightRunningWrites.get(key)?.payload === payload) _inflightRunningWrites.delete(key);
                 _recomputeSyncStatus();
             }
         }

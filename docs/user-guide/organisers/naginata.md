@@ -118,6 +118,10 @@ and Shiro (white):
   there is always a majority and a bout can never end in a draw. The editor
   flags any other total and does not let you save it.
 - The side with more flags wins the bout.
+- **Save result** (or **Finish + Start Next**) takes two taps, as **Finish**
+  does in the kendo editor: the first changes it to **Tap again to save**, and
+  the second saves. A quick double tap only does the first. **`Enter`** saves at
+  once.
 
 ### Standings
 

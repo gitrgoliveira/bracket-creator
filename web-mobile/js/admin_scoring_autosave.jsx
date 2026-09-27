@@ -129,10 +129,11 @@ export function useDebouncedRunningWrite({ isRunningRef, buildPatchRef, onSubmit
   };
 
   // Clear on unmount so the closure can't fire after the component is gone.
-  // Unmount keeps its CANCEL semantics: the discard prompt unmounts after the
-  // operator chose to discard, and closing a running editor flushes explicitly
-  // (flushPending). A reload never unmounts; the pagehide listener below is
-  // what keeps an edit across one.
+  // Unmount keeps its CANCEL semantics, because the discard prompt unmounts
+  // after the operator chose to discard. Every other way out of a running
+  // editor saves first: closing it and its Prev/Next each call flushPending
+  // before they unmount it. A reload never unmounts; the pagehide listener
+  // below is what keeps an edit across one.
   useEffectA(() => () => { cancelDebounce(); }, []);
 
   // The running write itself, shared by the debounce timer, flushPending and

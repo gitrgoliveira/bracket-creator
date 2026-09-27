@@ -136,6 +136,18 @@ describe.each(SITES)('bc-dtfn: $name', ({ match, withNext, button, armed }) => {
     expect(completed()).toBe(1);
   });
 
+  it('a tap after the wall clock was stepped back commits', async () => {
+    // A negative gap since arming (the device corrected its time) is not a
+    // bounce; counted as one, the button stayed dead until the clock caught up.
+    const { completed } = await mount(match(), { withNext });
+    const btn = button();
+    await pointerTap(btn);
+    vi.setSystemTime(Date.now() - 60_000);
+    await pointerTap(btn);
+    await wait(10);
+    expect(completed()).toBe(1);
+  });
+
   it('a keyboard-synthesized click (detail 0) on the armed button commits at once', async () => {
     const { completed } = await mount(match(), { withNext });
     const btn = button();

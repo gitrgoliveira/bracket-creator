@@ -22,7 +22,7 @@ import {
   teamResultLabel,
   isKoTieBlocked,
 } from '../admin_scoring_modal.jsx';
-import { makeSubmitDecision, fusenshoAllowed, clearFusensho } from '../admin_scoring_shared.jsx';
+import { makeSubmitDecision, fusenshoAllowed, clearFusensho, applyBoutScoreEdit } from '../admin_scoring_shared.jsx';
 import { DOWNSTREAM_KNOCKOUT_PLAYED_CANCELLED } from '../write_result.jsx';
 import { sameCompetitor } from '../competitor_identity.jsx';
 import { preserveStoredDaihyosenVerdict } from '../admin_scoring_team.jsx';
@@ -926,6 +926,20 @@ describe('applyFusenshoToggle', () => {
     expect(next.fusensho).toBe("");
   });
 
+  it('a side-switch on a reopened row, then its undo, leaves no circles as points (bc-fsnp)', () => {
+    // A row reopened from saved state carries its fusensho but no snapshot.
+    // Taking its circles into the snapshot let this undo restore them as
+    // ordinary points with the fusensho cleared.
+    const reopened = { aPts: ['○', '○'], bPts: ['K'], aFouls: 0, bFouls: 0, fusensho: "a", draw: false };
+    const switched = applyFusenshoToggle(reopened, "b");
+    expect(switched.aPts).toEqual([]);
+    expect(switched.bPts).toEqual(['○', '○']);
+    const undone = applyFusenshoToggle(switched, "b");
+    expect(undone.fusensho).toBe("");
+    expect(undone.aPts).toEqual([]);
+    expect(undone.bPts).toEqual(['K']);
+  });
+
   it('applying fusensho clears a stale draw (mutually exclusive)', () => {
     const prev = { aPts: [], bPts: [], aFouls: 0, bFouls: 0, fusensho: "", draw: true };
     const next = applyFusenshoToggle(prev, "a");
@@ -953,6 +967,64 @@ describe('clearFusensho (bc-fsnp)', () => {
     expect(next.aPts).toBe(prev.aPts);
     expect(next.bPts).toBe(prev.bPts);
     expect(next.draw).toBe(true);
+  });
+});
+
+describe('applyBoutScoreEdit (bc-fsnp)', () => {
+  // AKA (a) holds the fusensho; SHIRO (b) keeps the kote it struck.
+  const fusenshoRow = (snap) => ({ aPts: ['○', '○'], bPts: ['K'], aFouls: 0, bFouls: 0, fusensho: "a", draw: false, _preFusensho: snap });
+
+  it('taking a mark off the losing side keeps the fusensho', () => {
+    const prev = fusenshoRow({ aPts: ['M'], bPts: ['K'], aFouls: 0, bFouls: 0 });
+    const next = applyBoutScoreEdit(prev, { ...prev, bPts: [] });
+    expect(next.fusensho).toBe("a");
+    expect(next.aPts).toEqual(['○', '○']);
+    expect(next.bPts).toEqual([]);
+  });
+
+  it('the snapshot follows the correction, so the undo does not bring the mark back', () => {
+    const prev = fusenshoRow({ aPts: ['M'], bPts: ['K'], aFouls: 0, bFouls: 0 });
+    const undone = applyFusenshoToggle(applyBoutScoreEdit(prev, { ...prev, bPts: [] }), "a");
+    expect(undone.fusensho).toBe("");
+    expect(undone.aPts).toEqual(['M']);
+    expect(undone.bPts).toEqual([]);
+  });
+
+  it('on a reopened row (no snapshot) the undo keeps the correction too', () => {
+    const prev = fusenshoRow(undefined);
+    const corrected = applyBoutScoreEdit(prev, { ...prev, bPts: [] });
+    expect(corrected._preFusensho).toBeUndefined();
+    const undone = applyFusenshoToggle(corrected, "a");
+    expect(undone.aPts).toEqual([]);
+    expect(undone.bPts).toEqual([]);
+  });
+
+  it('adding a point is a fresh strike and ends the fusensho', () => {
+    // In encho the winner holds ONE circle, so the ippon buttons stay enabled.
+    const prev = { ...fusenshoRow(undefined), aPts: ['○'], bPts: [], encho: 1 };
+    const next = applyBoutScoreEdit(prev, { ...prev, bPts: ['M'] });
+    expect(next.fusensho).toBe("");
+    expect(next.aPts).toEqual([]);
+    expect(next.bPts).toEqual(['M']);
+  });
+
+  it('a foul edit ends the fusensho', () => {
+    const prev = fusenshoRow(undefined);
+    const next = applyBoutScoreEdit(prev, { ...prev, bFouls: 1 });
+    expect(next.fusensho).toBe("");
+    expect(next.aPts).toEqual([]);
+  });
+
+  it('an edit on a row without a fusensho clears its draw', () => {
+    const prev = { aPts: [], bPts: [], aFouls: 0, bFouls: 0, fusensho: "", draw: true };
+    const next = applyBoutScoreEdit(prev, { ...prev, aPts: ['M'] });
+    expect(next.draw).toBe(false);
+    expect(next.aPts).toEqual(['M']);
+  });
+
+  it('an edit that changes nothing leaves the row as it was', () => {
+    const prev = fusenshoRow(undefined);
+    expect(applyBoutScoreEdit(prev, prev)).toBe(prev);
   });
 });
 

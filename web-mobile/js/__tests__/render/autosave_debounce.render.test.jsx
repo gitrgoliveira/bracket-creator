@@ -473,3 +473,33 @@ describe('bc-emsl: a team-sheet tap that clears nothing writes nothing', () => {
     expect(slots('shiro').some((b) => b.textContent === 'M')).toBe(false);
   });
 });
+
+describe('an edit inside the autosave window survives Prev/Next', () => {
+  // Prev/Next re-key the editor in its host, which unmounts it, and the unmount
+  // cancels the debounce timer. An ippon tapped just before either one was
+  // never written; now the editor saves it first, as closing does.
+  const neighbour = { id: 'm-next', sideA: { name: 'Sato' }, sideB: { name: 'Ito' } };
+  const teamMatch = () => makeRunningMatch({
+    id: 'tm-running', compKind: 'team', teamSize: 3,
+    sideA: { id: 'teamA', name: 'Team A' }, sideB: { id: 'teamB', name: 'Team B' },
+  });
+  const viaButton = async () => { fireEvent.click(screen.getByText('Next →')); };
+  const viaKey = async () => { fireEvent.keyDown(window, { key: 'ArrowRight' }); };
+
+  it.each([
+    ['individual', 'the Next button', makeRunningMatch, viaButton],
+    ['individual', 'the → key', makeRunningMatch, viaKey],
+    ['team', 'the Next button', teamMatch, viaButton],
+    ['team', 'the → key', teamMatch, viaKey],
+  ])('%s editor: %s within 300ms of a tap writes the tap', async (_kind, _via, match, goNext) => {
+    let view;
+    const onNext = vi.fn(() => view.unmount());
+    view = renderModal(match(), { nextMatch: neighbour, onNext });
+    await act(async () => { fireEvent.click(screen.getAllByText('M')[0]); });
+    await act(goNext);
+    await act(async () => { vi.advanceTimersByTime(350); });
+    expect(onNext).toHaveBeenCalledTimes(1);
+    expect(window.API.recordScore).toHaveBeenCalledTimes(1);
+    expect(window.API.recordScore.mock.calls[0][2].status).toBe('running');
+  });
+});

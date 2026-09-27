@@ -14,6 +14,7 @@ import {
   applyFusenshoToggle,
   fusenshoAllowed,
   clearFusensho,
+  applyBoutScoreEdit,
   applyFoulIncrement,
   reconcileFoulsAtOpen,
   nextFoulOnDecrement,
@@ -681,18 +682,21 @@ export function fusenshoSideFromSub(sub) {
 }
 
 // fusenshoButtonTitle: what a sub-bout's Fusensho button for side `rs` will
-// do. `rs` is a rowSides entry (key "a"/"b", label "AKA"/"SHIRO"). The other
-// side keeps its struck points (applyFusenshoToggle), and a refused fusensho
-// (fusenshoAllowed) names the side that already won the bout.
-function fusenshoButtonTitle(sub, rs) {
+// do. `rs` and `other` are the row's two rowSides entries (key "a"/"b", label
+// "AKA"/"SHIRO"). The other side keeps its struck points
+// (applyFusenshoToggle), and a refused fusensho (fusenshoAllowed) names the
+// side that already won the bout. That win can sit under the winner's own
+// fusensho, whose circles are not tapped away, so its undo is named first.
+function fusenshoButtonTitle(sub, rs, other) {
   if (sub.fusensho === rs.key) {
     return sub._preFusensho
       ? "Click to undo fusensho: restores the previous score"
       : "Click to undo fusensho: removes the default-win circles; points already scored stay";
   }
   if (!fusenshoAllowed(sub, rs.key)) {
-    const winner = rs.key === "a" ? "SHIRO" : "AKA";
-    return `${winner} already won this bout: clear their points first`;
+    return sub.fusensho === other.key
+      ? `${other.label} already won this bout: undo their fusensho, then clear their points`
+      : `${other.label} already won this bout: clear their points first`;
   }
   return `Mark bout as fusensho: default win to ${rs.label}; points already scored stay`;
 }
@@ -1510,15 +1514,10 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
   };
 
   // updateSubScore: a scoring edit on a bout row (points, fouls, a keyboard
-  // waza). A fought score is neither a default win nor a draw, so it ends the
-  // row's fusensho through clearFusensho and clears the draw, applying the
-  // edit FIRST and clearFusensho LAST: an edit computed from the rendered pts
-  // can still carry a circle, and clearing last strips it. An edit that
-  // changes nothing (a waza past the 2-ippon cap) leaves the row as it was.
-  const updateSubScore = (idx, fn) => updateSub(idx, prev => {
-    const next = fn(prev);
-    return next === prev ? prev : { ...clearFusensho(next), draw: false };
-  });
+  // waza). applyBoutScoreEdit decides what it leaves: a fought score ends the
+  // row's fusensho and its draw, except taking a mark off the side the
+  // fusensho went against, a correction that keeps it.
+  const updateSubScore = (idx, fn) => updateSub(idx, prev => applyBoutScoreEdit(prev, fn(prev)));
 
   // T096/FR-031: per-bout Fusensho: award a default win to the present
   // side; the other side keeps what it had struck (applyFusenshoToggle).
@@ -2723,12 +2722,22 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
     onClose();
   };
 
+  // Prev/Next re-key this editor in its host, which unmounts it, and the
+  // unmount cancels the autosave timer: an edit still inside the window is
+  // saved first, as closing saves it (handleDismiss).
+  const leaveTo = (go) => () => {
+    if (m.status === "running" && scoringDirty) flushScoringAutosave();
+    go();
+  };
+  const goPrev = leaveTo(onPrev);
+  const goNext = leaveTo(onNext);
+
   // Esc-to-close + ←/→ match nav, matching ScoreEditorModal. M/K/D/T/H ippon
   // shortcuts are wired ONLY for kachinuki bout mode (one current bout, an
   // unambiguous target — see scoreCurrentBoutWaza); fixed-format team scoring
   // is many sub-matches and stays tap-only, and Enter-to-finish isn't wired.
   const kbRef = React.useRef(null);
-  kbRef.current = { submitting, handleDismiss, canClose, onPrev, onNext, prevMatch, nextMatch, kachinukiBoutMode, isNaginataTeam, scoreCurrentBoutWaza };
+  kbRef.current = { submitting, handleDismiss, canClose, onPrev, onNext, goPrev, goNext, prevMatch, nextMatch, kachinukiBoutMode, isNaginataTeam, scoreCurrentBoutWaza };
   useEffectA(() => {
     const onKeyDown = (ev) => {
       const s = kbRef.current;
@@ -2742,8 +2751,8 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
       // Keyed on the neighbour match as well as the callback, as in
       // ScoreEditorModal: the Scores tab wires onPrev/onNext unconditionally,
       // and with no neighbour they call scoreKeyOf(null), which throws.
-      if (ev.key === "ArrowLeft" && s.onPrev && s.prevMatch) { ev.preventDefault(); s.onPrev(); return; }
-      if (ev.key === "ArrowRight" && s.onNext && s.nextMatch) { ev.preventDefault(); s.onNext(); return; }
+      if (ev.key === "ArrowLeft" && s.onPrev && s.prevMatch) { ev.preventDefault(); s.goPrev(); return; }
+      if (ev.key === "ArrowRight" && s.onNext && s.nextMatch) { ev.preventDefault(); s.goNext(); return; }
       // mp-gmcg: keyboard ippon entry, KACHINUKI bout mode only (one current
       // bout → unambiguous target; the general team editor has many). Mirrors
       // the individual editor: blocked when any interactive element
@@ -3045,9 +3054,10 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
             // T096/FR-031: manual pts/fouls edits end the per-bout fusensho
             // (updateSubScore: the default-win circles go, struck points stay,
             // the _preFusensho snapshot is discarded) so the bout becomes a
-            // regular fought score once the operator intervenes. Re-applying
-            // via the Fusensho button captures a fresh snapshot from the
-            // current state.
+            // regular fought score once the operator intervenes. Taking a mark
+            // off the side the fusensho went against is a correction and keeps
+            // it (applyBoutScoreEdit). Re-applying via the Fusensho button
+            // captures a fresh snapshot from the current state.
             // onIncrement applies the FIK 2-foul rule via applyFoulIncrement:
             // the 2nd foul auto-awards an H to the OPPONENT and resets this
             // side's foul counter; it ends a fusensho the same way.
@@ -3238,7 +3248,8 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
                             in styles.css). T096/FR-031: Fusensho awards the bout
                             to this side by default; the other side keeps what it
                             struck. Re-clicking the active side undoes it; manual
-                            pts/fouls edits while active end it (updateSubScore). */}
+                            pts/fouls edits while active end it, except taking a
+                            mark off the other side (updateSubScore). */}
                         <div className="tsm-row-1">
                           {/* Buttons only: the scored ippon letters show in the
                               centre column (between the two competitors), like an
@@ -3257,7 +3268,7 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
                               className={`btn btn--sm ${s.fusensho === rs.key ? "btn--primary" : ""}`}
                               onClick={() => setFusenshoFor(idx, rs.key)}
                               disabled={!fusenshoAllowed(s, rs.key)}
-                              title={fusenshoButtonTitle(s, rs)}
+                              title={fusenshoButtonTitle(s, rs, rowSides[1 - rsIdx])}
                             >
                               {s.fusensho === rs.key ? "✓ Fusensho" : "Fusensho"}
                             </button>
@@ -3837,7 +3848,7 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
           )}
           <div className="score-nav">
             {prevMatch ? (
-              <button className="btn btn--sm score-nav__prev" onClick={onPrev} disabled={submitting}>← Prev</button>
+              <button className="btn btn--sm score-nav__prev" onClick={goPrev} disabled={submitting}>← Prev</button>
             ) : <span />}
             <div className="score-nav__actions">
               {m.status === "scheduled" && !isBarredMatch(m) && (
@@ -4014,7 +4025,7 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
               )}
             </div>
             {nextMatch ? (
-              <button className="btn btn--sm score-nav__next" onClick={onNext} disabled={submitting}>Next →</button>
+              <button className="btn btn--sm score-nav__next" onClick={goNext} disabled={submitting}>Next →</button>
             ) : <span />}
           </div>
           </>

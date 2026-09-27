@@ -132,7 +132,9 @@ describe('bc-fsnp: a per-bout fusensho keeps the other side\'s struck points', (
     expect(row.ipponsB).toEqual(['K']);
   });
 
-  it('correcting the loser\'s point ends the fusensho without leaving circles behind', async () => {
+  it('correcting the loser\'s point keeps the fusensho', async () => {
+    // Taking the mark off only fixes that side's points: the default win the
+    // operator recorded stays (a correction keeps what it did not touch).
     await mount(makeMatch());
     await tap(ipponButton('shiro', 'K'));
     await settle();
@@ -143,9 +145,30 @@ describe('bc-fsnp: a per-bout fusensho keeps the other side\'s struck points', (
     await tap(kSlot);
     await settle();
     const row = lastBout1();
-    expect(row.decision || '').toBe('');
-    expect(row.ipponsA).toEqual([]);
+    expect(row.decision).toBe('fusensho');
+    expect(row.ipponsA).toEqual(CIRCLES);
     expect(row.ipponsB).toEqual([]);
+    // And undoing the fusensho afterwards does not bring the kote back.
+    await tap(fusenshoButton('aka'));
+    await settle();
+    const undone = lastBout1();
+    expect(undone.decision || '').not.toBe('fusensho');
+    expect(undone.ipponsA).toEqual([]);
+    expect(undone.ipponsB).toEqual([]);
+  });
+
+  it('names the undo first when the side that won the bout holds a fusensho', async () => {
+    // Aka won 2-0, then was given the fusensho by mistake: its points sit under
+    // circles that cannot be tapped away, so "clear their points" alone
+    // pointed at nothing the operator could do.
+    await mount(makeMatch());
+    await tap(ipponButton('aka', 'M'));
+    await tap(ipponButton('aka', 'K'));
+    await settle();
+    await tap(fusenshoButton('aka'));
+    const shiro = fusenshoButton('shiro');
+    expect(shiro.disabled).toBe(true);
+    expect(shiro.title).toBe('AKA already won this bout: undo their fusensho, then clear their points');
   });
 
   it('refuses a fusensho against a side that already won the bout, and sends nothing', async () => {

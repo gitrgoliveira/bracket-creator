@@ -807,6 +807,16 @@ export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, on
     onClose();
   };
 
+  // Prev/Next re-key this editor in its host, which unmounts it, and the
+  // unmount cancels the autosave timer: an edit still inside the window is
+  // saved first, as closing saves it (handleDismiss).
+  const leaveTo = (go) => () => {
+    if (m.status === "running" && scoringDirty) flushScoringAutosave();
+    go();
+  };
+  const goPrev = leaveTo(onPrev);
+  const goNext = leaveTo(onNext);
+
   // Keyboard shortcuts:
   //   Shift+M/K/D/T/H  → award point to AKA (red, sideA)
   //   m/k/d/t/h        → award point to SHIRO (white, sideB)
@@ -819,7 +829,7 @@ export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, on
   // Scoring shortcuts (Enter/M/K/D/T/H/X, plus S in Naginata) are skipped when any interactive
   // element (input, button, link, …) has focus so native activation still works.
   const kbRef = React.useRef(null);
-  kbRef.current = { delegated: isTeam || isEngi, submitting, canFinish, isDrawToggled, isKnockoutPhase, aTotal, bTotal, handleDismiss, canClose, onPrev, onNext, prevMatch, nextMatch, onSubmit, onSubmitAndNext, buildPatch, addPt, doSubmit, isNaginata, decidedByHantei, isComplete, correctionReason, askCorrectionReason, markScoringDirty, cancelScoringDebounce };
+  kbRef.current = { delegated: isTeam || isEngi, submitting, canFinish, isDrawToggled, isKnockoutPhase, aTotal, bTotal, handleDismiss, canClose, onPrev, onNext, goPrev, goNext, prevMatch, nextMatch, onSubmit, onSubmitAndNext, buildPatch, addPt, doSubmit, isNaginata, decidedByHantei, isComplete, correctionReason, askCorrectionReason, markScoringDirty, cancelScoringDebounce };
 
   useEffectA(() => {
     const onKeyDown = (ev) => {
@@ -846,8 +856,8 @@ export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, on
         // wires onPrev/onNext unconditionally, and with no neighbour they
         // call scoreKeyOf(null), which throws. Same condition as the nav
         // buttons and the shortcut hint's hasNav.
-        if (ev.key === "ArrowLeft" && s.onPrev && s.prevMatch) { ev.preventDefault(); s.onPrev(); return; }
-        if (ev.key === "ArrowRight" && s.onNext && s.nextMatch) { ev.preventDefault(); s.onNext(); return; }
+        if (ev.key === "ArrowLeft" && s.onPrev && s.prevMatch) { ev.preventDefault(); s.goPrev(); return; }
+        if (ev.key === "ArrowRight" && s.onNext && s.nextMatch) { ev.preventDefault(); s.goNext(); return; }
       }
 
       // Scoring shortcuts blocked when any interactive element has focus
@@ -1343,7 +1353,7 @@ export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, on
           {!(isComplete && correctionPrompt) && (
           <div className="score-nav">
             {prevMatch ? (
-              <button className="btn btn--sm score-nav__prev" onClick={onPrev} disabled={submitting} title={prevMatch.sideA?.name + " vs " + prevMatch.sideB?.name}>← Prev</button>
+              <button className="btn btn--sm score-nav__prev" onClick={goPrev} disabled={submitting} title={prevMatch.sideA?.name + " vs " + prevMatch.sideB?.name}>← Prev</button>
             ) : <span />}
 
             <div className="score-nav__actions">
@@ -1394,7 +1404,7 @@ export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, on
             </div>
 
             {nextMatch ? (
-              <button className="btn btn--sm score-nav__next" onClick={onNext} disabled={submitting} title={nextMatch.sideA?.name + " vs " + nextMatch.sideB?.name}>Next →</button>
+              <button className="btn btn--sm score-nav__next" onClick={goNext} disabled={submitting} title={nextMatch.sideA?.name + " vs " + nextMatch.sideB?.name}>Next →</button>
             ) : <span />}
           </div>
           )}

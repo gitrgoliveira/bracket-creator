@@ -27,6 +27,15 @@ export const isPointerTap = (ev) => ev.detail !== 0;
 
 const KEYLESS = "";
 
+// withinBounce: is now inside the bounce window that opened at `at`? The one
+// copy of the time test. A negative gap means the wall clock was stepped back
+// (the device corrected its time), and is never a bounce: counted as one, it
+// swallowed every tap until the clock caught up with the stamp.
+function withinBounce(at) {
+  const gap = Date.now() - at;
+  return gap >= 0 && gap < TAP_BOUNCE_MS;
+}
+
 function stamps(ref) {
   if (!(ref.current instanceof Map)) ref.current = new Map();
   return ref.current;
@@ -50,7 +59,7 @@ export function clearTap(ref, key = KEYLESS) {
 export function tapIsBounce(ref, ev, key = KEYLESS) {
   if (!isPointerTap(ev)) return false;
   const at = stamps(ref).get(key);
-  return at !== undefined && Date.now() - at < TAP_BOUNCE_MS;
+  return at !== undefined && withinBounce(at);
 }
 
 // acceptTap: the check-then-stamp every guarded button runs. False for a
@@ -91,7 +100,7 @@ export function useArmedConfirm() {
   }, []);
   const confirm = (ev) => {
     if (armedAtRef.current === null) { setArmed(true); return false; }
-    if (isPointerTap(ev) && Date.now() - armedAtRef.current < TAP_BOUNCE_MS) return false;
+    if (isPointerTap(ev) && withinBounce(armedAtRef.current)) return false;
     return true;
   };
   return { armed, setArmed, confirm };

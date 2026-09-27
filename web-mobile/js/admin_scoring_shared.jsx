@@ -176,7 +176,9 @@ function ScoringShortcutHint({ pointKeys = "", hasNav = false, canClose = false 
 //   2. Side-switch (fusensho is already on the other side): keep the
 //      original _preFusensho and build from IT, so the new loser keeps what
 //      it struck before any fusensho, never the circles it was just given,
-//      and a later untoggle restores the genuine pre-fusensho score.
+//      and a later untoggle restores the genuine pre-fusensho score. With no
+//      snapshot (a reopened row), the base is the row without its circles
+//      (fusenshoBase), so an untoggle cannot bring them back as points.
 //   3. Toggle-off (re-clicking the active side): restore from _preFusensho.
 //      With no snapshot (the editor was reopened from saved state, which does
 //      not carry one), drop the circles through clearFusensho: struck points
@@ -191,8 +193,8 @@ function ScoringShortcutHint({ pointKeys = "", hasNav = false, canClose = false 
 // them, which erased the (E) audit mark and inflated an encho default win
 // from one maru to two. draw and fusensho are mutually exclusive, so a set
 // draw is cleared when fusensho is applied.
-// Any other edit on the row ends the fusensho through clearFusensho, which
-// also discards the snapshot: once the operator hand-edits, it is stale.
+// A scoring edit on the row goes through applyBoutScoreEdit, which ends the
+// fusensho unless the edit only takes a mark off the losing side.
 function applyFusenshoToggle(prev, side) {
   if (prev.fusensho === side) {
     const snap = prev._preFusensho;
@@ -213,9 +215,15 @@ function applyFusenshoToggle(prev, side) {
 }
 
 // fusenshoBase: the genuine pre-fusensho state of a sub-bout, i.e. the
-// snapshot a fusensho already took, else the row as it stands.
-const fusenshoBase = (prev) =>
-  prev._preFusensho || { aPts: prev.aPts, bPts: prev.bPts, aFouls: prev.aFouls, bFouls: prev.bFouls };
+// snapshot a fusensho already took, else the row as it stands without any
+// default-win circles. A row reopened from saved state carries its fusensho
+// but no snapshot, and taking its circles into a snapshot let an untoggle
+// after a side-switch restore them as ordinary points.
+const fusenshoBase = (prev) => {
+  if (prev._preFusensho) return prev._preFusensho;
+  const row = clearFusensho(prev);
+  return { aPts: row.aPts, bPts: row.bPts, aFouls: row.aFouls, bFouls: row.bFouls };
+};
 
 // fusenshoAllowed: can a default win go to `side` on this sub-bout? Not when
 // the other side had already struck MAX_IPPONS_PER_SIDE points: that side has
@@ -239,6 +247,36 @@ function clearFusensho(prev) {
   if (!prev.fusensho) return { ...prev, _preFusensho: undefined };
   const key = prev.fusensho === "a" ? "aPts" : "bPts";
   return { ...prev, [key]: struckIppons(prev[key]), fusensho: "", _preFusensho: undefined };
+}
+
+// applyBoutScoreEdit: the row a scoring edit on a team bout leaves, given the
+// row before it (`prev`) and the edit applied to it (`next`). A fought score
+// is neither a default win nor a draw, so an edit ends the fusensho through
+// clearFusensho, applied LAST (an edit computed from the rendered pts can
+// still carry a circle, and clearing last strips it), and clears the draw.
+// One edit is a correction instead: taking a mark off the side the fusensho
+// went AGAINST. It keeps the fusensho, since the operator only fixed that
+// side's points, and the snapshot follows it, so undoing the fusensho later
+// does not bring the removed mark back. Adding a point is a fresh strike and
+// still ends it. An edit that changes nothing leaves the row as it was.
+function applyBoutScoreEdit(prev, next) {
+  if (next === prev) return prev;
+  if (removesLosingSideMark(prev, next)) {
+    const key = prev.fusensho === "a" ? "bPts" : "aPts";
+    const snap = prev._preFusensho && { ...prev._preFusensho, [key]: next[key] };
+    return { ...next, _preFusensho: snap };
+  }
+  return { ...clearFusensho(next), draw: false };
+}
+
+// removesLosingSideMark: `next` differs from `prev` only in a mark taken off
+// the side a fusensho went against.
+function removesLosingSideMark(prev, next) {
+  if (!prev.fusensho || next.fusensho !== prev.fusensho) return false;
+  const [won, lost] = prev.fusensho === "a" ? ["aPts", "bPts"] : ["bPts", "aPts"];
+  return next[won] === prev[won]
+    && next.aFouls === prev.aFouls && next.bFouls === prev.bFouls
+    && next[lost].length < prev[lost].length;
 }
 
 // applyFoulIncrement: pure helper modelling a single `+` press on a
@@ -1798,6 +1836,7 @@ export {
   applyFusenshoToggle,
   fusenshoAllowed,
   clearFusensho,
+  applyBoutScoreEdit,
   applyFoulIncrement,
   reconcileFoulsAtOpen,
   nextFoulOnDecrement,

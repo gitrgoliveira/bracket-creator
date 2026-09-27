@@ -46,6 +46,16 @@ describe('tapIsBounce', () => {
     expect(tapIsBounce(ref, pointer)).toBe(false);
   });
 
+  it('a wall clock stepped back is never read as a bounce', () => {
+    // The device corrected its time: the gap since the stamp is negative until
+    // the clock catches up with it, which used to swallow every tap meanwhile.
+    const ref = { current: null };
+    vi.setSystemTime(new Date('2026-09-27T12:00:00Z'));
+    stampTap(ref);
+    vi.setSystemTime(new Date('2026-09-27T11:59:00Z'));
+    expect(tapIsBounce(ref, pointer)).toBe(false);
+  });
+
   it('clearTap forgets the stamp', () => {
     const ref = { current: null };
     stampTap(ref, 'a');

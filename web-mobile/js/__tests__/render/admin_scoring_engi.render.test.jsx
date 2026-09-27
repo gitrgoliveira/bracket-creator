@@ -517,6 +517,20 @@ describe('bc-dtfn: the engi Save is a two-tap guard, as Finish is in the other e
     expect(onSubmit).not.toHaveBeenCalled();
   });
 
+  it('a save that failed disarms it, so re-sending is deliberate', async () => {
+    const subscribers = [];
+    window.subscribeTerminalWriteFailed = (fn) => { subscribers.push(fn); return () => {}; };
+    try {
+      const { save } = mount({ match: makeMatch({ compId: 'c1', id: 'm1', flagsA: 3, flagsB: 0 }) });
+      await pointerTap(save);
+      expect(save.textContent).toBe('Tap again to save');
+      await act(async () => { subscribers.forEach((fn) => fn({ compID: 'c1', matchID: 'm1', reason: 'superseded' })); });
+      expect(save.textContent).toBe('Save result');
+    } finally {
+      delete window.subscribeTerminalWriteFailed;
+    }
+  });
+
   it('keyboard Enter saves directly', async () => {
     const { onSubmit } = mount();
     await act(async () => { fireEvent.keyDown(window, { key: 'Enter' }); });

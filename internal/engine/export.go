@@ -51,13 +51,19 @@ func (e *Engine) ExportCompetitionXlsx(id string) ([]byte, error) {
 		}
 	}
 
-	// Where each pool is ACTUALLY being fought. Best-effort for the same reason
-	// the bracket load below is: a competition with no pool matches on disk
-	// simply bands by the drawn allocation, which is what this did before.
-	var courtOfPool map[string]string
-	if poolMatches, poolErr := e.store.LoadPoolMatches(id); poolErr == nil {
-		courtOfPool = PoolCourtByName(poolMatches)
+	// The Pool Matches grid comes from the stored results, as it does in the
+	// results export (AttachPoolMatches): pools.csv records membership only, and
+	// the matches the draw left in the store's cache are gone after a restart,
+	// which printed a template with no match blocks. Strict like the bracket
+	// load below, so a corrupt pool-matches.csv fails the export rather than
+	// print one; a missing file (no draw yet) is not an error.
+	poolMatches, err := e.store.LoadPoolMatches(id)
+	if err != nil {
+		return nil, err
 	}
+	AttachPoolMatches(pools, poolMatches)
+	// Where each pool is ACTUALLY being fought, so it bands under that shiaijo.
+	courtOfPool := PoolCourtByName(poolMatches)
 
 	// The tournament, loaded ONCE and strictly (mp-yuy8 criterion 6): both the
 	// shiaijo list below and the Tags sheet's publicURL near the end of this

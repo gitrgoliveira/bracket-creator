@@ -3622,9 +3622,12 @@ const API = {
                 );
                 return { queued: true };
             }
-            // 4xx: throw immediately (400 validation, etc.).
+            // 4xx: throw immediately (400 validation, etc.). A finished
+            // match's refusal on the public page (409) carries a code in
+            // `error` and the sentence to show in `message`, as the score
+            // path's does.
             const err = await res.json().catch(() => ({}));
-            throw new Error(err.error || "Failed to save match lineup");
+            throw new Error(err.message || err.error || "Failed to save match lineup");
         }
         return res.json();
     },

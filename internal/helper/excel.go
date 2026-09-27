@@ -1050,11 +1050,11 @@ func PrintPoolMatches(f *excelize.File, pools []Pool, teamMatches int, numWinner
 		}
 		matchBlocks := len(maxBlocks)
 
-		maxResultBlock := 0
+		maxResultBlock, maxPrintedResults := 0, 0
 		for c := 0; c < numCourts; c++ {
 			if i < len(poolsByCourt[c]) {
 				p := pools[poolsByCourt[c][i]]
-				var resRows int
+				var resRows, printed int
 				if teamMatches > 0 {
 					// Team matches stacked results:
 					// Space before results (1)
@@ -1065,25 +1065,47 @@ func PrintPoolMatches(f *excelize.File, pools []Pool, teamMatches int, numWinner
 					// Rankings: len(Players)
 					// Space after pool (1)
 					resRows = 3*len(p.Players) + 11
+					// What printSinglePool really prints, from the space before
+					// the results to the last ranking row: the space, both tables
+					// with a blank row between them, two blank rows, and the
+					// Ranking header with its rows.
+					printed = 3*len(p.Players) + 7
 				} else {
 					// Results: Space (1) + Header (1) + Players (len) + Space (1) + Finalists (len)
 					// Individual matches include additional spaceLines
 					resRows = 3 + len(p.Players)*2 + spaceLines
+					printed = resRows
 				}
-
-				if resRows > maxResultBlock {
-					maxResultBlock = resRows
-				}
+				maxResultBlock = max(maxResultBlock, resRows)
+				maxPrintedResults = max(maxPrintedResults, printed)
 			}
 		}
 		if maxResultBlock > 0 {
 			maxBlocks = append(maxBlocks, maxResultBlock)
 		}
 
+		// pageBlocks are the rows each block really spans: printSinglePool
+		// follows every team match block with a spacing row its maxBlocks entry
+		// leaves out. poolRows is every row the pool prints.
+		pageBlocks := slices.Clone(maxBlocks)
+		poolRows := headerBlock + maxPrintedResults
+		for b := range matchBlocks {
+			if teamMatches > 0 {
+				pageBlocks[b]++
+			}
+			poolRows += pageBlocks[b]
+		}
+
 		totalPoolHeight := headerBlock + 1 // One row of space before the next pool
 		for _, b := range maxBlocks {
 			totalPoolHeight += b
 		}
+		// That estimate leaves out the team spacing rows, which its padded team
+		// results figure absorbs only for pools of up to three teams: a pool of
+		// four printed past it, and the next pool's header overwrote its fourth
+		// ranking row. The next pool starts no earlier than one blank row after
+		// the rows this one prints.
+		totalPoolHeight = max(totalPoolHeight, poolRows+1)
 
 		// Keep a pool on one page when it fits: start it on a fresh page, unless
 		// nothing but the shiaijo header is on this one yet, which a break here
@@ -1094,17 +1116,10 @@ func PrintPoolMatches(f *excelize.File, pools []Pool, teamMatches int, numWinner
 			rowsSinceLastPageBreak = 0
 		}
 
-		// A pool that still does not fit breaks between its blocks. pageBlocks
-		// are the rows each block really spans: printSinglePool follows every
-		// team match block with a spacing row its maxBlocks entry leaves out,
-		// so counting maxBlocks alone put the breaks inside later blocks.
+		// A pool that still does not fit breaks between its blocks, counted by
+		// pageBlocks: counting maxBlocks alone put the breaks inside later
+		// blocks.
 		if rowsSinceLastPageBreak+totalPoolHeight > rowsPerPageLimit {
-			pageBlocks := slices.Clone(maxBlocks)
-			if teamMatches > 0 {
-				for b := range matchBlocks {
-					pageBlocks[b]++
-				}
-			}
 			cursorOffset := 0
 			firstBlockSize := 0
 			if len(pageBlocks) > 0 {
@@ -1393,6 +1408,14 @@ func MatchRefLabel(matchNum int) string {
 	return fmt.Sprintf("M %d", matchNum)
 }
 
+// EliminationMatchTitle is the header the Elimination Matches sheet prints
+// over knockout match matchNum's block in printed round round (counted from
+// the first round). The Kachinuki Detail sheet titles that match's section
+// with it too.
+func EliminationMatchTitle(round, matchNum int) string {
+	return fmt.Sprintf(EliminationMatchTitleFormat, round, matchNum)
+}
+
 // loserCellOf returns the Excel cell address one row below the given "1." winner
 // cell, which is the "2." loser line of a single-elimination match block.
 func loserCellOf(winnerCell string) (string, error) {
@@ -1671,7 +1694,7 @@ func printSingleEliminationMatch(f *excelize.File, sheetName string, elimination
 
 	handleExcelError("SetCellStyle", f.SetCellStyle(sheetName, startCell, endCell, styles.poolHeader))
 	handleExcelError("MergeCell", f.MergeCell(sheetName, startCell, endCell))
-	handleExcelError("SetCellValue", f.SetCellValue(sheetName, startCell, fmt.Sprintf("Round %d - Match %d", round, eliminationMatch.matchNum)))
+	handleExcelError("SetCellValue", f.SetCellValue(sheetName, startCell, EliminationMatchTitle(round, int(eliminationMatch.matchNum))))
 
 	matchRow++
 	matchHeaderWithStyles(f, sheetName, startColName, matchRow, middleColName, endColName, styles.redHeader, styles.text, styles.whiteHeader, engi)

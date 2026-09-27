@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"sort"
-	"strconv"
 	"strings"
 
 	excelize "github.com/xuri/excelize/v2"
@@ -77,8 +76,9 @@ func BuildResultsWorkbook(store *state.Store, eng *engine.Engine, compID string)
 	// LoadPools restores only pool membership (pools.csv), not matches
 	// (pool-matches.csv). PrintPoolMatches renders the per-match grid from
 	// pool.Matches, so reconstruct it from the stored results before rendering,
-	// otherwise the grid (and the scores overlaid onto it) is empty.
-	poolOrdinals := attachPoolMatches(pools, matchResults)
+	// the same way the blank-template export does, otherwise the grid (and the
+	// scores overlaid onto it) is empty.
+	poolOrdinals := engine.AttachPoolMatches(pools, matchResults)
 
 	standings, err := eng.CalculatePoolStandings(compID)
 	if err != nil {
@@ -210,16 +210,16 @@ func BuildResultsWorkbook(store *state.Store, eng *engine.Engine, compID string)
 		if err := overlayBracketScores(f, bracketByNum, boutRows, comp.Engi, thirdPlaceMatch); err != nil {
 			return nil, fmt.Errorf("export: overlay bracket scores: %w", err)
 		}
-		// Knockout competitions have no pool data sheet, so the pool-oriented renderer emits
-		// broken ''! references for the entrant name cells. Overwrite them with
-		// the stored bracket's literal names (empty for unresolved slots) so the
-		// sheet is a valid literal snapshot with no broken formulas.
+		// A knockout-only competition's entrant cells are formulas into the data
+		// sheet and the earlier matches' winner cells, which this results
+		// snapshot never fills in; overwrite them with the stored bracket's names,
+		// a side still to be decided as "M n".
 		//
 		// comp.EffectiveFormat(), not comp.Format directly: an unset Format ("")
 		// is standalone knockout too (generation's default case), so it has the
 		// identical no-pool-data-sheet shape and needs the identical overlay.
 		if len(pools) == 0 && comp.EffectiveFormat() == state.CompFormatKnockout {
-			if err := overlayKnockoutBracketNames(f, bracketByNum, boutRows); err != nil {
+			if err := overlayKnockoutBracketNames(f, bracketByNum, engine.PrintedBracket(bracket), boutRows); err != nil {
 				return nil, fmt.Errorf("export: overlay knockout names: %w", err)
 			}
 		}
@@ -230,88 +230,6 @@ func BuildResultsWorkbook(store *state.Store, eng *engine.Engine, compID string)
 		return nil, fmt.Errorf("export: write workbook: %w", err)
 	}
 	return buf.Bytes(), nil
-}
-
-// attachPoolMatches reconstructs each pool's Matches slice from the stored pool
-// results. LoadPools restores only pool membership; the matches live in
-// pool-matches.csv (loaded separately). PrintPoolMatches renders its per-match
-// grid from pool.Matches, and the ordinal overlay in overlayPoolScores /
-// overlayTeamPoolScores maps the N-th grid row back to its result.
-//
-// Because an unresolvable match is SKIPPED (see below), pool.Matches can be
-// non-contiguous relative to the stored "<Pool>-<suffix>" IDs, so this returns
-// poolOrdinals: poolName -> the original numeric suffix of each KEPT match, in
-// grid order. The overlays use poolOrdinals[pool][i] to rebuild the result ID for
-// grid row i, rather than assuming row i == suffix i. Tiebreak/daihyosen results
-// (non-numeric suffix, e.g. "Pool A-DH-0") are skipped.
-//
-// Each side is resolved to its pool Player by the authoritative SideAID/SideBID
-// UUID ONLY (operator ruling bc-pnum): a pool-matches.csv row and a pools.csv
-// Player both carry an id field, so there is no name fallback. A row with no
-// id for a side, or an id this pool's own roster does not carry, resolves to
-// no Player at all and the match is skipped below.
-func attachPoolMatches(pools []helper.Pool, matchResults []state.MatchResult) map[string][]int {
-	poolOrdinals := make(map[string][]int, len(pools))
-	for pi := range pools {
-		p := &pools[pi]
-		prefix := p.PoolName + "-"
-
-		type idxRes struct {
-			idx int
-			mr  state.MatchResult
-		}
-		var mine []idxRes
-		for _, mr := range matchResults {
-			if !strings.HasPrefix(mr.ID, prefix) {
-				continue
-			}
-			n, err := strconv.Atoi(mr.ID[len(prefix):])
-			if err != nil {
-				continue // tiebreak/daihyosen or malformed suffix
-			}
-			mine = append(mine, idxRes{n, mr})
-		}
-		sort.Slice(mine, func(i, j int) bool { return mine[i].idx < mine[j].idx })
-
-		byID := make(map[string]*helper.Player, len(p.Players))
-		for i := range p.Players {
-			pl := &p.Players[i]
-			if pl.ID != "" {
-				byID[pl.ID] = pl
-			}
-		}
-		// ID-only (operator ruling bc-pnum): the side UUID (SideAID/SideBID
-		// from pool-matches.csv) is the only resolution path. Names are not
-		// unique within a competition (same name, different dojo is
-		// allowed), so a name-only lookup could attach the wrong Player and
-		// mislabel the grid; an empty or foreign id simply resolves to nil.
-		resolve := func(id string) *helper.Player {
-			if id == "" {
-				return nil
-			}
-			return byID[id]
-		}
-
-		p.Matches = make([]helper.Match, 0, len(mine))
-		ords := make([]int, 0, len(mine))
-		for _, ir := range mine {
-			sideA := resolve(ir.mr.SideAID)
-			sideB := resolve(ir.mr.SideBID)
-			// A side that resolves to no pool member (e.g. a participant removed
-			// after the match was recorded, or partially-written state) would be a
-			// nil *Player, which PrintPoolMatches dereferences unconditionally and
-			// panics on. Skip the unresolvable match: the skeleton row is simply left
-			// without an overlaid score, consistent with the frozen-snapshot semantics.
-			// The skip is why we track the original ordinal separately below.
-			if sideA == nil || sideB == nil {
-				continue
-			}
-			p.Matches = append(p.Matches, helper.Match{SideA: sideA, SideB: sideB})
-			ords = append(ords, ir.idx)
-		}
-		poolOrdinals[p.PoolName] = ords
-	}
-	return poolOrdinals
 }
 
 // ---------- pool score overlay ----------
@@ -374,7 +292,7 @@ func overlayPoolScores(f *excelize.File, pools []helper.Pool, resultByID map[str
 			ords := poolOrdinals[pool.PoolName]
 			for i := range pool.Matches {
 				// Grid row i maps back to its stored result via the ORIGINAL numeric
-				// suffix recorded by attachPoolMatches (row i is NOT necessarily suffix
+				// suffix recorded by engine.AttachPoolMatches (row i is NOT necessarily suffix
 				// i once an unresolvable match has been skipped). A missing result is
 				// simply left blank.
 				if i >= len(ords) {
@@ -1137,17 +1055,17 @@ func writeThirdPlaceEntrants(f *excelize.File, sheetName string, bm state.Bracke
 	return bm.Status == state.MatchStatusCompleted
 }
 
-// overlayKnockoutBracketNames overwrites the elimination entrant name cells with
-// the stored bracket's literal SideA/SideB. Knockout have no pool data sheet, so
-// the pool-oriented renderer points those cells at an empty pool-winner cell,
-// producing a broken ”! formula. Writing the literal names (or "" for an
-// unresolved slot, which clears the broken formula) yields a valid snapshot.
+// overlayKnockoutBracketNames overwrites a knockout-only competition's
+// elimination entrant name cells with literal names from the stored bracket,
+// named as engine.PrintedBracket names them: a competitor as stored, a side an
+// earlier match decides as "M n" (what the cell's own formula prints before a
+// result is entered), and a bye's empty side as a blank cell.
 //
 // Name cells sit at the court's start column (left, SideB) and start+6 (right,
 // SideA) on the entrant row (header + 2), placed by helper.WhiteLeft. Team brackets repeat the entrant name formulas on the
 // summary row (header + 4 + boutRows, just above the "Victories / Points" row), so
 // those are overwritten too.
-func overlayKnockoutBracketNames(f *excelize.File, bracketByNum map[int]state.BracketMatch, boutRows int) error {
+func overlayKnockoutBracketNames(f *excelize.File, bracketByNum map[int]state.BracketMatch, printed map[string]engine.PrintedBracketMatch, boutRows int) error {
 	sheetName := helper.SheetEliminationMatches
 	rows, err := f.GetRows(sheetName)
 	if err != nil {
@@ -1165,7 +1083,8 @@ func overlayKnockoutBracketNames(f *excelize.File, bracketByNum map[int]state.Br
 				continue
 			}
 
-			leftName, rightName := helper.WhiteLeft(bm.SideA, bm.SideB)
+			sides := printed[bm.ID]
+			leftName, rightName := helper.WhiteLeft(sides.SideA, sides.SideB)
 			leftCol := colNum(headerCol + 1)  // court start column
 			rightCol := colNum(headerCol + 7) // start + 6 (endColName)
 
@@ -1261,7 +1180,7 @@ func buildCourtColumnMap(row []string, startColIdx int) map[string]int {
 // id only) so two same-name competitors in one pool don't collapse onto a
 // single entry. A row is keyed by its participant id; a row without one
 // resolves to nothing, so an id-less standing is never inserted, matching
-// attachPoolMatches' own id-only resolution. Look up with player.ID.
+// engine.AttachPoolMatches' own id-only resolution. Look up with player.ID.
 func standingMap(standings []state.PlayerStanding) map[string]state.PlayerStanding {
 	m := make(map[string]state.PlayerStanding, len(standings))
 	for _, ps := range standings {
@@ -1325,7 +1244,7 @@ func parseRoundMatchLabel(s string) int {
 		return 0
 	}
 	var round, match int
-	if _, err := fmt.Sscanf(s, "Round %d - Match %d", &round, &match); err != nil {
+	if _, err := fmt.Sscanf(s, helper.EliminationMatchTitleFormat, &round, &match); err != nil {
 		return 0
 	}
 	return match

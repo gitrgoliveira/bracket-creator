@@ -161,6 +161,11 @@ const ColHeaderFlags = "Flags"
 // writer and reader cannot drift independently.
 const ThirdPlaceLabel = "3rd Place"
 
+// EliminationMatchTitleFormat is the header over every other knockout match's
+// block on the Elimination Matches sheet, "Round <r> - Match <n>" (see
+// EliminationMatchTitle); the results overlays parse it back to find a block.
+const EliminationMatchTitleFormat = "Round %d - Match %d"
+
 // Sheet names for every tab in the workbook. Use these constants wherever a
 // sheet name is needed so that a rename only requires one edit here.
 //

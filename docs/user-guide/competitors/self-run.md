@@ -28,6 +28,8 @@ You can record your match result directly from the public viewer, without the ad
 
 Only everyday match outcomes are available to self-reporters. Decisions that require an official ruling remain with the operator, and so do destructive actions such as editing the roster. For a full list of outcomes and what they mean, refer to [Recording decisions](../court-operators/recording-decisions.md).
 
+In a team match you can also name each bout's fighters on the score sheet: pick a team member from the list, or type their name. The names are saved with the match. Once the match has finished, ask the organiser to correct a name.
+
 ## Follow your matches and standings
 
 To track your progress, view the draw, and see standings, refer to [Following a tournament](../spectators/following.md).

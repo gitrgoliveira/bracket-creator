@@ -1,8 +1,11 @@
 package engine
 
 import (
+	"bytes"
+	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/gitrgoliveira/bracket-creator/internal/domain"
@@ -534,7 +537,7 @@ func TestCollectKachinukiMatches_BronzeWithSubResults(t *testing.T) {
 	out, err := eng.collectKachinukiMatches(compID, comp)
 	require.NoError(t, err)
 	require.Len(t, out, 1, "bronze match with 2 bouts should produce one detail entry")
-	assert.Equal(t, "3rd Place Match", out[0].Label)
+	assert.Equal(t, helper.ThirdPlaceLabel, out[0].Label)
 	require.Len(t, out[0].Bouts, 2)
 	assert.Equal(t, "R1", out[0].Bouts[0].SideAName)
 	assert.Equal(t, "B1", out[0].Bouts[0].SideBName)
@@ -566,7 +569,7 @@ func TestCollectKachinukiMatches_BronzeStub(t *testing.T) {
 	out, err := eng.collectKachinukiMatches(compID, comp)
 	require.NoError(t, err)
 	require.Len(t, out, 1)
-	assert.Equal(t, "3rd Place Match", out[0].Label)
+	assert.Equal(t, helper.ThirdPlaceLabel, out[0].Label)
 	assert.Equal(t, "RedTeam", out[0].SideATeam)
 	assert.Equal(t, "WhiteTeam", out[0].SideBTeam)
 	assert.Empty(t, out[0].Bouts)
@@ -652,8 +655,42 @@ func TestCollectKachinukiMatches_BlankTemplateCoversTheDraw(t *testing.T) {
 				assert.Contains(t, sides, helper.MatchRefLabel(1), "the semi-final fed by the first-round bout names it")
 			}
 
+			// Each bracket section carries the title of its block on the
+			// Elimination Matches sheet, so a side reading "M n" leads to the
+			// section titled with match n.
+			data, err := eng.ExportCompetitionXlsx(compID)
+			require.NoError(t, err)
+			f, err := excelize.OpenReader(bytes.NewReader(data))
+			require.NoError(t, err)
+			defer func() { require.NoError(t, f.Close()) }()
+			rows, err := f.GetRows(helper.SheetEliminationMatches)
+			require.NoError(t, err)
+			var sheetTitles, sectionTitles []string
+			for _, row := range rows {
+				if len(row) > 0 && (strings.HasPrefix(row[0], "Round ") || row[0] == helper.ThirdPlaceLabel) {
+					sheetTitles = append(sheetTitles, row[0])
+				}
+			}
+			titled := map[int]bool{}
+			for _, d := range out[tc.wantPool:] {
+				sectionTitles = append(sectionTitles, d.Label)
+				var round, number int
+				if _, err := fmt.Sscanf(d.Label, helper.EliminationMatchTitleFormat, &round, &number); err == nil {
+					titled[number] = true
+				}
+			}
+			assert.ElementsMatch(t, sheetTitles, sectionTitles, "each bracket section is titled as its Elimination Matches block")
+			for _, side := range sides {
+				var number int
+				if _, err := fmt.Sscanf(side, "M %d", &number); err == nil {
+					assert.True(t, titled[number], "side %q leads to a section titled with match %d", side, number)
+				}
+			}
+
 			final, bronze := out[len(out)-2], out[len(out)-1]
-			assert.Equal(t, "3rd Place Match", bronze.Label)
+			assert.Equal(t, helper.ThirdPlaceLabel, bronze.Label)
+			require.GreaterOrEqual(t, len(sheetTitles), 2)
+			assert.Equal(t, sheetTitles[len(sheetTitles)-2], final.Label, "the final carries the title of the last block before the 3rd place")
 			assert.ElementsMatch(t,
 				[]string{helper.MatchRefLabel(numbered - 2), helper.MatchRefLabel(numbered - 1)},
 				[]string{final.SideATeam, final.SideBTeam},

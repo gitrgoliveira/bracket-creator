@@ -19,7 +19,7 @@ info:
     - **`GET /api/schedule/estimate`**: stateless schedule calculator; always public.
     - **`GET /api/competitions/{id}/competitor-status`**: public read; the `POST` write is protected.
     - **`GET /api/competitions/{id}/teams/{tid}/lineups/{round}`**: public read; `PUT`/`DELETE` are protected.
-    - **`GET /api/competitions/{id}/teams/{tid}/match-lineups/{matchId}`**: public read; `PUT`/`DELETE` are protected.
+    - **`GET /api/competitions/{id}/teams/{tid}/match-lineups/{matchId}`**: public read; `PUT`/`DELETE` are protected (in self-run mode the `PUT` is open, see below).
     - **`GET /api/competitions/{id}/swiss/standings`**: public read; always public.
     - **`GET /api/tournament/announcement`**: public read; returns the currently active admin broadcast announcement (204 when none/expired).
 
@@ -30,6 +30,13 @@ info:
     draw, result overrides, roster mutations, import) and organiser-owned setup
     (tournament/competition config) stay gated. In the default `officiated` mode every
     `/api/` route keeps requiring `X-Tournament-Password` as described above.
+    The team writes the public score sheet makes when a competitor names a bout's
+    fighter are open in self-run mode too: `PUT .../teams/{tid}/match-lineups/{matchId}`,
+    `POST .../teams/{tid}/members` and `PUT .../teams/{tid}/members/{memberId}`. A
+    request without a valid password cannot change the lineup of a match that has
+    finished (409 `result_finalized`) or rename a team member who already has a name
+    (409). The Lineups page's other writes (round lineups, deleting a match lineup,
+    clearing a member's name) and `GET .../team-members` stay gated.
 
     **Request body size limits.** Every `/api/` route enforces a request-size cap and
     returns `413` when the body exceeds it: admin JSON bodies are capped at 1 MB by
@@ -3690,6 +3697,13 @@ paths:
         the match is running or completed (mp-q722). Match state never blocks a
         save; a structurally invalid payload (FIK shape rules) is still rejected
         with a 400.
+
+        In a self-run tournament the request is also accepted without a valid
+        password: the public score sheet saves it when a competitor names a
+        bout's fighter (bc-dhas). Such a request is refused for a match that
+        does not exist (404) or has finished (409 `result_finalized`, the score
+        endpoint's own refusal); the organiser, sending the password, keeps the
+        always-editable rule above.
       security:
         - TournamentPassword: []
       requestBody:
@@ -3707,6 +3721,28 @@ paths:
                 $ref: '#/components/schemas/TeamLineup'
         '400':
           $ref: '#/components/responses/BadRequest'
+        '404':
+          description: |
+            Competition not found, or (self-run, no valid password) no match
+            with this id.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '409':
+          description: |
+            Self-run, no valid password: the match has finished
+            (`error: result_finalized`, with a `message` to show).
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error:
+                    type: string
+                    enum: [result_finalized]
+                  message:
+                    type: string
         '500':
           $ref: '#/components/responses/InternalError'
     delete:

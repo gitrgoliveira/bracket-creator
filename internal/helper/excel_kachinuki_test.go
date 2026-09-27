@@ -439,7 +439,7 @@ func TestKachinukiDetailBlankSection(t *testing.T) {
 		{
 			name: "no bouts: empty numbered rows",
 			match: KachinukiMatchDetail{
-				Label: "Bracket R2-M1", SideATeam: "M 1", SideBTeam: "Kodokan", BlankBoutRows: 5,
+				Label: "Round 2 - Match 3", SideATeam: "M 1", SideBTeam: "Kodokan", BlankBoutRows: 5,
 			},
 			wantRows: 5,
 		},

@@ -53,7 +53,7 @@ func setupSquadTestRouter(t *testing.T) (*gin.Engine, *state.Store, string) {
 	r := gin.New()
 	admin := r.Group("/api")
 	admin.Use(AuthMiddleware(NewFileVerifier(store), store))
-	RegisterSquadHandlers(admin, store, store, stubBroadcaster{})
+	RegisterSquadHandlers(admin, store, store, stubBroadcaster{}, store, NewFileVerifier(store))
 	return r, store, teams[0].ID
 }
 
@@ -304,7 +304,7 @@ func TestSquadHandlers_RenameAndClearBroadcastTheLineupEvent(t *testing.T) {
 	r := gin.New()
 	admin := r.Group("/api")
 	admin.Use(AuthMiddleware(NewFileVerifier(store), store))
-	RegisterSquadHandlers(admin, store, store, hub)
+	RegisterSquadHandlers(admin, store, store, hub, store, NewFileVerifier(store))
 
 	base := "/api/competitions/c1/teams/" + teamID + "/members"
 

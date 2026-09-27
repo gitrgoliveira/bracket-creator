@@ -3137,7 +3137,9 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
               pickManualBoutName({
                 sub: s, idx, sideKey, memberIdKey, squad, setSquad, teamId,
                 compId: m.compId, password, updateSub,
-                onRenameFailed: (typed) => setEditorWarning(`"${typed}" was used for this bout, but the team member could not be renamed. Rename them on the Lineups page.`),
+                // A self-run competitor cannot open the Lineups page, so they are
+                // pointed at the organizer, as the server's own refusals do.
+                onRenameFailed: (typed) => setEditorWarning(`"${typed}" was used for this bout, but the team member could not be renamed. ${selfReport ? "Ask the tournament organizer to rename them." : "Rename them on the Lineups page."}`),
               }, value, member);
             // mp-gmcg: a kachinuki side with NO resolved name AND no lineup
             // route gets a free-typed name input riding the sub (like a

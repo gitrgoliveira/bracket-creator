@@ -257,13 +257,12 @@ func TestSelfRun_SelfRunMode_CompetitionConfigRoutes_RequireMainPassword(t *test
 		// play, so they stay main-password gated even in self-run mode (mp-i96p).
 		{http.MethodGet, "/api/competitions/some-id/export"},
 		{http.MethodGet, "/api/competitions/some-id/export-results"},
-		// Squad management (bc-tmid): organiser setup, same class as team
-		// lineup PUT/DELETE just above.
+		// Team members (bc-tmid): the read and the name clear stay organiser
+		// setup. Adding and naming a member are public in self-run, because
+		// the public score sheet names fighters through them
+		// (self_run_team_writes_test.go).
 		{http.MethodGet, "/api/competitions/some-id/team-members"},
-		{http.MethodPost, "/api/competitions/some-id/teams/some-team/members"},
-		{http.MethodPut, "/api/competitions/some-id/teams/some-team/members/some-member"},
-		// bc-pnum: clearing a member's name is the operator's "removal",
-		// same class as the PUT just above.
+		// bc-pnum: clearing a member's name is the operator's "removal".
 		{http.MethodDelete, "/api/competitions/some-id/teams/some-team/members/some-member"},
 	}
 

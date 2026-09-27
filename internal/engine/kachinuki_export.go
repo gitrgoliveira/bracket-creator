@@ -13,7 +13,6 @@ import (
 	"fmt"
 	"maps"
 	"slices"
-	"strings"
 
 	"github.com/gitrgoliveira/bracket-creator/internal/domain"
 	"github.com/gitrgoliveira/bracket-creator/internal/helper"
@@ -90,67 +89,36 @@ func (e *Engine) collectKachinukiMatches(compID string, comp *state.Competition)
 	}
 
 	// Bracket matches round by round, then the 3rd-place match (a sibling of
-	// bracket.Rounds). A bye, hidden with one side empty, has no section.
+	// bracket.Rounds). A bye, hidden with one side empty, has no section. Each
+	// is titled and its sides named as the Elimination Matches sheet prints
+	// them, so a side reading "M 3" leads to the section titled with match 3.
 	bracket, err := e.store.LoadBracket(compID)
 	if err == nil && bracket != nil {
-		numberByID := map[string]int{}
-		for _, round := range bracket.Rounds {
-			for _, bm := range round {
-				numberByID[bm.ID] = bm.MatchNumber
+		printed := PrintedBracket(bracket)
+		bracketSection := func(bm state.BracketMatch, fallbackTitle string) helper.KachinukiMatchDetail {
+			p := printed[bm.ID]
+			title := p.Title
+			if title == "" {
+				title = fallbackTitle // a bracket stored before match numbers
 			}
+			detail := section(bracketMatchToTeamResult(bm), title)
+			detail.SideATeam, detail.SideBTeam = p.SideA, p.SideB
+			return detail
 		}
 		for rIdx, round := range bracket.Rounds {
 			for mIdx, bm := range round {
 				if len(bm.SubResults) == 0 && (bm.Hidden || bm.SideA == "" || bm.SideB == "") {
 					continue
 				}
-				detail := section(bracketMatchToTeamResult(bm), fmt.Sprintf("Bracket R%d-M%d", rIdx+1, mIdx+1))
-				detail.SideATeam = kachinukiBracketSideName(bm.SideA, feederAt(bm.Feeders, 0), numberByID)
-				detail.SideBTeam = kachinukiBracketSideName(bm.SideB, feederAt(bm.Feeders, 1), numberByID)
-				out = append(out, detail)
+				out = append(out, bracketSection(bm, fmt.Sprintf("Bracket R%d-M%d", rIdx+1, mIdx+1)))
 			}
 		}
 		if bm := bracket.ThirdPlaceMatch; bm != nil {
-			// The bronze's sides are the semi-finals' losers: the matches
-			// feeding the final, side for side.
-			var finalFeeders []string
-			if n := len(bracket.Rounds); n > 0 && len(bracket.Rounds[n-1]) > 0 {
-				finalFeeders = bracket.Rounds[n-1][0].Feeders
-			}
-			detail := section(bracketMatchToTeamResult(*bm), "3rd Place Match")
-			detail.SideATeam = kachinukiBracketSideName(bm.SideA, feederAt(finalFeeders, 0), numberByID)
-			detail.SideBTeam = kachinukiBracketSideName(bm.SideB, feederAt(finalFeeders, 1), numberByID)
-			out = append(out, detail)
+			out = append(out, bracketSection(*bm, helper.ThirdPlaceLabel))
 		}
 	}
 
 	return out, nil
-}
-
-// kachinukiBracketSideName names a bracket side on the Kachinuki Detail sheet
-// the way the Elimination Matches sheet prints it: a team, or a pool
-// placeholder ("Pool A-1st"), as it stands; a side an earlier match decides
-// (a "Winner of" placeholder, or the bronze's side before the semi-finals end)
-// by that match's printed number, helper.MatchRefLabel's "M 3". feederID is
-// the real match feeding the side (state.BracketMatch.Feeders); a side whose
-// feeder is unknown stays blank.
-func kachinukiBracketSideName(side, feederID string, numberByID map[string]int) string {
-	if side != "" && !strings.HasPrefix(side, "Winner of") {
-		return side
-	}
-	if n := numberByID[feederID]; n > 0 {
-		return helper.MatchRefLabel(n)
-	}
-	return ""
-}
-
-// feederAt returns feeders[i], or "" when the slice does not reach it (a
-// bracket stored before feeders were recorded).
-func feederAt(feeders []string, i int) string {
-	if i < len(feeders) {
-		return feeders[i]
-	}
-	return ""
 }
 
 // buildKachinukiTeamNumbers resolves every team-shaped participant's

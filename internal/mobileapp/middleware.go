@@ -252,6 +252,14 @@ func enforceElevated(c *gin.Context, ev ElevatedVerifier) bool {
 // IMPORTANT: any NEW admin route that mutates organiser-owned setup (rather
 // than operational play) and is not already elevated-gated MUST be added here,
 // otherwise it becomes anonymously writable in self-run mode.
+//
+// Three team writes are deliberately public in self-run (operator decision,
+// bc-dhas): the ones the public score sheet makes when a competitor names a
+// bout's fighter. They are the match lineup PUT and naming a team member
+// (POST .../teams/:tid/members, PUT .../members/:memberId). Their handlers
+// guard an anonymous caller the way the score path does (selfRunAnonymous):
+// no lineup change once the match has finished, and no renaming a member who
+// already has a name. The Lineups page's other writes stay gated below.
 func isSelfRunMainGatedConfigRoute(method, fullPath string) bool {
 	switch method + " " + fullPath {
 	case http.MethodGet + " /api/tournament", // Fix 3329406556: password field in full Tournament struct; viewer uses /api/viewer/tournament
@@ -277,15 +285,15 @@ func isSelfRunMainGatedConfigRoute(method, fullPath string) bool {
 		// Forward check-in (single PUT + bulk POST /checkin-bulk) is intentionally ungated,
 		// participants and desk staff can check in without the main admin password.
 		// Only reversal (DELETE) requires it.
-		http.MethodDelete + " /api/competitions/:id/participants/:pid/checkin",         // check-in reversal, organiser correction
-		http.MethodPut + " /api/competitions/:id/teams/:tid/lineups/:round",            // team lineup management, organiser
-		http.MethodDelete + " /api/competitions/:id/teams/:tid/lineups/:round",         // team lineup management, organiser
-		http.MethodPut + " /api/competitions/:id/teams/:tid/match-lineups/:matchId",    // team match lineup, organiser
-		http.MethodDelete + " /api/competitions/:id/teams/:tid/match-lineups/:matchId", // team match lineup, organiser
-		http.MethodGet + " /api/competitions/:id/team-members",                         // bc-tmid: squad management, organiser setup
-		http.MethodPost + " /api/competitions/:id/teams/:tid/members",                  // bc-tmid: squad management, organiser setup
-		http.MethodPut + " /api/competitions/:id/teams/:tid/members/:memberId",         // bc-tmid: squad management, organiser setup
-		http.MethodDelete + " /api/competitions/:id/teams/:tid/members/:memberId",      // bc-pnum: squad member clear (name-only), organiser setup, same class as the PUT just above
+		http.MethodDelete + " /api/competitions/:id/participants/:pid/checkin", // check-in reversal, organiser correction
+		// The score sheet's own lineup and member writes are NOT here (see the
+		// doc comment above); these are the Lineups page's, which the public
+		// page never makes.
+		http.MethodPut + " /api/competitions/:id/teams/:tid/lineups/:round",            // round lineup, Lineups page
+		http.MethodDelete + " /api/competitions/:id/teams/:tid/lineups/:round",         // round lineup, Lineups page
+		http.MethodDelete + " /api/competitions/:id/teams/:tid/match-lineups/:matchId", // the score sheet clears a position with the PUT, never this
+		http.MethodGet + " /api/competitions/:id/team-members",                         // the public page reads team members from the viewer payload
+		http.MethodDelete + " /api/competitions/:id/teams/:tid/members/:memberId",      // bc-pnum: clearing a member's name, Lineups page only
 		http.MethodPost + " /api/competitions/:id/matches/:mid/decision",               // mp-ba3: kiken/fusenpai/daihyosen are admin-only decisions
 		http.MethodDelete + " /api/competitions/:id/matches/:mid/kachinuki-bout",       // mp-gmcg: removing a bout is an organiser correction, same class as reopen/override-winner; the participant score path gates itself via enforceSelfRunPolicy, this route does not
 		http.MethodPost + " /api/sponsors",                                             // mp-c38: sponsor logo upload, organiser setup, not operational play
@@ -295,6 +303,31 @@ func isSelfRunMainGatedConfigRoute(method, fullPath string) bool {
 	default:
 		return false
 	}
+}
+
+// selfRunAnonymous reports whether a request reaching a self-run write is an
+// anonymous caller: the tournament is self-run and the request carries no
+// valid main password. Such a caller gets the self-run limits on the routes
+// that are public in self-run (the score path's decision allowlist and
+// finished-match refusal, the score sheet's lineup and member writes); an
+// organiser who sends the password does not. ok is false when the answer
+// could not be worked out, and the error response has then been written, so
+// the caller stops. Fails closed on a tournament that cannot be loaded.
+func selfRunAnonymous(c *gin.Context, tl TournamentLoader, verifier PasswordVerifier) (anonymous, ok bool) {
+	t, err := tl.LoadTournament()
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to load tournament config"})
+		return false, false
+	}
+	if t == nil || t.Mode != state.TournamentModeSelfRun {
+		return false, true
+	}
+	valid, verr := verifier.Verify(c.GetHeader("X-Tournament-Password"))
+	if verr != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "auth verification failed"})
+		return false, false
+	}
+	return !valid, true
 }
 
 // AuthMiddleware gates admin endpoints behind the X-Tournament-Password

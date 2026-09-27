@@ -8,16 +8,21 @@
 // comment in participants.go for the data-loss history that store move
 // exists to close.
 //
-// All four routes are admin-only, and stay main-password-gated even in
-// self-run mode (isSelfRunMainGatedConfigRoute, middleware.go): squad
-// management is organiser setup, not operational play, the same class as
-// team lineup PUT/DELETE.
+// All four routes live on the admin group. In a self-run tournament ADD and
+// RENAME are also open to a caller without the password, because the public
+// score sheet names a bout's fighter through them (bc-dhas); such a caller may
+// name a member who has no name yet but not rename one who has (see the PUT).
+// The read and the name CLEAR stay main-password-gated
+// (isSelfRunMainGatedConfigRoute, middleware.go): the public page reads team
+// members from the viewer payload and never clears one.
 //
 // ADD is deliberately silent; RENAME and CLEAR are not, and the split is the
 // point. The original rule was that squad edits are setup done by one
 // organiser, not the concurrent multi-device traffic the lineup broadcast
 // exists for, so a member added on one device is invisible to a second admin
-// session until it remounts. That consequence is still accepted for ADD.
+// session until it remounts. That consequence is still accepted for ADD. On
+// the public score sheet an add is followed by the match lineup PUT, which
+// broadcasts, so the other devices refetch the members anyway.
 //
 // Rename and clear outgrew it. They now rewrite lineups.yaml as well
 // (state.renameMemberInLineupsLocked), because a lineup position stores a
@@ -33,9 +38,9 @@
 // changed. A spurious refetch costs one request; a missed one costs the
 // rename. Same safe direction bumpFileVersion takes in the store.
 //
-// The public surfaces do not call these routes at all: the viewer, the
-// court display and the streaming overlay read a team's squad from the
-// viewer payload (handlers_viewer.go). They inherit the same consequence.
+// The public READ surfaces do not call these routes: the viewer, the court
+// display and the streaming overlay read a team's squad from the viewer
+// payload (handlers_viewer.go). They inherit the same consequence.
 // Nothing here fires an event and the SPA has no data poll, so a squad
 // edit reaches them only on their next payload fetch, which some OTHER
 // broadcast triggers. Same trade, same reason: this is setup, and the
@@ -64,7 +69,10 @@ type SquadMemberRequest struct {
 // a 404 instead of a confusing 500 from a write that can never land (the
 // per-competition directory does not exist to write into); mirrors
 // handlers_lineup.go's own comp == nil check.
-func RegisterSquadHandlers(r *gin.RouterGroup, store SquadStore, comps CompetitionStore, hub Broadcaster) {
+//
+// tl/verifier tell an anonymous self-run caller apart (selfRunAnonymous) for
+// the rename's guard.
+func RegisterSquadHandlers(r *gin.RouterGroup, store SquadStore, comps CompetitionStore, hub Broadcaster, tl TournamentLoader, verifier PasswordVerifier) {
 	r.GET("/competitions/:id/team-members", func(c *gin.Context) {
 		compID, ok := requireValidCompID(c)
 		if !ok {
@@ -128,6 +136,27 @@ func RegisterSquadHandlers(r *gin.RouterGroup, store SquadStore, comps Competiti
 			c.JSON(http.StatusBadRequest, gin.H{"error": "name is required"})
 			return
 		}
+		// An anonymous self-run caller names a member from the public score
+		// sheet, which only ever names one who has no name yet. Renaming one
+		// who has a name stays with the organiser: the rename reaches every
+		// stored lineup and every bout already fought that names the member,
+		// finished matches included, which the score path's finished-match
+		// rule keeps from an anonymous caller.
+		anonymous, ok := selfRunAnonymous(c, tl, verifier)
+		if !ok {
+			return
+		}
+		if anonymous {
+			named, err := teamMemberHasName(store, compID, teamID, memberID)
+			if err != nil {
+				internalError(c, err)
+				return
+			}
+			if named {
+				c.JSON(http.StatusConflict, gin.H{"error": "this team member already has a name; ask the tournament organizer to change it"})
+				return
+			}
+		}
 		if err := store.RenameTeamMember(compID, teamID, memberID, req.Name); err != nil {
 			respondSquadWriteError(c, err)
 			return
@@ -163,6 +192,22 @@ func RegisterSquadHandlers(r *gin.RouterGroup, store SquadStore, comps Competiti
 		c.Status(http.StatusNoContent)
 		hub.Broadcast(EventLineupUpdated, gin.H{"competitionId": compID})
 	})
+}
+
+// teamMemberHasName reports whether the member already has a name. A member
+// or team it cannot find reads as unnamed, so the rename itself reports the
+// missing member (respondSquadWriteError's 404) rather than this check.
+func teamMemberHasName(store SquadStore, compID, teamID, memberID string) (bool, error) {
+	squads, err := store.LoadSquads(compID)
+	if err != nil {
+		return false, err
+	}
+	for _, m := range squads[teamID] {
+		if m.ID == memberID {
+			return strings.TrimSpace(m.Name) != "", nil
+		}
+	}
+	return false, nil
 }
 
 // requireValidCompIDAndTeam extracts (compID, teamID) from the URL, 400ing

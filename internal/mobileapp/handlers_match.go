@@ -1775,22 +1775,11 @@ func RegisterMatchHandlers(r *gin.RouterGroup, eng *engine.Engine, store Competi
 // In officiated mode this is a pass-through that returns "admin", true.
 // On LoadTournament error the function fails closed (500).
 func enforceSelfRunPolicy(c *gin.Context, tl TournamentLoader, verifier PasswordVerifier, req *ScoreRequest) (string, bool) {
-	t, err := tl.LoadTournament()
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to load tournament config"})
+	anonymous, ok := selfRunAnonymous(c, tl, verifier)
+	if !ok {
 		return "", false
 	}
-	if t == nil || t.Mode != "self-run" {
-		return "admin", true
-	}
-
-	// Self-run mode: check whether the caller has a valid admin password.
-	ok, verr := verifier.Verify(c.GetHeader("X-Tournament-Password"))
-	if verr != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "auth verification failed"})
-		return "", false
-	}
-	if ok {
+	if !anonymous {
 		return "admin", true
 	}
 

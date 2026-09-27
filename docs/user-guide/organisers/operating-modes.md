@@ -14,7 +14,9 @@ Officiated mode is the default. Every action (scoring, check-in, starting, and c
 
 In self-run mode, scoring, check-in, and starting competitions are open to anyone without a password, so competitors or table helpers can run and score their own matches. Completing a competition is irreversible, so it stays behind the destructive-ops password (refer to [Destructive-ops password](#destructive-ops-password)). A public self-registration page also becomes available for competitors to sign themselves up, for individual competitions only and only while the competition is still in setup, before the draw is generated.
 
-Two kinds of action stay gated in self-run mode. Organiser setup (creating and editing competitions, tournament settings, seeds, scheduling, team lineups, match decisions such as kiken, and exports) still requires the admin password. Destructive actions (deleting a competition, discarding a draw, editing the roster, and completing a competition) require the destructive-ops password (refer to [Destructive-ops password](#destructive-ops-password)).
+Two kinds of action stay gated in self-run mode. Organiser setup (creating and editing competitions, tournament settings, seeds, scheduling, the **Lineups** page, match decisions such as kiken, and exports) still requires the admin password. Destructive actions (deleting a competition, discarding a draw, editing the roster, and completing a competition) require the destructive-ops password (refer to [Destructive-ops password](#destructive-ops-password)).
+
+Competitors can name the fighters in a team match from its score sheet, without the password. A team member picked for a bout, or a typed name, is saved with that match, and a typed name fills in a team member who has no name yet or adds a new one. Two changes stay with the organiser: the lineup of a match that has finished, and the name of a team member who already has one.
 
 Results in self-run mode carry a provenance label. A score entered without a password is tagged "self-reported"; a score entered by an authenticated operator is tagged "admin". Officiated mode always produces "admin" results.
 

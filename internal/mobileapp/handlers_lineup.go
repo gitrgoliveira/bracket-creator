@@ -209,7 +209,12 @@ func findRoundLineup(lineups map[string]domain.TeamLineup, teamID string, round 
 // `*state.Store` satisfies the first three interfaces (TeamLineupStore +
 // CompetitionStore + CompetitionTransactor); the SSE hub satisfies
 // Broadcaster and is wired separately in production.
-func RegisterLineupHandlers(r *gin.RouterGroup, store TeamLineupStore, comps CompetitionStore, tx CompetitionTransactor, hub Broadcaster) {
+//
+// The match lineup PUT is public in a self-run tournament: the public score
+// sheet saves it when a competitor names a bout's fighter (bc-dhas).
+// `tl`/`verifier` tell an anonymous caller apart (selfRunAnonymous), who may
+// not change the lineup of a match that has finished (see the PUT).
+func RegisterLineupHandlers(r *gin.RouterGroup, store TeamLineupStore, comps CompetitionStore, tx CompetitionTransactor, hub Broadcaster, tl TournamentLoader, verifier PasswordVerifier) {
 	r.PUT("/competitions/:id/teams/:tid/lineups/:round", func(c *gin.Context) {
 		compID, teamID, round, ok := parseLineupParams(c)
 		if !ok {
@@ -343,6 +348,10 @@ func RegisterLineupHandlers(r *gin.RouterGroup, store TeamLineupStore, comps Com
 			Positions:     req.Positions,
 			MemberIDs:     req.MemberIDs,
 		}
+		anonymous, ok := selfRunAnonymous(c, tl, verifier)
+		if !ok {
+			return
+		}
 
 		type httpErr struct {
 			status int
@@ -368,6 +377,31 @@ func RegisterLineupHandlers(r *gin.RouterGroup, store TeamLineupStore, comps Com
 					body:   gin.H{"error": "competition is not configured for team play (teamSize must be > 0)"},
 				}
 				return nil
+			}
+			// An anonymous self-run caller writes from the public score sheet,
+			// so the score path's rule holds: the match must exist, and once it
+			// has finished its lineup is part of the result, which only the
+			// organiser corrects (checkFinalizedUnderTx refuses the same caller
+			// on the result itself). Read under this lock, like that check. An
+			// organiser keeps the always-editable rule.
+			if anonymous {
+				snap, found, err := matchSnapshotOrErr(stx, compID, matchID, "lineup")
+				if err != nil {
+					log.Printf("mobileapp: PUT /competitions/%s/teams/%s/match-lineups/%s: %v", compID, teamID, matchID, err)
+					respErr = &httpErr{status: http.StatusInternalServerError, body: gin.H{"error": "internal error"}}
+					return nil
+				}
+				if !found {
+					respErr = &httpErr{status: http.StatusNotFound, body: gin.H{"error": "match not found"}}
+					return nil
+				}
+				if isMatchFinalized(snap.Status) {
+					respErr = &httpErr{status: http.StatusConflict, body: gin.H{
+						"error":   "result_finalized",
+						"message": "This match has finished, so its lineup can no longer be changed. Contact the tournament organizer to correct it.",
+					}}
+					return nil
+				}
 			}
 			if err := stx.SetTeamLineup(compID, lineup, teamSize); err != nil {
 				// Domain validation errors ("team_lineup:" prefix) are 400; a

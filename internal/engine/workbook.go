@@ -2,6 +2,10 @@ package engine
 
 import (
 	"fmt"
+	"maps"
+	"sort"
+	"strconv"
+	"strings"
 
 	excelize "github.com/xuri/excelize/v2"
 
@@ -187,6 +191,13 @@ func (e *Engine) RenderCompetitionWorkbook(
 		if err != nil {
 			return nil, nil, fmt.Errorf("render workbook: %w", err)
 		}
+		// A knockout-only draw's first-round entrants are competitors, not pool
+		// places: point each at its name on the data sheet, as the CLI knockout
+		// does, or it prints as a broken ''! reference. Added after the Tree
+		// pages, which print those leaves as plain names.
+		if len(namesToPrintPlayers) > 0 {
+			maps.Copy(matchWinners, helper.ConvertPlayersToWinners(namesToPrintPlayers, false, playerCoords))
+		}
 		helper.PrintEliminationWithBronze(f, matchWinners, eliminationMatchRounds, comp.TeamBoutRows(),
 			plan, comp.Engi, hasBronze)
 	} else if comp.IsKnockoutEnabled() && bracketHasKnockoutContent(bracket) {
@@ -303,4 +314,87 @@ func bracketHasKnockoutContent(bracket *state.Bracket) bool {
 		}
 	}
 	return false
+}
+
+// AttachPoolMatches rebuilds each pool's Matches from the stored pool results,
+// the ONE source both workbook exports draw the Pool Matches grid from.
+// pools.csv (Store.LoadPools) records pool membership only, so the grid must
+// never rely on a Matches slice an earlier call happened to leave in the
+// store's cache: that one is gone after a restart, and the blank template used
+// to lose every match block with it. Any Matches already on pools is replaced.
+//
+// Because an unresolvable match is SKIPPED (see below), pool.Matches can be
+// non-contiguous relative to the stored "<Pool>-<suffix>" IDs, so this returns
+// poolOrdinals: poolName -> the original numeric suffix of each KEPT match, in
+// grid order. The results overlays use poolOrdinals[pool][i] to rebuild the
+// result ID for grid row i, rather than assuming row i == suffix i. Tiebreak/
+// daihyosen results (non-numeric suffix, e.g. "Pool A-DH-0") are skipped.
+//
+// Each side is resolved to its pool Player by the authoritative SideAID/SideBID
+// UUID ONLY (operator ruling bc-pnum): a pool-matches.csv row and a pools.csv
+// Player both carry an id field, so there is no name fallback. A row with no
+// id for a side, or an id this pool's own roster does not carry, resolves to
+// no Player at all and the match is skipped below.
+func AttachPoolMatches(pools []helper.Pool, matchResults []state.MatchResult) map[string][]int {
+	poolOrdinals := make(map[string][]int, len(pools))
+	for pi := range pools {
+		p := &pools[pi]
+		prefix := p.PoolName + "-"
+
+		type idxRes struct {
+			idx int
+			mr  state.MatchResult
+		}
+		var mine []idxRes
+		for _, mr := range matchResults {
+			if !strings.HasPrefix(mr.ID, prefix) {
+				continue
+			}
+			n, err := strconv.Atoi(mr.ID[len(prefix):])
+			if err != nil {
+				continue // tiebreak/daihyosen or malformed suffix
+			}
+			mine = append(mine, idxRes{n, mr})
+		}
+		sort.Slice(mine, func(i, j int) bool { return mine[i].idx < mine[j].idx })
+
+		byID := make(map[string]*helper.Player, len(p.Players))
+		for i := range p.Players {
+			pl := &p.Players[i]
+			if pl.ID != "" {
+				byID[pl.ID] = pl
+			}
+		}
+		// ID-only (operator ruling bc-pnum): the side UUID (SideAID/SideBID
+		// from pool-matches.csv) is the only resolution path. Names are not
+		// unique within a competition (same name, different dojo is
+		// allowed), so a name-only lookup could attach the wrong Player and
+		// mislabel the grid; an empty or foreign id simply resolves to nil.
+		resolve := func(id string) *helper.Player {
+			if id == "" {
+				return nil
+			}
+			return byID[id]
+		}
+
+		p.Matches = make([]helper.Match, 0, len(mine))
+		ords := make([]int, 0, len(mine))
+		for _, ir := range mine {
+			sideA := resolve(ir.mr.SideAID)
+			sideB := resolve(ir.mr.SideBID)
+			// A side that resolves to no pool member (e.g. a participant removed
+			// after the match was recorded, or partially-written state) would be a
+			// nil *Player, which PrintPoolMatches dereferences unconditionally and
+			// panics on. Skip the unresolvable match: the skeleton row is simply left
+			// without an overlaid score, consistent with the frozen-snapshot semantics.
+			// The skip is why we track the original ordinal separately below.
+			if sideA == nil || sideB == nil {
+				continue
+			}
+			p.Matches = append(p.Matches, helper.Match{SideA: sideA, SideB: sideB})
+			ords = append(ords, ir.idx)
+		}
+		poolOrdinals[p.PoolName] = ords
+	}
+	return poolOrdinals
 }

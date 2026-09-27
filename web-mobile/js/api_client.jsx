@@ -2103,6 +2103,12 @@ function parseSkippedCompetitionsHeader(headerValue) {
     }, []);
 }
 
+// Strict === false: a body that does not SAY it is unsaved is a lineup, so
+// a stub/older-shape response with no `saved` field at all still resolves
+// as a lineup rather than being swallowed. Shared by fetchTeamLineup and
+// fetchMatchLineup.
+const lineupOrNull = (body) => (body.saved === false ? null : body);
+
 const API = {
     async fetchTournament() {
         const res = await fetch('/api/viewer/tournament');
@@ -3398,16 +3404,9 @@ const API = {
         }
         return res.json();
     },
-    // T129/T130: per-round team lineups (FR-040). GET always answers 200
-    // when the competition exists; a round with nothing saved answers with
-    // `saved: false` and empty positions rather than 404 (bc-k404: a lineup
-    // either exists or it doesn't, and empty is a normal state, not a
-    // missing resource). This is the ONE place that turns `saved: false`
-    // into null -- callers that read null as "nothing submitted"
-    // (isMatchOverride, pickCopySource) would otherwise misread an
-    // empty-but-saved lineup as unsaved. PUT replaces the lineup. DELETE
-    // clears it so an operator can revise. A 404 now means the competition
-    // itself does not exist and throws like any other error.
+    // The GET answers saved: false when nothing is stored; lineupOrNull
+    // makes that null ("blank, editable"). A 404 means the competition does
+    // not exist and throws. PUT replaces; DELETE clears.
     // opts.fallback: best-effort resolution for match-scoring surfaces: when
     // the exact round has nothing saved the server falls back to the
     // closest saved round (highest <= requested, else highest overall). The
@@ -3421,10 +3420,7 @@ const API = {
             throw new Error(err.error || "Failed to load lineup");
         }
         const body = await res.json();
-        // Strict === false: a body that does not SAY it is unsaved is a
-        // lineup, so a stub/older-shape response with no `saved` field at
-        // all still resolves as a lineup rather than being swallowed.
-        return body.saved === false ? null : body;
+        return lineupOrNull(body);
     },
     // memberIds (bc-tmid pass 3) is optional and keyed by the same position
     // as positions: the squad member id half of a lineup, sent alongside
@@ -3567,7 +3563,7 @@ const API = {
             throw new Error(err.error || "Failed to load match lineup");
         }
         const body = await res.json();
-        return body.saved === false ? null : body;
+        return lineupOrNull(body);
     },
     // memberIds (bc-pnum gap closure) is optional and keyed by the same
     // position as positions, exactly like putTeamLineup's own memberIds
@@ -3646,7 +3642,10 @@ const API = {
             const err = await res.json().catch(() => ({}));
             throw new Error(err.error || "Failed to add daihyosen");
         }
-        return res.json();
+        // The handler responds with an envelope ({ result: MatchResult }); unwrap
+        // it the same way removeDaihyosen/removeKachinukiBout do.
+        const body = await res.json().catch(() => ({}));
+        return body.result ?? body;
     },
     // T141: remove an unscored daihyosen placeholder from a knockout team match.
     // Returns the updated MatchResult on 200. Throws on 404 (no daihyosen or

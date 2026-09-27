@@ -207,7 +207,7 @@ function middleMark(decision, encho) {
 
 // joinSp: join a score fragment and a result mark with a space, skipping
 // empties ("M" + "Ht" → "M Ht", "" + "Kiken" → "Kiken"). The JS twin of
-// joinSp in internal/export/suffix.go.
+// domain.JoinNonEmpty in internal/domain/result_marks.go.
 const joinSp = (a, b) => [a, b].filter(Boolean).join(" ");
 
 // placeMarks: resolve sideMarks onto the two display slots — the winner's

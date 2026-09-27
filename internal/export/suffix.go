@@ -55,20 +55,6 @@ func SideMarksLR(decision string, decidedByHantei bool, att domain.WinnerAttribu
 	return helper.WhiteLeft(aMark, bMark)
 }
 
-// joinSp joins two display fragments with a single space, skipping empties, so
-// a composed suffix never carries a leading, trailing, or doubled space. The JS
-// mirror does the same job with [...].filter(Boolean).join(" ").
-func joinSp(a, b string) string {
-	switch {
-	case a == "":
-		return b
-	case b == "":
-		return a
-	default:
-		return a + " " + b
-	}
-}
-
 // enchoLabel renders the overtime marker for an encho block: "" when no
 // overtime ran, "(E)" otherwise — always bare, never a count. A one-line
 // delegate to domain.EnchoLabel; see its doc comment for the full rule

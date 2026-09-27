@@ -386,17 +386,10 @@ export function MatchViewerModal({ match, onClose, tournament, compId: defaultCo
       onSubmit: async (patch) => {
         try {
           const res = await window.API.recordScore(scoringMatch.compId || defaultCompId, scoringMatch.id, patch, "", scoringMatch);
-          // bc-dhas: writeKeepsEditorOpen is the one rule every closing host
-          // asks (bc-plcl) -- keep the editor open for a write that did not
-          // land (the not-saved banner, as before) AND for a running write
-          // with no winner (Start, every autosave), closing only when a
-          // landed write ends the match. This surface used to ask
-          // writeDidNotLand alone, so a landed Start or a landed autosaved
-          // point closed the editor AND the match card, dumping the operator
-          // straight back to the home page mid-match. This matters more here
-          // than anywhere else: the public self-run surface has no toast, so
-          // the not-saved banner is the ONLY way a refused/queued write is
-          // ever reported.
+          // Close only when a landed write ends the match (writeKeepsEditorOpen,
+          // the rule every closing host asks). Start, an autosave, or a write
+          // that did not land keeps the editor open; the last shows its
+          // not-saved banner, the only report this toast-less surface has.
           if (writeKeepsEditorOpen(patch, res)) return res;
           setScoringMatch(null);
           onClose();

@@ -150,6 +150,28 @@ func requireValidCompID(c *gin.Context) (string, bool) {
 	return id, true
 }
 
+// requireExistingCompetition 404s when compID names no competition, and
+// 500s on an unreadable config.md. compID has already passed
+// requireValidCompID (format only), so this is the existence check that
+// turns a bad id into "competition not found" instead of falling through
+// to a store write that would fail with a bare, unmappable I/O error (no
+// competition directory to write team-members.yaml into) -- or, for the
+// public lineup GETs (bc-k404), instead of a lineup read silently
+// answering an empty "nothing saved" lineup for a competition that does
+// not exist at all.
+func requireExistingCompetition(c *gin.Context, comps CompetitionStore, compID string) bool {
+	comp, err := comps.LoadCompetition(compID)
+	if err != nil {
+		internalError(c, err)
+		return false
+	}
+	if comp == nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "competition not found"})
+		return false
+	}
+	return true
+}
+
 // RequireElevatedPassword gates destructive operations behind a SECOND
 // password supplied in the X-Admin-Password header (spec 004 / mp-e21). It
 // is layered on top of AuthMiddleware, the route group already verified the

@@ -12,7 +12,9 @@ import (
 // source: export.MiddleMark (state.EnchoMetadata-typed) and the Kachinuki
 // Detail sheet both delegate here, so this table is the one place the rule
 // itself is asserted; the delegates only need to prove they call through
-// (see internal/export/middle_closed_set_test.go).
+// (see internal/export/suffix_test.go's TestMiddleMark for the
+// *state.EnchoMetadata adapter, and internal/export/middle_closed_set_test.go
+// for the closed-set sweep across every decision and encho shape).
 func TestMiddleMark(t *testing.T) {
 	t.Parallel()
 

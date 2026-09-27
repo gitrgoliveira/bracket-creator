@@ -108,6 +108,14 @@ func IsKikenDecisionStr(s string) bool {
 	return IsKikenDecision(Decision(s))
 }
 
+// IsDrawDecisionStr reports whether the decision is a draw (hikiwake). The
+// ONE shared check: domain.MiddleMark's centre-mark switch and
+// state.IsDraw's wire-string check both delegate here rather than each
+// comparing against the wire value by hand.
+func IsDrawDecisionStr(s string) bool {
+	return s == string(DecisionHikiwake)
+}
+
 // IsDefaultWinDecisionStr reports whether the decision awards the match
 // points without a technique — the "default win" class (any kiken,
 // fusenpai, or fusensho) whose awarded points record as maru. These

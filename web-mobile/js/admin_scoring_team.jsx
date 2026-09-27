@@ -21,7 +21,6 @@ import {
   TermAS,
   GlossaryHintAS,
   resolveDecisionPassword,
-  assertRunningWritePersisted,
   makeSubmitDecision,
   initialEnchoPeriodsForMatch,
   daihyosenEnchoFields,
@@ -52,7 +51,7 @@ import { SideLabel } from './side_cell.jsx';
 // Imported from the leaf, not read off `window`, for the same reason
 // admin_scoring_shared.jsx does it: write_result.jsx is import-only, and this
 // editor is ES-imported by hosts and tests that never load api_client.
-import { notLandedBanner } from './write_result.jsx';
+import { notLandedBanner, writeDidNotLand } from './write_result.jsx';
 
 // boutMiddle is THE single source for a bout's centre value (vs/X/(E)/(DH));
 // the editor derives its per-bout middle from it rather than restating the
@@ -1066,40 +1065,24 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
   // T141: remove an unscored daihyosen placeholder. Defined at component
   // level so both the hantei row and any other affordance can call it.
   const onRemoveDaihyosen = async () => {
-    // C1/bc-dhas: cancel a pending debounced autosave FIRST, before deciding
-    // whether a save is owed here. hadPending catches a take-back made
-    // before the host's own refetch (isDirty alone would miss it, since the
-    // local row can still read equal to what THIS editor was last shown);
-    // isDirty catches an autosave already sent but not yet adopted back into
-    // serverSubs.
     const hadPending = cancelScoringDebounce();
     setEditorErr("");
     setDaihyosenBusy(true);
     try {
       if (m.status === "running" && (hadPending || isDirty)) {
-        // Flush the pending edit before the row it may be scoring
-        // disappears server-side: without this, an edit made just before
-        // Remove is lost, or a later stale write resurrects the row the
-        // operator just removed (R1/R2). Same "queued save aborts" rule the
-        // add path uses; the server's own guard (daihyosen_scored) stays the
-        // judge of whether removal is safe, never an overwrite from here.
-        const saveRes = await window.API.recordScore(m.compId, m.id, buildPatch("running"), resolveDecisionPassword(password), m);
-        assertRunningWritePersisted(saveRes);
+        if (!(await saveRunningSheet())) return;
       }
       const res = await window.API.removeDaihyosen(m.compId, m.id, resolveDecisionPassword(password));
       if (!mountedRef.current) return;
       // Adopt the shorter log at once rather than closing (operator decision
       // 2026-09-27: the editor stays open after Add or Remove on every host).
-      if (res && Array.isArray(res.subResults)) {
-        setMatchOverride({ ...match, subResults: res.subResults });
-      }
+      adoptServerSubs(res && res.subResults);
     } catch (e) {
       if (!mountedRef.current) return;
       const msg = String(e?.message || "");
       let userMsg = msg;
       if (msg === "daihyosen_scored") userMsg = "Clear the daihyosen score before removing it";
       else if (msg === "no_daihyosen") userMsg = "No daihyosen to remove";
-      else if (msg === "score_not_synced") userMsg = "Couldn't save the current scores (offline or server busy). Try again once the connection is back.";
       setEditorErr(userMsg);
     } finally {
       if (mountedRef.current) setDaihyosenBusy(false);
@@ -1982,7 +1965,7 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
       const nextSubs = updated && Array.isArray(updated.subResults)
         ? updated.subResults
         : (match.subResults || []).filter(s => s.position !== pos);
-      setMatchOverride({ ...match, subResults: nextSubs });
+      adoptServerSubs(nextSubs);
       // The server strips exactly the trailing bout at `pos`, so the new log
       // ceiling is pos-1; keep the teamSize floor (clampPositionCount).
       setSubsByOperator(prev => resizeSubsTo(prev, clampPositionCount(pos - 1, manualMaxPos)));
@@ -2633,6 +2616,28 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
     // write is ultimately refused.
     if (mountedRef.current && res && res.queued === true) setPendingWrite(true);
     return res;
+  };
+
+  // Raw server rows are safe to adopt directly: the only per-sub field the
+  // client derives is decidedByHantei, which none of these responses carry.
+  const adoptServerSubs = (subResults) => {
+    if (Array.isArray(subResults)) setMatchOverride({ ...match, subResults });
+  };
+
+  // Save the sheet first through doSubmit (it cancels the pending autosave,
+  // whose snapshot this save carries) before an add/remove changes the bout
+  // log a stale write could otherwise race or resurrect. Returns false when
+  // the caller must stop without sending that request: doSubmit/onSubmit
+  // returned nothing (a refused write threw, already reported by the host)
+  // or the write only queued or was refused (writeDidNotLand); either way
+  // the operator already has their report, from the banner just set or from
+  // doSubmit's own pending state.
+  const saveRunningSheet = async () => {
+    const res = await doSubmit(() => onSubmit(buildPatch("running")));
+    if (!res) return false;
+    const b = notLandedBanner(res);
+    if (b) setWriteFailed(b);
+    return !writeDidNotLand(res);
   };
 
   // Mirrors ScoreEditorModal.isDirty: "has the OPERATOR changed anything",
@@ -3608,45 +3613,19 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
             const anyBoutDecided = subTotals.some(t => t.aTotal > 0 || t.bTotal > 0 || t.draw || t.winner !== null);
             const teamTied = anyBoutDecided && ivA === ivB && pwA === pwB;
             const onDaihyosen = async () => {
-              // C1/bc-dhas: cancel a pending debounced autosave FIRST, the
-              // same rule doSubmit follows before an explicit submit. The
-              // save two lines down carries whatever snapshot that timer
-              // would have sent, so nothing of the operator's is lost;
-              // without this, a timer armed by the tap that led here fires
-              // AFTER the POST with a patch built before the daihyosen row
-              // existed, and the server drops it (preserveSubHantei never
-              // re-appends a dropped position -1 row).
-              cancelScoringDebounce();
+              // Save the sheet first through doSubmit (it cancels the
+              // pending autosave, whose snapshot this save carries), then
+              // add the row and adopt the server's bout log.
               setEditorErr("");
               setDaihyosenBusy(true);
               try {
-                // Persist the operator's current bout scores first (status
-                // stays "running"); the backend derives the tie from the
-                // saved SubResults, so a freshly-scored-but-unsaved tie
-                // would otherwise be rejected as not_tied.
-                //
-                // recordScore returns { queued: true } when the write could
-                // only be enqueued (offline / retryable 5xx) instead of being
-                // confirmed by the server. Daihyosen is a hard prerequisite on
-                // that persistence, so a queued (unconfirmed) save MUST abort the
-                // flow: otherwise recordDaihyosen runs against the stale
-                // server-side SubResults. The queued write still delivers in the
-                // background, so a retry succeeds once the connection is back.
-                const saveRes = await window.API.recordScore(m.compId, m.id, buildPatch("running"), resolveDecisionPassword(password), m);
-                assertRunningWritePersisted(saveRes); // abort if the save was only queued, not server-confirmed
+                if (!(await saveRunningSheet())) return;
                 const res = await window.API.recordDaihyosen(m.compId, m.id, resolveDecisionPassword(password));
                 if (!mountedRef.current) return;
                 // Adopt the new row at once rather than closing (operator
                 // decision 2026-09-27: the editor stays open after Add or
-                // Remove on every host). Same matchOverride shim
-                // removeCurrentBout uses; it clears itself once the parent's
-                // own refresh catches up (the content-keyed effect above).
-                // Raw server rows are safe here: the only per-sub field the
-                // client derives is decidedByHantei, which none of these can
-                // carry.
-                if (res && res.result && Array.isArray(res.result.subResults)) {
-                  setMatchOverride({ ...match, subResults: res.result.subResults });
-                }
+                // Remove on every host).
+                adoptServerSubs(res && res.subResults);
               } catch (e) {
                 if (!mountedRef.current) return;
                 const msg = String(e?.message || "");
@@ -3654,7 +3633,6 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
                 if (msg === "not_tied") userMsg = "Daihyosen needs a tie on IV and PW (this encounter already has a winner)";
                 else if (msg === "pool_match") userMsg = "Daihyosen is only for knockout matches";
                 else if (msg === "insufficient_eligibility") userMsg = "Not enough eligible competitors for a representative bout";
-                else if (msg === "score_not_synced") userMsg = "Couldn't save the current scores (offline or server busy). Try again once the connection is back.";
                 else if (!userMsg) userMsg = "Could not add a representative bout";
                 setEditorErr(userMsg);
               } finally {

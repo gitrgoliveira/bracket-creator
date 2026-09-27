@@ -8,12 +8,8 @@ package domain
 // Matches / Elimination Matches sheets (internal/export, which already
 // imports domain) and the Kachinuki Detail sheet (built by
 // internal/engine/kachinuki_export.go, which imports domain but not export --
-// export imports engine, so the reverse would cycle). export.MiddleMark,
-// export.enchoLabel, export.SideMarks and export.SideMarksLR are one-line
-// delegates to the functions here, kept so their existing exported
-// signatures (some taking *state.EnchoMetadata, which domain may not import)
-// and their pinning tests (middle_closed_set_test.go, suffix_test.go,
-// testdata/encho_labels.json) stay exactly where they are.
+// export imports engine, so the reverse would cycle). internal/export keeps
+// thin adapters over these.
 
 // MiddleMark returns the ONE mark the centre "vs" cell may carry for a
 // completed match. The middle column of a score sheet can only ever read:
@@ -37,7 +33,7 @@ package domain
 // middleMark()/formatIpponsScore in web-mobile/js/bracket.jsx.
 func MiddleMark(decision string, enchoOn bool) string {
 	switch {
-	case decision == string(DecisionHikiwake):
+	case IsDrawDecisionStr(decision):
 		return "X"
 	case decision == string(DecisionDaihyosen):
 		return "(DH)"
@@ -86,7 +82,7 @@ func SideMarks(decision string, decidedByHantei bool) (winnerMark, loserMark str
 		winnerMark = "Fus."
 	}
 	if decidedByHantei {
-		winnerMark = joinResultMarks(winnerMark, "Ht")
+		winnerMark = JoinNonEmpty(winnerMark, HanteiMark)
 	}
 	return winnerMark, loserMark
 }
@@ -94,10 +90,12 @@ func SideMarks(decision string, decidedByHantei bool) (winnerMark, loserMark str
 // SideMarksAB resolves SideMarks into (markA, markB) SIDE order -- SideA's
 // mark first, SideB's second, NOT the sheet's White-left/Red-right column
 // order. Placing the pair into sheet columns is an Excel-layout concern
-// (helper.WhiteLeft), applied by each caller AFTER this function: see
-// export.SideMarksLR (the main sheets) and the Kachinuki Detail bout writer
-// (internal/helper/excel_kachinuki.go), which both call this and then
-// White-left the result.
+// (helper.WhiteLeft), applied by each caller AFTER this function returns:
+// export.SideMarksLR (the main sheets) White-lefts immediately, while
+// internal/engine/kachinuki_export.go's buildKachinukiDetail calls this and
+// stores the SIDE-ordered pair on the bout -- the White-left step for the
+// Kachinuki Detail sheet runs later, in the helper writer
+// (internal/helper/excel_kachinuki.go's writeKachinukiBoutRow).
 //
 // att carries the ids and names of the record being marked: a pool or
 // bracket row's SideAID/SideBID/WinnerID, or a sub-bout's member ids
@@ -123,13 +121,11 @@ func SideMarksAB(decision string, decidedByHantei bool, att WinnerAttribution) (
 	}
 }
 
-// joinResultMarks joins two result-mark fragments with a single space,
-// skipping empties, so a composed mark never carries a leading, trailing, or
-// doubled space. A private twin of export.joinSp (which composes whole CELL
-// strings -- score + mark + foul triangle -- for that package's own callers,
-// not just two marks), kept separate rather than shared so domain gains no
-// dependency on export's wider cell-composition helper.
-func joinResultMarks(a, b string) string {
+// JoinNonEmpty joins two display fragments with a single space, skipping
+// empties, so a composed mark or cell never carries a leading, trailing, or
+// doubled space. The ONE shared join helper for this job: internal/helper
+// (excel_kachinuki.go) and internal/export (builder.go) both call it.
+func JoinNonEmpty(a, b string) string {
 	switch {
 	case a == "":
 		return b

@@ -135,13 +135,9 @@ export function useDebouncedRunningWrite({ isRunningRef, buildPatchRef, onSubmit
   // Hantei / Decision) so the queued timer can't fire afterward, and before
   // closing on the operator's Discard, so the unmount does not write what they
   // threw away. Nothing of this hook's is left pending then, so the pending
-  // edit is released too.
+  // edit is released too. Returns whether an edit was pending, so a caller
+  // can tell whether a save is still owed (onRemoveDaihyosen).
   const cancelDebounce = () => {
-    // bc-dhas: report whether a timer was actually pending, so a caller that
-    // must decide "is there an unsaved edit" (onRemoveDaihyosen) can ask this
-    // instead of re-deriving it. Every other caller (doSubmit, leaveEditor's
-    // Discard branch, the individual editor's own C1 submit) still just
-    // calls this for effect and ignores the return value.
     const hadPending = clearTimer();
     if (hadPending) notePending(false);
     return hadPending;

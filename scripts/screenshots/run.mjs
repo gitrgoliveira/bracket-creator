@@ -241,9 +241,13 @@ async function runRecipe(browser, recipe, ctx) {
   page.on('console', (msg) => {
     if (msg.type() !== 'error') return;
     let text = `console.error ${msg.text().split('\n')[0]}`;
-    if (text.startsWith('console.error Failed to load resource')) {
-      text += ` (${pathOf(msg.location().url)})`;
-    }
+    // Append the source path whenever the browser gives us one, rather than
+    // sniffing for Chromium's English "Failed to load resource" wording: that
+    // string is neither stable across a Chromium version bump nor present in
+    // a localised browser, and either would silently drop back to a
+    // URL-less line.
+    const url = msg.location().url;
+    if (url) text += ` (${pathOf(url)})`;
     pageFaults.push(text);
   });
   // page.video() has to be taken while the page is alive: closing the context

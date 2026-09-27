@@ -171,10 +171,11 @@ being photographed. Two severities, treated differently on purpose:
   screenshot would record that as though it were the product working.
 - A **console error or a failed request** (HTTP status 400 and above) is
   reported after the run but does not fail it, named by method and route (a
-  "Failed to load resource" console line carries its path too). No request on
-  a capture surface is expected to fail: the team lineup reads that used to
-  answer 404 until a lineup was saved now answer an empty lineup instead, so a
-  line here is a finding, not noise.
+  console error carries its source path too, whenever the browser reports
+  one, rather than only when its text says so). No request on a capture
+  surface is expected to fail: the team lineup reads that used to answer 404
+  until a lineup was saved now answer an empty lineup instead, so a line here
+  is a finding, not noise.
 
 A run with any failed capture exits non-zero, so the target can gate a script.
 

@@ -365,36 +365,6 @@ function resolveDecisionPassword(propPassword) {
   return propPassword || "";
 }
 
-// Guard for actions with a HARD prerequisite on server-side persistence
-// (e.g. the daihyosen pre-save). window.API.recordScore hands back one of four
-// shapes, and only two of them mean the dependent request may proceed:
-//
-//   MatchResult      confirmed by the server. Proceed.
-//   { stale: true }  a SAME-SESSION out-of-order write. The server already
-//                    holds this operator's own equal-or-newer state, so a
-//                    dependent read sees their own later intent. Proceed.
-//   { queued: true } never reached the server (offline / retryable 5xx). ABORT.
-//   { applied:false} reached the server and the timestamp guard DROPPED it
-//                    because a DIFFERENT writer's newer result won (bc-lww1).
-//                    ABORT.
-//
-// The last two are exactly what writeDidNotLand owns, so this asks it rather
-// than re-spelling the test — this was the SIXTH site of that question and the
-// one the original five-site conversion missed, which is also the reason the
-// rule now lives in a leaf module instead of at each caller.
-//
-// The stale/superseded split is the subtle part, and is why this cannot simply
-// abort on "not a MatchResult": `stale` is the operator's OWN newer state, so
-// a dependent read sees their later intent and is safe, whereas `applied:false`
-// is a different writer's state this operator has never seen, so a dependent
-// request built on it acts on a scoreline that was never on their screen.
-//
-// Throws "score_not_synced" so the caller aborts rather than running its
-// dependent request against server state it did not produce.
-function assertRunningWritePersisted(saveRes) {
-  if (writeDidNotLand(saveRes)) throw new Error("score_not_synced");
-}
-
 // T093/T094: build the /decision POST body. Pure helper so we can pin the
 // wire shape (decision/decisionBy/decisionReason/encho/force) against a
 // moving server contract. `force` is the T103 override flag used when the
@@ -1843,7 +1813,6 @@ export {
   TermAS,
   GlossaryHintAS,
   resolveDecisionPassword,
-  assertRunningWritePersisted,
   buildDecisionBody,
   submitDecisionRequest,
   makeSubmitDecision,

@@ -33,9 +33,7 @@
 // carries the encounter beyond the starting lineup -- is silently skipped
 // from the row display. The IV/PW summary (state.TeamResultFrom) is not
 // row-bound: it still counts every bout, including the ones the grid
-// dropped. Whether the main sheets should show every kachinuki bout is not
-// decided here (bc-kdsc fold-in g); this paragraph only corrects what the
-// current code does.
+// dropped.
 //
 // Bout-by-bout detail is rendered on a separate "Kachinuki Detail" sheet
 // (helper.SheetKachinukiDetail). See internal/helper/excel_kachinuki.go,
@@ -454,17 +452,16 @@ func printSinglePool(f *excelize.File, sheetName string, pool Pool, startCol int
 				poolRow++
 			}
 
-			leftSide, rightSide := WhiteLeft(playerRef(match.SideA.Name, pCoords[playerCoordKey(*match.SideA)]), playerRef(match.SideB.Name, pCoords[playerCoordKey(*match.SideB)]))
+			// leftP/rightP are the players occupying the LEFT (Shiro) and
+			// RIGHT (Aka) columns; reused below for the team summary rows too.
+			leftP, rightP := WhiteLeft(match.SideA, match.SideB)
+			leftSide := playerRef(leftP.Name, pCoords[playerCoordKey(*leftP)])
+			rightSide := playerRef(rightP.Name, pCoords[playerCoordKey(*rightP)])
 
 			poolEntryWithStyle(startColName, poolRow, endColName, f, sheetName,
 				leftSide,
 				rightSide,
 				styles.text)
-
-			// leftP/rightP are the players occupying the LEFT (Shiro) and
-			// RIGHT (Aka) columns, matching the entrant cells WhiteLeft
-			// placed above; reused below for the team summary rows too.
-			leftP, rightP := WhiteLeft(match.SideA, match.SideB)
 
 			if teamMatches == 0 {
 				scoreRow := poolRow
@@ -1662,47 +1659,28 @@ func printSingleEliminationMatch(f *excelize.File, sheetName string, elimination
 	matchHeaderWithStyles(f, sheetName, startColName, matchRow, middleColName, endColName, styles.redHeader, styles.text, styles.whiteHeader, engi)
 	matchRow++
 
-	//////////////////////////////////////
-	// eliminationMatch.Left checks if it is a pool winner
+	// entrant builds the CONCATENATE formula naming n's incoming entrant: a
+	// pool winner leaf ("Pool A-1st", or a bare seed reference for a
+	// non-pool leaf) or the winner of an earlier bracket match ("M <n>"),
+	// qualified with its sheet name when that match printed on a different
+	// sheet. Left and Right resolve identically, only the node differs.
 	startCell = startColName + fmt.Sprint(matchRow)
-	var akaFormula, shiroFormula string
-
-	if eliminationMatch.Left.LeafNode && len(eliminationMatch.Left.LeafVal) > 0 {
-		if strings.Contains(eliminationMatch.Left.LeafVal, "Pool") {
-			akaFormula = fmt.Sprintf("CONCATENATE(\"%s \",'%s'!%s)", eliminationMatch.Left.LeafVal, poolMatchWinners[eliminationMatch.Left.LeafVal].sheetName, poolMatchWinners[eliminationMatch.Left.LeafVal].cell)
-		} else {
-			akaFormula = fmt.Sprintf("'%s'!%s", poolMatchWinners[eliminationMatch.Left.LeafVal].sheetName, poolMatchWinners[eliminationMatch.Left.LeafVal].cell)
-		}
-	} else {
-		winnerFromMatch := fmt.Sprintf("M %d", eliminationMatch.Left.matchNum)
-		mw := matchWinners[winnerFromMatch]
-		if mw.sheetName == sheetName {
-			akaFormula = fmt.Sprintf("CONCATENATE(\"%s \",%s)", winnerFromMatch, mw.cell)
-		} else {
-			akaFormula = fmt.Sprintf("CONCATENATE(\"%s \",'%s'!%s)", winnerFromMatch, mw.sheetName, mw.cell)
-		}
-	}
-
-	//////////////////////////////////////
-	// eliminationMatch.Right checks if it is a pool winner
 	endCell = endColName + fmt.Sprint(matchRow)
-	if eliminationMatch.Right.LeafNode && len(eliminationMatch.Right.LeafVal) > 0 {
-		if strings.Contains(eliminationMatch.Right.LeafVal, "Pool") {
-			shiroFormula = fmt.Sprintf("CONCATENATE(\"%s \",'%s'!%s)", eliminationMatch.Right.LeafVal, poolMatchWinners[eliminationMatch.Right.LeafVal].sheetName, poolMatchWinners[eliminationMatch.Right.LeafVal].cell)
-		} else {
-			shiroFormula = fmt.Sprintf("'%s'!%s", poolMatchWinners[eliminationMatch.Right.LeafVal].sheetName, poolMatchWinners[eliminationMatch.Right.LeafVal].cell)
+	entrant := func(n *Node) string {
+		if n.LeafNode && len(n.LeafVal) > 0 {
+			if strings.Contains(n.LeafVal, "Pool") {
+				return fmt.Sprintf("CONCATENATE(\"%s \",'%s'!%s)", n.LeafVal, poolMatchWinners[n.LeafVal].sheetName, poolMatchWinners[n.LeafVal].cell)
+			}
+			return fmt.Sprintf("'%s'!%s", poolMatchWinners[n.LeafVal].sheetName, poolMatchWinners[n.LeafVal].cell)
 		}
-	} else {
-		winnerFromMatch := fmt.Sprintf("M %d", eliminationMatch.Right.matchNum)
+		winnerFromMatch := fmt.Sprintf("M %d", n.matchNum)
 		mw := matchWinners[winnerFromMatch]
 		if mw.sheetName == sheetName {
-			shiroFormula = fmt.Sprintf("CONCATENATE(\"%s \",%s)", winnerFromMatch, mw.cell)
-		} else {
-			shiroFormula = fmt.Sprintf("CONCATENATE(\"%s \",'%s'!%s)", winnerFromMatch, mw.sheetName, mw.cell)
+			return fmt.Sprintf("CONCATENATE(\"%s \",%s)", winnerFromMatch, mw.cell)
 		}
+		return fmt.Sprintf("CONCATENATE(\"%s \",'%s'!%s)", winnerFromMatch, mw.sheetName, mw.cell)
 	}
-
-	leftCellValue, rightCellValue := WhiteLeft(akaFormula, shiroFormula)
+	leftCellValue, rightCellValue := WhiteLeft(entrant(eliminationMatch.Left), entrant(eliminationMatch.Right))
 
 	handleExcelError("SetCellFormula", f.SetCellFormula(sheetName, startCell, leftCellValue))
 	handleExcelError("SetCellFormula", f.SetCellFormula(sheetName, endCell, rightCellValue))

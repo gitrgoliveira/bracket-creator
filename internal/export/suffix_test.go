@@ -21,10 +21,11 @@ func encho(periods int) *state.EnchoMetadata {
 func TestMiddleMark(t *testing.T) {
 	t.Parallel()
 
-	// The middle can only ever be "" (template keeps its "vs"), "X", "(E)"
-	// or "(DH)" — one mark, mutually exclusive. X beats (E) because a match
-	// that went to encho cannot end tied; (DH) beats (E) because a daihyosen
-	// bout is one-point sudden death with no overtime.
+	// domain's own TestMiddleMark (result_marks_test.go) pins the closed-set
+	// rule itself (decision priority, the full X/(E)/(DH) matrix); this
+	// table proves only the *state.EnchoMetadata adapter this package adds:
+	// nil, a degenerate zero-period block, and a multi-period block all
+	// collapse to the bare bool domain.MiddleMark expects.
 	tests := []struct {
 		name     string
 		decision string
@@ -32,17 +33,8 @@ func TestMiddleMark(t *testing.T) {
 		want     string
 	}{
 		{name: "fought, no encho", decision: "fought", encho: nil, want: ""},
-		{name: "empty decision, no encho", decision: "", encho: nil, want: ""},
-		{name: "encho win", decision: "fought", encho: encho(1), want: "(E)"},
-		{name: "encho win, multi-period stays bare", decision: "fought", encho: encho(4), want: "(E)"},
 		{name: "zero periods is no encho", decision: "fought", encho: encho(0), want: ""},
-		{name: "tie", decision: "hikiwake", encho: nil, want: "X"},
-		{name: "tie beats stale encho data", decision: "hikiwake", encho: encho(2), want: "X"},
-		{name: "daihyosen", decision: "daihyosen", encho: nil, want: "(DH)"},
-		{name: "daihyosen beats stale encho data (DH bouts have no encho)", decision: "daihyosen", encho: encho(1), want: "(DH)"},
-		{name: "kiken leaves the middle alone", decision: "kiken-voluntary", encho: nil, want: ""},
-		{name: "kiken during overtime keeps the (E) middle", decision: "kiken-voluntary", encho: encho(1), want: "(E)"},
-		{name: "fusenpai leaves the middle alone", decision: "fusenpai", encho: nil, want: ""},
+		{name: "encho win, multi-period stays bare", decision: "fought", encho: encho(4), want: "(E)"},
 	}
 
 	for _, tc := range tests {
@@ -57,36 +49,12 @@ func TestMiddleMark(t *testing.T) {
 func TestSideMarks(t *testing.T) {
 	t.Parallel()
 
-	// Result marks name their competitor: Ht the hantei winner, Kiken the
-	// withdrawer, Fus. the no-show (fusenpai, loser) or the defaulted winner
-	// (fusensho — kept in the export because a spreadsheet has no bout badge).
-	tests := []struct {
-		name       string
-		decision   string
-		hantei     bool
-		wantWinner string
-		wantLoser  string
-	}{
-		{name: "fought", decision: "fought", hantei: false, wantWinner: "", wantLoser: ""},
-		{name: "hantei", decision: "fought", hantei: true, wantWinner: "Ht", wantLoser: ""},
-		{name: "kiken-voluntary", decision: "kiken-voluntary", hantei: false, wantWinner: "", wantLoser: "Kiken"},
-		{name: "kiken-injury", decision: "kiken-injury", hantei: false, wantWinner: "", wantLoser: "Kiken"},
-		{name: "kiken (legacy)", decision: "kiken", hantei: false, wantWinner: "", wantLoser: "Kiken"},
-		{name: "fusenpai marks the no-show loser", decision: "fusenpai", hantei: false, wantWinner: "", wantLoser: "Fus."},
-		{name: "fusensho marks the defaulted winner", decision: "fusensho", hantei: false, wantWinner: "Fus.", wantLoser: ""},
-		{name: "daihyosen is a middle mark, not a side mark", decision: "daihyosen", hantei: false, wantWinner: "", wantLoser: ""},
-		{name: "hikiwake has no side marks", decision: "hikiwake", hantei: false, wantWinner: "", wantLoser: ""},
-	}
-
-	for _, tc := range tests {
-		tc := tc
-		t.Run(tc.name, func(t *testing.T) {
-			t.Parallel()
-			w, l := SideMarks(tc.decision, tc.hantei)
-			assert.Equal(t, tc.wantWinner, w, "winner mark")
-			assert.Equal(t, tc.wantLoser, l, "loser mark")
-		})
-	}
+	// The full rule table lives in domain's own TestSideMarks
+	// (result_marks_test.go); this proves only that export.SideMarks
+	// delegates to domain.SideMarks.
+	w, l := SideMarks("kiken-voluntary", false)
+	assert.Equal(t, "", w, "winner mark")
+	assert.Equal(t, "Kiken", l, "loser mark")
 }
 
 // TestDefaultWinMaruAB pins the display fallback for default wins whose
@@ -237,33 +205,6 @@ func TestFlagsScorePair(t *testing.T) {
 			gotA, gotB := FlagsScorePair(tc.a, tc.b)
 			assert.Equal(t, tc.wantA, gotA, "FlagsScorePair(%d,%d) left", tc.a, tc.b)
 			assert.Equal(t, tc.wantB, gotB, "FlagsScorePair(%d,%d) right", tc.a, tc.b)
-		})
-	}
-}
-
-func TestIpponsScore(t *testing.T) {
-	t.Parallel()
-
-	tests := []struct {
-		name   string
-		ippons []string
-		want   string
-	}{
-		{name: "nil slice", ippons: nil, want: ""},
-		{name: "empty slice", ippons: []string{}, want: ""},
-		{name: "single ippon", ippons: []string{"M"}, want: "M"},
-		{name: "two ippons", ippons: []string{"M", "K"}, want: "MK"},
-		{name: "skips dot placeholders", ippons: []string{"•", "M"}, want: "M"},
-		{name: "skips empty strings", ippons: []string{"", "K"}, want: "K"},
-		{name: "all placeholders", ippons: []string{"•", "•"}, want: ""},
-		{name: "preserves order", ippons: []string{"D", "T", "H"}, want: "DTH"},
-	}
-
-	for _, tc := range tests {
-		tc := tc
-		t.Run(tc.name, func(t *testing.T) {
-			t.Parallel()
-			assert.Equal(t, tc.want, IpponsScore(tc.ippons))
 		})
 	}
 }

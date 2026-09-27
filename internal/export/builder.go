@@ -392,10 +392,7 @@ func overlayPoolScores(f *excelize.File, pools []helper.Pool, resultByID map[str
 					// touches engi flag counts.
 					scoreA, scoreB = DefaultWinMaruAB(
 						IpponsScore(mr.IpponsA), IpponsScore(mr.IpponsB),
-						mr.Decision, mr.Encho, domain.WinnerAttribution{
-							WinnerID: mr.WinnerID, SideAID: mr.SideAID, SideBID: mr.SideBID,
-							Winner: mr.Winner, SideA: mr.SideA, SideB: mr.SideB,
-						})
+						mr.Decision, mr.Encho, mr.Attribution())
 				}
 				writeScoreRowCells(f, sheetName, courtStartCol, excelRow, scoreA, scoreB, mr)
 			}
@@ -572,8 +569,8 @@ func writeScoreRowCells(f *excelize.File, sheetName string, courtStartCol, excel
 	// The outstanding-hansoku ▲ rides the cell's OUTER edge — nearest that
 	// side's name column — per FIK Table 2 (White's ▲ far left, Red's far
 	// right) and matching the scoreboard's placement between name and slots.
-	setCellStr(f, sheetName, colNum(courtStartCol+1), excelRow, joinSp(lFoul, joinSp(leftScore, lMark)))
-	setCellStr(f, sheetName, colNum(courtStartCol+5), excelRow, joinSp(joinSp(rightScore, rMark), rFoul))
+	setCellStr(f, sheetName, colNum(courtStartCol+1), excelRow, domain.JoinNonEmpty(lFoul, domain.JoinNonEmpty(leftScore, lMark)))
+	setCellStr(f, sheetName, colNum(courtStartCol+5), excelRow, domain.JoinNonEmpty(domain.JoinNonEmpty(rightScore, rMark), rFoul))
 	writeMiddleMarkCell(f, sheetName, courtStartCol, excelRow, mr.Decision, mr.Encho)
 }
 
@@ -634,7 +631,7 @@ func setIVCellWithMark(f *excelize.File, sheetName, col string, row, iv int, mar
 		setIntCellDirect(f, sheetName, col, row, iv)
 		return
 	}
-	setCellStr(f, sheetName, col, row, joinSp(fmt.Sprintf("%d", iv), mark))
+	setCellStr(f, sheetName, col, row, domain.JoinNonEmpty(fmt.Sprintf("%d", iv), mark))
 }
 
 // writeTeamSubMatchScores writes each sub-bout's ippon letters onto the team
@@ -713,10 +710,10 @@ func writeTeamSubMatchScores(f *excelize.File, sheetName string, courtStartCol, 
 		lMark, rMark := SideMarksLR(sub.Decision, sub.HanteiDecided(), att)
 		// Outstanding-hansoku ▲ on the cell's outer edge, as in
 		// writeScoreRowCells (FIK Table 2; scoreboard parity).
-		if lScore := joinSp(lFoul, joinSp(leftScore, lMark)); lScore != "" {
+		if lScore := domain.JoinNonEmpty(lFoul, domain.JoinNonEmpty(leftScore, lMark)); lScore != "" {
 			setCellStr(f, sheetName, lVCol, excelRow, lScore)
 		}
-		if rScore := joinSp(joinSp(rightScore, rMark), rFoul); rScore != "" {
+		if rScore := domain.JoinNonEmpty(domain.JoinNonEmpty(rightScore, rMark), rFoul); rScore != "" {
 			setCellStr(f, sheetName, rVCol, excelRow, rScore)
 		}
 
@@ -1041,17 +1038,9 @@ func overlayBracketScores(f *excelize.File, bracketByNum map[int]state.BracketMa
 				// as the pool path (overlayPoolScores) already does — the
 				// mark then rides ONLY through the appended SideMarksLR
 				// suffix, matching the pool cell's "M Ht".
-				// Attributed by the row's own ids, the same triple
-				// writeScoreRowCells passes to SideMarksLR below: the maru
-				// fallback and the result mark compose one cell, so a
-				// same-name pairing must not be able to send them to
-				// different sides.
 				scoreA, scoreB = DefaultWinMaruAB(
 					IpponsScore(mrView.IpponsA), IpponsScore(mrView.IpponsB),
-					bm.Decision, bm.Encho, domain.WinnerAttribution{
-						WinnerID: bm.WinnerID, SideAID: bm.SideAID, SideBID: bm.SideBID,
-						Winner: bm.Winner, SideA: bm.SideA, SideB: bm.SideB,
-					})
+					bm.Decision, bm.Encho, mrView.Attribution())
 			}
 
 			writeScoreRowCells(f, sheetName, courtStartCol, excelRow, scoreA, scoreB, mrView)

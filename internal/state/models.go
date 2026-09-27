@@ -1129,7 +1129,7 @@ const DaihyosenSubPosition = -1
 
 // IsDraw reports whether a match decision string represents a draw.
 func IsDraw(decision string) bool {
-	return decision == DecisionDraw
+	return domain.IsDrawDecisionStr(decision)
 }
 
 type SubMatchResult struct {

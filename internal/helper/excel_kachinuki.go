@@ -39,6 +39,7 @@ import (
 	"fmt"
 	"strconv"
 
+	"github.com/gitrgoliveira/bracket-creator/internal/domain"
 	excelize "github.com/xuri/excelize/v2"
 )
 
@@ -94,15 +95,14 @@ type KachinukiMatchDetail struct {
 // sheet, named by POSITION (never by side letter, since which side sits in
 // which column is WhiteLeft's decision, not this file's). The layout is
 // flexible, NOT bound by CourtsColumnsPerCourt, so readability wins over
-// alignment with the main match sheets. Six columns: there is no Winner or
-// Decision column (operator decision 2026-09-27).
+// alignment with the main match sheets.
 const (
 	kachinukiColBout       = "A"
-	kachinukiColLeft       = "B" // Shiro: name + position
-	kachinukiColLeftScore  = "C" // Shiro: score + result mark
+	kachinukiColLeft       = "B" // left: name + position
+	kachinukiColLeftScore  = "C" // left: score + result mark
 	kachinukiColVs         = "D" // centre: the one closed-set middle mark, or "vs"
-	kachinukiColRightScore = "E" // Aka: score + result mark
-	kachinukiColRight      = "F" // Aka: name + position
+	kachinukiColRightScore = "E" // right: score + result mark
+	kachinukiColRight      = "F" // right: name + position
 )
 
 // WriteKachinukiDetailSheet creates the SheetKachinukiDetail sheet and
@@ -187,8 +187,7 @@ func writeKachinukiMatchSection(f *excelize.File, sheet string, match KachinukiM
 	titleStyle := getPoolHeaderStyle(f)
 	textStyle := getTextStyle(f)
 	summaryStyle := getGreyTextStyle(f)
-	whiteHeaderStyle := getWhiteHeaderStyle(f)
-	redHeaderStyle := getRedHeaderStyle(f)
+	leftStyle, rightStyle := WhiteLeft(getRedHeaderStyle(f), getWhiteHeaderStyle(f))
 
 	titleRow := startRow
 	subtitleRow := startRow + 1
@@ -198,41 +197,30 @@ func writeKachinukiMatchSection(f *excelize.File, sheet string, match KachinukiM
 
 	leftTeam, rightTeam := WhiteLeft(match.SideATeam, match.SideBTeam)
 
+	// put writes value/style into the row's [from, to] cell range, merging
+	// first when the range spans more than one column.
+	put := func(from, to string, row int, value any, style int) {
+		fromCell := from + strconv.Itoa(row)
+		toCell := to + strconv.Itoa(row)
+		if from != to {
+			handleExcelError("MergeCell", f.MergeCell(sheet, fromCell, toCell))
+		}
+		handleExcelError("SetCellValue", f.SetCellValue(sheet, fromCell, value))
+		handleExcelError("SetCellStyle", f.SetCellStyle(sheet, fromCell, toCell, style))
+	}
+
 	// --- Title row (merged across A..F) ---
-	titleCell := kachinukiColBout + strconv.Itoa(titleRow)
-	titleEndCell := kachinukiColRight + strconv.Itoa(titleRow)
-	handleExcelError("MergeCell", f.MergeCell(sheet, titleCell, titleEndCell))
-	handleExcelError("SetCellValue", f.SetCellValue(sheet, titleCell, fmt.Sprintf("%s (Kachinuki)", match.Label)))
-	handleExcelError("SetCellStyle", f.SetCellStyle(sheet, titleCell, titleEndCell, titleStyle))
+	put(kachinukiColBout, kachinukiColRight, titleRow, fmt.Sprintf("%s (Kachinuki)", match.Label), titleStyle)
 
 	// --- Subtitle row (merged), Shiro's team first (P1: matches the
 	// scoreboard's White-left reading) ---
-	subtitleCell := kachinukiColBout + strconv.Itoa(subtitleRow)
-	subtitleEndCell := kachinukiColRight + strconv.Itoa(subtitleRow)
-	handleExcelError("MergeCell", f.MergeCell(sheet, subtitleCell, subtitleEndCell))
-	handleExcelError("SetCellValue", f.SetCellValue(sheet, subtitleCell, fmt.Sprintf("%s vs %s", leftTeam, rightTeam)))
-	handleExcelError("SetCellStyle", f.SetCellStyle(sheet, subtitleCell, subtitleEndCell, textStyle))
+	put(kachinukiColBout, kachinukiColRight, subtitleRow, fmt.Sprintf("%s vs %s", leftTeam, rightTeam), textStyle)
 
 	// --- Header row (P1: colour + team name, no side words) ---
-	boutHeaderCell := kachinukiColBout + strconv.Itoa(headerRow)
-	handleExcelError("SetCellValue", f.SetCellValue(sheet, boutHeaderCell, "Bout #"))
-	handleExcelError("SetCellStyle", f.SetCellStyle(sheet, boutHeaderCell, boutHeaderCell, titleStyle))
-
-	leftStart := kachinukiColLeft + strconv.Itoa(headerRow)
-	leftEnd := kachinukiColLeftScore + strconv.Itoa(headerRow)
-	handleExcelError("MergeCell", f.MergeCell(sheet, leftStart, leftEnd))
-	handleExcelError("SetCellValue", f.SetCellValue(sheet, leftStart, leftTeam))
-	handleExcelError("SetCellStyle", f.SetCellStyle(sheet, leftStart, leftEnd, whiteHeaderStyle))
-
-	vsCell := kachinukiColVs + strconv.Itoa(headerRow)
-	handleExcelError("SetCellValue", f.SetCellValue(sheet, vsCell, "vs"))
-	handleExcelError("SetCellStyle", f.SetCellStyle(sheet, vsCell, vsCell, textStyle))
-
-	rightStart := kachinukiColRightScore + strconv.Itoa(headerRow)
-	rightEnd := kachinukiColRight + strconv.Itoa(headerRow)
-	handleExcelError("MergeCell", f.MergeCell(sheet, rightStart, rightEnd))
-	handleExcelError("SetCellValue", f.SetCellValue(sheet, rightStart, rightTeam))
-	handleExcelError("SetCellStyle", f.SetCellStyle(sheet, rightStart, rightEnd, redHeaderStyle))
+	put(kachinukiColBout, kachinukiColBout, headerRow, "Bout #", titleStyle)
+	put(kachinukiColLeft, kachinukiColLeftScore, headerRow, leftTeam, leftStyle)
+	put(kachinukiColVs, kachinukiColVs, headerRow, "vs", textStyle)
+	put(kachinukiColRightScore, kachinukiColRight, headerRow, rightTeam, rightStyle)
 
 	// --- Bout rows ---
 	for i, bout := range match.Bouts {
@@ -262,12 +250,11 @@ func writeKachinukiBoutRow(f *excelize.File, sheet string, bout KachinukiBout, r
 	handleExcelError("SetCellValue", f.SetCellValue(sheet, kachinukiColLeft+rowStr, leftPlayer))
 	handleExcelError("SetCellValue", f.SetCellValue(sheet, kachinukiColRight+rowStr, rightPlayer))
 
-	// Columns C/E: score + the bout's own result mark (Ht/Kiken/Fus.),
-	// exactly as the main sheets compose a score cell.
-	leftScore, rightScore := WhiteLeft(bout.ScoreA, bout.ScoreB)
-	leftMark, rightMark := WhiteLeft(bout.MarkA, bout.MarkB)
-	handleExcelError("SetCellValue", f.SetCellValue(sheet, kachinukiColLeftScore+rowStr, joinSp(leftScore, leftMark)))
-	handleExcelError("SetCellValue", f.SetCellValue(sheet, kachinukiColRightScore+rowStr, joinSp(rightScore, rightMark)))
+	// Columns C/E: the cell joins the score and its side mark (Ht/Kiken/
+	// Fus.), side order built first, then placed left/right.
+	leftScore, rightScore := WhiteLeft(domain.JoinNonEmpty(bout.ScoreA, bout.MarkA), domain.JoinNonEmpty(bout.ScoreB, bout.MarkB))
+	handleExcelError("SetCellValue", f.SetCellValue(sheet, kachinukiColLeftScore+rowStr, leftScore))
+	handleExcelError("SetCellValue", f.SetCellValue(sheet, kachinukiColRightScore+rowStr, rightScore))
 
 	// Column D: the one closed-set middle mark, or the template's own "vs"
 	// when the bout carries none.
@@ -284,9 +271,7 @@ func writeKachinukiBoutRow(f *excelize.File, sheet string, bout KachinukiBout, r
 // writeKachinukiSummaryRow writes the per-team elimination tallies. The
 // label "Summary" lives in column A; the elimination counts sit under Shiro's
 // and Aka's own columns (left/right through WhiteLeft) so readers can see at
-// a glance which team was exhausted. The match's own Pool or Elimination
-// Matches row carries the winning team and the match decision; this sheet no
-// longer repeats them (operator decision 2026-09-27).
+// a glance which team was exhausted.
 func writeKachinukiSummaryRow(f *excelize.File, sheet string, match KachinukiMatchDetail, row int, style int) {
 	rowStr := strconv.Itoa(row)
 
@@ -300,21 +285,6 @@ func writeKachinukiSummaryRow(f *excelize.File, sheet string, match KachinukiMat
 
 	// Style the whole row.
 	handleExcelError("SetCellStyle", f.SetCellStyle(sheet, kachinukiColBout+rowStr, kachinukiColRight+rowStr, style))
-}
-
-// joinSp joins two display fragments with a single space, skipping empties,
-// so a composed cell never carries a leading, trailing, or doubled space. A
-// private twin of export.joinSp (this package may not import export: export
-// imports engine, engine imports helper, so the reverse would cycle).
-func joinSp(a, b string) string {
-	switch {
-	case a == "":
-		return b
-	case b == "":
-		return a
-	default:
-		return a + " " + b
-	}
 }
 
 // formatKachinukiPlayer is a pure helper that combines a squad member's
@@ -331,14 +301,7 @@ func joinSp(a, b string) string {
 // Only when BOTH label and name are empty is there genuinely nothing to
 // show, and the cell stays blank.
 func formatKachinukiPlayer(label, name, position string) string {
-	display := name
-	if label != "" {
-		if name != "" {
-			display = label + " " + name
-		} else {
-			display = label
-		}
-	}
+	display := domain.JoinNonEmpty(label, name)
 	if display == "" {
 		return ""
 	}

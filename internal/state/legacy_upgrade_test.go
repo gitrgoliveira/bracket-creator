@@ -151,10 +151,24 @@ func TestLoadCompetitionDoesNotRewriteConfigOnDisk(t *testing.T) {
 	assert.Equal(t, before, after, "LoadCompetition itself must never rewrite config.md")
 }
 
+// assertNoMirrorLine fails the test if raw's re-saved config.md carries any
+// "mirror:" line: the legacy mirror key is folded away on load and must
+// never survive a save. Shared by both legacy-mirror-key convergence tests
+// below.
+func assertNoMirrorLine(t *testing.T, raw []byte) {
+	t.Helper()
+	for _, line := range strings.Split(string(raw), "\n") {
+		assert.Falsef(t, strings.HasPrefix(line, "mirror:"), "re-saved config.md must carry no mirror: line, got %q", line)
+	}
+}
+
 // TestSaveConvergesLegacyConfigOnDisk covers the other half: the on-disk file
 // converges onto the canonical values once something actually saves the
 // competition. SaveCompetition re-serialises whatever LoadCompetition handed
-// back, which is already folded, so no retired key or value survives.
+// back, which is already folded, so no retired key or value survives. It
+// also proves the mirror key specifically folds away: the fixture carries
+// `mirror: false`, and TestSaveConvergesLegacyMirrorKeyOnDisk below covers
+// the `mirror: true` case this fixture does not.
 //
 // Like TestLoadCompetitionDoesNotRewriteConfigOnDisk, the competition
 // directory is populated AFTER this test's Store is already open, so it is
@@ -170,6 +184,7 @@ func TestSaveConvergesLegacyConfigOnDisk(t *testing.T) {
 	require.NoError(t, os.MkdirAll(compDir, 0o700))
 	fixture, err := os.ReadFile(filepath.Join("testdata", "legacy_playoffs_config.md"))
 	require.NoError(t, err)
+	require.Contains(t, string(fixture), "mirror: false", "fixture must still exercise the stale mirror key")
 	require.NoError(t, os.WriteFile(filepath.Join(compDir, "config.md"), fixture, 0o600))
 
 	comp, err := s.LoadCompetition("bracket-court-d")
@@ -183,6 +198,7 @@ func TestSaveConvergesLegacyConfigOnDisk(t *testing.T) {
 	assert.Contains(t, string(raw), "knockout_match_duration_seconds: 300")
 	assert.NotContains(t, string(raw), "playoffs")
 	assert.NotContains(t, string(raw), "playoff_match_duration")
+	assertNoMirrorLine(t, raw)
 }
 
 // TestSaveConvergesLegacyMirrorKeyOnDisk pins bc-xlcl's storage-compat claim:
@@ -192,65 +208,34 @@ func TestSaveConvergesLegacyConfigOnDisk(t *testing.T) {
 // KnownFields/DisallowUnknownFields/UnmarshalStrict exists anywhere in the
 // Go tree -- and the next real save converges the on-disk file onto the
 // current shape with no `mirror:` line at all. Same load-then-save pattern as
-// TestSaveConvergesLegacyConfigOnDisk, which already exercises this exact
-// fixture's OTHER legacy keys; this test's job is the mirror key specifically,
-// for both the value the fixture already holds (false) and the one it
-// doesn't (true), so a fold that only special-cased one value would still be
-// caught.
+// TestSaveConvergesLegacyConfigOnDisk, which covers the `mirror: false` case
+// (among that fixture's other legacy keys); this test covers `mirror: true`
+// specifically, the value that fixture does not hold, so a fold that only
+// special-cased one value would still be caught.
 func TestSaveConvergesLegacyMirrorKeyOnDisk(t *testing.T) {
-	assertNoMirrorLine := func(t *testing.T, raw []byte) {
-		t.Helper()
-		for _, line := range strings.Split(string(raw), "\n") {
-			assert.Falsef(t, strings.HasPrefix(line, "mirror:"), "re-saved config.md must carry no mirror: line, got %q", line)
-		}
-	}
+	dir := t.TempDir()
+	s, err := state.NewStore(dir)
+	require.NoError(t, err)
 
-	t.Run("mirror: false", func(t *testing.T) {
-		dir := t.TempDir()
-		s, err := state.NewStore(dir)
-		require.NoError(t, err)
+	compDir := filepath.Join(dir, "competitions", "c1")
+	require.NoError(t, os.MkdirAll(compDir, 0o700))
+	legacy := "---\n" +
+		"id: c1\n" +
+		"name: C1\n" +
+		"kind: individual\n" +
+		"format: knockout\n" +
+		"status: knockout\n" +
+		"mirror: true\n" +
+		"---\n"
+	require.NoError(t, os.WriteFile(filepath.Join(compDir, "config.md"), []byte(legacy), 0o600))
 
-		compDir := filepath.Join(dir, "competitions", "bracket-court-d")
-		require.NoError(t, os.MkdirAll(compDir, 0o700))
-		fixture, err := os.ReadFile(filepath.Join("testdata", "legacy_playoffs_config.md"))
-		require.NoError(t, err)
-		require.Contains(t, string(fixture), "mirror: false", "fixture must still exercise the false case")
-		require.NoError(t, os.WriteFile(filepath.Join(compDir, "config.md"), fixture, 0o600))
+	comp, err := s.LoadCompetition("c1")
+	require.NoError(t, err, "a stale mirror key must not stop the file loading")
+	require.NoError(t, s.SaveCompetition(comp))
 
-		comp, err := s.LoadCompetition("bracket-court-d")
-		require.NoError(t, err, "a stale mirror key must not stop the file loading")
-		require.NoError(t, s.SaveCompetition(comp))
-
-		raw, err := os.ReadFile(filepath.Join(compDir, "config.md"))
-		require.NoError(t, err)
-		assertNoMirrorLine(t, raw)
-	})
-
-	t.Run("mirror: true", func(t *testing.T) {
-		dir := t.TempDir()
-		s, err := state.NewStore(dir)
-		require.NoError(t, err)
-
-		compDir := filepath.Join(dir, "competitions", "c1")
-		require.NoError(t, os.MkdirAll(compDir, 0o700))
-		legacy := "---\n" +
-			"id: c1\n" +
-			"name: C1\n" +
-			"kind: individual\n" +
-			"format: knockout\n" +
-			"status: knockout\n" +
-			"mirror: true\n" +
-			"---\n"
-		require.NoError(t, os.WriteFile(filepath.Join(compDir, "config.md"), []byte(legacy), 0o600))
-
-		comp, err := s.LoadCompetition("c1")
-		require.NoError(t, err, "a stale mirror key must not stop the file loading")
-		require.NoError(t, s.SaveCompetition(comp))
-
-		raw, err := os.ReadFile(filepath.Join(compDir, "config.md"))
-		require.NoError(t, err)
-		assertNoMirrorLine(t, raw)
-	})
+	raw, err := os.ReadFile(filepath.Join(compDir, "config.md"))
+	require.NoError(t, err)
+	assertNoMirrorLine(t, raw)
 }
 
 // TestLoadCompetitionWithMismatchedIDDoesNotCorruptAnotherCompetition is a

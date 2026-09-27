@@ -887,6 +887,17 @@ func columnContains(rows [][]string, col int, want string) bool {
 	return false
 }
 
+// cellAt safely reads rows[r][c], returning "" when r or c falls outside
+// rows in either direction: a negative index, a row past the end, or a
+// column past a row's end (GetRows trims each row's trailing empty cells,
+// so a blank cell past a short row's length is legitimately "").
+func cellAt(rows [][]string, r, c int) string {
+	if r < 0 || r >= len(rows) || c < 0 || c >= len(rows[r]) {
+		return ""
+	}
+	return rows[r][c]
+}
+
 // TestBuildResultsWorkbook_LeagueNoPhantomBracket is the regression test for the
 // phantom-bracket bug: the draw returns placeholder "Pool A-1st" finalist
 // labels even for a League (which has no knockout phase), so without the
@@ -1669,12 +1680,6 @@ func TestBuildResultsWorkbook_RaggedKnockoutScoresLandInTheRightBlocks(t *testin
 	//     SideB (Shiro) on the left, SideA (Aka) on the right.
 	elimRows, err := f.GetRows(helper.SheetEliminationMatches)
 	require.NoError(t, err)
-	cellAt := func(row, col int) string {
-		if row < 0 || row >= len(elimRows) || col < 0 || col >= len(elimRows[row]) {
-			return ""
-		}
-		return elimRows[row][col]
-	}
 	checked := 0
 	for rowIdx, row := range elimRows {
 		for headerCol, cell := range row {
@@ -1688,10 +1693,10 @@ func TestBuildResultsWorkbook_RaggedKnockoutScoresLandInTheRightBlocks(t *testin
 			require.Truef(t, ok, "block %q has no junction on the tree page", cell)
 
 			scoreRow := rowIdx + 2 // header, White/Red labels, then names+scores
-			nameB := cellAt(scoreRow, headerCol)
-			nameA := cellAt(scoreRow, headerCol+6)
-			scoreB := cellAt(scoreRow, headerCol+1)
-			scoreA := cellAt(scoreRow, headerCol+5)
+			nameB := cellAt(elimRows, scoreRow, headerCol)
+			nameA := cellAt(elimRows, scoreRow, headerCol+6)
+			scoreB := cellAt(elimRows, scoreRow, headerCol+1)
+			scoreA := cellAt(elimRows, scoreRow, headerCol+5)
 
 			// The block's competitors must be ones the tree's junction of this
 			// number sits above. This is the assertion the defect broke: under
@@ -4275,16 +4280,10 @@ func TestBuildResultsWorkbook_WhiteOnTheLeftRedOnTheRight(t *testing.T) {
 			return len(row) > 0 && (row[0] == "White" || row[0] == "Red")
 		})
 		require.GreaterOrEqual(t, hdr, 0, "the pool sheet must carry a side-label header")
-		at := func(r, c int) string {
-			if r >= len(rows) || c >= len(rows[r]) {
-				return ""
-			}
-			return rows[r][c]
-		}
-		assert.Equal(t, "White", at(hdr, 0), "the header's LEFT label")
-		assert.Equal(t, "Red", at(hdr, 6), "the header's RIGHT label")
-		assert.Equal(t, "D", at(hdr+1, 1), "the LEFT score cell is Shiro's (SideB)")
-		assert.Equal(t, "MK", at(hdr+1, 5), "the RIGHT score cell is Aka's (SideA)")
+		assert.Equal(t, "White", cellAt(rows, hdr, 0), "the header's LEFT label")
+		assert.Equal(t, "Red", cellAt(rows, hdr, 6), "the header's RIGHT label")
+		assert.Equal(t, "D", cellAt(rows, hdr+1, 1), "the LEFT score cell is Shiro's (SideB)")
+		assert.Equal(t, "MK", cellAt(rows, hdr+1, 5), "the RIGHT score cell is Aka's (SideA)")
 
 		matchRow := hdr + 2 // 1-based Excel row of match 0
 		assert.Equal(t, "Bob", resolvedCellText(t, f, helper.SheetPoolMatches, fmt.Sprintf("A%d", matchRow)),
@@ -4340,13 +4339,6 @@ func TestBuildResultsWorkbook_WhiteOnTheLeftRedOnTheRight(t *testing.T) {
 		defer f.Close()
 		rows, err := f.GetRows(helper.SheetEliminationMatches)
 		require.NoError(t, err)
-		at := func(r, c int) string {
-			if r >= len(rows) || c >= len(rows[r]) {
-				return ""
-			}
-			return rows[r][c]
-		}
-
 		// Blocks are found by their printed number: round numbers count down
 		// toward the final, so a fixed "Round 1" label would name the wrong bout.
 		checked := 0
@@ -4357,12 +4349,12 @@ func TestBuildResultsWorkbook_WhiteOnTheLeftRedOnTheRight(t *testing.T) {
 				if num <= 0 || !ok {
 					continue
 				}
-				assert.Equalf(t, "White", at(rowIdx+1, headerCol), "Match %d header's LEFT label", num)
-				assert.Equalf(t, "Red", at(rowIdx+1, headerCol+6), "Match %d header's RIGHT label", num)
-				assert.Equalf(t, bm.SideB, at(rowIdx+2, headerCol), "Match %d LEFT entrant is the lower-bracket side (SideB)", num)
-				assert.Equalf(t, bm.SideA, at(rowIdx+2, headerCol+6), "Match %d RIGHT entrant is the upper-bracket side (SideA)", num)
-				assert.Equalf(t, "D", at(rowIdx+2, headerCol+1), "Match %d LEFT score cell is Shiro's (SideB)", num)
-				assert.Equalf(t, "MK", at(rowIdx+2, headerCol+5), "Match %d RIGHT score cell is Aka's (SideA)", num)
+				assert.Equalf(t, "White", cellAt(rows, rowIdx+1, headerCol), "Match %d header's LEFT label", num)
+				assert.Equalf(t, "Red", cellAt(rows, rowIdx+1, headerCol+6), "Match %d header's RIGHT label", num)
+				assert.Equalf(t, bm.SideB, cellAt(rows, rowIdx+2, headerCol), "Match %d LEFT entrant is the lower-bracket side (SideB)", num)
+				assert.Equalf(t, bm.SideA, cellAt(rows, rowIdx+2, headerCol+6), "Match %d RIGHT entrant is the upper-bracket side (SideA)", num)
+				assert.Equalf(t, "D", cellAt(rows, rowIdx+2, headerCol+1), "Match %d LEFT score cell is Shiro's (SideB)", num)
+				assert.Equalf(t, "MK", cellAt(rows, rowIdx+2, headerCol+5), "Match %d RIGHT score cell is Aka's (SideA)", num)
 				checked++
 			}
 		}

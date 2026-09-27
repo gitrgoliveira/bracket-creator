@@ -14,6 +14,7 @@ import React from 'react';
 import { render, act, fireEvent, screen } from '@testing-library/react';
 import { describe, it, expect, vi, beforeAll, afterAll, beforeEach, afterEach } from 'vitest';
 import { installWindowStubs } from '../helpers/stub_globals.js';
+import { AUTOSAVE_DEBOUNCE_MS } from '../../admin_scoring_autosave.jsx';
 
 // window globals required by admin_scoring_modal.jsx
 // Split into SYNC (evaluated in the component body on every render) and LAZY
@@ -33,7 +34,10 @@ const STUBBED_GLOBALS = {
   resolveRoundIndex: () => 0,
   API: {
     fetchCompetitionDetails: vi.fn().mockResolvedValue(null),
-    recordScore: vi.fn().mockResolvedValue(undefined),
+    // A landed body: saveRunningSheet (admin_scoring_team.jsx) and Start
+    // match read a falsy result as the host having already reported a
+    // failure, so the default here must be truthy.
+    recordScore: vi.fn().mockResolvedValue({}),
     recordDaihyosen: vi.fn(),
     removeDaihyosen: vi.fn(),
     putMatchLineup: vi.fn(),
@@ -136,7 +140,7 @@ describe('C1 debounced autosave: ScoreEditorModal (individual match)', () => {
     expect(window.API.recordScore).toHaveBeenCalledTimes(0);
 
     // Advance past the 300ms debounce; the trailing-edge timer fires.
-    await act(async () => { vi.advanceTimersByTime(350); });
+    await act(async () => { vi.advanceTimersByTime(AUTOSAVE_DEBOUNCE_MS + 50); });
     expect(window.API.recordScore).toHaveBeenCalledTimes(1);
 
     // The patch must carry status "running" (NOT "completed" / "scheduled").
@@ -170,7 +174,7 @@ describe('C1 debounced autosave: ScoreEditorModal (individual match)', () => {
     // Advance past the debounce. The fire-time isRunning re-check (gate 3) must
     // suppress the now-stale running write so it can't regress the completed
     // result.
-    await act(async () => { vi.advanceTimersByTime(350); });
+    await act(async () => { vi.advanceTimersByTime(AUTOSAVE_DEBOUNCE_MS + 50); });
     expect(window.API.recordScore).toHaveBeenCalledTimes(0);
   });
 
@@ -195,7 +199,7 @@ describe('C1 debounced autosave: ScoreEditorModal (individual match)', () => {
     expect(window.API.recordScore).toHaveBeenCalledTimes(0);
 
     // Now advance past the debounce from the SECOND tap.
-    await act(async () => { vi.advanceTimersByTime(350); });
+    await act(async () => { vi.advanceTimersByTime(AUTOSAVE_DEBOUNCE_MS + 50); });
     // Only ONE write despite two taps.
     expect(window.API.recordScore).toHaveBeenCalledTimes(1);
   });
@@ -311,23 +315,8 @@ describe('C1 debounced autosave: ScoreEditorModal (individual match)', () => {
 
 describe('C1 debounced autosave: TeamScoreEditorModal (team match)', () => {
 
-  function makeRunningTeamMatch(overrides = {}) {
-    return {
-      id: 'tm-running',
-      status: 'running',
-      phase: 'pool',
-      poolName: 'Pool 1',
-      court: 'A',
-      compKind: 'team',
-      teamSize: 3,
-      sideA: { id: 'teamA', name: 'Team A' },
-      sideB: { id: 'teamB', name: 'Team B' },
-      ...overrides,
-    };
-  }
-
   it('a sub-bout ippon tap on a RUNNING team match triggers ONE debounced write', async () => {
-    renderModal(makeRunningTeamMatch());
+    renderModal(makeTeamMatch());
 
     // For a 3-person team match there are 3 rows × 2 sides × 5 buttons = 30+
     // ippon buttons. getAllByText('M') returns all of them; click the first.
@@ -337,7 +326,7 @@ describe('C1 debounced autosave: TeamScoreEditorModal (team match)', () => {
     await act(async () => { fireEvent.click(menButtons[0]); });
     expect(window.API.recordScore).toHaveBeenCalledTimes(0);
 
-    await act(async () => { vi.advanceTimersByTime(350); });
+    await act(async () => { vi.advanceTimersByTime(AUTOSAVE_DEBOUNCE_MS + 50); });
     expect(window.API.recordScore).toHaveBeenCalledTimes(1);
 
     const [, , patch] = window.API.recordScore.mock.calls[0];
@@ -417,60 +406,51 @@ describe('bc-rvfx: tapping an EMPTY ippon slot is a no-op', () => {
 // slot, or on a default-win circle, went through setPts, which ends a Tie or a
 // Fusensho and autosaves: one stray tap silently un-tied a bout on the server.
 describe('bc-emsl: a team-sheet tap that clears nothing writes nothing', () => {
-  const teamMatch = () => ({
-    id: 'tm-emsl', status: 'running', phase: 'pool', poolName: 'Pool 1', court: 'A',
-    compKind: 'team', teamSize: 3,
-    sideA: { id: 'teamA', name: 'Team A' },
-    sideB: { id: 'teamB', name: 'Team B' },
-  });
-  const bout1 = () => document.querySelectorAll('.team-sub-match')[0];
-  const slots = (color) => [...bout1().querySelectorAll(`.tsm-center-pts--${color} button.editor-side__pt`)];
-
   it('tapping an EMPTY mark slot keeps the bout\'s Tie and sends nothing', async () => {
-    renderModal(teamMatch());
-    await act(async () => { fireEvent.click(bout1().querySelector('[data-testid="scoring-modal-tie-button"]')); });
-    await act(async () => { vi.advanceTimersByTime(350); });
+    renderModal(makeTeamMatch({ id: 'tm-emsl' }));
+    await act(async () => { fireEvent.click(tieBoutButton(0)); });
+    await act(async () => { vi.advanceTimersByTime(AUTOSAVE_DEBOUNCE_MS + 50); });
     expect(window.API.recordScore).toHaveBeenCalledTimes(1);
 
-    const empty = slots('shiro').find((b) => b.textContent === '·');
+    const empty = markSlots(subMatchRows()[0], 'shiro').find((b) => b.textContent === '·');
     expect(empty).toBeTruthy();
     await act(async () => { fireEvent.click(empty); });
-    await act(async () => { vi.advanceTimersByTime(350); });
+    await act(async () => { vi.advanceTimersByTime(AUTOSAVE_DEBOUNCE_MS + 50); });
 
     expect(window.API.recordScore).toHaveBeenCalledTimes(1);
-    expect(bout1().querySelector('[data-testid="scoring-modal-tie-button"]').textContent).toContain('✓ Tie');
+    expect(tieBoutButton(0).textContent).toContain('✓ Tie');
   });
 
   it('tapping a default-win circle keeps the Fusensho and sends nothing', async () => {
-    renderModal(teamMatch());
-    const akaFusensho = bout1().querySelector('.team-sub-match__side--aka [data-testid="scoring-modal-fusensho-button"]');
+    renderModal(makeTeamMatch({ id: 'tm-emsl' }));
+    const akaFusensho = subMatchRows()[0].querySelector('.team-sub-match__side--aka [data-testid="scoring-modal-fusensho-button"]');
     await act(async () => { fireEvent.click(akaFusensho); });
-    await act(async () => { vi.advanceTimersByTime(350); });
+    await act(async () => { vi.advanceTimersByTime(AUTOSAVE_DEBOUNCE_MS + 50); });
     expect(window.API.recordScore).toHaveBeenCalledTimes(1);
 
-    const circle = slots('aka').find((b) => b.textContent === '\u25CB');
+    const circle = markSlots(subMatchRows()[0], 'aka').find((b) => b.textContent === '\u25CB');
     expect(circle).toBeTruthy();
     expect(circle.title).toBe('Default win: use Fusensho to undo');
     await act(async () => { fireEvent.click(circle); });
-    await act(async () => { vi.advanceTimersByTime(350); });
+    await act(async () => { vi.advanceTimersByTime(AUTOSAVE_DEBOUNCE_MS + 50); });
 
     expect(window.API.recordScore).toHaveBeenCalledTimes(1);
-    expect(bout1().querySelector('.team-sub-match__side--aka [data-testid="scoring-modal-fusensho-button"]').textContent).toContain('✓ Fusensho');
+    expect(subMatchRows()[0].querySelector('.team-sub-match__side--aka [data-testid="scoring-modal-fusensho-button"]').textContent).toContain('✓ Fusensho');
   });
 
   it('still removes a real mark and autosaves', async () => {
-    renderModal(teamMatch());
-    const shiroM = [...bout1().querySelectorAll('.team-sub-match__side--shiro button.ipt-btn')].find((b) => b.textContent === 'M');
+    renderModal(makeTeamMatch({ id: 'tm-emsl' }));
+    const shiroM = ipponButton(subMatchRows()[0], 'shiro', 'M');
     await act(async () => { fireEvent.click(shiroM); });
-    await act(async () => { vi.advanceTimersByTime(350); });
+    await act(async () => { vi.advanceTimersByTime(AUTOSAVE_DEBOUNCE_MS + 50); });
     expect(window.API.recordScore).toHaveBeenCalledTimes(1);
 
-    const mark = slots('shiro').find((b) => b.textContent === 'M');
+    const mark = markSlots(subMatchRows()[0], 'shiro').find((b) => b.textContent === 'M');
     expect(mark.title).toBe('Click to remove');
     await act(async () => { fireEvent.click(mark); });
-    await act(async () => { vi.advanceTimersByTime(350); });
+    await act(async () => { vi.advanceTimersByTime(AUTOSAVE_DEBOUNCE_MS + 50); });
     expect(window.API.recordScore).toHaveBeenCalledTimes(2);
-    expect(slots('shiro').some((b) => b.textContent === 'M')).toBe(false);
+    expect(markSlots(subMatchRows()[0], 'shiro').some((b) => b.textContent === 'M')).toBe(false);
   });
 });
 
@@ -481,25 +461,21 @@ describe('an edit inside the autosave window survives Prev/Next', () => {
   // the pending write, the same mechanism the page-hide flush uses. An ippon
   // tapped just before either one used to be lost; now the unmount writes it.
   const neighbour = { id: 'm-next', sideA: { name: 'Sato' }, sideB: { name: 'Ito' } };
-  const teamMatch = () => makeRunningMatch({
-    id: 'tm-running', compKind: 'team', teamSize: 3,
-    sideA: { id: 'teamA', name: 'Team A' }, sideB: { id: 'teamB', name: 'Team B' },
-  });
   const viaButton = async () => { fireEvent.click(screen.getByText('Next →')); };
   const viaKey = async () => { fireEvent.keyDown(window, { key: 'ArrowRight' }); };
 
   it.each([
     ['individual', 'the Next button', makeRunningMatch, viaButton],
     ['individual', 'the → key', makeRunningMatch, viaKey],
-    ['team', 'the Next button', teamMatch, viaButton],
-    ['team', 'the → key', teamMatch, viaKey],
+    ['team', 'the Next button', makeTeamMatch, viaButton],
+    ['team', 'the → key', makeTeamMatch, viaKey],
   ])('%s editor: %s within 300ms of a tap writes the tap', async (_kind, _via, match, goNext) => {
     let view;
     const onNext = vi.fn(() => view.unmount());
     view = renderModal(match(), { nextMatch: neighbour, onNext });
     await act(async () => { fireEvent.click(screen.getAllByText('M')[0]); });
     await act(goNext);
-    await act(async () => { vi.advanceTimersByTime(350); });
+    await act(async () => { vi.advanceTimersByTime(AUTOSAVE_DEBOUNCE_MS + 50); });
     expect(onNext).toHaveBeenCalledTimes(1);
     expect(window.API.recordScore).toHaveBeenCalledTimes(1);
     expect(window.API.recordScore.mock.calls[0][2].status).toBe('running');
@@ -528,14 +504,23 @@ describe('an edit inside the autosave window survives Prev/Next', () => {
 // admin_shiaijo.render.test.jsx uses under fake timers; `waitFor`'s own
 // polling never fires here since it schedules through the faked clock).
 
-function makeKnockoutTeamMatch(overrides = {}) {
+function makeTeamMatch(overrides = {}) {
   return {
-    id: 'tm-ko', compId: 'comp1', status: 'running', phase: 'bracket', round: 'Final',
-    court: 'A', compKind: 'team', teamSize: 3, compFormat: 'knockout', teamMatchType: 'fixed',
-    sideA: { id: 'team-A', name: 'Team A' }, sideB: { id: 'team-B', name: 'Team B' },
-    subResults: [],
+    id: 'tm-running', status: 'running', phase: 'pool', poolName: 'Pool 1', court: 'A',
+    compKind: 'team', teamSize: 3,
+    sideA: { id: 'teamA', name: 'Team A' }, sideB: { id: 'teamB', name: 'Team B' },
     ...overrides,
   };
+}
+
+// Knockout defaults layered on makeTeamMatch's pool-match shape: same team
+// shape, a bracket match instead of a pool one.
+function makeKnockoutTeamMatch(overrides = {}) {
+  return makeTeamMatch({
+    id: 'tm-ko', compId: 'comp1', phase: 'bracket', round: 'Final',
+    compFormat: 'knockout', teamMatchType: 'fixed', subResults: [],
+    ...overrides,
+  });
 }
 
 function daihyosenRow(overrides = {}) {
@@ -561,8 +546,11 @@ function tieBoutButton(idx) { return subMatchRows()[idx].querySelector('[data-te
 function ipponButton(rowEl, color, letter) {
   return [...rowEl.querySelectorAll(`.team-sub-match__side--${color} button.ipt-btn`)].find((b) => b.textContent === letter);
 }
+function markSlots(rowEl, color) {
+  return [...rowEl.querySelectorAll(`.tsm-center-pts--${color} button.editor-side__pt`)];
+}
 function markSlot(rowEl, color, letter) {
-  return [...rowEl.querySelectorAll(`.tsm-center-pts--${color} button.editor-side__pt`)].find((b) => b.textContent === letter);
+  return markSlots(rowEl, color).find((b) => b.textContent === letter);
 }
 
 describe('bc-dhas: Add/Remove representative bout races the pending autosave', () => {
@@ -573,7 +561,7 @@ describe('bc-dhas: Add/Remove representative bout races the pending autosave', (
   });
 
   it('T1: Add inside the debounce window cancels the pending autosave first', async () => {
-    window.API.recordDaihyosen.mockResolvedValue({ result: { ...makeKnockoutTeamMatch(), subResults: [daihyosenRow()] } });
+    window.API.recordDaihyosen.mockResolvedValue({ ...makeKnockoutTeamMatch(), subResults: [daihyosenRow()] });
     renderModal(makeKnockoutTeamMatch());
 
     // Tie every bout, the last tap right before Add (mirrors the bead's own
@@ -592,13 +580,13 @@ describe('bc-dhas: Add/Remove representative bout races the pending autosave', (
     // Red on e7cb3af0: the pending timer (armed by the last Tie, never
     // cancelled by onDaihyosen) fires here with a snapshot built before the
     // row existed.
-    await act(async () => { vi.advanceTimersByTime(350); });
+    await act(async () => { vi.advanceTimersByTime(AUTOSAVE_DEBOUNCE_MS + 50); });
     await settle();
     expect(window.API.recordScore).toHaveBeenCalledTimes(1);
   });
 
   it('T2: a tap right after the add carries the DH row (adopted via setMatchOverride)', async () => {
-    window.API.recordDaihyosen.mockResolvedValue({ result: { ...makeKnockoutTeamMatch(), subResults: [daihyosenRow()] } });
+    window.API.recordDaihyosen.mockResolvedValue({ ...makeKnockoutTeamMatch(), subResults: [daihyosenRow()] });
     renderModal(makeKnockoutTeamMatch());
 
     await act(async () => { fireEvent.click(tieBoutButton(2)); });
@@ -609,7 +597,7 @@ describe('bc-dhas: Add/Remove representative bout races the pending autosave', (
     // A tap made AFTER the add resolves: its debounced write, 350ms later,
     // must carry the newly adopted position -1 row.
     await act(async () => { fireEvent.click(tieBoutButton(0)); });
-    await act(async () => { vi.advanceTimersByTime(350); });
+    await act(async () => { vi.advanceTimersByTime(AUTOSAVE_DEBOUNCE_MS + 50); });
     await settle();
 
     expect(window.API.recordScore).toHaveBeenCalledTimes(1);
@@ -635,7 +623,7 @@ describe('bc-dhas: Add/Remove representative bout races the pending autosave', (
     await act(async () => { fireEvent.click(tieBoutButton(0)); });
 
     await act(async () => {
-      resolveDaihyosen({ result: { ...makeKnockoutTeamMatch(), subResults: [daihyosenRow()] } });
+      resolveDaihyosen({ ...makeKnockoutTeamMatch(), subResults: [daihyosenRow()] });
     });
     await settle();
 
@@ -645,7 +633,7 @@ describe('bc-dhas: Add/Remove representative bout races the pending autosave', (
     expect(onClose).not.toHaveBeenCalled();
 
     window.API.recordScore.mockClear();
-    await act(async () => { vi.advanceTimersByTime(350); });
+    await act(async () => { vi.advanceTimersByTime(AUTOSAVE_DEBOUNCE_MS + 50); });
     await settle();
 
     expect(onClose).not.toHaveBeenCalled();
@@ -677,7 +665,7 @@ describe('bc-dhas: Add/Remove representative bout races the pending autosave', (
 
     // The debounce was cancelled before the pre-remove save, so nothing is
     // left pending to fire a stale write after the delete.
-    await act(async () => { vi.advanceTimersByTime(350); });
+    await act(async () => { vi.advanceTimersByTime(AUTOSAVE_DEBOUNCE_MS + 50); });
     await settle();
     expect(window.API.recordScore).toHaveBeenCalledTimes(1);
     expect(onClose).not.toHaveBeenCalled();
@@ -703,7 +691,7 @@ describe('bc-dhas: Add/Remove representative bout races the pending autosave', (
     // the row server-side (R1).
     expect(onClose).not.toHaveBeenCalled();
 
-    await act(async () => { vi.advanceTimersByTime(350); });
+    await act(async () => { vi.advanceTimersByTime(AUTOSAVE_DEBOUNCE_MS + 50); });
     await settle();
     expect(window.API.recordScore).toHaveBeenCalledTimes(1);
     expect(onClose).not.toHaveBeenCalled();
@@ -717,7 +705,7 @@ describe('bc-dhas: Add/Remove representative bout races the pending autosave', (
 
     // Strike a point on the DH row itself and let it autosave.
     await act(async () => { fireEvent.click(ipponButton(dhRowEl(), 'shiro', 'M')); });
-    await act(async () => { vi.advanceTimersByTime(350); });
+    await act(async () => { vi.advanceTimersByTime(AUTOSAVE_DEBOUNCE_MS + 50); });
     await settle();
     expect(window.API.recordScore).toHaveBeenCalledTimes(1);
     const [, , firstPatch] = window.API.recordScore.mock.calls[0];
@@ -757,7 +745,7 @@ describe('bc-dhas: Add/Remove representative bout races the pending autosave', (
     // let it autosave.
     await act(async () => { fireEvent.click(screen.getByTestId('team-daihyosen-hantei-arm')); });
     await act(async () => { fireEvent.click(screen.getByTestId('team-daihyosen-hantei-shiro')); });
-    await act(async () => { vi.advanceTimersByTime(350); });
+    await act(async () => { vi.advanceTimersByTime(AUTOSAVE_DEBOUNCE_MS + 50); });
     await settle();
     expect(window.API.recordScore).toHaveBeenCalledTimes(1);
 

@@ -2,14 +2,9 @@
 // `/api/competitions/:cid/teams/:tid/lineups/:round` endpoints
 // (Slice 7.B / T127).
 //
-// GET returns the lineup for a (team, round) tuple. It always answers 200
-// when the competition exists: the body carries `saved: false` and an
-// empty lineup when nothing has been submitted for that key, never a 404
-// (bc-k404, operator decision 2026-09-27: "there either is one or there
-// isn't and it's empty"). A 404 here means the competition itself does
-// not exist. PUT sets/replaces the lineup, DELETE removes it. Lineups
-// are always editable, including while a match is running or completed
-// (mp-q722).
+// GET returns a teamLineupRead for a (team, round) tuple (200, saved false
+// when nothing is stored; 404 only for an unknown competition). PUT
+// sets/replaces it, DELETE removes it.
 //
 // All store I/O goes through the TeamLineupStore + CompetitionStore
 // interfaces (deps.go) rather than the concrete *state.Store
@@ -87,18 +82,8 @@ type LineupRequest struct {
 // admin credentials for the initial read. PUT and DELETE remain on the
 // admin group via RegisterLineupHandlers.
 //
-// Contract (bc-k404, operator decision 2026-09-27): both GETs answer 200
-// whenever the competition exists, carrying today's TeamLineup shape plus
-// one new field, `saved`. `saved: true` means the lineup stored at the
-// level asked for. `saved: false` means nothing is stored there, and the
-// body is the empty lineup for the KEY ASKED (round route: the requested
-// round, empty positions; match route: the requested matchId, empty
-// positions, round 0). `positions` is always an object, never null.
-// `saved` is the ONE marker: an empty positions map is not (a saved
-// lineup can itself be empty), and echoing the requested round/matchId is
-// not (the unsaved body echoes it too). A 404
-// (`{"error": "competition not found"}`) is reserved for a competition id
-// that names nothing at all.
+// Both GETs answer with a teamLineupRead (see its doc); a 404 means the
+// competition does not exist.
 //
 // Slice 7.B / T127.
 func RegisterPublicLineupHandlers(r *gin.RouterGroup, store TeamLineupStore, comps CompetitionStore) {
@@ -130,18 +115,9 @@ func RegisterPublicLineupHandlers(r *gin.RouterGroup, store TeamLineupStore, com
 			lineup, found = state.FindBestLineup(lineups, teamID, "", round)
 		}
 		if !found {
-			c.JSON(http.StatusOK, teamLineupRead{
-				TeamLineup: domain.TeamLineup{
-					TeamID:        teamID,
-					CompetitionID: compID,
-					Round:         round,
-					Positions:     map[domain.Position]string{},
-				},
-				Saved: false,
-			})
-			return
+			lineup = domain.TeamLineup{TeamID: teamID, CompetitionID: compID, Round: round, Positions: map[domain.Position]string{}}
 		}
-		c.JSON(http.StatusOK, teamLineupRead{TeamLineup: lineup, Saved: true})
+		c.JSON(http.StatusOK, teamLineupRead{TeamLineup: lineup, Saved: found})
 	})
 
 	// Match-scoped read (mp-825). The server never falls back to the
@@ -163,18 +139,9 @@ func RegisterPublicLineupHandlers(r *gin.RouterGroup, store TeamLineupStore, com
 		}
 		lineup, found := findMatchLineup(lineups, teamID, matchID)
 		if !found {
-			c.JSON(http.StatusOK, teamLineupRead{
-				TeamLineup: domain.TeamLineup{
-					TeamID:        teamID,
-					CompetitionID: compID,
-					MatchID:       matchID,
-					Positions:     map[domain.Position]string{},
-				},
-				Saved: false,
-			})
-			return
+			lineup = domain.TeamLineup{TeamID: teamID, CompetitionID: compID, MatchID: matchID, Positions: map[domain.Position]string{}}
 		}
-		c.JSON(http.StatusOK, teamLineupRead{TeamLineup: lineup, Saved: true})
+		c.JSON(http.StatusOK, teamLineupRead{TeamLineup: lineup, Saved: found})
 	})
 }
 

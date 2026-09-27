@@ -139,7 +139,6 @@ func TestBuildKachinukiDetail(t *testing.T) {
 	assert.Equal(t, "Pool Match 1", detail.Label)
 	assert.Equal(t, "RedTeam", detail.SideATeam)
 	assert.Equal(t, "WhiteTeam", detail.SideBTeam)
-	assert.Equal(t, "RedTeam", detail.Winner)
 	require.Len(t, detail.Bouts, 1)
 	assert.Equal(t, 1, detail.Bouts[0].Position)
 	assert.Equal(t, "R-Senpo", detail.Bouts[0].SideAName)
@@ -148,7 +147,11 @@ func TestBuildKachinukiDetail(t *testing.T) {
 	assert.Equal(t, "", detail.Bouts[0].ScoreB)
 	assert.Equal(t, "W-Senpo", detail.Bouts[0].SideBName)
 	assert.Equal(t, "Senpo", detail.Bouts[0].SideBPos)
-	assert.Equal(t, "R-Senpo", detail.Bouts[0].Winner)
+	// A fought bout with no encho and no hantei carries no middle mark and
+	// no side mark.
+	assert.Equal(t, "", detail.Bouts[0].Middle)
+	assert.Equal(t, "", detail.Bouts[0].MarkA)
+	assert.Equal(t, "", detail.Bouts[0].MarkB)
 	// Elimination tally: W-Senpo lost so b=1, R-Senpo won so a=0.
 	assert.Equal(t, 0, detail.EliminationA)
 	assert.Equal(t, 1, detail.EliminationB)
@@ -380,12 +383,10 @@ func TestCollectKachinukiMatches_BracketWithSubResults(t *testing.T) {
 	assert.Equal(t, "Bracket R1-M1", out[0].Label)
 	assert.Equal(t, "RedTeam", out[0].SideATeam)
 	assert.Equal(t, "WhiteTeam", out[0].SideBTeam)
-	assert.Equal(t, "RedTeam", out[0].Winner)
 	require.Len(t, out[0].Bouts, 3, "three bouts should be present")
 	assert.Equal(t, 1, out[0].Bouts[0].Position)
 	assert.Equal(t, "R-Senpo", out[0].Bouts[0].SideAName)
 	assert.Equal(t, "W-Senpo", out[0].Bouts[0].SideBName)
-	assert.Equal(t, "R-Senpo", out[0].Bouts[0].Winner)
 	assert.Equal(t, 3, out[0].Bouts[2].Position)
 }
 
@@ -415,9 +416,13 @@ func TestCollectKachinukiMatches_BronzeWithSubResults(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, out, 1, "bronze match with 2 bouts should produce one detail entry")
 	assert.Equal(t, "3rd Place Match", out[0].Label)
-	assert.Equal(t, "BlueTeam", out[0].Winner)
 	require.Len(t, out[0].Bouts, 2)
-	assert.Equal(t, "B1", out[0].Bouts[0].Winner)
+	assert.Equal(t, "R1", out[0].Bouts[0].SideAName)
+	assert.Equal(t, "B1", out[0].Bouts[0].SideBName)
+	// A fought bout carries no middle or side mark.
+	assert.Equal(t, "", out[0].Bouts[0].Middle)
+	assert.Equal(t, "", out[0].Bouts[0].MarkA)
+	assert.Equal(t, "", out[0].Bouts[0].MarkB)
 }
 
 // TestCollectKachinukiMatches_BronzeStub verifies the Naginata 3rd-place
@@ -553,8 +558,6 @@ func TestKachinukiDetailMatches_PoolMatchWithSubResults(t *testing.T) {
 	assert.Equal(t, "Pool Match 1", detail.Label)
 	assert.Equal(t, "RedTeam", detail.SideATeam)
 	assert.Equal(t, "WhiteTeam", detail.SideBTeam)
-	assert.Equal(t, "RedTeam", detail.Winner)
-	assert.Equal(t, "fought", detail.Decision)
 
 	require.Len(t, detail.Bouts, 2)
 	assert.Equal(t, 1, detail.Bouts[0].Position)
@@ -562,8 +565,14 @@ func TestKachinukiDetailMatches_PoolMatchWithSubResults(t *testing.T) {
 	assert.Equal(t, "MK", detail.Bouts[0].ScoreA, "IpponsA must be joined into one string")
 	assert.Equal(t, "W-Senpo", detail.Bouts[0].SideBName)
 	assert.Equal(t, "D", detail.Bouts[0].ScoreB, "IpponsB must be joined into one string")
-	assert.Equal(t, "R-Senpo", detail.Bouts[0].Winner)
-	assert.Equal(t, "fought", detail.Bouts[0].Decision)
+	// Bout 1 is fought, no encho, no hantei: no middle or side mark.
+	assert.Equal(t, "", detail.Bouts[0].Middle)
+	assert.Equal(t, "", detail.Bouts[0].MarkA)
+	assert.Equal(t, "", detail.Bouts[0].MarkB)
+	// Bout 2 is the fixture's hikiwake: centre X, still no side mark.
+	assert.Equal(t, "X", detail.Bouts[1].Middle)
+	assert.Equal(t, "", detail.Bouts[1].MarkA)
+	assert.Equal(t, "", detail.Bouts[1].MarkB)
 
 	// Bout 1: R-Senpo (SideA) wins, so W-Senpo (SideB) retires.
 	// Bout 2 is a hikiwake, which retires one player from EACH side:

@@ -323,16 +323,24 @@ func joinSp(a, b string) string {
 // sheet: "T10.1 Name (Position)". label leads name (matching the JS
 // display order the label's one owner, squad_member_label.jsx, composes
 // everywhere else), separated by a space; either the label or the
-// position may be blank independently. Empty name → empty string
-// (defensive, the renderer should never receive an empty player name for
-// a played bout).
+// position may be blank independently.
+//
+// A fighter picked by squad number and never named (bc-dnst) has a real
+// label and an empty name: the label alone still identifies them, so it
+// carries the cell on its own rather than blanking it (bc-kdsc fold-in f).
+// Only when BOTH label and name are empty is there genuinely nothing to
+// show, and the cell stays blank.
 func formatKachinukiPlayer(label, name, position string) string {
-	if name == "" {
-		return ""
-	}
 	display := name
 	if label != "" {
-		display = label + " " + name
+		if name != "" {
+			display = label + " " + name
+		} else {
+			display = label
+		}
+	}
+	if display == "" {
+		return ""
 	}
 	if position == "" {
 		return display

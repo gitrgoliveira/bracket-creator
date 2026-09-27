@@ -10,6 +10,7 @@ import (
 	"github.com/gitrgoliveira/bracket-creator/internal/state"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	excelize "github.com/xuri/excelize/v2"
 	"gopkg.in/yaml.v3"
 )
 
@@ -729,6 +730,62 @@ func TestResolveKachinukiDisplayName(t *testing.T) {
 		"no member id recorded on the row: stored text stands")
 	assert.Equal(t, "Old Spelling", resolveKachinukiDisplayName(squads, "", "m1", "Old Spelling"),
 		"no team id recorded on the row: stored text stands")
+}
+
+// TestBuildKachinukiDetail_NamelessFighterPickedByNumberStillPrints is the
+// bc-kdsc fold-in f repro: a fighter picked by squad number and never named
+// (bc-dnst) has a bout row whose own SideA stays "" -- so
+// resolveKachinukiDisplayName has nothing newer than that empty stored text
+// to show -- while resolveKachinukiMemberLabel still resolves a real label
+// from the squad slot's index alone, independent of its (blank) name. This
+// drives the REAL export path end to end (buildKachinukiDetail ->
+// helper.WriteKachinukiDetailSheet) and reads the rendered cell, because the
+// bug (or its absence) lives in formatKachinukiPlayer's response to a
+// label-but-no-name bout, which only the sheet renderer can confirm.
+func TestBuildKachinukiDetail_NamelessFighterPickedByNumberStillPrints(t *testing.T) {
+	squads := map[string][]domain.TeamMember{
+		"RedTeam": {
+			{ID: "m-red-3", Index: 3, Name: ""}, // picked by number, never named
+		},
+	}
+	teamNumbers := map[string]string{"RedTeam": "T10"}
+	positions := map[string]string{
+		lineupKey("RedTeam", memberKey("m-red-3")): "Chuken",
+	}
+
+	m := &state.MatchResult{
+		SideA:   "RedTeam",
+		SideB:   "WhiteTeam",
+		SideAID: "RedTeam",
+		Status:  state.MatchStatusCompleted,
+		SubResults: []state.SubMatchResult{
+			{
+				Position:      1,
+				SideA:         "", // never named: picked by squad number alone
+				SideAMemberID: "m-red-3",
+				SideB:         "W-Senpo",
+				IpponsA:       []string{"M"},
+				Decision:      "fought",
+			},
+		},
+	}
+
+	detail := buildKachinukiDetail(m, "Pool Match 1", positions, teamNumbers, squads)
+	require.Len(t, detail.Bouts, 1)
+	// The data buildKachinukiDetail hands the renderer: a real label, no name.
+	assert.Equal(t, "", detail.Bouts[0].SideAName, "the stored name stays empty: nothing newer to show")
+	assert.Equal(t, "T10.3", detail.Bouts[0].SideALabel, "the label still resolves from the squad slot's index")
+	assert.Equal(t, "Chuken", detail.Bouts[0].SideAPos)
+
+	f := excelize.NewFile()
+	defer func() { _ = f.Close() }()
+	require.NoError(t, helper.WriteKachinukiDetailSheet(f, []helper.KachinukiMatchDetail{detail}))
+
+	// Side A (Aka) sits in the RIGHT column (F) per helper.WhiteLeft.
+	cell, err := f.GetCellValue(helper.SheetKachinukiDetail, "F4")
+	require.NoError(t, err)
+	assert.NotEmptyf(t, cell, "a fighter picked by number and never named must not print a blank cell (got %q)", cell)
+	assert.Contains(t, cell, "T10.3", "the printed cell should at least show the known label")
 }
 
 // TestBuildKachinukiDetail_DisplayNameFollowsRename verifies the export

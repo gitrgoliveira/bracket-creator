@@ -228,12 +228,12 @@ async function mountSchedule(onEditScore = vi.fn(), matches = [runningMatch(), r
   });
 }
 
-async function mountSelfRun() {
+async function mountSelfRun(onClose = vi.fn()) {
   await act(async () => {
     render(
       <MatchViewerModal
         match={runningMatch()}
-        onClose={vi.fn()}
+        onClose={onClose}
         tournament={{ mode: 'self-run' }}
         compId="c1"
       />
@@ -242,6 +242,7 @@ async function mountSelfRun() {
   await act(async () => {
     fireEvent.click(screen.getByRole('button', { name: 'Report result' }));
   });
+  return onClose;
 }
 
 // ── 1. admin_shiaijo.jsx: inline court console ───────────────────────────────
@@ -551,5 +552,49 @@ describe('the pools and bracket editors close only on a saved result (bc-plcl)',
     expect(editorOpen(), 'after a correction that only queued').toBe(true);
     await submit({ status: 'completed', winner: { id: 'p2', name: 'Tanaka' } });
     expect(editorOpen(), 'after a saved correction').toBe(false);
+  });
+});
+
+// ── the self-run editor's own close decision (bc-dhas) ───────────────────────
+// The public surface used to close on ANY landed write (writeDidNotLand
+// alone), so Start match and every autosaved point dumped the operator back
+// to the match card. It now asks writeKeepsEditorOpen like every other
+// closing host (bc-plcl): stay open for a running write with no winner, or
+// for one that did not land; close, with the match card, only for a landed
+// write that ends the match.
+
+describe('the self-run editor stays open through running writes (bc-dhas)', () => {
+  const editorOpen = () => !!screen.queryByTestId('probe-score-editor');
+
+  it('stays open after Start and after an autosave; closes with the match card only on a landed finish', async () => {
+    const write = vi.fn()
+      .mockResolvedValueOnce({ status: 'running', winner: null })
+      .mockResolvedValueOnce({ status: 'running', ipponsA: ['M'] })
+      .mockResolvedValueOnce({ queued: true })
+      .mockResolvedValueOnce({ status: 'completed', winner: { id: 'p1', name: 'Yamada' } });
+    const recordScore = window.API.recordScore;
+    window.API.recordScore = write;
+    try {
+      const onClose = await mountSelfRun();
+      const submit = async (patch) => { await act(async () => { await probe.props.onSubmit(patch); }); };
+
+      await submit({ status: 'running', winner: null });
+      expect(editorOpen(), 'after Start').toBe(true);
+      expect(onClose).not.toHaveBeenCalled();
+
+      await submit({ status: 'running', ipponsA: ['M'] });
+      expect(editorOpen(), 'after an autosaved point').toBe(true);
+      expect(onClose).not.toHaveBeenCalled();
+
+      await submit({ status: 'completed', winner: { id: 'p1', name: 'Yamada' } });
+      expect(editorOpen(), 'after a finish that only queued').toBe(true);
+      expect(onClose).not.toHaveBeenCalled();
+
+      await submit({ status: 'completed', winner: { id: 'p1', name: 'Yamada' } });
+      expect(editorOpen(), 'after a landed finish').toBe(false);
+      expect(onClose).toHaveBeenCalledTimes(1);
+    } finally {
+      window.API.recordScore = recordScore;
+    }
   });
 });

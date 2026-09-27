@@ -12,7 +12,7 @@
 // here (plus window.* assignments) so the public surface of viewer.jsx is
 // unchanged.
 
-import { writeDidNotLand } from './write_result.jsx';
+import { writeKeepsEditorOpen } from './write_result.jsx';
 import { SideLabel } from './side_cell.jsx';
 import { useTeamLineups, TeamScoreboard, IndividualScore, numberedParts, teamNameMark } from './match_scoreboard.jsx';
 import { NumberedName } from './numbered_name.jsx';
@@ -386,13 +386,18 @@ export function MatchViewerModal({ match, onClose, tournament, compId: defaultCo
       onSubmit: async (patch) => {
         try {
           const res = await window.API.recordScore(scoringMatch.compId || defaultCompId, scoringMatch.id, patch, "", scoringMatch);
-          // A write that did not land is NOT a confirmed save: keep the editor
-          // open and return the signal so its not-saved banner shows. Closing
-          // here would be a false success on the public self-run surface, which
-          // matters more here than anywhere else: this surface has no toast, so
-          // the banner is the ONLY thing that can report it. Covers the queued
-          // case and the superseded one (bc-lww1).
-          if (writeDidNotLand(res)) return res;
+          // bc-dhas: writeKeepsEditorOpen is the one rule every closing host
+          // asks (bc-plcl) -- keep the editor open for a write that did not
+          // land (the not-saved banner, as before) AND for a running write
+          // with no winner (Start, every autosave), closing only when a
+          // landed write ends the match. This surface used to ask
+          // writeDidNotLand alone, so a landed Start or a landed autosaved
+          // point closed the editor AND the match card, dumping the operator
+          // straight back to the home page mid-match. This matters more here
+          // than anywhere else: the public self-run surface has no toast, so
+          // the not-saved banner is the ONLY way a refused/queued write is
+          // ever reported.
+          if (writeKeepsEditorOpen(patch, res)) return res;
           setScoringMatch(null);
           onClose();
           return res;

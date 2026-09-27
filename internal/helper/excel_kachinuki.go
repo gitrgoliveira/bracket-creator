@@ -60,7 +60,11 @@ type KachinukiBout struct {
 	// exactly as it did before squad labels existed.
 	SideALabel string
 	SideAPos   string // lineup position (Senpo, Jiho, Chuken, Fukusho, Taisho), may be empty
-	ScoreA     string // accumulated ippon string (e.g. "MK", "MMK") or empty
+	// ScoreA is the accumulated ippon string (e.g. "MK", "MMK"), or empty.
+	// A default-win winner's EMPTY recorded cell instead carries the FIK
+	// maru fallback (domain.DefaultWinMaruAB), exactly as the main sheets'
+	// writeTeamSubMatchScores fills it (bc-cse F2).
+	ScoreA     string
 	SideBName  string
 	SideBLabel string // Side B's twin of SideALabel, same rules.
 	SideBPos   string
@@ -140,16 +144,26 @@ func WriteKachinukiDetailSheet(f *excelize.File, matches []KachinukiMatchDetail)
 	// Set column widths for readability. These are unrelated to the
 	// per-court widths of Pool Matches / Elimination Matches. Column A is
 	// wide enough that the summary row's "Summary" label does not clip.
+	//
+	// The fighter columns (B/F) are widened past the Winner/Decision
+	// columns' old share, now that both are gone and the sheet fits one
+	// printed page wide regardless of column width (SetSheetLayoutPortraitA4
+	// scales the print, never the on-screen column). 24 clipped a labelled
+	// name at the 12pt centred font this sheet uses: a LibreOffice render of
+	// "T3.4 Yui Nakamura (Chuken)" (26 characters) lost its first character
+	// and spilled past the table. 36 comfortably fits the longest realistic
+	// label, "T12.4 Yui Nakamura (Fukusho)" (28 characters), with margin to
+	// spare (bc-cse F10).
 	colWidths := []struct {
 		from, to string
 		w        float64
 	}{
 		{kachinukiColBout, kachinukiColBout, 12},
-		{kachinukiColLeft, kachinukiColLeft, 24},
+		{kachinukiColLeft, kachinukiColLeft, 36},
 		{kachinukiColLeftScore, kachinukiColLeftScore, 10},
 		{kachinukiColVs, kachinukiColVs, 5},
 		{kachinukiColRightScore, kachinukiColRightScore, 10},
-		{kachinukiColRight, kachinukiColRight, 24},
+		{kachinukiColRight, kachinukiColRight, 36},
 	}
 	for _, cw := range colWidths {
 		handleExcelError("SetColWidth", f.SetColWidth(sheet, cw.from, cw.to, cw.w))

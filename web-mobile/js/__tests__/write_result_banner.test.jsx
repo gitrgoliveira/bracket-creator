@@ -13,6 +13,7 @@
 import { describe, it, expect } from 'vitest';
 import {
     notLandedBanner,
+    dependentActionBlocked,
     SUPERSEDED_REASON,
     SUPERSEDED_ADVICE,
     CLOCK_SKEW_REASON_TEXT,
@@ -62,5 +63,30 @@ describe('notLandedBanner', () => {
         // the host swallowed the error, so this must not throw.
         expect(notLandedBanner(null)).toBeNull();
         expect(notLandedBanner(undefined)).toBeNull();
+    });
+});
+
+// F1 (bc-p3-dh-lineups-excel review): dependentActionBlocked answers a
+// narrower question than notLandedBanner -- not "does this write deserve a
+// banner" but "does a caller-specific dependent action need to say why it
+// silently did nothing". A refusal already has notLandedBanner's own banner,
+// so this stays silent for that case on purpose (no duplicate message).
+describe('dependentActionBlocked', () => {
+    it('names a queued write as the reason a dependent action did not run', () => {
+        expect(dependentActionBlocked({ queued: true })).toBe(
+            "Couldn't save the current scores (offline or server busy). Try again once the connection is back."
+        );
+    });
+
+    it('says nothing about a refusal (notLandedBanner already reports it)', () => {
+        expect(dependentActionBlocked({ applied: false })).toBeNull();
+        expect(dependentActionBlocked({ applied: false, reason: 'clock_skew' })).toBeNull();
+    });
+
+    it('says nothing about a write that landed, or when there is no result at all', () => {
+        expect(dependentActionBlocked({ applied: true })).toBeNull();
+        expect(dependentActionBlocked({})).toBeNull();
+        expect(dependentActionBlocked(null)).toBeNull();
+        expect(dependentActionBlocked(undefined)).toBeNull();
     });
 });

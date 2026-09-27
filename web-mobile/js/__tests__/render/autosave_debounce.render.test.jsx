@@ -643,6 +643,78 @@ describe('bc-dhas: Add/Remove representative bout races the pending autosave', (
     expect(patch.subResults.find((s) => s.position === 1)?.decision).toBe('hikiwake');
   });
 
+  it('F6: adoptServerSubs builds the override from the LATEST match prop, not the one captured at click time', async () => {
+    let resolveDaihyosen;
+    window.API.recordDaihyosen.mockImplementation(() => new Promise((resolve) => { resolveDaihyosen = resolve; }));
+    const m1 = makeKnockoutTeamMatch();
+    const { rerender } = renderModal(m1);
+
+    await act(async () => { fireEvent.click(screen.getByTestId('scoring-modal-daihyosen-button')); });
+    await settle(); // the pre-save lands; recordDaihyosen is still pending
+
+    // The parent catches up BEFORE the POST resolves (an SSE push racing it):
+    // the dh row is already on the prop by the time the request answers.
+    const dh = daihyosenRow();
+    const m2 = { ...m1, subResults: [dh] };
+    await act(async () => {
+      rerender(<ScoreEditorModal match={m2} onClose={vi.fn()} onSubmit={makeOnSubmit(m2)} password="" />);
+    });
+
+    // The request finally resolves with the SAME row the prop already
+    // carries: adoptServerSubs's closure over the ORIGINAL `match` (m1,
+    // captured when onDaihyosen was created at click time) is now two
+    // renders stale.
+    await act(async () => { resolveDaihyosen({ subResults: [dh] }); });
+    await settle();
+
+    // The parent then finishes the match: SAME subResults as m2 (only
+    // status/winner differ), so matchSubsKey -- subResults content only --
+    // does not change between m2 and m3. If a stale override is already
+    // shadowing the prop, the override-clearing effect has no key change to
+    // fire on and never removes it.
+    const m3 = { ...m2, status: 'completed', winner: 'Team A' };
+    await act(async () => {
+      rerender(<ScoreEditorModal match={m3} onClose={vi.fn()} onSubmit={makeOnSubmit(m3)} password="" />);
+    });
+
+    // Red without the fix: adoptServerSubs reverts every field but
+    // subResults to m1 (status: "running"), so the editor keeps showing the
+    // running UI (no CORRECTION pill) even though the match completed.
+    expect(screen.queryByText('CORRECTION')).toBeTruthy();
+  });
+
+  it('A6: a scoring tap mid-request holds the autosave until the request resolves and the row is adopted', async () => {
+    let resolveDaihyosen;
+    window.API.recordDaihyosen.mockImplementation(() => new Promise((resolve) => { resolveDaihyosen = resolve; }));
+    renderModal(makeKnockoutTeamMatch());
+
+    await act(async () => { fireEvent.click(screen.getByTestId('scoring-modal-daihyosen-button')); });
+    await settle(); // the pre-save lands; recordDaihyosen is still pending
+    window.API.recordScore.mockClear();
+
+    // A tap made WHILE the POST is in flight arms the debounce.
+    await act(async () => { fireEvent.click(tieBoutButton(0)); });
+
+    // The debounce outlives the request: without the hold, this is exactly
+    // where the timer fires with a patch built before adoptServerSubs ran.
+    await act(async () => { vi.advanceTimersByTime(AUTOSAVE_DEBOUNCE_MS + 50); });
+    await settle();
+    // Red without the hold: the timer already fired here and sent a patch
+    // with no position -1 row.
+    expect(window.API.recordScore).not.toHaveBeenCalled();
+
+    await act(async () => {
+      resolveDaihyosen({ ...makeKnockoutTeamMatch(), subResults: [daihyosenRow()] });
+    });
+    await settle();
+
+    // The FIRST write after the request resolves carries the row: the
+    // deferred edit fires once the render adopting it has landed.
+    expect(window.API.recordScore).toHaveBeenCalledTimes(1);
+    const [, , patch] = window.API.recordScore.mock.calls[0];
+    expect(patch.subResults.some((s) => s.position === -1)).toBe(true);
+  });
+
   it('T3a: Remove inside the debounce window stays removed (onClose does not unmount)', async () => {
     window.API.removeDaihyosen.mockResolvedValue({ subResults: [] });
     const onClose = vi.fn();

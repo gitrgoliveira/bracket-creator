@@ -1,10 +1,12 @@
 package domain
 
-// result_marks.go is the ONE domain-layer owner of the two closed-set display
+// result_marks.go is the ONE domain-layer owner of the closed-set display
 // rules every results workbook sheet applies: the centre "vs" cell (see
-// MiddleMark) and the per-side result mark beside a competitor's score (see
-// SideMarks/SideMarksAB). It lives in domain, not internal/export, because
-// TWO sheet families need it and neither may import the other: the main Pool
+// MiddleMark), the per-side result mark beside a competitor's score (see
+// SideMarks/SideMarksAB), and the default-win maru fallback for a winner
+// whose recorded score cells are empty (see DefaultWinMaruAB). It lives in
+// domain, not internal/export, because TWO sheet families need it and
+// neither may import the other: the main Pool
 // Matches / Elimination Matches sheets (internal/export, which already
 // imports domain) and the Kachinuki Detail sheet (built by
 // internal/engine/kachinuki_export.go, which imports domain but not export --
@@ -68,10 +70,12 @@ func EnchoLabel(on bool) string {
 //	fusenpai  -> loser  "Fus."  (the mark names the no-show)
 //	fusensho  -> winner "Fus."  (the default WIN names the present side)
 //
-// The JS viewer surfaces fusensho via a separate bout badge, so its
-// sideMarks() omits it; a flat spreadsheet cell has no badge, so every Go
-// caller keeps the "Fus." mark (deliberate divergence, mirrored in the JS
-// docstring).
+// Mirrors sideMarks() in web-mobile/js/bracket.jsx exactly, fusensho
+// included: bc-tmfn removed an earlier gap where that surface omitted the
+// winner-side "Fus." mark on the theory that a separate bout badge already
+// carried it. No such badge exists for a match-level fusensho decision, so
+// there is no divergence between the two -- a fusensho match reads
+// identically here and in the JS viewer.
 func SideMarks(decision string, decidedByHantei bool) (winnerMark, loserMark string) {
 	switch {
 	case IsKikenDecisionStr(decision):
@@ -119,6 +123,51 @@ func SideMarksAB(decision string, decidedByHantei bool, att WinnerAttribution) (
 	default:
 		return "", ""
 	}
+}
+
+// DefaultWinMaruAB fills the WINNER's empty score cell with the FIK
+// default-win maru award (DefaultWinIppons), given SIDE-ordered scores. The
+// engine already records default wins as maru ippons from the same rule, so
+// scored data carries the balls itself -- this fallback covers results
+// recorded before that fill or imported without it. Never applies to engi
+// flag counts (callers gate) or the loser.
+//
+// att carries the ids and names of the record being marked, resolved
+// through AttributeWinnerSide, the SAME owner SideMarksAB uses: the two
+// functions compose one cell (score + result mark) and must agree on which
+// side won, or a same-name pair whose ids disagree with the name order
+// could print the maru fallback in one side's cell and the Kiken/Fus. mark
+// in the other's.
+//
+// enchoOn is the caller's own "did this bout go to overtime" predicate
+// (state.EnchoMetadata.On() on every current caller), the same reason
+// MiddleMark takes a bare bool rather than the metadata struct itself:
+// domain does not import state. The joined maru string goes through
+// IpponsScore rather than strings.Join so this file needs no import beyond
+// the domain package itself; TestIpponsScore already pins that a maru
+// slice survives it unchanged.
+//
+// The ONE domain-layer owner of this fallback: internal/export/suffix.go's
+// DefaultWinMaruAB (the main sheets) and
+// internal/engine/kachinuki_export.go's buildKachinukiDetail (the Kachinuki
+// Detail sheet) both delegate here, so a bout reads the same maru on every
+// sheet.
+func DefaultWinMaruAB(scoreA, scoreB, decision string, enchoOn bool, att WinnerAttribution) (string, string) {
+	if att.Winner == "" || !IsDefaultWinDecisionStr(decision) {
+		return scoreA, scoreB
+	}
+	maru := IpponsScore(DefaultWinIppons(enchoOn))
+	switch AttributeWinnerSide(att) {
+	case MatchSideA:
+		if scoreA == "" {
+			scoreA = maru
+		}
+	case MatchSideB:
+		if scoreB == "" {
+			scoreB = maru
+		}
+	}
+	return scoreA, scoreB
 }
 
 // JoinNonEmpty joins two display fragments with a single space, skipping

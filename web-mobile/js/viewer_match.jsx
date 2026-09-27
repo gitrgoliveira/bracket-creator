@@ -333,7 +333,10 @@ VSchedItem.displayName = "VSchedItem";
 
 export function MatchViewerModal({ match, onClose, tournament, compId: defaultCompId, slotLabel }) {
   window.useEscapeToClose(onClose);
-  const [scoringMatch, setScoringMatch] = useState(null);
+  // A5: a boolean, not a match snapshot -- the editor below reads the LIVE
+  // `match` prop directly (see its onSubmit too), so a correction made on
+  // another device is adopted instead of frozen at "Report result" time.
+  const [isScoring, setIsScoring] = useState(false);
   const triggerRef = useRefV(null);
   const trapRef = useRefV(null);
   const modalRefCb = useCallback((node) => {
@@ -379,19 +382,23 @@ export function MatchViewerModal({ match, onClose, tournament, compId: defaultCo
   const sideBName = slotName(match.sideB?.name || (typeof match.sideB === "string" ? match.sideB : ""), (match.feeders || [])[1]);
   const dialogLabel = sideAName && sideBName ? `Match: ${sideBName} vs ${sideAName}` : "Match details";
 
-  if (scoringMatch && window.ScoreEditorModal) {
+  if (isScoring && window.ScoreEditorModal) {
     return React.createElement(window.ScoreEditorModal, {
-      match: scoringMatch,
-      onClose: () => setScoringMatch(null),
+      // A5: the LIVE prop, not a snapshot -- so the editor follows a
+      // correction made on another device the same way every admin host's
+      // editor does (compId/id/onSubmit's own recordScore call below read
+      // the same live `match`, never a frozen copy).
+      match,
+      onClose: () => setIsScoring(false),
       onSubmit: async (patch) => {
         try {
-          const res = await window.API.recordScore(scoringMatch.compId || defaultCompId, scoringMatch.id, patch, "", scoringMatch);
+          const res = await window.API.recordScore(match.compId || defaultCompId, match.id, patch, "", match);
           // Close only when a landed write ends the match (writeKeepsEditorOpen,
           // the rule every closing host asks). Start, an autosave, or a write
           // that did not land keeps the editor open; the last shows its
           // not-saved banner, the only report this toast-less surface has.
           if (writeKeepsEditorOpen(patch, res)) return res;
-          setScoringMatch(null);
+          setIsScoring(false);
           onClose();
           return res;
         } catch (err) {
@@ -426,7 +433,7 @@ export function MatchViewerModal({ match, onClose, tournament, compId: defaultCo
             ) : (
               <button type="button"
                 className="btn btn--primary btn--sm"
-                onClick={() => setScoringMatch({ ...match, id: match.id })}
+                onClick={() => setIsScoring(true)}
               >
                 Report result
               </button>

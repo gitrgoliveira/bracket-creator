@@ -99,6 +99,16 @@ async function renderEditor(props = {}) {
   return utils;
 }
 
+
+// F1 (bc-p3-dh-lineups-excel review): arms the debounce on a NUMBERED bout
+// (never the daihyosen row itself) so onRemoveDaihyosen's own pre-save
+// condition (hadPending || isDirty) is true. Same selectors as the bc-dhas
+// block in autosave_debounce.render.test.jsx.
+function subMatchRows() { return [...document.querySelectorAll('.team-sub-match')]; }
+function ipponButton(rowEl, color, letter) {
+  return [...rowEl.querySelectorAll(`.team-sub-match__side--${color} button.ipt-btn`)].find((b) => b.textContent === letter);
+}
+
 describe('team editor inline error surface', () => {
   it('shows a failed remove-daihyosen error on screen (it is not swallowed by the add-daihyosen guard)', async () => {
     window.API.removeDaihyosen = vi.fn().mockRejectedValue(new Error('daihyosen_scored'));
@@ -126,5 +136,46 @@ describe('team editor inline error surface', () => {
       expect(screen.getByTestId('team-editor-error').textContent)
         .toBe('another operator is scoring this match');
     });
+  });
+
+  // F1 (bc-p3-dh-lineups-excel review): saveRunningSheet's pre-save can come
+  // back QUEUED (offline / retryable 5xx) rather than refused. Before this
+  // fix notLandedBanner correctly said nothing (a queue is not a refusal) and
+  // nothing else spoke up either, so the tap silently did nothing. Restored:
+  // dependentActionBlocked's sentence, the one the editor said before
+  // saveRunningSheet existed (assertRunningWritePersisted / score_not_synced,
+  // see git history at 26d12df2).
+  const QUEUED_MESSAGE = "Couldn't save the current scores (offline or server busy). Try again once the connection is back.";
+
+  it('a queued pre-save on Add shows the not-yet-sent message and never posts the add', async () => {
+    // No daihyosen row yet, so the Add affordance (not Remove) renders.
+    const noDaihyosenYet = matchWithDaihyosen({
+      subResults: [
+        { position: 1, sideA: 'Team A', sideB: 'Team B', ipponsA: ['M'], ipponsB: ['K'], winner: '' },
+      ],
+    });
+    await renderEditor({ match: noDaihyosenYet, onSubmit: vi.fn().mockResolvedValue({ queued: true }) });
+
+    await act(async () => { fireEvent.click(screen.getByTestId('scoring-modal-daihyosen-button')); });
+
+    await waitFor(() => {
+      expect(screen.getByTestId('team-editor-error').textContent).toBe(QUEUED_MESSAGE);
+    });
+    expect(window.API.recordDaihyosen).not.toHaveBeenCalled();
+  });
+
+  it('a queued pre-save on Remove shows the not-yet-sent message and never posts the remove', async () => {
+    await renderEditor({ onSubmit: vi.fn().mockResolvedValue({ queued: true }) });
+
+    // Arm the debounce on bout 2 (unscored, never the daihyosen row) so
+    // onRemoveDaihyosen's own pre-save condition (hadPending || isDirty) is
+    // true and the queued pre-save actually runs.
+    await act(async () => { fireEvent.click(ipponButton(subMatchRows()[1], 'shiro', 'M')); });
+    await act(async () => { fireEvent.click(screen.getByTestId('team-daihyosen-remove')); });
+
+    await waitFor(() => {
+      expect(screen.getByTestId('team-editor-error').textContent).toBe(QUEUED_MESSAGE);
+    });
+    expect(window.API.removeDaihyosen).not.toHaveBeenCalled();
   });
 });

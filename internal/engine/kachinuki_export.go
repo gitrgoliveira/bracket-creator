@@ -233,20 +233,32 @@ func buildKachinukiDetail(m *state.MatchResult, label string, positions map[stri
 	bouts := make([]helper.KachinukiBout, 0, len(m.SubResults))
 	for _, sub := range m.SubResults {
 		// Attributed as the main sheets' team bout rows are
-		// (domain.SubBoutAttribution).
-		att := domain.SubBoutAttribution(sub.Attribution())
+		// (domain.SubBoutAttributionForTeamRow), including its nameless-row
+		// team-name fallback (bc-cse F3): a fixed-order bout that names no
+		// fighter of its own is attributed by the encounter's own team
+		// names, exactly as internal/export/builder.go's
+		// writeTeamSubMatchScores does.
+		att := domain.SubBoutAttributionForTeamRow(sub.Attribution(), m.SideA, m.SideB)
 		markA, markB := domain.SideMarksAB(sub.Decision, sub.HanteiDecided(), att)
+		// The default-win maru fallback (domain.DefaultWinMaruAB, bc-cse F2)
+		// fills an empty winner cell exactly as the main sheets'
+		// writeTeamSubMatchScores does, so a bout whose default-win winner
+		// has empty recorded ippons (legacy/pre-fill data) reads the same
+		// maru on both sheets. Also drops placeholder dots and the Ht mark
+		// from a recorded score, as the main sheets do.
+		scoreA, scoreB := domain.DefaultWinMaruAB(
+			domain.IpponsScore(sub.IpponsA), domain.IpponsScore(sub.IpponsB),
+			sub.Decision, sub.Encho.On(), att)
 		bouts = append(bouts, helper.KachinukiBout{
 			Position:   sub.Position,
 			SideAName:  resolveKachinukiDisplayName(squads, m.SideAID, sub.SideAMemberID, sub.SideA),
 			SideALabel: resolveKachinukiMemberLabel(teamNumbers, squads, m.SideAID, sub.SideAMemberID),
 			SideAPos:   resolvePos(m.SideA, sub.SideAMemberID, sub.SideA),
-			// Drops placeholder dots and the Ht mark, as the main sheets do.
-			ScoreA:     domain.IpponsScore(sub.IpponsA),
+			ScoreA:     scoreA,
 			SideBName:  resolveKachinukiDisplayName(squads, m.SideBID, sub.SideBMemberID, sub.SideB),
 			SideBLabel: resolveKachinukiMemberLabel(teamNumbers, squads, m.SideBID, sub.SideBMemberID),
 			SideBPos:   resolvePos(m.SideB, sub.SideBMemberID, sub.SideB),
-			ScoreB:     domain.IpponsScore(sub.IpponsB),
+			ScoreB:     scoreB,
 			Middle:     domain.MiddleMark(sub.Decision, sub.Encho.On()),
 			MarkA:      markA,
 			MarkB:      markB,

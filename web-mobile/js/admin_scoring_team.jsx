@@ -51,7 +51,7 @@ import { SideLabel } from './side_cell.jsx';
 // Imported from the leaf, not read off `window`, for the same reason
 // admin_scoring_shared.jsx does it: write_result.jsx is import-only, and this
 // editor is ES-imported by hosts and tests that never load api_client.
-import { notLandedBanner, writeDidNotLand } from './write_result.jsx';
+import { notLandedBanner, writeDidNotLand, dependentActionBlocked } from './write_result.jsx';
 
 // boutMiddle is THE single source for a bout's centre value (vs/X/(E)/(DH));
 // the editor derives its per-bout middle from it rather than restating the
@@ -798,6 +798,14 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
   // (same id); keying on match?.id — not the object ref — keeps the editor open
   // across that reload instead of collapsing it after every ippon change.
   useEffectA(() => { setEditingDoneBoutIdx(-1); editingDoneOriginalRef.current = null; }, [match?.id]);
+  // F6: the LATEST `match` prop, refreshed every render (not in an effect: a
+  // pending async continuation -- adoptServerSubs below, resumed after an
+  // awaited save -- must see the prop as of whichever render most recently
+  // ran, not the one in which its own closure was created). Same
+  // direct-during-render assignment convention as _autosaveIsRunningRef etc.
+  // below.
+  const matchRef = useRefA(match);
+  matchRef.current = match;
   const m = matchOverride || match;
   const isComplete = m.status === "completed";
   // Kachinuki appends bouts beyond teamSize (engine assigns Position =
@@ -1056,11 +1064,31 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
   const _autosaveIsRunningRef = useRefA(false);
   const _autosaveBuildPatchRef = useRefA(null);
   const _autosaveOnSubmitRef = useRefA(null);
-  const { markDirty: markScoringDirty, cancelDebounce: cancelScoringDebounce } = useDebouncedRunningWrite({
+  const {
+    markDirty: markScoringDirty,
+    cancelDebounce: cancelScoringDebounce,
+    hold: holdScoringWrite,
+    release: releaseScoringWrite,
+  } = useDebouncedRunningWrite({
     isRunningRef: _autosaveIsRunningRef,
     buildPatchRef: _autosaveBuildPatchRef,
     onSubmitRef: _autosaveOnSubmitRef,
   });
+  // A6: release the hold once a representative-bout add/remove request has
+  // finished (daihyosenBusy's true->false edge), whichever way it finished.
+  // Both onDaihyosen and onRemoveDaihyosen set daihyosenBusy(false) in their
+  // `finally`, in the SAME synchronous continuation as the adopt
+  // (adoptServerSubs/setMatchOverride) that precedes it, so React batches
+  // both state updates into ONE render -- the render whose body refreshes
+  // _autosaveBuildPatchRef (line below, "_autosaveBuildPatchRef.current =
+  // buildPatch") runs BEFORE this effect. That holds even on F6's skip
+  // branch (adoptServerSubs decides the prop already matches the server and
+  // sets no override): reaching that branch at all means a render already
+  // carried the fresh prop, so buildPatchRef is already current and
+  // releasing here is still safe. Keyed on daihyosenBusy, not matchOverride:
+  // keying on the override would miss exactly that skip branch, since it
+  // sets no override and so triggers no re-run of an effect keyed on it.
+  useEffectA(() => { if (!daihyosenBusy) releaseScoringWrite(); }, [daihyosenBusy]);
 
   // T141: remove an unscored daihyosen placeholder. Defined at component
   // level so both the hantei row and any other affordance can call it.
@@ -1068,6 +1096,10 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
     const hadPending = cancelScoringDebounce();
     setEditorErr("");
     setDaihyosenBusy(true);
+    // A6: hold until daihyosenBusy flips back false (the effect above), so a
+    // scoring tap that lands during the DELETE cannot autosave a patch built
+    // before adoptServerSubs's row removal has rendered.
+    holdScoringWrite();
     try {
       if (m.status === "running" && (hadPending || isDirty)) {
         if (!(await saveRunningSheet())) return;
@@ -2621,7 +2653,23 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
   // Raw server rows are safe to adopt directly: the only per-sub field the
   // client derives is decidedByHantei, which none of these responses carry.
   const adoptServerSubs = (subResults) => {
-    if (Array.isArray(subResults)) setMatchOverride({ ...match, subResults });
+    if (!Array.isArray(subResults)) return;
+    // F6: build the override from the LATEST match prop (matchRef, updated
+    // every render), never from the `match` this closure was created with.
+    // That closure can be stale by the time an awaited save resolves -- the
+    // parent may have re-rendered with fresh data in the meantime (an SSE
+    // push racing the daihyosen POST) -- and every field but subResults
+    // would then revert to what it was at click time, shadowing the fresh
+    // prop.
+    const latest = matchRef.current;
+    // Skip the override entirely when the latest prop's bout log already
+    // matches what the server just returned: the override exists only to
+    // bridge the gap before the parent catches up. Setting one here would
+    // needlessly shadow a prop that is already current -- and since nothing
+    // would then differ, the override-clearing effect above (keyed on
+    // matchSubsKey) would never fire to remove it.
+    if (JSON.stringify(latest?.subResults || []) === JSON.stringify(subResults)) return;
+    setMatchOverride({ ...latest, subResults });
   };
 
   // Save the sheet first through doSubmit (it cancels the pending autosave,
@@ -2637,6 +2685,13 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
     if (!res) return false;
     const b = notLandedBanner(res);
     if (b) setWriteFailed(b);
+    // F1: a queued pre-save is not a refusal (notLandedBanner says nothing
+    // about it, by design), but it IS the reason a dependent Add/Remove tap
+    // is about to silently do nothing: say so beside the representative-bout
+    // controls, since the generic pending pill only reports the SCORES, not
+    // this tap.
+    const blocked = dependentActionBlocked(res);
+    if (blocked) setEditorErr(blocked);
     return !writeDidNotLand(res);
   };
 
@@ -3618,6 +3673,11 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
               // add the row and adopt the server's bout log.
               setEditorErr("");
               setDaihyosenBusy(true);
+              // A6: hold until daihyosenBusy flips back false (see the
+              // effect near useDebouncedRunningWrite's call), so a scoring
+              // tap that lands during the POST cannot autosave a patch built
+              // before adoptServerSubs's new row has rendered.
+              holdScoringWrite();
               try {
                 if (!(await saveRunningSheet())) return;
                 const res = await window.API.recordDaihyosen(m.compId, m.id, resolveDecisionPassword(password));

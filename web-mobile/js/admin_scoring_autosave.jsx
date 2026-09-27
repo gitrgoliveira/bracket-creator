@@ -116,6 +116,16 @@ export function useDebouncedRunningWrite({ isRunningRef, buildPatchRef, onSubmit
   // One token per editor instance, so two open editors never release each
   // other's pending edit.
   const pendingTokenRef = useRefA({});
+  // A6: hold/deferred pair for a caller that must suppress the autosave for a
+  // window it controls (the team editor's representative-bout add/remove
+  // request), without losing an edit made during that window. holdRef gates
+  // ONLY the timer callback below -- fireRunningWrite itself never reads it,
+  // so the unmount and page-hide flushes (which call fireRunningWrite
+  // directly) always write at once, hold or not. deferredRef records that a
+  // timer fired while held and was suppressed; it is what release() and the
+  // unmount/flush paths use to know an edit is still owed.
+  const holdRef = useRefA(false);
+  const deferredRef = useRefA(false);
   // Existing test stubs of window.API predate notePendingEdit, so ask first.
   const notePending = (on) => {
     const api = window.API;
@@ -135,12 +145,20 @@ export function useDebouncedRunningWrite({ isRunningRef, buildPatchRef, onSubmit
   // Hantei / Decision) so the queued timer can't fire afterward, and before
   // closing on the operator's Discard, so the unmount does not write what they
   // threw away. Nothing of this hook's is left pending then, so the pending
-  // edit is released too. Returns whether an edit was pending, so a caller
-  // can tell whether a save is still owed (onRemoveDaihyosen).
+  // edit is released too. Returns whether an edit was pending -- a live timer
+  // OR a deferred one a hold is still sitting on -- so a caller can tell
+  // whether a save is still owed (onRemoveDaihyosen). A deferred edit is
+  // dropped here, not fired: the explicit submit this precedes carries the
+  // same current state (buildPatch always reads live state), so firing it
+  // separately would only risk a stale write landing AFTER that submit's own
+  // result (e.g. a Finish completing the match, then a late "running" write
+  // regressing it) -- see hold()'s own note.
   const cancelDebounce = () => {
-    const hadPending = clearTimer();
-    if (hadPending) notePending(false);
-    return hadPending;
+    const hadTimer = clearTimer();
+    const hadDeferred = deferredRef.current;
+    deferredRef.current = false;
+    if (hadTimer || hadDeferred) notePending(false);
+    return hadTimer || hadDeferred;
   };
 
   // The running write itself, shared by the debounce timer, the unmount and
@@ -169,6 +187,26 @@ export function useDebouncedRunningWrite({ isRunningRef, buildPatchRef, onSubmit
     }
   };
 
+  // A6: hold/release, for a caller whose own request (the team editor's
+  // daihyosen add/remove POST) races a scoring tap that lands mid-request. A
+  // tap during the request arms the debounce as usual; if the debounce
+  // outlives the request, the timer fires while held below and defers
+  // instead of writing, because firing there would send a patch built from
+  // buildPatchRef as it stood BEFORE the request's own result was adopted
+  // (adoptServerSubs / setMatchOverride) -- refs update during RENDER, not
+  // synchronously inside an async continuation, so the adopt's render has to
+  // land first. release() is the caller's signal that it has: call it only
+  // from an effect that runs after the render applying the adopted result,
+  // never synchronously right after the adopt call itself.
+  const hold = () => { holdRef.current = true; };
+  const release = () => {
+    holdRef.current = false;
+    if (deferredRef.current) {
+      deferredRef.current = false;
+      fireRunningWrite();
+    }
+  };
+
   // Unmount writes an edit still inside the window, whatever unmounted the
   // editor (operator ruling 2026-09-27): Close, Prev/Next or their keys,
   // another match picked, a correction opened, a court switch, or the host
@@ -178,7 +216,17 @@ export function useDebouncedRunningWrite({ isRunningRef, buildPatchRef, onSubmit
   // one way out that saves nothing: the editor cancels first (cancelDebounce).
   // A reload never unmounts; the pagehide listener below keeps an edit across
   // one. Everything this reads is a ref, so the mount-time closure is safe.
-  useEffectA(() => () => { if (clearTimer()) fireRunningWrite(); }, []);
+  // A hold must never lose an edit: if a timer fired while held and is still
+  // sitting in deferredRef (unfired because the request never resolved
+  // before the editor unmounted), fire it here too -- clearTimer() alone
+  // would miss it, since that timer already ran (and cleared itself) when it
+  // deferred.
+  useEffectA(() => () => {
+    const hadTimer = clearTimer();
+    const hadDeferred = deferredRef.current;
+    deferredRef.current = false;
+    if (hadTimer || hadDeferred) fireRunningWrite();
+  }, []);
 
   // markDirty: call from every user-driven mutation handler (addPt,
   // removePt, foul increment/decrement, draw toggle, encho change, team
@@ -190,10 +238,18 @@ export function useDebouncedRunningWrite({ isRunningRef, buildPatchRef, onSubmit
     // is still pending, and a release here would publish synced-then-syncing
     // on every tap inside the window.
     clearTimer();
+    // A6: this fresh timer will itself carry every edit made so far
+    // (buildPatchRef always reads current state), so an earlier deferred-but-
+    // unfired edit is superseded by it, not lost. Without this, release()
+    // firing immediately AND this new timer firing later would double-send.
+    deferredRef.current = false;
     notePending(true);
     editPerfRef.current = perfNow();
     timerRef.current = setTimeout(() => {
       timerRef.current = null;
+      // A6: held -- defer rather than write. buildPatchRef may not yet
+      // reflect a result the holder's own request is about to adopt.
+      if (holdRef.current) { deferredRef.current = true; return; }
       fireRunningWrite();
     }, AUTOSAVE_DEBOUNCE_MS);
   };
@@ -203,10 +259,15 @@ export function useDebouncedRunningWrite({ isRunningRef, buildPatchRef, onSubmit
   // durably: recordScore puts a `durable` write into the persisted outbox,
   // because a fetch started here would die with the document. Only a PENDING
   // edit is written; with nothing pending there is nothing to lose. The
-  // mount-time closures are safe here: everything they read is a ref.
+  // mount-time closures are safe here: everything they read is a ref. Same
+  // hold-must-never-lose-an-edit rule as the unmount effect above: a deferred
+  // edit fires here too, not just a live timer.
   useEffectA(() => {
     const flushDurably = () => {
-      if (!clearTimer()) return;
+      const hadTimer = clearTimer();
+      const hadDeferred = deferredRef.current;
+      deferredRef.current = false;
+      if (!hadTimer && !hadDeferred) return;
       fireRunningWrite(true);
     };
     const onVisibility = () => { if (document.visibilityState === "hidden") flushDurably(); };
@@ -218,5 +279,5 @@ export function useDebouncedRunningWrite({ isRunningRef, buildPatchRef, onSubmit
     };
   }, []);
 
-  return { markDirty, cancelDebounce };
+  return { markDirty, cancelDebounce, hold, release };
 }

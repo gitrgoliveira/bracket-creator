@@ -683,25 +683,19 @@ func writeTeamSubMatchScores(f *excelize.File, sheetName string, courtStartCol, 
 		// mark landing in different cells is the incoherence DefaultWinMaruAB's
 		// own doc warns about. bc-pnum: a numbered team bout names individual
 		// PLAYERS, whose names are not unique by rule, so the row's member ids
-		// decide (domain.SubBoutAttribution, the same owner the individual
-		// victory uses) and a same-name pair no id can settle gets NO mark
-		// rather than one beside whichever fighter is written first --
-		// CLAUDE.md's accepted no-mark class (i). Before ids reached these
-		// rows this was the sideA-first convention, and the paragraph here
-		// said so; that is no longer true.
-		att := domain.SubBoutAttribution(sub.Attribution())
-		// A row that names no fighter is attributed by the encounter's own
-		// sides, which is what its Winner holds. Only when the row itself is
-		// silent: a row naming its fighters keeps deciding for itself, and a
-		// same-name pair (SideA == SideB, both non-empty) fails this same
-		// test, so it stays blanked as SubBoutAttribution left it rather than
-		// being re-attributed by team names, which ARE unique by rule.
-		// Asked of sub, not of att: Attribution() copies these two names
-		// verbatim and SubBoutAttribution only ever blanks a pair, so an
-		// att-side conjunct could restate this one but never narrow it.
-		if sub.SideA == "" && sub.SideB == "" {
-			att.SideA, att.SideB = matchSideA, matchSideB
-		}
+		// decide, and a same-name pair no id can settle gets NO mark rather
+		// than one beside whichever fighter is written first -- CLAUDE.md's
+		// accepted no-mark class (i). Before ids reached these rows this was
+		// the sideA-first convention, and the paragraph here said so; that is
+		// no longer true.
+		//
+		// A row that names no fighter of its own (a fixed-order bout settles at
+		// the MATCH level) is attributed by the encounter's own team names
+		// instead: domain.SubBoutAttributionForTeamRow is the ONE owner of that
+		// fallback (and of the same-name-fighter blank SubBoutAttribution
+		// itself applies), shared with the Kachinuki Detail sheet's
+		// buildKachinukiDetail (internal/engine/kachinuki_export.go).
+		att := domain.SubBoutAttributionForTeamRow(sub.Attribution(), matchSideA, matchSideB)
 		scoreA, scoreB := DefaultWinMaruAB(
 			IpponsScore(sub.IpponsA), IpponsScore(sub.IpponsB),
 			sub.Decision, sub.Encho, att)

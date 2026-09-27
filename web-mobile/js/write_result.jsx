@@ -157,6 +157,31 @@ export function notLandedBanner(res) {
 }
 
 
+// dependentActionBlocked: a narrower question than notLandedBanner's. That
+// predicate is right to say nothing about a queued pre-save at the three
+// explicit-tap sites it was written for (Start, Record bout): the editor's
+// own queued/offline surface already reports the state, so a second banner
+// would just repeat it. It is wrong for a write that is only a PRE-SAVE
+// gating a SECOND action -- the team editor's Add/Remove representative bout,
+// whose handler runs saveRunningSheet first so the row lands on a sheet the
+// server has already seen. There the generic pending pill explains the
+// SCORES did not send yet, but not why the tap the operator actually made --
+// Add, Remove -- silently did nothing. That caller needs its own sentence,
+// restored here to what the editor said before saveRunningSheet folded the
+// old assertRunningWritePersisted/score_not_synced pair into notLandedBanner
+// and lost it (bc-p3-dh-lineups-excel review).
+//
+// A refusal (applied:false) is excluded on purpose: notLandedBanner already
+// returns a reason for that case and the caller's writeFailed banner already
+// reports it, so a second message here would only duplicate it.
+export function dependentActionBlocked(res) {
+    if (!!res && res.queued === true) {
+        return "Couldn't save the current scores (offline or server busy). Try again once the connection is back.";
+    }
+    return null;
+}
+
+
 // matchLabel names a match the way the OPERATOR sees it: "Match 3", the label
 // on the scores list, the bracket and the printed tree. The internal id
 // ("m-r2-0") appears on no operator screen, so naming it there sends them

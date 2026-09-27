@@ -57,10 +57,13 @@ func TestSideMarks(t *testing.T) {
 	assert.Equal(t, "Kiken", l, "loser mark")
 }
 
-// TestDefaultWinMaruAB pins the display fallback for default wins whose
-// stored result predates the engine's maru fill: the winner's EMPTY cell
-// fills with one maru per awarded point (regulation "○○", encho "○"); a
-// recorded score, the loser, and non-default decisions are untouched.
+// TestDefaultWinMaruAB proves only the *state.EnchoMetadata adapter this
+// package adds (nil, a degenerate zero-period block, and a multi-period
+// block all collapse to the bare bool domain.DefaultWinMaruAB expects); the
+// full rule table (regulation "○○", encho "○", ids-over-names, a recorded
+// score/the loser/non-default decisions left untouched) lives in domain's
+// own TestDefaultWinMaruAB (result_marks_test.go), which this package
+// delegates to.
 func TestDefaultWinMaruAB(t *testing.T) {
 	t.Parallel()
 	tests := []struct {

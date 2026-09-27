@@ -219,6 +219,49 @@ func TestSubBoutAttribution(t *testing.T) {
 	})
 }
 
+// TestSubBoutAttributionForTeamRow pins the fixed-order team-row fallback
+// (bc-cse F3): a bout row that names no fighter of its own is attributed by
+// the encounter's own team names instead, exactly as
+// internal/export/builder.go's writeTeamSubMatchScores applies it inline,
+// and internal/engine/kachinuki_export.go's buildKachinukiDetail now shares.
+// The discriminating case is the one a naive post-SubBoutAttribution check
+// would get wrong: a same-name FIGHTER pair also ends up blanked, and must
+// STAY blanked rather than being re-attributed by the team names, because
+// SubBoutAttribution already answered "nobody can decide this from names"
+// for a different reason.
+func TestSubBoutAttributionForTeamRow(t *testing.T) {
+	t.Run("nameless row falls back to the team names", func(t *testing.T) {
+		att := domain.SubBoutAttributionForTeamRow(
+			domain.WinnerAttribution{Winner: "RedTeam"}, "RedTeam", "WhiteTeam")
+		assert.Equal(t, "RedTeam", att.SideA)
+		assert.Equal(t, "WhiteTeam", att.SideB)
+		assert.Equal(t, domain.MatchSideA, domain.AttributeWinnerSide(att))
+	})
+
+	t.Run("same-name fighter pair stays blanked, not re-attributed by team names", func(t *testing.T) {
+		att := domain.SubBoutAttributionForTeamRow(
+			domain.WinnerAttribution{Winner: "X", SideA: "X", SideB: "X"}, "RedTeam", "WhiteTeam")
+		assert.Empty(t, att.SideA, "a same-name fighter pair is blanked by SubBoutAttribution, not by this fallback")
+		assert.Empty(t, att.SideB)
+		assert.Equal(t, domain.MatchSideNone, domain.AttributeWinnerSide(att),
+			"the team names must never stand in for two fighters who happen to share a name")
+	})
+
+	t.Run("a row naming one fighter keeps deciding for itself", func(t *testing.T) {
+		att := domain.SubBoutAttributionForTeamRow(
+			domain.WinnerAttribution{Winner: "Ito", SideA: "", SideB: "Ito"}, "RedTeam", "WhiteTeam")
+		assert.Empty(t, att.SideA, "only ONE side is empty, so the row is not silent: no team-name fallback")
+		assert.Equal(t, "Ito", att.SideB)
+	})
+
+	t.Run("distinct fighter names are passed through untouched", func(t *testing.T) {
+		att := domain.SubBoutAttributionForTeamRow(
+			domain.WinnerAttribution{Winner: "Ito", SideA: "Sato", SideB: "Ito"}, "RedTeam", "WhiteTeam")
+		assert.Equal(t, "Sato", att.SideA)
+		assert.Equal(t, "Ito", att.SideB)
+	})
+}
+
 // TestAttributeWinnerSide_SingleKnownID pins the bc-dnst extension of the id
 // tier: a winner id equal to the ONE side that carries an id names that side
 // even when the other side has no id (a fighter fielded by squad number

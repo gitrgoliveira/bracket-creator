@@ -175,7 +175,11 @@ being photographed. Two severities, treated differently on purpose:
   one, rather than only when its text says so). No request on a capture
   surface is expected to fail: the team lineup reads that used to answer 404
   until a lineup was saved now answer an empty lineup instead, so a line here
-  is a finding, not noise.
+  is a finding, not noise. A failed request is therefore expected to be named
+  TWICE: once from the response, by method and route, and again as the
+  browser's own console error for that same request, carrying its path too.
+  That is one failure reported twice, not two failures, so do not report the
+  pair as a duplicate.
 
 A run with any failed capture exits non-zero, so the target can gate a script.
 

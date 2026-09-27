@@ -242,6 +242,40 @@ func SubBoutAttribution(att WinnerAttribution) WinnerAttribution {
 	return att
 }
 
+// SubBoutAttributionForTeamRow resolves the WinnerAttribution for one bout
+// row of a TEAM encounter, covering the one further case SubBoutAttribution
+// alone does not: a FIXED-ORDER row that names no fighter of its own
+// (rawAtt.SideA and rawAtt.SideB both empty) settles at the MATCH level, so
+// it falls back to the encounter's own team names -- which ARE unique by
+// rule, unlike two fighters' names.
+//
+// rawAtt must be the bout's attribution straight from
+// state.SubMatchResult.Attribution(), BEFORE SubBoutAttribution runs on it
+// (SideA/SideB copied verbatim from the stored row). Checking those RAW
+// names, not an already-blanked value, is load-bearing: a same-name FIGHTER
+// pair also ends up with a blanked attribution once SubBoutAttribution
+// below has run, and re-checking that already-blanked state would wrongly
+// catch it too, un-blanking data that was deliberately blanked because no
+// name can decide it. The fallback therefore runs FIRST, then
+// SubBoutAttribution: a nameless row's team names are themselves distinct
+// (two teams in one match are never the same team), so they are never
+// blanked by the check that follows; a same-name fighter pair never reaches
+// the fallback at all, since its raw names are non-empty, and is blanked by
+// SubBoutAttribution exactly as it was without this function.
+//
+// The ONE owner of this fallback: internal/export/builder.go's
+// writeTeamSubMatchScores (the main sheets) and
+// internal/engine/kachinuki_export.go's buildKachinukiDetail (the
+// Kachinuki Detail sheet) both call this in place of a bare
+// SubBoutAttribution(sub.Attribution()), so a nameless bout row is marked
+// the same way on both.
+func SubBoutAttributionForTeamRow(rawAtt WinnerAttribution, teamSideA, teamSideB string) WinnerAttribution {
+	if rawAtt.SideA == "" && rawAtt.SideB == "" {
+		rawAtt.SideA, rawAtt.SideB = teamSideA, teamSideB
+	}
+	return SubBoutAttribution(rawAtt)
+}
+
 func AttributeWinnerSide(a WinnerAttribution) MatchSide {
 	// Ids first. A winner id equal to a side's id names that side outright,
 	// even when the OTHER side carries no id (bc-dnst: a fighter fielded by

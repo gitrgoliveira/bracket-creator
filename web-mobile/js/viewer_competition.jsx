@@ -374,6 +374,7 @@ export function ViewerCompetition({ tournament, competition, pools, poolMatches,
               runningMatches={runningMatches}
               upcomingMatches={upcomingMatches}
               recentMatches={recentMatches}
+              allMatches={allMatches}
               tweaks={tweaks}
               tournament={tournament}
               compId={c.id}
@@ -470,9 +471,27 @@ export function ViewerCompetition({ tournament, competition, pools, poolMatches,
   );
 }
 
-export function ViewerOverview({ c, myPlayer, myUpcoming, currentMatch, runningMatches, upcomingMatches, recentMatches, tweaks, tournament, compId, standings, pools, poolMatches, onSwitchTab, hasActiveFilter, filterLabel, highlightPlayers }) {
+export function ViewerOverview({ c, myPlayer, myUpcoming, currentMatch, runningMatches, upcomingMatches, recentMatches, allMatches, tweaks, tournament, compId, standings, pools, poolMatches, onSwitchTab, hasActiveFilter, filterLabel, highlightPlayers }) {
   const [expandedMatchId, setExpandedMatchId] = useState(null);
-  const [selectedMatch, setSelectedMatch] = useState(null);
+  // A5: an id, not a frozen match object -- mirrors expandedMatchId just
+  // below, which the non-self-run branch already resolves live (its
+  // `.map((m) => ...)` re-reads the CURRENT `m` every render; only the id is
+  // state). Freezing the object here shadowed a correction made on another
+  // device: neither this card nor the score editor MatchViewerModal opens
+  // ever saw it. allMatches (not the three filtered/capped props) is the
+  // lookup source: a selected match can otherwise fall out of recentMatches'
+  // top-N cap once more matches complete while it stays open.
+  const [selectedMatchId, setSelectedMatchId] = useState(null);
+  // Union of everything this component was handed, not allMatches alone:
+  // callers that predate allMatches (and the mp-7x4n unit tests) pass only
+  // currentMatch/runningMatches/upcomingMatches/recentMatches, and a running
+  // currentMatch is not always also a member of runningMatches. Multiple
+  // lists can legitimately hold the same match; find() just takes the first.
+  const selectedMatchLive = selectedMatchId
+    ? [currentMatch, ...(runningMatches || []), ...(upcomingMatches || []), ...(recentMatches || []), ...(allMatches || [])]
+        .filter(Boolean)
+        .find((m) => m.id === selectedMatchId) || null
+    : null;
   const isSelfRun = tournament && tournament.mode === "self-run";
 
   const isLeague = c.format === "league";
@@ -525,7 +544,7 @@ export function ViewerOverview({ c, myPlayer, myUpcoming, currentMatch, runningM
 
   const handleMatchClick = (m) => {
     if (isSelfRun) {
-      setSelectedMatch(m);
+      setSelectedMatchId(m.id);
     } else {
       setExpandedMatchId(prev => prev === m.id ? null : m.id);
     }
@@ -728,7 +747,7 @@ export function ViewerOverview({ c, myPlayer, myUpcoming, currentMatch, runningM
           </div>
         </>
       )}
-      {isSelfRun && selectedMatch && <MatchViewerModal match={selectedMatch} onClose={() => setSelectedMatch(null)} tournament={tournament} compId={compId} />}
+      {isSelfRun && selectedMatchLive && <MatchViewerModal match={selectedMatchLive} onClose={() => setSelectedMatchId(null)} tournament={tournament} compId={compId} />}
     </div>
   );
 }

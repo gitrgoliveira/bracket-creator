@@ -148,6 +148,70 @@ func TestSideMarksAB(t *testing.T) {
 	}
 }
 
+// TestDefaultWinMaruAB pins the display fallback for default wins whose
+// stored result predates the engine's maru fill: the winner's EMPTY cell
+// fills with one maru per awarded point (regulation "○○", encho "○"); a
+// recorded score, the loser, and non-default decisions are untouched.
+// export.DefaultWinMaruAB (state.EnchoMetadata-typed) and the Kachinuki
+// Detail sheet's buildKachinukiDetail both delegate here, so this table is
+// the one place the rule itself is pinned (see
+// internal/export/suffix_test.go's TestDefaultWinMaruAB for the
+// *state.EnchoMetadata adapter, including its nil/degenerate-block cases).
+func TestDefaultWinMaruAB(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name                       string
+		scoreA, scoreB             string
+		decision                   string
+		enchoOn                    bool
+		winnerID, sideAID, sideBID string
+		winner                     string
+		wantA, wantB               string
+	}{
+		{name: "regulation kiken fills the winner pair", decision: "kiken-voluntary", winner: "Alice", wantA: "○○"},
+		{name: "legacy bare kiken fills too", decision: "kiken", winner: "Bob", wantB: "○○"},
+		{name: "fusenpai fills the survivor", decision: "fusenpai", winner: "Bob", wantB: "○○"},
+		{name: "fusensho fills the defaulted winner", decision: "fusensho", winner: "Alice", wantA: "○○"},
+		{name: "encho awards exactly one deciding point", decision: "kiken-injury", enchoOn: true, winner: "Alice", wantA: "○"},
+		{name: "a recorded score stands", scoreA: "M", decision: "kiken-injury", winner: "Alice", wantA: "M"},
+		{name: "non-default decision untouched", decision: "fought", winner: "Alice"},
+		{name: "no winner untouched", decision: "kiken-voluntary"},
+		{name: "unmatched winner untouched, no ids", decision: "kiken-voluntary", winner: "Carol"},
+		// ids win over names, even on a same-name pair (legal: two
+		// participants from different dojos may share a name).
+		{
+			name:     "same-name pair with ids: winner is B, maru lands on B not name-first A",
+			decision: "kiken-voluntary",
+			winnerID: "id-b", sideAID: "id-a", sideBID: "id-b",
+			winner: "Alice", wantB: "○○",
+		},
+		{
+			name:     "same-name pair with ids: winner is A",
+			decision: "kiken-voluntary",
+			winnerID: "id-a", sideAID: "id-a", sideBID: "id-b",
+			winner: "Alice", wantA: "○○",
+		},
+		{
+			name:     "ids present but winnerID matches neither side: unattributable, untouched",
+			decision: "kiken-voluntary",
+			winnerID: "id-x", sideAID: "id-a", sideBID: "id-b",
+			winner: "Alice",
+		},
+	}
+	for _, tt := range tests {
+		tc := tt
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			gotA, gotB := domain.DefaultWinMaruAB(tc.scoreA, tc.scoreB, tc.decision, tc.enchoOn, domain.WinnerAttribution{
+				WinnerID: tc.winnerID, SideAID: tc.sideAID, SideBID: tc.sideBID,
+				Winner: tc.winner, SideA: "Alice", SideB: "Bob",
+			})
+			assert.Equal(t, tc.wantA, gotA)
+			assert.Equal(t, tc.wantB, gotB)
+		})
+	}
+}
+
 // TestIpponsScore pins the display-string join at its domain-layer source;
 // export.IpponsScore is a one-line delegate. See also
 // internal/export/middle_closed_set_test.go's

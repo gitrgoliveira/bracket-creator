@@ -188,6 +188,72 @@ func TestBuildKachinukiDetail_FusenshoMarksTheWinnerBesideItsScore(t *testing.T)
 	assert.Equal(t, "○○", detail.Bouts[0].ScoreA, "the FIK default-win maru, joined from the stored ippons")
 }
 
+// TestBuildKachinukiDetail_FusenshoEmptyIpponsGetsMaruFallback pins bc-cse
+// gap F2: a per-bout fusensho whose recorded ippons are EMPTY (legacy/
+// pre-fill data, rather than the engine's own maru fill, as in the test
+// above) still gets the FIK default-win maru (domain.DefaultWinMaruAB) on
+// the winner's score, exactly as internal/export/builder.go's
+// writeTeamSubMatchScores prints for the same sub-result -- see
+// TestScoreCellsCarryOutstandingHansokuTriangle's "fixed-order row, no
+// fighter names" subtest there (a cross-package import would cycle
+// export<->engine, so the two are pinned by matching literal fixtures, not
+// by one shared test function).
+func TestBuildKachinukiDetail_FusenshoEmptyIpponsGetsMaruFallback(t *testing.T) {
+	m := &state.MatchResult{
+		SideA: "RedTeam",
+		SideB: "WhiteTeam",
+		SubResults: []state.SubMatchResult{
+			{
+				Position: 1,
+				SideA:    "R-Senpo", SideB: "W-Senpo",
+				Winner:   "R-Senpo",
+				Decision: "fusensho",
+				// IpponsA/IpponsB left nil on purpose: this is the empty-cell
+				// gap, not the already-covered stored-maru case above.
+			},
+		},
+	}
+
+	detail := buildKachinukiDetail(m, "Pool Match 1", map[string]string{}, map[string]string{}, map[string][]domain.TeamMember{})
+
+	require.Len(t, detail.Bouts, 1)
+	assert.Equal(t, "○○", detail.Bouts[0].ScoreA, "an empty recorded score still gets the FIK maru fallback")
+	assert.Equal(t, "", detail.Bouts[0].ScoreB)
+	assert.Equal(t, "Fus.", detail.Bouts[0].MarkA)
+	assert.Equal(t, "", detail.Bouts[0].MarkB)
+}
+
+// TestBuildKachinukiDetail_FixedOrderNamelessFusenshoAppliesMaruFallback
+// pins bc-cse gap F3: a FIXED-ORDER bout that names no fighter of its own
+// (SideA/SideB both empty; Winner carries the TEAM name instead) is
+// attributed through the encounter's own team names
+// (domain.SubBoutAttributionForTeamRow), exactly as
+// internal/export/builder.go's writeTeamSubMatchScores does for the
+// identical fixture in TestScoreCellsCarryOutstandingHansokuTriangle's
+// "fixed-order row, no fighter names: the default win still prints"
+// subtest. Before the fix this row got NO mark on the detail sheet at all
+// (buildKachinukiDetail called plain domain.SubBoutAttribution, which
+// leaves a nameless row unattributed).
+func TestBuildKachinukiDetail_FixedOrderNamelessFusenshoAppliesMaruFallback(t *testing.T) {
+	m := &state.MatchResult{
+		SideA: "Tora A",
+		SideB: "Kenshi B",
+		SubResults: []state.SubMatchResult{
+			{Position: 1, SideA: "", SideB: "", Winner: "Tora A", Decision: "fusensho"},
+		},
+	}
+
+	detail := buildKachinukiDetail(m, "Pool Match 1", map[string]string{}, map[string]string{}, map[string][]domain.TeamMember{})
+
+	require.Len(t, detail.Bouts, 1)
+	// Tora A is SideA, matching the builder_test.go fixture's own comment:
+	// "The winner is SideA (Aka)".
+	assert.Equal(t, "Fus.", detail.Bouts[0].MarkA, "the present side's own mark names the default win")
+	assert.Equal(t, "", detail.Bouts[0].MarkB)
+	assert.Equal(t, "○○", detail.Bouts[0].ScoreA, "an empty recorded score still gets the FIK maru fallback")
+	assert.Equal(t, "", detail.Bouts[0].ScoreB)
+}
+
 // TestBuildKachinukiDetail_NoPositions verifies graceful handling when
 // the position map is empty (positions render as empty strings).
 func TestBuildKachinukiDetail_NoPositions(t *testing.T) {

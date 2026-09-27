@@ -94,7 +94,7 @@ const STUBBED_GLOBALS = {
 };
 
 let restoreGlobals;
-let AdminShiaijoPage, AdminPools, AdminBracket, AdminScoreEditor, MatchViewerModal;
+let AdminShiaijoPage, AdminPools, AdminBracket, AdminScoreEditor, MatchViewerModal, ViewerOverview;
 
 beforeAll(async () => {
   // jsdom doesn't implement scrollTo; the schedule surface calls it on open.
@@ -107,11 +107,18 @@ beforeAll(async () => {
   await import('../../admin_competition_bracket.jsx');
   const sched = await import('../../admin_schedule_score_editor.jsx');
   const viewer = await import('../../viewer_match.jsx');
+  // A5: the OTHER self-run mount site (the Overview tab's currentMatch card,
+  // which opens the same MatchViewerModal). viewer_match.jsx is imported
+  // above first, since viewer_competition.jsx imports MatchViewerModal FROM
+  // it -- ESM resolves that import regardless of order here, but importing
+  // the leaf first mirrors the real module graph.
+  const viewerComp = await import('../../viewer_competition.jsx');
   AdminShiaijoPage = window.AdminShiaijoPage;
   AdminPools = window.AdminPools;
   AdminBracket = window.AdminBracket;
   AdminScoreEditor = sched.AdminScoreEditor;
   MatchViewerModal = viewer.MatchViewerModal;
+  ViewerOverview = viewerComp.ViewerOverview;
 });
 
 afterAll(() => restoreGlobals());
@@ -447,6 +454,68 @@ describe('mount site: viewer_match.jsx (public self-run)', () => {
       password: '',                // public surface authenticates nothing
       selfReport: true,
     });
+  });
+});
+
+// A5 (bc-p3-dh-lineups-excel review): the OTHER self-run entry point into
+// MatchViewerModal, the Overview tab's own "ON NOW" card (ViewerOverview,
+// viewer_competition.jsx). Both used to freeze a snapshot of the match at the
+// moment the editor opened (viewer_match.jsx's own scoringMatch here, and
+// ViewerOverview's selectedMatch there): an organiser's correction made on
+// another device, or the app's own periodic refetch, never reached the open
+// editor. Fixed: both now store only the match id and resolve the live match
+// on every render, mirroring the non-self-run expand-in-place path
+// (expandedMatchId) that already worked this way.
+describe('mount site: viewer_competition.jsx ViewerOverview (public self-run overview card, A5)', () => {
+  function overviewProps(overrides = {}) {
+    return {
+      c: { format: 'knockout', status: 'knockout', teamSize: 0, kind: 'individual', engi: false },
+      myPlayer: null,
+      myUpcoming: null,
+      currentMatch: null,
+      runningMatches: [],
+      upcomingMatches: [],
+      recentMatches: [],
+      allMatches: [],
+      tweaks: {},
+      tournament: { mode: 'self-run' },
+      compId: 'c1',
+      standings: {},
+      pools: [],
+      poolMatches: [],
+      onSwitchTab: () => {},
+      hasActiveFilter: false,
+      filterLabel: null,
+      highlightPlayers: new Set(),
+      ...overrides,
+    };
+  }
+
+  it('the score editor follows the LIVE match, not the one frozen when "Report result" was tapped', async () => {
+    const m1 = runningMatch({ modifiedAt: '2026-01-01T00:00:00Z' });
+    const props = overviewProps({ currentMatch: m1, allMatches: [m1] });
+    let view;
+    await act(async () => { view = render(<ViewerOverview {...props} />); });
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'View current match details' }));
+    });
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Report result' }));
+    });
+    expect(screen.getByTestId('probe-score-editor')).toBeTruthy();
+    expect(probe.props.match.modifiedAt).toBe('2026-01-01T00:00:00Z');
+
+    // The parent re-renders with an updated match (same id): a changed bout
+    // result or a corrected modifiedAt, exactly as an SSE refresh delivers.
+    const m2 = { ...m1, modifiedAt: '2026-06-06T00:00:00Z' };
+    await act(async () => {
+      view.rerender(<ViewerOverview {...overviewProps({ currentMatch: m2, allMatches: [m2] })} />);
+    });
+
+    // Red without the fix: the editor keeps showing modifiedAt from m1,
+    // frozen at the moment the card was tapped.
+    expect(probe.props.match.modifiedAt).toBe('2026-06-06T00:00:00Z');
   });
 });
 

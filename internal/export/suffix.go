@@ -9,7 +9,6 @@ package export
 
 import (
 	"strconv"
-	"strings"
 
 	"github.com/gitrgoliveira/bracket-creator/internal/domain"
 	"github.com/gitrgoliveira/bracket-creator/internal/helper"
@@ -86,36 +85,13 @@ func FlagsScorePair(a, b int) (string, string) {
 
 // DefaultWinMaruAB fills the WINNER's empty score cell with the joined
 // domain.DefaultWinIppons award for a default win, given SIDE-ordered
-// scores. The engine already records default wins as maru ippons from the
-// same rule (domain.DefaultWinIppons), so scored data carries the balls
-// itself — this fallback covers results recorded before that fill or
-// imported without it. Never applies to engi flag counts (callers gate)
-// or the loser.
-//
-// att carries the ids and names of the record being marked (a pool or
-// bracket row's SideAID/SideBID/WinnerID, or a sub-bout's member ids via
-// state.SubMatchResult.Attribution), resolved through
-// domain.AttributeWinnerSide, the SAME owner
-// SideMarksLR uses: the two helpers compose one cell (score + result mark)
-// and must agree on which side won, or a same-name pair whose ids disagree
-// with the name order could print the maru fallback in one side's cell and
-// the Kiken/Fus. mark in the other's.
+// scores. A one-line delegate to domain.DefaultWinMaruAB (the shared owner,
+// also used by the Kachinuki Detail sheet's buildKachinukiDetail), kept here
+// so this exported signature (state.EnchoMetadata, which domain may not
+// import) stays put. See domain.DefaultWinMaruAB's doc comment for the full
+// rule.
 func DefaultWinMaruAB(scoreA, scoreB, decision string, encho *state.EnchoMetadata, att domain.WinnerAttribution) (string, string) {
-	if att.Winner == "" || !domain.IsDefaultWinDecisionStr(decision) {
-		return scoreA, scoreB
-	}
-	maru := strings.Join(domain.DefaultWinIppons(encho.On()), "")
-	switch domain.AttributeWinnerSide(att) {
-	case domain.MatchSideA:
-		if scoreA == "" {
-			scoreA = maru
-		}
-	case domain.MatchSideB:
-		if scoreB == "" {
-			scoreB = maru
-		}
-	}
-	return scoreA, scoreB
+	return domain.DefaultWinMaruAB(scoreA, scoreB, decision, encho.On(), att)
 }
 
 // HansokuMark renders a side's outstanding (undischarged) hansoku count as

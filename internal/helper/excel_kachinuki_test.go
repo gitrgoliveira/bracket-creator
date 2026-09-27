@@ -521,6 +521,31 @@ func TestKachinukiDetailPageLayout(t *testing.T) {
 	assert.Equal(t, 1, *layout.FitToWidth, "page must scale to exactly one page wide")
 }
 
+// TestKachinukiDetailFighterColumnsWideEnoughForALabelledName pins bc-cse
+// F10: the fighter columns (B/F) must be wide enough that a labelled name
+// like "T12.4 Yui Nakamura (Fukusho)" (28 characters -- a two-digit team
+// number, a squad index, a two-word name, and the longest lineup position
+// word) does not clip in a real render at this sheet's 12pt centred font.
+// 24 (the width before this fix) clipped a 26-character label
+// ("T3.4 Yui Nakamura (Chuken)"); 36 is the fix. With the Winner/Decision
+// columns gone and the sheet fitted to one printed page wide regardless of
+// column width (TestKachinukiDetailPageLayout above), there is room to
+// widen these on-screen without affecting the print.
+func TestKachinukiDetailFighterColumnsWideEnoughForALabelledName(t *testing.T) {
+	f := excelize.NewFile()
+	defer func() { _ = f.Close() }()
+
+	matches := []KachinukiMatchDetail{makeKachinukiTestMatch()}
+	require.NoError(t, WriteKachinukiDetailSheet(f, matches))
+
+	left, err := f.GetColWidth(SheetKachinukiDetail, kachinukiColLeft)
+	require.NoError(t, err)
+	right, err := f.GetColWidth(SheetKachinukiDetail, kachinukiColRight)
+	require.NoError(t, err)
+	assert.Equal(t, 36.0, left, "the fighter column must be wide enough for a labelled name plus margin")
+	assert.Equal(t, 36.0, right, "the fighter column must be wide enough for a labelled name plus margin")
+}
+
 // intToString is a small helper that converts an int to a string without
 // pulling in strconv just for these tests. Mirrors fmt.Sprint("%d", n) on
 // non-negative ints, which is all we need for row indexing.

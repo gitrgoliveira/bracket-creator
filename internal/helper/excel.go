@@ -25,12 +25,21 @@
 // 8-column-per-court layout invariant (CourtsColumnsPerCourt = 8, see
 // constants.go and CLAUDE.md). Variable-bout kachinuki grids would either
 // overflow that budget or force a layout-mode switch the rest of the
-// workbook can't accommodate, so the main sheets carry the team-match
-// row only.
+// workbook can't accommodate, so the main sheets keep the FIXED teamSize
+// bout-row grid every other team match uses: the export overlay
+// (writeTeamSubMatchScores, internal/export/builder.go) writes a kachinuki
+// bout into that grid by its Position, so bouts 1..teamSize land in the
+// existing rows and any bout PAST teamSize -- reachable once winner-stays-on
+// carries the encounter beyond the starting lineup -- is silently skipped
+// from the row display. The IV/PW summary (state.TeamResultFrom) is not
+// row-bound: it still counts every bout, including the ones the grid
+// dropped. Whether the main sheets should show every kachinuki bout is not
+// decided here (bc-kdsc fold-in g); this paragraph only corrects what the
+// current code does.
 //
 // Bout-by-bout detail is rendered on a separate "Kachinuki Detail" sheet
 // (helper.SheetKachinukiDetail). See internal/helper/excel_kachinuki.go,
-// the sheet uses a flexible 8-column layout (NOT bound by
+// the sheet uses a flexible 6-column layout (NOT bound by
 // CourtsColumnsPerCourt) and is opt-in: the engine export path
 // (internal/engine/export.go → collectKachinukiMatches) emits it only
 // when comp.TeamMatchType == kachinuki AND at least one match carries

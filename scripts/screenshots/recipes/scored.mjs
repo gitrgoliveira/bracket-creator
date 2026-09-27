@@ -224,13 +224,14 @@ const ENGI_SPLITS = [[3, 2], [4, 1], [1, 4], [2, 3]];
 async function scoreEngiMatch(page, i) {
   const editor = page.locator(EDITOR).first();
   const [aka, shiro] = ENGI_SPLITS[i % ENGI_SPLITS.length];
+  // A same-side "+" inside TAP_BOUNCE_MS is a bounce and adds nothing.
   for (let n = 0; n < aka; n += 1) {
     await editor.locator('[data-testid="engi-aka-inc"]').click();
-    await settle(page, 100);
+    await settle(page, TAP_DWELL_MS);
   }
   for (let n = 0; n < shiro; n += 1) {
     await editor.locator('[data-testid="engi-shiro-inc"]').click();
-    await settle(page, 100);
+    await settle(page, TAP_DWELL_MS);
   }
   // engi-submit is a one-tap commit ("Save result"), but it carries the same
   // "Finish + Start Next →" chaining when another match waits.

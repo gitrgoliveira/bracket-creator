@@ -2,6 +2,8 @@ import React from 'react';
 import { render, fireEvent, screen, waitFor, act } from '@testing-library/react';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { EngiScoreEditorModal } from '../../admin_scoring_engi.jsx';
+import { TAP_BOUNCE_MS } from '../../tap_guard.jsx';
+import { pointerTap } from '../helpers/tap_events.js';
 
 // Regression coverage for a real orientation bug: sideB is Shiro and sideA is
 // Aka everywhere else in the app (bracket.jsx PlayerLine, admin_pools.jsx,
@@ -442,5 +444,52 @@ describe('EngiScoreEditorModal saves flags as they are entered', () => {
     await act(async () => { fireEvent.click(screen.getByTestId('engi-close-btn')); });
     expect(onSubmit).toHaveBeenCalledWith({ flagsA: 1, flagsB: 0, status: 'running' });
     expect(onClose).toHaveBeenCalled();
+  });
+});
+
+describe('bc-dtip: a bounced tap on an engi "+" adds one flag', () => {
+  beforeEach(() => { vi.useFakeTimers(); });
+  afterEach(() => { vi.useRealTimers(); });
+
+  it('a double tap on one side\'s "+" adds one flag; a deliberate second tap adds another', async () => {
+    render(<EngiScoreEditorModal match={makeMatch()} onClose={() => {}} onSubmit={() => {}} />);
+    const plus = screen.getByTestId('engi-aka-inc');
+    await pointerTap(plus);
+    await pointerTap(plus);
+    expect(screen.getByTestId('engi-aka-count').textContent).toBe('1');
+    await act(async () => { vi.advanceTimersByTime(TAP_BOUNCE_MS + 50); });
+    await pointerTap(plus);
+    expect(screen.getByTestId('engi-aka-count').textContent).toBe('2');
+  });
+
+  it('the other side\'s "+" is never refused', async () => {
+    render(<EngiScoreEditorModal match={makeMatch()} onClose={() => {}} onSubmit={() => {}} />);
+    await pointerTap(screen.getByTestId('engi-aka-inc'));
+    await pointerTap(screen.getByTestId('engi-shiro-inc'));
+    expect(screen.getByTestId('engi-aka-count').textContent).toBe('1');
+    expect(screen.getByTestId('engi-shiro-count').textContent).toBe('1');
+  });
+});
+
+describe('a flag change inside the autosave window survives Prev/Next', () => {
+  beforeEach(() => { vi.useFakeTimers(); });
+  afterEach(() => { vi.useRealTimers(); });
+
+  it.each([
+    ['the Next button', () => fireEvent.click(screen.getByText('Next →'))],
+    ['the → key', () => fireEvent.keyDown(window, { key: 'ArrowRight' })],
+  ])('%s within 300ms of a change saves it', async (_via, goNext) => {
+    const onSubmit = vi.fn().mockResolvedValue({ status: 'running' });
+    let view;
+    const onNext = vi.fn(() => view.unmount());
+    view = render(<EngiScoreEditorModal
+      match={makeMatch({ status: 'running' })} onClose={() => {}} onSubmit={onSubmit}
+      nextMatch={{ sideA: { name: 'Z' }, sideB: { name: 'W' } }} onNext={onNext}
+    />);
+    fireEvent.click(screen.getByTestId('engi-aka-inc'));
+    await act(async () => { goNext(); });
+    await act(async () => { vi.advanceTimersByTime(400); });
+    expect(onNext).toHaveBeenCalledTimes(1);
+    expect(onSubmit).toHaveBeenCalledWith({ flagsA: 1, flagsB: 0, status: 'running' });
   });
 });

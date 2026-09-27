@@ -27,6 +27,7 @@ import { useEscapeToClose, confirmDialog } from './ui.jsx';
 // NumberedName: single owner of the number-chip-on-the-outer-side rule.
 import { NumberedName } from './numbered_name.jsx';
 import { SideCell } from './side_cell.jsx';
+import { acceptTap } from './tap_guard.jsx';
 
 const MAX_FLAGS = 5;
 // Valid totals: 1, 3, 5 (odd, guarantees a winner).
@@ -137,6 +138,14 @@ export function EngiScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext
     (side === "a" ? setFlagsA : setFlagsB)(clamp(n));
     markDirty();
   };
+  // A side's "+" button: a bounced double tap is one flag, not two (bc-dtip;
+  // tap_guard.jsx), so a count the referees never showed cannot sneak in.
+  // The keyboard's a/s keys are never a bounce and do not come through here.
+  const flagTapRef = useRefE(null);
+  const addFlag = (ev, side) => {
+    if (!acceptTap(flagTapRef, ev, side)) return;
+    changeFlags(side, (side === "a" ? flagsA : flagsB) + 1);
+  };
 
   const total = flagsA + flagsB;
   const isValidTotal = VALID_TOTALS.has(total);
@@ -180,6 +189,16 @@ export function EngiScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext
     onClose();
   };
   useEscapeToClose(canClose ? handleDismiss : undefined);
+
+  // Prev/Next re-key this editor in its host, which unmounts it, and the
+  // unmount cancels the autosave timer: flags still inside the window are
+  // saved first, as closing saves them (handleDismiss).
+  const leaveTo = (go) => () => {
+    if (m.status === "running" && isDirty) flushPending();
+    go();
+  };
+  const goPrev = leaveTo(onPrev);
+  const goNext = leaveTo(onNext);
 
   // Pair names: the side's name holds both members combined ("Name 1 - Name 2");
   // split so member 2 renders under member 1. Both sides of an engi match are
@@ -307,7 +326,7 @@ export function EngiScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext
   // fresh state via kbRef. Escape stays owned by useEscapeToClose above.
   const kbRef = useRefE(null);
   const lastSideRef = useRefE(null); // "a" | "s" | null: which side Backspace undoes
-  kbRef.current = { submitting, canSubmit, showCorrectionPrompt, flagsA, flagsB, changeFlags, handleSubmit, onPrev, onNext, prevMatch, nextMatch };
+  kbRef.current = { submitting, canSubmit, showCorrectionPrompt, flagsA, flagsB, changeFlags, handleSubmit, onPrev, onNext, goPrev, goNext, prevMatch, nextMatch };
   useEffectE(() => {
     const onKeyDown = (ev) => {
       const s = kbRef.current;
@@ -322,8 +341,8 @@ export function EngiScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext
       // Keyed on the neighbour match as well as the callback: the Scores tab
       // wires onPrev/onNext unconditionally, and with no neighbour they call
       // scoreKeyOf(null), which throws. Same condition as the hint's hasNav.
-      if (ev.key === "ArrowLeft" && s.onPrev && s.prevMatch) { ev.preventDefault(); s.onPrev(); return; }
-      if (ev.key === "ArrowRight" && s.onNext && s.nextMatch) { ev.preventDefault(); s.onNext(); return; }
+      if (ev.key === "ArrowLeft" && s.onPrev && s.prevMatch) { ev.preventDefault(); s.goPrev(); return; }
+      if (ev.key === "ArrowRight" && s.onNext && s.nextMatch) { ev.preventDefault(); s.goNext(); return; }
 
       if (ev.key === "Enter") {
         // Let a focused button/link/input handle its own Enter (e.g. Cancel).
@@ -417,7 +436,7 @@ export function EngiScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext
               <button
                 type="button"
                 className="btn engi-counter__btn"
-                onClick={() => changeFlags("b", flagsB + 1)}
+                onClick={(ev) => addFlag(ev, "b")}
                 disabled={flagsB >= MAX_FLAGS}
                 aria-label="Shiro plus one flag"
                 data-testid="engi-shiro-inc"
@@ -457,7 +476,7 @@ export function EngiScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext
               <button
                 type="button"
                 className="btn engi-counter__btn"
-                onClick={() => changeFlags("a", flagsA + 1)}
+                onClick={(ev) => addFlag(ev, "a")}
                 disabled={flagsA >= MAX_FLAGS}
                 aria-label="Aka plus one flag"
                 data-testid="engi-aka-inc"
@@ -533,7 +552,7 @@ export function EngiScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext
         {!(isComplete && showCorrectionPrompt) && (
           <div className="score-nav">
             {prevMatch ? (
-              <button type="button" className="btn btn--sm score-nav__prev" onClick={onPrev} disabled={submitting} title={(prevMatch.sideA?.name || "") + " vs " + (prevMatch.sideB?.name || "")}>← Prev</button>
+              <button type="button" className="btn btn--sm score-nav__prev" onClick={goPrev} disabled={submitting} title={(prevMatch.sideA?.name || "") + " vs " + (prevMatch.sideB?.name || "")}>← Prev</button>
             ) : <span />}
             <div className="score-nav__actions">
               {canClose && <button type="button" className="btn" onClick={handleDismiss} disabled={submitting}>Cancel</button>}
@@ -549,7 +568,7 @@ export function EngiScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext
               </button>
             </div>
             {nextMatch ? (
-              <button type="button" className="btn btn--sm score-nav__next" onClick={onNext} disabled={submitting} title={(nextMatch.sideA?.name || "") + " vs " + (nextMatch.sideB?.name || "")}>Next →</button>
+              <button type="button" className="btn btn--sm score-nav__next" onClick={goNext} disabled={submitting} title={(nextMatch.sideA?.name || "") + " vs " + (nextMatch.sideB?.name || "")}>Next →</button>
             ) : <span />}
           </div>
         )}

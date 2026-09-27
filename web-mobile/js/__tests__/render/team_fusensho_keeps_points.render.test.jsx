@@ -86,6 +86,7 @@ async function mount(match) {
 const bout1Side = (color) => document.querySelectorAll('.team-sub-match')[0].querySelector(`.team-sub-match__side--${color}`);
 const ipponButton = (color, letter) => [...bout1Side(color).querySelectorAll('button.ipt-btn')].find((b) => b.textContent === letter);
 const fusenshoButton = (color) => bout1Side(color).querySelector('[data-testid="scoring-modal-fusensho-button"]');
+const refusalNote = (color) => bout1Side(color).querySelector('[data-testid="scoring-modal-fusensho-refused"]');
 // The mark slots sit in the centre column, each side's pair beside the middle.
 const markSlots = (color) => [...document.querySelectorAll('.team-sub-match')[0].querySelectorAll(`.tsm-center-pts--${color} button.editor-side__pt`)];
 
@@ -167,8 +168,9 @@ describe('bc-fsnp: a per-bout fusensho keeps the other side\'s struck points', (
     await settle();
     await tap(fusenshoButton('aka'));
     const shiro = fusenshoButton('shiro');
-    expect(shiro.disabled).toBe(true);
-    expect(shiro.title).toBe('AKA already won this bout: undo their fusensho, then clear their points');
+    expect(shiro.getAttribute('aria-disabled')).toBe('true');
+    await tap(shiro);
+    expect(refusalNote('shiro').textContent).toBe('AKA already won this bout: undo their fusensho, then clear their points');
   });
 
   it('refuses a fusensho against a side that already won the bout, and sends nothing', async () => {
@@ -177,11 +179,17 @@ describe('bc-fsnp: a per-bout fusensho keeps the other side\'s struck points', (
     await tap(ipponButton('shiro', 'K'));
     await settle();
     const aka = fusenshoButton('aka');
-    expect(aka.disabled).toBe(true);
+    expect(aka.getAttribute('aria-disabled')).toBe('true');
     expect(aka.title).toMatch(/SHIRO already won this bout/);
+    // The reason is not shown until the operator taps: every bout won 2-0
+    // refuses the loser's Fusensho, and a line under each would be clutter.
+    expect(refusalNote('aka')).toBeNull();
     window.API.recordScore.mockClear();
     await tap(aka);
     await settle();
     expect(window.API.recordScore).not.toHaveBeenCalled();
+    // A title never shows on a touchscreen, so the tap puts the reason in view.
+    expect(refusalNote('aka').textContent).toBe('SHIRO already won this bout: clear their points first');
+    expect(aka.textContent).toBe('Fusensho');
   });
 });

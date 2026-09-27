@@ -947,6 +947,10 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
   // (see submitInlineLineup below). Deliberately separate from editorErr:
   // the save did not fail, so it must never read like that channel.
   const [editorWarning, setEditorWarning] = useStateA("");
+  // The bout side (rowSides tapKey) whose refused Fusensho was last tapped:
+  // its reason shows under that row (bc-fsnp). A title alone never shows on a
+  // touchscreen, so the button stays tappable and explains itself instead.
+  const [fusenshoRefusal, setFusenshoRefusal] = useStateA("");
   const [daihyosenBusy, setDaihyosenBusy] = useStateA(false);
   // mp-4pc: the daihyosen is the only team sub-bout that may be decided
   // by hantei (judges' decision on a tied bout, FIK 7-5 / 29-6: encho
@@ -3266,14 +3270,19 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
                               data-testid="scoring-modal-fusensho-button"
                               type="button"
                               className={`btn btn--sm ${s.fusensho === rs.key ? "btn--primary" : ""}`}
-                              onClick={() => setFusenshoFor(idx, rs.key)}
-                              disabled={!fusenshoAllowed(s, rs.key)}
+                              onClick={() => (fusenshoAllowed(s, rs.key) ? setFusenshoFor(idx, rs.key) : setFusenshoRefusal(rs.tapKey))}
+                              aria-disabled={fusenshoAllowed(s, rs.key) ? undefined : "true"}
                               title={fusenshoButtonTitle(s, rs, rowSides[1 - rsIdx])}
                             >
                               {s.fusensho === rs.key ? "✓ Fusensho" : "Fusensho"}
                             </button>
                           </div>
                         </div>
+                        {fusenshoRefusal === rs.tapKey && !fusenshoAllowed(s, rs.key) && (
+                          <div className="tsm-fusensho-why" role="status" data-testid="scoring-modal-fusensho-refused">
+                            {fusenshoButtonTitle(s, rs, rowSides[1 - rsIdx])}
+                          </div>
+                        )}
                         {/* The independent foul stepper. The `+` button
                             calls onIncrement which applies the FIK 2-foul rule
                             via applyFoulIncrement (auto-award H to opponent,

@@ -2,7 +2,9 @@ package helper
 
 import (
 	"fmt"
+	"runtime"
 	"sync"
+	"weak"
 
 	excelize "github.com/xuri/excelize/v2"
 )
@@ -32,19 +34,25 @@ const (
 	styleUnlockedBorderBottom styleKey = "unlocked_border_bottom"
 )
 
+// styleCacheByFile holds each workbook's style ids, keyed by a WEAK pointer so
+// the cache never keeps a workbook alive: the long-running app styles one per
+// export. The entry is dropped by a cleanup the runtime runs once the
+// workbook is unreachable, so no caller has a release to forget.
 var (
 	styleCacheMu     sync.Mutex
-	styleCacheByFile = make(map[*excelize.File]map[styleKey]int)
+	styleCacheByFile = make(map[weak.Pointer[excelize.File]]map[styleKey]int)
 )
 
 func getCachedStyle(f *excelize.File, key styleKey, builder func(*excelize.File) int) int {
+	fileKey := weak.Make(f)
 	styleCacheMu.Lock()
 	defer styleCacheMu.Unlock()
 
-	cacheForFile, ok := styleCacheByFile[f]
+	cacheForFile, ok := styleCacheByFile[fileKey]
 	if !ok {
 		cacheForFile = make(map[styleKey]int)
-		styleCacheByFile[f] = cacheForFile
+		styleCacheByFile[fileKey] = cacheForFile
+		runtime.AddCleanup(f, dropStyleCache, fileKey)
 	}
 
 	if styleID, ok := cacheForFile[key]; ok {
@@ -54,6 +62,13 @@ func getCachedStyle(f *excelize.File, key styleKey, builder func(*excelize.File)
 	styleID := builder(f)
 	cacheForFile[key] = styleID
 	return styleID
+}
+
+// dropStyleCache removes a collected workbook's style ids.
+func dropStyleCache(fileKey weak.Pointer[excelize.File]) {
+	styleCacheMu.Lock()
+	defer styleCacheMu.Unlock()
+	delete(styleCacheByFile, fileKey)
 }
 
 func getBorderStyleTop(f *excelize.File) int {

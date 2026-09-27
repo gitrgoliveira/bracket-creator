@@ -54,6 +54,7 @@ function wiringOf(p) {
     variant: kind(p.variant),
     password: kind(p.password),
     selfReport: kind(p.selfReport),
+    teamMembers: kind(p.teamMembers),
   };
 }
 
@@ -107,11 +108,7 @@ beforeAll(async () => {
   await import('../../admin_competition_bracket.jsx');
   const sched = await import('../../admin_schedule_score_editor.jsx');
   const viewer = await import('../../viewer_match.jsx');
-  // A5: the OTHER self-run mount site (the Overview tab's currentMatch card,
-  // which opens the same MatchViewerModal). viewer_match.jsx is imported
-  // above first, since viewer_competition.jsx imports MatchViewerModal FROM
-  // it -- ESM resolves that import regardless of order here, but importing
-  // the leaf first mirrors the real module graph.
+  // The Overview tab's cards open the same MatchViewerModal.
   const viewerComp = await import('../../viewer_competition.jsx');
   AdminShiaijoPage = window.AdminShiaijoPage;
   AdminPools = window.AdminPools;
@@ -271,6 +268,7 @@ describe('mount site: admin_shiaijo.jsx (court console)', () => {
       variant: 'inline',
       password: 'pw',
       selfReport: 'absent',
+      teamMembers: 'absent',       // the editor loads them with the password
     });
   });
 });
@@ -294,6 +292,7 @@ describe('mount site: admin_pools.jsx (pools tab)', () => {
       variant: 'absent',           // default modal
       password: 'pw',
       selfReport: 'absent',
+      teamMembers: 'absent',       // the editor loads them with the password
     });
   });
 });
@@ -317,6 +316,7 @@ describe('mount site: admin_competition_bracket.jsx (bracket panel)', () => {
       variant: 'inline',
       password: 'pw',
       selfReport: 'absent',
+      teamMembers: 'absent',       // the editor loads them with the password
     });
     // The bracket panel stamps phase "bracket" on the editor's match so the
     // no-draw knockout rule holds (AdminBracket.scoringMatch enrichment).
@@ -347,6 +347,7 @@ describe('mount site: admin_schedule_score_editor.jsx (Scores tab)', () => {
       variant: 'absent',           // default modal
       password: 'pw',
       selfReport: 'absent',
+      teamMembers: 'absent',       // the editor loads them with the password
     });
     // Chained navigation must stay on the current match's shiaijo (CLAUDE.md
     // pitfall): with both fixtures on court A, m2 is the wired next match.
@@ -453,20 +454,16 @@ describe('mount site: viewer_match.jsx (public self-run)', () => {
       variant: 'absent',           // default modal
       password: '',                // public surface authenticates nothing
       selfReport: true,
+      teamMembers: 'object',       // from the page: the route needs the password
     });
   });
 });
 
-// A5 (bc-p3-dh-lineups-excel review): the OTHER self-run entry point into
-// MatchViewerModal, the Overview tab's own "ON NOW" card (ViewerOverview,
-// viewer_competition.jsx). Both used to freeze a snapshot of the match at the
-// moment the editor opened (viewer_match.jsx's own scoringMatch here, and
-// ViewerOverview's selectedMatch there): an organiser's correction made on
-// another device, or the app's own periodic refetch, never reached the open
-// editor. Fixed: both now store only the match id and resolve the live match
-// on every render, mirroring the non-self-run expand-in-place path
-// (expandedMatchId) that already worked this way.
-describe('mount site: viewer_competition.jsx ViewerOverview (public self-run overview card, A5)', () => {
+// The Overview tab's "ON NOW" card (ViewerOverview) is another way into
+// MatchViewerModal. It and the modal used to keep a copy of the match taken
+// when it was tapped, so a result corrected on another device never reached
+// the open editor; both now read the live match on every render.
+describe('mount site: viewer_competition.jsx ViewerOverview (public self-run overview card)', () => {
   function overviewProps(overrides = {}) {
     return {
       c: { format: 'knockout', status: 'knockout', teamSize: 0, kind: 'individual', engi: false },

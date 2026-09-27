@@ -1,10 +1,12 @@
 package test
 
 import (
+	"bytes"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	excelize "github.com/xuri/excelize/v2"
 )
 
 func TestCreateTestPlayers(t *testing.T) {
@@ -136,4 +138,28 @@ func TestReadCourtBands(t *testing.T) {
 	t.Run("non-header cells are ignored", func(t *testing.T) {
 		assert.Empty(t, ReadCourtBands([][]string{{"Pool A", "Shiaijo", "shiaijo A"}}, columnsPerCourt))
 	})
+}
+
+func TestRowBreaks(t *testing.T) {
+	f := excelize.NewFile()
+	defer func() { require.NoError(t, f.Close()) }()
+	_, err := f.NewSheet("Scores")
+	require.NoError(t, err)
+	require.NoError(t, f.InsertPageBreak("Scores", "A12"))
+	require.NoError(t, f.InsertPageBreak("Scores", "A30"))
+	var buf bytes.Buffer
+	require.NoError(t, f.Write(&buf))
+
+	breaks, err := RowBreaks(buf.Bytes(), "Scores")
+	require.NoError(t, err)
+	assert.Equal(t, []int{11, 29}, breaks, "a break before row 12 ends the page after row 11")
+
+	breaks, err = RowBreaks(buf.Bytes(), "Sheet1")
+	require.NoError(t, err)
+	assert.Empty(t, breaks, "a sheet with no break")
+
+	_, err = RowBreaks(buf.Bytes(), "Missing")
+	assert.Error(t, err, "an unknown sheet")
+	_, err = RowBreaks([]byte("not a workbook"), "Scores")
+	assert.Error(t, err, "bytes that are not an xlsx")
 }

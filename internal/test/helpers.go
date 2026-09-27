@@ -1,6 +1,11 @@
 package test
 
 import (
+	"archive/zip"
+	"bytes"
+	"encoding/xml"
+	"errors"
+	"fmt"
 	"slices"
 	"strconv"
 	"strings"
@@ -99,6 +104,83 @@ func bandOccupied(rows [][]string, start, columnsPerCourt int) bool {
 		}
 	}
 	return false
+}
+
+// RowBreaks returns the manual page breaks of one sheet of a saved workbook,
+// as the rows a page ENDS after (the <rowBreaks> brk ids, so the next page
+// starts on row id+1), in sheet order. excelize can insert a page break but
+// has no reader for one, so this reads the sheet XML out of the xlsx bytes,
+// resolving the sheet's file through the workbook's relationships.
+func RowBreaks(xlsx []byte, sheet string) ([]int, error) {
+	zr, err := zip.NewReader(bytes.NewReader(xlsx), int64(len(xlsx)))
+	if err != nil {
+		return nil, err
+	}
+	part := func(name string, into any) error {
+		for _, f := range zr.File {
+			if f.Name != name {
+				continue
+			}
+			rc, err := f.Open()
+			if err != nil {
+				return err
+			}
+			return errors.Join(xml.NewDecoder(rc).Decode(into), rc.Close())
+		}
+		return fmt.Errorf("%s is not in the workbook", name)
+	}
+
+	var wb struct {
+		Sheets []struct {
+			Name string `xml:"name,attr"`
+			RID  string `xml:"http://schemas.openxmlformats.org/officeDocument/2006/relationships id,attr"`
+		} `xml:"sheets>sheet"`
+	}
+	if err := part("xl/workbook.xml", &wb); err != nil {
+		return nil, err
+	}
+	var rels struct {
+		Rels []struct {
+			ID     string `xml:"Id,attr"`
+			Target string `xml:"Target,attr"`
+		} `xml:"Relationship"`
+	}
+	if err := part("xl/_rels/workbook.xml.rels", &rels); err != nil {
+		return nil, err
+	}
+	target := ""
+	for _, s := range wb.Sheets {
+		if s.Name != sheet {
+			continue
+		}
+		for _, r := range rels.Rels {
+			if r.ID == s.RID {
+				target = r.Target
+			}
+		}
+	}
+	if target == "" {
+		return nil, fmt.Errorf("no sheet %q in the workbook", sheet)
+	}
+	if abs, ok := strings.CutPrefix(target, "/"); ok {
+		target = abs
+	} else {
+		target = "xl/" + target
+	}
+
+	var ws struct {
+		Breaks []struct {
+			ID int `xml:"id,attr"`
+		} `xml:"rowBreaks>brk"`
+	}
+	if err := part(target, &ws); err != nil {
+		return nil, err
+	}
+	out := make([]int, 0, len(ws.Breaks))
+	for _, b := range ws.Breaks {
+		out = append(out, b.ID)
+	}
+	return out, nil
 }
 
 // CreateTestPlayers returns a slice of players for testing

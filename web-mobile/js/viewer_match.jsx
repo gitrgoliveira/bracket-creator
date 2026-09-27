@@ -22,7 +22,7 @@ import { sameCompetitor } from './competitor_identity.jsx';
 import { barredNameMark } from './barred_chip.jsx';
 import { matchShowsScore } from './match_shows_score.jsx';
 
-const { useState, useRef: useRefV, useCallback } = React;
+const { useState, useMemo, useRef: useRefV, useCallback } = React;
 
 // ---------------------------------------------------------------------------
 // mymatchQueueLabel: FR-025 label for the "Your next match" Queue chip.
@@ -328,14 +328,60 @@ export const VSchedItem = React.memo(({ m, tweaks, showCompetition, onClick, hig
 VSchedItem.displayName = "VSchedItem";
 
 // ---------------------------------------------------------------------------
+// useLiveMatch: the match a public-page MatchViewerModal is open on
+// ---------------------------------------------------------------------------
+
+// Every page that opens MatchViewerModal (the competition page's tabs and
+// Overview, Home, Schedule) reads the match from its live data on every
+// render, so the modal and the score editor it opens follow a result recorded
+// or corrected on another device. `rowOf(id, compId)` finds the row the page
+// holds for a match. Only the match's id and competition, and what the opener
+// added to the row (a round label, the competition's fields), are kept, and
+// the added keys win over the row's own. A match that leaves the data closes
+// the modal and is forgotten, because a draw discarded and made again reuses
+// the match ids.
+export function useLiveMatch(rowOf) {
+  const [picked, setPicked] = useState(null);
+  const row = picked ? rowOf(picked.id, picked.compId) : null;
+  React.useEffect(() => {
+    if (picked && !row) setPicked(null);
+  }, [picked, row]);
+  const match = useMemo(() => (row ? { ...row, ...picked.added } : null), [row, picked]);
+  const open = (clicked) => {
+    const base = rowOf(clicked.id, clicked.compId) || {};
+    const added = {};
+    for (const k of Object.keys(clicked)) if (clicked[k] !== base[k]) added[k] = clicked[k];
+    setPicked({ id: clicked.id, compId: clicked.compId, added });
+  };
+  return [match, open, () => setPicked(null)];
+}
+
+// matchRowIn: the row a competition holds for a match id, read where
+// compMatches (viewer_utils.jsx) reads its rows: the pool matches, the bracket
+// rounds, or the bronze.
+export function matchRowIn(comp, id) {
+  if (!comp) return null;
+  const b = comp.bracket;
+  const rounds = (b && b.rounds) || (Array.isArray(b) ? b : []);
+  return (comp.poolMatches || (comp.pools || []).flatMap((p) => p.matches || [])).find((m) => m && m.id === id)
+    || rounds.flat().find((m) => m && m.id === id)
+    || (b && b.thirdPlaceMatch && b.thirdPlaceMatch.id === id ? b.thirdPlaceMatch : null);
+}
+
+// tournamentMatchRow: the same, for a page that lists every competition's
+// matches (Home, Schedule). Match ids repeat across competitions.
+export function tournamentMatchRow(tournament, id, compId) {
+  return matchRowIn(((tournament && tournament.competitions) || []).find((c) => c.id === compId), id);
+}
+
+// ---------------------------------------------------------------------------
 // MatchViewerModal
 // ---------------------------------------------------------------------------
 
 export function MatchViewerModal({ match, onClose, tournament, compId: defaultCompId, slotLabel }) {
   window.useEscapeToClose(onClose);
-  // A5: a boolean, not a match snapshot -- the editor below reads the LIVE
-  // `match` prop directly (see its onSubmit too), so a correction made on
-  // another device is adopted instead of frozen at "Report result" time.
+  // Whether the editor is open, not a copy of the match: the editor reads the
+  // live `match` prop, so it follows a result corrected on another device.
   const [isScoring, setIsScoring] = useState(false);
   const triggerRef = useRefV(null);
   const trapRef = useRefV(null);
@@ -383,16 +429,14 @@ export function MatchViewerModal({ match, onClose, tournament, compId: defaultCo
   const dialogLabel = sideAName && sideBName ? `Match: ${sideBName} vs ${sideAName}` : "Match details";
 
   if (isScoring && window.ScoreEditorModal) {
+    const compId = match.compId || defaultCompId;
+    const comp = ((tournament && tournament.competitions) || []).find((c) => c.id === compId);
     return React.createElement(window.ScoreEditorModal, {
-      // A5: the LIVE prop, not a snapshot -- so the editor follows a
-      // correction made on another device the same way every admin host's
-      // editor does (compId/id/onSubmit's own recordScore call below read
-      // the same live `match`, never a frozen copy).
       match,
       onClose: () => setIsScoring(false),
       onSubmit: async (patch) => {
         try {
-          const res = await window.API.recordScore(match.compId || defaultCompId, match.id, patch, "", match);
+          const res = await window.API.recordScore(compId, match.id, patch, "", match);
           // Close only when a landed write ends the match (writeKeepsEditorOpen,
           // the rule every closing host asks). Start, an autosave, or a write
           // that did not land keeps the editor open; the last shows its
@@ -413,6 +457,10 @@ export function MatchViewerModal({ match, onClose, tournament, compId: defaultCo
       },
       password: "",
       selfReport: true,
+      // The team-members route needs the organiser password, so the members
+      // come from the viewer payload this page already holds. Always a map,
+      // so the editor never asks the route.
+      teamMembers: (comp && comp.squads) || {},
     });
   }
 

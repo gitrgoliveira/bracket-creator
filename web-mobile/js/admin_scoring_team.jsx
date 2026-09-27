@@ -763,7 +763,21 @@ export function reconcileRowsToPositions(rows, serverRows) {
   return serverRows.map(ss => byPos.get(ss._pos) || ss);
 }
 
-export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSubmitAndNext, onAfterDecision, onStartLanded, prevMatch, nextMatch, onPrev, onNext, password, selfReport, variant = "modal", canClose = true }) {
+// withServerDaihyosenRow: what a landed representative-bout add or remove
+// does to an autosave patch, for the edit owed when the editor unmounted
+// while the request was out (useDebouncedRunningWrite's settle). The patch
+// takes the row exactly as the server's returned log holds it, or none when
+// the log has none. null when the answer carried no log to read.
+function withServerDaihyosenRow(serverSubs) {
+  if (!Array.isArray(serverSubs)) return null;
+  const row = serverSubs.find((s) => s && s.position === DAIHYOSEN_POSITION);
+  return (patch) => {
+    const rest = (patch.subResults || []).filter((s) => s.position !== DAIHYOSEN_POSITION);
+    return { ...patch, subResults: row ? [...rest, row] : rest };
+  };
+}
+
+export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSubmitAndNext, onAfterDecision, onStartLanded, prevMatch, nextMatch, onPrev, onNext, password, selfReport, teamMembers, variant = "modal", canClose = true }) {
   // mp-gmcg: a successful [× Remove this bout] shrinks the SERVER bout log, and
   // the parent may not have caught up when this render runs. matchOverride
   // shadows the prop so the removed bout disappears at once, and is cleared
@@ -798,12 +812,9 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
   // (same id); keying on match?.id — not the object ref — keeps the editor open
   // across that reload instead of collapsing it after every ippon change.
   useEffectA(() => { setEditingDoneBoutIdx(-1); editingDoneOriginalRef.current = null; }, [match?.id]);
-  // F6: the LATEST `match` prop, refreshed every render (not in an effect: a
-  // pending async continuation -- adoptServerSubs below, resumed after an
-  // awaited save -- must see the prop as of whichever render most recently
-  // ran, not the one in which its own closure was created). Same
-  // direct-during-render assignment convention as _autosaveIsRunningRef etc.
-  // below.
+  // The LATEST `match` prop, refreshed during render rather than in an effect,
+  // so adoptServerSubs, resuming after an awaited request, reads the prop of
+  // the latest render rather than of the one that created its closure.
   const matchRef = useRefA(match);
   matchRef.current = match;
   const m = matchOverride || match;
@@ -1074,20 +1085,12 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
     buildPatchRef: _autosaveBuildPatchRef,
     onSubmitRef: _autosaveOnSubmitRef,
   });
-  // A6: release the hold once a representative-bout add/remove request has
-  // finished (daihyosenBusy's true->false edge), whichever way it finished.
-  // Both onDaihyosen and onRemoveDaihyosen set daihyosenBusy(false) in their
-  // `finally`, in the SAME synchronous continuation as the adopt
-  // (adoptServerSubs/setMatchOverride) that precedes it, so React batches
-  // both state updates into ONE render -- the render whose body refreshes
-  // _autosaveBuildPatchRef (line below, "_autosaveBuildPatchRef.current =
-  // buildPatch") runs BEFORE this effect. That holds even on F6's skip
-  // branch (adoptServerSubs decides the prop already matches the server and
-  // sets no override): reaching that branch at all means a render already
-  // carried the fresh prop, so buildPatchRef is already current and
-  // releasing here is still safe. Keyed on daihyosenBusy, not matchOverride:
-  // keying on the override would miss exactly that skip branch, since it
-  // sets no override and so triggers no re-run of an effect keyed on it.
+  // Release the hold once a representative-bout add or remove has settled
+  // (daihyosenBusy's true->false edge). The `finally` that clears the flag
+  // runs in the same continuation as the adopt, so both land in one render,
+  // which refreshes _autosaveBuildPatchRef before this effect runs. Keyed on
+  // the flag, not on matchOverride: adoptServerSubs sets no override when the
+  // prop already carries the server's log.
   useEffectA(() => { if (!daihyosenBusy) releaseScoringWrite(); }, [daihyosenBusy]);
 
   // T141: remove an unscored daihyosen placeholder. Defined at component
@@ -1096,15 +1099,19 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
     const hadPending = cancelScoringDebounce();
     setEditorErr("");
     setDaihyosenBusy(true);
-    // A6: hold until daihyosenBusy flips back false (the effect above), so a
-    // scoring tap that lands during the DELETE cannot autosave a patch built
-    // before adoptServerSubs's row removal has rendered.
-    holdScoringWrite();
+    // A tap made while the DELETE is out waits for it (the effect above), so
+    // its autosave is built from the sheet without the row.
+    const settle = holdScoringWrite();
     try {
       if (m.status === "running" && (hadPending || isDirty)) {
         if (!(await saveRunningSheet())) return;
       }
       const res = await window.API.removeDaihyosen(m.compId, m.id, resolveDecisionPassword(password));
+      if (writeDidNotLand(res)) {
+        if (mountedRef.current) setWriteFailed(notLandedBanner(res));
+        return;
+      }
+      settle(withServerDaihyosenRow(res && res.subResults));
       if (!mountedRef.current) return;
       // Adopt the shorter log at once rather than closing (operator decision
       // 2026-09-27: the editor stays open after Add or Remove on every host).
@@ -1117,6 +1124,7 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
       else if (msg === "no_daihyosen") userMsg = "No daihyosen to remove";
       setEditorErr(userMsg);
     } finally {
+      settle();
       if (mountedRef.current) setDaihyosenBusy(false);
     }
   };
@@ -1356,11 +1364,24 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
   // then simply mints for every name it cannot find against an empty
   // list). bc-cse: `squadUnavailable` records that this happened, so
   // submitInlineLineup's warning names the real root cause.
+  //
+  // A host that already holds the team members passes them as teamMembers
+  // and nothing is fetched: the public self-run page reads them from the
+  // viewer payload, because the team-members route needs the organiser
+  // password there. Keyed on their content, so a refetch that brings the
+  // same members changes nothing.
+  const teamMembersKey = teamMembers ? JSON.stringify(teamMembers) : "";
   useEffectA(() => {
     let cancelled = false;
     const teamAId = teamIdForSide(m.sideA);
     const teamBId = teamIdForSide(m.sideB);
     if (!m.compId || (!teamAId && !teamBId)) return;
+    if (teamMembers) {
+      if (teamAId) setSquadA(teamMembers[teamAId] || []);
+      if (teamBId) setSquadB(teamMembers[teamBId] || []);
+      setSquadUnavailable(false);
+      return;
+    }
     (async () => {
       try {
         const squads = await window.API.fetchSquads(m.compId, password);
@@ -1381,7 +1402,7 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
     // halves one 401 strands the editor for the whole encounter: every bout
     // row's picker offers nothing, every row loses the squad number this
     // ruling put on it, and every typed name is written with no member id.
-  }, [m.compId, compMeta, password]);
+  }, [m.compId, compMeta, password, teamMembersKey]);
 
   // Submit an inline position change: builds the full positions map from the
   // existing lineup + the changed key→value, resolves/mints that position's
@@ -2654,45 +2675,43 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
   // client derives is decidedByHantei, which none of these responses carry.
   const adoptServerSubs = (subResults) => {
     if (!Array.isArray(subResults)) return;
-    // F6: build the override from the LATEST match prop (matchRef, updated
-    // every render), never from the `match` this closure was created with.
-    // That closure can be stale by the time an awaited save resolves -- the
-    // parent may have re-rendered with fresh data in the meantime (an SSE
-    // push racing the daihyosen POST) -- and every field but subResults
-    // would then revert to what it was at click time, shadowing the fresh
-    // prop.
+    // From the LATEST prop, not the `match` this closure captured: the parent
+    // may have re-rendered while the request was out (an SSE push racing it),
+    // and every field but subResults would revert to its click-time value.
     const latest = matchRef.current;
-    // Skip the override entirely when the latest prop's bout log already
-    // matches what the server just returned: the override exists only to
-    // bridge the gap before the parent catches up. Setting one here would
-    // needlessly shadow a prop that is already current -- and since nothing
-    // would then differ, the override-clearing effect above (keyed on
-    // matchSubsKey) would never fire to remove it.
+    // No override when the prop already carries this log: the override only
+    // bridges the gap until the parent catches up, and one that shadows a
+    // current prop is never cleared (the clearing effect keys on matchSubsKey).
     if (JSON.stringify(latest?.subResults || []) === JSON.stringify(subResults)) return;
     setMatchOverride({ ...latest, subResults });
   };
 
   // Save the sheet first through doSubmit (it cancels the pending autosave,
   // whose snapshot this save carries) before an add/remove changes the bout
-  // log a stale write could otherwise race or resurrect. Returns false when
+  // log a stale write could otherwise race or resurrect. Saved again while a
+  // tap made during a save is owed: the add/remove is stamped when it is
+  // sent, so an edit made before then and written after it would be older
+  // than it and dropped. Each pass reads the sheet through the autosave refs,
+  // since this closure's buildPatch predates those taps. Returns false when
   // the caller must stop without sending that request: doSubmit/onSubmit
   // returned nothing (a refused write threw, already reported by the host)
   // or the write only queued or was refused (writeDidNotLand); either way
   // the operator already has their report, from the banner just set or from
   // doSubmit's own pending state.
   const saveRunningSheet = async () => {
-    const res = await doSubmit(() => onSubmit(buildPatch("running")));
-    if (!res) return false;
-    const b = notLandedBanner(res);
-    if (b) setWriteFailed(b);
-    // F1: a queued pre-save is not a refusal (notLandedBanner says nothing
-    // about it, by design), but it IS the reason a dependent Add/Remove tap
-    // is about to silently do nothing: say so beside the representative-bout
-    // controls, since the generic pending pill only reports the SCORES, not
-    // this tap.
-    const blocked = dependentActionBlocked(res);
-    if (blocked) setEditorErr(blocked);
-    return !writeDidNotLand(res);
+    do {
+      const res = await doSubmit(() => _autosaveOnSubmitRef.current(_autosaveBuildPatchRef.current("running")));
+      if (!res) return false;
+      const b = notLandedBanner(res);
+      if (b) setWriteFailed(b);
+      // A queued pre-save is no refusal, but it is why the Add/Remove tap is
+      // about to do nothing, which the pending pill (about the scores) does
+      // not say: say it beside those controls.
+      const blocked = dependentActionBlocked(res);
+      if (blocked) setEditorErr(blocked);
+      if (writeDidNotLand(res)) return false;
+    } while (cancelScoringDebounce());
+    return true;
   };
 
   // Mirrors ScoreEditorModal.isDirty: "has the OPERATOR changed anything",
@@ -3673,14 +3692,18 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
               // add the row and adopt the server's bout log.
               setEditorErr("");
               setDaihyosenBusy(true);
-              // A6: hold until daihyosenBusy flips back false (see the
-              // effect near useDebouncedRunningWrite's call), so a scoring
-              // tap that lands during the POST cannot autosave a patch built
-              // before adoptServerSubs's new row has rendered.
-              holdScoringWrite();
+              // A tap made while the POST is out waits for it (the release
+              // effect near useDebouncedRunningWrite's call), so its
+              // autosave is built from the sheet with the new row.
+              const settle = holdScoringWrite();
               try {
                 if (!(await saveRunningSheet())) return;
                 const res = await window.API.recordDaihyosen(m.compId, m.id, resolveDecisionPassword(password));
+                if (writeDidNotLand(res)) {
+                  if (mountedRef.current) setWriteFailed(notLandedBanner(res));
+                  return;
+                }
+                settle(withServerDaihyosenRow(res && res.subResults));
                 if (!mountedRef.current) return;
                 // Adopt the new row at once rather than closing (operator
                 // decision 2026-09-27: the editor stays open after Add or
@@ -3696,6 +3719,7 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
                 else if (!userMsg) userMsg = "Could not add a representative bout";
                 setEditorErr(userMsg);
               } finally {
+                settle();
                 if (mountedRef.current) setDaihyosenBusy(false);
               }
             };

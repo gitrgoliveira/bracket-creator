@@ -1,12 +1,14 @@
 package mobileapp
 
 import (
+	"bytes"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/gitrgoliveira/bracket-creator/internal/domain"
@@ -669,4 +671,199 @@ func TestRemoveDaihyosen_RunningWriteReadsNoStandings(t *testing.T) {
 	require.Len(t, matches, 1)
 	assert.Empty(t, matches[0].SubResults, "the daihyosen row is removed")
 	assert.Equal(t, state.MatchStatusRunning, matches[0].Status)
+}
+
+// daihyosenStampRouter mounts both daihyosen endpoints over a fresh store with
+// a broadcaster that records what went out, and seeds a running knockout
+// encounter B1 last written at storedAt. withRow gives it an unscored
+// representative bout (what a remove acts on); without one it is tied at 0-0
+// (what an add acts on).
+func daihyosenStampRouter(t *testing.T, compID string, storedAt int64, withRow bool) (*gin.Engine, *state.Store, *recordingBroadcaster) {
+	t.Helper()
+	store, err := state.NewStore(t.TempDir())
+	require.NoError(t, err)
+	hub := &recordingBroadcaster{}
+	gin.SetMode(gin.TestMode)
+	r := gin.New()
+	RegisterDaihyosenHandlers(r.Group("/api"), engine.New(store), store, hub)
+
+	require.NoError(t, store.SaveCompetition(&state.Competition{ID: compID}))
+	require.NoError(t, store.SaveParticipants(compID, []domain.Player{
+		{ID: "11111111-1111-4111-1111-111111111111", Name: "Alice", Dojo: "A"},
+	}))
+	bm := state.BracketMatch{ID: "B1", SideA: "TeamA", SideB: "TeamB", Status: state.MatchStatusRunning, ModifiedAt: storedAt}
+	if withRow {
+		bm.SubResults = []state.SubMatchResult{{Position: state.DaihyosenSubPosition, Decision: "daihyosen"}}
+	}
+	require.NoError(t, store.SaveBracket(compID, &state.Bracket{Rounds: [][]state.BracketMatch{{bm}}}))
+	return r, store, hub
+}
+
+// sendDaihyosen sends an add (POST) or a remove (DELETE) for B1 stamped at
+// modifiedAt, the body the SPA sends.
+func sendDaihyosen(t *testing.T, r *gin.Engine, method, compID string, modifiedAt int64) (int, map[string]any) {
+	t.Helper()
+	payload, err := json.Marshal(map[string]int64{"modifiedAt": modifiedAt})
+	require.NoError(t, err)
+	req := httptest.NewRequest(method, "/api/competitions/"+compID+"/matches/B1/daihyosen", bytes.NewReader(payload))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	var body map[string]any
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &body), "body: %s", w.Body.String())
+	return w.Code, body
+}
+
+func storedB1(t *testing.T, store *state.Store, compID string) state.BracketMatch {
+	t.Helper()
+	b, err := store.LoadBracket(compID)
+	require.NoError(t, err)
+	require.NotNil(t, b)
+	return b.Rounds[0][0]
+}
+
+func carriesDaihyosenRow(subs []state.SubMatchResult) bool {
+	for _, s := range subs {
+		if s.Position == state.DaihyosenSubPosition {
+			return true
+		}
+	}
+	return false
+}
+
+// TestDaihyosenWrites_CompeteOnTimestamps: the add and the remove carry the
+// client's stamp (bc-dhas) and are judged exactly as /decision is. A write
+// that applies moves the stored stamp to its own, so a copy of the match read
+// before it is older than the one it returns; one older than the stored
+// result, or stamped past the skew margin, is refused with 200
+// {"applied": false} and leaves nothing behind: no row change, no stamp, no
+// broadcast.
+func TestDaihyosenWrites_CompeteOnTimestamps(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		method  string
+		withRow bool
+	}{
+		{"add", http.MethodPost, false},
+		{"remove", http.MethodDelete, true},
+	} {
+		t.Run(tc.name+" applies and moves the stored stamp", func(t *testing.T) {
+			compID := "dh-stamp-applied-" + tc.name
+			now := time.Now().UnixMilli()
+			r, store, hub := daihyosenStampRouter(t, compID, now-60_000, tc.withRow)
+
+			code, body := sendDaihyosen(t, r, tc.method, compID, now)
+			require.Equal(t, http.StatusOK, code, "%v", body)
+			assert.NotContains(t, body, "applied")
+			result, ok := body["result"].(map[string]any)
+			require.True(t, ok, "%v", body)
+			assert.EqualValues(t, now, result["modifiedAt"], "the returned match carries the write's stamp")
+
+			bm := storedB1(t, store, compID)
+			assert.EqualValues(t, now, bm.ModifiedAt, "the stored stamp moved to the write's")
+			assert.Equal(t, !tc.withRow, carriesDaihyosenRow(bm.SubResults), "the write landed")
+			assert.Contains(t, hub.events, EventMatchUpdated)
+		})
+
+		t.Run(tc.name+" older than the stored result is superseded", func(t *testing.T) {
+			compID := "dh-stamp-superseded-" + tc.name
+			storedAt := time.Now().UnixMilli()
+			r, store, hub := daihyosenStampRouter(t, compID, storedAt, tc.withRow)
+
+			code, body := sendDaihyosen(t, r, tc.method, compID, storedAt-60_000)
+			require.Equal(t, http.StatusOK, code, "a refusal is never a 4xx/5xx; %v", body)
+			assert.Equal(t, false, body["applied"])
+			assert.Equal(t, "superseded", body["reason"])
+
+			bm := storedB1(t, store, compID)
+			assert.EqualValues(t, storedAt, bm.ModifiedAt, "the stored stamp stands")
+			assert.Equal(t, tc.withRow, carriesDaihyosenRow(bm.SubResults), "nothing was written")
+			assert.Empty(t, hub.events, "a refused write is broadcast to nobody")
+		})
+
+		t.Run(tc.name+" stamped past the skew margin is refused", func(t *testing.T) {
+			compID := "dh-stamp-skew-" + tc.name
+			storedAt := time.Now().UnixMilli() - 60_000
+			r, store, hub := daihyosenStampRouter(t, compID, storedAt, tc.withRow)
+
+			code, body := sendDaihyosen(t, r, tc.method, compID, time.Now().UnixMilli()+10_000)
+			require.Equal(t, http.StatusOK, code, "%v", body)
+			assert.Equal(t, false, body["applied"])
+			assert.Equal(t, "clock_skew", body["reason"])
+
+			bm := storedB1(t, store, compID)
+			assert.EqualValues(t, storedAt, bm.ModifiedAt, "the stored stamp stands")
+			assert.Equal(t, tc.withRow, carriesDaihyosenRow(bm.SubResults), "nothing was written")
+			assert.Empty(t, hub.events, "a refused write is broadcast to nobody")
+		})
+	}
+}
+
+// TestDaihyosenRowAsTheAddReturnsItSurvivesAScoreWrite: when the team editor
+// unmounts with an edit owed while an add is out, the owed write is sent once
+// the add lands, carrying the representative-bout row exactly as the add
+// returned it (withServerDaihyosenRow, admin_scoring_team.jsx). PUT /score must
+// accept that row as it stands and keep it.
+func TestDaihyosenRowAsTheAddReturnsItSurvivesAScoreWrite(t *testing.T) {
+	store, err := state.NewStore(t.TempDir())
+	require.NoError(t, err)
+	eng := engine.New(store)
+	hub := NewHub()
+	gin.SetMode(gin.TestMode)
+	r := gin.New()
+	api := r.Group("/api")
+	RegisterDaihyosenHandlers(api, eng, store, hub)
+	RegisterMatchHandlers(api, eng, store, store, hub, NewFileVerifier(store), store)
+
+	compID := "dh-owed-write"
+	require.NoError(t, store.SaveTournament(&state.Tournament{Name: "T", Courts: []string{"A"}}))
+	require.NoError(t, store.SaveCompetition(&state.Competition{
+		ID: compID, Format: state.CompFormatKnockout, TeamSize: 3, TeamMatchType: state.TeamMatchTypeFixed,
+	}))
+	require.NoError(t, store.SaveParticipants(compID, []domain.Player{
+		{ID: "11111111-1111-4111-1111-111111111111", Name: "TeamA", Dojo: "A"},
+		{ID: "22222222-2222-4222-2222-222222222222", Name: "TeamB", Dojo: "B"},
+	}))
+	addedAt := time.Now().UnixMilli()
+	require.NoError(t, store.SaveBracket(compID, &state.Bracket{Rounds: [][]state.BracketMatch{{{
+		ID: "B1", SideA: "TeamA", SideB: "TeamB", Status: state.MatchStatusRunning, ModifiedAt: addedAt - 60_000,
+	}}}}))
+
+	code, added := sendDaihyosen(t, r, http.MethodPost, compID, addedAt)
+	require.Equal(t, http.StatusOK, code, "%v", added)
+	result, ok := added["result"].(map[string]any)
+	require.True(t, ok, "%v", added)
+	subs, ok := result["subResults"].([]any)
+	require.True(t, ok, "%v", result)
+	var row map[string]any
+	for _, s := range subs {
+		if m, ok := s.(map[string]any); ok && m["position"] == float64(state.DaihyosenSubPosition) {
+			row = m
+		}
+	}
+	require.NotNil(t, row, "the add returned its row: %v", subs)
+
+	// The owed edit: a point struck on bout 1 while the add was out, stamped
+	// at the tap, which came after the add was sent.
+	w := putScore(t, r, compID, "B1", map[string]any{
+		"sideA": "TeamA", "sideB": "TeamB", "status": "running", "modifiedAt": addedAt + 500,
+		"subResults": []any{
+			map[string]any{"position": 1, "sideA": "", "sideB": "", "ipponsA": []string{"M"}, "ipponsB": []string{}, "winner": "TeamA", "decision": ""},
+			row,
+		},
+	})
+	require.Equal(t, http.StatusOK, w.Code, "body: %s", w.Body.String())
+	assert.NotContains(t, w.Body.String(), `"applied":false`)
+
+	bm := storedB1(t, store, compID)
+	assert.True(t, carriesDaihyosenRow(bm.SubResults), "the row the add returned is kept: %+v", bm.SubResults)
+	var bout1 *state.SubMatchResult
+	for i := range bm.SubResults {
+		if bm.SubResults[i].Position == 1 {
+			bout1 = &bm.SubResults[i]
+		}
+	}
+	require.NotNil(t, bout1, "%+v", bm.SubResults)
+	assert.Equal(t, []string{"M"}, bout1.IpponsA, "and so is the owed edit")
+	assert.EqualValues(t, addedAt+500, bm.ModifiedAt)
 }

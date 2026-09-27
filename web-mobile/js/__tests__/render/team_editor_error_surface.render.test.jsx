@@ -100,10 +100,9 @@ async function renderEditor(props = {}) {
 }
 
 
-// F1 (bc-p3-dh-lineups-excel review): arms the debounce on a NUMBERED bout
-// (never the daihyosen row itself) so onRemoveDaihyosen's own pre-save
-// condition (hadPending || isDirty) is true. Same selectors as the bc-dhas
-// block in autosave_debounce.render.test.jsx.
+// Arms the debounce on a NUMBERED bout (never the daihyosen row itself) so
+// onRemoveDaihyosen's own pre-save condition (hadPending || isDirty) is true.
+// Same selectors as the bc-dhas block in autosave_debounce.render.test.jsx.
 function subMatchRows() { return [...document.querySelectorAll('.team-sub-match')]; }
 function ipponButton(rowEl, color, letter) {
   return [...rowEl.querySelectorAll(`.team-sub-match__side--${color} button.ipt-btn`)].find((b) => b.textContent === letter);
@@ -138,13 +137,12 @@ describe('team editor inline error surface', () => {
     });
   });
 
-  // F1 (bc-p3-dh-lineups-excel review): saveRunningSheet's pre-save can come
-  // back QUEUED (offline / retryable 5xx) rather than refused. Before this
-  // fix notLandedBanner correctly said nothing (a queue is not a refusal) and
-  // nothing else spoke up either, so the tap silently did nothing. Restored:
-  // dependentActionBlocked's sentence, the one the editor said before
-  // saveRunningSheet existed (assertRunningWritePersisted / score_not_synced,
-  // see git history at 26d12df2).
+  // saveRunningSheet's pre-save can come back QUEUED (offline / retryable
+  // 5xx) rather than refused. notLandedBanner rightly says nothing about a
+  // queue, so without dependentActionBlocked's sentence (the one the editor
+  // said before saveRunningSheet existed, assertRunningWritePersisted /
+  // score_not_synced, see git history at 26d12df2) the tap silently did
+  // nothing.
   const QUEUED_MESSAGE = "Couldn't save the current scores (offline or server busy). Try again once the connection is back.";
 
   it('a queued pre-save on Add shows the not-yet-sent message and never posts the add', async () => {

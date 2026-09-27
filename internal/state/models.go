@@ -571,6 +571,32 @@ func (c *Competition) IsKachinuki() bool {
 	return c != nil && c.TeamSize >= 2 && c.TeamMatchType == TeamMatchTypeKachinuki
 }
 
+// KachinukiMaxBouts is the most bouts a kachinuki encounter between teams of
+// teamSize can take: every bout retires at least one fighter and the
+// encounter ends when one team is out, so at most all of one team and all but
+// one of the other, 2*teamSize-1.
+func KachinukiMaxBouts(teamSize int) int {
+	return 2*teamSize - 1
+}
+
+// TeamBoutRows is the number of numbered bout rows a team match's block has
+// on the score sheets, and the ONE owner of that count: 0 for an individual
+// competition, TeamSize for a team match, and KachinukiMaxBouts for
+// kachinuki. Every workbook consumer asks here: the Pool Matches and
+// Elimination Matches blocks (the 3rd-place block included), their IV/PW
+// formula ranges, the results overlay's row mapping, and the Kachinuki
+// Detail sheet's empty rows for hand entry.
+func (c *Competition) TeamBoutRows() int {
+	switch {
+	case c == nil || c.TeamSize <= 0:
+		return 0
+	case c.IsKachinuki():
+		return KachinukiMaxBouts(c.TeamSize)
+	default:
+		return c.TeamSize
+	}
+}
+
 // MinMatchDurationSeconds / MaxMatchDurationSeconds bound a per-match clock to
 // a plausible range: 1:00 to 60:00. Match duration drives auto-scheduling for
 // the whole event, so a fat-fingered 0:03 would collapse the day's timetable.

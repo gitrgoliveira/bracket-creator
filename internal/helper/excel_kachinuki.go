@@ -7,9 +7,8 @@ package helper
 // kachinuki team matches using the existing 8-column-per-court layout
 // (CourtsColumnsPerCourt = 8 in constants.go). This separate sheet uses a
 // flexible 6-column layout chosen for readability, NOT bound by
-// CourtsColumnsPerCourt, and is emitted only by the engine export path
-// (internal/engine/export.go) when a competition has teamMatchType=kachinuki
-// AND at least one kachinuki match carries bout data.
+// CourtsColumnsPerCourt, and is emitted by both workbook exports when a
+// competition has teamMatchType=kachinuki and a draw with matches in it.
 //
 // Layout per match section (rows are 1-based relative to the section start),
 // Shiro (SideB) LEFT and Aka (SideA) RIGHT throughout, per helper.WhiteLeft
@@ -19,8 +18,9 @@ package helper
 //	Row 1: Title, "<label> (Kachinuki)"
 //	Row 2: Subtitle, "<Shiro team> vs <Aka team>"
 //	Row 3: Column headers: Bout # | <Shiro team name>, merged B:C, white header | vs | <Aka team name>, merged E:F, red header
-//	Rows 4..N+3: one row per bout (N = len(bouts))
-//	Row N+4: Summary, eliminations per team
+//	Rows 4..N+3: one row per bout recorded, or, for a match with none yet,
+//	             N = BlankBoutRows empty numbered rows for hand entry
+//	Row N+4: Summary, eliminations per team (left blank for a match with no bouts)
 //
 // There is no Winner or Decision column (operator decision 2026-09-27): the
 // match's own Pool or Elimination Matches row already carries the result: the
@@ -31,7 +31,8 @@ package helper
 // beside the score of the side it names, exactly as the main sheets do.
 //
 // Sections are separated by a single blank row. The first section starts at
-// row 1.
+// row 1, and a section that would cross KachinukiDetailRowsPerPage starts a
+// new page.
 //
 // CHK037, T195–T203.
 
@@ -60,10 +61,8 @@ type KachinukiBout struct {
 	// exactly as it did before squad labels existed.
 	SideALabel string
 	SideAPos   string // lineup position (Senpo, Jiho, Chuken, Fukusho, Taisho), may be empty
-	// ScoreA is the accumulated ippon string (e.g. "MK", "MMK"), or empty.
-	// A default-win winner's EMPTY recorded cell instead carries the FIK
-	// maru fallback (domain.DefaultWinMaruAB), exactly as the main sheets'
-	// writeTeamSubMatchScores fills it (bc-cse F2).
+	// ScoreA is the accumulated ippon string (e.g. "MK", "MMK"), or empty;
+	// a default-win winner's empty cell carries the maru (domain.DefaultWinMaruAB).
 	ScoreA     string
 	SideBName  string
 	SideBLabel string // Side B's twin of SideALabel, same rules.
@@ -93,6 +92,23 @@ type KachinukiMatchDetail struct {
 	Bouts        []KachinukiBout
 	EliminationA int // count of Side A players retired by the end of the match
 	EliminationB int // count of Side B players retired by the end of the match
+	// BlankBoutRows is how many empty numbered bout rows the section prints
+	// for hand entry when Bouts is empty (a match not fought yet); ignored
+	// once a bout is recorded, since the section then lists exactly those.
+	BlankBoutRows int
+}
+
+// sectionBouts returns the rows a match's section prints: the bouts
+// recorded, or BlankBoutRows empty numbered rows when there are none.
+func (m KachinukiMatchDetail) sectionBouts() []KachinukiBout {
+	if len(m.Bouts) > 0 || m.BlankBoutRows <= 0 {
+		return m.Bouts
+	}
+	blank := make([]KachinukiBout, m.BlankBoutRows)
+	for i := range blank {
+		blank[i].Position = i + 1
+	}
+	return blank
 }
 
 // kachinukiDetailColumns enumerates the column letters used on the detail
@@ -114,20 +130,17 @@ const (
 // created, the caller is responsible for checking the input length AND
 // the renderer guards against accidental emission of an empty sheet.
 func WriteKachinukiDetailSheet(f *excelize.File, matches []KachinukiMatchDetail) error {
-	// Skip when there are no matches to render. The detail sheet is
-	// purely additive, never create an empty sheet (T201 acceptance).
-	if len(matches) == 0 {
-		return nil
-	}
-	// Also skip when every match has zero bouts: there is nothing to show.
-	hasBouts := false
+	// Skip when no match has a row to print (no bouts and no blank rows):
+	// the detail sheet is purely additive, never create an empty sheet
+	// (T201 acceptance).
+	hasRows := false
 	for _, m := range matches {
-		if len(m.Bouts) > 0 {
-			hasBouts = true
+		if len(m.sectionBouts()) > 0 {
+			hasRows = true
 			break
 		}
 	}
-	if !hasBouts {
+	if !hasRows {
 		return nil
 	}
 
@@ -141,19 +154,11 @@ func WriteKachinukiDetailSheet(f *excelize.File, matches []KachinukiMatchDetail)
 		}
 	}
 
-	// Set column widths for readability. These are unrelated to the
-	// per-court widths of Pool Matches / Elimination Matches. Column A is
-	// wide enough that the summary row's "Summary" label does not clip.
-	//
-	// The fighter columns (B/F) are widened past the Winner/Decision
-	// columns' old share, now that both are gone and the sheet fits one
-	// printed page wide regardless of column width (SetSheetLayoutPortraitA4
-	// scales the print, never the on-screen column). 24 clipped a labelled
-	// name at the 12pt centred font this sheet uses: a LibreOffice render of
-	// "T3.4 Yui Nakamura (Chuken)" (26 characters) lost its first character
-	// and spilled past the table. 36 comfortably fits the longest realistic
-	// label, "T12.4 Yui Nakamura (Fukusho)" (28 characters), with margin to
-	// spare (bc-cse F10).
+	// Column widths for readability, unrelated to the per-court widths of
+	// Pool Matches / Elimination Matches. Column A fits the summary row's
+	// "Summary" label; the fighter columns (B/F) fit the longest realistic
+	// labelled name, "T12.4 Yui Nakamura (Fukusho)", at this sheet's 12pt
+	// font. The print is scaled to one page wide whatever the widths.
 	colWidths := []struct {
 		from, to string
 		w        float64
@@ -170,18 +175,27 @@ func WriteKachinukiDetailSheet(f *excelize.File, matches []KachinukiMatchDetail)
 	}
 
 	row := 1
+	rowsOnPage := 0
 	for i, match := range matches {
-		if len(match.Bouts) == 0 {
-			// Skip matches with no bouts, they would render an empty
-			// section. The summary row alone has no value without a
-			// bout list to give it context.
+		bouts := match.sectionBouts()
+		if len(bouts) == 0 {
+			// Nothing to list: a summary row alone has no bout rows to
+			// give it context.
 			continue
+		}
+		// A section is its title, subtitle and header rows, its bouts and
+		// its summary row; one that would cross the page budget starts a new
+		// page instead, so no section is split for the hand filling it in.
+		if height := len(bouts) + 4; rowsOnPage > 0 && rowsOnPage+height > KachinukiDetailRowsPerPage {
+			handleExcelError("InsertPageBreak", f.InsertPageBreak(sheet, kachinukiColBout+strconv.Itoa(row)))
+			rowsOnPage = 0
 		}
 		nextRow := writeKachinukiMatchSection(f, sheet, match, row)
 		// Separator blank row between sections (except after the last).
 		if i < len(matches)-1 {
 			nextRow++
 		}
+		rowsOnPage += nextRow - row
 		row = nextRow
 	}
 
@@ -203,11 +217,12 @@ func writeKachinukiMatchSection(f *excelize.File, sheet string, match KachinukiM
 	summaryStyle := getGreyTextStyle(f)
 	leftStyle, rightStyle := WhiteLeft(getRedHeaderStyle(f), getWhiteHeaderStyle(f))
 
+	bouts := match.sectionBouts()
 	titleRow := startRow
 	subtitleRow := startRow + 1
 	headerRow := startRow + 2
 	firstBoutRow := startRow + 3
-	summaryRow := firstBoutRow + len(match.Bouts)
+	summaryRow := firstBoutRow + len(bouts)
 
 	leftTeam, rightTeam := WhiteLeft(match.SideATeam, match.SideBTeam)
 
@@ -237,7 +252,7 @@ func writeKachinukiMatchSection(f *excelize.File, sheet string, match KachinukiM
 	put(kachinukiColRightScore, kachinukiColRight, headerRow, rightTeam, rightStyle)
 
 	// --- Bout rows ---
-	for i, bout := range match.Bouts {
+	for i, bout := range bouts {
 		boutRow := firstBoutRow + i
 		writeKachinukiBoutRow(f, sheet, bout, boutRow, textStyle)
 	}
@@ -291,11 +306,15 @@ func writeKachinukiSummaryRow(f *excelize.File, sheet string, match KachinukiMat
 
 	handleExcelError("SetCellValue", f.SetCellValue(sheet, kachinukiColBout+rowStr, "Summary"))
 
-	leftElim, rightElim := WhiteLeft(match.EliminationA, match.EliminationB)
-	handleExcelError("SetCellValue", f.SetCellValue(sheet, kachinukiColLeft+rowStr,
-		fmt.Sprintf("%d eliminated", leftElim)))
-	handleExcelError("SetCellValue", f.SetCellValue(sheet, kachinukiColRight+rowStr,
-		fmt.Sprintf("%d eliminated", rightElim)))
+	// A match with no bout recorded has nothing to count yet: its cells are
+	// left empty for hand entry rather than claiming "0 eliminated".
+	if len(match.Bouts) > 0 {
+		leftElim, rightElim := WhiteLeft(match.EliminationA, match.EliminationB)
+		handleExcelError("SetCellValue", f.SetCellValue(sheet, kachinukiColLeft+rowStr,
+			fmt.Sprintf("%d eliminated", leftElim)))
+		handleExcelError("SetCellValue", f.SetCellValue(sheet, kachinukiColRight+rowStr,
+			fmt.Sprintf("%d eliminated", rightElim)))
+	}
 
 	// Style the whole row.
 	handleExcelError("SetCellStyle", f.SetCellStyle(sheet, kachinukiColBout+rowStr, kachinukiColRight+rowStr, style))

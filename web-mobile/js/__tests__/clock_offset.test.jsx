@@ -44,6 +44,9 @@
 //      and getting that comparison wrong would turn "a newer result won" into
 //      "resend and overwrite it" - the exact move the supersede advice exists
 //      to prevent.
+//   L. The representative-bout add and remove carry the stamp too, hand a
+//      refusal back as the refusal and relearn, and the stamp is what keeps a
+//      refetch read before the add from replacing the copy it pushed.
 //
 // The offset is never exported. It is observed through the one thing that
 // matters - payload.modifiedAt on a captured request body.
@@ -52,6 +55,7 @@
 // retry chain re-schedules itself, as does the queue backoff).
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { writeDidNotLand, writeWasSuperseded, writeWasRefusedForClock } from '../write_result.jsx';
 
 // Skew large enough that it can never be confused with fake-timer drift.
 const SKEW_MS = 100000;
@@ -1016,5 +1020,96 @@ describe('clock_skew recovery: the retried-once mark is persisted', () => {
         expect(warnSpy).toHaveBeenCalledWith(expect.stringMatching(/clock skew/i));
         warnSpy.mockRestore();
         unsub();
+    });
+});
+
+// ---------------------------------------------------------------------------
+// L. The representative-bout add and remove (bc-dhas)
+// ---------------------------------------------------------------------------
+// Both carry the stamp, exactly as recordDecision does, so each competes on
+// timestamps; a refusal is handed back as the refusal body (the team editor
+// reports it through notLandedBanner) and relearns the offset like any other.
+
+describe('the daihyosen add and remove carry the stamp', () => {
+    it.each([
+        ['add', 'POST', (API) => API.recordDaihyosen('c1', 'B1', 'pw')],
+        ['remove', 'DELETE', (API) => API.removeDaihyosen('c1', 'B1', 'pw')],
+    ])('the %s sends a server-relative modifiedAt in a JSON body', async (_name, method, send) => {
+        const server = makeServer({ timeOk: true });
+        const API = await loadWith(server);
+
+        await send(API);
+
+        const [url, opts] = server.fetch.mock.calls.find(([u]) => String(u).includes('/daihyosen'));
+        expect(String(url)).toBe('/api/competitions/c1/matches/B1/daihyosen');
+        expect(opts.method).toBe(method);
+        expect(opts.headers['Content-Type']).toBe('application/json');
+        expect(server.payloads).toHaveLength(1);
+        expect(server.payloads[0].modifiedAt).toBe(Date.now() + SKEW_MS);
+    });
+
+    it.each([
+        ['add', 'superseded', (API) => API.recordDaihyosen('c1', 'B1', 'pw')],
+        ['add', 'clock_skew', (API) => API.recordDaihyosen('c1', 'B1', 'pw')],
+        ['remove', 'superseded', (API) => API.removeDaihyosen('c1', 'B1', 'pw')],
+        ['remove', 'clock_skew', (API) => API.removeDaihyosen('c1', 'B1', 'pw')],
+    ])('a refused %s (%s) comes back as the refusal and relearns the offset', async (_name, reason, send) => {
+        const server = makeServer({ timeOk: true });
+        const API = await loadWith(server);
+        expect(server.timeCalls).toBe(1);
+        server.writeReply = () => ({ applied: false, reason, message: 'Not saved.' });
+
+        const res = await send(API);
+        await flushMicrotasks();
+
+        expect(writeDidNotLand(res)).toBe(true);
+        expect(writeWasSuperseded(res)).toBe(true);
+        expect(writeWasRefusedForClock(res)).toBe(reason === 'clock_skew');
+        expect(server.timeCalls).toBe(2);
+    });
+
+    it('a landed add is the match, unwrapped from its envelope', async () => {
+        const server = makeServer({ timeOk: true });
+        const API = await loadWith(server);
+        const row = { position: -1, sideA: '', sideB: '', ipponsA: null, ipponsB: null, winner: '', decision: 'daihyosen' };
+        server.writeReply = () => ({ subResult: row, result: { id: 'B1', status: 'running', subResults: [row] } });
+
+        const res = await API.recordDaihyosen('c1', 'B1', 'pw');
+
+        expect(res).toEqual({ id: 'B1', status: 'running', subResults: [row] });
+        expect(writeDidNotLand(res)).toBe(false);
+        expect(server.timeCalls).toBe(1);
+    });
+
+    // The window the stamp closes, end to end on the client. A refetch that
+    // read the match just before the add committed can answer after the add's
+    // push was applied; keepNewerMatches keeps a held running copy only when it
+    // is STRICTLY newer. The fake answers as the handler does (pinned by
+    // TestDaihyosenWrites_CompeteOnTimestamps): the match it returns, and
+    // broadcasts, carries the request's stamp; an unstamped add wrote the
+    // bracket projection, which carries none, so the held copy kept the
+    // pre-add stamp and the stale refetch replaced it.
+    it('a refetch read before the add does not replace the running copy the add pushed', async () => {
+        const server = makeServer({ timeOk: true });
+        const API = await loadWith(server);
+        const { applyPatch, keepNewerMatches } = await import('../patch.jsx');
+        // The pre-save the editor sends first lands 50ms before the add goes.
+        const b1 = { id: 'B1', sideA: 'TeamA', sideB: 'TeamB', status: 'running', modifiedAt: Date.now() + SKEW_MS - 50, subResults: [] };
+        const row = { position: -1, sideA: '', sideB: '', ipponsA: null, ipponsB: null, hansokuA: 0, hansokuB: 0, winner: '', decision: 'daihyosen' };
+        server.writeReply = () => {
+            const [, opts] = server.fetch.mock.calls.findLast(([u]) => String(u).includes('/daihyosen'));
+            const stamp = opts && opts.body ? JSON.parse(opts.body).modifiedAt : 0;
+            const result = { ...b1, subResults: [row] };
+            delete result.modifiedAt;
+            if (stamp) result.modifiedAt = stamp;
+            return { subResult: row, result };
+        };
+        const comp = (m) => ({ id: 'c1', poolMatches: [], bracket: { rounds: [[m]], thirdPlaceMatch: null } });
+
+        const added = await API.recordDaihyosen('c1', 'B1', 'pw');
+        const held = applyPatch(comp(b1), { type: 'match_updated', data: { competitionId: 'c1', matchId: 'B1', result: added } });
+        const out = keepNewerMatches(held, comp({ ...b1 }));
+
+        expect(out.bracket.rounds[0][0].subResults.some((s) => s.position === -1)).toBe(true);
     });
 });

@@ -15,6 +15,7 @@ import { render, act, fireEvent, screen } from '@testing-library/react';
 import { describe, it, expect, vi, beforeAll, afterAll, beforeEach, afterEach } from 'vitest';
 import { installWindowStubs } from '../helpers/stub_globals.js';
 import { AUTOSAVE_DEBOUNCE_MS } from '../../admin_scoring_autosave.jsx';
+import { SUPERSEDED_REASON, SUPERSEDED_ADVICE, CLOCK_SKEW_REASON_TEXT, CLOCK_SKEW_ADVICE } from '../../write_result.jsx';
 
 // window globals required by admin_scoring_modal.jsx
 // Split into SYNC (evaluated in the component body on every render) and LAZY
@@ -643,7 +644,7 @@ describe('bc-dhas: Add/Remove representative bout races the pending autosave', (
     expect(patch.subResults.find((s) => s.position === 1)?.decision).toBe('hikiwake');
   });
 
-  it('F6: adoptServerSubs builds the override from the LATEST match prop, not the one captured at click time', async () => {
+  it('adoptServerSubs builds the override from the LATEST match prop, not the one captured at click time', async () => {
     let resolveDaihyosen;
     window.API.recordDaihyosen.mockImplementation(() => new Promise((resolve) => { resolveDaihyosen = resolve; }));
     const m1 = makeKnockoutTeamMatch();
@@ -683,7 +684,7 @@ describe('bc-dhas: Add/Remove representative bout races the pending autosave', (
     expect(screen.queryByText('CORRECTION')).toBeTruthy();
   });
 
-  it('A6: a scoring tap mid-request holds the autosave until the request resolves and the row is adopted', async () => {
+  it('a scoring tap mid-request holds the autosave until the request resolves and the row is adopted', async () => {
     let resolveDaihyosen;
     window.API.recordDaihyosen.mockImplementation(() => new Promise((resolve) => { resolveDaihyosen = resolve; }));
     renderModal(makeKnockoutTeamMatch());
@@ -852,5 +853,226 @@ describe('bc-dhas: Add/Remove representative bout races the pending autosave', (
     const saveOrder = window.API.recordScore.mock.invocationCallOrder[0];
     const deleteOrder = window.API.removeDaihyosen.mock.invocationCallOrder[0];
     expect(saveOrder).toBeLessThan(deleteOrder);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// bc-dhas: the add and remove are stamped, so their outcome settles the hold
+// ---------------------------------------------------------------------------
+
+// The representative-bout row exactly as the add returns it (the handler's
+// placeholder, pinned by TestDaihyosenRowAsTheAddReturnsItSurvivesAScoreWrite).
+function serverDaihyosenRow() {
+  return { position: -1, sideA: '', sideB: '', ipponsA: null, ipponsB: null, hansokuA: 0, hansokuB: 0, winner: '', decision: 'daihyosen' };
+}
+
+function failedBanner() { return document.querySelector('.pending-write-banner--failed'); }
+
+// A request the test answers when it chooses.
+function deferred() {
+  let resolve, reject;
+  const promise = new Promise((res, rej) => { resolve = res; reject = rej; });
+  return { promise, resolve, reject };
+}
+
+describe('bc-dhas: an edit owed when the editor goes during an add or remove', () => {
+  beforeEach(() => {
+    window.API.recordDaihyosen = vi.fn();
+    window.API.removeDaihyosen = vi.fn();
+  });
+
+  it('a tap during an add is written once the add lands, with the row it returned', async () => {
+    const add = deferred();
+    window.API.recordDaihyosen.mockReturnValue(add.promise);
+    const view = renderModal(makeKnockoutTeamMatch());
+    await act(async () => { fireEvent.click(screen.getByTestId('scoring-modal-daihyosen-button')); });
+    await settle(); // the pre-save lands; the add is out
+    window.API.recordScore.mockClear();
+
+    await act(async () => { fireEvent.click(tieBoutButton(0)); });
+    await act(async () => { view.unmount(); });
+    await act(async () => { vi.advanceTimersByTime(AUTOSAVE_DEBOUNCE_MS + 50); });
+    // Written at once, the pre-add sheet would drop the row the add is making.
+    expect(window.API.recordScore).not.toHaveBeenCalled();
+
+    const row = serverDaihyosenRow();
+    await act(async () => { add.resolve({ ...makeKnockoutTeamMatch(), subResults: [row] }); });
+    await settle();
+
+    expect(window.API.recordScore).toHaveBeenCalledTimes(1);
+    const [, , patch] = window.API.recordScore.mock.calls[0];
+    expect(patch.status).toBe('running');
+    expect(patch.subResults.filter((s) => s.position === -1)).toEqual([row]);
+    expect(patch.subResults.find((s) => s.position === 1)?.decision).toBe('hikiwake');
+  });
+
+  it('a tap during a remove is written once the remove lands, without the row', async () => {
+    const remove = deferred();
+    window.API.removeDaihyosen.mockReturnValue(remove.promise);
+    const view = renderModal(makeMatchWithDaihyosen());
+    // Nothing is pending, so the DELETE goes at once.
+    await act(async () => { fireEvent.click(screen.getByTestId('team-daihyosen-remove')); });
+    await settle();
+    expect(window.API.removeDaihyosen).toHaveBeenCalledTimes(1);
+    window.API.recordScore.mockClear();
+
+    await act(async () => { fireEvent.click(tieBoutButton(0)); });
+    await act(async () => { view.unmount(); });
+    // Written at once, the sheet would put the removed row back.
+    expect(window.API.recordScore).not.toHaveBeenCalled();
+
+    await act(async () => { remove.resolve({ subResults: [] }); });
+    await settle();
+
+    expect(window.API.recordScore).toHaveBeenCalledTimes(1);
+    const [, , patch] = window.API.recordScore.mock.calls[0];
+    expect(patch.subResults.some((s) => s.position === -1)).toBe(false);
+    expect(patch.subResults.find((s) => s.position === 1)?.decision).toBe('hikiwake');
+  });
+
+  it.each([
+    ['an add is refused', makeKnockoutTeamMatch, 'scoring-modal-daihyosen-button', 'recordDaihyosen',
+      (d) => d.resolve({ applied: false, reason: 'superseded', message: 'Not saved.' }), false],
+    ['an add fails', makeKnockoutTeamMatch, 'scoring-modal-daihyosen-button', 'recordDaihyosen',
+      (d) => d.reject(new Error('not_tied')), false],
+    ['a remove is refused', makeMatchWithDaihyosen, 'team-daihyosen-remove', 'removeDaihyosen',
+      (d) => d.resolve({ applied: false, reason: 'clock_skew', message: 'Not saved.' }), true],
+  ])('when %s, the tap is written as it stood once it settles', async (_what, makeMatch, button, api, answer, hadRow) => {
+    const request = deferred();
+    window.API[api].mockReturnValue(request.promise);
+    const view = renderModal(makeMatch());
+    await act(async () => { fireEvent.click(screen.getByTestId(button)); });
+    await settle();
+    window.API.recordScore.mockClear();
+
+    await act(async () => { fireEvent.click(tieBoutButton(0)); });
+    await act(async () => { view.unmount(); });
+    expect(window.API.recordScore).not.toHaveBeenCalled();
+
+    await act(async () => { answer(request); });
+    await settle();
+
+    expect(window.API.recordScore).toHaveBeenCalledTimes(1);
+    const [, , patch] = window.API.recordScore.mock.calls[0];
+    expect(patch.subResults.some((s) => s.position === -1)).toBe(hadRow);
+    expect(patch.subResults.find((s) => s.position === 1)?.decision).toBe('hikiwake');
+  });
+
+  // The add landing and the editor going in one turn: the render that would
+  // release the hold never commits, so the unmount itself must see that the
+  // request has settled and write the tap with its outcome.
+  it('the editor going after the add landed, before the hold is released, writes the tap at once with the row', async () => {
+    const add = deferred();
+    window.API.recordDaihyosen.mockReturnValue(add.promise);
+    const view = renderModal(makeKnockoutTeamMatch());
+    await act(async () => { fireEvent.click(screen.getByTestId('scoring-modal-daihyosen-button')); });
+    await settle();
+    window.API.recordScore.mockClear();
+    await act(async () => { fireEvent.click(tieBoutButton(0)); });
+    await act(async () => { vi.advanceTimersByTime(AUTOSAVE_DEBOUNCE_MS + 50); });
+    expect(window.API.recordScore).not.toHaveBeenCalled();
+
+    const row = serverDaihyosenRow();
+    await act(async () => {
+      add.resolve({ ...makeKnockoutTeamMatch(), subResults: [row] });
+      for (let i = 0; i < 8; i++) await Promise.resolve();
+      view.unmount();
+    });
+    await settle();
+
+    expect(window.API.recordScore).toHaveBeenCalledTimes(1);
+    const [, , patch] = window.API.recordScore.mock.calls[0];
+    expect(patch.subResults.filter((s) => s.position === -1)).toEqual([row]);
+  });
+
+  it('the page going away while the tap waits writes it at once, durably and as it stood, and the add adds nothing', async () => {
+    const add = deferred();
+    window.API.recordDaihyosen.mockReturnValue(add.promise);
+    const view = renderModal(makeKnockoutTeamMatch());
+    await act(async () => { fireEvent.click(screen.getByTestId('scoring-modal-daihyosen-button')); });
+    await settle();
+    window.API.recordScore.mockClear();
+    await act(async () => { fireEvent.click(tieBoutButton(0)); });
+    await act(async () => { view.unmount(); });
+
+    await act(async () => { window.dispatchEvent(new Event('pagehide')); });
+    expect(window.API.recordScore).toHaveBeenCalledTimes(1);
+    const [, , patch] = window.API.recordScore.mock.calls[0];
+    expect(patch.durable).toBe(true);
+    expect(patch.subResults.some((s) => s.position === -1)).toBe(false);
+
+    await act(async () => { add.resolve({ ...makeKnockoutTeamMatch(), subResults: [serverDaihyosenRow()] }); });
+    await settle();
+    expect(window.API.recordScore).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('bc-dhas: the sheet is saved until no tap is owed before the add is sent', () => {
+  beforeEach(() => {
+    window.API.recordDaihyosen = vi.fn();
+    window.API.removeDaihyosen = vi.fn();
+  });
+
+  // The add is stamped when it is sent. A tap made while the pre-save was out,
+  // written after the add, would be older than it and dropped.
+  it('a tap made while the pre-save is out is saved before the add goes', async () => {
+    window.API.recordDaihyosen.mockResolvedValue({ ...makeKnockoutTeamMatch(), subResults: [serverDaihyosenRow()] });
+    const preSave = deferred();
+    window.API.recordScore.mockReturnValueOnce(preSave.promise);
+    renderModal(makeKnockoutTeamMatch());
+    await act(async () => { fireEvent.click(screen.getByTestId('scoring-modal-daihyosen-button')); });
+    await settle();
+    expect(window.API.recordScore).toHaveBeenCalledTimes(1);
+
+    await act(async () => { fireEvent.click(tieBoutButton(0)); });
+    await act(async () => { preSave.resolve({}); });
+    await settle();
+
+    expect(window.API.recordScore).toHaveBeenCalledTimes(2);
+    expect(window.API.recordScore.mock.calls[1][2].subResults.find((s) => s.position === 1)?.decision).toBe('hikiwake');
+    expect(window.API.recordDaihyosen).toHaveBeenCalledTimes(1);
+    expect(window.API.recordScore.mock.invocationCallOrder[1]).toBeLessThan(window.API.recordDaihyosen.mock.invocationCallOrder[0]);
+    // Nothing is left owed to go out after the add.
+    await act(async () => { vi.advanceTimersByTime(AUTOSAVE_DEBOUNCE_MS + 50); });
+    await settle();
+    expect(window.API.recordScore).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe('bc-dhas: a refused add or remove is reported and changes nothing', () => {
+  beforeEach(() => {
+    window.API.recordDaihyosen = vi.fn();
+    window.API.removeDaihyosen = vi.fn();
+  });
+
+  it('a superseded add shows the not-saved banner, adopts no row, and releases a held tap', async () => {
+    const add = deferred();
+    window.API.recordDaihyosen.mockReturnValue(add.promise);
+    renderModal(makeKnockoutTeamMatch());
+    await act(async () => { fireEvent.click(screen.getByTestId('scoring-modal-daihyosen-button')); });
+    await settle();
+    window.API.recordScore.mockClear();
+    await act(async () => { fireEvent.click(tieBoutButton(0)); });
+    await act(async () => { vi.advanceTimersByTime(AUTOSAVE_DEBOUNCE_MS + 50); });
+    expect(window.API.recordScore).not.toHaveBeenCalled();
+
+    await act(async () => { add.resolve({ applied: false, reason: 'superseded', message: 'Not saved.' }); });
+    await settle();
+
+    expect(failedBanner()?.textContent).toBe(`Not saved: ${SUPERSEDED_REASON}. ${SUPERSEDED_ADVICE}`);
+    expect(screen.getByTestId('scoring-modal-daihyosen-button')).toBeTruthy();
+    expect(screen.queryByTestId('team-daihyosen-remove')).toBeNull();
+    expect(window.API.recordScore).toHaveBeenCalledTimes(1);
+    expect(window.API.recordScore.mock.calls[0][2].subResults.some((s) => s.position === -1)).toBe(false);
+  });
+
+  it('a remove refused for the clock shows the clock banner and keeps the row', async () => {
+    window.API.removeDaihyosen.mockResolvedValue({ applied: false, reason: 'clock_skew', message: 'Not saved.' });
+    renderModal(makeMatchWithDaihyosen());
+    await act(async () => { fireEvent.click(screen.getByTestId('team-daihyosen-remove')); });
+    await settle();
+
+    expect(failedBanner()?.textContent).toBe(`Not saved: ${CLOCK_SKEW_REASON_TEXT}. ${CLOCK_SKEW_ADVICE}`);
+    expect(screen.getByTestId('team-daihyosen-remove')).toBeTruthy();
   });
 });

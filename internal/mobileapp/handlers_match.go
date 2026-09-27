@@ -1988,12 +1988,12 @@ func matchSnapshotOrErr(s matchStores, compID, matchID, guardLabel string) (matc
 // ONE place for the same reason respondCourtBusy is one place: the condition is
 // mapped on five handlers (score, quick-score, /decision and both daihyosen
 // paths), and a body hand-copied per handler is how the client's single branch
-// quietly stops matching one of them. /score and /decision both reach it: each
-// carries the client's stamp (mp-jnvl added the decision one), so the timestamp
-// guard compares rather than taking its unstamped bypass. Quick-score and the
-// two daihyosen paths still build their MatchResult without a stamp and so
-// always apply; they are mapped defensively because the default arm in each is
-// a 500 the SPA's write queue would retry forever.
+// quietly stops matching one of them. /score, /decision and both daihyosen
+// paths reach it: each carries the client's stamp (mp-jnvl added the decision
+// one, bc-dhas the daihyosen ones), so the timestamp guard compares rather than
+// taking its unstamped bypass. Quick-score still builds its MatchResult without
+// a stamp and so always applies; it is mapped defensively because its default
+// arm is a 500 the SPA's write queue would retry forever.
 //
 // bulk-score is deliberately NOT in that list: it reports per-entry failures in
 // its own errors[] array inside an overall 200, so a superseded entry is already

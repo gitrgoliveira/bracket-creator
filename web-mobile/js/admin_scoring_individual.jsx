@@ -60,7 +60,7 @@ import { SyncStatusPill, useDebouncedRunningWrite } from './admin_scoring_autosa
 import { TeamScoreEditorModal, isKoTieBlocked } from './admin_scoring_team.jsx';
 import { EngiScoreEditorModal } from './admin_scoring_engi.jsx';
 
-export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, onAfterDecision, started = false, prevMatch, nextMatch, onPrev, onNext, password, selfReport, variant = "modal", canClose = true }) {
+export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, onAfterDecision, started = false, prevMatch, nextMatch, onPrev, onNext, password, selfReport, teamMembers, variant = "modal", canClose = true }) {
   // bc-strt: a match whose start has landed is RUNNING, even while the host's
   // list still says scheduled (it refetches a moment after each save). The
   // editors autosave only a match they see as running, so a point struck in
@@ -922,7 +922,7 @@ export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, on
   }
   // Team routing: forward to TeamScoreEditorModal.
   if (isTeam) {
-    return <TeamScoreEditorModal match={m} teamSize={teamSize} onClose={onClose} onSubmit={onSubmit} onSubmitAndNext={onSubmitAndNext} onAfterDecision={onAfterDecision} onStartLanded={() => setStartedFrom({ at: match.modifiedAt })} prevMatch={prevMatch} nextMatch={nextMatch} onPrev={onPrev} onNext={onNext} password={password} selfReport={selfReport} variant={variant} canClose={canClose} />;
+    return <TeamScoreEditorModal match={m} teamSize={teamSize} onClose={onClose} onSubmit={onSubmit} onSubmitAndNext={onSubmitAndNext} onAfterDecision={onAfterDecision} onStartLanded={() => setStartedFrom({ at: match.modifiedAt })} prevMatch={prevMatch} nextMatch={nextMatch} onPrev={onPrev} onNext={onNext} password={password} selfReport={selfReport} teamMembers={teamMembers} variant={variant} canClose={canClose} />;
   }
 
   // a11y: label the dialog with the match/court context so screen readers

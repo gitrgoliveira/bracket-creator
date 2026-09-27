@@ -2339,13 +2339,14 @@ func (e *Engine) recordBracketMatchResult(h state.StoreTx, compId string, matchI
 // a trusted snapshot of this same match, so it must never be weighed against the
 // stamp of the write it is undoing — that write is by definition newer, and the
 // rollback would lose to it every time. Stating that here rather than at each
-// call site is what makes the two branches identical, and it matters because the
-// two snapshot PRODUCERS differ: bracketMatchAsResult deliberately leaves
-// ModifiedAt at 0 (so the bracket bypass was inert either way), while the pool
-// snapshot is a straight copy of the stored MatchResult from
-// lookupExistingResult and carries a REAL persisted stamp. A gate stated only at
-// the pool call site was therefore load-bearing on one branch and decorative on
-// the other, which is precisely the asymmetry this primitive exists to end.
+// call site is what makes the two branches identical, and it mattered because the
+// two snapshot PRODUCERS used to differ: bracketMatchAsResult left ModifiedAt
+// at 0 (so the bracket bypass was inert either way), while the pool snapshot is
+// a straight copy of the stored MatchResult from lookupExistingResult and
+// carries a REAL persisted stamp. A gate stated only at the pool call site was
+// therefore load-bearing on one branch and decorative on the other, which is
+// precisely the asymmetry this primitive exists to end. Both snapshots carry
+// the stamp now (bracketMatchAsResult).
 func applyMatchWrite(result *state.MatchResult, storedModifiedAt int64, policy matchWritePolicy) bool {
 	if policy == matchWriteRestore {
 		return true
@@ -2360,11 +2361,11 @@ func applyMatchWrite(result *state.MatchResult, storedModifiedAt int64, policy m
 	// path left (a client stamp far enough in the future to reach it by accident
 	// is refused at the HTTP boundary instead, see modifiedAtRefuseSkewMs).
 	//
-	// Expected traffic, not an alarm: the server-built writes (quick-score,
-	// /decision, both daihyosen paths) carry no stamp BY DESIGN, so every
-	// correction made through them logs here. The line earns its keep when an
-	// operator asks where a result went: it names the match whose stamped result
-	// an unstamped write replaced.
+	// Expected traffic, not an alarm: quick-score builds its write server-side
+	// with no stamp BY DESIGN, so every correction made through it logs here,
+	// as does a /decision from a client that sends none. The line earns its
+	// keep when an operator asks where a result went: it names the match whose
+	// stamped result an unstamped write replaced.
 	//
 	// RUNNING writes are excluded, and that is a volume decision with a
 	// correctness argument behind it. A legacy SPA build (no modifiedAt)

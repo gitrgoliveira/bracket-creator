@@ -7,6 +7,8 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	excelize "github.com/xuri/excelize/v2"
+
+	bctest "github.com/gitrgoliveira/bracket-creator/internal/test"
 )
 
 // makeKachinukiTestMatch builds a 6-bout kachinuki team-match fixture used by
@@ -422,6 +424,106 @@ func TestKachinukiDetailSummaryRow(t *testing.T) {
 	}
 }
 
+// TestKachinukiDetailBlankSection pins the hand-entry section (operator
+// decision 2026-09-27, bc-kdsc): a match with no bout recorded prints
+// BlankBoutRows empty numbered rows, "vs" in the centre as an unplayed row
+// reads, and a summary row whose counts are left for the hand to fill in; a
+// match with bouts lists exactly those, whatever BlankBoutRows says.
+func TestKachinukiDetailBlankSection(t *testing.T) {
+	cases := []struct {
+		name        string
+		match       KachinukiMatchDetail
+		wantRows    int
+		wantSummary [2]string // left (Shiro), right (Aka) summary cells
+	}{
+		{
+			name: "no bouts: empty numbered rows",
+			match: KachinukiMatchDetail{
+				Label: "Bracket R2-M1", SideATeam: "M 1", SideBTeam: "Kodokan", BlankBoutRows: 5,
+			},
+			wantRows: 5,
+		},
+		{
+			name: "bouts recorded: exactly those",
+			match: KachinukiMatchDetail{
+				Label: "Pool Match 1", SideATeam: "Kodokan", SideBTeam: "Mumeishi", BlankBoutRows: 5,
+				Bouts: []KachinukiBout{
+					{Position: 1, SideAName: "Akagi", ScoreA: "M", SideBName: "Shirai"},
+					{Position: 2, SideAName: "Akagi", SideBName: "Shimizu", ScoreB: "KK"},
+				},
+				EliminationA: 1, EliminationB: 1,
+			},
+			wantRows:    2,
+			wantSummary: [2]string{"1 eliminated", "1 eliminated"},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			f := excelize.NewFile()
+			defer func() { _ = f.Close() }()
+			require.NoError(t, WriteKachinukiDetailSheet(f, []KachinukiMatchDetail{tc.match}))
+
+			cell := func(col string, row int) string {
+				v, err := f.GetCellValue(SheetKachinukiDetail, col+intToString(row))
+				require.NoError(t, err)
+				return v
+			}
+			// Rows 1-3 are title, subtitle and header; bouts start on row 4.
+			assert.Contains(t, cell("A", 2), tc.match.SideATeam, "the subtitle names both sides")
+			for i := 0; i < tc.wantRows; i++ {
+				row := 4 + i
+				assert.Equal(t, intToString(i+1), cell("A", row), "row %d carries bout number %d", row, i+1)
+				assert.Equal(t, "vs", cell("D", row), "row %d centre", row)
+				if len(tc.match.Bouts) == 0 {
+					for _, col := range []string{"B", "C", "E", "F"} {
+						assert.Empty(t, cell(col, row), "an empty row leaves %s%d for the hand", col, row)
+					}
+				}
+			}
+			summaryRow := 4 + tc.wantRows
+			assert.Equal(t, "Summary", cell("A", summaryRow), "the summary follows the last row")
+			assert.Equal(t, tc.wantSummary[0], cell("B", summaryRow))
+			assert.Equal(t, tc.wantSummary[1], cell("F", summaryRow))
+		})
+	}
+}
+
+// TestKachinukiDetailSheetSkippedWithNothingToList confirms a match with
+// neither bouts nor empty rows to print adds no section, and no sheet when
+// it is the only one.
+func TestKachinukiDetailSheetSkippedWithNothingToList(t *testing.T) {
+	f := excelize.NewFile()
+	defer func() { _ = f.Close() }()
+
+	require.NoError(t, WriteKachinukiDetailSheet(f, []KachinukiMatchDetail{{Label: "Pool Match 1", SideATeam: "A", SideBTeam: "B"}}))
+	assert.NotContains(t, f.GetSheetList(), SheetKachinukiDetail)
+}
+
+// TestKachinukiDetailSectionsStayOnOnePage pins the keep-together page break:
+// a section that would cross KachinukiDetailRowsPerPage starts a new page
+// rather than being split. Five empty sections of nine rows are 13 rows each
+// plus a separator, so the fourth (rows 43-55) would cross the 50-row budget
+// and the page ends after row 42; the fifth still fits beside it.
+func TestKachinukiDetailSectionsStayOnOnePage(t *testing.T) {
+	f := excelize.NewFile()
+	defer func() { _ = f.Close() }()
+
+	matches := make([]KachinukiMatchDetail, 5)
+	for i := range matches {
+		matches[i] = KachinukiMatchDetail{Label: "Pool Match " + intToString(i+1), SideATeam: "Kodokan", SideBTeam: "Mumeishi", BlankBoutRows: 9}
+	}
+	require.NoError(t, WriteKachinukiDetailSheet(f, matches))
+	buf, err := f.WriteToBuffer()
+	require.NoError(t, err)
+
+	breaks, err := bctest.RowBreaks(buf.Bytes(), SheetKachinukiDetail)
+	require.NoError(t, err)
+	assert.Equal(t, []int{42}, breaks)
+	title, err := f.GetCellValue(SheetKachinukiDetail, "A43")
+	require.NoError(t, err)
+	assert.Equal(t, "Pool Match 4 (Kachinuki)", title, "the new page starts on the fourth section's title")
+}
+
 // TestKachinukiDetailMultipleMatches verifies the renderer writes one
 // section per match with blank-row separation. Two matches → two title
 // rows, two summary rows, no overlap.
@@ -521,16 +623,12 @@ func TestKachinukiDetailPageLayout(t *testing.T) {
 	assert.Equal(t, 1, *layout.FitToWidth, "page must scale to exactly one page wide")
 }
 
-// TestKachinukiDetailFighterColumnsWideEnoughForALabelledName pins bc-cse
-// F10: the fighter columns (B/F) must be wide enough that a labelled name
-// like "T12.4 Yui Nakamura (Fukusho)" (28 characters -- a two-digit team
-// number, a squad index, a two-word name, and the longest lineup position
-// word) does not clip in a real render at this sheet's 12pt centred font.
-// 24 (the width before this fix) clipped a 26-character label
-// ("T3.4 Yui Nakamura (Chuken)"); 36 is the fix. With the Winner/Decision
-// columns gone and the sheet fitted to one printed page wide regardless of
-// column width (TestKachinukiDetailPageLayout above), there is room to
-// widen these on-screen without affecting the print.
+// TestKachinukiDetailFighterColumnsWideEnoughForALabelledName pins the
+// fighter columns (B/F) wide enough that a labelled name like
+// "T12.4 Yui Nakamura (Fukusho)" (28 characters) does not clip at this
+// sheet's 12pt centred font; a LibreOffice render at 24 clipped the
+// 26-character "T3.4 Yui Nakamura (Chuken)". The print is fitted to one page
+// wide (TestKachinukiDetailPageLayout), so the width costs the print nothing.
 func TestKachinukiDetailFighterColumnsWideEnoughForALabelledName(t *testing.T) {
 	f := excelize.NewFile()
 	defer func() { _ = f.Close() }()

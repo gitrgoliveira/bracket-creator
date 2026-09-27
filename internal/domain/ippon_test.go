@@ -219,16 +219,11 @@ func TestSubBoutAttribution(t *testing.T) {
 	})
 }
 
-// TestSubBoutAttributionForTeamRow pins the fixed-order team-row fallback
-// (bc-cse F3): a bout row that names no fighter of its own is attributed by
-// the encounter's own team names instead, exactly as
-// internal/export/builder.go's writeTeamSubMatchScores applies it inline,
-// and internal/engine/kachinuki_export.go's buildKachinukiDetail now shares.
-// The discriminating case is the one a naive post-SubBoutAttribution check
-// would get wrong: a same-name FIGHTER pair also ends up blanked, and must
-// STAY blanked rather than being re-attributed by the team names, because
-// SubBoutAttribution already answered "nobody can decide this from names"
-// for a different reason.
+// TestSubBoutAttributionForTeamRow pins the team-row fallback: a bout row
+// that names no fighter of its own is attributed by the encounter's team
+// names. The discriminating case is the one a check made after
+// SubBoutAttribution would get wrong: a same-name FIGHTER pair is blanked too,
+// and must STAY blanked rather than be re-attributed by the team names.
 func TestSubBoutAttributionForTeamRow(t *testing.T) {
 	t.Run("nameless row falls back to the team names", func(t *testing.T) {
 		att := domain.SubBoutAttributionForTeamRow(

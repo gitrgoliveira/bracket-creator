@@ -1,7 +1,7 @@
 // Main App: single tournament per app/url. Tournament has multiple Competitions
 // (Men's Individual, Women's Individual, Teams, etc.). Auth gates admin mode.
 
-import { applyPatch as patchCompetitionData, checkSeqGap, keepNewerTournament } from './patch.jsx';
+import { applyPatch as patchCompetitionData, checkSeqGap, keepNewerDetail, keepNewerTournament } from './patch.jsx';
 import { createTimerPool } from './timer_pool.jsx';
 import { setCachedAuthConfig } from './admin_helpers.jsx';
 import { LS_NOTIFICATIONS_ENABLED } from './notification_keys.jsx';
@@ -998,6 +998,10 @@ function App() {
     // entries per SSE event for the tab's lifetime.
     const timerPool = createTimerPool();
     const jitteredTimeout = timerPool.schedule;
+    // The competition page's refetches never put a live score back to an
+    // older state (keepNewerDetail, patch.jsx): a self-run score editor reads
+    // this data. The display reads `tournament`, never this.
+    const takeCompDetail = (data) => setSelectedCompData((prev) => keepNewerDetail(prev, data));
 
     // maybeLoad gates the full-aggregate refetch. While the shiaijo operator
     // console is the active admin view, skip it: the console sources its
@@ -1029,7 +1033,7 @@ function App() {
         if (viewerCompId) {
             jitteredTimeout(
                 () => window.API.fetchCompetitionDetails(viewerCompId)
-                    .then(setSelectedCompData)
+                    .then(takeCompDetail)
                     .catch(err => console.error('tab-resume refresh failed:', err)),
                 Math.random() * 500
             );
@@ -1049,7 +1053,7 @@ function App() {
             if (viewerCompId) {
                 jitteredTimeout(
                     () => window.API.fetchCompetitionDetails(viewerCompId)
-                        .then(setSelectedCompData)
+                        .then(takeCompDetail)
                         .catch(err => console.error('resync refresh failed:', err)),
                     Math.random() * 500
                 );
@@ -1066,7 +1070,7 @@ function App() {
             if (viewerCompId) {
                 jitteredTimeout(
                     () => window.API.fetchCompetitionDetails(viewerCompId)
-                        .then(setSelectedCompData)
+                        .then(takeCompDetail)
                         .catch(err => console.error('gap refetch failed:', err)),
                     Math.random() * 500
                 );
@@ -1143,7 +1147,7 @@ function App() {
             // for any view that caches its own derived state.
             if (viewerCompId === event.data?.competitionId) {
                 setSelectedCompData(prev => patchCompetitionData(prev, event));
-                jitteredTimeout(() => window.API.fetchCompetitionDetails(viewerCompId).then(setSelectedCompData).catch(err => console.error('SSE refresh failed:', err)), detailJitter);
+                jitteredTimeout(() => window.API.fetchCompetitionDetails(viewerCompId).then(takeCompDetail).catch(err => console.error('SSE refresh failed:', err)), detailJitter);
             }
             // competitor_status_updated is a list-level event (eligibility
             // badges on the lobby): always refresh the full list.
@@ -1169,7 +1173,7 @@ function App() {
                 // Refresh current competition detail (jittered): the backend
                 // has already persisted the new status before broadcasting, so
                 // this fetch deterministically picks up the transition.
-                jitteredTimeout(() => window.API.fetchCompetitionDetails(viewerCompId).then(setSelectedCompData).catch(err => console.error('SSE refresh failed:', err)), detailJitter);
+                jitteredTimeout(() => window.API.fetchCompetitionDetails(viewerCompId).then(takeCompDetail).catch(err => console.error('SSE refresh failed:', err)), detailJitter);
             }
             // P1 (mp-9afd): fire a full-list refetch for list-level
             // transitions (competition_started / competition_completed change
@@ -1191,7 +1195,7 @@ function App() {
             // Court/time move: no competitionId in payload, so refresh the
             // currently selected competition (if any) and the tournament list.
             if (viewerCompId) {
-                jitteredTimeout(() => window.API.fetchCompetitionDetails(viewerCompId).then(setSelectedCompData).catch(err => console.error('SSE refresh failed:', err)), detailJitter);
+                jitteredTimeout(() => window.API.fetchCompetitionDetails(viewerCompId).then(takeCompDetail).catch(err => console.error('SSE refresh failed:', err)), detailJitter);
             }
             jitteredTimeout(maybeLoad, listJitter);
         } else if (event.type === "draw_generated" || event.type === "draw_discarded") {
@@ -1199,7 +1203,7 @@ function App() {
             // details (new pools/bracket data or cleared state) and the
             // tournament list so status badges update.
             if (viewerCompId === event.data?.competitionId) {
-                jitteredTimeout(() => window.API.fetchCompetitionDetails(viewerCompId).then(setSelectedCompData).catch(err => console.error('SSE refresh failed:', err)), detailJitter);
+                jitteredTimeout(() => window.API.fetchCompetitionDetails(viewerCompId).then(takeCompDetail).catch(err => console.error('SSE refresh failed:', err)), detailJitter);
             }
             jitteredTimeout(maybeLoad, listJitter);
         } else if (event.type === "swiss_round_generated") {
@@ -1211,7 +1215,7 @@ function App() {
             // / participants_updated pattern: no separate display-mode branch
             // needed because the unconditional load() at the end covers it.
             if (viewerCompId === event.data?.competitionId) {
-                jitteredTimeout(() => window.API.fetchCompetitionDetails(viewerCompId).then(setSelectedCompData).catch(err => console.error('SSE refresh failed:', err)), detailJitter);
+                jitteredTimeout(() => window.API.fetchCompetitionDetails(viewerCompId).then(takeCompDetail).catch(err => console.error('SSE refresh failed:', err)), detailJitter);
             }
             // swiss_round_generated updates the tournament list (swissCurrentRound
             // counter): always do one list refresh: covers display mode, home-
@@ -1223,7 +1227,7 @@ function App() {
             // event targets it; also refresh the tournament list so participant
             // counts stay accurate.
             if (viewerCompId === event.data?.competitionId) {
-                jitteredTimeout(() => window.API.fetchCompetitionDetails(viewerCompId).then(setSelectedCompData).catch(err => console.error('SSE refresh failed:', err)), detailJitter);
+                jitteredTimeout(() => window.API.fetchCompetitionDetails(viewerCompId).then(takeCompDetail).catch(err => console.error('SSE refresh failed:', err)), detailJitter);
             }
             jitteredTimeout(maybeLoad, listJitter);
         } else if (event.type === "lineup_updated") {
@@ -1246,11 +1250,14 @@ function App() {
             // names come from the lineup the CustomEvent already refreshes, which
             // is exactly what makes this line look redundant -- it is not.
             //
-            // NOT PINNED BY ANY TEST, deliberately recorded: nothing mounts App,
-            // so deleting this line reddens nothing. Extracting it into a helper
-            // was tried (f901b891 + 0ae7ed25) and reverted -- the helper's own
-            // test passed while the CALL SITE stayed mutable to a no-op, so it
-            // bought indirection and a swallowed-TypeError path, not coverage.
+            // NOT PINNED BY ANY TEST, deliberately recorded: deleting this line
+            // reddens nothing. A test that pins it would mount App the way
+            // app_competition_refetch_keeps_newer.render.test.jsx does, with a
+            // stub API and a probe in place of the page. Extracting it into a
+            // helper was tried (f901b891 + 0ae7ed25) and reverted -- the
+            // helper's own test passed while the CALL SITE stayed mutable to a
+            // no-op, so it bought indirection and a swallowed-TypeError path,
+            // not coverage.
             jitteredTimeout(maybeLoad, listJitter);
         } else if (event.type === "announcement") {
             // Payload is now the full list snapshot.
@@ -1289,7 +1296,7 @@ function App() {
       window.API.fetchCompetitionDetails(viewerCompId)
         .then(data => {
           if (cancelled) return;
-          setSelectedCompData(data);
+          setSelectedCompData((prev) => keepNewerDetail(prev, data));
           setLoading(false);
         })
         .catch(err => {

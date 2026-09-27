@@ -1048,6 +1048,7 @@ func PrintPoolMatches(f *excelize.File, pools []Pool, teamMatches int, numWinner
 				maxBlocks = append(maxBlocks, maxMatchBlock)
 			}
 		}
+		matchBlocks := len(maxBlocks)
 
 		maxResultBlock := 0
 		for c := 0; c < numCourts; c++ {
@@ -1084,31 +1085,40 @@ func PrintPoolMatches(f *excelize.File, pools []Pool, teamMatches int, numWinner
 			totalPoolHeight += b
 		}
 
-		// Logic to keep pool together or at least start at top of page
-		if rowsSinceLastPageBreak+totalPoolHeight > rowsPerPageLimit {
-			if rowsSinceLastPageBreak > 0 {
-				handleExcelError("InsertPageBreak", f.InsertPageBreak(sheetName, fmt.Sprintf("A%d", poolRow)))
-				rowsSinceLastPageBreak = 0
-			}
+		// Keep a pool on one page when it fits: start it on a fresh page, unless
+		// nothing but the shiaijo header is on this one yet, which a break here
+		// would print alone.
+		onlyCourtHeader := rowsSinceLastPageBreak <= startRow-1
+		if rowsSinceLastPageBreak+totalPoolHeight > rowsPerPageLimit && !onlyCourtHeader {
+			handleExcelError("InsertPageBreak", f.InsertPageBreak(sheetName, fmt.Sprintf("A%d", poolRow)))
+			rowsSinceLastPageBreak = 0
 		}
 
-		// Internal block breaks as a fallback for pools larger than a single page
-		if totalPoolHeight > rowsPerPageLimit {
+		// A pool that still does not fit breaks between its blocks. pageBlocks
+		// are the rows each block really spans: printSinglePool follows every
+		// team match block with a spacing row its maxBlocks entry leaves out,
+		// so counting maxBlocks alone put the breaks inside later blocks.
+		if rowsSinceLastPageBreak+totalPoolHeight > rowsPerPageLimit {
+			pageBlocks := slices.Clone(maxBlocks)
+			if teamMatches > 0 {
+				for b := range matchBlocks {
+					pageBlocks[b]++
+				}
+			}
 			cursorOffset := 0
 			firstBlockSize := 0
-			if len(maxBlocks) > 0 {
-				firstBlockSize = maxBlocks[0]
+			if len(pageBlocks) > 0 {
+				firstBlockSize = pageBlocks[0]
 			}
 
-			if rowsSinceLastPageBreak+headerBlock+firstBlockSize > rowsPerPageLimit {
+			if rowsSinceLastPageBreak+headerBlock+firstBlockSize > rowsPerPageLimit && !onlyCourtHeader {
 				handleExcelError("InsertPageBreak", f.InsertPageBreak(sheetName, fmt.Sprintf("A%d", poolRow+cursorOffset)))
 				rowsSinceLastPageBreak = 0
 			}
 			rowsSinceLastPageBreak += headerBlock
 			cursorOffset += headerBlock
 
-			for b := 0; b < len(maxBlocks); b++ {
-				blockSize := maxBlocks[b]
+			for b, blockSize := range pageBlocks {
 				if b > 0 && rowsSinceLastPageBreak+blockSize > rowsPerPageLimit {
 					handleExcelError("InsertPageBreak", f.InsertPageBreak(sheetName, fmt.Sprintf("A%d", poolRow+cursorOffset)))
 					rowsSinceLastPageBreak = 0
@@ -1375,6 +1385,14 @@ func PrintTeamEliminationMatches(f *excelize.File, poolMatchWinners map[string]M
 	return startRow, bands, matchWinners
 }
 
+// MatchRefLabel is how the Elimination Matches sheet names a knockout match's
+// entrant that an earlier match decides, "M <n>" (n its printed match number),
+// and the key its winner cell is recorded under in matchWinners. The Kachinuki
+// Detail sheet names a not-yet-known side through it too, so the two agree.
+func MatchRefLabel(matchNum int) string {
+	return fmt.Sprintf("M %d", matchNum)
+}
+
 // loserCellOf returns the Excel cell address one row below the given "1." winner
 // cell, which is the "2." loser line of a single-elimination match block.
 func loserCellOf(winnerCell string) (string, error) {
@@ -1395,7 +1413,7 @@ func bronzeEntrantFormulas(sheetName string, semiA, semiB int, matchWinners map[
 		if semiN == 0 || matchWinners == nil {
 			return ""
 		}
-		key := fmt.Sprintf("M %d", semiN)
+		key := MatchRefLabel(semiN)
 		mw, ok := matchWinners[key]
 		if !ok || mw.cell == "" {
 			return ""
@@ -1673,7 +1691,7 @@ func printSingleEliminationMatch(f *excelize.File, sheetName string, elimination
 			}
 			return fmt.Sprintf("'%s'!%s", poolMatchWinners[n.LeafVal].sheetName, poolMatchWinners[n.LeafVal].cell)
 		}
-		winnerFromMatch := fmt.Sprintf("M %d", n.matchNum)
+		winnerFromMatch := MatchRefLabel(int(n.matchNum))
 		mw := matchWinners[winnerFromMatch]
 		if mw.sheetName == sheetName {
 			return fmt.Sprintf("CONCATENATE(\"%s \",%s)", winnerFromMatch, mw.cell)
@@ -1700,7 +1718,7 @@ func printSingleEliminationMatch(f *excelize.File, sheetName string, elimination
 	// "1." / "2." result markers; the "1." cell is the winner reference the
 	// following rounds' CONCATENATE formulas point at.
 	winnerRow := printOrdinalMarkerRows(f, sheetName, colNames, styles, matchRow)
-	matchWinners[fmt.Sprintf("M %d", eliminationMatch.matchNum)] = MatchWinner{
+	matchWinners[MatchRefLabel(int(eliminationMatch.matchNum))] = MatchWinner{
 		cellCoord: cellCoord{sheetName: sheetName, cell: fmt.Sprintf("%s%d", endColName, winnerRow)},
 	}
 }

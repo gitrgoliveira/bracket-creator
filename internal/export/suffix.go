@@ -83,13 +83,10 @@ func FlagsScorePair(a, b int) (string, string) {
 	return strconv.Itoa(max(0, a)), strconv.Itoa(max(0, b))
 }
 
-// DefaultWinMaruAB fills the WINNER's empty score cell with the joined
-// domain.DefaultWinIppons award for a default win, given SIDE-ordered
-// scores. A one-line delegate to domain.DefaultWinMaruAB (the shared owner,
-// also used by the Kachinuki Detail sheet's buildKachinukiDetail), kept here
-// so this exported signature (state.EnchoMetadata, which domain may not
-// import) stays put. See domain.DefaultWinMaruAB's doc comment for the full
-// rule.
+// DefaultWinMaruAB fills the WINNER's empty score cell with the default-win
+// maru, given SIDE-ordered scores. A one-line delegate to
+// domain.DefaultWinMaruAB, kept for this signature's state.EnchoMetadata,
+// which domain may not import.
 func DefaultWinMaruAB(scoreA, scoreB, decision string, encho *state.EnchoMetadata, att domain.WinnerAttribution) (string, string) {
 	return domain.DefaultWinMaruAB(scoreA, scoreB, decision, encho.On(), att)
 }

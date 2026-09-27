@@ -3357,18 +3357,42 @@ paths:
         (daihyosen does not exist in kachinuki; a knockout tie goes to
         encho on the final bout), or if neither team has sufficient
         eligible competitors.
+
+
+        The add competes on timestamps like a score write when it carries
+        `modifiedAt`: the match it writes takes that stamp, so a copy of the
+        match read before the add is older than the one it returns.
       security:
         - TournamentPassword: []
       parameters:
         - $ref: '#/components/parameters/CompetitionId'
         - $ref: '#/components/parameters/MatchId'
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DaihyosenWriteStamp'
       responses:
         '200':
-          description: Daihyosen bout added.
+          description: >
+            Daihyosen bout added: the placeholder bout under `subResult` and
+            the updated match, which carries it and the request's stamp, under
+            `result`. OR the write was refused: a RefusedWrite (`applied:
+            false` with a `reason` of `superseded` or `clock_skew`); nothing is
+            stored and no SSE event is emitted.
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/MatchResult'
+                oneOf:
+                  - type: object
+                    required: [subResult, result]
+                    properties:
+                      subResult:
+                        $ref: '#/components/schemas/SubMatchResult'
+                      result:
+                        $ref: '#/components/schemas/MatchResult'
+                  - $ref: '#/components/schemas/RefusedWrite'
         '400':
           description: >
             Match is not tied (`not_tied`), is a pool match (`pool_match`),
@@ -3398,24 +3422,38 @@ paths:
         (ippons, a winner, a hantei mark, recorded hansoku, or a sub-decision
         other than the bare `daihyosen` placeholder), so this can only undo a
         bout that was added by mistake and never fought.
+
+
+        Takes the same optional `modifiedAt` body as the POST, and competes
+        on timestamps the same way when it carries one.
       security:
         - TournamentPassword: []
       parameters:
         - $ref: '#/components/parameters/CompetitionId'
         - $ref: '#/components/parameters/MatchId'
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DaihyosenWriteStamp'
       responses:
         '200':
           description: >
-            Daihyosen removed. The updated match is returned under a `result`
-            key (note this differs from the POST above, which returns the
-            MatchResult at the top level).
+            Daihyosen removed: the updated match, carrying the request's
+            stamp, under `result`. OR the write was refused: a RefusedWrite
+            (`applied: false` with a `reason` of `superseded` or
+            `clock_skew`); nothing is stored and no SSE event is emitted.
           content:
             application/json:
               schema:
-                type: object
-                properties:
-                  result:
-                    $ref: '#/components/schemas/MatchResult'
+                oneOf:
+                  - type: object
+                    required: [result]
+                    properties:
+                      result:
+                        $ref: '#/components/schemas/MatchResult'
+                  - $ref: '#/components/schemas/RefusedWrite'
         '404':
           description: >
             Match not found, or it carries no daihyosen bout to remove
@@ -4355,17 +4393,18 @@ components:
         an offline write queue retry an unwinnable request forever. Nothing is
         persisted and no SSE broadcast is emitted in either case.
 
-        PUT /score, POST /decision and PUT /override-winner each carry a
-        client-supplied modifiedAt, so the guard compares rather than bypassing
-        and any of them can produce either condition. The remaining match-write
-        endpoints (/quick-score and both /daihyosen paths) still build their
+        PUT /score, POST /decision, PUT /override-winner and both /daihyosen
+        paths each carry a client-supplied modifiedAt, so the guard compares
+        rather than bypassing and any of them can produce either condition.
+        The remaining match-write endpoint, /quick-score, still builds its
         result server-side without a stamp, so the guard takes its unstamped
-        bypass and they always apply; they nonetheless map the superseded
+        bypass and it always applies; it nonetheless maps the superseded
         condition to this same shape rather than to a 500, so that adding a
-        stamp to one of those payloads later cannot silently turn a benign
-        supersede into a request an offline queue retries forever. The batch endpoint /bulk-score is the one exception: it reports
-        both conditions per-entry in its own errors[] array inside an overall
-        200, carrying the same `reason` value there.
+        stamp to its payload later cannot silently turn a benign supersede
+        into a request an offline queue retries forever. The batch endpoint
+        /bulk-score is the one exception: it reports both conditions
+        per-entry in its own errors[] array inside an overall 200, carrying
+        the same `reason` value there.
       properties:
         applied:
           type: boolean
@@ -4390,6 +4429,23 @@ components:
         message:
           type: string
           description: Operator-facing explanation.
+
+    DaihyosenWriteStamp:
+      type: object
+      description: >
+        Optional body of both /daihyosen operations. An empty body, or one
+        without `modifiedAt`, is an unstamped request, which always applies.
+      properties:
+        modifiedAt:
+          type: integer
+          format: int64
+          description: >
+            Server-relative write stamp in unix milliseconds, learned from
+            GET /api/time, exactly as PUT /score and POST /decision carry. With
+            it the write competes on timestamps: one older than the stored
+            result is refused as `superseded`, and one more than 5s in the
+            server's future as `clock_skew` (see RefusedWrite). A write that
+            applies moves the match's stored `modifiedAt` to it.
 
     Error:
       type: object

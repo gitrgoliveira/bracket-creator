@@ -161,7 +161,9 @@ Reopening is refused while another match is already running on the same court, b
 
 ![The score editor for a completed kachinuki match, showing the recorded bouts and the Reopen match button, the correction control for a kachinuki match that did not end with a withdrawal.](../../screenshots/kachinuki-reopen.png)
 
-The results workbook (**Export & print**, then **Download results (.xlsx)**) includes a **Kachinuki Detail** sheet with the bout-by-bout record for every kachinuki encounter. Each side's columns are headed by its own team's name: Shiro (White) on the left in a white header, Aka (Red) on the right in a red one, matching the scoreboard. Each bout row shows who fought whom, the score, each fighter's lineup position, and a tie or overtime in the centre column. The result mark (Fus., Kiken) sits beside the fighter it names.
+The results workbook (**Export & print**, then **Download results (.xlsx)**) and the blank template (**Download blank template (.xlsx)**) include a **Kachinuki Detail** sheet with a section for every kachinuki encounter in the draw. Each side's columns are headed by its own team's name: Shiro (White) on the left in a white header, Aka (Red) on the right in a red one, matching the scoreboard. Each bout row shows who fought whom, the score, each fighter's lineup position, and a tie or overtime in the centre column. The result mark (Fus., Kiken) sits beside the fighter it names. An encounter with recorded bouts lists exactly those bouts. An encounter with none yet, such as every encounter in the blank template, gets empty numbered rows to fill in by hand: one for each bout the encounter can take, which is twice the team size less one (9 rows for teams of five).
+
+The **Pool Matches** and **Elimination Matches** sheets give each kachinuki encounter the same number of bout rows, the 3rd-place match included. A result fills the bouts fought, in order, and leaves the rest empty. If an encounter fields reserves and runs to more bouts than that, those sheets show its first bouts and the Kachinuki Detail sheet lists them all.
 
 ## Team standings and tie-breaks
 

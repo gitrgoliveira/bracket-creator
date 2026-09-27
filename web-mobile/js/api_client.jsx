@@ -2109,6 +2109,21 @@ function parseSkippedCompetitionsHeader(headerValue) {
 // fetchMatchLineup.
 const lineupOrNull = (body) => (body.saved === false ? null : body);
 
+// What the daihyosen add or remove came back with. A refusal (superseded,
+// clock_skew) is the 200 {applied: false} body itself, returned as it is for
+// write_result.jsx's predicates, with the clock relearned as for any refusal.
+// No _notifyScoreSuperseded: the team editor reports it from this result
+// (notLandedBanner), and that broadcast would repaint a clock refusal with
+// the superseded advice. Otherwise the match is unwrapped from its envelope
+// ({ result: MatchResult }), as removeKachinukiBout does.
+function _daihyosenOutcome(body) {
+    if (writeWasSuperseded(body)) {
+        _relearnClockThrottled();
+        return body;
+    }
+    return body.result ?? body;
+}
+
 const API = {
     async fetchTournament() {
         const res = await fetch('/api/viewer/tournament');
@@ -3630,39 +3645,42 @@ const API = {
     // decision="daihyosen" and Position=-1. The error codes (not_tied,
     // pool_match, insufficient_eligibility) are surfaced verbatim by the
     // caller: see TeamScoreEditorModal for the user-visible mapping.
+    // Stamped like recordDecision (bc-dhas), so the add competes on
+    // timestamps: see _daihyosenOutcome for what comes back.
     async recordDaihyosen(compID, matchID, password) {
         const res = await fetch(`/api/competitions/${compID}/matches/${matchID}/daihyosen`, {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
                 'X-Tournament-Password': password
-            }
+            },
+            body: JSON.stringify({ modifiedAt: _serverNowMs() }),
         });
         if (!res.ok) {
             const err = await res.json().catch(() => ({}));
             throw new Error(err.error || "Failed to add daihyosen");
         }
-        // The handler responds with an envelope ({ result: MatchResult }); unwrap
-        // it the same way removeDaihyosen/removeKachinukiBout do.
-        const body = await res.json().catch(() => ({}));
-        return body.result ?? body;
+        return _daihyosenOutcome(await res.json().catch(() => ({})));
     },
     // T141: remove an unscored daihyosen placeholder from a knockout team match.
     // Returns the updated MatchResult on 200. Throws on 404 (no daihyosen or
     // match not found) or 409 (daihyosen already scored: clear scores first).
+    // Stamped like the add, in a JSON body (the handler binds one on DELETE
+    // too).
     async removeDaihyosen(compID, matchID, password) {
         const res = await fetch(`/api/competitions/${compID}/matches/${matchID}/daihyosen`, {
             method: 'DELETE',
-            headers: { 'X-Tournament-Password': password }
+            headers: {
+                'Content-Type': 'application/json',
+                'X-Tournament-Password': password
+            },
+            body: JSON.stringify({ modifiedAt: _serverNowMs() }),
         });
         if (!res.ok) {
             const err = await res.json().catch(() => ({}));
             throw new Error(err.error || "Failed to remove daihyosen");
         }
-        // The handler responds with an envelope ({ result: MatchResult }); unwrap
-        // it so the return value matches the docstring ("the updated MatchResult").
-        const body = await res.json().catch(() => ({}));
-        return body.result ?? body;
+        return _daihyosenOutcome(await res.json().catch(() => ({})));
     },
     // T190-T193 (US13: Swiss format). Generate the next Swiss round.
     // Backend pre-conditions: format=swiss; all matches in the current

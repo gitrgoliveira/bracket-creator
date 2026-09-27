@@ -157,23 +157,16 @@ export function notLandedBanner(res) {
 }
 
 
-// dependentActionBlocked: a narrower question than notLandedBanner's. That
-// predicate is right to say nothing about a queued pre-save at the three
-// explicit-tap sites it was written for (Start, Record bout): the editor's
-// own queued/offline surface already reports the state, so a second banner
-// would just repeat it. It is wrong for a write that is only a PRE-SAVE
-// gating a SECOND action -- the team editor's Add/Remove representative bout,
-// whose handler runs saveRunningSheet first so the row lands on a sheet the
-// server has already seen. There the generic pending pill explains the
-// SCORES did not send yet, but not why the tap the operator actually made --
-// Add, Remove -- silently did nothing. That caller needs its own sentence,
-// restored here to what the editor said before saveRunningSheet folded the
-// old assertRunningWritePersisted/score_not_synced pair into notLandedBanner
-// and lost it (bc-p3-dh-lineups-excel review).
+// dependentActionBlocked: the sentence for a queued write that was only a
+// PRE-SAVE gating a second action, the team editor's Add/Remove
+// representative bout (saveRunningSheet). notLandedBanner rightly says
+// nothing about a queued write at the three explicit-tap sites it was written
+// for (Start match in both editors, Record bout in the team one), where the
+// editor's queued/offline surface reports it. Here that surface says the
+// scores did not send, not why the Add or Remove tap did nothing.
 //
-// A refusal (applied:false) is excluded on purpose: notLandedBanner already
-// returns a reason for that case and the caller's writeFailed banner already
-// reports it, so a second message here would only duplicate it.
+// A refusal (applied:false) is left to notLandedBanner: the caller already
+// shows its banner, so a second message would only repeat it.
 export function dependentActionBlocked(res) {
     if (!!res && res.queued === true) {
         return "Couldn't save the current scores (offline or server busy). Try again once the connection is back.";

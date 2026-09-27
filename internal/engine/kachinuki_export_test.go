@@ -188,16 +188,12 @@ func TestBuildKachinukiDetail_FusenshoMarksTheWinnerBesideItsScore(t *testing.T)
 	assert.Equal(t, "○○", detail.Bouts[0].ScoreA, "the FIK default-win maru, joined from the stored ippons")
 }
 
-// TestBuildKachinukiDetail_FusenshoEmptyIpponsGetsMaruFallback pins bc-cse
-// gap F2: a per-bout fusensho whose recorded ippons are EMPTY (legacy/
-// pre-fill data, rather than the engine's own maru fill, as in the test
-// above) still gets the FIK default-win maru (domain.DefaultWinMaruAB) on
-// the winner's score, exactly as internal/export/builder.go's
-// writeTeamSubMatchScores prints for the same sub-result -- see
-// TestScoreCellsCarryOutstandingHansokuTriangle's "fixed-order row, no
-// fighter names" subtest there (a cross-package import would cycle
-// export<->engine, so the two are pinned by matching literal fixtures, not
-// by one shared test function).
+// TestBuildKachinukiDetail_FusenshoEmptyIpponsGetsMaruFallback pins that a
+// per-bout fusensho whose recorded ippons are EMPTY (legacy or pre-fill data,
+// not the engine's own maru fill as in the test above) still gets the FIK
+// default-win maru (domain.DefaultWinMaruAB) on the winner's score, as the
+// main sheets print it (TestScoreCellsCarryOutstandingHansokuTriangle in
+// internal/export, a matching literal fixture since export imports engine).
 func TestBuildKachinukiDetail_FusenshoEmptyIpponsGetsMaruFallback(t *testing.T) {
 	m := &state.MatchResult{
 		SideA: "RedTeam",
@@ -224,16 +220,11 @@ func TestBuildKachinukiDetail_FusenshoEmptyIpponsGetsMaruFallback(t *testing.T) 
 }
 
 // TestBuildKachinukiDetail_FixedOrderNamelessFusenshoAppliesMaruFallback
-// pins bc-cse gap F3: a FIXED-ORDER bout that names no fighter of its own
-// (SideA/SideB both empty; Winner carries the TEAM name instead) is
-// attributed through the encounter's own team names
-// (domain.SubBoutAttributionForTeamRow), exactly as
-// internal/export/builder.go's writeTeamSubMatchScores does for the
-// identical fixture in TestScoreCellsCarryOutstandingHansokuTriangle's
-// "fixed-order row, no fighter names: the default win still prints"
-// subtest. Before the fix this row got NO mark on the detail sheet at all
-// (buildKachinukiDetail called plain domain.SubBoutAttribution, which
-// leaves a nameless row unattributed).
+// pins that a bout row naming no fighter of its own (SideA/SideB empty,
+// Winner the TEAM name) is attributed through the encounter's team names
+// (domain.SubBoutAttributionForTeamRow), so it carries its mark and maru as
+// the main sheets print the identical fixture in
+// TestScoreCellsCarryOutstandingHansokuTriangle (internal/export).
 func TestBuildKachinukiDetail_FixedOrderNamelessFusenshoAppliesMaruFallback(t *testing.T) {
 	m := &state.MatchResult{
 		SideA: "Tora A",
@@ -286,8 +277,11 @@ func TestCollectKachinukiMatches_NilComp(t *testing.T) {
 	assert.Nil(t, out)
 }
 
-// TestCollectKachinukiMatches_PoolMatchesWithBouts verifies that pool
-// matches with sub-results are collected and returned.
+// TestCollectKachinukiMatches_PoolMatchesWithBouts verifies that a pool
+// match with sub-results lists exactly those bouts, a pool match with none
+// gets 2*teamSize-1 empty rows for hand entry (operator decision 2026-09-27,
+// bc-kdsc), and a tie-break or daihyosen row has a section only once it has
+// bouts, since it is not a match of the draw.
 func TestCollectKachinukiMatches_PoolMatchesWithBouts(t *testing.T) {
 	eng, store, _ := setupTestEngine(t)
 	compID := "kachinuki-collect"
@@ -311,10 +305,21 @@ func TestCollectKachinukiMatches_PoolMatchesWithBouts(t *testing.T) {
 			},
 		},
 		{
-			// No sub-results, should be skipped.
+			// No sub-results: empty rows for hand entry.
 			ID:    "P1-1",
 			SideA: "AlphaTeam",
 			SideB: "BetaTeam",
+		},
+		// Supplementary rows: skipped while empty, listed once fought.
+		{ID: "Pool A-TB-0", SideA: "AlphaTeam", SideB: "RedTeam"},
+		{ID: "Pool A-DH-0", SideA: "AlphaTeam", SideB: "RedTeam"},
+		{
+			ID:    "Pool B-TB-0",
+			SideA: "BetaTeam",
+			SideB: "WhiteTeam",
+			SubResults: []state.SubMatchResult{
+				{Position: 1, SideA: "B1", SideB: "W1", Winner: "B1", Decision: "fought"},
+			},
 		},
 	}
 	require.NoError(t, store.SavePoolMatches(compID, matches))
@@ -326,8 +331,21 @@ func TestCollectKachinukiMatches_PoolMatchesWithBouts(t *testing.T) {
 	}
 	out, err := eng.collectKachinukiMatches(compID, comp)
 	require.NoError(t, err)
-	require.Len(t, out, 1, "only the match with sub-results should be collected")
+	require.Len(t, out, 3, "both draw matches and the fought tie-break, never an empty supplementary row")
+
+	assert.Equal(t, "Pool Match 1", out[0].Label)
 	assert.Equal(t, "RedTeam", out[0].SideATeam)
+	assert.Len(t, out[0].Bouts, 1)
+	assert.Zero(t, out[0].BlankBoutRows, "a match with bouts lists exactly those")
+
+	assert.Equal(t, "Pool Match 2", out[1].Label)
+	assert.Equal(t, "AlphaTeam", out[1].SideATeam)
+	assert.Equal(t, "BetaTeam", out[1].SideBTeam)
+	assert.Empty(t, out[1].Bouts)
+	assert.Equal(t, 9, out[1].BlankBoutRows, "a match with no bouts gets 2*5-1 empty rows")
+
+	assert.Equal(t, "Pool Match 5", out[2].Label, "the label keeps the row's place in the file")
+	assert.Len(t, out[2].Bouts, 1)
 }
 
 // TestBuildKachinukiPositionMap_WithLineups verifies that saved team lineups
@@ -422,13 +440,12 @@ func TestBuildKachinukiPositionMap_NilComp(t *testing.T) {
 }
 
 // TestCollectKachinukiMatches_WithBracketStub verifies that a bracket match
-// with no SubResults is skipped even if it has a kachinuki-exhaustion decision.
+// with no SubResults, even one a kachinuki-exhaustion decision closed, gets
+// 2*teamSize-1 empty rows for hand entry rather than being skipped.
 func TestCollectKachinukiMatches_WithBracketStub(t *testing.T) {
 	compID := "kachinuki-bracket-stub"
 	eng, store, comp := setupKachinukiComp(t, compID, 5)
 
-	// Bracket match with kachinuki-exhaustion decision but no SubResults:
-	// the export skips any bracket match where len(bm.SubResults) == 0.
 	require.NoError(t, store.SaveBracket(compID, &state.Bracket{
 		Rounds: [][]state.BracketMatch{
 			{
@@ -445,7 +462,12 @@ func TestCollectKachinukiMatches_WithBracketStub(t *testing.T) {
 
 	out, err := eng.collectKachinukiMatches(compID, comp)
 	require.NoError(t, err)
-	assert.Empty(t, out, "bracket match with no sub-results should be skipped")
+	require.Len(t, out, 1, "a bracket match with no bouts still has a section")
+	assert.Equal(t, "Bracket R1-M1", out[0].Label)
+	assert.Equal(t, "RedTeam", out[0].SideATeam)
+	assert.Equal(t, "WhiteTeam", out[0].SideBTeam)
+	assert.Empty(t, out[0].Bouts)
+	assert.Equal(t, 9, out[0].BlankBoutRows)
 }
 
 // TestCollectKachinukiMatches_BracketWithSubResults verifies that a bracket
@@ -524,8 +546,8 @@ func TestCollectKachinukiMatches_BronzeWithSubResults(t *testing.T) {
 
 // TestCollectKachinukiMatches_BronzeStub verifies the Naginata 3rd-place
 // (bronze) match — a sibling of bracket.Rounds — is considered by the export
-// at parity with Rounds matches (kachinuki-exhaustion stub, skipped when it
-// has no bouts).
+// at parity with Rounds matches: with no bouts it gets empty rows, and a
+// bracket with no rounds to find the final in does not stop it.
 func TestCollectKachinukiMatches_BronzeStub(t *testing.T) {
 	compID := "kachinuki-bronze-stub"
 	eng, store, comp := setupKachinukiComp(t, compID, 5, func(c *state.Competition) { c.Naginata = true })
@@ -543,9 +565,128 @@ func TestCollectKachinukiMatches_BronzeStub(t *testing.T) {
 
 	out, err := eng.collectKachinukiMatches(compID, comp)
 	require.NoError(t, err)
-	// Bronze stub has no bouts → skipped by the renderer guard, same as a
-	// Rounds bracket stub.
-	assert.Empty(t, out, "bronze stub with no bouts should be skipped")
+	require.Len(t, out, 1)
+	assert.Equal(t, "3rd Place Match", out[0].Label)
+	assert.Equal(t, "RedTeam", out[0].SideATeam)
+	assert.Equal(t, "WhiteTeam", out[0].SideBTeam)
+	assert.Empty(t, out[0].Bouts)
+	assert.Equal(t, 9, out[0].BlankBoutRows)
+}
+
+// TestCollectKachinukiMatches_BlankTemplateCoversTheDraw pins the hand-entry
+// rule on real draws (operator decision 2026-09-27, bc-kdsc): before any bout
+// is recorded, every match of the draw has a section of 2*teamSize-1 empty
+// rows -- each pool match, each numbered bracket match including the later
+// rounds whose sides are not known yet, and the 3rd-place match -- while a
+// bye has none. A side an earlier match decides is named the way the
+// Elimination Matches sheet prints it, "M <n>"; a pool placeholder as it
+// stands.
+func TestCollectKachinukiMatches_BlankTemplateCoversTheDraw(t *testing.T) {
+	singleThird := false
+	cases := []struct {
+		name     string
+		format   string
+		teams    []string
+		wantPool int  // pool-match sections, listed before the bracket's
+		wantByes bool // the fixture must include a bye for the exclusion to be tested
+	}{
+		{name: "knockout of five, three byes", format: state.CompFormatKnockout,
+			teams: []string{"Ryu", "Tora", "Kame", "Taka", "Kuma"}, wantByes: true},
+		{name: "pools then knockout", format: state.CompFormatMixed,
+			teams: []string{"Ryu", "Tora", "Kame", "Taka", "Kuma", "Hebi"}, wantPool: 6},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			eng, store, _ := setupTestEngine(t)
+			compID := "kachinuki-blank-draw"
+			createTestCompetition(t, store, compID, tc.format, 3, func(c *state.Competition) {
+				c.Kind = "team"
+				c.TeamSize = 3
+				c.TeamMatchType = state.TeamMatchTypeKachinuki
+				c.TwoThirdPlaces = &singleThird
+			})
+			saveTestParticipants(t, store, compID, tc.teams)
+			require.NoError(t, eng.StartCompetition(compID))
+
+			bracket, err := store.LoadBracket(compID)
+			require.NoError(t, err)
+			require.NotNil(t, bracket.ThirdPlaceMatch, "the fixture must draw a 3rd-place match")
+			numbered, byes := 0, 0
+			for _, round := range bracket.Rounds {
+				for _, bm := range round {
+					if bm.MatchNumber > 0 {
+						numbered++
+					} else {
+						byes++
+					}
+				}
+			}
+			if tc.wantByes {
+				require.Positive(t, byes, "the fixture must include a bye")
+			}
+
+			comp, err := store.LoadCompetition(compID)
+			require.NoError(t, err)
+			out, err := eng.collectKachinukiMatches(compID, comp)
+			require.NoError(t, err)
+			require.Len(t, out, tc.wantPool+numbered+1, "every pool match, every numbered bracket match and the 3rd-place match; no bye")
+
+			var sides []string
+			for _, d := range out {
+				assert.Empty(t, d.Bouts, d.Label)
+				assert.Equal(t, 5, d.BlankBoutRows, "%s: 2*3-1 empty rows", d.Label)
+				for _, side := range []string{d.SideATeam, d.SideBTeam} {
+					assert.NotEmpty(t, side, "%s: every side is named", d.Label)
+					assert.NotContains(t, side, "Winner of", "%s: the stored placeholder is never printed", d.Label)
+					sides = append(sides, side)
+				}
+			}
+			for _, d := range out[:tc.wantPool] {
+				assert.Contains(t, d.Label, "Pool Match ")
+			}
+			if tc.wantPool > 0 {
+				first := out[tc.wantPool]
+				assert.True(t, helper.IsPoolFinalistPlaceholder(first.SideATeam), first.SideATeam)
+				assert.True(t, helper.IsPoolFinalistPlaceholder(first.SideBTeam), first.SideBTeam)
+			} else {
+				assert.Contains(t, sides, helper.MatchRefLabel(1), "the semi-final fed by the first-round bout names it")
+			}
+
+			final, bronze := out[len(out)-2], out[len(out)-1]
+			assert.Equal(t, "3rd Place Match", bronze.Label)
+			assert.ElementsMatch(t,
+				[]string{helper.MatchRefLabel(numbered - 2), helper.MatchRefLabel(numbered - 1)},
+				[]string{final.SideATeam, final.SideBTeam},
+				"the final's sides are the two semi-finals, by number")
+			assert.Equal(t,
+				[]string{final.SideATeam, final.SideBTeam},
+				[]string{bronze.SideATeam, bronze.SideBTeam},
+				"the 3rd-place sides are the same semi-finals, side for side")
+		})
+	}
+}
+
+// TestCollectKachinukiMatches_MoreBoutsThanTheBlockKeepsThemAll pins that an
+// encounter that fielded reserves past 2*teamSize-1 bouts still lists every
+// bout on the detail sheet; only its main-sheet block stops at that count.
+func TestCollectKachinukiMatches_MoreBoutsThanTheBlockKeepsThemAll(t *testing.T) {
+	compID := "kachinuki-reserves"
+	eng, store, comp := setupKachinukiComp(t, compID, 2)
+
+	subs := make([]state.SubMatchResult, 5)
+	for i := range subs {
+		subs[i] = state.SubMatchResult{Position: i + 1, SideA: "R" + string(rune('1'+i)), SideB: "W1", Winner: "W1", Decision: "fought"}
+	}
+	require.NoError(t, store.SavePoolMatches(compID, []state.MatchResult{
+		{ID: "Pool A-0", SideA: "RedTeam", SideB: "WhiteTeam", SubResults: subs},
+	}))
+
+	out, err := eng.collectKachinukiMatches(compID, comp)
+	require.NoError(t, err)
+	require.Len(t, out, 1)
+	require.Len(t, out[0].Bouts, 5, "all five bouts, past the block's 2*2-1 = 3")
+	assert.Equal(t, 5, out[0].Bouts[4].Position)
+	assert.Zero(t, out[0].BlankBoutRows)
 }
 
 // TestResolveKachinukiPosition_PrefersMatchScoped verifies the mp-825
@@ -679,11 +820,12 @@ func TestKachinukiDetailMatches_PoolMatchWithSubResults(t *testing.T) {
 	assert.Equal(t, 2, detail.EliminationB, "W-Senpo (bout1 loser) and W-Jiho (bout2 hikiwake) both retire")
 }
 
-// TestKachinukiDetailMatches_MatchesWithoutSubResultsSkipped verifies that
-// pool matches carrying no SubResults are omitted from the returned detail
-// list entirely (no empty placeholder entries).
-func TestKachinukiDetailMatches_MatchesWithoutSubResultsSkipped(t *testing.T) {
-	compID := "kachinuki-detail-skip"
+// TestKachinukiDetailMatches_MatchWithoutSubResultsGetsBlankRows verifies,
+// through the exported wrapper the results export uses, that a pool match
+// carrying no SubResults gets 2*teamSize-1 empty rows for hand entry while a
+// fought one lists its bouts only, each labelled by its place in the file.
+func TestKachinukiDetailMatches_MatchWithoutSubResultsGetsBlankRows(t *testing.T) {
+	compID := "kachinuki-detail-blank"
 	eng, store, _ := setupKachinukiComp(t, compID, 5)
 
 	matches := []state.MatchResult{
@@ -701,9 +843,15 @@ func TestKachinukiDetailMatches_MatchesWithoutSubResultsSkipped(t *testing.T) {
 
 	out, err := eng.KachinukiDetailMatches(compID)
 	require.NoError(t, err)
-	require.Len(t, out, 1, "only the match with sub-results should appear")
-	assert.Equal(t, "Pool Match 2", out[0].Label, "label index tracks the original slice position, not the filtered position")
-	assert.Equal(t, "AlphaTeam", out[0].SideATeam)
+	require.Len(t, out, 2, "every match of the draw has a section")
+	assert.Equal(t, "Pool Match 1", out[0].Label)
+	assert.Equal(t, "RedTeam", out[0].SideATeam)
+	assert.Empty(t, out[0].Bouts)
+	assert.Equal(t, 9, out[0].BlankBoutRows)
+	assert.Equal(t, "Pool Match 2", out[1].Label)
+	assert.Equal(t, "AlphaTeam", out[1].SideATeam)
+	assert.Len(t, out[1].Bouts, 1)
+	assert.Zero(t, out[1].BlankBoutRows)
 }
 
 // TestKachinukiDetailMatches_UnknownCompetition_ValidIDFormat documents the

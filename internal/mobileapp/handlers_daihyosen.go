@@ -22,6 +22,7 @@ package mobileapp
 
 import (
 	"errors"
+	"io"
 	"log"
 	"net/http"
 
@@ -37,30 +38,44 @@ import (
 // daihyosen endpoints (add and remove) end their WithTransaction the same way,
 // and the branch below was the same nineteen lines twice.
 //
-// bc-lww1. Not reachable from either endpoint today, and the two callers reach
-// that conclusion by DIFFERENT routes, so neither reason alone covers this
-// helper:
-//
-//   - REMOVE reaches the pool branch as well as the bracket one. There the
-//     write copies the STORED match (u := *match), so the incoming stamp equals
-//     the stored one and ApplyByTimestamp's >= comparison applies it.
-//   - ADD can only reach the bracket branch, since AddDaihyosen rejects a pool
-//     id with ErrPoolMatch. There daihyosenBracketResult never projects
-//     ModifiedAt at all, so the stamp is 0 and the write takes the unstamped
-//     bypass.
-//
-// Both routes end in "applies", which is why neither endpoint can produce a
-// supersede — but they are separate arguments, and a change to either
-// projection invalidates only its own.
-//
-// Mapped anyway so a future writer that re-stamps EITHER projection cannot turn
-// a benign supersede into a 500 the client retries forever.
+// bc-lww1, reachable from both since bc-dhas: each write carries the client's
+// stamp (daihyosenWriteStamp), so one older than the stored result loses the
+// timestamp guard. An unstamped request still applies: the bracket projection
+// carries no ModifiedAt (the unstamped bypass), and a pool match's copy carries
+// the stored stamp, which ApplyByTimestamp's >= comparison accepts.
 func respondIfSuperseded(c *gin.Context, err error) bool {
 	if !errors.Is(err, engine.ErrMatchSuperseded) {
 		return false
 	}
 	respondSuperseded(c)
 	return true
+}
+
+// daihyosenWriteStamp reads the client's server-relative write stamp from the
+// optional {"modifiedAt": N} body both daihyosen endpoints take, and judges it
+// exactly as /decision judges its own: a stamp more than
+// modifiedAtRefuseSkewMs ahead of the server is refused with the clock_skew
+// body before anything is read or written, and a negative one is clamped to
+// the unstamped bypass. An empty body is an unstamped request (an older
+// client), which always applies. Reports false when it has answered.
+//
+// The written match carries the stamp, so an add or remove competes on
+// timestamps like a score write, and a copy of the match read before it is
+// older than the one it returns, which is how a stale refetch is told apart
+// from it (keepNewerMatches, patch.jsx).
+func daihyosenWriteStamp(c *gin.Context) (int64, bool) {
+	var body struct {
+		ModifiedAt int64 `json:"modifiedAt"`
+	}
+	if err := c.ShouldBindJSON(&body); err != nil && !errors.Is(err, io.EOF) {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return 0, false
+	}
+	if serverNowMs, aheadMs, refuse := clientClockSkew(body.ModifiedAt); refuse {
+		respondClockSkew(c, serverNowMs, aheadMs)
+		return 0, false
+	}
+	return clampClientModifiedAt(body.ModifiedAt), true
 }
 
 // respondIfValidationError maps a transaction error that is
@@ -138,6 +153,10 @@ func RegisterDaihyosenHandlers(r *gin.RouterGroup, eng DaihyosenEngine, store Da
 			return
 		}
 		mid := c.Param("mid")
+		stamp, ok := daihyosenWriteStamp(c)
+		if !ok {
+			return
+		}
 
 		// The whole read-guard-filter-write runs under ONE acquire of the
 		// per-comp lock: re-read the match inside the transaction so the
@@ -196,6 +215,10 @@ func RegisterDaihyosenHandlers(r *gin.RouterGroup, eng DaihyosenEngine, store Da
 			}
 			u := *match
 			u.SubResults = filtered
+			// Unstamped, the copy's own stamp stands (see respondIfSuperseded).
+			if stamp > 0 {
+				u.ModifiedAt = stamp
+			}
 			// Court exclusivity (mp-95mg) is not required here: DELETE /daihyosen
 			// only proceeds when the DH sub is an unscored placeholder (the guard
 			// above rejects if the sub has ippons, a winner, or a non-daihyosen
@@ -275,6 +298,10 @@ func RegisterDaihyosenHandlers(r *gin.RouterGroup, eng DaihyosenEngine, store Da
 			return
 		}
 		mid := c.Param("mid")
+		stamp, ok := daihyosenWriteStamp(c)
+		if !ok {
+			return
+		}
 
 		// Read-check-write under ONE acquire of the per-comp lock: the tie that
 		// gates AddDaihyosen is recomputed from the match's PERSISTED SubResults,
@@ -380,6 +407,9 @@ func RegisterDaihyosenHandlers(r *gin.RouterGroup, eng DaihyosenEngine, store Da
 			// stale by definition.
 			u.WinnerID = ""
 			u.WinnerSide = ""
+			if stamp > 0 {
+				u.ModifiedAt = stamp
+			}
 			u.SubResults = append(append([]state.SubMatchResult{}, match.SubResults...), *sub)
 			u.Status = state.MatchStatusRunning // daihyosen bout in progress
 			if _, err := eng.RecordMatchResultWithIneligibilityTx(stx, id, mid, &u); err != nil {

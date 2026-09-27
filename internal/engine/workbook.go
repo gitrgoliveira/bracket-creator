@@ -140,9 +140,10 @@ func (e *Engine) RenderCompetitionWorkbook(
 	//    EffectivePoolWinners() directly): under bc-qual larger-pools, an
 	//    oversized pool's crossed 2nd needs a matchWinners["<pool>-2nd"] entry
 	//    too, or the Tree/Elimination sheets print it as inert literal text
-	//    instead of a live link to the pool's actual result.
+	//    instead of a live link to the pool's actual result. comp.TeamBoutRows()
+	//    sizes each team block here and on the Elimination Matches sheet.
 	matchWinners, poolsByCourt := helper.PrintPoolMatches(
-		f, pools, comp.TeamSize, comp.MatchWinnerRanksNeeded(), courts, courtOfPool,
+		f, pools, comp.TeamBoutRows(), comp.MatchWinnerRanksNeeded(), courts, courtOfPool,
 		poolCoords, playerCoords, comp.Engi,
 	)
 
@@ -186,7 +187,7 @@ func (e *Engine) RenderCompetitionWorkbook(
 		if err != nil {
 			return nil, nil, fmt.Errorf("render workbook: %w", err)
 		}
-		helper.PrintEliminationWithBronze(f, matchWinners, eliminationMatchRounds, comp.TeamSize,
+		helper.PrintEliminationWithBronze(f, matchWinners, eliminationMatchRounds, comp.TeamBoutRows(),
 			plan, comp.Engi, hasBronze)
 	} else if comp.IsKnockoutEnabled() && bracketHasKnockoutContent(bracket) {
 		// The stored bracket already carries knockout content -- a
@@ -258,9 +259,9 @@ func (e *Engine) RenderCompetitionWorkbook(
 	}
 
 	// 7. Kachinuki Detail sheet (T195-T203, CHK037). Opt-in: only emitted
-	//    when the competition runs the kachinuki team-match format AND has
-	//    at least one match with bout data. The renderer is a no-op for
-	//    empty input, so this is safe even when the format is fixed.
+	//    when the competition runs the kachinuki team-match format and its
+	//    draw has matches. The renderer is a no-op for empty input, so this
+	//    is safe for every other team format.
 	if err := helper.WriteKachinukiDetailSheet(f, kachinukiMatches); err != nil {
 		return nil, nil, err
 	}

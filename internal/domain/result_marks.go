@@ -71,11 +71,7 @@ func EnchoLabel(on bool) string {
 //	fusensho  -> winner "Fus."  (the default WIN names the present side)
 //
 // Mirrors sideMarks() in web-mobile/js/bracket.jsx exactly, fusensho
-// included: bc-tmfn removed an earlier gap where that surface omitted the
-// winner-side "Fus." mark on the theory that a separate bout badge already
-// carried it. No such badge exists for a match-level fusensho decision, so
-// there is no divergence between the two -- a fusensho match reads
-// identically here and in the JS viewer.
+// included, so a fusensho match reads the same in the workbook and the app.
 func SideMarks(decision string, decidedByHantei bool) (winnerMark, loserMark string) {
 	switch {
 	case IsKikenDecisionStr(decision):
@@ -126,32 +122,14 @@ func SideMarksAB(decision string, decidedByHantei bool, att WinnerAttribution) (
 }
 
 // DefaultWinMaruAB fills the WINNER's empty score cell with the FIK
-// default-win maru award (DefaultWinIppons), given SIDE-ordered scores. The
-// engine already records default wins as maru ippons from the same rule, so
-// scored data carries the balls itself -- this fallback covers results
-// recorded before that fill or imported without it. Never applies to engi
-// flag counts (callers gate) or the loser.
-//
-// att carries the ids and names of the record being marked, resolved
-// through AttributeWinnerSide, the SAME owner SideMarksAB uses: the two
-// functions compose one cell (score + result mark) and must agree on which
-// side won, or a same-name pair whose ids disagree with the name order
-// could print the maru fallback in one side's cell and the Kiken/Fus. mark
-// in the other's.
-//
-// enchoOn is the caller's own "did this bout go to overtime" predicate
-// (state.EnchoMetadata.On() on every current caller), the same reason
-// MiddleMark takes a bare bool rather than the metadata struct itself:
-// domain does not import state. The joined maru string goes through
-// IpponsScore rather than strings.Join so this file needs no import beyond
-// the domain package itself; TestIpponsScore already pins that a maru
-// slice survives it unchanged.
-//
-// The ONE domain-layer owner of this fallback: internal/export/suffix.go's
-// DefaultWinMaruAB (the main sheets) and
-// internal/engine/kachinuki_export.go's buildKachinukiDetail (the Kachinuki
-// Detail sheet) both delegate here, so a bout reads the same maru on every
-// sheet.
+// default-win maru (DefaultWinIppons), given SIDE-ordered scores: scored data
+// carries the maru itself, so this covers results recorded before that fill
+// or imported without it. Never the loser's cell, and never engi flag counts
+// (callers gate). att is resolved through AttributeWinnerSide, the owner
+// SideMarksAB uses too, so a cell's maru and its Kiken/Fus. mark can never
+// name different sides; enchoOn is the caller's own overtime predicate, as
+// for MiddleMark. The main sheets (export.DefaultWinMaruAB) and the
+// Kachinuki Detail sheet both delegate here.
 func DefaultWinMaruAB(scoreA, scoreB, decision string, enchoOn bool, att WinnerAttribution) (string, string) {
 	if att.Winner == "" || !IsDefaultWinDecisionStr(decision) {
 		return scoreA, scoreB

@@ -5,7 +5,7 @@ import { poolLabel, tournamentMatches, compareDmy } from './viewer_utils.jsx';
 import { matchParticipantIds, matchParticipantNames, useWatchlist, resolveEntryPlayerIds, resolveWatchedPlayers, findPrimaryEntry, buildRoster, buildWatchedSets, matchInvolvesWatchedSet } from './viewer_watchlist_core.jsx';
 import { withNumber, teamNameMark } from './match_scoreboard.jsx';
 import { SideCell } from './side_cell.jsx';
-import { MatchViewerModal, localQueueLabelCompact } from './viewer_match.jsx';
+import { MatchViewerModal, localQueueLabelCompact, useLiveMatch, tournamentMatchRow } from './viewer_match.jsx';
 import { sameCompetitor, competitorKey } from './competitor_identity.jsx';
 import { competitorMatchesQuery, matchMentions } from './competitor_search.jsx';
 import { resultRecencyDesc } from './result_recency.jsx';
@@ -561,8 +561,8 @@ export function ScheduleViewer({ tournament, tweaks }) {
 
 // Tournament-wide schedule wrapper for the viewer (its own screen)
 export function ViewerSchedule({ tournament, onBack, tweaks }) {
-  const [selectedMatch, setSelectedMatch] = useState(null);
-  const extendedTweaks = { ...tweaks, onMatchClick: setSelectedMatch };
+  const [selectedMatch, openMatch, closeMatch] = useLiveMatch((id, compId) => tournamentMatchRow(tournament, id, compId));
+  const extendedTweaks = { ...tweaks, onMatchClick: openMatch };
   return (
     <div className="viewer">
       <div className="viewer__shell">
@@ -579,7 +579,7 @@ export function ViewerSchedule({ tournament, onBack, tweaks }) {
           {window.VersionFooter && <window.VersionFooter />}
         </div>
       </div>
-      {selectedMatch && <MatchViewerModal match={selectedMatch} onClose={() => setSelectedMatch(null)} tournament={tournament} />}
+      {selectedMatch && <MatchViewerModal match={selectedMatch} onClose={closeMatch} tournament={tournament} />}
     </div>
   );
 }

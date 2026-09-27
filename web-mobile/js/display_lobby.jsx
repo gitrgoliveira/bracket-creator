@@ -5,6 +5,7 @@ import { findRunningOnCourt, findUpcomingOnCourt, findActiveCourts, phaseLabel, 
 import { IndividualScore, numberedParts } from './match_scoreboard.jsx';
 import { NumberedName } from './numbered_name.jsx';
 import { teamIVPWScore } from './bracket.jsx';
+import { matchShowsScore } from './match_shows_score.jsx';
 import { isSupplementaryBout } from './pool_ids.jsx';
 
 const { useState: useSD, useEffect: useED, useMemo: useMD } = React;
@@ -117,15 +118,18 @@ function buildCourtSlots(competitions, court) {
 // The fallback is the bare "vs", not boutMiddle: boutMiddle exists to produce
 // X / (E) / (DH), and a team ENCOUNTER is not a fight, so its aggregate row
 // owns no middle mark even when the aggregate itself is tied (CLAUDE.md: the
-// summary centre is a deliberate spacer and NO mark ever goes in it). It also
-// needs no status gate -- teamIVPWScore is null until a bout is scored, which
-// covers both a scheduled encounter and the normal gap between "Start match"
-// and the first result.
+// summary centre is a deliberate spacer and NO mark ever goes in it).
+//
+// It is gated on matchShowsScore: a match sent back to the queue
+// keeps its fought bouts, so teamIVPWScore would print their aggregate on an
+// encounter that must read as not started (bc-sbq). Past the gate,
+// teamIVPWScore is null until a bout is scored, which covers the normal gap
+// between "Start match" and the first result.
 //
 // white-space: pre-line honours the two-line "IV a-b\nPW c-d" string; without
 // it the newline collapses and the cell renders one long line.
 function teamScoreCell(match, withZekkenName) {
-    const centre = teamIVPWScore(match) || "vs";
+    const centre = (matchShowsScore(match) && teamIVPWScore(match)) || "vs";
     // The score is what this board exists to show, so it takes a class of its
     // own rather than inheriting .msb-vs's muted separator grey. Only when
     // there IS a score: an unscored encounter's "vs" is a separator and should
@@ -214,8 +218,9 @@ function LobbyMatchCell({ slot, rowKind }) {
                     per-court board and viewer card use). Owns names, ippon
                     slots, hansoku ▲ on the offending side, hantei / decision
                     marks: attribution is positional, not color-only. For
-                    scheduled rows the match has no ippons, so the slots
-                    render empty (next to each name) which reads as "upcoming"
+                    scheduled rows the slots render empty (next to each name),
+                    even for a queued match that kept its score, since
+                    IndividualScore gates on matchShowsScore; that reads as "upcoming"
                     consistently with the running case's progression. A team
                     match instead renders teamScoreCell, whose IV/PW centre
                     is the aggregate twin of this row (bc-lbty). */}

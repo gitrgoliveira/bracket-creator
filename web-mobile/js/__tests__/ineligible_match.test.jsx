@@ -2,7 +2,10 @@ import { describe, it, expect } from 'vitest';
 import {
   barredSides, isBarredMatch, awaitedDefaultWin, defaultWinDecisionBody,
   barredNote, defaultWinActionLabel, bothBarredDrawable, bothBarredDrawAction,
+  sideBarredByDecision, involvesCompetitor,
 } from '../ineligible_match.jsx';
+// Sets window.isKikenDecision, which sideBarredByDecision reads at call time.
+import '../api_serializers.jsx';
 
 // The server stamps `ineligibleSides` on scheduled matches only; the sides
 // arrive normalized ({id, name}) on every surface that reads them.
@@ -95,5 +98,32 @@ describe('ineligible_match', () => {
     it('offers no draw action when only one side is barred', () => {
       expect(bothBarredDrawAction(match({ ineligibleSides: { b: 'kiken-voluntary' }, phase: 'pool' }))).toBeNull();
     });
+  });
+});
+
+// The advance after a decision skips the competitor it barred, because the
+// court list shows their matches barred only after it refreshes.
+describe('sideBarredByDecision', () => {
+  // What /decision answers with: the stored match, sides as bare names.
+  const stored = (over) => ({ id: 'Pool A-1', sideA: 'Umi E', sideB: 'Yama C', sideAId: 'u', sideBId: 'y', status: 'completed', ...over });
+  const open = match({ id: 'Pool A-1', status: 'running' });
+
+  it('names the side a withdrawal or no-show bars, from the caller\'s own match', () => {
+    expect(sideBarredByDecision(stored({ decision: 'kiken-voluntary', decisionBy: 'aka', winner: 'Yama C' }), open)).toBe(open.sideA);
+    expect(sideBarredByDecision(stored({ decision: 'kiken-injury', decisionBy: 'shiro', winner: 'Umi E' }), open)).toBe(open.sideB);
+    expect(sideBarredByDecision(stored({ decision: 'fusenpai', decisionBy: 'shiro', winner: 'Umi E' }), open)).toBe(open.sideB);
+  });
+
+  it('bars nobody for any other decision, or for a write that has not come back', () => {
+    expect(sideBarredByDecision(stored({ decision: 'fought', winner: 'Umi E' }), open)).toBeNull();
+    expect(sideBarredByDecision(stored({ decision: 'fusensho', decisionBy: 'shiro', winner: 'Umi E' }), open)).toBeNull();
+    expect(sideBarredByDecision({ queued: true }, open)).toBeNull();
+  });
+
+  it('involvesCompetitor finds the side on either side of a match, and nothing for no side', () => {
+    const later = match({ id: 'Pool A-3', sideA: { id: 'k', name: 'Kawa D' }, sideB: { id: 'u', name: 'Umi E' } });
+    expect(involvesCompetitor(later, open.sideA)).toBe(true);
+    expect(involvesCompetitor(later, open.sideB)).toBe(false);
+    expect(involvesCompetitor(later, null)).toBe(false);
   });
 });

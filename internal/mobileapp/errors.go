@@ -188,9 +188,9 @@ func barredCompetitorSentence(name, label, decision, opponent string) string {
 	switch decision {
 	case string(domain.DecisionKikenInjury):
 		if opponent == "" {
-			return fmt.Sprintf("%s withdrew injured in %s. Reinstate %s if the doctor allows.", name, label, name)
+			return fmt.Sprintf("%s withdrew injured in %s. Reinstate %s if they can fight again.", name, label, name)
 		}
-		return fmt.Sprintf("%s withdrew injured in %s. Reinstate %s if the doctor allows, or record the default win for %s.", name, label, name, opponent)
+		return fmt.Sprintf("%s withdrew injured in %s. Reinstate %s if they can fight again, or record the default win for %s.", name, label, name, opponent)
 	case string(domain.DecisionFusenpai):
 		if opponent == "" {
 			return fmt.Sprintf("%s did not appear for %s and cannot fight again.", name, label)

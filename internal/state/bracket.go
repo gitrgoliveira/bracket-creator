@@ -208,7 +208,7 @@ func (s *Store) copyBracket(b *Bracket) *Bracket {
 		// match copy path (copyMatchResults).
 		for j := range res.Rounds[i] {
 			res.Rounds[i][j].Encho = round[j].Encho.Clone()
-			res.Rounds[i][j].SubResults = cloneSubResults(round[j].SubResults)
+			res.Rounds[i][j].SubResults = CloneSubResults(round[j].SubResults)
 			if round[j].Feeders != nil {
 				res.Rounds[i][j].Feeders = append([]string(nil), round[j].Feeders...)
 			}
@@ -226,7 +226,7 @@ func (s *Store) copyBracket(b *Bracket) *Bracket {
 	if b.ThirdPlaceMatch != nil {
 		tpm := *b.ThirdPlaceMatch
 		tpm.Encho = b.ThirdPlaceMatch.Encho.Clone()
-		tpm.SubResults = cloneSubResults(b.ThirdPlaceMatch.SubResults)
+		tpm.SubResults = CloneSubResults(b.ThirdPlaceMatch.SubResults)
 		if b.ThirdPlaceMatch.Feeders != nil {
 			tpm.Feeders = append([]string(nil), b.ThirdPlaceMatch.Feeders...)
 		}

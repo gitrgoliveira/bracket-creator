@@ -180,7 +180,7 @@ func (e *DownstreamKnockoutPlayedError) Error() string {
 			// A pool-rank override (OverridePoolRanks) corrects no match.
 			change = fmt.Sprintf("changing the ranking of %s changes who qualified from it", pool)
 		}
-		return fmt.Sprintf("%s, and %s %s already fought by %s. Retry with forceDownstreamReopen to apply the change and reopen %s to be fought again",
+		return fmt.Sprintf("%s, and %s %s already fought by %s. Retry with forceDownstreamReopen to apply the change and reopen %s with the new competitor in, the winner cleared and the points kept",
 			change, strings.Join(labels, " and "), verb, who, them)
 	}
 	labels := make([]string, 0, len(e.Blocking))
@@ -194,10 +194,10 @@ func (e *DownstreamKnockoutPlayedError) Error() string {
 	if len(e.Blocking) > 1 {
 		// No Displaced clause: it names one competitor, and these matches do
 		// not share one.
-		return fmt.Sprintf("correcting %s would change the winner already propagated into %s, which have recorded their own results. Retry with forceDownstreamReopen to apply the correction and reopen both to be fought again",
+		return fmt.Sprintf("correcting %s would change the winner already propagated into %s, which have recorded their own results. Retry with forceDownstreamReopen to apply the correction and reopen both with the new competitors in, the winners cleared and the points kept",
 			label, blocked)
 	}
-	return fmt.Sprintf("correcting %s would change the winner already propagated into %s, which has recorded its own result; this would displace %q without updating that result. Retry with forceDownstreamReopen to apply the correction and reopen %s to be fought again",
+	return fmt.Sprintf("correcting %s would change the winner already propagated into %s, which has recorded its own result; this would displace %q without updating that result. Retry with forceDownstreamReopen to apply the correction and reopen %s with the new competitor in, the winner cleared and the points kept",
 		label, blocked, e.Displaced, blocked)
 }
 

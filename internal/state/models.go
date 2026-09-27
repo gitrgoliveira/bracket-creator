@@ -1314,6 +1314,18 @@ type IneligibleSidesAnnotation struct {
 	B string `json:"b,omitempty"`
 }
 
+// WithdrawnStatusAnnotation is where the withdrawn side of a COMPLETED match
+// that a withdrawal or default win decided stands now: its competitor status
+// (eligible, the match that bars it, whether it can be reinstated). The
+// editor's clear control words its consequence from it (a bar recorded by
+// another match, eligible again, reinstateable) without a status fetch of its
+// own. Request-time only, like IneligibleSidesAnnotation.
+type WithdrawnStatusAnnotation struct {
+	Eligible      bool   `json:"eligible"`
+	MatchID       string `json:"matchId,omitempty"`
+	Reinstateable bool   `json:"reinstateable,omitempty"`
+}
+
 type MatchResult struct {
 	ID     string `json:"id"`
 	SideA  string `json:"sideA"` // Player/Team Name
@@ -1392,7 +1404,7 @@ type MatchResult struct {
 	QueuePosition        int            `json:"queuePosition,omitempty" yaml:"-"`
 	// IneligibleSides is a READ-ONLY, request-time annotation (bc-cse),
 	// exactly like QueuePosition above: stamped only on the copy a viewer
-	// endpoint serves (mobileapp.annotateIneligibleSides), never on an
+	// endpoint serves (mobileapp.annotateEligibility), never on an
 	// object bound for a write, so it never reaches pool-matches.csv (no
 	// entry in poolMatchColumns, pools.go) the same way QueuePosition does
 	// not. Non-nil only for a SCHEDULED match whose stamped SideAID/SideBID
@@ -1401,6 +1413,11 @@ type MatchResult struct {
 	// without a second round trip. Omitted on the wire entirely when
 	// neither side is barred.
 	IneligibleSides *IneligibleSidesAnnotation `json:"ineligibleSides,omitempty" yaml:"-"`
+	// WithdrawnStatus is a READ-ONLY, request-time annotation stamped with
+	// IneligibleSides (mobileapp.annotateEligibility) and kept off disk the
+	// same way. Non-nil only on a COMPLETED match a withdrawal or default win
+	// decided whose withdrawn side has a competitor status.
+	WithdrawnStatus *WithdrawnStatusAnnotation `json:"withdrawnStatus,omitempty" yaml:"-"`
 	// DecidedByHantei is a LEGACY READ-ONLY channel, exactly as on
 	// SubMatchResult (see there and legacy_hantei.go): the verdict is the
 	// domain.HanteiMark entry in the winner's IpponsA/IpponsB. A hantei on a
@@ -1575,12 +1592,13 @@ func (e *EnchoMetadata) Clone() *EnchoMetadata {
 	return &c
 }
 
-// cloneSubResults deep-copies a sub-result slice so cached state never shares
+// CloneSubResults deep-copies a sub-result slice so cached state never shares
 // the IpponsA/IpponsB slices or nested Encho pointers with a returned value.
 // Used by both the pool match copy path (copyMatchResults) and the bracket
-// copy path (copyBracket); keep them aligned. Returns nil for a nil input so
+// copy path (copyBracket); keep them aligned. The engine's keepQueuedScore
+// uses it to copy a stored bout log onto a start. Returns nil for a nil input so
 // the omitempty/preserve semantics round-trip unchanged.
-func cloneSubResults(subs []SubMatchResult) []SubMatchResult {
+func CloneSubResults(subs []SubMatchResult) []SubMatchResult {
 	if subs == nil {
 		return nil
 	}
@@ -1688,7 +1706,7 @@ type BracketMatch struct {
 	QueuePosition int      `json:"queuePosition,omitempty"`
 	// IneligibleSides mirrors MatchResult.IneligibleSides for a bracket
 	// match (bc-cse): a request-time-only annotation, stamped by
-	// mobileapp.annotateIneligibleSides on the copy a viewer endpoint
+	// mobileapp.annotateEligibility on the copy a viewer endpoint
 	// serves, never on the object a write persists to bracket.json (the
 	// same discipline QueuePosition above already relies on -- see its own
 	// doc comment on MatchResult for why that is safe without a json:"-"
@@ -1696,6 +1714,10 @@ type BracketMatch struct {
 	// marshal, so what keeps a derived field off disk is WHEN it is set,
 	// not a wire/disk type split).
 	IneligibleSides *IneligibleSidesAnnotation `json:"ineligibleSides,omitempty"`
+	// WithdrawnStatus mirrors MatchResult.WithdrawnStatus for a bracket
+	// match, set only on the copy a viewer endpoint serves (see
+	// IneligibleSides above for why that keeps it off bracket.json).
+	WithdrawnStatus *WithdrawnStatusAnnotation `json:"withdrawnStatus,omitempty"`
 	// MatchNumber is the sequential bracket match number, matching the
 	// "Match N" label printed on the Excel tree sheet. 0 means unset; for a
 	// BracketMatch that is a hidden/bye placeholder, or a legacy bracket saved

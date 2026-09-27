@@ -1,7 +1,7 @@
 // Admin side: single tournament. Tournament has multiple Competitions.
 // Top-level: Tournament dashboard (all competitions), per-competition pages.
 
-import { applyPatch as patchCompetitionData, checkSeqGap } from './patch.jsx';
+import { applyPatch as patchCompetitionData, checkSeqGap, keepNewerDetail } from './patch.jsx';
 import { createTimerPool } from './timer_pool.jsx';
 // Imported from the leaf, not read off `window`: write_result.jsx is
 // import-only (see its header) and every consumer ES-imports it directly.
@@ -263,7 +263,7 @@ function AdminApp({ tournament, onUpdate, onLogout, onViewerMode, onPasswordChan
     if (view.kind === "competition" && view.id === cid) {
       try {
         const details = await window.API.fetchCompetitionDetails(cid);
-        if (mountedRef.current) setAdminCompData(details);
+        if (mountedRef.current) setAdminCompData((prev) => keepNewerDetail(prev, details));
       } catch (e) {
         console.error("Failed to refresh competition details after save:", e);
       }
@@ -481,7 +481,7 @@ function AdminApp({ tournament, onUpdate, onLogout, onViewerMode, onPasswordChan
     setAdminLoading(true);
     window.API.fetchCompetitionDetails(view.id)
       .then(data => {
-        if (!cancelled) { setAdminCompData(data); setAdminLoading(false); }
+        if (!cancelled) { setAdminCompData((prev) => keepNewerDetail(prev, data)); setAdminLoading(false); }
       })
       .catch(err => {
         if (!cancelled) { console.error(err); setAdminLoading(false); }
@@ -553,7 +553,7 @@ function AdminApp({ tournament, onUpdate, onLogout, onViewerMode, onPasswordChan
           window.API.fetchCompetitionDetails(targetId)
             .then(data => {
               if (cancelled || data?.config?.id !== targetId) return;
-              setAdminCompData(data);
+              setAdminCompData((prev) => keepNewerDetail(prev, data));
             })
             .catch(err => console.error('tab-resume refresh failed:', err));
         });
@@ -575,7 +575,7 @@ function AdminApp({ tournament, onUpdate, onLogout, onViewerMode, onPasswordChan
             window.API.fetchCompetitionDetails(targetId)
               .then(data => {
                 if (cancelled || data?.config?.id !== targetId) return;
-                setAdminCompData(data);
+                setAdminCompData((prev) => keepNewerDetail(prev, data));
               })
               .catch(err => console.error('resync refresh failed:', err));
           });
@@ -591,7 +591,7 @@ function AdminApp({ tournament, onUpdate, onLogout, onViewerMode, onPasswordChan
             window.API.fetchCompetitionDetails(targetId)
               .then(data => {
                 if (cancelled || data?.config?.id !== targetId) return;
-                setAdminCompData(data);
+                setAdminCompData((prev) => keepNewerDetail(prev, data));
               })
               .catch(err => console.error('gap refetch failed:', err));
           });
@@ -624,7 +624,7 @@ function AdminApp({ tournament, onUpdate, onLogout, onViewerMode, onPasswordChan
                   // check is belt-and-braces in case a fetch comes back with
                   // unexpected data shape.
                   if (cancelled || data?.config?.id !== targetId) return;
-                  setAdminCompData(data);
+                  setAdminCompData((prev) => keepNewerDetail(prev, data));
                 })
                 .catch(err => console.error("Failed to refresh competition details", err));
             });
@@ -849,7 +849,7 @@ function AdminApp({ tournament, onUpdate, onLogout, onViewerMode, onPasswordChan
       onOpenCompetition={(id, section) => setView({ kind: "competition", id, section: section || "overview" })}
       onCreateCompetition={() => setView({ kind: "createComp" })}
       onUpdate={(next) => updateCompetition(c.id, next)}
-      onRefreshCompetition={() => window.API.fetchCompetitionDetails(c.id).then(setAdminCompData).catch(err => console.error("refresh failed:", err))}
+      onRefreshCompetition={() => window.API.fetchCompetitionDetails(c.id).then((data) => setAdminCompData((prev) => keepNewerDetail(prev, data))).catch(err => console.error("refresh failed:", err))}
       onMoveCourt={moveMatchCourt}
       onEditScore={editMatchScore}
       onLogout={onLogout}

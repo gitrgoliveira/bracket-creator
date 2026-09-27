@@ -1,6 +1,6 @@
 import React from 'react';
-import { render, fireEvent, screen, waitFor } from '@testing-library/react';
-import { describe, it, expect, vi } from 'vitest';
+import { render, fireEvent, screen, waitFor, act } from '@testing-library/react';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { EngiScoreEditorModal } from '../../admin_scoring_engi.jsx';
 
 // Regression coverage for a real orientation bug: sideB is Shiro and sideA is
@@ -397,5 +397,50 @@ describe('bc-kbhn: engi ←/→ need a neighbour match', () => {
     expect(screen.getByTestId('engi-shortcut-hint').textContent).toContain('prev/next');
     fireEvent.keyDown(document.body, { key: 'ArrowRight' });
     expect(onNext).toHaveBeenCalledTimes(1);
+  });
+});
+
+// Operator ruling 2026-09-26: engi flags are saved as they are entered, so a
+// match sent back to the queue or switched away from keeps them. While the
+// match is running each change rides the same debounced running write the
+// kendo editors use; before it starts nothing is written until the result is.
+describe('EngiScoreEditorModal saves flags as they are entered', () => {
+  beforeEach(() => { vi.useFakeTimers(); });
+  afterEach(() => { vi.useRealTimers(); });
+
+  it('a running match saves each change as a running write', async () => {
+    const onSubmit = vi.fn().mockResolvedValue({ status: 'running' });
+    render(<EngiScoreEditorModal match={makeMatch({ status: 'running' })} onClose={() => {}} onSubmit={onSubmit} />);
+    fireEvent.click(screen.getByTestId('engi-aka-inc'));
+    fireEvent.click(screen.getByTestId('engi-shiro-inc'));
+    await act(async () => { vi.advanceTimersByTime(400); });
+    expect(onSubmit).toHaveBeenCalledTimes(1);
+    expect(onSubmit).toHaveBeenCalledWith({ flagsA: 1, flagsB: 1, status: 'running' });
+  });
+
+  it('a keyboard change saves too', async () => {
+    const onSubmit = vi.fn().mockResolvedValue({ status: 'running' });
+    render(<EngiScoreEditorModal match={makeMatch({ status: 'running' })} onClose={() => {}} onSubmit={onSubmit} />);
+    await act(async () => { fireEvent.keyDown(window, { key: 's' }); });
+    await act(async () => { vi.advanceTimersByTime(400); });
+    expect(onSubmit).toHaveBeenCalledWith({ flagsA: 0, flagsB: 1, status: 'running' });
+  });
+
+  it('a match not yet started writes nothing until the result is saved', async () => {
+    const onSubmit = vi.fn().mockResolvedValue(undefined);
+    render(<EngiScoreEditorModal match={makeMatch({ status: 'scheduled' })} onClose={() => {}} onSubmit={onSubmit} />);
+    fireEvent.click(screen.getByTestId('engi-aka-inc'));
+    await act(async () => { vi.advanceTimersByTime(400); });
+    expect(onSubmit).not.toHaveBeenCalled();
+  });
+
+  it('closing a running match with a change still pending saves it and asks nothing', async () => {
+    const onSubmit = vi.fn().mockResolvedValue({ status: 'running' });
+    const onClose = vi.fn();
+    render(<EngiScoreEditorModal match={makeMatch({ status: 'running' })} onClose={onClose} onSubmit={onSubmit} />);
+    fireEvent.click(screen.getByTestId('engi-aka-inc'));
+    await act(async () => { fireEvent.click(screen.getByTestId('engi-close-btn')); });
+    expect(onSubmit).toHaveBeenCalledWith({ flagsA: 1, flagsB: 0, status: 'running' });
+    expect(onClose).toHaveBeenCalled();
   });
 });

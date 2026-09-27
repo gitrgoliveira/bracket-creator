@@ -48,8 +48,9 @@ export function ViewerCompetition({ tournament, competition, pools, poolMatches,
   // this component receives pools/poolMatches/bracket as separate props (the
   // `competition` prop is detail.config, which carries none of them — see
   // app.jsx), so compMatchesForCompetition recombines the two halves. That
-  // helper is shared with the withdrawal panel so the recombination exists
-  // once rather than being spread by hand at each call site. compMatches
+  // helper is shared with the score editor's match lookups so the
+  // recombination exists once rather than being spread by hand at each call
+  // site. compMatches
   // reads the flat poolMatches list directly rather than walking `pools`, so a
   // Swiss competition (pools: [] always — Swiss piggybacks pool-matches.csv
   // with a synthetic "Swiss-R1" pool name but never writes pools.csv) now

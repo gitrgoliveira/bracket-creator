@@ -1021,3 +1021,251 @@ describe('a barred match is skipped by every auto-pick (bc-cse)', () => {
     expect(buttonText.some((t) => /call to court/i.test(t))).toBe(false);
   });
 });
+
+// Shared by the render tests below: a mutable court feed, a Refresh that
+// re-reads it, and the editor probe's current match.
+async function mountCourt(initial) {
+  const feed = { current: initial };
+  window.tournamentMatches = () => feed.current;
+  window.filterMatchesByCourt = (matches) => matches;
+  const prev = {
+    fetch: window.API.fetchCourtMatches,
+    sub: window.API.subscribeToEvents,
+    revert: window.API.revertMatchToQueue,
+  };
+  window.API.fetchCourtMatches = vi.fn().mockImplementation(() => Promise.resolve([{ id: 'c1', name: 'Cup' }]));
+  window.API.subscribeToEvents = () => () => {};
+  window.API.revertMatchToQueue = vi.fn().mockResolvedValue(true);
+  const showToast = vi.fn();
+  let utils;
+  await act(async () => {
+    utils = render(
+      <AdminShiaijoPage tournament={makeMinimalTournament()} court="A" onBack={vi.fn()} onEditScore={vi.fn()}
+        onMoveCourt={vi.fn()} onLogout={vi.fn()} onViewerMode={vi.fn()} password="" showToast={showToast}
+        tweaks={{}} onSwitchCourt={vi.fn()} />
+    );
+  });
+  return {
+    utils,
+    feed,
+    showToast,
+    editorMatch: () => { const el = utils.queryByTestId('score-editor'); return el ? el.getAttribute('data-match') : null; },
+    refresh: async () => { await act(async () => { utils.getByRole('button', { name: /refresh/i }).click(); }); },
+    restore: () => {
+      window.API.fetchCourtMatches = prev.fetch;
+      window.API.subscribeToEvents = prev.sub;
+      window.API.revertMatchToQueue = prev.revert;
+    },
+  };
+}
+
+const courtSide = (id, name) => ({ id, name });
+const courtMatch = (id, status, over = {}) => ({
+  id, compId: 'c1', compName: 'Cup', status, phase: 'pool', poolName: 'Pool A', court: 'A',
+  scheduledAt: `09:0${id.slice(-1)}`,
+  sideA: courtSide(`${id}-a`, `Aka ${id}`), sideB: courtSide(`${id}-b`, `Shiro ${id}`),
+  ...over,
+});
+
+// bc-sbq (operator ruling 2026-09-26): a match sent back to the queue keeps
+// its score, so Send back to queue is always offered, its confirm says the
+// score is kept, and picking another bout sends a scored one back rather than
+// refusing to switch (a mistaken switch is undone with one tap on its Start).
+describe('Send back to queue keeps the score and is always offered (bc-sbq)', () => {
+  const tapSendBack = async (c) => {
+    await act(async () => { c.utils.getByRole('button', { name: /send back to queue/i }).click(); });
+    return c.utils.container.querySelector('.shiaijo-move-confirm[role="dialog"]');
+  };
+
+  it('is offered on a team match with a fought bout, and says the score is kept', async () => {
+    const c = await mountCourt([courtMatch('m1', 'running', {
+      compKind: 'team', teamSize: 3, reopenPending: true,
+      subResults: [
+        { position: 1, sideA: 'A1', sideB: 'B1', ipponsA: ['M'], ipponsB: [], winner: 'A1' },
+        { position: 2, sideA: 'A2', sideB: 'B2', ipponsA: [], ipponsB: [] },
+      ],
+    })]);
+    try {
+      expect(c.editorMatch()).toBe('m1');
+      const dialog = await tapSendBack(c);
+      expect(dialog.textContent).toContain('Any score entered is kept');
+      expect(dialog.textContent).not.toMatch(/discard|lost/i);
+    } finally { c.restore(); }
+  });
+
+  it('sends a scored bout back when confirmed', async () => {
+    const c = await mountCourt([courtMatch('m1', 'running', { ipponsA: ['M'], hansokuB: 1 })]);
+    try {
+      await tapSendBack(c);
+      const confirm = [...c.utils.container.querySelectorAll('.shiaijo-move-confirm button')]
+        .find((b) => /send back to queue/i.test(b.textContent));
+      await act(async () => { confirm.click(); });
+      expect(window.API.revertMatchToQueue).toHaveBeenCalledWith('c1', 'm1', '');
+    } finally { c.restore(); }
+  });
+
+  it('picking another bout sends a scored one back to the queue and starts the pick', async () => {
+    const c = await mountCourt([courtMatch('m1', 'running', { ipponsA: ['M'] }), courtMatch('m2', 'scheduled')]);
+    try {
+      const startNext = c.utils.getAllByRole('button').find((b) => /^start/i.test(b.textContent.trim()));
+      expect(startNext, 'the Up Next card offers Start for m2').toBeTruthy();
+      await act(async () => { startNext.click(); });
+      expect(window.API.revertMatchToQueue).toHaveBeenCalledWith('c1', 'm1', '');
+      expect(c.showToast).not.toHaveBeenCalledWith('Finish or correct the bout in progress first', 'error');
+    } finally { c.restore(); }
+  });
+});
+
+// bc-strt: the console opens a match its Up next card started while the court
+// list still says scheduled. It tells the editor so (`started`), for the
+// scheduled snapshot the start was made from and no other, so a point struck
+// before the refetch saves at once and a later send back to the queue is not
+// mistaken for a start.
+describe('the editor is told a match the console started is running (bc-strt)', () => {
+  it('passes started for the snapshot it started, and only that one', async () => {
+    // The probe is module-wide: drop a previous test's editor, or the refused
+    // start below (which mounts no editor) would read that one's props.
+    probe.props = null;
+    const side = (id, name) => ({ id, name });
+    const m1 = {
+      id: 'm1', compId: 'c1', compName: 'Cup', status: 'scheduled', phase: 'pool', poolName: 'Pool A',
+      court: 'A', scheduledAt: '09:00', sideA: side('p1', 'Yamada'), sideB: side('p2', 'Tanaka'), modifiedAt: 100,
+    };
+    const m2 = { ...m1, id: 'm2', scheduledAt: '09:05', sideA: side('p3', 'Sato'), sideB: side('p4', 'Kato') };
+    let current = [m1, m2];
+    window.tournamentMatches = () => current;
+    const prevFetch = window.API.fetchCourtMatches;
+    const prevSub = window.API.subscribeToEvents;
+    window.API.fetchCourtMatches = vi.fn().mockImplementation(() => Promise.resolve([{ id: 'c1', name: 'Cup' }]));
+    window.API.subscribeToEvents = () => () => {};
+    let startResult = { applied: false, reason: 'clock_skew' };
+    const onEditScore = vi.fn().mockImplementation(() => Promise.resolve(startResult));
+    try {
+      let utils;
+      await act(async () => { utils = renderPage(makeMinimalTournament(), 'A', { onEditScore }); });
+      const start = async () => {
+        const card = utils.container.querySelector('.shiaijo-upnext__card');
+        const btn = [...card.querySelectorAll('button')].find((b) => /start match/i.test(b.textContent));
+        await act(async () => { btn.click(); });
+      };
+      const refresh = async () => { await act(async () => { utils.getByRole('button', { name: /refresh/i }).click(); }); };
+
+      // A refused start is no start.
+      await start();
+      expect(onEditScore).toHaveBeenCalledTimes(1);
+      expect(probe.props?.started || false).toBe(false);
+
+      startResult = { applied: true };
+      await start();
+      expect(probe.props.match.id).toBe('m1');
+      expect(probe.props.match.status, 'the list has not caught up yet').toBe('scheduled');
+      expect(probe.props.started).toBe(true);
+
+      // The list catches up; later the match goes back to the queue, which
+      // stamps it. That scheduled snapshot was not started.
+      current = [{ ...m1, status: 'running', modifiedAt: 200 }, m2];
+      await refresh();
+      current = [{ ...m1, modifiedAt: 300 }, m2];
+      await refresh();
+      expect(probe.props.match.id, 'the pick still holds the panel').toBe('m1');
+      expect(probe.props.match.status).toBe('scheduled');
+      expect(probe.props.started).toBe(false);
+    } finally {
+      window.API.fetchCourtMatches = prevFetch;
+      window.API.subscribeToEvents = prevSub;
+    }
+  });
+});
+
+// The console used to refetch its whole court feed for every event, and a
+// running match broadcasts every saved point. A running match's score update
+// changes only its own row, so the pushed result is shown at once, a push
+// older than the row it would replace is ignored, and the refetch that still
+// follows (for what a push cannot carry) happens once per burst.
+describe('the court console shows a pushed running score at once', () => {
+  it('applies the push to its row, ignores a stale one, and refetches once per burst', async () => {
+    vi.useFakeTimers();
+    const side = (id, name) => ({ id, name });
+    const running = (o = {}) => ({
+      id: 'm1', status: 'running', phase: 'pool', poolName: 'Pool A', court: 'A', scheduledAt: '09:00',
+      sideA: side('p1', 'Yamada'), sideB: side('p2', 'Tanaka'), ipponsA: [], ipponsB: [], modifiedAt: 100, ...o,
+    });
+    const comp = { id: 'c1', name: 'Cup', status: 'pools', poolMatches: [running()] };
+    let emit = () => {};
+    const prev = {
+      fetch: window.API.fetchCourtMatches, sub: window.API.subscribeToEvents,
+      tm: window.tournamentMatches, fbc: window.filterMatchesByCourt,
+    };
+    const fetchCourtMatches = vi.fn().mockResolvedValue([comp]);
+    window.API.fetchCourtMatches = fetchCourtMatches;
+    window.API.subscribeToEvents = (cb) => { emit = cb; return () => {}; };
+    window.tournamentMatches = (t) => (t.competitions || [])
+      .flatMap((c) => (c.poolMatches || []).map((m) => ({ ...m, compId: c.id, compName: c.name })));
+    window.filterMatchesByCourt = (matches) => matches;
+    try {
+      await act(async () => { renderPage(makeMinimalTournament(), 'A'); });
+      await act(async () => { await Promise.resolve(); });
+      expect(probe.props.match?.id).toBe('m1');
+      const fetchesBefore = fetchCourtMatches.mock.calls.length;
+      const push = (o) => act(async () => {
+        emit({ type: 'match_updated', data: { competitionId: 'c1', matchId: 'm1', result: running(o) } });
+      });
+
+      await push({ ipponsA: ['M'], modifiedAt: 200 });
+      expect(probe.props.match.ipponsA, 'shown at once, before any refetch').toEqual(['M']);
+      await push({ ipponsA: ['M', 'K'], modifiedAt: 300 });
+      await push({ ipponsA: [], modifiedAt: 250 });
+      expect(probe.props.match.ipponsA, 'a push older than the row is not applied').toEqual(['M', 'K']);
+      expect(fetchCourtMatches.mock.calls.length, 'nothing refetched yet').toBe(fetchesBefore);
+
+      await act(async () => { vi.advanceTimersByTime(700); });
+      await act(async () => { await Promise.resolve(); });
+      expect(fetchCourtMatches.mock.calls.length, 'one refetch for the burst of three').toBe(fetchesBefore + 1);
+      // That refetch answers with the row as it stood before the pushes (it
+      // read the data before the writes committed): the newer row stays.
+      expect(probe.props.match.ipponsA, 'a refetch older than the row does not put the old score back').toEqual(['M', 'K']);
+
+      // A refetch as new as the row, or newer, replaces it as before.
+      fetchCourtMatches.mockResolvedValue([{ ...comp, poolMatches: [running({ ipponsA: ['M', 'K'], ipponsB: ['D'], modifiedAt: 400 })] }]);
+      await act(async () => { emit({ type: 'schedule_updated', data: {} }); });
+      await act(async () => { vi.advanceTimersByTime(700); });
+      await act(async () => { await Promise.resolve(); });
+      expect(probe.props.match.ipponsB, 'a newer refetch is taken').toEqual(['D']);
+    } finally {
+      window.API.fetchCourtMatches = prev.fetch;
+      window.API.subscribeToEvents = prev.sub;
+      window.tournamentMatches = prev.tm;
+      window.filterMatchesByCourt = prev.fbc;
+      vi.useRealTimers();
+    }
+  });
+});
+
+// Recording a withdrawal advances the court like any other decision (operator
+// ruling 2026-09-26). This court's list does not show the withdrawn
+// competitor's matches barred until it is refetched, so the advance passes
+// over them itself rather than starting one the server then refuses.
+describe('the court moves on past the withdrawn competitor', () => {
+  it('starts the next match the withdrawn competitor is not in', async () => {
+    const side = (id, name) => ({ id, name });
+    const row = (id, a, b, status, at) => ({
+      id, compId: 'c1', compName: 'Cup', status, phase: 'pool', poolName: 'Pool A', court: 'A', scheduledAt: at, sideA: a, sideB: b,
+    });
+    const aoki = side('p1', 'Aoki');
+    const run = row('m1', aoki, side('p2', 'Baba'), 'running', '09:00');
+    window.tournamentMatches = () => [run, row('m2', side('p3', 'Endo'), aoki, 'scheduled', '09:05'), row('m3', side('p4', 'Doi'), side('p5', 'Fujii'), 'scheduled', '09:10')];
+    window.filterMatchesByCourt = (matches) => matches;
+    const onEditScore = vi.fn().mockResolvedValue({ status: 'running' });
+    await act(async () => { renderPage(makeMinimalTournament(), 'A', { onEditScore }); });
+    expect(probe.props.match?.id).toBe('m1');
+    await act(async () => {
+      // What /decision answers with: the stored match, sides as bare names.
+      await probe.props.onAfterDecision({
+        id: 'm1', sideA: 'Aoki', sideB: 'Baba', sideAId: 'p1', sideBId: 'p2', winner: 'Baba', winnerId: 'p2',
+        status: 'completed', decision: 'kiken-voluntary', decisionBy: 'aka',
+      });
+    });
+    expect(onEditScore).toHaveBeenCalledTimes(1);
+    expect(onEditScore.mock.calls[0][1], "Aoki's next match is passed over").toBe('m3');
+  });
+});

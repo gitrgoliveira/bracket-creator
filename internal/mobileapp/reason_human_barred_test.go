@@ -108,7 +108,7 @@ func TestScoreHandler_IneligibleCompetitor_ReasonHumanNamesMatchAndRemedy(t *tes
 		},
 		{
 			"kiken-injury", "kiken-injury",
-			"Alice withdrew injured in Pool A · Match 1. Reinstate Alice if the doctor allows, or record the default win for Carol.",
+			"Alice withdrew injured in Pool A · Match 1. Reinstate Alice if they can fight again, or record the default win for Carol.",
 		},
 		{
 			"fusenpai", "fusenpai",

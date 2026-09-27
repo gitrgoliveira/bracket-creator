@@ -305,7 +305,7 @@ type CompetitorStatus struct {
 }
 ```
 
-The engine should check eligibility before allowing a match to start, and auto-resolve remaining matches for ineligible competitors.
+The engine should check eligibility before allowing a match to start. It does not auto-resolve the remaining matches of an ineligible competitor (operator ruling 2026-09-26: recording a withdrawal changes only that match); each remaining match is closed from its own notice when it comes up.
 
 **Risk**: Medium. Changes the match data model, which affects storage, API responses, SSE events, and frontend rendering. Best done before other features that depend on richer match metadata.
 

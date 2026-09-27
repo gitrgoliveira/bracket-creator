@@ -172,7 +172,7 @@ Today `MatchResult.Decision` is a draw flag only. A fought 2–0, a kiken 2–0,
 
 - New `CompetitorStatus { PlayerID, Eligible, Reason, MatchID }` state.
 - Engine checks eligibility before allowing a match to start; rejects starting a match where a competitor is marked ineligible.
-- After kiken/fusenpai is recorded, the app surfaces the competitor's remaining scheduled matches and prompts the operator to resolve them (award default wins to opponents or remove from bracket).
+- After kiken/fusenpai is recorded, each of the competitor's remaining scheduled matches carries its own notice with a one-tap default win for the opponent, resolved when it comes up (operator ruling 2026-09-26: recording a withdrawal changes only that match, so nothing is resolved in bulk from the match where they withdrew).
 - Team kiken under FIK rules: validate that the correct positions are vacated (Jiho for 1 withdrawal, Jiho + Fukusho for 2; Senpo and Taisho cannot be forfeited; 3+ withdrawals disqualify the team).
 
 ---

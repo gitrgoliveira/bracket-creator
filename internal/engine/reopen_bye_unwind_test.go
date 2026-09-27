@@ -232,7 +232,7 @@ func TestCorrectionThroughAByeWarnsForAPlayedFinalThenReopensIt(t *testing.T) {
 	assert.Equal(t, "P01", final.SideA)
 	assert.Equal(t, state.MatchStatusScheduled, final.Status)
 	assert.Empty(t, final.Winner)
-	assert.Empty(t, final.IpponsA)
+	assert.Equal(t, []string{"M"}, final.IpponsA, "its points are kept (operator ruling 2026-09-26)")
 }
 
 // The manual winner override is the same correction through another door.

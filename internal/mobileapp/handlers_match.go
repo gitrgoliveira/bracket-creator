@@ -201,19 +201,27 @@ func annotateBracketQueuePositions(b *state.Bracket) {
 	}
 }
 
-// anyScheduledMatchHasBothSides reports whether poolMatches or bracket carry
-// at least one SCHEDULED match with both side ids stamped -- the ONLY shape
-// annotateIneligibleSides can ever act on (engine.BarredSides needs an id to
-// look anyone up). Gates the LoadCompetitorStatus read in the viewer
-// handlers behind it, so a competition with no scheduled match yet (or one
-// whose scheduled rows are all byes/unresolved feeders) never pays for a
-// status-file read it cannot use.
-func anyScheduledMatchHasBothSides(poolMatches []state.MatchResult, bracket *state.Bracket) bool {
-	hasBoth := func(status state.MatchStatus, idA, idB string) bool {
-		return status == state.MatchStatusScheduled && idA != "" && idB != ""
+// anyMatchToAnnotate reports whether poolMatches or bracket carry a match
+// annotateEligibility can act on: a SCHEDULED match with both side ids
+// stamped (its ineligibleSides stamp; engine.BarredSides needs an id to look
+// anyone up), or a COMPLETED match a withdrawal or default win decided (its
+// withdrawnStatus stamp, which the score editor words its clear from, so it
+// must be there once every match is finished too). Gates the
+// LoadCompetitorStatus read in the viewer handlers behind it, so a
+// competition with neither never pays for a status-file read it cannot use.
+func anyMatchToAnnotate(poolMatches []state.MatchResult, bracket *state.Bracket) bool {
+	acts := func(status state.MatchStatus, decision, idA, idB string) bool {
+		switch status {
+		case state.MatchStatusScheduled:
+			return idA != "" && idB != ""
+		case state.MatchStatusCompleted:
+			return domain.IsDefaultWinDecisionStr(decision)
+		}
+		return false
 	}
 	for i := range poolMatches {
-		if hasBoth(poolMatches[i].Status, poolMatches[i].SideAID, poolMatches[i].SideBID) {
+		m := &poolMatches[i]
+		if acts(m.Status, m.Decision, m.SideAID, m.SideBID) {
 			return true
 		}
 	}
@@ -223,22 +231,26 @@ func anyScheduledMatchHasBothSides(poolMatches []state.MatchResult, bracket *sta
 	for ri := range bracket.Rounds {
 		for mi := range bracket.Rounds[ri] {
 			bm := &bracket.Rounds[ri][mi]
-			if hasBoth(bm.Status, bm.SideAID, bm.SideBID) {
+			if acts(bm.Status, bm.Decision, bm.SideAID, bm.SideBID) {
 				return true
 			}
 		}
 	}
-	if bm := bracket.ThirdPlaceMatch; bm != nil && hasBoth(bm.Status, bm.SideAID, bm.SideBID) {
+	if bm := bracket.ThirdPlaceMatch; bm != nil && acts(bm.Status, bm.Decision, bm.SideAID, bm.SideBID) {
 		return true
 	}
 	return false
 }
 
-// annotateIneligibleSides stamps state.IneligibleSidesAnnotation (bc-cse) on
+// annotateEligibility stamps state.IneligibleSidesAnnotation (bc-cse) on
 // every SCHEDULED pool match and bracket match whose resolved side ids are
 // currently barred by a withdrawal recorded on a DIFFERENT match
 // (engine.BarredSides, the SAME check StartMatchTx gates a write on), so a
-// match LIST can grey/skip the row without attempting the write first.
+// match LIST can grey/skip the row without attempting the write first. On a
+// COMPLETED match a withdrawal or default win decided it stamps
+// state.WithdrawnStatusAnnotation instead: where the withdrawn side's
+// competitor status stands now, which the editor's clear control words its
+// consequence from.
 //
 // Read-only, request-time only, exactly like annotateQueuePositions: called
 // on the copy a viewer endpoint is about to serve, NEVER on a slice/bracket
@@ -247,7 +259,7 @@ func anyScheduledMatchHasBothSides(poolMatches []state.MatchResult, bracket *sta
 // models.go). MUST run BEFORE annotateQueuePositions/
 // annotateBracketQueuePositions, which read the stamp back to decide
 // whether a barred match counts toward the queue (position 0 for one).
-func annotateIneligibleSides(poolMatches []state.MatchResult, bracket *state.Bracket, statuses map[string]domain.CompetitorStatus) {
+func annotateEligibility(poolMatches []state.MatchResult, bracket *state.Bracket, statuses map[string]domain.CompetitorStatus) {
 	if len(statuses) == 0 {
 		return
 	}
@@ -289,22 +301,69 @@ func annotateIneligibleSides(poolMatches []state.MatchResult, bracket *state.Bra
 		}
 		return out
 	}
+	// The withdrawn side is the one decisionBy names, else the side that did
+	// not win (withdrawnSideKey, ineligible_match.jsx, reads it the same way).
+	withdrawn := func(status state.MatchStatus, decision, decisionBy, winnerID, sideAID, sideBID string) *state.WithdrawnStatusAnnotation {
+		if status != state.MatchStatusCompleted || !domain.IsDefaultWinDecisionStr(decision) {
+			return nil
+		}
+		var id string
+		switch {
+		case decisionBy == "aka":
+			id = sideAID
+		case decisionBy == "shiro":
+			id = sideBID
+		case winnerID != "" && winnerID == sideAID:
+			id = sideBID
+		case winnerID != "" && winnerID == sideBID:
+			id = sideAID
+		}
+		st, ok := statuses[id]
+		if id == "" || !ok {
+			return nil
+		}
+		return &state.WithdrawnStatusAnnotation{Eligible: st.Eligible, MatchID: st.MatchID, Reinstateable: st.Reinstateable}
+	}
 	for i := range poolMatches {
 		m := &poolMatches[i]
 		m.IneligibleSides = stamp(m.Status, m.ID, m.SideAID, m.SideBID)
+		m.WithdrawnStatus = withdrawn(m.Status, m.Decision, m.DecisionBy, m.WinnerID, m.SideAID, m.SideBID)
 	}
 	if bracket == nil {
 		return
 	}
+	stampBracket := func(bm *state.BracketMatch) {
+		bm.IneligibleSides = stamp(bm.Status, bm.ID, bm.SideAID, bm.SideBID)
+		bm.WithdrawnStatus = withdrawn(bm.Status, bm.Decision, bm.DecisionBy, bm.WinnerID, bm.SideAID, bm.SideBID)
+	}
 	for ri := range bracket.Rounds {
 		for mi := range bracket.Rounds[ri] {
-			bm := &bracket.Rounds[ri][mi]
-			bm.IneligibleSides = stamp(bm.Status, bm.ID, bm.SideAID, bm.SideBID)
+			stampBracket(&bracket.Rounds[ri][mi])
 		}
 	}
 	if bm := bracket.ThirdPlaceMatch; bm != nil {
-		bm.IneligibleSides = stamp(bm.Status, bm.ID, bm.SideAID, bm.SideBID)
+		stampBracket(bm)
 	}
+}
+
+// stampWithdrawnStatus gives a match write's result, before it is pushed, the
+// withdrawnStatus stamp the viewer payloads carry (annotateEligibility). A
+// host applies the push at once and refetches a moment later, so without it a
+// score editor left on a withdrawal it had just recorded worded the clear from
+// no stamp until the refetch landed. Only a completed withdrawal or default
+// win carries the stamp, so only those pay for the status read.
+func stampWithdrawnStatus(store CompetitionStore, compID string, r *state.MatchResult) {
+	if r.Status != state.MatchStatusCompleted || !domain.IsDefaultWinDecisionStr(r.Decision) {
+		return
+	}
+	statuses, err := store.LoadCompetitorStatus(compID)
+	if err != nil {
+		log.Printf("mobileapp: push %s/%s: load competitor status: %v", compID, r.ID, err)
+		return
+	}
+	one := []state.MatchResult{*r}
+	annotateEligibility(one, nil, statuses)
+	r.WithdrawnStatus = one[0].WithdrawnStatus
 }
 
 // anyNumberedBoutHasEncho reports whether any NUMBERED sub-result (a real
@@ -873,6 +932,9 @@ func RegisterMatchHandlers(r *gin.RouterGroup, eng *engine.Engine, store Competi
 		}
 
 		if len(successful) > 0 {
+			for i := range successful {
+				stampWithdrawnStatus(store, id, &successful[i])
+			}
 			hub.Broadcast(EventMatchUpdated, gin.H{
 				"competitionId": id,
 				"results":       matchesForBroadcast(successful),
@@ -1168,8 +1230,8 @@ func RegisterMatchHandlers(r *gin.RouterGroup, eng *engine.Engine, store Competi
 	})
 
 	// POST /competitions/:id/matches/:mid/revert-to-queue
-	// Reverts a running match back to the scheduled (queued) state, discarding
-	// any partial score so the operator can restart the correct bout. Idempotent
+	// Reverts a running match back to the scheduled (queued) state, keeping its
+	// score: starting it again carries on from it (bc-sbq). Idempotent
 	// for already-scheduled matches. Completed matches return 409 (use the score
 	// editor to correct a recorded result); an unknown match id returns 404.
 	//
@@ -1234,7 +1296,7 @@ func RegisterMatchHandlers(r *gin.RouterGroup, eng *engine.Engine, store Competi
 	// 409 downstream_knockout_played (the same wire contract as a knockout
 	// correction's, respondIfDownstreamKnockoutPlayed): the knockout match
 	// this one fed already has a result of its own, and confirming reopens it
-	// too, to be fought again. The response then names every match that was
+	// too, its winner cleared and its points kept. The response then names every match that was
 	// reopened that way ({"reopenedMatches": [{id, number, label}]}).
 	//
 	// The reason is OPTIONAL, and an absent body is equally
@@ -1375,8 +1437,8 @@ func RegisterMatchHandlers(r *gin.RouterGroup, eng *engine.Engine, store Competi
 	// between the two steps the old two-call client flow made. The blocker may
 	// be in the same competition (competitions run across several courts, so a
 	// sibling match can hold this one's court) or in a different one — the body
-	// carries whichever competition owns it. Destructive (the blocker loses any
-	// partial score), so it is main-password-gated in self-run mode via the
+	// carries whichever competition owns it. It reopens a recorded result (the
+	// blocker keeps its score), so it is main-password-gated in self-run mode via the
 	// central allowlist, the same class as reopen/override-winner.
 	// Body: {blockerCompId, blockerMatchId, reason?, forceDownstreamReopen?} —
 	// reason and forceDownstreamReopen optional, exactly like reopen (an
@@ -2327,6 +2389,10 @@ type scoreRequestBody struct {
 	// (engine.requalifyAfterPoolWrite): confirmed, those knockout matches are
 	// reopened and the new qualifier is seated.
 	ForceDownstreamReopen bool `json:"forceDownstreamReopen"`
+	// StartOnly marks a write that only starts the match (the SPA's
+	// startPatch): the score the stored match holds is kept rather than
+	// replaced by the payload's empty one (engine.ForceOptions.StartOnly).
+	StartOnly bool `json:"startOnly"`
 }
 
 // scoreResponseWithReopened is the score write's reply: the stored
@@ -2403,6 +2469,13 @@ func registerScoreHandler(r *gin.RouterGroup, eng ScoringEngine, store Competiti
 			return
 		}
 		req := body.ScoreRequest
+		// startOnly keeps the stored score in place of the payload's, after
+		// the payload is validated, so on anything but a start the verdict
+		// would rest on a scoreline nothing checked it against.
+		if body.StartOnly && req.Status != state.MatchStatusRunning {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "startOnly is only for a write that starts the match (status running)"})
+			return
+		}
 		// Kachinuki exception (mp-gmcg): a tied kachinuki pairing may be
 		// fought on in overtime on that same bout, in ANY phase — whether the
 		// final pairing must produce a result is operator discretion
@@ -2674,8 +2747,9 @@ func registerScoreHandler(r *gin.RouterGroup, eng ScoringEngine, store Competiti
 					}
 				}
 				engStatus, engErr = eng.RecordMatchResultWithIneligibilityTx(stx, id, mid, result, engine.ForceOptions{
-					Force:    body.ForceDownstreamReopen,
-					Reopened: &reopenedDownstream,
+					Force:     body.ForceDownstreamReopen,
+					Reopened:  &reopenedDownstream,
+					StartOnly: body.StartOnly,
 				})
 				// engErr is a normal application-level signal (AlreadyIneligible
 				// → 409, validation/not-found → other codes); we surface it
@@ -2874,6 +2948,7 @@ func registerScoreHandler(r *gin.RouterGroup, eng ScoringEngine, store Competiti
 			runningRevStore.Delete(matchKey)
 		}
 		if coalescer.Allow(matchKey, isRunning) {
+			stampWithdrawnStatus(store, id, result)
 			hub.Broadcast(EventMatchUpdated, gin.H{
 				"competitionId": id,
 				"matchId":       mid,

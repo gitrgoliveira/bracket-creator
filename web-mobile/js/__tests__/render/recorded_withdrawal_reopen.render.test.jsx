@@ -17,7 +17,7 @@ import { describe, it, expect, vi, beforeAll, afterAll, beforeEach } from 'vites
 import { installWindowStubs } from '../helpers/stub_globals.js';
 import { readStylesheet, cssBlock } from '../helpers/source.js';
 import { DOWNSTREAM_KNOCKOUT_REOPEN_CANCELLED } from '../../write_result.jsx';
-import { withdrawalLabel } from '../../admin_scoring_shared.jsx';
+import { withdrawalLabel, LATER_MATCHES_HOLD_MS } from '../../admin_scoring_shared.jsx';
 
 const STUBBED_GLOBALS = {
   isHikiwake: () => false,
@@ -189,7 +189,7 @@ describe.each([
     expect(screen.queryByTestId('recorded-withdrawal')).toBeNull();
     expect(onClose).not.toHaveBeenCalled();
     expect(screen.getByTestId('withdrawal-reopen-notice').textContent)
-      .toBe('Match 2 was reopened: it must be fought and scored again.');
+      .toBe('Match 2 was reopened with its points kept: check them, then finish it again.');
 
     // A new result on the same match (here another kiken) ends that reopen:
     // the notice described it, not the match now in front of the operator.
@@ -218,7 +218,7 @@ describe.each([
     await mount(fixture());
     await clearWithdrawal();
     await waitFor(() => expect(screen.getByTestId('withdrawal-reopen-conflict')).toBeTruthy());
-    expect(screen.getByTestId('withdrawal-reopen-conflict-warning').textContent).toMatch(/clears any score already entered/);
+    expect(screen.getByTestId('withdrawal-reopen-conflict-warning').textContent).toMatch(/keeps any score already entered/);
     await act(async () => { fireEvent.click(screen.getByTestId('withdrawal-reopen-requeue-button')); });
     expect(window.API.requeueBlockerAndReopen).toHaveBeenCalledWith(
       'comp1', fixture().id, 'comp1', 'm-blk', 'secret', { reason: '', force: false },
@@ -491,15 +491,16 @@ describe('Clear withdrawal and reopen: pool match feeding a knockout', () => {
 });
 
 // bc-rawm: withdrawalInForce widened to the match-level DEFAULT-WIN class
-// (RemainingMatchesPanel.award writes a whole-match `decision: "fusensho"`
-// for a scheduled match against a competitor already withdrawn elsewhere,
-// since fusenpai there is refused with 409 already_ineligible). Same
-// RecordedWithdrawal door as kiken/fusenpai, different copy: the Recorded
-// line names the winner, and the reopen button reads "Clear default win and
-// reopen".
+// (a match-level default win writes a whole-match `decision: "fusensho"` for
+// a match against a competitor already withdrawn elsewhere, recorded from
+// that match's own notice: BarredMatchNotice / the queue row's Record
+// default win). Same RecordedWithdrawal door as kiken/fusenpai, different
+// copy: the Recorded line names the winner, and the reopen button reads
+// "Clear default win and reopen".
 describe('a match-level fusensho default win (bc-rawm)', () => {
   // Yamada (aka) got the default win when Tanaka (shiro) withdrew elsewhere
-  // and RemainingMatchesPanel awarded this still-scheduled match to Yamada.
+  // and the opponent's default win was recorded for this still-scheduled
+  // match against Yamada.
   const defaultWin = (o = {}) => individualWithdrawal({
     decision: 'fusensho', decisionBy: 'shiro', decisionReason: 'auto: Tanaka withdrawn',
     ipponsA: ['○', '○'], ipponsB: [],
@@ -520,9 +521,9 @@ describe('a match-level fusensho default win (bc-rawm)', () => {
   // the barred competitor (Tanaka) is still barred -- almost always true,
   // since whatever barred them elsewhere is still on record -- so the
   // consequence says that plainly rather than promising "it goes back to
-  // running". No fetchCompetitorStatuses stub here (the untouched default
-  // API mock), so the reinstate clause is correctly absent: unknown reads
-  // as "not reinstateable", never as a promise that may not hold.
+  // running". No withdrawnStatus on the match here, so the reinstate clause
+  // is correctly absent: unknown reads as "not reinstateable", never as a
+  // promise that may not hold.
   it('the reopen consequence says the match queues again and the default win must be re-recorded', async () => {
     await mount(defaultWin());
     const text = screen.getByTestId('clear-withdrawal-consequence').textContent;
@@ -531,14 +532,10 @@ describe('a match-level fusensho default win (bc-rawm)', () => {
     expect(text).not.toContain('goes back to running');
   });
 
-  // bc-cse: when a live check finds Tanaka reinstateable (kiken-injury,
-  // still ineligible), the consequence ALSO offers that route.
+  // bc-cse: when the server's stamp says Tanaka is reinstateable
+  // (kiken-injury, still ineligible), the consequence ALSO offers that route.
   it('offers the reinstate route too when the barred competitor is still ineligible and reinstateable', async () => {
-    window.API.fetchCompetitorStatuses = vi.fn().mockResolvedValue([
-      { playerId: 'p2', eligible: false, reinstateable: true },
-    ]);
-    await mount(defaultWin());
-    await waitFor(() => expect(screen.getByTestId('clear-withdrawal-consequence').textContent).toContain('reinstate'));
+    await mount(defaultWin({ withdrawnStatus: { eligible: false, reinstateable: true } }));
     const text = screen.getByTestId('clear-withdrawal-consequence').textContent;
     expect(text).toBe('The match goes back to the queue. Tanaka is still withdrawn, so record the default win again, or reinstate Tanaka first to fight it.');
   });
@@ -546,11 +543,7 @@ describe('a match-level fusensho default win (bc-rawm)', () => {
   // Not reinstateable (e.g. kiken-voluntary) or no longer barred: no
   // reinstate clause either way -- only kiken-injury/still-ineligible earns it.
   it('does not offer reinstate when the status says it is not reinstateable', async () => {
-    window.API.fetchCompetitorStatuses = vi.fn().mockResolvedValue([
-      { playerId: 'p2', eligible: false, reinstateable: false },
-    ]);
-    await mount(defaultWin());
-    await waitFor(() => expect(window.API.fetchCompetitorStatuses).toHaveBeenCalled());
+    await mount(defaultWin({ withdrawnStatus: { eligible: false } }));
     const text = screen.getByTestId('clear-withdrawal-consequence').textContent;
     expect(text).not.toContain('reinstate');
   });
@@ -561,11 +554,7 @@ describe('a match-level fusensho default win (bc-rawm)', () => {
   // queue, and the copy says that instead of promising the queue and a
   // re-recorded default win.
   it('says the match reopens in progress when the barred competitor is eligible again', async () => {
-    window.API.fetchCompetitorStatuses = vi.fn().mockResolvedValue([
-      { playerId: 'p2', eligible: true },
-    ]);
-    await mount(defaultWin());
-    await waitFor(() => expect(window.API.fetchCompetitorStatuses).toHaveBeenCalled());
+    await mount(defaultWin({ withdrawnStatus: { eligible: true } }));
     const text = screen.getByTestId('clear-withdrawal-consequence').textContent;
     expect(text).toBe('Tanaka can fight again, so the match reopens in progress. Score it and finish it as usual.');
     expect(text).not.toContain('goes back to the queue');
@@ -593,11 +582,12 @@ describe('a match-level fusensho default win (bc-rawm)', () => {
 });
 
 // bc-cse: clearing THIS withdrawal never touches a LATER match the same
-// withdrawn competitor's default win (RemainingMatchesPanel.award) already
-// closed -- that match keeps its own recorded result. The consequence lists it
+// withdrawn competitor's default win already closed (recorded from that
+// match's own notice, BarredMatchNotice / the queue row's Record default
+// win) -- that match keeps its own recorded result. The consequence lists it
 // as a consequence (a warning, not a lock, per the 2026-09-24 ruling): the
 // operator can still reopen it separately to fight it. Fetched the same way
-// RemainingMatchesPanel finds Tanaka/Kyoto's other matches.
+// (fetch + compMatchesForCompetition) that finds Tanaka/Kyoto's other matches.
 describe('Clear withdrawal and reopen: a later default win from the same withdrawal (bc-cse)', () => {
   it('lists a later default win as a consequence, named by its scores-list label plus the pairing', async () => {
     const laterMatch = {
@@ -651,5 +641,81 @@ describe('Clear withdrawal and reopen: a later default win from the same withdra
     await mount(teamWithdrawal());
     await waitFor(() => expect(screen.getByTestId('clear-withdrawal-consequence')).toBeTruthy());
     expect(screen.queryByTestId('clear-withdrawal-default-win-consequences')).toBeNull();
+  });
+});
+
+// bc-kfup: a fusenpai recorded on a remaining match of a competitor who had
+// already withdrawn elsewhere chains onto that bar and records no status of
+// its own. Clearing it restores nobody, so the server sends the match back
+// to the queue while the bar holds (engine.reopenTargetStatus), the same as
+// a fusensho. The editor tells the two fusenpai apart by the competitor's
+// status, which the server stamps on the match (withdrawnStatus): an
+// ordinary fusenpai's names THIS match.
+describe('clearing a fusenpai chained onto an earlier withdrawal (bc-kfup)', () => {
+  it('says the match goes back to the queue, not that the competitor can compete again', async () => {
+    await mount(individualWithdrawal({ withdrawnStatus: { eligible: false, matchId: 'Pool A-0' } }));
+    await waitFor(() => expect(screen.getByTestId('clear-withdrawal-reopen').textContent).toBe('Clear default win'));
+    const text = screen.getByTestId('clear-withdrawal-consequence').textContent;
+    expect(text).toBe('The match goes back to the queue. Tanaka is still withdrawn, so record the default win again.');
+    expect(text).not.toContain('can compete again');
+  });
+
+  it('keeps the ordinary copy for a fusenpai that barred the competitor itself', async () => {
+    await mount(individualWithdrawal({ withdrawnStatus: { eligible: false, matchId: 'm-r1-0' } }));
+    expect(screen.getByTestId('clear-withdrawal-reopen').textContent).toBe('Clear withdrawal and reopen');
+    expect(screen.getByTestId('clear-withdrawal-consequence').textContent).toContain('can compete again');
+  });
+
+  // Review finding: a kiken whose competitor was reinstated and then withdrew
+  // again elsewhere no longer names this match, so its reopen also goes to
+  // the queue. The copy must not promise "back to running".
+  it('a kiken whose competitor is barred by another match also says the match goes back to the queue', async () => {
+    await mount(individualWithdrawal({ decision: 'kiken-voluntary', withdrawnStatus: { eligible: false, matchId: 'Pool A-5' } }));
+    await waitFor(() => expect(screen.getByTestId('clear-withdrawal-reopen').textContent).toBe('Clear withdrawal'));
+    expect(screen.getByTestId('clear-withdrawal-consequence').textContent).toContain('goes back to the queue');
+  });
+
+  // The later-matches fetch is best-effort with no timeout. A request that
+  // hangs must not keep the correction disabled: the hold is capped.
+  it('releases the clear after a short cap when the later-matches request hangs', async () => {
+    window.API.fetchCompetitionDetails = vi.fn().mockImplementation(() => new Promise(() => {}));
+    await mount(individualWithdrawal());
+    expect(screen.getByTestId('clear-withdrawal-reopen').disabled).toBe(true);
+    await waitFor(() => expect(screen.getByTestId('clear-withdrawal-reopen').disabled).toBe(false),
+      { timeout: LATER_MATCHES_HOLD_MS + 1500 });
+  });
+
+  it("lists a chained fusenpai among the original withdrawal's later default wins", async () => {
+    window.API.fetchCompetitionDetails = vi.fn().mockResolvedValue({ config: {} });
+    window.compMatchesForCompetition = () => [{
+      id: 'Pool A-3', compId: 'comp1', status: 'completed', phase: 'pool', poolName: 'Pool A', matchNumber: 3,
+      decision: 'fusenpai', decisionBy: 'aka',
+      sideA: { id: 'p2', name: 'Tanaka' }, sideB: { id: 'p3', name: 'Suzuki' },
+    }];
+    try {
+      await mount(individualWithdrawal({ decision: 'kiken-voluntary' }));
+      await waitFor(() => expect(screen.getByTestId('clear-withdrawal-default-win-Pool A-3')).toBeTruthy());
+      expect(screen.getByTestId('clear-withdrawal-default-win-Pool A-3').textContent).toContain('keeps its default win');
+      // Clearing this kiken moves the bar onto that no-show (the server's
+      // standingWithdrawalOf), so the match goes to the queue, not the court.
+      expect(screen.getByTestId('clear-withdrawal-consequence').textContent).toBe(
+        'The match goes back to the queue. Tanaka also did not appear for a later match, listed below, so they are still withdrawn because of it.');
+      expect(screen.getByTestId('clear-withdrawal-reopen').textContent).toBe('Clear withdrawal');
+    } finally {
+      window.compMatchesForCompetition = STUBBED_GLOBALS.compMatchesForCompetition;
+    }
+  });
+
+  // A chained no-show in the later list changes the copy, so the one-tap
+  // clear waits for that list rather than acting under the wrong promise.
+  it('holds the clear until the later matches are in', async () => {
+    // The editor fetches the competition from more than one place; release
+    // every call.
+    const pending = [];
+    window.API.fetchCompetitionDetails = vi.fn().mockImplementation(() => new Promise((r) => { pending.push(r); }));
+    await mount(individualWithdrawal({ decision: 'kiken-voluntary' }));
+    expect(screen.getByTestId('clear-withdrawal-reopen').disabled).toBe(true);
+    await act(async () => { pending.forEach((r) => r({ config: {} })); });
+    await waitFor(() => expect(screen.getByTestId('clear-withdrawal-reopen').disabled).toBe(false));
   });
 });

@@ -100,7 +100,7 @@ describe('match_scoreboard: teamIVPW', () => {
     const el = TeamScoreboard({
       subResults: [{ position: 1, sideA: 'Sato', sideB: 'Ito', winner: 'Ito', ipponsA: [], ipponsB: ['M'] }],
       teamResult: { shiroIV: 2, akaIV: 0, shiroPW: 5, akaPW: 1 },
-      matchSideA: 'Team A', matchSideB: 'Team B', teamSize: 3,
+      matchSideA: 'Team A', matchSideB: 'Team B', teamSize: 3, status: 'completed',
     });
     const text = collectText(el);
     expect(text).toContain('2');
@@ -111,7 +111,7 @@ describe('match_scoreboard: teamIVPW', () => {
     const { TeamScoreboard } = await import('../match_scoreboard.jsx');
     const el = TeamScoreboard({
       subResults: [{ position: 1, sideA: 'Sato', sideB: 'Ito', winner: 'Ito', ipponsA: [], ipponsB: ['M'] }],
-      matchSideA: 'Team A', matchSideB: 'Team B', teamSize: 3,
+      matchSideA: 'Team A', matchSideB: 'Team B', teamSize: 3, status: 'completed',
     });
     expect(collectText(el)).toContain('1');
   });
@@ -363,7 +363,7 @@ describe('match_scoreboard components', () => {
     // centreMarks logic compares winner === sideA/sideB by key). Without the
     // guard, both shiro and aka would render a win mark.
     const match = {
-      sideA: 'Same Name', sideB: 'Same Name',
+      sideA: 'Same Name', sideB: 'Same Name', status: 'completed',
       ipponsA: [], ipponsB: [], decidedByHantei: true,
       winner: 'Same Name',
     };
@@ -385,7 +385,7 @@ describe('match_scoreboard components', () => {
     // would, giving [K][ ] vs [Ht][M] with Aka (sideA) the hantei winner.
     const match = {
       sideA: { id: 'p1', name: 'Aka' }, sideB: { id: 'p2', name: 'Shiro' },
-      ipponsA: ['M'], ipponsB: ['K'], decidedByHantei: true,
+      ipponsA: ['M'], ipponsB: ['K'], decidedByHantei: true, status: 'completed',
       winner: { id: 'p1', name: 'Aka' },
     };
     const tree = runtime.mount(IndividualScore, { match });
@@ -411,7 +411,7 @@ describe('match_scoreboard components', () => {
     const match = {
       sideA: { id: 'p1', name: 'Aka' }, sideB: { id: 'p2', name: 'Shiro' },
       ipponsA: ['M'], ipponsB: [], winner: { id: 'p1', name: 'Aka' },
-      encho: { periodCount: 1 },
+      encho: { periodCount: 1 }, status: 'completed',
     };
     const tree = runtime.mount(IndividualScore, { match });
     expect(centreText(tree)).toBe('(E)');
@@ -425,7 +425,7 @@ describe('match_scoreboard components', () => {
     const match = {
       sideA: { id: 'p1', name: 'Aka' }, sideB: { id: 'p2', name: 'Shiro' },
       ipponsA: [], ipponsB: [], winner: { id: 'p1', name: 'Aka' },
-      decision: 'fusensho', encho: { periodCount: 1 },
+      decision: 'fusensho', encho: { periodCount: 1 }, status: 'completed',
     };
     // Collect the whole aka SLOT GROUP: the sub-win-a testid sits on cell 0
     // only, which reads a single maru in both cases and would not distinguish.
@@ -444,7 +444,7 @@ describe('match_scoreboard components', () => {
     const match = {
       sideA: { id: 'p1', name: 'Aka' }, sideB: { id: 'p2', name: 'Shiro' },
       ipponsA: [], ipponsB: [], winner: { id: 'p1', name: 'Aka' },
-      decision: 'fusensho', encho: null,
+      decision: 'fusensho', encho: null, status: 'completed',
     };
     const tree = runtime.mount(IndividualScore, { match });
     expect(collectText(findInTree(tree, n =>
@@ -505,7 +505,7 @@ describe('match_scoreboard components', () => {
     // overwrite a recorded point and never write the shared centre.
     const match = {
       sideA: { id: 'p1', name: 'Aka' }, sideB: { id: 'p2', name: 'Shiro' },
-      ipponsA: ['M', 'K'], ipponsB: ['M', 'K'], decidedByHantei: true,
+      ipponsA: ['M', 'K'], ipponsB: ['M', 'K'], decidedByHantei: true, status: 'completed',
       winner: { id: 'p1', name: 'Aka' },
     };
     const tree = runtime.mount(IndividualScore, { match });
@@ -524,7 +524,7 @@ describe('match_scoreboard components', () => {
     // winning side's slot gets the Ht mark.
     const match = {
       sideA: { id: 'p1', name: 'Same Name' }, sideB: { id: 'p2', name: 'Same Name' },
-      ipponsA: [], ipponsB: [], decidedByHantei: true,
+      ipponsA: [], ipponsB: [], decidedByHantei: true, status: 'completed',
       winner: { id: 'p1', name: 'Same Name' },
     };
     const tree = runtime.mount(IndividualScore, { match });
@@ -535,7 +535,7 @@ describe('match_scoreboard components', () => {
   });
 
   it('IndividualScore renders the ippon-letter slots (§263)', () => {
-    const tree = runtime.mount(IndividualScore, { match: { ipponsB: ['M'], ipponsA: ['K', 'M'] } });
+    const tree = runtime.mount(IndividualScore, { match: { status: 'completed', ipponsB: ['M'], ipponsA: ['K', 'M'] } });
     const text = collectText(tree);
     expect(findInTree(tree, n => n?.props?.['data-testid'] === 'individual-score')).toBeTruthy();
     expect(text).toContain('M'); expect(text).toContain('K');
@@ -545,7 +545,7 @@ describe('match_scoreboard components', () => {
   // marks are a NUMBER; every other type renders ippon letters (tested above).
   // flagsA=sideA=Aka, flagsB=sideB=Shiro (same convention as engiFlagScore).
   it('IndividualScore renders the engi flag COUNT per side, not ippon letters', () => {
-    const tree = runtime.mount(IndividualScore, { match: { flagsA: 3, flagsB: 2, ipponsA: [], ipponsB: [] } });
+    const tree = runtime.mount(IndividualScore, { match: { status: 'completed', flagsA: 3, flagsB: 2, ipponsA: [], ipponsB: [] } });
     const text = collectText(tree);
     expect(findInTree(tree, n => n?.props?.['data-testid'] === 'sub-flags-b')).toBeTruthy();
     expect(findInTree(tree, n => n?.props?.['data-testid'] === 'sub-flags-a')).toBeTruthy();
@@ -553,14 +553,14 @@ describe('match_scoreboard components', () => {
   });
 
   it('IndividualScore marks the Aka slot as winner when flagsA > flagsB', () => {
-    const tree = runtime.mount(IndividualScore, { match: { flagsA: 4, flagsB: 1, ipponsA: [], ipponsB: [] } });
+    const tree = runtime.mount(IndividualScore, { match: { status: 'completed', flagsA: 4, flagsB: 1, ipponsA: [], ipponsB: [] } });
     const akaSlots = findInTree(tree, n =>
       typeof n?.props?.className === 'string' && n.props.className.includes('msb-slots--aka'));
     expect(akaSlots?.props?.className).toContain('msb-slots--win');
   });
 
   it('IndividualScore marks the Shiro slot as winner when flagsB > flagsA', () => {
-    const tree = runtime.mount(IndividualScore, { match: { flagsA: 0, flagsB: 5, ipponsA: [], ipponsB: [] } });
+    const tree = runtime.mount(IndividualScore, { match: { status: 'completed', flagsA: 0, flagsB: 5, ipponsA: [], ipponsB: [] } });
     const shiroSlots = findInTree(tree, n =>
       typeof n?.props?.className === 'string' && /\bmsb-slots\b/.test(n.props.className) && !n.props.className.includes('--aka'));
     expect(shiroSlots?.props?.className).toContain('msb-slots--win');
@@ -615,7 +615,7 @@ describe('match_scoreboard components', () => {
       { position: 1, ipponsB: ['M'], ipponsA: [] },
       { position: 2, ipponsB: [], ipponsA: ['D'] },
     ];
-    const tree = runtime.mount(TeamScoreboard, { subResults, lineupA: null, lineupB: null, teamSize: 5, showDH: false });
+    const tree = runtime.mount(TeamScoreboard, { subResults, lineupA: null, lineupB: null, teamSize: 5, showDH: false, status: 'running' });
     expect(findInTree(tree, n => n?.props?.['data-testid'] === 'team-summary')).toBeTruthy();
     const text = collectText(tree);
     expect(text).toContain('IV'); expect(text).toContain('PW');
@@ -629,7 +629,7 @@ describe('match_scoreboard components', () => {
       { position: 1, ipponsB: ['M'], ipponsA: [] },
       { position: 2, ipponsB: [], ipponsA: ['D'] },
     ];
-    const tree = runtime.mount(TeamScoreboard, { subResults, lineupA: null, lineupB: null, teamSize: 5, showDH: false, isRunning: true });
+    const tree = runtime.mount(TeamScoreboard, { subResults, lineupA: null, lineupB: null, teamSize: 5, showDH: false, isRunning: true, status: 'running' });
     expect(boutRows(tree).map(r => r.state)).toEqual(['done', 'done', 'now', 'queued', 'queued']);
   });
 
@@ -641,14 +641,14 @@ describe('match_scoreboard components', () => {
       { position: 2, ipponsB: [], ipponsA: ['D'] },
       { position: 3, ipponsB: ['K'], ipponsA: [] },
     ];
-    const tree = runtime.mount(TeamScoreboard, { subResults, lineupA: null, lineupB: null, teamSize: 5, showDH: false /* not running */ });
+    const tree = runtime.mount(TeamScoreboard, { subResults, lineupA: null, lineupB: null, teamSize: 5, showDH: false, status: 'completed' /* not running */ });
     const states = boutRows(tree).map(r => r.state);
     expect(states).toEqual(['done', 'done', 'done', 'queued', 'queued']);
     expect(states).not.toContain('now');
   });
 
   it('TeamScoreboard leaves an up-next board (no scored bouts) all queued: no "now"', () => {
-    const tree = runtime.mount(TeamScoreboard, { subResults: [], lineupA: null, lineupB: null, teamSize: 5, showDH: false });
+    const tree = runtime.mount(TeamScoreboard, { subResults: [], lineupA: null, lineupB: null, teamSize: 5, showDH: false, status: 'scheduled' });
     const states = boutRows(tree).map(r => r.state);
     expect(states.length).toBe(5);
     expect(states.every(s => s === 'queued')).toBe(true);
@@ -657,7 +657,7 @@ describe('match_scoreboard components', () => {
   it('TeamScoreboard highlights bout 1 as "now" for a RUNNING 0-0 encounter (isRunning)', () => {
     // A running team match with no bouts scored yet must still mark the first
     // bout live, so it doesn't look identical to an up-next board.
-    const tree = runtime.mount(TeamScoreboard, { subResults: [], lineupA: null, lineupB: null, teamSize: 5, showDH: false, isRunning: true });
+    const tree = runtime.mount(TeamScoreboard, { subResults: [], lineupA: null, lineupB: null, teamSize: 5, showDH: false, isRunning: true, status: 'running' });
     expect(boutRows(tree).map(r => r.state)).toEqual(['now', 'queued', 'queued', 'queued', 'queued']);
   });
 
@@ -666,7 +666,7 @@ describe('match_scoreboard components', () => {
       { position: 1, ipponsB: ['M'], ipponsA: ['M'] },   // 1-1 → IV 0-0, PW 1-1 → tied
       { position: -1, ipponsB: ['M'], ipponsA: [] },
     ];
-    const tree = runtime.mount(TeamScoreboard, { subResults, lineupA: null, lineupB: null, teamSize: 5, showDH: true });
+    const tree = runtime.mount(TeamScoreboard, { subResults, lineupA: null, lineupB: null, teamSize: 5, showDH: true, status: 'completed' });
     // The rep bout carries its own (DH) centre mark, so the old text banner
     // was removed as redundant.
     expect(boutRows(tree).some(r => r.isDH)).toBe(true);
@@ -679,7 +679,7 @@ describe('match_scoreboard components', () => {
       { position: 2, ipponsB: ['M'], ipponsA: [] },        // shiro wins → IV 1-0 (NOT tied)
       { position: -1, sideA: 'Aka T', sideB: 'Shiro T', winner: 'Aka T' }, // stale/invalid DH
     ];
-    const tree = runtime.mount(TeamScoreboard, { subResults, lineupA: null, lineupB: null, teamSize: 5, showDH: true });
+    const tree = runtime.mount(TeamScoreboard, { subResults, lineupA: null, lineupB: null, teamSize: 5, showDH: true, status: 'completed' });
     expect(boutRows(tree).some(r => r.isDH)).toBe(false);
     expect(collectText(tree)).not.toContain('DAIHYOSEN');
   });
@@ -760,7 +760,7 @@ describe('match_scoreboard components', () => {
     ];
     const tree = runtime.mount(TeamScoreboard, {
       subResults, lineupA: null, lineupB: null, teamSize: 3, showDH: false,
-      matchSideA: 'Kyoto', matchSideB: 'Osaka',
+      matchSideA: 'Kyoto', matchSideB: 'Osaka', status: 'completed',
     });
     // Guard the fixture: the encounter really is tied, so an aggregate-level
     // mark would have something to describe if the rule allowed one.
@@ -822,7 +822,7 @@ describe('match_scoreboard components', () => {
       { position: -1, winner: 'White Team', decidedByHantei: true, ipponsA: [], ipponsB: [] },
     ];
     const tree = runtime.mount(TeamScoreboard, {
-      subResults, lineupA: null, lineupB: null, teamSize: 5, showDH: true,
+      subResults, lineupA: null, lineupB: null, teamSize: 5, showDH: true, status: 'completed',
       shiroName: 'White Team', akaName: 'Red Team',
     });
     // Find the DH bout row: its sub must carry teamB/teamA.

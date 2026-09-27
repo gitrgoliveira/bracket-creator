@@ -25,7 +25,7 @@ else
 endif
 
 # Define phony targets
-.PHONY: default help clean local/deps hooks/install go/fmt go/generate go/test go/build go/lint go/sec go/sec-tests go/vuln go/security js/deps js/lint js/sec js/outdated js/security js/check-imports js/validate examples docker/build docker/run pre-commit docs/deps docs/serve docs/open docs/build docs/linkcheck docs/prose docs/clean docs/screenshots docs/videos docs/media run run-mobile esbuild-jsx goreleaser/test release version
+.PHONY: default help clean local/deps hooks/install go/fmt go/generate go/test go/build go/lint go/sec go/sec-tests go/vuln go/security js/deps js/lint js/sec js/outdated js/security js/check-imports js/validate examples docker/build docker/run pre-commit docs/deps docs/serve docs/open docs/build docs/linkcheck docs/prose docs/clean docs/screenshots docs/videos docs/media e2e e2e/deps run run-mobile esbuild-jsx goreleaser/test release version
 
 default: help ## Show help information (default)
 
@@ -370,6 +370,32 @@ docs/media: go/build $(SHOTS_BROWSER_STAMP) ## Regenerate every captured screens
 	@# One run with no KIND, rather than depending on the two targets above:
 	@# those would start node and a browser twice over two disjoint halves.
 	@node $(SHOTS_DIR)/run.mjs $(if $(KIND),'KIND=$(KIND)',) $(SHOTS_ARGS)
+
+# Local e2e journeys (scripts/e2e, see its README.md). Like the capture harness
+# above, Playwright lives in its own package.json rather than web-mobile's, and
+# both pin the same Playwright release so they share one downloaded Chromium
+# under ~/.cache/ms-playwright. Deliberately NOT part of go/test and not run in
+# CI: a journey drives the real app through a browser, setup wizard and all.
+E2E_DIR := scripts/e2e
+E2E_DEPS_STAMP := $(E2E_DIR)/node_modules/.package-lock.json
+E2E_BROWSER_STAMP := $(E2E_DIR)/node_modules/.chromium-installed
+
+$(E2E_DEPS_STAMP): $(E2E_DIR)/package.json $(E2E_DIR)/package-lock.json
+	@echo "Installing the e2e harness dependencies..."
+	@npm --prefix $(E2E_DIR) ci --no-audit --no-fund
+	@touch $@
+
+$(E2E_BROWSER_STAMP): $(E2E_DEPS_STAMP)
+	@echo "Downloading the e2e browser..."
+	@cd $(E2E_DIR) && npx playwright install chromium
+	@touch $@
+
+e2e/deps: $(E2E_BROWSER_STAMP) ## Install the e2e harness and its Chromium (once per worktree)
+
+# E2E_ARGS is handed to `playwright test` as is: a spec path, --grep, --headed,
+# --project, ... e.g. make e2e E2E_ARGS='journeys/smoke.spec.mjs --headed'
+e2e: go/build $(E2E_BROWSER_STAMP) ## Run the local e2e journeys (E2E_ARGS= passes a spec, --grep or --headed to playwright)
+	@cd $(E2E_DIR) && npx playwright test $(E2E_ARGS)
 
 run: go/build ## Run the application locally
 	@echo "Running $(BIN_NAME)..."

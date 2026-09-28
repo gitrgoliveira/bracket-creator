@@ -27,7 +27,7 @@ import (
 // reopen/correction audit gate fails CLOSED when the pre-write snapshot read
 // errors (mp-gmcg). A best-effort read that swallowed the error and let
 // the write finalize on an assumed-false ReopenPending, silently dropping the
-// mandatory audit reason; the gate now mirrors checkFinalizedUnderTx and
+// mandatory audit reason; the gate now mirrors checkSelfReportedUnderTx and
 // surfaces the error so the transaction aborts (HTTP 500) instead. A directory
 // in place of pool-matches.csv is the deterministic stand-in for the transient
 // single-read fault: os.Open on a dir succeeds but csv.ReadAll on it does not,

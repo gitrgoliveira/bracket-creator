@@ -197,7 +197,8 @@ func (e *Engine) withBracketMatch(compId, matchId string, mutate func(*state.Bra
 // own, carries a decision hantei can coexist with, and is still tied (an
 // untied row cannot carry a hantei). An EXPLICIT false and a named winner
 // both pass through untouched. The preserveLoserScore precedent, one bout
-// deeper.
+// deeper. The silence test itself is KeepsStoredDaihyosenVerdict, which the
+// self-run guard shares.
 //
 // NIL vs EMPTY on IpponsA/IpponsB is the other half of "verdict-silent":
 // scoreline-silence is judged on whether the writer sent an ippon array AT
@@ -369,6 +370,85 @@ func logStrippedHantei(result *state.MatchResult, why string) {
 		result.ID, why, result.Winner, result.Status, result.Decision)
 }
 
+// KeepsStoredDaihyosenVerdict reports whether a write whose representative
+// bout row is in keeps the hantei verdict of prior, the stored row (nil when
+// there is none): prior carries the verdict and the winner it names, and in
+// says nothing about either, so preserveSubHantei carries prior's verdict and
+// scoreline onto it. It is the one owner of that silence test. The self-run
+// guard asks it too (mobileapp.SelfRunChangesRepBoutHantei), so a
+// participant's write that would erase an organiser's verdict is told apart
+// from one that keeps it by the same test the write itself applies.
+func KeepsStoredDaihyosenVerdict(prior, in *state.SubMatchResult) bool {
+	if prior == nil || !prior.HanteiDecided() || prior.Winner == "" {
+		return false
+	}
+	if in.Winner != "" || in.DecidedByHantei != nil ||
+		domain.ContainsHantei(in.IpponsA) || domain.ContainsHantei(in.IpponsB) {
+		return false // the writer addressed the verdict: its word stands
+	}
+	// The SAME predicate validateSubBout enforces, shared via domain so the
+	// two cannot drift (the restore runs after validation and is never
+	// re-checked).
+	if !domain.IsSubBoutHanteiCompatibleDecisionStr(in.Decision) {
+		return false
+	}
+	// Side-guarded, like the preserveLoserScore precedent: IpponsA/IpponsB
+	// are POSITIONAL, so copying them onto a row whose sides are named in
+	// the opposite order mirrors the letters and credits each side with the
+	// other's points. reconcileSides normalises at MATCH level only, never
+	// per sub-bout, so a drifted or hand-built payload can reach here
+	// swapped. An unnamed incoming row (the common stale-snapshot shape)
+	// inherits the names along with the scoreline.
+	//
+	// ABANDON on a mismatch rather than skipping only the copy. Winner is a
+	// NAME, so it needs no positional guard of its own - but it names one of
+	// the STORED pair, and stamping it onto a row naming a different pair
+	// attributes the verdict to neither competitor present. The tie check in
+	// preserveSubHantei cannot catch that: with the copy skipped the incoming
+	// row is still empty, so it compares 0 against 0 and passes vacuously.
+	// deriveDaihyosenWinner then matches no side and leaves the encounter
+	// with a hantei-decided rep bout and no winner at all, which a bracket
+	// completion rejects and pool standings score as a draw for both teams.
+	if (in.SideA != "" || in.SideB != "") &&
+		(in.SideA != prior.SideA || in.SideB != prior.SideB) {
+		return false
+	}
+	// A row that supplies NEITHER ippon array said nothing about the
+	// SCORELINE either, so the stored one travels with the verdict it
+	// rests on. Without this the verdict lands on an all-empty row and the
+	// struck ippons, the outstanding fouls, the overtime marker and the
+	// sub-decision are all lost: a 1-1 hantei would persist as 0-0, which
+	// moves the `Ht` to the other slot (resultSlot fills outside-to-inside)
+	// and drops the `(E)`.
+	//
+	// A row that DOES supply an ippon array — even one that is EMPTY, and
+	// even a stale second-device replay whose own scoreline happens to
+	// still read tied, e.g. a markless 1-1 offline-queue replay — has
+	// spoken for the scoreline itself, and the verdict must not travel
+	// onto it: the mark lives IN the copied ippons, so stamping the winner
+	// without also copying the mark-carrying scoreline would split the two
+	// permanently. The referees' record would be gone from disk while its
+	// consequence, the winner, survived — and once this write lands as the
+	// new stored row, a future preserve has no mark left to re-attach.
+	// ABANDON here, before any field is touched, rather than letting the
+	// tie check decide: that check answers "is this scoreline still tied",
+	// not "did the writer supply it", so it cannot distinguish an own tied
+	// scoreline from the copied one.
+	//
+	// This is a NIL check, deliberately not a scoring-ippon COUNT: an
+	// explicit `[]` (the team editor's 0-0 daihyosen withdrawal - see
+	// preserveSubHantei's doc) and an omitted key (a genuinely silent stale
+	// snapshot) both count zero scoring ippons, but only the second one
+	// is silence. countScoringIppons cannot tell them apart; nil-ness
+	// can, because Go's JSON decoder only produces nil for an absent key
+	// (SubMatchResult.IpponsA/IpponsB carry no `omitempty`, so a present
+	// `[]` always decodes to a non-nil empty slice). A bug fixed here:
+	// treating an explicit 0-0 withdrawal as silence resurrected the
+	// verdict the operator had just cleared, because the copy would then
+	// run and copy the stored Ht mark straight back.
+	return in.IpponsA == nil && in.IpponsB == nil
+}
+
 func preserveSubHantei(stored, incoming []state.SubMatchResult) {
 	var prior *state.SubMatchResult
 	for i := range stored {
@@ -377,79 +457,12 @@ func preserveSubHantei(stored, incoming []state.SubMatchResult) {
 			break
 		}
 	}
-	if prior == nil || !prior.HanteiDecided() || prior.Winner == "" {
-		return
-	}
 	for i := range incoming {
 		in := &incoming[i]
 		if in.Position != state.DaihyosenSubPosition {
 			continue
 		}
-		if in.Winner != "" || in.DecidedByHantei != nil ||
-			domain.ContainsHantei(in.IpponsA) || domain.ContainsHantei(in.IpponsB) {
-			return // the writer addressed the verdict: its word stands
-		}
-		// The SAME predicate validateSubBout enforces, shared via domain so the
-		// two cannot drift (this runs after validation and is never re-checked).
-		if !domain.IsSubBoutHanteiCompatibleDecisionStr(in.Decision) {
-			return
-		}
-		// Side-guarded, like the preserveLoserScore precedent: IpponsA/IpponsB
-		// are POSITIONAL, so copying them onto a row whose sides are named in
-		// the opposite order mirrors the letters and credits each side with the
-		// other's points. reconcileSides normalises at MATCH level only, never
-		// per sub-bout, so a drifted or hand-built payload can reach here
-		// swapped. An unnamed incoming row (the common stale-snapshot shape)
-		// inherits the names along with the scoreline.
-		//
-		// ABANDON on a mismatch rather than skipping only the copy. Winner is a
-		// NAME, so it needs no positional guard of its own - but it names one of
-		// the STORED pair, and stamping it onto a row naming a different pair
-		// attributes the verdict to neither competitor present. The tie check
-		// below cannot catch that: with the copy skipped the incoming row is
-		// still empty, so it compares 0 against 0 and passes vacuously.
-		// deriveDaihyosenWinner then matches no side and leaves the encounter
-		// with a hantei-decided rep bout and no winner at all, which a bracket
-		// completion rejects and pool standings score as a draw for both teams.
-		if (in.SideA != "" || in.SideB != "") &&
-			(in.SideA != prior.SideA || in.SideB != prior.SideB) {
-			return
-		}
-		// A row that supplies NEITHER ippon array said nothing about the
-		// SCORELINE either, so the stored one travels with the verdict it
-		// rests on. Without this the verdict lands on an all-empty row and the
-		// struck ippons, the outstanding fouls, the overtime marker and the
-		// sub-decision are all lost: a 1-1 hantei would persist as 0-0, which
-		// moves the `Ht` to the other slot (resultSlot fills outside-to-inside)
-		// and drops the `(E)`.
-		//
-		// A row that DOES supply an ippon array — even one that is EMPTY, and
-		// even a stale second-device replay whose own scoreline happens to
-		// still read tied, e.g. a markless 1-1 offline-queue replay — has
-		// spoken for the scoreline itself, and the verdict must not travel
-		// onto it: the mark lives IN the copied ippons (see below), so
-		// stamping the winner without also copying the mark-carrying
-		// scoreline would split the two permanently. The referees' record
-		// would be gone from disk while its consequence, the winner, survived
-		// — and once this write lands as the new stored row, a future
-		// preserve has no mark left to re-attach. ABANDON here, before any
-		// field is touched, rather than letting the tie check below decide:
-		// that check answers "is this scoreline still tied", not "did the
-		// writer supply it", so it cannot distinguish an own tied scoreline
-		// from the copied one.
-		//
-		// This is a NIL check, deliberately not a scoring-ippon COUNT: an
-		// explicit `[]` (the team editor's 0-0 daihyosen withdrawal - see the
-		// function doc) and an omitted key (a genuinely silent stale
-		// snapshot) both count zero scoring ippons, but only the second one
-		// is silence. countScoringIppons cannot tell them apart; nil-ness
-		// can, because Go's JSON decoder only produces nil for an absent key
-		// (SubMatchResult.IpponsA/IpponsB carry no `omitempty`, so a present
-		// `[]` always decodes to a non-nil empty slice). A bug fixed here:
-		// treating an explicit 0-0 withdrawal as silence resurrected the
-		// verdict the operator had just cleared, because the copy branch
-		// below would then run and copy the stored Ht mark straight back.
-		if in.IpponsA != nil || in.IpponsB != nil {
+		if !KeepsStoredDaihyosenVerdict(prior, in) {
 			return
 		}
 		if in.SideA == "" && in.SideB == "" {
@@ -476,9 +489,9 @@ func preserveSubHantei(stored, incoming []state.SubMatchResult) {
 		// The verdict itself travelled with the copied scoreline: prior's
 		// ippons carry the domain.HanteiMark entry, so there is no flag left
 		// to raise — only the winner the mark names. Reached ONLY when the
-		// scoreline above was copied wholesale from prior (the early return
-		// two blocks up guards it): the mark and the winner it names move as
-		// one atomic unit, never separately.
+		// scoreline above was copied wholesale from prior (the silence test
+		// guards it): the mark and the winner it names move as one atomic
+		// unit, never separately.
 		in.Winner = prior.Winner
 		return
 	}

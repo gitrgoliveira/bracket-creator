@@ -312,7 +312,7 @@ func RegisterDaihyosenHandlers(r *gin.RouterGroup, eng DaihyosenEngine, store Da
 			updated    state.MatchResult
 			subOut     *state.SubMatchResult
 			notFound   bool
-			addErrCode string // "", "not_tied", "pool_match", "insufficient_eligibility", "engi_competition", "kachinuki_competition"
+			addErrCode string // "", "not_tied", "pool_match", "insufficient_eligibility", "daihyosen_exists", "engi_competition", "kachinuki_competition"
 			haveResult bool
 		)
 		txErr := store.WithTransaction(id, func(stx state.StoreTx) error {
@@ -348,6 +348,18 @@ func RegisterDaihyosenHandlers(r *gin.RouterGroup, eng DaihyosenEngine, store Da
 			if !found {
 				notFound = true
 				return nil
+			}
+			// One representative bout per encounter. The tie below counts no
+			// representative bout, so a second add would pass it, sit beside
+			// the first, put a finished match back to running and bury the
+			// verdict recorded on the first (bc-dhas: a self-run participant
+			// could reach it). The score sheet never offers it; two devices
+			// adding at once, or a crafted request, would.
+			for i := range match.SubResults {
+				if match.SubResults[i].Position == state.DaihyosenSubPosition {
+					addErrCode = "daihyosen_exists"
+					return nil
+				}
 			}
 
 			// credit is state.DefaultWinCreditSide's answer for THIS match
@@ -446,6 +458,9 @@ func RegisterDaihyosenHandlers(r *gin.RouterGroup, eng DaihyosenEngine, store Da
 			return
 		case "insufficient_eligibility":
 			c.JSON(http.StatusConflict, gin.H{"error": "insufficient_eligibility"})
+			return
+		case "daihyosen_exists":
+			c.JSON(http.StatusConflict, gin.H{"error": "daihyosen_exists"})
 			return
 		}
 		if !haveResult {

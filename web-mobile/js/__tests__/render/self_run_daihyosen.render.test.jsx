@@ -144,6 +144,18 @@ describe('a participant runs the representative bout of a tied knockout team mat
     expect(onClose, 'the finished match closes the editor').toHaveBeenCalled();
   });
 
+  // The server refuses a second representative bout (daihyosen_exists): one
+  // added on another device a moment before would otherwise sit beside it.
+  it('says so when the bout was added on another device first', async () => {
+    window.API.recordDaihyosen = vi.fn(async () => { throw new Error('daihyosen_exists'); });
+    await openEditor(knockoutTeamMatch());
+    await addRepBout();
+
+    expect(document.querySelector('[data-testid="team-editor-error"]').textContent)
+      .toContain('This match already has a representative bout');
+    expect(window.alert).not.toHaveBeenCalled();
+  });
+
   it('removes it right after a scoring tap: the save made first lands, then the remove', async () => {
     await openEditor(knockoutTeamMatch());
     await addRepBout();
@@ -169,18 +181,64 @@ describe('a participant runs the representative bout of a tied knockout team mat
   });
 });
 
+// The organiser's verdict on the representative bout, as the page receives it
+// once recorded (normalizeMatch derives decidedByHantei from the mark).
+const DECIDED = { ...REP_BOUT, winner: 'Kodokan', ipponsA: ['Ht'], decidedByHantei: true };
+// The same sentence the server refuses a participant's change with
+// (handlers_match.go repBoutHanteiRefusal).
+const DECIDED_NOTE = 'The judges decided this representative bout (hantei). Ask the tournament organizer to change it.';
+const enabledControls = (row) => [...row.querySelectorAll('button')].filter((b) => !b.disabled).map((b) => b.textContent);
+
 describe('a hantei stays the organiser\'s on the public score sheet (bc-dhas)', () => {
-  it('a hantei the organiser recorded on the representative bout shows, and the participant cannot undo it', async () => {
-    const recorded = { ...REP_BOUT, winner: 'Kodokan', ipponsA: ['Ht'], decidedByHantei: true };
-    await openEditor(knockoutTeamMatch([...FOUGHT, recorded]));
+  it('a representative bout the judges decided shows its verdict and offers nothing to change', async () => {
+    await openEditor(knockoutTeamMatch([...FOUGHT, DECIDED]));
 
     const chip = screen.getByTestId('team-daihyosen-ht-aka');
     expect(chip.disabled, 'the Ht mark is shown, not offered for undo').toBe(true);
-    expect(screen.queryByTestId('team-daihyosen-hantei-row')).toBeNull();
+    expect(enabledControls(repBoutRow()), 'no scoring control on the bout').toEqual([]);
+    expect(screen.getByTestId('team-daihyosen-decided-note').textContent).toBe(DECIDED_NOTE);
+    expect(screen.queryByTestId('team-daihyosen-remove')).toBeNull();
+    expect(screen.queryByText('Decide by hantei…')).toBeNull();
+    expect(screen.queryByTestId('team-daihyosen-hantei-cancel')).toBeNull();
+    expect(screen.queryByTestId('scoring-modal-encho-pill'), 'nor its overtime').toBeNull();
     await act(async () => { fireEvent.click(chip); });
     await act(async () => { vi.advanceTimersByTime(AUTOSAVE_DEBOUNCE_MS + 50); });
     await settle();
     expect(window.API.recordScore).not.toHaveBeenCalled();
+  });
+
+  // The server takes a participant's write only when it sends the recorded
+  // verdict back as it is (internal/mobileapp/self_run_daihyosen_test.go,
+  // "sending it back as it is", pins the same row shape).
+  it('takes up the organiser\'s verdict while the sheet is open, and a later tap elsewhere saves it back', async () => {
+    const tournament = { mode: 'self-run', competitions: [{ id: 'c1', squads: {} }] };
+    let view;
+    await act(async () => {
+      view = render(<MatchViewerModal match={knockoutTeamMatch([...FOUGHT, REP_BOUT])} onClose={vi.fn()} tournament={tournament} compId="c1" />);
+    });
+    await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Report result' })); });
+    await settle();
+    expect(screen.getByTestId('team-daihyosen-remove'), 'the unscored bout can still be removed').toBeTruthy();
+    expect(screen.getByTestId('scoring-modal-encho-pill'), 'and fought on in overtime').toBeTruthy();
+
+    // The organiser records the hantei on another device; the page's live row follows.
+    await act(async () => {
+      view.rerender(<MatchViewerModal match={knockoutTeamMatch([...FOUGHT, DECIDED])} onClose={vi.fn()} tournament={tournament} compId="c1" />);
+    });
+    await settle();
+    expect(screen.getByTestId('team-daihyosen-decided-note').textContent).toBe(DECIDED_NOTE);
+    expect(enabledControls(repBoutRow()), 'no scoring control on the bout').toEqual([]);
+    expect(screen.queryByTestId('scoring-modal-encho-pill'), 'nor its overtime').toBeNull();
+
+    const bout1 = [...document.querySelectorAll('.team-sub-match')][0];
+    await act(async () => { fireEvent.click(bout1.querySelector('[aria-label="Add a SHIRO foul"]')); });
+    await act(async () => { vi.advanceTimersByTime(AUTOSAVE_DEBOUNCE_MS + 50); });
+    await settle();
+    expect(window.API.recordScore).toHaveBeenCalledTimes(1);
+    expect(repBoutOf(lastWire()), 'the verdict goes back as it was recorded').toMatchObject({
+      sideA: 'Kodokan', sideB: 'Mumeishi', winner: 'Kodokan', ipponsA: ['Ht'], ipponsB: [], decision: 'daihyosen',
+    });
+    expect(window.alert).not.toHaveBeenCalled();
   });
 
   it('a tied individual match offers no hantei, and points the participant at the organizer', async () => {

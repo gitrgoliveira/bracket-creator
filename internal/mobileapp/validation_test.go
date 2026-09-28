@@ -1583,7 +1583,9 @@ func TestIsSelfRunReportableSubDecision(t *testing.T) {
 		{name: "daihyosen on a numbered bout rejected", decision: "daihyosen", position: 1, want: false},
 		{name: "the representative bout (position -1) allowed", decision: "daihyosen", position: -1, want: true},
 		{name: "the representative bout with no decision allowed", decision: "", position: -1, want: true},
-		{name: "hantei on the representative bout rejected", decision: "daihyosen", decidedByHantei: true, position: -1, want: false},
+		// Judged against the stored verdict under the write's lock instead
+		// (SelfRunChangesRepBoutHantei): an echo of the organiser's must pass.
+		{name: "hantei on the representative bout left to the stored verdict", decision: "daihyosen", decidedByHantei: true, position: -1, want: true},
 		{name: "kiken on the representative bout rejected", decision: "kiken-voluntary", position: -1, want: false},
 		{name: "decidedByHantei true sub rejected", decision: "fought", decidedByHantei: true, position: 1, want: false},
 		{name: "position 0 allowed", decision: "fought", position: 0, want: true},
@@ -1592,6 +1594,51 @@ func TestIsSelfRunReportableSubDecision(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			got := IsSelfRunReportableSubDecision(tc.decision, tc.decidedByHantei, tc.position)
 			assert.Equal(t, tc.want, got)
+		})
+	}
+}
+
+// TestSelfRunChangesRepBoutHantei pins the rule on its own: a participant may
+// repeat the organiser's verdict or say nothing about it, never record,
+// move or clear one (operator decision, bc-dhas). The handler tests in
+// self_run_daihyosen_test.go pin the same rule through the score route.
+func TestSelfRunChangesRepBoutHantei(t *testing.T) {
+	row := func(winner string, ipponsA, ipponsB []string) state.SubMatchResult {
+		return state.SubMatchResult{
+			Position: state.DaihyosenSubPosition, SideA: "TeamA", SideB: "TeamB",
+			IpponsA: ipponsA, IpponsB: ipponsB, Winner: winner, Decision: "daihyosen",
+		}
+	}
+	bout := state.SubMatchResult{Position: 1, IpponsA: []string{"M"}, Winner: "TeamA"}
+	decided := row("TeamA", []string{domain.HanteiMark}, []string{})
+	unscored := row("", []string{}, []string{})
+	silent := row("", nil, nil)
+	swapped := row("TeamB", []string{domain.HanteiMark}, []string{})
+	swapped.SideA, swapped.SideB = "TeamB", "TeamA"
+
+	tests := []struct {
+		name     string
+		stored   *state.SubMatchResult
+		incoming []state.SubMatchResult
+		want     bool
+	}{
+		{"scoring with no verdict anywhere", &unscored, []state.SubMatchResult{bout, row("TeamA", []string{"M"}, []string{})}, false},
+		{"recording a verdict", &unscored, []state.SubMatchResult{bout, decided}, true},
+		{"recording a verdict on a match with no representative bout", nil, []state.SubMatchResult{bout, decided}, true},
+		{"repeating the recorded verdict", &decided, []state.SubMatchResult{bout, decided}, false},
+		{"moving the verdict to the other side", &decided, []state.SubMatchResult{bout, row("TeamB", []string{}, []string{domain.HanteiMark})}, true},
+		{"handing the verdict over by swapping the side names", &decided, []state.SubMatchResult{bout, swapped}, true},
+		{"clearing the verdict", &decided, []state.SubMatchResult{bout, unscored}, true},
+		{"scoring over the verdict", &decided, []state.SubMatchResult{bout, row("TeamB", []string{}, []string{"M"})}, true},
+		{"leaving the row's points out", &decided, []state.SubMatchResult{bout, silent}, false},
+		{"dropping the row", &decided, []state.SubMatchResult{bout}, true},
+		{"an empty list drops it too", &decided, []state.SubMatchResult{}, true},
+		{"sending no sub-results at all", &decided, nil, false},
+		{"a second row behind an echo", &decided, []state.SubMatchResult{bout, decided, unscored}, true},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			assert.Equal(t, tc.want, SelfRunChangesRepBoutHantei(tc.stored, tc.incoming))
 		})
 	}
 }

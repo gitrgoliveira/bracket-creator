@@ -1002,6 +1002,11 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
   // same one; this editor is such a surface.
   const daihyosenHanteiRecorded = !!existingDaihyosen?.decidedByHantei;
   const recordedDaihyosenSide = recordedDaihyosenSideOf(existingDaihyosen, m);
+  // bc-dhas: on the public self-run page a representative bout the judges
+  // decided is the organiser's. The server refuses a participant's change to
+  // it (409), so the row is shown with its verdict, not offered for scoring,
+  // and every save sends the verdict back as it is.
+  const repBoutDecidedForParticipant = !!selfReport && daihyosenHanteiRecorded;
   const [daihyosenHantei, setDaihyosenHantei] = useStateA(recordedDaihyosenSide);
   // Armed follows the RECORDED flag, not the resolved side, so an
   // unattributable stored verdict still opens the panel for re-picking
@@ -3260,6 +3265,9 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
 
             // Sub-bout is decided once either side reaches 2 ippons.
             const subBoutDecided = isBoutDecided(s.aPts, s.bPts);
+            // The representative bout the judges decided, on the public page:
+            // shown, not offered (see repBoutDecidedForParticipant).
+            const rowLocked = isDaihyoRow && repBoutDecidedForParticipant;
 
             // The side key ("a"/"b") that won the hantei on this row, else "".
             const dhHantei = isDaihyoRow && daihyosenTied ? daihyosenHantei : "";
@@ -3288,8 +3296,9 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
                     // an un-guarded click mid-save would clear the local
                     // verdict while the in-flight patch records it. On the
                     // public self-run page it only shows the organiser's
-                    // verdict: a participant cannot undo a hantei (bc-dhas).
-                    disabled={isHt && (selfReport || submitting || decisionSubmitting)}
+                    // verdict: a participant cannot undo a hantei, nor take
+                    // a mark off the bout it decided (bc-dhas).
+                    disabled={rowLocked || (isHt && (selfReport || submitting || decisionSubmitting))}
                     onClick={() => {
                       if (isHt) { clearHantei(); return; }
                       // bc-emsl: a tap on an EMPTY slot, or on a default-win
@@ -3303,7 +3312,7 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
                       clearTap(ipponTapRef, rs.tapKey);
                       rs.setPts(rs.pts.filter((_, j) => j !== i));
                     }}
-                    title={isHt ? (selfReport ? "Hantei winner (judges' decision)" : "Hantei winner: click to undo") : !mark ? undefined : defaultWin ? "Default win: use Fusensho to undo" : "Click to remove"}>
+                    title={isHt ? (selfReport ? "Hantei winner (judges' decision)" : "Hantei winner: click to undo") : (!mark || rowLocked) ? undefined : defaultWin ? "Default win: use Fusensho to undo" : "Click to remove"}>
                     {isHt ? "Ht" : (mark || "·")}
                   </button>
                 );
@@ -3402,7 +3411,7 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
                             {getIpponButtons(isNaginataTeam).map(cc => (
                               <button key={cc} className={`ipt-btn ipt-btn--sm ${cc === "H" ? "ipt-btn--h" : ""}`}
                                 onClick={(ev) => tapIppon(ev, rs, cc)}
-                                disabled={subBoutDecided}>{cc}</button>
+                                disabled={subBoutDecided || rowLocked}>{cc}</button>
                             ))}
                           </div>
                           <div className="tsm-fusensho">
@@ -3411,6 +3420,7 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
                               type="button"
                               className={`btn btn--sm ${s.fusensho === rs.key ? "btn--primary" : ""}`}
                               onClick={() => (fusenshoAllowed(s, rs.key) ? setFusenshoFor(idx, rs.key) : setFusenshoRefusal(rs.tapKey))}
+                              disabled={rowLocked}
                               aria-disabled={fusenshoAllowed(s, rs.key) ? undefined : "true"}
                               title={fusenshoButtonTitle(s, rs, rowSides[1 - rsIdx])}
                             >
@@ -3431,9 +3441,9 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
                         <div className="tsm-fouls" data-testid={`scoring-modal-hansoku-${rs.color}`}>
                           <span className="tsm-fouls__label">Fouls</span>
                           <div className="tsm-fouls__controls">
-                            <button className="tsm-fouls__btn" aria-label={`Remove a ${rs.label} foul`} onClick={() => rs.setFouls(nextFoulOnDecrement(rs.fouls))} disabled={rs.fouls === 0}>−</button>
+                            <button className="tsm-fouls__btn" aria-label={`Remove a ${rs.label} foul`} onClick={() => rs.setFouls(nextFoulOnDecrement(rs.fouls))} disabled={rs.fouls === 0 || rowLocked}>−</button>
                             <span className={`tsm-fouls__count ${rs.fouls >= 1 ? "tsm-fouls__count--warn" : ""}`}>{rs.fouls}</span>
-                            <button className="tsm-fouls__btn" aria-label={`Add a ${rs.label} foul`} onClick={(ev) => tapFoulIncrement(ev, rs)} disabled={subBoutDecided}>+</button>
+                            <button className="tsm-fouls__btn" aria-label={`Add a ${rs.label} foul`} onClick={(ev) => tapFoulIncrement(ev, rs)} disabled={subBoutDecided || rowLocked}>+</button>
                           </div>
                         </div>
                       </div>
@@ -3631,16 +3641,24 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
               A participant on the public self-run page (selfReport) runs the
               representative bout like any bout but is offered no hantei: a
               judges' decision stays the organiser's, and the server refuses
-              one from a participant (bc-dhas). They keep Remove. */}
+              one from a participant (bc-dhas). They keep Remove, and once the
+              organiser records a hantei they are told why the bout is shown,
+              not offered (the same sentence the server refuses a change with,
+              handlers_match.go repBoutHanteiRefusal). */}
           {hasDaihyosen && (() => {
             const dt = subTotals[daihyosenIdx];
             const tiedScore = dt.aTotal === dt.bTotal;
             const offerRemove = dt.aTotal === 0 && dt.bTotal === 0 && !daihyosenHanteiArmed;
-            if (selfReport && !offerRemove) return null;
+            if (selfReport && !offerRemove && !repBoutDecidedForParticipant) return null;
             return (
               <div className="hantei-row" data-testid="team-daihyosen-hantei-row" style={{ display: "flex", gap: 8, alignItems: "center", padding: "6px 8px", marginTop: 12, background: "var(--surface-2)", borderRadius: 6, fontSize: 12 }}>
                 <span style={{ fontWeight: 600, color: "var(--ink-2)" }}>{selfReport ? "Daihyosen" : "Daihyosen hantei"}</span>
                 <span style={{ color: "var(--ink-3)" }}>{selfReport ? "(representative bout)" : "(judges' decision)"}</span>
+                {repBoutDecidedForParticipant && (
+                  <span data-testid="team-daihyosen-decided-note" style={{ marginLeft: "auto", color: "var(--ink-2)" }}>
+                    The judges decided this representative bout (hantei). Ask the tournament organizer to change it.
+                  </span>
+                )}
                 {offerRemove && (
                   <button
                     type="button"
@@ -3666,7 +3684,7 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
                     Decide by hantei…
                   </button>
                 )}
-                {daihyosenHanteiArmed && (
+                {!selfReport && daihyosenHanteiArmed && (
                   <div style={{ marginLeft: "auto", display: "flex", gap: 6 }}>
                     <button type="button" className={`btn btn--sm ${daihyosenHantei === "b" ? "btn--primary" : ""}`} data-testid="team-daihyosen-hantei-shiro"
                       onClick={() => pickDaihyosenHantei("b")} disabled={submitting || decisionSubmitting}>SHIRO wins</button>
@@ -3740,6 +3758,8 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
                 if (msg === "not_tied") userMsg = "Daihyosen needs a tie on IV and PW (this encounter already has a winner)";
                 else if (msg === "pool_match") userMsg = "Daihyosen is only for knockout matches";
                 else if (msg === "insufficient_eligibility") userMsg = "Not enough eligible competitors for a representative bout";
+                // Another device added it first; the row arrives with the match.
+                else if (msg === "daihyosen_exists") userMsg = "This match already has a representative bout";
                 else if (!userMsg) userMsg = "Could not add a representative bout";
                 setEditorErr(userMsg);
               } finally {
@@ -3880,8 +3900,10 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
               mode — declaring encho there is OPTIONAL, its only effect the middle
               mark (vs → "(E)"), and it is done via the footer Encho button, so a
               period-stepper would be redundant AND confusing. Corrections,
-              daihyosen and fixed-format team matches keep it. */}
-          {!kachinukiBoutMode && (
+              daihyosen and fixed-format team matches keep it, except on the
+              public page once the judges decided the representative bout: its
+              overtime is part of that bout, which is shown, not offered. */}
+          {!kachinukiBoutMode && !repBoutDecidedForParticipant && (
             <EnchoControl
               enchoPeriodCount={enchoPeriodCount}
               setEnchoPeriodCount={changeEnchoPeriodCount}

@@ -1478,7 +1478,7 @@ async function _flushQueue() {
                         // reading this alert used to see with no way to understand it or
                         // move forward.
                         const dropCopy = _downstreamQueueDropCopy(body);
-                        const reason = dropCopy ? dropCopy.reason : (body.reasonHuman || body.error || `HTTP ${res.status}`);
+                        const reason = dropCopy ? dropCopy.reason : (body.reasonHuman || body.message || body.error || `HTTP ${res.status}`);
                         if (terminal) {
                             _notifyTerminalWriteFailed({
                                 compID, matchID, kind, status: res.status, reason,
@@ -2910,7 +2910,11 @@ const API = {
         // structured error rather than a plain message; see
         // _downstreamKnockoutPlayedError and write_result.jsx's
         // downstreamKnockoutPlayedRefusal.
-        throw _downstreamRefusalError(data) || new Error(data.error || "Failed to record score");
+        // Otherwise the refusal's sentence when it carries one (a finished
+        // match, a representative bout the judges decided: 409 with the code in
+        // `error` and the sentence in `message`), which the public score sheet
+        // shows as it is; the bare code only when there is no sentence.
+        throw _downstreamRefusalError(data) || new Error(data.message || data.error || "Failed to record score");
     },
     // T093–T095: kiken / fusenpai / fusensho / daihyosen: server auto-fills
     // scoreline and Winner from {decision, decisionBy, encho}. Body shape is

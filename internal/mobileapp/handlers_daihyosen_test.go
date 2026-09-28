@@ -799,6 +799,31 @@ func TestDaihyosenWrites_CompeteOnTimestamps(t *testing.T) {
 	}
 }
 
+// TestDaihyosenAdd_RefusesASecondRepresentativeBout: an encounter has one
+// representative bout. The tie the add checks counts none, so a second add
+// used to pass it and sit beside the first (bc-dhas); two devices adding at
+// once reach this as well as a crafted request.
+func TestDaihyosenAdd_RefusesASecondRepresentativeBout(t *testing.T) {
+	compID := "dh-second-add"
+	storedAt := time.Now().UnixMilli() - 60_000
+	r, store, hub := daihyosenStampRouter(t, compID, storedAt, true)
+
+	code, body := sendDaihyosen(t, r, http.MethodPost, compID, storedAt+1_000)
+	require.Equal(t, http.StatusConflict, code, "%v", body)
+	assert.Equal(t, "daihyosen_exists", body["error"])
+
+	bm := storedB1(t, store, compID)
+	rows := 0
+	for _, s := range bm.SubResults {
+		if s.Position == state.DaihyosenSubPosition {
+			rows++
+		}
+	}
+	assert.Equal(t, 1, rows, "the first row stays the only one")
+	assert.EqualValues(t, storedAt, bm.ModifiedAt, "nothing was written")
+	assert.Empty(t, hub.events, "a refused add is broadcast to nobody")
+}
+
 // TestDaihyosenRowAsTheAddReturnsItSurvivesAScoreWrite: when the team editor
 // unmounts with an edit owed while an add is out, the owed write is sent once
 // the add lands, carrying the representative-bout row exactly as the add

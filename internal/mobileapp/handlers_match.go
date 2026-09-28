@@ -1348,7 +1348,7 @@ func RegisterMatchHandlers(r *gin.RouterGroup, eng *engine.Engine, store Competi
 
 		// Self-run mode: reopening a finalized result is an organiser action
 		// (anonymous participants are blocked from overwriting finalized
-		// results on the score path via checkFinalizedUnderTx; an ungated
+		// results on the score path via checkSelfReportedUnderTx; an ungated
 		// reopen would be a trivial bypass). The gate lives in the CENTRAL
 		// allowlist, isSelfRunMainGatedConfigRoute (middleware.go), same as
 		// its sibling override-winner — NOT hand-rolled here, so it shares
@@ -1766,9 +1766,10 @@ func RegisterMatchHandlers(r *gin.RouterGroup, eng *engine.Engine, store Competi
 // and true on success; writes the HTTP error response and returns "",
 // false when the request should be rejected.
 //
-// The finalized-result guard is NOT checked here, it must run inside
+// The finalized-result guard and the representative bout's hantei guard are
+// NOT checked here: both read the stored match, so they run inside
 // WithTransaction to prevent TOCTOU races between concurrent anonymous
-// submissions. See checkFinalizedUnderTx.
+// submissions. See checkSelfReportedUnderTx.
 //
 // Called after ScoreRequest.Validate() so the request is structurally valid.
 //
@@ -1807,24 +1808,54 @@ func enforceSelfRunPolicy(c *gin.Context, tl TournamentLoader, verifier Password
 	return "self-reported", true
 }
 
-// errResultFinalized is a sentinel returned by checkFinalizedUnderTx to
+// errResultFinalized is a sentinel returned by checkSelfReportedUnderTx to
 // signal that the match is already finalized and the anonymous overwrite
 // should be rejected with 409.
 var errResultFinalized = errors.New("result_finalized")
 
-// checkFinalizedUnderTx runs inside WithTransaction (under the per-comp
-// lock) so it's safe from TOCTOU races. Returns errResultFinalized when
-// an anonymous caller tries to write to a completed match. Fails closed:
-// a load error rejects the request rather than allowing an overwrite,
-// which is why it reads the snapshot through the fail-closed
-// matchSnapshotOrErr rather than a best-effort error-swallowing read.
-func checkFinalizedUnderTx(stx state.StoreTx, compID, matchID string) error {
-	snap, found, err := matchSnapshotOrErr(stx, compID, matchID, "finalized")
+// repBoutHanteiRefusal is checkSelfReportedUnderTx's answer to an anonymous
+// write that would record, change or clear the representative bout's hantei
+// (SelfRunChangesRepBoutHantei). recorded says whether the stored row carries
+// a verdict, which decides the sentence the participant is shown.
+type repBoutHanteiRefusal struct{ recorded bool }
+
+func (r *repBoutHanteiRefusal) Error() string { return "hantei_organiser_only" }
+
+// Message is the sentence the public score sheet shows as it is. The first is
+// also the note the score sheet puts under a representative bout the judges
+// decided (admin_scoring_team.jsx), so a refusal reads like the page did.
+func (r *repBoutHanteiRefusal) Message() string {
+	if r.recorded {
+		return "The judges decided this representative bout (hantei). Ask the tournament organizer to change it."
+	}
+	return "Only the tournament organizer can record a judges' decision (hantei)."
+}
+
+// checkSelfReportedUnderTx is the in-transaction half of the self-run rules
+// for an anonymous score write. It runs inside WithTransaction (under the
+// per-comp lock) so it's safe from TOCTOU races with a concurrent write, and
+// it reads the stored match once for both of its refusals: a write to a
+// completed match (errResultFinalized), and one that would record, change or
+// clear the representative bout's hantei (*repBoutHanteiRefusal), judged on
+// incoming, the sub-results the write will store. Fails closed: a load error
+// rejects the request rather than allowing the write, which is why it reads
+// the snapshot through the fail-closed matchSnapshotOrErr rather than a
+// best-effort error-swallowing read. A match in neither store passes both
+// checks on purpose: the write that follows under the same lock refuses it
+// (errMatchNotFound), so nothing, a hantei included, can land on it.
+func checkSelfReportedUnderTx(stx state.StoreTx, compID, matchID string, incoming []state.SubMatchResult) error {
+	snap, found, err := matchSnapshotOrErr(stx, compID, matchID, "self-run")
 	if err != nil {
 		return err
 	}
-	if found && isMatchFinalized(snap.Status) {
+	if !found {
+		return nil
+	}
+	if isMatchFinalized(snap.Status) {
 		return errResultFinalized
+	}
+	if SelfRunChangesRepBoutHantei(snap.RepBout, incoming) {
+		return &repBoutHanteiRefusal{recorded: snap.RepBout != nil && snap.RepBout.HanteiDecided()}
 	}
 	return nil
 }
@@ -1875,6 +1906,24 @@ type matchSnapshot struct {
 	// gate's exemption reads under the same lock as the write it gates
 	// (engine.KeepsWithdrawalRuling, via teamFinishRefusalUnderTx).
 	Decision string
+	// RepBout is a copy of the stored representative-bout row (position -1),
+	// nil when the match has none: the self-run guard compares a
+	// participant's write against the hantei it may carry
+	// (checkSelfReportedUnderTx). One row, not the bout log the note above
+	// keeps out.
+	RepBout *state.SubMatchResult
+}
+
+// repBoutOf returns a copy of the first representative-bout row in subs, nil
+// when there is none.
+func repBoutOf(subs []state.SubMatchResult) *state.SubMatchResult {
+	for i := range subs {
+		if subs[i].Position == state.DaihyosenSubPosition {
+			row := subs[i]
+			return &row
+		}
+	}
+	return nil
 }
 
 // lookupMatchSnapshot is mobileapp's READ-side traversal of the three homes a
@@ -1913,6 +1962,7 @@ func lookupMatchSnapshot(s matchStores, compID, matchID string) (matchSnapshot, 
 				CorrectionReason: poolMatches[i].CorrectionReason,
 				ReopenPending:    poolMatches[i].ReopenPending,
 				Decision:         poolMatches[i].Decision,
+				RepBout:          repBoutOf(poolMatches[i].SubResults),
 			}, true, loadErr
 		}
 	}
@@ -1944,6 +1994,7 @@ func bracketMatchSnapshot(bm *state.BracketMatch) matchSnapshot {
 		ReopenPending:    bm.ReopenPending,
 		InBracket:        true,
 		Decision:         bm.Decision,
+		RepBout:          repBoutOf(bm.SubResults),
 	}
 }
 
@@ -2664,10 +2715,18 @@ func registerScoreHandler(r *gin.RouterGroup, eng ScoringEngine, store Competiti
 			// court, plus participant ineligibility. Withdrawal decisions bypass
 			// so operators can record kiken on matches with ineligible participants.
 			return tx.WithTransaction(id, func(stx state.StoreTx) error {
-				// mp-ba3: finalized guard runs under the per-comp lock to
+				// mp-ba3: the finalized guard, and the representative bout's
+				// hantei guard (bc-dhas), run under the per-comp lock to
 				// prevent TOCTOU races between concurrent anonymous submissions.
 				if resultSource == "self-reported" {
-					if err := checkFinalizedUnderTx(stx, id, mid); err != nil {
+					// A start keeps the stored bouts whatever it sends
+					// (engine.keepQueuedScore), so only a scoring write's own
+					// sub-results are judged.
+					incoming := result.SubResults
+					if body.StartOnly {
+						incoming = nil
+					}
+					if err := checkSelfReportedUnderTx(stx, id, mid, incoming); err != nil {
 						engErr = err
 						return nil
 					}
@@ -2819,6 +2878,14 @@ func registerScoreHandler(r *gin.RouterGroup, eng ScoringEngine, store Competiti
 				c.JSON(http.StatusConflict, gin.H{
 					"error":   "result_finalized",
 					"message": "This match result has already been reported. Contact the tournament organizer to correct it.",
+				})
+				return
+			}
+			var hanteiRefusal *repBoutHanteiRefusal
+			if errors.As(engErr, &hanteiRefusal) {
+				c.JSON(http.StatusConflict, gin.H{
+					"error":   hanteiRefusal.Error(),
+					"message": hanteiRefusal.Message(),
 				})
 				return
 			}

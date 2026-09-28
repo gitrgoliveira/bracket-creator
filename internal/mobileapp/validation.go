@@ -1296,10 +1296,12 @@ func IsSelfRunReportableDecision(decision string, hanteiDecided bool) bool {
 // the representative bout of a tied knockout team match like any bout
 // (operator decision, bc-dhas). Rejected: kiken variants, fusenpai,
 // kachinuki-exhaustion, "daihyosen" on a numbered bout, and a hantei mark on
-// any bout, the representative bout included (a judges' decision stays the
-// organiser's).
+// a numbered bout. A hantei mark on the representative bout is not judged
+// here: whether it repeats the organiser's recorded verdict depends on the
+// stored match, so SelfRunChangesRepBoutHantei decides it under the write's
+// lock.
 func IsSelfRunReportableSubDecision(decision string, decidedByHantei bool, position int) bool {
-	if decidedByHantei {
+	if decidedByHantei && position != state.DaihyosenSubPosition {
 		return false
 	}
 	switch decision {
@@ -1310,6 +1312,56 @@ func IsSelfRunReportableSubDecision(decision string, decidedByHantei bool, posit
 	default:
 		return false
 	}
+}
+
+// SelfRunChangesRepBoutHantei reports whether an anonymous self-run score
+// write would record, change or clear the hantei (judges' decision) on the
+// representative bout, which stays the organiser's (operator decision,
+// bc-dhas). stored is the match's stored representative-bout row, nil when it
+// has none; incoming is the write's sub-results. A participant's write may
+// still:
+//   - carry the mark when it repeats the recorded verdict (sameHanteiVerdict):
+//     an editor that took up the organiser's verdict sends it back with every
+//     save;
+//   - leave the row's points out, which keeps the recorded verdict
+//     (engine.KeepsStoredDaihyosenVerdict, the write's own silence test);
+//   - carry no sub-results at all, which keeps every stored row.
+//
+// A write that lists sub-results without the representative bout drops the
+// row, and with it any verdict. Every representative-bout row a write carries
+// is judged, so a second one cannot slip past behind a first.
+func SelfRunChangesRepBoutHantei(stored *state.SubMatchResult, incoming []state.SubMatchResult) bool {
+	recorded := stored != nil && stored.HanteiDecided()
+	carriesRow := false
+	for i := range incoming {
+		in := &incoming[i]
+		if in.Position != state.DaihyosenSubPosition {
+			continue
+		}
+		carriesRow = true
+		switch {
+		case in.HanteiDecided():
+			if !recorded || !sameHanteiVerdict(stored, in) {
+				return true
+			}
+		case recorded:
+			if !engine.KeepsStoredDaihyosenVerdict(stored, in) {
+				return true
+			}
+		}
+	}
+	return recorded && !carriesRow && incoming != nil
+}
+
+// sameHanteiVerdict reports whether in carries the verdict stored does: the
+// same winner between the same two sides, with the mark on the same side. The
+// side names count as much as the arrays, because the arrays are positional
+// while the winner is read against the row's names: a row that swaps the names
+// keeps the mark in the same array and hands the verdict to the other team.
+func sameHanteiVerdict(stored, in *state.SubMatchResult) bool {
+	return in.Winner == stored.Winner && in.SideA == stored.SideA && in.SideB == stored.SideB &&
+		domain.ContainsHantei(in.IpponsA) == domain.ContainsHantei(stored.IpponsA) &&
+		domain.ContainsHantei(in.IpponsB) == domain.ContainsHantei(stored.IpponsB)
 }
 
 // validateRemovedCourtsNotInUse refuses a competition court change that would

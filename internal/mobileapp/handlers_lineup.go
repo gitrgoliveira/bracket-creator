@@ -381,7 +381,7 @@ func RegisterLineupHandlers(r *gin.RouterGroup, store TeamLineupStore, comps Com
 			// An anonymous self-run caller writes from the public score sheet,
 			// so the score path's rule holds: the match must exist, and once it
 			// has finished its lineup is part of the result, which only the
-			// organiser corrects (checkFinalizedUnderTx refuses the same caller
+			// organiser corrects (checkSelfReportedUnderTx refuses the same caller
 			// on the result itself). Read under this lock, like that check. An
 			// organiser keeps the always-editable rule.
 			if anonymous {

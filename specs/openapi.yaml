@@ -44,7 +44,13 @@ info:
     competitors saw: a match `decision` that is empty, `fought` or `hikiwake`, and a bout
     `decision` that is one of those or `fusensho` (or `daihyosen` on the
     representative bout). Any other decision, or the `Ht` judges'-decision mark on
-    any bout, is refused with 400.
+    a numbered bout, is refused with 400. A judges' decision on the representative
+    bout stays the organiser's: such a write may send the `Ht` mark back only as the
+    organiser recorded it (same winner, same side), or leave the row's ippons out,
+    and one that would record, move or clear it (dropping the row included) is
+    refused with 409 `hantei_organiser_only`. `POST .../matches/bulk-score` and
+    `PUT .../matches/{mid}/quick-score` stay gated: they write results without these
+    checks.
 
     **Request body size limits.** Every `/api/` route that reads a body (any POST,
     PUT or PATCH, and a DELETE that carries one) enforces a request-size cap and
@@ -2413,7 +2419,7 @@ paths:
                 $ref: '#/components/schemas/Error'
         '409':
           description: |
-            Conflict; one of seven codes returned in the `error` field:
+            Conflict; one of eight codes returned in the `error` field:
             - `court_busy`: court already has a running match in this or another competition.
               Extra fields: `court`, `matchId`, `compId`, `label`, `message`.
             - `ineligible_competitor`: a participant is ineligible (kiken/fusenpai in a prior match, or barred by
@@ -2427,6 +2433,14 @@ paths:
               Extra fields: `playerId`, `matchId`, `reason`, `reasonHuman`.
             - `result_finalized`: the match result is already locked (self-reported only).
               Extra fields: `message`.
+            - `hantei_organiser_only`: a request without a valid password (self-run) would
+              record, move or clear the judges' decision on the representative bout
+              (position `-1`), or drop a row that carries one. Sending the recorded
+              decision back as it is, or leaving the row's ippons out, is not refused.
+              Extra fields: `message`, one sentence for the participant: "The judges
+              decided this representative bout (hantei). Ask the tournament organizer
+              to change it." when a decision is recorded, else "Only the tournament
+              organizer can record a judges' decision (hantei)."
             - `side_mismatch`: the submitted winner does not match either side of the match.
               Extra fields: `message`.
             - `downstream_knockout_played`: the write would change who a
@@ -3124,6 +3138,10 @@ paths:
         with partial success) with that entry's `matchId` and an `error` naming the bouts, e.g.
         "Bout 5 (Taisho) has no result. Record a score, a Tie, or a Fusensho before finishing."
         Nothing is written for that entry, and other entries are unaffected.
+
+
+        Stays main-password-gated in self-run mode (401 without it): it writes results
+        without PUT /score's self-run checks.
       security:
         - TournamentPassword: []
       parameters:
@@ -3200,6 +3218,10 @@ paths:
         and the server determines the team winner and synthesises SubResults so that
         standings IV/IL/IT counts are updated correctly. Use the full `/score` endpoint
         when you have per-member ippon data.
+
+
+        Stays main-password-gated in self-run mode (401 without it): it replaces the
+        match's bouts outright, without PUT /score's self-run checks.
       security:
         - TournamentPassword: []
       parameters:
@@ -3448,7 +3470,11 @@ paths:
               schema:
                 $ref: '#/components/schemas/Error'
         '409':
-          description: Insufficient eligible competitors (`insufficient_eligibility`).
+          description: >
+            Insufficient eligible competitors (`insufficient_eligibility`), or the
+            match already has a representative bout (`daihyosen_exists`): an
+            encounter has one, and the tie this route checks counts none, so a
+            second would otherwise be appended beside the first.
           content:
             application/json:
               schema:

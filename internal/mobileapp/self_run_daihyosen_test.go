@@ -4,14 +4,16 @@ package mobileapp
 // (daihyosen) of a tied knockout team match like any bout (operator decision,
 // bc-dhas): the public page adds it, scores it, finishes the match on the
 // winner it decides, and removes one added by mistake, all with no organiser
-// password. A hantei stays the organiser's: an anonymous write carrying the
-// judges'-decision mark is refused on the representative bout as on any
-// other. Officiated tournaments are unchanged.
+// password. A hantei stays the organiser's: an anonymous write may not record,
+// move or clear the judges' decision on the representative bout, and may only
+// send back the one the organiser recorded (409 hantei_organiser_only
+// otherwise). Officiated tournaments are unchanged.
 //
 // Every request is built the way the public page sends it: an EMPTY
 // X-Tournament-Password header, not a missing one.
 
 import (
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -78,17 +80,21 @@ func (f *repBoutFixture) addRepBout(t *testing.T) {
 }
 
 // score sends the team sheet the way the public editor does: the three fought
-// bouts as they stand, then the representative bout.
+// bouts as they stand, then the representative bout (none when repBout is
+// nil, which drops the row).
 func (f *repBoutFixture) score(password string, status state.MatchStatus, winner string, at int64, repBout map[string]any) *httptest.ResponseRecorder {
+	subs := []any{
+		map[string]any{"position": 1, "sideA": "", "sideB": "", "ipponsA": []string{"M"}, "ipponsB": []string{}, "winner": "TeamA", "decision": ""},
+		map[string]any{"position": 2, "sideA": "", "sideB": "", "ipponsA": []string{}, "ipponsB": []string{"K"}, "winner": "TeamB", "decision": ""},
+		map[string]any{"position": 3, "sideA": "", "sideB": "", "ipponsA": []string{}, "ipponsB": []string{}, "winner": "", "decision": "hikiwake"},
+	}
+	if repBout != nil {
+		subs = append(subs, repBout)
+	}
 	return f.send(http.MethodPut, repBoutMatchPath+"/score", password, map[string]any{
 		"sideA": "TeamA", "sideB": "TeamB", "status": status, "winner": winner,
 		"ipponsA": []string{}, "ipponsB": []string{}, "modifiedAt": at,
-		"subResults": []any{
-			map[string]any{"position": 1, "sideA": "", "sideB": "", "ipponsA": []string{"M"}, "ipponsB": []string{}, "winner": "TeamA", "decision": ""},
-			map[string]any{"position": 2, "sideA": "", "sideB": "", "ipponsA": []string{}, "ipponsB": []string{"K"}, "winner": "TeamB", "decision": ""},
-			map[string]any{"position": 3, "sideA": "", "sideB": "", "ipponsA": []string{}, "ipponsB": []string{}, "winner": "", "decision": "hikiwake"},
-			repBout,
-		},
+		"subResults": subs,
 	})
 }
 
@@ -160,7 +166,7 @@ func TestSelfRun_HanteiOnTheRepresentativeBoutStaysTheOrganisers(t *testing.T) {
 		name    string
 		repBout map[string]any
 	}{
-		{"the judges'-decision mark", repBoutRow([]string{domain.HanteiMark}, []string{}, "TeamA")},
+		{"the judges'-decision mark", hanteiRow()},
 		{"the legacy decidedByHantei flag", legacyFlag},
 	}
 	for _, tc := range cases {
@@ -169,8 +175,7 @@ func TestSelfRun_HanteiOnTheRepresentativeBoutStaysTheOrganisers(t *testing.T) {
 			f.addRepBout(t)
 
 			w := f.score("", state.MatchStatusRunning, "", f.now+100, tc.repBout)
-			require.Equal(t, http.StatusBadRequest, w.Code, w.Body.String())
-			assert.Contains(t, w.Body.String(), "decision type not allowed")
+			requireHanteiRefusal(t, w, "Only the tournament organizer can record a judges' decision (hantei).")
 			assert.False(t, f.storedRepBout(t).HanteiDecided(), "nothing is written")
 
 			w = f.score("main-pw", state.MatchStatusRunning, "", f.now+200, tc.repBout)
@@ -178,6 +183,158 @@ func TestSelfRun_HanteiOnTheRepresentativeBoutStaysTheOrganisers(t *testing.T) {
 			assert.True(t, f.storedRepBout(t).HanteiDecided())
 		})
 	}
+}
+
+// hanteiRow is the representative bout the judges decided for TeamA, as the
+// team editor writes it: the organiser's, or a participant's editor sending
+// back the verdict it took up.
+func hanteiRow() map[string]any {
+	return repBoutRow([]string{domain.HanteiMark}, []string{}, "TeamA")
+}
+
+// recordHantei has the organiser record the judges' decision for TeamA while
+// the match is running, as the operator console saves it.
+func (f *repBoutFixture) recordHantei(t *testing.T) {
+	t.Helper()
+	w := f.score("main-pw", state.MatchStatusRunning, "", f.now+100, hanteiRow())
+	require.Equal(t, http.StatusOK, w.Code, "the organiser records the hantei: %s", w.Body.String())
+	require.True(t, f.storedRepBout(t).HanteiDecided())
+}
+
+// requireHanteiRefusal checks a participant's write was refused the way a
+// finished match's is (409), with the sentence the public score sheet shows.
+func requireHanteiRefusal(t *testing.T, w *httptest.ResponseRecorder, message string) {
+	t.Helper()
+	require.Equal(t, http.StatusConflict, w.Code, w.Body.String())
+	var body map[string]string
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &body), w.Body.String())
+	assert.Equal(t, "hantei_organiser_only", body["error"])
+	assert.Equal(t, message, body["message"])
+}
+
+// A participant cannot clear, move or score over the organiser's verdict, by
+// any shape of write the score route accepts (operator decision, bc-dhas).
+func TestSelfRun_ParticipantsCannotChangeTheOrganisersHantei(t *testing.T) {
+	swapped := hanteiRow()
+	swapped["sideA"], swapped["sideB"], swapped["winner"] = "TeamB", "TeamA", "TeamB"
+	legacyMove := repBoutRow([]string{}, []string{}, "TeamB")
+	legacyMove["decidedByHantei"] = true
+	cases := []struct {
+		name    string
+		repBout map[string]any // nil drops the row from the list
+	}{
+		{"clearing it", repBoutRow([]string{}, []string{}, "")},
+		{"moving it to the other side", repBoutRow([]string{}, []string{domain.HanteiMark}, "TeamB")},
+		{"handing it over by swapping the side names", swapped},
+		{"moving it with the legacy decidedByHantei flag", legacyMove},
+		{"scoring over it", repBoutRow([]string{}, []string{"M"}, "TeamB")},
+		{"dropping the row", nil},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			f := newRepBoutFixture(t, true)
+			f.addRepBout(t)
+			f.recordHantei(t)
+
+			w := f.score("", state.MatchStatusRunning, "", f.now+200, tc.repBout)
+			requireHanteiRefusal(t, w, "The judges decided this representative bout (hantei). Ask the tournament organizer to change it.")
+			row := f.storedRepBout(t)
+			assert.Equal(t, []string{domain.HanteiMark}, row.IpponsA, "the verdict stands")
+			assert.Equal(t, "TeamA", row.Winner)
+		})
+	}
+}
+
+// A participant's editor that took up the organiser's verdict keeps saving:
+// sending it back, leaving the row's points out, or sending no bouts at all
+// all keep it, and the match finishes on it.
+func TestSelfRun_ParticipantsKeepTheOrganisersHantei(t *testing.T) {
+	legacyEcho := repBoutRow([]string{}, []string{}, "TeamA")
+	legacyEcho["decidedByHantei"] = true
+	silent := repBoutRow(nil, nil, "")
+	delete(silent, "ipponsA")
+	delete(silent, "ipponsB")
+	cases := []struct {
+		name    string
+		repBout map[string]any
+	}{
+		{"sending it back as it is", hanteiRow()},
+		{"sending it back with the legacy decidedByHantei flag", legacyEcho},
+		{"leaving the row's points out", silent},
+	}
+	requireKept := func(t *testing.T, f *repBoutFixture, w *httptest.ResponseRecorder) {
+		t.Helper()
+		require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+		assert.NotContains(t, w.Body.String(), `"applied":false`)
+		row := f.storedRepBout(t)
+		assert.Equal(t, []string{domain.HanteiMark}, row.IpponsA, "the verdict stands")
+		assert.Equal(t, "TeamA", row.Winner)
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			f := newRepBoutFixture(t, true)
+			f.addRepBout(t)
+			f.recordHantei(t)
+			requireKept(t, f, f.score("", state.MatchStatusRunning, "", f.now+200, tc.repBout))
+		})
+	}
+
+	t.Run("sending no bouts at all", func(t *testing.T) {
+		f := newRepBoutFixture(t, true)
+		f.addRepBout(t)
+		f.recordHantei(t)
+		requireKept(t, f, f.send(http.MethodPut, repBoutMatchPath+"/score", "", map[string]any{
+			"sideA": "TeamA", "sideB": "TeamB", "status": state.MatchStatusRunning, "modifiedAt": f.now + 200,
+		}))
+	})
+
+	t.Run("finishing the match on it", func(t *testing.T) {
+		f := newRepBoutFixture(t, true)
+		f.addRepBout(t)
+		f.recordHantei(t)
+		requireKept(t, f, f.score("", state.MatchStatusCompleted, "TeamA", f.now+200, hanteiRow()))
+		bm := storedB1(t, f.store, "c1")
+		assert.Equal(t, state.MatchStatusCompleted, bm.Status)
+		assert.Equal(t, "TeamA", bm.Winner)
+		assert.Equal(t, "self-reported", bm.ResultSource)
+	})
+}
+
+// The organiser, with the password, changes their own verdict as before.
+func TestSelfRun_TheOrganiserChangesTheirHantei(t *testing.T) {
+	f := newRepBoutFixture(t, true)
+	f.addRepBout(t)
+	f.recordHantei(t)
+
+	w := f.score("main-pw", state.MatchStatusRunning, "", f.now+200, repBoutRow([]string{}, []string{}, ""))
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	assert.False(t, f.storedRepBout(t).HanteiDecided(), "the organiser cleared it")
+}
+
+// Adding a second representative bout used to pass the add's tie check (which
+// counts none) and put a finished match back to running beside the verdict
+// recorded on the first. A participant can reach that route, so it matters
+// most here.
+func TestSelfRun_ASecondRepresentativeBoutCannotReopenTheMatch(t *testing.T) {
+	f := newRepBoutFixture(t, true)
+	f.addRepBout(t)
+	f.recordHantei(t)
+	w := f.score("", state.MatchStatusCompleted, "TeamA", f.now+200, hanteiRow())
+	require.Equal(t, http.StatusOK, w.Code, "finishing on the verdict: %s", w.Body.String())
+
+	w = f.send(http.MethodPost, repBoutMatchPath+"/daihyosen", "", map[string]any{"modifiedAt": f.now + 300})
+	require.Equal(t, http.StatusConflict, w.Code, w.Body.String())
+	assert.Contains(t, w.Body.String(), `"daihyosen_exists"`)
+	bm := storedB1(t, f.store, "c1")
+	assert.Equal(t, state.MatchStatusCompleted, bm.Status, "the match stays finished")
+	assert.Equal(t, "TeamA", bm.Winner)
+	rows := 0
+	for _, s := range bm.SubResults {
+		if s.Position == state.DaihyosenSubPosition {
+			rows++
+		}
+	}
+	assert.Equal(t, 1, rows, "the representative bout stays the only one")
 }
 
 func TestOfficiated_RepresentativeBoutNeedsThePassword(t *testing.T) {

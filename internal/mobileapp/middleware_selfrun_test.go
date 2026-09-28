@@ -1049,3 +1049,38 @@ func TestSelfRun_RequeueBlockerAndReopenRequiresMainPassword(t *testing.T) {
 	assert.Equal(t, http.StatusUnauthorized, w.Code,
 		"requeue-blocker-and-reopen must be main-gated in self-run mode")
 }
+
+// bc-dhas: bulk-score and quick-score write results without the participant
+// score path's self-run rules (the decision allowlist, the finished-match
+// refusal and the representative bout's hantei guard), and quick-score
+// replaces a match's bouts outright. Left public, either would undo all of
+// them, so both are main-gated in self-run mode, like reopen. No page calls
+// either route; organiser tooling sends the password.
+func TestSelfRun_BulkAndQuickScoreRequireMainPassword(t *testing.T) {
+	store := newTempStore(t)
+	seedSelfRunTournament(t, store, "admin-pw")
+	r := setupSelfRunRouter(t, store, NewFileVerifier(store))
+
+	routes := []struct {
+		method, path string
+		body         any
+	}{
+		{http.MethodPost, "/api/competitions/some-comp/matches/bulk-score", []any{}},
+		{http.MethodPut, "/api/competitions/some-comp/matches/m-r1-0/quick-score", map[string]any{"sideA": "A", "sideB": "B", "teamAWins": 1}},
+	}
+	for _, rt := range routes {
+		t.Run(rt.method+" "+rt.path, func(t *testing.T) {
+			req := jsonReq(rt.method, rt.path, rt.body)
+			req.Header.Set("X-Tournament-Password", "")
+			w := httptest.NewRecorder()
+			r.ServeHTTP(w, req)
+			assert.Equal(t, http.StatusUnauthorized, w.Code, "without the password: %s", w.Body.String())
+
+			req = jsonReq(rt.method, rt.path, rt.body)
+			req.Header.Set("X-Tournament-Password", "main-pw")
+			w = httptest.NewRecorder()
+			r.ServeHTTP(w, req)
+			assert.NotEqual(t, http.StatusUnauthorized, w.Code, "the password clears the gate: %s", w.Body.String())
+		})
+	}
+}

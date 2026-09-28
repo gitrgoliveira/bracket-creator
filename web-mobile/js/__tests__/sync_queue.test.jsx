@@ -341,6 +341,32 @@ describe('_flushQueue: non-retryable 4xx discards, 5xx/429/network retries', () 
         warnSpy.mockRestore();
     });
 
+    // bc-dhas: a self-run refusal carries the code in `error` and a sentence in
+    // `message`; the alert for a dropped write gives the sentence.
+    it('reports the sentence of a refusal that carries one, not its code', async () => {
+        const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+        const alerts = [];
+        const unsubAlert = mod.subscribeQueueAlert((a) => alerts.push(a));
+        mockFetch(() => Promise.resolve({
+            ok: false,
+            status: 409,
+            json: () => Promise.resolve({
+                error: 'hantei_organiser_only',
+                message: 'The judges decided this representative bout (hantei). Ask the tournament organizer to change it.',
+            }),
+        }));
+
+        enqueueRunningWrite('c1', 'm1', { status: 'running', rev: 1 }, '');
+        await flushMicrotasks();
+
+        expect(alerts).toEqual([expect.objectContaining({
+            kind: 'rejected',
+            detail: 'The judges decided this representative bout (hantei). Ask the tournament organizer to change it.',
+        })]);
+        unsubAlert();
+        warnSpy.mockRestore();
+    });
+
     it('discards a queued write on a non-retryable 4xx (e.g. 400): never retried forever', async () => {
         const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
 
@@ -797,6 +823,24 @@ describe('recordScore: queues running writes on network failure', () => {
         await expect(
             API.recordScore('c1', 'm1', { status: 'running' }, 'pw', null)
         ).rejects.toThrow('Already fighting in match X');
+    });
+
+    // bc-dhas: the public score sheet shows a thrown message as it is, so a
+    // refusal that carries a sentence must throw the sentence, not the code:
+    // the finished-match refusal alerted "result_finalized" before this.
+    it.each([
+        ['result_finalized', 'This match result has already been reported. Contact the tournament organizer to correct it.'],
+        ['hantei_organiser_only', 'The judges decided this representative bout (hantei). Ask the tournament organizer to change it.'],
+    ])('throws the sentence of a %s refusal, not its code', async (error, message) => {
+        mockFetch(() => Promise.resolve({
+            ok: false,
+            status: 409,
+            json: () => Promise.resolve({ error, message }),
+        }));
+
+        await expect(
+            API.recordScore('c1', 'm1', { status: 'running' }, '', null)
+        ).rejects.toThrow(message);
     });
 
     it('queues a running 5xx as "syncing" (server up, not "offline" or falsely "synced")', async () => {

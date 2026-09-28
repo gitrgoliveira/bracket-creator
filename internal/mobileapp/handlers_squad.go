@@ -9,9 +9,10 @@
 // exists to close.
 //
 // All four routes live on the admin group. In a self-run tournament ADD and
-// RENAME are also open to a caller without the password, because the public
+// RENAME are also open to a caller with an empty password, because the public
 // score sheet names a bout's fighter through them (bc-dhas); such a caller may
-// name a member who has no name yet but not rename one who has (see the PUT).
+// name a member who has no name yet but not rename one who has (see the PUT),
+// and a password sent but wrong is a 401 on both (selfRunAnonymous).
 // The read and the name CLEAR stay main-password-gated
 // (isSelfRunMainGatedConfigRoute, middleware.go): the public page reads team
 // members from the viewer payload and never clears one.
@@ -40,10 +41,11 @@
 //
 // The public READ surfaces do not call these routes: the viewer, the court
 // display and the streaming overlay read a team's squad from the viewer
-// payload (handlers_viewer.go). They inherit the same consequence.
-// Nothing here fires an event and the SPA has no data poll, so a squad
-// edit reaches them only on their next payload fetch, which some OTHER
-// broadcast triggers. Same trade, same reason: this is setup, and the
+// payload (handlers_viewer.go). A rename or a clear reaches them through that
+// same lineup event, on which the SPA refetches the payload (app.jsx). An add
+// reaches them only on their next payload fetch, which some OTHER broadcast
+// triggers: on the public score sheet the lineup PUT that follows it, and on
+// the Lineups page, where an add is setup, whatever broadcast comes next; the
 // label it feeds is enrichment beside a name that is already correct.
 package mobileapp
 
@@ -70,8 +72,8 @@ type SquadMemberRequest struct {
 // per-competition directory does not exist to write into); mirrors
 // handlers_lineup.go's own comp == nil check.
 //
-// tl/verifier tell an anonymous self-run caller apart (selfRunAnonymous) for
-// the rename's guard.
+// tl/verifier tell an anonymous self-run caller apart (selfRunAnonymous), for
+// the rename's guard and so that a wrong password on either write is 401.
 func RegisterSquadHandlers(r *gin.RouterGroup, store SquadStore, comps CompetitionStore, hub Broadcaster, tl TournamentLoader, verifier PasswordVerifier) {
 	r.GET("/competitions/:id/team-members", func(c *gin.Context) {
 		compID, ok := requireValidCompID(c)
@@ -104,6 +106,11 @@ func RegisterSquadHandlers(r *gin.RouterGroup, store SquadStore, comps Competiti
 		}
 		if strings.TrimSpace(req.Name) == "" {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "name is required"})
+			return
+		}
+		// A participant may add a member as the organiser may; asked only so
+		// that a password sent wrong is answered 401, as on the rename.
+		if _, ok := selfRunAnonymous(c, tl, verifier); !ok {
 			return
 		}
 		member, err := store.AddTeamMember(compID, teamID, req.Name)
@@ -218,6 +225,17 @@ func requireValidCompIDAndTeam(c *gin.Context) (compID, teamID string, ok bool) 
 	return compID, teamID, true
 }
 
+// errMemberAlreadyNamed refuses a participant's rename of a team member who
+// already has a name (state.ErrTeamMemberNamed, which only the participant's
+// NameUnnamedTeamMember returns). The rename reaches every stored lineup and
+// every bout already fought, finished matches included, so it stays the
+// organiser's.
+var errMemberAlreadyNamed = &selfRunRefusal{
+	status:  http.StatusConflict,
+	code:    "member_already_named",
+	message: "This team member already has a name. Ask the tournament organizer to change it.",
+}
+
 // respondSquadWriteError maps an AddTeamMember/RenameTeamMember/
 // NameUnnamedTeamMember/ClearTeamMemberName error to its HTTP status.
 // ErrTeamNotFound (the team id names no participant), ErrTeamMemberNotFound,
@@ -236,7 +254,7 @@ func respondSquadWriteError(c *gin.Context, err error) {
 		return
 	}
 	if errors.Is(err, state.ErrTeamMemberNamed) {
-		c.JSON(http.StatusConflict, gin.H{"error": "this team member already has a name; ask the tournament organizer to change it"})
+		c.JSON(errMemberAlreadyNamed.status, errMemberAlreadyNamed.body())
 		return
 	}
 	if errors.Is(err, state.ErrTeamMemberClearAfterStart) {

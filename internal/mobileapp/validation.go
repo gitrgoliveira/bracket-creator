@@ -1263,7 +1263,7 @@ func (r *ScoreRequest) AsMatchResult() *state.MatchResult {
 
 // IsSelfRunReportableDecision reports whether the given decision value is
 // permitted for participant self-reporting in self-run tournaments (i.e.
-// when no valid admin password is present on the request).
+// when the request's password is empty, selfRunAnonymous).
 //
 // Allowed at the top level: "" (none), "fought", "hikiwake". These are
 // factual observations a participant can make without referee authority.
@@ -1293,16 +1293,14 @@ func IsSelfRunReportableDecision(decision string, hanteiDecided bool) bool {
 // anonymous callers. Allowed: "" (none), "fought", "hikiwake", "fusensho"
 // (per-bout forfeiture is a factual observation), and "daihyosen" on the
 // representative bout (position -1) only (operator decision, bc-dhas).
-// Rejected: kiken variants, fusenpai, kachinuki-exhaustion, "daihyosen" on a
-// numbered bout, and a hantei mark on a numbered bout. It judges one row's
-// decision and nothing else: whether the write may carry a representative
-// bout at all (the match must already have one, and only one) and whether a
-// hantei mark on it repeats the organiser's depend on the stored match, so
-// holdSelfReportedWriteUnderTx decides them under the write's lock.
-func IsSelfRunReportableSubDecision(decision string, decidedByHantei bool, position int) bool {
-	if decidedByHantei && position != state.DaihyosenSubPosition {
-		return false
-	}
+// Rejected: kiken variants, fusenpai, kachinuki-exhaustion, and "daihyosen"
+// on a numbered bout. It judges one row's decision and nothing else. A hantei
+// mark on a numbered bout is refused for every caller by validateSubBout,
+// which runs first. Whether the write may carry a representative bout at all
+// and whether a hantei mark on it repeats the organiser's depend on the
+// stored match, so holdSelfReportedWriteUnderTx decides them under the
+// write's lock.
+func IsSelfRunReportableSubDecision(decision string, position int) bool {
 	switch decision {
 	case "", "fought", "hikiwake", "fusensho":
 		return true

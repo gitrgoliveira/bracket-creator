@@ -1152,6 +1152,58 @@ describe('the daihyosen add and remove carry the stamp', () => {
         expect(outcome.error.message).toBe(`The representative bout was not ${done}: the server did not answer. Check the connection and try again.`);
     });
 
+    // ONE controller stays armed through the body read (_fetchJson): a stalled
+    // body is ABORTED at the deadline, which frees its connection, instead of
+    // being left reading while the editor has given up on it.
+    it('a stalled body is aborted at the deadline, freeing its connection', async () => {
+        const server = makeServer({ timeOk: true });
+        const API = await loadWith(server);
+        const answering = server.fetch;
+        let signal = null;
+        global.fetch = vi.fn((url, opts) => {
+            if (!String(url).includes('/daihyosen')) return answering(url, opts);
+            signal = opts.signal;
+            return Promise.resolve({ ok: true, status: 200, json: () => new Promise(() => {}) });
+        });
+        let outcome = null;
+        API.recordDaihyosen('c1', 'B1', 'pw').then(() => { outcome = { landed: true }; }, (error) => { outcome = { error }; });
+
+        await tick(11000);
+        expect(signal && signal.aborted, 'still reading inside the 12 s').toBe(false);
+        await tick(1500);
+        expect(signal.aborted, 'the body read is aborted, not just stopped waiting for').toBe(true);
+        expect(outcome && outcome.error && outcome.error.message)
+            .toBe('The representative bout was not added: the server did not answer. Check the connection and try again.');
+    });
+
+    // The budget runs on a timer, not the wall clock: a device clock stepped
+    // forward while the request is out (an NTP correction) must not cut it
+    // short and report a landed add as unanswered.
+    it('a step of the wall clock during the request does not cut its budget', async () => {
+        const server = makeServer({ timeOk: true });
+        const API = await loadWith(server);
+        const answering = server.fetch;
+        let answerHeaders;
+        const row = { position: -1, sideA: '', sideB: '', winner: '', decision: 'daihyosen' };
+        const body = { subResult: row, result: { id: 'B1', status: 'running', subResults: [row] } };
+        global.fetch = vi.fn((url, opts) => {
+            if (!String(url).includes('/daihyosen')) return answering(url, opts);
+            return new Promise((resolve) => { answerHeaders = resolve; });
+        });
+        let outcome = null;
+        API.recordDaihyosen('c1', 'B1', 'pw').then((res) => { outcome = { res }; }, (error) => { outcome = { error }; });
+        await tick(100);
+
+        // The clock steps forward while the request is out; then the answer
+        // arrives, its body a moment after its headers.
+        vi.setSystemTime(Date.now() + 20000);
+        answerHeaders({ ok: true, status: 200, json: () => new Promise((resolve) => setTimeout(() => resolve(body), 50)) });
+        await tick(100);
+
+        expect(outcome && outcome.error, 'not reported as unanswered').toBeFalsy();
+        expect(outcome && outcome.res).toEqual({ id: 'B1', status: 'running', subResults: [row] });
+    });
+
     // A refused add or remove shows the server's own sentence when it sends
     // one (a finished match's, for a participant); a bare code is thrown as it
     // is, for the editor's own wording of it.

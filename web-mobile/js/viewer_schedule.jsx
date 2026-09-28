@@ -561,9 +561,19 @@ export function ScheduleViewer({ tournament, tweaks }) {
 
 // Tournament-wide schedule wrapper for the viewer (its own screen)
 export function ViewerSchedule({ tournament, onBack, tweaks }) {
-  // A match opens on the live row of the list the schedule draws from.
-  const allMatches = useMemo(() => tournamentMatches(tournament), [tournament]);
-  const [selectedMatch, openMatch, closeMatch] = useLiveMatch((id, compId) => matchInList(allMatches, id, compId));
+  // A match opens on the live row its competition holds. Only that
+  // competition's list is built, and only once a match is open: the page's
+  // own list is ScheduleViewer's, and nothing else here reads one.
+  const rowOf = useMemo(() => {
+    const byComp = new Map();
+    return (id, compId) => {
+      if (!byComp.has(compId)) {
+        byComp.set(compId, tournamentMatches({ competitions: (tournament.competitions || []).filter((c) => c.id === compId) }));
+      }
+      return matchInList(byComp.get(compId), id, compId);
+    };
+  }, [tournament]);
+  const [selectedMatch, openMatch, closeMatch] = useLiveMatch(rowOf);
   const extendedTweaks = { ...tweaks, onMatchClick: openMatch };
   return (
     <div className="viewer">

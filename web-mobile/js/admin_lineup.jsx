@@ -38,7 +38,7 @@
 
 import { idOf, nameOf } from './competitor_identity.jsx';
 import { squadSlotLabel } from './squad_member_label.jsx';
-import { rosterWithoutPlacedElsewhere, memberPlacedElsewhere } from './lineup_resolver.jsx';
+import { rosterWithoutPlacedElsewhere, memberPlacedElsewhere, memberRefusalNote } from './lineup_resolver.jsx';
 import { normalizeParticipantName } from './data.jsx';
 import { renameMemberFields } from './lineup_rename.jsx';
 
@@ -283,11 +283,11 @@ function blankMemberForPosition(squad, posKey, currentIds) {
 //
 // Returns { memberIds, squad, failures }: `squad` is handed back (possibly
 // extended by a mint, or with a member renamed) so the caller can cache it
-// without a second fetch. `failures` is `[{ position, name, reason }]`, one
-// entry per position whose rename/mint failed; `reason` is the server's own
-// message (API.renameTeamMember/addTeamMember throw with err.error from the
-// response body) -- never a raw Error object or a stack. This function
-// never throws.
+// without a second fetch. `failures` is `[{ position, name, reason, code }]`,
+// one entry per position whose rename/mint failed; `reason` is the refusal's
+// own words and `code` its code, when it carries one (API.renameTeamMember/
+// addTeamMember throw them, api_client.jsx _refusalError) -- never a raw
+// Error object or a stack. This function never throws.
 async function resolveMemberIdsForPositions(compId, teamId, positions, squad, password, currentIds) {
   let currentSquad = Array.isArray(squad) ? squad : [];
   const memberIds = {};
@@ -308,7 +308,7 @@ async function resolveMemberIdsForPositions(compId, teamId, positions, squad, pa
         currentSquad = currentSquad.map(mem => (mem === blankMember ? { ...mem, name } : mem));
         memberIds[posKey] = blankMember.id;
       } catch (e) {
-        failures.push({ position: posKey, name, reason: (e && e.message) || "" });
+        failures.push(memberWriteFailure(posKey, name, e));
       }
       continue;
     }
@@ -319,10 +319,18 @@ async function resolveMemberIdsForPositions(compId, teamId, positions, squad, pa
     } catch (e) {
       // Minting failed: leave this position's id unresolved (see doc above)
       // and record why.
-      failures.push({ position: posKey, name, reason: (e && e.message) || "" });
+      failures.push(memberWriteFailure(posKey, name, e));
     }
   }
   return { memberIds, squad: currentSquad, failures };
+}
+
+// memberWriteFailure: one resolver failure, in the shape documented above;
+// `code` only when the refusal carried one.
+function memberWriteFailure(position, name, e) {
+  const failure = { position, name, reason: (e && e.message) || "" };
+  if (e && e.code) failure.code = e.code;
+  return failure;
 }
 
 // memberIdentityWarning composes the ONE operator-facing sentence every
@@ -350,14 +358,18 @@ function memberIdentityWarning(failures, squadUnavailable) {
   }
   const list = (Array.isArray(failures) ? failures : []).filter(f => f && f.position);
   if (list.length === 0) return "";
+  // Each part is whole sentences, so a refusal's own sentence (memberRefusalNote)
+  // follows its position as it is, not in brackets.
   const parts = list.map(f => {
     const label = lineupPositionLabel(f.position);
     const who = f.name ? `${label} (${f.name})` : label;
+    const note = memberRefusalNote(f, "");
+    if (note) return `${who} could not be linked to a team member. ${note}`;
     return f.reason
-      ? `${who} could not be linked to a team member (${f.reason})`
-      : `${who} could not be linked to a team member`;
+      ? `${who} could not be linked to a team member (${f.reason}).`
+      : `${who} could not be linked to a team member.`;
   });
-  return `Lineup saved, but ${parts.join(". ")}. Scores will still record normally.`;
+  return `Lineup saved, but ${parts.join(" ")} Scores will still record normally.`;
 }
 
 function AdminLineup({ comp, team, round, password, showToast, onClose }) {

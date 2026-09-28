@@ -36,25 +36,20 @@ const STUBBED_GLOBALS = {
   API: { fetchCompetitionDetails: vi.fn().mockResolvedValue(null), recordScore: vi.fn() },
   Term: ({ children }) => <span>{children}</span>,
   GlossaryHint: ({ name }) => <span title={name} />,
+  // jsdom has no ResizeObserver; the Bracket tab watches its canvas with one.
+  // The environment's window is the global object, so this stub is the global.
+  ResizeObserver: class { observe() {} disconnect() {} },
 };
 
 let restoreGlobals;
 let ViewerCompetition;
-const hadResizeObserver = 'ResizeObserver' in globalThis;
-const realResizeObserver = globalThis.ResizeObserver;
 
 beforeAll(async () => {
   restoreGlobals = installWindowStubs(STUBBED_GLOBALS);
-  // jsdom has no ResizeObserver; the Bracket tab watches its canvas with one.
-  globalThis.ResizeObserver = class { observe() {} disconnect() {} };
   ({ ViewerCompetition } = await import('../../viewer_competition.jsx'));
 });
 
-afterAll(() => {
-  restoreGlobals();
-  if (hadResizeObserver) globalThis.ResizeObserver = realResizeObserver;
-  else delete globalThis.ResizeObserver;
-});
+afterAll(() => restoreGlobals());
 
 beforeEach(() => { probe.props = null; });
 

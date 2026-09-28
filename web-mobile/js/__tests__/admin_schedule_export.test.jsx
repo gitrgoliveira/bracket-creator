@@ -151,6 +151,25 @@ describe('buildXlsxBody teamMatchType param', () => {
   });
 });
 
+// ── tournamentType: the effective format ─────────────────────────────────────
+// A stored "" format is a knockout (state.Competition.EffectiveFormat), and
+// the engine draws it as one, so its blank template must be a knockout too.
+
+describe('buildXlsxBody tournamentType', () => {
+  const four = [player('A', 'D1'), player('B', 'D2'), player('C', 'D3'), player('D', 'D4')];
+
+  it.each([
+    ['', 'knockout'],
+    [undefined, 'knockout'],
+    ['knockout', 'knockout'],
+    ['mixed', 'pools'],
+    ['league', 'pools'],
+  ])('format %j asks for a %s template', (format, type) => {
+    const body = buildXlsxBody({ format, poolSize: 3, poolWinners: 2, courts: ['A'] }, 'Test', four);
+    expect(body.get('tournamentType')).toBe(type);
+  });
+});
+
 // ── regression: non-engi roster uses 2-column layout ────────────────────────
 
 describe('buildXlsxBody non-engi roster lines', () => {

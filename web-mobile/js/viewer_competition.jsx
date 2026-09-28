@@ -3,7 +3,7 @@
 
 import { TermV, competitionKindLabel, poolLabel, compMatchesForCompetition } from './viewer_utils.jsx';
 import { isFollowedPlayer, isPlayerWatched, entryKey, resolveWatchedPlayers, findPrimaryEntry, buildPrimaryNextMatch, buildRoster, useWatchlist, buildWatchedSets, matchInvolvesWatchedSet } from './viewer_watchlist_core.jsx';
-import { MatchDetailCard, VSchedItem, MatchViewerModal, useLiveMatch, matchRowIn } from './viewer_match.jsx';
+import { MatchDetailCard, VSchedItem, MatchViewerModal, useLiveMatch, bracketMatchIn } from './viewer_match.jsx';
 import { WinnerBadge, SwissStandingsViewer, PoolsViewer, LeagueStandingsViewer, DHBadge, matchWinnerName } from './viewer_standings.jsx';
 import { AwardsView } from './viewer_awards.jsx';
 import { usePrimaryWatch } from './viewer_schedule.jsx';
@@ -250,7 +250,7 @@ export function ViewerCompetition({ tournament, competition, pools, poolMatches,
   // round label). A preview bracket is not in allMatches, so its raw row is
   // the fallback, and the Bracket tab's declaration supplies the rest.
   const [selectedMatch, openMatch, closeMatch] = useLiveMatch((id) =>
-    allMatches.find((m) => m.id === id) || matchRowIn({ bracket }, id));
+    allMatches.find((m) => m.id === id) || bracketMatchIn(bracket, id));
   const [bracketOverflowRight, setBracketOverflowRight] = useState(false);
 
   // Keyed on an id STRING, not a match object: re-scroll only when the target
@@ -478,12 +478,11 @@ export function ViewerCompetition({ tournament, competition, pools, poolMatches,
 
 export function ViewerOverview({ c, myPlayer, myUpcoming, currentMatch, runningMatches, upcomingMatches, recentMatches, allMatches, tweaks, tournament, compId, standings, pools, poolMatches, onSwitchTab, hasActiveFilter, filterLabel, highlightPlayers }) {
   const [expandedMatchId, setExpandedMatchId] = useState(null);
-  // allMatches keeps a match that has dropped out of Recent results' cap while
-  // its modal is open. The four lists stay in the lookup for callers that pass
-  // no allMatches, and a running currentMatch is not always in runningMatches.
+  // Every match this tab shows is a row of allMatches (ViewerCompetition
+  // derives the other lists from it), which also keeps a match that has
+  // dropped out of Recent results' cap while its modal is open.
   const [selectedMatch, openMatch, closeMatch] = useLiveMatch((id) =>
-    [currentMatch, ...(runningMatches || []), ...(upcomingMatches || []), ...(recentMatches || []), ...(allMatches || [])]
-      .find((m) => m && m.id === id) || null);
+    (allMatches || []).find((m) => m && m.id === id) || null);
   const isSelfRun = tournament && tournament.mode === "self-run";
 
   const isLeague = c.format === "league";

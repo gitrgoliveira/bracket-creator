@@ -162,7 +162,8 @@ func TestSelfRun_ScoreSheetTeamWrites_AnonymousGuards(t *testing.T) {
 	t.Run("renaming a member who has a name is refused", func(t *testing.T) {
 		f := newTeamWritesFixture(t, true)
 		w := f.send(http.MethodPut, f.membersPath()+"/"+f.namedA, "", map[string]any{"name": "Someone Else"})
-		require.Equal(t, http.StatusConflict, w.Code, w.Body.String())
+		requireRefusal(t, w, http.StatusConflict, "member_already_named",
+			"This team member already has a name. Ask the tournament organizer to change it.")
 		assert.Equal(t, "Sato", f.memberName(t, f.namedA))
 	})
 }
@@ -236,6 +237,41 @@ func TestSelfRun_ScoreSheetTeamWrites_OrganiserUnrestricted(t *testing.T) {
 	w = f.send(http.MethodPut, f.membersPath()+"/"+f.namedA, "main-pw", map[string]any{"name": "Sato Kenji"})
 	require.Equal(t, http.StatusNoContent, w.Code, "renaming a named member: %s", w.Body.String())
 	assert.Equal(t, "Sato Kenji", f.memberName(t, f.namedA))
+}
+
+// A password that is sent but wrong is neither the organiser nor a
+// participant. The public page always sends an EMPTY header, so a wrong one is
+// an organiser holding a stale password: it is answered 401 as a gated route
+// answers it, not refused with a participant's sentence telling them to ask
+// the tournament organizer.
+func TestSelfRun_ScoreSheetTeamWrites_AWrongPasswordIsRefused(t *testing.T) {
+	f := newTeamWritesFixture(t, true)
+	for _, tc := range []struct {
+		name, method, path string
+		body               any
+		asParticipant      int // what the public page's empty header gets
+	}{
+		{"a finished match's lineup", http.MethodPut, f.lineupPath("PoolA-1"), senpo("Mei Ito", f.blankA), http.StatusConflict},
+		{"renaming a named member", http.MethodPut, f.membersPath() + "/" + f.namedA, map[string]any{"name": "Someone Else"}, http.StatusConflict},
+		{"adding a member", http.MethodPost, f.membersPath(), map[string]any{"name": "Ren Abe"}, http.StatusCreated},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			requireInvalidPassword(t, f.send(tc.method, tc.path, "stale-pw", tc.body))
+			w := f.send(tc.method, tc.path, "", tc.body)
+			assert.Equal(t, tc.asParticipant, w.Code, "an empty header is still a participant: %s", w.Body.String())
+		})
+	}
+	_, saved := f.savedLineup(t, "PoolA-1")
+	assert.False(t, saved, "no lineup is written")
+	assert.Equal(t, "Sato", f.memberName(t, f.namedA), "no member is renamed")
+}
+
+// requireInvalidPassword checks a write was refused the way AuthMiddleware
+// refuses a wrong password on a gated route.
+func requireInvalidPassword(t *testing.T, w *httptest.ResponseRecorder) {
+	t.Helper()
+	require.Equal(t, http.StatusUnauthorized, w.Code, w.Body.String())
+	assert.JSONEq(t, `{"error":"invalid tournament password"}`, w.Body.String())
 }
 
 // An officiated tournament opens nothing: the same writes still need the

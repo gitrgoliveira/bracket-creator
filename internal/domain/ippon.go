@@ -243,16 +243,21 @@ func SubBoutAttribution(att WinnerAttribution) WinnerAttribution {
 // SubBoutAttributionForTeamRow is SubBoutAttribution for one bout row of a
 // TEAM encounter, plus the one case it alone does not cover: a row naming no
 // fighter of its own settles at the MATCH level, so it is attributed by the
-// encounter's team names, which are unique by rule. rawAtt must come straight
-// from state.SubMatchResult.Attribution(): the fallback checks the RAW names
-// before SubBoutAttribution runs, because a same-name fighter pair is blanked
-// by it too and must stay blanked. Every team bout row on the score sheets
-// and the Kachinuki Detail sheet is attributed here.
+// encounter's team names. rawAtt must come straight from
+// state.SubMatchResult.Attribution(): whether the row names a fighter is
+// asked of the RAW names, because a same-name fighter pair is blanked by
+// SubBoutAttribution too and must stay blanked. The team names go in AFTER
+// that blank, never through it: they are match-level identity, unique by
+// rule, and where a legacy roster holds two same-named teams the row is
+// attributed as the match itself is, to side A first, the side the app and
+// the standings (state.SubBoutWinnerSide) give it. Every team bout row on the
+// score sheets and the Kachinuki Detail sheet is attributed here.
 func SubBoutAttributionForTeamRow(rawAtt WinnerAttribution, teamSideA, teamSideB string) WinnerAttribution {
+	att := SubBoutAttribution(rawAtt)
 	if rawAtt.SideA == "" && rawAtt.SideB == "" {
-		rawAtt.SideA, rawAtt.SideB = teamSideA, teamSideB
+		att.SideA, att.SideB = teamSideA, teamSideB
 	}
-	return SubBoutAttribution(rawAtt)
+	return att
 }
 
 func AttributeWinnerSide(a WinnerAttribution) MatchSide {

@@ -5,7 +5,7 @@
 // bronze/decider match", reused here rather than re-derived so the exported
 // blank template's bronze block agrees with the same predicate every other
 // surface (settings screen, awards page) already uses.
-import { effectiveTwoThirdPlaces } from './competition_shape.jsx';
+import { effectiveTwoThirdPlaces, resolveFormat, FORMAT_KNOCKOUT, FORMAT_LEAGUE } from './competition_shape.jsx';
 
 const { useState: useStateA } = React;
 
@@ -28,8 +28,11 @@ const csvField = (s) => {
 //   naginata, leagueTwoThirdPlaces.
 // cName is the display name for the competition (used as titlePrefix).
 export function buildXlsxBody(cfg, cName, players) {
-  const isKnockout = cfg.format === "knockout";
-  const singlePool = cfg.format === "league";
+  // A stored "" format is a knockout (resolveFormat): read as pools, a
+  // knockout's template came back as a pool draw.
+  const format = resolveFormat(cfg.format);
+  const isKnockout = format === FORMAT_KNOCKOUT;
+  const singlePool = format === FORMAT_LEAGUE;
   const playersPerPool = singlePool ? players.length : (cfg.poolSize || players.length);
 
   // /create requires 1 <= winnersPerPool < playersPerPool for pools.

@@ -44,6 +44,7 @@ import {
     CLOCK_SKEW_REASON_TEXT, CLOCK_SKEW_ADVICE, CLOCK_SKEW_UNHEALED_ADVICE,
     downstreamKnockoutPlayedQueueDrop, downstreamKnockoutRunningMessage, downstreamKnockoutRunningReopenMessage,
     downstreamKnockoutRunningQueueDrop, courtBusyMessage,
+    FETCH_TIMEOUT_MS, REP_BOUT_NOT_ADDED, REP_BOUT_NOT_REMOVED, noAnswerSentence,
 } from './write_result.jsx';
 
 // ---------------------------------------------------------------------------
@@ -56,11 +57,9 @@ import {
 // The clearTimeout in finally ensures the alarm never fires after the
 // request has already settled, avoiding a stale abort on a new controller.
 // That settling is the HEADERS arriving: the abort covers nothing after it,
-// so a body read that must be bounded as well is bounded by its caller
-// (_jsonBy).
+// so a request whose body must be bounded as well goes through _fetchJson.
+// The deadline itself is FETCH_TIMEOUT_MS (write_result.jsx).
 // ---------------------------------------------------------------------------
-
-const FETCH_TIMEOUT_MS = 12000;
 
 /**
  * fetch() with an automatic abort timeout.
@@ -83,6 +82,17 @@ function fetchWithTimeout(url, opts, ms = FETCH_TIMEOUT_MS) {
 // said what happened. The one owner of that choice.
 function _refusalText(body, fallback) {
     return (body && (body.message || body.error)) || fallback;
+}
+
+// _refusalError: the Error a refused request is thrown with, in _refusalText's
+// words. A refusal that carries a sentence carries its code beside it, and the
+// Error keeps that code, so a caller can tell one refusal from another without
+// comparing words (the team editor and the Lineups page word a member who
+// already has a name alike through it, lineup_resolver.jsx memberRefusalNote).
+function _refusalError(body, fallback) {
+    const e = new Error(_refusalText(body, fallback));
+    if (body && body.message && body.error) e.code = body.error;
+    return e;
 }
 
 // reopenFailureError builds the Error thrown by a failed reopen. reopenMatch and
@@ -2139,46 +2149,62 @@ function _daihyosenOutcome(body) {
     return body.result ?? body;
 }
 
-// _jsonBy reads a response's body as JSON by `deadline` (epoch ms), rejecting
-// once it passes. An unparseable body reads as {}, as `.json().catch(() =>
-// ({}))` does everywhere else; only a body that never completes rejects.
-function _jsonBy(res, deadline) {
-    return new Promise((resolve, reject) => {
-        const timer = setTimeout(() => reject(new Error('the response body did not arrive in time')), Math.max(0, deadline - Date.now()));
-        Promise.resolve().then(() => res.json()).then(
-            (body) => { clearTimeout(timer); resolve(body); },
-            () => { clearTimeout(timer); resolve({}); },
-        );
+// _fetchJson fetches and reads the body as JSON under ONE deadline, on ONE
+// AbortController: fetchWithTimeout's abort ends when the headers arrive, and
+// here the same controller stays armed until the body has been read. A body
+// that stalls is therefore aborted too, which frees its connection, and the
+// budget runs on a timer, so a step of the device's wall clock cannot cut it
+// short. The body read is also raced against the abort itself, so the deadline
+// holds whether or not a platform's json() rejects on it. Resolves to
+// { res, body }; an unparseable body reads as {}, as `.json().catch(() =>
+// ({}))` does everywhere else. Rejects on a network failure or the deadline.
+async function _fetchJson(url, opts, ms = FETCH_TIMEOUT_MS) {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), ms);
+    const aborted = new Promise((_resolve, reject) => {
+        controller.signal.addEventListener('abort', () => reject(new Error('the request was not answered in time')), { once: true });
     });
+    // Nothing else may observe this rejection: it only ends the race below.
+    aborted.catch(() => {});
+    try {
+        const res = await Promise.race([fetch(url, { ...opts, signal: controller.signal }), aborted]);
+        const body = await Promise.race([
+            Promise.resolve().then(() => res.json()).catch((e) => {
+                if (controller.signal.aborted) throw e;
+                return {};
+            }),
+            aborted,
+        ]);
+        return { res, body };
+    } finally {
+        clearTimeout(timer);
+    }
 }
 
 // The daihyosen add (POST) or remove (DELETE), stamped like recordDecision.
-// Bounded like every other write, and the whole of it, body included: the team
-// editor holds each autosave on the court until this request settles, so a
-// request left hanging on a half-open connection would stop all saving there.
-// fetchWithTimeout's abort ends at the headers, so the body is read by the
-// same deadline (_jsonBy): a body that never completes is no answer too. No
-// answer is reported as not done, in a sentence the editor shows as it is; the
-// held write then goes out as it stood, which undoes the change if the server
-// did make it after all. A refusal shows the server's own sentence when it
-// sends one (_refusalText), e.g. a finished match's.
+// Bounded like every other write, and the whole of it, body included
+// (_fetchJson): the team editor holds each autosave on the court until this
+// request settles, so a request left hanging on a half-open connection would
+// stop all saving there. No answer is reported as not done, in a sentence the
+// editor shows as it is (noAnswerSentence); the held write then goes out as
+// the sheet stood before the request, and the score path decides what it
+// makes of a change the server did make after all. A refusal shows the
+// server's own sentence when it sends one (_refusalText), e.g. a finished
+// match's.
 async function _daihyosenRequest(method, compID, matchID, password, notDone) {
-    const noAnswer = `${notDone}: the server did not answer. Check the connection and try again.`;
-    const deadline = Date.now() + FETCH_TIMEOUT_MS;
     let res;
     let body;
     try {
-        res = await fetchWithTimeout(`/api/competitions/${compID}/matches/${matchID}/daihyosen`, {
+        ({ res, body } = await _fetchJson(`/api/competitions/${compID}/matches/${matchID}/daihyosen`, {
             method,
             headers: {
                 'Content-Type': 'application/json',
                 'X-Tournament-Password': password
             },
             body: JSON.stringify({ modifiedAt: _serverNowMs() }),
-        }, FETCH_TIMEOUT_MS);
-        body = await _jsonBy(res, deadline);
+        }));
     } catch (_e) {
-        throw new Error(noAnswer);
+        throw new Error(noAnswerSentence(notDone));
     }
     if (!res.ok) throw new Error(_refusalText(body, notDone));
     return _daihyosenOutcome(body);
@@ -3586,7 +3612,7 @@ const API = {
         });
         if (!res.ok) {
             const err = await res.json().catch(() => ({}));
-            throw new Error(_refusalText(err, "Failed to add team member"));
+            throw _refusalError(err, "Failed to add team member");
         }
         return res.json();
     },
@@ -3603,7 +3629,7 @@ const API = {
         });
         if (!res.ok) {
             const err = await res.json().catch(() => ({}));
-            throw new Error(_refusalText(err, "Failed to rename team member"));
+            throw _refusalError(err, "Failed to rename team member");
         }
         return true;
     },
@@ -3712,7 +3738,7 @@ const API = {
     // Stamped like recordDecision (bc-dhas), so the add competes on
     // timestamps: see _daihyosenOutcome for what comes back.
     async recordDaihyosen(compID, matchID, password) {
-        return _daihyosenRequest('POST', compID, matchID, password, "The representative bout was not added");
+        return _daihyosenRequest('POST', compID, matchID, password, REP_BOUT_NOT_ADDED);
     },
     // T141: remove an unscored daihyosen placeholder from a knockout team match.
     // Returns the updated MatchResult on 200. Throws on 404 (no daihyosen or
@@ -3720,7 +3746,7 @@ const API = {
     // Stamped like the add, in a JSON body (the handler binds one on DELETE
     // too).
     async removeDaihyosen(compID, matchID, password) {
-        return _daihyosenRequest('DELETE', compID, matchID, password, "The representative bout was not removed");
+        return _daihyosenRequest('DELETE', compID, matchID, password, REP_BOUT_NOT_REMOVED);
     },
     // T190-T193 (US13: Swiss format). Generate the next Swiss round.
     // Backend pre-conditions: format=swiss; all matches in the current

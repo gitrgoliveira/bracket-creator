@@ -15,7 +15,7 @@ import { render, act, fireEvent, screen } from '@testing-library/react';
 import { describe, it, expect, vi, beforeAll, afterAll, beforeEach, afterEach } from 'vitest';
 import { installWindowStubs } from '../helpers/stub_globals.js';
 import { AUTOSAVE_DEBOUNCE_MS } from '../../admin_scoring_autosave.jsx';
-import { SUPERSEDED_REASON, SUPERSEDED_ADVICE, CLOCK_SKEW_REASON_TEXT, CLOCK_SKEW_ADVICE } from '../../write_result.jsx';
+import { SUPERSEDED_REASON, SUPERSEDED_ADVICE, CLOCK_SKEW_REASON_TEXT, CLOCK_SKEW_ADVICE, FETCH_TIMEOUT_MS } from '../../write_result.jsx';
 
 // window globals required by admin_scoring_modal.jsx
 // Split into SYNC (evaluated in the component body on every render) and LAZY
@@ -1139,5 +1139,198 @@ describe('bc-dhas: Add then Remove with the match prop never refreshed', () => {
     await settle();
     expect(window.API.recordScore).toHaveBeenCalledTimes(1);
     expect(window.API.recordScore.mock.calls[0][2].subResults.some((s) => s.position === -1)).toBe(false);
+  });
+});
+
+// The organiser's Add is offered on a match that is not running as well. A
+// queued match is saved first, which starts it through the score path's court
+// and eligibility checks; a finished one is judged on its stored bouts, since
+// a running write there is answered stale (and the admin host would tell the
+// organiser to reopen a match that has no reopen).
+describe('bc-dhas: the sheet is saved before an add unless the match has finished', () => {
+  beforeEach(() => {
+    window.API.recordDaihyosen = vi.fn().mockResolvedValue({ ...makeKnockoutTeamMatch(), subResults: [serverDaihyosenRow()] });
+  });
+
+  it('an add on a finished match sends no running write first', async () => {
+    renderModal(makeKnockoutTeamMatch({ status: 'completed' }));
+    await act(async () => { fireEvent.click(screen.getByTestId('scoring-modal-daihyosen-button')); });
+    await settle();
+
+    expect(window.API.recordDaihyosen).toHaveBeenCalledTimes(1);
+    expect(window.API.recordScore).not.toHaveBeenCalled();
+  });
+
+  it('an add on a queued match saves the sheet first, as a running write', async () => {
+    renderModal(makeKnockoutTeamMatch({ status: 'scheduled' }));
+    await act(async () => { fireEvent.click(screen.getByTestId('scoring-modal-daihyosen-button')); });
+    await settle();
+
+    expect(window.API.recordScore).toHaveBeenCalledTimes(1);
+    expect(window.API.recordScore.mock.calls[0][2].status).toBe('running');
+    expect(window.API.recordDaihyosen).toHaveBeenCalledTimes(1);
+  });
+});
+
+// A host can wait on more than its write (the admin hosts refetch every
+// competition after it), so the save made before an add or remove has the
+// request's own deadline. Past it the change is reported as not answered and
+// never sent, and the tap held meanwhile goes out.
+describe('bc-dhas: a save before an add or remove that never settles', () => {
+  beforeEach(() => {
+    window.API.recordDaihyosen = vi.fn();
+    window.API.removeDaihyosen = vi.fn();
+  });
+
+  it.each([
+    ['an add', makeKnockoutTeamMatch, 'scoring-modal-daihyosen-button', 'recordDaihyosen', 'added', false],
+    ['a remove', makeMatchWithDaihyosen, 'team-daihyosen-remove', 'removeDaihyosen', 'removed', true],
+  ])('%s is given up on at the deadline, and the held tap is then written', async (_what, makeMatch, button, api, done, hadRow) => {
+    window.API.recordScore.mockReturnValueOnce(new Promise(() => {}));
+    renderModal(makeMatch());
+    // An edit owed, so a remove saves the sheet first too.
+    await act(async () => { fireEvent.click(tieBoutButton(0)); });
+    await act(async () => { fireEvent.click(screen.getByTestId(button)); });
+    await settle();
+    expect(window.API.recordScore, 'the save is out').toHaveBeenCalledTimes(1);
+
+    await act(async () => { fireEvent.click(tieBoutButton(1)); });
+    await act(async () => { vi.advanceTimersByTime(AUTOSAVE_DEBOUNCE_MS + 50); });
+    await settle();
+    expect(window.API.recordScore, 'held while the save is out').toHaveBeenCalledTimes(1);
+
+    await act(async () => { vi.advanceTimersByTime(FETCH_TIMEOUT_MS); });
+    await settle();
+
+    expect(screen.getByTestId('team-editor-error').textContent)
+      .toBe(`The representative bout was not ${done}: the server did not answer. Check the connection and try again.`);
+    expect(window.API[api]).not.toHaveBeenCalled();
+    expect(window.API.recordScore).toHaveBeenCalledTimes(2);
+    const held = window.API.recordScore.mock.calls[1][2].subResults;
+    expect(held.find((s) => s.position === 2)?.decision).toBe('hikiwake');
+    expect(held.some((s) => s.position === -1)).toBe(hadRow);
+  });
+});
+
+// One overtime counter serves two targets: the representative bout's while it
+// exists, the team match's otherwise. An add or remove moves it between them,
+// and a tap held meanwhile is written from the render that adopts the answer.
+describe('bc-dhas: the overtime count follows the row on an add or remove', () => {
+  beforeEach(() => {
+    window.API.recordDaihyosen = vi.fn();
+    window.API.removeDaihyosen = vi.fn();
+  });
+
+  it("a remove does not write the rep bout's overtime onto the team match", async () => {
+    const remove = deferred();
+    window.API.removeDaihyosen.mockReturnValue(remove.promise);
+    renderModal(makeMatchWithDaihyosen({ subResults: [daihyosenRow({ encho: { periodCount: 1 } })] }));
+    await act(async () => { fireEvent.click(screen.getByTestId('team-daihyosen-remove')); });
+    await settle();
+    await act(async () => { fireEvent.click(tieBoutButton(0)); });
+    await act(async () => { vi.advanceTimersByTime(AUTOSAVE_DEBOUNCE_MS + 50); });
+    expect(window.API.recordScore).not.toHaveBeenCalled();
+
+    await act(async () => { remove.resolve({ ...makeKnockoutTeamMatch(), subResults: [] }); });
+    await settle();
+
+    expect(window.API.recordScore).toHaveBeenCalledTimes(1);
+    const patch = window.API.recordScore.mock.calls[0][2];
+    expect(patch.subResults.some((s) => s.position === -1)).toBe(false);
+    expect(patch.encho).toBeUndefined();
+  });
+
+  it("an add does not write the team match's overtime onto the new rep bout", async () => {
+    const add = deferred();
+    window.API.recordDaihyosen.mockReturnValue(add.promise);
+    renderModal(makeKnockoutTeamMatch({ encho: { periodCount: 1 } }));
+    await act(async () => { fireEvent.click(screen.getByTestId('scoring-modal-daihyosen-button')); });
+    await settle(); // the pre-save lands; the add is out
+    window.API.recordScore.mockClear();
+    await act(async () => { fireEvent.click(tieBoutButton(0)); });
+    await act(async () => { vi.advanceTimersByTime(AUTOSAVE_DEBOUNCE_MS + 50); });
+    expect(window.API.recordScore).not.toHaveBeenCalled();
+
+    await act(async () => { add.resolve({ ...makeKnockoutTeamMatch(), subResults: [serverDaihyosenRow()] }); });
+    await settle();
+
+    expect(window.API.recordScore).toHaveBeenCalledTimes(1);
+    const row = window.API.recordScore.mock.calls[0][2].subResults.find((s) => s.position === -1);
+    expect(row).toBeTruthy();
+    expect(row.encho).toBeUndefined();
+  });
+});
+
+// The override that shows an adopted answer gives way to a prop at least as
+// new as that answer, whatever the prop's log reads: a refetch can bring a log
+// that reads as it did before the add (another device removed the row first),
+// which no comparison of content can tell from no change at all.
+describe('bc-dhas: an adopted answer gives way to a prop at least as new', () => {
+  function renderLive(match) {
+    const onSubmit = makeOnSubmit(match);
+    const onClose = vi.fn();
+    const view = render(<ScoreEditorModal match={match} onClose={onClose} onSubmit={onSubmit} password="" />);
+    return (next) => view.rerender(<ScoreEditorModal match={next} onClose={onClose} onSubmit={onSubmit} password="" />);
+  }
+
+  function lastWrittenRepBout() {
+    const calls = window.API.recordScore.mock.calls;
+    return calls[calls.length - 1][2].subResults.find((s) => s.position === -1);
+  }
+
+  it('a refetch newer than the add, with the log as it was, takes the added row away', async () => {
+    window.API.recordDaihyosen = vi.fn().mockResolvedValue({ ...makeKnockoutTeamMatch(), subResults: [serverDaihyosenRow()], modifiedAt: 2000 });
+    const rerender = renderLive(makeKnockoutTeamMatch({ modifiedAt: 1000 }));
+    await act(async () => { fireEvent.click(screen.getByTestId('scoring-modal-daihyosen-button')); });
+    await settle();
+    expect(subMatchRows()).toHaveLength(4);
+
+    await act(async () => { rerender(makeKnockoutTeamMatch({ modifiedAt: 3000 })); });
+    await settle();
+
+    expect(subMatchRows()).toHaveLength(3);
+    expect(screen.queryByTestId('team-daihyosen-remove')).toBeNull();
+    window.API.recordScore.mockClear();
+    await act(async () => { fireEvent.click(tieBoutButton(0)); });
+    await act(async () => { vi.advanceTimersByTime(AUTOSAVE_DEBOUNCE_MS + 50); });
+    await settle();
+    expect(window.API.recordScore).toHaveBeenCalledTimes(1);
+    expect(lastWrittenRepBout()).toBeUndefined();
+  });
+
+  // The control: the echo of the save made before the add can come back
+  // after the add's answer. It is older than the answer, so the row stays.
+  it('a refetch older than the add keeps the added row', async () => {
+    window.API.recordDaihyosen = vi.fn().mockResolvedValue({ ...makeKnockoutTeamMatch(), subResults: [serverDaihyosenRow()], modifiedAt: 2000 });
+    const rerender = renderLive(makeKnockoutTeamMatch({ modifiedAt: 1000 }));
+    await act(async () => { fireEvent.click(screen.getByTestId('scoring-modal-daihyosen-button')); });
+    await settle();
+
+    await act(async () => { rerender(makeKnockoutTeamMatch({ modifiedAt: 1500 })); });
+    await settle();
+
+    expect(subMatchRows()).toHaveLength(4);
+    expect(screen.getByTestId('team-daihyosen-remove')).toBeTruthy();
+  });
+
+  // Another device scored the new row and its push arrived before this
+  // page's own answer. The answer is older: shown over the prop, its unscored
+  // row would be written back over the other device's point.
+  it('an answer older than the prop when it lands does not hide the newer row', async () => {
+    const add = deferred();
+    window.API.recordDaihyosen = vi.fn().mockReturnValue(add.promise);
+    const rerender = renderLive(makeKnockoutTeamMatch({ modifiedAt: 1000 }));
+    await act(async () => { fireEvent.click(screen.getByTestId('scoring-modal-daihyosen-button')); });
+    await settle();
+    await act(async () => { rerender(makeKnockoutTeamMatch({ modifiedAt: 3000, subResults: [{ ...serverDaihyosenRow(), ipponsA: ['M'], ipponsB: [] }] })); });
+    await act(async () => { add.resolve({ ...makeKnockoutTeamMatch(), subResults: [serverDaihyosenRow()], modifiedAt: 2000 }); });
+    await settle();
+
+    window.API.recordScore.mockClear();
+    await act(async () => { fireEvent.click(tieBoutButton(0)); });
+    await act(async () => { vi.advanceTimersByTime(AUTOSAVE_DEBOUNCE_MS + 50); });
+    await settle();
+    expect(window.API.recordScore).toHaveBeenCalledTimes(1);
+    expect(lastWrittenRepBout()?.ipponsA).toEqual(['M']);
   });
 });

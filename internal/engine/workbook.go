@@ -69,7 +69,10 @@ import (
 //     different Engine methods over different inputs (collectKachinukiMatches
 //     takes an id+comp pair scoped for the stored-draw path;
 //     KachinukiDetailMatches takes only the id), so the DATA differs even
-//     though the RENDERING (step 7) does not.
+//     though the RENDERING (step 7) does not. Before the draw, when step 4
+//     prints a knockout-only competition's skeleton, there is no stored
+//     bracket for that read to list, and the sections come from the rounds
+//     step 4 printed instead (helper.BlankKachinukiSections).
 //
 // courts is the caller's own CompetitionCourts(comp, tourn) result rather
 // than a tournament parameter this function would resolve itself, because
@@ -201,6 +204,14 @@ func (e *Engine) RenderCompetitionWorkbook(
 		}
 		helper.PrintEliminationWithBronze(f, matchWinners, eliminationMatchRounds, comp.TeamBoutRows(),
 			plan, comp.Engi, hasBronze)
+		// Before the draw a knockout-only competition has no stored bracket for
+		// the caller's bout-log read to list, and the sheet above printed the
+		// skeleton seeded from the roster instead. The Kachinuki Detail sheet
+		// lists the same matches from the same rounds, so the two sheets have
+		// one source.
+		if comp.IsKachinuki() && !bracketHasKnockoutContent(bracket) {
+			kachinukiMatches = helper.BlankKachinukiSections(nil, eliminationMatchRounds, hasBronze, comp.TeamBoutRows())
+		}
 	} else if comp.IsKnockoutEnabled() && bracketHasKnockoutContent(bracket) {
 		// The stored bracket already carries knockout content -- a
 		// third-place bout, or at least one round-1-or-later match -- but
@@ -272,8 +283,9 @@ func (e *Engine) RenderCompetitionWorkbook(
 
 	// 7. Kachinuki Detail sheet (T195-T203, CHK037). Opt-in: only emitted
 	//    when the competition runs the kachinuki team-match format and its
-	//    draw has matches. The renderer is a no-op for empty input, so this
-	//    is safe for every other team format.
+	//    draw has matches, or before the draw the skeleton step 4 printed.
+	//    The renderer is a no-op for empty input, so this is safe for every
+	//    other team format.
 	if err := helper.WriteKachinukiDetailSheet(f, kachinukiMatches); err != nil {
 		return nil, nil, err
 	}

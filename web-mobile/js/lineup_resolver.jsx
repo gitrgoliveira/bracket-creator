@@ -144,6 +144,23 @@ export function rosterWithoutPlacedElsewhere(roster, lineup, posKey) {
   });
 }
 
+// MEMBER_ALREADY_NAMED: the code a participant's rename of a team member who
+// already has a name is refused with (errMemberAlreadyNamed,
+// internal/mobileapp/handlers_squad.go). The refusal's sentence is the
+// server's; memberRefusalNote is how both paths that name a member (a typed
+// bout-row name, a saved lineup) show it.
+export const MEMBER_ALREADY_NAMED = "member_already_named";
+
+// memberRefusalNote: the sentence a refused team member write adds after the
+// words that say what was not done. For a member who already has a name it is
+// the server's own sentence, as it is, so the participant reads that refusal
+// one way wherever they typed the name; for anything else it is `fallback`.
+// `refusal` is { code, reason }: the thrown Error's code and message, as a
+// resolver failure records them.
+export function memberRefusalNote(refusal, fallback) {
+  return refusal && refusal.code === MEMBER_ALREADY_NAMED && refusal.reason ? refusal.reason : fallback;
+}
+
 // mergeLineupIdsForPosition composes the WHOLE memberIds map an inline
 // lineup write sends: carries `existingIds` forward untouched, then either
 // sets `posKey` to `resolvedId` or CLEARS it -- clearing happens both when

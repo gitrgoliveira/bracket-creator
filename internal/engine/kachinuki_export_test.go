@@ -703,6 +703,61 @@ func TestCollectKachinukiMatches_UnfoughtDrawCoversEveryMatch(t *testing.T) {
 	}
 }
 
+// Before the draw, a knockout-only competition's workbook prints the bracket
+// skeleton seeded from the roster on the Elimination Matches sheet. Its
+// Kachinuki Detail sheet lists the same matches, from the same skeleton, each
+// with its empty bout rows for hand entry: there is no stored bracket yet for
+// collectKachinukiMatches to read, and the sheet used to be left out.
+func TestExportBeforeTheDrawListsTheSkeletonOnTheKachinukiDetail(t *testing.T) {
+	eng, store, _ := setupTestEngine(t)
+	compID := "kachinuki-before-the-draw"
+	createTestCompetition(t, store, compID, state.CompFormatKnockout, 3, func(c *state.Competition) {
+		c.Kind = "team"
+		c.TeamSize = 3
+		c.TeamMatchType = state.TeamMatchTypeKachinuki
+	})
+	saveTestParticipants(t, store, compID, []string{"Ryu", "Tora", "Kame", "Taka", "Kuma", "Hebi"})
+
+	data, err := eng.ExportCompetitionXlsx(compID)
+	require.NoError(t, err)
+	f, err := excelize.OpenReader(bytes.NewReader(data))
+	require.NoError(t, err)
+	defer func() { require.NoError(t, f.Close()) }()
+
+	elim, err := f.GetRows(helper.SheetEliminationMatches)
+	require.NoError(t, err)
+	var blocks []string
+	for _, row := range elim {
+		if len(row) > 0 && strings.HasPrefix(row[0], "Round ") {
+			blocks = append(blocks, row[0])
+		}
+	}
+	require.NotEmpty(t, blocks, "the skeleton is printed on the Elimination Matches sheet")
+
+	idx, err := f.GetSheetIndex(helper.SheetKachinukiDetail)
+	require.NoError(t, err)
+	require.NotEqual(t, -1, idx, "the workbook has a Kachinuki Detail sheet")
+	detail, err := f.GetRows(helper.SheetKachinukiDetail)
+	require.NoError(t, err)
+	var sections []string
+	for r, row := range detail {
+		if len(row) == 0 {
+			continue
+		}
+		title, ok := strings.CutSuffix(row[0], " (Kachinuki)")
+		if !ok {
+			continue
+		}
+		sections = append(sections, title)
+		bouts := 0
+		for b := r + 3; b < len(detail) && len(detail[b]) > 0 && detail[b][0] == fmt.Sprint(bouts+1); b++ {
+			bouts++
+		}
+		assert.Equal(t, 5, bouts, "%s: 2*3-1 empty bout rows", title)
+	}
+	assert.Equal(t, blocks, sections, "one section per printed block, titled as it and in its order")
+}
+
 // TestCollectKachinukiMatches_MoreBoutsThanTheBlockKeepsThemAll pins that an
 // encounter that fielded reserves past 2*teamSize-1 bouts still lists every
 // bout on the detail sheet; only its main-sheet block stops at that count.

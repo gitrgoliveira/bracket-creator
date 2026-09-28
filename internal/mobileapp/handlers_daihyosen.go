@@ -190,12 +190,9 @@ func RegisterDaihyosenHandlers(r *gin.RouterGroup, eng DaihyosenEngine, store Da
 		// whole match (the pre-fix shape) could revert a concurrent bout score
 		// or delete a daihyosen that was scored in the read→write window.
 		var (
-			updated     state.MatchResult
-			notFound    bool
-			noDaihyosen bool
-			scored      bool
-			haveResult  bool
-			refusal     *selfRunRefusal
+			updated    state.MatchResult
+			resp       *txResponse // the answer when nothing is written, decided under the lock
+			haveResult bool
 		)
 		txErr := store.WithTransaction(id, func(stx state.StoreTx) error {
 			match, found, err := findMatchForDaihyosenTx(stx, id, mid)
@@ -203,17 +200,18 @@ func RegisterDaihyosenHandlers(r *gin.RouterGroup, eng DaihyosenEngine, store Da
 				return err
 			}
 			if !found {
-				notFound = true
+				resp = &txResponse{status: http.StatusNotFound, body: gin.H{"error": "match not found"}}
 				return nil
 			}
 			if anonymous {
-				if refusal = selfRunDaihyosenRefusal(match.Status, "This match has not started. Start it before removing its representative bout."); refusal != nil {
+				if refusal := selfRunDaihyosenRefusal(match.Status, "This match has not started. Start it before removing its representative bout."); refusal != nil {
+					resp = refusal.response()
 					return nil
 				}
 			}
 			dhIdx := state.DaihyosenSubIndex(match.SubResults)
 			if dhIdx < 0 {
-				noDaihyosen = true
+				resp = &txResponse{status: http.StatusNotFound, body: gin.H{"error": "no_daihyosen"}}
 				return nil
 			}
 			// Guard (re-checked under the lock): refuse removal once the DH
@@ -227,7 +225,7 @@ func RegisterDaihyosenHandlers(r *gin.RouterGroup, eng DaihyosenEngine, store Da
 			if len(dh.IpponsA) > 0 || len(dh.IpponsB) > 0 || dh.Winner != "" || dh.HanteiDecided() ||
 				dh.HansokuA > 0 || dh.HansokuB > 0 ||
 				(dh.Decision != "" && dh.Decision != string(domain.DecisionDaihyosen)) {
-				scored = true
+				resp = &txResponse{status: http.StatusConflict, body: gin.H{"error": "daihyosen_scored"}}
 				return nil
 			}
 			// Build an updated match with the DH sub filtered out.
@@ -289,20 +287,11 @@ func RegisterDaihyosenHandlers(r *gin.RouterGroup, eng DaihyosenEngine, store Da
 			internalError(c, txErr)
 			return
 		}
-		switch {
-		case notFound:
-			c.JSON(http.StatusNotFound, gin.H{"error": "match not found"})
+		if resp != nil {
+			c.JSON(resp.status, resp.body)
 			return
-		case refusal != nil:
-			c.JSON(refusal.status, refusal.body())
-			return
-		case noDaihyosen:
-			c.JSON(http.StatusNotFound, gin.H{"error": "no_daihyosen"})
-			return
-		case scored:
-			c.JSON(http.StatusConflict, gin.H{"error": "daihyosen_scored"})
-			return
-		case !haveResult:
+		}
+		if !haveResult {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "daihyosen removal produced no result"})
 			return
 		}
@@ -339,10 +328,8 @@ func RegisterDaihyosenHandlers(r *gin.RouterGroup, eng DaihyosenEngine, store Da
 		var (
 			updated    state.MatchResult
 			subOut     *state.SubMatchResult
-			notFound   bool
-			addErrCode string // "", "not_tied", "pool_match", "insufficient_eligibility", "daihyosen_exists", "engi_competition", "kachinuki_competition", "individual_competition"
+			resp       *txResponse // the answer when nothing is written, decided under the lock
 			haveResult bool
-			refusal    *selfRunRefusal
 		)
 		txErr := store.WithTransaction(id, func(stx state.StoreTx) error {
 			// Engi competitions decide bouts by referee flag counts; a
@@ -354,7 +341,7 @@ func RegisterDaihyosenHandlers(r *gin.RouterGroup, eng DaihyosenEngine, store Da
 				return err
 			}
 			if comp != nil && comp.Engi {
-				addErrCode = "engi_competition"
+				resp = &txResponse{status: http.StatusBadRequest, body: gin.H{"error": "engi competitions do not support daihyosen; use flag scoring instead"}}
 				return nil
 			}
 			// Daihyosen does not exist in kachinuki (mp-gmcg): a tied final
@@ -364,9 +351,9 @@ func RegisterDaihyosenHandlers(r *gin.RouterGroup, eng DaihyosenEngine, store Da
 			// own dispatch gate (TeamSize >= 2 + kachinuki type): a
 			// competition the engine refuses to advance as kachinuki
 			// (MaybeAdvanceKachinuki returns early below TeamSize 2) must not
-			// be told "kachinuki_competition" here either.
+			// be told it is kachinuki here either.
 			if comp.IsKachinuki() {
-				addErrCode = "kachinuki_competition"
+				resp = &txResponse{status: http.StatusBadRequest, body: gin.H{"error": "daihyosen does not exist in kachinuki; a tied final bout is a draw in pools/league and goes to encho in a knockout"}}
 				return nil
 			}
 			// A representative bout breaks a tie between TEAMS. An individual
@@ -374,7 +361,7 @@ func RegisterDaihyosenHandlers(r *gin.RouterGroup, eng DaihyosenEngine, store Da
 			// nothing each and append one. Team is TeamSize >= 2
 			// (ValidateCompetitionTeamSize keeps Kind == "team" in step).
 			if comp != nil && comp.TeamSize < 2 {
-				addErrCode = "individual_competition"
+				resp = &txResponse{status: http.StatusBadRequest, body: gin.H{"error": "individual competitions do not support daihyosen; a representative bout breaks a tie between teams"}}
 				return nil
 			}
 
@@ -383,11 +370,12 @@ func RegisterDaihyosenHandlers(r *gin.RouterGroup, eng DaihyosenEngine, store Da
 				return err
 			}
 			if !found {
-				notFound = true
+				resp = &txResponse{status: http.StatusNotFound, body: gin.H{"error": "match not found"}}
 				return nil
 			}
 			if anonymous {
-				if refusal = selfRunDaihyosenRefusal(match.Status, "This match has not started. Start it before adding a representative bout."); refusal != nil {
+				if refusal := selfRunDaihyosenRefusal(match.Status, "This match has not started. Start it before adding a representative bout."); refusal != nil {
+					resp = refusal.response()
 					return nil
 				}
 			}
@@ -398,7 +386,7 @@ func RegisterDaihyosenHandlers(r *gin.RouterGroup, eng DaihyosenEngine, store Da
 			// The score sheet never offers it; two devices adding at once, or a
 			// crafted request, would.
 			if state.DaihyosenSubIndex(match.SubResults) >= 0 {
-				addErrCode = "daihyosen_exists"
+				resp = &txResponse{status: http.StatusConflict, body: gin.H{"error": "daihyosen_exists"}}
 				return nil
 			}
 
@@ -427,13 +415,13 @@ func RegisterDaihyosenHandlers(r *gin.RouterGroup, eng DaihyosenEngine, store Da
 			if err != nil {
 				switch {
 				case errors.Is(err, engine.ErrNotTied):
-					addErrCode = "not_tied"
+					resp = &txResponse{status: http.StatusBadRequest, body: gin.H{"error": "not_tied"}}
 					return nil
 				case errors.Is(err, engine.ErrPoolMatch):
-					addErrCode = "pool_match"
+					resp = &txResponse{status: http.StatusBadRequest, body: gin.H{"error": "pool_match"}}
 					return nil
 				case errors.Is(err, engine.ErrInsufficientEligibility):
-					addErrCode = "insufficient_eligibility"
+					resp = &txResponse{status: http.StatusConflict, body: gin.H{"error": "insufficient_eligibility"}}
 					return nil
 				default:
 					return err
@@ -479,35 +467,8 @@ func RegisterDaihyosenHandlers(r *gin.RouterGroup, eng DaihyosenEngine, store Da
 			internalError(c, txErr)
 			return
 		}
-		if notFound {
-			c.JSON(http.StatusNotFound, gin.H{"error": "match not found"})
-			return
-		}
-		if refusal != nil {
-			c.JSON(refusal.status, refusal.body())
-			return
-		}
-		switch addErrCode {
-		case "engi_competition":
-			c.JSON(http.StatusBadRequest, gin.H{"error": "engi competitions do not support daihyosen; use flag scoring instead"})
-			return
-		case "kachinuki_competition":
-			c.JSON(http.StatusBadRequest, gin.H{"error": "daihyosen does not exist in kachinuki; a tied final bout is a draw in pools/league and goes to encho in a knockout"})
-			return
-		case "individual_competition":
-			c.JSON(http.StatusBadRequest, gin.H{"error": "individual competitions do not support daihyosen; a representative bout breaks a tie between teams"})
-			return
-		case "not_tied":
-			c.JSON(http.StatusBadRequest, gin.H{"error": "not_tied"})
-			return
-		case "pool_match":
-			c.JSON(http.StatusBadRequest, gin.H{"error": "pool_match"})
-			return
-		case "insufficient_eligibility":
-			c.JSON(http.StatusConflict, gin.H{"error": "insufficient_eligibility"})
-			return
-		case "daihyosen_exists":
-			c.JSON(http.StatusConflict, gin.H{"error": "daihyosen_exists"})
+		if resp != nil {
+			c.JSON(resp.status, resp.body)
 			return
 		}
 		if !haveResult {

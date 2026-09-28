@@ -183,4 +183,26 @@ describe('a participant names a later kachinuki bout\'s fighter (bc-dhas)', () =
     expect(warning.textContent).toContain('Ask the tournament organizer to rename them.');
     expect(warning.textContent).not.toContain('Lineups page');
   });
+
+  // Another device named that member first: the server refuses the rename with
+  // a code and its own sentence, which the row shows as it is, the same words
+  // a saved lineup's warning uses for it (memberRefusalNote).
+  it('a rename refused because the member already has a name says so in the server\'s words', async () => {
+    const sentence = 'This team member already has a name. Ask the tournament organizer to change it.';
+    window.API.renameTeamMember = vi.fn(async () => { throw Object.assign(new Error(sentence), { code: 'member_already_named' }); });
+    const played = [
+      { position: 1, sideA: 'Ren Abe', sideB: 'Mei Ito', ipponsA: ['M', 'M'], ipponsB: [], winner: 'Ren Abe' },
+      { position: 2, sideA: 'Ren Abe', sideB: '', ipponsA: [], ipponsB: [] },
+    ];
+    await openEditor(teamMatch('kachinuki', played), { 'team-A': blank('a'), 'team-B': blank('b') });
+    const shiroNow = () => [...document.querySelectorAll('.team-sub-match__side--shiro input')].pop();
+    await act(async () => { fireEvent.focus(shiroNow()); });
+    const slot = [...document.querySelectorAll('.pmf__option')].find((b) => b.textContent.includes('T2.3'));
+    await act(async () => { fireEvent.mouseDown(slot); });
+    await typeName(shiroNow(), 'Ito');
+
+    const warning = document.querySelector('[data-testid="team-editor-lineup-warning"]');
+    expect(warning, 'the refused rename is reported').toBeTruthy();
+    expect(warning.textContent).toBe(`"Ito" was used for this bout, but the team member could not be renamed. ${sentence}`);
+  });
 });

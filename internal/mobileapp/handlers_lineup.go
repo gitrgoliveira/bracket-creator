@@ -239,16 +239,9 @@ func RegisterLineupHandlers(r *gin.RouterGroup, store TeamLineupStore, comps Com
 		// atomicity argument the engine UpdatePoolMatchByID / UpdateBracket
 		// primitives already make for their own multi-step flows.
 		//
-		// httpErr carries the (status, body) pair the response should
-		// emit; we set it from inside the tx and write the response
-		// AFTER the lock releases. Writing JSON while holding the lock
-		// would let a slow consumer stall every other writer for the
-		// same competition for the entire stream duration.
-		type httpErr struct {
-			status int
-			body   gin.H
-		}
-		var respErr *httpErr
+		// respErr is the error answer, set from inside the tx and written
+		// AFTER the lock releases (txResponse).
+		var respErr *txResponse
 		var persistedLineup domain.TeamLineup
 		txErr := tx.WithTransaction(compID, func(stx state.StoreTx) error {
 			// TeamSize is competition-level: a 3-person team and a
@@ -258,16 +251,16 @@ func RegisterLineupHandlers(r *gin.RouterGroup, store TeamLineupStore, comps Com
 			comp, err := stx.LoadCompetition(compID)
 			if err != nil {
 				log.Printf("mobileapp: PUT /competitions/%s/teams/%s/lineups: LoadCompetition: %v", compID, teamID, err)
-				respErr = &httpErr{status: http.StatusInternalServerError, body: gin.H{"error": "internal error"}}
+				respErr = &txResponse{status: http.StatusInternalServerError, body: gin.H{"error": "internal error"}}
 				return nil
 			}
 			if comp == nil {
-				respErr = &httpErr{status: http.StatusNotFound, body: gin.H{"error": "competition not found"}}
+				respErr = &txResponse{status: http.StatusNotFound, body: gin.H{"error": "competition not found"}}
 				return nil
 			}
 			teamSize := comp.TeamSize
 			if teamSize <= 0 {
-				respErr = &httpErr{
+				respErr = &txResponse{
 					status: http.StatusBadRequest,
 					body:   gin.H{"error": "competition is not configured for team play (teamSize must be > 0)"},
 				}
@@ -277,7 +270,7 @@ func RegisterLineupHandlers(r *gin.RouterGroup, store TeamLineupStore, comps Com
 			if err := stx.SetTeamLineup(compID, lineup, teamSize); err != nil {
 				// Domain validation errors ("team_lineup:" prefix) are 400; a
 				// YAML/disk fault is a 500 (see lineupSetStatus).
-				respErr = &httpErr{status: lineupSetStatus(err), body: gin.H{"error": err.Error()}}
+				respErr = &txResponse{status: lineupSetStatus(err), body: gin.H{"error": err.Error()}}
 				return nil
 			}
 			// Reload after write so the response carries the persisted
@@ -288,7 +281,7 @@ func RegisterLineupHandlers(r *gin.RouterGroup, store TeamLineupStore, comps Com
 			lineups, err := stx.LoadTeamLineups(compID)
 			if err != nil {
 				log.Printf("mobileapp: PUT /competitions/%s/teams/%s/lineups: LoadTeamLineups: %v", compID, teamID, err)
-				respErr = &httpErr{status: http.StatusInternalServerError, body: gin.H{"error": "internal error"}}
+				respErr = &txResponse{status: http.StatusInternalServerError, body: gin.H{"error": "internal error"}}
 				return nil
 			}
 			if persisted, ok := findRoundLineup(lineups, teamID, round); ok {
@@ -353,26 +346,22 @@ func RegisterLineupHandlers(r *gin.RouterGroup, store TeamLineupStore, comps Com
 			return
 		}
 
-		type httpErr struct {
-			status int
-			body   gin.H
-		}
-		var respErr *httpErr
+		var respErr *txResponse // as in the round lineup PUT above
 		var persistedLineup domain.TeamLineup
 		txErr := tx.WithTransaction(compID, func(stx state.StoreTx) error {
 			comp, err := stx.LoadCompetition(compID)
 			if err != nil {
 				log.Printf("mobileapp: PUT /competitions/%s/teams/%s/match-lineups/%s: LoadCompetition: %v", compID, teamID, matchID, err)
-				respErr = &httpErr{status: http.StatusInternalServerError, body: gin.H{"error": "internal error"}}
+				respErr = &txResponse{status: http.StatusInternalServerError, body: gin.H{"error": "internal error"}}
 				return nil
 			}
 			if comp == nil {
-				respErr = &httpErr{status: http.StatusNotFound, body: gin.H{"error": "competition not found"}}
+				respErr = &txResponse{status: http.StatusNotFound, body: gin.H{"error": "competition not found"}}
 				return nil
 			}
 			teamSize := comp.TeamSize
 			if teamSize <= 0 {
-				respErr = &httpErr{
+				respErr = &txResponse{
 					status: http.StatusBadRequest,
 					body:   gin.H{"error": "competition is not configured for team play (teamSize must be > 0)"},
 				}
@@ -389,29 +378,28 @@ func RegisterLineupHandlers(r *gin.RouterGroup, store TeamLineupStore, comps Com
 				snap, found, err := matchSnapshotOrErr(stx, compID, matchID, "lineup")
 				if err != nil {
 					log.Printf("mobileapp: PUT /competitions/%s/teams/%s/match-lineups/%s: %v", compID, teamID, matchID, err)
-					respErr = &httpErr{status: http.StatusInternalServerError, body: gin.H{"error": "internal error"}}
+					respErr = &txResponse{status: http.StatusInternalServerError, body: gin.H{"error": "internal error"}}
 					return nil
 				}
 				if !found {
-					respErr = &httpErr{status: http.StatusNotFound, body: gin.H{"error": "match not found"}}
+					respErr = &txResponse{status: http.StatusNotFound, body: gin.H{"error": "match not found"}}
 					return nil
 				}
 				if isMatchFinalized(snap.Status) {
-					refusal := resultFinalized("This match has finished, so its lineup can no longer be changed. Contact the tournament organizer to correct it.")
-					respErr = &httpErr{status: refusal.status, body: refusal.body()}
+					respErr = resultFinalized("This match has finished, so its lineup can no longer be changed. Contact the tournament organizer to correct it.").response()
 					return nil
 				}
 			}
 			if err := stx.SetTeamLineup(compID, lineup, teamSize); err != nil {
 				// Domain validation errors ("team_lineup:" prefix) are 400; a
 				// YAML/disk fault is a 500 (see lineupSetStatus).
-				respErr = &httpErr{status: lineupSetStatus(err), body: gin.H{"error": err.Error()}}
+				respErr = &txResponse{status: lineupSetStatus(err), body: gin.H{"error": err.Error()}}
 				return nil
 			}
 			lineups, err := stx.LoadTeamLineups(compID)
 			if err != nil {
 				log.Printf("mobileapp: PUT /competitions/%s/teams/%s/match-lineups/%s: LoadTeamLineups: %v", compID, teamID, matchID, err)
-				respErr = &httpErr{status: http.StatusInternalServerError, body: gin.H{"error": "internal error"}}
+				respErr = &txResponse{status: http.StatusInternalServerError, body: gin.H{"error": "internal error"}}
 				return nil
 			}
 			if persisted, found := findMatchLineup(lineups, teamID, matchID); found {

@@ -8,6 +8,10 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { resolveMemberIdForName, resolveMemberIdsForPositions, memberIdentityWarning, blankMemberForPosition } from '../admin_lineup.jsx';
 
+// The server's sentence for a participant's rename of a team member who
+// already has a name (errMemberAlreadyNamed, internal/mobileapp/handlers_squad.go).
+const ALREADY_NAMED_SENTENCE = 'This team member already has a name. Ask the tournament organizer to change it.';
+
 const SQUAD = [
   { id: 'mem-sato', index: 0, name: 'Sato' },
   { id: 'mem-tanaka', index: 1, name: 'Tanaka' },
@@ -213,6 +217,18 @@ describe('resolveMemberIdsForPositions', () => {
     expect(addTeamMember).not.toHaveBeenCalled();
   });
 
+  // bc-dhas: a participant's rename of a member someone has already named is
+  // refused with a code (member_already_named) beside its sentence. The failure
+  // keeps both, so the warning can show that refusal in the server's words.
+  it('a rename refused with a code keeps the code beside the reason', async () => {
+    const refused = Object.assign(new Error(ALREADY_NAMED_SENTENCE), { code: 'member_already_named' });
+    global.window.API = { addTeamMember: vi.fn(), renameTeamMember: vi.fn().mockRejectedValue(refused) };
+    const { failures } = await resolveMemberIdsForPositions(
+      'comp1', 'team1', { senpo: 'Sato' }, BLANK_SQUAD, ''
+    );
+    expect(failures).toEqual([{ position: 'senpo', name: 'Sato', reason: ALREADY_NAMED_SENTENCE, code: 'member_already_named' }]);
+  });
+
   // bc-dnst (currentIds, the 6th argument): a name typed into a slot that
   // was PICKED BY NUMBER (its memberId already recorded on this position,
   // e.g. via LineupNameInput's object-entry roster) must rename THAT
@@ -376,6 +392,28 @@ describe('memberIdentityWarning', () => {
     );
     expect(msg).toContain('team member');
     expect(msg.toLowerCase()).not.toContain('member id');
+  });
+
+  // bc-dhas: a member who already has a name is refused in the server's own
+  // sentence, and the warning shows it as that sentence, the way the score
+  // sheet's bout row does (memberRefusalNote), not in brackets.
+  it('shows a member-already-named refusal in the server\'s own sentence', () => {
+    const msg = memberIdentityWarning(
+      [{ position: 'senpo', name: 'Sato', reason: ALREADY_NAMED_SENTENCE, code: 'member_already_named' }], false,
+    );
+    expect(msg).toBe(`Lineup saved, but Senpo (Sato) could not be linked to a team member. ${ALREADY_NAMED_SENTENCE} Scores will still record normally.`);
+  });
+
+  it('keeps any other reason in brackets, one sentence per position', () => {
+    const msg = memberIdentityWarning(
+      [
+        { position: 'senpo', name: 'Sato', reason: 'offline' },
+        { position: 'taisho', name: 'Ito', reason: ALREADY_NAMED_SENTENCE, code: 'member_already_named' },
+        { position: 'jiho', name: 'Abe', reason: '' },
+      ],
+      false,
+    );
+    expect(msg).toBe(`Lineup saved, but Senpo (Sato) could not be linked to a team member (offline). Taisho (Ito) could not be linked to a team member. ${ALREADY_NAMED_SENTENCE} Jiho (Abe) could not be linked to a team member. Scores will still record normally.`);
   });
 
   it('ignores entries with no position key defensively (never throws on malformed input)', () => {

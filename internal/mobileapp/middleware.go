@@ -314,14 +314,17 @@ func isSelfRunMainGatedConfigRoute(method, fullPath string) bool {
 	}
 }
 
-// selfRunAnonymous reports whether a request reaching a self-run write is an
-// anonymous caller: the tournament is self-run and the request carries no
-// valid main password. Such a caller gets the self-run limits on the routes
-// that are public in self-run (the score path's decision allowlist and
-// finished-match refusal, the score sheet's lineup and member writes); an
-// organiser who sends the password does not. ok is false when the answer
-// could not be worked out, and the error response has then been written, so
-// the caller stops. Fails closed on a tournament that cannot be loaded.
+// selfRunAnonymous reports whether a request reaching a write that is public
+// in self-run comes from a participant: the tournament is self-run and the
+// request's X-Tournament-Password is EMPTY, as the public page always sends
+// it. Every handler that calls it holds such a caller to the self-run limits;
+// an organiser who sends the password is not held to them. A password that is
+// sent but wrong is neither: it is an organiser holding a stale one, answered
+// 401 as AuthMiddleware answers it on a gated route (respondInvalidPassword),
+// rather than refused with a participant's sentence telling them to ask the
+// tournament organizer. ok is false when the response has been written (that
+// 401, or an answer that could not be worked out), so the caller stops. Fails
+// closed on a tournament that cannot be loaded.
 func selfRunAnonymous(c *gin.Context, tl TournamentLoader, verifier PasswordVerifier) (anonymous, ok bool) {
 	t, err := tl.LoadTournament()
 	if err != nil {
@@ -331,12 +334,27 @@ func selfRunAnonymous(c *gin.Context, tl TournamentLoader, verifier PasswordVeri
 	if t == nil || t.Mode != state.TournamentModeSelfRun {
 		return false, true
 	}
-	valid, verr := verifier.Verify(c.GetHeader("X-Tournament-Password"))
+	password := c.GetHeader("X-Tournament-Password")
+	if password == "" {
+		return true, true
+	}
+	valid, verr := verifier.Verify(password)
 	if verr != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "auth verification failed"})
 		return false, false
 	}
-	return !valid, true
+	if !valid {
+		respondInvalidPassword(c)
+		return false, false
+	}
+	return false, true
+}
+
+// respondInvalidPassword answers a request whose X-Tournament-Password is
+// wrong, on a gated route (AuthMiddleware) and on one that is public in
+// self-run (selfRunAnonymous) alike.
+func respondInvalidPassword(c *gin.Context) {
+	c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "invalid tournament password"})
 }
 
 // AuthMiddleware gates admin endpoints behind the X-Tournament-Password
@@ -391,8 +409,7 @@ func AuthMiddleware(verifier PasswordVerifier, store *state.Store) gin.HandlerFu
 				return
 			}
 			if !ok {
-				c.JSON(http.StatusUnauthorized, gin.H{"error": "invalid tournament password"})
-				c.Abort()
+				respondInvalidPassword(c)
 				return
 			}
 			c.Next()
@@ -474,8 +491,7 @@ func AuthMiddleware(verifier PasswordVerifier, store *state.Store) gin.HandlerFu
 			return
 		}
 		if !ok {
-			c.JSON(http.StatusUnauthorized, gin.H{"error": "invalid tournament password"})
-			c.Abort()
+			respondInvalidPassword(c)
 			return
 		}
 

@@ -16,6 +16,7 @@ import React from 'react';
 import { render, act, fireEvent, screen, waitFor } from '@testing-library/react';
 import { describe, it, expect, vi, beforeAll, afterAll, beforeEach } from 'vitest';
 import { installWindowStubs } from '../helpers/stub_globals.js';
+import { SUPERSEDED_REASON, SUPERSEDED_ADVICE } from '../../write_result.jsx';
 
 const STUBBED_GLOBALS = {
   isHikiwake: () => false,
@@ -127,6 +128,21 @@ describe('team editor inline error surface', () => {
     expect(onClose).not.toHaveBeenCalled();
   });
 
+  // An error that says nothing still says what was not done, the same way on
+  // both buttons (the remove used to show nothing at all).
+  it.each([
+    ['a remove', 'removeDaihyosen', 'team-daihyosen-remove', 'The representative bout was not removed', undefined],
+    ['an add', 'recordDaihyosen', 'scoring-modal-daihyosen-button', 'The representative bout was not added',
+      { subResults: [{ position: 1, sideA: 'Team A', sideB: 'Team B', ipponsA: ['M'], ipponsB: ['K'], winner: '' }] }],
+  ])('%s failing with no message says what was not done', async (_what, api, button, sentence, matchOverrides) => {
+    window.API[api] = vi.fn().mockRejectedValue(new Error(''));
+    await renderEditor(matchOverrides ? { match: matchWithDaihyosen(matchOverrides), onSubmit: vi.fn().mockResolvedValue({}) } : {});
+    await act(async () => { fireEvent.click(screen.getByTestId(button)); });
+    await waitFor(() => {
+      expect(screen.getByTestId('team-editor-error').textContent).toBe(sentence);
+    });
+  });
+
   it('surfaces an unmapped server message verbatim rather than a generic notice', async () => {
     window.API.removeDaihyosen = vi.fn().mockRejectedValue(new Error('another operator is scoring this match'));
     await renderEditor();
@@ -173,6 +189,40 @@ describe('team editor inline error surface', () => {
 
     await waitFor(() => {
       expect(screen.getByTestId('team-editor-error').textContent).toBe(QUEUED_MESSAGE);
+    });
+    expect(window.API.removeDaihyosen).not.toHaveBeenCalled();
+  });
+
+  // A pre-save the server REFUSED stops the add or remove too: a newer result
+  // is stored, and a change made over the sheet as this device holds it would
+  // be judged on bouts it has not seen. The not-saved banner says why.
+  const SUPERSEDED = { applied: false, reason: 'superseded' };
+  const failedBannerText = () => document.querySelector('.pending-write-banner--failed')?.textContent;
+
+  it('a superseded pre-save on Add shows the not-saved banner and never posts the add', async () => {
+    const noDaihyosenYet = matchWithDaihyosen({
+      subResults: [
+        { position: 1, sideA: 'Team A', sideB: 'Team B', ipponsA: ['M'], ipponsB: ['K'], winner: '' },
+      ],
+    });
+    await renderEditor({ match: noDaihyosenYet, onSubmit: vi.fn().mockResolvedValue(SUPERSEDED) });
+
+    await act(async () => { fireEvent.click(screen.getByTestId('scoring-modal-daihyosen-button')); });
+
+    await waitFor(() => {
+      expect(failedBannerText()).toBe(`Not saved: ${SUPERSEDED_REASON}. ${SUPERSEDED_ADVICE}`);
+    });
+    expect(window.API.recordDaihyosen).not.toHaveBeenCalled();
+  });
+
+  it('a superseded pre-save on Remove shows the not-saved banner and never posts the remove', async () => {
+    await renderEditor({ onSubmit: vi.fn().mockResolvedValue(SUPERSEDED) });
+
+    await act(async () => { fireEvent.click(ipponButton(subMatchRows()[1], 'shiro', 'M')); });
+    await act(async () => { fireEvent.click(screen.getByTestId('team-daihyosen-remove')); });
+
+    await waitFor(() => {
+      expect(failedBannerText()).toBe(`Not saved: ${SUPERSEDED_REASON}. ${SUPERSEDED_ADVICE}`);
     });
     expect(window.API.removeDaihyosen).not.toHaveBeenCalled();
   });

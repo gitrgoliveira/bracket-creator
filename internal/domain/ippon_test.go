@@ -255,6 +255,19 @@ func TestSubBoutAttributionForTeamRow(t *testing.T) {
 		assert.Equal(t, "Sato", att.SideA)
 		assert.Equal(t, "Ito", att.SideB)
 	})
+
+	// A legacy roster can hold two same-named teams. A row naming no fighter
+	// settles at the match level, where the app and the standings
+	// (state.SubBoutWinnerSide) give such a pair's winner to side A, so the
+	// workbook marks the same side rather than none.
+	t.Run("a nameless row between two same-named teams keeps side A", func(t *testing.T) {
+		att := domain.SubBoutAttributionForTeamRow(
+			domain.WinnerAttribution{Winner: "Kyoto"}, "Kyoto", "Kyoto")
+		assert.Equal(t, domain.MatchSideA, domain.AttributeWinnerSide(att))
+		markA, markB := domain.SideMarksAB(string(domain.DecisionFusensho), false, att)
+		assert.Equal(t, "Fus.", markA, "the fusensho is marked beside side A")
+		assert.Empty(t, markB)
+	})
 }
 
 // TestAttributeWinnerSide_SingleKnownID pins the bc-dnst extension of the id

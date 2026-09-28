@@ -21,6 +21,9 @@ Consequences for a pool of N teams (each team plays N−1 encounters in one "rou
 This contradicts FIK practice: a team may change its order and players between each
 team encounter.
 
+> **Since removed (mp-q722):** the freeze itself is gone. No lineup is locked any
+> more, round-scoped or match-scoped; see resolved decisions 1 and 2 for today's rule.
+
 > Note: bracket/elimination is already correct: a team appears in exactly one match
 > per `Rounds[N]`, so `(teamID, round)` is already 1:1 with the match there. The defect
 > is **pool-specific**.
@@ -33,20 +36,20 @@ Add an optional `MatchID string` to `TeamLineup`.
   **round-scoped** key. The two namespaces never collide (match keys are prefixed).
 - Bracket and legacy round-only data load unchanged: **no on-disk migration**. A
   round-only lineup remains valid and is the fallback when no per-match entry exists.
-- Per-match entries lock independently: locking pool match 1 does **not** freeze the
-  (still-unstarted) lineup for pool match 2.
+- Per-match entries are independent: pool match 1's lineup and pool match 2's are
+  saved and read apart.
 
 ### Resolved decisions
 
-1. **Lock granularity.** A per-match (`MatchID != ""`) lineup locks only when *its*
-   match transitions to live/completed. Round-keyed (legacy) lineups keep the existing
-   round-0 freeze behavior. The engine score path calls **both**
-   `LockTeamLineupForMatch(comp, matchID)` (new) and the legacy
-   `LockTeamLineupsForRound(comp, 0)` (unchanged) so neither keying regresses during
-   transition.
-2. **TOCTOU set-guard.** `SetTeamLineup` for a match-scoped lineup refuses with
-   `ErrLineupLocked` when *that match* is already running/completed (checked by ID).
-   Round-scoped sets keep the existing round-status check.
+1. **No lock.** A lineup, match-scoped or round-scoped, is never locked: it can be
+   saved while its match is scheduled, running or finished (mp-q722). The lock this
+   decision first described (`LockTeamLineupForMatch`, `LockTeamLineupsForRound`,
+   called from the score path) was removed.
+2. **Who is refused.** Only a caller with an empty password in a self-run tournament
+   (the public score sheet) is refused, and only for a match that has finished: 409
+   `result_finalized`, read under the competition's lock (bc-dhas). The organiser,
+   sending the password, can save any lineup. The `ErrLineupLocked` set-guard this
+   decision first described was removed with the lock.
 3. **Migration.** None on disk. The fallback key means existing round-keyed lineups
    keep working; the new UI writes match-keyed entries going forward.
 4. **FIK 5-person rule.** `Validate(teamSize)` is unchanged and runs per set, regardless

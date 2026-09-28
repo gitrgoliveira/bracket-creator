@@ -174,6 +174,23 @@ export function dependentActionBlocked(res) {
     return null;
 }
 
+// FETCH_TIMEOUT_MS: how long a bounded request is waited on before it is
+// reported as not answered. api_client.jsx gives it to every fetchWithTimeout
+// and to _fetchJson (headers AND body there), and the team editor gives it to
+// the save it makes before a representative-bout add or remove, so the hold
+// that save runs under ends too (admin_scoring_team.jsx runRepBoutChange).
+export const FETCH_TIMEOUT_MS = 12000;
+
+// What a representative-bout add or remove leaves undone when it does not
+// land, and the sentence for one the server never answered, or answered with
+// a body that never completed. The team editor shows it as it is, whichever
+// half (the save before the request, or the request) went unanswered.
+export const REP_BOUT_NOT_ADDED = 'The representative bout was not added';
+export const REP_BOUT_NOT_REMOVED = 'The representative bout was not removed';
+export function noAnswerSentence(notDone) {
+    return `${notDone}: the server did not answer. Check the connection and try again.`;
+}
+
 
 // matchLabel names a match the way the OPERATOR sees it: "Match 3", the label
 // on the scores list, the bracket and the printed tree. The internal id

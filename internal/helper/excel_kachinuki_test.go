@@ -156,9 +156,10 @@ func TestKachinukiDetail_ShiroLeftAkaRight(t *testing.T) {
 	assert.Contains(t, summaryF, "1")
 }
 
-// TestKachinukiDetailSheetExists is T195: when a competition has
-// teamMatchType=kachinuki and at least one kachinuki match with bouts,
-// the workbook contains a sheet named SheetKachinukiDetail.
+// TestKachinukiDetailSheetExists is T195: given at least one match section to
+// list, whether it carries recorded bouts (as here) or only the empty numbered
+// rows a match with none gets, the workbook contains a sheet named
+// SheetKachinukiDetail.
 func TestKachinukiDetailSheetExists(t *testing.T) {
 	f := excelize.NewFile()
 	defer func() { _ = f.Close() }()
@@ -566,10 +567,9 @@ func TestKachinukiDetailMultipleMatches(t *testing.T) {
 // adding the detail sheet does not regress the main-sheet layout
 // invariant (NFR-023).
 //
-// We exercise this by calling the existing CLI helper code path (which
-// is kachinuki-agnostic) and confirming the sheet names are present and
-// usable. The detail sheet is then added by WriteKachinukiDetailSheet
-// and must not disturb Pool Matches / Elimination Matches.
+// It creates the standard sheets as NewFileFromScratch does, adds the
+// detail sheet with WriteKachinukiDetailSheet, and checks that doing so
+// leaves Pool Matches / Elimination Matches present and usable.
 func TestKachinukiMainSheetStillSummary(t *testing.T) {
 	f := excelize.NewFile()
 	defer func() { _ = f.Close() }()

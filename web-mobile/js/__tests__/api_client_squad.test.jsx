@@ -108,6 +108,29 @@ describe('the member writes throw a refusal\'s sentence, not its code', () => {
     global.fetch = mockFetch(409, { error: 'result_finalized', message: 'This match has finished. Contact the tournament organizer.' });
     await expect(send(API)).rejects.toThrow('This match has finished. Contact the tournament organizer.');
   });
+
+  // The code stays on the error beside the sentence, so the team editor and
+  // the Lineups page can tell a member who already has a name from any other
+  // refusal (lineup_resolver.jsx memberRefusalNote) without comparing words.
+  it.each([
+    ['add', (API) => API.addTeamMember('c1', 'team-1', 'Ito', '')],
+    ['rename', (API) => API.renameTeamMember('c1', 'team-1', 'm1', 'Ito', '')],
+  ])('the %s keeps a refusal\'s code on the error it throws', async (_name, send) => {
+    global.fetch = mockFetch(409, { error: 'member_already_named', message: 'This team member already has a name. Ask the tournament organizer to change it.' });
+    const err = await send(API).catch((e) => e);
+    expect(err.message).toBe('This team member already has a name. Ask the tournament organizer to change it.');
+    expect(err.code).toBe('member_already_named');
+  });
+
+  it.each([
+    ['add', (API) => API.addTeamMember('c1', 'team-1', 'Ito', '')],
+    ['rename', (API) => API.renameTeamMember('c1', 'team-1', 'm1', 'Ito', '')],
+  ])('the %s leaves no code on a refusal that is only a message', async (_name, send) => {
+    global.fetch = mockFetch(404, { error: 'team member not found' });
+    const err = await send(API).catch((e) => e);
+    expect(err.message).toBe('team member not found');
+    expect(err.code).toBeUndefined();
+  });
 });
 
 describe('API.clearTeamMember', () => {

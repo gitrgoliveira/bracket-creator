@@ -221,7 +221,8 @@ func NewRouterWithHub(store *state.Store, eng *engine.Engine, res *resources.Res
 	// Sponsor uploads (mp-c38), multipart logo upload needs envelope
 	// headroom for the file plus boundary/form-field overhead; so it gets
 	// its own 2 MB group separate from the 1 MB JSON tier. DELETE rides
-	// on the same group (DELETE skips the cap by method anyway).
+	// on the same group; a DELETE sends no body, and one that did would be
+	// capped like a POST (MaxBodyBytes).
 	adminSponsorBody := adminGroup(r, SponsorMaxBodyBytes, verifier, store)
 	RegisterSponsorHandlers(adminSponsorBody, store, hub)
 

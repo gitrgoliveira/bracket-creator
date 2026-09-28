@@ -1568,12 +1568,15 @@ func TestIsSelfRunReportableDecision(t *testing.T) {
 }
 
 func TestIsSelfRunReportableSubDecision(t *testing.T) {
+	// A hantei mark is not this function's to judge: validateSubBout refuses
+	// one on a numbered bout for every caller ("invalid: hantei on regular
+	// bout position"), and holdSelfReportedWriteUnderTx judges the one on the
+	// representative bout against the stored verdict.
 	tests := []struct {
-		name            string
-		decision        string
-		decidedByHantei bool
-		position        int
-		want            bool
+		name     string
+		decision string
+		position int
+		want     bool
 	}{
 		{name: "empty sub-decision allowed", decision: "", position: 1, want: true},
 		{name: "fought sub-decision allowed", decision: "fought", position: 1, want: true},
@@ -1583,16 +1586,12 @@ func TestIsSelfRunReportableSubDecision(t *testing.T) {
 		{name: "daihyosen on a numbered bout rejected", decision: "daihyosen", position: 1, want: false},
 		{name: "the representative bout (position -1) allowed", decision: "daihyosen", position: -1, want: true},
 		{name: "the representative bout with no decision allowed", decision: "", position: -1, want: true},
-		// Judged against the stored verdict under the write's lock instead
-		// (holdSelfReportedWriteUnderTx): an echo of the organiser's must pass.
-		{name: "hantei on the representative bout left to the stored verdict", decision: "daihyosen", decidedByHantei: true, position: -1, want: true},
 		{name: "kiken on the representative bout rejected", decision: "kiken-voluntary", position: -1, want: false},
-		{name: "decidedByHantei true sub rejected", decision: "fought", decidedByHantei: true, position: 1, want: false},
 		{name: "position 0 allowed", decision: "fought", position: 0, want: true},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			got := IsSelfRunReportableSubDecision(tc.decision, tc.decidedByHantei, tc.position)
+			got := IsSelfRunReportableSubDecision(tc.decision, tc.position)
 			assert.Equal(t, tc.want, got)
 		})
 	}

@@ -73,10 +73,10 @@ func TestAttachPoolMatches_MiddleSkipPreservesOrdinals(t *testing.T) {
 }
 
 // TestAttachPoolMatches_PrefersSideIDs is the regression test for the same-name
-// participant bug in attachPoolMatches: two competitors can share a name but sit
+// participant bug in AttachPoolMatches: two competitors can share a name but sit
 // in different dojos (allowed), so a name-only side lookup attaches the wrong
-// Player. The fix resolves each side by its authoritative SideAID/SideBID UUID
-// first, falling back to the name only when no ID is present.
+// Player. Each side is resolved by its SideAID/SideBID UUID, and by nothing
+// else (TestAttachPoolMatches_IDlessSidesAreUnresolvable).
 func TestAttachPoolMatches_PrefersSideIDs(t *testing.T) {
 	t.Parallel()
 
@@ -156,9 +156,9 @@ func poolMatchRows(t *testing.T, xlsx []byte) int {
 	return n
 }
 
-// TestExportCompetitionXlsx_PoolMatchBlocksSurviveARestart pins that the blank
-// template builds its Pool Matches grid from the stored pool results, as the
-// results export does: pools.csv records membership only, and a fresh Store
+// TestExportCompetitionXlsx_PoolMatchBlocksSurviveARestart pins that the
+// stored-draw export builds its Pool Matches grid from the stored pool results,
+// as the results export does: pools.csv records membership only, and a fresh Store
 // and Engine over the same data dir (a server restart) used to print no match
 // blocks at all.
 func TestExportCompetitionXlsx_PoolMatchBlocksSurviveARestart(t *testing.T) {

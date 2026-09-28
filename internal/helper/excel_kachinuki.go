@@ -9,7 +9,9 @@ package helper
 // flexible 6-column layout chosen for readability, NOT bound by
 // CourtsColumnsPerCourt. A competition with teamMatchType=kachinuki and a
 // draw with matches in it gets it in both of the app's workbook exports and
-// in the blank template the /create generator draws.
+// in the blank template the /create generator draws; before the draw, a
+// knockout-only one gets it for the skeleton its Elimination Matches sheet
+// prints.
 //
 // Layout per match section (rows are 1-based relative to the section start),
 // Shiro (SideB) LEFT and Aka (SideA) RIGHT throughout, per helper.WhiteLeft

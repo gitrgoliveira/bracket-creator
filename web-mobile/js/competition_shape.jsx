@@ -113,6 +113,15 @@ export const POOL_FORMAT_OPTIONS = [
   { value: POOL_FORMAT_PARTIAL, label: "Partial / neighbour-only", hint: "Each participant plays a neighbourhood subset: useful when a full round-robin would not fit in the day's schedule." },
 ];
 
+// resolveFormat: a stored "" format is a knockout, as
+// state.Competition.EffectiveFormat (internal/state/models.go) reads it.
+// "" is a legitimate stored value, which the write doors accept, so a
+// surface that branches on the format asks this rather than comparing the
+// stored value to a literal.
+export function resolveFormat(format) {
+  return format || FORMAT_KNOCKOUT;
+}
+
 // resolvePoolFormat: a stored/legacy "" means "full" -- the engine's own
 // unset default (internal/engine/pools.go's `switch comp.PoolFormat`
 // falls through to the full round-robin arm). Both screens need this to

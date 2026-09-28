@@ -1761,8 +1761,9 @@ func RegisterMatchHandlers(r *gin.RouterGroup, eng *engine.Engine, store Competi
 }
 
 // enforceSelfRunPolicy applies the self-run decision allowlist when the
-// tournament is in self-run mode and the request carries no valid admin
-// password. Returns the resultSource string ("admin" or "self-reported")
+// tournament is in self-run mode and the request's password is empty, as the
+// public page sends it (selfRunAnonymous; a password sent but wrong is a 401
+// there). Returns the resultSource string ("admin" or "self-reported")
 // and true on success; writes the HTTP error response and returns "",
 // false when the request should be rejected.
 //
@@ -1792,7 +1793,7 @@ func enforceSelfRunPolicy(c *gin.Context, tl TournamentLoader, verifier Password
 	}
 	for i := range req.SubResults {
 		sub := &req.SubResults[i]
-		if !IsSelfRunReportableSubDecision(sub.Decision, sub.HanteiDecided(), sub.Position) {
+		if !IsSelfRunReportableSubDecision(sub.Decision, sub.Position) {
 			c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("subResults[%d]: decision type not allowed in self-run mode without admin password", i)})
 			return "", false
 		}
@@ -1821,11 +1822,13 @@ type selfRunRefusal struct {
 
 func (r *selfRunRefusal) Error() string { return r.code }
 
-// Message is the sentence the public page shows as it is.
-func (r *selfRunRefusal) Message() string { return r.message }
-
 // body is the response body: the code and the sentence.
 func (r *selfRunRefusal) body() gin.H { return gin.H{"error": r.code, "message": r.message} }
+
+// response is the refusal as a handler answers it after its transaction.
+func (r *selfRunRefusal) response() *txResponse {
+	return &txResponse{status: r.status, body: r.body()}
+}
 
 // resultFinalized is the refusal of an anonymous self-run write to a match
 // that has finished, which only the organiser corrects. The score path, the
@@ -1843,8 +1846,8 @@ var errResultFinalized = resultFinalized("This match result has already been rep
 // repBoutHanteiRefusal is the refusal of an anonymous write that would record,
 // move or clear the judges' decision (hantei) on the representative bout, or
 // finish the match against it. recorded says whether the organiser recorded
-// one, which decides the sentence. The first is also the note the public score
-// sheet shows under a representative bout the judges decided
+// one, which decides the sentence. The recorded one is also the note the public
+// score sheet shows under a representative bout the judges decided
 // (admin_scoring_team.jsx); testdata/rep_bout_hantei_messages.json holds both
 // for the two languages.
 func repBoutHanteiRefusal(recorded bool) *selfRunRefusal {
@@ -1863,15 +1866,6 @@ var errDuplicateRepBout = &selfRunRefusal{
 	message: "A team match has one representative bout, and this score lists more than one. Reload the score sheet and try again.",
 }
 
-// errNoRepBout refuses a write scoring a representative bout the match does
-// not have. Only the add route creates one, with its tie, pool, kachinuki,
-// engi and eligibility checks, and the score path makes none of them.
-var errNoRepBout = &selfRunRefusal{
-	status:  http.StatusConflict,
-	code:    "no_daihyosen",
-	message: "This match has no representative bout. Add it on the score sheet before scoring it.",
-}
-
 // holdSelfReportedWriteUnderTx is the one judge of an anonymous self-run score
 // write. It runs inside WithTransaction (under the per-comp lock), so the
 // stored match it reads, once, cannot change before the write lands. It
@@ -1882,8 +1876,14 @@ var errNoRepBout = &selfRunRefusal{
 //   - A match that has finished is the organiser's to correct
 //     (errResultFinalized).
 //   - An encounter has one representative bout: a write listing two is
-//     refused (errDuplicateRepBout), and so is one scoring a representative
-//     bout the match does not have (errNoRepBout).
+//     refused (errDuplicateRepBout). A participant's write never creates one
+//     (only the add route does, with its tie, pool, kachinuki, engi and
+//     eligibility checks), so a row for a representative bout the match does
+//     not have is one the write inherited, from a sheet a moment behind a
+//     remove made elsewhere or a queued write replayed after it. The row is
+//     dropped and logged, as stripInvalidHantei drops what a write inherited,
+//     and the rest of the write goes on to be written as usual, the timestamp
+//     guard deciding a stale one.
 //   - Once the organiser recorded a judges' decision on the representative
 //     bout, the write's row must send it back (sameHanteiVerdict) or leave the
 //     row's ippons out (engine.KeepsStoredDaihyosenVerdict), a write listing
@@ -1899,7 +1899,8 @@ var errNoRepBout = &selfRunRefusal{
 // ones the write sends, through the attribution the engine uses (ids first), so
 // an id naming the other side cannot pass behind a matching name. A start
 // (startOnly) keeps the stored bouts whatever it sends (engine.keepQueuedScore),
-// so its sub-results are not judged.
+// so its sub-results are not judged, and the engine derives its winner from
+// the bouts it keeps.
 //
 // Fails closed: a load error rejects the request rather than allowing the write
 // (matchSnapshotOrErr). A match in neither store passes on purpose: the write
@@ -1926,7 +1927,12 @@ func holdSelfReportedWriteUnderTx(stx state.StoreTx, compID, matchID string, res
 	}
 	stored := snap.RepBout
 	if row >= 0 && stored == nil {
-		return errNoRepBout
+		// Into a fresh slice, which stays a list (never nil) even when the row
+		// was all it held: nil would tell the engine to keep the stored bouts.
+		kept := make([]state.SubMatchResult, 0, len(subs)-1)
+		result.SubResults = append(append(kept, subs[:row]...), subs[row+1:]...)
+		log.Printf("mobileapp: dropped the representative bout from a self-run score write to %s/%s because the match has none; the rest of the write was kept", compID, matchID)
+		return nil
 	}
 	if stored == nil || !stored.HanteiDecided() {
 		if row >= 0 && subs[row].HanteiDecided() {

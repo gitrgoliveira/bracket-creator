@@ -354,25 +354,24 @@ export function useLiveMatch(rowOf) {
   return [match, open, () => setPicked(null)];
 }
 
-// matchInList: the row a tournament-wide match list (tournamentMatches) holds
-// for a match, found by its id AND its competition, because match ids repeat
-// across competitions (each draw numbers its own): by id alone, another
-// competition's match of the same id would stand in for it. Home and Schedule
-// give it to useLiveMatch as their `rowOf`.
+// matchInList: the row a match list built by tournamentMatches holds for a
+// match, found by its id AND its competition, because match ids repeat across
+// competitions (each draw numbers its own): by id alone, another competition's
+// match of the same id would stand in for it. Home and Schedule use it in
+// their `rowOf` for useLiveMatch.
 export function matchInList(list, id, compId) {
   return list.find((m) => m.id === id && m.compId === compId);
 }
 
-// matchRowIn: the row a competition holds for a match id, read where
-// compMatches (viewer_utils.jsx) reads its rows: the pool matches, the bracket
-// rounds, or the bronze. A raw row, without compMatches' own fields.
-export function matchRowIn(comp, id) {
-  if (!comp) return null;
-  const b = comp.bracket;
-  const rounds = (b && b.rounds) || (Array.isArray(b) ? b : []);
-  return (comp.poolMatches || (comp.pools || []).flatMap((p) => p.matches || [])).find((m) => m && m.id === id)
-    || rounds.flat().find((m) => m && m.id === id)
-    || (b && b.thirdPlaceMatch && b.thirdPlaceMatch.id === id ? b.thirdPlaceMatch : null);
+// bracketMatchIn: the row a bracket holds for a match id, in its rounds or its
+// bronze, read as compMatches (viewer_utils.jsx) reads them, the legacy
+// array-shaped bracket included. A raw row, without compMatches' own fields:
+// the Bracket tab opens a preview bracket's match through it, since a preview
+// is not in the competition's match list.
+export function bracketMatchIn(bracket, id) {
+  const rounds = (bracket && bracket.rounds) || (Array.isArray(bracket) ? bracket : []);
+  return rounds.flat().find((m) => m && m.id === id)
+    || (bracket && bracket.thirdPlaceMatch && bracket.thirdPlaceMatch.id === id ? bracket.thirdPlaceMatch : null);
 }
 
 // ---------------------------------------------------------------------------

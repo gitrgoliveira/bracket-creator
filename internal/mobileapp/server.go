@@ -206,7 +206,7 @@ func NewRouterWithHub(store *state.Store, eng *engine.Engine, res *resources.Res
 	RegisterReinstateHandler(adminSmallBody, eng, hub)
 	RegisterLineupHandlers(adminSmallBody, store, store, store, hub, store, verifier)
 	RegisterSquadHandlers(adminSmallBody, store, store, hub, store, verifier)
-	RegisterDaihyosenHandlers(adminSmallBody, eng, store, hub)
+	RegisterDaihyosenHandlers(adminSmallBody, eng, store, hub, store, verifier)
 	RegisterLeagueTiebreakHandlers(adminSmallBody, eng, store, hub)
 	RegisterSwissHandlers(adminSmallBody, store, eng, hub)
 

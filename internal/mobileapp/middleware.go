@@ -287,7 +287,7 @@ func isSelfRunMainGatedConfigRoute(method, fullPath string) bool {
 		http.MethodGet + " /api/competitions/:id/export-results",                           // mp-i96p: results xlsx export, admin/CPU-heavy, keep gated like /export
 		http.MethodPut + " /api/competitions/:id/matches/:mid/court",                       // court assignment, organiser coordination
 		http.MethodPut + " /api/competitions/:id/matches/:mid/time",                        // match time, organiser coordination
-		http.MethodPost + " /api/competitions/:id/matches/bulk-score",                      // bc-dhas: organiser tooling; it skips the participant score path's self-run rules (enforceSelfRunPolicy, checkSelfReportedUnderTx), so a public one would bypass them
+		http.MethodPost + " /api/competitions/:id/matches/bulk-score",                      // bc-dhas: organiser tooling; it skips the participant score path's self-run rules (enforceSelfRunPolicy, holdSelfReportedWriteUnderTx), so a public one would bypass them
 		http.MethodPut + " /api/competitions/:id/matches/:mid/quick-score",                 // bc-dhas: same, and it replaces a match's bouts outright, finished or not
 		http.MethodPut + " /api/competitions/:id/seeds",                                    // seeding, organiser pre-draw setup
 		http.MethodPost + " /api/competitions/:id/competitors/:pid/reinstate",              // kiken-injury reinstatement, organiser decision

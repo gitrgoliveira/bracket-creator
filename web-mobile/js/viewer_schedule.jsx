@@ -5,7 +5,7 @@ import { poolLabel, tournamentMatches, compareDmy } from './viewer_utils.jsx';
 import { matchParticipantIds, matchParticipantNames, useWatchlist, resolveEntryPlayerIds, resolveWatchedPlayers, findPrimaryEntry, buildRoster, buildWatchedSets, matchInvolvesWatchedSet } from './viewer_watchlist_core.jsx';
 import { withNumber, teamNameMark } from './match_scoreboard.jsx';
 import { SideCell } from './side_cell.jsx';
-import { MatchViewerModal, localQueueLabelCompact, useLiveMatch } from './viewer_match.jsx';
+import { MatchViewerModal, localQueueLabelCompact, useLiveMatch, matchInList } from './viewer_match.jsx';
 import { sameCompetitor, competitorKey } from './competitor_identity.jsx';
 import { competitorMatchesQuery, matchMentions } from './competitor_search.jsx';
 import { resultRecencyDesc } from './result_recency.jsx';
@@ -561,12 +561,9 @@ export function ScheduleViewer({ tournament, tweaks }) {
 
 // Tournament-wide schedule wrapper for the viewer (its own screen)
 export function ViewerSchedule({ tournament, onBack, tweaks }) {
-  // A match opens by its id and competition (match ids repeat across
-  // competitions) and shows the live row from the same list the schedule
-  // draws from.
+  // A match opens on the live row of the list the schedule draws from.
   const allMatches = useMemo(() => tournamentMatches(tournament), [tournament]);
-  const [selectedMatch, openMatch, closeMatch] = useLiveMatch((id, compId) =>
-    allMatches.find((m) => m.id === id && m.compId === compId));
+  const [selectedMatch, openMatch, closeMatch] = useLiveMatch((id, compId) => matchInList(allMatches, id, compId));
   const extendedTweaks = { ...tweaks, onMatchClick: openMatch };
   return (
     <div className="viewer">

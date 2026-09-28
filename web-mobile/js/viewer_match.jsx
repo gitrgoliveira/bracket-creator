@@ -354,6 +354,15 @@ export function useLiveMatch(rowOf) {
   return [match, open, () => setPicked(null)];
 }
 
+// matchInList: the row a tournament-wide match list (tournamentMatches) holds
+// for a match, found by its id AND its competition, because match ids repeat
+// across competitions (each draw numbers its own): by id alone, another
+// competition's match of the same id would stand in for it. Home and Schedule
+// give it to useLiveMatch as their `rowOf`.
+export function matchInList(list, id, compId) {
+  return list.find((m) => m.id === id && m.compId === compId);
+}
+
 // matchRowIn: the row a competition holds for a match id, read where
 // compMatches (viewer_utils.jsx) reads its rows: the pool matches, the bracket
 // rounds, or the bronze. A raw row, without compMatches' own fields.

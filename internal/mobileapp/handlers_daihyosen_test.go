@@ -33,7 +33,7 @@ func setupDaihyosenTestRouter(t *testing.T) (*gin.Engine, *state.Store, *engine.
 	gin.SetMode(gin.TestMode)
 	r := gin.New()
 	api := r.Group("/api")
-	RegisterDaihyosenHandlers(api, eng, store, hub)
+	RegisterDaihyosenHandlers(api, eng, store, hub, store, NewFileVerifier(store))
 
 	return r, store, eng, hub, dir
 }
@@ -309,7 +309,7 @@ func TestCountEligibleForSides_OneIneligible(t *testing.T) {
 // non-existent match returns 404.
 func TestDaihyosenHandler_MatchNotFound(t *testing.T) {
 	r, store, _, _, _ := setupDaihyosenTestRouter(t)
-	require.NoError(t, store.SaveCompetition(&state.Competition{ID: "c1"}))
+	require.NoError(t, store.SaveCompetition(&state.Competition{ID: "c1", Kind: "team", TeamSize: 3}))
 
 	req := httptest.NewRequest(http.MethodPost,
 		"/api/competitions/c1/matches/no-such-match/daihyosen", nil)
@@ -324,7 +324,7 @@ func TestDaihyosenHandler_MatchNotFound(t *testing.T) {
 func TestDaihyosenHandler_HappyPath(t *testing.T) {
 	r, store, _, _, _ := setupDaihyosenTestRouter(t)
 	compID := "dh-happy"
-	require.NoError(t, store.SaveCompetition(&state.Competition{ID: compID}))
+	require.NoError(t, store.SaveCompetition(&state.Competition{ID: compID, Kind: "team", TeamSize: 3}))
 	// Save one eligible participant (so countEligibleForSides returns > 0).
 	p1ID := "11111111-1111-4111-1111-111111111111"
 	require.NoError(t, store.SaveParticipants(compID, []domain.Player{
@@ -374,10 +374,10 @@ func TestDaihyosenHandler_BroadcastsStarted(t *testing.T) {
 	hub := &recordingBroadcaster{}
 	gin.SetMode(gin.TestMode)
 	r := gin.New()
-	RegisterDaihyosenHandlers(r.Group("/api"), startedAutoEngine{engine.New(store)}, store, hub)
+	RegisterDaihyosenHandlers(r.Group("/api"), startedAutoEngine{engine.New(store)}, store, hub, store, NewFileVerifier(store))
 
 	compID := "dh-started"
-	require.NoError(t, store.SaveCompetition(&state.Competition{ID: compID}))
+	require.NoError(t, store.SaveCompetition(&state.Competition{ID: compID, Kind: "team", TeamSize: 3}))
 	require.NoError(t, store.SaveParticipants(compID, []domain.Player{
 		{ID: "11111111-1111-4111-1111-111111111111", Name: "Alice", Dojo: "A"},
 	}))
@@ -557,7 +557,7 @@ func TestRemoveDaihyosen(t *testing.T) {
 // match returns 400 with "pool_match" because daihyosen is knockout-only.
 func TestDaihyosenHandler_PoolMatchReturnsError(t *testing.T) {
 	r, store, _, _, _ := setupDaihyosenTestRouter(t)
-	require.NoError(t, store.SaveCompetition(&state.Competition{ID: "c1"}))
+	require.NoError(t, store.SaveCompetition(&state.Competition{ID: "c1", Kind: "team", TeamSize: 3}))
 	require.NoError(t, store.SavePoolMatches("c1", []state.MatchResult{
 		{ID: "Pool A-0", SideA: "TeamA", SideB: "TeamB"},
 	}))
@@ -575,14 +575,10 @@ func TestDaihyosenHandler_PoolMatchReturnsError(t *testing.T) {
 
 // TestRemoveDaihyosen_PoolMatchWithStaleWinnerIDSucceeds is the round-2 Opus
 // review's finding 3: DELETE /daihyosen's `u := *match` inherits the stored
-// match's WinnerID/WinnerSide verbatim. POST can never reach a match with a
-// STALE WinnerID (AddDaihyosen rejects any "Pool "-prefixed id with
-// ErrPoolMatch before its own `u := *match`, and AddDaihyosen only succeeds
-// against a TIED, RUNNING encounter -- i.e. no Winner/WinnerID recorded yet
-// either way -- so the bracket projection's WinnerID is always empty here,
-// even though daihyosenBracketResult now projects a stamped BracketMatch's
-// real SideAID/SideBID/WinnerID faithfully, bc-brid), but DELETE has no
-// such gate: findMatchForDaihyosenTx dispatches purely on ID shape, so a
+// match's WinnerID/WinnerSide verbatim. POST can never reach a POOL match
+// (AddDaihyosen rejects any "Pool "-prefixed id with ErrPoolMatch before its
+// own `u := *match`), but DELETE has no such gate:
+// findMatchForDaihyosenTx dispatches purely on ID shape, so a
 // legacy/hand-edited POOL match row that has picked up an unscored
 // Position=-1 placeholder sub (this handler's normal removal target) CAN
 // carry real SideAID/SideBID plus a stale match-level WinnerID left over from
@@ -685,9 +681,9 @@ func daihyosenStampRouter(t *testing.T, compID string, storedAt int64, withRow b
 	hub := &recordingBroadcaster{}
 	gin.SetMode(gin.TestMode)
 	r := gin.New()
-	RegisterDaihyosenHandlers(r.Group("/api"), engine.New(store), store, hub)
+	RegisterDaihyosenHandlers(r.Group("/api"), engine.New(store), store, hub, store, NewFileVerifier(store))
 
-	require.NoError(t, store.SaveCompetition(&state.Competition{ID: compID}))
+	require.NoError(t, store.SaveCompetition(&state.Competition{ID: compID, Kind: "team", TeamSize: 3}))
 	require.NoError(t, store.SaveParticipants(compID, []domain.Player{
 		{ID: "11111111-1111-4111-1111-111111111111", Name: "Alice", Dojo: "A"},
 	}))
@@ -723,12 +719,7 @@ func storedB1(t *testing.T, store *state.Store, compID string) state.BracketMatc
 }
 
 func carriesDaihyosenRow(subs []state.SubMatchResult) bool {
-	for _, s := range subs {
-		if s.Position == state.DaihyosenSubPosition {
-			return true
-		}
-	}
-	return false
+	return state.DaihyosenSubIndex(subs) >= 0
 }
 
 // TestDaihyosenWrites_CompeteOnTimestamps: the add and the remove carry the
@@ -837,7 +828,7 @@ func TestDaihyosenRowAsTheAddReturnsItSurvivesAScoreWrite(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	r := gin.New()
 	api := r.Group("/api")
-	RegisterDaihyosenHandlers(api, eng, store, hub)
+	RegisterDaihyosenHandlers(api, eng, store, hub, store, NewFileVerifier(store))
 	RegisterMatchHandlers(api, eng, store, store, hub, NewFileVerifier(store), store)
 
 	compID := "dh-owed-write"

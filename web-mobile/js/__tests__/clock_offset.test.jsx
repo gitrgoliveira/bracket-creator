@@ -564,6 +564,34 @@ describe('clock_skew recovery: a live completed write', () => {
         unsub();
     });
 
+    // bc-dhas: the resend meets whatever the server says about the match NOW;
+    // a refusal carrying a sentence (the organiser finished the match, or
+    // recorded the judges' decision, meanwhile) is thrown with the sentence,
+    // as the first attempt's refusal is, never the bare code.
+    it('a resend refused with a sentence throws the sentence', async () => {
+        const server = makeServer({ timeOk: true });
+        const API = await loadWith(server);
+        const answering = server.fetch;
+        let writes = 0;
+        global.fetch = vi.fn((url, opts) => {
+            if (String(url).includes('/api/time') || !(opts && opts.body)) return answering(url, opts);
+            writes++;
+            if (writes === 1) return answering(url, opts); // server.writeReply: the skew refusal
+            return Promise.resolve({
+                ok: false, status: 409,
+                json: () => Promise.resolve({
+                    error: 'hantei_organiser_only',
+                    message: 'The judges decided this representative bout (hantei). Ask the tournament organizer to change it.',
+                }),
+            });
+        });
+        server.writeReply = () => skewRefusal();
+
+        await expect(API.recordScore('c1', 'm1', { status: 'completed' }, '', null))
+            .rejects.toThrow('The judges decided this representative bout (hantei). Ask the tournament organizer to change it.');
+        expect(writes).toBe(2);
+    });
+
     it('refused twice: reports it, never a third attempt, never queued', async () => {
         // The drop console.warns for devtools; the strict test setup fails on an
         // unexpected warn, so own the spy here and assert it fired.
@@ -1097,6 +1125,52 @@ describe('the daihyosen add and remove carry the stamp', () => {
         await tick(1500);
         expect(outcome && outcome.error, 'given up and reported').toBeTruthy();
         expect(outcome.error.message).toBe(`The representative bout was not ${done}: the server did not answer. Check the connection and try again.`);
+    });
+
+    // fetchWithTimeout's abort ends when the headers arrive, so a body that
+    // never completes (a connection dropped mid-response with no reset) used
+    // to hold the editor's writes for good. It is read by the same deadline.
+    it.each([
+        ['add', (API) => API.recordDaihyosen('c1', 'B1', 'pw'), 'added', true],
+        ['remove', (API) => API.removeDaihyosen('c1', 'B1', 'pw'), 'removed', true],
+        ['refused add', (API) => API.recordDaihyosen('c1', 'B1', 'pw'), 'added', false],
+    ])('the %s is given up at the same 12 s when its body never completes', async (_name, send, done, ok) => {
+        const server = makeServer({ timeOk: true });
+        const API = await loadWith(server);
+        const answering = server.fetch;
+        global.fetch = vi.fn((url, opts) => {
+            if (!String(url).includes('/daihyosen')) return answering(url, opts);
+            return Promise.resolve({ ok, status: ok ? 200 : 409, json: () => new Promise(() => {}) });
+        });
+        let outcome = null;
+        send(API).then(() => { outcome = { landed: true }; }, (error) => { outcome = { error }; });
+
+        await tick(11000);
+        expect(outcome, 'still reading inside the 12 s').toBeNull();
+        await tick(1500);
+        expect(outcome && outcome.error, 'given up and reported').toBeTruthy();
+        expect(outcome.error.message).toBe(`The representative bout was not ${done}: the server did not answer. Check the connection and try again.`);
+    });
+
+    // A refused add or remove shows the server's own sentence when it sends
+    // one (a finished match's, for a participant); a bare code is thrown as it
+    // is, for the editor's own wording of it.
+    it.each([
+        ['an add refused with a sentence', (API) => API.recordDaihyosen('c1', 'B1', ''), { error: 'result_finalized', message: 'This match result has already been reported. Contact the tournament organizer to correct it.' },
+            'This match result has already been reported. Contact the tournament organizer to correct it.'],
+        ['a remove refused with a sentence', (API) => API.removeDaihyosen('c1', 'B1', ''), { error: 'result_finalized', message: 'This match result has already been reported. Contact the tournament organizer to correct it.' },
+            'This match result has already been reported. Contact the tournament organizer to correct it.'],
+        ['a remove refused with a bare code', (API) => API.removeDaihyosen('c1', 'B1', 'pw'), { error: 'daihyosen_scored' }, 'daihyosen_scored'],
+    ])('%s is thrown with the words the editor shows', async (_name, send, reply, words) => {
+        const server = makeServer({ timeOk: true });
+        const API = await loadWith(server);
+        const answering = server.fetch;
+        global.fetch = vi.fn((url, opts) => {
+            if (!String(url).includes('/daihyosen')) return answering(url, opts);
+            return Promise.resolve({ ok: false, status: 409, json: () => Promise.resolve(reply) });
+        });
+
+        await expect(send(API)).rejects.toThrow(words);
     });
 
     it('a landed add is the match, unwrapped from its envelope', async () => {

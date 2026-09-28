@@ -93,6 +93,23 @@ describe('API.renameTeamMember', () => {
   });
 });
 
+// bc-dhas: the public score sheet makes both writes and shows a thrown message
+// as it is, so a refusal that carries a sentence throws the sentence, not the
+// code beside it.
+describe('the member writes throw a refusal\'s sentence, not its code', () => {
+  let originalFetch;
+  beforeEach(() => { originalFetch = global.fetch; });
+  afterEach(() => { global.fetch = originalFetch; });
+
+  it.each([
+    ['add', (API) => API.addTeamMember('c1', 'team-1', 'Ito', '')],
+    ['rename', (API) => API.renameTeamMember('c1', 'team-1', 'm1', 'Ito', '')],
+  ])('the %s', async (_name, send) => {
+    global.fetch = mockFetch(409, { error: 'result_finalized', message: 'This match has finished. Contact the tournament organizer.' });
+    await expect(send(API)).rejects.toThrow('This match has finished. Contact the tournament organizer.');
+  });
+});
+
 describe('API.clearTeamMember', () => {
   let originalFetch;
   beforeEach(() => { originalFetch = global.fetch; });

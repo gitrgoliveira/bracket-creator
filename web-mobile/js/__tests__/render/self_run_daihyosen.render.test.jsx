@@ -13,6 +13,8 @@ import React from 'react';
 import { render, act, fireEvent, screen } from '@testing-library/react';
 import { describe, it, expect, vi, beforeAll, afterAll, beforeEach, afterEach } from 'vitest';
 import { installWindowStubs } from '../helpers/stub_globals.js';
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 import { AUTOSAVE_DEBOUNCE_MS } from '../../admin_scoring_autosave.jsx';
 import { toBackendMatchResult } from '../../api_serializers.jsx';
 
@@ -88,9 +90,9 @@ async function settle(times = 8) {
   }
 }
 
-async function openEditor(match, onClose = vi.fn()) {
+async function openEditor(match, onClose = vi.fn(), squads = {}) {
   await act(async () => {
-    render(<MatchViewerModal match={match} onClose={onClose} tournament={{ mode: 'self-run', competitions: [{ id: 'c1', squads: {} }] }} compId="c1" />);
+    render(<MatchViewerModal match={match} onClose={onClose} tournament={{ mode: 'self-run', competitions: [{ id: 'c1', squads }] }} compId="c1" />);
   });
   await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Report result' })); });
   await settle();
@@ -156,6 +158,38 @@ describe('a participant runs the representative bout of a tied knockout team mat
     expect(window.alert).not.toHaveBeenCalled();
   });
 
+  // The server refuses a participant's add or remove on a match that is not
+  // running (409; result_finalized once it has finished), so the sheet offers
+  // them only while it runs, following the live match as it changes.
+  it('offers Add and Remove only while the match is running', async () => {
+    const tournament = { mode: 'self-run', competitions: [{ id: 'c1', squads: {} }] };
+    const at = (status, subResults) => ({ ...knockoutTeamMatch(subResults), status });
+    let view;
+    await act(async () => {
+      view = render(<MatchViewerModal match={at('scheduled', FOUGHT)} onClose={vi.fn()} tournament={tournament} compId="c1" />);
+    });
+    await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Report result' })); });
+    await settle();
+    const rerender = async (match) => {
+      await act(async () => {
+        view.rerender(<MatchViewerModal match={match} onClose={vi.fn()} tournament={tournament} compId="c1" />);
+      });
+      await settle();
+    };
+    expect(screen.queryByTestId('scoring-modal-daihyosen-button'), 'not before the match starts').toBeNull();
+
+    await rerender(at('running', FOUGHT));
+    expect(screen.getByTestId('scoring-modal-daihyosen-button'), 'while it runs').toBeTruthy();
+
+    await rerender(at('running', [...FOUGHT, REP_BOUT]));
+    expect(screen.getByTestId('team-daihyosen-remove'), 'while it runs').toBeTruthy();
+
+    // The organiser ends it meanwhile (a withdrawal keeps the unscored bout).
+    await rerender({ ...at('completed', [...FOUGHT, REP_BOUT]), winner: AKA, decision: 'kiken-voluntary', decisionBy: 'shiro' });
+    expect(screen.queryByTestId('team-daihyosen-remove'), 'not once it has finished').toBeNull();
+    expect(screen.queryByTestId('team-daihyosen-hantei-row')).toBeNull();
+  });
+
   it('removes it right after a scoring tap: the save made first lands, then the remove', async () => {
     await openEditor(knockoutTeamMatch());
     await addRepBout();
@@ -184,18 +218,27 @@ describe('a participant runs the representative bout of a tied knockout team mat
 // The organiser's verdict on the representative bout, as the page receives it
 // once recorded (normalizeMatch derives decidedByHantei from the mark).
 const DECIDED = { ...REP_BOUT, winner: 'Kodokan', ipponsA: ['Ht'], decidedByHantei: true };
-// The same sentence the server refuses a participant's change with
-// (handlers_match.go repBoutHanteiRefusal).
-const DECIDED_NOTE = 'The judges decided this representative bout (hantei). Ask the tournament organizer to change it.';
+// The same sentence the server refuses a participant's change with, read from
+// the fixture both sides are pinned to.
+const DECIDED_NOTE = JSON.parse(readFileSync(
+  resolve(__dirname, '..', '..', '..', '..', 'internal', 'mobileapp', 'testdata', 'rep_bout_hantei_messages.json'),
+  'utf8',
+)).recorded;
 const enabledControls = (row) => [...row.querySelectorAll('button')].filter((b) => !b.disabled).map((b) => b.textContent);
+const named = (p, names) => names.map((name, i) => ({ id: `${p}${i + 1}`, index: i + 1, name }));
 
 describe('a hantei stays the organiser\'s on the public score sheet (bc-dhas)', () => {
   it('a representative bout the judges decided shows its verdict and offers nothing to change', async () => {
-    await openEditor(knockoutTeamMatch([...FOUGHT, DECIDED]));
+    // Team members on hand, so a fighter picker would have names to offer.
+    await openEditor(knockoutTeamMatch([...FOUGHT, DECIDED]), vi.fn(), {
+      'team-A': named('a', ['Ren Abe', 'Kai Mori', 'Yui Sato']),
+      'team-B': named('b', ['Mei Ito', 'Sho Ueda', 'Rin Ota']),
+    });
 
     const chip = screen.getByTestId('team-daihyosen-ht-aka');
     expect(chip.disabled, 'the Ht mark is shown, not offered for undo').toBe(true);
     expect(enabledControls(repBoutRow()), 'no scoring control on the bout').toEqual([]);
+    expect(repBoutRow().querySelectorAll('input, select'), 'no fighter picker on the bout').toHaveLength(0);
     expect(screen.getByTestId('team-daihyosen-decided-note').textContent).toBe(DECIDED_NOTE);
     expect(screen.queryByTestId('team-daihyosen-remove')).toBeNull();
     expect(screen.queryByText('Decide by hantei…')).toBeNull();

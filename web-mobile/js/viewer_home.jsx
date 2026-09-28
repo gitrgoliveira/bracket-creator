@@ -5,7 +5,7 @@ import { competitionKindLabel, compMatches, tournamentMatches, TournamentInfo, c
 import { matchParticipantIds, mergeSharedWatchlist, resolveEntryPlayerIds, resolveWatchedPlayers, findPrimaryEntry, heroEntry, sharedLinkPass, readSharedLedger, writeSharedLedger, clearSharedLedger, sessionStore, buildPrimaryNextMatch, buildPrimaryLastResult, buildRoster, rosterFullyLoaded, useWatchlist, buildWatchedSets, matchInvolvesWatchedSet } from './viewer_watchlist_core.jsx';
 import { runOnce, notifEnable, notifDisable, useChimeMuted, isFollowedMatchOnDeck, useFollowedMatchAlert, useSecondaryWatchAlert, MyMatchAlertBanner } from './viewer_alerts.jsx';
 import { notificationSupported } from './viewer_notifications.jsx';
-import { VSchedItem, MatchViewerModal, useLiveMatch } from './viewer_match.jsx';
+import { VSchedItem, MatchViewerModal, useLiveMatch, matchInList } from './viewer_match.jsx';
 import { buildWatchlistUpcoming, usePrimaryWatch, WATCHED_UPCOMING_LIST_MAX } from './viewer_schedule.jsx';
 import { mirrorWatchlistParam } from './watchlist_link.jsx';
 import { isBarredMatch } from './ineligible_match.jsx';
@@ -233,10 +233,8 @@ export function ViewerHome({ tournament, onSelectCompetition, onAdminClick, onOp
 
   // global "across-all-competitions" lists for the home page
   const allMatches = useMemo(() => tournamentMatches(t), [t]);
-  // Every door on this page opens a match by its id and competition (match
-  // ids repeat across competitions) and shows the live row from this list.
-  const [selectedMatch, openMatch, closeMatch] = useLiveMatch((id, compId) =>
-    allMatches.find((m) => m.id === id && m.compId === compId));
+  // Every door on this page shows the live row from this list.
+  const [selectedMatch, openMatch, closeMatch] = useLiveMatch((id, compId) => matchInList(allMatches, id, compId));
   const bothSidesMatches = useMemo(() => allMatches.filter(hasBothSides), [allMatches]);
   // Running-comp set: gates the home NOW / Up-next strips and the running dot.
   // BOTH setup and draw-ready are excluded: a draw-ready comp has a published

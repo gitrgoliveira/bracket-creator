@@ -141,12 +141,33 @@ type DaihyosenStore interface {
 	WithTransaction(compID string, fn func(tx state.StoreTx) error) error
 }
 
+// selfRunDaihyosenRefusal is the refusal an anonymous self-run add or remove
+// of the representative bout gets, nil when the match is running. A
+// participant runs the representative bout of the match being fought: one that
+// has finished is the organiser's to correct (errResultFinalized, as on the
+// score path), and one not started yet is started first. notStarted is the
+// sentence for that case. The organiser keeps no such rule: an add to a
+// finished fixed-order knockout match may be their correction, since no reopen
+// exists for one.
+func selfRunDaihyosenRefusal(status state.MatchStatus, notStarted string) *selfRunRefusal {
+	switch {
+	case status == state.MatchStatusRunning:
+		return nil
+	case isMatchFinalized(status):
+		return errResultFinalized
+	default:
+		return &selfRunRefusal{status: http.StatusConflict, code: "match_not_running", message: notStarted}
+	}
+}
+
 // RegisterDaihyosenHandlers wires the POST and DELETE /daihyosen endpoints.
 // The caller in server.go passes `*engine.Engine` and `*state.Store` which
-// satisfy the local interfaces by structural match.
+// satisfy the local interfaces by structural match. Both routes are public in
+// self-run; tl and verifier tell an anonymous caller from the organiser
+// (selfRunAnonymous).
 //
 // T140, FR-046.
-func RegisterDaihyosenHandlers(r *gin.RouterGroup, eng DaihyosenEngine, store DaihyosenStore, hub Broadcaster) {
+func RegisterDaihyosenHandlers(r *gin.RouterGroup, eng DaihyosenEngine, store DaihyosenStore, hub Broadcaster, tl TournamentLoader, verifier PasswordVerifier) {
 	r.DELETE("/competitions/:id/matches/:mid/daihyosen", func(c *gin.Context) {
 		id, ok := requireValidCompID(c)
 		if !ok {
@@ -154,6 +175,10 @@ func RegisterDaihyosenHandlers(r *gin.RouterGroup, eng DaihyosenEngine, store Da
 		}
 		mid := c.Param("mid")
 		stamp, ok := daihyosenWriteStamp(c)
+		if !ok {
+			return
+		}
+		anonymous, ok := selfRunAnonymous(c, tl, verifier)
 		if !ok {
 			return
 		}
@@ -170,6 +195,7 @@ func RegisterDaihyosenHandlers(r *gin.RouterGroup, eng DaihyosenEngine, store Da
 			noDaihyosen bool
 			scored      bool
 			haveResult  bool
+			refusal     *selfRunRefusal
 		)
 		txErr := store.WithTransaction(id, func(stx state.StoreTx) error {
 			match, found, err := findMatchForDaihyosenTx(stx, id, mid)
@@ -180,14 +206,12 @@ func RegisterDaihyosenHandlers(r *gin.RouterGroup, eng DaihyosenEngine, store Da
 				notFound = true
 				return nil
 			}
-			// Locate the daihyosen sub (Position == -1).
-			dhIdx := -1
-			for i := range match.SubResults {
-				if match.SubResults[i].Position == state.DaihyosenSubPosition {
-					dhIdx = i
-					break
+			if anonymous {
+				if refusal = selfRunDaihyosenRefusal(match.Status, "This match has not started. Start it before removing its representative bout."); refusal != nil {
+					return nil
 				}
 			}
+			dhIdx := state.DaihyosenSubIndex(match.SubResults)
 			if dhIdx < 0 {
 				noDaihyosen = true
 				return nil
@@ -219,28 +243,25 @@ func RegisterDaihyosenHandlers(r *gin.RouterGroup, eng DaihyosenEngine, store Da
 			if stamp > 0 {
 				u.ModifiedAt = stamp
 			}
-			// Court exclusivity (mp-95mg) is not required here: DELETE /daihyosen
-			// only proceeds when the DH sub is an unscored placeholder (the guard
-			// above rejects if the sub has ippons, a winner, or a non-daihyosen
-			// decision), which means the parent match is still in MatchStatusRunning,
-			// no cross-comp conflict can be introduced by this write.
+			// No court check runs here (mp-95mg). A participant's remove reaches
+			// only a running match (selfRunDaihyosenRefusal), which already
+			// holds its court. The organiser's reaches a match in any status,
+			// and puts a finished or queued one back to running without the
+			// court and eligibility checks a start runs; that is theirs to do.
 			u.Status = state.MatchStatusRunning
 			// Clear ALL DH-derived match-level result/decision metadata so the
 			// match returns to a clean running state. MatchResult.Decision has no
 			// omitempty, so leaving Decision/DecisionBy/DecisionReason/Encho set
 			// would let a removed daihyosen still present as decided-by-daihyosen
 			// (or carry stale overtime) while Status is back to running. WinnerID/
-			// WinnerSide are cleared alongside Winner (a match this handler
-			// reaches is, in the currently reachable case, always bracket-sourced
-			// and so already carries no WinnerID either (AddDaihyosen only
-			// appends onto a TIED, RUNNING encounter, so Winner/WinnerID were
-			// never set to begin with, whatever bm.SideAID/SideBID carry
-			// since bc-brid) -- but a stored POOL match that has picked up a
-			// legacy/hand-edited Position=-1 sub CAN carry a real stale
-			// WinnerID left over from an unrelated prior result, which would
-			// otherwise fail backfillMatchIdentity's forward-write
+			// WinnerSide are cleared alongside Winner: the organiser's remove
+			// also reaches a finished match, whose winner a decision may have
+			// recorded beside an unfought representative bout, and a stored POOL
+			// match that has picked up a legacy/hand-edited Position=-1 sub CAN
+			// carry a stale WinnerID left over from an unrelated prior result,
+			// which would otherwise fail backfillMatchIdentity's forward-write
 			// validation (bc-idfx finding 10) as an inherited 500, not this
-			// handler's own fault).
+			// handler's own fault.
 			u.Winner = ""
 			u.WinnerID = ""
 			u.WinnerSide = ""
@@ -272,6 +293,9 @@ func RegisterDaihyosenHandlers(r *gin.RouterGroup, eng DaihyosenEngine, store Da
 		case notFound:
 			c.JSON(http.StatusNotFound, gin.H{"error": "match not found"})
 			return
+		case refusal != nil:
+			c.JSON(refusal.status, refusal.body())
+			return
 		case noDaihyosen:
 			c.JSON(http.StatusNotFound, gin.H{"error": "no_daihyosen"})
 			return
@@ -302,6 +326,10 @@ func RegisterDaihyosenHandlers(r *gin.RouterGroup, eng DaihyosenEngine, store Da
 		if !ok {
 			return
 		}
+		anonymous, ok := selfRunAnonymous(c, tl, verifier)
+		if !ok {
+			return
+		}
 
 		// Read-check-write under ONE acquire of the per-comp lock: the tie that
 		// gates AddDaihyosen is recomputed from the match's PERSISTED SubResults,
@@ -312,8 +340,9 @@ func RegisterDaihyosenHandlers(r *gin.RouterGroup, eng DaihyosenEngine, store Da
 			updated    state.MatchResult
 			subOut     *state.SubMatchResult
 			notFound   bool
-			addErrCode string // "", "not_tied", "pool_match", "insufficient_eligibility", "daihyosen_exists", "engi_competition", "kachinuki_competition"
+			addErrCode string // "", "not_tied", "pool_match", "insufficient_eligibility", "daihyosen_exists", "engi_competition", "kachinuki_competition", "individual_competition"
 			haveResult bool
+			refusal    *selfRunRefusal
 		)
 		txErr := store.WithTransaction(id, func(stx state.StoreTx) error {
 			// Engi competitions decide bouts by referee flag counts; a
@@ -340,6 +369,14 @@ func RegisterDaihyosenHandlers(r *gin.RouterGroup, eng DaihyosenEngine, store Da
 				addErrCode = "kachinuki_competition"
 				return nil
 			}
+			// A representative bout breaks a tie between TEAMS. An individual
+			// match has no bouts, so the tie below would read it as level at
+			// nothing each and append one. Team is TeamSize >= 2
+			// (ValidateCompetitionTeamSize keeps Kind == "team" in step).
+			if comp != nil && comp.TeamSize < 2 {
+				addErrCode = "individual_competition"
+				return nil
+			}
 
 			match, found, err := findMatchForDaihyosenTx(stx, id, mid)
 			if err != nil {
@@ -349,28 +386,30 @@ func RegisterDaihyosenHandlers(r *gin.RouterGroup, eng DaihyosenEngine, store Da
 				notFound = true
 				return nil
 			}
-			// One representative bout per encounter. The tie below counts no
-			// representative bout, so a second add would pass it, sit beside
-			// the first, put a finished match back to running and bury the
-			// verdict recorded on the first (bc-dhas: a self-run participant
-			// could reach it). The score sheet never offers it; two devices
-			// adding at once, or a crafted request, would.
-			for i := range match.SubResults {
-				if match.SubResults[i].Position == state.DaihyosenSubPosition {
-					addErrCode = "daihyosen_exists"
+			if anonymous {
+				if refusal = selfRunDaihyosenRefusal(match.Status, "This match has not started. Start it before adding a representative bout."); refusal != nil {
 					return nil
 				}
 			}
+			// One representative bout per encounter, for every caller. The tie
+			// below counts no representative bout, so a second add would pass
+			// it, sit beside the first, and on a finished match put it back to
+			// running and bury the verdict recorded on the first (bc-dhas).
+			// The score sheet never offers it; two devices adding at once, or a
+			// crafted request, would.
+			if state.DaihyosenSubIndex(match.SubResults) >= 0 {
+				addErrCode = "daihyosen_exists"
+				return nil
+			}
 
 			// credit is state.DefaultWinCreditSide's answer for THIS match
-			// (bc-cse: ComputeTeamSummary's credit is no longer optional). It is
-			// always domain.MatchSideNone here in practice: AddDaihyosen only
-			// ever applies to a still-tied, still-RUNNING encounter (never a
-			// completed one), and DefaultWinCreditSide credits nobody unless the
-			// match is completed. Computed properly anyway rather than passed as
-			// a bare domain.MatchSideNone, so this call site goes through the
-			// same canonical derivation as every other TeamResult reader instead
-			// of hand-asserting the invariant.
+			// (bc-cse: ComputeTeamSummary's credit is no longer optional). For a
+			// participant's add it is domain.MatchSideNone: they reach only a
+			// running match (above), and DefaultWinCreditSide credits nobody
+			// unless the match is completed. The organiser's add reaches a
+			// completed one too, where a default-win ruling's credit counts
+			// towards the tie, exactly as every other TeamResult reader counts
+			// it.
 			credit := state.DefaultWinCreditSide(match.Status, match.Decision, match.DecisionBy, match.Attribution())
 			sideASummary, sideBSummary := engine.ComputeTeamSummary(match.SubResults, match.SideA, match.SideB, credit)
 
@@ -403,20 +442,21 @@ func RegisterDaihyosenHandlers(r *gin.RouterGroup, eng DaihyosenEngine, store Da
 
 			// Append the placeholder to the match's SubResults and persist via
 			// the Tx score path so the append commits under the held lock.
-			// Court exclusivity (mp-95mg) is not required here: AddDaihyosen
-			// returns ErrNotTied unless the parent match is in a tied completed-
-			// bouts state (i.e. already MatchStatusRunning on the court). The
-			// court slot was committed when the match was first started via the
-			// score endpoint, which holds WithCourtExclusivityLock.
+			// No court check runs here (mp-95mg). A participant's add reaches
+			// only a running match (selfRunDaihyosenRefusal), whose court slot
+			// was committed when it was started through the score endpoint,
+			// which holds WithCourtExclusivityLock. The organiser's reaches a
+			// match in any status the tie allows, a 0-0 one not started yet or
+			// a finished one included, and puts it to running without the
+			// court and eligibility checks a start runs; that is theirs to do.
 			u := *match
 			// AddDaihyosen only succeeds against ErrPoolMatch's rejection when
 			// engine.IsPoolMatchID(mid) is false, so `match` here is ALWAYS the
-			// bracket projection (daihyosenBracketResult), which never sets
-			// WinnerID/WinnerSide -- but clear them explicitly anyway, matching
-			// the DELETE handler's clean-slate rule above rather than relying on
-			// that being true today: the daihyosen encounter is being reopened
-			// (a fresh representative bout appended), so any prior verdict is
-			// stale by definition.
+			// bracket projection (daihyosenBracketResult). Only WinnerID and
+			// WinnerSide are cleared: Winner and Decision are kept, so the
+			// organiser's add to a finished match leaves its winner and
+			// decision beside the running status until the next score write
+			// replaces them.
 			u.WinnerID = ""
 			u.WinnerSide = ""
 			if stamp > 0 {
@@ -443,12 +483,19 @@ func RegisterDaihyosenHandlers(r *gin.RouterGroup, eng DaihyosenEngine, store Da
 			c.JSON(http.StatusNotFound, gin.H{"error": "match not found"})
 			return
 		}
+		if refusal != nil {
+			c.JSON(refusal.status, refusal.body())
+			return
+		}
 		switch addErrCode {
 		case "engi_competition":
 			c.JSON(http.StatusBadRequest, gin.H{"error": "engi competitions do not support daihyosen; use flag scoring instead"})
 			return
 		case "kachinuki_competition":
 			c.JSON(http.StatusBadRequest, gin.H{"error": "daihyosen does not exist in kachinuki; a tied final bout is a draw in pools/league and goes to encho in a knockout"})
+			return
+		case "individual_competition":
+			c.JSON(http.StatusBadRequest, gin.H{"error": "individual competitions do not support daihyosen; a representative bout breaks a tie between teams"})
 			return
 		case "not_tied":
 			c.JSON(http.StatusBadRequest, gin.H{"error": "not_tied"})
@@ -562,10 +609,10 @@ func daihyosenBracketResult(bm *state.BracketMatch) *state.MatchResult {
 		SideB:  bm.SideB,
 		Winner: bm.Winner,
 		// SideAID/SideBID/WinnerID (bc-brid): bm may carry none (an
-		// unresolved knockout match -- the only shape reachable here, since
-		// AddDaihyosen requires the encounter tied and running, i.e. no
-		// Winner/WinnerID yet either way) or its stamped pairing; projected
-		// faithfully either way, matching bracketMatchAsResult's rule.
+		// unresolved knockout match) or its stamped pairing, and a finished
+		// match the organiser adds to or removes from carries its winner's
+		// id too; projected faithfully either way, matching
+		// bracketMatchAsResult's rule.
 		SideAID:        bm.SideAID,
 		SideBID:        bm.SideBID,
 		WinnerID:       bm.WinnerID,

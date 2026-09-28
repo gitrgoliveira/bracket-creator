@@ -16,6 +16,8 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -26,7 +28,11 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-const repBoutMatchPath = "/api/competitions/c1/matches/B1"
+const (
+	repBoutMatchPath = "/api/competitions/c1/matches/B1"
+	repBoutTeamAID   = "11111111-1111-4111-1111-111111111111"
+	repBoutTeamBID   = "22222222-2222-4222-2222-222222222222"
+)
 
 // repBoutFixture is a knockout team competition whose one match, B1, is
 // running with its three bouts fought and tied: one win each and a draw.
@@ -48,8 +54,8 @@ func newRepBoutFixture(t *testing.T, selfRun bool) *repBoutFixture {
 		ID: "c1", Name: "Teams", Kind: "team", Format: state.CompFormatKnockout,
 		TeamSize: 3, TeamMatchType: state.TeamMatchTypeFixed,
 	}))
-	teamA := domain.Player{ID: "11111111-1111-4111-1111-111111111111", Name: "TeamA", Dojo: "A"}
-	teamB := domain.Player{ID: "22222222-2222-4222-2222-222222222222", Name: "TeamB", Dojo: "B"}
+	teamA := domain.Player{ID: repBoutTeamAID, Name: "TeamA", Dojo: "A"}
+	teamB := domain.Player{ID: repBoutTeamBID, Name: "TeamB", Dojo: "B"}
 	require.NoError(t, store.SaveParticipants("c1", []domain.Player{teamA, teamB}))
 	now := time.Now().UnixMilli()
 	require.NoError(t, store.SaveBracket("c1", &state.Bracket{Rounds: [][]state.BracketMatch{{{
@@ -83,6 +89,11 @@ func (f *repBoutFixture) addRepBout(t *testing.T) {
 // bouts as they stand, then the representative bout (none when repBout is
 // nil, which drops the row).
 func (f *repBoutFixture) score(password string, status state.MatchStatus, winner string, at int64, repBout map[string]any) *httptest.ResponseRecorder {
+	return f.send(http.MethodPut, repBoutMatchPath+"/score", password, scoreSheet(status, winner, at, repBout))
+}
+
+// scoreSheet is the body score sends, for a test that adds to it.
+func scoreSheet(status state.MatchStatus, winner string, at int64, repBout map[string]any) map[string]any {
 	subs := []any{
 		map[string]any{"position": 1, "sideA": "", "sideB": "", "ipponsA": []string{"M"}, "ipponsB": []string{}, "winner": "TeamA", "decision": ""},
 		map[string]any{"position": 2, "sideA": "", "sideB": "", "ipponsA": []string{}, "ipponsB": []string{"K"}, "winner": "TeamB", "decision": ""},
@@ -91,11 +102,11 @@ func (f *repBoutFixture) score(password string, status state.MatchStatus, winner
 	if repBout != nil {
 		subs = append(subs, repBout)
 	}
-	return f.send(http.MethodPut, repBoutMatchPath+"/score", password, map[string]any{
+	return map[string]any{
 		"sideA": "TeamA", "sideB": "TeamB", "status": status, "winner": winner,
 		"ipponsA": []string{}, "ipponsB": []string{}, "modifiedAt": at,
 		"subResults": subs,
-	})
+	}
 }
 
 // repBoutRow is the representative bout's row as the team editor writes it:
@@ -110,13 +121,9 @@ func repBoutRow(ipponsA, ipponsB []string, winner string) map[string]any {
 func (f *repBoutFixture) storedRepBout(t *testing.T) *state.SubMatchResult {
 	t.Helper()
 	subs := storedB1(t, f.store, "c1").SubResults
-	for i := range subs {
-		if subs[i].Position == state.DaihyosenSubPosition {
-			return &subs[i]
-		}
-	}
-	t.Fatal("B1 carries no representative bout")
-	return nil
+	i := state.DaihyosenSubIndex(subs)
+	require.GreaterOrEqual(t, i, 0, "B1 carries no representative bout")
+	return &subs[i]
 }
 
 func TestSelfRun_ParticipantsRunTheRepresentativeBout(t *testing.T) {
@@ -205,10 +212,17 @@ func (f *repBoutFixture) recordHantei(t *testing.T) {
 // finished match's is (409), with the sentence the public score sheet shows.
 func requireHanteiRefusal(t *testing.T, w *httptest.ResponseRecorder, message string) {
 	t.Helper()
-	require.Equal(t, http.StatusConflict, w.Code, w.Body.String())
+	requireRefusal(t, w, http.StatusConflict, "hantei_organiser_only", message)
+}
+
+// requireRefusal checks a participant's write was refused with this status and
+// code, and with the sentence the public page shows as it is.
+func requireRefusal(t *testing.T, w *httptest.ResponseRecorder, status int, code, message string) {
+	t.Helper()
+	require.Equal(t, status, w.Code, w.Body.String())
 	var body map[string]string
 	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &body), w.Body.String())
-	assert.Equal(t, "hantei_organiser_only", body["error"])
+	assert.Equal(t, code, body["error"])
 	assert.Equal(t, message, body["message"])
 }
 
@@ -313,8 +327,9 @@ func TestSelfRun_TheOrganiserChangesTheirHantei(t *testing.T) {
 
 // Adding a second representative bout used to pass the add's tie check (which
 // counts none) and put a finished match back to running beside the verdict
-// recorded on the first. A participant can reach that route, so it matters
-// most here.
+// recorded on the first. A participant's add no longer reaches a finished
+// match at all (TestSelfRun_ParticipantsAddARepresentativeBoutOnlyToARunningMatch);
+// the organiser's does, and this is what stops it.
 func TestSelfRun_ASecondRepresentativeBoutCannotReopenTheMatch(t *testing.T) {
 	f := newRepBoutFixture(t, true)
 	f.addRepBout(t)
@@ -322,7 +337,7 @@ func TestSelfRun_ASecondRepresentativeBoutCannotReopenTheMatch(t *testing.T) {
 	w := f.score("", state.MatchStatusCompleted, "TeamA", f.now+200, hanteiRow())
 	require.Equal(t, http.StatusOK, w.Code, "finishing on the verdict: %s", w.Body.String())
 
-	w = f.send(http.MethodPost, repBoutMatchPath+"/daihyosen", "", map[string]any{"modifiedAt": f.now + 300})
+	w = f.send(http.MethodPost, repBoutMatchPath+"/daihyosen", "main-pw", map[string]any{"modifiedAt": f.now + 300})
 	require.Equal(t, http.StatusConflict, w.Code, w.Body.String())
 	assert.Contains(t, w.Body.String(), `"daihyosen_exists"`)
 	bm := storedB1(t, f.store, "c1")
@@ -345,4 +360,375 @@ func TestOfficiated_RepresentativeBoutNeedsThePassword(t *testing.T) {
 	w = f.score("", state.MatchStatusRunning, "", f.now+100, repBoutRow([]string{"M"}, []string{}, "TeamA"))
 	assert.Equal(t, http.StatusUnauthorized, w.Code, w.Body.String())
 	assert.False(t, carriesDaihyosenRow(storedB1(t, f.store, "c1").SubResults), "nothing is written")
+}
+
+const (
+	repBoutDecidedSentence  = "The judges decided this representative bout (hantei). Ask the tournament organizer to change it."
+	resultFinalizedSentence = "This match result has already been reported. Contact the tournament organizer to correct it."
+)
+
+// setB1 rewrites the stored B1, for a match the fixture does not start with.
+func (f *repBoutFixture) setB1(t *testing.T, edit func(bm *state.BracketMatch)) {
+	t.Helper()
+	b, err := f.store.LoadBracket("c1")
+	require.NoError(t, err)
+	edit(&b.Rounds[0][0])
+	require.NoError(t, f.store.SaveBracket("c1", b))
+}
+
+// Two fouls on a row that leaves its ippons out fold into an ippon for the
+// other side before the write is stored, so the row is not silent: it would
+// replace the organiser's verdict with a scoreline that has none.
+func TestSelfRun_FoulsOnARowWithoutIpponsCannotEraseTheHantei(t *testing.T) {
+	for _, fouls := range []string{"hansokuA", "hansokuB"} {
+		t.Run(fouls, func(t *testing.T) {
+			f := newRepBoutFixture(t, true)
+			f.addRepBout(t)
+			f.recordHantei(t)
+			recorded := *f.storedRepBout(t)
+
+			row := repBoutRow(nil, nil, "")
+			delete(row, "ipponsA")
+			delete(row, "ipponsB")
+			row[fouls] = 2
+			w := f.score("", state.MatchStatusRunning, "", f.now+200, row)
+			requireHanteiRefusal(t, w, repBoutDecidedSentence)
+			assert.Equal(t, recorded, *f.storedRepBout(t), "the decided bout is as the organiser recorded it")
+		})
+	}
+}
+
+// A participant's write that keeps the organiser's verdict is stored with the
+// decided bout exactly as recorded, whatever it sent for that bout: a new
+// scoreline around the same verdict, fouls, overtime, or another sub-decision
+// on a row that leaves its ippons out.
+func TestSelfRun_TheDecidedRepresentativeBoutIsStoredAsRecorded(t *testing.T) {
+	rescored := repBoutRow([]string{"M", domain.HanteiMark}, []string{"K"}, "TeamA")
+	rescored["hansokuB"] = 1
+	rescored["encho"] = map[string]any{"periodCount": 2}
+	redecided := repBoutRow(nil, nil, "")
+	delete(redecided, "ipponsA")
+	delete(redecided, "ipponsB")
+	redecided["decision"] = "fought"
+	cases := []struct {
+		name    string
+		repBout map[string]any
+	}{
+		{"a new scoreline, fouls and overtime around the same verdict", rescored},
+		{"another sub-decision on a row without ippons", redecided},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			f := newRepBoutFixture(t, true)
+			f.addRepBout(t)
+			f.recordHantei(t)
+			recorded := *f.storedRepBout(t)
+
+			w := f.score("", state.MatchStatusRunning, "", f.now+200, tc.repBout)
+			require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+			assert.NotContains(t, w.Body.String(), `"applied":false`)
+			assert.Equal(t, recorded, *f.storedRepBout(t), "the decided bout is as the organiser recorded it")
+		})
+	}
+}
+
+// A participant finishes the match on the organiser's judges' decision, never
+// against it: a winner the write names, by name or by id, must be the side
+// the decided bout names, even when the write sends that bout back as it is.
+func TestSelfRun_TheMatchFinishesOnlyOnTheDecidedSide(t *testing.T) {
+	// finish sends the finishing write and reports B1 as it stood before it.
+	finish := func(t *testing.T, winner, winnerID string) (*repBoutFixture, state.BracketMatch, *httptest.ResponseRecorder) {
+		t.Helper()
+		f := newRepBoutFixture(t, true)
+		f.addRepBout(t)
+		f.recordHantei(t)
+		before := storedB1(t, f.store, "c1")
+		body := scoreSheet(state.MatchStatusCompleted, winner, f.now+200, hanteiRow())
+		body["winnerId"] = winnerID
+		return f, before, f.send(http.MethodPut, repBoutMatchPath+"/score", "", body)
+	}
+	cases := []struct {
+		name, winner, winnerID string
+	}{
+		{"naming the other team", "TeamB", ""},
+		{"naming the other team by name and id", "TeamB", repBoutTeamBID},
+		{"naming the other team by id alone", "", repBoutTeamBID},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			f, before, w := finish(t, tc.winner, tc.winnerID)
+			requireHanteiRefusal(t, w, repBoutDecidedSentence)
+			assert.Equal(t, before, storedB1(t, f.store, "c1"), "nothing is written")
+		})
+	}
+
+	// A name and an id that disagree never reach the judge: the request's
+	// own validation refuses them first.
+	t.Run("naming the decided team with the other team's id", func(t *testing.T) {
+		f, before, w := finish(t, "TeamA", repBoutTeamBID)
+		require.Equal(t, http.StatusBadRequest, w.Code, w.Body.String())
+		assert.Equal(t, before, storedB1(t, f.store, "c1"), "nothing is written")
+	})
+}
+
+// A participant scores the representative bout the match already has. Only
+// the add route creates one, with its tie, pool, kachinuki, engi and
+// eligibility checks, and an encounter has one.
+func TestSelfRun_AScoreWriteNeverCreatesARepresentativeBout(t *testing.T) {
+	const noRepBout = "This match has no representative bout. Add it on the score sheet before scoring it."
+	won := repBoutRow([]string{"M"}, []string{}, "TeamA")
+
+	t.Run("on a knockout match without one", func(t *testing.T) {
+		f := newRepBoutFixture(t, true)
+		w := f.score("", state.MatchStatusRunning, "", f.now+100, won)
+		requireRefusal(t, w, http.StatusConflict, "no_daihyosen", noRepBout)
+		assert.False(t, carriesDaihyosenRow(storedB1(t, f.store, "c1").SubResults), "nothing is written")
+	})
+
+	t.Run("on a kachinuki match, which has none", func(t *testing.T) {
+		f := newRepBoutFixture(t, true)
+		require.NoError(t, f.store.SaveCompetition(&state.Competition{
+			ID: "c1", Name: "Teams", Kind: "team", Format: state.CompFormatKnockout,
+			TeamSize: 3, TeamMatchType: state.TeamMatchTypeKachinuki,
+		}))
+		w := f.score("", state.MatchStatusRunning, "", f.now+100, won)
+		requireRefusal(t, w, http.StatusConflict, "no_daihyosen", noRepBout)
+		assert.False(t, carriesDaihyosenRow(storedB1(t, f.store, "c1").SubResults), "nothing is written")
+	})
+
+	t.Run("two in one write", func(t *testing.T) {
+		f := newRepBoutFixture(t, true)
+		f.addRepBout(t)
+		body := scoreSheet(state.MatchStatusRunning, "", f.now+100, won)
+		body["subResults"] = append(body["subResults"].([]any), repBoutRow([]string{}, []string{"M"}, "TeamB"))
+		w := f.send(http.MethodPut, repBoutMatchPath+"/score", "", body)
+		requireRefusal(t, w, http.StatusBadRequest, "duplicate_daihyosen",
+			"A team match has one representative bout, and this score lists more than one. Reload the score sheet and try again.")
+		rows := 0
+		for _, s := range storedB1(t, f.store, "c1").SubResults {
+			if s.Position == state.DaihyosenSubPosition {
+				rows++
+				assert.Empty(t, s.Winner, "nothing is written")
+			}
+		}
+		assert.Equal(t, 1, rows)
+	})
+}
+
+// A participant adds the representative bout of the match being fought. On a
+// finished match the add would put it back to running with the organiser's
+// result still on it, for the next score write to overturn; on one not started
+// it would start it past the court and eligibility checks a start runs.
+func TestSelfRun_ParticipantsAddARepresentativeBoutOnlyToARunningMatch(t *testing.T) {
+	t.Run("a finished match", func(t *testing.T) {
+		f := newRepBoutFixture(t, true)
+		w := f.score("main-pw", state.MatchStatusCompleted, "TeamA", f.now+100, nil)
+		require.Equal(t, http.StatusOK, w.Code, "the organiser finishes it: %s", w.Body.String())
+
+		w = f.send(http.MethodPost, repBoutMatchPath+"/daihyosen", "", map[string]any{"modifiedAt": f.now + 200})
+		requireRefusal(t, w, http.StatusConflict, "result_finalized", resultFinalizedSentence)
+		bm := storedB1(t, f.store, "c1")
+		assert.Equal(t, state.MatchStatusCompleted, bm.Status, "the match stays finished")
+		assert.Equal(t, "TeamA", bm.Winner)
+		assert.False(t, carriesDaihyosenRow(bm.SubResults), "nothing is written")
+
+		// The organiser's add is not the participant's: it may be their
+		// correction, since a fixed-order knockout match has no reopen.
+		w = f.send(http.MethodPost, repBoutMatchPath+"/daihyosen", "main-pw", map[string]any{"modifiedAt": f.now + 300})
+		require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	})
+
+	t.Run("a match not started yet", func(t *testing.T) {
+		f := newRepBoutFixture(t, true)
+		f.setB1(t, func(bm *state.BracketMatch) {
+			bm.Status = state.MatchStatusScheduled
+			bm.SubResults = nil
+		})
+		w := f.send(http.MethodPost, repBoutMatchPath+"/daihyosen", "", map[string]any{"modifiedAt": f.now + 100})
+		requireRefusal(t, w, http.StatusConflict, "match_not_running",
+			"This match has not started. Start it before adding a representative bout.")
+		bm := storedB1(t, f.store, "c1")
+		assert.Equal(t, state.MatchStatusScheduled, bm.Status, "the match is not started")
+		assert.False(t, carriesDaihyosenRow(bm.SubResults), "nothing is written")
+	})
+}
+
+// A participant removes a representative bout added by mistake from the match
+// being fought. On a finished match the remove would put it back to running
+// and clear the organiser's result, a withdrawal's bar with it.
+func TestSelfRun_ParticipantsRemoveARepresentativeBoutOnlyFromARunningMatch(t *testing.T) {
+	t.Run("a finished match", func(t *testing.T) {
+		f := newRepBoutFixture(t, true)
+		f.addRepBout(t)
+		// TeamB cannot field a representative, so the organiser records its
+		// withdrawal; the unfought representative bout stays on the match.
+		w := f.send(http.MethodPost, repBoutMatchPath+"/decision", "main-pw", map[string]any{
+			"decision": "kiken-voluntary", "decisionBy": "shiro", "modifiedAt": f.now + 100,
+		})
+		require.Equal(t, http.StatusOK, w.Code, "the organiser records the withdrawal: %s", w.Body.String())
+		bm := storedB1(t, f.store, "c1")
+		require.Equal(t, state.MatchStatusCompleted, bm.Status)
+		require.True(t, carriesDaihyosenRow(bm.SubResults))
+
+		w = f.send(http.MethodDelete, repBoutMatchPath+"/daihyosen", "", map[string]any{"modifiedAt": f.now + 200})
+		requireRefusal(t, w, http.StatusConflict, "result_finalized", resultFinalizedSentence)
+		bm = storedB1(t, f.store, "c1")
+		assert.Equal(t, state.MatchStatusCompleted, bm.Status, "the match stays finished")
+		assert.Equal(t, "TeamA", bm.Winner)
+		assert.Equal(t, "kiken-voluntary", bm.Decision)
+		assert.True(t, carriesDaihyosenRow(bm.SubResults), "nothing is written")
+		statuses, err := f.store.LoadCompetitorStatus("c1")
+		require.NoError(t, err)
+		require.Contains(t, statuses, repBoutTeamBID)
+		assert.False(t, statuses[repBoutTeamBID].Eligible, "the withdrawal still bars TeamB")
+	})
+
+	t.Run("a match not started yet", func(t *testing.T) {
+		f := newRepBoutFixture(t, true)
+		f.setB1(t, func(bm *state.BracketMatch) {
+			bm.Status = state.MatchStatusScheduled
+			bm.SubResults = append(bm.SubResults, state.SubMatchResult{
+				Position: state.DaihyosenSubPosition, Decision: string(domain.DecisionDaihyosen),
+			})
+		})
+		w := f.send(http.MethodDelete, repBoutMatchPath+"/daihyosen", "", map[string]any{"modifiedAt": f.now + 100})
+		requireRefusal(t, w, http.StatusConflict, "match_not_running",
+			"This match has not started. Start it before removing its representative bout.")
+		bm := storedB1(t, f.store, "c1")
+		assert.Equal(t, state.MatchStatusScheduled, bm.Status, "the match is not started")
+		assert.True(t, carriesDaihyosenRow(bm.SubResults), "nothing is written")
+	})
+}
+
+// A representative bout breaks a tie between teams. An individual match has
+// no bouts, so the add's tie check read it as tied at nothing each and
+// appended one; every caller is refused now, the organiser included.
+func TestRepresentativeBoutIsForTeamCompetitionsOnly(t *testing.T) {
+	for _, caller := range []struct{ name, password string }{
+		{"the organiser", "main-pw"},
+		{"a participant", ""},
+	} {
+		t.Run(caller.name, func(t *testing.T) {
+			f := newRepBoutFixture(t, true)
+			require.NoError(t, f.store.SaveCompetition(&state.Competition{
+				ID: "c1", Name: "Singles", Kind: "individual", Format: state.CompFormatKnockout,
+			}))
+			f.setB1(t, func(bm *state.BracketMatch) { bm.SubResults = nil })
+
+			w := f.send(http.MethodPost, repBoutMatchPath+"/daihyosen", caller.password, map[string]any{"modifiedAt": f.now + 100})
+			require.Equal(t, http.StatusBadRequest, w.Code, w.Body.String())
+			var body map[string]string
+			require.NoError(t, json.Unmarshal(w.Body.Bytes(), &body), w.Body.String())
+			assert.Equal(t, "individual competitions do not support daihyosen; a representative bout breaks a tie between teams", body["error"])
+			bm := storedB1(t, f.store, "c1")
+			assert.Equal(t, state.MatchStatusRunning, bm.Status)
+			assert.False(t, carriesDaihyosenRow(bm.SubResults), "nothing is written")
+		})
+	}
+}
+
+// TestHoldSelfReportedWriteUnderTx pins the judge on its own, against a stored
+// match: a participant may send the organiser's verdict back or say nothing
+// about it, never record, move or clear one, and the decided bout they send
+// back is stored as the organiser recorded it (operator decision, bc-dhas).
+// The handler tests above pin the same rules through the score route.
+func TestHoldSelfReportedWriteUnderTx(t *testing.T) {
+	row := func(winner string, ipponsA, ipponsB []string) state.SubMatchResult {
+		return state.SubMatchResult{
+			Position: state.DaihyosenSubPosition, SideA: "TeamA", SideB: "TeamB",
+			IpponsA: ipponsA, IpponsB: ipponsB, Winner: winner, Decision: "daihyosen",
+		}
+	}
+	bout := state.SubMatchResult{Position: 1, IpponsA: []string{"M"}, Winner: "TeamA"}
+	decided := row("TeamA", []string{domain.HanteiMark}, []string{})
+	unscored := row("", []string{}, []string{})
+	silent := row("", nil, nil)
+	fouled := silent
+	fouled.HansokuB = 2
+	swapped := row("TeamB", []string{domain.HanteiMark}, []string{})
+	swapped.SideA, swapped.SideB = "TeamB", "TeamA"
+	recorded, notRecorded := repBoutHanteiRefusal(true), repBoutHanteiRefusal(false)
+
+	tests := []struct {
+		name              string
+		stored            *state.SubMatchResult
+		incoming          []state.SubMatchResult
+		winner, winnerID  string
+		startOnly         bool
+		want              *selfRunRefusal
+		wantStoredRepBout bool // the write's row is replaced by the stored one
+	}{
+		{name: "scoring with no verdict anywhere", stored: &unscored, incoming: []state.SubMatchResult{bout, row("TeamA", []string{"M"}, []string{})}},
+		{name: "recording a verdict", stored: &unscored, incoming: []state.SubMatchResult{bout, decided}, want: notRecorded},
+		{name: "scoring a representative bout the match does not have", incoming: []state.SubMatchResult{bout, decided}, want: errNoRepBout},
+		{name: "repeating the recorded verdict", stored: &decided, incoming: []state.SubMatchResult{bout, decided}, wantStoredRepBout: true},
+		{name: "moving the verdict to the other side", stored: &decided, incoming: []state.SubMatchResult{bout, row("TeamB", []string{}, []string{domain.HanteiMark})}, want: recorded},
+		{name: "handing the verdict over by swapping the side names", stored: &decided, incoming: []state.SubMatchResult{bout, swapped}, want: recorded},
+		{name: "clearing the verdict", stored: &decided, incoming: []state.SubMatchResult{bout, unscored}, want: recorded},
+		{name: "scoring over the verdict", stored: &decided, incoming: []state.SubMatchResult{bout, row("TeamB", []string{}, []string{"M"})}, want: recorded},
+		{name: "leaving the row's points out", stored: &decided, incoming: []state.SubMatchResult{bout, silent}, wantStoredRepBout: true},
+		{name: "fouls that fold into a point on a row without points", stored: &decided, incoming: []state.SubMatchResult{bout, fouled}, want: recorded},
+		{name: "dropping the row", stored: &decided, incoming: []state.SubMatchResult{bout}, want: recorded},
+		{name: "an empty list drops it too", stored: &decided, incoming: []state.SubMatchResult{}, want: recorded},
+		{name: "sending no sub-results at all", stored: &decided},
+		{name: "a second row behind an echo", stored: &decided, incoming: []state.SubMatchResult{bout, decided, unscored}, want: errDuplicateRepBout},
+		{name: "finishing on the decided side", stored: &decided, incoming: []state.SubMatchResult{bout, decided}, winner: "TeamA", winnerID: repBoutTeamAID, wantStoredRepBout: true},
+		{name: "finishing on the other side", stored: &decided, incoming: []state.SubMatchResult{bout, decided}, winner: "TeamB", want: recorded},
+		{name: "finishing on the other side's id", stored: &decided, winnerID: repBoutTeamBID, want: recorded},
+		{name: "finishing on a name neither side has", stored: &decided, winner: "TeamC", want: recorded},
+		{name: "a start judges no bouts", stored: &decided, incoming: []state.SubMatchResult{bout}, startOnly: true},
+		{name: "a start still judges its winner", stored: &decided, winner: "TeamB", startOnly: true, want: recorded},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			store := newTempStore(t)
+			require.NoError(t, store.SaveCompetition(&state.Competition{
+				ID: "c1", Name: "Teams", Kind: "team", Format: state.CompFormatKnockout,
+				TeamSize: 3, TeamMatchType: state.TeamMatchTypeFixed,
+			}))
+			subs := []state.SubMatchResult{bout}
+			if tc.stored != nil {
+				subs = append(subs, *tc.stored)
+			}
+			require.NoError(t, store.SaveBracket("c1", &state.Bracket{Rounds: [][]state.BracketMatch{{{
+				ID: "B1", SideA: "TeamA", SideB: "TeamB", SideAID: repBoutTeamAID, SideBID: repBoutTeamBID,
+				Status: state.MatchStatusRunning, SubResults: subs,
+			}}}}))
+			sent := state.CloneSubResults(tc.incoming)
+			result := &state.MatchResult{SubResults: tc.incoming, Winner: tc.winner, WinnerID: tc.winnerID}
+
+			err := store.WithTransaction("c1", func(stx state.StoreTx) error {
+				return holdSelfReportedWriteUnderTx(stx, "c1", "B1", result, tc.startOnly)
+			})
+			if tc.want != nil {
+				var refusal *selfRunRefusal
+				require.ErrorAs(t, err, &refusal)
+				assert.Equal(t, tc.want, refusal)
+				return
+			}
+			require.NoError(t, err)
+			assert.Equal(t, sent, tc.incoming, "the request's own rows are never written into")
+			if tc.wantStoredRepBout {
+				assert.Equal(t, *tc.stored, result.SubResults[state.DaihyosenSubIndex(result.SubResults)])
+			} else {
+				assert.Equal(t, sent, result.SubResults)
+			}
+		})
+	}
+}
+
+// TestRepBoutHanteiRefusal_SharedTable is the Go half of the shared sentence
+// table; the JS half reads the same file (rep_bout_hantei_note.test.jsx).
+func TestRepBoutHanteiRefusal_SharedTable(t *testing.T) {
+	raw, err := os.ReadFile(filepath.Join("testdata", "rep_bout_hantei_messages.json"))
+	require.NoError(t, err)
+	var table struct {
+		Recorded    string `json:"recorded"`
+		NotRecorded string `json:"notRecorded"`
+	}
+	require.NoError(t, json.Unmarshal(raw, &table))
+	require.NotEmpty(t, table.Recorded)
+	require.NotEmpty(t, table.NotRecorded)
+	assert.Equal(t, table.Recorded, repBoutHanteiRefusal(true).Message())
+	assert.Equal(t, table.NotRecorded, repBoutHanteiRefusal(false).Message())
 }

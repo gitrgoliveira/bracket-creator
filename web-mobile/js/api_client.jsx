@@ -55,19 +55,34 @@ import {
 // rejected promise so callers enter the same catch branch as a TCP reset.
 // The clearTimeout in finally ensures the alarm never fires after the
 // request has already settled, avoiding a stale abort on a new controller.
+// That settling is the HEADERS arriving: the abort covers nothing after it,
+// so a body read that must be bounded as well is bounded by its caller
+// (_jsonBy).
 // ---------------------------------------------------------------------------
+
+const FETCH_TIMEOUT_MS = 12000;
 
 /**
  * fetch() with an automatic abort timeout.
  * @param {string} url
  * @param {RequestInit} opts
- * @param {number} [ms=12000]
+ * @param {number} [ms=FETCH_TIMEOUT_MS]
  * @returns {Promise<Response>}
  */
-function fetchWithTimeout(url, opts, ms = 12000) {
+function fetchWithTimeout(url, opts, ms = FETCH_TIMEOUT_MS) {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), ms);
     return fetch(url, { ...opts, signal: controller.signal }).finally(() => clearTimeout(timer));
+}
+
+// _refusalText is the words a refused request is thrown with: the refusal's
+// sentence (`message`: a finished match, the judges' decision on a
+// representative bout) when it carries one, else its code (`error`), else the
+// caller's fallback. The public page shows a thrown message as it is, so a
+// path that threw the bare code showed "result_finalized" where the server had
+// said what happened. The one owner of that choice.
+function _refusalText(body, fallback) {
+    return (body && (body.message || body.error)) || fallback;
 }
 
 // reopenFailureError builds the Error thrown by a failed reopen. reopenMatch and
@@ -102,7 +117,7 @@ async function reopenFailureError(res) {
         if (downstream.downstreamKnockoutPlayed) downstream.downstreamKnockoutPlayed.reopen = true;
         return downstream;
     }
-    const e = new Error(err.message || err.error || "Failed to reopen match");
+    const e = new Error(_refusalText(err, "Failed to reopen match"));
     if (err.error) e.code = err.error;
     if (err.court) e.court = err.court;
     if (err.matchId) e.matchId = err.matchId;
@@ -188,7 +203,7 @@ function _revKey(compID, matchID) { return `${compID}:${matchID}`; }
 // body isn't this refusal, so callers can `throw _downstreamKnockoutPlayedError(body) || new Error(...)`.
 function _downstreamKnockoutPlayedError(body) {
     if (!body || body.error !== 'downstream_knockout_played') return null;
-    const err = new Error(body.message || body.error || 'Failed to record score');
+    const err = new Error(_refusalText(body, 'Failed to record score'));
     err.downstreamKnockoutPlayed = {
         matchId: body.matchId,
         blockingMatchId: body.blockingMatchId,
@@ -1478,7 +1493,7 @@ async function _flushQueue() {
                         // reading this alert used to see with no way to understand it or
                         // move forward.
                         const dropCopy = _downstreamQueueDropCopy(body);
-                        const reason = dropCopy ? dropCopy.reason : (body.reasonHuman || body.message || body.error || `HTTP ${res.status}`);
+                        const reason = dropCopy ? dropCopy.reason : (body.reasonHuman || _refusalText(body, `HTTP ${res.status}`));
                         if (terminal) {
                             _notifyTerminalWriteFailed({
                                 compID, matchID, kind, status: res.status, reason,
@@ -2124,15 +2139,34 @@ function _daihyosenOutcome(body) {
     return body.result ?? body;
 }
 
+// _jsonBy reads a response's body as JSON by `deadline` (epoch ms), rejecting
+// once it passes. An unparseable body reads as {}, as `.json().catch(() =>
+// ({}))` does everywhere else; only a body that never completes rejects.
+function _jsonBy(res, deadline) {
+    return new Promise((resolve, reject) => {
+        const timer = setTimeout(() => reject(new Error('the response body did not arrive in time')), Math.max(0, deadline - Date.now()));
+        Promise.resolve().then(() => res.json()).then(
+            (body) => { clearTimeout(timer); resolve(body); },
+            () => { clearTimeout(timer); resolve({}); },
+        );
+    });
+}
+
 // The daihyosen add (POST) or remove (DELETE), stamped like recordDecision.
-// Bounded by fetchWithTimeout like every other write: the team editor holds
-// each autosave on the court until this request settles, so a request left
-// hanging on a half-open connection would stop all saving there. No answer
-// is reported as not done, in a sentence the editor shows as it is; the held
-// write then goes out as it stood, which undoes the change if the server did
-// make it after all.
+// Bounded like every other write, and the whole of it, body included: the team
+// editor holds each autosave on the court until this request settles, so a
+// request left hanging on a half-open connection would stop all saving there.
+// fetchWithTimeout's abort ends at the headers, so the body is read by the
+// same deadline (_jsonBy): a body that never completes is no answer too. No
+// answer is reported as not done, in a sentence the editor shows as it is; the
+// held write then goes out as it stood, which undoes the change if the server
+// did make it after all. A refusal shows the server's own sentence when it
+// sends one (_refusalText), e.g. a finished match's.
 async function _daihyosenRequest(method, compID, matchID, password, notDone) {
+    const noAnswer = `${notDone}: the server did not answer. Check the connection and try again.`;
+    const deadline = Date.now() + FETCH_TIMEOUT_MS;
     let res;
+    let body;
     try {
         res = await fetchWithTimeout(`/api/competitions/${compID}/matches/${matchID}/daihyosen`, {
             method,
@@ -2141,15 +2175,13 @@ async function _daihyosenRequest(method, compID, matchID, password, notDone) {
                 'X-Tournament-Password': password
             },
             body: JSON.stringify({ modifiedAt: _serverNowMs() }),
-        });
+        }, FETCH_TIMEOUT_MS);
+        body = await _jsonBy(res, deadline);
     } catch (_e) {
-        throw new Error(`${notDone}: the server did not answer. Check the connection and try again.`);
+        throw new Error(noAnswer);
     }
-    if (!res.ok) {
-        const err = await res.json().catch(() => ({}));
-        throw new Error(err.error || notDone);
-    }
-    return _daihyosenOutcome(await res.json().catch(() => ({})));
+    if (!res.ok) throw new Error(_refusalText(body, notDone));
+    return _daihyosenOutcome(body);
 }
 
 const API = {
@@ -2801,7 +2833,7 @@ const API = {
             if (retryBody.error === "ineligible_competitor" || retryBody.error === "already_ineligible") {
                 throw new Error(retryBody.reasonHuman || retryBody.reason || retryBody.error || "Failed to record score");
             }
-            throw _courtBusyError(retryBody) || _downstreamRefusalError(retryBody) || new Error(retryBody.error || "Failed to record score");
+            throw _courtBusyError(retryBody) || _downstreamRefusalError(retryBody) || new Error(_refusalText(retryBody, "Failed to record score"));
         };
 
         let res;
@@ -2910,11 +2942,8 @@ const API = {
         // structured error rather than a plain message; see
         // _downstreamKnockoutPlayedError and write_result.jsx's
         // downstreamKnockoutPlayedRefusal.
-        // Otherwise the refusal's sentence when it carries one (a finished
-        // match, a representative bout the judges decided: 409 with the code in
-        // `error` and the sentence in `message`), which the public score sheet
-        // shows as it is; the bare code only when there is no sentence.
-        throw _downstreamRefusalError(data) || new Error(data.message || data.error || "Failed to record score");
+        // Otherwise the refusal's sentence when it carries one (_refusalText).
+        throw _downstreamRefusalError(data) || new Error(_refusalText(data, "Failed to record score"));
     },
     // T093–T095: kiken / fusenpai / fusensho / daihyosen: server auto-fills
     // scoreline and Winner from {decision, decisionBy, encho}. Body shape is
@@ -3557,7 +3586,7 @@ const API = {
         });
         if (!res.ok) {
             const err = await res.json().catch(() => ({}));
-            throw new Error(err.error || "Failed to add team member");
+            throw new Error(_refusalText(err, "Failed to add team member"));
         }
         return res.json();
     },
@@ -3574,7 +3603,7 @@ const API = {
         });
         if (!res.ok) {
             const err = await res.json().catch(() => ({}));
-            throw new Error(err.error || "Failed to rename team member");
+            throw new Error(_refusalText(err, "Failed to rename team member"));
         }
         return true;
     },
@@ -3659,7 +3688,7 @@ const API = {
             // `error` and the sentence to show in `message`, as the score
             // path's does.
             const err = await res.json().catch(() => ({}));
-            throw new Error(err.message || err.error || "Failed to save match lineup");
+            throw new Error(_refusalText(err, "Failed to save match lineup"));
         }
         return res.json();
     },

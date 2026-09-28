@@ -41,8 +41,9 @@ func (e *Engine) KachinukiDetailMatches(id string) ([]helper.KachinukiMatchDetai
 //
 // The function is read-only: load pool matches, bracket, and team lineups,
 // flatten into helper.KachinukiMatchDetail. The order is pool matches in
-// persisted order, then bracket matches round by round, then the 3rd-place
-// match.
+// persisted order, then bracket matches by match number (the order the
+// Elimination Matches sheet prints them, not storage order), then the
+// 3rd-place match.
 func (e *Engine) collectKachinukiMatches(compID string, comp *state.Competition) ([]helper.KachinukiMatchDetail, error) {
 	if !comp.IsKachinuki() {
 		return nil, nil

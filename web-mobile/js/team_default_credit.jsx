@@ -38,8 +38,9 @@
 // SCOPE: this leaf answers "which side does a default-win ruling credit" and
 // "what does that mean for one bout's outcome / for an IV-PW aggregate". It
 // does NOT decide what MARK (Kiken/Fus.) a surface shows: that is bracket.jsx
-// `sideMarks`' job (mirrored from internal/export/suffix.go SideMarks), kept
-// there because CLAUDE.md documents sideMarks/SideMarks as one mirrored pair
+// `sideMarks`' job (mirrored from domain.SideMarks in
+// internal/domain/result_marks.go), kept there because CLAUDE.md documents
+// sideMarks/domain.SideMarks as one mirrored pair
 // with one owner, and duplicating its "Kiken"/"Fus." label logic here would
 // split that pair into three. A caller placing a mark beside a withdrawn
 // team's name computes it the SAME way MatchCard already does (sideMarks +

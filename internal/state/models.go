@@ -1146,6 +1146,19 @@ const DecisionDraw = "hikiwake"
 // missing from the sheet.
 const DaihyosenSubPosition = -1
 
+// DaihyosenSubIndex returns the index of the representative-bout row in subs,
+// the first row at DaihyosenSubPosition, or -1 when there is none. It is the
+// one answer to "which row is the representative bout": an encounter holds
+// one, and where a hand-edited or legacy file holds two, it is the first.
+func DaihyosenSubIndex(subs []SubMatchResult) int {
+	for i := range subs {
+		if subs[i].Position == DaihyosenSubPosition {
+			return i
+		}
+	}
+	return -1
+}
+
 // IsDraw reports whether a match decision string represents a draw.
 func IsDraw(decision string) bool {
 	return domain.IsDrawDecisionStr(decision)

@@ -1348,7 +1348,7 @@ func RegisterMatchHandlers(r *gin.RouterGroup, eng *engine.Engine, store Competi
 
 		// Self-run mode: reopening a finalized result is an organiser action
 		// (anonymous participants are blocked from overwriting finalized
-		// results on the score path via checkSelfReportedUnderTx; an ungated
+		// results on the score path via holdSelfReportedWriteUnderTx; an ungated
 		// reopen would be a trivial bypass). The gate lives in the CENTRAL
 		// allowlist, isSelfRunMainGatedConfigRoute (middleware.go), same as
 		// its sibling override-winner — NOT hand-rolled here, so it shares
@@ -1766,10 +1766,10 @@ func RegisterMatchHandlers(r *gin.RouterGroup, eng *engine.Engine, store Competi
 // and true on success; writes the HTTP error response and returns "",
 // false when the request should be rejected.
 //
-// The finalized-result guard and the representative bout's hantei guard are
-// NOT checked here: both read the stored match, so they run inside
-// WithTransaction to prevent TOCTOU races between concurrent anonymous
-// submissions. See checkSelfReportedUnderTx.
+// Nothing that reads the stored match is checked here (the finished-match
+// refusal, the representative bout's rules): that runs inside WithTransaction,
+// so concurrent anonymous submissions cannot race it. See
+// holdSelfReportedWriteUnderTx.
 //
 // Called after ScoreRequest.Validate() so the request is structurally valid.
 //
@@ -1808,42 +1808,104 @@ func enforceSelfRunPolicy(c *gin.Context, tl TournamentLoader, verifier Password
 	return "self-reported", true
 }
 
-// errResultFinalized is a sentinel returned by checkSelfReportedUnderTx to
-// signal that the match is already finalized and the anonymous overwrite
-// should be rejected with 409.
-var errResultFinalized = errors.New("result_finalized")
-
-// repBoutHanteiRefusal is checkSelfReportedUnderTx's answer to an anonymous
-// write that would record, change or clear the representative bout's hantei
-// (SelfRunChangesRepBoutHantei). recorded says whether the stored row carries
-// a verdict, which decides the sentence the participant is shown.
-type repBoutHanteiRefusal struct{ recorded bool }
-
-func (r *repBoutHanteiRefusal) Error() string { return "hantei_organiser_only" }
-
-// Message is the sentence the public score sheet shows as it is. The first is
-// also the note the score sheet puts under a representative bout the judges
-// decided (admin_scoring_team.jsx), so a refusal reads like the page did.
-func (r *repBoutHanteiRefusal) Message() string {
-	if r.recorded {
-		return "The judges decided this representative bout (hantei). Ask the tournament organizer to change it."
-	}
-	return "Only the tournament organizer can record a judges' decision (hantei)."
+// selfRunRefusal is a refusal of an anonymous self-run write: the status of
+// the response, its code (the body's error) and the sentence the public page
+// shows as it is (the body's message). The sentence is written where the
+// refusal is decided, so the handler that sends it never works the case out
+// again.
+type selfRunRefusal struct {
+	status  int
+	code    string
+	message string
 }
 
-// checkSelfReportedUnderTx is the in-transaction half of the self-run rules
-// for an anonymous score write. It runs inside WithTransaction (under the
-// per-comp lock) so it's safe from TOCTOU races with a concurrent write, and
-// it reads the stored match once for both of its refusals: a write to a
-// completed match (errResultFinalized), and one that would record, change or
-// clear the representative bout's hantei (*repBoutHanteiRefusal), judged on
-// incoming, the sub-results the write will store. Fails closed: a load error
-// rejects the request rather than allowing the write, which is why it reads
-// the snapshot through the fail-closed matchSnapshotOrErr rather than a
-// best-effort error-swallowing read. A match in neither store passes both
-// checks on purpose: the write that follows under the same lock refuses it
-// (errMatchNotFound), so nothing, a hantei included, can land on it.
-func checkSelfReportedUnderTx(stx state.StoreTx, compID, matchID string, incoming []state.SubMatchResult) error {
+func (r *selfRunRefusal) Error() string { return r.code }
+
+// Message is the sentence the public page shows as it is.
+func (r *selfRunRefusal) Message() string { return r.message }
+
+// body is the response body: the code and the sentence.
+func (r *selfRunRefusal) body() gin.H { return gin.H{"error": r.code, "message": r.message} }
+
+// resultFinalized is the refusal of an anonymous self-run write to a match
+// that has finished, which only the organiser corrects. The score path, the
+// representative bout's add and remove, and the score sheet's lineup write all
+// send it. message is the sentence; the lineup's names what it could not
+// change.
+func resultFinalized(message string) *selfRunRefusal {
+	return &selfRunRefusal{status: http.StatusConflict, code: "result_finalized", message: message}
+}
+
+// errResultFinalized is resultFinalized with the score path's sentence, which
+// the representative bout's add and remove send too.
+var errResultFinalized = resultFinalized("This match result has already been reported. Contact the tournament organizer to correct it.")
+
+// repBoutHanteiRefusal is the refusal of an anonymous write that would record,
+// move or clear the judges' decision (hantei) on the representative bout, or
+// finish the match against it. recorded says whether the organiser recorded
+// one, which decides the sentence. The first is also the note the public score
+// sheet shows under a representative bout the judges decided
+// (admin_scoring_team.jsx); testdata/rep_bout_hantei_messages.json holds both
+// for the two languages.
+func repBoutHanteiRefusal(recorded bool) *selfRunRefusal {
+	message := "Only the tournament organizer can record a judges' decision (hantei)."
+	if recorded {
+		message = "The judges decided this representative bout (hantei). Ask the tournament organizer to change it."
+	}
+	return &selfRunRefusal{status: http.StatusConflict, code: "hantei_organiser_only", message: message}
+}
+
+// errDuplicateRepBout refuses a write listing two representative-bout rows: an
+// encounter has one.
+var errDuplicateRepBout = &selfRunRefusal{
+	status:  http.StatusBadRequest,
+	code:    "duplicate_daihyosen",
+	message: "A team match has one representative bout, and this score lists more than one. Reload the score sheet and try again.",
+}
+
+// errNoRepBout refuses a write scoring a representative bout the match does
+// not have. Only the add route creates one, with its tie, pool, kachinuki,
+// engi and eligibility checks, and the score path makes none of them.
+var errNoRepBout = &selfRunRefusal{
+	status:  http.StatusConflict,
+	code:    "no_daihyosen",
+	message: "This match has no representative bout. Add it on the score sheet before scoring it.",
+}
+
+// holdSelfReportedWriteUnderTx is the one judge of an anonymous self-run score
+// write. It runs inside WithTransaction (under the per-comp lock), so the
+// stored match it reads, once, cannot change before the write lands. It
+// refuses the write or lets it through, and it can rewrite it on the way: a
+// representative bout the organiser decided is written back exactly as
+// stored. In order:
+//
+//   - A match that has finished is the organiser's to correct
+//     (errResultFinalized).
+//   - An encounter has one representative bout: a write listing two is
+//     refused (errDuplicateRepBout), and so is one scoring a representative
+//     bout the match does not have (errNoRepBout).
+//   - Once the organiser recorded a judges' decision on the representative
+//     bout, the write's row must send it back (sameHanteiVerdict) or leave the
+//     row's ippons out (engine.KeepsStoredDaihyosenVerdict), a write listing
+//     bouts must list that row, and a winner the write names, by name or by
+//     id, must be the side the decided bout names; otherwise
+//     repBoutHanteiRefusal. The row is then replaced by a copy of the stored
+//     one, its points, fouls, overtime, sub-decision and names included, so a
+//     participant can finish on the decided bout but never change it.
+//   - With none recorded, a row carrying the judges'-decision mark would record
+//     one (repBoutHanteiRefusal).
+//
+// The write's winner is read against the STORED sides and their ids, never the
+// ones the write sends, through the attribution the engine uses (ids first), so
+// an id naming the other side cannot pass behind a matching name. A start
+// (startOnly) keeps the stored bouts whatever it sends (engine.keepQueuedScore),
+// so its sub-results are not judged.
+//
+// Fails closed: a load error rejects the request rather than allowing the write
+// (matchSnapshotOrErr). A match in neither store passes on purpose: the write
+// that follows under the same lock refuses it (errMatchNotFound), so nothing
+// can land on it.
+func holdSelfReportedWriteUnderTx(stx state.StoreTx, compID, matchID string, result *state.MatchResult, startOnly bool) error {
 	snap, found, err := matchSnapshotOrErr(stx, compID, matchID, "self-run")
 	if err != nil {
 		return err
@@ -1854,8 +1916,49 @@ func checkSelfReportedUnderTx(stx state.StoreTx, compID, matchID string, incomin
 	if isMatchFinalized(snap.Status) {
 		return errResultFinalized
 	}
-	if SelfRunChangesRepBoutHantei(snap.RepBout, incoming) {
-		return &repBoutHanteiRefusal{recorded: snap.RepBout != nil && snap.RepBout.HanteiDecided()}
+	var subs []state.SubMatchResult
+	if !startOnly {
+		subs = result.SubResults
+	}
+	row := state.DaihyosenSubIndex(subs)
+	if row >= 0 && state.DaihyosenSubIndex(subs[row+1:]) >= 0 {
+		return errDuplicateRepBout
+	}
+	stored := snap.RepBout
+	if row >= 0 && stored == nil {
+		return errNoRepBout
+	}
+	if stored == nil || !stored.HanteiDecided() {
+		if row >= 0 && subs[row].HanteiDecided() {
+			return repBoutHanteiRefusal(false)
+		}
+		return nil
+	}
+	switch {
+	case row >= 0:
+		in := &subs[row]
+		if in.HanteiDecided() && !sameHanteiVerdict(stored, in) ||
+			!in.HanteiDecided() && !engine.KeepsStoredDaihyosenVerdict(stored, in) {
+			return repBoutHanteiRefusal(true)
+		}
+	case subs != nil:
+		return repBoutHanteiRefusal(true) // listing the bouts without it drops it
+	}
+	if result.Winner != "" || result.WinnerID != "" {
+		claimed := snap.Pairing
+		claimed.Winner, claimed.WinnerID = result.Winner, result.WinnerID
+		side := domain.AttributeWinnerSide(claimed)
+		if side == domain.MatchSideNone || side != state.SubBoutWinnerSide(*stored, snap.Pairing.SideA, snap.Pairing.SideB) {
+			return repBoutHanteiRefusal(true)
+		}
+	}
+	if row >= 0 {
+		// A fresh slice and a deep copy: result.SubResults shares the
+		// request's backing array, and the engine fills free ippon slots in
+		// place, which must never reach the stored row.
+		kept := append([]state.SubMatchResult(nil), subs...)
+		kept[row] = state.CloneSubResults([]state.SubMatchResult{*stored})[0]
+		result.SubResults = kept
 	}
 	return nil
 }
@@ -1907,23 +2010,26 @@ type matchSnapshot struct {
 	// (engine.KeepsWithdrawalRuling, via teamFinishRefusalUnderTx).
 	Decision string
 	// RepBout is a copy of the stored representative-bout row (position -1),
-	// nil when the match has none: the self-run guard compares a
-	// participant's write against the hantei it may carry
-	// (checkSelfReportedUnderTx). One row, not the bout log the note above
-	// keeps out.
+	// nil when the match has none: the self-run judge compares a
+	// participant's write against it, and writes back a deep copy of it once
+	// the organiser has decided it (holdSelfReportedWriteUnderTx). One row,
+	// not the bout log the note above keeps out.
 	RepBout *state.SubMatchResult
+	// Pairing is the stored match's attribution (its sides, their ids and its
+	// winner), which the self-run judge reads a participant's winner against
+	// rather than the sides the write sends.
+	Pairing domain.WinnerAttribution
 }
 
 // repBoutOf returns a copy of the first representative-bout row in subs, nil
 // when there is none.
 func repBoutOf(subs []state.SubMatchResult) *state.SubMatchResult {
-	for i := range subs {
-		if subs[i].Position == state.DaihyosenSubPosition {
-			row := subs[i]
-			return &row
-		}
+	i := state.DaihyosenSubIndex(subs)
+	if i < 0 {
+		return nil
 	}
-	return nil
+	row := subs[i]
+	return &row
 }
 
 // lookupMatchSnapshot is mobileapp's READ-side traversal of the three homes a
@@ -1963,6 +2069,7 @@ func lookupMatchSnapshot(s matchStores, compID, matchID string) (matchSnapshot, 
 				ReopenPending:    poolMatches[i].ReopenPending,
 				Decision:         poolMatches[i].Decision,
 				RepBout:          repBoutOf(poolMatches[i].SubResults),
+				Pairing:          poolMatches[i].Attribution(),
 			}, true, loadErr
 		}
 	}
@@ -1995,6 +2102,7 @@ func bracketMatchSnapshot(bm *state.BracketMatch) matchSnapshot {
 		InBracket:        true,
 		Decision:         bm.Decision,
 		RepBout:          repBoutOf(bm.SubResults),
+		Pairing:          bm.Attribution(),
 	}
 }
 
@@ -2715,18 +2823,11 @@ func registerScoreHandler(r *gin.RouterGroup, eng ScoringEngine, store Competiti
 			// court, plus participant ineligibility. Withdrawal decisions bypass
 			// so operators can record kiken on matches with ineligible participants.
 			return tx.WithTransaction(id, func(stx state.StoreTx) error {
-				// mp-ba3: the finalized guard, and the representative bout's
-				// hantei guard (bc-dhas), run under the per-comp lock to
-				// prevent TOCTOU races between concurrent anonymous submissions.
+				// mp-ba3, bc-dhas: the self-run judge runs under the per-comp
+				// lock, so concurrent anonymous submissions cannot race it. It
+				// may rewrite result's representative bout before the write.
 				if resultSource == "self-reported" {
-					// A start keeps the stored bouts whatever it sends
-					// (engine.keepQueuedScore), so only a scoring write's own
-					// sub-results are judged.
-					incoming := result.SubResults
-					if body.StartOnly {
-						incoming = nil
-					}
-					if err := checkSelfReportedUnderTx(stx, id, mid, incoming); err != nil {
+					if err := holdSelfReportedWriteUnderTx(stx, id, mid, result, body.StartOnly); err != nil {
 						engErr = err
 						return nil
 					}
@@ -2874,19 +2975,9 @@ func registerScoreHandler(r *gin.RouterGroup, eng ScoringEngine, store Competiti
 				respondSuperseded(c)
 				return
 			}
-			if errors.Is(engErr, errResultFinalized) {
-				c.JSON(http.StatusConflict, gin.H{
-					"error":   "result_finalized",
-					"message": "This match result has already been reported. Contact the tournament organizer to correct it.",
-				})
-				return
-			}
-			var hanteiRefusal *repBoutHanteiRefusal
-			if errors.As(engErr, &hanteiRefusal) {
-				c.JSON(http.StatusConflict, gin.H{
-					"error":   hanteiRefusal.Error(),
-					"message": hanteiRefusal.Message(),
-				})
+			var refusal *selfRunRefusal
+			if errors.As(engErr, &refusal) {
+				c.JSON(refusal.status, refusal.body())
 				return
 			}
 			if errors.Is(engErr, engine.ErrMatchSideMismatch) {

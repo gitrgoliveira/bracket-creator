@@ -381,8 +381,9 @@ func RegisterLineupHandlers(r *gin.RouterGroup, store TeamLineupStore, comps Com
 			// An anonymous self-run caller writes from the public score sheet,
 			// so the score path's rule holds: the match must exist, and once it
 			// has finished its lineup is part of the result, which only the
-			// organiser corrects (checkSelfReportedUnderTx refuses the same caller
-			// on the result itself). Read under this lock, like that check. An
+			// organiser corrects (holdSelfReportedWriteUnderTx refuses the same
+			// caller on the result itself). Read under this lock, like that
+			// check, and refused with the same result_finalized body. An
 			// organiser keeps the always-editable rule.
 			if anonymous {
 				snap, found, err := matchSnapshotOrErr(stx, compID, matchID, "lineup")
@@ -396,10 +397,8 @@ func RegisterLineupHandlers(r *gin.RouterGroup, store TeamLineupStore, comps Com
 					return nil
 				}
 				if isMatchFinalized(snap.Status) {
-					respErr = &httpErr{status: http.StatusConflict, body: gin.H{
-						"error":   "result_finalized",
-						"message": "This match has finished, so its lineup can no longer be changed. Contact the tournament organizer to correct it.",
-					}}
+					refusal := resultFinalized("This match has finished, so its lineup can no longer be changed. Contact the tournament organizer to correct it.")
+					respErr = &httpErr{status: refusal.status, body: refusal.body()}
 					return nil
 				}
 			}

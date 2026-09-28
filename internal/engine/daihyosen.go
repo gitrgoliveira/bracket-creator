@@ -323,12 +323,10 @@ func (e *Engine) InjectPoolDaihyosenMatches(compID string) ([]state.MatchResult,
 // change. That call site computes credit the same way MatchResult.TeamResult
 // does (state.DefaultWinCreditSide against the match's own
 // Status/Decision/DecisionBy/Attribution()) rather than passing
-// domain.MatchSideNone, even though the match it reads is never itself
-// completed-by-default-win at that point (AddDaihyosen only applies to a
-// still-tied, still-running encounter, so DefaultWinCreditSide already
-// answers MatchSideNone there) -- computing it properly costs nothing and
-// keeps every caller going through the one canonical derivation rather than
-// a caller hand-asserting "no ruling can be in force here".
+// domain.MatchSideNone. A self-run participant's add reaches only a running
+// match, where DefaultWinCreditSide answers MatchSideNone, but the
+// organiser's reaches a completed one too, where a default-win ruling's
+// credit counts towards the tie as it does for every other reader.
 func ComputeTeamSummary(subResults []state.SubMatchResult, sideAName, sideBName string, credit domain.MatchSide) (TeamSummary, TeamSummary) {
 	// Delegate to the single source of truth in state (the same computation
 	// feeds the wire teamResult the frontend renders), so tie-break math and

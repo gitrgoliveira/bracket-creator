@@ -160,6 +160,14 @@ const SQUAD_MEMBER_LABEL_STYLE = { fontSize: 11, color: "var(--ink-3)", fontWeig
 // MAX_TEAM_SIZE (admin_helpers.jsx), kept in lockstep with the team-size input
 // caps in admin_competition.jsx and admin_setup.jsx.
 
+// The note under a representative bout the judges decided, on the public
+// self-run page (bc-dhas). The server refuses a participant's change to that
+// bout with the same sentence (repBoutHanteiRefusal.Message,
+// internal/mobileapp/handlers_match.go), and both are pinned to the
+// "recorded" value of internal/mobileapp/testdata/rep_bout_hantei_messages.json,
+// so the participant reads one sentence whichever side says it.
+export const REP_BOUT_DECIDED_NOTE = "The judges decided this representative bout (hantei). Ask the tournament organizer to change it.";
+
 // recordedDaihyosenSideOf resolves which SIDE a stored daihyosen hantei names:
 // "" (none, or unattributable), "a" (AKA) or "b" (SHIRO).
 //
@@ -1003,10 +1011,16 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
   const daihyosenHanteiRecorded = !!existingDaihyosen?.decidedByHantei;
   const recordedDaihyosenSide = recordedDaihyosenSideOf(existingDaihyosen, m);
   // bc-dhas: on the public self-run page a representative bout the judges
-  // decided is the organiser's. The server refuses a participant's change to
-  // it (409), so the row is shown with its verdict, not offered for scoring,
-  // and every save sends the verdict back as it is.
+  // decided is the organiser's. The server does not let a participant change
+  // it, so the row is shown with its verdict, not offered for scoring (no
+  // control on it, and it has no fighter picker to lock), and every save sends
+  // the verdict back as it is.
   const repBoutDecidedForParticipant = !!selfReport && daihyosenHanteiRecorded;
+  // A participant adds or removes the representative bout only while the match
+  // is being fought: the server refuses either on a match that is not running
+  // (409; result_finalized once it has finished), so the page does not offer
+  // what would be refused. The organiser, with the password, keeps both.
+  const repBoutAddRemoveOpen = !selfReport || m.status === "running";
   const [daihyosenHantei, setDaihyosenHantei] = useStateA(recordedDaihyosenSide);
   // Armed follows the RECORDED flag, not the resolved side, so an
   // unattributable stored verdict still opens the panel for re-picking
@@ -3641,14 +3655,13 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
               A participant on the public self-run page (selfReport) runs the
               representative bout like any bout but is offered no hantei: a
               judges' decision stays the organiser's, and the server refuses
-              one from a participant (bc-dhas). They keep Remove, and once the
-              organiser records a hantei they are told why the bout is shown,
-              not offered (the same sentence the server refuses a change with,
-              handlers_match.go repBoutHanteiRefusal). */}
+              one from a participant (bc-dhas). They keep Remove while the match
+              is running, and once the organiser records a hantei they are told
+              why the bout is shown, not offered (REP_BOUT_DECIDED_NOTE). */}
           {hasDaihyosen && (() => {
             const dt = subTotals[daihyosenIdx];
             const tiedScore = dt.aTotal === dt.bTotal;
-            const offerRemove = dt.aTotal === 0 && dt.bTotal === 0 && !daihyosenHanteiArmed;
+            const offerRemove = repBoutAddRemoveOpen && dt.aTotal === 0 && dt.bTotal === 0 && !daihyosenHanteiArmed;
             if (selfReport && !offerRemove && !repBoutDecidedForParticipant) return null;
             return (
               <div className="hantei-row" data-testid="team-daihyosen-hantei-row" style={{ display: "flex", gap: 8, alignItems: "center", padding: "6px 8px", marginTop: 12, background: "var(--surface-2)", borderRadius: 6, fontSize: 12 }}>
@@ -3656,7 +3669,7 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
                 <span style={{ color: "var(--ink-3)" }}>{selfReport ? "(representative bout)" : "(judges' decision)"}</span>
                 {repBoutDecidedForParticipant && (
                   <span data-testid="team-daihyosen-decided-note" style={{ marginLeft: "auto", color: "var(--ink-2)" }}>
-                    The judges decided this representative bout (hantei). Ask the tournament organizer to change it.
+                    {REP_BOUT_DECIDED_NOTE}
                   </span>
                 )}
                 {offerRemove && (
@@ -3720,7 +3733,7 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
             // kachinuki daihyosen POST), so the ADD affordance is hidden.
             // Existing/legacy daihyosen rows still render defensively via
             // hasDaihyosen above.
-            if (hasDaihyosen || !isKnockoutPhase || isKachinuki) return null;
+            if (hasDaihyosen || !isKnockoutPhase || isKachinuki || !repBoutAddRemoveOpen) return null;
             // Local tie detection drives the highlight + helper copy only: 
             // the backend is the source of truth and re-validates on submit.
             // A bout is "decided" once it carries any ippon or is a draw; a

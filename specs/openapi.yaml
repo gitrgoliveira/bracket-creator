@@ -39,16 +39,22 @@ info:
     clearing a member's name) and `GET .../team-members` stay gated.
     A request without a valid password also runs the representative bout of a tied
     knockout team match: `POST`/`DELETE .../matches/{mid}/daihyosen` add and remove
-    it, and `PUT .../matches/{mid}/score` scores it through its `subResults` row
-    (position `-1`, decision `daihyosen`). Its score write carries only what the
-    competitors saw: a match `decision` that is empty, `fought` or `hikiwake`, and a bout
-    `decision` that is one of those or `fusensho` (or `daihyosen` on the
-    representative bout). Any other decision, or the `Ht` judges'-decision mark on
-    a numbered bout, is refused with 400. A judges' decision on the representative
-    bout stays the organiser's: such a write may send the `Ht` mark back only as the
-    organiser recorded it (same winner, same side), or leave the row's ippons out,
-    and one that would record, move or clear it (dropping the row included) is
-    refused with 409 `hantei_organiser_only`. `POST .../matches/bulk-score` and
+    it while the match is running (409 `result_finalized` once it has finished, 409
+    `match_not_running` before it starts), and `PUT .../matches/{mid}/score` scores
+    it through its `subResults` row (position `-1`, decision `daihyosen`). The score
+    write never creates one: a row for a representative bout the match does not
+    have is refused with 409 `no_daihyosen`, and a write listing two with 400
+    `duplicate_daihyosen`. It carries only what the competitors saw: a match
+    `decision` that is empty, `fought` or `hikiwake`, and a bout `decision` that is
+    one of those or `fusensho` (or `daihyosen` on the representative bout). Any
+    other decision, or the `Ht` judges'-decision mark on a numbered bout, is refused
+    with 400. A judges' decision on the representative bout stays the organiser's:
+    such a write may send the `Ht` mark back only as the organiser recorded it (same
+    winner, same side names, mark on the same side), or leave the row's ippons out,
+    and the row is then stored exactly as the organiser recorded it, whatever else
+    it carries. One that would record, move or clear the decision (dropping the row
+    included), or name a match winner other than the side it decided, is refused
+    with 409 `hantei_organiser_only`. `POST .../matches/bulk-score` and
     `PUT .../matches/{mid}/quick-score` stay gated: they write results without these
     checks.
 
@@ -2388,6 +2394,12 @@ paths:
             `error` names the bouts, e.g. "Bout 5 (Taisho) has no result.
             Record a score, a Tie, or a Fusensho before finishing."
 
+            A request without a valid password (self-run) whose `subResults`
+            list more than one representative-bout row (position `-1`) is
+            refused with `error` `duplicate_daihyosen` and a `message` for the
+            participant: "A team match has one representative bout, and this
+            score lists more than one. Reload the score sheet and try again."
+
             A `completed` write whose `decision` is empty or `hikiwake` on a
             match whose stored result is a completed withdrawal (kiken or
             fusenpai) is a score sheet's correction, which cannot state a
@@ -2419,7 +2431,7 @@ paths:
                 $ref: '#/components/schemas/Error'
         '409':
           description: |
-            Conflict; one of eight codes returned in the `error` field:
+            Conflict; one of nine codes returned in the `error` field:
             - `court_busy`: court already has a running match in this or another competition.
               Extra fields: `court`, `matchId`, `compId`, `label`, `message`.
             - `ineligible_competitor`: a participant is ineligible (kiken/fusenpai in a prior match, or barred by
@@ -2435,12 +2447,19 @@ paths:
               Extra fields: `message`.
             - `hantei_organiser_only`: a request without a valid password (self-run) would
               record, move or clear the judges' decision on the representative bout
-              (position `-1`), or drop a row that carries one. Sending the recorded
-              decision back as it is, or leaving the row's ippons out, is not refused.
+              (position `-1`), drop a row that carries one, or name a match `winner` or
+              `winnerId` other than the side the decision names (read against the stored
+              sides and their ids). Sending the recorded decision back as it is, or
+              leaving the row's ippons out, is not refused, and the row is then stored
+              exactly as the organiser recorded it.
               Extra fields: `message`, one sentence for the participant: "The judges
               decided this representative bout (hantei). Ask the tournament organizer
               to change it." when a decision is recorded, else "Only the tournament
               organizer can record a judges' decision (hantei)."
+            - `no_daihyosen`: a request without a valid password (self-run) carries a
+              representative-bout row (position `-1`) for a match that has none. Only
+              `POST .../daihyosen` adds one. Extra fields: `message`, "This match has no
+              representative bout. Add it on the score sheet before scoring it."
             - `side_mismatch`: the submitted winner does not match either side of the match.
               Extra fields: `message`.
             - `downstream_knockout_played`: the write would change who a
@@ -2473,6 +2492,8 @@ paths:
                       - ineligible_competitor
                       - already_ineligible
                       - result_finalized
+                      - hantei_organiser_only
+                      - no_daihyosen
                       - side_mismatch
                       - downstream_knockout_played
                       - downstream_knockout_running
@@ -2494,7 +2515,7 @@ paths:
                       `engine.OperatorMatchLabel`.
                   message:
                     type: string
-                    description: Human-readable detail (court_busy, result_finalized, side_mismatch, downstream_knockout_played, downstream_knockout_running).
+                    description: Human-readable detail (court_busy, result_finalized, hantei_organiser_only, no_daihyosen, side_mismatch, downstream_knockout_played, downstream_knockout_running); for the self-run codes, the sentence the public page shows as it is.
                   playerId:
                     type: string
                     description: Ineligible participant ID (ineligible_competitor / already_ineligible).
@@ -3417,10 +3438,10 @@ paths:
       description: >
         Adds a daihyosen (representative) bout to break a tie in an
         elimination team match. Rejected if the match is not tied,
-        if it is a pool match, if the competition is engi or kachinuki
-        (daihyosen does not exist in kachinuki; a knockout tie goes to
-        encho on the final bout), or if neither team has sufficient
-        eligible competitors.
+        if it is a pool match, if the competition is individual, engi
+        or kachinuki (daihyosen does not exist in kachinuki; a knockout
+        tie goes to encho on the final bout), or if neither team has
+        sufficient eligible competitors.
 
 
         The add competes on timestamps like a score write when it carries
@@ -3462,9 +3483,12 @@ paths:
             Match is not tied (`not_tied`), is a pool match (`pool_match`),
             or the competition does not support daihyosen: engi competitions
             decide bouts by referee flags (`error` is a human-readable
-            message), and daihyosen does not exist in kachinuki (`error`
+            message), daihyosen does not exist in kachinuki (`error`
             begins "daihyosen does not exist in kachinuki"; a tied final bout
-            is a draw in pools/league and goes to encho in a knockout).
+            is a draw in pools/league and goes to encho in a knockout), and an
+            individual competition has no bouts to tie on (`error` begins
+            "individual competitions do not support daihyosen"). Refused for
+            every caller, with or without the password.
           content:
             application/json:
               schema:
@@ -3475,10 +3499,26 @@ paths:
             match already has a representative bout (`daihyosen_exists`): an
             encounter has one, and the tie this route checks counts none, so a
             second would otherwise be appended beside the first.
+
+
+            Self-run, no valid password: the match is not running. Once it has
+            finished, `result_finalized` with the score route's `message` ("This
+            match result has already been reported. Contact the tournament
+            organizer to correct it."); before it starts, `match_not_running`
+            with a `message` ("This match has not started. Start it before
+            adding a representative bout."). A request with the password is not
+            limited by the match's status.
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/Error'
+                type: object
+                properties:
+                  error:
+                    type: string
+                    enum: [insufficient_eligibility, daihyosen_exists, result_finalized, match_not_running]
+                  message:
+                    type: string
+                    description: The sentence the public page shows as it is (result_finalized, match_not_running).
     delete:
       tags: [matches]
       summary: Remove an unscored representative (daihyosen) bout
@@ -3543,10 +3583,26 @@ paths:
             The daihyosen bout has already been scored (`daihyosen_scored`).
             Removing it would discard a fought result, so it must be corrected
             through the score editor instead.
+
+
+            Self-run, no valid password: the match is not running. Once it has
+            finished, `result_finalized` with the score route's `message` ("This
+            match result has already been reported. Contact the tournament
+            organizer to correct it."); before it starts, `match_not_running`
+            with a `message` ("This match has not started. Start it before
+            removing its representative bout."). A request with the password is
+            not limited by the match's status.
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/Error'
+                type: object
+                properties:
+                  error:
+                    type: string
+                    enum: [daihyosen_scored, result_finalized, match_not_running]
+                  message:
+                    type: string
+                    description: The sentence the public page shows as it is (result_finalized, match_not_running).
         '413':
           $ref: '#/components/responses/PayloadTooLarge'
 

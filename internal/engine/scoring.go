@@ -375,7 +375,7 @@ func logStrippedHantei(result *state.MatchResult, why string) {
 // there is none): prior carries the verdict and the winner it names, and in
 // says nothing about either, so preserveSubHantei carries prior's verdict and
 // scoreline onto it. It is the one owner of that silence test. The self-run
-// guard asks it too (mobileapp.SelfRunChangesRepBoutHantei), so a
+// judge asks it too (mobileapp.holdSelfReportedWriteUnderTx), so a
 // participant's write that would erase an organiser's verdict is told apart
 // from one that keeps it by the same test the write itself applies.
 func KeepsStoredDaihyosenVerdict(prior, in *state.SubMatchResult) bool {
@@ -411,6 +411,14 @@ func KeepsStoredDaihyosenVerdict(prior, in *state.SubMatchResult) bool {
 	// completion rejects and pool standings score as a draw for both teams.
 	if (in.SideA != "" || in.SideB != "") &&
 		(in.SideA != prior.SideA || in.SideB != prior.SideB) {
+		return false
+	}
+	// Two outstanding fouls on a side fold into an "H" for the other side
+	// before a write is stored (applyHansokuIppons), which gives a row
+	// without ippons an array of its own. Such a row is not silent, so the
+	// answer is the same asked before the fold (the self-run judge) as
+	// after it (preserveSubHantei).
+	if in.HansokuA >= 2 || in.HansokuB >= 2 {
 		return false
 	}
 	// A row that supplies NEITHER ippon array said nothing about the
@@ -451,50 +459,45 @@ func KeepsStoredDaihyosenVerdict(prior, in *state.SubMatchResult) bool {
 
 func preserveSubHantei(stored, incoming []state.SubMatchResult) {
 	var prior *state.SubMatchResult
-	for i := range stored {
-		if stored[i].Position == state.DaihyosenSubPosition {
-			prior = &stored[i]
-			break
-		}
+	if i := state.DaihyosenSubIndex(stored); i >= 0 {
+		prior = &stored[i]
 	}
-	for i := range incoming {
-		in := &incoming[i]
-		if in.Position != state.DaihyosenSubPosition {
-			continue
-		}
-		if !KeepsStoredDaihyosenVerdict(prior, in) {
-			return
-		}
-		if in.SideA == "" && in.SideB == "" {
-			in.SideA, in.SideB = prior.SideA, prior.SideB
-		}
-		in.IpponsA = append([]string(nil), prior.IpponsA...)
-		in.IpponsB = append([]string(nil), prior.IpponsB...)
-		// Hansoku travels WITH the ippons, not separately: an outstanding
-		// foul is part of the same scoreline, and the two are coupled
-		// (every second one discharges into an "H" ippon for the opponent,
-		// applyHansokuIppons). Restoring the letters but not the counts
-		// left a coherent stored pair as an incoherent restored one -
-		// prior's discharged H's beside the incoming zero - so the
-		// referee's outstanding ▲ vanished from every scoreboard and the
-		// next foul on that side no longer discharged.
-		in.HansokuA, in.HansokuB = prior.HansokuA, prior.HansokuB
-		in.Encho = prior.Encho.Clone()
-		if in.Decision == "" {
-			in.Decision = prior.Decision
-		}
-		if !domain.HanteiTiedScoreline(in.IpponsA, in.IpponsB) {
-			return // untied now: the verdict cannot stand on this scoreline
-		}
-		// The verdict itself travelled with the copied scoreline: prior's
-		// ippons carry the domain.HanteiMark entry, so there is no flag left
-		// to raise — only the winner the mark names. Reached ONLY when the
-		// scoreline above was copied wholesale from prior (the silence test
-		// guards it): the mark and the winner it names move as one atomic
-		// unit, never separately.
-		in.Winner = prior.Winner
+	i := state.DaihyosenSubIndex(incoming)
+	if i < 0 {
 		return
 	}
+	in := &incoming[i]
+	if !KeepsStoredDaihyosenVerdict(prior, in) {
+		return
+	}
+	if in.SideA == "" && in.SideB == "" {
+		in.SideA, in.SideB = prior.SideA, prior.SideB
+	}
+	in.IpponsA = append([]string(nil), prior.IpponsA...)
+	in.IpponsB = append([]string(nil), prior.IpponsB...)
+	// Hansoku travels WITH the ippons, not separately: an outstanding
+	// foul is part of the same scoreline, and the two are coupled
+	// (every second one discharges into an "H" ippon for the opponent,
+	// applyHansokuIppons). Restoring the letters but not the counts
+	// left a coherent stored pair as an incoherent restored one -
+	// prior's discharged H's beside the incoming zero - so the
+	// referee's outstanding ▲ vanished from every scoreboard and the
+	// next foul on that side no longer discharged.
+	in.HansokuA, in.HansokuB = prior.HansokuA, prior.HansokuB
+	in.Encho = prior.Encho.Clone()
+	if in.Decision == "" {
+		in.Decision = prior.Decision
+	}
+	if !domain.HanteiTiedScoreline(in.IpponsA, in.IpponsB) {
+		return // untied now: the verdict cannot stand on this scoreline
+	}
+	// The verdict itself travelled with the copied scoreline: prior's
+	// ippons carry the domain.HanteiMark entry, so there is no flag left
+	// to raise — only the winner the mark names. Reached ONLY when the
+	// scoreline above was copied wholesale from prior (the silence test
+	// guards it): the mark and the winner it names move as one atomic
+	// unit, never separately.
+	in.Winner = prior.Winner
 }
 
 // preserveDaihyosenOutcome is the call every forward SubResults replacement

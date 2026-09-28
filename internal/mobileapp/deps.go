@@ -219,6 +219,7 @@ type SquadStore interface {
 	LoadSquads(compID string) (map[string][]domain.TeamMember, error)
 	AddTeamMember(compID, teamID, name string) (domain.TeamMember, error)
 	RenameTeamMember(compID, teamID, memberID, newName string) error
+	NameUnnamedTeamMember(compID, teamID, memberID, newName string) error
 	ClearTeamMemberName(compID, teamID, memberID string) error
 }
 

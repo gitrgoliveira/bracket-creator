@@ -6,8 +6,8 @@
 // competitions, so the match is found by its competition as well as its id.
 // A match that leaves the data closes the modal for good.
 import React from 'react';
-import { render, act, fireEvent, screen } from '@testing-library/react';
-import { describe, it, expect, vi, beforeAll, afterAll, beforeEach } from 'vitest';
+import { render, act, fireEvent, screen, within } from '@testing-library/react';
+import { describe, it, expect, vi, beforeAll, afterAll, beforeEach, afterEach } from 'vitest';
 import { installWindowStubs } from '../helpers/stub_globals.js';
 
 const probe = { props: null };
@@ -109,5 +109,40 @@ describe.each([
     await act(async () => { view.rerender(page(tournament(openComp({ bracket: { rounds: [[finalRow({ modifiedAt: 0 })]] } })))); });
     expect(screen.queryByTestId('probe-score-editor')).toBeNull();
     expect(screen.queryByRole('dialog')).toBeNull();
+  });
+});
+
+// Home's alert banner keeps the match from the moment the alert fired, and
+// its View button opens THAT copy. Later pushes and refetches give the live
+// row new arrays, which the editor must follow: a copy standing in for the
+// live row seeded the editor with the old scoreline, and its first tap then
+// saved that scoreline stamped now, erasing the newer point.
+describe('Home: the alert banner opens the live match, not the copy it holds (bc-dhas)', () => {
+  const yamada = { id: 'p1', name: 'Yamada', dojo: 'Kodokan' };
+  const tanaka = { id: 'p2', name: 'Tanaka', dojo: 'Mumeishi' };
+  const followed = (row) => ({
+    mode: 'self-run', name: 'T', date: '', courts: ['A'],
+    competitions: [openComp({ players: [yamada, tanaka], bracket: { rounds: [[row]] } })],
+  });
+
+  beforeEach(() => { localStorage.setItem('bc_watchlist', JSON.stringify([{ type: 'player', id: 'p1', name: 'Yamada' }])); });
+  afterEach(() => { localStorage.removeItem('bc_watchlist'); });
+
+  it('the editor opened from View carries the point recorded after the alert fired', async () => {
+    let view;
+    // Not on deck yet: the alert primes and stays quiet.
+    await act(async () => { view = render(home(followed(finalRow({ status: 'scheduled', queuePosition: 2 })))); });
+    expect(screen.queryByTestId('match-alert-banner')).toBeNull();
+
+    // The match starts: the alert fires and the banner holds this row.
+    await act(async () => { view.rerender(home(followed(finalRow({ modifiedAt: 100 })))); });
+    const banner = screen.getByTestId('match-alert-banner');
+
+    // A point is recorded elsewhere; the refetched row carries new arrays.
+    await act(async () => { view.rerender(home(followed(finalRow({ modifiedAt: 200, ipponsA: ['M'] })))); });
+
+    await act(async () => { fireEvent.click(within(banner).getByRole('button', { name: 'View' })); });
+    await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Report result' })); });
+    expect(probe.props.match).toMatchObject({ id: 'k1', compId: 'c1', status: 'running', modifiedAt: 200, ipponsA: ['M'] });
   });
 });

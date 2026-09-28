@@ -777,6 +777,14 @@ function withServerDaihyosenRow(serverSubs) {
   };
 }
 
+// subsKey: a bout log by its content, the one comparison the match override
+// makes both when the prop moves (the clearing effect) and when a server
+// answer is adopted (adoptServerSubs), so the two cannot disagree about
+// whether the prop already holds a log.
+function subsKey(subResults) {
+  return JSON.stringify(subResults || []);
+}
+
 export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSubmitAndNext, onAfterDecision, onStartLanded, prevMatch, nextMatch, onPrev, onNext, password, selfReport, teamMembers, variant = "modal", canClose = true }) {
   // mp-gmcg: a successful [× Remove this bout] shrinks the SERVER bout log, and
   // the parent may not have caught up when this render runs. matchOverride
@@ -804,7 +812,7 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
   //     surviving on the one path that opts out of the live prop.
   // Content-keying is quiet for a same-content reload (identical string) and
   // fires for every real change, including that last one.
-  const matchSubsKey = JSON.stringify(match?.subResults || []);
+  const matchSubsKey = subsKey(match?.subResults);
   useEffectA(() => { setMatchOverride(null); }, [match?.id, matchSubsKey]);
   // mp-gmcg: never carry an open past-bout correction across a match SWITCH,
   // but DO survive a same-match reload. Autosave persists each correction as a
@@ -2682,7 +2690,13 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
     // No override when the prop already carries this log: the override only
     // bridges the gap until the parent catches up, and one that shadows a
     // current prop is never cleared (the clearing effect keys on matchSubsKey).
-    if (JSON.stringify(latest?.subResults || []) === JSON.stringify(subResults)) return;
+    // An earlier adopt's override goes too: after Add then Remove with no
+    // prop refresh between them, the prop holds the log Remove returned, and
+    // the Add's override would otherwise keep the removed row on the sheet.
+    if (subsKey(latest?.subResults) === subsKey(subResults)) {
+      setMatchOverride(null);
+      return;
+    }
     setMatchOverride({ ...latest, subResults });
   };
 
@@ -3272,8 +3286,10 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
                     // The Ht chip mutates the hantei verdict, so it obeys the
                     // same submit-time freeze as the arm/pick/Cancel controls;
                     // an un-guarded click mid-save would clear the local
-                    // verdict while the in-flight patch records it.
-                    disabled={isHt && (submitting || decisionSubmitting)}
+                    // verdict while the in-flight patch records it. On the
+                    // public self-run page it only shows the organiser's
+                    // verdict: a participant cannot undo a hantei (bc-dhas).
+                    disabled={isHt && (selfReport || submitting || decisionSubmitting)}
                     onClick={() => {
                       if (isHt) { clearHantei(); return; }
                       // bc-emsl: a tap on an EMPTY slot, or on a default-win
@@ -3287,7 +3303,7 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
                       clearTap(ipponTapRef, rs.tapKey);
                       rs.setPts(rs.pts.filter((_, j) => j !== i));
                     }}
-                    title={isHt ? "Hantei winner: click to undo" : !mark ? undefined : defaultWin ? "Default win: use Fusensho to undo" : "Click to remove"}>
+                    title={isHt ? (selfReport ? "Hantei winner (judges' decision)" : "Hantei winner: click to undo") : !mark ? undefined : defaultWin ? "Default win: use Fusensho to undo" : "Click to remove"}>
                     {isHt ? "Ht" : (mark || "·")}
                   </button>
                 );
@@ -3611,15 +3627,21 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
               29-6). Encho is optional: a tied daihyosen may be taken straight
               to a judges' decision. Mounts whenever a daihyosen exists;
               arming requires a tied scoreline. The chosen winner rides onto
-              the position DAIHYOSEN_POSITION sub (decidedByHantei) when the operator saves. */}
+              the position DAIHYOSEN_POSITION sub (decidedByHantei) when the operator saves.
+              A participant on the public self-run page (selfReport) runs the
+              representative bout like any bout but is offered no hantei: a
+              judges' decision stays the organiser's, and the server refuses
+              one from a participant (bc-dhas). They keep Remove. */}
           {hasDaihyosen && (() => {
             const dt = subTotals[daihyosenIdx];
             const tiedScore = dt.aTotal === dt.bTotal;
+            const offerRemove = dt.aTotal === 0 && dt.bTotal === 0 && !daihyosenHanteiArmed;
+            if (selfReport && !offerRemove) return null;
             return (
               <div className="hantei-row" data-testid="team-daihyosen-hantei-row" style={{ display: "flex", gap: 8, alignItems: "center", padding: "6px 8px", marginTop: 12, background: "var(--surface-2)", borderRadius: 6, fontSize: 12 }}>
-                <span style={{ fontWeight: 600, color: "var(--ink-2)" }}>Daihyosen hantei</span>
-                <span style={{ color: "var(--ink-3)" }}>(judges' decision)</span>
-                {dt.aTotal === 0 && dt.bTotal === 0 && !daihyosenHanteiArmed && (
+                <span style={{ fontWeight: 600, color: "var(--ink-2)" }}>{selfReport ? "Daihyosen" : "Daihyosen hantei"}</span>
+                <span style={{ color: "var(--ink-3)" }}>{selfReport ? "(representative bout)" : "(judges' decision)"}</span>
+                {offerRemove && (
                   <button
                     type="button"
                     className="btn btn--ghost btn--sm"
@@ -3631,7 +3653,7 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
                     Remove daihyosen
                   </button>
                 )}
-                {!daihyosenHanteiArmed && (
+                {!selfReport && !daihyosenHanteiArmed && (
                   <button
                     type="button"
                     className="btn btn--sm"

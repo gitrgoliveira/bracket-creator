@@ -116,8 +116,22 @@ describe('ViewerCompetition: a match opened from a tab follows the live data (bc
     expect(probe.props.match).toMatchObject({ phase: 'bracket', round: 'Final', compId: 'c1' });
   });
 
-  // The Pools tab builds the object it opens itself, so what it added is told
-  // apart from the row by comparing the two.
+  // A preview bracket is not in the page's match list, so the live row is the
+  // raw one, whose `round` is the engine's index: the tab's declared label wins.
+  it('a preview bracket\'s match keeps the tab\'s declared round label over the raw row\'s', async () => {
+    let view;
+    await act(async () => { view = render(page({ bracket: { preview: true, rounds: [[finalRow()]] } })); });
+    await openEditorOn(view, 'k1');
+    expect(probe.props.match).toMatchObject({ id: 'k1', phase: 'bracket', round: 'Final', compId: 'c1' });
+
+    await act(async () => {
+      view.rerender(page({ bracket: { preview: true, rounds: [[finalRow({ modifiedAt: 200 })]] } }));
+    });
+    expect(probe.props.match).toMatchObject({ modifiedAt: 200, round: 'Final' });
+  });
+
+  // The Pools tab opens a match by its id; the live row carries the pool's
+  // fields from the page's own match list.
   it('a match opened from the Pools tab follows the live row too', async () => {
     const poolRow = (overrides = {}) => ({
       id: 'Pool A-0', status: 'running', court: 'A', sideA: yamada, sideB: tanaka,

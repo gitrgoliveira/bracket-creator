@@ -8,6 +8,8 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	excelize "github.com/xuri/excelize/v2"
+
+	bctest "github.com/gitrgoliveira/bracket-creator/internal/test"
 )
 
 // TestPoolsDoNotOverlap pins that each pool on the Pool Matches sheet ends
@@ -90,6 +92,11 @@ func TestPoolsDoNotOverlap(t *testing.T) {
 			}
 			lastA := rankingA + tc.poolSize
 			assert.Greater(t, headerB, lastA+1, "Pool B starts after Pool A's last ranking row (%d) and a blank row", lastA)
+			// The layout the pager counts is the one printed: Pool A's rows,
+			// then its gap, then Pool B.
+			layout := layPoolRow(pools[:1], tc.teamMatches)
+			assert.Equal(t, headerA+layout.height()-layout.gap-1, lastA, "Pool A's last printed row is where its layout ends")
+			assert.Equal(t, headerA+layout.height(), headerB, "Pool B starts where Pool A's layout ends")
 
 			for _, pool := range []string{"Pool A", "Pool B"} {
 				for k := 1; k <= tc.poolSize; k++ {
@@ -102,4 +109,45 @@ func TestPoolsDoNotOverlap(t *testing.T) {
 			}
 		})
 	}
+}
+
+// TestPoolPagesCountTheRowsASplitPoolUses pins the Pool Matches paging after a
+// pool taller than a page: the page count takes exactly the rows the pool
+// uses, so the next pool shares the page with its results when it fits. With
+// teams of six, a pool of three splits after its match blocks (a break after
+// row 29) and a pool of two then fits on that second page; counting the pool's
+// results at their old padded height put the count two rows ahead and forced
+// a third page (a break after row 47) for nothing.
+func TestPoolPagesCountTheRowsASplitPoolUses(t *testing.T) {
+	pools := make([]Pool, 2)
+	poolCoords := map[string]cellCoord{}
+	pCoords := map[string]playerCellCoord{}
+	for pi, size := range []int{3, 2} {
+		name := fmt.Sprintf("Pool %c", 'A'+pi)
+		pools[pi].PoolName = name
+		poolCoords[name] = cellCoord{sheetName: SheetPoolDraw, cell: fmt.Sprintf("A%d", pi+1)}
+		for k := range size {
+			p := Player{Name: fmt.Sprintf("%s team %d", name, k+1), Dojo: fmt.Sprintf("%s dojo %d", name, k+1)}
+			pools[pi].Players = append(pools[pi].Players, p)
+			pCoords[playerCoordKey(p)] = playerCellCoord{cellCoord: cellCoord{sheetName: SheetPoolDraw, cell: fmt.Sprintf("B%d", len(pCoords)+1)}}
+		}
+	}
+	CreatePoolRoundRobinMatches(pools)
+
+	f := excelize.NewFile()
+	defer func() { _ = f.Close() }()
+	_, err := f.NewSheet(SheetPoolMatches)
+	require.NoError(t, err)
+	_, err = f.NewSheet(SheetPoolDraw)
+	require.NoError(t, err)
+	PrintPoolMatches(f, pools, 6, 2, CourtLabels(1), nil, poolCoords, pCoords, false)
+
+	buf, err := f.WriteToBuffer()
+	require.NoError(t, err)
+	breaks, err := bctest.RowBreaks(buf.Bytes(), SheetPoolMatches)
+	require.NoError(t, err)
+	assert.Equal(t, []int{29}, breaks, "one break, inside the pool of three; the pool of two follows its results")
+	rows, err := f.GetRows(SheetPoolMatches)
+	require.NoError(t, err)
+	assert.LessOrEqual(t, len(rows)-breaks[len(breaks)-1], PoolMatchesRowsPerPage, "the second page holds both")
 }

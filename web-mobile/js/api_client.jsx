@@ -2124,6 +2124,34 @@ function _daihyosenOutcome(body) {
     return body.result ?? body;
 }
 
+// The daihyosen add (POST) or remove (DELETE), stamped like recordDecision.
+// Bounded by fetchWithTimeout like every other write: the team editor holds
+// each autosave on the court until this request settles, so a request left
+// hanging on a half-open connection would stop all saving there. No answer
+// is reported as not done, in a sentence the editor shows as it is; the held
+// write then goes out as it stood, which undoes the change if the server did
+// make it after all.
+async function _daihyosenRequest(method, compID, matchID, password, notDone) {
+    let res;
+    try {
+        res = await fetchWithTimeout(`/api/competitions/${compID}/matches/${matchID}/daihyosen`, {
+            method,
+            headers: {
+                'Content-Type': 'application/json',
+                'X-Tournament-Password': password
+            },
+            body: JSON.stringify({ modifiedAt: _serverNowMs() }),
+        });
+    } catch (_e) {
+        throw new Error(`${notDone}: the server did not answer. Check the connection and try again.`);
+    }
+    if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.error || notDone);
+    }
+    return _daihyosenOutcome(await res.json().catch(() => ({})));
+}
+
 const API = {
     async fetchTournament() {
         const res = await fetch('/api/viewer/tournament');
@@ -3651,19 +3679,7 @@ const API = {
     // Stamped like recordDecision (bc-dhas), so the add competes on
     // timestamps: see _daihyosenOutcome for what comes back.
     async recordDaihyosen(compID, matchID, password) {
-        const res = await fetch(`/api/competitions/${compID}/matches/${matchID}/daihyosen`, {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-                'X-Tournament-Password': password
-            },
-            body: JSON.stringify({ modifiedAt: _serverNowMs() }),
-        });
-        if (!res.ok) {
-            const err = await res.json().catch(() => ({}));
-            throw new Error(err.error || "Failed to add daihyosen");
-        }
-        return _daihyosenOutcome(await res.json().catch(() => ({})));
+        return _daihyosenRequest('POST', compID, matchID, password, "The representative bout was not added");
     },
     // T141: remove an unscored daihyosen placeholder from a knockout team match.
     // Returns the updated MatchResult on 200. Throws on 404 (no daihyosen or
@@ -3671,19 +3687,7 @@ const API = {
     // Stamped like the add, in a JSON body (the handler binds one on DELETE
     // too).
     async removeDaihyosen(compID, matchID, password) {
-        const res = await fetch(`/api/competitions/${compID}/matches/${matchID}/daihyosen`, {
-            method: 'DELETE',
-            headers: {
-                'Content-Type': 'application/json',
-                'X-Tournament-Password': password
-            },
-            body: JSON.stringify({ modifiedAt: _serverNowMs() }),
-        });
-        if (!res.ok) {
-            const err = await res.json().catch(() => ({}));
-            throw new Error(err.error || "Failed to remove daihyosen");
-        }
-        return _daihyosenOutcome(await res.json().catch(() => ({})));
+        return _daihyosenRequest('DELETE', compID, matchID, password, "The representative bout was not removed");
     },
     // T190-T193 (US13: Swiss format). Generate the next Swiss round.
     // Backend pre-conditions: format=swiss; all matches in the current

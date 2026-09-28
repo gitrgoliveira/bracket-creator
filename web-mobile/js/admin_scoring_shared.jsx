@@ -357,10 +357,11 @@ function GlossaryHintAS({ name }) {
 
 // T093–T098: shared helpers for the decision (kiken/fusenpai/fusensho) flow.
 //
-// Resolve the password for /decision POST. The helper only uses the prop
-// (no window fallback); callers must pass the password explicitly. Returns ""
-// as a safe sentinel that the server will reject with 401, surfacing any
-// misconfiguration where the prop was not provided.
+// Resolve the password for the /decision POST and the representative-bout add
+// and remove. The helper only uses the prop (no window fallback); callers must
+// pass the password explicitly. "" is what the public self-run page passes: the
+// representative-bout routes accept it there, and every gated route (/decision
+// included) answers it with 401, surfacing a caller that forgot the prop.
 function resolveDecisionPassword(propPassword) {
   return propPassword || "";
 }

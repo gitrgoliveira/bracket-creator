@@ -1066,6 +1066,34 @@ describe('bc-dhas: a refused add or remove is reported and changes nothing', () 
     expect(window.API.recordScore.mock.calls[0][2].subResults.some((s) => s.position === -1)).toBe(false);
   });
 
+  // The API gives up on an add or remove after 12 s with no answer and throws
+  // this sentence (clock_offset.test.jsx pins that half). The editor reports
+  // it, and the tap it held while the request was out then goes out as the
+  // sheet stood.
+  it.each([
+    ['an add', makeKnockoutTeamMatch, 'scoring-modal-daihyosen-button', 'recordDaihyosen', 'added', false],
+    ['a remove', makeMatchWithDaihyosen, 'team-daihyosen-remove', 'removeDaihyosen', 'removed', true],
+  ])('%s the server never answered is reported, and the held tap is then written as it stood', async (_what, makeMatch, button, api, done, hadRow) => {
+    const request = deferred();
+    window.API[api].mockReturnValue(request.promise);
+    renderModal(makeMatch());
+    await act(async () => { fireEvent.click(screen.getByTestId(button)); });
+    await settle();
+    window.API.recordScore.mockClear();
+    await act(async () => { fireEvent.click(tieBoutButton(0)); });
+    await act(async () => { vi.advanceTimersByTime(AUTOSAVE_DEBOUNCE_MS + 50); });
+    expect(window.API.recordScore, 'held while the request is out').not.toHaveBeenCalled();
+
+    const sentence = `The representative bout was not ${done}: the server did not answer. Check the connection and try again.`;
+    await act(async () => { request.reject(new Error(sentence)); });
+    await settle();
+
+    expect(screen.getByTestId('team-editor-error').textContent).toBe(sentence);
+    expect(screen.getByTestId(button).disabled).toBe(false);
+    expect(window.API.recordScore).toHaveBeenCalledTimes(1);
+    expect(window.API.recordScore.mock.calls[0][2].subResults.some((s) => s.position === -1)).toBe(hadRow);
+  });
+
   it('a remove refused for the clock shows the clock banner and keeps the row', async () => {
     window.API.removeDaihyosen.mockResolvedValue({ applied: false, reason: 'clock_skew', message: 'Not saved.' });
     renderModal(makeMatchWithDaihyosen());
@@ -1074,5 +1102,42 @@ describe('bc-dhas: a refused add or remove is reported and changes nothing', () 
 
     expect(failedBanner()?.textContent).toBe(`Not saved: ${CLOCK_SKEW_REASON_TEXT}. ${CLOCK_SKEW_ADVICE}`);
     expect(screen.getByTestId('team-daihyosen-remove')).toBeTruthy();
+  });
+});
+
+// A host whose match prop takes no push (the Scores tab's list within its
+// jittered reload, or the court console with SSE down) can see Add then
+// Remove with no refresh in between. The Add adopts its log over the prop;
+// the Remove's log equals the prop again, and adopting it must take the
+// Add's override away, or the removed row stays on the sheet, a second
+// Remove answers "No daihyosen to remove", and the next tap saves the row back.
+describe('bc-dhas: Add then Remove with the match prop never refreshed', () => {
+  beforeEach(() => {
+    window.API.recordDaihyosen = vi.fn().mockResolvedValue({ ...makeKnockoutTeamMatch(), subResults: [serverDaihyosenRow()] });
+    window.API.removeDaihyosen = vi.fn().mockResolvedValue({ subResults: [] });
+  });
+
+  it('the removed row leaves the sheet and no later write brings it back', async () => {
+    renderModal(makeKnockoutTeamMatch());
+    await act(async () => { fireEvent.click(tieBoutButton(0)); });
+    await act(async () => { fireEvent.click(tieBoutButton(1)); });
+    await act(async () => { fireEvent.click(tieBoutButton(2)); });
+    await act(async () => { fireEvent.click(screen.getByTestId('scoring-modal-daihyosen-button')); });
+    await settle();
+    expect(subMatchRows()).toHaveLength(4);
+
+    await act(async () => { fireEvent.click(screen.getByTestId('team-daihyosen-remove')); });
+    await settle();
+    expect(window.API.removeDaihyosen).toHaveBeenCalledTimes(1);
+    expect(subMatchRows()).toHaveLength(3);
+    expect(screen.queryByTestId('team-daihyosen-remove')).toBeNull();
+    expect(screen.getByTestId('scoring-modal-daihyosen-button')).toBeTruthy();
+
+    window.API.recordScore.mockClear();
+    await act(async () => { fireEvent.click(tieBoutButton(0)); });
+    await act(async () => { vi.advanceTimersByTime(AUTOSAVE_DEBOUNCE_MS + 50); });
+    await settle();
+    expect(window.API.recordScore).toHaveBeenCalledTimes(1);
+    expect(window.API.recordScore.mock.calls[0][2].subResults.some((s) => s.position === -1)).toBe(false);
   });
 });

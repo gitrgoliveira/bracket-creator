@@ -1,8 +1,6 @@
 package engine
 
 import (
-	"strings"
-
 	"github.com/gitrgoliveira/bracket-creator/internal/helper"
 	"github.com/gitrgoliveira/bracket-creator/internal/state"
 )
@@ -43,7 +41,7 @@ func PrintedBracket(bracket *state.Bracket) map[string]PrintedBracketMatch {
 		}
 	}
 	side := func(name string, feeders []string, i int) string {
-		if name != "" && !strings.HasPrefix(name, "Winner of") {
+		if name != "" && !helper.IsWinnerOfPlaceholder(name) {
 			return name
 		}
 		if i < len(feeders) {

@@ -146,6 +146,27 @@ func TestSquad_RenameUnknownMemberOrTeam(t *testing.T) {
 	})
 }
 
+// NameUnnamedTeamMember names a member who has no name yet and refuses one who
+// has, writing nothing; an unknown member is still ErrTeamMemberNotFound.
+func TestSquad_NameUnnamedTeamMember(t *testing.T) {
+	s, id, teamA, _ := newSquadTestStore(t)
+	squads, err := s.LoadSquads(id)
+	require.NoError(t, err)
+	blank := squads[teamA][0]
+	require.Empty(t, blank.Name, "teamA is seeded with blank members")
+
+	require.NoError(t, s.NameUnnamedTeamMember(id, teamA, blank.ID, " Mei Ito "))
+	err = s.NameUnnamedTeamMember(id, teamA, blank.ID, "Ren Abe")
+	assert.ErrorIs(t, err, ErrTeamMemberNamed, "a member who has a name is not renamed")
+
+	squads, err = s.LoadSquads(id)
+	require.NoError(t, err)
+	assert.Equal(t, "Mei Ito", squads[teamA][0].Name, "the first name stands, trimmed")
+
+	assert.ErrorIs(t, s.NameUnnamedTeamMember(id, teamA, "no-such-member", "X"), ErrTeamMemberNotFound)
+	require.NoError(t, s.RenameTeamMember(id, teamA, blank.ID, "Ren Abe"), "the organiser's rename is unrestricted")
+}
+
 // A squad may exceed the competition's TeamSize: reserves and replacements
 // are unconstrained (operator ruling 2026-09-09).
 func TestSquad_SizeMayExceedCompetitionTeamSize(t *testing.T) {

@@ -313,7 +313,7 @@ func overlayPoolScores(f *excelize.File, pools []helper.Pool, resultByID map[str
 					// derivation, so it rides the else branch and never
 					// touches engi flag counts.
 					scoreA, scoreB = DefaultWinMaruAB(
-						IpponsScore(mr.IpponsA), IpponsScore(mr.IpponsB),
+						domain.IpponsScore(mr.IpponsA), domain.IpponsScore(mr.IpponsB),
 						mr.Decision, mr.Encho, mr.Attribution())
 				}
 				writeScoreRowCells(f, sheetName, courtStartCol, excelRow, scoreA, scoreB, mr)
@@ -611,7 +611,7 @@ func writeTeamSubMatchScores(f *excelize.File, sheetName string, courtStartCol, 
 		// both rules, shared with the Kachinuki Detail sheet.
 		att := domain.SubBoutAttributionForTeamRow(sub.Attribution(), matchSideA, matchSideB)
 		scoreA, scoreB := DefaultWinMaruAB(
-			IpponsScore(sub.IpponsA), IpponsScore(sub.IpponsB),
+			domain.IpponsScore(sub.IpponsA), domain.IpponsScore(sub.IpponsB),
 			sub.Decision, sub.Encho, att)
 		leftScore, rightScore := helper.WhiteLeft(scoreA, scoreB)
 		lFoul, rFoul := helper.WhiteLeft(HansokuMark(sub.HansokuA), HansokuMark(sub.HansokuB))
@@ -941,13 +941,13 @@ func overlayBracketScores(f *excelize.File, bracketByNum map[int]state.BracketMa
 				// (domain.HanteiMark). writeScoreRowCells below ALSO appends
 				// that mark via SideMarksLR (reading it off mrView), so
 				// rendering the array verbatim would double-print it:
-				// "MHt Ht". Render through IpponsScore instead, which filters
+				// "MHt Ht". Render through domain.IpponsScore instead, which filters
 				// non-scoring entries (the mark, the bye placeholder) exactly
 				// as the pool path (overlayPoolScores) already does — the
 				// mark then rides ONLY through the appended SideMarksLR
 				// suffix, matching the pool cell's "M Ht".
 				scoreA, scoreB = DefaultWinMaruAB(
-					IpponsScore(mrView.IpponsA), IpponsScore(mrView.IpponsB),
+					domain.IpponsScore(mrView.IpponsA), domain.IpponsScore(mrView.IpponsB),
 					bm.Decision, bm.Encho, mrView.Attribution())
 			}
 

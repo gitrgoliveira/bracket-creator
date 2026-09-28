@@ -19,30 +19,18 @@
 //
 // Row-count thresholds and layout constants are defined in constants.go.
 //
-// CHK037, Kachinuki Excel rendering decision (T160 + T195–T203):
-//
-// The main Pool Matches / Elimination Matches sheets continue to use the
-// 8-column-per-court layout invariant (CourtsColumnsPerCourt = 8, see
-// constants.go and CLAUDE.md). Variable-bout kachinuki grids would either
-// overflow that budget or force a layout-mode switch the rest of the
-// workbook can't accommodate, so the main sheets keep the FIXED teamSize
-// bout-row grid every other team match uses: the export overlay
-// (writeTeamSubMatchScores, internal/export/builder.go) writes a kachinuki
-// bout into that grid by its Position, so bouts 1..teamSize land in the
-// existing rows and any bout PAST teamSize -- reachable once winner-stays-on
-// carries the encounter beyond the starting lineup -- is silently skipped
-// from the row display. The IV/PW summary (state.TeamResultFrom) is not
-// row-bound: it still counts every bout, including the ones the grid
-// dropped.
-//
-// Bout-by-bout detail is rendered on a separate "Kachinuki Detail" sheet
-// (helper.SheetKachinukiDetail). See internal/helper/excel_kachinuki.go,
-// the sheet uses a flexible 6-column layout (NOT bound by
-// CourtsColumnsPerCourt) and is opt-in: the engine export path
-// (internal/engine/export.go → collectKachinukiMatches) emits it only
-// when comp.TeamMatchType == kachinuki AND at least one match carries
-// bouts. CLI export paths (cmd/create-pools.go, create-knockout.go) are
-// kachinuki-agnostic and produce zero changes to existing example files.
+// Kachinuki (CHK037, T160, T195–T203): the Pool Matches and Elimination
+// Matches sheets keep the 8-column-per-court layout (CourtsColumnsPerCourt),
+// and a kachinuki team block has a numbered row for every bout an encounter
+// can take, 2 x teamSize - 1 rather than teamSize: state.Competition.
+// TeamBoutRows owns the count and every workbook asks it. The results overlay
+// (writeTeamSubMatchScores, internal/export/builder.go) fills the bouts fought
+// by Position and skips one past the block, while the IV/PW summary
+// (state.TeamResultFrom) counts every bout. The "Kachinuki Detail" sheet
+// (excel_kachinuki.go) lists each match's bouts, or empty numbered rows for a
+// match with none: the app's exports build it from the stored draw
+// (engine.collectKachinukiMatches), the blank template from the draw it makes
+// (BlankKachinukiSections, called by cmd's /create generator).
 package helper
 
 import (
@@ -416,7 +404,7 @@ func buildTeamPointsFormula(lVCol, lPCol, rVCol, rPCol string, startRow, endRow 
 	return strings.Join(parts, "+")
 }
 
-func printSinglePool(f *excelize.File, sheetName string, pool Pool, startCol int, startRow int, teamMatches int, numWinners int, maxBlocks []int, colNames matchColumnNames, styles matchStyles, matchWinners map[string]MatchWinner, poolCoords map[string]cellCoord, pCoords map[string]playerCellCoord, engi bool) {
+func printSinglePool(f *excelize.File, sheetName string, pool Pool, startCol int, startRow int, teamMatches int, numWinners int, layout poolRowLayout, colNames matchColumnNames, styles matchStyles, matchWinners map[string]MatchWinner, poolCoords map[string]cellCoord, pCoords map[string]playerCellCoord, engi bool) {
 	poolRow := startRow
 
 	startColName := colNames.startColName
@@ -438,7 +426,7 @@ func printSinglePool(f *excelize.File, sheetName string, pool Pool, startCol int
 		poolRow++
 	}
 
-	for m := 0; m < len(maxBlocks)-1; m++ {
+	for m, blockRows := range layout.matchRows {
 		startMatchRow := poolRow
 
 		if m < len(pool.Matches) {
@@ -506,10 +494,7 @@ func printSinglePool(f *excelize.File, sheetName string, pool Pool, startCol int
 			}
 		}
 
-		poolRow = startMatchRow + maxBlocks[m]
-		if teamMatches > 0 {
-			poolRow++ // Add space between team matches
-		}
+		poolRow = startMatchRow + blockRows + layout.spacing
 	}
 
 	poolRow++ // Add a single row of space between the pool and the pool results
@@ -941,6 +926,63 @@ func printPoolResultsTable(f *excelize.File, sheetName string, pool Pool, startR
 	return printIndividualResultsTableSection(ctx, headerRow, teamMatches)
 }
 
+// poolRowLayout is the rows one row of pools (the same place in every
+// shiaijo's band, printed side by side) takes on the Pool Matches sheet, block
+// by block as printSinglePool prints them. It is the ONE source of that
+// height: printSinglePool places its match blocks by it, and PrintPoolMatches
+// both moves its row cursor and counts its pages by it.
+type poolRowLayout struct {
+	header    int   // the pool header, and the match header row an individual pool prints once
+	matchRows []int // each match block: 1 row for an individual match; the White/Red row, the team names row and the bout rows for a team match
+	spacing   int   // the blank row after each team match block
+	results   int   // from the blank row before the results tables to the last ranking row
+	gap       int   // blank rows before the next pool
+}
+
+// layPoolRow lays out a row of pools as its tallest pool needs.
+func layPoolRow(rowPools []Pool, teamMatches int) poolRowLayout {
+	maxMatches, maxPlayers := 0, 0
+	for _, p := range rowPools {
+		maxMatches = max(maxMatches, len(p.Matches))
+		maxPlayers = max(maxPlayers, len(p.Players))
+	}
+	if teamMatches == 0 {
+		// The blank row, the results table, two blank rows, and the Ranking
+		// header with its rows.
+		return poolRowLayout{header: 2, matchRows: slices.Repeat([]int{1}, maxMatches), results: 2*maxPlayers + 5, gap: 1}
+	}
+	return poolRowLayout{
+		header:    1,
+		matchRows: slices.Repeat([]int{2 + teamMatches}, maxMatches),
+		spacing:   1,
+		// The blank row, both results tables with a blank row between them,
+		// two blank rows, and the Ranking header with its rows.
+		results: 3*maxPlayers + 7,
+		// A pool of fewer than four matches keeps the blank rows it has always
+		// been printed with, 5 - matches in all, so that no cell moves.
+		gap: max(1, 5-maxMatches),
+	}
+}
+
+// segments are the rows each block of the row takes, with the blank rows
+// after it: every match block, then the results.
+func (l poolRowLayout) segments() []int {
+	out := make([]int, 0, len(l.matchRows)+1)
+	for _, rows := range l.matchRows {
+		out = append(out, rows+l.spacing)
+	}
+	return append(out, l.results+l.gap)
+}
+
+// height is every row the row of pools takes, down to where the next starts.
+func (l poolRowLayout) height() int {
+	h := l.header
+	for _, rows := range l.segments() {
+		h += rows
+	}
+	return h
+}
+
 // PrintPoolMatches lays the Pool Matches sheet: one 8-column band per shiaijo,
 // each court's pools stacked down its band in AssignPoolsToCourts order. It
 // returns the per-pool winner cells the elimination sheet links to.
@@ -984,7 +1026,6 @@ func PrintPoolMatches(f *excelize.File, pools []Pool, teamMatches int, numWinner
 	configuredStartCols := make(map[int]bool)
 
 	startRow := 2
-	spaceLines := 2
 	colNamesByStartCol := make(map[int]matchColumnNames, numCourts)
 
 	styles := matchStyles{
@@ -1011,138 +1052,47 @@ func PrintPoolMatches(f *excelize.File, pools []Pool, teamMatches int, numWinner
 	rowsPerPageLimit := PoolMatchesRowsPerPage
 
 	for i := 0; i < maxPoolsInCourt; i++ {
-		headerBlock := 1
-		if teamMatches == 0 {
-			headerBlock = 2
-		}
-
-		maxMatches := 0
+		var rowPools []Pool
 		for c := 0; c < numCourts; c++ {
 			if i < len(poolsByCourt[c]) {
-				p := pools[poolsByCourt[c][i]]
-				if len(p.Matches) > maxMatches {
-					maxMatches = len(p.Matches)
-				}
+				rowPools = append(rowPools, pools[poolsByCourt[c][i]])
 			}
 		}
-
-		maxBlocks := make([]int, 0, maxMatches+1)
-		for m := 0; m < maxMatches; m++ {
-			maxMatchBlock := 0
-			for c := 0; c < numCourts; c++ {
-				if i < len(poolsByCourt[c]) {
-					p := pools[poolsByCourt[c][i]]
-					if len(p.Matches) > m {
-						matchRows := 1
-						if teamMatches > 0 {
-							// White/Red Header (1) + Team Names (1) + Sub-matches (teamMatches)
-							matchRows = 2 + teamMatches
-						}
-						if matchRows > maxMatchBlock {
-							maxMatchBlock = matchRows
-						}
-					}
-				}
-			}
-			if maxMatchBlock > 0 {
-				maxBlocks = append(maxBlocks, maxMatchBlock)
-			}
-		}
-		matchBlocks := len(maxBlocks)
-
-		maxResultBlock, maxPrintedResults := 0, 0
-		for c := 0; c < numCourts; c++ {
-			if i < len(poolsByCourt[c]) {
-				p := pools[poolsByCourt[c][i]]
-				var resRows, printed int
-				if teamMatches > 0 {
-					// Team matches stacked results:
-					// Space before results (1)
-					// Table 1: Header (1) + Players (len)
-					// Space between tables (1)
-					// Table 2: Header (1) + Players (len)
-					// Space before ranking (1)
-					// Rankings: len(Players)
-					// Space after pool (1)
-					resRows = 3*len(p.Players) + 11
-					// What printSinglePool really prints, from the space before
-					// the results to the last ranking row: the space, both tables
-					// with a blank row between them, two blank rows, and the
-					// Ranking header with its rows.
-					printed = 3*len(p.Players) + 7
-				} else {
-					// Results: Space (1) + Header (1) + Players (len) + Space (1) + Finalists (len)
-					// Individual matches include additional spaceLines
-					resRows = 3 + len(p.Players)*2 + spaceLines
-					printed = resRows
-				}
-				maxResultBlock = max(maxResultBlock, resRows)
-				maxPrintedResults = max(maxPrintedResults, printed)
-			}
-		}
-		if maxResultBlock > 0 {
-			maxBlocks = append(maxBlocks, maxResultBlock)
-		}
-
-		// pageBlocks are the rows each block really spans: printSinglePool
-		// follows every team match block with a spacing row its maxBlocks entry
-		// leaves out. poolRows is every row the pool prints.
-		pageBlocks := slices.Clone(maxBlocks)
-		poolRows := headerBlock + maxPrintedResults
-		for b := range matchBlocks {
-			if teamMatches > 0 {
-				pageBlocks[b]++
-			}
-			poolRows += pageBlocks[b]
-		}
-
-		totalPoolHeight := headerBlock + 1 // One row of space before the next pool
-		for _, b := range maxBlocks {
-			totalPoolHeight += b
-		}
-		// That estimate leaves out the team spacing rows, which its padded team
-		// results figure absorbs only for pools of up to three teams: a pool of
-		// four printed past it, and the next pool's header overwrote its fourth
-		// ranking row. The next pool starts no earlier than one blank row after
-		// the rows this one prints.
-		totalPoolHeight = max(totalPoolHeight, poolRows+1)
+		layout := layPoolRow(rowPools, teamMatches)
+		height := layout.height()
 
 		// Keep a pool on one page when it fits: start it on a fresh page, unless
 		// nothing but the shiaijo header is on this one yet, which a break here
 		// would print alone.
 		onlyCourtHeader := rowsSinceLastPageBreak <= startRow-1
-		if rowsSinceLastPageBreak+totalPoolHeight > rowsPerPageLimit && !onlyCourtHeader {
+		if rowsSinceLastPageBreak+height > rowsPerPageLimit && !onlyCourtHeader {
 			handleExcelError("InsertPageBreak", f.InsertPageBreak(sheetName, fmt.Sprintf("A%d", poolRow)))
 			rowsSinceLastPageBreak = 0
 		}
 
-		// A pool that still does not fit breaks between its blocks, counted by
-		// pageBlocks: counting maxBlocks alone put the breaks inside later
-		// blocks.
-		if rowsSinceLastPageBreak+totalPoolHeight > rowsPerPageLimit {
+		// A pool that still does not fit breaks between its blocks, each with
+		// the blank rows after it, so the count follows the row cursor exactly
+		// and the pools after this one are paged from where it really ends.
+		if rowsSinceLastPageBreak+height > rowsPerPageLimit {
+			segments := layout.segments()
 			cursorOffset := 0
-			firstBlockSize := 0
-			if len(pageBlocks) > 0 {
-				firstBlockSize = pageBlocks[0]
-			}
-
-			if rowsSinceLastPageBreak+headerBlock+firstBlockSize > rowsPerPageLimit && !onlyCourtHeader {
+			if rowsSinceLastPageBreak+layout.header+segments[0] > rowsPerPageLimit && !onlyCourtHeader {
 				handleExcelError("InsertPageBreak", f.InsertPageBreak(sheetName, fmt.Sprintf("A%d", poolRow+cursorOffset)))
 				rowsSinceLastPageBreak = 0
 			}
-			rowsSinceLastPageBreak += headerBlock
-			cursorOffset += headerBlock
+			rowsSinceLastPageBreak += layout.header
+			cursorOffset += layout.header
 
-			for b, blockSize := range pageBlocks {
-				if b > 0 && rowsSinceLastPageBreak+blockSize > rowsPerPageLimit {
+			for b, rows := range segments {
+				if b > 0 && rowsSinceLastPageBreak+rows > rowsPerPageLimit {
 					handleExcelError("InsertPageBreak", f.InsertPageBreak(sheetName, fmt.Sprintf("A%d", poolRow+cursorOffset)))
 					rowsSinceLastPageBreak = 0
 				}
-				rowsSinceLastPageBreak += blockSize
-				cursorOffset += blockSize
+				rowsSinceLastPageBreak += rows
+				cursorOffset += rows
 			}
 		} else {
-			rowsSinceLastPageBreak += totalPoolHeight
+			rowsSinceLastPageBreak += height
 		}
 
 		for c := 0; c < numCourts; c++ {
@@ -1161,11 +1111,11 @@ func PrintPoolMatches(f *excelize.File, pools []Pool, teamMatches int, numWinner
 					colNamesByStartCol[startCol] = colNames
 				}
 
-				printSinglePool(f, sheetName, pools[poolIdx], startCol, poolRow, teamMatches, numWinners, maxBlocks, colNames, styles, matchWinners, poolCoords, pCoords, engi)
+				printSinglePool(f, sheetName, pools[poolIdx], startCol, poolRow, teamMatches, numWinners, layout, colNames, styles, matchWinners, poolCoords, pCoords, engi)
 			}
 		}
 
-		poolRow += totalPoolHeight
+		poolRow += height
 	}
 
 	SetEliminationPrintArea(f, sheetName, numCourts, poolRow-1)
@@ -1709,7 +1659,7 @@ func printSingleEliminationMatch(f *excelize.File, sheetName string, elimination
 	endCell = endColName + fmt.Sprint(matchRow)
 	entrant := func(n *Node) string {
 		if n.LeafNode && len(n.LeafVal) > 0 {
-			if strings.Contains(n.LeafVal, "Pool") {
+			if IsPoolFinalistPlaceholder(n.LeafVal) {
 				return fmt.Sprintf("CONCATENATE(\"%s \",'%s'!%s)", n.LeafVal, poolMatchWinners[n.LeafVal].sheetName, poolMatchWinners[n.LeafVal].cell)
 			}
 			return fmt.Sprintf("'%s'!%s", poolMatchWinners[n.LeafVal].sheetName, poolMatchWinners[n.LeafVal].cell)

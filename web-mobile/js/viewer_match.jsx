@@ -335,30 +335,28 @@ VSchedItem.displayName = "VSchedItem";
 // Overview, Home, Schedule) reads the match from its live data on every
 // render, so the modal and the score editor it opens follow a result recorded
 // or corrected on another device. `rowOf(id, compId)` finds the row the page
-// holds for a match. Only the match's id and competition, and what the opener
-// added to the row (a round label, the competition's fields), are kept, and
-// the added keys win over the row's own. A match that leaves the data closes
-// the modal and is forgotten, because a draw discarded and made again reuses
-// the match ids.
+// holds for a match. open(match, decoration) keeps only the match's id and
+// competition, plus the keys its opener DECLARES (the Bracket tab's round
+// label, say), which win over the row's own. Nothing else is taken from the
+// object handed in: an opener may hold a copy taken long before (Home's alert
+// banner keeps the match from when the alert fired), and its scoreline must
+// never stand in for the live one. A match that leaves the data closes the
+// modal and is forgotten, because a draw discarded and made again reuses the
+// match ids.
 export function useLiveMatch(rowOf) {
   const [picked, setPicked] = useState(null);
   const row = picked ? rowOf(picked.id, picked.compId) : null;
   React.useEffect(() => {
     if (picked && !row) setPicked(null);
   }, [picked, row]);
-  const match = useMemo(() => (row ? { ...row, ...picked.added } : null), [row, picked]);
-  const open = (clicked) => {
-    const base = rowOf(clicked.id, clicked.compId) || {};
-    const added = {};
-    for (const k of Object.keys(clicked)) if (clicked[k] !== base[k]) added[k] = clicked[k];
-    setPicked({ id: clicked.id, compId: clicked.compId, added });
-  };
+  const match = useMemo(() => (row && picked.decoration ? { ...row, ...picked.decoration } : row), [row, picked]);
+  const open = (m, decoration) => setPicked({ id: m.id, compId: m.compId, decoration: decoration || null });
   return [match, open, () => setPicked(null)];
 }
 
 // matchRowIn: the row a competition holds for a match id, read where
 // compMatches (viewer_utils.jsx) reads its rows: the pool matches, the bracket
-// rounds, or the bronze.
+// rounds, or the bronze. A raw row, without compMatches' own fields.
 export function matchRowIn(comp, id) {
   if (!comp) return null;
   const b = comp.bracket;
@@ -366,12 +364,6 @@ export function matchRowIn(comp, id) {
   return (comp.poolMatches || (comp.pools || []).flatMap((p) => p.matches || [])).find((m) => m && m.id === id)
     || rounds.flat().find((m) => m && m.id === id)
     || (b && b.thirdPlaceMatch && b.thirdPlaceMatch.id === id ? b.thirdPlaceMatch : null);
-}
-
-// tournamentMatchRow: the same, for a page that lists every competition's
-// matches (Home, Schedule). Match ids repeat across competitions.
-export function tournamentMatchRow(tournament, id, compId) {
-  return matchRowIn(((tournament && tournament.competitions) || []).find((c) => c.id === compId), id);
 }
 
 // ---------------------------------------------------------------------------

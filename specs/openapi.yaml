@@ -37,8 +37,17 @@ info:
     finished (409 `result_finalized`) or rename a team member who already has a name
     (409). The Lineups page's other writes (round lineups, deleting a match lineup,
     clearing a member's name) and `GET .../team-members` stay gated.
+    A request without a valid password also runs the representative bout of a tied
+    knockout team match: `POST`/`DELETE .../matches/{mid}/daihyosen` add and remove
+    it, and `PUT .../matches/{mid}/score` scores it through its `subResults` row
+    (position `-1`, decision `daihyosen`). Its score write carries only what the
+    competitors saw: a match `decision` that is empty, `fought` or `hikiwake`, and a bout
+    `decision` that is one of those or `fusensho` (or `daihyosen` on the
+    representative bout). Any other decision, or the `Ht` judges'-decision mark on
+    any bout, is refused with 400.
 
-    **Request body size limits.** Every `/api/` route enforces a request-size cap and
+    **Request body size limits.** Every `/api/` route that reads a body (any POST,
+    PUT or PATCH, and a DELETE that carries one) enforces a request-size cap and
     returns `413` when the body exceeds it: admin JSON bodies are capped at 1 MB by
     default; `POST /api/tournament/announce` and `POST /api/tournament/reset` are
     capped tighter, at 4 KB, since their payloads are small fixed-shape JSON; and
@@ -3487,6 +3496,14 @@ paths:
                       result:
                         $ref: '#/components/schemas/MatchResult'
                   - $ref: '#/components/schemas/RefusedWrite'
+        '400':
+          description: >
+            The body is not the `modifiedAt` object (malformed JSON, or a
+            `modifiedAt` that is not a number).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
         '404':
           description: >
             Match not found, or it carries no daihyosen bout to remove
@@ -3504,6 +3521,8 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Error'
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
 
   /api/competitions/{id}/competitor-status:
     parameters:
@@ -3967,6 +3986,8 @@ paths:
           description: No tie-breaker matches found for the group.
         '409':
           description: One or more matches are in progress or already scored.
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
 
   /api/competitions/{id}/league-tiebreak/finalize:
     parameters:

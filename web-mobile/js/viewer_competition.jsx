@@ -245,9 +245,12 @@ export function ViewerCompetition({ tournament, competition, pools, poolMatches,
 
   const [bracketScrollTarget, setBracketScrollTarget] = useState(null);
   const bracketScrollRef = useRefV(null);
-  // Looked up in the rows the Bracket, Pools and League tabs are handed, not
-  // in allMatches, which leaves out a preview bracket.
-  const [selectedMatch, openMatch, closeMatch] = useLiveMatch((id) => matchRowIn({ poolMatches, bracket }, id));
+  // The live row is allMatches', which carries the competition's fields the
+  // score editor routes on, so only the Bracket tab declares anything (its
+  // round label). A preview bracket is not in allMatches, so its raw row is
+  // the fallback, and the Bracket tab's declaration supplies the rest.
+  const [selectedMatch, openMatch, closeMatch] = useLiveMatch((id) =>
+    allMatches.find((m) => m.id === id) || matchRowIn({ bracket }, id));
   const [bracketOverflowRight, setBracketOverflowRight] = useState(false);
 
   // Keyed on an id STRING, not a match object: re-scroll only when the target
@@ -414,7 +417,7 @@ export function ViewerCompetition({ tournament, competition, pools, poolMatches,
                       // (legacy mode where ri equals the backend index). Prefer it
                       // over the display-column index so lineup fetches use the right
                       // round when phantom leading rounds shift the display column.
-                      openMatch({ ...m, phase: "bracket", round: label, phaseName: label, roundIndex: m.roundIndex ?? ri, compId: c.id, compName: c.name, compKind: c.kind, teamSize: c.teamSize, compEngi: isEngi, teamMatchType: teamMatchTypeFor(c) });
+                      openMatch(m, { phase: "bracket", round: label, phaseName: label, roundIndex: m.roundIndex ?? ri, compId: c.id, compName: c.name, compKind: c.kind, teamSize: c.teamSize, compEngi: isEngi, teamMatchType: teamMatchTypeFor(c) });
                     }}
                   />
                   {derivedBracket.thirdPlaceMatch && (() => {
@@ -434,7 +437,7 @@ export function ViewerCompetition({ tournament, competition, pools, poolMatches,
                           showDojo={tweaks.showDojo ?? true}
                           highlighted={currentMatch?.id === bm.id}
                           highlightPlayers={highlightPlayers}
-                          onClick={() => openMatch({ ...bm, phase: "bracket", round: "3rd Place", phaseName: "3rd Place", roundIndex: derivedBracket.rounds.length, compId: c.id, compName: c.name, compKind: c.kind, teamSize: c.teamSize, compEngi: isEngi, teamMatchType: teamMatchTypeFor(c) })}
+                          onClick={() => openMatch(bm, { phase: "bracket", round: "3rd Place", phaseName: "3rd Place", roundIndex: derivedBracket.rounds.length, compId: c.id, compName: c.name, compKind: c.kind, teamSize: c.teamSize, compEngi: isEngi, teamMatchType: teamMatchTypeFor(c) })}
                         />
                       </div>
                     );
@@ -448,10 +451,10 @@ export function ViewerCompetition({ tournament, competition, pools, poolMatches,
               LeagueStandingsViewer. Mirrored in admin_pools.jsx and
               admin_shiaijo.jsx's ShiaijoContext. */}
           {effectiveTab === "pools" && hasPools && !isLeague && (
-            <PoolsViewer pools={pools} standings={standings} poolMatches={poolMatches} tweaks={tweaks} competition={c} onMatchClick={openMatch} highlightPlayers={highlightPlayers} />
+            <PoolsViewer pools={pools} standings={standings} poolMatches={poolMatches} tweaks={tweaks} competition={c} onMatchClick={(m) => openMatch(m)} highlightPlayers={highlightPlayers} />
           )}
           {effectiveTab === "league" && hasPools && isLeague && (
-            <LeagueStandingsViewer competition={c} poolMatches={poolMatches} tweaks={tweaks} onMatchClick={openMatch} highlightPlayers={highlightPlayers} />
+            <LeagueStandingsViewer competition={c} poolMatches={poolMatches} tweaks={tweaks} onMatchClick={(m) => openMatch(m)} highlightPlayers={highlightPlayers} />
           )}
           {effectiveTab === "swiss" && isSwiss && (
             <SwissStandingsViewer competition={c} poolMatches={poolMatches} tweaks={tweaks} />

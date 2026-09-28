@@ -46,17 +46,6 @@ func TestMiddleMark(t *testing.T) {
 	}
 }
 
-func TestSideMarks(t *testing.T) {
-	t.Parallel()
-
-	// The full rule table lives in domain's own TestSideMarks
-	// (result_marks_test.go); this proves only that export.SideMarks
-	// delegates to domain.SideMarks.
-	w, l := SideMarks("kiken-voluntary", false)
-	assert.Equal(t, "", w, "winner mark")
-	assert.Equal(t, "Kiken", l, "loser mark")
-}
-
 // TestDefaultWinMaruAB proves only the *state.EnchoMetadata adapter this
 // package adds (nil, a degenerate zero-period block, and a multi-period
 // block all collapse to the bare bool domain.DefaultWinMaruAB expects); the
@@ -235,11 +224,11 @@ func TestEnchoLabel_GoldenTable(t *testing.T) {
 	for _, tc := range table.Cases {
 		t.Run(fmt.Sprintf("periodCount=%d", tc.PeriodCount), func(t *testing.T) {
 			t.Parallel()
-			assert.Equal(t, tc.Label, enchoLabel(encho(tc.PeriodCount)),
-				"Go enchoLabel disagrees with the shared table; update BOTH renderers, not just this one")
+			assert.Equal(t, tc.Label, domain.EnchoLabel(encho(tc.PeriodCount).On()),
+				"Go domain.EnchoLabel disagrees with the shared table; update BOTH renderers, not just this one")
 		})
 	}
 
 	// nil is not expressible in the shared table but must render like 0.
-	assert.Equal(t, "", enchoLabel(nil))
+	assert.Equal(t, "", domain.EnchoLabel((*state.EnchoMetadata)(nil).On()))
 }

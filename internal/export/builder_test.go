@@ -345,7 +345,7 @@ func TestBuildResultsWorkbook_BracketScores(t *testing.T) {
 // reads the mark off the MatchResult view), so rendering the array verbatim
 // would render "MHt Ht" -- the mark twice. The pool path
 // (TestBuildResultsWorkbook_ResultMarksInScoreCells) already filters through
-// IpponsScore first, rendering "M Ht"; the bracket overlay must match it
+// domain.IpponsScore first, rendering "M Ht"; the bracket overlay must match it
 // exactly, not double the mark.
 func TestBuildResultsWorkbook_BracketHanteiScoreCell(t *testing.T) {
 	t.Parallel()
@@ -1648,8 +1648,8 @@ func TestBuildResultsWorkbook_RaggedKnockoutScoresLandInTheRightBlocks(t *testin
 
 			assert.Equal(t, bm.SideB, nameB, "Match %d left entrant", num)
 			assert.Equal(t, bm.SideA, nameA, "Match %d right entrant", num)
-			assert.Equal(t, IpponsScore(bm.IpponsB), scoreB, "Match %d left score", num)
-			assert.Equal(t, IpponsScore(bm.IpponsA), scoreA, "Match %d right score", num)
+			assert.Equal(t, domain.IpponsScore(bm.IpponsB), scoreB, "Match %d left score", num)
+			assert.Equal(t, domain.IpponsScore(bm.IpponsA), scoreA, "Match %d right score", num)
 			checked++
 		}
 	}
@@ -2396,6 +2396,42 @@ func TestScoreCellsCarryOutstandingHansokuTriangle(t *testing.T) {
 		assert.Equal(t, "M ▲", right, "A (Aka) scores on the right, so its standing foul rides that cell's outer edge")
 	})
 
+	// Shiro's standing foul rides the LEFT cell's outer edge, so it comes
+	// before a score there, the mirror of Aka's after it on the right.
+	t.Run("individual row, Shiro's foul before a score", func(t *testing.T) {
+		f := excelize.NewFile()
+		defer f.Close()
+		sheet := helper.SheetPoolMatches
+		f.NewSheet(sheet)
+
+		mr := state.MatchResult{
+			SideA: "Alice", SideB: "Bob", Winner: "Bob",
+			IpponsA: []string{"M"}, HansokuA: 2, // discharged into B's H
+			IpponsB: []string{"K", "H"}, HansokuB: 1, // one standing foul on B
+			Status: state.MatchStatusCompleted,
+		}
+		writeScoreRowCells(f, sheet, 1, 5, "M", "KH", mr)
+		left, _ := f.GetCellValue(sheet, "B5")
+		right, _ := f.GetCellValue(sheet, "F5")
+		assert.Equal(t, "▲ KH", left, "B (Shiro) scores on the left, so its standing foul comes first")
+		assert.Equal(t, "M", right)
+	})
+
+	t.Run("team sub-bout row, Shiro's foul before a score", func(t *testing.T) {
+		f := excelize.NewFile()
+		defer f.Close()
+		sheet := helper.SheetPoolMatches
+		f.NewSheet(sheet)
+
+		subs := []state.SubMatchResult{
+			{Position: 1, SideA: "Ann", SideB: "Ben", Winner: "Ben",
+				IpponsA: []string{"M"}, HansokuA: 2, IpponsB: []string{"K", "H"}, HansokuB: 1},
+		}
+		writeTeamSubMatchScores(f, sheet, 1, 5, subs, 3, "", "", domain.MatchSideNone)
+		left, _ := f.GetCellValue(sheet, "B5")
+		assert.Equal(t, "▲ KH", left, "Shiro's standing foul comes before its score")
+	})
+
 	t.Run("team sub-bout row", func(t *testing.T) {
 		f := excelize.NewFile()
 		defer f.Close()
@@ -2610,7 +2646,7 @@ func firstPoolMatchScoreRow(rows [][]string, bandStart int) []string {
 // TestBuildResultsWorkbook_EngiPoolFlagScoreCells verifies that for an engi pool
 // match, the Pool Matches sheet renders the referee flag counts as literal numbers,
 // not ippon letters. Previously broken because overlayPoolScores called
-// IpponsScore(mr.IpponsA) which returned "" (engi matches have no ippons).
+// domain.IpponsScore(mr.IpponsA) which returned "" (engi matches have no ippons).
 // Both the 3-2 case and the 5-0 shutout are exercised: the loser's "0" must be
 // written explicitly to distinguish a clean shutout from a kiken/fusenpai.
 func TestBuildResultsWorkbook_EngiPoolFlagScoreCells(t *testing.T) {

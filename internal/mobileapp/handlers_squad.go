@@ -141,23 +141,18 @@ func RegisterSquadHandlers(r *gin.RouterGroup, store SquadStore, comps Competiti
 		// who has a name stays with the organiser: the rename reaches every
 		// stored lineup and every bout already fought that names the member,
 		// finished matches included, which the score path's finished-match
-		// rule keeps from an anonymous caller.
+		// rule keeps from an anonymous caller. The store checks under the
+		// rename's own lock, so two callers naming one blank member cannot
+		// both pass.
 		anonymous, ok := selfRunAnonymous(c, tl, verifier)
 		if !ok {
 			return
 		}
+		rename := store.RenameTeamMember
 		if anonymous {
-			named, err := teamMemberHasName(store, compID, teamID, memberID)
-			if err != nil {
-				internalError(c, err)
-				return
-			}
-			if named {
-				c.JSON(http.StatusConflict, gin.H{"error": "this team member already has a name; ask the tournament organizer to change it"})
-				return
-			}
+			rename = store.NameUnnamedTeamMember
 		}
-		if err := store.RenameTeamMember(compID, teamID, memberID, req.Name); err != nil {
+		if err := rename(compID, teamID, memberID, req.Name); err != nil {
 			respondSquadWriteError(c, err)
 			return
 		}
@@ -194,22 +189,6 @@ func RegisterSquadHandlers(r *gin.RouterGroup, store SquadStore, comps Competiti
 	})
 }
 
-// teamMemberHasName reports whether the member already has a name. A member
-// or team it cannot find reads as unnamed, so the rename itself reports the
-// missing member (respondSquadWriteError's 404) rather than this check.
-func teamMemberHasName(store SquadStore, compID, teamID, memberID string) (bool, error) {
-	squads, err := store.LoadSquads(compID)
-	if err != nil {
-		return false, err
-	}
-	for _, m := range squads[teamID] {
-		if m.ID == memberID {
-			return strings.TrimSpace(m.Name) != "", nil
-		}
-	}
-	return false, nil
-}
-
 // requireValidCompIDAndTeam extracts (compID, teamID) from the URL, 400ing
 // on an empty team id. Shared by all three readers of this path prefix: the
 // squad handlers below and parseLineupParams/parseMatchLineupParams
@@ -240,10 +219,10 @@ func requireValidCompIDAndTeam(c *gin.Context) (compID, teamID string, ok bool) 
 }
 
 // respondSquadWriteError maps an AddTeamMember/RenameTeamMember/
-// ClearTeamMemberName error to its HTTP status. ErrTeamNotFound (the team id
-// names no participant), ErrTeamMemberNotFound, and
-// ErrTeamMemberClearAfterStart are squad-specific; everything else reuses
-// classifyRosterWriteError's existing sentinel table via
+// NameUnnamedTeamMember/ClearTeamMemberName error to its HTTP status.
+// ErrTeamNotFound (the team id names no participant), ErrTeamMemberNotFound,
+// ErrTeamMemberNamed and ErrTeamMemberClearAfterStart are squad-specific;
+// everything else reuses classifyRosterWriteError's existing sentinel table via
 // respondRosterWriteError (errors.go) rather than a second hand-copied
 // mapping -- state.ErrDuplicateTeamMember is already classified there as a
 // 409, the same status every OTHER caller of that sentinel gets.
@@ -254,6 +233,10 @@ func respondSquadWriteError(c *gin.Context, err error) {
 	}
 	if errors.Is(err, state.ErrTeamMemberNotFound) {
 		c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
+		return
+	}
+	if errors.Is(err, state.ErrTeamMemberNamed) {
+		c.JSON(http.StatusConflict, gin.H{"error": "this team member already has a name; ask the tournament organizer to change it"})
 		return
 	}
 	if errors.Is(err, state.ErrTeamMemberClearAfterStart) {

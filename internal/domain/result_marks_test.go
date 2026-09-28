@@ -46,8 +46,8 @@ func TestMiddleMark(t *testing.T) {
 }
 
 // TestEnchoLabel pins the bare "(E)"/"" rule directly (mp-m4bn: never a
-// count); export.enchoLabel delegates here after reducing its
-// *state.EnchoMetadata argument to encho.On().
+// count); the shared Go/JS table in internal/export/testdata/encho_labels.json
+// drives it from a period count (export's TestEnchoLabel_GoldenTable).
 func TestEnchoLabel(t *testing.T) {
 	t.Parallel()
 	assert.Equal(t, "", domain.EnchoLabel(false))
@@ -55,7 +55,7 @@ func TestEnchoLabel(t *testing.T) {
 }
 
 // TestSideMarks pins the per-side result-mark rule at its domain-layer
-// source; export.SideMarks is a one-line delegate.
+// source; export.SideMarksLR places it on the sheet.
 func TestSideMarks(t *testing.T) {
 	t.Parallel()
 
@@ -212,11 +212,8 @@ func TestDefaultWinMaruAB(t *testing.T) {
 	}
 }
 
-// TestIpponsScore pins the display-string join at its domain-layer source;
-// export.IpponsScore is a one-line delegate. See also
-// internal/export/middle_closed_set_test.go's
-// TestIpponsScoreRendersOnlyScoringMarks, which asserts the same rule via the
-// delegate.
+// TestIpponsScore pins the display-string join that every score cell the
+// export writes draws through: only real scoring marks are printed.
 func TestIpponsScore(t *testing.T) {
 	t.Parallel()
 

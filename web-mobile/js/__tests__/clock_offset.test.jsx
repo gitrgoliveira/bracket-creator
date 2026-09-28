@@ -1068,6 +1068,37 @@ describe('the daihyosen add and remove carry the stamp', () => {
         expect(server.timeCalls).toBe(2);
     });
 
+    // The team editor holds every autosave on the court until the add or
+    // remove settles, so each gives up after fetchWithTimeout's 12 s like
+    // every other write rather than wait for the browser to fail a half-open
+    // connection, and says so in a sentence the editor shows as it is.
+    it.each([
+        ['add', (API) => API.recordDaihyosen('c1', 'B1', 'pw'), 'added'],
+        ['remove', (API) => API.removeDaihyosen('c1', 'B1', 'pw'), 'removed'],
+    ])('the %s is given up after 12 s when the server never answers, and reported', async (_name, send, done) => {
+        const server = makeServer({ timeOk: true });
+        const API = await loadWith(server);
+        const answering = server.fetch;
+        global.fetch = vi.fn((url, opts) => {
+            if (!String(url).includes('/daihyosen')) return answering(url, opts);
+            // A connection that never answers: like a real fetch, the request
+            // settles only when its signal aborts it.
+            return new Promise((_resolve, reject) => {
+                if (opts && opts.signal) {
+                    opts.signal.addEventListener('abort', () => reject(new DOMException('The operation was aborted.', 'AbortError')));
+                }
+            });
+        });
+        let outcome = null;
+        send(API).then(() => { outcome = { landed: true }; }, (error) => { outcome = { error }; });
+
+        await tick(11000);
+        expect(outcome, 'still waiting inside the 12 s').toBeNull();
+        await tick(1500);
+        expect(outcome && outcome.error, 'given up and reported').toBeTruthy();
+        expect(outcome.error.message).toBe(`The representative bout was not ${done}: the server did not answer. Check the connection and try again.`);
+    });
+
     it('a landed add is the match, unwrapped from its envelope', async () => {
         const server = makeServer({ timeOk: true });
         const API = await loadWith(server);

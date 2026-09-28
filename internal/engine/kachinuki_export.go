@@ -10,6 +10,7 @@ package engine
 // CHK037, T195–T203.
 
 import (
+	"cmp"
 	"fmt"
 	"maps"
 	"slices"
@@ -88,30 +89,43 @@ func (e *Engine) collectKachinukiMatches(compID string, comp *state.Competition)
 		out = append(out, section(m, helper.PoolMatchLabel(i+1)))
 	}
 
-	// Bracket matches round by round, then the 3rd-place match (a sibling of
-	// bracket.Rounds). A bye, hidden with one side empty, has no section. Each
-	// is titled and its sides named as the Elimination Matches sheet prints
-	// them, so a side reading "M 3" leads to the section titled with match 3.
+	// Bracket matches in match-number order, the order the Elimination Matches
+	// sheet prints its blocks, then the 3rd-place match (a sibling of
+	// bracket.Rounds). Storage order is not that order: once byes lift a pair
+	// into a later printed round it sits in an earlier storage row
+	// (state.Bracket.NumberMatches). A bye, hidden with one side empty, has no
+	// section. Each is titled and its sides named as the sheet prints them, so
+	// a side reading "M 3" leads to the section titled with match 3.
 	bracket, err := e.store.LoadBracket(compID)
 	if err == nil && bracket != nil {
 		printed := PrintedBracket(bracket)
-		bracketSection := func(bm state.BracketMatch, fallbackTitle string) helper.KachinukiMatchDetail {
-			p := printed[bm.ID]
-			title := p.Title
-			if title == "" {
-				title = fallbackTitle // a bracket stored before match numbers
-			}
-			detail := section(bracketMatchToTeamResult(bm), title)
-			detail.SideATeam, detail.SideBTeam = p.SideA, p.SideB
-			return detail
+		type stored struct {
+			bm            state.BracketMatch
+			fallbackTitle string // for a bracket stored before match numbers
 		}
+		var matches []stored
 		for rIdx, round := range bracket.Rounds {
 			for mIdx, bm := range round {
 				if len(bm.SubResults) == 0 && (bm.Hidden || bm.SideA == "" || bm.SideB == "") {
 					continue
 				}
-				out = append(out, bracketSection(bm, fmt.Sprintf("Bracket R%d-M%d", rIdx+1, mIdx+1)))
+				matches = append(matches, stored{bm, fmt.Sprintf("Bracket R%d-M%d", rIdx+1, mIdx+1)})
 			}
+		}
+		// Stable, so matches without a number come first, in storage order.
+		slices.SortStableFunc(matches, func(a, b stored) int { return cmp.Compare(a.bm.MatchNumber, b.bm.MatchNumber) })
+		bracketSection := func(bm state.BracketMatch, fallbackTitle string) helper.KachinukiMatchDetail {
+			p := printed[bm.ID]
+			title := p.Title
+			if title == "" {
+				title = fallbackTitle
+			}
+			detail := section(bracketMatchToTeamResult(bm), title)
+			detail.SideATeam, detail.SideBTeam = p.SideA, p.SideB
+			return detail
+		}
+		for _, m := range matches {
+			out = append(out, bracketSection(m.bm, m.fallbackTitle))
 		}
 		if bm := bracket.ThirdPlaceMatch; bm != nil {
 			out = append(out, bracketSection(*bm, helper.ThirdPlaceLabel))

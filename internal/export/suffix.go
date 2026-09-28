@@ -22,20 +22,13 @@ import (
 // owner the Kachinuki Detail sheet also delegates to (internal/helper), kept
 // here so this exported signature (state.EnchoMetadata, which domain may not
 // import) and its pinning test (middle_closed_set_test.go) stay put. See
-// domain.MiddleMark's doc comment for the full rule and SideMarks for
+// domain.MiddleMark's doc comment for the full rule and domain.SideMarks for
 // everything the middle may NOT carry.
 func MiddleMark(decision string, encho *state.EnchoMetadata) string {
 	return domain.MiddleMark(decision, encho.On())
 }
 
-// SideMarks returns the per-side result marks for a decision: winnerMark goes
-// in the winning side's score cell, loserMark in the losing side's. A
-// one-line delegate to domain.SideMarks; see its doc comment for the rule.
-func SideMarks(decision string, decidedByHantei bool) (winnerMark, loserMark string) {
-	return domain.SideMarks(decision, decidedByHantei)
-}
-
-// SideMarksLR resolves SideMarks into (left, right) on-sheet order for a
+// SideMarksLR resolves domain.SideMarks into (left, right) on-sheet order for a
 // match between sideA and sideB: Shiro (SideB) on the left, Aka (SideA) on
 // the right, through helper.WhiteLeft like the scores beside these marks.
 // domain.SideMarksAB owns the decision+attribution part (SIDE order, shared
@@ -52,16 +45,6 @@ func SideMarks(decision string, decidedByHantei bool) (winnerMark, loserMark str
 func SideMarksLR(decision string, decidedByHantei bool, att domain.WinnerAttribution) (left, right string) {
 	aMark, bMark := domain.SideMarksAB(decision, decidedByHantei, att)
 	return helper.WhiteLeft(aMark, bMark)
-}
-
-// enchoLabel renders the overtime marker for an encho block: "" when no
-// overtime ran, "(E)" otherwise — always bare, never a count. A one-line
-// delegate to domain.EnchoLabel; see its doc comment for the full rule
-// (mp-m4bn: no count). The editors' "· (E) Overtime ×N" eyebrow is different
-// on purpose: a live readout of the stepper the operator is using, not a
-// result marking.
-func enchoLabel(encho *state.EnchoMetadata) string {
-	return domain.EnchoLabel(encho.On())
 }
 
 // FlagsScorePair returns the display strings for both sides of an engi bout.
@@ -104,12 +87,4 @@ func HansokuMark(fouls int) string {
 		return "▲"
 	}
 	return ""
-}
-
-// IpponsScore formats an ippon slice as a readable score string: ["M","K"] ->
-// "MK", nil/empty -> "". A one-line delegate to domain.IpponsScore; see its
-// doc comment for the full rule (bye/hikiwake special cases live in the
-// caller).
-func IpponsScore(ippons []string) string {
-	return domain.IpponsScore(ippons)
 }

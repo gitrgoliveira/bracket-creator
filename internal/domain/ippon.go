@@ -130,8 +130,6 @@ func IsScoringIppon(v string) bool {
 // or a judges'-decision mark never leaks into the printed cell. Mirrors the
 // character-join behaviour in formatIpponsScore (bracket.jsx) without the
 // full display logic (bye/hikiwake special cases live in the caller).
-// export.IpponsScore is a one-line delegate to this, kept for its existing
-// callers in internal/export.
 func IpponsScore(ippons []string) string {
 	result := ""
 	for _, s := range ippons {

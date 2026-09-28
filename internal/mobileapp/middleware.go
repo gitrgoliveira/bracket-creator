@@ -82,14 +82,21 @@ const BrandingMaxFileBytes int64 = 1 << 20 // 1 MB
 //     error reasonably even if not optimally, a follow-up could map
 //     that specific error to 413 inside BindJSON wrappers.
 //
-// Skips GET/HEAD/DELETE/OPTIONS, those don't carry a body in
-// practice and wrapping a nil body would surface false errors.
+// Skips GET/HEAD/OPTIONS, which carry no body a handler reads, and a DELETE
+// without a body, since wrapping a missing body would surface false errors.
+// A DELETE that carries one (the daihyosen and league tie-break removals read
+// JSON) is capped like a POST.
 func MaxBodyBytes(n int64) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		switch c.Request.Method {
-		case http.MethodGet, http.MethodHead, http.MethodDelete, http.MethodOptions:
+		case http.MethodGet, http.MethodHead, http.MethodOptions:
 			c.Next()
 			return
+		case http.MethodDelete:
+			if c.Request.Body == nil || c.Request.Body == http.NoBody {
+				c.Next()
+				return
+			}
 		}
 		if c.Request.ContentLength > n {
 			c.AbortWithStatusJSON(http.StatusRequestEntityTooLarge, gin.H{
@@ -294,7 +301,7 @@ func isSelfRunMainGatedConfigRoute(method, fullPath string) bool {
 		http.MethodDelete + " /api/competitions/:id/teams/:tid/match-lineups/:matchId", // the score sheet clears a position with the PUT, never this
 		http.MethodGet + " /api/competitions/:id/team-members",                         // the public page reads team members from the viewer payload
 		http.MethodDelete + " /api/competitions/:id/teams/:tid/members/:memberId",      // bc-pnum: clearing a member's name, Lineups page only
-		http.MethodPost + " /api/competitions/:id/matches/:mid/decision",               // mp-ba3: kiken/fusenpai/daihyosen are admin-only decisions
+		http.MethodPost + " /api/competitions/:id/matches/:mid/decision",               // mp-ba3: kiken/fusenpai/fusensho/daihyosen rulings are the organiser's; a participant adds the representative bout via POST .../daihyosen and scores it on /score (bc-dhas)
 		http.MethodDelete + " /api/competitions/:id/matches/:mid/kachinuki-bout",       // mp-gmcg: removing a bout is an organiser correction, same class as reopen/override-winner; the participant score path gates itself via enforceSelfRunPolicy, this route does not
 		http.MethodPost + " /api/sponsors",                                             // mp-c38: sponsor logo upload, organiser setup, not operational play
 		http.MethodDelete + " /api/sponsors/:index",                                    // mp-c38: sponsor deletion, organiser setup, not operational play

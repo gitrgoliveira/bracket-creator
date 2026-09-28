@@ -679,7 +679,7 @@ func TestCollectKachinukiMatches_UnfoughtDrawCoversEveryMatch(t *testing.T) {
 					titled[number] = true
 				}
 			}
-			assert.ElementsMatch(t, sheetTitles, sectionTitles, "each bracket section is titled as its Elimination Matches block")
+			assert.Equal(t, sheetTitles, sectionTitles, "each bracket section is titled as its Elimination Matches block, in the order the sheet prints them")
 			for _, side := range sides {
 				var number int
 				if _, err := fmt.Sscanf(side, "M %d", &number); err == nil {

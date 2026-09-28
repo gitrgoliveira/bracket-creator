@@ -1590,7 +1590,7 @@ type EnchoMetadata struct {
 
 // On reports whether the block records overtime that was actually fought:
 // non-nil with a positive PeriodCount. THE single predicate for "did this
-// result happen in encho" — the (E) label (enchoLabel, pinned by the
+// result happen in encho" — the (E) label (domain.EnchoLabel, pinned by the
 // golden table), the default-win maru count (domain.DefaultWinIppons
 // callers), and decision validation all key on it, so a degenerate
 // {periodCount: 0} block can never make one surface claim overtime while

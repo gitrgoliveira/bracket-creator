@@ -737,7 +737,11 @@ export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, on
   const hasPointsOrDraw = isDrawToggled || aTotal > 0 || bTotal > 0;
   const koTieBlocked = !decidedByHantei && m.status !== "scheduled" && hasPointsOrDraw &&
     isKoTieBlocked({ isKnockoutPhase, teamWinner: individualWinner, isComplete: false });
-  const KO_TIE_REASON = "Needs a winner: fight encho, then record hantei if still tied.";
+  // A participant on the public self-run page cannot record a hantei (see the
+  // decision place below), so it points them at the organizer instead.
+  const KO_TIE_REASON = selfReport
+    ? "Needs a winner: fight encho, then ask the organizer for a hantei if still tied."
+    : "Needs a winner: fight encho, then record hantei if still tied.";
   const canFinish = !decidedByHantei && !koTieBlocked && hasPointsOrDraw;
 
   // Finish guard (see TeamScoreEditorModal): one tap ARMS the button — its label
@@ -1131,12 +1135,13 @@ export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, on
           {/* T093–T098: decision place. The judges'-decision (hantei) affordance
               forms the TOP row whenever the scoreline is tied; the withdrawal/
               forfeit controls (kiken/fusenpai/fusensho) form the BOTTOM row.
-              Hantei keeps its own tied-scoreline condition so it still surfaces
-              in self-report mode, where the admin-only controls below are hidden.
+              Neither row is offered in self-report mode: a hantei and a
+              withdrawal stay the organiser's, and the server refuses both from
+              a participant (bc-dhas).
               Sits between the scoring board and the footer so the flow is: enter
               score OR record a decision, either way the modal closes or
               advances, same as any other decision. */}
-          {(aTotal === bTotal || (!decisionPromptKind && !selfReport)) && (
+          {!selfReport && (aTotal === bTotal || !decisionPromptKind) && (
             <div className="decision-controls decision-controls--stacked" style={{ marginTop: 12, fontSize: 12 }}>
               <span className="decision-controls__label" style={{ color: "var(--ink-3)", fontWeight: 600 }}>Decision:</span>
               {/* A tied match may be decided by referee hantei. The winner is
@@ -1210,7 +1215,7 @@ export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, on
                   )}
                 </div>
               )}
-              {!decisionPromptKind && !selfReport && (
+              {!decisionPromptKind && (
                 <div className="decision-controls__group">
                   <div className="decision-btn-group">
                     <button data-testid="scoring-modal-kiken-voluntary-button" type="button" className="btn btn--sm" onClick={() => { setDecisionErr(""); setDecisionPromptKind("kiken-voluntary"); }} disabled={submitting || decisionSubmitting}>

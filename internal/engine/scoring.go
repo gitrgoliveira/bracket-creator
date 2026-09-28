@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"log"
 	"sort"
-	"strings"
 	"sync"
 	"time"
 
@@ -3100,7 +3099,7 @@ func displacedCompetitor(bm, blocking *state.BracketMatch, mIdx int) string {
 	if mIdx%2 == 0 {
 		slot = blocking.SideA
 	}
-	if slot != "" && !strings.HasPrefix(slot, "Winner of") {
+	if slot != "" && !helper.IsWinnerOfPlaceholder(slot) {
 		return slot
 	}
 	return bm.Winner
@@ -3194,7 +3193,7 @@ func (e *Engine) propagateBracketWinner(bracket *state.Bracket, rIdx, mIdx int) 
 		// when both sides share a name.
 		loser, loserID := bracketLoserIdentity(m)
 		// Skip empty/placeholder losers (bye matches resolve with one side blank).
-		if loser != "" && !strings.HasPrefix(loser, "Winner of") {
+		if loser != "" && !helper.IsWinnerOfPlaceholder(loser) {
 			bronze := bracket.ThirdPlaceMatch
 			// Assign by semifinal POSITION, not first-empty-slot. The round
 			// feeding the final always has exactly two matches (mIdx 0 and 1),
@@ -3214,7 +3213,7 @@ func (e *Engine) propagateBracketWinner(bracket *state.Bracket, rIdx, mIdx int) 
 	}
 
 	// Try to resolve the OTHER side if it's a "Winner of" placeholder
-	if strings.HasPrefix(nextM.SideA, "Winner of") {
+	if helper.IsWinnerOfPlaceholder(nextM.SideA) {
 		// nextM.SideA is "Winner of rX-mY"
 		r, m := parseWinnerOf(nextM.SideA, len(bracket.Rounds))
 		if r >= 0 && r < len(bracket.Rounds) && m >= 0 && m < len(bracket.Rounds[r]) {
@@ -3225,7 +3224,7 @@ func (e *Engine) propagateBracketWinner(bracket *state.Bracket, rIdx, mIdx int) 
 			}
 		}
 	}
-	if strings.HasPrefix(nextM.SideB, "Winner of") {
+	if helper.IsWinnerOfPlaceholder(nextM.SideB) {
 		r, m := parseWinnerOf(nextM.SideB, len(bracket.Rounds))
 		if r >= 0 && r < len(bracket.Rounds) && m >= 0 && m < len(bracket.Rounds[r]) {
 			srcM := bracket.Rounds[r][m]
@@ -3237,12 +3236,12 @@ func (e *Engine) propagateBracketWinner(bracket *state.Bracket, rIdx, mIdx int) 
 	}
 
 	// Recursive resolution
-	if nextM.SideA != "" && nextM.SideB == "" && !strings.HasPrefix(nextM.SideA, "Winner of") {
+	if nextM.SideA != "" && nextM.SideB == "" && !helper.IsWinnerOfPlaceholder(nextM.SideA) {
 		nextM.Winner = nextM.SideA
 		nextM.WinnerID = nextM.SideAID
 		nextM.Status = state.MatchStatusCompleted
 		e.propagateBracketWinner(bracket, rIdx+1, nextMatchIdx)
-	} else if nextM.SideA == "" && nextM.SideB != "" && !strings.HasPrefix(nextM.SideB, "Winner of") {
+	} else if nextM.SideA == "" && nextM.SideB != "" && !helper.IsWinnerOfPlaceholder(nextM.SideB) {
 		nextM.Winner = nextM.SideB
 		nextM.WinnerID = nextM.SideBID
 		nextM.Status = state.MatchStatusCompleted

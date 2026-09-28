@@ -14,7 +14,9 @@ package mobileapp
 import (
 	"net/http"
 	"net/http/httptest"
+	"sync"
 	"testing"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/gitrgoliveira/bracket-creator/internal/domain"
@@ -163,6 +165,65 @@ func TestSelfRun_ScoreSheetTeamWrites_AnonymousGuards(t *testing.T) {
 		require.Equal(t, http.StatusConflict, w.Code, w.Body.String())
 		assert.Equal(t, "Sato", f.memberName(t, f.namedA))
 	})
+}
+
+// squadReadBarrier holds each squad read until a second one has happened (or
+// a second has passed): the interleaving where two renames both check the
+// member before either writes.
+type squadReadBarrier struct {
+	*state.Store
+	mu      sync.Mutex
+	reads   int
+	release chan struct{}
+}
+
+func (b *squadReadBarrier) LoadSquads(compID string) (map[string][]domain.TeamMember, error) {
+	squads, err := b.Store.LoadSquads(compID)
+	b.mu.Lock()
+	if b.reads++; b.reads == 2 {
+		close(b.release)
+	}
+	b.mu.Unlock()
+	select {
+	case <-b.release:
+	case <-time.After(time.Second):
+	}
+	return squads, err
+}
+
+// Two anonymous callers naming one blank member at once cannot both succeed:
+// the second finds the first's name and is refused, however their requests
+// interleave. The squad store holds each read until both requests have read,
+// so a check made before the rename's own lock would pass for both.
+func TestSelfRun_NamingABlankMemberAtOnceOneWins(t *testing.T) {
+	f := newTeamWritesFixture(t, true)
+	gin.SetMode(gin.TestMode)
+	r := gin.New()
+	squads := &squadReadBarrier{Store: f.store, release: make(chan struct{})}
+	RegisterSquadHandlers(r.Group("/api"), squads, f.store, stubBroadcaster{}, f.store, NewFileVerifier(f.store))
+
+	names := []string{"Mei Ito", "Ren Abe"}
+	codes := make([]int, len(names))
+	var wg sync.WaitGroup
+	for i, name := range names {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			req := jsonReq(http.MethodPut, f.membersPath()+"/"+f.blankA, map[string]any{"name": name})
+			req.Header.Set("X-Tournament-Password", "")
+			w := httptest.NewRecorder()
+			r.ServeHTTP(w, req)
+			codes[i] = w.Code
+		}()
+	}
+	wg.Wait()
+
+	assert.ElementsMatch(t, []int{http.StatusNoContent, http.StatusConflict}, codes, "one caller names the member, the other is refused")
+	winner := names[0]
+	if codes[1] == http.StatusNoContent {
+		winner = names[1]
+	}
+	assert.Equal(t, winner, f.memberName(t, f.blankA), "the member keeps the name of the caller that succeeded")
 }
 
 // The organiser keeps every rule the operator console has always had.

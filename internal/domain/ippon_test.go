@@ -13,7 +13,7 @@ import (
 )
 
 // TestIsScoringIppon pins the one predicate CountScoringIppons and
-// export.IpponsScore both draw through: an empty cell, the unfilled-slot
+// IpponsScore both draw through: an empty cell, the unfilled-slot
 // placeholder, and the judges'-decision mark are all NOT points.
 func TestIsScoringIppon(t *testing.T) {
 	tests := []struct {

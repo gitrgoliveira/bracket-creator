@@ -1,0 +1,197 @@
+// bc-dhas (operator decision: "Participants run it"): on a self-run tournament
+// the public score sheet runs the representative bout (daihyosen) of a tied
+// knockout team match like any bout. A competitor adds it, scores it, finishes
+// the match on the winner it decides, and removes one added by mistake, with
+// no organiser password: the public page sends an empty one. A hantei stays
+// the organiser's, so the public editor offers none, on the representative
+// bout or on an individual match.
+//
+// Mounted through the real door, MatchViewerModal and "Report result". The
+// flows below pin what the public editor sends; the server's side of the
+// ruling is pinned by internal/mobileapp/self_run_daihyosen_test.go.
+import React from 'react';
+import { render, act, fireEvent, screen } from '@testing-library/react';
+import { describe, it, expect, vi, beforeAll, afterAll, beforeEach, afterEach } from 'vitest';
+import { installWindowStubs } from '../helpers/stub_globals.js';
+import { AUTOSAVE_DEBOUNCE_MS } from '../../admin_scoring_autosave.jsx';
+import { toBackendMatchResult } from '../../api_serializers.jsx';
+
+const STUBBED_GLOBALS = {
+  isHikiwake: () => false,
+  arraysEqual: (a, b) => a.length === b.length && a.every((v, i) => v === b[i]),
+  isKikenDecision: () => false,
+  isTextEntry: () => false,
+  isInteractiveTarget: () => false,
+  confirmDialog: vi.fn().mockResolvedValue(true),
+  resolveRoundIndex: () => 0,
+  API: {},
+  compMatches: () => [],
+  compMatchesForCompetition: () => [],
+  Term: ({ children }) => <span>{children}</span>,
+  GlossaryHint: ({ name }) => <span title={name} />,
+};
+
+let restoreGlobals;
+let MatchViewerModal;
+
+beforeAll(async () => {
+  restoreGlobals = installWindowStubs(STUBBED_GLOBALS);
+  await import('../../admin_lineup.jsx');
+  await import('../../admin_scoring_modal.jsx');
+  ({ MatchViewerModal } = await import('../../viewer_match.jsx'));
+});
+
+afterAll(() => restoreGlobals());
+
+const AKA = { id: 'team-A', name: 'Kodokan', number: 'T1' };
+const SHIRO = { id: 'team-B', name: 'Mumeishi', number: 'T2' };
+// Three bouts fought and tied: one win each and a draw.
+const FOUGHT = [
+  { position: 1, sideA: '', sideB: '', ipponsA: ['M'], ipponsB: [], winner: 'Kodokan', decision: '' },
+  { position: 2, sideA: '', sideB: '', ipponsA: [], ipponsB: ['K'], winner: 'Mumeishi', decision: '' },
+  { position: 3, sideA: '', sideB: '', ipponsA: [], ipponsB: [], winner: '', decision: 'hikiwake' },
+];
+const REP_BOUT = { position: -1, sideA: 'Kodokan', sideB: 'Mumeishi', ipponsA: [], ipponsB: [], winner: '', decision: 'daihyosen' };
+
+const knockoutTeamMatch = (subResults = FOUGHT) => ({
+  id: 'm1', compId: 'c1', compName: 'Teams', status: 'running', phase: 'bracket', round: 'Final', court: 'A',
+  compKind: 'team', teamSize: 3, compFormat: 'knockout', teamMatchType: 'fixed',
+  sideA: AKA, sideB: SHIRO, subResults,
+});
+
+beforeEach(() => {
+  vi.useFakeTimers();
+  vi.spyOn(window, 'alert').mockImplementation(() => {});
+  window.API = {
+    fetchCompetitionDetails: vi.fn().mockResolvedValue({ id: 'c1', config: { format: 'knockout', players: [] } }),
+    fetchSquads: vi.fn(),
+    fetchMatchLineup: vi.fn(async () => null),
+    fetchTeamLineup: vi.fn(async () => null),
+    putMatchLineup: vi.fn(),
+    // Every write lands, as the server now answers the public page.
+    recordScore: vi.fn(async (_c, _id, patch) => ({ status: patch.status })),
+    recordDaihyosen: vi.fn(async () => ({ ...knockoutTeamMatch(), subResults: [...FOUGHT, REP_BOUT] })),
+    removeDaihyosen: vi.fn(async () => ({ ...knockoutTeamMatch(), subResults: FOUGHT })),
+    hasPendingTerminalWrite: () => false,
+    notePendingEdit: () => () => {},
+  };
+});
+
+afterEach(() => {
+  vi.useRealTimers();
+  vi.restoreAllMocks();
+});
+
+async function settle(times = 8) {
+  for (let i = 0; i < times; i++) {
+    await act(async () => { await Promise.resolve(); });
+  }
+}
+
+async function openEditor(match, onClose = vi.fn()) {
+  await act(async () => {
+    render(<MatchViewerModal match={match} onClose={onClose} tournament={{ mode: 'self-run', competitions: [{ id: 'c1', squads: {} }] }} compId="c1" />);
+  });
+  await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Report result' })); });
+  await settle();
+  return onClose;
+}
+
+const repBoutRow = () => [...document.querySelectorAll('.team-sub-match')][FOUGHT.length];
+const ipponButton = (row, color, letter) =>
+  [...row.querySelectorAll(`.team-sub-match__side--${color} button.ipt-btn`)].find((b) => b.textContent === letter);
+const markSlot = (row, color, letter) =>
+  [...row.querySelectorAll(`.tsm-center-pts--${color} button.editor-side__pt`)].find((b) => b.textContent === letter);
+
+// What the last score write put on the wire, through the real serializer.
+function lastWire() {
+  const [, , patch, , match] = window.API.recordScore.mock.calls.at(-1);
+  return toBackendMatchResult(patch, match);
+}
+const repBoutOf = (wire) => (wire.subResults || []).find((s) => s.position === -1);
+
+async function addRepBout() {
+  await act(async () => { fireEvent.click(screen.getByTestId('scoring-modal-daihyosen-button')); });
+  await settle();
+}
+
+describe('a participant runs the representative bout of a tied knockout team match (bc-dhas)', () => {
+  it('adds it, scores it and finishes the match on the winner it decides', async () => {
+    const onClose = await openEditor(knockoutTeamMatch());
+    await addRepBout();
+
+    expect(window.API.recordDaihyosen).toHaveBeenCalledWith('c1', 'm1', '');
+    expect(repBoutRow(), 'the representative bout is on the sheet').toBeTruthy();
+    expect(screen.getByTestId('team-daihyosen-remove'), 'Remove is offered while it is unscored').toBeTruthy();
+    expect(screen.queryByTestId('team-daihyosen-hantei-arm'), 'no hantei is offered').toBeNull();
+    expect(screen.queryByText(/hantei/i)).toBeNull();
+
+    await act(async () => { fireEvent.click(ipponButton(repBoutRow(), 'aka', 'M')); });
+    await act(async () => { vi.advanceTimersByTime(AUTOSAVE_DEBOUNCE_MS + 50); });
+    await settle();
+    const scored = repBoutOf(lastWire());
+    expect(scored).toMatchObject({ decision: 'daihyosen', ipponsA: ['M'], ipponsB: [] });
+    expect(screen.queryByTestId('team-daihyosen-hantei-row'), 'nothing is left to offer once it is scored').toBeNull();
+
+    await act(async () => { fireEvent.click(screen.getByText('Finish')); });
+    await act(async () => { fireEvent.click(screen.getByText('Tap again to finish')); });
+    await settle();
+    const finished = lastWire();
+    expect(finished).toMatchObject({ status: 'completed', winner: 'Kodokan', decision: '' });
+    expect(repBoutOf(finished)).toMatchObject({ decision: 'daihyosen', winner: 'Kodokan', ipponsA: ['M'], ipponsB: [] });
+    expect(window.API.recordScore.mock.calls.every(([, , , password]) => password === '')).toBe(true);
+    expect(window.alert).not.toHaveBeenCalled();
+    expect(onClose, 'the finished match closes the editor').toHaveBeenCalled();
+  });
+
+  it('removes it right after a scoring tap: the save made first lands, then the remove', async () => {
+    await openEditor(knockoutTeamMatch());
+    await addRepBout();
+    window.API.recordScore.mockClear();
+
+    // A point struck and taken back off: the edit is still owed when Remove is tapped.
+    await act(async () => { fireEvent.click(ipponButton(repBoutRow(), 'aka', 'M')); });
+    await act(async () => { fireEvent.click(markSlot(repBoutRow(), 'aka', 'M')); });
+    await act(async () => { fireEvent.click(screen.getByTestId('team-daihyosen-remove')); });
+    await settle();
+
+    expect(window.API.recordScore).toHaveBeenCalledTimes(1);
+    // The row is back to what the server holds, so the editor has nothing to
+    // say about its points and may leave them out; it still sends the row.
+    const saved = repBoutOf(lastWire());
+    expect(saved, 'the save made first carries the representative bout').toMatchObject({ decision: 'daihyosen' });
+    expect([...(saved.ipponsA || []), ...(saved.ipponsB || [])]).toEqual([]);
+    expect(window.API.removeDaihyosen).toHaveBeenCalledWith('c1', 'm1', '');
+    expect(window.alert).not.toHaveBeenCalled();
+    expect(document.querySelector('[data-testid="team-editor-error"]'), 'no refusal is shown').toBeNull();
+    expect(repBoutRow(), 'the row is gone').toBeFalsy();
+    expect(screen.getByTestId('scoring-modal-daihyosen-button'), 'and it can be added again').toBeTruthy();
+  });
+});
+
+describe('a hantei stays the organiser\'s on the public score sheet (bc-dhas)', () => {
+  it('a hantei the organiser recorded on the representative bout shows, and the participant cannot undo it', async () => {
+    const recorded = { ...REP_BOUT, winner: 'Kodokan', ipponsA: ['Ht'], decidedByHantei: true };
+    await openEditor(knockoutTeamMatch([...FOUGHT, recorded]));
+
+    const chip = screen.getByTestId('team-daihyosen-ht-aka');
+    expect(chip.disabled, 'the Ht mark is shown, not offered for undo').toBe(true);
+    expect(screen.queryByTestId('team-daihyosen-hantei-row')).toBeNull();
+    await act(async () => { fireEvent.click(chip); });
+    await act(async () => { vi.advanceTimersByTime(AUTOSAVE_DEBOUNCE_MS + 50); });
+    await settle();
+    expect(window.API.recordScore).not.toHaveBeenCalled();
+  });
+
+  it('a tied individual match offers no hantei, and points the participant at the organizer', async () => {
+    await openEditor({
+      id: 'm2', compId: 'c1', compName: 'Individuals', status: 'running', phase: 'bracket', round: 'Final', court: 'A',
+      compFormat: 'knockout', sideA: { id: 'p-a', name: 'Aoki' }, sideB: { id: 'p-b', name: 'Baba' },
+      ipponsA: ['M'], ipponsB: ['K'],
+    });
+    expect(screen.queryByTestId('scoring-modal-hantei-row')).toBeNull();
+    expect(screen.queryByText('Decide by hantei…')).toBeNull();
+    expect(screen.getByText('Needs a winner').closest('button').title)
+      .toBe('Needs a winner: fight encho, then ask the organizer for a hantei if still tied.');
+  });
+});

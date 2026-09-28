@@ -1272,8 +1272,11 @@ func (r *ScoreRequest) AsMatchResult() *state.MatchResult {
 //
 // Rejected: "kiken-voluntary", "kiken-injury", "fusenpai", "daihyosen",
 // "kachinuki-exhaustion", "fusensho", referee/operator rulings with
-// eligibility side-effects or official designation requirements. Also
-// rejected when decidedByHantei is explicitly true (judges' panel decision).
+// eligibility side-effects or official designation requirements. A
+// match-level "daihyosen" is the /decision ruling; the representative bout
+// itself is a sub-result row a participant may score (see
+// IsSelfRunReportableSubDecision). Also rejected when the hantei mark is
+// present (a judges' decision stays the organiser's).
 func IsSelfRunReportableDecision(decision string, hanteiDecided bool) bool {
 	if hanteiDecided {
 		return false
@@ -1288,19 +1291,22 @@ func IsSelfRunReportableDecision(decision string, hanteiDecided bool) bool {
 
 // IsSelfRunReportableSubDecision validates a sub-bout decision for self-run
 // anonymous callers. Allowed: "" (none), "fought", "hikiwake", "fusensho"
-// (per-bout forfeiture is a factual observation). Rejected: kiken variants,
-// fusenpai, daihyosen, kachinuki-exhaustion, decidedByHantei=true. Also
-// rejects position == -1 (daihyosen representative bout placeholder).
+// (per-bout forfeiture is a factual observation), and "daihyosen" on the
+// representative bout (position -1) only: participants add, score and remove
+// the representative bout of a tied knockout team match like any bout
+// (operator decision, bc-dhas). Rejected: kiken variants, fusenpai,
+// kachinuki-exhaustion, "daihyosen" on a numbered bout, and a hantei mark on
+// any bout, the representative bout included (a judges' decision stays the
+// organiser's).
 func IsSelfRunReportableSubDecision(decision string, decidedByHantei bool, position int) bool {
-	if position == state.DaihyosenSubPosition {
-		return false
-	}
 	if decidedByHantei {
 		return false
 	}
 	switch decision {
 	case "", "fought", "hikiwake", "fusensho":
 		return true
+	case "daihyosen":
+		return position == state.DaihyosenSubPosition
 	default:
 		return false
 	}

@@ -1580,8 +1580,11 @@ func TestIsSelfRunReportableSubDecision(t *testing.T) {
 		{name: "hikiwake sub-decision allowed", decision: "hikiwake", position: 1, want: true},
 		{name: "fusensho sub-decision allowed", decision: "fusensho", position: 1, want: true},
 		{name: "kiken-voluntary sub rejected", decision: "kiken-voluntary", position: 1, want: false},
-		{name: "daihyosen sub rejected", decision: "daihyosen", position: 1, want: false},
-		{name: "position -1 (daihyosen slot) rejected", decision: "", position: -1, want: false},
+		{name: "daihyosen on a numbered bout rejected", decision: "daihyosen", position: 1, want: false},
+		{name: "the representative bout (position -1) allowed", decision: "daihyosen", position: -1, want: true},
+		{name: "the representative bout with no decision allowed", decision: "", position: -1, want: true},
+		{name: "hantei on the representative bout rejected", decision: "daihyosen", decidedByHantei: true, position: -1, want: false},
+		{name: "kiken on the representative bout rejected", decision: "kiken-voluntary", position: -1, want: false},
 		{name: "decidedByHantei true sub rejected", decision: "fought", decidedByHantei: true, position: 1, want: false},
 		{name: "position 0 allowed", decision: "fought", position: 0, want: true},
 	}

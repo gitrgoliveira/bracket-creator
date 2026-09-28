@@ -169,12 +169,10 @@ describe('individual editor IMPOSSIBLE CELLS (asserted, not skipped)', () => {
 });
 
 describe('individual editor selfReport (public self-run surface)', () => {
-  it('selfReport hides the kiken/fusenpai controls but KEEPS the hantei row on a tied scoreline', async () => {
-    // Pinned CURRENT behaviour: the hantei affordance has its own
-    // tied-scoreline condition and deliberately still surfaces in self-report
-    // mode, while the admin-only withdrawal controls hide. Whether the public
-    // self-run surface should be able to record a judges' decision is ruled
-    // on by mp-yqxn.5.
+  it('selfReport hides the kiken/fusenpai controls AND the hantei row on a tied scoreline', async () => {
+    // Operator decision (bc-dhas): a hantei stays the organiser's on a
+    // self-run tournament, and the server refuses one from a participant, so
+    // the public editor offers it no more than the withdrawal controls.
     await renderCell(
       { format: 'mixed', phase: 'pool', naginata: false },
       {},
@@ -183,7 +181,7 @@ describe('individual editor selfReport (public self-run surface)', () => {
     expect(screen.queryByTestId('scoring-modal-kiken-voluntary-button')).toBeNull();
     expect(screen.queryByTestId('scoring-modal-kiken-injury-button')).toBeNull();
     expect(screen.queryByTestId('scoring-modal-fusenpai-button')).toBeNull();
-    expect(screen.queryByTestId('scoring-modal-hantei-row')).not.toBeNull();
+    expect(screen.queryByTestId('scoring-modal-hantei-row')).toBeNull();
   });
 });
 

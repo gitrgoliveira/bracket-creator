@@ -63,6 +63,14 @@ func TestPrintedBracket(t *testing.T) {
 		assert.Equal(t, PrintedBracketMatch{SideA: "", SideB: "Cid"}, legacy["b"], "an unknown feeder leaves the side blank")
 	})
 
+	t.Run("a competitor named like the start of a feeder label", func(t *testing.T) {
+		named := PrintedBracket(&state.Bracket{Rounds: [][]state.BracketMatch{
+			{{ID: "a", SideA: "Ann", SideB: "Bea", MatchNumber: 1, DisplayRound: 2}},
+			{{ID: "b", SideA: "Winner of Kyushu", SideB: "Winner of r2-m0", MatchNumber: 2, DisplayRound: 1, Feeders: []string{"x", "a"}}},
+		}})
+		assert.Equal(t, PrintedBracketMatch{Title: helper.EliminationMatchTitle(2, 2), SideA: "Winner of Kyushu", SideB: helper.MatchRefLabel(1)}, named["b"])
+	})
+
 	t.Run("no bracket", func(t *testing.T) {
 		assert.Empty(t, PrintedBracket(nil))
 	})

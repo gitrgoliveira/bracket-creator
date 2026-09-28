@@ -18,6 +18,8 @@ Two kinds of action stay gated in self-run mode. Organiser setup (creating and e
 
 Competitors can name the fighters in a team match from its score sheet, without the password. A team member picked for a bout, or a typed name, is saved with that match, and a typed name fills in a team member who has no name yet or adds a new one. Two changes stay with the organiser: the lineup of a match that has finished, and the name of a team member who already has one.
 
+Competitors also run the representative bout (daihyosen) of a tied knockout team match from its score sheet: they add it, score it like any other bout, and remove one added by mistake while it is still unscored. A judges' decision (hantei) stays with the organiser, on the representative bout as on every other bout, so the public score sheet does not offer one.
+
 Results in self-run mode carry a provenance label. A score entered without a password is tagged "self-reported"; a score entered by an authenticated operator is tagged "admin". Officiated mode always produces "admin" results.
 
 !!! note

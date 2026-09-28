@@ -2,7 +2,6 @@ package engine
 
 import (
 	"fmt"
-	"strings"
 
 	"github.com/gitrgoliveira/bracket-creator/internal/domain"
 	"github.com/gitrgoliveira/bracket-creator/internal/helper"
@@ -325,8 +324,8 @@ func (e *Engine) buildBracketFromDraw(comp *state.Competition, draw *helper.Knoc
 			}
 			aEmpty := m.SideA == ""
 			bEmpty := m.SideB == ""
-			aPlaceholder := strings.HasPrefix(m.SideA, "Winner of")
-			bPlaceholder := strings.HasPrefix(m.SideB, "Winner of")
+			aPlaceholder := helper.IsWinnerOfPlaceholder(m.SideA)
+			bPlaceholder := helper.IsWinnerOfPlaceholder(m.SideB)
 			if (aEmpty && bPlaceholder) || (bEmpty && aPlaceholder) {
 				m.Status = state.MatchStatusCompleted
 			}
@@ -521,7 +520,7 @@ func computeBracketDisplayMetadata(bracket *state.Bracket) {
 	// seeded entrant / resolved name / dead end (no connector line).
 	var realFeederID func(side string) string
 	realFeederID = func(side string) string {
-		if !strings.HasPrefix(side, "Winner of") {
+		if !helper.IsWinnerOfPlaceholder(side) {
 			return "" // resolved name, pool placeholder, or empty → no feeder
 		}
 		r, m := parseWinnerOf(side, numRounds)

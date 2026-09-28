@@ -13,15 +13,14 @@ package engine
 //     name column (engi stores both members in Player.Name; the CSV layout is
 //     unchanged, so WithZekkenName=false engi comps use the plain layout).
 //
-// Note on formulas: the stored-draw path loads pools from CSV (which does not
-// persist match pairings). As a result the match grid has no match rows and the
-// W/L/Flags standings formulas collapse to literal "0". The ISNUMBER+N( formula
-// pattern is therefore not present in this export path; it is instead exercised by
-// TestBuildResultsWorkbook_* tests in internal/export, which use the full
-// helper.Pool.Matches slice.
+//   - The standings cells are live formulas over the match rows: the
+//     stored-draw path rebuilds each pool's matches from pool-matches.csv
+//     (AttachPoolMatches), so W counts a won bout by ISNUMBER and Flags sums
+//     the flags with N(), as in the results workbook.
 
 import (
 	"bytes"
+	"slices"
 	"strings"
 	"testing"
 
@@ -176,6 +175,19 @@ func TestExportCompetitionXlsx_Engi(t *testing.T) {
 		"Pool Matches standings must NOT carry 'PW' header for an engi competition")
 	assert.Equal(t, -1, bctest.FindCellRow(pmRows, "PL"),
 		"Pool Matches standings must NOT carry 'PL' header for an engi competition")
+
+	// The first standings row's W and Flags cells count the match rows.
+	header := bctest.FindCellRow(pmRows, helper.ColHeaderFlags)
+	require.GreaterOrEqual(t, header, 0)
+	for col, want := range map[string]string{"W": "ISNUMBER(", helper.ColHeaderFlags: "N("} {
+		c := slices.Index(pmRows[header], col)
+		require.GreaterOrEqual(t, c, 0, "the standings header carries %q", col)
+		cell, err := excelize.CoordinatesToCellName(c+1, header+2)
+		require.NoError(t, err)
+		formula, err := f.GetCellFormula(helper.SheetPoolMatches, cell)
+		require.NoError(t, err)
+		assert.Contains(t, formula, want, "%s (%s) counts the match rows", col, cell)
+	}
 
 	// --- Data sheet: the combined pair name appears in the Name column ---
 	dataRows, err := f.GetRows(helper.SheetData)

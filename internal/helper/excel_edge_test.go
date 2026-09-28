@@ -230,14 +230,14 @@ func TestPrintTeamEliminationMatchesWhiteLeft(t *testing.T) {
 	// LeafNode: true mirrors real construction (CreateBalancedTree always sets it
 	// for true leaves); printSingleEliminationMatch now branches on this field
 	// rather than parsing LeafVal as a cell reference (mp-uagg).
-	nodeA := &Node{LeafNode: true, LeafVal: "Pool A", matchNum: 1}
-	nodeB := &Node{LeafNode: true, LeafVal: "Pool B", matchNum: 1}
+	nodeA := &Node{LeafNode: true, LeafVal: "Pool A-1st", matchNum: 1}
+	nodeB := &Node{LeafNode: true, LeafVal: "Pool B-1st", matchNum: 1}
 	eliminationMatchRounds := [][]*Node{
 		{{Left: nodeA, Right: nodeB, matchNum: 1}},
 	}
 	poolMatchWinners := map[string]MatchWinner{
-		"Pool A": {cellCoord: cellCoord{sheetName: "Pool Results", cell: "A1"}},
-		"Pool B": {cellCoord: cellCoord{sheetName: "Pool Results", cell: "B1"}},
+		"Pool A-1st": {cellCoord: cellCoord{sheetName: "Pool Results", cell: "A1"}},
+		"Pool B-1st": {cellCoord: cellCoord{sheetName: "Pool Results", cell: "B1"}},
 	}
 
 	t.Run("White left, Red right", func(t *testing.T) {
@@ -256,9 +256,9 @@ func TestPrintTeamEliminationMatchesWhiteLeft(t *testing.T) {
 		// The entrant row under it: node.Right (Pool B) left, node.Left
 		// (Pool A) right.
 		left, _ := f.GetCellFormula(SheetEliminationMatches, "A4")
-		assert.Contains(t, left, `"Pool B "`, "the left entrant is the lower-bracket side (node.Right)")
+		assert.Contains(t, left, `"Pool B-1st "`, "the left entrant is the lower-bracket side (node.Right)")
 		right, _ := f.GetCellFormula(SheetEliminationMatches, "G4")
-		assert.Contains(t, right, `"Pool A "`, "the right entrant is the upper-bracket side (node.Left)")
+		assert.Contains(t, right, `"Pool A-1st "`, "the right entrant is the upper-bracket side (node.Left)")
 	})
 
 	t.Run("multiple courts", func(t *testing.T) {

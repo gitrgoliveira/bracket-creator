@@ -83,6 +83,10 @@ func squadFloor(teamSize int) int {
 // clear) either way.
 var ErrTeamMemberNotFound = errors.New("team member not found")
 
+// ErrTeamMemberNamed is NameUnnamedTeamMember's refusal: the member already
+// has a name, and only the organiser may change one (RenameTeamMember).
+var ErrTeamMemberNamed = errors.New("team member already has a name")
+
 // ErrTeamNotFound is returned when a squad write names a team id that no
 // participant in this competition carries.
 var ErrTeamNotFound = errors.New("no team with that id in this competition")
@@ -505,19 +509,32 @@ func (s *Store) AddTeamMember(compID, teamID, name string) (domain.TeamMember, e
 // as the whole call's, so the operator was told a rename that HAD landed had
 // failed, and retyping the old name became a second real rename.
 func (s *Store) RenameTeamMember(compID, teamID, memberID, newName string) error {
+	return s.nameTeamMember(compID, teamID, memberID, newName, false)
+}
+
+// NameUnnamedTeamMember is RenameTeamMember for a member who has no name yet,
+// refused with ErrTeamMemberNamed when the member has one. The check reads
+// under the same hold of the competition lock as the write, so two callers
+// naming one blank member cannot both pass it: the second finds the first's
+// name.
+func (s *Store) NameUnnamedTeamMember(compID, teamID, memberID, newName string) error {
+	return s.nameTeamMember(compID, teamID, memberID, newName, true)
+}
+
+func (s *Store) nameTeamMember(compID, teamID, memberID, newName string, onlyUnnamed bool) error {
 	if err := ValidateCompetitionID(compID); err != nil {
 		return err
 	}
 	newName = strings.TrimSpace(newName)
 	return s.WithTransaction(compID, func(tx StoreTx) error {
-		return s.renameTeamMemberTx(tx, compID, teamID, memberID, newName)
+		return s.renameTeamMemberTx(tx, compID, teamID, memberID, newName, onlyUnnamed)
 	})
 }
 
-// renameTeamMemberTx is RenameTeamMember's body, staged through the
+// renameTeamMemberTx is the body of both renames, staged through the
 // transaction's writer so the squad file and the lineups file land together
 // or not at all.
-func (s *Store) renameTeamMemberTx(tx StoreTx, compID, teamID, memberID, newName string) error {
+func (s *Store) renameTeamMemberTx(tx StoreTx, compID, teamID, memberID, newName string, onlyUnnamed bool) error {
 	write := tx.(*storeTx).txWriteFn()
 	squads, err := s.loadSquadsLocked(compID)
 	if err != nil {
@@ -536,6 +553,9 @@ func (s *Store) renameTeamMemberTx(tx StoreTx, compID, teamID, memberID, newName
 	}
 	if target == -1 {
 		return ErrTeamMemberNotFound
+	}
+	if onlyUnnamed && strings.TrimSpace(existing[target].Name) != "" {
+		return ErrTeamMemberNamed
 	}
 	if err := squadDuplicateNameCheck(newName, otherNames); err != nil {
 		return err

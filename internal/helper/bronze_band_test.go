@@ -30,7 +30,7 @@ func TestBronzeBlockBandSelection(t *testing.T) {
 		_, err := f.NewSheet(SheetEliminationMatches)
 		require.NoError(t, err)
 
-		PrintBronzeBlockWithPrintArea(f, 2, 1, 0, false, bands, bronzeCourt, nil, nil)
+		PrintBronzeBlockWithPrintArea(f, EliminationPrint{NextRow: 2, RowsOnPage: 1, Bands: bands}, 0, false, bronzeCourt, nil)
 
 		merged, err := f.GetMergeCells(SheetEliminationMatches)
 		require.NoError(t, err)

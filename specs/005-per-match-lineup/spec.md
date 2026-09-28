@@ -45,11 +45,19 @@ Add an optional `MatchID string` to `TeamLineup`.
    saved while its match is scheduled, running or finished (mp-q722). The lock this
    decision first described (`LockTeamLineupForMatch`, `LockTeamLineupsForRound`,
    called from the score path) was removed.
-2. **Who is refused.** Only a caller with an empty password in a self-run tournament
-   (the public score sheet) is refused, and only for a match that has finished: 409
-   `result_finalized`, read under the competition's lock (bc-dhas). The organiser,
-   sending the password, can save any lineup. The `ErrLineupLocked` set-guard this
-   decision first described was removed with the lock.
+2. **Who is refused, per route.** A caller with the valid main password is never
+   refused for the state of a match. Otherwise:
+   - Officiated tournament: every lineup write needs the main password (401).
+   - Self-run tournament, round lineup PUT and DELETE, and match lineup DELETE: main-gated
+     as in an officiated one (401 for an empty or a wrong password).
+   - Self-run tournament, match lineup PUT: public, because the public score sheet
+     saves it when a competitor names a bout's fighter (bc-dhas). An empty password is
+     a participant, refused for a match that does not exist (404) or has finished (409
+     `result_finalized`, read under the competition's lock); a password that is sent
+     but wrong gets 401.
+
+   The `ErrLineupLocked` set-guard this decision first described was removed with the
+   lock.
 3. **Migration.** None on disk. The fallback key means existing round-keyed lineups
    keep working; the new UI writes match-keyed entries going forward.
 4. **FIK 5-person rule.** `Validate(teamSize)` is unchanged and runs per set, regardless

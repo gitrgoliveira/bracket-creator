@@ -208,8 +208,11 @@ func (e *Engine) RenderCompetitionWorkbook(
 		// the caller's bout-log read to list, and the sheet above printed the
 		// skeleton seeded from the roster instead. The Kachinuki Detail sheet
 		// lists the same matches from the same rounds, so the two sheets have
-		// one source.
-		if comp.IsKachinuki() && !bracketHasKnockoutContent(bracket) {
+		// one source. isPureKnockout scopes it to that competition: with no
+		// pool phase and no bracket rounds the caller's read is empty, so
+		// nothing it listed is replaced, while a competition with pools keeps
+		// its pool sections whatever its bracket holds.
+		if comp.IsKachinuki() && isPureKnockout(comp, pools) && !bracketHasKnockoutContent(bracket) {
 			kachinukiMatches = helper.BlankKachinukiSections(nil, eliminationMatchRounds, hasBronze, comp.TeamBoutRows())
 		}
 	} else if comp.IsKnockoutEnabled() && bracketHasKnockoutContent(bracket) {

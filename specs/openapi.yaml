@@ -45,8 +45,9 @@ info:
     it through its `subResults` row (position `-1`, decision `daihyosen`). Such a
     score write never creates one: a row for a representative bout the match does
     not have (a sheet a moment behind a remove made elsewhere) is dropped from the
-    write and the rest is written as usual, and a write listing two is refused with
-    400 `duplicate_daihyosen`. It carries only what the competitors saw: a match
+    write and the rest is written as usual, unless the write finishes the match,
+    which may take its winner from that row and is refused with 409 `no_daihyosen`; a write listing
+    two is refused with 400 `duplicate_daihyosen`. It carries only what the competitors saw: a match
     `decision` that is empty, `fought` or `hikiwake`, and a bout `decision` that is
     one of those or `fusensho` (or `daihyosen` on the representative bout). Any
     other decision, or the `Ht` judges'-decision mark on a numbered bout, is refused
@@ -2447,7 +2448,7 @@ paths:
                 $ref: '#/components/schemas/Error'
         '409':
           description: |
-            Conflict; one of eight codes returned in the `error` field:
+            Conflict; one of nine codes returned in the `error` field:
             - `court_busy`: court already has a running match in this or another competition.
               Extra fields: `court`, `matchId`, `compId`, `label`, `message`.
             - `ineligible_competitor`: a participant is ineligible (kiken/fusenpai in a prior match, or barred by
@@ -2475,6 +2476,14 @@ paths:
               decided this representative bout (hantei). Ask the tournament organizer
               to change it." when a decision is recorded, else "Only the tournament
               organizer can record a judges' decision (hantei)."
+            - `no_daihyosen`: a request with an empty password (self-run) finishes the
+              match (`status` completed) on a representative-bout row (position `-1`)
+              the match does not have, such as a sheet a moment behind a remove made
+              on another device. A finish may take its winner from that row, so nothing is written.
+              A write that does not finish the match loses the row instead and is
+              written as usual. Extra fields: `message`, "This match's representative
+              bout was removed on another device. Reload the score sheet before
+              finishing."
             - `side_mismatch`: the submitted winner does not match either side of the match.
               Extra fields: `message`.
             - `downstream_knockout_played`: the write would change who a
@@ -2508,6 +2517,7 @@ paths:
                       - already_ineligible
                       - result_finalized
                       - hantei_organiser_only
+                      - no_daihyosen
                       - side_mismatch
                       - downstream_knockout_played
                       - downstream_knockout_running
@@ -2529,7 +2539,7 @@ paths:
                       `engine.OperatorMatchLabel`.
                   message:
                     type: string
-                    description: Human-readable detail (court_busy, result_finalized, hantei_organiser_only, side_mismatch, downstream_knockout_played, downstream_knockout_running); for the self-run codes, the sentence the public page shows as it is.
+                    description: Human-readable detail (court_busy, result_finalized, hantei_organiser_only, no_daihyosen, side_mismatch, downstream_knockout_played, downstream_knockout_running); for the self-run codes, the sentence the public page shows as it is.
                   playerId:
                     type: string
                     description: Ineligible participant ID (ineligible_competitor / already_ineligible).
@@ -3454,8 +3464,10 @@ paths:
         elimination team match. Rejected if the match is not tied,
         if it is a pool match, if the competition is individual, engi
         or kachinuki (daihyosen does not exist in kachinuki; a knockout
-        tie goes to encho on the final bout), or if either team has no
-        eligible competitor.
+        tie goes to encho on the final bout), or if no competitor in the whole
+        competition is eligible. That last check counts the competition's roster
+        as one, not each side, so a side whose own team is barred still gets a
+        representative bout while any other entrant is eligible.
 
 
         The add competes on timestamps like a score write when it carries
@@ -3526,7 +3538,8 @@ paths:
                 $ref: '#/components/schemas/Error'
         '409':
           description: >
-            Insufficient eligible competitors (`insufficient_eligibility`), or the
+            No competitor in the competition is eligible (`insufficient_eligibility`;
+            the count is competition-wide, see the description), or the
             match already has a representative bout (`daihyosen_exists`): an
             encounter has one, and the tie this route checks counts none, so a
             second would otherwise be appended beside the first.
@@ -4017,14 +4030,17 @@ paths:
       summary: Name or rename a team member
       description: |
         Sets the member's name. The new name reaches every stored lineup that
-        places the member; bouts already fought keep the name they were
-        recorded with.
+        places the member. Bouts already fought keep the name they were
+        recorded with in their stored `sideA`/`sideB`, but every surface of the
+        app and the export show the member's current name, looked up by id, so
+        a rename changes what those bouts show too, finished matches included.
 
         In a self-run tournament a request with an empty password may name a
         member who has no name yet (the public score sheet does when a
-        competitor names a fighter), but not rename one who has: that is 409
-        `member_already_named`, and stays with the organiser, who renames any
-        member. A password that is sent but wrong gets 401.
+        competitor names a fighter), but not rename one who has: since a rename
+        changes what every bout that member fought shows, it stays with the
+        organiser, who renames any member, and a participant's is 409
+        `member_already_named`. A password that is sent but wrong gets 401.
       security:
         - TournamentPassword: []
       requestBody:

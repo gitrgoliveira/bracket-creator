@@ -371,6 +371,10 @@ export function queueAlertMessage(alert) {
     case "unreadable":
       return `${n} queued ${one ? "write" : "writes"} could not be read and ${one ? "was" : "were"} discarded. Check the affected ${one ? "match" : "matches"}.`;
     case "rejected":
+      // A refusal that is a whole sentence (`sentence`, api_client.jsx
+      // _replayRefusal) says what to do, so it closes the alert as it is:
+      // "Re-enter it." after it could contradict it ("Reload the score sheet").
+      if (alert.sentence && alert.detail) return `A result was refused by the server and cannot be saved. ${alert.detail}`;
       return `A result was refused by the server${detail} and cannot be saved. Re-enter it.`;
     // bc-lww1. Deliberately NOT folded into "rejected": that message ends in
     // "Re-enter it", which here would tell the operator to overwrite the newer

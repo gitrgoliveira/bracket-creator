@@ -114,10 +114,10 @@ export const POOL_FORMAT_OPTIONS = [
 ];
 
 // resolveFormat: a stored "" format is a knockout, as
-// state.Competition.EffectiveFormat (internal/state/models.go) reads it.
-// "" is a legitimate stored value, which the write doors accept, so a
-// surface that branches on the format asks this rather than comparing the
-// stored value to a literal.
+// state.Competition.EffectiveFormat (internal/state/models.go) reads it; ""
+// is a legitimate stored value, which the write doors accept. buildXlsxBody
+// (admin_schedule_export.jsx) is its one caller: the other surfaces that
+// branch on the format compare the stored value.
 export function resolveFormat(format) {
   return format || FORMAT_KNOCKOUT;
 }

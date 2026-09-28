@@ -295,8 +295,27 @@ function _downstreamQueueDropCopy(body) {
     const running = _downstreamKnockoutRunningError(body);
     if (running) return downstreamKnockoutRunningQueueDrop(running.downstreamKnockoutRunning.runningMatches);
     const courtBusy = _courtBusyError(body);
-    if (courtBusy) return { reason: courtBusy.message };
+    // A whole sentence that says what to do, so it is marked as one
+    // (_replayRefusal): no full stop or advice is added after it.
+    if (courtBusy) return { reason: courtBusy.message, sentence: true };
     return null;
+}
+
+// _replayRefusal: what a queued write the server refused on replay is reported
+// with, in the shape the terminal failure and the queue alert carry: its
+// `reason`, the drop copy's own `advice` where there is one, and `sentence`
+// when the reason is the server's own sentence (`reasonHuman`, else
+// `message`; the court_busy drop copy is marked the same way). A banner and
+// the alert show such a sentence as it is
+// (write_result.jsx notSavedText, app.jsx queueAlertMessage): it says what to
+// do, so advice of theirs after it would contradict it. A bare code or HTTP
+// status carries no mark and keeps their own words around it.
+function _replayRefusal(body, fallback) {
+    const dropCopy = _downstreamQueueDropCopy(body);
+    if (dropCopy) return dropCopy;
+    const sentence = body.reasonHuman || body.message;
+    if (sentence) return { reason: sentence, sentence: true };
+    return { reason: body.error || fallback };
 }
 
 // ---------------------------------------------------------------------------
@@ -1458,15 +1477,12 @@ async function _flushQueue() {
                             // human copy, same reason this can't just retry: there is no
                             // operator here for attemptScoreWrite's confirm dialog to
                             // prompt, and nothing sets forceDownstreamReopen automatically.
-                            const dropCopy = _downstreamQueueDropCopy(body);
-                            const reason = dropCopy ? dropCopy.reason : (body.reasonHuman || body.error || 'conflict (409)');
-                            _notifyTerminalWriteFailed({
-                                compID, matchID, kind, status: 409, reason,
-                                ...(dropCopy && dropCopy.advice ? { advice: dropCopy.advice } : {}),
-                            });
+                            const refusal = _replayRefusal(body, 'conflict (409)');
+                            _notifyTerminalWriteFailed({ compID, matchID, kind, status: 409, ...refusal });
                             _notifyQueueAlert({
                                 kind: 'rejected', count: 1, terminalCount: 1, compID, matchID,
-                                detail: reason,
+                                detail: refusal.reason,
+                                ...(refusal.sentence ? { sentence: true } : {}),
                             });
                         }
                         _dequeue(key, descriptor);
@@ -1502,17 +1518,14 @@ async function _flushQueue() {
                         // "downstream_knockout_played" token, which is what an operator
                         // reading this alert used to see with no way to understand it or
                         // move forward.
-                        const dropCopy = _downstreamQueueDropCopy(body);
-                        const reason = dropCopy ? dropCopy.reason : (body.reasonHuman || _refusalText(body, `HTTP ${res.status}`));
+                        const refusal = _replayRefusal(body, `HTTP ${res.status}`);
                         if (terminal) {
-                            _notifyTerminalWriteFailed({
-                                compID, matchID, kind, status: res.status, reason,
-                                ...(dropCopy && dropCopy.advice ? { advice: dropCopy.advice } : {}),
-                            });
+                            _notifyTerminalWriteFailed({ compID, matchID, kind, status: res.status, ...refusal });
                         }
                         _notifyQueueAlert({
                             kind: 'rejected', count: 1, terminalCount: terminal ? 1 : 0, compID, matchID,
-                            detail: reason,
+                            detail: refusal.reason,
+                            ...(refusal.sentence ? { sentence: true } : {}),
                         });
                         _dequeue(key, descriptor);
                     }
@@ -2149,6 +2162,16 @@ function _daihyosenOutcome(body) {
     return body.result ?? body;
 }
 
+// _requestTimedOut: the one error a request given up on at its deadline
+// rejects with (_fetchJson), marked `timedOut` so a caller can tell it from a
+// request that failed: the organiser's refresh after a write says nothing
+// about one (admin.jsx refreshFailureToast).
+function _requestTimedOut() {
+    const e = new Error('the request was not answered in time');
+    e.timedOut = true;
+    return e;
+}
+
 // _fetchJson fetches and reads the body as JSON under ONE deadline, on ONE
 // AbortController: fetchWithTimeout's abort ends when the headers arrive, and
 // here the same controller stays armed until the body has been read. A body
@@ -2157,14 +2180,16 @@ function _daihyosenOutcome(body) {
 // short. The body read is also raced against the abort itself, so the deadline
 // holds whether or not a platform's json() rejects on it. Resolves to
 // { res, body }; an unparseable body reads as {}, as `.json().catch(() =>
-// ({}))` does everywhere else. Rejects on a network failure or the deadline.
+// ({}))` does everywhere else. Rejects on a network failure, or past the
+// deadline with _requestTimedOut's error, however the abort surfaced.
 async function _fetchJson(url, opts, ms = FETCH_TIMEOUT_MS) {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), ms);
     const aborted = new Promise((_resolve, reject) => {
-        controller.signal.addEventListener('abort', () => reject(new Error('the request was not answered in time')), { once: true });
+        controller.signal.addEventListener('abort', () => reject(new Error('aborted')), { once: true });
     });
-    // Nothing else may observe this rejection: it only ends the race below.
+    // Nothing else may observe this rejection: it only ends the race below,
+    // whose catch reports every rejection after the abort as the one timeout.
     aborted.catch(() => {});
     try {
         const res = await Promise.race([fetch(url, { ...opts, signal: controller.signal }), aborted]);
@@ -2176,6 +2201,11 @@ async function _fetchJson(url, opts, ms = FETCH_TIMEOUT_MS) {
             aborted,
         ]);
         return { res, body };
+    } catch (e) {
+        // Only the deadline aborts this controller, and the race can surface
+        // that as fetch's AbortError or the body read's as well as its own.
+        if (controller.signal.aborted) throw _requestTimedOut();
+        throw e;
     } finally {
         clearTimeout(timer);
     }
@@ -2312,7 +2342,21 @@ const API = {
         }
         return res.json();
     },
-    async fetchCompetitions() {
+    // `bounded` gives up after FETCH_TIMEOUT_MS, the body read included
+    // (_fetchJson), instead of waiting on a connection that never answers.
+    // The organiser's refresh after a write asks for it (admin.jsx
+    // refreshCompsBestEffort): the score editor that made the write waits on
+    // that refresh, and it is best-effort. Other callers wait as long as the
+    // aggregate takes, which can be long for a large tournament on a slow link.
+    async fetchCompetitions({ bounded = false } = {}) {
+        if (bounded) {
+            const { res, body } = await _fetchJson('/api/viewer/competitions', {});
+            if (!res.ok) throw new Error(body.error || `Failed to fetch competitions (Status ${res.status})`);
+            // _fetchJson reads an unreadable body as {}: never hand that on as
+            // the competitions.
+            if (!Array.isArray(body)) throw new Error('Failed to fetch competitions (unreadable answer)');
+            return body.map(normalizeViewerCompItem);
+        }
         const res = await fetch('/api/viewer/competitions');
         if (!res.ok) {
             const err = await res.json().catch(() => ({}));

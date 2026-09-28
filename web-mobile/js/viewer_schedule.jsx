@@ -1,7 +1,7 @@
 // Schedule + filter components extracted from viewer.jsx (mp-pxxc step 7).
 // Pure file split. no behaviour change.
 
-import { poolLabel, tournamentMatches, compareDmy } from './viewer_utils.jsx';
+import { poolLabel, tournamentMatches, compMatches, compareDmy } from './viewer_utils.jsx';
 import { matchParticipantIds, matchParticipantNames, useWatchlist, resolveEntryPlayerIds, resolveWatchedPlayers, findPrimaryEntry, buildRoster, buildWatchedSets, matchInvolvesWatchedSet } from './viewer_watchlist_core.jsx';
 import { withNumber, teamNameMark } from './match_scoreboard.jsx';
 import { SideCell } from './side_cell.jsx';
@@ -568,7 +568,8 @@ export function ViewerSchedule({ tournament, onBack, tweaks }) {
     const byComp = new Map();
     return (id, compId) => {
       if (!byComp.has(compId)) {
-        byComp.set(compId, tournamentMatches({ competitions: (tournament.competitions || []).filter((c) => c.id === compId) }));
+        const comp = (tournament.competitions || []).find((c) => c.id === compId);
+        byComp.set(compId, comp ? compMatches(comp) : []);
       }
       return matchInList(byComp.get(compId), id, compId);
     };

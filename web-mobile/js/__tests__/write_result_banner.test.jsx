@@ -13,6 +13,9 @@
 import { describe, it, expect } from 'vitest';
 import {
     notLandedBanner,
+    terminalFailureBanner,
+    notSavedText,
+    NOT_SAVED_ADVICE,
     dependentActionBlocked,
     SUPERSEDED_REASON,
     SUPERSEDED_ADVICE,
@@ -88,5 +91,42 @@ describe('dependentActionBlocked', () => {
         expect(dependentActionBlocked({})).toBeNull();
         expect(dependentActionBlocked(null)).toBeNull();
         expect(dependentActionBlocked(undefined)).toBeNull();
+    });
+});
+
+// notSavedText is the ONE line every not-saved banner shows (the three score
+// editors and the barred-match notice). A refusal the server worded itself is
+// shown as it is: a full stop and advice after it doubled the stop, and the
+// default advice could contradict it.
+describe('notSavedText', () => {
+    const REMOVED = "This match's representative bout was removed on another device. Reload the score sheet before finishing.";
+
+    it('shows a sentence the server wrote as it is, once', () => {
+        expect(notSavedText({ reason: REMOVED, sentence: true })).toBe(`Not saved: ${REMOVED}`);
+    });
+
+    it('words a code or a status around it, with the advice given or the default', () => {
+        expect(notSavedText({ reason: 'conflict' })).toBe(`Not saved: conflict. ${NOT_SAVED_ADVICE}`);
+        expect(notSavedText({ reason: SUPERSEDED_REASON, advice: SUPERSEDED_ADVICE })).toBe(`Not saved: ${SUPERSEDED_REASON}. ${SUPERSEDED_ADVICE}`);
+    });
+
+    it('reads every banner notLandedBanner makes as before', () => {
+        for (const res of [{ applied: false, reason: 'clock_skew' }, { applied: false }]) {
+            const b = notLandedBanner(res);
+            expect(notSavedText(b)).toBe(`Not saved: ${b.reason}. ${b.advice}`);
+        }
+    });
+});
+
+describe('terminalFailureBanner', () => {
+    it('keeps the server-sentence mark a replayed refusal carries', () => {
+        expect(terminalFailureBanner({ status: 409, reason: 'Said by the server.', sentence: true }))
+            .toEqual({ reason: 'Said by the server.', advice: undefined, sentence: true });
+    });
+
+    it('names the status when a failure carries no reason, and marks nothing', () => {
+        const b = terminalFailureBanner({ status: 400 });
+        expect(b).toEqual({ reason: 'save rejected (400)', advice: undefined });
+        expect(notSavedText(b)).toBe(`Not saved: save rejected (400). ${NOT_SAVED_ADVICE}`);
     });
 });

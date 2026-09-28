@@ -1270,3 +1270,170 @@ describe('the daihyosen add and remove carry the stamp', () => {
         expect(out.bracket.rounds[0][0].subResults.some((s) => s.position === -1)).toBe(true);
     });
 });
+
+// The organiser's refresh after a write (admin.jsx refreshCompsBestEffort)
+// asks for the aggregate bounded: a score editor waits on that refresh after
+// every write it makes, the save before a representative-bout add included,
+// so one left hanging held the editor, and the add, for good. The bound is the
+// same one controller through the body read (_fetchJson). Every other caller
+// still waits as long as the aggregate takes.
+describe('the organiser\'s refresh after a write is bounded', () => {
+    const comps = [{ id: 'c1', name: 'Open', kind: 'individual', format: 'knockout', status: 'knockout', players: [], poolMatches: [], bracket: null }];
+
+    it('gives up after 12 s when the server never answers', async () => {
+        const server = makeServer({ timeOk: true });
+        const API = await loadWith(server);
+        const answering = server.fetch;
+        let signal = null;
+        global.fetch = vi.fn((url, opts) => {
+            if (!String(url).includes('/api/viewer/competitions')) return answering(url, opts);
+            signal = opts && opts.signal;
+            return new Promise((_resolve, reject) => {
+                if (signal) signal.addEventListener('abort', () => reject(new DOMException('The operation was aborted.', 'AbortError')));
+            });
+        });
+        let outcome = null;
+        API.fetchCompetitions({ bounded: true }).then(() => { outcome = { landed: true }; }, (error) => { outcome = { error }; });
+
+        await tick(11000);
+        expect(outcome, 'still waiting inside the 12 s').toBeNull();
+        await tick(1500);
+        expect(outcome && outcome.error, 'given up').toBeTruthy();
+        expect(outcome.error.timedOut, 'reported as given up on, not as failed').toBe(true);
+        expect(signal.aborted).toBe(true);
+    });
+
+    it('aborts a body that never completes at the same deadline', async () => {
+        const server = makeServer({ timeOk: true });
+        const API = await loadWith(server);
+        const answering = server.fetch;
+        let signal = null;
+        global.fetch = vi.fn((url, opts) => {
+            if (!String(url).includes('/api/viewer/competitions')) return answering(url, opts);
+            signal = opts.signal;
+            return Promise.resolve({ ok: true, status: 200, json: () => new Promise(() => {}) });
+        });
+        let outcome = null;
+        API.fetchCompetitions({ bounded: true }).then(() => { outcome = { landed: true }; }, (error) => { outcome = { error }; });
+
+        await tick(11000);
+        expect(signal.aborted, 'still reading inside the 12 s').toBe(false);
+        await tick(1500);
+        expect(signal.aborted).toBe(true);
+        expect(outcome && outcome.error, 'given up').toBeTruthy();
+        expect(outcome.error.timedOut, 'reported as given up on, not as failed').toBe(true);
+    });
+
+    // The request is given up on at the deadline and the fetch then rejects
+    // with its own AbortError, as a real one does: still the one timeout.
+    it('reports the deadline as the one timeout when the fetch rejects with its own abort error', async () => {
+        const server = makeServer({ timeOk: true });
+        const API = await loadWith(server);
+        const answering = server.fetch;
+        global.fetch = vi.fn((url, opts) => {
+            if (!String(url).includes('/api/viewer/competitions')) return answering(url, opts);
+            return new Promise((_resolve, reject) => {
+                opts.signal.addEventListener('abort', () => reject(new DOMException('The operation was aborted.', 'AbortError')));
+            });
+        });
+        let outcome = null;
+        API.fetchCompetitions({ bounded: true }).then(() => { outcome = { landed: true }; }, (error) => { outcome = { error }; });
+
+        await tick(12500);
+        expect(outcome && outcome.error && outcome.error.timedOut).toBe(true);
+        expect(outcome.error.name).not.toBe('AbortError');
+    });
+
+    it('does not report a failure that is not the deadline as a timeout', async () => {
+        const server = makeServer({ timeOk: true });
+        const API = await loadWith(server);
+        const answering = server.fetch;
+        global.fetch = vi.fn((url, opts) => {
+            if (!String(url).includes('/api/viewer/competitions')) return answering(url, opts);
+            return Promise.reject(new TypeError('network error'));
+        });
+
+        const error = await API.fetchCompetitions({ bounded: true }).catch((e) => e);
+
+        expect(error).toBeInstanceOf(TypeError);
+        expect(error.timedOut).toBeFalsy();
+    });
+
+    // What the organiser is told (admin.jsx refreshFailureToast), from the
+    // errors this request really rejects with: a refresh given up on says
+    // nothing, since the write it follows reaches the page by push and a
+    // reload would fetch the same slow aggregate; any other failure keeps the
+    // hint to reload.
+    it('a refresh given up on toasts nothing; a network failure or an unreadable answer toasts the reload hint', async () => {
+        const { refreshFailureToast } = await import('../admin.jsx');
+        const server = makeServer({ timeOk: true });
+        const API = await loadWith(server);
+        const answering = server.fetch;
+        let reply = null;
+        global.fetch = vi.fn((url, opts) => {
+            if (!String(url).includes('/api/viewer/competitions')) return answering(url, opts);
+            return reply(opts);
+        });
+        const failWith = async (make) => {
+            reply = make;
+            let error = null;
+            const pending = API.fetchCompetitions({ bounded: true }).catch((e) => { error = e; });
+            await tick(12500);
+            await pending;
+            return error;
+        };
+
+        const timedOut = await failWith(() => new Promise(() => {}));
+        const network = await failWith(() => Promise.reject(new TypeError('network error')));
+        const unreadable = await failWith(() => Promise.resolve({ ok: true, status: 200, json: () => Promise.reject(new SyntaxError('Unexpected end of JSON input')) }));
+
+        expect(refreshFailureToast('Score', timedOut)).toBeNull();
+        expect(refreshFailureToast('Score', network)).toBe('Score succeeded; refresh failed. Reload to see latest');
+        expect(refreshFailureToast('Score', unreadable)).toBe('Score succeeded; refresh failed. Reload to see latest');
+    });
+
+    it('answers with the competitions when the server does', async () => {
+        const server = makeServer({ timeOk: true });
+        const API = await loadWith(server);
+        const answering = server.fetch;
+        global.fetch = vi.fn((url, opts) => {
+            if (!String(url).includes('/api/viewer/competitions')) return answering(url, opts);
+            return Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve(comps) });
+        });
+
+        const out = await API.fetchCompetitions({ bounded: true });
+
+        expect(Array.isArray(out)).toBe(true);
+        expect(out.map((c) => c.id)).toEqual(['c1']);
+    });
+
+    // _fetchJson reads an unreadable body as {}; handed on, the refresh would
+    // set the tournament's competitions to {} and break the admin.
+    it('refuses an answer that is not a list, rather than handing it on', async () => {
+        const server = makeServer({ timeOk: true });
+        const API = await loadWith(server);
+        const answering = server.fetch;
+        global.fetch = vi.fn((url, opts) => {
+            if (!String(url).includes('/api/viewer/competitions')) return answering(url, opts);
+            return Promise.resolve({ ok: true, status: 200, json: () => Promise.reject(new SyntaxError('Unexpected end of JSON input')) });
+        });
+
+        await expect(API.fetchCompetitions({ bounded: true })).rejects.toThrow('Failed to fetch competitions');
+    });
+
+    it('leaves every other caller unbounded', async () => {
+        const server = makeServer({ timeOk: true });
+        const API = await loadWith(server);
+        const answering = server.fetch;
+        let opts = 'not called';
+        global.fetch = vi.fn((url, o) => {
+            if (!String(url).includes('/api/viewer/competitions')) return answering(url, o);
+            opts = o;
+            return Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve(comps) });
+        });
+
+        await API.fetchCompetitions();
+
+        expect(opts === undefined || !opts.signal, 'no deadline on the plain call').toBe(true);
+    });
+});

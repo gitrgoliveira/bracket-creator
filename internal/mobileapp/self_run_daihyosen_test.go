@@ -605,6 +605,26 @@ func TestSelfRun_AScoreWriteNeverCreatesARepresentativeBout(t *testing.T) {
 	})
 }
 
+// A finish cannot rest on a representative bout the match no longer has. A
+// sheet a moment behind a remove made on another device scores the stale row
+// and finishes on the winner it names; dropping the row and keeping the finish
+// used to store the tied encounter as completed for that winner, with no
+// representative bout behind it, for the bracket to advance. The finish is
+// refused and nothing is stored; a running write still only loses the row
+// (TestSelfRun_AScoreWriteNeverCreatesARepresentativeBout).
+func TestSelfRun_AFinishOnARemovedRepresentativeBoutIsRefused(t *testing.T) {
+	f := newRepBoutFixture(t, true)
+	f.addRepBout(t)
+	w := f.send(http.MethodDelete, repBoutMatchPath+"/daihyosen", "", map[string]any{"modifiedAt": f.now + 100})
+	require.Equal(t, http.StatusOK, w.Code, "another device removes it: %s", w.Body.String())
+	before := storedB1(t, f.store, "c1")
+
+	w = f.score("", state.MatchStatusCompleted, "TeamA", f.now+200, repBoutRow([]string{"M"}, []string{}, "TeamA"))
+	requireRefusal(t, w, http.StatusConflict, "no_daihyosen",
+		"This match's representative bout was removed on another device. Reload the score sheet before finishing.")
+	assert.Equal(t, before, storedB1(t, f.store, "c1"), "nothing is stored: the match is still running, with no winner")
+}
+
 // A participant adds the representative bout of the match being fought. On a
 // finished match the add would put it back to running with the organiser's
 // result still on it, for the next score write to overturn; on one not started
@@ -744,6 +764,7 @@ func TestHoldSelfReportedWriteUnderTx(t *testing.T) {
 		stored            *state.SubMatchResult
 		incoming          []state.SubMatchResult
 		winner, winnerID  string
+		status            state.MatchStatus
 		startOnly         bool
 		want              *selfRunRefusal
 		wantStoredRepBout bool // the write's row is replaced by the stored one
@@ -752,6 +773,7 @@ func TestHoldSelfReportedWriteUnderTx(t *testing.T) {
 		{name: "scoring with no verdict anywhere", stored: &unscored, incoming: []state.SubMatchResult{bout, row("TeamA", []string{"M"}, []string{})}},
 		{name: "recording a verdict", stored: &unscored, incoming: []state.SubMatchResult{bout, decided}, want: notRecorded},
 		{name: "scoring a representative bout the match does not have", incoming: []state.SubMatchResult{bout, decided}, wantRepBoutGone: true},
+		{name: "finishing on a representative bout the match does not have", incoming: []state.SubMatchResult{bout, row("TeamA", []string{"M"}, []string{})}, winner: "TeamA", status: state.MatchStatusCompleted, want: errRepBoutRemoved},
 		{name: "repeating the recorded verdict", stored: &decided, incoming: []state.SubMatchResult{bout, decided}, wantStoredRepBout: true},
 		{name: "moving the verdict to the other side", stored: &decided, incoming: []state.SubMatchResult{bout, row("TeamB", []string{}, []string{domain.HanteiMark})}, want: recorded},
 		{name: "handing the verdict over by swapping the side names", stored: &decided, incoming: []state.SubMatchResult{bout, swapped}, want: recorded},
@@ -786,7 +808,7 @@ func TestHoldSelfReportedWriteUnderTx(t *testing.T) {
 				Status: state.MatchStatusRunning, SubResults: subs,
 			}}}}))
 			sent := state.CloneSubResults(tc.incoming)
-			result := &state.MatchResult{SubResults: tc.incoming, Winner: tc.winner, WinnerID: tc.winnerID}
+			result := &state.MatchResult{SubResults: tc.incoming, Winner: tc.winner, WinnerID: tc.winnerID, Status: tc.status}
 
 			err := store.WithTransaction("c1", func(stx state.StoreTx) error {
 				return holdSelfReportedWriteUnderTx(stx, "c1", "B1", result, tc.startOnly)

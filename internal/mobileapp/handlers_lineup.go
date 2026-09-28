@@ -233,78 +233,9 @@ func RegisterLineupHandlers(r *gin.RouterGroup, store TeamLineupStore, comps Com
 			Positions:     req.Positions,
 			MemberIDs:     req.MemberIDs,
 		}
-
-		// T156: load comp (for teamSize) + Set lineup + reload lineup (for
-		// the response) all run under one WithTransaction acquire. Same
-		// atomicity argument the engine UpdatePoolMatchByID / UpdateBracket
-		// primitives already make for their own multi-step flows.
-		//
-		// respErr is the error answer, set from inside the tx and written
-		// AFTER the lock releases (txResponse).
-		var respErr *txResponse
-		var persistedLineup domain.TeamLineup
-		txErr := tx.WithTransaction(compID, func(stx state.StoreTx) error {
-			// TeamSize is competition-level: a 3-person team and a
-			// 5-person team cannot coexist in the same competition. We
-			// need it here to drive Validate(); not having a competition
-			// is a 404.
-			comp, err := stx.LoadCompetition(compID)
-			if err != nil {
-				log.Printf("mobileapp: PUT /competitions/%s/teams/%s/lineups: LoadCompetition: %v", compID, teamID, err)
-				respErr = &txResponse{status: http.StatusInternalServerError, body: gin.H{"error": "internal error"}}
-				return nil
-			}
-			if comp == nil {
-				respErr = &txResponse{status: http.StatusNotFound, body: gin.H{"error": "competition not found"}}
-				return nil
-			}
-			teamSize := comp.TeamSize
-			if teamSize <= 0 {
-				respErr = &txResponse{
-					status: http.StatusBadRequest,
-					body:   gin.H{"error": "competition is not configured for team play (teamSize must be > 0)"},
-				}
-				return nil
-			}
-
-			if err := stx.SetTeamLineup(compID, lineup, teamSize); err != nil {
-				// Domain validation errors ("team_lineup:" prefix) are 400; a
-				// YAML/disk fault is a 500 (see lineupSetStatus).
-				respErr = &txResponse{status: lineupSetStatus(err), body: gin.H{"error": err.Error()}}
-				return nil
-			}
-			// Reload after write so the response carries the persisted
-			// CompetitionID (auto-stamped by Set) and any future
-			// server-managed fields. This reload reads the same on-disk
-			// state as the Set above because no concurrent writer can
-			// have taken the per-comp lock between them.
-			lineups, err := stx.LoadTeamLineups(compID)
-			if err != nil {
-				log.Printf("mobileapp: PUT /competitions/%s/teams/%s/lineups: LoadTeamLineups: %v", compID, teamID, err)
-				respErr = &txResponse{status: http.StatusInternalServerError, body: gin.H{"error": "internal error"}}
-				return nil
-			}
-			if persisted, ok := findRoundLineup(lineups, teamID, round); ok {
-				persistedLineup = persisted
-			} else {
-				// Defensive: SetTeamLineup just succeeded, so the entry
-				// MUST be present on reload. Falling back to the request
-				// payload keeps the response shape sane if the
-				// invariant is somehow violated.
-				persistedLineup = lineup
-			}
-			return nil
+		saveLineup(c, tx, hub, lineup, nil, func(lineups map[string]domain.TeamLineup) (domain.TeamLineup, bool) {
+			return findRoundLineup(lineups, teamID, round)
 		})
-		if txErr != nil {
-			internalError(c, txErr)
-			return
-		}
-		if respErr != nil {
-			c.JSON(respErr.status, respErr.body)
-			return
-		}
-		c.JSON(http.StatusOK, persistedLineup)
-		hub.Broadcast(EventLineupUpdated, gin.H{"competitionId": compID})
 	})
 
 	r.DELETE("/competitions/:id/teams/:tid/lineups/:round", func(c *gin.Context) {
@@ -321,8 +252,8 @@ func RegisterLineupHandlers(r *gin.RouterGroup, store TeamLineupStore, comps Com
 	})
 
 	// Match-scoped PUT/DELETE (mp-825). Mirrors the round-scoped flow but
-	// keys the lineup by matchID so successive encounters lock and edit
-	// independently.
+	// keys the lineup by matchID, so successive encounters keep separate
+	// lineups.
 	r.PUT("/competitions/:id/teams/:tid/match-lineups/:matchId", func(c *gin.Context) {
 		compID, teamID, matchID, ok := parseMatchLineupParams(c)
 		if !ok {
@@ -345,82 +276,33 @@ func RegisterLineupHandlers(r *gin.RouterGroup, store TeamLineupStore, comps Com
 		if !ok {
 			return
 		}
-
-		var respErr *txResponse // as in the round lineup PUT above
-		var persistedLineup domain.TeamLineup
-		txErr := tx.WithTransaction(compID, func(stx state.StoreTx) error {
-			comp, err := stx.LoadCompetition(compID)
-			if err != nil {
-				log.Printf("mobileapp: PUT /competitions/%s/teams/%s/match-lineups/%s: LoadCompetition: %v", compID, teamID, matchID, err)
-				respErr = &txResponse{status: http.StatusInternalServerError, body: gin.H{"error": "internal error"}}
-				return nil
-			}
-			if comp == nil {
-				respErr = &txResponse{status: http.StatusNotFound, body: gin.H{"error": "competition not found"}}
-				return nil
-			}
-			teamSize := comp.TeamSize
-			if teamSize <= 0 {
-				respErr = &txResponse{
-					status: http.StatusBadRequest,
-					body:   gin.H{"error": "competition is not configured for team play (teamSize must be > 0)"},
-				}
-				return nil
-			}
-			// An anonymous self-run caller writes from the public score sheet,
-			// so the score path's rule holds: the match must exist, and once it
-			// has finished its lineup is part of the result, which only the
-			// organiser corrects (holdSelfReportedWriteUnderTx refuses the same
-			// caller on the result itself). Read under this lock, like that
-			// check, and refused with the same result_finalized body. An
-			// organiser keeps the always-editable rule.
-			if anonymous {
+		// An anonymous self-run caller writes from the public score sheet,
+		// so the score path's rule holds: the match must exist, and once it
+		// has finished its lineup is part of the result, which only the
+		// organiser corrects (holdSelfReportedWriteUnderTx refuses the same
+		// caller on the result itself). Read under the save's lock, like that
+		// check, and refused with the same result_finalized body. An
+		// organiser keeps the always-editable rule.
+		var guard func(stx state.StoreTx) *txResponse
+		if anonymous {
+			guard = func(stx state.StoreTx) *txResponse {
 				snap, found, err := matchSnapshotOrErr(stx, compID, matchID, "lineup")
 				if err != nil {
-					log.Printf("mobileapp: PUT /competitions/%s/teams/%s/match-lineups/%s: %v", compID, teamID, matchID, err)
-					respErr = &txResponse{status: http.StatusInternalServerError, body: gin.H{"error": "internal error"}}
-					return nil
+					log.Printf("mobileapp: PUT %s: %v", c.Request.URL.Path, err)
+					return &txResponse{status: http.StatusInternalServerError, body: gin.H{"error": "internal error"}}
 				}
 				if !found {
-					respErr = &txResponse{status: http.StatusNotFound, body: gin.H{"error": "match not found"}}
-					return nil
+					return &txResponse{status: http.StatusNotFound, body: gin.H{"error": "match not found"}}
 				}
 				if isMatchFinalized(snap.Status) {
-					respErr = resultFinalized("This match has finished, so its lineup can no longer be changed. Contact the tournament organizer to correct it.").response()
-					return nil
+					return resultFinalized("This match has finished, so its lineup can no longer be changed. Contact the tournament organizer to correct it.").response()
 				}
-			}
-			if err := stx.SetTeamLineup(compID, lineup, teamSize); err != nil {
-				// Domain validation errors ("team_lineup:" prefix) are 400; a
-				// YAML/disk fault is a 500 (see lineupSetStatus).
-				respErr = &txResponse{status: lineupSetStatus(err), body: gin.H{"error": err.Error()}}
 				return nil
 			}
-			lineups, err := stx.LoadTeamLineups(compID)
-			if err != nil {
-				log.Printf("mobileapp: PUT /competitions/%s/teams/%s/match-lineups/%s: LoadTeamLineups: %v", compID, teamID, matchID, err)
-				respErr = &txResponse{status: http.StatusInternalServerError, body: gin.H{"error": "internal error"}}
-				return nil
-			}
-			if persisted, found := findMatchLineup(lineups, teamID, matchID); found {
-				persistedLineup = persisted
-			} else {
-				// Defensive: Set just succeeded, so the entry must be
-				// present on reload; fall back to the request payload.
-				persistedLineup = lineup
-			}
-			return nil
+		}
+		saveLineup(c, tx, hub, lineup, guard, func(lineups map[string]domain.TeamLineup) (domain.TeamLineup, bool) {
+			return findMatchLineup(lineups, teamID, matchID)
 		})
-		if txErr != nil {
-			internalError(c, txErr)
-			return
-		}
-		if respErr != nil {
-			c.JSON(respErr.status, respErr.body)
-			return
-		}
-		c.JSON(http.StatusOK, persistedLineup)
-		hub.Broadcast(EventLineupUpdated, gin.H{"competitionId": compID})
 	})
 
 	r.DELETE("/competitions/:id/teams/:tid/match-lineups/:matchId", func(c *gin.Context) {
@@ -435,6 +317,83 @@ func RegisterLineupHandlers(r *gin.RouterGroup, store TeamLineupStore, comps Com
 		c.Status(http.StatusNoContent)
 		hub.Broadcast(EventLineupUpdated, gin.H{"competitionId": compID})
 	})
+}
+
+// saveLineup is the body the round and the match lineup PUTs share. Under one
+// per-comp lock (T156, the same atomicity argument the engine
+// UpdatePoolMatchByID / UpdateBracket primitives make) it loads the
+// competition for its team size, runs guard (the match PUT's rule for a
+// participant; nil when there is none), saves the lineup and reads it back
+// with find for the response. The answer is written after the lock releases
+// (txResponse), and a saved lineup is broadcast so SSE clients re-fetch it.
+func saveLineup(c *gin.Context, tx CompetitionTransactor, hub Broadcaster, lineup domain.TeamLineup, guard func(stx state.StoreTx) *txResponse, find func(map[string]domain.TeamLineup) (domain.TeamLineup, bool)) {
+	compID := lineup.CompetitionID
+	var respErr *txResponse
+	var persistedLineup domain.TeamLineup
+	txErr := tx.WithTransaction(compID, func(stx state.StoreTx) error {
+		// TeamSize is competition-level: a 3-person team and a 5-person team
+		// cannot coexist in the same competition. We need it here to drive
+		// Validate(); not having a competition is a 404.
+		comp, err := stx.LoadCompetition(compID)
+		if err != nil {
+			log.Printf("mobileapp: PUT %s: LoadCompetition: %v", c.Request.URL.Path, err)
+			respErr = &txResponse{status: http.StatusInternalServerError, body: gin.H{"error": "internal error"}}
+			return nil
+		}
+		if comp == nil {
+			respErr = &txResponse{status: http.StatusNotFound, body: gin.H{"error": "competition not found"}}
+			return nil
+		}
+		teamSize := comp.TeamSize
+		if teamSize <= 0 {
+			respErr = &txResponse{
+				status: http.StatusBadRequest,
+				body:   gin.H{"error": "competition is not configured for team play (teamSize must be > 0)"},
+			}
+			return nil
+		}
+		if guard != nil {
+			if respErr = guard(stx); respErr != nil {
+				return nil
+			}
+		}
+		if err := stx.SetTeamLineup(compID, lineup, teamSize); err != nil {
+			// Domain validation errors ("team_lineup:" prefix) are 400; a
+			// YAML/disk fault is a 500 (see lineupSetStatus).
+			respErr = &txResponse{status: lineupSetStatus(err), body: gin.H{"error": err.Error()}}
+			return nil
+		}
+		// Reload after write so the response carries the persisted
+		// CompetitionID (auto-stamped by Set) and any future server-managed
+		// fields. This reload reads the same on-disk state as the Set above
+		// because no concurrent writer can have taken the per-comp lock
+		// between them.
+		lineups, err := stx.LoadTeamLineups(compID)
+		if err != nil {
+			log.Printf("mobileapp: PUT %s: LoadTeamLineups: %v", c.Request.URL.Path, err)
+			respErr = &txResponse{status: http.StatusInternalServerError, body: gin.H{"error": "internal error"}}
+			return nil
+		}
+		if persisted, ok := find(lineups); ok {
+			persistedLineup = persisted
+		} else {
+			// Defensive: SetTeamLineup just succeeded, so the entry MUST be
+			// present on reload. Falling back to the request payload keeps the
+			// response shape sane if the invariant is somehow violated.
+			persistedLineup = lineup
+		}
+		return nil
+	})
+	if txErr != nil {
+		internalError(c, txErr)
+		return
+	}
+	if respErr != nil {
+		c.JSON(respErr.status, respErr.body)
+		return
+	}
+	c.JSON(http.StatusOK, persistedLineup)
+	hub.Broadcast(EventLineupUpdated, gin.H{"competitionId": compID})
 }
 
 // parseLineupParams extracts (compID, teamID, round) from the URL and

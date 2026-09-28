@@ -1245,13 +1245,26 @@ func breakBeforeEliminationBlock(f *excelize.File, startRow, rowsOnPage, height 
 	return rowsOnPage
 }
 
+// EliminationPrint is what PrintTeamEliminationMatches leaves for a block that
+// follows it on the Elimination Matches sheet: the 3rd-place block
+// (PrintBronzeBlockWithPrintArea). Its fields are named so that the page
+// state cannot be handed over in the wrong order, which would compile and
+// print the block on the wrong row or page.
+type EliminationPrint struct {
+	// NextRow is the row after the last block and its trailing space lines.
+	NextRow int
+	// RowsOnPage is how full that leaves the page in progress.
+	RowsOnPage int
+	// Bands are the shiaijo printed as bands, in the sheet's order.
+	Bands []string
+	// Winners maps each match's "M n" label to its winner cell.
+	Winners map[string]MatchWinner
+}
+
 // PrintTeamEliminationMatches renders all elimination match blocks onto the
-// Elimination Matches sheet and returns the next available start row (the row
-// immediately after the last rendered block plus any trailing space lines),
-// how many rows of the page in progress that leaves filled (for the 3rd-place
-// block that may follow, PrintBronzeBlockWithPrintArea), the bands and the
-// match winners. Callers that do not need the return values may ignore them.
-func PrintTeamEliminationMatches(f *excelize.File, poolMatchWinners map[string]MatchWinner, eliminationMatchRounds [][]*Node, numTeamMatches int, plan CourtPlan, engi bool) (int, int, []string, map[string]MatchWinner) {
+// Elimination Matches sheet and returns where that leaves the sheet
+// (EliminationPrint). Callers that do not need it may ignore it.
+func PrintTeamEliminationMatches(f *excelize.File, poolMatchWinners map[string]MatchWinner, eliminationMatchRounds [][]*Node, numTeamMatches int, plan CourtPlan, engi bool) EliminationPrint {
 	// This sheet is a per-shiaijo handout: one band, one page break and one
 	// "Shiaijo X" header per court. A bout printed under the wrong band sends
 	// its competitors to a shiaijo the app is not calling them to, so the band
@@ -1362,7 +1375,7 @@ func PrintTeamEliminationMatches(f *excelize.File, poolMatchWinners map[string]M
 	}
 
 	SetSheetLayoutPortraitA4DownThenOver(f, sheetName, numCourts)
-	return startRow, rowsSinceLastPageBreak, bands, matchWinners
+	return EliminationPrint{NextRow: startRow, RowsOnPage: rowsSinceLastPageBreak, Bands: bands, Winners: matchWinners}
 }
 
 // MatchRefLabel is how the Elimination Matches sheet names a knockout match's
@@ -1502,8 +1515,9 @@ func printOrdinalMarkerRows(f *excelize.File, sheetName string, colNames matchCo
 // courtStartCol is 1-based (use 1 for the first/only court). semiA and semiB
 // are the match numbers of the two semifinals whose losers compete in the bronze
 // (0 means absent/bye; that entrant cell is left empty). matchWinners is the map
-// returned by PrintTeamEliminationMatches so the loser-cell refs can be derived
-// from the "2." row of each semi's block. Returns the next available start row.
+// PrintTeamEliminationMatches returns (EliminationPrint.Winners), so the
+// loser-cell refs can be derived from the "2." row of each semi's block.
+// Returns the next available start row.
 func PrintThirdPlaceBlock(f *excelize.File, courtStartCol, startRow, numTeamMatches int, engi bool, semiA, semiB int, matchWinners map[string]MatchWinner) int {
 	sheetName := SheetEliminationMatches
 	colNames := buildMatchColumnNames(courtStartCol)
@@ -1576,15 +1590,17 @@ func PrintThirdPlaceBlock(f *excelize.File, courtStartCol, startRow, numTeamMatc
 	return startRow + matchHeight
 }
 
-// PrintBronzeBlockWithPrintArea renders the naginata 3rd-place block starting at
-// startRow (deriving the two semifinal match numbers from rounds) and extends the
-// Elimination Matches print area to cover it. It bundles the three-call bronze
-// protocol shared by every bronze render path (CLI generators, results workbook,
-// stored-draw export). nil rounds derive zero semi numbers, leaving both
-// entrant slots hand-fillable. rowsOnPage is how full PrintTeamEliminationMatches
-// left the page in progress: the block follows the page rule every other block
-// on the sheet does (breakBeforeEliminationBlock).
-func PrintBronzeBlockWithPrintArea(f *excelize.File, startRow, rowsOnPage, numTeamMatches int, engi bool, bands []string, bronzeCourt string, rounds [][]*Node, matchWinners map[string]MatchWinner) {
+// PrintBronzeBlockWithPrintArea renders the naginata 3rd-place block where
+// PrintTeamEliminationMatches left the sheet (after: its next row, the bands and
+// the match winners; deriving the two semifinal match numbers from rounds) and
+// extends the Elimination Matches print area to cover it. It bundles the
+// three-call bronze protocol shared by every bronze render path (CLI generators,
+// results workbook, stored-draw export). nil rounds derive zero semi numbers,
+// leaving both entrant slots hand-fillable. The block follows the page rule
+// every other block on the sheet does (breakBeforeEliminationBlock), from how
+// full after.RowsOnPage says the page in progress is.
+func PrintBronzeBlockWithPrintArea(f *excelize.File, after EliminationPrint, numTeamMatches int, engi bool, bronzeCourt string, rounds [][]*Node) {
+	startRow, bands, matchWinners := after.NextRow, after.Bands, after.Winners
 	semiA, semiB := SemifinalMatchNumbers(rounds)
 	// The bronze is a bout like any other on this sheet, so it prints in ITS
 	// shiaijo's band. Pinning it to the leftmost band was only ever right while
@@ -1614,7 +1630,7 @@ func PrintBronzeBlockWithPrintArea(f *excelize.File, startRow, rowsOnPage, numTe
 			band = len(bands) - 1
 		}
 	}
-	breakBeforeEliminationBlock(f, startRow, rowsOnPage, eliminationBlockHeight(numTeamMatches))
+	breakBeforeEliminationBlock(f, startRow, after.RowsOnPage, eliminationBlockHeight(numTeamMatches))
 	bronzeEndRow := PrintThirdPlaceBlock(f, 1+band*CourtsColumnsPerCourt, startRow, numTeamMatches, engi, semiA, semiB, matchWinners)
 	// The SHEET's band count, never a re-derivation of it: SetEliminationPrintArea
 	// replaces the defined name, so a different number here silently overrides the
@@ -1644,9 +1660,9 @@ func PrintEliminationWithBronze(f *excelize.File, matchWinners map[string]MatchW
 	if !includeBronze {
 		plan.Bronze = ""
 	}
-	nextRow, rowsOnPage, bands, elimMatchWinners := PrintTeamEliminationMatches(f, matchWinners, rounds, numTeamMatches, plan, engi)
+	printed := PrintTeamEliminationMatches(f, matchWinners, rounds, numTeamMatches, plan, engi)
 	if includeBronze {
-		PrintBronzeBlockWithPrintArea(f, nextRow, rowsOnPage, numTeamMatches, engi, bands, plan.Bronze, rounds, elimMatchWinners)
+		PrintBronzeBlockWithPrintArea(f, printed, numTeamMatches, engi, plan.Bronze, rounds)
 	}
 }
 

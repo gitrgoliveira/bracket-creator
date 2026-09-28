@@ -28,6 +28,7 @@ import { useEscapeToClose, confirmDialog } from './ui.jsx';
 import { NumberedName } from './numbered_name.jsx';
 import { SideCell } from './side_cell.jsx';
 import { useArmedConfirm } from './tap_guard.jsx';
+import { terminalFailureBanner, notSavedText } from './write_result.jsx';
 
 const MAX_FLAGS = 5;
 // Valid totals: 1, 3, 5 (odd, guarantees a winner).
@@ -287,7 +288,7 @@ export function EngiScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext
     const unsub = window.subscribeTerminalWriteFailed((info) => {
       if (!mountedRef.current) return;
       if (!info || info.compID !== m.compId || info.matchID !== m.id) return;
-      setWriteFailed({ reason: info.reason || `save rejected (${info.status || "error"})`, advice: info.advice });
+      setWriteFailed(terminalFailureBanner(info));
       setPendingWrite(false);
       // Re-sending a failed save has to be deliberate: disarm, as the
       // individual editor does.
@@ -532,7 +533,7 @@ export function EngiScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext
             over the pending banner. Mirrors ScoreEditorModal. */}
         {writeFailed && (
           <div className="pending-write-banner pending-write-banner--failed" role="alert" aria-live="assertive">
-            <span>Not saved: {writeFailed.reason}. {writeFailed.advice || "Re-enter the result and submit again."}</span>
+            <span>{notSavedText(writeFailed)}</span>
             {pendingFnRef.current && (
               <button type="button" className="btn btn--sm" disabled={submitting} onClick={() => doSubmit(pendingFnRef.current)}>Retry</button>
             )}

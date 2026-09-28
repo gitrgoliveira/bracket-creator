@@ -758,6 +758,37 @@ func TestExportBeforeTheDrawListsTheSkeletonOnTheKachinukiDetail(t *testing.T) {
 	assert.Equal(t, blocks, sections, "one section per printed block, titled as it and in its order")
 }
 
+// The skeleton stands in for the stored bracket only where there is no pool
+// phase. A competition with pools keeps the sections its bout-log read lists,
+// its pool matches included, even with a bracket that carries no rounds.
+func TestExportKeepsAMixedCompetitionsPoolSectionsOnTheKachinukiDetail(t *testing.T) {
+	eng, store, _ := setupTestEngine(t)
+	compID := "kachinuki-mixed-no-rounds"
+	createTestCompetition(t, store, compID, state.CompFormatMixed, 3, func(c *state.Competition) {
+		c.Kind = "team"
+		c.TeamSize = 3
+		c.TeamMatchType = state.TeamMatchTypeKachinuki
+	})
+	saveTestParticipants(t, store, compID, []string{"Ryu", "Tora", "Kame", "Taka", "Kuma", "Hebi"})
+	require.NoError(t, eng.StartCompetition(compID))
+	require.NoError(t, store.SaveBracket(compID, &state.Bracket{}))
+
+	data, err := eng.ExportCompetitionXlsx(compID)
+	require.NoError(t, err)
+	f, err := excelize.OpenReader(bytes.NewReader(data))
+	require.NoError(t, err)
+	defer func() { require.NoError(t, f.Close()) }()
+	detail, err := f.GetRows(helper.SheetKachinukiDetail)
+	require.NoError(t, err)
+	pools := 0
+	for _, row := range detail {
+		if len(row) > 0 && strings.HasPrefix(row[0], "Pool Match ") && strings.HasSuffix(row[0], " (Kachinuki)") {
+			pools++
+		}
+	}
+	assert.Equal(t, 6, pools, "the six pool matches keep their sections")
+}
+
 // TestCollectKachinukiMatches_MoreBoutsThanTheBlockKeepsThemAll pins that an
 // encounter that fielded reserves past 2*teamSize-1 bouts still lists every
 // bout on the detail sheet; only its main-sheet block stops at that count.

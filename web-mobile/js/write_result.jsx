@@ -1,13 +1,13 @@
 // Owner of ONE question: did a score write actually land, and if not, is the
 // state the operator is looking at ever going to become true?
 //
-// EVERY consumer imports this module directly -- api_client.jsx, the two
-// scoring editors (admin_scoring_team, admin_scoring_individual),
-// admin_scoring_shared.jsx, admin_shiaijo.jsx, admin.jsx (the single
-// editMatchScore chokepoint every score-editor host routes through), the
-// schedule score editor and viewer_match.jsx. Nothing reads these names off
-// `window`: the mirrors api_client used to publish are gone, so there is
-// exactly one binding per name and no second spelling to drift.
+// EVERY consumer imports this module directly -- api_client.jsx, the three
+// scoring editors (admin_scoring_team, admin_scoring_individual,
+// admin_scoring_engi), admin_scoring_shared.jsx, admin_shiaijo.jsx, admin.jsx
+// (the single editMatchScore chokepoint every score-editor host routes
+// through), the schedule score editor and viewer_match.jsx. Nothing reads
+// these names off `window`: the mirrors api_client used to publish are gone,
+// so there is exactly one binding per name and no second spelling to drift.
 //
 // This is a leaf on purpose (no imports, no window reads), and it is
 // import-only: it has no <script type="module"> tag of its own and must never
@@ -154,6 +154,32 @@ export function notLandedBanner(res) {
         return { reason: SUPERSEDED_REASON, advice: SUPERSEDED_ADVICE };
     }
     return null;
+}
+
+// terminalFailureBanner: the banner a score editor raises for a queued write
+// that failed for good (subscribeTerminalWriteFailed), in the same shape as
+// notLandedBanner's, plus `sentence` when the refusal is a whole sentence that
+// says what to do (api_client.jsx _replayRefusal). One owner, so no editor drops the mark.
+export function terminalFailureBanner(info) {
+    return {
+        reason: info.reason || `save rejected (${info.status || 'error'})`,
+        advice: info.advice,
+        ...(info.sentence ? { sentence: true } : {}),
+    };
+}
+
+// notSavedText: the ONE line every not-saved banner shows for a
+// { reason, advice, sentence } pair: "Not saved: <reason>. <advice>", with the
+// default advice to re-enter when none is given. A refusal that is a whole
+// sentence (`sentence`: the server's own words, or the busy-shiaijo copy) is
+// shown as it is after "Not saved:": it ends its own
+// sentence and says what to do, so a full stop and advice after it doubled the
+// stop and could contradict it ("Re-enter the result" after "Reload the score
+// sheet").
+export const NOT_SAVED_ADVICE = "Re-enter the result and submit again.";
+export function notSavedText(failed) {
+    if (failed.sentence) return `Not saved: ${failed.reason}`;
+    return `Not saved: ${failed.reason}. ${failed.advice || NOT_SAVED_ADVICE}`;
 }
 
 

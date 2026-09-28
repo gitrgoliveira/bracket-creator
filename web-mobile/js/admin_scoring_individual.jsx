@@ -15,7 +15,7 @@ import { sameCompetitor } from './competitor_identity.jsx';
 // Imported from the leaf, not read off `window`: this editor is ES-imported by
 // its host and by unit tests that never load api_client, and write_result.jsx
 // is import-only so it can be reached directly (see its header).
-import { notLandedBanner } from './write_result.jsx';
+import { notLandedBanner, terminalFailureBanner, notSavedText } from './write_result.jsx';
 import { useArmedConfirm, acceptTap, clearTap } from './tap_guard.jsx';
 
 import {
@@ -546,7 +546,7 @@ export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, on
     const unsub = window.subscribeTerminalWriteFailed((info) => {
       if (!mountedRef.current) return;
       if (!info || info.compID !== m.compId || info.matchID !== m.id) return;
-      setWriteFailed({ reason: info.reason || `save rejected (${info.status || 'error'})`, advice: info.advice });
+      setWriteFailed(terminalFailureBanner(info));
       setPendingWrite(false); // the queued write is gone: it failed, not pending
       // DISARM the finish confirmation. The submit that just failed left the
       // button in its "Tap again to finish" state, so the operator was one tap
@@ -1308,7 +1308,7 @@ export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, on
               precedence over the (now-cleared) pending banner. */}
           {writeFailed && (
             <div className="pending-write-banner pending-write-banner--failed" role="alert" aria-live="assertive">
-              <span>Not saved: {writeFailed.reason}. {writeFailed.advice || "Re-enter the result and submit again."}</span>
+              <span>{notSavedText(writeFailed)}</span>
               {/* Only offer Retry when we still hold the submit closure. After a
                   reopen/hydration it can't be recovered from the serialized queue,
                   so a Retry button would be permanently disabled and misleading: 

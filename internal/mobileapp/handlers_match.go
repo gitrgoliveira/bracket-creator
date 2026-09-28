@@ -1866,6 +1866,17 @@ var errDuplicateRepBout = &selfRunRefusal{
 	message: "A team match has one representative bout, and this score lists more than one. Reload the score sheet and try again.",
 }
 
+// errRepBoutRemoved refuses a participant's finish that carries a
+// representative bout the match does not have. A finish may take its winner
+// from that row (the score sheet does when the numbered bouts are tied), so it
+// is not written without it; any other write only loses the row
+// (holdSelfReportedWriteUnderTx).
+var errRepBoutRemoved = &selfRunRefusal{
+	status:  http.StatusConflict,
+	code:    "no_daihyosen",
+	message: "This match's representative bout was removed on another device. Reload the score sheet before finishing.",
+}
+
 // holdSelfReportedWriteUnderTx is the one judge of an anonymous self-run score
 // write. It runs inside WithTransaction (under the per-comp lock), so the
 // stored match it reads, once, cannot change before the write lands. It
@@ -1883,7 +1894,9 @@ var errDuplicateRepBout = &selfRunRefusal{
 //     remove made elsewhere or a queued write replayed after it. The row is
 //     dropped and logged, as stripInvalidHantei drops what a write inherited,
 //     and the rest of the write goes on to be written as usual, the timestamp
-//     guard deciding a stale one.
+//     guard deciding a stale one. A write that finishes the match is refused
+//     instead (errRepBoutRemoved), since a finish may take its winner from
+//     that row.
 //   - Once the organiser recorded a judges' decision on the representative
 //     bout, the write's row must send it back (sameHanteiVerdict) or leave the
 //     row's ippons out (engine.KeepsStoredDaihyosenVerdict), a write listing
@@ -1927,6 +1940,9 @@ func holdSelfReportedWriteUnderTx(stx state.StoreTx, compID, matchID string, res
 	}
 	stored := snap.RepBout
 	if row >= 0 && stored == nil {
+		if result.Status == state.MatchStatusCompleted {
+			return errRepBoutRemoved
+		}
 		// Into a fresh slice, which stays a list (never nil) even when the row
 		// was all it held: nil would tell the engine to keep the stored bouts.
 		kept := make([]state.SubMatchResult, 0, len(subs)-1)

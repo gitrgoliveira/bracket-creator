@@ -146,6 +146,31 @@ describe('a participant runs the representative bout of a tied knockout team mat
     expect(onClose, 'the finished match closes the editor').toHaveBeenCalled();
   });
 
+  // Another device removed the representative bout this sheet still shows. A
+  // finish rests on that bout, so the server refuses it (409 no_daihyosen)
+  // with a sentence, which the public page shows as it is, keeping the sheet.
+  it('a finish refused because the bout was removed elsewhere shows the server\'s sentence', async () => {
+    const sentence = "This match's representative bout was removed on another device. Reload the score sheet before finishing.";
+    window.API.recordScore = vi.fn(async (_c, _id, patch) => {
+      if (patch.status === 'completed') throw new Error(sentence);
+      return { status: patch.status };
+    });
+    // The page logs the refusal as well as showing it.
+    const logError = vi.spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      const onClose = await openEditor(knockoutTeamMatch([...FOUGHT, { ...REP_BOUT, ipponsA: ['M'], winner: 'Kodokan' }]));
+
+      await act(async () => { fireEvent.click(screen.getByText('Finish')); });
+      await act(async () => { fireEvent.click(screen.getByText('Tap again to finish')); });
+      await settle();
+
+      expect(window.alert).toHaveBeenCalledWith(sentence);
+      expect(onClose, 'the sheet stays open').not.toHaveBeenCalled();
+    } finally {
+      logError.mockRestore();
+    }
+  });
+
   // The server refuses a second representative bout (daihyosen_exists): one
   // added on another device a moment before would otherwise sit beside it.
   it('says so when the bout was added on another device first', async () => {

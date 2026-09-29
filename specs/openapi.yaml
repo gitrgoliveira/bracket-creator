@@ -172,7 +172,9 @@ paths:
                 teamMatches:
                   type: integer
                   default: 0
-                  description: Team size; 0 draws an individual competition.
+                  minimum: 0
+                  maximum: 100
+                  description: Team size; 0 draws an individual competition. Outside 0 to 100 is a 400, the schedule estimate's bound, since the size sets every team block's bout rows.
                 teamMatchType:
                   type: string
                   enum: [fixed, kachinuki]

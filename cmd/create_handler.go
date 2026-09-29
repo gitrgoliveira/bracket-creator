@@ -13,6 +13,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/gitrgoliveira/bracket-creator/internal/domain"
+	"github.com/gitrgoliveira/bracket-creator/internal/engine"
 	"github.com/gitrgoliveira/bracket-creator/internal/helper"
 	"github.com/gitrgoliveira/bracket-creator/internal/state"
 )
@@ -65,6 +66,13 @@ func createTournamentHandler(c *gin.Context) {
 	teamMatches, err := strconv.Atoi(c.PostForm("teamMatches"))
 	if err != nil {
 		teamMatches = 0
+	}
+	// The team size sizes every team block's bout rows and the Kachinuki
+	// Detail sheet's empty sections, so this public request bounds it as the
+	// schedule estimate does (engine.MaxTeamSize).
+	if teamMatches < 0 || teamMatches > engine.MaxTeamSize {
+		c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("teamMatches must be between 0 and %d", engine.MaxTeamSize)})
+		return
 	}
 	// teamMatchType "kachinuki" is the app's blank template of a kachinuki
 	// competition; absent or "fixed" is a team match. The same rule as the

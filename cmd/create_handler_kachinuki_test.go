@@ -8,6 +8,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -15,6 +16,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/xuri/excelize/v2"
 
+	"github.com/gitrgoliveira/bracket-creator/internal/engine"
 	"github.com/gitrgoliveira/bracket-creator/internal/helper"
 	bctest "github.com/gitrgoliveira/bracket-creator/internal/test"
 )
@@ -239,6 +241,32 @@ func TestCreateHandler_TeamMatchTypeFollowsTheCompetitionRule(t *testing.T) {
 	require.Equal(t, http.StatusOK, fixedBody.Code, fixedBody.Body.String())
 	require.Equal(t, http.StatusOK, absentBody.Code, absentBody.Body.String())
 	assert.True(t, bytes.Equal(absentBody.Body.Bytes(), fixedBody.Body.Bytes()), "fixed draws the same workbook as no teamMatchType")
+}
+
+// TestCreateHandler_TeamSizeIsBounded pins the bound on a posted team size.
+// It sizes the bout rows of every team block and the Kachinuki Detail
+// sheet's empty sections, so an unbounded value from this public request
+// would size those allocations (CodeQL go/uncontrolled-allocation-size).
+// The bound is the schedule estimate's, engine.MaxTeamSize.
+func TestCreateHandler_TeamSizeIsBounded(t *testing.T) {
+	teams := []string{"Ryu", "Tora", "Kame", "Taka"}
+	want := fmt.Sprintf("teamMatches must be between 0 and %d", engine.MaxTeamSize)
+	for _, matchType := range []string{"kachinuki", ""} {
+		for _, size := range []string{strconv.Itoa(engine.MaxTeamSize + 1), "-2"} {
+			form := kachinukiForm("knockout", teams...)
+			form.Set("teamMatchType", matchType)
+			form.Set("teamMatches", size)
+			w := postCreateRaw(t, form)
+			require.Equal(t, http.StatusBadRequest, w.Code, "teamMatchType=%q teamMatches=%s", matchType, size)
+			var body struct{ Error string }
+			require.NoError(t, json.Unmarshal(w.Body.Bytes(), &body))
+			assert.Equal(t, want, body.Error)
+		}
+	}
+	atBound := kachinukiForm("knockout", teams...)
+	atBound.Set("teamMatches", strconv.Itoa(engine.MaxTeamSize))
+	w := postCreateRaw(t, atBound)
+	assert.Equal(t, http.StatusOK, w.Code, "the bound itself is accepted: %s", w.Body.String())
 }
 
 // TestCreateHandler_WithoutTeamMatchTypeMatchesTheExamples pins that a request

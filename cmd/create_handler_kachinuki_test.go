@@ -8,6 +8,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -18,6 +19,7 @@ import (
 
 	"github.com/gitrgoliveira/bracket-creator/internal/engine"
 	"github.com/gitrgoliveira/bracket-creator/internal/helper"
+	"github.com/gitrgoliveira/bracket-creator/internal/state"
 	bctest "github.com/gitrgoliveira/bracket-creator/internal/test"
 )
 
@@ -210,6 +212,85 @@ func TestCreateHandler_KachinukiKnockoutDetail(t *testing.T) {
 		assert.Equal(t, "M 1 vs Ryu", bctest.CellAt(rows, at[1]+1, 0), "the bye's team meets the first match's winner")
 		for i := range titles {
 			assert.Equal(t, 5, bctest.NumberedRowsFrom(rows, at[i]+3, 0), titles[i])
+		}
+	})
+}
+
+// TestCreateHandler_LeagueHasNoKnockout pins the blank template of a league,
+// format=league: a league is decided by its table, so the one pool of
+// everyone (as buildXlsxBody posts a league) is followed by no knockout -- no
+// tree page, an empty Elimination Matches sheet and, for kachinuki, a Kachinuki
+// Detail section for each league match and none for a final -- the sheets the
+// stored-draw export prints for the same competition, both asking
+// state.Competition.IsKnockoutEnabled. The same one pool without format=league
+// is a pools competition whose two qualifiers meet in a final: a league is
+// never inferred from the draw's shape.
+func TestCreateHandler_LeagueHasNoKnockout(t *testing.T) {
+	teams := []string{"Ryu", "Tora", "Kame", "Taka"}
+	onePool := func(matchType, format string) url.Values {
+		form := kachinukiForm("pools", teams...)
+		form.Set("playersPerPool", strconv.Itoa(len(teams)))
+		if matchType == "" {
+			form.Del("teamMatchType")
+		}
+		if format != "" {
+			form.Set("format", format)
+		}
+		return form
+	}
+	treePages := func(f *excelize.File) (pages []string) {
+		for _, s := range f.GetSheetList() {
+			if strings.HasPrefix(s, "Tree") {
+				pages = append(pages, s)
+			}
+		}
+		return pages
+	}
+	leagueMatches := []string{"Pool Match 1", "Pool Match 2", "Pool Match 3", "Pool Match 4", "Pool Match 5", "Pool Match 6"}
+
+	for _, matchType := range []string{"kachinuki", ""} {
+		t.Run(fmt.Sprintf("teamMatchType=%q", matchType), func(t *testing.T) {
+			f := postCreate(t, onePool(matchType, state.CompFormatLeague))
+			assert.Empty(t, treePages(f), "a league prints no tree page")
+			elimRows, err := f.GetRows(helper.SheetEliminationMatches)
+			require.NoError(t, err)
+			assert.Empty(t, elimRows, "a league has no knockout match to print")
+
+			detail, err := f.GetRows(helper.SheetKachinukiDetail)
+			if matchType == "" {
+				assert.Error(t, err, "a team match has no Kachinuki Detail sheet")
+				return
+			}
+			require.NoError(t, err)
+			titles, _ := detailSections(detail)
+			assert.Equal(t, leagueMatches, titles, "a section for each league match, none for a final")
+		})
+	}
+
+	t.Run("one pool without format=league keeps its final", func(t *testing.T) {
+		f := postCreate(t, onePool("kachinuki", ""))
+		assert.Equal(t, []string{"Tree 1"}, treePages(f))
+		elimRows, err := f.GetRows(helper.SheetEliminationMatches)
+		require.NoError(t, err)
+		assert.GreaterOrEqual(t, bctest.FirstRowWith(elimRows, 0, "Round 1 - Match 1"), 0)
+		detail, err := f.GetRows(helper.SheetKachinukiDetail)
+		require.NoError(t, err)
+		titles, _ := detailSections(detail)
+		assert.Equal(t, append(slices.Clone(leagueMatches), "Round 1 - Match 1"), titles)
+	})
+
+	t.Run("format is league on a pools draw or absent", func(t *testing.T) {
+		for _, tc := range []struct{ tournamentType, format string }{
+			{"knockout", state.CompFormatLeague},
+			{"pools", state.CompFormatSwiss},
+			{"pools", state.CompFormatMixed},
+		} {
+			form := onePool("kachinuki", tc.format)
+			form.Set("tournamentType", tc.tournamentType)
+			w := postCreateRaw(t, form)
+			if assert.Equal(t, http.StatusBadRequest, w.Code, "%s with format=%s", tc.tournamentType, tc.format) {
+				assert.Contains(t, w.Body.String(), "unsupported format")
+			}
 		}
 	})
 }

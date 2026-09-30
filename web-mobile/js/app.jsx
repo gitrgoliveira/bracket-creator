@@ -727,8 +727,15 @@ function App() {
         applyTheme(t.theme); // mp-scf: apply custom colors
       }
     } catch (e) {
+      // A failed fetch (network, 5xx) says nothing about whether a tournament
+      // exists, so it never opens the create-tournament gate over one already
+      // shown: a failed RELOAD (every SSE event runs one) keeps the last good
+      // data, logged like the page's other background refetches, and the
+      // connection indicator reports the outage. Only the FIRST load moves
+      // undefined to null here, so the gate opens instead of spinning; only
+      // the server's own "no tournament" answer (above) replaces a loaded one.
       console.error("Failed to load tournament", e);
-      setTournament(null); // Explicitly transition from undefined to null so the gate opens
+      setTournament((prev) => (prev === undefined ? null : prev));
     } finally {
       setLoading(false);
     }
@@ -755,7 +762,8 @@ function App() {
   //
   // Snapshot fallback: the standard load() above already runs on mount
   // and populates tournament. If the server is unreachable on first load,
-  // load() catches and sets tournament=null. The snapshot handler below
+  // load() catches and sets tournament=null (a failed reload keeps the
+  // last good data instead). The snapshot handler below
   // bootstraps from the operator tab's reply instead, using the court
   // slice of competitions. We set a synthetic tournament so the display
   // can render.

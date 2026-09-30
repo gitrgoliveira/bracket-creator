@@ -820,6 +820,12 @@ func RegisterMatchHandlers(r *gin.RouterGroup, eng *engine.Engine, store Competi
 				errs = append(errs, scoreError{MatchID: results[i].ID, Error: compErr.Error()})
 				continue
 			}
+			// The kachinuki win decision belongs to a kachinuki competition
+			// only, judged against the same one competition record.
+			if refusal := refuseKachinukiDecisionForComp(comp, &results[i].MatchResult); refusal != nil {
+				errs = append(errs, scoreError{MatchID: results[i].ID, Error: refusal.Error()})
+				continue
+			}
 			finishRefusal := refuseUnfinishedTeamFinishForComp(comp, results[i].ID, &results[i].MatchResult)
 
 			// mp-ic5b: the correction-reason gate and the write run under the
@@ -2697,6 +2703,18 @@ func registerScoreHandler(r *gin.RouterGroup, eng ScoringEngine, store Competiti
 				return
 			}
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+		// The kachinuki win decision belongs to a kachinuki competition only
+		// (refuseKachinukiDecisionForComp); validation above has no
+		// competition to judge it by.
+		kachinukiRefusal, kachinukiErr := refuseKachinukiDecision(store, id, (*state.MatchResult)(&req))
+		if kachinukiErr != nil {
+			internalError(c, kachinukiErr)
+			return
+		}
+		if kachinukiRefusal != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": kachinukiRefusal.Error()})
 			return
 		}
 		// bc-tmfn: a team match cannot be finished while a numbered bout has

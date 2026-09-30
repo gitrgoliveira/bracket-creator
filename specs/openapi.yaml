@@ -162,6 +162,16 @@ paths:
                 tournamentType:
                   type: string
                   enum: [pools, knockout]
+                format:
+                  type: string
+                  enum: [league]
+                  description: >-
+                    league (with tournamentType pools only, else 400) draws the
+                    pool with no knockout: no tree page, no elimination match
+                    and no knockout section on the Kachinuki Detail sheet, as a
+                    league is decided by its table. Absent is the draw
+                    tournamentType names; a single pool is never read as a
+                    league.
                 singleTree:
                   type: string
                   enum: ["on", "off"]
@@ -3479,10 +3489,12 @@ paths:
         elimination team match. Rejected if the match is not tied,
         if it is a pool match, if the competition is individual, engi
         or kachinuki (daihyosen does not exist in kachinuki; a knockout
-        tie goes to encho on the final bout), or if no competitor in the whole
-        competition is eligible. That last check counts the competition's roster
-        as one, not each side, so a side whose own team is barred still gets a
-        representative bout while any other entrant is eligible.
+        tie goes to encho on the final bout), or if either side cannot field a
+        representative. That last check asks each side on its own id, as the
+        start gate does: a side is refused when a withdrawal recorded in ANOTHER
+        match bars its team, whoever else in the competition is eligible. A
+        withdrawal recorded in this match does not count against it, and a side
+        with no id (an unresolved feeder or a bye) has nothing to bar it.
 
 
         The add competes on timestamps like a score write when it carries
@@ -3555,8 +3567,8 @@ paths:
                 $ref: '#/components/schemas/Error'
         '409':
           description: >
-            No competitor in the competition is eligible (`insufficient_eligibility`;
-            the count is competition-wide, see the description), or the
+            A side cannot field a representative (`insufficient_eligibility`:
+            another match's withdrawal bars its team, see the description), or the
             match already has a representative bout (`daihyosen_exists`): an
             encounter has one, and the tie this route checks counts none, so a
             second would otherwise be appended beside the first.

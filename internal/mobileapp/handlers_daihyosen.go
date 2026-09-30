@@ -404,12 +404,10 @@ func RegisterDaihyosenHandlers(r *gin.RouterGroup, eng DaihyosenEngine, store Da
 			credit := state.DefaultWinCreditSide(match.Status, match.Decision, match.DecisionBy, match.Attribution())
 			sideASummary, sideBSummary := engine.ComputeTeamSummary(match.SubResults, match.SideA, match.SideB, credit)
 
-			// Count eligible competitors per side under the same lock (CHK026).
-			// Pre-Slice-7 there are no explicit rosters; eligibility is tracked
-			// per player via competitor-status, so this is a coarse "team has ≥1
-			// eligible participant" count, sufficient for the 0-eligible forfeit
-			// branch.
-			sideAEligible, sideBEligible, err := countEligibleForSidesTx(stx, id, match.SideA, match.SideB)
+			// Whether each side can field a representative, read under the
+			// same lock (CHK026): a side another match's withdrawal barred
+			// cannot, whoever else in the competition is still eligible.
+			sideAEligible, sideBEligible, err := countEligibleForSidesTx(stx, id, mid, match.SideAID, match.SideBID)
 			if err != nil {
 				return err
 			}
@@ -598,52 +596,35 @@ func daihyosenBracketResult(bm *state.BracketMatch) *state.MatchResult {
 	}
 }
 
-// countEligibleForSides counts, for each named side, how many roster
-// participants currently have CompetitorStatus.Eligible != false. This
-// is a coarse pre-lineup approximation of CHK026: until per-team
-// rosters land in the store, we conservatively treat ALL participants
-// as belonging to both sides and instead require that the total
-// eligible-participant count be positive. That's sufficient for the
-// "0 eligible → forfeit" branch (the only place CHK026 actually fires
-// in practice, a depleted team will have all its members marked
-// ineligible after kiken).
+// countEligibleForSidesTx reports, for EACH side of match matchID, whether
+// that side can field a representative: 1 when it can, 0 when it cannot, the
+// count AddDaihyosen refuses on (CHK026). A side is the participant its id
+// names (in a team competition, the team), and eligibility is recorded on
+// that participant, so the question is the one the start gate asks: is this
+// side barred by a withdrawal another match recorded? engine.BarredSides is
+// its one owner, so this reads the same answer StartMatchTx does, with the
+// same two consequences:
 //
-// Once team lineups land (T-series owned by the parallel lineup agent)
-// this helper can be replaced with a per-team eligibility count by
-// joining state.LoadTeamLineup against statuses.
-func countEligibleForSidesTx(tx state.StoreTx, compID, sideAName, sideBName string) (int, int, error) {
-	comp, err := tx.LoadCompetition(compID)
-	if err != nil {
-		return 0, 0, err
-	}
-	withZekken := false
-	if comp != nil {
-		withZekken = comp.EffectiveWithZekkenName()
-	}
-	participants, err := tx.LoadParticipants(compID, withZekken)
-	if err != nil {
-		return 0, 0, err
-	}
+//   - a side is resolved by its id only. An empty id (a bye, an unresolved
+//     "Winner of ..." feeder, a legacy row not yet repaired) has no status to
+//     bar it, and counts as able, as the start gate treats it;
+//   - a status THIS match recorded does not count against it (the undo-path
+//     exemption), so a match may be re-scored past its own withdrawal.
+//
+// It used to count the competition's whole roster as one number returned for
+// both sides, so a side whose own team was barred still got a representative
+// bout while any other entrant was eligible.
+func countEligibleForSidesTx(tx state.StoreTx, compID, matchID, sideAID, sideBID string) (int, int, error) {
 	statuses, err := tx.LoadCompetitorStatus(compID)
 	if err != nil {
 		return 0, 0, err
 	}
-
-	// Until team rosters exist, return the same eligible count for both
-	// sides. Operators that hit the 0-eligible branch will still see
-	// insufficient_eligibility surfaced once the depleted side has all
-	// its members marked ineligible (i.e. when this count is 0).
-	eligible := 0
-	for _, p := range participants {
-		st, ok := statuses[p.ID]
-		if !ok || st.Eligible {
-			eligible++
+	eligible := func(barred *domain.CompetitorStatus) int {
+		if barred != nil {
+			return 0
 		}
+		return 1
 	}
-	// sideAName/sideBName are kept in the signature so the post-lineup
-	// refactor (team-aware count) doesn't change the call site. Until
-	// then, the names are intentionally unused.
-	_ = sideAName
-	_ = sideBName
-	return eligible, eligible, nil
+	a, b := engine.BarredSides(statuses, matchID, sideAID, sideBID)
+	return eligible(a), eligible(b), nil
 }

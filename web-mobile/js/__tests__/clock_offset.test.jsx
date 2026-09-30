@@ -1437,3 +1437,79 @@ describe('the organiser\'s refresh after a write is bounded', () => {
         expect(opts === undefined || !opts.signal, 'no deadline on the plain call').toBe(true);
     });
 });
+
+// A score write's deadline covers its answer's body as well as its headers
+// (_fetchJson). fetchWithTimeout's abort ended when the headers arrived, so a
+// server that sent them and then stalled kept the write pending for good, and
+// with it the editor's `submitting`, which disables Finish and Close. Past the
+// deadline the write is a network failure like any other: queued ({queued:
+// true}) and replayed with the stamp it was sent with, which is safe if the
+// server did store it, since the write guard is last-write-wins and an equal
+// stamp re-applies.
+describe('a score write whose answer never completes is queued, not held', () => {
+    const stalledBody = () => Promise.resolve({ ok: true, status: 200, json: () => new Promise(() => {}) });
+    const answered = () => Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve({}) });
+
+    it.each([
+        ['a finished score', '/score', (API) => API.recordScore('c1', 'm1', { status: 'completed' }, 'pw', null)],
+        ['a running score', '/score', (API) => API.recordScore('c1', 'm1', { status: 'running' }, 'pw', null)],
+        ['a decision', '/decision', (API) => API.recordDecision('c1', 'm1', { decision: 'kiken-voluntary', decisionBy: 'shiro' }, 'pw')],
+        ['a winner override', '/override-winner', (API) => API.overrideBracketWinner('c1', 'm1', 'Alice', 'pw')],
+    ])('%s is given up at 12 s, queued, and replayed with the same stamp', async (_name, path, send) => {
+        const server = makeServer({ timeOk: true });
+        const API = await loadWith(server);
+        const answering = server.fetch;
+        const sent = [];
+        global.fetch = vi.fn((url, opts) => {
+            if (!String(url).includes(path)) return answering(url, opts);
+            sent.push(JSON.parse(opts.body));
+            return sent.length === 1 ? stalledBody() : answered();
+        });
+        let outcome = null;
+        send(API).then((res) => { outcome = { res }; }, (error) => { outcome = { error }; });
+
+        await tick(11000);
+        expect(outcome, 'still reading inside the 12 s').toBeNull();
+        await tick(1500);
+        expect(outcome && outcome.res, 'given up and queued, not thrown').toEqual({ queued: true });
+        expect(writeDidNotLand(outcome.res)).toBe(true);
+
+        // The queue replays it, as it does a write whose connection failed.
+        await tick(1000);
+        expect(sent).toHaveLength(2);
+        expect(sent[1].modifiedAt).toBe(sent[0].modifiedAt);
+        expect(sent[1].rev).toBe(sent[0].rev);
+        expect(API.unsentWrites().total, 'delivered and out of the queue').toBe(0);
+    });
+
+    // The replay loop is single-flight: one replay whose body never completed
+    // stopped every later flush, so the queue the write above goes into must
+    // be bounded the same way or the hang only moves there.
+    it('a queued write whose replay answer never completes does not stop the queue', async () => {
+        const server = makeServer({ timeOk: true });
+        const API = await loadWith(server);
+        const answering = server.fetch;
+        const sent = [];
+        global.fetch = vi.fn((url, opts) => {
+            if (!String(url).includes('/score')) return answering(url, opts);
+            sent.push(JSON.parse(opts.body));
+            if (sent.length === 1) return Promise.reject(new TypeError('network error'));
+            return sent.length === 2 ? stalledBody() : answered();
+        });
+
+        // Offline: the finished score is queued, and the queue replays it at
+        // once; that replay's answer never completes.
+        expect(await API.recordScore('c1', 'm1', { status: 'completed' }, 'pw', null)).toEqual({ queued: true });
+        await flushMicrotasks();
+        expect(sent).toHaveLength(2);
+
+        await tick(11000);
+        expect(API.unsentWrites().total, 'still waiting on the replay inside the 12 s').toBe(1);
+        // Given up at the deadline, kept, and retried after the backoff.
+        await tick(1500);
+        await tick(1000);
+        expect(sent).toHaveLength(3);
+        expect(sent[2].modifiedAt).toBe(sent[0].modifiedAt);
+        expect(API.unsentWrites().total, 'delivered and out of the queue').toBe(0);
+    });
+});

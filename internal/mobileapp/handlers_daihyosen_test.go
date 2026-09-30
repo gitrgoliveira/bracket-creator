@@ -52,9 +52,9 @@ func findMatchForDaihyosen(store *state.Store, compID, matchID string) (m *state
 	return m, found, err
 }
 
-func countEligibleForSides(store *state.Store, compID, sideA, sideB string) (a int, b int, err error) {
+func countEligibleForSides(store *state.Store, compID, matchID, sideAID, sideBID string) (a int, b int, err error) {
 	txErr := store.WithTransaction(compID, func(tx state.StoreTx) error {
-		a, b, err = countEligibleForSidesTx(tx, compID, sideA, sideB)
+		a, b, err = countEligibleForSidesTx(tx, compID, matchID, sideAID, sideBID)
 		return err
 	})
 	if err == nil && txErr != nil {
@@ -251,58 +251,148 @@ func TestFindMatchForDaihyosen_BracketNotFound(t *testing.T) {
 	assert.Nil(t, match)
 }
 
-// TestCountEligibleForSides_AllEligible verifies that all participants are
-// counted when no ineligibility records exist.
+// TestCountEligibleForSides_AllEligible: with no ineligibility records, each
+// side can field a representative.
 func TestCountEligibleForSides_AllEligible(t *testing.T) {
-	dir, err := os.MkdirTemp("", "eligible-*")
-	require.NoError(t, err)
-	defer os.RemoveAll(dir)
-
-	store, err := state.NewStore(dir)
+	store, err := state.NewStore(t.TempDir())
 	require.NoError(t, err)
 	compID := "eligible-comp"
 	require.NoError(t, store.SaveCompetition(&state.Competition{ID: compID}))
-	// Use proper UUID-format IDs so SaveParticipants/LoadParticipants round-trips correctly.
-	p1ID := "aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa"
-	p2ID := "bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb"
-	require.NoError(t, store.SaveParticipants(compID, []domain.Player{
-		{ID: p1ID, Name: "Alice", Dojo: "A"},
-		{ID: p2ID, Name: "Bob", Dojo: "B"},
-	}))
 
-	a, b, err := countEligibleForSides(store, compID, "TeamA", "TeamB")
-	require.NoError(t, err)
-	assert.Equal(t, 2, a)
-	assert.Equal(t, 2, b)
-}
-
-// TestCountEligibleForSides_OneIneligible verifies that an ineligible
-// participant is excluded from the eligible count.
-func TestCountEligibleForSides_OneIneligible(t *testing.T) {
-	dir, err := os.MkdirTemp("", "ineligible-*")
-	require.NoError(t, err)
-	defer os.RemoveAll(dir)
-
-	store, err := state.NewStore(dir)
-	require.NoError(t, err)
-	compID := "ineligible-comp"
-	require.NoError(t, store.SaveCompetition(&state.Competition{ID: compID}))
-	p1ID := "cccccccc-cccc-4ccc-cccc-cccccccccccc"
-	p2ID := "dddddddd-dddd-4ddd-dddd-dddddddddddd"
-	require.NoError(t, store.SaveParticipants(compID, []domain.Player{
-		{ID: p1ID, Name: "Alice", Dojo: "A"},
-		{ID: p2ID, Name: "Bob", Dojo: "B"},
-	}))
-	require.NoError(t, store.SetCompetitorStatus(compID, domain.CompetitorStatus{
-		PlayerID: p1ID,
-		Eligible: false,
-		Reason:   "kiken",
-	}))
-
-	a, b, err := countEligibleForSides(store, compID, "TeamA", "TeamB")
+	a, b, err := countEligibleForSides(store, compID, "B1",
+		"aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa", "bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb")
 	require.NoError(t, err)
 	assert.Equal(t, 1, a)
 	assert.Equal(t, 1, b)
+}
+
+// TestCountEligibleForSides_IsPerSide: the count answers for each side of the
+// match, by the side's own id. It used to count the competition's roster as
+// one number returned for both sides, so a barred side read as able whenever
+// anyone else in the competition was eligible, and an unrelated barred entrant
+// lowered both sides alike.
+func TestCountEligibleForSides_IsPerSide(t *testing.T) {
+	const (
+		teamA    = "cccccccc-cccc-4ccc-cccc-cccccccccccc"
+		teamB    = "dddddddd-dddd-4ddd-dddd-dddddddddddd"
+		teamC    = "eeeeeeee-eeee-4eee-eeee-eeeeeeeeeeee"
+		barredIn = "Pool A-1"
+	)
+	bar := func(t *testing.T, store *state.Store, compID, pid, matchID string) {
+		t.Helper()
+		require.NoError(t, store.SetCompetitorStatus(compID, domain.CompetitorStatus{
+			PlayerID: pid, Eligible: false, Reason: "kiken", MatchID: matchID,
+		}))
+	}
+	newStore := func(t *testing.T, compID string) *state.Store {
+		t.Helper()
+		store, err := state.NewStore(t.TempDir())
+		require.NoError(t, err)
+		require.NoError(t, store.SaveCompetition(&state.Competition{ID: compID}))
+		return store
+	}
+
+	t.Run("a side another match barred cannot field one", func(t *testing.T) {
+		store := newStore(t, "per-side-a")
+		bar(t, store, "per-side-a", teamA, barredIn)
+		a, b, err := countEligibleForSides(store, "per-side-a", "B1", teamA, teamB)
+		require.NoError(t, err)
+		assert.Equal(t, 0, a, "side A's own team is barred")
+		assert.Equal(t, 1, b)
+	})
+	t.Run("side B is judged on its own id", func(t *testing.T) {
+		store := newStore(t, "per-side-b")
+		bar(t, store, "per-side-b", teamB, barredIn)
+		a, b, err := countEligibleForSides(store, "per-side-b", "B1", teamA, teamB)
+		require.NoError(t, err)
+		assert.Equal(t, 1, a)
+		assert.Equal(t, 0, b, "side B's own team is barred")
+	})
+	t.Run("a barred entrant outside the match bars neither side", func(t *testing.T) {
+		store := newStore(t, "per-side-other")
+		bar(t, store, "per-side-other", teamC, barredIn)
+		a, b, err := countEligibleForSides(store, "per-side-other", "B1", teamA, teamB)
+		require.NoError(t, err)
+		assert.Equal(t, 1, a)
+		assert.Equal(t, 1, b)
+	})
+	t.Run("a status this match recorded does not count against it", func(t *testing.T) {
+		store := newStore(t, "per-side-own")
+		bar(t, store, "per-side-own", teamA, "B1")
+		a, b, err := countEligibleForSides(store, "per-side-own", "B1", teamA, teamB)
+		require.NoError(t, err)
+		assert.Equal(t, 1, a, "the undo-path exemption engine.BarredSides owns")
+		assert.Equal(t, 1, b)
+	})
+	t.Run("a side with no id has nothing to bar it", func(t *testing.T) {
+		store := newStore(t, "per-side-noid")
+		bar(t, store, "per-side-noid", teamA, barredIn)
+		a, b, err := countEligibleForSides(store, "per-side-noid", "B1", "", teamB)
+		require.NoError(t, err)
+		assert.Equal(t, 1, a, "resolved by id only: an empty id matches no status")
+		assert.Equal(t, 1, b)
+	})
+}
+
+// TestDaihyosenHandler_RefusesASideItsOwnTeamCannotField: a knockout team
+// match whose side A was barred by a withdrawal in another match is refused a
+// representative bout with 409 insufficient_eligibility, even though other
+// entrants in the competition are still eligible. The organiser's add reaches
+// a scheduled 0-0 match (the tie holds at nothing each), which is how a match
+// with a barred side meets this route. Before the count was per side it
+// answered 200 and appended the bout.
+func TestDaihyosenHandler_RefusesASideItsOwnTeamCannotField(t *testing.T) {
+	const (
+		teamA = "aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa"
+		teamB = "bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb"
+		teamC = "cccccccc-cccc-4ccc-cccc-cccccccccccc"
+	)
+	for _, tc := range []struct {
+		name     string
+		barredIn string
+		wantCode int
+	}{
+		{name: "barred by another match", barredIn: "Pool A-1", wantCode: http.StatusConflict},
+		{name: "barred by this match", barredIn: "B1", wantCode: http.StatusOK},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			r, store, _, _, _ := setupDaihyosenTestRouter(t)
+			compID := "dh-own-side"
+			require.NoError(t, store.SaveCompetition(&state.Competition{ID: compID, Kind: "team", TeamSize: 3}))
+			require.NoError(t, store.SaveParticipants(compID, []domain.Player{
+				{ID: teamA, Name: "TeamA", Dojo: "A"},
+				{ID: teamB, Name: "TeamB", Dojo: "B"},
+				{ID: teamC, Name: "TeamC", Dojo: "C"},
+			}))
+			require.NoError(t, store.SaveBracket(compID, &state.Bracket{
+				Rounds: [][]state.BracketMatch{{{
+					ID: "B1", SideA: "TeamA", SideB: "TeamB", SideAID: teamA, SideBID: teamB,
+					Status: state.MatchStatusScheduled,
+				}}},
+			}))
+			require.NoError(t, store.SetCompetitorStatus(compID, domain.CompetitorStatus{
+				PlayerID: teamA, Eligible: false, Reason: "kiken", MatchID: tc.barredIn,
+			}))
+
+			req := httptest.NewRequest(http.MethodPost, "/api/competitions/"+compID+"/matches/B1/daihyosen", nil)
+			w := httptest.NewRecorder()
+			r.ServeHTTP(w, req)
+			require.Equal(t, tc.wantCode, w.Code, w.Body.String())
+
+			bracket, err := store.LoadBracket(compID)
+			require.NoError(t, err)
+			added := carriesDaihyosenRow(bracket.Rounds[0][0].SubResults)
+			if tc.wantCode == http.StatusConflict {
+				var body map[string]any
+				require.NoError(t, json.Unmarshal(w.Body.Bytes(), &body))
+				assert.Equal(t, "insufficient_eligibility", body["error"])
+				assert.False(t, added, "a refused add appends nothing")
+				assert.Equal(t, state.MatchStatusScheduled, bracket.Rounds[0][0].Status, "a refused add writes nothing")
+			} else {
+				assert.True(t, added, "a match may be re-scored past its own withdrawal")
+			}
+		})
+	}
 }
 
 // TestDaihyosenHandler_MatchNotFound verifies that a request for a

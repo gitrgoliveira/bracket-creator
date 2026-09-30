@@ -162,7 +162,7 @@ type Hub struct {
 
 	// history is a ring buffer of the last HistorySize broadcast
 	// envelopes. Indexed by `seq % HistorySize`. Reads (via
-	// snapshotHistorySince) take the read lock; writes (in Broadcast)
+	// snapshotHistorySinceLocked) hold the lock; writes (in Broadcast)
 	// take the write lock.
 	history     []historyEntry
 	HistorySize int
@@ -361,19 +361,12 @@ func (h *Hub) Broadcast(eventType EventType, data any) {
 	}
 }
 
-// snapshotHistorySince returns history entries whose seq is strictly
+// snapshotHistorySinceLocked returns history entries whose seq is strictly
 // greater than `since`, ordered by ascending seq. Returns at most
 // HistorySize entries (older ones have been overwritten in the ring).
 // The bool result is false when the requested `since` is older than the
 // oldest entry retained in the buffer, caller may want to log a "snapshot
 // needed" sentinel in that case (gap exceeds replay capacity).
-func (h *Hub) snapshotHistorySince(since int64) (entries []historyEntry, complete bool) {
-	h.mu.RLock()
-	defer h.mu.RUnlock()
-	return h.snapshotHistorySinceLocked(since)
-}
-
-// snapshotHistorySinceLocked is the lock-free body of snapshotHistorySince.
 // Caller holds h.mu (read or write).
 func (h *Hub) snapshotHistorySinceLocked(since int64) (entries []historyEntry, complete bool) {
 	currentSeq := h.seq.Load()

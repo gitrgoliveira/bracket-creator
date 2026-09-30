@@ -600,29 +600,14 @@ func resolvePutNumberPrefix(eng *engine.Engine, target *state.Competition, store
 // competition on a field it never touched.
 //
 // A thin wrapper over engine.CheckUniqueCompFields (PR #416 finding 1),
-// which owns the sibling walk; this is the STRICT policy (an unreadable
+// which owns the sibling walk under the STRICT policy (an unreadable
 // sibling is a hard failure): create and import can be retried by the
 // operator, so silently skipping a sibling and letting a genuine collision
 // through is the wrong trade. The start/generate-draw pre-flight cannot
-// defer that way and uses checkUniqueCompFieldsTolerant instead (bc-pnum
-// A5(d)).
+// defer that way; it goes through engine.EnsureNumberPrefix, which applies
+// the tolerant sibling policy itself (bc-pnum A5(d)).
 func checkUniqueCompFields(eng *engine.Engine, name, prefix, excludeID string) error {
-	_, err := eng.CheckUniqueCompFields(name, prefix, excludeID, false)
-	return err
-}
-
-// checkUniqueCompFieldsTolerant is checkUniqueCompFields's pre-flight-only
-// variant (bc-pnum A5(d)): an unreadable sibling config.md is logged and
-// SKIPPED rather than turned into a 500. A start/generate-draw request
-// cannot be deferred the way create/import can -- the competition the
-// operator is trying to start is not the broken one, and they have no
-// "retry with a different value" recourse -- and GET /competitions and
-// MigrateNumberPrefixes already apply the same log-and-skip rule to a bad
-// sibling. Returns the ids of every sibling this call skipped and a single
-// error already shaped for the caller: an infra fault as a plain error, a
-// collision as *engine.ValidationError.
-func checkUniqueCompFieldsTolerant(eng *engine.Engine, name, prefix, excludeID string) ([]string, error) {
-	return eng.CheckUniqueCompFields(name, prefix, excludeID, true)
+	return eng.CheckUniqueCompFields(name, prefix, excludeID)
 }
 
 // validateRankOverrides checks a pool-rank override request's ranks (the

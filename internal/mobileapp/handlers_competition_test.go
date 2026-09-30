@@ -2300,9 +2300,9 @@ func TestPOSTStartAndGenerateDraw_LegacyEmptyPrefix_AssignBeforeDrawing(t *testi
 	// bc-pnum A5(d): an UNRELATED sibling competition's unreadable config.md
 	// must not turn a start/generate-draw pre-flight for THIS competition
 	// into a 500. engine's takenNumberPrefixes (which assignDefaultNumberPrefix
-	// uses via DefaultNumberPrefixFor) and checkUniqueCompFieldsTolerant
-	// (which the pre-flight uses) must both log-and-skip the broken sibling
-	// rather than propagate its load error.
+	// uses via DefaultNumberPrefixFor) and EnsureNumberPrefix's uniqueness
+	// check (which the pre-flight uses) must both log-and-skip the broken
+	// sibling rather than propagate its load error.
 	t.Run("POST /start is not refused by an unrelated sibling's unreadable config.md", func(t *testing.T) {
 		r, store, _, _, tempDir := setupTestRouter(t)
 		defer os.RemoveAll(tempDir)
@@ -2394,8 +2394,8 @@ func TestEnsureNumberPrefix_ConcurrentFlipSurvivesAtomicReadModifyWrite(t *testi
 }
 
 // TestEnsureNumberPrefix_CorrelatesSkippedSiblingWithAssignedPrefix pins the correlated skip warning:
-// checkUniqueCompFieldsTolerant already logged its own "skipping unreadable
-// sibling" line, and the assignment itself was not logged anywhere -- so a
+// the tolerant sibling walk (engine.siblingCompetitions) already logged its
+// own "skipping unreadable" line, and the assignment itself was not logged anywhere -- so a
 // derived prefix that persisted while a sibling was unreadable (and thus
 // possibly colliding once that sibling's config.md is repaired) left no way
 // to correlate the two facts from the server log alone. ensureNumberPrefix's
@@ -3634,35 +3634,6 @@ func TestCheckUniqueCompFields(t *testing.T) {
 		seed("blank-named", "", "BLK")
 		err := checkUniqueCompFields(eng, "", "SomethingElse", "")
 		require.NoError(t, err, "an empty name must never collide, even against a stored blank name")
-	})
-}
-
-// TestCheckUniqueCompFieldsTolerant pins bc-pnum A5(d): the pre-flight's own
-// variant logs and SKIPS an unreadable sibling rather than turning it into an
-// error, but still refuses a REAL collision it can actually see (D4(b)).
-func TestCheckUniqueCompFieldsTolerant(t *testing.T) {
-	_, store, eng, _, tempDir := setupTestRouter(t)
-	defer os.RemoveAll(tempDir)
-
-	require.NoError(t, store.SaveCompetition(&state.Competition{ID: "broken", Name: "Broken", NumberPrefix: "B"}))
-	require.NoError(t, os.WriteFile(filepath.Join(tempDir, "competitions", "broken", "config.md"), []byte("not front matter at all"), 0o600))
-	require.NoError(t, store.SaveCompetition(&state.Competition{ID: "fine", Name: "Fine Comp", NumberPrefix: "F"}))
-
-	t.Run("an unreadable sibling is logged and skipped, not surfaced as an error", func(t *testing.T) {
-		skipped, err := checkUniqueCompFieldsTolerant(eng, "NewComp", "K", "")
-		assert.NoError(t, err, "the pre-flight variant must never fail over a sibling it cannot even read")
-		assert.Equal(t, []string{"broken"}, skipped, "the skipped sibling id must be surfaced so a caller can correlate it with what it assigned")
-	})
-
-	// D4(b): a REAL collision the tolerant variant CAN see is still refused,
-	// as an *engine.ValidationError so the pre-flight's caller maps it to 400
-	// exactly like the engine's own refusals.
-	t.Run("a real collision is still refused as a ValidationError", func(t *testing.T) {
-		_, err := checkUniqueCompFieldsTolerant(eng, "NewComp2", "F", "")
-		require.Error(t, err)
-		var validation *engine.ValidationError
-		assert.ErrorAs(t, err, &validation, "must be an *engine.ValidationError so the caller's switch maps it to 400")
-		assert.Contains(t, err.Error(), "Fine Comp")
 	})
 }
 

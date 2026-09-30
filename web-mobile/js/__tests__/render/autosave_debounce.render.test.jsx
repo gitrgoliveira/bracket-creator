@@ -1490,6 +1490,58 @@ describe('bc-dhas: an adopted answer gives way to a prop at least as new', () =>
   });
 });
 
+// A send-back (or requeue, or reopen) keeps the bout log and is stamped by the
+// server's clock, which can read older than this device's stamped answer. Add
+// then Remove before the add reached the prop leaves the prop holding the very
+// log the remove answered with, so the send-back changes neither the log nor
+// (past the answer) the stamp, and the sheet kept showing a sent-back match as
+// running. The prop's status now lets it through once its log is the
+// answer's own; a status change on a different log still does not.
+describe("bc-dhas: a status change the answer's log already holds is shown", () => {
+  function renderLive(match) {
+    const onSubmit = makeOnSubmit(match);
+    const view = render(<ScoreEditorModal match={match} onClose={vi.fn()} onSubmit={onSubmit} password="" />);
+    return (next) => view.rerender(<ScoreEditorModal match={next} onClose={vi.fn()} onSubmit={onSubmit} password="" />);
+  }
+
+  beforeEach(() => {
+    window.API.recordDaihyosen = vi.fn().mockResolvedValue({ ...makeKnockoutTeamMatch(), subResults: [serverDaihyosenRow()], modifiedAt: 2000 });
+    window.API.removeDaihyosen = vi.fn().mockResolvedValue({ ...makeKnockoutTeamMatch(), subResults: [], modifiedAt: 3000 });
+  });
+
+  it('Add then Remove, then a send-back stamped below the answer: the sheet shows it queued', async () => {
+    const rerender = renderLive(makeKnockoutTeamMatch({ modifiedAt: 1000 }));
+    await act(async () => { fireEvent.click(screen.getByTestId('scoring-modal-daihyosen-button')); });
+    await settle();
+    await act(async () => { fireEvent.click(screen.getByTestId('team-daihyosen-remove')); });
+    await settle();
+    expect(window.API.removeDaihyosen).toHaveBeenCalledTimes(1);
+    expect(screen.queryByText('Start match')).toBeNull();
+
+    await act(async () => { rerender(makeKnockoutTeamMatch({ status: 'scheduled', modifiedAt: 1500 })); });
+    await settle();
+
+    expect(screen.getByText('Start match')).toBeTruthy();
+    expect(subMatchRows()).toHaveLength(3);
+  });
+
+  // The control: after the add alone, a queued copy read before it carries
+  // the log from before the add. Letting it through would take the added row
+  // off the sheet, which is what the override is there to stop.
+  it('Add, then a queued copy with the log from before it: the added row stays', async () => {
+    const rerender = renderLive(makeKnockoutTeamMatch({ modifiedAt: 1000 }));
+    await act(async () => { fireEvent.click(screen.getByTestId('scoring-modal-daihyosen-button')); });
+    await settle();
+    expect(subMatchRows()).toHaveLength(4);
+
+    await act(async () => { rerender(makeKnockoutTeamMatch({ status: 'scheduled', modifiedAt: 500 })); });
+    await settle();
+
+    expect(subMatchRows()).toHaveLength(4);
+    expect(screen.getByTestId('team-daihyosen-remove')).toBeTruthy();
+  });
+});
+
 // A save given up on at the deadline is still out, and its loop still writes
 // an edit it finds owed. A second add or remove started beside it would lose
 // the edit owed under its own hold to that loop, written from the sheet before

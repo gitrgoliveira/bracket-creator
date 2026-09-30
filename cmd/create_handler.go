@@ -90,6 +90,15 @@ func createTournamentHandler(c *gin.Context) {
 		})
 		return
 	}
+	// format "league" is the app's blank template of a league: one pool of
+	// everyone and no knockout, since a league is decided by its table.
+	// Absent is the draw tournamentType names. Never inferred from the pool
+	// shape: a pools competition may form a single pool and still play a final.
+	format := c.PostForm("format")
+	if format != "" && (format != state.CompFormatLeague || tournamentType != "pools") {
+		c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("unsupported format %q (only %q, with tournamentType \"pools\")", format, state.CompFormatLeague)})
+		return
+	}
 
 	winnersPerPool, err := strconv.Atoi(c.PostForm("winnersPerPool"))
 	if err != nil {
@@ -184,6 +193,7 @@ func createTournamentHandler(c *gin.Context) {
 			determined:      determined,
 			teamMatches:     teamMatches,
 			teamMatchType:   teamMatchType,
+			format:          format,
 			roundRobin:      roundRobin,
 			poolFormat:      poolFormat,
 			numPlayers:      numPlayers,

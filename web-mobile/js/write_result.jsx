@@ -84,6 +84,49 @@ export function writeWasSuperseded(res) {
     return !!res && res.applied === false;
 }
 
+// writeWasRefused: did a score editor's write come back REFUSED, stored
+// nowhere and never going to be? Asked on what the host handed back, so a
+// thrown refusal counts as well: every host catches it, reports it (a toast,
+// an alert) and hands the editor nothing. Two shapes:
+//   - nothing handed back: the host already reported a refusal (a busy
+//     shiaijo, a finished match, a barred competitor, a validation error).
+//   - applied:false: superseded or clock_skew (writeWasSuperseded).
+// A QUEUED write is not refused: it lands on reconnect.
+//
+// The editors ask it to DISARM a two-tap commit (Finish, Finish + Start Next,
+// End match, the engi Save) whose write was refused: left armed, one more tap
+// re-sent the very write just refused, and for a superseded one that tap
+// would overwrite the newer result. A queued commit stays armed, since
+// sending it again is what the pending banner's Retry now does anyway.
+//
+// One host shape reads as refused without being one: the court console's and
+// the Scores tab's Finish + Start Next return nothing once the finish has
+// landed and the next match is started. Disarming there costs nothing, since
+// the editor has moved on to the next match.
+export function writeWasRefused(res) {
+    return !res || writeWasSuperseded(res);
+}
+
+// writeRetryable: can sending this write again make it land? The ONE owner of
+// whether a score editor offers Retry. Only a QUEUED write can: it never
+// reached the server (offline, a timeout, a 5xx), the queue keeps sending it,
+// and Retry only sends it sooner. Nothing else a write can come back with is
+// fixed by sending the same write again:
+//   - superseded: a newer result is stored, and a re-send, stamped now, would
+//     overwrite it (SUPERSEDED_ADVICE).
+//   - clock_skew: the client has already resynced and re-sent it; entering
+//     the result again is the remedy (CLOCK_SKEW_ADVICE), not a replay.
+//   - any other refusal (the match has finished, the organiser alone decides
+//     the rep bout, a competitor is barred, the shiaijo is busy, a validation
+//     error): the server answers it the same way until something else
+//     changes, and then the operator enters the result again.
+// So an editor keeps the write to re-send only for a queued one, and the
+// not-saved banner (always a refusal: notLandedBanner, terminalFailureBanner)
+// never carries Retry.
+export function writeRetryable(res) {
+    return !!res && res.queued === true;
+}
+
 // CLOCK_SKEW_REASON_TEXT / CLOCK_SKEW_ADVICE: the copy for the OTHER
 // not-landed verdict (bc-cse). The server refuses a write whose modifiedAt is
 // implausibly far in its own future with 200 {"applied": false, "reason":

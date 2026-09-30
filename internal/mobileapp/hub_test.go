@@ -324,30 +324,36 @@ func TestHubRingBufferEvicts(t *testing.T) {
 	assert.NotContains(t, body, "id: 4\n", "surviving entries must not be partially replayed on unsatisfiable gap")
 }
 
-// T216: snapshotHistorySince contract, the helper underlying the
-// replay path. Tests the edges directly so a regression in the ring
-// index math fails here instead of in the integration test where the
-// gin response writer obscures the cause.
+// T216: snapshotHistorySinceLocked contract, the helper underlying the
+// replay path (subscribeWithReplay calls it under the hub lock). Tests the
+// edges directly so a regression in the ring index math fails here instead
+// of in the integration test where the gin response writer obscures the
+// cause.
 func TestSnapshotHistorySince(t *testing.T) {
 	h := NewHubWithHistory(5)
 	for i := 0; i < 3; i++ {
 		h.Broadcast(EventMatchUpdated, map[string]int{"i": i})
 	}
+	snapshot := func(since int64) ([]historyEntry, bool) {
+		h.mu.RLock()
+		defer h.mu.RUnlock()
+		return h.snapshotHistorySinceLocked(since)
+	}
 
 	t.Run("since beyond current returns nothing", func(t *testing.T) {
-		entries, complete := h.snapshotHistorySince(10)
+		entries, complete := snapshot(10)
 		assert.Empty(t, entries)
 		assert.True(t, complete)
 	})
 
 	t.Run("since equals current returns nothing", func(t *testing.T) {
-		entries, complete := h.snapshotHistorySince(3)
+		entries, complete := snapshot(3)
 		assert.Empty(t, entries)
 		assert.True(t, complete)
 	})
 
 	t.Run("since zero returns all retained in order", func(t *testing.T) {
-		entries, complete := h.snapshotHistorySince(0)
+		entries, complete := snapshot(0)
 		require.Len(t, entries, 3)
 		assert.True(t, complete)
 		for i, e := range entries {
@@ -362,7 +368,7 @@ func TestSnapshotHistorySince(t *testing.T) {
 		for i := 0; i < 4; i++ {
 			h.Broadcast(EventMatchUpdated, map[string]int{"i": i})
 		}
-		entries, complete := h.snapshotHistorySince(1)
+		entries, complete := snapshot(1)
 		assert.False(t, complete, "since=1 < oldest retained should report incomplete")
 		require.NotEmpty(t, entries)
 		// First returned entry is the oldest retained (seq 3), not the

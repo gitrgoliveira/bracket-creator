@@ -168,6 +168,16 @@ describe('buildXlsxBody tournamentType', () => {
     const body = buildXlsxBody({ format, poolSize: 3, poolWinners: 2, courts: ['A'] }, 'Test', four);
     expect(body.get('tournamentType')).toBe(type);
   });
+
+  it.each([
+    ['league', 'league'],
+    ['mixed', null],
+    ['knockout', null],
+    ['', null],
+  ])('format %j sends format=%s so only a league draws no knockout', (format, sent) => {
+    const body = buildXlsxBody({ format, poolSize: 3, poolWinners: 2, courts: ['A'] }, 'Test', four);
+    expect(body.get('format')).toBe(sent);
+  });
 });
 
 // ── regression: non-engi roster uses 2-column layout ────────────────────────

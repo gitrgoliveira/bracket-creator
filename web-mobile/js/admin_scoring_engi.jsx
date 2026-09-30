@@ -28,7 +28,7 @@ import { useEscapeToClose, confirmDialog } from './ui.jsx';
 import { NumberedName } from './numbered_name.jsx';
 import { SideCell } from './side_cell.jsx';
 import { useArmedConfirm } from './tap_guard.jsx';
-import { terminalFailureBanner, notSavedText } from './write_result.jsx';
+import { terminalFailureBanner, notSavedText, writeWasRefused, writeRetryable } from './write_result.jsx';
 
 const MAX_FLAGS = 5;
 // Valid totals: 1, 3, 5 (odd, guarantees a winner).
@@ -224,13 +224,23 @@ export function EngiScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext
       if (mountedRef.current) { setErr(e?.message || "Save failed"); setSubmitting(false); }
       return;
     }
+    // A refused save (writeWasRefused: the host reported it and handed back
+    // nothing, or superseded / clock_skew) re-enables the controls and
+    // disarms Save: left armed, one tap re-sent the write just refused. It
+    // used to leave `submitting` set, so Save read "Saving…" and stayed
+    // disabled for good.
+    if (writeWasRefused(res)) {
+      if (mountedRef.current) { setSubmitting(false); setSaveArmed(false); }
+      return res;
+    }
     // F5: a terminal write that was only queued (offline / transient) resolves
     // { queued: true } instead of throwing. Do NOT close as if saved: re-enable
     // the controls, enter pending-write mode with the sticky banner, and
-    // remember the closure so "Retry now" can re-invoke it. On a clean success
+    // remember the closure so "Retry now" can re-invoke it (writeRetryable:
+    // the one write a re-send can land). Save stays armed. On a clean success
     // the parent closes the modal, so we intentionally leave `submitting` set
     // (matches the prior behaviour and avoids a post-unmount state update).
-    if (res && res.queued && mountedRef.current) {
+    if (writeRetryable(res) && mountedRef.current) {
       setSubmitting(false);
       setPendingWrite(true);
       pendingFnRef.current = fn;
@@ -528,15 +538,13 @@ export function EngiScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext
             onCancel={() => setShowCorrectionPrompt(false)}
           />
         )}
-        {/* F5: PERMANENT-failure banner: a queued terminal write was rejected
-            (non-retryable) and dropped, so it never saved. Takes precedence
-            over the pending banner. Mirrors ScoreEditorModal. */}
+        {/* F5: PERMANENT-failure banner: the write was refused, so it never
+            saved. No Retry: a refusal is never fixed by sending the same write
+            again (writeRetryable). Takes precedence over the pending banner.
+            Mirrors ScoreEditorModal. */}
         {writeFailed && (
           <div className="pending-write-banner pending-write-banner--failed" role="alert" aria-live="assertive">
             <span>{notSavedText(writeFailed)}</span>
-            {pendingFnRef.current && (
-              <button type="button" className="btn btn--sm" disabled={submitting} onClick={() => doSubmit(pendingFnRef.current)}>Retry</button>
-            )}
           </div>
         )}
         {/* F5: pending-write banner: a terminal submit was only queued (offline

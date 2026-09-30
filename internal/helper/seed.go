@@ -272,7 +272,7 @@ func delayDojoMeetings(result []Player, occupied map[int]bool) {
 	// comparison, so every comparison below (ids[cand] == ids[x], etc.) is
 	// an int compare rather than a normalized-string compare. ids is kept
 	// in lockstep with result: whenever result[i]/result[j] are swapped
-	// (the accepted swap below, and dojoSwapGain's own temporary
+	// (the accepted swap below, and dojoSwapGainAfter's own temporary
 	// swap-and-revert), ids[i]/ids[j] are swapped too, so it is always
 	// exactly the id of result[i].Dojo without ever resolving it again.
 	idCache, _ := newDojoIDCacheFor(result)
@@ -292,7 +292,7 @@ func delayDojoMeetings(result []Player, occupied map[int]bool) {
 	}
 
 	// Early-out (bc-drwx item 2): a swap only ever happens between two
-	// movable slots of DIFFERENT dojos (dojoSwapGain's own candidate filter,
+	// movable slots of DIFFERENT dojos (bestRelocation's own candidate filter,
 	// below), so with fewer than two distinct dojos among the movable
 	// (unseeded) players NO swap can EVER exist, whatever the roster size --
 	// the whole climb below is provably a no-op before it examines a single
@@ -324,7 +324,7 @@ func delayDojoMeetings(result []Player, occupied map[int]bool) {
 	// span between accepted swaps) pays exactly one stable sort of the
 	// same-dojo pairs, walked worst-round-first, instead of an O(N^2)
 	// rescan per stuck pair; the per-slot memo (slotBest, below) is safe
-	// because dojoSwapGain/dojoSwapGainAfter are pure functions of (slot,
+	// because dojoSlotMeetSum/dojoSwapGainAfter are pure functions of (slot,
 	// result) for the life of a generation, unaffected by which pair asks;
 	// and the stable sort keeps ties at the same round in scan order.
 	for iter := 0; iter < len(result)*len(result); iter++ {
@@ -526,13 +526,13 @@ func denseSlotMap(n int) []int {
 // includes slot x or slot y (each such pair counted exactly once, including
 // the {x, y} pair itself when both are members of the same dojo). Only
 // slots x and y can change when those two are swapped, so its callers --
-// dojoSwapGain (before the swap) and dojoSwapGainAfter (after it), always
-// with x != y -- never need the sum over every OTHER pair in the draw:
-// those are unaffected by the swap and would cancel out of the before/after
-// delta anyway. Walking only the pairs that touch {x, y} turns this from an
+// dojoSwapGainAfter (after the swap) and the swap-gain tests that hand it an
+// honest `before` (before it), always with x != y -- never need the sum
+// over every OTHER pair in the draw: those are unaffected by the swap and
+// would cancel out of the before/after delta anyway. Walking only the pairs that touch {x, y} turns this from an
 // O(N^2) whole-draw scan into O(N) per call, an ~100x cut on THIS function
 // alone at N=256 (measured), which is what made the O(N) candidates * O(N)
-// dojoSwapGain = O(N^2) candidate-confirmation scan in delayDojoMeetings
+// swap-gain = O(N^2) candidate-confirmation scan in delayDojoMeetings
 // affordable per call. That confirmation scan remained delayDojoMeetings'
 // own dominant cost afterwards (it recurs once per outer iteration, and
 // wave-1's stuck-pair continuation can run many iterations per accepted
@@ -609,20 +609,14 @@ func dojoSlotMeetSum(result []Player, ids []int, slots []int, x int) int {
 	return sum
 }
 
-// dojoSwapGain reports how much later same-dojo competitors would meet if the
-// occupants of slots x and y traded places. Positive means an improvement.
-// x, y are DENSE indices; slots is denseSlotMap(len(result)) (see
-// dojoSumMeetRounds' own doc comment).
-func dojoSwapGain(result []Player, ids []int, slots []int, x, y int) int {
-	before := dojoSumMeetRounds(result, ids, slots, x, y)
-	return dojoSwapGainAfter(result, ids, slots, x, y, before)
-}
-
-// dojoSwapGainAfter is dojoSwapGain's swap/after/revert half, taking an
-// already-computed `before` rather than deriving it from dojoSumMeetRounds
-// itself. dojoSwapGain calls it with the honest (freshly computed) sum, so
-// it stays correct for any x, y including dojo-mates; delayDojoMeetings'
-// bestRelocation calls it directly with a `before` built from the
+// dojoSwapGainAfter reports how much later same-dojo competitors would meet if
+// the occupants of slots x and y traded places, given `before`, the
+// pre-swap dojoSumMeetRounds for the same x, y. Positive means an
+// improvement. x, y are DENSE indices; slots is denseSlotMap(len(result))
+// (see dojoSumMeetRounds' own doc comment). Handed the honest (freshly
+// computed) sum it is correct for any x, y including dojo-mates, which is
+// how TestDojoSwapGainAfter_MatchesFullDrawDelta pins it; delayDojoMeetings'
+// bestRelocation calls it with a `before` built from the
 // per-generation dojoSlotMeetSum decomposition (see that function's own
 // doc comment), which is only valid for the different-dojo x/y pairs
 // bestRelocation's own candidate filter already restricts it to.

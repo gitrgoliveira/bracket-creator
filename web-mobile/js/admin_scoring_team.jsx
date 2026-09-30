@@ -52,7 +52,7 @@ import { SideLabel } from './side_cell.jsx';
 // Imported from the leaf, not read off `window`, for the same reason
 // admin_scoring_shared.jsx does it: write_result.jsx is import-only, and this
 // editor is ES-imported by hosts and tests that never load api_client.
-import { notLandedBanner, terminalFailureBanner, notSavedText, writeDidNotLand, dependentActionBlocked, FETCH_TIMEOUT_MS, REP_BOUT_NOT_ADDED, REP_BOUT_NOT_REMOVED, noAnswerSentence } from './write_result.jsx';
+import { notLandedBanner, terminalFailureBanner, notSavedText, writeDidNotLand, writeWasRefused, writeRetryable, dependentActionBlocked, FETCH_TIMEOUT_MS, REP_BOUT_NOT_ADDED, REP_BOUT_NOT_REMOVED, noAnswerSentence } from './write_result.jsx';
 
 // boutMiddle is THE single source for a bout's centre value (vs/X/(E)/(DH));
 // the editor derives its per-bout middle from it rather than restating the
@@ -884,6 +884,23 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
   useEffectA(() => {
     setMatchOverride(prev => (prev && holdsAnswer(matchModifiedAt, prev.at) ? null : prev));
   }, [matchModifiedAt]);
+  // And once the prop's status moves while its log is already the answer's
+  // own. A send-back, requeue or reopen keeps the bout log and is stamped by
+  // the server's clock, which can read older than a device-stamped answer, so
+  // neither rule above sees it: the log did not change and the stamp is below
+  // `at`. Reached when the answer put back the log the prop still holds (Add,
+  // then Remove before the add reached the prop), and the sheet then kept
+  // showing a sent-back match as running. With the log equal, letting the prop
+  // through cannot drop an added row or bring back a removed one, which is all
+  // the override guards; an older running copy is still held back
+  // (predatesAnswer), since its overtime can predate the answer. Keyed on the
+  // status alone: every server-stamped change that clears a verdict moves it,
+  // and the winner is an object rebuilt on every refetch.
+  const matchStatus = match?.status;
+  useEffectA(() => {
+    setMatchOverride(prev => (prev && prev.match.id === match?.id && subsKey(prev.match.subResults) === matchSubsKey
+      && !predatesAnswer(match, prev) ? null : prev));
+  }, [matchStatus]);
   // mp-gmcg: never carry an open past-bout correction across a match SWITCH,
   // but DO survive a same-match reload. Autosave persists each correction as a
   // running write, which round-trips back over SSE as a fresh `match` object
@@ -2737,13 +2754,21 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
     // call sites that submit with status:"running" -- the ones
     // _notifyScoreSuperseded deliberately stays silent for -- can check
     // writeWasSuperseded themselves. See writeFailed's declaration above.
+    // A refused write disarms the two-tap commits (writeWasRefused): left
+    // armed, one tap re-sent the write just refused. A queued one stays armed.
+    const disarm = () => { if (mountedRef.current) { setFinishArmed(false); setEndArmed(false); } };
     let res;
-    try { res = await fn(); } finally { if (mountedRef.current) setSubmitting(false); }
+    try {
+      res = await fn();
+    } finally {
+      if (mountedRef.current) setSubmitting(false);
+    }
+    if (writeWasRefused(res)) disarm();
     // A queued write has NOT reached the server. Flag it so the banner below
     // says so; the sync subscription clears it once the queue drains, and the
     // terminal-fail subscription replaces it with the not-saved banner if the
     // write is ultimately refused.
-    if (mountedRef.current && res && res.queued === true) setPendingWrite(true);
+    if (mountedRef.current && writeRetryable(res)) setPendingWrite(true);
     return res;
   };
 

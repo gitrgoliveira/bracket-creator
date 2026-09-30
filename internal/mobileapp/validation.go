@@ -815,7 +815,10 @@ type ScoreRequest state.MatchResult
 //     standings).
 //   - Decision (T077, FR-031, contracts/match-decisions.md):
 //     value must be one of fought/hikiwake/kiken/fusenpai/fusensho/
-//     daihyosen/kachinuki-exhaustion (or empty).
+//     daihyosen/kachinuki-exhaustion (or empty). kachinuki-exhaustion is
+//     further limited to a kachinuki competition by
+//     refuseKachinukiDecisionForComp, which the handlers run with the
+//     competition loaded.
 //     kiken/fusenpai require decisionBy and a winning-side scoreline
 //     (2-0 in regulation, 1-0 in encho). fusensho is only
 //     valid on a per-bout SubResult, not on a top-level score request.
@@ -1006,6 +1009,63 @@ func (r *ScoreRequest) validateDecision() error {
 		}
 	}
 	return nil
+}
+
+// kachinukiDecisionMessage is the refusal refuseKachinukiDecisionForComp
+// gives, prefixed with the field that carried the value.
+const kachinukiDecisionMessage = "kachinuki-exhaustion is only for a kachinuki (winner stays on) competition, and this one is not; record the result without it"
+
+// kachinukiDecisionField names the first place a score payload carries the
+// kachinuki win decision: "decision" at match level, "subResults[i].decision"
+// on a bout row, or "" when it carries none.
+func kachinukiDecisionField(r *state.MatchResult) string {
+	const exhaustion = string(domain.DecisionKachinukiExhaustion)
+	if r.Decision == exhaustion {
+		return "decision"
+	}
+	for i := range r.SubResults {
+		if r.SubResults[i].Decision == exhaustion {
+			return fmt.Sprintf("subResults[%d].decision", i)
+		}
+	}
+	return ""
+}
+
+// refuseKachinukiDecisionForComp is the ONE check that the kachinuki win
+// decision ("kachinuki-exhaustion") is written only to a kachinuki
+// competition. validateDecision allows the value because it has no
+// competition to judge it by; this runs where the competition is known, on
+// both doors that take a client decision: PUT /score (through
+// refuseKachinukiDecision) and bulk-score (with the competition it loads once
+// per batch). POST /decision never accepts the value, and quick-score sends
+// no decision. The value is checked at match level and on every bout row,
+// since a bout row's decision has no allowlist of its own. A nil competition
+// is left to the write, which reports it missing.
+func refuseKachinukiDecisionForComp(comp *state.Competition, r *state.MatchResult) *ValidationError {
+	if comp == nil || comp.IsKachinuki() {
+		return nil
+	}
+	field := kachinukiDecisionField(r)
+	if field == "" {
+		return nil
+	}
+	return &ValidationError{Field: field, Message: kachinukiDecisionMessage}
+}
+
+// refuseKachinukiDecision is refuseKachinukiDecisionForComp for PUT /score,
+// which holds no competition record: it loads one only when the payload
+// carries the value, so an ordinary write pays no store read. A load failure
+// is returned as an error (the caller answers 500), never as a refusal that
+// would blame the payload for it.
+func refuseKachinukiDecision(store CompetitionStore, compID string, r *state.MatchResult) (*ValidationError, error) {
+	if kachinukiDecisionField(r) == "" {
+		return nil, nil
+	}
+	comp, err := store.LoadCompetition(compID)
+	if err != nil {
+		return nil, err
+	}
+	return refuseKachinukiDecisionForComp(comp, r), nil
 }
 
 // winningScoreline reports whether exactly one of the two ippon slices

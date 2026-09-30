@@ -15,7 +15,7 @@ import { sameCompetitor } from './competitor_identity.jsx';
 // Imported from the leaf, not read off `window`: this editor is ES-imported by
 // its host and by unit tests that never load api_client, and write_result.jsx
 // is import-only so it can be reached directly (see its header).
-import { notLandedBanner, terminalFailureBanner, notSavedText } from './write_result.jsx';
+import { notLandedBanner, terminalFailureBanner, notSavedText, writeWasRefused, writeRetryable } from './write_result.jsx';
 import { useArmedConfirm, acceptTap, clearTap } from './tap_guard.jsx';
 
 import {
@@ -484,16 +484,21 @@ export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, on
     setSubmitting(true);
     // Clear any prior pending/failed state when the operator explicitly retries.
     if (mountedRef.current) { setPendingWrite(false); setWriteFailed(null); }
+    // A refused write disarms Finish (writeWasRefused): left armed, one tap
+    // re-sent the write just refused. A queued one stays armed.
+    const disarm = () => { if (mountedRef.current) setFinishArmed(false); };
     let res;
     try {
       res = await fn();
     } finally {
       if (mountedRef.current) setSubmitting(false);
     }
+    if (writeWasRefused(res)) disarm();
     // F5: if the terminal write was only queued (offline / transient), do NOT
     // close or advance. Instead enter pending-write mode: show the sticky banner
-    // and remember the submit closure so "Retry now" can re-invoke it.
-    if (res && res.queued) {
+    // and remember the submit closure so "Retry now" can re-invoke it. Only a
+    // queued write is worth re-sending (writeRetryable).
+    if (writeRetryable(res)) {
       if (mountedRef.current) {
         setPendingWrite(true);
         pendingFnRef.current = fn;
@@ -1302,27 +1307,16 @@ export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, on
               RecordedWithdrawal, which unmounts the moment the match is
               running again (the team editor places its copy the same way). */}
           <ReopenFeedback ctl={reopenCtl} testIdPrefix="withdrawal-reopen" />
-          {/* F5: PERMANENT-failure banner: a queued terminal write was rejected
-              (non-retryable 4xx) and dropped, so it never saved. Non-dismissible
-              danger state; the operator must re-enter and submit again. Takes
-              precedence over the (now-cleared) pending banner. */}
+          {/* F5: PERMANENT-failure banner: the write was refused (superseded,
+              refused for the clock, or a 4xx on a queued replay), so it never
+              saved. Non-dismissible danger state. No Retry: a refusal is never
+              fixed by sending the same write again (writeRetryable), and for a
+              superseded one a re-send would overwrite the newer result. The
+              banner says what to do instead. Takes precedence over the
+              (now-cleared) pending banner. */}
           {writeFailed && (
             <div className="pending-write-banner pending-write-banner--failed" role="alert" aria-live="assertive">
               <span>{notSavedText(writeFailed)}</span>
-              {/* Only offer Retry when we still hold the submit closure. After a
-                  reopen/hydration it can't be recovered from the serialized queue,
-                  so a Retry button would be permanently disabled and misleading: 
-                  the banner text already tells the operator to re-enter. */}
-              {pendingFnRef.current && (
-                <button
-                  type="button"
-                  className="btn btn--sm"
-                  disabled={submitting}
-                  onClick={() => doSubmit(pendingFnRef.current)}
-                >
-                  Retry
-                </button>
-              )}
             </div>
           )}
           {/* F5: pending-write banner: shown when a terminal submit was only queued

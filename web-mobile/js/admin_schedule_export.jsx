@@ -80,6 +80,9 @@ export function buildXlsxBody(cfg, cName, players) {
     determined: "on", // preserve the registered participant order (no shuffle)
   });
   if (singlePool || cfg.roundRobin) body.set("roundRobin", "on");
+  // A league's template is one pool and no knockout; /create cannot tell that
+  // from a pools competition that formed a single pool and still plays a final.
+  if (singlePool) body.set("format", FORMAT_LEAGUE);
   // Honour the competition's pool format: "partial" → path-graph match set
   // (the generator otherwise defaults to full round-robin). Mirrors the
   // engine's PoolFormat switch (internal/engine/pools.go).

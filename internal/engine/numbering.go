@@ -433,34 +433,31 @@ func checkPrefixAgainstSiblings(siblings []*state.Competition, name, prefix stri
 // CheckUniqueCompFields verifies that name and prefix are both unique across
 // every OTHER competition (excludeID excluded). Moved from mobileapp's
 // checkUniqueCompFieldsSiblingPolicy (PR #416 finding 1); mobileapp's
-// checkUniqueCompFields / checkUniqueCompFieldsTolerant are now thin wrappers
-// over this.
+// checkUniqueCompFields is a thin wrapper over this.
 //
 // Both fields may be empty to exempt them from the check; when BOTH are
 // empty nothing is validated and the sibling set is never even loaded, so a
 // caller that validates only what it moved and moved neither field pays no
 // sibling-load cost.
 //
-// tolerateUnreadableSibling selects siblingCompetitions' policy: STRICT
-// (false) is for create/import, which can be retried by the operator, so
-// silently skipping a sibling and letting a genuine collision through would
-// be the wrong trade; TOLERANT (true) is for a caller that cannot defer the
-// way create/import can (the start/generate-draw pre-flight).
+// The sibling walk is STRICT: its callers (create/import) can be retried by
+// the operator, so silently skipping an unreadable sibling and letting a
+// genuine collision through would be the wrong trade. The start/generate-
+// draw pre-flight, which cannot defer that way, applies the tolerant policy
+// through EnsureNumberPrefix instead.
 //
-// Returns the ids of any sibling this call could not read (only possible
-// under the tolerant policy) and a single error: a collision is a
-// *ValidationError, an infrastructure fault (the list/load itself failing
-// under the strict policy) is a plain error.
-func (e *Engine) CheckUniqueCompFields(name, prefix, excludeID string, tolerateUnreadableSibling bool) (skipped []string, err error) {
+// Returns a single error: a collision is a *ValidationError, an
+// infrastructure fault (the list/load itself failing) is a plain error.
+func (e *Engine) CheckUniqueCompFields(name, prefix, excludeID string) error {
 	prefix = strings.TrimSpace(prefix)
 	if name == "" && prefix == "" {
-		return nil, nil
+		return nil
 	}
-	siblings, skipped, err := e.siblingCompetitions(excludeID, tolerateUnreadableSibling)
+	siblings, _, err := e.siblingCompetitions(excludeID, false)
 	if err != nil {
-		return skipped, err
+		return err
 	}
-	return skipped, checkPrefixAgainstSiblings(siblings, name, prefix)
+	return checkPrefixAgainstSiblings(siblings, name, prefix)
 }
 
 // EnsureNumberPrefix is the ONE engine-level implementation of the derive ->

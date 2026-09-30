@@ -157,3 +157,90 @@ describe.each(SITES)('bc-dtfn: $name', ({ match, withNext, button, armed }) => {
     expect(completed()).toBe(1);
   });
 });
+
+// A refused commit disarms. The write came back refused (writeWasRefused,
+// write_result.jsx): the host reported it and handed back nothing (a busy
+// shiaijo, a finished match, a barred competitor: every host catches the
+// refusal editMatchScore rethrows, reports it and returns nothing), or the
+// server answered applied:false (superseded, or refused for the clock).
+// Left armed, the button still read "Tap again to finish" and one more tap
+// re-sent the write just refused, which for a superseded one overwrites the
+// newer result. The engi Save was worse: it stayed on "Saving…", disabled.
+// A QUEUED commit is different: it will land, so it stays armed, and one tap
+// sends it again as the pending banner's Retry now does.
+const engiMatch = () => ({
+  id: 'm-engi', compId: 'comp1', status: 'running', phase: 'pool', poolName: 'Pool 1', court: 'A',
+  compEngi: true,
+  sideA: { id: 'pa', name: 'Aoi - Haru', dojo: 'DojoA' },
+  sideB: { id: 'pb', name: 'Bo - Cho', dojo: 'DojoB' },
+  flagsA: 3, flagsB: 0,
+});
+
+const COMMITS = [
+  ...SITES,
+  { name: 'engi Save', match: engiMatch, button: () => screen.getByTestId('engi-submit'), armed: 'Tap again to save' },
+];
+
+const REFUSALS = [
+  ['the host reported the refusal and handed back nothing', undefined],
+  ['the write was superseded', { applied: false, reason: 'superseded' }],
+  ['the write was refused for the clock', { applied: false, reason: 'clock_skew' }],
+];
+
+async function mountCommit(match, withNext, outcome) {
+  // The commit goes to onSubmitAndNext where there is one, else to onSubmit.
+  const host = vi.fn().mockResolvedValue(outcome);
+  const onSubmit = withNext ? vi.fn().mockResolvedValue({}) : host;
+  if (match.compFormat === 'knockout') {
+    window.API.fetchCompetitionDetails.mockResolvedValue({
+      id: 'comp1', config: { format: 'knockout', teamMatchType: 'kachinuki', naginata: false, players: [] },
+    });
+  } else {
+    window.API.fetchCompetitionDetails.mockResolvedValue(null);
+  }
+  await act(async () => {
+    render(<ScoreEditorModal match={match} onClose={vi.fn()} onSubmit={onSubmit} onSubmitAndNext={withNext ? host : undefined} password="" />);
+  });
+  return host;
+}
+
+async function commitOnce(btn) {
+  await pointerTap(btn);
+  await wait(TAP_BOUNCE_MS + 50);
+  await pointerTap(btn);
+  await wait(10);
+}
+
+describe.each(COMMITS)('a refused commit disarms: $name', ({ match, withNext, button, armed }) => {
+  it.each(REFUSALS)('when %s', async (_how, outcome) => {
+    const host = await mountCommit(match(), withNext, outcome);
+    // Found once by its resting label and kept: the label changes as it arms.
+    const btn = button();
+    const unarmed = btn.textContent;
+
+    await commitOnce(btn);
+    expect(host, 'the commit was sent and refused').toHaveBeenCalledTimes(1);
+    expect(btn.textContent, 'disarmed').toBe(unarmed);
+    expect(btn.disabled, 'enabled again').toBe(false);
+
+    await wait(TAP_BOUNCE_MS + 50);
+    await pointerTap(btn);
+    await wait(10);
+    expect(host, 'one tap does not re-send it').toHaveBeenCalledTimes(1);
+    expect(btn.textContent, 'it arms again').toMatch(armed);
+  });
+
+  it('a queued commit stays armed: it will land, and one tap sends it again', async () => {
+    const host = await mountCommit(match(), withNext, { queued: true });
+    const btn = button();
+
+    await commitOnce(btn);
+    expect(host).toHaveBeenCalledTimes(1);
+    expect(btn.textContent).toMatch(armed);
+
+    await wait(TAP_BOUNCE_MS + 50);
+    await pointerTap(btn);
+    await wait(10);
+    expect(host).toHaveBeenCalledTimes(2);
+  });
+});

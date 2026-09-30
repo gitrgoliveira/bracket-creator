@@ -1234,7 +1234,12 @@ async function _flushQueue() {
                     effectiveUrl = `/api/competitions/${compID}/matches/${matchID}/score`;
                 }
                 try {
-                    const res = await fetchWithTimeout(effectiveUrl, {
+                    // Bounded, the body read included (_fetchJson): this loop is
+                    // single-flight, so one replay whose body never completed
+                    // would stop every later flush. Past the deadline it is a
+                    // network failure like any other (the catch below): kept and
+                    // retried, and the answer each branch reads is `replyBody`.
+                    const { res, body: replyBody } = await _fetchJson(effectiveUrl, {
                         method: effectiveMethod,
                         headers: { 'Content-Type': 'application/json', 'X-Tournament-Password': password },
                         // Never a replayed confirmation, whatever the entry holds:
@@ -1259,7 +1264,7 @@ async function _flushQueue() {
                             // stamps a decision would have the drop swallowed silently -
                             // the entry deleted as delivered, nothing said - which is the
                             // exact failure bc-lww1 was.
-                            const body = await res.json().catch(() => ({}));
+                            const body = replyBody;
                             if (writeWasRefusedForClock(body)) {
                                 // bc-cse: NOT a supersede. The server refused this
                                 // replay because the stamp it carries is in the
@@ -1341,8 +1346,9 @@ async function _flushQueue() {
                         } else if (!terminal && kind === 'score') {
                             // bc-cse MEDIUM-2. A RUNNING score replay is normally
                             // fire-and-forget: res.ok is taken as delivered and the
-                            // entry is deleted unread. That is right for every body
-                            // this endpoint can return EXCEPT the clock-skew refusal,
+                            // entry is deleted without a look at the answer. That is
+                            // right for every body this endpoint can return EXCEPT
+                            // the clock-skew refusal,
                             // where res.ok means the exact opposite of delivered -
                             // nothing was written, and deleting the entry throws the
                             // snapshot away. Most of what it carried is level-triggered
@@ -1352,11 +1358,11 @@ async function _flushQueue() {
                             // holds it and the winner-stays sequence stalls until the
                             // operator presses Record bout again.
                             //
-                            // So this arm parses the body for that ONE case. Every other
+                            // So this arm reads the body for that ONE case. Every other
                             // body - a plain 200, {stale:true}, reason 'superseded', no
                             // reason at all - falls straight through to the same
                             // delete-as-delivered below, byte-identically to before.
-                            const body = await res.json().catch(() => ({}));
+                            const body = replyBody;
                             const refusedForClock = writeWasRefusedForClock(body);
                             if (refusedForClock && !descriptor.skewRetried) {
                                 await _restampQueuedEntryForSkew(descriptor);
@@ -1414,7 +1420,7 @@ async function _flushQueue() {
                         // Fire ON the crossing (=== not >=) so one wedged write
                         // announces once, not on every retry for the next 12 hours.
                         if (rejections === SERVER_REJECTION_NOTICE_THRESHOLD) {
-                            const body = await res.json().catch(() => ({}));
+                            const body = replyBody;
                             console.warn(`[sync] queued ${kind || 'running'} write still failing after ${rejections} server rejections (${res.status}); keeping it queued:`, body);
                             _notifyQueueAlert({
                                 kind: 'server_error',
@@ -1442,7 +1448,7 @@ async function _flushQueue() {
                         // anyFailed: with nothing else queued the flush goes quiet
                         // instead of burning a retry every 8s for 12 hours.
                         if (!descriptor.authBlocked) {
-                            const body = await res.json().catch(() => ({}));
+                            const body = replyBody;
                             console.warn(`[sync] parking queued ${kind || 'running'} write pending re-auth (${res.status}):`, body);
                             descriptor.authBlocked = true;
                             _notifyQueueAlert({
@@ -1468,7 +1474,7 @@ async function _flushQueue() {
                         // IMPORTANT: this lost-response rule applies ONLY to queued retries
                         // inside _flushQueue. The direct recordDecision call path always throws
                         // on 409 so the score editor's force-retry prompt still fires.
-                        const body = await res.json().catch(() => ({}));
+                        const body = replyBody;
                         if (body.error !== 'decision_locked' && body.error !== 'already_ineligible') {
                             console.warn(`[sync] queued decision write rejected (409):`, body);
                             // bc-cse: a queued kiken/fusenpai/daihyosen correction can hit
@@ -1504,7 +1510,7 @@ async function _flushQueue() {
                         // the latter reaches only an operator with this exact match
                         // open, which is precisely not the case when a queued write
                         // fails minutes later on a different court.
-                        const body = await res.json().catch(() => ({}));
+                        const body = replyBody;
                         console.warn(`[sync] queued ${kind || 'running'} write rejected (${res.status}):`, body);
                         // bc-cse: a queued knockout correction (score OR decision) can
                         // land here too -- offline, or during a transient-5xx retry run,
@@ -1530,7 +1536,8 @@ async function _flushQueue() {
                         _dequeue(key, descriptor);
                     }
                 } catch (_) {
-                    // fetch rejected (network down) or aborted by fetchWithTimeout.
+                    // fetch rejected (network down), or the request or its body
+                    // was given up at the deadline (_fetchJson).
                     anyFailed = true;
                     networkFailed = true;
                 }
@@ -2876,12 +2883,13 @@ const API = {
             await _learnServerClockOffset();
             payload.modifiedAt = _serverNowMs();
             let retryRes;
+            let retryBody;
             try {
-                retryRes = await fetchWithTimeout(scoreUrl, {
+                ({ res: retryRes, body: retryBody } = await _fetchJson(scoreUrl, {
                     method: 'PUT',
                     headers: { 'Content-Type': 'application/json', 'X-Tournament-Password': password },
                     body: JSON.stringify(payload),
-                });
+                }));
             } catch (_networkErr) {
                 _enqueueTerminalWrite(
                     _revKey(compID, matchID), 'score', 'PUT', scoreUrl,
@@ -2890,7 +2898,6 @@ const API = {
                 _broadcastPatch(payload);
                 return { queued: true };
             }
-            const retryBody = await retryRes.json().catch(() => ({}));
             if (retryRes.ok) return await _handleOkBody(retryBody, false);
             if (retryRes.status >= 500 || retryRes.status === 429) {
                 _enqueueTerminalWrite(
@@ -2907,18 +2914,24 @@ const API = {
         };
 
         let res;
+        let data;
         try {
             try {
-                // F1: use fetchWithTimeout (12 s) so a stalled wifi request doesn't
-                // block the UI indefinitely. An abort is treated as a network failure.
-                res = await fetchWithTimeout(scoreUrl, {
+                // F1: bounded (12 s), the body read included (_fetchJson), so
+                // neither a stalled request nor a body that never completes
+                // holds the editor that awaits this write. Past the deadline it
+                // is a network failure: queued below and replayed, which is
+                // safe even if the server did store it, because the replay
+                // carries the same stamp (and rev) and the write guard is
+                // last-write-wins with an equal stamp re-applying.
+                ({ res, body: data } = await _fetchJson(scoreUrl, {
                     method: 'PUT',
                     headers: {
                         'Content-Type': 'application/json',
                         'X-Tournament-Password': password
                     },
                     body: JSON.stringify(payload)
-                });
+                }));
             } catch (_networkErr) {
                 // Network failure or timeout abort. For running-status writes,
                 // queue for retry: last-write-wins semantics so only the latest state
@@ -2969,7 +2982,6 @@ const API = {
             }
         }
 
-        const data = await res.json().catch(() => ({}));
         if (res.ok) return await _handleOkBody(data, true);
         // A running write that failed with a RETRYABLE server error (5xx / 429)
         // is queued for offline-style retry. Without this the inflight counter
@@ -3021,7 +3033,7 @@ const API = {
     // MUST be "shiro" or "aka", decisionReason is optional and ≤200 chars.
     // Response is the updated state.MatchResult.
     //
-    // F1: uses fetchWithTimeout (12 s abort on stalled wifi).
+    // F1: bounded (12 s abort on stalled wifi), the body read included.
     // F5: on network failure / abort / 5xx / 429 the decision is enqueued as a
     // terminal write for durable re-delivery. 4xx (including 409 decision_locked
     // on the DIRECT call) always throw: the score editor relies on a thrown 409
@@ -3037,16 +3049,18 @@ const API = {
         // could order it against the bouts around it (mp-jnvl).
         const payload = { ...body, modifiedAt: _serverNowMs() };
         let res;
+        let data;
         try {
-            // F1: abort after 12 s; AbortError propagates as network failure.
-            res = await fetchWithTimeout(decisionUrl, {
+            // F1: abort after 12 s, the body read included (_fetchJson, as
+            // recordScore); past it the decision is queued as a network failure.
+            ({ res, body: data } = await _fetchJson(decisionUrl, {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
                     'X-Tournament-Password': password
                 },
                 body: JSON.stringify(payload)
-            });
+            }));
         } catch (_networkErr) {
             // F5: network failure or timeout: enqueue as terminal for retry.
             _enqueueTerminalWrite(
@@ -3067,7 +3081,7 @@ const API = {
             // 4xx (including 409 decision_locked): throw immediately so the UI
             // can surface the error. The decision-locked-as-success rule is ONLY
             // for queued retries in _flushQueue, not for direct calls.
-            const err = await res.json().catch(() => ({}));
+            const err = data;
             // bc-rawm: the eligibility gate (mp-dc52 Phase 3) refuses a
             // decision exactly as it refuses a score write -- 409
             // ineligible_competitor / already_ineligible carrying a full
@@ -3092,7 +3106,6 @@ const API = {
             // attemptScoreWrite).
             throw _downstreamRefusalError(err) || new Error(err.error || "Failed to record decision");
         }
-        const data = await res.json();
         // bc-cse, LIVE since mp-jnvl: the /decision handler maps a superseded
         // write to 200 {"applied": false}, and a decision now carries a real
         // modifiedAt (stamped above, exactly as recordScore stamps its own
@@ -3199,17 +3212,19 @@ const API = {
         const payload = { winnerName, modifiedAt: _serverNowMs() };
         if (forceDownstreamReopen) payload.forceDownstreamReopen = true;
         let res;
+        let body;
         try {
-            // fetchWithTimeout so a stalled request is treated as offline rather
-            // than hanging the "Run now" flow.
-            res = await fetchWithTimeout(url, {
+            // Bounded, the body read included (_fetchJson), so a stalled
+            // request or body is treated as offline rather than hanging the
+            // "Run now" flow.
+            ({ res, body } = await _fetchJson(url, {
                 method: 'PUT',
                 headers: {
                     'Content-Type': 'application/json',
                     'X-Tournament-Password': password
                 },
                 body: JSON.stringify(payload)
-            });
+            }));
         } catch (_networkErr) {
             // mp-y3nk Phase 4: offline / timeout. An operator's feeder-winner
             // assertion (the "Run now" recovery) must survive an update outage
@@ -3225,7 +3240,7 @@ const API = {
             return { queued: true };
         }
         if (!res.ok) {
-            const err = await res.json().catch(() => ({}));
+            const err = body;
             // bc-kcdg: 409 downstream_knockout_played (this feeder's assertion
             // would repaint a later match that already played on the current
             // winner) is parsed into the same structured error recordScore
@@ -3239,7 +3254,6 @@ const API = {
         // the caller must NOT trust its optimistic pick. An older server (or any
         // absent body) yields {} here; default applied=true so back-compat callers
         // keep advancing exactly as before.
-        const body = await res.json().catch(() => ({}));
         let applied = body.applied !== false;
         // The body that produced the FINAL verdict, which the resend below may
         // replace. bc-cse: the reason travels back out to the caller, because a
@@ -3258,22 +3272,21 @@ const API = {
             await _learnServerClockOffset();
             payload.modifiedAt = _serverNowMs();
             let retryRes;
+            let retryBody;
             try {
-                retryRes = await fetchWithTimeout(url, {
+                ({ res: retryRes, body: retryBody } = await _fetchJson(url, {
                     method: 'PUT',
                     headers: { 'Content-Type': 'application/json', 'X-Tournament-Password': password },
                     body: JSON.stringify(payload),
-                });
+                }));
             } catch (_networkErr) {
                 // Same durability rule as the first attempt: queue it and say so.
                 _enqueueTerminalWrite(`override:${compID}:${matchID}`, 'override', 'PUT', url, payload, password, compID, matchID);
                 return { queued: true };
             }
             if (!retryRes.ok) {
-                const retryErr = await retryRes.json().catch(() => ({}));
-                throw new Error(retryErr.error || "Failed to override winner");
+                throw new Error(retryBody.error || "Failed to override winner");
             }
-            const retryBody = await retryRes.json().catch(() => ({}));
             applied = retryBody.applied !== false;
             verdict = retryBody;
             // Refused twice: never a third attempt. The caller already treats

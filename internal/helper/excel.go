@@ -1693,7 +1693,11 @@ func printSingleEliminationMatch(f *excelize.File, sheetName string, elimination
 			if IsPoolFinalistPlaceholder(n.LeafVal) {
 				return fmt.Sprintf("CONCATENATE(\"%s \",'%s'!%s)", n.LeafVal, poolMatchWinners[n.LeafVal].sheetName, poolMatchWinners[n.LeafVal].cell)
 			}
-			return fmt.Sprintf("'%s'!%s", poolMatchWinners[n.LeafVal].sheetName, poolMatchWinners[n.LeafVal].cell)
+			key := n.LeafVal
+			if n.EntrantKey != "" {
+				key = n.EntrantKey
+			}
+			return fmt.Sprintf("'%s'!%s", poolMatchWinners[key].sheetName, poolMatchWinners[key].cell)
 		}
 		winnerFromMatch := MatchRefLabel(int(n.matchNum))
 		mw := matchWinners[winnerFromMatch]

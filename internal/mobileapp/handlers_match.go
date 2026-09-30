@@ -1877,6 +1877,15 @@ var errRepBoutRemoved = &selfRunRefusal{
 	message: "This match's representative bout was removed on another device. Reload the score sheet before finishing.",
 }
 
+// errRepBoutAdded refuses a participant's finish that lists the bouts without
+// the representative bout the match has: it was decided on a sheet that never
+// saw the row. Any other write keeps the stored row (holdSelfReportedWriteUnderTx).
+var errRepBoutAdded = &selfRunRefusal{
+	status:  http.StatusConflict,
+	code:    "daihyosen_added",
+	message: "A representative bout was added to this match on another device. Reload the score sheet before finishing.",
+}
+
 // holdSelfReportedWriteUnderTx is the one judge of an anonymous self-run score
 // write. It runs inside WithTransaction (under the per-comp lock), so the
 // stored match it reads, once, cannot change before the write lands. It
@@ -1896,7 +1905,10 @@ var errRepBoutRemoved = &selfRunRefusal{
 //     and the rest of the write goes on to be written as usual, the timestamp
 //     guard deciding a stale one. A write that finishes the match is refused
 //     instead (errRepBoutRemoved), since a finish may take its winner from
-//     that row.
+//     that row. Nor does it remove one (only the remove route does, with its
+//     unscored check): a write listing the bouts without the row the match
+//     has comes from a sheet a moment behind an add, so the stored row is
+//     kept, scored or not, and a finish is refused (errRepBoutAdded).
 //   - Once the organiser recorded a judges' decision on the representative
 //     bout, the write's row must send it back (sameHanteiVerdict) or leave the
 //     row's ippons out (engine.KeepsStoredDaihyosenVerdict), a write listing
@@ -1948,6 +1960,15 @@ func holdSelfReportedWriteUnderTx(stx state.StoreTx, compID, matchID string, res
 		kept := make([]state.SubMatchResult, 0, len(subs)-1)
 		result.SubResults = append(append(kept, subs[:row]...), subs[row+1:]...)
 		log.Printf("mobileapp: dropped the representative bout from a self-run score write to %s/%s because the match has none; the rest of the write was kept", compID, matchID)
+		return nil
+	}
+	if stored != nil && row < 0 && subs != nil && !stored.HanteiDecided() {
+		if result.Status == state.MatchStatusCompleted {
+			return errRepBoutAdded
+		}
+		kept := append(append([]state.SubMatchResult(nil), subs...), state.CloneSubResults([]state.SubMatchResult{*stored})[0])
+		result.SubResults = kept
+		log.Printf("mobileapp: kept the representative bout a self-run score write to %s/%s left out; the rest of the write was kept", compID, matchID)
 		return nil
 	}
 	if stored == nil || !stored.HanteiDecided() {

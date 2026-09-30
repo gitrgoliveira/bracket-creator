@@ -35,15 +35,16 @@ func (e *Engine) KachinukiDetailMatches(id string) ([]helper.KachinukiMatchDetai
 
 // collectKachinukiMatches returns one Kachinuki Detail section per match of
 // a kachinuki competition's draw, for both workbook exports, and nil for any
-// other competition. A match with recorded bouts lists exactly those; a match
-// with none gets comp.TeamBoutRows() empty numbered rows for hand entry
-// (operator decision 2026-09-27, bc-kdsc).
+// other competition. A match with recorded bouts lists exactly those; one
+// still to be decided with none gets comp.TeamBoutRows() empty numbered rows
+// for hand entry (operator decision 2026-09-27, bc-kdsc), and one decided
+// without a bout gets none, since nothing is left to enter.
 //
-// The function is read-only: load pool matches, bracket, and team lineups,
-// flatten into helper.KachinukiMatchDetail. The order is pool matches in
-// persisted order, then bracket matches by match number (the order the
-// Elimination Matches sheet prints them, not storage order), then the
-// 3rd-place match.
+// The function is read-only: load pools, pool matches, bracket, and team
+// lineups, flatten into helper.KachinukiMatchDetail. The order is pool
+// matches in the Pool Matches grid's order, then bracket matches by match
+// number (the order the Elimination Matches sheet prints them, not storage
+// order), then the 3rd-place match.
 func (e *Engine) collectKachinukiMatches(compID string, comp *state.Competition) ([]helper.KachinukiMatchDetail, error) {
 	if !comp.IsKachinuki() {
 		return nil, nil
@@ -65,29 +66,47 @@ func (e *Engine) collectKachinukiMatches(compID string, comp *state.Competition)
 	squads := e.buildKachinukiSquads(compID)
 
 	var out []helper.KachinukiMatchDetail
-	// section builds a match's section; one with no bout recorded gets the
-	// empty rows for hand entry.
+	// section builds a match's section; one not yet decided and with no bout
+	// recorded gets the empty rows for hand entry.
 	section := func(m *state.MatchResult, label string) helper.KachinukiMatchDetail {
 		detail := buildKachinukiDetail(m, label, positionByPlayer, teamNumbers, squads)
-		if len(detail.Bouts) == 0 {
+		if len(detail.Bouts) == 0 && m.Status != state.MatchStatusCompleted {
 			detail.BlankBoutRows = comp.TeamBoutRows()
 		}
 		return detail
 	}
 
-	// Pool matches first. A tie-break or daihyosen row is not a match of the
-	// draw (the Pool Matches sheet prints no block for it), so it has a
-	// section only once it has bouts.
+	// Pool matches first, numbered as the Pool Matches grid lists them
+	// (helper.EachPoolMatch, shared with the blank template). A row the grid
+	// has no block for (a tie-break or daihyosen) has a section only once it
+	// has bouts, titled by its operator label rather than a draw number.
 	poolMatches, err := e.store.LoadPoolMatches(compID)
 	if err != nil {
 		return nil, err
 	}
+	pools, err := e.store.LoadPools(compID)
+	if err != nil {
+		return nil, err
+	}
+	ordinals := AttachPoolMatches(pools, poolMatches)
+	byID := make(map[string]*state.MatchResult, len(poolMatches))
+	for i := range poolMatches {
+		byID[poolMatches[i].ID] = &poolMatches[i]
+	}
+	listed := make(map[string]bool, len(poolMatches))
+	helper.EachPoolMatch(pools, func(label string, pool helper.Pool, i int) {
+		id := fmt.Sprintf("%s-%d", pool.PoolName, ordinals[pool.PoolName][i])
+		if m := byID[id]; m != nil {
+			listed[id] = true
+			out = append(out, section(m, label))
+		}
+	})
 	for i := range poolMatches {
 		m := &poolMatches[i]
-		if len(m.SubResults) == 0 && (IsPoolDaihyosenMatchID(m.ID) || IsTiebreakerMatchID(m.ID)) {
+		if listed[m.ID] || len(m.SubResults) == 0 {
 			continue
 		}
-		out = append(out, section(m, helper.PoolMatchLabel(i+1)))
+		out = append(out, section(m, OperatorMatchLabel(comp, nil, m.ID)))
 	}
 
 	// Bracket matches in match-number order, the order the Elimination Matches

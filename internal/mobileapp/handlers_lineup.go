@@ -259,6 +259,10 @@ func RegisterLineupHandlers(r *gin.RouterGroup, store TeamLineupStore, comps Com
 		if !ok {
 			return
 		}
+		anonymous, ok := selfRunAnonymous(c, tl, verifier)
+		if !ok {
+			return
+		}
 		var req LineupRequest
 		if err := c.ShouldBindJSON(&req); err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
@@ -272,14 +276,10 @@ func RegisterLineupHandlers(r *gin.RouterGroup, store TeamLineupStore, comps Com
 			Positions:     req.Positions,
 			MemberIDs:     req.MemberIDs,
 		}
-		anonymous, ok := selfRunAnonymous(c, tl, verifier)
-		if !ok {
-			return
-		}
 		// An anonymous self-run caller writes from the public score sheet,
-		// so the score path's rule holds: the match must exist, and once it
-		// has finished its lineup is part of the result, which only the
-		// organiser corrects (holdSelfReportedWriteUnderTx refuses the same
+		// so the score path's rule holds: the match must exist and hold the
+		// team by id (errTeamNotInMatch), and once it has finished its lineup
+		// is part of the result, which only the organiser corrects (holdSelfReportedWriteUnderTx refuses the same
 		// caller on the result itself). Read under the save's lock, like that
 		// check, and refused with the same result_finalized body. An
 		// organiser keeps the always-editable rule.
@@ -293,6 +293,9 @@ func RegisterLineupHandlers(r *gin.RouterGroup, store TeamLineupStore, comps Com
 				}
 				if !found {
 					return &txResponse{status: http.StatusNotFound, body: gin.H{"error": "match not found"}}
+				}
+				if teamID != snap.Pairing.SideAID && teamID != snap.Pairing.SideBID {
+					return errTeamNotInMatch.response()
 				}
 				if isMatchFinalized(snap.Status) {
 					return resultFinalized("This match has finished, so its lineup can no longer be changed. Contact the tournament organizer to correct it.").response()
@@ -317,6 +320,16 @@ func RegisterLineupHandlers(r *gin.RouterGroup, store TeamLineupStore, comps Com
 		c.Status(http.StatusNoContent)
 		hub.Broadcast(EventLineupUpdated, gin.H{"competitionId": compID})
 	})
+}
+
+// errTeamNotInMatch refuses a participant's lineup write for a team the
+// match does not hold by id: nothing reads such a lineup, and each one would
+// add a key to lineups.yaml. A side with no id yet (an unresolved knockout
+// feeder) takes no participant's lineup either.
+var errTeamNotInMatch = &selfRunRefusal{
+	status:  http.StatusNotFound,
+	code:    "team_not_in_match",
+	message: "This team is not in this match. Reload the score sheet and try again.",
 }
 
 // saveLineup is the body the round and the match lineup PUTs share. Under one

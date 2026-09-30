@@ -49,14 +49,34 @@ func isPureKnockout(comp *state.Competition, pools []helper.Pool) bool {
 // unreachable through the one that exists, so what it actually bought was a
 // second exported entry into this derivation -- the thing EliminationDraw is
 // the single owner of (mp-ndfu) -- plus a redundant draw build.
-func knockoutLeaves(store *state.Store, comp *state.Competition, pools []helper.Pool, bracket *state.Bracket) []string {
+//
+// keys is parallel to leaves: each competitor's identity (helper.PlayerKey
+// form), or "" for a bye or a legacy side stored without an id.
+func knockoutLeaves(store *state.Store, comp *state.Competition, pools []helper.Pool, bracket *state.Bracket) (leaves, keys []string) {
 	if !isPureKnockout(comp, pools) {
-		return nil
+		return nil, nil
 	}
 	if leaves := KnockoutLeavesFromBracket(bracket); len(leaves) > 0 {
-		return leaves
+		keys := make([]string, 0, len(leaves))
+		for _, m := range bracket.Rounds[0] {
+			keys = append(keys, sideKey(m.SideAID), sideKey(m.SideBID))
+		}
+		return leaves, keys
 	}
-	return KnockoutFinalsFromParticipants(store, comp)
+	seeded := seededKnockoutParticipants(store, comp)
+	leaves = make([]string, len(seeded))
+	keys = make([]string, len(seeded))
+	for i, p := range seeded {
+		leaves[i], keys[i] = p.Name, helper.PlayerKey(p)
+	}
+	return leaves, keys
+}
+
+func sideKey(id string) string {
+	if id == "" {
+		return ""
+	}
+	return helper.CompetitorKey(id, "", "")
 }
 
 // poolDraw builds the pool-fed court-first draw, or nil when the competition
@@ -235,13 +255,25 @@ func EliminationDraw(store *state.Store, comp *state.Competition, pools []helper
 	if draw := poolDraw(comp, pools, numCourts); draw != nil {
 		return draw
 	}
-	leaves := knockoutLeaves(store, comp, pools, bracket)
+	leaves, keys := knockoutLeaves(store, comp, pools, bracket)
 	if len(leaves) == 0 {
 		return nil
 	}
 	// nil (every slot a bye) falls through NewKnockoutDraw as a nil draw, which
 	// the callers already treat as "nothing to render".
-	return helper.NewKnockoutDraw(helper.BuildSlotTree(leaves), numCourts)
+	draw := helper.NewKnockoutDraw(helper.BuildSlotTree(leaves), numCourts)
+	if draw == nil {
+		return nil
+	}
+	// An empty slot builds no leaf, so its key is dropped to keep the rest aligned.
+	leafKeys := make([]string, 0, len(keys))
+	for i, k := range keys {
+		if leaves[i] != "" {
+			leafKeys = append(leafKeys, k)
+		}
+	}
+	helper.StampEntrantKeys(draw.Root, leafKeys)
+	return draw
 }
 
 // KnockoutLeavesFromBracket reconstructs the pow2 leaf ordering the engine used to
@@ -277,6 +309,20 @@ func KnockoutLeavesFromBracket(bracket *state.Bracket) []string {
 // acceptable. Returns nil when participants can't be loaded, in which case no
 // elimination sheet is rendered.
 func KnockoutFinalsFromParticipants(store *state.Store, comp *state.Competition) []string {
+	seeded := seededKnockoutParticipants(store, comp)
+	if seeded == nil {
+		return nil
+	}
+	names := make([]string, len(seeded))
+	for i, p := range seeded {
+		names[i] = p.Name
+	}
+	return names
+}
+
+// seededKnockoutParticipants is KnockoutFinalsFromParticipants' seeded roster,
+// players rather than names, so a caller can key each leaf by identity.
+func seededKnockoutParticipants(store *state.Store, comp *state.Competition) []helper.Player {
 	players, err := store.LoadParticipants(comp.ID, comp.EffectiveWithZekkenName())
 	if err != nil || len(players) == 0 {
 		return nil
@@ -311,12 +357,7 @@ func KnockoutFinalsFromParticipants(store *state.Store, comp *state.Competition)
 	// calls are hoisted -- caching is not needed to close repeated
 	// re-export cost, but that conclusion depends on BOTH fixes, not item
 	// 2 in isolation.
-	seeded := helper.StandardSeeding(players)
-	names := make([]string, len(seeded))
-	for i, p := range seeded {
-		names[i] = p.Name
-	}
-	return names
+	return helper.StandardSeeding(players)
 }
 
 // CompetitionCourts is the shiaijo a competition runs on, by NAME.

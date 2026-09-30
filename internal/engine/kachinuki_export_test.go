@@ -11,6 +11,7 @@ import (
 	"github.com/gitrgoliveira/bracket-creator/internal/domain"
 	"github.com/gitrgoliveira/bracket-creator/internal/helper"
 	"github.com/gitrgoliveira/bracket-creator/internal/state"
+	bctest "github.com/gitrgoliveira/bracket-creator/internal/test/idstamp"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	excelize "github.com/xuri/excelize/v2"
@@ -280,11 +281,28 @@ func TestCollectKachinukiMatches_NilComp(t *testing.T) {
 	assert.Nil(t, out)
 }
 
+// saveKachinukiPool saves one pools.csv pool holding teams, returning each
+// team's participant id: a pool section is listed from the grid, which
+// resolves a stored row's sides by id.
+func saveKachinukiPool(t *testing.T, store *state.Store, compID, poolName string, teams ...string) map[string]string {
+	t.Helper()
+	ids := make(map[string]string, len(teams))
+	players := make([]helper.Player, len(teams))
+	for i, team := range teams {
+		ids[team] = bctest.StampPlayerID(team, "Dojo")
+		players[i] = helper.Player{ID: ids[team], Name: team, Dojo: "Dojo"}
+	}
+	pools, err := store.LoadPools(compID)
+	require.NoError(t, err)
+	require.NoError(t, store.SavePools(compID, append(pools, helper.Pool{PoolName: poolName, Players: players})))
+	return ids
+}
+
 // TestCollectKachinukiMatches_PoolMatchesWithBouts verifies that a pool
 // match with sub-results lists exactly those bouts, a pool match with none
 // gets 2*teamSize-1 empty rows for hand entry (operator decision 2026-09-27,
 // bc-kdsc), and a tie-break or daihyosen row has a section only once it has
-// bouts, since it is not a match of the draw.
+// bouts, titled by its operator label since it is not a match of the draw.
 func TestCollectKachinukiMatches_PoolMatchesWithBouts(t *testing.T) {
 	eng, store, _ := setupTestEngine(t)
 	compID := "kachinuki-collect"
@@ -297,21 +315,26 @@ func TestCollectKachinukiMatches_PoolMatchesWithBouts(t *testing.T) {
 		TeamSize:      5,
 		Status:        state.CompStatusPools,
 	}))
+	ids := saveKachinukiPool(t, store, compID, "Pool A", "RedTeam", "WhiteTeam", "AlphaTeam", "BetaTeam")
 
 	matches := []state.MatchResult{
 		{
-			ID:    "P1-0",
-			SideA: "RedTeam",
-			SideB: "WhiteTeam",
+			ID:      "Pool A-0",
+			SideA:   "RedTeam",
+			SideB:   "WhiteTeam",
+			SideAID: ids["RedTeam"],
+			SideBID: ids["WhiteTeam"],
 			SubResults: []state.SubMatchResult{
 				{Position: 1, SideA: "R1", SideB: "W1", Winner: "R1", Decision: "fought"},
 			},
 		},
 		{
 			// No sub-results: empty rows for hand entry.
-			ID:    "P1-1",
-			SideA: "AlphaTeam",
-			SideB: "BetaTeam",
+			ID:      "Pool A-1",
+			SideA:   "AlphaTeam",
+			SideB:   "BetaTeam",
+			SideAID: ids["AlphaTeam"],
+			SideBID: ids["BetaTeam"],
 		},
 		// Supplementary rows: skipped while empty, listed once fought.
 		{ID: "Pool A-TB-0", SideA: "AlphaTeam", SideB: "RedTeam"},
@@ -347,7 +370,7 @@ func TestCollectKachinukiMatches_PoolMatchesWithBouts(t *testing.T) {
 	assert.Empty(t, out[1].Bouts)
 	assert.Equal(t, 9, out[1].BlankBoutRows, "a match with no bouts gets 2*5-1 empty rows")
 
-	assert.Equal(t, "Pool Match 5", out[2].Label, "the label keeps the row's place in the file")
+	assert.Equal(t, "Pool B tiebreaker", out[2].Label, "a supplementary row takes no draw number")
 	assert.Len(t, out[2].Bouts, 1)
 }
 
@@ -878,14 +901,17 @@ func TestKachinukiDetailMatches_NonKachinukiComp(t *testing.T) {
 func TestKachinukiDetailMatches_PoolMatchWithSubResults(t *testing.T) {
 	compID := "kachinuki-detail-pool"
 	eng, store, _ := setupKachinukiComp(t, compID, 5)
+	ids := saveKachinukiPool(t, store, compID, "Pool A", "RedTeam", "WhiteTeam")
 
 	matches := []state.MatchResult{
 		{
-			ID:     "P1-0",
-			SideA:  "RedTeam",
-			SideB:  "WhiteTeam",
-			Winner: "RedTeam",
-			Status: state.MatchStatusCompleted,
+			ID:      "Pool A-0",
+			SideA:   "RedTeam",
+			SideB:   "WhiteTeam",
+			SideAID: ids["RedTeam"],
+			SideBID: ids["WhiteTeam"],
+			Winner:  "RedTeam",
+			Status:  state.MatchStatusCompleted,
 			SubResults: []state.SubMatchResult{
 				{
 					Position: 1,
@@ -946,17 +972,20 @@ func TestKachinukiDetailMatches_PoolMatchWithSubResults(t *testing.T) {
 // TestKachinukiDetailMatches_MatchWithoutSubResultsGetsBlankRows verifies,
 // through the exported wrapper the results export uses, that a pool match
 // carrying no SubResults gets 2*teamSize-1 empty rows for hand entry while a
-// fought one lists its bouts only, each labelled by its place in the file.
+// fought one lists its bouts only, each labelled by its place in the grid.
 func TestKachinukiDetailMatches_MatchWithoutSubResultsGetsBlankRows(t *testing.T) {
 	compID := "kachinuki-detail-blank"
 	eng, store, _ := setupKachinukiComp(t, compID, 5)
+	ids := saveKachinukiPool(t, store, compID, "Pool A", "RedTeam", "WhiteTeam", "AlphaTeam", "BetaTeam")
 
 	matches := []state.MatchResult{
-		{ID: "P1-0", SideA: "RedTeam", SideB: "WhiteTeam"}, // no SubResults
+		{ID: "Pool A-0", SideA: "RedTeam", SideB: "WhiteTeam", SideAID: ids["RedTeam"], SideBID: ids["WhiteTeam"]}, // no SubResults
 		{
-			ID:    "P1-1",
-			SideA: "AlphaTeam",
-			SideB: "BetaTeam",
+			ID:      "Pool A-1",
+			SideA:   "AlphaTeam",
+			SideB:   "BetaTeam",
+			SideAID: ids["AlphaTeam"],
+			SideBID: ids["BetaTeam"],
 			SubResults: []state.SubMatchResult{
 				{Position: 1, SideA: "A1", SideB: "B1", Winner: "A1", Decision: "fought"},
 			},
@@ -1441,4 +1470,63 @@ func TestBuildKachinukiPositionMap_DuplicateMemberIDLabelsDeterministically(t *t
 		require.Equal(t, first, got, "the surviving label must not depend on map iteration order")
 	}
 	assert.Equal(t, "Chuken", first, "sorted key order keeps the first, which is chuken before senpo")
+}
+
+// A pool section is numbered as BlankKachinukiSections numbers the same draw:
+// pool by pool in the Pool Matches grid's order, not in the file's order,
+// and a supplementary row takes no number.
+func TestCollectKachinukiMatches_PoolSectionsNumberedAsTheBlankTemplate(t *testing.T) {
+	eng, store, _ := setupTestEngine(t)
+	compID := "kachinuki-pool-numbering"
+	createTestCompetition(t, store, compID, state.CompFormatMixed, 3, func(c *state.Competition) {
+		c.Kind = "team"
+		c.TeamSize = 3
+		c.TeamMatchType = state.TeamMatchTypeKachinuki
+		c.Courts = []string{"A", "B"}
+	})
+	saveTestParticipants(t, store, compID, []string{"Ryu", "Tora", "Kame", "Taka", "Kuma", "Hebi"})
+	require.NoError(t, eng.StartCompetition(compID))
+
+	stored, err := store.LoadPoolMatches(compID)
+	require.NoError(t, err)
+	require.NotEmpty(t, stored)
+	tb := state.MatchResult{ID: stored[0].ID[:strings.LastIndexByte(stored[0].ID, '-')] + "-TB-0", SideA: stored[0].SideA, SideB: stored[0].SideB}
+	stored = append([]state.MatchResult{stored[len(stored)-1], tb}, stored[:len(stored)-1]...)
+	require.NoError(t, store.SavePoolMatches(compID, stored))
+
+	pools, err := store.LoadPools(compID)
+	require.NoError(t, err)
+	AttachPoolMatches(pools, stored)
+	want := helper.BlankKachinukiSections(pools, nil, false, 5)
+
+	comp, err := store.LoadCompetition(compID)
+	require.NoError(t, err)
+	out, err := eng.collectKachinukiMatches(compID, comp)
+	require.NoError(t, err)
+	require.GreaterOrEqual(t, len(out), len(want))
+	for i, w := range want {
+		assert.Equal(t, [3]string{w.Label, w.SideATeam, w.SideBTeam}, [3]string{out[i].Label, out[i].SideATeam, out[i].SideBTeam}, "section %d", i)
+	}
+}
+
+// A match decided without a bout has nothing left to enter, so it gets no
+// blank rows; one not played yet still does.
+func TestCollectKachinukiMatches_DecidedWithoutBoutsGetsNoBlankRows(t *testing.T) {
+	compID := "kachinuki-decided-no-bouts"
+	eng, store, comp := setupKachinukiComp(t, compID, 5)
+	require.NoError(t, store.SaveBracket(compID, &state.Bracket{Rounds: [][]state.BracketMatch{{
+		{ID: "r1-m1", MatchNumber: 1, SideA: "AlphaTeam", SideB: "BetaTeam", Status: state.MatchStatusCompleted, Decision: "kiken-voluntary", Winner: "AlphaTeam"},
+		{ID: "r1-m2", MatchNumber: 2, SideA: "GammaTeam", SideB: "DeltaTeam"},
+	}}}))
+
+	out, err := eng.collectKachinukiMatches(compID, comp)
+	require.NoError(t, err)
+	rows := map[string]int{}
+	for _, d := range out {
+		rows[d.SideATeam] = d.BlankBoutRows
+	}
+	require.Contains(t, rows, "AlphaTeam")
+	require.Contains(t, rows, "GammaTeam")
+	assert.Zero(t, rows["AlphaTeam"], "a match decided by a withdrawal")
+	assert.Equal(t, 9, rows["GammaTeam"], "a match not played yet keeps 2*5-1 rows")
 }

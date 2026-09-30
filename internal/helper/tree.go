@@ -20,9 +20,12 @@ type Node struct {
 
 	// Pool Number or Cell value
 	LeafVal string
-	Val     int64
-	Left    *Node
-	Right   *Node
+	// EntrantKey is a competitor leaf's identity (PlayerKey), which keys its
+	// data-sheet reference in place of LeafVal so namesakes stay apart.
+	EntrantKey string
+	Val        int64
+	Left       *Node
+	Right      *Node
 
 	// risenAfter/risenBefore count the slot levels this node was lifted past
 	// when BuildSlotTree collapsed an EMPTY sibling (a phantom pair, or a
@@ -69,6 +72,29 @@ func CreateBalancedTree(leafValues []string) *Node {
 	node.Val = node.Left.Val + node.Right.Val
 
 	return node
+}
+
+// StampEntrantKeys sets EntrantKey on root's leaves, left to right, one key
+// per leaf; a leaf past the end of keys, or given "", keeps none.
+// Stamp the tree a KnockoutDraw holds: NewKnockoutDraw rebuilds its input.
+func StampEntrantKeys(root *Node, keys []string) {
+	i := 0
+	var walk func(n *Node)
+	walk = func(n *Node) {
+		if n == nil {
+			return
+		}
+		if n.LeafNode {
+			if i < len(keys) {
+				n.EntrantKey = keys[i]
+			}
+			i++
+			return
+		}
+		walk(n.Left)
+		walk(n.Right)
+	}
+	walk(root)
 }
 
 // PrintLeafNodes draws one bracket page: it writes every leaf's label and every

@@ -1587,6 +1587,9 @@ func TestIsSelfRunReportableSubDecision(t *testing.T) {
 		{name: "the representative bout (position -1) allowed", decision: "daihyosen", position: -1, want: true},
 		{name: "the representative bout with no decision allowed", decision: "", position: -1, want: true},
 		{name: "kiken on the representative bout rejected", decision: "kiken-voluntary", position: -1, want: false},
+		{name: "fusensho on the representative bout rejected", decision: "fusensho", position: -1, want: false},
+		{name: "hikiwake on the representative bout rejected", decision: "hikiwake", position: -1, want: false},
+		{name: "fought on the representative bout rejected", decision: "fought", position: -1, want: false},
 		{name: "position 0 allowed", decision: "fought", position: 0, want: true},
 	}
 	for _, tc := range tests {

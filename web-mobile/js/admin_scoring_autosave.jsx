@@ -103,8 +103,9 @@ export function SyncStatusPill({ isRunning }) {
 // released only once the write has been handed to onSubmit (by then
 // recordScore counts it as in flight). Kept when the editor goes away: the
 // unmount writes it. Kept when the page goes away: on pagehide, or the tab
-// being hidden, a pending edit is written at once with `durable: true` on the
-// patch, which makes recordScore put it straight into the persisted outbox.
+// being hidden, a pending edit is written at once (a hidden tab first waits
+// for a hold, see the effect below) with `durable: true` on the patch, which
+// makes recordScore put it straight into the persisted outbox.
 // Every write carries the time of the edit it saves (editedPerf), so however
 // late it goes out, it is never newer than a result recorded after the tap.
 export function useDebouncedRunningWrite({ isRunningRef, buildPatchRef, onSubmitRef }) {
@@ -226,10 +227,15 @@ export function useDebouncedRunningWrite({ isRunningRef, buildPatchRef, onSubmit
   // bc-sync: the page going away (a reload, a closed tab, the iPad locking or
   // switching app) writes an edit still in the window NOW, durably: recordScore
   // puts a `durable` write into the persisted outbox, because a fetch started
-  // here would die with the document. A hold does not delay it, since nothing
-  // can wait for a page that is going away: it goes with the outcome applied
-  // if the request has settled, else as it stands, and the listeners stay on
-  // while an unmounted editor's edit waits for its request.
+  // here would die with the document. On pagehide a hold does not delay it,
+  // since nothing can wait for a page that is going away: it goes with the
+  // outcome applied if the request has settled, else as it stands. The tab
+  // being hidden does not mean it is going, so there an unsettled hold is
+  // waited for and the edit then goes durably with the outcome, where a write
+  // at once would put back a removed representative bout or wipe an added one.
+  // Accepted gap: a hidden page the system discards before the request
+  // answers, with no pagehide, loses that tap. The listeners stay on while an
+  // edit waits for its request.
   //
   // One effect for both, so the unmount decides whether the page listeners
   // stay. Everything the closures read is a ref, so the mount-time closure is
@@ -237,16 +243,30 @@ export function useDebouncedRunningWrite({ isRunningRef, buildPatchRef, onSubmit
   useEffectA(() => {
     let gone = false;
     const outcome = () => (holdRef.current && holdRef.current.transform) || null;
+    const isHidden = () => document.visibilityState === "hidden";
     const listen = (on) => {
       const method = on ? "addEventListener" : "removeEventListener";
-      window[method]("pagehide", flushDurably);
+      window[method]("pagehide", onPageHide);
       document[method]("visibilitychange", onVisibility);
     };
-    const flushDurably = () => {
+    // Once a hold waited for settles: a mounted, shown editor leaves the edit
+    // to release(), which writes it after the render adopting the outcome.
+    const writeOnSettle = (h) => () => {
+      if (!gone && !isHidden()) return;
+      if (gone) listen(false);
+      if (takeOwed()) fireRunningWrite(isHidden(), h.transform);
+    };
+    const flushDurably = (goingAway) => {
+      const h = holdRef.current;
+      if (!goingAway && h && !h.settled) {
+        h.onSettle = writeOnSettle(h);
+        return;
+      }
       if (takeOwed()) fireRunningWrite(true, outcome());
       if (gone) listen(false);
     };
-    const onVisibility = () => { if (document.visibilityState === "hidden") flushDurably(); };
+    const onPageHide = () => flushDurably(true);
+    const onVisibility = () => { if (isHidden()) flushDurably(false); };
     listen(true);
     return () => {
       gone = true;
@@ -254,10 +274,7 @@ export function useDebouncedRunningWrite({ isRunningRef, buildPatchRef, onSubmit
       const owed = takeOwed();
       if (owed && h && !h.settled) {
         deferredRef.current = true;
-        h.onSettle = () => {
-          listen(false);
-          if (takeOwed()) fireRunningWrite(false, h.transform);
-        };
+        h.onSettle = writeOnSettle(h);
         return;
       }
       listen(false);

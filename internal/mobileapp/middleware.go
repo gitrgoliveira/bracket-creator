@@ -318,9 +318,7 @@ func isSelfRunMainGatedConfigRoute(method, fullPath string) bool {
 // in self-run comes from a participant: the tournament is self-run and the
 // request's X-Tournament-Password is EMPTY, as the public page always sends
 // it. The handlers that call it hold such a caller to the self-run limits and
-// leave an organiser, who sends the password, free of them. The member POST is
-// the exception: a participant may add a member as the organiser may, so it
-// asks only so that a wrong password is answered 401. A password that is
+// leave an organiser, who sends the password, free of them. A password that is
 // sent but wrong is neither: it is an organiser holding a stale one, answered
 // 401 as AuthMiddleware answers it on a gated route (respondInvalidPassword),
 // rather than refused with a participant's sentence telling them to ask the

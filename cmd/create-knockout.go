@@ -205,6 +205,15 @@ func (o *knockoutOptions) createKnockout(entries []string) error {
 	// into one region per shiaijo and paginated exactly like a pool-fed draw.
 	// nil pools skips the roster overlay.
 	draw := helper.NewKnockoutDraw(tree, o.courts)
+	// The leaves are players in order, so each carries its identity: namesakes
+	// from different dojos then enter through their own data-sheet rows.
+	if draw != nil {
+		keys := make([]string, len(players))
+		for i, p := range players {
+			keys[i] = helper.PlayerKey(p)
+		}
+		helper.StampEntrantKeys(draw.Root, keys)
+	}
 	plan := blankWorkbookCourtPlan(draw, courtNames)
 	eliminationMatchRounds, numPages, err := helper.RenderKnockoutPages(f, plan, o.singleTree, nil, nil, nil, nil)
 	if err != nil {

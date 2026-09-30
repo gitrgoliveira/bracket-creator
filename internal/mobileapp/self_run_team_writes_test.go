@@ -14,6 +14,7 @@ package mobileapp
 import (
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -313,4 +314,79 @@ func TestSelfRun_LineupsPageWrites_StayGated(t *testing.T) {
 			assert.Equal(t, http.StatusUnauthorized, w.Code, w.Body.String())
 		})
 	}
+}
+
+// A participant's lineup write names a team the match holds: an id neither
+// side carries would add a lineup nobody reads, one key per request. The
+// organiser keeps the lineup route as it was.
+func TestSelfRun_MatchLineupNamesATeamInTheMatch(t *testing.T) {
+	f := newTeamWritesFixture(t, true)
+	stranger := "/api/competitions/c1/teams/33333333-3333-4333-3333-333333333333/match-lineups/PoolA-0"
+
+	w := f.send(http.MethodPut, stranger, "", senpo("Mei Ito", f.blankA))
+	requireRefusal(t, w, http.StatusNotFound, "team_not_in_match",
+		"This team is not in this match. Reload the score sheet and try again.")
+	lineups, err := f.store.LoadTeamLineups("c1")
+	require.NoError(t, err)
+	assert.Empty(t, lineups, "nothing is written")
+
+	w = f.send(http.MethodPut, stranger, "main-pw", senpo("Mei Ito", ""))
+	require.Equal(t, http.StatusOK, w.Code, "the organiser's write: %s", w.Body.String())
+}
+
+// A participant adds a member while the competition runs, up to a limit, and
+// never a name longer than a competitor's. The organiser keeps adding past
+// both limits of a participant's.
+func TestSelfRun_AddingAMemberIsBounded(t *testing.T) {
+	long := strings.Repeat("a", MaxLenPlayerName+1)
+
+	t.Run("a name longer than a competitor's is refused", func(t *testing.T) {
+		f := newTeamWritesFixture(t, true)
+		for _, password := range []string{"", "main-pw"} {
+			w := f.send(http.MethodPost, f.membersPath(), password, map[string]any{"name": long})
+			assert.Equal(t, http.StatusBadRequest, w.Code, "adding, password %q: %s", password, w.Body.String())
+			w = f.send(http.MethodPut, f.membersPath()+"/"+f.blankA, password, map[string]any{"name": long})
+			assert.Equal(t, http.StatusBadRequest, w.Code, "naming, password %q: %s", password, w.Body.String())
+		}
+		assert.Empty(t, f.memberName(t, f.blankA))
+	})
+
+	t.Run("a wrong password is refused before the body is judged", func(t *testing.T) {
+		f := newTeamWritesFixture(t, true)
+		requireInvalidPassword(t, f.send(http.MethodPost, f.membersPath(), "stale-pw", map[string]any{"name": long}))
+		requireInvalidPassword(t, f.send(http.MethodPut, f.membersPath()+"/"+f.blankA, "stale-pw", map[string]any{"name": long}))
+		requireInvalidPassword(t, f.send(http.MethodPut, f.lineupPath("PoolA-0"), "stale-pw", map[string]any{"positions": "not a map"}))
+	})
+
+	t.Run("a participant adds up to the limit", func(t *testing.T) {
+		f := newTeamWritesFixture(t, true)
+		squads, err := f.store.LoadSquads("c1")
+		require.NoError(t, err)
+		limit := 2*5 + state.SquadReserveSlots
+		for i := len(squads[f.teamA]); i < limit; i++ {
+			w := f.send(http.MethodPost, f.membersPath(), "", map[string]any{"name": "Member " + string(rune('A'+i))})
+			require.Equal(t, http.StatusCreated, w.Code, w.Body.String())
+		}
+		w := f.send(http.MethodPost, f.membersPath(), "", map[string]any{"name": "One Too Many"})
+		requireRefusal(t, w, http.StatusConflict, "team_member_limit",
+			"This team already lists as many members as the score sheet can add. Ask the tournament organizer to add more.")
+		w = f.send(http.MethodPost, f.membersPath(), "main-pw", map[string]any{"name": "One Too Many"})
+		require.Equal(t, http.StatusCreated, w.Code, "the organiser adds past it: %s", w.Body.String())
+	})
+
+	t.Run("a finished competition's teams are the organiser's", func(t *testing.T) {
+		f := newTeamWritesFixture(t, true)
+		require.NoError(t, f.store.SaveCompetition(&state.Competition{ID: "c1", Name: "Teams", Kind: "team", TeamSize: 5, Status: state.CompStatusComplete}))
+		const finished = "This competition has finished, so its teams can no longer be changed. Contact the tournament organizer to correct it."
+		requireRefusal(t, f.send(http.MethodPost, f.membersPath(), "", map[string]any{"name": "Ren Abe"}),
+			http.StatusConflict, "competition_finished", finished)
+		requireRefusal(t, f.send(http.MethodPut, f.membersPath()+"/"+f.blankA, "", map[string]any{"name": "Mei Ito"}),
+			http.StatusConflict, "competition_finished", finished)
+		assert.Empty(t, f.memberName(t, f.blankA))
+
+		w := f.send(http.MethodPost, f.membersPath(), "main-pw", map[string]any{"name": "Ren Abe"})
+		require.Equal(t, http.StatusCreated, w.Code, w.Body.String())
+		w = f.send(http.MethodPut, f.membersPath()+"/"+f.blankA, "main-pw", map[string]any{"name": "Mei Ito"})
+		require.Equal(t, http.StatusNoContent, w.Code, w.Body.String())
+	})
 }

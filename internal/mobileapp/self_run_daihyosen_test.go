@@ -19,6 +19,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strings"
 	"testing"
 	"time"
 
@@ -423,8 +424,9 @@ func TestSelfRun_FoulsOnARowWithoutIpponsCannotEraseTheHantei(t *testing.T) {
 
 // A participant's write that keeps the organiser's verdict is stored with the
 // decided bout exactly as recorded, whatever it sent for that bout: a new
-// scoreline around the same verdict, fouls, overtime, or another sub-decision
-// on a row that leaves its ippons out.
+// scoreline around the same verdict, fouls, overtime, or no sub-decision on a
+// row that leaves its ippons out (the only other one a participant may send
+// there, IsSelfRunReportableSubDecision).
 func TestSelfRun_TheDecidedRepresentativeBoutIsStoredAsRecorded(t *testing.T) {
 	rescored := repBoutRow([]string{"M", domain.HanteiMark}, []string{"K"}, "TeamA")
 	rescored["hansokuB"] = 1
@@ -432,7 +434,7 @@ func TestSelfRun_TheDecidedRepresentativeBoutIsStoredAsRecorded(t *testing.T) {
 	redecided := repBoutRow(nil, nil, "")
 	delete(redecided, "ipponsA")
 	delete(redecided, "ipponsB")
-	redecided["decision"] = "fought"
+	redecided["decision"] = ""
 	cases := []struct {
 		name    string
 		repBout map[string]any
@@ -752,6 +754,7 @@ func TestHoldSelfReportedWriteUnderTx(t *testing.T) {
 	bout := state.SubMatchResult{Position: 1, IpponsA: []string{"M"}, Winner: "TeamA"}
 	decided := row("TeamA", []string{domain.HanteiMark}, []string{})
 	unscored := row("", []string{}, []string{})
+	scoredRow := row("TeamA", []string{"M"}, []string{})
 	silent := row("", nil, nil)
 	fouled := silent
 	fouled.HansokuB = 2
@@ -769,11 +772,15 @@ func TestHoldSelfReportedWriteUnderTx(t *testing.T) {
 		want              *selfRunRefusal
 		wantStoredRepBout bool // the write's row is replaced by the stored one
 		wantRepBoutGone   bool // the write's row is dropped, the rest kept as sent
+		wantRepBoutKept   bool // the stored row is appended to the rows sent
 	}{
 		{name: "scoring with no verdict anywhere", stored: &unscored, incoming: []state.SubMatchResult{bout, row("TeamA", []string{"M"}, []string{})}},
 		{name: "recording a verdict", stored: &unscored, incoming: []state.SubMatchResult{bout, decided}, want: notRecorded},
 		{name: "scoring a representative bout the match does not have", incoming: []state.SubMatchResult{bout, decided}, wantRepBoutGone: true},
 		{name: "finishing on a representative bout the match does not have", incoming: []state.SubMatchResult{bout, row("TeamA", []string{"M"}, []string{})}, winner: "TeamA", status: state.MatchStatusCompleted, want: errRepBoutRemoved},
+		{name: "listing the bouts without the scored representative bout keeps it", stored: &scoredRow, incoming: []state.SubMatchResult{bout}, wantRepBoutKept: true},
+		{name: "an empty list keeps an unscored one", stored: &unscored, incoming: []state.SubMatchResult{}, wantRepBoutKept: true},
+		{name: "finishing without the representative bout the match has", stored: &scoredRow, incoming: []state.SubMatchResult{bout}, winner: "TeamA", status: state.MatchStatusCompleted, want: errRepBoutAdded},
 		{name: "repeating the recorded verdict", stored: &decided, incoming: []state.SubMatchResult{bout, decided}, wantStoredRepBout: true},
 		{name: "moving the verdict to the other side", stored: &decided, incoming: []state.SubMatchResult{bout, row("TeamB", []string{}, []string{domain.HanteiMark})}, want: recorded},
 		{name: "handing the verdict over by swapping the side names", stored: &decided, incoming: []state.SubMatchResult{bout, swapped}, want: recorded},
@@ -824,6 +831,8 @@ func TestHoldSelfReportedWriteUnderTx(t *testing.T) {
 			switch {
 			case tc.wantStoredRepBout:
 				assert.Equal(t, *tc.stored, result.SubResults[state.DaihyosenSubIndex(result.SubResults)])
+			case tc.wantRepBoutKept:
+				assert.Equal(t, append(slices.Clone(sent), *tc.stored), result.SubResults)
 			case tc.wantRepBoutGone:
 				kept := slices.DeleteFunc(slices.Clone(sent), func(s state.SubMatchResult) bool {
 					return s.Position == state.DaihyosenSubPosition
@@ -842,4 +851,132 @@ func TestRepBoutHanteiRefusal_SharedTable(t *testing.T) {
 	table := loadRepBoutHanteiTable(t)
 	assert.Equal(t, table.Recorded, repBoutHanteiRefusal(true).message)
 	assert.Equal(t, table.NotRecorded, repBoutHanteiRefusal(false).message)
+}
+
+// A participant's score write never removes a representative bout either:
+// only the remove route does, with its unscored check. A sheet a moment behind
+// an add made on another device lists the bouts without it; a running write
+// keeps the stored row and the rest of the write, and a finish is refused,
+// since it was decided on a sheet that never saw the row.
+func TestSelfRun_AScoreWriteNeverRemovesARepresentativeBout(t *testing.T) {
+	scored := func(t *testing.T) *repBoutFixture {
+		f := newRepBoutFixture(t, true)
+		f.addRepBout(t)
+		w := f.score("", state.MatchStatusRunning, "", f.now+100, repBoutRow([]string{"M"}, []string{}, "TeamA"))
+		require.Equal(t, http.StatusOK, w.Code, "another device scores it: %s", w.Body.String())
+		return f
+	}
+
+	t.Run("a running write keeps it", func(t *testing.T) {
+		f := scored(t)
+		body := scoreSheet(state.MatchStatusRunning, "", f.now+200, nil)
+		body["subResults"].([]any)[2] = map[string]any{
+			"position": 3, "sideA": "", "sideB": "", "ipponsA": []string{"K"}, "ipponsB": []string{}, "winner": "TeamA", "decision": "",
+		}
+		w := f.send(http.MethodPut, repBoutMatchPath+"/score", "", body)
+		require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+		assert.NotContains(t, w.Body.String(), `"applied":false`)
+		assert.Equal(t, []string{"M"}, f.storedRepBout(t).IpponsA, "the scored representative bout is kept")
+		for _, s := range storedB1(t, f.store, "c1").SubResults {
+			if s.Position == 3 {
+				assert.Equal(t, []string{"K"}, s.IpponsA, "the edit beside it is written")
+			}
+		}
+	})
+
+	t.Run("a finish is refused", func(t *testing.T) {
+		f := scored(t)
+		before := storedB1(t, f.store, "c1")
+		w := f.score("", state.MatchStatusCompleted, "TeamA", f.now+200, nil)
+		requireRefusal(t, w, http.StatusConflict, "daihyosen_added",
+			"A representative bout was added to this match on another device. Reload the score sheet before finishing.")
+		assert.Equal(t, before, storedB1(t, f.store, "c1"), "nothing is stored")
+	})
+
+	t.Run("the organiser's write is not judged", func(t *testing.T) {
+		f := scored(t)
+		w := f.score("main-pw", state.MatchStatusRunning, "", f.now+200, nil)
+		require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+		assert.False(t, carriesDaihyosenRow(storedB1(t, f.store, "c1").SubResults))
+	})
+}
+
+// The representative bout is sudden death: a participant scores it, and never
+// records a draw or a default win on it (those decide the encounter through
+// deriveDaihyosenWinner). The organiser's write is unchanged.
+func TestSelfRun_RepresentativeBoutTakesOnlyItsOwnDecision(t *testing.T) {
+	for _, decision := range []string{"fusensho", "hikiwake"} {
+		t.Run(decision, func(t *testing.T) {
+			f := newRepBoutFixture(t, true)
+			f.addRepBout(t)
+			row := repBoutRow([]string{"○", "○"}, []string{}, "TeamA")
+			row["decision"] = decision
+			w := f.score("", state.MatchStatusRunning, "", f.now+100, row)
+			require.Equal(t, http.StatusBadRequest, w.Code, w.Body.String())
+			assert.Empty(t, f.storedRepBout(t).Winner, "nothing is written")
+
+			w = f.score("main-pw", state.MatchStatusRunning, "", f.now+200, row)
+			require.Equal(t, http.StatusOK, w.Code, "the organiser's write: %s", w.Body.String())
+		})
+	}
+}
+
+// requireNoAuditFields checks a 200 body's result carries none of the
+// operator-only fields the public broadcast strips.
+func requireNoAuditFields(t *testing.T, w *httptest.ResponseRecorder) map[string]any {
+	t.Helper()
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	var body map[string]map[string]any
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &body), w.Body.String())
+	require.NotNil(t, body["result"], w.Body.String())
+	for _, key := range []string{"decisionReason", "correctionReason", "rev", "revSession"} {
+		assert.NotContains(t, body["result"], key)
+	}
+	return body["result"]
+}
+
+// Both representative-bout routes are public in self-run, so their answer
+// carries the match as the public broadcast does, without the audit notes.
+func TestDaihyosenResponses_CarryNoAuditFields(t *testing.T) {
+	for _, password := range []string{"", "main-pw"} {
+		t.Run("add, password "+password, func(t *testing.T) {
+			f := newRepBoutFixture(t, true)
+			f.setB1(t, func(bm *state.BracketMatch) { bm.DecisionReason = "private note" })
+			result := requireNoAuditFields(t, f.send(http.MethodPost, repBoutMatchPath+"/daihyosen", password, map[string]any{"modifiedAt": f.now}))
+			assert.Contains(t, result, "teamResult", "the match keeps the shape the editor adopts")
+		})
+	}
+	t.Run("remove", func(t *testing.T) {
+		f := newRepBoutFixture(t, true)
+		require.NoError(t, f.store.SavePoolMatches("c1", []state.MatchResult{{
+			ID: "Pool A-1", SideA: "TeamA", SideB: "TeamB", SideAID: repBoutTeamAID, SideBID: repBoutTeamBID,
+			Status: state.MatchStatusRunning, CorrectionReason: "private note", DecisionReason: "private note",
+			SubResults: []state.SubMatchResult{{Position: state.DaihyosenSubPosition, SideA: "TeamA", SideB: "TeamB", Decision: "daihyosen"}},
+		}}))
+		requireNoAuditFields(t, f.send(http.MethodDelete, "/api/competitions/c1/matches/Pool%20A-1/daihyosen", "main-pw", map[string]any{"modifiedAt": f.now}))
+	})
+}
+
+// A password sent but wrong is answered 401 before the body is read, so a
+// stale organiser is not told about their clock or their body instead.
+func TestDaihyosen_AWrongPasswordIsRefusedBeforeTheStamp(t *testing.T) {
+	farFuture := map[string]any{"modifiedAt": time.Now().Add(time.Hour).UnixMilli()}
+	for _, method := range []string{http.MethodPost, http.MethodDelete} {
+		t.Run(method+" with a stamp far ahead", func(t *testing.T) {
+			f := newRepBoutFixture(t, true)
+			requireInvalidPassword(t, f.send(method, repBoutMatchPath+"/daihyosen", "stale-pw", farFuture))
+			w := f.send(method, repBoutMatchPath+"/daihyosen", "", farFuture)
+			require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+			assert.Contains(t, w.Body.String(), `"clock_skew"`, "a participant's stamp is still judged")
+		})
+		t.Run(method+" with a malformed body", func(t *testing.T) {
+			f := newRepBoutFixture(t, true)
+			req := httptest.NewRequest(method, repBoutMatchPath+"/daihyosen", strings.NewReader("{not json"))
+			req.Header.Set("Content-Type", "application/json")
+			req.Header.Set("X-Tournament-Password", "stale-pw")
+			w := httptest.NewRecorder()
+			f.r.ServeHTTP(w, req)
+			requireInvalidPassword(t, w)
+		})
+	}
 }

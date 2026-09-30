@@ -827,6 +827,16 @@ function holdsAnswer(stamp, at) {
   return at > 0 && (Number(stamp) || 0) >= at;
 }
 
+// predatesAnswer: whether `match` is a running copy read before a stamped
+// answer the override holds, which a changed log must not clear: it is the
+// match from before that write. keepNewerMatches' (patch.jsx) rule: only
+// running over running, and only a stamped copy, since a status move is
+// stamped by the server's clock and an unstamped copy is a redrawn match.
+function predatesAnswer(match, override) {
+  const stamp = Number(match?.modifiedAt) || 0;
+  return override.at > 0 && override.match.status === "running" && match?.status === "running" && stamp > 0 && stamp < override.at;
+}
+
 export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSubmitAndNext, onAfterDecision, onStartLanded, prevMatch, nextMatch, onPrev, onNext, password, selfReport, teamMembers, variant = "modal", canClose = true }) {
   // mp-gmcg: a successful [× Remove this bout] shrinks the SERVER bout log, and
   // the parent may not have caught up when this render runs. matchOverride
@@ -857,9 +867,14 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
   //     already moved past. Exactly the divergence bc-tsub exists to remove,
   //     surviving on the one path that opts out of the live prop.
   // Content-keying is quiet for a same-content reload (identical string) and
-  // fires for every real change, including that last one.
+  // fires for every real change, including that last one. A stamped answer's
+  // override survives a change from a running copy older than it
+  // (predatesAnswer): a push or refetch that read the match before the add or
+  // remove committed, whose log the next autosave would otherwise write back.
   const matchSubsKey = subsKey(match?.subResults);
-  useEffectA(() => { setMatchOverride(null); }, [match?.id, matchSubsKey]);
+  useEffectA(() => {
+    setMatchOverride(prev => (prev && prev.match.id === match?.id && predatesAnswer(match, prev) ? prev : null));
+  }, [match?.id, matchSubsKey]);
   // A stamped answer's override also goes once the prop is at least as new as
   // that answer, whatever its log reads. The log can read as it did before the
   // add (another device removed the row before this page refetched), which the

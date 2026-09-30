@@ -1007,6 +1007,161 @@ describe('bc-dhas: an edit owed when the editor goes during an add or remove', (
   });
 });
 
+// A hidden tab is not going away: an edit held for an add or remove waits for
+// its outcome there, where a write at once would carry the sheet from before it.
+async function setVisibility(state) {
+  if (state === 'visible') delete document.visibilityState;
+  else Object.defineProperty(document, 'visibilityState', { configurable: true, get: () => state });
+  await act(async () => { document.dispatchEvent(new Event('visibilitychange')); });
+}
+
+describe('bc-dhas: the tab hidden while a tap waits for an add or remove', () => {
+  beforeEach(() => {
+    window.API.recordDaihyosen = vi.fn();
+    window.API.removeDaihyosen = vi.fn();
+  });
+  afterEach(() => { delete document.visibilityState; });
+
+  it.each([
+    ['a remove', makeMatchWithDaihyosen, 'team-daihyosen-remove', 'removeDaihyosen', () => ({ subResults: [] }), []],
+    ['an add', makeKnockoutTeamMatch, 'scoring-modal-daihyosen-button', 'recordDaihyosen',
+      () => ({ ...makeKnockoutTeamMatch(), subResults: [serverDaihyosenRow()] }), [serverDaihyosenRow()]],
+  ])('during %s writes nothing until it lands, then writes the tap durably with its outcome', async (_what, makeMatch, button, api, answer, rows) => {
+    const request = deferred();
+    window.API[api].mockReturnValue(request.promise);
+    renderModal(makeMatch());
+    await act(async () => { fireEvent.click(screen.getByTestId(button)); });
+    await settle();
+    window.API.recordScore.mockClear();
+    await act(async () => { fireEvent.click(tieBoutButton(0)); });
+
+    await setVisibility('hidden');
+    expect(window.API.recordScore, 'a write now would carry the sheet from before the request').not.toHaveBeenCalled();
+
+    await act(async () => { request.resolve(answer()); });
+    await settle();
+    expect(window.API.recordScore).toHaveBeenCalledTimes(1);
+    const [, , patch] = window.API.recordScore.mock.calls[0];
+    expect(patch.durable).toBe(true);
+    expect(patch.subResults.filter((s) => s.position === -1)).toEqual(rows);
+    expect(patch.subResults.find((s) => s.position === 1)?.decision).toBe('hikiwake');
+
+    await act(async () => { vi.advanceTimersByTime(AUTOSAVE_DEBOUNCE_MS + 50); });
+    await settle();
+    expect(window.API.recordScore, 'written once').toHaveBeenCalledTimes(1);
+  });
+
+  it('shown again before the request lands, the tap is written as usual once the row is adopted', async () => {
+    const remove = deferred();
+    window.API.removeDaihyosen.mockReturnValue(remove.promise);
+    renderModal(makeMatchWithDaihyosen());
+    await act(async () => { fireEvent.click(screen.getByTestId('team-daihyosen-remove')); });
+    await settle();
+    window.API.recordScore.mockClear();
+    await act(async () => { fireEvent.click(tieBoutButton(0)); });
+    await setVisibility('hidden');
+    await setVisibility('visible');
+
+    await act(async () => { remove.resolve({ subResults: [] }); });
+    await settle();
+    await act(async () => { vi.advanceTimersByTime(AUTOSAVE_DEBOUNCE_MS + 50); });
+    await settle();
+    expect(window.API.recordScore).toHaveBeenCalledTimes(1);
+    const [, , patch] = window.API.recordScore.mock.calls[0];
+    expect(patch.durable).toBeUndefined();
+    expect(patch.subResults.some((s) => s.position === -1)).toBe(false);
+    expect(patch.subResults.find((s) => s.position === 1)?.decision).toBe('hikiwake');
+  });
+
+  it('a page going away after the tab was hidden still writes the tap at once, as it stood', async () => {
+    const remove = deferred();
+    window.API.removeDaihyosen.mockReturnValue(remove.promise);
+    renderModal(makeMatchWithDaihyosen());
+    await act(async () => { fireEvent.click(screen.getByTestId('team-daihyosen-remove')); });
+    await settle();
+    window.API.recordScore.mockClear();
+    await act(async () => { fireEvent.click(tieBoutButton(0)); });
+    await setVisibility('hidden');
+    expect(window.API.recordScore).not.toHaveBeenCalled();
+
+    await act(async () => { window.dispatchEvent(new Event('pagehide')); });
+    expect(window.API.recordScore).toHaveBeenCalledTimes(1);
+    expect(window.API.recordScore.mock.calls[0][2].durable).toBe(true);
+
+    await act(async () => { remove.resolve({ subResults: [] }); });
+    await settle();
+    expect(window.API.recordScore).toHaveBeenCalledTimes(1);
+  });
+
+  it('an editor gone with the tap owed waits for the request while hidden, then writes it durably', async () => {
+    const remove = deferred();
+    window.API.removeDaihyosen.mockReturnValue(remove.promise);
+    const view = renderModal(makeMatchWithDaihyosen());
+    await act(async () => { fireEvent.click(screen.getByTestId('team-daihyosen-remove')); });
+    await settle();
+    window.API.recordScore.mockClear();
+    await act(async () => { fireEvent.click(tieBoutButton(0)); });
+    await act(async () => { view.unmount(); });
+    await setVisibility('hidden');
+    expect(window.API.recordScore).not.toHaveBeenCalled();
+
+    await act(async () => { remove.resolve({ subResults: [] }); });
+    await settle();
+    expect(window.API.recordScore).toHaveBeenCalledTimes(1);
+    const [, , patch] = window.API.recordScore.mock.calls[0];
+    expect(patch.durable).toBe(true);
+    expect(patch.subResults.some((s) => s.position === -1)).toBe(false);
+  });
+});
+
+// A running copy older than the add's answer (a push or refetch that read the
+// data before the add committed) is not the match after it, whatever its log.
+describe('bc-dhas: an older running copy does not take the added row off the sheet', () => {
+  beforeEach(() => {
+    window.API.recordDaihyosen = vi.fn();
+    window.API.removeDaihyosen = vi.fn();
+  });
+
+  const hikiwakeBout1 = { position: 1, sideA: '', sideB: '', ipponsA: [], ipponsB: [], winner: '', decision: 'hikiwake' };
+
+  async function addLanded() {
+    const base = makeKnockoutTeamMatch({ modifiedAt: 1000 });
+    window.API.recordDaihyosen.mockResolvedValue({ ...base, subResults: [serverDaihyosenRow()], modifiedAt: 2000 });
+    const view = renderModal(base);
+    await act(async () => { fireEvent.click(screen.getByTestId('scoring-modal-daihyosen-button')); });
+    await settle();
+    expect(screen.queryByTestId('team-daihyosen-remove')).toBeTruthy();
+    const show = async (m) => {
+      await act(async () => { view.rerender(<ScoreEditorModal match={m} onClose={vi.fn()} onSubmit={makeOnSubmit(m)} password="" />); });
+      await settle();
+    };
+    return { base, show };
+  }
+
+  it('keeps the row, and the next tap writes it', async () => {
+    const { base, show } = await addLanded();
+    await show({ ...base, subResults: [hikiwakeBout1], modifiedAt: 1500 });
+    expect(screen.queryByTestId('team-daihyosen-remove')).toBeTruthy();
+
+    window.API.recordScore.mockClear();
+    await act(async () => { fireEvent.click(tieBoutButton(1)); });
+    await act(async () => { vi.advanceTimersByTime(AUTOSAVE_DEBOUNCE_MS + 50); });
+    await settle();
+    expect(window.API.recordScore).toHaveBeenCalledTimes(1);
+    expect(window.API.recordScore.mock.calls[0][2].subResults.some((s) => s.position === -1)).toBe(true);
+  });
+
+  it.each([
+    ['a copy as new as the answer', { modifiedAt: 2000 }],
+    ['an unstamped copy', { modifiedAt: 0 }],
+    ['a copy no longer running', { modifiedAt: 1500, status: 'completed', winner: 'Team A' }],
+  ])('%s is the match the sheet shows', async (_what, fields) => {
+    const { base, show } = await addLanded();
+    await show({ ...base, subResults: [hikiwakeBout1], ...fields });
+    expect(screen.queryByTestId('team-daihyosen-remove')).toBeNull();
+  });
+});
+
 describe('bc-dhas: the sheet is saved until no tap is owed before the add is sent', () => {
   beforeEach(() => {
     window.API.recordDaihyosen = vi.fn();

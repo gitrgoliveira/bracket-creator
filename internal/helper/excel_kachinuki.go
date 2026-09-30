@@ -120,6 +120,19 @@ func PoolMatchLabel(n int) string {
 	return fmt.Sprintf("Pool Match %d", n)
 }
 
+// EachPoolMatch visits every pool match pool by pool, each pool's in its
+// Pool Matches grid order, with its section title (PoolMatchLabel) and its
+// index in pool.Matches: the one numbering both Kachinuki Detail builders use.
+func EachPoolMatch(pools []Pool, visit func(label string, pool Pool, i int)) {
+	n := 0
+	for _, pool := range pools {
+		for i := range pool.Matches {
+			n++
+			visit(PoolMatchLabel(n), pool, i)
+		}
+	}
+}
+
 // BlankKachinukiSections lists an empty Kachinuki Detail section of boutRows
 // numbered rows for every match of a draw with nothing recorded yet: each pool
 // match in order, then each knockout match round by round, then the 3rd-place
@@ -134,13 +147,9 @@ func BlankKachinukiSections(pools []Pool, rounds [][]*Node, includeBronze bool, 
 	add := func(label, sideA, sideB string) {
 		out = append(out, KachinukiMatchDetail{Label: label, SideATeam: sideA, SideBTeam: sideB, BlankBoutRows: boutRows})
 	}
-	n := 0
-	for _, pool := range pools {
-		for _, m := range pool.Matches {
-			n++
-			add(PoolMatchLabel(n), m.SideA.Name, m.SideB.Name)
-		}
-	}
+	EachPoolMatch(pools, func(label string, pool Pool, i int) {
+		add(label, pool.Matches[i].SideA.Name, pool.Matches[i].SideB.Name)
+	})
 	entrant := func(node *Node) string {
 		if node.LeafNode {
 			return node.LeafVal

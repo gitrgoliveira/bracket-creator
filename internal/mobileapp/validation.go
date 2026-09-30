@@ -1290,22 +1290,25 @@ func IsSelfRunReportableDecision(decision string, hanteiDecided bool) bool {
 }
 
 // IsSelfRunReportableSubDecision validates a sub-bout decision for self-run
-// anonymous callers. Allowed: "" (none), "fought", "hikiwake", "fusensho"
-// (per-bout forfeiture is a factual observation), and "daihyosen" on the
-// representative bout (position -1) only (operator decision, bc-dhas).
-// Rejected: kiken variants, fusenpai, kachinuki-exhaustion, and "daihyosen"
-// on a numbered bout. It judges one row's decision and nothing else. A hantei
-// mark on a numbered bout is refused for every caller by validateSubBout,
-// which runs first. Whether the write may carry a representative bout at all
+// anonymous callers. Allowed on a numbered bout: "" (none), "fought",
+// "hikiwake", "fusensho" (per-bout forfeiture is a factual observation). The
+// representative bout (position -1) takes only "" or "daihyosen" (operator
+// decision, bc-dhas): it is sudden death, and a draw or default win recorded
+// on it would decide the encounter (deriveDaihyosenWinner) as the organiser's
+// ruling does. Rejected: kiken variants, fusenpai, kachinuki-exhaustion, and
+// "daihyosen" on a numbered bout. It judges one row's decision and nothing
+// else. A hantei mark on a numbered bout is refused for every caller by
+// validateSubBout, which runs first. Whether the write may carry a representative bout at all
 // and whether a hantei mark on it repeats the organiser's depend on the
 // stored match, so holdSelfReportedWriteUnderTx decides them under the
 // write's lock.
 func IsSelfRunReportableSubDecision(decision string, position int) bool {
+	if position == state.DaihyosenSubPosition {
+		return decision == "" || decision == "daihyosen"
+	}
 	switch decision {
 	case "", "fought", "hikiwake", "fusensho":
 		return true
-	case "daihyosen":
-		return position == state.DaihyosenSubPosition
 	default:
 		return false
 	}

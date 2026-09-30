@@ -174,11 +174,12 @@ func RegisterDaihyosenHandlers(r *gin.RouterGroup, eng DaihyosenEngine, store Da
 			return
 		}
 		mid := c.Param("mid")
-		stamp, ok := daihyosenWriteStamp(c)
+		// The caller first, so a wrong password is 401 whatever the body says.
+		anonymous, ok := selfRunAnonymous(c, tl, verifier)
 		if !ok {
 			return
 		}
-		anonymous, ok := selfRunAnonymous(c, tl, verifier)
+		stamp, ok := daihyosenWriteStamp(c)
 		if !ok {
 			return
 		}
@@ -302,7 +303,8 @@ func RegisterDaihyosenHandlers(r *gin.RouterGroup, eng DaihyosenEngine, store Da
 			"result":        matchForBroadcast(updated),
 		})
 
-		c.JSON(http.StatusOK, gin.H{"result": &updated})
+		// Public in self-run, so answered as the broadcast is, without the audit notes.
+		c.JSON(http.StatusOK, gin.H{"result": matchForBroadcast(updated)})
 	})
 
 	r.POST("/competitions/:id/matches/:mid/daihyosen", func(c *gin.Context) {
@@ -311,11 +313,12 @@ func RegisterDaihyosenHandlers(r *gin.RouterGroup, eng DaihyosenEngine, store Da
 			return
 		}
 		mid := c.Param("mid")
-		stamp, ok := daihyosenWriteStamp(c)
+		// The caller first, so a wrong password is 401 whatever the body says.
+		anonymous, ok := selfRunAnonymous(c, tl, verifier)
 		if !ok {
 			return
 		}
-		anonymous, ok := selfRunAnonymous(c, tl, verifier)
+		stamp, ok := daihyosenWriteStamp(c)
 		if !ok {
 			return
 		}
@@ -503,7 +506,7 @@ func RegisterDaihyosenHandlers(r *gin.RouterGroup, eng DaihyosenEngine, store Da
 			hub.Broadcast(EventScheduleUpdated, nil)
 		}
 
-		c.JSON(http.StatusOK, gin.H{"subResult": subOut, "result": &updated})
+		c.JSON(http.StatusOK, gin.H{"subResult": subOut, "result": matchForBroadcast(updated)})
 	})
 }
 

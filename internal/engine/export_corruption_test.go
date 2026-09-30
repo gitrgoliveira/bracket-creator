@@ -65,6 +65,30 @@ func TestExportCompetitionXlsx_CorruptTournament_Fails(t *testing.T) {
 	assert.Nil(t, data)
 }
 
+// TestExportCompetitionXlsx_UnreadablePoolMatches_Fails pins the same rule for
+// pool-matches.csv, which now feeds the printed Pool Matches grid: an
+// unreadable file aborts the export (and so the booklet, whose skip is only
+// for IsUnexportable) rather than printing a template with no match blocks.
+func TestExportCompetitionXlsx_UnreadablePoolMatches_Fails(t *testing.T) {
+	eng, store, dir := setupTestEngine(t)
+	compID := "export-unreadable-pool-matches"
+	createTestCompetition(t, store, compID, "league", 3)
+	saveTestParticipants(t, store, compID, []string{"Alice", "Bob", "Charlie"})
+	require.NoError(t, eng.StartCompetition(compID))
+
+	path := filepath.Join(dir, "competitions", compID, "pool-matches.csv")
+	require.NoError(t, os.RemoveAll(path))
+	require.NoError(t, os.Mkdir(path, 0o755))
+
+	data, err := eng.ExportCompetitionXlsx(compID)
+	require.Error(t, err, "an unreadable pool-matches.csv must abort the export rather than print no match blocks")
+	assert.Nil(t, data)
+	assert.False(t, IsUnexportable(err), "corrupt state is a failure, not an unexportable competition to skip")
+
+	_, _, err = eng.ExportTournamentWorkbooks(t.TempDir(), compID)
+	require.Error(t, err, "the booklet aborts on corrupt state, as it does for bracket.json and tournament.md")
+}
+
 // TestExportCompetitionXlsx_MissingBracketAndTournament_Succeeds guards
 // against over-strictness: a competition that has never been drawn (no
 // bracket.json) and a folder with no tournament.md at all (the bootstrap

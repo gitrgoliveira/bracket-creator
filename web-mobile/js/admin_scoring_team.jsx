@@ -43,6 +43,7 @@ import {
 // Start the server would refuse; isBarredMatch (ineligible_match.jsx) is the
 // one owner of that question.
 import { isBarredMatch } from './ineligible_match.jsx';
+import { isOlderRunningCopy } from './patch.jsx';
 
 import { useDebouncedRunningWrite, SyncStatusPill } from './admin_scoring_autosave.jsx';
 import { serverNowMs } from './server_clock.jsx';
@@ -829,12 +830,9 @@ function holdsAnswer(stamp, at) {
 
 // predatesAnswer: whether `match` is a running copy read before a stamped
 // answer the override holds, which a changed log must not clear: it is the
-// match from before that write. keepNewerMatches' (patch.jsx) rule: only
-// running over running, and only a stamped copy, since a status move is
-// stamped by the server's clock and an unstamped copy is a redrawn match.
+// match from before that write. It is keepNewerMatches' rule (patch.jsx).
 function predatesAnswer(match, override) {
-  const stamp = Number(match?.modifiedAt) || 0;
-  return override.at > 0 && override.match.status === "running" && match?.status === "running" && stamp > 0 && stamp < override.at;
+  return override.at > 0 && !!match && isOlderRunningCopy(match, override.match.status, override.at);
 }
 
 export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSubmitAndNext, onAfterDecision, onStartLanded, prevMatch, nextMatch, onPrev, onNext, password, selfReport, teamMembers, variant = "modal", canClose = true }) {

@@ -99,7 +99,8 @@ func RegisterSquadHandlers(r *gin.RouterGroup, store SquadStore, comps Competiti
 		if !ok {
 			return
 		}
-		if !requireExistingCompetition(c, comps, compID) {
+		comp, ok := loadExistingCompetition(c, comps, compID)
+		if !ok {
 			return
 		}
 		anonymous, ok := selfRunAnonymous(c, tl, verifier)
@@ -114,7 +115,7 @@ func RegisterSquadHandlers(r *gin.RouterGroup, store SquadStore, comps Competiti
 		if !validMemberName(c, req.Name) {
 			return
 		}
-		if anonymous && !selfRunMayAddMember(c, store, comps, compID, teamID) {
+		if anonymous && !selfRunMayAddMember(c, store, comp, compID, teamID) {
 			return
 		}
 		member, err := store.AddTeamMember(compID, teamID, req.Name)
@@ -130,7 +131,8 @@ func RegisterSquadHandlers(r *gin.RouterGroup, store SquadStore, comps Competiti
 		if !ok {
 			return
 		}
-		if !requireExistingCompetition(c, comps, compID) {
+		comp, ok := loadExistingCompetition(c, comps, compID)
+		if !ok {
 			return
 		}
 		memberID := c.Param("memberId")
@@ -150,25 +152,15 @@ func RegisterSquadHandlers(r *gin.RouterGroup, store SquadStore, comps Competiti
 		if !validMemberName(c, req.Name) {
 			return
 		}
-		// An anonymous self-run caller names a member from the public score
-		// sheet, which only ever names one who has no name yet. Renaming one
-		// who has a name stays with the organiser: the new name reaches every
-		// stored lineup and every bout already fought that names the member,
-		// finished matches included, which the score path's finished-match
-		// rule keeps from an anonymous caller. Naming a nameless member
-		// reaches a finished match's stored lineup too, on purpose: it fills
-		// a blank beside the same member id every display already resolves,
-		// and skipping it would leave that copy stale against the team's
-		// members. The store checks under the rename's own lock, so two
-		// callers naming one blank member cannot both pass.
+		// An anonymous caller only names a member who has no name yet: renaming
+		// reaches every stored lineup and fought bout, finished matches
+		// included, so it stays the organiser's. Naming a blank still fills a
+		// finished match's stored lineup, beside the member id every display
+		// resolves. The store checks under its own lock, so two callers naming
+		// one blank member cannot both pass.
 		rename := store.RenameTeamMember
 		if anonymous {
-			comp, ok := loadCompetitionForSquad(c, comps, compID)
-			if !ok {
-				return
-			}
-			if comp.Status == state.CompStatusComplete {
-				c.JSON(errCompetitionFinished.status, errCompetitionFinished.body())
+			if !selfRunCompetitionOpen(c, comp) {
 				return
 			}
 			rename = store.NameUnnamedTeamMember
@@ -278,32 +270,22 @@ var errCompetitionFinished = &selfRunRefusal{
 	message: "This competition has finished, so its teams can no longer be changed. Contact the tournament organizer to correct it.",
 }
 
-// loadCompetitionForSquad loads the competition requireExistingCompetition
-// already found, answering 500 when it cannot.
-func loadCompetitionForSquad(c *gin.Context, comps CompetitionStore, compID string) (*state.Competition, bool) {
-	comp, err := comps.LoadCompetition(compID)
-	if err != nil {
-		internalError(c, err)
-		return nil, false
+// selfRunCompetitionOpen answers errCompetitionFinished, and reports false,
+// when a participant's team write reaches a finished competition.
+func selfRunCompetitionOpen(c *gin.Context, comp *state.Competition) bool {
+	if comp.Status == state.CompStatusComplete {
+		c.JSON(errCompetitionFinished.status, errCompetitionFinished.body())
+		return false
 	}
-	if comp == nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "competition not found"})
-		return nil, false
-	}
-	return comp, true
+	return true
 }
 
 // selfRunMayAddMember holds a participant's add to a competition still
 // running and to selfRunMemberLimit, answering the refusal when it is not
 // allowed. The count is read outside the add's lock, so requests racing each
 // other can pass it together; the next request after them is refused.
-func selfRunMayAddMember(c *gin.Context, store SquadStore, comps CompetitionStore, compID, teamID string) bool {
-	comp, ok := loadCompetitionForSquad(c, comps, compID)
-	if !ok {
-		return false
-	}
-	if comp.Status == state.CompStatusComplete {
-		c.JSON(errCompetitionFinished.status, errCompetitionFinished.body())
+func selfRunMayAddMember(c *gin.Context, store SquadStore, comp *state.Competition, compID, teamID string) bool {
+	if !selfRunCompetitionOpen(c, comp) {
 		return false
 	}
 	squads, err := store.LoadSquads(compID)

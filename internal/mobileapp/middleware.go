@@ -167,16 +167,23 @@ func requireValidCompID(c *gin.Context) (string, bool) {
 // answering an empty "nothing saved" lineup for a competition that does
 // not exist at all.
 func requireExistingCompetition(c *gin.Context, comps CompetitionStore, compID string) bool {
+	_, ok := loadExistingCompetition(c, comps, compID)
+	return ok
+}
+
+// loadExistingCompetition is requireExistingCompetition for a caller that
+// also needs the competition it found.
+func loadExistingCompetition(c *gin.Context, comps CompetitionStore, compID string) (*state.Competition, bool) {
 	comp, err := comps.LoadCompetition(compID)
 	if err != nil {
 		internalError(c, err)
-		return false
+		return nil, false
 	}
 	if comp == nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "competition not found"})
-		return false
+		return nil, false
 	}
-	return true
+	return comp, true
 }
 
 // RequireElevatedPassword gates destructive operations behind a SECOND

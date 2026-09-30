@@ -7,6 +7,7 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -1966,8 +1967,8 @@ func holdSelfReportedWriteUnderTx(stx state.StoreTx, compID, matchID string, res
 		if result.Status == state.MatchStatusCompleted {
 			return errRepBoutAdded
 		}
-		kept := append(append([]state.SubMatchResult(nil), subs...), state.CloneSubResults([]state.SubMatchResult{*stored})[0])
-		result.SubResults = kept
+		storedRow := state.CloneSubResults([]state.SubMatchResult{*stored})[0]
+		result.SubResults = append(slices.Clone(subs), storedRow)
 		log.Printf("mobileapp: kept the representative bout a self-run score write to %s/%s left out; the rest of the write was kept", compID, matchID)
 		return nil
 	}
@@ -1999,7 +2000,7 @@ func holdSelfReportedWriteUnderTx(stx state.StoreTx, compID, matchID string, res
 		// A fresh slice and a deep copy: result.SubResults shares the
 		// request's backing array, and the engine fills free ippon slots in
 		// place, which must never reach the stored row.
-		kept := append([]state.SubMatchResult(nil), subs...)
+		kept := slices.Clone(subs)
 		kept[row] = state.CloneSubResults([]state.SubMatchResult{*stored})[0]
 		result.SubResults = kept
 	}

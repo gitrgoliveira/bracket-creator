@@ -496,6 +496,14 @@ function applyPatch(prev, event) {
     return changed ? next : prev;
 }
 
+// isOlderRunningCopy: whether `fetched` is a running match stamped earlier
+// than a running copy held at `heldStamp`. The one rule keepNewerMatches and a
+// score editor's held answer both apply; see keepNewerMatches for why only
+// running over running, and only a stamped fetched copy.
+function isOlderRunningCopy(fetched, heldStatus, heldStamp) {
+    return heldStatus === "running" && fetched.status === "running" && fetched.modifiedAt > 0 && (heldStamp || 0) > fetched.modifiedAt;
+}
+
 // keepNewerMatches: the competition a refetch answered with, keeping a running
 // match the caller already holds from a NEWER write -- a live score never goes
 // back in time under a score editor. A holder applies a push at once
@@ -526,7 +534,7 @@ function keepNewerMatches(held, fetched) {
     // match ids) always replaces too.
     const newer = (row) => {
         const h = heldById.get(row.id);
-        return h && h.status === "running" && row.status === "running" && row.modifiedAt > 0 && (h.modifiedAt || 0) > row.modifiedAt ? h : row;
+        return h && isOlderRunningCopy(row, h.status, h.modifiedAt) ? h : row;
     };
     const b = fetched.bracket;
     return {
@@ -565,5 +573,5 @@ function keepNewerTournament(held, fetched) {
 
 export {
     applyPatch, applyPatchOrdered, checkSeqGap, recomputeQueuePositions, recomputeBracketQueuePositions,
-    keepNewerMatches, keepNewerDetail, keepNewerCompetitions, keepNewerTournament,
+    keepNewerMatches, keepNewerDetail, keepNewerCompetitions, keepNewerTournament, isOlderRunningCopy,
 };

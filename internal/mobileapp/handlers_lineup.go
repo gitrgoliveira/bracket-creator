@@ -269,6 +269,13 @@ func RegisterLineupHandlers(r *gin.RouterGroup, store TeamLineupStore, comps Com
 			return
 		}
 
+		for pos, name := range req.Positions {
+			if err := validateMaxLen("positions."+string(pos), name, MaxLenPlayerName); err != nil {
+				c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+				return
+			}
+		}
+
 		lineup := domain.TeamLineup{
 			TeamID:        teamID,
 			CompetitionID: compID,

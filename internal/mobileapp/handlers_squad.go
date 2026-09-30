@@ -8,8 +8,8 @@
 // comment in participants.go for the data-loss history that store move
 // exists to close.
 //
-// All four routes live on the admin group. In a self-run tournament ADD and
-// RENAME are also open to a caller with an empty password, because the public
+// All four routes are registered on the admin group. In a self-run tournament
+// ADD and RENAME also accept a caller with an empty password, because the public
 // score sheet names a bout's fighter through them (bc-dhas); such a caller may
 // name a member who has no name yet but not rename one who has (see the PUT),
 // adds or names only while the competition runs, and adds up to

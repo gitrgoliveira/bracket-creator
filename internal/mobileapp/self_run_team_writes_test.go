@@ -124,6 +124,15 @@ func senpo(name, memberID string) LineupRequest {
 	}
 }
 
+func TestSelfRun_MatchLineup_RefusesAnOverlongName(t *testing.T) {
+	f := newTeamWritesFixture(t, true)
+
+	w := f.send(http.MethodPut, f.lineupPath("PoolA-0"), "", senpo(strings.Repeat("x", MaxLenPlayerName+1), f.blankA))
+	require.Equal(t, http.StatusBadRequest, w.Code, w.Body.String())
+	_, ok := f.savedLineup(t, "PoolA-0")
+	assert.False(t, ok, "a refused lineup writes nothing")
+}
+
 func TestSelfRun_ScoreSheetTeamWrites_AnonymousCallerSaves(t *testing.T) {
 	f := newTeamWritesFixture(t, true)
 

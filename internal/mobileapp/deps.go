@@ -217,7 +217,7 @@ type TeamLineupStore interface {
 // RenameTeamMember / ClearTeamMemberName methods on *state.Store.
 type SquadStore interface {
 	LoadSquads(compID string) (map[string][]domain.TeamMember, error)
-	AddTeamMember(compID, teamID, name string) (domain.TeamMember, error)
+	AddTeamMemberUpTo(compID, teamID, name string, limit int) (domain.TeamMember, error)
 	RenameTeamMember(compID, teamID, memberID, newName string) error
 	NameUnnamedTeamMember(compID, teamID, memberID, newName string) error
 	ClearTeamMemberName(compID, teamID, memberID string) error

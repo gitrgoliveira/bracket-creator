@@ -115,10 +115,14 @@ func RegisterSquadHandlers(r *gin.RouterGroup, store SquadStore, comps Competiti
 		if !validMemberName(c, req.Name) {
 			return
 		}
-		if anonymous && !selfRunMayAddMember(c, store, comp, compID, teamID) {
-			return
+		limit := 0
+		if anonymous {
+			if !selfRunCompetitionOpen(c, comp) {
+				return
+			}
+			limit = selfRunMemberLimit(comp.TeamSize)
 		}
-		member, err := store.AddTeamMember(compID, teamID, req.Name)
+		member, err := store.AddTeamMemberUpTo(compID, teamID, req.Name, limit)
 		if err != nil {
 			respondSquadWriteError(c, err)
 			return
@@ -255,7 +259,8 @@ func selfRunMemberLimit(teamSize int) int {
 }
 
 // errTeamMemberLimit refuses a participant's add once the team holds
-// selfRunMemberLimit members.
+// selfRunMemberLimit members (state.ErrTeamMemberLimit, judged under the
+// store's lock).
 var errTeamMemberLimit = &selfRunRefusal{
 	status:  http.StatusConflict,
 	code:    "team_member_limit",
@@ -275,26 +280,6 @@ var errCompetitionFinished = &selfRunRefusal{
 func selfRunCompetitionOpen(c *gin.Context, comp *state.Competition) bool {
 	if comp.Status == state.CompStatusComplete {
 		c.JSON(errCompetitionFinished.status, errCompetitionFinished.body())
-		return false
-	}
-	return true
-}
-
-// selfRunMayAddMember holds a participant's add to a competition still
-// running and to selfRunMemberLimit, answering the refusal when it is not
-// allowed. The count is read outside the add's lock, so requests racing each
-// other can pass it together; the next request after them is refused.
-func selfRunMayAddMember(c *gin.Context, store SquadStore, comp *state.Competition, compID, teamID string) bool {
-	if !selfRunCompetitionOpen(c, comp) {
-		return false
-	}
-	squads, err := store.LoadSquads(compID)
-	if err != nil {
-		internalError(c, err)
-		return false
-	}
-	if len(squads[teamID]) >= selfRunMemberLimit(comp.TeamSize) {
-		c.JSON(errTeamMemberLimit.status, errTeamMemberLimit.body())
 		return false
 	}
 	return true
@@ -326,6 +311,10 @@ func respondSquadWriteError(c *gin.Context, err error) {
 	}
 	if errors.Is(err, state.ErrTeamMemberNotFound) {
 		c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
+		return
+	}
+	if errors.Is(err, state.ErrTeamMemberLimit) {
+		c.JSON(errTeamMemberLimit.status, errTeamMemberLimit.body())
 		return
 	}
 	if errors.Is(err, state.ErrTeamMemberNamed) {

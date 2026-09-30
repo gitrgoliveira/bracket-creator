@@ -307,7 +307,7 @@ func RegisterLineupHandlers(r *gin.RouterGroup, store TeamLineupStore, comps Com
 				if isMatchFinalized(snap.Status) {
 					return resultFinalized("This match has finished, so its lineup can no longer be changed. Contact the tournament organizer to correct it.").response()
 				}
-				return nil
+				return memberIDsOutsideTeam(stx, compID, teamID, req.MemberIDs)
 			}
 		}
 		saveLineup(c, tx, hub, lineup, guard, func(lineups map[string]domain.TeamLineup) (domain.TeamLineup, bool) {
@@ -337,6 +337,39 @@ var errTeamNotInMatch = &selfRunRefusal{
 	status:  http.StatusNotFound,
 	code:    "team_not_in_match",
 	message: "This team is not in this match. Reload the score sheet and try again.",
+}
+
+// memberIDsOutsideTeam refuses a lineup that places a member id the team does
+// not hold (400 team_member_not_in_team): ids are bare UUIDs, so the team's own
+// squad is the only thing that says whose they are, and a lineup naming another
+// team's member would put that member on this team's score sheet.
+func memberIDsOutsideTeam(stx state.StoreTx, compID, teamID string, memberIDs map[domain.Position]string) *txResponse {
+	if len(memberIDs) == 0 {
+		return nil
+	}
+	squads, err := stx.LoadSquads(compID)
+	if err != nil {
+		log.Printf("mobileapp: lineup member check for %s: %v", compID, err)
+		return &txResponse{status: http.StatusInternalServerError, body: gin.H{"error": "internal error"}}
+	}
+	held := make(map[string]bool, len(squads[teamID]))
+	for _, m := range squads[teamID] {
+		held[m.ID] = true
+	}
+	for pos, id := range memberIDs {
+		if id != "" && !held[id] {
+			return errLineupMemberNotInTeam(pos).response()
+		}
+	}
+	return nil
+}
+
+func errLineupMemberNotInTeam(pos domain.Position) *selfRunRefusal {
+	return &selfRunRefusal{
+		status:  http.StatusBadRequest,
+		code:    "team_member_not_in_team",
+		message: "The member chosen for " + string(pos) + " is not on this team. Reload the score sheet and pick again.",
+	}
 }
 
 // saveLineup is the body the round and the match lineup PUTs share. Under one

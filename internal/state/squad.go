@@ -454,6 +454,17 @@ func squadDuplicateNameCheck(candidateName string, otherNames []string) error {
 // by overwriting it; a squad member is not, which is why the two diverge.
 // See requireTeamParticipantLocked below.
 func (s *Store) AddTeamMember(compID, teamID, name string) (domain.TeamMember, error) {
+	return s.AddTeamMemberUpTo(compID, teamID, name, 0)
+}
+
+// ErrTeamMemberLimit is AddTeamMemberUpTo's refusal: the squad already holds
+// limit members.
+var ErrTeamMemberLimit = errors.New("team already holds as many members as allowed")
+
+// AddTeamMemberUpTo is AddTeamMember held to a squad of at most limit members
+// (limit <= 0 means no cap). The count is read under the same lock as the
+// write, so requests racing each other cannot both pass it.
+func (s *Store) AddTeamMemberUpTo(compID, teamID, name string, limit int) (domain.TeamMember, error) {
 	if err := ValidateCompetitionID(compID); err != nil {
 		return domain.TeamMember{}, err
 	}
@@ -472,6 +483,9 @@ func (s *Store) AddTeamMember(compID, teamID, name string) (domain.TeamMember, e
 		return domain.TeamMember{}, err
 	}
 	existing := squads[teamID]
+	if limit > 0 && len(existing) >= limit {
+		return domain.TeamMember{}, ErrTeamMemberLimit
+	}
 
 	otherNames := make([]string, 0, len(existing))
 	for _, m := range existing {

@@ -133,6 +133,28 @@ func TestSelfRun_MatchLineup_RefusesAnOverlongName(t *testing.T) {
 	assert.False(t, ok, "a refused lineup writes nothing")
 }
 
+func TestSelfRun_MatchLineup_RefusesAMemberTheTeamDoesNotHold(t *testing.T) {
+	f := newTeamWritesFixture(t, true)
+	squads, err := f.store.LoadSquads("c1")
+	require.NoError(t, err)
+	foreign := ""
+	for teamID, members := range squads {
+		if teamID != f.teamA {
+			foreign = members[0].ID
+		}
+	}
+	require.NotEmpty(t, foreign, "the other team's member")
+
+	for name, id := range map[string]string{"another team's member": foreign, "an id no team holds": "00000000-0000-4000-8000-000000000000"} {
+		t.Run(name, func(t *testing.T) {
+			w := f.send(http.MethodPut, f.lineupPath("PoolA-0"), "", senpo("Mei Ito", id))
+			requireRefusal(t, w, http.StatusBadRequest, "team_member_not_in_team", "The member chosen for senpo is not on this team. Reload the score sheet and pick again.")
+			_, ok := f.savedLineup(t, "PoolA-0")
+			assert.False(t, ok, "a refused lineup writes nothing")
+		})
+	}
+}
+
 func TestSelfRun_ScoreSheetTeamWrites_AnonymousCallerSaves(t *testing.T) {
 	f := newTeamWritesFixture(t, true)
 

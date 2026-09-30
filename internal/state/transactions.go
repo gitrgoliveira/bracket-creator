@@ -115,6 +115,9 @@ type StoreTx interface {
 	LoadTeamLineups(compID string) (map[string]domain.TeamLineup, error)
 	SetTeamLineup(compID string, l domain.TeamLineup, teamSize int) error
 	LoadParticipants(compID string, withZekkenName bool) ([]domain.Player, error)
+	// LoadSquads is Store.LoadSquads under the held lock, read-your-own-writes
+	// over a team-members file this transaction already staged.
+	LoadSquads(compID string) (map[string][]domain.TeamMember, error)
 
 	// UpdatePoolMatchByID is the tx-aware twin of
 	// Store.UpdatePoolMatchByID. Same semantics, same return values; the
@@ -598,6 +601,16 @@ func (t *storeTx) SetTeamLineup(compID string, l domain.TeamLineup, teamSize int
 		return t.store.saveTeamLineupsLocked(compID, current, t.txWriteFn())
 	}
 	return t.store.setTeamLineupLocked(compID, l, teamSize, t.txWriteFn())
+}
+
+func (t *storeTx) LoadSquads(compID string) (map[string][]domain.TeamMember, error) {
+	if err := t.checkCompID(compID); err != nil {
+		return nil, err
+	}
+	if pending, ok := t.pendingFor(teamMembersFilename); ok {
+		return parseSquadsBytes(pending)
+	}
+	return t.store.loadSquadsLocked(compID)
 }
 
 func (t *storeTx) LoadParticipants(compID string, withZekkenName bool) ([]domain.Player, error) {

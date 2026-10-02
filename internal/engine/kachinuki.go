@@ -2095,9 +2095,8 @@ func bracketMatchStartedOrDecided(bm *state.BracketMatch) bool {
 // applyKachinukiMerge merges an incoming kachinuki bout log into the stored
 // prior log by position via mergeKachinukiSubResults. No-op for individual,
 // fixed-format, or missing competitions. Shared by the locked and tx scoring
-// paths (RecordMatchResultTx/RecordMatchResult AND, via
-// RecordMatchResultWithIneligibilityTx, RecordDecisionTx) so the merge guard
-// cannot drift between them.
+// paths (RecordMatchResultWithIneligibilityTx AND, via it, RecordDecisionTx)
+// so the merge guard cannot drift between them.
 //
 // On a COMPLETED write (the operator's explicit "End match", mp-gmcg) it
 // additionally strips trailing UNSCORED bouts after the merge:

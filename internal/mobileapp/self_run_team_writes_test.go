@@ -148,7 +148,7 @@ func TestSelfRun_MatchLineup_RefusesAMemberTheTeamDoesNotHold(t *testing.T) {
 	for name, id := range map[string]string{"another team's member": foreign, "an id no team holds": "00000000-0000-4000-8000-000000000000"} {
 		t.Run(name, func(t *testing.T) {
 			w := f.send(http.MethodPut, f.lineupPath("PoolA-0"), "", senpo("Mei Ito", id))
-			requireRefusal(t, w, http.StatusBadRequest, "team_member_not_in_team", "The member chosen for senpo is not on this team. Reload the score sheet and pick again.")
+			requireRefusal(t, w, http.StatusBadRequest, "team_member_not_in_team", "The member chosen for senpo is not on this team. Pick again from the list.")
 			_, ok := f.savedLineup(t, "PoolA-0")
 			assert.False(t, ok, "a refused lineup writes nothing")
 		})
@@ -356,7 +356,7 @@ func TestSelfRun_MatchLineupNamesATeamInTheMatch(t *testing.T) {
 
 	w := f.send(http.MethodPut, stranger, "", senpo("Mei Ito", f.blankA))
 	requireRefusal(t, w, http.StatusNotFound, "team_not_in_match",
-		"This team is not in this match. Reload the score sheet and try again.")
+		"This team is not in this match. Check the score sheet and try again.")
 	lineups, err := f.store.LoadTeamLineups("c1")
 	require.NoError(t, err)
 	assert.Empty(t, lineups, "nothing is written")

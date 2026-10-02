@@ -373,7 +373,7 @@ export function queueAlertMessage(alert) {
     case "rejected":
       // A refusal that is a whole sentence (`sentence`, api_client.jsx
       // _replayRefusal) says what to do, so it closes the alert as it is:
-      // "Re-enter it." after it could contradict it ("Reload the score sheet").
+      // "Re-enter it." after it could contradict it ("Check the scores and finish again").
       if (alert.sentence && alert.detail) return `A result was refused by the server and cannot be saved. ${alert.detail}`;
       return `A result was refused by the server${detail} and cannot be saved. Re-enter it.`;
     // bc-lww1. Deliberately NOT folded into "rejected": that message ends in
@@ -756,9 +756,9 @@ function App() {
   //   3. Runs a 5 s interval tick that re-derives linkState from sseConnected
   //      + the bridge's last-broadcast recency.
   //
-  // On reconnect the existing SSE match_updated handler fires maybeLoad()
-  // which wholesale replaces the in-memory tree with server truth: the
-  // optimistic broadcast overlay is discarded by construction.
+  // On reconnect the SSE event effect fires maybeLoad() (a stream reopened
+  // after a loss), which wholesale replaces the in-memory tree with server
+  // truth: the optimistic broadcast overlay is discarded by construction.
   //
   // Snapshot fallback: the standard load() above already runs on mount
   // and populates tournament. If the server is unreachable on first load,
@@ -1032,26 +1032,50 @@ function App() {
     // it resets on viewerCompId/mode changes alongside the SSE reconnect.
     const sseSeq = { lastSeq: 0 };
 
-    // F8: resync on tab resume. When the tab becomes visible again after
-    // being backgrounded, reconnect SSE (clears any stale connection) and
-    // refresh data so the UI is current. Defined inside the effect so the
-    // closure captures jitteredTimeout, maybeLoad and viewerCompId; removed
-    // in the effect cleanup alongside unsub() to avoid duplicate handlers
-    // across re-renders.
-    const onVisibilityChange = () => {
-        if (document.hidden) return;
-        window.API.reconnectEvents();
-        maybeLoad();
+    // Refresh data so the UI is current: the tournament (now, or after
+    // loadDelay) and the competition page's detail. Defined inside the effect
+    // so the closure captures jitteredTimeout, maybeLoad and viewerCompId.
+    const resync = (loadDelay, label) => {
+        if (loadDelay) jitteredTimeout(maybeLoad, loadDelay);
+        else maybeLoad();
         if (viewerCompId) {
             jitteredTimeout(
                 () => window.API.fetchCompetitionDetails(viewerCompId)
                     .then(takeCompDetail)
-                    .catch(err => console.error('tab-resume refresh failed:', err)),
+                    .catch(err => console.error(`${label} refresh failed:`, err)),
                 Math.random() * 500
             );
         }
     };
+
+    // F8: resync on tab resume. When the tab becomes visible again after
+    // being backgrounded, reconnect SSE (clears any stale connection) and
+    // refresh at once. A resume after the stream was lost loads twice (here,
+    // and when the stream reopens below), which is harmless. Removed in the
+    // effect cleanup alongside unsub() to avoid duplicate handlers across
+    // re-renders.
+    const onVisibilityChange = () => {
+        if (document.hidden) return;
+        window.API.reconnectEvents();
+        resync(0, 'tab-resume');
+    };
     document.addEventListener('visibilitychange', onVisibilityChange);
+
+    // A stream that reopens after it was lost reloads. The hub replays the
+    // events this page missed (api_client sends the last id it saw), but not
+    // one it received whose load then failed because the device could not
+    // fetch: nothing retried that load, so the page stayed behind until the
+    // next event, and a score sheet still showed a representative bout
+    // another device had removed. Coming back online counts as lost: the
+    // stream can outlive the outage, so it is reopened, and its reopen does
+    // the one load. The load is jittered: the wifi returning reconnects every
+    // device in the venue at once.
+    let streamLost = false;
+    const onOnline = () => {
+        streamLost = true;
+        window.API.reconnectEvents();
+    };
+    window.addEventListener('online', onOnline);
 
     const unsub = window.API.subscribeToEvents((event) => {
         // F6b: heartbeat: liveness only, do not patch or advance seq.
@@ -1295,8 +1319,19 @@ function App() {
         // T063: track SSE connection status so /display surfaces can
         // render a reconnect indicator during disconnects.
         setSseConnected(status === 'open');
+        if (status !== 'open') {
+            streamLost = true;
+        } else if (streamLost) {
+            streamLost = false;
+            resync(Math.random() * 2000, 'reconnect');
+        }
     });
-    return () => { unsub(); timerPool.clearAll(); document.removeEventListener('visibilitychange', onVisibilityChange); };
+    return () => {
+        unsub();
+        timerPool.clearAll();
+        document.removeEventListener('visibilitychange', onVisibilityChange);
+        window.removeEventListener('online', onOnline);
+    };
   }, [viewerCompId, mode]);
 
   const [selectedCompData, setSelectedCompData] = useS(null);

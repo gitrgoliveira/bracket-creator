@@ -847,7 +847,7 @@ describe('recordScore: queues running writes on network failure', () => {
     // device removed is refused (a running write only loses the row). The
     // finish is not queued: the sentence is thrown for the public page to show.
     it('throws the sentence of a finish refused for a removed representative bout', async () => {
-        const message = "This match's representative bout was removed on another device. Reload the score sheet before finishing.";
+        const message = "This match's representative bout was removed on another device. Check the scores and finish again.";
         mockFetch(() => Promise.resolve({
             ok: false,
             status: 409,
@@ -1234,7 +1234,7 @@ describe('subscribeTerminalWriteFailed: permanent terminal-write rejection is su
 // flush branches that drop a refused replay are covered: the generic one and
 // the decision 409.
 describe('_flushQueue: a replay refused in the server\'s own words is marked as a sentence', () => {
-    const REMOVED = "This match's representative bout was removed on another device. Reload the score sheet before finishing.";
+    const REMOVED = "This match's representative bout was removed on another device. Check the scores and finish again.";
 
     async function replayRefused(send, key, body) {
         const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});

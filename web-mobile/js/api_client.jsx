@@ -1958,6 +1958,24 @@ let _retryTimer = null;
 /** @type {Set<{callback: Function, onStatus: Function|undefined}>} */
 const _subscribers = new Set();
 
+// The last event id the stream delivered (the server's seq, from its `id:`
+// line). A reconnect opens a NEW EventSource, which sends no Last-Event-ID
+// header, so the id rides on the URL and the hub replays every event after
+// it (or answers resync_required when it cannot). A resync_required with no
+// id (a restarted server that has sent nothing yet) resets it, since the
+// browser keeps the old id when a frame carries none.
+let _lastEventId = '';
+function _noteEventId(id, parsed) {
+    if (parsed && parsed.type === 'resync_required' && !(parsed.seq > 0)) {
+        _lastEventId = '';
+        return;
+    }
+    if (id) _lastEventId = id;
+}
+function _eventsUrl() {
+    return _lastEventId ? `/api/events?lastEventId=${encodeURIComponent(_lastEventId)}` : '/api/events';
+}
+
 // F2: timestamp of the last received SSE activity (open or message).
 let _lastActivityAt = 0;
 /** @type {ReturnType<typeof setInterval>|null} */
@@ -2032,7 +2050,7 @@ function _ensureConnected() {
     // events from a superseded source (`source !== _sharedSource`) so a stale
     // instance: should one ever fire after being replaced: can't close the
     // live connection or fan out a false status/message to current subscribers.
-    const source = new EventSource('/api/events');
+    const source = new EventSource(_eventsUrl());
     _sharedSource = source;
 
     // F2: arm the watchdog at connect time, not just in onopen: a CONNECTING
@@ -2092,6 +2110,7 @@ function _ensureConnected() {
                 _relearnClockThrottled();
             }
         }
+        _noteEventId(event.lastEventId, parsed);
         for (const sub of _subscribers) {
             try { sub.callback(parsed); } catch (err) { console.error('SSE callback failed:', err); }
         }

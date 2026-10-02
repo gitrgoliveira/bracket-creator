@@ -150,7 +150,7 @@ describe('a participant runs the representative bout of a tied knockout team mat
   // finish rests on that bout, so the server refuses it (409 no_daihyosen)
   // with a sentence, which the public page shows as it is, keeping the sheet.
   it('a finish refused because the bout was removed elsewhere shows the server\'s sentence', async () => {
-    const sentence = "This match's representative bout was removed on another device. Reload the score sheet before finishing.";
+    const sentence = "This match's representative bout was removed on another device. Check the scores and finish again.";
     window.API.recordScore = vi.fn(async (_c, _id, patch) => {
       if (patch.status === 'completed') throw new Error(sentence);
       return { status: patch.status };

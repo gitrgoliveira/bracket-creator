@@ -217,8 +217,8 @@ export function terminalFailureBanner(info) {
 // sentence (`sentence`: the server's own words, or the busy-shiaijo copy) is
 // shown as it is after "Not saved:": it ends its own
 // sentence and says what to do, so a full stop and advice after it doubled the
-// stop and could contradict it ("Re-enter the result" after "Reload the score
-// sheet").
+// stop and could contradict it ("Re-enter the result" after "Check the scores
+// and finish again").
 export const NOT_SAVED_ADVICE = "Re-enter the result and submit again.";
 export function notSavedText(failed) {
     if (failed.sentence) return `Not saved: ${failed.reason}`;

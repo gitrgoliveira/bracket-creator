@@ -276,6 +276,59 @@ func TestHubReplaysOnReconnect(t *testing.T) {
 	assert.NotContains(t, body, "id: 2\n", "already-acked seq 2 should not be replayed")
 }
 
+// The SPA reconnects by opening a new EventSource, which carries no
+// Last-Event-ID header, so it sends the last id it saw as the lastEventId
+// query parameter. The hub replays from it exactly as from the header, and the
+// header wins when a request carries both.
+func TestHubReplaysFromLastEventIDQuery(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	for _, tc := range []struct {
+		name, url, header string
+		replayed, skipped []string
+	}{
+		{"query alone", "/events?lastEventId=2", "", []string{"id: 3\n", "id: 4\n", "id: 5\n"}, []string{"id: 1\n", "id: 2\n"}},
+		{"header wins over query", "/events?lastEventId=1", "4", []string{"id: 5\n"}, []string{"id: 2\n", "id: 3\n", "id: 4\n"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			h := NewHub()
+			for i := 0; i < 5; i++ {
+				h.Broadcast(EventMatchUpdated, map[string]int{"i": i})
+			}
+			r := gin.New()
+			r.GET("/events", h.HandleEvents())
+
+			closeChan := make(chan bool)
+			w := &mockResponseWriter{ResponseRecorder: httptest.NewRecorder(), closeChan: closeChan}
+			ctx, cancel := context.WithCancel(context.Background())
+			req, _ := http.NewRequestWithContext(ctx, "GET", tc.url, nil)
+			if tc.header != "" {
+				req.Header.Set("Last-Event-ID", tc.header)
+			}
+			done := make(chan struct{})
+			go func() {
+				r.ServeHTTP(w, req)
+				close(done)
+			}()
+			waitForFrame(t, w, "id: 5\n")
+			cancel()
+			close(closeChan)
+			select {
+			case <-done:
+			case <-time.After(1 * time.Second):
+				t.Fatal("handler did not finish after context cancel")
+			}
+
+			body := w.BodyString()
+			for _, frame := range tc.replayed {
+				assert.Contains(t, body, frame)
+			}
+			for _, frame := range tc.skipped {
+				assert.NotContains(t, body, frame)
+			}
+		})
+	}
+}
+
 // T216: ring-buffer eviction. With HistorySize=3 the hub keeps only the
 // last 3 envelopes. Broadcasting 5 events then reconnecting with
 // Last-Event-ID=1 means event 2 has been overwritten and the gap is

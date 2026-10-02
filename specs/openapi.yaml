@@ -2424,7 +2424,7 @@ paths:
             list more than one representative-bout row (position `-1`) is
             refused with `error` `duplicate_daihyosen` and a `message` for the
             participant: "A team match has one representative bout, and this
-            score lists more than one. Reload the score sheet and try again."
+            score lists more than one. Check the scores and try again."
 
             A `completed` write whose `decision` is empty or `hikiwake` on a
             match whose stored result is a completed withdrawal (kiken or
@@ -2499,15 +2499,15 @@ paths:
               on another device. A finish may take its winner from that row, so nothing is written.
               A write that does not finish the match loses the row instead and is
               written as usual. Extra fields: `message`, "This match's representative
-              bout was removed on another device. Reload the score sheet before
-              finishing."
+              bout was removed on another device. Check the scores and finish
+              again."
             - `daihyosen_added`: a request with an empty password (self-run) finishes
               the match on a sheet that lists the bouts without the representative bout
               the match has, such as a sheet a moment behind an add made on another
               device. Nothing is written. A write that does not finish the match keeps
               the stored row and is written as usual. Extra fields: `message`, "A
-              representative bout was added to this match on another device. Reload the
-              score sheet before finishing."
+              representative bout was added to this match on another device. Check the
+              scores and finish again."
             - `side_mismatch`: the submitted winner does not match either side of the match.
               Extra fields: `message`.
             - `downstream_knockout_played`: the write would change who a
@@ -3948,7 +3948,7 @@ paths:
             Competition not found, or (self-run, an empty password) no match
             with this id, or a team the match does not hold
             (`error: team_not_in_match`, with a `message` to show: "This team
-            is not in this match. Reload the score sheet and try again.").
+            is not in this match. Check the score sheet and try again.").
           content:
             application/json:
               schema:

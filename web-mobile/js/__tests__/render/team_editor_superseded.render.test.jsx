@@ -167,7 +167,7 @@ describe('team score editor: a superseded explicit tap reaches the screen (bc-lw
   // banner shows that sentence as it is, once, with no second full stop and
   // no default advice to re-enter, which would contradict its own.
   it('shows a refusal the server worded itself as it is', async () => {
-    const sentence = "This match's representative bout was removed on another device. Reload the score sheet before finishing.";
+    const sentence = "This match's representative bout was removed on another device. Check the scores and finish again.";
     const subscribers = [];
     window.subscribeTerminalWriteFailed = (fn) => { subscribers.push(fn); return () => {}; };
     try {

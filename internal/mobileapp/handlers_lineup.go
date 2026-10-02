@@ -336,7 +336,7 @@ func RegisterLineupHandlers(r *gin.RouterGroup, store TeamLineupStore, comps Com
 var errTeamNotInMatch = &selfRunRefusal{
 	status:  http.StatusNotFound,
 	code:    "team_not_in_match",
-	message: "This team is not in this match. Reload the score sheet and try again.",
+	message: "This team is not in this match. Check the score sheet and try again.",
 }
 
 // memberIDsOutsideTeam refuses a lineup that places a member id the team does
@@ -368,7 +368,7 @@ func errLineupMemberNotInTeam(pos domain.Position) *selfRunRefusal {
 	return &selfRunRefusal{
 		status:  http.StatusBadRequest,
 		code:    "team_member_not_in_team",
-		message: "The member chosen for " + string(pos) + " is not on this team. Reload the score sheet and pick again.",
+		message: "The member chosen for " + string(pos) + " is not on this team. Pick again from the list.",
 	}
 }
 

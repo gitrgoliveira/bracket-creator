@@ -595,7 +595,7 @@ func TestSelfRun_AScoreWriteNeverCreatesARepresentativeBout(t *testing.T) {
 		body["subResults"] = append(body["subResults"].([]any), repBoutRow([]string{}, []string{"M"}, "TeamB"))
 		w := f.send(http.MethodPut, repBoutMatchPath+"/score", "", body)
 		requireRefusal(t, w, http.StatusBadRequest, "duplicate_daihyosen",
-			"A team match has one representative bout, and this score lists more than one. Reload the score sheet and try again.")
+			"A team match has one representative bout, and this score lists more than one. Check the scores and try again.")
 		rows := 0
 		for _, s := range storedB1(t, f.store, "c1").SubResults {
 			if s.Position == state.DaihyosenSubPosition {
@@ -623,7 +623,7 @@ func TestSelfRun_AFinishOnARemovedRepresentativeBoutIsRefused(t *testing.T) {
 
 	w = f.score("", state.MatchStatusCompleted, "TeamA", f.now+200, repBoutRow([]string{"M"}, []string{}, "TeamA"))
 	requireRefusal(t, w, http.StatusConflict, "no_daihyosen",
-		"This match's representative bout was removed on another device. Reload the score sheet before finishing.")
+		"This match's representative bout was removed on another device. Check the scores and finish again.")
 	assert.Equal(t, before, storedB1(t, f.store, "c1"), "nothing is stored: the match is still running, with no winner")
 }
 
@@ -889,7 +889,7 @@ func TestSelfRun_AScoreWriteNeverRemovesARepresentativeBout(t *testing.T) {
 		before := storedB1(t, f.store, "c1")
 		w := f.score("", state.MatchStatusCompleted, "TeamA", f.now+200, nil)
 		requireRefusal(t, w, http.StatusConflict, "daihyosen_added",
-			"A representative bout was added to this match on another device. Reload the score sheet before finishing.")
+			"A representative bout was added to this match on another device. Check the scores and finish again.")
 		assert.Equal(t, before, storedB1(t, f.store, "c1"), "nothing is stored")
 	})
 

@@ -1140,7 +1140,7 @@ func RegisterMatchHandlers(r *gin.RouterGroup, eng *engine.Engine, store Competi
 			if errors.Is(err, engine.ErrMatchSideMismatch) {
 				c.JSON(http.StatusConflict, gin.H{
 					"error":   "side_mismatch",
-					"message": "The submitted competitors don't match this match's pairing. Reload and try again.",
+					"message": "The submitted competitors don't match this match's pairing. Check the score sheet and try again.",
 				})
 				return
 			}
@@ -1870,7 +1870,7 @@ func repBoutHanteiRefusal(recorded bool) *selfRunRefusal {
 var errDuplicateRepBout = &selfRunRefusal{
 	status:  http.StatusBadRequest,
 	code:    "duplicate_daihyosen",
-	message: "A team match has one representative bout, and this score lists more than one. Reload the score sheet and try again.",
+	message: "A team match has one representative bout, and this score lists more than one. Check the scores and try again.",
 }
 
 // errRepBoutRemoved refuses a participant's finish that carries a
@@ -1881,7 +1881,7 @@ var errDuplicateRepBout = &selfRunRefusal{
 var errRepBoutRemoved = &selfRunRefusal{
 	status:  http.StatusConflict,
 	code:    "no_daihyosen",
-	message: "This match's representative bout was removed on another device. Reload the score sheet before finishing.",
+	message: "This match's representative bout was removed on another device. Check the scores and finish again.",
 }
 
 // errRepBoutAdded refuses a participant's finish that lists the bouts without
@@ -1890,7 +1890,7 @@ var errRepBoutRemoved = &selfRunRefusal{
 var errRepBoutAdded = &selfRunRefusal{
 	status:  http.StatusConflict,
 	code:    "daihyosen_added",
-	message: "A representative bout was added to this match on another device. Reload the score sheet before finishing.",
+	message: "A representative bout was added to this match on another device. Check the scores and finish again.",
 }
 
 // holdSelfReportedWriteUnderTx is the one judge of an anonymous self-run score
@@ -3047,7 +3047,7 @@ func registerScoreHandler(r *gin.RouterGroup, eng ScoringEngine, store Competiti
 				// pairing, refuse rather than rewrite match identity.
 				c.JSON(http.StatusConflict, gin.H{
 					"error":   "side_mismatch",
-					"message": "The submitted competitors don't match this match's pairing. Reload and try again.",
+					"message": "The submitted competitors don't match this match's pairing. Check the score sheet and try again.",
 				})
 				return
 			}

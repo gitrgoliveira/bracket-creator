@@ -99,7 +99,7 @@ describe('dependentActionBlocked', () => {
 // shown as it is: a full stop and advice after it doubled the stop, and the
 // default advice could contradict it.
 describe('notSavedText', () => {
-    const REMOVED = "This match's representative bout was removed on another device. Reload the score sheet before finishing.";
+    const REMOVED = "This match's representative bout was removed on another device. Check the scores and finish again.";
 
     it('shows a sentence the server wrote as it is, once', () => {
         expect(notSavedText({ reason: REMOVED, sentence: true })).toBe(`Not saved: ${REMOVED}`);

@@ -413,11 +413,18 @@ func (h *Hub) snapshotHistorySinceLocked(since int64) (entries []historyEntry, c
 //
 // The handler also emits an SSE `id: <seq>` line for every event so the
 // browser's auto-reconnect carries the right Last-Event-ID without any
-// JS work.
+// JS work. The SPA never relies on that auto-reconnect: it closes the
+// source on an error and opens a new one, which carries no header, so it
+// sends the last id it saw as the `lastEventId` query parameter instead.
+// The header wins when both are present.
 func (h *Hub) HandleEvents() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		var lastEventID int64
-		if raw := c.GetHeader("Last-Event-ID"); raw != "" {
+		raw := c.GetHeader("Last-Event-ID")
+		if raw == "" {
+			raw = c.Query("lastEventId")
+		}
+		if raw != "" {
 			if v, err := strconv.ParseInt(raw, 10, 64); err == nil && v > 0 {
 				lastEventID = v
 			}

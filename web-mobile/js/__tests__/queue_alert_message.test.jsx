@@ -29,9 +29,9 @@ describe('queueAlertMessage', () => {
 
     // A refusal the server worded itself (`sentence`, marked where the replay
     // was refused) says what to do, so it closes the alert as it is: "Re-enter
-    // it." after "Reload the score sheet before finishing." contradicted it.
+    // it." after "Check the scores and finish again." contradicted it.
     it('shows a refusal the server worded itself as the alert\'s advice', () => {
-        const sentence = "This match's representative bout was removed on another device. Reload the score sheet before finishing.";
+        const sentence = "This match's representative bout was removed on another device. Check the scores and finish again.";
         const msg = queueAlertMessage({ kind: 'rejected', count: 1, terminalCount: 1, detail: sentence, sentence: true });
         expect(msg).toBe(`A result was refused by the server and cannot be saved. ${sentence}`);
     });

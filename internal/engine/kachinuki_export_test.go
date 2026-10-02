@@ -31,90 +31,8 @@ func TestLineupKey(t *testing.T) {
 	assert.Equal(t, k1, lineupKey("TeamA", "Alice"), "key must be deterministic")
 }
 
-// TestTallyKachinukiEliminations_Winner exercises the winner-based
-// retirement branch: when SideB wins a bout, the SideA player is
-// retired (b counter for winner's perspective, a for loser's). The
-// fixture is deliberately ASYMMETRIC (2 SideA retirements vs 1 SideB)
-// so a swap of the two returned counters cannot pass unnoticed.
-func TestTallyKachinukiEliminations_Winner(t *testing.T) {
-	m := &state.MatchResult{
-		SideA: "RedTeam",
-		SideB: "WhiteTeam",
-		SubResults: []state.SubMatchResult{
-			{Position: 1, SideA: "R-Senpo", SideB: "W-Senpo", Winner: "W-Senpo", Decision: "fought"},
-			{Position: 2, SideA: "R-Jiho", SideB: "W-Senpo", Winner: "R-Jiho", Decision: "fought"},
-			{Position: 3, SideA: "R-Jiho", SideB: "W-Jiho", Winner: "W-Jiho", Decision: "fought"},
-		},
-	}
-	a, b := tallyKachinukiEliminations(m)
-	assert.Equal(t, 2, a, "SideA retired: R-Senpo (bout 1) and R-Jiho (bout 3) eliminated")
-	assert.Equal(t, 1, b, "SideB retired: W-Senpo (bout 2) eliminated")
-}
-
-// TestTallyKachinukiEliminations_Hikiwake verifies that a hikiwake
-// retires both players (one from each side).
-func TestTallyKachinukiEliminations_Hikiwake(t *testing.T) {
-	m := &state.MatchResult{
-		SideA: "RedTeam",
-		SideB: "WhiteTeam",
-		SubResults: []state.SubMatchResult{
-			{
-				Position: 1,
-				SideA:    "R-Senpo",
-				SideB:    "W-Senpo",
-				Decision: state.DecisionDraw,
-			},
-		},
-	}
-	a, b := tallyKachinukiEliminations(m)
-	assert.Equal(t, 1, a, "hikiwake retires SideA player")
-	assert.Equal(t, 1, b, "hikiwake retires SideB player")
-}
-
-// TestTallyKachinukiEliminations_CountsAFighterFieldedByNumber pins the
-// switch from len(retiredX.Names) to retiredX.Count().
-//
-// The three fixtures above cannot pin it: every fighter in them carries a
-// NAME and no member id, so the two expressions agree by construction and
-// reverting the change leaves them green (verified -- the revert left the
-// whole repo green, which is how this gap was found). The discriminating
-// shape is the one bc-dnst introduced: a fighter picked by squad number and
-// never named retires under a member id and an EMPTY name, so the Names set
-// never hears about them and the exported Kachinuki Detail sheet under-counts
-// that side's eliminations.
-func TestTallyKachinukiEliminations_CountsAFighterFieldedByNumber(t *testing.T) {
-	m := &state.MatchResult{
-		SideA: "RedTeam",
-		SideB: "WhiteTeam",
-		SubResults: []state.SubMatchResult{
-			// SideA is a blank squad slot fielded by number: id, no name.
-			// The winner is named, so attribution takes the name tier and
-			// retires SideA -- under its id alone.
-			{Position: 1, SideA: "", SideAMemberID: "m-red-1", SideB: "W-Senpo", Winner: "W-Senpo", Decision: "fought"},
-			// A second, NAMED SideA retirement, so the assertion below is a
-			// count of two distinct fighters rather than of one: a naive
-			// len(Names) would report 1 here, not 0, and an assertion of 1
-			// could not tell the two implementations apart.
-			{Position: 2, SideA: "R-Jiho", SideB: "W-Senpo", Winner: "W-Senpo", Decision: "fought"},
-		},
-	}
-	a, b := tallyKachinukiEliminations(m)
-	assert.Equal(t, 2, a, "both SideA fighters retired; the nameless one is counted by member id")
-	assert.Equal(t, 0, b, "SideB's fighter won both bouts and stays on")
-}
-
-// TestTallyKachinukiEliminations_Empty verifies no panics/zero counts
-// for a match with no sub-results.
-func TestTallyKachinukiEliminations_Empty(t *testing.T) {
-	m := &state.MatchResult{SideA: "A", SideB: "B"}
-	a, b := tallyKachinukiEliminations(m)
-	assert.Equal(t, 0, a)
-	assert.Equal(t, 0, b)
-}
-
 // TestBuildKachinukiDetail verifies the full conversion: sub-results
-// become Bouts, eliminations are tallied, and top-level fields are
-// copied.
+// become Bouts and top-level fields are copied.
 func TestBuildKachinukiDetail(t *testing.T) {
 	positions := map[string]string{
 		lineupKey("RedTeam", "R-Senpo"):   "Senpo",
@@ -157,9 +75,6 @@ func TestBuildKachinukiDetail(t *testing.T) {
 	assert.Equal(t, "", detail.Bouts[0].Middle)
 	assert.Equal(t, "", detail.Bouts[0].MarkA)
 	assert.Equal(t, "", detail.Bouts[0].MarkB)
-	// Elimination tally: W-Senpo lost so b=1, R-Senpo won so a=0.
-	assert.Equal(t, 0, detail.EliminationA)
-	assert.Equal(t, 1, detail.EliminationB)
 }
 
 // TestBuildKachinukiDetail_FusenshoMarksTheWinnerBesideItsScore pins the
@@ -960,13 +875,6 @@ func TestKachinukiDetailMatches_PoolMatchWithSubResults(t *testing.T) {
 	assert.Equal(t, "X", detail.Bouts[1].Middle)
 	assert.Equal(t, "", detail.Bouts[1].MarkA)
 	assert.Equal(t, "", detail.Bouts[1].MarkB)
-
-	// Bout 1: R-Senpo (SideA) wins, so W-Senpo (SideB) retires.
-	// Bout 2 is a hikiwake, which retires one player from EACH side:
-	// R-Senpo (SideA) and W-Jiho (SideB). Distinct retired names per side:
-	// SideA={R-Senpo} (1), SideB={W-Senpo, W-Jiho} (2).
-	assert.Equal(t, 1, detail.EliminationA, "R-Senpo retires via the bout-2 hikiwake")
-	assert.Equal(t, 2, detail.EliminationB, "W-Senpo (bout1 loser) and W-Jiho (bout2 hikiwake) both retire")
 }
 
 // TestKachinukiDetailMatches_MatchWithoutSubResultsGetsBlankRows verifies,
@@ -1177,8 +1085,9 @@ func TestBuildKachinukiDetail_NamelessFighterPickedByNumberStillPrints(t *testin
 	defer func() { _ = f.Close() }()
 	require.NoError(t, helper.WriteKachinukiDetailSheet(f, []helper.KachinukiMatchDetail{detail}))
 
-	// Side A (Aka) sits in the RIGHT column (F) per helper.WhiteLeft.
-	cell, err := f.GetCellValue(helper.SheetKachinukiDetail, "F4")
+	// Side A (Aka) sits in the RIGHT name column (G) per helper.WhiteLeft, on
+	// the first bout row under the title, colour and team rows.
+	cell, err := f.GetCellValue(helper.SheetKachinukiDetail, "G4")
 	require.NoError(t, err)
 	assert.NotEmptyf(t, cell, "a fighter picked by number and never named must not print a blank cell (got %q)", cell)
 	assert.Contains(t, cell, "T10.3", "the printed cell should at least show the known label")

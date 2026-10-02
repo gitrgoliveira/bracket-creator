@@ -306,47 +306,10 @@ func advanceAfterHikiwake(in AdvanceKachinukiInput) AdvanceKachinukiResult {
 type RetiredMemberSet struct {
 	IDs   map[string]struct{}
 	Names map[string]struct{}
-	// nameOnly holds the names of retirements that carried NO member id, so
-	// Count can tally distinct fighters as ids plus id-less names: a fighter
-	// fielded by squad number before being named (bc-dnst) retires under an
-	// id and an empty name, and a count of Names alone would miss them.
-	nameOnly map[string]struct{}
-	// namedByID holds every name that retired ALONGSIDE a member id. It exists
-	// only so Count can tell a second, id-less row for a fighter ALREADY
-	// counted through their id from a genuinely different id-less fighter.
-	namedByID map[string]struct{}
 }
 
 func newRetiredMemberSet() RetiredMemberSet {
-	return RetiredMemberSet{
-		IDs: map[string]struct{}{}, Names: map[string]struct{}{},
-		nameOnly: map[string]struct{}{}, namedByID: map[string]struct{}{},
-	}
-}
-
-// Count is the number of distinct fighters retired: every id-carrying
-// retirement, plus every name-only retirement for a fighter no id already
-// counted.
-//
-// The second clause is why this is not len(IDs)+len(nameOnly). One fighter can
-// be recorded BOTH ways -- reopen an encounter and re-score a bout through a
-// path that omits the member id while the original row still carries it -- and
-// the naive sum then reported two eliminations for a team that lost one
-// fighter, straight into the exported Kachinuki Detail sheet.
-//
-// Two teammates genuinely sharing a display name, one retiring with an id and
-// one without, still collapse to one. That is the same name ambiguity
-// ambiguousFighterNames exists for, and under-counting it is the safe
-// direction: a tally that is short never ends an encounter early.
-func (r RetiredMemberSet) Count() int {
-	n := len(r.IDs)
-	for name := range r.nameOnly {
-		if _, alsoByID := r.namedByID[name]; alsoByID {
-			continue
-		}
-		n++
-	}
-	return n
+	return RetiredMemberSet{IDs: map[string]struct{}{}, Names: map[string]struct{}{}}
 }
 
 // retire records one retirement: name (when non-empty) into Names,
@@ -360,11 +323,6 @@ func (r RetiredMemberSet) retire(name, memberID string) {
 	}
 	if memberID != "" {
 		r.IDs[memberID] = struct{}{}
-		if name != "" {
-			r.namedByID[name] = struct{}{}
-		}
-	} else if name != "" {
-		r.nameOnly[name] = struct{}{}
 	}
 }
 

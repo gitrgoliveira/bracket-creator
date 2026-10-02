@@ -71,6 +71,12 @@ func detailSections(rows [][]string) (titles []string, at []int) {
 	return titles, at
 }
 
+// detailTeams reads the teams a Kachinuki Detail section names on its team
+// row, under the White | vs | Red row: Shiro's on the left, Aka's on the right.
+func detailTeams(rows [][]string, title int) (shiro, aka string) {
+	return bctest.CellAt(rows, title+2, 0), bctest.CellAt(rows, title+2, 6)
+}
+
 // TestCreateHandler_KachinukiBlocksHoldEveryBout pins the blank template's
 // team blocks: with teamMatchType=kachinuki every block on the Pool Matches
 // sheet, the Elimination Matches sheet and its 3rd-place block has a row for
@@ -149,10 +155,9 @@ func TestCreateHandler_KachinukiDetailCoversTheDraw(t *testing.T) {
 		"Round 1 - Match 1", "Round 1 - Match 2", "Round 2 - Match 3", helper.ThirdPlaceLabel,
 	}, titles)
 	for i, title := range titles {
-		// The title, "<Shiro> vs <Aka>", the header row, then the bouts.
+		// The title, the White | vs | Red row, the team names, then the bouts.
 		assert.Equal(t, 5, bctest.NumberedRowsFrom(rows, at[i]+3, 0), "%s bout rows", title)
-		shiro, aka, ok := strings.Cut(bctest.CellAt(rows, at[i]+1, 0), " vs ")
-		require.True(t, ok, "%s subtitle", title)
+		shiro, aka := detailTeams(rows, at[i])
 		if strings.HasPrefix(title, "Pool Match") {
 			assert.Contains(t, sixTeams, shiro, title)
 			assert.Contains(t, sixTeams, aka, title)
@@ -190,7 +195,8 @@ func TestCreateHandler_KachinukiKnockoutDetail(t *testing.T) {
 		require.NoError(t, err)
 		titles, at := detailSections(rows)
 		require.Equal(t, []string{"Round 1 - Match 1"}, titles)
-		assert.Equal(t, "Tora vs Ryu", bctest.CellAt(rows, at[0]+1, 0), "the upper entrant is Aka, on the right")
+		shiro, aka := detailTeams(rows, at[0])
+		assert.Equal(t, [2]string{"Tora", "Ryu"}, [2]string{shiro, aka}, "the upper entrant is Aka, on the right")
 		assert.Equal(t, 5, bctest.NumberedRowsFrom(rows, at[0]+3, 0))
 
 		elimRows, err := f.GetRows(helper.SheetEliminationMatches)
@@ -208,8 +214,10 @@ func TestCreateHandler_KachinukiKnockoutDetail(t *testing.T) {
 		require.NoError(t, err)
 		titles, at := detailSections(rows)
 		require.Equal(t, []string{"Round 1 - Match 1", "Round 2 - Match 2"}, titles)
-		assert.Equal(t, "Kame vs Tora", bctest.CellAt(rows, at[0]+1, 0))
-		assert.Equal(t, "M 1 vs Ryu", bctest.CellAt(rows, at[1]+1, 0), "the bye's team meets the first match's winner")
+		shiro, aka := detailTeams(rows, at[0])
+		assert.Equal(t, [2]string{"Kame", "Tora"}, [2]string{shiro, aka})
+		shiro, aka = detailTeams(rows, at[1])
+		assert.Equal(t, [2]string{"M 1", "Ryu"}, [2]string{shiro, aka}, "the bye's team meets the first match's winner")
 		for i := range titles {
 			assert.Equal(t, 5, bctest.NumberedRowsFrom(rows, at[i]+3, 0), titles[i])
 		}

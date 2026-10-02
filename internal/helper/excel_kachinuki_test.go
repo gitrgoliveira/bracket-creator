@@ -14,17 +14,16 @@ import (
 // makeKachinukiTestMatch builds a 6-bout kachinuki team-match fixture used by
 // the detail-sheet tests. Side A wins 4 bouts and Side B wins 1 with one
 // hikiwake; in practice this is enough to drive every renderer branch (winner
-// rows, draw row, summary tallies) without needing multiple fixtures. The
-// match's own winner/decision are no longer carried here (operator decision
-// 2026-09-27, no Winner/Decision column): the match's Pool or Elimination
-// Matches row is where that result lives.
+// rows, the draw row) without needing multiple fixtures. The match's own
+// winner/decision, and any tally of eliminations, are no longer carried here
+// (operator decisions 2026-09-27 and 2026-10-02: no Winner/Decision column,
+// no summary row): the match's Pool or Elimination Matches row is where that
+// result lives, and the section simply ends at its last bout row.
 func makeKachinukiTestMatch() KachinukiMatchDetail {
 	return KachinukiMatchDetail{
-		Label:        "Pool A - Match 1",
-		SideATeam:    "Team Alpha",
-		SideBTeam:    "Team Bravo",
-		EliminationA: 1, // 1 player from Team Alpha was retired (hikiwake bout)
-		EliminationB: 5, // 5 players from Team Bravo retired (losses + hikiwake)
+		Label:     "Pool A - Match 1",
+		SideATeam: "Team Alpha",
+		SideBTeam: "Team Bravo",
 		Bouts: []KachinukiBout{
 			{Position: 1, SideAName: "Alice", SideAPos: "Senpo", ScoreA: "MM", SideBName: "Bob", SideBPos: "Senpo", ScoreB: ""},
 			{Position: 2, SideAName: "Alice", SideAPos: "Senpo", ScoreA: "M", SideBName: "Carol", SideBPos: "Jiho", ScoreB: ""},
@@ -36,14 +35,15 @@ func makeKachinukiTestMatch() KachinukiMatchDetail {
 	}
 }
 
-// TestKachinukiDetail_ShiroLeftAkaRight pins bc-kdsc's P1 header: Shiro
-// (SideB) on the LEFT in a white header cell carrying the Shiro team's own
-// NAME, Aka (SideA) on the RIGHT in a red header cell carrying the Aka
-// team's name, no side words ("Side A"/"Side B"/"Shiro"/"Aka"/"White"/"Red")
-// anywhere, and no Winner or Decision column at all (the sheet is six
-// columns, A..F). Team names deliberately contain no side word, so the
-// no-words assertion cannot pass by accident (it would pass vacuously if the
-// team names themselves happened to say "Aka" or "White").
+// TestKachinukiDetail_ShiroLeftAkaRight pins the section layout (operator
+// decision 2026-10-02): a section is drawn exactly like a team match block
+// on the Elimination Matches sheet, seven columns A..G. Row 2 carries the
+// generic White/Red header (matchHeaderLabels), never a team name; row 3
+// carries the team names themselves, Shiro (SideB) on the LEFT in column A,
+// Aka (SideA) on the RIGHT in column G, each in the plain grey text style,
+// not the white/red header style (that belongs to row 2 alone). There is no
+// Winner or Decision column, and the sheet uses exactly seven columns:
+// nothing beyond G carries a value.
 func TestKachinukiDetail_ShiroLeftAkaRight(t *testing.T) {
 	f := excelize.NewFile()
 	defer func() { _ = f.Close() }()
@@ -55,66 +55,43 @@ func TestKachinukiDetail_ShiroLeftAkaRight(t *testing.T) {
 		Bouts: []KachinukiBout{
 			{Position: 1, SideAName: "Akagi", ScoreA: "M", SideBName: "Shirai", ScoreB: "KK"},
 		},
-		EliminationA: 1,
-		EliminationB: 3,
 	}
 	require.NoError(t, WriteKachinukiDetailSheet(f, []KachinukiMatchDetail{match}))
 
-	// Subtitle row: Shiro's team first (matching the scoreboard, "White vs
-	// Red" reading left to right).
-	subtitle, err := f.GetCellValue(SheetKachinukiDetail, "A2")
+	// Header row (row 2): the generic White/Red labels, never a team name,
+	// placed exactly as matchHeaderWithStyles places them on an Elimination
+	// Matches block.
+	const headerRow = "2"
+	leftLabel, rightLabel := matchHeaderLabels()
+	headerA, err := f.GetCellValue(SheetKachinukiDetail, "A"+headerRow)
 	require.NoError(t, err)
-	assert.Equal(t, "Mumeishi vs Kodokan", subtitle)
-
-	// Header row (row 3): B carries Mumeishi (Shiro, white header), E
-	// carries Kodokan (Aka, red header). B:C and E:F are merged.
-	const headerRow = "3"
-	headerB, err := f.GetCellValue(SheetKachinukiDetail, "B"+headerRow)
+	assert.Equal(t, leftLabel, headerA, "Shiro's header cell carries the generic left label")
+	headerG, err := f.GetCellValue(SheetKachinukiDetail, "G"+headerRow)
 	require.NoError(t, err)
-	assert.Equal(t, "Mumeishi", headerB)
-	headerE, err := f.GetCellValue(SheetKachinukiDetail, "E"+headerRow)
-	require.NoError(t, err)
-	assert.Equal(t, "Kodokan", headerE)
-
-	merges, err := f.GetMergeCells(SheetKachinukiDetail)
-	require.NoError(t, err)
-	var mergedBC, mergedEF bool
-	for _, m := range merges {
-		switch {
-		case m.GetStartAxis() == "B"+headerRow && m.GetEndAxis() == "C"+headerRow:
-			mergedBC = true
-		case m.GetStartAxis() == "E"+headerRow && m.GetEndAxis() == "F"+headerRow:
-			mergedEF = true
-		}
-	}
-	assert.True(t, mergedBC, "B%s:C%s must be merged for the Shiro team name", headerRow, headerRow)
-	assert.True(t, mergedEF, "E%s:F%s must be merged for the Aka team name", headerRow, headerRow)
+	assert.Equal(t, rightLabel, headerG, "Aka's header cell carries the generic right label")
 
 	whiteStyle := getWhiteHeaderStyle(f)
 	redStyle := getRedHeaderStyle(f)
-	bStyle, err := f.GetCellStyle(SheetKachinukiDetail, "B"+headerRow)
+	aStyle, err := f.GetCellStyle(SheetKachinukiDetail, "A"+headerRow)
 	require.NoError(t, err)
-	assert.Equal(t, whiteStyle, bStyle, "Shiro's header cell must use the white header style")
-	eStyle, err := f.GetCellStyle(SheetKachinukiDetail, "E"+headerRow)
+	assert.Equal(t, whiteStyle, aStyle, "Shiro's header cell must use the white header style")
+	gStyle, err := f.GetCellStyle(SheetKachinukiDetail, "G"+headerRow)
 	require.NoError(t, err)
-	assert.Equal(t, redStyle, eStyle, "Aka's header cell must use the red header style")
+	assert.Equal(t, redStyle, gStyle, "Aka's header cell must use the red header style")
 
-	// No side word in the HEADER row specifically (scoped there, not swept
-	// across bout rows: a fighter's real name, e.g. "Akagi", may legitimately
-	// contain the substring "Aka" without the renderer having printed the
-	// side word).
-	headerForbidden := []string{"Side A", "Side B", "Shiro", "Aka", "White", "Red"}
-	headerCells := []string{"A" + headerRow, "B" + headerRow, "C" + headerRow, "D" + headerRow, "E" + headerRow, "F" + headerRow}
-	for _, cell := range headerCells {
-		v, err := f.GetCellValue(SheetKachinukiDetail, cell)
-		require.NoError(t, err)
-		for _, word := range headerForbidden {
-			assert.NotContainsf(t, v, word, "header cell %s (%q) must not contain %q", cell, v, word)
-		}
-	}
+	// Team row (row 3): the team names themselves, Shiro (SideB) LEFT,
+	// Aka (SideA) RIGHT -- this is the ONE place either team's name is
+	// printed in the section (see the "printed once" check below).
+	const teamRow = "3"
+	teamA, err := f.GetCellValue(SheetKachinukiDetail, "A"+teamRow)
+	require.NoError(t, err)
+	assert.Equal(t, "Mumeishi", teamA, "Shiro's team name is on the LEFT")
+	teamG, err := f.GetCellValue(SheetKachinukiDetail, "G"+teamRow)
+	require.NoError(t, err)
+	assert.Equal(t, "Kodokan", teamG, "Aka's team name is on the RIGHT")
 
 	// No cell anywhere in the section says "Winner" or "Decision", and
-	// columns G/H are empty on every row: the sheet is six columns, A..F.
+	// nothing is written beyond column G: the sheet is seven columns, A..G.
 	rows, err := f.GetRows(SheetKachinukiDetail)
 	require.NoError(t, err)
 	for r, row := range rows {
@@ -124,36 +101,43 @@ func TestKachinukiDetail_ShiroLeftAkaRight(t *testing.T) {
 					"row %d col %d (%q) must not contain %q", r+1, c+1, cell, word)
 			}
 		}
-		// Columns G (index 6) and H (index 7) must be empty on every row: the
-		// sheet has no seventh or eighth column left to hold anything.
-		assert.Lessf(t, len(row), 7, "row %d must not extend into column G", r+1)
+		// Column H (index 7) and beyond must be empty on every row: the
+		// sheet has no eighth column left to hold anything.
+		assert.LessOrEqualf(t, len(row), 7, "row %d must not extend past column G", r+1)
 	}
 
 	// Bout row (row 4): Shiro (Shirai/KK) on the left, Aka (Akagi/M) on the
-	// right.
+	// right, each cell carrying the bout number ahead of the fighter.
 	const boutRow = "4"
+	boutA, err := f.GetCellValue(SheetKachinukiDetail, "A"+boutRow)
+	require.NoError(t, err)
+	assert.Contains(t, boutA, "Shirai")
 	boutB, err := f.GetCellValue(SheetKachinukiDetail, "B"+boutRow)
 	require.NoError(t, err)
-	assert.Contains(t, boutB, "Shirai")
-	boutC, err := f.GetCellValue(SheetKachinukiDetail, "C"+boutRow)
-	require.NoError(t, err)
-	assert.Equal(t, "KK", boutC)
-	boutE, err := f.GetCellValue(SheetKachinukiDetail, "E"+boutRow)
-	require.NoError(t, err)
-	assert.Equal(t, "M", boutE)
+	assert.Equal(t, "KK", boutB)
 	boutF, err := f.GetCellValue(SheetKachinukiDetail, "F"+boutRow)
 	require.NoError(t, err)
-	assert.Contains(t, boutF, "Akagi")
+	assert.Equal(t, "M", boutF)
+	boutG, err := f.GetCellValue(SheetKachinukiDetail, "G"+boutRow)
+	require.NoError(t, err)
+	assert.Contains(t, boutG, "Akagi")
 
-	// Summary row (row 5): Shiro's (3) elimination count on the left (B),
-	// Aka's (1) on the right (F).
-	const summaryRow = "5"
-	summaryB, err := f.GetCellValue(SheetKachinukiDetail, "B"+summaryRow)
-	require.NoError(t, err)
-	assert.Contains(t, summaryB, "3")
-	summaryF, err := f.GetCellValue(SheetKachinukiDetail, "F"+summaryRow)
-	require.NoError(t, err)
-	assert.Contains(t, summaryF, "1")
+	// Each team's name is printed exactly ONCE in the section (on the team
+	// row alone): removing the old duplicated "<Shiro> vs <Aka>" subtitle
+	// line is part of this change (operator decision 2026-10-02).
+	countOccurrences := func(needle string) int {
+		n := 0
+		for _, row := range rows {
+			for _, cell := range row {
+				if cell == needle {
+					n++
+				}
+			}
+		}
+		return n
+	}
+	assert.Equal(t, 1, countOccurrences("Mumeishi"), "Shiro's team name must appear exactly once")
+	assert.Equal(t, 1, countOccurrences("Kodokan"), "Aka's team name must appear exactly once")
 }
 
 // TestKachinukiDetailSheetExists is T195: given at least one match section to
@@ -193,10 +177,10 @@ func TestKachinukiDetailSheetSkippedWhenEmpty(t *testing.T) {
 }
 
 // TestKachinukiDetailBoutRows is T196: a 6-bout kachinuki match renders 6
-// bout rows plus a header row and a summary row, with columns Bout #,
-// <Shiro team> (merged B:C, white header), vs, <Aka team> (merged E:F, red
-// header). There is no Winner or Decision column (operator decision
-// 2026-09-27, bc-kdsc): the sheet is six columns, A..F.
+// bout rows after its title, header and team rows, each name cell carrying
+// the bout number ahead of the fighter it names. There is no Winner,
+// Decision, or summary row (operator decisions 2026-09-27 and 2026-10-02):
+// the section is seven columns, A..G, and ends at its last bout row.
 func TestKachinukiDetailBoutRows(t *testing.T) {
 	f := excelize.NewFile()
 	defer func() { _ = f.Close() }()
@@ -205,33 +189,38 @@ func TestKachinukiDetailBoutRows(t *testing.T) {
 	require.NoError(t, WriteKachinukiDetailSheet(f, matches))
 
 	// Section layout (deterministic, defined by the renderer):
-	//   row 1: match title (merged across columns A..F)
-	//   row 2: subtitle "<Shiro team> vs <Aka team>"
-	//   row 3: column headers
+	//   row 1: match title (merged across columns A..G)
+	//   row 2: White | vs | Red header (generic, no team name)
+	//   row 3: team row, Shiro (SideB) left, Aka (SideA) right
 	//   rows 4..9: 6 bout rows (one per bout)
-	//   row 10: summary row
-	// Column letters A..F map to: Bout #, Shiro (name+score), vs, Aka (score+name).
+	// Column letters A..G map to: Shiro (name+score), unused, centre mark,
+	// unused, Aka (score+name), matching a team match block.
 
 	titleRow := 1
-	subtitleRow := 2
-	headerRow := 3
+	headerRow := 2
+	teamRow := 3
 	firstBoutRow := 4
-	summaryRow := firstBoutRow + 6
+	afterLastBout := firstBoutRow + 6
 
-	// Header values: B:C merged holds the Shiro team's name (SideB, "Team
-	// Bravo"), E:F merged holds the Aka team's name (SideA, "Team Alpha").
-	boutHeader, err := f.GetCellValue(SheetKachinukiDetail, "A"+intToString(headerRow))
+	// Header row: the generic labels, never either team's name.
+	leftLabel, rightLabel := matchHeaderLabels()
+	gotLeftLabel, err := f.GetCellValue(SheetKachinukiDetail, "A"+intToString(headerRow))
 	require.NoError(t, err)
-	assert.Equal(t, "Bout #", boutHeader)
-	leftHeader, err := f.GetCellValue(SheetKachinukiDetail, "B"+intToString(headerRow))
-	require.NoError(t, err)
-	assert.Equal(t, "Team Bravo", leftHeader, "Shiro (SideB) heads the left columns")
+	assert.Equal(t, leftLabel, gotLeftLabel)
 	vsHeader, err := f.GetCellValue(SheetKachinukiDetail, "D"+intToString(headerRow))
 	require.NoError(t, err)
 	assert.Equal(t, "vs", vsHeader)
-	rightHeader, err := f.GetCellValue(SheetKachinukiDetail, "E"+intToString(headerRow))
+	gotRightLabel, err := f.GetCellValue(SheetKachinukiDetail, "G"+intToString(headerRow))
 	require.NoError(t, err)
-	assert.Equal(t, "Team Alpha", rightHeader, "Aka (SideA) heads the right columns")
+	assert.Equal(t, rightLabel, gotRightLabel)
+
+	// Team row: Shiro (SideB, "Team Bravo") LEFT, Aka (SideA, "Team Alpha") RIGHT.
+	leftTeam, err := f.GetCellValue(SheetKachinukiDetail, "A"+intToString(teamRow))
+	require.NoError(t, err)
+	assert.Equal(t, "Team Bravo", leftTeam, "Shiro (SideB) heads the left column")
+	rightTeam, err := f.GetCellValue(SheetKachinukiDetail, "G"+intToString(teamRow))
+	require.NoError(t, err)
+	assert.Equal(t, "Team Alpha", rightTeam, "Aka (SideA) heads the right column")
 
 	// Title row should mention the match label and identify it as Kachinuki.
 	title, err := f.GetCellValue(SheetKachinukiDetail, "A"+intToString(titleRow))
@@ -239,15 +228,11 @@ func TestKachinukiDetailBoutRows(t *testing.T) {
 	assert.Contains(t, title, "Pool A - Match 1")
 	assert.Contains(t, strings.ToLower(title), "kachinuki")
 
-	// Subtitle row should reference both team names.
-	subtitle, err := f.GetCellValue(SheetKachinukiDetail, "A"+intToString(subtitleRow))
-	require.NoError(t, err)
-	assert.Contains(t, subtitle, "Team Alpha")
-	assert.Contains(t, subtitle, "Team Bravo")
-
-	// Spot-check each bout row. Shiro (SideB) is LEFT (columns B/C), Aka
-	// (SideA) is RIGHT (columns E/F); bout 3 is the fixture's hikiwake, so
-	// its centre column reads "X" rather than the default "vs".
+	// Spot-check each bout row. Shiro (SideB) is LEFT (columns A/B), Aka
+	// (SideA) is RIGHT (columns F/G); bout 3 is the fixture's hikiwake, so
+	// its centre column reads "X". Every other bout carries no middle mark
+	// at all: an empty centre, never a default "vs" (that belongs to the
+	// section's header row alone).
 	wantBouts := []struct {
 		boutNum   int
 		sideAName string
@@ -258,63 +243,62 @@ func TestKachinukiDetailBoutRows(t *testing.T) {
 		sideBPos  string
 		middle    string
 	}{
-		{1, "Alice", "Senpo", "MM", "", "Bob", "Senpo", "vs"},
-		{2, "Alice", "Senpo", "M", "", "Carol", "Jiho", "vs"},
+		{1, "Alice", "Senpo", "MM", "", "Bob", "Senpo", ""},
+		{2, "Alice", "Senpo", "M", "", "Carol", "Jiho", ""},
 		{3, "Alice", "Senpo", "", "", "Dan", "Chuken", "X"},
-		{4, "Eve", "Jiho", "MK", "K", "Frank", "Fukusho", "vs"},
-		{5, "Eve", "Jiho", "", "M", "Grace", "Taisho", "vs"},
-		{6, "Hank", "Chuken", "MMK", "", "Grace", "Taisho", "vs"},
+		{4, "Eve", "Jiho", "MK", "K", "Frank", "Fukusho", ""},
+		{5, "Eve", "Jiho", "", "M", "Grace", "Taisho", ""},
+		{6, "Hank", "Chuken", "MMK", "", "Grace", "Taisho", ""},
 	}
 
 	for i, b := range wantBouts {
 		row := firstBoutRow + i
 
-		// Bout number (column A)
-		boutVal, err := f.GetCellValue(SheetKachinukiDetail, "A"+intToString(row))
+		// Side B (Shiro) name + position, led by the bout number, LEFT
+		// (column A).
+		wantLeft := intToString(b.boutNum) + " " + b.sideBName + " (" + b.sideBPos + ")"
+		leftCell, err := f.GetCellValue(SheetKachinukiDetail, "A"+intToString(row))
 		require.NoError(t, err)
-		assert.Equalf(t, intToString(b.boutNum), boutVal, "row %d: bout number", row)
+		assert.Equalf(t, wantLeft, leftCell, "row %d: Shiro name", row)
 
-		// Side B (Shiro) name + position, LEFT (column B).
-		leftCell, err := f.GetCellValue(SheetKachinukiDetail, "B"+intToString(row))
-		require.NoError(t, err)
-		assert.Containsf(t, leftCell, b.sideBName, "row %d: Shiro name", row)
-		assert.Containsf(t, leftCell, b.sideBPos, "row %d: Shiro position", row)
-
-		// Side B (Shiro) score, LEFT (column C).
-		leftScore, err := f.GetCellValue(SheetKachinukiDetail, "C"+intToString(row))
+		// Side B (Shiro) score, LEFT (column B).
+		leftScore, err := f.GetCellValue(SheetKachinukiDetail, "B"+intToString(row))
 		require.NoError(t, err)
 		assert.Equalf(t, b.scoreB, leftScore, "row %d: Shiro score", row)
 
-		// Centre column (D): the bout's one middle mark, or "vs".
+		// Centre column (D): the bout's one middle mark, or empty.
 		middle, err := f.GetCellValue(SheetKachinukiDetail, "D"+intToString(row))
 		require.NoError(t, err)
 		assert.Equalf(t, b.middle, middle, "row %d: centre mark", row)
 
-		// Side A (Aka) score, RIGHT (column E).
-		rightScore, err := f.GetCellValue(SheetKachinukiDetail, "E"+intToString(row))
+		// Side A (Aka) score, RIGHT (column F).
+		rightScore, err := f.GetCellValue(SheetKachinukiDetail, "F"+intToString(row))
 		require.NoError(t, err)
 		assert.Equalf(t, b.scoreA, rightScore, "row %d: Aka score", row)
 
-		// Side A (Aka) name + position, RIGHT (column F).
-		rightCell, err := f.GetCellValue(SheetKachinukiDetail, "F"+intToString(row))
+		// Side A (Aka) name + position, led by the bout number, RIGHT
+		// (column G).
+		wantRight := intToString(b.boutNum) + " " + b.sideAName + " (" + b.sideAPos + ")"
+		rightCell, err := f.GetCellValue(SheetKachinukiDetail, "G"+intToString(row))
 		require.NoError(t, err)
-		assert.Containsf(t, rightCell, b.sideAName, "row %d: Aka name", row)
-		assert.Containsf(t, rightCell, b.sideAPos, "row %d: Aka position", row)
+		assert.Equalf(t, wantRight, rightCell, "row %d: Aka name", row)
 	}
 
-	// Sanity check: the row immediately after the last bout is the summary,
-	// not another bout row, the bout column should NOT contain a bout number
-	// (it should hold a "Summary" or "Total" label instead).
-	postBouts, err := f.GetCellValue(SheetKachinukiDetail, "A"+intToString(summaryRow))
+	// Sanity check: exactly 6 bout rows, nothing in a would-be 7th.
+	// TestKachinukiDetailSectionEndsAtLastBoutRow pins the full-row sweep
+	// for this, now that there is no summary row to tell the two apart.
+	postBouts, err := f.GetCellValue(SheetKachinukiDetail, "A"+intToString(afterLastBout))
 	require.NoError(t, err)
-	assert.NotEqual(t, "7", postBouts, "expected exactly 6 bout rows, found a 7th")
+	assert.Empty(t, postBouts, "expected exactly 6 bout rows, found content in a 7th")
 }
 
 // TestKachinukiDetailBoutRows_WithSquadLabel verifies the squad member
 // label (bc-pnum: "make a team member's label available to the public
-// surfaces") is written beside the fighter's name on the detail sheet, and
-// that a blank label (the SideB fighter here has none) falls back to just
-// the name -- unaffected, matching every other row in this file's fixture.
+// surfaces") is written beside the fighter's name on the detail sheet,
+// after the bout number every name cell now carries ahead of the fighter
+// (operator decision 2026-10-02), and that a blank label (the SideB fighter
+// here has none) falls back to just the name -- unaffected, matching every
+// other row in this file's fixture.
 func TestKachinukiDetailBoutRows_WithSquadLabel(t *testing.T) {
 	f := excelize.NewFile()
 	defer func() { _ = f.Close() }()
@@ -330,22 +314,25 @@ func TestKachinukiDetailBoutRows_WithSquadLabel(t *testing.T) {
 	require.NoError(t, WriteKachinukiDetailSheet(f, []KachinukiMatchDetail{match}))
 
 	firstBoutRow := 4
-	// Side A (Aka, labelled T10.1) is RIGHT, column F.
-	sideACell, err := f.GetCellValue(SheetKachinukiDetail, "F"+intToString(firstBoutRow))
+	// Side A (Aka, labelled T10.1) is RIGHT, column G: the bout number
+	// leads, then the label leads the name, ahead of the position suffix.
+	sideACell, err := f.GetCellValue(SheetKachinukiDetail, "G"+intToString(firstBoutRow))
 	require.NoError(t, err)
-	assert.Equal(t, "T10.1 Alice (Senpo)", sideACell, "label leads the name, ahead of the position suffix")
+	assert.Equal(t, "1 T10.1 Alice (Senpo)", sideACell, "the bout number leads, then the label leads the name")
 
-	// Side B (Shiro, no label recorded) is LEFT, column B.
-	sideBCell, err := f.GetCellValue(SheetKachinukiDetail, "B"+intToString(firstBoutRow))
+	// Side B (Shiro, no label recorded) is LEFT, column A: no label
+	// recorded falls back to the bout number, name and position.
+	sideBCell, err := f.GetCellValue(SheetKachinukiDetail, "A"+intToString(firstBoutRow))
 	require.NoError(t, err)
-	assert.Equal(t, "Bob (Senpo)", sideBCell, "no label recorded for Side B: falls back to name + position, unchanged")
+	assert.Equal(t, "1 Bob (Senpo)", sideBCell, "no label recorded for Side B: falls back to number + name + position")
 }
 
 // TestKachinukiDetailBoutRow_FusenshoMarkBesideScore pins the per-bout
 // default-win mark (bc-kdsc change 8b): the winner's result mark (e.g. the
 // exhaustion walkover's Fus.) rides beside its OWN score cell, composed with
 // the same score+mark join the main sheets use, never in the centre column,
-// which the closed-set middle-mark rule reserves for vs/X/(E)/(DH).
+// which the closed-set middle-mark rule reserves for vs/X/(E)/(DH) and which
+// a default win never sets on this sheet.
 func TestKachinukiDetailBoutRow_FusenshoMarkBesideScore(t *testing.T) {
 	f := excelize.NewFile()
 	defer func() { _ = f.Close() }()
@@ -362,80 +349,64 @@ func TestKachinukiDetailBoutRow_FusenshoMarkBesideScore(t *testing.T) {
 	require.NoError(t, WriteKachinukiDetailSheet(f, []KachinukiMatchDetail{match}))
 
 	firstBoutRow := 4
-	// Aka (SideA) is RIGHT (column E): score and mark compose one cell.
-	rightScore, err := f.GetCellValue(SheetKachinukiDetail, "E"+intToString(firstBoutRow))
+	// Aka (SideA) is RIGHT (column F): score and mark compose one cell.
+	rightScore, err := f.GetCellValue(SheetKachinukiDetail, "F"+intToString(firstBoutRow))
 	require.NoError(t, err)
 	assert.Equal(t, "○○ Fus.", rightScore, "the winner's maru and Fus. mark ride together in its own score cell")
 
-	// The loser's cell (Shiro, column C) carries neither score nor mark.
-	leftScore, err := f.GetCellValue(SheetKachinukiDetail, "C"+intToString(firstBoutRow))
+	// The loser's cell (Shiro, column B) carries neither score nor mark.
+	leftScore, err := f.GetCellValue(SheetKachinukiDetail, "B"+intToString(firstBoutRow))
 	require.NoError(t, err)
 	assert.Empty(t, leftScore, "fusensho marks only the winner; the no-show's own cell stays blank")
 
-	// The centre stays untouched: no bout.Middle set, so it falls back to
-	// the template's own "vs" -- a default win is not a middle-mark decision.
+	// The centre stays empty: no bout.Middle set, and a default win is not a
+	// middle-mark decision, so there is no fallback "vs" at bout-row level
+	// (that belongs to the section's White | vs | Red header row alone).
 	middle, err := f.GetCellValue(SheetKachinukiDetail, "D"+intToString(firstBoutRow))
 	require.NoError(t, err)
-	assert.Equal(t, "vs", middle, "a default-win mark never reaches the centre column")
+	assert.Empty(t, middle, "a default-win mark never reaches the centre column, and the centre has no default fallback")
 }
 
-// TestKachinukiDetailSummaryRow is T197: the summary row shows total
-// eliminations per team, Shiro (SideB) left and Aka (SideA) right through
-// WhiteLeft like every other row on this sheet. There is no Winner or
-// Decision cell (operator decision 2026-09-27, bc-kdsc): the match's own
-// Pool or Elimination Matches row carries the outcome.
-func TestKachinukiDetailSummaryRow(t *testing.T) {
+// TestKachinukiDetailSectionEndsAtLastBoutRow pins the section's end
+// (operator decision 2026-10-02: the "Eliminated" summary row is dropped
+// entirely, along with KachinukiMatchDetail.EliminationA/EliminationB): a
+// section carries no tally and no label after its bouts, it simply ends.
+// With a single section on the sheet the row right after the last bout is
+// left completely empty on every column; TestKachinukiDetailMultipleMatches
+// pins the other half of this, that a second section's title follows after
+// exactly one blank separator row.
+func TestKachinukiDetailSectionEndsAtLastBoutRow(t *testing.T) {
 	f := excelize.NewFile()
 	defer func() { _ = f.Close() }()
 
 	matches := []KachinukiMatchDetail{makeKachinukiTestMatch()}
 	require.NoError(t, WriteKachinukiDetailSheet(f, matches))
 
-	// 6 bouts + 3 leading rows (title, subtitle, header) → summary at row 10.
-	summaryRow := 10
+	// 6 bouts + 3 leading rows (title, header, team) -> the last bout is
+	// row 9, so row 10 is left empty: there is only one section here, and
+	// nothing ever follows a section's last bout row but either a blank
+	// separator or, with none to separate from, nothing at all.
+	afterLastBout := 10
 
-	// A label like "Total" / "Summary", exact text not pinned, just that
-	// some label is present.
-	label, err := f.GetCellValue(SheetKachinukiDetail, "A"+intToString(summaryRow))
-	require.NoError(t, err)
-	assert.NotEmpty(t, label, "summary row should have a label in column A")
-	lowerLabel := strings.ToLower(label)
-	assert.True(t,
-		strings.Contains(lowerLabel, "summary") || strings.Contains(lowerLabel, "total"),
-		"summary row label should mention Summary or Total, got %q", label)
-
-	// Eliminations per team: Team A (Aka) retired 1 (hikiwake), Team B
-	// (Shiro) retired 5. Shiro's count is LEFT (column B), Aka's is RIGHT
-	// (column F). We don't pin the exact wording, just that the integers
-	// appear under the correct side.
-	shiroElim, err := f.GetCellValue(SheetKachinukiDetail, "B"+intToString(summaryRow))
-	require.NoError(t, err)
-	assert.Contains(t, shiroElim, "5", "Shiro (Team B) elimination count should appear in the LEFT column B")
-
-	akaElim, err := f.GetCellValue(SheetKachinukiDetail, "F"+intToString(summaryRow))
-	require.NoError(t, err)
-	assert.Contains(t, akaElim, "1", "Aka (Team A) elimination count should appear in the RIGHT column F")
-
-	// No Winner or Decision cell: the sheet is six columns, A..F, and the
-	// match's own Pool or Elimination Matches row carries the outcome.
-	for _, col := range []string{"G", "H"} {
-		v, err := f.GetCellValue(SheetKachinukiDetail, col+intToString(summaryRow))
+	for _, col := range []string{"A", "B", "C", "D", "E", "F", "G"} {
+		v, err := f.GetCellValue(SheetKachinukiDetail, col+intToString(afterLastBout))
 		require.NoError(t, err)
-		assert.Empty(t, v, "column %s must be empty: no Winner or Decision column", col)
+		assert.Emptyf(t, v, "column %s of row %d must be empty: the section ends at its last bout row, no summary follows", col, afterLastBout)
 	}
 }
 
 // TestKachinukiDetailBlankSection pins the hand-entry section (operator
 // decision 2026-09-27, bc-kdsc): a match with no bout recorded prints
-// BlankBoutRows empty numbered rows, "vs" in the centre as an unplayed row
-// reads, and a summary row whose counts are left for the hand to fill in; a
-// match with bouts lists exactly those, whatever BlankBoutRows says.
+// BlankBoutRows empty numbered rows, each showing just its row number with
+// an empty centre (no default "vs" at bout-row level, see
+// TestKachinukiDetailBoutRow_FusenshoMarkBesideScore); a match with bouts
+// lists exactly those, whatever BlankBoutRows says. There is no summary row
+// (operator decision 2026-10-02): the section simply ends at its last row.
 func TestKachinukiDetailBlankSection(t *testing.T) {
 	cases := []struct {
-		name        string
-		match       KachinukiMatchDetail
-		wantRows    int
-		wantSummary [2]string // left (Shiro), right (Aka) summary cells
+		name     string
+		match    KachinukiMatchDetail
+		wantRows int
 	}{
 		{
 			name: "no bouts: empty numbered rows",
@@ -452,10 +423,8 @@ func TestKachinukiDetailBlankSection(t *testing.T) {
 					{Position: 1, SideAName: "Akagi", ScoreA: "M", SideBName: "Shirai"},
 					{Position: 2, SideAName: "Akagi", SideBName: "Shimizu", ScoreB: "KK"},
 				},
-				EliminationA: 1, EliminationB: 1,
 			},
-			wantRows:    2,
-			wantSummary: [2]string{"1 eliminated", "1 eliminated"},
+			wantRows: 2,
 		},
 	}
 	for _, tc := range cases {
@@ -469,22 +438,27 @@ func TestKachinukiDetailBlankSection(t *testing.T) {
 				require.NoError(t, err)
 				return v
 			}
-			// Rows 1-3 are title, subtitle and header; bouts start on row 4.
-			assert.Contains(t, cell("A", 2), tc.match.SideATeam, "the subtitle names both sides")
+			// Rows 1-3 are title, header and team; bouts start on row 4.
+			assert.Equal(t, tc.match.SideBTeam, cell("A", 3), "the team row names Shiro on the left")
+			assert.Equal(t, tc.match.SideATeam, cell("G", 3), "the team row names Aka on the right")
 			for i := 0; i < tc.wantRows; i++ {
 				row := 4 + i
-				assert.Equal(t, intToString(i+1), cell("A", row), "row %d carries bout number %d", row, i+1)
-				assert.Equal(t, "vs", cell("D", row), "row %d centre", row)
+				assert.Equal(t, "", cell("D", row), "row %d centre stays empty absent a mark", row)
 				if len(tc.match.Bouts) == 0 {
+					// An empty row shows just its number, left for the hand.
+					assert.Equal(t, intToString(i+1), cell("A", row), "row %d carries just the bout number", row)
+					assert.Equal(t, intToString(i+1), cell("G", row), "row %d carries just the bout number", row)
 					for _, col := range []string{"B", "C", "E", "F"} {
 						assert.Empty(t, cell(col, row), "an empty row leaves %s%d for the hand", col, row)
 					}
 				}
 			}
-			summaryRow := 4 + tc.wantRows
-			assert.Equal(t, "Summary", cell("A", summaryRow), "the summary follows the last row")
-			assert.Equal(t, tc.wantSummary[0], cell("B", summaryRow))
-			assert.Equal(t, tc.wantSummary[1], cell("F", summaryRow))
+			// The section ends at its last row: each case's match is the
+			// sheet's only section, so nothing follows it.
+			afterLastRow := 4 + tc.wantRows
+			for _, col := range []string{"A", "B", "C", "D", "E", "F", "G"} {
+				assert.Empty(t, cell(col, afterLastRow), "no summary row follows the last bout")
+			}
 		})
 	}
 }
@@ -502,9 +476,12 @@ func TestKachinukiDetailSheetSkippedWithNothingToList(t *testing.T) {
 
 // TestKachinukiDetailSectionsStayOnOnePage pins the keep-together page break:
 // a section that would cross KachinukiDetailRowsPerPage starts a new page
-// rather than being split. Five empty sections of nine rows are 13 rows each
-// plus a separator, so the fourth (rows 43-55) would cross the 50-row budget
-// and the page ends after row 42; the fifth still fits beside it.
+// rather than being split. Five sections of nine blank bout rows are 12
+// content rows each (title, header, team, 9 bouts) plus a 1-row separator
+// between sections. After three sections (36 content rows + 3 separators =
+// 39 rows consumed) the fourth section's own 12 content rows would push the
+// running total to 51, past the 50-row budget, so the break lands ahead of
+// it and the fifth still fits on the new page.
 func TestKachinukiDetailSectionsStayOnOnePage(t *testing.T) {
 	f := excelize.NewFile()
 	defer func() { _ = f.Close() }()
@@ -519,15 +496,18 @@ func TestKachinukiDetailSectionsStayOnOnePage(t *testing.T) {
 
 	breaks, err := bctest.RowBreaks(buf.Bytes(), SheetKachinukiDetail)
 	require.NoError(t, err)
-	assert.Equal(t, []int{42}, breaks)
-	title, err := f.GetCellValue(SheetKachinukiDetail, "A43")
+	assert.Equal(t, []int{39}, breaks)
+	title, err := f.GetCellValue(SheetKachinukiDetail, "A40")
 	require.NoError(t, err)
 	assert.Equal(t, "Pool Match 4 (Kachinuki)", title, "the new page starts on the fourth section's title")
 }
 
 // TestKachinukiDetailMultipleMatches verifies the renderer writes one
-// section per match with blank-row separation. Two matches → two title
-// rows, two summary rows, no overlap.
+// section per match with exactly one blank separator row between them, and
+// that a section's own title, header, team and bout rows never bleed into
+// the next. Two matches of 6 bouts each: the first section's last bout is
+// row 9, row 10 is the blank separator, and the second section's title
+// starts at row 11.
 func TestKachinukiDetailMultipleMatches(t *testing.T) {
 	f := excelize.NewFile()
 	defer func() { _ = f.Close() }()
@@ -537,8 +517,6 @@ func TestKachinukiDetailMultipleMatches(t *testing.T) {
 	m2.Label = "Pool A - Match 2"
 	m2.SideATeam = "Team Charlie"
 	m2.SideBTeam = "Team Delta"
-	m2.EliminationA = 5
-	m2.EliminationB = 2
 
 	require.NoError(t, WriteKachinukiDetailSheet(f, []KachinukiMatchDetail{m1, m2}))
 
@@ -546,19 +524,16 @@ func TestKachinukiDetailMultipleMatches(t *testing.T) {
 	t1, _ := f.GetCellValue(SheetKachinukiDetail, "A1")
 	assert.Contains(t, t1, "Pool A - Match 1")
 
-	// Second match: title appears somewhere on the sheet, distinct from m1.
-	// Walk down looking for the second title row. The renderer leaves at
-	// least one blank row between sections (>= row 12 in the test fixture:
-	// 10 rows of m1 + 1 separator + start of m2).
-	foundSecond := false
-	for row := 11; row <= 25; row++ {
-		v, _ := f.GetCellValue(SheetKachinukiDetail, "A"+intToString(row))
-		if strings.Contains(v, "Pool A - Match 2") {
-			foundSecond = true
-			break
-		}
+	// Row 10 is the one blank separator row between the two sections.
+	for _, col := range []string{"A", "B", "C", "D", "E", "F", "G"} {
+		v, _ := f.GetCellValue(SheetKachinukiDetail, col+"10")
+		assert.Empty(t, v, "row 10 is the blank separator between sections")
 	}
-	assert.True(t, foundSecond, "expected second match section after first")
+
+	// Second match: title at row 11, right after the separator.
+	t2, err := f.GetCellValue(SheetKachinukiDetail, "A11")
+	require.NoError(t, err)
+	assert.Contains(t, t2, "Pool A - Match 2")
 }
 
 // TestKachinukiMainSheetStillSummary is T198: when the workbook is built
@@ -624,11 +599,13 @@ func TestKachinukiDetailPageLayout(t *testing.T) {
 }
 
 // TestKachinukiDetailFighterColumnsWideEnoughForALabelledName pins the
-// fighter columns (B/F) wide enough that a labelled name like
-// "T12.4 Yui Nakamura (Fukusho)" (28 characters) does not clip at this
-// sheet's 12pt centred font; a LibreOffice render at 24 clipped the
-// 26-character "T3.4 Yui Nakamura (Chuken)". The print is fitted to one page
-// wide (TestKachinukiDetailPageLayout), so the width costs the print nothing.
+// fighter columns (A/G) wide enough that a labelled, numbered name like
+// "17 T12.4 Yui Nakamura (Fukusho)" (31 characters -- the bout number now
+// leads every name cell, operator decision 2026-10-02) does not clip at
+// this sheet's 12pt centred font; a LibreOffice render at 24 clipped the
+// shorter, unnumbered "T3.4 Yui Nakamura (Chuken)". The print is fitted to
+// one page wide (TestKachinukiDetailPageLayout), so the width costs the
+// print nothing.
 func TestKachinukiDetailFighterColumnsWideEnoughForALabelledName(t *testing.T) {
 	f := excelize.NewFile()
 	defer func() { _ = f.Close() }()
@@ -636,12 +613,12 @@ func TestKachinukiDetailFighterColumnsWideEnoughForALabelledName(t *testing.T) {
 	matches := []KachinukiMatchDetail{makeKachinukiTestMatch()}
 	require.NoError(t, WriteKachinukiDetailSheet(f, matches))
 
-	left, err := f.GetColWidth(SheetKachinukiDetail, kachinukiColLeft)
+	left, err := f.GetColWidth(SheetKachinukiDetail, "A")
 	require.NoError(t, err)
-	right, err := f.GetColWidth(SheetKachinukiDetail, kachinukiColRight)
+	right, err := f.GetColWidth(SheetKachinukiDetail, "G")
 	require.NoError(t, err)
-	assert.Equal(t, 36.0, left, "the fighter column must be wide enough for a labelled name plus margin")
-	assert.Equal(t, 36.0, right, "the fighter column must be wide enough for a labelled name plus margin")
+	assert.Equal(t, float64(kachinukiFighterColWidth), left, "the fighter column must be wide enough for a numbered, labelled name plus margin")
+	assert.Equal(t, float64(kachinukiFighterColWidth), right, "the fighter column must be wide enough for a numbered, labelled name plus margin")
 }
 
 // intToString is a small helper that converts an int to a string without

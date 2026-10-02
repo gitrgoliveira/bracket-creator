@@ -342,6 +342,21 @@ type matchStyles struct {
 	unlockedBorderBottom int
 }
 
+// newMatchStyles is the one style set every match block is drawn with: the
+// Pool Matches and Elimination Matches blocks, the 3rd-place block and the
+// Kachinuki Detail sections.
+func newMatchStyles(f *excelize.File) matchStyles {
+	return matchStyles{
+		poolHeader:           getPoolHeaderStyle(f),
+		text:                 getGreyTextStyle(f),
+		borderBottom:         getBorderStyleBottom(f),
+		redHeader:            getRedHeaderStyle(f),
+		whiteHeader:          getWhiteHeaderStyle(f),
+		unlockedText:         getUnlockedTextStyle(f),
+		unlockedBorderBottom: getUnlockedBorderStyleBottom(f),
+	}
+}
+
 type playerMatchRecord struct {
 	row        int
 	endRow     int    // if > 0, this is the end of a range [row, endRow]
@@ -1028,15 +1043,7 @@ func PrintPoolMatches(f *excelize.File, pools []Pool, teamMatches int, numWinner
 	startRow := 2
 	colNamesByStartCol := make(map[int]matchColumnNames, numCourts)
 
-	styles := matchStyles{
-		poolHeader:           getPoolHeaderStyle(f),
-		text:                 getGreyTextStyle(f),
-		borderBottom:         getBorderStyleBottom(f),
-		redHeader:            getRedHeaderStyle(f),
-		whiteHeader:          getWhiteHeaderStyle(f),
-		unlockedText:         getUnlockedTextStyle(f),
-		unlockedBorderBottom: getUnlockedBorderStyleBottom(f),
-	}
+	styles := newMatchStyles(f)
 
 	writeCourtHeaders(f, sheetName, courts, styles.poolHeader)
 
@@ -1293,15 +1300,7 @@ func PrintTeamEliminationMatches(f *excelize.File, poolMatchWinners map[string]M
 	spaceLines := EliminationSpaceLines
 	colNamesByStartCol := make(map[int]matchColumnNames, numCourts)
 
-	styles := matchStyles{
-		poolHeader:           getPoolHeaderStyle(f),
-		text:                 getGreyTextStyle(f),
-		borderBottom:         getBorderStyleBottom(f),
-		redHeader:            getRedHeaderStyle(f),
-		whiteHeader:          getWhiteHeaderStyle(f),
-		unlockedText:         getUnlockedTextStyle(f),
-		unlockedBorderBottom: getUnlockedBorderStyleBottom(f),
-	}
+	styles := newMatchStyles(f)
 
 	writeCourtHeaders(f, sheetName, bands, styles.poolHeader)
 
@@ -1445,18 +1444,7 @@ func printTeamMatchBlock(f *excelize.File, sheetName string, colNames matchColum
 	middleColName := colNames.middleColName
 
 	firstTeamRow := matchRow + 1
-	for i := 0; i < numTeamMatches; i++ {
-		matchRow++
-		subStart := startColName + fmt.Sprint(matchRow)
-		subEnd := endColName + fmt.Sprint(matchRow)
-		handleExcelError("SetCellStyle", f.SetCellStyle(sheetName, subStart, subEnd, styles.text))
-		handleExcelError("SetCellInt", f.SetCellInt(sheetName, subStart, int64(i+1)))
-		handleExcelError("SetCellInt", f.SetCellInt(sheetName, subEnd, int64(i+1)))
-		handleExcelError("SetCellStyle", f.SetCellStyle(sheetName,
-			colNames.leftVictoriesColName+fmt.Sprint(matchRow),
-			colNames.rightVictoriesColName+fmt.Sprint(matchRow),
-			styles.unlockedText))
-	}
+	matchRow = printNumberedBoutRows(f, sheetName, colNames, styles, matchRow, numTeamMatches)
 	lastTeamRow := matchRow
 
 	if numTeamMatches > 0 {
@@ -1494,6 +1482,26 @@ func printTeamMatchBlock(f *excelize.File, sheetName string, colNames matchColum
 	return matchRow
 }
 
+// printNumberedBoutRows writes n numbered bout rows below matchRow, the
+// number in both name cells and the score cells unlocked for hand entry, and
+// returns the last of them. A team match block and a Kachinuki Detail section
+// both draw their bout rows with it.
+func printNumberedBoutRows(f *excelize.File, sheetName string, colNames matchColumnNames, styles matchStyles, matchRow, n int) int {
+	for i := 0; i < n; i++ {
+		matchRow++
+		subStart := colNames.startColName + fmt.Sprint(matchRow)
+		subEnd := colNames.endColName + fmt.Sprint(matchRow)
+		handleExcelError("SetCellStyle", f.SetCellStyle(sheetName, subStart, subEnd, styles.text))
+		handleExcelError("SetCellInt", f.SetCellInt(sheetName, subStart, int64(i+1)))
+		handleExcelError("SetCellInt", f.SetCellInt(sheetName, subEnd, int64(i+1)))
+		handleExcelError("SetCellStyle", f.SetCellStyle(sheetName,
+			colNames.leftVictoriesColName+fmt.Sprint(matchRow),
+			colNames.rightVictoriesColName+fmt.Sprint(matchRow),
+			styles.unlockedText))
+	}
+	return matchRow
+}
+
 // printOrdinalMarkerRows writes the "1." / "2." result-marking rows two rows
 // below matchRow and returns the Excel row carrying the "1." marker (the cell
 // a regular elimination match registers as its winner reference; the bronze
@@ -1522,15 +1530,7 @@ func PrintThirdPlaceBlock(f *excelize.File, courtStartCol, startRow, numTeamMatc
 	sheetName := SheetEliminationMatches
 	colNames := buildMatchColumnNames(courtStartCol)
 
-	styles := matchStyles{
-		poolHeader:           getPoolHeaderStyle(f),
-		text:                 getGreyTextStyle(f),
-		borderBottom:         getBorderStyleBottom(f),
-		redHeader:            getRedHeaderStyle(f),
-		whiteHeader:          getWhiteHeaderStyle(f),
-		unlockedText:         getUnlockedTextStyle(f),
-		unlockedBorderBottom: getUnlockedBorderStyleBottom(f),
-	}
+	styles := newMatchStyles(f)
 
 	matchHeight := eliminationBlockHeight(numTeamMatches)
 

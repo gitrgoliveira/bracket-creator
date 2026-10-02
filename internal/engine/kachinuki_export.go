@@ -276,7 +276,7 @@ func resolveKachinukiDisplayName(squads map[string][]domain.TeamMember, teamID, 
 }
 
 // buildKachinukiDetail converts a single state.MatchResult into the
-// helper-layer detail struct, including eliminations.
+// helper-layer detail struct.
 func buildKachinukiDetail(m *state.MatchResult, label string, positions map[string]string, teamNumbers map[string]string, squads map[string][]domain.TeamMember) helper.KachinukiMatchDetail {
 	resolvePos := func(team, memberID, player string) string {
 		return resolveKachinukiBoutPosition(positions, m.ID, team, memberID, player)
@@ -308,28 +308,12 @@ func buildKachinukiDetail(m *state.MatchResult, label string, positions map[stri
 		})
 	}
 
-	elimA, elimB := tallyKachinukiEliminations(m)
-
 	return helper.KachinukiMatchDetail{
-		Label:        label,
-		SideATeam:    m.SideA,
-		SideBTeam:    m.SideB,
-		Bouts:        bouts,
-		EliminationA: elimA,
-		EliminationB: elimB,
+		Label:     label,
+		SideATeam: m.SideA,
+		SideBTeam: m.SideB,
+		Bouts:     bouts,
 	}
-}
-
-// tallyKachinukiEliminations returns the number of retired (eliminated)
-// players per side. It delegates to RetiredPlayersFromBoutLog so the
-// retirement rule (hikiwake retires both sides, otherwise the loser retires)
-// lives in exactly one place, and counts through RetiredMemberSet.Count so
-// a fighter fielded by squad number and not yet named (an id, no name,
-// bc-dnst) is counted like any other; a count of the retired NAMES alone
-// missed every such fighter. `a` is SideA eliminations, `b` is SideB.
-func tallyKachinukiEliminations(m *state.MatchResult) (a, b int) {
-	retiredA, retiredB := RetiredPlayersFromBoutLog(m.SubResults, m.SideA, m.SideB)
-	return retiredA.Count(), retiredB.Count()
 }
 
 // lineupKey is the composite key used to look up a player's lineup

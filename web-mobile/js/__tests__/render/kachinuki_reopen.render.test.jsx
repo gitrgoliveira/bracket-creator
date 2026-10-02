@@ -663,6 +663,13 @@ describe('kachinuki Encho is offered only on the current tied bout', () => {
   // bc-kenu (operator ruling 2026-09-26): the operator is tired and clumsy, so
   // every mistake is undoable in one step. Bout mode hides the overtime
   // stepper, so a mistaken or double-tapped Encho needs its own undo.
+  //
+  // bc-kheb: these tests used to read the encho off a visible "(E)", which on
+  // a level 1-1 bout came from the editor header alone (the bout row derives
+  // a tie there and X beats (E)). The header readout went with the
+  // 2026-09-24 ruling, so the Undo encho button is what shows a period is on.
+  // Whether the bout row itself should read (E) during a level encho is an
+  // open question, not settled here.
   it('takes back a double-tapped Encho one period at a time, back to the tie', async () => {
     await renderEditor({
       match: completedKachinukiMatch({ status: 'running', winner: null, subResults: [tiedBout(1)] }),
@@ -670,13 +677,12 @@ describe('kachinuki Encho is offered only on the current tied bout', () => {
     expect(screen.queryByTestId('kachinuki-encho-undo-button')).toBeNull();
     await act(async () => { fireEvent.click(screen.getByTestId('kachinuki-encho-button')); });
     await act(async () => { fireEvent.click(screen.getByTestId('kachinuki-encho-button')); });
-    expect(document.body.textContent).toContain('(E)');
+    expect(screen.getByTestId('kachinuki-encho-undo-button')).toBeTruthy();
 
     const undo = () => act(async () => { fireEvent.click(screen.getByTestId('kachinuki-encho-undo-button')); });
     await undo();
-    expect(document.body.textContent, 'one period still on').toContain('(E)');
+    expect(screen.queryByTestId('kachinuki-encho-undo-button'), 'one period still on').not.toBeNull();
     await undo();
-    expect(document.body.textContent).not.toContain('(E)');
     expect(screen.queryByTestId('kachinuki-encho-undo-button')).toBeNull();
     // Back to the tie it was: Encho is offered again.
     expect(screen.getByTestId('kachinuki-encho-button')).toBeTruthy();
@@ -720,7 +726,106 @@ describe('kachinuki Encho is offered only on the current tied bout', () => {
     await waitFor(() => expect(window.API.fetchMatchLineup).toHaveBeenCalledTimes(2));
     const encho = screen.getByTestId('kachinuki-encho-button');
     await act(async () => { fireEvent.click(encho); });
-    expect(document.body.textContent).toContain('(E)');
+    expect(screen.getByTestId('kachinuki-encho-undo-button'), 'the tap recorded a period').toBeTruthy();
+  });
+});
+
+// bc-kheb (operator ruling 2026-09-24): one kachinuki bout fought on in encho
+// does not put the encounter in overtime. (E) lives on that bout's own row
+// only: the editor header shows no overtime, no write carries a match-level
+// encho, and a completed encounter offers no match-level overtime stepper.
+describe('kachinuki encho stays on the bout, never on the encounter', () => {
+  const tiedBout = { position: 1, sideA: 'A1', sideB: 'B1', ipponsA: ['M'], ipponsB: ['M'] };
+  const eyebrow = () => document.querySelector('.editor-modal__eyebrow').textContent;
+
+  it('Encho then a point and Record bout: no header overtime, no match-level encho, the bout keeps its own', async () => {
+    const onSubmit = vi.fn().mockResolvedValue(undefined);
+    await renderEditor({
+      match: completedKachinukiMatch({ status: 'running', winner: null, subResults: [tiedBout] }),
+      onSubmit,
+    });
+    await act(async () => { fireEvent.click(screen.getByTestId('kachinuki-encho-button')); });
+    expect(eyebrow()).not.toContain('Overtime');
+    await act(async () => { fireEvent.keyDown(window, { key: 'm' }); });
+    expect(eyebrow()).not.toContain('Overtime');
+    await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Record bout' })); });
+    await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(1));
+    const patch = onSubmit.mock.calls[0][0];
+    expect(patch.encho).toBeUndefined();
+    const bout1 = patch.subResults.find(s => s.position === 1);
+    expect(bout1.encho).toEqual({ periodCount: 1 });
+  });
+
+  it('Encho then Undo encho never shows overtime in the header', async () => {
+    const onSubmit = vi.fn().mockResolvedValue(undefined);
+    await renderEditor({
+      match: completedKachinukiMatch({ status: 'running', winner: null, subResults: [tiedBout] }),
+      onSubmit,
+    });
+    await act(async () => { fireEvent.click(screen.getByTestId('kachinuki-encho-button')); });
+    expect(eyebrow()).not.toContain('Overtime');
+    await act(async () => { fireEvent.click(screen.getByTestId('kachinuki-encho-undo-button')); });
+    expect(eyebrow()).not.toContain('Overtime');
+    await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Record bout' })); });
+    await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(1));
+    expect(onSubmit.mock.calls[0][0].encho).toBeUndefined();
+  });
+
+  it('a stored encounter encho from an older release reaches neither the header nor a write', async () => {
+    const onSubmit = vi.fn().mockResolvedValue(undefined);
+    await renderEditor({
+      match: completedKachinukiMatch({ status: 'running', winner: null, encho: { periodCount: 2 }, subResults: [tiedBout] }),
+      onSubmit,
+    });
+    expect(eyebrow()).not.toContain('Overtime');
+    await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Record bout' })); });
+    await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(1));
+    expect(onSubmit.mock.calls[0][0].encho).toBeUndefined();
+  });
+
+  it('a completed encounter opened for correction offers no match-level overtime stepper', async () => {
+    await renderEditor({ match: completedKachinukiMatch({ encho: { periodCount: 1 } }) });
+    expect(screen.queryByTestId('scoring-modal-encho-checkbox')).toBeNull();
+    expect(screen.queryByTestId('scoring-modal-encho-pill')).toBeNull();
+  });
+
+  it('a decision on a kachinuki encounter sends no encho', async () => {
+    window.API.recordDecision = vi.fn().mockResolvedValue({ id: 'm1', status: 'completed' });
+    await renderEditor({ match: reopenedKachinukiMatch({ encho: { periodCount: 1 } }) });
+    await act(async () => { fireEvent.click(screen.getByTestId('scoring-modal-fusenpai-button')); });
+    await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Record' })); });
+    await waitFor(() => expect(window.API.recordDecision).toHaveBeenCalledTimes(1));
+    const body = window.API.recordDecision.mock.calls[0][2];
+    expect(body.decision).toBe('fusenpai');
+    expect(body.encho).toBeUndefined();
+  });
+
+  // Scoping guard: a fixed-order team match keeps its match-level overtime,
+  // and a representative bout keeps its own.
+  it('a fixed-order team match keeps the stepper and sends its match-level encho', async () => {
+    window.API.recordDecision = vi.fn().mockResolvedValue({ id: 'm1', status: 'completed' });
+    await renderEditor({
+      match: completedKachinukiMatch({ teamMatchType: 'regular', status: 'running', winner: null, encho: { periodCount: 1 } }),
+    });
+    expect(screen.getByTestId('scoring-modal-encho-checkbox')).toBeTruthy();
+    expect(document.querySelector('.editor-modal__eyebrow').textContent).toContain('Overtime');
+    await act(async () => { fireEvent.click(screen.getByTestId('scoring-modal-fusenpai-button')); });
+    await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Record' })); });
+    await waitFor(() => expect(window.API.recordDecision).toHaveBeenCalledTimes(1));
+    expect(window.API.recordDecision.mock.calls[0][2].encho).toEqual({ periodCount: 1 });
+  });
+
+  it('a fixed-order representative bout keeps its overtime stepper', async () => {
+    await renderEditor({
+      match: completedKachinukiMatch({
+        teamMatchType: 'regular', status: 'running', winner: null, phase: 'bracket', round: 'Final',
+        subResults: [
+          { position: 1, sideA: 'A1', sideB: 'B1', ipponsA: ['M'], ipponsB: ['M'] },
+          { position: -1, sideA: 'Team A', sideB: 'Team B', ipponsA: [], ipponsB: [], decision: 'daihyosen', encho: { periodCount: 1 } },
+        ],
+      }),
+    });
+    expect(screen.getByTestId('scoring-modal-encho-checkbox')).toBeTruthy();
   });
 });
 
@@ -728,7 +833,9 @@ describe('kachinuki Encho is offered only on the current tied bout', () => {
 // enchoPeriodCount, which enchoBlock() serialised onto EVERY completed branch
 // — including the End-as-draw one. That persisted `encho` alongside decision
 // "hikiwake", a contradiction the display only swallowed because X beats (E).
-describe('kachinuki End-match omits the match-level encho on a drawn end', () => {
+// bc-kheb (operator ruling 2026-09-24) went further: the encounter never
+// carries a match-level encho, decisive end or drawn.
+describe('kachinuki End match never sends a match-level encho', () => {
   const decisiveBout = { position: 1, sideA: 'A1', sideB: 'B1', ipponsA: ['M', 'M'], ipponsB: [], winner: 'A1', encho: { periodCount: 1 } };
 
   async function endMatch(onSubmit) {
@@ -739,19 +846,21 @@ describe('kachinuki End-match omits the match-level encho on a drawn end', () =>
     return onSubmit.mock.calls[0][0];
   }
 
-  it('keeps the encounter (E) on a DECISIVE end where a bout went to overtime', async () => {
+  it('sends no encounter (E) on a DECISIVE end where a bout went to overtime', async () => {
     const onSubmit = vi.fn().mockResolvedValue(undefined);
     await renderEditor({
       match: completedKachinukiMatch({
         status: 'running', winner: null,
-        encho: { periodCount: 1 }, // seeds enchoPeriodCount
+        encho: { periodCount: 1 }, // a stored encounter encho from an older release
         subResults: [decisiveBout],
       }),
       onSubmit,
     });
     const patch = await endMatch(onSubmit);
     expect(patch.decision).toBe('kachinuki-exhaustion');
-    expect(patch.encho?.periodCount).toBe(1);
+    expect(patch.encho).toBeUndefined();
+    // The bout that went to overtime keeps its own.
+    expect(patch.subResults.find(s => s.position === 1).encho).toEqual({ periodCount: 1 });
   });
 
   it('drops the encounter (E) on a DRAWN end even when an earlier bout had overtime', async () => {

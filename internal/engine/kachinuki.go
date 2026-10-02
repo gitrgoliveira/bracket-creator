@@ -2112,6 +2112,14 @@ func applyKachinukiMerge(comp *state.Competition, prior, result *state.MatchResu
 	if !comp.IsKachinuki() {
 		return nil
 	}
+	// bc-kheb (operator ruling 2026-09-24): a kachinuki encounter carries no
+	// match-level overtime; each bout records its own. STRIPPED, never
+	// refused: a write from an older client (an offline-queued one replays for
+	// up to 12h) carries the field as state it inherited, and a 400 would
+	// blame the operator for it. Logged, as stripInvalidHantei logs its drop.
+	if comp.ClearKachinukiEncounterEncho(&result.Encho) {
+		log.Printf("engine: %s/%s: dropped a match-level encho from a kachinuki encounter write (overtime is recorded per bout)", comp.ID, result.ID)
+	}
 	var stored []state.SubMatchResult
 	if prior != nil {
 		stored = prior.SubResults

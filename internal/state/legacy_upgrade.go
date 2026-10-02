@@ -350,6 +350,9 @@ func (s *Store) EnsureLegacyUpgraded(compID string) {
 	if err := s.upgradeTeamDefaultWinBoutPaddingLocked(compID, roster); err != nil {
 		log.Printf("state: legacy team-default-win-bout-padding upgrade for %s: %v", compID, err)
 	}
+	if err := s.upgradeKachinukiEncounterEnchoLocked(compID, roster); err != nil {
+		log.Printf("state: legacy kachinuki-encounter-encho upgrade for %s: %v", compID, err)
+	}
 	s.legacyUpgraded.Store(compID, struct{}{})
 }
 
@@ -1372,6 +1375,101 @@ func (s *Store) padTeamDefaultWinBoutsInBracketLocked(compID string, teamSize in
 	}
 	if bracket.ThirdPlaceMatch != nil {
 		pad(bracket.ThirdPlaceMatch)
+	}
+	if !changed {
+		return nil
+	}
+	return s.saveBracketLocked(compID, bracket, s.directWrite)
+}
+
+// upgradeKachinukiEncounterEnchoLocked clears the match-level overtime an
+// older release stored on a kachinuki competition's encounters (bc-kheb,
+// operator ruling 2026-09-24: one bout fought on in encho does not put the
+// encounter in overtime, so (E) lives on that bout's row only). That release
+// mirrored a bout's encho into the encounter's Encho, and every
+// encounter-level surface (the bracket card, the score lists, the exported
+// summary row) then showed the encounter as in overtime. Each pool and bracket
+// match (rounds and bronze) goes through the same rule the engine's write
+// chokepoint applies, Competition.ClearKachinukiEncounterEncho; a bout's own
+// SubResults[i].Encho is never touched.
+//
+// Keyed on a persisted marker, Competition.KachinukiEncounterEnchoCleared,
+// not on the data's shape: it runs while the marker is absent and sets it
+// once both match files are saved, so it converges rather than re-running.
+// The marker is written LAST and only after both saves succeed, so a failed
+// save leaves it unset and the next process start retries. Both halves save
+// through savePoolMatchesLocked/saveBracketLocked, where the file-version
+// bumps sit. Caller holds the per-comp lock (EnsureLegacyUpgraded).
+func (s *Store) upgradeKachinukiEncounterEnchoLocked(compID string, roster *legacyUpgradeRoster) error {
+	comp, err := roster.competition()
+	if err != nil || comp == nil || !comp.IsKachinuki() || comp.KachinukiEncounterEnchoCleared {
+		return err
+	}
+	if comp.ID != compID {
+		// saveCompetitionChangedLocked paths and locks off comp.ID, not the
+		// directory this call was handed: see upgradeCompetitionFormatLocked's
+		// BUG 1. Leave the files as they are.
+		log.Printf("state: legacy kachinuki-encounter-encho upgrade for %s: config.md id %q does not match its directory; left unconverted", compID, comp.ID)
+		return nil
+	}
+	if err := s.clearKachinukiEncounterEnchoInPoolMatchesLocked(compID, comp); err != nil {
+		return err
+	}
+	if err := s.clearKachinukiEncounterEnchoInBracketLocked(compID, comp); err != nil {
+		return err
+	}
+	updated := *comp
+	updated.KachinukiEncounterEnchoCleared = true
+	if _, err := s.saveCompetitionChangedLocked(&updated, s.directWrite); err != nil {
+		return fmt.Errorf("kachinuki encounter encho cleared but its marker was not saved: %w", err)
+	}
+	comp.KachinukiEncounterEnchoCleared = true
+	return nil
+}
+
+// clearKachinukiEncounterEnchoInPoolMatchesLocked is
+// upgradeKachinukiEncounterEnchoLocked's pool-matches.csv half. Caller holds
+// the per-comp lock.
+func (s *Store) clearKachinukiEncounterEnchoInPoolMatchesLocked(compID string, comp *Competition) error {
+	parsed, err := parsePoolMatchesFile(s.compPath(compID, "pool-matches.csv"))
+	if err != nil {
+		return nil // missing/unreadable pool matches are the consumers' error to report
+	}
+	matches, _ := parsed.([]MatchResult)
+	changed := false
+	for i := range matches {
+		if comp.ClearKachinukiEncounterEncho(&matches[i].Encho) {
+			changed = true
+		}
+	}
+	if !changed {
+		return nil
+	}
+	return s.savePoolMatchesLocked(compID, matches, s.directWrite)
+}
+
+// clearKachinukiEncounterEnchoInBracketLocked is
+// upgradeKachinukiEncounterEnchoLocked's bracket.json half. Caller holds the
+// per-comp lock.
+func (s *Store) clearKachinukiEncounterEnchoInBracketLocked(compID string, comp *Competition) error {
+	parsed, err := parseBracketFile(s.compPath(compID, "bracket.json"))
+	if err != nil {
+		return nil // missing/unreadable bracket is the consumers' error to report
+	}
+	bracket, _ := parsed.(*Bracket)
+	if bracket == nil {
+		return nil
+	}
+	changed := false
+	for i := range bracket.Rounds {
+		for j := range bracket.Rounds[i] {
+			if comp.ClearKachinukiEncounterEncho(&bracket.Rounds[i][j].Encho) {
+				changed = true
+			}
+		}
+	}
+	if bracket.ThirdPlaceMatch != nil && comp.ClearKachinukiEncounterEncho(&bracket.ThirdPlaceMatch.Encho) {
+		changed = true
 	}
 	if !changed {
 		return nil

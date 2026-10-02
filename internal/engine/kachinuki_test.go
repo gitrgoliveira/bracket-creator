@@ -2086,7 +2086,9 @@ func TestReopenKachinukiMatch_DiscardsVerdictKeepsBoutLog(t *testing.T) {
 
 	t.Run("pool", func(t *testing.T) {
 		compID := "reopen-verdict-pool"
-		eng, store, _ := setupKachinukiComp(t, compID, 3)
+		// markerSet: the load repair (bc-kheb) would clear the stored Encho
+		// before the reopen ran, and the Encho assertion would pin nothing.
+		eng, store, _ := setupKachinukiComp(t, compID, 3, markerSet)
 		require.NoError(t, store.SavePoolMatches(compID, []state.MatchResult{{
 			ID: "P1-0", SideA: "RedTeam", SideB: "WhiteTeam",
 			Status: state.MatchStatusCompleted,
@@ -2132,7 +2134,7 @@ func TestReopenKachinukiMatch_DiscardsVerdictKeepsBoutLog(t *testing.T) {
 
 	t.Run("bracket", func(t *testing.T) {
 		compID := "reopen-verdict-bracket"
-		eng, store, _ := setupKachinukiComp(t, compID, 3)
+		eng, store, _ := setupKachinukiComp(t, compID, 3, markerSet)
 		require.NoError(t, store.SaveBracket(compID, &state.Bracket{
 			Rounds: [][]state.BracketMatch{
 				{{

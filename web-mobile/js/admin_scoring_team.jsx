@@ -1329,6 +1329,14 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
   // grid behaviour.
   const teamMatchType = m.teamMatchType || compMeta?.config?.teamMatchType || "fixed";
   const isKachinuki = teamMatchType === "kachinuki";
+  // bc-kheb (operator ruling 2026-09-24): a kachinuki encounter never carries
+  // a match-level overtime. One bout fought on in encho does not put the
+  // encounter in overtime, so (E) lives on that bout's own row only. The
+  // count seeded from a legacy stored m.encho stays local: the eyebrow,
+  // enchoBlock and /decision read this derived count, never the raw one. A
+  // legacy kachinuki daihyosen row keeps its encho, as the stepper does.
+  const kachinukiEncounter = isKachinuki && !hasDaihyosen;
+  const encounterEnchoCount = kachinukiEncounter ? 0 : enchoPeriodCount;
   // Compact "Instrument Panel" mode fits the editor on one viewport page
   // for ≤5-person teams. Kachinuki renders only the current bout while
   // running (see kachinukiVisiblePositions), so it always fits even
@@ -1561,7 +1569,7 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
   // (operator ruling 2026-09-26): recording a withdrawal changes only the
   // match it was recorded on.
   const submitDecision = makeSubmitDecision({
-    match: m, enchoPeriodCount, password, mountedRef,
+    match: m, enchoPeriodCount: encounterEnchoCount, password, mountedRef,
     setDecisionSubmitting, setDecisionErr, setDecisionPromptKind,
     onClose, onAfterDecision, isComplete, entityLabel: "teams",
   });
@@ -1992,15 +2000,15 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
   const kachinukiEnchoOffered = kachinukiBoutMode
     && kachinukiEnchoAvailable(kachinukiEndOutcome)
     && kachinukiLastScoredIdx === kachinukiCurBoutIdx;
-  // Encho on the tied current kachinuki bout: bump the bout's overtime count
-  // AND the match-level counter (decisionSuffix reads match.encho for the
-  // "(E)" suffix; enchoBlock forwards it since kachinuki has no daihyosen),
-  // then clear the tied outcome so the SAME pair keeps scoring that bout. The
-  // guard mirrors kachinukiEnchoOffered so the keyboard/programmatic path can
-  // never target a bout the encounter has already advanced past.
+  // Encho on the tied current kachinuki bout: bump THAT bout's overtime count
+  // only, then clear the tied outcome so the SAME pair keeps scoring that
+  // bout. The encounter is not in overtime (operator ruling 2026-09-24,
+  // bc-kheb): (E) belongs on the bout's own row, so the match-level count is
+  // left alone. The guard mirrors kachinukiEnchoOffered so the
+  // keyboard/programmatic path can never target a bout the encounter has
+  // already advanced past.
   const applyKachinukiEncho = () => {
     if (!kachinukiEnchoOffered) return;
-    setEnchoPeriodCount(cnt => cnt + 1);
     updateSub(kachinukiLastScoredIdx, prev => ({ ...prev, encho: (prev.encho || 0) + 1, draw: false, _preFusensho: undefined }));
     setEndArmed(false);
   };
@@ -2015,7 +2023,6 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
     && subTotals[kachinukiCurBoutIdx].aTotal === subTotals[kachinukiCurBoutIdx].bTotal;
   const undoKachinukiEncho = () => {
     if (!kachinukiEnchoUndoable) return;
-    setEnchoPeriodCount(cnt => Math.max(0, cnt - 1));
     updateSub(kachinukiCurBoutIdx, prev => {
       const encho = (prev.encho || 0) - 1;
       return encho > 0 ? { ...prev, encho } : { ...prev, encho: 0, draw: true };
@@ -2166,15 +2173,16 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
 
   // mp-4pc: when a daihyosen exists the encho counter belongs to that
   // sub-bout (attached per-sub in buildPatch), so suppress the top-level
-  // encho to avoid duplicate/ambiguous semantics on the team match.
-  const enchoBlock = () => (enchoPeriodCount > 0 && !hasDaihyosen) ? { encho: { periodCount: enchoPeriodCount } } : {};
+  // encho to avoid duplicate/ambiguous semantics on the team match. A
+  // kachinuki encounter sends none at all (encounterEnchoCount, bc-kheb).
+  const enchoBlock = () => (encounterEnchoCount > 0 && !hasDaihyosen) ? { encho: { periodCount: encounterEnchoCount } } : {};
   // An operator change to the overtime count from EnchoControl: the value (a
   // number, or the updater its stepper hands over), then the save it
   // schedules, as for a point. The count rides the running write either way:
   // the match's (enchoBlock) or, once a daihyosen exists, that bout's
   // (daihyosenEnchoFields). The count adopted from the server does not come
-  // through here, and the kachinuki Encho/Undo encho already save through
-  // updateSub.
+  // through here. The kachinuki Encho/Undo encho never touch this count:
+  // they change the bout's own encho through updateSub.
   const changeEnchoPeriodCount = (v) => { setEnchoPeriodCount(v); markScoringDirty(); };
 
   // Per-bout competitor names. Single choke point shared by the row
@@ -2705,13 +2713,12 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
           corrected: isComplete,
         },
         subResults,
-        // The match-level (E) is omitted on a DRAWN end: the middle mark can be
-        // X (tie) OR (E) but never both — a match that went to encho cannot end
-        // tied (boutMiddle) — so persisting encho alongside decision "hikiwake"
-        // is a contradiction the display only swallows because X beats (E)
-        // (mp-gmcg review). Each bout that actually went to overtime still
-        // records its own `encho` on its SubMatchResult (entry.encho above), so
-        // no overtime is lost; only the spurious encounter-level marker is.
+        // A kachinuki encounter never sends a match-level (E) (operator ruling
+        // 2026-09-24, bc-kheb): enchoBlock reads encounterEnchoCount, which is
+        // 0 here. Each bout that actually went to overtime records its own
+        // `encho` on its SubMatchResult (entry.encho above), so no overtime is
+        // lost. The DRAWN-end gate stays as it was (mp-gmcg review): a match
+        // that went to encho cannot end tied, so the two never ride together.
         ...(endWinnerSide ? enchoBlock() : {}),
         ...correctionBlock,
       };
@@ -3114,7 +3121,7 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
                 : m.phase === "bracket" && m.matchNumber > 0
                 ? <span> · Match {m.matchNumber}</span>
                 : null}
-              {enchoPeriodCount > 0 && <span className="editor-modal__eyebrow-encho">· (E) Overtime ×{enchoPeriodCount}</span>}
+              {encounterEnchoCount > 0 && <span className="editor-modal__eyebrow-encho">· (E) Overtime ×{encounterEnchoCount}</span>}
             </div>
             <div className="editor-modal__title" style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
               <span><TermAS name="shiaijo">Shiaijo</TermAS> {m.court} · {m.scheduledAt || "Now"}</span>
@@ -4052,11 +4059,15 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
               mp-gmcg (critique + operator ruling): suppressed in kachinuki bout
               mode — declaring encho there is OPTIONAL, its only effect the middle
               mark (vs → "(E)"), and it is done via the footer Encho button, so a
-              period-stepper would be redundant AND confusing. Corrections,
-              daihyosen and fixed-format team matches keep it, except on the
-              public page once the judges decided the representative bout: its
-              overtime is part of that bout, which is shown, not offered. */}
-          {!kachinukiBoutMode && !repBoutDecidedForParticipant && (
+              period-stepper would be redundant AND confusing. bc-kheb (operator
+              ruling 2026-09-24): a kachinuki encounter has no match-level
+              overtime, so a completed one opened for correction offers none
+              either (kachinukiEncounter); a legacy kachinuki daihyosen row
+              keeps it. Daihyosen and fixed-format team matches keep it, except
+              on the public page once the judges decided the representative
+              bout: its overtime is part of that bout, which is shown, not
+              offered. */}
+          {!kachinukiBoutMode && !kachinukiEncounter && !repBoutDecidedForParticipant && (
             <EnchoControl
               enchoPeriodCount={enchoPeriodCount}
               setEnchoPeriodCount={changeEnchoPeriodCount}

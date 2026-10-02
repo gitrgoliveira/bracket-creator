@@ -166,6 +166,14 @@ func RegisterDecisionHandlers(r *gin.RouterGroup, eng ScoringEngine, store Compe
 			c.JSON(http.StatusBadRequest, gin.H{"error": "engi competitions do not support kiken/fusenpai decisions; use flag scoring instead"})
 			return
 		}
+		// bc-kheb: a kachinuki encounter carries no match-level overtime
+		// (state.Competition.ClearKachinukiEncounterEncho, which the engine's
+		// write chokepoint applies too). Dropped HERE as well, because the
+		// decision computes the winner's default-win circles from this encho
+		// before that chokepoint runs: an older client's encho would leave the
+		// winner one circle instead of two. Stripped, not refused, for the
+		// same queued-write reason the chokepoint gives.
+		comp.ClearKachinukiEncounterEncho(&req.Encho)
 
 		// T156: run the entire RecordDecision flow inside one
 		// WithTransaction. The engine call chain, sides lookup, T103

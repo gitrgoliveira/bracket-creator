@@ -1015,6 +1015,11 @@ func (e *Engine) recordDecisionTx(tx state.StoreTx, compID, matchID, decision, d
 	// The winner gets the maru default-win fill; the withdrawing side keeps
 	// whatever it had struck and the encounter keeps its prior sub-bouts
 	// (FIK Art. 32 — see preserveLoserScore below).
+	// A kachinuki encounter carries no match-level overtime, so it is dropped
+	// before the circles are counted: the chokepoint that strips it runs later.
+	if comp, cerr := tx.LoadCompetition(compID); cerr == nil && comp != nil {
+		comp.ClearKachinukiEncounterEncho(&encho)
+	}
 	winIppons := domain.DefaultWinIppons(encho.On())
 	result := &state.MatchResult{
 		ID:             matchID,

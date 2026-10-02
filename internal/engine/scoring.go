@@ -3182,8 +3182,15 @@ func guardDownstreamKnockoutCorrection(bracket *state.Bracket, rIdx, mIdx int, b
 	if !changed {
 		return nil
 	}
+	return downstreamCorrectionRefusal(bracket, rIdx, mIdx, bm, force)
+}
+
+// downstreamCorrectionRefusal is the refusal both correction guards end on,
+// once they know the winner changed: a running later match is refused whatever
+// force says, and force skips only the played refusal.
+func downstreamCorrectionRefusal(bracket *state.Bracket, rIdx, mIdx int, m *state.BracketMatch, force bool) error {
 	d := propagatedDownstreamOf(bracket, rIdx, mIdx)
-	if err := runningDownstreamRefusal(bm.ID, d.running()); err != nil {
+	if err := runningDownstreamRefusal(m.ID, d.running()); err != nil {
 		return err
 	}
 	if force {
@@ -3193,7 +3200,7 @@ func guardDownstreamKnockoutCorrection(bracket *state.Bracket, rIdx, mIdx int, b
 	if len(blocking) == 0 {
 		return nil
 	}
-	return newDownstreamKnockoutPlayedError(bm, blocking, d.displacedSlot(blocking, mIdx))
+	return newDownstreamKnockoutPlayedError(m, blocking, d.displacedSlot(blocking, mIdx))
 }
 
 func (e *Engine) propagateBracketWinner(bracket *state.Bracket, rIdx, mIdx int) {
@@ -3382,18 +3389,7 @@ func guardOverrideDownstreamKnockoutCorrection(bracket *state.Bracket, rIdx, mId
 	if !changed {
 		return nil
 	}
-	d := propagatedDownstreamOf(bracket, rIdx, mIdx)
-	if err := runningDownstreamRefusal(m.ID, d.running()); err != nil {
-		return err
-	}
-	if force {
-		return nil
-	}
-	blocking := d.played()
-	if len(blocking) == 0 {
-		return nil
-	}
-	return newDownstreamKnockoutPlayedError(m, blocking, d.displacedSlot(blocking, mIdx))
+	return downstreamCorrectionRefusal(bracket, rIdx, mIdx, m, force)
 }
 
 // OverrideBracketWinner atomically loads the bracket, locates the

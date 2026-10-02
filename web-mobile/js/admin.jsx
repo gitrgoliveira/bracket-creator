@@ -172,14 +172,20 @@ function AdminApp({ tournament, onUpdate, onLogout, onViewerMode, onPasswordChan
   // or duplicate-ID errors on the second attempt. Separating the refresh
   // into this helper makes the contract explicit: mutation errors throw,
   // refresh errors log + toast a "reload to see latest" hint.
+  //
+  // Bounded (fetchCompetitions' `bounded`): a score editor waits on this after
+  // every write it makes, a representative-bout add's save included, so a
+  // refresh that never answers would hold that editor. One given up on is
+  // logged and toasts nothing (refreshFailureToast).
   const refreshCompsBestEffort = async (actionLabel) => {
     try {
-      const comps = await window.API.fetchCompetitions();
+      const comps = await window.API.fetchCompetitions({ bounded: true });
       if (!mountedRef.current) return;
       onUpdateRef.current(mergeCompetitionsIntoTournament(tRef.current, () => comps));
     } catch (e) {
       console.warn(`refresh after ${actionLabel} failed (action did succeed):`, e);
-      if (mountedRef.current) showToast(`${actionLabel} succeeded; refresh failed. Reload to see latest`, "error");
+      const toast = refreshFailureToast(actionLabel, e);
+      if (toast && mountedRef.current) showToast(toast, "error");
     }
   };
 
@@ -870,6 +876,18 @@ function normalizeCreatedRecord(created) {
   return { ...created, players: created.players ?? [] };
 }
 
+// refreshFailureToast: what the operator is told when the refresh after an
+// action fails (the action itself did succeed): the hint to reload, or nothing
+// for a refresh given up on at its deadline (the bounded request's
+// `timedOut`). The score editors refresh after every autosave, so on a large
+// tournament over slow venue wifi a timed-out refresh would toast every few
+// taps, while the write reaches this page by push anyway and Reload would
+// fetch the same slow aggregate again.
+function refreshFailureToast(actionLabel, e) {
+  if (e && e.timedOut) return null;
+  return `${actionLabel} succeeded; refresh failed. Reload to see latest`;
+}
+
 // StartAllModal: three-phase dialog for the dashboard "Start all" action.
 // Follows the shared .modal-backdrop / .modal pattern (mirrors
 // AnnouncementModal). The confirm and result phases are dismissable (backdrop
@@ -967,4 +985,4 @@ window.normalizeCreatedRecord = normalizeCreatedRecord;
 // component with no window binding, and its confirm phase now carries the
 // "will NOT be started" list, which is the surface that stops "Start all"
 // offering a competition the server would refuse.
-export { mergeCompetitionsIntoTournament, mergeTournamentPatch, normalizeCreatedRecord, StartAllModal, attemptScoreWrite };
+export { mergeCompetitionsIntoTournament, mergeTournamentPatch, normalizeCreatedRecord, refreshFailureToast, StartAllModal, attemptScoreWrite };

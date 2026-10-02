@@ -341,6 +341,32 @@ describe('_flushQueue: non-retryable 4xx discards, 5xx/429/network retries', () 
         warnSpy.mockRestore();
     });
 
+    // bc-dhas: a self-run refusal carries the code in `error` and a sentence in
+    // `message`; the alert for a dropped write gives the sentence.
+    it('reports the sentence of a refusal that carries one, not its code', async () => {
+        const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+        const alerts = [];
+        const unsubAlert = mod.subscribeQueueAlert((a) => alerts.push(a));
+        mockFetch(() => Promise.resolve({
+            ok: false,
+            status: 409,
+            json: () => Promise.resolve({
+                error: 'hantei_organiser_only',
+                message: 'The judges decided this representative bout (hantei). Ask the tournament organizer to change it.',
+            }),
+        }));
+
+        enqueueRunningWrite('c1', 'm1', { status: 'running', rev: 1 }, '');
+        await flushMicrotasks();
+
+        expect(alerts).toEqual([expect.objectContaining({
+            kind: 'rejected',
+            detail: 'The judges decided this representative bout (hantei). Ask the tournament organizer to change it.',
+        })]);
+        unsubAlert();
+        warnSpy.mockRestore();
+    });
+
     it('discards a queued write on a non-retryable 4xx (e.g. 400): never retried forever', async () => {
         const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
 
@@ -799,6 +825,40 @@ describe('recordScore: queues running writes on network failure', () => {
         ).rejects.toThrow('Already fighting in match X');
     });
 
+    // bc-dhas: the public score sheet shows a thrown message as it is, so a
+    // refusal that carries a sentence must throw the sentence, not the code:
+    // the finished-match refusal alerted "result_finalized" before this.
+    it.each([
+        ['result_finalized', 'This match result has already been reported. Contact the tournament organizer to correct it.'],
+        ['hantei_organiser_only', 'The judges decided this representative bout (hantei). Ask the tournament organizer to change it.'],
+    ])('throws the sentence of a %s refusal, not its code', async (error, message) => {
+        mockFetch(() => Promise.resolve({
+            ok: false,
+            status: 409,
+            json: () => Promise.resolve({ error, message }),
+        }));
+
+        await expect(
+            API.recordScore('c1', 'm1', { status: 'running' }, '', null)
+        ).rejects.toThrow(message);
+    });
+
+    // A participant's finish that still carries a representative bout another
+    // device removed is refused (a running write only loses the row). The
+    // finish is not queued: the sentence is thrown for the public page to show.
+    it('throws the sentence of a finish refused for a removed representative bout', async () => {
+        const message = "This match's representative bout was removed on another device. Check the scores and finish again.";
+        mockFetch(() => Promise.resolve({
+            ok: false,
+            status: 409,
+            json: () => Promise.resolve({ error: 'no_daihyosen', message }),
+        }));
+
+        await expect(
+            API.recordScore('c1', 'm1', { status: 'completed' }, '', null)
+        ).rejects.toThrow(message);
+    });
+
     it('queues a running 5xx as "syncing" (server up, not "offline" or falsely "synced")', async () => {
         // A 5xx (or 429) for a running write is transient: queue it for retry so
         // the sync pill reflects the unsynced state rather than flipping back to
@@ -1167,6 +1227,68 @@ describe('subscribeTerminalWriteFailed: permanent terminal-write rejection is su
     });
 });
 
+// A queued write refused on replay in the server's own words (its `message`,
+// or `reasonHuman`) is marked `sentence` on the failure and the alert, so the
+// editor banner and the global alert show it as it is instead of adding their
+// own advice after it. A bare code is not marked, and keeps their words. Both
+// flush branches that drop a refused replay are covered: the generic one and
+// the decision 409.
+describe('_flushQueue: a replay refused in the server\'s own words is marked as a sentence', () => {
+    const REMOVED = "This match's representative bout was removed on another device. Check the scores and finish again.";
+
+    async function replayRefused(send, key, body) {
+        const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+        mockFetch(() => Promise.reject(new TypeError('offline')));
+        await send();
+        expect(API.hasPendingTerminalWrite('c1', key)).toBe(true);
+        const failures = [];
+        const alerts = [];
+        const unsubFail = mod.subscribeTerminalWriteFailed((info) => failures.push(info));
+        const unsubAlert = mod.subscribeQueueAlert((a) => alerts.push(a));
+        mockFetch(() => Promise.resolve({ ok: false, status: 409, json: () => Promise.resolve(body) }));
+        window.dispatchEvent(new Event('online'));
+        await tick(50);
+        unsubFail();
+        unsubAlert();
+        warnSpy.mockRestore();
+        expect(API.hasPendingTerminalWrite('c1', key)).toBe(false);
+        return { failure: failures[0], alert: alerts.find((a) => a.kind === 'rejected') };
+    }
+    const finish = (id) => () => API.recordScore('c1', id, { status: 'completed', winner: 'A' }, '', null);
+    const decide = (id) => () => API.recordDecision('c1', id, { decision: 'kiken-voluntary', decisionBy: 'aka' }, 'pw');
+
+    it('a refused finish carrying a message', async () => {
+        const { failure, alert } = await replayRefused(finish('ms1'), 'ms1', { error: 'no_daihyosen', message: REMOVED });
+        expect(failure).toMatchObject({ reason: REMOVED, sentence: true });
+        expect(failure.advice).toBeUndefined();
+        expect(alert).toMatchObject({ detail: REMOVED, sentence: true });
+    });
+
+    it('a refused finish carrying a reasonHuman', async () => {
+        const said = 'Alice withdrew in Pool A · Match 1 and cannot fight again. Record the default win for Carol.';
+        const { failure, alert } = await replayRefused(finish('ms2'), 'ms2', { error: 'ineligible_competitor', reasonHuman: said });
+        expect(failure).toMatchObject({ reason: said, sentence: true });
+        expect(alert).toMatchObject({ detail: said, sentence: true });
+    });
+
+    it('a refused decision carrying a message, which it used to report by its code', async () => {
+        const said = 'This match result has already been reported. Contact the tournament organizer to correct it.';
+        const { failure, alert } = await replayRefused(decide('md1'), 'md1', { error: 'result_finalized', message: said });
+        expect(failure).toMatchObject({ reason: said, sentence: true });
+        expect(alert).toMatchObject({ detail: said, sentence: true });
+    });
+
+    it.each([
+        ['finish', finish('mb1'), 'mb1'],
+        ['decision', decide('mb2'), 'mb2'],
+    ])('a refused %s that is only a code is not marked', async (_what, send, key) => {
+        const { failure, alert } = await replayRefused(send, key, { error: 'conflict' });
+        expect(failure.reason).toBe('conflict');
+        expect(failure.sentence).toBeUndefined();
+        expect(alert.sentence).toBeUndefined();
+    });
+});
+
 // bc-cse: a QUEUED terminal knockout correction (score OR decision) that
 // replays into a 409 downstream_knockout_played must be discarded (it can
 // never land automatically -- nothing at this device can tap the confirm
@@ -1335,10 +1457,14 @@ describe('_flushQueue: court_busy 409 on a queued score write (bc-cse)', () => {
             'Shiaijo A is running Pool A · Match 2. Finish it or send it back to the queue first.'
         );
         expect(failures[0].reason).not.toBe('court_busy');
+        // A whole sentence that says what to do: shown as it is, with no
+        // full stop or re-enter advice added after it.
+        expect(failures[0].sentence).toBe(true);
 
         const rejected = alerts.filter((a) => a.kind === 'rejected');
         expect(rejected.length).toBeGreaterThanOrEqual(1);
         expect(rejected[0].detail).not.toBe('court_busy');
+        expect(rejected[0].sentence).toBe(true);
     });
 });
 

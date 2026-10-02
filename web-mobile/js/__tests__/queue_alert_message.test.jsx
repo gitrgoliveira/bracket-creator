@@ -27,6 +27,20 @@ describe('queueAlertMessage', () => {
         expect(msg).not.toMatch(/newer result/i);
     });
 
+    // A refusal the server worded itself (`sentence`, marked where the replay
+    // was refused) says what to do, so it closes the alert as it is: "Re-enter
+    // it." after "Check the scores and finish again." contradicted it.
+    it('shows a refusal the server worded itself as the alert\'s advice', () => {
+        const sentence = "This match's representative bout was removed on another device. Check the scores and finish again.";
+        const msg = queueAlertMessage({ kind: 'rejected', count: 1, terminalCount: 1, detail: sentence, sentence: true });
+        expect(msg).toBe(`A result was refused by the server and cannot be saved. ${sentence}`);
+    });
+
+    it('keeps its own words around a refusal that is only a code', () => {
+        const msg = queueAlertMessage({ kind: 'rejected', count: 1, terminalCount: 1, detail: 'conflict' });
+        expect(msg).toBe('A result was refused by the server (conflict) and cannot be saved. Re-enter it.');
+    });
+
     it('pluralises a superseded batch', () => {
         const msg = queueAlertMessage({ kind: 'superseded', count: 3, terminalCount: 3 });
         expect(msg).toMatch(/3 results were not saved/i);

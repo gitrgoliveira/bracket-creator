@@ -1,7 +1,10 @@
 package helper
 
 import (
+	"runtime"
 	"testing"
+	"time"
+	"weak"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -89,4 +92,42 @@ func TestNamesToPrintColumnsFitOnePage(t *testing.T) {
 		a, b, a+b, namesToPrintPageWidthUnits)
 	assert.Equal(t, float64(namesToPrintNumberColWidth), a, "column A width must be the fixed constant")
 	assert.Equal(t, float64(namesToPrintNameColWidth), b, "column B width must be the fixed constant")
+}
+
+// styleCacheHolds reports whether the style cache still has an entry for the
+// workbook fileKey names.
+func styleCacheHolds(fileKey weak.Pointer[excelize.File]) bool {
+	styleCacheMu.Lock()
+	defer styleCacheMu.Unlock()
+	_, ok := styleCacheByFile[fileKey]
+	return ok
+}
+
+// styleOneWorkbook styles a fresh workbook and returns only a weak pointer to
+// it, so nothing on the caller's stack keeps the workbook reachable.
+//
+//go:noinline
+func styleOneWorkbook(t *testing.T) weak.Pointer[excelize.File] {
+	f := excelize.NewFile()
+	require.Positive(t, getTextStyle(f))
+	require.NoError(t, f.Close())
+	return weak.Make(f)
+}
+
+// TestStyleCacheReleasesACollectedWorkbook pins that the style cache never
+// keeps a workbook alive: once a styled workbook is unreachable its entry
+// goes, with no release call from any caller. The long-running app styles
+// one workbook per export. Collection is asynchronous, so this polls GC up to
+// a deadline rather than trusting a single cycle.
+func TestStyleCacheReleasesACollectedWorkbook(t *testing.T) {
+	fileKey := styleOneWorkbook(t)
+	require.True(t, styleCacheHolds(fileKey), "styling a workbook caches its style ids")
+
+	deadline := time.Now().Add(5 * time.Second)
+	for styleCacheHolds(fileKey) && time.Now().Before(deadline) {
+		runtime.GC()
+		time.Sleep(10 * time.Millisecond)
+	}
+	assert.True(t, fileKey.Value() == nil, "the workbook must have been collected")
+	assert.False(t, styleCacheHolds(fileKey), "its cache entry must go with it")
 }

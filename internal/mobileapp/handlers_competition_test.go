@@ -2300,9 +2300,9 @@ func TestPOSTStartAndGenerateDraw_LegacyEmptyPrefix_AssignBeforeDrawing(t *testi
 	// bc-pnum A5(d): an UNRELATED sibling competition's unreadable config.md
 	// must not turn a start/generate-draw pre-flight for THIS competition
 	// into a 500. engine's takenNumberPrefixes (which assignDefaultNumberPrefix
-	// uses via DefaultNumberPrefixFor) and checkUniqueCompFieldsTolerant
-	// (which the pre-flight uses) must both log-and-skip the broken sibling
-	// rather than propagate its load error.
+	// uses via DefaultNumberPrefixFor) and EnsureNumberPrefix's uniqueness
+	// check (which the pre-flight uses) must both log-and-skip the broken
+	// sibling rather than propagate its load error.
 	t.Run("POST /start is not refused by an unrelated sibling's unreadable config.md", func(t *testing.T) {
 		r, store, _, _, tempDir := setupTestRouter(t)
 		defer os.RemoveAll(tempDir)
@@ -2394,8 +2394,8 @@ func TestEnsureNumberPrefix_ConcurrentFlipSurvivesAtomicReadModifyWrite(t *testi
 }
 
 // TestEnsureNumberPrefix_CorrelatesSkippedSiblingWithAssignedPrefix pins the correlated skip warning:
-// checkUniqueCompFieldsTolerant already logged its own "skipping unreadable
-// sibling" line, and the assignment itself was not logged anywhere -- so a
+// the tolerant sibling walk (engine.siblingCompetitions) already logged its
+// own "skipping unreadable" line, and the assignment itself was not logged anywhere -- so a
 // derived prefix that persisted while a sibling was unreadable (and thus
 // possibly colliding once that sibling's config.md is repaired) left no way
 // to correlate the two facts from the server log alone. ensureNumberPrefix's
@@ -2610,7 +2610,6 @@ func TestPUTCompetition_LegacyUnrelatedFieldChangeHealsPoolsCSV(t *testing.T) {
 		"poolSize":       4,
 		"poolWinners":    2,
 		"roundRobin":     false,
-		"mirror":         false,
 		"checkInEnabled": true, // the only field this PUT actually changes
 		// numberPrefix deliberately omitted.
 	})
@@ -2637,9 +2636,9 @@ func TestPUTCompetition_LegacyUnrelatedFieldChangeHealsPoolsCSV(t *testing.T) {
 }
 
 // TestPUTCompetition_RosterPUT_UnreadableSiblingDoesNotBlockUnmovedPrefix
-// pins the roster-save sibling scan: the roster-only branch used to call checkUniqueCompFields(eng,
+// pins the roster-save sibling scan: the roster-only branch used to call CheckUniqueCompFields(
 // "", validatePrefix, id) UNCONDITIONALLY, even when validatePrefix was ""
-// (nothing to validate, the common already-prefixed case). checkUniqueCompFields
+// (nothing to validate, the common already-prefixed case). CheckUniqueCompFields
 // is the STRICT policy, so it still listed every sibling and LoadCompetition'd
 // each one, and one unreadable sibling's config.md 500'd this competition's
 // roster save even though its own prefix never moved. The fix skips the
@@ -2774,7 +2773,7 @@ func TestPUTCompetition_RosterOnlyPUTHealsBlankNumberPrefix(t *testing.T) {
 }
 
 // TestPUTCompetition_GrandfathersUnmovedAmbiguousOrDuplicateStoredValues pins
-// the review's BLOCKER on the ambiguity/duplicate-name fixes: checkUniqueCompFields
+// the review's BLOCKER on the ambiguity/duplicate-name fixes: CheckUniqueCompFields
 // now also refuses a stored value ambiguous with (or identical to) a
 // sibling's, but a PUT must validate only what IT actually moves, never
 // re-litigate what it inherited unchanged. "K" and "K2" (or two same-named
@@ -2837,7 +2836,7 @@ func TestPUTCompetition_GrandfathersUnmovedAmbiguousOrDuplicateStoredValues(t *t
 		body, _ := json.Marshal(map[string]any{
 			"id": "grandfather-k2", "name": "Grandfather K2", "format": state.CompFormatMixed,
 			"kind": "individual", "courts": []string{"A"}, "poolSize": 4, "poolWinners": 2,
-			"roundRobin": false, "mirror": false, "numberPrefix": "K2",
+			"roundRobin": false, "numberPrefix": "K2",
 			"date": "02-01-2026", // the only field this PUT actually changes
 		})
 		w := httptest.NewRecorder()
@@ -2860,7 +2859,7 @@ func TestPUTCompetition_GrandfathersUnmovedAmbiguousOrDuplicateStoredValues(t *t
 		body, _ := json.Marshal(map[string]any{
 			"id": "grandfather-k2", "name": "Grandfather K2", "format": state.CompFormatMixed,
 			"kind": "individual", "courts": []string{"A"}, "poolSize": 4, "poolWinners": 2,
-			"roundRobin": false, "mirror": false, "numberPrefix": "K9", // ambiguous with sibling "K"
+			"roundRobin": false, "numberPrefix": "K9", // ambiguous with sibling "K"
 		})
 		w := httptest.NewRecorder()
 		req, _ := http.NewRequest("PUT", "/api/competitions/grandfather-k2", bytes.NewBuffer(body))
@@ -2933,7 +2932,7 @@ func TestPUTCompetition_HealOnlyRenumberBroadcasts(t *testing.T) {
 	body, _ := json.Marshal(map[string]any{
 		"id": cid, "name": "Heal Only Broadcast", "format": state.CompFormatMixed,
 		"kind": "individual", "courts": []string{"A"}, "poolSize": 4, "poolWinners": 2,
-		"roundRobin": false, "mirror": false, "numberPrefix": "K",
+		"roundRobin": false, "numberPrefix": "K",
 	})
 	w := httptest.NewRecorder()
 	req, _ := http.NewRequest("PUT", "/api/competitions/"+cid, bytes.NewBuffer(body))
@@ -3021,7 +3020,7 @@ func TestPUTCompetition_SettingsOnlyResponseCarriesNoProvisionalNumbers(t *testi
 	body, _ := json.Marshal(map[string]any{
 		"id": cid, "name": "Settings No Provisional", "format": state.CompFormatMixed,
 		"kind": "individual", "courts": []string{"A"}, "poolSize": 4, "poolWinners": 2,
-		"roundRobin": false, "mirror": false, "numberPrefix": "X",
+		"roundRobin": false, "numberPrefix": "X",
 		// players deliberately OMITTED: this is a settings-only PUT.
 	})
 	w := httptest.NewRecorder()
@@ -3558,7 +3557,7 @@ func TestCompetitionCourtsInvariant(t *testing.T) {
 	})
 }
 
-// TestCheckUniqueCompFields tests the checkUniqueCompFields helper directly.
+// TestCheckUniqueCompFields tests the CheckUniqueCompFields helper directly.
 func TestCheckUniqueCompFields(t *testing.T) {
 	_, store, eng, _, tempDir := setupTestRouter(t)
 	defer os.RemoveAll(tempDir)
@@ -3570,24 +3569,24 @@ func TestCheckUniqueCompFields(t *testing.T) {
 	t.Run("empty prefix is always exempt", func(t *testing.T) {
 		seed("pfx-empty-1", "EmptyPfx1", "")
 		seed("pfx-empty-2", "EmptyPfx2", "")
-		err := checkUniqueCompFields(eng, "NewComp", "", "")
+		err := eng.CheckUniqueCompFields("NewComp", "", "")
 		require.NoError(t, err)
 	})
 
 	t.Run("whitespace-only prefix is exempt", func(t *testing.T) {
-		err := checkUniqueCompFields(eng, "AnotherNewComp", "  ", "")
+		err := eng.CheckUniqueCompFields("AnotherNewComp", "  ", "")
 		require.NoError(t, err)
 	})
 
 	t.Run("no collision for distinct prefixes", func(t *testing.T) {
 		seed("pfx-k", "KendoComp", "K")
-		err := checkUniqueCompFields(eng, "DistinctName", "M", "")
+		err := eng.CheckUniqueCompFields("DistinctName", "M", "")
 		require.NoError(t, err)
 	})
 
 	t.Run("collision detected (exact prefix match)", func(t *testing.T) {
 		seed("pfx-collision", "CollisionComp", "X")
-		err := checkUniqueCompFields(eng, "UniqueName", "X", "")
+		err := eng.CheckUniqueCompFields("UniqueName", "X", "")
 		assert.Error(t, err)
 		assert.Contains(t, err.Error(), "number prefix")
 		assert.Contains(t, err.Error(), "CollisionComp")
@@ -3595,7 +3594,7 @@ func TestCheckUniqueCompFields(t *testing.T) {
 
 	t.Run("collision detected (case-insensitive prefix)", func(t *testing.T) {
 		seed("pfx-case", "CaseComp", "Y")
-		err := checkUniqueCompFields(eng, "AnotherUnique", "y", "")
+		err := eng.CheckUniqueCompFields("AnotherUnique", "y", "")
 		assert.Error(t, err)
 	})
 
@@ -3606,7 +3605,7 @@ func TestCheckUniqueCompFields(t *testing.T) {
 	// competition.
 	t.Run("collision detected (ambiguous prefix, K vs K2)", func(t *testing.T) {
 		seed("pfx-ambiguous-k", "KendoAmbiguous", "K")
-		err := checkUniqueCompFields(eng, "KendoAmbiguousChallenger", "K2", "")
+		err := eng.CheckUniqueCompFields("KendoAmbiguousChallenger", "K2", "")
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "number prefix")
 		assert.Contains(t, err.Error(), "KendoAmbiguous")
@@ -3614,13 +3613,13 @@ func TestCheckUniqueCompFields(t *testing.T) {
 
 	t.Run("excludeID skips own record (PUT update)", func(t *testing.T) {
 		seed("pfx-self", "SelfComp", "Z")
-		err := checkUniqueCompFields(eng, "SelfComp", "Z", "pfx-self")
+		err := eng.CheckUniqueCompFields("SelfComp", "Z", "pfx-self")
 		require.NoError(t, err)
 	})
 
 	t.Run("collision detected (duplicate name)", func(t *testing.T) {
 		seed("name-col", "DuplicateName", "Q")
-		err := checkUniqueCompFields(eng, "DuplicateName", "W", "")
+		err := eng.CheckUniqueCompFields("DuplicateName", "W", "")
 		assert.Error(t, err)
 		assert.Contains(t, err.Error(), "competition name")
 	})
@@ -3633,37 +3632,8 @@ func TestCheckUniqueCompFields(t *testing.T) {
 	// empty-name caller's OWN competition on a field it never touched.
 	t.Run("empty name is always exempt, even against a stored blank-named competition", func(t *testing.T) {
 		seed("blank-named", "", "BLK")
-		err := checkUniqueCompFields(eng, "", "SomethingElse", "")
+		err := eng.CheckUniqueCompFields("", "SomethingElse", "")
 		require.NoError(t, err, "an empty name must never collide, even against a stored blank name")
-	})
-}
-
-// TestCheckUniqueCompFieldsTolerant pins bc-pnum A5(d): the pre-flight's own
-// variant logs and SKIPS an unreadable sibling rather than turning it into an
-// error, but still refuses a REAL collision it can actually see (D4(b)).
-func TestCheckUniqueCompFieldsTolerant(t *testing.T) {
-	_, store, eng, _, tempDir := setupTestRouter(t)
-	defer os.RemoveAll(tempDir)
-
-	require.NoError(t, store.SaveCompetition(&state.Competition{ID: "broken", Name: "Broken", NumberPrefix: "B"}))
-	require.NoError(t, os.WriteFile(filepath.Join(tempDir, "competitions", "broken", "config.md"), []byte("not front matter at all"), 0o600))
-	require.NoError(t, store.SaveCompetition(&state.Competition{ID: "fine", Name: "Fine Comp", NumberPrefix: "F"}))
-
-	t.Run("an unreadable sibling is logged and skipped, not surfaced as an error", func(t *testing.T) {
-		skipped, err := checkUniqueCompFieldsTolerant(eng, "NewComp", "K", "")
-		assert.NoError(t, err, "the pre-flight variant must never fail over a sibling it cannot even read")
-		assert.Equal(t, []string{"broken"}, skipped, "the skipped sibling id must be surfaced so a caller can correlate it with what it assigned")
-	})
-
-	// D4(b): a REAL collision the tolerant variant CAN see is still refused,
-	// as an *engine.ValidationError so the pre-flight's caller maps it to 400
-	// exactly like the engine's own refusals.
-	t.Run("a real collision is still refused as a ValidationError", func(t *testing.T) {
-		_, err := checkUniqueCompFieldsTolerant(eng, "NewComp2", "F", "")
-		require.Error(t, err)
-		var validation *engine.ValidationError
-		assert.ErrorAs(t, err, &validation, "must be an *engine.ValidationError so the caller's switch maps it to 400")
-		assert.Contains(t, err.Error(), "Fine Comp")
 	})
 }
 
@@ -4084,7 +4054,6 @@ func TestPUTCompetition_DrawReadyOutputAffectingGate(t *testing.T) {
 			"poolSize":    5, // changed from stored 4, output-affecting
 			"poolWinners": 2,
 			"roundRobin":  false,
-			"mirror":      false,
 		})
 		w := httptest.NewRecorder()
 		req, _ := http.NewRequest("PUT", "/api/competitions/"+cid, bytes.NewBuffer(body))
@@ -4116,7 +4085,6 @@ func TestPUTCompetition_DrawReadyOutputAffectingGate(t *testing.T) {
 			"poolSize":    4,
 			"poolWinners": 2,
 			"roundRobin":  false,
-			"mirror":      false,
 		})
 		w := httptest.NewRecorder()
 		req, _ := http.NewRequest("PUT", "/api/competitions/"+cid, bytes.NewBuffer(body))
@@ -4153,7 +4121,6 @@ func TestPUTCompetition_DrawReadyOutputAffectingGate(t *testing.T) {
 				"poolSize":    4,
 				"poolWinners": 2,
 				"roundRobin":  false,
-				"mirror":      false,
 				tc.field:      tc.value, // the only output-affecting change
 			})
 			w := httptest.NewRecorder()
@@ -4191,7 +4158,6 @@ func TestPUTCompetition_DrawReadyOutputAffectingGate(t *testing.T) {
 			"poolSize":     4,
 			"poolWinners":  2,
 			"roundRobin":   false,
-			"mirror":       false,
 			"numberPrefix": "X", // the only output-affecting-looking change
 		})
 		w := httptest.NewRecorder()
@@ -4233,7 +4199,6 @@ func TestPUTCompetition_DrawReadyOutputAffectingGate(t *testing.T) {
 			"poolSize":    4,     // same as stored
 			"poolWinners": 2,     // same as stored
 			"roundRobin":  false, // same as stored
-			"mirror":      false, // same as stored
 		})
 		w := httptest.NewRecorder()
 		req, _ := http.NewRequest("PUT", "/api/competitions/"+cid, bytes.NewBuffer(body))
@@ -4288,7 +4253,6 @@ func TestPUTCompetition_OmittedNumberPrefixInheritsStored(t *testing.T) {
 		"poolSize":    4,
 		"poolWinners": 2,
 		"roundRobin":  false,
-		"mirror":      false,
 		// numberPrefix deliberately OMITTED: the exact shape a client that
 		// has never heard of the field, or simply doesn't echo it back, sends.
 	})
@@ -4342,7 +4306,7 @@ func TestPUTCompetition_RenumberFailurePolicy(t *testing.T) {
 		body, _ := json.Marshal(map[string]any{
 			"id": cid, "name": "Renumber Fail Rename Renamed", "format": state.CompFormatMixed,
 			"kind": "individual", "courts": []string{"A"}, "poolSize": 4, "poolWinners": 2,
-			"roundRobin": false, "mirror": false, "numberPrefix": "K", // unchanged
+			"roundRobin": false, "numberPrefix": "K", // unchanged
 		})
 		w := httptest.NewRecorder()
 		req, _ := http.NewRequest("PUT", "/api/competitions/"+cid, bytes.NewBuffer(body))
@@ -4373,7 +4337,7 @@ func TestPUTCompetition_RenumberFailurePolicy(t *testing.T) {
 		body, _ := json.Marshal(map[string]any{
 			"id": cid, "name": "Renumber Fail Prefix", "format": state.CompFormatMixed,
 			"kind": "individual", "courts": []string{"A"}, "poolSize": 4, "poolWinners": 2,
-			"roundRobin": false, "mirror": false, "numberPrefix": "X", // moved
+			"roundRobin": false, "numberPrefix": "X", // moved
 		})
 		w := httptest.NewRecorder()
 		req, _ := http.NewRequest("PUT", "/api/competitions/"+cid, bytes.NewBuffer(body))
@@ -4420,7 +4384,7 @@ func TestPUTCompetition_RenumberFailurePolicy(t *testing.T) {
 		body, _ := json.Marshal(map[string]any{
 			"id": cid, "name": "Renumber Fail Omitted Renamed", "format": state.CompFormatMixed,
 			"kind": "individual", "courts": []string{"A"}, "poolSize": 4, "poolWinners": 2,
-			"roundRobin": false, "mirror": false,
+			"roundRobin": false,
 			// numberPrefix deliberately omitted: inherited as "K".
 		})
 		w := httptest.NewRecorder()
@@ -4564,7 +4528,6 @@ func TestUpdateCompetition_TeamMatchTypeLockedDrawReady(t *testing.T) {
 			"poolSize":      4,
 			"poolWinners":   2,
 			"roundRobin":    false,
-			"mirror":        false,
 		})
 		w := httptest.NewRecorder()
 		req, _ := http.NewRequest("PUT", "/api/competitions/"+cid, bytes.NewBuffer(body))
@@ -4595,7 +4558,6 @@ func TestUpdateCompetition_TeamMatchTypeLockedDrawReady(t *testing.T) {
 			"poolSize":      4,
 			"poolWinners":   2,
 			"roundRobin":    false,
-			"mirror":        false,
 		})
 		w := httptest.NewRecorder()
 		req, _ := http.NewRequest("PUT", "/api/competitions/"+cid, bytes.NewBuffer(body))
@@ -4655,7 +4617,6 @@ func TestUpdateCompetition_TeamMatchTypeDrawReadyOmittedAndLegacy(t *testing.T) 
 			"poolSize":    4,
 			"poolWinners": 2,
 			"roundRobin":  false,
-			"mirror":      false,
 		})
 		w := httptest.NewRecorder()
 		req, _ := http.NewRequest("PUT", "/api/competitions/"+cid, bytes.NewBuffer(body))
@@ -4700,7 +4661,6 @@ func TestUpdateCompetition_TeamMatchTypeDrawReadyOmittedAndLegacy(t *testing.T) 
 			"poolSize":      4,
 			"poolWinners":   2,
 			"roundRobin":    false,
-			"mirror":        false,
 		})
 		w := httptest.NewRecorder()
 		req, _ := http.NewRequest("PUT", "/api/competitions/"+cid, bytes.NewBuffer(body))
@@ -4930,7 +4890,6 @@ func TestUpdateCompetition_TeamMatchTypeLockedWhenStarted(t *testing.T) {
 			"poolSize":      4,
 			"poolWinners":   2,
 			"roundRobin":    false,
-			"mirror":        false,
 		}
 	}
 	put := func(payload map[string]any) *httptest.ResponseRecorder {

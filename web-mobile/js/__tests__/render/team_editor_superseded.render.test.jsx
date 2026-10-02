@@ -162,6 +162,48 @@ describe('team score editor: a superseded explicit tap reaches the screen (bc-lw
     }
   });
 
+  // A queued finish refused on replay in the server's own words (here the
+  // representative bout removed on another device) carries `sentence`: the
+  // banner shows that sentence as it is, once, with no second full stop and
+  // no default advice to re-enter, which would contradict its own.
+  it('shows a refusal the server worded itself as it is', async () => {
+    const sentence = "This match's representative bout was removed on another device. Check the scores and finish again.";
+    const subscribers = [];
+    window.subscribeTerminalWriteFailed = (fn) => { subscribers.push(fn); return () => {}; };
+    try {
+      await renderEditor(vi.fn().mockResolvedValue(undefined));
+      await act(async () => {
+        for (const fn of subscribers) {
+          fn({ compID: 'comp1', matchID: 'm1', kind: 'score', status: 409, reason: sentence, sentence: true });
+        }
+      });
+
+      const text = screen.getByRole('alert').textContent;
+      expect(text).toBe(`Not saved: ${sentence}`);
+      expect(text).not.toContain('..');
+      expect(text).not.toContain('Re-enter the result and submit again');
+    } finally {
+      delete window.subscribeTerminalWriteFailed;
+    }
+  });
+
+  it('keeps its own words around a refusal that is only a code', async () => {
+    const subscribers = [];
+    window.subscribeTerminalWriteFailed = (fn) => { subscribers.push(fn); return () => {}; };
+    try {
+      await renderEditor(vi.fn().mockResolvedValue(undefined));
+      await act(async () => {
+        for (const fn of subscribers) {
+          fn({ compID: 'comp1', matchID: 'm1', kind: 'score', status: 409, reason: 'conflict' });
+        }
+      });
+
+      expect(screen.getByRole('alert').textContent).toBe('Not saved: conflict. Re-enter the result and submit again.');
+    } finally {
+      delete window.subscribeTerminalWriteFailed;
+    }
+  });
+
   it('ignores a failure reported for a DIFFERENT match', async () => {
     const subscribers = [];
     window.subscribeTerminalWriteFailed = (fn) => { subscribers.push(fn); return () => {}; };

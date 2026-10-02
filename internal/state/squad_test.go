@@ -4,6 +4,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"sync"
 	"testing"
 
 	"github.com/gitrgoliveira/bracket-creator/internal/domain"
@@ -146,6 +147,27 @@ func TestSquad_RenameUnknownMemberOrTeam(t *testing.T) {
 	})
 }
 
+// NameUnnamedTeamMember names a member who has no name yet and refuses one who
+// has, writing nothing; an unknown member is still ErrTeamMemberNotFound.
+func TestSquad_NameUnnamedTeamMember(t *testing.T) {
+	s, id, teamA, _ := newSquadTestStore(t)
+	squads, err := s.LoadSquads(id)
+	require.NoError(t, err)
+	blank := squads[teamA][0]
+	require.Empty(t, blank.Name, "teamA is seeded with blank members")
+
+	require.NoError(t, s.NameUnnamedTeamMember(id, teamA, blank.ID, " Mei Ito "))
+	err = s.NameUnnamedTeamMember(id, teamA, blank.ID, "Ren Abe")
+	assert.ErrorIs(t, err, ErrTeamMemberNamed, "a member who has a name is not renamed")
+
+	squads, err = s.LoadSquads(id)
+	require.NoError(t, err)
+	assert.Equal(t, "Mei Ito", squads[teamA][0].Name, "the first name stands, trimmed")
+
+	assert.ErrorIs(t, s.NameUnnamedTeamMember(id, teamA, "no-such-member", "X"), ErrTeamMemberNotFound)
+	require.NoError(t, s.RenameTeamMember(id, teamA, blank.ID, "Ren Abe"), "the organiser's rename is unrestricted")
+}
+
 // A squad may exceed the competition's TeamSize: reserves and replacements
 // are unconstrained (operator ruling 2026-09-09).
 func TestSquad_SizeMayExceedCompetitionTeamSize(t *testing.T) {
@@ -160,6 +182,45 @@ func TestSquad_SizeMayExceedCompetitionTeamSize(t *testing.T) {
 	squads, err := s.LoadSquads(id)
 	require.NoError(t, err)
 	assert.Len(t, squads[teamA], 10, "the 5 seeded slots plus all 5 added reserves must be persisted despite a TeamSize of 3")
+}
+
+// AddTeamMemberUpTo reads the cap under the write's own lock, so requests
+// racing for the last slots cannot all pass it: exactly the room left is
+// added and every other caller is refused.
+func TestSquad_AddTeamMemberUpToHoldsTheCapUnderRacingAdds(t *testing.T) {
+	s, id, teamA, _ := newSquadTestStore(t) // teamA already carries 5 seeded slots
+
+	const limit, callers = 8, 20
+	var wg sync.WaitGroup
+	results := make(chan error, callers)
+	for i := 0; i < callers; i++ {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			_, err := s.AddTeamMemberUpTo(id, teamA, string(rune('A'+i))+"-racer", limit)
+			results <- err
+		}(i)
+	}
+	wg.Wait()
+	close(results)
+
+	added, refused := 0, 0
+	for err := range results {
+		switch {
+		case err == nil:
+			added++
+		case errors.Is(err, ErrTeamMemberLimit):
+			refused++
+		default:
+			require.NoError(t, err)
+		}
+	}
+	assert.Equal(t, limit-5, added)
+	assert.Equal(t, callers-(limit-5), refused)
+
+	squads, err := s.LoadSquads(id)
+	require.NoError(t, err)
+	assert.Len(t, squads[teamA], limit)
 }
 
 // --- saveSquadsLocked / directory creation ----------------------------------

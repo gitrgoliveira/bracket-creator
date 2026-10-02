@@ -18,7 +18,7 @@ import (
 // TestBuildResultsWorkbook_LargerPools_CrossedQualifierHasLiveFormula mirrors
 // internal/engine's TestExportCompetitionXlsx_LargerPools_CrossedQualifierHasLiveFormula
 // for the SECOND Excel export path (the results workbook this package
-// builds, as opposed to Engine.ExportCompetitionXlsx's blank-template one).
+// builds, as opposed to Engine.ExportCompetitionXlsx's stored-draw one).
 //
 // bc-qual LP-3c review finding: helper.PrintPoolMatches only registers a
 // matchWinners["<pool>-<ordinal>"] Excel cell-reference entry for ranks

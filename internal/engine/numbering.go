@@ -75,7 +75,7 @@ func drawPositions(drawOrder []string) map[string]int {
 // competition has no prefix, so a caller does not have to special-case that
 // itself. mobileapp.numbersFromDrawWithBracket / applyDrawNumbers and
 // NumberedParticipantsFor below are this function's two callers, so the
-// viewer/display merge and the blank-template export cannot silently drift
+// viewer/display merge and the stored-draw export cannot silently drift
 // apart on how a knockout-only competitor's number is composed.
 func NumberKnockoutParticipants(comp *state.Competition, drawOrder []string, players []domain.Player) {
 	prefix := comp.EffectiveNumberPrefix()
@@ -127,7 +127,7 @@ func orderPlayersByDraw(players []domain.Player, pos map[string]int) []domain.Pl
 // NumberedParticipantsFor returns comp's roster, loaded fresh, numbered from
 // the bracket's DrawOrder and returned in DRAW order (orderPlayersByDraw):
 // numbered players first, top to bottom of the bracket, unnumbered players
-// (never drawn) after, in roster order. Used by the blank-template export,
+// (never drawn) after, in roster order. Used by the stored-draw export,
 // which (unlike the viewer/display merge) has no already-loaded roster to
 // mutate in place.
 //
@@ -165,14 +165,14 @@ func (e *Engine) NumberedParticipantsFor(comp *state.Competition, bracket *state
 // the pipeline there is a numbered roster worth printing at all.
 //
 // RenderCompetitionWorkbook calls this directly now, so both of its callers
-// -- Engine.ExportCompetitionXlsx (blank-template) and
+// -- Engine.ExportCompetitionXlsx (stored draw) and
 // export.BuildResultsWorkbook (results archive) -- get it without deriving
 // it themselves; ExportCompetitionXlsx also calls it a second time, on its
 // own, for its Tags-sheet extra, which needs the identical numbered roster
 // after the shared pipeline has already returned. Before this was
-// extracted, only the blank-template export derived it and the results
+// extracted, only the stored-draw export derived it and the results
 // export always passed nil, so a knockout-only competition's results
-// workbook was silently missing the sheet the blank-template export had --
+// workbook was silently missing the sheet the stored-draw export had --
 // every such competition carries a prefix (comp.NumberPrefix is never left
 // blank once a competition is created), so the gap was not a rare edge case
 // but the ordinary shape.
@@ -190,7 +190,7 @@ func (e *Engine) NumberedParticipantsFor(comp *state.Competition, bracket *state
 //
 // Deliberately checks EffectiveFormat directly rather than
 // DrawSourceFor(comp) == DrawInBracket: ExportCompetitionXlsx (the
-// blank-template export) is reachable BEFORE a draw exists, precisely so an
+// stored-draw export) is reachable BEFORE a draw exists, precisely so an
 // operator can print name tags and blank score sheets ahead of the
 // tournament, and DrawSourceFor returns DrawNone for a not-yet-drawn
 // knockout competition exactly as it does for one with no draw at all --
@@ -432,35 +432,34 @@ func checkPrefixAgainstSiblings(siblings []*state.Competition, name, prefix stri
 
 // CheckUniqueCompFields verifies that name and prefix are both unique across
 // every OTHER competition (excludeID excluded). Moved from mobileapp's
-// checkUniqueCompFieldsSiblingPolicy (PR #416 finding 1); mobileapp's
-// checkUniqueCompFields / checkUniqueCompFieldsTolerant are now thin wrappers
-// over this.
+// checkUniqueCompFieldsSiblingPolicy (PR #416 finding 1); create, import and
+// the competition PUT call it directly. Its result is nil, a *ValidationError
+// on a collision (the caller answers 400), or any other error when the
+// store could not be read (500).
 //
 // Both fields may be empty to exempt them from the check; when BOTH are
 // empty nothing is validated and the sibling set is never even loaded, so a
 // caller that validates only what it moved and moved neither field pays no
 // sibling-load cost.
 //
-// tolerateUnreadableSibling selects siblingCompetitions' policy: STRICT
-// (false) is for create/import, which can be retried by the operator, so
-// silently skipping a sibling and letting a genuine collision through would
-// be the wrong trade; TOLERANT (true) is for a caller that cannot defer the
-// way create/import can (the start/generate-draw pre-flight).
+// The sibling walk is STRICT: its callers (create/import) can be retried by
+// the operator, so silently skipping an unreadable sibling and letting a
+// genuine collision through would be the wrong trade. The start/generate-
+// draw pre-flight, which cannot defer that way, applies the tolerant policy
+// through EnsureNumberPrefix instead.
 //
-// Returns the ids of any sibling this call could not read (only possible
-// under the tolerant policy) and a single error: a collision is a
-// *ValidationError, an infrastructure fault (the list/load itself failing
-// under the strict policy) is a plain error.
-func (e *Engine) CheckUniqueCompFields(name, prefix, excludeID string, tolerateUnreadableSibling bool) (skipped []string, err error) {
+// Returns a single error: a collision is a *ValidationError, an
+// infrastructure fault (the list/load itself failing) is a plain error.
+func (e *Engine) CheckUniqueCompFields(name, prefix, excludeID string) error {
 	prefix = strings.TrimSpace(prefix)
 	if name == "" && prefix == "" {
-		return nil, nil
+		return nil
 	}
-	siblings, skipped, err := e.siblingCompetitions(excludeID, tolerateUnreadableSibling)
+	siblings, _, err := e.siblingCompetitions(excludeID, false)
 	if err != nil {
-		return skipped, err
+		return err
 	}
-	return skipped, checkPrefixAgainstSiblings(siblings, name, prefix)
+	return checkPrefixAgainstSiblings(siblings, name, prefix)
 }
 
 // EnsureNumberPrefix is the ONE engine-level implementation of the derive ->

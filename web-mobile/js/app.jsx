@@ -1,7 +1,7 @@
 // Main App: single tournament per app/url. Tournament has multiple Competitions
 // (Men's Individual, Women's Individual, Teams, etc.). Auth gates admin mode.
 
-import { applyPatch as patchCompetitionData, checkSeqGap, keepNewerTournament } from './patch.jsx';
+import { applyPatch as patchCompetitionData, checkSeqGap, keepNewerDetail, keepNewerTournament } from './patch.jsx';
 import { createTimerPool } from './timer_pool.jsx';
 import { setCachedAuthConfig } from './admin_helpers.jsx';
 import { LS_NOTIFICATIONS_ENABLED } from './notification_keys.jsx';
@@ -371,6 +371,10 @@ export function queueAlertMessage(alert) {
     case "unreadable":
       return `${n} queued ${one ? "write" : "writes"} could not be read and ${one ? "was" : "were"} discarded. Check the affected ${one ? "match" : "matches"}.`;
     case "rejected":
+      // A refusal that is a whole sentence (`sentence`, api_client.jsx
+      // _replayRefusal) says what to do, so it closes the alert as it is:
+      // "Re-enter it." after it could contradict it ("Check the scores and finish again").
+      if (alert.sentence && alert.detail) return `A result was refused by the server and cannot be saved. ${alert.detail}`;
       return `A result was refused by the server${detail} and cannot be saved. Re-enter it.`;
     // bc-lww1. Deliberately NOT folded into "rejected": that message ends in
     // "Re-enter it", which here would tell the operator to overwrite the newer
@@ -723,8 +727,15 @@ function App() {
         applyTheme(t.theme); // mp-scf: apply custom colors
       }
     } catch (e) {
+      // A failed fetch (network, 5xx) says nothing about whether a tournament
+      // exists, so it never opens the create-tournament gate over one already
+      // shown: a failed RELOAD (every SSE event runs one) keeps the last good
+      // data, logged like the page's other background refetches, and the
+      // connection indicator reports the outage. Only the FIRST load moves
+      // undefined to null here, so the gate opens instead of spinning; only
+      // the server's own "no tournament" answer (above) replaces a loaded one.
       console.error("Failed to load tournament", e);
-      setTournament(null); // Explicitly transition from undefined to null so the gate opens
+      setTournament((prev) => (prev === undefined ? null : prev));
     } finally {
       setLoading(false);
     }
@@ -745,13 +756,14 @@ function App() {
   //   3. Runs a 5 s interval tick that re-derives linkState from sseConnected
   //      + the bridge's last-broadcast recency.
   //
-  // On reconnect the existing SSE match_updated handler fires maybeLoad()
-  // which wholesale replaces the in-memory tree with server truth: the
-  // optimistic broadcast overlay is discarded by construction.
+  // On reconnect the SSE event effect fires maybeLoad() (a stream reopened
+  // after a loss), which wholesale replaces the in-memory tree with server
+  // truth: the optimistic broadcast overlay is discarded by construction.
   //
   // Snapshot fallback: the standard load() above already runs on mount
   // and populates tournament. If the server is unreachable on first load,
-  // load() catches and sets tournament=null. The snapshot handler below
+  // load() catches and sets tournament=null (a failed reload keeps the
+  // last good data instead). The snapshot handler below
   // bootstraps from the operator tab's reply instead, using the court
   // slice of competitions. We set a synthetic tournament so the display
   // can render.
@@ -998,6 +1010,10 @@ function App() {
     // entries per SSE event for the tab's lifetime.
     const timerPool = createTimerPool();
     const jitteredTimeout = timerPool.schedule;
+    // The competition page's refetches never put a live score back to an
+    // older state (keepNewerDetail, patch.jsx): a self-run score editor reads
+    // this data. The display reads `tournament`, never this.
+    const takeCompDetail = (data) => setSelectedCompData((prev) => keepNewerDetail(prev, data));
 
     // maybeLoad gates the full-aggregate refetch. While the shiaijo operator
     // console is the active admin view, skip it: the console sources its
@@ -1016,26 +1032,50 @@ function App() {
     // it resets on viewerCompId/mode changes alongside the SSE reconnect.
     const sseSeq = { lastSeq: 0 };
 
-    // F8: resync on tab resume. When the tab becomes visible again after
-    // being backgrounded, reconnect SSE (clears any stale connection) and
-    // refresh data so the UI is current. Defined inside the effect so the
-    // closure captures jitteredTimeout, maybeLoad and viewerCompId; removed
-    // in the effect cleanup alongside unsub() to avoid duplicate handlers
-    // across re-renders.
-    const onVisibilityChange = () => {
-        if (document.hidden) return;
-        window.API.reconnectEvents();
-        maybeLoad();
+    // Refresh data so the UI is current: the tournament (now, or after
+    // loadDelay) and the competition page's detail. Defined inside the effect
+    // so the closure captures jitteredTimeout, maybeLoad and viewerCompId.
+    const resync = (loadDelay, label) => {
+        if (loadDelay) jitteredTimeout(maybeLoad, loadDelay);
+        else maybeLoad();
         if (viewerCompId) {
             jitteredTimeout(
                 () => window.API.fetchCompetitionDetails(viewerCompId)
-                    .then(setSelectedCompData)
-                    .catch(err => console.error('tab-resume refresh failed:', err)),
+                    .then(takeCompDetail)
+                    .catch(err => console.error(`${label} refresh failed:`, err)),
                 Math.random() * 500
             );
         }
     };
+
+    // F8: resync on tab resume. When the tab becomes visible again after
+    // being backgrounded, reconnect SSE (clears any stale connection) and
+    // refresh at once. A resume after the stream was lost refreshes once
+    // instead, when the stream reopens (below), which is also when the device
+    // is known to fetch again. Removed in the effect cleanup alongside unsub()
+    // to avoid duplicate handlers across re-renders.
+    const onVisibilityChange = () => {
+        if (document.hidden) return;
+        window.API.reconnectEvents();
+        if (!streamLost) resync(0, 'tab-resume');
+    };
     document.addEventListener('visibilitychange', onVisibilityChange);
+
+    // A stream that reopens after it was lost reloads. The hub replays the
+    // events this page missed (api_client sends the last id it saw), but not
+    // one it received whose load then failed because the device could not
+    // fetch: nothing retried that load, so the page stayed behind until the
+    // next event, and a score sheet still showed a representative bout
+    // another device had removed. Coming back online counts as lost: the
+    // stream can outlive the outage, so it is reopened, and its reopen does
+    // the one load. The load is jittered: the wifi returning reconnects every
+    // device in the venue at once.
+    let streamLost = false;
+    const onOnline = () => {
+        streamLost = true;
+        window.API.reconnectEvents();
+    };
+    window.addEventListener('online', onOnline);
 
     const unsub = window.API.subscribeToEvents((event) => {
         // F6b: heartbeat: liveness only, do not patch or advance seq.
@@ -1049,7 +1089,7 @@ function App() {
             if (viewerCompId) {
                 jitteredTimeout(
                     () => window.API.fetchCompetitionDetails(viewerCompId)
-                        .then(setSelectedCompData)
+                        .then(takeCompDetail)
                         .catch(err => console.error('resync refresh failed:', err)),
                     Math.random() * 500
                 );
@@ -1066,7 +1106,7 @@ function App() {
             if (viewerCompId) {
                 jitteredTimeout(
                     () => window.API.fetchCompetitionDetails(viewerCompId)
-                        .then(setSelectedCompData)
+                        .then(takeCompDetail)
                         .catch(err => console.error('gap refetch failed:', err)),
                     Math.random() * 500
                 );
@@ -1143,7 +1183,7 @@ function App() {
             // for any view that caches its own derived state.
             if (viewerCompId === event.data?.competitionId) {
                 setSelectedCompData(prev => patchCompetitionData(prev, event));
-                jitteredTimeout(() => window.API.fetchCompetitionDetails(viewerCompId).then(setSelectedCompData).catch(err => console.error('SSE refresh failed:', err)), detailJitter);
+                jitteredTimeout(() => window.API.fetchCompetitionDetails(viewerCompId).then(takeCompDetail).catch(err => console.error('SSE refresh failed:', err)), detailJitter);
             }
             // competitor_status_updated is a list-level event (eligibility
             // badges on the lobby): always refresh the full list.
@@ -1169,7 +1209,7 @@ function App() {
                 // Refresh current competition detail (jittered): the backend
                 // has already persisted the new status before broadcasting, so
                 // this fetch deterministically picks up the transition.
-                jitteredTimeout(() => window.API.fetchCompetitionDetails(viewerCompId).then(setSelectedCompData).catch(err => console.error('SSE refresh failed:', err)), detailJitter);
+                jitteredTimeout(() => window.API.fetchCompetitionDetails(viewerCompId).then(takeCompDetail).catch(err => console.error('SSE refresh failed:', err)), detailJitter);
             }
             // P1 (mp-9afd): fire a full-list refetch for list-level
             // transitions (competition_started / competition_completed change
@@ -1191,7 +1231,7 @@ function App() {
             // Court/time move: no competitionId in payload, so refresh the
             // currently selected competition (if any) and the tournament list.
             if (viewerCompId) {
-                jitteredTimeout(() => window.API.fetchCompetitionDetails(viewerCompId).then(setSelectedCompData).catch(err => console.error('SSE refresh failed:', err)), detailJitter);
+                jitteredTimeout(() => window.API.fetchCompetitionDetails(viewerCompId).then(takeCompDetail).catch(err => console.error('SSE refresh failed:', err)), detailJitter);
             }
             jitteredTimeout(maybeLoad, listJitter);
         } else if (event.type === "draw_generated" || event.type === "draw_discarded") {
@@ -1199,7 +1239,7 @@ function App() {
             // details (new pools/bracket data or cleared state) and the
             // tournament list so status badges update.
             if (viewerCompId === event.data?.competitionId) {
-                jitteredTimeout(() => window.API.fetchCompetitionDetails(viewerCompId).then(setSelectedCompData).catch(err => console.error('SSE refresh failed:', err)), detailJitter);
+                jitteredTimeout(() => window.API.fetchCompetitionDetails(viewerCompId).then(takeCompDetail).catch(err => console.error('SSE refresh failed:', err)), detailJitter);
             }
             jitteredTimeout(maybeLoad, listJitter);
         } else if (event.type === "swiss_round_generated") {
@@ -1211,7 +1251,7 @@ function App() {
             // / participants_updated pattern: no separate display-mode branch
             // needed because the unconditional load() at the end covers it.
             if (viewerCompId === event.data?.competitionId) {
-                jitteredTimeout(() => window.API.fetchCompetitionDetails(viewerCompId).then(setSelectedCompData).catch(err => console.error('SSE refresh failed:', err)), detailJitter);
+                jitteredTimeout(() => window.API.fetchCompetitionDetails(viewerCompId).then(takeCompDetail).catch(err => console.error('SSE refresh failed:', err)), detailJitter);
             }
             // swiss_round_generated updates the tournament list (swissCurrentRound
             // counter): always do one list refresh: covers display mode, home-
@@ -1223,7 +1263,7 @@ function App() {
             // event targets it; also refresh the tournament list so participant
             // counts stay accurate.
             if (viewerCompId === event.data?.competitionId) {
-                jitteredTimeout(() => window.API.fetchCompetitionDetails(viewerCompId).then(setSelectedCompData).catch(err => console.error('SSE refresh failed:', err)), detailJitter);
+                jitteredTimeout(() => window.API.fetchCompetitionDetails(viewerCompId).then(takeCompDetail).catch(err => console.error('SSE refresh failed:', err)), detailJitter);
             }
             jitteredTimeout(maybeLoad, listJitter);
         } else if (event.type === "lineup_updated") {
@@ -1246,11 +1286,14 @@ function App() {
             // names come from the lineup the CustomEvent already refreshes, which
             // is exactly what makes this line look redundant -- it is not.
             //
-            // NOT PINNED BY ANY TEST, deliberately recorded: nothing mounts App,
-            // so deleting this line reddens nothing. Extracting it into a helper
-            // was tried (f901b891 + 0ae7ed25) and reverted -- the helper's own
-            // test passed while the CALL SITE stayed mutable to a no-op, so it
-            // bought indirection and a swallowed-TypeError path, not coverage.
+            // NOT PINNED BY ANY TEST, deliberately recorded: deleting this line
+            // reddens nothing. A test that pins it would mount App the way
+            // app_competition_refetch_keeps_newer.render.test.jsx does, with a
+            // stub API and a probe in place of the page. Extracting it into a
+            // helper was tried (f901b891 + 0ae7ed25) and reverted -- the
+            // helper's own test passed while the CALL SITE stayed mutable to a
+            // no-op, so it bought indirection and a swallowed-TypeError path,
+            // not coverage.
             jitteredTimeout(maybeLoad, listJitter);
         } else if (event.type === "announcement") {
             // Payload is now the full list snapshot.
@@ -1276,8 +1319,19 @@ function App() {
         // T063: track SSE connection status so /display surfaces can
         // render a reconnect indicator during disconnects.
         setSseConnected(status === 'open');
+        if (status !== 'open') {
+            streamLost = true;
+        } else if (streamLost) {
+            streamLost = false;
+            resync(Math.random() * 2000, 'reconnect');
+        }
     });
-    return () => { unsub(); timerPool.clearAll(); document.removeEventListener('visibilitychange', onVisibilityChange); };
+    return () => {
+        unsub();
+        timerPool.clearAll();
+        document.removeEventListener('visibilitychange', onVisibilityChange);
+        window.removeEventListener('online', onOnline);
+    };
   }, [viewerCompId, mode]);
 
   const [selectedCompData, setSelectedCompData] = useS(null);
@@ -1289,7 +1343,7 @@ function App() {
       window.API.fetchCompetitionDetails(viewerCompId)
         .then(data => {
           if (cancelled) return;
-          setSelectedCompData(data);
+          setSelectedCompData((prev) => keepNewerDetail(prev, data));
           setLoading(false);
         })
         .catch(err => {

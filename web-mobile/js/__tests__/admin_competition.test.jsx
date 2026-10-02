@@ -338,9 +338,7 @@ describe('AdminSettings useEffect deps completeness (H3 regression)', () => {
   //   (b) saveNow PUTs `next.<field>` (allowlist): without `c.<field>`
   //       in deps, a concurrent admin's PUT (broadcast via SSE) won't
   //       update local, and the next save of any other field would PUT
-  //       a stale value over the server's update. Example: `mirror` is
-  //       not in the JSX but IS in saveNow's allowlist, so it needs to
-  //       round-trip through local for the same defense.
+  //       a stale value over the server's update.
   //
   // If you add a `local.<field>` reference OR a `<field>: next.<field>`
   // entry in finalNext, add `<field>` here AND add `c.<field>` to the
@@ -353,8 +351,6 @@ describe('AdminSettings useEffect deps completeness (H3 regression)', () => {
     'format', 'kind',
     // status: JSX-read (delete-warning prompt)
     'status',
-    // mirror: saveNow-allowlist (defense against zero-value clobber)
-    'mirror',
     // FR-050 / T044: poolFormat round-trips through saveNow's PUT body,
     // so it needs a dep to absorb SSE-pushed concurrent admin changes.
     'poolFormat',
@@ -425,19 +421,12 @@ describe('AdminSettings.saveNow payload whitelist', () => {
   //     onto disk). Server-managed fields (status, players,
   //     hasParticipantIDs) and viewer-derived fields (poolMatches,
   //     pools, bracket, schedule) must NOT appear.
-  //
-  // `mirror` IS in this allowlist even though AdminSettings doesn't
-  // show a Mirror checkbox: data.jsx:200 defaults `mirror: true` for
-  // new competitions and the backend transform unconditionally writes
-  // `current.Mirror = comp.Mirror`. Omitting it would JSON-encode to
-  // false and clobber the disk value on every settings save.
   const ALLOWED = new Set([
     'id', 'name', 'date', 'startTime',
     'poolSize', 'poolWinners', 'poolSizeMode',
     'courts', 'roundRobin', 'withZekkenName',
     'teamSize', 'numberPrefix',
     'format', 'kind',
-    'mirror',
     // FR-050 / T044: round-robin shape selector.
     'poolFormat',
     // FR-052..FR-054 / T047: per-phase durations, in SECONDS. Zero means
@@ -456,7 +445,7 @@ describe('AdminSettings.saveNow payload whitelist', () => {
     // clobber a previously-set naginata: true with Go's zero-value false.
     'naginata',
     // mp-9k3v: engi (flag-scoring kata pairs). Same zero-value-clobber
-    // hazard as naginata/mirror, with a second failure mode: past setup the
+    // hazard as naginata, with a second failure mode: past setup the
     // backend REJECTS a mismatched engi ("engi can only be changed before the
     // competition starts"), so omitting it broke every settings save outright.
     'engi',
@@ -469,7 +458,7 @@ describe('AdminSettings.saveNow payload whitelist', () => {
     // bc-3rdp: joint-3rd-place rule, generalised from leagueTwoThirdPlaces
     // (now legacy read-only, see FORBIDDEN below) to every format that can
     // award a 3rd place. Round-tripped for the same zero-value-clobber
-    // reason as naginata/mirror above.
+    // reason as naginata above.
     'twoThirdPlaces',
     // Round-tripped (no UI control) to avoid clobbering a kachinuki
     // competition's value to "" on a settings save.
@@ -479,7 +468,7 @@ describe('AdminSettings.saveNow payload whitelist', () => {
     // competition CREATE form, admin_setup.jsx, exposes the radio); still
     // round-tripped here to avoid clobbering a previously-set non-standard
     // value to "" (Go's zero value) on every unrelated settings save, same
-    // hazard class as mirror/teamMatchType/naginata above.
+    // hazard class as teamMatchType/naginata above.
     'extraQualifiers',
   ]);
   // Fields that MUST NOT appear in the PUT body: pinning the
@@ -534,7 +523,7 @@ describe('AdminSettings.saveNow payload whitelist', () => {
   // The settings transform in handlers_competition.go merges the bound body
   // onto disk with unconditional `current.X = comp.X` assignments. A field
   // the PUT body omits therefore decodes to Go's ZERO VALUE and clobbers the
-  // stored value: that is one bug shape (mirror, teamMatchType, naginata all
+  // stored value: that is one bug shape (teamMatchType, naginata both
   // carry comments saying so). Engi added a second, worse shape: it is also
   // guarded by `if started && comp.Engi != current.Engi { reject }`, so an
   // omitted `engi` didn't merely clobber, it made EVERY settings save fail on

@@ -26,7 +26,7 @@ const { useState, useEffect, useRef } = React;
 import {
   barredNote, awaitedDefaultWin, defaultWinDecisionBody, defaultWinActionLabel, bothBarredDrawAction,
 } from './ineligible_match.jsx';
-import { notLandedBanner, writeDidNotLand } from './write_result.jsx';
+import { notLandedBanner, notSavedText, writeDidNotLand } from './write_result.jsx';
 
 // No onDone/refresh plumbing here on purpose: recording the default win, or
 // reinstating the competitor, is an ordinary /decision or /reinstate write,
@@ -72,7 +72,7 @@ export function BarredMatchNotice({ match, password, onDone }) {
       // never share a banner.
       const banner = notLandedBanner(res);
       if (banner) {
-        setErr(`Not saved: ${banner.reason}. ${banner.advice}`);
+        setErr(notSavedText(banner));
         return;
       }
       if (writeDidNotLand(res)) {

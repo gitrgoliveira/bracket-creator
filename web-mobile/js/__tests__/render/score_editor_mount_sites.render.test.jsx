@@ -54,6 +54,7 @@ function wiringOf(p) {
     variant: kind(p.variant),
     password: kind(p.password),
     selfReport: kind(p.selfReport),
+    teamMembers: kind(p.teamMembers),
   };
 }
 
@@ -94,7 +95,7 @@ const STUBBED_GLOBALS = {
 };
 
 let restoreGlobals;
-let AdminShiaijoPage, AdminPools, AdminBracket, AdminScoreEditor, MatchViewerModal;
+let AdminShiaijoPage, AdminPools, AdminBracket, AdminScoreEditor, MatchViewerModal, ViewerOverview;
 
 beforeAll(async () => {
   // jsdom doesn't implement scrollTo; the schedule surface calls it on open.
@@ -107,11 +108,14 @@ beforeAll(async () => {
   await import('../../admin_competition_bracket.jsx');
   const sched = await import('../../admin_schedule_score_editor.jsx');
   const viewer = await import('../../viewer_match.jsx');
+  // The Overview tab's cards open the same MatchViewerModal.
+  const viewerComp = await import('../../viewer_competition.jsx');
   AdminShiaijoPage = window.AdminShiaijoPage;
   AdminPools = window.AdminPools;
   AdminBracket = window.AdminBracket;
   AdminScoreEditor = sched.AdminScoreEditor;
   MatchViewerModal = viewer.MatchViewerModal;
+  ViewerOverview = viewerComp.ViewerOverview;
 });
 
 afterAll(() => restoreGlobals());
@@ -228,12 +232,12 @@ async function mountSchedule(onEditScore = vi.fn(), matches = [runningMatch(), r
   });
 }
 
-async function mountSelfRun() {
+async function mountSelfRun(onClose = vi.fn()) {
   await act(async () => {
     render(
       <MatchViewerModal
         match={runningMatch()}
-        onClose={vi.fn()}
+        onClose={onClose}
         tournament={{ mode: 'self-run' }}
         compId="c1"
       />
@@ -242,6 +246,7 @@ async function mountSelfRun() {
   await act(async () => {
     fireEvent.click(screen.getByRole('button', { name: 'Report result' }));
   });
+  return onClose;
 }
 
 // ── 1. admin_shiaijo.jsx: inline court console ───────────────────────────────
@@ -263,6 +268,7 @@ describe('mount site: admin_shiaijo.jsx (court console)', () => {
       variant: 'inline',
       password: 'pw',
       selfReport: 'absent',
+      teamMembers: 'absent',       // the editor loads them with the password
     });
   });
 });
@@ -286,6 +292,7 @@ describe('mount site: admin_pools.jsx (pools tab)', () => {
       variant: 'absent',           // default modal
       password: 'pw',
       selfReport: 'absent',
+      teamMembers: 'absent',       // the editor loads them with the password
     });
   });
 });
@@ -309,6 +316,7 @@ describe('mount site: admin_competition_bracket.jsx (bracket panel)', () => {
       variant: 'inline',
       password: 'pw',
       selfReport: 'absent',
+      teamMembers: 'absent',       // the editor loads them with the password
     });
     // The bracket panel stamps phase "bracket" on the editor's match so the
     // no-draw knockout rule holds (AdminBracket.scoringMatch enrichment).
@@ -339,6 +347,7 @@ describe('mount site: admin_schedule_score_editor.jsx (Scores tab)', () => {
       variant: 'absent',           // default modal
       password: 'pw',
       selfReport: 'absent',
+      teamMembers: 'absent',       // the editor loads them with the password
     });
     // Chained navigation must stay on the current match's shiaijo (CLAUDE.md
     // pitfall): with both fixtures on court A, m2 is the wired next match.
@@ -445,7 +454,65 @@ describe('mount site: viewer_match.jsx (public self-run)', () => {
       variant: 'absent',           // default modal
       password: '',                // public surface authenticates nothing
       selfReport: true,
+      teamMembers: 'object',       // from the page: the route needs the password
     });
+  });
+});
+
+// The Overview tab's "ON NOW" card (ViewerOverview) is another way into
+// MatchViewerModal. It and the modal used to keep a copy of the match taken
+// when it was tapped, so a result corrected on another device never reached
+// the open editor; both now read the live match on every render.
+describe('mount site: viewer_competition.jsx ViewerOverview (public self-run overview card)', () => {
+  function overviewProps(overrides = {}) {
+    return {
+      c: { format: 'knockout', status: 'knockout', teamSize: 0, kind: 'individual', engi: false },
+      myPlayer: null,
+      myUpcoming: null,
+      currentMatch: null,
+      runningMatches: [],
+      upcomingMatches: [],
+      recentMatches: [],
+      allMatches: [],
+      tweaks: {},
+      tournament: { mode: 'self-run' },
+      compId: 'c1',
+      standings: {},
+      pools: [],
+      poolMatches: [],
+      onSwitchTab: () => {},
+      hasActiveFilter: false,
+      filterLabel: null,
+      highlightPlayers: new Set(),
+      ...overrides,
+    };
+  }
+
+  it('the score editor follows the LIVE match, not the one frozen when "Report result" was tapped', async () => {
+    const m1 = runningMatch({ modifiedAt: '2026-01-01T00:00:00Z' });
+    const props = overviewProps({ currentMatch: m1, allMatches: [m1] });
+    let view;
+    await act(async () => { view = render(<ViewerOverview {...props} />); });
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'View current match details' }));
+    });
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Report result' }));
+    });
+    expect(screen.getByTestId('probe-score-editor')).toBeTruthy();
+    expect(probe.props.match.modifiedAt).toBe('2026-01-01T00:00:00Z');
+
+    // The parent re-renders with an updated match (same id): a changed bout
+    // result or a corrected modifiedAt, exactly as an SSE refresh delivers.
+    const m2 = { ...m1, modifiedAt: '2026-06-06T00:00:00Z' };
+    await act(async () => {
+      view.rerender(<ViewerOverview {...overviewProps({ currentMatch: m2, allMatches: [m2] })} />);
+    });
+
+    // Red without the fix: the editor keeps showing modifiedAt from m1,
+    // frozen at the moment the card was tapped.
+    expect(probe.props.match.modifiedAt).toBe('2026-06-06T00:00:00Z');
   });
 });
 
@@ -551,5 +618,49 @@ describe('the pools and bracket editors close only on a saved result (bc-plcl)',
     expect(editorOpen(), 'after a correction that only queued').toBe(true);
     await submit({ status: 'completed', winner: { id: 'p2', name: 'Tanaka' } });
     expect(editorOpen(), 'after a saved correction').toBe(false);
+  });
+});
+
+// ── the self-run editor's own close decision (bc-dhas) ───────────────────────
+// The public surface used to close on ANY landed write (writeDidNotLand
+// alone), so Start match and every autosaved point dumped the operator back
+// to the match card. It now asks writeKeepsEditorOpen like every other
+// closing host (bc-plcl): stay open for a running write with no winner, or
+// for one that did not land; close, with the match card, only for a landed
+// write that ends the match.
+
+describe('the self-run editor stays open through running writes (bc-dhas)', () => {
+  const editorOpen = () => !!screen.queryByTestId('probe-score-editor');
+
+  it('stays open after Start and after an autosave; closes with the match card only on a landed finish', async () => {
+    const write = vi.fn()
+      .mockResolvedValueOnce({ status: 'running', winner: null })
+      .mockResolvedValueOnce({ status: 'running', ipponsA: ['M'] })
+      .mockResolvedValueOnce({ queued: true })
+      .mockResolvedValueOnce({ status: 'completed', winner: { id: 'p1', name: 'Yamada' } });
+    const recordScore = window.API.recordScore;
+    window.API.recordScore = write;
+    try {
+      const onClose = await mountSelfRun();
+      const submit = async (patch) => { await act(async () => { await probe.props.onSubmit(patch); }); };
+
+      await submit({ status: 'running', winner: null });
+      expect(editorOpen(), 'after Start').toBe(true);
+      expect(onClose).not.toHaveBeenCalled();
+
+      await submit({ status: 'running', ipponsA: ['M'] });
+      expect(editorOpen(), 'after an autosaved point').toBe(true);
+      expect(onClose).not.toHaveBeenCalled();
+
+      await submit({ status: 'completed', winner: { id: 'p1', name: 'Yamada' } });
+      expect(editorOpen(), 'after a finish that only queued').toBe(true);
+      expect(onClose).not.toHaveBeenCalled();
+
+      await submit({ status: 'completed', winner: { id: 'p1', name: 'Yamada' } });
+      expect(editorOpen(), 'after a landed finish').toBe(false);
+      expect(onClose).toHaveBeenCalledTimes(1);
+    } finally {
+      window.API.recordScore = recordScore;
+    }
   });
 });

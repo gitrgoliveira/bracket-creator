@@ -178,8 +178,8 @@ function sideLabel(side) {
 // stepper records how many periods were fought (periodCount persists for the
 // tournament log), but the result marking deliberately never carries the
 // number: counted markers ("(E×3)") confuse readers of brackets and result
-// sheets. Do not reintroduce the count here. Mirrors enchoLabel() in
-// internal/export/suffix.go, pinned by the shared table in
+// sheets. Do not reintroduce the count here. Mirrors domain.EnchoLabel
+// (internal/domain/result_marks.go), pinned by the shared table in
 // internal/export/testdata/encho_labels.json. The score editors' "· (E)
 // Overtime ×N" eyebrow is different on purpose: a live readout of the stepper
 // the operator is using, not a result marking.
@@ -197,8 +197,9 @@ function enchoLabel(encho) {
 // cannot end tied (encho runs until someone scores), so X beats (E); and a
 // daihyosen bout is one-point sudden death, so DH bouts do not have encho and
 // (DH) beats (E). Everything else — Kiken, Fus., Ht — is a RESULT and belongs
-// beside the competitor it names: see sideMarks. Mirrors MiddleMark in
-// internal/export/suffix.go.
+// beside the competitor it names: see sideMarks. Mirrors domain.MiddleMark
+// (internal/domain/result_marks.go); export.MiddleMark adapts it to an encho
+// block, as this function takes one.
 function middleMark(decision, encho) {
   if (isHikiwakeBC(decision)) return "X";
   if (decision === "daihyosen") return "(DH)";
@@ -207,14 +208,15 @@ function middleMark(decision, encho) {
 
 // joinSp: join a score fragment and a result mark with a space, skipping
 // empties ("M" + "Ht" → "M Ht", "" + "Kiken" → "Kiken"). The JS twin of
-// joinSp in internal/export/suffix.go.
+// domain.JoinNonEmpty in internal/domain/result_marks.go.
 const joinSp = (a, b) => [a, b].filter(Boolean).join(" ");
 
 // placeMarks: resolve sideMarks onto the two display slots — the winner's
 // mark rides the winning side, the loser's the other. When neither slot is
 // known to have won, no marks are placed; each caller owns that fallback
 // (score strings trail the marks, match cards drop them). The JS analogue
-// of the winner-resolution half of SideMarksLR in internal/export/suffix.go.
+// of domain.SideMarksAB (internal/domain/result_marks.go), whose marks
+// export.SideMarksLR places White-left on the sheet.
 // Companion rule: on the two-slot GRID surfaces (the shared scoreboard and the
 // team score editor) which of a side's two cells the mark takes is answered by
 // resultSlot in result_slot.jsx — a separate leaf; the dependency reasoning is
@@ -268,14 +270,15 @@ function matchMiddleMark(match) {
 //   kiken    → loser  "Kiken" (the competitor who withdrew)
 //   fusenpai → loser  "Fus."  (the no-show)
 //   fusensho → winner "Fus."  (the default WIN names the present side)
-// Mirrors internal/export/suffix.go SideMarks exactly (CLAUDE.md documents
-// the pair as one mirrored rule). bc-tmfn removed the earlier fusensho gap
-// here: this surface used to omit the winner-side "Fus." mark on the theory
-// that "the viewer surfaces it via a separate bout badge", but no such badge
-// exists for a MATCH-LEVEL fusensho decision (only a per-bout team row's ○○
-// fill, which is a different thing), so a match-level default win used to
-// render with no mark on this surface at all. There is no divergence left to
-// document: a fusensho match now reads identically here and in the export.
+// Mirrors domain.SideMarks (internal/domain/result_marks.go) exactly
+// (CLAUDE.md documents the pair as one mirrored rule). bc-tmfn removed the
+// earlier fusensho gap here: this surface used to omit the winner-side "Fus."
+// mark on the theory that "the viewer surfaces it via a separate bout badge",
+// but no such badge exists for a MATCH-LEVEL fusensho decision (only a
+// per-bout team row's ○○ fill, which is a different thing), so a match-level
+// default win used to render with no mark on this surface at all. There is no
+// divergence left to document: a fusensho match now reads identically here and
+// in the export.
 function sideMarks(decision, decidedByHantei) {
   let winner = "", loser = "";
   if (isKikenDecisionBC(decision)) loser = "Kiken";
@@ -353,9 +356,10 @@ function winnerSideLR(m) {
 // name ("M Ht (E) K", "– vs Kiken"), which needs `winnerSide`
 // ("left" | "right", from winnerSideLR) — without it the marks fall back to
 // trailing after the score, still readable but unattributed.
-// Mirrors the Excel export (internal/export/suffix.go MiddleMark/SideMarks +
-// builder cell writes; the sheet template's own middle cell text is "vs" and
-// its empty score cells stay empty).
+// Mirrors the Excel export (domain.MiddleMark/domain.SideMarks, placed on the
+// sheet by export.SideMarksLR, plus the builder's cell writes; the sheet
+// template's own middle cell text is "vs" and its empty score cells stay
+// empty).
 function formatIpponsScore(ipponsLeft, ipponsRight, score, decision, encho, decidedByHantei, winnerSide) {
   // decidedByHantei (positional) is the canonical flag. The `typeof` guard
   // lets callers that omit the arg safely get false without sending undefined.

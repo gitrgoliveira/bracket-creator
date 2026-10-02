@@ -48,12 +48,12 @@ func setupLineupTestRouter(t *testing.T) (*gin.Engine, *state.Store, string) {
 
 	// Public group, same as production server.go
 	api := r.Group("/api")
-	RegisterPublicLineupHandlers(api, store)
+	RegisterPublicLineupHandlers(api, store, store)
 
 	// Admin group, AuthMiddleware gates all writes
 	admin := r.Group("/api")
 	admin.Use(AuthMiddleware(NewFileVerifier(store), store))
-	RegisterLineupHandlers(admin, store, store, store, stubBroadcaster{})
+	RegisterLineupHandlers(admin, store, store, store, stubBroadcaster{}, store, NewFileVerifier(store))
 
 	return r, store, dir
 }
@@ -74,14 +74,26 @@ func TestPublicLineupGET_NoAuthRequired(t *testing.T) {
 		TeamSize: 5,
 	}))
 
-	t.Run("no lineup returns 404, no auth needed", func(t *testing.T) {
+	t.Run("no lineup answers 200 with an empty lineup, saved false, no auth", func(t *testing.T) {
 		req := httptest.NewRequest(http.MethodGet,
 			"/api/competitions/c1/teams/teamA/lineups/1", nil)
 		// Deliberately no X-Tournament-Password header
 		w := httptest.NewRecorder()
 		r.ServeHTTP(w, req)
 
-		assert.Equal(t, http.StatusNotFound, w.Code)
+		require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+		// Raw body (map[string]any), not a domain.TeamLineup decode: a
+		// struct decode would silently miss `saved` going missing, which
+		// is exactly the regression this test exists to catch.
+		var body map[string]any
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &body))
+		assert.Equal(t, false, body["saved"], "nothing saved -> saved: false, never omitted")
+		assert.Equal(t, map[string]any{}, body["positions"], "empty positions, not null")
+		assert.Equal(t, "teamA", body["teamId"])
+		assert.Equal(t, "c1", body["competitionId"])
+		assert.Equal(t, float64(1), body["round"], "echoes the round asked for")
+		assert.NotContains(t, body, "matchId", "the round route never carries a matchId")
+		assert.NotContains(t, body, "memberIds")
 	})
 
 	t.Run("persisted lineup is visible without auth", func(t *testing.T) {
@@ -105,6 +117,9 @@ func TestPublicLineupGET_NoAuthRequired(t *testing.T) {
 		r.ServeHTTP(w, req)
 
 		assert.Equal(t, http.StatusOK, w.Code)
+		var body map[string]any
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &body))
+		assert.Equal(t, true, body["saved"], "a lineup that was actually set answers saved: true")
 		var got domain.TeamLineup
 		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &got))
 		assert.Equal(t, "teamA", got.TeamID)
@@ -148,6 +163,9 @@ func TestPublicLineupGET_PayloadIntact(t *testing.T) {
 			r.ServeHTTP(w, req)
 
 			require.Equal(t, http.StatusOK, w.Code)
+			var body map[string]any
+			require.NoError(t, json.Unmarshal(w.Body.Bytes(), &body))
+			assert.Equal(t, true, body["saved"])
 			var got domain.TeamLineup
 			require.NoError(t, json.Unmarshal(w.Body.Bytes(), &got))
 			assert.Equal(t, "teamA", got.TeamID)
@@ -473,12 +491,12 @@ func TestLineupPUT_MemberIDsInvalidPositionKey(t *testing.T) {
 // TestPublicLineupGET_FallbackBest: the scoring modal is the client-side
 // twin of AMENDMENT 1. Operators typically save one round-0 lineup for
 // the whole day, but a knockout final asks for its own round index (1+),
-// and an exact-only GET 404s, leaving the modal with no names (UAT: the
-// final's bootstrapped bout 1 was submitted with empty sides). With
-// ?fallback=best the handler resolves via the FindBestLineup round tiers
-// (highest round <= requested, else highest overall). Without the param
-// the exact + 404 semantics are unchanged (the lineup editor relies on
-// 404 meaning "no lineup submitted for THIS round").
+// and an exact-only GET answers nothing saved, leaving the modal with no
+// names (UAT: the final's bootstrapped bout 1 was submitted with empty
+// sides). With ?fallback=best the handler resolves via the FindBestLineup
+// round tiers (highest round <= requested, else highest overall). Without
+// the param the exact-round semantics are unchanged (the lineup editor
+// relies on saved: false meaning "no lineup submitted for THIS round").
 func TestPublicLineupGET_FallbackBest(t *testing.T) {
 	r, store, _ := setupLineupTestRouter(t)
 
@@ -505,6 +523,9 @@ func TestPublicLineupGET_FallbackBest(t *testing.T) {
 		r.ServeHTTP(w, req)
 
 		require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+		var body map[string]any
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &body))
+		assert.Equal(t, true, body["saved"])
 		var got domain.TeamLineup
 		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &got))
 		assert.Equal(t, "teamA", got.TeamID)
@@ -512,20 +533,53 @@ func TestPublicLineupGET_FallbackBest(t *testing.T) {
 		assert.Equal(t, "p1", got.Positions[domain.PosSenpo])
 	})
 
-	t.Run("exact miss without the param still 404s", func(t *testing.T) {
+	t.Run("exact miss without the param answers nothing saved", func(t *testing.T) {
 		req := httptest.NewRequest(http.MethodGet,
 			"/api/competitions/c-fb/teams/teamA/lineups/1", nil)
 		w := httptest.NewRecorder()
 		r.ServeHTTP(w, req)
-		assert.Equal(t, http.StatusNotFound, w.Code)
+		require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+		var body map[string]any
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &body))
+		assert.Equal(t, false, body["saved"])
+		assert.Equal(t, map[string]any{}, body["positions"])
+		assert.Equal(t, float64(1), body["round"], "echoes the requested round, not the fallback's")
 	})
 
-	t.Run("fallback=best with no lineup at all still 404s", func(t *testing.T) {
+	t.Run("fallback=best with no round lineup at all answers nothing saved", func(t *testing.T) {
 		req := httptest.NewRequest(http.MethodGet,
 			"/api/competitions/c-fb/teams/teamB/lineups/1?fallback=best", nil)
 		w := httptest.NewRecorder()
 		r.ServeHTTP(w, req)
-		assert.Equal(t, http.StatusNotFound, w.Code)
+		require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+		var body map[string]any
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &body))
+		assert.Equal(t, false, body["saved"])
+		assert.Equal(t, float64(1), body["round"])
+
+		// A MATCH-scoped lineup for the SAME team must never satisfy the
+		// round-scoped fallback: FindBestLineupAny skips match-scoped
+		// entries by design (AMENDMENT 1), so seeding one here and still
+		// reading saved: false pins that it was never consulted.
+		require.NoError(t, store.SetTeamLineup("c-fb", domain.TeamLineup{
+			TeamID:  "teamB",
+			MatchID: "Pool A-0",
+			Positions: map[domain.Position]string{
+				domain.PosSenpo:   "m1",
+				domain.PosJiho:    "m2",
+				domain.PosChuken:  "m3",
+				domain.PosFukusho: "m4",
+				domain.PosTaisho:  "m5",
+			},
+		}, 5))
+		req2 := httptest.NewRequest(http.MethodGet,
+			"/api/competitions/c-fb/teams/teamB/lineups/1?fallback=best", nil)
+		w2 := httptest.NewRecorder()
+		r.ServeHTTP(w2, req2)
+		require.Equal(t, http.StatusOK, w2.Code, w2.Body.String())
+		var body2 map[string]any
+		require.NoError(t, json.Unmarshal(w2.Body.Bytes(), &body2))
+		assert.Equal(t, false, body2["saved"], "a match-scoped entry must not satisfy the round fallback")
 	})
 
 	t.Run("exact hit ignores the param", func(t *testing.T) {
@@ -549,4 +603,59 @@ func TestPublicLineupGET_FallbackBest(t *testing.T) {
 		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &got))
 		assert.Equal(t, 1, got.Round, "exact round-1 lineup wins over fallback")
 	})
+}
+
+// TestPublicLineupGET_UnknownCompetition: both lineup GETs 404 with
+// "competition not found" when the competition itself does not exist
+// (bc-k404). The status alone is already 404 on main (an unreadable
+// competition directory falls through to the same "nothing saved" 404 a
+// real miss gives), so this asserts the BODY: the distinct message is
+// what tells the two apart now that "nothing saved" no longer 404s.
+func TestPublicLineupGET_UnknownCompetition(t *testing.T) {
+	r, _, _ := setupLineupTestRouter(t)
+
+	for _, tc := range []struct {
+		name, path string
+	}{
+		{"round", "/api/competitions/no-such-comp/teams/teamA/lineups/1"},
+		{"match", "/api/competitions/no-such-comp/teams/teamA/match-lineups/m1"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodGet, tc.path, nil)
+			w := httptest.NewRecorder()
+			r.ServeHTTP(w, req)
+
+			require.Equal(t, http.StatusNotFound, w.Code)
+			var body map[string]any
+			require.NoError(t, json.Unmarshal(w.Body.Bytes(), &body))
+			assert.Equal(t, "competition not found", body["error"])
+		})
+	}
+}
+
+// TestPublicLineupGET_BadParamsStay400 pins the CHECK ORDER (bc-k404): a
+// malformed param 400s before the handler ever asks whether the
+// competition exists, on both routes. Already green on main (today's
+// handlers have no existence check to race against), which is the
+// point -- this test exists to keep that order true now that
+// requireExistingCompetition has been added, not to prove something new.
+func TestPublicLineupGET_BadParamsStay400(t *testing.T) {
+	r, _, _ := setupLineupTestRouter(t)
+
+	for _, tc := range []struct {
+		name, path string
+	}{
+		{"bad competition id format", "/api/competitions/bad.id/teams/teamA/lineups/1"},
+		{"empty team id", "/api/competitions/c1/teams//lineups/1"},
+		{"non-integer round", "/api/competitions/c1/teams/teamA/lineups/abc"},
+		{"negative round", "/api/competitions/c1/teams/teamA/lineups/-1"},
+		{"unknown competition and bad round together", "/api/competitions/no-such-comp/teams/teamA/lineups/abc"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodGet, tc.path, nil)
+			w := httptest.NewRecorder()
+			r.ServeHTTP(w, req)
+			assert.Equal(t, http.StatusBadRequest, w.Code, w.Body.String())
+		})
+	}
 }

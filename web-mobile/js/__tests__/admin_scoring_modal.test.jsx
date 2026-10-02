@@ -1,7 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import {
   resolveDecisionPassword,
-  assertRunningWritePersisted,
   buildDecisionBody,
   submitDecisionRequest,
   getIpponButtons,
@@ -55,60 +54,6 @@ describe('resolveDecisionPassword', () => {
     expect(resolveDecisionPassword('')).toBe('');
     expect(resolveDecisionPassword(undefined)).toBe('');
     expect(resolveDecisionPassword(null)).toBe('');
-  });
-});
-
-describe('assertRunningWritePersisted (daihyosen pre-save prerequisite guard)', () => {
-  // recordScore returns a discriminated { queued: true } when a running write
-  // could only be enqueued (offline / retryable 5xx), NOT server-confirmed.
-  // Actions with a hard prerequisite on persistence (the daihyosen pre-save)
-  // must abort on that case rather than proceed against stale server state.
-  it('throws "score_not_synced" when the write was only queued', () => {
-    expect(() => assertRunningWritePersisted({ queued: true })).toThrow('score_not_synced');
-  });
-
-  it('does not throw for a server-confirmed MatchResult', () => {
-    expect(() => assertRunningWritePersisted({ id: 'm1', status: 'running' })).not.toThrow();
-  });
-
-  it('does not throw for a same-session stale 200 (server already holds equal-or-newer state)', () => {
-    // A { stale: true } result means the server no-op'd an out-of-order write
-    // because it already has an equal-or-newer state; dependent reads are safe,
-    // so daihyosen should proceed, not abort.
-    expect(() => assertRunningWritePersisted({ stale: true })).not.toThrow();
-  });
-
-  it('does not throw for null/undefined (no result to inspect)', () => {
-    expect(() => assertRunningWritePersisted(null)).not.toThrow();
-    expect(() => assertRunningWritePersisted(undefined)).not.toThrow();
-  });
-
-  it('does not throw when queued is falsy', () => {
-    expect(() => assertRunningWritePersisted({ queued: false })).not.toThrow();
-  });
-
-  // bc-lww1: the server gained a SECOND not-landed shape. A 200 {applied:false}
-  // means the timestamp guard dropped this write because a DIFFERENT writer's
-  // newer result is stored, so nothing the operator entered was saved and the
-  // dependent daihyosen request would be built on sub-results they never saw.
-  // This guard was the sixth site of the "did it land?" question and the one
-  // the original five-site conversion missed.
-  it('throws "score_not_synced" when the server superseded the write', () => {
-    expect(() => assertRunningWritePersisted({ applied: false, reason: 'superseded' }))
-      .toThrow('score_not_synced');
-  });
-
-  // The distinction that makes this guard non-trivial: `stale` (above) is the
-  // operator's OWN out-of-order write and proceeds, while `applied:false` is
-  // someone else's result winning and must abort. Both are 200s that are not
-  // MatchResults, so "not a MatchResult" is NOT the rule.
-  it('treats a superseded write differently from a same-session stale one', () => {
-    expect(() => assertRunningWritePersisted({ stale: true })).not.toThrow();
-    expect(() => assertRunningWritePersisted({ applied: false })).toThrow('score_not_synced');
-  });
-
-  it('does not throw when applied is true', () => {
-    expect(() => assertRunningWritePersisted({ applied: true, id: 'm1' })).not.toThrow();
   });
 });
 

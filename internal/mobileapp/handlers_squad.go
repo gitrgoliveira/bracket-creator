@@ -8,16 +8,24 @@
 // comment in participants.go for the data-loss history that store move
 // exists to close.
 //
-// All four routes are admin-only, and stay main-password-gated even in
-// self-run mode (isSelfRunMainGatedConfigRoute, middleware.go): squad
-// management is organiser setup, not operational play, the same class as
-// team lineup PUT/DELETE.
+// All four routes are registered on the admin group. In a self-run tournament
+// ADD and RENAME also accept a caller with an empty password, because the public
+// score sheet names a bout's fighter through them (bc-dhas); such a caller may
+// name a member who has no name yet but not rename one who has (see the PUT),
+// adds or names only while the competition runs, and adds up to
+// selfRunMemberLimit. A password sent but wrong is a 401 on both
+// (selfRunAnonymous).
+// The read and the name CLEAR stay main-password-gated
+// (isSelfRunMainGatedConfigRoute, middleware.go): the public page reads team
+// members from the viewer payload and never clears one.
 //
 // ADD is deliberately silent; RENAME and CLEAR are not, and the split is the
 // point. The original rule was that squad edits are setup done by one
 // organiser, not the concurrent multi-device traffic the lineup broadcast
 // exists for, so a member added on one device is invisible to a second admin
-// session until it remounts. That consequence is still accepted for ADD.
+// session until it remounts. That consequence is still accepted for ADD. On
+// the public score sheet an add is followed by the match lineup PUT, which
+// broadcasts, so the other devices refetch the members anyway.
 //
 // Rename and clear outgrew it. They now rewrite lineups.yaml as well
 // (state.renameMemberInLineupsLocked), because a lineup position stores a
@@ -33,12 +41,13 @@
 // changed. A spurious refetch costs one request; a missed one costs the
 // rename. Same safe direction bumpFileVersion takes in the store.
 //
-// The public surfaces do not call these routes at all: the viewer, the
-// court display and the streaming overlay read a team's squad from the
-// viewer payload (handlers_viewer.go). They inherit the same consequence.
-// Nothing here fires an event and the SPA has no data poll, so a squad
-// edit reaches them only on their next payload fetch, which some OTHER
-// broadcast triggers. Same trade, same reason: this is setup, and the
+// The public READ surfaces do not call these routes: the viewer, the court
+// display and the streaming overlay read a team's squad from the viewer
+// payload (handlers_viewer.go). A rename or a clear reaches them through that
+// same lineup event, on which the SPA refetches the payload (app.jsx). An add
+// reaches them only on their next payload fetch, which some OTHER broadcast
+// triggers: on the public score sheet the lineup PUT that follows it, and on
+// the Lineups page, where an add is setup, whatever broadcast comes next; the
 // label it feeds is enrichment beside a name that is already correct.
 package mobileapp
 
@@ -48,6 +57,7 @@ import (
 	"strings"
 
 	"github.com/gin-gonic/gin"
+	"github.com/gitrgoliveira/bracket-creator/internal/domain"
 	"github.com/gitrgoliveira/bracket-creator/internal/state"
 )
 
@@ -64,13 +74,17 @@ type SquadMemberRequest struct {
 // a 404 instead of a confusing 500 from a write that can never land (the
 // per-competition directory does not exist to write into); mirrors
 // handlers_lineup.go's own comp == nil check.
-func RegisterSquadHandlers(r *gin.RouterGroup, store SquadStore, comps CompetitionStore, hub Broadcaster) {
+//
+// tl/verifier tell an anonymous self-run caller apart (selfRunAnonymous), for
+// the add's and the rename's guards and so that a wrong password on either
+// write is 401.
+func RegisterSquadHandlers(r *gin.RouterGroup, store SquadStore, comps CompetitionStore, hub Broadcaster, tl TournamentLoader, verifier PasswordVerifier) {
 	r.GET("/competitions/:id/team-members", func(c *gin.Context) {
 		compID, ok := requireValidCompID(c)
 		if !ok {
 			return
 		}
-		if !requireExistingCompetitionForSquad(c, comps, compID) {
+		if !requireExistingCompetition(c, comps, compID) {
 			return
 		}
 		squads, err := store.LoadSquads(compID)
@@ -86,7 +100,12 @@ func RegisterSquadHandlers(r *gin.RouterGroup, store SquadStore, comps Competiti
 		if !ok {
 			return
 		}
-		if !requireExistingCompetitionForSquad(c, comps, compID) {
+		comp, ok := loadExistingCompetition(c, comps, compID)
+		if !ok {
+			return
+		}
+		anonymous, ok := selfRunAnonymous(c, tl, verifier)
+		if !ok {
 			return
 		}
 		var req SquadMemberRequest
@@ -94,11 +113,18 @@ func RegisterSquadHandlers(r *gin.RouterGroup, store SquadStore, comps Competiti
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 			return
 		}
-		if strings.TrimSpace(req.Name) == "" {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "name is required"})
+		if !validMemberName(c, req.Name) {
 			return
 		}
-		member, err := store.AddTeamMember(compID, teamID, req.Name)
+		// A participant's add is bounded and refused once the competition
+		// has finished, both judged by the store under its lock.
+		var member domain.TeamMember
+		var err error
+		if anonymous {
+			member, err = store.AddTeamMemberUpTo(compID, teamID, req.Name, selfRunMemberLimit(comp.TeamSize))
+		} else {
+			member, err = store.AddTeamMember(compID, teamID, req.Name)
+		}
 		if err != nil {
 			respondSquadWriteError(c, err)
 			return
@@ -111,7 +137,7 @@ func RegisterSquadHandlers(r *gin.RouterGroup, store SquadStore, comps Competiti
 		if !ok {
 			return
 		}
-		if !requireExistingCompetitionForSquad(c, comps, compID) {
+		if !requireExistingCompetition(c, comps, compID) {
 			return
 		}
 		memberID := c.Param("memberId")
@@ -119,16 +145,30 @@ func RegisterSquadHandlers(r *gin.RouterGroup, store SquadStore, comps Competiti
 			c.JSON(http.StatusBadRequest, gin.H{"error": "member ID is required"})
 			return
 		}
+		anonymous, ok := selfRunAnonymous(c, tl, verifier)
+		if !ok {
+			return
+		}
 		var req SquadMemberRequest
 		if err := c.ShouldBindJSON(&req); err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 			return
 		}
-		if strings.TrimSpace(req.Name) == "" {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "name is required"})
+		if !validMemberName(c, req.Name) {
 			return
 		}
-		if err := store.RenameTeamMember(compID, teamID, memberID, req.Name); err != nil {
+		// An anonymous caller only names a member who has no name yet: renaming
+		// reaches every stored lineup and fought bout, finished matches
+		// included, so it stays the organiser's. Naming a blank still fills a
+		// finished match's stored lineup, beside the member id every display
+		// resolves. The store checks that, and that the competition has not
+		// finished, under its own lock, so two callers naming one blank member
+		// cannot both pass, nor can one racing the finish.
+		rename := store.RenameTeamMember
+		if anonymous {
+			rename = store.NameUnnamedTeamMember
+		}
+		if err := rename(compID, teamID, memberID, req.Name); err != nil {
 			respondSquadWriteError(c, err)
 			return
 		}
@@ -148,7 +188,7 @@ func RegisterSquadHandlers(r *gin.RouterGroup, store SquadStore, comps Competiti
 		if !ok {
 			return
 		}
-		if !requireExistingCompetitionForSquad(c, comps, compID) {
+		if !requireExistingCompetition(c, comps, compID) {
 			return
 		}
 		memberID := c.Param("memberId")
@@ -163,25 +203,6 @@ func RegisterSquadHandlers(r *gin.RouterGroup, store SquadStore, comps Competiti
 		c.Status(http.StatusNoContent)
 		hub.Broadcast(EventLineupUpdated, gin.H{"competitionId": compID})
 	})
-}
-
-// requireExistingCompetitionForSquad 404s when compID names no competition,
-// and 500s on an unreadable config.md. compID has already passed
-// requireValidCompID (format only), so this is the existence check that
-// turns a bad id into "competition not found" instead of falling through to
-// a store write that would fail with a bare, unmappable I/O error (no
-// competition directory to write team-members.yaml into).
-func requireExistingCompetitionForSquad(c *gin.Context, comps CompetitionStore, compID string) bool {
-	comp, err := comps.LoadCompetition(compID)
-	if err != nil {
-		internalError(c, err)
-		return false
-	}
-	if comp == nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "competition not found"})
-		return false
-	}
-	return true
 }
 
 // requireValidCompIDAndTeam extracts (compID, teamID) from the URL, 400ing
@@ -213,11 +234,62 @@ func requireValidCompIDAndTeam(c *gin.Context) (compID, teamID string, ok bool) 
 	return compID, teamID, true
 }
 
+// validMemberName answers 400 for a blank name, or one longer than a
+// competitor's (MaxLenPlayerName), and reports whether the name may be saved.
+func validMemberName(c *gin.Context, name string) bool {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "name is required"})
+		return false
+	}
+	if err := validateMaxLen("name", name, MaxLenPlayerName); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return false
+	}
+	return true
+}
+
+// selfRunMemberLimit is how many members a participant may bring a team to:
+// the team's seeded slots (team size plus state.SquadReserveSlots) and one
+// more per position. A member can never be removed, so an anonymous caller
+// is held to it; the organiser is not.
+func selfRunMemberLimit(teamSize int) int {
+	return 2*teamSize + state.SquadReserveSlots
+}
+
+// errTeamMemberLimit refuses a participant's add once the team holds
+// selfRunMemberLimit members (state.ErrTeamMemberLimit, judged under the
+// store's lock).
+var errTeamMemberLimit = &selfRunRefusal{
+	status:  http.StatusConflict,
+	code:    "team_member_limit",
+	message: "This team already lists as many members as the score sheet can add. Ask the tournament organizer to add more.",
+}
+
+// errCompetitionFinished refuses a participant's add or naming of a team
+// member once the competition has finished, which only the organiser corrects.
+var errCompetitionFinished = &selfRunRefusal{
+	status:  http.StatusConflict,
+	code:    "competition_finished",
+	message: "This competition has finished, so its teams can no longer be changed. Contact the tournament organizer to correct it.",
+}
+
+// errMemberAlreadyNamed refuses a participant's rename of a team member who
+// already has a name (state.ErrTeamMemberNamed, which only the participant's
+// NameUnnamedTeamMember returns). The rename reaches every stored lineup and
+// every bout already fought, finished matches included, so it stays the
+// organiser's.
+var errMemberAlreadyNamed = &selfRunRefusal{
+	status:  http.StatusConflict,
+	code:    "member_already_named",
+	message: "This team member already has a name. Ask the tournament organizer to change it.",
+}
+
 // respondSquadWriteError maps an AddTeamMember/RenameTeamMember/
-// ClearTeamMemberName error to its HTTP status. ErrTeamNotFound (the team id
-// names no participant), ErrTeamMemberNotFound, and
-// ErrTeamMemberClearAfterStart are squad-specific; everything else reuses
-// classifyRosterWriteError's existing sentinel table via
+// NameUnnamedTeamMember/ClearTeamMemberName error to its HTTP status.
+// ErrTeamNotFound (the team id names no participant), ErrTeamMemberNotFound,
+// ErrTeamMemberNamed and ErrTeamMemberClearAfterStart are squad-specific;
+// everything else reuses classifyRosterWriteError's existing sentinel table via
 // respondRosterWriteError (errors.go) rather than a second hand-copied
 // mapping -- state.ErrDuplicateTeamMember is already classified there as a
 // 409, the same status every OTHER caller of that sentinel gets.
@@ -228,6 +300,18 @@ func respondSquadWriteError(c *gin.Context, err error) {
 	}
 	if errors.Is(err, state.ErrTeamMemberNotFound) {
 		c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
+		return
+	}
+	if errors.Is(err, state.ErrTeamMemberLimit) {
+		c.JSON(errTeamMemberLimit.status, errTeamMemberLimit.body())
+		return
+	}
+	if errors.Is(err, state.ErrTeamMemberNamed) {
+		c.JSON(errMemberAlreadyNamed.status, errMemberAlreadyNamed.body())
+		return
+	}
+	if errors.Is(err, state.ErrCompetitionFinished) {
+		c.JSON(errCompetitionFinished.status, errCompetitionFinished.body())
 		return
 	}
 	if errors.Is(err, state.ErrTeamMemberClearAfterStart) {

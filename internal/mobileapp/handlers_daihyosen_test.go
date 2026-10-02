@@ -1,12 +1,14 @@
 package mobileapp
 
 import (
+	"bytes"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/gitrgoliveira/bracket-creator/internal/domain"
@@ -31,7 +33,7 @@ func setupDaihyosenTestRouter(t *testing.T) (*gin.Engine, *state.Store, *engine.
 	gin.SetMode(gin.TestMode)
 	r := gin.New()
 	api := r.Group("/api")
-	RegisterDaihyosenHandlers(api, eng, store, hub)
+	RegisterDaihyosenHandlers(api, eng, store, hub, store, NewFileVerifier(store))
 
 	return r, store, eng, hub, dir
 }
@@ -50,9 +52,9 @@ func findMatchForDaihyosen(store *state.Store, compID, matchID string) (m *state
 	return m, found, err
 }
 
-func countEligibleForSides(store *state.Store, compID, sideA, sideB string) (a int, b int, err error) {
+func countEligibleForSides(store *state.Store, compID, matchID, sideAID, sideBID string) (a int, b int, err error) {
 	txErr := store.WithTransaction(compID, func(tx state.StoreTx) error {
-		a, b, err = countEligibleForSidesTx(tx, compID, sideA, sideB)
+		a, b, err = countEligibleForSidesTx(tx, compID, matchID, sideAID, sideBID)
 		return err
 	})
 	if err == nil && txErr != nil {
@@ -249,65 +251,155 @@ func TestFindMatchForDaihyosen_BracketNotFound(t *testing.T) {
 	assert.Nil(t, match)
 }
 
-// TestCountEligibleForSides_AllEligible verifies that all participants are
-// counted when no ineligibility records exist.
+// TestCountEligibleForSides_AllEligible: with no ineligibility records, each
+// side can field a representative.
 func TestCountEligibleForSides_AllEligible(t *testing.T) {
-	dir, err := os.MkdirTemp("", "eligible-*")
-	require.NoError(t, err)
-	defer os.RemoveAll(dir)
-
-	store, err := state.NewStore(dir)
+	store, err := state.NewStore(t.TempDir())
 	require.NoError(t, err)
 	compID := "eligible-comp"
 	require.NoError(t, store.SaveCompetition(&state.Competition{ID: compID}))
-	// Use proper UUID-format IDs so SaveParticipants/LoadParticipants round-trips correctly.
-	p1ID := "aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa"
-	p2ID := "bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb"
-	require.NoError(t, store.SaveParticipants(compID, []domain.Player{
-		{ID: p1ID, Name: "Alice", Dojo: "A"},
-		{ID: p2ID, Name: "Bob", Dojo: "B"},
-	}))
 
-	a, b, err := countEligibleForSides(store, compID, "TeamA", "TeamB")
-	require.NoError(t, err)
-	assert.Equal(t, 2, a)
-	assert.Equal(t, 2, b)
-}
-
-// TestCountEligibleForSides_OneIneligible verifies that an ineligible
-// participant is excluded from the eligible count.
-func TestCountEligibleForSides_OneIneligible(t *testing.T) {
-	dir, err := os.MkdirTemp("", "ineligible-*")
-	require.NoError(t, err)
-	defer os.RemoveAll(dir)
-
-	store, err := state.NewStore(dir)
-	require.NoError(t, err)
-	compID := "ineligible-comp"
-	require.NoError(t, store.SaveCompetition(&state.Competition{ID: compID}))
-	p1ID := "cccccccc-cccc-4ccc-cccc-cccccccccccc"
-	p2ID := "dddddddd-dddd-4ddd-dddd-dddddddddddd"
-	require.NoError(t, store.SaveParticipants(compID, []domain.Player{
-		{ID: p1ID, Name: "Alice", Dojo: "A"},
-		{ID: p2ID, Name: "Bob", Dojo: "B"},
-	}))
-	require.NoError(t, store.SetCompetitorStatus(compID, domain.CompetitorStatus{
-		PlayerID: p1ID,
-		Eligible: false,
-		Reason:   "kiken",
-	}))
-
-	a, b, err := countEligibleForSides(store, compID, "TeamA", "TeamB")
+	a, b, err := countEligibleForSides(store, compID, "B1",
+		"aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa", "bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb")
 	require.NoError(t, err)
 	assert.Equal(t, 1, a)
 	assert.Equal(t, 1, b)
+}
+
+// TestCountEligibleForSides_IsPerSide: the count answers for each side of the
+// match, by the side's own id. It used to count the competition's roster as
+// one number returned for both sides, so a barred side read as able whenever
+// anyone else in the competition was eligible, and an unrelated barred entrant
+// lowered both sides alike.
+func TestCountEligibleForSides_IsPerSide(t *testing.T) {
+	const (
+		teamA    = "cccccccc-cccc-4ccc-cccc-cccccccccccc"
+		teamB    = "dddddddd-dddd-4ddd-dddd-dddddddddddd"
+		teamC    = "eeeeeeee-eeee-4eee-eeee-eeeeeeeeeeee"
+		barredIn = "Pool A-1"
+	)
+	bar := func(t *testing.T, store *state.Store, compID, pid, matchID string) {
+		t.Helper()
+		require.NoError(t, store.SetCompetitorStatus(compID, domain.CompetitorStatus{
+			PlayerID: pid, Eligible: false, Reason: "kiken", MatchID: matchID,
+		}))
+	}
+	newStore := func(t *testing.T, compID string) *state.Store {
+		t.Helper()
+		store, err := state.NewStore(t.TempDir())
+		require.NoError(t, err)
+		require.NoError(t, store.SaveCompetition(&state.Competition{ID: compID}))
+		return store
+	}
+
+	t.Run("a side another match barred cannot field one", func(t *testing.T) {
+		store := newStore(t, "per-side-a")
+		bar(t, store, "per-side-a", teamA, barredIn)
+		a, b, err := countEligibleForSides(store, "per-side-a", "B1", teamA, teamB)
+		require.NoError(t, err)
+		assert.Equal(t, 0, a, "side A's own team is barred")
+		assert.Equal(t, 1, b)
+	})
+	t.Run("side B is judged on its own id", func(t *testing.T) {
+		store := newStore(t, "per-side-b")
+		bar(t, store, "per-side-b", teamB, barredIn)
+		a, b, err := countEligibleForSides(store, "per-side-b", "B1", teamA, teamB)
+		require.NoError(t, err)
+		assert.Equal(t, 1, a)
+		assert.Equal(t, 0, b, "side B's own team is barred")
+	})
+	t.Run("a barred entrant outside the match bars neither side", func(t *testing.T) {
+		store := newStore(t, "per-side-other")
+		bar(t, store, "per-side-other", teamC, barredIn)
+		a, b, err := countEligibleForSides(store, "per-side-other", "B1", teamA, teamB)
+		require.NoError(t, err)
+		assert.Equal(t, 1, a)
+		assert.Equal(t, 1, b)
+	})
+	t.Run("a status this match recorded does not count against it", func(t *testing.T) {
+		store := newStore(t, "per-side-own")
+		bar(t, store, "per-side-own", teamA, "B1")
+		a, b, err := countEligibleForSides(store, "per-side-own", "B1", teamA, teamB)
+		require.NoError(t, err)
+		assert.Equal(t, 1, a, "the undo-path exemption engine.BarredSides owns")
+		assert.Equal(t, 1, b)
+	})
+	t.Run("a side with no id has nothing to bar it", func(t *testing.T) {
+		store := newStore(t, "per-side-noid")
+		bar(t, store, "per-side-noid", teamA, barredIn)
+		a, b, err := countEligibleForSides(store, "per-side-noid", "B1", "", teamB)
+		require.NoError(t, err)
+		assert.Equal(t, 1, a, "resolved by id only: an empty id matches no status")
+		assert.Equal(t, 1, b)
+	})
+}
+
+// TestDaihyosenHandler_RefusesASideItsOwnTeamCannotField: a knockout team
+// match whose side A was barred by a withdrawal in another match is refused a
+// representative bout with 409 insufficient_eligibility, even though other
+// entrants in the competition are still eligible. The organiser's add reaches
+// a scheduled 0-0 match (the tie holds at nothing each), which is how a match
+// with a barred side meets this route. Before the count was per side it
+// answered 200 and appended the bout.
+func TestDaihyosenHandler_RefusesASideItsOwnTeamCannotField(t *testing.T) {
+	const (
+		teamA = "aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa"
+		teamB = "bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb"
+		teamC = "cccccccc-cccc-4ccc-cccc-cccccccccccc"
+	)
+	for _, tc := range []struct {
+		name     string
+		barredIn string
+		wantCode int
+	}{
+		{name: "barred by another match", barredIn: "Pool A-1", wantCode: http.StatusConflict},
+		{name: "barred by this match", barredIn: "B1", wantCode: http.StatusOK},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			r, store, _, _, _ := setupDaihyosenTestRouter(t)
+			compID := "dh-own-side"
+			require.NoError(t, store.SaveCompetition(&state.Competition{ID: compID, Kind: "team", TeamSize: 3}))
+			require.NoError(t, store.SaveParticipants(compID, []domain.Player{
+				{ID: teamA, Name: "TeamA", Dojo: "A"},
+				{ID: teamB, Name: "TeamB", Dojo: "B"},
+				{ID: teamC, Name: "TeamC", Dojo: "C"},
+			}))
+			require.NoError(t, store.SaveBracket(compID, &state.Bracket{
+				Rounds: [][]state.BracketMatch{{{
+					ID: "B1", SideA: "TeamA", SideB: "TeamB", SideAID: teamA, SideBID: teamB,
+					Status: state.MatchStatusScheduled,
+				}}},
+			}))
+			require.NoError(t, store.SetCompetitorStatus(compID, domain.CompetitorStatus{
+				PlayerID: teamA, Eligible: false, Reason: "kiken", MatchID: tc.barredIn,
+			}))
+
+			req := httptest.NewRequest(http.MethodPost, "/api/competitions/"+compID+"/matches/B1/daihyosen", nil)
+			w := httptest.NewRecorder()
+			r.ServeHTTP(w, req)
+			require.Equal(t, tc.wantCode, w.Code, w.Body.String())
+
+			bracket, err := store.LoadBracket(compID)
+			require.NoError(t, err)
+			added := carriesDaihyosenRow(bracket.Rounds[0][0].SubResults)
+			if tc.wantCode == http.StatusConflict {
+				var body map[string]any
+				require.NoError(t, json.Unmarshal(w.Body.Bytes(), &body))
+				assert.Equal(t, "insufficient_eligibility", body["error"])
+				assert.False(t, added, "a refused add appends nothing")
+				assert.Equal(t, state.MatchStatusScheduled, bracket.Rounds[0][0].Status, "a refused add writes nothing")
+			} else {
+				assert.True(t, added, "a match may be re-scored past its own withdrawal")
+			}
+		})
+	}
 }
 
 // TestDaihyosenHandler_MatchNotFound verifies that a request for a
 // non-existent match returns 404.
 func TestDaihyosenHandler_MatchNotFound(t *testing.T) {
 	r, store, _, _, _ := setupDaihyosenTestRouter(t)
-	require.NoError(t, store.SaveCompetition(&state.Competition{ID: "c1"}))
+	require.NoError(t, store.SaveCompetition(&state.Competition{ID: "c1", Kind: "team", TeamSize: 3}))
 
 	req := httptest.NewRequest(http.MethodPost,
 		"/api/competitions/c1/matches/no-such-match/daihyosen", nil)
@@ -322,7 +414,7 @@ func TestDaihyosenHandler_MatchNotFound(t *testing.T) {
 func TestDaihyosenHandler_HappyPath(t *testing.T) {
 	r, store, _, _, _ := setupDaihyosenTestRouter(t)
 	compID := "dh-happy"
-	require.NoError(t, store.SaveCompetition(&state.Competition{ID: compID}))
+	require.NoError(t, store.SaveCompetition(&state.Competition{ID: compID, Kind: "team", TeamSize: 3}))
 	// Save one eligible participant (so countEligibleForSides returns > 0).
 	p1ID := "11111111-1111-4111-1111-111111111111"
 	require.NoError(t, store.SaveParticipants(compID, []domain.Player{
@@ -346,6 +438,49 @@ func TestDaihyosenHandler_HappyPath(t *testing.T) {
 	var resp map[string]any
 	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
 	assert.NotNil(t, resp["subResult"])
+}
+
+// The organiser's add to a finished, tied team match reopens its result: the
+// match runs again with no winner or decision of its own until the
+// representative bout decides it. A recorded withdrawal is not that result;
+// clearing one is its own action, so the add leaves it.
+func TestDaihyosenHandler_AddToAFinishedMatchReopensItsResult(t *testing.T) {
+	add := func(t *testing.T, decision string) state.BracketMatch {
+		t.Helper()
+		r, store, _, _, _ := setupDaihyosenTestRouter(t)
+		compID := "dh-reopen"
+		require.NoError(t, store.SaveCompetition(&state.Competition{ID: compID, Kind: "team", TeamSize: 3}))
+		require.NoError(t, store.SaveParticipants(compID, []domain.Player{
+			{ID: "11111111-1111-4111-1111-111111111111", Name: "Alice", Dojo: "A"},
+		}))
+		// No bouts: IV 0-0, PW 0-0, tied, with a winner recorded on top.
+		require.NoError(t, store.SaveBracket(compID, &state.Bracket{
+			Rounds: [][]state.BracketMatch{{
+				{ID: "B1", SideA: "TeamA", SideB: "TeamB", Status: state.MatchStatusCompleted,
+					Winner: "TeamA", Decision: decision},
+			}},
+		}))
+		w := httptest.NewRecorder()
+		r.ServeHTTP(w, httptest.NewRequest(http.MethodPost, "/api/competitions/"+compID+"/matches/B1/daihyosen", nil))
+		require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+		bracket, err := store.LoadBracket(compID)
+		require.NoError(t, err)
+		return bracket.Rounds[0][0]
+	}
+
+	t.Run("a scored result is cleared", func(t *testing.T) {
+		m := add(t, string(domain.DecisionFought))
+		assert.Equal(t, state.MatchStatusRunning, m.Status)
+		assert.Empty(t, m.Winner, "a running match has no winner")
+		assert.Empty(t, m.Decision, "nor a decision")
+	})
+
+	t.Run("a withdrawal is kept", func(t *testing.T) {
+		m := add(t, string(domain.DecisionKikenVoluntary))
+		assert.Equal(t, state.MatchStatusRunning, m.Status)
+		assert.Equal(t, "TeamA", m.Winner)
+		assert.Equal(t, string(domain.DecisionKikenVoluntary), m.Decision)
+	})
 }
 
 // startedAutoEngine is the real engine with one method overridden, so the
@@ -372,10 +507,10 @@ func TestDaihyosenHandler_BroadcastsStarted(t *testing.T) {
 	hub := &recordingBroadcaster{}
 	gin.SetMode(gin.TestMode)
 	r := gin.New()
-	RegisterDaihyosenHandlers(r.Group("/api"), startedAutoEngine{engine.New(store)}, store, hub)
+	RegisterDaihyosenHandlers(r.Group("/api"), startedAutoEngine{engine.New(store)}, store, hub, store, NewFileVerifier(store))
 
 	compID := "dh-started"
-	require.NoError(t, store.SaveCompetition(&state.Competition{ID: compID}))
+	require.NoError(t, store.SaveCompetition(&state.Competition{ID: compID, Kind: "team", TeamSize: 3}))
 	require.NoError(t, store.SaveParticipants(compID, []domain.Player{
 		{ID: "11111111-1111-4111-1111-111111111111", Name: "Alice", Dojo: "A"},
 	}))
@@ -555,7 +690,7 @@ func TestRemoveDaihyosen(t *testing.T) {
 // match returns 400 with "pool_match" because daihyosen is knockout-only.
 func TestDaihyosenHandler_PoolMatchReturnsError(t *testing.T) {
 	r, store, _, _, _ := setupDaihyosenTestRouter(t)
-	require.NoError(t, store.SaveCompetition(&state.Competition{ID: "c1"}))
+	require.NoError(t, store.SaveCompetition(&state.Competition{ID: "c1", Kind: "team", TeamSize: 3}))
 	require.NoError(t, store.SavePoolMatches("c1", []state.MatchResult{
 		{ID: "Pool A-0", SideA: "TeamA", SideB: "TeamB"},
 	}))
@@ -573,14 +708,10 @@ func TestDaihyosenHandler_PoolMatchReturnsError(t *testing.T) {
 
 // TestRemoveDaihyosen_PoolMatchWithStaleWinnerIDSucceeds is the round-2 Opus
 // review's finding 3: DELETE /daihyosen's `u := *match` inherits the stored
-// match's WinnerID/WinnerSide verbatim. POST can never reach a match with a
-// STALE WinnerID (AddDaihyosen rejects any "Pool "-prefixed id with
-// ErrPoolMatch before its own `u := *match`, and AddDaihyosen only succeeds
-// against a TIED, RUNNING encounter -- i.e. no Winner/WinnerID recorded yet
-// either way -- so the bracket projection's WinnerID is always empty here,
-// even though daihyosenBracketResult now projects a stamped BracketMatch's
-// real SideAID/SideBID/WinnerID faithfully, bc-brid), but DELETE has no
-// such gate: findMatchForDaihyosenTx dispatches purely on ID shape, so a
+// match's WinnerID/WinnerSide verbatim. POST can never reach a POOL match
+// (AddDaihyosen rejects any "Pool "-prefixed id with ErrPoolMatch before its
+// own `u := *match`), but DELETE has no such gate:
+// findMatchForDaihyosenTx dispatches purely on ID shape, so a
 // legacy/hand-edited POOL match row that has picked up an unscored
 // Position=-1 placeholder sub (this handler's normal removal target) CAN
 // carry real SideAID/SideBID plus a stale match-level WinnerID left over from
@@ -669,4 +800,219 @@ func TestRemoveDaihyosen_RunningWriteReadsNoStandings(t *testing.T) {
 	require.Len(t, matches, 1)
 	assert.Empty(t, matches[0].SubResults, "the daihyosen row is removed")
 	assert.Equal(t, state.MatchStatusRunning, matches[0].Status)
+}
+
+// daihyosenStampRouter mounts both daihyosen endpoints over a fresh store with
+// a broadcaster that records what went out, and seeds a running knockout
+// encounter B1 last written at storedAt. withRow gives it an unscored
+// representative bout (what a remove acts on); without one it is tied at 0-0
+// (what an add acts on).
+func daihyosenStampRouter(t *testing.T, compID string, storedAt int64, withRow bool) (*gin.Engine, *state.Store, *recordingBroadcaster) {
+	t.Helper()
+	store, err := state.NewStore(t.TempDir())
+	require.NoError(t, err)
+	hub := &recordingBroadcaster{}
+	gin.SetMode(gin.TestMode)
+	r := gin.New()
+	RegisterDaihyosenHandlers(r.Group("/api"), engine.New(store), store, hub, store, NewFileVerifier(store))
+
+	require.NoError(t, store.SaveCompetition(&state.Competition{ID: compID, Kind: "team", TeamSize: 3}))
+	require.NoError(t, store.SaveParticipants(compID, []domain.Player{
+		{ID: "11111111-1111-4111-1111-111111111111", Name: "Alice", Dojo: "A"},
+	}))
+	bm := state.BracketMatch{ID: "B1", SideA: "TeamA", SideB: "TeamB", Status: state.MatchStatusRunning, ModifiedAt: storedAt}
+	if withRow {
+		bm.SubResults = []state.SubMatchResult{{Position: state.DaihyosenSubPosition, Decision: "daihyosen"}}
+	}
+	require.NoError(t, store.SaveBracket(compID, &state.Bracket{Rounds: [][]state.BracketMatch{{bm}}}))
+	return r, store, hub
+}
+
+// sendDaihyosen sends an add (POST) or a remove (DELETE) for B1 stamped at
+// modifiedAt, the body the SPA sends.
+func sendDaihyosen(t *testing.T, r *gin.Engine, method, compID string, modifiedAt int64) (int, map[string]any) {
+	t.Helper()
+	payload, err := json.Marshal(map[string]int64{"modifiedAt": modifiedAt})
+	require.NoError(t, err)
+	req := httptest.NewRequest(method, "/api/competitions/"+compID+"/matches/B1/daihyosen", bytes.NewReader(payload))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	var body map[string]any
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &body), "body: %s", w.Body.String())
+	return w.Code, body
+}
+
+func storedB1(t *testing.T, store *state.Store, compID string) state.BracketMatch {
+	t.Helper()
+	b, err := store.LoadBracket(compID)
+	require.NoError(t, err)
+	require.NotNil(t, b)
+	return b.Rounds[0][0]
+}
+
+func carriesDaihyosenRow(subs []state.SubMatchResult) bool {
+	return state.DaihyosenSubIndex(subs) >= 0
+}
+
+// TestDaihyosenWrites_CompeteOnTimestamps: the add and the remove carry the
+// client's stamp (bc-dhas) and are judged exactly as /decision is. A write
+// that applies moves the stored stamp to its own, so a copy of the match read
+// before it is older than the one it returns; one older than the stored
+// result, or stamped past the skew margin, is refused with 200
+// {"applied": false} and leaves nothing behind: no row change, no stamp, no
+// broadcast.
+func TestDaihyosenWrites_CompeteOnTimestamps(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		method  string
+		withRow bool
+	}{
+		{"add", http.MethodPost, false},
+		{"remove", http.MethodDelete, true},
+	} {
+		t.Run(tc.name+" applies and moves the stored stamp", func(t *testing.T) {
+			compID := "dh-stamp-applied-" + tc.name
+			now := time.Now().UnixMilli()
+			r, store, hub := daihyosenStampRouter(t, compID, now-60_000, tc.withRow)
+
+			code, body := sendDaihyosen(t, r, tc.method, compID, now)
+			require.Equal(t, http.StatusOK, code, "%v", body)
+			assert.NotContains(t, body, "applied")
+			result, ok := body["result"].(map[string]any)
+			require.True(t, ok, "%v", body)
+			assert.EqualValues(t, now, result["modifiedAt"], "the returned match carries the write's stamp")
+
+			bm := storedB1(t, store, compID)
+			assert.EqualValues(t, now, bm.ModifiedAt, "the stored stamp moved to the write's")
+			assert.Equal(t, !tc.withRow, carriesDaihyosenRow(bm.SubResults), "the write landed")
+			assert.Contains(t, hub.events, EventMatchUpdated)
+		})
+
+		t.Run(tc.name+" older than the stored result is superseded", func(t *testing.T) {
+			compID := "dh-stamp-superseded-" + tc.name
+			storedAt := time.Now().UnixMilli()
+			r, store, hub := daihyosenStampRouter(t, compID, storedAt, tc.withRow)
+
+			code, body := sendDaihyosen(t, r, tc.method, compID, storedAt-60_000)
+			require.Equal(t, http.StatusOK, code, "a refusal is never a 4xx/5xx; %v", body)
+			assert.Equal(t, false, body["applied"])
+			assert.Equal(t, "superseded", body["reason"])
+
+			bm := storedB1(t, store, compID)
+			assert.EqualValues(t, storedAt, bm.ModifiedAt, "the stored stamp stands")
+			assert.Equal(t, tc.withRow, carriesDaihyosenRow(bm.SubResults), "nothing was written")
+			assert.Empty(t, hub.events, "a refused write is broadcast to nobody")
+		})
+
+		t.Run(tc.name+" stamped past the skew margin is refused", func(t *testing.T) {
+			compID := "dh-stamp-skew-" + tc.name
+			storedAt := time.Now().UnixMilli() - 60_000
+			r, store, hub := daihyosenStampRouter(t, compID, storedAt, tc.withRow)
+
+			code, body := sendDaihyosen(t, r, tc.method, compID, time.Now().UnixMilli()+10_000)
+			require.Equal(t, http.StatusOK, code, "%v", body)
+			assert.Equal(t, false, body["applied"])
+			assert.Equal(t, "clock_skew", body["reason"])
+
+			bm := storedB1(t, store, compID)
+			assert.EqualValues(t, storedAt, bm.ModifiedAt, "the stored stamp stands")
+			assert.Equal(t, tc.withRow, carriesDaihyosenRow(bm.SubResults), "nothing was written")
+			assert.Empty(t, hub.events, "a refused write is broadcast to nobody")
+		})
+	}
+}
+
+// TestDaihyosenAdd_RefusesASecondRepresentativeBout: an encounter has one
+// representative bout. The tie the add checks counts none, so a second add
+// used to pass it and sit beside the first (bc-dhas); two devices adding at
+// once reach this as well as a crafted request.
+func TestDaihyosenAdd_RefusesASecondRepresentativeBout(t *testing.T) {
+	compID := "dh-second-add"
+	storedAt := time.Now().UnixMilli() - 60_000
+	r, store, hub := daihyosenStampRouter(t, compID, storedAt, true)
+
+	code, body := sendDaihyosen(t, r, http.MethodPost, compID, storedAt+1_000)
+	require.Equal(t, http.StatusConflict, code, "%v", body)
+	assert.Equal(t, "daihyosen_exists", body["error"])
+
+	bm := storedB1(t, store, compID)
+	rows := 0
+	for _, s := range bm.SubResults {
+		if s.Position == state.DaihyosenSubPosition {
+			rows++
+		}
+	}
+	assert.Equal(t, 1, rows, "the first row stays the only one")
+	assert.EqualValues(t, storedAt, bm.ModifiedAt, "nothing was written")
+	assert.Empty(t, hub.events, "a refused add is broadcast to nobody")
+}
+
+// TestDaihyosenRowAsTheAddReturnsItSurvivesAScoreWrite: when the team editor
+// unmounts with an edit owed while an add is out, the owed write is sent once
+// the add lands, carrying the representative-bout row exactly as the add
+// returned it (withServerDaihyosenRow, admin_scoring_team.jsx). PUT /score must
+// accept that row as it stands and keep it.
+func TestDaihyosenRowAsTheAddReturnsItSurvivesAScoreWrite(t *testing.T) {
+	store, err := state.NewStore(t.TempDir())
+	require.NoError(t, err)
+	eng := engine.New(store)
+	hub := NewHub()
+	gin.SetMode(gin.TestMode)
+	r := gin.New()
+	api := r.Group("/api")
+	RegisterDaihyosenHandlers(api, eng, store, hub, store, NewFileVerifier(store))
+	RegisterMatchHandlers(api, eng, store, store, hub, NewFileVerifier(store), store)
+
+	compID := "dh-owed-write"
+	require.NoError(t, store.SaveTournament(&state.Tournament{Name: "T", Courts: []string{"A"}}))
+	require.NoError(t, store.SaveCompetition(&state.Competition{
+		ID: compID, Format: state.CompFormatKnockout, TeamSize: 3, TeamMatchType: state.TeamMatchTypeFixed,
+	}))
+	require.NoError(t, store.SaveParticipants(compID, []domain.Player{
+		{ID: "11111111-1111-4111-1111-111111111111", Name: "TeamA", Dojo: "A"},
+		{ID: "22222222-2222-4222-2222-222222222222", Name: "TeamB", Dojo: "B"},
+	}))
+	addedAt := time.Now().UnixMilli()
+	require.NoError(t, store.SaveBracket(compID, &state.Bracket{Rounds: [][]state.BracketMatch{{{
+		ID: "B1", SideA: "TeamA", SideB: "TeamB", Status: state.MatchStatusRunning, ModifiedAt: addedAt - 60_000,
+	}}}}))
+
+	code, added := sendDaihyosen(t, r, http.MethodPost, compID, addedAt)
+	require.Equal(t, http.StatusOK, code, "%v", added)
+	result, ok := added["result"].(map[string]any)
+	require.True(t, ok, "%v", added)
+	subs, ok := result["subResults"].([]any)
+	require.True(t, ok, "%v", result)
+	var row map[string]any
+	for _, s := range subs {
+		if m, ok := s.(map[string]any); ok && m["position"] == float64(state.DaihyosenSubPosition) {
+			row = m
+		}
+	}
+	require.NotNil(t, row, "the add returned its row: %v", subs)
+
+	// The owed edit: a point struck on bout 1 while the add was out, stamped
+	// at the tap, which came after the add was sent.
+	w := putScore(t, r, compID, "B1", map[string]any{
+		"sideA": "TeamA", "sideB": "TeamB", "status": "running", "modifiedAt": addedAt + 500,
+		"subResults": []any{
+			map[string]any{"position": 1, "sideA": "", "sideB": "", "ipponsA": []string{"M"}, "ipponsB": []string{}, "winner": "TeamA", "decision": ""},
+			row,
+		},
+	})
+	require.Equal(t, http.StatusOK, w.Code, "body: %s", w.Body.String())
+	assert.NotContains(t, w.Body.String(), `"applied":false`)
+
+	bm := storedB1(t, store, compID)
+	assert.True(t, carriesDaihyosenRow(bm.SubResults), "the row the add returned is kept: %+v", bm.SubResults)
+	var bout1 *state.SubMatchResult
+	for i := range bm.SubResults {
+		if bm.SubResults[i].Position == 1 {
+			bout1 = &bm.SubResults[i]
+		}
+	}
+	require.NotNil(t, bout1, "%+v", bm.SubResults)
+	assert.Equal(t, []string{"M"}, bout1.IpponsA, "and so is the owed edit")
+	assert.EqualValues(t, addedAt+500, bm.ModifiedAt)
 }

@@ -158,11 +158,12 @@ func NewRouterWithHub(store *state.Store, eng *engine.Engine, res *resources.Res
 	// GET /competitions/:id/competitor-status, eligibility state is
 	// derivable from public match results; viewer/display surfaces need it
 	// without admin credentials.
-	// GET /competitions/:id/teams/:tid/lineups/:round, lineup assignments
-	// are visible to coaches and spectators; AdminLineup loads them before
-	// the operator has entered the admin password.
+	// GET /competitions/:id/teams/:tid/lineups/:round and
+	// .../match-lineups/:matchId, lineup assignments are visible to
+	// coaches and spectators; AdminLineup loads them before the operator
+	// has entered the admin password.
 	RegisterPublicEligibilityHandlers(api, store)
-	RegisterPublicLineupHandlers(api, store)
+	RegisterPublicLineupHandlers(api, store, store)
 	RegisterPublicSwissHandlers(api, store, eng)
 	RegisterPublicLeagueHandlers(api, eng)
 	RegisterPublicAnnouncementHandlers(api, store)
@@ -203,9 +204,9 @@ func NewRouterWithHub(store *state.Store, eng *engine.Engine, res *resources.Res
 	RegisterDecisionHandlers(adminSmallBody, eng, store, store, hub)
 	RegisterEligibilityHandlers(adminSmallBody, store, hub)
 	RegisterReinstateHandler(adminSmallBody, eng, hub)
-	RegisterLineupHandlers(adminSmallBody, store, store, store, hub)
-	RegisterSquadHandlers(adminSmallBody, store, store, hub)
-	RegisterDaihyosenHandlers(adminSmallBody, eng, store, hub)
+	RegisterLineupHandlers(adminSmallBody, store, store, store, hub, store, verifier)
+	RegisterSquadHandlers(adminSmallBody, store, store, hub, store, verifier)
+	RegisterDaihyosenHandlers(adminSmallBody, eng, store, hub, store, verifier)
 	RegisterLeagueTiebreakHandlers(adminSmallBody, eng, store, hub)
 	RegisterSwissHandlers(adminSmallBody, store, eng, hub)
 
@@ -220,7 +221,8 @@ func NewRouterWithHub(store *state.Store, eng *engine.Engine, res *resources.Res
 	// Sponsor uploads (mp-c38), multipart logo upload needs envelope
 	// headroom for the file plus boundary/form-field overhead; so it gets
 	// its own 2 MB group separate from the 1 MB JSON tier. DELETE rides
-	// on the same group (DELETE skips the cap by method anyway).
+	// on the same group; a DELETE sends no body, and one that did would be
+	// capped like a POST (MaxBodyBytes).
 	adminSponsorBody := adminGroup(r, SponsorMaxBodyBytes, verifier, store)
 	RegisterSponsorHandlers(adminSponsorBody, store, hub)
 

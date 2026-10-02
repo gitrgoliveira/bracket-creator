@@ -42,7 +42,6 @@ const EXPECTED_EXPORTS = [
   'reconcileFoulsAtOpen',
   'nextFoulOnDecrement',
   'resolveDecisionPassword',
-  'assertRunningWritePersisted',
   'buildDecisionBody',
   'submitDecisionRequest',
   'makeSubmitDecision',

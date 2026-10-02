@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"sort"
-	"strconv"
 	"strings"
 
 	excelize "github.com/xuri/excelize/v2"
@@ -41,9 +40,8 @@ var ErrCompetitionNotFound = errors.New("competition not found")
 // + standings) and elimination bracket results are included as literal values,
 // so the workbook is suitable for archiving after a live event.
 //
-// This is a SEPARATE path from Engine.ExportCompetitionXlsx (the blank-template
-// export). That function and the existing GET /api/competitions/:id/export
-// endpoint are not modified.
+// This is a SEPARATE path from Engine.ExportCompetitionXlsx, the stored-draw
+// export behind GET /api/competitions/:id/export and the PDF prints.
 //
 // Download filename served by the handler: "results-<compID>.xlsx".
 func BuildResultsWorkbook(store *state.Store, eng *engine.Engine, compID string) ([]byte, error) {
@@ -57,7 +55,7 @@ func BuildResultsWorkbook(store *state.Store, eng *engine.Engine, compID string)
 
 	// Swiss has no pools and no static bracket (results are per-round pairings and
 	// a running standings table), so there is nothing to render into the pool/tree
-	// layout this builder produces. Block it explicitly, matching the blank-template
+	// layout this builder produces. Block it explicitly, matching the stored-draw
 	// export, rather than emitting an empty workbook. A dedicated Swiss sheet is
 	// tracked as follow-up work.
 	if comp.Format == state.CompFormatSwiss {
@@ -77,8 +75,9 @@ func BuildResultsWorkbook(store *state.Store, eng *engine.Engine, compID string)
 	// LoadPools restores only pool membership (pools.csv), not matches
 	// (pool-matches.csv). PrintPoolMatches renders the per-match grid from
 	// pool.Matches, so reconstruct it from the stored results before rendering,
-	// otherwise the grid (and the scores overlaid onto it) is empty.
-	poolOrdinals := attachPoolMatches(pools, matchResults)
+	// the same way the stored-draw export does, otherwise the grid (and the
+	// scores overlaid onto it) is empty.
+	poolOrdinals := engine.AttachPoolMatches(pools, matchResults)
 
 	standings, err := eng.CalculatePoolStandings(compID)
 	if err != nil {
@@ -91,7 +90,7 @@ func BuildResultsWorkbook(store *state.Store, eng *engine.Engine, compID string)
 	}
 
 	// The tournament, loaded ONCE and strictly (mp-yuy8 criterion 6), matching
-	// the blank-template export (Engine.ExportCompetitionXlsx): a corrupt
+	// the stored-draw export (Engine.ExportCompetitionXlsx): a corrupt
 	// tournament.md now aborts this export instead of CompetitionCourts
 	// silently degrading to the competition's own court list -- which prints
 	// the WRONG shiaijo names on every sheet for exactly the legacy records
@@ -109,7 +108,7 @@ func BuildResultsWorkbook(store *state.Store, eng *engine.Engine, compID string)
 		matchResultByID[mr.ID] = mr
 	}
 
-	// The shiaijo BY NAME, mirroring the blank-template export: a competition
+	// The shiaijo BY NAME, mirroring the stored-draw export: a competition
 	// allocated C and D must not have its sheets titled A and B. The count is
 	// read off the same list rather than derived a second time.
 	courts := engine.CompetitionCourts(comp, tourn)
@@ -120,14 +119,14 @@ func BuildResultsWorkbook(store *state.Store, eng *engine.Engine, compID string)
 
 	// EliminationDraw owns the leaf order -- pool winners, or the frozen
 	// bracket's own leaves for a pure knockout competition -- and is shared
-	// with the blank-template export so the two exports of one competition
+	// with the stored-draw export so the two exports of one competition
 	// render the identical bracket, with numbering that matches the stored
 	// bracket overlayBracketScores fills in (mp-ndfu).
 	draw := engine.EliminationDraw(store, comp, pools, bracket, numCourts)
 
 	// Kachinuki Detail sheet's bout log (GAP 6): bout-by-bout log for
-	// kachinuki team competitions. Same opt-in semantics as the blank-
-	// template export (Engine.ExportCompetitionXlsx): the renderer is a
+	// kachinuki team competitions. Same opt-in semantics as the stored-draw
+	// export (Engine.ExportCompetitionXlsx): the renderer is a
 	// no-op for empty input, so fixed-format and individual comps are
 	// unaffected. Without this, the admin "Download results" workbook
 	// (which builds HERE, not via ExportCompetitionXlsx) had no bout log.
@@ -160,7 +159,7 @@ func BuildResultsWorkbook(store *state.Store, eng *engine.Engine, compID string)
 	// snapshot and the pool-oriented renderer's formula references have
 	// nowhere valid to point without a pool data sheet.
 	// The second return value (the knockout-only numbered roster) is the
-	// blank-template export's own extra (its Tags sheet); this results
+	// stored-draw export's own extra (its Tags sheet); this results
 	// export has no such extra and discards it.
 	poolsByCourt, _, err := eng.RenderCompetitionWorkbook(f, comp, pools, bracket, courts, courtOfPool, draw, kachinukiMatches)
 	if err != nil {
@@ -175,10 +174,15 @@ func BuildResultsWorkbook(store *state.Store, eng *engine.Engine, compID string)
 	// to Print, Kachinuki Detail) touches either sheet again, so the order
 	// shift changes nothing about what ends up in either cell. ----
 
+	// Each team block's bout-row count, the same one the shared pipeline
+	// printed the blocks with, so every row these overlays address lies
+	// inside its own block.
+	boutRows := comp.TeamBoutRows()
+
 	// Pool Matches: W/L/T/RANK formula cells collapse to 0 after a store
 	// round-trip (documented at cmd/create_handler.go:25), so overwrite them
 	// with literal values from the engine.
-	if err := overlayPoolScores(f, pools, matchResultByID, poolOrdinals, comp.TeamSize, comp.Mirror, poolsByCourt, comp.Engi); err != nil {
+	if err := overlayPoolScores(f, pools, matchResultByID, poolOrdinals, boutRows, poolsByCourt, comp.Engi); err != nil {
 		return nil, fmt.Errorf("export: overlay pool scores: %w", err)
 	}
 	if err := overlayPoolStandings(f, pools, standings, comp.TeamSize, poolsByCourt, comp.Engi); err != nil {
@@ -202,19 +206,19 @@ func BuildResultsWorkbook(store *state.Store, eng *engine.Engine, compID string)
 	if bracket != nil {
 		bracketByNum := buildBracketMatchIndex(bracket)
 		thirdPlaceMatch := bracket.ThirdPlaceMatch
-		if err := overlayBracketScores(f, bracketByNum, comp.TeamSize, comp.Mirror, comp.Engi, thirdPlaceMatch); err != nil {
+		if err := overlayBracketScores(f, bracketByNum, boutRows, comp.Engi, thirdPlaceMatch); err != nil {
 			return nil, fmt.Errorf("export: overlay bracket scores: %w", err)
 		}
-		// Knockout competitions have no pool data sheet, so the pool-oriented renderer emits
-		// broken ''! references for the entrant name cells. Overwrite them with
-		// the stored bracket's literal names (empty for unresolved slots) so the
-		// sheet is a valid literal snapshot with no broken formulas.
+		// A knockout-only competition's entrant cells are formulas into the data
+		// sheet and the earlier matches' winner cells, which this results
+		// snapshot never fills in; overwrite them with the stored bracket's names,
+		// a side still to be decided as "M n".
 		//
 		// comp.EffectiveFormat(), not comp.Format directly: an unset Format ("")
 		// is standalone knockout too (generation's default case), so it has the
 		// identical no-pool-data-sheet shape and needs the identical overlay.
 		if len(pools) == 0 && comp.EffectiveFormat() == state.CompFormatKnockout {
-			if err := overlayKnockoutBracketNames(f, bracketByNum, comp.TeamSize, comp.Mirror); err != nil {
+			if err := overlayKnockoutBracketNames(f, bracketByNum, engine.PrintedBracket(bracket), boutRows); err != nil {
 				return nil, fmt.Errorf("export: overlay knockout names: %w", err)
 			}
 		}
@@ -227,88 +231,6 @@ func BuildResultsWorkbook(store *state.Store, eng *engine.Engine, compID string)
 	return buf.Bytes(), nil
 }
 
-// attachPoolMatches reconstructs each pool's Matches slice from the stored pool
-// results. LoadPools restores only pool membership; the matches live in
-// pool-matches.csv (loaded separately). PrintPoolMatches renders its per-match
-// grid from pool.Matches, and the ordinal overlay in overlayPoolScores /
-// overlayTeamPoolScores maps the N-th grid row back to its result.
-//
-// Because an unresolvable match is SKIPPED (see below), pool.Matches can be
-// non-contiguous relative to the stored "<Pool>-<suffix>" IDs, so this returns
-// poolOrdinals: poolName -> the original numeric suffix of each KEPT match, in
-// grid order. The overlays use poolOrdinals[pool][i] to rebuild the result ID for
-// grid row i, rather than assuming row i == suffix i. Tiebreak/daihyosen results
-// (non-numeric suffix, e.g. "Pool A-DH-0") are skipped.
-//
-// Each side is resolved to its pool Player by the authoritative SideAID/SideBID
-// UUID ONLY (operator ruling bc-pnum): a pool-matches.csv row and a pools.csv
-// Player both carry an id field, so there is no name fallback. A row with no
-// id for a side, or an id this pool's own roster does not carry, resolves to
-// no Player at all and the match is skipped below.
-func attachPoolMatches(pools []helper.Pool, matchResults []state.MatchResult) map[string][]int {
-	poolOrdinals := make(map[string][]int, len(pools))
-	for pi := range pools {
-		p := &pools[pi]
-		prefix := p.PoolName + "-"
-
-		type idxRes struct {
-			idx int
-			mr  state.MatchResult
-		}
-		var mine []idxRes
-		for _, mr := range matchResults {
-			if !strings.HasPrefix(mr.ID, prefix) {
-				continue
-			}
-			n, err := strconv.Atoi(mr.ID[len(prefix):])
-			if err != nil {
-				continue // tiebreak/daihyosen or malformed suffix
-			}
-			mine = append(mine, idxRes{n, mr})
-		}
-		sort.Slice(mine, func(i, j int) bool { return mine[i].idx < mine[j].idx })
-
-		byID := make(map[string]*helper.Player, len(p.Players))
-		for i := range p.Players {
-			pl := &p.Players[i]
-			if pl.ID != "" {
-				byID[pl.ID] = pl
-			}
-		}
-		// ID-only (operator ruling bc-pnum): the side UUID (SideAID/SideBID
-		// from pool-matches.csv) is the only resolution path. Names are not
-		// unique within a competition (same name, different dojo is
-		// allowed), so a name-only lookup could attach the wrong Player and
-		// mislabel the grid; an empty or foreign id simply resolves to nil.
-		resolve := func(id string) *helper.Player {
-			if id == "" {
-				return nil
-			}
-			return byID[id]
-		}
-
-		p.Matches = make([]helper.Match, 0, len(mine))
-		ords := make([]int, 0, len(mine))
-		for _, ir := range mine {
-			sideA := resolve(ir.mr.SideAID)
-			sideB := resolve(ir.mr.SideBID)
-			// A side that resolves to no pool member (e.g. a participant removed
-			// after the match was recorded, or partially-written state) would be a
-			// nil *Player, which PrintPoolMatches dereferences unconditionally and
-			// panics on. Skip the unresolvable match: the skeleton row is simply left
-			// without an overlaid score, consistent with the frozen-snapshot semantics.
-			// The skip is why we track the original ordinal separately below.
-			if sideA == nil || sideB == nil {
-				continue
-			}
-			p.Matches = append(p.Matches, helper.Match{SideA: sideA, SideB: sideB})
-			ords = append(ords, ir.idx)
-		}
-		poolOrdinals[p.PoolName] = ords
-	}
-	return poolOrdinals
-}
-
 // ---------- pool score overlay ----------
 
 // overlayPoolScores writes literal score values into the Pool Matches sheet.
@@ -316,17 +238,17 @@ func attachPoolMatches(pools []helper.Pool, matchResults []state.MatchResult) ma
 // names - excelize's GetRows does NOT evaluate these formulas, so we cannot
 // match by player names. Instead we use ordinal position.
 //
-// Individual pools render as a COMPACT block: one "Red ... vs ... White" header
+// Individual pools render as a COMPACT block: one "White ... vs ... Red" header
 // per pool, immediately followed by one row per round-robin match (in pool.Matches
 // order). So the N-th header in a court column is the N-th pool assigned to that
-// court, and match i sits at header row + 1 + i. By default SideA (Red) is the
-// left column and SideB (White) the right; mirror swaps the two score columns.
-func overlayPoolScores(f *excelize.File, pools []helper.Pool, resultByID map[string]state.MatchResult, poolOrdinals map[string][]int, teamSize int, mirror bool, poolsByCourt [][]int, engi bool) error {
+// court, and match i sits at header row + 1 + i. SideB (White) is the left
+// column and SideA (Red) the right (helper.WhiteLeft).
+func overlayPoolScores(f *excelize.File, pools []helper.Pool, resultByID map[string]state.MatchResult, poolOrdinals map[string][]int, boutRows int, poolsByCourt [][]int, engi bool) error {
 	if len(pools) == 0 {
 		return nil
 	}
-	if teamSize != 0 {
-		return overlayTeamPoolScores(f, pools, resultByID, poolOrdinals, teamSize, mirror, poolsByCourt)
+	if boutRows != 0 {
+		return overlayTeamPoolScores(f, pools, resultByID, poolOrdinals, boutRows, poolsByCourt)
 	}
 
 	sheetName := helper.SheetPoolMatches
@@ -348,7 +270,7 @@ func overlayPoolScores(f *excelize.File, pools []helper.Pool, resultByID map[str
 			if startColIdx >= len(row) {
 				continue
 			}
-			if row[startColIdx] != "Red" && row[startColIdx] != "White" {
+			if row[startColIdx] != helper.MatchHeaderLeftLabel() {
 				continue
 			}
 
@@ -360,17 +282,16 @@ func overlayPoolScores(f *excelize.File, pools []helper.Pool, resultByID map[str
 			}
 			pool := pools[poolsByCourt[c][poolOrder]]
 
-			// Column layout (1-based) for the default mirror=false template:
-			// startCol+1 = left victories (Red/SideA), startCol+3 = middle/vs,
-			// startCol+5 = right victories (White/SideB). With mirror=true the
-			// sides swap physically (White left, Red right); writeScoreRowCells
-			// owns that display swap and derives the columns from courtStartCol.
+			// Column layout (1-based): startCol+1 = left victories
+			// (White/SideB), startCol+3 = middle/vs, startCol+5 = right
+			// victories (Red/SideA). writeScoreRowCells owns that placement
+			// and derives the columns from courtStartCol.
 			courtStartCol := 1 + c*helper.CourtsColumnsPerCourt
 
 			ords := poolOrdinals[pool.PoolName]
 			for i := range pool.Matches {
 				// Grid row i maps back to its stored result via the ORIGINAL numeric
-				// suffix recorded by attachPoolMatches (row i is NOT necessarily suffix
+				// suffix recorded by engine.AttachPoolMatches (row i is NOT necessarily suffix
 				// i once an unresolvable match has been skipped). A missing result is
 				// simply left blank.
 				if i >= len(ords) {
@@ -392,13 +313,10 @@ func overlayPoolScores(f *excelize.File, pools []helper.Pool, resultByID map[str
 					// derivation, so it rides the else branch and never
 					// touches engi flag counts.
 					scoreA, scoreB = DefaultWinMaruAB(
-						IpponsScore(mr.IpponsA), IpponsScore(mr.IpponsB),
-						mr.Decision, mr.Encho, domain.WinnerAttribution{
-							WinnerID: mr.WinnerID, SideAID: mr.SideAID, SideBID: mr.SideBID,
-							Winner: mr.Winner, SideA: mr.SideA, SideB: mr.SideB,
-						})
+						domain.IpponsScore(mr.IpponsA), domain.IpponsScore(mr.IpponsB),
+						mr.Decision, mr.Encho, mr.Attribution())
 				}
-				writeScoreRowCells(f, sheetName, courtStartCol, excelRow, scoreA, scoreB, mr, mirror)
+				writeScoreRowCells(f, sheetName, courtStartCol, excelRow, scoreA, scoreB, mr)
 			}
 		}
 	}
@@ -410,14 +328,14 @@ func overlayPoolScores(f *excelize.File, pools []helper.Pool, resultByID map[str
 // summary onto the team pool-match layout produced by PrintPoolMatches when
 // teamMatches > 0. The layout per encounter (see printSinglePool team branch):
 //
-//	Red header row      (scanned: start col == "Red")
-//	team names / summary row  = Red row + 1  (holds IV/PW summary: lV/lP left, rV/rP right)
-//	sub-match rows      = Red row + 2 .. Red row + 1 + teamSize (ordinals 1..teamSize)
+//	side-label header row  (scanned: start col == "White")
+//	team names / summary row  = header row + 1  (holds IV/PW summary: lV/lP left, rV/rP right)
+//	sub-match rows      = header row + 2 .. header row + 1 + boutRows (ordinals 1..boutRows)
 //
 // It uses the same ordinal-position matching as the individual path: the N-th
-// "Red" header in a court's column band corresponds to the N-th match across
+// side-label header in a court's column band corresponds to the N-th match across
 // that court's pools, in pool order.
-func overlayTeamPoolScores(f *excelize.File, pools []helper.Pool, resultByID map[string]state.MatchResult, poolOrdinals map[string][]int, teamSize int, mirror bool, poolsByCourt [][]int) error {
+func overlayTeamPoolScores(f *excelize.File, pools []helper.Pool, resultByID map[string]state.MatchResult, poolOrdinals map[string][]int, boutRows int, poolsByCourt [][]int) error {
 	sheetName := helper.SheetPoolMatches
 
 	courtMatches := buildCourtMatchJobs(pools, poolsByCourt, poolOrdinals)
@@ -438,7 +356,7 @@ func overlayTeamPoolScores(f *excelize.File, pools []helper.Pool, resultByID map
 			if startColIdx >= len(row) {
 				continue
 			}
-			if row[startColIdx] != "Red" && row[startColIdx] != "White" {
+			if row[startColIdx] != helper.MatchHeaderLeftLabel() {
 				continue
 			}
 
@@ -460,17 +378,17 @@ func overlayTeamPoolScores(f *excelize.File, pools []helper.Pool, resultByID map
 			}
 
 			courtStartCol := 1 + c*helper.CourtsColumnsPerCourt
-			// summary row = Red header row + 1 (1-based excel row).
+			// summary row = side-label header row + 1 (1-based excel row).
 			summaryExcelRow := rowIdx + 2
-			writeTeamSummaryCells(f, sheetName, courtStartCol, summaryExcelRow, mr, mirror)
+			writeTeamSummaryCells(f, sheetName, courtStartCol, summaryExcelRow, mr)
 
-			// Sub-match rows start two rows below the Red header (1-based).
+			// Sub-match rows start two rows below the side-label header (1-based).
 			// credit: same call writeTeamSummaryCells makes internally, so
 			// the summary row and the bout rows below agree on which side a
 			// default-win ruling credits.
 			subStartExcelRow := rowIdx + 3
 			credit := state.DefaultWinCreditSide(mr.Status, mr.Decision, mr.DecisionBy, mr.Attribution())
-			writeTeamSubMatchScores(f, sheetName, courtStartCol, subStartExcelRow, mr.SubResults, teamSize, mirror, mr.SideA, mr.SideB, credit)
+			writeTeamSubMatchScores(f, sheetName, courtStartCol, subStartExcelRow, mr.SubResults, boutRows, mr.SideA, mr.SideB, credit)
 		}
 	}
 
@@ -506,19 +424,19 @@ func buildCourtMatchJobs(pools []helper.Pool, poolsByCourt [][]int, poolOrdinals
 //	lVCol (startCol+1) = left IV,  lPCol (startCol+2) = left PW
 //	rVCol (startCol+5) = right IV, rPCol (startCol+4) = right PW
 //
-// SideA is Red (left by default), SideB is Shiro (right); mirror swaps sides.
+// SideA is Aka (Red, right), SideB is Shiro (White, left).
 // The middle "vs" cell carries only the encounter's single middle mark
 // (X for a drawn encounter, (DH) when it went to a representative bout);
 // encounter-level result marks (Kiken/Fus./Ht) ride in the competitor's IV
 // cell, next to their victory count.
-func writeTeamSummaryCells(f *excelize.File, sheetName string, courtStartCol, excelRow int, mr state.MatchResult, mirror bool) {
+func writeTeamSummaryCells(f *excelize.File, sheetName string, courtStartCol, excelRow int, mr state.MatchResult) {
 	lVCol := colNum(courtStartCol + 1)
 	lPCol := colNum(courtStartCol + 2)
 	rPCol := colNum(courtStartCol + 4)
 	rVCol := colNum(courtStartCol + 5)
 
 	att := mr.Attribution()
-	lMark, rMark := SideMarksLR(mr.Decision, mr.HanteiDecided(), att, mirror)
+	lMark, rMark := SideMarksLR(mr.Decision, mr.HanteiDecided(), att)
 
 	// credit is state.DefaultWinCreditSide's answer for THIS match: which
 	// side (if any) a default-win ruling (kiken/fusenpai/fusensho) closing
@@ -530,12 +448,11 @@ func writeTeamSummaryCells(f *excelize.File, sheetName string, courtStartCol, ex
 	credit := state.DefaultWinCreditSide(mr.Status, mr.Decision, mr.DecisionBy, att)
 	line := state.TeamResultFrom(mr.SubResults, mr.SideA, mr.SideB, credit)
 	if line != nil {
-		// SideA = Aka, SideB = Shiro. Left is Aka unless mirror.
-		leftIV, leftPW := line.AkaIV, line.AkaPW
-		rightIV, rightPW := line.ShiroIV, line.ShiroPW
-		if mirror {
-			leftIV, leftPW, rightIV, rightPW = rightIV, rightPW, leftIV, leftPW
-		}
+		// SideA = Aka, SideB = Shiro: Shiro's figures on the left, Aka's on
+		// the right, through helper.WhiteLeft like every other side-ordered
+		// pair this export writes.
+		leftIV, rightIV := helper.WhiteLeft(line.AkaIV, line.ShiroIV)
+		leftPW, rightPW := helper.WhiteLeft(line.AkaPW, line.ShiroPW)
 		setIVCellWithMark(f, sheetName, lVCol, excelRow, leftIV, lMark)
 		setIntCellDirect(f, sheetName, lPCol, excelRow, leftPW)
 		setIVCellWithMark(f, sheetName, rVCol, excelRow, rightIV, rMark)
@@ -564,25 +481,18 @@ func writeTeamSummaryCells(f *excelize.File, sheetName string, courtStartCol, ex
 // writeScoreRowCells writes an individual match's score row: each side's
 // score joined with its result mark (Kiken/Fus./Ht ride in the competitor's
 // cell), and the single middle mark. Takes SIDE-ordered scores (A = Aka,
-// B = Shiro) and owns the display swap itself — like writeTeamSubMatchScores —
-// so no caller re-enforces the mirror rule. Shared by the pool and bracket
-// overlays so the cell contract lives in one place.
-func writeScoreRowCells(f *excelize.File, sheetName string, courtStartCol, excelRow int, scoreA, scoreB string, mr state.MatchResult, mirror bool) {
-	leftScore, rightScore := scoreA, scoreB
-	lFoul, rFoul := HansokuMark(mr.HansokuA), HansokuMark(mr.HansokuB)
-	if mirror {
-		leftScore, rightScore = scoreB, scoreA
-		lFoul, rFoul = rFoul, lFoul
-	}
-	lMark, rMark := SideMarksLR(mr.Decision, mr.HanteiDecided(), domain.WinnerAttribution{
-		WinnerID: mr.WinnerID, SideAID: mr.SideAID, SideBID: mr.SideBID,
-		Winner: mr.Winner, SideA: mr.SideA, SideB: mr.SideB,
-	}, mirror)
+// B = Shiro) and places them White-left itself (helper.WhiteLeft), like
+// writeTeamSubMatchScores, so no caller orders the columns. Shared by the
+// pool and bracket overlays so the cell contract lives in one place.
+func writeScoreRowCells(f *excelize.File, sheetName string, courtStartCol, excelRow int, scoreA, scoreB string, mr state.MatchResult) {
+	leftScore, rightScore := helper.WhiteLeft(scoreA, scoreB)
+	lFoul, rFoul := helper.WhiteLeft(HansokuMark(mr.HansokuA), HansokuMark(mr.HansokuB))
+	lMark, rMark := SideMarksLR(mr.Decision, mr.HanteiDecided(), mr.Attribution())
 	// The outstanding-hansoku ▲ rides the cell's OUTER edge — nearest that
 	// side's name column — per FIK Table 2 (White's ▲ far left, Red's far
 	// right) and matching the scoreboard's placement between name and slots.
-	setCellStr(f, sheetName, colNum(courtStartCol+1), excelRow, joinSp(lFoul, joinSp(leftScore, lMark)))
-	setCellStr(f, sheetName, colNum(courtStartCol+5), excelRow, joinSp(joinSp(rightScore, rMark), rFoul))
+	setCellStr(f, sheetName, colNum(courtStartCol+1), excelRow, domain.JoinNonEmpty(lFoul, domain.JoinNonEmpty(leftScore, lMark)))
+	setCellStr(f, sheetName, colNum(courtStartCol+5), excelRow, domain.JoinNonEmpty(domain.JoinNonEmpty(rightScore, rMark), rFoul))
 	writeMiddleMarkCell(f, sheetName, courtStartCol, excelRow, mr.Decision, mr.Encho)
 }
 
@@ -597,10 +507,6 @@ func writeMiddleMarkCell(f *excelize.File, sheetName string, courtStartCol, exce
 
 // bracketMatchResultView adapts a BracketMatch to the MatchResult shape the
 // shared row writers consume (they read only the result fields).
-// Deliberately omits SideAID/SideBID/WinnerID (bc-brid added them to
-// BracketMatch, but this export path was not converted; see the id-fallback
-// comment at this function's call site) -- the row writers below stay on
-// the pre-existing name-based attribution.
 func bracketMatchResultView(bm *state.BracketMatch) state.MatchResult {
 	return state.MatchResult{
 		SideA:  bm.SideA,
@@ -647,16 +553,20 @@ func setIVCellWithMark(f *excelize.File, sheetName, col string, row, iv int, mar
 		setIntCellDirect(f, sheetName, col, row, iv)
 		return
 	}
-	setCellStr(f, sheetName, col, row, joinSp(fmt.Sprintf("%d", iv), mark))
+	setCellStr(f, sheetName, col, row, domain.JoinNonEmpty(fmt.Sprintf("%d", iv), mark))
 }
 
 // writeTeamSubMatchScores writes each sub-bout's ippon letters onto the team
-// sub-match rows. Left ippons -> lVCol (startCol+1), right -> rVCol (startCol+5),
-// middle "vs" -> tie marker / suffix. subResults are keyed by Position (1-based);
-// the daihyosen placeholder (Position < 0) is skipped so its blank row stays clean.
-// teamSize bounds the number of sub-match rows the grid actually has; a Position
-// outside [1, teamSize] (corrupted state) is skipped rather than writing into the
-// next encounter's cells. Shared by the pool sheet and overlayTeamBracketScores.
+// sub-match rows. Shiro's (SideB) ippons -> lVCol (startCol+1), Aka's
+// (SideA) -> rVCol (startCol+5), middle "vs" -> tie marker / suffix.
+// subResults are keyed by Position (1-based); the daihyosen placeholder
+// (Position < 0) is skipped so its blank row stays clean.
+// boutRows is the number of bout rows the block actually has
+// (state.Competition.TeamBoutRows); a Position outside [1, boutRows] is skipped
+// rather than writing into the next encounter's cells: corrupted state, or a
+// kachinuki encounter that fielded reserves past its block, whose later bouts
+// only the Kachinuki Detail sheet lists. Shared by the pool sheet and
+// overlayTeamBracketScores.
 // matchSideA/matchSideB are the ENCOUNTER's team names. A fixed-order bout
 // settles at the match level, so its row records no per-fighter identity
 // (bc-dnst) and its Winner names the TEAM: without these, SubBoutAttribution
@@ -674,12 +584,12 @@ func setIVCellWithMark(f *excelize.File, sheetName, col string, row, iv int, mar
 // mark names the ONE competitor who withdrew and already rides the summary
 // row's IV cell. domain.MatchSideNone reproduces the pre-credit behaviour
 // exactly (an unfought bout's cells stay blank).
-func writeTeamSubMatchScores(f *excelize.File, sheetName string, courtStartCol, subStartExcelRow int, subResults []state.SubMatchResult, teamSize int, mirror bool, matchSideA, matchSideB string, credit domain.MatchSide) {
+func writeTeamSubMatchScores(f *excelize.File, sheetName string, courtStartCol, subStartExcelRow int, subResults []state.SubMatchResult, boutRows int, matchSideA, matchSideB string, credit domain.MatchSide) {
 	lVCol := colNum(courtStartCol + 1)
 	rVCol := colNum(courtStartCol + 5)
 
 	for _, sub := range subResults {
-		if sub.Position <= 0 || sub.Position > teamSize {
+		if sub.Position <= 0 || sub.Position > boutRows {
 			continue // skip daihyosen placeholder / unpositioned / out-of-range rows
 		}
 		// state.SubBoutEffectiveResult substitutes the FIK default-win maru
@@ -693,46 +603,25 @@ func writeTeamSubMatchScores(f *excelize.File, sheetName string, courtStartCol, 
 		// Sub-match row for Position P is the P-th sub row (1-based Position).
 		excelRow := subStartExcelRow + (sub.Position - 1)
 
-		// ONE attribution per bout row, shared by both marks below, because
-		// they name the SAME winner: the maru fallback and the Kiken/Fus.
-		// mark landing in different cells is the incoherence DefaultWinMaruAB's
-		// own doc warns about. bc-pnum: a numbered team bout names individual
-		// PLAYERS, whose names are not unique by rule, so the row's member ids
-		// decide (domain.SubBoutAttribution, the same owner the individual
-		// victory uses) and a same-name pair no id can settle gets NO mark
-		// rather than one beside whichever fighter is written first --
-		// CLAUDE.md's accepted no-mark class (i). Before ids reached these
-		// rows this was the sideA-first convention, and the paragraph here
-		// said so; that is no longer true.
-		att := domain.SubBoutAttribution(sub.Attribution())
-		// A row that names no fighter is attributed by the encounter's own
-		// sides, which is what its Winner holds. Only when the row itself is
-		// silent: a row naming its fighters keeps deciding for itself, and a
-		// same-name pair (SideA == SideB, both non-empty) fails this same
-		// test, so it stays blanked as SubBoutAttribution left it rather than
-		// being re-attributed by team names, which ARE unique by rule.
-		// Asked of sub, not of att: Attribution() copies these two names
-		// verbatim and SubBoutAttribution only ever blanks a pair, so an
-		// att-side conjunct could restate this one but never narrow it.
-		if sub.SideA == "" && sub.SideB == "" {
-			att.SideA, att.SideB = matchSideA, matchSideB
-		}
+		// ONE attribution per bout row, shared by the maru fallback and the
+		// Kiken/Fus. mark because they name the same winner. The row's member
+		// ids decide, a same-name pair no id can settle gets no mark (CLAUDE.md's
+		// accepted no-mark class (i)), and a row naming no fighter falls back to
+		// the encounter's team names: domain.SubBoutAttributionForTeamRow owns
+		// both rules, shared with the Kachinuki Detail sheet.
+		att := domain.SubBoutAttributionForTeamRow(sub.Attribution(), matchSideA, matchSideB)
 		scoreA, scoreB := DefaultWinMaruAB(
-			IpponsScore(sub.IpponsA), IpponsScore(sub.IpponsB),
+			domain.IpponsScore(sub.IpponsA), domain.IpponsScore(sub.IpponsB),
 			sub.Decision, sub.Encho, att)
-		leftScore, rightScore := scoreA, scoreB
-		lFoul, rFoul := HansokuMark(sub.HansokuA), HansokuMark(sub.HansokuB)
-		if mirror {
-			leftScore, rightScore = scoreB, scoreA
-			lFoul, rFoul = rFoul, lFoul
-		}
-		lMark, rMark := SideMarksLR(sub.Decision, sub.HanteiDecided(), att, mirror)
+		leftScore, rightScore := helper.WhiteLeft(scoreA, scoreB)
+		lFoul, rFoul := helper.WhiteLeft(HansokuMark(sub.HansokuA), HansokuMark(sub.HansokuB))
+		lMark, rMark := SideMarksLR(sub.Decision, sub.HanteiDecided(), att)
 		// Outstanding-hansoku ▲ on the cell's outer edge, as in
 		// writeScoreRowCells (FIK Table 2; scoreboard parity).
-		if lScore := joinSp(lFoul, joinSp(leftScore, lMark)); lScore != "" {
+		if lScore := domain.JoinNonEmpty(lFoul, domain.JoinNonEmpty(leftScore, lMark)); lScore != "" {
 			setCellStr(f, sheetName, lVCol, excelRow, lScore)
 		}
-		if rScore := joinSp(joinSp(rightScore, rMark), rFoul); rScore != "" {
+		if rScore := domain.JoinNonEmpty(domain.JoinNonEmpty(rightScore, rMark), rFoul); rScore != "" {
 			setCellStr(f, sheetName, rVCol, excelRow, rScore)
 		}
 
@@ -988,14 +877,14 @@ func overlayTeamPoolStandings(f *excelize.File, pools []helper.Pool, standings m
 // thirdPlaceMatch is the bracket's bronze match (nil when this competition
 // does not require a single 3rd place -- see
 // state.Competition.RequiresSingleThirdPlace, bc-3rdp).
-func overlayBracketScores(f *excelize.File, bracketByNum map[int]state.BracketMatch, teamSize int, mirror bool, engi bool, thirdPlaceMatch *state.BracketMatch) error {
-	if teamSize != 0 {
+func overlayBracketScores(f *excelize.File, bracketByNum map[int]state.BracketMatch, boutRows int, engi bool, thirdPlaceMatch *state.BracketMatch) error {
+	if boutRows != 0 {
 		// Engi is individual-only; the team overlay renders ippon strings and
 		// would silently drop flag scores. Fail loudly if the invariant breaks.
 		if engi {
-			return fmt.Errorf("overlayBracketScores: engi is individual-only (teamSize=%d)", teamSize)
+			return fmt.Errorf("overlayBracketScores: engi is individual-only (boutRows=%d)", boutRows)
 		}
-		return overlayTeamBracketScores(f, bracketByNum, teamSize, mirror, thirdPlaceMatch)
+		return overlayTeamBracketScores(f, bracketByNum, boutRows, thirdPlaceMatch)
 	}
 	sheetName := helper.SheetEliminationMatches
 
@@ -1016,7 +905,7 @@ func overlayBracketScores(f *excelize.File, bracketByNum map[int]state.BracketMa
 			}
 
 			// Score row is 2 rows below the header:
-			//   header+1 = Red/White label row
+			//   header+1 = White/Red label row
 			//   header+2 = player/score row
 			scoreRowIdx := rowIdx + 2
 			if scoreRowIdx >= len(rows) {
@@ -1033,7 +922,7 @@ func overlayBracketScores(f *excelize.File, bracketByNum map[int]state.BracketMa
 			// middle cell, and the winner marker remain gated on
 			// MatchStatusCompleted below.
 			if cell == helper.ThirdPlaceLabel {
-				if !writeThirdPlaceEntrants(f, sheetName, bm, courtStartCol, excelRow, mirror) {
+				if !writeThirdPlaceEntrants(f, sheetName, bm, courtStartCol, excelRow) {
 					continue
 				}
 			}
@@ -1052,25 +941,17 @@ func overlayBracketScores(f *excelize.File, bracketByNum map[int]state.BracketMa
 				// (domain.HanteiMark). writeScoreRowCells below ALSO appends
 				// that mark via SideMarksLR (reading it off mrView), so
 				// rendering the array verbatim would double-print it:
-				// "MHt Ht". Render through IpponsScore instead, which filters
+				// "MHt Ht". Render through domain.IpponsScore instead, which filters
 				// non-scoring entries (the mark, the bye placeholder) exactly
 				// as the pool path (overlayPoolScores) already does — the
 				// mark then rides ONLY through the appended SideMarksLR
 				// suffix, matching the pool cell's "M Ht".
-				// Attributed by the row's own ids, the same triple
-				// writeScoreRowCells passes to SideMarksLR below: the maru
-				// fallback and the result mark compose one cell, so a
-				// same-name pairing must not be able to send them to
-				// different sides.
 				scoreA, scoreB = DefaultWinMaruAB(
-					IpponsScore(mrView.IpponsA), IpponsScore(mrView.IpponsB),
-					bm.Decision, bm.Encho, domain.WinnerAttribution{
-						WinnerID: bm.WinnerID, SideAID: bm.SideAID, SideBID: bm.SideBID,
-						Winner: bm.Winner, SideA: bm.SideA, SideB: bm.SideB,
-					})
+					domain.IpponsScore(mrView.IpponsA), domain.IpponsScore(mrView.IpponsB),
+					bm.Decision, bm.Encho, mrView.Attribution())
 			}
 
-			writeScoreRowCells(f, sheetName, courtStartCol, excelRow, scoreA, scoreB, mrView, mirror)
+			writeScoreRowCells(f, sheetName, courtStartCol, excelRow, scoreA, scoreB, mrView)
 
 			if bm.Winner != "" {
 				writeWinnerCell(f, sheetName, rows, scoreRowIdx, headerCol, bm.Winner)
@@ -1084,15 +965,15 @@ func overlayBracketScores(f *excelize.File, bracketByNum map[int]state.BracketMa
 // elimination layout produced by PrintTeamEliminationMatches. Relative to a
 // "Round N - Match N" header at (1-based) row H:
 //
-//	sub-match row for Position p (1..teamSize) = H + 2 + p   (ippon letters)
-//	IV/PW summary ("Victories / Points") row   = H + 5 + teamSize
-//	"1." winner-marker row                      = H + 8 + teamSize
+//	sub-match row for Position p (1..boutRows) = H + 2 + p   (ippon letters)
+//	IV/PW summary ("Victories / Points") row   = H + 5 + boutRows
+//	"1." winner-marker row                      = H + 8 + boutRows
 //
 // IV/PW cell columns on the summary row mirror the pool summary: left IV=startCol+1,
 // left PW=startCol+2, right IV=startCol+5, right PW=startCol+4. The summary IV/PW
 // cells and per-player W/L/T standings are formula-driven (they tally the sub-match
 // rows) and collapse after a store round-trip, so we overwrite them with literals.
-func overlayTeamBracketScores(f *excelize.File, bracketByNum map[int]state.BracketMatch, teamSize int, mirror bool, thirdPlaceMatch *state.BracketMatch) error {
+func overlayTeamBracketScores(f *excelize.File, bracketByNum map[int]state.BracketMatch, boutRows int, thirdPlaceMatch *state.BracketMatch) error {
 	sheetName := helper.SheetEliminationMatches
 
 	rows, err := f.GetRows(sheetName)
@@ -1119,7 +1000,7 @@ func overlayTeamBracketScores(f *excelize.File, bracketByNum map[int]state.Brack
 			// IV/PW summary, and the winner marker remain gated on
 			// MatchStatusCompleted below.
 			if cell == helper.ThirdPlaceLabel {
-				if !writeThirdPlaceEntrants(f, sheetName, bm, courtStartCol, headerExcelRow+2, mirror) {
+				if !writeThirdPlaceEntrants(f, sheetName, bm, courtStartCol, headerExcelRow+2) {
 					continue
 				}
 			}
@@ -1131,13 +1012,13 @@ func overlayTeamBracketScores(f *excelize.File, bracketByNum map[int]state.Brack
 			// param) but is the SAME answer: both read Status/Decision/
 			// DecisionBy/Attribution off this one bm.
 			credit := state.DefaultWinCreditSide(bm.Status, bm.Decision, bm.DecisionBy, bm.Attribution())
-			writeTeamSubMatchScores(f, sheetName, courtStartCol, headerExcelRow+3, bm.SubResults, teamSize, mirror, bm.SideA, bm.SideB, credit)
+			writeTeamSubMatchScores(f, sheetName, courtStartCol, headerExcelRow+3, bm.SubResults, boutRows, bm.SideA, bm.SideB, credit)
 
-			// IV/PW summary row = H + 5 + teamSize. Route through the shared
+			// IV/PW summary row = H + 5 + boutRows. Route through the shared
 			// pool-sheet writer so the IV-mark contract (and the forfeit
 			// fallback when no summary line exists) lives in one place.
-			summaryExcelRow := headerExcelRow + 5 + teamSize
-			writeTeamSummaryCells(f, sheetName, courtStartCol, summaryExcelRow, bracketMatchResultView(&bm), mirror)
+			summaryExcelRow := headerExcelRow + 5 + boutRows
+			writeTeamSummaryCells(f, sheetName, courtStartCol, summaryExcelRow, bracketMatchResultView(&bm))
 
 			// Winner marker: the "1." row is 3 rows below the summary row; reuse the
 			// individual writer, which scans forward for the "1." ordinal.
@@ -1160,33 +1041,30 @@ func overlayTeamBracketScores(f *excelize.File, bracketByNum map[int]state.Brack
 // no-scoring-yet formulas test in builder_test.go). The return value reports
 // whether the match is completed so the caller can skip the score overlay for
 // an unplayed match.
-func writeThirdPlaceEntrants(f *excelize.File, sheetName string, bm state.BracketMatch, courtStartCol, entrantRow int, mirror bool) bool {
+func writeThirdPlaceEntrants(f *excelize.File, sheetName string, bm state.BracketMatch, courtStartCol, entrantRow int) bool {
 	leftNameCol := colNum(courtStartCol)
 	rightNameCol := colNum(courtStartCol + 6)
-	sideA, sideB := bm.SideA, bm.SideB
-	if mirror {
-		sideA, sideB = sideB, sideA
+	leftName, rightName := helper.WhiteLeft(bm.SideA, bm.SideB)
+	if leftName != "" {
+		setCellStr(f, sheetName, leftNameCol, entrantRow, leftName)
 	}
-	if sideA != "" {
-		setCellStr(f, sheetName, leftNameCol, entrantRow, sideA)
-	}
-	if sideB != "" {
-		setCellStr(f, sheetName, rightNameCol, entrantRow, sideB)
+	if rightName != "" {
+		setCellStr(f, sheetName, rightNameCol, entrantRow, rightName)
 	}
 	return bm.Status == state.MatchStatusCompleted
 }
 
-// overlayKnockoutBracketNames overwrites the elimination entrant name cells with
-// the stored bracket's literal SideA/SideB. Knockout have no pool data sheet, so
-// the pool-oriented renderer points those cells at an empty pool-winner cell,
-// producing a broken ”! formula. Writing the literal names (or "" for an
-// unresolved slot, which clears the broken formula) yields a valid snapshot.
+// overlayKnockoutBracketNames overwrites a knockout-only competition's
+// elimination entrant name cells with literal names from the stored bracket,
+// named as engine.PrintedBracket names them: a competitor as stored, a side an
+// earlier match decides as "M n" (what the cell's own formula prints before a
+// result is entered), and a bye's empty side as a blank cell.
 //
-// Name cells sit at the court's start column (left) and start+6 (right) on the
-// entrant row (header + 2). Team brackets repeat the entrant name formulas on the
-// summary row (header + 4 + teamSize, just above the "Victories / Points" row), so
+// Name cells sit at the court's start column (left, SideB) and start+6 (right,
+// SideA) on the entrant row (header + 2), placed by helper.WhiteLeft. Team brackets repeat the entrant name formulas on the
+// summary row (header + 4 + boutRows, just above the "Victories / Points" row), so
 // those are overwritten too.
-func overlayKnockoutBracketNames(f *excelize.File, bracketByNum map[int]state.BracketMatch, teamSize int, mirror bool) error {
+func overlayKnockoutBracketNames(f *excelize.File, bracketByNum map[int]state.BracketMatch, printed map[string]engine.PrintedBracketMatch, boutRows int) error {
 	sheetName := helper.SheetEliminationMatches
 	rows, err := f.GetRows(sheetName)
 	if err != nil {
@@ -1204,10 +1082,8 @@ func overlayKnockoutBracketNames(f *excelize.File, bracketByNum map[int]state.Br
 				continue
 			}
 
-			leftName, rightName := bm.SideA, bm.SideB
-			if mirror {
-				leftName, rightName = rightName, leftName
-			}
+			sides := printed[bm.ID]
+			leftName, rightName := helper.WhiteLeft(sides.SideA, sides.SideB)
 			leftCol := colNum(headerCol + 1)  // court start column
 			rightCol := colNum(headerCol + 7) // start + 6 (endColName)
 
@@ -1215,13 +1091,13 @@ func overlayKnockoutBracketNames(f *excelize.File, bracketByNum map[int]state.Br
 			setCellStr(f, sheetName, leftCol, entrantRow, leftName)
 			setCellStr(f, sheetName, rightCol, entrantRow, rightName)
 
-			if teamSize > 0 {
-				// The repeated entrant-name formulas sit at header + 4 + teamSize
-				// (rowIdx+5+teamSize), one row ABOVE the "Victories / Points" text
-				// row. printSingleEliminationMatch: header + Red/White + entrant (H+2),
-				// teamSize sub-match rows (H+3..H+2+teamSize), then matchRow += 2 lands
-				// the summary name row at H+4+teamSize.
-				summaryRow := rowIdx + 5 + teamSize
+			if boutRows > 0 {
+				// The repeated entrant-name formulas sit at header + 4 + boutRows
+				// (rowIdx+5+boutRows), one row ABOVE the "Victories / Points" text
+				// row. printSingleEliminationMatch: header + White/Red + entrant (H+2),
+				// boutRows sub-match rows (H+3..H+2+boutRows), then matchRow += 2 lands
+				// the summary name row at H+4+boutRows.
+				summaryRow := rowIdx + 5 + boutRows
 				setCellStr(f, sheetName, leftCol, summaryRow, leftName)
 				setCellStr(f, sheetName, rightCol, summaryRow, rightName)
 			}
@@ -1303,7 +1179,7 @@ func buildCourtColumnMap(row []string, startColIdx int) map[string]int {
 // id only) so two same-name competitors in one pool don't collapse onto a
 // single entry. A row is keyed by its participant id; a row without one
 // resolves to nothing, so an id-less standing is never inserted, matching
-// attachPoolMatches' own id-only resolution. Look up with player.ID.
+// engine.AttachPoolMatches' own id-only resolution. Look up with player.ID.
 func standingMap(standings []state.PlayerStanding) map[string]state.PlayerStanding {
 	m := make(map[string]state.PlayerStanding, len(standings))
 	for _, ps := range standings {
@@ -1367,7 +1243,7 @@ func parseRoundMatchLabel(s string) int {
 		return 0
 	}
 	var round, match int
-	if _, err := fmt.Sscanf(s, "Round %d - Match %d", &round, &match); err != nil {
+	if _, err := fmt.Sscanf(s, helper.EliminationMatchTitleFormat, &round, &match); err != nil {
 		return 0
 	}
 	return match

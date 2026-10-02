@@ -1,7 +1,9 @@
 // mp-bkg: tests for the three matchId-keyed lineup API helpers
 // (fetchMatchLineup, putMatchLineup, deleteMatchLineup) in api_client.jsx.
-// These mirror the round-scoped helpers; same 404/error handling, just
-// targeting a different endpoint path (/match-lineups/:matchId vs /lineups/:round).
+// These mirror the round-scoped helpers: fetchMatchLineup turns a `saved:
+// false` body into null (bc-k404: nothing saved is a 200, not a 404), the
+// same rule fetchTeamLineup applies below, just against a different
+// endpoint path (/match-lineups/:matchId vs /lineups/:round).
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { API } from '../api_client.jsx';
@@ -22,14 +24,21 @@ describe('API.fetchMatchLineup', () => {
   beforeEach(() => { originalFetch = global.fetch; });
   afterEach(() => { global.fetch = originalFetch; });
 
-  it('returns null on 404 (no lineup saved yet)', async () => {
-    global.fetch = mockFetch(404, { error: 'not found' });
+  it('returns null when the server says nothing is saved (200, saved false)', async () => {
+    global.fetch = mockFetch(200, { teamId: 'team1', matchId: 'match1', positions: {}, saved: false });
     const result = await API.fetchMatchLineup('comp1', 'team1', 'match1');
     expect(result).toBeNull();
   });
 
   it('returns parsed body on 200', async () => {
     const lineup = { teamId: 'team1', matchId: 'match1', positions: { senpo: 'Alice' } };
+    global.fetch = mockFetch(200, lineup);
+    const result = await API.fetchMatchLineup('comp1', 'team1', 'match1');
+    expect(result).toEqual(lineup);
+  });
+
+  it('saved true with empty positions is a lineup', async () => {
+    const lineup = { teamId: 'team1', matchId: 'match1', positions: {}, saved: true };
     global.fetch = mockFetch(200, lineup);
     const result = await API.fetchMatchLineup('comp1', 'team1', 'match1');
     expect(result).toEqual(lineup);
@@ -42,9 +51,55 @@ describe('API.fetchMatchLineup', () => {
     expect(url).toBe('/api/competitions/c42/teams/t99/match-lineups/mx7');
   });
 
-  it('throws on non-404 error responses', async () => {
+  it('throws on an error answer, 404 included, with the server\'s message', async () => {
     global.fetch = mockFetch(500, { error: 'internal' });
     await expect(API.fetchMatchLineup('c1', 't1', 'm1')).rejects.toThrow('internal');
+
+    global.fetch = mockFetch(404, { error: 'competition not found' });
+    await expect(API.fetchMatchLineup('c1', 't1', 'm1')).rejects.toThrow('competition not found');
+  });
+});
+
+describe('API.fetchTeamLineup', () => {
+  let originalFetch;
+  beforeEach(() => { originalFetch = global.fetch; });
+  afterEach(() => { global.fetch = originalFetch; });
+
+  it('calls the correct URL without fallback', async () => {
+    global.fetch = mockFetch(200, { teamId: 't1', round: 1, positions: {}, saved: false });
+    await API.fetchTeamLineup('c1', 't1', 1);
+    const [url] = global.fetch.mock.calls[0];
+    expect(url).toBe('/api/competitions/c1/teams/t1/lineups/1');
+  });
+
+  it('calls the correct URL with ?fallback=best', async () => {
+    global.fetch = mockFetch(200, { teamId: 't1', round: 1, positions: {}, saved: false });
+    await API.fetchTeamLineup('c1', 't1', 1, { fallback: true });
+    const [url] = global.fetch.mock.calls[0];
+    expect(url).toBe('/api/competitions/c1/teams/t1/lineups/1?fallback=best');
+  });
+
+  it('returns null when saved is false, with or without fallback', async () => {
+    global.fetch = mockFetch(200, { teamId: 't1', round: 1, positions: {}, saved: false });
+    expect(await API.fetchTeamLineup('c1', 't1', 1)).toBeNull();
+    expect(await API.fetchTeamLineup('c1', 't1', 1, { fallback: true })).toBeNull();
+  });
+
+  it('returns the body when saved is true', async () => {
+    const lineup = { teamId: 't1', round: 0, positions: { senpo: 'Alice' }, saved: true };
+    global.fetch = mockFetch(200, lineup);
+    const result = await API.fetchTeamLineup('c1', 't1', 1, { fallback: true });
+    expect(result).toEqual(lineup);
+  });
+
+  it('throws "competition not found" on 404', async () => {
+    global.fetch = mockFetch(404, { error: 'competition not found' });
+    await expect(API.fetchTeamLineup('c1', 't1', 1)).rejects.toThrow('competition not found');
+  });
+
+  it('throws on a 500', async () => {
+    global.fetch = mockFetch(500, { error: 'internal' });
+    await expect(API.fetchTeamLineup('c1', 't1', 1)).rejects.toThrow('internal');
   });
 });
 
@@ -69,6 +124,20 @@ describe('API.putMatchLineup', () => {
     global.fetch = mockFetch(400, { error: 'missing senpo' });
     await expect(API.putMatchLineup('c1', 't1', 'm1', {}, 'pw'))
       .rejects.toThrow('missing senpo');
+  });
+
+  // bc-dhas: on a self-run tournament the public score sheet may save a
+  // lineup, but not once the match has finished. The refusal names the
+  // reason in a sentence, which is what the editor shows, and the error
+  // keeps the code beside it, as the member writes' errors do.
+  it('throws the sentence of a finished match\'s refusal, carrying its code', async () => {
+    global.fetch = mockFetch(409, {
+      error: 'result_finalized',
+      message: 'This match has finished, so its lineup can no longer be changed. Contact the tournament organizer to correct it.',
+    });
+    const err = await API.putMatchLineup('c1', 't1', 'm1', { senpo: 'Bob' }, '').catch((e) => e);
+    expect(err.message).toBe('This match has finished, so its lineup can no longer be changed. Contact the tournament organizer to correct it.');
+    expect(err.code).toBe('result_finalized');
   });
 });
 

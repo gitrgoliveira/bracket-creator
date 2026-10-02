@@ -21,7 +21,6 @@ import {
   TermAS,
   GlossaryHintAS,
   resolveDecisionPassword,
-  assertRunningWritePersisted,
   makeSubmitDecision,
   initialEnchoPeriodsForMatch,
   daihyosenEnchoFields,
@@ -44,6 +43,7 @@ import {
 // Start the server would refuse; isBarredMatch (ineligible_match.jsx) is the
 // one owner of that question.
 import { isBarredMatch } from './ineligible_match.jsx';
+import { isOlderRunningCopy } from './patch.jsx';
 
 import { useDebouncedRunningWrite, SyncStatusPill } from './admin_scoring_autosave.jsx';
 import { serverNowMs } from './server_clock.jsx';
@@ -52,7 +52,7 @@ import { SideLabel } from './side_cell.jsx';
 // Imported from the leaf, not read off `window`, for the same reason
 // admin_scoring_shared.jsx does it: write_result.jsx is import-only, and this
 // editor is ES-imported by hosts and tests that never load api_client.
-import { notLandedBanner } from './write_result.jsx';
+import { notLandedBanner, terminalFailureBanner, notSavedText, writeDidNotLand, writeWasRefused, writeRetryable, dependentActionBlocked, FETCH_TIMEOUT_MS, REP_BOUT_NOT_ADDED, REP_BOUT_NOT_REMOVED, noAnswerSentence } from './write_result.jsx';
 
 // boutMiddle is THE single source for a bout's centre value (vs/X/(E)/(DH));
 // the editor derives its per-bout middle from it rather than restating the
@@ -137,7 +137,7 @@ export function preserveStoredDaihyosenVerdict({ armed, pickedSide, tied, existi
 // StreamingOverlay). The implementations live in lineup_resolver.jsx;
 // re-exported here so existing imports from admin_scoring_modal.jsx (which
 // re-exports them onward) continue to work.
-import { resolveMatchLineup, resolveLineupTeamId, resolveBoutSideName, resolveBoutSideMemberId, resolveSquadMember, squadMemberIdForUniqueName, squadRosterEntries, rosterWithoutPlacedElsewhere, resolveBoutSideDisplayName, buildInlineLineupWrite, POS_KEYS_5, POS_LABELS_5 } from './lineup_resolver.jsx';
+import { resolveMatchLineup, resolveLineupTeamId, resolveBoutSideName, resolveBoutSideMemberId, resolveSquadMember, squadMemberIdForUniqueName, squadRosterEntries, rosterWithoutPlacedElsewhere, resolveBoutSideDisplayName, buildInlineLineupWrite, memberRefusalNote, POS_KEYS_5, POS_LABELS_5 } from './lineup_resolver.jsx';
 import { DAIHYOSEN_POSITION } from './pool_ids.jsx';
 import { joinList } from './admin_helpers.jsx';
 // The shared owner of what an operator is told about unreadable data; the
@@ -160,6 +160,14 @@ const SQUAD_MEMBER_LABEL_STYLE = { fontSize: 11, color: "var(--ink-3)", fontWeig
 // from teamSize and any persisted kachinuki bouts; the upper bound everywhere is
 // MAX_TEAM_SIZE (admin_helpers.jsx), kept in lockstep with the team-size input
 // caps in admin_competition.jsx and admin_setup.jsx.
+
+// The note under a representative bout the judges decided, on the public
+// self-run page (bc-dhas). The server refuses a participant's change to that
+// bout with the same sentence (repBoutHanteiRefusal,
+// internal/mobileapp/handlers_match.go), and both are pinned to the
+// "recorded" value of internal/mobileapp/testdata/rep_bout_hantei_messages.json,
+// so the participant reads one sentence whichever side says it.
+export const REP_BOUT_DECIDED_NOTE = "The judges decided this representative bout (hantei). Ask the tournament organizer to change it.";
 
 // recordedDaihyosenSideOf resolves which SIDE a stored daihyosen hantei names:
 // "" (none, or unattributable), "a" (AKA) or "b" (SHIRO).
@@ -642,7 +650,7 @@ export async function pickManualBoutName({ sub, idx, sideKey, memberIdKey, squad
     if (typeof setSquad === "function") {
       setSquad(sq => (Array.isArray(sq) ? sq : []).map(mm => (mm && mm.id === priorId) ? { ...mm, name: typed } : mm));
     }
-  } catch (_e) {
+  } catch (e) {
     // TELL THE OPERATOR. The rename never reached the server, so the member
     // stays nameless there permanently: every later picker row, the Lineups
     // page and the member list keep offering it as "no name yet", and
@@ -650,8 +658,9 @@ export async function pickManualBoutName({ sub, idx, sideKey, memberIdKey, squad
     // bout row itself is fine (it carries the typed name and the id), which
     // is exactly why this needs saying out loud rather than looking
     // correct. The sibling resolver path reports the same failure through
-    // this channel for the same reason (bc-dnst).
-    onRenameFailed(typed);
+    // this channel for the same reason (bc-dnst). The error goes along: a
+    // refusal with its own sentence is shown in those words (memberRefusalNote).
+    onRenameFailed(typed, e);
   }
 }
 
@@ -764,7 +773,69 @@ export function reconcileRowsToPositions(rows, serverRows) {
   return serverRows.map(ss => byPos.get(ss._pos) || ss);
 }
 
-export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSubmitAndNext, onAfterDecision, onStartLanded, prevMatch, nextMatch, onPrev, onNext, password, selfReport, variant = "modal", canClose = true }) {
+// withServerDaihyosenRow: what a landed representative-bout add or remove
+// does to an autosave patch, for the edit owed when the editor unmounted
+// while the request was out (useDebouncedRunningWrite's settle). The patch
+// takes the row exactly as the server's returned log holds it, or none when
+// the log has none. null when the answer carried no log to read.
+function withServerDaihyosenRow(serverSubs) {
+  if (!Array.isArray(serverSubs)) return null;
+  const row = serverSubs.find((s) => s && s.position === DAIHYOSEN_POSITION);
+  return (patch) => {
+    const rest = (patch.subResults || []).filter((s) => s.position !== DAIHYOSEN_POSITION);
+    return { ...patch, subResults: row ? [...rest, row] : rest };
+  };
+}
+
+// What a representative-bout add or remove is refused with, by the server's
+// code, in the operator's words. Any other message (a server sentence, such
+// as a finished match's) is shown as it is.
+const REP_BOUT_ADD_REFUSALS = new Map([
+  ["not_tied", "Daihyosen needs a tie on IV and PW (this encounter already has a winner)"],
+  ["pool_match", "Daihyosen is only for knockout matches"],
+  ["insufficient_eligibility", "Not enough eligible competitors for a representative bout"],
+  // Another device added it first; the row arrives with the match.
+  ["daihyosen_exists", "This match already has a representative bout"],
+]);
+const REP_BOUT_REMOVE_REFUSALS = new Map([
+  ["daihyosen_scored", "Clear the daihyosen score before removing it"],
+  ["no_daihyosen", "No daihyosen to remove"],
+]);
+
+// withinDeadline: a promise's outcome, or TIMED_OUT once `ms` has passed with
+// none. Only the wait ends: the promise itself runs on.
+const TIMED_OUT = Symbol("timed out");
+function withinDeadline(promise, ms) {
+  let timer;
+  const late = new Promise((resolve) => { timer = setTimeout(() => resolve(TIMED_OUT), ms); });
+  return Promise.race([promise, late]).finally(() => clearTimeout(timer));
+}
+
+// subsKey: a bout log by its content, the one comparison the match override
+// makes both when the prop moves (the clearing effect) and when a server
+// answer is adopted (adoptServerSubs), so the two cannot disagree about
+// whether the prop already holds a log.
+function subsKey(subResults) {
+  return JSON.stringify(subResults || []);
+}
+
+// holdsAnswer: whether a match stamped `stamp` already holds what a stamped
+// answer (the representative-bout add and remove, stamped `at`) wrote: a push
+// or refetch reached it, or a later write did. The match, not the answer, is
+// then what the sheet shows and what an edit owed at unmount is written with.
+// An unstamped answer (at 0) is never judged by its stamp.
+function holdsAnswer(stamp, at) {
+  return at > 0 && (Number(stamp) || 0) >= at;
+}
+
+// predatesAnswer: whether `match` is a running copy read before a stamped
+// answer the override holds, which a changed log must not clear: it is the
+// match from before that write. It is keepNewerMatches' rule (patch.jsx).
+function predatesAnswer(match, override) {
+  return override.at > 0 && !!match && isOlderRunningCopy(match, override.match.status, override.at);
+}
+
+export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSubmitAndNext, onAfterDecision, onStartLanded, prevMatch, nextMatch, onPrev, onNext, password, selfReport, teamMembers, variant = "modal", canClose = true }) {
   // mp-gmcg: a successful [× Remove this bout] shrinks the SERVER bout log, and
   // the parent may not have caught up when this render runs. matchOverride
   // shadows the prop so the removed bout disappears at once, and is cleared
@@ -776,6 +847,10 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
   // f3ca05bd, which made all four mount sites hold a key and resolve the match
   // from live data every render; the override is now a latency shim, not a
   // substitute for a refresh that never comes.
+  //
+  // It is { match, at }: the match the sheet shows, and the stamp of the
+  // answer it came from (0 for an unstamped one), kept together so the two
+  // cannot drift apart.
   const [matchOverride, setMatchOverride] = useStateA(null);
   // Clear the override once the prop actually MOVES off the pre-removal state.
   // Keyed on the bout log's CONTENT, which is the only version of this that is
@@ -790,16 +865,54 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
   //     already moved past. Exactly the divergence bc-tsub exists to remove,
   //     surviving on the one path that opts out of the live prop.
   // Content-keying is quiet for a same-content reload (identical string) and
-  // fires for every real change, including that last one.
-  const matchSubsKey = JSON.stringify(match?.subResults || []);
-  useEffectA(() => { setMatchOverride(null); }, [match?.id, matchSubsKey]);
+  // fires for every real change, including that last one. A stamped answer's
+  // override survives a change from a running copy older than it
+  // (predatesAnswer): a push or refetch that read the match before the add or
+  // remove committed, whose log the next autosave would otherwise write back.
+  const matchSubsKey = subsKey(match?.subResults);
+  useEffectA(() => {
+    setMatchOverride(prev => (prev && prev.match.id === match?.id && predatesAnswer(match, prev) ? prev : null));
+  }, [match?.id, matchSubsKey]);
+  // A stamped answer's override also goes once the prop is at least as new as
+  // that answer, whatever its log reads. The log can read as it did before the
+  // add (another device removed the row before this page refetched), which the
+  // content key cannot tell from no change at all, and the override would then
+  // keep a row the match no longer has. An override from an unstamped answer
+  // (a kachinuki bout removal, `at` 0) is cleared by content alone: its answer
+  // carries the stamp the match had before it.
+  const matchModifiedAt = Number(match?.modifiedAt) || 0;
+  useEffectA(() => {
+    setMatchOverride(prev => (prev && holdsAnswer(matchModifiedAt, prev.at) ? null : prev));
+  }, [matchModifiedAt]);
+  // And once the prop's status moves while its log is already the answer's
+  // own. A send-back, requeue or reopen keeps the bout log and is stamped by
+  // the server's clock, which can read older than a device-stamped answer, so
+  // neither rule above sees it: the log did not change and the stamp is below
+  // `at`. Reached when the answer put back the log the prop still holds (Add,
+  // then Remove before the add reached the prop), and the sheet then kept
+  // showing a sent-back match as running. With the log equal, letting the prop
+  // through cannot drop an added row or bring back a removed one, which is all
+  // the override guards; an older running copy is still held back
+  // (predatesAnswer), since its overtime can predate the answer. Keyed on the
+  // status alone: every server-stamped change that clears a verdict moves it,
+  // and the winner is an object rebuilt on every refetch.
+  const matchStatus = match?.status;
+  useEffectA(() => {
+    setMatchOverride(prev => (prev && prev.match.id === match?.id && subsKey(prev.match.subResults) === matchSubsKey
+      && !predatesAnswer(match, prev) ? null : prev));
+  }, [matchStatus]);
   // mp-gmcg: never carry an open past-bout correction across a match SWITCH,
   // but DO survive a same-match reload. Autosave persists each correction as a
   // running write, which round-trips back over SSE as a fresh `match` object
   // (same id); keying on match?.id — not the object ref — keeps the editor open
   // across that reload instead of collapsing it after every ippon change.
   useEffectA(() => { setEditingDoneBoutIdx(-1); editingDoneOriginalRef.current = null; }, [match?.id]);
-  const m = matchOverride || match;
+  // The LATEST `match` prop, refreshed during render rather than in an effect,
+  // so adoptServerSubs, resuming after an awaited request, reads the prop of
+  // the latest render rather than of the one that created its closure.
+  const matchRef = useRefA(match);
+  matchRef.current = match;
+  const m = matchOverride?.match || match;
   const isComplete = m.status === "completed";
   // Kachinuki appends bouts beyond teamSize (engine assigns Position =
   // len(SubResults)+1, up to 2*roster-1 bouts), so size the grid to cover every
@@ -922,7 +1035,7 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
   const editingDoneOriginalRef = useRefA(null);
   // T131: lineup data so each bout cell can show the assigned player
   // name + canonical position label. Falls back gracefully when the
-  // lineup hasn't been submitted yet (404 → null).
+  // lineup hasn't been submitted yet (saved: false -> null, bc-k404).
   const [lineupA, setLineupA] = useStateA(null);
   const [lineupB, setLineupB] = useStateA(null);
   // bc-pnum gap closure: each side's squad, so the inline lineup picker
@@ -976,6 +1089,17 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
   // same one; this editor is such a surface.
   const daihyosenHanteiRecorded = !!existingDaihyosen?.decidedByHantei;
   const recordedDaihyosenSide = recordedDaihyosenSideOf(existingDaihyosen, m);
+  // bc-dhas: on the public self-run page a representative bout the judges
+  // decided is the organiser's. The server does not let a participant change
+  // it, so the row is shown with its verdict, not offered for scoring (no
+  // control on it, and it has no fighter picker to lock), and every save sends
+  // the verdict back as it is.
+  const repBoutDecidedForParticipant = !!selfReport && daihyosenHanteiRecorded;
+  // A participant adds or removes the representative bout only while the match
+  // is being fought: the server refuses either on a match that is not running
+  // (409; result_finalized once it has finished), so the page does not offer
+  // what would be refused. The organiser, with the password, keeps both.
+  const repBoutAddRemoveOpen = !selfReport || m.status === "running";
   const [daihyosenHantei, setDaihyosenHantei] = useStateA(recordedDaihyosenSide);
   // Armed follows the RECORDED flag, not the resolved side, so an
   // unattributable stored verdict still opens the panel for re-picking
@@ -1057,31 +1181,42 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
   const _autosaveIsRunningRef = useRefA(false);
   const _autosaveBuildPatchRef = useRefA(null);
   const _autosaveOnSubmitRef = useRefA(null);
-  const { markDirty: markScoringDirty, cancelDebounce: cancelScoringDebounce } = useDebouncedRunningWrite({
+  const {
+    markDirty: markScoringDirty,
+    cancelDebounce: cancelScoringDebounce,
+    hold: holdScoringWrite,
+    release: releaseScoringWrite,
+  } = useDebouncedRunningWrite({
     isRunningRef: _autosaveIsRunningRef,
     buildPatchRef: _autosaveBuildPatchRef,
     onSubmitRef: _autosaveOnSubmitRef,
   });
+  // Release the hold once a representative-bout add or remove has settled
+  // (daihyosenBusy's true->false edge). The `finally` that clears the flag
+  // runs in the same continuation as the adopt, so both land in one render,
+  // which refreshes _autosaveBuildPatchRef before this effect runs. Keyed on
+  // the flag, not on matchOverride: adoptServerSubs sets no override when the
+  // prop already holds the answer. The true render always comes first in a
+  // browser, where Preact renders a state change in a microtask queued before
+  // any continuation of the request (the app leaves options.debounceRendering
+  // alone); only a test's act() can batch true and false into one render, so a
+  // test resolves the request in a step of its own.
+  useEffectA(() => { if (!daihyosenBusy) releaseScoringWrite(); }, [daihyosenBusy]);
 
   // T141: remove an unscored daihyosen placeholder. Defined at component
   // level so both the hantei row and any other affordance can call it.
-  const onRemoveDaihyosen = async () => {
-    setEditorErr("");
-    setDaihyosenBusy(true);
-    try {
-      await window.API.removeDaihyosen(m.compId, m.id, resolveDecisionPassword(password));
-      if (!mountedRef.current) return;
-      onClose();
-    } catch (e) {
-      if (!mountedRef.current) return;
-      const msg = String(e?.message || "");
-      let userMsg = msg;
-      if (msg === "daihyosen_scored") userMsg = "Clear the daihyosen score before removing it";
-      else if (msg === "no_daihyosen") userMsg = "No daihyosen to remove";
-      setEditorErr(userMsg);
-    } finally {
-      if (mountedRef.current) setDaihyosenBusy(false);
-    }
+  const onRemoveDaihyosen = () => {
+    // Taken first: whether an edit is owed decides whether the sheet is saved
+    // before the DELETE.
+    const hadPending = cancelScoringDebounce();
+    return runRepBoutChange({
+      // Only a running sheet with an edit still owed is saved first, so the
+      // DELETE does not race it; there is nothing else to protect.
+      preSave: m.status === "running" && (hadPending || isDirty),
+      send: () => window.API.removeDaihyosen(m.compId, m.id, resolveDecisionPassword(password)),
+      refusals: REP_BOUT_REMOVE_REFUSALS,
+      notDone: REP_BOUT_NOT_REMOVED,
+    });
   };
   useEffectA(() => () => { mountedRef.current = false; }, []);
 
@@ -1096,7 +1231,7 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
     const unsub = window.subscribeTerminalWriteFailed((info) => {
       if (!mountedRef.current) return;
       if (!info || info.compID !== m.compId || info.matchID !== m.id) return;
-      setWriteFailed({ reason: info.reason || `save rejected (${info.status || 'error'})`, advice: info.advice });
+      setWriteFailed(terminalFailureBanner(info));
       // Disarm the finish confirmation for the same reason the individual
       // editor does: the failed submit left the button on "Tap again to
       // finish", one tap from re-sending the very write the banner is telling
@@ -1162,9 +1297,10 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
         console.warn("Competition fetch for team modal failed:", e);
       }
       // mp-bkg: prefer per-match lineup (GET match-lineups/:matchId); fall
-      // back to round lineup when no per-match entry exists (404 → null →
-      // round lookup). Map the name-keyed side to the participant id the
-      // lineup is stored under first: otherwise every GET 404s.
+      // back to round lineup when no per-match entry exists (saved: false
+      // -> null -> round lookup). Map the name-keyed side to the
+      // participant id the lineup is stored under first: otherwise every
+      // GET reads nothing saved.
       // The detail payload carries participants under config.players; the
       // top-level players array is often an empty (but truthy) [] in this
       // shape, so prefer whichever list is non-empty.
@@ -1318,11 +1454,27 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
   // then simply mints for every name it cannot find against an empty
   // list). bc-cse: `squadUnavailable` records that this happened, so
   // submitInlineLineup's warning names the real root cause.
+  //
+  // A host that already holds the team members passes them as teamMembers
+  // and nothing is fetched: the public self-run page reads them from the
+  // viewer payload, because the team-members route needs the organiser
+  // password there. Keyed on the two sides' lists by content, so a refetch
+  // that brings them the same members changes nothing, whatever it brings
+  // the competition's other teams.
+  const teamMembersKey = teamMembers
+    ? JSON.stringify([teamMembers[teamIdForSide(m.sideA)] || [], teamMembers[teamIdForSide(m.sideB)] || []])
+    : "";
   useEffectA(() => {
     let cancelled = false;
     const teamAId = teamIdForSide(m.sideA);
     const teamBId = teamIdForSide(m.sideB);
     if (!m.compId || (!teamAId && !teamBId)) return;
+    if (teamMembers) {
+      if (teamAId) setSquadA(teamMembers[teamAId] || []);
+      if (teamBId) setSquadB(teamMembers[teamBId] || []);
+      setSquadUnavailable(false);
+      return;
+    }
     (async () => {
       try {
         const squads = await window.API.fetchSquads(m.compId, password);
@@ -1343,7 +1495,7 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
     // halves one 401 strands the editor for the whole encounter: every bout
     // row's picker offers nothing, every row loses the squad number this
     // ruling put on it, and every typed name is written with no member id.
-  }, [m.compId, compMeta, password]);
+  }, [m.compId, compMeta, password, teamMembersKey]);
 
   // Submit an inline position change: builds the full positions map from the
   // existing lineup + the changed key→value, resolves/mints that position's
@@ -1959,7 +2111,7 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
       const nextSubs = updated && Array.isArray(updated.subResults)
         ? updated.subResults
         : (match.subResults || []).filter(s => s.position !== pos);
-      setMatchOverride({ ...match, subResults: nextSubs });
+      adoptServerSubs(nextSubs);
       // The server strips exactly the trailing bout at `pos`, so the new log
       // ceiling is pos-1; keep the teamSize floor (clampPositionCount).
       setSubsByOperator(prev => resizeSubsTo(prev, clampPositionCount(pos - 1, manualMaxPos)));
@@ -2603,13 +2755,155 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
     // _notifyScoreSuperseded deliberately stays silent for -- can check
     // writeWasSuperseded themselves. See writeFailed's declaration above.
     let res;
-    try { res = await fn(); } finally { if (mountedRef.current) setSubmitting(false); }
+    try {
+      res = await fn();
+    } finally {
+      if (mountedRef.current) setSubmitting(false);
+    }
+    // A refused write disarms the two-tap commits (writeWasRefused): left
+    // armed, one tap re-sent the write just refused. A queued one stays armed.
+    if (writeWasRefused(res) && mountedRef.current) {
+      setFinishArmed(false);
+      setEndArmed(false);
+    }
     // A queued write has NOT reached the server. Flag it so the banner below
     // says so; the sync subscription clears it once the queue drains, and the
     // terminal-fail subscription replaces it with the not-saved banner if the
     // write is ultimately refused.
-    if (mountedRef.current && res && res.queued === true) setPendingWrite(true);
+    if (mountedRef.current && writeRetryable(res)) setPendingWrite(true);
     return res;
+  };
+
+  // Raw server rows are safe to adopt directly: the only per-sub field the
+  // client derives is decidedByHantei, which none of these responses carry.
+  // `answer` is the stamped match a representative-bout add or remove answers
+  // with; the kachinuki bout removal passes none, its answer being unstamped.
+  // Returns the match the editor shows from now on, or null when there was no
+  // log to adopt.
+  const adoptServerSubs = (subResults, answer) => {
+    if (!Array.isArray(subResults)) return null;
+    // From the LATEST prop, not the `match` this closure captured: the parent
+    // may have re-rendered while the request was out (an SSE push racing it),
+    // and every field but subResults would revert to its click-time value.
+    const latest = matchRef.current;
+    const at = Number(answer?.modifiedAt) || 0;
+    // No override when the prop already holds the answer: the override only
+    // bridges the gap until the parent catches up, and one that shadows a
+    // current prop is never cleared.
+    if (holdsAnswer(latest?.modifiedAt, at)) {
+      setMatchOverride(null);
+      return latest;
+    }
+    // Unstamped, the log alone decides, and a prop that carries it already
+    // needs no override. An earlier adopt's override goes too: after Add then
+    // Remove with no prop refresh between them, the prop holds the log Remove
+    // returned, and the Add's override would otherwise keep the removed row on
+    // the sheet.
+    if (at === 0 && subsKey(latest?.subResults) === subsKey(subResults)) {
+      setMatchOverride(null);
+      return latest;
+    }
+    // A newer stamped answer is the match as that write left it, so besides
+    // the log the sheet takes its status (an add or remove leaves the match
+    // running, a finished one included, so the next point autosaves) and the
+    // team match's overtime (a remove clears it), or the next save would write
+    // the prop's back. Winner and decision stay the prop's: the client shapes
+    // them (normalizeMatch), and the answer carries them raw.
+    const shown = at > 0
+      ? { ...latest, subResults, encho: answer.encho, ...(answer.status ? { status: answer.status } : {}) }
+      : { ...latest, subResults };
+    setMatchOverride({ match: shown, at });
+    return shown;
+  };
+
+  // Save the sheet first through doSubmit (it cancels the pending autosave,
+  // whose snapshot this save carries) before an add/remove changes the bout
+  // log a stale write could otherwise race or resurrect. Saved again while a
+  // tap made during a save is owed: the add/remove is stamped when it is
+  // sent, so an edit made before then and written after it would be older
+  // than it and dropped. Each pass reads the sheet through the autosave refs,
+  // since this closure's buildPatch predates those taps. Returns false when
+  // the caller must stop without sending that request: doSubmit/onSubmit
+  // returned nothing (a refused write threw, already reported by the host)
+  // or the write only queued or was refused (writeDidNotLand); either way
+  // the operator already has their report, from the banner just set or from
+  // doSubmit's own pending state.
+  const saveRunningSheet = async () => {
+    do {
+      const res = await doSubmit(() => _autosaveOnSubmitRef.current(_autosaveBuildPatchRef.current("running")));
+      if (!res) return false;
+      const b = notLandedBanner(res);
+      if (b) setWriteFailed(b);
+      // A queued pre-save is no refusal, but it is why the Add/Remove tap is
+      // about to do nothing, which the pending pill (about the scores) does
+      // not say: say it beside those controls.
+      const blocked = dependentActionBlocked(res);
+      if (blocked) setEditorErr(blocked);
+      if (writeDidNotLand(res)) return false;
+    } while (cancelScoringDebounce());
+    return true;
+  };
+
+  // runRepBoutChange: the representative-bout add and remove, one sequence
+  // (bc-dhas). Each passes only what differs: whether to save the sheet first
+  // (preSave), the request (send), its refusals by code, and what it leaves
+  // undone (notDone, also the words for an error that says nothing).
+  //
+  // A tap made meanwhile waits for the outcome (the hold, released by the
+  // effect near useDebouncedRunningWrite's call once daihyosenBusy clears), so
+  // its autosave is built from the sheet the request leaves. The whole held
+  // section is bounded: the request by api_client's own deadline, the save
+  // before it here, since a host may wait on an unbounded refetch after its
+  // write. Past FETCH_TIMEOUT_MS the change is reported as not answered and
+  // the hold is released; the save may still land later, and last-write-wins
+  // orders it. Until it settles `submitting` stays set, and both buttons are
+  // disabled on it: a change started beside that save would lose an edit
+  // owed under its hold to the save's own loop, written from the sheet
+  // before the change.
+  //
+  // A landed answer settles the hold with its outcome BEFORE the mount check,
+  // so an editor that went away meanwhile still writes its owed edit with the
+  // row as the server returned it. A mounted editor then adopts the server's
+  // bout log and stays open (operator decision 2026-09-27).
+  const runRepBoutChange = async ({ preSave, send, refusals, notDone }) => {
+    setEditorErr("");
+    setDaihyosenBusy(true);
+    const settle = holdScoringWrite();
+    try {
+      if (preSave) {
+        const saved = await withinDeadline(saveRunningSheet(), FETCH_TIMEOUT_MS);
+        if (saved === TIMED_OUT) {
+          if (mountedRef.current) setEditorErr(noAnswerSentence(notDone));
+          return;
+        }
+        if (!saved) return;
+      }
+      const res = await send();
+      if (writeDidNotLand(res)) {
+        if (mountedRef.current) setWriteFailed(notLandedBanner(res));
+        return;
+      }
+      // An edit owed at unmount is written with the answer's row, unless the
+      // last match this editor saw already holds the answer (another device
+      // scored the new row first), whose row stands, as on a mounted sheet.
+      const latest = matchRef.current;
+      const answered = holdsAnswer(latest?.modifiedAt, Number(res && res.modifiedAt) || 0) ? (latest.subResults || []) : res && res.subResults;
+      settle(withServerDaihyosenRow(answered));
+      if (!mountedRef.current) return;
+      const shown = adoptServerSubs(res && res.subResults, res);
+      // The one overtime counter moves with the row, between the rep bout's
+      // and the team match's. Re-seeded in this same update, from the match
+      // the sheet now shows, so the render the release writes from does not
+      // put the old target's count on the new.
+      if (shown) setEnchoPeriodCount(initialEnchoPeriodsForMatch(shown));
+    } catch (e) {
+      if (!mountedRef.current) return;
+      const msg = String(e?.message || "");
+      setEditorErr(refusals.get(msg) || msg || notDone);
+    } finally {
+      settle();
+      if (mountedRef.current) setDaihyosenBusy(false);
+    }
   };
 
   // Mirrors ScoreEditorModal.isDirty: "has the OPERATOR changed anything",
@@ -3035,7 +3329,9 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
               pickManualBoutName({
                 sub: s, idx, sideKey, memberIdKey, squad, setSquad, teamId,
                 compId: m.compId, password, updateSub,
-                onRenameFailed: (typed) => setEditorWarning(`"${typed}" was used for this bout, but the team member could not be renamed. Rename them on the Lineups page.`),
+                // A self-run competitor cannot open the Lineups page, so they are
+                // pointed at the organizer, as the server's own refusals do.
+                onRenameFailed: (typed, e) => setEditorWarning(`"${typed}" was used for this bout, but the team member could not be renamed. ${memberRefusalNote({ code: e && e.code, reason: e && e.message }, selfReport ? "Ask the tournament organizer to rename them." : "Rename them on the Lineups page.")}`),
               }, value, member);
             // mp-gmcg: a kachinuki side with NO resolved name AND no lineup
             // route gets a free-typed name input riding the sub (like a
@@ -3142,6 +3438,9 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
 
             // Sub-bout is decided once either side reaches 2 ippons.
             const subBoutDecided = isBoutDecided(s.aPts, s.bPts);
+            // The representative bout the judges decided, on the public page:
+            // shown, not offered (see repBoutDecidedForParticipant).
+            const rowLocked = isDaihyoRow && repBoutDecidedForParticipant;
 
             // The side key ("a"/"b") that won the hantei on this row, else "".
             const dhHantei = isDaihyoRow && daihyosenTied ? daihyosenHantei : "";
@@ -3168,8 +3467,11 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
                     // The Ht chip mutates the hantei verdict, so it obeys the
                     // same submit-time freeze as the arm/pick/Cancel controls;
                     // an un-guarded click mid-save would clear the local
-                    // verdict while the in-flight patch records it.
-                    disabled={isHt && (submitting || decisionSubmitting)}
+                    // verdict while the in-flight patch records it. On the
+                    // public self-run page it only shows the organiser's
+                    // verdict: a participant cannot undo a hantei, nor take
+                    // a mark off the bout it decided (bc-dhas).
+                    disabled={rowLocked || (isHt && (selfReport || submitting || decisionSubmitting))}
                     onClick={() => {
                       if (isHt) { clearHantei(); return; }
                       // bc-emsl: a tap on an EMPTY slot, or on a default-win
@@ -3183,7 +3485,7 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
                       clearTap(ipponTapRef, rs.tapKey);
                       rs.setPts(rs.pts.filter((_, j) => j !== i));
                     }}
-                    title={isHt ? "Hantei winner: click to undo" : !mark ? undefined : defaultWin ? "Default win: use Fusensho to undo" : "Click to remove"}>
+                    title={isHt ? (selfReport ? "Hantei winner (judges' decision)" : "Hantei winner: click to undo") : (!mark || rowLocked) ? undefined : defaultWin ? "Default win: use Fusensho to undo" : "Click to remove"}>
                     {isHt ? "Ht" : (mark || "·")}
                   </button>
                 );
@@ -3282,7 +3584,7 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
                             {getIpponButtons(isNaginataTeam).map(cc => (
                               <button key={cc} className={`ipt-btn ipt-btn--sm ${cc === "H" ? "ipt-btn--h" : ""}`}
                                 onClick={(ev) => tapIppon(ev, rs, cc)}
-                                disabled={subBoutDecided}>{cc}</button>
+                                disabled={subBoutDecided || rowLocked}>{cc}</button>
                             ))}
                           </div>
                           <div className="tsm-fusensho">
@@ -3291,6 +3593,7 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
                               type="button"
                               className={`btn btn--sm ${s.fusensho === rs.key ? "btn--primary" : ""}`}
                               onClick={() => (fusenshoAllowed(s, rs.key) ? setFusenshoFor(idx, rs.key) : setFusenshoRefusal(rs.tapKey))}
+                              disabled={rowLocked}
                               aria-disabled={fusenshoAllowed(s, rs.key) ? undefined : "true"}
                               title={fusenshoButtonTitle(s, rs, rowSides[1 - rsIdx])}
                             >
@@ -3311,9 +3614,9 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
                         <div className="tsm-fouls" data-testid={`scoring-modal-hansoku-${rs.color}`}>
                           <span className="tsm-fouls__label">Fouls</span>
                           <div className="tsm-fouls__controls">
-                            <button className="tsm-fouls__btn" aria-label={`Remove a ${rs.label} foul`} onClick={() => rs.setFouls(nextFoulOnDecrement(rs.fouls))} disabled={rs.fouls === 0}>−</button>
+                            <button className="tsm-fouls__btn" aria-label={`Remove a ${rs.label} foul`} onClick={() => rs.setFouls(nextFoulOnDecrement(rs.fouls))} disabled={rs.fouls === 0 || rowLocked}>−</button>
                             <span className={`tsm-fouls__count ${rs.fouls >= 1 ? "tsm-fouls__count--warn" : ""}`}>{rs.fouls}</span>
-                            <button className="tsm-fouls__btn" aria-label={`Add a ${rs.label} foul`} onClick={(ev) => tapFoulIncrement(ev, rs)} disabled={subBoutDecided}>+</button>
+                            <button className="tsm-fouls__btn" aria-label={`Add a ${rs.label} foul`} onClick={(ev) => tapFoulIncrement(ev, rs)} disabled={subBoutDecided || rowLocked}>+</button>
                           </div>
                         </div>
                       </div>
@@ -3507,15 +3810,28 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
               29-6). Encho is optional: a tied daihyosen may be taken straight
               to a judges' decision. Mounts whenever a daihyosen exists;
               arming requires a tied scoreline. The chosen winner rides onto
-              the position DAIHYOSEN_POSITION sub (decidedByHantei) when the operator saves. */}
+              the position DAIHYOSEN_POSITION sub (decidedByHantei) when the operator saves.
+              A participant on the public self-run page (selfReport) runs the
+              representative bout like any bout but is offered no hantei: a
+              judges' decision stays the organiser's, and the server refuses
+              one from a participant (bc-dhas). They keep Remove while the match
+              is running, and once the organiser records a hantei they are told
+              why the bout is shown, not offered (REP_BOUT_DECIDED_NOTE). */}
           {hasDaihyosen && (() => {
             const dt = subTotals[daihyosenIdx];
             const tiedScore = dt.aTotal === dt.bTotal;
+            const offerRemove = repBoutAddRemoveOpen && dt.aTotal === 0 && dt.bTotal === 0 && !daihyosenHanteiArmed;
+            if (selfReport && !offerRemove && !repBoutDecidedForParticipant) return null;
             return (
               <div className="hantei-row" data-testid="team-daihyosen-hantei-row" style={{ display: "flex", gap: 8, alignItems: "center", padding: "6px 8px", marginTop: 12, background: "var(--surface-2)", borderRadius: 6, fontSize: 12 }}>
-                <span style={{ fontWeight: 600, color: "var(--ink-2)" }}>Daihyosen hantei</span>
-                <span style={{ color: "var(--ink-3)" }}>(judges' decision)</span>
-                {dt.aTotal === 0 && dt.bTotal === 0 && !daihyosenHanteiArmed && (
+                <span style={{ fontWeight: 600, color: "var(--ink-2)" }}>{selfReport ? "Daihyosen" : "Daihyosen hantei"}</span>
+                <span style={{ color: "var(--ink-3)" }}>{selfReport ? "(representative bout)" : "(judges' decision)"}</span>
+                {repBoutDecidedForParticipant && (
+                  <span data-testid="team-daihyosen-decided-note" style={{ marginLeft: "auto", color: "var(--ink-2)" }}>
+                    {REP_BOUT_DECIDED_NOTE}
+                  </span>
+                )}
+                {offerRemove && (
                   <button
                     type="button"
                     className="btn btn--ghost btn--sm"
@@ -3527,7 +3843,7 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
                     Remove daihyosen
                   </button>
                 )}
-                {!daihyosenHanteiArmed && (
+                {!selfReport && !daihyosenHanteiArmed && (
                   <button
                     type="button"
                     className="btn btn--sm"
@@ -3540,7 +3856,7 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
                     Decide by hantei…
                   </button>
                 )}
-                {daihyosenHanteiArmed && (
+                {!selfReport && daihyosenHanteiArmed && (
                   <div style={{ marginLeft: "auto", display: "flex", gap: 6 }}>
                     <button type="button" className={`btn btn--sm ${daihyosenHantei === "b" ? "btn--primary" : ""}`} data-testid="team-daihyosen-hantei-shiro"
                       onClick={() => pickDaihyosenHantei("b")} disabled={submitting || decisionSubmitting}>SHIRO wins</button>
@@ -3563,11 +3879,12 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
               5-person tie always does). It is *highlighted* when a tie on
               IV+PW is detected locally; otherwise it sits quietly as a
               ghost button. Clicking it flushes the current bout scores
-              (the backend recomputes the tie from the PERSISTED SubResults,
-              so an unsaved tie would otherwise read as not_tied) and then
-              POSTs to /daihyosen; the server appends a SubMatchResult with
-              decision="daihyosen" that the operator scores via the regular
-              bout flow. Errors map to user-visible strings per the contract
+              while the match runs (the backend recomputes the tie from the
+              PERSISTED SubResults, so an unsaved tie would otherwise read as
+              not_tied) and then POSTs to /daihyosen; the server appends a
+              SubMatchResult with decision="daihyosen" that the operator
+              scores via the regular bout flow. Errors map to user-visible
+              strings per the contract
               in handlers_daihyosen.go. Once a daihyosen exists it renders as
               a scoreable row above (mp-4pc), so don't offer a second. */}
           {(() => {
@@ -3576,7 +3893,7 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
             // kachinuki daihyosen POST), so the ADD affordance is hidden.
             // Existing/legacy daihyosen rows still render defensively via
             // hasDaihyosen above.
-            if (hasDaihyosen || !isKnockoutPhase || isKachinuki) return null;
+            if (hasDaihyosen || !isKnockoutPhase || isKachinuki || !repBoutAddRemoveOpen) return null;
             // Local tie detection drives the highlight + helper copy only: 
             // the backend is the source of truth and re-validates on submit.
             // A bout is "decided" once it carries any ippon or is a draw; a
@@ -3584,44 +3901,17 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
             // so draws MUST count here (the bug the old gate had).
             const anyBoutDecided = subTotals.some(t => t.aTotal > 0 || t.bTotal > 0 || t.draw || t.winner !== null);
             const teamTied = anyBoutDecided && ivA === ivB && pwA === pwB;
-            const onDaihyosen = async () => {
-              setEditorErr("");
-              setDaihyosenBusy(true);
-              try {
-                // Persist the operator's current bout scores first (status
-                // stays "running"); the backend derives the tie from the
-                // saved SubResults, so a freshly-scored-but-unsaved tie
-                // would otherwise be rejected as not_tied.
-                //
-                // recordScore returns { queued: true } when the write could
-                // only be enqueued (offline / retryable 5xx) instead of being
-                // confirmed by the server. Daihyosen is a hard prerequisite on
-                // that persistence, so a queued (unconfirmed) save MUST abort the
-                // flow: otherwise recordDaihyosen runs against the stale
-                // server-side SubResults. The queued write still delivers in the
-                // background, so a retry succeeds once the connection is back.
-                const saveRes = await window.API.recordScore(m.compId, m.id, buildPatch("running"), resolveDecisionPassword(password), m);
-                assertRunningWritePersisted(saveRes); // abort if the save was only queued, not server-confirmed
-                await window.API.recordDaihyosen(m.compId, m.id, resolveDecisionPassword(password));
-                if (!mountedRef.current) return;
-                // Closing + reopening is the cleanest cross-cutting refresh
-                // path. The parent listens for SSE match_updated and pushes
-                // the new bout when re-opened.
-                onClose();
-              } catch (e) {
-                if (!mountedRef.current) return;
-                const msg = String(e?.message || "");
-                let userMsg = msg;
-                if (msg === "not_tied") userMsg = "Daihyosen needs a tie on IV and PW (this encounter already has a winner)";
-                else if (msg === "pool_match") userMsg = "Daihyosen is only for knockout matches";
-                else if (msg === "insufficient_eligibility") userMsg = "Not enough eligible competitors for a representative bout";
-                else if (msg === "score_not_synced") userMsg = "Couldn't save the current scores (offline or server busy). Try again once the connection is back.";
-                else if (!userMsg) userMsg = "Could not add a representative bout";
-                setEditorErr(userMsg);
-              } finally {
-                if (mountedRef.current) setDaihyosenBusy(false);
-              }
-            };
+            const onDaihyosen = () => runRepBoutChange({
+              // Saved first unless the match has finished, so the server judges
+              // the tie on the bouts as they stand, and a queued match starts
+              // through the score path's court and eligibility checks. A
+              // finished match is judged as stored: a running write there is
+              // answered stale.
+              preSave: m.status !== "completed",
+              send: () => window.API.recordDaihyosen(m.compId, m.id, resolveDecisionPassword(password)),
+              refusals: REP_BOUT_ADD_REFUSALS,
+              notDone: REP_BOUT_NOT_ADDED,
+            });
             return (
               <div className={`daihyosen-controls${teamTied ? " daihyosen-controls--tied" : ""}`}>
                 <div className="daihyosen-controls__title">
@@ -3637,7 +3927,7 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
                     term's own click handler), leaving a dead-zone over the
                     word. The term is taught in the title/hint above instead. */}
                 <div>
-                  <button data-testid="scoring-modal-daihyosen-button" type="button" className={`btn btn--sm ${teamTied ? "btn--primary" : "btn--ghost"}`} onClick={onDaihyosen} disabled={daihyosenBusy}>
+                  <button data-testid="scoring-modal-daihyosen-button" type="button" className={`btn btn--sm ${teamTied ? "btn--primary" : "btn--ghost"}`} onClick={onDaihyosen} disabled={daihyosenBusy || submitting || decisionSubmitting}>
                     {daihyosenBusy ? "Adding…" : "Add representative bout"}
                   </button>
                 </div>
@@ -3755,8 +4045,10 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
               mode — declaring encho there is OPTIONAL, its only effect the middle
               mark (vs → "(E)"), and it is done via the footer Encho button, so a
               period-stepper would be redundant AND confusing. Corrections,
-              daihyosen and fixed-format team matches keep it. */}
-          {!kachinukiBoutMode && (
+              daihyosen and fixed-format team matches keep it, except on the
+              public page once the judges decided the representative bout: its
+              overtime is part of that bout, which is shown, not offered. */}
+          {!kachinukiBoutMode && !repBoutDecidedForParticipant && (
             <EnchoControl
               enchoPeriodCount={enchoPeriodCount}
               setEnchoPeriodCount={changeEnchoPeriodCount}
@@ -3860,7 +4152,7 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
           )}
           {writeFailed && (
             <div className="pending-write-banner pending-write-banner--failed" role="alert" aria-live="assertive">
-              <span>Not saved: {writeFailed.reason}. {writeFailed.advice || "Re-enter the result and submit again."}</span>
+              <span>{notSavedText(writeFailed)}</span>
             </div>
           )}
           {/* bc-cse: a barred match cannot be started as scheduled -- the
@@ -3954,7 +4246,7 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
                     // this is a no-op then and the still-correct override is
                     // left untouched.
                     if (mountedRef.current && res && Array.isArray(res.subResults)) {
-                      setMatchOverride(prev => prev ? { ...prev, subResults: res.subResults } : prev);
+                      setMatchOverride(prev => prev ? { ...prev, match: { ...prev.match, subResults: res.subResults } } : prev);
                     }
                     // F5: same reasoning as Start match above -- Record bout
                     // also submits status:"running" and is also an explicit

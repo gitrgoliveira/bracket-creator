@@ -3714,19 +3714,20 @@ func TestAdvanceKachinuki_SameNameNoIDsStillAdvances(t *testing.T) {
 	assert.Equal(t, "B-Jiho", res.Next.SideB)
 }
 
-// TestRetiredMemberSet_CountIncludesNamelessFighters pins that the elimination
-// tally counts a fighter retired under an id and an empty name (fielded by
-// squad number before being named, bc-dnst) exactly like a named one.
-func TestRetiredMemberSet_CountIncludesNamelessFighters(t *testing.T) {
+// TestRetiredPlayersFromBoutLog_NamelessFighterRetiresByID pins that a
+// fighter fielded by squad number before being named (bc-dnst), an id and an
+// empty name, retires under that id, beside a named fighter with no id.
+func TestRetiredPlayersFromBoutLog_NamelessFighterRetiresByID(t *testing.T) {
 	log := []state.SubMatchResult{
 		{Position: 1, SideA: "", SideAMemberID: "a1", SideB: "", SideBMemberID: "b1", Winner: "Team A", WinnerMemberID: "a1", Decision: "fought"},
 		{Position: 2, SideA: "", SideAMemberID: "a1", SideB: "Tanaka", SideBMemberID: "b2", Winner: "Tanaka", WinnerMemberID: "b2", Decision: "fought"},
 		{Position: 3, SideA: "Legacy", SideB: "Tanaka", SideBMemberID: "b2", Winner: "Tanaka", Decision: "fought"},
 	}
 	retiredA, retiredB := RetiredPlayersFromBoutLog(log, "Team A", "Team B")
-	assert.Equal(t, 2, retiredA.Count(), "a1 (nameless, by id) and Legacy (name only)")
-	assert.Equal(t, 1, retiredB.Count(), "b1 (nameless, by id)")
-	assert.Equal(t, 1, len(retiredA.Names), "the name set alone would have missed a1")
+	assert.Equal(t, map[string]struct{}{"a1": {}}, retiredA.IDs, "a1 retires by id")
+	assert.Equal(t, map[string]struct{}{"Legacy": {}}, retiredA.Names, "Legacy retires by name; a1 has none")
+	assert.Equal(t, map[string]struct{}{"b1": {}}, retiredB.IDs, "b1 retires by id")
+	assert.Empty(t, retiredB.Names)
 }
 
 // TestRetiredPlayersFromBoutLog_PendingNamelessRowRetiresNobody pins that a
@@ -3739,44 +3740,10 @@ func TestRetiredPlayersFromBoutLog_PendingNamelessRowRetiresNobody(t *testing.T)
 		{Position: 4, SideA: "", SideAMemberID: "a3", SideB: "Tanaka", SideBMemberID: "b2"},
 	}
 	retiredA, retiredB := RetiredPlayersFromBoutLog(log, "Team A", "Team B")
-	assert.Equal(t, 0, retiredA.Count())
-	assert.Equal(t, 0, retiredB.Count(), "Tanaka must not be retired by a bout nobody has scored")
-}
-
-// One fighter recorded BOTH with and without a member id is ONE elimination.
-//
-// retire() files an id-carrying retirement under IDs and an id-less one under
-// nameOnly, and the naive len(IDs)+len(nameOnly) counted such a fighter twice.
-// tallyKachinukiEliminations feeds that straight into the exported Kachinuki
-// Detail sheet, so a team that lost one fighter was reported as having lost
-// two. Reachable by reopening an encounter and re-scoring a bout through a
-// path that omits the member id while the original row still carries it.
-func TestRetiredMemberSet_CountsOneFighterOnceAcrossMixedRows(t *testing.T) {
-	boutLog := []state.SubMatchResult{
-		// Kenji loses carrying his member id.
-		{Position: 1, SideA: "Kenji", SideAMemberID: "m7", SideB: "Taro", SideBMemberID: "m9",
-			Winner: "Taro", WinnerMemberID: "m9"},
-		// The SAME fighter loses again on a row that lost its id.
-		{Position: 2, SideA: "Kenji", SideB: "Goro", SideBMemberID: "m11",
-			Winner: "Goro", WinnerMemberID: "m11"},
-	}
-	retiredA, retiredB := RetiredPlayersFromBoutLog(boutLog, "TeamA", "TeamB")
-
-	assert.Equal(t, 1, retiredA.Count(), "one fighter, recorded two ways, is one elimination")
-	assert.Equal(t, 0, retiredB.Count(), "the other side lost nobody")
-
-	// Both buckets really are populated, so the test is exercising the
-	// dedup rather than a shape where only one of them was ever filled.
-	assert.Contains(t, retiredA.IDs, "m7")
-	assert.Contains(t, retiredA.nameOnly, "Kenji")
-
-	// A genuinely different id-less fighter still counts on top.
-	boutLog = append(boutLog, state.SubMatchResult{
-		Position: 3, SideA: "Hiro", SideB: "Ken", SideBMemberID: "m12",
-		Winner: "Ken", WinnerMemberID: "m12",
-	})
-	retiredA, _ = RetiredPlayersFromBoutLog(boutLog, "TeamA", "TeamB")
-	assert.Equal(t, 2, retiredA.Count(), "a second, distinct id-less fighter is its own elimination")
+	assert.Empty(t, retiredA.IDs)
+	assert.Empty(t, retiredA.Names)
+	assert.Empty(t, retiredB.IDs, "Tanaka must not be retired by a bout nobody has scored")
+	assert.Empty(t, retiredB.Names, "Tanaka must not be retired by a bout nobody has scored")
 }
 
 // The BOUT-LOG-ONLY roster branch (no saved lineup) must consult the same

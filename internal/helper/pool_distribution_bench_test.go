@@ -35,7 +35,7 @@ func benchInterleavedDojoRoster(nDojos, groupSize int) []Player {
 }
 
 // The StandardSeeding benchmarks below measure delayDojoMeetings' hill
-// climb (P1: dojoSumMeetRounds/dojoSwapGain) at the sizes and dojo shapes
+// climb (P1: dojoSumMeetRounds/dojoSwapGainAfter) at the sizes and dojo shapes
 // bc-dojo-least-conflicted-pool's wave-2 measurement was asked to
 // re-verify: 256 entrants at 16 dojos of 16 and 32 dojos of 8, plus the
 // 64- and 128-entrant equivalents (same two dojo-count shapes, scaled) used
@@ -148,7 +148,7 @@ func benchSingleDojoRoster(n int) []Player {
 
 // BenchmarkStandardSeeding_SingleDojo_64/128/256 are bc-drwx item 2's own
 // worst case: with only ONE dojo in the whole roster, no cross-dojo swap
-// partner can EVER exist (dojoSwapGain's candidate filter rejects same-dojo
+// partner can EVER exist (bestRelocation's candidate filter rejects same-dojo
 // targets unconditionally), so the pre-fix delayDojoMeetings paid O(N^4) --
 // C(N,2) same-dojo pairs, excluded one at a time, each exclusion re-paying a
 // fresh O(N^2) worst-pair rescan -- to discover, the slow way, that the

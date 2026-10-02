@@ -2691,8 +2691,8 @@ func referenceDojoSumMeetRoundsTouching(result []Player, keys []string, slots []
 }
 
 // referenceFullDrawDojoSum is a full whole-draw meeting-round total,
-// independent of both dojoSumMeetRounds and dojoSwapGain, used by
-// TestDojoSwapGain_MatchesFullDrawDelta as the "recompute from scratch"
+// independent of both dojoSumMeetRounds and dojoSwapGainAfter, used by
+// TestDojoSwapGainAfter_MatchesFullDrawDelta as the "recompute from scratch"
 // oracle for a swap's gain. slots is denseSlotMap(len(result)) -- see
 // referenceDojoSumMeetRoundsTouching's own doc comment for why this must
 // match what the real function is handed.
@@ -2713,7 +2713,7 @@ func referenceFullDrawDojoSum(result []Player, keys []string, slots []int) int {
 }
 
 // dojoSumTestRosters is shared by TestDojoSumMeetRounds_MatchesFullScan and
-// TestDojoSwapGain_MatchesFullDrawDelta: a spread of deterministic shapes
+// TestDojoSwapGainAfter_MatchesFullDrawDelta: a spread of deterministic shapes
 // covering a namesake-free (all-unique-dojo) roster, a clustered-dojo roster
 // (a few dojos, several members each, pasted dojo-by-dojo as an operator
 // would), a multi-dojo roster with dojos interleaved rather than clustered,
@@ -2801,20 +2801,21 @@ func TestDojoSumMeetRounds_MatchesFullScan(t *testing.T) {
 	}
 }
 
-// TestDojoSwapGain_MatchesFullDrawDelta pins dojoSwapGain -- built on top of
-// the P1-rewritten dojoSumMeetRounds -- against an entirely independent
-// oracle: the before/after delta of a full whole-draw recompute
-// (referenceFullDrawDojoSum), for every (x, y) swap in each roster shape.
-// This is what actually matters to delayDojoMeetings' hill climb: the
-// SCOPED sum must still produce the same swap-gain delta the old whole-draw
-// sum would have.
-func TestDojoSwapGain_MatchesFullDrawDelta(t *testing.T) {
+// TestDojoSwapGainAfter_MatchesFullDrawDelta pins dojoSwapGainAfter, handed
+// the honest `before` (dojoSumMeetRounds over the same x, y) -- the P1-
+// rewritten scoped sum on both sides of the swap -- against an entirely
+// independent oracle: the before/after delta of a full whole-draw recompute
+// (referenceFullDrawDojoSum), for every (x, y) swap in each roster shape,
+// dojo-mates included. This is what actually matters to delayDojoMeetings'
+// hill climb: the SCOPED sum must still produce the same swap-gain delta the
+// old whole-draw sum would have.
+func TestDojoSwapGainAfter_MatchesFullDrawDelta(t *testing.T) {
 	for name, roster := range dojoSumTestRosters() {
 		t.Run(name, func(t *testing.T) {
 			slots := denseSlotMap(len(roster))
 			// keys (string) feeds referenceFullDrawDojoSum, the independent
 			// string-keyed oracle; ids (int, bc-pnum) feeds the production
-			// dojoSwapGain, which now indexes by dense id -- see
+			// dojoSwapGainAfter/dojoSumMeetRounds, which index by dense id -- see
 			// TestDojoSumMeetRounds_MatchesFullScan's own comment for why
 			// both are built here.
 			keys := make([]string, len(roster))
@@ -2842,7 +2843,7 @@ func TestDojoSwapGain_MatchesFullDrawDelta(t *testing.T) {
 					keys[x], keys[y] = keys[y], keys[x]
 					want := after - before
 
-					got := dojoSwapGain(roster, ids, slots, x, y)
+					got := dojoSwapGainAfter(roster, ids, slots, x, y, dojoSumMeetRounds(roster, ids, slots, x, y))
 					assert.Equalf(t, want, got, "x=%d y=%d", x, y)
 				}
 			}
@@ -2869,7 +2870,7 @@ func referenceDelayDojoMeetingsUnmemoized(result []Player, occupied map[int]bool
 	// below -- same reason as slots: a drift here would be misattributed to
 	// the memo. Built INDEPENDENTLY of the production dojoIDCache/
 	// newDojoIDCache interner (mirroring TestDojoSumMeetRounds_MatchesFullScan's
-	// and TestDojoSwapGain_MatchesFullDrawDelta's own idOf block, not calling
+	// and TestDojoSwapGainAfter_MatchesFullDrawDelta's own idOf block, not calling
 	// into dojoIDCache at all): a bug in dojoIDCache's own id-minting logic
 	// must stay visible to this oracle, not be baked into both sides of the
 	// comparison by sharing the same interner.
@@ -2921,7 +2922,7 @@ func referenceDelayDojoMeetingsUnmemoized(result []Player, occupied map[int]bool
 				if y == x || !movable(y) || ids[y] == ids[x] {
 					continue
 				}
-				if gain := dojoSwapGain(result, ids, slots, x, y); gain > bestGain {
+				if gain := dojoSwapGainAfter(result, ids, slots, x, y, dojoSumMeetRounds(result, ids, slots, x, y)); gain > bestGain {
 					bestGain, bestX, bestY = gain, x, y
 				}
 			}

@@ -330,7 +330,6 @@ type Competition struct {
 	StartTime         string            `yaml:"start_time" json:"startTime"`
 	Date              string            `yaml:"date" json:"date"`
 	Status            CompetitionStatus `yaml:"status" json:"status"`
-	Mirror            bool              `yaml:"mirror" json:"mirror"`
 	WithZekkenName    bool              `yaml:"with_zekken_name" json:"withZekkenName"`
 	NumberPrefix      string            `yaml:"number_prefix,omitempty" json:"numberPrefix,omitempty"`
 	HasParticipantIDs bool              `yaml:"has_participant_ids,omitempty" json:"hasParticipantIDs,omitempty"`
@@ -570,6 +569,25 @@ func (c Competition) EffectiveFormat() string {
 // fighter per side.
 func (c *Competition) IsKachinuki() bool {
 	return c != nil && c.TeamSize >= 2 && c.TeamMatchType == TeamMatchTypeKachinuki
+}
+
+// TeamBoutRows is the number of numbered bout rows a team match's block has
+// on the score sheets, and the ONE owner of that count: 0 for an individual
+// competition, TeamSize for a team match, and domain.KachinukiMaxBouts for
+// kachinuki. Every workbook asks here, the app's exports and the blank
+// template the /create generator draws alike: the Pool Matches and
+// Elimination Matches blocks (the 3rd-place block included), their IV/PW
+// formula ranges, the results overlay's row mapping, and the Kachinuki
+// Detail sheet's empty rows for hand entry.
+func (c *Competition) TeamBoutRows() int {
+	switch {
+	case c == nil || c.TeamSize <= 0:
+		return 0
+	case c.IsKachinuki():
+		return domain.KachinukiMaxBouts(c.TeamSize)
+	default:
+		return c.TeamSize
+	}
 }
 
 // MinMatchDurationSeconds / MaxMatchDurationSeconds bound a per-match clock to
@@ -1128,9 +1146,22 @@ const DecisionDraw = "hikiwake"
 // missing from the sheet.
 const DaihyosenSubPosition = -1
 
+// DaihyosenSubIndex returns the index of the representative-bout row in subs,
+// the first row at DaihyosenSubPosition, or -1 when there is none. It is the
+// one answer to "which row is the representative bout": an encounter holds
+// one, and where a hand-edited or legacy file holds two, it is the first.
+func DaihyosenSubIndex(subs []SubMatchResult) int {
+	for i := range subs {
+		if subs[i].Position == DaihyosenSubPosition {
+			return i
+		}
+	}
+	return -1
+}
+
 // IsDraw reports whether a match decision string represents a draw.
 func IsDraw(decision string) bool {
-	return decision == DecisionDraw
+	return domain.IsDrawDecisionStr(decision)
 }
 
 type SubMatchResult struct {
@@ -1572,7 +1603,7 @@ type EnchoMetadata struct {
 
 // On reports whether the block records overtime that was actually fought:
 // non-nil with a positive PeriodCount. THE single predicate for "did this
-// result happen in encho" — the (E) label (enchoLabel, pinned by the
+// result happen in encho" — the (E) label (domain.EnchoLabel, pinned by the
 // golden table), the default-win maru count (domain.DefaultWinIppons
 // callers), and decision validation all key on it, so a degenerate
 // {periodCount: 0} block can never make one surface claim overtime while

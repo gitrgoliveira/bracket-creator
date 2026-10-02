@@ -24,6 +24,7 @@ import {
   configShapeChangeStaged, shapeConfigForSave,
   pendingConfigClears,
   cutNumberPrefix, MAX_NUMBER_PREFIX_CHARS, HINT_NUMBER_PREFIX, numberPrefixHint,
+  resolveFormat,
 } from '../competition_shape.jsx';
 
 // The four format values a competition can hold. Used to sweep every
@@ -43,6 +44,21 @@ describe('wire-value constants', () => {
     expect(FORMAT_SWISS).toBe('swiss');
     expect(POOL_FORMAT_FULL).toBe('full');
     expect(POOL_FORMAT_PARTIAL).toBe('partial');
+  });
+});
+
+// resolveFormat mirrors state.Competition.EffectiveFormat: a stored "" (or a
+// config with no format at all) is a knockout, every real value is itself.
+describe('resolveFormat', () => {
+  it.each([
+    ['', FORMAT_KNOCKOUT],
+    [undefined, FORMAT_KNOCKOUT],
+    [FORMAT_KNOCKOUT, FORMAT_KNOCKOUT],
+    [FORMAT_MIXED, FORMAT_MIXED],
+    [FORMAT_LEAGUE, FORMAT_LEAGUE],
+    [FORMAT_SWISS, FORMAT_SWISS],
+  ])('%j reads as %j', (stored, effective) => {
+    expect(resolveFormat(stored)).toBe(effective);
   });
 });
 

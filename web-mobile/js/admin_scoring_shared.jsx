@@ -8,7 +8,7 @@ const Icon = window.Icon;
 
 import { DAIHYOSEN_POSITION, scoreRowMatchLabel } from './pool_ids.jsx';
 import {
-  writeDidNotLand,
+  writeDidNotLand, writeRetryable,
   attemptScoreWrite, DOWNSTREAM_KNOCKOUT_PLAYED_CANCELLED, DOWNSTREAM_KNOCKOUT_REOPEN_CANCELLED, downstreamKnockoutReopenedNotice,
   courtBusyMessage,
 } from './write_result.jsx';
@@ -357,42 +357,13 @@ function GlossaryHintAS({ name }) {
 
 // T093–T098: shared helpers for the decision (kiken/fusenpai/fusensho) flow.
 //
-// Resolve the password for /decision POST. The helper only uses the prop
-// (no window fallback); callers must pass the password explicitly. Returns ""
-// as a safe sentinel that the server will reject with 401, surfacing any
-// misconfiguration where the prop was not provided.
+// Resolve the password for the /decision POST and the representative-bout add
+// and remove. The helper only uses the prop (no window fallback); callers must
+// pass the password explicitly. "" is what the public self-run page passes: the
+// representative-bout routes accept it there, and every gated route (/decision
+// included) answers it with 401, surfacing a caller that forgot the prop.
 function resolveDecisionPassword(propPassword) {
   return propPassword || "";
-}
-
-// Guard for actions with a HARD prerequisite on server-side persistence
-// (e.g. the daihyosen pre-save). window.API.recordScore hands back one of four
-// shapes, and only two of them mean the dependent request may proceed:
-//
-//   MatchResult      confirmed by the server. Proceed.
-//   { stale: true }  a SAME-SESSION out-of-order write. The server already
-//                    holds this operator's own equal-or-newer state, so a
-//                    dependent read sees their own later intent. Proceed.
-//   { queued: true } never reached the server (offline / retryable 5xx). ABORT.
-//   { applied:false} reached the server and the timestamp guard DROPPED it
-//                    because a DIFFERENT writer's newer result won (bc-lww1).
-//                    ABORT.
-//
-// The last two are exactly what writeDidNotLand owns, so this asks it rather
-// than re-spelling the test — this was the SIXTH site of that question and the
-// one the original five-site conversion missed, which is also the reason the
-// rule now lives in a leaf module instead of at each caller.
-//
-// The stale/superseded split is the subtle part, and is why this cannot simply
-// abort on "not a MatchResult": `stale` is the operator's OWN newer state, so
-// a dependent read sees their later intent and is safe, whereas `applied:false`
-// is a different writer's state this operator has never seen, so a dependent
-// request built on it acts on a scoreline that was never on their screen.
-//
-// Throws "score_not_synced" so the caller aborts rather than running its
-// dependent request against server state it did not produce.
-function assertRunningWritePersisted(saveRes) {
-  if (writeDidNotLand(saveRes)) throw new Error("score_not_synced");
 }
 
 // T093/T094: build the /decision POST body. Pure helper so we can pin the
@@ -500,10 +471,13 @@ function makeSubmitDecision({
       // clock_skew) -- this is no longer a defence against a shape it could
       // not yet send.
       //
-      // F5: enter pending-write mode so the banner shows in the footer, and
-      // save the submit closure so "Retry now" can re-invoke it directly.
+      // F5: a QUEUED decision enters pending-write mode so the banner shows in
+      // the footer, and saves the submit closure so "Retry now" can re-invoke
+      // it directly. A refused one (applied:false) does neither
+      // (writeRetryable): the terminal-failure channel's not-saved banner
+      // reports it, with no Retry beside it.
       if (writeDidNotLand(updated)) {
-        if (setPendingWrite) {
+        if (setPendingWrite && writeRetryable(updated)) {
           setPendingWrite(true);
           if (pendingFnRef) pendingFnRef.current = () => submit(kind, { decisionBy, decisionReason }, opts);
         }
@@ -1843,7 +1817,6 @@ export {
   TermAS,
   GlossaryHintAS,
   resolveDecisionPassword,
-  assertRunningWritePersisted,
   buildDecisionBody,
   submitDecisionRequest,
   makeSubmitDecision,

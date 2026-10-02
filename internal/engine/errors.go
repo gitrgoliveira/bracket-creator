@@ -344,7 +344,7 @@ func roundLabelFromEnd(fromEnd int) string {
 // therefore by ExportTournamentWorkbooks), and is aliased by
 // internal/export.ErrSwissExportUnsupported for BuildResultsWorkbook. Swiss
 // has no pools and no static bracket -- results are per-round pairings plus a
-// running standings table -- so NEITHER the blank-template bracket export nor
+// running standings table -- so NEITHER the stored-draw export nor
 // the results-workbook export has anything to render; the message below is
 // shared by both and deliberately does not call either path a "bracket
 // export". Handlers should return HTTP 422 with the sentinel's message,

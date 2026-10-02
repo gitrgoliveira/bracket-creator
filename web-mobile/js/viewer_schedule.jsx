@@ -1,11 +1,11 @@
 // Schedule + filter components extracted from viewer.jsx (mp-pxxc step 7).
 // Pure file split. no behaviour change.
 
-import { poolLabel, tournamentMatches, compareDmy } from './viewer_utils.jsx';
+import { poolLabel, tournamentMatches, compMatches, compareDmy } from './viewer_utils.jsx';
 import { matchParticipantIds, matchParticipantNames, useWatchlist, resolveEntryPlayerIds, resolveWatchedPlayers, findPrimaryEntry, buildRoster, buildWatchedSets, matchInvolvesWatchedSet } from './viewer_watchlist_core.jsx';
 import { withNumber, teamNameMark } from './match_scoreboard.jsx';
 import { SideCell } from './side_cell.jsx';
-import { MatchViewerModal, localQueueLabelCompact } from './viewer_match.jsx';
+import { MatchViewerModal, localQueueLabelCompact, useLiveMatch, matchInList } from './viewer_match.jsx';
 import { sameCompetitor, competitorKey } from './competitor_identity.jsx';
 import { competitorMatchesQuery, matchMentions } from './competitor_search.jsx';
 import { resultRecencyDesc } from './result_recency.jsx';
@@ -561,8 +561,21 @@ export function ScheduleViewer({ tournament, tweaks }) {
 
 // Tournament-wide schedule wrapper for the viewer (its own screen)
 export function ViewerSchedule({ tournament, onBack, tweaks }) {
-  const [selectedMatch, setSelectedMatch] = useState(null);
-  const extendedTweaks = { ...tweaks, onMatchClick: setSelectedMatch };
+  // A match opens on the live row its competition holds. Only that
+  // competition's list is built, and only once a match is open: the page's
+  // own list is ScheduleViewer's, and nothing else here reads one.
+  const rowOf = useMemo(() => {
+    const byComp = new Map();
+    return (id, compId) => {
+      if (!byComp.has(compId)) {
+        const comp = (tournament.competitions || []).find((c) => c.id === compId);
+        byComp.set(compId, comp ? compMatches(comp) : []);
+      }
+      return matchInList(byComp.get(compId), id, compId);
+    };
+  }, [tournament]);
+  const [selectedMatch, openMatch, closeMatch] = useLiveMatch(rowOf);
+  const extendedTweaks = { ...tweaks, onMatchClick: openMatch };
   return (
     <div className="viewer">
       <div className="viewer__shell">
@@ -579,7 +592,7 @@ export function ViewerSchedule({ tournament, onBack, tweaks }) {
           {window.VersionFooter && <window.VersionFooter />}
         </div>
       </div>
-      {selectedMatch && <MatchViewerModal match={selectedMatch} onClose={() => setSelectedMatch(null)} tournament={tournament} />}
+      {selectedMatch && <MatchViewerModal match={selectedMatch} onClose={closeMatch} tournament={tournament} />}
     </div>
   );
 }

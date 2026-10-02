@@ -9,6 +9,12 @@ import (
 	"github.com/gitrgoliveira/bracket-creator/internal/state"
 )
 
+// ExportCompetitionXlsx renders the competition's stored draw (pools.csv,
+// pool-matches.csv, bracket.json) as a workbook with no results: the
+// stored-draw export behind GET /api/competitions/:id/export and the PDF print
+// export (ExportTournamentWorkbooks). The app's "Download blank template"
+// button does not come here: it posts the roster to /create, which draws the
+// workbook afresh (cmd/create_handler.go).
 func (e *Engine) ExportCompetitionXlsx(id string) ([]byte, error) {
 	comp, err := e.store.LoadCompetition(id)
 	if err != nil {
@@ -51,13 +57,19 @@ func (e *Engine) ExportCompetitionXlsx(id string) ([]byte, error) {
 		}
 	}
 
-	// Where each pool is ACTUALLY being fought. Best-effort for the same reason
-	// the bracket load below is: a competition with no pool matches on disk
-	// simply bands by the drawn allocation, which is what this did before.
-	var courtOfPool map[string]string
-	if poolMatches, poolErr := e.store.LoadPoolMatches(id); poolErr == nil {
-		courtOfPool = PoolCourtByName(poolMatches)
+	// The Pool Matches grid comes from the stored results, as it does in the
+	// results export (AttachPoolMatches): pools.csv records membership only, and
+	// the matches the draw left in the store's cache are gone after a restart,
+	// which printed a template with no match blocks. Strict like the bracket
+	// load below, so a corrupt pool-matches.csv fails the export rather than
+	// print one; a missing file (no draw yet) is not an error.
+	poolMatches, err := e.store.LoadPoolMatches(id)
+	if err != nil {
+		return nil, err
 	}
+	AttachPoolMatches(pools, poolMatches)
+	// Where each pool is ACTUALLY being fought, so it bands under that shiaijo.
+	courtOfPool := PoolCourtByName(poolMatches)
 
 	// The tournament, loaded ONCE and strictly (mp-yuy8 criterion 6): both the
 	// shiaijo list below and the Tags sheet's publicURL near the end of this
@@ -130,7 +142,7 @@ func (e *Engine) ExportCompetitionXlsx(id string) ([]byte, error) {
 		return nil, err
 	}
 
-	// Tags sheet, blank-template-export-only extra: pass publicURL so numbered
+	// Tags sheet, the stored-draw export's own extra: pass publicURL so numbered
 	// tags get an embedded QR code. tourn (loaded once, strictly, above) may
 	// legitimately be nil for a competition with no tournament record yet,
 	// which simply omits QR codes without aborting the export. CreateTagsSheet

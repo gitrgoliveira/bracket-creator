@@ -21,14 +21,16 @@ func newBodySizeTestRouter(limit int64) *gin.Engine {
 	gin.SetMode(gin.ReleaseMode)
 	r := gin.New()
 	r.Use(MaxBodyBytes(limit))
-	r.POST("/echo", func(c *gin.Context) {
+	echo := func(c *gin.Context) {
 		body, err := c.GetRawData()
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 			return
 		}
 		c.JSON(http.StatusOK, gin.H{"len": len(body)})
-	})
+	}
+	r.POST("/echo", echo)
+	r.DELETE("/echo", echo)
 	r.GET("/ping", func(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{"ok": true})
 	})
@@ -96,6 +98,68 @@ func TestMaxBodyBytes_SkipsBodylessMethods(t *testing.T) {
 	r.ServeHTTP(w, req)
 
 	assert.Equal(t, http.StatusOK, w.Code, "GET should bypass body cap")
+}
+
+// TestMaxBodyBytes_CapsADeleteThatCarriesABody pins the cap on a DELETE with
+// a body (the daihyosen and league tie-break removals read one): over the
+// limit it is refused like a POST, by its Content-Length or while it is read,
+// while a DELETE without a body passes untouched.
+func TestMaxBodyBytes_CapsADeleteThatCarriesABody(t *testing.T) {
+	r := newBodySizeTestRouter(100)
+	send := func(body string, contentLength int64) *httptest.ResponseRecorder {
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest(http.MethodDelete, "/echo", strings.NewReader(body))
+		req.ContentLength = contentLength
+		r.ServeHTTP(w, req)
+		return w
+	}
+
+	w := send(strings.Repeat("x", 200), 200)
+	assert.Equal(t, http.StatusRequestEntityTooLarge, w.Code, "an oversized DELETE body is refused by its Content-Length")
+
+	w = send(strings.Repeat("x", 200), -1)
+	assert.NotEqual(t, http.StatusOK, w.Code, "an oversized DELETE body with no Content-Length is cut off as it is read")
+
+	w = send(`{"modifiedAt":1}`, 16)
+	assert.Equal(t, http.StatusOK, w.Code, "a DELETE body under the limit is read")
+	assert.Contains(t, w.Body.String(), `"len":16`)
+
+	// As the server receives it: a request without a body reads as http.NoBody.
+	w = httptest.NewRecorder()
+	r.ServeHTTP(w, httptest.NewRequest(http.MethodDelete, "/echo", nil))
+	assert.Equal(t, http.StatusOK, w.Code, "a DELETE without a body passes")
+	assert.Contains(t, w.Body.String(), `"len":0`)
+}
+
+// TestMaxBodyBytes_DeleteBodiesAreCappedBeforeAuth exercises the real
+// NewRouter: the two DELETE routes that read a body answer an oversized one
+// with 413 before AuthMiddleware runs (401 without a password), so an
+// anonymous caller cannot make the server read it in full.
+func TestMaxBodyBytes_DeleteBodiesAreCappedBeforeAuth(t *testing.T) {
+	tempDir, err := os.MkdirTemp("", "delete-cap-test-*")
+	require.NoError(t, err)
+	defer os.RemoveAll(tempDir)
+
+	store, err := state.NewStore(tempDir)
+	require.NoError(t, err)
+	require.NoError(t, store.SaveTournament(&state.Tournament{Name: "Test", Password: "secret"}))
+
+	eng := engine.New(store)
+	res := resources.NewResources(nil, fstest.MapFS{"web-mobile/index.html": {Data: []byte("<html></html>")}})
+	router, _, limiter := NewRouter(store, eng, res, NewFileVerifier(store))
+	t.Cleanup(limiter.Close)
+
+	body := strings.Repeat("x", int(DefaultMaxBodyBytes)+1)
+	for _, path := range []string{
+		"/api/competitions/comp/matches/Pool%20A-0/daihyosen",
+		"/api/competitions/comp/league-tiebreak",
+	} {
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest(http.MethodDelete, path, bytes.NewBufferString(body))
+		req.ContentLength = int64(len(body))
+		router.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusRequestEntityTooLarge, w.Code, "DELETE %s: got %d", path, w.Code)
+	}
 }
 
 // TestMaxBodyBytes_FiresBeforeAuth pins the wiring contract used by

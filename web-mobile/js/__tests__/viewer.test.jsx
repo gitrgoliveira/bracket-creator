@@ -1236,7 +1236,9 @@ describe('LeagueMatrix (mp-f4xo)', () => {
 });
 
 // mp-7x4n: ViewerOverview opens MatchViewerModal in self-run mode,
-// MatchDetailCard in officiated mode.
+// MatchDetailCard in officiated mode. The modal reads its match from
+// allMatches, the competition's whole list ViewerCompetition passes, so every
+// fixture that opens it carries the match there too.
 describe('ViewerOverview self-run vs officiated match click (mp-7x4n)', () => {
   const realReact = global.React;
   let runtime;
@@ -1309,6 +1311,7 @@ describe('ViewerOverview self-run vs officiated match click (mp-7x4n)', () => {
       runningMatches: [],
       upcomingMatches: [m],
       recentMatches: [],
+      allMatches: [m],
       tweaks: {},
       tournament: { mode: 'self-run' },
       compId: 'c1',
@@ -1336,6 +1339,7 @@ describe('ViewerOverview self-run vs officiated match click (mp-7x4n)', () => {
       runningMatches: [],
       upcomingMatches: [m],
       recentMatches: [],
+      allMatches: [m],
       tweaks: {},
       tournament: { mode: 'officiated' },
       compId: 'c1',
@@ -1362,6 +1366,7 @@ describe('ViewerOverview self-run vs officiated match click (mp-7x4n)', () => {
       runningMatches: [],
       upcomingMatches: [],
       recentMatches: [],
+      allMatches: [running],
       tweaks: {},
       tournament: { mode: 'self-run' },
       compId: 'c1',
@@ -1384,6 +1389,7 @@ describe('ViewerOverview self-run vs officiated match click (mp-7x4n)', () => {
       runningMatches: [],
       upcomingMatches: [],
       recentMatches: [],
+      allMatches: [running],
       tweaks: {},
       tournament: { mode: 'self-run' },
       compId: 'c1',

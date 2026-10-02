@@ -103,8 +103,9 @@ export function SyncStatusPill({ isRunning }) {
 // released only once the write has been handed to onSubmit (by then
 // recordScore counts it as in flight). Kept when the editor goes away: the
 // unmount writes it. Kept when the page goes away: on pagehide, or the tab
-// being hidden, a pending edit is written at once with `durable: true` on the
-// patch, which makes recordScore put it straight into the persisted outbox.
+// being hidden, a pending edit is written at once (a hidden tab first waits
+// for a hold, see the effect below) with `durable: true` on the patch, which
+// makes recordScore put it straight into the persisted outbox.
 // Every write carries the time of the edit it saves (editedPerf), so however
 // late it goes out, it is never newer than a result recorded after the tap.
 export function useDebouncedRunningWrite({ isRunningRef, buildPatchRef, onSubmitRef }) {
@@ -116,6 +117,10 @@ export function useDebouncedRunningWrite({ isRunningRef, buildPatchRef, onSubmit
   // One token per editor instance, so two open editors never release each
   // other's pending edit.
   const pendingTokenRef = useRefA({});
+  // The caller's hold (see hold below), or null. A debounce that fires while
+  // one is on sets deferredRef instead of writing, and the edit stays owed.
+  const holdRef = useRefA(null);
+  const deferredRef = useRefA(false);
   // Existing test stubs of window.API predate notePendingEdit, so ask first.
   const notePending = (on) => {
     const api = window.API;
@@ -131,19 +136,32 @@ export function useDebouncedRunningWrite({ isRunningRef, buildPatchRef, onSubmit
     return true;
   };
 
+  // takeOwed: clear the timer and a deferred edit, reporting whether an edit
+  // was owed. Whoever takes it writes it or drops it.
+  const takeOwed = () => {
+    const owed = clearTimer() || deferredRef.current;
+    deferredRef.current = false;
+    return owed;
+  };
+
   // cancelDebounce: call this before any explicit submit (Start / Finish /
   // Hantei / Decision) so the queued timer can't fire afterward, and before
   // closing on the operator's Discard, so the unmount does not write what they
   // threw away. Nothing of this hook's is left pending then, so the pending
-  // edit is released too.
+  // edit is released too. Returns whether an edit was owed, so a caller can
+  // tell a save is still due. A deferred edit is dropped, not written: the
+  // submit this precedes carries the same current state.
   const cancelDebounce = () => {
-    if (clearTimer()) notePending(false);
+    const owed = takeOwed();
+    if (owed) notePending(false);
+    return owed;
   };
 
-  // The running write itself, shared by the debounce timer, the unmount and
-  // the page-hide flush so they can never apply different gates. `durable`
-  // asks recordScore to queue the write rather than fetch it (bc-sync).
-  const fireRunningWrite = (durable) => {
+  // The running write itself, shared by the debounce timer, release, the
+  // unmount and the page-hide flush so they can never apply different gates.
+  // `durable` asks recordScore to queue the write rather than fetch it
+  // (bc-sync); `transform` applies a hold's outcome to the patch (see hold).
+  const fireRunningWrite = (durable, transform) => {
     try {
       // gate 3: re-check running at FIRE time. If the match was completed
       // during the debounce window (this operator's Finish cancels the timer,
@@ -157,12 +175,42 @@ export function useDebouncedRunningWrite({ isRunningRef, buildPatchRef, onSubmit
       // flight before its first await, so the status stays "syncing" through
       // the hand-over instead of flickering to "synced" and back.
       try {
-        const patch = { ...buildPatchRef.current("running"), editedPerf: editPerfRef.current };
+        let patch = { ...buildPatchRef.current("running"), editedPerf: editPerfRef.current };
+        if (transform) patch = transform(patch);
         const p = onSubmitRef.current(durable ? { ...patch, durable: true } : patch);
         if (p && typeof p.catch === "function") p.catch(() => {});
       } catch (_) { /* swallow */ }
     } finally {
       notePending(false);
+    }
+  };
+
+  // hold: for a caller whose own request (the team editor's representative-bout
+  // add or remove) changes the sheet an autosave is built from. A debounce
+  // that fires while held defers its write, and the mounted caller calls
+  // release() from an effect that runs after the render adopting the result,
+  // since refs update during render, not inside the request's continuation.
+  //
+  // hold() returns settle(transform), which the caller calls once the request
+  // has settled, mounted or not: with a function applying the outcome to a
+  // patch when it landed, with nothing when it failed or was refused. An edit
+  // owed when the editor unmounts during the request waits for it and is
+  // written with that outcome applied, since nothing renders to adopt it.
+  const hold = () => {
+    const h = { settled: false, transform: null, onSettle: null };
+    holdRef.current = h;
+    return (transform) => {
+      if (h.settled) return;
+      h.settled = true;
+      h.transform = transform || null;
+      if (h.onSettle) h.onSettle();
+    };
+  };
+  const release = () => {
+    holdRef.current = null;
+    if (deferredRef.current) {
+      deferredRef.current = false;
+      fireRunningWrite();
     }
   };
 
@@ -173,9 +221,66 @@ export function useDebouncedRunningWrite({ isRunningRef, buildPatchRef, onSubmit
   // one is why the write carries the time of the tap (editedPerf): the tap is
   // older than that finish, so the server keeps the finish. Discarding is the
   // one way out that saves nothing: the editor cancels first (cancelDebounce).
-  // A reload never unmounts; the pagehide listener below keeps an edit across
-  // one. Everything this reads is a ref, so the mount-time closure is safe.
-  useEffectA(() => () => { if (clearTimer()) fireRunningWrite(); }, []);
+  // Under a hold the edit goes out with the request's outcome applied: at
+  // once if it has settled, else when it settles.
+  //
+  // bc-sync: the page going away (a reload, a closed tab, the iPad locking or
+  // switching app) writes an edit still in the window NOW, durably: recordScore
+  // puts a `durable` write into the persisted outbox, because a fetch started
+  // here would die with the document. On pagehide a hold does not delay it,
+  // since nothing can wait for a page that is going away: it goes with the
+  // outcome applied if the request has settled, else as it stands. The tab
+  // being hidden does not mean it is going, so there an unsettled hold is
+  // waited for and the edit then goes durably with the outcome, where a write
+  // at once would put back a removed representative bout or wipe an added one.
+  // Accepted gap: a hidden page the system discards before the request
+  // answers, with no pagehide, loses that tap. The listeners stay on while an
+  // edit waits for its request.
+  //
+  // One effect for both, so the unmount decides whether the page listeners
+  // stay. Everything the closures read is a ref, so the mount-time closure is
+  // safe.
+  useEffectA(() => {
+    let gone = false;
+    const outcome = () => (holdRef.current && holdRef.current.transform) || null;
+    const isHidden = () => document.visibilityState === "hidden";
+    const listen = (on) => {
+      const method = on ? "addEventListener" : "removeEventListener";
+      window[method]("pagehide", onPageHide);
+      document[method]("visibilitychange", onVisibility);
+    };
+    // Once a hold waited for settles: a mounted, shown editor leaves the edit
+    // to release(), which writes it after the render adopting the outcome.
+    const writeOnSettle = (h) => () => {
+      if (!gone && !isHidden()) return;
+      if (gone) listen(false);
+      if (takeOwed()) fireRunningWrite(isHidden(), h.transform);
+    };
+    const flushDurably = (goingAway) => {
+      const h = holdRef.current;
+      if (!goingAway && h && !h.settled) {
+        h.onSettle = writeOnSettle(h);
+        return;
+      }
+      if (takeOwed()) fireRunningWrite(true, outcome());
+      if (gone) listen(false);
+    };
+    const onPageHide = () => flushDurably(true);
+    const onVisibility = () => { if (isHidden()) flushDurably(false); };
+    listen(true);
+    return () => {
+      gone = true;
+      const h = holdRef.current;
+      const owed = takeOwed();
+      if (owed && h && !h.settled) {
+        deferredRef.current = true;
+        h.onSettle = writeOnSettle(h);
+        return;
+      }
+      listen(false);
+      if (owed) fireRunningWrite(false, outcome());
+    };
+  }, []);
 
   // markDirty: call from every user-driven mutation handler (addPt,
   // removePt, foul increment/decrement, draw toggle, encho change, team
@@ -187,33 +292,17 @@ export function useDebouncedRunningWrite({ isRunningRef, buildPatchRef, onSubmit
     // is still pending, and a release here would publish synced-then-syncing
     // on every tap inside the window.
     clearTimer();
+    // The new timer carries every edit so far (buildPatchRef reads current
+    // state), so a deferred one is superseded by it, not lost.
+    deferredRef.current = false;
     notePending(true);
     editPerfRef.current = perfNow();
     timerRef.current = setTimeout(() => {
       timerRef.current = null;
+      if (holdRef.current) { deferredRef.current = true; return; }
       fireRunningWrite();
     }, AUTOSAVE_DEBOUNCE_MS);
   };
 
-  // bc-sync: the page is going away (a reload, a closed tab, the iPad locking
-  // or switching app). An edit still in the debounce window is written NOW,
-  // durably: recordScore puts a `durable` write into the persisted outbox,
-  // because a fetch started here would die with the document. Only a PENDING
-  // edit is written; with nothing pending there is nothing to lose. The
-  // mount-time closures are safe here: everything they read is a ref.
-  useEffectA(() => {
-    const flushDurably = () => {
-      if (!clearTimer()) return;
-      fireRunningWrite(true);
-    };
-    const onVisibility = () => { if (document.visibilityState === "hidden") flushDurably(); };
-    window.addEventListener("pagehide", flushDurably);
-    document.addEventListener("visibilitychange", onVisibility);
-    return () => {
-      window.removeEventListener("pagehide", flushDurably);
-      document.removeEventListener("visibilitychange", onVisibility);
-    };
-  }, []);
-
-  return { markDirty, cancelDebounce };
+  return { markDirty, cancelDebounce, hold, release };
 }

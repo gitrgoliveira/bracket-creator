@@ -197,6 +197,19 @@ async function captureStill(page, recipe, file) {
   await page.screenshot({ path: file, fullPage: recipe.capture === 'fullPage', ...STABLE });
 }
 
+// Chromium reports a resource-load console error with the failed resource's
+// own URL as the message location (there is no JS call site for a
+// network-level error), so this is how the console line below recovers a
+// path the text alone never carries. Also used to shorten a response
+// listener's URL to a path: no host, no query string, no token.
+function pathOf(url) {
+  try {
+    return new URL(url).pathname;
+  } catch {
+    return url;
+  }
+}
+
 async function runRecipe(browser, recipe, ctx) {
   const { base, api, dataDir, fixture } = ctx;
   const isVideo = recipe.capture === 'video';
@@ -210,18 +223,32 @@ async function runRecipe(browser, recipe, ctx) {
   if (recipe.auth === 'admin') await authAdmin(context);
   const page = await context.newPage();
   // A capture is a real browser session, so the page can tell us it is broken.
-  // Two severities, deliberately not treated alike. An UNCAUGHT exception means
-  // the surface is broken and the capture would record that as the product
-  // working, so it fails the capture. A console error does not: the SPA asks
-  // for a team's lineup before one exists and the server answers 404, which the
-  // client handles and which is normal on seven captures here. Failing on that
-  // would make the gate cry wolf on every team surface, and a gate that always
-  // fires is one the operator learns to skip.
+  // Two severities, deliberately not treated alike (operator decision
+  // 2026-09-27). An UNCAUGHT exception means the surface is broken and the
+  // capture would record that as the product working, so it fails the
+  // capture. A console error or a failed request (HTTP status 400 and above)
+  // does not: they are reported after the run, named by method and route, so
+  // a real fault is visible without failing every capture that happens to
+  // surface one.
   const pageErrors = [];
   const pageFaults = [];
   page.on('pageerror', (err) => pageErrors.push(err.message.split('\n')[0]));
+  page.on('response', (res) => {
+    if (res.status() >= 400) {
+      pageFaults.push(`HTTP ${res.status()} ${res.request().method()} ${pathOf(res.url())}`);
+    }
+  });
   page.on('console', (msg) => {
-    if (msg.type() === 'error') pageFaults.push(`console.error ${msg.text().split('\n')[0]}`);
+    if (msg.type() !== 'error') return;
+    let text = `console.error ${msg.text().split('\n')[0]}`;
+    // Append the source path whenever the browser gives us one, rather than
+    // sniffing for Chromium's English "Failed to load resource" wording: that
+    // string is neither stable across a Chromium version bump nor present in
+    // a localised browser, and either would silently drop back to a
+    // URL-less line.
+    const url = msg.location().url;
+    if (url) text += ` (${pathOf(url)})`;
+    pageFaults.push(text);
   });
   // page.video() has to be taken while the page is alive: closing the context
   // is what finalises the file, and by then the page handle is gone.
@@ -403,7 +430,7 @@ async function main() {
   // loud: the capture looks like the product working, and records it broken.
   const faulted = results.filter(([, v]) => v.faults && v.faults.length);
   if (faulted.length) {
-    console.log('\npage errors during capture - the surface misbehaved while being photographed:');
+    console.log('\npage errors and failed requests during capture - the surface misbehaved while being photographed:');
     for (const [name, v] of faulted) {
       for (const fault of [...new Set(v.faults)]) console.log(`  ${name}: ${fault}`);
     }

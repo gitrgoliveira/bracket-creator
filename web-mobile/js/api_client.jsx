@@ -44,6 +44,7 @@ import {
     CLOCK_SKEW_REASON_TEXT, CLOCK_SKEW_ADVICE, CLOCK_SKEW_UNHEALED_ADVICE,
     downstreamKnockoutPlayedQueueDrop, downstreamKnockoutRunningMessage, downstreamKnockoutRunningReopenMessage,
     downstreamKnockoutRunningQueueDrop, courtBusyMessage,
+    FETCH_TIMEOUT_MS, REP_BOUT_NOT_ADDED, REP_BOUT_NOT_REMOVED, noAnswerSentence,
 } from './write_result.jsx';
 
 // ---------------------------------------------------------------------------
@@ -55,19 +56,43 @@ import {
 // rejected promise so callers enter the same catch branch as a TCP reset.
 // The clearTimeout in finally ensures the alarm never fires after the
 // request has already settled, avoiding a stale abort on a new controller.
+// That settling is the HEADERS arriving: the abort covers nothing after it,
+// so a request whose body must be bounded as well goes through _fetchJson.
+// The deadline itself is FETCH_TIMEOUT_MS (write_result.jsx).
 // ---------------------------------------------------------------------------
 
 /**
  * fetch() with an automatic abort timeout.
  * @param {string} url
  * @param {RequestInit} opts
- * @param {number} [ms=12000]
+ * @param {number} [ms=FETCH_TIMEOUT_MS]
  * @returns {Promise<Response>}
  */
-function fetchWithTimeout(url, opts, ms = 12000) {
+function fetchWithTimeout(url, opts, ms = FETCH_TIMEOUT_MS) {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), ms);
     return fetch(url, { ...opts, signal: controller.signal }).finally(() => clearTimeout(timer));
+}
+
+// _refusalText is the words a refused request is thrown with: the refusal's
+// sentence (`message`: a finished match, the judges' decision on a
+// representative bout) when it carries one, else its code (`error`), else the
+// caller's fallback. The public page shows a thrown message as it is, so a
+// path that threw the bare code showed "result_finalized" where the server had
+// said what happened. The one owner of that choice.
+function _refusalText(body, fallback) {
+    return (body && (body.message || body.error)) || fallback;
+}
+
+// _refusalError: the Error a refused request is thrown with, in _refusalText's
+// words. A refusal that carries a sentence carries its code beside it, and the
+// Error keeps that code, so a caller can tell one refusal from another without
+// comparing words (the team editor and the Lineups page word a member who
+// already has a name alike through it, lineup_resolver.jsx memberRefusalNote).
+function _refusalError(body, fallback) {
+    const e = new Error(_refusalText(body, fallback));
+    if (body && body.message && body.error) e.code = body.error;
+    return e;
 }
 
 // reopenFailureError builds the Error thrown by a failed reopen. reopenMatch and
@@ -102,7 +127,7 @@ async function reopenFailureError(res) {
         if (downstream.downstreamKnockoutPlayed) downstream.downstreamKnockoutPlayed.reopen = true;
         return downstream;
     }
-    const e = new Error(err.message || err.error || "Failed to reopen match");
+    const e = new Error(_refusalText(err, "Failed to reopen match"));
     if (err.error) e.code = err.error;
     if (err.court) e.court = err.court;
     if (err.matchId) e.matchId = err.matchId;
@@ -188,7 +213,7 @@ function _revKey(compID, matchID) { return `${compID}:${matchID}`; }
 // body isn't this refusal, so callers can `throw _downstreamKnockoutPlayedError(body) || new Error(...)`.
 function _downstreamKnockoutPlayedError(body) {
     if (!body || body.error !== 'downstream_knockout_played') return null;
-    const err = new Error(body.message || body.error || 'Failed to record score');
+    const err = new Error(_refusalText(body, 'Failed to record score'));
     err.downstreamKnockoutPlayed = {
         matchId: body.matchId,
         blockingMatchId: body.blockingMatchId,
@@ -270,8 +295,27 @@ function _downstreamQueueDropCopy(body) {
     const running = _downstreamKnockoutRunningError(body);
     if (running) return downstreamKnockoutRunningQueueDrop(running.downstreamKnockoutRunning.runningMatches);
     const courtBusy = _courtBusyError(body);
-    if (courtBusy) return { reason: courtBusy.message };
+    // A whole sentence that says what to do, so it is marked as one
+    // (_replayRefusal): no full stop or advice is added after it.
+    if (courtBusy) return { reason: courtBusy.message, sentence: true };
     return null;
+}
+
+// _replayRefusal: what a queued write the server refused on replay is reported
+// with, in the shape the terminal failure and the queue alert carry: its
+// `reason`, the drop copy's own `advice` where there is one, and `sentence`
+// when the reason is the server's own sentence (`reasonHuman`, else
+// `message`; the court_busy drop copy is marked the same way). A banner and
+// the alert show such a sentence as it is
+// (write_result.jsx notSavedText, app.jsx queueAlertMessage): it says what to
+// do, so advice of theirs after it would contradict it. A bare code or HTTP
+// status carries no mark and keeps their own words around it.
+function _replayRefusal(body, fallback) {
+    const dropCopy = _downstreamQueueDropCopy(body);
+    if (dropCopy) return dropCopy;
+    const sentence = body.reasonHuman || body.message;
+    if (sentence) return { reason: sentence, sentence: true };
+    return { reason: body.error || fallback };
 }
 
 // ---------------------------------------------------------------------------
@@ -1190,7 +1234,12 @@ async function _flushQueue() {
                     effectiveUrl = `/api/competitions/${compID}/matches/${matchID}/score`;
                 }
                 try {
-                    const res = await fetchWithTimeout(effectiveUrl, {
+                    // Bounded, the body read included (_fetchJson): this loop is
+                    // single-flight, so one replay whose body never completed
+                    // would stop every later flush. Past the deadline it is a
+                    // network failure like any other (the catch below): kept and
+                    // retried, and the answer each branch reads is `body`.
+                    const { res, body } = await _fetchJson(effectiveUrl, {
                         method: effectiveMethod,
                         headers: { 'Content-Type': 'application/json', 'X-Tournament-Password': password },
                         // Never a replayed confirmation, whatever the entry holds:
@@ -1215,7 +1264,6 @@ async function _flushQueue() {
                             // stamps a decision would have the drop swallowed silently -
                             // the entry deleted as delivered, nothing said - which is the
                             // exact failure bc-lww1 was.
-                            const body = await res.json().catch(() => ({}));
                             if (writeWasRefusedForClock(body)) {
                                 // bc-cse: NOT a supersede. The server refused this
                                 // replay because the stamp it carries is in the
@@ -1297,8 +1345,9 @@ async function _flushQueue() {
                         } else if (!terminal && kind === 'score') {
                             // bc-cse MEDIUM-2. A RUNNING score replay is normally
                             // fire-and-forget: res.ok is taken as delivered and the
-                            // entry is deleted unread. That is right for every body
-                            // this endpoint can return EXCEPT the clock-skew refusal,
+                            // entry is deleted without a look at the answer. That is
+                            // right for every body this endpoint can return EXCEPT
+                            // the clock-skew refusal,
                             // where res.ok means the exact opposite of delivered -
                             // nothing was written, and deleting the entry throws the
                             // snapshot away. Most of what it carried is level-triggered
@@ -1308,11 +1357,10 @@ async function _flushQueue() {
                             // holds it and the winner-stays sequence stalls until the
                             // operator presses Record bout again.
                             //
-                            // So this arm parses the body for that ONE case. Every other
+                            // So this arm reads the body for that ONE case. Every other
                             // body - a plain 200, {stale:true}, reason 'superseded', no
                             // reason at all - falls straight through to the same
                             // delete-as-delivered below, byte-identically to before.
-                            const body = await res.json().catch(() => ({}));
                             const refusedForClock = writeWasRefusedForClock(body);
                             if (refusedForClock && !descriptor.skewRetried) {
                                 await _restampQueuedEntryForSkew(descriptor);
@@ -1370,7 +1418,6 @@ async function _flushQueue() {
                         // Fire ON the crossing (=== not >=) so one wedged write
                         // announces once, not on every retry for the next 12 hours.
                         if (rejections === SERVER_REJECTION_NOTICE_THRESHOLD) {
-                            const body = await res.json().catch(() => ({}));
                             console.warn(`[sync] queued ${kind || 'running'} write still failing after ${rejections} server rejections (${res.status}); keeping it queued:`, body);
                             _notifyQueueAlert({
                                 kind: 'server_error',
@@ -1398,7 +1445,6 @@ async function _flushQueue() {
                         // anyFailed: with nothing else queued the flush goes quiet
                         // instead of burning a retry every 8s for 12 hours.
                         if (!descriptor.authBlocked) {
-                            const body = await res.json().catch(() => ({}));
                             console.warn(`[sync] parking queued ${kind || 'running'} write pending re-auth (${res.status}):`, body);
                             descriptor.authBlocked = true;
                             _notifyQueueAlert({
@@ -1424,7 +1470,6 @@ async function _flushQueue() {
                         // IMPORTANT: this lost-response rule applies ONLY to queued retries
                         // inside _flushQueue. The direct recordDecision call path always throws
                         // on 409 so the score editor's force-retry prompt still fires.
-                        const body = await res.json().catch(() => ({}));
                         if (body.error !== 'decision_locked' && body.error !== 'already_ineligible') {
                             console.warn(`[sync] queued decision write rejected (409):`, body);
                             // bc-cse: a queued kiken/fusenpai/daihyosen correction can hit
@@ -1433,15 +1478,12 @@ async function _flushQueue() {
                             // human copy, same reason this can't just retry: there is no
                             // operator here for attemptScoreWrite's confirm dialog to
                             // prompt, and nothing sets forceDownstreamReopen automatically.
-                            const dropCopy = _downstreamQueueDropCopy(body);
-                            const reason = dropCopy ? dropCopy.reason : (body.reasonHuman || body.error || 'conflict (409)');
-                            _notifyTerminalWriteFailed({
-                                compID, matchID, kind, status: 409, reason,
-                                ...(dropCopy && dropCopy.advice ? { advice: dropCopy.advice } : {}),
-                            });
+                            const refusal = _replayRefusal(body, 'conflict (409)');
+                            _notifyTerminalWriteFailed({ compID, matchID, kind, status: 409, ...refusal });
                             _notifyQueueAlert({
                                 kind: 'rejected', count: 1, terminalCount: 1, compID, matchID,
-                                detail: reason,
+                                detail: refusal.reason,
+                                ...(refusal.sentence ? { sentence: true } : {}),
                             });
                         }
                         _dequeue(key, descriptor);
@@ -1463,7 +1505,6 @@ async function _flushQueue() {
                         // the latter reaches only an operator with this exact match
                         // open, which is precisely not the case when a queued write
                         // fails minutes later on a different court.
-                        const body = await res.json().catch(() => ({}));
                         console.warn(`[sync] queued ${kind || 'running'} write rejected (${res.status}):`, body);
                         // bc-cse: a queued knockout correction (score OR decision) can
                         // land here too -- offline, or during a transient-5xx retry run,
@@ -1477,22 +1518,20 @@ async function _flushQueue() {
                         // "downstream_knockout_played" token, which is what an operator
                         // reading this alert used to see with no way to understand it or
                         // move forward.
-                        const dropCopy = _downstreamQueueDropCopy(body);
-                        const reason = dropCopy ? dropCopy.reason : (body.reasonHuman || body.error || `HTTP ${res.status}`);
+                        const refusal = _replayRefusal(body, `HTTP ${res.status}`);
                         if (terminal) {
-                            _notifyTerminalWriteFailed({
-                                compID, matchID, kind, status: res.status, reason,
-                                ...(dropCopy && dropCopy.advice ? { advice: dropCopy.advice } : {}),
-                            });
+                            _notifyTerminalWriteFailed({ compID, matchID, kind, status: res.status, ...refusal });
                         }
                         _notifyQueueAlert({
                             kind: 'rejected', count: 1, terminalCount: terminal ? 1 : 0, compID, matchID,
-                            detail: reason,
+                            detail: refusal.reason,
+                            ...(refusal.sentence ? { sentence: true } : {}),
                         });
                         _dequeue(key, descriptor);
                     }
                 } catch (_) {
-                    // fetch rejected (network down) or aborted by fetchWithTimeout.
+                    // fetch rejected (network down), or the request or its body
+                    // was given up at the deadline (_fetchJson).
                     anyFailed = true;
                     networkFailed = true;
                 }
@@ -1913,6 +1952,24 @@ let _retryTimer = null;
 /** @type {Set<{callback: Function, onStatus: Function|undefined}>} */
 const _subscribers = new Set();
 
+// The last event id the stream delivered (the server's seq, from its `id:`
+// line). A reconnect opens a NEW EventSource, which sends no Last-Event-ID
+// header, so the id rides on the URL and the hub replays every event after
+// it (or answers resync_required when it cannot). A resync_required with no
+// id (a restarted server that has sent nothing yet) resets it, since the
+// browser keeps the old id when a frame carries none.
+let _lastEventId = '';
+function _noteEventId(id, parsed) {
+    if (parsed && parsed.type === 'resync_required' && !(parsed.seq > 0)) {
+        _lastEventId = '';
+        return;
+    }
+    if (id) _lastEventId = id;
+}
+function _eventsUrl() {
+    return _lastEventId ? `/api/events?lastEventId=${encodeURIComponent(_lastEventId)}` : '/api/events';
+}
+
 // F2: timestamp of the last received SSE activity (open or message).
 let _lastActivityAt = 0;
 /** @type {ReturnType<typeof setInterval>|null} */
@@ -1987,7 +2044,7 @@ function _ensureConnected() {
     // events from a superseded source (`source !== _sharedSource`) so a stale
     // instance: should one ever fire after being replaced: can't close the
     // live connection or fan out a false status/message to current subscribers.
-    const source = new EventSource('/api/events');
+    const source = new EventSource(_eventsUrl());
     _sharedSource = source;
 
     // F2: arm the watchdog at connect time, not just in onopen: a CONNECTING
@@ -2047,6 +2104,7 @@ function _ensureConnected() {
                 _relearnClockThrottled();
             }
         }
+        _noteEventId(event.lastEventId, parsed);
         for (const sub of _subscribers) {
             try { sub.callback(parsed); } catch (err) { console.error('SSE callback failed:', err); }
         }
@@ -2101,6 +2159,105 @@ function parseSkippedCompetitionsHeader(headerValue) {
         out.push({ id: entry.slice(0, sep), reason: entry.slice(sep + 2) });
         return out;
     }, []);
+}
+
+// Strict === false: a body that does not SAY it is unsaved is a lineup, so
+// a stub/older-shape response with no `saved` field at all still resolves
+// as a lineup rather than being swallowed. Shared by fetchTeamLineup and
+// fetchMatchLineup.
+const lineupOrNull = (body) => (body.saved === false ? null : body);
+
+// What the daihyosen add or remove came back with. A refusal (superseded,
+// clock_skew) is the 200 {applied: false} body itself, returned as it is for
+// write_result.jsx's predicates, with the clock relearned as for any refusal.
+// No _notifyScoreSuperseded: the team editor reports it from this result
+// (notLandedBanner), and that broadcast would repaint a clock refusal with
+// the superseded advice. Otherwise the match is unwrapped from its envelope
+// ({ result: MatchResult }), as removeKachinukiBout does.
+function _daihyosenOutcome(body) {
+    if (writeWasSuperseded(body)) {
+        _relearnClockThrottled();
+        return body;
+    }
+    return body.result ?? body;
+}
+
+// _requestTimedOut: the one error a request given up on at its deadline
+// rejects with (_fetchJson), marked `timedOut` so a caller can tell it from a
+// request that failed: the organiser's refresh after a write says nothing
+// about one (admin.jsx refreshFailureToast).
+function _requestTimedOut() {
+    const e = new Error('the request was not answered in time');
+    e.timedOut = true;
+    return e;
+}
+
+// _fetchJson fetches and reads the body as JSON under ONE deadline, on ONE
+// AbortController: fetchWithTimeout's abort ends when the headers arrive, and
+// here the same controller stays armed until the body has been read. A body
+// that stalls is therefore aborted too, which frees its connection, and the
+// budget runs on a timer, so a step of the device's wall clock cannot cut it
+// short. The body read is also raced against the abort itself, so the deadline
+// holds whether or not a platform's json() rejects on it. Resolves to
+// { res, body }; an unparseable body reads as {}, as `.json().catch(() =>
+// ({}))` does everywhere else. Rejects on a network failure, or past the
+// deadline with _requestTimedOut's error, however the abort surfaced.
+async function _fetchJson(url, opts, ms = FETCH_TIMEOUT_MS) {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), ms);
+    const aborted = new Promise((_resolve, reject) => {
+        controller.signal.addEventListener('abort', () => reject(new Error('aborted')), { once: true });
+    });
+    // Nothing else may observe this rejection: it only ends the race below,
+    // whose catch reports every rejection after the abort as the one timeout.
+    aborted.catch(() => {});
+    try {
+        const res = await Promise.race([fetch(url, { ...opts, signal: controller.signal }), aborted]);
+        const body = await Promise.race([
+            Promise.resolve().then(() => res.json()).catch((e) => {
+                if (controller.signal.aborted) throw e;
+                return {};
+            }),
+            aborted,
+        ]);
+        return { res, body };
+    } catch (e) {
+        // Only the deadline aborts this controller, and the race can surface
+        // that as fetch's AbortError or the body read's as well as its own.
+        if (controller.signal.aborted) throw _requestTimedOut();
+        throw e;
+    } finally {
+        clearTimeout(timer);
+    }
+}
+
+// The daihyosen add (POST) or remove (DELETE), stamped like recordDecision.
+// Bounded like every other write, and the whole of it, body included
+// (_fetchJson): the team editor holds each autosave on the court until this
+// request settles, so a request left hanging on a half-open connection would
+// stop all saving there. No answer is reported as not done, in a sentence the
+// editor shows as it is (noAnswerSentence); the held write then goes out as
+// the sheet stood before the request, and the score path decides what it
+// makes of a change the server did make after all. A refusal shows the
+// server's own sentence when it sends one (_refusalText), e.g. a finished
+// match's.
+async function _daihyosenRequest(method, compID, matchID, password, notDone) {
+    let res;
+    let body;
+    try {
+        ({ res, body } = await _fetchJson(`/api/competitions/${compID}/matches/${matchID}/daihyosen`, {
+            method,
+            headers: {
+                'Content-Type': 'application/json',
+                'X-Tournament-Password': password
+            },
+            body: JSON.stringify({ modifiedAt: _serverNowMs() }),
+        }));
+    } catch (_e) {
+        throw new Error(noAnswerSentence(notDone));
+    }
+    if (!res.ok) throw new Error(_refusalText(body, notDone));
+    return _daihyosenOutcome(body);
 }
 
 const API = {
@@ -2205,7 +2362,21 @@ const API = {
         }
         return res.json();
     },
-    async fetchCompetitions() {
+    // `bounded` gives up after FETCH_TIMEOUT_MS, the body read included
+    // (_fetchJson), instead of waiting on a connection that never answers.
+    // The organiser's refresh after a write asks for it (admin.jsx
+    // refreshCompsBestEffort): the score editor that made the write waits on
+    // that refresh, and it is best-effort. Other callers wait as long as the
+    // aggregate takes, which can be long for a large tournament on a slow link.
+    async fetchCompetitions({ bounded = false } = {}) {
+        if (bounded) {
+            const { res, body } = await _fetchJson('/api/viewer/competitions', {});
+            if (!res.ok) throw new Error(body.error || `Failed to fetch competitions (Status ${res.status})`);
+            // _fetchJson reads an unreadable body as {}: never hand that on as
+            // the competitions.
+            if (!Array.isArray(body)) throw new Error('Failed to fetch competitions (unreadable answer)');
+            return body.map(normalizeViewerCompItem);
+        }
         const res = await fetch('/api/viewer/competitions');
         if (!res.ok) {
             const err = await res.json().catch(() => ({}));
@@ -2725,12 +2896,13 @@ const API = {
             await _learnServerClockOffset();
             payload.modifiedAt = _serverNowMs();
             let retryRes;
+            let retryBody;
             try {
-                retryRes = await fetchWithTimeout(scoreUrl, {
+                ({ res: retryRes, body: retryBody } = await _fetchJson(scoreUrl, {
                     method: 'PUT',
                     headers: { 'Content-Type': 'application/json', 'X-Tournament-Password': password },
                     body: JSON.stringify(payload),
-                });
+                }));
             } catch (_networkErr) {
                 _enqueueTerminalWrite(
                     _revKey(compID, matchID), 'score', 'PUT', scoreUrl,
@@ -2739,7 +2911,6 @@ const API = {
                 _broadcastPatch(payload);
                 return { queued: true };
             }
-            const retryBody = await retryRes.json().catch(() => ({}));
             if (retryRes.ok) return await _handleOkBody(retryBody, false);
             if (retryRes.status >= 500 || retryRes.status === 429) {
                 _enqueueTerminalWrite(
@@ -2752,22 +2923,28 @@ const API = {
             if (retryBody.error === "ineligible_competitor" || retryBody.error === "already_ineligible") {
                 throw new Error(retryBody.reasonHuman || retryBody.reason || retryBody.error || "Failed to record score");
             }
-            throw _courtBusyError(retryBody) || _downstreamRefusalError(retryBody) || new Error(retryBody.error || "Failed to record score");
+            throw _courtBusyError(retryBody) || _downstreamRefusalError(retryBody) || new Error(_refusalText(retryBody, "Failed to record score"));
         };
 
         let res;
+        let data;
         try {
             try {
-                // F1: use fetchWithTimeout (12 s) so a stalled wifi request doesn't
-                // block the UI indefinitely. An abort is treated as a network failure.
-                res = await fetchWithTimeout(scoreUrl, {
+                // F1: bounded (12 s), the body read included (_fetchJson), so
+                // neither a stalled request nor a body that never completes
+                // holds the editor that awaits this write. Past the deadline it
+                // is a network failure: queued below and replayed, which is
+                // safe even if the server did store it, because the replay
+                // carries the same stamp (and rev) and the write guard is
+                // last-write-wins with an equal stamp re-applying.
+                ({ res, body: data } = await _fetchJson(scoreUrl, {
                     method: 'PUT',
                     headers: {
                         'Content-Type': 'application/json',
                         'X-Tournament-Password': password
                     },
                     body: JSON.stringify(payload)
-                });
+                }));
             } catch (_networkErr) {
                 // Network failure or timeout abort. For running-status writes,
                 // queue for retry: last-write-wins semantics so only the latest state
@@ -2818,7 +2995,6 @@ const API = {
             }
         }
 
-        const data = await res.json().catch(() => ({}));
         if (res.ok) return await _handleOkBody(data, true);
         // A running write that failed with a RETRYABLE server error (5xx / 429)
         // is queued for offline-style retry. Without this the inflight counter
@@ -2861,7 +3037,8 @@ const API = {
         // structured error rather than a plain message; see
         // _downstreamKnockoutPlayedError and write_result.jsx's
         // downstreamKnockoutPlayedRefusal.
-        throw _downstreamRefusalError(data) || new Error(data.error || "Failed to record score");
+        // Otherwise the refusal's sentence when it carries one (_refusalText).
+        throw _downstreamRefusalError(data) || new Error(_refusalText(data, "Failed to record score"));
     },
     // T093–T095: kiken / fusenpai / fusensho / daihyosen: server auto-fills
     // scoreline and Winner from {decision, decisionBy, encho}. Body shape is
@@ -2869,7 +3046,7 @@ const API = {
     // MUST be "shiro" or "aka", decisionReason is optional and ≤200 chars.
     // Response is the updated state.MatchResult.
     //
-    // F1: uses fetchWithTimeout (12 s abort on stalled wifi).
+    // F1: bounded (12 s abort on stalled wifi), the body read included.
     // F5: on network failure / abort / 5xx / 429 the decision is enqueued as a
     // terminal write for durable re-delivery. 4xx (including 409 decision_locked
     // on the DIRECT call) always throw: the score editor relies on a thrown 409
@@ -2885,16 +3062,18 @@ const API = {
         // could order it against the bouts around it (mp-jnvl).
         const payload = { ...body, modifiedAt: _serverNowMs() };
         let res;
+        let data;
         try {
-            // F1: abort after 12 s; AbortError propagates as network failure.
-            res = await fetchWithTimeout(decisionUrl, {
+            // F1: abort after 12 s, the body read included (_fetchJson, as
+            // recordScore); past it the decision is queued as a network failure.
+            ({ res, body: data } = await _fetchJson(decisionUrl, {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
                     'X-Tournament-Password': password
                 },
                 body: JSON.stringify(payload)
-            });
+            }));
         } catch (_networkErr) {
             // F5: network failure or timeout: enqueue as terminal for retry.
             _enqueueTerminalWrite(
@@ -2915,7 +3094,6 @@ const API = {
             // 4xx (including 409 decision_locked): throw immediately so the UI
             // can surface the error. The decision-locked-as-success rule is ONLY
             // for queued retries in _flushQueue, not for direct calls.
-            const err = await res.json().catch(() => ({}));
             // bc-rawm: the eligibility gate (mp-dc52 Phase 3) refuses a
             // decision exactly as it refuses a score write -- 409
             // ineligible_competitor / already_ineligible carrying a full
@@ -2923,10 +3101,10 @@ const API = {
             // recordScore does below: reasonHuman, then reason, then the bare
             // code. Checked BEFORE the downstream parse: neither downstream
             // helper matches these two codes, so without this branch the
-            // fallback `new Error(err.error ...)` would have thrown the raw
+            // fallback `new Error(data.error ...)` would have thrown the raw
             // machine token instead of the server's sentence.
-            if (err.error === "ineligible_competitor" || err.error === "already_ineligible") {
-                throw new Error(err.reasonHuman || err.reason || err.error || "Failed to record decision");
+            if (data.error === "ineligible_competitor" || data.error === "already_ineligible") {
+                throw new Error(data.reasonHuman || data.reason || data.error || "Failed to record decision");
             }
             // bc-cse: 409 downstream_knockout_played (a kiken/fusenpai/daihyosen
             // decision that corrects a completed knockout match whose later
@@ -2938,9 +3116,8 @@ const API = {
             // a decision retry (submitDecisionRequest, admin_scoring_shared.jsx,
             // is what now reads .downstreamKnockoutPlayed off this error via
             // attemptScoreWrite).
-            throw _downstreamRefusalError(err) || new Error(err.error || "Failed to record decision");
+            throw _downstreamRefusalError(data) || new Error(data.error || "Failed to record decision");
         }
-        const data = await res.json();
         // bc-cse, LIVE since mp-jnvl: the /decision handler maps a superseded
         // write to 200 {"applied": false}, and a decision now carries a real
         // modifiedAt (stamped above, exactly as recordScore stamps its own
@@ -3047,17 +3224,19 @@ const API = {
         const payload = { winnerName, modifiedAt: _serverNowMs() };
         if (forceDownstreamReopen) payload.forceDownstreamReopen = true;
         let res;
+        let body;
         try {
-            // fetchWithTimeout so a stalled request is treated as offline rather
-            // than hanging the "Run now" flow.
-            res = await fetchWithTimeout(url, {
+            // Bounded, the body read included (_fetchJson), so a stalled
+            // request or body is treated as offline rather than hanging the
+            // "Run now" flow.
+            ({ res, body } = await _fetchJson(url, {
                 method: 'PUT',
                 headers: {
                     'Content-Type': 'application/json',
                     'X-Tournament-Password': password
                 },
                 body: JSON.stringify(payload)
-            });
+            }));
         } catch (_networkErr) {
             // mp-y3nk Phase 4: offline / timeout. An operator's feeder-winner
             // assertion (the "Run now" recovery) must survive an update outage
@@ -3073,13 +3252,12 @@ const API = {
             return { queued: true };
         }
         if (!res.ok) {
-            const err = await res.json().catch(() => ({}));
             // bc-kcdg: 409 downstream_knockout_played (this feeder's assertion
             // would repaint a later match that already played on the current
             // winner) is parsed into the same structured error recordScore
             // throws, so a caller can offer the same confirm+retry loop
             // (write_result.jsx's attemptScoreWrite) rather than a plain message.
-            throw _downstreamKnockoutPlayedError(err) || new Error(err.error || "Failed to override winner");
+            throw _downstreamKnockoutPlayedError(body) || new Error(body.error || "Failed to override winner");
         }
         // Backend replies 200 {"applied": <bool>} (mp-y3nk). applied=false means
         // the timestamp guard dropped this assertion because a newer/equal result
@@ -3087,7 +3265,6 @@ const API = {
         // the caller must NOT trust its optimistic pick. An older server (or any
         // absent body) yields {} here; default applied=true so back-compat callers
         // keep advancing exactly as before.
-        const body = await res.json().catch(() => ({}));
         let applied = body.applied !== false;
         // The body that produced the FINAL verdict, which the resend below may
         // replace. bc-cse: the reason travels back out to the caller, because a
@@ -3106,22 +3283,21 @@ const API = {
             await _learnServerClockOffset();
             payload.modifiedAt = _serverNowMs();
             let retryRes;
+            let retryBody;
             try {
-                retryRes = await fetchWithTimeout(url, {
+                ({ res: retryRes, body: retryBody } = await _fetchJson(url, {
                     method: 'PUT',
                     headers: { 'Content-Type': 'application/json', 'X-Tournament-Password': password },
                     body: JSON.stringify(payload),
-                });
+                }));
             } catch (_networkErr) {
                 // Same durability rule as the first attempt: queue it and say so.
                 _enqueueTerminalWrite(`override:${compID}:${matchID}`, 'override', 'PUT', url, payload, password, compID, matchID);
                 return { queued: true };
             }
             if (!retryRes.ok) {
-                const retryErr = await retryRes.json().catch(() => ({}));
-                throw new Error(retryErr.error || "Failed to override winner");
+                throw new Error(retryBody.error || "Failed to override winner");
             }
-            const retryBody = await retryRes.json().catch(() => ({}));
             applied = retryBody.applied !== false;
             verdict = retryBody;
             // Refused twice: never a third attempt. The caller already treats
@@ -3398,23 +3574,23 @@ const API = {
         }
         return res.json();
     },
-    // T129/T130: per-round team lineups (FR-040). GET returns the persisted
-    // TeamLineup for (compId, teamId, round): 404 when no lineup has been
-    // submitted yet, which the form treats as "blank, editable". PUT replaces
-    // the lineup. DELETE clears it so an operator can revise.
+    // The GET answers saved: false when nothing is stored; lineupOrNull
+    // makes that null ("blank, editable"). A 404 means the competition does
+    // not exist and throws. PUT replaces; DELETE clears.
     // opts.fallback: best-effort resolution for match-scoring surfaces: when
-    // the exact round has no lineup the server falls back to the closest
-    // saved round (highest <= requested, else highest overall) instead of
-    // 404. The lineup EDITOR must NOT pass this: 404 means "blank, editable".
+    // the exact round has nothing saved the server falls back to the
+    // closest saved round (highest <= requested, else highest overall). The
+    // lineup EDITOR must NOT pass this: it reads the exact round with no
+    // fallback, so nothing saved there is null ("blank, editable").
     async fetchTeamLineup(compID, teamId, round, opts) {
         const qs = opts && opts.fallback ? "?fallback=best" : "";
         const res = await fetch(`/api/competitions/${compID}/teams/${teamId}/lineups/${round}${qs}`);
-        if (res.status === 404) return null;
         if (!res.ok) {
             const err = await res.json().catch(() => ({}));
             throw new Error(err.error || "Failed to load lineup");
         }
-        return res.json();
+        const body = await res.json();
+        return lineupOrNull(body);
     },
     // memberIds (bc-tmid pass 3) is optional and keyed by the same position
     // as positions: the squad member id half of a lineup, sent alongside
@@ -3428,16 +3604,18 @@ const API = {
         // write doesn't collide with a concurrent score write for the same match.
         const lineupKey = `lineup:${compID}:${teamId}:${round}`;
         let res;
+        let body;
         try {
-            // F1: abort after 12 s on stalled wifi.
-            res = await fetchWithTimeout(lineupUrl, {
+            // F1: abort after 12 s on stalled wifi, the body read included
+            // (_fetchJson).
+            ({ res, body } = await _fetchJson(lineupUrl, {
                 method: 'PUT',
                 headers: {
                     'Content-Type': 'application/json',
                     'X-Tournament-Password': password
                 },
                 body: JSON.stringify(lineupBody)
-            });
+            }));
         } catch (_networkErr) {
             // F5: network failure or timeout: enqueue as terminal.
             _enqueueTerminalWrite(
@@ -3456,10 +3634,9 @@ const API = {
                 return { queued: true };
             }
             // 4xx: throw immediately (400 validation, etc.).
-            const err = await res.json().catch(() => ({}));
-            throw new Error(err.error || "Failed to save lineup");
+            throw new Error(body.error || "Failed to save lineup");
         }
-        return res.json();
+        return body;
     },
     async deleteTeamLineup(compID, teamId, round, password) {
         const res = await fetch(`/api/competitions/${compID}/teams/${teamId}/lineups/${round}`, {
@@ -3504,7 +3681,7 @@ const API = {
         });
         if (!res.ok) {
             const err = await res.json().catch(() => ({}));
-            throw new Error(err.error || "Failed to add team member");
+            throw _refusalError(err, "Failed to add team member");
         }
         return res.json();
     },
@@ -3521,7 +3698,7 @@ const API = {
         });
         if (!res.ok) {
             const err = await res.json().catch(() => ({}));
-            throw new Error(err.error || "Failed to rename team member");
+            throw _refusalError(err, "Failed to rename team member");
         }
         return true;
     },
@@ -3546,15 +3723,18 @@ const API = {
     // mp-825 / mp-bkg: per-match lineup endpoints. Match ID takes the
     // place of the round key: successive encounters between the same
     // two teams each carry an independent lineup entry.
-    // 404 → null (no lineup saved yet; form treats as blank/editable).
+    // `saved: false` -> null (bc-k404: nothing saved for this match is a
+    // 200, not a 404; resolveMatchLineup falls back to the round-scoped GET
+    // above on null, never the server). A 404 here means the competition
+    // does not exist.
     async fetchMatchLineup(compID, teamId, matchId) {
         const res = await fetch(`/api/competitions/${compID}/teams/${teamId}/match-lineups/${matchId}`);
-        if (res.status === 404) return null;
         if (!res.ok) {
             const err = await res.json().catch(() => ({}));
             throw new Error(err.error || "Failed to load match lineup");
         }
-        return res.json();
+        const body = await res.json();
+        return lineupOrNull(body);
     },
     // memberIds (bc-pnum gap closure) is optional and keyed by the same
     // position as positions, exactly like putTeamLineup's own memberIds
@@ -3571,16 +3751,18 @@ const API = {
         // F5: per-match lineup key: distinct from round-scoped lineups.
         const matchLineupKey = `lineup:${compID}:${teamId}:match:${matchId}`;
         let res;
+        let body;
         try {
-            // F1: abort after 12 s on stalled wifi.
-            res = await fetchWithTimeout(matchLineupUrl, {
+            // F1: abort after 12 s on stalled wifi, the body read included
+            // (_fetchJson).
+            ({ res, body } = await _fetchJson(matchLineupUrl, {
                 method: 'PUT',
                 headers: {
                     'Content-Type': 'application/json',
                     'X-Tournament-Password': password
                 },
                 body: JSON.stringify(matchLineupBody)
-            });
+            }));
         } catch (_networkErr) {
             // F5: network failure or timeout: enqueue as terminal.
             _enqueueTerminalWrite(
@@ -3598,11 +3780,14 @@ const API = {
                 );
                 return { queued: true };
             }
-            // 4xx: throw immediately (400 validation, etc.).
-            const err = await res.json().catch(() => ({}));
-            throw new Error(err.error || "Failed to save match lineup");
+            // 4xx: throw immediately (400 validation, etc.). A finished
+            // match's refusal on the public page (409) carries a code in
+            // `error` and the sentence to show in `message`, as the score
+            // path's does; the thrown error keeps both, as the member
+            // writes' do.
+            throw _refusalError(body, "Failed to save match lineup");
         }
-        return res.json();
+        return body;
     },
     async deleteMatchLineup(compID, teamId, matchId, password) {
         const res = await fetch(`/api/competitions/${compID}/teams/${teamId}/match-lineups/${matchId}`, {
@@ -3621,36 +3806,18 @@ const API = {
     // decision="daihyosen" and Position=-1. The error codes (not_tied,
     // pool_match, insufficient_eligibility) are surfaced verbatim by the
     // caller: see TeamScoreEditorModal for the user-visible mapping.
+    // Stamped like recordDecision (bc-dhas), so the add competes on
+    // timestamps: see _daihyosenOutcome for what comes back.
     async recordDaihyosen(compID, matchID, password) {
-        const res = await fetch(`/api/competitions/${compID}/matches/${matchID}/daihyosen`, {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-                'X-Tournament-Password': password
-            }
-        });
-        if (!res.ok) {
-            const err = await res.json().catch(() => ({}));
-            throw new Error(err.error || "Failed to add daihyosen");
-        }
-        return res.json();
+        return _daihyosenRequest('POST', compID, matchID, password, REP_BOUT_NOT_ADDED);
     },
     // T141: remove an unscored daihyosen placeholder from a knockout team match.
     // Returns the updated MatchResult on 200. Throws on 404 (no daihyosen or
     // match not found) or 409 (daihyosen already scored: clear scores first).
+    // Stamped like the add, in a JSON body (the handler binds one on DELETE
+    // too).
     async removeDaihyosen(compID, matchID, password) {
-        const res = await fetch(`/api/competitions/${compID}/matches/${matchID}/daihyosen`, {
-            method: 'DELETE',
-            headers: { 'X-Tournament-Password': password }
-        });
-        if (!res.ok) {
-            const err = await res.json().catch(() => ({}));
-            throw new Error(err.error || "Failed to remove daihyosen");
-        }
-        // The handler responds with an envelope ({ result: MatchResult }); unwrap
-        // it so the return value matches the docstring ("the updated MatchResult").
-        const body = await res.json().catch(() => ({}));
-        return body.result ?? body;
+        return _daihyosenRequest('DELETE', compID, matchID, password, REP_BOUT_NOT_REMOVED);
     },
     // T190-T193 (US13: Swiss format). Generate the next Swiss round.
     // Backend pre-conditions: format=swiss; all matches in the current

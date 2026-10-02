@@ -4,6 +4,7 @@ import (
 	"math"
 	"time"
 
+	"github.com/gitrgoliveira/bracket-creator/internal/domain"
 	"github.com/gitrgoliveira/bracket-creator/internal/helper"
 	"github.com/gitrgoliveira/bracket-creator/internal/state"
 )
@@ -26,7 +27,9 @@ const MaxCourts = helper.MaxCourts
 // implementation-defined in Go, yielding a negative duration or an inverted
 // best/worst range (mp-gmcg review). 100 is ~14× the largest real team, so no
 // legitimate planning number is rejected. Clamped in EstimateSchedule (all
-// callers) and 400'd by the handler (matching the MaxCourts precedent).
+// callers) and 400'd by the handler (matching the MaxCourts precedent). The
+// stateless workbook generator (POST /create, cmd/create_handler.go) 400s a
+// team size past it too, since that size sizes every team block's bout rows.
 const MaxTeamSize = 100
 
 // MaxScheduleCount and MaxSchedulePct are the same class of defensive bound for
@@ -171,7 +174,7 @@ func kachinukiBoutRange(n int) (best, avg, worst float64) {
 		return 0, 0, 0
 	}
 	best = float64(n)
-	worst = float64(2*n - 1)
+	worst = float64(domain.KachinukiMaxBouts(n))
 	avg = (best + worst) / 2
 	return best, avg, worst
 }

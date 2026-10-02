@@ -13,7 +13,9 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/gitrgoliveira/bracket-creator/internal/domain"
+	"github.com/gitrgoliveira/bracket-creator/internal/engine"
 	"github.com/gitrgoliveira/bracket-creator/internal/helper"
+	"github.com/gitrgoliveira/bracket-creator/internal/state"
 )
 
 // createTournamentHandler generates a tournament Excel workbook from a posted
@@ -65,12 +67,36 @@ func createTournamentHandler(c *gin.Context) {
 	if err != nil {
 		teamMatches = 0
 	}
+	// The team size sizes every team block's bout rows and the Kachinuki
+	// Detail sheet's empty sections, so this public request bounds it as the
+	// schedule estimate does (engine.MaxTeamSize).
+	if teamMatches < 0 || teamMatches > engine.MaxTeamSize {
+		c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("teamMatches must be between 0 and %d", engine.MaxTeamSize)})
+		return
+	}
+	// teamMatchType "kachinuki" is the app's blank template of a kachinuki
+	// competition; absent or "fixed" is a team match. The same rule as the
+	// competition's own setting: kachinuki needs teams of two or more.
+	teamMatchType := state.TeamMatchType(c.PostForm("teamMatchType"))
+	if err := state.ValidateTeamMatchType(teamMatchType, teamMatches); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
 
 	tournamentType := c.PostForm("tournamentType")
 	if tournamentType != "pools" && tournamentType != "knockout" {
 		c.JSON(http.StatusBadRequest, gin.H{
 			"error": "Invalid tournament type",
 		})
+		return
+	}
+	// format "league" is the app's blank template of a league: one pool of
+	// everyone and no knockout, since a league is decided by its table.
+	// Absent is the draw tournamentType names. Never inferred from the pool
+	// shape: a pools competition may form a single pool and still play a final.
+	format := c.PostForm("format")
+	if format != "" && (format != state.CompFormatLeague || tournamentType != "pools") {
+		c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("unsupported format %q (only %q, with tournamentType \"pools\")", format, state.CompFormatLeague)})
 		return
 	}
 
@@ -166,6 +192,8 @@ func createTournamentHandler(c *gin.Context) {
 			thirdPlaceMatch: thirdPlaceMatch,
 			determined:      determined,
 			teamMatches:     teamMatches,
+			teamMatchType:   teamMatchType,
+			format:          format,
 			roundRobin:      roundRobin,
 			poolFormat:      poolFormat,
 			numPlayers:      numPlayers,
@@ -206,6 +234,7 @@ func createTournamentHandler(c *gin.Context) {
 			engi:            engi,
 			determined:      determined,
 			teamMatches:     teamMatches,
+			teamMatchType:   teamMatchType,
 			courts:          courts,
 			titlePrefix:     titlePrefix,
 			numberPrefix:    numberPrefix,

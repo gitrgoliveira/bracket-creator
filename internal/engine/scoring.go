@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"log"
 	"sort"
-	"strings"
 	"sync"
 	"time"
 
@@ -198,7 +197,8 @@ func (e *Engine) withBracketMatch(compId, matchId string, mutate func(*state.Bra
 // own, carries a decision hantei can coexist with, and is still tied (an
 // untied row cannot carry a hantei). An EXPLICIT false and a named winner
 // both pass through untouched. The preserveLoserScore precedent, one bout
-// deeper.
+// deeper. The silence test itself is KeepsStoredDaihyosenVerdict, which the
+// self-run guard shares.
 //
 // NIL vs EMPTY on IpponsA/IpponsB is the other half of "verdict-silent":
 // scoreline-silence is judged on whether the writer sent an ippon array AT
@@ -370,119 +370,134 @@ func logStrippedHantei(result *state.MatchResult, why string) {
 		result.ID, why, result.Winner, result.Status, result.Decision)
 }
 
+// KeepsStoredDaihyosenVerdict reports whether a write whose representative
+// bout row is in keeps the hantei verdict of prior, the stored row (nil when
+// there is none): prior carries the verdict and the winner it names, and in
+// says nothing about either, so preserveSubHantei carries prior's verdict and
+// scoreline onto it. It is the one owner of that silence test. The self-run
+// judge asks it too (mobileapp.holdSelfReportedWriteUnderTx), so a
+// participant's write that would erase an organiser's verdict is told apart
+// from one that keeps it by the same test the write itself applies.
+func KeepsStoredDaihyosenVerdict(prior, in *state.SubMatchResult) bool {
+	if prior == nil || !prior.HanteiDecided() || prior.Winner == "" {
+		return false
+	}
+	if in.Winner != "" || in.DecidedByHantei != nil ||
+		domain.ContainsHantei(in.IpponsA) || domain.ContainsHantei(in.IpponsB) {
+		return false // the writer addressed the verdict: its word stands
+	}
+	// The SAME predicate validateSubBout enforces, shared via domain so the
+	// two cannot drift (the restore runs after validation and is never
+	// re-checked).
+	if !domain.IsSubBoutHanteiCompatibleDecisionStr(in.Decision) {
+		return false
+	}
+	// Side-guarded, like the preserveLoserScore precedent: IpponsA/IpponsB
+	// are POSITIONAL, so copying them onto a row whose sides are named in
+	// the opposite order mirrors the letters and credits each side with the
+	// other's points. reconcileSides normalises at MATCH level only, never
+	// per sub-bout, so a drifted or hand-built payload can reach here
+	// swapped. An unnamed incoming row (the common stale-snapshot shape)
+	// inherits the names along with the scoreline.
+	//
+	// ABANDON on a mismatch rather than skipping only the copy. Winner is a
+	// NAME, so it needs no positional guard of its own - but it names one of
+	// the STORED pair, and stamping it onto a row naming a different pair
+	// attributes the verdict to neither competitor present. The tie check in
+	// preserveSubHantei cannot catch that: with the copy skipped the incoming
+	// row is still empty, so it compares 0 against 0 and passes vacuously.
+	// deriveDaihyosenWinner then matches no side and leaves the encounter
+	// with a hantei-decided rep bout and no winner at all, which a bracket
+	// completion rejects and pool standings score as a draw for both teams.
+	if (in.SideA != "" || in.SideB != "") &&
+		(in.SideA != prior.SideA || in.SideB != prior.SideB) {
+		return false
+	}
+	// Two outstanding fouls on a side fold into an "H" for the other side
+	// before a write is stored (applyHansokuIppons), which gives a row
+	// without ippons an array of its own. Such a row is not silent, so the
+	// answer is the same asked before the fold (the self-run judge) as
+	// after it (preserveSubHantei).
+	if in.HansokuA >= 2 || in.HansokuB >= 2 {
+		return false
+	}
+	// A row that supplies NEITHER ippon array said nothing about the
+	// SCORELINE either, so the stored one travels with the verdict it
+	// rests on. Without this the verdict lands on an all-empty row and the
+	// struck ippons, the outstanding fouls, the overtime marker and the
+	// sub-decision are all lost: a 1-1 hantei would persist as 0-0, which
+	// moves the `Ht` to the other slot (resultSlot fills outside-to-inside)
+	// and drops the `(E)`.
+	//
+	// A row that DOES supply an ippon array — even one that is EMPTY, and
+	// even a stale second-device replay whose own scoreline happens to
+	// still read tied, e.g. a markless 1-1 offline-queue replay — has
+	// spoken for the scoreline itself, and the verdict must not travel
+	// onto it: the mark lives IN the copied ippons, so stamping the winner
+	// without also copying the mark-carrying scoreline would split the two
+	// permanently. The referees' record would be gone from disk while its
+	// consequence, the winner, survived — and once this write lands as the
+	// new stored row, a future preserve has no mark left to re-attach.
+	// ABANDON here, before any field is touched, rather than letting the
+	// tie check decide: that check answers "is this scoreline still tied",
+	// not "did the writer supply it", so it cannot distinguish an own tied
+	// scoreline from the copied one.
+	//
+	// This is a NIL check, deliberately not a scoring-ippon COUNT: an
+	// explicit `[]` (the team editor's 0-0 daihyosen withdrawal - see
+	// preserveSubHantei's doc) and an omitted key (a genuinely silent stale
+	// snapshot) both count zero scoring ippons, but only the second one
+	// is silence. countScoringIppons cannot tell them apart; nil-ness
+	// can, because Go's JSON decoder only produces nil for an absent key
+	// (SubMatchResult.IpponsA/IpponsB carry no `omitempty`, so a present
+	// `[]` always decodes to a non-nil empty slice). A bug fixed here:
+	// treating an explicit 0-0 withdrawal as silence resurrected the
+	// verdict the operator had just cleared, because the copy would then
+	// run and copy the stored Ht mark straight back.
+	return in.IpponsA == nil && in.IpponsB == nil
+}
+
 func preserveSubHantei(stored, incoming []state.SubMatchResult) {
 	var prior *state.SubMatchResult
-	for i := range stored {
-		if stored[i].Position == state.DaihyosenSubPosition {
-			prior = &stored[i]
-			break
-		}
+	if i := state.DaihyosenSubIndex(stored); i >= 0 {
+		prior = &stored[i]
 	}
-	if prior == nil || !prior.HanteiDecided() || prior.Winner == "" {
+	i := state.DaihyosenSubIndex(incoming)
+	if i < 0 {
 		return
 	}
-	for i := range incoming {
-		in := &incoming[i]
-		if in.Position != state.DaihyosenSubPosition {
-			continue
-		}
-		if in.Winner != "" || in.DecidedByHantei != nil ||
-			domain.ContainsHantei(in.IpponsA) || domain.ContainsHantei(in.IpponsB) {
-			return // the writer addressed the verdict: its word stands
-		}
-		// The SAME predicate validateSubBout enforces, shared via domain so the
-		// two cannot drift (this runs after validation and is never re-checked).
-		if !domain.IsSubBoutHanteiCompatibleDecisionStr(in.Decision) {
-			return
-		}
-		// Side-guarded, like the preserveLoserScore precedent: IpponsA/IpponsB
-		// are POSITIONAL, so copying them onto a row whose sides are named in
-		// the opposite order mirrors the letters and credits each side with the
-		// other's points. reconcileSides normalises at MATCH level only, never
-		// per sub-bout, so a drifted or hand-built payload can reach here
-		// swapped. An unnamed incoming row (the common stale-snapshot shape)
-		// inherits the names along with the scoreline.
-		//
-		// ABANDON on a mismatch rather than skipping only the copy. Winner is a
-		// NAME, so it needs no positional guard of its own - but it names one of
-		// the STORED pair, and stamping it onto a row naming a different pair
-		// attributes the verdict to neither competitor present. The tie check
-		// below cannot catch that: with the copy skipped the incoming row is
-		// still empty, so it compares 0 against 0 and passes vacuously.
-		// deriveDaihyosenWinner then matches no side and leaves the encounter
-		// with a hantei-decided rep bout and no winner at all, which a bracket
-		// completion rejects and pool standings score as a draw for both teams.
-		if (in.SideA != "" || in.SideB != "") &&
-			(in.SideA != prior.SideA || in.SideB != prior.SideB) {
-			return
-		}
-		// A row that supplies NEITHER ippon array said nothing about the
-		// SCORELINE either, so the stored one travels with the verdict it
-		// rests on. Without this the verdict lands on an all-empty row and the
-		// struck ippons, the outstanding fouls, the overtime marker and the
-		// sub-decision are all lost: a 1-1 hantei would persist as 0-0, which
-		// moves the `Ht` to the other slot (resultSlot fills outside-to-inside)
-		// and drops the `(E)`.
-		//
-		// A row that DOES supply an ippon array — even one that is EMPTY, and
-		// even a stale second-device replay whose own scoreline happens to
-		// still read tied, e.g. a markless 1-1 offline-queue replay — has
-		// spoken for the scoreline itself, and the verdict must not travel
-		// onto it: the mark lives IN the copied ippons (see below), so
-		// stamping the winner without also copying the mark-carrying
-		// scoreline would split the two permanently. The referees' record
-		// would be gone from disk while its consequence, the winner, survived
-		// — and once this write lands as the new stored row, a future
-		// preserve has no mark left to re-attach. ABANDON here, before any
-		// field is touched, rather than letting the tie check below decide:
-		// that check answers "is this scoreline still tied", not "did the
-		// writer supply it", so it cannot distinguish an own tied scoreline
-		// from the copied one.
-		//
-		// This is a NIL check, deliberately not a scoring-ippon COUNT: an
-		// explicit `[]` (the team editor's 0-0 daihyosen withdrawal - see the
-		// function doc) and an omitted key (a genuinely silent stale
-		// snapshot) both count zero scoring ippons, but only the second one
-		// is silence. countScoringIppons cannot tell them apart; nil-ness
-		// can, because Go's JSON decoder only produces nil for an absent key
-		// (SubMatchResult.IpponsA/IpponsB carry no `omitempty`, so a present
-		// `[]` always decodes to a non-nil empty slice). A bug fixed here:
-		// treating an explicit 0-0 withdrawal as silence resurrected the
-		// verdict the operator had just cleared, because the copy branch
-		// below would then run and copy the stored Ht mark straight back.
-		if in.IpponsA != nil || in.IpponsB != nil {
-			return
-		}
-		if in.SideA == "" && in.SideB == "" {
-			in.SideA, in.SideB = prior.SideA, prior.SideB
-		}
-		in.IpponsA = append([]string(nil), prior.IpponsA...)
-		in.IpponsB = append([]string(nil), prior.IpponsB...)
-		// Hansoku travels WITH the ippons, not separately: an outstanding
-		// foul is part of the same scoreline, and the two are coupled
-		// (every second one discharges into an "H" ippon for the opponent,
-		// applyHansokuIppons). Restoring the letters but not the counts
-		// left a coherent stored pair as an incoherent restored one -
-		// prior's discharged H's beside the incoming zero - so the
-		// referee's outstanding ▲ vanished from every scoreboard and the
-		// next foul on that side no longer discharged.
-		in.HansokuA, in.HansokuB = prior.HansokuA, prior.HansokuB
-		in.Encho = prior.Encho.Clone()
-		if in.Decision == "" {
-			in.Decision = prior.Decision
-		}
-		if !domain.HanteiTiedScoreline(in.IpponsA, in.IpponsB) {
-			return // untied now: the verdict cannot stand on this scoreline
-		}
-		// The verdict itself travelled with the copied scoreline: prior's
-		// ippons carry the domain.HanteiMark entry, so there is no flag left
-		// to raise — only the winner the mark names. Reached ONLY when the
-		// scoreline above was copied wholesale from prior (the early return
-		// two blocks up guards it): the mark and the winner it names move as
-		// one atomic unit, never separately.
-		in.Winner = prior.Winner
+	in := &incoming[i]
+	if !KeepsStoredDaihyosenVerdict(prior, in) {
 		return
 	}
+	if in.SideA == "" && in.SideB == "" {
+		in.SideA, in.SideB = prior.SideA, prior.SideB
+	}
+	in.IpponsA = append([]string(nil), prior.IpponsA...)
+	in.IpponsB = append([]string(nil), prior.IpponsB...)
+	// Hansoku travels WITH the ippons, not separately: an outstanding
+	// foul is part of the same scoreline, and the two are coupled
+	// (every second one discharges into an "H" ippon for the opponent,
+	// applyHansokuIppons). Restoring the letters but not the counts
+	// left a coherent stored pair as an incoherent restored one -
+	// prior's discharged H's beside the incoming zero - so the
+	// referee's outstanding ▲ vanished from every scoreboard and the
+	// next foul on that side no longer discharged.
+	in.HansokuA, in.HansokuB = prior.HansokuA, prior.HansokuB
+	in.Encho = prior.Encho.Clone()
+	if in.Decision == "" {
+		in.Decision = prior.Decision
+	}
+	if !domain.HanteiTiedScoreline(in.IpponsA, in.IpponsB) {
+		return // untied now: the verdict cannot stand on this scoreline
+	}
+	// The verdict itself travelled with the copied scoreline: prior's
+	// ippons carry the domain.HanteiMark entry, so there is no flag left
+	// to raise — only the winner the mark names. Reached ONLY when the
+	// scoreline above was copied wholesale from prior (the silence test
+	// guards it): the mark and the winner it names move as one atomic
+	// unit, never separately.
+	in.Winner = prior.Winner
 }
 
 // preserveDaihyosenOutcome is the call every forward SubResults replacement
@@ -2339,13 +2354,14 @@ func (e *Engine) recordBracketMatchResult(h state.StoreTx, compId string, matchI
 // a trusted snapshot of this same match, so it must never be weighed against the
 // stamp of the write it is undoing — that write is by definition newer, and the
 // rollback would lose to it every time. Stating that here rather than at each
-// call site is what makes the two branches identical, and it matters because the
-// two snapshot PRODUCERS differ: bracketMatchAsResult deliberately leaves
-// ModifiedAt at 0 (so the bracket bypass was inert either way), while the pool
-// snapshot is a straight copy of the stored MatchResult from
-// lookupExistingResult and carries a REAL persisted stamp. A gate stated only at
-// the pool call site was therefore load-bearing on one branch and decorative on
-// the other, which is precisely the asymmetry this primitive exists to end.
+// call site is what makes the two branches identical, and it mattered because the
+// two snapshot PRODUCERS used to differ: bracketMatchAsResult left ModifiedAt
+// at 0 (so the bracket bypass was inert either way), while the pool snapshot is
+// a straight copy of the stored MatchResult from lookupExistingResult and
+// carries a REAL persisted stamp. A gate stated only at the pool call site was
+// therefore load-bearing on one branch and decorative on the other, which is
+// precisely the asymmetry this primitive exists to end. Both snapshots carry
+// the stamp now (bracketMatchAsResult).
 func applyMatchWrite(result *state.MatchResult, storedModifiedAt int64, policy matchWritePolicy) bool {
 	if policy == matchWriteRestore {
 		return true
@@ -2360,11 +2376,11 @@ func applyMatchWrite(result *state.MatchResult, storedModifiedAt int64, policy m
 	// path left (a client stamp far enough in the future to reach it by accident
 	// is refused at the HTTP boundary instead, see modifiedAtRefuseSkewMs).
 	//
-	// Expected traffic, not an alarm: the server-built writes (quick-score,
-	// /decision, both daihyosen paths) carry no stamp BY DESIGN, so every
-	// correction made through them logs here. The line earns its keep when an
-	// operator asks where a result went: it names the match whose stamped result
-	// an unstamped write replaced.
+	// Expected traffic, not an alarm: quick-score builds its write server-side
+	// with no stamp BY DESIGN, so every correction made through it logs here,
+	// as does a /decision from a client that sends none. The line earns its
+	// keep when an operator asks where a result went: it names the match whose
+	// stamped result an unstamped write replaced.
 	//
 	// RUNNING writes are excluded, and that is a volume decision with a
 	// correctness argument behind it. A legacy SPA build (no modifiedAt)
@@ -3099,7 +3115,7 @@ func displacedCompetitor(bm, blocking *state.BracketMatch, mIdx int) string {
 	if mIdx%2 == 0 {
 		slot = blocking.SideA
 	}
-	if slot != "" && !strings.HasPrefix(slot, "Winner of") {
+	if slot != "" && !helper.IsWinnerOfPlaceholder(slot) {
 		return slot
 	}
 	return bm.Winner
@@ -3193,7 +3209,7 @@ func (e *Engine) propagateBracketWinner(bracket *state.Bracket, rIdx, mIdx int) 
 		// when both sides share a name.
 		loser, loserID := bracketLoserIdentity(m)
 		// Skip empty/placeholder losers (bye matches resolve with one side blank).
-		if loser != "" && !strings.HasPrefix(loser, "Winner of") {
+		if loser != "" && !helper.IsWinnerOfPlaceholder(loser) {
 			bronze := bracket.ThirdPlaceMatch
 			// Assign by semifinal POSITION, not first-empty-slot. The round
 			// feeding the final always has exactly two matches (mIdx 0 and 1),
@@ -3213,7 +3229,7 @@ func (e *Engine) propagateBracketWinner(bracket *state.Bracket, rIdx, mIdx int) 
 	}
 
 	// Try to resolve the OTHER side if it's a "Winner of" placeholder
-	if strings.HasPrefix(nextM.SideA, "Winner of") {
+	if helper.IsWinnerOfPlaceholder(nextM.SideA) {
 		// nextM.SideA is "Winner of rX-mY"
 		r, m := parseWinnerOf(nextM.SideA, len(bracket.Rounds))
 		if r >= 0 && r < len(bracket.Rounds) && m >= 0 && m < len(bracket.Rounds[r]) {
@@ -3224,7 +3240,7 @@ func (e *Engine) propagateBracketWinner(bracket *state.Bracket, rIdx, mIdx int) 
 			}
 		}
 	}
-	if strings.HasPrefix(nextM.SideB, "Winner of") {
+	if helper.IsWinnerOfPlaceholder(nextM.SideB) {
 		r, m := parseWinnerOf(nextM.SideB, len(bracket.Rounds))
 		if r >= 0 && r < len(bracket.Rounds) && m >= 0 && m < len(bracket.Rounds[r]) {
 			srcM := bracket.Rounds[r][m]
@@ -3236,12 +3252,12 @@ func (e *Engine) propagateBracketWinner(bracket *state.Bracket, rIdx, mIdx int) 
 	}
 
 	// Recursive resolution
-	if nextM.SideA != "" && nextM.SideB == "" && !strings.HasPrefix(nextM.SideA, "Winner of") {
+	if nextM.SideA != "" && nextM.SideB == "" && !helper.IsWinnerOfPlaceholder(nextM.SideA) {
 		nextM.Winner = nextM.SideA
 		nextM.WinnerID = nextM.SideAID
 		nextM.Status = state.MatchStatusCompleted
 		e.propagateBracketWinner(bracket, rIdx+1, nextMatchIdx)
-	} else if nextM.SideA == "" && nextM.SideB != "" && !strings.HasPrefix(nextM.SideB, "Winner of") {
+	} else if nextM.SideA == "" && nextM.SideB != "" && !helper.IsWinnerOfPlaceholder(nextM.SideB) {
 		nextM.Winner = nextM.SideB
 		nextM.WinnerID = nextM.SideBID
 		nextM.Status = state.MatchStatusCompleted

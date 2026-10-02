@@ -44,6 +44,9 @@
 //      and getting that comparison wrong would turn "a newer result won" into
 //      "resend and overwrite it" - the exact move the supersede advice exists
 //      to prevent.
+//   L. The representative-bout add and remove carry the stamp too, hand a
+//      refusal back as the refusal and relearn, and the stamp is what keeps a
+//      refetch read before the add from replacing the copy it pushed.
 //
 // The offset is never exported. It is observed through the one thing that
 // matters - payload.modifiedAt on a captured request body.
@@ -52,6 +55,7 @@
 // retry chain re-schedules itself, as does the queue backoff).
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { writeDidNotLand, writeWasSuperseded, writeWasRefusedForClock } from '../write_result.jsx';
 
 // Skew large enough that it can never be confused with fake-timer drift.
 const SKEW_MS = 100000;
@@ -560,6 +564,34 @@ describe('clock_skew recovery: a live completed write', () => {
         unsub();
     });
 
+    // bc-dhas: the resend meets whatever the server says about the match NOW;
+    // a refusal carrying a sentence (the organiser finished the match, or
+    // recorded the judges' decision, meanwhile) is thrown with the sentence,
+    // as the first attempt's refusal is, never the bare code.
+    it('a resend refused with a sentence throws the sentence', async () => {
+        const server = makeServer({ timeOk: true });
+        const API = await loadWith(server);
+        const answering = server.fetch;
+        let writes = 0;
+        global.fetch = vi.fn((url, opts) => {
+            if (String(url).includes('/api/time') || !(opts && opts.body)) return answering(url, opts);
+            writes++;
+            if (writes === 1) return answering(url, opts); // server.writeReply: the skew refusal
+            return Promise.resolve({
+                ok: false, status: 409,
+                json: () => Promise.resolve({
+                    error: 'hantei_organiser_only',
+                    message: 'The judges decided this representative bout (hantei). Ask the tournament organizer to change it.',
+                }),
+            });
+        });
+        server.writeReply = () => skewRefusal();
+
+        await expect(API.recordScore('c1', 'm1', { status: 'completed' }, '', null))
+            .rejects.toThrow('The judges decided this representative bout (hantei). Ask the tournament organizer to change it.');
+        expect(writes).toBe(2);
+    });
+
     it('refused twice: reports it, never a third attempt, never queued', async () => {
         // The drop console.warns for devtools; the strict test setup fails on an
         // unexpected warn, so own the spy here and assert it fired.
@@ -1016,5 +1048,468 @@ describe('clock_skew recovery: the retried-once mark is persisted', () => {
         expect(warnSpy).toHaveBeenCalledWith(expect.stringMatching(/clock skew/i));
         warnSpy.mockRestore();
         unsub();
+    });
+});
+
+// ---------------------------------------------------------------------------
+// L. The representative-bout add and remove (bc-dhas)
+// ---------------------------------------------------------------------------
+// Both carry the stamp, exactly as recordDecision does, so each competes on
+// timestamps; a refusal is handed back as the refusal body (the team editor
+// reports it through notLandedBanner) and relearns the offset like any other.
+
+describe('the daihyosen add and remove carry the stamp', () => {
+    it.each([
+        ['add', 'POST', (API) => API.recordDaihyosen('c1', 'B1', 'pw')],
+        ['remove', 'DELETE', (API) => API.removeDaihyosen('c1', 'B1', 'pw')],
+    ])('the %s sends a server-relative modifiedAt in a JSON body', async (_name, method, send) => {
+        const server = makeServer({ timeOk: true });
+        const API = await loadWith(server);
+
+        await send(API);
+
+        const [url, opts] = server.fetch.mock.calls.find(([u]) => String(u).includes('/daihyosen'));
+        expect(String(url)).toBe('/api/competitions/c1/matches/B1/daihyosen');
+        expect(opts.method).toBe(method);
+        expect(opts.headers['Content-Type']).toBe('application/json');
+        expect(server.payloads).toHaveLength(1);
+        expect(server.payloads[0].modifiedAt).toBe(Date.now() + SKEW_MS);
+    });
+
+    it.each([
+        ['add', 'superseded', (API) => API.recordDaihyosen('c1', 'B1', 'pw')],
+        ['add', 'clock_skew', (API) => API.recordDaihyosen('c1', 'B1', 'pw')],
+        ['remove', 'superseded', (API) => API.removeDaihyosen('c1', 'B1', 'pw')],
+        ['remove', 'clock_skew', (API) => API.removeDaihyosen('c1', 'B1', 'pw')],
+    ])('a refused %s (%s) comes back as the refusal and relearns the offset', async (_name, reason, send) => {
+        const server = makeServer({ timeOk: true });
+        const API = await loadWith(server);
+        expect(server.timeCalls).toBe(1);
+        server.writeReply = () => ({ applied: false, reason, message: 'Not saved.' });
+
+        const res = await send(API);
+        await flushMicrotasks();
+
+        expect(writeDidNotLand(res)).toBe(true);
+        expect(writeWasSuperseded(res)).toBe(true);
+        expect(writeWasRefusedForClock(res)).toBe(reason === 'clock_skew');
+        expect(server.timeCalls).toBe(2);
+    });
+
+    // The team editor holds every autosave on the court until the add or
+    // remove settles, so each gives up after fetchWithTimeout's 12 s like
+    // every other write rather than wait for the browser to fail a half-open
+    // connection, and says so in a sentence the editor shows as it is.
+    it.each([
+        ['add', (API) => API.recordDaihyosen('c1', 'B1', 'pw'), 'added'],
+        ['remove', (API) => API.removeDaihyosen('c1', 'B1', 'pw'), 'removed'],
+    ])('the %s is given up after 12 s when the server never answers, and reported', async (_name, send, done) => {
+        const server = makeServer({ timeOk: true });
+        const API = await loadWith(server);
+        const answering = server.fetch;
+        global.fetch = vi.fn((url, opts) => {
+            if (!String(url).includes('/daihyosen')) return answering(url, opts);
+            // A connection that never answers: like a real fetch, the request
+            // settles only when its signal aborts it.
+            return new Promise((_resolve, reject) => {
+                if (opts && opts.signal) {
+                    opts.signal.addEventListener('abort', () => reject(new DOMException('The operation was aborted.', 'AbortError')));
+                }
+            });
+        });
+        let outcome = null;
+        send(API).then(() => { outcome = { landed: true }; }, (error) => { outcome = { error }; });
+
+        await tick(11000);
+        expect(outcome, 'still waiting inside the 12 s').toBeNull();
+        await tick(1500);
+        expect(outcome && outcome.error, 'given up and reported').toBeTruthy();
+        expect(outcome.error.message).toBe(`The representative bout was not ${done}: the server did not answer. Check the connection and try again.`);
+    });
+
+    // fetchWithTimeout's abort ends when the headers arrive, so a body that
+    // never completes (a connection dropped mid-response with no reset) used
+    // to hold the editor's writes for good. It is read by the same deadline.
+    it.each([
+        ['add', (API) => API.recordDaihyosen('c1', 'B1', 'pw'), 'added', true],
+        ['remove', (API) => API.removeDaihyosen('c1', 'B1', 'pw'), 'removed', true],
+        ['refused add', (API) => API.recordDaihyosen('c1', 'B1', 'pw'), 'added', false],
+    ])('the %s is given up at the same 12 s when its body never completes', async (_name, send, done, ok) => {
+        const server = makeServer({ timeOk: true });
+        const API = await loadWith(server);
+        const answering = server.fetch;
+        global.fetch = vi.fn((url, opts) => {
+            if (!String(url).includes('/daihyosen')) return answering(url, opts);
+            return Promise.resolve({ ok, status: ok ? 200 : 409, json: () => new Promise(() => {}) });
+        });
+        let outcome = null;
+        send(API).then(() => { outcome = { landed: true }; }, (error) => { outcome = { error }; });
+
+        await tick(11000);
+        expect(outcome, 'still reading inside the 12 s').toBeNull();
+        await tick(1500);
+        expect(outcome && outcome.error, 'given up and reported').toBeTruthy();
+        expect(outcome.error.message).toBe(`The representative bout was not ${done}: the server did not answer. Check the connection and try again.`);
+    });
+
+    // ONE controller stays armed through the body read (_fetchJson): a stalled
+    // body is ABORTED at the deadline, which frees its connection, instead of
+    // being left reading while the editor has given up on it.
+    it('a stalled body is aborted at the deadline, freeing its connection', async () => {
+        const server = makeServer({ timeOk: true });
+        const API = await loadWith(server);
+        const answering = server.fetch;
+        let signal = null;
+        global.fetch = vi.fn((url, opts) => {
+            if (!String(url).includes('/daihyosen')) return answering(url, opts);
+            signal = opts.signal;
+            return Promise.resolve({ ok: true, status: 200, json: () => new Promise(() => {}) });
+        });
+        let outcome = null;
+        API.recordDaihyosen('c1', 'B1', 'pw').then(() => { outcome = { landed: true }; }, (error) => { outcome = { error }; });
+
+        await tick(11000);
+        expect(signal && signal.aborted, 'still reading inside the 12 s').toBe(false);
+        await tick(1500);
+        expect(signal.aborted, 'the body read is aborted, not just stopped waiting for').toBe(true);
+        expect(outcome && outcome.error && outcome.error.message)
+            .toBe('The representative bout was not added: the server did not answer. Check the connection and try again.');
+    });
+
+    // The budget runs on a timer, not the wall clock: a device clock stepped
+    // forward while the request is out (an NTP correction) must not cut it
+    // short and report a landed add as unanswered.
+    it('a step of the wall clock during the request does not cut its budget', async () => {
+        const server = makeServer({ timeOk: true });
+        const API = await loadWith(server);
+        const answering = server.fetch;
+        let answerHeaders;
+        const row = { position: -1, sideA: '', sideB: '', winner: '', decision: 'daihyosen' };
+        const body = { subResult: row, result: { id: 'B1', status: 'running', subResults: [row] } };
+        global.fetch = vi.fn((url, opts) => {
+            if (!String(url).includes('/daihyosen')) return answering(url, opts);
+            return new Promise((resolve) => { answerHeaders = resolve; });
+        });
+        let outcome = null;
+        API.recordDaihyosen('c1', 'B1', 'pw').then((res) => { outcome = { res }; }, (error) => { outcome = { error }; });
+        await tick(100);
+
+        // The clock steps forward while the request is out; then the answer
+        // arrives, its body a moment after its headers.
+        vi.setSystemTime(Date.now() + 20000);
+        answerHeaders({ ok: true, status: 200, json: () => new Promise((resolve) => setTimeout(() => resolve(body), 50)) });
+        await tick(100);
+
+        expect(outcome && outcome.error, 'not reported as unanswered').toBeFalsy();
+        expect(outcome && outcome.res).toEqual({ id: 'B1', status: 'running', subResults: [row] });
+    });
+
+    // A refused add or remove shows the server's own sentence when it sends
+    // one (a finished match's, for a participant); a bare code is thrown as it
+    // is, for the editor's own wording of it.
+    it.each([
+        ['an add refused with a sentence', (API) => API.recordDaihyosen('c1', 'B1', ''), { error: 'result_finalized', message: 'This match result has already been reported. Contact the tournament organizer to correct it.' },
+            'This match result has already been reported. Contact the tournament organizer to correct it.'],
+        ['a remove refused with a sentence', (API) => API.removeDaihyosen('c1', 'B1', ''), { error: 'result_finalized', message: 'This match result has already been reported. Contact the tournament organizer to correct it.' },
+            'This match result has already been reported. Contact the tournament organizer to correct it.'],
+        ['a remove refused with a bare code', (API) => API.removeDaihyosen('c1', 'B1', 'pw'), { error: 'daihyosen_scored' }, 'daihyosen_scored'],
+    ])('%s is thrown with the words the editor shows', async (_name, send, reply, words) => {
+        const server = makeServer({ timeOk: true });
+        const API = await loadWith(server);
+        const answering = server.fetch;
+        global.fetch = vi.fn((url, opts) => {
+            if (!String(url).includes('/daihyosen')) return answering(url, opts);
+            return Promise.resolve({ ok: false, status: 409, json: () => Promise.resolve(reply) });
+        });
+
+        await expect(send(API)).rejects.toThrow(words);
+    });
+
+    it('a landed add is the match, unwrapped from its envelope', async () => {
+        const server = makeServer({ timeOk: true });
+        const API = await loadWith(server);
+        const row = { position: -1, sideA: '', sideB: '', ipponsA: null, ipponsB: null, winner: '', decision: 'daihyosen' };
+        server.writeReply = () => ({ subResult: row, result: { id: 'B1', status: 'running', subResults: [row] } });
+
+        const res = await API.recordDaihyosen('c1', 'B1', 'pw');
+
+        expect(res).toEqual({ id: 'B1', status: 'running', subResults: [row] });
+        expect(writeDidNotLand(res)).toBe(false);
+        expect(server.timeCalls).toBe(1);
+    });
+
+    // The window the stamp closes, end to end on the client. A refetch that
+    // read the match just before the add committed can answer after the add's
+    // push was applied; keepNewerMatches keeps a held running copy only when it
+    // is STRICTLY newer. The fake answers as the handler does (pinned by
+    // TestDaihyosenWrites_CompeteOnTimestamps): the match it returns, and
+    // broadcasts, carries the request's stamp; an unstamped add wrote the
+    // bracket projection, which carries none, so the held copy kept the
+    // pre-add stamp and the stale refetch replaced it.
+    it('a refetch read before the add does not replace the running copy the add pushed', async () => {
+        const server = makeServer({ timeOk: true });
+        const API = await loadWith(server);
+        const { applyPatch, keepNewerMatches } = await import('../patch.jsx');
+        // The pre-save the editor sends first lands 50ms before the add goes.
+        const b1 = { id: 'B1', sideA: 'TeamA', sideB: 'TeamB', status: 'running', modifiedAt: Date.now() + SKEW_MS - 50, subResults: [] };
+        const row = { position: -1, sideA: '', sideB: '', ipponsA: null, ipponsB: null, hansokuA: 0, hansokuB: 0, winner: '', decision: 'daihyosen' };
+        server.writeReply = () => {
+            const [, opts] = server.fetch.mock.calls.findLast(([u]) => String(u).includes('/daihyosen'));
+            const stamp = opts && opts.body ? JSON.parse(opts.body).modifiedAt : 0;
+            const result = { ...b1, subResults: [row] };
+            delete result.modifiedAt;
+            if (stamp) result.modifiedAt = stamp;
+            return { subResult: row, result };
+        };
+        const comp = (m) => ({ id: 'c1', poolMatches: [], bracket: { rounds: [[m]], thirdPlaceMatch: null } });
+
+        const added = await API.recordDaihyosen('c1', 'B1', 'pw');
+        const held = applyPatch(comp(b1), { type: 'match_updated', data: { competitionId: 'c1', matchId: 'B1', result: added } });
+        const out = keepNewerMatches(held, comp({ ...b1 }));
+
+        expect(out.bracket.rounds[0][0].subResults.some((s) => s.position === -1)).toBe(true);
+    });
+});
+
+// The organiser's refresh after a write (admin.jsx refreshCompsBestEffort)
+// asks for the aggregate bounded: a score editor waits on that refresh after
+// every write it makes, the save before a representative-bout add included,
+// so one left hanging held the editor, and the add, for good. The bound is the
+// same one controller through the body read (_fetchJson). Every other caller
+// still waits as long as the aggregate takes.
+describe('the organiser\'s refresh after a write is bounded', () => {
+    const comps = [{ id: 'c1', name: 'Open', kind: 'individual', format: 'knockout', status: 'knockout', players: [], poolMatches: [], bracket: null }];
+
+    it('gives up after 12 s when the server never answers', async () => {
+        const server = makeServer({ timeOk: true });
+        const API = await loadWith(server);
+        const answering = server.fetch;
+        let signal = null;
+        global.fetch = vi.fn((url, opts) => {
+            if (!String(url).includes('/api/viewer/competitions')) return answering(url, opts);
+            signal = opts && opts.signal;
+            return new Promise((_resolve, reject) => {
+                if (signal) signal.addEventListener('abort', () => reject(new DOMException('The operation was aborted.', 'AbortError')));
+            });
+        });
+        let outcome = null;
+        API.fetchCompetitions({ bounded: true }).then(() => { outcome = { landed: true }; }, (error) => { outcome = { error }; });
+
+        await tick(11000);
+        expect(outcome, 'still waiting inside the 12 s').toBeNull();
+        await tick(1500);
+        expect(outcome && outcome.error, 'given up').toBeTruthy();
+        expect(outcome.error.timedOut, 'reported as given up on, not as failed').toBe(true);
+        expect(signal.aborted).toBe(true);
+    });
+
+    it('aborts a body that never completes at the same deadline', async () => {
+        const server = makeServer({ timeOk: true });
+        const API = await loadWith(server);
+        const answering = server.fetch;
+        let signal = null;
+        global.fetch = vi.fn((url, opts) => {
+            if (!String(url).includes('/api/viewer/competitions')) return answering(url, opts);
+            signal = opts.signal;
+            return Promise.resolve({ ok: true, status: 200, json: () => new Promise(() => {}) });
+        });
+        let outcome = null;
+        API.fetchCompetitions({ bounded: true }).then(() => { outcome = { landed: true }; }, (error) => { outcome = { error }; });
+
+        await tick(11000);
+        expect(signal.aborted, 'still reading inside the 12 s').toBe(false);
+        await tick(1500);
+        expect(signal.aborted).toBe(true);
+        expect(outcome && outcome.error, 'given up').toBeTruthy();
+        expect(outcome.error.timedOut, 'reported as given up on, not as failed').toBe(true);
+    });
+
+    // The request is given up on at the deadline and the fetch then rejects
+    // with its own AbortError, as a real one does: still the one timeout.
+    it('reports the deadline as the one timeout when the fetch rejects with its own abort error', async () => {
+        const server = makeServer({ timeOk: true });
+        const API = await loadWith(server);
+        const answering = server.fetch;
+        global.fetch = vi.fn((url, opts) => {
+            if (!String(url).includes('/api/viewer/competitions')) return answering(url, opts);
+            return new Promise((_resolve, reject) => {
+                opts.signal.addEventListener('abort', () => reject(new DOMException('The operation was aborted.', 'AbortError')));
+            });
+        });
+        let outcome = null;
+        API.fetchCompetitions({ bounded: true }).then(() => { outcome = { landed: true }; }, (error) => { outcome = { error }; });
+
+        await tick(12500);
+        expect(outcome && outcome.error && outcome.error.timedOut).toBe(true);
+        expect(outcome.error.name).not.toBe('AbortError');
+    });
+
+    it('does not report a failure that is not the deadline as a timeout', async () => {
+        const server = makeServer({ timeOk: true });
+        const API = await loadWith(server);
+        const answering = server.fetch;
+        global.fetch = vi.fn((url, opts) => {
+            if (!String(url).includes('/api/viewer/competitions')) return answering(url, opts);
+            return Promise.reject(new TypeError('network error'));
+        });
+
+        const error = await API.fetchCompetitions({ bounded: true }).catch((e) => e);
+
+        expect(error).toBeInstanceOf(TypeError);
+        expect(error.timedOut).toBeFalsy();
+    });
+
+    // What the organiser is told (admin.jsx refreshFailureToast), from the
+    // errors this request really rejects with: a refresh given up on says
+    // nothing, since the write it follows reaches the page by push and a
+    // reload would fetch the same slow aggregate; any other failure keeps the
+    // hint to reload.
+    it('a refresh given up on toasts nothing; a network failure or an unreadable answer toasts the reload hint', async () => {
+        const { refreshFailureToast } = await import('../admin.jsx');
+        const server = makeServer({ timeOk: true });
+        const API = await loadWith(server);
+        const answering = server.fetch;
+        let reply = null;
+        global.fetch = vi.fn((url, opts) => {
+            if (!String(url).includes('/api/viewer/competitions')) return answering(url, opts);
+            return reply(opts);
+        });
+        const failWith = async (make) => {
+            reply = make;
+            let error = null;
+            const pending = API.fetchCompetitions({ bounded: true }).catch((e) => { error = e; });
+            await tick(12500);
+            await pending;
+            return error;
+        };
+
+        const timedOut = await failWith(() => new Promise(() => {}));
+        const network = await failWith(() => Promise.reject(new TypeError('network error')));
+        const unreadable = await failWith(() => Promise.resolve({ ok: true, status: 200, json: () => Promise.reject(new SyntaxError('Unexpected end of JSON input')) }));
+
+        expect(refreshFailureToast('Score', timedOut)).toBeNull();
+        expect(refreshFailureToast('Score', network)).toBe('Score succeeded; refresh failed. Reload to see latest');
+        expect(refreshFailureToast('Score', unreadable)).toBe('Score succeeded; refresh failed. Reload to see latest');
+    });
+
+    it('answers with the competitions when the server does', async () => {
+        const server = makeServer({ timeOk: true });
+        const API = await loadWith(server);
+        const answering = server.fetch;
+        global.fetch = vi.fn((url, opts) => {
+            if (!String(url).includes('/api/viewer/competitions')) return answering(url, opts);
+            return Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve(comps) });
+        });
+
+        const out = await API.fetchCompetitions({ bounded: true });
+
+        expect(Array.isArray(out)).toBe(true);
+        expect(out.map((c) => c.id)).toEqual(['c1']);
+    });
+
+    // _fetchJson reads an unreadable body as {}; handed on, the refresh would
+    // set the tournament's competitions to {} and break the admin.
+    it('refuses an answer that is not a list, rather than handing it on', async () => {
+        const server = makeServer({ timeOk: true });
+        const API = await loadWith(server);
+        const answering = server.fetch;
+        global.fetch = vi.fn((url, opts) => {
+            if (!String(url).includes('/api/viewer/competitions')) return answering(url, opts);
+            return Promise.resolve({ ok: true, status: 200, json: () => Promise.reject(new SyntaxError('Unexpected end of JSON input')) });
+        });
+
+        await expect(API.fetchCompetitions({ bounded: true })).rejects.toThrow('Failed to fetch competitions');
+    });
+
+    it('leaves every other caller unbounded', async () => {
+        const server = makeServer({ timeOk: true });
+        const API = await loadWith(server);
+        const answering = server.fetch;
+        let opts = 'not called';
+        global.fetch = vi.fn((url, o) => {
+            if (!String(url).includes('/api/viewer/competitions')) return answering(url, o);
+            opts = o;
+            return Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve(comps) });
+        });
+
+        await API.fetchCompetitions();
+
+        expect(opts === undefined || !opts.signal, 'no deadline on the plain call').toBe(true);
+    });
+});
+
+// A score write's deadline covers its answer's body as well as its headers
+// (_fetchJson). fetchWithTimeout's abort ended when the headers arrived, so a
+// server that sent them and then stalled kept the write pending for good, and
+// with it the editor's `submitting`, which disables Finish and Close. Past the
+// deadline the write is a network failure like any other: queued ({queued:
+// true}) and replayed with the stamp it was sent with, which is safe if the
+// server did store it, since the write guard is last-write-wins and an equal
+// stamp re-applies.
+describe('a score write whose answer never completes is queued, not held', () => {
+    const stalledBody = () => Promise.resolve({ ok: true, status: 200, json: () => new Promise(() => {}) });
+    const answered = () => Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve({}) });
+
+    it.each([
+        ['a finished score', '/score', (API) => API.recordScore('c1', 'm1', { status: 'completed' }, 'pw', null)],
+        ['a running score', '/score', (API) => API.recordScore('c1', 'm1', { status: 'running' }, 'pw', null)],
+        ['a decision', '/decision', (API) => API.recordDecision('c1', 'm1', { decision: 'kiken-voluntary', decisionBy: 'shiro' }, 'pw')],
+        ['a winner override', '/override-winner', (API) => API.overrideBracketWinner('c1', 'm1', 'Alice', 'pw')],
+    ])('%s is given up at 12 s, queued, and replayed with the same stamp', async (_name, path, send) => {
+        const server = makeServer({ timeOk: true });
+        const API = await loadWith(server);
+        const answering = server.fetch;
+        const sent = [];
+        global.fetch = vi.fn((url, opts) => {
+            if (!String(url).includes(path)) return answering(url, opts);
+            sent.push(JSON.parse(opts.body));
+            return sent.length === 1 ? stalledBody() : answered();
+        });
+        let outcome = null;
+        send(API).then((res) => { outcome = { res }; }, (error) => { outcome = { error }; });
+
+        await tick(11000);
+        expect(outcome, 'still reading inside the 12 s').toBeNull();
+        await tick(1500);
+        expect(outcome && outcome.res, 'given up and queued, not thrown').toEqual({ queued: true });
+        expect(writeDidNotLand(outcome.res)).toBe(true);
+
+        // The queue replays it, as it does a write whose connection failed.
+        await tick(1000);
+        expect(sent).toHaveLength(2);
+        expect(sent[1].modifiedAt).toBe(sent[0].modifiedAt);
+        expect(sent[1].rev).toBe(sent[0].rev);
+        expect(API.unsentWrites().total, 'delivered and out of the queue').toBe(0);
+    });
+
+    // The replay loop is single-flight: one replay whose body never completed
+    // stopped every later flush, so the queue the write above goes into must
+    // be bounded the same way or the hang only moves there.
+    it('a queued write whose replay answer never completes does not stop the queue', async () => {
+        const server = makeServer({ timeOk: true });
+        const API = await loadWith(server);
+        const answering = server.fetch;
+        const sent = [];
+        global.fetch = vi.fn((url, opts) => {
+            if (!String(url).includes('/score')) return answering(url, opts);
+            sent.push(JSON.parse(opts.body));
+            if (sent.length === 1) return Promise.reject(new TypeError('network error'));
+            return sent.length === 2 ? stalledBody() : answered();
+        });
+
+        // Offline: the finished score is queued, and the queue replays it at
+        // once; that replay's answer never completes.
+        expect(await API.recordScore('c1', 'm1', { status: 'completed' }, 'pw', null)).toEqual({ queued: true });
+        await flushMicrotasks();
+        expect(sent).toHaveLength(2);
+
+        await tick(11000);
+        expect(API.unsentWrites().total, 'still waiting on the replay inside the 12 s').toBe(1);
+        // Given up at the deadline, kept, and retried after the backoff.
+        await tick(1500);
+        await tick(1000);
+        expect(sent).toHaveLength(3);
+        expect(sent[2].modifiedAt).toBe(sent[0].modifiedAt);
+        expect(API.unsentWrites().total, 'delivered and out of the queue').toBe(0);
     });
 });

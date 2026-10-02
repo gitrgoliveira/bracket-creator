@@ -1,12 +1,14 @@
 package helper
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	excelize "github.com/xuri/excelize/v2"
 
+	"github.com/gitrgoliveira/bracket-creator/internal/domain"
 	bctest "github.com/gitrgoliveira/bracket-creator/internal/test"
 )
 
@@ -28,7 +30,7 @@ func TestBronzeBlockBandSelection(t *testing.T) {
 		_, err := f.NewSheet(SheetEliminationMatches)
 		require.NoError(t, err)
 
-		PrintBronzeBlockWithPrintArea(f, 2, 0, false, false, bands, bronzeCourt, nil, nil)
+		PrintBronzeBlockWithPrintArea(f, EliminationPrint{NextRow: 2, RowsOnPage: 1, Bands: bands}, 0, false, bronzeCourt, nil)
 
 		merged, err := f.GetMergeCells(SheetEliminationMatches)
 		require.NoError(t, err)
@@ -95,7 +97,7 @@ func TestEliminationBandsIgnoreTheBronzeCourtWhenNoBronzePrints(t *testing.T) {
 		// a third one, which is the shiaijo that must not appear unless the
 		// bronze block itself does.
 		plan := CourtPlan{Draw: draw, Courts: []string{"A", "B", "C"}, Bronze: "C"}
-		PrintEliminationWithBronze(f, nil, rounds, 0, plan, false, false, includeBronze)
+		PrintEliminationWithBronze(f, nil, rounds, 0, plan, false, includeBronze)
 
 		rows, err := f.GetRows(SheetEliminationMatches)
 		require.NoError(t, err)
@@ -152,7 +154,7 @@ func TestEliminationRoundsToleratesANilEntry(t *testing.T) {
 		}
 
 		plan := CourtPlan{Draw: draw, Courts: []string{"A", "B"}}
-		PrintEliminationWithBronze(f, nil, rounds, 0, plan, false, false, false)
+		PrintEliminationWithBronze(f, nil, rounds, 0, plan, false, false)
 
 		rows, err := f.GetRows(SheetEliminationMatches)
 		require.NoError(t, err)
@@ -170,4 +172,59 @@ func TestEliminationRoundsToleratesANilEntry(t *testing.T) {
 	// from the sheet the same bouts produce on their own.
 	assert.Equal(t, clean, render(t, true),
 		"a nil entry must be skipped exactly as AssignMatchNumbers and FillInMatches skip it")
+}
+
+// Every match block on the Elimination Matches sheet follows one page rule: a
+// block that would not fit on the page in progress starts a new one, so no
+// block prints across two pages. The 3rd-place block used to skip it. With
+// kachinuki teams of nine (2n-1 = 17 bout rows) it followed a final that
+// already filled most of a page and ran far past the page's budget. Both
+// workbook writers, the app's exports and /create, print through
+// PrintEliminationWithBronze.
+func TestEliminationBlocksAreNeverSplitAcrossPages(t *testing.T) {
+	t.Parallel()
+	leaf := func(v string) *Node { return &Node{LeafNode: true, LeafVal: v} }
+	semiA := &Node{Left: leaf("Pool A-1st"), Right: leaf("Pool B-2nd")}
+	semiB := &Node{Left: leaf("Pool B-1st"), Right: leaf("Pool A-2nd")}
+	rounds := [][]*Node{{semiA, semiB}, {{Left: semiA, Right: semiB}}}
+	AssignMatchNumbers(rounds)
+	boutRows := domain.KachinukiMaxBouts(9)
+
+	f := excelize.NewFile()
+	defer func() { require.NoError(t, f.Close()) }()
+	_, err := f.NewSheet(SheetEliminationMatches)
+	require.NoError(t, err)
+	PrintEliminationWithBronze(f, nil, rounds, boutRows, CourtPlan{Draw: testDrawFor(rounds, 1)}, false, true)
+
+	rows, err := f.GetRows(SheetEliminationMatches)
+	require.NoError(t, err)
+	buf, err := f.WriteToBuffer()
+	require.NoError(t, err)
+	breaks, err := bctest.RowBreaks(buf.Bytes(), SheetEliminationMatches)
+	require.NoError(t, err)
+	// pageStart is the first row of the printed page row is on (1-based).
+	pageStart := func(row int) int {
+		start := 1
+		for _, end := range breaks {
+			if end < row {
+				start = end + 1
+			}
+		}
+		return start
+	}
+
+	height := EliminationTeamMatchHeightBase + boutRows
+	var blocks []int // each block's title row, 1-based
+	for r, row := range rows {
+		if len(row) > 0 && (strings.HasPrefix(row[0], "Round ") || row[0] == ThirdPlaceLabel) {
+			blocks = append(blocks, r+1)
+		}
+	}
+	require.Len(t, blocks, 4, "two semi-finals, the final and the 3rd place")
+	require.Equal(t, ThirdPlaceLabel, rows[blocks[3]-1][0])
+	for _, first := range blocks {
+		last := first + height - 1
+		assert.LessOrEqual(t, last-pageStart(first)+1, EliminationRowsPerPage,
+			"%s (rows %d-%d) runs past its page, which starts at row %d", rows[first-1][0], first, last, pageStart(first))
+	}
 }

@@ -149,7 +149,6 @@ func (e *Engine) RecordMatchResultWithIneligibilityTx(tx state.StoreTx, compID, 
 	if err := applyHansokuIppons(result); err != nil {
 		return nil, err
 	}
-	deriveDaihyosenWinner(result)
 
 	// Capture the prior result so we can roll back the score on
 	// AlreadyIneligibleError. lookupExistingResult reads directly from
@@ -165,6 +164,11 @@ func (e *Engine) RecordMatchResultWithIneligibilityTx(tx state.StoreTx, compID, 
 	if fo.StartOnly {
 		keepQueuedScore(prior, result)
 	}
+	// After the start's swap, so the winner comes from the bouts this write
+	// stores: a start's own representative-bout row is discarded above, and a
+	// winner derived from it would stand beside a stored bout that says
+	// otherwise.
+	deriveDaihyosenWinner(result)
 
 	// Kachinuki bout logs merge BY POSITION rather than replace wholesale
 	// (ACID: a client whose local log is behind the server must never

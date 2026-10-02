@@ -4,7 +4,7 @@
 // point included.
 
 import { describe, it, expect } from 'vitest';
-import { writeKeepsEditorOpen } from '../write_result.jsx';
+import { writeKeepsEditorOpen, writeWasRefused, writeRetryable } from '../write_result.jsx';
 
 describe('writeKeepsEditorOpen', () => {
   const running = { status: 'running', winner: null };
@@ -32,5 +32,23 @@ describe('writeKeepsEditorOpen', () => {
 
   it('a write with nothing to report is not held open', () => {
     expect(writeKeepsEditorOpen(finish, undefined)).toBe(false);
+  });
+});
+
+// What a write came back with, as the editors read it: whether a two-tap
+// commit disarms (writeWasRefused) and whether Retry is offered
+// (writeRetryable). Only a queued write is worth sending again; a refused one
+// is answered the same way however often it is sent.
+describe('writeWasRefused / writeRetryable', () => {
+  it.each([
+    ['nothing handed back (the host reported a refusal)', undefined, true, false],
+    ['superseded', { applied: false, reason: 'superseded' }, true, false],
+    ['refused for the clock', { applied: false, reason: 'clock_skew' }, true, false],
+    ['queued', { queued: true }, false, true],
+    ['landed', { applied: true }, false, false],
+    ['landed, a bare body', {}, false, false],
+  ])('%s', (_name, res, refused, retryable) => {
+    expect(writeWasRefused(res)).toBe(refused);
+    expect(writeRetryable(res)).toBe(retryable);
   });
 });

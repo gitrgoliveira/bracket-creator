@@ -57,6 +57,15 @@ func internalError(c *gin.Context, err error, publicMsg ...string) {
 	c.JSON(http.StatusInternalServerError, gin.H{"error": msg})
 }
 
+// txResponse is an answer a handler decides inside a transaction and writes
+// after the lock releases: writing JSON while holding the lock would let a slow
+// consumer stall every other writer for the same competition for the whole
+// stream.
+type txResponse struct {
+	status int
+	body   gin.H
+}
+
 // respondEngineError classifies err against the two typed engine sentinels
 // every handler in this package already checks by hand -- *engine.NotFoundError
 // (404) and *engine.ValidationError (400) -- and falls back to internalError
@@ -257,9 +266,11 @@ func respondIfEngineWriteError(c *gin.Context, err error) bool {
 // a server fault" cases: a terminal 422 naming the file, never a 500.
 //
 // Shared by every handler whose engine call can reach LoadOverrides: the
-// score handler, the decision handler, the daihyosen add/remove handlers,
-// the league-tiebreak candidates/generate handlers, and the chusen-
-// candidates handler. Before this was extracted, only the score handler
+// score handler, the decision handler, the league-tiebreak candidates/generate
+// handlers, and the chusen-candidates handler. The daihyosen add/remove
+// handlers reach it through respondIfEngineWriteError too, but their writes
+// are always running ones, which never read the overrides, so they never
+// answer 422. Before this was extracted, only the score handler
 // had this mapping and every sibling call site fell through to a 500 for
 // the identical failure.
 func respondIfCorruptOverrides(c *gin.Context, err error) bool {
@@ -283,7 +294,7 @@ func respondIfCorruptOverrides(c *gin.Context, err error) bool {
 // draw, restore the settings, or use the live standings view), not server
 // faults, hence 422 rather than 500.
 //
-// Shared by the blank-template export route (GET .../export,
+// Shared by the stored-draw export route (GET .../export,
 // handlers_competition.go) and the results-archive export route (GET
 // .../export-results, handlers_export.go) so the same two-sentinel mapping
 // does not drift into two hand-copied bodies -- mirrors

@@ -195,12 +195,12 @@ func AddPlayerDataToSheet(f *excelize.File, players []Player, sanitize bool, tit
 // so a caller never has to run AddPoolDataToSheet and then separately
 // AddPlayerDataToSheet on the same workbook to cover the one shape
 // (knockout-only, no pools.csv) that needs the latter. namesToPrintPlayers
-// takes priority when non-empty (the blank-template export's numbered
+// takes priority when non-empty (the stored-draw export's numbered
 // roster, see Engine.NumberedParticipantsFor); pools is used otherwise,
 // including the ordinary "no pools drawn yet" case, which AddPoolDataToSheet
 // already renders as a header-only sheet.
 //
-// Before this existed, the blank-template export called AddPoolDataToSheet
+// Before this existed, the stored-draw export called AddPoolDataToSheet
 // unconditionally (writing only headers when pools was empty) and THEN
 // called AddPlayerDataToSheet a second time for the knockout-only case,
 // after RenderCompetitionWorkbook had already returned -- two writers of one

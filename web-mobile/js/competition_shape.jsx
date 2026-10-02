@@ -113,6 +113,15 @@ export const POOL_FORMAT_OPTIONS = [
   { value: POOL_FORMAT_PARTIAL, label: "Partial / neighbour-only", hint: "Each participant plays a neighbourhood subset: useful when a full round-robin would not fit in the day's schedule." },
 ];
 
+// resolveFormat: a stored "" format is a knockout, as
+// state.Competition.EffectiveFormat (internal/state/models.go) reads it; ""
+// is a legitimate stored value, which the write doors accept. buildXlsxBody
+// (admin_schedule_export.jsx) is its one caller: the other surfaces that
+// branch on the format compare the stored value.
+export function resolveFormat(format) {
+  return format || FORMAT_KNOCKOUT;
+}
+
 // resolvePoolFormat: a stored/legacy "" means "full" -- the engine's own
 // unset default (internal/engine/pools.go's `switch comp.PoolFormat`
 // falls through to the full round-robin arm). Both screens need this to
@@ -1230,6 +1239,5 @@ export const COMPETITION_DEFAULTS = {
   // 0 means "unset, use the scheduler default" for both durations (T047).
   poolMatchDurationSeconds: 0,
   knockoutMatchDurationSeconds: 0,
-  mirror: true,
   startTime: "09:00",
 };

@@ -79,9 +79,9 @@ sequenceDiagram
     B->>C: GET /api/events
     C->>H: proxied (unbuffered)
     H-->>B: id: N · data: event   (real-time, as matches change)
-    Note over H: each event stamped seq=N,<br/>retained in a 100-event ring
+    Note over H: each event stamped seq=N,<br/>retained in a 200-event ring
     B--xH: Wi-Fi blip, connection drops
-    B->>C: auto-reconnect, Last-Event-ID: N
+    B->>C: reconnect, new EventSource with ?lastEventId=N
     C->>H: proxied
     alt gap satisfiable from ring
         H-->>B: replay N+1 … head
@@ -91,7 +91,10 @@ sequenceDiagram
     H-->>B: heartbeat every 15s (observable frame)
 ```
 
-- **Replay ring**: `DefaultHistorySize` (100) recent events. `Last-Event-ID` replays the gap.
+- **Replay ring**: `DefaultHistorySize` (200) recent events. The last id the client saw replays
+  the gap. The client reconnects by opening a new `EventSource`, which sends no `Last-Event-ID`
+  header, so it sends that id as the `lastEventId` query parameter (the header wins if both
+  arrive).
 - **`resync_required`**: emitted when a gap-free replay is impossible (ring eviction or a
   server restart that reset `seq`). The client resets its `lastSeq` and full-refetches. Emitted
   **without** an `id:` line when head seq is 0 so it can't force `Last-Event-ID` to "0".
@@ -133,6 +136,10 @@ flowchart LR
         silent -->|no| arm
     end
     vis["visibilitychange: tab → visible"] --> rc["reconnectEvents() + refetch"]
+    back["browser 'online' event"] --> rco["reconnectEvents()"]
+    rco --> reopen["stream reopens after a loss"]
+    reconnect --> reopen
+    reopen --> rf["refetch (jittered)"]
 ```
 
 Key client mechanisms (all in `web-mobile/js/api_client.jsx` + consumers):
@@ -146,7 +153,8 @@ Key client mechanisms (all in `web-mobile/js/api_client.jsx` + consumers):
 | Server errors (5xx / 429), and 403 | write stays queued and keeps retrying for as long as the tab stays open (the TTL is applied at page load, not during a session); after 10 consecutive rejections the operator gets a notice and the sync pill shows "Not saving". On this server 403 is never a bad credential (that is 401): it means the tournament is not configured yet, or is missing its password. Only an admin fixing the server state clears it, so signing in again cannot help and the write keeps retrying instead of parking |
 | Invalid credential (401) | the one 4xx a retry can fix: the write is parked, not discarded, stops retrying, and shows "Sign in to save"; signing in again re-sends it with the new credential |
 | Other non-retryable 4xx (400 validation, 413, generic 409) | write is discarded (it can never succeed on retry), and the operator always gets a visible notice naming the match and the server's reason |
-| Missed events | `Last-Event-ID` replay + `checkSeqGap` on every event → scoped refetch; `resync_required` |
+| Missed events | replay from the last event id the client saw (`?lastEventId=`), `checkSeqGap` on every event → scoped refetch; `resync_required`. A stream that reopens after it was lost also refetches everything, jittered over 2s so a venue's devices do not all ask at once: replay does not resend an event the page received whose refetch then failed because the device could not fetch |
+| Back online | the browser's `online` event forces a reconnect, and the reopened stream refetches as above (the stream can outlive the outage, so it is not left to report a loss itself) |
 | Tab resume | `visibilitychange` → force reconnect + refetch |
 | False success | terminal writes show pending / parked / still-retrying / failure state, never a false "saved"; a write dropped for exceeding the TTL, or because the stored entry was corrupt, also raises a visible notice at page load, never a silent loss |
 | Storage full | if the browser can't persist the queue (storage quota exhausted), that is surfaced to the operator rather than swallowed |

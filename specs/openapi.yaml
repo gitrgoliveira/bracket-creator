@@ -19,6 +19,7 @@ info:
     - **`GET /api/schedule/estimate`**: stateless schedule calculator; always public.
     - **`GET /api/competitions/{id}/competitor-status`**: public read; the `POST` write is protected.
     - **`GET /api/competitions/{id}/teams/{tid}/lineups/{round}`**: public read; `PUT`/`DELETE` are protected.
+    - **`GET /api/competitions/{id}/teams/{tid}/match-lineups/{matchId}`**: public read; `PUT`/`DELETE` are protected (in self-run mode the `PUT` is open, see below).
     - **`GET /api/competitions/{id}/swiss/standings`**: public read; always public.
     - **`GET /api/tournament/announcement`**: public read; returns the currently active admin broadcast announcement (204 when none/expired).
 
@@ -29,8 +30,50 @@ info:
     draw, result overrides, roster mutations, import) and organiser-owned setup
     (tournament/competition config) stay gated. In the default `officiated` mode every
     `/api/` route keeps requiring `X-Tournament-Password` as described above.
+    The team writes the public score sheet makes when a competitor names a bout's
+    fighter are open in self-run mode too: `PUT .../teams/{tid}/match-lineups/{matchId}`,
+    `POST .../teams/{tid}/members` and `PUT .../teams/{tid}/members/{memberId}`. A
+    request with an empty `X-Tournament-Password` (the public page's) cannot change
+    the lineup of a match that has finished (409 `result_finalized`) or of a team the
+    match does not hold (404 `team_not_in_match`), rename a team member who already
+    has a name (409 `member_already_named`), add or name a member once the competition
+    has finished (409 `competition_finished`), or add one to a team that already holds
+    twice its team size plus two members (409 `team_member_limit`). The Lineups page's
+    other writes (round lineups, deleting a match lineup, clearing a member's name)
+    and `GET .../team-members` stay gated.
+    An empty `X-Tournament-Password` also runs the representative bout of a tied
+    knockout team match: `POST`/`DELETE .../matches/{mid}/daihyosen` add and remove
+    it while the match is running (409 `result_finalized` once it has finished, 409
+    `match_not_running` before it starts), and `PUT .../matches/{mid}/score` scores
+    it through its `subResults` row (position `-1`, decision `daihyosen`). Such a
+    score write never creates one: a row for a representative bout the match does
+    not have (a sheet a moment behind a remove made elsewhere) is dropped from the
+    write and the rest is written as usual, unless the write finishes the match,
+    which may take its winner from that row and is refused with 409 `no_daihyosen`; a write listing
+    two is refused with 400 `duplicate_daihyosen`. Nor does it remove one: a write listing
+    the bouts without the representative bout the match has (a sheet a moment behind an
+    add made elsewhere) keeps the stored row, scored or not, unless it finishes the match,
+    which is refused with 409 `daihyosen_added`. It carries only what the competitors saw: a match
+    `decision` that is empty, `fought` or `hikiwake`, a numbered bout `decision` that is
+    one of those or `fusensho`, and a representative-bout `decision` that is empty or
+    `daihyosen` (a draw or a default win there would decide the encounter). Any
+    other decision, or the `Ht` judges'-decision mark on a numbered bout, is refused
+    with 400. A judges' decision on the representative bout stays the organiser's:
+    such a write may send the row back as the organiser recorded it (same winner,
+    same side names, the `Ht` mark on the same side), or leave the row's ippons out,
+    and the row is then stored exactly as the organiser recorded it. A row that
+    leaves its ippons out is refused all the same if it names a winner, carries two
+    or more outstanding fouls on a side (they would score an ippon), or names sides other than
+    the recorded ones. One that would record, move or clear the decision (dropping
+    the row included), or name a match winner other than the side it decided, is
+    refused with 409 `hantei_organiser_only`. On these public writes a password that
+    is sent but wrong is answered 401 (`invalid tournament password`), as on a gated
+    route: only an empty one is a participant. `POST .../matches/bulk-score` and
+    `PUT .../matches/{mid}/quick-score` stay gated: they write results without these
+    checks.
 
-    **Request body size limits.** Every `/api/` route enforces a request-size cap and
+    **Request body size limits.** Every `/api/` route that reads a body (any POST,
+    PUT or PATCH, and a DELETE that carries one) enforces a request-size cap and
     returns `413` when the body exceeds it: admin JSON bodies are capped at 1 MB by
     default; `POST /api/tournament/announce` and `POST /api/tournament/reset` are
     capped tighter, at 4 KB, since their payloads are small fixed-shape JSON; and
@@ -119,6 +162,16 @@ paths:
                 tournamentType:
                   type: string
                   enum: [pools, knockout]
+                format:
+                  type: string
+                  enum: [league]
+                  description: >-
+                    league (with tournamentType pools only, else 400) draws the
+                    pool with no knockout: no tree page, no elimination match
+                    and no knockout section on the Kachinuki Detail sheet, as a
+                    league is decided by its table. Absent is the draw
+                    tournamentType names; a single pool is never read as a
+                    league.
                 singleTree:
                   type: string
                   enum: ["on", "off"]
@@ -128,9 +181,6 @@ paths:
                 determined:
                   type: string
                   enum: ["on", "off"]
-                mirror:
-                  type: string
-                  enum: ["on", "off"]
                 titlePrefix:
                   type: string
                 numberPrefix:
@@ -138,6 +188,34 @@ paths:
                 teamMatches:
                   type: integer
                   default: 0
+                  minimum: 0
+                  maximum: 100
+                  description: Team size; 0 draws an individual competition. Outside 0 to 100 is a 400, the schedule estimate's bound, since the size sets every team block's bout rows.
+                teamMatchType:
+                  type: string
+                  enum: [fixed, kachinuki]
+                  description: >-
+                    Team match format; absent is fixed. kachinuki (teams of two
+                    or more, else 400) gives every team block a row for each
+                    bout an encounter can take, 2 x teamMatches - 1, and adds a
+                    Kachinuki Detail sheet with an empty section for every match
+                    of the draw.
+                engi:
+                  type: string
+                  enum: ["on", "off"]
+                thirdPlaceMatch:
+                  type: string
+                  enum: ["on", "off"]
+                  description: >-
+                    Adds a 3rd-place match after the semifinals. The legacy
+                    field name naginata=on is accepted as an alias.
+                poolFormat:
+                  type: string
+                  enum: [full, partial]
+                  description: partial draws the path-graph match set; otherwise roundRobin decides.
+                extraQualifiers:
+                  type: string
+                  enum: ["", larger-pools, fill-bracket]
                 winnersPerPool:
                   type: integer
                   default: 2
@@ -149,7 +227,7 @@ paths:
                   enum: ["on", "off"]
                 poolSizeMode:
                   type: string
-                  enum: [max, exact]
+                  enum: [min, max]
                 courts:
                   type: integer
                   default: 2
@@ -1066,7 +1144,7 @@ paths:
         on-disk record: `name`, `date`, `startTime`, `poolSize`,
         `poolWinners`, `poolSizeMode`, `poolFormat`, `extraQualifiers`,
         `courts`, `roundRobin`, `withZekkenName`, `teamSize`,
-        `numberPrefix`, `format`, `kind`, `mirror`,
+        `numberPrefix`, `format`, `kind`,
         `poolMatchDurationSeconds`, `knockoutMatchDurationSeconds`,
         `swissRounds`, `naginata`, `engi`, `teamMatchType`,
         `checkInEnabled`, `leagueTiebreakTopN`, `leagueTwoThirdPlaces`.
@@ -1088,8 +1166,8 @@ paths:
         `checkInEnabled`, `swissRounds` and `numberPrefix`) is editable
         regardless of status through this endpoint; `poolSize`, `poolWinners`,
         `poolSizeMode`, `poolFormat`, `extraQualifiers`, `courts`,
-        `roundRobin`, `teamSize`, `withZekkenName` and
-        `mirror` are additionally subject to the draw-ready
+        `roundRobin`, `teamSize` and `withZekkenName`
+        are additionally subject to the draw-ready
         output-affecting 409 (see below) while status is exactly
         `draw-ready`, but are not blocked once the competition has moved
         past it.
@@ -1223,7 +1301,7 @@ paths:
 
             * Output-affecting settings (format, courts, pool
               size/winners/mode, extra qualifiers, pool format, round-robin,
-              mirror, team size, kind, team match type, zekken
+              team size, kind, team match type, zekken
               display) were changed while the competition is in `draw-ready`
               state; discard the draw first. `numberPrefix` is NOT one of
               these: it can be changed in any status, including `draw-ready`
@@ -2342,6 +2420,12 @@ paths:
             `error` names the bouts, e.g. "Bout 5 (Taisho) has no result.
             Record a score, a Tie, or a Fusensho before finishing."
 
+            A request with an empty password (self-run) whose `subResults`
+            list more than one representative-bout row (position `-1`) is
+            refused with `error` `duplicate_daihyosen` and a `message` for the
+            participant: "A team match has one representative bout, and this
+            score lists more than one. Check the scores and try again."
+
             A `completed` write whose `decision` is empty or `hikiwake` on a
             match whose stored result is a completed withdrawal (kiken or
             fusenpai) is a score sheet's correction, which cannot state a
@@ -2371,9 +2455,18 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Error'
+        '401':
+          description: >
+            `invalid tournament password`: the password is missing or wrong in an
+            officiated tournament, or, in a self-run one, sent but wrong. An empty
+            password is a participant there, never a 401.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
         '409':
           description: |
-            Conflict; one of seven codes returned in the `error` field:
+            Conflict; one of nine codes returned in the `error` field:
             - `court_busy`: court already has a running match in this or another competition.
               Extra fields: `court`, `matchId`, `compId`, `label`, `message`.
             - `ineligible_competitor`: a participant is ineligible (kiken/fusenpai in a prior match, or barred by
@@ -2387,6 +2480,34 @@ paths:
               Extra fields: `playerId`, `matchId`, `reason`, `reasonHuman`.
             - `result_finalized`: the match result is already locked (self-reported only).
               Extra fields: `message`.
+            - `hantei_organiser_only`: a request with an empty password (self-run) would
+              record, move or clear the judges' decision on the representative bout
+              (position `-1`), drop a row that carries one, or name a match `winner` or
+              `winnerId` other than the side the decision names (read against the stored
+              sides and their ids). Sending the row back as the organiser recorded it is
+              not refused, nor is leaving its ippons out, unless that row names a winner,
+              carries two or more outstanding fouls on a side, or names sides other
+              than the recorded ones. A row that is not refused is stored exactly as the organiser
+              recorded it.
+              Extra fields: `message`, one sentence for the participant: "The judges
+              decided this representative bout (hantei). Ask the tournament organizer
+              to change it." when a decision is recorded, else "Only the tournament
+              organizer can record a judges' decision (hantei)."
+            - `no_daihyosen`: a request with an empty password (self-run) finishes the
+              match (`status` completed) on a representative-bout row (position `-1`)
+              the match does not have, such as a sheet a moment behind a remove made
+              on another device. A finish may take its winner from that row, so nothing is written.
+              A write that does not finish the match loses the row instead and is
+              written as usual. Extra fields: `message`, "This match's representative
+              bout was removed on another device. Check the scores and finish
+              again."
+            - `daihyosen_added`: a request with an empty password (self-run) finishes
+              the match on a sheet that lists the bouts without the representative bout
+              the match has, such as a sheet a moment behind an add made on another
+              device. Nothing is written. A write that does not finish the match keeps
+              the stored row and is written as usual. Extra fields: `message`, "A
+              representative bout was added to this match on another device. Check the
+              scores and finish again."
             - `side_mismatch`: the submitted winner does not match either side of the match.
               Extra fields: `message`.
             - `downstream_knockout_played`: the write would change who a
@@ -2419,6 +2540,9 @@ paths:
                       - ineligible_competitor
                       - already_ineligible
                       - result_finalized
+                      - hantei_organiser_only
+                      - no_daihyosen
+                      - daihyosen_added
                       - side_mismatch
                       - downstream_knockout_played
                       - downstream_knockout_running
@@ -2440,7 +2564,7 @@ paths:
                       `engine.OperatorMatchLabel`.
                   message:
                     type: string
-                    description: Human-readable detail (court_busy, result_finalized, side_mismatch, downstream_knockout_played, downstream_knockout_running).
+                    description: Human-readable detail (court_busy, result_finalized, hantei_organiser_only, no_daihyosen, daihyosen_added, side_mismatch, downstream_knockout_played, downstream_knockout_running); for the self-run codes, the sentence the public page shows as it is.
                   playerId:
                     type: string
                     description: Ineligible participant ID (ineligible_competitor / already_ineligible).
@@ -3084,6 +3208,10 @@ paths:
         with partial success) with that entry's `matchId` and an `error` naming the bouts, e.g.
         "Bout 5 (Taisho) has no result. Record a score, a Tie, or a Fusensho before finishing."
         Nothing is written for that entry, and other entries are unaffected.
+
+
+        Stays main-password-gated in self-run mode (401 without it): it writes results
+        without PUT /score's self-run checks.
       security:
         - TournamentPassword: []
       parameters:
@@ -3160,6 +3288,10 @@ paths:
         and the server determines the team winner and synthesises SubResults so that
         standings IV/IL/IT counts are updated correctly. Use the full `/score` endpoint
         when you have per-member ippon data.
+
+
+        Stays main-password-gated in self-run mode (401 without it): it replaces the
+        match's bouts outright, without PUT /score's self-run checks.
       security:
         - TournamentPassword: []
       parameters:
@@ -3355,40 +3487,111 @@ paths:
       description: >
         Adds a daihyosen (representative) bout to break a tie in an
         elimination team match. Rejected if the match is not tied,
-        if it is a pool match, if the competition is engi or kachinuki
-        (daihyosen does not exist in kachinuki; a knockout tie goes to
-        encho on the final bout), or if neither team has sufficient
-        eligible competitors.
+        if it is a pool match, if the competition is individual, engi
+        or kachinuki (daihyosen does not exist in kachinuki; a knockout
+        tie goes to encho on the final bout), or if either side cannot field a
+        representative. That last check asks each side on its own id, as the
+        start gate does: a side is refused when a withdrawal recorded in ANOTHER
+        match bars its team, whoever else in the competition is eligible. A
+        withdrawal recorded in this match does not count against it, and a side
+        with no id (an unresolved feeder or a bye) has nothing to bar it.
+
+
+        The add competes on timestamps like a score write when it carries
+        `modifiedAt`: the match it writes takes that stamp, so a copy of the
+        match read before the add is older than the one it returns.
       security:
         - TournamentPassword: []
       parameters:
         - $ref: '#/components/parameters/CompetitionId'
         - $ref: '#/components/parameters/MatchId'
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DaihyosenWriteStamp'
       responses:
         '200':
-          description: Daihyosen bout added.
+          description: >
+            Daihyosen bout added: the placeholder bout under `subResult` and
+            the updated match, which carries it and the request's stamp, under
+            `result`, without the audit notes (`decisionReason`,
+            `correctionReason`) the public broadcast leaves out. OR the write was refused: a RefusedWrite (`applied:
+            false` with a `reason` of `superseded` or `clock_skew`); nothing is
+            stored and no SSE event is emitted.
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/MatchResult'
+                oneOf:
+                  - type: object
+                    required: [subResult, result]
+                    properties:
+                      subResult:
+                        $ref: '#/components/schemas/SubMatchResult'
+                      result:
+                        $ref: '#/components/schemas/MatchResult'
+                  - $ref: '#/components/schemas/RefusedWrite'
         '400':
           description: >
-            Match is not tied (`not_tied`), is a pool match (`pool_match`),
-            or the competition does not support daihyosen: engi competitions
-            decide bouts by referee flags (`error` is a human-readable
-            message), and daihyosen does not exist in kachinuki (`error`
-            begins "daihyosen does not exist in kachinuki"; a tied final bout
-            is a draw in pools/league and goes to encho in a knockout).
+            The body is not the `modifiedAt` object (malformed JSON, or a
+            `modifiedAt` that is not a number), the match is not tied
+            (`not_tied`) or is a pool match (`pool_match`), or the competition
+            does not support daihyosen: engi competitions decide bouts by
+            referee flags (`error` is a human-readable message), daihyosen
+            does not exist in kachinuki (`error` begins "daihyosen does not
+            exist in kachinuki"; a tied final bout is a draw in pools/league
+            and goes to encho in a knockout), and an individual competition
+            has no bouts to tie on (`error` begins "individual competitions do
+            not support daihyosen"). Refused for every caller, with or without
+            the password.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: >
+            `invalid tournament password`: missing or wrong in an officiated
+            tournament, or sent but wrong in a self-run one, where an empty
+            password is a participant. Answered before the body is read, so a
+            wrong password is never told about its stamp.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: Match not found (`match not found`).
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/Error'
         '409':
-          description: Insufficient eligible competitors (`insufficient_eligibility`).
+          description: >
+            A side cannot field a representative (`insufficient_eligibility`:
+            another match's withdrawal bars its team, see the description), or the
+            match already has a representative bout (`daihyosen_exists`): an
+            encounter has one, and the tie this route checks counts none, so a
+            second would otherwise be appended beside the first.
+
+
+            Self-run, an empty password: the match is not running. Once it has
+            finished, `result_finalized` with the score route's `message` ("This
+            match result has already been reported. Contact the tournament
+            organizer to correct it."); before it starts, `match_not_running`
+            with a `message` ("This match has not started. Start it before
+            adding a representative bout."). A request with the password is not
+            limited by the match's status.
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/Error'
+                type: object
+                properties:
+                  error:
+                    type: string
+                    enum: [insufficient_eligibility, daihyosen_exists, result_finalized, match_not_running]
+                  message:
+                    type: string
+                    description: The sentence the public page shows as it is (result_finalized, match_not_running).
     delete:
       tags: [matches]
       summary: Remove an unscored representative (daihyosen) bout
@@ -3400,24 +3603,57 @@ paths:
         (ippons, a winner, a hantei mark, recorded hansoku, or a sub-decision
         other than the bare `daihyosen` placeholder), so this can only undo a
         bout that was added by mistake and never fought.
+
+
+        Takes the same optional `modifiedAt` body as the POST, and competes
+        on timestamps the same way when it carries one.
       security:
         - TournamentPassword: []
       parameters:
         - $ref: '#/components/parameters/CompetitionId'
         - $ref: '#/components/parameters/MatchId'
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DaihyosenWriteStamp'
       responses:
         '200':
           description: >
-            Daihyosen removed. The updated match is returned under a `result`
-            key (note this differs from the POST above, which returns the
-            MatchResult at the top level).
+            Daihyosen removed: the updated match, carrying the request's
+            stamp, under `result`, without the audit notes (`decisionReason`,
+            `correctionReason`) the public broadcast leaves out. OR the write was refused: a RefusedWrite
+            (`applied: false` with a `reason` of `superseded` or
+            `clock_skew`); nothing is stored and no SSE event is emitted.
           content:
             application/json:
               schema:
-                type: object
-                properties:
-                  result:
-                    $ref: '#/components/schemas/MatchResult'
+                oneOf:
+                  - type: object
+                    required: [result]
+                    properties:
+                      result:
+                        $ref: '#/components/schemas/MatchResult'
+                  - $ref: '#/components/schemas/RefusedWrite'
+        '400':
+          description: >
+            The body is not the `modifiedAt` object (malformed JSON, or a
+            `modifiedAt` that is not a number).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: >
+            `invalid tournament password`: missing or wrong in an officiated
+            tournament, or sent but wrong in a self-run one, where an empty
+            password is a participant. Answered before the body is read, so a
+            wrong password is never told about its stamp.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
         '404':
           description: >
             Match not found, or it carries no daihyosen bout to remove
@@ -3431,10 +3667,28 @@ paths:
             The daihyosen bout has already been scored (`daihyosen_scored`).
             Removing it would discard a fought result, so it must be corrected
             through the score editor instead.
+
+
+            Self-run, an empty password: the match is not running. Once it has
+            finished, `result_finalized` with the score route's `message` ("This
+            match result has already been reported. Contact the tournament
+            organizer to correct it."); before it starts, `match_not_running`
+            with a `message` ("This match has not started. Start it before
+            removing its representative bout."). A request with the password is
+            not limited by the match's status.
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/Error'
+                type: object
+                properties:
+                  error:
+                    type: string
+                    enum: [daihyosen_scored, result_finalized, match_not_running]
+                  message:
+                    type: string
+                    description: The sentence the public page shows as it is (result_finalized, match_not_running).
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
 
   /api/competitions/{id}/competitor-status:
     parameters:
@@ -3531,6 +3785,14 @@ paths:
     get:
       tags: [competitions]
       summary: Get team lineup for round
+      description: |
+        Always answers 200 while the competition exists (bc-k404, operator decision
+        2026-09-27: a lineup either exists or it doesn't, and empty is a normal state,
+        not a missing resource). The response's `saved` field is the marker: `true`
+        means the lineup stored at the round asked for (or, with `fallback=best`, the
+        resolved round); `false` means nothing is stored there, and the body echoes the
+        requested round with empty `positions`. 404 is reserved for a competition id
+        that names no competition at all.
       security: []
       parameters:
         - in: query
@@ -3542,19 +3804,26 @@ paths:
           description: >
             When fallback=best the server resolves the best available lineup when none
             exists for the exact round (the highest round at or below the requested one,
-            then the team's latest lineup) and only 404s when the team has no lineups at
-            all. This round-scoped endpoint has no matchId, so match-scoped lineups are
-            not consulted. Without this parameter the endpoint keeps exact-round semantics
-            (404 when that round has no lineup). PUT and DELETE are unaffected.
+            then the team's latest lineup), answering `saved: false` only when the team
+            has no round-scoped lineups at all. This round-scoped endpoint has no
+            matchId, so match-scoped lineups are never consulted. Without this parameter
+            the endpoint keeps exact-round semantics (saved: false when that round has
+            nothing saved). PUT and DELETE are unaffected.
       responses:
         '200':
-          description: Team lineup.
+          description: Team lineup, saved or not (see `saved`).
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/TeamLineup'
+                $ref: '#/components/schemas/TeamLineupRead'
+        '400':
+          $ref: '#/components/responses/BadRequest'
         '404':
-          $ref: '#/components/responses/NotFound'
+          description: Competition not found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
     put:
       tags: [competitions]
       summary: Save team lineup for round
@@ -3574,7 +3843,13 @@ paths:
               schema:
                 $ref: '#/components/schemas/TeamLineup'
         '400':
-          $ref: '#/components/responses/BadRequest'
+          description: >
+            The body is not a JSON object, a position key is not a valid
+            position, or a position's name is longer than 100 bytes.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
         '500':
           $ref: '#/components/responses/InternalError'
     delete:
@@ -3609,18 +3884,28 @@ paths:
       tags: [competitions]
       summary: Get team lineup for a specific match
       description: |
-        Match-scoped lineup (mp-825). A 404 lets the caller fall back to the
-        round-scoped endpoint.
+        Match-scoped lineup (mp-825). Always answers 200 while the competition exists
+        (bc-k404): `saved: false` and empty `positions` when no match-scoped entry
+        exists, never a 404. The server never falls back to the round-scoped lineup on
+        this route; that tier belongs to the CALLER, which reads `saved: false` and
+        asks the round-scoped endpoint above itself. 404 is reserved for a competition
+        id that names no competition at all.
       security: []
       responses:
         '200':
-          description: Team lineup.
+          description: Team lineup, saved or not (see `saved`).
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/TeamLineup'
+                $ref: '#/components/schemas/TeamLineupRead'
+        '400':
+          $ref: '#/components/responses/BadRequest'
         '404':
-          $ref: '#/components/responses/NotFound'
+          description: Competition not found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
     put:
       tags: [competitions]
       summary: Save team lineup for a specific match
@@ -3629,6 +3914,16 @@ paths:
         the match is running or completed (mp-q722). Match state never blocks a
         save; a structurally invalid payload (FIK shape rules) is still rejected
         with a 400.
+
+        In a self-run tournament the request is also accepted with an empty
+        password: the public score sheet saves it when a competitor names a
+        bout's fighter (bc-dhas). Such a request is refused for a match that
+        does not exist (404), for a team the match does not hold by id (404
+        `team_not_in_match`), for a member id the team does not hold (400
+        `team_member_not_in_team`), or for a match that has finished (409
+        `result_finalized`, the score endpoint's own refusal); the organiser,
+        sending the password, keeps the always-editable rule above, and a
+        password that is sent but wrong gets 401 before the body is read.
       security:
         - TournamentPassword: []
       requestBody:
@@ -3645,7 +3940,50 @@ paths:
               schema:
                 $ref: '#/components/schemas/TeamLineup'
         '400':
-          $ref: '#/components/responses/BadRequest'
+          description: |
+            The body is not a JSON object, a position key is not a valid
+            position, or a position's name is longer than 100 bytes. Self-run,
+            an empty password: also a member id the team does not hold
+            (`error: team_member_not_in_team`, with a `message` to show, e.g.
+            "The member chosen for senpo is not on this team. Pick again from
+            the list.").
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: >
+            `invalid tournament password`: missing or wrong in an officiated
+            tournament, or sent but wrong in a self-run one, where an empty
+            password is a participant.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: |
+            Competition not found, or (self-run, an empty password) no match
+            with this id, or a team the match does not hold
+            (`error: team_not_in_match`, with a `message` to show: "This team
+            is not in this match. Check the score sheet and try again.").
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '409':
+          description: |
+            Self-run, an empty password: the match has finished
+            (`error: result_finalized`, with a `message` to show).
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error:
+                    type: string
+                    enum: [result_finalized]
+                  message:
+                    type: string
         '500':
           $ref: '#/components/responses/InternalError'
     delete:
@@ -3660,6 +3998,166 @@ paths:
           $ref: '#/components/responses/BadRequest'
         '500':
           $ref: '#/components/responses/InternalError'
+
+  /api/competitions/{id}/teams/{tid}/members:
+    parameters:
+      - $ref: '#/components/parameters/CompetitionId'
+      - in: path
+        name: tid
+        required: true
+        schema:
+          type: string
+        description: Team ID (the team's participant id).
+    post:
+      tags: [competitions]
+      summary: Add a team member
+      description: |
+        Adds a member to the team with the next display index; an index is
+        never reused. Two members of one team may not share a name.
+
+        In a self-run tournament a request with an empty password may add one
+        too: the public score sheet does when a competitor types a fighter's
+        name. Such a request is refused once the competition has finished (409
+        `competition_finished`) or once the team holds twice its team size plus
+        two members (409 `team_member_limit`), since a member is never removed;
+        the organiser adds past both. A password that is sent but wrong gets
+        401 before the body is read.
+      security:
+        - TournamentPassword: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TeamMemberName'
+      responses:
+        '201':
+          description: Member added.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TeamMember'
+        '400':
+          description: The body is not a JSON object, or `name` is empty or longer than 100 bytes.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: >
+            `invalid tournament password`: missing or wrong in an officiated
+            tournament, or sent but wrong in a self-run one, where an empty
+            password is a participant.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: No competition with this id, or no team with this id in it.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '409':
+          description: >
+            Another member of the team already has this name (`error` only).
+            Or, self-run with an empty password, the competition has finished
+            (`competition_finished`) or the team is at its limit
+            (`team_member_limit`), each with a `message` to show.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error:
+                    type: string
+                  message:
+                    type: string
+                    description: The sentence the public page shows as it is (competition_finished, team_member_limit).
+
+  /api/competitions/{id}/teams/{tid}/members/{memberId}:
+    parameters:
+      - $ref: '#/components/parameters/CompetitionId'
+      - in: path
+        name: tid
+        required: true
+        schema:
+          type: string
+        description: Team ID (the team's participant id).
+      - in: path
+        name: memberId
+        required: true
+        schema:
+          type: string
+        description: The member's id.
+    put:
+      tags: [competitions]
+      summary: Name or rename a team member
+      description: |
+        Sets the member's name. The new name reaches every stored lineup that
+        places the member. Bouts already fought keep the name they were
+        recorded with in their stored `sideA`/`sideB`, but every surface of the
+        app and the export show the member's current name, looked up by id, so
+        a rename changes what those bouts show too, finished matches included.
+
+        In a self-run tournament a request with an empty password may name a
+        member who has no name yet (the public score sheet does when a
+        competitor names a fighter), but not rename one who has: since a rename
+        changes what every bout that member fought shows, it stays with the
+        organiser, who renames any member, and a participant's is 409
+        `member_already_named`. Once the competition has finished a
+        participant's is 409 `competition_finished`. A password that is sent
+        but wrong gets 401 before the body is read.
+      security:
+        - TournamentPassword: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TeamMemberName'
+      responses:
+        '204':
+          description: Member named.
+        '400':
+          description: The body is not a JSON object, or `name` is empty or longer than 100 bytes.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: >
+            `invalid tournament password`: missing or wrong in an officiated
+            tournament, or sent but wrong in a self-run one, where an empty
+            password is a participant.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: No competition, team or member with this id.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '409':
+          description: >
+            Self-run, an empty password: the member already has a name
+            (`member_already_named`, with a `message` to show: "This team
+            member already has a name. Ask the tournament organizer to change
+            it."), or the competition has finished (`competition_finished`).
+            Or, for any caller, another member of the team already has this
+            name (`error` only).
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error:
+                    type: string
+                  message:
+                    type: string
+                    description: The sentence the public page shows as it is (member_already_named, competition_finished).
 
   /api/competitions/{id}/swiss/generate-round:
     parameters:
@@ -3844,6 +4342,8 @@ paths:
           description: No tie-breaker matches found for the group.
         '409':
           description: One or more matches are in progress or already scored.
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
 
   /api/competitions/{id}/league-tiebreak/finalize:
     parameters:
@@ -4165,6 +4665,7 @@ components:
         the public read endpoints `GET /api/schedule/estimate`,
         `GET /api/competitions/{id}/competitor-status`,
         `GET /api/competitions/{id}/teams/{tid}/lineups/{round}`,
+        `GET /api/competitions/{id}/teams/{tid}/match-lineups/{matchId}`,
         `GET /api/competitions/{id}/swiss/standings`, and
         `GET /api/tournament/announcement`,
         and (in file mode only) the bootstrap PUT/POST `/api/tournament`
@@ -4331,17 +4832,18 @@ components:
         an offline write queue retry an unwinnable request forever. Nothing is
         persisted and no SSE broadcast is emitted in either case.
 
-        PUT /score, POST /decision and PUT /override-winner each carry a
-        client-supplied modifiedAt, so the guard compares rather than bypassing
-        and any of them can produce either condition. The remaining match-write
-        endpoints (/quick-score and both /daihyosen paths) still build their
+        PUT /score, POST /decision, PUT /override-winner and both /daihyosen
+        paths each carry a client-supplied modifiedAt, so the guard compares
+        rather than bypassing and any of them can produce either condition.
+        The remaining match-write endpoint, /quick-score, still builds its
         result server-side without a stamp, so the guard takes its unstamped
-        bypass and they always apply; they nonetheless map the superseded
+        bypass and it always applies; it nonetheless maps the superseded
         condition to this same shape rather than to a 500, so that adding a
-        stamp to one of those payloads later cannot silently turn a benign
-        supersede into a request an offline queue retries forever. The batch endpoint /bulk-score is the one exception: it reports
-        both conditions per-entry in its own errors[] array inside an overall
-        200, carrying the same `reason` value there.
+        stamp to its payload later cannot silently turn a benign supersede
+        into a request an offline queue retries forever. The batch endpoint
+        /bulk-score is the one exception: it reports both conditions
+        per-entry in its own errors[] array inside an overall 200, carrying
+        the same `reason` value there.
       properties:
         applied:
           type: boolean
@@ -4366,6 +4868,23 @@ components:
         message:
           type: string
           description: Operator-facing explanation.
+
+    DaihyosenWriteStamp:
+      type: object
+      description: >
+        Optional body of both /daihyosen operations. An empty body, or one
+        without `modifiedAt`, is an unstamped request, which always applies.
+      properties:
+        modifiedAt:
+          type: integer
+          format: int64
+          description: >
+            Server-relative write stamp in unix milliseconds, learned from
+            GET /api/time, exactly as PUT /score and POST /decision carry. With
+            it the write competes on timestamps: one older than the stored
+            result is refused as `superseded`, and one more than 5s in the
+            server's future as `clock_skew` (see RefusedWrite). A write that
+            applies moves the match's stored `modifiedAt` to it.
 
     Error:
       type: object
@@ -4803,8 +5322,6 @@ components:
             `completed` → finished; `invalid` → operator-declared invalid,
             prerequisite for deleting an already-started competition.
           enum: [setup, draw-ready, pools, knockout, completed, invalid, ""]
-        mirror:
-          type: boolean
         withZekkenName:
           type: boolean
         numberPrefix:
@@ -5810,6 +6327,30 @@ components:
           type: string
           format: date-time
 
+    TeamMemberName:
+      type: object
+      required: [name]
+      properties:
+        name:
+          type: string
+          description: The member's name; must not be empty.
+
+    TeamMember:
+      type: object
+      required: [id, index, name]
+      properties:
+        id:
+          type: string
+          description: Stable for the member's life; a rename keeps it.
+        index:
+          type: integer
+          description: >
+            1-based display index within the team, never reused. With the
+            team's competitor number it forms the member's label, e.g. T10.1.
+        name:
+          type: string
+          description: Empty for a numbered member no one has named yet.
+
     TeamLineup:
       type: object
       description: >
@@ -5844,6 +6385,27 @@ components:
             Map of position label to the team member's id, keyed by the same
             positions as `positions`. Optional: a position without an entry
             here is identified by its name alone.
+
+    TeamLineupRead:
+      description: >
+        The response body for the two public lineup GETs (bc-k404, operator decision
+        2026-09-27). Everything TeamLineup carries, plus one required field, `saved`,
+        which is the ONE marker of whether a lineup is actually stored at the key
+        asked for: an empty `positions` map is not that marker (a saved lineup can
+        itself be empty), and an echoed round/matchId is not either (the unsaved body
+        echoes the requested key too).
+      allOf:
+        - $ref: '#/components/schemas/TeamLineup'
+        - type: object
+          required: [saved]
+          properties:
+            saved:
+              type: boolean
+              description: >
+                true when a lineup is stored at the round/matchId asked for (or, with
+                fallback=best, the round it resolved to); false when nothing is stored
+                there, in which case `positions` is empty and the round/matchId in the
+                body is the one requested, not a fallback.
 
     ScheduleEstimate:
       type: object

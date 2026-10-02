@@ -87,6 +87,8 @@ describe('the write-result rule is importable without running the gate', () => {
     const trips = (line) => scanSource(line + '\n', WRITE_RULES).length === 1;
     expect(trips('if (res.applied === false) return;')).toBe(true);
     expect(trips('window.writeDidNotLand(res)')).toBe(true);
+    expect(trips('window.writeWasRefused(res)')).toBe(true);
+    expect(trips('window.writeRetryable(res)')).toBe(true);
     expect(trips('if (writeDidNotLand(res)) return;')).toBe(false);
   });
 });

@@ -58,7 +58,9 @@ describe('EngiScoreEditorModal orientation', () => {
   });
 
   it('submits flagsA tied to the Aka/sideA count and flagsB tied to the Shiro/sideB count', async () => {
-    const onSubmit = vi.fn().mockResolvedValue(undefined);
+    // A landed save. Nothing handed back is a host reporting a refusal
+    // (writeWasRefused), which re-enables Save after the click's act.
+    const onSubmit = vi.fn().mockResolvedValue({});
     render(<EngiScoreEditorModal match={makeMatch()} onClose={() => {}} onSubmit={onSubmit} />);
     // 3 flags to Aka (sideA), 0 to Shiro (sideB): a valid {1,3,5} total.
     fireEvent.click(screen.getByTestId('engi-aka-inc'));

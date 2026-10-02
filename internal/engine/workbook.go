@@ -2,6 +2,10 @@ package engine
 
 import (
 	"fmt"
+	"maps"
+	"sort"
+	"strconv"
+	"strings"
 
 	excelize "github.com/xuri/excelize/v2"
 
@@ -11,7 +15,8 @@ import (
 
 // RenderCompetitionWorkbook renders the sheet pipeline shared by both
 // workbook exports of one competition (mp-yuy8): Engine.ExportCompetitionXlsx
-// (internal/engine/export.go, the blank-template export) and
+// (internal/engine/export.go, the stored-draw export behind
+// GET /api/competitions/:id/export and the PDF prints) and
 // export.BuildResultsWorkbook (internal/export/builder.go, the results-
 // archive export). Both used to hand-copy the same sheet sequence; a sheet
 // added to one and not the other has already shipped as a real bug (mp-8b1b
@@ -39,7 +44,7 @@ import (
 //  7. Kachinuki Detail sheet (helper.WriteKachinukiDetailSheet)
 //
 // Every caller-specific extra rides OUTSIDE this function, called by the
-// caller before or after: the blank-template export's Tags sheet (needs the
+// caller before or after: the stored-draw export's Tags sheet (needs the
 // tournament's publicURL, which this function deliberately does not take --
 // see the parameter doc below), and the results export's score/standings/
 // bracket-name literal overlays. The overlays write onto the Pool Matches and
@@ -62,9 +67,12 @@ import (
 //     here (they need numCourts, courts derived from comp, for it too).
 //   - kachinukiMatches is the caller's own bout-log read: the two callers use
 //     different Engine methods over different inputs (collectKachinukiMatches
-//     takes an id+comp pair scoped for the blank-template path;
+//     takes an id+comp pair scoped for the stored-draw path;
 //     KachinukiDetailMatches takes only the id), so the DATA differs even
-//     though the RENDERING (step 7) does not.
+//     though the RENDERING (step 7) does not. Before the draw, when step 4
+//     prints a knockout-only competition's skeleton, there is no stored
+//     bracket for that read to list, and the sections come from the rounds
+//     step 4 printed instead (helper.BlankKachinukiSections).
 //
 // courts is the caller's own CompetitionCourts(comp, tourn) result rather
 // than a tournament parameter this function would resolve itself, because
@@ -90,7 +98,7 @@ import (
 // caller-specific left to preserve by keeping it a parameter -- deriving it
 // here instead is what makes it impossible for the two callers' Data /
 // Names-to-Print sheets to disagree on whether this shape applies. Before
-// this branch existed at all, the blank-template export called
+// this branch existed at all, the stored-draw export called
 // helper.AddPoolDataToSheet here (over the empty pools slice, writing only
 // headers) and THEN called helper.AddPlayerDataToSheet a second time,
 // itself, after this function returned -- two writers of the same sheet,
@@ -140,10 +148,11 @@ func (e *Engine) RenderCompetitionWorkbook(
 	//    EffectivePoolWinners() directly): under bc-qual larger-pools, an
 	//    oversized pool's crossed 2nd needs a matchWinners["<pool>-2nd"] entry
 	//    too, or the Tree/Elimination sheets print it as inert literal text
-	//    instead of a live link to the pool's actual result.
+	//    instead of a live link to the pool's actual result. comp.TeamBoutRows()
+	//    sizes each team block here and on the Elimination Matches sheet.
 	matchWinners, poolsByCourt := helper.PrintPoolMatches(
-		f, pools, comp.TeamSize, comp.MatchWinnerRanksNeeded(), courts, courtOfPool,
-		comp.Mirror, poolCoords, playerCoords, comp.Engi,
+		f, pools, comp.TeamBoutRows(), comp.MatchWinnerRanksNeeded(), courts, courtOfPool,
+		poolCoords, playerCoords, comp.Engi,
 	)
 
 	// hasBronze: a third-place bout exists only for a competition that cannot
@@ -165,7 +174,7 @@ func (e *Engine) RenderCompetitionWorkbook(
 	// RequiresSingleThirdPlace() was true at draw time, and testing it directly
 	// is equivalent to (comp.RequiresSingleThirdPlace() || isPureKnockout(comp,
 	// pools)) && bracket != nil && bracket.ThirdPlaceMatch != nil, the
-	// formula the blank-template export used pre-extraction -- the extra
+	// formula the stored-draw export used pre-extraction -- the extra
 	// disjunct was redundant against the writer (mp-yuy8 criterion 5). This
 	// is also exactly the condition the results export already used
 	// unconditionally for its includeBronze flag below, so using it here
@@ -186,8 +195,26 @@ func (e *Engine) RenderCompetitionWorkbook(
 		if err != nil {
 			return nil, nil, fmt.Errorf("render workbook: %w", err)
 		}
-		helper.PrintEliminationWithBronze(f, matchWinners, eliminationMatchRounds, comp.TeamSize,
-			plan, comp.Mirror, comp.Engi, hasBronze)
+		// A knockout-only draw's first-round entrants are competitors, not pool
+		// places: point each at its name on the data sheet, as the CLI knockout
+		// does, or it prints as a broken ''! reference. Added after the Tree
+		// pages, which print those leaves as plain names.
+		if len(namesToPrintPlayers) > 0 {
+			maps.Copy(matchWinners, helper.ConvertPlayersToWinners(namesToPrintPlayers, false, playerCoords))
+		}
+		helper.PrintEliminationWithBronze(f, matchWinners, eliminationMatchRounds, comp.TeamBoutRows(),
+			plan, comp.Engi, hasBronze)
+		// Before the draw a knockout-only competition has no stored bracket for
+		// the caller's bout-log read to list, and the sheet above printed the
+		// skeleton seeded from the roster instead. The Kachinuki Detail sheet
+		// lists the same matches from the same rounds, so the two sheets have
+		// one source. isPureKnockout scopes it to that competition: with no
+		// pool phase and no bracket rounds the caller's read is empty, so
+		// nothing it listed is replaced, while a competition with pools keeps
+		// its pool sections whatever its bracket holds.
+		if comp.IsKachinuki() && isPureKnockout(comp, pools) && !bracketHasKnockoutContent(bracket) {
+			kachinukiMatches = helper.BlankKachinukiSections(nil, eliminationMatchRounds, hasBronze, comp.TeamBoutRows())
+		}
 	} else if comp.IsKnockoutEnabled() && bracketHasKnockoutContent(bracket) {
 		// The stored bracket already carries knockout content -- a
 		// third-place bout, or at least one round-1-or-later match -- but
@@ -258,9 +285,10 @@ func (e *Engine) RenderCompetitionWorkbook(
 	}
 
 	// 7. Kachinuki Detail sheet (T195-T203, CHK037). Opt-in: only emitted
-	//    when the competition runs the kachinuki team-match format AND has
-	//    at least one match with bout data. The renderer is a no-op for
-	//    empty input, so this is safe even when the format is fixed.
+	//    when the competition runs the kachinuki team-match format and its
+	//    draw has matches, or before the draw the skeleton step 4 printed.
+	//    The renderer is a no-op for empty input, so this is safe for every
+	//    other team format.
 	if err := helper.WriteKachinukiDetailSheet(f, kachinukiMatches); err != nil {
 		return nil, nil, err
 	}
@@ -302,4 +330,87 @@ func bracketHasKnockoutContent(bracket *state.Bracket) bool {
 		}
 	}
 	return false
+}
+
+// AttachPoolMatches rebuilds each pool's Matches from the stored pool results,
+// the ONE source both workbook exports draw the Pool Matches grid from.
+// pools.csv (Store.LoadPools) records pool membership only, so the grid must
+// never rely on a Matches slice an earlier call happened to leave in the
+// store's cache: that one is gone after a restart, which would leave the
+// sheet without a single match block. Any Matches already on pools is replaced.
+//
+// Because an unresolvable match is SKIPPED (see below), pool.Matches can be
+// non-contiguous relative to the stored "<Pool>-<suffix>" IDs, so this returns
+// poolOrdinals: poolName -> the original numeric suffix of each KEPT match, in
+// grid order. The results overlays use poolOrdinals[pool][i] to rebuild the
+// result ID for grid row i, rather than assuming row i == suffix i. Tiebreak/
+// daihyosen results (non-numeric suffix, e.g. "Pool A-DH-0") are skipped.
+//
+// Each side is resolved to its pool Player by the authoritative SideAID/SideBID
+// UUID ONLY (operator ruling bc-pnum): a pool-matches.csv row and a pools.csv
+// Player both carry an id field, so there is no name fallback. A row with no
+// id for a side, or an id this pool's own roster does not carry, resolves to
+// no Player at all and the match is skipped below.
+func AttachPoolMatches(pools []helper.Pool, matchResults []state.MatchResult) map[string][]int {
+	poolOrdinals := make(map[string][]int, len(pools))
+	for pi := range pools {
+		p := &pools[pi]
+		prefix := p.PoolName + "-"
+
+		type idxRes struct {
+			idx int
+			mr  state.MatchResult
+		}
+		var mine []idxRes
+		for _, mr := range matchResults {
+			if !strings.HasPrefix(mr.ID, prefix) {
+				continue
+			}
+			n, err := strconv.Atoi(mr.ID[len(prefix):])
+			if err != nil {
+				continue // tiebreak/daihyosen or malformed suffix
+			}
+			mine = append(mine, idxRes{n, mr})
+		}
+		sort.Slice(mine, func(i, j int) bool { return mine[i].idx < mine[j].idx })
+
+		byID := make(map[string]*helper.Player, len(p.Players))
+		for i := range p.Players {
+			pl := &p.Players[i]
+			if pl.ID != "" {
+				byID[pl.ID] = pl
+			}
+		}
+		// ID-only (operator ruling bc-pnum): the side UUID (SideAID/SideBID
+		// from pool-matches.csv) is the only resolution path. Names are not
+		// unique within a competition (same name, different dojo is
+		// allowed), so a name-only lookup could attach the wrong Player and
+		// mislabel the grid; an empty or foreign id simply resolves to nil.
+		resolve := func(id string) *helper.Player {
+			if id == "" {
+				return nil
+			}
+			return byID[id]
+		}
+
+		p.Matches = make([]helper.Match, 0, len(mine))
+		ords := make([]int, 0, len(mine))
+		for _, ir := range mine {
+			sideA := resolve(ir.mr.SideAID)
+			sideB := resolve(ir.mr.SideBID)
+			// A side that resolves to no pool member (e.g. a participant removed
+			// after the match was recorded, or partially-written state) would be a
+			// nil *Player, which PrintPoolMatches dereferences unconditionally and
+			// panics on. Skip the unresolvable match: the skeleton row is simply left
+			// without an overlaid score, consistent with the frozen-snapshot semantics.
+			// The skip is why we track the original ordinal separately below.
+			if sideA == nil || sideB == nil {
+				continue
+			}
+			p.Matches = append(p.Matches, helper.Match{SideA: sideA, SideB: sideB})
+			ords = append(ords, ir.idx)
+		}
+		poolOrdinals[p.PoolName] = ords
+	}
+	return poolOrdinals
 }

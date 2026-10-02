@@ -5,7 +5,7 @@
 // bronze/decider match", reused here rather than re-derived so the exported
 // blank template's bronze block agrees with the same predicate every other
 // surface (settings screen, awards page) already uses.
-import { effectiveTwoThirdPlaces } from './competition_shape.jsx';
+import { effectiveTwoThirdPlaces, resolveFormat, FORMAT_KNOCKOUT, FORMAT_LEAGUE } from './competition_shape.jsx';
 
 const { useState: useStateA } = React;
 
@@ -23,13 +23,16 @@ const csvField = (s) => {
 // buildXlsxBody constructs the URLSearchParams body for POST /create from a
 // competition config object (cfg) and a player list. Extracted for testing.
 // cfg fields used: format, poolSize, poolWinners, poolSizeMode, courts,
-//   teamSize, name, numberPrefix, roundRobin, poolFormat, withZekkenName,
-//   engi, and (via effectiveTwoThirdPlaces) twoThirdPlaces, naginata,
-//   leagueTwoThirdPlaces.
+//   teamSize, teamMatchType, name, numberPrefix, roundRobin, poolFormat,
+//   withZekkenName, engi, and (via effectiveTwoThirdPlaces) twoThirdPlaces,
+//   naginata, leagueTwoThirdPlaces.
 // cName is the display name for the competition (used as titlePrefix).
 export function buildXlsxBody(cfg, cName, players) {
-  const isKnockout = cfg.format === "knockout";
-  const singlePool = cfg.format === "league";
+  // A stored "" format is a knockout (resolveFormat): read as pools, a
+  // knockout's template came back as a pool draw.
+  const format = resolveFormat(cfg.format);
+  const isKnockout = format === FORMAT_KNOCKOUT;
+  const singlePool = format === FORMAT_LEAGUE;
   const playersPerPool = singlePool ? players.length : (cfg.poolSize || players.length);
 
   // /create requires 1 <= winnersPerPool < playersPerPool for pools.
@@ -77,12 +80,20 @@ export function buildXlsxBody(cfg, cName, players) {
     determined: "on", // preserve the registered participant order (no shuffle)
   });
   if (singlePool || cfg.roundRobin) body.set("roundRobin", "on");
+  // A league's template is one pool and no knockout; /create cannot tell that
+  // from a pools competition that formed a single pool and still plays a final.
+  if (singlePool) body.set("format", FORMAT_LEAGUE);
   // Honour the competition's pool format: "partial" → path-graph match set
   // (the generator otherwise defaults to full round-robin). Mirrors the
   // engine's PoolFormat switch (internal/engine/pools.go).
   if (cfg.poolFormat === "partial") body.set("poolFormat", "partial");
   if (effectiveZekken) body.set("withZekkenName", "on");
   if (cfg.engi) body.set("engi", "on");
+  // A kachinuki competition (state.Competition.IsKachinuki: teams of two or
+  // more) says so; the server then sizes every team block for the most bouts
+  // an encounter can take and adds the Kachinuki Detail sheet. teamMatches
+  // stays the team size.
+  if (cfg.teamMatchType === "kachinuki" && Number(cfg.teamSize) >= 2) body.set("teamMatchType", "kachinuki");
   // thirdPlaceMatch: the blank workbook needs a bronze (3rd-place) block
   // exactly when this competition does NOT award joint 3rd places -- i.e.
   // RequiresSingleThirdPlace, the exact negation of effectiveTwoThirdPlaces

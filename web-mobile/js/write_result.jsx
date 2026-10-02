@@ -1,13 +1,13 @@
 // Owner of ONE question: did a score write actually land, and if not, is the
 // state the operator is looking at ever going to become true?
 //
-// EVERY consumer imports this module directly -- api_client.jsx, the two
-// scoring editors (admin_scoring_team, admin_scoring_individual),
-// admin_scoring_shared.jsx, admin_shiaijo.jsx, admin.jsx (the single
-// editMatchScore chokepoint every score-editor host routes through), the
-// schedule score editor and viewer_match.jsx. Nothing reads these names off
-// `window`: the mirrors api_client used to publish are gone, so there is
-// exactly one binding per name and no second spelling to drift.
+// EVERY consumer imports this module directly -- api_client.jsx, the three
+// scoring editors (admin_scoring_team, admin_scoring_individual,
+// admin_scoring_engi), admin_scoring_shared.jsx, admin_shiaijo.jsx, admin.jsx
+// (the single editMatchScore chokepoint every score-editor host routes
+// through), the schedule score editor and viewer_match.jsx. Nothing reads
+// these names off `window`: the mirrors api_client used to publish are gone,
+// so there is exactly one binding per name and no second spelling to drift.
 //
 // This is a leaf on purpose (no imports, no window reads), and it is
 // import-only: it has no <script type="module"> tag of its own and must never
@@ -84,6 +84,49 @@ export function writeWasSuperseded(res) {
     return !!res && res.applied === false;
 }
 
+// writeWasRefused: did a score editor's write come back REFUSED, stored
+// nowhere and never going to be? Asked on what the host handed back, so a
+// thrown refusal counts as well: every host catches it, reports it (a toast,
+// an alert) and hands the editor nothing. Two shapes:
+//   - nothing handed back: the host already reported a refusal (a busy
+//     shiaijo, a finished match, a barred competitor, a validation error).
+//   - applied:false: superseded or clock_skew (writeWasSuperseded).
+// A QUEUED write is not refused: it lands on reconnect.
+//
+// The editors ask it to DISARM a two-tap commit (Finish, Finish + Start Next,
+// End match, the engi Save) whose write was refused: left armed, one more tap
+// re-sent the very write just refused, and for a superseded one that tap
+// would overwrite the newer result. A queued commit stays armed, since
+// sending it again is what the pending banner's Retry now does anyway.
+//
+// One host shape reads as refused without being one: the court console's and
+// the Scores tab's Finish + Start Next return nothing once the finish has
+// landed and the next match is started. Disarming there costs nothing, since
+// the editor has moved on to the next match.
+export function writeWasRefused(res) {
+    return !res || writeWasSuperseded(res);
+}
+
+// writeRetryable: can sending this write again make it land? The ONE owner of
+// whether a score editor offers Retry. Only a QUEUED write can: it never
+// reached the server (offline, a timeout, a 5xx), the queue keeps sending it,
+// and Retry only sends it sooner. Nothing else a write can come back with is
+// fixed by sending the same write again:
+//   - superseded: a newer result is stored, and a re-send, stamped now, would
+//     overwrite it (SUPERSEDED_ADVICE).
+//   - clock_skew: the client has already resynced and re-sent it; entering
+//     the result again is the remedy (CLOCK_SKEW_ADVICE), not a replay.
+//   - any other refusal (the match has finished, the organiser alone decides
+//     the rep bout, a competitor is barred, the shiaijo is busy, a validation
+//     error): the server answers it the same way until something else
+//     changes, and then the operator enters the result again.
+// So an editor keeps the write to re-send only for a queued one, and the
+// not-saved banner (always a refusal: notLandedBanner, terminalFailureBanner)
+// never carries Retry.
+export function writeRetryable(res) {
+    return !!res && res.queued === true;
+}
+
 // CLOCK_SKEW_REASON_TEXT / CLOCK_SKEW_ADVICE: the copy for the OTHER
 // not-landed verdict (bc-cse). The server refuses a write whose modifiedAt is
 // implausibly far in its own future with 200 {"applied": false, "reason":
@@ -154,6 +197,67 @@ export function notLandedBanner(res) {
         return { reason: SUPERSEDED_REASON, advice: SUPERSEDED_ADVICE };
     }
     return null;
+}
+
+// terminalFailureBanner: the banner a score editor raises for a queued write
+// that failed for good (subscribeTerminalWriteFailed), in the same shape as
+// notLandedBanner's, plus `sentence` when the refusal is a whole sentence that
+// says what to do (api_client.jsx _replayRefusal). One owner, so no editor drops the mark.
+export function terminalFailureBanner(info) {
+    return {
+        reason: info.reason || `save rejected (${info.status || 'error'})`,
+        advice: info.advice,
+        ...(info.sentence ? { sentence: true } : {}),
+    };
+}
+
+// notSavedText: the ONE line every not-saved banner shows for a
+// { reason, advice, sentence } pair: "Not saved: <reason>. <advice>", with the
+// default advice to re-enter when none is given. A refusal that is a whole
+// sentence (`sentence`: the server's own words, or the busy-shiaijo copy) is
+// shown as it is after "Not saved:": it ends its own
+// sentence and says what to do, so a full stop and advice after it doubled the
+// stop and could contradict it ("Re-enter the result" after "Check the scores
+// and finish again").
+export const NOT_SAVED_ADVICE = "Re-enter the result and submit again.";
+export function notSavedText(failed) {
+    if (failed.sentence) return `Not saved: ${failed.reason}`;
+    return `Not saved: ${failed.reason}. ${failed.advice || NOT_SAVED_ADVICE}`;
+}
+
+
+// dependentActionBlocked: the sentence for a queued write that was only a
+// PRE-SAVE gating a second action, the team editor's Add/Remove
+// representative bout (saveRunningSheet). notLandedBanner rightly says
+// nothing about a queued write at the three explicit-tap sites it was written
+// for (Start match in both editors, Record bout in the team one), where the
+// editor's queued/offline surface reports it. Here that surface says the
+// scores did not send, not why the Add or Remove tap did nothing.
+//
+// A refusal (applied:false) is left to notLandedBanner: the caller already
+// shows its banner, so a second message would only repeat it.
+export function dependentActionBlocked(res) {
+    if (writeRetryable(res)) {
+        return "Couldn't save the current scores (offline or server busy). Try again once the connection is back.";
+    }
+    return null;
+}
+
+// FETCH_TIMEOUT_MS: how long a bounded request is waited on before it is
+// reported as not answered. api_client.jsx gives it to every fetchWithTimeout
+// and to _fetchJson (headers AND body there), and the team editor gives it to
+// the save it makes before a representative-bout add or remove, so the hold
+// that save runs under ends too (admin_scoring_team.jsx runRepBoutChange).
+export const FETCH_TIMEOUT_MS = 12000;
+
+// What a representative-bout add or remove leaves undone when it does not
+// land, and the sentence for one the server never answered, or answered with
+// a body that never completed. The team editor shows it as it is, whichever
+// half (the save before the request, or the request) went unanswered.
+export const REP_BOUT_NOT_ADDED = 'The representative bout was not added';
+export const REP_BOUT_NOT_REMOVED = 'The representative bout was not removed';
+export function noAnswerSentence(notDone) {
+    return `${notDone}: the server did not answer. Check the connection and try again.`;
 }
 
 

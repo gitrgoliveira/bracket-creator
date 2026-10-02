@@ -26,7 +26,7 @@ const { useState, useEffect, useRef } = React;
 import {
   barredNote, awaitedDefaultWin, defaultWinDecisionBody, defaultWinActionLabel, bothBarredDrawAction,
 } from './ineligible_match.jsx';
-import { notLandedBanner, notSavedText, writeDidNotLand } from './write_result.jsx';
+import { notLandedBanner, notSavedText, writeDidNotLand, QUEUED_NOTICE } from './write_result.jsx';
 
 // No onDone/refresh plumbing here on purpose: recording the default win, or
 // reinstating the competitor, is an ordinary /decision or /reinstate write,
@@ -76,7 +76,7 @@ export function BarredMatchNotice({ match, password, onDone }) {
         return;
       }
       if (writeDidNotLand(res)) {
-        setErr("Not saved yet: queued, and will be recorded once the connection returns.");
+        setErr(QUEUED_NOTICE);
       }
       setLanded(true);
       if (typeof onDone === "function") onDone(res);

@@ -640,6 +640,8 @@ function _isAllowedTerminalRequest(method, url) {
 //   'auth_required' parked pending re-authentication; still queued
 //   'storage_full'  the queue could not be persisted; a reload would lose it
 //   'discarded'     dropped wholesale on credential revocation (password reset)
+//   'sent'          GOOD news (bc-offl): held finished results landed in one
+//                   flush; the one kind App renders as a success toast
 // ---------------------------------------------------------------------------
 const _queueAlertListeners = new Set();
 const _pendingQueueAlerts = [];
@@ -1024,10 +1026,64 @@ function _hasServerErroringQueued() {
  * and neither re-auth nor a server retry can make progress until it is fixed.
  */
 function _recomputeSyncStatus() {
-    if (_offlineFlag && _writeQueue.size > 0) { _setSyncStatus('offline'); return; }
-    if (_hasAuthBlockedQueued()) { _setSyncStatus('auth-required'); return; }
-    if (_hasServerErroringQueued()) { _setSyncStatus('server-error'); return; }
-    _setSyncStatus((_inflightRunning > 0 || _writeQueue.size > 0 || _pendingEdits.size > 0) ? 'syncing' : 'synced');
+    _setSyncStatus(_deriveSyncStatus());
+    _publishUnsentWrites();
+}
+function _deriveSyncStatus() {
+    if (_offlineFlag && _writeQueue.size > 0) return 'offline';
+    if (_hasAuthBlockedQueued()) return 'auth-required';
+    if (_hasServerErroringQueued()) return 'server-error';
+    return (_inflightRunning > 0 || _writeQueue.size > 0 || _pendingEdits.size > 0) ? 'syncing' : 'synced';
+}
+
+// bc-offl: the held-writes COUNT channel, for the admin topbar's indicator
+// (admin_shell.jsx), which is mounted on every admin page and so still shows a
+// held result after the editor that held it has closed. Separate from
+// subscribeSyncStatus on purpose: that one is status-only and deduped by
+// status, and its transition sequences are pinned (sync_queue.test.jsx).
+//
+// Published from _recomputeSyncStatus, which every queue mutation reaches
+// (enqueue, the flush pass, rehydrate, the storage-event take-up, the page-hide
+// keep, re-auth, park, clear), and ONLY when a count changed: a score editor
+// recomputes on every tap (API.notePendingEdit), and an undeduped emit would
+// fire per tap. Not from _persistQueue, which a rehydrate that dropped nothing
+// never calls; subscribing also replays the queue as it is NOW, so a reload
+// with a held queue shows its count at once.
+//
+// Scope: THIS tab's queue, which includes entries taken up from another tab's
+// stored outbox (_onStoredQueueChanged). An edit still inside an editor's
+// autosave window is not a held write and is not counted (the editor's own
+// pill shows it as Syncing...), so the pill and the topbar can disagree for
+// that moment; that is correct, not a drift to fix.
+const _unsentListeners = new Set();
+let _lastUnsent = { total: 0, terminal: 0, authBlocked: 0 };
+function _unsentCounts() {
+    let total = 0, terminal = 0, authBlocked = 0;
+    for (const d of _writeQueue.values()) {
+        if (!d) continue;
+        total++;
+        if (d.terminal) terminal++;
+        if (d.authBlocked) authBlocked++;
+    }
+    return { total, terminal, authBlocked };
+}
+function _publishUnsentWrites() {
+    const next = _unsentCounts();
+    if (next.total === _lastUnsent.total && next.terminal === _lastUnsent.terminal
+        && next.authBlocked === _lastUnsent.authBlocked) return;
+    _lastUnsent = next;
+    for (const fn of _unsentListeners) {
+        try { fn({ ...next }); } catch (_e) { /* swallow */ }
+    }
+}
+/**
+ * Subscribe to the held-writes count ({total, terminal, authBlocked}). Replays
+ * the current count on subscribe. Returns an unsubscribe function.
+ */
+function subscribeUnsentWrites(fn) {
+    _unsentListeners.add(fn);
+    try { fn(_unsentCounts()); } catch (_e) { /* swallow */ }
+    return () => _unsentListeners.delete(fn);
 }
 
 /**
@@ -1167,6 +1223,12 @@ async function _flushQueue() {
     // carried only so a single-drop alert can still name its match.
     let supersededThisPass = 0;
     let lastSupersededMatch = null;
+    // bc-offl: HELD finished results that landed in this flush, counted the
+    // same way and announced once at the end ('sent'), so the operator who saw
+    // them held is told they arrived. A terminal write enters the queue only
+    // when its direct send failed, so an ordinary online write never reaches
+    // this count and never raises the toast (operator decision 2026-09-27).
+    let sentThisPass = 0;
     try {
         do {
             _flushRequested = false;
@@ -1255,15 +1317,12 @@ async function _flushQueue() {
                             // that means to the operator differs, so they are announced
                             // differently.
                             //
-                            // 'decision' is DEFENCE IN DEPTH and is inert today, the same
-                            // reason the server maps the condition on that endpoint at
-                            // all: RecordDecisionTx builds its MatchResult with no
-                            // ModifiedAt, so the write takes ApplyByTimestamp's unstamped
-                            // bypass and this body can never be produced. Without the
-                            // kind here the arm would not parse, so a future writer that
-                            // stamps a decision would have the drop swallowed silently -
-                            // the entry deleted as delivered, nothing said - which is the
-                            // exact failure bc-lww1 was.
+                            // 'decision' is live: /decision carries the client's stamp
+                            // (RecordDecisionTx's variadic modifiedAt), so a queued
+                            // decision can come back superseded or refused for clock
+                            // skew like a score. Without the kind here that answer
+                            // would be swallowed - the entry deleted as delivered,
+                            // nothing said - which is the exact failure bc-lww1 was.
                             if (writeWasRefusedForClock(body)) {
                                 // bc-cse: NOT a supersede. The server refused this
                                 // replay because the stamp it carries is in the
@@ -1381,6 +1440,10 @@ async function _flushQueue() {
                             }
                         }
                         if (_dequeue(key, descriptor)) {
+                            // A superseded result did not land (announced above);
+                            // a clock-skew refusal never reaches here (the arms
+                            // above continue), checked anyway as defence.
+                            if (terminal && !writeWasSuperseded(body) && !writeWasRefusedForClock(body)) sentThisPass++;
                             // A confirmed terminal score write needs no further rev
                             // tracking: drop its counter (mirrors recordScore's online
                             // completed path) so _matchRevCounters doesn't grow for the
@@ -1567,6 +1630,10 @@ async function _flushQueue() {
         // In the finally so the alert still reaches the operator if the pass
         // throws part-way: the drops it counts have already happened and their
         // queue entries are already gone, so this is the last chance to say so.
+        // 'sent' goes FIRST: the toast keeps a visible error over a later
+        // success, so a pass with both still ends on the error, and a pass with
+        // no error shows the confirmation.
+        if (sentThisPass > 0) _notifyQueueAlert({ kind: 'sent', count: sentThisPass, terminalCount: sentThisPass });
         _notifyScoreSupersededAlert(
             supersededThisPass,
             lastSupersededMatch ? lastSupersededMatch.compID : undefined,
@@ -4170,14 +4237,7 @@ const API = {
      * @returns {{total: number, terminal: number, authBlocked: number}}
      */
     unsentWrites() {
-        let total = 0, terminal = 0, authBlocked = 0;
-        for (const d of _writeQueue.values()) {
-            if (!d) continue;
-            total++;
-            if (d.terminal) terminal++;
-            if (d.authBlocked) authBlocked++;
-        }
-        return { total, terminal, authBlocked };
+        return _unsentCounts();
     },
 
     /**
@@ -4300,6 +4360,7 @@ const API = {
 
 export {
     API, subscribeSyncStatus, subscribeTerminalWriteFailed, subscribeBracketResync, subscribeQueueAlert,
+    subscribeUnsentWrites,
     enqueueRunningWrite,
     writeDidNotLand, writeWasSuperseded, writeWasRefusedForClock,
     SUPERSEDED_REASON, SUPERSEDED_ADVICE,
@@ -4315,6 +4376,9 @@ if (typeof window !== 'undefined') {
     // C2: expose sync-status pub/sub so components loaded as window.* globals
     // (admin_scoring_modal.jsx, etc.) can subscribe without an ES import.
     window.subscribeSyncStatus = subscribeSyncStatus;
+    // bc-offl: the held-writes count, for the admin topbar (admin_shell.jsx is
+    // script-tagged and cannot ES-import this script-tagged module).
+    window.subscribeUnsentWrites = subscribeUnsentWrites;
     // mp-gpra: terminal-write failure pub/sub: lets the score editor show an
     // explicit "not saved" state when a queued terminal write is permanently dropped.
     window.subscribeTerminalWriteFailed = subscribeTerminalWriteFailed;

@@ -52,7 +52,7 @@ import { SideLabel } from './side_cell.jsx';
 // Imported from the leaf, not read off `window`, for the same reason
 // admin_scoring_shared.jsx does it: write_result.jsx is import-only, and this
 // editor is ES-imported by hosts and tests that never load api_client.
-import { notLandedBanner, terminalFailureBanner, notSavedText, writeDidNotLand, writeWasRefused, writeRetryable, dependentActionBlocked, FETCH_TIMEOUT_MS, REP_BOUT_NOT_ADDED, REP_BOUT_NOT_REMOVED, noAnswerSentence } from './write_result.jsx';
+import { notLandedBanner, terminalFailureBanner, notSavedText, writeDidNotLand, writeWasRefused, writeRetryable, dependentActionBlocked, FETCH_TIMEOUT_MS, REP_BOUT_NOT_ADDED, REP_BOUT_NOT_REMOVED, noAnswerSentence, QUEUED_NOTICE } from './write_result.jsx';
 
 // boutMiddle is THE single source for a bout's centre value (vs/X/(E)/(DH));
 // the editor derives its per-bout middle from it rather than restating the
@@ -4155,7 +4155,7 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
               closure to replay, so the operator re-enters and re-taps instead. */}
           {!writeFailed && pendingWrite && (
             <div className="pending-write-banner" role="status" aria-live="polite">
-              <span>Not sent yet: this result is saved on this device and will sync when the connection returns.</span>
+              <span>{QUEUED_NOTICE}</span>
             </div>
           )}
           {writeFailed && (

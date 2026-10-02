@@ -285,6 +285,35 @@ a:hover {
   }
 }
 
+/* Held-writes indicator (bc-offl), after the connection pill: results held on
+   this device until the connection returns. Laid out like the pill, but with a
+   STATIC dot in every state: the pill beside it already pulses while the link
+   is down, and the operator ruled no second motion (DESIGN.md Principle 3).
+   Offline and a server that keeps refusing take the danger colour; "Sending..."
+   stays calm. Not interactive, so it needs no touch floor. */
+.topbar__held {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--ink-2);
+  white-space: nowrap;
+}
+
+.topbar__held__dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  background: currentColor;
+  flex: none;
+}
+
+.topbar__held--offline,
+.topbar__held--error {
+  color: var(--danger);
+}
+
 /* Sustained-outage escalation. The calm `.topbar__conn` pill covers transient
    reconnects; this full-width strip only appears once a drop outlives the
    stream's first retry, when the operator may be scoring against stale data.

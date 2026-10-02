@@ -441,7 +441,7 @@ function makeSubmitDecision({
   isComplete,       // item 7: corrections (isComplete=true) must not auto-advance
   entityLabel = 'competitors',
   // F5: optional pending-write handles threaded in from ScoreEditorModal so
-  // a queued (offline) decision write shows the sticky "Not saved yet" banner.
+  // a queued (offline) decision write shows the sticky QUEUED_NOTICE banner.
   // Not provided by TeamScoreEditorModal (which has its own pending state path).
   setPendingWrite,
   pendingFnRef,

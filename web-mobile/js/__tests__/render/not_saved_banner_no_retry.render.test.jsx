@@ -16,7 +16,7 @@ import React from 'react';
 import { render, act, fireEvent, screen } from '@testing-library/react';
 import { describe, it, expect, vi, beforeAll, afterAll, beforeEach } from 'vitest';
 import { installWindowStubs } from '../helpers/stub_globals.js';
-import { SUPERSEDED_REASON, SUPERSEDED_ADVICE } from '../../write_result.jsx';
+import { SUPERSEDED_REASON, SUPERSEDED_ADVICE, QUEUED_NOTICE } from '../../write_result.jsx';
 import { keyboardClick } from '../helpers/tap_events.js';
 
 // The terminal-failure channel api_client.jsx publishes, captured so a test
@@ -99,7 +99,7 @@ describe.each(EDITORS)('$name editor: a refused write offers no Retry', ({ match
     await keyboardClick(commit());
     expect(onSubmit).toHaveBeenCalledTimes(1);
     // Queued: the one write a re-send can land, so Retry now is offered.
-    expect(screen.getByText(/will keep retrying until it lands/)).toBeTruthy();
+    expect(screen.getByText(QUEUED_NOTICE)).toBeTruthy();
     expect(retryButton()?.textContent).toBe('Retry now');
 
     await raiseTerminalFailure({ compID: match.compId, matchID: match.id, ...payload });
@@ -121,7 +121,7 @@ describe('individual editor: a refused decision offers no Retry', () => {
     await act(async () => { fireEvent.submit(form); });
   }
 
-  it('superseded: the not-saved banner, no "will keep retrying", no Retry', async () => {
+  it('superseded: the not-saved banner, no pending notice, no Retry', async () => {
     // What api_client.jsx's recordDecision does with a 200 {applied:false}:
     // announce it on the terminal-failure channel, then hand the body back.
     window.API.recordDecision = vi.fn(async (compID, matchID) => {
@@ -131,26 +131,26 @@ describe('individual editor: a refused decision offers no Retry', () => {
     await recordWithdrawal();
     expect(window.API.recordDecision).toHaveBeenCalledTimes(1);
     expect(screen.getByRole('alert').textContent).toContain(SUPERSEDED_REASON);
-    expect(screen.queryByText(/will keep retrying until it lands/)).toBeNull();
+    expect(screen.queryByText(QUEUED_NOTICE)).toBeNull();
     expect(retryButton()).toBeNull();
   });
 
   // The decision submit itself must not call a refusal pending: the channel
-  // above is what reports it, and without it the pending banner said "will
-  // keep retrying until it lands" over a write that never will, with Retry
-  // now beside it.
+  // above is what reports it, and without it the pending banner said the
+  // write would still be sent (QUEUED_NOTICE) over a write that never will,
+  // with Retry now beside it.
   it('refused for the clock: never the pending banner, with or without the channel', async () => {
     window.API.recordDecision = vi.fn().mockResolvedValue({ applied: false, reason: 'clock_skew' });
     await recordWithdrawal();
     expect(window.API.recordDecision).toHaveBeenCalledTimes(1);
-    expect(screen.queryByText(/will keep retrying until it lands/)).toBeNull();
+    expect(screen.queryByText(QUEUED_NOTICE)).toBeNull();
     expect(retryButton()).toBeNull();
   });
 
   it('queued: the pending banner keeps Retry now, which sends the decision again', async () => {
     window.API.recordDecision = vi.fn().mockResolvedValue({ queued: true });
     await recordWithdrawal();
-    expect(screen.getByText(/will keep retrying until it lands/)).toBeTruthy();
+    expect(screen.getByText(QUEUED_NOTICE)).toBeTruthy();
     await act(async () => { fireEvent.click(retryButton()); });
     expect(window.API.recordDecision).toHaveBeenCalledTimes(2);
   });

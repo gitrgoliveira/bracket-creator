@@ -28,7 +28,7 @@ import { useEscapeToClose, confirmDialog } from './ui.jsx';
 import { NumberedName } from './numbered_name.jsx';
 import { SideCell } from './side_cell.jsx';
 import { useArmedConfirm } from './tap_guard.jsx';
-import { terminalFailureBanner, notSavedText, writeWasRefused, writeRetryable } from './write_result.jsx';
+import { terminalFailureBanner, notSavedText, writeWasRefused, writeRetryable, QUEUED_NOTICE } from './write_result.jsx';
 
 const MAX_FLAGS = 5;
 // Valid totals: 1, 3, 5 (odd, guarantees a winner).
@@ -552,7 +552,7 @@ export function EngiScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext
             the operator may still retry manually while we hold the payload. */}
         {pendingWrite && !writeFailed && (
           <div className="pending-write-banner" role="status" aria-live="polite">
-            <span>Not saved yet: will keep retrying until it lands.</span>
+            <span>{QUEUED_NOTICE}</span>
             {pendingFnRef.current && (
               <button type="button" className="btn btn--sm btn--ghost" disabled={submitting} onClick={() => doSubmit(pendingFnRef.current)}>Retry now</button>
             )}

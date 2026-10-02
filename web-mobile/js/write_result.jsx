@@ -5,9 +5,10 @@
 // scoring editors (admin_scoring_team, admin_scoring_individual,
 // admin_scoring_engi), admin_scoring_shared.jsx, admin_shiaijo.jsx, admin.jsx
 // (the single editMatchScore chokepoint every score-editor host routes
-// through), the schedule score editor and viewer_match.jsx. Nothing reads
-// these names off `window`: the mirrors api_client used to publish are gone,
-// so there is exactly one binding per name and no second spelling to drift.
+// through), the schedule score editor, viewer_match.jsx, app.jsx (the queue
+// alerts) and admin_shell.jsx (the topbar's held-writes indicator). Nothing
+// reads these names off `window`: the mirrors api_client used to publish are
+// gone, so there is exactly one binding per name and no second spelling to drift.
 //
 // This is a leaf on purpose (no imports, no window reads), and it is
 // import-only: it has no <script type="module"> tag of its own and must never
@@ -223,6 +224,47 @@ export const NOT_SAVED_ADVICE = "Re-enter the result and submit again.";
 export function notSavedText(failed) {
     if (failed.sentence) return `Not saved: ${failed.reason}`;
     return `Not saved: ${failed.reason}. ${failed.advice || NOT_SAVED_ADVICE}`;
+}
+
+// QUEUED_NOTICE: the ONE line a score editor (and the barred-match notice)
+// shows for a write that did not reach the server and is HELD on this device:
+// it will land on its own once the connection returns. Worded as the docs word
+// it ("saved on the device and sent when the connection returns"), and never
+// "Not saved", which the docs and notSavedText reserve for a REFUSED write that
+// will never land. Three hand-typed wordings existed before this owner.
+export const QUEUED_NOTICE = 'Not sent yet: saved on this device, and sent when the connection returns.';
+
+// queuedWritesNoun: the ONE rule for how held writes are counted to the
+// operator. An operator counts results, and a held running autosave is not
+// one, so a count that includes any finished result (a completed score, a
+// decision, a lineup, a Run now winner) names only those; otherwise it names
+// score updates. Returns { n, one, noun }. `finished` qualifies a result as
+// "finished result" where the message wants it (the queue alerts, the sent
+// toast); the topbar's agreed wording says "1 result not sent" and passes false.
+export function queuedWritesNoun(terminal, total, { finished = true } = {}) {
+    const term = Number(terminal) || 0;
+    const n = term > 0 ? term : (Number(total) || 0);
+    const one = n === 1;
+    const noun = term > 0
+        ? `${finished ? 'finished ' : ''}${one ? 'result' : 'results'}`
+        : (one ? 'score update' : 'score updates');
+    return { n, one, noun };
+}
+
+// heldWritesText: the admin topbar's held-writes indicator (bc-offl), shown
+// after the connection pill on every admin page, so a result held on this
+// device stays visible after the editor that held it has closed (the court
+// console moves on to the next match by itself). `status` is the sync status
+// (subscribeSyncStatus), `counts` this tab's queue (subscribeUnsentWrites).
+// null when nothing is held, and for auth-required, whose "Sign in to save"
+// button already says it.
+export function heldWritesText(status, counts) {
+    const { total = 0, terminal = 0 } = counts || {};
+    if (!(total > 0) || status === 'auth-required') return null;
+    const { n, noun } = queuedWritesNoun(terminal, total, { finished: false });
+    if (status === 'offline') return `Offline: ${n} ${noun} not sent`;
+    if (status === 'server-error') return `Not saving: ${n} ${noun}`;
+    return `Sending ${n} ${noun}…`;
 }
 
 

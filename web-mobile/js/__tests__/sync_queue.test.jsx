@@ -2749,3 +2749,135 @@ describe('bc-sync: an autosave is stamped with the time of its edit (operator ru
         expect(body.modifiedAt).toBe(Date.now());
     });
 });
+
+// bc-offl: the held-writes count the admin topbar shows, and the 'sent'
+// confirmation when HELD results land (operator decisions 2026-09-27).
+describe('bc-offl: subscribeUnsentWrites, the held-writes count', () => {
+    const offline = () => Promise.reject(new TypeError('offline'));
+    const landed = () => Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve({}) });
+    const ZERO = { total: 0, terminal: 0, authBlocked: 0 };
+    const ONE_RESULT = { total: 1, terminal: 1, authBlocked: 0 };
+    const entry = (matchID) => [`c1:${matchID}`, {
+        compID: 'c1', matchID, payload: { status: 'completed', winner: matchID }, password: 'pw',
+        kind: 'score', terminal: true, method: 'PUT', url: `/api/competitions/c1/matches/${matchID}/score`,
+        enqueuedAt: Date.now(),
+    }];
+
+    it('replays the count, fires when a result is held, and again when it is sent', async () => {
+        mockFetch(offline);
+        const seen = [];
+        const unsub = mod.subscribeUnsentWrites((c) => seen.push(c));
+        await API.recordScore('c1', 'm1', { status: 'completed', winner: 'A' }, 'pw', null);
+        await tick(5000); // a few failed retries: none of them changes the count
+        mockFetch(landed);
+        window.dispatchEvent(new Event('online'));
+        await tick(50);
+        unsub();
+        expect(seen).toEqual([ZERO, ONE_RESULT, ZERO]);
+    });
+
+    it('does not fire on a scoring tap (API.notePendingEdit recomputes the status per tap)', () => {
+        const seen = [];
+        const unsub = mod.subscribeUnsentWrites((c) => seen.push(c));
+        const token = {};
+        API.notePendingEdit(token, true);
+        API.notePendingEdit(token, false);
+        API.notePendingEdit(token, true);
+        unsub();
+        expect(seen).toEqual([ZERO]);
+    });
+
+    it('a reload with a held result shows its count at once (the rehydrate dropped nothing)', async () => {
+        localStorage.setItem('bc_write_queue', JSON.stringify([entry('m1')]));
+        mockFetch(offline);
+        vi.resetModules();
+        const m = await import('../api_client.jsx');
+        const seen = [];
+        m.subscribeUnsentWrites((c) => seen.push(c));
+        expect(seen).toEqual([ONE_RESULT]);
+    });
+
+    it('fires when this tab takes up a write another tab stored', async () => {
+        mockFetch(offline);
+        const seen = [];
+        const unsub = mod.subscribeUnsentWrites((c) => seen.push(c));
+        window.dispatchEvent(new StorageEvent('storage', {
+            key: 'bc_write_queue', oldValue: null, newValue: JSON.stringify([entry('mB')]),
+        }));
+        await flushMicrotasks();
+        unsub();
+        expect(seen).toEqual([ZERO, ONE_RESULT]);
+    });
+});
+
+describe('bc-offl: a held result that lands is announced as sent', () => {
+    const offline = () => Promise.reject(new TypeError('offline'));
+    const answer = (body) => Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve(body) });
+
+    async function holdThenReconnect(hold, reply) {
+        const alerts = [];
+        const unsub = mod.subscribeQueueAlert((a) => alerts.push(a));
+        mockFetch(offline);
+        await hold();
+        await flushMicrotasks();
+        mockFetch(reply);
+        window.dispatchEvent(new Event('online'));
+        await tick(80);
+        unsub();
+        return alerts;
+    }
+
+    it('one held finished result: exactly one sent alert, counting it', async () => {
+        const alerts = await holdThenReconnect(
+            () => API.recordScore('c1', 'm1', { status: 'completed', winner: 'A' }, 'pw', null),
+            () => answer({}),
+        );
+        expect(alerts.filter((a) => a.kind === 'sent')).toEqual([{ kind: 'sent', count: 1, terminalCount: 1 }]);
+    });
+
+    it('two held results landing in one flush: one alert carrying both', async () => {
+        const alerts = await holdThenReconnect(async () => {
+            await API.recordScore('c1', 'm1', { status: 'completed', winner: 'A' }, 'pw', null);
+            await API.recordScore('c1', 'm2', { status: 'completed', winner: 'B' }, 'pw', null);
+        }, () => answer({}));
+        const sent = alerts.filter((a) => a.kind === 'sent');
+        expect(sent).toHaveLength(1);
+        expect(sent[0].count).toBe(2);
+    });
+
+    it('a superseded held result is not announced as sent', async () => {
+        const alerts = await holdThenReconnect(
+            () => API.recordScore('c1', 'm1', { status: 'completed', winner: 'A' }, 'pw', null),
+            () => answer({ applied: false, reason: 'superseded' }),
+        );
+        expect(alerts.filter((a) => a.kind === 'sent')).toEqual([]);
+        expect(alerts.filter((a) => a.kind === 'superseded')).toHaveLength(1);
+    });
+
+    it('a held running update alone is not a result, so nothing is announced', async () => {
+        const alerts = await holdThenReconnect(
+            () => API.recordScore('c1', 'm1', { status: 'running', ipponsA: ['M'] }, 'pw', null),
+            () => answer({}),
+        );
+        expect(alerts.filter((a) => a.kind === 'sent')).toEqual([]);
+    });
+
+    it('an ordinary online finish raises no toast (it was never held)', async () => {
+        const alerts = [];
+        const unsub = mod.subscribeQueueAlert((a) => alerts.push(a));
+        mockFetch(() => answer({}));
+        await API.recordScore('c1', 'm1', { status: 'completed', winner: 'A' }, 'pw', null);
+        await tick(50);
+        unsub();
+        expect(alerts).toEqual([]);
+    });
+
+    it('one landed and one superseded in the same flush: sent, then superseded', async () => {
+        const alerts = await holdThenReconnect(async () => {
+            await API.recordScore('c1', 'm1', { status: 'completed', winner: 'A' }, 'pw', null);
+            await API.recordScore('c1', 'm2', { status: 'completed', winner: 'B' }, 'pw', null);
+        }, (url) => (String(url).includes('/matches/m1/') ? answer({}) : answer({ applied: false, reason: 'superseded' })));
+        expect(alerts.map((a) => a.kind)).toEqual(['sent', 'superseded']);
+        expect(alerts[0].count).toBe(1);
+    });
+});

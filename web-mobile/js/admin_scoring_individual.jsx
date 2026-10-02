@@ -15,7 +15,7 @@ import { sameCompetitor } from './competitor_identity.jsx';
 // Imported from the leaf, not read off `window`: this editor is ES-imported by
 // its host and by unit tests that never load api_client, and write_result.jsx
 // is import-only so it can be reached directly (see its header).
-import { notLandedBanner, terminalFailureBanner, notSavedText, writeWasRefused, writeRetryable } from './write_result.jsx';
+import { notLandedBanner, terminalFailureBanner, notSavedText, writeWasRefused, writeRetryable, QUEUED_NOTICE } from './write_result.jsx';
 import { useArmedConfirm, acceptTap, clearTap } from './tap_guard.jsx';
 
 import {
@@ -173,7 +173,7 @@ export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, on
   const [submitting, setSubmitting] = useStateA(false);
   // F5: pending-write state: set when a terminal submit resolves { queued:true }
   // (offline / transient failure). While pending the modal stays open and shows a
-  // sticky "Not saved yet" banner. Cleared when the queue drains for this match
+  // sticky QUEUED_NOTICE ("Not sent yet") banner. Cleared when the queue drains for this match
   // (subscribeSyncStatus + hasPendingTerminalWrite). pendingFn holds the last
   // terminal submit closure so "Retry now" can re-invoke it directly.
   const [pendingWrite, setPendingWrite] = useStateA(false);
@@ -1321,7 +1321,7 @@ export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, on
               and will be retried automatically. Operator may still dismiss. */}
           {pendingWrite && !writeFailed && (
             <div className="pending-write-banner" role="status" aria-live="polite">
-              <span>Not saved yet: will keep retrying until it lands.</span>
+              <span>{QUEUED_NOTICE}</span>
               {/* Only show Retry when we hold the submit closure. On a hydrated
                   re-open it can't be restored from the serialized queue: but the
                   queue still auto-retries in the background, so no button is fine. */}

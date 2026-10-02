@@ -89,6 +89,12 @@ describe('the write-result rule is importable without running the gate', () => {
     expect(trips('window.writeDidNotLand(res)')).toBe(true);
     expect(trips('window.writeWasRefused(res)')).toBe(true);
     expect(trips('window.writeRetryable(res)')).toBe(true);
+    // The held-write copy (bc-offl): a script-tagged surface reaching for it
+    // off window would render "undefined" where the notice belongs.
+    expect(trips('<span>{window.QUEUED_NOTICE}</span>')).toBe(true);
+    expect(trips('window.heldWritesText(status, counts)')).toBe(true);
+    expect(trips('window.queuedWritesNoun(1, 1)')).toBe(true);
+    expect(trips('<span>{QUEUED_NOTICE}</span>')).toBe(false);
     expect(trips('if (writeDidNotLand(res)) return;')).toBe(false);
   });
 });

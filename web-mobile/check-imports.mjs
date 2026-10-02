@@ -53,6 +53,9 @@ const CHECK_MODULES = [
   'match_scoreboard.jsx',
   'admin_setup.jsx',
   'admin_competition_settings.jsx',
+  // bc-offl: the topbar's held-writes indicator imports its copy from
+  // write_result.jsx, the shell's one ES import.
+  'admin_shell.jsx',
 ];
 
 // ---------------------------------------------------------------------------

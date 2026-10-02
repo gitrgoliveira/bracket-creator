@@ -113,7 +113,7 @@ describe('a participant fills in a fixed-order row from the list (bc-dhas)', () 
     await act(async () => { fireEvent.focus(akaBout1()); });
     const kai = [...document.querySelectorAll('.team-sub-match__side--aka .pmf__option')].find((b) => b.textContent.includes('Kai Mori'));
     expect(kai, 'Kai Mori is offered').toBeTruthy();
-    await act(async () => { fireEvent.mouseDown(kai); });
+    await act(async () => { fireEvent.click(kai); });
     await act(async () => { await new Promise((r) => setTimeout(r, 0)); });
 
     expect(window.API.putMatchLineup).toHaveBeenCalledWith('c1', 'team-A', 'm1', { senpo: 'Kai Mori' }, '', { senpo: 'a2' });
@@ -131,7 +131,7 @@ describe('a participant fills in a fixed-order row from the list (bc-dhas)', () 
     });
     const add = document.querySelector('.team-sub-match__side--aka .lineup-name__add');
     expect(add, 'the "+ Add" row is offered').toBeTruthy();
-    await act(async () => { fireEvent.mouseDown(add); });
+    await act(async () => { fireEvent.click(add); });
     await act(async () => { await new Promise((r) => setTimeout(r, 0)); });
 
     expect(window.API.addTeamMember).toHaveBeenCalledWith('c1', 'team-A', 'Jun Oda', '');
@@ -152,7 +152,7 @@ describe('a participant names a later kachinuki bout\'s fighter (bc-dhas)', () =
     await act(async () => { fireEvent.focus(shiroNow()); });
     const slot = [...document.querySelectorAll('.pmf__option')].find((b) => b.textContent.includes('T2.3'));
     expect(slot, 'the numbered member T2.3 is offered').toBeTruthy();
-    await act(async () => { fireEvent.mouseDown(slot); });
+    await act(async () => { fireEvent.click(slot); });
     await typeName(shiroNow(), 'Ito');
 
     expect(window.API.renameTeamMember).toHaveBeenCalledWith('c1', 'team-B', 'b3', 'Ito', '');
@@ -175,7 +175,7 @@ describe('a participant names a later kachinuki bout\'s fighter (bc-dhas)', () =
     const shiroNow = () => [...document.querySelectorAll('.team-sub-match__side--shiro input')].pop();
     await act(async () => { fireEvent.focus(shiroNow()); });
     const slot = [...document.querySelectorAll('.pmf__option')].find((b) => b.textContent.includes('T2.3'));
-    await act(async () => { fireEvent.mouseDown(slot); });
+    await act(async () => { fireEvent.click(slot); });
     await typeName(shiroNow(), 'Ito');
 
     const warning = document.querySelector('[data-testid="team-editor-lineup-warning"]');
@@ -198,7 +198,7 @@ describe('a participant names a later kachinuki bout\'s fighter (bc-dhas)', () =
     const shiroNow = () => [...document.querySelectorAll('.team-sub-match__side--shiro input')].pop();
     await act(async () => { fireEvent.focus(shiroNow()); });
     const slot = [...document.querySelectorAll('.pmf__option')].find((b) => b.textContent.includes('T2.3'));
-    await act(async () => { fireEvent.mouseDown(slot); });
+    await act(async () => { fireEvent.click(slot); });
     await typeName(shiroNow(), 'Ito');
 
     const warning = document.querySelector('[data-testid="team-editor-lineup-warning"]');

@@ -142,7 +142,7 @@ describe('bc-dnst: kachinuki row beyond teamSize routes name picks off the lineu
     const freshOption = options.find((b) => b.textContent.includes('Fresh Fighter'));
     expect(freshOption, 'expected "Fresh Fighter" to be offered from the squad').toBeTruthy();
 
-    await act(async () => { fireEvent.mouseDown(freshOption); });
+    await act(async () => { fireEvent.click(freshOption); });
 
     expect(putMatchLineup).not.toHaveBeenCalled();
 
@@ -170,7 +170,7 @@ describe('bc-dnst: kachinuki row beyond teamSize routes name picks off the lineu
     const blankOption = Array.from(document.querySelectorAll('.team-sub-match__side--aka .pmf__option'))
       .find((b) => b.textContent.includes('T5.7'));
     expect(blankOption, 'expected the blank slot T5.7 to be offered').toBeTruthy();
-    await act(async () => { fireEvent.mouseDown(blankOption); });
+    await act(async () => { fireEvent.click(blankOption); });
     // The current bout's AKA side is the one that renders an input (fought
     // rows are read-only), so locate it from the input, not the first row.
     const akaSide = () => document.querySelector('.team-sub-match__side--aka input').closest('.team-sub-match__side--aka');

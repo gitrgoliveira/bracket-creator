@@ -899,8 +899,10 @@ function LineupNameInput({ value, roster, onSelect, disabled, ariaLabel, color, 
 
   // On click-outside: commit a typed but un-submitted name rather than
   // discarding it. Without this, tabbing quickly between slots loses names.
-  // Note: option onMouseDown uses preventDefault so the outside mousedown only
-  // fires when clicking a genuinely external target (q is already "" after commit).
+  // Note: option onMouseDown uses preventDefault so focus stays in the input;
+  // the option itself commits on CLICK (bc-flst), so the whole tap lands on
+  // the option before the list closes. The outside mousedown only fires when
+  // clicking a genuinely external target (q is already "" after commit).
   window.useClickOutside(ref, () => {
     if (q) {
       skipBlurRef.current = true;
@@ -963,6 +965,12 @@ function LineupNameInput({ value, roster, onSelect, disabled, ariaLabel, color, 
           value={open ? query : (value || "")}
           onChange={(e) => { setQuery(e.target.value); setOpen(true); setActive(-1); }}
           onFocus={() => { setOpen(true); setQuery(""); setActive(-1); }}
+          // A tap on a box that still has focus (after a pick, the options'
+          // preventDefault kept it there) fires no focus event, so the tap
+          // itself reopens the list (bc-flst). It only ever opens, never
+          // toggles closed, so the click that follows the first focus is a
+          // no-op.
+          onClick={() => { if (!open && !disabled) { setOpen(true); setQuery(""); setActive(-1); } }}
           onKeyDown={onKeyDown}
           onBlur={(e) => {
             // Do not close if focus moved to something inside the wrapper
@@ -980,7 +988,7 @@ function LineupNameInput({ value, roster, onSelect, disabled, ariaLabel, color, 
         />
         {(value || clearable) && !disabled && (
           <button type="button" className="lineup-name__clear" title="Clear player" aria-label="Clear player"
-            onMouseDown={(e) => { e.preventDefault(); commit(""); }}>×</button>
+            onMouseDown={(e) => e.preventDefault()} onClick={() => commit("")}>×</button>
         )}
       </div>
       {open && optionCount > 0 && (
@@ -988,7 +996,7 @@ function LineupNameInput({ value, roster, onSelect, disabled, ariaLabel, color, 
           {matches.map((entry, i) => (
             <button type="button" key={entry.isObject ? (entry.raw?.id || entry.raw?.index) : entry.name}
               className={`pmf__option ${i === active ? "pmf__option--active" : ""}`}
-              onMouseDown={(e) => { e.preventDefault(); commitEntry(entry); }}>
+              onMouseDown={(e) => e.preventDefault()} onClick={() => commitEntry(entry)}>
               {entry.isObject ? (
                 <>
                   <span className="pmf__opt-label">{entry.label}</span>
@@ -1002,7 +1010,7 @@ function LineupNameInput({ value, roster, onSelect, disabled, ariaLabel, color, 
           {canAddNew && (
             <button type="button"
               className={`pmf__option lineup-name__add ${active === matches.length ? "pmf__option--active" : ""}`}
-              onMouseDown={(e) => { e.preventDefault(); commit(q); }}>
+              onMouseDown={(e) => e.preventDefault()} onClick={() => commit(q)}>
               <span className="pmf__opt-name">+ Add “{q}”</span>
             </button>
           )}

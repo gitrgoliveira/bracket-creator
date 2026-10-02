@@ -3554,7 +3554,12 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
                               // case; only this host was missed (bc-dnst).
                               clearable={!!rs.memberId}
                               ariaLabel={`${posLabel} ${rs.label} player`}
-                              onSelect={(name, member) => rs.onSelectName(name, member)}
+                              // A pick closes the list, which drops over this
+                              // side's ippon buttons, so a double tap's second
+                              // tap would score the ippon it uncovered (bc-flst).
+                              // Stamp the bout list's bounce ref, as opening a
+                              // fought bout does (bc-kbrw).
+                              onSelect={(name, member) => { stampTap(boutListTapRef); rs.onSelectName(name, member); }}
                             />
                           ) : (
                             /* The read-only branch, which the DAIHYOSEN row

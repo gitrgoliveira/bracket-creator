@@ -11,7 +11,7 @@
 import React from 'react';
 import { act, screen } from '@testing-library/react';
 import { describe, it, expect, vi, beforeAll, afterAll, afterEach } from 'vitest';
-import { installWindowStubs } from '../helpers/stub_globals.js';
+import { mountApp, settle } from '../helpers/mount_app.js';
 
 function ProbeViewerHome(props) {
   return <div data-testid="viewer-home">{props.tournament && props.tournament.name}</div>;
@@ -33,7 +33,6 @@ const STUBBED_GLOBALS = {
   },
 };
 
-const settle = () => act(async () => { await new Promise((r) => setTimeout(r, 20)); });
 const shown = () => screen.getByTestId('viewer-home').textContent;
 // The reload is jittered; with Math.random at 0 it runs at once.
 const status = async (s) => {
@@ -54,26 +53,14 @@ const serverChanges = () => {
   return name;
 };
 
-let restoreGlobals;
-let root;
-const startPath = window.location.pathname;
+let unmount;
 
 beforeAll(async () => {
-  restoreGlobals = installWindowStubs(STUBBED_GLOBALS);
-  root = document.createElement('div');
-  root.id = 'root';
-  document.body.appendChild(root);
-  window.history.pushState(null, '', '/');
-  await act(async () => { await import('../../app.jsx'); });
-  await settle();
+  ({ unmount } = await mountApp({ path: '/', globals: STUBBED_GLOBALS }));
   await status('open');
 });
 
-afterAll(() => {
-  restoreGlobals();
-  root.remove();
-  window.history.pushState(null, '', startPath);
-});
+afterAll(() => { unmount(); });
 
 afterEach(() => { window.API.reconnectEvents.mockClear(); });
 
@@ -116,5 +103,38 @@ describe('reloading after the event stream was lost', () => {
 
     await status('open');
     expect(shown()).toBe(name);
+  });
+});
+
+describe('coming back to the tab', () => {
+  const resume = async () => {
+    const visible = vi.spyOn(document, 'hidden', 'get').mockReturnValue(false);
+    try {
+      await act(async () => { document.dispatchEvent(new Event('visibilitychange')); });
+      await settle();
+    } finally {
+      visible.mockRestore();
+    }
+  };
+
+  it('a tab whose stream held refreshes at once', async () => {
+    const name = serverChanges();
+    await resume();
+    expect(window.API.reconnectEvents).toHaveBeenCalledTimes(1);
+    expect(shown()).toBe(name);
+  });
+
+  it('a tab whose stream was lost loads once, when the stream reopens', async () => {
+    const name = serverChanges();
+    await status('error');
+    const before = window.API.fetchTournament.mock.calls.length;
+
+    await resume();
+    expect(window.API.reconnectEvents).toHaveBeenCalledTimes(1);
+    expect(window.API.fetchTournament.mock.calls.length, 'nothing loads before the stream is back').toBe(before);
+
+    await status('open');
+    expect(shown()).toBe(name);
+    expect(window.API.fetchTournament.mock.calls.length, 'one load for the resume and the reopen together').toBe(before + 1);
   });
 });

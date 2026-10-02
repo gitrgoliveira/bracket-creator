@@ -262,16 +262,9 @@ func writeKachinukiMatchSection(f *excelize.File, sheet string, styles matchStyl
 	bouts := match.sectionBouts()
 	row := startRow
 
-	// --- Title row, merged across the block like a match block's title ---
-	titleStart, titleEnd := cols.startColName+strconv.Itoa(row), cols.endColName+strconv.Itoa(row)
-	handleExcelError("SetCellStyle", f.SetCellStyle(sheet, titleStart, titleEnd, styles.poolHeader))
-	handleExcelError("MergeCell", f.MergeCell(sheet, titleStart, titleEnd))
-	handleExcelError("SetCellValue", f.SetCellValue(sheet, titleStart, fmt.Sprintf("%s (Kachinuki)", match.Label)))
-
-	// --- White | vs | Red, then each side's team under its colour ---
-	row++
-	matchHeaderWithStyles(f, sheet, cols.startColName, row, cols.middleColName, cols.endColName, styles.redHeader, styles.text, styles.whiteHeader, false)
-	row++
+	// --- A match block's heading (title, White | vs | Red), then each side's
+	// team under its colour ---
+	row = printMatchBlockHeading(f, sheet, cols, styles, row, fmt.Sprintf("%s (Kachinuki)", match.Label), false)
 	leftTeam, rightTeam := WhiteLeft(match.SideATeam, match.SideBTeam)
 	handleExcelError("SetCellStyle", f.SetCellStyle(sheet, cols.startColName+strconv.Itoa(row), cols.endColName+strconv.Itoa(row), styles.text))
 	handleExcelError("SetCellValue", f.SetCellValue(sheet, cols.startColName+strconv.Itoa(row), leftTeam))
@@ -289,9 +282,9 @@ func writeKachinukiMatchSection(f *excelize.File, sheet string, styles matchStyl
 }
 
 // writeKachinukiBoutRow fills one numbered bout row, Shiro left and Aka right
-// through WhiteLeft like every other side-ordered pair in this workbook. A
-// blank row (no fighter, score or mark) is left as printNumberedBoutRows drew
-// it.
+// through WhiteLeft like every other side-ordered pair in this workbook. Its
+// name cells always carry the bout's number, so a blank row (no fighter, score
+// or mark) reads exactly as printNumberedBoutRows numbered it.
 func writeKachinukiBoutRow(f *excelize.File, sheet string, cols matchColumnNames, bout KachinukiBout, row int) {
 	rowStr := strconv.Itoa(row)
 

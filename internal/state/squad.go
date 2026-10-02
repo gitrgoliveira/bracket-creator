@@ -372,22 +372,24 @@ func (s *Store) pruneOrphanedTeamMembersLocked(compID string, comp *Competition,
 // (seeds.go): LoadParticipants would re-acquire the lock this function's
 // caller already holds and deadlock a non-reentrant mutex. WithSeeds is off
 // because the seed merge is irrelevant to an id comparison and would read a
-// second file.
-func (s *Store) requireTeamParticipantLocked(compID, teamID string) error {
-	withZekken, _, err := s.withZekkenNameLocked(compID)
+// second file. The competition record it read is returned, as
+// withZekkenNameLocked returns it, so a caller judging its status reads
+// config.md once.
+func (s *Store) requireTeamParticipantLocked(compID, teamID string) (*Competition, error) {
+	withZekken, comp, err := s.withZekkenNameLocked(compID)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	players, err := s.loadParticipantsNoLock(compID, withZekken, LoadParticipantsOpts{WithSeeds: false})
 	if err != nil {
-		return err
+		return nil, err
 	}
 	for i := range players {
 		if players[i].ID == teamID {
-			return nil
+			return comp, nil
 		}
 	}
-	return fmt.Errorf("%w: %q", ErrTeamNotFound, teamID)
+	return nil, fmt.Errorf("%w: %q", ErrTeamNotFound, teamID)
 }
 
 // squadDuplicateNameCheck runs helper.DuplicateNamesWithKeys over
@@ -475,17 +477,23 @@ func (s *Store) AddTeamMemberUpTo(compID, teamID, name string, limit int) (domai
 	return s.addTeamMember(compID, teamID, name, limit, true)
 }
 
-// requireCompetitionOpenLocked is ErrCompetitionFinished's check. The caller
+// requireCompetitionOpen is ErrCompetitionFinished's check, on a record read
+// under the competition lock.
+func requireCompetitionOpen(comp *Competition) error {
+	if comp != nil && comp.Status == CompStatusComplete {
+		return ErrCompetitionFinished
+	}
+	return nil
+}
+
+// requireCompetitionOpenLocked reads the record and checks it. The caller
 // holds the competition lock.
 func (s *Store) requireCompetitionOpenLocked(compID string) error {
 	comp, err := s.loadCompetitionLocked(compID)
 	if err != nil {
 		return err
 	}
-	if comp != nil && comp.Status == CompStatusComplete {
-		return ErrCompetitionFinished
-	}
-	return nil
+	return requireCompetitionOpen(comp)
 }
 
 func (s *Store) addTeamMember(compID, teamID, name string, limit int, participant bool) (domain.TeamMember, error) {
@@ -498,11 +506,12 @@ func (s *Store) addTeamMember(compID, teamID, name string, limit int, participan
 	mu.Lock()
 	defer mu.Unlock()
 
-	if err := s.requireTeamParticipantLocked(compID, teamID); err != nil {
+	comp, err := s.requireTeamParticipantLocked(compID, teamID)
+	if err != nil {
 		return domain.TeamMember{}, err
 	}
 	if participant {
-		if err := s.requireCompetitionOpenLocked(compID); err != nil {
+		if err := requireCompetitionOpen(comp); err != nil {
 			return domain.TeamMember{}, err
 		}
 	}

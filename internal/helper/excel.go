@@ -425,13 +425,9 @@ func printSinglePool(f *excelize.File, sheetName string, pool Pool, startCol int
 	startColName := colNames.startColName
 	middleColName := colNames.middleColName
 	endColName := colNames.endColName
-	startCell := startColName + fmt.Sprint(poolRow)
-	endCell := endColName + fmt.Sprint(poolRow)
-
-	handleExcelError("SetCellStyle", f.SetCellStyle(sheetName, startCell, endCell, styles.poolHeader))
-	handleExcelError("MergeCell", f.MergeCell(sheetName, startCell, endCell))
+	titleCell := mergeMatchBlockTitle(f, sheetName, colNames, styles, poolRow)
 	pc := poolCoords[pool.PoolName]
-	handleExcelError("SetCellFormula", f.SetCellFormula(sheetName, startCell, sheetRef(pc.sheetName, pc.cell)))
+	handleExcelError("SetCellFormula", f.SetCellFormula(sheetName, titleCell, sheetRef(pc.sheetName, pc.cell)))
 
 	playerMatchRows := make(map[*Player][]playerMatchRecord)
 
@@ -446,9 +442,7 @@ func printSinglePool(f *excelize.File, sheetName string, pool Pool, startCol int
 
 		if m < len(pool.Matches) {
 			match := pool.Matches[m]
-			startCell = startColName + fmt.Sprint(poolRow)
-			endCell = endColName + fmt.Sprint(poolRow)
-			handleExcelError("SetCellStyle", f.SetCellStyle(sheetName, startCell, endCell, styles.text))
+			handleExcelError("SetCellStyle", f.SetCellStyle(sheetName, startColName+fmt.Sprint(poolRow), endColName+fmt.Sprint(poolRow), styles.text))
 
 			if teamMatches > 0 {
 				matchHeaderWithStyles(f, sheetName, startColName, poolRow, middleColName, endColName, styles.redHeader, styles.text, styles.whiteHeader, engi)
@@ -480,17 +474,7 @@ func printSinglePool(f *excelize.File, sheetName string, pool Pool, startCol int
 			}
 
 			subMatchStartRow := poolRow + 1
-			for i := 0; i < teamMatches; i++ {
-				poolRow++
-				startCell = startColName + fmt.Sprint(poolRow)
-				endCell = endColName + fmt.Sprint(poolRow)
-				handleExcelError("SetCellStyle", f.SetCellStyle(sheetName, startCell, endCell, styles.text))
-				handleExcelError("SetCellInt", f.SetCellInt(sheetName, startCell, int64(i+1)))
-				handleExcelError("SetCellInt", f.SetCellInt(sheetName, endCell, int64(i+1)))
-
-				// Unlock scoring columns for team matches
-				handleExcelError("SetCellStyle", f.SetCellStyle(sheetName, colNames.leftVictoriesColName+fmt.Sprint(poolRow), colNames.rightVictoriesColName+fmt.Sprint(poolRow), styles.unlockedText))
-			}
+			poolRow = printNumberedBoutRows(f, sheetName, colNames, styles, poolRow, teamMatches)
 			subMatchEndRow := poolRow
 			// Spacing will be handled by the block offset
 
@@ -1502,6 +1486,28 @@ func printNumberedBoutRows(f *excelize.File, sheetName string, colNames matchCol
 	return matchRow
 }
 
+// mergeMatchBlockTitle styles and merges a match block's title row across the
+// block's columns and returns the row's first cell, which the caller fills: a
+// pool block with a formula, every other block with its title.
+func mergeMatchBlockTitle(f *excelize.File, sheetName string, colNames matchColumnNames, styles matchStyles, row int) string {
+	startCell := colNames.startColName + fmt.Sprint(row)
+	endCell := colNames.endColName + fmt.Sprint(row)
+	handleExcelError("SetCellStyle", f.SetCellStyle(sheetName, startCell, endCell, styles.poolHeader))
+	handleExcelError("MergeCell", f.MergeCell(sheetName, startCell, endCell))
+	return startCell
+}
+
+// printMatchBlockHeading writes a match block's title row and the White | vs |
+// Red row under it, and returns the row after them: the heading every
+// elimination block, the 3rd-place block and a Kachinuki Detail section share.
+func printMatchBlockHeading(f *excelize.File, sheetName string, colNames matchColumnNames, styles matchStyles, row int, title string, engi bool) int {
+	titleCell := mergeMatchBlockTitle(f, sheetName, colNames, styles, row)
+	handleExcelError("SetCellValue", f.SetCellValue(sheetName, titleCell, title))
+	row++
+	matchHeaderWithStyles(f, sheetName, colNames.startColName, row, colNames.middleColName, colNames.endColName, styles.redHeader, styles.text, styles.whiteHeader, engi)
+	return row + 1
+}
+
 // printOrdinalMarkerRows writes the "1." / "2." result-marking rows two rows
 // below matchRow and returns the Excel row carrying the "1." marker (the cell
 // a regular elimination match registers as its winner reference; the bronze
@@ -1540,18 +1546,9 @@ func PrintThirdPlaceBlock(f *excelize.File, courtStartCol, startRow, numTeamMatc
 
 	matchRow := startRow
 
-	// Header "3rd Place" (same merged style as "Round N - Match N").
-	headerStart := startColName + fmt.Sprint(matchRow)
-	headerEnd := endColName + fmt.Sprint(matchRow)
-	handleExcelError("SetCellStyle", f.SetCellStyle(sheetName, headerStart, headerEnd, styles.poolHeader))
-	handleExcelError("MergeCell", f.MergeCell(sheetName, headerStart, headerEnd))
-	handleExcelError("SetCellValue", f.SetCellValue(sheetName, headerStart, ThirdPlaceLabel))
-	matchRow++
-
+	// Header "3rd Place" (same merged style as "Round N - Match N"), then the
 	// White/Red label row.
-	matchHeaderWithStyles(f, sheetName, startColName, matchRow, middleColName, endColName,
-		styles.redHeader, styles.text, styles.whiteHeader, engi)
-	matchRow++
+	matchRow = printMatchBlockHeading(f, sheetName, colNames, styles, matchRow, ThirdPlaceLabel, engi)
 
 	// Score row: overlay writes name cells (always) and score cells (when the
 	// match is completed); only the score cells are unlocked here.
@@ -1670,24 +1667,15 @@ func printSingleEliminationMatch(f *excelize.File, sheetName string, elimination
 	startColName := colNames.startColName
 	middleColName := colNames.middleColName
 	endColName := colNames.endColName
-	startCell := startColName + fmt.Sprint(matchRow)
-	endCell := endColName + fmt.Sprint(matchRow)
-
-	handleExcelError("SetCellStyle", f.SetCellStyle(sheetName, startCell, endCell, styles.poolHeader))
-	handleExcelError("MergeCell", f.MergeCell(sheetName, startCell, endCell))
-	handleExcelError("SetCellValue", f.SetCellValue(sheetName, startCell, EliminationMatchTitle(round, int(eliminationMatch.matchNum))))
-
-	matchRow++
-	matchHeaderWithStyles(f, sheetName, startColName, matchRow, middleColName, endColName, styles.redHeader, styles.text, styles.whiteHeader, engi)
-	matchRow++
+	matchRow = printMatchBlockHeading(f, sheetName, colNames, styles, matchRow, EliminationMatchTitle(round, int(eliminationMatch.matchNum)), engi)
 
 	// entrant builds the CONCATENATE formula naming n's incoming entrant: a
 	// pool winner leaf ("Pool A-1st", or a bare seed reference for a
 	// non-pool leaf) or the winner of an earlier bracket match ("M <n>"),
 	// qualified with its sheet name when that match printed on a different
 	// sheet. Left and Right resolve identically, only the node differs.
-	startCell = startColName + fmt.Sprint(matchRow)
-	endCell = endColName + fmt.Sprint(matchRow)
+	startCell := startColName + fmt.Sprint(matchRow)
+	endCell := endColName + fmt.Sprint(matchRow)
 	entrant := func(n *Node) string {
 		if n.LeafNode && len(n.LeafVal) > 0 {
 			if IsPoolFinalistPlaceholder(n.LeafVal) {

@@ -473,10 +473,9 @@ function makeSubmitDecision({
       //
       // F5: a QUEUED decision enters pending-write mode so the banner shows in
       // the footer, and saves the submit closure so "Retry now" can re-invoke
-      // it directly. A refused one (applied:false) does neither: it will never
-      // land, and sending it again cannot change that (writeRetryable), so it
-      // is reported by the not-saved banner the terminal-failure channel
-      // raises, with no Retry beside it.
+      // it directly. A refused one (applied:false) does neither
+      // (writeRetryable): the terminal-failure channel's not-saved banner
+      // reports it, with no Retry beside it.
       if (writeDidNotLand(updated)) {
         if (setPendingWrite && writeRetryable(updated)) {
           setPendingWrite(true);

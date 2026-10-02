@@ -11,8 +11,8 @@
 // competition page, then lets a stale refetch answer after a newer one.
 import React from 'react';
 import { act } from '@testing-library/react';
-import { describe, it, expect, vi, beforeAll, afterAll } from 'vitest';
-import { installWindowStubs } from '../helpers/stub_globals.js';
+import { describe, it, expect, vi, afterAll } from 'vitest';
+import { mountApp, settle } from '../helpers/mount_app.js';
 import { readCode } from '../helpers/source.js';
 
 const page = { props: null };
@@ -46,33 +46,15 @@ const STUBBED_GLOBALS = {
   },
 };
 
-// Lets every pending fetch and zero-delay timer run inside act().
-const settle = () => act(async () => { await new Promise((r) => setTimeout(r, 20)); });
+let unmount;
 
-let restoreGlobals;
-let root;
-const startPath = window.location.pathname;
-
-beforeAll(() => {
-  restoreGlobals = installWindowStubs(STUBBED_GLOBALS);
-  root = document.createElement('div');
-  root.id = 'root';
-  document.body.appendChild(root);
-  window.history.pushState(null, '', '/competition/c1');
-});
-
-afterAll(() => {
-  restoreGlobals();
-  root.remove();
-  window.history.pushState(null, '', startPath);
-});
+afterAll(() => { unmount(); });
 
 describe('the public competition page keeps the newer live score over a stale refetch (bc-dhas)', () => {
   it('a refetch that answers late with an older running match does not replace the newer one', async () => {
     // The page opens on a copy that already holds the newer point.
     details.push(detail(300, ['M', 'K']));
-    await act(async () => { await import('../../app.jsx'); });
-    await settle();
+    ({ unmount } = await mountApp({ path: '/competition/c1', globals: STUBBED_GLOBALS }));
     expect(page.props, 'the competition page rendered').toBeTruthy();
     expect(page.props.poolMatches[0].ipponsA).toEqual(['M', 'K']);
 

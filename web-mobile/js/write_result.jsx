@@ -237,7 +237,7 @@ export function notSavedText(failed) {
 // A refusal (applied:false) is left to notLandedBanner: the caller already
 // shows its banner, so a second message would only repeat it.
 export function dependentActionBlocked(res) {
-    if (!!res && res.queued === true) {
+    if (writeRetryable(res)) {
         return "Couldn't save the current scores (offline or server busy). Try again once the connection is back.";
     }
     return null;

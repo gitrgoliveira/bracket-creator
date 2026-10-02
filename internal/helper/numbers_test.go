@@ -226,7 +226,7 @@ func TestDefaultNumberPrefix_ExhaustedSuffixesNeverPanics(t *testing.T) {
 
 	// Every candidate is now taken or ambiguous, so the function returns the
 	// LAST one it tried (the top of the width-2 zero-padded band) rather than
-	// looping forever or growing past the length cap. checkUniqueCompFields
+	// looping forever or growing past the length cap. CheckUniqueCompFields
 	// is what actually rejects this collision at save time, with its own
 	// "already used by competition ..." error naming the real conflict.
 	assert.Equal(t, "K99", got)

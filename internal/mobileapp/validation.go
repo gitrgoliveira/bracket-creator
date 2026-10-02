@@ -1011,10 +1011,6 @@ func (r *ScoreRequest) validateDecision() error {
 	return nil
 }
 
-// kachinukiDecisionMessage is the refusal refuseKachinukiDecisionForComp
-// gives, prefixed with the field that carried the value.
-const kachinukiDecisionMessage = "kachinuki-exhaustion is only for a kachinuki (winner stays on) competition, and this one is not; record the result without it"
-
 // kachinukiDecisionField names the first place a score payload carries the
 // kachinuki win decision: "decision" at match level, "subResults[i].decision"
 // on a bout row, or "" when it carries none.
@@ -1049,7 +1045,10 @@ func refuseKachinukiDecisionForComp(comp *state.Competition, r *state.MatchResul
 	if field == "" {
 		return nil
 	}
-	return &ValidationError{Field: field, Message: kachinukiDecisionMessage}
+	return &ValidationError{
+		Field:   field,
+		Message: "kachinuki-exhaustion is only for a kachinuki (winner stays on) competition, and this one is not; record the result without it",
+	}
 }
 
 // refuseKachinukiDecision is refuseKachinukiDecisionForComp for PUT /score,

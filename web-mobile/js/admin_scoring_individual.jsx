@@ -484,16 +484,15 @@ export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, on
     setSubmitting(true);
     // Clear any prior pending/failed state when the operator explicitly retries.
     if (mountedRef.current) { setPendingWrite(false); setWriteFailed(null); }
-    // A refused write disarms Finish (writeWasRefused): left armed, one tap
-    // re-sent the write just refused. A queued one stays armed.
-    const disarm = () => { if (mountedRef.current) setFinishArmed(false); };
     let res;
     try {
       res = await fn();
     } finally {
       if (mountedRef.current) setSubmitting(false);
     }
-    if (writeWasRefused(res)) disarm();
+    // A refused write disarms Finish (writeWasRefused): left armed, one tap
+    // re-sent the write just refused. A queued one stays armed.
+    if (writeWasRefused(res) && mountedRef.current) setFinishArmed(false);
     // F5: if the terminal write was only queued (offline / transient), do NOT
     // close or advance. Instead enter pending-write mode: show the sticky banner
     // and remember the submit closure so "Retry now" can re-invoke it. Only a
@@ -1309,10 +1308,8 @@ export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, on
           <ReopenFeedback ctl={reopenCtl} testIdPrefix="withdrawal-reopen" />
           {/* F5: PERMANENT-failure banner: the write was refused (superseded,
               refused for the clock, or a 4xx on a queued replay), so it never
-              saved. Non-dismissible danger state. No Retry: a refusal is never
-              fixed by sending the same write again (writeRetryable), and for a
-              superseded one a re-send would overwrite the newer result. The
-              banner says what to do instead. Takes precedence over the
+              saved. Non-dismissible danger state. No Retry (writeRetryable
+              says why); the banner says what to do instead. Takes precedence over the
               (now-cleared) pending banner. */}
           {writeFailed && (
             <div className="pending-write-banner pending-write-banner--failed" role="alert" aria-live="assertive">

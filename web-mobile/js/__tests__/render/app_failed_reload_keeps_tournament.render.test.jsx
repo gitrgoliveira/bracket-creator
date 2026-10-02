@@ -10,8 +10,8 @@
 // makes the reloads fail.
 import React from 'react';
 import { act, screen } from '@testing-library/react';
-import { describe, it, expect, vi, beforeAll, afterAll } from 'vitest';
-import { installWindowStubs } from '../helpers/stub_globals.js';
+import { describe, it, expect, vi, afterAll } from 'vitest';
+import { mountApp, settle } from '../helpers/mount_app.js';
 
 const home = { props: null };
 function ProbeViewerHome(props) {
@@ -35,9 +35,6 @@ const STUBBED_GLOBALS = {
   },
 };
 
-// Lets every pending fetch and zero-delay timer run inside act().
-const settle = () => act(async () => { await new Promise((r) => setTimeout(r, 20)); });
-
 // A server event that reloads the tournament at once (resync_required calls
 // load() with no jitter).
 const reload = async () => {
@@ -45,28 +42,13 @@ const reload = async () => {
   await settle();
 };
 
-let restoreGlobals;
-let root;
-const startPath = window.location.pathname;
+let unmount;
 
-beforeAll(() => {
-  restoreGlobals = installWindowStubs(STUBBED_GLOBALS);
-  root = document.createElement('div');
-  root.id = 'root';
-  document.body.appendChild(root);
-  window.history.pushState(null, '', '/');
-});
-
-afterAll(() => {
-  restoreGlobals();
-  root.remove();
-  window.history.pushState(null, '', startPath);
-});
+afterAll(() => { unmount(); });
 
 describe('a failed reload keeps the tournament on screen', () => {
   it('only the server\'s "no tournament" answer opens the setup screen', async () => {
-    await act(async () => { await import('../../app.jsx'); });
-    await settle();
+    ({ unmount } = await mountApp({ path: '/', globals: STUBBED_GLOBALS }));
     expect(screen.getByTestId('viewer-home')).toHaveTextContent('London Cup');
 
     // load() logs each failure; that log is expected here.

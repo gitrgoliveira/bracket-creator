@@ -561,7 +561,7 @@ func inheritOrAssignNumberPrefix(eng *engine.Engine, target *state.Competition, 
 // and the prefix ONLY when moved is true.
 //
 // when neither applies (the common already-set-prefix roster save),
-// this skips checkUniqueCompFields entirely rather than call it with two
+// this skips CheckUniqueCompFields entirely rather than call it with two
 // empty fields to no-op on -- engine.CheckUniqueCompFields's own early
 // return covers any OTHER caller that reaches it with both fields empty,
 // but skipping the call altogether here also skips paying for building the
@@ -579,35 +579,12 @@ func resolvePutNumberPrefix(eng *engine.Engine, target *state.Competition, store
 	if moved {
 		validatePrefix = target.NumberPrefix
 	}
-	err := checkUniqueCompFields(eng, validateName, validatePrefix, id)
+	err := eng.CheckUniqueCompFields(validateName, validatePrefix, id)
 	var validation *engine.ValidationError
 	if errors.As(err, &validation) {
 		return moved, nil, validation
 	}
 	return moved, err, nil
-}
-
-// checkUniqueCompFields verifies that name and prefix are both unique across all
-// competitions except excludeID. Returns a single error: nil on success, a
-// *engine.ValidationError on a detected collision (caller should 400, via
-// errors.As), or any other error when the store could not be queried (caller
-// should 500). Empty prefix is exempt from the uniqueness check, and so is an
-// empty name (bc-pnum A5(c)/D4): the start/generate-draw pre-flight passes ""
-// for the name deliberately, since it validates only the field IT introduces
-// (the derived prefix), never an inherited duplicate name the request never
-// sent -- without this exemption a blank-named record already on disk (an
-// out-of-band copy/restore) would refuse the empty-name caller's OWN
-// competition on a field it never touched.
-//
-// A thin wrapper over engine.CheckUniqueCompFields (PR #416 finding 1),
-// which owns the sibling walk under the STRICT policy (an unreadable
-// sibling is a hard failure): create and import can be retried by the
-// operator, so silently skipping a sibling and letting a genuine collision
-// through is the wrong trade. The start/generate-draw pre-flight cannot
-// defer that way; it goes through engine.EnsureNumberPrefix, which applies
-// the tolerant sibling policy itself (bc-pnum A5(d)).
-func checkUniqueCompFields(eng *engine.Engine, name, prefix, excludeID string) error {
-	return eng.CheckUniqueCompFields(name, prefix, excludeID)
 }
 
 // validateRankOverrides checks a pool-rank override request's ranks (the
@@ -1052,12 +1029,12 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 		// Atomic uniqueness-check + save under the global
 		// competition-rename mutex. Closes the AB-BA window where two
 		// concurrent POSTs (or PUT renames) to the same new name both
-		// passed checkUniqueCompFields (each seeing the other still had
+		// passed CheckUniqueCompFields (each seeing the other still had
 		// its old name) and both landed. See state.Store
 		// WithCompetitionRenameLock for full rationale.
 		//
 		// Also checks ID uniqueness: pre-fix, a POST with an existing
-		// `id` but different `name` passed checkUniqueCompFields (the
+		// `id` but different `name` passed CheckUniqueCompFields (the
 		// name was unique) and then SaveCompetitionChanged silently
 		// overwrote the existing competition. POST is documented as
 		// CREATE, so an existing ID is a 409 / 400 case.
@@ -1070,7 +1047,7 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 			if dErr := assignDefaultNumberPrefix(eng, &comp, ""); dErr != nil {
 				return dErr
 			}
-			if err := checkUniqueCompFields(eng, comp.Name, comp.NumberPrefix, ""); err != nil {
+			if err := eng.CheckUniqueCompFields(comp.Name, comp.NumberPrefix, ""); err != nil {
 				var validation *engine.ValidationError
 				if errors.As(err, &validation) {
 					validationErr = validation
@@ -1475,7 +1452,7 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 		//
 		// 1. AB-BA rename race closure: two concurrent PUTs renaming
 		//    different competitions to the same new name both passed
-		//    checkUniqueCompFields pre-fix (each seeing the other still
+		//    CheckUniqueCompFields pre-fix (each seeing the other still
 		//    had its old name) and both landed. The dedicated rename
 		//    mutex (different from any per-comp lock) serializes the
 		//    check+save for uniqueness. An earlier attempt folded the
@@ -1578,7 +1555,7 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 					// [blocker]: a write validates only what it moves -- a
 					// roster-only PUT never changes Name (see the comment
 					// above this branch), so "" is passed for validateName,
-					// the same exemption checkUniqueCompFields already gives
+					// the same exemption CheckUniqueCompFields already gives
 					// an untouched/empty field, and resolvePutNumberPrefix
 					// validates the prefix only when THIS call moved it: an
 					// already-set stored prefix -- even one ambiguous with a
@@ -1812,14 +1789,14 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 					}
 				}
 				// Existence first, uniqueness second. Pre-fix order ran
-				// checkUniqueCompFields BEFORE the transform, so a PUT to
+				// CheckUniqueCompFields BEFORE the transform, so a PUT to
 				// a missing: id whose body Name happened to collide with
 				// an existing competition would 400 "name already exists"
 				// instead of the documented 404 missing. Folding the
 				// check into the transform, after current == nil, is
 				// safe under WithCompetitionRenameLock: the rename mutex
 				// serializes rename ops, so the LoadCompetition calls on
-				// OTHER comp IDs that checkUniqueCompFields performs can't
+				// OTHER comp IDs that CheckUniqueCompFields performs can't
 				// race a concurrent rename of those comps (see store.go
 				// "Lock ordering note" on WithCompetitionRenameLock).
 				// A blank/omitted numberPrefix on a settings PUT means "keep the

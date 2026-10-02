@@ -496,7 +496,7 @@ func importCompetition(store *state.Store, eng *engine.Engine, entry ImportManif
 		// create/PUT. Checked separately from the prefix below (prefix
 		// exempted with "" here) so a name collision and a prefix collision
 		// can be told apart without parsing the error text.
-		if err := checkUniqueCompFields(eng, comp.Name, "", comp.ID); err != nil {
+		if err := eng.CheckUniqueCompFields(comp.Name, "", comp.ID); err != nil {
 			var nameErr *engine.ValidationError
 			if !errors.As(err, &nameErr) {
 				return err
@@ -511,7 +511,7 @@ func importCompetition(store *state.Store, eng *engine.Engine, entry ImportManif
 		// legitimate restore over a rule that did not exist when the data
 		// was created. The governing rule for this bead is explicit: on
 		// legacy data we ASSIGN, never reject. So a prefix collision here
-		// (exact OR ambiguous, whichever checkUniqueCompFields caught) is
+		// (exact OR ambiguous, whichever CheckUniqueCompFields caught) is
 		// healed by re-deriving a fresh prefix through the same
 		// DefaultNumberPrefixFor every other assignment path already uses
 		// (create, settings, the start/generate-draw pre-flight,
@@ -524,7 +524,7 @@ func importCompetition(store *state.Store, eng *engine.Engine, entry ImportManif
 		// keeps import consistent with every other place a prefix is
 		// (re)assigned, and covers a manifest extended with pools later).
 		var prefixErr *engine.ValidationError
-		if err := checkUniqueCompFields(eng, "", comp.NumberPrefix, comp.ID); err != nil && !errors.As(err, &prefixErr) {
+		if err := eng.CheckUniqueCompFields("", comp.NumberPrefix, comp.ID); err != nil && !errors.As(err, &prefixErr) {
 			return err
 		} else if prefixErr != nil {
 			oldPrefix := comp.NumberPrefix
@@ -548,7 +548,7 @@ func importCompetition(store *state.Store, eng *engine.Engine, entry ImportManif
 			// above, which also refuses rather than silently landing bad
 			// data.
 			var reErr *engine.ValidationError
-			if err := checkUniqueCompFields(eng, "", newPrefix, comp.ID); err != nil && !errors.As(err, &reErr) {
+			if err := eng.CheckUniqueCompFields("", newPrefix, comp.ID); err != nil && !errors.As(err, &reErr) {
 				return err
 			} else if reErr != nil {
 				res.Error = fmt.Sprintf("number prefix %q collided on restore and no replacement prefix could be derived: %v", oldPrefix, reErr)

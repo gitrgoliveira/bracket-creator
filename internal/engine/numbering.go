@@ -432,8 +432,10 @@ func checkPrefixAgainstSiblings(siblings []*state.Competition, name, prefix stri
 
 // CheckUniqueCompFields verifies that name and prefix are both unique across
 // every OTHER competition (excludeID excluded). Moved from mobileapp's
-// checkUniqueCompFieldsSiblingPolicy (PR #416 finding 1); mobileapp's
-// checkUniqueCompFields is a thin wrapper over this.
+// checkUniqueCompFieldsSiblingPolicy (PR #416 finding 1); create, import and
+// the competition PUT call it directly. Its result is nil, a *ValidationError
+// on a collision (the caller answers 400), or any other error when the
+// store could not be read (500).
 //
 // Both fields may be empty to exempt them from the check; when BOTH are
 // empty nothing is validated and the sibling set is never even loaded, so a

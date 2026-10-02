@@ -138,7 +138,7 @@ func NormalizeNumberPrefix(s string) string {
 // counter, so a prefix like "K02" can never coincide with "K"'s own sequence
 // (which only ever produces "K1".."K9","K10",... -- never "K02"). Two
 // genuinely equal prefixes are NOT reported here: that collision is the
-// pre-existing exact-match check (checkUniqueCompFields,
+// pre-existing exact-match check (CheckUniqueCompFields,
 // DefaultNumberPrefix's own normalized-equality check); this function
 // covers only the stem+digits shape those checks miss.
 func NumberPrefixesAmbiguous(a, b string) bool {
@@ -182,7 +182,7 @@ func isDigitExtension(long, short string) bool {
 
 // DefaultNumberPrefix derives a competition's default number prefix from its
 // name, avoiding every prefix in taken (compared case-insensitively, as
-// checkUniqueCompFields compares them) and every prefix ambiguous with one
+// CheckUniqueCompFields compares them) and every prefix ambiguous with one
 // (NumberPrefixesAmbiguous).
 //
 // The derivation walks the name's words and takes their initials, so "Kendo
@@ -275,7 +275,7 @@ func DefaultNumberPrefix(name string, taken []string) string {
 	// already taken or ambiguous. Return the last one tried rather than
 	// inventing a value beyond MaxNumberPrefixLen -- this function's
 	// contract is a best-effort SUGGESTION, not a uniqueness guarantee, and
-	// every request-driven caller validates that (via checkUniqueCompFields,
+	// every request-driven caller validates that (via CheckUniqueCompFields,
 	// against the SAME taken set) before trusting it:
 	//   - create, settings-save and the start/generate-draw pre-flight call
 	//     this function ONLY to fill in a blank field, validate the

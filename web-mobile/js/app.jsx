@@ -1050,14 +1050,14 @@ function App() {
 
     // F8: resync on tab resume. When the tab becomes visible again after
     // being backgrounded, reconnect SSE (clears any stale connection) and
-    // refresh at once. A resume after the stream was lost loads twice (here,
-    // and when the stream reopens below), which is harmless. Removed in the
-    // effect cleanup alongside unsub() to avoid duplicate handlers across
-    // re-renders.
+    // refresh at once. A resume after the stream was lost refreshes once
+    // instead, when the stream reopens (below), which is also when the device
+    // is known to fetch again. Removed in the effect cleanup alongside unsub()
+    // to avoid duplicate handlers across re-renders.
     const onVisibilityChange = () => {
         if (document.hidden) return;
         window.API.reconnectEvents();
-        resync(0, 'tab-resume');
+        if (!streamLost) resync(0, 'tab-resume');
     };
     document.addEventListener('visibilitychange', onVisibilityChange);
 

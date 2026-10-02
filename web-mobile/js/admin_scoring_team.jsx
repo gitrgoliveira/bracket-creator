@@ -2754,16 +2754,18 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
     // call sites that submit with status:"running" -- the ones
     // _notifyScoreSuperseded deliberately stays silent for -- can check
     // writeWasSuperseded themselves. See writeFailed's declaration above.
-    // A refused write disarms the two-tap commits (writeWasRefused): left
-    // armed, one tap re-sent the write just refused. A queued one stays armed.
-    const disarm = () => { if (mountedRef.current) { setFinishArmed(false); setEndArmed(false); } };
     let res;
     try {
       res = await fn();
     } finally {
       if (mountedRef.current) setSubmitting(false);
     }
-    if (writeWasRefused(res)) disarm();
+    // A refused write disarms the two-tap commits (writeWasRefused): left
+    // armed, one tap re-sent the write just refused. A queued one stays armed.
+    if (writeWasRefused(res) && mountedRef.current) {
+      setFinishArmed(false);
+      setEndArmed(false);
+    }
     // A queued write has NOT reached the server. Flag it so the banner below
     // says so; the sync subscription clears it once the queue drains, and the
     // terminal-fail subscription replaces it with the not-saved banner if the

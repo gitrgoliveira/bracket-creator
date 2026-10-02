@@ -147,7 +147,7 @@ describe('the Scores tab and a barred match (bc-cse)', () => {
 
     expect(btn.disabled).toBe(true);
     const notice = utils.getByTestId('barred-match-notice');
-    expect(notice.textContent).toContain('queued');
+    expect(notice.textContent).toContain('Not sent yet');
     await act(async () => { btn.click(); });
     expect(window.API.recordDecision).toHaveBeenCalledTimes(1);
   });

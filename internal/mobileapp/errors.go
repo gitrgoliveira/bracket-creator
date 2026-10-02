@@ -373,13 +373,15 @@ func qualifierChangePayload(changes []engine.QualifierChange) []engine.Qualifier
 // with HTTP 409 {"error":"downstream_knockout_running","matchId",
 // "runningMatches","message"} and reports whether it answered. A pool
 // correction in a mixed competition that would move a qualifier out of a
-// knockout match somebody is fighting right now is refused outright: unlike
+// knockout match somebody is fighting right now, or a knockout correction
+// whose new winner would change a side of a later match being fought
+// (operator decision 2026-09-27), is refused outright: unlike
 // downstream_knockout_played it is NOT confirmable (forceDownstreamReopen does
-// not get past it), because reopening a match mid-bout would wipe what is
-// being scored at the shiaijo. message is the operator's copy ("Match 9 (Quarterfinals) is
-// being fought now. Finish it or send it back to the queue, then save
-// again."). A 409, never a 5xx, so the offline write queue drops a replay
-// that meets it instead of retrying it forever (mp-q8c6).
+// not get past it), because the match is in progress at the shiaijo. message
+// is the operator's copy ("Match 9 (Quarterfinals) is being fought now on
+// Shiaijo B. Finish it or send it back to the queue, then save this
+// correction again."). A 409, never a 5xx, so the offline write queue drops a
+// replay that meets it instead of retrying it forever (mp-q8c6).
 func respondIfDownstreamKnockoutRunning(c *gin.Context, err error) bool {
 	var runningErr *engine.DownstreamKnockoutRunningError
 	if !errors.As(err, &runningErr) {
@@ -396,8 +398,9 @@ func respondIfDownstreamKnockoutRunning(c *gin.Context, err error) bool {
 
 // blockedMatchesPayload renders knockout matches for the wire, for every
 // payload that names them to the operator (blockingMatches, runningMatches,
-// reopenedMatches): id for addressing, number, and label, the words the
-// operator is shown ("Match 3 (Final)", engine.MatchLabel). The client prints
+// reopenedMatches): id for addressing, number, label, the words the operator
+// is shown ("Match 3 (Final)", engine.MatchLabel), and court, the shiaijo the
+// match is on ("" when it has none). The client prints
 // the label as it is rather than composing its own from the number, so the
 // dialog and this payload's message cannot name the same match two ways. A
 // number of 0 means the match never got one (a bye placeholder, or a
@@ -406,7 +409,7 @@ func respondIfDownstreamKnockoutRunning(c *gin.Context, err error) bool {
 func blockedMatchesPayload(blocking []engine.ReopenedMatch) []map[string]any {
 	out := make([]map[string]any, 0, len(blocking))
 	for _, b := range blocking {
-		out = append(out, map[string]any{"id": b.ID, "number": b.Number, "label": engine.MatchLabel(b)})
+		out = append(out, map[string]any{"id": b.ID, "number": b.Number, "label": engine.MatchLabel(b), "court": b.Court})
 	}
 	return out
 }

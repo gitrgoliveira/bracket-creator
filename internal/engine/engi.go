@@ -159,10 +159,8 @@ func (e *Engine) recordEngiMatch(
 				if winnerSide == "A" {
 					newWinner = bm.SideA
 				}
-				if !force {
-					if err := guardOverrideDownstreamKnockoutCorrection(b, rIdx, mIdx, bm, newWinner); err != nil {
-						return err
-					}
+				if err := guardOverrideDownstreamKnockoutCorrection(b, rIdx, mIdx, bm, newWinner, force); err != nil {
+					return err
 				}
 				priorWinner, priorWinnerID := propagatedWinnerOf(b, rIdx, mIdx, bm)
 				result = applyEngiToBracketMatch(bm, flagsA, flagsB, winnerSide, correctionReason)

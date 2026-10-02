@@ -994,6 +994,11 @@ func (e *Engine) recordDecisionTx(tx state.StoreTx, compID, matchID, decision, d
 		_, name, ok := losingSide(prior)
 		hadPriorLoser = ok && name != ""
 	}
+	// bc-rfsw: refused BEFORE the T103 lock below, so the operator is never
+	// asked to confirm a write the bracket write would then refuse.
+	if err := refuseDecisionReachingRunningMatch(tx, compID, matchID, decisionBy, prior); err != nil {
+		return nil, nil, err
+	}
 	// T103: downstream-match check. The contract scope is "either
 	// participant", if any subsequent match for either side has been
 	// started or completed since the kiken/fusenpai, refuse the undo
@@ -1068,6 +1073,52 @@ func (e *Engine) recordDecisionTx(tx state.StoreTx, compID, matchID, decision, d
 	// restore here read that RESTORED status as the current loser and freed
 	// the new withdrawer, so there is none: the rule has one owner.
 	return result, status, nil
+}
+
+// refuseDecisionReachingRunningMatch is the decision path's early answer to
+// the running-downstream rule the bracket write enforces anyway
+// (guardDownstreamKnockoutCorrection): a decision on a knockout ROUND match
+// whose winner (the side decisionBy does not name, exactly as
+// recordDecisionTx assigns it) differs from the one already propagated, while
+// a later match it fed is being fought, is a *DownstreamKnockoutRunningError.
+// Asked before the T103 decision lock so no confirm precedes a write that
+// would be refused (operator decision 2026-09-27). It reuses
+// propagatedWinnerOf and propagatedDownstream.running, never a copy of their
+// rules; the winner is compared by id when the prior carries one, by name
+// only for BracketMatch's id-less shapes (bc-brid).
+func refuseDecisionReachingRunningMatch(tx state.StoreTx, compID, matchID, decisionBy string, prior *state.MatchResult) error {
+	if IsPoolMatchID(matchID) {
+		return nil
+	}
+	bracket, err := tx.LoadBracket(compID)
+	if err != nil {
+		return err
+	}
+	if bracket == nil {
+		return nil
+	}
+	for rIdx := range bracket.Rounds {
+		for mIdx := range bracket.Rounds[rIdx] {
+			bm := &bracket.Rounds[rIdx][mIdx]
+			if bm.ID != matchID {
+				continue
+			}
+			winner, winnerID := prior.SideB, prior.SideBID
+			if decisionBy == "shiro" {
+				winner, winnerID = prior.SideA, prior.SideAID
+			}
+			priorName, priorID := propagatedWinnerOf(bracket, rIdx, mIdx, bm)
+			changed := winner != priorName
+			if priorID != "" {
+				changed = winnerID != priorID
+			}
+			if !changed {
+				return nil
+			}
+			return runningDownstreamRefusal(matchID, propagatedDownstreamOf(bracket, rIdx, mIdx).running())
+		}
+	}
+	return nil
 }
 
 // restoreEligibilityRecordedByMatch restores eligibility for every

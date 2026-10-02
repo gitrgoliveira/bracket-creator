@@ -987,7 +987,7 @@ func TestPoolRescore_FinisherFlip_KnockoutRunning_Rejected(t *testing.T) {
 		require.ErrorAs(t, rescore, &runErr)
 		require.Len(t, runErr.Running, 1)
 		assert.Equal(t, knockoutMatchID, runErr.Running[0].ID)
-		assert.Contains(t, runErr.Error(), "is being fought now. Finish it or send it back to the queue, then save again.")
+		assert.Equal(t, "Match 1 (Final) is being fought now on Shiaijo A. Finish it or send it back to the queue, then save this correction again.", runErr.Error())
 	}
 	poolA0 := loadPoolMatchByID(t, store, compID, "Pool A-0")
 	assert.Equal(t, "A1", poolA0.Winner, "the refused correction must not land")

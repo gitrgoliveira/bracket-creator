@@ -47,7 +47,7 @@ func TestReopenHandler_DownstreamRunning_RespondsWithLabel(t *testing.T) {
 	require.NoError(t, store.SaveBracket(compID, &state.Bracket{Rounds: [][]state.BracketMatch{
 		{{ID: "m-r1-0", SideA: "Alice", SideAID: aliceID, SideB: "Bob", SideBID: bobID,
 			Status: state.MatchStatusRunning, DisplayRound: 2, MatchNumber: 1}},
-		{{ID: "m-r2-0", SideB: "Carol", SideBID: carolID, DisplayRound: 1, MatchNumber: 2}},
+		{{ID: "m-r2-0", SideB: "Carol", SideBID: carolID, DisplayRound: 1, MatchNumber: 2, Court: "A"}},
 	}}))
 	_, _, err = eng.RecordDecision(compID, "m-r1-0", "fusenpai", "shiro", "", nil, false)
 	require.NoError(t, err)
@@ -80,9 +80,9 @@ func TestReopenHandler_DownstreamRunning_RespondsWithLabel(t *testing.T) {
 	// bc-cse item 7: the reopen door's own remedy, never the save-path's
 	// "then save again" -- a reopen has no save step to retry.
 	assert.Equal(t,
-		"Match 2 (Final) is being fought now. Finish it or send it back to the queue, then reopen this match again.",
+		"Match 2 (Final) is being fought now on Shiaijo A. Finish it or send it back to the queue, then reopen this match again.",
 		msg)
-	assert.NotContains(t, msg, "then save again",
+	assert.NotContains(t, msg, "then save",
 		"a reopen refusal must never tell the operator to save again")
 	running, ok := resp["runningMatches"].([]any)
 	require.True(t, ok && len(running) == 1)

@@ -502,18 +502,20 @@ function qualifierMoveConfirmMessage(changes, blockingMatches, blockingMatchId, 
 
 // downstreamKnockoutRunningMessage (the 409 downstream_knockout_running): a
 // pool correction that would move a qualifier out of a knockout match being
-// fought RIGHT NOW. Not confirmable, so this is an error message, never a
-// dialog: the operator finishes that match or sends it back to the queue,
-// then saves again. The server's Go message says the same words
+// fought RIGHT NOW, or a knockout correction whose new winner would change a
+// side of a later match being fought (operator decision 2026-09-27). Not
+// confirmable, so this is an error message, never a dialog: the operator
+// finishes that match or sends it back to the queue, then saves the
+// correction again. The server's Go message says the same words
 // (engine.DownstreamKnockoutRunningError).
 export function downstreamKnockoutRunningMessage(runningMatches) {
     const { subject, them } = runningParts(runningMatches);
-    return `${subject}. Finish ${them} or send ${them} back to the queue, then save again.`;
+    return `${subject}. Finish ${them} or send ${them} back to the queue, then save this correction again.`;
 }
 
 // downstreamKnockoutRunningReopenMessage: the same refusal (409
 // downstream_knockout_running) met by a REOPEN rather than a score write
-// (bc-cse). "then save again" is wrong here -- a reopen has no save step to
+// (bc-cse). "then save this correction again" is wrong here -- a reopen has no save step to
 // retry, the operator taps Reopen again once the blocking match is out of
 // the way -- so this is a separate message, not a parameter on the one
 // above, the same split downstreamKnockoutPlayedConfirm's own `reopen` flag
@@ -549,13 +551,25 @@ export function courtBusyMessage({ court, label }) {
     return `Shiaijo ${court} is running ${label}. Finish it or send it back to the queue first.`;
 }
 
+// runningParts names the matches being fought and where, the same words as
+// engine's runningSubject: "Match 3 (Final) is being fought now on Shiaijo
+// A", and for two, "The 3rd-place match is being fought now on Shiaijo B and
+// Match 3 (Final) on Shiaijo A". A match with no court gets no court clause,
+// and when none has one the plural form stands.
 function runningParts(runningMatches) {
     const ms = (runningMatches || []).filter(Boolean);
-    const named = matchLabelList(ms) || 'A knockout match';
-    const Named = named.charAt(0).toUpperCase() + named.slice(1);
-    return ms.length > 1
-        ? { subject: `${Named} are being fought now`, them: 'them' }
-        : { subject: `${Named} is being fought now`, them: 'it' };
+    const them = ms.length > 1 ? 'them' : 'it';
+    let subject;
+    if (!ms.some((m) => m.court)) {
+        const named = matchLabelList(ms) || 'A knockout match';
+        subject = `${named} ${ms.length > 1 ? 'are' : 'is'} being fought now`;
+    } else {
+        const parts = ms.map((m, i) => `${matchLabel(m)}${i === 0 ? ' is being fought now' : ''}${m.court ? ` on Shiaijo ${m.court}` : ''}`);
+        subject = parts.length > 1
+            ? `${parts.slice(0, -1).join(', ')} and ${parts[parts.length - 1]}`
+            : parts[0];
+    }
+    return { subject: subject.charAt(0).toUpperCase() + subject.slice(1), them };
 }
 
 // The cancellation notice: confirms to the operator that declining the

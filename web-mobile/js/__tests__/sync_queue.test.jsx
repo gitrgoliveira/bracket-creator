@@ -2342,8 +2342,8 @@ describe('_enqueueTerminalWrite: a queued write never carries the downstream con
             json: () => Promise.resolve({
                 error: 'downstream_knockout_running',
                 matchId: 'mrun',
-                runningMatches: [{ id: 'm-r1-0', number: 9 }],
-                message: 'Match 9 is being fought now. Finish it or send it back to the queue, then save again.',
+                runningMatches: [{ id: 'm-r1-0', number: 9, court: 'A' }],
+                message: 'Match 9 is being fought now on Shiaijo A. Finish it or send it back to the queue, then save this correction again.',
             }),
         }));
         window.dispatchEvent(new Event('online'));
@@ -2352,7 +2352,7 @@ describe('_enqueueTerminalWrite: a queued write never carries the downstream con
         warnSpy.mockRestore();
 
         expect(API.hasPendingTerminalWrite('c1', 'mrun')).toBe(false);
-        expect(failures[0].reason).toBe('Match 9 is being fought now');
+        expect(failures[0].reason).toBe('Match 9 is being fought now on Shiaijo A');
         expect(failures[0].advice).toBe('Finish it or send it back to the queue, then enter this result again.');
     });
 });

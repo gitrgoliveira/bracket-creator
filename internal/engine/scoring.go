@@ -590,6 +590,9 @@ type ReopenedMatch struct {
 	DisplayRound  int
 	PriorDecision string
 	Restored      *domain.CompetitorStatus
+	// Court is the shiaijo the match is on ("" when it has none), so a
+	// refusal can tell the operator where the match is being fought.
+	Court string
 }
 
 // bracketMatchRef is the ONE way a bracket match becomes a ReopenedMatch, so
@@ -597,7 +600,16 @@ type ReopenedMatch struct {
 // running refusals, and the matches a confirmed correction reopened) carries
 // the same identity MatchLabel reads.
 func bracketMatchRef(m *state.BracketMatch) ReopenedMatch {
-	return ReopenedMatch{ID: m.ID, Number: m.MatchNumber, DisplayRound: m.DisplayRound}
+	return ReopenedMatch{ID: m.ID, Number: m.MatchNumber, DisplayRound: m.DisplayRound, Court: m.Court}
+}
+
+// bracketMatchRefs is bracketMatchRef over a list, in order.
+func bracketMatchRefs(ms []*state.BracketMatch) []ReopenedMatch {
+	out := make([]ReopenedMatch, 0, len(ms))
+	for _, m := range ms {
+		out = append(out, bracketMatchRef(m))
+	}
+	return out
 }
 
 type ForceOptions struct {
@@ -612,7 +624,9 @@ type ForceOptions struct {
 	// competition that moves a qualifier out of a knockout match already
 	// fought is refused the same way, and Force reopens those matches with
 	// the new qualifier seated (requalifyAfterPoolWrite). It never gets past
-	// a knockout match being fought now (DownstreamKnockoutRunningError).
+	// a knockout match being fought now (DownstreamKnockoutRunningError), on a
+	// pool correction or a knockout correction alike (operator decision
+	// 2026-09-27).
 	Force bool
 	// Reopened, when non-nil, is populated with the IDs of every downstream
 	// bracket match reopened by a forced correction (empty when Force is
@@ -2619,14 +2633,15 @@ func applyBracketMatchResult(bm *state.BracketMatch, result *state.MatchResult, 
 // bc-kcdg: before mutating a ROUND match (the bronze branch has no
 // downstream, so it is exempt), guardDownstreamKnockoutCorrection checks
 // whether this write would change an already-propagated winner while a
-// downstream match in the propagation chain carries a result of its own. A
-// non-nil result there is *DownstreamKnockoutPlayedError and aborts before
-// any mutation — UpdateBracket skips the save on a non-nil error, so a
-// refusal leaves no footprint, matching the ErrMatchSuperseded contract just
-// above it. force skips the guard and, once the correction and its
-// propagation have landed, requeues the ONE downstream match the correction
-// would otherwise have silently repainted; its id is returned so the caller
-// can broadcast match_updated for it.
+// downstream match in the propagation chain carries a result of its own
+// (*DownstreamKnockoutPlayedError) or is being fought now
+// (*DownstreamKnockoutRunningError). Either aborts before any mutation —
+// UpdateBracket skips the save on a non-nil error, so a refusal leaves no
+// footprint, matching the ErrMatchSuperseded contract just above it. force
+// gets past the played refusal only (never the running one) and, once the
+// correction and its propagation have landed, requeues the ONE downstream
+// match the correction would otherwise have silently repainted; its id is
+// returned so the caller can broadcast match_updated for it.
 func (e *Engine) applyBracketResultIn(bracket *state.Bracket, compID, matchID string, result *state.MatchResult, policy matchWritePolicy, force bool) ([]ReopenedMatch, bool, error) {
 	if bracket == nil {
 		return nil, false, notFoundErrorf("bracket not found for competition %s", compID)
@@ -2644,31 +2659,30 @@ func (e *Engine) applyBracketResultIn(bracket *state.Bracket, compID, matchID st
 			// refuse a correction that moves nobody, or, forced, requeue a
 			// match it never changed.
 			inherited := preserveWithdrawalRuling(rulingOfBracketMatch(bm), result, policy)
-			if !force {
-				// bc-cse finding 2: a stale replayed write must be reported as
-				// ErrMatchSuperseded -- the ordinary 200 {"applied":false}
-				// contract every other bracket write gives a reconnecting
-				// offline court (see CLAUDE.md "Write refusal and the clock
-				// frame") -- never the destructive "apply and reopen" 409 the
-				// downstream guard raises. Test the SAME staleness predicate
-				// applyBracketMatchResult's own applyMatchWrite call applies
-				// just below (domain.ApplyByTimestamp against bm.ModifiedAt,
-				// forward policy only) rather than restating the LWW rule
-				// here, so the two checks cannot drift; this call is a
-				// non-mutating PRE-check purely to decide whether the guard
-				// should even run. When it says stale, skip the guard and let
-				// applyBracketMatchResult's identical check drop the write
-				// through the normal (non-guard) path below.
-				stale := policy == matchWriteForward && !domain.ApplyByTimestamp(result.ModifiedAt, bm.ModifiedAt)
-				if !stale {
-					if err := guardDownstreamKnockoutCorrection(bracket, rIdx, mIdx, bm, result, policy); err != nil {
-						return nil, false, err
-					}
+			// bc-cse finding 2: a stale replayed write must be reported as
+			// ErrMatchSuperseded -- the ordinary 200 {"applied":false}
+			// contract every other bracket write gives a reconnecting
+			// offline court (see CLAUDE.md "Write refusal and the clock
+			// frame") -- never a downstream refusal the guard raises. Test
+			// the SAME staleness predicate applyBracketMatchResult's own
+			// applyMatchWrite call applies just below
+			// (domain.ApplyByTimestamp against bm.ModifiedAt, forward policy
+			// only) rather than restating the LWW rule here, so the two
+			// checks cannot drift; this call is a non-mutating PRE-check
+			// purely to decide whether the guard should even run. When it
+			// says stale, skip the guard and let applyBracketMatchResult's
+			// identical check drop the write through the normal (non-guard)
+			// path below. The guard runs forced too: force gets past a
+			// played later match, never a running one (bc-rfsw).
+			stale := policy == matchWriteForward && !domain.ApplyByTimestamp(result.ModifiedAt, bm.ModifiedAt)
+			if !stale {
+				if err := guardDownstreamKnockoutCorrection(bracket, rIdx, mIdx, bm, result, policy, force); err != nil {
+					return nil, false, err
 				}
 			}
 			// Captured BEFORE the write, so the force branch below can tell a
 			// correction that actually changes the winner from one that does
-			// not. force skips the guard, and an unconditional requeue there
+			// not. force skips the guard's played refusal, and an unconditional requeue there
 			// cleared the next round for a write that stored the same winner --
 			// including one confirmed for an unrelated reason, since the
 			// decision path's own T103 force used to arrive as this flag.
@@ -2722,8 +2736,8 @@ func (e *Engine) applyBracketResultIn(bracket *state.Bracket, compID, matchID st
 }
 
 // bracketMatchCarriesOwnResult reports whether bm holds a result someone
-// actually recorded (running, or any ippons/sub-results/decision/hansoku/
-// resultSource), as opposed to a slot merely auto-completed by
+// actually recorded (closed, with any ippons/sub-results/decision/hansoku/
+// flags/resultSource), as opposed to a slot merely auto-completed by
 // propagateBracketWinner's bye pass-through. buildBracketFromDraw's bye
 // auto-resolve and propagateBracketWinner's three empty-side arms set only
 // Winner/WinnerID/Status=Completed on such a slot — never any of the fields
@@ -2737,9 +2751,10 @@ func (e *Engine) applyBracketResultIn(bracket *state.Bracket, compID, matchID st
 // they unwind instead (propagatedDownstreamOf). The two predicates answer
 // different questions for different rules; do not merge them.
 //
-// RECORDED CONTENT always blocks, whatever the status, and a RUNNING match
-// blocks even while empty: it is on court being fought right now, which is
-// the ordinary case this predicate exists to catch.
+// Only a CLOSED match counts. A RUNNING match is not closed and is not this
+// predicate's business: it is refused separately, and first, by
+// propagatedDownstream.running (operator decision 2026-09-27), never
+// repainted or cleared.
 //
 // There is deliberately no exemption for a match this bead's own forced
 // correction has already dealt with. forceReopenDownstreamChain REQUEUES its
@@ -2750,21 +2765,19 @@ func (e *Engine) applyBracketResultIn(bracket *state.Bracket, compID, matchID st
 // exempted a match PART WAY through its re-fight, so a second correction
 // silently repainted it while keeping the ippons already struck for the
 // competitor being replaced -- this bead's own defect, reintroduced by its
-// fix. A running match reopened through the KACHINUKI path still blocks, and
-// should: someone is fighting it.
+// fix. A running match reopened through the KACHINUKI path is refused by
+// propagatedDownstream.running, not by this predicate, and should be:
+// someone is fighting it.
 func bracketMatchCarriesOwnResult(bm *state.BracketMatch) bool {
 	// CLOSED is the precondition (operator ruling 2026-09-19: "you do not
 	// affect the state of the next match unless it was closed"). A scheduled
-	// slot has nothing to lose. A RUNNING match is left alone too, and the
-	// trade there is worth stating plainly rather than glossing: it KEEPS the
-	// ippons already struck while propagation repaints the name above them, so
-	// for the rest of that bout the board can show one competitor's strike
-	// under another's name. Accepted because no VERDICT is recorded yet -- the
-	// match still has to be decided, and whoever is at the shiaijo decides it
-	// -- and because clearing a bout in progress to protect a result that does
-	// not exist is the more destructive act. Only a COMPLETED match can be
-	// left permanently displaying a competitor its own recorded result
-	// disagrees with, which is the defect this guard exists for.
+	// slot has nothing to lose. A RUNNING match is not closed either, but it
+	// is no longer repainted: the operator decision of 2026-09-27 reversed the
+	// 2026-09-19 trade (keep the struck ippons, repaint the name above them)
+	// for a match being fought, so every correction door refuses it through
+	// propagatedDownstream.running before asking this. Only a COMPLETED match
+	// can be left permanently displaying a competitor its own recorded result
+	// disagrees with, which is the defect this predicate exists for.
 	if bm.Status != state.MatchStatusCompleted {
 		return false
 	}
@@ -3150,10 +3163,14 @@ func effectiveBracketWriteStatus(result *state.MatchResult) state.MatchStatus {
 // requires this match's own feeders, and therefore this match itself for
 // its own downstream, to already be resolved), passes straight through. A
 // matchWriteRestore (the K3 rollback replaying a trusted snapshot) is never
-// refused -- the caller here already skips this function entirely when
-// force is set, but restore is exempt independently via the policy check
-// below, matching every other bracket-write guard's restore exemption.
-func guardDownstreamKnockoutCorrection(bracket *state.Bracket, rIdx, mIdx int, bm *state.BracketMatch, result *state.MatchResult, policy matchWritePolicy) error {
+// refused, via the policy check below, matching every other bracket-write
+// guard's restore exemption.
+//
+// A changed winner that reaches a later match being FOUGHT is refused first
+// (runningDownstreamRefusal), whatever force says: force confirms reopening a
+// played match, never repainting one in progress (operator decision
+// 2026-09-27). Only then does force skip the played refusal.
+func guardDownstreamKnockoutCorrection(bracket *state.Bracket, rIdx, mIdx int, bm *state.BracketMatch, result *state.MatchResult, policy matchWritePolicy, force bool) error {
 	if policy != matchWriteForward || effectiveBracketWriteStatus(result) != state.MatchStatusCompleted {
 		return nil
 	}
@@ -3166,6 +3183,12 @@ func guardDownstreamKnockoutCorrection(bracket *state.Bracket, rIdx, mIdx int, b
 		return nil
 	}
 	d := propagatedDownstreamOf(bracket, rIdx, mIdx)
+	if err := runningDownstreamRefusal(bm.ID, d.running()); err != nil {
+		return err
+	}
+	if force {
+		return nil
+	}
 	blocking := d.played()
 	if len(blocking) == 0 {
 		return nil
@@ -3344,8 +3367,10 @@ func deriveOverrideWinnerID(m *state.BracketMatch, winnerName string) string {
 // rule, adapted to the override API's bare-name input (it has no
 // state.MatchResult to resolve a winner id through, so it derives the
 // would-be id itself via deriveOverrideWinnerID rather than calling
-// bracketWinnerChanged/resolveWinnerIDFromSides).
-func guardOverrideDownstreamKnockoutCorrection(bracket *state.Bracket, rIdx, mIdx int, m *state.BracketMatch, winnerName string) error {
+// bracketWinnerChanged/resolveWinnerIDFromSides). Like its twin it refuses
+// a running later match first, whatever force says, and force skips only the
+// played refusal.
+func guardOverrideDownstreamKnockoutCorrection(bracket *state.Bracket, rIdx, mIdx int, m *state.BracketMatch, winnerName string, force bool) error {
 	newWinnerID := deriveOverrideWinnerID(m, winnerName)
 	priorName, priorID := propagatedWinnerOf(bracket, rIdx, mIdx, m)
 	var changed bool
@@ -3358,6 +3383,12 @@ func guardOverrideDownstreamKnockoutCorrection(bracket *state.Bracket, rIdx, mId
 		return nil
 	}
 	d := propagatedDownstreamOf(bracket, rIdx, mIdx)
+	if err := runningDownstreamRefusal(m.ID, d.running()); err != nil {
+		return err
+	}
+	if force {
+		return nil
+	}
 	blocking := d.played()
 	if len(blocking) == 0 {
 		return nil
@@ -3384,8 +3415,8 @@ func guardOverrideDownstreamKnockoutCorrection(bracket *state.Bracket, rIdx, mId
 // skip the disk save, avoiding a spurious write of an unchanged bracket (finding 8).
 //
 // bc-kcdg: the round branch (bronze has no downstream, so it is exempt) runs
-// guardOverrideDownstreamKnockoutCorrection before mutating, unless opts
-// carries Force. A forced override that changes an already-propagated
+// guardOverrideDownstreamKnockoutCorrection before mutating; Force gets past
+// its played refusal, never its running one. A forced override that changes an already-propagated
 // winner requeues the one downstream match that carries its own
 // result (forceReopenDownstreamChain), same as the score-write path; opts'
 // Reopened field, when non-nil, is populated with their IDs.
@@ -3412,10 +3443,8 @@ func (e *Engine) OverrideBracketWinner(compId string, matchId string, winnerName
 					if !domain.ApplyByTimestamp(modifiedAt, m.ModifiedAt) {
 						return errLWWDropped
 					}
-					if !fo.Force {
-						if err := guardOverrideDownstreamKnockoutCorrection(bracket, rIdx, mIdx, m, winnerName); err != nil {
-							return err
-						}
+					if err := guardOverrideDownstreamKnockoutCorrection(bracket, rIdx, mIdx, m, winnerName, fo.Force); err != nil {
+						return err
 					}
 					// Captured before the override rewrites it, for the same
 					// reason the score door captures its own: a forced override

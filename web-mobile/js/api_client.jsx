@@ -115,7 +115,7 @@ async function reopenFailureError(res) {
     // DOWNSTREAM MATCH STILL RUNNING (not yet played) gets a copy for THIS
     // being a reopen (bc-cse: `{ reopen: true }` selects
     // downstreamKnockoutRunningReopenMessage, "...then reopen again" rather
-    // than the score path's "...then save again", which has no save step to
+    // than the score path's "...then save this correction again", which has no save step to
     // retry here), instead of falling through to the bare
     // "downstream_knockout_running" token below. The PLAYED shape ALSO marks
     // `reopen` on its own structured field below, for the confirm dialog's
@@ -234,14 +234,15 @@ function _downstreamKnockoutPlayedError(body) {
 }
 
 // Parses the 409 downstream_knockout_running refusal: a pool correction that
-// would move a qualifier out of a knockout match being fought now. Unlike the
+// would move a qualifier out of a knockout match being fought now, or a
+// knockout correction that would change a side of one. Unlike the
 // played refusal it is NOT confirmable, so it carries no confirm fields; the
 // thrown Error's message is the operator's copy (write_result.jsx's
 // downstreamKnockoutRunningMessage) rather than the bare code, which is what
 // every `new Error(data.error)` fallback below would otherwise show. Returns
 // null when the body is not this refusal. bc-cse: `opts.reopen` swaps in
 // downstreamKnockoutRunningReopenMessage instead -- the score path's "then
-// save again" is wrong for a REOPEN, which has no save step to retry.
+// save this correction again" is wrong for a REOPEN, which has no save step to retry.
 function _downstreamKnockoutRunningError(body, opts) {
     if (!body || body.error !== 'downstream_knockout_running') return null;
     const message = (opts && opts.reopen)
@@ -3324,7 +3325,9 @@ const API = {
             // winner) is parsed into the same structured error recordScore
             // throws, so a caller can offer the same confirm+retry loop
             // (write_result.jsx's attemptScoreWrite) rather than a plain message.
-            throw _downstreamKnockoutPlayedError(body) || new Error(body.error || "Failed to override winner");
+            // bc-rfsw: 409 downstream_knockout_running (that later match is
+            // being fought now) throws the operator's sentence, not confirmable.
+            throw _downstreamRefusalError(body) || new Error(body.error || "Failed to override winner");
         }
         // Backend replies 200 {"applied": <bool>} (mp-y3nk). applied=false means
         // the timestamp guard dropped this assertion because a newer/equal result

@@ -1163,7 +1163,7 @@ describe('API Utils', () => {
           json: async () => ({ error: 'downstream_knockout_running', matchId: '', runningMatches: [{ id: 'm9', number: 9 }] }),
         });
         await expect(API.overridePoolRanks('c1', 'Pool A', order, 'pw', true))
-          .rejects.toThrow('Match 9 is being fought now. Finish it or send it back to the queue, then save again.');
+          .rejects.toThrow('Match 9 is being fought now. Finish it or send it back to the queue, then save this correction again.');
         const [, opts] = global.fetch.mock.calls[0];
         expect(JSON.parse(opts.body)).toEqual({ ranks: order, forceDownstreamReopen: true });
       });

@@ -350,8 +350,10 @@ func respondDecisionEngineError(c *gin.Context, store CompetitionStore, compID, 
 		})
 	case respondIfDownstreamKnockoutRunning(c, engErr):
 		// A decision on a mixed competition's POOL match that would
-		// move a qualifier out of a knockout match being fought now:
-		// terminal, not confirmable (see
+		// move a qualifier out of a knockout match being fought now, or
+		// on a knockout match whose new winner would change a side of a
+		// later match being fought now (bc-rfsw, raised before the T103
+		// decision_locked check): terminal, not confirmable (see
 		// respondIfDownstreamKnockoutRunning's doc comment).
 	case respondIfDownstreamKnockoutPlayed(c, engErr):
 		// bc-kcdg: this decision would change an already-propagated

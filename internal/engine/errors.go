@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/gitrgoliveira/bracket-creator/internal/helper"
 	"github.com/gitrgoliveira/bracket-creator/internal/state"
 )
 
@@ -209,12 +210,15 @@ func (e *DownstreamKnockoutPlayedError) Is(target error) bool {
 // DownstreamKnockoutRunningError. Handlers should return HTTP 409.
 var ErrDownstreamKnockoutRunning = errors.New("downstream knockout match is being fought")
 
-// DownstreamKnockoutRunningError refuses a write that would move a
-// qualifier out of a knockout match somebody is fighting RIGHT NOW. Two
-// producers construct it, distinguished by Reopening: a pool correction in
-// a mixed competition (pool_requalify.go's requalifyAfterPoolWrite, the
-// default Reopening:false), and the reopen / requeue-blocker-and-reopen
-// doors (reopenBracketDownstreamCheck, kachinuki.go, Reopening:true). Unlike
+// DownstreamKnockoutRunningError refuses a write that would change a side of
+// a knockout match somebody is fighting RIGHT NOW. Three producers construct
+// it, distinguished by Reopening: a pool correction in a mixed competition
+// (pool_requalify.go's requalifyAfterPoolWrite) and a knockout correction
+// whose new winner reaches a running later match (runningDownstreamRefusal,
+// on the score, decision, override and engi doors; operator decision
+// 2026-09-27), both the default Reopening:false, and the reopen /
+// requeue-blocker-and-reopen doors (reopenBracketDownstreamCheck,
+// kachinuki.go, Reopening:true). Unlike
 // DownstreamKnockoutPlayedError it cannot be confirmed past: reopening a
 // match mid-bout would wipe strikes being scored at the shiaijo, so the
 // operator finishes the match or sends it back to the queue first, THEN
@@ -222,8 +226,8 @@ var ErrDownstreamKnockoutRunning = errors.New("downstream knockout match is bein
 // reason to exist (see Error()). Checked before the played case, so the
 // operator is never asked to confirm something that would then be refused.
 type DownstreamKnockoutRunningError struct {
-	// MatchID is the pool match being corrected; "" for a pool-rank override
-	// (OverridePoolRanks), which corrects none.
+	// MatchID is the match being corrected or reopened; "" for a pool-rank
+	// override (OverridePoolRanks), which corrects none.
 	MatchID string
 	// Running is every knockout match the move would reach that is being
 	// fought, each with the number the operator knows it by.
@@ -241,25 +245,55 @@ type DownstreamKnockoutRunningError struct {
 // wording (Reopening:false); the reopen path's own wording is Reopening's
 // whole reason to exist, see the struct doc.
 func (e *DownstreamKnockoutRunningError) Error() string {
-	labels := make([]string, 0, len(e.Running))
-	for _, r := range e.Running {
-		labels = append(labels, MatchLabel(r))
-	}
-	subject := strings.Join(labels, " and ")
-	if subject == "" {
-		subject = "A knockout match"
-	}
-	verb := "is"
 	them := "it"
-	if len(labels) > 1 {
-		verb, them = "are", "them"
+	if len(e.Running) > 1 {
+		them = "them"
 	}
-	retry := "then save again"
+	retry := "then save this correction again"
 	if e.Reopening {
 		retry = "then reopen this match again"
 	}
-	return fmt.Sprintf("%s %s being fought now. Finish %s or send %s back to the queue, %s.",
-		SentenceCase(subject), verb, them, them, retry)
+	return fmt.Sprintf("%s. Finish %s or send %s back to the queue, %s.",
+		SentenceCase(runningSubject(e.Running)), them, them, retry)
+}
+
+// runningSubject names the matches being fought and where: "Match 3 (Final)
+// is being fought now on Shiaijo A", and for two, "the 3rd-place match is
+// being fought now on Shiaijo B and Match 3 (Final) on Shiaijo A". The court
+// clause is left out for a match with no court, and when none has one the
+// plural form stands ("A and B are being fought now"). The SPA's runningParts
+// (write_result.jsx) composes the same words.
+func runningSubject(running []ReopenedMatch) string {
+	if len(running) == 0 {
+		return "A knockout match is being fought now"
+	}
+	anyCourt := false
+	for _, r := range running {
+		anyCourt = anyCourt || r.Court != ""
+	}
+	if !anyCourt {
+		labels := make([]string, 0, len(running))
+		for _, r := range running {
+			labels = append(labels, MatchLabel(r))
+		}
+		verb := "is"
+		if len(labels) > 1 {
+			verb = "are"
+		}
+		return fmt.Sprintf("%s %s being fought now", strings.Join(labels, " and "), verb)
+	}
+	parts := make([]string, 0, len(running))
+	for i, r := range running {
+		part := MatchLabel(r)
+		if i == 0 {
+			part += " is being fought now"
+		}
+		if r.Court != "" {
+			part += " on " + helper.ShiaijoLabel(r.Court)
+		}
+		parts = append(parts, part)
+	}
+	return strings.Join(parts, " and ")
 }
 
 func (e *DownstreamKnockoutRunningError) Is(target error) bool {

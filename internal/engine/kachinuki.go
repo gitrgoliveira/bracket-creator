@@ -1226,15 +1226,9 @@ func (e *Engine) reopenResultPreconditionTx(tx state.StoreTx, compID string, com
 // ErrReopenDownstreamFought.
 func reopenBracketDownstreamCheck(bracket *state.Bracket, rIdx, mIdx int, force bool) error {
 	d := propagatedDownstreamOf(bracket, rIdx, mIdx)
-	var running []ReopenedMatch
-	for _, t := range []*state.BracketMatch{d.bronze, d.next} {
-		if t != nil && t.Status == state.MatchStatusRunning {
-			running = append(running, bracketMatchRef(t))
-		}
-	}
 	matchID := bracket.Rounds[rIdx][mIdx].ID
-	if len(running) > 0 {
-		return &DownstreamKnockoutRunningError{MatchID: matchID, Running: running, Reopening: true}
+	if running := d.running(); len(running) > 0 {
+		return &DownstreamKnockoutRunningError{MatchID: matchID, Running: bracketMatchRefs(running), Reopening: true}
 	}
 	if played := d.played(); len(played) > 0 && !force {
 		return newDownstreamKnockoutPlayedError(&bracket.Rounds[rIdx][mIdx], played, d.displacedSlot(played, mIdx))
@@ -1900,7 +1894,9 @@ func propagatedDownstreamOf(bracket *state.Bracket, rIdx, mIdx int) propagatedDo
 // match names these (reopenBracketDownstreamCheck,
 // guardDownstreamKnockoutCorrection, guardOverrideDownstreamKnockoutCorrection)
 // and forceReopenDownstreamChain reopens exactly these, so the refusal and the
-// confirmation cannot disagree.
+// confirmation cannot disagree. Its sibling running() names the same two
+// matches when they are being FOUGHT, which every one of those doors refuses
+// outright, before this, and force does not get past.
 //
 // ONE HOP, not the whole chain (operator ruling 2026-09-19): "if a correction
 // is applied then that match is completed and reopens the next one, if that
@@ -1922,6 +1918,34 @@ func (d propagatedDownstream) played() []*state.BracketMatch {
 		blocking = append(blocking, d.next)
 	}
 	return blocking
+}
+
+// running returns the matches ONE HOP down (past byes, as played() counts
+// them) that are being fought right now: the bronze first, then next. It is
+// the one "running downstream" predicate for the reopen door
+// (reopenBracketDownstreamCheck) and the knockout-correction doors
+// (guardDownstreamKnockoutCorrection, guardOverrideDownstreamKnockoutCorrection,
+// and the decision path's pre-lock check), so their refusals cannot disagree
+// (operator decision 2026-09-27: a running later match is refused, never
+// repainted or cleared).
+func (d propagatedDownstream) running() []*state.BracketMatch {
+	var running []*state.BracketMatch
+	for _, t := range []*state.BracketMatch{d.bronze, d.next} {
+		if t != nil && t.Status == state.MatchStatusRunning {
+			running = append(running, t)
+		}
+	}
+	return running
+}
+
+// runningDownstreamRefusal is the save-path refusal (Reopening false) for a
+// correction of matchID whose new winner reaches the matches in running, or
+// nil when none is being fought.
+func runningDownstreamRefusal(matchID string, running []*state.BracketMatch) error {
+	if len(running) == 0 {
+		return nil
+	}
+	return &DownstreamKnockoutRunningError{MatchID: matchID, Running: bracketMatchRefs(running)}
 }
 
 // displacedSlot is the feeder position newDownstreamKnockoutPlayedError reads

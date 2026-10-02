@@ -208,4 +208,32 @@ describe('kachinuki Record bout reports which refusal it got (bc-cse)', () => {
     await tapRecordBout({ id: 'm1', status: 'running', subResults: [] });
     expect(screen.queryByRole('alert')).toBeNull();
   });
+
+  // bc-rboq: the callback handed doSubmit no result, so a QUEUED bout (offline)
+  // never raised the editor's own "Not sent yet" notice. Query by the banner's
+  // class: the editor has other role="status" regions.
+  it('a queued Record bout shows the pending banner', async () => {
+    await tapRecordBout({ queued: true });
+
+    const banner = document.querySelector('.pending-write-banner');
+    expect(banner).not.toBeNull();
+    expect(banner.textContent).toContain('Not sent yet');
+    expect(screen.queryByRole('alert')).toBeNull();
+  });
+
+  it('the pending banner clears once the queue drains', async () => {
+    // Several components subscribe (the pill too), so keep every listener.
+    const listeners = new Set();
+    window.subscribeSyncStatus = (fn) => { listeners.add(fn); return () => listeners.delete(fn); };
+    window.API.hasPendingTerminalWrite = () => false;
+    try {
+      await tapRecordBout({ queued: true });
+      expect(document.querySelector('.pending-write-banner')).not.toBeNull();
+
+      await act(async () => { listeners.forEach((fn) => fn('synced')); });
+      expect(document.querySelector('.pending-write-banner')).toBeNull();
+    } finally {
+      delete window.subscribeSyncStatus;
+    }
+  });
 });

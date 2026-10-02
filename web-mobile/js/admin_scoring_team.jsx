@@ -991,9 +991,10 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
   // individual editor): it exists only so the operator sees an explanation
   // instead of a button that silently re-enables having saved nothing.
   const [writeFailed, setWriteFailed] = useStateA(null); // { reason, advice? } | null
-  // A COMPLETED write for this match that is queued rather than confirmed.
-  // SyncStatusPill covers the running case and renders nothing once a match
-  // is finished, so without this a team result entered on a flaky connection
+  // An explicit tap (Start match, Record bout, Finish/End) whose write was
+  // only queued rather than confirmed; autosaves are left to SyncStatusPill,
+  // which renders nothing once a match is finished, so without this a team
+  // result entered on a flaky connection
   // sat on screen looking saved with no indication it had not reached the
   // server -- the one moment the operator is most likely to walk away from
   // the court. Mirrors ScoreEditorModal's pendingWrite, minus its Retry
@@ -2753,7 +2754,9 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
     // Return the awaited result (rather than discarding it, as before) so
     // call sites that submit with status:"running" -- the ones
     // _notifyScoreSuperseded deliberately stays silent for -- can check
-    // writeWasSuperseded themselves. See writeFailed's declaration above.
+    // writeWasSuperseded themselves. See writeFailed's declaration above. A
+    // wrapper passed to doSubmit must return the write's result, or the pending
+    // banner and the refusal disarm below both lose it.
     let res;
     try {
       res = await fn();
@@ -4259,6 +4262,9 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
                       const banner = notLandedBanner(res);
                       if (banner) setWriteFailed(banner);
                     }
+                    // bc-rboq: doSubmit reads the result to raise the pending
+                    // banner for a queued write; returning nothing hid it.
+                    return res;
                   });
                 }} disabled={submitting || !kachinukiCurrentBoutPlayed}
                   title={!kachinukiCurrentBoutPlayed ? "Nothing recorded for this bout yet" : undefined}>

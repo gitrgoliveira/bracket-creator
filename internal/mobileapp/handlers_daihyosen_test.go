@@ -440,6 +440,49 @@ func TestDaihyosenHandler_HappyPath(t *testing.T) {
 	assert.NotNil(t, resp["subResult"])
 }
 
+// The organiser's add to a finished, tied team match reopens its result: the
+// match runs again with no winner or decision of its own until the
+// representative bout decides it. A recorded withdrawal is not that result;
+// clearing one is its own action, so the add leaves it.
+func TestDaihyosenHandler_AddToAFinishedMatchReopensItsResult(t *testing.T) {
+	add := func(t *testing.T, decision string) state.BracketMatch {
+		t.Helper()
+		r, store, _, _, _ := setupDaihyosenTestRouter(t)
+		compID := "dh-reopen"
+		require.NoError(t, store.SaveCompetition(&state.Competition{ID: compID, Kind: "team", TeamSize: 3}))
+		require.NoError(t, store.SaveParticipants(compID, []domain.Player{
+			{ID: "11111111-1111-4111-1111-111111111111", Name: "Alice", Dojo: "A"},
+		}))
+		// No bouts: IV 0-0, PW 0-0, tied, with a winner recorded on top.
+		require.NoError(t, store.SaveBracket(compID, &state.Bracket{
+			Rounds: [][]state.BracketMatch{{
+				{ID: "B1", SideA: "TeamA", SideB: "TeamB", Status: state.MatchStatusCompleted,
+					Winner: "TeamA", Decision: decision},
+			}},
+		}))
+		w := httptest.NewRecorder()
+		r.ServeHTTP(w, httptest.NewRequest(http.MethodPost, "/api/competitions/"+compID+"/matches/B1/daihyosen", nil))
+		require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+		bracket, err := store.LoadBracket(compID)
+		require.NoError(t, err)
+		return bracket.Rounds[0][0]
+	}
+
+	t.Run("a scored result is cleared", func(t *testing.T) {
+		m := add(t, string(domain.DecisionFought))
+		assert.Equal(t, state.MatchStatusRunning, m.Status)
+		assert.Empty(t, m.Winner, "a running match has no winner")
+		assert.Empty(t, m.Decision, "nor a decision")
+	})
+
+	t.Run("a withdrawal is kept", func(t *testing.T) {
+		m := add(t, string(domain.DecisionKikenVoluntary))
+		assert.Equal(t, state.MatchStatusRunning, m.Status)
+		assert.Equal(t, "TeamA", m.Winner)
+		assert.Equal(t, string(domain.DecisionKikenVoluntary), m.Decision)
+	})
+}
+
 // startedAutoEngine is the real engine with one method overridden, so the
 // daihyosen handler's auto-complete switch takes its AutoCompleteStarted arm
 // while every other call the endpoint makes stays production code.

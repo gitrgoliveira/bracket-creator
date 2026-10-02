@@ -57,6 +57,7 @@ import (
 	"strings"
 
 	"github.com/gin-gonic/gin"
+	"github.com/gitrgoliveira/bracket-creator/internal/domain"
 	"github.com/gitrgoliveira/bracket-creator/internal/state"
 )
 
@@ -115,14 +116,15 @@ func RegisterSquadHandlers(r *gin.RouterGroup, store SquadStore, comps Competiti
 		if !validMemberName(c, req.Name) {
 			return
 		}
-		limit := 0
+		// A participant's add is bounded and refused once the competition
+		// has finished, both judged by the store under its lock.
+		var member domain.TeamMember
+		var err error
 		if anonymous {
-			if !selfRunCompetitionOpen(c, comp) {
-				return
-			}
-			limit = selfRunMemberLimit(comp.TeamSize)
+			member, err = store.AddTeamMemberUpTo(compID, teamID, req.Name, selfRunMemberLimit(comp.TeamSize))
+		} else {
+			member, err = store.AddTeamMember(compID, teamID, req.Name)
 		}
-		member, err := store.AddTeamMemberUpTo(compID, teamID, req.Name, limit)
 		if err != nil {
 			respondSquadWriteError(c, err)
 			return
@@ -135,8 +137,7 @@ func RegisterSquadHandlers(r *gin.RouterGroup, store SquadStore, comps Competiti
 		if !ok {
 			return
 		}
-		comp, ok := loadExistingCompetition(c, comps, compID)
-		if !ok {
+		if !requireExistingCompetition(c, comps, compID) {
 			return
 		}
 		memberID := c.Param("memberId")
@@ -160,13 +161,11 @@ func RegisterSquadHandlers(r *gin.RouterGroup, store SquadStore, comps Competiti
 		// reaches every stored lineup and fought bout, finished matches
 		// included, so it stays the organiser's. Naming a blank still fills a
 		// finished match's stored lineup, beside the member id every display
-		// resolves. The store checks under its own lock, so two callers naming
-		// one blank member cannot both pass.
+		// resolves. The store checks that, and that the competition has not
+		// finished, under its own lock, so two callers naming one blank member
+		// cannot both pass, nor can one racing the finish.
 		rename := store.RenameTeamMember
 		if anonymous {
-			if !selfRunCompetitionOpen(c, comp) {
-				return
-			}
 			rename = store.NameUnnamedTeamMember
 		}
 		if err := rename(compID, teamID, memberID, req.Name); err != nil {
@@ -275,16 +274,6 @@ var errCompetitionFinished = &selfRunRefusal{
 	message: "This competition has finished, so its teams can no longer be changed. Contact the tournament organizer to correct it.",
 }
 
-// selfRunCompetitionOpen answers errCompetitionFinished, and reports false,
-// when a participant's team write reaches a finished competition.
-func selfRunCompetitionOpen(c *gin.Context, comp *state.Competition) bool {
-	if comp.Status == state.CompStatusComplete {
-		c.JSON(errCompetitionFinished.status, errCompetitionFinished.body())
-		return false
-	}
-	return true
-}
-
 // errMemberAlreadyNamed refuses a participant's rename of a team member who
 // already has a name (state.ErrTeamMemberNamed, which only the participant's
 // NameUnnamedTeamMember returns). The rename reaches every stored lineup and
@@ -319,6 +308,10 @@ func respondSquadWriteError(c *gin.Context, err error) {
 	}
 	if errors.Is(err, state.ErrTeamMemberNamed) {
 		c.JSON(errMemberAlreadyNamed.status, errMemberAlreadyNamed.body())
+		return
+	}
+	if errors.Is(err, state.ErrCompetitionFinished) {
+		c.JSON(errCompetitionFinished.status, errCompetitionFinished.body())
 		return
 	}
 	if errors.Is(err, state.ErrTeamMemberClearAfterStart) {

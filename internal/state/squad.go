@@ -454,17 +454,41 @@ func squadDuplicateNameCheck(candidateName string, otherNames []string) error {
 // by overwriting it; a squad member is not, which is why the two diverge.
 // See requireTeamParticipantLocked below.
 func (s *Store) AddTeamMember(compID, teamID, name string) (domain.TeamMember, error) {
-	return s.AddTeamMemberUpTo(compID, teamID, name, 0)
+	return s.addTeamMember(compID, teamID, name, 0, false)
 }
 
 // ErrTeamMemberLimit is AddTeamMemberUpTo's refusal: the squad already holds
 // limit members.
 var ErrTeamMemberLimit = errors.New("team already holds as many members as allowed")
 
-// AddTeamMemberUpTo is AddTeamMember held to a squad of at most limit members
-// (limit <= 0 means no cap). The count is read under the same lock as the
-// write, so requests racing each other cannot both pass it.
+// ErrCompetitionFinished refuses a participant's team-member write
+// (AddTeamMemberUpTo, NameUnnamedTeamMember) once the competition is
+// complete.
+var ErrCompetitionFinished = errors.New("competition has finished")
+
+// AddTeamMemberUpTo is a self-run participant's add: AddTeamMember held to a
+// squad of at most limit members (limit <= 0 means no cap), and refused with
+// ErrCompetitionFinished once the competition is complete. Both are read under
+// the same lock as the write, the lock a competition's completion also takes,
+// so requests racing each other or the finish cannot pass them.
 func (s *Store) AddTeamMemberUpTo(compID, teamID, name string, limit int) (domain.TeamMember, error) {
+	return s.addTeamMember(compID, teamID, name, limit, true)
+}
+
+// requireCompetitionOpenLocked is ErrCompetitionFinished's check. The caller
+// holds the competition lock.
+func (s *Store) requireCompetitionOpenLocked(compID string) error {
+	comp, err := s.loadCompetitionLocked(compID)
+	if err != nil {
+		return err
+	}
+	if comp != nil && comp.Status == CompStatusComplete {
+		return ErrCompetitionFinished
+	}
+	return nil
+}
+
+func (s *Store) addTeamMember(compID, teamID, name string, limit int, participant bool) (domain.TeamMember, error) {
 	if err := ValidateCompetitionID(compID); err != nil {
 		return domain.TeamMember{}, err
 	}
@@ -476,6 +500,11 @@ func (s *Store) AddTeamMemberUpTo(compID, teamID, name string, limit int) (domai
 
 	if err := s.requireTeamParticipantLocked(compID, teamID); err != nil {
 		return domain.TeamMember{}, err
+	}
+	if participant {
+		if err := s.requireCompetitionOpenLocked(compID); err != nil {
+			return domain.TeamMember{}, err
+		}
 	}
 
 	squads, err := s.loadSquadsLocked(compID)
@@ -526,11 +555,13 @@ func (s *Store) RenameTeamMember(compID, teamID, memberID, newName string) error
 	return s.nameTeamMember(compID, teamID, memberID, newName, false)
 }
 
-// NameUnnamedTeamMember is RenameTeamMember for a member who has no name yet,
-// refused with ErrTeamMemberNamed when the member has one. The check reads
-// under the same hold of the competition lock as the write, so two callers
-// naming one blank member cannot both pass it: the second finds the first's
-// name.
+// NameUnnamedTeamMember is a self-run participant's RenameTeamMember: for a
+// member who has no name yet, refused with ErrTeamMemberNamed when the member
+// has one and with ErrCompetitionFinished once the competition is complete.
+// Both checks read under the same hold of the competition lock as the write,
+// the lock a competition's completion also takes, so two callers naming one
+// blank member cannot both pass (the second finds the first's name), and
+// neither can a caller racing the finish.
 func (s *Store) NameUnnamedTeamMember(compID, teamID, memberID, newName string) error {
 	return s.nameTeamMember(compID, teamID, memberID, newName, true)
 }
@@ -568,8 +599,13 @@ func (s *Store) renameTeamMemberTx(tx StoreTx, compID, teamID, memberID, newName
 	if target == -1 {
 		return ErrTeamMemberNotFound
 	}
-	if onlyUnnamed && strings.TrimSpace(existing[target].Name) != "" {
-		return ErrTeamMemberNamed
+	if onlyUnnamed {
+		if strings.TrimSpace(existing[target].Name) != "" {
+			return ErrTeamMemberNamed
+		}
+		if err := s.requireCompetitionOpenLocked(compID); err != nil {
+			return err
+		}
 	}
 	if err := squadDuplicateNameCheck(newName, otherNames); err != nil {
 		return err

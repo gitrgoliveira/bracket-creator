@@ -73,6 +73,19 @@ type LineupRequest struct {
 	MemberIDs map[domain.Position]string `json:"memberIds,omitempty"`
 }
 
+// validLineupNames answers 400, and reports false, when a position's name is
+// longer than a competitor's (MaxLenPlayerName). Both lineup PUTs ask it, as
+// both store the names they are sent.
+func validLineupNames(c *gin.Context, req LineupRequest) bool {
+	for pos, name := range req.Positions {
+		if err := validateMaxLen("positions."+string(pos), name, MaxLenPlayerName); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return false
+		}
+	}
+	return true
+}
+
 // RegisterPublicLineupHandlers wires the read-only GET
 // /competitions/:id/teams/:tid/lineups/:round and
 // /competitions/:id/teams/:tid/match-lineups/:matchId endpoints on an
@@ -225,6 +238,9 @@ func RegisterLineupHandlers(r *gin.RouterGroup, store TeamLineupStore, comps Com
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 			return
 		}
+		if !validLineupNames(c, req) {
+			return
+		}
 
 		lineup := domain.TeamLineup{
 			TeamID:        teamID,
@@ -269,11 +285,8 @@ func RegisterLineupHandlers(r *gin.RouterGroup, store TeamLineupStore, comps Com
 			return
 		}
 
-		for pos, name := range req.Positions {
-			if err := validateMaxLen("positions."+string(pos), name, MaxLenPlayerName); err != nil {
-				c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-				return
-			}
+		if !validLineupNames(c, req) {
+			return
 		}
 
 		lineup := domain.TeamLineup{

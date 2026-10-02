@@ -249,30 +249,17 @@ func RegisterDaihyosenHandlers(r *gin.RouterGroup, eng DaihyosenEngine, store Da
 			// court and eligibility checks a start runs; that is theirs to do.
 			u.Status = state.MatchStatusRunning
 			// Clear ALL DH-derived match-level result/decision metadata so the
-			// match returns to a clean running state. MatchResult.Decision has no
-			// omitempty, so leaving Decision/DecisionBy/DecisionReason/Encho set
-			// would let a removed daihyosen still present as decided-by-daihyosen
-			// (or carry stale overtime) while Status is back to running. WinnerID/
-			// WinnerSide are cleared alongside Winner: the organiser's remove
-			// also reaches a finished match, whose winner a decision may have
-			// recorded beside an unfought representative bout, and a stored POOL
-			// match that has picked up a legacy/hand-edited Position=-1 sub CAN
-			// carry a stale WinnerID left over from an unrelated prior result,
-			// which would otherwise fail backfillMatchIdentity's forward-write
-			// validation (bc-idfx finding 10) as an inherited 500, not this
-			// handler's own fault.
-			u.Winner = ""
-			u.WinnerID = ""
-			u.WinnerSide = ""
-			// The judges'-decision mark travels IN the ippons: stripping it here
-			// clears the verdict on both store branches alike, each of which
-			// persists these slices natively (the bracket write copies them onto
-			// BracketMatch.IpponsA/B, the pool write stores them as the cells).
-			u.IpponsA = domain.StripHantei(u.IpponsA)
-			u.IpponsB = domain.StripHantei(u.IpponsB)
-			u.Decision = ""
-			u.DecisionBy = ""
-			u.DecisionReason = ""
+			// match returns to a clean running state: the verdict
+			// (clearMatchVerdict), and the overtime, which a removed daihyosen
+			// must not leave behind either. WinnerID/WinnerSide go with Winner:
+			// the organiser's remove also reaches a finished match, whose winner
+			// a decision may have recorded beside an unfought representative
+			// bout, and a stored POOL match that has picked up a
+			// legacy/hand-edited Position=-1 sub CAN carry a stale WinnerID left
+			// over from an unrelated prior result, which would otherwise fail
+			// backfillMatchIdentity's forward-write validation (bc-idfx finding
+			// 10) as an inherited 500, not this handler's own fault.
+			clearMatchVerdict(&u)
 			u.Encho = nil
 			if _, err := eng.RecordMatchResultWithIneligibilityTx(stx, id, mid, &u); err != nil {
 				return err
@@ -441,13 +428,20 @@ func RegisterDaihyosenHandlers(r *gin.RouterGroup, eng DaihyosenEngine, store Da
 			u := *match
 			// AddDaihyosen only succeeds against ErrPoolMatch's rejection when
 			// engine.IsPoolMatchID(mid) is false, so `match` here is ALWAYS the
-			// bracket projection (daihyosenBracketResult). Only WinnerID and
-			// WinnerSide are cleared: Winner and Decision are kept, so the
-			// organiser's add to a finished match leaves its winner and
-			// decision beside the running status until the next score write
-			// replaces them.
-			u.WinnerID = ""
-			u.WinnerSide = ""
+			// bracket projection (daihyosenBracketResult). The organiser's add
+			// to a finished match reopens its result, so the verdict it
+			// recorded goes (clearMatchVerdict) rather than standing beside the
+			// running status until the next score write. A recorded withdrawal
+			// or default win stays: removing one is its own action (Clear
+			// withdrawal and reopen), and the competitor status it wrote would
+			// otherwise name a match that no longer records it. Only its
+			// WinnerID and WinnerSide go, as they always have.
+			if domain.IsDefaultWinDecisionStr(u.Decision) {
+				u.WinnerID = ""
+				u.WinnerSide = ""
+			} else {
+				clearMatchVerdict(&u)
+			}
 			if stamp > 0 {
 				u.ModifiedAt = stamp
 			}
@@ -627,4 +621,22 @@ func countEligibleForSidesTx(tx state.StoreTx, compID, matchID, sideAID, sideBID
 	}
 	a, b := engine.BarredSides(statuses, matchID, sideAID, sideBID)
 	return eligible(a), eligible(b), nil
+}
+
+// clearMatchVerdict clears a match's result so it reads as undecided: the
+// winner, the decision, and the judges'-decision mark, which travels IN the
+// ippons, so stripping it clears the verdict on both store branches alike
+// (the bracket write copies the slices onto BracketMatch.IpponsA/B, the pool
+// write stores them as the cells). MatchResult.Decision has no omitempty, so a
+// decision left set would still read as decided while the match is running.
+// Adding and removing a representative bout both put a match back to running.
+func clearMatchVerdict(u *state.MatchResult) {
+	u.Winner = ""
+	u.WinnerID = ""
+	u.WinnerSide = ""
+	u.IpponsA = domain.StripHantei(u.IpponsA)
+	u.IpponsB = domain.StripHantei(u.IpponsB)
+	u.Decision = ""
+	u.DecisionBy = ""
+	u.DecisionReason = ""
 }

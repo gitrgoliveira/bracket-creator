@@ -3843,7 +3843,13 @@ paths:
               schema:
                 $ref: '#/components/schemas/TeamLineup'
         '400':
-          $ref: '#/components/responses/BadRequest'
+          description: >
+            The body is not a JSON object, a position key is not a valid
+            position, or a position's name is longer than 100 bytes.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
         '500':
           $ref: '#/components/responses/InternalError'
     delete:
@@ -3913,7 +3919,8 @@ paths:
         password: the public score sheet saves it when a competitor names a
         bout's fighter (bc-dhas). Such a request is refused for a match that
         does not exist (404), for a team the match does not hold by id (404
-        `team_not_in_match`), or for a match that has finished (409
+        `team_not_in_match`), for a member id the team does not hold (400
+        `team_member_not_in_team`), or for a match that has finished (409
         `result_finalized`, the score endpoint's own refusal); the organiser,
         sending the password, keeps the always-editable rule above, and a
         password that is sent but wrong gets 401 before the body is read.
@@ -3933,7 +3940,17 @@ paths:
               schema:
                 $ref: '#/components/schemas/TeamLineup'
         '400':
-          $ref: '#/components/responses/BadRequest'
+          description: |
+            The body is not a JSON object, a position key is not a valid
+            position, or a position's name is longer than 100 bytes. Self-run,
+            an empty password: also a member id the team does not hold
+            (`error: team_member_not_in_team`, with a `message` to show, e.g.
+            "The member chosen for senpo is not on this team. Pick again from
+            the list.").
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
         '401':
           description: >
             `invalid tournament password`: missing or wrong in an officiated

@@ -128,14 +128,16 @@ describe('API.putMatchLineup', () => {
 
   // bc-dhas: on a self-run tournament the public score sheet may save a
   // lineup, but not once the match has finished. The refusal names the
-  // reason in a sentence, which is what the editor shows, not the code.
-  it('throws the sentence of a finished match\'s refusal, not its code', async () => {
+  // reason in a sentence, which is what the editor shows, and the error
+  // keeps the code beside it, as the member writes' errors do.
+  it('throws the sentence of a finished match\'s refusal, carrying its code', async () => {
     global.fetch = mockFetch(409, {
       error: 'result_finalized',
       message: 'This match has finished, so its lineup can no longer be changed. Contact the tournament organizer to correct it.',
     });
-    await expect(API.putMatchLineup('c1', 't1', 'm1', { senpo: 'Bob' }, ''))
-      .rejects.toThrow('This match has finished, so its lineup can no longer be changed.');
+    const err = await API.putMatchLineup('c1', 't1', 'm1', { senpo: 'Bob' }, '').catch((e) => e);
+    expect(err.message).toBe('This match has finished, so its lineup can no longer be changed. Contact the tournament organizer to correct it.');
+    expect(err.code).toBe('result_finalized');
   });
 });
 

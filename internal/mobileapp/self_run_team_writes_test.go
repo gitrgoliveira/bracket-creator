@@ -133,6 +133,20 @@ func TestSelfRun_MatchLineup_RefusesAnOverlongName(t *testing.T) {
 	assert.False(t, ok, "a refused lineup writes nothing")
 }
 
+// The round lineup stores the names it is sent too, so it takes the same cap,
+// for the organiser who is the only caller it has.
+func TestRoundLineup_RefusesAnOverlongName(t *testing.T) {
+	f := newTeamWritesFixture(t, true)
+
+	path := "/api/competitions/c1/teams/" + f.teamA + "/lineups/0"
+	w := f.send(http.MethodPut, path, "main-pw", senpo(strings.Repeat("x", MaxLenPlayerName+1), f.blankA))
+	require.Equal(t, http.StatusBadRequest, w.Code, w.Body.String())
+	lineups, err := f.store.LoadTeamLineups("c1")
+	require.NoError(t, err)
+	_, ok := findRoundLineup(lineups, f.teamA, 0)
+	assert.False(t, ok, "a refused lineup writes nothing")
+}
+
 func TestSelfRun_MatchLineup_RefusesAMemberTheTeamDoesNotHold(t *testing.T) {
 	f := newTeamWritesFixture(t, true)
 	squads, err := f.store.LoadSquads("c1")
@@ -420,4 +434,50 @@ func TestSelfRun_AddingAMemberIsBounded(t *testing.T) {
 		w = f.send(http.MethodPut, f.membersPath()+"/"+f.blankA, "main-pw", map[string]any{"name": "Mei Ito"})
 		require.Equal(t, http.StatusNoContent, w.Code, w.Body.String())
 	})
+}
+
+// staleCompetitions answers every competition read with the competition as it
+// stood before it finished: the handler's own read, taken before the store's
+// lock, where the organiser's finish can land between the two.
+type staleCompetitions struct{ *state.Store }
+
+func (s staleCompetitions) LoadCompetition(compID string) (*state.Competition, error) {
+	comp, err := s.Store.LoadCompetition(compID)
+	if comp == nil {
+		return comp, err
+	}
+	open := *comp
+	open.Status = state.CompStatusPools
+	return &open, err
+}
+
+// A participant's add or naming that races the competition's finish is
+// refused: the store judges "finished" under the lock the finish takes, not
+// the handler from its earlier read.
+func TestSelfRun_TeamWritesRacingTheFinishAreRefused(t *testing.T) {
+	f := newTeamWritesFixture(t, true)
+	require.NoError(t, f.store.SaveCompetition(&state.Competition{ID: "c1", Name: "Teams", Kind: "team", TeamSize: 5, Status: state.CompStatusComplete}))
+	before, err := f.store.LoadSquads("c1")
+	require.NoError(t, err)
+
+	gin.SetMode(gin.TestMode)
+	r := gin.New()
+	RegisterSquadHandlers(r.Group("/api"), f.store, staleCompetitions{f.store}, stubBroadcaster{}, f.store, NewFileVerifier(f.store))
+	send := func(method, path string, body any) *httptest.ResponseRecorder {
+		req := jsonReq(method, path, body)
+		req.Header.Set("X-Tournament-Password", "")
+		w := httptest.NewRecorder()
+		r.ServeHTTP(w, req)
+		return w
+	}
+
+	const finished = "This competition has finished, so its teams can no longer be changed. Contact the tournament organizer to correct it."
+	requireRefusal(t, send(http.MethodPost, f.membersPath(), map[string]any{"name": "Ren Abe"}),
+		http.StatusConflict, "competition_finished", finished)
+	requireRefusal(t, send(http.MethodPut, f.membersPath()+"/"+f.blankA, map[string]any{"name": "Mei Ito"}),
+		http.StatusConflict, "competition_finished", finished)
+
+	after, err := f.store.LoadSquads("c1")
+	require.NoError(t, err)
+	assert.Equal(t, before[f.teamA], after[f.teamA], "nothing was added or named")
 }

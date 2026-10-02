@@ -3788,9 +3788,10 @@ const API = {
             // 4xx: throw immediately (400 validation, etc.). A finished
             // match's refusal on the public page (409) carries a code in
             // `error` and the sentence to show in `message`, as the score
-            // path's does.
+            // path's does; the thrown error keeps both, as the member
+            // writes' do.
             const err = await res.json().catch(() => ({}));
-            throw new Error(_refusalText(err, "Failed to save match lineup"));
+            throw _refusalError(err, "Failed to save match lineup");
         }
         return res.json();
     },

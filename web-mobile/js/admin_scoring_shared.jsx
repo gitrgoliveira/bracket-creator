@@ -844,7 +844,10 @@ function FoulCounter({ fouls, setFouls, onIncrement, color, disabled }) {
 // `clearable` (bc-dnst): show the clear button even with an empty value, for a
 // host whose position is occupied by a picked squad slot that has no name yet
 // (the Up Next lineup panel); without it a nameless placement had no way out.
-function LineupNameInput({ value, roster, onSelect, disabled, ariaLabel, color, clearable }) {
+// `onListPick` is told of a pick made by tapping a row of the open list (an
+// option or "+ Add"), never of a typed commit, Enter, the clear button or a
+// click outside: only that pick closes the list under the finger.
+function LineupNameInput({ value, roster, onSelect, onListPick, disabled, ariaLabel, color, clearable }) {
   const [query, setQuery] = useStateA("");
   const [open, setOpen] = useStateA(false);
   const [active, setActive] = useStateA(-1); // -1 = no explicit selection yet
@@ -996,7 +999,7 @@ function LineupNameInput({ value, roster, onSelect, disabled, ariaLabel, color, 
           {matches.map((entry, i) => (
             <button type="button" key={entry.isObject ? (entry.raw?.id || entry.raw?.index) : entry.name}
               className={`pmf__option ${i === active ? "pmf__option--active" : ""}`}
-              onMouseDown={(e) => e.preventDefault()} onClick={() => commitEntry(entry)}>
+              onMouseDown={(e) => e.preventDefault()} onClick={() => { onListPick?.(); commitEntry(entry); }}>
               {entry.isObject ? (
                 <>
                   <span className="pmf__opt-label">{entry.label}</span>
@@ -1010,7 +1013,7 @@ function LineupNameInput({ value, roster, onSelect, disabled, ariaLabel, color, 
           {canAddNew && (
             <button type="button"
               className={`pmf__option lineup-name__add ${active === matches.length ? "pmf__option--active" : ""}`}
-              onMouseDown={(e) => e.preventDefault()} onClick={() => commit(q)}>
+              onMouseDown={(e) => e.preventDefault()} onClick={() => { onListPick?.(); commit(q); }}>
               <span className="pmf__opt-name">+ Add “{q}”</span>
             </button>
           )}

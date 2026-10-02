@@ -996,7 +996,7 @@ func (e *Engine) recordDecisionTx(tx state.StoreTx, compID, matchID, decision, d
 	}
 	// bc-rfsw: refused BEFORE the T103 lock below, so the operator is never
 	// asked to confirm a write the bracket write would then refuse.
-	if err := refuseDecisionReachingRunningMatch(tx, compID, matchID, decisionBy, prior); err != nil {
+	if err := refuseDecisionReachingRunningMatch(tx, compID, matchID, decisionBy, prior, modifiedAtStamp); err != nil {
 		return nil, nil, err
 	}
 	// T103: downstream-match check. The contract scope is "either
@@ -1017,9 +1017,11 @@ func (e *Engine) recordDecisionTx(tx state.StoreTx, compID, matchID, decision, d
 	// (FIK Art. 32 — see preserveLoserScore below).
 	// A kachinuki encounter carries no match-level overtime, so it is dropped
 	// before the circles are counted: the chokepoint that strips it runs later.
-	if comp, cerr := tx.LoadCompetition(compID); cerr == nil && comp != nil {
-		comp.ClearKachinukiEncounterEncho(&encho)
+	comp, err := tx.LoadCompetition(compID)
+	if err != nil {
+		return nil, nil, fmt.Errorf("recordDecisionTx: load competition %s: %w", compID, err)
 	}
+	comp.ClearKachinukiEncounterEncho(&encho)
 	winIppons := domain.DefaultWinIppons(encho.On())
 	result := &state.MatchResult{
 		ID:             matchID,
@@ -1087,11 +1089,13 @@ func (e *Engine) recordDecisionTx(tx state.StoreTx, compID, matchID, decision, d
 // recordDecisionTx assigns it) differs from the one already propagated, while
 // a later match it fed is being fought, is a *DownstreamKnockoutRunningError.
 // Asked before the T103 decision lock so no confirm precedes a write that
-// would be refused (operator decision 2026-09-27). It reuses
-// propagatedWinnerOf and propagatedDownstream.running, never a copy of their
-// rules; the winner is compared by id when the prior carries one, by name
-// only for BracketMatch's id-less shapes (bc-brid).
-func refuseDecisionReachingRunningMatch(tx state.StoreTx, compID, matchID, decisionBy string, prior *state.MatchResult) error {
+// would be refused (operator decision 2026-09-27). It asks the score door's
+// own rules (propagatedWinnerOf, winnerDiffers, downstreamCorrectionRefusal
+// with force, so only the running half applies) rather than a copy of them.
+// A stale decision (an offline replay older than the stored match) is not
+// judged here, exactly as the score door skips its guard for one: the write
+// itself then reports it superseded rather than refused.
+func refuseDecisionReachingRunningMatch(tx state.StoreTx, compID, matchID, decisionBy string, prior *state.MatchResult, modifiedAtStamp int64) error {
 	if IsPoolMatchID(matchID) {
 		return nil
 	}
@@ -1108,19 +1112,18 @@ func refuseDecisionReachingRunningMatch(tx state.StoreTx, compID, matchID, decis
 			if bm.ID != matchID {
 				continue
 			}
+			if !domain.ApplyByTimestamp(modifiedAtStamp, bm.ModifiedAt) {
+				return nil
+			}
 			winner, winnerID := prior.SideB, prior.SideBID
 			if decisionBy == "shiro" {
 				winner, winnerID = prior.SideA, prior.SideAID
 			}
 			priorName, priorID := propagatedWinnerOf(bracket, rIdx, mIdx, bm)
-			changed := winner != priorName
-			if priorID != "" {
-				changed = winnerID != priorID
-			}
-			if !changed {
+			if !winnerDiffers(winner, winnerID, priorName, priorID) {
 				return nil
 			}
-			return runningDownstreamRefusal(matchID, propagatedDownstreamOf(bracket, rIdx, mIdx).running())
+			return downstreamCorrectionRefusal(bracket, rIdx, mIdx, bm, true)
 		}
 	}
 	return nil

@@ -2,6 +2,7 @@ package state
 
 import (
 	"os"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -99,6 +100,27 @@ func TestLegacyKachinukiEncounterEnchoMarkerStopsTheRepair(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, pool, 1)
 	assert.Equal(t, encounterEncho(), pool[0].Encho, "a marked competition is not repaired again")
+}
+
+// A match file the repair cannot read is not "nothing to repair": the marker
+// stays unset so a later start, once the file reads, still clears it.
+func TestLegacyKachinukiEncounterEnchoUnreadableFileLeavesTheMarkerUnset(t *testing.T) {
+	dir := seedEncounterEncho(t, kachinukiComp("k"))
+	seed, err := NewStore(dir)
+	require.NoError(t, err)
+	require.NoError(t, os.WriteFile(seed.compPath("k", "bracket.json"), []byte("{not json"), 0o600))
+	raw, err := os.ReadFile(seed.compPath("k", "config.md")) // #nosec G304
+	require.NoError(t, err)
+	// The seeding store's own startup sweep already ran the repair: put the
+	// older release's marker-less config back.
+	require.NoError(t, os.WriteFile(seed.compPath("k", "config.md"),
+		[]byte(strings.ReplaceAll(string(raw), "kachinuki_encounter_encho_cleared: true\n", "")), 0o600))
+
+	fresh, err := NewStore(dir)
+	require.NoError(t, err)
+	raw, err = os.ReadFile(fresh.compPath("k", "config.md")) // #nosec G304
+	require.NoError(t, err)
+	assert.NotContains(t, string(raw), "kachinuki_encounter_encho_cleared", "an unreadable bracket leaves the marker unset")
 }
 
 // Scoping guard: an individual competition and a fixed-order team

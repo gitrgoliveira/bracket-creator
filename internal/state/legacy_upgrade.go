@@ -1396,8 +1396,11 @@ func (s *Store) padTeamDefaultWinBoutsInBracketLocked(compID string, teamSize in
 // Keyed on a persisted marker, Competition.KachinukiEncounterEnchoCleared,
 // not on the data's shape: it runs while the marker is absent and sets it
 // once both match files are saved, so it converges rather than re-running.
-// The marker is written LAST and only after both saves succeed, so a failed
-// save leaves it unset and the next process start retries. Both halves save
+// The marker is written LAST and only after both files are read and saved, so
+// a failed read or save leaves it unset and the next process start retries.
+// A competition created as kachinuki by this release starts with the marker
+// set (POST /competitions): its writes go through the chokepoint, so it holds
+// nothing to repair. Both halves save
 // through savePoolMatchesLocked/saveBracketLocked, where the file-version
 // bumps sit. Caller holds the per-comp lock (EnsureLegacyUpgraded).
 func (s *Store) upgradeKachinukiEncounterEnchoLocked(compID string, roster *legacyUpgradeRoster) error {
@@ -1431,9 +1434,11 @@ func (s *Store) upgradeKachinukiEncounterEnchoLocked(compID string, roster *lega
 // upgradeKachinukiEncounterEnchoLocked's pool-matches.csv half. Caller holds
 // the per-comp lock.
 func (s *Store) clearKachinukiEncounterEnchoInPoolMatchesLocked(compID string, comp *Competition) error {
+	// A missing file parses as empty; any error here is a real read or parse
+	// failure, returned so the marker stays unset and the next start retries.
 	parsed, err := parsePoolMatchesFile(s.compPath(compID, "pool-matches.csv"))
 	if err != nil {
-		return nil // missing/unreadable pool matches are the consumers' error to report
+		return fmt.Errorf("read pool matches: %w", err)
 	}
 	matches, _ := parsed.([]MatchResult)
 	changed := false
@@ -1452,9 +1457,10 @@ func (s *Store) clearKachinukiEncounterEnchoInPoolMatchesLocked(compID string, c
 // upgradeKachinukiEncounterEnchoLocked's bracket.json half. Caller holds the
 // per-comp lock.
 func (s *Store) clearKachinukiEncounterEnchoInBracketLocked(compID string, comp *Competition) error {
+	// As the pool half: a missing file parses as empty, so an error is real.
 	parsed, err := parseBracketFile(s.compPath(compID, "bracket.json"))
 	if err != nil {
-		return nil // missing/unreadable bracket is the consumers' error to report
+		return fmt.Errorf("read bracket: %w", err)
 	}
 	bracket, _ := parsed.(*Bracket)
 	if bracket == nil {

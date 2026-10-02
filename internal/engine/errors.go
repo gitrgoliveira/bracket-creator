@@ -182,7 +182,7 @@ func (e *DownstreamKnockoutPlayedError) Error() string {
 			change = fmt.Sprintf("changing the ranking of %s changes who qualified from it", pool)
 		}
 		return fmt.Sprintf("%s, and %s %s already fought by %s. Retry with forceDownstreamReopen to apply the change and reopen %s with the new competitor in, the winner cleared and the points kept",
-			change, strings.Join(labels, " and "), verb, who, them)
+			change, sentenceList(labels), verb, who, them)
 	}
 	labels := make([]string, 0, len(e.Blocking))
 	for _, b := range e.Blocking {
@@ -190,7 +190,7 @@ func (e *DownstreamKnockoutPlayedError) Error() string {
 	}
 	blocked := e.BlockingMatchID
 	if len(labels) > 0 {
-		blocked = strings.Join(labels, " and ")
+		blocked = sentenceList(labels)
 	}
 	if len(e.Blocking) > 1 {
 		// No Displaced clause: it names one competitor, and these matches do
@@ -280,7 +280,7 @@ func runningSubject(running []ReopenedMatch) string {
 		if len(labels) > 1 {
 			verb = "are"
 		}
-		return fmt.Sprintf("%s %s being fought now", strings.Join(labels, " and "), verb)
+		return fmt.Sprintf("%s %s being fought now", sentenceList(labels), verb)
 	}
 	parts := make([]string, 0, len(running))
 	for i, r := range running {
@@ -293,7 +293,7 @@ func runningSubject(running []ReopenedMatch) string {
 		}
 		parts = append(parts, part)
 	}
-	return strings.Join(parts, " and ")
+	return sentenceList(parts)
 }
 
 func (e *DownstreamKnockoutRunningError) Is(target error) bool {
@@ -341,6 +341,17 @@ func SentenceCase(s string) string {
 		return s
 	}
 	return strings.ToUpper(s[:1]) + s[1:]
+}
+
+// sentenceList joins items for a sentence, "A, B and C", the same words the
+// SPA's matchLabelList and runningParts (write_result.jsx) compose, so a
+// refusal reads alike whether the server's message or the client's copy is
+// shown.
+func sentenceList(items []string) string {
+	if len(items) <= 1 {
+		return strings.Join(items, "")
+	}
+	return strings.Join(items[:len(items)-1], ", ") + " and " + items[len(items)-1]
 }
 
 func MatchLabel(m ReopenedMatch) string {

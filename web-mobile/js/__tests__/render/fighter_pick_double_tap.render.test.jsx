@@ -139,4 +139,17 @@ describe.each([
     await keyboardClick(shiroBtn('D'));
     expect(marks('shiro')).toEqual(['D']);
   });
+
+  // A typed name is committed by the tap that leaves the box (click outside).
+  // That tap lands on a visible ippon button, not on one a closing list
+  // uncovered, so it scores.
+  it('a typed name committed by tapping an ippon button scores that ippon', async () => {
+    await mount(makeMatch());
+    await act(async () => { fireEvent.focus(shiroInput()); });
+    await act(async () => { fireEvent.change(shiroInput(), { target: { value: 'Jun Oda' } }); });
+    await act(async () => { fireEvent.mouseDown(shiroBtn('D')); });
+    expect(shiroInput().value).toBe('Jun Oda');
+    await pointerTap(shiroBtn('D'));
+    expect(marks('shiro')).toEqual(['D']);
+  });
 });

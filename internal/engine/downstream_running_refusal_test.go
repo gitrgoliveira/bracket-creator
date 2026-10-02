@@ -360,3 +360,65 @@ func TestPropagatedDownstream_RunningOrder(t *testing.T) {
 	assert.Empty(t, propagatedDownstream{bronze: bronze, next: final}.running())
 	assert.Empty(t, propagatedDownstream{}.running(), "past the final there is nothing")
 }
+
+// TestRecordDecisionTx_StaleDecisionOverRunningNextIsSuperseded: a kiken
+// queued offline replays after another device scored the semifinal the other
+// way and the final started. The decision is older than the stored match, so
+// it is reported superseded, exactly as a stale score write is, never as the
+// running refusal whose advice (save again) would overwrite the newer result.
+func TestRecordDecisionTx_StaleDecisionOverRunningNextIsSuperseded(t *testing.T) {
+	eng, store, _ := setupTestEngine(t)
+	compID := "kcdg-decision-stale"
+	require.NoError(t, store.SaveCompetition(&state.Competition{
+		ID: compID, Name: "kcdg", Status: state.CompStatusKnockout,
+	}))
+	require.NoError(t, store.SaveBracket(compID, &state.Bracket{
+		Rounds: [][]state.BracketMatch{
+			{
+				{ID: "m-r1-0", SideA: "Alice", SideB: "Bob", SideAID: "alice", SideBID: "bob",
+					Winner: "Bob", WinnerID: "bob", Status: state.MatchStatusCompleted,
+					IpponsB: []string{"M"}, ModifiedAt: 10_000, MatchNumber: 1, DisplayRound: 2, Court: "A"},
+				{ID: "m-r1-1", SideA: "Carol", SideB: "Dave", SideAID: "carol", SideBID: "dave",
+					Winner: "Carol", WinnerID: "carol", Status: state.MatchStatusCompleted,
+					IpponsA: []string{"M"}, MatchNumber: 2, DisplayRound: 2, Court: "A"},
+			},
+			{
+				{ID: "m-r2-0", SideA: "Bob", SideAID: "bob", SideB: "Carol", SideBID: "carol",
+					Status: state.MatchStatusRunning, IpponsA: []string{"K"}, MatchNumber: 3, DisplayRound: 1, Court: "A"},
+			},
+		},
+	}))
+
+	// The stale kiken: Bob (shiro) withdrawing, which would make Alice the winner.
+	err := inTx(t, store, compID, func(tx state.StoreTx) error {
+		_, _, e := eng.RecordDecisionTx(tx, compID, "m-r1-0", "kiken-voluntary", "shiro", "", nil, false, 5_000)
+		return e
+	})
+	require.ErrorIs(t, err, ErrMatchSuperseded, "a stale decision is reported as superseded, not as the running refusal")
+	var runErr *DownstreamKnockoutRunningError
+	assert.NotErrorAs(t, err, &runErr)
+
+	b, err := store.LoadBracket(compID)
+	require.NoError(t, err)
+	assert.Equal(t, "Bob", b.Rounds[0][0].Winner, "the newer result stands")
+	assert.Equal(t, "Bob", b.Rounds[1][0].SideA)
+}
+
+// TestDownstreamKnockoutRunningError_ThreeMatchesReadAsTheSPASays: a pool
+// correction can name three or more running matches; the server's sentence
+// lists them "A, B and C", the words write_result.jsx's runningParts composes
+// (pinned there by the same strings), so a replayed refusal and a direct one
+// read alike.
+func TestDownstreamKnockoutRunningError_ThreeMatchesReadAsTheSPASays(t *testing.T) {
+	withCourts := []ReopenedMatch{
+		{ID: "m-r1-0", Number: 1, Court: "A"},
+		{ID: "m-r1-1", Number: 2, Court: "B"},
+		{ID: "m-r1-2", Number: 3, Court: "C"},
+	}
+	assert.Equal(t, "Knockout Match 1 is being fought now on Shiaijo A, knockout Match 2 on Shiaijo B and knockout Match 3 on Shiaijo C. Finish them or send them back to the queue, then save this correction again.",
+		(&DownstreamKnockoutRunningError{Running: withCourts}).Error())
+
+	noCourts := []ReopenedMatch{{ID: "m-r1-0", Number: 1}, {ID: "m-r1-1", Number: 2}, {ID: "m-r1-2", Number: 3}}
+	assert.Equal(t, "Knockout Match 1, knockout Match 2 and knockout Match 3 are being fought now. Finish them or send them back to the queue, then save this correction again.",
+		(&DownstreamKnockoutRunningError{Running: noCourts}).Error())
+}

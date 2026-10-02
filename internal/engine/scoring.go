@@ -3042,10 +3042,17 @@ func bracketWinnerChanged(bm *state.BracketMatch, priorName, priorID string, res
 	if err := resolveWinnerIDFromSides(result, policy); err != nil {
 		return false, err
 	}
+	return winnerDiffers(result.Winner, result.WinnerID, priorName, priorID), nil
+}
+
+// winnerDiffers is the knockout-correction doors' one test of whether a new
+// winner differs from the one already propagated: by id when the prior carries
+// one, by name only for the id-less BracketMatch shapes (bc-brid).
+func winnerDiffers(newName, newID, priorName, priorID string) bool {
 	if priorID != "" {
-		return result.WinnerID != priorID, nil
+		return newID != priorID
 	}
-	return result.Winner != priorName, nil
+	return newName != priorName
 }
 
 // propagatedWinnerOf is the winner a bracket match's result currently stands
@@ -3380,13 +3387,7 @@ func deriveOverrideWinnerID(m *state.BracketMatch, winnerName string) string {
 func guardOverrideDownstreamKnockoutCorrection(bracket *state.Bracket, rIdx, mIdx int, m *state.BracketMatch, winnerName string, force bool) error {
 	newWinnerID := deriveOverrideWinnerID(m, winnerName)
 	priorName, priorID := propagatedWinnerOf(bracket, rIdx, mIdx, m)
-	var changed bool
-	if priorID != "" {
-		changed = newWinnerID != priorID
-	} else {
-		changed = winnerName != priorName
-	}
-	if !changed {
+	if !winnerDiffers(winnerName, newWinnerID, priorName, priorID) {
 		return nil
 	}
 	return downstreamCorrectionRefusal(bracket, rIdx, mIdx, m, force)

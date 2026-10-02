@@ -1038,6 +1038,10 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 		// name was unique) and then SaveCompetitionChanged silently
 		// overwrote the existing competition. POST is documented as
 		// CREATE, so an existing ID is a 409 / 400 case.
+		// A new kachinuki competition has no encounter overtime for the load
+		// repair to clear, since every write strips it, so it starts marked
+		// rather than having its config.md rewritten on the next start.
+		comp.KachinukiEncounterEnchoCleared = comp.IsKachinuki()
 		var validationErr, idErr error
 		lockErr := store.WithCompetitionRenameLock(func() error {
 			if existing, _ := store.LoadCompetition(comp.ID); existing != nil {

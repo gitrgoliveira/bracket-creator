@@ -507,7 +507,8 @@ type Competition struct {
 	// (upgradeKachinukiEncounterEnchoLocked, legacy_upgrade.go) has cleared the
 	// match-level overtime an older release stored on this competition's
 	// kachinuki encounters (bc-kheb). The repair runs only while it is false,
-	// and sets it once both match files are saved. Server-managed: `json:"-"`
+	// and sets it once both match files are saved; POST /competitions sets it
+	// on a competition created as kachinuki, which has nothing to repair. Server-managed: `json:"-"`
 	// keeps it off the wire, and the settings PUT copies onto the stored
 	// record, so nothing a client sends can clear it.
 	KachinukiEncounterEnchoCleared bool `yaml:"kachinuki_encounter_encho_cleared,omitempty" json:"-"`
@@ -586,8 +587,9 @@ func (c *Competition) IsKachinuki() bool {
 // fought on in encho does not put a kachinuki encounter in overtime, so (E)
 // lives on that bout's own row (SubMatchResult.Encho, never touched here) and
 // the encounter carries none. Called by the engine's kachinuki write
-// chokepoint (applyKachinukiMerge) and by the load repair, so a write and an
-// old file converge on the same shape. encho points at a MatchResult's or a
+// chokepoint (applyKachinukiMerge), by its decision write before the
+// default-win circles are counted (recordDecisionTx), and by the load repair,
+// so a write and an old file converge on the same shape. encho points at a MatchResult's or a
 // BracketMatch's Encho field.
 func (c *Competition) ClearKachinukiEncounterEncho(encho **EnchoMetadata) bool {
 	if !c.IsKachinuki() || encho == nil || *encho == nil {

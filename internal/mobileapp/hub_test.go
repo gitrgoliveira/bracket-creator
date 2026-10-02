@@ -682,7 +682,7 @@ func TestHandleEvents_SatisfiableReplayUnchanged(t *testing.T) {
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	req, _ := http.NewRequestWithContext(ctx, "GET", "/events", nil)
-	// Last-Event-ID=2 is within the ring (ring holds 100 by default) → satisfiable.
+	// Last-Event-ID=2 is within the ring (ring holds 200 by default) → satisfiable.
 	req.Header.Set("Last-Event-ID", "2")
 
 	done := make(chan struct{})

@@ -79,7 +79,7 @@ sequenceDiagram
     B->>C: GET /api/events
     C->>H: proxied (unbuffered)
     H-->>B: id: N · data: event   (real-time, as matches change)
-    Note over H: each event stamped seq=N,<br/>retained in a 100-event ring
+    Note over H: each event stamped seq=N,<br/>retained in a 200-event ring
     B--xH: Wi-Fi blip, connection drops
     B->>C: reconnect, new EventSource with ?lastEventId=N
     C->>H: proxied
@@ -91,7 +91,7 @@ sequenceDiagram
     H-->>B: heartbeat every 15s (observable frame)
 ```
 
-- **Replay ring**: `DefaultHistorySize` (100) recent events. The last id the client saw replays
+- **Replay ring**: `DefaultHistorySize` (200) recent events. The last id the client saw replays
   the gap. The client reconnects by opening a new `EventSource`, which sends no `Last-Event-ID`
   header, so it sends that id as the `lastEventId` query parameter (the header wins if both
   arrive).

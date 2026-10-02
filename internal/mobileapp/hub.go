@@ -62,9 +62,10 @@ const (
 )
 
 // DefaultHistorySize is the default ring buffer capacity for replay-on-reconnect (T216).
-// 100 events is roughly 30 seconds of activity on a busy tournament floor
-// (multi-court bulk score) and matches what we measured in v3 review.
-const DefaultHistorySize = 100
+// The v3 review measured 100 events at roughly 30 seconds of activity on a
+// busy tournament floor (multi-court bulk score); 200 holds about a minute,
+// so a device off the wifi that long still catches up by replay.
+const DefaultHistorySize = 200
 
 // DefaultMaxSSEClients caps concurrent /api/events subscribers per process.
 // Each subscriber allocates one buffered channel (100-element historyEntry

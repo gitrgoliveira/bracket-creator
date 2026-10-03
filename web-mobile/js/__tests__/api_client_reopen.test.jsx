@@ -159,8 +159,9 @@ describe('API.reopenMatch', () => {
   // so a kachinuki reopen blocked by a downstream match STILL RUNNING (not
   // yet played) gets its OWN copy instead of falling through to the bare
   // "downstream_knockout_running" token below. bc-cse: that copy is now the
-  // REOPEN variant ("...then reopen again"), not the score path's "...then
-  // save again" -- a reopen has no save step to retry.
+  // REOPEN variant ("...then reopen this match again", the server's own
+  // words), not the score path's "...then save this correction again" -- a
+  // reopen has no save step to retry.
   it('parses the downstream_knockout_running refusal with the REOPEN copy, not the score path\'s', async () => {
     global.fetch = mockFetch(409, {
       error: 'downstream_knockout_running',
@@ -172,7 +173,7 @@ describe('API.reopenMatch', () => {
       () => { throw new Error('expected a rejection'); },
       (e) => e
     );
-    expect(err.message).toBe('Match 7 (Final) is being fought now. Finish it or send it back to the queue, then reopen again.');
+    expect(err.message).toBe('Match 7 (Final) is being fought now. Finish it or send it back to the queue, then reopen this match again.');
     expect(err.code).toBe('downstream_knockout_running');
     expect(err.downstreamKnockoutRunning).toEqual({ matchId: 'm-r1-0', runningMatches: [{ id: 'm-r2-0', label: 'Match 7 (Final)' }] });
     // Not marked as a "played" refusal: the running shape carries nothing to

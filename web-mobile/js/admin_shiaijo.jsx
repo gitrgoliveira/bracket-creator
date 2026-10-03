@@ -492,6 +492,16 @@ function matchInComp(comp, id) {
     return b.thirdPlaceMatch && b.thirdPlaceMatch.id === id ? b.thirdPlaceMatch : null;
 }
 
+// confirmMatchLabel: how a confirm names the match it acts on. BOTH
+// competitors, never one: "Ito Rin leaves Shiaijo A" read as a person moving,
+// not a match. Order mirrors the on-court display (Shiro/sideB vs Aka/sideA).
+// Shared by the court move and Send back to queue.
+function confirmMatchLabel(m) {
+    const shiro = (m.sideB && m.sideB.name) || "";
+    const aka = (m.sideA && m.sideA.name) || "";
+    return (shiro && aka) ? `${shiro} vs ${aka}` : (shiro || aka || "this match");
+}
+
 function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, onMoveCourt, onLogout, onViewerMode, password, showToast, tweaks, onSwitchCourt }) {
     // Normalize once: filterMatchesByCourt trims its param, so a bookmarked URL
     // with stray whitespace must use the trimmed value everywhere.
@@ -1052,16 +1062,23 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
     // has no more matches to run on this court (it has finished, or hasn't
     // started yet: no running and no scheduled bouts here) AND another
     // competition still has scheduled matches on the court. That's the "you're
-    // on the wrong competition, switch" case. It deliberately does NOT fire just
-    // because another competition has an earlier match while this one is still
-    // active: the operator runs their current competition to completion first.
-    // Never red/navy: uses --warn-* tokens only.
+    // on the wrong competition, switch" case. It deliberately does NOT turn
+    // amber just because another competition has an earlier match while this
+    // one is still active: the operator runs their current competition to
+    // completion first. In that case it is the quiet variant (alsoWaiting):
+    // neutral, "N <comp> matches also waiting on this court", still a tap to
+    // switch and never a switch by itself (operator request 2026-10-03, after
+    // a match moved here from another court was visible only through the
+    // picker). Never red/navy: the amber case uses --warn-* tokens only.
     const nudgeBanner = useMemoSh(() => {
         if (!effectiveCompId || !courtKnown) return null;
 
-        // Selected comp still has a running or scheduled match here → no nudge.
+        // Selected comp still has a running or scheduled match here: no
+        // "switch" nudge, but the other competition's matches are still named
+        // (alsoWaiting), quietly, because a match moved onto this court from
+        // another one was otherwise visible only through the competition
+        // picker (operator request 2026-10-03).
         const selHasActive = running.some(m => m.compId === effectiveCompId) || filteredScheduled.length > 0;
-        if (selHasActive) return null;
 
         // Other competitions' scheduled matches still on this court.
         const otherScheduled = allMatches.filter(
@@ -1078,7 +1095,7 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
         }
         const entries = Object.values(byComp);
         entries.sort((a, b) => b.count - a.count);
-        return { comp: entries[0].name, compId: entries[0].id, count: entries[0].count };
+        return { comp: entries[0].name, compId: entries[0].id, count: entries[0].count, alsoWaiting: selHasActive };
     }, [allMatches, effectiveCompId, running, filteredScheduled, courtKnown]);
 
     // Delegate to the canonical start-patch factory (admin_schedule.jsx) rather
@@ -1258,12 +1275,7 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
     // score (operator ruling 2026-09-26, bc-sbq): starting it again carries on
     // from it, and the operator removes a wrong mark themselves.
     const requestRevert = (m) => {
-        // Name BOTH competitors so the confirm identifies the match, not just
-        // one side. Order mirrors the on-court display (Shiro/sideB vs Aka/sideA).
-        const shiro = (m.sideB && m.sideB.name) || "";
-        const aka = (m.sideA && m.sideA.name) || "";
-        const label = (shiro && aka) ? `${shiro} vs ${aka}` : (shiro || aka || "this match");
-        setPendingRevert({ compId: m.compId, matchId: m.id, label });
+        setPendingRevert({ compId: m.compId, matchId: m.id, label: confirmMatchLabel(m) });
     };
     const confirmRevert = async () => {
         if (!pendingRevert || reverting) return;
@@ -1297,8 +1309,7 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
     // once the operator confirms.
     const requestMoveCourt = (compId, matchId, toCourt) => {
         const mm = sorted.find((x) => x.compId === compId && x.id === matchId);
-        const label = mm ? ((mm.sideB && mm.sideB.name) || (mm.sideA && mm.sideA.name) || "this match") : "this match";
-        setPendingMove({ compId, matchId, to: toCourt, label, from: (mm && mm.court) || court });
+        setPendingMove({ compId, matchId, to: toCourt, label: mm ? confirmMatchLabel(mm) : "this match", from: (mm && mm.court) || court });
     };
     const confirmMoveCourt = async () => {
         if (!pendingMove || movingCourt) return;
@@ -1620,13 +1631,18 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
                             {nudgeBanner && (
                                 <button
                                     type="button"
-                                    className="alert alert--warn shiaijo-nudge"
+                                    className={`alert shiaijo-nudge ${nudgeBanner.alsoWaiting ? "shiaijo-nudge--also" : "alert--warn"}`}
+                                    data-testid="shiaijo-nudge"
                                     onClick={() => setSelectedCompId(nudgeBanner.compId)}
                                     aria-label={`Switch to ${nudgeBanner.comp}`}
                                 >
-                                    <span className="shiaijo-nudge__icon" aria-hidden="true">{Icon ? <Icon name="alert-circle" size={15} /> : "⚠"}</span>
+                                    {!nudgeBanner.alsoWaiting && (
+                                        <span className="shiaijo-nudge__icon" aria-hidden="true">{Icon ? <Icon name="alert-circle" size={15} /> : "⚠"}</span>
+                                    )}
                                     <span className="shiaijo-nudge__text">
-                                        {`Switch to ${nudgeBanner.comp}: ${nudgeBanner.count} match${nudgeBanner.count === 1 ? "" : "es"} waiting on this court.`}
+                                        {nudgeBanner.alsoWaiting
+                                            ? `${nudgeBanner.count} ${nudgeBanner.comp} match${nudgeBanner.count === 1 ? "" : "es"} also waiting on this court.`
+                                            : `Switch to ${nudgeBanner.comp}: ${nudgeBanner.count} match${nudgeBanner.count === 1 ? "" : "es"} waiting on this court.`}
                                     </span>
                                     <span className="shiaijo-nudge__cta" aria-hidden="true">Switch →</span>
                                 </button>

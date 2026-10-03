@@ -7,6 +7,7 @@ import { setCachedAuthConfig } from './admin_helpers.jsx';
 import { LS_NOTIFICATIONS_ENABLED } from './notification_keys.jsx';
 import { bridge, setSnapshotProvider, setDisplayCourt, getLastBroadcastAt, applyPatchToTree, mergeSnapshotIntoTree, deriveLinkState, freshnessMs } from './court_bridge.jsx';
 import { BRANDING_DEFAULTS } from './admin_branding.jsx';
+import { queuedWritesNoun } from './write_result.jsx';
 
 const { useState: useS, useEffect: useE, useRef: useR, useCallback: useC } = React;
 
@@ -346,24 +347,19 @@ function parseCourtFromSearch() {
 
 // bc-qttl: turn a queue alert from api_client.jsx into operator-facing prose.
 //
-// The queue holds writes that have not reached the server. Every alert below is
-// bad news about finished work, so every one of these is rendered as an ERROR
-// toast (>=8s dwell, manual dismiss, protected from being clobbered by a later
-// success toast) rather than an informational one.
+// The queue holds writes that have not reached the server. Every alert below but
+// one is bad news about finished work, rendered as an ERROR toast (>=8s dwell,
+// manual dismiss, protected from being clobbered by a later success toast)
+// rather than an informational one. The exception is 'sent' (bc-offl): held
+// finished results that have now landed, a success toast (queueAlertToastType).
 //
 // Counts are reported as FINISHED RESULTS when the alert carries any, falling
 // back to raw writes otherwise: an operator counts results, and a queued running
-// autosave is not one. Exported for test.
+// autosave is not one (queuedWritesNoun, write_result.jsx). Exported for test.
 export function queueAlertMessage(alert) {
   if (!alert) return null;
-  const total = Number(alert.count) || 0;
-  const term = Number(alert.terminalCount) || 0;
-  const n = term > 0 ? term : total;
+  const { n, one, noun } = queuedWritesNoun(alert.terminalCount, alert.count);
   if (n <= 0 && alert.kind !== "storage_full") return null;
-  const one = n === 1;
-  const noun = term > 0
-    ? (one ? "finished result" : "finished results")
-    : (one ? "score update" : "score updates");
   const detail = alert.detail ? ` (${alert.detail})` : "";
   switch (alert.kind) {
     case "expired":
@@ -390,9 +386,17 @@ export function queueAlertMessage(alert) {
       return "Browser storage is full, so unsaved results can no longer be kept safely. Let them sync before reloading this tab.";
     case "discarded":
       return `${n} unsaved ${noun} ${one ? "was" : "were"} discarded because the tournament password changed.`;
+    case "sent":
+      return `${n} ${noun} sent.`;
     default:
       return null;
   }
+}
+
+// queueAlertToastType: how the one subscriber below shows a queue alert. Only
+// 'sent' is good news; every other kind stays an error. Exported for test.
+export function queueAlertToastType(alert) {
+  return alert && alert.kind === "sent" ? "success" : "error";
 }
 
 function App() {
@@ -586,7 +590,7 @@ function App() {
     if (typeof window.subscribeQueueAlert !== "function") return;
     return window.subscribeQueueAlert((alert) => {
       const message = queueAlertMessage(alert);
-      if (message) showToast(message, "error");
+      if (message) showToast(message, queueAlertToastType(alert));
     });
     // Mount-only: showToast closes over setToast, which is stable.
     // oxlint-disable-next-line react-hooks/exhaustive-deps

@@ -152,3 +152,114 @@ describe('AdminTopbar: persistent "Sign in to save" control', () => {
     expect(screen.queryByText('Sign in to save')).toBeNull();
   });
 });
+
+// bc-offl: a result finished offline is held on the device, and the court
+// console moves on to the next match by itself, unmounting the editor whose
+// banner said so. The topbar is the always-mounted home for the held count
+// (operator decision 2026-09-27: a separate item after the connection pill,
+// "Offline: 1 result not sent"; the pill reads "Reconnecting..." meanwhile).
+describe('AdminTopbar: held results', () => {
+  let bus, unsentBus, hadUnsent, origUnsent;
+
+  beforeAll(() => {
+    hadUnsent = 'subscribeUnsentWrites' in window;
+    origUnsent = window.subscribeUnsentWrites;
+  });
+  afterAll(() => {
+    if (hadUnsent) window.subscribeUnsentWrites = origUnsent;
+    else delete window.subscribeUnsentWrites;
+  });
+
+  beforeEach(() => {
+    bus = makeFakeSyncBus('synced');
+    unsentBus = makeFakeSyncBus({ total: 0, terminal: 0, authBlocked: 0 });
+    window.subscribeSyncStatus = bus.subscribe;
+    window.subscribeUnsentWrites = unsentBus.subscribe;
+    window.requestReauth = vi.fn();
+  });
+
+  function renderTopbar() {
+    return render(
+      <window.AdminTopbar
+        tournament={{ name: 'Kanto Open', competitions: [] }}
+        onLogout={vi.fn()}
+        onViewerMode={vi.fn()}
+        hideRunningStrip
+      />
+    );
+  }
+  const held = () => screen.queryByTestId('topbar-held');
+
+  it('an offline held result shows "Offline: 1 result not sent" and the pill reads Reconnecting', async () => {
+    renderTopbar();
+    expect(held()).toBeNull();
+    expect(screen.getByText('Connected')).toBeTruthy();
+
+    await act(async () => {
+      unsentBus.set({ total: 1, terminal: 1, authBlocked: 0 });
+      bus.set('offline');
+    });
+
+    expect(held()).toHaveTextContent('Offline: 1 result not sent');
+    expect(held().className).toContain('topbar__held--offline');
+    expect(held().getAttribute('role')).toBe('status');
+    expect(screen.queryByText('Connected')).toBeNull();
+    expect(screen.getByText('Reconnecting…').className).toContain('topbar__conn--down');
+  });
+
+  it('counts results, plural, and only results when any are held', async () => {
+    renderTopbar();
+    await act(async () => {
+      unsentBus.set({ total: 3, terminal: 2, authBlocked: 0 });
+      bus.set('offline');
+    });
+    expect(held()).toHaveTextContent('Offline: 2 results not sent');
+  });
+
+  it('a held running update alone is a score update, and while sending it says so', async () => {
+    renderTopbar();
+    await act(async () => {
+      unsentBus.set({ total: 1, terminal: 0, authBlocked: 0 });
+      bus.set('syncing');
+    });
+    expect(held()).toHaveTextContent('Sending 1 score update…');
+    expect(held().className).not.toContain('topbar__held--offline');
+    // Only the write status 'offline' moves the pill.
+    expect(screen.getByText('Connected')).toBeTruthy();
+  });
+
+  it('a server that keeps refusing reads "Not saving"', async () => {
+    renderTopbar();
+    await act(async () => {
+      unsentBus.set({ total: 1, terminal: 1, authBlocked: 0 });
+      bus.set('server-error');
+    });
+    expect(held()).toHaveTextContent('Not saving: 1 result');
+    expect(held().className).toContain('topbar__held--error');
+  });
+
+  it('auth-required keeps its button and shows no indicator', async () => {
+    renderTopbar();
+    await act(async () => {
+      unsentBus.set({ total: 1, terminal: 1, authBlocked: 1 });
+      bus.set('auth-required');
+    });
+    expect(screen.getByText('Sign in to save')).toBeTruthy();
+    expect(held()).toBeNull();
+  });
+
+  it('goes once the queue drains', async () => {
+    renderTopbar();
+    await act(async () => {
+      unsentBus.set({ total: 1, terminal: 1, authBlocked: 0 });
+      bus.set('offline');
+    });
+    expect(held()).not.toBeNull();
+    await act(async () => {
+      unsentBus.set({ total: 0, terminal: 0, authBlocked: 0 });
+      bus.set('synced');
+    });
+    expect(held()).toBeNull();
+    expect(screen.getByText('Connected')).toBeTruthy();
+  });
+});

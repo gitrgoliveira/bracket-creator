@@ -19,7 +19,7 @@ import React from 'react';
 import { render, act, fireEvent, screen, waitFor } from '@testing-library/react';
 import { describe, it, expect, vi, beforeAll, afterAll, beforeEach } from 'vitest';
 import { installWindowStubs } from '../helpers/stub_globals.js';
-import { SUPERSEDED_REASON, SUPERSEDED_ADVICE, CLOCK_SKEW_REASON_TEXT, CLOCK_SKEW_ADVICE } from '../../write_result.jsx';
+import { SUPERSEDED_REASON, SUPERSEDED_ADVICE, CLOCK_SKEW_REASON_TEXT, CLOCK_SKEW_ADVICE, QUEUED_NOTICE } from '../../write_result.jsx';
 
 const STUBBED_GLOBALS = {
   isHikiwake: () => false,
@@ -297,7 +297,7 @@ describe('team score editor: a queued completed write says so', () => {
     await act(async () => { fireEvent.click(screen.getByText('Start match')); });
 
     const banner = await screen.findByRole('status');
-    expect(banner.textContent).toContain('Not sent yet');
+    expect(banner.textContent).toContain(QUEUED_NOTICE);
     // Distinct from the refused case: this one WILL sync, so it must not tell
     // the operator to go and check what is recorded.
     expect(banner.textContent).not.toContain('Check the recorded result');

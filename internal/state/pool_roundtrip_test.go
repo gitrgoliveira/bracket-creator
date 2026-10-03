@@ -46,6 +46,11 @@ var notPersistedInPoolCSV = map[string]string{
 		"by mobileapp.annotateEligibility on the served copy, from the " +
 		"competitor-status store; never persisted, same discipline.",
 	"WinnerSide": "derived: the winner name compared against SideA/SideB.",
+	"ClearsWithdrawal": "request-only flag set by the /score handler from the " +
+		"body's clearWithdrawal: it tells THIS write to replace a recorded " +
+		"withdrawal (engine.KeepsWithdrawalRuling). Once the write lands the " +
+		"stored decision says what happened, so persisting the flag would " +
+		"make a later write read as a removal it never asked for.",
 	"SubResultsRaw": "the SubResults cell's UNPARSED bytes, retained only when " +
 		"that cell failed to parse so the whole-file rewrite cannot destroy an " +
 		"organiser's malformed edit. It has no column of its own because it IS " +

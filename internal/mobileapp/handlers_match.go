@@ -717,8 +717,9 @@ func RegisterMatchHandlers(r *gin.RouterGroup, eng *engine.Engine, store Competi
 			// already played (resolved by retrying the SAME entry with
 			// forceDownstreamReopen:true once the operator confirms); and
 			// "downstream_knockout_running" when that pool entry would move a
-			// qualifier out of a knockout match being fought now (terminal:
-			// finish or requeue that match, then retry).
+			// qualifier out of a knockout match being fought now, or a knockout
+			// entry would change a side of one (terminal: finish or requeue
+			// that match, then retry).
 			//
 			// It matters because the single-match endpoints answer those
 			// conditions with a distinct body ({"applied": false, "reason":
@@ -917,8 +918,8 @@ func RegisterMatchHandlers(r *gin.RouterGroup, eng *engine.Engine, store Competi
 					// override, exactly as /score's 409 body prompts them to.
 					bulkErr.Reason = "downstream_knockout_played"
 				case errors.As(err, &downstreamRunningErr):
-					// Re-scoring THIS entry (a pool match) would move a
-					// qualifier out of a knockout match being fought now. Same
+					// Re-scoring THIS entry would move a qualifier out of, or
+					// change a side of, a knockout match being fought now. Same
 					// batch-Reason treatment as downstream_knockout_played
 					// above, but NOT resolvable with forceDownstreamReopen:
 					// the operator finishes or requeues that match first.
@@ -1151,8 +1152,8 @@ func RegisterMatchHandlers(r *gin.RouterGroup, eng *engine.Engine, store Competi
 			if respondIfDownstreamKnockoutPlayed(c, err) {
 				return
 			}
-			// Re-scoring this pool match would move a qualifier out of a
-			// knockout match being fought now: terminal, not confirmable (see
+			// Re-scoring this match would move a qualifier out of, or change
+			// a side of, a knockout match being fought now: terminal, not confirmable (see
 			// respondIfDownstreamKnockoutRunning's doc comment). A generic 500
 			// here would be retried forever by the offline write queue.
 			if respondIfDownstreamKnockoutRunning(c, err) {
@@ -1715,6 +1716,10 @@ func RegisterMatchHandlers(r *gin.RouterGroup, eng *engine.Engine, store Competi
 			var notFoundErr *engine.NotFoundError
 			var validationErr *engine.ValidationError
 			switch {
+			case respondIfDownstreamKnockoutRunning(c, err):
+				// bc-rfsw: the override would change a side of a later match
+				// being fought now; terminal, not confirmable, and checked
+				// first like every other door.
 			case respondIfDownstreamKnockoutPlayed(c, err):
 				// Same fixed wire contract as the score-write endpoint's 409;
 				// respondIfDownstreamKnockoutPlayed already wrote the response.
@@ -2591,6 +2596,12 @@ type scoreRequestBody struct {
 	// startPatch): the score the stored match holds is kept rather than
 	// replaced by the payload's empty one (engine.ForceOptions.StartOnly).
 	StartOnly bool `json:"startOnly"`
+	// ClearWithdrawal marks a completed correction that removes a withdrawal
+	// or default win recorded by mistake: the payload is the real result and
+	// replaces the ruling (state.MatchResult.ClearsWithdrawal,
+	// engine.KeepsWithdrawalRuling), where a correction without it keeps the
+	// ruling. The match stays finished, so this fix never takes the court.
+	ClearWithdrawal bool `json:"clearWithdrawal"`
 }
 
 // scoreResponseWithReopened is the score write's reply: the stored
@@ -2667,6 +2678,7 @@ func registerScoreHandler(r *gin.RouterGroup, eng ScoringEngine, store Competiti
 			return
 		}
 		req := body.ScoreRequest
+		req.ClearsWithdrawal = body.ClearWithdrawal
 		// startOnly keeps the stored score in place of the payload's, after
 		// the payload is validated, so on anything but a start the verdict
 		// would rest on a scoreline nothing checked it against.
@@ -3100,7 +3112,8 @@ func registerScoreHandler(r *gin.RouterGroup, eng ScoringEngine, store Competiti
 				return
 			}
 			// A pool correction that would move a qualifier out of a knockout
-			// match being fought now: terminal, not confirmable.
+			// match being fought now, or a knockout correction that would
+			// change a side of one: terminal, not confirmable.
 			if respondIfDownstreamKnockoutRunning(c, engErr) {
 				return
 			}

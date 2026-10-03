@@ -503,6 +503,16 @@ type Competition struct {
 	// competition to CompStatusComplete. Phase 3b.
 	LeagueTiebreakFinalized bool `yaml:"league_tiebreak_finalized,omitempty" json:"leagueTiebreakFinalized,omitempty"`
 
+	// KachinukiEncounterEnchoCleared records that the one-time load repair
+	// (upgradeKachinukiEncounterEnchoLocked, legacy_upgrade.go) has cleared the
+	// match-level overtime an older release stored on this competition's
+	// kachinuki encounters (bc-kheb). The repair runs only while it is false,
+	// and sets it once both match files are saved; POST /competitions sets it
+	// on a competition created as kachinuki, which has nothing to repair. Server-managed: `json:"-"`
+	// keeps it off the wire, and the settings PUT copies onto the stored
+	// record, so nothing a client sends can clear it.
+	KachinukiEncounterEnchoCleared bool `yaml:"kachinuki_encounter_encho_cleared,omitempty" json:"-"`
+
 	Players []domain.Player `yaml:"-" json:"players"`
 }
 
@@ -569,6 +579,24 @@ func (c Competition) EffectiveFormat() string {
 // fighter per side.
 func (c *Competition) IsKachinuki() bool {
 	return c != nil && c.TeamSize >= 2 && c.TeamMatchType == TeamMatchTypeKachinuki
+}
+
+// ClearKachinukiEncounterEncho clears a match-level overtime record from one
+// of c's encounters when c is kachinuki, and reports whether it cleared one.
+// The ONE owner of the rule (operator ruling 2026-09-24, bc-kheb): one bout
+// fought on in encho does not put a kachinuki encounter in overtime, so (E)
+// lives on that bout's own row (SubMatchResult.Encho, never touched here) and
+// the encounter carries none. Called by the engine's kachinuki write
+// chokepoint (applyKachinukiMerge), by its decision write before the
+// default-win circles are counted (recordDecisionTx), and by the load repair,
+// so a write and an old file converge on the same shape. encho points at a MatchResult's or a
+// BracketMatch's Encho field.
+func (c *Competition) ClearKachinukiEncounterEncho(encho **EnchoMetadata) bool {
+	if !c.IsKachinuki() || encho == nil || *encho == nil {
+		return false
+	}
+	*encho = nil
+	return true
 }
 
 // TeamBoutRows is the number of numbered bout rows a team match's block has
@@ -1389,19 +1417,25 @@ type MatchResult struct {
 	// it to resolve WinnerID from the stored side ids even when both sides
 	// share a name. Never persisted (json/CSV omit); it only carries the
 	// side decision from the handler to the id-resolution step.
-	WinnerSide     string           `json:"-" yaml:"-"`
-	IpponsA        []string         `json:"ipponsA"` // waza letters M/K/D/T/H/S (naginata), or ○ (FIK default-win marker)
-	IpponsB        []string         `json:"ipponsB"`
-	HansokuA       int              `json:"hansokuA"`
-	HansokuB       int              `json:"hansokuB"`
-	Decision       string           `json:"decision"`
-	DecisionBy     string           `json:"decisionBy,omitempty"`
-	DecisionReason string           `json:"decisionReason,omitempty"`
-	Status         MatchStatus      `json:"status"`
-	Court          string           `json:"court"`
-	Round          int              `json:"round" yaml:"round"`
-	ScheduledAt    string           `json:"scheduledAt"`
-	SubResults     []SubMatchResult `json:"subResults,omitempty"`
+	WinnerSide string `json:"-" yaml:"-"`
+	// ClearsWithdrawal is a transient flag set by the score handler from the
+	// request's `clearWithdrawal`: the operator removed a withdrawal or
+	// default win recorded by mistake and this completed write is the real
+	// result, so it replaces the stored ruling rather than keeping it
+	// (engine.KeepsWithdrawalRuling). Never persisted (json/CSV omit).
+	ClearsWithdrawal bool             `json:"-" yaml:"-"`
+	IpponsA          []string         `json:"ipponsA"` // waza letters M/K/D/T/H/S (naginata), or ○ (FIK default-win marker)
+	IpponsB          []string         `json:"ipponsB"`
+	HansokuA         int              `json:"hansokuA"`
+	HansokuB         int              `json:"hansokuB"`
+	Decision         string           `json:"decision"`
+	DecisionBy       string           `json:"decisionBy,omitempty"`
+	DecisionReason   string           `json:"decisionReason,omitempty"`
+	Status           MatchStatus      `json:"status"`
+	Court            string           `json:"court"`
+	Round            int              `json:"round" yaml:"round"`
+	ScheduledAt      string           `json:"scheduledAt"`
+	SubResults       []SubMatchResult `json:"subResults,omitempty"`
 	// SubResultsRaw holds the sub-bout cell EXACTLY as it was read, and only
 	// when it failed to parse as JSON. It is the repair copy. The reader
 	// degrades a malformed cell to an empty encounter rather than failing the

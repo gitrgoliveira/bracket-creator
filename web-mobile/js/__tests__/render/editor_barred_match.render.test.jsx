@@ -8,6 +8,7 @@ import React from 'react';
 import { render, act, fireEvent, screen } from '@testing-library/react';
 import { describe, it, expect, vi, beforeAll, afterAll, beforeEach } from 'vitest';
 import { installWindowStubs } from '../helpers/stub_globals.js';
+import { QUEUED_NOTICE } from '../../write_result.jsx';
 
 const STUBBED_GLOBALS = {
   isHikiwake: () => false,
@@ -102,6 +103,16 @@ describe('a scheduled barred match shows BarredMatchNotice instead of Start (bc-
     const notice = screen.getByTestId('barred-match-notice');
     const actions = document.querySelector('.score-nav__actions');
     expect(actions.contains(notice)).toBe(false);
+  });
+
+  // bc-offl: a default win recorded offline is held on the device, and the
+  // notice says so in the one held-write wording (QUEUED_NOTICE), not a
+  // fourth hand-typed copy.
+  it('individual editor: a default win held offline shows the held-write notice', async () => {
+    window.API.recordDecision = vi.fn().mockResolvedValue({ queued: true });
+    await mount(individualBarred());
+    await act(async () => { fireEvent.click(screen.getByTestId('barred-match-default-win')); });
+    expect(screen.getByTestId('barred-match-notice').textContent).toContain(QUEUED_NOTICE);
   });
 
   it('individual editor: a non-barred scheduled match still shows Start match', async () => {

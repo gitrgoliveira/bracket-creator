@@ -31,6 +31,7 @@ import {
   CORRECTION_PRESETS,
   useAdoptFromServer,
   useMatchReopen,
+  useWithdrawalRemoval,
   ReopenFeedback,
   RecordedWithdrawal,
   withdrawalInForce,
@@ -52,7 +53,7 @@ import { SideLabel } from './side_cell.jsx';
 // Imported from the leaf, not read off `window`, for the same reason
 // admin_scoring_shared.jsx does it: write_result.jsx is import-only, and this
 // editor is ES-imported by hosts and tests that never load api_client.
-import { notLandedBanner, terminalFailureBanner, notSavedText, writeDidNotLand, writeWasRefused, writeRetryable, dependentActionBlocked, FETCH_TIMEOUT_MS, REP_BOUT_NOT_ADDED, REP_BOUT_NOT_REMOVED, noAnswerSentence } from './write_result.jsx';
+import { notLandedBanner, terminalFailureBanner, notSavedText, writeDidNotLand, writeWasRefused, writeRetryable, dependentActionBlocked, FETCH_TIMEOUT_MS, REP_BOUT_NOT_ADDED, REP_BOUT_NOT_REMOVED, noAnswerSentence, QUEUED_NOTICE } from './write_result.jsx';
 
 // boutMiddle is THE single source for a bout's centre value (vs/X/(E)/(DH));
 // the editor derives its per-bout middle from it rather than restating the
@@ -991,9 +992,10 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
   // individual editor): it exists only so the operator sees an explanation
   // instead of a button that silently re-enables having saved nothing.
   const [writeFailed, setWriteFailed] = useStateA(null); // { reason, advice? } | null
-  // A COMPLETED write for this match that is queued rather than confirmed.
-  // SyncStatusPill covers the running case and renders nothing once a match
-  // is finished, so without this a team result entered on a flaky connection
+  // An explicit tap (Start match, Record bout, Finish/End) whose write was
+  // only queued rather than confirmed; autosaves are left to SyncStatusPill,
+  // which renders nothing once a match is finished, so without this a team
+  // result entered on a flaky connection
   // sat on screen looking saved with no indication it had not reached the
   // server -- the one moment the operator is most likely to walk away from
   // the court. Mirrors ScoreEditorModal's pendingWrite, minus its Retry
@@ -1328,6 +1330,14 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
   // grid behaviour.
   const teamMatchType = m.teamMatchType || compMeta?.config?.teamMatchType || "fixed";
   const isKachinuki = teamMatchType === "kachinuki";
+  // bc-kheb (operator ruling 2026-09-24): a kachinuki encounter never carries
+  // a match-level overtime. One bout fought on in encho does not put the
+  // encounter in overtime, so (E) lives on that bout's own row only. The
+  // count seeded from a legacy stored m.encho stays local: the eyebrow,
+  // enchoBlock and /decision read this derived count, never the raw one. A
+  // legacy kachinuki daihyosen row keeps its encho, as the stepper does.
+  const kachinukiEncounter = isKachinuki && !hasDaihyosen;
+  const encounterEnchoCount = kachinukiEncounter ? 0 : enchoPeriodCount;
   // Compact "Instrument Panel" mode fits the editor on one viewport page
   // for ≤5-person teams. Kachinuki renders only the current bout while
   // running (see kachinukiVisiblePositions), so it always fits even
@@ -1560,7 +1570,7 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
   // (operator ruling 2026-09-26): recording a withdrawal changes only the
   // match it was recorded on.
   const submitDecision = makeSubmitDecision({
-    match: m, enchoPeriodCount, password, mountedRef,
+    match: m, enchoPeriodCount: encounterEnchoCount, password, mountedRef,
     setDecisionSubmitting, setDecisionErr, setDecisionPromptKind,
     onClose, onAfterDecision, isComplete, entityLabel: "teams",
   });
@@ -1810,13 +1820,43 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
   // which awards the OTHER side from decisionBy, IV+1/PW+2 per bout.
   const unscoredBouts = unfinishedTeamBouts({ subs, teamSize });
   const recordedWithdrawal = withdrawalInForce(m);
-  const withdrawalWinner = recordedWithdrawal ? ({ a: "b", b: "a" }[withdrawnKeyOf(m)] || null) : null;
+  // Remove withdrawal (operator ruling 2026-10-03: a fix must leave the match
+  // resolved): the operator takes the recorded ruling off in this editor and
+  // Save correction sends the bouts' own result with clearWithdrawal, which
+  // replaces the ruling on the server. Nothing is sent before that save.
+  // Kachinuki is never offered it: a finished kachinuki encounter has no Save
+  // correction (its result is the last bout's, through End match), so it
+  // keeps Clear withdrawal and reopen alone (enabled: !isKachinuki, stated
+  // once here). The removal, and when it ends, is useWithdrawalRemoval's;
+  // rulingShown is the one answer every read site below asks ("is the
+  // recorded ruling still what this editor shows"). Undo, or the ruling
+  // moving under a pending removal, puts the recorded result back, bouts
+  // included.
+  const {
+    removing: removingWithdrawal, rulingShown, removal: withdrawalRemoval,
+    patchBlock: clearWithdrawalBlock,
+  } = useWithdrawalRemoval({
+    match: m,
+    enabled: !isKachinuki,
+    onUndo: () => { setSubs(serverSubs); setFinishRefused(false); },
+    onReset: () => setFinishRefused(false),
+  });
+  const withdrawalWinner = rulingShown ? ({ a: "b", b: "a" }[withdrawnKeyOf(m)] || null) : null;
   const teamVerdictText = withdrawalWinner
     ? teamResultLabel({ teamWinner: withdrawalWinner })
     : teamResultLabel({ teamWinner, isKnockoutPhase, hasAnyScore: teamHasAnyScore, isKachinuki });
   // Block Finish while a KO encounter has no winner: the operator must add and
   // score a daihyosen first (the affordance below). Pool draws stay finishable.
-  const koTieBlocked = isKoTieBlocked({ isKnockoutPhase, teamWinner, isComplete });
+  // saveEndsTheMatch is the one input the block and the button's label both
+  // read: a running match's Finish ends it, a correction of a finished one
+  // does not (its result is already on record), EXCEPT a removed withdrawal,
+  // whose save hands the result to the bouts, which can tie. That save is
+  // still a correction (Save correction, with its reason) but must not end a
+  // knockout tied, so the label says "Needs a winner" whenever the block
+  // holds, before it says "Save correction", in the order the individual
+  // editor's label already reads them.
+  const saveEndsTheMatch = !isComplete || removingWithdrawal;
+  const koTieBlocked = isKoTieBlocked({ isKnockoutPhase, teamWinner, isComplete: !saveEndsTheMatch });
   // bc-tmfn: Finish (and Save correction: corrections are not exempt) refuses
   // while a numbered bout has no result. Kachinuki ends on End match instead.
   // The refusal is shown once the operator taps Finish, and then follows the
@@ -1826,13 +1866,17 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
   // keeps the recorded kiken/fusenpai (operator ruling 2026-09-24, "Save
   // correction should just save what the operator enters"), so the bouts
   // nobody fought after it are not a finish (engine.KeepsWithdrawalRuling).
-  // Removing a withdrawal recorded by mistake is not a save at all: it is
-  // Clear withdrawal and reopen (RecordedWithdrawal), after which the match is
-  // running and every bout needs a result like any other. A kachinuki
+  // Removing a withdrawal recorded by mistake is either Remove withdrawal
+  // (removingWithdrawal: the same Save correction, now with every bout
+  // needing a result like any finish) or Clear withdrawal and reopen
+  // (RecordedWithdrawal), after which the match is running. A kachinuki
   // encounter a withdrawal decided gets the same line and control, in place
   // of its plain Reopen (canReopenKachinukiMatch), but no Save correction, so
   // keepsWithdrawal (which shapes that save) stays off for it.
-  const keepsWithdrawal = recordedWithdrawal && !isKachinuki;
+  // Remove withdrawal ends it: the bouts nobody fought are rows to fill
+  // again (the server's team finish gate applies to that save), with no
+  // credit and no kept winner.
+  const keepsWithdrawal = rulingShown && !isKachinuki;
   // bc-tmfn: the band's IV/PW (ts.iv/ts.pw below, via teamSides) include the
   // credited bouts while keepsWithdrawal holds. bc-cse: withdrawalInForce
   // now DELEGATES to isTeamDefaultWinDecision (team_default_credit.jsx), so
@@ -1991,15 +2035,15 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
   const kachinukiEnchoOffered = kachinukiBoutMode
     && kachinukiEnchoAvailable(kachinukiEndOutcome)
     && kachinukiLastScoredIdx === kachinukiCurBoutIdx;
-  // Encho on the tied current kachinuki bout: bump the bout's overtime count
-  // AND the match-level counter (decisionSuffix reads match.encho for the
-  // "(E)" suffix; enchoBlock forwards it since kachinuki has no daihyosen),
-  // then clear the tied outcome so the SAME pair keeps scoring that bout. The
-  // guard mirrors kachinukiEnchoOffered so the keyboard/programmatic path can
-  // never target a bout the encounter has already advanced past.
+  // Encho on the tied current kachinuki bout: bump THAT bout's overtime count
+  // only, then clear the tied outcome so the SAME pair keeps scoring that
+  // bout. The encounter is not in overtime (operator ruling 2026-09-24,
+  // bc-kheb): (E) belongs on the bout's own row, so the match-level count is
+  // left alone. The guard mirrors kachinukiEnchoOffered so the
+  // keyboard/programmatic path can never target a bout the encounter has
+  // already advanced past.
   const applyKachinukiEncho = () => {
     if (!kachinukiEnchoOffered) return;
-    setEnchoPeriodCount(cnt => cnt + 1);
     updateSub(kachinukiLastScoredIdx, prev => ({ ...prev, encho: (prev.encho || 0) + 1, draw: false, _preFusensho: undefined }));
     setEndArmed(false);
   };
@@ -2014,7 +2058,6 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
     && subTotals[kachinukiCurBoutIdx].aTotal === subTotals[kachinukiCurBoutIdx].bTotal;
   const undoKachinukiEncho = () => {
     if (!kachinukiEnchoUndoable) return;
-    setEnchoPeriodCount(cnt => Math.max(0, cnt - 1));
     updateSub(kachinukiCurBoutIdx, prev => {
       const encho = (prev.encho || 0) - 1;
       return encho > 0 ? { ...prev, encho } : { ...prev, encho: 0, draw: true };
@@ -2165,15 +2208,16 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
 
   // mp-4pc: when a daihyosen exists the encho counter belongs to that
   // sub-bout (attached per-sub in buildPatch), so suppress the top-level
-  // encho to avoid duplicate/ambiguous semantics on the team match.
-  const enchoBlock = () => (enchoPeriodCount > 0 && !hasDaihyosen) ? { encho: { periodCount: enchoPeriodCount } } : {};
+  // encho to avoid duplicate/ambiguous semantics on the team match. A
+  // kachinuki encounter sends none at all (encounterEnchoCount, bc-kheb).
+  const enchoBlock = () => (encounterEnchoCount > 0 && !hasDaihyosen) ? { encho: { periodCount: encounterEnchoCount } } : {};
   // An operator change to the overtime count from EnchoControl: the value (a
   // number, or the updater its stepper hands over), then the save it
   // schedules, as for a point. The count rides the running write either way:
   // the match's (enchoBlock) or, once a daihyosen exists, that bout's
   // (daihyosenEnchoFields). The count adopted from the server does not come
-  // through here, and the kachinuki Encho/Undo encho already save through
-  // updateSub.
+  // through here. The kachinuki Encho/Undo encho never touch this count:
+  // they change the bout's own encho through updateSub.
   const changeEnchoPeriodCount = (v) => { setEnchoPeriodCount(v); markScoringDirty(); };
 
   // Per-bout competitor names. Single choke point shared by the row
@@ -2704,13 +2748,12 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
           corrected: isComplete,
         },
         subResults,
-        // The match-level (E) is omitted on a DRAWN end: the middle mark can be
-        // X (tie) OR (E) but never both — a match that went to encho cannot end
-        // tied (boutMiddle) — so persisting encho alongside decision "hikiwake"
-        // is a contradiction the display only swallows because X beats (E)
-        // (mp-gmcg review). Each bout that actually went to overtime still
-        // records its own `encho` on its SubMatchResult (entry.encho above), so
-        // no overtime is lost; only the spurious encounter-level marker is.
+        // A kachinuki encounter never sends a match-level (E) (operator ruling
+        // 2026-09-24, bc-kheb): enchoBlock reads encounterEnchoCount, which is
+        // 0 here. Each bout that actually went to overtime records its own
+        // `encho` on its SubMatchResult (entry.encho above), so no overtime is
+        // lost. The DRAWN-end gate stays as it was (mp-gmcg review): a match
+        // that went to encho cannot end tied, so the two never ride together.
         ...(endWinnerSide ? enchoBlock() : {}),
         ...correctionBlock,
       };
@@ -2736,6 +2779,8 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
       subResults,
       ...enchoBlock(),
       ...correctionBlock,
+      // After Remove withdrawal this result replaces the recorded ruling.
+      ...clearWithdrawalBlock,
     };
   };
   // C1: keep autosave refs fresh with the latest buildPatch / onSubmit /
@@ -2753,7 +2798,9 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
     // Return the awaited result (rather than discarding it, as before) so
     // call sites that submit with status:"running" -- the ones
     // _notifyScoreSuperseded deliberately stays silent for -- can check
-    // writeWasSuperseded themselves. See writeFailed's declaration above.
+    // writeWasSuperseded themselves. See writeFailed's declaration above. A
+    // wrapper passed to doSubmit must return the write's result, or the pending
+    // banner and the refusal disarm below both lose it.
     let res;
     try {
       res = await fn();
@@ -2924,7 +2971,9 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
   // competition, so serialising the same board once per consumer was pure
   // repetition on the busiest path in the file.
   const serverSubsSig = JSON.stringify(serverSubs);
-  const isDirty = JSON.stringify(subs) !== serverSubsSig || daihyosenVerdictDirty;
+  const isDirty = JSON.stringify(subs) !== serverSubsSig || daihyosenVerdictDirty
+    // A removed withdrawal is unsaved until Save correction sends it.
+    || removingWithdrawal;
   // bc-dscn: an edit the running patch would NOT carry. Under kachinuki
   // buildPatch drops every row kachinukiRowSent does not name, so a changed
   // row it leaves out never reaches the server by a flush. Closing would lose
@@ -3111,7 +3160,7 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
                 : m.phase === "bracket" && m.matchNumber > 0
                 ? <span> · Match {m.matchNumber}</span>
                 : null}
-              {enchoPeriodCount > 0 && <span className="editor-modal__eyebrow-encho">· (E) Overtime ×{enchoPeriodCount}</span>}
+              {encounterEnchoCount > 0 && <span className="editor-modal__eyebrow-encho">· (E) Overtime ×{encounterEnchoCount}</span>}
             </div>
             <div className="editor-modal__title" style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
               <span><TermAS name="shiaijo">Shiaijo</TermAS> {m.court} · {m.scheduledAt || "Now"}</span>
@@ -3149,7 +3198,7 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
                       withdrawal's Kiken/Fus. rides beside the withdrawn team
                       (WithdrawalMarkedName, bc-kcsh), never in the centre. */}
                   <div className="sb-name">
-                    <WithdrawalMarkedName match={m} sideKey={s.key} side={s.color} name={s.name} number={s.number} />
+                    <WithdrawalMarkedName match={m} sideKey={s.key} side={s.color} name={s.name} number={s.number} rulingShown={rulingShown} />
                   </div>
                 </div>
                 {idx === 0 && (
@@ -3551,7 +3600,16 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
                               // case; only this host was missed (bc-dnst).
                               clearable={!!rs.memberId}
                               ariaLabel={`${posLabel} ${rs.label} player`}
-                              onSelect={(name, member) => rs.onSelectName(name, member)}
+                              // A pick from the list closes it, and the list
+                              // drops over this side's ippon buttons, so a double
+                              // tap's second tap would score the ippon it
+                              // uncovered (bc-flst). Only that pick stamps the
+                              // bout list's bounce ref, as opening a fought bout
+                              // does (bc-kbrw): a typed name committed by tapping
+                              // an ippon button lands on a visible target, and
+                              // that tap must score.
+                              onListPick={() => stampTap(boutListTapRef)}
+                              onSelect={rs.onSelectName}
                             />
                           ) : (
                             /* The read-only branch, which the DAIHYOSEN row
@@ -3794,7 +3852,7 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
                         {/* bc-kcsh: the recorded decision under the verdict
                             while a withdrawal is in force (see
                             teamVerdictText). */}
-                        {recordedWithdrawal && (
+                        {rulingShown && (
                           <div className="team-summary__fact" data-testid="team-summary-decision">{withdrawalLabel(m.decision)}</div>
                         )}
                       </div>
@@ -3974,7 +4032,11 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
               team stays with the Withdrawal or no-show controls below. The
               same component serves the individual editor. */}
           {recordedWithdrawal && !decisionPromptKind && !selfReport && (
-            <RecordedWithdrawal match={m} ctl={reopenCtl} disabled={submitting || decisionSubmitting} />
+            <RecordedWithdrawal
+              match={m} ctl={reopenCtl} disabled={submitting || decisionSubmitting}
+              // null on kachinuki: see useWithdrawalRemoval above.
+              removal={withdrawalRemoval}
+            />
           )}
           {!decisionPromptKind && !selfReport && (
             <details className="decision-disclosure">
@@ -4044,11 +4106,15 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
               mp-gmcg (critique + operator ruling): suppressed in kachinuki bout
               mode — declaring encho there is OPTIONAL, its only effect the middle
               mark (vs → "(E)"), and it is done via the footer Encho button, so a
-              period-stepper would be redundant AND confusing. Corrections,
-              daihyosen and fixed-format team matches keep it, except on the
-              public page once the judges decided the representative bout: its
-              overtime is part of that bout, which is shown, not offered. */}
-          {!kachinukiBoutMode && !repBoutDecidedForParticipant && (
+              period-stepper would be redundant AND confusing. bc-kheb (operator
+              ruling 2026-09-24): a kachinuki encounter has no match-level
+              overtime, so a completed one opened for correction offers none
+              either (kachinukiEncounter); a legacy kachinuki daihyosen row
+              keeps it. Daihyosen and fixed-format team matches keep it, except
+              on the public page once the judges decided the representative
+              bout: its overtime is part of that bout, which is shown, not
+              offered. */}
+          {!kachinukiBoutMode && !kachinukiEncounter && !repBoutDecidedForParticipant && (
             <EnchoControl
               enchoPeriodCount={enchoPeriodCount}
               setEnchoPeriodCount={changeEnchoPeriodCount}
@@ -4147,7 +4213,7 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
               closure to replay, so the operator re-enters and re-taps instead. */}
           {!writeFailed && pendingWrite && (
             <div className="pending-write-banner" role="status" aria-live="polite">
-              <span>Not sent yet: this result is saved on this device and will sync when the connection returns.</span>
+              <span>{QUEUED_NOTICE}</span>
             </div>
           )}
           {writeFailed && (
@@ -4259,6 +4325,9 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
                       const banner = notLandedBanner(res);
                       if (banner) setWriteFailed(banner);
                     }
+                    // bc-rboq: doSubmit reads the result to raise the pending
+                    // banner for a queued write; returning nothing hid it.
+                    return res;
                   });
                 }} disabled={submitting || !kachinukiCurrentBoutPlayed}
                   title={!kachinukiCurrentBoutPlayed ? "Nothing recorded for this bout yet" : undefined}>
@@ -4331,7 +4400,7 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
                   doSubmit(() => (isComplete ? onSubmit : onSubmitAndNext)(buildPatch("completed")));
                 }} disabled={submitting || koTieBlocked}
                   title={koTieBlocked ? "A knockout match can't be a draw: add and score a daihyosen to decide a winner" : undefined}>
-                  {submitting ? "Saving…" : isComplete ? "Save correction" : koTieBlocked ? "Needs a winner" : finishArmed ? "Tap again to finish →" : "Finish + Start Next →"}
+                  {submitting ? "Saving…" : koTieBlocked ? "Needs a winner" : isComplete ? "Save correction" : finishArmed ? "Tap again to finish →" : "Finish + Start Next →"}
                 </button>
               ) : (
                 <button className={`btn btn--primary ${finishArmed && !isComplete ? "btn--confirm" : ""}`} onClick={(ev) => {
@@ -4341,7 +4410,7 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
                   doSubmit(() => onSubmit(buildPatch("completed")));
                 }} disabled={submitting || koTieBlocked}
                   title={koTieBlocked ? "A knockout match can't be a draw: add and score a daihyosen to decide a winner" : undefined}>
-                  {submitting ? "Saving…" : isComplete ? "Save correction" : koTieBlocked ? "Needs a winner" : finishArmed ? "Tap again to finish" : "Finish"}
+                  {submitting ? "Saving…" : koTieBlocked ? "Needs a winner" : isComplete ? "Save correction" : finishArmed ? "Tap again to finish" : "Finish"}
                 </button>
               )}
             </div>

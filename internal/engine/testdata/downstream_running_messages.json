@@ -1,0 +1,94 @@
+{
+  "_comment": [
+    "The downstream_knockout_running refusal sentence, shared by BOTH language",
+    "implementations: DownstreamKnockoutRunningError.Error() in",
+    "internal/engine/errors.go (Go, the server's `message`) and",
+    "downstreamKnockoutRunningMessage / downstreamKnockoutRunningReopenMessage",
+    "in web-mobile/js/write_result.jsx (JS, what the SPA shows). The two used",
+    "to be pinned by copies of the same literals in each language's tests,",
+    "and the reopen wording drifted apart that way. Go half:",
+    "TestDownstreamKnockoutRunningError_SharedMessages",
+    "(internal/engine/downstream_running_refusal_test.go); JS half:",
+    "web-mobile/js/__tests__/downstream_running_messages_shared.test.jsx.",
+    "",
+    "Schema, one entry per case: `reopening` selects the door (false: a saved",
+    "correction, true: a reopen); `running` lists the matches being fought,",
+    "each as the engine's ReopenedMatch (`id`, `number`, `displayRound`,",
+    "`court`) plus the `label` the server sends on the wire for it (the Go",
+    "test checks MatchLabel produces it, the JS test passes it in);",
+    "`message` is the sentence both sides must produce."
+  ],
+  "cases": [
+    {
+      "name": "save, one match on a court",
+      "reopening": false,
+      "running": [
+        { "id": "m-r2-0", "number": 2, "displayRound": 1, "court": "A", "label": "Match 2 (Final)" }
+      ],
+      "message": "Match 2 (Final) is being fought now on Shiaijo A. Finish it or send it back to the queue, then save this correction again."
+    },
+    {
+      "name": "reopen, one match on a court",
+      "reopening": true,
+      "running": [
+        { "id": "m-r2-0", "number": 2, "displayRound": 1, "court": "A", "label": "Match 2 (Final)" }
+      ],
+      "message": "Match 2 (Final) is being fought now on Shiaijo A. Finish it or send it back to the queue, then reopen this match again."
+    },
+    {
+      "name": "reopen, one match with no court",
+      "reopening": true,
+      "running": [
+        { "id": "m-r2-0", "number": 7, "displayRound": 1, "court": "", "label": "Match 7 (Final)" }
+      ],
+      "message": "Match 7 (Final) is being fought now. Finish it or send it back to the queue, then reopen this match again."
+    },
+    {
+      "name": "save, the 3rd-place match alone",
+      "reopening": false,
+      "running": [
+        { "id": "m-bronze", "number": 0, "displayRound": 0, "court": "B", "label": "the 3rd-place match" }
+      ],
+      "message": "The 3rd-place match is being fought now on Shiaijo B. Finish it or send it back to the queue, then save this correction again."
+    },
+    {
+      "name": "save, two matches, the 3rd-place match first as the server sends them",
+      "reopening": false,
+      "running": [
+        { "id": "m-bronze", "number": 0, "displayRound": 0, "court": "B", "label": "the 3rd-place match" },
+        { "id": "m-r2-0", "number": 3, "displayRound": 1, "court": "A", "label": "Match 3 (Final)" }
+      ],
+      "message": "The 3rd-place match is being fought now on Shiaijo B and Match 3 (Final) on Shiaijo A. Finish them or send them back to the queue, then save this correction again."
+    },
+    {
+      "name": "save, three matches on courts",
+      "reopening": false,
+      "running": [
+        { "id": "m-r1-0", "number": 1, "displayRound": 0, "court": "A", "label": "knockout Match 1" },
+        { "id": "m-r1-1", "number": 2, "displayRound": 0, "court": "B", "label": "knockout Match 2" },
+        { "id": "m-r1-2", "number": 3, "displayRound": 0, "court": "C", "label": "knockout Match 3" }
+      ],
+      "message": "Knockout Match 1 is being fought now on Shiaijo A, knockout Match 2 on Shiaijo B and knockout Match 3 on Shiaijo C. Finish them or send them back to the queue, then save this correction again."
+    },
+    {
+      "name": "save, three matches with no court",
+      "reopening": false,
+      "running": [
+        { "id": "m-r1-0", "number": 1, "displayRound": 0, "court": "", "label": "knockout Match 1" },
+        { "id": "m-r1-1", "number": 2, "displayRound": 0, "court": "", "label": "knockout Match 2" },
+        { "id": "m-r1-2", "number": 3, "displayRound": 0, "court": "", "label": "knockout Match 3" }
+      ],
+      "message": "Knockout Match 1, knockout Match 2 and knockout Match 3 are being fought now. Finish them or send them back to the queue, then save this correction again."
+    },
+    {
+      "name": "reopen, three matches on courts",
+      "reopening": true,
+      "running": [
+        { "id": "m-r1-0", "number": 1, "displayRound": 0, "court": "A", "label": "knockout Match 1" },
+        { "id": "m-r1-1", "number": 2, "displayRound": 0, "court": "B", "label": "knockout Match 2" },
+        { "id": "m-r1-2", "number": 3, "displayRound": 0, "court": "C", "label": "knockout Match 3" }
+      ],
+      "message": "Knockout Match 1 is being fought now on Shiaijo A, knockout Match 2 on Shiaijo B and knockout Match 3 on Shiaijo C. Finish them or send them back to the queue, then reopen this match again."
+    }
+  ]
+}

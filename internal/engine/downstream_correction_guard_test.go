@@ -823,24 +823,58 @@ func TestRecordDecisionTxWithOptions_DecouplesForceFromBcKcdg(t *testing.T) {
 	})
 }
 
-// TestDownstreamKnockoutCorrection_RunningDownstreamIsLeftAlone pins the
-// operator's ruling of 2026-09-19: "you do not affect the state of the next
-// match unless it was closed."
-//
-// A downstream match that is being FOUGHT is not closed, so the correction is
-// neither refused nor allowed to clear it. Its status and its struck ippons
-// are left exactly as they are, and the side name is repainted by ordinary
-// propagation, as it has always been.
-//
-// The trade this ruling accepts, stated plainly because it is the one thing a
-// reader will want to check: the bout in progress keeps the ippons already
-// struck while the name above them changes. It is accepted because a running
-// match holds no VERDICT yet, so nothing self-contradictory is recorded, and
-// the alternative -- wiping a bout the shiaijo is in the middle of -- is the
-// more destructive act.
-func TestDownstreamKnockoutCorrection_RunningDownstreamIsLeftAlone(t *testing.T) {
-	eng, store, _ := setupTestEngine(t)
-	compID := "kcdg-running-downstream"
+// TestDownstreamKnockoutCorrection_RunningDownstreamRefuses pins the
+// operator's decision of 2026-09-27, which reverses the 2026-09-19 ruling for
+// a later match being FOUGHT: a knockout correction whose new winner would
+// change a side of a running later match is not saved, on every door, and
+// confirming cannot get past it. Repainting it silently swapped a competitor
+// inside a bout in progress, under the ippons already struck for the one
+// being replaced, with no word to the shiaijo. The operator finishes that
+// match or sends it back to the queue (which keeps its score), then saves the
+// correction again.
+func TestDownstreamKnockoutCorrection_RunningDownstreamRefuses(t *testing.T) {
+	for _, force := range []bool{false, true} {
+		eng, store, dir := setupTestEngine(t)
+		compID := "kcdg-running-downstream"
+		seedRunningNextRound(t, store, compID)
+		before, err := readCompFile(t, dir, compID, "bracket.json")
+		require.NoError(t, err)
+
+		var reopened []ReopenedMatch
+		txErr := inTx(t, store, compID, func(tx state.StoreTx) error {
+			_, err := eng.RecordMatchResultWithIneligibilityTx(tx, compID, "m-r1-0", correctR1ToBob("fix"),
+				ForceOptions{Force: force, Reopened: &reopened})
+			return err
+		})
+
+		var runErr *DownstreamKnockoutRunningError
+		require.ErrorAs(t, txErr, &runErr, "force=%v", force)
+		assert.NotErrorIs(t, txErr, ErrDownstreamKnockoutPlayed, "never offered as confirmable (force=%v)", force)
+		assert.Equal(t, "m-r1-0", runErr.MatchID)
+		require.Len(t, runErr.Running, 1)
+		assert.Equal(t, "m-r2-0", runErr.Running[0].ID)
+		assert.Equal(t, "A", runErr.Running[0].Court)
+		assert.False(t, runErr.Reopening)
+		assert.Equal(t, "Match 2 (Final) is being fought now on Shiaijo A. Finish it or send it back to the queue, then save this correction again.",
+			runErr.Error())
+		assert.Empty(t, reopened, "force=%v", force)
+
+		after, err := readCompFile(t, dir, compID, "bracket.json")
+		require.NoError(t, err)
+		assert.Equal(t, string(before), string(after), "a refused correction leaves no footprint (force=%v)", force)
+		b, err := store.LoadBracket(compID)
+		require.NoError(t, err)
+		assert.Equal(t, "Alice", b.Rounds[0][0].Winner)
+		assert.Equal(t, "Alice", b.Rounds[1][0].SideA, "the running match keeps its competitor")
+		assert.Equal(t, []string{"K"}, b.Rounds[1][0].IpponsB)
+		assert.Equal(t, state.MatchStatusRunning, b.Rounds[1][0].Status)
+	}
+}
+
+// seedRunningNextRound: m-r1-0 won by Alice, and m-r2-0, the final it feeds,
+// on Shiaijo A right now with one ippon struck and no verdict.
+func seedRunningNextRound(t *testing.T, store *state.Store, compID string) {
+	t.Helper()
 	require.NoError(t, store.SaveCompetition(&state.Competition{
 		ID: compID, Name: "kcdg", Status: state.CompStatusKnockout,
 	}))
@@ -849,30 +883,15 @@ func TestDownstreamKnockoutCorrection_RunningDownstreamIsLeftAlone(t *testing.T)
 			{
 				{ID: "m-r1-0", SideA: "Alice", SideB: "Bob", SideAID: "alice", SideBID: "bob",
 					Winner: "Alice", WinnerID: "alice", Status: state.MatchStatusCompleted,
-					IpponsA: []string{"M"}},
+					IpponsA: []string{"M"}, MatchNumber: 1, DisplayRound: 2, Court: "A"},
 			},
 			{
-				// On court right now: no verdict, one ippon struck.
 				{ID: "m-r2-0", SideA: "Alice", SideB: "Charlie", SideAID: "alice", SideBID: "charlie",
-					Status: state.MatchStatusRunning, IpponsB: []string{"K"}},
+					Status: state.MatchStatusRunning, IpponsB: []string{"K"},
+					MatchNumber: 2, DisplayRound: 1, Court: "A"},
 			},
 		},
 	}))
-
-	var reopened []ReopenedMatch
-	require.NoError(t, inTx(t, store, compID, func(tx state.StoreTx) error {
-		_, err := eng.RecordMatchResultWithIneligibilityTx(tx, compID, "m-r1-0", correctR1ToBob("fix"),
-			ForceOptions{Reopened: &reopened})
-		return err
-	}), "a running downstream match must not refuse the correction")
-	assert.Empty(t, reopened, "and must not be cleared by it")
-
-	b, err := store.LoadBracket(compID)
-	require.NoError(t, err)
-	assert.Equal(t, "Bob", b.Rounds[0][0].Winner)
-	assert.Equal(t, state.MatchStatusRunning, b.Rounds[1][0].Status, "still being fought")
-	assert.Equal(t, []string{"K"}, b.Rounds[1][0].IpponsB, "its struck ippon survives untouched")
-	assert.Equal(t, "Bob", b.Rounds[1][0].SideA, "the side is repainted by ordinary propagation")
 }
 
 // TestDownstreamKnockoutCorrection_DisplacedNamesTheStaleCompetitor pins what

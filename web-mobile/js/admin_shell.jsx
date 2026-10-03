@@ -3,6 +3,10 @@
 // lives here so it loads before any section-specific file. See
 // web-mobile/admin_split_plan.md.
 
+// The held-writes copy (bc-offl). write_result.jsx is an import-only leaf, so
+// this script-tagged module can import it without a double evaluation.
+import { heldWritesText } from './write_result.jsx';
+
 const { useState: useStateA, useMemo: useMemoA, useEffect: useEffectA, useRef: useRefA } = React;
 
 // Producers (loaded earlier).
@@ -157,6 +161,23 @@ function AdminTopbar({ onLogout, onViewerMode, tournament, hideRunningStrip }) {
     return () => unsub();
   }, []);
 
+  // bc-offl: the held-writes count. A result finished while offline is held on
+  // this device, and the court console rightly moves on to the next match, which
+  // unmounts the editor whose banner said so; this indicator is the always-
+  // mounted home for it (operator decision 2026-09-27: a separate item after the
+  // connection pill, the danger colour, no pulse).
+  const [unsent, setUnsent] = useStateA(null);
+  useEffectA(() => {
+    const subscribe = typeof window !== 'undefined' && window.subscribeUnsentWrites;
+    if (!subscribe) return;
+    const unsub = subscribe((c) => setUnsent(c));
+    return () => unsub();
+  }, []);
+  const heldText = heldWritesText(syncStatus, unsent);
+  // While queued writes fail for network reasons the event stream may still
+  // read open; the pill says what the writes found (operator decision 2026-09-27).
+  const linkUp = connected && syncStatus !== 'offline';
+
   return (
     // Wrap topbar + running-strip in a single sticky container so they scroll
     // together. This lets the topbar size naturally (min-height instead of a
@@ -180,14 +201,25 @@ function AdminTopbar({ onLogout, onViewerMode, tournament, hideRunningStrip }) {
             (DESIGN.md Principle 3). role=status + aria-live announce the
             change to assistive tech without alarming. */}
         <span
-          className={`topbar__conn${connected ? "" : " topbar__conn--down"}`}
+          className={`topbar__conn${linkUp ? "" : " topbar__conn--down"}`}
           role="status"
           aria-live="polite"
-          title={connected ? "Receiving real-time updates" : "Connection lost, reconnecting"}
+          title={linkUp ? "Receiving real-time updates" : "Connection lost, reconnecting"}
         >
           <span aria-hidden="true" className="topbar__conn__dot"></span>
-          {connected ? "Connected" : "Reconnecting…"}
+          {linkUp ? "Connected" : "Reconnecting…"}
         </span>
+        {heldText && (
+          <span
+            className={`topbar__held${syncStatus === 'offline' ? " topbar__held--offline" : syncStatus === 'server-error' ? " topbar__held--error" : ""}`}
+            role="status"
+            aria-live="polite"
+            data-testid="topbar-held"
+          >
+            <span aria-hidden="true" className="topbar__held__dot"></span>
+            {heldText}
+          </span>
+        )}
         <button type="button" className="viewer-toggle" onClick={onViewerMode}><Icon name="eye" /> Public viewer</button>
         {syncStatus === 'auth-required' && (
           <button

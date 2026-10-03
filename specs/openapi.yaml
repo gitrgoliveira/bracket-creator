@@ -1833,6 +1833,9 @@ paths:
                           type: string
                           description: >
                             The operator's name for the match, shown as is: its number and knockout round, e.g. `Match 3 (Final)`; `knockout Match 3` when the bracket records no round, `the 3rd-place match` for the bronze, the id when it has no number.
+                        court:
+                          type: string
+                          description: The shiaijo the match is on (e.g. `A`); empty when it has none.
         '400':
           description: >
             playerId is missing, blank, or does not name a competitor in this
@@ -1892,6 +1895,9 @@ paths:
                               type: string
                               description: >
                                 The operator's name for the match, shown as is: its number and knockout round, e.g. `Match 3 (Final)`; `knockout Match 3` when the bracket records no round, `the 3rd-place match` for the bronze, the id when it has no number.
+                            court:
+                              type: string
+                              description: The shiaijo the match is on (e.g. `A`); empty when it has none.
                       message:
                         type: string
         '422':
@@ -2350,6 +2356,14 @@ paths:
           one) is kept rather than replaced by the payload's empty scoreline.
           Without it, an empty scoreline clears the stored one. `startOnly`
           with any status other than `running` is a 400.
+
+          `clearWithdrawal: true` (also request-only) marks a completed
+          correction that removes a withdrawal or default win recorded by
+          mistake: the payload is the real result (a win, or a draw) and
+          replaces the recorded ruling, the match stays completed, and the
+          competitor the withdrawal barred is eligible again. Without it, a
+          completed correction with no decision, or `hikiwake`, keeps the
+          ruling. A team match must then carry a result on every bout.
         content:
           application/json:
             schema:
@@ -2522,11 +2536,13 @@ paths:
               places that move.
             - `downstream_knockout_running`: a pool correction in a mixed
               competition would move a qualifier out of a knockout match being
-              fought now. Nothing is written, and `forceDownstreamReopen` does
-              not get past it: finish that match or send it back to the queue,
-              then save again. Extra fields: `matchId` (this match),
-              `runningMatches` (`[{id, number, label}]`), `message` (the operator's
-              sentence).
+              fought now, or a knockout correction's new winner would change a
+              side of a later knockout match being fought now. Nothing is
+              written, and `forceDownstreamReopen` does not get past it:
+              finish that match or send it back to the queue, then save this
+              correction again. Extra fields: `matchId` (this match),
+              `runningMatches` (`[{id, number, label, court}]`), `message`
+              (the operator's sentence, naming the shiaijo).
           content:
             application/json:
               schema:
@@ -2588,6 +2604,9 @@ paths:
                           type: string
                           description: >
                             The operator's name for the match, shown as is: its number and knockout round, e.g. `Match 3 (Final)`; `knockout Match 3` when the bracket records no round, `the 3rd-place match` for the bronze, the id when it has no number.
+                        court:
+                          type: string
+                          description: The shiaijo the match is on (e.g. `A`); empty when it has none.
         '422':
           description: |
             `corrupt_overrides`: this competition's overrides.json could not
@@ -2768,6 +2787,9 @@ paths:
                           type: string
                           description: >
                             The operator's name for the match, shown as is: its number and knockout round, e.g. `Match 3 (Final)`; `knockout Match 3` when the bracket records no round, `the 3rd-place match` for the bronze, the id when it has no number.
+                        court:
+                          type: string
+                          description: The shiaijo the match is on (e.g. `A`); empty when it has none.
         '400':
           description: >
             The `reason` is longer than 200 characters, the body is present but
@@ -2799,14 +2821,14 @@ paths:
             - `error: downstream_knockout_played`: a later knockout match fed
               by this result has a result of its own. Extra fields:
               `matchId` (this match), `blockingMatchId`, `blockingMatches`
-              (`[{id, number, label}]`, two for a semifinal feeding the final and the
+              (`[{id, number, label, court}]`, two for a semifinal feeding the final and the
               bronze match), `displaced` (the competitor in the slot this match
               fed), `message`. Retry with `forceDownstreamReopen: true` to
               reopen them too.
             - `error: downstream_knockout_running`: a later knockout match fed
               by this result is being fought right now, so it cannot be
               reopened with it. Nothing is written. Extra fields: `matchId`
-              (this match), `runningMatches` (`[{id, number, label}]`),
+              (this match), `runningMatches` (`[{id, number, label, court}]`),
               `message`.
             - `error: court_busy` (machine code, sentence in `message`):
               another match is already running on this match's court, in this
@@ -2864,6 +2886,9 @@ paths:
                             label:
                               type: string
                               description: The operator's name for the match; see `engine.OperatorMatchLabel`.
+                            court:
+                              type: string
+                              description: The shiaijo the match is on (e.g. `A`); empty when it has none.
                       message:
                         type: string
         '500':
@@ -3015,6 +3040,9 @@ paths:
                               type: integer
                             label:
                               type: string
+                            court:
+                              type: string
+                              description: The shiaijo the match is on (e.g. `A`); empty when it has none.
                       message:
                         type: string
         '500':
@@ -3159,6 +3187,22 @@ paths:
                       applied:
                         type: boolean
                   - $ref: '#/components/schemas/RefusedWrite'
+        '409':
+          description: >
+            The same knockout refusals as PUT .../score, with the same bodies:
+            `downstream_knockout_played` when the new winner would change who
+            a later knockout match with its own result was fought by (retry
+            with `forceDownstreamReopen: true`), and
+            `downstream_knockout_running` when it would change a side of a
+            later knockout match being fought now (`runningMatches`, each with
+            its `court`; not confirmable, `forceDownstreamReopen` does not get
+            past it). Nothing is written.
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - $ref: '#/components/schemas/Error'
+                  - $ref: '#/components/schemas/DownstreamKnockoutPlayedError'
 
   /api/competitions/{id}/matches/{mid}/time:
     put:
@@ -3275,7 +3319,10 @@ paths:
                             to apply it and reopen those matches.
                             `downstream_knockout_running`: the entry is a pool correction
                             that would move a qualifier out of a knockout match being
-                            fought now; finish or requeue that match, then retry. In
+                            fought now, or a knockout correction whose new winner would
+                            change a side of a later knockout match being fought now;
+                            `forceDownstreamReopen` does not get past it; finish or
+                            requeue that match, then retry. In
                             every case the entry is excluded from `succeeded` and never
                             broadcast. Other entries in the batch are unaffected.
 
@@ -3343,6 +3390,17 @@ paths:
                   - $ref: '#/components/schemas/RefusedWrite'
         '400':
           $ref: '#/components/responses/BadRequest'
+        '409':
+          description: >
+            The same knockout refusals as PUT .../score, with the same bodies:
+            `downstream_knockout_played` (retry with
+            `forceDownstreamReopen: true`), and `downstream_knockout_running`
+            when the result would change a side of, or move a qualifier out
+            of, a knockout match being fought now (not confirmable).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
 
   /api/competitions/{id}/matches/{mid}/decision:
     post:
@@ -3451,9 +3509,10 @@ paths:
             fought by (`downstream_knockout_played`, retry with
             `forceDownstreamReopen: true`; `qualifierChange` names the pool
             places a decision on a mixed competition's pool match moves), or
-            one that would move a qualifier out of a knockout match being
-            fought now (`downstream_knockout_running`, not confirmable). Same
-            bodies as PUT .../score.
+            one that would move a qualifier out of, or change a side of, a
+            knockout match being fought now (`downstream_knockout_running`,
+            not confirmable, and answered before `decision_locked` so no
+            confirm precedes it). Same bodies as PUT .../score.
           content:
             application/json:
               schema:
@@ -4927,6 +4986,9 @@ components:
                 type: string
                 description: >
                   The operator's name for the match, shown as is: its number and knockout round, e.g. `Match 3 (Final)`; `knockout Match 3` when the bracket records no round, `the 3rd-place match` for the bronze, the id when it has no number.
+              court:
+                type: string
+                description: The shiaijo the match is on (e.g. `A`); empty when it has none.
         displaced:
           type: string
           description: The competitor in the slot this match fed, when there is one blocking match.

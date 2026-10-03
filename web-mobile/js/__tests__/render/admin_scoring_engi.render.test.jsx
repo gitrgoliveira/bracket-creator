@@ -3,6 +3,7 @@ import { render, fireEvent, screen, waitFor, act } from '@testing-library/react'
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { EngiScoreEditorModal } from '../../admin_scoring_engi.jsx';
 import { TAP_BOUNCE_MS } from '../../tap_guard.jsx';
+import { QUEUED_NOTICE } from '../../write_result.jsx';
 import { pointerTap } from '../helpers/tap_events.js';
 
 // Regression coverage for a real orientation bug: sideB is Shiro and sideA is
@@ -223,7 +224,7 @@ describe('EngiScoreEditorModal offline safety net (impeccable critique P2)', () 
     await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(1));
     // Pending banner is shown and the commit control is still available (modal
     // stayed open, not closed-as-saved).
-    await waitFor(() => expect(screen.getByText(/will keep retrying until it lands/i)).toBeTruthy());
+    await waitFor(() => expect(screen.getByText(QUEUED_NOTICE)).toBeTruthy());
     expect(screen.queryByTestId('engi-submit')).not.toBeNull();
 
     // Retry now re-invokes the same payload.

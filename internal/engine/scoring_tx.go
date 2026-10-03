@@ -994,6 +994,11 @@ func (e *Engine) recordDecisionTx(tx state.StoreTx, compID, matchID, decision, d
 		_, name, ok := losingSide(prior)
 		hadPriorLoser = ok && name != ""
 	}
+	// bc-rfsw: refused BEFORE the T103 lock below, so the operator is never
+	// asked to confirm a write the bracket write would then refuse.
+	if err := refuseDecisionReachingRunningMatch(tx, compID, matchID, decisionBy, prior, modifiedAtStamp); err != nil {
+		return nil, nil, err
+	}
 	// T103: downstream-match check. The contract scope is "either
 	// participant", if any subsequent match for either side has been
 	// started or completed since the kiken/fusenpai, refuse the undo
@@ -1010,6 +1015,13 @@ func (e *Engine) recordDecisionTx(tx state.StoreTx, compID, matchID, decision, d
 	// The winner gets the maru default-win fill; the withdrawing side keeps
 	// whatever it had struck and the encounter keeps its prior sub-bouts
 	// (FIK Art. 32 — see preserveLoserScore below).
+	// A kachinuki encounter carries no match-level overtime, so it is dropped
+	// before the circles are counted: the chokepoint that strips it runs later.
+	comp, err := tx.LoadCompetition(compID)
+	if err != nil {
+		return nil, nil, fmt.Errorf("recordDecisionTx: load competition %s: %w", compID, err)
+	}
+	comp.ClearKachinukiEncounterEncho(&encho)
 	winIppons := domain.DefaultWinIppons(encho.On())
 	result := &state.MatchResult{
 		ID:             matchID,
@@ -1068,6 +1080,53 @@ func (e *Engine) recordDecisionTx(tx state.StoreTx, compID, matchID, decision, d
 	// restore here read that RESTORED status as the current loser and freed
 	// the new withdrawer, so there is none: the rule has one owner.
 	return result, status, nil
+}
+
+// refuseDecisionReachingRunningMatch is the decision path's early answer to
+// the running-downstream rule the bracket write enforces anyway
+// (guardDownstreamKnockoutCorrection): a decision on a knockout ROUND match
+// whose winner (the side decisionBy does not name, exactly as
+// recordDecisionTx assigns it) differs from the one already propagated, while
+// a later match it fed is being fought, is a *DownstreamKnockoutRunningError.
+// Asked before the T103 decision lock so no confirm precedes a write that
+// would be refused (operator decision 2026-09-27). It asks the score door's
+// own rules (propagatedWinnerOf, winnerDiffers, downstreamCorrectionRefusal
+// with force, so only the running half applies) rather than a copy of them.
+// A stale decision (an offline replay older than the stored match) is not
+// judged here, exactly as the score door skips its guard for one: the write
+// itself then reports it superseded rather than refused.
+func refuseDecisionReachingRunningMatch(tx state.StoreTx, compID, matchID, decisionBy string, prior *state.MatchResult, modifiedAtStamp int64) error {
+	if IsPoolMatchID(matchID) {
+		return nil
+	}
+	bracket, err := tx.LoadBracket(compID)
+	if err != nil {
+		return err
+	}
+	if bracket == nil {
+		return nil
+	}
+	for rIdx := range bracket.Rounds {
+		for mIdx := range bracket.Rounds[rIdx] {
+			bm := &bracket.Rounds[rIdx][mIdx]
+			if bm.ID != matchID {
+				continue
+			}
+			if !domain.ApplyByTimestamp(modifiedAtStamp, bm.ModifiedAt) {
+				return nil
+			}
+			winner, winnerID := prior.SideB, prior.SideBID
+			if decisionBy == "shiro" {
+				winner, winnerID = prior.SideA, prior.SideAID
+			}
+			priorName, priorID := propagatedWinnerOf(bracket, rIdx, mIdx, bm)
+			if !winnerDiffers(winner, winnerID, priorName, priorID) {
+				return nil
+			}
+			return downstreamCorrectionRefusal(bracket, rIdx, mIdx, bm, true)
+		}
+	}
+	return nil
 }
 
 // restoreEligibilityRecordedByMatch restores eligibility for every

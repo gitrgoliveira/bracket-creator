@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { queueAlertMessage } from '../app.jsx';
+import { queueAlertMessage, queueAlertToastType } from '../app.jsx';
 
 // The alert kinds are what the operator actually READS when a result does not
 // reach the server, so the wording is behaviour, not decoration.
@@ -50,4 +50,23 @@ describe('queueAlertMessage', () => {
     it('returns null for an unknown kind, so nothing is toasted', () => {
         expect(queueAlertMessage({ kind: 'not-a-kind', count: 1, terminalCount: 1 })).toBeNull();
     });
+
+    // bc-offl (operator decision 2026-09-27, Q2): held results that landed.
+    it('confirms held results that were sent, singular and plural', () => {
+        expect(queueAlertMessage({ kind: 'sent', count: 1, terminalCount: 1 })).toBe('1 finished result sent.');
+        expect(queueAlertMessage({ kind: 'sent', count: 3, terminalCount: 3 })).toBe('3 finished results sent.');
+    });
+});
+
+describe('queueAlertToastType', () => {
+    it('shows a sent confirmation as a success toast', () => {
+        expect(queueAlertToastType({ kind: 'sent', count: 1, terminalCount: 1 })).toBe('success');
+    });
+
+    it.each(['expired', 'unreadable', 'rejected', 'superseded', 'server_error', 'auth_required', 'storage_full', 'discarded'])(
+        'keeps %s an error toast',
+        (kind) => {
+            expect(queueAlertToastType({ kind, count: 1, terminalCount: 1 })).toBe('error');
+        },
+    );
 });

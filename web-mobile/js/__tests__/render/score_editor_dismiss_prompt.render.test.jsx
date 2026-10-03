@@ -248,7 +248,7 @@ describe('bc-dscn: team editor', () => {
       const fresh = Array.from(document.querySelectorAll('.team-sub-match__side--aka .pmf__option'))
         .find((b) => b.textContent.includes('Fresh Fighter'));
       expect(fresh, 'expected "Fresh Fighter" to be offered').toBeTruthy();
-      await act(async () => { fireEvent.mouseDown(fresh); });
+      await act(async () => { fireEvent.click(fresh); });
 
       window.confirmDialog = vi.fn().mockResolvedValue(false);
       await clickClose();

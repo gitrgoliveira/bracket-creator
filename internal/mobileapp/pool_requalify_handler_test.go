@@ -233,7 +233,7 @@ func TestPoolCorrection_RunningKnockout_409Terminal(t *testing.T) {
 				require.Len(t, resp.RunningMatches, 1)
 				assert.Equal(t, "m-r1-0", resp.RunningMatches[0].ID)
 				assert.Equal(t, "Match 1 (Final)", resp.RunningMatches[0].Label)
-				assert.Equal(t, "Match 1 (Final) is being fought now. Finish it or send it back to the queue, then save again.", resp.Message)
+				assert.Equal(t, "Match 1 (Final) is being fought now on Shiaijo A. Finish it or send it back to the queue, then save this correction again.", resp.Message)
 				assertPoolA0WonBy(t, store, compID, "A1")
 			})
 		}

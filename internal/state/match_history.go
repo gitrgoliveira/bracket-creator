@@ -55,6 +55,11 @@ type MatchHistoryEntry struct {
 	// Held carries the incoming value of every held group, so the change is
 	// kept even though it was not applied.
 	Held map[string]json.RawMessage `json:"held,omitempty"`
+	// Reason says why every change was held regardless of its stamp, when
+	// one rule did that: "older revision of this board" for a running write
+	// the same board had already followed with a newer one (the running rev
+	// guard). Empty when each group was judged by its own stamp.
+	Reason string `json:"reason,omitempty"`
 	// ClearedWithdrawal is the result a later scoring change cleared (R2).
 	ClearedWithdrawal json.RawMessage `json:"clearedWithdrawal,omitempty"`
 }

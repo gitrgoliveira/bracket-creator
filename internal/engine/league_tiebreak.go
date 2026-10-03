@@ -183,110 +183,115 @@ func (e *Engine) LeagueTiebreakCandidates(compID string) ([]TiedGroup, error) {
 // Idempotent: pairs that already exist in the store are skipped. For league
 // competitions it operates on the single league pool.
 func (e *Engine) GenerateLeagueTiebreakMatches(compID string, tiedTeamIDs []string) ([]state.MatchResult, error) {
-	comp, err := e.store.LoadCompetition(compID)
-	if err != nil {
-		return nil, err
-	}
-	if comp == nil {
-		return nil, notFoundErrorf("competition %s not found", compID)
-	}
-	if comp.Format != state.CompFormatLeague || comp.TeamSize == 0 {
-		return nil, validationErrorf("GenerateLeagueTiebreakMatches is only valid for team-league competitions")
-	}
-	if len(tiedTeamIDs) < 2 {
-		return nil, validationErrorf("GenerateLeagueTiebreakMatches requires teamIds (at least two) for competition %s", compID)
-	}
+	// Read before the transaction (the tournament has its own lock), and
+	// only reported when there is something to schedule, as it always was.
+	tournament, tournErr := e.store.LoadTournament()
 
-	standings, err := e.CalculatePoolStandings(compID)
-	if err != nil {
-		return nil, err
-	}
-
-	var poolName string
-	var tiedGroup []state.PlayerStanding
-
-	// ID-only selection (operator ruling bc-pnum): unambiguous by
-	// construction (a participant id names exactly one competitor), so no
-	// ambiguity diagnostic is needed -- a missing id is simply "not found".
-	idSet := make(map[string]bool, len(tiedTeamIDs))
-	for _, id := range tiedTeamIDs {
-		if id == "" {
-			return nil, validationErrorf("teamIds entries must be non-empty for competition %s", compID)
+	// ONE read-modify-write of pool-matches.csv under the per-competition
+	// lock (bc-mrgc phase 3): it used to load and save under two separate
+	// lock acquisitions, so a score landing in between was overwritten by
+	// the stale copy saved back. The standings that select the tied group
+	// are read inside the same transaction, from the same rows.
+	// The reads below run under the competition's lock (tx.LoadPoolMatches),
+	// which skips the first-read legacy conversion; run it first, as the
+	// store's own LoadPoolMatches always did (a no-op after the first call).
+	e.store.EnsureLegacyUpgraded(compID)
+	var injected []state.MatchResult
+	err := e.store.WithTransaction(compID, func(tx state.StoreTx) error {
+		comp, err := tx.LoadCompetition(compID)
+		if err != nil {
+			return err
 		}
-		if idSet[id] {
-			return nil, validationErrorf("duplicate team id %q in tie-break request for competition %s", id, compID)
+		if comp == nil {
+			return notFoundErrorf("competition %s not found", compID)
 		}
-		idSet[id] = true
-	}
-	for pn, ps := range standings {
-		for _, s := range ps {
-			if idSet[s.Player.ID] {
-				poolName = pn
-				tiedGroup = append(tiedGroup, s)
+		if comp.Format != state.CompFormatLeague || comp.TeamSize == 0 {
+			return validationErrorf("GenerateLeagueTiebreakMatches is only valid for team-league competitions")
+		}
+		if len(tiedTeamIDs) < 2 {
+			return validationErrorf("GenerateLeagueTiebreakMatches requires teamIds (at least two) for competition %s", compID)
+		}
+
+		standings, err := e.computeStandingsFrom(tx, compID)
+		if err != nil {
+			return err
+		}
+
+		var poolName string
+		var tiedGroup []state.PlayerStanding
+
+		// ID-only selection (operator ruling bc-pnum): unambiguous by
+		// construction (a participant id names exactly one competitor), so no
+		// ambiguity diagnostic is needed -- a missing id is simply "not found".
+		idSet := make(map[string]bool, len(tiedTeamIDs))
+		for _, id := range tiedTeamIDs {
+			if id == "" {
+				return validationErrorf("teamIds entries must be non-empty for competition %s", compID)
+			}
+			if idSet[id] {
+				return validationErrorf("duplicate team id %q in tie-break request for competition %s", id, compID)
+			}
+			idSet[id] = true
+		}
+		for pn, ps := range standings {
+			for _, s := range ps {
+				if idSet[s.Player.ID] {
+					poolName = pn
+					tiedGroup = append(tiedGroup, s)
+				}
 			}
 		}
-	}
-	if len(tiedGroup) != len(idSet) {
-		return nil, validationErrorf("one or more requested team ids not found in standings for competition %s", compID)
-	}
-	// No separate len(tiedGroup) < 2 check: idSet has at least the two
-	// non-empty, deduplicated entries the loop above already enforced, and
-	// the match just above pins len(tiedGroup) == len(idSet).
+		if len(tiedGroup) != len(idSet) {
+			return validationErrorf("one or more requested team ids not found in standings for competition %s", compID)
+		}
+		// No separate len(tiedGroup) < 2 check: idSet has at least the two
+		// non-empty, deduplicated entries the loop above already enforced, and
+		// the match just above pins len(tiedGroup) == len(idSet).
 
-	// Determine the court from existing matches. existingRows are handed to
-	// generatePoolDaihyosenMatches raw (not reduced to a bare-name dedup map
-	// here): it resolves each row's sides against tiedGroup itself via
-	// groupMemberIDs, the same identity-keyed contract
-	// InjectPoolDaihyosenMatches uses, so a namesake-involving existing bout
-	// cannot suppress a distinct pair on this operator-triggered path either.
-	allMatches, err := e.store.LoadPoolMatches(compID)
+		// Determine the court from existing matches. existingRows are handed to
+		// generatePoolDaihyosenMatches raw (not reduced to a bare-name dedup map
+		// here): it resolves each row's sides against tiedGroup itself via
+		// groupMemberIDs, the same identity-keyed contract
+		// InjectPoolDaihyosenMatches uses, so a namesake-involving existing bout
+		// cannot suppress a distinct pair on this operator-triggered path either.
+		allMatches, err := tx.LoadPoolMatches(compID)
+		if err != nil {
+			return err
+		}
+		e.noteMatchRead(compID)
+		court := ""
+		existingCount := 0
+		var existingRows []state.MatchResult
+		for _, m := range allMatches {
+			pn, ok := poolNameFromMatchID(m.ID)
+			if !ok {
+				continue
+			}
+			if pn == poolName && court == "" {
+				court = m.Court
+			}
+			if IsPoolDaihyosenMatchID(m.ID) && pn == poolName {
+				existingCount++
+				existingRows = append(existingRows, m)
+			}
+		}
+
+		injected = generatePoolDaihyosenMatches(poolName, tiedGroup, existingCount, court, existingRows)
+		if len(injected) == 0 {
+			return nil
+		}
+		if tournErr != nil {
+			return tournErr
+		}
+		// Reassign schedule slots for the new DH matches, keeping every time
+		// already set.
+		return tx.SavePoolMatches(compID, appendWithSlots(allMatches, injected, comp, tournament))
+	})
 	if err != nil {
 		return nil, err
 	}
-	court := ""
-	existingCount := 0
-	var existingRows []state.MatchResult
-	for _, m := range allMatches {
-		pn, ok := poolNameFromMatchID(m.ID)
-		if !ok {
-			continue
-		}
-		if pn == poolName && court == "" {
-			court = m.Court
-		}
-		if IsPoolDaihyosenMatchID(m.ID) && pn == poolName {
-			existingCount++
-			existingRows = append(existingRows, m)
-		}
-	}
-
-	injected := generatePoolDaihyosenMatches(poolName, tiedGroup, existingCount, court, existingRows)
 	if len(injected) == 0 {
 		return nil, nil
-	}
-
-	allMatches = append(allMatches, injected...)
-
-	// Reassign schedule slots for the new DH matches.
-	existingTimes := make(map[string]string, len(allMatches))
-	for _, m := range allMatches {
-		if m.ScheduledAt != "" {
-			existingTimes[m.ID] = m.ScheduledAt
-		}
-	}
-	tournament, err := e.store.LoadTournament()
-	if err != nil {
-		return nil, err
-	}
-	allMatches, _ = assignPoolMatchSlots(allMatches, comp, tournament)
-	for i := range allMatches {
-		if t, ok := existingTimes[allMatches[i].ID]; ok {
-			allMatches[i].ScheduledAt = t
-		}
-	}
-
-	if err := e.store.SavePoolMatches(compID, allMatches); err != nil {
-		return nil, err
 	}
 
 	e.standingsCache.Delete(compID)

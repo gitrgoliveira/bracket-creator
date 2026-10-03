@@ -162,7 +162,9 @@ func TestDecisionHandler_HeldDecisionAnswersHeldGroups(t *testing.T) {
 	var out map[string]any
 	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &out))
 	assert.Equal(t, false, out["applied"])
-	assert.ElementsMatch(t, []any{"result", "points", "encho"}, out["heldGroups"])
+	// encho is not listed: the decision carries no overtime over a match with
+	// none, an echo of the stored value and no loss (bc-mrgc phase 3).
+	assert.ElementsMatch(t, []any{"result", "points"}, out["heldGroups"])
 	m := mergeStored(t, store, compID)
 	assert.Equal(t, state.MatchStatusRunning, m.Status)
 	statuses, err := store.LoadCompetitorStatus(compID)
@@ -212,4 +214,77 @@ func TestBulkScore_ReportsHeldGroups(t *testing.T) {
 	history, err := store.LoadMatchHistory(compID, "Pool A-0")
 	require.NoError(t, err)
 	assert.Len(t, history, 3, "both entries recorded, the superseded one included")
+}
+
+// A start write (startOnly) changes the status alone: the score the stored
+// match holds is kept (keepQueuedScore), so its history entry names the
+// result group and nothing else, and its empty payload score is no change an
+// operator made (bc-mrgc phase 3, item 2).
+func TestScoreHandler_StartWriteHistoryNamesOnlyTheResult(t *testing.T) {
+	const compID = "merge-start"
+	r, store := mergeServer(t, compID)
+	now := time.Now().UnixMilli()
+	mergeScore(t, r, compID, map[string]any{
+		"status": "running", "ipponsA": []string{"M"}, "ipponsB": []string{},
+		"changed": []string{"points"}, "modifiedAt": now - 10_000,
+	})
+	out := mergeScore(t, r, compID, map[string]any{
+		"status": "running", "startOnly": true, "ipponsA": []string{}, "ipponsB": []string{},
+		"modifiedAt": now - 5_000,
+	})
+	assert.NotContains(t, out, "applied", "the start applied; got %v", out)
+	m := mergeStored(t, store, compID)
+	assert.Equal(t, []string{"M"}, m.IpponsA, "the stored score is kept")
+	history, err := store.LoadMatchHistory(compID, "Pool A-0")
+	require.NoError(t, err)
+	require.Len(t, history, 2)
+	start := history[1]
+	assert.Equal(t, []string{state.GroupResult}, start.Changed, "a start changes the result group alone")
+	assert.Len(t, start.Outcomes, 1)
+	assert.Empty(t, start.Held)
+}
+
+// An override-winner older than the stored result is not applied; it is kept
+// in the match's history with the winner it named and answered like any
+// other fully held write: applied:false, reason superseded, and the result
+// group it held (bc-mrgc phase 3, item 4).
+func TestOverrideWinner_HeldAnswersHeldGroups(t *testing.T) {
+	const compID = "merge-override"
+	r, store, _, _, _ := setupTestRouter(t)
+	require.NoError(t, store.SaveTournament(&state.Tournament{Name: "T", Password: "", Courts: []string{"A"}}))
+	require.NoError(t, store.SaveCompetition(&state.Competition{
+		ID: compID, Name: compID, Kind: "individual", Format: state.CompFormatKnockout,
+		Status: state.CompStatusKnockout, Courts: []string{"A"},
+	}))
+	require.NoError(t, store.SaveParticipants(compID, []domain.Player{
+		{ID: mgAliceID, Name: mgAlice, Dojo: "D1"},
+		{ID: mgBobID, Name: mgBob, Dojo: "D2"},
+	}))
+	now := time.Now().UnixMilli()
+	require.NoError(t, store.SaveBracket(compID, &state.Bracket{Rounds: [][]state.BracketMatch{{{
+		ID: "m-r1-0", SideA: mgAlice, SideAID: mgAliceID, SideB: mgBob, SideBID: mgBobID,
+		Status: state.MatchStatusCompleted, Winner: mgAlice, WinnerID: mgAliceID,
+		ModifiedAt: now - 5_000, MatchNumber: 1, Court: "A",
+	}}}}))
+
+	w := serveJSON(r, "PUT", "/api/competitions/"+compID+"/matches/m-r1-0/override-winner", map[string]any{
+		"winnerName": mgBob, "modifiedAt": now - 20_000,
+	})
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	var out map[string]any
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &out))
+	assert.Equal(t, false, out["applied"])
+	assert.Equal(t, "superseded", out["reason"], "the reason the client tells a supersede from a clock refusal by")
+	assert.Equal(t, []any{"result"}, out["heldGroups"])
+
+	b, err := store.LoadBracket(compID)
+	require.NoError(t, err)
+	assert.Equal(t, mgAlice, b.MatchByID("m-r1-0").Winner, "the newer result stands")
+	history, err := store.LoadMatchHistory(compID, "m-r1-0")
+	require.NoError(t, err)
+	require.NotEmpty(t, history)
+	last := history[len(history)-1]
+	assert.Equal(t, "override-winner", last.Door)
+	assert.Equal(t, state.HistoryOutcomeHeld, last.Outcomes[state.GroupResult])
+	assert.Contains(t, string(last.Held[state.GroupResult]), mgBob)
 }

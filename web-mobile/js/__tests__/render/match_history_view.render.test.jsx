@@ -144,3 +144,31 @@ describe('heldValueText', () => {
     expect(view.heldValueText(group, value)).toBe(words);
   });
 });
+
+// bc-mrgc phase 3: a write kept whole by one rule (the server's rev guard:
+// an older revision of this board) says why, in the server's own words.
+describe('historyEntryView: the reason a whole write was kept', () => {
+  it('shows the reason the server recorded', () => {
+    const v = view.historyEntryView({
+      matchId: 'm-ind', door: 'score', stamp: at(10, 2, 0), receivedAt: at(10, 4, 0), changed: ['points'],
+      outcomes: { points: 'held' }, held: { points: { ipponsA: ['K'], ipponsB: [], hansokuA: 0, hansokuB: 0 } },
+      reason: 'older revision of this board',
+    });
+    expect(v.reason).toBe('Not applied: older revision of this board');
+    expect(v.held).toHaveLength(1);
+  });
+
+  it('shows none for an entry judged group by group', () => {
+    expect(view.historyEntryView(ENTRIES[1]).reason).toBeNull();
+  });
+
+  it('lists no held line for a group the server recorded as unchanged (an echo)', () => {
+    const v = view.historyEntryView({
+      matchId: 'm-ind', door: 'decision', stamp: at(10, 1, 0), receivedAt: at(10, 1, 0),
+      changed: ['result', 'points', 'encho'], outcomes: { result: 'held', points: 'held', encho: 'unchanged' },
+      held: { result: { status: 'completed', decision: 'kiken-voluntary', decisionBy: 'aka', winner: 'Yamada' }, points: { ipponsA: [], ipponsB: ['○', '○'], hansokuA: 0, hansokuB: 0 } },
+    });
+    expect(v.held.map((h) => h.group)).toEqual(['result', 'points']);
+    expect(v.held.map((h) => h.text).join(' ')).not.toMatch(/overtime/);
+  });
+});

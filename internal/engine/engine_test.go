@@ -1725,7 +1725,7 @@ func TestOverrideBracketWinner_TimestampLWW(t *testing.T) {
 // workaround for the silent drop, not a statement about corrections — and it
 // outlived its cause while opening a data-loss hole of its own, because it
 // cannot distinguish a live correction from one the offline queue replayed
-// hours later (the SPA holds terminal writes for up to 12h).
+// hours later (the SPA holds terminal writes until they land).
 //
 // Now that a dropped write comes back as applied:false with "check what is
 // recorded", the swallowing this bypass existed to prevent cannot happen, and a

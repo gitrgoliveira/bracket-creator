@@ -185,8 +185,8 @@ func TestQuickScoreKeepsCorrectionReason(t *testing.T) {
 // the verdict (mark present = it stands, mark absent = it does not), and the
 // old flag-carry machinery has nothing left to carry. The one write shape
 // that loses a verdict it arguably "did not address" is a stale pre-ruling
-// client re-scoring a hantei match with markless ippons inside the offline
-// queue's replay window; accepted and documented in state/legacy_hantei.go.
+// client re-scoring a hantei match with markless ippons replayed from the
+// offline queue; accepted and documented in state/legacy_hantei.go.
 func TestPoolWrite_HanteiTravelsWithTheScoreline(t *testing.T) {
 	stored := func() *state.MatchResult {
 		return &state.MatchResult{
@@ -479,7 +479,7 @@ func TestTimestampGuardAppliesToBothBranches(t *testing.T) {
 	// correction is never dropped as stale", pinning a bypass that let any write
 	// carrying a CorrectionReason outrank the stamp. That exemption was written
 	// for a live correction and could not tell one from a replay, so an offline
-	// correction flushed from the write queue up to 12h later silently
+	// correction flushed from the write queue hours later silently
 	// overwrote a newer result the operator had never seen. See applyMatchWrite
 	// for why LWW still protects every case the bypass was meant to protect.
 	t.Run("a stale correction is dropped like any other stale write", func(t *testing.T) {

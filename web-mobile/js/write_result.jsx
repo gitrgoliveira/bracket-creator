@@ -86,6 +86,13 @@ export function supersededAlertText(n, one) {
         : `${n} results were not applied because newer changes to the same matches were recorded first. They were kept in each match's history, so nothing is lost: check those matches and their history before entering anything again.`;
 }
 
+// OVERRIDE_HELD_NOTICE (bc-mrgc phase 3): the court console's toast when a
+// winner the operator picked for an unresolved feeder (Resolve feeders) was
+// not applied because a newer result for that match was recorded first. Like
+// any superseded write it was kept in the match's history, not lost, and the
+// court refreshes to show what is recorded.
+export const OVERRIDE_HELD_NOTICE = "A winner you picked was not applied: a newer result for that match was recorded first. Your pick was kept in the match's history. Refreshing this court to show the current state.";
+
 // writeHeldGroups / writePartlyHeld (bc-mrgc): which groups of a write the
 // server kept in the match's history instead of applying it, because a newer
 // change to the same group was already recorded. The server lists them in

@@ -813,7 +813,8 @@ describe('recordScore: queues running writes on network failure', () => {
         // Finding #2: the old 409-swallow for running writes is removed. A real
         // 409 (ineligible_competitor, court_busy, side_mismatch, result_finalized)
         // must propagate as a thrown error so the UI can surface it to the operator.
-        // The stale-rev signal from the server is HTTP 200 with {stale:true}, not 409.
+        // An older revision from the same board is HTTP 200 applied:false
+        // (kept in the match's history, bc-mrgc phase 3), never a 409.
         mockFetch(() => Promise.resolve({
             ok: false,
             status: 409,
@@ -1395,16 +1396,20 @@ describe('_flushQueue: downstream_knockout_played 409 on a queued correction (bc
         expect(rejected[0].detail).not.toBe('downstream_knockout_played');
     });
 
-    it('still applies decision_locked-as-success for an UNRELATED 409 (regression guard on the branch above)', async () => {
-        // The decision-specific 409 branch must keep treating decision_locked /
-        // already_ineligible as "our own lost-response write already landed"
-        // and stay silent -- the downstream_knockout_played handling above must
-        // not swallow that existing contract.
+    it('reports decision_locked on a queued replay instead of taking it as success (bc-mrgc phase 3)', async () => {
+        // A queued decision the server refuses on replay is the operator's
+        // result not landing, whatever the 409's code. It used to be swallowed
+        // on the theory that an earlier send had landed; the server now answers
+        // that exact replay (same decision, side and stamp) as recorded, so a
+        // decision_locked here is a real refusal and must be reported.
+        const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
         mockFetch(() => Promise.reject(new TypeError('offline')));
         await API.recordDecision('c1', 'mlocked', { decision: 'fusenpai', decisionBy: 'shiro' }, 'pw');
 
         const failures = [];
         const unsubFail = mod.subscribeTerminalWriteFailed((info) => failures.push(info));
+        const alerts = [];
+        const unsubAlert = mod.subscribeQueueAlert((a) => alerts.push(a));
 
         mockFetch(() => Promise.resolve({
             ok: false,
@@ -1414,9 +1419,36 @@ describe('_flushQueue: downstream_knockout_played 409 on a queued correction (bc
         window.dispatchEvent(new Event('online'));
         await tick(50);
         unsubFail();
+        unsubAlert();
+        warnSpy.mockRestore();
 
         expect(API.hasPendingTerminalWrite('c1', 'mlocked')).toBe(false);
-        expect(failures.length).toBe(0);
+        expect(failures.length).toBe(1);
+        expect(failures[0]).toMatchObject({ compID: 'c1', matchID: 'mlocked', kind: 'decision', status: 409 });
+        expect(alerts.filter((a) => a.kind === 'rejected')).toHaveLength(1);
+    });
+
+    it('reports already_ineligible on a queued replay in the server\'s own words', async () => {
+        const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+        mockFetch(() => Promise.reject(new TypeError('offline')));
+        await API.recordDecision('c1', 'mbarred', { decision: 'kiken-voluntary', decisionBy: 'aka' }, 'pw');
+
+        const alerts = [];
+        const unsubAlert = mod.subscribeQueueAlert((a) => alerts.push(a));
+        mockFetch(() => Promise.resolve({
+            ok: false,
+            status: 409,
+            json: () => Promise.resolve({ error: 'already_ineligible', reasonHuman: 'Alice already withdrew in Pool A · Match 1.' }),
+        }));
+        window.dispatchEvent(new Event('online'));
+        await tick(50);
+        unsubAlert();
+        warnSpy.mockRestore();
+
+        const rejected = alerts.filter((a) => a.kind === 'rejected');
+        expect(rejected).toHaveLength(1);
+        expect(rejected[0].detail).toBe('Alice already withdrew in Pool A · Match 1.');
+        expect(rejected[0].sentence).toBe(true);
     });
 });
 
@@ -1537,116 +1569,59 @@ describe('_flushQueue: LWW-dropped queued override triggers bracketResync (mp-y3
 // ---------------------------------------------------------------------------
 // bc-qttl: "ONLY A CONFIRMED WRITE EMPTIES THE QUEUE"
 //
-// The rest of this file covers the reworked contract: a 12h TTL (was 6h), the
+// The rest of this file covers the reworked contract: no age limit at all
+// (bc-mrgc phase 3; it was a 12h TTL), the
 // rehydrate-alerts-and-writes-back-so-it-never-re-fires fix, the buffered
 // queue-alert channel, 401 parking vs 403 retrying, resumeAfterAuth, the
 // still-drops-with-an-alert 4xx path, clearQueue's discarded alert, the
 // latched storage_full alert, and API.unsentWrites().
 // ---------------------------------------------------------------------------
 
-describe('bc-qttl: 12h queue TTL (up from 6h)', () => {
-    it('an entry enqueued 11 hours ago survives rehydration', async () => {
-        const elevenHoursAgo = Date.now() - 11 * 60 * 60 * 1000;
-        const entries = [['c1:m1', {
-            compID: 'c1', matchID: 'm1', payload: {}, password: 'pw',
-            kind: 'score', terminal: true, method: 'PUT',
-            url: '/api/competitions/c1/matches/m1/score', enqueuedAt: elevenHoursAgo,
-        }]];
-        localStorage.setItem('bc_write_queue', JSON.stringify(entries));
+describe('bc-mrgc phase 3: no queued write is dropped for its age', () => {
+    // It used to be discarded after 12 hours (announced, but gone). The server
+    // now orders an old write by its stamp and keeps what a newer change
+    // outranks in the match's history, so sending it loses nothing and
+    // discarding it would.
+    const entryAged = (key, matchID, ageMs, terminal = true) => [key, {
+        compID: 'c1', matchID, payload: { status: 'completed', modifiedAt: Date.now() - ageMs }, password: 'pw',
+        kind: 'score', terminal,
+        ...(terminal ? { method: 'PUT', url: `/api/competitions/c1/matches/${matchID}/score` } : {}),
+        enqueuedAt: Date.now() - ageMs,
+    }];
+
+    it('entries 11 hours, 13 hours and 3 days old all survive rehydration', async () => {
+        const hour = 60 * 60 * 1000;
+        localStorage.setItem('bc_write_queue', JSON.stringify([
+            entryAged('c1:m1', 'm1', 11 * hour),
+            entryAged('c1:m2', 'm2', 13 * hour),
+            entryAged('c1:m3', 'm3', 72 * hour),
+        ]));
         mockFetch(() => Promise.reject(new TypeError('offline')));
         vi.resetModules();
         const m = await import('../api_client.jsx');
         expect(m.API.hasPendingTerminalWrite('c1', 'm1')).toBe(true);
+        expect(m.API.hasPendingTerminalWrite('c1', 'm2')).toBe(true);
+        expect(m.API.hasPendingTerminalWrite('c1', 'm3')).toBe(true);
     });
 
-    it('an entry enqueued 13 hours ago is dropped (past the 12h TTL)', async () => {
+    it('an old entry raises no alert on load and is sent, then leaves the queue once it lands', async () => {
         const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
-        const thirteenHoursAgo = Date.now() - 13 * 60 * 60 * 1000;
-        const entries = [['c1:m2', {
-            compID: 'c1', matchID: 'm2', payload: {}, password: 'pw',
-            kind: 'score', terminal: true, method: 'PUT',
-            url: '/api/competitions/c1/matches/m2/score', enqueuedAt: thirteenHoursAgo,
-        }]];
-        localStorage.setItem('bc_write_queue', JSON.stringify(entries));
-        mockFetch(() => Promise.reject(new TypeError('offline')));
+        localStorage.setItem('bc_write_queue', JSON.stringify([
+            entryAged('c1:m1', 'm1', 13 * 60 * 60 * 1000),
+            entryAged('c1:m2', 'm2', 13 * 60 * 60 * 1000, false),
+        ]));
+        const sent = [];
+        mockFetch((url) => { sent.push(String(url)); return Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve({}) }); });
         vi.resetModules();
         const m = await import('../api_client.jsx');
-        expect(m.API.hasPendingTerminalWrite('c1', 'm2')).toBe(false);
-        expect(warnSpy).toHaveBeenCalled();
-        warnSpy.mockRestore();
-    });
-});
-
-describe('bc-qttl: expired-drop alert reports count and terminalCount', () => {
-    it('raises one expired alert, counting the terminal entry separately from the running one', async () => {
-        const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
-        const old = Date.now() - 13 * 60 * 60 * 1000;
-        const entries = [
-            ['c1:m1', {
-                compID: 'c1', matchID: 'm1', payload: {}, password: 'pw',
-                kind: 'score', terminal: true, method: 'PUT',
-                url: '/api/competitions/c1/matches/m1/score', enqueuedAt: old,
-            }],
-            ['c1:m2', {
-                compID: 'c1', matchID: 'm2', payload: {}, password: 'pw',
-                kind: 'score', terminal: false, enqueuedAt: old,
-            }],
-        ];
-        localStorage.setItem('bc_write_queue', JSON.stringify(entries));
-        mockFetch(() => Promise.reject(new TypeError('offline')));
-        vi.resetModules();
-        const m = await import('../api_client.jsx');
-
-        // No subscriber existed at import time, so the alert was buffered; a
-        // subscriber added now still receives the replay (see the buffered-replay
-        // describe block below for the dedicated coverage of that mechanism).
         const alerts = [];
         m.subscribeQueueAlert((a) => alerts.push(a));
-
-        const expiredAlerts = alerts.filter((a) => a.kind === 'expired');
-        expect(expiredAlerts.length).toBe(1);
-        expect(expiredAlerts[0].count).toBe(2);
-        expect(expiredAlerts[0].terminalCount).toBe(1);
-
-        warnSpy.mockRestore();
-    });
-});
-
-describe('bc-qttl: the key regression - an expired drop is never re-announced on a later reload', () => {
-    it('rehydrate writes the pruned queue back so a second import of the same (now-empty) storage does not re-fire the expired alert', async () => {
-        // Before this fix, rehydrate never wrote back: a fully-expired queue
-        // stayed on disk untouched, so every reload re-read, re-dropped, and
-        // re-announced the SAME entries forever.
-        const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
-        const old = Date.now() - 13 * 60 * 60 * 1000;
-        const entries = [['c1:m1', {
-            compID: 'c1', matchID: 'm1', payload: {}, password: 'pw',
-            kind: 'score', terminal: true, method: 'PUT',
-            url: '/api/competitions/c1/matches/m1/score', enqueuedAt: old,
-        }]];
-        localStorage.setItem('bc_write_queue', JSON.stringify(entries));
-        mockFetch(() => Promise.reject(new TypeError('offline')));
-
-        // First load: the expired entry is dropped and announced once.
-        vi.resetModules();
-        const m1 = await import('../api_client.jsx');
-        const firstLoadAlerts = [];
-        m1.subscribeQueueAlert((a) => firstLoadAlerts.push(a));
-        expect(firstLoadAlerts.filter((a) => a.kind === 'expired').length).toBe(1);
-
-        // The pruned (now-empty) queue must have been persisted, i.e. the key
-        // removed outright: this is what stops the next reload from seeing the
-        // same expired entries again.
+        expect(alerts.filter((a) => a.kind !== 'sent')).toEqual([]); // nothing is discarded, so nothing is announced as lost
+        await tick(50);
+        expect(sent.filter((u) => u.includes('/matches/m1/'))).toHaveLength(1);
+        expect(sent.filter((u) => u.includes('/matches/m2/'))).toHaveLength(1);
+        expect(m.API.hasPendingTerminalWrite('c1', 'm1')).toBe(false);
         expect(localStorage.getItem('bc_write_queue')).toBeNull();
-
-        // Second load ("reload"): nothing is left on disk, so nothing expires
-        // and nothing is re-announced.
-        vi.resetModules();
-        const m2 = await import('../api_client.jsx');
-        const secondLoadAlerts = [];
-        m2.subscribeQueueAlert((a) => secondLoadAlerts.push(a));
-        expect(secondLoadAlerts.filter((a) => a.kind === 'expired').length).toBe(0);
-
         warnSpy.mockRestore();
     });
 });
@@ -1654,11 +1629,12 @@ describe('bc-qttl: the key regression - an expired drop is never re-announced on
 describe('bc-qttl: queue alerts raised before any subscriber exists are buffered and replayed once', () => {
     it('a subscriber added after rehydration still receives the buffered alert; a second subscriber gets nothing (buffer is drained, not a durable log)', async () => {
         const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
-        const old = Date.now() - 13 * 60 * 60 * 1000;
+        // An unreadable entry (a terminal write whose url is outside the
+        // allowlist) is the one thing a load still drops, and announces.
         const entries = [['c1:m1', {
             compID: 'c1', matchID: 'm1', payload: {}, password: 'pw',
             kind: 'score', terminal: true, method: 'PUT',
-            url: '/api/competitions/c1/matches/m1/score', enqueuedAt: old,
+            url: '/api/admin/secrets', enqueuedAt: Date.now(),
         }]];
         localStorage.setItem('bc_write_queue', JSON.stringify(entries));
         mockFetch(() => Promise.reject(new TypeError('offline')));
@@ -1667,7 +1643,7 @@ describe('bc-qttl: queue alerts raised before any subscriber exists are buffered
 
         const first = [];
         m.subscribeQueueAlert((a) => first.push(a));
-        expect(first.filter((a) => a.kind === 'expired').length).toBe(1);
+        expect(first.filter((a) => a.kind === 'unreadable').length).toBe(1);
 
         // A second subscriber added afterwards must NOT see a duplicate: the
         // buffer was drained into the first subscriber, it is not a durable log.
@@ -2635,14 +2611,32 @@ describe('bc-sync: a tab follows the writes other tabs store', () => {
         expect(API.hasPendingTerminalWrite('c1', 'mA')).toBe(true);
     });
 
-    it('an older copy the other tab stores does not replace this tab\'s newer write', async () => {
+    it('an older copy of the same write the other tab stores does not replace this tab\'s newer one', async () => {
         mockFetch(offline);
         await API.recordScore('c1', 'm1', { status: 'completed', winner: 'A' }, 'pw', null);
-        otherTabSaved(null, JSON.stringify([entry('m1', { payload: { status: 'completed', winner: 'stale' }, enqueuedAt: Date.now() - 1000 })]));
+        // The other tab holds an older copy of THIS write (the same queue
+        // entry, so the same key) and saves it.
+        const [[ownKey]] = JSON.parse(localStorage.getItem('bc_write_queue'));
+        const [, older] = entry('m1', { payload: { status: 'completed', winner: 'stale' }, enqueuedAt: Date.now() - 1000 });
+        otherTabSaved(null, JSON.stringify([[ownKey, older]]));
         const sent = [];
         mockFetch((url, opts) => { sent.push(JSON.parse(opts.body).winner); return landed(); });
         await tick(10000);
         expect(sent).toEqual(['A']);
+    });
+
+    it('a different write the other tab queued for the same match is kept too, and both are sent in the order made (bc-mrgc phase 3)', async () => {
+        mockFetch(offline);
+        await API.recordScore('c1', 'm1', { status: 'completed', winner: 'A' }, 'pw', null);
+        // The other tab's own write about the same match, made earlier (an
+        // old-shape key: one entry per match, keyed by the match itself).
+        otherTabSaved(null, JSON.stringify([entry('m1', {
+            payload: { status: 'completed', winner: 'earlier', modifiedAt: 1 }, enqueuedAt: Date.now() - 1000,
+        })]));
+        const sent = [];
+        mockFetch((url, opts) => { sent.push(JSON.parse(opts.body).winner); return landed(); });
+        await tick(10000);
+        expect(sent).toEqual(['earlier', 'A']);
     });
 
     it('does not take up an entry a load would drop', async () => {
@@ -2681,7 +2675,11 @@ describe('bc-sync: a running write still being sent when the page goes away is k
         expect(storedEntries().map((d) => d.matchID)).toEqual(['m1']);
     });
 
-    it('a queued Finish made after it was sent is not replaced', async () => {
+    it('a queued Finish made after it was sent is not replaced, and the running write is kept beside it', async () => {
+        // bc-mrgc phase 3: each write is an entry of its own. The copy of the
+        // write still being sent no longer gives way to the later Finish (it
+        // used to be skipped, and lost if the page went), nor replaces it: both
+        // are kept, and replay in the order made, the running write first.
         mockFetch((url, opts) => (JSON.parse(opts.body).status === 'running' ? hang() : Promise.reject(new TypeError('offline'))));
         API.recordScore('c1', 'm1', { status: 'running', ipponsA: ['M'] }, 'pw', null);
         await flushMicrotasks();
@@ -2689,7 +2687,11 @@ describe('bc-sync: a running write still being sent when the page goes away is k
         await API.recordScore('c1', 'm1', { status: 'completed', ipponsA: ['M', 'M'], winner: 'A' }, 'pw', null);
         window.dispatchEvent(new Event('pagehide'));
         expect(API.hasPendingTerminalWrite('c1', 'm1')).toBe(true);
-        expect(storedEntries()).toEqual([expect.objectContaining({ terminal: true })]);
+        const kept = storedEntries().sort((a, b) => a.payload.modifiedAt - b.payload.modifiedAt);
+        expect(kept).toEqual([
+            expect.objectContaining({ terminal: false, payload: expect.objectContaining({ status: 'running' }) }),
+            expect.objectContaining({ terminal: true, payload: expect.objectContaining({ winner: 'A' }) }),
+        ]);
     });
 
     it('a write that already landed is not queued again', async () => {

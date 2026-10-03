@@ -430,137 +430,138 @@ func isBlockingEngiTBRow(m state.MatchResult) bool {
 // regenerates the schedule. Returns the newly injected matches (nil
 // when there are no ties or all TB pairs already exist).
 func (e *Engine) InjectTiebreakerMatches(compID string) ([]state.MatchResult, error) {
-	comp, err := e.store.LoadCompetition(compID)
-	if err != nil {
-		return nil, err
-	}
-	if comp == nil {
-		return nil, notFoundErrorf("competition %s not found", compID)
-	}
+	// Read before the transaction (the tournament has its own lock), and
+	// only reported when there is something to schedule, as it always was.
+	tournament, tournErr := e.store.LoadTournament()
 
-	// Engi (kata competition) ranks by wins then accumulated flags (naginata.md);
-	// Points is left at zero for all engi standings (no points metric), so
-	// detectPoolTies would see every pool as fully tied and inject spurious
-	// ippon-shobu bouts. Supplementary bouts are never held for engi.
-	// Self-heal: remove any TB row a pre-fix engine left behind that would
-	// block pool completion (Status != completed OR Winner == "", including a
-	// bogus bout finalized as hikiwake via the decision endpoint); left in
-	// place such rows block completion forever. Only completed TB rows with a
-	// recorded winner are preserved: recorded results are never deleted.
-	if comp.Engi {
-		allMatches, loadErr := e.store.LoadPoolMatches(compID)
-		if loadErr != nil {
-			return nil, loadErr
+	// ONE read-modify-write of pool-matches.csv under the per-competition
+	// lock, both the engi self-heal and the injection (bc-mrgc phase 3): each
+	// used to load and save under two separate lock acquisitions, so a score
+	// landing in between was overwritten by the stale copy saved back. The
+	// standings that decide the injection are read inside the same
+	// transaction, from the same rows.
+	// The reads below run under the competition's lock (tx.LoadPoolMatches),
+	// which skips the first-read legacy conversion; run it first, as the
+	// store's own LoadPoolMatches always did (a no-op after the first call).
+	e.store.EnsureLegacyUpgraded(compID)
+	var injected []state.MatchResult
+	healed := false
+	err := e.store.WithTransaction(compID, func(tx state.StoreTx) error {
+		comp, err := tx.LoadCompetition(compID)
+		if err != nil {
+			return err
 		}
-		var kept []state.MatchResult
+		if comp == nil {
+			return notFoundErrorf("competition %s not found", compID)
+		}
+
+		// Engi (kata competition) ranks by wins then accumulated flags (naginata.md);
+		// Points is left at zero for all engi standings (no points metric), so
+		// detectPoolTies would see every pool as fully tied and inject spurious
+		// ippon-shobu bouts. Supplementary bouts are never held for engi.
+		// Self-heal: remove any TB row a pre-fix engine left behind that would
+		// block pool completion (Status != completed OR Winner == "", including a
+		// bogus bout finalized as hikiwake via the decision endpoint); left in
+		// place such rows block completion forever. Only completed TB rows with a
+		// recorded winner are preserved: recorded results are never deleted.
+		if comp.Engi {
+			allMatches, loadErr := tx.LoadPoolMatches(compID)
+			if loadErr != nil {
+				return loadErr
+			}
+			e.noteMatchRead(compID)
+			var kept []state.MatchResult
+			for _, m := range allMatches {
+				if isBlockingEngiTBRow(m) {
+					continue
+				}
+				kept = append(kept, m)
+			}
+			if len(kept) < len(allMatches) {
+				healed = true
+				return tx.SavePoolMatches(compID, kept)
+			}
+			return nil
+		}
+
+		// Supplementary ippon-shobu bouts are held only where the tie affects
+		// advancement/seeding; pendingTieBreaks owns that band.
+		standings, err := e.computeStandingsFrom(tx, compID)
+		if err != nil {
+			return err
+		}
+
+		allMatches, err := tx.LoadPoolMatches(compID)
+		if err != nil {
+			return err
+		}
+		e.noteMatchRead(compID)
+
+		// Scan existing TB matches per pool for idempotency and ID sequencing.
+		// existingRows are handed to generateTiebreakerMatches raw (not reduced to
+		// a bare-name dedup map here) so it can resolve each row's sides against
+		// the SPECIFIC tied group being processed via groupMemberIDs -- see
+		// that function's doc comment for why a bare-name reduction at this scan
+		// stage would collapse distinct namesake-involving pairs.
+		poolTB := map[string][]state.MatchResult{}
+		poolCourt := map[string]string{}
+		// regularIncomplete[pool] becomes true if ANY regular (non-TB) match in the
+		// pool is not yet completed. Tiebreakers must only be injected once a pool's
+		// regular round-robin is finished, otherwise an intermediate, partial-result
+		// tie (e.g. everyone 0–0 after one match) would spuriously inject TB matches
+		// that a later result then breaks, leaving orphaned scheduled TB matches that
+		// never clear. (The pre-incremental caller enforced this via a comp-wide
+		// "all regular matches complete" gate; per-pool seeding needs it here.)
+		regularIncomplete := map[string]bool{}
 		for _, m := range allMatches {
-			if isBlockingEngiTBRow(m) {
+			pn, ok := poolNameFromMatchID(m.ID)
+			if !ok {
 				continue
 			}
-			kept = append(kept, m)
-		}
-		if len(kept) < len(allMatches) {
-			if saveErr := e.store.SavePoolMatches(compID, kept); saveErr != nil {
-				return nil, saveErr
+			if _, inStandings := standings[pn]; !inStandings {
+				continue
 			}
-			e.standingsCache.Delete(compID)
-			e.standingsFlight.Delete(compID)
-			return nil, nil
+			if _, ok := poolCourt[pn]; !ok {
+				poolCourt[pn] = m.Court
+			}
+			if IsTiebreakerMatchID(m.ID) {
+				poolTB[pn] = append(poolTB[pn], m)
+			} else if m.Status != state.MatchStatusCompleted {
+				regularIncomplete[pn] = true
+			}
 		}
-		return nil, nil
-	}
 
-	// Supplementary ippon-shobu bouts are held only where the tie affects
-	// advancement/seeding; pendingTieBreaks owns that band.
-	standings, err := e.CalculatePoolStandings(compID)
+		for poolName, poolStandings := range standings {
+			// Don't inject tiebreakers until the pool's regular matches are all done.
+			if regularIncomplete[poolName] {
+				continue
+			}
+			for _, p := range pendingTieBreaks(comp, poolName, poolStandings, poolTB[poolName], poolCourt[poolName], false) {
+				injected = append(injected, p.bouts...)
+			}
+		}
+
+		if len(injected) == 0 {
+			return nil
+		}
+		if tournErr != nil {
+			return tournErr
+		}
+		// Reassign slots so the new TB matches get ScheduledAt values,
+		// keeping operator-adjusted times.
+		return tx.SavePoolMatches(compID, appendWithSlots(allMatches, injected, comp, tournament))
+	})
 	if err != nil {
 		return nil, err
 	}
-
-	allMatches, err := e.store.LoadPoolMatches(compID)
-	if err != nil {
-		return nil, err
+	if healed || len(injected) > 0 {
+		// Invalidate the standings cache so the next read reflects the change.
+		e.standingsCache.Delete(compID)
+		e.standingsFlight.Delete(compID)
 	}
-
-	// Scan existing TB matches per pool for idempotency and ID sequencing.
-	// existingRows are handed to generateTiebreakerMatches raw (not reduced to
-	// a bare-name dedup map here) so it can resolve each row's sides against
-	// the SPECIFIC tied group being processed via groupMemberIDs -- see
-	// that function's doc comment for why a bare-name reduction at this scan
-	// stage would collapse distinct namesake-involving pairs.
-	poolTB := map[string][]state.MatchResult{}
-	poolCourt := map[string]string{}
-	// regularIncomplete[pool] becomes true if ANY regular (non-TB) match in the
-	// pool is not yet completed. Tiebreakers must only be injected once a pool's
-	// regular round-robin is finished, otherwise an intermediate, partial-result
-	// tie (e.g. everyone 0–0 after one match) would spuriously inject TB matches
-	// that a later result then breaks, leaving orphaned scheduled TB matches that
-	// never clear. (The pre-incremental caller enforced this via a comp-wide
-	// "all regular matches complete" gate; per-pool seeding needs it here.)
-	regularIncomplete := map[string]bool{}
-	for _, m := range allMatches {
-		pn, ok := poolNameFromMatchID(m.ID)
-		if !ok {
-			continue
-		}
-		if _, inStandings := standings[pn]; !inStandings {
-			continue
-		}
-		if _, ok := poolCourt[pn]; !ok {
-			poolCourt[pn] = m.Court
-		}
-		if IsTiebreakerMatchID(m.ID) {
-			poolTB[pn] = append(poolTB[pn], m)
-		} else if m.Status != state.MatchStatusCompleted {
-			regularIncomplete[pn] = true
-		}
-	}
-
-	var injected []state.MatchResult
-	for poolName, poolStandings := range standings {
-		// Don't inject tiebreakers until the pool's regular matches are all done.
-		if regularIncomplete[poolName] {
-			continue
-		}
-		for _, p := range pendingTieBreaks(comp, poolName, poolStandings, poolTB[poolName], poolCourt[poolName], false) {
-			injected = append(injected, p.bouts...)
-		}
-	}
-
 	if len(injected) == 0 {
 		return nil, nil
 	}
-
-	allMatches = append(allMatches, injected...)
-
-	// Reassign slots so the new TB matches get ScheduledAt values.
-	// Snapshot operator-adjusted times first so they survive the reassignment;
-	// only newly injected matches (ScheduledAt == "") should receive new slots.
-	existingTimes := make(map[string]string, len(allMatches))
-	for _, m := range allMatches {
-		if m.ScheduledAt != "" {
-			existingTimes[m.ID] = m.ScheduledAt
-		}
-	}
-	tournament, err := e.store.LoadTournament()
-	if err != nil {
-		return nil, err
-	}
-	allMatches, _ = assignPoolMatchSlots(allMatches, comp, tournament)
-	for i := range allMatches {
-		if t, ok := existingTimes[allMatches[i].ID]; ok {
-			allMatches[i].ScheduledAt = t
-		}
-	}
-
-	if err := e.store.SavePoolMatches(compID, allMatches); err != nil {
-		return nil, err
-	}
-
-	// Invalidate the standings cache so the next read reflects the injected matches.
-	e.standingsCache.Delete(compID)
-	e.standingsFlight.Delete(compID)
-
 	return injected, nil
 }
 

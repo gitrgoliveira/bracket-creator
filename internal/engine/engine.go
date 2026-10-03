@@ -44,6 +44,22 @@ type Engine struct {
 	store           *state.Store
 	standingsCache  sync.Map // map[compID string]*standingsCacheEntry
 	standingsFlight sync.Map // map[compID string]*sync.Once, collapses concurrent cold-cache calls
+
+	// afterMatchRead, when set (tests only), runs at the seam where a
+	// read-modify-write of a match file has read what it will write back:
+	// the pool-matches injections and the Swiss append (inside their one
+	// transaction), and the kachinuki advance (between its read and its
+	// locked write). It lets a test land a concurrent write in that window
+	// and pin that nothing it wrote is lost (bc-mrgc phase 3). Production
+	// never sets it.
+	afterMatchRead func(compID string)
+}
+
+// noteMatchRead runs the test seam above, when one is set.
+func (e *Engine) noteMatchRead(compID string) {
+	if e.afterMatchRead != nil {
+		e.afterMatchRead(compID)
+	}
 }
 
 func New(store *state.Store) *Engine {

@@ -122,12 +122,17 @@ export function historyEntryView(entry) {
     const cleared = entry.clearedWithdrawal
         ? `Withdrawal cleared by later scoring: ${resultText(entry.clearedWithdrawal)}`
         : null;
+    // Why the whole write was kept rather than applied, when one rule did that
+    // (bc-mrgc phase 3): the server's own words ("older revision of this
+    // board" for a save the same device had already followed with a newer one).
+    const reason = typeof entry.reason === 'string' && entry.reason ? `Not applied: ${entry.reason}` : null;
     return {
         time: historyTime(entry),
         door: historyDoorWords(entry.door),
         changed: changed.length ? `changed ${changed.join(', ')}` : 'changed nothing',
         held,
         cleared,
+        reason,
     };
 }
 
@@ -189,6 +194,7 @@ export function MatchHistoryDisclosure({ match, password, hidden = false }) {
                                         <span className="match-history__time">{v.time}</span>
                                         {' '}<span className="match-history__door">{v.door}</span>
                                         {', '}<span className="match-history__changed">{v.changed}</span>
+                                        {v.reason && <div className="match-history__held" data-testid="match-history-reason">{v.reason}</div>}
                                         {v.held.map((h) => (
                                             <div key={h.group} className="match-history__held" data-testid="match-history-held">{h.text}</div>
                                         ))}

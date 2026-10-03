@@ -538,8 +538,10 @@ match that has meanwhile been finished never reopens it: its changes made after 
 are applied to the finished result, which stays finished, and the winner is worked out again
 from the merged points or bouts; its changes made before the finish are held. If that leaves
 a knockout match tied, it goes back to running, because a knockout cannot end tied, and a
-pool or league match becomes a draw. An out of order write from the same client session is
-still dropped.
+pool or league match becomes a draw. An engi match is never a draw: a count that decides no
+winner (an even total) sends it back to running, in a pool as in a knockout. An out of order
+write from the same client session (an older save arriving after a newer one) is not applied,
+and is kept whole in the history as an older revision of that board.
 
 A deliberate correction is subject to the same rule, which matters most when it was made
 without a connection. Correcting the result you are looking at works normally. Correcting
@@ -552,7 +554,11 @@ knowing what happened in between.
 **Every write is kept in the match's history.** Each match has an append only history file in
 the competition's `history/` folder, one line per write that reached it: when the change was
 made, when the server received it, which endpoint it came through, the groups it changed and,
-for each, whether it was applied or held, with the held values. The history is written in the
+for each, whether it was applied or held, with the held values. A held group that says exactly
+what is already stored (for example "no overtime" over a match with none) is no loss, so it is
+recorded as unchanged and its value is not kept. When one rule held the whole write, the line
+also says why: an older revision of the same board, or an engi result whose flags and winner
+are kept together. The history is written in the
 same transaction as the match, so the two land together or not at all, and a write refused
 outright (an invalid payload, the wrong competitors) leaves no line. Reopening, requeueing,
 overriding a winner and the other server actions that change a result write their own line.

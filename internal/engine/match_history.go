@@ -70,6 +70,11 @@ func (e *Engine) recordWriteHistory(h state.StoreTx, compID, matchID string, res
 	for _, g := range rep.Unchanged {
 		outcomes[g] = state.HistoryOutcomeUnchanged
 	}
+	// A held group that said exactly what is stored lost nothing: it is
+	// recorded as unchanged, never as held.
+	for _, g := range rep.HeldEcho {
+		outcomes[g] = state.HistoryOutcomeUnchanged
+	}
 	for _, g := range rep.Held {
 		outcomes[g] = state.HistoryOutcomeHeld
 	}
@@ -82,6 +87,7 @@ func (e *Engine) recordWriteHistory(h state.StoreTx, compID, matchID string, res
 		Changed:           rep.Changed,
 		Outcomes:          outcomes,
 		Held:              rep.HeldValues,
+		Reason:            rep.HoldReason,
 		ClearedWithdrawal: rep.ClearedWithdrawal,
 	}
 	if err := h.AppendMatchHistory(compID, entry); err != nil {

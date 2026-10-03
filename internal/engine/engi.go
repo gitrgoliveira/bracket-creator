@@ -67,7 +67,50 @@ func engiWinnerSide(flagsA, flagsB int) string {
 //
 // Returns the persisted MatchResult so the handler can echo / broadcast it.
 func (e *Engine) recordEngiMatchResult(h state.StoreTx, compID, matchID string, flagsA, flagsB int, correctionReason string, opts ...ForceOptions) (*state.MatchResult, error) {
-	return e.recordEngiMatch(h, compID, matchID, flagsA, flagsB, correctionReason, opts...)
+	return e.recordEngiMatch(h, compID, matchID, flagsA, flagsB, correctionReason, 0, opts...)
+}
+
+// engiFinishProbe is the write an engi finish makes, built on the stored
+// match: the flags, the winner they decide, completed, stamped with the
+// client's stamp and naming the two groups it changes (result and flags).
+func engiFinishProbe(prior, result *state.MatchResult) state.MatchResult {
+	p := *prior
+	p.SubResults = state.CloneSubResults(prior.SubResults)
+	p.GroupStamps = nil
+	p.Merge = nil
+	applyEngiToMatchResult(&p, result.FlagsA, result.FlagsB, engiWinnerSide(result.FlagsA, result.FlagsB), result.CorrectionReason)
+	p.ModifiedAt = result.ModifiedAt
+	p.Changed = append([]string(nil), engiChangedGroups...)
+	p.WriteDoor = doorEngi
+	p.RevSession = result.RevSession
+	return p
+}
+
+// HoldReasonEngiAtomic is the history reason of an engi finish held whole
+// because a newer change to one of its two groups is stored: the flags and
+// the winner they decide are one change, never applied apart.
+const HoldReasonEngiAtomic = "the flags and the winner they decide are kept together"
+
+// engiFinishHeld judges an engi finish by the merge owner before the engi
+// recorder writes it (bc-mrgc phase 3): ordered by its stamp against the
+// stored result and flags groups, through the same rule every other write
+// takes. The flags and the winner they decide are atomic, so when either
+// group is held both are (a stale finish must not set a winner over newer
+// flags, nor new flags under an older winner). On a hold the report is left
+// on result.Merge for the history entry and true is returned.
+func engiFinishHeld(prior, result *state.MatchResult, comp *state.Competition, knockout bool) bool {
+	probe := engiFinishProbe(prior, result)
+	rep := mergeMatchWrite(prior, &probe, matchWriteForward, mergeCtx{comp: comp, knockout: knockout})
+	if len(rep.Held)+len(rep.HeldEcho) == 0 {
+		return false
+	}
+	if !rep.Superseded() {
+		probe = engiFinishProbe(prior, result)
+		rep = mergeMatchWrite(prior, &probe, matchWriteForward, mergeCtx{comp: comp, knockout: knockout, holdAll: HoldReasonEngiAtomic})
+	}
+	result.Merge = rep
+	result.WriteDoor = doorEngi
+	return true
 }
 
 // backfillEngiResult copies the engine-derived identity from a recorded engi
@@ -106,6 +149,7 @@ func (e *Engine) recordEngiMatch(
 	compID, matchID string,
 	flagsA, flagsB int,
 	correctionReason string,
+	stamp int64,
 	opts ...ForceOptions,
 ) (*state.MatchResult, error) {
 	fo := firstForceOptions(opts)
@@ -118,10 +162,13 @@ func (e *Engine) recordEngiMatch(
 		)
 	}
 	winnerSide := engiWinnerSide(flagsA, flagsB)
-	// The engi finish carries no client stamp yet (ordering it is bc-mrgc's
-	// phase 3); its groups are stamped with the server's clock so the next
-	// write is ordered against it.
-	stamp := serverNowMs()
+	// The engi finish is stamped with the client's stamp, when the operator
+	// made it (bc-mrgc phase 3): the dispatch seam has already ordered it
+	// against the stored groups (engiFinishHeld). Only a writer with no stamp
+	// (the engine's own callers, a legacy client) takes the server's clock.
+	if stamp <= 0 {
+		stamp = serverNowMs()
+	}
 
 	// Try the pool stage first.
 	var out *state.MatchResult

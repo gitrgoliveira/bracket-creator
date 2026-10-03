@@ -55,6 +55,13 @@ describe('queueAlertMessage', () => {
         expect(queueAlertMessage({ kind: 'not-a-kind', count: 1, terminalCount: 1 })).toBeNull();
     });
 
+    // bc-mrgc phase 3: nothing queued is discarded for its age any more (the
+    // server orders an old write by its stamp and keeps what loses in the
+    // match's history), so the 12-hour discard notice is gone with it.
+    it('has no expiry notice: no queued write is discarded for its age', () => {
+        expect(queueAlertMessage({ kind: 'expired', count: 1, terminalCount: 1 })).toBeNull();
+    });
+
     // bc-offl (operator decision 2026-09-27, Q2): held results that landed.
     it('confirms held results that were sent, singular and plural', () => {
         expect(queueAlertMessage({ kind: 'sent', count: 1, terminalCount: 1 })).toBe('1 finished result sent.');
@@ -67,7 +74,7 @@ describe('queueAlertToastType', () => {
         expect(queueAlertToastType({ kind: 'sent', count: 1, terminalCount: 1 })).toBe('success');
     });
 
-    it.each(['expired', 'unreadable', 'rejected', 'superseded', 'server_error', 'auth_required', 'storage_full', 'discarded'])(
+    it.each(['unreadable', 'rejected', 'superseded', 'server_error', 'auth_required', 'storage_full', 'discarded'])(
         'keeps %s an error toast',
         (kind) => {
             expect(queueAlertToastType({ kind, count: 1, terminalCount: 1 })).toBe('error');

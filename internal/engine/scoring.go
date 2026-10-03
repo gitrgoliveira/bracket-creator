@@ -108,6 +108,15 @@ type storedSides struct {
 // same-name pair). "Match identity is fixed at generation" has to mean both
 // halves or it means neither.
 func reconcileSides(result *state.MatchResult, stored storedSides) (mismatch bool) {
+	// A side whose participant id matches the stored one is the same
+	// competitor whatever name the payload carries: a write queued before a
+	// participant rename carries the old name and must not be refused for it
+	// (bc-mrgc phase 3, "Nothing should be dropped"). It is accepted and the
+	// stored, current name is kept, on the side and wherever the write names
+	// that side by the old name. Only a genuine identity disagreement (an id
+	// mismatch, or a name mismatch no id can settle) is refused.
+	adoptCurrentSideName(result, &result.SideA, result.SideAID, stored.A, stored.AID)
+	adoptCurrentSideName(result, &result.SideB, result.SideBID, stored.B, stored.BID)
 	if result.SideA == "" {
 		result.SideA = stored.A
 	} else if stored.A != "" && result.SideA != stored.A {
@@ -128,6 +137,38 @@ func reconcileSides(result *state.MatchResult, stored storedSides) (mismatch boo
 		mismatch = true
 	}
 	return mismatch
+}
+
+// adoptCurrentSideName replaces a payload side name that differs from the
+// stored one when the side's participant id says it is the same competitor
+// (a rename since the write was made), and every place the write names that
+// side by the old name: the match winner (when its id, if any, is this side's)
+// and the representative-bout row, which names the teams themselves (the
+// numbered bout rows name fighters, never the side).
+func adoptCurrentSideName(result *state.MatchResult, side *string, sideID, storedName, storedID string) {
+	old := *side
+	if old == "" || storedName == "" || old == storedName || sideID == "" || sideID != storedID {
+		return
+	}
+	*side = storedName
+	if result.Winner == old && (result.WinnerID == "" || result.WinnerID == storedID) {
+		result.Winner = storedName
+	}
+	for i := range result.SubResults {
+		sub := &result.SubResults[i]
+		if sub.Position != state.DaihyosenSubPosition {
+			continue
+		}
+		if sub.SideA == old {
+			sub.SideA = storedName
+		}
+		if sub.SideB == old {
+			sub.SideB = storedName
+		}
+		if sub.Winner == old {
+			sub.Winner = storedName
+		}
+	}
 }
 
 // withPoolMatch atomically loads pool matches, calls mutate on the one
@@ -641,7 +682,19 @@ type ForceOptions struct {
 	// bytes as an operator clearing every mark on an editor board, which must
 	// still clear them.
 	StartOnly bool
+	// HoldReason, when set, holds the write whole: nothing of it is applied,
+	// all of it is kept in the match's history with this reason, and the
+	// write answers superseded (holdWriteTx). The score handler sets it for a
+	// running write older than one the same board already sent
+	// (HoldReasonOlderRevision): the ordering protection the rev guard gives,
+	// without dropping anything.
+	HoldReason string
 }
+
+// HoldReasonOlderRevision is the history reason of a running write the same
+// scoring board had already followed with a newer one (the score handler's
+// rev guard, bc-mrgc phase 3).
+const HoldReasonOlderRevision = "older revision of this board"
 
 // firstForceOptions returns the caller's ForceOptions, or the zero value
 // (force=false, no reopen list) when the variadic slot was omitted.

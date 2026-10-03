@@ -1789,8 +1789,15 @@ func RegisterMatchHandlers(r *gin.RouterGroup, eng *engine.Engine, store Competi
 			// operator just overrode; broadcast it too so a client watching
 			// only that court/match learns its verdict was cleared.
 			broadcastReopenedDownstream(hub, id, reopenedDownstream)
+			c.JSON(http.StatusOK, gin.H{"applied": true})
+			return
 		}
-		c.JSON(http.StatusOK, gin.H{"applied": applied})
+		// A newer result for this match is stored: the override is not
+		// applied and is kept in the match's history with the winner it
+		// named (the engine's recordOverrideHistory). Answered exactly like
+		// any other write whose every change was held (bc-mrgc phase 3): the
+		// result group it held, and the superseded reason the client keys on.
+		respondSuperseded(c, []string{state.GroupResult})
 	})
 
 	r.PUT("/competitions/:id/matches/:mid/time", func(c *gin.Context) {
@@ -2617,8 +2624,10 @@ type runningRev struct {
 // (session + rev).
 //
 // C2 rev-guard: when a "running" write arrives with a Rev that is lower
-// than the stored high-water mark WITHIN THE SAME RevSession, we silently
-// no-op it (return 200). This prevents out-of-order delivery from a
+// than the stored high-water mark WITHIN THE SAME RevSession, nothing of it
+// is applied: it is kept whole in the match's history and answered
+// superseded (holdOlderRevision, bc-mrgc phase 3; it used to be dropped with
+// a bare 200 {stale:true}). This prevents out-of-order delivery from a
 // reconnect flush overwriting a more-recent in-flight write. Writes from a
 // DIFFERENT RevSession are treated as last-write-wins, multiple operators
 // may legitimately score the same shiaijo concurrently. The merge
@@ -2739,6 +2748,41 @@ func scoreResponseWithReopened(result *state.MatchResult, reopened []engine.Reop
 		merged["heldGroups"] = held
 	}
 	return merged
+}
+
+// holdOlderRevision answers a running write the same scoring board has
+// already followed with a newer one (the rev guard below). The ordering
+// protection stays: nothing of it is applied. But nothing is dropped either
+// (bc-mrgc phase 3, "Nothing should be dropped"): the engine keeps the whole
+// write in the match's history with the reason, through the merge owner, and
+// the write is answered superseded with the groups it held, exactly like any
+// other write a newer change outranks. It takes no court and passes no gate,
+// since it changes nothing: no court lock, no start gate, no correction
+// check, and the rev high-water mark is left where the newer write put it.
+func holdOlderRevision(c *gin.Context, tx CompetitionTransactor, eng ScoringEngine, id, mid string, result *state.MatchResult) {
+	var engErr error
+	txErr := tx.WithTransaction(id, func(stx state.StoreTx) error {
+		_, engErr = eng.RecordMatchResultWithIneligibilityTx(stx, id, mid, result, engine.ForceOptions{
+			HoldReason: engine.HoldReasonOlderRevision,
+		})
+		return nil
+	})
+	if txErr == nil {
+		txErr = engErr
+	}
+	var notFoundErr *engine.NotFoundError
+	switch {
+	case errors.Is(txErr, engine.ErrMatchSuperseded):
+		respondSuperseded(c, engine.HeldGroupsOf(txErr))
+	case errors.As(txErr, &notFoundErr):
+		c.JSON(http.StatusNotFound, gin.H{"error": txErr.Error()})
+	case txErr != nil:
+		internalError(c, txErr)
+	default:
+		// The hold always answers superseded; a nil here would be a write
+		// that neither applied nor was kept, which must not read as saved.
+		internalError(c, fmt.Errorf("match %s: an older revision was neither applied nor held", mid))
+	}
 }
 
 func registerScoreHandler(r *gin.RouterGroup, eng ScoringEngine, store CompetitionStore, tx CompetitionTransactor, hub Broadcaster, verifier PasswordVerifier, tl TournamentLoader) {
@@ -2894,8 +2938,9 @@ func registerScoreHandler(r *gin.RouterGroup, eng ScoringEngine, store Competiti
 		// cannot second-guess the shiaijo. The former premature-completion
 		// 409 gate was removed with the engine's auto-finalize.
 
-		// C2 rev-guard: drop stale "running" autosave writes that arrive
-		// out of order after a reconnect flush.
+		// C2 rev-guard: a "running" autosave write that arrives after a newer
+		// one from the same board (out of order after a reconnect flush) is
+		// not applied, and is kept in the match's history (holdOlderRevision).
 		//
 		// Only gated when:
 		//   - status is "running" (autosave writes; completed writes always win)
@@ -2907,8 +2952,10 @@ func registerScoreHandler(r *gin.RouterGroup, eng ScoringEngine, store Competiti
 		//
 		// Same-session ordering: if the stored high-water mark for this match
 		// (within the same session) is already > the incoming Rev, the write is
-		// stale, return 200 so the client doesn't surface an error but skip the
-		// engine write entirely. A higher-or-equal rev advances the mark.
+		// an older revision: nothing of it is applied, the whole write goes to
+		// the match's history, and it is answered superseded with the groups it
+		// held (200, never a 4xx: it can never win a retry). A higher-or-equal
+		// rev advances the mark.
 		//
 		// Different sessions (concurrent operators): last-write-wins. Multiple
 		// operators may legitimately score the same shiaijo simultaneously. The
@@ -2923,12 +2970,12 @@ func registerScoreHandler(r *gin.RouterGroup, eng ScoringEngine, store Competiti
 				}
 				stored := existing.(runningRev)
 				// Same session: a lower rev is a stale out-of-order delivery (e.g.
-				// a reconnect flush). Drop it. DIFFERENT sessions are concurrent
+				// a reconnect flush). Hold it in the history. DIFFERENT sessions are concurrent
 				// operators (multiple operators may score one shiaijo), last write
 				// wins; the completed-match regression guard below still prevents a
 				// running write from reverting a finished match.
 				if stored.Session == incoming.Session && result.Rev < stored.Rev {
-					c.JSON(http.StatusOK, gin.H{"stale": true})
+					holdOlderRevision(c, tx, eng, id, mid, result)
 					return
 				}
 				if runningRevStore.CompareAndSwap(matchKey, existing, incoming) {

@@ -52,6 +52,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"slices"
 	"sort"
 	"time"
 
@@ -95,6 +96,13 @@ func (e *Engine) RecordMatchResultWithIneligibilityTx(tx state.StoreTx, compID, 
 	if loadErr != nil {
 		return nil, fmt.Errorf("RecordMatchResultWithIneligibilityTx: load competition %s: %w", compID, loadErr)
 	}
+	// A write the caller already knows must not apply (the running rev
+	// guard's older revision) is kept whole in the match's history and
+	// answered superseded, before anything else judges it: nothing of it
+	// lands, and nothing about it is lost (bc-mrgc phase 3).
+	if fo.HoldReason != "" {
+		return nil, e.holdWriteTx(tx, compID, matchID, result, comp, fo.HoldReason)
+	}
 	// Only a COMPLETING write goes through the engi recorder. Engi's flag-total
 	// rule (odd, in {1,3,5}: a 3- or 5-referee panel cannot draw) can only be
 	// satisfied by a real result, so routing every engi write through it
@@ -125,17 +133,33 @@ func (e *Engine) RecordMatchResultWithIneligibilityTx(tx state.StoreTx, compID, 
 		// a mixed competition needs it, so no other engi write pays the read.
 		// A prior it cannot read is the write's error, never a nil prior: a
 		// nil prior leaves the refusal below nothing to roll back to.
-		var engiPrior *state.MatchResult
-		if comp.Format == state.CompFormatMixed && IsPoolMatchID(matchID) {
-			var lerr error
-			if engiPrior, lerr = e.lookupExistingResult(tx, compID, matchID); lerr != nil {
-				return nil, lerr
+		//
+		// The finish is ordered by its stamp like every other write (bc-mrgc
+		// phase 3): judged by the merge owner first, it is held whole, kept
+		// in the match's history and answered superseded when a newer change
+		// to its result or flags is stored, BEFORE the downstream guard, so a
+		// stale replay is never misreported as a knockout correction.
+		engiPrior, lerr := e.lookupExistingResult(tx, compID, matchID)
+		if lerr != nil {
+			return nil, lerr
+		}
+		if engiValidTotal(result.FlagsA, result.FlagsB) {
+			inPool, perr := e.matchInPoolFile(tx, compID, matchID)
+			if perr != nil {
+				return nil, perr
 			}
+			if engiFinishHeld(engiPrior, result, comp, !inPool) {
+				e.recordWriteHistory(tx, compID, matchID, result)
+				return nil, supersededBy(result)
+			}
+		}
+		if comp.Format != state.CompFormatMixed || !IsPoolMatchID(matchID) {
+			engiPrior = nil
 		}
 		// fo carries bc-kcdg's downstream-correction confirmation through the
 		// engi seam. Without it an engi knockout correction could neither be
 		// refused nor confirmed: the guard lives past this early return.
-		rec, recErr := e.recordEngiMatchResult(tx, compID, matchID, result.FlagsA, result.FlagsB, result.CorrectionReason, fo)
+		rec, recErr := e.recordEngiMatch(tx, compID, matchID, result.FlagsA, result.FlagsB, result.CorrectionReason, result.ModifiedAt, fo)
 		if recErr != nil {
 			return nil, recErr
 		}
@@ -1008,6 +1032,20 @@ func (e *Engine) recordDecisionTx(tx state.StoreTx, compID, matchID, decision, d
 		return nil, nil, supersededBy(result)
 	}
 
+	// An exact replay of the decision already recorded (the same decision,
+	// side and stamp: a queued write whose first send landed but whose answer
+	// was lost) is that same write landing again, so it answers as recorded,
+	// before any refusal below (the T103 lock would otherwise refuse the
+	// replay of a withdrawal whose competitor has a later match under way,
+	// and the client would report a recorded result as refused). It changes
+	// nothing; its history entry says so (bc-mrgc phase 3).
+	if exactDecisionReplay(prior, decision, decisionBy, modifiedAtStamp) {
+		probe := *result
+		result.Merge = mergeMatchWrite(prior, &probe, matchWriteForward, mergeCtx{comp: comp})
+		e.recordWriteHistory(tx, compID, matchID, result)
+		return prior, nil, nil
+	}
+
 	// T105/CHK047: reject concurrent kiken, if the intended loser is
 	// already ineligible from a *different* match, two operators are
 	// trying to kiken the same player simultaneously. Return 409 so the
@@ -1161,6 +1199,52 @@ func decisionHeldByMerge(prior, result *state.MatchResult, comp *state.Competiti
 	}
 	result.Merge = rep
 	return true
+}
+
+// exactDecisionReplay reports a decision write the stored match already
+// holds exactly: finished with this decision against this side, its result
+// group stamped with this write's own stamp. Only a stamped write can be one.
+func exactDecisionReplay(prior *state.MatchResult, decision, decisionBy string, stamp int64) bool {
+	return stamp > 0 &&
+		prior.Status == state.MatchStatusCompleted &&
+		prior.Decision == decision &&
+		prior.DecisionBy == decisionBy &&
+		prior.GroupStamp(state.GroupResult) == stamp
+}
+
+// holdWriteTx keeps a write whole in the match's history without applying any
+// of it, for ForceOptions.HoldReason. The merge owner decides what the write
+// changes and the values it holds (mergeMatchWrite with holdAll), on a copy,
+// so the stored match is untouched; the entry records the reason. Returns the
+// superseded error the write is answered with.
+func (e *Engine) holdWriteTx(tx state.StoreTx, compID, matchID string, result *state.MatchResult, comp *state.Competition, reason string) error {
+	prior, err := e.lookupExistingResult(tx, compID, matchID)
+	if err != nil {
+		return err
+	}
+	inPool, err := e.matchInPoolFile(tx, compID, matchID)
+	if err != nil {
+		return err
+	}
+	probe := *result
+	probe.SubResults = state.CloneSubResults(result.SubResults)
+	result.Merge = mergeMatchWrite(prior, &probe, matchWriteForward, mergeCtx{
+		comp: comp, knockout: !inPool, nilSubsClear: inPool, holdAll: reason,
+	})
+	e.recordWriteHistory(tx, compID, matchID, result)
+	return supersededBy(result)
+}
+
+// matchInPoolFile reports whether matchID is a row of the competition's
+// pool-matches file (a pool, league or Swiss match) rather than a knockout
+// match: the branch the merge context needs (mergeCtx.knockout and
+// nilSubsClear) when a caller judges a write outside writeToPoolOrBracket.
+func (e *Engine) matchInPoolFile(h state.StoreTx, compID, matchID string) (bool, error) {
+	pool, err := h.LoadPoolMatches(compID)
+	if err != nil {
+		return false, err
+	}
+	return slices.ContainsFunc(pool, func(m state.MatchResult) bool { return m.ID == matchID }), nil
 }
 
 // refuseDecisionReachingRunningMatch is the decision path's early answer to

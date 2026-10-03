@@ -415,6 +415,14 @@ func findBracketMatchByID(b *Bracket, matchID string) *BracketMatch {
 	return nil
 }
 
+// MatchByID is findBracketMatchByID for a caller outside this package that
+// mutates a bracket match inside UpdateBracket and may need to abort the
+// write (UpdateBracketMatchByID's mutate cannot): rounds first, then the
+// bronze sibling, or nil.
+func (b *Bracket) MatchByID(matchID string) *BracketMatch {
+	return findBracketMatchByID(b, matchID)
+}
+
 // MatchStatusByID returns the status of the match with the given ID, searching
 // pool matches FIRST, then the bracket (rounds, then the bronze sibling), or
 // found=false. It reads the CACHED parse directly and copies NOTHING: the

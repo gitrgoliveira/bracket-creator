@@ -2393,12 +2393,13 @@ paths:
             MatchResult. When part of the write was held (a newer change to
             those groups is stored) the body also carries `heldGroups`, the
             groups kept in the match's history instead of applied.
-            When the rev-guard drops a running-write autosave as a same-session
-            out-of-order delivery (a lower rev than one already applied for
-            that client session, e.g. a reconnect flush) the body is
-            `{"stale":true}` (the `stale` field set, all other MatchResult
-            fields absent). Different client sessions are concurrent operators;
-            the server merges their writes by stamp, never stale. When EVERY
+            A running write the rev-guard finds older than one the same client
+            session already sent (a lower rev, e.g. an out-of-order reconnect
+            flush) is not applied and not dropped: the whole write is kept in
+            the match's history with the reason "older revision of this board"
+            and answered with the RefusedWrite shape below (`superseded`, with
+            the `heldGroups` it held). Different client sessions are concurrent
+            operators; the server merges their writes by stamp. When EVERY
             group the write changes is held, the body is the RefusedWrite shape
             (`{"applied": false, "reason": "superseded", "heldGroups": [...],
             ...}`): nothing of it was applied to the match, no SSE broadcast is
@@ -2412,25 +2413,12 @@ paths:
             application/json:
               schema:
                 # anyOf, not oneOf: MatchResult is an open schema (no required
-                # fields, no additionalProperties:false), so `{"stale":true}`
+                # fields, no additionalProperties:false), so a RefusedWrite body
                 # also validates against it. oneOf demands exactly one match and
-                # would flag that as ambiguous in most JSON-Schema tooling. The
-                # stale branch pins additionalProperties:false so a stale marker
-                # is unambiguous; a real result still matches the MatchResult
-                # branch.
+                # would flag that as ambiguous in most JSON-Schema tooling.
                 anyOf:
                   - $ref: '#/components/schemas/MatchResult'
                   - $ref: '#/components/schemas/RefusedWrite'
-                  - type: object
-                    additionalProperties: false
-                    properties:
-                      stale:
-                        type: boolean
-                        description: >
-                          true when the rev-guard dropped a running-write
-                          autosave as a same-session out-of-order delivery.
-                          Omitted on normal responses.
-                    required: [stale]
         '400':
           description: |
             Invalid payload, or a correction of a match that is already
@@ -3222,13 +3210,14 @@ paths:
             refetch. 200 either way: neither case is a fault and neither can win
             a retry as-is.
 
-            Two ways it can be false. The timestamp last-write-wins guard may
-            have dropped the assertion because a newer stored result already
-            decides this match (bare `{"applied": false}`). Or the request's
-            `modifiedAt` was implausibly far in the future, in which case the
-            body is the RefusedWrite shape with `reason: clock_skew` and a
-            `serverNowMs`, and the client should resync its clock offset from
-            GET /api/time before re-submitting.
+            Two ways it can be false, both the RefusedWrite shape. A newer
+            stored result already decides this match: the assertion is not
+            applied, it is kept in the match's history with the winner it
+            named, and the body is `reason: superseded` with `heldGroups:
+            ["result"]`, exactly like a score write whose every change was held.
+            Or the request's `modifiedAt` was implausibly far in the future:
+            `reason: clock_skew` with a `serverNowMs`, and the client should
+            resync its clock offset from GET /api/time before re-submitting.
           content:
             application/json:
               schema:
@@ -3239,6 +3228,7 @@ paths:
                     properties:
                       applied:
                         type: boolean
+                        enum: [true]
                   - $ref: '#/components/schemas/RefusedWrite'
         '409':
           description: >
@@ -3565,7 +3555,11 @@ paths:
             MatchResult, is kept in the match's history, and bars nobody; a
             `clock_skew` refusal stores nothing. No SSE event is emitted for
             either. A recorded decision that had part of it held carries
-            `heldGroups` beside the MatchResult.
+            `heldGroups` beside the MatchResult. An exact replay of the decision
+            already recorded (the same decision, side and `modifiedAt`: a
+            queued send whose first answer was lost) is answered as recorded,
+            with the stored MatchResult, before any 409 below; it changes
+            nothing.
           content:
             application/json:
               schema:
@@ -5067,8 +5061,21 @@ components:
             enum: [applied, unchanged, held]
         held:
           type: object
-          description: The value of every held group, as the write carried it, keyed by MergeGroup.
+          description: >
+            The value of every held group, as the write carried it, keyed by
+            MergeGroup. A held group whose value equals the stored one (an
+            echo, e.g. a decision's "no overtime" over a match with none) is
+            no loss: it is recorded as `unchanged` and kept out of here.
           additionalProperties: {}
+        reason:
+          type: string
+          description: >
+            Why every group the write changes was held regardless of its stamp,
+            when one rule did that: "older revision of this board" (a running
+            write the same client session had already followed with a newer
+            one), or "the flags and the winner they decide are kept together"
+            (an engi finish one of whose two groups a newer change outranks).
+            Absent when each group was judged by its own stamp.
         clearedWithdrawal:
           type: object
           description: The withdrawal or default win a later scoring change cleared (the result group as it was), when one was.

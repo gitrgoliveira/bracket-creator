@@ -31,7 +31,7 @@
 //   F1: fetchWithTimeout: per-request AbortController, 12 s default.
 //   F2: SSE silence watchdog: reconnects if no message for 35 s (>2× heartbeat).
 //   F3: SSE reconnect exponential backoff + jitter (1–30 s, reset on open).
-//   F4: Write queue persisted to localStorage (12 h TTL, try/catch safe).
+//   F4: Write queue persisted to localStorage (no age limit, try/catch safe).
 //   F5: Terminal writes (decision, completed score, lineup) durable via queue.
 
 import { normalizeCompetitionDetail, normalizePlayer, toBackendMatchResult, buildPlayerMetadata } from './api_serializers.jsx';
@@ -499,19 +499,34 @@ const _revSession = (typeof crypto !== 'undefined' && crypto.randomUUID)
 // ---------------------------------------------------------------------------
 // C2 / F4 / F5: Offline write queue
 // ---------------------------------------------------------------------------
-// Holds the latest pending write per queue key (last-write-wins for running
-// autosaves; terminal writes supersede running ones for the same match).
-// On any network failure the write is queued here and retried on reconnect.
+// Holds every pending write, per match an ORDERED list (bc-mrgc phase 3,
+// operator ruling 2026-10-03: "Nothing should be dropped. All events must be
+// ordered."). On any network failure the write is queued here and retried on
+// reconnect.
+//
+// One entry per write, each under its own key: `${base}${QUEUE_ENTRY_SEP}${id}`,
+// where the BASE is the match the write is about (`compID:matchID` for a score
+// or a decision, `override:…`, `lineup:…`). A match's entries replay in the
+// order of the stamp they carry (_entryStamp), and the flush stops a match at
+// its first entry that does not settle, so a later write is never sent ahead of
+// an earlier one. The ONE coalescing rule (_coalesceTarget): a score write
+// takes the place of the match's LAST entry only when that entry is a score
+// write no newer than it, and a running write only of a running one, claiming
+// the groups both changed (union, as bc-mrgc phase 2 does). Nothing else
+// replaces anything: a running write never replaces a queued Finish or a
+// decision, and a decision and a score for the same match are two entries. A key persisted by an earlier build (one entry
+// per match, keyed by the base itself) is a valid entry of this shape: its base
+// is the key, so an old queue loads and replays as it is.
 //
 // F4: The queue is persisted to localStorage on every change so that a page
 // reload or crash during a wifi gap does not lose unsaved scores/decisions.
-// Entries older than QUEUE_TTL_MS (12 h) are dropped on rehydration, and the
-// drop is REPORTED (bc-qttl) via the queue-alert channel: a queued result that
-// never reached the server must never vanish without telling the operator.
+// Nothing is dropped for its age: an old entry is sent like any other, and the
+// server orders it by its stamp, applying what is still the latest change and
+// keeping what a newer change outranks in the match's history (it used to be
+// discarded after 12 h, announced, but gone).
 //
 // F5: Terminal writes (completed score, decision, lineup) use the same queue
 // with additional descriptor fields: kind, terminal, method, url.
-// A terminal entry for a key SUPERSEDES any running entry for the same key.
 //
 // Sync-status state is published via _syncStatus / _syncListeners so the UI
 // (SyncStatusPill) can render synced / syncing / offline without coupling to
@@ -535,7 +550,8 @@ const _revSession = (typeof crypto !== 'undefined' && crypto.randomUUID)
  *   terminal        : true for completed / decision / lineup writes
  *   method          : HTTP method string ('PUT' | 'POST')
  *   url             : same-origin request path, e.g. /api/competitions/… (for replay in _flushQueue)
- *   enqueuedAt      : Date.now() at enqueue time (for TTL eviction on reload)
+ *   enqueuedAt      : Date.now() at enqueue time (the outbox's "which copy is
+ *                     newer" test, and the order of an entry with no stamp)
  *   perfAtEnqueue   : performance.now() at enqueue time (bc-cse). SESSION-LOCAL
  *                     and deliberately NOT persisted - it is measured from this
  *                     document's time origin, so it is meaningless once
@@ -587,7 +603,6 @@ const _revSession = (typeof crypto !== 'undefined' && crypto.randomUUID)
  */
 
 const QUEUE_STORAGE_KEY = 'bc_write_queue';
-const QUEUE_TTL_MS = 12 * 60 * 60 * 1000; // 12 hours
 
 // Defense-in-depth allowlist for terminal-write replay. The queue only ever
 // holds score/decision/lineup writes, which are ALWAYS PUT/POST to
@@ -636,7 +651,6 @@ function _isAllowedTerminalRequest(method, url) {
 // exactly like the writes it is reporting.
 //
 // Alert shape: {kind, count, terminalCount, detail?, compID?, matchID?}
-//   'expired'       dropped on rehydration: older than QUEUE_TTL_MS
 //   'unreadable'    dropped: corrupt/tampered entry that can never be replayed
 //   'rejected'      the server permanently refused it (non-retryable 4xx)
 //   'server_error'  the server keeps failing it; STILL QUEUED, still retrying
@@ -819,23 +833,112 @@ function _enqueuedAfter(d, at) {
     return !!d && typeof d.enqueuedAt === 'number' && typeof at === 'number' && d.enqueuedAt > at;
 }
 
-// _storedEntryProblem: why a stored queue entry cannot be replayed ('unreadable'
-// or 'expired'), or null when it can. The checks a rehydrate applies, stated
+// ---------------------------------------------------------------------------
+// bc-mrgc phase 3: per match, an ordered list of pending writes.
+// ---------------------------------------------------------------------------
+// The separator between an entry's base (the match it is about) and its own
+// id. A control character, so no competition, match, team or round id can
+// contain it, and a key persisted by an earlier build (no separator) is its
+// own base.
+const QUEUE_ENTRY_SEP = '\u001f';
+let _entrySeq = 0;
+
+// _baseOf: the match (or lineup, or override target) a queue key is about.
+function _baseOf(key) {
+    const i = typeof key === 'string' ? key.indexOf(QUEUE_ENTRY_SEP) : -1;
+    return i < 0 ? key : key.slice(0, i);
+}
+
+// _newEntryKey: a fresh key for one more write about `base`. Unique across
+// tabs (the stored outbox is shared) and across reloads.
+function _newEntryKey(base) {
+    _entrySeq++;
+    return `${base}${QUEUE_ENTRY_SEP}${Date.now().toString(36)}.${_entrySeq.toString(36)}.${Math.random().toString(36).slice(2, 8)}`;
+}
+
+// _entryStamp: the order an entry replays in: the stamp its payload carries
+// (when the operator made the change, server-relative), or, for a write with
+// none (a lineup), when it was queued.
+function _entryStamp(d) {
+    const s = Number(d && d.payload && d.payload.modifiedAt);
+    if (Number.isFinite(s) && s > 0) return s;
+    return Number(d && d.enqueuedAt) || 0;
+}
+
+// _byEntryOrder: the ONE replay order. By stamp, then by when it was queued,
+// then by key, so it is total and the same in every tab.
+function _byEntryOrder([ka, a], [kb, b]) {
+    return (_entryStamp(a) - _entryStamp(b))
+        || ((Number(a && a.enqueuedAt) || 0) - (Number(b && b.enqueuedAt) || 0))
+        || (ka < kb ? -1 : ka > kb ? 1 : 0);
+}
+
+// _entriesFor: a base's pending writes, in replay order.
+function _entriesFor(base) {
+    const out = [];
+    for (const [k, d] of _writeQueue) {
+        if (d && _baseOf(k) === base) out.push([k, d]);
+    }
+    return out.sort(_byEntryOrder);
+}
+
+function _isRunningScore(d) {
+    return !!d && d.kind === 'score' && !d.terminal;
+}
+
+// _coalesceTarget: the one entry a new write may take the place of, or null
+// when it is appended as an entry of its own. Only a SCORE write coalesces,
+// only into its match's LAST entry, only when that entry is a score write too
+// (the same board's state, which the newer write restates, claiming its
+// groups through the union), and only when the new write is not older than
+// it. A RUNNING write takes the place of a running one only: never of a queued
+// Finish or correction. A Finish or correction may take the place of either
+// (a later Finish, or the editor's Retry re-sending the queued one, is the
+// same result restated, not a second one). A decision, an override or a
+// lineup save is never replaced, and nothing coalesces across one. The
+// page-hide copy of a write still being sent (_keepInflightRunning) is its
+// own entry until its fetch settles.
+function _coalesceTarget(base, descriptor) {
+    if (!descriptor || descriptor.kind !== 'score') return null;
+    const list = _entriesFor(base);
+    const last = list.length ? list[list.length - 1] : null;
+    if (!last) return null;
+    const [key, prev] = last;
+    if (!prev || prev.kind !== 'score' || _heldByOpenFetch(key, prev)) return null;
+    if (prev.terminal && !descriptor.terminal) return null;
+    if (_entryStamp(descriptor) < _entryStamp(prev)) return null;
+    return last;
+}
+
+// _mustQueueBehind: does a new write about `base` have to wait behind what is
+// already queued for it, rather than go straight to the server? Sent ahead, it
+// would land before an earlier write the same device made, and the server's
+// rules that hang on the order (a withdrawal against the scoreline it was
+// declared over, a correction after a finish) would read the two the wrong
+// way round. A score write goes straight unless something other than a running
+// score is pending (a running one is claimed by the union and drained when the
+// new write lands); every other write waits behind anything pending.
+function _mustQueueBehind(base, kind) {
+    for (const [, d] of _entriesFor(base)) {
+        if (kind !== 'score' || !_isRunningScore(d)) return true;
+    }
+    return false;
+}
+
+// _storedEntryProblem: why a stored queue entry cannot be replayed
+// ('unreadable'), or null when it can. The checks a rehydrate applies, stated
 // once so taking up another tab's entries (_onStoredQueueChanged) applies them
-// too.
-function _storedEntryProblem(descriptor, now) {
+// too. An entry is never refused for its age (bc-mrgc phase 3): the server
+// orders it by its stamp and keeps what a newer change outranks in the
+// match's history, so sending it loses nothing and discarding it would.
+function _storedEntryProblem(descriptor) {
     if (!descriptor || typeof descriptor !== 'object') return 'unreadable';
-    // enqueuedAt must be a finite positive number: a tampered/corrupt entry
-    // could set it to a non-numeric truthy value (e.g. a string), making
-    // (now - enqueuedAt) NaN so the TTL comparison is false and an
-    // arbitrarily old write slips through. Validate the type FIRST, and
-    // separately from the age test below: an unparseable stamp is a corrupt
-    // entry, not an old one, and conflating them would report a tampered
-    // queue to the operator as ordinary expiry.
+    // enqueuedAt must be a finite positive number: it orders the entry and
+    // tells two copies of it apart (_enqueuedAfter), and a tampered/corrupt
+    // value (a string, NaN) would make both comparisons silently false.
     if (typeof descriptor.enqueuedAt !== 'number'
         || !Number.isFinite(descriptor.enqueuedAt)
         || descriptor.enqueuedAt <= 0) return 'unreadable';
-    if ((now - descriptor.enqueuedAt) > QUEUE_TTL_MS) return 'expired';
     // Defense-in-depth: localStorage is tamperable. Reject terminal entries
     // whose method/url fall outside the queue allowlist (PUT/POST to
     // /api/competitions/…) before they can ever reach fetch on replay.
@@ -962,7 +1065,7 @@ function _notifyScoreSupersededEditor(compID, matchID) {
 
 // The ALERT half: reaches an operator who has already moved on to another
 // court. Split from the editor half so a flush pass can emit ONE alert carrying
-// a real count, the way the 'expired' and 'unreadable' alerts already do.
+// a real count, the way the 'unreadable' alert already does.
 // Publishing count:1 per drop made queueAlertMessage's plural branch dead code
 // and left a court that reconnected with several dropped results looking at a
 // single toast reading "A result was not saved".
@@ -1115,7 +1218,7 @@ let _flushAttempt = 0;
 // destroying the operator's result, which is the one outcome the outbox exists
 // to prevent, and a persistently-erroring backend is exactly the case where a
 // queued score matters most. So the entry now STAYS QUEUED and keeps retrying
-// for the full QUEUE_TTL_MS, and this constant became a NOTICE threshold: on
+// until it lands, and this constant became a NOTICE threshold: on
 // crossing it we tell the operator (queue-alert 'server_error') and move the
 // pill off "Syncing…" onto a distinct not-saving state. The wedged-pill
 // complaint was really a SIGNALLING failure, and it is fixed by signalling.
@@ -1250,17 +1353,38 @@ async function _flushQueue() {
             // stored in the map at the time of the snapshot. After an await, we check
             // identity before deleting so a newer write (a fresh object literal set
             // under the same key by enqueueRunningWrite) is not accidentally removed.
-            const entries = [..._writeQueue.entries()];
+            //
+            // bc-mrgc phase 3: in replay order (_byEntryOrder), and a match
+            // whose entry does not settle in this pass (kept: offline, a 5xx,
+            // parked, its page-hide copy still being sent, re-stamped for a
+            // clock refusal) sends nothing after it in this pass, so a later
+            // write about a match never lands ahead of an earlier one.
+            const entries = [..._writeQueue.entries()].sort(_byEntryOrder);
             const gen = _queueGen; // clearQueue() bumps this to cancel an in-flight flush
             let anyFailed = false;      // any failure → keep in queue + backoff
             let networkFailed = false;  // fetch rejected → connection down → "offline"
+            const waiting = new Set();  // bases with an unsettled earlier entry this pass
+            // The entry the previous iteration took up. Every way out of the
+            // body below is a `continue` (or the end of the iteration), so the
+            // next iteration's first step is where it is known whether that
+            // entry settled (left the queue) or stays, holding its match back.
+            let taken = null;
+            const holdBackIfUnsettled = () => {
+                if (taken && _writeQueue.get(taken[0]) === taken[1]) waiting.add(_baseOf(taken[0]));
+                taken = null;
+            };
             for (const [key, descriptor] of entries) {
+                holdBackIfUnsettled();
                 // If clearQueue() ran during a prior await (logout / password_reset →
                 // credential revocation), abort before sending anything else with the
                 // now-revoked password/header.
                 if (gen !== _queueGen) break;
                 // Skip entries removed or superseded since the snapshot was taken.
                 if (_writeQueue.get(key) !== descriptor) continue;
+                // An earlier write about this match is still pending: this one
+                // waits for it (the order is the point).
+                if (waiting.has(_baseOf(key))) continue;
+                taken = [key, descriptor];
                 // bc-qttl: a write parked on 401 carries the password captured at
                 // enqueue time, so retrying it can only reproduce the same auth failure
                 // until API.resumeAfterAuth() re-stamps it. Skip it here (it stays
@@ -1312,7 +1436,8 @@ async function _flushQueue() {
                         body: JSON.stringify(_withoutDownstreamConfirmation(payload)),
                     });
                     if (res.ok) {
-                        // Success (HTTP 200/201, including a stale {stale:true} no-op): remove
+                        // Success (HTTP 200/201, including a write the server kept in the
+                        // match's history instead of applying, applied:false): remove
                         // from queue only if no newer write has replaced this descriptor.
                         if (terminal && (kind === 'override' || kind === 'score' || kind === 'decision')) {
                             // All three endpoints answer a timestamp-guard drop the same
@@ -1376,6 +1501,15 @@ async function _flushQueue() {
                                     // refetch. Benign, NOT a write failure: do not use the
                                     // terminal-fail channel (which surfaces a "not saved" error).
                                     _notifyBracketResync({ compID, matchID, reason: 'lww_dropped' });
+                                    // bc-mrgc phase 3: the assertion is the
+                                    // operator's own entry, kept in the match's
+                                    // history, not applied. Told like a held
+                                    // finished score: in the pass's one
+                                    // superseded alert, so it is never silent.
+                                    if (_writeQueue.get(key) === descriptor) {
+                                        supersededThisPass++;
+                                        lastSupersededMatch = { compID, matchID };
+                                    }
                                 } else {
                                     // bc-lww1: a queued FINISHED score, which is the operator's own
                                     // entered result. It is gone, and this is the last moment
@@ -1420,8 +1554,10 @@ async function _flushQueue() {
                             // operator presses Record bout again.
                             //
                             // So this arm reads the body for that ONE case. Every other
-                            // body - a plain 200, {stale:true}, reason 'superseded', no
-                            // reason at all - falls straight through to the same
+                            // body - a plain 200, reason 'superseded' (an older
+                            // revision of this board, or older than a stored change:
+                            // either way kept in the match's history by the server),
+                            // no reason at all - falls straight through to the same
                             // delete-as-delivered below, byte-identically to before.
                             const refusedForClock = writeWasRefusedForClock(body);
                             if (refusedForClock && !descriptor.skewRetried) {
@@ -1482,7 +1618,7 @@ async function _flushQueue() {
                         const rejections = (Number(descriptor.attempts) || 0) + 1;
                         descriptor.attempts = rejections;
                         // Fire ON the crossing (=== not >=) so one wedged write
-                        // announces once, not on every retry for the next 12 hours.
+                        // announces once, not on every retry after it.
                         if (rejections === SERVER_REJECTION_NOTICE_THRESHOLD) {
                             console.warn(`[sync] queued ${kind || 'running'} write still failing after ${rejections} server rejections (${res.status}); keeping it queued:`, body);
                             _notifyQueueAlert({
@@ -1509,7 +1645,7 @@ async function _flushQueue() {
                         // until API.resumeAfterAuth() re-stamps it with the new
                         // credential. So this branch deliberately does NOT set
                         // anyFailed: with nothing else queued the flush goes quiet
-                        // instead of burning a retry every 8s for 12 hours.
+                        // instead of burning a retry every 8s indefinitely.
                         if (!descriptor.authBlocked) {
                             console.warn(`[sync] parking queued ${kind || 'running'} write pending re-auth (${res.status}):`, body);
                             descriptor.authBlocked = true;
@@ -1522,36 +1658,29 @@ async function _flushQueue() {
                             });
                         }
                     } else if (terminal && kind === 'decision' && res.status === 409) {
-                        // F5: decision-locked-as-success for queued terminal decision entries.
+                        // A queued decision the server refused on replay. Every 409 is
+                        // REPORTED, never taken as success (bc-mrgc phase 3, "Nothing
+                        // should be dropped"). decision_locked and already_ineligible
+                        // used to be swallowed on the theory that an earlier send whose
+                        // answer was lost had landed; the server now answers that exact
+                        // replay (same decision, side and stamp) as recorded
+                        // (engine.exactDecisionReplay), so a 409 here is a real refusal
+                        // the operator has to see. Same human copy as the score path's
+                        // flush-loop drop below (a later match played before this
+                        // replay ran, say): there is no operator here for
+                        // attemptScoreWrite's confirm dialog to prompt, and nothing sets
+                        // forceDownstreamReopen automatically.
                         //
-                        // When a decision POST was sent by the operator but the network dropped
-                        // before the response arrived, the request may have landed on the server
-                        // (decision already recorded) even though the client never saw a 2xx.
-                        // On the subsequent queued retry the server returns 409 with
-                        // error="decision_locked" or "already_ineligible": both indicate our
-                        // earlier (lost-response) attempt succeeded. Any other 409
-                        // (unexpected) can never succeed on retry either: so both
-                        // cases discard the entry; only the unexpected one warns.
-                        //
-                        // IMPORTANT: this lost-response rule applies ONLY to queued retries
-                        // inside _flushQueue. The direct recordDecision call path always throws
-                        // on 409 so the score editor's force-retry prompt still fires.
-                        if (body.error !== 'decision_locked' && body.error !== 'already_ineligible') {
-                            console.warn(`[sync] queued decision write rejected (409):`, body);
-                            // bc-cse: a queued kiken/fusenpai/daihyosen correction can hit
-                            // this same 409 the score path's flush-loop drop handles below
-                            // -- the later match was played before this replay ran. Same
-                            // human copy, same reason this can't just retry: there is no
-                            // operator here for attemptScoreWrite's confirm dialog to
-                            // prompt, and nothing sets forceDownstreamReopen automatically.
-                            const refusal = _replayRefusal(body, 'conflict (409)');
-                            _notifyTerminalWriteFailed({ compID, matchID, kind, status: 409, ...refusal });
-                            _notifyQueueAlert({
-                                kind: 'rejected', count: 1, terminalCount: 1, compID, matchID,
-                                detail: refusal.reason,
-                                ...(refusal.sentence ? { sentence: true } : {}),
-                            });
-                        }
+                        // The direct recordDecision call path always throws on 409 so the
+                        // score editor's force-retry prompt still fires.
+                        console.warn(`[sync] queued decision write rejected (409):`, body);
+                        const refusal = _replayRefusal(body, 'conflict (409)');
+                        _notifyTerminalWriteFailed({ compID, matchID, kind, status: 409, ...refusal });
+                        _notifyQueueAlert({
+                            kind: 'rejected', count: 1, terminalCount: 1, compID, matchID,
+                            detail: refusal.reason,
+                            ...(refusal.sentence ? { sentence: true } : {}),
+                        });
                         _dequeue(key, descriptor);
                     } else {
                         // Non-retryable response: 400 validation, 413, generic 409
@@ -1645,18 +1774,12 @@ async function _flushQueue() {
     }
 }
 
-/**
- * Enqueue a running-status write for offline-resilient delivery.
- * Last-write-wins per matchId: any older pending write for the same match
- * is replaced (including any terminal entry: a superseded terminal means
- * the operator sent a newer running update after a failed finish, which
- * is handled by the caller's logic; this path keeps them consistent).
- * Triggers an immediate flush attempt; on failure backs off and retries.
- */
-// Shared post-enqueue tail for both queue paths: persist, republish sync status,
-// reset the backoff counter (a fresh user write must not inherit a stale
-// max-backoff delay from a prior failure run), and kick a flush.
-function _commitEnqueue(key, descriptor) {
+// Shared post-enqueue tail for every queue path: place the write in its
+// match's list (_placeWrite: coalesced into the last running score write, or
+// an entry of its own), persist, republish sync status, reset the backoff
+// counter (a fresh user write must not inherit a stale max-backoff delay from
+// a prior failure run), and kick a flush. Returns the entry's key.
+function _commitEnqueue(base, descriptor) {
     // bc-cse: the monotonic half of the clock-skew re-stamp. performance.now()
     // is immune to wall-clock steps, so the difference between this reading and
     // one taken at flush time is the write's TRUE age even if the OS corrects
@@ -1666,36 +1789,59 @@ function _commitEnqueue(key, descriptor) {
     // two different zeros. An entry without it simply falls back to the
     // wall-clock reconstruction, which is what every entry did before.
     descriptor.perfAtEnqueue = _perfNow();
+    const key = _placeWrite(base, descriptor);
     _writeQueue.set(key, descriptor);
     _persistQueue();
     _recomputeSyncStatus();
     if (_flushTimer !== null) { clearTimeout(_flushTimer); _flushTimer = null; }
     _flushAttempt = 0;
     _flushQueue();
+    return key;
+}
+
+// _placeWrite: the key a new write about `base` goes under. When it coalesces
+// (_coalesceTarget), it takes the last running score write's key and carries
+// what that write said that a later write must not lose: the groups it
+// changed (_claimingQueuedGroups) and, for a running write, a pending
+// kachinukiBoutFinal (enqueueRunningWrite's comment says why). Otherwise it is
+// a new entry, after the others in replay order.
+function _placeWrite(base, descriptor) {
+    const target = _coalesceTarget(base, descriptor);
+    if (!target) return _newEntryKey(base);
+    const [key, prev] = target;
+    let payload = _claimingQueuedGroups(prev, descriptor.payload);
+    if (!descriptor.terminal && prev.payload && prev.payload.kachinukiBoutFinal
+        && payload && !payload.kachinukiBoutFinal) {
+        payload = { ...payload, kachinukiBoutFinal: true };
+    }
+    descriptor.payload = payload;
+    return key;
 }
 
 /**
- * Enqueue a running-status write for offline-resilient delivery.
- * Last-write-wins per matchId. Running writes always PUT to the score endpoint,
- * so method/url are omitted: _flushQueue reconstructs that path for terminal=false.
+ * Enqueue a running-status write for offline-resilient delivery. It takes the
+ * place of the match's last queued write only when that is a running score
+ * write too (_coalesceTarget); otherwise it is queued after what is there.
+ * Running writes always PUT to the score endpoint, so method/url are omitted:
+ * _flushQueue reconstructs that path for terminal=false.
  *
  * kachinukiBoutFinal is an edge-triggered COMMAND (the operator pressed
  * "Record bout": the server must run kachinuki advancement once), while the
- * rest of the payload is level-triggered state that LWW may coalesce freely.
- * If the queued entry for this match carries the flag and the superseding
- * write does not (a later autosave while still offline), carry the flag
- * forward, otherwise the reconnect flush would deliver the score but silently
- * skip advancement and the winner-stays sequence would stall until the
- * operator pressed Record bout again. Safe to re-deliver: MaybeAdvanceKachinuki
- * bails when the last numbered bout has no outcome or the match is completed.
+ * rest of the payload is level-triggered state that coalescing may fold
+ * freely. If the queued entry it takes the place of carries the flag and the
+ * new write does not (a later autosave while still offline), the flag is
+ * carried forward (_placeWrite), otherwise the reconnect flush would deliver
+ * the score but silently skip advancement and the winner-stays sequence would
+ * stall until the operator pressed Record bout again. Safe to re-deliver:
+ * MaybeAdvanceKachinuki bails when the last numbered bout has no outcome or
+ * the match is completed.
  */
 function enqueueRunningWrite(compID, matchID, payload, password) {
     _commitEnqueue(_revKey(compID, matchID), _runningDescriptor(compID, matchID, payload, password, Date.now()));
 }
 
-// The queue entry for a running write, carrying a queued kachinukiBoutFinal
-// forward (enqueueRunningWrite's comment says why). Shared with the page-hide
-// copy of a write still being sent (_keepInflightRunning).
+// The queue entry for a running write. Shared with the page-hide copy of a
+// write still being sent (_keepInflightRunning).
 // _claimingQueuedGroups (bc-mrgc): a score write that takes the place of a
 // queued score write for the same match carries the later state, so it must
 // also claim every group the one it replaces changed, or that change would
@@ -1712,13 +1858,6 @@ function _claimingQueuedGroups(prev, payload) {
 }
 
 function _runningDescriptor(compID, matchID, payload, password, enqueuedAt) {
-    const prev = _writeQueue.get(_revKey(compID, matchID));
-    if (prev && !prev.terminal && prev.kind === 'score'
-        && prev.payload && prev.payload.kachinukiBoutFinal
-        && payload && !payload.kachinukiBoutFinal) {
-        payload = { ...payload, kachinukiBoutFinal: true };
-    }
-    payload = _claimingQueuedGroups(prev, payload);
     return {
         compID, matchID, payload, password,
         kind: 'score', terminal: false,
@@ -1747,9 +1886,14 @@ function _withoutDownstreamConfirmation(payload) {
 
 /**
  * F5: Enqueue a terminal write for offline-resilient delivery.
- * Terminal entries (completed score, decision, lineup) supersede any running
- * entry for the same key: last-write-wins, terminal takes priority.
- * @param {string} key        - Queue key (use _revKey or lineup key)
+ * A terminal SCORE write (a Finish, a correction) takes the place of the
+ * match's last queued write when that is a score write (running, or a Finish
+ * the editor's Retry is re-sending), claiming its groups (_coalesceTarget,
+ * _placeWrite); every other terminal write (a
+ * decision, a lineup, an override) is queued after what is there and replays
+ * in order. Nothing queued is ever replaced by it otherwise.
+ * @param {string} key        - Queue BASE: the match the write is about (use
+ *                              _revKey, or the lineup / override base)
  * @param {WriteKind} kind    - 'score' | 'decision' | 'lineup'
  * @param {string} method     - HTTP method ('PUT' | 'POST')
  * @param {string} url        - Same-origin request path (e.g. /api/competitions/…)
@@ -1759,8 +1903,7 @@ function _withoutDownstreamConfirmation(payload) {
  * @param {string} matchID    - Match ID (for identity tracking)
  */
 function _enqueueTerminalWrite(key, kind, method, url, payload, password, compID, matchID) {
-    if (kind === 'score') payload = _claimingQueuedGroups(_writeQueue.get(key), payload);
-    _commitEnqueue(key, {
+    return _commitEnqueue(key, {
         compID, matchID, payload: _withoutDownstreamConfirmation(payload), password,
         kind, terminal: true,
         method, url,
@@ -1773,21 +1916,24 @@ function _enqueueTerminalWrite(key, kind, method, url, payload, password, compID
 // sent but not yet answered, up to fetchWithTimeout's 12s on bad Wi-Fi, would
 // be lost with it. A copy of each goes into the persisted outbox now, so the
 // next load sends it. A copy of a write that did land is harmless there: the
-// server takes an equal rev again and drops a lower one. A match whose queued entry
-// was added after this write was sent keeps it: that entry is newer (a failed
-// later edit, or a queued Finish). The editors' own page-hide flush of a
-// pending edit runs after this one (their listeners are added later), so its
-// newer write replaces this one in the queue.
+// server orders an equal stamp again, and keeps an older revision of this board
+// in the match's history. The copy is an entry of its own (bc-mrgc phase 3):
+// it never replaces what is queued for the match (a failed later edit, or a
+// queued Finish), and nothing coalesces into it; it replays in its place in
+// the match's order. The editors' own page-hide flush of a pending edit runs
+// after this one (their listeners are added later), so its newer write is
+// queued after it.
 function _keepInflightRunning() {
     let kept = false;
-    for (const [key, w] of _inflightRunningWrites) {
-        const queued = _writeQueue.get(key);
-        if (queued && queued.enqueuedAt >= w.sentAt) continue;
+    for (const [base, w] of _inflightRunningWrites) {
+        // Already kept by an earlier hide event, and still queued.
+        if (w.kept && _writeQueue.get(w.keptKey) === w.kept) continue;
         // Dated when it was sent, as the clock-skew re-stamp needs: hide time
         // would date it up to the fetch timeout later than it was made.
         w.kept = _runningDescriptor(w.compID, w.matchID, w.payload, w.password, w.sentAt);
         w.kept.perfAtEnqueue = w.perfAtSend;
-        _writeQueue.set(key, w.kept);
+        w.keptKey = _newEntryKey(base);
+        _writeQueue.set(w.keptKey, w.kept);
         kept = true;
     }
     // Stored, not sent: the fetch holding each copy is still open, so the
@@ -1804,7 +1950,7 @@ function _keepInflightRunning() {
 // A queue entry that is the page-hide copy of a running write whose fetch is
 // still open (_keepInflightRunning): the flush skips it.
 function _heldByOpenFetch(key, descriptor) {
-    return _inflightRunningWrites.get(key)?.kept === descriptor;
+    return _inflightRunningWrites.get(_baseOf(key))?.kept === descriptor;
 }
 
 // Remove-then-add for the same reason as the online handler below.
@@ -1848,11 +1994,10 @@ function _onStoredQueueChanged(oldRaw, newRaw) {
             : !after.has(k) && before.get(k)?.enqueuedAt === d.enqueuedAt;
         if (gone && _dequeue(k, d)) changed = true;
     }
-    const now = Date.now();
     for (const [k, d] of after || []) {
         const held = _writeQueue.get(k);
         if (held && !_enqueuedAfter(d, held.enqueuedAt)) continue;
-        if (_storedEntryProblem(d, now)) continue;
+        if (_storedEntryProblem(d)) continue;
         _writeQueue.set(k, d);
         _adopted.add(d);
         changed = adopted = true;
@@ -1908,11 +2053,13 @@ if (typeof window !== 'undefined') {
 // ---------------------------------------------------------------------------
 // F4: Rehydrate write queue from localStorage on module load
 // ---------------------------------------------------------------------------
-// Parse any entries persisted by a previous page session. Drop stale entries
-// (older than QUEUE_TTL_MS = 12 h) so we never replay half-day-old scores into
-// a tournament that has moved on. Valid entries are added to _writeQueue and
-// an immediate flush is triggered so they are delivered as soon as the page
-// has network. All localStorage access is wrapped in try/catch for
+// Parse any entries persisted by a previous page session, whatever their age
+// (bc-mrgc phase 3: the server orders an old write by its stamp and keeps what
+// a newer change outranks in the match's history, so nothing is dropped for
+// being old). A queue persisted by an earlier build (one entry per match, keyed
+// by the match itself) loads as it is: its key is its own base (_baseOf).
+// Valid entries are added to _writeQueue and an immediate flush is triggered
+// so they are delivered as soon as the page has network. All localStorage access is wrapped in try/catch for
 // private-browsing / quota safety.
 // ---------------------------------------------------------------------------
 
@@ -1953,17 +2100,15 @@ if (typeof fetch === 'function') {
         if (!raw) return;
         const entries = JSON.parse(raw);
         if (!Array.isArray(entries)) return;
-        const now = Date.now();
         let anyLoaded = false;
         // bc-qttl: every drop below is COUNTED and reported. These entries are
         // finished operator work that never reached the server, and the previous
         // code discarded them with a bare `continue` - no log, no signal, nothing
-        // the operator could ever notice. Counted by class, because "too old to
-        // replay" and "corrupt beyond replay" are different things to be told, and
-        // terminal separately from running, because "3 results were lost" and "3
-        // writes were lost" are different claims and only the terminal ones are a
-        // finished result.
-        let expired = 0, expiredTerminal = 0;
+        // the operator could ever notice. Counted terminal separately from
+        // running, because "3 results were lost" and "3 writes were lost" are
+        // different claims and only the terminal ones are a finished result.
+        // The one class left is a corrupt entry: nothing is dropped for its age
+        // (bc-mrgc phase 3).
         let unreadable = 0, unreadableTerminal = 0;
         // A dropped entry is marked settled, so the persist below takes it out
         // of storage: the merge otherwise keeps what this tab did not write.
@@ -1980,14 +2125,7 @@ if (typeof fetch === 'function') {
             if (!Array.isArray(item) || item.length < 2) { dropUnreadable(null, null); continue; }
             const [key, descriptor] = item;
             if (!key || !descriptor || typeof descriptor !== 'object') { dropUnreadable(key, null); continue; }
-            const problem = _storedEntryProblem(descriptor, now);
-            if (problem === 'expired') {
-                expired++;
-                if (descriptor.terminal) expiredTerminal++;
-                _markSettled(key, descriptor);
-                continue;
-            }
-            if (problem) { dropUnreadable(key, descriptor); continue; }
+            if (_storedEntryProblem(descriptor)) { dropUnreadable(key, descriptor); continue; }
             // Only restore if not already superseded by a same-session write.
             if (!_writeQueue.has(key)) {
                 _writeQueue.set(key, descriptor);
@@ -1995,15 +2133,11 @@ if (typeof fetch === 'function') {
             }
         }
         // Persist the pruned queue whenever anything was dropped. This is what makes
-        // the alerts below fire ONCE rather than on every reload forever: rehydrate
-        // never used to write back, so a fully-expired queue stayed in localStorage
-        // untouched, and each refresh would re-read, re-drop and re-announce the same
-        // entries. With the queue now empty _persistQueue() removes the key outright.
-        if (expired > 0 || unreadable > 0) _persistQueue();
-        if (expired > 0) {
-            console.warn(`[sync] discarded ${expired} queued write(s) older than the ${QUEUE_TTL_MS / 3600000}h queue TTL`);
-            _notifyQueueAlert({ kind: 'expired', count: expired, terminalCount: expiredTerminal });
-        }
+        // the alert below fires ONCE rather than on every reload forever: rehydrate
+        // never used to write back, so a dropped entry stayed in localStorage
+        // untouched, and each refresh would re-read, re-drop and re-announce it.
+        // With the queue now empty _persistQueue() removes the key outright.
+        if (unreadable > 0) _persistQueue();
         if (unreadable > 0) {
             console.warn(`[sync] discarded ${unreadable} unreadable queued write(s) on rehydration`);
             _notifyQueueAlert({ kind: 'unreadable', count: unreadable, terminalCount: unreadableTerminal });
@@ -2799,22 +2933,26 @@ const API = {
         // the autosave goes out (its debounce, or the editor going away).
         payload.modifiedAt = _serverNowMs() - _editAge(result);
 
-        // bc-mrgc: a score write queued for this match is superseded by this
-        // one whichever way it goes (a landed completed write drains it, a
-        // landed running write leaves it to be dropped by the rev guard, a
-        // failed one replaces it in the queue), so this write carries the
-        // later state and must claim every group the queued one changed too.
-        const queuedScore = _writeQueue.get(_revKey(compID, matchID));
-        if (queuedScore && queuedScore.kind === 'score' && queuedScore.payload) {
+        // C2: stamp monotonic rev on running-status writes so the server's
+        // rev-guard can hold out-of-order deliveries (e.g. from reconnect flush).
+        // Completed writes do not need a rev: the guard is gated on status=running.
+        const isRunning = payload?.status === 'running';
+        const base = _revKey(compID, matchID);
+
+        // bc-mrgc: the running score write queued last for this match (the one
+        // this write would take the place of in the queue, _coalesceTarget) is
+        // superseded by this one whichever way it goes (a landed write drains
+        // it, a failed one takes its place in the queue), so this write carries
+        // the later state and must claim every group the queued one changed
+        // too. A queued Finish or decision is never such a write: it stays, and
+        // this write waits behind it (_mustQueueBehind below).
+        const claimedEntry = _coalesceTarget(base, { kind: 'score', terminal: !isRunning, payload });
+        const queuedScore = claimedEntry ? claimedEntry[1] : null;
+        if (queuedScore && queuedScore.payload) {
             const claimed = unionChanged(queuedScore.payload.changed, payload.changed);
             if (claimed === undefined) delete payload.changed;
             else payload.changed = claimed;
         }
-
-        // C2: stamp monotonic rev on running-status writes so the server's
-        // rev-guard can drop out-of-order deliveries (e.g. from reconnect flush).
-        // Completed writes do not need a rev: the guard is gated on status=running.
-        const isRunning = payload?.status === 'running';
         // bc-sync: a running write the editor marks `durable` (the page is
         // being hidden or unloaded) is queued, not fetched (below), so it is
         // never in flight. The flag is read from the patch and never sent:
@@ -2829,19 +2967,23 @@ const API = {
             // enqueueRunningWrite cannot see direct sends). Safe to re-deliver:
             // MaybeAdvanceKachinuki bails without a scored last bout or on a
             // completed match.
-            const queued = _writeQueue.get(_revKey(compID, matchID));
-            if (queued && !queued.terminal && queued.kind === 'score'
-                && queued.payload && queued.payload.kachinukiBoutFinal
+            if (queuedScore && queuedScore.payload && queuedScore.payload.kachinukiBoutFinal
                 && !payload.kachinukiBoutFinal) {
                 payload.kachinukiBoutFinal = true;
             }
             payload.rev = _nextRev(compID, matchID);
             payload.revSession = _revSession;
-            if (!durable) {
-                _inflightRunning++;
-                _inflightRunningWrites.set(_revKey(compID, matchID), { compID, matchID, payload, password, sentAt: Date.now(), perfAtSend: _perfNow(), kept: null });
-                _recomputeSyncStatus();
-            }
+        }
+        // bc-mrgc phase 3: a write about a match that has an earlier write
+        // still queued which this one does not take the place of (a Finish, a
+        // decision) waits behind it, so the two reach the server in the order
+        // they were made. It is queued, and the flush sends it after the
+        // earlier one lands.
+        const queueBehind = !durable && _mustQueueBehind(base, 'score');
+        if (isRunning && !durable && !queueBehind) {
+            _inflightRunning++;
+            _inflightRunningWrites.set(base, { compID, matchID, payload, password, sentAt: Date.now(), perfAtSend: _perfNow(), kept: null, keptKey: null });
+            _recomputeSyncStatus();
         }
 
         // mp-9ukk Phase 2: broadcast helper. Publishes a match patch on the
@@ -2890,39 +3032,45 @@ const API = {
             _broadcastPatch(payload);
             return { queued: true };
         }
+        // Waiting behind an earlier queued write for this match (queueBehind
+        // above): queued exactly as a failed send would be, and announced as
+        // queued, so the editor shows it as not sent yet.
+        if (queueBehind) {
+            if (isRunning) enqueueRunningWrite(compID, matchID, payload, password);
+            else _enqueueTerminalWrite(base, 'score', 'PUT', scoreUrl, payload, password, compID, matchID);
+            _broadcastPatch(payload);
+            return { queued: true };
+        }
 
         // Everything a 2xx can mean, in one place, because bc-cse gave this
         // response TWO producers: the first attempt, and the clock-skew resend
         // below. `allowSkewRetry` is what stops the two from ping-ponging - the
         // resend passes false, so a second clock_skew refusal is terminal.
         const _handleOkBody = async (body, allowSkewRetry) => {
-            if (!isRunning) {
-                // A completed/terminal write that REACHED the server supersedes any
-                // queued running autosave for this match: drain it now (and prune
-                // the per-match rev counter) so a stale flush can't later revert the
-                // finalized result. Deferred from pre-flight on purpose: if the
-                // completed PUT fails outright (e.g. Finish while offline) we KEEP
-                // the last queued running snapshot so it can still flush when the
-                // connection returns, instead of dropping the operator's scores.
-                //
-                // Note the drain is deliberately PRE-OUTCOME: it happens on any 2xx,
-                // before this function reads what the body actually decided, so a
-                // clock_skew refusal (a 200 that stored NOTHING) drains the snapshot
-                // too. That is not a loss - the queued snapshot was stamped by the
-                // same unreconciled clock as the write just refused, so it would be
-                // refused in its turn, and the completed write is retried here with a
-                // corrected stamp anyway.
-                if (_dequeue(_revKey(compID, matchID))) {
-                    _persistQueue();
-                    _recomputeSyncStatus();
-                }
-                _matchRevCounters.delete(_revKey(compID, matchID));
+            // A write that REACHED the server takes the place of the running
+            // score write queued for this match whose groups it claimed
+            // (claimedEntry, the union above): drain that one entry now, and
+            // only it. Never a queued Finish or decision: those are entries of
+            // their own and replay in order (bc-mrgc phase 3; the old drain
+            // took whatever the match's one queue slot held). Deferred from
+            // pre-flight on purpose: if the PUT fails outright (e.g. Finish
+            // while offline) the queued snapshot stays and the failed write is
+            // queued in its place.
+            //
+            // A completed write drains PRE-OUTCOME: on any 2xx, before this
+            // function reads what the body decided, so a clock_skew refusal (a
+            // 200 that stored NOTHING) drains the snapshot too. That is not a
+            // loss - the queued snapshot was stamped by the same unreconciled
+            // clock as the write just refused, so it would be refused in its
+            // turn, and the completed write is retried here with a corrected
+            // stamp anyway. A RUNNING write refused for clock skew is not
+            // resent, so it drains nothing.
+            if (claimedEntry && (!isRunning || !writeWasRefusedForClock(body))
+                && _dequeue(claimedEntry[0], claimedEntry[1])) {
+                _persistQueue();
+                _recomputeSyncStatus();
             }
-            // A stale running write is signalled by HTTP 200 {stale:true}
-            // (the server's rev-guard no-ops it). Do not broadcast it: pushing
-            // a superseded running score to the display would overwrite the
-            // newer state already there. Return as-is; the fire-and-forget
-            // autosave caller ignores the value.
+            if (!isRunning) _matchRevCounters.delete(_revKey(compID, matchID));
             // mp-9ukk: echo the operator's patch to the court display
             // peer-to-peer so the board keeps updating when the SSE link is
             // slow or down. This is an OPTIMISTIC overlay, not the
@@ -2932,9 +3080,9 @@ const API = {
             // fully server-normalized state arrives via SSE (or the reconnect
             // full refetch), which replaces the overlay. Broadcasting the
             // request payload (not the server `data`) keeps one consistent
-            // shape across the confirmed and offline paths. Skip a rejected
-            // stale write above so a superseded score is never pushed.
-            if (body && body.stale) return body;
+            // shape across the confirmed and offline paths. A write that was
+            // not applied (clock_skew, or superseded: kept in the match's
+            // history) is never pushed, below.
             // bc-cse: refused for clock skew. NOT a supersede - nothing newer is
             // stored and there is nothing for the operator to go and check; the
             // stamp we sent was simply in the server's future. Heal and resend
@@ -3089,7 +3237,7 @@ const API = {
                 const w = _inflightRunningWrites.get(key);
                 if (w?.payload === payload) {
                     _inflightRunningWrites.delete(key);
-                    if (w.kept && _dequeue(key, w.kept)) _persistQueue();
+                    if (w.kept && _dequeue(w.keptKey, w.kept)) _persistQueue();
                 }
                 _recomputeSyncStatus();
             }
@@ -3150,8 +3298,8 @@ const API = {
     // F5: on network failure / abort / 5xx / 429 the decision is enqueued as a
     // terminal write for durable re-delivery. 4xx (including 409 decision_locked
     // on the DIRECT call) always throw: the score editor relies on a thrown 409
-    // to show its force-retry prompt. The decision-locked-as-success rule (409
-    // treated as success) applies ONLY to queued retries inside _flushQueue.
+    // to show its force-retry prompt. A queued replay's 409 is reported too
+    // (_flushQueue), never taken as success (bc-mrgc phase 3).
     async recordDecision(compID, matchID, body, password) {
         const decisionUrl = `/api/competitions/${compID}/matches/${matchID}/decision`;
         // Stamp in server-relative time, exactly as recordScore does (mp-y3nk).
@@ -3161,6 +3309,17 @@ const API = {
         // win - was the one completion carrying no time at all, so no surface
         // could order it against the bouts around it (mp-jnvl).
         const payload = { ...body, modifiedAt: _serverNowMs() };
+        // bc-mrgc phase 3: a decision about a match with any write of this
+        // device still queued waits behind it, so the server sees them in the
+        // order they were made (a withdrawal stands on the scoreline it was
+        // declared over). Queued like a failed send, and replayed after.
+        if (_mustQueueBehind(_revKey(compID, matchID), 'decision')) {
+            _enqueueTerminalWrite(
+                _revKey(compID, matchID), 'decision', 'POST', decisionUrl,
+                payload, password, compID, matchID
+            );
+            return { queued: true };
+        }
         let res;
         let data;
         try {
@@ -3192,8 +3351,8 @@ const API = {
                 return { queued: true };
             }
             // 4xx (including 409 decision_locked): throw immediately so the UI
-            // can surface the error. The decision-locked-as-success rule is ONLY
-            // for queued retries in _flushQueue, not for direct calls.
+            // can surface the error (a queued replay's refusal is reported by
+            // _flushQueue the same way).
             // bc-rawm: the eligibility gate (mp-dc52 Phase 3) refuses a
             // decision exactly as it refuses a score write -- 409
             // ineligible_competitor / already_ineligible carrying a full
@@ -3323,6 +3482,13 @@ const API = {
         // mp-y3nk: stamp in server-relative time for last-write-wins reconciliation.
         const payload = { winnerName, modifiedAt: _serverNowMs() };
         if (forceDownstreamReopen) payload.forceDownstreamReopen = true;
+        // bc-mrgc phase 3: an assertion about a feeder with an earlier one of
+        // this device's still queued waits behind it, in the order made.
+        const overrideBase = `override:${compID}:${matchID}`;
+        if (_mustQueueBehind(overrideBase, 'override')) {
+            _enqueueTerminalWrite(overrideBase, 'override', 'PUT', url, payload, password, compID, matchID);
+            return { queued: true };
+        }
         let res;
         let body;
         try {
@@ -3411,7 +3577,13 @@ const API = {
             // score - relearn so the operator's next "Run now" carries a live stamp.
             _relearnClockThrottled();
         }
-        return { applied, reason: verdict.reason, message: verdict.message };
+        // heldGroups (bc-mrgc phase 3): a held assertion was kept in the
+        // match's history, named by the group it held, like a superseded score
+        // (write_result.jsx writeHeldGroups).
+        return {
+            applied, reason: verdict.reason, message: verdict.message,
+            ...(Array.isArray(verdict.heldGroups) ? { heldGroups: verdict.heldGroups } : {}),
+        };
     },
     async resetOverrides(compID, password, adminPassword) {
         const res = await fetch(`/api/competitions/${compID}/overrides`, {
@@ -3705,6 +3877,13 @@ const API = {
         // F5: lineup queue key is distinct from score/decision keys so a lineup
         // write doesn't collide with a concurrent score write for the same match.
         const lineupKey = `lineup:${compID}:${teamId}:${round}`;
+        // bc-mrgc phase 3: an earlier save of this lineup still queued goes
+        // first; this one waits behind it rather than land before it and be
+        // overwritten by its replay.
+        if (_mustQueueBehind(lineupKey, 'lineup')) {
+            _enqueueTerminalWrite(lineupKey, 'lineup', 'PUT', lineupUrl, lineupBody, password, compID, '');
+            return { queued: true };
+        }
         let res;
         let body;
         try {
@@ -3868,6 +4047,11 @@ const API = {
         const matchLineupUrl = `/api/competitions/${compID}/teams/${teamId}/match-lineups/${matchId}`;
         // F5: per-match lineup key: distinct from round-scoped lineups.
         const matchLineupKey = `lineup:${compID}:${teamId}:match:${matchId}`;
+        // bc-mrgc phase 3: queued behind an earlier save of it, as above.
+        if (_mustQueueBehind(matchLineupKey, 'lineup')) {
+            _enqueueTerminalWrite(matchLineupKey, 'lineup', 'PUT', matchLineupUrl, matchLineupBody, password, compID, matchId);
+            return { queued: true };
+        }
         let res;
         let body;
         try {
@@ -4271,8 +4455,7 @@ const API = {
     // Exposed as API.hasPendingTerminalWrite / window.API.hasPendingTerminalWrite.
     // -------------------------------------------------------------------------
     hasPendingTerminalWrite(compID, matchID) {
-        const descriptor = _writeQueue.get(_revKey(compID, matchID));
-        return !!(descriptor && descriptor.terminal);
+        return _entriesFor(_revKey(compID, matchID)).some(([, d]) => d.terminal);
     },
 
     // mp-gpra (security): clearQueue: drop all queued writes (in-memory + the

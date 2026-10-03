@@ -634,15 +634,13 @@ export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, on
   // site is below isDirty, which is what it needs.
   //
   // Be precise about what happens if they then save over a newer result.
-  // Timestamp last-write-wins (mp-y3nk) now covers EVERY match, pool and
-  // knockout alike, through engine.applyMatchWrite: a write stamped older than
-  // the stored result is dropped, so an editor that sat through an outage
-  // cannot bury a result recorded meanwhile. That is a floor, not a resolution
-  // protocol. Concurrent editors are still deliberately last-write-wins
-  // (handlers_match.go says so), the guard only orders writes that carry
-  // stamps, and the `stale: true` response covers a narrower case again (a
-  // lower Rev from the SAME session, or a running write arriving after
-  // completion).
+  // The server's merge (bc-mrgc, engine.mergeMatchWrite) covers EVERY match,
+  // pool and knockout alike: a change stamped older than the stored change to
+  // the same thing is not applied but kept in the match's history, so an
+  // editor that sat through an outage cannot bury a result recorded
+  // meanwhile. That is a floor, not a resolution protocol. Concurrent editors
+  // still order by stamp per group, and a lower Rev from the SAME session is
+  // held in the history as an older revision of that board.
   //
   // So this re-seed is still doing the load-bearing work: it removes the
   // ARTIFICIAL conflicts, where an editor holding a mount-time snapshot wrote

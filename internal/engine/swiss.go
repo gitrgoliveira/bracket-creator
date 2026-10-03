@@ -967,14 +967,27 @@ func (e *Engine) AdvanceSwissRound(compID string) ([]state.MatchResult, int, err
 		return nil, 0, err
 	}
 
-	prior, err := e.store.LoadPoolMatches(compID)
-	if err != nil {
-		return nil, 0, err
-	}
-	merged := make([]state.MatchResult, 0, len(prior)+len(newMatches))
-	merged = append(merged, prior...)
-	merged = append(merged, newMatches...)
-	if err := e.store.SavePoolMatches(compID, merged); err != nil {
+	// The append is ONE read-modify-write under the per-competition lock
+	// (bc-mrgc phase 3): it used to load and save under two separate lock
+	// acquisitions, so a correction landing in between was overwritten by the
+	// stale copy saved back. (The pairing itself reads the finished round
+	// outside the lock; a correction to it after this point is ordered like
+	// any other write and is never lost.)
+	// The reads below run under the competition's lock (tx.LoadPoolMatches),
+	// which skips the first-read legacy conversion; run it first, as the
+	// store's own LoadPoolMatches always did (a no-op after the first call).
+	e.store.EnsureLegacyUpgraded(compID)
+	if err := e.store.WithTransaction(compID, func(tx state.StoreTx) error {
+		prior, err := tx.LoadPoolMatches(compID)
+		if err != nil {
+			return err
+		}
+		e.noteMatchRead(compID)
+		merged := make([]state.MatchResult, 0, len(prior)+len(newMatches))
+		merged = append(merged, prior...)
+		merged = append(merged, newMatches...)
+		return tx.SavePoolMatches(compID, merged)
+	}); err != nil {
 		return nil, 0, err
 	}
 

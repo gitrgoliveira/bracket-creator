@@ -64,6 +64,11 @@ type mergeCtx struct {
 	// always replaced the stored bouts with it, the bracket has always kept
 	// them. The default keeps both exactly as they were.
 	nilSubsClear bool
+	// holdAll, when set, holds every group the write changes whatever its
+	// stamp, and is recorded as the reason in the history entry. The running
+	// rev guard uses it for a write older than one the same board already
+	// sent (ForceOptions.HoldReason): kept, never applied, never dropped.
+	holdAll string
 }
 
 // runningOverFinished reports R3's shape: a running or scheduled write over a
@@ -188,7 +193,7 @@ func mergeMatchWrite(stored, incoming *state.MatchResult, policy matchWritePolic
 
 	hold := map[string]bool{}
 	for _, g := range changed {
-		if !domain.ApplyByTimestamp(stamp, stored.GroupStamp(g)) {
+		if mc.holdAll != "" || !domain.ApplyByTimestamp(stamp, stored.GroupStamp(g)) {
 			hold[g] = true
 		}
 	}
@@ -227,7 +232,7 @@ func mergeMatchWrite(stored, incoming *state.MatchResult, policy matchWritePolic
 		}
 	}
 
-	rep := &state.MergeReport{Stamp: stamp, Changed: changed}
+	rep := &state.MergeReport{Stamp: stamp, Changed: changed, HoldReason: mc.holdAll}
 	stamps := state.MaterializedGroupStamps(stored.GroupStamps, stored.ModifiedAt, state.SubPositions(stored.SubResults))
 	for _, g := range groups {
 		if inChanged[g] && !hold[g] {
@@ -237,7 +242,11 @@ func mergeMatchWrite(stored, incoming *state.MatchResult, policy matchWritePolic
 			}
 			continue
 		}
-		if inChanged[g] {
+		if inChanged[g] && !state.GroupDiffers(stored, incoming, g) {
+			// Held, but saying exactly what is stored: nothing is lost, so
+			// it is neither reported as held nor kept as a held value.
+			rep.HeldEcho = append(rep.HeldEcho, g)
+		} else if inChanged[g] {
 			rep.Held = append(rep.Held, g)
 			if rep.HeldValues == nil {
 				rep.HeldValues = map[string]json.RawMessage{}
@@ -317,7 +326,9 @@ func logUnstampedOverwrite(result *state.MatchResult, storedModifiedAt int64) {
 // deriveWinnerAfterMerge works the winner out again from a finished match's
 // merged scoreline (R3), through the owners every other write uses:
 //
-//   - engi: the side with more flags (engiWinnerSide's rule);
+//   - engi: the side with more flags (engiWinnerSide's rule), only on a
+//     valid flag total; an engi match is never a draw, so any other total
+//     sends it back to running whatever the phase;
 //   - kachinuki: the deciding bout, deriveKachinukiWinner;
 //   - a team match: IV, then PW (state.TeamResultFrom through
 //     MatchResult.TeamResult), then the representative bout's winner
@@ -332,6 +343,17 @@ func deriveWinnerAfterMerge(m *state.MatchResult, mc mergeCtx) {
 	comp := mc.comp
 	switch {
 	case comp != nil && comp.Engi:
+		// An engi match cannot be drawn (a 3- or 5-referee panel), and its
+		// winner is decided only by a valid flag total. A merged count that is
+		// not one (a board part-way through its count, an even total) has no
+		// winner and is never a draw: the match goes back to running for the
+		// panel to finish counting, in a pool and a knockout alike.
+		if !engiValidTotal(m.FlagsA, m.FlagsB) {
+			m.Winner, m.WinnerID, m.WinnerSide = "", "", ""
+			m.Status = state.MatchStatusRunning
+			m.Decision = ""
+			return
+		}
 		switch {
 		case m.FlagsA > m.FlagsB:
 			side = domain.MatchSideA

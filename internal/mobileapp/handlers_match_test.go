@@ -1621,8 +1621,9 @@ func TestQuickScoreHandler(t *testing.T) {
 // TestScoreHandler_RevGuard validates the C2 monotonic-revision guard for
 // "running" autosave writes:
 //
-//   - A stale running write (rev < stored high-water) is silently no-op'd
-//     (HTTP 200 with {"stale":true}); the stored result is unchanged.
+//   - A stale running write (rev < stored high-water) is not applied: it is
+//     kept in the match's history and answered superseded with heldGroups
+//     (bc-mrgc phase 3); the stored result is unchanged.
 //   - A higher rev advances the mark and the write proceeds normally.
 //   - Rev==0 (unversioned) writes always proceed regardless of the mark.
 //   - Completed writes are never blocked by a stale rev.
@@ -1711,27 +1712,57 @@ func TestScoreHandler_RevGuard(t *testing.T) {
 	t.Run("rev=0 (unversioned) always proceeds", func(t *testing.T) {
 		code, body := scoreRunning(0)
 		assert.Equal(t, http.StatusOK, code)
-		assert.Nil(t, body["stale"], "unversioned write must not be marked stale")
+		assert.NotEqual(t, false, body["applied"], "unversioned write must not be marked stale")
 	})
 
 	t.Run("higher rev advances the mark and write proceeds", func(t *testing.T) {
 		code, body := scoreRunning(5)
 		assert.Equal(t, http.StatusOK, code)
-		assert.Nil(t, body["stale"], "higher rev should proceed, not be stale")
+		assert.NotEqual(t, false, body["applied"], "higher rev should proceed, not be stale")
 	})
 
 	t.Run("same rev is not stale (equal rev always proceeds)", func(t *testing.T) {
 		code, body := scoreRunning(5)
 		assert.Equal(t, http.StatusOK, code)
-		assert.Nil(t, body["stale"], "equal rev should proceed")
+		assert.NotEqual(t, false, body["applied"], "equal rev should proceed")
 	})
 
-	t.Run("stale running write is dropped with stale=true, stored result unchanged", func(t *testing.T) {
-		// Send rev=3 after rev=5 is the stored mark, should be stale.
-		code, body := scoreRunning(3)
-		assert.Equal(t, http.StatusOK, code)
-		stale, ok := body["stale"].(bool)
-		assert.True(t, ok && stale, "stale running write must return {stale:true}")
+	t.Run("an older revision is not applied, kept in the history and answered superseded", func(t *testing.T) {
+		// rev=3 after rev=5 is the stored mark: an older revision of this
+		// board. It carries a different scoreline (K, where rev 5 stored M), so
+		// the points group is a real loss if dropped (bc-mrgc phase 3:
+		// "Nothing should be dropped").
+		payload, _ := json.Marshal(map[string]any{
+			"sideA": "Alice", "sideB": "Bob",
+			"ipponsA": []string{"K"}, "ipponsB": []string{},
+			"status": "running", "rev": 3, "revSession": "rg-sess",
+			"changed": []string{"points"},
+		})
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest("PUT", "/api/competitions/rg1/matches/PoolA-1/score", bytes.NewBuffer(payload))
+		req.Header.Set("Content-Type", "application/json")
+		r.ServeHTTP(w, req)
+		require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+		var body map[string]any
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &body))
+		assert.Nil(t, body["stale"], "the {stale:true} answer is gone: nothing is dropped without a trace")
+		assert.Equal(t, false, body["applied"])
+		assert.Equal(t, "superseded", body["reason"])
+		assert.Equal(t, []any{"points"}, body["heldGroups"])
+
+		ms, err := store.LoadPoolMatches("rg1")
+		require.NoError(t, err)
+		require.Len(t, ms, 1)
+		assert.Equal(t, []string{"M"}, ms[0].IpponsA, "the newer revision stays")
+
+		hist, err := store.LoadMatchHistory("rg1", "PoolA-1")
+		require.NoError(t, err)
+		require.NotEmpty(t, hist)
+		last := hist[len(hist)-1]
+		assert.Equal(t, engine.HoldReasonOlderRevision, last.Reason)
+		assert.Equal(t, "rg-sess", last.Session)
+		assert.Equal(t, state.HistoryOutcomeHeld, last.Outcomes["points"])
+		assert.Contains(t, string(last.Held["points"]), `"K"`, "the held scoreline is kept with its values")
 	})
 
 	t.Run("rev>0 without a RevSession is unversioned (always proceeds)", func(t *testing.T) {
@@ -1740,7 +1771,7 @@ func TestScoreHandler_RevGuard(t *testing.T) {
 		// treated as unversioned, so it proceeds rather than being dropped.
 		code, body := scoreRunningNoSession(1)
 		assert.Equal(t, http.StatusOK, code)
-		assert.Nil(t, body["stale"], "a Rev without a RevSession must never be marked stale")
+		assert.NotEqual(t, false, body["applied"], "a Rev without a RevSession must never be marked stale")
 	})
 
 	t.Run("completed write is never blocked by stale rev guard", func(t *testing.T) {
@@ -1788,20 +1819,20 @@ func TestScoreHandler_RevGuard_SessionTakeover(t *testing.T) {
 	t.Run("session A advances to rev=5", func(t *testing.T) {
 		code, body := scoreRunningWithSession("session-A", 5)
 		assert.Equal(t, http.StatusOK, code)
-		assert.Nil(t, body["stale"], "initial write must proceed")
+		assert.NotEqual(t, false, body["applied"], "initial write must proceed")
 	})
 
-	t.Run("session A rev=3 is stale (same session, lower rev)", func(t *testing.T) {
+	t.Run("session A rev=3 is held (same session, lower rev)", func(t *testing.T) {
 		code, body := scoreRunningWithSession("session-A", 3)
 		assert.Equal(t, http.StatusOK, code)
-		stale, ok := body["stale"].(bool)
-		assert.True(t, ok && stale, "lower rev in same session must be stale")
+		assert.Equal(t, false, body["applied"], "lower rev in same session is not applied")
+		assert.Equal(t, "superseded", body["reason"])
 	})
 
 	t.Run("session B rev=1 proceeds (new session takes over despite A being at rev=5)", func(t *testing.T) {
 		code, body := scoreRunningWithSession("session-B", 1)
 		assert.Equal(t, http.StatusOK, code)
-		assert.Nil(t, body["stale"], "a new session must never be dropped as stale")
+		assert.NotEqual(t, false, body["applied"], "a new session must never be dropped as stale")
 	})
 
 	t.Run("session B rev=0 is unversioned and always proceeds", func(t *testing.T) {
@@ -1810,7 +1841,7 @@ func TestScoreHandler_RevGuard_SessionTakeover(t *testing.T) {
 		// rather than be dropped as stale.
 		code, body := scoreRunningWithSession("session-B", 0)
 		assert.Equal(t, http.StatusOK, code)
-		assert.Nil(t, body["stale"], "rev=0 is unversioned and must always proceed")
+		assert.NotEqual(t, false, body["applied"], "rev=0 is unversioned and must always proceed")
 	})
 }
 

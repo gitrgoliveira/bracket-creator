@@ -24,7 +24,7 @@ import { SideCell } from './side_cell.jsx';
 // already makes.
 import {
     writeDidNotLand, writeWasSuperseded, writeWasRefusedForClock, CLOCK_SKEW_REASON_TEXT,
-    attemptScoreWrite, DOWNSTREAM_KNOCKOUT_PLAYED_CANCELLED,
+    attemptScoreWrite, DOWNSTREAM_KNOCKOUT_PLAYED_CANCELLED, OVERRIDE_HELD_NOTICE,
 } from './write_result.jsx';
 // swissRoundLabel: single owner is pool_ids.jsx (mp-dej2); this file used to
 // carry its own copy.
@@ -377,7 +377,7 @@ function ResolveFeedersModal({ match, comp, password, onClose, onResolved, onOpt
                     if (writeWasRefusedForClock(r)) {
                         // Refused for clock skew: nothing newer exists, nothing was
                         // recorded anywhere, and the client has just resynced. The
-                        // "already recorded elsewhere" wording would be a plain
+                        // "newer result recorded first" wording would be a plain
                         // falsehood and would stop the operator retrying the one
                         // action that now works.
                         anyClockRefused = true;
@@ -402,7 +402,7 @@ function ResolveFeedersModal({ match, comp, password, onClose, onResolved, onOpt
                 showToast(anyQueued
                     ? "Recorded offline. This match is ready to run now and will sync when the court reconnects."
                     : anyDropped
-                        ? "Some results were already recorded elsewhere. Refreshing this court to show the current state."
+                        ? OVERRIDE_HELD_NOTICE
                         : anyClockRefused
                             ? "This device's clock was out of step with the server and has been resynced. Try resolving again."
                             : "Feeders resolved. The match is ready to start.");

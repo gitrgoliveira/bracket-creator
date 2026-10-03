@@ -219,6 +219,31 @@ func TestMerge_SameGroupClashKeepsTheOlderInHistory(t *testing.T) {
 	})
 }
 
+// A held group whose value equals the stored one is not a loss (bc-mrgc phase
+// 3): a stale decision's "no overtime" over a match with none is neither
+// reported as held, nor kept as a held value, nor recorded as held in the
+// history entry, while the groups that do differ are.
+func TestMerge_EchoOfAHeldGroupIsNotListedAsHeld(t *testing.T) {
+	bothBranches(t, func(t *testing.T, knockout bool) {
+		h := mmIndividual(t, knockout)
+		point := mmRunning(h, mmT2, state.GroupPoints)
+		point.IpponsA = []string{"M"}
+		require.NoError(t, h.write(point))
+
+		_, _, err := h.eng.RecordDecision(h.compID, h.matchID, "kiken-voluntary", "aka", "knee", nil, false, mmT1)
+		require.ErrorIs(t, err, ErrMatchSuperseded)
+		assert.NotContains(t, HeldGroupsOf(err), state.GroupEncho, "an echo of the stored overtime is not a held change")
+		assert.Contains(t, HeldGroupsOf(err), state.GroupResult)
+
+		entries := h.history(t)
+		last := entries[len(entries)-1]
+		assert.Contains(t, last.Changed, state.GroupEncho, "the write still names what it changed")
+		assert.Equal(t, state.HistoryOutcomeUnchanged, last.Outcomes[state.GroupEncho], "recorded as unchanged, never as held")
+		assert.NotContains(t, last.Held, state.GroupEncho, "no held value is kept for it")
+		assert.Equal(t, state.HistoryOutcomeHeld, last.Outcomes[state.GroupResult])
+	})
+}
+
 // Q1: a kiken made at 10:02 arriving after a point made at 10:05. The point
 // is the later fact, so the kiken goes to history unapplied: the match runs
 // on with the point and the competitor is never barred. The reverse order (a
@@ -234,7 +259,10 @@ func TestMerge_LateKikenOlderThanAPointIsHeld(t *testing.T) {
 
 			_, _, err := h.eng.RecordDecision(h.compID, h.matchID, "kiken-voluntary", "aka", "knee", nil, false, mmT1)
 			require.ErrorIs(t, err, ErrMatchSuperseded)
-			assert.ElementsMatch(t, decisionChangedGroups(), HeldGroupsOf(err), "the withdrawal and its circles are held together")
+			// The decision changes result, points and encho; it carries no
+			// overtime over a match with none, so encho echoes the stored
+			// value and is no loss (bc-mrgc phase 3): not listed as held.
+			assert.ElementsMatch(t, []string{state.GroupResult, state.GroupPoints}, HeldGroupsOf(err), "the withdrawal and its circles are held together")
 
 			m := h.load(t)
 			assert.Equal(t, state.MatchStatusRunning, m.Status, "the match runs on")

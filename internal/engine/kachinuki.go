@@ -33,6 +33,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"reflect"
 	"sort"
 	"strings"
 
@@ -658,26 +659,48 @@ func (e *Engine) MaybeAdvanceKachinuki(compID, matchID string) (bool, []state.Su
 	stamp := serverNowMs()
 	var appendedGroup string
 
+	// The read above ran without the lock; the write below re-checks, under
+	// it, that the match is still the one the pairing was worked out from
+	// (bc-mrgc phase 3). A match completed, requeued or scored in between is
+	// left exactly as it is: the advance would otherwise set it running and
+	// clear its verdict over a result it never saw.
+	e.noteMatchRead(compID)
+	snapshot := parent
+
 	if isBracket {
-		// UpdateBracketMatchByID owns the rounds → bronze-sibling walk, so the
-		// append site no longer re-implements it (and can't forget the bronze).
-		found, err := e.store.UpdateBracketMatchByID(compID, matchID, func(bm *state.BracketMatch) {
+		// bm.MatchByID owns the rounds → bronze-sibling walk, so the append
+		// site no longer re-implements it (and can't forget the bronze);
+		// UpdateBracket rather than UpdateBracketMatchByID so the re-check
+		// can abort the write.
+		err := e.store.UpdateBracket(compID, func(b *state.Bracket) error {
+			bm := b.MatchByID(matchID)
+			if bm == nil {
+				return notFoundErrorf("bracket match %s not found", matchID)
+			}
+			if !kachinukiAdvanceStillHolds(snapshot, bm.Status, bm.ModifiedAt, bm.SubResults) {
+				return errKachinukiAdvanceStale
+			}
 			appendNextKachinukiBout(bm, *out.Next)
 			appendedGroup = state.BoutGroup(bm.SubResults[len(bm.SubResults)-1].Position)
 			bm.StampGroups(stamp, appendedGroup, state.GroupResult)
 			postLog = append([]state.SubMatchResult(nil), bm.SubResults...)
+			return nil
 		})
+		if errors.Is(err, errKachinukiAdvanceStale) {
+			log.Printf("engine.MaybeAdvanceKachinuki compId=%s matchId=%s: the match changed after the advance read it; not advanced", compID, matchID)
+			return false, nil, nil
+		}
 		if err != nil {
 			return false, nil, err
-		}
-		if !found {
-			return false, nil, notFoundErrorf("bracket match %s not found", matchID)
 		}
 		e.recordDirectHistory(e.store, compID, matchID, doorKachinukiAdvance, stamp, appendedGroup, state.GroupResult)
 		return true, postLog, nil
 	}
 
 	found, err := e.store.UpdatePoolMatchByID(compID, matchID, func(parent *state.MatchResult) error {
+		if !kachinukiAdvanceStillHolds(snapshot, parent.Status, parent.ModifiedAt, parent.SubResults) {
+			return errKachinukiAdvanceStale
+		}
 		// Append the next bout. Appending means the encounter continues: the
 		// parent match must stay running with no match-level winner/decision.
 		out.Next.Position = len(parent.SubResults) + 1
@@ -691,6 +714,10 @@ func (e *Engine) MaybeAdvanceKachinuki(compID, matchID string) (bool, []state.Su
 		postLog = append([]state.SubMatchResult(nil), parent.SubResults...)
 		return nil
 	})
+	if errors.Is(err, errKachinukiAdvanceStale) {
+		log.Printf("engine.MaybeAdvanceKachinuki compId=%s matchId=%s: the match changed after the advance read it; not advanced", compID, matchID)
+		return false, nil, nil
+	}
 	if err != nil {
 		return false, nil, err
 	}
@@ -699,6 +726,21 @@ func (e *Engine) MaybeAdvanceKachinuki(compID, matchID string) (bool, []state.Su
 	}
 	e.recordDirectHistory(e.store, compID, matchID, doorKachinukiAdvance, stamp, appendedGroup, state.GroupResult)
 	return true, postLog, nil
+}
+
+// errKachinukiAdvanceStale aborts the advance's locked write when the match
+// changed after the advance read it (kachinukiAdvanceStillHolds).
+var errKachinukiAdvanceStale = errors.New("kachinuki advance: the match changed since it was read")
+
+// kachinukiAdvanceStillHolds re-checks, under the write's lock, that the
+// stored match is the one MaybeAdvanceKachinuki read without it: not
+// completed, the same status and stamp, and the same bout log. Anything else
+// means a write landed in between, which the advance must not overwrite.
+func kachinukiAdvanceStillHolds(snapshot *state.MatchResult, status state.MatchStatus, modifiedAt int64, subs []state.SubMatchResult) bool {
+	return status != state.MatchStatusCompleted &&
+		status == snapshot.Status &&
+		modifiedAt == snapshot.ModifiedAt &&
+		reflect.DeepEqual(subs, snapshot.SubResults)
 }
 
 // Sentinel errors for the operator-led reopen path (mp-gmcg, spec 006
@@ -2152,8 +2194,8 @@ func applyKachinukiMerge(comp *state.Competition, prior, result *state.MatchResu
 	}
 	// bc-kheb (operator ruling 2026-09-24): a kachinuki encounter carries no
 	// match-level overtime; each bout records its own. STRIPPED, never
-	// refused: a write from an older client (an offline-queued one replays for
-	// up to 12h) carries the field as state it inherited, and a 400 would
+	// refused: a write from an older client (an offline-queued one replays
+	// whenever it lands) carries the field as state it inherited, and a 400 would
 	// blame the operator for it. Logged, as stripInvalidHantei logs its drop.
 	if comp.ClearKachinukiEncounterEncho(&result.Encho) {
 		log.Printf("engine: %s/%s: dropped a match-level encho from a kachinuki encounter write (overtime is recorded per bout)", comp.ID, result.ID)
@@ -2485,6 +2527,9 @@ func bracketMatchToTeamResult(bm state.BracketMatch) *state.MatchResult {
 		ScheduledAt: bm.ScheduledAt,
 		Decision:    bm.Decision,
 		SubResults:  bm.SubResults,
+		// ModifiedAt lets MaybeAdvanceKachinuki re-check, under the write's
+		// lock, that the match it read is still the match it writes.
+		ModifiedAt: bm.ModifiedAt,
 	}
 }
 

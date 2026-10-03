@@ -371,14 +371,24 @@ type MergeReport struct {
 	// default (every group the payload carries) and R3's rule that a running
 	// write over a finished match never carries the result.
 	Changed []string
-	// Applied and Held partition Changed: a held group is one a newer stored
-	// change outranks; its incoming value is in HeldValues. Unchanged is the
-	// part of Applied whose value equals the stored one (an echo: a client
-	// that names no groups sends every one of them back).
+	// Applied, Held and HeldEcho partition Changed: a held group is one a
+	// newer stored change outranks; its incoming value is in HeldValues.
+	// HeldEcho is a held group whose incoming value equals the stored one
+	// (an echo: a decision's "no overtime" over a match with none), which is
+	// not a loss and is therefore neither listed as held nor kept in
+	// HeldValues. Unchanged is the part of Applied whose value equals the
+	// stored one (an echo: a client that names no groups sends every one of
+	// them back).
 	Applied    []string
 	Held       []string
+	HeldEcho   []string
 	Unchanged  []string
 	HeldValues map[string]json.RawMessage
+	// HoldReason, when set, is why every group the write changes was held
+	// regardless of its stamp (a running write older than one the same
+	// board already sent: "older revision of this board"). Recorded in the
+	// history entry.
+	HoldReason string
 	// ClearedWithdrawal is the result group a later scoring change cleared
 	// (R2: points scored means the withdrawal was a mistake), kept for the
 	// history; nil when none was.
@@ -394,7 +404,7 @@ type MergeReport struct {
 // Only then is it answered applied:false, and nothing is written but its
 // history entry.
 func (r *MergeReport) Superseded() bool {
-	return r != nil && len(r.Held) > 0 && len(r.Applied) == len(r.Unchanged)
+	return r != nil && len(r.Held)+len(r.HeldEcho) > 0 && len(r.Applied) == len(r.Unchanged)
 }
 
 // HeldGroups is the list a response carries, nil when nothing was held.

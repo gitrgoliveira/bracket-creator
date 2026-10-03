@@ -9772,6 +9772,20 @@ abbr.msb-lab { text-decoration: none; cursor: help; }
   outline: 2px solid var(--warn-ink);
   outline-offset: 2px;
 }
+/* The quiet variant: another competition's matches are waiting on this court
+   while the selected one still has work here. Informational, so neutral
+   surface tokens rather than the amber warn set; still a tappable switch. */
+.shiaijo-nudge--also {
+  background: var(--surface-2);
+  border-color: var(--line);
+  color: var(--ink-2);
+}
+.shiaijo-nudge--also:hover {
+  background: var(--line-2);
+}
+.shiaijo-nudge--also:focus-visible {
+  outline-color: var(--ink-2);
+}
 .shiaijo-nudge__icon {
   font-size: 15px;
   flex-shrink: 0;

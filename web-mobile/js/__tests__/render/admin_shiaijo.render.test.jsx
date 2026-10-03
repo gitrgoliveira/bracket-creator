@@ -27,7 +27,16 @@ const STUBBED_GLOBALS = {
   // WHICH match the console selected (captured at import, so it cannot be
   // swapped per test).
   ScoreEditorModal: (props) => { probe.props = props; return <div data-testid="score-editor" data-match={props.match ? props.match.id : ''} />; },
-  CourtPicker: () => null,
+  // A bare court control: one button per OTHER court, calling onChange the
+  // way the real CourtPicker's option does (admin_shell.jsx), so the console's
+  // move confirm can be reached without the real popover.
+  CourtPicker: ({ value, courts, onChange }) => (
+    <span data-testid="court-picker-stub">
+      {(courts || []).filter((cc) => cc !== value).map((cc) => (
+        <button type="button" key={cc} data-testid={`move-to-${cc}`} onClick={() => onChange(cc)}>{`Move to ${cc}`}</button>
+      ))}
+    </span>
+  ),
   BracketTree: () => null,
   Icon: ({ name }) => <span>{name}</span>,
   // hasBothSides / isPendingBracketMatch are the REAL implementations published
@@ -1267,5 +1276,68 @@ describe('the court moves on past the withdrawn competitor', () => {
     });
     expect(onEditScore).toHaveBeenCalledTimes(1);
     expect(onEditScore.mock.calls[0][1], "Aoki's next match is passed over").toBe('m3');
+  });
+});
+
+// Operator request 2026-10-03: a match moved onto this court from another one,
+// for a competition other than the one shown, was visible only through the
+// competition picker. The court names the other competition's waiting matches
+// quietly while its own still has work, keeps the amber "Switch to" for when it
+// has none, and never switches by itself. The move confirm names the MATCH,
+// both competitors, not one person.
+describe('a court shared with another competition', () => {
+  const shared = () => [
+    courtMatch('m1', 'running'),
+    courtMatch('m2', 'scheduled'),
+    courtMatch('m3', 'scheduled', { compId: 'c2', compName: 'League' }),
+  ];
+  const nudge = (c) => c.utils.queryByTestId('shiaijo-nudge');
+
+  it("names the other competition's waiting match quietly while this one still has work", async () => {
+    const c = await mountCourt(shared());
+    try {
+      const n = nudge(c);
+      expect(n, 'the other competition is named on the court').toBeTruthy();
+      expect(n.textContent).toContain('1 League match also waiting on this court.');
+      expect(n.classList.contains('shiaijo-nudge--also')).toBe(true);
+      expect(n.classList.contains('alert--warn')).toBe(false);
+      expect(c.editorMatch(), 'nothing switched by itself').toBe('m1');
+    } finally { c.restore(); }
+  });
+
+  it('switches only when tapped', async () => {
+    const c = await mountCourt(shared());
+    try {
+      const picker = () => c.utils.container.querySelector('select[aria-label="Select competition to officiate"]');
+      expect(picker().value).toBe('c1');
+      await act(async () => { nudge(c).click(); });
+      expect(picker().value).toBe('c2');
+    } finally { c.restore(); }
+  });
+
+  it('turns amber, "Switch to", once this competition has nothing left on the court', async () => {
+    const c = await mountCourt([
+      courtMatch('m1', 'completed', { winner: courtSide('m1-a', 'Aka m1') }),
+      courtMatch('m3', 'scheduled', { compId: 'c2', compName: 'League' }),
+    ]);
+    try {
+      const picker = c.utils.container.querySelector('select[aria-label="Select competition to officiate"]');
+      if (picker.value !== 'c1') {
+        await act(async () => { picker.value = 'c1'; picker.dispatchEvent(new Event('change', { bubbles: true })); });
+      }
+      const n = nudge(c);
+      expect(n.textContent).toContain('Switch to League: 1 match waiting on this court.');
+      expect(n.classList.contains('alert--warn')).toBe(true);
+      expect(n.classList.contains('shiaijo-nudge--also')).toBe(false);
+    } finally { c.restore(); }
+  });
+
+  it('the move confirm names both competitors', async () => {
+    const c = await mountCourt([courtMatch('m1', 'running'), courtMatch('m2', 'scheduled'), courtMatch('m3', 'scheduled')]);
+    try {
+      await act(async () => { c.utils.getAllByTestId('move-to-B')[0].click(); });
+      const dialog = c.utils.container.querySelector('.shiaijo-move-confirm[role="dialog"]');
+      expect(dialog.textContent).toMatch(/Shiro m\d vs Aka m\d leaves Shiaijo A and joins the queue on Shiaijo B\./);
+    } finally { c.restore(); }
   });
 });

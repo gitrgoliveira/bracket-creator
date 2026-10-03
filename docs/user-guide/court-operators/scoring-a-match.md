@@ -1,6 +1,6 @@
 # Score a match
 
-The court console at `/admin/shiaijo/<court>` (linked from the dashboard under **Shiaijo operator views**) is your primary surface for running bouts at a single court. It shows that court's current and upcoming matches with their match numbers, and keeps the scoring flow chained to the same court throughout the session. It also prompts you to switch to whichever competition needs the court next.
+The court console at `/admin/shiaijo/<court>` (linked from the dashboard under **Shiaijo operator views**) is your primary surface for running bouts at a single court. It shows that court's current and upcoming matches with their match numbers, and keeps the scoring flow chained to the same court throughout the session. When another competition also has matches on the court, for example one moved here from another shiai-jo, a quiet line names them ("1 Individual match also waiting on this court.") while yours still has matches to run. Once yours has none left here, it turns amber and prompts you to switch. Either way the console switches only when you tap it.
 
 ## Enter scores
 

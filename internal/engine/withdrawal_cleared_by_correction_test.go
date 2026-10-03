@@ -17,10 +17,18 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+// clearsSubtest names a subtest by whether its write carries the flag; the
+// "without" run is the control for the "with" one.
+func clearsSubtest(clears bool) string {
+	if clears {
+		return "with clearWithdrawal"
+	}
+	return "without"
+}
+
 func TestWithdrawalClearedByCorrection_IndividualWin(t *testing.T) {
 	for _, clears := range []bool{true, false} {
-		name := map[bool]string{true: "with clearWithdrawal", false: "without"}[clears]
-		t.Run(name, func(t *testing.T) {
+		t.Run(clearsSubtest(clears), func(t *testing.T) {
 			eng, store, compID := seedIndividualWithdrawal(t, "kiken-voluntary", nil)
 			_, err := eng.RecordMatchResultWithIneligibility(compID, "Pool A-0", &state.MatchResult{
 				ID: "Pool A-0", SideA: wrTeamA, SideB: wrTeamB, Winner: wrTeamA, WinnerID: wrTeamAID,
@@ -51,8 +59,7 @@ func TestWithdrawalClearedByCorrection_IndividualWin(t *testing.T) {
 // for rather than a decision value.
 func TestWithdrawalClearedByCorrection_Draw(t *testing.T) {
 	for _, clears := range []bool{true, false} {
-		name := map[bool]string{true: "with clearWithdrawal", false: "without"}[clears]
-		t.Run(name, func(t *testing.T) {
+		t.Run(clearsSubtest(clears), func(t *testing.T) {
 			eng, store, compID := seedIndividualWithdrawal(t, "kiken-injury", nil)
 			_, err := eng.RecordMatchResultWithIneligibility(compID, "Pool A-0", &state.MatchResult{
 				ID: "Pool A-0", SideA: wrTeamA, SideB: wrTeamB, Decision: "hikiwake",

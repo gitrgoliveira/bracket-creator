@@ -1348,6 +1348,54 @@ function useMatchReopen({ match, password, isComplete }) {
   return { busy, landed, err, conflict, blockerLabel, notice, reopen, requeueBlocker, dismissConflict: () => setConflict(null) };
 }
 
+// useWithdrawalRemoval: Remove withdrawal (operator ruling 2026-10-03, "the
+// fix must leave the match resolved"), the one state machine both editors run
+// for it. The operator takes the recorded ruling off in the editor, enters
+// the result as it was fought, and Save correction sends it with
+// clearWithdrawal, which replaces the ruling on the server
+// (engine.KeepsWithdrawalRuling). Nothing is sent before that save.
+//
+// `enabled` is the editor's one statement of whether it can offer it at all
+// (the team editor passes !isKachinuki: a finished kachinuki encounter has no
+// Save correction). onRemove/onUndo are the editor's own side effects (what
+// its board does when the ruling goes or comes back); the hook flips the
+// state around them.
+//
+// ONE reset rule: a removal belongs to the match and the ruling it was made
+// against, so a change of the match id, the decision or the side it names
+// ends a pending removal, and the ruling shows again. Keyed on those three
+// values, never on the match object, which SSE re-creates on every broadcast.
+// What the board does then is onReset, which defaults to onUndo: the
+// individual board must re-seed, or the winner's side would lock again over
+// the operator's letters. The team editor keeps its bout edits (an edit in
+// progress survives a verdict adopted from another device) and only clears
+// its refusal notice.
+//
+// Returns:
+//   removing    - a removal is pending: the editor obeys the bouts, not the ruling
+//   rulingShown - a recorded withdrawal is in force and is still shown
+//   removal     - RecordedWithdrawal's `removal` prop, null when !enabled
+//   patchBlock  - spread into every completed write
+function useWithdrawalRemoval({ match, enabled, onRemove, onUndo, onReset = onUndo }) {
+  const [removed, setRemoved] = useStateA(false);
+  const inForce = withdrawalInForce(match);
+  const removing = !!enabled && inForce && removed;
+  const rulingShown = inForce && !removing;
+  useEffectA(() => {
+    if (!removed) return;
+    setRemoved(false);
+    if (onReset) onReset();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [match.id, match.decision, match.decisionBy]);
+  const removal = enabled ? {
+    removed: removing,
+    onRemove: () => { setRemoved(true); if (onRemove) onRemove(); },
+    onUndo: () => { setRemoved(false); if (onUndo) onUndo(); },
+  } : null;
+  const patchBlock = removing ? { clearWithdrawal: true } : {};
+  return { removing, rulingShown, removal, patchBlock };
+}
+
 // ReopenFeedback: what a reopen made through useMatchReopen came back with,
 // rendered ONCE per editor, outside the control that started the reopen
 // (testIdPrefix names the door). It must outlive that control: Clear
@@ -1464,8 +1512,9 @@ export const LATER_MATCHES_HOLD_MS = 2000;
 // ruling passes { removed, onRemove, onUndo }. Remove withdrawal is that
 // fix: the match stays finished, the operator enters the result as it was
 // fought, and Save correction sends it with clearWithdrawal so it replaces
-// the ruling (engine.KeepsWithdrawalRuling). The removed state lives in the
-// EDITOR, which reads it to unlock the board; this component only offers
+// the ruling (engine.KeepsWithdrawalRuling). The removed state lives in
+// useWithdrawalRemoval, which the EDITOR runs and reads to unlock the board,
+// and which hands this prop over as it is; this component only offers
 // the switch and says what it does. Without `removal` (kachinuki, which has
 // no Save correction) only the reopen is offered, as before.
 function RecordedWithdrawal({ match, ctl, disabled = false, singleBout = false, removal = null }) {
@@ -1575,19 +1624,23 @@ function RecordedWithdrawal({ match, ctl, disabled = false, singleBout = false, 
   const namesDefaultWin = (clearsDefaultWin || barMovesOn)
     && (isDefaultWin || match.decision === "fusenpai");
   const removed = !!(removal && removal.removed);
-  // Whether removing the ruling makes the competitor eligible again. It does
-  // only when THIS match's record is what bars them: a bar recorded by
-  // another match (barredElsewhere, or a later no-show the bar moves onto)
-  // stays, and a match-level fusensho never recorded a bar of its own, so it
-  // restores nobody unless the server already reads them eligible.
-  const staysBarred = barMovesOn || barredElsewhere || (isDefaultWin && !isEligibleAgain);
-  const removeEligibility = barMovesOn
-    ? ` ${who || "The withdrawn competitor"} stays withdrawn because of the later match listed below.`
-    : staysBarred
-      ? ` ${who || "The withdrawn competitor"} stays withdrawn because of another match.`
-      : isDefaultWin
-        ? ""
-        : ` ${who || "The withdrawn competitor"} can compete again.`;
+  // Where the withdrawn competitor stands once this ruling is gone, the ONE
+  // answer both fixes describe (the reopen copy and the removal sentence):
+  //   staysLater     - the bar moves onto a later no-show (barMovesOn);
+  //   staysElsewhere - another match bars them (barredElsewhere), or this is
+  //                    a match-level fusensho, which never recorded a bar of
+  //                    its own, and the server does not read them eligible;
+  //   restored       - they can compete again: this match's record was the
+  //                    bar, or the server already reads them eligible.
+  let eligibility = "restored";
+  if (barMovesOn) eligibility = "staysLater";
+  else if (clearsDefaultWin && !isEligibleAgain) eligibility = "staysElsewhere";
+  const withdrawnWho = who || "The withdrawn competitor";
+  const removeEligibility = {
+    staysLater: ` ${withdrawnWho} stays withdrawn because of the later match listed below.`,
+    staysElsewhere: ` ${withdrawnWho} stays withdrawn because of another match.`,
+    restored: ` ${withdrawnWho} can compete again.`,
+  }[eligibility];
 
   return (
     <div className="decision-recorded" data-testid="recorded-withdrawal" style={{ marginTop: 10, fontSize: 13 }}>
@@ -1665,11 +1718,7 @@ function RecordedWithdrawal({ match, ctl, disabled = false, singleBout = false, 
           </>
         )}
       </div>
-      {removed ? (
-        <p data-testid="remove-withdrawal-consequence" style={{ margin: "6px 0 0" }}>
-          Enter the result as it was fought, then save the correction. The match stays finished.{removeEligibility}
-        </p>
-      ) : (<>
+      {!removed && (<>
           {clearsDefaultWin ? (
             // bc-cse: a fusensho names the OTHER competitor as barred, not
             // this match's own withdrawal, so clearing it does not simply
@@ -1682,14 +1731,14 @@ function RecordedWithdrawal({ match, ctl, disabled = false, singleBout = false, 
             // server reopens this match straight to running, so the copy
             // says that instead of promising the queue.
             <p data-testid="clear-withdrawal-consequence" style={{ margin: "6px 0 0" }}>
-              {isEligibleAgain
+              {eligibility === "restored"
                 ? `${who || "The barred competitor"} can fight again, so the match reopens in progress. Score it and finish it as usual.`
                 : <>
                   The match goes back to the queue. {who || "The barred competitor"} is still withdrawn, so
                   record the default win again{canReinstate ? `, or reinstate ${who || "them"} first to fight it` : ""}.
                 </>}
             </p>
-          ) : barMovesOn ? (
+          ) : eligibility === "staysLater" ? (
             <p data-testid="clear-withdrawal-consequence" style={{ margin: "6px 0 0" }}>
               The match goes back to the queue. {who || "The withdrawn competitor"} also did not
               appear for a later match, listed below, so they are still withdrawn because of it.
@@ -1720,16 +1769,19 @@ function RecordedWithdrawal({ match, ctl, disabled = false, singleBout = false, 
               {who || "the withdrawn side"} can compete again, and you score the rest and finish it.
             </p>
           )}
-          {removal && (
-            // The one-save fix beside the reopen (operator ruling
-            // 2026-10-03): the match never leaves the finished state and
-            // never takes the court.
-            <p data-testid="remove-withdrawal-consequence" style={{ margin: "6px 0 0" }}>
-              Or remove it: the match stays finished, you enter the result as it was fought and
-              save the correction.{removeEligibility}
-            </p>
-          )}
       </>)}
+      {removal && (
+        // The one-save fix beside the reopen (operator ruling 2026-10-03):
+        // the match never leaves the finished state and never takes the
+        // court. Offered, it follows the reopen copy; pending, it stands in
+        // for it. The eligibility tail is the same answer either way.
+        <p data-testid="remove-withdrawal-consequence" style={{ margin: "6px 0 0" }}>
+          {removed
+            ? "Enter the result as it was fought, then save the correction. The match stays finished."
+            : "Or remove it: the match stays finished, you enter the result as it was fought and save the correction."}
+          {removeEligibility}
+        </p>
+      )}
           {feedsKnockout && (
             // A pool match of a pools-then-knockout competition feeds the
             // knockout through its standings, so the result it is finished
@@ -1777,17 +1829,19 @@ function RecordedWithdrawal({ match, ctl, disabled = false, singleBout = false, 
 // INNER side of the name, across it from the number (numberFollowsName), and
 // never in the centre: the middle is a closed set, and Kiken/Fus. name one
 // competitor. Both editors render their header names through here, the
-// individual board and the team encounter header alike. `removed` is the
-// editor's pending Remove withdrawal: the board no longer shows the ruling,
-// so neither does the name.
-function WithdrawalMarkedName({ match, sideKey, side, name, number, removed = false }) {
+// individual board and the team encounter header alike. `rulingShown` is the
+// editor's own answer to "is the recorded ruling on show" (useWithdrawalRemoval:
+// false during a pending Remove withdrawal), and the mark appears only when it
+// is true, so a surface that forgets to pass it shows no mark rather than a
+// mark the board no longer agrees with.
+function WithdrawalMarkedName({ match, sideKey, side, name, number, rulingShown = false }) {
   // bc-cse: take BOTH marks once and place the right one on the right name,
   // rather than always reading .loser -- for a match-level fusensho the
   // withdrawal names the BARRED (losing) side, and sideMarks' fusensho arm
   // puts its "Fus." on .winner, not .loser, so reading .loser alone showed
   // NO mark at all on either header while the bracket, list rows, TV
   // headline and export all marked the winner "Fus.".
-  const inForce = withdrawalInForce(match) && !removed;
+  const inForce = rulingShown === true && withdrawalInForce(match);
   const withdrawnKey = inForce ? withdrawnKeyOf(match) : "";
   let mark = "";
   if (inForce && withdrawnKey) {
@@ -1932,6 +1986,7 @@ export {
   withdrawnKeyOf,
   withdrawalInForce,
   useMatchReopen,
+  useWithdrawalRemoval,
   ReopenFeedback,
   RecordedWithdrawal,
   WithdrawalMarkedName,

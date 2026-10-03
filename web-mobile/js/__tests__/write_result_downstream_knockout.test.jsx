@@ -332,17 +332,10 @@ describe('downstreamKnockoutPlayedConfirm with a qualifier change', () => {
 });
 
 // The terminal refusal: a knockout match the move reaches is being fought now.
+// One match, two (the 3rd-place match first) and three, with and without a
+// court, on both doors, are pinned against the server's own sentence in
+// downstream_running_messages_shared.test.jsx. These are the SPA-only shapes.
 describe('downstreamKnockoutRunningMessage', () => {
-    it('names the match, its shiaijo and the way out', () => {
-        expect(downstreamKnockoutRunningMessage([{ id: 'm-r2-0', number: 3, label: 'Match 3 (Final)', court: 'A' }]))
-            .toBe('Match 3 (Final) is being fought now on Shiaijo A. Finish it or send it back to the queue, then save this correction again.');
-    });
-    it('names two with their shiaijo, bronze first as the server sends them', () => {
-        expect(downstreamKnockoutRunningMessage([
-            { id: 'm-bronze', number: 0, label: 'the 3rd-place match', court: 'B' },
-            { id: 'm-r2-0', number: 3, label: 'Match 3 (Final)', court: 'A' },
-        ])).toBe('The 3rd-place match is being fought now on Shiaijo B and Match 3 (Final) on Shiaijo A. Finish them or send them back to the queue, then save this correction again.');
-    });
     it('leaves the court clause out for a match with no court', () => {
         expect(downstreamKnockoutRunningMessage([{ id: 'm-r1-0', number: 9 }]))
             .toBe('Match 9 is being fought now. Finish it or send it back to the queue, then save this correction again.');
@@ -351,8 +344,6 @@ describe('downstreamKnockoutRunningMessage', () => {
         expect(downstreamKnockoutRunningMessage([{ id: 'm-r1-0', number: 9 }, { id: 'm-bronze', number: 0 }]))
             .toBe('Match 9 and the 3rd-place match are being fought now. Finish them or send them back to the queue, then save this correction again.');
     });
-    // Three or more ("A, B and C") and the reopen door are pinned against
-    // the server's own sentence in downstream_running_messages_shared.test.jsx.
     it('never prints an empty subject', () => {
         expect(downstreamKnockoutRunningMessage(undefined))
             .toBe('A knockout match is being fought now. Finish it or send it back to the queue, then save this correction again.');

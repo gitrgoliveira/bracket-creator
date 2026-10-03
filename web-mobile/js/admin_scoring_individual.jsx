@@ -40,6 +40,7 @@ import {
   useAdoptFromServer,
   sideColorName,
   useMatchReopen,
+  useWithdrawalRemoval,
   ReopenFeedback,
   RecordedWithdrawal,
   withdrawalInForce,
@@ -329,15 +330,24 @@ export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, on
   // result with clearWithdrawal, which replaces the ruling on the server.
   // Nothing is sent until then. recordedLockedKey is the SERVER's ruling and
   // is what the re-seed below watches; lockedKey is what the board obeys.
-  const [withdrawalRemoved, setWithdrawalRemoved] = useStateA(false);
-  const removingWithdrawal = recordedWithdrawal && withdrawalRemoved;
+  // The removal itself, and when it ends, is useWithdrawalRemoval's: Remove
+  // takes the winner's default-win maru off (struckIppons keeps whatever
+  // either side actually struck, the withdrawer's letters included) and the
+  // board takes ordinary entry; Undo, or the ruling moving under a pending
+  // removal, puts the recorded result back, ruling, maru and locks alike.
+  const {
+    removing: removingWithdrawal, rulingShown, removal: withdrawalRemoval,
+    patchBlock: clearWithdrawalBlock,
+  } = useWithdrawalRemoval({
+    match: m,
+    enabled: true,
+    onRemove: () => { setAPts((p) => struckIppons(p)); setBPts((p) => struckIppons(p)); },
+    onUndo: () => applyServerScore(),
+  });
   const recordedWithdrawnKey = recordedWithdrawal ? withdrawnKeyOf(m) : "";
   const recordedLockedKey = recordedWithdrawnKey === "a" ? "b" : recordedWithdrawnKey === "b" ? "a" : "";
-  const withdrawnKey = removingWithdrawal ? "" : recordedWithdrawnKey;
-  const lockedKey = removingWithdrawal ? "" : recordedLockedKey;
-  // Sent only on a completed write: the running and scheduled shapes never
-  // carry it (the server reads it on a completed correction alone).
-  const clearWithdrawalBlock = removingWithdrawal ? { clearWithdrawal: true } : {};
+  const withdrawnKey = rulingShown ? recordedWithdrawnKey : "";
+  const lockedKey = rulingShown ? recordedLockedKey : "";
   const sideCap = (side) => (side === lockedKey ? 0 : lockedKey ? MAX_IPPONS_PER_SIDE - 1 : MAX_IPPONS_PER_SIDE);
 
   // Hansoku Hs are now physically present in the opponent's pts array
@@ -435,7 +445,12 @@ export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, on
       ...enchoBlock(), ...hanteiClear, ...repBlock,
     };
     const correctionBlock = isComplete && correctionReason ? { correctionReason } : {};
-    if (isDrawToggled) return { winner: null, ipponsA: [], ipponsB: [], hansokuA: aFouls, hansokuB: bFouls, status: "completed", score: { type: "hikiwake", winnerPts: 0, loserPts: 0, fouls, corrected: isComplete }, ...enchoBlock(), ...hanteiClear, ...correctionBlock, ...clearWithdrawalBlock, ...repBlock };
+    // What every completed shape below ends with, built once so a new shape
+    // cannot leave part of it out. clearWithdrawalBlock rides only here: the
+    // running and scheduled shapes never carry it (the server reads it on a
+    // completed correction alone).
+    const completedTail = { ...enchoBlock(), ...hanteiClear, ...correctionBlock, ...clearWithdrawalBlock, ...repBlock };
+    if (isDrawToggled) return { winner: null, ipponsA: [], ipponsB: [], hansokuA: aFouls, hansokuB: bFouls, status: "completed", score: { type: "hikiwake", winnerPts: 0, loserPts: 0, fouls, corrected: isComplete }, ...completedTail };
     // ippon. Hansoku Hs are already physically present in the pts arrays
     // (folded in by applyFoulIncrement at the 2-foul boundary), so no
     // additional H fold is needed here.
@@ -444,10 +459,10 @@ export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, on
     const aFinal = aLetters.slice(0, MAX_IPPONS_PER_SIDE);
     const bFinal = bLetters.slice(0, MAX_IPPONS_PER_SIDE);
     const winnerSide = aFinal.length > bFinal.length ? "a" : bFinal.length > aFinal.length ? "b" : null;
-    if (!winnerSide) return { winner: null, ipponsA: aFinal, ipponsB: bFinal, hansokuA: aFouls, hansokuB: bFouls, status: "completed", score: { type: "hikiwake", winnerPts: 0, loserPts: 0, fouls, corrected: isComplete }, ...enchoBlock(), ...hanteiClear, ...correctionBlock, ...clearWithdrawalBlock, ...repBlock };
+    if (!winnerSide) return { winner: null, ipponsA: aFinal, ipponsB: bFinal, hansokuA: aFouls, hansokuB: bFouls, status: "completed", score: { type: "hikiwake", winnerPts: 0, loserPts: 0, fouls, corrected: isComplete }, ...completedTail };
     const winner = winnerSide === "a" ? m.sideA : m.sideB;
     const ippons = winnerSide === "a" ? aFinal : bFinal;
-    return { winner, ipponsA: aFinal, ipponsB: bFinal, hansokuA: aFouls, hansokuB: bFouls, status: "completed", score: { type: "ippon", winnerPts: ippons.length, loserPts: (winnerSide === "a" ? bFinal : aFinal).length, ippons, fouls, corrected: isComplete }, ...enchoBlock(), ...hanteiClear, ...correctionBlock, ...clearWithdrawalBlock, ...repBlock };
+    return { winner, ipponsA: aFinal, ipponsB: bFinal, hansokuA: aFouls, hansokuB: bFouls, status: "completed", score: { type: "ippon", winnerPts: ippons.length, loserPts: (winnerSide === "a" ? bFinal : aFinal).length, ippons, fouls, corrected: isComplete }, ...completedTail };
   };
   // C1: keep autosave refs fresh with the latest buildPatch / onSubmit /
   // running-status so the debounce callback never reads a stale closure.
@@ -817,32 +832,15 @@ export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, on
   // Keyed on the SERVER's ruling (recordedLockedKey), never on the board's
   // lockedKey: Remove withdrawal unlocks the board locally, and re-seeding on
   // that would put the default-win maru straight back. A ruling that moves
-  // under the board also ends a removal made against the old one.
+  // under the board also ends a removal made against the old one, through
+  // useWithdrawalRemoval's own reset (above).
   const lockedKeyRef = useRefA(recordedLockedKey);
   useEffectA(() => {
     if (lockedKeyRef.current === recordedLockedKey) return;
     lockedKeyRef.current = recordedLockedKey;
-    setWithdrawalRemoved(false);
     applyServerScore();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [recordedLockedKey]);
-  // Prev/Next re-use this editor for another match: a removal belongs to the
-  // match it was made on.
-  useEffectA(() => { setWithdrawalRemoved(false); }, [m.id]);
-  // Remove withdrawal: the winner's default-win maru goes (struckIppons keeps
-  // whatever either side actually struck, the withdrawer's letters included)
-  // and the board takes ordinary entry. Both state changes land in one render,
-  // so isDirty is true the moment the board unlocks.
-  const removeWithdrawal = () => {
-    setWithdrawalRemoved(true);
-    setAPts((p) => struckIppons(p));
-    setBPts((p) => struckIppons(p));
-  };
-  // Undo: back to what is recorded, ruling, maru and locks alike.
-  const undoRemoveWithdrawal = () => {
-    setWithdrawalRemoved(false);
-    applyServerScore();
-  };
   // leaveEditor: every way out of the editor that is not a write, Close and
   // Prev/Next alike (operator ruling 2026-09-27: Prev/Next ask as Close does).
   const leaveEditor = async (go) => {
@@ -1083,7 +1081,7 @@ export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, on
                           withdrawal's Kiken/Fus. rides beside the withdrawn
                           competitor (WithdrawalMarkedName, bc-kcsh). */}
                       <div className="sb-name">
-                        <WithdrawalMarkedName match={m} sideKey={s.key} side={s.color} name={s.name} number={s.number} removed={removingWithdrawal} />
+                        <WithdrawalMarkedName match={m} sideKey={s.key} side={s.color} name={s.name} number={s.number} rulingShown={rulingShown} />
                       </div>
                       <div className="sb-points-grid">
                         {getIpponButtons(isNaginata).map((cc) => (
@@ -1300,7 +1298,7 @@ export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, on
           {recordedWithdrawal && !decisionPromptKind && !selfReport && (
             <RecordedWithdrawal
               match={m} ctl={reopenCtl} disabled={submitting || decisionSubmitting} singleBout
-              removal={{ removed: removingWithdrawal, onRemove: removeWithdrawal, onUndo: undoRemoveWithdrawal }}
+              removal={withdrawalRemoval}
             />
           )}
           {decisionErr && (

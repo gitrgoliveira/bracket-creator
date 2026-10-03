@@ -264,6 +264,22 @@ describe('individual editor: Remove withdrawal', () => {
     expect(forced.winner?.name).toBe('Tanaka');
   });
 
+  // A match-level fusensho whose barred competitor the server already reads
+  // eligible again: the reopen copy says they can fight again, so the removal
+  // sentence says the same outcome rather than nothing (one eligibility answer
+  // in RecordedWithdrawal, read by both).
+  it('a default win over a competitor already eligible again says they can compete again, as the reopen does', async () => {
+    const fusensho = individualKiken({ decision: 'fusensho', ipponsB: [], withdrawnStatus: { eligible: true } });
+    await mount(fusensho);
+    await waitFor(() => expect(screen.getByTestId('remove-withdrawal').textContent).toBe('Remove default win'));
+    expect(screen.getByTestId('clear-withdrawal-consequence').textContent).toContain('Tanaka can fight again');
+    expect(screen.getByTestId('remove-withdrawal-consequence').textContent.replace(/\s+/g, ' ')).toBe(
+      'Or remove it: the match stays finished, you enter the result as it was fought and save the correction. Tanaka can compete again.');
+    await tap(screen.getByTestId('remove-withdrawal'));
+    expect(screen.getByTestId('remove-withdrawal-consequence').textContent.replace(/\s+/g, ' ')).toBe(
+      'Enter the result as it was fought, then save the correction. The match stays finished. Tanaka can compete again.');
+  });
+
   it('a competitor barred by another match is not promised they can compete again', async () => {
     await mount(individualKiken({ decision: 'fusenpai', ipponsB: [], withdrawnStatus: { eligible: false, matchId: 'Pool A-0' } }));
     await waitFor(() => expect(screen.getByTestId('remove-withdrawal').textContent).toBe('Remove default win'));
@@ -348,6 +364,34 @@ describe('team editor: Remove withdrawal', () => {
     expect(onClose).not.toHaveBeenCalled();
   });
 
+  // A knockout encounter whose only fought bout was drawn: the recorded
+  // withdrawal decides it, so Save correction is open. Removing it hands the
+  // result to the bouts, which tie, and a knockout cannot end tied: the
+  // button and the tie block read the same input, so the button names the
+  // block ("Needs a winner") instead of offering a Save correction it would
+  // refuse.
+  it('in a knockout, a removal whose bouts tie reads Needs a winner, not Save correction', async () => {
+    const onSubmit = vi.fn().mockResolvedValue(undefined);
+    await mount(teamKiken({
+      phase: 'bracket', round: 'Round 1', poolName: undefined,
+      subResults: [{ position: 1, sideA: '', sideB: '', ipponsA: [], ipponsB: [], winner: '', decision: 'hikiwake' }],
+    }), { onSubmit });
+    const saveButton = () => [...document.querySelectorAll('.score-nav button.btn--primary')][0];
+    expect(saveButton().textContent).toBe('Save correction');
+    expect(saveButton().disabled).toBe(false);
+
+    await tap(screen.getByTestId('remove-withdrawal'));
+    expect(saveButton().textContent).toBe('Needs a winner');
+    expect(saveButton().disabled).toBe(true);
+
+    // A point in bout 2 breaks the tie: the save is a correction again.
+    const bout2Buttons = document.querySelectorAll('.team-sub-match__btns')[2];
+    await tap([...bout2Buttons.querySelectorAll('.ipt-btn')].find((b) => b.textContent === 'M'));
+    expect(saveButton().textContent).toBe('Save correction');
+    expect(saveButton().disabled).toBe(false);
+    expect(onSubmit).not.toHaveBeenCalled();
+  });
+
   // A finished kachinuki encounter has no Save correction (its result is the
   // last bout's, through End match), so the one-save fix has no write to
   // ride on: only Clear withdrawal and reopen is offered there.
@@ -356,5 +400,57 @@ describe('team editor: Remove withdrawal', () => {
     expect(screen.getByTestId('clear-withdrawal-reopen')).toBeTruthy();
     expect(screen.queryByTestId('remove-withdrawal')).toBeNull();
     expect(screen.queryByTestId('remove-withdrawal-consequence')).toBeNull();
+  });
+});
+
+// ONE reset rule, in useWithdrawalRemoval (admin_scoring_shared.jsx): a
+// removal belongs to the match and the ruling it was made against, so a peer
+// re-recording the ruling (here a different decision on the SAME side, which
+// leaves the individual board's locked side where it was) ends a pending
+// removal in BOTH editors and the ruling shows again. The individual board
+// re-seeds (its winner side would otherwise lock over the operator's letters);
+// the team editor keeps its bout edits, because an edit in progress survives a
+// verdict adopted from another device, and saves them as a plain correction.
+describe('a ruling re-recorded under a pending removal ends it in both editors', () => {
+  async function rerender(view, match) {
+    await act(async () => {
+      view.rerender(<ScoreEditorModal match={match} onClose={vi.fn()} onSubmit={vi.fn().mockResolvedValue(undefined)} password="secret" />);
+    });
+  }
+
+  it('individual: the maru and the lock come back', async () => {
+    const view = await mount(individualKiken());
+    await tap(screen.getByTestId('remove-withdrawal'));
+    await tap(addButton('aka', 'D'));
+    expect(screen.getByTestId('remove-withdrawal-pending')).toBeTruthy();
+
+    await rerender(view, individualKiken({ decision: 'kiken-injury' }));
+    expect(screen.queryByTestId('remove-withdrawal-pending')).toBeNull();
+    expect(screen.getByTestId('remove-withdrawal')).toBeTruthy();
+    expect(filled('aka')).toEqual(['○', '○']);
+    slots('aka').forEach((b) => expect(b.disabled).toBe(true));
+    expect(screen.getByTestId('withdrawal-mark-shiro').textContent).toBe('Kiken');
+  });
+
+  it('team: the recorded ruling comes back, the bout edit stays', async () => {
+    const view = await mount(teamKiken());
+    await tap(screen.getByTestId('remove-withdrawal'));
+    await tap(screen.getAllByTestId('scoring-modal-tie-button')[1]);
+    expect(screen.queryByTestId('team-summary-decision')).toBeNull();
+
+    await rerender(view, teamKiken({ decision: 'kiken-injury' }));
+    expect(screen.queryByTestId('remove-withdrawal-pending')).toBeNull();
+    expect(screen.getByTestId('team-summary-decision')).toBeTruthy();
+    expect(screen.getByTestId('withdrawal-mark-aka').textContent).toBe('Kiken');
+    // The tie made during the removal is kept; the save no longer clears the
+    // ruling.
+    const onSubmit = vi.fn().mockResolvedValue(undefined);
+    await act(async () => {
+      view.rerender(<ScoreEditorModal match={teamKiken({ decision: 'kiken-injury' })} onClose={vi.fn()} onSubmit={onSubmit} password="secret" />);
+    });
+    await saveCorrection();
+    const patch = onSubmit.mock.calls[0][0];
+    expect(patch).not.toHaveProperty('clearWithdrawal');
+    expect(patch.subResults.map((s) => s.decision)).toEqual(['', 'hikiwake', '']);
   });
 });

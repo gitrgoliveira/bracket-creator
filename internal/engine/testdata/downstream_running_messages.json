@@ -44,6 +44,23 @@
       "message": "Match 7 (Final) is being fought now. Finish it or send it back to the queue, then reopen this match again."
     },
     {
+      "name": "save, the 3rd-place match alone",
+      "reopening": false,
+      "running": [
+        { "id": "m-bronze", "number": 0, "displayRound": 0, "court": "B", "label": "the 3rd-place match" }
+      ],
+      "message": "The 3rd-place match is being fought now on Shiaijo B. Finish it or send it back to the queue, then save this correction again."
+    },
+    {
+      "name": "save, two matches, the 3rd-place match first as the server sends them",
+      "reopening": false,
+      "running": [
+        { "id": "m-bronze", "number": 0, "displayRound": 0, "court": "B", "label": "the 3rd-place match" },
+        { "id": "m-r2-0", "number": 3, "displayRound": 1, "court": "A", "label": "Match 3 (Final)" }
+      ],
+      "message": "The 3rd-place match is being fought now on Shiaijo B and Match 3 (Final) on Shiaijo A. Finish them or send them back to the queue, then save this correction again."
+    },
+    {
       "name": "save, three matches on courts",
       "reopening": false,
       "running": [

@@ -31,6 +31,7 @@ import {
   CORRECTION_PRESETS,
   useAdoptFromServer,
   useMatchReopen,
+  useWithdrawalRemoval,
   ReopenFeedback,
   RecordedWithdrawal,
   withdrawalInForce,
@@ -1825,20 +1826,37 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
   // replaces the ruling on the server. Nothing is sent before that save.
   // Kachinuki is never offered it: a finished kachinuki encounter has no Save
   // correction (its result is the last bout's, through End match), so it
-  // keeps Clear withdrawal and reopen alone.
-  const [withdrawalRemoved, setWithdrawalRemoved] = useStateA(false);
-  const removingWithdrawal = recordedWithdrawal && !isKachinuki && withdrawalRemoved;
-  // A removal belongs to the match and the ruling it was made against.
-  useEffectA(() => { setWithdrawalRemoved(false); }, [m.id, m.decision, m.decisionBy]);
-  const withdrawalWinner = recordedWithdrawal && !removingWithdrawal ? ({ a: "b", b: "a" }[withdrawnKeyOf(m)] || null) : null;
+  // keeps Clear withdrawal and reopen alone (enabled: !isKachinuki, stated
+  // once here). The removal, and when it ends, is useWithdrawalRemoval's;
+  // rulingShown is the one answer every read site below asks ("is the
+  // recorded ruling still what this editor shows"). Undo, or the ruling
+  // moving under a pending removal, puts the recorded result back, bouts
+  // included.
+  const {
+    removing: removingWithdrawal, rulingShown, removal: withdrawalRemoval,
+    patchBlock: clearWithdrawalBlock,
+  } = useWithdrawalRemoval({
+    match: m,
+    enabled: !isKachinuki,
+    onUndo: () => { setSubs(serverSubs); setFinishRefused(false); },
+    onReset: () => setFinishRefused(false),
+  });
+  const withdrawalWinner = rulingShown ? ({ a: "b", b: "a" }[withdrawnKeyOf(m)] || null) : null;
   const teamVerdictText = withdrawalWinner
     ? teamResultLabel({ teamWinner: withdrawalWinner })
     : teamResultLabel({ teamWinner, isKnockoutPhase, hasAnyScore: teamHasAnyScore, isKachinuki });
   // Block Finish while a KO encounter has no winner: the operator must add and
   // score a daihyosen first (the affordance below). Pool draws stay finishable.
-  // A removed withdrawal leaves the result to the bouts, which can tie: the
-  // completed-encounter exemption does not hold for that save.
-  const koTieBlocked = isKoTieBlocked({ isKnockoutPhase, teamWinner, isComplete: isComplete && !removingWithdrawal });
+  // saveEndsTheMatch is the one input the block and the button's label both
+  // read: a running match's Finish ends it, a correction of a finished one
+  // does not (its result is already on record), EXCEPT a removed withdrawal,
+  // whose save hands the result to the bouts, which can tie. That save is
+  // still a correction (Save correction, with its reason) but must not end a
+  // knockout tied, so the label says "Needs a winner" whenever the block
+  // holds, before it says "Save correction", in the order the individual
+  // editor's label already reads them.
+  const saveEndsTheMatch = !isComplete || removingWithdrawal;
+  const koTieBlocked = isKoTieBlocked({ isKnockoutPhase, teamWinner, isComplete: !saveEndsTheMatch });
   // bc-tmfn: Finish (and Save correction: corrections are not exempt) refuses
   // while a numbered bout has no result. Kachinuki ends on End match instead.
   // The refusal is shown once the operator taps Finish, and then follows the
@@ -1858,7 +1876,7 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
   // Remove withdrawal ends it: the bouts nobody fought are rows to fill
   // again (the server's team finish gate applies to that save), with no
   // credit and no kept winner.
-  const keepsWithdrawal = recordedWithdrawal && !isKachinuki && !removingWithdrawal;
+  const keepsWithdrawal = rulingShown && !isKachinuki;
   // bc-tmfn: the band's IV/PW (ts.iv/ts.pw below, via teamSides) include the
   // credited bouts while keepsWithdrawal holds. bc-cse: withdrawalInForce
   // now DELEGATES to isTeamDefaultWinDecision (team_default_credit.jsx), so
@@ -2762,7 +2780,7 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
       ...enchoBlock(),
       ...correctionBlock,
       // After Remove withdrawal this result replaces the recorded ruling.
-      ...(removingWithdrawal ? { clearWithdrawal: true } : {}),
+      ...clearWithdrawalBlock,
     };
   };
   // C1: keep autosave refs fresh with the latest buildPatch / onSubmit /
@@ -3180,7 +3198,7 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
                       withdrawal's Kiken/Fus. rides beside the withdrawn team
                       (WithdrawalMarkedName, bc-kcsh), never in the centre. */}
                   <div className="sb-name">
-                    <WithdrawalMarkedName match={m} sideKey={s.key} side={s.color} name={s.name} number={s.number} removed={removingWithdrawal} />
+                    <WithdrawalMarkedName match={m} sideKey={s.key} side={s.color} name={s.name} number={s.number} rulingShown={rulingShown} />
                   </div>
                 </div>
                 {idx === 0 && (
@@ -3834,7 +3852,7 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
                         {/* bc-kcsh: the recorded decision under the verdict
                             while a withdrawal is in force (see
                             teamVerdictText). */}
-                        {recordedWithdrawal && !removingWithdrawal && (
+                        {rulingShown && (
                           <div className="team-summary__fact" data-testid="team-summary-decision">{withdrawalLabel(m.decision)}</div>
                         )}
                       </div>
@@ -4016,13 +4034,8 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
           {recordedWithdrawal && !decisionPromptKind && !selfReport && (
             <RecordedWithdrawal
               match={m} ctl={reopenCtl} disabled={submitting || decisionSubmitting}
-              // Not on kachinuki: see removingWithdrawal.
-              removal={isKachinuki ? null : {
-                removed: removingWithdrawal,
-                onRemove: () => setWithdrawalRemoved(true),
-                // Undo puts the recorded result back, bouts included.
-                onUndo: () => { setWithdrawalRemoved(false); setSubs(serverSubs); setFinishRefused(false); },
-              }}
+              // null on kachinuki: see useWithdrawalRemoval above.
+              removal={withdrawalRemoval}
             />
           )}
           {!decisionPromptKind && !selfReport && (
@@ -4387,7 +4400,7 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
                   doSubmit(() => (isComplete ? onSubmit : onSubmitAndNext)(buildPatch("completed")));
                 }} disabled={submitting || koTieBlocked}
                   title={koTieBlocked ? "A knockout match can't be a draw: add and score a daihyosen to decide a winner" : undefined}>
-                  {submitting ? "Saving…" : isComplete ? "Save correction" : koTieBlocked ? "Needs a winner" : finishArmed ? "Tap again to finish →" : "Finish + Start Next →"}
+                  {submitting ? "Saving…" : koTieBlocked ? "Needs a winner" : isComplete ? "Save correction" : finishArmed ? "Tap again to finish →" : "Finish + Start Next →"}
                 </button>
               ) : (
                 <button className={`btn btn--primary ${finishArmed && !isComplete ? "btn--confirm" : ""}`} onClick={(ev) => {
@@ -4397,7 +4410,7 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
                   doSubmit(() => onSubmit(buildPatch("completed")));
                 }} disabled={submitting || koTieBlocked}
                   title={koTieBlocked ? "A knockout match can't be a draw: add and score a daihyosen to decide a winner" : undefined}>
-                  {submitting ? "Saving…" : isComplete ? "Save correction" : koTieBlocked ? "Needs a winner" : finishArmed ? "Tap again to finish" : "Finish"}
+                  {submitting ? "Saving…" : koTieBlocked ? "Needs a winner" : isComplete ? "Save correction" : finishArmed ? "Tap again to finish" : "Finish"}
                 </button>
               )}
             </div>

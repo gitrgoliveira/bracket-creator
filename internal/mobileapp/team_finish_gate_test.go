@@ -13,7 +13,6 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"sync"
 	"testing"
 
 	"github.com/gin-gonic/gin"
@@ -285,24 +284,11 @@ func TestTeamFinishGate_ClearWithdrawalReopensTheMatch(t *testing.T) {
 	w := postDecision(t, r, "tf", finishGateMatchID, map[string]any{"decision": "kiken-voluntary", "decisionBy": "aka"})
 	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
 
-	var mu sync.Mutex
-	var events []string
-	ch := hub.Subscribe()
-	require.NotNil(t, ch)
-	done := make(chan struct{})
-	go func() {
-		defer close(done)
-		for e := range ch {
-			mu.Lock()
-			events = append(events, e.payload)
-			mu.Unlock()
-		}
-	}()
+	getEvents := collectEvents(t, hub)
 
 	w = postReopen(t, r, "tf", finishGateMatchID, "Withdrawal recorded by mistake")
 	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
-	hub.Unsubscribe(ch)
-	<-done
+	events := getEvents()
 
 	stored := finishGateStored(t, store)
 	assert.Equal(t, state.MatchStatusRunning, stored.Status, "the match was never decided")
@@ -313,7 +299,6 @@ func TestTeamFinishGate_ClearWithdrawalReopensTheMatch(t *testing.T) {
 	statuses, err := store.LoadCompetitorStatus("tf")
 	require.NoError(t, err)
 	assert.True(t, statuses[finishGateTeamAID].Eligible, "the team the withdrawal barred is eligible again")
-	mu.Lock()
 	var restored bool
 	for _, e := range events {
 		if strings.Contains(e, `"type":"competitor_status_updated"`) &&
@@ -321,7 +306,6 @@ func TestTeamFinishGate_ClearWithdrawalReopensTheMatch(t *testing.T) {
 			restored = true
 		}
 	}
-	mu.Unlock()
 	assert.True(t, restored, "the restore is broadcast; got %v", events)
 
 	partial := finishPayload(wonBout(1), unfoughtBout(2), unfoughtBout(3))
@@ -379,27 +363,14 @@ func TestTeamFinishGate_ClearWithdrawalCorrectionSavesTheRealResult(t *testing.T
 	assert.Contains(t, w.Body.String(), "Bout 2 and Bout 3 have no result.")
 	assert.Equal(t, "kiken-voluntary", finishGateStored(t, store).Decision, "the refused write left the withdrawal alone")
 
-	var mu sync.Mutex
-	var events []string
-	ch := hub.Subscribe()
-	require.NotNil(t, ch)
-	done := make(chan struct{})
-	go func() {
-		defer close(done)
-		for e := range ch {
-			mu.Lock()
-			events = append(events, e.payload)
-			mu.Unlock()
-		}
-	}()
+	getEvents := collectEvents(t, hub)
 
 	full := finishPayload(wonBout(1), wonBout(2), wonBout(3))
 	full["clearWithdrawal"] = true
 	full["correctionReason"] = "Withdrawal recorded by mistake"
 	w = putScore(t, r, "tf", finishGateMatchID, full)
 	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
-	hub.Unsubscribe(ch)
-	<-done
+	events := getEvents()
 
 	stored := finishGateStored(t, store)
 	assert.Equal(t, state.MatchStatusCompleted, stored.Status, "the match never stopped being finished")
@@ -408,7 +379,6 @@ func TestTeamFinishGate_ClearWithdrawalCorrectionSavesTheRealResult(t *testing.T
 	statuses, err := store.LoadCompetitorStatus("tf")
 	require.NoError(t, err)
 	assert.True(t, statuses[finishGateTeamAID].Eligible, "Ryu never withdrew")
-	mu.Lock()
 	var restored bool
 	for _, e := range events {
 		if strings.Contains(e, `"type":"competitor_status_updated"`) &&
@@ -416,7 +386,6 @@ func TestTeamFinishGate_ClearWithdrawalCorrectionSavesTheRealResult(t *testing.T
 			restored = true
 		}
 	}
-	mu.Unlock()
 	assert.True(t, restored, "the restore is broadcast; got %v", events)
 }
 

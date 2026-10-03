@@ -164,6 +164,38 @@ describe('individual editor: Remove withdrawal', () => {
     expect(patch.winner).toBeNull();
   });
 
+  // The name stops carrying the ruling the board no longer shows: a Kiken
+  // beside Tanaka under "will be removed" read as two answers at once.
+  it("the withdrawn competitor's Kiken mark goes with the removal and comes back on Undo", async () => {
+    await mount(individualKiken());
+    expect(screen.getByTestId('withdrawal-mark-shiro').textContent).toBe('Kiken');
+    await tap(screen.getByTestId('remove-withdrawal'));
+    expect(screen.queryByTestId('withdrawal-mark-shiro')).toBeNull();
+    expect(screen.queryByTestId('withdrawal-mark-aka')).toBeNull();
+    await tap(screen.getByTestId('remove-withdrawal-undo'));
+    expect(screen.getByTestId('withdrawal-mark-shiro').textContent).toBe('Kiken');
+  });
+
+  // A judges' decision is a real result too: decided after Remove, it goes
+  // out through its own write (submitHantei), which must clear the ruling
+  // exactly as Save correction does.
+  it('a hantei decided after Remove replaces the ruling as well', async () => {
+    const onSubmit = vi.fn().mockResolvedValue(undefined);
+    await mount(individualKiken(), { onSubmit });
+    await tap(screen.getByTestId('remove-withdrawal'));
+    await tap(addButton('aka', 'K'));
+    await tap(screen.getByTestId('scoring-modal-hantei-arm'));
+    await tap(screen.getByTestId('scoring-modal-hantei-aka'));
+    const confirm = [...document.querySelectorAll('.reason-prompt button')].find((b) => b.textContent === 'Confirm');
+    await tap(confirm);
+    expect(onSubmit).toHaveBeenCalledTimes(1);
+    const patch = onSubmit.mock.calls[0][0];
+    expect(patch.decidedByHantei).toBe(true);
+    expect(patch.winner?.name).toBe('Yamada');
+    expect(patch.clearWithdrawal).toBe(true);
+    expect(patch.correctionReason).toBeTruthy();
+  });
+
   it('Undo puts the recorded result back, maru and locks included', async () => {
     await mount(individualKiken());
     await tap(screen.getByTestId('remove-withdrawal'));
@@ -294,6 +326,16 @@ describe('team editor: Remove withdrawal', () => {
     expect(patch.winner?.name).toBe('Osaka');
     // The tie made before Undo went with it.
     expect(patch.subResults.map((s) => s.decision)).toEqual(['', '', '']);
+  });
+
+  it("the withdrawn team's Kiken mark goes with the removal and comes back on Undo", async () => {
+    await mount(teamKiken());
+    expect(screen.getByTestId('withdrawal-mark-aka').textContent).toBe('Kiken');
+    await tap(screen.getByTestId('remove-withdrawal'));
+    expect(screen.queryByTestId('withdrawal-mark-aka')).toBeNull();
+    expect(screen.queryByTestId('withdrawal-mark-shiro')).toBeNull();
+    await tap(screen.getByTestId('remove-withdrawal-undo'));
+    expect(screen.getByTestId('withdrawal-mark-aka').textContent).toBe('Kiken');
   });
 
   it('removing is an unsaved change: closing asks before discarding it', async () => {

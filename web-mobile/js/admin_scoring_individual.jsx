@@ -1083,7 +1083,7 @@ export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, on
                           withdrawal's Kiken/Fus. rides beside the withdrawn
                           competitor (WithdrawalMarkedName, bc-kcsh). */}
                       <div className="sb-name">
-                        <WithdrawalMarkedName match={m} sideKey={s.key} side={s.color} name={s.name} number={s.number} />
+                        <WithdrawalMarkedName match={m} sideKey={s.key} side={s.color} name={s.name} number={s.number} removed={removingWithdrawal} />
                       </div>
                       <div className="sb-points-grid">
                         {getIpponButtons(isNaginata).map((cc) => (

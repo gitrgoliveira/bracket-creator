@@ -3180,7 +3180,7 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
                       withdrawal's Kiken/Fus. rides beside the withdrawn team
                       (WithdrawalMarkedName, bc-kcsh), never in the centre. */}
                   <div className="sb-name">
-                    <WithdrawalMarkedName match={m} sideKey={s.key} side={s.color} name={s.name} number={s.number} />
+                    <WithdrawalMarkedName match={m} sideKey={s.key} side={s.color} name={s.name} number={s.number} removed={removingWithdrawal} />
                   </div>
                 </div>
                 {idx === 0 && (

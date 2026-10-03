@@ -1777,15 +1777,17 @@ function RecordedWithdrawal({ match, ctl, disabled = false, singleBout = false, 
 // INNER side of the name, across it from the number (numberFollowsName), and
 // never in the centre: the middle is a closed set, and Kiken/Fus. name one
 // competitor. Both editors render their header names through here, the
-// individual board and the team encounter header alike.
-function WithdrawalMarkedName({ match, sideKey, side, name, number }) {
+// individual board and the team encounter header alike. `removed` is the
+// editor's pending Remove withdrawal: the board no longer shows the ruling,
+// so neither does the name.
+function WithdrawalMarkedName({ match, sideKey, side, name, number, removed = false }) {
   // bc-cse: take BOTH marks once and place the right one on the right name,
   // rather than always reading .loser -- for a match-level fusensho the
   // withdrawal names the BARRED (losing) side, and sideMarks' fusensho arm
   // puts its "Fus." on .winner, not .loser, so reading .loser alone showed
   // NO mark at all on either header while the bracket, list rows, TV
   // headline and export all marked the winner "Fus.".
-  const inForce = withdrawalInForce(match);
+  const inForce = withdrawalInForce(match) && !removed;
   const withdrawnKey = inForce ? withdrawnKeyOf(match) : "";
   let mark = "";
   if (inForce && withdrawnKey) {

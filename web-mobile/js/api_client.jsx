@@ -114,9 +114,10 @@ async function reopenFailureError(res) {
     // _downstreamKnockoutPlayedError alone, so a kachinuki reopen blocked by a
     // DOWNSTREAM MATCH STILL RUNNING (not yet played) gets a copy for THIS
     // being a reopen (bc-cse: `{ reopen: true }` selects
-    // downstreamKnockoutRunningReopenMessage, "...then reopen again" rather
-    // than the score path's "...then save this correction again", which has no save step to
-    // retry here), instead of falling through to the bare
+    // downstreamKnockoutRunningReopenMessage, "...then reopen this match
+    // again" rather than the score path's "...then save this correction
+    // again", which has no save step to retry here), instead of falling
+    // through to the bare
     // "downstream_knockout_running" token below. The PLAYED shape ALSO marks
     // `reopen` on its own structured field below, for the confirm dialog's
     // copy; the running shape carries no `.downstreamKnockoutPlayed` to mark,

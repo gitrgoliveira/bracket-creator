@@ -9,6 +9,9 @@ package engine
 // and /decision, where the refusal must come before the T103 lock.
 
 import (
+	"encoding/json"
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/gitrgoliveira/bracket-creator/internal/state"
@@ -404,21 +407,43 @@ func TestRecordDecisionTx_StaleDecisionOverRunningNextIsSuperseded(t *testing.T)
 	assert.Equal(t, "Bob", b.Rounds[1][0].SideA)
 }
 
-// TestDownstreamKnockoutRunningError_ThreeMatchesReadAsTheSPASays: a pool
-// correction can name three or more running matches; the server's sentence
-// lists them "A, B and C", the words write_result.jsx's runningParts composes
-// (pinned there by the same strings), so a replayed refusal and a direct one
-// read alike.
-func TestDownstreamKnockoutRunningError_ThreeMatchesReadAsTheSPASays(t *testing.T) {
-	withCourts := []ReopenedMatch{
-		{ID: "m-r1-0", Number: 1, Court: "A"},
-		{ID: "m-r1-1", Number: 2, Court: "B"},
-		{ID: "m-r1-2", Number: 3, Court: "C"},
-	}
-	assert.Equal(t, "Knockout Match 1 is being fought now on Shiaijo A, knockout Match 2 on Shiaijo B and knockout Match 3 on Shiaijo C. Finish them or send them back to the queue, then save this correction again.",
-		(&DownstreamKnockoutRunningError{Running: withCourts}).Error())
+// TestDownstreamKnockoutRunningError_SharedMessages: the server's sentence and
+// the SPA's (write_result.jsx) are pinned by ONE table both languages load,
+// testdata/downstream_running_messages.json, so a replayed refusal and a
+// direct one read alike on both doors (a saved correction and a reopen) and
+// for one match or several ("A, B and C"). Literal copies in each language's
+// tests are how the reopen wording drifted apart.
+func TestDownstreamKnockoutRunningError_SharedMessages(t *testing.T) {
+	raw, err := os.ReadFile(filepath.Join("testdata", "downstream_running_messages.json"))
+	require.NoError(t, err, "shared Go/JS message table is missing")
 
-	noCourts := []ReopenedMatch{{ID: "m-r1-0", Number: 1}, {ID: "m-r1-1", Number: 2}, {ID: "m-r1-2", Number: 3}}
-	assert.Equal(t, "Knockout Match 1, knockout Match 2 and knockout Match 3 are being fought now. Finish them or send them back to the queue, then save this correction again.",
-		(&DownstreamKnockoutRunningError{Running: noCourts}).Error())
+	var table struct {
+		Cases []struct {
+			Name      string `json:"name"`
+			Reopening bool   `json:"reopening"`
+			Running   []struct {
+				ID           string `json:"id"`
+				Number       int    `json:"number"`
+				DisplayRound int    `json:"displayRound"`
+				Court        string `json:"court"`
+				Label        string `json:"label"`
+			} `json:"running"`
+			Message string `json:"message"`
+		} `json:"cases"`
+	}
+	require.NoError(t, json.Unmarshal(raw, &table))
+	require.NotEmpty(t, table.Cases, "message table parsed to zero cases: it would assert nothing")
+
+	for _, tc := range table.Cases {
+		t.Run(tc.Name, func(t *testing.T) {
+			running := make([]ReopenedMatch, 0, len(tc.Running))
+			for _, r := range tc.Running {
+				m := ReopenedMatch{ID: r.ID, Number: r.Number, DisplayRound: r.DisplayRound, Court: r.Court}
+				require.Equal(t, r.Label, MatchLabel(m), "the fixture's wire label must be the one the server sends")
+				running = append(running, m)
+			}
+			assert.Equal(t, tc.Message,
+				(&DownstreamKnockoutRunningError{Running: running, Reopening: tc.Reopening}).Error())
+		})
+	}
 }

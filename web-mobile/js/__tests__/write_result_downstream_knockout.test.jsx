@@ -351,16 +351,8 @@ describe('downstreamKnockoutRunningMessage', () => {
         expect(downstreamKnockoutRunningMessage([{ id: 'm-r1-0', number: 9 }, { id: 'm-bronze', number: 0 }]))
             .toBe('Match 9 and the 3rd-place match are being fought now. Finish them or send them back to the queue, then save this correction again.');
     });
-    // The same strings as engine's TestDownstreamKnockoutRunningError_ThreeMatchesReadAsTheSPASays.
-    it('lists three as "A, B and C", as the server does', () => {
-        const three = (court) => [1, 2, 3].map((n, i) => ({
-            id: `m-r1-${i}`, number: n, label: `knockout Match ${n}`, court: court ? 'ABC'[i] : '',
-        }));
-        expect(downstreamKnockoutRunningMessage(three(true)))
-            .toBe('Knockout Match 1 is being fought now on Shiaijo A, knockout Match 2 on Shiaijo B and knockout Match 3 on Shiaijo C. Finish them or send them back to the queue, then save this correction again.');
-        expect(downstreamKnockoutRunningMessage(three(false)))
-            .toBe('Knockout Match 1, knockout Match 2 and knockout Match 3 are being fought now. Finish them or send them back to the queue, then save this correction again.');
-    });
+    // Three or more ("A, B and C") and the reopen door are pinned against
+    // the server's own sentence in downstream_running_messages_shared.test.jsx.
     it('never prints an empty subject', () => {
         expect(downstreamKnockoutRunningMessage(undefined))
             .toBe('A knockout match is being fought now. Finish it or send it back to the queue, then save this correction again.');

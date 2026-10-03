@@ -240,10 +240,10 @@ type DownstreamKnockoutRunningError struct {
 	Reopening bool
 }
 
-// Error is the operator-facing sentence (the SPA shows the same words, from
-// write_result.jsx's downstreamKnockoutRunningMessage) for the SAVE-path
-// wording (Reopening:false); the reopen path's own wording is Reopening's
-// whole reason to exist, see the struct doc.
+// Error is the operator-facing sentence. The SPA shows the same words, from
+// write_result.jsx's downstreamKnockoutRunningMessage (Reopening:false) and
+// downstreamKnockoutRunningReopenMessage (Reopening:true); both languages are
+// pinned by the one table testdata/downstream_running_messages.json.
 func (e *DownstreamKnockoutRunningError) Error() string {
 	them := "it"
 	if len(e.Running) > 1 {

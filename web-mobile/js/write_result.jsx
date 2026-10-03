@@ -515,14 +515,16 @@ export function downstreamKnockoutRunningMessage(runningMatches) {
 
 // downstreamKnockoutRunningReopenMessage: the same refusal (409
 // downstream_knockout_running) met by a REOPEN rather than a score write
-// (bc-cse). "then save this correction again" is wrong here -- a reopen has no save step to
-// retry, the operator taps Reopen again once the blocking match is out of
-// the way -- so this is a separate message, not a parameter on the one
-// above, the same split downstreamKnockoutPlayedConfirm's own `reopen` flag
-// already draws for the played-shape refusal.
+// (bc-cse). "then save this correction again" is wrong here -- a reopen has
+// no save step to retry, the operator taps Reopen again once the blocking
+// match is out of the way -- so this is a separate message, not a parameter
+// on the one above, the same split downstreamKnockoutPlayedConfirm's own
+// `reopen` flag already draws for the played-shape refusal. Both read as the
+// server's DownstreamKnockoutRunningError does, pinned by the shared table
+// internal/engine/testdata/downstream_running_messages.json.
 export function downstreamKnockoutRunningReopenMessage(runningMatches) {
     const { subject, them } = runningParts(runningMatches);
-    return `${subject}. Finish ${them} or send ${them} back to the queue, then reopen again.`;
+    return `${subject}. Finish ${them} or send ${them} back to the queue, then reopen this match again.`;
 }
 
 // downstreamKnockoutRunningQueueDrop: the same refusal met by a QUEUED replay,

@@ -78,7 +78,7 @@ func TestReopenHandler_DownstreamRunning_RespondsWithLabel(t *testing.T) {
 	assert.NotContains(t, msg, "cannot reopen: a downstream knockout match has already started",
 		"the bare ErrReopenDownstreamFought text must not reach the operator")
 	// bc-cse item 7: the reopen door's own remedy, never the save-path's
-	// "then save again" -- a reopen has no save step to retry.
+	// "then save this correction again" -- a reopen has no save step to retry.
 	assert.Equal(t,
 		"Match 2 (Final) is being fought now on Shiaijo A. Finish it or send it back to the queue, then reopen this match again.",
 		msg)

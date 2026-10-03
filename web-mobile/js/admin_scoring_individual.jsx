@@ -10,7 +10,7 @@ const { useState: useStateA, useEffect: useEffectA, useRef: useRefA, useMemo: us
 // tiebreaker is also a rep bout, just not a daihyosen).
 import { isPoolDaihyosenBout } from './pool_ids.jsx';
 import { SideLabel } from './side_cell.jsx';
-import { realIppons, hanteiTied, hanteiSlot, hanteiWinnerKey, sideSlotOrder } from './result_slot.jsx';
+import { realIppons, hanteiTied, hanteiSlot, hanteiWinnerKey, sideSlotOrder, struckIppons } from './result_slot.jsx';
 import { sameCompetitor } from './competitor_identity.jsx';
 // Imported from the leaf, not read off `window`: this editor is ES-imported by
 // its host and by unit tests that never load api_client, and write_result.jsx
@@ -301,9 +301,11 @@ export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, on
   });
   // bc-tmfn: Clear withdrawal and reopen, the same door and component the team
   // editor uses (RecordedWithdrawal / useMatchReopen, admin_scoring_shared.jsx).
-  // A correction here keeps a recorded withdrawal (it has no way to state a
-  // decision), so removing one recorded by mistake is a reopen: the match goes
-  // back to running with the letters the withdrawing side struck. The editor
+  // A plain correction here keeps a recorded withdrawal (it has no way to
+  // state a decision). Removing one recorded by mistake is either Remove
+  // withdrawal (below: one save, the match stays finished) or a reopen: the
+  // match goes back to running with the letters the withdrawing side struck,
+  // for a match that still has fighting left in it. On a reopen the editor
   // STAYS OPEN and follows the match to running in place, so
   // the operator scores the rest here, as the consequence text tells them,
   // and the ReopenFeedback in the footer can still show what else the reopen
@@ -320,8 +322,22 @@ export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, on
   // bout, so it cannot be the side that withdrew (and the server refuses the
   // 2-2 that two letters against two maru would make). "" when no withdrawal
   // is in force, or the ruling does not say who withdrew.
-  const withdrawnKey = recordedWithdrawal ? withdrawnKeyOf(m) : "";
-  const lockedKey = withdrawnKey === "a" ? "b" : withdrawnKey === "b" ? "a" : "";
+  //
+  // Remove withdrawal (operator ruling 2026-10-03: a fix must leave the match
+  // resolved) lifts all of that in THIS editor: the ruling is no longer kept,
+  // so both sides take ordinary entry and Save correction sends the real
+  // result with clearWithdrawal, which replaces the ruling on the server.
+  // Nothing is sent until then. recordedLockedKey is the SERVER's ruling and
+  // is what the re-seed below watches; lockedKey is what the board obeys.
+  const [withdrawalRemoved, setWithdrawalRemoved] = useStateA(false);
+  const removingWithdrawal = recordedWithdrawal && withdrawalRemoved;
+  const recordedWithdrawnKey = recordedWithdrawal ? withdrawnKeyOf(m) : "";
+  const recordedLockedKey = recordedWithdrawnKey === "a" ? "b" : recordedWithdrawnKey === "b" ? "a" : "";
+  const withdrawnKey = removingWithdrawal ? "" : recordedWithdrawnKey;
+  const lockedKey = removingWithdrawal ? "" : recordedLockedKey;
+  // Sent only on a completed write: the running and scheduled shapes never
+  // carry it (the server reads it on a completed correction alone).
+  const clearWithdrawalBlock = removingWithdrawal ? { clearWithdrawal: true } : {};
   const sideCap = (side) => (side === lockedKey ? 0 : lockedKey ? MAX_IPPONS_PER_SIDE - 1 : MAX_IPPONS_PER_SIDE);
 
   // Hansoku Hs are now physically present in the opponent's pts array
@@ -419,7 +435,7 @@ export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, on
       ...enchoBlock(), ...hanteiClear, ...repBlock,
     };
     const correctionBlock = isComplete && correctionReason ? { correctionReason } : {};
-    if (isDrawToggled) return { winner: null, ipponsA: [], ipponsB: [], hansokuA: aFouls, hansokuB: bFouls, status: "completed", score: { type: "hikiwake", winnerPts: 0, loserPts: 0, fouls, corrected: isComplete }, ...enchoBlock(), ...hanteiClear, ...correctionBlock, ...repBlock };
+    if (isDrawToggled) return { winner: null, ipponsA: [], ipponsB: [], hansokuA: aFouls, hansokuB: bFouls, status: "completed", score: { type: "hikiwake", winnerPts: 0, loserPts: 0, fouls, corrected: isComplete }, ...enchoBlock(), ...hanteiClear, ...correctionBlock, ...clearWithdrawalBlock, ...repBlock };
     // ippon. Hansoku Hs are already physically present in the pts arrays
     // (folded in by applyFoulIncrement at the 2-foul boundary), so no
     // additional H fold is needed here.
@@ -428,10 +444,10 @@ export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, on
     const aFinal = aLetters.slice(0, MAX_IPPONS_PER_SIDE);
     const bFinal = bLetters.slice(0, MAX_IPPONS_PER_SIDE);
     const winnerSide = aFinal.length > bFinal.length ? "a" : bFinal.length > aFinal.length ? "b" : null;
-    if (!winnerSide) return { winner: null, ipponsA: aFinal, ipponsB: bFinal, hansokuA: aFouls, hansokuB: bFouls, status: "completed", score: { type: "hikiwake", winnerPts: 0, loserPts: 0, fouls, corrected: isComplete }, ...enchoBlock(), ...hanteiClear, ...correctionBlock, ...repBlock };
+    if (!winnerSide) return { winner: null, ipponsA: aFinal, ipponsB: bFinal, hansokuA: aFouls, hansokuB: bFouls, status: "completed", score: { type: "hikiwake", winnerPts: 0, loserPts: 0, fouls, corrected: isComplete }, ...enchoBlock(), ...hanteiClear, ...correctionBlock, ...clearWithdrawalBlock, ...repBlock };
     const winner = winnerSide === "a" ? m.sideA : m.sideB;
     const ippons = winnerSide === "a" ? aFinal : bFinal;
-    return { winner, ipponsA: aFinal, ipponsB: bFinal, hansokuA: aFouls, hansokuB: bFouls, status: "completed", score: { type: "ippon", winnerPts: ippons.length, loserPts: (winnerSide === "a" ? bFinal : aFinal).length, ippons, fouls, corrected: isComplete }, ...enchoBlock(), ...hanteiClear, ...correctionBlock, ...repBlock };
+    return { winner, ipponsA: aFinal, ipponsB: bFinal, hansokuA: aFouls, hansokuB: bFouls, status: "completed", score: { type: "ippon", winnerPts: ippons.length, loserPts: (winnerSide === "a" ? bFinal : aFinal).length, ippons, fouls, corrected: isComplete }, ...enchoBlock(), ...hanteiClear, ...correctionBlock, ...clearWithdrawalBlock, ...repBlock };
   };
   // C1: keep autosave refs fresh with the latest buildPatch / onSubmit /
   // running-status so the debounce callback never reads a stale closure.
@@ -463,6 +479,9 @@ export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, on
       status: "completed",
       ...enchoBlock(),
       decidedByHantei: true,
+      // A hantei is a real result too: after Remove withdrawal it replaces
+      // the ruling exactly as Save correction's own write does.
+      ...clearWithdrawalBlock,
     };
     // bc-htcr: a hantei verdict on a completed match is a correction like
     // any other, so it carries the audit reason the server requires, and
@@ -774,7 +793,9 @@ export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, on
     bFouls !== initialBFouls ||
     isDrawToggled !== initialIsDrawToggled ||
     enchoPeriodCount !== initialEnchoPeriods ||
-    decidedByHantei !== hanteiRecorded;
+    decidedByHantei !== hanteiRecorded ||
+    // A removed withdrawal is unsaved until Save correction sends it.
+    removingWithdrawal;
   // The scoreline half of the same rule, declared HERE because the hook needs
   // isDirty: it reads the value from the render BEFORE the server change (see
   // useAdoptFromServer). It self-corrects: a re-seed makes the next render's
@@ -793,13 +814,35 @@ export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, on
   // autosave onto a match with no withdrawal left to explain them. This is
   // not the peer disagreement keepLocalEdits protects; the operator's own
   // reopen moved the server, so the board re-seeds from it.
-  const lockedKeyRef = useRefA(lockedKey);
+  // Keyed on the SERVER's ruling (recordedLockedKey), never on the board's
+  // lockedKey: Remove withdrawal unlocks the board locally, and re-seeding on
+  // that would put the default-win maru straight back. A ruling that moves
+  // under the board also ends a removal made against the old one.
+  const lockedKeyRef = useRefA(recordedLockedKey);
   useEffectA(() => {
-    if (lockedKeyRef.current === lockedKey) return;
-    lockedKeyRef.current = lockedKey;
+    if (lockedKeyRef.current === recordedLockedKey) return;
+    lockedKeyRef.current = recordedLockedKey;
+    setWithdrawalRemoved(false);
     applyServerScore();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [lockedKey]);
+  }, [recordedLockedKey]);
+  // Prev/Next re-use this editor for another match: a removal belongs to the
+  // match it was made on.
+  useEffectA(() => { setWithdrawalRemoved(false); }, [m.id]);
+  // Remove withdrawal: the winner's default-win maru goes (struckIppons keeps
+  // whatever either side actually struck, the withdrawer's letters included)
+  // and the board takes ordinary entry. Both state changes land in one render,
+  // so isDirty is true the moment the board unlocks.
+  const removeWithdrawal = () => {
+    setWithdrawalRemoved(true);
+    setAPts((p) => struckIppons(p));
+    setBPts((p) => struckIppons(p));
+  };
+  // Undo: back to what is recorded, ruling, maru and locks alike.
+  const undoRemoveWithdrawal = () => {
+    setWithdrawalRemoved(false);
+    applyServerScore();
+  };
   // leaveEditor: every way out of the editor that is not a write, Close and
   // Prev/Next alike (operator ruling 2026-09-27: Prev/Next ask as Close does).
   const leaveEditor = async (go) => {
@@ -1255,7 +1298,10 @@ export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, on
           {/* Correcting a match a withdrawal ended: what is recorded, and the
               way to remove it when it was a wrong entry. */}
           {recordedWithdrawal && !decisionPromptKind && !selfReport && (
-            <RecordedWithdrawal match={m} ctl={reopenCtl} disabled={submitting || decisionSubmitting} singleBout />
+            <RecordedWithdrawal
+              match={m} ctl={reopenCtl} disabled={submitting || decisionSubmitting} singleBout
+              removal={{ removed: removingWithdrawal, onRemove: removeWithdrawal, onUndo: undoRemoveWithdrawal }}
+            />
           )}
           {decisionErr && (
             <div style={{ color: "var(--danger)", fontSize: 12, marginTop: 6 }}>{decisionErr}</div>

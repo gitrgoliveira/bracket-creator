@@ -1819,13 +1819,26 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
   // which awards the OTHER side from decisionBy, IV+1/PW+2 per bout.
   const unscoredBouts = unfinishedTeamBouts({ subs, teamSize });
   const recordedWithdrawal = withdrawalInForce(m);
-  const withdrawalWinner = recordedWithdrawal ? ({ a: "b", b: "a" }[withdrawnKeyOf(m)] || null) : null;
+  // Remove withdrawal (operator ruling 2026-10-03: a fix must leave the match
+  // resolved): the operator takes the recorded ruling off in this editor and
+  // Save correction sends the bouts' own result with clearWithdrawal, which
+  // replaces the ruling on the server. Nothing is sent before that save.
+  // Kachinuki is never offered it: a finished kachinuki encounter has no Save
+  // correction (its result is the last bout's, through End match), so it
+  // keeps Clear withdrawal and reopen alone.
+  const [withdrawalRemoved, setWithdrawalRemoved] = useStateA(false);
+  const removingWithdrawal = recordedWithdrawal && !isKachinuki && withdrawalRemoved;
+  // A removal belongs to the match and the ruling it was made against.
+  useEffectA(() => { setWithdrawalRemoved(false); }, [m.id, m.decision, m.decisionBy]);
+  const withdrawalWinner = recordedWithdrawal && !removingWithdrawal ? ({ a: "b", b: "a" }[withdrawnKeyOf(m)] || null) : null;
   const teamVerdictText = withdrawalWinner
     ? teamResultLabel({ teamWinner: withdrawalWinner })
     : teamResultLabel({ teamWinner, isKnockoutPhase, hasAnyScore: teamHasAnyScore, isKachinuki });
   // Block Finish while a KO encounter has no winner: the operator must add and
   // score a daihyosen first (the affordance below). Pool draws stay finishable.
-  const koTieBlocked = isKoTieBlocked({ isKnockoutPhase, teamWinner, isComplete });
+  // A removed withdrawal leaves the result to the bouts, which can tie: the
+  // completed-encounter exemption does not hold for that save.
+  const koTieBlocked = isKoTieBlocked({ isKnockoutPhase, teamWinner, isComplete: isComplete && !removingWithdrawal });
   // bc-tmfn: Finish (and Save correction: corrections are not exempt) refuses
   // while a numbered bout has no result. Kachinuki ends on End match instead.
   // The refusal is shown once the operator taps Finish, and then follows the
@@ -1835,13 +1848,17 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
   // keeps the recorded kiken/fusenpai (operator ruling 2026-09-24, "Save
   // correction should just save what the operator enters"), so the bouts
   // nobody fought after it are not a finish (engine.KeepsWithdrawalRuling).
-  // Removing a withdrawal recorded by mistake is not a save at all: it is
-  // Clear withdrawal and reopen (RecordedWithdrawal), after which the match is
-  // running and every bout needs a result like any other. A kachinuki
+  // Removing a withdrawal recorded by mistake is either Remove withdrawal
+  // (removingWithdrawal: the same Save correction, now with every bout
+  // needing a result like any finish) or Clear withdrawal and reopen
+  // (RecordedWithdrawal), after which the match is running. A kachinuki
   // encounter a withdrawal decided gets the same line and control, in place
   // of its plain Reopen (canReopenKachinukiMatch), but no Save correction, so
   // keepsWithdrawal (which shapes that save) stays off for it.
-  const keepsWithdrawal = recordedWithdrawal && !isKachinuki;
+  // Remove withdrawal ends it: the bouts nobody fought are rows to fill
+  // again (the server's team finish gate applies to that save), with no
+  // credit and no kept winner.
+  const keepsWithdrawal = recordedWithdrawal && !isKachinuki && !removingWithdrawal;
   // bc-tmfn: the band's IV/PW (ts.iv/ts.pw below, via teamSides) include the
   // credited bouts while keepsWithdrawal holds. bc-cse: withdrawalInForce
   // now DELEGATES to isTeamDefaultWinDecision (team_default_credit.jsx), so
@@ -2744,6 +2761,8 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
       subResults,
       ...enchoBlock(),
       ...correctionBlock,
+      // After Remove withdrawal this result replaces the recorded ruling.
+      ...(removingWithdrawal ? { clearWithdrawal: true } : {}),
     };
   };
   // C1: keep autosave refs fresh with the latest buildPatch / onSubmit /
@@ -2934,7 +2953,9 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
   // competition, so serialising the same board once per consumer was pure
   // repetition on the busiest path in the file.
   const serverSubsSig = JSON.stringify(serverSubs);
-  const isDirty = JSON.stringify(subs) !== serverSubsSig || daihyosenVerdictDirty;
+  const isDirty = JSON.stringify(subs) !== serverSubsSig || daihyosenVerdictDirty
+    // A removed withdrawal is unsaved until Save correction sends it.
+    || removingWithdrawal;
   // bc-dscn: an edit the running patch would NOT carry. Under kachinuki
   // buildPatch drops every row kachinukiRowSent does not name, so a changed
   // row it leaves out never reaches the server by a flush. Closing would lose
@@ -3813,7 +3834,7 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
                         {/* bc-kcsh: the recorded decision under the verdict
                             while a withdrawal is in force (see
                             teamVerdictText). */}
-                        {recordedWithdrawal && (
+                        {recordedWithdrawal && !removingWithdrawal && (
                           <div className="team-summary__fact" data-testid="team-summary-decision">{withdrawalLabel(m.decision)}</div>
                         )}
                       </div>
@@ -3993,7 +4014,16 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
               team stays with the Withdrawal or no-show controls below. The
               same component serves the individual editor. */}
           {recordedWithdrawal && !decisionPromptKind && !selfReport && (
-            <RecordedWithdrawal match={m} ctl={reopenCtl} disabled={submitting || decisionSubmitting} />
+            <RecordedWithdrawal
+              match={m} ctl={reopenCtl} disabled={submitting || decisionSubmitting}
+              // Not on kachinuki: see removingWithdrawal.
+              removal={isKachinuki ? null : {
+                removed: removingWithdrawal,
+                onRemove: () => setWithdrawalRemoved(true),
+                // Undo puts the recorded result back, bouts included.
+                onUndo: () => { setWithdrawalRemoved(false); setSubs(serverSubs); setFinishRefused(false); },
+              }}
+            />
           )}
           {!decisionPromptKind && !selfReport && (
             <details className="decision-disclosure">

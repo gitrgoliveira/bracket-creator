@@ -2328,6 +2328,43 @@ describe('_enqueueTerminalWrite: a queued write never carries the downstream con
         expect(m.API.hasPendingTerminalWrite('c1', 'mold')).toBe(false);
     });
 
+    // clearWithdrawal is the opposite case: it is the write's own content
+    // (this result replaces the recorded withdrawal, operator ruling
+    // 2026-10-03), not a confirmation of one refusal, so the queue keeps it,
+    // persisted, and a replay after a reload still sends it.
+    it('keeps clearWithdrawal on a queued correction, through persist, rehydrate and replay', async () => {
+        const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+        const live = [];
+        mockFetch((_url, opts) => {
+            live.push(JSON.parse(opts.body));
+            return Promise.resolve({ ok: false, status: 503, json: () => Promise.resolve({ error: 'unavailable' }) });
+        });
+        const res = await API.recordScore('c1', 'mclear',
+            { status: 'completed', winner: 'A', ipponsA: ['M'], ipponsB: [], correctionReason: 'Entry error', clearWithdrawal: true },
+            'pw', null);
+        expect(res).toEqual({ queued: true });
+        expect(live[0].clearWithdrawal).toBe(true);
+        const stored = JSON.parse(localStorage.getItem('bc_write_queue'));
+        expect(stored.find(([key]) => key.includes('mclear'))[1].payload.clearWithdrawal).toBe(true);
+
+        // A reload: a fresh module rehydrates the stored entry and replays it.
+        const replays = [];
+        mockFetch((url, opts) => {
+            if (String(url).includes('/matches/mclear/')) replays.push(JSON.parse(opts.body));
+            return Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve({}) });
+        });
+        vi.resetModules();
+        const m = await import('../api_client.jsx');
+        await tick(50);
+        warnSpy.mockRestore();
+        expect(replays.length).toBeGreaterThanOrEqual(1);
+        for (const body of replays) {
+            expect(body.clearWithdrawal).toBe(true);
+            expect(body.correctionReason).toBe('Entry error');
+        }
+        expect(m.API.hasPendingTerminalWrite('c1', 'mclear')).toBe(false);
+    });
+
     it('a replay meeting a knockout match being fought is dropped with the operator copy, not the token', async () => {
         const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
         mockFetch(() => Promise.reject(new TypeError('offline')));

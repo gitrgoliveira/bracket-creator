@@ -1355,6 +1355,10 @@ func rulingOfBracketMatch(bm *state.BracketMatch) withdrawalRuling {
 //     in applyPoolWrite/applyBracketResultIn has nothing else to fall back
 //     on once this reports false);
 //   - incoming completed: a start, an autosave or a requeue never inherits;
+//   - incoming not marked ClearsWithdrawal: the operator removed the ruling
+//     in the editor and this write is the real result (operator ruling
+//     2026-10-03: a fix leaves the match resolved), so it replaces the ruling
+//     whatever decision it carries, a draw included;
 //   - incoming decision "" or "hikiwake", and nothing else: that is a score
 //     sheet's correction, and no score sheet can state a decision (the team
 //     sheet's rows say nothing about the encounter, the individual sheet's
@@ -1369,9 +1373,11 @@ func rulingOfBracketMatch(bm *state.BracketMatch) withdrawalRuling {
 //     the kiken was kept and the default arm of recordDecisionTx still
 //     restored the loser, leaving a stored kiken with an eligible loser).
 //
-// Removing a withdrawal recorded by mistake is not a score write at all: it
-// is a reopen (ReopenMatch), which puts the match back to running with its
-// fought bouts kept.
+// A withdrawal recorded by mistake is removed in one of two ways: this
+// write with ClearsWithdrawal, which stores the real result and leaves the
+// match finished (restoreIfWithdrawalRemoved lifts the bar), or a reopen
+// (ReopenMatch), which puts the match back to running with its fought bouts
+// kept, for a match that still has fighting left in it.
 //
 // Exported because the team finish gate (mobileapp.refuseUnfinishedTeamFinish)
 // must exempt exactly the writes this keeps the ruling for, and a second copy
@@ -1380,6 +1386,7 @@ func KeepsWithdrawalRuling(storedStatus state.MatchStatus, storedDecision string
 	return storedStatus == state.MatchStatusCompleted &&
 		domain.IsDefaultWinDecisionStr(storedDecision) &&
 		incoming.Status == state.MatchStatusCompleted &&
+		!incoming.ClearsWithdrawal &&
 		(incoming.Decision == "" || incoming.Decision == string(domain.DecisionHikiwake))
 }
 

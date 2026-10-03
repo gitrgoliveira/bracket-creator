@@ -132,6 +132,35 @@ describe('API Utils', () => {
       expect(result2.forceDownstreamReopen).toBeUndefined();
     });
 
+    // Operator ruling 2026-10-03: Remove withdrawal, then Save correction,
+    // sends the real result with clearWithdrawal so it replaces the recorded
+    // withdrawal instead of being kept under it. A plain correction must not
+    // carry the key at all (engine.KeepsWithdrawalRuling keeps the ruling then).
+    it('forwards clearWithdrawal:true with the real result (Remove withdrawal)', () => {
+      const match = { sideA: 'A', sideB: 'B' };
+      const won = toBackendMatchResult({
+        winner: 'A', status: 'completed', ipponsA: ['M', 'K'], ipponsB: ['M'],
+        score: { type: 'ippon' }, clearWithdrawal: true,
+      }, match);
+      expect(won.clearWithdrawal).toBe(true);
+      expect(won.decision).toBe('');
+      expect(won.winner).toBe('A');
+      const drawn = toBackendMatchResult({
+        winner: null, status: 'completed', ipponsA: [], ipponsB: [],
+        score: { type: 'hikiwake' }, clearWithdrawal: true,
+      }, match);
+      expect(drawn.clearWithdrawal).toBe(true);
+      expect(drawn.decision).toBe('hikiwake');
+    });
+
+    it('omits clearWithdrawal when absent or falsy (a plain correction keeps the ruling)', () => {
+      const match = { sideA: 'A', sideB: 'B' };
+      const plain = toBackendMatchResult({ winner: 'A', status: 'completed', ipponsA: ['M'], ipponsB: [] }, match);
+      expect(plain).not.toHaveProperty('clearWithdrawal');
+      const off = toBackendMatchResult({ winner: 'A', status: 'completed', ipponsA: ['M'], ipponsB: [], clearWithdrawal: false }, match);
+      expect(off).not.toHaveProperty('clearWithdrawal');
+    });
+
     it('an explicit false leaves the payload markless (the clear IS the absence)', () => {
       const match = { sideA: 'A', sideB: 'B', decidedByHantei: true };
       const result = toBackendMatchResult({

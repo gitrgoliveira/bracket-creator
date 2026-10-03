@@ -151,6 +151,14 @@ function toBackendMatchResult(patch, match) {
     // for re-entry. Set by admin.jsx's editMatchScore on the confirmed retry
     // only -- see write_result.jsx's downstreamKnockoutPlayedRefusal.
     if (patch.forceDownstreamReopen) result.forceDownstreamReopen = true;
+    // Request-only flag (operator ruling 2026-10-03): a completed correction
+    // made after Remove withdrawal in the editor. The payload is the real
+    // result and replaces the recorded withdrawal or default win instead of
+    // keeping it (engine.KeepsWithdrawalRuling). Never persisted. Unlike
+    // forceDownstreamReopen it is the write's own content, not a confirmation
+    // of one refusal, so a queued copy keeps it and its replay still means it.
+    // Omitted unless true, so a plain correction carries no such key.
+    if (patch.clearWithdrawal) result.clearWithdrawal = true;
     if (patch.subResults) {
         // Same conversion per bout: a sub carrying the editor's boolean (the
         // daihyosen editor states it unconditionally) has it folded into the

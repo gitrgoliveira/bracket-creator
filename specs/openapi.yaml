@@ -2356,6 +2356,14 @@ paths:
           one) is kept rather than replaced by the payload's empty scoreline.
           Without it, an empty scoreline clears the stored one. `startOnly`
           with any status other than `running` is a 400.
+
+          `clearWithdrawal: true` (also request-only) marks a completed
+          correction that removes a withdrawal or default win recorded by
+          mistake: the payload is the real result (a win, or a draw) and
+          replaces the recorded ruling, the match stays completed, and the
+          competitor the withdrawal barred is eligible again. Without it, a
+          completed correction with no decision, or `hikiwake`, keeps the
+          ruling. A team match must then carry a result on every bout.
         content:
           application/json:
             schema:

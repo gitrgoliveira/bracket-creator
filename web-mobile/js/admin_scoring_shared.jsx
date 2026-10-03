@@ -1459,7 +1459,16 @@ export const LATER_MATCHES_HOLD_MS = 2000;
 // button drops "and reopen" ("Clear default win", or "Clear withdrawal" for a
 // kiken whose competitor is barred by another match), because such a match
 // may go back to the queue rather than onto the court.
-function RecordedWithdrawal({ match, ctl, disabled = false, singleBout = false }) {
+// removal (operator ruling 2026-10-03, "the fix must leave the match
+// resolved"): an editor that can save the real result over the recorded
+// ruling passes { removed, onRemove, onUndo }. Remove withdrawal is that
+// fix: the match stays finished, the operator enters the result as it was
+// fought, and Save correction sends it with clearWithdrawal so it replaces
+// the ruling (engine.KeepsWithdrawalRuling). The removed state lives in the
+// EDITOR, which reads it to unlock the board; this component only offers
+// the switch and says what it does. Without `removal` (kachinuki, which has
+// no Save correction) only the reopen is offered, as before.
+function RecordedWithdrawal({ match, ctl, disabled = false, singleBout = false, removal = null }) {
   const withdrawnKey = withdrawnKeyOf(match);
   const withdrawn = withdrawnSideOf(match);
   const who = withdrawn?.name || "";
@@ -1561,6 +1570,24 @@ function RecordedWithdrawal({ match, ctl, disabled = false, singleBout = false }
   // returns this one to the queue too (engine.reopenTargetStatusTx).
   const barMovesOn = !clearsDefaultWin && !!laterDefaultWins
     && laterDefaultWins.some(x => x.decision === "fusenpai");
+  // The one noun both controls use for what is recorded, so "Clear default
+  // win" and "Remove default win" (or "... withdrawal") always agree.
+  const namesDefaultWin = (clearsDefaultWin || barMovesOn)
+    && (isDefaultWin || match.decision === "fusenpai");
+  const removed = !!(removal && removal.removed);
+  // Whether removing the ruling makes the competitor eligible again. It does
+  // only when THIS match's record is what bars them: a bar recorded by
+  // another match (barredElsewhere, or a later no-show the bar moves onto)
+  // stays, and a match-level fusensho never recorded a bar of its own, so it
+  // restores nobody unless the server already reads them eligible.
+  const staysBarred = barMovesOn || barredElsewhere || (isDefaultWin && !isEligibleAgain);
+  const removeEligibility = barMovesOn
+    ? ` ${who || "The withdrawn competitor"} stays withdrawn because of the later match listed below.`
+    : staysBarred
+      ? ` ${who || "The withdrawn competitor"} stays withdrawn because of another match.`
+      : isDefaultWin
+        ? ""
+        : ` ${who || "The withdrawn competitor"} can compete again.`;
 
   return (
     <div className="decision-recorded" data-testid="recorded-withdrawal" style={{ marginTop: 10, fontSize: 13 }}>
@@ -1583,13 +1610,33 @@ function RecordedWithdrawal({ match, ctl, disabled = false, singleBout = false }
             the clear does is stated below, before it is tapped. The one
             second step left is useMatchReopen's own, when a later knockout
             match has already been fought ("Reopen both"). */}
-        <button
-          type="button"
-          className="btn btn--sm"
-          data-testid="clear-withdrawal-reopen"
-          onClick={() => ctl.reopen("")}
-          disabled={disabled || ctl.busy || ctl.landed || !settled}
-        >
+        {removed ? (
+          // Removed in the editor, not yet saved: nothing has been sent, so
+          // Undo just puts the recorded result back on the board.
+          <>
+            <span data-testid="remove-withdrawal-pending">
+              {namesDefaultWin ? "The default win" : "The withdrawal"} will be removed when you save the correction.
+            </span>
+            {" "}
+            <button
+              type="button"
+              className="btn btn--sm"
+              data-testid="remove-withdrawal-undo"
+              onClick={removal.onUndo}
+              disabled={disabled}
+            >
+              Undo
+            </button>
+          </>
+        ) : (
+          <>
+            <button
+              type="button"
+              className="btn btn--sm"
+              data-testid="clear-withdrawal-reopen"
+              onClick={() => ctl.reopen("")}
+              disabled={disabled || ctl.busy || ctl.landed || !settled}
+            >
               {/* bc-cse: "Clear default win" -- no "and reopen" -- because a
                   fusensho reopen no longer always lands running: the server
                   returns the match to SCHEDULED when the barred competitor
@@ -1597,9 +1644,32 @@ function RecordedWithdrawal({ match, ctl, disabled = false, singleBout = false }
                   to running once they no longer are, so this button cannot
                   promise "and reopen" for either outcome uniformly. */}
               {ctl.busy ? "Reopening…" : ctl.landed ? "Reopened" : !(clearsDefaultWin || barMovesOn) ? "Clear withdrawal and reopen"
-                : (isDefaultWin || match.decision === "fusenpai") ? "Clear default win" : "Clear withdrawal"}
-        </button>
+                : namesDefaultWin ? "Clear default win" : "Clear withdrawal"}
+            </button>
+            {removal && (
+              <>
+                {" "}
+                {/* No reason here: Save correction asks for one, and
+                    nothing is sent until then. */}
+                <button
+                  type="button"
+                  className="btn btn--sm"
+                  data-testid="remove-withdrawal"
+                  onClick={removal.onRemove}
+                  disabled={disabled || ctl.busy || ctl.landed}
+                >
+                  {namesDefaultWin ? "Remove default win" : "Remove withdrawal"}
+                </button>
+              </>
+            )}
+          </>
+        )}
       </div>
+      {removed ? (
+        <p data-testid="remove-withdrawal-consequence" style={{ margin: "6px 0 0" }}>
+          Enter the result as it was fought, then save the correction. The match stays finished.{removeEligibility}
+        </p>
+      ) : (<>
           {clearsDefaultWin ? (
             // bc-cse: a fusensho names the OTHER competitor as barred, not
             // this match's own withdrawal, so clearing it does not simply
@@ -1650,6 +1720,16 @@ function RecordedWithdrawal({ match, ctl, disabled = false, singleBout = false }
               {who || "the withdrawn side"} can compete again, and you score the rest and finish it.
             </p>
           )}
+          {removal && (
+            // The one-save fix beside the reopen (operator ruling
+            // 2026-10-03): the match never leaves the finished state and
+            // never takes the court.
+            <p data-testid="remove-withdrawal-consequence" style={{ margin: "6px 0 0" }}>
+              Or remove it: the match stays finished, you enter the result as it was fought and
+              save the correction.{removeEligibility}
+            </p>
+          )}
+      </>)}
           {feedsKnockout && (
             // A pool match of a pools-then-knockout competition feeds the
             // knockout through its standings, so the result it is finished

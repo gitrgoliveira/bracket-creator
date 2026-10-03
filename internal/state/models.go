@@ -1417,19 +1417,25 @@ type MatchResult struct {
 	// it to resolve WinnerID from the stored side ids even when both sides
 	// share a name. Never persisted (json/CSV omit); it only carries the
 	// side decision from the handler to the id-resolution step.
-	WinnerSide     string           `json:"-" yaml:"-"`
-	IpponsA        []string         `json:"ipponsA"` // waza letters M/K/D/T/H/S (naginata), or ○ (FIK default-win marker)
-	IpponsB        []string         `json:"ipponsB"`
-	HansokuA       int              `json:"hansokuA"`
-	HansokuB       int              `json:"hansokuB"`
-	Decision       string           `json:"decision"`
-	DecisionBy     string           `json:"decisionBy,omitempty"`
-	DecisionReason string           `json:"decisionReason,omitempty"`
-	Status         MatchStatus      `json:"status"`
-	Court          string           `json:"court"`
-	Round          int              `json:"round" yaml:"round"`
-	ScheduledAt    string           `json:"scheduledAt"`
-	SubResults     []SubMatchResult `json:"subResults,omitempty"`
+	WinnerSide string `json:"-" yaml:"-"`
+	// ClearsWithdrawal is a transient flag set by the score handler from the
+	// request's `clearWithdrawal`: the operator removed a withdrawal or
+	// default win recorded by mistake and this completed write is the real
+	// result, so it replaces the stored ruling rather than keeping it
+	// (engine.KeepsWithdrawalRuling). Never persisted (json/CSV omit).
+	ClearsWithdrawal bool             `json:"-" yaml:"-"`
+	IpponsA          []string         `json:"ipponsA"` // waza letters M/K/D/T/H/S (naginata), or ○ (FIK default-win marker)
+	IpponsB          []string         `json:"ipponsB"`
+	HansokuA         int              `json:"hansokuA"`
+	HansokuB         int              `json:"hansokuB"`
+	Decision         string           `json:"decision"`
+	DecisionBy       string           `json:"decisionBy,omitempty"`
+	DecisionReason   string           `json:"decisionReason,omitempty"`
+	Status           MatchStatus      `json:"status"`
+	Court            string           `json:"court"`
+	Round            int              `json:"round" yaml:"round"`
+	ScheduledAt      string           `json:"scheduledAt"`
+	SubResults       []SubMatchResult `json:"subResults,omitempty"`
 	// SubResultsRaw holds the sub-bout cell EXACTLY as it was read, and only
 	// when it failed to parse as JSON. It is the repair copy. The reader
 	// degrades a malformed cell to an empty encounter rather than failing the

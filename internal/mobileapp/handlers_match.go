@@ -2596,6 +2596,12 @@ type scoreRequestBody struct {
 	// startPatch): the score the stored match holds is kept rather than
 	// replaced by the payload's empty one (engine.ForceOptions.StartOnly).
 	StartOnly bool `json:"startOnly"`
+	// ClearWithdrawal marks a completed correction that removes a withdrawal
+	// or default win recorded by mistake: the payload is the real result and
+	// replaces the ruling (state.MatchResult.ClearsWithdrawal,
+	// engine.KeepsWithdrawalRuling), where a correction without it keeps the
+	// ruling. The match stays finished, so this fix never takes the court.
+	ClearWithdrawal bool `json:"clearWithdrawal"`
 }
 
 // scoreResponseWithReopened is the score write's reply: the stored
@@ -2672,6 +2678,7 @@ func registerScoreHandler(r *gin.RouterGroup, eng ScoringEngine, store Competiti
 			return
 		}
 		req := body.ScoreRequest
+		req.ClearsWithdrawal = body.ClearWithdrawal
 		// startOnly keeps the stored score in place of the payload's, after
 		// the payload is validated, so on anything but a start the verdict
 		// would rest on a scoreline nothing checked it against.

@@ -2,9 +2,99 @@
 // Used by both ScoreEditorModal (individual) and TeamScoreEditorModal (team).
 // Extracted from admin_scoring_modal.jsx (mp-zac3).
 
+import { toBackendMatchResult, matchWire } from './api_serializers.jsx';
+import { changedGroups, statedGroupsOf, groupMatches, heldGroupsNote } from './match_groups.jsx';
+import { writePartlyHeld, writeHeldGroups, writeDidNotLand } from './write_result.jsx';
+
 const { useState: useStateA, useEffect: useEffectA, useRef: useRefA } = React;
 
 export const AUTOSAVE_DEBOUNCE_MS = 300;
+
+// ---------------------------------------------------------------------------
+// useChangedGroups (bc-mrgc): every score write an editor builds names the
+// groups it changes (match_groups.jsx), so the server applies only those and
+// keeps every other group as stored. Called once per editor with the match it
+// renders from; returns claim(patch), which every patch the editor hands to
+// its host goes through, autosave included, and which returns the patch with
+// `changed` set.
+//
+// A group counts as changed when the write's value differs from either of two
+// baselines, both read through the serializer the write goes through
+// (api_serializers.jsx matchWire) so only a real difference counts:
+//
+//   - the server's value the editor's state last AGREED with for that group:
+//     the match as the editor mounted on it, moved on whenever a write is
+//     built while the editor's value and the match it renders from are the
+//     same (its own write come back, or a value it adopted). Not simply the
+//     latest copy of the match: an editor that does not follow a group (the
+//     individual editor seeds its points and overtime once) would otherwise
+//     read another device's later change to that group as its own and put the
+//     old value back.
+//   - the last write this editor built for the match: a tap taken back before
+//     the first write's echo arrives reads the same as the copy that has not
+//     caught up yet, and without this the second write would name nothing and
+//     the server would keep the first.
+// ---------------------------------------------------------------------------
+export function useChangedGroups(match) {
+  const matchRef = useRefA(match);
+  matchRef.current = match;
+  const stateRef = useRefA(null);
+  const keyOf = (m) => `${(m && m.compId) || ""}\u0000${(m && m.id) || ""}`;
+  // The editor moving to another match starts over from that match.
+  if (!stateRef.current || stateRef.current.key !== keyOf(match)) {
+    stateRef.current = { key: keyOf(match), seed: matchWire(match), agreed: {}, last: null };
+  }
+  return (patch) => {
+    if (!patch) return patch;
+    const m = matchRef.current;
+    const st = stateRef.current;
+    const next = toBackendMatchResult(patch, m);
+    const current = matchWire(m);
+    for (const g of statedGroupsOf(next)) {
+      if (groupMatches(g, next, current, next)) st.agreed[g] = current;
+    }
+    const changed = changedGroups(next, (g) => st.agreed[g] || st.seed, st.last);
+    st.last = next;
+    return { ...patch, changed };
+  };
+}
+
+// ---------------------------------------------------------------------------
+// useKeptInHistoryNote (bc-mrgc): the quiet note a score editor shows when the
+// server applied a write in part and kept the rest in the match's history,
+// because a newer change to the same thing was recorded first. The editor's
+// flow carries on as for any landed write; the note only names what was kept
+// (heldGroupsNote). A write that lands with nothing held clears it; one that
+// did not land (queued, or refused, which has its own banner) leaves it.
+// Returns { note, noteFromWrite }, noteFromWrite stable across renders so the
+// autosave can hold it.
+// ---------------------------------------------------------------------------
+export function useKeptInHistoryNote() {
+  const [note, setNote] = useStateA(null);
+  const mountedRef = useRefA(true);
+  useEffectA(() => () => { mountedRef.current = false; }, []);
+  // The note last set, so a write that changes nothing about it (the common
+  // case: every landed autosave) renders nothing.
+  const shownRef = useRefA(null);
+  const noteFromWriteRef = useRefA(null);
+  if (!noteFromWriteRef.current) {
+    noteFromWriteRef.current = (res) => {
+      if (!mountedRef.current || !res) return;
+      let next = shownRef.current;
+      if (writePartlyHeld(res)) next = heldGroupsNote(writeHeldGroups(res));
+      else if (!writeDidNotLand(res)) next = null;
+      if (next === shownRef.current) return;
+      shownRef.current = next;
+      setNote(next);
+    };
+  }
+  return { note, noteFromWrite: noteFromWriteRef.current };
+}
+
+export function KeptInHistoryNote({ note }) {
+  if (!note) return null;
+  return <div className="sb-hint" role="status" data-testid="kept-in-history-note">{note}</div>;
+}
 
 // The monotonic clock an edit is read on, or null where there is none (the
 // write is then stamped when it is sent).
@@ -108,7 +198,13 @@ export function SyncStatusPill({ isRunning }) {
 // makes recordScore put it straight into the persisted outbox.
 // Every write carries the time of the edit it saves (editedPerf), so however
 // late it goes out, it is never newer than a result recorded after the tap.
-export function useDebouncedRunningWrite({ isRunningRef, buildPatchRef, onSubmitRef }) {
+//
+// onWriteResult, optional, is handed what each running write comes back with
+// (the editors' kept-in-history note, useKeptInHistoryNote). Read through a
+// ref, so a new function each render is fine.
+export function useDebouncedRunningWrite({ isRunningRef, buildPatchRef, onSubmitRef, onWriteResult }) {
+  const onWriteResultRef = useRefA(onWriteResult);
+  onWriteResultRef.current = onWriteResult;
   const timerRef = useRefA(null);
   // The monotonic reading of the last edit, sent on the patch as `editedPerf`
   // (never on the wire) so recordScore stamps the write with the time of that
@@ -178,7 +274,9 @@ export function useDebouncedRunningWrite({ isRunningRef, buildPatchRef, onSubmit
         let patch = { ...buildPatchRef.current("running"), editedPerf: editPerfRef.current };
         if (transform) patch = transform(patch);
         const p = onSubmitRef.current(durable ? { ...patch, durable: true } : patch);
-        if (p && typeof p.catch === "function") p.catch(() => {});
+        if (p && typeof p.then === "function") {
+          p.then((res) => { const cb = onWriteResultRef.current; if (cb) cb(res); }).catch(() => {});
+        }
       } catch (_) { /* swallow */ }
     } finally {
       notePending(false);

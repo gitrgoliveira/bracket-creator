@@ -114,11 +114,13 @@ describe('team score editor: a superseded explicit tap reaches the screen (bc-lw
 
     await waitFor(() => {
       const alert = screen.getByRole('alert');
-      expect(alert.textContent).toContain('Not saved');
+      // bc-mrgc: the tap is kept in the match's history, not lost.
+      expect(alert.textContent).toContain('Not applied');
+      expect(alert.textContent).toContain("kept in the match's history");
       // The advice is the load-bearing half: every OTHER write failure ends in
-      // "re-enter the result", which here would overwrite the newer result that
-      // won. The operator has to look at what is recorded first.
-      expect(alert.textContent).toContain('Check the recorded result');
+      // "re-enter the result", which here would overwrite the newer change that
+      // won. The operator has to look at the match first.
+      expect(alert.textContent).toContain('Check the match and its history');
       expect(alert.textContent).not.toContain('Re-enter the result and submit again');
     });
   });

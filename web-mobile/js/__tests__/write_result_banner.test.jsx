@@ -17,7 +17,10 @@ import {
     notSavedText,
     NOT_SAVED_ADVICE,
     dependentActionBlocked,
+    SUPERSEDED_LEAD,
     SUPERSEDED_REASON,
+    writeHeldGroups,
+    writePartlyHeld,
     SUPERSEDED_ADVICE,
     CLOCK_SKEW_REASON_TEXT,
     CLOCK_SKEW_ADVICE,
@@ -35,7 +38,10 @@ describe('notLandedBanner', () => {
     });
 
     it('maps a plain supersede to the superseded copy', () => {
+        // bc-mrgc: the write is kept in the match's history, so it leads with
+        // "Not applied", never "Not saved".
         expect(notLandedBanner({ applied: false })).toEqual({
+            lead: SUPERSEDED_LEAD,
             reason: SUPERSEDED_REASON,
             advice: SUPERSEDED_ADVICE,
         });
@@ -45,6 +51,7 @@ describe('notLandedBanner', () => {
         // Only the exact 'clock_skew' wire value takes the narrow branch; any
         // other reason is still just "a newer result won".
         expect(notLandedBanner({ applied: false, reason: 'something_else' })).toEqual({
+            lead: SUPERSEDED_LEAD,
             reason: SUPERSEDED_REASON,
             advice: SUPERSEDED_ADVICE,
         });
@@ -110,11 +117,20 @@ describe('notSavedText', () => {
         expect(notSavedText({ reason: SUPERSEDED_REASON, advice: SUPERSEDED_ADVICE })).toBe(`Not saved: ${SUPERSEDED_REASON}. ${SUPERSEDED_ADVICE}`);
     });
 
-    it('reads every banner notLandedBanner makes as before', () => {
-        for (const res of [{ applied: false, reason: 'clock_skew' }, { applied: false }]) {
-            const b = notLandedBanner(res);
-            expect(notSavedText(b)).toBe(`Not saved: ${b.reason}. ${b.advice}`);
-        }
+    it('reads every banner notLandedBanner makes, a kept write leading with its own words', () => {
+        const clock = notLandedBanner({ applied: false, reason: 'clock_skew' });
+        expect(notSavedText(clock)).toBe(`Not saved: ${clock.reason}. ${clock.advice}`);
+        // bc-mrgc: a superseded write was kept in the match's history, not lost.
+        const kept = notLandedBanner({ applied: false });
+        expect(notSavedText(kept)).toBe(`Not applied: ${SUPERSEDED_REASON}. ${SUPERSEDED_ADVICE}`);
+        expect(notSavedText(kept)).toMatch(/kept in the match's history/);
+        expect(notSavedText(kept)).toMatch(/nothing is lost/);
+        expect(notSavedText(kept)).not.toMatch(/Not saved/);
+    });
+
+    it('a superseded replay keeps its lead through terminalFailureBanner', () => {
+        const b = terminalFailureBanner({ status: 200, lead: SUPERSEDED_LEAD, reason: SUPERSEDED_REASON, advice: SUPERSEDED_ADVICE });
+        expect(notSavedText(b)).toBe(`Not applied: ${SUPERSEDED_REASON}. ${SUPERSEDED_ADVICE}`);
     });
 });
 
@@ -128,5 +144,29 @@ describe('terminalFailureBanner', () => {
         const b = terminalFailureBanner({ status: 400 });
         expect(b).toEqual({ reason: 'save rejected (400)', advice: undefined });
         expect(notSavedText(b)).toBe(`Not saved: save rejected (400). ${NOT_SAVED_ADVICE}`);
+    });
+});
+
+// bc-mrgc: a write the server applied in part names, in `heldGroups`, the
+// groups it kept in the match's history instead. A superseded write lists
+// them too, but is answered by the banner, never by the quiet note.
+describe('writeHeldGroups / writePartlyHeld', () => {
+    it('a write applied in part is partly held, naming its groups', () => {
+        const res = { id: 'm1', status: 'running', heldGroups: ['points', 'bout:2'] };
+        expect(writeHeldGroups(res)).toEqual(['points', 'bout:2']);
+        expect(writePartlyHeld(res)).toBe(true);
+    });
+
+    it('a superseded write names its groups but is not partly held', () => {
+        const res = { applied: false, reason: 'superseded', heldGroups: ['points'] };
+        expect(writeHeldGroups(res)).toEqual(['points']);
+        expect(writePartlyHeld(res)).toBe(false);
+    });
+
+    it('a write that held nothing, a queued one, and nothing at all are not', () => {
+        for (const res of [{ id: 'm1' }, { id: 'm1', heldGroups: [] }, { queued: true }, undefined, null]) {
+            expect(writePartlyHeld(res)).toBe(false);
+            expect(writeHeldGroups(res)).toEqual([]);
+        }
     });
 });

@@ -53,7 +53,8 @@ import {
 // one owner of that question.
 import { isBarredMatch } from './ineligible_match.jsx';
 
-import { SyncStatusPill, useDebouncedRunningWrite } from './admin_scoring_autosave.jsx';
+import { SyncStatusPill, useDebouncedRunningWrite, useChangedGroups, useKeptInHistoryNote, KeptInHistoryNote } from './admin_scoring_autosave.jsx';
+import { MatchHistoryDisclosure } from './match_history_view.jsx';
 
 // isKoTieBlocked: import-only, from the team editor's shared module. bc-rawm
 // reuses it here for the SAME tie rule (a knockout match cannot finish with
@@ -76,6 +77,9 @@ export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, on
   const treatAsRunning = match.status === "scheduled"
     && (started || (startedFrom !== null && startedFrom.at === match.modifiedAt));
   const m = useMemoA(() => (treatAsRunning ? { ...match, status: "running" } : match), [match, treatAsRunning]);
+  // bc-mrgc: names the groups each write changes, against the match this
+  // editor renders from (see useChangedGroups).
+  const claimChanged = useChangedGroups(m);
   const isComplete = m.status === "completed";
   // Canonical team check (matches admin_pools.jsx and the lineup panel):
   // compKind OR a positive teamSize. A team competition created with only
@@ -255,10 +259,13 @@ export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, on
   const _autosaveIsRunningRef = useRefA(false);
   const _autosaveBuildPatchRef = useRefA(null);
   const _autosaveOnSubmitRef = useRefA(null);
+  // bc-mrgc: what a write applied only in part kept in the match's history.
+  const keptInHistory = useKeptInHistoryNote();
   const { markDirty: markScoringDirty, cancelDebounce: cancelScoringDebounce } = useDebouncedRunningWrite({
     isRunningRef: _autosaveIsRunningRef,
     buildPatchRef: _autosaveBuildPatchRef,
     onSubmitRef: _autosaveOnSubmitRef,
+    onWriteResult: keptInHistory.noteFromWrite,
   });
 
   useEffectA(() => {
@@ -438,7 +445,11 @@ export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, on
   // them on empty server-side, so an unset dropdown won't wipe a prior pick.
   const repBlock = m.repIsTeam ? { repPlayerA, repPlayerB } : {};
 
-  const buildPatch = (targetStatus) => {
+  // bc-mrgc: every patch this editor hands its host names the groups it
+  // changes (useChangedGroups), and `extra` (a correction reason given at
+  // the prompt) is part of the write those groups are worked out from.
+  const buildPatch = (targetStatus, extra) => claimChanged({ ...buildPatchFields(targetStatus), ...extra });
+  const buildPatchFields = (targetStatus) => {
     const fouls = { a: aFouls, b: bFouls };
     if (targetStatus === "scheduled") return { winner: null, status: "scheduled", score: null, ipponsA: [], ipponsB: [], hansokuA: 0, hansokuB: 0, ...hanteiClear, ...repBlock };
     if (targetStatus === "running") return {
@@ -509,12 +520,13 @@ export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, on
     // verdict stood, with no other way to change it (Save correction is off
     // while the hantei is set).
     if (isComplete && !correctionReason) {
-      askCorrectionReason((r) => doSubmit(() => onSubmit({ ...patch, correctionReason: r })));
+      askCorrectionReason((r) => doSubmit(() => onSubmit(claimChanged({ ...patch, correctionReason: r }))));
       return undefined;
     }
     if (isComplete) patch.correctionReason = correctionReason;
     const submitFn = (!isComplete && onSubmitAndNext) ? onSubmitAndNext : onSubmit;
-    return doSubmit(() => submitFn(patch));
+    const claimed = claimChanged(patch);
+    return doSubmit(() => submitFn(claimed));
   };
 
   const doSubmit = async (fn) => {
@@ -528,6 +540,7 @@ export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, on
     } finally {
       if (mountedRef.current) setSubmitting(false);
     }
+    keptInHistory.noteFromWrite(res);
     // A refused write disarms Finish (writeWasRefused): left armed, one tap
     // re-sent the write just refused. A queued one stays armed.
     if (writeWasRefused(res) && mountedRef.current) setFinishArmed(false);
@@ -971,7 +984,7 @@ export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, on
   // editor is shown from the first render with no kendo-editor flash.
   // The team check is skipped for engi (engi is never a team).
   if (isEngi) {
-    return <EngiScoreEditorModal match={m} onClose={onClose} onSubmit={onSubmit} onSubmitAndNext={onSubmitAndNext} prevMatch={prevMatch} nextMatch={nextMatch} onPrev={onPrev} onNext={onNext} variant={variant} canClose={canClose} />;
+    return <EngiScoreEditorModal match={m} onClose={onClose} onSubmit={onSubmit} onSubmitAndNext={onSubmitAndNext} prevMatch={prevMatch} nextMatch={nextMatch} onPrev={onPrev} onNext={onNext} variant={variant} canClose={canClose} password={password} selfReport={selfReport} />;
   }
   // Team routing: forward to TeamScoreEditorModal.
   if (isTeam) {
@@ -1342,7 +1355,7 @@ export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, on
                 // buildPatch reads correctionReason from state, but state
                 // updates are async: pass r inline via a local override
                 // so the patch is correct on the very first submit.
-                const patch = { ...buildPatch("completed"), correctionReason: r };
+                const patch = buildPatch("completed", { correctionReason: r });
                 doSubmit(() => onSubmit(patch));
               }}
               onCancel={() => setCorrectionPrompt(null)}
@@ -1364,6 +1377,10 @@ export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, on
               <span>{notSavedText(writeFailed)}</span>
             </div>
           )}
+          <KeptInHistoryNote note={keptInHistory.note} />
+          {/* bc-mrgc: every write that reached this match, kept or applied.
+              The organiser's view, so not on a self-run participant's sheet. */}
+          <MatchHistoryDisclosure match={m} password={password} hidden={!!selfReport} />
           {/* F5: pending-write banner: shown when a terminal submit was only queued
               (offline / transient failure). The write is durable in localStorage
               and will be retried automatically. Operator may still dismiss. */}

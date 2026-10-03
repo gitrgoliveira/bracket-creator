@@ -94,6 +94,11 @@ describe('the write-result rule is importable without running the gate', () => {
     expect(trips('<span>{window.QUEUED_NOTICE}</span>')).toBe(true);
     expect(trips('window.heldWritesText(status, counts)')).toBe(true);
     expect(trips('window.queuedWritesNoun(1, 1)')).toBe(true);
+    // bc-mrgc: the kept-in-history copy and the partial-apply predicates.
+    expect(trips('window.writePartlyHeld(res)')).toBe(true);
+    expect(trips('window.writeHeldGroups(res)')).toBe(true);
+    expect(trips('<span>{window.SUPERSEDED_LEAD}</span>')).toBe(true);
+    expect(trips('window.supersededAlertText(1, true)')).toBe(true);
     expect(trips('<span>{QUEUED_NOTICE}</span>')).toBe(false);
     expect(trips('if (writeDidNotLand(res)) return;')).toBe(false);
   });

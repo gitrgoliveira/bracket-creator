@@ -56,6 +56,11 @@ const CHECK_MODULES = [
   // bc-offl: the topbar's held-writes indicator imports its copy from
   // write_result.jsx, the shell's one ES import.
   'admin_shell.jsx',
+  // bc-mrgc: the engi editor imports the change-group hook, and the History
+  // disclosure reads its words from four owners (bracket.jsx, result_slot.jsx,
+  // admin_scoring_shared.jsx, match_groups.jsx).
+  'admin_scoring_engi.jsx',
+  'match_history_view.jsx',
 ];
 
 // ---------------------------------------------------------------------------

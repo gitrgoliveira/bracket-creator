@@ -2040,7 +2040,10 @@ describe('recordScore: a superseded write is announced, not reported as saved (b
         // explicit "not saved" rather than clearing to look saved.
         expect(failures.length).toBe(1);
         expect(failures[0]).toMatchObject({ compID: 'c1', matchID: 'm1', kind: 'score' });
-        expect(failures[0].reason).toContain('newer result');
+        // bc-mrgc: kept in the match's history, so the banner leads "Not applied".
+        expect(failures[0].reason).toContain('newer change');
+        expect(failures[0].reason).toContain("kept in the match's history");
+        expect(failures[0].lead).toBe('Not applied');
         // The advice is the point: every OTHER write failure ends in "re-enter
         // the result", which here would overwrite the newer result that won.
         expect(failures[0].advice).toBeTruthy();

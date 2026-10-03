@@ -210,7 +210,7 @@ describe('team editor inline error surface', () => {
     await act(async () => { fireEvent.click(screen.getByTestId('scoring-modal-daihyosen-button')); });
 
     await waitFor(() => {
-      expect(failedBannerText()).toBe(`Not saved: ${SUPERSEDED_REASON}. ${SUPERSEDED_ADVICE}`);
+      expect(failedBannerText()).toBe(`Not applied: ${SUPERSEDED_REASON}. ${SUPERSEDED_ADVICE}`);
     });
     expect(window.API.recordDaihyosen).not.toHaveBeenCalled();
   });
@@ -222,7 +222,7 @@ describe('team editor inline error surface', () => {
     await act(async () => { fireEvent.click(screen.getByTestId('team-daihyosen-remove')); });
 
     await waitFor(() => {
-      expect(failedBannerText()).toBe(`Not saved: ${SUPERSEDED_REASON}. ${SUPERSEDED_ADVICE}`);
+      expect(failedBannerText()).toBe(`Not applied: ${SUPERSEDED_REASON}. ${SUPERSEDED_ADVICE}`);
     });
     expect(window.API.removeDaihyosen).not.toHaveBeenCalled();
   });

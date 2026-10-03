@@ -54,20 +54,52 @@ export function writeKeepsEditorOpen(patch, res) {
     return writeDidNotLand(res) || (!!patch && patch.status === "running" && !patch.winner);
 }
 
-// SUPERSEDED_REASON / SUPERSEDED_ADVICE: the copy for the one case where
-// re-entering is the wrong move (bc-lww1). Every OTHER write failure ends in
-// "re-enter the result", and here that is actively wrong: re-entering
+// SUPERSEDED_LEAD / SUPERSEDED_REASON / SUPERSEDED_ADVICE: the copy for the one
+// case where re-entering is the wrong move (bc-lww1). Every OTHER write failure
+// ends in "re-enter the result", and here that is actively wrong: re-entering
 // re-stamps the write with the current clock, so it would beat the newer
-// stored result and undo it. One owner for this string pair: api_client.jsx's
-// `_notifyScoreSuperseded` broadcast uses it, and so does notLandedBanner at
+// stored change and undo it. One owner for these strings: api_client.jsx's
+// `_notifyScoreSuperseded` broadcast uses them, and so does notLandedBanner at
 // the foot of this file -- the answer for every explicit-tap call site that
 // submits with status:"running", the shape that broadcast deliberately stays
 // silent for (a superseded autosave is routine noise; an operator tapping
 // "Start match" or "Record bout" and having it silently do nothing is not) and
 // which therefore builds this banner state from the awaited result instead of
 // relying on the subscription.
-export const SUPERSEDED_REASON = 'a newer result for this match is already recorded';
-export const SUPERSEDED_ADVICE = 'Check the recorded result before re-entering anything: re-submitting would overwrite the newer one.';
+//
+// bc-mrgc (operator ruling 2026-10-03: "Nothing should be dropped. All events
+// must be ordered."): a superseded write is no longer lost. The server merges
+// a write group by group, and a change older than a stored change to the same
+// thing is kept in the match's history instead of applied, so the banner
+// leads with "Not applied", not "Not saved", says nothing is lost, and sends
+// the operator to the match and its history before entering anything again.
+export const SUPERSEDED_LEAD = 'Not applied';
+export const SUPERSEDED_REASON = "a newer change to the same thing was recorded first, so this one was kept in the match's history and nothing is lost";
+export const SUPERSEDED_ADVICE = 'Check the match and its history before entering anything again: entering it again would replace the newer change.';
+
+// supersededAlertText: the queue alert for finished results a replay found
+// superseded (app.jsx queueAlertMessage), worded like the banner above. `n` is
+// how many, `one` whether that is a single result (queuedWritesNoun).
+export function supersededAlertText(n, one) {
+    return one
+        ? "A result was not applied because a newer change to the same match was recorded first. It was kept in the match's history, so nothing is lost: check the match and its history before entering anything again."
+        : `${n} results were not applied because newer changes to the same matches were recorded first. They were kept in each match's history, so nothing is lost: check those matches and their history before entering anything again.`;
+}
+
+// writeHeldGroups / writePartlyHeld (bc-mrgc): which groups of a write the
+// server kept in the match's history instead of applying it, because a newer
+// change to the same group was already recorded. The server lists them in
+// `heldGroups` on BOTH answers that can hold any: a write applied in part (the
+// rest landed, applied is not false) and a superseded one (nothing landed).
+// writePartlyHeld is the first of those alone, the one a score editor answers
+// with a quiet note while its flow carries on; a superseded write gets the
+// banner above instead (notLandedBanner).
+export function writeHeldGroups(res) {
+    return res && Array.isArray(res.heldGroups) ? res.heldGroups.filter((g) => typeof g === 'string') : [];
+}
+export function writePartlyHeld(res) {
+    return !!res && res.applied !== false && writeHeldGroups(res).length > 0;
+}
 
 // writeWasSuperseded: the STRONGER half. Both shapes above mean "not stored",
 // but they differ on whether the local optimistic state will still come true.
@@ -195,7 +227,7 @@ export function notLandedBanner(res) {
         return { reason: CLOCK_SKEW_REASON_TEXT, advice: CLOCK_SKEW_ADVICE };
     }
     if (writeWasSuperseded(res)) {
-        return { reason: SUPERSEDED_REASON, advice: SUPERSEDED_ADVICE };
+        return { lead: SUPERSEDED_LEAD, reason: SUPERSEDED_REASON, advice: SUPERSEDED_ADVICE };
     }
     return null;
 }
@@ -203,27 +235,32 @@ export function notLandedBanner(res) {
 // terminalFailureBanner: the banner a score editor raises for a queued write
 // that failed for good (subscribeTerminalWriteFailed), in the same shape as
 // notLandedBanner's, plus `sentence` when the refusal is a whole sentence that
-// says what to do (api_client.jsx _replayRefusal). One owner, so no editor drops the mark.
+// says what to do (api_client.jsx _replayRefusal), and `lead` when the write
+// was not lost (a superseded replay, kept in the match's history). One owner,
+// so no editor drops the mark.
 export function terminalFailureBanner(info) {
     return {
         reason: info.reason || `save rejected (${info.status || 'error'})`,
         advice: info.advice,
         ...(info.sentence ? { sentence: true } : {}),
+        ...(info.lead ? { lead: info.lead } : {}),
     };
 }
 
 // notSavedText: the ONE line every not-saved banner shows for a
-// { reason, advice, sentence } pair: "Not saved: <reason>. <advice>", with the
-// default advice to re-enter when none is given. A refusal that is a whole
+// { reason, advice, sentence, lead } set: "Not saved: <reason>. <advice>", with
+// the default advice to re-enter when none is given. A refusal that is a whole
 // sentence (`sentence`: the server's own words, or the busy-shiaijo copy) is
 // shown as it is after "Not saved:": it ends its own
 // sentence and says what to do, so a full stop and advice after it doubled the
 // stop and could contradict it ("Re-enter the result" after "Check the scores
-// and finish again").
+// and finish again"). `lead` replaces "Not saved" for a write that was kept
+// rather than lost (SUPERSEDED_LEAD, bc-mrgc).
 export const NOT_SAVED_ADVICE = "Re-enter the result and submit again.";
 export function notSavedText(failed) {
-    if (failed.sentence) return `Not saved: ${failed.reason}`;
-    return `Not saved: ${failed.reason}. ${failed.advice || NOT_SAVED_ADVICE}`;
+    const lead = failed.lead || 'Not saved';
+    if (failed.sentence) return `${lead}: ${failed.reason}`;
+    return `${lead}: ${failed.reason}. ${failed.advice || NOT_SAVED_ADVICE}`;
 }
 
 // QUEUED_NOTICE: the ONE line a score editor (and the barred-match notice)

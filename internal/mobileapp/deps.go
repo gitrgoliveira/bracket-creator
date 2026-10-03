@@ -68,6 +68,16 @@ type CompetitionStore interface {
 	LoadCompetitorStatus(compID string) (map[string]domain.CompetitorStatus, error)
 }
 
+// MatchHistoryStore is what the match-history read needs (bc-mrgc,
+// RegisterMatchHistoryHandler): the competition and the match, to answer 404
+// for one that does not exist, and the match's history itself. Mirrors
+// state.Store.
+type MatchHistoryStore interface {
+	LoadCompetition(id string) (*state.Competition, error)
+	MatchStatusByID(compID, matchID string) (state.MatchStatus, bool, error)
+	LoadMatchHistory(compID, matchID string) ([]state.MatchHistoryEntry, error)
+}
+
 // ScoringEngine is the consumer-boundary view of engine.Engine used by
 // the match-score handler family. Pre-Slice-0 the handlers held a
 // concrete `*engine.Engine`, which forced any handler test to spin up

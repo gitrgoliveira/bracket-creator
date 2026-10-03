@@ -35,12 +35,13 @@
 //   F5: Terminal writes (decision, completed score, lineup) durable via queue.
 
 import { normalizeCompetitionDetail, normalizePlayer, toBackendMatchResult, buildPlayerMetadata } from './api_serializers.jsx';
+import { unionChanged } from './match_groups.jsx';
 import { bridge as _bridge } from './court_bridge.jsx';
 // The offset lives in a leaf so a score editor can read the same clock (server_clock.jsx).
 import { serverNowMs, serverClockOffsetMs, setServerClockOffsetMs } from './server_clock.jsx';
 import {
     writeDidNotLand, writeWasSuperseded, writeWasRefusedForClock,
-    SUPERSEDED_REASON, SUPERSEDED_ADVICE,
+    SUPERSEDED_LEAD, SUPERSEDED_REASON, SUPERSEDED_ADVICE,
     CLOCK_SKEW_REASON_TEXT, CLOCK_SKEW_ADVICE, CLOCK_SKEW_UNHEALED_ADVICE,
     downstreamKnockoutPlayedQueueDrop, downstreamKnockoutRunningMessage, downstreamKnockoutRunningReopenMessage,
     downstreamKnockoutRunningQueueDrop, courtBusyMessage,
@@ -956,7 +957,7 @@ function _notifyScoreSupersededEditor(compID, matchID) {
     // since this broadcast is deliberately silent for that status. Same
     // strings, one owner, so a future wording change cannot paste the copy
     // anywhere a fourth time.
-    _notifyTerminalWriteFailed({ compID, matchID, kind: 'score', status: 200, reason: SUPERSEDED_REASON, advice: SUPERSEDED_ADVICE });
+    _notifyTerminalWriteFailed({ compID, matchID, kind: 'score', status: 200, lead: SUPERSEDED_LEAD, reason: SUPERSEDED_REASON, advice: SUPERSEDED_ADVICE });
 }
 
 // The ALERT half: reaches an operator who has already moved on to another
@@ -1695,6 +1696,21 @@ function enqueueRunningWrite(compID, matchID, payload, password) {
 // The queue entry for a running write, carrying a queued kachinukiBoutFinal
 // forward (enqueueRunningWrite's comment says why). Shared with the page-hide
 // copy of a write still being sent (_keepInflightRunning).
+// _claimingQueuedGroups (bc-mrgc): a score write that takes the place of a
+// queued score write for the same match carries the later state, so it must
+// also claim every group the one it replaces changed, or that change would
+// never be applied: the server applies only the groups a write names
+// (match_groups.jsx). Returns the payload with `changed` the union of both
+// (unionChanged: no list on either side means every group, and stays so), or
+// the payload untouched when there is no queued score write. A COPY, never a
+// mutation: the live fetch and _broadcastPatch share the caller's object.
+function _claimingQueuedGroups(prev, payload) {
+    if (!prev || prev.kind !== 'score' || !prev.payload || !payload) return payload;
+    const changed = unionChanged(prev.payload.changed, payload.changed);
+    const { changed: _own, ...rest } = payload;
+    return changed === undefined ? rest : { ...rest, changed };
+}
+
 function _runningDescriptor(compID, matchID, payload, password, enqueuedAt) {
     const prev = _writeQueue.get(_revKey(compID, matchID));
     if (prev && !prev.terminal && prev.kind === 'score'
@@ -1702,6 +1718,7 @@ function _runningDescriptor(compID, matchID, payload, password, enqueuedAt) {
         && payload && !payload.kachinukiBoutFinal) {
         payload = { ...payload, kachinukiBoutFinal: true };
     }
+    payload = _claimingQueuedGroups(prev, payload);
     return {
         compID, matchID, payload, password,
         kind: 'score', terminal: false,
@@ -1742,6 +1759,7 @@ function _withoutDownstreamConfirmation(payload) {
  * @param {string} matchID    - Match ID (for identity tracking)
  */
 function _enqueueTerminalWrite(key, kind, method, url, payload, password, compID, matchID) {
+    if (kind === 'score') payload = _claimingQueuedGroups(_writeQueue.get(key), payload);
     _commitEnqueue(key, {
         compID, matchID, payload: _withoutDownstreamConfirmation(payload), password,
         kind, terminal: true,
@@ -2781,6 +2799,18 @@ const API = {
         // the autosave goes out (its debounce, or the editor going away).
         payload.modifiedAt = _serverNowMs() - _editAge(result);
 
+        // bc-mrgc: a score write queued for this match is superseded by this
+        // one whichever way it goes (a landed completed write drains it, a
+        // landed running write leaves it to be dropped by the rev guard, a
+        // failed one replaces it in the queue), so this write carries the
+        // later state and must claim every group the queued one changed too.
+        const queuedScore = _writeQueue.get(_revKey(compID, matchID));
+        if (queuedScore && queuedScore.kind === 'score' && queuedScore.payload) {
+            const claimed = unionChanged(queuedScore.payload.changed, payload.changed);
+            if (claimed === undefined) delete payload.changed;
+            else payload.changed = claimed;
+        }
+
         // C2: stamp monotonic rev on running-status writes so the server's
         // rev-guard can drop out-of-order deliveries (e.g. from reconnect flush).
         // Completed writes do not need a rev: the guard is gated on status=running.
@@ -2822,10 +2852,11 @@ const API = {
         // sideBId so the display tab's normalizeMatch can resolve participants by
         // UUID rather than falling back to name-key lookup (which can mis-resolve
         // same-name participants). winnerId is already in rest when present.
-        // rev/revSession are stripped so internal write-ordering metadata is not
-        // propagated to the display tab.
+        // rev/revSession, and the groups the write names (`changed`, bc-mrgc),
+        // are stripped so internal write-ordering metadata is not propagated
+        // to the display tab.
         const _broadcastPatch = (fields) => {
-            const { rev: _r, revSession: _rs, ...rest } = fields || {};
+            const { rev: _r, revSession: _rs, changed: _ch, ...rest } = fields || {};
             const court = (match && match.court) || '';
             // Do not emit an unscoped (court-less) broadcast: a display can only
             // safely apply a patch it can attribute to its court, and the display
@@ -3725,6 +3756,22 @@ const API = {
     // participant id -- see internal/state/squad.go. Returns the whole
     // map ({ teamId: [{id, index, name}, …] }) since the lineup editor
     // needs its own team's list, not one member at a time.
+    // bc-mrgc: a match's write history, oldest change first: every write that
+    // reached the match, with the values of a change kept rather than applied
+    // because a newer change to the same thing was recorded first. An
+    // organiser read (main-gated in self-run); the score editors' History
+    // disclosure (match_history_view.jsx) is its one reader.
+    async fetchMatchHistory(compID, matchID, password) {
+        const res = await fetchWithTimeout(`/api/competitions/${encodeURIComponent(compID)}/matches/${encodeURIComponent(matchID)}/history`, {
+            headers: password ? { 'X-Tournament-Password': password } : {}
+        });
+        if (!res.ok) {
+            const err = await res.json().catch(() => ({}));
+            throw new Error(err.error || "Failed to load the match history");
+        }
+        const data = await res.json();
+        return Array.isArray(data) ? data : [];
+    },
     async fetchSquads(compID, password) {
         const res = await fetch(`/api/competitions/${compID}/team-members`, {
             headers: password ? { 'X-Tournament-Password': password } : {}

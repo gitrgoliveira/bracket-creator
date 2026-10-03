@@ -1214,7 +1214,7 @@ describe('bc-dhas: a refused add or remove is reported and changes nothing', () 
     await act(async () => { add.resolve({ applied: false, reason: 'superseded', message: 'Not saved.' }); });
     await settle();
 
-    expect(failedBanner()?.textContent).toBe(`Not saved: ${SUPERSEDED_REASON}. ${SUPERSEDED_ADVICE}`);
+    expect(failedBanner()?.textContent).toBe(`Not applied: ${SUPERSEDED_REASON}. ${SUPERSEDED_ADVICE}`);
     expect(screen.getByTestId('scoring-modal-daihyosen-button')).toBeTruthy();
     expect(screen.queryByTestId('team-daihyosen-remove')).toBeNull();
     expect(window.API.recordScore).toHaveBeenCalledTimes(1);

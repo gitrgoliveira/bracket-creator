@@ -7,7 +7,7 @@ import { setCachedAuthConfig } from './admin_helpers.jsx';
 import { LS_NOTIFICATIONS_ENABLED } from './notification_keys.jsx';
 import { bridge, setSnapshotProvider, setDisplayCourt, getLastBroadcastAt, applyPatchToTree, mergeSnapshotIntoTree, deriveLinkState, freshnessMs } from './court_bridge.jsx';
 import { BRANDING_DEFAULTS } from './admin_branding.jsx';
-import { queuedWritesNoun } from './write_result.jsx';
+import { queuedWritesNoun, supersededAlertText } from './write_result.jsx';
 
 const { useState: useS, useEffect: useE, useRef: useR, useCallback: useC } = React;
 
@@ -377,7 +377,7 @@ export function queueAlertMessage(alert) {
     // result that just won. A supersede is the one drop where re-entering is the
     // wrong move, so it gets its own wording.
     case "superseded":
-      return `${one ? "A result was" : `${n} results were`} not saved because a newer result is already recorded for the same ${one ? "match" : "matches"}. Check what is recorded before re-entering anything.`;
+      return supersededAlertText(n, one);
     case "server_error":
       return `The server keeps refusing a queued result${detail}. It is still queued and still retrying, so keep this tab open.`;
     case "auth_required":

@@ -3147,6 +3147,42 @@ paths:
         '200':
           description: Court updated.
 
+  /api/competitions/{id}/matches/{mid}/history:
+    get:
+      tags: [matches]
+      summary: A match's write history
+      description: >
+        Every write that reached the match, applied or not, in the order the
+        changes were MADE: by each entry's `stamp`, oldest first, an unstamped
+        write placed at its `receivedAt`, ties in arrival order (bc-mrgc). A
+        change the merge did not apply, because a newer change to the same
+        group was already recorded, is kept here with its value (`held`), so
+        nothing an operator entered is lost. The score editors show it in a
+        History disclosure. An organiser view: in a self-run tournament it
+        stays behind the main password.
+      security:
+        - TournamentPassword: []
+      parameters:
+        - $ref: '#/components/parameters/CompetitionId'
+        - $ref: '#/components/parameters/MatchId'
+      responses:
+        '200':
+          description: The match's history; an empty array when it has none.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/MatchHistoryEntry'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          description: Missing or incorrect tournament password.
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
   /api/competitions/{id}/matches/{mid}/override-winner:
     put:
       tags: [matches]
@@ -4989,6 +5025,54 @@ components:
           description: >
             Present on `superseded`: the groups the write changes, every one
             of them held and kept in the match's history.
+
+    MatchHistoryEntry:
+      type: object
+      description: >
+        One write that reached a match (bc-mrgc): what made it, when the change
+        was made, the groups it changed and, per group, whether it was applied
+        or kept in the history because a newer change to that group was
+        already recorded.
+      properties:
+        matchId:
+          type: string
+        door:
+          type: string
+          description: >
+            What made the write: score, bulk-score, quick-score, decision,
+            daihyosen-add, daihyosen-remove, reopen, requeue, override-winner,
+            engi, kachinuki-advance, kachinuki-remove-bout, downstream-reopen,
+            or engine for a write the server made itself.
+          example: score
+        stamp:
+          type: integer
+          format: int64
+          description: When the change was made (the write's modifiedAt, server-relative unix ms); 0 for an unstamped write.
+        receivedAt:
+          type: integer
+          format: int64
+          description: When the server took the write (unix ms).
+        session:
+          type: string
+          description: The client scoring session, when the write named one.
+        changed:
+          type: array
+          items:
+            $ref: '#/components/schemas/MergeGroup'
+        outcomes:
+          type: object
+          description: Per group the write changed, `applied`, `unchanged` (applied, equal to the stored value) or `held` (kept here, not applied).
+          additionalProperties:
+            type: string
+            enum: [applied, unchanged, held]
+        held:
+          type: object
+          description: The value of every held group, as the write carried it, keyed by MergeGroup.
+          additionalProperties: {}
+        clearedWithdrawal:
+          type: object
+          description: The withdrawal or default win a later scoring change cleared (the result group as it was), when one was.
+          additionalProperties: {}
 
     MergeGroup:
       type: string

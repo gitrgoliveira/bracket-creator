@@ -5437,6 +5437,34 @@ button.vsched-item:not([data-clickable]) {
   margin: 0 0 8px;
 }
 
+/* A match's write history (bc-mrgc), closed by default in the score editors'
+   footer: one line per write, oldest first, with any change kept rather than
+   applied set under it. Quiet like .sb-hint: it is a record to consult. */
+.match-history {
+  margin: 6px 0 0;
+  text-align: left;
+}
+.match-history__body {
+  margin-top: 4px;
+  font-size: 12px;
+  color: var(--ink-2);
+}
+.match-history__list {
+  margin: 0;
+  padding-left: 18px;
+}
+.match-history__entry {
+  margin: 2px 0;
+}
+.match-history__time {
+  font-family: var(--font-mono);
+  color: var(--ink-3);
+}
+.match-history__held,
+.match-history__note {
+  color: var(--ink-3);
+}
+
 /* Why a bout side's Fusensho refused, shown under that side after a tap on
    the refused button (a title never shows on a touchscreen). */
 .tsm-fusensho-why {

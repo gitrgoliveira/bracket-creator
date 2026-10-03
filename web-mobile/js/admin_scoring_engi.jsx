@@ -22,7 +22,8 @@
 const { useState: useStateE, useEffect: useEffectE, useRef: useRefE } = React;
 
 import { ReasonPrompt, CORRECTION_PRESETS, useAdoptFromServer } from './admin_scoring_shared.jsx';
-import { SyncStatusPill, useDebouncedRunningWrite } from './admin_scoring_autosave.jsx';
+import { SyncStatusPill, useDebouncedRunningWrite, useChangedGroups, useKeptInHistoryNote, KeptInHistoryNote } from './admin_scoring_autosave.jsx';
+import { MatchHistoryDisclosure } from './match_history_view.jsx';
 import { useEscapeToClose, confirmDialog } from './ui.jsx';
 // NumberedName: single owner of the number-chip-on-the-outer-side rule.
 import { NumberedName } from './numbered_name.jsx';
@@ -91,8 +92,11 @@ function deriveWinner(flagsA, flagsB) {
 // EngiScoreEditorModal: full engi flag-counter editor.
 // Props mirror the individual ScoreEditorModal surface so the dispatch in
 // admin_scoring_individual.jsx can forward the same prop bag.
-export function EngiScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, prevMatch, nextMatch, onPrev, onNext, variant = "modal", canClose = true }) {
+export function EngiScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, prevMatch, nextMatch, onPrev, onNext, variant = "modal", canClose = true, password, selfReport }) {
   const m = match;
+  // bc-mrgc: names the groups each write changes, against the match this
+  // editor renders from (see useChangedGroups).
+  const claimChanged = useChangedGroups(m);
   const isComplete = m.status === "completed";
   const initialFlagsA = m.flagsA || 0;
   const initialFlagsB = m.flagsB || 0;
@@ -124,13 +128,16 @@ export function EngiScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext
   const autosaveIsRunningRef = useRefE(false);
   const autosaveBuildPatchRef = useRefE(null);
   const autosaveOnSubmitRef = useRefE(null);
+  // bc-mrgc: what a write applied only in part kept in the match's history.
+  const keptInHistory = useKeptInHistoryNote();
   const { markDirty, cancelDebounce } = useDebouncedRunningWrite({
     isRunningRef: autosaveIsRunningRef,
     buildPatchRef: autosaveBuildPatchRef,
     onSubmitRef: autosaveOnSubmitRef,
+    onWriteResult: keptInHistory.noteFromWrite,
   });
   autosaveIsRunningRef.current = m.status === "running";
-  autosaveBuildPatchRef.current = (status) => ({ flagsA, flagsB, status });
+  autosaveBuildPatchRef.current = (status) => claimChanged({ flagsA, flagsB, status });
   autosaveOnSubmitRef.current = onSubmit;
   // An operator change to either count: the value, then the save it schedules.
   // A count adopted from the server does not come through here. A key pressed
@@ -224,6 +231,7 @@ export function EngiScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext
       if (mountedRef.current) { setErr(e?.message || "Save failed"); setSubmitting(false); }
       return;
     }
+    keptInHistory.noteFromWrite(res);
     // A refused save (writeWasRefused: the host reported it and handed back
     // nothing, or superseded / clock_skew) re-enables the controls and
     // disarms Save: left armed, one tap re-sent the write just refused. It
@@ -311,7 +319,7 @@ export function EngiScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext
   // once confirmed via ReasonPrompt, so a retry after a failed first attempt
   // (operator clicks "Save correction" again without reopening the prompt) must
   // still carry it: otherwise the retry silently drops the audit reason.
-  const buildPayload = () => ({ flagsA, flagsB, status: "completed", ...(correctionReason ? { correctionReason } : {}) });
+  const buildPayload = () => claimChanged({ flagsA, flagsB, status: "completed", ...(correctionReason ? { correctionReason } : {}) });
   const handleSubmit = () => {
     if (!canSubmit) return;
     if (isComplete && !correctionReason) {
@@ -533,7 +541,8 @@ export function EngiScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext
               setCorrectionReason(r);
               setShowCorrectionPrompt(false);
               // A correction saves the current match only (never advance).
-              doSubmit(() => onSubmit({ flagsA, flagsB, status: "completed", correctionReason: r }));
+              const patch = claimChanged({ flagsA, flagsB, status: "completed", correctionReason: r });
+              doSubmit(() => onSubmit(patch));
             }}
             onCancel={() => setShowCorrectionPrompt(false)}
           />
@@ -547,6 +556,10 @@ export function EngiScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext
             <span>{notSavedText(writeFailed)}</span>
           </div>
         )}
+        <KeptInHistoryNote note={keptInHistory.note} />
+        {/* bc-mrgc: every write that reached this match, kept or applied.
+            The organiser's view, so not on a self-run participant's sheet. */}
+        <MatchHistoryDisclosure match={m} password={password} hidden={!!selfReport} />
         {/* F5: pending-write banner: a terminal submit was only queued (offline
             / transient). The write is durable in localStorage and auto-retries;
             the operator may still retry manually while we hold the payload. */}

@@ -9,7 +9,11 @@ import {
   DOWNSTREAM_KNOCKOUT_PLAYED_CANCELLED,
   attemptScoreWrite,
   downstreamKnockoutReopenedNotice,
+  writePartlyHeld,
+  writeHeldGroups,
+  writeKeepsEditorOpen,
 } from './write_result.jsx';
+import { heldGroupsNote } from './match_groups.jsx';
 
 const { useState: useStateA, useEffect: useEffectA, useRef: useRefA } = React;
 
@@ -324,6 +328,13 @@ function AdminApp({ tournament, onUpdate, onLogout, onViewerMode, onPasswordChan
     if (saveRes && saveRes.downstreamReopened) {
       const notice = downstreamKnockoutReopenedNotice(saveRes.downstreamReopened);
       if (notice) showToast(notice);
+    }
+    // bc-mrgc: a write applied in part, the rest kept in the match's history
+    // because a newer change to it was recorded first. An editor that stays
+    // open says so itself (useKeptInHistoryNote); one this write closes
+    // cannot, so the note is the toast here.
+    if (writePartlyHeld(saveRes) && !writeKeepsEditorOpen(result, saveRes)) {
+      showToast(heldGroupsNote(writeHeldGroups(saveRes)));
     }
     // F5: when the write was only queued (offline/transient), skip the
     // best-effort refresh. There is nothing new on the server yet.

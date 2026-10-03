@@ -46,7 +46,8 @@ import {
 import { isBarredMatch } from './ineligible_match.jsx';
 import { isOlderRunningCopy } from './patch.jsx';
 
-import { useDebouncedRunningWrite, SyncStatusPill } from './admin_scoring_autosave.jsx';
+import { useDebouncedRunningWrite, SyncStatusPill, useChangedGroups, useKeptInHistoryNote, KeptInHistoryNote } from './admin_scoring_autosave.jsx';
+import { MatchHistoryDisclosure } from './match_history_view.jsx';
 import { serverNowMs } from './server_clock.jsx';
 import { SideLabel } from './side_cell.jsx';
 
@@ -914,6 +915,9 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
   const matchRef = useRefA(match);
   matchRef.current = match;
   const m = matchOverride?.match || match;
+  // bc-mrgc: names the groups each write changes, against the match this
+  // editor renders from (see useChangedGroups).
+  const claimChanged = useChangedGroups(m);
   const isComplete = m.status === "completed";
   // Kachinuki appends bouts beyond teamSize (engine assigns Position =
   // len(SubResults)+1, up to 2*roster-1 bouts), so size the grid to cover every
@@ -1183,6 +1187,8 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
   const _autosaveIsRunningRef = useRefA(false);
   const _autosaveBuildPatchRef = useRefA(null);
   const _autosaveOnSubmitRef = useRefA(null);
+  // bc-mrgc: what a write applied only in part kept in the match's history.
+  const keptInHistory = useKeptInHistoryNote();
   const {
     markDirty: markScoringDirty,
     cancelDebounce: cancelScoringDebounce,
@@ -1192,6 +1198,7 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
     isRunningRef: _autosaveIsRunningRef,
     buildPatchRef: _autosaveBuildPatchRef,
     onSubmitRef: _autosaveOnSubmitRef,
+    onWriteResult: keptInHistory.noteFromWrite,
   });
   // Release the hold once a representative-bout add or remove has settled
   // (daihyosenBusy's true->false edge). The `finally` that clears the flag
@@ -2507,7 +2514,14 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
   const kachinukiRowSent = (idx) =>
     subBoutHasBeenPlayed(subs[idx]) || idx === kachinukiCurBoutIdx || idx === editingDoneBoutIdx
     || subBoutHasBeenPlayed(serverSubs[idx]);
+  // bc-mrgc: every patch this editor hands its host names the groups it
+  // changes (useChangedGroups), worked out with the correction reason given at
+  // the prompt (opts.correctionReason) as part of the write.
   const buildPatch = (targetStatus, opts = {}) => {
+    const fields = buildPatchFields(targetStatus, opts);
+    return claimChanged(opts.correctionReason ? { ...fields, correctionReason: opts.correctionReason } : fields);
+  };
+  const buildPatchFields = (targetStatus, opts = {}) => {
     if (targetStatus === "scheduled") return { winner: null, status: "scheduled", score: null, ipponsA: [], ipponsB: [], subResults: [] };
     // ONE preserve verdict for this save: the sub-row overlay and the
     // match-level winner below must agree by construction.
@@ -2816,6 +2830,7 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
     } finally {
       if (mountedRef.current) setSubmitting(false);
     }
+    keptInHistory.noteFromWrite(res);
     // A refused write disarms the two-tap commits (writeWasRefused): left
     // armed, one tap re-sent the write just refused. A queued one stays armed.
     if (writeWasRefused(res) && mountedRef.current) {
@@ -4145,7 +4160,7 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
               onConfirm={(r) => {
                 setCorrectionReason(r);
                 setReasonPromptKind("");
-                const patch = { ...buildPatch("completed"), correctionReason: r };
+                const patch = buildPatch("completed", { correctionReason: r });
                 doSubmit(() => onSubmit(patch));
               }}
               onCancel={() => setReasonPromptKind("")}
@@ -4232,6 +4247,10 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
               <span>{notSavedText(writeFailed)}</span>
             </div>
           )}
+          <KeptInHistoryNote note={keptInHistory.note} />
+          {/* bc-mrgc: every write that reached this match, kept or applied.
+              The organiser's view, so not on a self-run participant's sheet. */}
+          <MatchHistoryDisclosure match={m} password={password} hidden={!!selfReport} />
           {/* bc-cse: a barred match cannot be started as scheduled -- the
               server would just refuse it -- so the ONE component that shows
               why and offers the default-win/reinstate resolution

@@ -12,11 +12,14 @@ describe('queueAlertMessage', () => {
     it('tells the operator NOT to simply re-enter a superseded result', () => {
         const msg = queueAlertMessage({ kind: 'superseded', count: 1, terminalCount: 1 });
         expect(msg).toBeTruthy();
-        expect(msg).toMatch(/not saved/i);
-        expect(msg).toMatch(/newer result/i);
+        // bc-mrgc: the result is kept in the match's history, not lost.
+        expect(msg).toMatch(/not applied/i);
+        expect(msg).toMatch(/newer change/i);
+        expect(msg).toMatch(/kept in the match's history/i);
+        expect(msg).toMatch(/nothing is lost/i);
         // The distinguishing instruction. 'rejected' says "Re-enter it."; this
         // must not, or the advice actively causes the data loss it reports.
-        expect(msg).toMatch(/check what is recorded/i);
+        expect(msg).toMatch(/check the match and its history/i);
         expect(msg).not.toMatch(/^.*\bRe-enter it\.\s*$/i);
     });
 
@@ -43,7 +46,8 @@ describe('queueAlertMessage', () => {
 
     it('pluralises a superseded batch', () => {
         const msg = queueAlertMessage({ kind: 'superseded', count: 3, terminalCount: 3 });
-        expect(msg).toMatch(/3 results were not saved/i);
+        expect(msg).toMatch(/3 results were not applied/i);
+        expect(msg).toMatch(/kept in each match's history/i);
         expect(msg).toMatch(/matches/i);
     });
 

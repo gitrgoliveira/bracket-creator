@@ -264,6 +264,9 @@ func TestSelfRun_SelfRunMode_CompetitionConfigRoutes_RequireMainPassword(t *test
 		{http.MethodGet, "/api/competitions/some-id/team-members"},
 		// bc-pnum: clearing a member's name is the operator's "removal".
 		{http.MethodDelete, "/api/competitions/some-id/teams/some-team/members/some-member"},
+		// bc-mrgc: a match's write history, held values included, is the
+		// score editors' organiser view; the public page never reads it.
+		{http.MethodGet, "/api/competitions/some-id/matches/some-match/history"},
 	}
 
 	for _, tc := range configRoutes {

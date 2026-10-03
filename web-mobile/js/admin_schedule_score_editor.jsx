@@ -22,6 +22,7 @@ import { isBarredMatch, sideBarredByDecision, involvesCompetitor } from './ineli
 // matters for this file's own render suite.
 import { BarredMatchNotice } from './barred_match_notice.jsx';
 import { matchShowsScore } from './match_shows_score.jsx';
+import { GROUP_RESULT } from './match_groups.jsx';
 
 const { useState: useStateA, useMemo: useMemoA, useEffect: useEffectA, useRef: useRefA } = React;
 
@@ -89,9 +90,14 @@ function ScoreEditCourtBtn({ m, courts, onMoveCourt }) {
 // toBackendMatchResult leaves the empty scoreline below off the wire. The
 // editors' own Start sends their board unflagged, so an operator who cleared
 // every mark still clears it.
+//
+// bc-mrgc: a start changes the status and nothing else, so it names the result
+// group alone (match_groups.jsx): the server keeps every other group of the
+// match as stored, the score a send-back kept included.
 export function startPatch() {
   return {
     startOnly: true,
+    changed: [GROUP_RESULT],
     status: "running", winner: null, ipponsA: [], ipponsB: [], hansokuA: 0, hansokuB: 0,
     score: { type: "ippon", winnerPts: 0, loserPts: 0, ippons: [], fouls: { a: 0, b: 0 }, live: true, corrected: false },
   };

@@ -70,7 +70,7 @@ describe('EngiScoreEditorModal orientation', () => {
     // Save is a two-tap guard: the first tap arms it, the second saves.
     fireEvent.click(screen.getByTestId('engi-submit'));
     fireEvent.click(screen.getByTestId('engi-submit'));
-    expect(onSubmit).toHaveBeenCalledWith({ flagsA: 3, flagsB: 0, status: 'completed' });
+    expect(onSubmit).toHaveBeenCalledWith({ flagsA: 3, flagsB: 0, status: 'completed', changed: ['result', 'flags'] });
   });
 
   it('highlights the Aka box as winner when flagsA > flagsB', () => {
@@ -107,13 +107,13 @@ describe('EngiScoreEditorModal correction retry (Copilot review: PR #326)', () =
     fireEvent.click(screen.getByText('Confirm'));
 
     await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(1));
-    expect(onSubmit).toHaveBeenNthCalledWith(1, { flagsA: 3, flagsB: 0, status: 'completed', correctionReason: 'Scoring error' });
+    expect(onSubmit).toHaveBeenNthCalledWith(1, { flagsA: 3, flagsB: 0, status: 'completed', correctionReason: 'Scoring error', changed: ['result'] });
 
     // Retry: correctionReason is already set in state, so this click skips
     // the ReasonPrompt gate and goes straight to doSubmit.
     fireEvent.click(screen.getByTestId('engi-submit'));
     await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(2));
-    expect(onSubmit).toHaveBeenNthCalledWith(2, { flagsA: 3, flagsB: 0, status: 'completed', correctionReason: 'Scoring error' });
+    expect(onSubmit).toHaveBeenNthCalledWith(2, { flagsA: 3, flagsB: 0, status: 'completed', correctionReason: 'Scoring error', changed: ['result'] });
   });
 });
 
@@ -128,7 +128,7 @@ describe('EngiScoreEditorModal Finish + Start Next (impeccable critique P2)', ()
     fireEvent.click(submit);
     expect(submit.textContent).toBe('Tap again to finish →');
     fireEvent.click(submit);
-    await waitFor(() => expect(onSubmitAndNext).toHaveBeenCalledWith({ flagsA: 3, flagsB: 0, status: 'completed' }));
+    await waitFor(() => expect(onSubmitAndNext).toHaveBeenCalledWith({ flagsA: 3, flagsB: 0, status: 'completed', changed: ['result'] }));
     expect(onSubmit).not.toHaveBeenCalled();
   });
 
@@ -141,7 +141,7 @@ describe('EngiScoreEditorModal Finish + Start Next (impeccable critique P2)', ()
     expect(submit.textContent).toContain('Save correction');
     fireEvent.click(submit); // opens ReasonPrompt
     fireEvent.click(screen.getByText('Confirm'));
-    await waitFor(() => expect(onSubmit).toHaveBeenCalledWith({ flagsA: 3, flagsB: 0, status: 'completed', correctionReason: 'Scoring error' }));
+    await waitFor(() => expect(onSubmit).toHaveBeenCalledWith({ flagsA: 3, flagsB: 0, status: 'completed', correctionReason: 'Scoring error', changed: ['result'] }));
     expect(onSubmitAndNext).not.toHaveBeenCalled();
   });
 
@@ -193,7 +193,7 @@ describe('EngiScoreEditorModal keyboard flag entry (impeccable critique P2/P3)',
     expect(screen.getByTestId('engi-aka-count').textContent).toBe('3');
     expect(screen.getByTestId('engi-shiro-count').textContent).toBe('2');
     fireEvent.keyDown(document.body, { key: 'Enter' });
-    await waitFor(() => expect(onSubmit).toHaveBeenCalledWith({ flagsA: 3, flagsB: 2, status: 'completed' }));
+    await waitFor(() => expect(onSubmit).toHaveBeenCalledWith({ flagsA: 3, flagsB: 2, status: 'completed', changed: ['result', 'flags'] }));
   });
 
   it('does not hijack typing inside a text field (reason note)', () => {
@@ -230,7 +230,7 @@ describe('EngiScoreEditorModal offline safety net (impeccable critique P2)', () 
     // Retry now re-invokes the same payload.
     fireEvent.click(screen.getByText('Retry now'));
     await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(2));
-    expect(onSubmit).toHaveBeenNthCalledWith(2, { flagsA: 3, flagsB: 0, status: 'completed' });
+    expect(onSubmit).toHaveBeenNthCalledWith(2, { flagsA: 3, flagsB: 0, status: 'completed', changed: ['result'] });
   });
 });
 
@@ -425,7 +425,7 @@ describe('EngiScoreEditorModal saves flags as they are entered', () => {
     fireEvent.click(screen.getByTestId('engi-shiro-inc'));
     await act(async () => { vi.advanceTimersByTime(400); });
     expect(onSubmit).toHaveBeenCalledTimes(1);
-    expect(onSubmit).toHaveBeenCalledWith({ flagsA: 1, flagsB: 1, status: 'running', editedPerf: expect.any(Number) });
+    expect(onSubmit).toHaveBeenCalledWith({ flagsA: 1, flagsB: 1, status: 'running', editedPerf: expect.any(Number), changed: ['flags'] });
   });
 
   it('a keyboard change saves too', async () => {
@@ -433,7 +433,7 @@ describe('EngiScoreEditorModal saves flags as they are entered', () => {
     render(<EngiScoreEditorModal match={makeMatch({ status: 'running' })} onClose={() => {}} onSubmit={onSubmit} />);
     await act(async () => { fireEvent.keyDown(window, { key: 's' }); });
     await act(async () => { vi.advanceTimersByTime(400); });
-    expect(onSubmit).toHaveBeenCalledWith({ flagsA: 0, flagsB: 1, status: 'running', editedPerf: expect.any(Number) });
+    expect(onSubmit).toHaveBeenCalledWith({ flagsA: 0, flagsB: 1, status: 'running', editedPerf: expect.any(Number), changed: ['flags'] });
   });
 
   it('a match not yet started writes nothing until the result is saved', async () => {
@@ -452,7 +452,7 @@ describe('EngiScoreEditorModal saves flags as they are entered', () => {
     view = render(<EngiScoreEditorModal match={makeMatch({ status: 'running' })} onClose={onClose} onSubmit={onSubmit} />);
     fireEvent.click(screen.getByTestId('engi-aka-inc'));
     await act(async () => { fireEvent.click(screen.getByTestId('engi-close-btn')); });
-    expect(onSubmit).toHaveBeenCalledWith({ flagsA: 1, flagsB: 0, status: 'running', editedPerf: expect.any(Number) });
+    expect(onSubmit).toHaveBeenCalledWith({ flagsA: 1, flagsB: 0, status: 'running', editedPerf: expect.any(Number), changed: ['flags'] });
     expect(onClose).toHaveBeenCalled();
   });
 });
@@ -476,7 +476,7 @@ describe('a flag change inside the autosave window survives Prev/Next', () => {
     await act(async () => { goNext(); });
     await act(async () => { vi.advanceTimersByTime(400); });
     expect(onNext).toHaveBeenCalledTimes(1);
-    expect(onSubmit).toHaveBeenCalledWith({ flagsA: 1, flagsB: 0, status: 'running', editedPerf: expect.any(Number) });
+    expect(onSubmit).toHaveBeenCalledWith({ flagsA: 1, flagsB: 0, status: 'running', editedPerf: expect.any(Number), changed: ['flags'] });
   });
 });
 
@@ -509,7 +509,7 @@ describe('bc-dtfn: the engi Save is a two-tap guard, as Finish is in the other e
     await act(async () => { vi.advanceTimersByTime(TAP_BOUNCE_MS + 50); });
     await pointerTap(save);
     expect(onSubmit).toHaveBeenCalledTimes(1);
-    expect(onSubmit).toHaveBeenCalledWith({ flagsA: 3, flagsB: 0, status: 'completed' });
+    expect(onSubmit).toHaveBeenCalledWith({ flagsA: 3, flagsB: 0, status: 'completed', changed: ['result'] });
   });
 
   it('a flag change disarms it', async () => {

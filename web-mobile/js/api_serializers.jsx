@@ -159,6 +159,12 @@ function toBackendMatchResult(patch, match) {
     // of one refusal, so a queued copy keeps it and its replay still means it.
     // Omitted unless true, so a plain correction carries no such key.
     if (patch.clearWithdrawal) result.clearWithdrawal = true;
+    // bc-mrgc: the groups this write changes (match_groups.jsx), computed by
+    // the editor when it built the patch (changedGroupsFor below). The server
+    // applies only these and keeps every other group as stored. Absent means
+    // "every group the payload carries", which is what a write that names
+    // none has always meant. Copied, so a later union never edits the patch.
+    if (Array.isArray(patch.changed)) result.changed = [...patch.changed];
     if (patch.subResults) {
         // Same conversion per bout: a sub carrying the editor's boolean (the
         // daihyosen editor states it unconditionally) has it folded into the
@@ -232,6 +238,35 @@ function toBackendMatchResult(patch, match) {
             winnerId, sideAId, sideBId);
     }
     return result;
+}
+
+// matchWire: the wire shape a match the client holds (normalizeMatch's shape)
+// serialises to, through the SAME toBackendMatchResult a write goes through
+// (bc-mrgc). It is the baseline a write's `changed` is worked out against
+// (match_groups.jsx changedGroups): comparing a write with the copy it was
+// built from only means anything when both are read the same way, so a
+// placeholder slot, the Ht mark's placement, a winner held as an object, or
+// a status the client spells differently never reads as a change.
+function matchWire(m) {
+    if (!m) return null;
+    const asPatch = {
+        status: m.status || "scheduled",
+        winner: m.winner || null,
+        decision: m.decision || "",
+        ipponsA: Array.isArray(m.ipponsA) ? m.ipponsA : [],
+        ipponsB: Array.isArray(m.ipponsB) ? m.ipponsB : [],
+        hansokuA: m.hansokuA ?? 0,
+        hansokuB: m.hansokuB ?? 0,
+        decidedByHantei: !!m.decidedByHantei,
+    };
+    if (m.correctionReason) asPatch.correctionReason = m.correctionReason;
+    if (m.encho) asPatch.encho = m.encho;
+    if (m.flagsA != null) asPatch.flagsA = m.flagsA;
+    if (m.flagsB != null) asPatch.flagsB = m.flagsB;
+    if (m.repPlayerA) asPatch.repPlayerA = m.repPlayerA;
+    if (m.repPlayerB) asPatch.repPlayerB = m.repPlayerB;
+    if (Array.isArray(m.subResults)) asPatch.subResults = m.subResults;
+    return toBackendMatchResult(asPatch, m);
 }
 
 // Normalize a backend match (string sideA/sideB) into UI shape (object sideA/sideB).
@@ -525,7 +560,7 @@ function normalizeCompetitionDetail(data) {
     return result;
 }
 
-export { toBackendStatus, isHikiwake, isKikenDecision, toBackendMatchResult, normalizeMatch, buildPlayerMap, normalizePlayer, normalizeCompetitionDetail, buildPlayerMetadata };
+export { toBackendStatus, isHikiwake, isKikenDecision, toBackendMatchResult, matchWire, normalizeMatch, buildPlayerMap, normalizePlayer, normalizeCompetitionDetail, buildPlayerMetadata };
 
 if (typeof window !== 'undefined') {
     window.toBackendStatus = toBackendStatus;

@@ -139,3 +139,40 @@ func TestWithdrawalClearedByCorrection_KnockoutSeatsTheRealWinner(t *testing.T) 
 	assert.Empty(t, b.Rounds[1][0].Winner, "the final is reopened for re-entry")
 	assert.True(t, wrEligible(t, store, compID, wrTeamAID))
 }
+
+// A default win (fusensho) recorded on a match because its competitor was
+// barred by ANOTHER match records no bar of its own, so clearing it restores
+// nobody: the real result is saved and the competitor stays barred by the
+// match that barred them.
+func TestWithdrawalClearedByCorrection_DefaultWinKeepsTheBarFromElsewhere(t *testing.T) {
+	eng, store, _ := setupTestEngine(t)
+	const compID = "wr-fusensho"
+	createTestCompetition(t, store, compID, "league", 3)
+	wrSaveTeams(t, store, compID)
+	require.NoError(t, store.SavePoolMatches(compID, []state.MatchResult{
+		{ID: "Pool A-0", SideA: wrTeamA, SideAID: wrTeamAID, SideB: wrTeamB, SideBID: wrTeamBID, Status: state.MatchStatusRunning},
+		{ID: "Pool A-1", SideA: wrTeamA, SideAID: wrTeamAID, SideB: wrTeamC, SideBID: wrTeamCID, Status: state.MatchStatusRunning},
+	}))
+	// Ryu withdraws in Pool A-1, then Tora is given the default win in Pool A-0.
+	_, _, err := eng.RecordDecision(compID, "Pool A-1", "kiken-voluntary", "aka", "", nil, false)
+	require.NoError(t, err)
+	_, _, err = eng.RecordDecision(compID, "Pool A-0", "fusensho", "aka", "", nil, false)
+	require.NoError(t, err)
+	require.Equal(t, "fusensho", wrPoolMatch(t, store, compID).Decision)
+
+	_, err = eng.RecordMatchResultWithIneligibility(compID, "Pool A-0", &state.MatchResult{
+		ID: "Pool A-0", SideA: wrTeamA, SideB: wrTeamB, Winner: wrTeamA, WinnerID: wrTeamAID,
+		IpponsA: []string{"M", "K"}, IpponsB: []string{"K"},
+		Status: state.MatchStatusCompleted, ClearsWithdrawal: true,
+	})
+	require.NoError(t, err)
+
+	m := wrPoolMatch(t, store, compID)
+	assert.Equal(t, "", m.Decision, "the default win is replaced by the real result")
+	assert.Equal(t, wrTeamA, m.Winner)
+	statuses, err := store.LoadCompetitorStatus(compID)
+	require.NoError(t, err)
+	require.Contains(t, statuses, wrTeamAID)
+	assert.False(t, statuses[wrTeamAID].Eligible, "Ryu is still barred")
+	assert.Equal(t, "Pool A-1", statuses[wrTeamAID].MatchID, "by the match that barred them")
+}

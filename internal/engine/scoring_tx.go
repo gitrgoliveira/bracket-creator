@@ -947,6 +947,15 @@ func (e *Engine) recordDecisionTx(tx state.StoreTx, compID, matchID, decision, d
 	if err != nil {
 		return nil, nil, err
 	}
+	// A stale decision (an offline replay older than the stored match) is
+	// superseded before anything judges it: the write below would drop it by
+	// this same comparison (applyMatchWrite), so the refusals that follow
+	// (already barred, a running later match, the T103 lock) would only
+	// misreport it as something to resolve and send again, when a newer
+	// result is already stored and re-entering would overwrite it.
+	if !domain.ApplyByTimestamp(modifiedAtStamp, prior.ModifiedAt) {
+		return nil, nil, ErrMatchSuperseded
+	}
 	sideA, sideB := prior.SideA, prior.SideB
 	sideAID, sideBID := prior.SideAID, prior.SideBID
 
@@ -996,7 +1005,7 @@ func (e *Engine) recordDecisionTx(tx state.StoreTx, compID, matchID, decision, d
 	}
 	// bc-rfsw: refused BEFORE the T103 lock below, so the operator is never
 	// asked to confirm a write the bracket write would then refuse.
-	if err := refuseDecisionReachingRunningMatch(tx, compID, matchID, decisionBy, prior, modifiedAtStamp); err != nil {
+	if err := refuseDecisionReachingRunningMatch(tx, compID, matchID, decisionBy, prior); err != nil {
 		return nil, nil, err
 	}
 	// T103: downstream-match check. The contract scope is "either
@@ -1092,10 +1101,9 @@ func (e *Engine) recordDecisionTx(tx state.StoreTx, compID, matchID, decision, d
 // would be refused (operator decision 2026-09-27). It asks the score door's
 // own rules (propagatedWinnerOf, winnerDiffers, downstreamCorrectionRefusal
 // with force, so only the running half applies) rather than a copy of them.
-// A stale decision (an offline replay older than the stored match) is not
-// judged here, exactly as the score door skips its guard for one: the write
-// itself then reports it superseded rather than refused.
-func refuseDecisionReachingRunningMatch(tx state.StoreTx, compID, matchID, decisionBy string, prior *state.MatchResult, modifiedAtStamp int64) error {
+// A stale decision never reaches it: recordDecisionTx answers one superseded
+// before any of its refusals.
+func refuseDecisionReachingRunningMatch(tx state.StoreTx, compID, matchID, decisionBy string, prior *state.MatchResult) error {
 	if IsPoolMatchID(matchID) {
 		return nil
 	}
@@ -1111,9 +1119,6 @@ func refuseDecisionReachingRunningMatch(tx state.StoreTx, compID, matchID, decis
 			bm := &bracket.Rounds[rIdx][mIdx]
 			if bm.ID != matchID {
 				continue
-			}
-			if !domain.ApplyByTimestamp(modifiedAtStamp, bm.ModifiedAt) {
-				return nil
 			}
 			winner, winnerID := prior.SideB, prior.SideBID
 			if decisionBy == "shiro" {

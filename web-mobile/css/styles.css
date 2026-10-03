@@ -9781,7 +9781,7 @@ abbr.msb-lab { text-decoration: none; cursor: help; }
   color: var(--ink-2);
 }
 .shiaijo-nudge--also:hover {
-  background: var(--line-2);
+  background: var(--line);
 }
 .shiaijo-nudge--also:focus-visible {
   outline-color: var(--ink-2);

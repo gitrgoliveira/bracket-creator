@@ -390,6 +390,64 @@ func TestRecordDecisionTx_DownstreamLockReturnsErr(t *testing.T) {
 	assert.Truef(t, errors.Is(engErr, ErrDecisionLocked), "expected ErrDecisionLocked, got %v", engErr)
 }
 
+// A stale decision (an offline replay older than the stored match) is
+// superseded before any refusal judges it: the T103 lock and the
+// already-barred check would otherwise answer it as something to resolve and
+// send again, when a newer result is already stored. A newer stamp still
+// meets each refusal, which is what makes these the controls.
+func TestRecordDecisionTx_StaleReplayIsSupersededBeforeTheRefusals(t *testing.T) {
+	setup := func(t *testing.T) (*Engine, *state.Store, string) {
+		t.Helper()
+		eng, store, _ := setupTestEngine(t)
+		compID := "tx-stale"
+		createTestCompetition(t, store, compID, "league", 3)
+		require.NoError(t, store.SaveParticipants(compID, []domain.Player{
+			{ID: helper.NewUUID4(), Name: "Alice", Dojo: "A"},
+			{ID: helper.NewUUID4(), Name: "Bob", Dojo: "B"},
+			{ID: helper.NewUUID4(), Name: "Carol", Dojo: "C"},
+		}))
+		require.NoError(t, store.SavePoolMatches(compID, []state.MatchResult{
+			{ID: "Pool A-0", SideA: "Alice", SideB: "Bob", Status: state.MatchStatusScheduled},
+			{ID: "Pool A-1", SideA: "Carol", SideB: "Alice", Status: state.MatchStatusRunning, ModifiedAt: 10_000},
+		}))
+		// Alice withdraws in Pool A-0, stamped 10_000.
+		_, _, err := eng.RecordDecision(compID, "Pool A-0", "kiken", "aka", "first", nil, false, 10_000)
+		require.NoError(t, err)
+		return eng, store, compID
+	}
+	decide := func(eng *Engine, store *state.Store, compID, matchID, decisionBy string, stamp int64) error {
+		var engErr error
+		_ = store.WithTransaction(compID, func(tx state.StoreTx) error {
+			_, _, engErr = eng.RecordDecisionTx(tx, compID, matchID, "kiken", decisionBy, "replay", nil, false, stamp)
+			return nil
+		})
+		return engErr
+	}
+
+	t.Run("the T103 lock", func(t *testing.T) {
+		// Undoing Pool A-0's kiken while Alice's Pool A-1 is running.
+		eng, store, compID := setup(t)
+		err := decide(eng, store, compID, "Pool A-0", "shiro", 5_000)
+		require.ErrorIs(t, err, ErrMatchSuperseded)
+		assert.NotErrorIs(t, err, ErrDecisionLocked)
+
+		err = decide(eng, store, compID, "Pool A-0", "shiro", 20_000)
+		assert.ErrorIs(t, err, ErrDecisionLocked, "a newer stamp still meets the lock")
+	})
+
+	t.Run("the already-barred check", func(t *testing.T) {
+		// A second kiken against Alice, in Pool A-1 (Alice is SideB, shiro, there).
+		eng, store, compID := setup(t)
+		err := decide(eng, store, compID, "Pool A-1", "shiro", 5_000)
+		require.ErrorIs(t, err, ErrMatchSuperseded)
+		var already *AlreadyIneligibleError
+		assert.False(t, errors.As(err, &already))
+
+		err = decide(eng, store, compID, "Pool A-1", "shiro", 20_000)
+		assert.True(t, errors.As(err, &already), "a newer stamp still meets the check, got %v", err)
+	})
+}
+
 // TestRecordMatchResultWithIneligibilityTx_Basic verifies the
 // tx-aware score-write produces the same on-disk outcome as the
 // non-tx variant.

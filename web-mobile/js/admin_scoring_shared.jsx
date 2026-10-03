@@ -1376,7 +1376,10 @@ function useMatchReopen({ match, password, isComplete }) {
 //   rulingShown - a recorded withdrawal is in force and is still shown
 //   removal     - RecordedWithdrawal's `removal` prop, null when !enabled
 //   patchBlock  - spread into every completed write
-function useWithdrawalRemoval({ match, enabled, onRemove, onUndo, onReset = onUndo }) {
+// `held` is the editor's pendingWrite: the correction carrying the removal
+// was saved on this device and is waiting to be sent. Undo cannot recall
+// it, so the removal then reads as sent and offers no Undo.
+function useWithdrawalRemoval({ match, enabled, held = false, onRemove, onUndo, onReset = onUndo }) {
   const [removed, setRemoved] = useStateA(false);
   const inForce = withdrawalInForce(match);
   const removing = !!enabled && inForce && removed;
@@ -1389,6 +1392,7 @@ function useWithdrawalRemoval({ match, enabled, onRemove, onUndo, onReset = onUn
   }, [match.id, match.decision, match.decisionBy]);
   const removal = enabled ? {
     removed: removing,
+    held: removing && !!held,
     onRemove: () => { setRemoved(true); if (onRemove) onRemove(); },
     onUndo: () => { setRemoved(false); if (onUndo) onUndo(); },
   } : null;
@@ -1663,7 +1667,13 @@ function RecordedWithdrawal({ match, ctl, disabled = false, singleBout = false, 
             the clear does is stated below, before it is tapped. The one
             second step left is useMatchReopen's own, when a later knockout
             match has already been fought ("Reopen both"). */}
-        {removed ? (
+        {removed && removal.held ? (
+          // The correction is saved on this device and waiting to be sent: it
+          // will remove the ruling when it lands, and Undo could not recall it.
+          <span data-testid="remove-withdrawal-pending">
+            The correction is saved on this device and removes {namesDefaultWin ? "the default win" : "the withdrawal"} when it is sent.
+          </span>
+        ) : removed ? (
           // Removed in the editor, not yet saved: nothing has been sent, so
           // Undo just puts the recorded result back on the board.
           <>

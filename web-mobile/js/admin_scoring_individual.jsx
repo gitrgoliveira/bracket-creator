@@ -341,8 +341,12 @@ export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, on
   } = useWithdrawalRemoval({
     match: m,
     enabled: true,
+    held: pendingWrite,
     onRemove: () => { setAPts((p) => struckIppons(p)); setBPts((p) => struckIppons(p)); },
-    onUndo: () => applyServerScore(),
+    // The recorded verdict comes back too: a hantei armed during the removal
+    // would otherwise outlive the tie it was armed on (the circles return,
+    // the hantei row and its Cancel go, and every control stays disabled).
+    onUndo: () => { applyServerScore(); setDecidedByHantei(hanteiRecorded); },
   });
   const recordedWithdrawnKey = recordedWithdrawal ? withdrawnKeyOf(m) : "";
   const recordedLockedKey = recordedWithdrawnKey === "a" ? "b" : recordedWithdrawnKey === "b" ? "a" : "";

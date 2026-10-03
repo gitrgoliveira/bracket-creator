@@ -1838,6 +1838,7 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
   } = useWithdrawalRemoval({
     match: m,
     enabled: !isKachinuki,
+    held: pendingWrite,
     onUndo: () => { setSubs(serverSubs); setFinishRefused(false); },
     onReset: () => setFinishRefused(false),
   });
@@ -1857,6 +1858,14 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
   // editor's label already reads them.
   const saveEndsTheMatch = !isComplete || removingWithdrawal;
   const koTieBlocked = isKoTieBlocked({ isKnockoutPhase, teamWinner, isComplete: !saveEndsTheMatch });
+  // A representative bout is fought on the court, and the server judges a
+  // tie on the STORED match, which still holds the withdrawal until this
+  // save, so the add is refused during a removal. A tied knockout is "more
+  // fighting left": it is fixed by Clear withdrawal and reopen, and both the
+  // block's title and the representative-bout panel say so.
+  const koTieTitle = removingWithdrawal
+    ? "A knockout match can't be a draw: undo, then use Clear withdrawal and reopen to fight a representative bout"
+    : "A knockout match can't be a draw: add and score a daihyosen to decide a winner";
   // bc-tmfn: Finish (and Save correction: corrections are not exempt) refuses
   // while a numbered bout has no result. Kachinuki ends on End match instead.
   // The refusal is shown once the operator taps Finish, and then follows the
@@ -3975,8 +3984,10 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
                 <div className="daihyosen-controls__title">
                   {teamTied ? "Match tied on IV and PW" : <>Tie-breaker (<TermAS name="daihyosen">daihyosen</TermAS>)</>}
                 </div>
-                <div className="daihyosen-controls__hint">
-                  {teamTied
+                <div className="daihyosen-controls__hint" data-testid="daihyosen-hint">
+                  {removingWithdrawal
+                    ? <>A knockout encounter must have a winner. If the bouts were tied, a representative bout (<TermAS name="daihyosen">daihyosen</TermAS>) decided it: undo the removal and use Clear withdrawal and reopen, which puts the match back on the court to fight it.</>
+                    : teamTied
                     ? <>This encounter is tied. Add a representative bout (<TermAS name="daihyosen">daihyosen</TermAS>) to decide it. Each side picks one eligible competitor, scored like any other sub-match.</>
                     : <>A knockout encounter must have a winner. If the bouts end tied, add a representative bout (<TermAS name="daihyosen">daihyosen</TermAS>) to break it.</>}
                 </div>
@@ -3984,11 +3995,11 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
                     button would swallow the tap via stopPropagation (the
                     term's own click handler), leaving a dead-zone over the
                     word. The term is taught in the title/hint above instead. */}
-                <div>
+                {!removingWithdrawal && <div>
                   <button data-testid="scoring-modal-daihyosen-button" type="button" className={`btn btn--sm ${teamTied ? "btn--primary" : "btn--ghost"}`} onClick={onDaihyosen} disabled={daihyosenBusy || submitting || decisionSubmitting}>
                     {daihyosenBusy ? "Adding…" : "Add representative bout"}
                   </button>
-                </div>
+                </div>}
               </div>
             );
           })()}
@@ -4399,7 +4410,7 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
                   if (!isComplete && !confirmFinish(ev)) return;
                   doSubmit(() => (isComplete ? onSubmit : onSubmitAndNext)(buildPatch("completed")));
                 }} disabled={submitting || koTieBlocked}
-                  title={koTieBlocked ? "A knockout match can't be a draw: add and score a daihyosen to decide a winner" : undefined}>
+                  title={koTieBlocked ? koTieTitle : undefined}>
                   {submitting ? "Saving…" : koTieBlocked ? "Needs a winner" : isComplete ? "Save correction" : finishArmed ? "Tap again to finish →" : "Finish + Start Next →"}
                 </button>
               ) : (
@@ -4409,7 +4420,7 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
                   if (!isComplete && !confirmFinish(ev)) return;
                   doSubmit(() => onSubmit(buildPatch("completed")));
                 }} disabled={submitting || koTieBlocked}
-                  title={koTieBlocked ? "A knockout match can't be a draw: add and score a daihyosen to decide a winner" : undefined}>
+                  title={koTieBlocked ? koTieTitle : undefined}>
                   {submitting ? "Saving…" : koTieBlocked ? "Needs a winner" : isComplete ? "Save correction" : finishArmed ? "Tap again to finish" : "Finish"}
                 </button>
               )}

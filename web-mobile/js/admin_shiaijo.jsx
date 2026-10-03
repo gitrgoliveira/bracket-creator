@@ -867,6 +867,15 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
         // Else any comp
         return courtsComps[0].id;
     }, [selectedCompId, courtsComps, running, allMatches]);
+    // One operator per court (operator ruling 2026-09-26): the console never
+    // switches competition by itself. The default above only CHOOSES the first
+    // one shown; it is then held as if picked, so a finished bout or a match
+    // moved onto this court cannot swap the competition under the operator.
+    // From then on only the picker and the banner below change it (and a
+    // competition that leaves this court falls back to the default again).
+    useEffectSh(() => {
+        if (effectiveCompId && effectiveCompId !== selectedCompId) setSelectedCompId(effectiveCompId);
+    }, [effectiveCompId, selectedCompId]);
 
     // The scoring panel shows the match the operator is officiating. By default
     // that's the running (NOW) bout, but the operator may pick any upcoming
@@ -1093,9 +1102,12 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
             if (!byComp[m.compId]) byComp[m.compId] = { id: m.compId, name: m.compName, count: 0 };
             byComp[m.compId].count++;
         }
+        // EVERY other competition waiting here is named, each with its own
+        // switch, most matches first: a match moved onto this court may
+        // belong to the smaller one.
         const entries = Object.values(byComp);
         entries.sort((a, b) => b.count - a.count);
-        return { comp: entries[0].name, compId: entries[0].id, count: entries[0].count, alsoWaiting: selHasActive };
+        return { entries, alsoWaiting: selHasActive };
     }, [allMatches, effectiveCompId, running, filteredScheduled, courtKnown]);
 
     // Delegate to the canonical start-patch factory (admin_schedule.jsx) rather
@@ -1628,25 +1640,30 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
 
                         {/* ── Scoring / lineup + context (right) ──────── */}
                         <div className="shiaijo__main">
-                            {nudgeBanner && (
-                                <button
-                                    type="button"
-                                    className={`alert shiaijo-nudge ${nudgeBanner.alsoWaiting ? "shiaijo-nudge--also" : "alert--warn"}`}
-                                    data-testid="shiaijo-nudge"
-                                    onClick={() => setSelectedCompId(nudgeBanner.compId)}
-                                    aria-label={`Switch to ${nudgeBanner.comp}`}
-                                >
-                                    {!nudgeBanner.alsoWaiting && (
-                                        <span className="shiaijo-nudge__icon" aria-hidden="true">{Icon ? <Icon name="alert-circle" size={15} /> : "⚠"}</span>
-                                    )}
-                                    <span className="shiaijo-nudge__text">
-                                        {nudgeBanner.alsoWaiting
-                                            ? `${nudgeBanner.count} ${nudgeBanner.comp} match${nudgeBanner.count === 1 ? "" : "es"} also waiting on this court.`
-                                            : `Switch to ${nudgeBanner.comp}: ${nudgeBanner.count} match${nudgeBanner.count === 1 ? "" : "es"} waiting on this court.`}
-                                    </span>
-                                    <span className="shiaijo-nudge__cta" aria-hidden="true">Switch →</span>
-                                </button>
-                            )}
+                            {nudgeBanner && nudgeBanner.entries.map((e) => {
+                                const matches = `${e.count} ${e.count === 1 ? "match" : "matches"}`;
+                                const text = nudgeBanner.alsoWaiting
+                                    ? `${e.count} ${e.name} ${e.count === 1 ? "match" : "matches"} also waiting on this court.`
+                                    : `Switch to ${e.name}: ${matches} waiting on this court.`;
+                                return (
+                                    <button
+                                        type="button"
+                                        key={e.id}
+                                        className={`alert shiaijo-nudge ${nudgeBanner.alsoWaiting ? "shiaijo-nudge--also" : "alert--warn"}`}
+                                        data-testid="shiaijo-nudge"
+                                        onClick={() => setSelectedCompId(e.id)}
+                                        // The name carries the visible text (WCAG 2.5.3) and,
+                                        // on the quiet line, what the tap does.
+                                        aria-label={nudgeBanner.alsoWaiting ? `${text} Switch to ${e.name}` : text}
+                                    >
+                                        {!nudgeBanner.alsoWaiting && (
+                                            <span className="shiaijo-nudge__icon" aria-hidden="true">{Icon ? <Icon name="alert-circle" size={15} /> : "⚠"}</span>
+                                        )}
+                                        <span className="shiaijo-nudge__text">{text}</span>
+                                        <span className="shiaijo-nudge__cta" aria-hidden="true">Switch →</span>
+                                    </button>
+                                );
+                            })}
                             {allDone && !correctingMatch && (
                                 <div className="empty">
                                     <h3>{selectedCompName ? `${selectedCompName} is complete on Shiaijo ${court}` : `All matches complete on Shiaijo ${court}`}</h3>

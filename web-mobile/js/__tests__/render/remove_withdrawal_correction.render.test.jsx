@@ -164,6 +164,36 @@ describe('individual editor: Remove withdrawal', () => {
     expect(patch.winner).toBeNull();
   });
 
+  // Undo puts the recorded verdict back too. A hantei armed on the tie the
+  // removal made would otherwise outlive it: the circles return, the hantei
+  // row and its Cancel go, and every control stays disabled.
+  it('Undo after arming a hantei disarms it, so the editor is usable again', async () => {
+    await mount(individualKiken());
+    await tap(screen.getByTestId('remove-withdrawal'));
+    await tap(addButton('aka', 'K'));
+    await tap(screen.getByTestId('scoring-modal-hantei-arm'));
+    expect(screen.getByTestId('scoring-modal-hantei-cancel')).toBeTruthy();
+    await tap(screen.getByTestId('remove-withdrawal-undo'));
+    expect(filled('aka')).toEqual(['○', '○']);
+    expect(navButton('Save correction').disabled).toBe(false);
+    expect(slots('shiro').some((b) => /Hantei armed/.test(b.title || ''))).toBe(false);
+  });
+
+  // A save held on this device (offline) will remove the ruling when it is
+  // sent, and Undo cannot recall it: the box says so and offers no Undo.
+  it('a correction held offline reads as sent and offers no Undo', async () => {
+    const onSubmit = vi.fn().mockResolvedValue({ queued: true });
+    await mount(individualKiken(), { onSubmit });
+    await tap(screen.getByTestId('remove-withdrawal'));
+    await tap(addButton('aka', 'M'));
+    await tap(addButton('aka', 'K'));
+    await saveCorrection();
+    expect(onSubmit.mock.calls[0][0].clearWithdrawal).toBe(true);
+    expect(screen.getByTestId('remove-withdrawal-pending').textContent)
+      .toBe('The correction is saved on this device and removes the withdrawal when it is sent.');
+    expect(screen.queryByTestId('remove-withdrawal-undo')).toBeNull();
+  });
+
   // The name stops carrying the ruling the board no longer shows: a Kiken
   // beside Tanaka under "will be removed" read as two answers at once.
   it("the withdrawn competitor's Kiken mark goes with the removal and comes back on Undo", async () => {
@@ -383,6 +413,12 @@ describe('team editor: Remove withdrawal', () => {
     await tap(screen.getByTestId('remove-withdrawal'));
     expect(saveButton().textContent).toBe('Needs a winner');
     expect(saveButton().disabled).toBe(true);
+    // The way out it names is one that works: a representative bout is
+    // fought on the court, and the server would refuse an add while the
+    // withdrawal is still stored, so the add is not offered here.
+    expect(screen.getByTestId('daihyosen-hint').textContent).toContain('Clear withdrawal and reopen');
+    expect(screen.queryByTestId('scoring-modal-daihyosen-button')).toBeNull();
+    expect(saveButton().title).toContain('Clear withdrawal and reopen');
 
     // A point in bout 2 breaks the tie: the save is a correction again.
     const bout2Buttons = document.querySelectorAll('.team-sub-match__btns')[2];

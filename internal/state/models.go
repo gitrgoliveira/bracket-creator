@@ -1422,7 +1422,10 @@ type MatchResult struct {
 	// request's `clearWithdrawal`: the operator removed a withdrawal or
 	// default win recorded by mistake and this completed write is the real
 	// result, so it replaces the stored ruling rather than keeping it
-	// (engine.KeepsWithdrawalRuling). Never persisted (json/CSV omit).
+	// (engine.KeepsWithdrawalRuling). Never written to disk or the wire
+	// (json/CSV omit); the store's in-memory copy of a pool match may keep
+	// it, as it keeps WinnerSide, and nothing reads it there: every write
+	// is judged on the request-built result, never on a stored copy.
 	ClearsWithdrawal bool             `json:"-" yaml:"-"`
 	IpponsA          []string         `json:"ipponsA"` // waza letters M/K/D/T/H/S (naginata), or ○ (FIK default-win marker)
 	IpponsB          []string         `json:"ipponsB"`

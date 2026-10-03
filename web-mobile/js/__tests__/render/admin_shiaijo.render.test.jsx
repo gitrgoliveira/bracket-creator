@@ -1315,20 +1315,49 @@ describe('a court shared with another competition', () => {
     } finally { c.restore(); }
   });
 
-  it('turns amber, "Switch to", once this competition has nothing left on the court', async () => {
+  // One operator per court: the competition shown is held, so the bout that
+  // finishes does not swap the court to the other competition. It turns
+  // amber and waits for the tap instead.
+  it('holds the competition when its last bout here finishes, and turns amber, "Switch to"', async () => {
     const c = await mountCourt([
-      courtMatch('m1', 'completed', { winner: courtSide('m1-a', 'Aka m1') }),
+      courtMatch('m1', 'running'),
       courtMatch('m3', 'scheduled', { compId: 'c2', compName: 'League' }),
     ]);
     try {
-      const picker = c.utils.container.querySelector('select[aria-label="Select competition to officiate"]');
-      if (picker.value !== 'c1') {
-        await act(async () => { picker.value = 'c1'; picker.dispatchEvent(new Event('change', { bubbles: true })); });
-      }
+      const picker = () => c.utils.container.querySelector('select[aria-label="Select competition to officiate"]');
+      expect(picker().value).toBe('c1');
+      c.feed.current = [
+        courtMatch('m1', 'completed', { winner: courtSide('m1-a', 'Aka m1') }),
+        courtMatch('m3', 'scheduled', { compId: 'c2', compName: 'League' }),
+      ];
+      await c.refresh();
+      expect(picker().value, 'the console did not switch by itself').toBe('c1');
       const n = nudge(c);
       expect(n.textContent).toContain('Switch to League: 1 match waiting on this court.');
       expect(n.classList.contains('alert--warn')).toBe(true);
       expect(n.classList.contains('shiaijo-nudge--also')).toBe(false);
+      await act(async () => { n.click(); });
+      expect(picker().value).toBe('c2');
+    } finally { c.restore(); }
+  });
+
+  it('names every other competition waiting here, each with its own switch', async () => {
+    const c = await mountCourt([
+      courtMatch('m1', 'running'),
+      courtMatch('m3', 'scheduled', { compId: 'c2', compName: 'League' }),
+      courtMatch('m4', 'scheduled', { compId: 'c3', compName: 'Teams' }),
+      courtMatch('m5', 'scheduled', { compId: 'c3', compName: 'Teams' }),
+    ]);
+    try {
+      const lines = c.utils.getAllByTestId('shiaijo-nudge');
+      expect(lines.map((l) => l.querySelector('.shiaijo-nudge__text').textContent)).toEqual([
+        '2 Teams matches also waiting on this court.',
+        '1 League match also waiting on this court.',
+      ]);
+      // The accessible name carries the visible text and what the tap does.
+      expect(lines[1].getAttribute('aria-label')).toBe('1 League match also waiting on this court. Switch to League');
+      await act(async () => { lines[1].click(); });
+      expect(c.utils.container.querySelector('select[aria-label="Select competition to officiate"]').value).toBe('c2');
     } finally { c.restore(); }
   });
 

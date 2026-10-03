@@ -1133,8 +1133,9 @@ func TestReopenHandler_BracketDownstreamStates(t *testing.T) {
 
 // TestScoreHandler_KachinukiCompletedToRunningStillNoOps pins that the
 // reopen endpoint did NOT weaken the score path's stale-write guard: a
-// plain status "running" write against a completed match is still
-// silently discarded (stale) rather than reverting the finished result.
+// plain status "running" write against a completed match never reverts the
+// finished result (bc-mrgc: it never carries the verdict, and an unstamped
+// one is held whole).
 // Reopen is the only sanctioned way back to running.
 func TestScoreHandler_KachinukiCompletedToRunningStillNoOps(t *testing.T) {
 	compID := "kachinuki-stale-guard-survives"
@@ -1150,7 +1151,11 @@ func TestScoreHandler_KachinukiCompletedToRunningStillNoOps(t *testing.T) {
 		},
 	})
 	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
-	assert.Contains(t, w.Body.String(), `"stale":true`, "the write must be discarded as stale, not applied")
+	// bc-mrgc: unstamped, so it cannot be ordered after the finish; every
+	// change it makes is held in the match's history and it answers
+	// superseded (it used to answer {stale:true}).
+	assert.Contains(t, w.Body.String(), `"applied":false`, "the write must not be applied")
+	assert.Contains(t, w.Body.String(), `"reason":"superseded"`)
 
 	matches, err := store.LoadPoolMatches(compID)
 	require.NoError(t, err)

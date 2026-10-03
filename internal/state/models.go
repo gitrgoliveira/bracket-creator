@@ -1426,19 +1426,38 @@ type MatchResult struct {
 	// (json/CSV omit); the store's in-memory copy of a pool match may keep
 	// it, as it keeps WinnerSide, and nothing reads it there: every write
 	// is judged on the request-built result, never on a stored copy.
-	ClearsWithdrawal bool             `json:"-" yaml:"-"`
-	IpponsA          []string         `json:"ipponsA"` // waza letters M/K/D/T/H/S (naginata), or ○ (FIK default-win marker)
-	IpponsB          []string         `json:"ipponsB"`
-	HansokuA         int              `json:"hansokuA"`
-	HansokuB         int              `json:"hansokuB"`
-	Decision         string           `json:"decision"`
-	DecisionBy       string           `json:"decisionBy,omitempty"`
-	DecisionReason   string           `json:"decisionReason,omitempty"`
-	Status           MatchStatus      `json:"status"`
-	Court            string           `json:"court"`
-	Round            int              `json:"round" yaml:"round"`
-	ScheduledAt      string           `json:"scheduledAt"`
-	SubResults       []SubMatchResult `json:"subResults,omitempty"`
+	ClearsWithdrawal bool `json:"-" yaml:"-"`
+	// Changed names the GROUPS this write changes (match_groups.go: points,
+	// result, encho, flags, rep, bout:<position>), the input to the merge
+	// owner engine.mergeMatchWrite (bc-mrgc). Transient like ClearsWithdrawal:
+	// the score handler reads it from the request's `changed`, and every
+	// server-built write (decision, daihyosen add/remove, quick-score, a
+	// start) sets it explicitly. nil means "the writer stated nothing", which
+	// the merge reads as every group the payload carries (see
+	// engine.defaultChangedGroups). Never written to disk or the wire.
+	Changed []string `json:"-" yaml:"-"`
+	// WriteDoor names the endpoint a write came through ("score", "decision",
+	// "daihyosen-add", ...), for the match history entry the write leaves.
+	// Transient, set by the handler; "" reads as "engine" in the history.
+	WriteDoor string `json:"-" yaml:"-"`
+	// Merge is what engine.mergeMatchWrite decided for THIS write: which
+	// groups applied, which were held (kept in the match history because a
+	// newer change to them is stored), and the held values. Set on the
+	// incoming result only, read by the history writer and the handlers'
+	// heldGroups; never persisted.
+	Merge          *MergeReport     `json:"-" yaml:"-"`
+	IpponsA        []string         `json:"ipponsA"` // waza letters M/K/D/T/H/S (naginata), or ○ (FIK default-win marker)
+	IpponsB        []string         `json:"ipponsB"`
+	HansokuA       int              `json:"hansokuA"`
+	HansokuB       int              `json:"hansokuB"`
+	Decision       string           `json:"decision"`
+	DecisionBy     string           `json:"decisionBy,omitempty"`
+	DecisionReason string           `json:"decisionReason,omitempty"`
+	Status         MatchStatus      `json:"status"`
+	Court          string           `json:"court"`
+	Round          int              `json:"round" yaml:"round"`
+	ScheduledAt    string           `json:"scheduledAt"`
+	SubResults     []SubMatchResult `json:"subResults,omitempty"`
 	// SubResultsRaw holds the sub-bout cell EXACTLY as it was read, and only
 	// when it failed to parse as JSON. It is the repair copy. The reader
 	// degrades a malformed cell to an empty encounter rather than failing the
@@ -1568,15 +1587,30 @@ type MatchResult struct {
 	// via BracketMatch.ModifiedAt, pool-matches.csv via its own column. The
 	// guard needs a STORED stamp to compare against, so persistence is not a
 	// detail here, it is the precondition; this was bracket-only for exactly as
-	// long as the pool file had nowhere to put it. engine.applyMatchWrite is the
-	// one primitive both branches call.
+	// long as the pool file had nowhere to put it. engine.mergeMatchWrite is the
+	// one owner both branches call (bc-mrgc), comparing per group.
 	//
-	// The completed-never-reverted guard stays on top regardless. 0
+	// A running write never reverts a completed match regardless (it never
+	// carries the result group, engine.runningOverFinished). 0
 	// (absent/legacy) means "unstamped": it is treated as arrival-order and still
 	// APPLIES (it does NOT lose to a stamped write), so old files and un-stamped
 	// clients behave exactly as before rather than having a legitimate change
 	// silently dropped. See domain.ApplyByTimestamp.
+	//
+	// Since bc-mrgc the comparison is made PER GROUP (GroupStamps below);
+	// ModifiedAt stays the newest of the group stamps, which is what recency
+	// (result_recency.jsx) and the SPA's keepNewerMatches read.
 	ModifiedAt int64 `json:"modifiedAt,omitempty" yaml:"-"`
+	// GroupStamps is the stamp of the last applied change to each group
+	// (match_groups.go), the per-group form of ModifiedAt that
+	// engine.mergeMatchWrite orders writes by (bc-mrgc). nil on a match
+	// written before groups existed: every group then reads as stamped at
+	// ModifiedAt (GroupStamp), so a legacy file behaves exactly as the
+	// whole-match guard did. A bout group whose row is gone keeps its stamp
+	// (a tombstone), so an older write still carrying the row cannot bring it
+	// back. Persisted as the last pool-matches.csv column and in bracket.json
+	// (BracketMatch.GroupStamps).
+	GroupStamps map[string]int64 `json:"groupStamps,omitempty" yaml:"-"`
 }
 
 // HanteiDecided reports whether a hantei verdict stands on this match: the
@@ -1859,6 +1893,10 @@ type BracketMatch struct {
 	// 0 = unstamped/legacy: arrival-order, still applies (never dropped). See
 	// domain.ApplyByTimestamp.
 	ModifiedAt int64 `json:"modifiedAt,omitempty"`
+	// GroupStamps mirrors MatchResult.GroupStamps (bc-mrgc): the stamp of the
+	// last applied change to each group of this match, persisted in
+	// bracket.json. nil on a legacy match (every group reads ModifiedAt).
+	GroupStamps map[string]int64 `json:"groupStamps,omitempty"`
 	// PlaceholderA / PlaceholderB / PlaceholderWinner record what SideA / SideB /
 	// Winner held at DRAW time, before any pool resolved. They are written once,
 	// by engine.buildBracketFromDraw, for a pool-fed (mixed) knockout whose

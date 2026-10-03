@@ -35,7 +35,6 @@ import (
 	"log"
 	"sort"
 	"strings"
-	"time"
 
 	"github.com/gitrgoliveira/bracket-creator/internal/domain"
 	"github.com/gitrgoliveira/bracket-creator/internal/state"
@@ -653,12 +652,19 @@ func (e *Engine) MaybeAdvanceKachinuki(compID, matchID string) (bool, []state.Su
 	// echo it without re-reading the match (E1). A fresh slice header keeps it
 	// independent of the store's parse buffer.
 	var postLog []state.SubMatchResult
+	// The appended pairing and the verdict it clears are stamped with the
+	// server's clock (bc-mrgc), and the advance is recorded in the match's
+	// history, so a write made before it is ordered against it.
+	stamp := serverNowMs()
+	var appendedGroup string
 
 	if isBracket {
 		// UpdateBracketMatchByID owns the rounds → bronze-sibling walk, so the
 		// append site no longer re-implements it (and can't forget the bronze).
 		found, err := e.store.UpdateBracketMatchByID(compID, matchID, func(bm *state.BracketMatch) {
 			appendNextKachinukiBout(bm, *out.Next)
+			appendedGroup = state.BoutGroup(bm.SubResults[len(bm.SubResults)-1].Position)
+			bm.StampGroups(stamp, appendedGroup, state.GroupResult)
 			postLog = append([]state.SubMatchResult(nil), bm.SubResults...)
 		})
 		if err != nil {
@@ -667,6 +673,7 @@ func (e *Engine) MaybeAdvanceKachinuki(compID, matchID string) (bool, []state.Su
 		if !found {
 			return false, nil, notFoundErrorf("bracket match %s not found", matchID)
 		}
+		e.recordDirectHistory(e.store, compID, matchID, doorKachinukiAdvance, stamp, appendedGroup, state.GroupResult)
 		return true, postLog, nil
 	}
 
@@ -679,6 +686,8 @@ func (e *Engine) MaybeAdvanceKachinuki(compID, matchID string) (bool, []state.Su
 		parent.Winner = ""
 		parent.WinnerID = "" // bc-brid: the verdict's id half, cleared with the name.
 		parent.Decision = ""
+		appendedGroup = state.BoutGroup(out.Next.Position)
+		parent.StampGroups(stamp, appendedGroup, state.GroupResult)
 		postLog = append([]state.SubMatchResult(nil), parent.SubResults...)
 		return nil
 	})
@@ -688,6 +697,7 @@ func (e *Engine) MaybeAdvanceKachinuki(compID, matchID string) (bool, []state.Su
 	if !found {
 		return false, nil, nil
 	}
+	e.recordDirectHistory(e.store, compID, matchID, doorKachinukiAdvance, stamp, appendedGroup, state.GroupResult)
 	return true, postLog, nil
 }
 
@@ -841,9 +851,13 @@ var (
 // with it gets the same treatment (restoreForceReopened), reported on its
 // opts.Reopened entry's Restored.
 //
-// STAMP. The reopen sets ModifiedAt to the server's now (reopenPoolMatch,
-// reopenBracketMatch), so a write stamped before it cannot win
-// last-write-wins against it and complete the running match again.
+// STAMP. The reopen stamps every group it clears (the verdict, the
+// match-level scoreline and overtime, and a pool match's rep players) with the
+// server's now (reopenPoolMatch, reopenBracketMatch, through StampGroups), so
+// a write stamped before it cannot put any of them back and complete the
+// running match again; it is held in the match's history instead (bc-mrgc).
+// The bouts keep their own stamps: a bout change made after a bout was last
+// changed still applies.
 func (e *Engine) ReopenMatch(compID, matchID, reason string, opts ...ForceOptions) (*domain.CompetitorStatus, error) {
 	fo := firstForceOptions(opts)
 	comp, err := e.store.LoadCompetition(compID)
@@ -999,6 +1013,7 @@ func (e *Engine) reopenUnderCourtLock(compID string, comp *state.Competition, ma
 				if serr := h.Save(); serr != nil {
 					return serr
 				}
+				e.recordDirectHistory(tx, compID, matchID, doorReopen, h.Pool.GroupStamp(state.GroupResult), reopenedPoolGroups...)
 				// The reopen cleared the decision: a withdrawal it removed
 				// bars nobody (see ELIGIBILITY on ReopenMatch).
 				restored = e.restoreIfWithdrawalRemoved(tx, compID, matchID, prior, h.Pool.Decision, nil)
@@ -1030,6 +1045,7 @@ func (e *Engine) reopenUnderCourtLock(compID string, comp *state.Competition, ma
 			if serr := h.Save(); serr != nil {
 				return serr
 			}
+			e.recordDirectHistory(tx, compID, matchID, doorReopen, h.Bracket.GroupStamp(state.GroupResult), reopenedBracketGroups...)
 			e.restoreForceReopened(tx, compID, reopenedDownstream)
 			if fo.Reopened != nil {
 				*fo.Reopened = reopenedDownstream
@@ -1391,6 +1407,10 @@ func (e *Engine) RemoveTrailingKachinukiBout(compID, matchID string) (*state.Mat
 			}
 			return subs[:n-1], nil
 		}
+		// The removed bout keeps its stamp as a tombstone (bc-mrgc), so a
+		// write made before the removal that still carries it cannot bring
+		// it back; one made after it can.
+		stamp := serverNowMs()
 
 		found, ferr := findMatchHome(tx, compID, matchID, func(h matchHome) error {
 			if h.Pool != nil {
@@ -1399,10 +1419,13 @@ func (e *Engine) RemoveTrailingKachinukiBout(compID, matchID string) (*state.Mat
 					opErr = serr
 					return nil
 				}
+				removed := state.BoutGroup(h.Pool.SubResults[len(h.Pool.SubResults)-1].Position)
+				h.Pool.StampGroups(stamp, removed)
 				h.Pool.SubResults = stripped
 				if werr := h.Save(); werr != nil {
 					return werr
 				}
+				e.recordDirectHistory(tx, compID, matchID, doorKachinukiRemove, stamp, removed)
 				u := *h.Pool
 				updated = &u
 				return nil
@@ -1412,10 +1435,13 @@ func (e *Engine) RemoveTrailingKachinukiBout(compID, matchID string) (*state.Mat
 				opErr = serr
 				return nil
 			}
+			removed := state.BoutGroup(h.Bracket.SubResults[len(h.Bracket.SubResults)-1].Position)
+			h.Bracket.StampGroups(stamp, removed)
 			h.Bracket.SubResults = stripped
 			if werr := h.Save(); werr != nil {
 				return werr
 			}
+			e.recordDirectHistory(tx, compID, matchID, doorKachinukiRemove, stamp, removed)
 			updated = bracketMatchToTeamResult(*h.Bracket)
 			return nil
 		})
@@ -1647,8 +1673,20 @@ func reopenPoolMatch(m *state.MatchResult, reason string, targetStatus state.Mat
 	m.RepPlayerB = ""
 	m.CorrectionReason = reason
 	m.ReopenPending = reopenPending(reason)
-	m.ModifiedAt = time.Now().UnixMilli()
+	// Revert fence, per group (bc-mrgc): every group the reopen cleared is
+	// stamped with the server's clock, so a write stamped before the reopen
+	// cannot put any of them back.
+	m.StampGroups(serverNowMs(), reopenedPoolGroups...)
 }
+
+// reopenedPoolGroups and reopenedBracketGroups are the groups a reopen
+// clears, and so stamps: the verdict, the match-level scoreline and overtime
+// (a single-bout match's fight is put back by the caller, under the same
+// stamp), and on a pool match the representative players.
+var (
+	reopenedPoolGroups    = []string{state.GroupResult, state.GroupPoints, state.GroupEncho, state.GroupRep}
+	reopenedBracketGroups = []string{state.GroupResult, state.GroupPoints, state.GroupEncho}
+)
 
 // reopenBracketMatch discards the ENCOUNTER-LEVEL VERDICT and keeps the BOUT
 // LOG. Those are separate things in the data model, which is what makes this
@@ -1706,8 +1744,9 @@ func reopenBracketMatch(bm *state.BracketMatch, reason string, targetStatus stat
 	bm.ReopenPending = reopenPending(reason)
 	// Revert fence, as reopenPoolMatch's doc explains: every reopen door
 	// (ReopenMatch, RequeueBlockerAndReopen, forceReopenDownstreamChain) ends
-	// here, so a write stamped before the reopen is refused as superseded.
-	bm.ModifiedAt = time.Now().UnixMilli()
+	// here, so a write stamped before the reopen cannot put back any group
+	// it cleared (bc-mrgc).
+	bm.StampGroups(serverNowMs(), reopenedBracketGroups...)
 }
 
 // reopenBracketMatchKeepingTheFight is reopenBracketMatch for a reopen that

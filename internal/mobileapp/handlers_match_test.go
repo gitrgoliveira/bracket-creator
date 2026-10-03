@@ -3409,12 +3409,16 @@ func TestScoreHandler_RunningWriteCannotRevertCompleted(t *testing.T) {
 	req2.Header.Set("Content-Type", "application/json")
 	r.ServeHTTP(w2, req2)
 
-	// Step 3: the server must return 200 with stale=true.
+	// Step 3: the server must return 200, the write not applied. bc-mrgc: a
+	// running write over a finished match never carries the verdict, and this
+	// one is unstamped, so it cannot be ordered after the finish: every change
+	// it makes is held (kept in the match's history) and it answers
+	// superseded, where it used to answer {stale:true}.
 	assert.Equal(t, http.StatusOK, w2.Code, "stale running write must return 200")
 	var body map[string]any
 	require.NoError(t, json.Unmarshal(w2.Body.Bytes(), &body))
-	stale, ok := body["stale"].(bool)
-	assert.True(t, ok && stale, "stale running write must return {stale:true}")
+	assert.Equal(t, false, body["applied"], "stale running write must not apply; body: %s", w2.Body.String())
+	assert.Equal(t, "superseded", body["reason"])
 
 	// Step 4: match must still be completed, not reverted to running.
 	assert.Equal(t, state.MatchStatusCompleted, loadStatus(), "running write must not revert a completed match")
@@ -3571,12 +3575,13 @@ func TestScoreHandler_ScheduledWriteCannotRevertCompleted(t *testing.T) {
 	req2.Header.Set("Content-Type", "application/json")
 	r.ServeHTTP(w2, req2)
 
-	// Step 3: the server must return 200 with stale=true.
+	// Step 3: the server must return 200, the write not applied (bc-mrgc: see
+	// TestScoreHandler_RunningWriteCannotRevertCompleted).
 	assert.Equal(t, http.StatusOK, w2.Code, "stale scheduled write must return 200")
 	var body map[string]any
 	require.NoError(t, json.Unmarshal(w2.Body.Bytes(), &body))
-	stale, ok := body["stale"].(bool)
-	assert.True(t, ok && stale, "stale scheduled write must return {stale:true}")
+	assert.Equal(t, false, body["applied"], "stale scheduled write must not apply; body: %s", w2.Body.String())
+	assert.Equal(t, "superseded", body["reason"])
 
 	// Step 4: match must still be completed with the original winner intact.
 	after := loadMatch()

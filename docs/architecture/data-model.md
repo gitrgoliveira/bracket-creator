@@ -195,6 +195,8 @@ classDiagram
         +string ResultSource
         +string CorrectionReason
         +bool ReopenPending
+        +long ModifiedAt
+        +map GroupStamps
     }
 
     class CompetitorSide {
@@ -277,6 +279,7 @@ classDiagram
         +bool ReopenPending
         +bool DecidedByHantei (legacy, read-only)
         +long ModifiedAt
+        +map GroupStamps
     }
 
     MatchResult "1" *-- "2" CompetitorSide : side A is aka, side B is shiro
@@ -416,6 +419,11 @@ classDiagram
         <<JSON>>
         Overrides
     }
+    class history_dir["history/"] {
+        <<JSON lines, one file per match>>
+        every write that reached the match
+        applied or held, with held values
+    }
     class wal[".wal/"] {
         <<pending transactions>>
         replayed on startup
@@ -442,6 +450,7 @@ classDiagram
     config_md --> lineups_yaml
     config_md --> team_members_yaml
     config_md --> overrides_json
+    config_md --> history_dir
     team_members_yaml --> lineups_yaml : positions reference members
 ```
 
@@ -502,32 +511,62 @@ sequenceDiagram
     S->>S: release the lock
 ```
 
-**Concurrent editors are not arbitrated.** Two operators scoring the same match is treated
-as last write wins, which is intentional: more than one person may legitimately be scoring
-one court. Three narrower guards do apply. A write stamped older than the stored result is
-dropped, so a court coming back from an outage cannot overwrite a newer result recorded
-elsewhere; the drop is reported, not silent. For a finished result the response says the
-write was superseded and the operator sees an explicit "Not saved" notice, because a
-discarded final score is lost work the scorer must know about, while a superseded
-running-status autosave stays quiet as routine noise. A running write that arrives after
-the match has been completed is discarded rather than reverting the result. An out of
-order write from the same client session is dropped. Anything beyond that is a genuine
-disagreement between two people and is left visible rather than resolved silently.
+**Concurrent writes are merged, never dropped.** A match result is split into groups of
+fields that change together: the scoreline, the verdict (status, winner, decision and the
+notes that describe it), the overtime, the engi flags, the representative players, and each
+bout of a team match on its own. A write names the groups it changes, and each group records
+the time of the last change applied to it. A change applies only when it was made no earlier
+than the stored change to the same group, so two operators changing different things (one
+records the overtime while another enters a point, or two bouts of a team match are scored on
+two boards) both land, whatever order their writes arrive in. A group a write does not change
+is never overwritten. When two writes change the same group, the one made later stays, and
+the other is not discarded: it is kept in the match's history with its values. The times
+compared are when each change was made, never when it arrived, so a court coming back from
+an outage cannot overwrite a newer change recorded elsewhere, and its own changes to things
+nobody touched since still land. A write all of whose changes are outranked is reported as
+not applied (the operator sees an explicit notice naming that it was kept in the history),
+and one applied in part says which groups were held. A write that does not name its groups
+counts as changing every group it carries.
+
+Three rules sit on top. A withdrawal or default win is one change with the scoreline it
+writes: it is held whole when any point or bout was entered after it was declared, because
+points scored later mean the withdrawal no longer describes the match. The other way round, a
+point entered on a board still scoring the match after a withdrawal was recorded means the
+withdrawal was a mistake: it is cleared (and kept in the history), the competitor it barred
+can fight again, and the winner is worked out from the points. A board that is still scoring a
+match that has meanwhile been finished never reopens it: its changes made after the finish
+are applied to the finished result, which stays finished, and the winner is worked out again
+from the merged points or bouts; its changes made before the finish are held. If that leaves
+a knockout match tied, it goes back to running, because a knockout cannot end tied, and a
+pool or league match becomes a draw. An out of order write from the same client session is
+still dropped.
 
 A deliberate correction is subject to the same rule, which matters most when it was made
 without a connection. Correcting the result you are looking at works normally. Correcting
 a result that has since been changed by someone else does not overwrite them: the
-correction is refused and reported, exactly as any other out of date write would be. That
-is the point, because a correction saved during an outage can reach the server hours
-later, long after the match has moved on, and the operator who wrote it has no way of
+correction's outranked parts are held and reported, exactly as any other out of date write
+would be. That is the point, because a correction saved during an outage can reach the server
+hours later, long after the match has moved on, and the operator who wrote it has no way of
 knowing what happened in between.
 
-The stale write guard needs the timestamp of the stored result to compare against, so it
-only works where that timestamp is saved. It is saved for every match, in both files, which
-is what makes the rule the same wherever a match happens to be in the competition. A result
-written before the timestamp existed, or by a client that does not send one, counts as
-unstamped and always applies: the guard discriminates only when both sides carry a stamp,
-so it can never silently drop a legitimate change.
+**Every write is kept in the match's history.** Each match has an append only history file in
+the competition's `history/` folder, one line per write that reached it: when the change was
+made, when the server received it, which endpoint it came through, the groups it changed and,
+for each, whether it was applied or held, with the held values. The history is written in the
+same transaction as the match, so the two land together or not at all, and a write refused
+outright (an invalid payload, the wrong competitors) leaves no line. Reopening, requeueing,
+overriding a winner and the other server actions that change a result write their own line.
+The history goes with its competition, and with a discarded draw, since a draw generated again
+reuses the match ids.
+
+The merge needs the time of each stored change to compare against, so it only works where
+those times are saved. They are saved for every match, in both files (the last column of the
+results file, and the bracket file), which is what makes the rule the same wherever a match
+happens to be in the competition. A match saved before the per group times existed has only
+one time for the whole result, and every group reads as changed then, so it is compared exactly
+as before. A write from a client that does not send a time counts as unstamped and always
+applies: the merge discriminates only when both sides carry a stamp, so it can never silently
+hold a legitimate change.
 
 The comparison only holds if the two clocks agree, so a timestamp that is far enough in the
 future to be impossible is refused and reported rather than trusted or quietly discarded.

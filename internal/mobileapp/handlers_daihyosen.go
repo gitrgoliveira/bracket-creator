@@ -47,7 +47,7 @@ func respondIfSuperseded(c *gin.Context, err error) bool {
 	if !errors.Is(err, engine.ErrMatchSuperseded) {
 		return false
 	}
-	respondSuperseded(c)
+	respondSuperseded(c, engine.HeldGroupsOf(err))
 	return true
 }
 
@@ -194,6 +194,10 @@ func RegisterDaihyosenHandlers(r *gin.RouterGroup, eng DaihyosenEngine, store Da
 			updated    state.MatchResult
 			resp       *txResponse // the answer when nothing is written, decided under the lock
 			haveResult bool
+			// supersededErr is a write whose every change was held: the
+			// transaction commits (its history entry lands) and the answer is
+			// applied:false (bc-mrgc).
+			supersededErr error
 		)
 		txErr := store.WithTransaction(id, func(stx state.StoreTx) error {
 			match, found, err := findMatchForDaihyosenTx(stx, id, mid)
@@ -261,7 +265,19 @@ func RegisterDaihyosenHandlers(r *gin.RouterGroup, eng DaihyosenEngine, store Da
 			// 10) as an inherited 500, not this handler's own fault.
 			clearMatchVerdict(&u)
 			u.Encho = nil
+			// What the remove changes (bc-mrgc): the representative bout (its
+			// stamp stays as a tombstone, so an older write still carrying the
+			// row cannot bring it back), the verdict, the overtime, and the
+			// scoreline when clearing the verdict took a hantei mark out of it.
+			u.Changed = daihyosenChangedGroups(match, &u, state.GroupResult, state.GroupEncho)
+			u.WriteDoor = engine.DoorDaihyosenDel
 			if _, err := eng.RecordMatchResultWithIneligibilityTx(stx, id, mid, &u); err != nil {
+				if errors.Is(err, engine.ErrMatchSuperseded) {
+					// Committed, not aborted: the write's history entry is
+					// its one footprint and must land.
+					supersededErr = err
+					return nil
+				}
 				return err
 			}
 			updated = u
@@ -273,6 +289,10 @@ func RegisterDaihyosenHandlers(r *gin.RouterGroup, eng DaihyosenEngine, store Da
 				return
 			}
 			internalError(c, txErr)
+			return
+		}
+		if supersededErr != nil {
+			respondIfSuperseded(c, supersededErr)
 			return
 		}
 		if resp != nil {
@@ -291,7 +311,7 @@ func RegisterDaihyosenHandlers(r *gin.RouterGroup, eng DaihyosenEngine, store Da
 		})
 
 		// Public in self-run, so answered as the broadcast is, without the audit notes.
-		c.JSON(http.StatusOK, gin.H{"result": matchForBroadcast(updated)})
+		c.JSON(http.StatusOK, withHeldGroups(gin.H{"result": matchForBroadcast(updated)}, updated.Merge))
 	})
 
 	r.POST("/competitions/:id/matches/:mid/daihyosen", func(c *gin.Context) {
@@ -320,6 +340,8 @@ func RegisterDaihyosenHandlers(r *gin.RouterGroup, eng DaihyosenEngine, store Da
 			subOut     *state.SubMatchResult
 			resp       *txResponse // the answer when nothing is written, decided under the lock
 			haveResult bool
+			// supersededErr: see the remove handler's.
+			supersededErr error
 		)
 		txErr := store.WithTransaction(id, func(stx state.StoreTx) error {
 			// Engi competitions decide bouts by referee flag counts; a
@@ -447,7 +469,16 @@ func RegisterDaihyosenHandlers(r *gin.RouterGroup, eng DaihyosenEngine, store Da
 			}
 			u.SubResults = append(append([]state.SubMatchResult{}, match.SubResults...), *sub)
 			u.Status = state.MatchStatusRunning // daihyosen bout in progress
+			// What the add changes (bc-mrgc): the new representative bout and
+			// the verdict, and the scoreline when clearing the verdict took a
+			// hantei mark out of it.
+			u.Changed = daihyosenChangedGroups(match, &u, state.GroupResult)
+			u.WriteDoor = engine.DoorDaihyosenAdd
 			if _, err := eng.RecordMatchResultWithIneligibilityTx(stx, id, mid, &u); err != nil {
+				if errors.Is(err, engine.ErrMatchSuperseded) {
+					supersededErr = err
+					return nil
+				}
 				return err
 			}
 			updated = u
@@ -460,6 +491,10 @@ func RegisterDaihyosenHandlers(r *gin.RouterGroup, eng DaihyosenEngine, store Da
 				return
 			}
 			internalError(c, txErr)
+			return
+		}
+		if supersededErr != nil {
+			respondIfSuperseded(c, supersededErr)
 			return
 		}
 		if resp != nil {
@@ -498,7 +533,7 @@ func RegisterDaihyosenHandlers(r *gin.RouterGroup, eng DaihyosenEngine, store Da
 			hub.Broadcast(EventScheduleUpdated, nil)
 		}
 
-		c.JSON(http.StatusOK, gin.H{"subResult": subOut, "result": matchForBroadcast(updated)})
+		c.JSON(http.StatusOK, withHeldGroups(gin.H{"subResult": subOut, "result": matchForBroadcast(updated)}, updated.Merge))
 	})
 }
 
@@ -639,4 +674,26 @@ func clearMatchVerdict(u *state.MatchResult) {
 	u.Decision = ""
 	u.DecisionBy = ""
 	u.DecisionReason = ""
+}
+
+// daihyosenChangedGroups is what a representative-bout add or remove changes:
+// the representative bout, the groups the caller names, and the scoreline
+// when clearMatchVerdict took a hantei mark out of it. Diffing u against the
+// stored match is safe here, unlike on a client payload: u was built from
+// that very match under the same lock (bc-mrgc).
+func daihyosenChangedGroups(stored, u *state.MatchResult, groups ...string) []string {
+	out := append([]string{state.BoutGroup(state.DaihyosenSubPosition)}, groups...)
+	if state.GroupDiffers(stored, u, state.GroupPoints) {
+		out = append(out, state.GroupPoints)
+	}
+	return out
+}
+
+// withHeldGroups adds heldGroups to a write's answer when part of the write
+// was kept in the match's history rather than applied (bc-mrgc).
+func withHeldGroups(body gin.H, rep *state.MergeReport) gin.H {
+	if held := rep.HeldGroups(); len(held) > 0 {
+		body["heldGroups"] = held
+	}
+	return body
 }

@@ -164,6 +164,11 @@ func (s *Store) copyMatchResults(results []MatchResult) []MatchResult {
 		// result through *Encho / *DecidedByHantei cannot corrupt cached
 		// state. Mirrors copyBracket, which already clones its Encho pointer.
 		res[i].Encho = r.Encho.Clone()
+		res[i].GroupStamps = CloneGroupStamps(r.GroupStamps)
+		// The write's own transient merge inputs and outputs never travel on
+		// a stored copy: a writer that builds its result from one (the
+		// daihyosen add, `u := *match`) must state its own.
+		res[i].Changed, res[i].WriteDoor, res[i].Merge = nil, "", nil
 		if r.DecidedByHantei != nil {
 			v := *r.DecidedByHantei
 			res[i].DecidedByHantei = &v
@@ -630,6 +635,38 @@ var poolMatchColumns = []poolMatchColumn{
 			if v, err := strconv.ParseInt(cell, 10, 64); err == nil && v > 0 {
 				m.ModifiedAt = v
 			}
+		}},
+	// The per-group stamps the merge orders writes by (bc-mrgc), one JSON
+	// object in one cell. Empty when the match has none (a legacy row, or a
+	// match never written with a stamp), which reads back as nil: every group
+	// then reads ModifiedAt, the whole-match comparison legacy rows have
+	// always had. A cell that does not parse reads as nil the same way and is
+	// logged, so a hand edit degrades to the legacy comparison rather than
+	// failing the row.
+	{name: "GroupStamps",
+		put: func(r *MatchResult) string {
+			if len(r.GroupStamps) == 0 {
+				return ""
+			}
+			b, err := json.Marshal(r.GroupStamps)
+			if err != nil {
+				slog.Error("state: pool match GroupStamps marshal failed; writing empty cell",
+					"matchID", r.ID, "error", err)
+				return ""
+			}
+			return string(b)
+		},
+		take: func(m *MatchResult, cell string) {
+			if cell == "" {
+				return
+			}
+			var stamps map[string]int64
+			if err := json.Unmarshal([]byte(cell), &stamps); err != nil {
+				slog.Error("state: pool match GroupStamps cell corrupt; reading as unstamped groups",
+					"matchID", m.ID, "error", err)
+				return
+			}
+			m.GroupStamps = stamps
 		}},
 }
 

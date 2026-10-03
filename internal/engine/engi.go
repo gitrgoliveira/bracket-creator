@@ -91,6 +91,10 @@ func backfillEngiResult(result, rec *state.MatchResult) {
 	result.Status = rec.Status
 }
 
+// engiChangedGroups are the groups an engi finish changes: the flags and the
+// verdict they decide.
+var engiChangedGroups = []string{state.GroupResult, state.GroupFlags}
+
 // recordEngiMatch is the shared record core. The store handle h abstracts the
 // persistence layer: *state.Store satisfies state.StoreTx, so the same body
 // runs against either the store itself (each call locks) or a live transaction
@@ -114,16 +118,22 @@ func (e *Engine) recordEngiMatch(
 		)
 	}
 	winnerSide := engiWinnerSide(flagsA, flagsB)
+	// The engi finish carries no client stamp yet (ordering it is bc-mrgc's
+	// phase 3); its groups are stamped with the server's clock so the next
+	// write is ordered against it.
+	stamp := serverNowMs()
 
 	// Try the pool stage first.
 	var out *state.MatchResult
 	err := e.withPoolMatch(h, compID, matchID, func(r *state.MatchResult) error {
 		applyEngiToMatchResult(r, flagsA, flagsB, winnerSide, correctionReason)
+		r.StampGroups(stamp, engiChangedGroups...)
 		cp := *r
 		out = &cp
 		return nil
 	})
 	if err == nil {
+		e.recordDirectHistory(h, compID, matchID, doorEngi, stamp, engiChangedGroups...)
 		return out, nil
 	}
 	if err != errMatchNotFound {
@@ -164,6 +174,7 @@ func (e *Engine) recordEngiMatch(
 				}
 				priorWinner, priorWinnerID := propagatedWinnerOf(b, rIdx, mIdx, bm)
 				result = applyEngiToBracketMatch(bm, flagsA, flagsB, winnerSide, correctionReason)
+				bm.StampGroups(stamp, engiChangedGroups...)
 				e.propagateBracketWinner(b, rIdx, mIdx)
 				if force && winnerActuallyChanged(priorWinner, priorWinnerID, bm) {
 					reopened = forceReopenDownstreamChain(b, rIdx, mIdx, bm.ID)
@@ -178,6 +189,7 @@ func (e *Engine) recordEngiMatch(
 				return validationErrorf("%s is not ready to score: a feeder pool or match has not finished", SentenceCase(MatchLabel(bracketMatchRef(bm))))
 			}
 			result = applyEngiToBracketMatch(bm, flagsA, flagsB, winnerSide, correctionReason)
+			bm.StampGroups(stamp, engiChangedGroups...)
 			// No propagation out of bronze.
 			return nil
 		}
@@ -186,6 +198,7 @@ func (e *Engine) recordEngiMatch(
 	if updateErr != nil {
 		return nil, updateErr
 	}
+	e.recordDirectHistory(h, compID, matchID, doorEngi, stamp, engiChangedGroups...)
 	e.restoreForceReopened(h, compID, reopened)
 	if fo.Reopened != nil {
 		*fo.Reopened = append(*fo.Reopened, reopened...)

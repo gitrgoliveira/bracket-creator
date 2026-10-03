@@ -704,6 +704,11 @@ func (e *Engine) DiscardDraw(id string) error {
 			return fmt.Errorf("DiscardDraw: failed to delete %s: %w", f, err)
 		}
 	}
+	// The matches' histories go with them (bc-mrgc): a draw generated again
+	// reuses the match ids, and its matches must not inherit these.
+	if err := e.store.DeleteMatchHistory(id); err != nil {
+		return fmt.Errorf("DiscardDraw: failed to delete the match history: %w", err)
+	}
 	_, err = e.store.UpdateCompetitionChanged(id, func(current *state.Competition) (*state.Competition, error) {
 		if current == nil {
 			return nil, notFoundErrorf("competition %s not found", id)

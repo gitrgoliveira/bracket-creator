@@ -391,7 +391,7 @@ func TestDownstreamKnockoutCorrection_RestoreBypassesGuard(t *testing.T) {
 		Status: state.MatchStatusCompleted,
 	}
 	txErr := inTx(t, store, compID, func(tx state.StoreTx) error {
-		_, _, err := eng.recordBracketMatchResult(tx, compID, "m-r1-0", snapshot, matchWriteRestore, false)
+		_, _, err := eng.recordBracketMatchResult(tx, compID, "m-r1-0", snapshot, matchWriteRestore, false, nil)
 		return err
 	})
 	require.NoError(t, txErr, "matchWriteRestore must never be refused by the downstream guard")

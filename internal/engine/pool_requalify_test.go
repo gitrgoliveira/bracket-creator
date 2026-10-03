@@ -771,6 +771,13 @@ func TestRevertMatchToQueue_PoolStampsRevertFence(t *testing.T) {
 
 	stale := f.poolResult("Pool A-0", "A1")
 	stale.ModifiedAt = now - 5_000 // written before the requeue, replayed after it
+	// bc-mrgc: the requeue fences the VERDICT (it stamps the result group with
+	// the server's now) and keeps the score with the stamps it had. The
+	// replay's verdict is held; the rest of it echoes the stored score, so
+	// nothing of it applies and it answers superseded, kept in the match's
+	// history rather than lost.
 	require.ErrorIs(t, f.write("Pool A-0", stale), ErrMatchSuperseded)
+	require.NotNil(t, stale.Merge)
+	assert.Equal(t, []string{state.GroupResult}, stale.Merge.Held)
 	assert.Equal(t, state.MatchStatusScheduled, loadPoolMatchByID(t, f.store, f.compID, "Pool A-0").Status)
 }

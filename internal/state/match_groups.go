@@ -1,0 +1,406 @@
+// Package state, match_groups.go owns the GROUPS a match write is merged by
+// (bc-mrgc, operator ruling 2026-10-03: "Nothing should be dropped. All events
+// must be ordered.").
+//
+// A match result is split into groups of fields that change together. A write
+// names the groups it changes (MatchResult.Changed) and engine.mergeMatchWrite
+// applies each one only if the write's stamp is not older than that group's
+// stored stamp (MatchResult.GroupStamps); a group the write did not change is
+// never overwritten, and a change that is not applied is kept in the match's
+// history (match_history.go). This file is the ONE owner of what each group
+// holds: CopyGroup moves a group's fields, GroupDiffers compares them,
+// GroupValue projects them for the history, and stampGroups records a change.
+// Everything else asks these, never a hand-copied field list.
+//
+// NOT groups, on purpose: the sides and their ids, court, schedule, round,
+// ReopenPending, IsOverridden and the bracket structure. Each has its own
+// writer (the draw, scheduling, the reopen, the handler's re-stamp), and none
+// is something a score write changes.
+package state
+
+import (
+	"encoding/json"
+	"reflect"
+	"sort"
+	"strconv"
+	"strings"
+)
+
+// The scalar groups. A team match additionally has one group per bout row,
+// BoutGroup(position).
+const (
+	// GroupPoints holds the match-level scoreline: IpponsA, IpponsB,
+	// HansokuA, HansokuB.
+	GroupPoints = "points"
+	// GroupResult holds the verdict: Status, Winner, WinnerID, Decision,
+	// DecisionBy, DecisionReason, and the audit fields that describe it,
+	// CorrectionReason and ResultSource.
+	GroupResult = "result"
+	// GroupEncho holds the match-level overtime block.
+	GroupEncho = "encho"
+	// GroupFlags holds the engi referee flag counts.
+	GroupFlags = "flags"
+	// GroupRep holds the pool daihyosen/tiebreaker representative players.
+	GroupRep = "rep"
+
+	boutGroupPrefix = "bout:"
+)
+
+// ScalarGroups lists the scalar groups in their fixed order.
+var ScalarGroups = []string{GroupPoints, GroupResult, GroupEncho, GroupFlags, GroupRep}
+
+// BoutGroup names the group of the bout row at position (1..n, or
+// DaihyosenSubPosition for the representative bout).
+func BoutGroup(position int) string {
+	return boutGroupPrefix + strconv.Itoa(position)
+}
+
+// ParseBoutGroup reports the bout position a group names, and whether it
+// names one at all.
+func ParseBoutGroup(group string) (int, bool) {
+	rest, ok := strings.CutPrefix(group, boutGroupPrefix)
+	if !ok {
+		return 0, false
+	}
+	pos, err := strconv.Atoi(rest)
+	if err != nil {
+		return 0, false
+	}
+	return pos, true
+}
+
+// ValidGroup reports whether group names a scalar group or a bout row. The
+// score handler refuses a `changed` entry that is neither.
+func ValidGroup(group string) bool {
+	for _, g := range ScalarGroups {
+		if g == group {
+			return true
+		}
+	}
+	_, ok := ParseBoutGroup(group)
+	return ok
+}
+
+// IsScoringGroup reports whether a change to group changes who won: the
+// match-level points, a bout row, or the engi flags.
+func IsScoringGroup(group string) bool {
+	if group == GroupPoints || group == GroupFlags {
+		return true
+	}
+	_, ok := ParseBoutGroup(group)
+	return ok
+}
+
+// SubPositions lists the distinct bout positions of subs, in row order.
+func SubPositions(subs []SubMatchResult) []int {
+	seen := make(map[int]bool, len(subs))
+	out := make([]int, 0, len(subs))
+	for i := range subs {
+		if !seen[subs[i].Position] {
+			seen[subs[i].Position] = true
+			out = append(out, subs[i].Position)
+		}
+	}
+	return out
+}
+
+// subAt returns the first bout row at position, or nil.
+func subAt(subs []SubMatchResult, position int) *SubMatchResult {
+	for i := range subs {
+		if subs[i].Position == position {
+			return &subs[i]
+		}
+	}
+	return nil
+}
+
+// boutOrderKey sorts bout rows the way every writer appends them: numbered
+// bouts ascending, the representative bout (and any other negative) after.
+func boutOrderKey(position int) int {
+	if position < 0 {
+		return 1<<30 - position
+	}
+	return position
+}
+
+// setSubAt replaces the row at position in subs with row, removes it when row
+// is nil, or inserts it in bout order when subs has none. Every row at that
+// position goes: a hand-edited file holding two is repaired by the merge, not
+// copied twice.
+func setSubAt(subs []SubMatchResult, position int, row *SubMatchResult) []SubMatchResult {
+	out := make([]SubMatchResult, 0, len(subs)+1)
+	placed := false
+	for i := range subs {
+		if subs[i].Position == position {
+			if row != nil && !placed {
+				out = append(out, CloneSubResults([]SubMatchResult{*row})[0])
+				placed = true
+			}
+			continue
+		}
+		out = append(out, subs[i])
+	}
+	if row != nil && !placed {
+		out = append(out, CloneSubResults([]SubMatchResult{*row})[0])
+		sort.SliceStable(out, func(i, j int) bool {
+			return boutOrderKey(out[i].Position) < boutOrderKey(out[j].Position)
+		})
+	}
+	if len(out) == 0 && subs == nil {
+		return nil
+	}
+	return out
+}
+
+// CopyGroup copies group's fields from src into dst, deep, so dst never
+// aliases src. A bout group copies src's row at that position, or removes
+// dst's when src has none.
+func CopyGroup(dst, src *MatchResult, group string) {
+	switch group {
+	case GroupPoints:
+		dst.IpponsA = cloneStrings(src.IpponsA)
+		dst.IpponsB = cloneStrings(src.IpponsB)
+		dst.HansokuA, dst.HansokuB = src.HansokuA, src.HansokuB
+	case GroupResult:
+		dst.Status = src.Status
+		dst.Winner, dst.WinnerID = src.Winner, src.WinnerID
+		// The transient side hint travels with the winner it describes (a
+		// stored copy may carry one, see losingSide), never beside another.
+		dst.WinnerSide = src.WinnerSide
+		dst.Decision, dst.DecisionBy, dst.DecisionReason = src.Decision, src.DecisionBy, src.DecisionReason
+		dst.CorrectionReason, dst.ResultSource = src.CorrectionReason, src.ResultSource
+	case GroupEncho:
+		dst.Encho = src.Encho.Clone()
+	case GroupFlags:
+		dst.FlagsA, dst.FlagsB = src.FlagsA, src.FlagsB
+	case GroupRep:
+		dst.RepPlayerA, dst.RepPlayerB = src.RepPlayerA, src.RepPlayerB
+	default:
+		if pos, ok := ParseBoutGroup(group); ok {
+			dst.SubResults = setSubAt(dst.SubResults, pos, subAt(src.SubResults, pos))
+		}
+	}
+}
+
+// GroupDiffers reports whether a and b hold different values in group. An
+// empty and a nil ippon list are the same scoreline.
+func GroupDiffers(a, b *MatchResult, group string) bool {
+	return !reflect.DeepEqual(groupProjection(a, group), groupProjection(b, group))
+}
+
+// GroupValue is group's fields of m as JSON, the shape the match history keeps
+// for a change it did not apply. A bout group that has no row is "null".
+func GroupValue(m *MatchResult, group string) json.RawMessage {
+	b, err := json.Marshal(groupProjection(m, group))
+	if err != nil {
+		return json.RawMessage("null")
+	}
+	return b
+}
+
+type pointsGroup struct {
+	IpponsA  []string `json:"ipponsA"`
+	IpponsB  []string `json:"ipponsB"`
+	HansokuA int      `json:"hansokuA"`
+	HansokuB int      `json:"hansokuB"`
+}
+
+type resultGroup struct {
+	Status           MatchStatus `json:"status"`
+	Winner           string      `json:"winner"`
+	WinnerID         string      `json:"winnerId,omitempty"`
+	Decision         string      `json:"decision"`
+	DecisionBy       string      `json:"decisionBy,omitempty"`
+	DecisionReason   string      `json:"decisionReason,omitempty"`
+	CorrectionReason string      `json:"correctionReason,omitempty"`
+	ResultSource     string      `json:"resultSource,omitempty"`
+}
+
+type flagsGroup struct {
+	FlagsA int `json:"flagsA"`
+	FlagsB int `json:"flagsB"`
+}
+
+type repGroup struct {
+	RepPlayerA string `json:"repPlayerA"`
+	RepPlayerB string `json:"repPlayerB"`
+}
+
+// groupProjection is the single list of which fields each group holds; the
+// comparison and the history read it, and CopyGroup moves the same fields.
+func groupProjection(m *MatchResult, group string) any {
+	switch group {
+	case GroupPoints:
+		return pointsGroup{IpponsA: nonNilStrings(m.IpponsA), IpponsB: nonNilStrings(m.IpponsB), HansokuA: m.HansokuA, HansokuB: m.HansokuB}
+	case GroupResult:
+		return resultGroup{
+			Status: m.Status, Winner: m.Winner, WinnerID: m.WinnerID,
+			Decision: m.Decision, DecisionBy: m.DecisionBy, DecisionReason: m.DecisionReason,
+			CorrectionReason: m.CorrectionReason, ResultSource: m.ResultSource,
+		}
+	case GroupEncho:
+		if !m.Encho.On() {
+			return (*EnchoMetadata)(nil)
+		}
+		return m.Encho
+	case GroupFlags:
+		return flagsGroup{FlagsA: m.FlagsA, FlagsB: m.FlagsB}
+	case GroupRep:
+		return repGroup{RepPlayerA: m.RepPlayerA, RepPlayerB: m.RepPlayerB}
+	}
+	if pos, ok := ParseBoutGroup(group); ok {
+		row := subAt(m.SubResults, pos)
+		if row == nil {
+			return (*SubMatchResult)(nil)
+		}
+		c := CloneSubResults([]SubMatchResult{*row})[0]
+		c.IpponsA, c.IpponsB = nonNilStrings(c.IpponsA), nonNilStrings(c.IpponsB)
+		return &c
+	}
+	return nil
+}
+
+func nonNilStrings(s []string) []string {
+	if s == nil {
+		return []string{}
+	}
+	return s
+}
+
+func cloneStrings(s []string) []string {
+	if s == nil {
+		return nil
+	}
+	return append([]string(nil), s...)
+}
+
+// CloneGroupStamps deep-copies a stamp map; nil stays nil (a legacy match).
+func CloneGroupStamps(stamps map[string]int64) map[string]int64 {
+	if stamps == nil {
+		return nil
+	}
+	out := make(map[string]int64, len(stamps))
+	for k, v := range stamps {
+		out[k] = v
+	}
+	return out
+}
+
+// groupStampOf is the stored stamp of group: its own entry, or ModifiedAt for
+// a match written before groups existed (nil map), so a legacy match is
+// compared exactly as the whole-match guard compared it. Once a match has a
+// map, a group with no entry was never written: 0.
+func groupStampOf(stamps map[string]int64, modifiedAt int64, group string) int64 {
+	if stamps == nil {
+		return modifiedAt
+	}
+	return stamps[group]
+}
+
+// GroupStamp is the stored stamp of group on m (see groupStampOf).
+func (m *MatchResult) GroupStamp(group string) int64 {
+	return groupStampOf(m.GroupStamps, m.ModifiedAt, group)
+}
+
+// GroupStamp is the stored stamp of group on bm (see groupStampOf).
+func (bm *BracketMatch) GroupStamp(group string) int64 {
+	return groupStampOf(bm.GroupStamps, bm.ModifiedAt, group)
+}
+
+// MaterializedGroupStamps returns a copy of the stamp map with a legacy
+// match's implicit stamps made explicit: every scalar group and every bout row
+// it holds, at its ModifiedAt. Needed before ONE group of a legacy match is
+// stamped, or every other group would start reading the new ModifiedAt.
+func MaterializedGroupStamps(stamps map[string]int64, modifiedAt int64, positions []int) map[string]int64 {
+	if stamps != nil {
+		return CloneGroupStamps(stamps)
+	}
+	out := map[string]int64{}
+	if modifiedAt <= 0 {
+		return out
+	}
+	for _, g := range ScalarGroups {
+		out[g] = modifiedAt
+	}
+	for _, p := range positions {
+		out[BoutGroup(p)] = modifiedAt
+	}
+	return out
+}
+
+// stampGroups is the ONE writer of a change's stamp: it records that groups
+// changed at stamp and keeps ModifiedAt the newest stamp. A stamp of 0 (an
+// unstamped write) moves nothing, exactly as an unstamped write always kept
+// the stored ModifiedAt. positions are the bout rows the match held BEFORE
+// the change, for the legacy materialization.
+func stampGroups(stamps *map[string]int64, modifiedAt *int64, positions []int, stamp int64, groups ...string) {
+	if stamp <= 0 || len(groups) == 0 {
+		return
+	}
+	m := MaterializedGroupStamps(*stamps, *modifiedAt, positions)
+	for _, g := range groups {
+		m[g] = stamp
+	}
+	*stamps = m
+	if stamp > *modifiedAt {
+		*modifiedAt = stamp
+	}
+}
+
+// StampGroups records that groups of m changed at stamp. Every writer that
+// changes a group's fields outside the merge (a reopen, a requeue, an
+// override, the engi recorder, the kachinuki advance) calls this or its
+// BracketMatch twin, so the next write is ordered against the change.
+func (m *MatchResult) StampGroups(stamp int64, groups ...string) {
+	stampGroups(&m.GroupStamps, &m.ModifiedAt, SubPositions(m.SubResults), stamp, groups...)
+}
+
+// StampGroups is MatchResult.StampGroups for a bracket match.
+func (bm *BracketMatch) StampGroups(stamp int64, groups ...string) {
+	stampGroups(&bm.GroupStamps, &bm.ModifiedAt, SubPositions(bm.SubResults), stamp, groups...)
+}
+
+// MergeReport is what engine.mergeMatchWrite decided for one write (bc-mrgc).
+// It rides on the incoming MatchResult (MatchResult.Merge) to the history
+// writer and to the handlers' heldGroups; it is never persisted.
+type MergeReport struct {
+	// Stamp is the write's own stamp (its modifiedAt), before the merge folds
+	// the stored ModifiedAt into the result.
+	Stamp int64
+	// Changed is the effective list of groups the write changes, after the
+	// default (every group the payload carries) and R3's rule that a running
+	// write over a finished match never carries the result.
+	Changed []string
+	// Applied and Held partition Changed: a held group is one a newer stored
+	// change outranks; its incoming value is in HeldValues. Unchanged is the
+	// part of Applied whose value equals the stored one (an echo: a client
+	// that names no groups sends every one of them back).
+	Applied    []string
+	Held       []string
+	Unchanged  []string
+	HeldValues map[string]json.RawMessage
+	// ClearedWithdrawal is the result group a later scoring change cleared
+	// (R2: points scored means the withdrawal was a mistake), kept for the
+	// history; nil when none was.
+	ClearedWithdrawal json.RawMessage
+	// ResultChanged reports whether the stored verdict moved: the result
+	// group applied, a withdrawal was cleared, or the winner was worked out
+	// again. A write that leaves it unmoved has no eligibility consequence.
+	ResultChanged bool
+}
+
+// Superseded reports whether nothing of the write applied: a group it
+// changes is held, and every other one it names only echoes the stored value.
+// Only then is it answered applied:false, and nothing is written but its
+// history entry.
+func (r *MergeReport) Superseded() bool {
+	return r != nil && len(r.Held) > 0 && len(r.Applied) == len(r.Unchanged)
+}
+
+// HeldGroups is the list a response carries, nil when nothing was held.
+func (r *MergeReport) HeldGroups() []string {
+	if r == nil || len(r.Held) == 0 {
+		return nil
+	}
+	return append([]string(nil), r.Held...)
+}

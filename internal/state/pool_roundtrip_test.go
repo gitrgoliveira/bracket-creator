@@ -61,6 +61,14 @@ var notPersistedInPoolCSV = map[string]string{
 		"fills SubResultsRaw, and carried to the SPA so the operator sees which " +
 		"match lost its bouts. Derived state, not a column, exactly like " +
 		"QueuePosition and WinnerSide.",
+	"Changed": "request-only (bc-mrgc): the groups THIS write changes, the " +
+		"merge's input (engine.mergeMatchWrite). Once the write lands the " +
+		"stored match and its GroupStamps say what changed; persisting it " +
+		"would make a later write that names nothing read as one that does.",
+	"WriteDoor": "request-only (bc-mrgc): the endpoint a write came through, " +
+		"for its match history entry, which is where it is kept.",
+	"Merge": "the merge's report on THIS write (bc-mrgc), read by the history " +
+		"writer and the handlers' heldGroups; the history file keeps it.",
 	"DecidedByHantei": "LEGACY READ-ONLY compatibility channel (models.go doc " +
 		"comment above the field): the verdict is the domain.HanteiMark entry " +
 		"in the winner's IpponsA/IpponsB, and writers must never set this flag. " +

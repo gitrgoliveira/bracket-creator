@@ -2215,10 +2215,25 @@ func TestRevertBracketMatch_StaleWriteFenced(t *testing.T) {
 	// bc-lww1: the fence must also ANSWER. This used to return a nil error, which
 	// every layer above read as "saved" — the operator whose queued result was
 	// fenced out got a 200 carrying their own echoed payload.
-	require.ErrorIs(t, eng.RecordMatchResult(compID, "BF-1", &state.MatchResult{
+	//
+	// bc-mrgc: the requeue stamps the VERDICT with the server's now and keeps
+	// the score, each part with the stamp it was last changed at. The replay's
+	// verdict is older than the requeue, so it is held; everything else it
+	// carries only echoes the stored score, so nothing of it applies and it
+	// answers superseded. It is not lost: the match history keeps it.
+	replay := &state.MatchResult{
 		ID: "BF-1", SideA: "Alice", SideB: "Bob",
 		Winner: "Bob", Status: state.MatchStatusCompleted, ModifiedAt: tStale,
-	}), ErrMatchSuperseded)
+	}
+	require.ErrorIs(t, eng.RecordMatchResult(compID, "BF-1", replay), ErrMatchSuperseded)
+	require.NotNil(t, replay.Merge)
+	assert.Equal(t, []string{state.GroupResult}, replay.Merge.Held, "the verdict is held, and only the verdict")
+	history, err := store.LoadMatchHistory(compID, "BF-1")
+	require.NoError(t, err)
+	require.NotEmpty(t, history)
+	last := history[len(history)-1]
+	assert.Equal(t, state.HistoryOutcomeHeld, last.Outcomes[state.GroupResult])
+	assert.Contains(t, string(last.Held[state.GroupResult]), `"winner":"Bob"`, "the held verdict is kept, with its values")
 
 	// With the fix the revert fence (m.ModifiedAt = now()) is higher than tStale,
 	// so the replay is dropped and the match stays scheduled.

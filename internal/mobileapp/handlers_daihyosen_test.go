@@ -898,6 +898,13 @@ func TestDaihyosenWrites_CompeteOnTimestamps(t *testing.T) {
 			require.Equal(t, http.StatusOK, code, "a refusal is never a 4xx/5xx; %v", body)
 			assert.Equal(t, false, body["applied"])
 			assert.Equal(t, "superseded", body["reason"])
+			// bc-mrgc: the answer names what was held, and the write is kept
+			// in the match's history: the transaction commits its entry.
+			assert.Contains(t, body["heldGroups"], state.BoutGroup(state.DaihyosenSubPosition), "%v", body)
+			history, err := store.LoadMatchHistory(compID, "B1")
+			require.NoError(t, err)
+			require.Len(t, history, 1, "the held write's one footprint")
+			assert.Equal(t, state.HistoryOutcomeHeld, history[0].Outcomes[state.BoutGroup(state.DaihyosenSubPosition)])
 
 			bm := storedB1(t, store, compID)
 			assert.EqualValues(t, storedAt, bm.ModifiedAt, "the stored stamp stands")

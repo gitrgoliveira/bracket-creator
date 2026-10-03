@@ -170,6 +170,12 @@ func (e *Engine) RecordMatchResultWithIneligibilityTx(tx state.StoreTx, compID, 
 	// otherwise.
 	deriveDaihyosenWinner(result)
 
+	// The bout rows as the writer sent them, before the server's own changes
+	// below (the kachinuki merge, the default-win padding). A writer that
+	// named its groups did not name those: noteServerBoutChanges adds them,
+	// or the merge would put the stored rows back over them.
+	writerSubs := state.CloneSubResults(result.SubResults)
+
 	// Kachinuki bout logs merge BY POSITION rather than replace wholesale
 	// (ACID: a client whose local log is behind the server must never
 	// destroy server-appended bouts). Applied here at the entry point,
@@ -243,6 +249,7 @@ func (e *Engine) RecordMatchResultWithIneligibilityTx(tx state.StoreTx, compID, 
 			result.SubResults = state.PadDefaultWinBoutPositions(result.SubResults, comp.TeamSize)
 		}
 	}
+	noteServerBoutChanges(result, writerSubs)
 
 	// K3 ahead of the write: a withdrawal whose loser a DIFFERENT match has
 	// already made ineligible is refused before anything is written. The
@@ -256,7 +263,15 @@ func (e *Engine) RecordMatchResultWithIneligibilityTx(tx state.StoreTx, compID, 
 		return nil, err
 	}
 
-	sideMismatch, reopened, inheritedRuling, err := e.writeToPoolOrBracket(tx, compID, matchID, result, matchWriteForward, fo.Force)
+	sideMismatch, reopened, inheritedRuling, err := e.writeToPoolOrBracket(tx, compID, matchID, result, matchWriteForward, fo.Force, comp)
+	if errors.Is(err, ErrMatchSuperseded) {
+		// Every change this write makes is outranked by a newer stored one:
+		// nothing of it lands on the match, and all of it is kept in the
+		// match's history (bc-mrgc). The callers commit the transaction on
+		// this error, so the entry lands.
+		e.recordWriteHistory(tx, compID, matchID, result)
+		return nil, supersededBy(result)
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -281,6 +296,19 @@ func (e *Engine) RecordMatchResultWithIneligibilityTx(tx state.StoreTx, compID, 
 		return nil, err
 	}
 
+	// The write has landed and nothing below can roll it back except the K3
+	// refusal, which returns before this runs again: record it in the
+	// match's history now, in this transaction (bc-mrgc). The K3 path
+	// restores the match AND leaves no entry, since the write it refuses
+	// never happened.
+	historyRecorded := false
+	recordHistory := func() {
+		if !historyRecorded {
+			historyRecorded = true
+			e.recordWriteHistory(tx, compID, matchID, result)
+		}
+	}
+
 	// A bout-row correction that kept a recorded withdrawal
 	// (preserveWithdrawalRuling) changed no ruling, so it has no eligibility
 	// consequence: re-recording the withdrawal would rewrite the competitor's
@@ -288,7 +316,13 @@ func (e *Engine) RecordMatchResultWithIneligibilityTx(tx state.StoreTx, compID, 
 	// broadcast a change nobody made. Deliberately keyed on the helper's own
 	// report, never on comparing result with prior: an unchanged
 	// (decision, loser) test would also swallow a genuine re-decision.
-	if inheritedRuling {
+	//
+	// The same holds for a write whose merge left the verdict where it was
+	// (the result group held or not changed, and no winner worked out again):
+	// the stored verdict is copied into result, and recording it again would
+	// do exactly that rewrite (bc-mrgc).
+	if inheritedRuling || (result.Merge != nil && !result.Merge.ResultChanged) {
+		recordHistory()
 		return nil, nil
 	}
 	status, err := e.recordIneligibilityFromDecision(tx, compID, matchID, result)
@@ -305,8 +339,10 @@ func (e *Engine) RecordMatchResultWithIneligibilityTx(tx state.StoreTx, compID, 
 			return nil, err
 		}
 		log.Printf("engine: recordIneligibilityFromDecision compId=%s matchId=%s: %v", compID, matchID, err)
+		recordHistory()
 		return nil, nil
 	}
+	recordHistory()
 	// The eligibility record follows the ruling (operator ruling 2026-09-24:
 	// "Everything should be able to be fixed, in case of a wrong entry").
 	// This write landed (a superseded, mismatched or rolled-back write
@@ -947,17 +983,30 @@ func (e *Engine) recordDecisionTx(tx state.StoreTx, compID, matchID, decision, d
 	if err != nil {
 		return nil, nil, err
 	}
-	// A stale decision (an offline replay older than the stored match) is
-	// superseded before anything judges it: the write below would drop it by
-	// this same comparison (applyMatchWrite), so the refusals that follow
-	// (already barred, a running later match, the T103 lock) would only
-	// misreport it as something to resolve and send again, when a newer
-	// result is already stored and re-entering would overwrite it.
-	if !domain.ApplyByTimestamp(modifiedAtStamp, prior.ModifiedAt) {
-		return nil, nil, ErrMatchSuperseded
-	}
 	sideA, sideB := prior.SideA, prior.SideB
 	sideAID, sideBID := prior.SideAID, prior.SideBID
+
+	// The decision's write is built FIRST, from prior alone, so it can be
+	// judged by the merge before anything else judges it (below).
+	// A kachinuki encounter carries no match-level overtime, so it is dropped
+	// before the circles are counted: the chokepoint that strips it runs later.
+	comp, err := tx.LoadCompetition(compID)
+	if err != nil {
+		return nil, nil, fmt.Errorf("recordDecisionTx: load competition %s: %w", compID, err)
+	}
+	comp.ClearKachinukiEncounterEncho(&encho)
+	result := buildDecisionResult(prior, matchID, decision, decisionBy, decisionReason, encho, modifiedAtStamp)
+
+	// A stale decision (an offline replay older than the stored match) is
+	// superseded before anything judges it: the write below would hold it by
+	// this same rule (the merge, mergeMatchWrite), so the refusals that follow
+	// (already barred, a running later match, the T103 lock) would only
+	// misreport it as something to resolve and send again, when a newer
+	// change is already stored. It is kept in the match's history (bc-mrgc).
+	if decisionHeldByMerge(prior, result, comp) {
+		e.recordWriteHistory(tx, compID, matchID, result)
+		return nil, nil, supersededBy(result)
+	}
 
 	// T105/CHK047: reject concurrent kiken, if the intended loser is
 	// already ineligible from a *different* match, two operators are
@@ -1021,52 +1070,6 @@ func (e *Engine) recordDecisionTx(tx state.StoreTx, compID, matchID, decision, d
 			return nil, nil, ErrDecisionLocked
 		}
 	}
-	// The winner gets the maru default-win fill; the withdrawing side keeps
-	// whatever it had struck and the encounter keeps its prior sub-bouts
-	// (FIK Art. 32 — see preserveLoserScore below).
-	// A kachinuki encounter carries no match-level overtime, so it is dropped
-	// before the circles are counted: the chokepoint that strips it runs later.
-	comp, err := tx.LoadCompetition(compID)
-	if err != nil {
-		return nil, nil, fmt.Errorf("recordDecisionTx: load competition %s: %w", compID, err)
-	}
-	comp.ClearKachinukiEncounterEncho(&encho)
-	winIppons := domain.DefaultWinIppons(encho.On())
-	result := &state.MatchResult{
-		ID:             matchID,
-		SideA:          sideA,
-		SideB:          sideB,
-		SideAID:        sideAID,
-		SideBID:        sideBID,
-		Decision:       decision,
-		DecisionBy:     decisionBy,
-		DecisionReason: decisionReason,
-		Encho:          encho,
-		Status:         state.MatchStatusCompleted,
-		ModifiedAt:     modifiedAtStamp,
-	}
-	// shiro=SideB (White, left), aka=SideA (Red, right). The surviving side
-	// gets the ○ default-win fill and becomes Winner. WinnerSide/WinnerID are
-	// set DIRECTLY from decisionBy/the side's own id -- never inferred from
-	// name or scoreline comparison -- so a same-name pairing (two "Tanaka
-	// Kenji" from different dojos) is attributed by SIDE, not by a name or
-	// ippon-count heuristic that goes ambiguous the instant both sides share
-	// a display name (repro: Tokyo vs Osaka, 1-1 into encho, Tokyo withdraws;
-	// the winner's default-win maru and the loser's one preserved struck
-	// point tie the inferred ippon counts, so the old name/scoreline
-	// inference credited Tokyo, the WITHDRAWER, with the win).
-	if decisionBy == "shiro" {
-		result.IpponsA = winIppons
-		result.Winner = sideA
-		result.WinnerSide = "A"
-		result.WinnerID = sideAID
-	} else {
-		result.IpponsB = winIppons
-		result.Winner = sideB
-		result.WinnerSide = "B"
-		result.WinnerID = sideBID
-	}
-	preserveLoserScore(result, prior, decisionBy)
 	// kcdgOpts is the caller's own bc-kcdg authorization and is NOT derived
 	// from the T103 `force` above. They answer different questions: T103's
 	// force confirms undoing a kiken or fusenpai whose loser has since been
@@ -1089,6 +1092,75 @@ func (e *Engine) recordDecisionTx(tx state.StoreTx, compID, matchID, decision, d
 	// restore here read that RESTORED status as the current loser and freed
 	// the new withdrawer, so there is none: the rule has one owner.
 	return result, status, nil
+}
+
+// decisionChangedGroups is what a decision write changes (bc-mrgc): its
+// verdict, the scoreline its default-win circles are written into, and the
+// overtime those circles are counted for. Never the bouts: the encounter
+// keeps its prior bouts (preserveLoserScore), and the default-win padding
+// names its own rows (noteServerBoutChanges).
+func decisionChangedGroups() []string {
+	return []string{state.GroupResult, state.GroupPoints, state.GroupEncho}
+}
+
+// buildDecisionResult is the write a decision makes, built from the stored
+// match alone. The winner gets the maru default-win fill; the withdrawing
+// side keeps whatever it had struck and the encounter keeps its prior
+// sub-bouts (FIK Art. 32, preserveLoserScore).
+func buildDecisionResult(prior *state.MatchResult, matchID, decision, decisionBy, decisionReason string, encho *state.EnchoMetadata, modifiedAtStamp int64) *state.MatchResult {
+	winIppons := domain.DefaultWinIppons(encho.On())
+	result := &state.MatchResult{
+		ID:             matchID,
+		SideA:          prior.SideA,
+		SideB:          prior.SideB,
+		SideAID:        prior.SideAID,
+		SideBID:        prior.SideBID,
+		Decision:       decision,
+		DecisionBy:     decisionBy,
+		DecisionReason: decisionReason,
+		Encho:          encho,
+		Status:         state.MatchStatusCompleted,
+		ModifiedAt:     modifiedAtStamp,
+		Changed:        decisionChangedGroups(),
+		WriteDoor:      DoorDecision,
+	}
+	// shiro=SideB (White, left), aka=SideA (Red, right). The surviving side
+	// gets the ○ default-win fill and becomes Winner. WinnerSide/WinnerID are
+	// set DIRECTLY from decisionBy/the side's own id -- never inferred from
+	// name or scoreline comparison -- so a same-name pairing (two "Tanaka
+	// Kenji" from different dojos) is attributed by SIDE, not by a name or
+	// ippon-count heuristic that goes ambiguous the instant both sides share
+	// a display name (repro: Tokyo vs Osaka, 1-1 into encho, Tokyo withdraws;
+	// the winner's default-win maru and the loser's one preserved struck
+	// point tie the inferred ippon counts, so the old name/scoreline
+	// inference credited Tokyo, the WITHDRAWER, with the win).
+	if decisionBy == "shiro" {
+		result.IpponsA = winIppons
+		result.Winner = prior.SideA
+		result.WinnerSide = "A"
+		result.WinnerID = prior.SideAID
+	} else {
+		result.IpponsB = winIppons
+		result.Winner = prior.SideB
+		result.WinnerSide = "B"
+		result.WinnerID = prior.SideBID
+	}
+	preserveLoserScore(result, prior, decisionBy)
+	return result
+}
+
+// decisionHeldByMerge asks the merge owner, on a copy, whether every change
+// the decision makes would be held, and leaves that report on result for
+// the history entry when it would. It is the merge's own rule, not a second
+// statement of it: the write itself is judged by the same mergeMatchWrite.
+func decisionHeldByMerge(prior, result *state.MatchResult, comp *state.Competition) bool {
+	probe := *result
+	rep := mergeMatchWrite(prior, &probe, matchWriteForward, mergeCtx{comp: comp})
+	if !rep.Superseded() {
+		return false
+	}
+	result.Merge = rep
+	return true
 }
 
 // refuseDecisionReachingRunningMatch is the decision path's early answer to

@@ -264,7 +264,9 @@ func RegisterDecisionHandlers(r *gin.RouterGroup, eng ScoringEngine, store Compe
 		// without reading the returned result.
 		tryAutoCompletePoolsAfterWrite(c, eng, hub, id, state.MatchResult{ID: mid, Status: state.MatchStatusCompleted})
 
-		c.JSON(http.StatusOK, result)
+		// The stored result, plus heldGroups when part of the decision was
+		// kept in the match's history rather than applied (bc-mrgc).
+		c.JSON(http.StatusOK, scoreResponseWithReopened(result, nil))
 	})
 }
 
@@ -304,7 +306,7 @@ func respondDecisionEngineError(c *gin.Context, store CompetitionStore, compID, 
 		// supersede here would not merely mis-report a dropped write,
 		// it would poison the offline queue with one that can never
 		// succeed.
-		respondSuperseded(c)
+		respondSuperseded(c, engine.HeldGroupsOf(engErr))
 	case errors.As(engErr, &alreadyIneligErr):
 		// T105/CHK047: concurrent kiken, another operator already
 		// recorded ineligibility for this player on a different
@@ -443,6 +445,8 @@ func handleBothSidesBarredHikiwake(c *gin.Context, eng ScoringEngine, store Comp
 			ID: matchID, SideA: m.SideA, SideB: m.SideB, SideAID: m.SideAID, SideBID: m.SideBID,
 			Status: state.MatchStatusCompleted, Decision: "hikiwake", DecisionReason: reason,
 			ModifiedAt: req.ModifiedAt,
+			// The draw is a verdict and nothing else (bc-mrgc).
+			Changed: []string{state.GroupResult}, WriteDoor: engine.DoorDecision,
 		}
 		if _, werr := eng.RecordMatchResultWithIneligibilityTx(stx, compID, matchID, write); werr != nil {
 			writeErr = werr
@@ -481,6 +485,6 @@ func handleBothSidesBarredHikiwake(c *gin.Context, eng ScoringEngine, store Comp
 		"results":       matchesForBroadcast([]state.MatchResult{result}),
 	})
 	tryAutoCompletePoolsAfterWrite(c, eng, hub, compID, result)
-	c.JSON(http.StatusOK, result)
+	c.JSON(http.StatusOK, scoreResponseWithReopened(&result, nil))
 	return true
 }

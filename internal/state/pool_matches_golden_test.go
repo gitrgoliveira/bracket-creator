@@ -26,9 +26,9 @@ import (
 // disk. If this test fails you have changed the file format: that is only
 // correct for a NEW APPENDED column, in which case regenerate the tail here
 // and say so in the commit.
-const poolMatchesGolden = `PoolName,MatchIdx,SideA,SideB,Winner,IpponsA,IpponsB,HansokuA,HansokuB,Decision,Status,Court,SubResults,ScheduledAt,ResultSource,Round,SideAID,SideBID,WinnerID,CorrectionReason,RepPlayerA,RepPlayerB,FlagsA,FlagsB,ReopenPending,DecisionBy,DecisionReason,Encho,ModifiedAt
-Pool A,1,Kyoto,Osaka,Kyoto,M|Ht,K,1,2,fought,completed,B,"[{""position"":1,""sideA"":""K1"",""sideB"":""O1"",""ipponsA"":[""D""],""ipponsB"":null,""hansokuA"":0,""hansokuB"":0,""winner"":""K1"",""decision"":""""}]",09:45,admin,3,id-a,id-b,id-a,scoreboard misread,Rep A,Rep B,2,1,true,Referee Tanaka,call recorded,2,1737000000000
-Pool B,2,Nara,Kobe,,,,0,0,,scheduled,A,,10:15,,0,,,,,,,0,0,false,,,0,0
+const poolMatchesGolden = `PoolName,MatchIdx,SideA,SideB,Winner,IpponsA,IpponsB,HansokuA,HansokuB,Decision,Status,Court,SubResults,ScheduledAt,ResultSource,Round,SideAID,SideBID,WinnerID,CorrectionReason,RepPlayerA,RepPlayerB,FlagsA,FlagsB,ReopenPending,DecisionBy,DecisionReason,Encho,ModifiedAt,GroupStamps
+Pool A,1,Kyoto,Osaka,Kyoto,M|Ht,K,1,2,fought,completed,B,"[{""position"":1,""sideA"":""K1"",""sideB"":""O1"",""ipponsA"":[""D""],""ipponsB"":null,""hansokuA"":0,""hansokuB"":0,""winner"":""K1"",""decision"":""""}]",09:45,admin,3,id-a,id-b,id-a,scoreboard misread,Rep A,Rep B,2,1,true,Referee Tanaka,call recorded,2,1737000000000,"{""bout:1"":1736500000000,""points"":1736000000000,""result"":1737000000000}"
+Pool B,2,Nara,Kobe,,,,0,0,,scheduled,A,,10:15,,0,,,,,,,0,0,false,,,0,0,
 `
 
 func poolMatchesGoldenInput() []MatchResult {
@@ -51,6 +51,8 @@ func poolMatchesGoldenInput() []MatchResult {
 			FlagsA: 2, FlagsB: 1,
 			ReopenPending: true,
 			ModifiedAt:    1737000000000,
+			// GroupStamps (bc-mrgc), the column appended after ModifiedAt.
+			GroupStamps: map[string]int64{GroupPoints: 1736000000000, GroupResult: 1737000000000, BoutGroup(1): 1736500000000},
 		},
 		{
 			ID: "Pool B-2", SideA: "Nara", SideB: "Kobe",

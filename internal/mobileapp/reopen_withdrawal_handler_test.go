@@ -259,6 +259,11 @@ func TestReopen_OlderQueuedWriteIsRefusedAfterward(t *testing.T) {
 		reopen  func(t *testing.T, r *gin.Engine, compID string) *httptest.ResponseRecorder
 		stale   map[string]any
 		status  func(t *testing.T, store *state.Store, compID string) state.MatchStatus
+		// partial (bc-mrgc): the queued write carries a bout correction made
+		// after that bout was last changed, so the bout applies while
+		// everything the reopen fenced is held. The verdict still does not
+		// land, which is what this test is about.
+		partial bool
 	}
 	individualCorrection := map[string]any{
 		"sideA": "Ryu", "sideB": "Tora", "winner": "Tora",
@@ -360,7 +365,7 @@ func TestReopen_OlderQueuedWriteIsRefusedAfterward(t *testing.T) {
 				"subResults":       []map[string]any{kachinukiSub(1, "R-1", "W-1", []string{"M", "K"}, "R-1", "fought")},
 				"correctionReason": "Scoring error: wrong waza entered", "modifiedAt": queuedAt,
 			},
-			status: poolStatus},
+			status: poolStatus, partial: true},
 	}
 	for _, d := range doors {
 		t.Run(d.name, func(t *testing.T) {
@@ -373,8 +378,13 @@ func TestReopen_OlderQueuedWriteIsRefusedAfterward(t *testing.T) {
 			require.Equal(t, http.StatusOK, w.Code, w.Body.String())
 			var body map[string]any
 			require.NoError(t, json.Unmarshal(w.Body.Bytes(), &body))
-			assert.Equal(t, false, body["applied"], "a write stamped before the reopen must not land; got %s", w.Body.String())
-			assert.Equal(t, "superseded", body["reason"])
+			if d.partial {
+				assert.Nil(t, body["applied"], "the bout correction applied; got %s", w.Body.String())
+				assert.Contains(t, body["heldGroups"], state.GroupResult, "the verdict stamped before the reopen is held")
+			} else {
+				assert.Equal(t, false, body["applied"], "a write stamped before the reopen must not land; got %s", w.Body.String())
+				assert.Equal(t, "superseded", body["reason"])
+			}
 			assert.Equal(t, state.MatchStatusRunning, d.status(t, store, compID), "the reopened match stays running")
 		})
 	}

@@ -2364,6 +2364,24 @@ paths:
           competitor the withdrawal barred is eligible again. Without it, a
           completed correction with no decision, or `hikiwake`, keeps the
           ruling. A team match must then carry a result on every bout.
+
+          `changed` (also request-only) names the GROUPS this write changes,
+          and the server merges the write group by group (see the MergeGroup
+          schema): each named group applies only when the write's
+          `modifiedAt` is not older than that group's stored stamp
+          (`groupStamps` on the match), a group the write does not name is
+          never overwritten, and a named group that does not apply is HELD,
+          kept in the match's history with its values. Absent `changed` means
+          every group the payload carries, except that a `running` or
+          `scheduled` write over a `completed` match never carries `result`:
+          its scoring changes apply to the finished match when they were made
+          after the result (the match stays completed and its winner is worked
+          out again from the merged points or bouts; a knockout match left tied
+          goes back to running, a pool or league match left tied becomes a
+          draw), and are held when made before it. A scoring change made on a
+          running board after a recorded withdrawal or default win clears it
+          (points scored mean the withdrawal was a mistake), and the competitor
+          it barred is eligible again. A name that is not a group is a 400.
         content:
           application/json:
             schema:
@@ -2371,25 +2389,25 @@ paths:
       responses:
         '200':
           description: |
-            Result recorded. On a normal write the body is the updated MatchResult.
-            When a running-write autosave is a no-op the body is `{"stale":true}`
-            (the `stale` field set, all other MatchResult fields absent). This
-            happens in two cases: (a) the rev-guard drops it as a same-session
-            out-of-order delivery (a lower rev than one already applied for that
-            client session, e.g. a reconnect flush), or (b) the match is already
-            completed, so a running write must not revert the final result.
-            Different client sessions are concurrent operators; the server
-            applies those last-write-wins, never stale — and when the
-            last-write-wins comparison drops the INCOMING write, the body is the
-            RefusedWrite shape (`{"applied": false, "reason": ..., ...}`):
-            nothing was persisted, no SSE broadcast is emitted, and the client
-            must surface "not saved" rather than treat the echo as a save. Two
-            causes: `superseded` (the `modifiedAt` is older than the stored
-            result's, the reconnecting offline court case) and `clock_skew`
-            (the `modifiedAt` is implausibly far in the future, so this device's
-            clock is wrong; the write is refused rather than trusted or zeroed,
-            and the client should resync from GET /api/time and re-submit the
-            same result). See the RefusedWrite schema.
+            Result recorded. On a normal write the body is the updated (merged)
+            MatchResult. When part of the write was held (a newer change to
+            those groups is stored) the body also carries `heldGroups`, the
+            groups kept in the match's history instead of applied.
+            When the rev-guard drops a running-write autosave as a same-session
+            out-of-order delivery (a lower rev than one already applied for
+            that client session, e.g. a reconnect flush) the body is
+            `{"stale":true}` (the `stale` field set, all other MatchResult
+            fields absent). Different client sessions are concurrent operators;
+            the server merges their writes by stamp, never stale. When EVERY
+            group the write changes is held, the body is the RefusedWrite shape
+            (`{"applied": false, "reason": "superseded", "heldGroups": [...],
+            ...}`): nothing of it was applied to the match, no SSE broadcast is
+            emitted, and the held values are in the match's history. The other
+            RefusedWrite cause is `clock_skew` (the `modifiedAt` is implausibly
+            far in the future, so this device's clock is wrong; the write is
+            refused rather than trusted or zeroed, and the client should resync
+            from GET /api/time and re-submit the same result). See the
+            RefusedWrite schema.
           content:
             application/json:
               schema:
@@ -2409,10 +2427,9 @@ paths:
                       stale:
                         type: boolean
                         description: >
-                          true when a running-write autosave was a no-op; either
-                          dropped by the rev-guard as a same-session out-of-order
-                          delivery, or rejected because the match is already
-                          completed. Omitted on normal responses.
+                          true when the rev-guard dropped a running-write
+                          autosave as a same-session out-of-order delivery.
+                          Omitted on normal responses.
                     required: [stale]
         '400':
           description: |
@@ -3299,8 +3316,10 @@ paths:
                           description: >
                             Machine-readable discriminator, present only for the
                             classes named here and omitted for every other failure, so
-                            its presence always means the same thing. `superseded`: a
-                            newer result for that match is already stored. `clock_skew`:
+                            its presence always means the same thing. `superseded`:
+                            every group the entry changes is held, a newer change to each
+                            being already stored; `heldGroups` names them and they are kept
+                            in the match's history. `clock_skew`:
                             that entry's `modifiedAt` is implausibly far in the future, so
                             the sending device's clock is wrong; nothing was written for
                             it and re-running the import will not help until the clock is
@@ -3325,6 +3344,26 @@ paths:
                             requeue that match, then retry. In
                             every case the entry is excluded from `succeeded` and never
                             broadcast. Other entries in the batch are unaffected.
+                        heldGroups:
+                          type: array
+                          items:
+                            $ref: '#/components/schemas/MergeGroup'
+                          description: On a `superseded` entry, the groups held.
+                  heldGroups:
+                    type: array
+                    description: >
+                      Entries that applied in part: the groups of each that were held
+                      (a newer change to them is stored) and kept in the match's
+                      history. Omitted when no entry was held in part.
+                    items:
+                      type: object
+                      properties:
+                        matchId:
+                          type: string
+                        heldGroups:
+                          type: array
+                          items:
+                            $ref: '#/components/schemas/MergeGroup'
 
   /api/competitions/{id}/matches/{mid}/quick-score:
     put:
@@ -3480,10 +3519,17 @@ paths:
       responses:
         '200':
           description: >
-            Decision recorded, OR the write was refused. A refusal carries the
-            RefusedWrite shape (`applied: false` with a `reason` of
-            `superseded` or `clock_skew`) instead of a MatchResult; nothing is
-            stored and no SSE event is emitted.
+            Decision recorded, OR the write was refused. A decision changes
+            the `result`, `points` and `encho` groups (MergeGroup) and is
+            atomic: it is held whole when its verdict is older than the stored
+            one, or when any stored points or bout change was made after it
+            (points scored after a withdrawal was declared mean it no longer
+            describes the match). A held decision carries the RefusedWrite shape
+            (`applied: false`, `reason: superseded`, `heldGroups`) instead of a
+            MatchResult, is kept in the match's history, and bars nobody; a
+            `clock_skew` refusal stores nothing. No SSE event is emitted for
+            either. A recorded decision that had part of it held carries
+            `heldGroups` beside the MatchResult.
           content:
             application/json:
               schema:
@@ -3578,7 +3624,10 @@ paths:
             `result`, without the audit notes (`decisionReason`,
             `correctionReason`) the public broadcast leaves out. OR the write was refused: a RefusedWrite (`applied:
             false` with a `reason` of `superseded` or `clock_skew`); nothing is
-            stored and no SSE event is emitted.
+            applied to the match and no SSE event is emitted. A superseded add
+            (the representative bout and the verdict, the groups it changes,
+            both held) carries `heldGroups` and is kept in the match's history.
+            An add applied in part carries `heldGroups` beside `result`.
           content:
             application/json:
               schema:
@@ -3684,7 +3733,10 @@ paths:
             stamp, under `result`, without the audit notes (`decisionReason`,
             `correctionReason`) the public broadcast leaves out. OR the write was refused: a RefusedWrite
             (`applied: false` with a `reason` of `superseded` or
-            `clock_skew`); nothing is stored and no SSE event is emitted.
+            `clock_skew`); nothing is applied to the match and no SSE event is
+            emitted. A superseded remove carries `heldGroups` and is kept in
+            the match's history. The removed bout keeps its stamp, so an older
+            write still carrying it cannot bring it back.
           content:
             application/json:
               schema:
@@ -4867,14 +4919,16 @@ components:
       additionalProperties: false
       required: [applied, reason, message]
       description: >
-        A write the timestamp last-write-wins guard did not persist. Two causes,
-        told apart by `reason`, and they need different remedies:
+        A write nothing of which was applied to the match. Two causes, told
+        apart by `reason`, and they need different remedies:
 
-        - `superseded`: a NEWER result for this match is already stored, so the
-          incoming write lost the comparison. Clients must treat this as "not
-          saved" (show the message) and must NOT advise blind re-entry:
-          re-submitting re-stamps the payload with the current clock and would
-          overwrite the newer result that won.
+        - `superseded`: every group the write changes is held, because a NEWER
+          change to each is already stored (the merge orders a match's writes
+          group by group, by stamp; see MergeGroup). The write is not lost: its
+          values are kept in the match's history, and `heldGroups` names the
+          groups. Clients must treat this as "not applied" (show the message)
+          and must NOT advise blind re-entry: re-submitting re-stamps the
+          payload with the current clock and would overwrite the newer change.
 
         - `clock_skew`: the request's `modifiedAt` is implausibly far in the
           future (more than a few seconds ahead of the server), so this device's
@@ -4889,7 +4943,8 @@ components:
         Both are returned with HTTP 200, never an error status: neither is a
         fault, and neither can win a retry as-is, so an error status would make
         an offline write queue retry an unwinnable request forever. Nothing is
-        persisted and no SSE broadcast is emitted in either case.
+        applied to the match and no SSE broadcast is emitted in either case; a
+        superseded write leaves its match history entry and nothing else.
 
         PUT /score, POST /decision, PUT /override-winner and both /daihyosen
         paths each carry a client-supplied modifiedAt, so the guard compares
@@ -4927,6 +4982,28 @@ components:
         message:
           type: string
           description: Operator-facing explanation.
+        heldGroups:
+          type: array
+          items:
+            $ref: '#/components/schemas/MergeGroup'
+          description: >
+            Present on `superseded`: the groups the write changes, every one
+            of them held and kept in the match's history.
+
+    MergeGroup:
+      type: string
+      description: >
+        A group of match fields that change together and are ordered together
+        (bc-mrgc). `points` is the match-level scoreline (ipponsA, ipponsB,
+        hansokuA, hansokuB); `result` is the verdict (status, winner, winnerId,
+        decision, decisionBy, decisionReason, and the correctionReason and
+        resultSource that describe it); `encho` the match-level overtime;
+        `flags` the engi flag counts; `rep` the pool representative players;
+        and `bout:<position>` one bout row (1..n, or -1 for the representative
+        bout). The sides, court, schedule and round are not groups. A write
+        names the groups it changes in `changed`; the match records the stamp
+        of the last applied change to each in `groupStamps`.
+      pattern: '^(points|result|encho|flags|rep|bout:-?[0-9]+)$'
 
     DaihyosenWriteStamp:
       type: object
@@ -5710,6 +5787,40 @@ components:
             single session's own out-of-order delivery (a reconnect flush). Writes
             from different sessions are concurrent operators and apply
             last-write-wins. Never returned in responses or public projections.
+        changed:
+          type: array
+          writeOnly: true
+          items:
+            $ref: '#/components/schemas/MergeGroup'
+          description: >
+            The groups this write changes (PUT /score and each /bulk-score
+            entry). The server applies each one only if the write's
+            `modifiedAt` is not older than that group's stored stamp, never
+            overwrites a group the write does not name, and keeps a named
+            group it does not apply in the match's history. Absent means every
+            group the payload carries; see PUT /score. Never stored or
+            returned.
+        groupStamps:
+          type: object
+          readOnly: true
+          additionalProperties:
+            type: integer
+            format: int64
+          description: >
+            The stamp (server-relative unix ms) of the last applied change to
+            each group, keyed by MergeGroup. Absent on a match written before
+            groups existed: every group then reads as stamped at
+            `modifiedAt`. A bout group whose row is gone keeps its stamp, so an
+            older write still carrying the row cannot bring it back.
+        heldGroups:
+          type: array
+          readOnly: true
+          items:
+            $ref: '#/components/schemas/MergeGroup'
+          description: >
+            On a write's response only: the groups of THIS write that were not
+            applied (a newer change to them is stored) and were kept in the
+            match's history. Omitted when everything applied.
         sideA:
           type: string
           maxLength: 100
@@ -6183,7 +6294,16 @@ components:
             Server-relative unix-millis timestamp of the last change to this
             bracket match's result, used to reconcile out-of-order writes.
             0/absent means unstamped (legacy data); arrival order still
-            applies.
+            applies. Always the newest of `groupStamps`.
+        groupStamps:
+          type: object
+          readOnly: true
+          additionalProperties:
+            type: integer
+            format: int64
+          description: >
+            The stamp of the last applied change to each group of this match,
+            keyed by MergeGroup; see MatchResult.groupStamps.
         placeholderA:
           type: string
           readOnly: true

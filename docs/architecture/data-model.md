@@ -303,6 +303,15 @@ are one concept with two instances, not twelve independent attributes. Side A is
 side B is shiro. The draw fixes that pairing, and it is not a display order: every surface
 draws shiro on the left.
 
+**A pool bout's id carries its number in the playing order.** A pool or league bout is
+`<pool name>-<n>`, and the draw gives `n` after it has put the pool's bouts in the order they
+are played (a league is reordered so nobody fights twice in a row), so `Pool A-0` is the
+first bout played. Every surface names a bout by this number: the court console's "Match 1
+of 6", the server's messages, the scores list and the printed workbook. Moving a bout in a
+court's queue changes when it is played, not its number. A draw made by an earlier release
+may hold a league whose ids were given before the reorder; its bouts keep their numbers, and
+every surface shows the same one.
+
 **A team match is an aggregate.** `SubMatchResult` is a full bout in its own right: its own
 pairing, score, decision, overtime and judges' decision. A five person team encounter holds
 five of them, plus an optional representative bout at position `-1`. Ranking figures such as

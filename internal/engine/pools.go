@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"sort"
 	"strconv"
+	"strings"
 
 	"github.com/gitrgoliveira/bracket-creator/internal/domain"
 	"github.com/gitrgoliveira/bracket-creator/internal/helper"
@@ -315,5 +316,23 @@ func (e *Engine) generatePools(comp *state.Competition, players []domain.Player,
 		results, _ = assignPoolMatchSlots(results, comp, tournament)
 	}
 
+	numberPoolMatchesInPlayingOrder(results)
 	return e.store.SavePoolMatches(comp.ID, results)
+}
+
+// numberPoolMatchesInPlayingOrder gives each pool's bouts their ids in the
+// order they are saved, which is the order they are played (operator ruling
+// 2026-10-04: one number on every surface, the playing order, with the id in
+// sync). The league scheduler reorders the bouts after they are created so
+// nobody fights twice in a row, which left "Pool A-1" as the first bout
+// played: the court console called it "Match 1 of 6" while the server's
+// label and the workbook, which read the id, called it Match 2. Numbering
+// after every reorder, before anything stores an id, puts "Pool A-0" first.
+func numberPoolMatchesInPlayingOrder(results []state.MatchResult) {
+	next := make(map[string]int)
+	for i := range results {
+		pool := results[i].ID[:strings.LastIndex(results[i].ID, "-")]
+		results[i].ID = pool + "-" + strconv.Itoa(next[pool])
+		next[pool]++
+	}
 }

@@ -1,8 +1,10 @@
 package mobileapp
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
+	"log"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -101,4 +103,33 @@ func TestInternalErrorNamesACorruptFile(t *testing.T) {
 		assert.NotContains(t, body, "corrupt_file")
 		assert.NotContains(t, body, "/srv/tournament-data")
 	})
+}
+
+// A write whose transaction log committed but whose file write failed is a
+// disk fault: it is still answered 500, so the device keeps retrying until one
+// lands (operator decision 2026-10-04), and the server logs it as an error
+// that says the change is kept.
+func TestInternalErrorLogsACommittedButUnappliedWriteAsADiskError(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	var buf bytes.Buffer
+	prev := log.Writer()
+	log.SetOutput(&buf)
+	defer log.SetOutput(prev)
+
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	c.Request, _ = http.NewRequest(http.MethodPut, "/api/competitions/abc/matches/Pool%20A-0/score", nil)
+	internalError(c, fmt.Errorf("WithTransaction %q: Apply: open pool-matches.csv: permission denied (%w)", "abc", state.ErrTxCommitted))
+
+	assert.Equal(t, http.StatusInternalServerError, w.Code, "the device keeps retrying")
+	assert.Contains(t, w.Body.String(), "internal error")
+	assert.Contains(t, buf.String(), "ERROR")
+	assert.Contains(t, buf.String(), "disk refused a file write")
+
+	buf.Reset()
+	w = httptest.NewRecorder()
+	c, _ = gin.CreateTestContext(w)
+	c.Request, _ = http.NewRequest(http.MethodGet, "/x", nil)
+	internalError(c, errors.New("something else"))
+	assert.NotContains(t, buf.String(), "disk refused", "only a committed transaction is a disk fault")
 }

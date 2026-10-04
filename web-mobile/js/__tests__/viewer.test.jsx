@@ -286,6 +286,25 @@ describe('Viewer Utils', () => {
       expect(compMatches(c)).toEqual([]);
     });
 
+    // "Match N of M" reads the bout's number from its id, the one every
+    // surface uses (operator ruling 2026-10-04: one number, the playing
+    // order, ids in sync). A draw made before the draw numbered its bouts in
+    // playing order saved them out of id order; the console now names them
+    // as the server's label and the workbook do, not by row position.
+    it('names a bout by its id\'s number whatever row it is saved in', () => {
+      const c = mkComp({
+        poolMatches: [
+          { id: 'Pool A-1', status: 'scheduled' },
+          { id: 'Pool A-2', status: 'scheduled' },
+          { id: 'Pool A-0', status: 'scheduled' },
+        ],
+      });
+      const ms = compMatches(c);
+      expect(ms.map((m) => [m.id, m.poolPosition, m.poolCount])).toEqual([
+        ['Pool A-1', 2, 3], ['Pool A-2', 3, 3], ['Pool A-0', 1, 3],
+      ]);
+    });
+
     it('excludes tiebreak/daihyosen bouts from poolCount and poolPosition', () => {
       // 3-player RR = 3 regular matches; the -TB- and -DH- bouts must NOT count
       // toward "Match N of M" (they are not part of the round-robin schedule).

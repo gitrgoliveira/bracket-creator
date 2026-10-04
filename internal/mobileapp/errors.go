@@ -27,6 +27,15 @@ import (
 // failures should still return an explicit 4xx with their own message.
 func internalError(c *gin.Context, err error, publicMsg ...string) {
 	log.Printf("mobileapp: %s %s: %v", c.Request.Method, c.Request.URL.Path, err)
+	// A transaction whose log committed and whose file write then failed
+	// (state.ErrTxCommitted) is a disk fault, not a refused write: the change
+	// is kept and lands on restart, or with the next write the disk accepts.
+	// The answer stays a 500, so the device keeps retrying until one lands
+	// (operator decision 2026-10-04), and the log says so as an error.
+	if errors.Is(err, state.ErrTxCommitted) {
+		log.Printf("mobileapp: ERROR: %s %s: the server's disk refused a file write. The change is kept in the transaction log and is written on restart, or by the next write the disk accepts; the device keeps retrying it. Check the disk (space, permissions).",
+			c.Request.Method, c.Request.URL.Path)
+	}
 	// A file the operator can repair is the ONE internal failure worth naming.
 	// Everything else here is deliberately opaque, but "internal error" on a
 	// corrupt competition file tells an organiser mid tournament that scoring

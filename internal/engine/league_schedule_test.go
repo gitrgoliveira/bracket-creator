@@ -3,6 +3,7 @@ package engine
 import (
 	"fmt"
 	"sort"
+	"strings"
 	"testing"
 	"time"
 
@@ -430,6 +431,52 @@ func TestGeneratePools_League_G1G2(t *testing.T) {
 				for i := 1; i < len(slotIdxs); i++ {
 					assert.Greaterf(t, slotIdxs[i]-slotIdxs[i-1], 1,
 						"G2 violation: player %q in adjacent slots %d and %d", player, slotIdxs[i-1], slotIdxs[i])
+				}
+			}
+		})
+	}
+}
+
+// Each pool's bouts are numbered in the order they are played (operator
+// ruling 2026-10-04: "Should be in playing order and both ids should be in
+// sync"). The draw reorders a league so nobody fights twice in a row; the
+// ids are given after that, so "Pool A-0" is the first bout played, and the
+// id's number, the console's "Match N of M", the server's label and the
+// workbook all name a bout alike. A mixed draw's pools keep the same rule.
+func TestGeneratePools_BoutsAreNumberedInPlayingOrder(t *testing.T) {
+	t.Parallel()
+	for _, tt := range []struct {
+		name     string
+		format   string
+		poolSize int
+		courts   []string
+	}{
+		{"league", state.CompFormatLeague, 6, []string{"A", "B"}},
+		{"two pools", state.CompFormatMixed, 3, []string{"A", "B"}},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			eng, store, _ := setupTestEngine(t)
+			compID := "play-order-" + strings.ReplaceAll(tt.name, " ", "-")
+			comp := &state.Competition{
+				ID: compID, Name: "Play order", Kind: "individual", Format: tt.format,
+				PoolSize: tt.poolSize, PoolSizeMode: "min", PoolWinners: 1, RoundRobin: true,
+				Courts: tt.courts, StartTime: "09:00", Status: "setup",
+			}
+			require.NoError(t, store.SaveCompetition(comp))
+			saveTestParticipants(t, store, compID, names(6))
+			require.NoError(t, eng.StartCompetition(compID))
+
+			matches, err := store.LoadPoolMatches(compID)
+			require.NoError(t, err)
+			require.NotEmpty(t, matches)
+			next := map[string]int{}
+			for i, m := range matches {
+				pool := m.ID[:strings.LastIndex(m.ID, "-")]
+				assert.Equalf(t, fmt.Sprintf("%s-%d", pool, next[pool]), m.ID, "row %d is numbered by its place in the playing order", i)
+				next[pool]++
+				if i > 0 && matches[i-1].Court == m.Court {
+					assert.LessOrEqualf(t, matches[i-1].ScheduledAt, m.ScheduledAt, "a court's rows are saved in the playing order (row %d)", i)
 				}
 			}
 		})

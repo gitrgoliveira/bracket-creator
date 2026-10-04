@@ -340,7 +340,13 @@ export const QUEUED_NOTICE = 'Not sent yet: saved on this device, and sent when 
 // the two, asked with the queued answer the editor kept (or `true` when it
 // only knows a write is pending, e.g. reopened over a queued Finish).
 export const QUEUED_UNSAVED_NOTICE = 'Not sent yet: keep this page open until the connection returns.';
-export function queuedNotice(res) {
+// QUEUED_REFUSED_NOTICE: the same held write once the server has refused it
+// past the notice threshold (a server error on every attempt). The connection
+// is fine then, so "sent when the connection returns" would be false; the
+// editor offers to discard it beside this line (HeldWriteDiscard).
+export const QUEUED_REFUSED_NOTICE = 'Not saved yet: the server keeps refusing it. It is still being tried.';
+export function queuedNotice(res, { keepsFailing = false } = {}) {
+    if (keepsFailing) return QUEUED_REFUSED_NOTICE;
     return res && typeof res === 'object' && res.persisted === false ? QUEUED_UNSAVED_NOTICE : QUEUED_NOTICE;
 }
 

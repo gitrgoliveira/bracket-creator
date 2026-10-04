@@ -15,7 +15,7 @@ import React from 'react';
 import { render, act, fireEvent, screen } from '@testing-library/react';
 import { describe, it, expect, vi, beforeAll, afterAll, beforeEach, afterEach } from 'vitest';
 import { installWindowStubs } from '../helpers/stub_globals.js';
-import { QUEUED_NOTICE, QUEUED_UNSAVED_NOTICE, HELD_WRITE_DISCARD_LABEL } from '../../write_result.jsx';
+import { QUEUED_NOTICE, QUEUED_UNSAVED_NOTICE, QUEUED_REFUSED_NOTICE, HELD_WRITE_DISCARD_LABEL } from '../../write_result.jsx';
 import { keyboardClick } from '../helpers/tap_events.js';
 
 const STUBBED_GLOBALS = {
@@ -151,8 +151,18 @@ describe.each(EDITORS)('$name editor: a held write the server keeps refusing can
   });
 
   it('offers nothing while the held write is only waiting', async () => {
-    await queued();
+    const banner = await queued();
     expect(discardButton()).toBeNull();
+    expect(banner.textContent).toContain(QUEUED_NOTICE);
+  });
+
+  // The connection is fine once the server keeps refusing it, so the line no
+  // longer says it is sent "when the connection returns".
+  it('once it keeps failing, the banner says the server keeps refusing it', async () => {
+    const banner = await queued();
+    await crossThreshold();
+    expect(banner.textContent).toContain(QUEUED_REFUSED_NOTICE);
+    expect(banner.textContent).not.toContain(QUEUED_NOTICE);
   });
 
   it('once it keeps failing, discards it after the confirm, and only for this match', async () => {

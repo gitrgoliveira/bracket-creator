@@ -46,6 +46,8 @@ export function heldWriteWhere(held, competitions) {
   return compName && what ? `${compName} · ${what}` : (compName || what);
 }
 
+const capitalize = (t) => (t ? t.charAt(0).toUpperCase() + t.slice(1) : t);
+
 // HeldWritesPanel: every write held on this device, opened from the topbar's
 // held-writes indicator. A write the server keeps refusing can be discarded
 // here, one at a time and after a confirm, whatever it is: a running
@@ -92,7 +94,7 @@ export function HeldWritesPanel({ competitions, onClose }) {
               <div className="held-writes__text">
                 <div className="held-writes__where">{heldWriteWhere(held, competitions)}</div>
                 <div className={`held-writes__state${held.keepsFailing ? ' held-writes__state--error' : ''}`}>
-                  {`${heldWriteWhat(held)}: ${heldWriteState(held)}`}
+                  {`${capitalize(heldWriteWhat(held))}: ${heldWriteState(held)}`}
                 </div>
               </div>
               {held.keepsFailing && (

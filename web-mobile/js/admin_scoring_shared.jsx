@@ -10,7 +10,7 @@ import { DAIHYOSEN_POSITION, scoreRowMatchLabel } from './pool_ids.jsx';
 import {
   writeDidNotLand, writeRetryable,
   attemptScoreWrite, DOWNSTREAM_KNOCKOUT_PLAYED_CANCELLED, DOWNSTREAM_KNOCKOUT_REOPEN_CANCELLED, downstreamKnockoutReopenedNotice,
-  courtBusyMessage, HELD_WRITE_DISCARD_LABEL, heldWriteDiscardConfirm,
+  courtBusyMessage, HELD_WRITE_DISCARD_LABEL, heldWriteDiscardConfirm, queuedNotice,
 } from './write_result.jsx';
 import { sameCompetitor } from './competitor_identity.jsx';
 import { sideWord } from './side_cell.jsx';
@@ -48,22 +48,40 @@ function isBoutDecided(aPts, bPts) {
 // It never blocks another write (each queued write is sent on its own), but
 // without this the only way to stop it was signing out, which discards every
 // held result. `onDiscarded` lets the editor drop its pending banner.
-export function HeldWriteDiscard({ compId, matchId, onDiscarded, disabled = false }) {
+// useHeldWriteKeepsFailing: whether this match's held write has crossed the
+// server-error threshold. The sync status moves to "server-error" when one
+// does, and back when it lands or is discarded: re-asked on each. Returns
+// [stuck, recheck].
+function useHeldWriteKeepsFailing(compId, matchId) {
   const api = window.API;
   const keepsFailing = () => !!(api && typeof api.heldWriteKeepsFailing === 'function'
     && compId && matchId && api.heldWriteKeepsFailing(compId, matchId));
   const [stuck, setStuck] = useStateA(keepsFailing);
-  const [busy, setBusy] = useStateA(false);
   const mountedRef = useRefA(true);
   useEffectA(() => () => { mountedRef.current = false; }, []);
-  // The sync status moves to "server-error" when a held write crosses the
-  // threshold, and back when it lands or is discarded: re-ask on each.
   useEffectA(() => {
     setStuck(keepsFailing());
     if (typeof window.subscribeSyncStatus !== 'function') return undefined;
     return window.subscribeSyncStatus(() => { if (mountedRef.current) setStuck(keepsFailing()); });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [compId, matchId]);
+  return [stuck, () => { if (mountedRef.current) setStuck(keepsFailing()); }];
+}
+
+// HeldWriteNotice: the pending banner's line, worded for where the held
+// write stands (queuedNotice): waiting for the connection, held in this page
+// only, or refused by the server on every attempt. The three editors render it.
+export function HeldWriteNotice({ compId, matchId, res }) {
+  const [stuck] = useHeldWriteKeepsFailing(compId, matchId);
+  return <span>{queuedNotice(res, { keepsFailing: stuck })}</span>;
+}
+
+export function HeldWriteDiscard({ compId, matchId, onDiscarded, disabled = false }) {
+  const api = window.API;
+  const [stuck, recheck] = useHeldWriteKeepsFailing(compId, matchId);
+  const [busy, setBusy] = useStateA(false);
+  const mountedRef = useRefA(true);
+  useEffectA(() => () => { mountedRef.current = false; }, []);
   if (!stuck) return null;
   const discard = async () => {
     setBusy(true);
@@ -73,7 +91,7 @@ export function HeldWriteDiscard({ compId, matchId, onDiscarded, disabled = fals
         : false;
       if (!ok || !mountedRef.current) return;
       api.discardFailingHeldWrites(compId, matchId);
-      setStuck(keepsFailing());
+      recheck();
       if (typeof onDiscarded === 'function') onDiscarded();
     } finally {
       if (mountedRef.current) setBusy(false);

@@ -313,11 +313,11 @@ describe('AdminTopbar: the held-writes list', () => {
     const rows = screen.getAllByTestId('held-write');
     expect(rows).toHaveLength(3);
     expect(rows[0]).toHaveTextContent('Teams · Pool A · Match 1');
-    expect(rows[0]).toHaveTextContent('score update: the server keeps refusing it');
+    expect(rows[0]).toHaveTextContent('Score update: the server keeps refusing it');
     expect(rows[1]).toHaveTextContent("Teams · Kodokan's lineup");
-    expect(rows[1]).toHaveTextContent('team lineup: the server keeps refusing it');
+    expect(rows[1]).toHaveTextContent('Team lineup: the server keeps refusing it');
     expect(rows[2]).toHaveTextContent('Teams · Match 4');
-    expect(rows[2]).toHaveTextContent('winner set by hand: waiting to be sent');
+    expect(rows[2]).toHaveTextContent('Winner set by hand: waiting to be sent');
     // Discard only where the server keeps refusing.
     expect(rows[0].querySelector('[data-testid="held-write-discard-one"]')).not.toBeNull();
     expect(rows[1].querySelector('[data-testid="held-write-discard-one"]')).not.toBeNull();

@@ -21,7 +21,7 @@
 
 const { useState: useStateE, useEffect: useEffectE, useRef: useRefE } = React;
 
-import { ReasonPrompt, CORRECTION_PRESETS, useAdoptFromServer, HeldWriteDiscard } from './admin_scoring_shared.jsx';
+import { ReasonPrompt, CORRECTION_PRESETS, useAdoptFromServer, HeldWriteDiscard, HeldWriteNotice } from './admin_scoring_shared.jsx';
 import { SyncStatusPill, useDebouncedRunningWrite, useChangedGroups, useKeptInHistoryNote, KeptInHistoryNote } from './admin_scoring_autosave.jsx';
 import { MatchHistoryDisclosure } from './match_history_view.jsx';
 import { useEscapeToClose, confirmDialog } from './ui.jsx';
@@ -29,7 +29,7 @@ import { useEscapeToClose, confirmDialog } from './ui.jsx';
 import { NumberedName } from './numbered_name.jsx';
 import { SideCell } from './side_cell.jsx';
 import { useArmedConfirm } from './tap_guard.jsx';
-import { terminalFailureBanner, notSavedText, writeWasRefused, writeRetryable, queuedNotice } from './write_result.jsx';
+import { terminalFailureBanner, notSavedText, writeWasRefused, writeRetryable } from './write_result.jsx';
 
 const MAX_FLAGS = 5;
 // Valid totals: 1, 3, 5 (odd, guarantees a winner).
@@ -569,7 +569,7 @@ export function EngiScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext
             the operator may still retry manually while we hold the payload. */}
         {pendingWrite && !writeFailed && (
           <div className="pending-write-banner" role="status" aria-live="polite">
-            <span>{queuedNotice(pendingWrite)}</span>
+            <HeldWriteNotice compId={m.compId} matchId={m.id} res={pendingWrite} />
             {pendingFnRef.current && (
               <button type="button" className="btn btn--sm btn--ghost" disabled={submitting} onClick={() => doSubmit(pendingFnRef.current)}>Retry now</button>
             )}

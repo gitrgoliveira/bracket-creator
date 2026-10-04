@@ -1127,6 +1127,15 @@ function _hasServerErroringQueued() {
 function _keepsFailing(d) {
     return !!d && (Number(d.attempts) || 0) >= SERVER_REJECTION_NOTICE_THRESHOLD;
 }
+// The one discard of a held write (API.discardHeldWrite and the editors'
+// API.discardFailingHeldWrites): only a write the server keeps refusing.
+function _discardIfFailing(key, d) {
+    return _keepsFailing(d) && _dequeue(key, d);
+}
+function _afterDiscard() {
+    _persistQueue();
+    _recomputeSyncStatus();
+}
 
 /**
  * Recompute and publish the correct sync status from current state:
@@ -4518,13 +4527,41 @@ const API = {
     discardFailingHeldWrites(compID, matchID) {
         let discarded = 0;
         for (const [key, d] of _entriesFor(_revKey(compID, matchID))) {
-            if (_keepsFailing(d) && _dequeue(key, d)) discarded++;
+            if (_discardIfFailing(key, d)) discarded++;
         }
-        if (discarded > 0) {
-            _persistQueue();
-            _recomputeSyncStatus();
-        }
+        if (discarded > 0) _afterDiscard();
         return discarded;
+    },
+
+    // Every write held on this device, in the order it replays, for the admin
+    // topbar's held-writes list (HeldWritesPanel, admin_shell.jsx). It is where
+    // a held write with no editor to discard it from is reached: a running
+    // autosave, a lineup save or a hand-set winner the server keeps refusing.
+    // Each item names what it is (kind, terminal; for a lineup its team and
+    // round), whether it keeps failing, and the key discardHeldWrite takes. A
+    // write still sending, or only waiting for the connection, is listed
+    // without a way to discard it: it will land on its own.
+    heldWrites() {
+        const all = [..._writeQueue.entries()].filter(([, d]) => !!d).sort(_byEntryOrder);
+        return all.map(([key, d]) => ({
+            key,
+            compID: d.compID || '',
+            matchID: d.matchID || '',
+            kind: d.kind || 'score',
+            terminal: !!d.terminal,
+            keepsFailing: _keepsFailing(d),
+            authBlocked: !!d.authBlocked,
+            ...(d.kind === 'lineup' && d.payload
+                ? { teamId: d.payload.teamId || '', round: d.payload.round } : {}),
+        }));
+    },
+    // Discards ONE held write, by the key heldWrites gave, and only while the
+    // server keeps refusing it (a write waiting for the connection is never
+    // discarded through here). Returns whether it was.
+    discardHeldWrite(key) {
+        const ok = _discardIfFailing(key, _writeQueue.get(key));
+        if (ok) _afterDiscard();
+        return ok;
     },
 
     // mp-gpra (security): clearQueue: drop all queued writes (in-memory + the

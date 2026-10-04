@@ -350,13 +350,37 @@ export function queuedNotice(res) {
 // open, so the editor's pending banner offers to discard it, and only it,
 // after this confirm. Named "result" as the operator counts it.
 export const HELD_WRITE_DISCARD_LABEL = 'Discard held result';
-export function heldWriteDiscardConfirm() {
+export function heldWriteDiscardConfirm(held) {
+    // `held` (from the topbar's list) names any other kind of held write; the
+    // editors' button, which discards a result, passes nothing.
+    const what = held ? heldWriteWhat(held) : 'result';
+    const where = held && held.kind === 'lineup' ? 'the lineup' : 'the match';
     return {
-        message: 'The server keeps refusing the result held on this device for this match, so it may never be sent. '
-            + 'Discard it? Nothing else is discarded. Check the match afterwards, and enter the result again if it is still needed.',
+        message: `The server keeps refusing the ${what} held on this device${held ? '' : ' for this match'}, so it may never be sent. `
+            + `Discard it? Nothing else is discarded. Check ${where} afterwards, and enter it again if it is still needed.`,
         confirmLabel: 'Discard it',
         danger: true,
     };
+}
+
+// heldWriteWhat: what one held write is, in the operator's words, for the
+// topbar's held-writes list and its discard confirm. `held` is an item of
+// API.heldWrites(): a running autosave is a score update, everything else
+// the result or setting it carried.
+export function heldWriteWhat(held) {
+    switch (held && held.kind) {
+        case 'decision': return 'decision';
+        case 'override': return 'winner set by hand';
+        case 'lineup': return 'team lineup';
+        default: return held && held.terminal ? 'finished result' : 'score update';
+    }
+}
+
+// heldWriteState: where one held write stands, for the same list.
+export function heldWriteState(held) {
+    if (held && held.keepsFailing) return 'the server keeps refusing it';
+    if (held && held.authBlocked) return 'waiting for you to sign in';
+    return 'waiting to be sent';
 }
 
 // queuedWritesNoun: the ONE rule for how held writes are counted to the

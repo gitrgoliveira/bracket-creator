@@ -290,15 +290,80 @@ a:hover {
    STATIC dot in every state: the pill beside it already pulses while the link
    is down, and the operator ruled no second motion (DESIGN.md Principle 3).
    Offline and a server that keeps refusing take the danger colour; "Sending..."
-   stays calm. Not interactive, so it needs no touch floor. */
+   stays calm. A button: it opens the list of what is held (HeldWritesPanel),
+   so it carries the touch floor and an underline that says it opens. */
 .topbar__held {
   display: inline-flex;
   align-items: center;
   gap: 6px;
+  min-height: 36px;
+  padding: 0 6px;
+  border: 0;
+  border-radius: 6px;
+  background: none;
+  font: inherit;
   font-size: 12px;
   font-weight: 600;
   color: var(--ink-2);
   white-space: nowrap;
+  cursor: pointer;
+  text-decoration: underline dotted;
+  text-underline-offset: 3px;
+}
+
+.topbar__held:hover {
+  background: var(--line-2);
+}
+
+.topbar__held:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+@media (pointer: coarse) {
+  .topbar__held {
+    min-height: 44px;
+  }
+}
+
+/* The list it opens: one row per held write, what it is and where it stands,
+   with Discard on a write the server keeps refusing. */
+.held-writes {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.held-writes__item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 0;
+  border-top: 1px solid var(--line-2);
+}
+
+.held-writes__item:first-child {
+  border-top: 0;
+}
+
+.held-writes__where {
+  font-weight: 600;
+  color: var(--ink-1);
+}
+
+.held-writes__state {
+  font-size: 13px;
+  color: var(--ink-2);
+}
+
+.held-writes__state--error {
+  color: var(--danger);
+}
+
+.held-writes__empty {
+  margin: 0;
+  color: var(--ink-2);
 }
 
 .topbar__held__dot {

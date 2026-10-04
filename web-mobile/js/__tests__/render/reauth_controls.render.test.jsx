@@ -202,7 +202,9 @@ describe('AdminTopbar: held results', () => {
 
     expect(held()).toHaveTextContent('Offline: 1 result not sent');
     expect(held().className).toContain('topbar__held--offline');
-    expect(held().getAttribute('role')).toBe('status');
+    // A button that opens the list; its text is the live region.
+    expect(held().tagName).toBe('BUTTON');
+    expect(held().querySelector('[role="status"]')).toHaveTextContent('Offline: 1 result not sent');
     expect(screen.queryByText('Connected')).toBeNull();
     expect(screen.getByText('Reconnecting…').className).toContain('topbar__conn--down');
   });
@@ -261,5 +263,83 @@ describe('AdminTopbar: held results', () => {
     });
     expect(held()).toBeNull();
     expect(screen.getByText('Connected')).toBeTruthy();
+  });
+});
+
+// The held-writes indicator opens the list of what is held (HeldWritesPanel),
+// where a write the server keeps refusing is discarded on its own, whatever it
+// is: a running autosave, a lineup save and a hand-set winner have no editor of
+// their own to offer it. A write only waiting is listed with no Discard.
+describe('AdminTopbar: the held-writes list', () => {
+  let bus, unsentBus, saved;
+  const KEYS = ['subscribeUnsentWrites', 'API', 'confirmDialog', 'compMatches'];
+  beforeAll(() => { saved = KEYS.map((k) => [k, k in window, window[k]]); });
+  afterAll(() => { for (const [k, had, v] of saved) { if (had) window[k] = v; else delete window[k]; } });
+
+  let held;
+  beforeEach(() => {
+    bus = makeFakeSyncBus('server-error');
+    unsentBus = makeFakeSyncBus({ total: 3, terminal: 2, authBlocked: 0 });
+    window.subscribeSyncStatus = bus.subscribe;
+    window.subscribeUnsentWrites = unsentBus.subscribe;
+    window.requestReauth = vi.fn();
+    held = [
+      { key: 'k1', compID: 'c1', matchID: 'Pool A-0', kind: 'score', terminal: false, keepsFailing: true, authBlocked: false },
+      { key: 'k2', compID: 'c1', matchID: '', kind: 'lineup', terminal: true, keepsFailing: true, authBlocked: false, teamId: 't1', round: '1' },
+      { key: 'k3', compID: 'c1', matchID: 'r1-m1', kind: 'override', terminal: true, keepsFailing: false, authBlocked: false },
+    ];
+    window.API = {
+      heldWrites: vi.fn(() => held.map((h) => ({ ...h }))),
+      discardHeldWrite: vi.fn((key) => { held = held.filter((h) => h.key !== key); return true; }),
+    };
+    window.confirmDialog = vi.fn().mockResolvedValue(true);
+    window.compMatches = () => [{ id: 'Pool A-0', poolName: 'Pool A', phase: 'pool' }, { id: 'r1-m1', phase: 'bracket', matchNumber: 4 }];
+  });
+
+  function openList() {
+    render(
+      <window.AdminTopbar
+        tournament={{ name: 'Kanto Open', competitions: [{ id: 'c1', name: 'Teams', participants: [{ id: 't1', name: 'Kodokan' }] }] }}
+        onLogout={vi.fn()}
+        onViewerMode={vi.fn()}
+        hideRunningStrip
+      />
+    );
+    fireEvent.click(screen.getByTestId('topbar-held'));
+  }
+
+  it('lists each held write by competition, match or team, what it is and where it stands', () => {
+    openList();
+    const rows = screen.getAllByTestId('held-write');
+    expect(rows).toHaveLength(3);
+    expect(rows[0]).toHaveTextContent('Teams · Pool A · Match 1');
+    expect(rows[0]).toHaveTextContent('score update: the server keeps refusing it');
+    expect(rows[1]).toHaveTextContent("Teams · Kodokan's lineup");
+    expect(rows[1]).toHaveTextContent('team lineup: the server keeps refusing it');
+    expect(rows[2]).toHaveTextContent('Teams · Match 4');
+    expect(rows[2]).toHaveTextContent('winner set by hand: waiting to be sent');
+    // Discard only where the server keeps refusing.
+    expect(rows[0].querySelector('[data-testid="held-write-discard-one"]')).not.toBeNull();
+    expect(rows[1].querySelector('[data-testid="held-write-discard-one"]')).not.toBeNull();
+    expect(rows[2].querySelector('[data-testid="held-write-discard-one"]')).toBeNull();
+  });
+
+  it('discards only the one write, after a confirm naming what it is', async () => {
+    openList();
+    const lineupRow = screen.getAllByTestId('held-write')[1];
+    await act(async () => { fireEvent.click(lineupRow.querySelector('[data-testid="held-write-discard-one"]')); });
+    expect(window.confirmDialog).toHaveBeenCalledTimes(1);
+    expect(window.confirmDialog.mock.calls[0][0].message).toContain('team lineup');
+    expect(window.API.discardHeldWrite).toHaveBeenCalledWith('k2');
+    expect(window.API.discardHeldWrite).toHaveBeenCalledTimes(1);
+    expect(screen.getAllByTestId('held-write')).toHaveLength(2);
+  });
+
+  it('a confirm answered No discards nothing', async () => {
+    window.confirmDialog = vi.fn().mockResolvedValue(false);
+    openList();
+    await act(async () => { fireEvent.click(screen.getAllByTestId('held-write-discard-one')[0]); });
+    expect(window.API.discardHeldWrite).not.toHaveBeenCalled();
+    expect(screen.getAllByTestId('held-write')).toHaveLength(3);
   });
 });

@@ -5,7 +5,8 @@
 
 // The held-writes copy (bc-offl). write_result.jsx is an import-only leaf, so
 // this script-tagged module can import it without a double evaluation.
-import { heldWritesText } from './write_result.jsx';
+import { heldWritesText, heldWriteWhat, heldWriteState, heldWriteDiscardConfirm, matchLabel } from './write_result.jsx';
+import { scoreRowMatchLabel } from './pool_ids.jsx';
 
 const { useState: useStateA, useMemo: useMemoA, useEffect: useEffectA, useRef: useRefA } = React;
 
@@ -24,6 +25,92 @@ const Modal = window.Modal;
 // a second copy of a QR-plus-copy modal is the drift this repo keeps paying
 // for. qr.js is no longer imported here because ShareLinkModal owns the QR.
 const ShareLinkModal = window.ShareLinkModal;
+
+// heldWriteWhere: which match (or team) one held write is about, named the
+// way the score list names it (scoreRowMatchLabel) when the competition's
+// matches are loaded, else by the match's number or id (matchLabel). The
+// competition is named too: the list spans every competition on the device.
+export function heldWriteWhere(held, competitions) {
+  const comp = (competitions || []).find((c) => c && c.id === held.compID) || null;
+  const compName = (comp && comp.name) || held.compID || '';
+  let what;
+  if (held.kind === 'lineup') {
+    const team = comp && Array.isArray(comp.participants)
+      ? comp.participants.find((p) => p && p.id === held.teamId) : null;
+    what = team && team.name ? `${team.name}'s lineup` : 'a team lineup';
+  } else {
+    const m = comp && typeof window.compMatches === 'function'
+      ? (window.compMatches(comp) || []).find((x) => x && x.id === held.matchID) : null;
+    what = (m && scoreRowMatchLabel(m)) || matchLabel(m ? { number: m.matchNumber, id: m.id } : { id: held.matchID });
+  }
+  return compName && what ? `${compName} · ${what}` : (compName || what);
+}
+
+// HeldWritesPanel: every write held on this device, opened from the topbar's
+// held-writes indicator. A write the server keeps refusing can be discarded
+// here, one at a time and after a confirm, whatever it is: a running
+// autosave, a lineup save or a hand-set winner has no editor of its own to
+// offer it (the score editors' banner offers it for a result). A write that is
+// only waiting for the connection, or for a sign-in, is listed without one: it
+// lands on its own. Re-read whenever the sync status or the held count moves.
+export function HeldWritesPanel({ competitions, onClose }) {
+  const api = window.API;
+  const read = () => (api && typeof api.heldWrites === 'function' ? api.heldWrites() : []);
+  const [items, setItems] = useStateA(read);
+  const [busyKey, setBusyKey] = useStateA(null);
+  const mountedRef = useRefA(true);
+  useEffectA(() => () => { mountedRef.current = false; }, []);
+  useEffectA(() => {
+    const refresh = () => { if (mountedRef.current) setItems(read()); };
+    const offs = [];
+    if (typeof window.subscribeSyncStatus === 'function') offs.push(window.subscribeSyncStatus(refresh));
+    if (typeof window.subscribeUnsentWrites === 'function') offs.push(window.subscribeUnsentWrites(refresh));
+    return () => offs.forEach((off) => { if (typeof off === 'function') off(); });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  const discard = async (held) => {
+    setBusyKey(held.key);
+    try {
+      const ok = typeof window.confirmDialog === 'function'
+        ? await window.confirmDialog(heldWriteDiscardConfirm(held))
+        : false;
+      if (!ok || !mountedRef.current) return;
+      api.discardHeldWrite(held.key);
+      setItems(read());
+    } finally {
+      if (mountedRef.current) setBusyKey(null);
+    }
+  };
+  return (
+    <Modal title="Held on this device" onClose={onClose}>
+      {items.length === 0 ? (
+        <p className="held-writes__empty">Nothing is held on this device: everything has been sent.</p>
+      ) : (
+        <ul className="held-writes" data-testid="held-writes">
+          {items.map((held) => (
+            <li key={held.key} className="held-writes__item" data-testid="held-write">
+              <div className="held-writes__text">
+                <div className="held-writes__where">{heldWriteWhere(held, competitions)}</div>
+                <div className={`held-writes__state${held.keepsFailing ? ' held-writes__state--error' : ''}`}>
+                  {`${heldWriteWhat(held)}: ${heldWriteState(held)}`}
+                </div>
+              </div>
+              {held.keepsFailing && (
+                <button
+                  type="button"
+                  className="btn btn--sm btn--ghost"
+                  data-testid="held-write-discard-one"
+                  disabled={busyKey !== null}
+                  onClick={() => discard(held)}
+                >Discard</button>
+              )}
+            </li>
+          ))}
+        </ul>
+      )}
+    </Modal>
+  );
+}
 
 // Maximum running-match chips rendered in the topbar status strip before the
 // "+N more" overflow indicator kicks in.
@@ -174,6 +261,7 @@ function AdminTopbar({ onLogout, onViewerMode, tournament, hideRunningStrip }) {
     return () => unsub();
   }, []);
   const heldText = heldWritesText(syncStatus, unsent);
+  const [heldOpen, setHeldOpen] = useStateA(false);
   // While queued writes fail for network reasons the event stream may still
   // read open; the pill says what the writes found (operator decision 2026-09-27).
   const linkUp = connected && syncStatus !== 'offline';
@@ -210,15 +298,25 @@ function AdminTopbar({ onLogout, onViewerMode, tournament, hideRunningStrip }) {
           {linkUp ? "Connected" : "Reconnecting…"}
         </span>
         {heldText && (
-          <span
+          // Opens the list of what is held (HeldWritesPanel), where a write
+          // the server keeps refusing can be discarded. The live region is
+          // the text inside, so the button's own name stays the count.
+          <button
+            type="button"
             className={`topbar__held${syncStatus === 'offline' ? " topbar__held--offline" : syncStatus === 'server-error' ? " topbar__held--error" : ""}`}
-            role="status"
-            aria-live="polite"
+            aria-haspopup="dialog"
             data-testid="topbar-held"
+            onClick={() => setHeldOpen(true)}
           >
             <span aria-hidden="true" className="topbar__held__dot"></span>
-            {heldText}
-          </span>
+            <span role="status" aria-live="polite">{heldText}</span>
+          </button>
+        )}
+        {heldOpen && (
+          <HeldWritesPanel
+            competitions={tournament && tournament.competitions}
+            onClose={() => setHeldOpen(false)}
+          />
         )}
         <button type="button" className="viewer-toggle" onClick={onViewerMode}><Icon name="eye" /> Public viewer</button>
         {syncStatus === 'auth-required' && (

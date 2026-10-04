@@ -585,6 +585,50 @@ describe('the way past a held write the server keeps refusing', () => {
     });
 });
 
+// The topbar's held-writes list (HeldWritesPanel) reaches the held writes no
+// editor offers to discard: a running autosave, a lineup save, a hand-set
+// winner. Each is discarded on its own, and only once the server keeps
+// refusing it; a write only waiting for the connection is never discarded.
+describe('any held write the server keeps refusing can be discarded on its own', () => {
+    it('lists every kind, refuses to discard one only waiting, discards each failing one', async () => {
+        const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+        const s = server({ status: (url) => (url.includes('/m2/') ? 200 : 500) });
+        await API.recordScore('c1', 'm1', { status: 'running', ipponsA: ['M'] }, 'pw', null);
+        await API.putTeamLineup('c1', 't1', '1', { 1: 'Ito' }, 'pw');
+        await API.overrideBracketWinner('c1', 'r1-m1', 'Team A', 'pw');
+        await API.recordScore('c1', 'm2', { status: 'completed', winner: 'B' }, 'pw', null);
+        await settleOfflinePass();
+        const waiting = API.heldWrites();
+        expect(waiting.map((h) => h.kind).sort()).toEqual(['lineup', 'override', 'score', 'score']);
+        expect(waiting.every((h) => !h.keepsFailing)).toBe(true);
+        // Only waiting for the connection: not discarded through this door.
+        expect(API.discardHeldWrite(waiting[0].key)).toBe(false);
+        expect(API.heldWrites()).toHaveLength(4);
+        s.online();
+        await tick(60_000); // past the server-error notice threshold
+        const failing = API.heldWrites();
+        // m2 landed; the other three keep failing.
+        expect(failing.map((h) => [h.kind, h.terminal, h.keepsFailing]).sort()).toEqual([
+            ['lineup', true, true], ['override', true, true], ['score', false, true],
+        ]);
+        const lineup = failing.find((h) => h.kind === 'lineup');
+        expect(lineup).toMatchObject({ compID: 'c1', teamId: 't1', round: '1' });
+        expect(failing.find((h) => h.kind === 'override')).toMatchObject({ compID: 'c1', matchID: 'r1-m1' });
+        const statuses = [];
+        const unsub = mod.subscribeSyncStatus((st) => statuses.push(st));
+        expect(statuses.at(-1)).toBe('server-error');
+        expect(API.discardHeldWrite(lineup.key)).toBe(true);
+        expect(API.discardHeldWrite(lineup.key)).toBe(false);
+        expect(API.heldWrites().map((h) => h.kind).sort()).toEqual(['override', 'score']);
+        expect(storedEntries()).toHaveLength(2);
+        for (const h of API.heldWrites()) expect(API.discardHeldWrite(h.key)).toBe(true);
+        unsub();
+        expect(statuses.at(-1)).not.toBe('server-error');
+        expect(API.unsentWrites().total).toBe(0);
+        warnSpy.mockRestore();
+    });
+});
+
 describe('a queued change held because the finished match needs a winner', () => {
     // Operator ruling 2026-10-04: the server keeps the match's recorded finish
     // and the change in its history, and says why (heldReason). The replay

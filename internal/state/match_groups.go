@@ -334,13 +334,25 @@ func MaterializedGroupStamps(stamps map[string]int64, modifiedAt int64, position
 // unstamped write) moves nothing, exactly as an unstamped write always kept
 // the stored ModifiedAt. positions are the bout rows the match held BEFORE
 // the change, for the legacy materialization.
+// stampGroups is the ONE writer of a change's stamp: it records that groups
+// changed at stamp and keeps ModifiedAt the newest stamp. A stamp of 0 (an
+// unstamped write) moves nothing, exactly as an unstamped write always kept
+// the stored ModifiedAt. It never LOWERS a group's stamp either: a caller
+// that already holds a later count for a group (an engi finish let through
+// as a HeldEcho under an older stamp, bc-mrgc Finding 2) must not drag that
+// group's stamp backwards, or a later-arriving change made between the two
+// would read as applying after a group it never actually followed. positions
+// are the bout rows the match held BEFORE the change, for the legacy
+// materialization.
 func stampGroups(stamps *map[string]int64, modifiedAt *int64, positions []int, stamp int64, groups ...string) {
 	if stamp <= 0 || len(groups) == 0 {
 		return
 	}
 	m := MaterializedGroupStamps(*stamps, *modifiedAt, positions)
 	for _, g := range groups {
-		m[g] = stamp
+		if stamp > m[g] {
+			m[g] = stamp
+		}
 	}
 	*stamps = m
 	if stamp > *modifiedAt {
@@ -399,11 +411,13 @@ type MergeReport struct {
 	// result with a winner.
 	NeedsWinner bool
 	// DefaultWinStands reports that the held groups were held because a
-	// match-level default win (fusensho awarded for a bar recorded on a
-	// DIFFERENT match) already closed the match: the scoring held says
-	// nothing about that bar, and a scoreline cannot land beside the default
-	// win's circles without one discarding the other, so the default win
-	// stands and the scoring is kept in the history. Unlike NeedsWinner, the
+	// default win (any of kiken, kiken-injury, fusenpai, or a match-level
+	// fusensho awarded for a bar recorded on a DIFFERENT match) already
+	// closed the match: a board still scoring it, points or overtime alike,
+	// says nothing that overrides that ruling, and a scoreline (or an (E)
+	// mark) cannot land beside the default win's circles without one
+	// discarding the other, so the default win stands and the scoring is
+	// kept in the history. Unlike NeedsWinner, the
 	// match already has the winner it needs; the answer carries it as
 	// heldReason "default_win_stands", so the operator is told to use Remove
 	// default win rather than to correct the result with a winner.
@@ -465,8 +479,9 @@ func (r *MergeReport) DisplacedGroups() []string {
 const HeldReasonNeedsWinner = "needs_winner"
 
 // HeldReasonDefaultWinStands is the wire code (heldReason) of groups held
-// because a match-level default win (awarded for a bar recorded on ANOTHER
-// match) already closed the match (MergeReport.DefaultWinStands). Unlike
+// because a default win -- a withdrawal of this match (kiken, kiken-injury,
+// fusenpai) or a match-level fusensho awarded for a bar recorded on ANOTHER
+// match -- already closed the match (MergeReport.DefaultWinStands). Unlike
 // HeldReasonNeedsWinner, the match already has a winner, so the operator is
 // not told to correct it with one; the remedy is the editor's own Remove
 // default win.

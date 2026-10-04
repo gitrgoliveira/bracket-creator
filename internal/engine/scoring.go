@@ -207,12 +207,13 @@ func (e *Engine) withPoolMatch(h state.StoreTx, compId, matchId string, mutate f
 // present (so RecordMatchResult callers fall through cleanly when neither
 // pool-match nor bracket-match has that ID).
 //
-// Delegates to state.Store.UpdateBracketMatchByID (mp-gmcg review R5), which
-// holds the per-competition lock across load → walk-rounds → bronze-sibling →
-// mutate → save and writes ONLY when the match is found — the exact walk this
-// used to hand-roll, and the sibling of UpdatePoolMatchByID. findBracketMatchByID
-// searches Rounds FIRST then the ThirdPlaceMatch sibling, so "m-bronze" resolves
-// here too.
+// Delegates to h.UpdateBracketMatchByID (mp-gmcg review R5) on the given
+// state.StoreTx handle — the bare store, which holds the per-competition lock
+// itself, or a transaction already holding it — across load → walk-rounds →
+// bronze-sibling → mutate → save, and writes ONLY when the match is found —
+// the exact walk this used to hand-roll, and the sibling of
+// UpdatePoolMatchByID. findBracketMatchByID searches Rounds FIRST then the
+// ThirdPlaceMatch sibling, so "m-bronze" resolves here too.
 //
 // NOTE: no playability gate here. withBracketMatch backs the SCHEDULING mutators
 // (UpdateMatchCourt / UpdateMatchTime) and RevertMatchToQueue, which must work
@@ -2967,7 +2968,7 @@ func downstreamReopenReason(correctedID string) string {
 // instead). Keep the two distinct: requeue is "this match is not finished,
 // carry on from where it stopped", reopen is "this match finished and its
 // verdict no longer stands". Both keep what was scored.
-func requeueBracketMatch(m *state.BracketMatch) {
+func requeueBracketMatch(m *state.BracketMatch, stamp int64) {
 	m.Status = state.MatchStatusScheduled
 	m.Winner = ""
 	m.WinnerID = "" // bc-brid: the verdict's id half, cleared with the name.
@@ -2986,7 +2987,10 @@ func requeueBracketMatch(m *state.BracketMatch) {
 	// (T_stale < T_revert) cannot put the verdict back on replay. Using 0
 	// would make ApplyByTimestamp always return true (weaker). Only the
 	// verdict group is stamped (bc-mrgc): the kept score keeps its stamps.
-	m.StampGroups(serverNowMs(), state.GroupResult)
+	// The caller passes the SAME stamp its history entry records, so the
+	// match and that entry never disagree by the sub-millisecond gap a
+	// second serverNowMs() call here would introduce.
+	m.StampGroups(stamp, state.GroupResult)
 }
 
 // bracketWinnerChanged reports whether result's resolved winner differs from
@@ -3508,6 +3512,15 @@ func (e *Engine) OverrideBracketWinner(compId string, matchId string, winnerName
 			return uerr
 		}
 		e.recordOverrideHistory(tx, compId, matchId, winnerName, modifiedAt, true)
+		// restoreForceReopened must run with the SAME handle the bracket write
+		// just used (its own doc comment says so): it both restores eligibility
+		// for a competitor the reopen un-bars and appends that reopen's history
+		// line, and doing either outside this transaction would leave a window
+		// where the bracket already shows the reopened match but neither of
+		// those followed (a crash there, or a decision landing in the gap,
+		// would see a reopened match with no history line, or a bar the
+		// restore had not yet lifted/could wrongly lift).
+		e.restoreForceReopened(tx, compId, reopened)
 		return nil
 	})
 	if held {
@@ -3521,7 +3534,6 @@ func (e *Engine) OverrideBracketWinner(compId string, matchId string, winnerName
 	if err != nil {
 		return false, err
 	}
-	e.restoreForceReopened(e.store, compId, reopened)
 	if fo.Reopened != nil {
 		*fo.Reopened = reopened
 	}
@@ -3643,7 +3655,7 @@ func (e *Engine) RevertMatchToQueue(compId, matchId string) error {
 			// Same contract as the pool path: any non-completed match goes back
 			// to the queue with its score, losing only the verdict and the audit
 			// notes, even if it was already scheduled.
-			requeueBracketMatch(m)
+			requeueBracketMatch(m, stamp)
 		})
 		if berr != nil {
 			// Neither pool nor bracket holds this match: reported through the

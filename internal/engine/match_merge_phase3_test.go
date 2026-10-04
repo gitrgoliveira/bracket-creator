@@ -115,6 +115,53 @@ func TestMerge_EngiFinishEchoingTheStoredFlagsApplies(t *testing.T) {
 	})
 }
 
+// bc-mrgc Finding 2 (a regression from letting an echoed finish apply,
+// above): recordEngiMatch stamps BOTH groups the finish names with its own
+// stamp via StampGroups, unconditionally. When the flags group was merely
+// echoed (its real, newer stamp already on record), that unconditional
+// stamp dragged the flags group's stamp BACKWARDS to the stale finish's
+// own, older stamp -- so a genuinely later recount, timestamped between the
+// two, then read as newer than the flags group's (corrupted) stamp and
+// applied, flipping the winner on a count that never actually changed.
+// stampGroups must never lower a group's stamp (the fix), so the flags
+// group keeps the real T3 stamp of the count that set it, and the T2
+// recount -- genuinely older than that -- is held.
+func TestMerge_EngiFinishEchoNeverLowersTheFlagsStamp(t *testing.T) {
+	bothBranches(t, func(t *testing.T, knockout bool) {
+		h := mmEngi(t, knockout)
+		// The board's own, real count: 3-2.
+		count := mmRunning(h, mmT3, state.GroupFlags)
+		count.FlagsA, count.FlagsB = 3, 2
+		require.NoError(t, h.write(count))
+
+		// A stale Save result from another device, made before that count
+		// but delivered after it: an echo of the SAME 3-2, so it applies
+		// (Finding 2's own fix), but must not touch the flags group's
+		// already-newer T3 stamp.
+		require.NoError(t, h.write(mmEngiFinish(h, mmT1, 3, 2)))
+		afterFinish := h.load(t)
+		require.Equal(t, mmT3, afterFinish.GroupStamp(state.GroupFlags), "precondition: the echoed finish did not lower the flags' stamp")
+
+		// A third device's own recount, made between the two writes above
+		// (T2), arrives last. In real time it is OLDER than the T3 count
+		// actually on record, so it must be held, never applied.
+		late := mmRunning(h, mmT2, state.GroupFlags)
+		late.FlagsA, late.FlagsB = 2, 3
+		err := h.write(late)
+		require.ErrorIs(t, err, ErrMatchSuperseded, "T2 is older than the flags group's real T3 stamp")
+
+		m := h.load(t)
+		assert.Equal(t, state.MatchStatusCompleted, m.Status)
+		assert.Equal(t, wrTeamA, m.Winner, "the flags never actually moved off 3-2")
+		assert.Equal(t, 3, m.FlagsA)
+		assert.Equal(t, 2, m.FlagsB)
+		assert.Equal(t, mmT3, m.GroupStamp(state.GroupFlags), "the stale finish's older stamp never lowered it")
+
+		last := h.history(t)[len(h.history(t))-1]
+		assert.Equal(t, state.HistoryOutcomeHeld, last.Outcomes[state.GroupFlags], "the stale recount is held, in the history")
+	})
+}
+
 // R3 on an engi match: a count changed after the finish applies to the
 // finished match, and the winner is worked out again. An engi match is never
 // a draw, and (R4 revised, operator ruling 2026-10-04) a recount that cannot

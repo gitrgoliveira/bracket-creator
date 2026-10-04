@@ -122,9 +122,9 @@ func TestScoreHandler_HeldForAWinnerSaysSo(t *testing.T) {
 // OTHER side is barred by a DIFFERENT match, recorded from the queue row's
 // Record default win) is not applied either, and the answer says why with its
 // own code and message (heldReason "default_win_stands",
-// DefaultWinStandsMessage), so the operator is sent to Remove default win
-// rather than told to correct the result with a winner: the match already
-// has one.
+// DefaultWinStandsMessage), so the operator is sent to correct the default
+// win from the match's score editor rather than told to correct the result
+// with a winner: the match already has one.
 func TestScoreHandler_HeldForADefaultWinSaysSo(t *testing.T) {
 	const compID = "merge-review-dws"
 	r, store := mergeServer(t, compID)

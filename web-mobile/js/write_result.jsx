@@ -94,12 +94,12 @@ export function supersededAlertText(n, one, needsWinner = false, defaultWinStand
             : `${text} Where one would leave a finished match without a winner, correct that result with a winner.`;
     }
     if (defaultWinStands) {
-        // At least one was held because a default win recorded for a bar on
-        // another match still stands (writeDefaultWinStands): the fix is
-        // Remove default win, never re-entering the score.
+        // At least one was held because a default win already closed the
+        // match (writeDefaultWinStands): the fix is to correct the default
+        // win from the match's score editor, never re-entering the score.
         return one
-            ? "A result was not applied because this match was closed with a default win, recorded because the other competitor cannot fight. It was kept in the match's history, so nothing is lost: use Remove default win to change the result."
-            : `${text} Where one was closed with a default win, use Remove default win to change that result.`;
+            ? "A result was not applied because this match was closed with a default win. It was kept in the match's history, so nothing is lost: correct the default win from the match's score editor to change the result."
+            : `${text} Where one was closed with a default win, correct the default win from the match's score editor to change that result.`;
     }
     return text;
 }
@@ -147,25 +147,29 @@ export const NEEDS_WINNER_ADVICE = 'Correct the result with a winner.';
 // "A newer change to the same thing was recorded first."
 export const NEEDS_WINNER_NOTE = 'It would leave the finished match without a winner, and it needs one: correct the result with a winner.';
 
-// writeDefaultWinStands / DEFAULT_WIN_STANDS_* (bc-mrgc, the fusensho twin of
-// writeNeedsWinner above): a running board's scoring over a match a
-// match-level fusensho closed (a default win awarded because the OTHER side
-// is barred by a DIFFERENT match) is held rather than applied -- the default
-// win already decided this match, and a scoreline cannot land beside it
-// without one discarding the other. The server says why with heldReason
-// "default_win_stands". Unlike needs_winner, nothing here asks for a
-// correction with a winner: the match already has one. The fix is the
-// editor's own Remove default win, which sends the held scoring on as the
-// real result instead of the default win.
+// writeDefaultWinStands / DEFAULT_WIN_STANDS_* (bc-mrgc): a running board's
+// scoring, or its overtime, over a match ANY default win closed -- a
+// withdrawal (kiken, fusenpai) or a default win awarded because the OTHER
+// side is barred by a DIFFERENT match (fusensho) -- is held rather than
+// applied: the default win already decided this match, and a scoreline
+// cannot land beside it without one discarding the other. The server says
+// why with heldReason "default_win_stands". Unlike needs_winner, nothing
+// here asks for a correction with a winner: the match already has one. The
+// fix is to correct the default win from the match's score editor, which
+// sends the held scoring on as the real result instead of the default win.
+// The copy names no specific button: which control does that (Clear default
+// win, Remove default win, or none at all on a kachinuki match) depends on
+// the match's format and is owned by admin_scoring_shared.jsx, not restated
+// here.
 export const HELD_REASON_DEFAULT_WIN_STANDS = 'default_win_stands';
 export function writeDefaultWinStands(res) {
     return !!res && res.heldReason === HELD_REASON_DEFAULT_WIN_STANDS
         && writeDisplacedGroups(res).length === 0
         && (writeWasSuperseded(res) || writeHeldGroups(res).length > 0);
 }
-export const DEFAULT_WIN_STANDS_REASON = "this match was closed with a default win because the other competitor cannot fight, so this change was kept in the match's history and nothing is lost";
-export const DEFAULT_WIN_STANDS_ADVICE = 'To change the result, use Remove default win in its score editor.';
-export const DEFAULT_WIN_STANDS_NOTE = "This match was closed with a default win because the other competitor cannot fight: to change the result, use Remove default win in its score editor.";
+export const DEFAULT_WIN_STANDS_REASON = "this match was closed with a default win, so this change was kept in the match's history and nothing is lost";
+export const DEFAULT_WIN_STANDS_ADVICE = "To change the result, correct the default win from the match's score editor.";
+export const DEFAULT_WIN_STANDS_NOTE = "This match was closed with a default win: to change the result, correct the default win from the match's score editor.";
 
 export function supersededBanner(res) {
     if (writeNeedsWinner(res)) {

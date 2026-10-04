@@ -627,6 +627,35 @@ describe('kachinuki [× Remove this bout] undoes a bout added by mistake', () =>
     expect(onSubmit.mock.calls[1][0].seenModifiedAt).toBe(7_777);
   });
 
+  // bc-cse: the common case, with NO prior [Remove this bout] -- the override
+  // adoption above only covers the removal-then-append sequence. Here Record
+  // bout is the FIRST thing the operator does: there is no override to adopt
+  // the answer's stamp into, so it must be floored a different way, or the
+  // next tap on the freshly-appended bout reads the match's PRE-advance
+  // stamp instead of the one the server just gave it.
+  it('with no prior removal, Record bout answer still floors the next tap on the appended bout', async () => {
+    const boutOneOnly = [{ position: 1, sideA: 'A1', sideB: 'B1', ipponsA: ['M'], ipponsB: [], winner: 'A1' }];
+    const boutOneAndNew = [...boutOneOnly, { position: 2, sideA: 'A1', sideB: 'B3', ipponsA: [], ipponsB: [] }];
+    const onSubmit = vi.fn().mockResolvedValue({ subResults: boutOneAndNew, modifiedAt: 7_777 });
+    await renderEditor({
+      match: completedKachinukiMatch({ status: 'running', winner: null, subResults: boutOneOnly, modifiedAt: 1_000 }),
+      onSubmit,
+    });
+
+    expect(screen.queryByTestId('kachinuki-remove-bout-button')).toBeNull();
+    await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Record bout' })); });
+    await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(1));
+
+    // There is no prior override here, so the parent's `match` prop (never
+    // rerendered by this harness, same as the test above) is still what the
+    // editor shows -- the point of this test is that the stamp still reaches
+    // the autosave's floor even so, through _recordBoutAnswerStampRef rather
+    // than the override adoption.
+    await act(async () => { fireEvent.keyDown(window, { key: 'm' }); });
+    await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(2), { timeout: 3000 });
+    expect(onSubmit.mock.calls[1][0].seenModifiedAt).toBe(7_777);
+  });
+
   // mp-gmcg review F4: the local override that hides the removed bout must
   // survive a same-content snapshot reload. An SSE refresh hands back a NEW
   // match object with identical (stale) content while the parent list catches

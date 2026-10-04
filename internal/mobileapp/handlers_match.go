@@ -2290,7 +2290,8 @@ func matchSnapshotOrErr(s matchStores, compID, matchID, guardLabel string) (matc
 // never wins a retry, so it keeps the same applied:false superseded shape,
 // with heldReason and its own message (messageForHeldReason) telling the
 // operator what to do: correct the result with a winner for needs_winner, or
-// use Remove default win for default_win_stands.
+// correct the default win from the match's score editor for
+// default_win_stands.
 func respondSuperseded(c *gin.Context, heldGroups []string, heldReason string) {
 	// LOGGED because this is the one successful-looking response whose work
 	// an operator does not see on the match. Since bc-mrgc the held values are
@@ -2326,13 +2327,16 @@ const SupersededMessage = "Not applied: a newer change to this match is already 
 const NeedsWinnerMessage = "Not applied: this change would leave the finished match without a winner, and it needs one. Correct the result with a winner. This change was kept in the match's history."
 
 // DefaultWinStandsMessage is the sentence a write is answered with when its
-// scoring was held because a match-level default win, awarded for a bar
-// recorded on a DIFFERENT match, already closed the match (bc-mrgc, the
-// fusensho twin of NeedsWinnerMessage above). Unlike that case the match
-// already has the winner it needs, so this does not ask for a correction
-// with one; the remedy is the editor's own Remove default win, which sends
-// the held scoring on as the real result.
-const DefaultWinStandsMessage = "Not applied: this match was closed with a default win because the other competitor cannot fight, so the scoring was kept in the match's history. To change the result, open the match and use Remove default win."
+// scoring, or its overtime, was held because a default win already closed
+// the match (bc-mrgc): a withdrawal (kiken, fusenpai) or a default win
+// awarded because the OTHER side is barred by a DIFFERENT match (fusensho).
+// Unlike NeedsWinnerMessage above, the match already has the winner it
+// needs, so this does not ask for a correction with one; the remedy is to
+// correct the default win from the match's score editor, which sends the
+// held scoring on as the real result. The sentence names no specific
+// button: which control does that depends on the match's format (team vs
+// individual, kachinuki or not) and is owned by admin_scoring_shared.jsx.
+const DefaultWinStandsMessage = "Not applied: this match was closed with a default win, so the scoring was kept in the match's history. To change the result, correct the default win from the match's score editor."
 
 // messageForHeldReason is the one place a heldReason code is turned into the
 // operator sentence that goes with it: respondSuperseded and the bulk-score

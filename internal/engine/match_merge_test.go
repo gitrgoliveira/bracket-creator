@@ -311,11 +311,14 @@ func TestMerge_LateKikenOlderThanAPointIsHeld(t *testing.T) {
 		// must not land on their own.
 		t.Run("a held verdict holds its circles", func(t *testing.T) {
 			h := mmIndividual(t, knockout)
-			// A genuine change to the result group (an echo of the stored
-			// status would keep the match's own stamp, bc-mrgc Finding 3,
-			// and never outrank the kiken below).
+			// A write that NAMES the result group takes its own stamp
+			// whether or not it actually differs from stored (bc-mrgc
+			// Finding 1), so this status write alone is enough to put T2 on
+			// the result group and outrank the kiken below; no extra value
+			// change is needed to force that (round 3's CorrectionReason
+			// workaround, now unnecessary, since an UNNAMED echo is the
+			// only shape that still reverts to its stored stamp).
 			status := mmRunning(h, mmT2, state.GroupResult)
-			status.CorrectionReason = "board recount"
 			require.NoError(t, h.write(status))
 
 			_, _, err := h.eng.RecordDecision(h.compID, h.matchID, "kiken-voluntary", "aka", "knee", nil, false, mmT1)
@@ -440,6 +443,81 @@ func TestMerge_ScoringAfterATeamDefaultWinForABarElsewhereIsHeld(t *testing.T) {
 	assert.Equal(t, HoldReasonDefaultWinStands, h.history(t)[len(h.history(t))-1].Reason)
 }
 
+// bc-mrgc Finding 3 (a regression): holdScoring only holds groups
+// IsScoringGroup counts, which excludes overtime, so a running write's
+// encho change over a default-win-closed match landed even though its
+// points were held with the default win -- an (E) mark on a match FIK Art.
+// 32 never puts one on. Both the points and the overtime must be held
+// together, with the same reason.
+func TestMerge_ScoringAndOvertimeAfterADefaultWinAreBothHeld(t *testing.T) {
+	bothBranches(t, func(t *testing.T, knockout bool) {
+		h := mmIndividual(t, knockout)
+		_, _, err := h.eng.RecordDecision(h.compID, h.matchID, "fusensho", "aka", "", nil, false, mmT1)
+		require.NoError(t, err)
+		before := h.load(t)
+
+		board := mmRunning(h, mmT2, state.GroupPoints, state.GroupEncho)
+		board.IpponsA = []string{"M"}
+		board.Encho = &state.EnchoMetadata{PeriodCount: 1}
+		err = h.write(board)
+		require.ErrorIs(t, err, ErrMatchSuperseded, "both changes are held with the default win")
+		assert.ElementsMatch(t, []string{state.GroupPoints, state.GroupEncho}, HeldGroupsOf(err))
+		assert.Equal(t, state.HeldReasonDefaultWinStands, HeldReasonOf(err))
+
+		m := h.load(t)
+		assert.Equal(t, "fusensho", m.Decision, "the default win stands")
+		assert.Nil(t, m.Encho, "no overtime lands on a default win")
+		assert.Equal(t, before.IpponsA, m.IpponsA, "the scoreline is as the default win recorded it")
+	})
+}
+
+// The encho-only half of Finding 3: a running write that changes NOTHING
+// but overtime over a match a withdrawal closed must still be held, with
+// the same reason, even though scoringChanged alone would never have seen
+// it (no point, bout or flag moved).
+func TestMerge_OvertimeAloneAfterAWithdrawalIsHeld(t *testing.T) {
+	bothBranches(t, func(t *testing.T, knockout bool) {
+		h := mmIndividual(t, knockout)
+		_, _, err := h.eng.RecordDecision(h.compID, h.matchID, "kiken-voluntary", "aka", "knee", nil, false, mmT1)
+		require.NoError(t, err)
+
+		board := mmRunning(h, mmT2, state.GroupEncho)
+		board.Encho = &state.EnchoMetadata{PeriodCount: 1}
+		err = h.write(board)
+		require.ErrorIs(t, err, ErrMatchSuperseded, "an (E) tap alone is not a scoring change, so it cannot clear the withdrawal")
+		assert.Equal(t, []string{state.GroupEncho}, HeldGroupsOf(err))
+		assert.Equal(t, state.HeldReasonDefaultWinStands, HeldReasonOf(err))
+
+		m := h.load(t)
+		assert.Equal(t, "kiken-voluntary", m.Decision, "the withdrawal stands")
+		assert.Nil(t, m.Encho, "no overtime lands on a withdrawal that was never cleared")
+	})
+}
+
+// R2's clear still needs an actual scoring change, and once it has one the
+// overtime the same board carries lands with it, exactly as the points do.
+func TestMerge_ScoringAndOvertimeTogetherClearAWithdrawal(t *testing.T) {
+	bothBranches(t, func(t *testing.T, knockout bool) {
+		h := mmIndividual(t, knockout)
+		_, _, err := h.eng.RecordDecision(h.compID, h.matchID, "kiken-voluntary", "aka", "knee", nil, false, mmT1)
+		require.NoError(t, err)
+		require.False(t, wrEligible(t, h.store, h.compID, wrTeamAID), "precondition: Ryu is barred")
+
+		board := mmRunning(h, mmT2, state.GroupPoints, state.GroupEncho)
+		board.IpponsA = []string{"M"}
+		board.IpponsB = []string{}
+		board.Encho = &state.EnchoMetadata{PeriodCount: 1}
+		require.NoError(t, h.write(board), "the scoring change clears the withdrawal, and the overtime applies with it")
+
+		m := h.load(t)
+		assert.Equal(t, state.MatchStatusCompleted, m.Status, "the match stays finished")
+		assert.Empty(t, m.Decision, "the withdrawal is cleared")
+		assert.Equal(t, wrTeamA, m.Winner, "the winner is worked out from the points")
+		assert.True(t, m.Encho.On(), "the overtime genuinely played lands with the cleared scoreline")
+		assert.True(t, wrEligible(t, h.store, h.compID, wrTeamAID), "eligibility follows the cleared ruling")
+	})
+}
+
 // A verdict that applies but does not move (the same withdrawal sent again
 // under a later stamp: another device's copy, a correction restating it) has
 // no eligibility consequence: recording it again would bar once more a
@@ -460,8 +538,96 @@ func TestMerge_SameDecisionSentAgainLeavesAReinstatement(t *testing.T) {
 		assert.True(t, wrEligible(t, h.store, h.compID, wrTeamAID), "the reinstatement stands")
 		m := h.load(t)
 		assert.Equal(t, "kiken-injury", m.Decision)
-		assert.Equal(t, mmT1, m.ModifiedAt, "the echo moved nothing, so it keeps the stamp of the decision it repeated")
+		// A decision always NAMES its groups (decisionChangedGroups), so even
+		// though this echo moved nothing, it is still a real action taken at
+		// T2 (bc-mrgc Finding 1): only a write that names NO groups falls
+		// back to the stamp it already held.
+		assert.Equal(t, mmT2, m.ModifiedAt, "a named echo still takes the stamp of the write that repeated it")
 	})
+}
+
+// bc-mrgc Finding 1 (a regression in the previous round): a write that NAMES
+// a group it changes took that stamp only when the value actually differed
+// from stored; an echo of the same value reverted to the stored stamp as if
+// the write had never named anything, exactly like a whole-match re-send.
+// That is wrong for a NAMED write: the operator's screen showed the old
+// value and they acted on it, so the echo is still a real action taken at
+// its own time. Three writes land in this order: device A strikes a point
+// at T1; device B, whose screen still showed none, taps the SAME point at
+// T3 and sends it back (an echo, but a named one); device A's own removal,
+// made at T2 -- before B's tap -- but delayed in flight, arrives last. In
+// real time the removal is now stale and must be held, leaving the point
+// B (re-)struck at T3 standing.
+func TestMerge_NamedEchoTakesItsOwnStamp(t *testing.T) {
+	bothBranches(t, func(t *testing.T, knockout bool) {
+		h := mmIndividual(t, knockout)
+		first := mmRunning(h, mmT1, state.GroupPoints)
+		first.IpponsA = []string{"M"}
+		require.NoError(t, h.write(first))
+
+		echo := mmRunning(h, mmT3, state.GroupPoints)
+		echo.IpponsA = []string{"M"}
+		require.NoError(t, h.write(echo), "an echo of the stored point, but named")
+		afterEcho := h.load(t)
+		assert.Equal(t, mmT3, afterEcho.GroupStamp(state.GroupPoints), "the named echo takes its own stamp, not the stamp already stored")
+
+		late := mmRunning(h, mmT2, state.GroupPoints)
+		late.IpponsA = []string{}
+		err := h.write(late)
+		require.ErrorIs(t, err, ErrMatchSuperseded, "T2 is older than the point's real T3 stamp, so the removal is held")
+
+		m := h.load(t)
+		assert.Equal(t, []string{"M"}, m.IpponsA, "the point struck again at T3 stands")
+	})
+}
+
+// bc-mrgc Finding 1, the decision side: the same regression made an exact
+// replay of a recorded decision unrecognisable once that decision had been
+// sent a second time as an echo. exactDecisionReplay matches by comparing
+// the stored result group's stamp to the replay's own stamp, so a decision
+// echoed at T2 must leave the result group stamped T2 -- not reverted to
+// T1, the stamp of the ORIGINAL send -- or a later exact replay of the T2
+// send can no longer recognise itself and falls through to the T103
+// downstream lock instead of being answered as already recorded.
+func TestMerge_ExactReplayOfANamedEchoedDecisionStillMatches(t *testing.T) {
+	h := mmIndividual(t, false)
+	ms, err := h.store.LoadPoolMatches(h.compID)
+	require.NoError(t, err)
+	ms = append(ms, state.MatchResult{
+		ID: "Pool A-1", SideA: wrTeamA, SideAID: wrTeamAID, SideB: wrTeamC, SideBID: wrTeamCID,
+		Status: state.MatchStatusScheduled,
+	})
+	require.NoError(t, h.store.SavePoolMatches(h.compID, ms))
+
+	_, _, err = h.eng.RecordDecision(h.compID, h.matchID, "kiken-voluntary", "aka", "knee", nil, false, mmT1)
+	require.NoError(t, err)
+
+	// The same decision sent again: it moves nothing (an echo), but a
+	// decision always names its groups (decisionChangedGroups), so under
+	// the fix it still takes T2 as the result group's own stamp.
+	_, status, err := h.eng.RecordDecision(h.compID, h.matchID, "kiken-voluntary", "aka", "knee", nil, false, mmT2)
+	require.NoError(t, err)
+	assert.Nil(t, status, "the echo moved nothing, so it has no eligibility consequence")
+	afterEcho := h.load(t)
+	assert.Equal(t, mmT2, afterEcho.GroupStamp(state.GroupResult), "the named echo took its own stamp")
+
+	// The withdrawer's later match is put under way, which arms the T103
+	// lock against an UNDO.
+	ms, err = h.store.LoadPoolMatches(h.compID)
+	require.NoError(t, err)
+	for i := range ms {
+		if ms[i].ID == "Pool A-1" {
+			ms[i].Status = state.MatchStatusRunning
+		}
+	}
+	require.NoError(t, h.store.SavePoolMatches(h.compID, ms))
+
+	// An exact replay of the T2 send (the operator's lost-answer retry) is
+	// answered as recorded, not refused as an undo the lock would catch.
+	got, _, err := h.eng.RecordDecision(h.compID, h.matchID, "kiken-voluntary", "aka", "knee", nil, false, mmT2)
+	require.NoError(t, err, "an exact replay of the T2 write is the recorded write, not an undo")
+	require.NotNil(t, got)
+	assert.Equal(t, "kiken-voluntary", got.Decision)
 }
 
 // R2 on a fixed-order team match: the bouts decide the winner (IV, then PW).

@@ -327,8 +327,13 @@ func mergeMatchWrite(stored, incoming *state.MatchResult, policy matchWritePolic
 		carryHantei(stored, incoming)
 	}
 
-	// R2 and R3: a scoring change applied to a finished match.
-	if finished && scoringChanged(stored, incoming, rep.Applied) {
+	// R2 and R3: a scoring change applied to a finished match. An overtime
+	// change rides along even with no scoring change of its own (a board
+	// still toggling encho on a match a default win already closed), since
+	// R2/R4's default-win branch below must hold it with any scoring too:
+	// otherwise an (E) mark could land on a default win on its own, which
+	// FIK Art. 32 never produces (one maru in encho, never overtime).
+	if finished && (scoringChanged(stored, incoming, rep.Applied) || slices.Contains(rep.Applied, state.GroupEncho)) {
 		probe := *incoming
 		// R2 clears a withdrawal OF THIS MATCH: points scored after it mean
 		// it was a mistake. A fusensho is a default win awarded for a bar
@@ -337,14 +342,20 @@ func mergeMatchWrite(stored, incoming *state.MatchResult, policy matchWritePolic
 		// beside the circles a default win records without one discarding
 		// the other: the default win stands and the scoring is held, in the
 		// history with the reason (R4's shape).
-		cleared := domain.IsWithdrawalDecisionStr(probe.Decision)
+		// A clear needs an actual SCORING change: an overtime toggle alone
+		// (no point, bout or flag moved) says nothing about whether the
+		// withdrawal was a mistake, so it must not read as one -- the
+		// stored decision stays, and the encho-only change is held below
+		// with the same default-win-stands reason a real default win gets,
+		// never silently reopened on an (E) tap alone.
+		cleared := domain.IsWithdrawalDecisionStr(probe.Decision) && scoringChanged(stored, incoming, rep.Applied)
 		if cleared {
 			probe.Decision, probe.DecisionBy, probe.DecisionReason = "", "", ""
 			probe.Winner, probe.WinnerID, probe.WinnerSide = "", "", ""
 		}
 		switch {
 		case !cleared && domain.IsDefaultWinDecisionStr(probe.Decision):
-			mh.holdScoring(HoldReasonDefaultWinStands)
+			mh.holdDefaultWinScoring(HoldReasonDefaultWinStands)
 		case deriveWinnerAfterMerge(&probe, mc):
 			if cleared {
 				rep.ClearedWithdrawal = state.GroupValue(incoming, state.GroupResult)
@@ -412,18 +423,29 @@ func mergeMatchWrite(stored, incoming *state.MatchResult, policy matchWritePolic
 			rep.Unchanged = append(rep.Unchanged, g)
 		}
 	}
-	// A group that moved nothing keeps its stored stamp: the write's own
-	// stamp belongs to what it CHANGED, never to a value it only echoed, or
-	// a whole-match re-send (bulk-score, an older client with no `changed`)
-	// would take every group's stamp and fence out a real, older change made
-	// on another device in the gap. Delete rather than zero when the stored
-	// match never stamped the group at all, so an echoed legacy group keeps
-	// reading as never written.
-	for _, g := range rep.Unchanged {
-		if s, ok := storedStamps[g]; ok {
-			stamps[g] = s
-		} else {
-			delete(stamps, g)
+	// A group that moved nothing keeps its stored stamp, but ONLY when the
+	// write named no groups at all (Changed is nil: bulk-score, an older
+	// client). Such a write cannot tell an echo from a change -- it re-sends
+	// every group it carries whether or not the operator touched it -- so
+	// letting its echoes take its own stamp would fence out a real, older
+	// change made on another device in the gap. A write that DOES name a
+	// group named it because it changed against the operator's own screen,
+	// so a named echo (the same value sent back, e.g. a replayed decision)
+	// is still a real action taken at this write's stamp and must keep that
+	// stamp: reverting it is what let a later-arriving change compare
+	// itself against a stale, reverted stamp instead of the time the
+	// operator actually acted (the regression this guards against; a named
+	// write's groups already took `stamp` in the Applied loop above, so
+	// here there is nothing to do for it). Delete rather than zero when the
+	// stored match never stamped the group at all, so an echoed legacy
+	// group keeps reading as never written.
+	if incoming.Changed == nil {
+		for _, g := range rep.Unchanged {
+			if s, ok := storedStamps[g]; ok {
+				stamps[g] = s
+			} else {
+				delete(stamps, g)
+			}
 		}
 	}
 	// A verdict that applied but equals the stored one (an echo: the same
@@ -447,11 +469,14 @@ func mergeMatchWrite(stored, incoming *state.MatchResult, policy matchWritePolic
 			incoming.ModifiedAt = max(incoming.ModifiedAt, s)
 		}
 	}
-	// Only when some applied group actually moved: an applied group that
-	// only echoed the stored value (and so kept its stored stamp above)
-	// must not drag ModifiedAt forward either, or a whole-match echo would
-	// fence out a real, older change the same way a per-group one would.
-	if len(rep.Applied) > len(rep.Unchanged) && stamp > incoming.ModifiedAt {
+	// A write that named its groups moves ModifiedAt whenever it is actually
+	// persisted (an echo included: see above), since naming a group is
+	// itself the operator's action at this stamp. A write that named NONE
+	// (Changed nil) moves it only when something it carried actually
+	// differed from stored, or a whole-match echo (bulk-score, an older
+	// client) would drag ModifiedAt forward and fence out a real, older
+	// change the same way a per-group one would.
+	if (incoming.Changed != nil || len(rep.Applied) > len(rep.Unchanged)) && stamp > incoming.ModifiedAt {
 		incoming.ModifiedAt = stamp
 	}
 	incoming.Merge = rep
@@ -653,6 +678,23 @@ func (h *mergeHold) holdScoring(reason string) {
 	h.holdGroups(reason, scoring...)
 }
 
+// holdDefaultWinScoring holds every applied group that decides who won
+// together with a changed overtime: a default win already decided this
+// match, and nothing a board still scoring it sends says otherwise, whether
+// that is a point, a bout, or an (E) mark. holdScoring alone would miss the
+// overtime group, since IsScoringGroup does not count it as scoring, and a
+// held scoreline landing beside an applied (E) would put overtime on a match
+// the default win rule says had none (FIK Art. 32: one maru in encho).
+func (h *mergeHold) holdDefaultWinScoring(reason string) {
+	var groups []string
+	for _, g := range h.rep.Applied {
+		if state.IsScoringGroup(g) || g == state.GroupEncho {
+			groups = append(groups, g)
+		}
+	}
+	h.holdGroups(reason, groups...)
+}
+
 // needsWinnerReason is the history reason of a change held because the
 // match would be left with no winner it must have.
 func needsWinnerReason(mc mergeCtx) string {
@@ -673,12 +715,14 @@ const HoldReasonKnockoutNeedsWinner = "a knockout match needs a winner"
 // count does not give.
 const HoldReasonEngiNeedsValidCount = "an engi result needs a valid flag count"
 
-// HoldReasonDefaultWinStands is why a running board's scoring over a match a
-// fusensho closed is held: the default win was awarded for a bar recorded on
-// another match (the other side cannot fight), which points scored here say
-// nothing about, so it stands and the scoring is kept in the history. R2's
-// clear is for a withdrawal of the match itself.
-const HoldReasonDefaultWinStands = "the other side cannot fight, so a default win closed this match"
+// HoldReasonDefaultWinStands is why a running board's write over a match a
+// default win closed -- a withdrawal of this match (kiken, kiken-injury,
+// fusenpai) or a fusensho awarded for a bar recorded on ANOTHER match -- is
+// held: neither a point, a bout, nor an overtime toggle the board sends says
+// the default win was wrong, so it stands and the write is kept in the
+// history. R2's clear is for a withdrawal of the match itself, and needs an
+// actual scoring change (cleared, above) -- an (E) tap alone is not one.
+const HoldReasonDefaultWinStands = "a default win closed this match"
 
 // HoldReasonFinishAtomic is why a stale Finish is held whole: a write that
 // completes the match carries a scoreline its verdict stood on, so when the

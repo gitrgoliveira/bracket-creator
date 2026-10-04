@@ -2382,12 +2382,13 @@ paths:
           match with no valid flag count, is never applied: the match keeps its
           recorded finish (it never goes back to running) and the change is
           held, answered with `heldReason: needs_winner`, so the operator
-          corrects the result with a winner. A running board's scoring over a
-          match a match-level default win (fusensho) closed, for a bar
-          recorded on a DIFFERENT match, is held the same way, answered with
-          `heldReason: default_win_stands`; the match already has the winner
-          it needs, so the operator uses Remove default win instead of
-          correcting the result with one. A finish whose result applies over
+          corrects the result with a winner. A running board's scoring, or
+          its overtime, over a match a default win already closed (a
+          withdrawal, or a win awarded because the other side is barred by a
+          DIFFERENT match) is held the same way, answered with `heldReason:
+          default_win_stands`; the match already has the winner it needs, so
+          the operator corrects the default win from the match's score
+          editor instead of correcting the result with one. A finish whose result applies over
           scoring stored NEWER than it gets the winner that scoring gives (the
           same verdict as if the two had arrived in stamp order); when that
           scoring would leave the finished match without a winner (a knockout
@@ -2413,8 +2414,9 @@ paths:
             groups kept in the match's history instead of applied, and
             `heldReason: needs_winner` when they were held because applying
             them would leave a finished match without the winner it needs, or
-            `heldReason: default_win_stands` when a match-level default win
-            awarded for a bar on a DIFFERENT match already closed the match.
+            `heldReason: default_win_stands` when a default win (a
+            withdrawal, or a win awarded for a bar on a DIFFERENT match)
+            already closed the match.
             An applied finish that moved stored, NEWER scoring into the
             match's history (it would have left the match without a winner,
             and in stamp order came after this finish) carries
@@ -3407,10 +3409,10 @@ paths:
                           description: >
                             On a `superseded` entry held because applying it would
                             leave a finished match without the winner it needs, or
-                            because a match-level default win awarded for a bar on
-                            a DIFFERENT match already closed the match
-                            (see RefusedWrite.heldReason); `error` then carries that
-                            sentence.
+                            because a default win (a withdrawal, or a win awarded
+                            for a bar on a DIFFERENT match) already closed the
+                            match (see RefusedWrite.heldReason); `error` then
+                            carries that sentence.
                   heldGroups:
                     type: array
                     description: >
@@ -5043,9 +5045,11 @@ components:
           type: string
           enum: [superseded, clock_skew]
           description: >
-            Machine-readable cause. `superseded` means a newer stored result
-            won; `clock_skew` means this device's clock is ahead of the server
-            and the stamp was refused.
+            Machine-readable cause. `superseded` means the write's groups were
+            held rather than applied, either because a newer stored result won
+            or for one of the two other reasons named in `heldReason`;
+            `clock_skew` means this device's clock is ahead of the server and
+            the stamp was refused.
         serverNowMs:
           type: integer
           format: int64
@@ -5076,12 +5080,13 @@ components:
             without the winner it needs (a knockout match left tied, an engi
             match left with no valid flag count); `message` then tells the
             operator to correct the result with a winner. `default_win_stands`:
-            a match-level default win (fusensho) awarded for a bar recorded on
-            a DIFFERENT match already closed the match; `message` then tells
-            the operator to use Remove default win instead, since the match
-            already has the winner it needs. Either way the change is kept in
-            the match's history. Also carried, beside `heldGroups`, by a write
-            applied in part.
+            a default win already closed the match, whether a withdrawal
+            (kiken, fusenpai) or a win awarded because the other side is
+            barred by a DIFFERENT match (fusensho); `message` then tells the
+            operator to correct the default win from the match's score
+            editor instead, since the match already has the winner it needs.
+            Either way the change is kept in the match's history. Also
+            carried, beside `heldGroups`, by a write applied in part.
 
     MatchHistoryEntry:
       type: object
@@ -5978,10 +5983,10 @@ components:
             $ref: '#/components/schemas/MergeGroup'
           description: >
             On a write's response only: the groups of THIS write that were not
-            applied (a newer change to them is stored, or applying them would
-            leave a finished match without the winner it needs: see
-            `heldReason`) and were kept in the match's history. Omitted when
-            everything applied.
+            applied (a newer change to them is stored, applying them would
+            leave a finished match without the winner it needs, or a default
+            win already closed the match: see `heldReason`) and were kept in
+            the match's history. Omitted when everything applied.
         heldReason:
           type: string
           readOnly: true
@@ -5990,8 +5995,8 @@ components:
             On a write's response only, beside `heldGroups` or
             `displacedGroups`: present when they were held or moved because
             applying them would leave a finished match without the winner it
-            needs, or because a match-level default win awarded for a bar on
-            a DIFFERENT match already closed the match
+            needs, or because a default win (a withdrawal, or a win awarded
+            for a bar recorded on a DIFFERENT match) already closed the match
             (see RefusedWrite.heldReason).
         displacedGroups:
           type: array

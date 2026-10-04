@@ -209,9 +209,12 @@ func serverNowMs() int64 {
 }
 
 // recordOverrideHistory records an override-winner write in the match's
-// history: applied, or held with the winner it named. The override writes
-// outside a transaction (OverrideBracketWinner), so this is its own append,
-// after the bracket save.
+// history: applied, or held with the winner it named. An APPLIED override
+// appends through the same transaction handle the bracket write just used
+// (OverrideBracketWinner), so the write and its history line commit or fail
+// together. A HELD override makes no write at all, so there is nothing to
+// share a transaction with: it is appended on its own, directly through the
+// store.
 func (e *Engine) recordOverrideHistory(h state.StoreTx, compID, matchID, winnerName string, stamp int64, applied bool) {
 	if applied {
 		e.recordDirectHistory(h, compID, matchID, doorOverride, stamp, state.GroupResult)

@@ -1192,6 +1192,14 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
   const _autosaveBuildPatchRef = useRefA(null);
   const _autosaveOnSubmitRef = useRefA(null);
   const _autosaveSeenStampRef = useRefA(0);
+  // bc-cse: the latest Record-bout answer's own stamp, held independently of
+  // matchOverride. The common case (no prior [Remove this bout] leaving an
+  // override to adopt it into) left this answer's modifiedAt unseen until the
+  // SSE push caught up, so a tap on the freshly-appended bout in the meantime
+  // was floored by the PRE-advance stamp instead. Reset on a match switch so a
+  // stale answer from a PREVIOUS match never floors a write on this one.
+  const _recordBoutAnswerStampRef = useRefA(0);
+  useEffectA(() => { _recordBoutAnswerStampRef.current = 0; }, [match?.id]);
   // bc-mrgc: what a write applied only in part kept in the match's history.
   const keptInHistory = useKeptInHistoryNote();
   const {
@@ -2802,7 +2810,11 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
   // C1: keep autosave refs fresh with the latest buildPatch / onSubmit /
   // running-status for TeamScoreEditorModal.
   _autosaveIsRunningRef.current = m.status === "running";
-  _autosaveSeenStampRef.current = m.modifiedAt || 0;
+  // bc-cse: floored by whichever is later, this match's own stamp or a
+  // Record-bout answer this editor has already seen for it (see
+  // _recordBoutAnswerStampRef) -- the override adoption below only covers the
+  // case where a prior [Remove this bout] left one to adopt into.
+  _autosaveSeenStampRef.current = Math.max(m.modifiedAt || 0, _recordBoutAnswerStampRef.current);
   _autosaveBuildPatchRef.current = buildPatch;
   _autosaveOnSubmitRef.current = onSubmit;
 
@@ -4340,8 +4352,15 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
                       // With the stamp the advance gave the match (bc-hlck):
                       // the sheet's next tap on the new bout is floored by
                       // the match it shows, and the override is what it
-                      // shows until the prop catches up.
+                      // shows until the prop catches up. Held in
+                      // _recordBoutAnswerStampRef too (bc-cse), monotonically,
+                      // so the floor reaches the autosave's seen-stamp ref
+                      // even in the common case where there is no prior
+                      // override to adopt it into.
                       const stamp = Number(res.modifiedAt) || 0;
+                      if (stamp > 0) {
+                        _recordBoutAnswerStampRef.current = Math.max(_recordBoutAnswerStampRef.current, stamp);
+                      }
                       setMatchOverride(prev => prev ? {
                         ...prev,
                         match: { ...prev.match, subResults: res.subResults, ...(stamp > 0 ? { modifiedAt: stamp } : {}) },

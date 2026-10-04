@@ -230,13 +230,17 @@ describe('a change held because the finished match needs a winner', () => {
     });
 });
 
-// bc-mrgc, the fusensho twin of the block above: a running board's scoring
-// over a match a match-level default win closed (the other side is barred by
-// a DIFFERENT match) is not applied, is kept in the match's history, and the
-// server says so with heldReason "default_win_stands". The match already has
-// the winner it needs, so the advice is Remove default win, never "correct
-// the result with a winner" and never the plain superseded "check the newer
-// change".
+// bc-mrgc / bc-cse: a running board's scoring, or its overtime, over a match
+// ANY default win closed (a withdrawal, or a default win awarded because the
+// other side is barred by a DIFFERENT match) is not applied, is kept in the
+// match's history, and the server says so with heldReason
+// "default_win_stands". The match already has the winner it needs, so the
+// advice is to correct the default win from the match's score editor, never
+// "correct the result with a winner" and never the plain superseded "check
+// the newer change". The copy names no specific button: a kachinuki match's
+// editor offers no "Remove default win" control at all
+// (`useWithdrawalRemoval({ enabled: !isKachinuki })`), so a sentence naming
+// one would describe a button that is not there.
 describe('a change held because a default win for a bar elsewhere stands', () => {
     const superseded = { applied: false, reason: 'superseded', heldGroups: ['points'], heldReason: 'default_win_stands' };
     const partly = { id: 'm1', status: 'completed', heldGroups: ['points'], heldReason: 'default_win_stands' };
@@ -251,26 +255,30 @@ describe('a change held because a default win for a bar elsewhere stands', () =>
         expect(writeNeedsWinner(superseded)).toBe(false);
     });
 
-    it('the superseded banner points at Remove default win, never "correct the result"', () => {
+    it('the superseded banner points at the score editor, never a specific button or "correct the result"', () => {
         const banner = notLandedBanner(superseded);
         expect(banner).toEqual({ lead: SUPERSEDED_LEAD, reason: DEFAULT_WIN_STANDS_REASON, advice: DEFAULT_WIN_STANDS_ADVICE });
         const text = notSavedText(banner);
         expect(text).toMatch(/^Not applied: /);
         expect(text).toMatch(/default win/);
-        expect(text).toMatch(/Remove default win/);
+        expect(text).toMatch(/score editor/);
+        expect(text).not.toMatch(/Remove default win/);
         expect(text).not.toMatch(/newer change/);
         expect(text).not.toMatch(/correct the result/);
+        expect(text).not.toMatch(/cannot fight/);
     });
 
-    it('the partial-apply note says it in place of "a newer change"', () => {
+    it('the partial-apply note says it in place of "a newer change", and names no button', () => {
         expect(heldGroupsNote(['points'], false, true)).toBe(
-            "Kept in the match's history, not applied: points. This match was closed with a default win because the other competitor cannot fight: to change the result, use Remove default win in its score editor.");
+            "Kept in the match's history, not applied: points. This match was closed with a default win: to change the result, correct the default win from the match's score editor.");
     });
 
-    it('the queue alert says it too', () => {
-        expect(supersededAlertText(1, true, false, true)).toMatch(/Remove default win/);
+    it('the queue alert says it too, and names no button', () => {
+        expect(supersededAlertText(1, true, false, true)).toMatch(/score editor/);
+        expect(supersededAlertText(1, true, false, true)).not.toMatch(/Remove default win/);
         expect(supersededAlertText(1, true, false, true)).not.toMatch(/newer change/);
-        expect(supersededAlertText(2, false, false, true)).toMatch(/Remove default win/);
+        expect(supersededAlertText(2, false, false, true)).toMatch(/score editor/);
+        expect(supersededAlertText(2, false, false, true)).not.toMatch(/Remove default win/);
     });
 
     it('no em-dash and no "mat" in any of the copy', () => {

@@ -73,6 +73,7 @@ func TestRevertMatchToQueue_RecordsHistoryAtomicallyWithTheWrite(t *testing.T) {
 		require.NoError(t, err)
 		require.Len(t, matches, 1)
 		assert.Equal(t, state.MatchStatusScheduled, matches[0].Status, "the write landed alongside its history entry")
+		assert.Equal(t, matches[0].GroupStamp(state.GroupResult), history[0].Stamp, "one stamp for both the result group and its history entry")
 	})
 
 	t.Run("bracket", func(t *testing.T) {
@@ -94,6 +95,12 @@ func TestRevertMatchToQueue_RecordsHistoryAtomicallyWithTheWrite(t *testing.T) {
 		b, err := store.LoadBracket(compID)
 		require.NoError(t, err)
 		assert.Equal(t, state.MatchStatusScheduled, b.Rounds[0][0].Status, "the write landed alongside its history entry")
+		// requeueBracketMatch used to stamp the match with its OWN
+		// serverNowMs() call rather than the one RevertMatchToQueue took for
+		// the history entry, so the two could differ by up to a
+		// millisecond. The caller now passes its stamp in, so both read the
+		// same value.
+		assert.Equal(t, b.Rounds[0][0].GroupStamp(state.GroupResult), history[0].Stamp, "one stamp for both the result group and its history entry")
 	})
 }
 
@@ -161,4 +168,58 @@ func TestAdvanceKachinukiOnce_SuccessRecordsHistoryEntry(t *testing.T) {
 	matches, err := store.LoadPoolMatches(compID)
 	require.NoError(t, err)
 	require.Len(t, matches[0].SubResults, 3, "the write landed alongside its history entry")
+}
+
+// A forced OverrideBracketWinner that reopens a downstream match used to call
+// restoreForceReopened AFTER its own transaction returned, with the bare
+// store rather than the transaction handle the bracket write just used. That
+// left a window, between the override's commit and this later call, where a
+// process dying left the downstream match reopened with no history entry
+// explaining it, and the competitor it un-bars still eligible-false. It now
+// runs with the same tx handle inside the override's own transaction, so both
+// halves of the downstream reopen -- the eligibility restore and the
+// "downstream-reopen" history entry -- commit or fail together with the
+// override's own write and its own history entry. The setup is the "forced
+// winner override" case of TestForceReopenedDownstreamWithdrawalRestoresEligibility
+// (reopen_withdrawal_test.go): an individual knockout final Kuma withdrew
+// from (kiken-voluntary), reopened by overriding round 1's winner.
+func TestOverrideBracketWinner_ForcedReopenRecordsDownstreamHistoryAtomically(t *testing.T) {
+	fought := func(eng *Engine, compID string) {
+		_, err := eng.RecordMatchResultWithIneligibility(compID, "m-r1-0", &state.MatchResult{
+			ID: "m-r1-0", SideA: wrTeamA, SideB: wrTeamB, Winner: wrTeamB,
+			IpponsB: []string{"M", "K"}, Status: state.MatchStatusCompleted,
+		})
+		require.NoError(t, err)
+	}
+	eng, store, compID := seedKnockoutFinalWithdrawal(t, fought)
+
+	// The seed's own kiken-voluntary decision on m-r2-0 already left one
+	// "decision" history entry there before the override runs.
+	preHistory, err := store.LoadMatchHistory(compID, "m-r2-0")
+	require.NoError(t, err)
+	require.Len(t, preHistory, 1, "precondition: the seeded withdrawal recorded its own entry")
+
+	var reopened []ReopenedMatch
+	applied, err := eng.OverrideBracketWinner(compID, "m-r1-0", wrTeamA, 0, ForceOptions{Force: true, Reopened: &reopened})
+	require.NoError(t, err)
+	require.True(t, applied)
+	require.Len(t, reopened, 1)
+	assert.Equal(t, "m-r2-0", reopened[0].ID)
+
+	// The eligibility half of restoreForceReopened landed.
+	assert.True(t, wrEligible(t, store, compID, wrTeamCID), "the final's withdrawal is gone, so Kuma can compete again")
+
+	// The history half of restoreForceReopened landed too: the downstream
+	// match gets its own "downstream-reopen" entry APPENDED after the
+	// seed's decision entry, alongside the override's own entry for the
+	// match the operator actually acted on.
+	downstreamHistory, err := store.LoadMatchHistory(compID, "m-r2-0")
+	require.NoError(t, err)
+	require.Len(t, downstreamHistory, 2, "the downstream reopen's own history entry lands with the override")
+	assert.Equal(t, doorDownstreamReopen, downstreamHistory[1].Door)
+
+	overrideHistory, err := store.LoadMatchHistory(compID, "m-r1-0")
+	require.NoError(t, err)
+	require.Len(t, overrideHistory, 2, "the fought-round setup left its own entry before the override's")
+	assert.Equal(t, doorOverride, overrideHistory[1].Door)
 }

@@ -73,3 +73,28 @@ func TestStoredCopiesCarryNoRequestFields(t *testing.T) {
 		assert.Nil(t, ms[0].Merge, load)
 	}
 }
+
+// TestStampGroups_NeverLowersAGroupsStamp pins stampGroups' own invariant
+// directly (bc-mrgc Finding 2): a caller that already holds a LATER stamp
+// for a group (an engi finish let through as a HeldEcho under an older
+// stamp) must never drag that group's stamp backwards, or a change that
+// genuinely arrived between the two would wrongly read as applying after a
+// group it never actually followed. ModifiedAt already never lowered;
+// stampGroups must give each individual group the same guarantee.
+func TestStampGroups_NeverLowersAGroupsStamp(t *testing.T) {
+	m := &MatchResult{ID: "m", Status: MatchStatusRunning, ModifiedAt: 100}
+	m.StampGroups(300, GroupFlags)
+	require.Equal(t, int64(300), m.GroupStamp(GroupFlags), "precondition: the group is stamped forward")
+
+	m.StampGroups(150, GroupFlags)
+	assert.Equal(t, int64(300), m.GroupStamp(GroupFlags), "an older stamp never lowers the group's recorded stamp")
+
+	m.StampGroups(400, GroupFlags)
+	assert.Equal(t, int64(400), m.GroupStamp(GroupFlags), "a genuinely newer stamp still moves it forward")
+
+	// A group stampGroups has never touched starts materialized from
+	// ModifiedAt (MaterializedGroupStamps): an older stamp than THAT must
+	// not lower it either.
+	m.StampGroups(50, GroupResult)
+	assert.Equal(t, int64(100), m.GroupStamp(GroupResult), "an older stamp than the match's own start never lowers it")
+}

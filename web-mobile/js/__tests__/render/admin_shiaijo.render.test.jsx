@@ -268,6 +268,79 @@ describe('AdminShiaijoPage render-smoke', () => {
     expect(queryByText('Start match')).toBeNull();
   });
 
+  // A court back online refetches its feed when the stream reopens, with no
+  // manual Refresh. app.jsx reopens the stream on 'online' by closing it, which
+  // fires no error, so the reopen reads as a bare 'open' (the stale court seen
+  // in the browser: Start still offered for a match another device started).
+  // The refetch is jittered (200-600 ms), hence the fake timers.
+  it('refetches the court feed when the stream reopens after the device comes back online', async () => {
+    vi.useFakeTimers();
+    const fetchCourtMatches = vi.fn().mockResolvedValue([]);
+    const prevFetch = window.API.fetchCourtMatches;
+    const prevSub = window.API.subscribeToEvents;
+    let status = null;
+    window.API.fetchCourtMatches = fetchCourtMatches;
+    window.API.subscribeToEvents = (_cb, onStatus) => { status = onStatus; return () => {}; };
+    window.tournamentMatches = () => [];
+    window.filterMatchesByCourt = (matches) => matches;
+    try {
+      await act(async () => { renderPage(makeMinimalTournament()); });
+      await act(async () => { status('open'); await vi.advanceTimersByTimeAsync(1000); });
+      const afterConnect = fetchCourtMatches.mock.calls.length;
+      // A bare reopen with nothing before it is not a reconnect.
+      await act(async () => { status('open'); await vi.advanceTimersByTimeAsync(1000); });
+      expect(fetchCourtMatches.mock.calls.length).toBe(afterConnect);
+      await act(async () => {
+        window.dispatchEvent(new Event('online'));
+        status('open');
+        await vi.advanceTimersByTimeAsync(1000);
+      });
+      expect(fetchCourtMatches.mock.calls.length).toBe(afterConnect + 1);
+    } finally {
+      vi.useRealTimers();
+      window.API.fetchCourtMatches = prevFetch;
+      window.API.subscribeToEvents = prevSub;
+    }
+  });
+
+  // Back from the background (an iPad locked or switched app), the court's
+  // feed is refetched: admin.jsx's own resume refresh reloads the
+  // competition, not this court's feed.
+  it('refetches the court feed when the page becomes visible again', async () => {
+    vi.useFakeTimers();
+    const fetchCourtMatches = vi.fn().mockResolvedValue([]);
+    const prevFetch = window.API.fetchCourtMatches;
+    const prevSub = window.API.subscribeToEvents;
+    window.API.fetchCourtMatches = fetchCourtMatches;
+    window.API.subscribeToEvents = () => () => {};
+    window.tournamentMatches = () => [];
+    window.filterMatchesByCourt = (matches) => matches;
+    const hidden = Object.getOwnPropertyDescriptor(Document.prototype, 'hidden');
+    let isHidden = false;
+    Object.defineProperty(document, 'hidden', { configurable: true, get: () => isHidden });
+    try {
+      let utils;
+      await act(async () => { utils = renderPage(makeMinimalTournament()); await vi.advanceTimersByTimeAsync(1000); });
+      const afterMount = fetchCourtMatches.mock.calls.length;
+      isHidden = true;
+      await act(async () => { document.dispatchEvent(new Event('visibilitychange')); await vi.advanceTimersByTimeAsync(1000); });
+      expect(fetchCourtMatches.mock.calls.length).toBe(afterMount);
+      isHidden = false;
+      await act(async () => { document.dispatchEvent(new Event('visibilitychange')); await vi.advanceTimersByTimeAsync(1000); });
+      expect(fetchCourtMatches.mock.calls.length).toBe(afterMount + 1);
+      // Unmounted, it no longer listens.
+      utils.unmount();
+      await act(async () => { document.dispatchEvent(new Event('visibilitychange')); await vi.advanceTimersByTimeAsync(1000); });
+      expect(fetchCourtMatches.mock.calls.length).toBe(afterMount + 1);
+    } finally {
+      vi.useRealTimers();
+      delete document.hidden;
+      if (hidden) Object.defineProperty(Document.prototype, 'hidden', hidden);
+      window.API.fetchCourtMatches = prevFetch;
+      window.API.subscribeToEvents = prevSub;
+    }
+  });
+
   // mp-y3nk Phase 2: the manual "Refresh" button re-pulls the court feed on
   // demand, the operator's recovery when the queue looks stale after a dropped
   // connection. It must call fetchCourtMatches again beyond the mount fetch.

@@ -248,12 +248,24 @@ export function applyBronzeLoserLocal(rounds, matchId, winnerName, thirdPlaceMat
 // on reconnect self-heals its queue instead of waiting for the next ordinary
 // event. Gating on a prior error avoids a redundant double-fetch on page load,
 // where the mount fetch already runs. Exported for unit testing.
+//
+// markLost() counts as such an error. The stream does not always error when the
+// device loses its connection: app.jsx reopens it when the device comes back
+// online (reconnectEvents closes the old one, which fires no error), so that
+// reopen arrives as an 'open' with nothing before it, and a court that went
+// offline kept its stale queue (offering Start for a match another device had
+// started) until a manual refresh. The console marks the stream lost on
+// 'online', and the reopen that follows refetches. The reopen, not 'online'
+// itself, is the moment to fetch: it is when the device is known to reach the
+// server again.
 export function makeReconnectRefetcher(onReconnect) {
     let sawError = false;
-    return (status) => {
+    const onStatus = (status) => {
         if (status === "error") { sawError = true; return; }
         if (status === "open" && sawError) { sawError = false; onReconnect(); }
     };
+    onStatus.markLost = () => { sawError = true; };
+    return onStatus;
 }
 
 // How many of the most-recent completed bouts the Completed section shows
@@ -674,15 +686,33 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
                 },
                 onStatus
             );
-            unsub = () => { if (typeof off === "function") off(); };
+            // Back online: the reopen app.jsx makes refetches (see
+            // makeReconnectRefetcher.markLost).
+            const onOnline = () => onStatus.markLost();
+            window.addEventListener("online", onOnline);
+            unsub = () => {
+                window.removeEventListener("online", onOnline);
+                if (typeof off === "function") off();
+            };
         }
+        // Back from the background (an iPad locked or switched app): events
+        // may have been missed meanwhile, and admin.jsx's own resume refresh
+        // reloads the competition, not this court's feed.
+        const onVisible = () => { if (!document.hidden && !cancelled) scheduleRefresh(); };
+        document.addEventListener("visibilitychange", onVisible);
         let unsubResync = () => {};
         if (typeof window.subscribeBracketResync === "function") {
             // A queued override the server LWW-dropped emits no SSE broadcast, so
             // refetch to replace any stale optimistic bracket state (mp-y3nk).
             unsubResync = window.subscribeBracketResync(() => { if (!cancelled) scheduleRefresh(); });
         }
-        return () => { cancelled = true; timerPool.clearAll(); unsub(); unsubResync(); };
+        return () => {
+            cancelled = true;
+            timerPool.clearAll();
+            document.removeEventListener("visibilitychange", onVisible);
+            unsub();
+            unsubResync();
+        };
     }, [court, refreshCourt]);
 
     // Court-scoped competitions: the live feed once loaded, else the prop

@@ -524,7 +524,9 @@ func appendNextKachinukiBout(bm *state.BracketMatch, next state.SubMatchResult) 
 	bm.Decision = ""
 }
 
-// MaybeAdvanceKachinuki runs the post-score side effect for a
+// advanceKachinukiOnce is one attempt of MaybeAdvanceKachinuki (below, which
+// reads again when the locked write finds the match changed). It runs the
+// post-score side effect for a
 // kachinuki team match.
 //
 // The score endpoint (handlers_match.go) calls this AFTER
@@ -545,17 +547,19 @@ func appendNextKachinukiBout(bm *state.BracketMatch, next state.SubMatchResult) 
 //     may be incomplete); the operator ends the encounter with an explicit
 //     completed score write from the score editor.
 //
-// Reports (advanced, postLog, err): `advanced` is whether SubResults or the
+// Reports (advanced, post, err): `advanced` is whether SubResults or the
 // parent match was mutated (the handler uses it to decide whether to emit an
-// extra match-updated SSE event), and `postLog` is the FULL bout log AFTER the
-// append when advanced is true (nil otherwise). Returning the log lets the
-// caller echo the appended pairing to the open editor without re-reading the
-// match from the store — the read this replaced was ~the 9th store read on a
-// request already doing several, once per advancing bout, live (mp-gmcg review
-// E1).
+// extra match-updated SSE event), and `post` (KachinukiAdvance) is the FULL
+// bout log AFTER the append plus the stamps the advance left, when advanced
+// is true (nil otherwise). Returning them lets the caller echo the appended
+// pairing to the open editor without re-reading the match from the store;
+// the read this replaced was ~the 9th store read on a request already doing
+// several, once per advancing bout, during play (mp-gmcg review E1).
+// errKachinukiAdvanceStale is returned, never logged here, so the caller can
+// try again.
 //
 // FR-044, T135, T137.
-func (e *Engine) MaybeAdvanceKachinuki(compID, matchID string) (bool, []state.SubMatchResult, error) {
+func (e *Engine) advanceKachinukiOnce(compID, matchID string) (bool, *KachinukiAdvance, error) {
 	comp, err := e.store.LoadCompetition(compID)
 	if err != nil {
 		return false, nil, err
@@ -649,21 +653,27 @@ func (e *Engine) MaybeAdvanceKachinuki(compID, matchID string) (bool, []state.Su
 		return false, nil, nil
 	}
 
-	// postLog captures the FULL bout log AFTER the append, so the caller can
-	// echo it without re-reading the match (E1). A fresh slice header keeps it
-	// independent of the store's parse buffer.
-	var postLog []state.SubMatchResult
+	// post captures the FULL bout log AFTER the append and the stamps the
+	// advance left, so the caller can echo them without re-reading the match
+	// (E1). A fresh slice header keeps the log independent of the store's
+	// parse buffer.
+	var post *KachinukiAdvance
 	// The appended pairing and the verdict it clears are stamped with the
-	// server's clock (bc-mrgc), and the advance is recorded in the match's
-	// history, so a write made before it is ordered against it.
-	stamp := serverNowMs()
+	// server's clock, never older than the match (the rule every server-built
+	// write follows, writeStamp: a device running ahead of the server stamped
+	// the write this advance answers later than the server's now, and the
+	// bout it appends must not read as made before the save that recorded the
+	// one it follows), and the advance is recorded in the match's history, so
+	// a write made before it is ordered against it (bc-mrgc).
+	stamp := max(serverNowMs(), parent.ModifiedAt)
 	var appendedGroup string
 
 	// The read above ran without the lock; the write below re-checks, under
 	// it, that the match is still the one the pairing was worked out from
 	// (bc-mrgc phase 3). A match completed, requeued or scored in between is
 	// left exactly as it is: the advance would otherwise set it running and
-	// clear its verdict over a result it never saw.
+	// clear its verdict over a result it never saw. errKachinukiAdvanceStale
+	// then has MaybeAdvanceKachinuki read the match again.
 	e.noteMatchRead(compID)
 	snapshot := parent
 
@@ -683,18 +693,18 @@ func (e *Engine) MaybeAdvanceKachinuki(compID, matchID string) (bool, []state.Su
 			appendNextKachinukiBout(bm, *out.Next)
 			appendedGroup = state.BoutGroup(bm.SubResults[len(bm.SubResults)-1].Position)
 			bm.StampGroups(stamp, appendedGroup, state.GroupResult)
-			postLog = append([]state.SubMatchResult(nil), bm.SubResults...)
+			post = &KachinukiAdvance{
+				BoutLog:     append([]state.SubMatchResult(nil), bm.SubResults...),
+				ModifiedAt:  bm.ModifiedAt,
+				GroupStamps: state.CloneGroupStamps(bm.GroupStamps),
+			}
 			return nil
 		})
-		if errors.Is(err, errKachinukiAdvanceStale) {
-			log.Printf("engine.MaybeAdvanceKachinuki compId=%s matchId=%s: the match changed after the advance read it; not advanced", compID, matchID)
-			return false, nil, nil
-		}
 		if err != nil {
 			return false, nil, err
 		}
 		e.recordDirectHistory(e.store, compID, matchID, doorKachinukiAdvance, stamp, appendedGroup, state.GroupResult)
-		return true, postLog, nil
+		return true, post, nil
 	}
 
 	found, err := e.store.UpdatePoolMatchByID(compID, matchID, func(parent *state.MatchResult) error {
@@ -711,13 +721,13 @@ func (e *Engine) MaybeAdvanceKachinuki(compID, matchID string) (bool, []state.Su
 		parent.Decision = ""
 		appendedGroup = state.BoutGroup(out.Next.Position)
 		parent.StampGroups(stamp, appendedGroup, state.GroupResult)
-		postLog = append([]state.SubMatchResult(nil), parent.SubResults...)
+		post = &KachinukiAdvance{
+			BoutLog:     append([]state.SubMatchResult(nil), parent.SubResults...),
+			ModifiedAt:  parent.ModifiedAt,
+			GroupStamps: state.CloneGroupStamps(parent.GroupStamps),
+		}
 		return nil
 	})
-	if errors.Is(err, errKachinukiAdvanceStale) {
-		log.Printf("engine.MaybeAdvanceKachinuki compId=%s matchId=%s: the match changed after the advance read it; not advanced", compID, matchID)
-		return false, nil, nil
-	}
 	if err != nil {
 		return false, nil, err
 	}
@@ -725,7 +735,48 @@ func (e *Engine) MaybeAdvanceKachinuki(compID, matchID string) (bool, []state.Su
 		return false, nil, nil
 	}
 	e.recordDirectHistory(e.store, compID, matchID, doorKachinukiAdvance, stamp, appendedGroup, state.GroupResult)
-	return true, postLog, nil
+	return true, post, nil
+}
+
+// KachinukiAdvance is what MaybeAdvanceKachinuki hands back when it appended a
+// bout: the FULL bout log after the append, and the match's stamps as the
+// advance left them. The handler echoes all of it on the Record-bout answer,
+// so the open editor renders the appended pairing at once without a store
+// re-read (mp-gmcg review E1) and shows the stamp the advance gave the match,
+// which its next tap is floored by (bc-hlck). Echoing the pre-advance stamp
+// let a device running behind the server stamp the first point of the new
+// bout older than the bout itself, and the point was held.
+type KachinukiAdvance struct {
+	BoutLog     []state.SubMatchResult
+	ModifiedAt  int64
+	GroupStamps map[string]int64
+}
+
+// kachinukiAdvanceAttempts bounds how often MaybeAdvanceKachinuki reads the
+// match again after its locked write found it changed.
+const kachinukiAdvanceAttempts = 3
+
+// MaybeAdvanceKachinuki is the kachinuki post-score advance (the steps and
+// the report are documented on advanceKachinukiOnce, which is one attempt of
+// it). The read runs without the lock and the locked write re-checks what it
+// read (kachinukiAdvanceStillHolds); when the match changed in between, the
+// pairing is worked out AGAIN from the match as it now is, rather than stood
+// down from: standing down left the operator's Record bout answered with no
+// next pairing and nothing to do but tap it again. A finish that landed is
+// final on the second read too (a completed match is never advanced), so a
+// re-read never reopens it. After kachinukiAdvanceAttempts the match is
+// changing faster than it can be read and the advance stands down, logged.
+func (e *Engine) MaybeAdvanceKachinuki(compID, matchID string) (bool, *KachinukiAdvance, error) {
+	for attempt := 1; ; attempt++ {
+		advanced, post, err := e.advanceKachinukiOnce(compID, matchID)
+		if !errors.Is(err, errKachinukiAdvanceStale) {
+			return advanced, post, err
+		}
+		if attempt == kachinukiAdvanceAttempts {
+			log.Printf("engine.MaybeAdvanceKachinuki compId=%s matchId=%s: the match changed each of the %d times the advance read it; not advanced", compID, matchID, attempt)
+			return false, nil, nil
+		}
+	}
 }
 
 // errKachinukiAdvanceStale aborts the advance's locked write when the match

@@ -156,7 +156,8 @@ func TestLostUpdate_SwissAppendKeepsALandedCorrection(t *testing.T) {
 // The kachinuki advance read the match without the lock and its locked write
 // set the match running and cleared its verdict without looking again. A
 // finish landing in between was reopened by it. Now the locked write
-// re-checks and stands down.
+// re-checks and reads again, and a finish that landed is final on that read
+// too, so nothing is appended over it.
 func TestLostUpdate_KachinukiAdvanceDoesNotReopenAFinishThatLanded(t *testing.T) {
 	finish := func(m *state.MatchResult) {
 		m.Status = state.MatchStatusCompleted
@@ -219,4 +220,68 @@ func TestLostUpdate_KachinukiAdvanceDoesNotReopenAFinishThatLanded(t *testing.T)
 		assert.Equal(t, "RedTeam", bm.Winner)
 		assert.Len(t, bm.SubResults, 2, "no bout appended over it")
 	})
+}
+
+// A correction landing between the advance's read and its locked write (the
+// other device fixing bout 1's winner) trips the re-check. The advance then
+// reads the match again and works the pairing out from the corrected bout,
+// rather than standing down with nothing appended and the operator's Record
+// bout answered with no next pairing.
+func TestLostUpdate_KachinukiAdvanceReadsAgainAfterALandedCorrection(t *testing.T) {
+	eng, store, comp := setupKachinukiComp(t, "lu-kachinuki-reread", 2,
+		func(c *state.Competition) { c.Format = state.CompFormatMixed })
+	redID, whiteID := helper.NewUUID4(), helper.NewUUID4()
+	require.NoError(t, store.SaveParticipants(comp.ID, []domain.Player{
+		{ID: redID, Name: "RedTeam", Dojo: "D"},
+		{ID: whiteID, Name: "WhiteTeam", Dojo: "D"},
+	}))
+	lineup := func(teamID string, names ...string) map[string]string {
+		ids := map[string]string{}
+		positions := map[domain.Position]string{}
+		memberIDs := map[domain.Position]string{}
+		for i, name := range names {
+			m, err := store.AddTeamMember(comp.ID, teamID, name)
+			require.NoError(t, err)
+			ids[name] = m.ID
+			positions[domain.PositionNumbered(i+1)] = name
+			memberIDs[domain.PositionNumbered(i+1)] = m.ID
+		}
+		require.NoError(t, store.SetTeamLineup(comp.ID, domain.TeamLineup{
+			TeamID: teamID, Round: 0, Positions: positions, MemberIDs: memberIDs,
+		}, 2))
+		return ids
+	}
+	red := lineup(redID, "R1", "R2")
+	white := lineup(whiteID, "W1", "W2")
+	require.NoError(t, store.SavePoolMatches(comp.ID, []state.MatchResult{{
+		ID: "P1-0", SideA: "RedTeam", SideAID: redID, SideB: "WhiteTeam", SideBID: whiteID, Status: state.MatchStatusRunning,
+		SubResults: []state.SubMatchResult{{
+			Position: 1, SideA: "R1", SideAMemberID: red["R1"], SideB: "W1", SideBMemberID: white["W1"],
+			Winner: "W1", Decision: "fought",
+		}},
+	}}))
+
+	// The other device corrects bout 1 while the advance works from the
+	// uncorrected read: R1 won it, and stays on. The winner's member id goes
+	// with the name, as every writer re-derives it (ids decide who stayed
+	// on, bc-pnum).
+	wait := landWriteAtTheSeam(t, eng, comp.ID, func() error {
+		_, err := store.UpdatePoolMatchByID(comp.ID, "P1-0", func(m *state.MatchResult) error {
+			m.SubResults[0].Winner, m.SubResults[0].WinnerMemberID = "R1", red["R1"]
+			m.ModifiedAt = time.Now().UnixMilli()
+			return nil
+		})
+		return err
+	})
+	advanced, post, err := eng.MaybeAdvanceKachinuki(comp.ID, "P1-0")
+	require.NoError(t, err)
+	wait()
+	require.True(t, advanced, "the advance reads the corrected match again rather than standing down")
+	require.Len(t, post.BoutLog, 2)
+	assert.Equal(t, "R1", post.BoutLog[1].SideA, "the corrected winner stays on")
+	assert.Equal(t, "W2", post.BoutLog[1].SideB, "against White's next fighter")
+	m := storedPoolMatch(t, store, comp.ID, "P1-0")
+	assert.Equal(t, "R1", m.SubResults[0].Winner, "the landed correction is kept")
+	assert.Equal(t, post.BoutLog, m.SubResults, "the echo is the stored log")
+	assert.Equal(t, m.ModifiedAt, post.ModifiedAt, "the echo carries the stamp the advance left")
 }

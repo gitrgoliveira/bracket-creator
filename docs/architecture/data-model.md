@@ -542,7 +542,10 @@ writes: it is held whole when any point or bout was entered after it was declare
 points scored later mean the withdrawal no longer describes the match. The other way round, a
 point entered on a board still scoring the match after a withdrawal was recorded means the
 withdrawal was a mistake: it is cleared (and kept in the history), the competitor it barred
-can fight again, and the winner is worked out from the points. A board that is still scoring a
+can fight again, and the winner is worked out from the points. That is for a withdrawal of the
+match itself: a default win awarded because the other side is barred by another match says
+nothing about that bar, so it stands and the later scoring is held, in the history with the
+reason. A board that is still scoring a
 match that has meanwhile been finished never reopens it: its changes made after the finish
 are applied to the finished result, which stays finished, and the winner is worked out again
 from the merged points or bouts; its changes made before the finish are held. A pool or

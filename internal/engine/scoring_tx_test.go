@@ -267,13 +267,16 @@ func TestRecordDecisionTx_RenamedLoser_RescoreStillResolvesByID(t *testing.T) {
 		{ID: bobID, Name: "Bob-Renamed", Dojo: "B"},
 	}))
 
-	// Re-record the SAME decision (same decisionBy, same intended loser).
-	// The stored id survives the rename, so this still resolves to Bob.
-	_, status2, err := eng.RecordDecision(compID, matchID, "kiken-voluntary", "shiro", "injury", nil, false)
+	// Re-record a decision for the SAME loser (same decisionBy): a different
+	// kiken, so the verdict moves and the eligibility is recorded again (an
+	// identical one is an echo and records no status, bc-mrgc). The stored
+	// id survives the rename, so this still resolves to Bob.
+	_, status2, err := eng.RecordDecision(compID, matchID, "kiken-injury", "shiro", "injury", nil, false)
 	require.NoError(t, err)
 	require.NotNil(t, status2, "the id survives the rename, so the write still resolves the SAME loser")
 	assert.Equal(t, bobID, status2.PlayerID)
 	assert.False(t, status2.Eligible)
+	assert.True(t, status2.Reinstateable, "the record follows the new verdict")
 
 	statuses, err := store.LoadCompetitorStatus(compID)
 	require.NoError(t, err)

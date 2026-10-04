@@ -52,7 +52,6 @@ import (
 	"errors"
 	"fmt"
 	"log"
-	"slices"
 	"sort"
 	"time"
 
@@ -139,15 +138,11 @@ func (e *Engine) RecordMatchResultWithIneligibilityTx(tx state.StoreTx, compID, 
 		// in the match's history and answered superseded when a newer change
 		// to its result or flags is stored, BEFORE the downstream guard, so a
 		// stale replay is never misreported as a knockout correction.
-		engiPrior, lerr := e.lookupExistingResult(tx, compID, matchID)
+		engiPrior, inPool, lerr := e.lookupExistingResultIn(tx, compID, matchID)
 		if lerr != nil {
 			return nil, lerr
 		}
 		if engiValidTotal(result.FlagsA, result.FlagsB) {
-			inPool, perr := e.matchInPoolFile(tx, compID, matchID)
-			if perr != nil {
-				return nil, perr
-			}
 			if engiFinishHeld(engiPrior, result, comp, !inPool) {
 				e.recordWriteHistory(tx, compID, matchID, result)
 				return nil, supersededBy(result)
@@ -1221,11 +1216,7 @@ func exactDecisionReplay(prior *state.MatchResult, decision, decisionBy string, 
 // so the stored match is untouched; the entry records the reason. Returns the
 // superseded error the write is answered with.
 func (e *Engine) holdWriteTx(tx state.StoreTx, compID, matchID string, result *state.MatchResult, comp *state.Competition, reason string) error {
-	prior, err := e.lookupExistingResult(tx, compID, matchID)
-	if err != nil {
-		return err
-	}
-	inPool, err := e.matchInPoolFile(tx, compID, matchID)
+	prior, inPool, err := e.lookupExistingResultIn(tx, compID, matchID)
 	if err != nil {
 		return err
 	}
@@ -1236,18 +1227,6 @@ func (e *Engine) holdWriteTx(tx state.StoreTx, compID, matchID string, result *s
 	})
 	e.recordWriteHistory(tx, compID, matchID, result)
 	return supersededBy(result)
-}
-
-// matchInPoolFile reports whether matchID is a row of the competition's
-// pool-matches file (a pool, league or Swiss match) rather than a knockout
-// match: the branch the merge context needs (mergeCtx.knockout and
-// nilSubsClear) when a caller judges a write outside writeToPoolOrBracket.
-func (e *Engine) matchInPoolFile(h state.StoreTx, compID, matchID string) (bool, error) {
-	pool, err := h.LoadPoolMatches(compID)
-	if err != nil {
-		return false, err
-	}
-	return slices.ContainsFunc(pool, func(m state.MatchResult) bool { return m.ID == matchID }), nil
 }
 
 // refuseDecisionReachingRunningMatch is the decision path's early answer to

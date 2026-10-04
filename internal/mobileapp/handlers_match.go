@@ -749,15 +749,10 @@ func RegisterMatchHandlers(r *gin.RouterGroup, eng *engine.Engine, store Competi
 			HeldReason string `json:"heldReason,omitempty"`
 		}
 		var errs []scoreError
-		// heldEntry reports an entry that was applied in part: the groups
-		// named were kept in the match's history instead (bc-mrgc).
-		type heldEntry struct {
-			MatchID         string   `json:"matchId"`
-			HeldGroups      []string `json:"heldGroups"`
-			DisplacedGroups []string `json:"displacedGroups,omitempty"`
-			HeldReason      string   `json:"heldReason,omitempty"`
-		}
-		var partlyHeld []heldEntry
+		// partlyHeld reports each entry that was applied in part: its matchId
+		// and what withHeldGroups adds (heldGroups, always present on an
+		// entry, empty when its only change was a move to the history).
+		var partlyHeld []gin.H
 		// Only successfully-recorded results go into the SSE broadcast so
 		// clients never patch with values the engine rejected.
 		var successful []state.MatchResult
@@ -978,11 +973,8 @@ func RegisterMatchHandlers(r *gin.RouterGroup, eng *engine.Engine, store Competi
 				continue
 			}
 			successful = append(successful, results[i].MatchResult)
-			if held, displaced := results[i].Merge.HeldGroups(), results[i].Merge.DisplacedGroups(); len(held)+len(displaced) > 0 {
-				if held == nil {
-					held = []string{}
-				}
-				partlyHeld = append(partlyHeld, heldEntry{MatchID: results[i].ID, HeldGroups: held, DisplacedGroups: displaced, HeldReason: results[i].Merge.HeldReason()})
+			if rep := results[i].Merge; len(rep.HeldGroups())+len(rep.DisplacedGroups()) > 0 {
+				partlyHeld = append(partlyHeld, withHeldGroups(gin.H{"matchId": results[i].ID, "heldGroups": []string{}}, rep))
 			}
 			if capturedStatus != nil {
 				eligibilityUpdates = append(eligibilityUpdates, capturedStatus)
@@ -2783,7 +2775,7 @@ func scoreResponseWithReopened(result *state.MatchResult, reopened []engine.Reop
 	if err != nil {
 		return result
 	}
-	var merged map[string]any
+	var merged gin.H
 	if err := json.Unmarshal(raw, &merged); err != nil {
 		return result
 	}
@@ -2795,26 +2787,29 @@ func scoreResponseWithReopened(result *state.MatchResult, reopened []engine.Reop
 	if len(reopened) > 0 {
 		merged["reopenedMatches"] = blockedMatchesPayload(reopened)
 	}
-	// Part of the write was not applied: a newer change to those groups is
-	// stored, and this write's values for them were kept in the match's
-	// history (bc-mrgc). The rest applied, so the answer is still applied.
-	if len(held) > 0 {
-		merged["heldGroups"] = held
+	return withHeldGroups(merged, result.Merge)
+}
+
+// withHeldGroups adds to a write's answer what the merge did not apply or
+// moved (bc-mrgc): heldGroups, the groups kept in the match's history because
+// a newer change to each is stored (or, with heldReason "needs_winner",
+// because applying them would have left the match without the winner it
+// needs, R4); displacedGroups, stored newer scoring this write moved to the
+// history (S2 with R4); and heldReason itself. The ONE owner of those three
+// keys: the score answer, the representative-bout add and remove
+// (handlers_daihyosen.go) and each bulk-score entry build theirs here. The
+// rest of the answer is applied, so it still reads as applied.
+func withHeldGroups(body gin.H, rep *state.MergeReport) gin.H {
+	if held := rep.HeldGroups(); len(held) > 0 {
+		body["heldGroups"] = held
 	}
-	// Why, when it was not a newer change: applying them would have left the
-	// match without the winner it needs (R4), so the operator corrects the
-	// result with a winner.
-	// A stored change this write moved to the history: newer scoring that
-	// would have left the finished match without the winner it needs, which
-	// in stamp order came after this finish and could not apply (S2 with
-	// R4). The finish applied; displacedGroups names what was moved.
-	if displaced := result.Merge.DisplacedGroups(); len(displaced) > 0 {
-		merged["displacedGroups"] = displaced
+	if displaced := rep.DisplacedGroups(); len(displaced) > 0 {
+		body["displacedGroups"] = displaced
 	}
-	if reason := result.Merge.HeldReason(); reason != "" {
-		merged["heldReason"] = reason
+	if reason := rep.HeldReason(); reason != "" {
+		body["heldReason"] = reason
 	}
-	return merged
+	return body
 }
 
 // holdOlderRevision answers a running write the same scoring board has
@@ -3413,7 +3408,7 @@ func registerScoreHandler(r *gin.RouterGroup, eng ScoringEngine, store Competiti
 		// to retry and double-record. Mirrors the recordIneligibility
 		// non-fatal pattern.
 		if body.KachinukiBoutFinal {
-			if advanced, postLog, kerr := eng.MaybeAdvanceKachinuki(id, mid); kerr != nil {
+			if advanced, post, kerr := eng.MaybeAdvanceKachinuki(id, mid); kerr != nil {
 				log.Printf("engine.MaybeAdvanceKachinuki(%s, %s): %v", id, mid, kerr)
 			} else if advanced {
 				// Echo the POST-advance bout log so the open score editor can
@@ -3422,9 +3417,13 @@ func registerScoreHandler(r *gin.RouterGroup, eng ScoringEngine, store Competiti
 				// predates the append, and SSE only refreshes the match
 				// LIST, not the host's open-match snapshot. MaybeAdvanceKachinuki
 				// hands back the post-append log directly, so no store re-read
-				// (mp-gmcg review E1).
-				if postLog != nil {
-					result.SubResults = postLog
+				// (mp-gmcg review E1), and the stamps the advance left, so
+				// the editor's next tap on the new bout is floored by them
+				// (bc-hlck) rather than by the pre-advance stamp.
+				if post != nil {
+					result.SubResults = post.BoutLog
+					result.ModifiedAt = post.ModifiedAt
+					result.GroupStamps = post.GroupStamps
 				}
 				hub.Broadcast(EventMatchUpdated, gin.H{
 					"competitionId": id,

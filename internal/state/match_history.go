@@ -18,6 +18,7 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"log"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -131,7 +132,7 @@ func (s *Store) appendMatchHistoryLocked(compID string, existing []byte, entry M
 // parseMatchHistory reads a history file's lines. A line that does not parse
 // is skipped and logged rather than failing the read: the history is a record
 // to consult, and one damaged line must not hide the rest.
-func parseMatchHistory(raw []byte) []MatchHistoryEntry {
+func parseMatchHistory(compID, matchID string, raw []byte) []MatchHistoryEntry {
 	var out []MatchHistoryEntry
 	sc := bufio.NewScanner(bytes.NewReader(raw))
 	sc.Buffer(make([]byte, 0, 64*1024), 8*1024*1024)
@@ -142,6 +143,7 @@ func parseMatchHistory(raw []byte) []MatchHistoryEntry {
 		}
 		var e MatchHistoryEntry
 		if err := json.Unmarshal(line, &e); err != nil {
+			log.Printf("state: match history %s/%s: a line could not be read and is skipped: %v", compID, matchID, err)
 			continue
 		}
 		out = append(out, e)
@@ -179,7 +181,7 @@ func (s *Store) LoadMatchHistory(compID, matchID string) ([]MatchHistoryEntry, e
 	if err != nil {
 		return nil, err
 	}
-	return parseMatchHistory(raw), nil
+	return parseMatchHistory(compID, matchID, raw), nil
 }
 
 // DeleteMatchHistory removes every match history of a competition. A
@@ -218,11 +220,11 @@ func (t *storeTx) LoadMatchHistory(compID, matchID string) ([]MatchHistoryEntry,
 		return nil, err
 	}
 	if pending, ok := t.pendingFor(filepath.Join(matchHistoryDir, matchHistoryFile(matchID))); ok {
-		return parseMatchHistory(pending), nil
+		return parseMatchHistory(compID, matchID, pending), nil
 	}
 	raw, err := t.store.readMatchHistoryBytesLocked(compID, matchID)
 	if err != nil {
 		return nil, err
 	}
-	return parseMatchHistory(raw), nil
+	return parseMatchHistory(compID, matchID, raw), nil
 }

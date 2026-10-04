@@ -180,9 +180,9 @@ type ScoringEngine interface {
 	// kachinuki ("winner-stays-on") team match. No-op for non-kachinuki
 	// competitions. Returns (advanced, postLog, err): postLog is the full
 	// bout log AFTER the appended pairing when advanced is true, so the
-	// caller echoes it without re-reading the match. Mirrors
-	// engine.Engine.MaybeAdvanceKachinuki. FR-044, T135.
-	MaybeAdvanceKachinuki(compID, matchID string) (bool, []state.SubMatchResult, error)
+	// caller echoes it, with the stamps the advance left, without re-reading
+	// the match. Mirrors engine.Engine.MaybeAdvanceKachinuki. FR-044, T135.
+	MaybeAdvanceKachinuki(compID, matchID string) (bool, *engine.KachinukiAdvance, error)
 }
 
 // CompetitorStatusStore is the consumer-boundary view of state.Store

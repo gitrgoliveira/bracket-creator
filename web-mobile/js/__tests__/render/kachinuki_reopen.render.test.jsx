@@ -599,6 +599,34 @@ describe('kachinuki [× Remove this bout] undoes a bout added by mistake', () =>
     expect(screen.getByRole('button', { name: 'Record bout' })).toBeDisabled();
   });
 
+  // bc-hlck: the server stamps the appended bout with its own clock, and the
+  // Record-bout answer carries that stamp with the log. Adopted into the
+  // override with the log, it is the match the sheet shows, so the next tap
+  // on the new bout is floored by it (seenModifiedAt). Adopting the log alone
+  // left the override on the pre-advance stamp, and a device running behind
+  // the server stamped that tap older than the bout it scored.
+  it('the next tap on the appended bout is floored by the stamp the advance gave the match', async () => {
+    const boutOneOnly = [{ position: 1, sideA: 'A1', sideB: 'B1', ipponsA: ['M'], ipponsB: [], winner: 'A1' }];
+    window.API.removeKachinukiBout = vi.fn().mockResolvedValue({ id: 'm1', subResults: boutOneOnly });
+    const boutOneAndNew = [...boutOneOnly, { position: 2, sideA: 'A1', sideB: 'B3', ipponsA: [], ipponsB: [] }];
+    const onSubmit = vi.fn().mockResolvedValue({ subResults: boutOneAndNew, modifiedAt: 7_777 });
+    await renderEditor({ match: runningWithAppendedBout({ modifiedAt: 1_000 }), onSubmit });
+
+    await act(async () => { fireEvent.click(screen.getByTestId('kachinuki-remove-bout-button')); });
+    await waitFor(() => expect(screen.queryByTestId('kachinuki-remove-bout-button')).toBeNull());
+    await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Record bout' })); });
+    await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(screen.queryByTestId('kachinuki-record-hint')).not.toBeNull());
+
+    // Shiro men on the appended bout: the autosave that carries it was made
+    // against the match as the answer left it. (Record bout itself is an
+    // explicit tap, floored by the match the host hands recordScore, so it
+    // carries no seenModifiedAt of its own.)
+    await act(async () => { fireEvent.keyDown(window, { key: 'm' }); });
+    await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(2), { timeout: 3000 });
+    expect(onSubmit.mock.calls[1][0].seenModifiedAt).toBe(7_777);
+  });
+
   // mp-gmcg review F4: the local override that hides the removed bout must
   // survive a same-content snapshot reload. An SSE refresh hands back a NEW
   // match object with identical (stale) content while the parent list catches

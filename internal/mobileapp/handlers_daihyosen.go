@@ -688,18 +688,3 @@ func daihyosenChangedGroups(stored, u *state.MatchResult, groups ...string) []st
 	}
 	return out
 }
-
-// withHeldGroups adds heldGroups to a write's answer when part of the write
-// was kept in the match's history rather than applied (bc-mrgc).
-func withHeldGroups(body gin.H, rep *state.MergeReport) gin.H {
-	if held := rep.HeldGroups(); len(held) > 0 {
-		body["heldGroups"] = held
-	}
-	if displaced := rep.DisplacedGroups(); len(displaced) > 0 {
-		body["displacedGroups"] = displaced
-	}
-	if reason := rep.HeldReason(); reason != "" {
-		body["heldReason"] = reason
-	}
-	return body
-}

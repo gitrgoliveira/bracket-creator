@@ -17,8 +17,9 @@
 // (changedGroups), the union two coalesced writes carry (unionChanged), and
 // the plain words a group is named by to the operator (groupLabel).
 //
-// A near leaf: its one import is result_slot.jsx (itself a leaf), for the
-// placeholder token, so the "what is an empty slot" rule keeps one definition.
+// A near leaf with two imports, both leaves: result_slot.jsx for the
+// placeholder token, so the "what is an empty slot" rule keeps one definition,
+// and write_result.jsx for the answer predicates keptInHistoryNote reads.
 // The serializer that builds the wire shapes compared here is
 // api_serializers.jsx's (matchWire, changedGroupsFor), and the hook that keeps
 // an editor's baselines is admin_scoring_autosave.jsx's useChangedGroups.

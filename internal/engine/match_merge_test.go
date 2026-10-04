@@ -366,6 +366,65 @@ func TestMerge_ScoringAfterAWithdrawalClearsIt(t *testing.T) {
 	})
 }
 
+// R2's clear is for a withdrawal of the match itself. A fusensho closed this
+// match because the other side is barred by ANOTHER match; points a board
+// still scoring it sends after that say nothing about that bar, so the
+// default win stands and the scoring is held, in the history with the reason,
+// and no winner is asked for (the match has one).
+func TestMerge_ScoringAfterADefaultWinForABarElsewhereIsHeld(t *testing.T) {
+	bothBranches(t, func(t *testing.T, knockout bool) {
+		h := mmIndividual(t, knockout)
+		// Ryu (aka) cannot fight: the default win is Tora's.
+		_, _, err := h.eng.RecordDecision(h.compID, h.matchID, "fusensho", "aka", "", nil, false, mmT1)
+		require.NoError(t, err)
+		before := h.load(t)
+		require.Equal(t, wrTeamB, before.Winner, "precondition: Tora has the default win")
+
+		point := mmRunning(h, mmT2)
+		point.Changed = nil // today's client: the whole board
+		point.IpponsA = []string{"M"}
+		point.IpponsB = []string{}
+		err = h.write(point)
+		require.ErrorIs(t, err, ErrMatchSuperseded, "the point is its one change, and it is held")
+		assert.Equal(t, []string{state.GroupPoints}, HeldGroupsOf(err))
+		assert.Empty(t, HeldReasonOf(err), "no winner is asked for")
+
+		m := h.load(t)
+		assert.Equal(t, state.MatchStatusCompleted, m.Status)
+		assert.Equal(t, "fusensho", m.Decision, "the default win stands")
+		assert.Equal(t, wrTeamB, m.Winner)
+		assert.Equal(t, before.IpponsA, m.IpponsA, "the scoreline is as the default win recorded it")
+		assert.Equal(t, before.IpponsB, m.IpponsB)
+		last := h.history(t)[len(h.history(t))-1]
+		assert.Equal(t, HoldReasonDefaultWinStands, last.Reason)
+		assert.Empty(t, last.ClearedWithdrawal, "nothing was cleared")
+	})
+}
+
+// A verdict that applies but does not move (the same withdrawal sent again
+// under a later stamp: another device's copy, a correction restating it) has
+// no eligibility consequence: recording it again would bar once more a
+// competitor reinstated since.
+func TestMerge_SameDecisionSentAgainLeavesAReinstatement(t *testing.T) {
+	bothBranches(t, func(t *testing.T, knockout bool) {
+		h := mmIndividual(t, knockout)
+		_, _, err := h.eng.RecordDecision(h.compID, h.matchID, "kiken-injury", "aka", "knee", nil, false, mmT1)
+		require.NoError(t, err)
+		require.False(t, wrEligible(t, h.store, h.compID, wrTeamAID), "precondition: Ryu is barred")
+		_, err = h.eng.ReinstateCompetitor(h.compID, wrTeamAID)
+		require.NoError(t, err)
+		require.True(t, wrEligible(t, h.store, h.compID, wrTeamAID), "precondition: Ryu is reinstated")
+
+		_, status, err := h.eng.RecordDecision(h.compID, h.matchID, "kiken-injury", "aka", "knee", nil, false, mmT2)
+		require.NoError(t, err)
+		assert.Nil(t, status, "a verdict that did not move records no status")
+		assert.True(t, wrEligible(t, h.store, h.compID, wrTeamAID), "the reinstatement stands")
+		m := h.load(t)
+		assert.Equal(t, "kiken-injury", m.Decision)
+		assert.Equal(t, mmT2, m.ModifiedAt, "the echo still applied and took its stamp")
+	})
+}
+
 // R2 on a fixed-order team match: the bouts decide the winner (IV, then PW).
 func TestMerge_ScoringAfterATeamWithdrawalClearsIt(t *testing.T) {
 	eng, store, compID, _ := seedPoolWithdrawal(t, "kiken-voluntary")

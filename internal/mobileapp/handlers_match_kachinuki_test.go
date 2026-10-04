@@ -208,6 +208,12 @@ func TestScoreHandler_KachinukiBoutFinalAppendsNextBout(t *testing.T) {
 	matches, err := store.LoadPoolMatches(compID)
 	require.NoError(t, err)
 	require.Len(t, matches, 1)
+	// And the stamp the advance gave the match, not the write's: the editor
+	// floors its next tap on the new bout by the stamp it shows (bc-hlck),
+	// and the pre-advance one let a device running behind the server stamp
+	// that tap older than the bout it scores.
+	assert.Positive(t, matches[0].ModifiedAt, "the advance stamps the match")
+	assert.Equal(t, matches[0].ModifiedAt, echoed.ModifiedAt, "the echo carries the advance's stamp")
 	require.Len(t, matches[0].SubResults, 2, "flagged bout-final write must append bout 2")
 	assert.Equal(t, "R-1", matches[0].SubResults[1].SideA, "winner stays on")
 	assert.Equal(t, "W-2", matches[0].SubResults[1].SideB, "next from lineup")

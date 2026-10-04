@@ -298,12 +298,22 @@ func mergeMatchWrite(stored, incoming *state.MatchResult, policy matchWritePolic
 	// R2 and R3: a scoring change applied to a finished match.
 	if finished && scoringChanged(stored, incoming, rep.Applied) {
 		probe := *incoming
-		cleared := domain.IsDefaultWinDecisionStr(probe.Decision)
+		// R2 clears a withdrawal OF THIS MATCH: points scored after it mean
+		// it was a mistake. A fusensho is a default win awarded for a bar
+		// recorded on ANOTHER match (the other side cannot fight), which
+		// points scored here say nothing about, and a scoreline cannot land
+		// beside the circles a default win records without one discarding
+		// the other: the default win stands and the scoring is held, in the
+		// history with the reason (R4's shape).
+		cleared := domain.IsWithdrawalDecisionStr(probe.Decision)
 		if cleared {
 			probe.Decision, probe.DecisionBy, probe.DecisionReason = "", "", ""
 			probe.Winner, probe.WinnerID, probe.WinnerSide = "", "", ""
 		}
-		if deriveWinnerAfterMerge(&probe, mc) {
+		switch {
+		case !cleared && domain.IsDefaultWinDecisionStr(probe.Decision):
+			mh.holdScoring(HoldReasonDefaultWinStands)
+		case deriveWinnerAfterMerge(&probe, mc):
 			if cleared {
 				rep.ClearedWithdrawal = state.GroupValue(incoming, state.GroupResult)
 				// The scoring change replaces the ruling: KeepsWithdrawalRuling
@@ -317,7 +327,7 @@ func mergeMatchWrite(stored, incoming *state.MatchResult, policy matchWritePolic
 					stamps[state.GroupResult] = stamp
 				}
 			}
-		} else {
+		default:
 			// R4 (operator ruling 2026-10-04): the change would leave a
 			// finished knockout match tied, or an engi match with no valid
 			// count. It is not applied: the match keeps its recorded finish,
@@ -369,6 +379,14 @@ func mergeMatchWrite(stored, incoming *state.MatchResult, policy matchWritePolic
 		if !state.GroupDiffers(stored, incoming, g) {
 			rep.Unchanged = append(rep.Unchanged, g)
 		}
+	}
+	// A verdict that applied but equals the stored one (an echo: the same
+	// decision sent again under a later stamp, or a winner worked out again
+	// to the same answer) did not move. Recording it again would rewrite the
+	// competitor's status (and undo a reinstatement made since), so it has
+	// no eligibility consequence.
+	if slices.Contains(rep.Unchanged, state.GroupResult) {
+		rep.ResultChanged = false
 	}
 	if len(stamps) == 0 {
 		stamps = nil
@@ -565,7 +583,9 @@ func (h *mergeHold) holdGroups(reason string, groups ...string) {
 		}
 	}
 	h.rep.HoldReason = reason
-	h.rep.NeedsWinner = true
+	// "Correct the result with a winner" is the answer for the two R4
+	// reasons only; a default win that stands asks for no correction.
+	h.rep.NeedsWinner = reason == HoldReasonKnockoutNeedsWinner || reason == HoldReasonEngiNeedsValidCount
 }
 
 // holdScoring holds every applied group that decides who won.
@@ -598,6 +618,13 @@ const HoldReasonKnockoutNeedsWinner = "a knockout match needs a winner"
 // on a valid flag count, which a change that leaves an even or incomplete
 // count does not give.
 const HoldReasonEngiNeedsValidCount = "an engi result needs a valid flag count"
+
+// HoldReasonDefaultWinStands is why a running board's scoring over a match a
+// fusensho closed is held: the default win was awarded for a bar recorded on
+// another match (the other side cannot fight), which points scored here say
+// nothing about, so it stands and the scoring is kept in the history. R2's
+// clear is for a withdrawal of the match itself.
+const HoldReasonDefaultWinStands = "a default win closed this match: the other side cannot fight"
 
 // completesMatch reports whether the merged write leaves the match finished
 // (an empty status completes a bracket match, effectiveBracketWriteStatus).

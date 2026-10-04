@@ -4337,7 +4337,15 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
                     // this is a no-op then and the still-correct override is
                     // left untouched.
                     if (mountedRef.current && res && Array.isArray(res.subResults)) {
-                      setMatchOverride(prev => prev ? { ...prev, match: { ...prev.match, subResults: res.subResults } } : prev);
+                      // With the stamp the advance gave the match (bc-hlck):
+                      // the sheet's next tap on the new bout is floored by
+                      // the match it shows, and the override is what it
+                      // shows until the prop catches up.
+                      const stamp = Number(res.modifiedAt) || 0;
+                      setMatchOverride(prev => prev ? {
+                        ...prev,
+                        match: { ...prev.match, subResults: res.subResults, ...(stamp > 0 ? { modifiedAt: stamp } : {}) },
+                      } : prev);
                     }
                     // F5: same reasoning as Start match above -- Record bout
                     // also submits status:"running" and is also an explicit

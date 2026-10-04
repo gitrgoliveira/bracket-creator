@@ -168,10 +168,16 @@ func (e *Engine) RecordMatchResultWithIneligibilityTx(tx state.StoreTx, compID, 
 			return nil, recErr
 		}
 		backfillEngiResult(result, rec)
-		e.recordWriteHistory(tx, compID, matchID, result)
+		// History is written AFTER requalification succeeds, never before: a
+		// refusal (e.g. DownstreamKnockoutPlayedError without the operator's
+		// confirmation) rolls the pool row back to prior, and a history
+		// entry staged ahead of that would claim "applied" for a write that
+		// was, in the end, refused (bc-cse). The displaced-history behaviour
+		// recordWriteHistory already carries rides along at its new site.
 		if err := e.requalifyMixedPoolWrite(tx, compID, comp, matchID, rec, engiPrior, fo); err != nil {
 			return nil, err
 		}
+		e.recordWriteHistory(tx, compID, matchID, result)
 		return nil, nil
 	}
 

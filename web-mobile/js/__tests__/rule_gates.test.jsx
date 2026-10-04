@@ -12,17 +12,27 @@
 // reports the wrong line sends the reader to prose, and a comment stripper
 // that hides code hides violations.
 import { describe, it, expect } from 'vitest';
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 import { stripComments, scanSource, scanWholeFile } from '../../check-helpers.mjs';
 import { FORBIDDEN as NUMBER_RULES } from '../../check-competitor-search.mjs';
 import { FORBIDDEN as WRITE_RULES } from '../../check-write-result.mjs';
 
-// The two default-win rules (WRITE_RULES[2] and [3]) are the ones
+// The three default-win rules (WRITE_RULES[2], [3] and [4]) are the ones
 // findViolations scans WHOLE-FILE (scanWholeFile), not line by line: see
 // check-write-result.mjs's WHOLE_FILE_RULE_INDICES. Tests below that exercise
-// a cross-line shape use scanWholeFile directly with just these two, rather
+// a cross-line shape use scanWholeFile directly with just these three, rather
 // than scanSource with the full WRITE_RULES array, since scanSource cannot
 // see across a line break by construction.
-const DEFAULT_WIN_RULES = [WRITE_RULES[2], WRITE_RULES[3]];
+const DEFAULT_WIN_RULES = [WRITE_RULES[2], WRITE_RULES[3], WRITE_RULES[4]];
+
+// The shared Go/JS table of default-win cases (bc-cse): Go half is
+// TestDefaultWinMatches (internal/mobileapp/prose_no_default_win_test.go),
+// which reads the same file, so the two engines agree case for case rather
+// than drifting apart under two hand-copied lists.
+const DEFAULT_WIN_TABLE = JSON.parse(readFileSync(
+  resolve(__dirname, '..', '..', '..', 'internal', 'mobileapp', 'testdata', 'default_win_cases.json'), 'utf8',
+)).cases;
 
 const lines = (src) => src.split('\n').length;
 
@@ -146,10 +156,21 @@ describe('the "default win" phrase rule has no legitimate spelling', () => {
     expect(trips('return "Two default losses recorded";')).toBe(true);
   });
 
+  it('catches the noun form "default winner(s)" (bc-cse FIX C), which the win/loss pattern above cannot reach', () => {
+    // "winner" fails the pattern above's trailing \b right after "win": the
+    // "n" ending "win" and the "n" opening "ner" are both word characters,
+    // so there is no boundary there. This sibling rule catches the noun on
+    // its own, with a whitespace-only separator so it still leaves
+    // `variant="default" winner={w}` alone (the quote is not in the class).
+    expect(trips('return "Kyoto is the default winner";')).toBe(true);
+    expect(trips('return "the default winners are listed below";')).toBe(true);
+  });
+
   it('does not trip on an identifier -- the space/hyphen is required', () => {
     expect(trips('export function writeDefaultWinStands(res) { return defaultWin; }')).toBe(false);
     expect(trips('export const DEFAULT_WIN_STANDS_REASON = 1;')).toBe(false);
     expect(trips('export const DefaultLossCount = 1;')).toBe(false);
+    expect(trips('export const defaultWinnerID = x;')).toBe(false);
   });
 
   it('does not trip inside a comment', () => {
@@ -242,11 +263,41 @@ describe('the "wins ... by default" phrase rule', () => {
     expect(tripsWhole('return "winning by default is not shown that way.";')).toBe(true);
   });
 
-  it('catches "the winner by default" and the loss side: "loses/lost/losing by default"', () => {
-    expect(tripsWhole('return "the winner by default is Kyoto.";')).toBe(true);
+  it('catches the loss side: "loses by default"', () => {
     expect(tripsWhole('return "Kyoto loses by default this round.";')).toBe(true);
-    expect(tripsWhole('return "the match was lost by default.";')).toBe(true);
-    expect(tripsWhole('return "losing by default is not shown that way.";')).toBe(true);
+  });
+
+  it('no longer catches "winner"/"lost"/"losing" (bc-cse FIX B): real prose used those words without naming a decision', () => {
+    // Rebalanced away from "winners?"/"lost"/"losing": each produced a real
+    // false positive on ordinary settings/connection prose (see the
+    // false-positive-sentences test below). "the winner by default" is
+    // the ONE case this rebalance costs: it named a decision, in the
+    // winner-before-default order the sibling "default winner(s)" rule
+    // does not cover (that one only reaches default-before-winner).
+    expect(tripsWhole('return "the winner by default is Kyoto.";')).toBe(false);
+    expect(tripsWhole('return "the match was lost by default.";')).toBe(false);
+    expect(tripsWhole('return "losing by default is not shown that way.";')).toBe(false);
+  });
+
+  it('excludes the contraction "won\'t" without a lookahead (bc-cse FIX B)', () => {
+    expect(tripsWhole('return "This won\'t be shown by default.";')).toBe(false);
+    expect(tripsWhole('return "The sidebar won\'t open by default on a phone.";')).toBe(false);
+    // "wonder"/"wondering" never reach the "won" branch at all: \bwon\b
+    // does not match a "won" that continues into more word characters.
+    expect(tripsWhole('return "I wondered whether this applies by default.";')).toBe(false);
+  });
+
+  it('does not cross a Markdown-table-cell boundary, or read a setting/connection sentence as a decision (bc-cse FIX B)', () => {
+    expect(tripsWhole('return "Winners per pool is 2 by default.";')).toBe(false);
+    expect(tripsWhole('return "Pool winners advance by default";')).toBe(false);
+    expect(tripsWhole('return "If the connection is lost, by default the app retries";')).toBe(false);
+    expect(tripsWhole('return "Points lost (PL) are hidden by default";')).toBe(false);
+    expect(tripsWhole('return "Winners per pool | 2 | | Bronze match | off by default";')).toBe(false);
+  });
+
+  it('crosses a line break between "by" and "default" too (bc-cse FIX A)', () => {
+    expect(tripsWhole('return "Kyoto wins by\ndefault";')).toBe(true);
+    expect(tripsWhole('return "wins the match by\n        default";')).toBe(true);
   });
 
   it('crosses a line break -- the [^.] bound is what keeps it inside a sentence (bc-cse)', () => {
@@ -273,5 +324,18 @@ describe('the "wins ... by default" phrase rule', () => {
 
   it('names the recorded decision instead, which never trips it', () => {
     expect(tripsWhole('return `Record fusensho for ${name}`;')).toBe(false);
+  });
+});
+
+// The shared Go/JS table (bc-cse): every case here is also asked of Go's
+// defaultWinMatches by TestDefaultWinMatches against the SAME file, so the
+// two engines cannot drift onto different answers for the same input. Each
+// value is fed through scanWholeFile directly (the mechanism findViolations
+// actually runs the default-win rules through), since several cases exist
+// specifically to test a cross-line wrap.
+describe('the default-win rules match the shared Go/JS case table', () => {
+  it.each(DEFAULT_WIN_TABLE)('$name', ({ value, want }) => {
+    const got = scanWholeFile(`${value}\n`, DEFAULT_WIN_RULES).length > 0;
+    expect(got).toBe(want);
   });
 });

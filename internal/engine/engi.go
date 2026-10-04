@@ -102,9 +102,11 @@ const HoldReasonEngiAtomic = "the flags and the winner they decide are kept toge
 func engiFinishHeld(prior, result *state.MatchResult, comp *state.Competition, knockout bool) bool {
 	probe := engiFinishProbe(prior, result)
 	rep := mergeMatchWrite(prior, &probe, matchWriteForward, mergeCtx{comp: comp, knockout: knockout})
-	// The stamp the merge ordered the finish by is the one the engi recorder
-	// writes: an unstamped finish takes the server's time there (writeStamp),
-	// so it leaves a fence like every other finish.
+	// Default for a write this function ultimately holds whole (the atomic
+	// re-merge below, `return true`): the finish's own attempted stamp,
+	// exactly as before. The two "applied" returns below override this with
+	// the merge's actually-settled stamp instead (bc-cse): a held write
+	// never lands, so there is no merged state for it to report.
 	result.ModifiedAt = rep.Stamp
 	result.WriteDoor = doorEngi
 	if len(rep.Held) == 0 {
@@ -124,6 +126,15 @@ func engiFinishHeld(prior, result *state.MatchResult, comp *state.Competition, k
 		// on the write for it to apply directly (engi.go's recordEngiMatch,
 		// through state.ApplyMergedGroupStamps).
 		result.GroupStamps = state.CloneGroupStamps(probe.GroupStamps)
+		// The answer must report the stamp the merge actually settled on
+		// (bc-cse), never the finish's own attempted stamp (which mergeCtx
+		// only used to ORDER the write): probe.ModifiedAt already holds the
+		// merged value here -- it is what the recorder below persists onto
+		// the stored match too, via ApplyMergedGroupStamps over GroupStamps.
+		// rec.ModifiedAt is NOT that value: on the bracket branch,
+		// applyEngiToBracketMatch builds a fresh *state.MatchResult before
+		// stampEngiChanges ever runs, so it is always 0.
+		result.ModifiedAt = probe.ModifiedAt
 		return false
 	}
 	// S2 (operator ruling 2026-10-04, "the newest count decides" in both
@@ -146,6 +157,9 @@ func engiFinishHeld(prior, result *state.MatchResult, comp *state.Competition, k
 		result.FlagsA, result.FlagsB = probe.FlagsA, probe.FlagsB
 		result.Merge = rep
 		result.GroupStamps = state.CloneGroupStamps(probe.GroupStamps)
+		// Same rule as the branch above: the answer reports the merge's own
+		// settled stamp, not the finish's own, older attempted one.
+		result.ModifiedAt = probe.ModifiedAt
 		return false
 	}
 	if !rep.Superseded() {

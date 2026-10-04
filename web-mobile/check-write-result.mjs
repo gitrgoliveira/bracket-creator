@@ -117,8 +117,11 @@ export const FORBIDDEN = [
     // also covers `default{" "}win` (a JSX expression splice), string
     // concatenation (`'default ' + 'win'`), a hyphenated spelling
     // ("default-win", the historical testid shape), and a non-breaking
-    // space (`\s` matches U+00A0), all of which render as the same two
-    // words a reader sees run together.
+    // space (`\s` matches U+00A0, and every other Unicode "Space_Separator"
+    // code point: JS's `\s` is Unicode-aware by spec with no extra flag
+    // needed, unlike Go's RE2 \s, which the sibling Go gate therefore widens
+    // with \p{Zs}), all of which render as the same two words a reader sees
+    // run together.
     //
     // The separator is REQUIRED (`+`, not `*`): a camelCase identifier such
     // as `isDefaultWin`, `clearsDefaultWin` or `DEFAULT_WIN_STANDS_REASON`
@@ -136,26 +139,65 @@ export const FORBIDDEN = [
     why: 'says "default win", a term kendo does not have; name the recorded decision instead (kiken, fusenpai, fusensho) through decisionWord (write_result.jsx)',
   },
   {
+    // "default winner(s)" (bc-cse FIX C): the noun form the pattern above
+    // cannot reach, because its trailing \b sits right after "win"/"wins"
+    // and "winner" fails that boundary (both the "n" ending "win" and the
+    // "n" opening "ner" are word characters, so there is no boundary
+    // between them -- the very fix that stopped the rule above reading the
+    // "win" inside "winner" as a false hit also means it never reads the
+    // real word "winner" as a hit at all). The separator here is
+    // whitespace only, deliberately narrower than the pattern above's: a
+    // JSX/struct attribute run such as `variant="default" winner={w}`
+    // separates the two words with a quote, which this class excludes, so
+    // that shape still passes here too.
+    re: /default\s+winners?\b/i,
+    why: 'says "default winner", a term kendo does not have; name the recorded decision instead (kiken, fusenpai, fusensho) through decisionWord (write_result.jsx)',
+  },
+  {
     // The other way to say it without the word "default" next to "win":
     // "X wins by default" / "the match was won by default" / "winning by
     // default". Same ruling, same scanning (whole-file, so a wrap between
-    // "win"/"won"/"winning" and "by default" is caught too -- the gap is
-    // `[^.]`, not `[^.\n]` (bc-cse), so it crosses a real line break); still
-    // bounded to 40 characters with no sentence break (a literal ".") so it
-    // cannot reach across an unrelated "win" and an unrelated "by default"
-    // in two different sentences -- that bound alone was always enough to
-    // keep the match inside one sentence, so excluding "\n" as well bought
-    // nothing but the missed wraps this fix closes.
-    re: /\b(?:wins?|won|winning|winners?|loses|lost|losing)\b[^.]{0,40}\bby default\b/i,
+    // "win"/"won"/"winning" and "by default", OR between "by" and
+    // "default" itself (bc-cse FIX A), is caught too -- the gap is
+    // `[^.|]`, not `[^.]` or `[^.\n]` (bc-cse): it crosses a real line
+    // break, and a literal "by default" is now `by\s+default` so a
+    // formatter wrap landing between those two words is caught as well;
+    // still bounded to 40 characters with no sentence break (a literal
+    // ".") or Markdown table-cell break (a literal "|", bc-cse FIX B) so
+    // it cannot reach across an unrelated "win" and an unrelated "by
+    // default" in two different sentences or table cells.
+    //
+    // Rebalanced to the decision wordings only -- wins, won, winning,
+    // loses -- after "winners?", "lost" and "losing" produced real false
+    // positives on ordinary settings/connection prose ("Winners per pool
+    // is 2 by default.", "If the connection is lost, by default the app
+    // retries.", "Points lost (PL) are hidden by default."): none of those
+    // name a kendo decision, so they must not trip this rule. A real
+    // "winner ... by default" sentence is still caught by the "default
+    // winner(s)" rule above when the two words sit next to each other,
+    // which is the shape that actually occurs.
+    //
+    // "won" excludes its own contraction "won't" without a lookahead (JS
+    // regex has none without the /y sticky trick, which is not worth it
+    // here): `\bwon\b` alone also matches inside "won't", because the
+    // word-to-apostrophe transition is itself a `\b`. The alternative
+    // instead requires the character right after "won" to be present and
+    // NOT an apostrophe, a literal "." or a literal "|" (or end of
+    // string) -- excluding "." and "|" too, not just "'", keeps this
+    // forced character from itself swallowing the sentence/cell boundary
+    // the gap after it exists to stop at. "wonder"/"wondering" never reach
+    // this branch at all, since `\bwon\b` does not match a "won" that
+    // continues into more word characters.
+    re: /(?:\b(?:wins?|winning|loses)\b|\bwon\b(?:[^'.|]|$))[^.|]{0,40}\bby\s+default\b/i,
     why: 'says a side "wins by default", a phrase kendo does not have; name the recorded decision instead (kiken, fusenpai, fusensho) through decisionWord (write_result.jsx)',
   },
 ];
 
 // Scanned against the WHOLE comment-stripped file (scanWholeFile) rather
-// than line by line (scanSource): both are prose rules whose production text
-// can wrap across a line break, and neither depends on a single line's
+// than line by line (scanSource): all three are prose rules whose production
+// text can wrap across a line break, and none depends on a single line's
 // syntax the way the two JS-API rules above do.
-const WHOLE_FILE_RULE_INDICES = new Set([2, 3]);
+const WHOLE_FILE_RULE_INDICES = new Set([2, 3, 4]);
 
 // api_client.jsx is the collaborator that turns an HTTP response INTO the
 // discriminated result the predicates read, so it necessarily touches the raw
@@ -170,8 +212,9 @@ const ALLOWED_RULE_INDEX = 0;
 
 // The OWNER module is exempt from the two rules ABOVE it (it is allowed to
 // state its own abstraction in the raw terms those rules forbid everywhere
-// else), but not from the two default-win rules: nothing, the owner
-// included, may say "default win" or "wins ... by default".
+// else), but not from the three default-win rules: nothing, the owner
+// included, may say "default win", "default winner", or "wins ... by
+// default".
 const OWNER_EXEMPT_RULE_INDICES = new Set([0, 1]);
 
 // scanFile: picks scanSource (line-based) or scanWholeFile (comment-stripped
@@ -198,7 +241,7 @@ export function findViolations() {
       violations.push({ rel, ...hit });
     }
   }
-  // The two default-win rules are prose rules an operator can hit outside
+  // The three default-win rules are prose rules an operator can hit outside
   // js/jsx too (see EXTRA_TEXT_FILES above); the JS-API rules have no
   // business there, so only the whole-file default-win rules run on them.
   const defaultWinRules = FORBIDDEN.filter((_, i) => WHOLE_FILE_RULE_INDICES.has(i));
@@ -215,14 +258,14 @@ if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.ur
   const violations = findViolations();
   if (violations.length === 0) {
     console.log('  ✓ the not-landed rule is asked, never re-derived');
-    console.log('  ✓ no production string says "default win" or "wins ... by default"');
+    console.log('  ✓ no production string says "default win", "default winner" or "wins ... by default"');
     console.log('All write-result checks OK.');
     process.exit(0);
   }
   console.error('Write-result checks failed.\n');
   console.error(`The landed/superseded rule belongs to js/${OWNER} (writeDidNotLand / writeWasSuperseded);`);
   console.error('re-deriving it at a call site is how the sixth site was missed last time.');
-  console.error('"default win" / "wins ... by default" are not kendo terms; name the recorded decision instead (kiken, fusenpai, fusensho).\n');
+  console.error('"default win" / "default winner" / "wins ... by default" are not kendo terms; name the recorded decision instead (kiken, fusenpai, fusensho).\n');
   printViolations(violations);
   process.exit(1);
 }

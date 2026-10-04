@@ -3,7 +3,7 @@
 
 This runs against the Markdown SOURCES under ``docs/`` (not the built site),
 so it catches wording problems before ``mkdocs build`` ever renders them.
-Six rules are enforced, each of which the public docs must never contain:
+Seven rules are enforced, each of which the public docs must never contain:
 
 * ``em-dash``: the character U+2014 (an em dash). House style writes short
   sentences instead.
@@ -18,9 +18,11 @@ Six rules are enforced, each of which the public docs must never contain:
   such term (operator ruling 2026-10-04): every finished match has a result,
   a scoreline or a registered decision that names the winner -- name the
   recorded decision instead (kiken, fusenpai, fusensho).
-* ``wins-by-default``: the same ruling, the other way to say it -- naming a
-  side as winning "by default" without the words "default" and "win" next
-  to each other.
+* ``default-winner``: the same ruling, the noun form -- "default winner(s)"
+  -- which ``default-win``'s own word-boundary requirement cannot reach.
+* ``wins-by-default``: the same ruling again, the other way to say it --
+  naming a side as winning "by default" without the words "default" and
+  "win" next to each other.
 
 ``docs/dev-guide/code_of_conduct.md`` is skipped because it is third-party
 text (the Contributor Covenant) that this repo does not control the wording
@@ -30,25 +32,26 @@ paragraph it interrupts rather than letting the prose before it join the
 prose after it (bc-cse) -- a line-based rule never saw the difference, but a
 paragraph rule that joined across a skipped block could read two unrelated
 sentences as one. HTML tags are stripped before matching, for both the line
-rules and the two paragraph rules (bc-cse: before this fix only the line
+rules and the three paragraph rules (bc-cse: before this fix only the line
 rules got this treatment, so e.g. ``<img src="shots/default-win.png">`` read
 as prose to the paragraph rules alone). Markdown emphasis markers (``*`` and
-``_``) are also stripped before the two paragraph rules run, so
+``_``) are also stripped before the three paragraph rules run, so
 ``**default** win`` and ``_default_ win`` read exactly as ``default win``
 rather than hiding the two words behind punctuation neither gate's character
 class names.
 
 The first four rules are checked LINE BY LINE, which is correct for them (an
 em dash, a "See [...]" link, an internal id, and "mat" are each self-contained
-within one line in every real violation seen). The two default-win rules are
-different: Markdown source commonly soft-wraps a sentence across physical
-lines (a paragraph renders as one block regardless of where its source lines
-break), so "the default" ending one line and "win" starting the next is one
-violation a line-by-line check cannot see -- the same class of miss the
-sibling JS gate (web-mobile/check-write-result.mjs) fixed for the same
-ruling. Those two rules are therefore checked against each PARAGRAPH (a run
-of consecutive non-blank prose lines, rejoined with newlines preserved so a
-hit's line number can still be computed), never against a single line alone.
+within one line in every real violation seen). The three default-win rules
+are different: Markdown source commonly soft-wraps a sentence across
+physical lines (a paragraph renders as one block regardless of where its
+source lines break), so "the default" ending one line and "win" starting the
+next is one violation a line-by-line check cannot see -- the same class of
+miss the sibling JS gate (web-mobile/check-write-result.mjs) fixed for the
+same ruling. Those three rules are therefore checked against each PARAGRAPH
+(a run of consecutive non-blank prose lines, rejoined with newlines
+preserved so a hit's line number can still be computed), never against a
+single line alone.
 
 Usage:
     python3 docs/check_prose.py [docs_dir]   # default: docs
@@ -80,17 +83,17 @@ RULES: list[tuple[str, re.Pattern[str]]] = [
     ("mat", MAT_RE),
 ]
 
-# The default-win pair (operator ruling 2026-10-04), checked against each
+# The default-win trio (operator ruling 2026-10-04), checked against each
 # PARAGRAPH instead (see iter_paragraphs below), so a phrase a Markdown
 # source wraps across two lines is still caught -- mirrors
 # web-mobile/check-write-result.mjs's own default-win rules, widened the
-# same way for the same ruling (the Go gate gets the same pair too).
+# same way for the same ruling (the Go gate gets the same three too).
 #
 # The separator in DEFAULT_WIN_RE is REQUIRED (`+`, not `*`), matching the JS
 # rule's own reasoning even though prose has no camelCase identifiers to
 # protect: the two words running together with NO separator at all
 # ("defaultwin") is not a shape an author produces by accident in prose, so
-# there is nothing real to catch there, and keeping the two gates'
+# there is nothing real to catch there, and keeping the gates'
 # character classes in the same shape is one less thing to keep in sync by
 # hand. One or more of whitespace (a line wrap included -- `\s` matches a
 # newline), a quote, a brace, `+`, or a hyphen (the historical "default-win"
@@ -99,21 +102,54 @@ RULES: list[tuple[str, re.Pattern[str]]] = [
 # ``variant="default" winner={w}`` would read the "win" inside "winner" as
 # the forbidden word, matching the same fix in the JS and Go gates.
 DEFAULT_WIN_RE = re.compile(r"default[\s{}\"'+-]+(?:wins?|loss(?:es)?)\b", re.IGNORECASE)
+# "default winner(s)" (bc-cse FIX C): the noun form DEFAULT_WIN_RE's
+# trailing \b after "win" cannot reach, because "winner" never satisfies a
+# boundary right after "win" (the "n" ending "win" and the "n" opening
+# "ner" are both word characters). The separator here is whitespace only,
+# deliberately narrower than DEFAULT_WIN_RE's: an HTML attribute run such as
+# ``variant="default" winner={w}`` separates the two words with a quote,
+# which this class excludes, so that shape still passes here too.
+DEFAULT_WINNER_RE = re.compile(r"default\s+winners?\b", re.IGNORECASE)
 # The other way to say it without "default" and "win" adjacent: naming a
 # side as winning "by default", including the past and participle forms
 # ("won by default", "winning by default") a bare `wins?` alternation
 # missed. Bounded to 40 characters with no sentence break (a literal ".")
-# so it cannot reach across an unrelated "win" and an unrelated "by
-# default" in two different sentences. The gap is `[^.]`, not `[^.\n]`
-# (bc-cse): it now crosses a real line break, since a Markdown paragraph
-# wraps its source lines exactly the way the default-win rule above already
-# accounts for, and the 40-character bound (plus the literal ".") was
-# already the thing keeping the match inside one sentence -- excluding "\n"
-# as well bought nothing but the wrapped shape this fix exists to catch.
-WINS_BY_DEFAULT_RE = re.compile(r"\b(?:wins?|won|winning|winners?|loses|lost|losing)\b[^.]{0,40}\bby default\b", re.IGNORECASE)
+# or Markdown table-row break (a literal "|", bc-cse FIX B) so it cannot
+# reach across an unrelated "win" and an unrelated "by default" in two
+# different sentences or table cells. The gap is `[^.|]`, not `[^.\n]` or
+# `[^.]` (bc-cse): it crosses a real line break, since a Markdown paragraph
+# wraps its source lines exactly the way DEFAULT_WIN_RE already accounts
+# for, and the 40-character bound (plus "." and "|") was already the thing
+# keeping the match inside one sentence/cell -- excluding "\n" as well
+# bought nothing but the wrapped shape this fix exists to catch.
+#
+# Rebalanced to the decision wordings only -- wins, won, winning, loses --
+# after "winners?", "lost" and "losing" produced real false positives on
+# ordinary settings/connection prose ("Winners per pool is 2 by default.",
+# "If the connection is lost, by default the app retries.", "Points lost
+# (PL) are hidden by default."): none of those name a kendo decision.
+# "winner ... by default" is still caught by DEFAULT_WINNER_RE above when
+# the two words sit next to each other, which is the shape that occurs.
+#
+# "won" excludes its own contraction "won't" without a lookahead (Python's
+# re module has none): `\bwon\b` alone also matches inside "won't", because
+# the word-to-apostrophe transition is itself a `\b`. The alternative
+# instead requires the character right after "won" to be present and NOT
+# an apostrophe, a literal "." or a literal "|" (or end of string) --
+# excluding "." and "|" too keeps this forced character from swallowing
+# the sentence/cell boundary the gap after it exists to stop at.
+# "wonder"/"wondering" never reach this branch, since `\bwon\b` does not
+# match a "won" that continues into more word characters. `by\s+default`
+# (not a literal "by default") lets a wrap land between "by" and
+# "default" themselves too (bc-cse FIX A).
+WINS_BY_DEFAULT_RE = re.compile(
+    r"(?:\b(?:wins?|winning|loses)\b|\bwon\b(?:[^'.|]|$))[^.|]{0,40}\bby\s+default\b",
+    re.IGNORECASE,
+)
 
 PARAGRAPH_RULES: list[tuple[str, re.Pattern[str]]] = [
     ("default-win", DEFAULT_WIN_RE),
+    ("default-winner", DEFAULT_WINNER_RE),
     ("wins-by-default", WINS_BY_DEFAULT_RE),
 ]
 
@@ -137,18 +173,18 @@ def check_line(line: str) -> list[str]:
 
 
 # Markdown emphasis delimiters. Stripped (not replaced with a space) before
-# the two paragraph rules run, so "**default** win" and "_default_ win" read
-# as the plain "default win" a reader actually sees, rather than hiding the
-# two words behind punctuation neither DEFAULT_WIN_RE's nor
-# WINS_BY_DEFAULT_RE's character class names. Inline code spans are already
-# gone by this point (iter_prose_lines strips them before yielding a line),
-# so this cannot eat an underscore inside a real identifier such as
-# `snake_case`.
+# the three paragraph rules run, so "**default** win" and "_default_ win"
+# read as the plain "default win" a reader actually sees, rather than
+# hiding the two words behind punctuation none of DEFAULT_WIN_RE's,
+# DEFAULT_WINNER_RE's, nor WINS_BY_DEFAULT_RE's character class names.
+# Inline code spans are already gone by this point (iter_prose_lines strips
+# them before yielding a line), so this cannot eat an underscore inside a
+# real identifier such as `snake_case`.
 EMPHASIS_RE = re.compile(r"[*_]+")
 
 
 def _paragraph_prose(line: str) -> str:
-    """Normalize one line the way the two PARAGRAPH_RULES need it: HTML tags
+    """Normalize one line the way the three PARAGRAPH_RULES need it: HTML tags
     stripped to a space (bc-cse), exactly as check_line does for the line
     rules -- before this fix only check_line got that treatment, so e.g.
     ``<img src="shots/default-win.png">`` read as prose to the paragraph

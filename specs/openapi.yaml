@@ -2709,12 +2709,15 @@ paths:
         kachinuki team match, or any match (team or individual, pool or
         knockout) whose stored `decision` is a kiken (of any kind), a
         fusenpai, or a fusensho. Status returns to
-        `running` -- EXCEPT a match-level `fusensho` whose `decisionBy` side
-        is STILL barred by a decision recorded on a DIFFERENT match, which
-        returns to `scheduled` instead: going straight to `running` would
-        strand the operator behind the eligibility gate with no way to
-        start it. The identical fusensho reopens to `running` once that
-        competitor is reinstated. The match-level verdict
+        `running` -- EXCEPT when the decision's `decisionBy` side is STILL
+        barred by a decision recorded on a DIFFERENT match, which returns to
+        `scheduled` instead: this can hold for a kiken, a fusenpai, or a
+        fusensho reopen alike, not fusensho alone, since going straight to
+        `running` would strand the operator behind the eligibility gate with
+        no way to start it. The identical reopen returns to `running` once
+        that bar is gone, whether because the competitor was reinstated or
+        because whatever else recorded the bar was itself cleared. The
+        match-level verdict
         (winner, decision, maru scoreline) is cleared, and what was
         fought is kept: the bout log (subResults), or on a single-bout match
         (an individual match, a pool daihyosen or tiebreaker bout) the letters
@@ -2738,9 +2741,12 @@ paths:
         `X-Tournament-Password` gets 401. Broadcasts a `match_updated` event.
 
         Reopening a match a withdrawal (kiken, fusenpai) ended REMOVES the
-        withdrawal: every competitor-status entry that match recorded is
-        restored to eligible, in the same transaction as the reopen, and the
-        restore is broadcast as `competitor_status_updated`.
+        withdrawal: every competitor-status entry that named this match as
+        the bar is restored to eligible, UNLESS a fusenpai recorded on a
+        different match chained onto the same bar, in which case the status
+        instead moves to name that chained fusenpai and the competitor stays
+        barred because of it. Either way this runs in the same transaction as
+        the reopen, and the change is broadcast as `competitor_status_updated`.
 
         Knockout matches: a winner already propagated into a next-round slot
         that has not been fought is retracted to its "Winner of rX-mY"

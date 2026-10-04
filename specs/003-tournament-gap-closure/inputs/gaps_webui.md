@@ -121,7 +121,7 @@ This document summarizes UX issues identified during a full tournament setup of 
 
 **Where**: Admin > Scoring modal (individual and team)
 **What happens**: When a competitor withdraws mid-tournament (injury, illness) or fails to appear at court call, the operator must manually score a 2–0 result and remember which competitor defaulted. There is no "Kiken" or "No-show" button, no visual distinction between a fought 2–0 and a default 2–0, and no mechanism to flag the withdrawn competitor as ineligible for subsequent matches.
-**Expected**: The scoring modal should offer a "Kiken" (withdrawal) and/or "Default win" action that: (a) auto-fills the default score (2–0 regulation, 1–0 if during encho), (b) records the match decision reason, and (c) marks the withdrawn competitor as ineligible, prompting the operator to resolve their remaining scheduled matches.
+**Expected**: The scoring modal should offer a "Kiken" (withdrawal) and/or "Fusenpai"/"Fusensho" action that: (a) auto-fills the default score (2–0 regulation, 1–0 if during encho), (b) records the match decision reason, and (c) marks the withdrawn competitor as ineligible, prompting the operator to resolve their remaining scheduled matches.
 **Impact**: Without this, a withdrawn competitor can silently appear in later bracket rounds. The tournament manager must manually track and intervene, which is error-prone during a busy event. See `gaps_tournament_spec.md` Gap 13.
 
 ---

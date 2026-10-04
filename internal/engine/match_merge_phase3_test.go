@@ -178,6 +178,57 @@ func TestMerge_EngiNewestValidCountDecidesInBothOrders(t *testing.T) {
 	})
 }
 
+// TestMerge_EngiAnswerReportsTheMergedModifiedAt pins bc-cse. The write's OWN
+// answer -- the *state.MatchResult the caller passed in, which the handler
+// echoes back in the /score response and broadcasts as match_updated -- must
+// report the stamp the merge actually settled on, never the finish's own
+// older attempted stamp. Before the fix, engiFinishHeld's "newest count
+// decides" branch (TestMerge_EngiNewestValidCountDecidesInBothOrders's
+// companion assertions on the STORED match) left result.ModifiedAt at the
+// finish's own stamp (mmT2) while the stored match, via
+// state.ApplyMergedGroupStamps, already held the real, newer mmT3 the merge
+// computed. A client flooring its next write on the answer's stamp (bc-hlck,
+// _stampAfterSeen) could then stamp a write between the two, racing a change
+// the stored match had already moved past.
+func TestMerge_EngiAnswerReportsTheMergedModifiedAt(t *testing.T) {
+	bothBranches(t, func(t *testing.T, knockout bool) {
+		h := mmEngi(t, knockout)
+		recount := mmRunning(h, mmT3, state.GroupFlags)
+		recount.FlagsA, recount.FlagsB = 1, 2
+		require.NoError(t, h.write(recount))
+
+		finish := mmEngiFinish(h, mmT2, 3, 0)
+		require.NoError(t, h.write(finish), "the newer, valid count already decides it")
+		assert.Equal(t, mmT3, finish.ModifiedAt, "the answer must report the merge's settled stamp, not the finish's own older one")
+
+		m := h.load(t)
+		assert.Equal(t, m.ModifiedAt, finish.ModifiedAt, "the answer and the stored match must agree")
+	})
+}
+
+// TestMerge_EngiFinishEchoAnswerReportsTheStoredModifiedAt pins bc-cse's
+// other site: a stale, SAME-count finish replayed over an already-completed
+// match is an echo (HeldEcho, not Held: TestMerge_EngiFinishEchoingTheStoredFlagsApplies)
+// and applies with nothing actually changing -- but its answer must still
+// report the match's real, newer ModifiedAt, not its own older attempted
+// stamp. Before the fix this was the OTHER branch engiFinishHeld's
+// unconditional `result.ModifiedAt = rep.Stamp` at the top of the function
+// fed: the len(rep.Held)==0 early return never corrected it for an echo
+// either.
+func TestMerge_EngiFinishEchoAnswerReportsTheStoredModifiedAt(t *testing.T) {
+	bothBranches(t, func(t *testing.T, knockout bool) {
+		h := mmEngi(t, knockout)
+		require.NoError(t, h.write(mmEngiFinish(h, mmT3, 3, 0)))
+
+		echo := mmEngiFinish(h, mmT1, 3, 0)
+		require.NoError(t, h.write(echo), "the same count replayed under an older stamp is an echo, not a hold")
+		assert.Equal(t, mmT3, echo.ModifiedAt, "the answer must report the match's real, newer ModifiedAt, not the echo's own older stamp")
+
+		m := h.load(t)
+		assert.Equal(t, m.ModifiedAt, echo.ModifiedAt, "the answer and the stored match must agree")
+	})
+}
+
 // A finish whose only "held" flags are an echo of the stored count (the same
 // total a board already autosaved, under an older stamp) is no loss, so it
 // is NOT held with the result (bc-mrgc, HeldEcho is not a hold): the finish

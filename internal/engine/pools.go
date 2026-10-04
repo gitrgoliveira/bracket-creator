@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"sort"
 	"strconv"
-	"strings"
 
 	"github.com/gitrgoliveira/bracket-creator/internal/domain"
 	"github.com/gitrgoliveira/bracket-creator/internal/helper"
@@ -331,7 +330,8 @@ func (e *Engine) generatePools(comp *state.Competition, players []domain.Player,
 func numberPoolMatchesInPlayingOrder(results []state.MatchResult) {
 	next := make(map[string]int)
 	for i := range results {
-		pool := results[i].ID[:strings.LastIndex(results[i].ID, "-")]
+		// Every id here was built as "<pool>-<index>" above.
+		pool, _ := poolNameFromMatchID(results[i].ID)
 		results[i].ID = pool + "-" + strconv.Itoa(next[pool])
 		next[pool]++
 	}

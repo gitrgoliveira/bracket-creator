@@ -624,7 +624,7 @@ const HoldReasonEngiNeedsValidCount = "an engi result needs a valid flag count"
 // another match (the other side cannot fight), which points scored here say
 // nothing about, so it stands and the scoring is kept in the history. R2's
 // clear is for a withdrawal of the match itself.
-const HoldReasonDefaultWinStands = "a default win closed this match: the other side cannot fight"
+const HoldReasonDefaultWinStands = "the other side cannot fight, so a default win closed this match"
 
 // completesMatch reports whether the merged write leaves the match finished
 // (an empty status completes a bracket match, effectiveBracketWriteStatus).

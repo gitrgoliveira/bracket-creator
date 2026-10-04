@@ -401,6 +401,40 @@ func TestMerge_ScoringAfterADefaultWinForABarElsewhereIsHeld(t *testing.T) {
 	})
 }
 
+// The team twin: the bouts a board changed are held too (every scoring group,
+// not the points alone), and the credited rows the default win padded come
+// back untouched.
+func TestMerge_ScoringAfterATeamDefaultWinForABarElsewhereIsHeld(t *testing.T) {
+	eng, store, compID, _ := seedPoolWithdrawal(t, "fusensho")
+	require.True(t, wrEligible(t, store, compID, wrTeamAID), "precondition: a fusensho bars nobody on this match")
+	h := mmHome{eng: eng, store: store, compID: compID, matchID: "Pool A-0"}
+	before := wrPoolMatch(t, store, compID)
+	require.Equal(t, "fusensho", before.Decision)
+	require.Len(t, before.SubResults, 3, "precondition: the default win padded every position")
+
+	board := mmRunning(h, mmT2)
+	board.Changed = nil
+	board.SubResults = []state.SubMatchResult{
+		wrBout1("M"),
+		{Position: 2, SideA: "r2", SideB: "t2", Winner: "t2", IpponsB: []string{"K"}},
+		{Position: 3, SideA: "r3", SideB: "t3", Winner: "t3", IpponsB: []string{"D", "M"}},
+	}
+	board.IpponsA, board.IpponsB = []string{}, []string{}
+	err := h.write(board)
+	require.ErrorIs(t, err, ErrMatchSuperseded, "nothing of the board applies")
+	held := HeldGroupsOf(err)
+	assert.Subset(t, held, []string{state.BoutGroup(2), state.BoutGroup(3)}, "every bout the board changed is held")
+	assert.NotContains(t, held, state.BoutGroup(1), "an echo of the stored bout is not a held change")
+	assert.Empty(t, HeldReasonOf(err), "no winner is asked for")
+
+	m := wrPoolMatch(t, store, compID)
+	assert.Equal(t, state.MatchStatusCompleted, m.Status)
+	assert.Equal(t, "fusensho", m.Decision, "the default win stands")
+	assert.Equal(t, before.Winner, m.Winner)
+	assert.Equal(t, before.SubResults, m.SubResults, "the rows the default win padded are untouched")
+	assert.Equal(t, HoldReasonDefaultWinStands, h.history(t)[len(h.history(t))-1].Reason)
+}
+
 // A verdict that applies but does not move (the same withdrawal sent again
 // under a later stamp: another device's copy, a correction restating it) has
 // no eligibility consequence: recording it again would bar once more a

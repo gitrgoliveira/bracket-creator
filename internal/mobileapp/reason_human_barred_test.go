@@ -104,15 +104,15 @@ func TestScoreHandler_IneligibleCompetitor_ReasonHumanNamesMatchAndRemedy(t *tes
 	}{
 		{
 			"kiken-voluntary", "kiken-voluntary",
-			"Alice withdrew in Pool A · Match 1 and cannot fight again. Record the default win for Carol.",
+			"Alice withdrew in Pool A · Match 1 and cannot fight again. Record the fusensho for Carol.",
 		},
 		{
 			"kiken-injury", "kiken-injury",
-			"Alice withdrew injured in Pool A · Match 1. Reinstate Alice if they can fight again, or record the default win for Carol.",
+			"Alice withdrew injured in Pool A · Match 1. Reinstate Alice if they can fight again, or record the fusensho for Carol.",
 		},
 		{
 			"fusenpai", "fusenpai",
-			"Alice did not appear for Pool A · Match 1 and cannot fight again. Record the default win for Carol.",
+			"Alice did not appear for Pool A · Match 1 and cannot fight again. Record the fusensho for Carol.",
 		},
 	}
 
@@ -173,7 +173,7 @@ func TestDecisionHandler_AlreadyIneligible_ReasonHumanNamesMatchAndRemedy(t *tes
 	assert.Equal(t, aliceID, body["playerId"])
 	assert.Equal(t, "Pool A-0", body["matchId"])
 	assert.Equal(t,
-		"Alice withdrew in Pool A · Match 1 and cannot fight again. Record the default win for Carol.",
+		"Alice withdrew in Pool A · Match 1 and cannot fight again. Record the fusensho for Carol.",
 		body["reasonHuman"])
 }
 
@@ -327,7 +327,7 @@ func TestBulkScoreHandler_AlreadyIneligible_ReasonHumanNamesMatchAndRemedy(t *te
 	require.Len(t, resp.Errors, 1)
 	assert.Equal(t, "Pool A-1", resp.Errors[0].MatchID)
 	assert.Equal(t,
-		"Alice withdrew in Pool A · Match 1 and cannot fight again. Record the default win for Carol.",
+		"Alice withdrew in Pool A · Match 1 and cannot fight again. Record the fusensho for Carol.",
 		resp.Errors[0].Error)
 	assert.NotContains(t, resp.Errors[0].Error, aliceID, "the raw participant id must not leak into the operator-facing error")
 }

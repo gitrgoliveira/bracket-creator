@@ -150,15 +150,19 @@ export function barredNote(m) {
     const w = awaitedDefaultWin(m);
     if (!w) return "";
     const name = nameOf(w.barred);
-    if (w.reinstateable) return `${name} withdrew injured: reinstate them or record the default win.`;
-    if (w.decision === "fusenpai") return `${name} did not appear earlier: record the default win.`;
-    return `${name} withdrew: record the default win.`;
+    // bc-cse: the one-tap action always records a fusensho for the opponent
+    // (defaultWinDecisionBodyForSide), whatever barred `name` -- "default
+    // win" does not exist in kendo and must never appear here (operator
+    // ruling 2026-10-04).
+    if (w.reinstateable) return `${name} withdrew injured: reinstate them or record the fusensho.`;
+    if (w.decision === "fusenpai") return `${name} did not appear earlier: record the fusensho.`;
+    return `${name} withdrew: record the fusensho.`;
 }
 
 // The label of the operator's one-tap action.
 export function defaultWinActionLabel(m) {
     const w = awaitedDefaultWin(m);
-    return w ? `Record default win for ${nameOf(w.opponent)}` : "";
+    return w ? `Record fusensho for ${nameOf(w.opponent)}` : "";
 }
 
 // bothBarredDrawable(m): true when a both-barred match's format allows

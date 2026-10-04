@@ -4,6 +4,7 @@ import (
 	"cmp"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log"
 	"slices"
 
@@ -355,7 +356,7 @@ func mergeMatchWrite(stored, incoming *state.MatchResult, policy matchWritePolic
 		}
 		switch {
 		case !cleared && domain.IsDefaultWinDecisionStr(probe.Decision):
-			mh.holdDefaultWinScoring(HoldReasonDefaultWinStands)
+			mh.holdDefaultWinScoring(probe.Decision)
 		case deriveWinnerAfterMerge(&probe, mc):
 			if cleared {
 				rep.ClearedWithdrawal = state.GroupValue(incoming, state.GroupResult)
@@ -660,11 +661,10 @@ func (h *mergeHold) holdGroups(reason string, groups ...string) {
 	h.rep.HoldReason = reason
 	// "Correct the result with a winner" is the answer for the two R4
 	// reasons only; a default win that stands asks for no correction.
+	// holdDefaultWinScoring sets DefaultWinStands and StandingDecision
+	// itself, since the reason text it builds here now names the decision
+	// and so can no longer be compared against one fixed constant.
 	h.rep.NeedsWinner = reason == HoldReasonKnockoutNeedsWinner || reason == HoldReasonEngiNeedsValidCount
-	// The default win that closed the match already has the winner it
-	// needs, so the answer sends the operator to Remove default win
-	// instead of asking for a correction with a winner.
-	h.rep.DefaultWinStands = reason == HoldReasonDefaultWinStands
 }
 
 // holdScoring holds every applied group that decides who won.
@@ -685,14 +685,21 @@ func (h *mergeHold) holdScoring(reason string) {
 // overtime group, since IsScoringGroup does not count it as scoring, and a
 // held scoreline landing beside an applied (E) would put overtime on a match
 // the default win rule says had none (FIK Art. 32: one maru in encho).
-func (h *mergeHold) holdDefaultWinScoring(reason string) {
+func (h *mergeHold) holdDefaultWinScoring(decision string) {
 	var groups []string
 	for _, g := range h.rep.Applied {
 		if state.IsScoringGroup(g) || g == state.GroupEncho {
 			groups = append(groups, g)
 		}
 	}
-	h.holdGroups(reason, groups...)
+	h.holdGroups(defaultWinStandsReason(decision), groups...)
+	// The decision that closed the match already has the winner it needs,
+	// so the answer sends the operator to the editor's own Remove <decision>
+	// instead of asking for a correction with a winner (holdGroups'
+	// NeedsWinner stays false for this reason). StandingDecision lets the
+	// HTTP layer name the decision on the wire (heldDecision).
+	h.rep.DefaultWinStands = true
+	h.rep.StandingDecision = decision
 }
 
 // needsWinnerReason is the history reason of a change held because the
@@ -715,14 +722,20 @@ const HoldReasonKnockoutNeedsWinner = "a knockout match needs a winner"
 // count does not give.
 const HoldReasonEngiNeedsValidCount = "an engi result needs a valid flag count"
 
-// HoldReasonDefaultWinStands is why a running board's write over a match a
-// default win closed -- a withdrawal of this match (kiken, kiken-injury,
-// fusenpai) or a fusensho awarded for a bar recorded on ANOTHER match -- is
-// held: neither a point, a bout, nor an overtime toggle the board sends says
-// the default win was wrong, so it stands and the write is kept in the
-// history. R2's clear is for a withdrawal of the match itself, and needs an
-// actual scoring change (cleared, above) -- an (E) tap alone is not one.
-const HoldReasonDefaultWinStands = "a default win closed this match"
+// defaultWinStandsReason builds the history reason for a running board's
+// write over a match a decision already closed -- a withdrawal of this
+// match (kiken, kiken-injury, fusenpai) or a fusensho awarded for a bar
+// recorded on ANOTHER match -- naming that decision itself (e.g. "a kiken
+// closed this match") rather than the eliminated "default win" umbrella
+// term, since kendo has no shared word for the class and every sentence a
+// person reads must name one of the three (operator ruling 2026-10-04).
+// Neither a point, a bout, nor an overtime toggle the board sends says the
+// decision was wrong, so it stands and the write is kept in the history.
+// R2's clear is for a withdrawal of the match itself, and needs an actual
+// scoring change (cleared, above) -- an (E) tap alone is not one.
+func defaultWinStandsReason(decision string) string {
+	return fmt.Sprintf("a %s closed this match", domain.DecisionWord(decision))
+}
 
 // HoldReasonFinishAtomic is why a stale Finish is held whole: a write that
 // completes the match carries a scoreline its verdict stood on, so when the

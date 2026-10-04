@@ -348,7 +348,7 @@ func (s *Store) EnsureLegacyUpgraded(compID string) {
 		log.Printf("state: legacy lineup-member-id upgrade for %s: %v", compID, err)
 	}
 	if err := s.upgradeTeamDefaultWinBoutPaddingLocked(compID, roster); err != nil {
-		log.Printf("state: legacy team-default-win-bout-padding upgrade for %s: %v", compID, err)
+		log.Printf("state: legacy team-decision-bout-padding upgrade for %s: %v", compID, err)
 	}
 	if err := s.upgradeKachinukiEncounterEnchoLocked(compID, roster); err != nil {
 		log.Printf("state: legacy kachinuki-encounter-encho upgrade for %s: %v", compID, err)

@@ -1266,7 +1266,7 @@ describe('_flushQueue: a replay refused in the server\'s own words is marked as 
     });
 
     it('a refused finish carrying a reasonHuman', async () => {
-        const said = 'Alice withdrew in Pool A · Match 1 and cannot fight again. Record the default win for Carol.';
+        const said = 'Alice withdrew in Pool A · Match 1 and cannot fight again. Record the fusensho for Carol.';
         const { failure, alert } = await replayRefused(finish('ms2'), 'ms2', { error: 'ineligible_competitor', reasonHuman: said });
         expect(failure).toMatchObject({ reason: said, sentence: true });
         expect(alert).toMatchObject({ detail: said, sentence: true });

@@ -1309,7 +1309,7 @@ func (e *Engine) reopenResultPreconditionTx(tx state.StoreTx, compID string, com
 		// bc-cse item 14: no "(correctionReason)" jargon -- that named the
 		// internal API field, not anything the operator sees on the score
 		// editor's own correction-reason box.
-		return validationErrorf("reopen is only for kachinuki team matches and for matches decided by a withdrawal or default win (kiken, kiken-injury, fusenpai, or fusensho); correct other results via the score editor instead")
+		return validationErrorf("reopen is only for kachinuki team matches and for matches decided by a withdrawal (kiken, kiken-injury, or fusenpai) or a fusensho; correct other results via the score editor instead")
 	}
 	if h.Pool != nil {
 		// A pool reopen changes no knockout slot: the pool is incomplete

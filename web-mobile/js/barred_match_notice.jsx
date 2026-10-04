@@ -117,7 +117,7 @@ export function BarredMatchNotice({ match, password, onDone }) {
       {err && <div style={{ marginTop: 4 }}>{err}</div>}
       <div style={{ display: "flex", gap: 8, marginTop: 6, flexWrap: "wrap" }}>
         {w && (
-          <button type="button" className="btn btn--sm" data-testid="barred-match-default-win"
+          <button type="button" className="btn btn--sm" data-testid="barred-match-record-fusensho"
             onClick={recordDefaultWin} disabled={busy || landed}>
             {busy ? "Recording…" : landed ? "Recorded" : defaultWinActionLabel(match)}
           </button>

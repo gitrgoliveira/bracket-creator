@@ -28,6 +28,8 @@ import {
     NEEDS_WINNER_REASON,
     NEEDS_WINNER_ADVICE,
     writeDefaultWinStands,
+    writeHeldDecision,
+    decisionWord,
     DEFAULT_WIN_STANDS_REASON,
     DEFAULT_WIN_STANDS_ADVICE,
     supersededAlertText,
@@ -231,19 +233,23 @@ describe('a change held because the finished match needs a winner', () => {
 });
 
 // bc-mrgc / bc-cse: a running board's scoring, or its overtime, over a match
-// ANY default win closed (a withdrawal, or a default win awarded because the
-// other side is barred by a DIFFERENT match) is not applied, is kept in the
-// match's history, and the server says so with heldReason
-// "default_win_stands". The match already has the winner it needs, so the
-// advice is to correct the default win from the match's score editor, never
-// "correct the result with a winner" and never the plain superseded "check
-// the newer change". The copy names no specific button: a kachinuki match's
-// editor offers no "Remove default win" control at all
-// (`useWithdrawalRemoval({ enabled: !isKachinuki })`), so a sentence naming
-// one would describe a button that is not there.
-describe('a change held because a default win for a bar elsewhere stands', () => {
-    const superseded = { applied: false, reason: 'superseded', heldGroups: ['points'], heldReason: 'default_win_stands' };
-    const partly = { id: 'm1', status: 'completed', heldGroups: ['points'], heldReason: 'default_win_stands' };
+// a decision ALREADY closed (kiken, fusenpai, or a fusensho awarded because
+// the other side is barred by a DIFFERENT match) is not applied, is kept in
+// the match's history, and the server says so with heldReason
+// "default_win_stands" plus `heldDecision` naming which one. The match
+// already has the winner it needs, so the advice is to correct that
+// decision from the match's score editor, never "correct the result with a
+// winner" and never the plain superseded "check the newer change". The copy
+// names no specific button: a kachinuki match's editor offers no "Remove
+// fusensho" control at all (`useWithdrawalRemoval({ enabled: !isKachinuki })`),
+// so a sentence naming one would describe a button that is not there. "default
+// win" does not exist in kendo and must never appear here (operator ruling
+// 2026-10-04): the recorded decision is named instead, or "a recorded
+// decision" when the server named none (an older server) or a flushed pass
+// held more than one kind.
+describe('a change held because a decision for a bar elsewhere stands', () => {
+    const superseded = { applied: false, reason: 'superseded', heldGroups: ['points'], heldReason: 'default_win_stands', heldDecision: 'fusensho' };
+    const partly = { id: 'm1', status: 'completed', heldGroups: ['points'], heldReason: 'default_win_stands', heldDecision: 'fusensho' };
 
     it('is read from heldReason, on a superseded answer and on one applied in part', () => {
         expect(writeDefaultWinStands(superseded)).toBe(true);
@@ -255,36 +261,53 @@ describe('a change held because a default win for a bar elsewhere stands', () =>
         expect(writeNeedsWinner(superseded)).toBe(false);
     });
 
-    it('the superseded banner points at the score editor, never a specific button or "correct the result"', () => {
+    it('the superseded banner names the recorded decision, never a specific button or "correct the result"', () => {
         const banner = notLandedBanner(superseded);
-        expect(banner).toEqual({ lead: SUPERSEDED_LEAD, reason: DEFAULT_WIN_STANDS_REASON, advice: DEFAULT_WIN_STANDS_ADVICE });
+        expect(banner).toEqual({ lead: SUPERSEDED_LEAD, reason: DEFAULT_WIN_STANDS_REASON('fusensho'), advice: DEFAULT_WIN_STANDS_ADVICE('fusensho') });
         const text = notSavedText(banner);
         expect(text).toMatch(/^Not applied: /);
-        expect(text).toMatch(/default win/);
+        expect(text).toMatch(/fusensho/);
         expect(text).toMatch(/score editor/);
-        expect(text).not.toMatch(/Remove default win/);
+        expect(text).not.toMatch(/default[ -]win/i);
+        expect(text).not.toMatch(/Remove fusensho/);
         expect(text).not.toMatch(/newer change/);
         expect(text).not.toMatch(/correct the result/);
         expect(text).not.toMatch(/cannot fight/);
     });
 
-    it('the partial-apply note says it in place of "a newer change", and names no button', () => {
-        expect(heldGroupsNote(['points'], false, true)).toBe(
-            "Kept in the match's history, not applied: points. This match was closed with a default win: to change the result, correct the default win from the match's score editor.");
+    it('falls back to "a recorded decision" when the server names none (an older server)', () => {
+        const noDecision = { applied: false, reason: 'superseded', heldGroups: ['points'], heldReason: 'default_win_stands' };
+        const banner = notLandedBanner(noDecision);
+        expect(banner.reason).toMatch(/a recorded decision/);
+        expect(banner.advice).toMatch(/the recorded decision/);
+        expect(banner.reason).not.toMatch(/default[ -]win/i);
     });
 
-    it('the queue alert says it too, and names no button', () => {
-        expect(supersededAlertText(1, true, false, true)).toMatch(/score editor/);
-        expect(supersededAlertText(1, true, false, true)).not.toMatch(/Remove default win/);
-        expect(supersededAlertText(1, true, false, true)).not.toMatch(/newer change/);
-        expect(supersededAlertText(2, false, false, true)).toMatch(/score editor/);
-        expect(supersededAlertText(2, false, false, true)).not.toMatch(/Remove default win/);
+    it('the partial-apply note names the decision in place of "a newer change", and names no button', () => {
+        expect(heldGroupsNote(['points'], false, true, 'fusensho')).toBe(
+            "Kept in the match's history, not applied: points. This match was closed with a fusensho: to change the result, correct the fusensho from the match's score editor.");
     });
 
-    it('no em-dash and no "mat" in any of the copy', () => {
-        const all = [DEFAULT_WIN_STANDS_REASON, DEFAULT_WIN_STANDS_ADVICE, heldGroupsNote(['points'], false, true), supersededAlertText(2, false, false, true)].join(' ');
+    it('the queue alert names the decision too, and names no button', () => {
+        expect(supersededAlertText(1, true, false, true, 'fusensho')).toMatch(/score editor/);
+        expect(supersededAlertText(1, true, false, true, 'fusensho')).not.toMatch(/Remove fusensho/);
+        expect(supersededAlertText(1, true, false, true, 'fusensho')).not.toMatch(/newer change/);
+        expect(supersededAlertText(1, true, false, true, 'fusensho')).toMatch(/\bfusensho\b/);
+        expect(supersededAlertText(2, false, false, true, 'kiken-voluntary')).toMatch(/score editor/);
+        expect(supersededAlertText(2, false, false, true, 'kiken-voluntary')).toMatch(/\bkiken\b/);
+        expect(supersededAlertText(2, false, false, true, 'kiken-voluntary')).not.toMatch(/Remove fusensho/);
+        // A mixed or absent decision falls back, never guesses.
+        expect(supersededAlertText(2, false, false, true, null)).toMatch(/a recorded decision/);
+    });
+
+    it('no em-dash and no "mat" in any of the copy, and no "default win" anywhere', () => {
+        const all = [
+            DEFAULT_WIN_STANDS_REASON('fusensho'), DEFAULT_WIN_STANDS_ADVICE('fusensho'),
+            heldGroupsNote(['points'], false, true, 'fusensho'), supersededAlertText(2, false, false, true, 'fusensho'),
+        ].join(' ');
         expect(all).not.toMatch(/—/);
         expect(all).not.toMatch(/\bmats?\b/i);
+        expect(all).not.toMatch(/default[ -]win/i);
     });
 });
 
@@ -335,5 +358,40 @@ describe('a finish recorded that moved a later change to the history', () => {
     it('the queue alert says the held result was saved', () => {
         expect(displacedAlertText(1, true)).toMatch(/^A held result was saved\. .*moved to the match's history\.$/);
         expect(displacedAlertText(2, false)).toMatch(/^2 held results were saved\./);
+    });
+});
+
+// decisionWord / writeHeldDecision (operator ruling 2026-10-04): the ONE map
+// from a wire decision code to the operator's bare word, and the ONE reader
+// of the server's heldDecision field. "default win" is not a kendo term and
+// must never be produced by either.
+describe('decisionWord', () => {
+    it('collapses every kiken variant to "kiken"', () => {
+        expect(decisionWord('kiken')).toBe('kiken');
+        expect(decisionWord('kiken-voluntary')).toBe('kiken');
+        expect(decisionWord('kiken-injury')).toBe('kiken');
+    });
+    it('names fusenpai and fusensho as themselves', () => {
+        expect(decisionWord('fusenpai')).toBe('fusenpai');
+        expect(decisionWord('fusensho')).toBe('fusensho');
+    });
+    it('is null for anything outside the class', () => {
+        expect(decisionWord('fought')).toBeNull();
+        expect(decisionWord('hikiwake')).toBeNull();
+        expect(decisionWord('daihyosen')).toBeNull();
+        expect(decisionWord('')).toBeNull();
+        expect(decisionWord(undefined)).toBeNull();
+    });
+});
+
+describe('writeHeldDecision', () => {
+    it('reads the string heldDecision field', () => {
+        expect(writeHeldDecision({ heldDecision: 'fusensho' })).toBe('fusensho');
+    });
+    it('is null when absent, empty, or not a string (an older server)', () => {
+        expect(writeHeldDecision({})).toBeNull();
+        expect(writeHeldDecision({ heldDecision: '' })).toBeNull();
+        expect(writeHeldDecision({ heldDecision: 7 })).toBeNull();
+        expect(writeHeldDecision(null)).toBeNull();
     });
 });

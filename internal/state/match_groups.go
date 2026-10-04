@@ -422,6 +422,13 @@ type MergeReport struct {
 	// heldReason "default_win_stands", so the operator is told to use Remove
 	// default win rather than to correct the result with a winner.
 	DefaultWinStands bool
+	// StandingDecision is the decision code (e.g. "fusensho",
+	// "kiken-voluntary") that closed the match when DefaultWinStands is set;
+	// "" otherwise. The HTTP layer reads it through HeldDecision and surfaces
+	// it as heldDecision beside heldReason "default_win_stands" so the
+	// client can name the decision itself rather than the eliminated
+	// "default win" umbrella term.
+	StandingDecision string
 	// Displaced are STORED changes this write moved to the history (S2 with
 	// R4): a finish that arrives after newer scoring which would leave the
 	// match without the winner it needs is applied on its own scoreline, as
@@ -500,6 +507,16 @@ func (r *MergeReport) HeldReason() string {
 		return HeldReasonDefaultWinStands
 	}
 	return ""
+}
+
+// HeldDecision is the decision code (StandingDecision) a response carries
+// as heldDecision beside heldReason "default_win_stands", "" when the held
+// groups were not held for that reason.
+func (r *MergeReport) HeldDecision() string {
+	if r == nil || !r.DefaultWinStands {
+		return ""
+	}
+	return r.StandingDecision
 }
 
 // HeldGroups is the list a response carries, nil when nothing was held.

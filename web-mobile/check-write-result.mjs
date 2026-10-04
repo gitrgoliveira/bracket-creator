@@ -1,9 +1,16 @@
 #!/usr/bin/env node
-// Guards the ONE rule that answers "did this score write actually land?".
+// Guards two things: the ONE rule that answers "did this score write
+// actually land?", and the ONE phrase no production string may say.
 //
-// The rule lives in js/write_result.jsx as writeDidNotLand (queued OR
+// The landed rule lives in js/write_result.jsx as writeDidNotLand (queued OR
 // superseded) and writeWasSuperseded (superseded only). Every consumer must ask
 // one of those rather than re-deriving the test from the response shape.
+//
+// The phrase rule (operator ruling 2026-10-04) is unrelated in subject but
+// shares this file's machinery and its Makefile wiring (js/check-imports):
+// "default win" is not a term kendo has, so no production string may say it,
+// the write_result.jsx held-write copy included -- name the recorded
+// decision instead (kiken, fusenpai, fusensho) through decisionWord.
 //
 // This check exists because the codebase has already paid for that twice. The
 // question was originally spelled `res.queued` inline at five call sites; when
@@ -83,6 +90,19 @@ export const FORBIDDEN = [
     re: /window\.(writeDidNotLand|writeWasSuperseded|writeWasRefused|writeWasRefusedForClock|writeRetryable|notLandedBanner|SUPERSEDED_LEAD|SUPERSEDED_REASON|SUPERSEDED_ADVICE|supersededAlertText|writeHeldGroups|writePartlyHeld|CLOCK_SKEW_REASON_TEXT|CLOCK_SKEW_ADVICE|QUEUED_NOTICE|QUEUED_UNSAVED_NOTICE|queuedNotice|queuedWritesNoun|heldWritesText|writeNeedsWinner|writeDisplacedGroups|supersededBanner|displacedAlertText)\b/,
     why: 'reads an owned predicate/copy off window; those mirrors are deleted, import from write_result.jsx instead',
   },
+  {
+    // "Default win" is not a kendo term (operator ruling 2026-10-04): every
+    // finished match has a result, a scoreline or a registered decision that
+    // NAMES the winner. This rule is unlike the two above: it has no owner
+    // allowed to state it directly, the OWNER module (write_result.jsx)
+    // included, so it is NOT exempted for OWNER or for api_client.jsx below
+    // (see the per-rule exemption sets). An identifier such as `defaultWin`
+    // or `DEFAULT_WIN_STANDS_*` still passes: the space/hyphen is required,
+    // and stripComments already removes comments before this runs, so a
+    // comment explaining the ruling (this one included) is never a hit.
+    re: /default[ -]win/i,
+    why: 'says "default win", a term kendo does not have; name the recorded decision instead (kiken, fusenpai, fusensho) through decisionWord (write_result.jsx)',
+  },
 ];
 
 // api_client.jsx is the collaborator that turns an HTTP response INTO the
@@ -91,16 +111,28 @@ export const FORBIDDEN = [
 //
 // The exemption is per-RULE, not per-file: api_client may compare `.applied`
 // (it is the parser) but may NOT re-publish a window mirror, since restoring
-// one would re-open the drift the migration closed.
+// one would re-open the drift the migration closed, and it may not say
+// "default win" either.
 const ALLOWED = new Set(['api_client.jsx']);
 const ALLOWED_RULE_INDEX = 0;
+
+// The OWNER module is exempt from the two rules ABOVE it (it is allowed to
+// state its own abstraction in the raw terms those rules forbid everywhere
+// else), but not from the default-win rule: nothing, the owner included, may
+// say "default win".
+const OWNER_EXEMPT_RULE_INDICES = new Set([0, 1]);
 
 export function findViolations() {
   const violations = [];
   for (const file of walk(JS_DIR)) {
-    if (file.endsWith(OWNER)) continue;
-    const exempt = [...ALLOWED].some((a) => file.endsWith(a));
-    const rules = exempt ? FORBIDDEN.filter((_, r) => r !== ALLOWED_RULE_INDEX) : FORBIDDEN;
+    const isOwner = file.endsWith(OWNER);
+    const isParser = [...ALLOWED].some((a) => file.endsWith(a));
+    const rules = FORBIDDEN.filter((_, r) => {
+      if (isOwner && OWNER_EXEMPT_RULE_INDICES.has(r)) return false;
+      if (isParser && r === ALLOWED_RULE_INDEX) return false;
+      return true;
+    });
+    if (rules.length === 0) continue;
     const rel = relative(ROOT, file);
     for (const hit of scanSource(readFileSync(file, 'utf8'), rules)) {
       violations.push({ rel, ...hit });
@@ -113,12 +145,14 @@ if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.ur
   const violations = findViolations();
   if (violations.length === 0) {
     console.log('  ✓ the not-landed rule is asked, never re-derived');
+    console.log('  ✓ no production string says "default win"');
     console.log('All write-result checks OK.');
     process.exit(0);
   }
-  console.error('Hand-rolled "did the write land?" checks found.\n');
-  console.error(`The rule belongs to js/${OWNER} (writeDidNotLand / writeWasSuperseded).`);
-  console.error('Re-deriving it at a call site is how the sixth site was missed last time.\n');
+  console.error('Write-result checks failed.\n');
+  console.error(`The landed/superseded rule belongs to js/${OWNER} (writeDidNotLand / writeWasSuperseded);`);
+  console.error('re-deriving it at a call site is how the sixth site was missed last time.');
+  console.error('"default win" is not a kendo term; name the recorded decision instead (kiken, fusenpai, fusensho).\n');
   printViolations(violations);
   process.exit(1);
 }

@@ -113,3 +113,33 @@ describe('the write-result rule is importable without running the gate', () => {
     expect(trips('if (writeDidNotLand(res)) return;')).toBe(false);
   });
 });
+
+// The "default win" phrase rule (operator ruling 2026-10-04): "default win"
+// is not a kendo term, so no production string may say it. Unlike the two
+// rules above it, this one is deliberately global -- it has no owner allowed
+// to state it directly -- so it is checked here only against scanSource
+// directly (comment-stripped), the same mechanism findViolations uses, never
+// against a hand-rolled owner exemption.
+describe('the "default win" phrase rule has no legitimate spelling', () => {
+  const trips = (line) => scanSource(line + '\n', WRITE_RULES).length === 1;
+
+  it('catches the space and the hyphen, in either case', () => {
+    expect(trips('return "Record default win for Tora";')).toBe(true);
+    expect(trips('return "Clear default-win";')).toBe(true);
+    expect(trips('return "DEFAULT WIN recorded";')).toBe(true);
+  });
+
+  it('does not trip on an identifier -- the space/hyphen is required', () => {
+    expect(trips('export function writeDefaultWinStands(res) { return defaultWin; }')).toBe(false);
+    expect(trips('export const DEFAULT_WIN_STANDS_REASON = 1;')).toBe(false);
+  });
+
+  it('does not trip inside a comment', () => {
+    expect(trips('// "default win" does not exist in kendo')).toBe(false);
+  });
+
+  it('names the recorded decision instead, which never trips it', () => {
+    expect(trips('return `Record fusensho for ${name}`;')).toBe(false);
+    expect(trips('return decisionWord(decision);')).toBe(false);
+  });
+});

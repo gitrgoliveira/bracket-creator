@@ -153,7 +153,7 @@ describe('heldValueText', () => {
     ['encho', null, 'no overtime'],
     ['flags', { flagsA: 1, flagsB: 2 }, 'flags Shiro 2, Aka 1'],
     ['result', { status: 'completed', decision: 'hikiwake' }, 'draw'],
-    ['result', { status: 'completed', decision: 'fusensho', decisionBy: 'shiro' }, 'Default win (fusensho) against Shiro'],
+    ['result', { status: 'completed', decision: 'fusensho', decisionBy: 'shiro' }, 'Fusensho against Shiro'],
     ['result', { status: 'completed', winner: 'Tanaka' }, 'Tanaka won'],
     ['bout:-1', null, 'no bout'],
   ])('%s %j reads "%s"', (group, value, words) => {

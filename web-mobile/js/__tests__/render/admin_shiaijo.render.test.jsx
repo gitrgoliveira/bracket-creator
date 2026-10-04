@@ -954,7 +954,7 @@ describe('a barred match is skipped by every auto-pick (bc-cse)', () => {
     court: 'A', scheduledAt: '09:10', sideA: side('s', 'Sato'), sideB: side('k', 'Kato'),
   };
 
-  it('Up Next skips it, its queue row offers the default win instead of Start, and no Reinstate for a non-reinstateable withdrawal', async () => {
+  it('Up Next skips it, its queue row offers the fusensho action instead of Start, and no Reinstate for a non-reinstateable withdrawal', async () => {
     window.tournamentMatches = () => [barredMatch(), openMatch];
     window.filterMatchesByCourt = (m) => m;
     const recordDecision = vi.fn().mockResolvedValue({ applied: true });
@@ -974,12 +974,12 @@ describe('a barred match is skipped by every auto-pick (bc-cse)', () => {
       const rows = [...utils.container.querySelectorAll('.shiaijo-qrow')];
       const row = rows.find((r) => r.textContent.includes('Yama'));
       expect(row).toBeTruthy();
-      expect(row.textContent).toContain('Yama withdrew: record the default win.');
+      expect(row.textContent).toContain('Yama withdrew: record the fusensho.');
       const startBtn = [...row.querySelectorAll('button')].find((b) => /^start match$/i.test(b.textContent));
       expect(startBtn).toBeUndefined();
       expect(utils.queryByTestId('barred-match-reinstate')).toBeNull();
-      const awardBtn = utils.getByTestId('barred-match-default-win');
-      expect(awardBtn.textContent).toBe('Record default win for Umi');
+      const awardBtn = utils.getByTestId('barred-match-record-fusensho');
+      expect(awardBtn.textContent).toBe('Record fusensho for Umi');
 
       await act(async () => { awardBtn.click(); });
       expect(recordDecision).toHaveBeenCalledWith('c1', 'm-barred', {
@@ -1037,7 +1037,7 @@ describe('a barred match is skipped by every auto-pick (bc-cse)', () => {
     await act(async () => { utils = renderPage(makeMinimalTournament()); });
     const notice = utils.getByTestId('barred-match-notice');
     expect(notice.textContent).toContain('Both withdrew earlier: neither can fight this match.');
-    expect(utils.queryByTestId('barred-match-default-win')).toBeNull();
+    expect(utils.queryByTestId('barred-match-record-fusensho')).toBeNull();
     expect(utils.queryByTestId('barred-match-reinstate')).toBeNull();
     expect(utils.getByTestId('barred-match-record-drawn').textContent).toBe('Record as drawn (neither can fight)');
   });

@@ -15,7 +15,7 @@ import { sameCompetitor } from './competitor_identity.jsx';
 // Imported from the leaf, not read off `window`: this editor is ES-imported by
 // its host and by unit tests that never load api_client, and write_result.jsx
 // is import-only so it can be reached directly (see its header).
-import { notLandedBanner, terminalFailureBanner, notSavedText, writeWasRefused, writeRetryable } from './write_result.jsx';
+import { notLandedBanner, terminalFailureBanner, notSavedText, writeWasRefused, writeRetryable, decisionWord } from './write_result.jsx';
 import { useArmedConfirm, acceptTap, clearTap } from './tap_guard.jsx';
 
 import {
@@ -688,6 +688,9 @@ export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, on
     // The winner's slots while a recorded withdrawal is in force: the maru
     // shows, read-only (see lockedKey).
     const locked = s.key === lockedKey;
+    // bc-cse: names the recorded decision -- "default win" does not exist
+    // in kendo and must never appear here (operator ruling 2026-10-04).
+    const decisionNoun = decisionWord(m.decision) || "decision";
     return sideSlotOrder(s.color).map((i, ordinal) => {
       const isHt = htSlot === i;
       // The spoken ordinal counts in READING order (ordinal), not by the
@@ -703,8 +706,8 @@ export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, on
           className={`sb-slot ${(isHt || s.pts[i]) ? "sb-slot--filled" : ""}`}
           onClick={() => removePt(s.key, i)}
           disabled={decidedByHantei || locked}
-          title={locked ? "Default win recorded with the withdrawal" : decidedByHantei ? (hanteiRecorded ? "Locked: hantei already recorded" : "Hantei armed: choose a winner above, or cancel") : "Click to remove"}
-          aria-label={`${sideColorName(s.color)} slot ${ordinal + 1}: ${isHt ? "Ht" : (s.pts[i] ? (locked ? `${s.pts[i]}, default win` : `remove ${s.pts[i]}`) : "empty")}`}
+          title={locked ? `${decisionNoun.charAt(0).toUpperCase()}${decisionNoun.slice(1)} recorded` : decidedByHantei ? (hanteiRecorded ? "Locked: hantei already recorded" : "Hantei armed: choose a winner above, or cancel") : "Click to remove"}
+          aria-label={`${sideColorName(s.color)} slot ${ordinal + 1}: ${isHt ? "Ht" : (s.pts[i] ? (locked ? `${s.pts[i]}, ${decisionNoun}` : `remove ${s.pts[i]}`) : "empty")}`}
         >
           {isHt ? "Ht" : (s.pts[i] || "\u00b7")}
         </button>

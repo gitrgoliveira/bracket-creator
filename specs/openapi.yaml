@@ -56,7 +56,7 @@ info:
     which is refused with 409 `daihyosen_added`. It carries only what the competitors saw: a match
     `decision` that is empty, `fought` or `hikiwake`, a numbered bout `decision` that is
     one of those or `fusensho`, and a representative-bout `decision` that is empty or
-    `daihyosen` (a draw or a default win there would decide the encounter). Any
+    `daihyosen` (a draw, a kiken, a fusenpai, or a fusensho there would decide the encounter). Any
     other decision, or the `Ht` judges'-decision mark on a numbered bout, is refused
     with 400. A judges' decision on the representative bout stays the organiser's:
     such a write may send the row back as the organiser recorded it (same winner,
@@ -2358,7 +2358,7 @@ paths:
           with any status other than `running` is a 400.
 
           `clearWithdrawal: true` (also request-only) marks a completed
-          correction that removes a withdrawal or default win recorded by
+          correction that removes a kiken, fusenpai, or fusensho recorded by
           mistake: the payload is the real result (a win, or a draw) and
           replaces the recorded ruling, the match stays completed, and the
           competitor the withdrawal barred is eligible again. Without it, a
@@ -2383,12 +2383,13 @@ paths:
           recorded finish (it never goes back to running) and the change is
           held, answered with `heldReason: needs_winner`, so the operator
           corrects the result with a winner. A running board's scoring, or
-          its overtime, over a match a default win already closed (a
-          withdrawal, or a win awarded because the other side is barred by a
-          DIFFERENT match) is held the same way, answered with `heldReason:
-          default_win_stands`; the match already has the winner it needs, so
-          the operator corrects the default win from the match's score
-          editor instead of correcting the result with one. A finish whose result applies over
+          its overtime, over a match a decision already closed (a kiken or a
+          fusenpai of this match, or a fusensho awarded because the other
+          side is barred by a DIFFERENT match) is held the same way, answered
+          with `heldReason: default_win_stands` and `heldDecision` naming
+          that decision; the match already has the winner it needs, so the
+          operator corrects the decision from the match's score editor
+          instead of correcting the result with one. A finish whose result applies over
           scoring stored NEWER than it gets the winner that scoring gives (the
           same verdict as if the two had arrived in stamp order); when that
           scoring would leave the finished match without a winner (a knockout
@@ -2398,8 +2399,8 @@ paths:
           `displacedGroups`, with the same `heldReason`. A finish that carries
           no scoreline of its own is held instead. A points change whose write does not apply
           `result` keeps a recorded judges' decision (hantei mark). A scoring change made on a
-          running board after a recorded withdrawal or default win clears it
-          (points scored mean the withdrawal was a mistake), and the competitor
+          running board after a recorded kiken, fusenpai, or fusensho clears
+          it (points scored mean the withdrawal was a mistake), and the competitor
           it barred is eligible again. A name that is not a group is a 400.
         content:
           application/json:
@@ -2414,9 +2415,10 @@ paths:
             groups kept in the match's history instead of applied, and
             `heldReason: needs_winner` when they were held because applying
             them would leave a finished match without the winner it needs, or
-            `heldReason: default_win_stands` when a default win (a
-            withdrawal, or a win awarded for a bar on a DIFFERENT match)
-            already closed the match.
+            `heldReason: default_win_stands` with `heldDecision` naming the
+            decision (a kiken or a fusenpai of this match, or a fusensho
+            awarded for a bar on a DIFFERENT match) that already closed the
+            match.
             An applied finish that moved stored, NEWER scoring into the
             match's history (it would have left the match without a winner,
             and in stamp order came after this finish) carries
@@ -2480,7 +2482,7 @@ paths:
             `subResults`, `correctionReason` and stamp are saved; the recorded
             withdrawal (`decision`, `decisionBy`, `decisionReason`, `winner`,
             `winnerId`, `encho`) is kept as stored; and so is the winner's
-            default-win scoreline. On a single-bout match (no `subResults`)
+            maru scoreline (the circles FIK records for the withdrawal). On a single-bout match (no `subResults`)
             the withdrawing side's `ipponsA`/`ipponsB` are taken from the write
             (only real struck letters; an omitted side keeps the stored
             letters), so a correction to the points struck before the
@@ -2519,7 +2521,7 @@ paths:
             - `ineligible_competitor`: a participant is ineligible (kiken/fusenpai in a prior match, or barred by
               a decision recorded on a different match). `reasonHuman` is a full operator sentence naming the
               competitor, the match, and what to do, e.g. "Alice withdrew in Pool A · Match 1 and cannot fight
-              again. Record the default win for Carol."; when BOTH sides of a knockout match are barred (the
+              again. Record the fusensho for Carol."; when BOTH sides of a knockout match are barred (the
               only case a knockout cannot resolve with a draw), it instead reads "Neither Alice nor Bob can
               fight Pool A · Match 1: correct the earlier withdrawal or the draw."
               Extra fields: `playerId`, `reason`, `reasonHuman`.
@@ -2705,21 +2707,21 @@ paths:
       description: |
         Sanctioned "Reopen match" for a COMPLETED match that is either a
         kachinuki team match, or any match (team or individual, pool or
-        knockout) whose stored `decision` is a withdrawal or default win
-        (kiken of any kind, fusenpai, or fusensho). Status returns to
+        knockout) whose stored `decision` is a kiken (of any kind), a
+        fusenpai, or a fusensho. Status returns to
         `running` -- EXCEPT a match-level `fusensho` whose `decisionBy` side
         is STILL barred by a decision recorded on a DIFFERENT match, which
         returns to `scheduled` instead: going straight to `running` would
         strand the operator behind the eligibility gate with no way to
         start it. The identical fusensho reopens to `running` once that
         competitor is reinstated. The match-level verdict
-        (winner, decision, default-win scoreline) is cleared, and what was
+        (winner, decision, maru scoreline) is cleared, and what was
         fought is kept: the bout log (subResults), or on a single-bout match
         (an individual match, a pool daihyosen or tiebreaker bout) the letters
         the withdrawing side had struck, the fouls, the overtime and, on a
         team rep bout, who fought it (repPlayerA/B). The winner's letters from
         before the withdrawal are not kept: recording the withdrawal replaced
-        them with the default-win maru, which the reopen clears. The operator
+        them with the maru FIK records for it, which the reopen clears. The operator
         then scores the rest and completes the match through the score
         endpoint. The reopen stamps the match's `modifiedAt` with the server's
         time, so a write stamped before it (an offline-queued save replayed
@@ -2827,9 +2829,9 @@ paths:
           description: >
             The `reason` is longer than 200 characters, the body is present but
             malformed JSON, or the match is neither a kachinuki team match nor
-            one a withdrawal or default win decided: "reopen is only for
-            kachinuki team matches and for matches decided by a withdrawal or
-            default win (kiken, kiken-injury, fusenpai, or fusensho); correct
+            one a withdrawal or fusensho decided: "reopen is only for
+            kachinuki team matches and for matches decided by a withdrawal
+            (kiken, kiken-injury, or fusenpai) or a fusensho; correct
             other results via the score editor instead."
           content:
             application/json:
@@ -2934,7 +2936,7 @@ paths:
       description: |
         The atomic remedy for a court_busy reopen. When reopening a finished
         match ({id}/{mid}, the target: any match the reopen endpoint accepts
-        -- including one decided by a match-level default win, fusensho --
+        -- including one decided by a match-level fusensho --
         with the same gate and the same `downstream_knockout_played` /
         `forceDownstreamReopen` / `downstream_knockout_running` handling,
         checked BEFORE the blocker is touched) is refused because ANOTHER
@@ -2996,7 +2998,7 @@ paths:
             `blockerCompId` is missing or malformed, `blockerMatchId` is missing
             or too long, the `reason` exceeds 200 characters, the body is
             malformed JSON, or the target is neither a kachinuki team match nor
-            one a withdrawal or default win decided (same message as
+            one a withdrawal or fusensho decided (same message as
             `POST .../reopen`'s 400).
           content:
             application/json:
@@ -3409,10 +3411,18 @@ paths:
                           description: >
                             On a `superseded` entry held because applying it would
                             leave a finished match without the winner it needs, or
-                            because a default win (a withdrawal, or a win awarded
-                            for a bar on a DIFFERENT match) already closed the
-                            match (see RefusedWrite.heldReason); `error` then
-                            carries that sentence.
+                            because a decision (a kiken or a fusenpai of this
+                            match, or a fusensho awarded for a bar on a DIFFERENT
+                            match) already closed the match (see
+                            RefusedWrite.heldReason); `error` then carries that
+                            sentence.
+                        heldDecision:
+                          type: string
+                          description: >
+                            The decision code (e.g. `fusensho`, `kiken-voluntary`)
+                            that closed the match, present only beside
+                            `heldReason: default_win_stands`. See
+                            RefusedWrite.heldDecision.
                   heldGroups:
                     type: array
                     description: >
@@ -3437,6 +3447,9 @@ paths:
                           type: string
                           enum: [needs_winner, default_win_stands]
                           description: As RefusedWrite.heldReason.
+                        heldDecision:
+                          type: string
+                          description: As RefusedWrite.heldDecision.
 
   /api/competitions/{id}/matches/{mid}/quick-score:
     put:
@@ -3626,7 +3639,7 @@ paths:
             Competitor not eligible (`ineligible_competitor`; `reasonHuman`
             names the competitor, the match, and what to do, e.g. "Alice
             withdrew in Pool A · Match 1 and cannot fight again. Record the
-            default win for Carol."; the knockout both-sides-barred case
+            fusensho for Carol."; the knockout both-sides-barred case
             reads "Neither Alice nor Bob can fight Pool A · Match 1: correct
             the earlier withdrawal or the draw."), or a decision
             that would change who a knockout match with its own result was
@@ -5080,13 +5093,23 @@ components:
             without the winner it needs (a knockout match left tied, an engi
             match left with no valid flag count); `message` then tells the
             operator to correct the result with a winner. `default_win_stands`:
-            a default win already closed the match, whether a withdrawal
-            (kiken, fusenpai) or a win awarded because the other side is
-            barred by a DIFFERENT match (fusensho); `message` then tells the
-            operator to correct the default win from the match's score
-            editor instead, since the match already has the winner it needs.
-            Either way the change is kept in the match's history. Also
-            carried, beside `heldGroups`, by a write applied in part.
+            a decision already closed the match -- a kiken or a fusenpai of
+            this match, or a fusensho awarded because the other side is
+            barred by a DIFFERENT match; `heldDecision` names which one, and
+            `message` then tells the operator to correct that decision from
+            the match's score editor instead, since the match already has
+            the winner it needs. Either way the change is kept in the
+            match's history. Also carried, beside `heldGroups`, by a write
+            applied in part.
+        heldDecision:
+          type: string
+          description: >
+            The decision code (e.g. `fusensho`, `kiken-voluntary`) that
+            closed the match, present only beside `heldReason:
+            default_win_stands`. Kendo names the decision itself; there is no
+            shared umbrella term for this class of result, so a client
+            renders this value (or a word derived from it) rather than a
+            generic label.
 
     MatchHistoryEntry:
       type: object
@@ -5151,7 +5174,7 @@ components:
             group was judged by its own stamp.
         clearedWithdrawal:
           type: object
-          description: The withdrawal or default win a later scoring change cleared (the result group as it was), when one was.
+          description: The kiken, fusenpai, or fusensho a later scoring change cleared (the result group as it was), when one was.
           additionalProperties: {}
 
     MergeGroup:
@@ -5891,9 +5914,9 @@ components:
     WithdrawnStatusAnnotation:
       type: object
       description: >
-        Request-time only, never stored. On a completed match a withdrawal or
-        default win decided: where the withdrawn side's competitor status
-        stands now. Set on the viewer payloads, and on the result a /decision,
+        Request-time only, never stored. On a completed match a kiken,
+        fusenpai, or fusensho decided: where the withdrawn side's competitor
+        status stands now. Set on the viewer payloads, and on the result a /decision,
         /score or bulk-score write returns and pushes.
       properties:
         eligible:
@@ -5984,9 +6007,9 @@ components:
           description: >
             On a write's response only: the groups of THIS write that were not
             applied (a newer change to them is stored, applying them would
-            leave a finished match without the winner it needs, or a default
-            win already closed the match: see `heldReason`) and were kept in
-            the match's history. Omitted when everything applied.
+            leave a finished match without the winner it needs, or a
+            decision already closed the match: see `heldReason`) and were
+            kept in the match's history. Omitted when everything applied.
         heldReason:
           type: string
           readOnly: true
@@ -5995,9 +6018,13 @@ components:
             On a write's response only, beside `heldGroups` or
             `displacedGroups`: present when they were held or moved because
             applying them would leave a finished match without the winner it
-            needs, or because a default win (a withdrawal, or a win awarded
-            for a bar recorded on a DIFFERENT match) already closed the match
-            (see RefusedWrite.heldReason).
+            needs, or because a decision (a kiken or a fusenpai of this
+            match, or a fusensho awarded for a bar recorded on a DIFFERENT
+            match) already closed the match (see RefusedWrite.heldReason).
+        heldDecision:
+          type: string
+          readOnly: true
+          description: As RefusedWrite.heldDecision.
         displacedGroups:
           type: array
           readOnly: true
@@ -6049,7 +6076,7 @@ components:
             character — a waza letter (M/K/D/T, and S in naginata; the set is
             deliberately open, so do not validate against a fixed list), the
             "H" ippon awarded by the opponent's second hansoku, the "○" (maru)
-            awarded per point on a default win, or "•" for an unfilled slot —
+            awarded per point on a kiken, fusenpai, or fusensho, or "•" for an unfilled slot —
             or the two-character non-scoring "Ht" judges'-decision mark, which
             rides in the winner's list only. "|" is rejected. At most 2 entries
             per side, and both sides may not hold 2 scoring entries.
@@ -6187,8 +6214,8 @@ components:
         (rendered left), Aka is sideA (rendered right). The daihyosen
         (position -1) sub-bout is excluded, so a representative-bout-decided
         tie reports the tied totals (for example IV 0-0). For a non-kachinuki
-        match decided by a match-level default win, these totals already
-        include the credit for every unfought numbered bout (one victory and
+        match decided by a match-level kiken, fusenpai, or fusensho, these
+        totals already include the credit for every unfought numbered bout (one victory and
         two points per bout, to the side `decisionBy` did not name); refer to
         `MatchResult.decisionBy`. Absent on individual matches. Never sent by
         clients.
@@ -6247,7 +6274,7 @@ components:
           description: >
             Decision code for this individual sub-match. For numbered bouts:
             `""` (normal victory), `"hikiwake"` (draw/tie), or `"fusensho"`
-            (per-bout default win). The daihyosen representative bout
+            (a per-bout win awarded for a bar on a different match). The daihyosen representative bout
             (`position: -1`) always carries `"daihyosen"`; including when its
             winner is declared by hantei on a tied bout (the frontend emits
             `decision: "daihyosen"` with the "Ht" mark in the winner's ippon
@@ -6342,7 +6369,7 @@ components:
           maxItems: 2
           description: >
             Side A's struck ippons as waza letters (M/K/D/T/H, maru for a
-            default win), plus the non-scoring "Ht" judges'-decision mark on
+            kiken, fusenpai, or fusensho), plus the non-scoring "Ht" judges'-decision mark on
             the winner's side. The same shape as `MatchResult.ipponsA`.
         ipponsB:
           type: array

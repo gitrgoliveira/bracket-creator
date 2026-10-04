@@ -270,7 +270,7 @@ function subWinnerSides(sub, matchSideA, matchSideB) {
 // Ht DOES land there (it takes the first free slot), so a selector on it proves
 // the mark's position only when the fixture's scoreline is stated too; assert on
 // the whole `.msb-slots` group when you mean "somewhere in the win group".
-const WAZA_NAMES = { M: "Men (head)", K: "Kote (wrist)", D: "Do (body)", T: "Tsuki (throat)", H: "Hansoku (penalty)", S: "Sune (shin)", "○": "Default win", Ht: "Hantei (judges' decision)" };
+const WAZA_NAMES = { M: "Men (head)", K: "Kote (wrist)", D: "Do (body)", T: "Tsuki (throat)", H: "Hansoku (penalty)", S: "Sune (shin)", "○": "Awarded (kiken, fusenpai or fusensho)", Ht: "Hantei (judges' decision)" };
 
 function slotCells(letters, side, testid) {
   // sideSlotOrder, not a local reverse: slot 0 is the OUTER (name-side) cell on

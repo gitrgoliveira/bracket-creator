@@ -72,6 +72,22 @@ func TestDefaultWinHelpers(t *testing.T) {
 	assert.Equal(t, []string{"○"}, domain.DefaultWinIppons(true))
 }
 
+func TestDecisionWord(t *testing.T) {
+	cases := map[string]string{
+		"kiken":           "kiken",
+		"kiken-voluntary": "kiken",
+		"kiken-injury":    "kiken",
+		"fusenpai":        "fusenpai",
+		"fusensho":        "fusensho",
+	}
+	for d, want := range cases {
+		assert.Equal(t, want, domain.DecisionWord(d), d)
+	}
+	for _, d := range []string{"", "fought", "hikiwake", "daihyosen", "kachinuki-exhaustion"} {
+		assert.Empty(t, domain.DecisionWord(d), d)
+	}
+}
+
 // The hantei-compatible set has TWO enforcers at different layers - the HTTP
 // validator on the way in, and the engine's preserve on the way out, which
 // mutates a row after validation and is never re-checked. They share this

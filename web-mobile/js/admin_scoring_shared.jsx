@@ -8,7 +8,7 @@ const Icon = window.Icon;
 
 import { DAIHYOSEN_POSITION, scoreRowMatchLabel } from './pool_ids.jsx';
 import {
-  writeDidNotLand, writeRetryable,
+  writeDidNotLand, writeRetryable, decisionWord,
   attemptScoreWrite, DOWNSTREAM_KNOCKOUT_PLAYED_CANCELLED, DOWNSTREAM_KNOCKOUT_REOPEN_CANCELLED, downstreamKnockoutReopenedNotice,
   courtBusyMessage, HELD_WRITE_DISCARD_LABEL, heldWriteDiscardConfirm, queuedNotice,
 } from './write_result.jsx';
@@ -1196,16 +1196,23 @@ const CORRECTION_PRESETS = ["Scoring error", "Wrong competitor", "Data entry", "
 // editors read it. Any kiken that is not the injury kind reads as voluntary,
 // the legacy bare "kiken" included, which the server loads as voluntary too.
 function withdrawalLabel(decision) {
-  if (decision === "fusenpai") return "Fusenpai";
+  if (decision === "fusenpai" || decision === "fusensho") {
+    // bc-cse: derives its word from decisionWord (write_result.jsx) rather
+    // than restating the map -- "fusensho" used to read "Default win
+    // (fusensho)" here, which named a thing kendo does not have alongside
+    // the thing it does (operator ruling 2026-10-04).
+    const word = decisionWord(decision);
+    return word.charAt(0).toUpperCase() + word.slice(1);
+  }
   // bc-rawm: a match-level fusensho, the shape a match-level default win
-  // takes when the operator taps "Record default win for <opponent>" on a
+  // takes when the operator taps "Record fusensho for <opponent>" on a
   // match against an already-withdrawn competitor -- the match's own notice
-  // (BarredMatchNotice / defaultWinDecisionBodyForSide, ineligible_match.jsx).
-  // Short label for the same "fact" slots kiken/fusenpai use (e.g.
-  // admin_scoring_team.jsx's team-summary-decision); the fuller "Default win
-  // (fusensho) for <winner>" sentence is composed in RecordedWithdrawal,
-  // which needs the winner's name this function does not have.
-  if (decision === "fusensho") return "Default win (fusensho)";
+  // (BarredMatchNotice / defaultWinDecisionBodyForSide, ineligible_match.jsx)
+  // -- falls through the branch above. Short label for the same "fact" slots
+  // kiken/fusenpai use (e.g. admin_scoring_team.jsx's team-summary-decision);
+  // the fuller "Fusensho for <winner>" sentence is composed in
+  // RecordedWithdrawal, which needs the winner's name this function does not
+  // have.
   return decision === "kiken-injury" ? "Kiken – Injury" : "Kiken – Voluntary";
 }
 
@@ -1633,6 +1640,13 @@ function RecordedWithdrawal({ match, ctl, disabled = false, singleBout = false, 
   const isDefaultWin = match.decision === "fusensho";
   const what = match.decision === "fusenpai" ? "did not appear" : "withdrew";
   const feedsKnockout = match.phase === "pool" && match.compFormat === "mixed";
+  // bc-cse: the operator's word for what IS recorded on this match --
+  // "kiken", "fusenpai", or "fusensho" -- never "withdrawal"/"default win"
+  // as two names for the same thing (operator ruling 2026-10-04: "default
+  // win" does not exist in kendo). Always resolves: RecordedWithdrawal
+  // renders only once withdrawalInForce(match) is true, which gates on
+  // exactly this decision class.
+  const decisionNoun = decisionWord(match.decision) || "withdrawal";
 
   // bc-cse: "Everything should be able to be fixed... the operator just needs
   // to be aware of the consequences" (operator ruling 2026-09-24) extends past
@@ -1726,10 +1740,6 @@ function RecordedWithdrawal({ match, ctl, disabled = false, singleBout = false, 
   // returns this one to the queue too (engine.reopenTargetStatusTx).
   const barMovesOn = !clearsDefaultWin && !!laterDefaultWins
     && laterDefaultWins.some(x => x.decision === "fusenpai");
-  // The one noun both controls use for what is recorded, so "Clear default
-  // win" and "Remove default win" (or "... withdrawal") always agree.
-  const namesDefaultWin = (clearsDefaultWin || barMovesOn)
-    && (isDefaultWin || match.decision === "fusenpai");
   const removed = !!(removal && removal.removed);
   // Where the withdrawn competitor stands once this ruling is gone, the ONE
   // answer both fixes describe (the reopen copy and the removal sentence):
@@ -1753,15 +1763,15 @@ function RecordedWithdrawal({ match, ctl, disabled = false, singleBout = false, 
     <div className="decision-recorded" data-testid="recorded-withdrawal" style={{ marginTop: 10, fontSize: 13 }}>
       <div>
         {/* bc-rawm: a match-level fusensho (recorded from the match's own
-            notice: BarredMatchNotice / the queue row's Record default win)
-            names the WINNER first -- "Default win (fusensho) for <winner>" --
+            notice: BarredMatchNotice / the queue row's Record fusensho for
+            <opponent>) names the WINNER first -- "Fusensho for <winner>" --
             so the operator sees who benefits from the same reading the wire's
             decisionBy already carries, then names who had withdrawn as a
             second sentence. withdrawalLabel cannot build this on its own: it
             takes only the decision string, not the winner's name. */}
         <span>
           {isDefaultWin
-            ? `Recorded: Default win (fusensho) for ${winnerName || "the opponent"}. ${who || "The withdrawn competitor"} had withdrawn.`
+            ? `Recorded: Fusensho for ${winnerName || "the opponent"}. ${who || "The withdrawn competitor"} had withdrawn.`
             : `Recorded: ${withdrawalLabel(match.decision)}${who ? `, ${who} ${what}` : ""}.`}
         </span>
         {" "}
@@ -1774,14 +1784,14 @@ function RecordedWithdrawal({ match, ctl, disabled = false, singleBout = false, 
           // The correction is saved on this device and waiting to be sent: it
           // will remove the ruling when it lands, and Undo could not recall it.
           <span data-testid="remove-withdrawal-pending">
-            The correction is saved on this device and removes {namesDefaultWin ? "the default win" : "the withdrawal"} when it is sent.
+            The correction is saved on this device and removes the {decisionNoun} when it is sent.
           </span>
         ) : removed ? (
           // Removed in the editor, not yet saved: nothing has been sent, so
           // Undo just puts the recorded result back on the board.
           <>
             <span data-testid="remove-withdrawal-pending">
-              {namesDefaultWin ? "The default win" : "The withdrawal"} will be removed when you save the correction.
+              {`The ${decisionNoun} will be removed when you save the correction.`}
             </span>
             {" "}
             <button
@@ -1803,14 +1813,14 @@ function RecordedWithdrawal({ match, ctl, disabled = false, singleBout = false, 
               onClick={() => ctl.reopen("")}
               disabled={disabled || ctl.busy || ctl.landed || !settled}
             >
-              {/* bc-cse: "Clear default win" -- no "and reopen" -- because a
+              {/* bc-cse: "Clear <decision>" -- no "and reopen" -- because a
                   fusensho reopen no longer always lands running: the server
                   returns the match to SCHEDULED when the barred competitor
                   is still barred (BarredMatchNotice shows again), and only
                   to running once they no longer are, so this button cannot
                   promise "and reopen" for either outcome uniformly. */}
-              {ctl.busy ? "Reopening…" : ctl.landed ? "Reopened" : !(clearsDefaultWin || barMovesOn) ? "Clear withdrawal and reopen"
-                : namesDefaultWin ? "Clear default win" : "Clear withdrawal"}
+              {ctl.busy ? "Reopening…" : ctl.landed ? "Reopened" : !(clearsDefaultWin || barMovesOn) ? `Clear ${decisionNoun} and reopen`
+                : `Clear ${decisionNoun}`}
             </button>
             {removal && (
               <>
@@ -1827,7 +1837,7 @@ function RecordedWithdrawal({ match, ctl, disabled = false, singleBout = false, 
                   // withdrawn, barMovesOn) depends on it.
                   disabled={disabled || ctl.busy || ctl.landed || !settled}
                 >
-                  {namesDefaultWin ? "Remove default win" : "Remove withdrawal"}
+                  {`Remove ${decisionNoun}`}
                 </button>
               </>
             )}
@@ -1851,7 +1861,7 @@ function RecordedWithdrawal({ match, ctl, disabled = false, singleBout = false, 
                 ? `${who || "The barred competitor"} can fight again, so the match reopens in progress. Score it and finish it as usual.`
                 : <>
                   The match goes back to the queue. {who || "The barred competitor"} is still withdrawn, so
-                  record the default win again{canReinstate ? `, or reinstate ${who || "them"} first to fight it` : ""}.
+                  record the fusensho again{canReinstate ? `, or reinstate ${who || "them"} first to fight it` : ""}.
                 </>}
             </p>
           ) : eligibility === "staysLater" ? (
@@ -1861,22 +1871,22 @@ function RecordedWithdrawal({ match, ctl, disabled = false, singleBout = false, 
             </p>
           ) : singleBout && match.decision === "fusenpai" ? (
             // A no-show fought nothing: there are no points to keep or lose,
-            // so the reopen only removes the default win.
+            // so the reopen only removes the win the fusenpai gave.
             <p data-testid="clear-withdrawal-consequence" style={{ margin: "6px 0 0" }}>
-              This reopens the match: it goes back to running, the default win given
+              This reopens the match: it goes back to running, the win the fusenpai gave
               to {winnerName || "the other side"} is removed, and {who || "the side marked absent"} can
               compete again. Then score the match and finish it.
             </p>
           ) : singleBout ? (
             // A single bout (an individual match, or a team -DH-/-TB- rep
             // bout) loses the WINNER's points on a reopen: recording the
-            // kiken replaced them with the default win (recordDecisionTx)
+            // decision replaced them with its own award (recordDecisionTx)
             // and the reopen drops that verdict, so only what the withdrawing
             // side struck is still there to keep (engine singleBoutFightOf).
             <p data-testid="clear-withdrawal-consequence" style={{ margin: "6px 0 0" }}>
               This reopens the match: it goes back to running and {who || "the withdrawn side"} can
-              compete again. {winnerName || "The winner"}&apos;s points were replaced by the default
-              win when the withdrawal was recorded, so enter them again; {who ? `${who}'s` : "the withdrawn side's"} points
+              compete again. {winnerName || "The winner"}&apos;s points were replaced by the {decisionNoun}
+              {" "}when the withdrawal was recorded, so enter them again; {who ? `${who}'s` : "the withdrawn side's"} points
               are kept. Then score the rest and finish it.
             </p>
           ) : (
@@ -1911,7 +1921,7 @@ function RecordedWithdrawal({ match, ctl, disabled = false, singleBout = false, 
             </p>
           )}
           {laterDefaultWins && laterDefaultWins.length > 0 && (
-            <div data-testid="clear-withdrawal-default-win-consequences" style={{ margin: "6px 0 0" }}>
+            <div data-testid="clear-withdrawal-later-matches" style={{ margin: "6px 0 0" }}>
               {/* bc-cse: named by scoreRowMatchLabel first -- a pairing alone
                   cannot be found in the scores list, which is where the
                   operator has to go to reopen it -- with the pairing appended
@@ -1923,9 +1933,10 @@ function RecordedWithdrawal({ match, ctl, disabled = false, singleBout = false, 
               {laterDefaultWins.map((x) => {
                 const label = scoreRowMatchLabel(x);
                 const pairing = `${x.sideB?.name || "Shiro"} vs ${x.sideA?.name || "Aka"}`;
+                const noun = decisionWord(x.decision) || "decision";
                 return (
-                  <p key={x.id} data-testid={`clear-withdrawal-default-win-${x.id}`} style={{ margin: "4px 0 0" }}>
-                    {label ? `${label} · ${pairing}` : pairing} keeps its default win; reopen it to fight it.
+                  <p key={x.id} data-testid={`clear-withdrawal-later-match-${x.id}`} style={{ margin: "4px 0 0" }}>
+                    {label ? `${label} · ${pairing}` : pairing} keeps its {noun}; reopen it to fight it.
                   </p>
                 );
               })}

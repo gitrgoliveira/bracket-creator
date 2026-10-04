@@ -404,7 +404,7 @@ func TestMerge_ScoringAfterADefaultWinForABarElsewhereIsHeld(t *testing.T) {
 		assert.Equal(t, before.IpponsA, m.IpponsA, "the scoreline is as the default win recorded it")
 		assert.Equal(t, before.IpponsB, m.IpponsB)
 		last := h.history(t)[len(h.history(t))-1]
-		assert.Equal(t, HoldReasonDefaultWinStands, last.Reason)
+		assert.Equal(t, defaultWinStandsReason("fusensho"), last.Reason)
 		assert.Empty(t, last.ClearedWithdrawal, "nothing was cleared")
 	})
 }
@@ -440,7 +440,7 @@ func TestMerge_ScoringAfterATeamDefaultWinForABarElsewhereIsHeld(t *testing.T) {
 	assert.Equal(t, "fusensho", m.Decision, "the default win stands")
 	assert.Equal(t, before.Winner, m.Winner)
 	assert.Equal(t, before.SubResults, m.SubResults, "the rows the default win padded are untouched")
-	assert.Equal(t, HoldReasonDefaultWinStands, h.history(t)[len(h.history(t))-1].Reason)
+	assert.Equal(t, defaultWinStandsReason("fusensho"), h.history(t)[len(h.history(t))-1].Reason)
 }
 
 // bc-mrgc Finding 3 (a regression): holdScoring only holds groups

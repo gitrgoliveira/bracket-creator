@@ -705,14 +705,14 @@ function fusenshoButtonTitle(sub, rs, other) {
   if (sub.fusensho === rs.key) {
     return sub._preFusensho
       ? "Click to undo fusensho: restores the previous score"
-      : "Click to undo fusensho: removes the default-win circles; points already scored stay";
+      : "Click to undo fusensho: removes the fusensho circles; points already scored stay";
   }
   if (!fusenshoAllowed(sub, rs.key)) {
     return sub.fusensho === other.key
       ? `${other.label} already won this bout: undo their fusensho, then clear their points`
       : `${other.label} already won this bout: clear their points first`;
   }
-  return `Mark bout as fusensho: default win to ${rs.label}; points already scored stay`;
+  return `Mark bout as fusensho: awards fusensho to ${rs.label}; points already scored stay`;
 }
 
 // subBoutHasBeenPlayed: true once a sub-bout carries any operator input
@@ -3564,7 +3564,7 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
                       clearTap(ipponTapRef, rs.tapKey);
                       rs.setPts(rs.pts.filter((_, j) => j !== i));
                     }}
-                    title={isHt ? (selfReport ? "Hantei winner (judges' decision)" : "Hantei winner: click to undo") : (!mark || rowLocked) ? undefined : defaultWin ? "Default win: use Fusensho to undo" : "Click to remove"}>
+                    title={isHt ? (selfReport ? "Hantei winner (judges' decision)" : "Hantei winner: click to undo") : (!mark || rowLocked) ? undefined : defaultWin ? "Awarded by fusensho: use Fusensho to undo" : "Click to remove"}>
                     {isHt ? "Ht" : (mark || "·")}
                   </button>
                 );
@@ -4117,7 +4117,7 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
               server never applies. */}
           {decisionPromptKind && !isKachinuki && unscoredBouts.length > 0 && (
             <div style={{ fontSize: 12, color: "var(--ink-3)", marginTop: 4 }} data-testid="decision-consequence-note">
-              A withdrawal credits the other team with a default win, 2–0, in {unscoredBouts.length === 1 ? "the 1 bout" : `each of the ${unscoredBouts.length} bouts`} with no result yet.
+              A withdrawal credits the other team, 2–0 (as a fusensho bout would), in {unscoredBouts.length === 1 ? "the 1 bout" : `each of the ${unscoredBouts.length} bouts`} with no result yet.
             </div>
           )}
           {decisionPromptKind && (

@@ -208,12 +208,12 @@ func barredCompetitorSentence(name, label, decision, opponent string) string {
 		if opponent == "" {
 			return fmt.Sprintf("%s withdrew injured in %s. Reinstate %s if they can fight again.", name, label, name)
 		}
-		return fmt.Sprintf("%s withdrew injured in %s. Reinstate %s if they can fight again, or record the default win for %s.", name, label, name, opponent)
+		return fmt.Sprintf("%s withdrew injured in %s. Reinstate %s if they can fight again, or record the fusensho for %s.", name, label, name, opponent)
 	case string(domain.DecisionFusenpai):
 		if opponent == "" {
 			return fmt.Sprintf("%s did not appear for %s and cannot fight again.", name, label)
 		}
-		return fmt.Sprintf("%s did not appear for %s and cannot fight again. Record the default win for %s.", name, label, opponent)
+		return fmt.Sprintf("%s did not appear for %s and cannot fight again. Record the fusensho for %s.", name, label, opponent)
 	default:
 		// kiken, kiken-voluntary, and any other/legacy barring decision this
 		// app never itself writes (fusensho/daihyosen do not bar anyone, so
@@ -223,7 +223,7 @@ func barredCompetitorSentence(name, label, decision, opponent string) string {
 		if opponent == "" {
 			return fmt.Sprintf("%s withdrew in %s and cannot fight again.", name, label)
 		}
-		return fmt.Sprintf("%s withdrew in %s and cannot fight again. Record the default win for %s.", name, label, opponent)
+		return fmt.Sprintf("%s withdrew in %s and cannot fight again. Record the fusensho for %s.", name, label, opponent)
 	}
 }
 

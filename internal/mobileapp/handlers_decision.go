@@ -307,7 +307,7 @@ func respondDecisionEngineError(c *gin.Context, store CompetitionStore, compID, 
 		// supersede here would not merely mis-report a dropped write,
 		// it would poison the offline queue with one that can never
 		// succeed.
-		respondSuperseded(c, engine.HeldGroupsOf(engErr), engine.HeldReasonOf(engErr))
+		respondSuperseded(c, engine.HeldGroupsOf(engErr), engine.HeldReasonOf(engErr), engine.HeldDecisionOf(engErr))
 	case errors.As(engErr, &alreadyIneligErr):
 		// T105/CHK047: concurrent kiken, another operator already
 		// recorded ineligibility for this player on a different

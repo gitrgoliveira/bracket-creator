@@ -431,7 +431,7 @@ describe('bc-emsl: a team-sheet tap that clears nothing writes nothing', () => {
 
     const circle = markSlots(subMatchRows()[0], 'aka').find((b) => b.textContent === '\u25CB');
     expect(circle).toBeTruthy();
-    expect(circle.title).toBe('Default win: use Fusensho to undo');
+    expect(circle.title).toBe('Awarded by fusensho: use Fusensho to undo');
     await act(async () => { fireEvent.click(circle); });
     await act(async () => { vi.advanceTimersByTime(AUTOSAVE_DEBOUNCE_MS + 50); });
 

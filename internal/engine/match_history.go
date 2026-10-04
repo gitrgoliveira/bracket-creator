@@ -248,6 +248,12 @@ type SupersededError struct {
 	// state.HeldReasonNeedsWinner when applying them would have left the
 	// match without the winner it needs.
 	HeldReason string
+	// HeldDecision is the decision code (state.MergeReport.HeldDecision,
+	// e.g. "fusensho", "kiken-voluntary") that closed the match when
+	// HeldReason is state.HeldReasonDefaultWinStands; "" otherwise. Lets the
+	// handlers name the decision on the wire (heldDecision) instead of the
+	// eliminated "default win" umbrella term.
+	HeldDecision string
 }
 
 func (e *SupersededError) Error() string { return ErrMatchSuperseded.Error() }
@@ -257,7 +263,11 @@ func (e *SupersededError) Is(target error) bool { return target == ErrMatchSuper
 
 // supersededBy is the error a write whose every change was held returns.
 func supersededBy(result *state.MatchResult) error {
-	return &SupersededError{Held: result.Merge.HeldGroups(), HeldReason: result.Merge.HeldReason()}
+	return &SupersededError{
+		Held:         result.Merge.HeldGroups(),
+		HeldReason:   result.Merge.HeldReason(),
+		HeldDecision: result.Merge.HeldDecision(),
+	}
 }
 
 // HeldReasonOf returns why a superseded write's groups were held (see
@@ -266,6 +276,16 @@ func HeldReasonOf(err error) string {
 	var se *SupersededError
 	if errors.As(err, &se) {
 		return se.HeldReason
+	}
+	return ""
+}
+
+// HeldDecisionOf returns the decision code a superseded write's default-win
+// hold named (see SupersededError.HeldDecision), or "".
+func HeldDecisionOf(err error) string {
+	var se *SupersededError
+	if errors.As(err, &se) {
+		return se.HeldDecision
 	}
 	return ""
 }

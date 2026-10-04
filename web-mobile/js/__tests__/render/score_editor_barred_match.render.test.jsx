@@ -73,9 +73,9 @@ describe('the Scores tab and a barred match (bc-cse)', () => {
     let utils;
     await act(async () => { utils = mount(); });
     const notice = utils.getByTestId('barred-match-notice');
-    expect(notice.textContent).toContain('Yama withdrew: record the default win.');
-    const btn = utils.getByTestId('barred-match-default-win');
-    expect(btn.textContent).toBe('Record default win for Umi');
+    expect(notice.textContent).toContain('Yama withdrew: record the fusensho.');
+    const btn = utils.getByTestId('barred-match-record-fusensho');
+    expect(btn.textContent).toBe('Record fusensho for Umi');
 
     await act(async () => { btn.click(); });
     expect(window.API.recordDecision).toHaveBeenCalledWith('c1', 'm-barred', {
@@ -108,7 +108,7 @@ describe('the Scores tab and a barred match (bc-cse)', () => {
     window.API.recordDecision = vi.fn().mockResolvedValue({ applied: false, reason: 'clock_skew' });
     let utils;
     await act(async () => { utils = mount(); });
-    const btn = utils.getByTestId('barred-match-default-win');
+    const btn = utils.getByTestId('barred-match-record-fusensho');
     await act(async () => { btn.click(); });
 
     const notice = utils.getByTestId('barred-match-notice');
@@ -116,7 +116,7 @@ describe('the Scores tab and a barred match (bc-cse)', () => {
     expect(notice.textContent).not.toContain('a newer result for this match is already recorded');
     // Not landed: the operator can retry once the clock has resynced.
     expect(btn.disabled).toBe(false);
-    expect(btn.textContent).toBe('Record default win for Umi');
+    expect(btn.textContent).toBe('Record fusensho for Umi');
   });
 
   // bc-cse: after a landed (or queued -- see below) write the button must
@@ -126,7 +126,7 @@ describe('the Scores tab and a barred match (bc-cse)', () => {
     window.API.recordDecision = vi.fn().mockResolvedValue({ applied: true });
     let utils;
     await act(async () => { utils = mount(); });
-    const btn = utils.getByTestId('barred-match-default-win');
+    const btn = utils.getByTestId('barred-match-record-fusensho');
     await act(async () => { btn.click(); });
 
     expect(btn.disabled).toBe(true);
@@ -142,7 +142,7 @@ describe('the Scores tab and a barred match (bc-cse)', () => {
     window.API.recordDecision = vi.fn().mockResolvedValue({ queued: true });
     let utils;
     await act(async () => { utils = mount(); });
-    const btn = utils.getByTestId('barred-match-default-win');
+    const btn = utils.getByTestId('barred-match-record-fusensho');
     await act(async () => { btn.click(); });
 
     expect(btn.disabled).toBe(true);

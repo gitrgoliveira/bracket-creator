@@ -146,7 +146,8 @@ func TestScoreHandler_HeldForADefaultWinSaysSo(t *testing.T) {
 	assert.Equal(t, false, out["applied"])
 	assert.Equal(t, "superseded", out["reason"], "the not-retried, not-lost shape the queue keys on")
 	assert.Equal(t, state.HeldReasonDefaultWinStands, out["heldReason"])
-	assert.Equal(t, DefaultWinStandsMessage, out["message"])
+	assert.Equal(t, "fusensho", out["heldDecision"])
+	assert.Equal(t, DefaultWinStandsMessage("fusensho"), out["message"])
 	assert.Equal(t, []any{"points"}, out["heldGroups"])
 
 	m := mergeStored(t, store, compID)

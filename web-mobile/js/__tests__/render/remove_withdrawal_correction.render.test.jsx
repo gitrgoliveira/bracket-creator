@@ -136,8 +136,8 @@ describe('individual editor: Remove withdrawal', () => {
 
   it('sits beside Clear withdrawal and reopen and says what it does', async () => {
     await mount(individualKiken());
-    expect(screen.getByTestId('clear-withdrawal-reopen').textContent).toBe('Clear withdrawal and reopen');
-    expect(screen.getByTestId('remove-withdrawal').textContent).toBe('Remove withdrawal');
+    expect(screen.getByTestId('clear-withdrawal-reopen').textContent).toBe('Clear kiken and reopen');
+    expect(screen.getByTestId('remove-withdrawal').textContent).toBe('Remove kiken');
     expect(screen.getByTestId('remove-withdrawal-consequence').textContent.replace(/\s+/g, ' ')).toBe(
       'Or remove it: the match stays finished, you enter the result as it was fought and save the correction. Tanaka can compete again.');
   });
@@ -152,7 +152,7 @@ describe('individual editor: Remove withdrawal', () => {
     expect(filled('aka')).toEqual([]);
     expect(filled('shiro')).toEqual(['M']);
     expect(addButton('aka', 'M').disabled).toBe(false);
-    expect(screen.getByTestId('remove-withdrawal-pending').textContent).toBe('The withdrawal will be removed when you save the correction.');
+    expect(screen.getByTestId('remove-withdrawal-pending').textContent).toBe('The kiken will be removed when you save the correction.');
     expect(screen.getByTestId('remove-withdrawal-undo')).toBeTruthy();
     expect(screen.queryByTestId('clear-withdrawal-reopen')).toBeNull();
     expect(window.API.reopenMatch).not.toHaveBeenCalled();
@@ -214,7 +214,7 @@ describe('individual editor: Remove withdrawal', () => {
     await saveCorrection();
     expect(onSubmit.mock.calls[0][0].clearWithdrawal).toBe(true);
     expect(screen.getByTestId('remove-withdrawal-pending').textContent)
-      .toBe('The correction is saved on this device and removes the withdrawal when it is sent.');
+      .toBe('The correction is saved on this device and removes the kiken when it is sent.');
     expect(screen.queryByTestId('remove-withdrawal-undo')).toBeNull();
   });
 
@@ -325,7 +325,7 @@ describe('individual editor: Remove withdrawal', () => {
   it('a default win over a competitor already eligible again says they can compete again, as the reopen does', async () => {
     const fusensho = individualKiken({ decision: 'fusensho', ipponsB: [], withdrawnStatus: { eligible: true } });
     await mount(fusensho);
-    await waitFor(() => expect(screen.getByTestId('remove-withdrawal').textContent).toBe('Remove default win'));
+    await waitFor(() => expect(screen.getByTestId('remove-withdrawal').textContent).toBe('Remove fusensho'));
     expect(screen.getByTestId('clear-withdrawal-consequence').textContent).toContain('Tanaka can fight again');
     expect(screen.getByTestId('remove-withdrawal-consequence').textContent.replace(/\s+/g, ' ')).toBe(
       'Or remove it: the match stays finished, you enter the result as it was fought and save the correction. Tanaka can compete again.');
@@ -336,7 +336,7 @@ describe('individual editor: Remove withdrawal', () => {
 
   it('a competitor barred by another match is not promised they can compete again', async () => {
     await mount(individualKiken({ decision: 'fusenpai', ipponsB: [], withdrawnStatus: { eligible: false, matchId: 'Pool A-0' } }));
-    await waitFor(() => expect(screen.getByTestId('remove-withdrawal').textContent).toBe('Remove default win'));
+    await waitFor(() => expect(screen.getByTestId('remove-withdrawal').textContent).toBe('Remove fusenpai'));
     const text = screen.getByTestId('remove-withdrawal-consequence').textContent;
     expect(text).toContain('Tanaka stays withdrawn because of another match.');
     expect(text).not.toContain('can compete again');
@@ -349,7 +349,7 @@ describe('team editor: Remove withdrawal', () => {
   it('sits beside Clear withdrawal and reopen', async () => {
     await mount(teamKiken());
     expect(screen.getByTestId('clear-withdrawal-reopen')).toBeTruthy();
-    expect(screen.getByTestId('remove-withdrawal').textContent).toBe('Remove withdrawal');
+    expect(screen.getByTestId('remove-withdrawal').textContent).toBe('Remove kiken');
     expect(screen.getByTestId('team-summary-decision')).toBeTruthy();
   });
 

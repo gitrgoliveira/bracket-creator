@@ -47,7 +47,7 @@ func respondIfSuperseded(c *gin.Context, err error) bool {
 	if !errors.Is(err, engine.ErrMatchSuperseded) {
 		return false
 	}
-	respondSuperseded(c, engine.HeldGroupsOf(err), engine.HeldReasonOf(err))
+	respondSuperseded(c, engine.HeldGroupsOf(err), engine.HeldReasonOf(err), engine.HeldDecisionOf(err))
 	return true
 }
 

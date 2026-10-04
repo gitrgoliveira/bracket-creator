@@ -40,7 +40,7 @@ import { bridge as _bridge } from './court_bridge.jsx';
 // The offset lives in a leaf so a score editor can read the same clock (server_clock.jsx).
 import { serverNowMs, serverClockOffsetMs, setServerClockOffsetMs } from './server_clock.jsx';
 import {
-    writeDidNotLand, writeWasSuperseded, writeWasRefusedForClock, writeNeedsWinner, writeDefaultWinStands, writeDisplacedGroups, supersededBanner,
+    writeDidNotLand, writeWasSuperseded, writeWasRefusedForClock, writeNeedsWinner, writeDefaultWinStands, writeHeldDecision, writeDisplacedGroups, supersededBanner,
     SUPERSEDED_REASON, SUPERSEDED_ADVICE,
     CLOCK_SKEW_REASON_TEXT, CLOCK_SKEW_ADVICE, CLOCK_SKEW_UNHEALED_ADVICE,
     downstreamKnockoutPlayedQueueDrop, downstreamKnockoutRunningMessage, downstreamKnockoutRunningReopenMessage,
@@ -1129,18 +1129,18 @@ function _notifyScoreSupersededEditor(compID, matchID, body) {
 // Publishing count:1 per drop made queueAlertMessage's plural branch dead code
 // and left a court that reconnected with several dropped results looking at a
 // single toast reading "A result was not saved".
-function _notifyScoreSupersededAlert(count, compID, matchID, needsWinner = false, defaultWinStands = false) {
+function _notifyScoreSupersededAlert(count, compID, matchID, needsWinner = false, defaultWinStands = false, decision = null) {
     if (count <= 0) return;
     _notifyQueueAlert({
         kind: 'superseded', count, terminalCount: count, compID, matchID,
         ...(needsWinner ? { needsWinner: true } : {}),
-        ...(defaultWinStands ? { defaultWinStands: true } : {}),
+        ...(defaultWinStands ? { defaultWinStands: true, decision } : {}),
     });
 }
 
 function _notifyScoreSuperseded(compID, matchID, body) {
     _notifyScoreSupersededEditor(compID, matchID, body);
-    _notifyScoreSupersededAlert(1, compID, matchID, writeNeedsWinner(body), writeDefaultWinStands(body));
+    _notifyScoreSupersededAlert(1, compID, matchID, writeNeedsWinner(body), writeDefaultWinStands(body), writeHeldDecision(body));
 }
 
 // Bracket-resync channel. When a queued override-winner assertion the server
@@ -1416,10 +1416,26 @@ async function _flushQueue() {
     // Whether any of them was held because it would leave a finished match
     // without a winner (writeNeedsWinner): the alert then says to correct it.
     let needsWinnerThisPass = false;
-    // Whether any of them was held because a default win recorded for a bar
-    // on another match still stands (writeDefaultWinStands): the alert then
-    // points at Remove default win instead.
+    // Whether any of them was held because a decision recorded for a bar on
+    // another match still stands (writeDefaultWinStands): the alert then
+    // names that recorded decision instead of pointing at a specific button.
     let defaultWinStandsThisPass = false;
+    // The decision code held across the pass, read with writeHeldDecision.
+    // undefined (unseen) until the first hold, then that hold's decision;
+    // a later hold for a DIFFERENT decision collapses it to null (mixed),
+    // which defaultWinStandsWord (write_result.jsx) reads as "no single
+    // decision to name" exactly like an absent heldDecision does.
+    let defaultWinStandsDecisionThisPass;
+    // Records one writeDefaultWinStands hold against the two trackers above,
+    // called at both sites below so they can never drift apart (one named
+    // the decision, the other read it, before this was one function).
+    const noteDefaultWinStands = (body) => {
+        if (!writeDefaultWinStands(body)) return;
+        defaultWinStandsThisPass = true;
+        const d = writeHeldDecision(body);
+        if (defaultWinStandsDecisionThisPass === undefined) defaultWinStandsDecisionThisPass = d;
+        else if (defaultWinStandsDecisionThisPass !== d) defaultWinStandsDecisionThisPass = null;
+    };
     // Held finishes that landed and moved a LATER change of their match to
     // its history (writeDisplacedGroups): told once per pass, like 'sent'.
     let displacedThisPass = 0;
@@ -1615,7 +1631,7 @@ async function _flushQueue() {
                                         _notifyScoreSupersededEditor(compID, matchID, body);
                                         supersededThisPass++;
                                         if (writeNeedsWinner(body)) needsWinnerThisPass = true;
-                                        if (writeDefaultWinStands(body)) defaultWinStandsThisPass = true;
+                                        noteDefaultWinStands(body);
                                         lastSupersededMatch = { compID, matchID };
                                     }
                                 }
@@ -1674,7 +1690,7 @@ async function _flushQueue() {
                             _notifyScoreSupersededEditor(compID, matchID, body);
                             supersededThisPass++;
                             if (writeNeedsWinner(body)) needsWinnerThisPass = true;
-                            if (writeDefaultWinStands(body)) defaultWinStandsThisPass = true;
+                            noteDefaultWinStands(body);
                             lastSupersededMatch = { compID, matchID };
                         }
                         if (_dequeue(key, descriptor)) {
@@ -1878,6 +1894,7 @@ async function _flushQueue() {
             lastSupersededMatch ? lastSupersededMatch.matchID : undefined,
             needsWinnerThisPass,
             defaultWinStandsThisPass,
+            defaultWinStandsDecisionThisPass || null,
         );
     }
 }

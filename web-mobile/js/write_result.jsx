@@ -82,7 +82,7 @@ export const SUPERSEDED_ADVICE = 'Check the match and its history before enterin
 // how many, `one` whether that is a single result (queuedWritesNoun),
 // `needsWinner` whether any was held because it would leave a finished match
 // without a winner (writeNeedsWinner).
-export function supersededAlertText(n, one, needsWinner = false, defaultWinStands = false) {
+export function supersededAlertText(n, one, needsWinner = false, defaultWinStands = false, decision = null) {
     const text = one
         ? "A result was not applied because a newer change to the same match was recorded first. It was kept in the match's history, so nothing is lost: check the match and its history before entering anything again."
         : `${n} results were not applied because newer changes to the same matches were recorded first. They were kept in each match's history, so nothing is lost: check those matches and their history before entering anything again.`;
@@ -94,12 +94,16 @@ export function supersededAlertText(n, one, needsWinner = false, defaultWinStand
             : `${text} Where one would leave a finished match without a winner, correct that result with a winner.`;
     }
     if (defaultWinStands) {
-        // At least one was held because a default win already closed the
-        // match (writeDefaultWinStands): the fix is to correct the default
-        // win from the match's score editor, never re-entering the score.
+        // At least one was held because a decision already closed the match
+        // (writeDefaultWinStands): the fix is to correct that decision from
+        // the match's score editor, never re-entering the score. `decision`
+        // names it when the whole pass held exactly one kind
+        // (defaultWinStandsWord falls back to "recorded decision" for a
+        // mixed pass or an older server with no heldDecision).
+        const word = defaultWinStandsWord(decision);
         return one
-            ? "A result was not applied because this match was closed with a default win. It was kept in the match's history, so nothing is lost: correct the default win from the match's score editor to change the result."
-            : `${text} Where one was closed with a default win, correct the default win from the match's score editor to change that result.`;
+            ? `A result was not applied because this match was closed with a ${word}. It was kept in the match's history, so nothing is lost: correct the ${word} from the match's score editor to change the result.`
+            : `${text} Where one was closed with a ${word}, correct the ${word} from the match's score editor to change that result.`;
     }
     return text;
 }
@@ -147,36 +151,87 @@ export const NEEDS_WINNER_ADVICE = 'Correct the result with a winner.';
 // "A newer change to the same thing was recorded first."
 export const NEEDS_WINNER_NOTE = 'It would leave the finished match without a winner, and it needs one: correct the result with a winner.';
 
+// decisionWord / FALLBACK_DECISION_WORD (operator ruling 2026-10-04): "default
+// win" does not exist in kendo and must never appear in anything a person
+// reads -- every finished match has a result, a scoreline or a registered
+// decision that NAMES the winner (kiken: kiken-voluntary or kiken-injury;
+// fusenpai; fusensho; hantei). decisionWord is the ONE map from a wire
+// decision code to the bare word the operator is told: "kiken" for any kiken
+// variant (the legacy bare "kiken" included), "fusenpai", "fusensho", or null
+// for anything outside that class (fought, hikiwake, daihyosen,
+// kachinuki-exhaustion, ippon-shobu, no decision). Every caller that used to
+// say "default win" now names the recorded decision through here instead --
+// admin_scoring_shared.jsx's withdrawalLabel derives its fusenpai/fusensho
+// words from it rather than restating the map.
+export function decisionWord(code) {
+    if (code === 'kiken' || code === 'kiken-voluntary' || code === 'kiken-injury') return 'kiken';
+    if (code === 'fusenpai') return 'fusenpai';
+    if (code === 'fusensho') return 'fusensho';
+    return null;
+}
+
+// FALLBACK_DECISION_WORD: what a sentence names when there is no specific
+// decision to name -- an older server answering with no `heldDecision`, or a
+// flushed queue pass that held more than one kind across several matches, so
+// naming the wrong one would be worse than naming none.
+const FALLBACK_DECISION_WORD = 'recorded decision';
+
+// defaultWinStandsWord: decisionWord with that fallback applied, the one
+// place DEFAULT_WIN_STANDS_* and supersededAlertText read a decision code
+// from.
+function defaultWinStandsWord(decision) {
+    return decisionWord(decision) || FALLBACK_DECISION_WORD;
+}
+
+// writeHeldDecision: the decision code the server named alongside heldReason
+// "default_win_stands" (e.g. "fusensho", "kiken-voluntary"), read for the
+// writeDefaultWinStands case only -- null for anything else, including an
+// older server that sends no `heldDecision` at all, in which case callers
+// fall back to FALLBACK_DECISION_WORD through defaultWinStandsWord.
+export function writeHeldDecision(res) {
+    return (res && typeof res.heldDecision === 'string' && res.heldDecision) || null;
+}
+
 // writeDefaultWinStands / DEFAULT_WIN_STANDS_* (bc-mrgc): a running board's
-// scoring, or its overtime, over a match ANY default win closed -- a
-// withdrawal (kiken, fusenpai) or a default win awarded because the OTHER
-// side is barred by a DIFFERENT match (fusensho) -- is held rather than
-// applied: the default win already decided this match, and a scoreline
-// cannot land beside it without one discarding the other. The server says
-// why with heldReason "default_win_stands". Unlike needs_winner, nothing
-// here asks for a correction with a winner: the match already has one. The
-// fix is to correct the default win from the match's score editor, which
-// sends the held scoring on as the real result instead of the default win.
-// The copy names no specific button: which control does that (Clear default
-// win, Remove default win, or none at all on a kachinuki match) depends on
-// the match's format and is owned by admin_scoring_shared.jsx, not restated
-// here.
+// scoring, or its overtime, over a match a decision ALREADY closed -- kiken,
+// fusenpai, or a fusensho awarded because the OTHER side is barred by a
+// DIFFERENT match -- is held rather than applied: that decision already
+// settled this match, and a scoreline cannot land beside it without one
+// discarding the other. The server says why with heldReason
+// "default_win_stands" and names which decision with `heldDecision`. Unlike
+// needs_winner, nothing here asks for a correction with a winner: the match
+// already has one. The fix is to correct that decision from the match's
+// score editor, which sends the held scoring on as the real result instead.
+// The copy names no specific button: which control does that (Clear
+// <decision>, Remove <decision>, or none at all on a kachinuki match)
+// depends on the match's format and is owned by admin_scoring_shared.jsx,
+// not restated here.
 export const HELD_REASON_DEFAULT_WIN_STANDS = 'default_win_stands';
 export function writeDefaultWinStands(res) {
     return !!res && res.heldReason === HELD_REASON_DEFAULT_WIN_STANDS
         && writeDisplacedGroups(res).length === 0
         && (writeWasSuperseded(res) || writeHeldGroups(res).length > 0);
 }
-export const DEFAULT_WIN_STANDS_REASON = "this match was closed with a default win, so this change was kept in the match's history and nothing is lost";
-export const DEFAULT_WIN_STANDS_ADVICE = "To change the result, correct the default win from the match's score editor.";
-export const DEFAULT_WIN_STANDS_NOTE = "This match was closed with a default win: to change the result, correct the default win from the match's score editor.";
+export function DEFAULT_WIN_STANDS_REASON(decision) {
+    const word = defaultWinStandsWord(decision);
+    return `this match was closed with a ${word}, so this change was kept in the match's history and nothing is lost`;
+}
+export function DEFAULT_WIN_STANDS_ADVICE(decision) {
+    const word = defaultWinStandsWord(decision);
+    return `To change the result, correct the ${word} from the match's score editor.`;
+}
+export function DEFAULT_WIN_STANDS_NOTE(decision) {
+    const word = defaultWinStandsWord(decision);
+    return `This match was closed with a ${word}: to change the result, correct the ${word} from the match's score editor.`;
+}
 
 export function supersededBanner(res) {
     if (writeNeedsWinner(res)) {
         return { lead: SUPERSEDED_LEAD, reason: NEEDS_WINNER_REASON, advice: NEEDS_WINNER_ADVICE };
     }
     if (writeDefaultWinStands(res)) {
-        return { lead: SUPERSEDED_LEAD, reason: DEFAULT_WIN_STANDS_REASON, advice: DEFAULT_WIN_STANDS_ADVICE };
+        const decision = writeHeldDecision(res);
+        return { lead: SUPERSEDED_LEAD, reason: DEFAULT_WIN_STANDS_REASON(decision), advice: DEFAULT_WIN_STANDS_ADVICE(decision) };
     }
     return { lead: SUPERSEDED_LEAD, reason: SUPERSEDED_REASON, advice: SUPERSEDED_ADVICE };
 }

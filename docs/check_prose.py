@@ -14,6 +14,10 @@ Four rules are enforced, each of which the public docs must never contain:
   public reader.
 * ``mat``: the word "mat"/"mats"/"matside". Kendo has no mats; the fighting area
   is a shiai-jo (court).
+* ``default-win``: the phrase "default win" (or "default-win"). Kendo has no
+  such term (operator ruling 2026-10-04): every finished match has a result,
+  a scoreline or a registered decision that names the winner -- name the
+  recorded decision instead (kiken, fusenpai, fusensho).
 
 ``docs/dev-guide/code_of_conduct.md`` is skipped because it is third-party
 text (the Contributor Covenant) that this repo does not control the wording
@@ -41,6 +45,7 @@ SKIP_FILES = {
 SEE_LINK_RE = re.compile(r"\b[Ss]ee (the |also )?\[")
 INTERNAL_ID_RE = re.compile(r"\b(mp|bc)-[a-z0-9]{3,4}\b")
 MAT_RE = re.compile(r"\bmat(s|side)?\b", re.IGNORECASE)
+DEFAULT_WIN_RE = re.compile(r"\bdefault[ -]win\b", re.IGNORECASE)
 HTML_TAG_RE = re.compile(r"<[^>]+>")
 
 # (rule name, pattern) pairs checked against each prose line, in report order.
@@ -49,6 +54,7 @@ RULES: list[tuple[str, re.Pattern[str]]] = [
     ("see-link", SEE_LINK_RE),
     ("internal-id", INTERNAL_ID_RE),
     ("mat", MAT_RE),
+    ("default-win", DEFAULT_WIN_RE),
 ]
 
 # Inline code spans (single-backtick delimited) and complete HTML comments,

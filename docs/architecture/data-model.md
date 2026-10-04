@@ -537,16 +537,16 @@ not applied (the operator sees an explicit notice naming that it was kept in the
 and one applied in part says which groups were held. A write that does not name its groups
 counts as changing every group it carries.
 
-Further rules sit on top. A withdrawal or default win is one change with the scoreline it
+Further rules sit on top. A kiken, fusenpai, or fusensho is one change with the scoreline it
 writes: it is held whole when any point or bout was entered after it was declared, because
-points scored later mean the withdrawal no longer describes the match. The other way round, a
-point entered on a board still scoring the match after a withdrawal was recorded means the
-withdrawal was a mistake: it is cleared (and kept in the history), the competitor it barred
+points scored later mean the decision no longer describes the match. The other way round, a
+point entered on a board still scoring the match after one was recorded means it was a
+mistake: it is cleared (and kept in the history), the competitor it barred
 can fight again, and the winner is worked out from the points. That clearing rule is for a withdrawal of the
-match itself. A default win that has already closed a match, whether a withdrawal or a win
-awarded because the other side is barred by another match, otherwise stands: a later change
-to its score, or its overtime, says nothing about that default win, so it is held, in the
-history with the reason. A board that is still scoring a
+match itself. A kiken, fusenpai, or fusensho that has already closed a match, whether a
+withdrawal or a win awarded because the other side is barred by another match, otherwise
+stands: a later change to its score, or its overtime, says nothing about that decision, so
+it is held, in the history with the reason. A board that is still scoring a
 match that has meanwhile been finished never reopens it: its changes made after the finish
 are applied to the finished result, which stays finished, and the winner is worked out again
 from the merged points or bouts; its changes made before the finish are held. A pool or

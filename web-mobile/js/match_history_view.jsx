@@ -200,11 +200,14 @@ export function MatchHistoryDisclosure({ match, password, hidden = false }) {
                     )}
                     {!error && entries && entries.length > 0 && (
                         <ol className="match-history__list">
-                            {entries.map((e) => {
+                            {entries.map((e, i) => {
                                 const v = historyEntryView(e);
-                                // An entry has no id: when the server took it, when the
-                                // change was made, and what it was, tell them apart.
-                                const key = `${e.receivedAt}:${e.stamp}:${e.door}:${e.session || ''}:${(e.changed || []).join(',')}`;
+                                // An entry has no id. The history is append-only and read
+                                // whole, oldest first, so its position is stable; the
+                                // rest only helps React tell a reload's entries apart.
+                                // Two entries can match in everything else (an exact
+                                // replay taken in the same millisecond).
+                                const key = `${i}:${e.receivedAt}:${e.stamp}:${e.door}`;
                                 return (
                                     <li key={key} className="match-history__entry" data-testid="match-history-entry">
                                         <span className="match-history__time">{v.time}</span>

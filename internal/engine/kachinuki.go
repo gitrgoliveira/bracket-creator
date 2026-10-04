@@ -2203,7 +2203,7 @@ func applyKachinukiMerge(comp *state.Competition, prior, result *state.MatchResu
 		matchID = prior.ID
 	}
 	if comp.ClearKachinukiEncounterEncho(matchID, &result.Encho) {
-		log.Printf("engine: %s/%s: dropped a match-level encho from a kachinuki encounter write (overtime is recorded per bout)", comp.ID, result.ID)
+		log.Printf("engine: %s/%s: dropped a match-level encho from a kachinuki encounter write (overtime is recorded per bout)", comp.ID, matchID)
 	}
 	var stored []state.SubMatchResult
 	if prior != nil {

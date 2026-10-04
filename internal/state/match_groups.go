@@ -21,6 +21,7 @@ package state
 import (
 	"encoding/json"
 	"reflect"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -439,22 +440,13 @@ func (r *MergeReport) DisplacedGroups() []string {
 	var out []string
 	for _, d := range r.Displaced {
 		for g := range d.Values {
-			if !containsString(out, g) {
+			if !slices.Contains(out, g) {
 				out = append(out, g)
 			}
 		}
 	}
 	sort.Strings(out)
 	return out
-}
-
-func containsString(list []string, s string) bool {
-	for _, v := range list {
-		if v == s {
-			return true
-		}
-	}
-	return false
 }
 
 // HeldReasonNeedsWinner is the wire code (heldReason) of groups held because

@@ -737,7 +737,7 @@ func deriveWinnerAfterMerge(m *state.MatchResult, mc mergeCtx) bool {
 			side = sideNamed(m, probe.Winner)
 		}
 		kachinukiDecided = side != domain.MatchSideNone
-	case hasNumberedBout(m.SubResults):
+	case hasTeamBout(m.SubResults):
 		if line := m.TeamResult(); line != nil {
 			// SideA is Aka, SideB is Shiro (TeamResultLine).
 			switch {
@@ -809,13 +809,16 @@ func sideNamed(m *state.MatchResult, winner string) domain.MatchSide {
 	return domain.MatchSideNone
 }
 
-func hasNumberedBout(subs []state.SubMatchResult) bool {
+// hasTeamBout: the bout rows make this a team match whose winner the bouts
+// decide: a numbered bout, or the representative bout alone (a team match's
+// match-level ippons are empty, so reading them would call it tied).
+func hasTeamBout(subs []state.SubMatchResult) bool {
 	for i := range subs {
 		if subs[i].Position >= 1 {
 			return true
 		}
 	}
-	return false
+	return state.DaihyosenSubIndex(subs) >= 0
 }
 
 // WholeMatchChangedGroups is what a server-built write that replaces the

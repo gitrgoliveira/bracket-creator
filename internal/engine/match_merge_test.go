@@ -661,3 +661,22 @@ func TestMerge_RollbackRestoresTheStamps(t *testing.T) {
 		assert.Equal(t, snapshot.ModifiedAt, m.ModifiedAt)
 	})
 }
+
+// A team match whose only bout row is the representative bout is still a
+// team match: its winner comes from that bout, never from the match-level
+// ippons (empty on a team match), which would read it tied and, on a
+// knockout, hold the change that decided it (review thread on PR #453).
+func TestDeriveWinnerAfterMerge_RepresentativeBoutAloneDecidesATeamMatch(t *testing.T) {
+	comp := &state.Competition{ID: "teams", Kind: "team", TeamSize: 3}
+	m := &state.MatchResult{
+		ID: "m-r1-0", SideA: "Kyoto", SideAID: "t-kyoto", SideB: "Osaka", SideBID: "t-osaka",
+		Status: state.MatchStatusCompleted,
+		SubResults: []state.SubMatchResult{
+			{Position: state.DaihyosenSubPosition, SideA: "Kyoto", SideB: "Osaka", Winner: "Osaka", IpponsB: []string{"M"}, Decision: "daihyosen"},
+		},
+	}
+	require.True(t, deriveWinnerAfterMerge(m, mergeCtx{comp: comp, knockout: true}))
+	assert.Equal(t, "Osaka", m.Winner)
+	assert.Equal(t, "t-osaka", m.WinnerID)
+	assert.Equal(t, "B", m.WinnerSide)
+}

@@ -27,6 +27,7 @@ const (
 	mmT2 = mmT0 + 120_000
 	mmT3 = mmT0 + 180_000
 	mmT4 = mmT0 + 240_000
+	mmT5 = mmT0 + 300_000
 )
 
 // mmHome is one match under test, on one of the two store branches.
@@ -310,7 +311,11 @@ func TestMerge_LateKikenOlderThanAPointIsHeld(t *testing.T) {
 		// must not land on their own.
 		t.Run("a held verdict holds its circles", func(t *testing.T) {
 			h := mmIndividual(t, knockout)
+			// A genuine change to the result group (an echo of the stored
+			// status would keep the match's own stamp, bc-mrgc Finding 3,
+			// and never outrank the kiken below).
 			status := mmRunning(h, mmT2, state.GroupResult)
+			status.CorrectionReason = "board recount"
 			require.NoError(t, h.write(status))
 
 			_, _, err := h.eng.RecordDecision(h.compID, h.matchID, "kiken-voluntary", "aka", "knee", nil, false, mmT1)
@@ -387,7 +392,7 @@ func TestMerge_ScoringAfterADefaultWinForABarElsewhereIsHeld(t *testing.T) {
 		err = h.write(point)
 		require.ErrorIs(t, err, ErrMatchSuperseded, "the point is its one change, and it is held")
 		assert.Equal(t, []string{state.GroupPoints}, HeldGroupsOf(err))
-		assert.Empty(t, HeldReasonOf(err), "no winner is asked for")
+		assert.Equal(t, state.HeldReasonDefaultWinStands, HeldReasonOf(err), "the default win stands, so no winner is asked for")
 
 		m := h.load(t)
 		assert.Equal(t, state.MatchStatusCompleted, m.Status)
@@ -425,7 +430,7 @@ func TestMerge_ScoringAfterATeamDefaultWinForABarElsewhereIsHeld(t *testing.T) {
 	held := HeldGroupsOf(err)
 	assert.Subset(t, held, []string{state.BoutGroup(2), state.BoutGroup(3)}, "every bout the board changed is held")
 	assert.NotContains(t, held, state.BoutGroup(1), "an echo of the stored bout is not a held change")
-	assert.Empty(t, HeldReasonOf(err), "no winner is asked for")
+	assert.Equal(t, state.HeldReasonDefaultWinStands, HeldReasonOf(err), "the default win stands, so no winner is asked for")
 
 	m := wrPoolMatch(t, store, compID)
 	assert.Equal(t, state.MatchStatusCompleted, m.Status)
@@ -455,7 +460,7 @@ func TestMerge_SameDecisionSentAgainLeavesAReinstatement(t *testing.T) {
 		assert.True(t, wrEligible(t, h.store, h.compID, wrTeamAID), "the reinstatement stands")
 		m := h.load(t)
 		assert.Equal(t, "kiken-injury", m.Decision)
-		assert.Equal(t, mmT2, m.ModifiedAt, "the echo still applied and took its stamp")
+		assert.Equal(t, mmT1, m.ModifiedAt, "the echo moved nothing, so it keeps the stamp of the decision it repeated")
 	})
 }
 
@@ -566,6 +571,106 @@ func TestMerge_RunningPointAfterTheFinish(t *testing.T) {
 	})
 }
 
+// A whole-match echo (bulk-score, or an older client sending no `changed`,
+// re-sending a finished match's exact scoreline) moves nothing, so it must
+// not fence out a real, older change (bc-mrgc Finding 3): the echo keeps
+// every group's T1 stamp instead of dragging them to its own T5, so a point
+// genuinely made at T4 -- after the finish, before the echo arrived -- still
+// applies and the winner is worked out again, exactly as it would with no
+// echo in between.
+func TestMerge_WholeMatchEchoDoesNotFenceOutAnOlderChange(t *testing.T) {
+	bothBranches(t, func(t *testing.T, knockout bool) {
+		h := mmIndividual(t, knockout)
+		finish := mmRunning(h, mmT1)
+		finish.Changed = nil
+		finish.Status = state.MatchStatusCompleted
+		finish.IpponsA, finish.IpponsB = []string{"M"}, []string{}
+		finish.Winner, finish.WinnerID = wrTeamA, wrTeamAID
+		require.NoError(t, h.write(finish))
+
+		// An echo of the exact stored finish, replayed late (a bulk-score
+		// re-send, or an older client with no `changed`): nothing about it
+		// differs, including the winner id, so under the fix it moves no
+		// stamp.
+		echo := mmRunning(h, mmT5)
+		echo.Changed = nil
+		echo.Status = state.MatchStatusCompleted
+		echo.IpponsA, echo.IpponsB = []string{"M"}, []string{}
+		echo.Winner, echo.WinnerID = wrTeamA, wrTeamAID
+		require.NoError(t, h.write(echo), "an echo of the stored finish; nothing about it changed")
+		afterEcho := h.load(t)
+		assert.Equal(t, mmT1, afterEcho.GroupStamp(state.GroupResult), "the echo did not move the result's stamp")
+		assert.Equal(t, mmT1, afterEcho.GroupStamp(state.GroupPoints), "nor the points'")
+
+		late := mmRunning(h, mmT4)
+		late.Changed = nil
+		late.IpponsA, late.IpponsB = []string{"M"}, []string{"K", "D"}
+		require.NoError(t, h.write(late), "T4 is after the finish and the echo moved nothing, so it applies")
+
+		m := h.load(t)
+		assert.Equal(t, state.MatchStatusCompleted, m.Status, "stays finished")
+		assert.Equal(t, wrTeamB, m.Winner, "the winner is worked out again from the later points")
+		assert.Equal(t, wrTeamBID, m.WinnerID)
+		if knockout {
+			b, err := h.store.LoadBracket(h.compID)
+			require.NoError(t, err)
+			assert.Equal(t, wrTeamB, b.Rounds[1][0].SideA, "the new winner advances")
+		}
+
+		entries := h.history(t)
+		last := entries[len(entries)-1]
+		assert.NotEqual(t, state.HistoryOutcomeHeld, last.Outcomes[state.GroupPoints], "the later point applied; it was not held")
+	})
+}
+
+// Finish atomicity (bc-mrgc Finding 4): a write that completes the match
+// carries a scoreline its verdict stood on. When that verdict is held by its
+// stamp -- a correction made on another device, after the stale write --
+// everything else the stale write changes is held with it, never applied
+// alone beside a verdict it never declared.
+func TestMerge_FinishIsAtomicWithTheScorelineItStoodOn(t *testing.T) {
+	bothBranches(t, func(t *testing.T, knockout bool) {
+		h := mmIndividual(t, knockout)
+		finish := mmRunning(h, mmT1)
+		finish.Changed = nil
+		finish.Status = state.MatchStatusCompleted
+		finish.IpponsA, finish.IpponsB = []string{"M"}, []string{}
+		finish.Winner, finish.WinnerID = wrTeamA, wrTeamAID
+		require.NoError(t, h.write(finish))
+
+		// A verdict-only correction (an operator's hantei call): Tora
+		// actually won. Needs no CorrectionReason here -- that gate is the
+		// handler's (applyCorrectionReasonUnderTx), not the engine's.
+		correction := mmRunning(h, mmT3, state.GroupResult)
+		correction.Status = state.MatchStatusCompleted
+		correction.Winner, correction.WinnerID = wrTeamB, wrTeamBID
+		require.NoError(t, h.write(correction))
+
+		// Device B's queued Finish from T2: stamped before the correction,
+		// carrying a different scoreline than the one the correction judged.
+		late := mmRunning(h, mmT2)
+		late.Changed = nil
+		late.Status = state.MatchStatusCompleted
+		late.IpponsA, late.IpponsB = []string{"M"}, []string{"K"}
+		late.Winner, late.WinnerID = wrTeamA, wrTeamAID
+		err := h.write(late)
+		require.ErrorIs(t, err, ErrMatchSuperseded, "the whole write is held with its outranked verdict")
+		held := HeldGroupsOf(err)
+		assert.Subset(t, held, []string{state.GroupResult, state.GroupPoints}, "the scoreline is held with the verdict it stood on")
+		assert.Empty(t, HeldReasonOf(err), "the match already has a winner; none is needed")
+
+		m := h.load(t)
+		assert.Equal(t, wrTeamB, m.Winner, "the correction's verdict stands")
+		assert.Equal(t, []string{"M"}, m.IpponsA, "B's queued scoreline never lands beside it")
+		assert.Empty(t, m.IpponsB)
+
+		last := h.history(t)[len(h.history(t))-1]
+		assert.Equal(t, HoldReasonFinishAtomic, last.Reason)
+		assert.Equal(t, state.HistoryOutcomeHeld, last.Outcomes[state.GroupPoints])
+		assert.Equal(t, state.HistoryOutcomeHeld, last.Outcomes[state.GroupResult])
+	})
+}
+
 // A removed representative bout keeps its stamp as a tombstone: an older
 // write still carrying the row does not bring it back, a newer one does.
 func TestMerge_RemovedBoutIsATombstone(t *testing.T) {
@@ -618,7 +723,12 @@ func TestMerge_LegacyMatchesBehaveAsBefore(t *testing.T) {
 			m := h.load(t)
 			assert.Equal(t, []string{"M"}, m.IpponsA)
 			assert.Equal(t, mmT1, m.ModifiedAt)
-			assert.Equal(t, mmT1, m.GroupStamp(state.GroupResult), "every group it carried is stamped")
+			assert.Equal(t, mmT1, m.GroupStamp(state.GroupPoints), "the group that actually changed is stamped")
+			// Status stayed "running" on both sides: an echo of a group it
+			// carried, so it keeps the stamp materialized from the match's
+			// own start (bc-mrgc Finding 3: an echo never takes the write's
+			// stamp, whole-match legacy write included).
+			assert.Equal(t, mmT0, m.GroupStamp(state.GroupResult), "a group the write only echoed keeps its own stamp")
 		})
 		t.Run("a running echo never reopens a finished match", func(t *testing.T) {
 			h := mmIndividual(t, knockout)

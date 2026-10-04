@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/gitrgoliveira/bracket-creator/internal/helper"
 	"github.com/gitrgoliveira/bracket-creator/internal/state"
@@ -341,4 +342,57 @@ func TestDecisionHandler_DownstreamKnockoutPlayed_ForceReturns200(t *testing.T) 
 	assert.Equal(t, state.MatchStatusScheduled, b.Rounds[1][0].Status,
 		"reopened in place and waiting to be fought again: running would hold the court, which deadlocked two reopened siblings")
 	assert.Empty(t, b.Rounds[1][0].Winner, "the reopened match's stale verdict was cleared")
+}
+
+// TestDecisionHandler_ExactReplay_CarriesCourt is a Finding 5 (bc-cse review
+// of PR #453) regression test: a knockout match's decision answer must name
+// its court whether it is a fresh write or an exact replay of one already
+// recorded. recordDecisionTx's exact-replay branch used to return the
+// bracket match projected through bracketMatchAsResult, which deliberately
+// omits Court/ScheduledAt (see that function's header comment), so a
+// replayed decision on a knockout match answered with no court at all even
+// though the match plainly has one and the FIRST answer carried it.
+func TestDecisionHandler_ExactReplay_CarriesCourt(t *testing.T) {
+	r, store, _, _, tempDir := setupTestRouter(t)
+	defer os.RemoveAll(tempDir)
+
+	compID := "decision-replay-court"
+	require.NoError(t, store.SaveCompetition(&state.Competition{
+		ID: compID, Name: "replay-court", Status: state.CompStatusKnockout,
+	}))
+	require.NoError(t, store.SaveBracket(compID, &state.Bracket{
+		Rounds: [][]state.BracketMatch{
+			{
+				{ID: "m-r1-0", SideA: "Alice", SideB: "Bob", SideAID: "alice", SideBID: "bob",
+					Court: "B", Status: state.MatchStatusRunning},
+			},
+		},
+	}))
+
+	stamp := time.Now().UnixMilli()
+	body, _ := json.Marshal(DecisionRequest{Decision: "kiken-voluntary", DecisionBy: "aka", ModifiedAt: stamp})
+
+	post := func() *httptest.ResponseRecorder {
+		req := httptest.NewRequest(http.MethodPost,
+			"/api/competitions/"+compID+"/matches/m-r1-0/decision",
+			bytes.NewBuffer(body))
+		req.Header.Set("Content-Type", "application/json")
+		w := httptest.NewRecorder()
+		r.ServeHTTP(w, req)
+		return w
+	}
+
+	first := post()
+	require.Equal(t, http.StatusOK, first.Code, first.Body.String())
+	var firstResp map[string]any
+	require.NoError(t, json.Unmarshal(first.Body.Bytes(), &firstResp))
+	require.Equal(t, "B", firstResp["court"], "the fresh decision names its court")
+
+	// The exact same decision, same side, same stamp: an exact replay (a
+	// queued write whose first send landed but whose answer was lost).
+	second := post()
+	require.Equal(t, http.StatusOK, second.Code, second.Body.String())
+	var secondResp map[string]any
+	require.NoError(t, json.Unmarshal(second.Body.Bytes(), &secondResp))
+	assert.Equal(t, "B", secondResp["court"], "the replayed decision must name its court too")
 }

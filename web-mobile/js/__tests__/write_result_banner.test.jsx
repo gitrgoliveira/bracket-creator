@@ -27,6 +27,9 @@ import {
     writeNeedsWinner,
     NEEDS_WINNER_REASON,
     NEEDS_WINNER_ADVICE,
+    writeDefaultWinStands,
+    DEFAULT_WIN_STANDS_REASON,
+    DEFAULT_WIN_STANDS_ADVICE,
     supersededAlertText,
     writeDisplacedGroups,
     displacedAlertText,
@@ -223,6 +226,56 @@ describe('a change held because the finished match needs a winner', () => {
     it('no em-dash and no "mat" in any of the copy', () => {
         const all = [NEEDS_WINNER_REASON, NEEDS_WINNER_ADVICE, heldGroupsNote(['points'], true), supersededAlertText(2, false, true)].join(' ');
         expect(all).not.toMatch(/\u2014/);
+        expect(all).not.toMatch(/\bmats?\b/i);
+    });
+});
+
+// bc-mrgc, the fusensho twin of the block above: a running board's scoring
+// over a match a match-level default win closed (the other side is barred by
+// a DIFFERENT match) is not applied, is kept in the match's history, and the
+// server says so with heldReason "default_win_stands". The match already has
+// the winner it needs, so the advice is Remove default win, never "correct
+// the result with a winner" and never the plain superseded "check the newer
+// change".
+describe('a change held because a default win for a bar elsewhere stands', () => {
+    const superseded = { applied: false, reason: 'superseded', heldGroups: ['points'], heldReason: 'default_win_stands' };
+    const partly = { id: 'm1', status: 'completed', heldGroups: ['points'], heldReason: 'default_win_stands' };
+
+    it('is read from heldReason, on a superseded answer and on one applied in part', () => {
+        expect(writeDefaultWinStands(superseded)).toBe(true);
+        expect(writeDefaultWinStands(partly)).toBe(true);
+        expect(writeDefaultWinStands({ applied: false, reason: 'superseded', heldGroups: ['points'] })).toBe(false);
+        expect(writeDefaultWinStands({ queued: true })).toBe(false);
+        expect(writeDefaultWinStands(null)).toBe(false);
+        // The two reasons are mutually exclusive.
+        expect(writeNeedsWinner(superseded)).toBe(false);
+    });
+
+    it('the superseded banner points at Remove default win, never "correct the result"', () => {
+        const banner = notLandedBanner(superseded);
+        expect(banner).toEqual({ lead: SUPERSEDED_LEAD, reason: DEFAULT_WIN_STANDS_REASON, advice: DEFAULT_WIN_STANDS_ADVICE });
+        const text = notSavedText(banner);
+        expect(text).toMatch(/^Not applied: /);
+        expect(text).toMatch(/default win/);
+        expect(text).toMatch(/Remove default win/);
+        expect(text).not.toMatch(/newer change/);
+        expect(text).not.toMatch(/correct the result/);
+    });
+
+    it('the partial-apply note says it in place of "a newer change"', () => {
+        expect(heldGroupsNote(['points'], false, true)).toBe(
+            "Kept in the match's history, not applied: points. This match was closed with a default win because the other competitor cannot fight: to change the result, use Remove default win in its score editor.");
+    });
+
+    it('the queue alert says it too', () => {
+        expect(supersededAlertText(1, true, false, true)).toMatch(/Remove default win/);
+        expect(supersededAlertText(1, true, false, true)).not.toMatch(/newer change/);
+        expect(supersededAlertText(2, false, false, true)).toMatch(/Remove default win/);
+    });
+
+    it('no em-dash and no "mat" in any of the copy', () => {
+        const all = [DEFAULT_WIN_STANDS_REASON, DEFAULT_WIN_STANDS_ADVICE, heldGroupsNote(['points'], false, true), supersededAlertText(2, false, false, true)].join(' ');
+        expect(all).not.toMatch(/—/);
         expect(all).not.toMatch(/\bmats?\b/i);
     });
 });

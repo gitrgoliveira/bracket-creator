@@ -212,9 +212,9 @@ func serverNowMs() int64 {
 // history: applied, or held with the winner it named. The override writes
 // outside a transaction (OverrideBracketWinner), so this is its own append,
 // after the bracket save.
-func (e *Engine) recordOverrideHistory(compID, matchID, winnerName string, stamp int64, applied bool) {
+func (e *Engine) recordOverrideHistory(h state.StoreTx, compID, matchID, winnerName string, stamp int64, applied bool) {
 	if applied {
-		e.recordDirectHistory(e.store, compID, matchID, doorOverride, stamp, state.GroupResult)
+		e.recordDirectHistory(h, compID, matchID, doorOverride, stamp, state.GroupResult)
 		return
 	}
 	held, err := json.Marshal(map[string]string{"winner": winnerName})
@@ -230,7 +230,7 @@ func (e *Engine) recordOverrideHistory(compID, matchID, winnerName string, stamp
 		Outcomes:   map[string]string{state.GroupResult: state.HistoryOutcomeHeld},
 		Held:       map[string]json.RawMessage{state.GroupResult: held},
 	}
-	if err := e.store.AppendMatchHistory(compID, entry); err != nil {
+	if err := h.AppendMatchHistory(compID, entry); err != nil {
 		log.Printf("engine: match %s/%s: history entry not recorded: %v", compID, matchID, err)
 	}
 }

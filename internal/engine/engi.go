@@ -105,8 +105,11 @@ func engiFinishHeld(prior, result *state.MatchResult, comp *state.Competition, k
 	// writes: an unstamped finish takes the server's time there (writeStamp),
 	// so it leaves a fence like every other finish.
 	result.ModifiedAt = rep.Stamp
-	if len(rep.Held)+len(rep.HeldEcho) == 0 {
-		// Applied. The report stays on the write for what it moved to the
+	if len(rep.Held) == 0 {
+		// Applied. A HeldEcho here is no loss (bc-mrgc phase 3: the stored
+		// flags already held this value, just at an older stamp than the
+		// write), so it does not make the finish atomic -- only a REAL held
+		// group does. The report stays on the write for what it moved to the
 		// history (S2 with R4: a newer recount that left no valid count),
 		// which the caller records once the recorder has written the finish.
 		result.Merge = rep

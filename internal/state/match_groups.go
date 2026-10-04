@@ -398,6 +398,16 @@ type MergeReport struct {
 	// heldReason "needs_winner", so the operator is told to correct the
 	// result with a winner.
 	NeedsWinner bool
+	// DefaultWinStands reports that the held groups were held because a
+	// match-level default win (fusensho awarded for a bar recorded on a
+	// DIFFERENT match) already closed the match: the scoring held says
+	// nothing about that bar, and a scoreline cannot land beside the default
+	// win's circles without one discarding the other, so the default win
+	// stands and the scoring is kept in the history. Unlike NeedsWinner, the
+	// match already has the winner it needs; the answer carries it as
+	// heldReason "default_win_stands", so the operator is told to use Remove
+	// default win rather than to correct the result with a winner.
+	DefaultWinStands bool
 	// Displaced are STORED changes this write moved to the history (S2 with
 	// R4): a finish that arrives after newer scoring which would leave the
 	// match without the winner it needs is applied on its own scoreline, as
@@ -454,13 +464,27 @@ func (r *MergeReport) DisplacedGroups() []string {
 // (MergeReport.NeedsWinner).
 const HeldReasonNeedsWinner = "needs_winner"
 
+// HeldReasonDefaultWinStands is the wire code (heldReason) of groups held
+// because a match-level default win (awarded for a bar recorded on ANOTHER
+// match) already closed the match (MergeReport.DefaultWinStands). Unlike
+// HeldReasonNeedsWinner, the match already has a winner, so the operator is
+// not told to correct it with one; the remedy is the editor's own Remove
+// default win.
+const HeldReasonDefaultWinStands = "default_win_stands"
+
 // HeldReason is the code a response carries beside heldGroups, "" when the
 // held groups were held by their stamps alone.
 func (r *MergeReport) HeldReason() string {
-	if r == nil || !r.NeedsWinner || len(r.Held)+len(r.Displaced) == 0 {
+	if r == nil || len(r.Held)+len(r.Displaced) == 0 {
 		return ""
 	}
-	return HeldReasonNeedsWinner
+	if r.NeedsWinner {
+		return HeldReasonNeedsWinner
+	}
+	if r.DefaultWinStands {
+		return HeldReasonDefaultWinStands
+	}
+	return ""
 }
 
 // HeldGroups is the list a response carries, nil when nothing was held.

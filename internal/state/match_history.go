@@ -148,6 +148,14 @@ func parseMatchHistory(compID, matchID string, raw []byte) []MatchHistoryEntry {
 		}
 		out = append(out, e)
 	}
+	// A scanner error (most likely a line past the 8 MiB buffer cap,
+	// bufio.ErrTooLong) stops the scan outright: unlike an unparsable line,
+	// which is skipped so the lines either side of it are still read, there
+	// is no way to resume past a scanner error, so every line after it is
+	// silently missing from out unless this is logged.
+	if err := sc.Err(); err != nil {
+		log.Printf("state: match history %s/%s: a line could not be scanned and the entries after it were not read: %v", compID, matchID, err)
+	}
 	return out
 }
 

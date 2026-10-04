@@ -40,7 +40,7 @@ import { bridge as _bridge } from './court_bridge.jsx';
 // The offset lives in a leaf so a score editor can read the same clock (server_clock.jsx).
 import { serverNowMs, serverClockOffsetMs, setServerClockOffsetMs } from './server_clock.jsx';
 import {
-    writeDidNotLand, writeWasSuperseded, writeWasRefusedForClock, writeNeedsWinner, writeDisplacedGroups, supersededBanner,
+    writeDidNotLand, writeWasSuperseded, writeWasRefusedForClock, writeNeedsWinner, writeDefaultWinStands, writeDisplacedGroups, supersededBanner,
     SUPERSEDED_REASON, SUPERSEDED_ADVICE,
     CLOCK_SKEW_REASON_TEXT, CLOCK_SKEW_ADVICE, CLOCK_SKEW_UNHEALED_ADVICE,
     downstreamKnockoutPlayedQueueDrop, downstreamKnockoutRunningMessage, downstreamKnockoutRunningReopenMessage,
@@ -1129,14 +1129,18 @@ function _notifyScoreSupersededEditor(compID, matchID, body) {
 // Publishing count:1 per drop made queueAlertMessage's plural branch dead code
 // and left a court that reconnected with several dropped results looking at a
 // single toast reading "A result was not saved".
-function _notifyScoreSupersededAlert(count, compID, matchID, needsWinner = false) {
+function _notifyScoreSupersededAlert(count, compID, matchID, needsWinner = false, defaultWinStands = false) {
     if (count <= 0) return;
-    _notifyQueueAlert({ kind: 'superseded', count, terminalCount: count, compID, matchID, ...(needsWinner ? { needsWinner: true } : {}) });
+    _notifyQueueAlert({
+        kind: 'superseded', count, terminalCount: count, compID, matchID,
+        ...(needsWinner ? { needsWinner: true } : {}),
+        ...(defaultWinStands ? { defaultWinStands: true } : {}),
+    });
 }
 
 function _notifyScoreSuperseded(compID, matchID, body) {
     _notifyScoreSupersededEditor(compID, matchID, body);
-    _notifyScoreSupersededAlert(1, compID, matchID, writeNeedsWinner(body));
+    _notifyScoreSupersededAlert(1, compID, matchID, writeNeedsWinner(body), writeDefaultWinStands(body));
 }
 
 // Bracket-resync channel. When a queued override-winner assertion the server
@@ -1412,6 +1416,10 @@ async function _flushQueue() {
     // Whether any of them was held because it would leave a finished match
     // without a winner (writeNeedsWinner): the alert then says to correct it.
     let needsWinnerThisPass = false;
+    // Whether any of them was held because a default win recorded for a bar
+    // on another match still stands (writeDefaultWinStands): the alert then
+    // points at Remove default win instead.
+    let defaultWinStandsThisPass = false;
     // Held finishes that landed and moved a LATER change of their match to
     // its history (writeDisplacedGroups): told once per pass, like 'sent'.
     let displacedThisPass = 0;
@@ -1607,6 +1615,7 @@ async function _flushQueue() {
                                         _notifyScoreSupersededEditor(compID, matchID, body);
                                         supersededThisPass++;
                                         if (writeNeedsWinner(body)) needsWinnerThisPass = true;
+                                        if (writeDefaultWinStands(body)) defaultWinStandsThisPass = true;
                                         lastSupersededMatch = { compID, matchID };
                                     }
                                 }
@@ -1652,17 +1661,20 @@ async function _flushQueue() {
                             }
                         }
                         // A change held because it would leave a finished match
-                        // without a winner (writeNeedsWinner) is the operator's
+                        // without a winner (writeNeedsWinner), or because a
+                        // default win recorded for a bar on another match still
+                        // stands (writeDefaultWinStands), is the operator's
                         // correction, never routine noise, so it is said
                         // whatever the write: a queued Finish applied in part,
                         // or a running write. A superseded Finish was counted
                         // above. Never a displaced answer: that finish was
                         // recorded (writeDisplacedGroups, the 'displaced' alert).
-                        if (kind === 'score' && writeNeedsWinner(body) && !(terminal && writeWasSuperseded(body))
+                        if (kind === 'score' && (writeNeedsWinner(body) || writeDefaultWinStands(body)) && !(terminal && writeWasSuperseded(body))
                             && _writeQueue.get(key) === descriptor) {
                             _notifyScoreSupersededEditor(compID, matchID, body);
                             supersededThisPass++;
-                            needsWinnerThisPass = true;
+                            if (writeNeedsWinner(body)) needsWinnerThisPass = true;
+                            if (writeDefaultWinStands(body)) defaultWinStandsThisPass = true;
                             lastSupersededMatch = { compID, matchID };
                         }
                         if (_dequeue(key, descriptor)) {
@@ -1865,6 +1877,7 @@ async function _flushQueue() {
             lastSupersededMatch ? lastSupersededMatch.compID : undefined,
             lastSupersededMatch ? lastSupersededMatch.matchID : undefined,
             needsWinnerThisPass,
+            defaultWinStandsThisPass,
         );
     }
 }

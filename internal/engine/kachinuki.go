@@ -677,55 +677,76 @@ func (e *Engine) advanceKachinukiOnce(compID, matchID string) (bool, *KachinukiA
 	e.noteMatchRead(compID)
 	snapshot := parent
 
+	// The appended bout and its history entry are one transaction (bc-mrgc):
+	// without it, a process dying right after the appended pairing lands
+	// leaves a bout no history line explains, and the operator has no record
+	// of how it got there.
 	if isBracket {
 		// bm.MatchByID owns the rounds → bronze-sibling walk, so the append
 		// site no longer re-implements it (and can't forget the bronze);
 		// UpdateBracket rather than UpdateBracketMatchByID so the re-check
 		// can abort the write.
-		err := e.store.UpdateBracket(compID, func(b *state.Bracket) error {
-			bm := b.MatchByID(matchID)
-			if bm == nil {
-				return notFoundErrorf("bracket match %s not found", matchID)
+		err := e.store.WithTransaction(compID, func(tx state.StoreTx) error {
+			if uerr := tx.UpdateBracket(compID, func(b *state.Bracket) error {
+				bm := b.MatchByID(matchID)
+				if bm == nil {
+					return notFoundErrorf("bracket match %s not found", matchID)
+				}
+				if !kachinukiAdvanceStillHolds(snapshot, bm.Status, bm.ModifiedAt, bm.SubResults) {
+					return errKachinukiAdvanceStale
+				}
+				appendNextKachinukiBout(bm, *out.Next)
+				appendedGroup = state.BoutGroup(bm.SubResults[len(bm.SubResults)-1].Position)
+				bm.StampGroups(stamp, appendedGroup, state.GroupResult)
+				post = &KachinukiAdvance{
+					BoutLog:     append([]state.SubMatchResult(nil), bm.SubResults...),
+					ModifiedAt:  bm.ModifiedAt,
+					GroupStamps: state.CloneGroupStamps(bm.GroupStamps),
+				}
+				return nil
+			}); uerr != nil {
+				return uerr
 			}
-			if !kachinukiAdvanceStillHolds(snapshot, bm.Status, bm.ModifiedAt, bm.SubResults) {
-				return errKachinukiAdvanceStale
-			}
-			appendNextKachinukiBout(bm, *out.Next)
-			appendedGroup = state.BoutGroup(bm.SubResults[len(bm.SubResults)-1].Position)
-			bm.StampGroups(stamp, appendedGroup, state.GroupResult)
-			post = &KachinukiAdvance{
-				BoutLog:     append([]state.SubMatchResult(nil), bm.SubResults...),
-				ModifiedAt:  bm.ModifiedAt,
-				GroupStamps: state.CloneGroupStamps(bm.GroupStamps),
-			}
+			e.recordDirectHistory(tx, compID, matchID, doorKachinukiAdvance, stamp, appendedGroup, state.GroupResult)
 			return nil
 		})
 		if err != nil {
 			return false, nil, err
 		}
-		e.recordDirectHistory(e.store, compID, matchID, doorKachinukiAdvance, stamp, appendedGroup, state.GroupResult)
 		return true, post, nil
 	}
 
-	found, err := e.store.UpdatePoolMatchByID(compID, matchID, func(parent *state.MatchResult) error {
-		if !kachinukiAdvanceStillHolds(snapshot, parent.Status, parent.ModifiedAt, parent.SubResults) {
-			return errKachinukiAdvanceStale
+	var found bool
+	err = e.store.WithTransaction(compID, func(tx state.StoreTx) error {
+		var uerr error
+		found, uerr = tx.UpdatePoolMatchByID(compID, matchID, func(parent *state.MatchResult) error {
+			if !kachinukiAdvanceStillHolds(snapshot, parent.Status, parent.ModifiedAt, parent.SubResults) {
+				return errKachinukiAdvanceStale
+			}
+			// Append the next bout. Appending means the encounter continues: the
+			// parent match must stay running with no match-level winner/decision.
+			out.Next.Position = len(parent.SubResults) + 1
+			parent.SubResults = append(parent.SubResults, *out.Next)
+			parent.Status = state.MatchStatusRunning
+			parent.Winner = ""
+			parent.WinnerID = "" // bc-brid: the verdict's id half, cleared with the name.
+			parent.Decision = ""
+			appendedGroup = state.BoutGroup(out.Next.Position)
+			parent.StampGroups(stamp, appendedGroup, state.GroupResult)
+			post = &KachinukiAdvance{
+				BoutLog:     append([]state.SubMatchResult(nil), parent.SubResults...),
+				ModifiedAt:  parent.ModifiedAt,
+				GroupStamps: state.CloneGroupStamps(parent.GroupStamps),
+			}
+			return nil
+		})
+		if uerr != nil {
+			return uerr
 		}
-		// Append the next bout. Appending means the encounter continues: the
-		// parent match must stay running with no match-level winner/decision.
-		out.Next.Position = len(parent.SubResults) + 1
-		parent.SubResults = append(parent.SubResults, *out.Next)
-		parent.Status = state.MatchStatusRunning
-		parent.Winner = ""
-		parent.WinnerID = "" // bc-brid: the verdict's id half, cleared with the name.
-		parent.Decision = ""
-		appendedGroup = state.BoutGroup(out.Next.Position)
-		parent.StampGroups(stamp, appendedGroup, state.GroupResult)
-		post = &KachinukiAdvance{
-			BoutLog:     append([]state.SubMatchResult(nil), parent.SubResults...),
-			ModifiedAt:  parent.ModifiedAt,
-			GroupStamps: state.CloneGroupStamps(parent.GroupStamps),
+		if !found {
+			return nil
 		}
+		e.recordDirectHistory(tx, compID, matchID, doorKachinukiAdvance, stamp, appendedGroup, state.GroupResult)
 		return nil
 	})
 	if err != nil {
@@ -734,7 +755,6 @@ func (e *Engine) advanceKachinukiOnce(compID, matchID string) (bool, *KachinukiA
 	if !found {
 		return false, nil, nil
 	}
-	e.recordDirectHistory(e.store, compID, matchID, doorKachinukiAdvance, stamp, appendedGroup, state.GroupResult)
 	return true, post, nil
 }
 

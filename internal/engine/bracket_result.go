@@ -91,3 +91,32 @@ func bracketMatchAsResult(bm *state.BracketMatch) *state.MatchResult {
 		GroupStamps: state.CloneGroupStamps(bm.GroupStamps),
 	}
 }
+
+// bracketMatchCourtAndSchedule returns the Court and ScheduledAt a bracket
+// match (a round match or the bronze/3rd-place match) currently holds,
+// bypassing bracketMatchAsResult's projection above, which deliberately
+// omits them (see its header comment: the mobileapp handlers build their
+// own Court/ScheduledAt-carrying projection for scheduling). Scheduling is
+// never touched by a decision or score write -- applyBracketMatchResult's
+// own comment says so ("does NOT touch bm.Court / bm.ScheduledAt") -- so
+// these are simply the match's current values. recordDecisionTx's
+// exact-replay branch uses this to echo them onto the answer it returns, the
+// same way a fresh write's applyBracketMatchResult pass echoes them onto
+// its result: a replay makes no write, so nothing else performs that echo
+// for it (bc-cse finding 5).
+func bracketMatchCourtAndSchedule(bracket *state.Bracket, matchID string) (court, scheduledAt string, found bool) {
+	if bracket == nil {
+		return "", "", false
+	}
+	for _, round := range bracket.Rounds {
+		for i := range round {
+			if round[i].ID == matchID {
+				return round[i].Court, round[i].ScheduledAt, true
+			}
+		}
+	}
+	if bracket.ThirdPlaceMatch != nil && bracket.ThirdPlaceMatch.ID == matchID {
+		return bracket.ThirdPlaceMatch.Court, bracket.ThirdPlaceMatch.ScheduledAt, true
+	}
+	return "", "", false
+}

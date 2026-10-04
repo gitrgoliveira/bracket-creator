@@ -26,7 +26,8 @@
 
 import { IPPON_PLACEHOLDER } from './result_slot.jsx';
 import {
-    NEEDS_WINNER_NOTE, writeNeedsWinner, writePartlyHeld, writeHeldGroups, writeDisplacedGroups,
+    NEEDS_WINNER_NOTE, DEFAULT_WIN_STANDS_NOTE, writeNeedsWinner, writeDefaultWinStands,
+    writePartlyHeld, writeHeldGroups, writeDisplacedGroups,
 } from './write_result.jsx';
 
 export const GROUP_POINTS = 'points';
@@ -101,10 +102,10 @@ export function groupsLabel(groups) {
 // when they were held because applying them would leave the finished match
 // without a winner (writeNeedsWinner): the note then says to correct the
 // result with a winner instead of naming a newer change.
-export function heldGroupsNote(groups, needsWinner = false) {
+export function heldGroupsNote(groups, needsWinner = false, defaultWinStands = false) {
     const words = groupsLabel(groups);
     if (!words) return null;
-    const why = needsWinner ? NEEDS_WINNER_NOTE : 'A newer change to the same thing was recorded first.';
+    const why = needsWinner ? NEEDS_WINNER_NOTE : defaultWinStands ? DEFAULT_WIN_STANDS_NOTE : 'A newer change to the same thing was recorded first.';
     return `Kept in the match's history, not applied: ${words}. ${why}`;
 }
 
@@ -125,8 +126,8 @@ export function displacedGroupsNote(groups) {
 // changes it moved there. null when the answer kept nothing.
 export function keptInHistoryNote(res) {
     const parts = [];
-    if (writePartlyHeld(res) || writeNeedsWinner(res)) {
-        parts.push(heldGroupsNote(writeHeldGroups(res), writeNeedsWinner(res)));
+    if (writePartlyHeld(res) || writeNeedsWinner(res) || writeDefaultWinStands(res)) {
+        parts.push(heldGroupsNote(writeHeldGroups(res), writeNeedsWinner(res), writeDefaultWinStands(res)));
     }
     parts.push(displacedGroupsNote(writeDisplacedGroups(res)));
     const text = parts.filter(Boolean).join(' ');

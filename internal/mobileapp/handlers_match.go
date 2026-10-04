@@ -745,7 +745,9 @@ func RegisterMatchHandlers(r *gin.RouterGroup, eng *engine.Engine, store Competi
 			HeldGroups []string `json:"heldGroups,omitempty"`
 			// HeldReason is "needs_winner" when they were held because
 			// applying them would leave the match without the winner it
-			// needs (R4), rather than for a newer stored change.
+			// needs (R4), "default_win_stands" when a match-level default
+			// win awarded for a bar on a DIFFERENT match already closed the
+			// match, or "" for a newer stored change.
 			HeldReason string `json:"heldReason,omitempty"`
 		}
 		var errs []scoreError
@@ -922,7 +924,7 @@ func RegisterMatchHandlers(r *gin.RouterGroup, eng *engine.Engine, store Competi
 					bulkErr.HeldGroups = engine.HeldGroupsOf(err)
 					bulkErr.HeldReason = engine.HeldReasonOf(err)
 					if bulkErr.HeldReason != "" {
-						bulkErr.Error = NeedsWinnerMessage
+						bulkErr.Error = messageForHeldReason(bulkErr.HeldReason)
 					}
 				case errors.As(err, &alreadyIneligErr):
 					// bc-rawm/bc-cse: this batch shape has no dedicated 409 to
@@ -2282,10 +2284,13 @@ func matchSnapshotOrErr(s matchStores, compID, matchID, guardLabel string) (matc
 //
 // heldReason is the merge's code for why (engine.HeldReasonOf): "" for a newer
 // stored change, "needs_winner" when applying the write would have left a
-// finished match without the winner it needs (R4). The latter is still not
-// lost and still never wins a retry, so it keeps the same applied:false
-// superseded shape, with heldReason and its own message telling the operator
-// to correct the result with a winner.
+// finished match without the winner it needs (R4), "default_win_stands" when
+// a match-level default win awarded for a bar on a DIFFERENT match already
+// closed the match. Either of the latter two is still not lost and still
+// never wins a retry, so it keeps the same applied:false superseded shape,
+// with heldReason and its own message (messageForHeldReason) telling the
+// operator what to do: correct the result with a winner for needs_winner, or
+// use Remove default win for default_win_stands.
 func respondSuperseded(c *gin.Context, heldGroups []string, heldReason string) {
 	// LOGGED because this is the one successful-looking response whose work
 	// an operator does not see on the match. Since bc-mrgc the held values are
@@ -2304,7 +2309,7 @@ func respondSuperseded(c *gin.Context, heldGroups []string, heldReason string) {
 	}
 	if heldReason != "" {
 		body["heldReason"] = heldReason
-		body["message"] = NeedsWinnerMessage
+		body["message"] = messageForHeldReason(heldReason)
 	}
 	c.JSON(http.StatusOK, body)
 }
@@ -2319,6 +2324,29 @@ const SupersededMessage = "Not applied: a newer change to this match is already 
 // needs (R4, operator ruling 2026-10-04): a knockout match left tied, or an
 // engi match left with no valid flag count.
 const NeedsWinnerMessage = "Not applied: this change would leave the finished match without a winner, and it needs one. Correct the result with a winner. This change was kept in the match's history."
+
+// DefaultWinStandsMessage is the sentence a write is answered with when its
+// scoring was held because a match-level default win, awarded for a bar
+// recorded on a DIFFERENT match, already closed the match (bc-mrgc, the
+// fusensho twin of NeedsWinnerMessage above). Unlike that case the match
+// already has the winner it needs, so this does not ask for a correction
+// with one; the remedy is the editor's own Remove default win, which sends
+// the held scoring on as the real result.
+const DefaultWinStandsMessage = "Not applied: this match was closed with a default win because the other competitor cannot fight, so the scoring was kept in the match's history. To change the result, open the match and use Remove default win."
+
+// messageForHeldReason is the one place a heldReason code is turned into the
+// operator sentence that goes with it: respondSuperseded and the bulk-score
+// path (which cannot share its JSON body) both read it, so the two can never
+// say something different about the same code. NeedsWinnerMessage is the
+// default for a non-empty reason this binary does not otherwise recognise,
+// since every heldReason answer today needs a message and the two known
+// codes are exhaustive otherwise.
+func messageForHeldReason(heldReason string) string {
+	if heldReason == state.HeldReasonDefaultWinStands {
+		return DefaultWinStandsMessage
+	}
+	return NeedsWinnerMessage
+}
 
 // writesOverFinished reports whether a write of this status, over a finished
 // match, is a correction to it rather than a start: a completed correction, or
@@ -2515,10 +2543,13 @@ func applyCorrectionReasonUnderTx(stx state.StoreTx, compID, matchID string, r *
 	if r.Status == state.MatchStatusCompleted && snap.Status == state.MatchStatusCompleted {
 		// A finish made BEFORE the stored result (a queued Finish replayed
 		// after the match was finished on another device) is no correction:
-		// the merge holds its result by its stamp and keeps it in the match's
-		// history. Demanding a reason here refused it before it got there,
-		// and it was lost (bc-mrgc review). An equal stamp is an exact
-		// replay, which applies, so it is still a correction to justify.
+		// the merge holds it WHOLE, by the result's own stamp
+		// (HoldReasonFinishAtomic, bc-mrgc Finding 4) -- its scoreline never
+		// lands beside a verdict it never declared -- and keeps it in the
+		// match's history. Demanding a reason here refused it before it got
+		// there, and it was lost (bc-mrgc review). An equal stamp is an
+		// exact replay, which applies, so it is still a correction to
+		// justify.
 		if r.ModifiedAt > 0 && r.ModifiedAt < snap.ResultStamp {
 			return correctionCheck{StoredStatus: snap.Status, StoredDecision: snap.Decision}, nil
 		}

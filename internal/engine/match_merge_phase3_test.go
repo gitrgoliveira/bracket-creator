@@ -81,6 +81,40 @@ func TestMerge_EngiStaleFinishIsHeldInHistory(t *testing.T) {
 	})
 }
 
+// A finish whose only "held" flags are an echo of the stored count (the same
+// total a board already autosaved, under an older stamp) is no loss, so it
+// is NOT held with the result (bc-mrgc, HeldEcho is not a hold): the finish
+// applies, the winner is set from the flags, and nothing is kept in history.
+// Before the fix, engiFinishHeld treated len(Held)+len(HeldEcho) > 0 as a
+// reason to hold the whole finish, which answered this write superseded and
+// left the match running with no winner, even though re-entering it could
+// never have overwritten anything newer.
+func TestMerge_EngiFinishEchoingTheStoredFlagsApplies(t *testing.T) {
+	bothBranches(t, func(t *testing.T, knockout bool) {
+		h := mmEngi(t, knockout)
+		// Board A autosaves the count while the match is still running.
+		count := mmRunning(h, mmT2, state.GroupFlags)
+		count.FlagsA, count.FlagsB = 3, 2
+		require.NoError(t, h.write(count))
+
+		// Board B, which never saw that autosave, taps Save result at an
+		// earlier stamp with the same 3-2 count.
+		require.NoError(t, h.write(mmEngiFinish(h, mmT1, 3, 2)), "an echoed count is no loss; the finish applies")
+
+		m := h.load(t)
+		assert.Equal(t, state.MatchStatusCompleted, m.Status, "the finish is not held")
+		assert.Equal(t, wrTeamA, m.Winner, "3 flags beats 2")
+		assert.Equal(t, 3, m.FlagsA)
+		assert.Equal(t, 2, m.FlagsB)
+
+		last := h.history(t)[len(h.history(t))-1]
+		assert.Equal(t, doorEngi, last.Door)
+		assert.NotEqual(t, state.HistoryOutcomeHeld, last.Outcomes[state.GroupFlags], "the echo is not held")
+		assert.NotEqual(t, state.HistoryOutcomeHeld, last.Outcomes[state.GroupResult], "the result applied")
+		assert.Empty(t, last.Reason, "nothing was held atomically")
+	})
+}
+
 // R3 on an engi match: a count changed after the finish applies to the
 // finished match, and the winner is worked out again. An engi match is never
 // a draw, and (R4 revised, operator ruling 2026-10-04) a recount that cannot

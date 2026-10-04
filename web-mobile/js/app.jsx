@@ -375,7 +375,7 @@ export function queueAlertMessage(alert) {
     // result that just won. A supersede is the one drop where re-entering is the
     // wrong move, so it gets its own wording.
     case "superseded":
-      return supersededAlertText(n, one, !!alert.needsWinner);
+      return supersededAlertText(n, one, !!alert.needsWinner, !!alert.defaultWinStands);
     case "server_error":
       // It holds back no other write (each queued write is sent on its own),
       // and the editor of that match offers to discard it (HeldWriteDiscard).

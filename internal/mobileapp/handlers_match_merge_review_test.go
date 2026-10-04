@@ -117,6 +117,44 @@ func TestScoreHandler_HeldForAWinnerSaysSo(t *testing.T) {
 	assert.Equal(t, 3, m.FlagsA)
 }
 
+// R2's fusensho arm (bc-mrgc, the fusensho twin of the R4 test above): a
+// running board's scoring over a match a match-level default win closed (the
+// OTHER side is barred by a DIFFERENT match, recorded from the queue row's
+// Record default win) is not applied either, and the answer says why with its
+// own code and message (heldReason "default_win_stands",
+// DefaultWinStandsMessage), so the operator is sent to Remove default win
+// rather than told to correct the result with a winner: the match already
+// has one.
+func TestScoreHandler_HeldForADefaultWinSaysSo(t *testing.T) {
+	const compID = "merge-review-dws"
+	r, store := mergeServer(t, compID)
+	now := time.Now().UnixMilli()
+
+	// mgBob (SideB, shiro in a pool match) cannot fight (e.g. barred by a
+	// withdrawal on another match): the default win is mgAlice's (SideA, aka).
+	w := serveJSON(r, "POST", "/api/competitions/"+compID+"/matches/Pool A-0/decision", map[string]any{
+		"decision": "fusensho", "decisionBy": "shiro", "modifiedAt": now - 20_000,
+	})
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+
+	code, out := mergeReviewPut(t, r, compID, map[string]any{
+		"sideA": mgAlice, "sideB": mgBob, "status": "running",
+		"ipponsA": []string{"M"}, "ipponsB": []string{},
+		"changed": []string{"points"}, "modifiedAt": now - 10_000,
+	})
+	require.Equal(t, http.StatusOK, code, out)
+	assert.Equal(t, false, out["applied"])
+	assert.Equal(t, "superseded", out["reason"], "the not-retried, not-lost shape the queue keys on")
+	assert.Equal(t, state.HeldReasonDefaultWinStands, out["heldReason"])
+	assert.Equal(t, DefaultWinStandsMessage, out["message"])
+	assert.Equal(t, []any{"points"}, out["heldGroups"])
+
+	m := mergeStored(t, store, compID)
+	assert.Equal(t, state.MatchStatusCompleted, m.Status, "the default win stands")
+	assert.Equal(t, "fusensho", m.Decision)
+	assert.Equal(t, mgAlice, m.Winner)
+}
+
 // The other arrival order of the same two writes: the recount arrives first,
 // then the finish made before it. In stamp order the recount could not apply
 // after the finish, so the finish is applied on its own count and the

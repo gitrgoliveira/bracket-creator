@@ -1041,6 +1041,25 @@ func (e *Engine) recordDecisionTx(tx state.StoreTx, compID, matchID, decision, d
 		probe := *result
 		result.Merge = mergeMatchWrite(prior, &probe, matchWriteForward, mergeCtx{comp: comp})
 		e.recordWriteHistory(tx, compID, matchID, result)
+		// The replay makes no write, so nothing echoes Court/ScheduledAt onto
+		// prior the way a fresh decision's applyPoolWrite/applyBracketMatchResult
+		// pass echoes them onto its own result (bc-cse finding 5): a pool
+		// match's prior already carries them, a direct copy of the stored
+		// row, but a bracket match's prior came through bracketMatchAsResult,
+		// which deliberately omits them. Fill them in here, directly from
+		// the bracket, when still empty.
+		if prior.Court == "" || prior.ScheduledAt == "" {
+			if bracket, berr := tx.LoadBracket(compID); berr == nil {
+				if court, scheduledAt, ok := bracketMatchCourtAndSchedule(bracket, matchID); ok {
+					if prior.Court == "" {
+						prior.Court = court
+					}
+					if prior.ScheduledAt == "" {
+						prior.ScheduledAt = scheduledAt
+					}
+				}
+			}
+		}
 		return prior, nil, nil
 	}
 

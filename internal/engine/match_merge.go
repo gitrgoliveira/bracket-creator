@@ -250,6 +250,34 @@ func mergeMatchWrite(stored, incoming *state.MatchResult, policy matchWritePolic
 			hold[g] = true
 		}
 	}
+	// Finish atomicity (a write that COMPLETES the match is atomic with
+	// what it changes, mirroring R2's withdrawal atomicity and
+	// HoldReasonEngiAtomic): when the STORED match already has a verdict,
+	// and the write's own verdict is held by its stamp -- a GENUINE hold,
+	// not an echo of what is already stored -- the whole write holds with
+	// it, so a stale Finish can never move a scoreline in beside a verdict
+	// it never declared (a correction made on another device, after it,
+	// judging the match differently). Scoped to stored.Status ==
+	// completed on purpose: a write stamped before a REOPEN (the stored
+	// match is running again, no verdict to protect) is an ordinary stale
+	// write, and its bouts apply on their own stamps exactly as they did
+	// before this rule, pinned by the reopen handler's own superseded-write
+	// tests. Excludes a write OR a stored result that is itself a
+	// withdrawal/default win too: that side is already covered above, by
+	// withdrawalOutranked, which has its own rule for a stale "fought"
+	// write arriving against a stored withdrawal (its bouts are ordered on
+	// their own stamps, not held with the verdict). An echoed result (the
+	// SAME verdict replayed under an older stamp) is not a hold at all, by
+	// rule: the write still merges group by group, as it does today.
+	finishAtomic := inChanged[state.GroupResult] && hold[state.GroupResult] &&
+		stored.Status == state.MatchStatusCompleted && completesMatch(incoming, mc) &&
+		!domain.IsDefaultWinDecisionStr(incoming.Decision) && !domain.IsDefaultWinDecisionStr(stored.Decision) &&
+		state.GroupDiffers(stored, incoming, state.GroupResult)
+	if finishAtomic {
+		for _, g := range changed {
+			hold[g] = true
+		}
+	}
 
 	// Every group either side holds, plus a changed bout neither holds (a
 	// removal over a tombstone).
@@ -266,7 +294,11 @@ func mergeMatchWrite(stored, incoming *state.MatchResult, policy matchWritePolic
 		}
 	}
 
-	rep := &state.MergeReport{Stamp: stamp, Changed: changed, HoldReason: mc.holdAll}
+	holdReason := mc.holdAll
+	if holdReason == "" && finishAtomic {
+		holdReason = HoldReasonFinishAtomic
+	}
+	rep := &state.MergeReport{Stamp: stamp, Changed: changed, HoldReason: holdReason}
 	storedStamps := state.MaterializedGroupStamps(stored.GroupStamps, stored.ModifiedAt, state.SubPositions(stored.SubResults))
 	stamps := state.CloneGroupStamps(storedStamps)
 	for _, g := range groups {
@@ -380,6 +412,20 @@ func mergeMatchWrite(stored, incoming *state.MatchResult, policy matchWritePolic
 			rep.Unchanged = append(rep.Unchanged, g)
 		}
 	}
+	// A group that moved nothing keeps its stored stamp: the write's own
+	// stamp belongs to what it CHANGED, never to a value it only echoed, or
+	// a whole-match re-send (bulk-score, an older client with no `changed`)
+	// would take every group's stamp and fence out a real, older change made
+	// on another device in the gap. Delete rather than zero when the stored
+	// match never stamped the group at all, so an echoed legacy group keeps
+	// reading as never written.
+	for _, g := range rep.Unchanged {
+		if s, ok := storedStamps[g]; ok {
+			stamps[g] = s
+		} else {
+			delete(stamps, g)
+		}
+	}
 	// A verdict that applied but equals the stored one (an echo: the same
 	// decision sent again under a later stamp, or a winner worked out again
 	// to the same answer) did not move. Recording it again would rewrite the
@@ -401,7 +447,11 @@ func mergeMatchWrite(stored, incoming *state.MatchResult, policy matchWritePolic
 			incoming.ModifiedAt = max(incoming.ModifiedAt, s)
 		}
 	}
-	if len(rep.Applied) > 0 && stamp > incoming.ModifiedAt {
+	// Only when some applied group actually moved: an applied group that
+	// only echoed the stored value (and so kept its stored stamp above)
+	// must not drag ModifiedAt forward either, or a whole-match echo would
+	// fence out a real, older change the same way a per-group one would.
+	if len(rep.Applied) > len(rep.Unchanged) && stamp > incoming.ModifiedAt {
 		incoming.ModifiedAt = stamp
 	}
 	incoming.Merge = rep
@@ -586,6 +636,10 @@ func (h *mergeHold) holdGroups(reason string, groups ...string) {
 	// "Correct the result with a winner" is the answer for the two R4
 	// reasons only; a default win that stands asks for no correction.
 	h.rep.NeedsWinner = reason == HoldReasonKnockoutNeedsWinner || reason == HoldReasonEngiNeedsValidCount
+	// The default win that closed the match already has the winner it
+	// needs, so the answer sends the operator to Remove default win
+	// instead of asking for a correction with a winner.
+	h.rep.DefaultWinStands = reason == HoldReasonDefaultWinStands
 }
 
 // holdScoring holds every applied group that decides who won.
@@ -625,6 +679,15 @@ const HoldReasonEngiNeedsValidCount = "an engi result needs a valid flag count"
 // nothing about, so it stands and the scoring is kept in the history. R2's
 // clear is for a withdrawal of the match itself.
 const HoldReasonDefaultWinStands = "the other side cannot fight, so a default win closed this match"
+
+// HoldReasonFinishAtomic is why a stale Finish is held whole: a write that
+// completes the match carries a scoreline its verdict stood on, so when the
+// verdict itself is outranked by a newer one (a correction made on another
+// device, after it), everything else the stale write changes is kept with
+// it, in the history, rather than landing beside a verdict it never
+// declared. Mirrors HoldReasonEngiAtomic; a withdrawal has its own atomicity
+// rule (R2's withdrawalOutranked) and never reaches this one.
+const HoldReasonFinishAtomic = "a finish and the scoreline it stood on are kept together"
 
 // completesMatch reports whether the merged write leaves the match finished
 // (an empty status completes a bracket match, effectiveBracketWriteStatus).

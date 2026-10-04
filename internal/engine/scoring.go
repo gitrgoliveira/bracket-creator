@@ -220,8 +220,8 @@ func (e *Engine) withPoolMatch(h state.StoreTx, compId, matchId string, mutate f
 // courts/times. The per-match playability gate lives only in the SCORING paths
 // (recordBracketMatchResult / OverrideBracketWinner),
 // which mutate via UpdateBracket directly.
-func (e *Engine) withBracketMatch(compId, matchId string, mutate func(*state.BracketMatch)) error {
-	found, err := e.store.UpdateBracketMatchByID(compId, matchId, mutate)
+func (e *Engine) withBracketMatch(h state.StoreTx, compId, matchId string, mutate func(*state.BracketMatch)) error {
+	found, err := h.UpdateBracketMatchByID(compId, matchId, mutate)
 	if err != nil {
 		return err
 	}
@@ -3333,7 +3333,7 @@ func (e *Engine) UpdateMatchCourt(compId string, matchId string, newCourt string
 	if !errors.Is(err, errMatchNotFound) {
 		return err
 	}
-	return e.withBracketMatch(compId, matchId, func(m *state.BracketMatch) {
+	return e.withBracketMatch(e.store, compId, matchId, func(m *state.BracketMatch) {
 		m.Court = newCourt
 	})
 }
@@ -3421,89 +3421,106 @@ func guardOverrideDownstreamKnockoutCorrection(bracket *state.Bracket, rIdx, mId
 func (e *Engine) OverrideBracketWinner(compId string, matchId string, winnerName string, modifiedAt int64, opts ...ForceOptions) (bool, error) {
 	fo := firstForceOptions(opts)
 	var reopened []ReopenedMatch
-	err := e.store.UpdateBracket(compId, func(bracket *state.Bracket) error {
-		if bracket == nil {
-			return notFoundErrorf("bracket not found for competition %s", compId)
-		}
-		for rIdx := range bracket.Rounds {
-			for mIdx := range bracket.Rounds[rIdx] {
-				m := &bracket.Rounds[rIdx][mIdx]
-				if m.ID == matchId {
-					if !bracketMatchPlayable(m) {
-						// PURE (m already carries Number/DisplayRound): safe
-						// inside UpdateBracket's mutate callback (bc-cse item
-						// 14), which holds the per-comp lock.
-						return validationErrorf("%s is not ready to override: a feeder pool or match has not finished", SentenceCase(MatchLabel(bracketMatchRef(m))))
+	// The write and its history entry are one transaction (bc-mrgc): a held
+	// (errLWWDropped) assertion makes no write at all, so it is recorded
+	// outside the transaction below, but an APPLIED override must not land
+	// with no history line explaining it if the process dies right after.
+	var held bool
+	err := e.store.WithTransaction(compId, func(tx state.StoreTx) error {
+		uerr := tx.UpdateBracket(compId, func(bracket *state.Bracket) error {
+			if bracket == nil {
+				return notFoundErrorf("bracket not found for competition %s", compId)
+			}
+			for rIdx := range bracket.Rounds {
+				for mIdx := range bracket.Rounds[rIdx] {
+					m := &bracket.Rounds[rIdx][mIdx]
+					if m.ID == matchId {
+						if !bracketMatchPlayable(m) {
+							// PURE (m already carries Number/DisplayRound): safe
+							// inside UpdateBracket's mutate callback (bc-cse item
+							// 14), which holds the per-comp lock.
+							return validationErrorf("%s is not ready to override: a feeder pool or match has not finished", SentenceCase(MatchLabel(bracketMatchRef(m))))
+						}
+						// Timestamp ordering (mp-y3nk), on the one group an override
+						// changes (bc-mrgc): a reconnecting offline feeder assertion
+						// older than a newer stored verdict is not applied; it is
+						// kept in the match's history below. Return errLWWDropped
+						// (not nil) so UpdateBracket skips the save.
+						if !domain.ApplyByTimestamp(modifiedAt, m.GroupStamp(state.GroupResult)) {
+							return errLWWDropped
+						}
+						if err := guardOverrideDownstreamKnockoutCorrection(bracket, rIdx, mIdx, m, winnerName, fo.Force); err != nil {
+							return err
+						}
+						// Captured before the override rewrites it, for the same
+						// reason the score door captures its own: a forced override
+						// that names the winner already recorded must not requeue
+						// the next round.
+						priorWinner, priorWinnerID := propagatedWinnerOf(bracket, rIdx, mIdx, m)
+						setBracketOverrideWinner(m, winnerName)
+						m.IsOverridden = true
+						m.Status = state.MatchStatusCompleted
+						// An override ends the match, so a reopened match closed out
+						// this way must not keep ReopenPending set: it bypasses
+						// applyCorrectionReasonUnderTx/dischargeReopenPendingUnderTx,
+						// which clear it on every other way of ending a match.
+						m.ReopenPending = false
+						m.StampGroups(modifiedAt, state.GroupResult)
+						e.propagateBracketWinner(bracket, rIdx, mIdx)
+						// Same gate as the score door: a forced override that names
+						// the winner already recorded displaces nobody, so there is
+						// nothing downstream to unwind. displacedWinner is this
+						// match's winner as it stood before setBracketOverrideWinner.
+						if fo.Force && winnerActuallyChanged(priorWinner, priorWinnerID, m) {
+							reopened = forceReopenDownstreamChain(bracket, rIdx, mIdx, m.ID)
+						}
+						return nil
 					}
-					// Timestamp ordering (mp-y3nk), on the one group an override
-					// changes (bc-mrgc): a reconnecting offline feeder assertion
-					// older than a newer stored verdict is not applied; it is
-					// kept in the match's history below. Return errLWWDropped
-					// (not nil) so UpdateBracket skips the save.
-					if !domain.ApplyByTimestamp(modifiedAt, m.GroupStamp(state.GroupResult)) {
-						return errLWWDropped
-					}
-					if err := guardOverrideDownstreamKnockoutCorrection(bracket, rIdx, mIdx, m, winnerName, fo.Force); err != nil {
-						return err
-					}
-					// Captured before the override rewrites it, for the same
-					// reason the score door captures its own: a forced override
-					// that names the winner already recorded must not requeue
-					// the next round.
-					priorWinner, priorWinnerID := propagatedWinnerOf(bracket, rIdx, mIdx, m)
-					setBracketOverrideWinner(m, winnerName)
-					m.IsOverridden = true
-					m.Status = state.MatchStatusCompleted
-					// An override ends the match, so a reopened match closed out
-					// this way must not keep ReopenPending set: it bypasses
-					// applyCorrectionReasonUnderTx/dischargeReopenPendingUnderTx,
-					// which clear it on every other way of ending a match.
-					m.ReopenPending = false
-					m.StampGroups(modifiedAt, state.GroupResult)
-					e.propagateBracketWinner(bracket, rIdx, mIdx)
-					// Same gate as the score door: a forced override that names
-					// the winner already recorded displaces nobody, so there is
-					// nothing downstream to unwind. displacedWinner is this
-					// match's winner as it stood before setBracketOverrideWinner.
-					if fo.Force && winnerActuallyChanged(priorWinner, priorWinnerID, m) {
-						reopened = forceReopenDownstreamChain(bracket, rIdx, mIdx, m.ID)
-					}
-					return nil
 				}
 			}
-		}
-		// The bronze (3rd-place) knockout lives outside Rounds; handle it
-		// here. Bronze has no downstream match, so no propagation is needed.
-		if bracket.ThirdPlaceMatch != nil && bracket.ThirdPlaceMatch.ID == matchId {
-			bm := bracket.ThirdPlaceMatch
-			if !bracketMatchPlayable(bm) {
-				// PURE, same reasoning as the round branch above.
-				return validationErrorf("%s is not ready to override: a feeder pool or match has not finished", SentenceCase(MatchLabel(bracketMatchRef(bm))))
+			// The bronze (3rd-place) knockout lives outside Rounds; handle it
+			// here. Bronze has no downstream match, so no propagation is needed.
+			if bracket.ThirdPlaceMatch != nil && bracket.ThirdPlaceMatch.ID == matchId {
+				bm := bracket.ThirdPlaceMatch
+				if !bracketMatchPlayable(bm) {
+					// PURE, same reasoning as the round branch above.
+					return validationErrorf("%s is not ready to override: a feeder pool or match has not finished", SentenceCase(MatchLabel(bracketMatchRef(bm))))
+				}
+				// Same errLWWDropped mechanism as above.
+				if !domain.ApplyByTimestamp(modifiedAt, bm.GroupStamp(state.GroupResult)) {
+					return errLWWDropped
+				}
+				setBracketOverrideWinner(bm, winnerName)
+				bm.IsOverridden = true
+				bm.Status = state.MatchStatusCompleted
+				// Mirror of the round branch: an override discharges the reopen debt.
+				bm.ReopenPending = false
+				bm.StampGroups(modifiedAt, state.GroupResult)
+				return nil
 			}
-			// Same errLWWDropped mechanism as above.
-			if !domain.ApplyByTimestamp(modifiedAt, bm.GroupStamp(state.GroupResult)) {
-				return errLWWDropped
-			}
-			setBracketOverrideWinner(bm, winnerName)
-			bm.IsOverridden = true
-			bm.Status = state.MatchStatusCompleted
-			// Mirror of the round branch: an override discharges the reopen debt.
-			bm.ReopenPending = false
-			bm.StampGroups(modifiedAt, state.GroupResult)
+			return notFoundErrorf("bracket match %s not found", matchId)
+		})
+		if errors.Is(uerr, errLWWDropped) {
+			held = true
 			return nil
 		}
-		return notFoundErrorf("bracket match %s not found", matchId)
+		if uerr != nil {
+			return uerr
+		}
+		e.recordOverrideHistory(tx, compId, matchId, winnerName, modifiedAt, true)
+		return nil
 	})
-	if errors.Is(err, errLWWDropped) {
+	if held {
 		// Not applied, and kept: the override is recorded in the match's
-		// history as held, with the winner it named (bc-mrgc).
-		e.recordOverrideHistory(compId, matchId, winnerName, modifiedAt, false)
+		// history as held, with the winner it named (bc-mrgc). No write
+		// landed, so this is appended on its own, outside the transaction
+		// above (which, for this case, staged nothing).
+		e.recordOverrideHistory(e.store, compId, matchId, winnerName, modifiedAt, false)
 		return false, nil
 	}
 	if err != nil {
 		return false, err
 	}
-	e.recordOverrideHistory(compId, matchId, winnerName, modifiedAt, true)
 	e.restoreForceReopened(e.store, compId, reopened)
 	if fo.Reopened != nil {
 		*fo.Reopened = reopened
@@ -3530,7 +3547,7 @@ func (e *Engine) UpdateMatchTime(compId string, matchId string, scheduledAt stri
 	if !errors.Is(err, errMatchNotFound) {
 		return err
 	}
-	return e.withBracketMatch(compId, matchId, func(m *state.BracketMatch) {
+	return e.withBracketMatch(e.store, compId, matchId, func(m *state.BracketMatch) {
 		m.ScheduledAt = scheduledAt
 	})
 }
@@ -3557,83 +3574,102 @@ func (e *Engine) UpdateMatchTime(compId string, matchId string, scheduledAt stri
 // lock-free `revertMatchToQueueUnderCourtLock` core and call THAT from the
 // composition, mirroring reopenUnderCourtLock.
 func (e *Engine) RevertMatchToQueue(compId, matchId string) error {
-	var alreadyCompleted bool
+	var alreadyCompleted, notFound bool
 
-	err := e.withPoolMatch(e.store, compId, matchId, func(r *state.MatchResult) error {
-		if r.Status == state.MatchStatusCompleted {
-			// Reported through the captured flag, not an abort: the caller
-			// turns it into its own error AFTER the store call, and aborting
-			// here would change that error's identity.
-			alreadyCompleted = true
+	// The write and its history entry are one transaction (bc-mrgc): a
+	// requeue frees a court and clears a verdict, so a process dying right
+	// after it lands must not leave the match with nothing explaining how
+	// it got there.
+	err := e.store.WithTransaction(compId, func(tx state.StoreTx) error {
+		stamp := serverNowMs()
+		perr := e.withPoolMatch(tx, compId, matchId, func(r *state.MatchResult) error {
+			if r.Status == state.MatchStatusCompleted {
+				// Reported through the captured flag, not an abort: the caller
+				// turns it into its own error AFTER the store call, and aborting
+				// here would change that error's identity.
+				alreadyCompleted = true
+				return nil
+			}
+			// Any non-completed match (running, or an already-scheduled match that
+			// still carries a stale verdict or audit note from an earlier partial
+			// write) goes back to the queue WITH ITS SCORE: points, penalties,
+			// overtime, bouts, flags and rep-bout fighters stay (keepQueuedScore
+			// names them), and the operator removes a wrong mark themselves
+			// (operator ruling 2026-09-26, bc-sbq). Only the verdict and the
+			// audit notes go. Idempotent: a pristine scheduled match is left
+			// effectively unchanged.
+			r.Status = state.MatchStatusScheduled
+			r.Winner = ""
+			r.WinnerID = ""
+			r.Decision = ""
+			r.DecisionBy = ""
+			r.DecisionReason = ""
+			r.ResultSource = ""
+			r.CorrectionReason = ""
+			// ReopenPending is a match-level field a reopened result carries
+			// (reopenPoolMatch sets it), so requeue clears it too: the result the
+			// reopen discarded no longer matters to a match sent back to the
+			// queue. reopenBracketMatch's doc names this mirror obligation on
+			// RevertMatchToQueue.
+			r.ReopenPending = false
+			// Revert fence, the same one the bracket branch sets
+			// (requeueBracketMatch, mp-y3nk): a write stamped before the requeue,
+			// such as an offline-queued score replayed afterwards, loses the
+			// timestamp comparison instead of resurrecting the result the operator
+			// just sent back to the queue. Left unstamped, the requeued row kept
+			// whatever stamp it had, which the stale write could beat. Only the
+			// verdict is stamped (bc-mrgc): the score stays, and so does the
+			// stamp each part of it was last changed at.
+			r.StampGroups(stamp, state.GroupResult)
+			return nil
+		})
+		if perr == nil {
+			if !alreadyCompleted {
+				e.recordDirectHistory(tx, compId, matchId, doorRequeue, stamp, state.GroupResult)
+			}
 			return nil
 		}
-		// Any non-completed match (running, or an already-scheduled match that
-		// still carries a stale verdict or audit note from an earlier partial
-		// write) goes back to the queue WITH ITS SCORE: points, penalties,
-		// overtime, bouts, flags and rep-bout fighters stay (keepQueuedScore
-		// names them), and the operator removes a wrong mark themselves
-		// (operator ruling 2026-09-26, bc-sbq). Only the verdict and the
-		// audit notes go. Idempotent: a pristine scheduled match is left
-		// effectively unchanged.
-		r.Status = state.MatchStatusScheduled
-		r.Winner = ""
-		r.WinnerID = ""
-		r.Decision = ""
-		r.DecisionBy = ""
-		r.DecisionReason = ""
-		r.ResultSource = ""
-		r.CorrectionReason = ""
-		// ReopenPending is a match-level field a reopened result carries
-		// (reopenPoolMatch sets it), so requeue clears it too: the result the
-		// reopen discarded no longer matters to a match sent back to the
-		// queue. reopenBracketMatch's doc names this mirror obligation on
-		// RevertMatchToQueue.
-		r.ReopenPending = false
-		// Revert fence, the same one the bracket branch sets
-		// (requeueBracketMatch, mp-y3nk): a write stamped before the requeue,
-		// such as an offline-queued score replayed afterwards, loses the
-		// timestamp comparison instead of resurrecting the result the operator
-		// just sent back to the queue. Left unstamped, the requeued row kept
-		// whatever stamp it had, which the stale write could beat. Only the
-		// verdict is stamped (bc-mrgc): the score stays, and so does the
-		// stamp each part of it was last changed at.
-		r.StampGroups(serverNowMs(), state.GroupResult)
+		if !errors.Is(perr, errMatchNotFound) {
+			return perr
+		}
+
+		// Pool match not found; try the elimination bracket. alreadyCompleted is
+		// still false here (the pool closure never ran on the errMatchNotFound path).
+		berr := e.withBracketMatch(tx, compId, matchId, func(m *state.BracketMatch) {
+			if m.Status == state.MatchStatusCompleted {
+				alreadyCompleted = true
+				return
+			}
+			// Same contract as the pool path: any non-completed match goes back
+			// to the queue with its score, losing only the verdict and the audit
+			// notes, even if it was already scheduled.
+			requeueBracketMatch(m)
+		})
+		if berr != nil {
+			// Neither pool nor bracket holds this match: reported through the
+			// captured flag rather than an error here, so the outer call can
+			// surface a typed NotFoundError (a fabricated match id is a client
+			// error, not a server fault) without that error being misread as a
+			// transaction failure.
+			if errors.Is(berr, errMatchNotFound) {
+				notFound = true
+				return nil
+			}
+			return berr
+		}
+		if !alreadyCompleted {
+			e.recordDirectHistory(tx, compId, matchId, doorRequeue, stamp, state.GroupResult)
+		}
 		return nil
 	})
-	if err == nil {
-		if alreadyCompleted {
-			return ErrMatchAlreadyCompleted
-		}
-		e.recordDirectHistory(e.store, compId, matchId, doorRequeue, serverNowMs(), state.GroupResult)
-		return nil
-	}
-	if !errors.Is(err, errMatchNotFound) {
+	if err != nil {
 		return err
 	}
-
-	// Pool match not found; try the elimination bracket. alreadyCompleted is
-	// still false here (the pool closure never ran on the errMatchNotFound path).
-	if err = e.withBracketMatch(compId, matchId, func(m *state.BracketMatch) {
-		if m.Status == state.MatchStatusCompleted {
-			alreadyCompleted = true
-			return
-		}
-		// Same contract as the pool path: any non-completed match goes back
-		// to the queue with its score, losing only the verdict and the audit
-		// notes, even if it was already scheduled.
-		requeueBracketMatch(m)
-	}); err != nil {
-		// Neither pool nor bracket holds this match: surface a typed
-		// NotFoundError so the handler can answer 404 (a fabricated match id
-		// is a client error, not a server fault).
-		if errors.Is(err, errMatchNotFound) {
-			return notFoundErrorf("match %s not found in competition %s", matchId, compId)
-		}
-		return err
+	if notFound {
+		return notFoundErrorf("match %s not found in competition %s", matchId, compId)
 	}
 	if alreadyCompleted {
 		return ErrMatchAlreadyCompleted
 	}
-	e.recordDirectHistory(e.store, compId, matchId, doorRequeue, serverNowMs(), state.GroupResult)
 	return nil
 }

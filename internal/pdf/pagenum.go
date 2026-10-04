@@ -1,6 +1,7 @@
 package pdf
 
 import (
+	"context"
 	"fmt"
 
 	"github.com/pdfcpu/pdfcpu/pkg/api"
@@ -17,8 +18,8 @@ const pageNumberDesc = "scale:1 abs, pos:bc, off:0 12, rot:0, op:1, fillc:#55555
 
 // StampPageNumbers writes a copy of inPath to outPath with a "N / M" footer
 // stamped on every page. It returns an error if the PDF has no pages.
-func StampPageNumbers(inPath, outPath string) error {
-	total, err := PageCount(inPath)
+func StampPageNumbers(ctx context.Context, inPath, outPath string) error {
+	total, err := PageCount(ctx, inPath)
 	if err != nil {
 		return err
 	}
@@ -29,14 +30,14 @@ func StampPageNumbers(inPath, outPath string) error {
 	m := make(map[int]*model.Watermark, total)
 	for p := 1; p <= total; p++ {
 		text := fmt.Sprintf("%d / %d", p, total)
-		wm, err := api.TextWatermark(text, pageNumberDesc, true /*onTop*/, false /*update*/, types.POINTS)
+		wm, err := api.TextWatermark(ctx, text, pageNumberDesc, true /*onTop*/, false /*update*/, types.POINTS, conf())
 		if err != nil {
 			return fmt.Errorf("build page-number watermark for page %d: %w", p, err)
 		}
 		m[p] = wm
 	}
 
-	if err := api.AddWatermarksMapFile(inPath, outPath, m, conf()); err != nil {
+	if err := api.AddWatermarksMapFile(ctx, inPath, outPath, m, conf()); err != nil {
 		return fmt.Errorf("stamp page numbers on %s: %w", inPath, err)
 	}
 	return nil

@@ -1,6 +1,7 @@
 package pdf
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"strings"
@@ -29,19 +30,19 @@ type SheetRange struct {
 // pdfcpu leaves PageThru==0 on the final bookmark because it has no successor
 // to bound it; we patch any bookmark whose PageThru < PageFrom to end at the
 // last page of the document. Without this the final sheet's pages are dropped.
-func SheetRanges(pdfPath string) ([]SheetRange, error) {
+func SheetRanges(ctx context.Context, pdfPath string) ([]SheetRange, error) {
 	f, err := os.Open(pdfPath) // #nosec G304 -- pdfPath is an internally-generated soffice output path, not user input.
 	if err != nil {
 		return nil, fmt.Errorf("open pdf: %w", err)
 	}
 	defer func() { _ = f.Close() }()
 
-	bms, err := api.Bookmarks(f, conf())
+	bms, err := api.Bookmarks(ctx, f, conf())
 	if err != nil {
 		return nil, fmt.Errorf("read bookmarks from %s: %w", pdfPath, err)
 	}
 
-	total, err := PageCount(pdfPath)
+	total, err := PageCount(ctx, pdfPath)
 	if err != nil {
 		return nil, err
 	}
@@ -63,14 +64,14 @@ func SheetRanges(pdfPath string) ([]SheetRange, error) {
 }
 
 // PageCount returns the number of pages in a PDF.
-func PageCount(pdfPath string) (int, error) {
+func PageCount(ctx context.Context, pdfPath string) (int, error) {
 	f, err := os.Open(pdfPath) // #nosec G304 -- pdfPath is an internally-generated PDF path, not user input.
 	if err != nil {
 		return 0, fmt.Errorf("open pdf: %w", err)
 	}
 	defer func() { _ = f.Close() }()
 
-	n, err := api.PageCount(f, conf())
+	n, err := api.PageCount(ctx, f, conf())
 	if err != nil {
 		return 0, fmt.Errorf("page count of %s: %w", pdfPath, err)
 	}
@@ -79,7 +80,7 @@ func PageCount(pdfPath string) (int, error) {
 
 // ExtractPages writes a new PDF at outPath containing only the given inclusive
 // 1-indexed page ranges from srcPath, in the order supplied.
-func ExtractPages(srcPath string, ranges []SheetRange, outPath string) error {
+func ExtractPages(ctx context.Context, srcPath string, ranges []SheetRange, outPath string) error {
 	if len(ranges) == 0 {
 		return fmt.Errorf("no page ranges to extract from %s", srcPath)
 	}
@@ -88,19 +89,19 @@ func ExtractPages(srcPath string, ranges []SheetRange, outPath string) error {
 		pages = append(pages, fmt.Sprintf("%d-%d", r.PageFrom, r.PageThru))
 	}
 	// api.CollectFile keeps the listed pages (in order) and writes a new file.
-	if err := api.CollectFile(srcPath, outPath, pages, conf()); err != nil {
+	if err := api.CollectFile(ctx, srcPath, outPath, pages, conf()); err != nil {
 		return fmt.Errorf("extract pages %s from %s: %w", strings.Join(pages, ","), srcPath, err)
 	}
 	return nil
 }
 
 // MergePDFs concatenates the given PDFs (in order) into a single outPath.
-func MergePDFs(inPaths []string, outPath string) error {
+func MergePDFs(ctx context.Context, inPaths []string, outPath string) error {
 	if len(inPaths) == 0 {
 		return fmt.Errorf("no PDFs to merge")
 	}
 	// dividerPage=false: no blank separator page between merged files.
-	if err := api.MergeCreateFile(inPaths, outPath, false, conf()); err != nil {
+	if err := api.MergeCreateFile(ctx, inPaths, outPath, false, conf()); err != nil {
 		return fmt.Errorf("merge %d pdf(s) into %s: %w", len(inPaths), outPath, err)
 	}
 	return nil

@@ -18,7 +18,6 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
-	"math"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -117,14 +116,10 @@ func (s *Store) appendMatchHistoryLocked(compID string, existing []byte, entry M
 	if err != nil {
 		return fmt.Errorf("match history: %w", err)
 	}
-	// The file grows by one line per write, so its size is bounded in
-	// practice; the check keeps the capacity sum from overflowing whatever
-	// the inputs (the separator and the trailing newline are the +2).
-	if len(existing) > math.MaxInt-len(line)-2 {
-		return fmt.Errorf("match history: %s/%s: history too large to append to", compID, entry.MatchID)
-	}
-	buf := make([]byte, 0, len(existing)+len(line)+2)
-	buf = append(buf, existing...)
+	// A copy, never existing itself: it may be the staged bytes another
+	// read still holds. No capacity is computed up front, so no size sum
+	// can overflow; append grows the copy as it needs to.
+	buf := append([]byte(nil), existing...)
 	if len(buf) > 0 && buf[len(buf)-1] != '\n' {
 		buf = append(buf, '\n')
 	}

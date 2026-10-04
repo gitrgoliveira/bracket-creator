@@ -44,11 +44,11 @@ func TestConvertAndReadRanges(t *testing.T) {
 	require.NoError(t, err)
 	require.FileExists(t, pdfPath)
 
-	ranges, err := SheetRanges(pdfPath)
+	ranges, err := SheetRanges(context.Background(), pdfPath)
 	require.NoError(t, err)
 	require.NotEmpty(t, ranges)
 
-	total, err := PageCount(pdfPath)
+	total, err := PageCount(context.Background(), pdfPath)
 	require.NoError(t, err)
 
 	byName := map[string]SheetRange{}
@@ -79,7 +79,7 @@ func TestExtractAndMerge(t *testing.T) {
 	pdfPath, err := conv.ConvertToPDF(context.Background(), xlsx, tmp)
 	require.NoError(t, err)
 
-	ranges, err := SheetRanges(pdfPath)
+	ranges, err := SheetRanges(context.Background(), pdfPath)
 	require.NoError(t, err)
 
 	g, _ := GroupByType("pools-trees")
@@ -99,14 +99,14 @@ func TestExtractAndMerge(t *testing.T) {
 	require.NotEmpty(t, picked)
 
 	extracted := filepath.Join(tmp, "extracted.pdf")
-	require.NoError(t, ExtractPages(pdfPath, picked, extracted))
-	gotPages, err := PageCount(extracted)
+	require.NoError(t, ExtractPages(context.Background(), pdfPath, picked, extracted))
+	gotPages, err := PageCount(context.Background(), extracted)
 	require.NoError(t, err)
 	assert.Equal(t, wantPages, gotPages, "extracted page count must equal sum of picked ranges")
 
 	merged := filepath.Join(tmp, "merged.pdf")
-	require.NoError(t, MergePDFs([]string{extracted, extracted}, merged))
-	mergedPages, err := PageCount(merged)
+	require.NoError(t, MergePDFs(context.Background(), []string{extracted, extracted}, merged))
+	mergedPages, err := PageCount(context.Background(), merged)
 	require.NoError(t, err)
 	assert.Equal(t, 2*gotPages, mergedPages, "merging a PDF with itself doubles the page count")
 }

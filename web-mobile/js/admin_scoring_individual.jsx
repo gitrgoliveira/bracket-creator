@@ -262,6 +262,7 @@ export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, on
   const _autosaveIsRunningRef = useRefA(false);
   const _autosaveBuildPatchRef = useRefA(null);
   const _autosaveOnSubmitRef = useRefA(null);
+  const _autosaveSeenStampRef = useRefA(0);
   // bc-mrgc: what a write applied only in part kept in the match's history.
   const keptInHistory = useKeptInHistoryNote();
   const { markDirty: markScoringDirty, cancelDebounce: cancelScoringDebounce } = useDebouncedRunningWrite({
@@ -269,6 +270,7 @@ export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, on
     buildPatchRef: _autosaveBuildPatchRef,
     onSubmitRef: _autosaveOnSubmitRef,
     onWriteResult: keptInHistory.noteFromWrite,
+    seenStampRef: _autosaveSeenStampRef,
   });
 
   useEffectA(() => {
@@ -485,6 +487,7 @@ export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, on
   // C1: keep autosave refs fresh with the latest buildPatch / onSubmit /
   // running-status so the debounce callback never reads a stale closure.
   _autosaveIsRunningRef.current = m.status === "running";
+  _autosaveSeenStampRef.current = m.modifiedAt || 0;
   _autosaveBuildPatchRef.current = buildPatch;
   _autosaveOnSubmitRef.current = onSubmit;
 

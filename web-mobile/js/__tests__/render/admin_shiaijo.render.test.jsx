@@ -418,7 +418,9 @@ describe('AdminShiaijoPage render-smoke', () => {
   it('Run now → recording feeder winners calls overrideBracketWinner per feeder', async () => {
     const rounds = [
       [
-        { id: 'm-r2-0', status: 'scheduled', sideA: { id: 'a', name: 'Alice' }, sideB: { id: 'b', name: 'Bob' } },
+        // Stamped: the assertion is floored by it (bc-hlck). The other feeder
+        // carries no stamp, and its call is exactly as it always was.
+        { id: 'm-r2-0', status: 'scheduled', modifiedAt: 1_700_000_000_000, sideA: { id: 'a', name: 'Alice' }, sideB: { id: 'b', name: 'Bob' } },
         { id: 'm-r2-1', status: 'scheduled', sideA: { id: 'c', name: 'Carol' }, sideB: { id: 'd', name: 'Dan' } },
       ],
       [
@@ -445,7 +447,7 @@ describe('AdminShiaijoPage render-smoke', () => {
       await act(async () => { utils.getByRole('button', { name: 'Carol' }).click(); });
       await act(async () => { utils.getByRole('button', { name: /record & make startable/i }).click(); });
       expect(overrideBracketWinner).toHaveBeenCalledTimes(2);
-      expect(overrideBracketWinner).toHaveBeenCalledWith('c1', 'm-r2-0', 'Alice', expect.anything());
+      expect(overrideBracketWinner).toHaveBeenCalledWith('c1', 'm-r2-0', 'Alice', expect.anything(), false, 1_700_000_000_000);
       expect(overrideBracketWinner).toHaveBeenCalledWith('c1', 'm-r2-1', 'Carol', expect.anything());
     } finally {
       window.API.overrideBracketWinner = prevOverride;

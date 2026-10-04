@@ -423,6 +423,54 @@ function _perfNow() {
         : null;
 }
 
+// bc-hlck: a write is never stamped older than the result it was made against
+// (operator request 2026-10-03). The stamp is this device's estimate of the
+// server's time, and two devices' estimates can differ by up to the 5 s the
+// server accepts: a device running ahead stamps its write later than real
+// time, and a second device that sees that write and changes it a moment
+// later would stamp its change EARLIER than the write it changed, so the
+// server would keep the change in the history instead of applying it.
+//
+// _stampAfterSeen is the ONE rule (a hybrid logical clock): this device's
+// stamp, or the stamp of the match as the operator saw it plus one, whichever
+// is later. Wall-clock order stands wherever the clocks agree (an offline
+// court's genuinely later action still wins); where they disagree, a change
+// still lands after what it changed. The floor stops HLC_FLOOR_MAX_AHEAD_MS
+// past this device's own time, inside the 5 s the server accepts
+// (modifiedAtRefuseSkewMs), so chasing a stamp seen far ahead can never get
+// the write refused for clock skew; past that, the write is ordered by its
+// own time as before.
+//
+// What "as seen" is belongs to the caller: the match the operator acted on
+// (`match.modifiedAt` for a tap, `seenModifiedAt` in a decision's body or
+// a representative bout's or a hand-set winner's argument), and for an
+// autosave the match as it was at the TAP (`seenModifiedAt` on the patch,
+// recorded beside editedPerf by useDebouncedRunningWrite), never the match
+// at the send: a tap made before another device finished the match stays
+// older than that finish (operator ruling 2026-09-27). 0 or absent: no floor.
+const HLC_FLOOR_MAX_AHEAD_MS = 4000;
+function _stampAfterSeen(stamp, seen) {
+    const s = Number(seen);
+    if (!Number.isFinite(s) || s <= 0 || stamp > s) return stamp;
+    return Math.max(stamp, Math.min(s + 1, _serverNowMs() + HLC_FLOOR_MAX_AHEAD_MS));
+}
+// What a score write was made against: the autosave's tap-time snapshot when
+// it carries one (even 0: the tap saw no stamp), else the match handed in.
+function _seenOfScore(result, match) {
+    if (result && result.seenModifiedAt !== undefined) return Number(result.seenModifiedAt) || 0;
+    return Number(match && match.modifiedAt) || 0;
+}
+// The seen stamp a payload was floored by, kept beside it (never sent) so the
+// queue can record it on the entry (_commitEnqueue, seenModifiedAt) and a
+// re-stamped replay keeps the floor (_restampQueuedEntryForSkew).
+const _payloadSeen = new WeakMap();
+function _stampPayload(payload, stamp, seen) {
+    payload.modifiedAt = _stampAfterSeen(stamp, seen);
+    const s = Number(seen);
+    if (Number.isFinite(s) && s > 0) _payloadSeen.set(payload, s);
+    return payload;
+}
+
 // _editAge: how long ago the edit a score editor's autosave carries was made,
 // from the monotonic reading of its last tap (`editedPerf` on the patch, set
 // by useDebouncedRunningWrite and never sent: toBackendMatchResult copies
@@ -1312,7 +1360,7 @@ let _queueGen = 0;
 async function _restampQueuedEntryForSkew(descriptor) {
     await _learnServerClockOffset();
     const enqueuedAt = Number.isFinite(descriptor.enqueuedAt) ? descriptor.enqueuedAt : Date.now();
-    descriptor.payload.modifiedAt = _restampFor(enqueuedAt, descriptor.perfAtEnqueue);
+    descriptor.payload.modifiedAt = _stampAfterSeen(_restampFor(enqueuedAt, descriptor.perfAtEnqueue), descriptor.seenModifiedAt);
     descriptor.skewRetried = true;
     _persistQueue();
 }
@@ -1827,6 +1875,9 @@ function _commitEnqueue(base, descriptor) {
     // two different zeros. An entry without it simply falls back to the
     // wall-clock reconstruction, which is what every entry did before.
     descriptor.perfAtEnqueue = _perfNow();
+    // bc-hlck: what the write was made against, so a re-stamped replay keeps
+    // the floor its first stamp had. Persisted (it is a server-time stamp).
+    if (_payloadSeen.has(descriptor.payload)) descriptor.seenModifiedAt = _payloadSeen.get(descriptor.payload);
     const key = _placeWrite(base, descriptor);
     _writeQueue.set(key, descriptor);
     // Read BEFORE the flush is kicked: the flush's synchronous part can
@@ -1863,6 +1914,11 @@ function _placeWrite(base, descriptor) {
     const target = _coalesceTarget(base, descriptor);
     if (!target) return _newEntryKey(base);
     const [key, prev] = target;
+    // The write it takes the place of was made against a match at least as
+    // old: the later floor stands for both.
+    if (Number(prev.seenModifiedAt) > (Number(descriptor.seenModifiedAt) || 0)) {
+        descriptor.seenModifiedAt = prev.seenModifiedAt;
+    }
     let payload = _claimingQueuedGroups(prev, descriptor.payload);
     if (!descriptor.terminal && prev.payload && prev.payload.kachinukiBoutFinal
         && payload && !payload.kachinukiBoutFinal) {
@@ -1935,6 +1991,8 @@ function _runningDescriptor(compID, matchID, payload, password, enqueuedAt) {
 // mutation: the live fetch and _broadcastPatch share the caller's object.
 function _withoutDownstreamConfirmation(payload) {
     const { forceDownstreamReopen: _confirmation, ...rest } = payload || {};
+    // The copy keeps what the write was floored by (bc-hlck, _stampPayload).
+    if (_payloadSeen.has(payload)) _payloadSeen.set(rest, _payloadSeen.get(payload));
     return rest;
 }
 
@@ -1986,6 +2044,7 @@ function _keepInflightRunning() {
         // would date it up to the fetch timeout later than it was made.
         w.kept = _runningDescriptor(w.compID, w.matchID, w.payload, w.password, w.sentAt);
         w.kept.perfAtEnqueue = w.perfAtSend;
+        if (_payloadSeen.has(w.payload)) w.kept.seenModifiedAt = _payloadSeen.get(w.payload);
         w.keptKey = _newEntryKey(base);
         _writeQueue.set(w.keptKey, w.kept);
         kept = true;
@@ -2516,7 +2575,7 @@ async function _fetchJson(url, opts, ms = FETCH_TIMEOUT_MS) {
 // makes of a change the server did make after all. A refusal shows the
 // server's own sentence when it sends one (_refusalText), e.g. a finished
 // match's.
-async function _daihyosenRequest(method, compID, matchID, password, notDone) {
+async function _daihyosenRequest(method, compID, matchID, password, notDone, seenModifiedAt) {
     let res;
     let body;
     try {
@@ -2526,7 +2585,7 @@ async function _daihyosenRequest(method, compID, matchID, password, notDone) {
                 'Content-Type': 'application/json',
                 'X-Tournament-Password': password
             },
-            body: JSON.stringify({ modifiedAt: _serverNowMs() }),
+            body: JSON.stringify(_stampPayload({}, _serverNowMs(), seenModifiedAt)),
         }));
     } catch (_e) {
         throw new Error(noAnswerSentence(notDone));
@@ -2985,7 +3044,9 @@ const API = {
         // its sending (operator ruling 2026-09-27): a tap made before another
         // device finished the match stays older than that finish however late
         // the autosave goes out (its debounce, or the editor going away).
-        payload.modifiedAt = _serverNowMs() - _editAge(result);
+        // Never older than the match it was made against (bc-hlck).
+        const seen = _seenOfScore(result, match);
+        _stampPayload(payload, _serverNowMs() - _editAge(result), seen);
 
         // C2: stamp monotonic rev on running-status writes so the server's
         // rev-guard can hold out-of-order deliveries (e.g. from reconnect flush).
@@ -3193,7 +3254,7 @@ const API = {
         // corrected stamp, so queuing it is safe.
         const _resendAfterClockSkew = async () => {
             await _learnServerClockOffset();
-            payload.modifiedAt = _serverNowMs();
+            _stampPayload(payload, _serverNowMs(), seen);
             let retryRes;
             let retryBody;
             try {
@@ -3375,7 +3436,10 @@ const API = {
         // match closed while still `scheduled` - a queue row's Record default
         // win - was the one completion carrying no time at all, so no surface
         // could order it against the bouts around it (mp-jnvl).
-        const payload = { ...body, modifiedAt: _serverNowMs() };
+        // `seenModifiedAt` in the body is the match the decision was recorded
+        // on (bc-hlck): it floors the stamp and is never sent.
+        const { seenModifiedAt: seen, ...rest } = body || {};
+        const payload = _stampPayload({ ...rest }, _serverNowMs(), seen);
         // Sent straight to the server even when a write of this device for
         // the match is still queued (bc-mrgc): the server orders the two by
         // their stamps, so a withdrawal still stands on the scoreline it was
@@ -3537,10 +3601,12 @@ const API = {
     // played on the current winner), threaded through exactly as recordScore's
     // payload carries it, so a confirmed retry here also reopens the blocking
     // match(es) for re-entry rather than silently repainting them.
-    async overrideBracketWinner(compID, matchID, winnerName, password, forceDownstreamReopen) {
+    // seenModifiedAt (optional): the match's stamp as this device last had
+    // it, which the stamp is never older than (bc-hlck).
+    async overrideBracketWinner(compID, matchID, winnerName, password, forceDownstreamReopen, seenModifiedAt) {
         const url = `/api/competitions/${compID}/matches/${matchID}/override-winner`;
         // mp-y3nk: stamp in server-relative time for last-write-wins reconciliation.
-        const payload = { winnerName, modifiedAt: _serverNowMs() };
+        const payload = _stampPayload({ winnerName }, _serverNowMs(), seenModifiedAt);
         if (forceDownstreamReopen) payload.forceDownstreamReopen = true;
         // Sent straight to the server even when an earlier assertion of this
         // device about the feeder is still queued: the server orders the two
@@ -4166,16 +4232,17 @@ const API = {
     // caller: see TeamScoreEditorModal for the user-visible mapping.
     // Stamped like recordDecision (bc-dhas), so the add competes on
     // timestamps: see _daihyosenOutcome for what comes back.
-    async recordDaihyosen(compID, matchID, password) {
-        return _daihyosenRequest('POST', compID, matchID, password, REP_BOUT_NOT_ADDED);
+    // seenModifiedAt (optional): the match as the sheet showed it (bc-hlck).
+    async recordDaihyosen(compID, matchID, password, seenModifiedAt) {
+        return _daihyosenRequest('POST', compID, matchID, password, REP_BOUT_NOT_ADDED, seenModifiedAt);
     },
     // T141: remove an unscored daihyosen placeholder from a knockout team match.
     // Returns the updated MatchResult on 200. Throws on 404 (no daihyosen or
     // match not found) or 409 (daihyosen already scored: clear scores first).
     // Stamped like the add, in a JSON body (the handler binds one on DELETE
     // too).
-    async removeDaihyosen(compID, matchID, password) {
-        return _daihyosenRequest('DELETE', compID, matchID, password, REP_BOUT_NOT_REMOVED);
+    async removeDaihyosen(compID, matchID, password, seenModifiedAt) {
+        return _daihyosenRequest('DELETE', compID, matchID, password, REP_BOUT_NOT_REMOVED, seenModifiedAt);
     },
     // T190-T193 (US13: Swiss format). Generate the next Swiss round.
     // Backend pre-conditions: format=swiss; all matches in the current

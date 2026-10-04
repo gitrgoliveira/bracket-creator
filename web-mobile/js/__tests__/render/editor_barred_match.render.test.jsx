@@ -95,6 +95,18 @@ describe('a scheduled barred match shows BarredMatchNotice instead of Start (bc-
     }, 'secret');
   });
 
+  // bc-hlck: the default win is never stamped older than the match as shown:
+  // the body carries its stamp for recordDecision, which never sends it.
+  it('the default win carries the stamp of the match as shown', async () => {
+    window.API.recordDecision.mockClear();
+    await mount(individualBarred({ modifiedAt: 1_700_000_000_000 }));
+    await act(async () => { fireEvent.click(screen.getByTestId('barred-match-default-win')); });
+    expect(window.API.recordDecision).toHaveBeenCalledWith('comp1', 'm-r1-0', {
+      decision: 'fusensho', decisionBy: 'shiro', decisionReason: 'auto: Tanaka withdrawn',
+      seenModifiedAt: 1_700_000_000_000,
+    }, 'secret');
+  });
+
   // bc-cse: BarredMatchNotice is a full-width block, lifted above
   // .score-nav__actions (a centred WRAPPING flex row of small buttons) --
   // not squeezed into one flex item alongside them.

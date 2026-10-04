@@ -315,11 +315,15 @@ export function shiaijoScoreCell(m) {
 // result, password) call shape into overrideBracketWinner's own positional
 // signature. Only sends forceDownstreamReopen when true, so the FIRST attempt
 // for each feeder is byte-identical to the call before this override gained
-// the confirm+retry loop (bc-kcdg).
+// the confirm+retry loop (bc-kcdg). The feeder's stamp as this device has it
+// rides last when there is one, so the assertion is never stamped older than
+// the feeder it names (bc-hlck); with none, the call is as it always was.
 function recordOverrideWinner(compId, matchId, result, pw) {
-    return result.forceDownstreamReopen
-        ? window.API.overrideBracketWinner(compId, matchId, result.winnerName, pw, true)
-        : window.API.overrideBracketWinner(compId, matchId, result.winnerName, pw);
+    const args = [compId, matchId, result.winnerName, pw];
+    const seen = Number(result.seenModifiedAt) || 0;
+    if (result.forceDownstreamReopen || seen > 0) args.push(!!result.forceDownstreamReopen);
+    if (seen > 0) args.push(seen);
+    return window.API.overrideBracketWinner(...args);
 }
 
 // ResolveFeedersModal (mp-y3nk Phase 3): last-resort recovery when a court must
@@ -376,7 +380,7 @@ function ResolveFeedersModal({ match, comp, password, onClose, onResolved, onOpt
                     confirmDialog: window.confirmDialog,
                     compId: comp.id,
                     matchId: s.feeder.id,
-                    result: { winnerName: winner },
+                    result: { winnerName: winner, seenModifiedAt: s.feeder.modifiedAt || 0 },
                     password,
                     match: null,
                 });

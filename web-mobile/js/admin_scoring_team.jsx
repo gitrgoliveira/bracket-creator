@@ -1189,6 +1189,7 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
   const _autosaveIsRunningRef = useRefA(false);
   const _autosaveBuildPatchRef = useRefA(null);
   const _autosaveOnSubmitRef = useRefA(null);
+  const _autosaveSeenStampRef = useRefA(0);
   // bc-mrgc: what a write applied only in part kept in the match's history.
   const keptInHistory = useKeptInHistoryNote();
   const {
@@ -1201,6 +1202,7 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
     buildPatchRef: _autosaveBuildPatchRef,
     onSubmitRef: _autosaveOnSubmitRef,
     onWriteResult: keptInHistory.noteFromWrite,
+    seenStampRef: _autosaveSeenStampRef,
   });
   // Release the hold once a representative-bout add or remove has settled
   // (daihyosenBusy's true->false edge). The `finally` that clears the flag
@@ -1224,7 +1226,7 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
       // Only a running sheet with an edit still owed is saved first, so the
       // DELETE does not race it; there is nothing else to protect.
       preSave: m.status === "running" && (hadPending || isDirty),
-      send: () => window.API.removeDaihyosen(m.compId, m.id, resolveDecisionPassword(password)),
+      send: () => window.API.removeDaihyosen(m.compId, m.id, resolveDecisionPassword(password), m.modifiedAt || 0),
       refusals: REP_BOUT_REMOVE_REFUSALS,
       notDone: REP_BOUT_NOT_REMOVED,
     });
@@ -2811,6 +2813,7 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
   // C1: keep autosave refs fresh with the latest buildPatch / onSubmit /
   // running-status for TeamScoreEditorModal.
   _autosaveIsRunningRef.current = m.status === "running";
+  _autosaveSeenStampRef.current = m.modifiedAt || 0;
   _autosaveBuildPatchRef.current = buildPatch;
   _autosaveOnSubmitRef.current = onSubmit;
 
@@ -3992,7 +3995,7 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
               // finished match is judged as stored: a running write there is
               // answered stale.
               preSave: m.status !== "completed",
-              send: () => window.API.recordDaihyosen(m.compId, m.id, resolveDecisionPassword(password)),
+              send: () => window.API.recordDaihyosen(m.compId, m.id, resolveDecisionPassword(password), m.modifiedAt || 0),
               refusals: REP_BOUT_ADD_REFUSALS,
               notDone: REP_BOUT_NOT_ADDED,
             });

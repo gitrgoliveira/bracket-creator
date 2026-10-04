@@ -257,7 +257,7 @@ describe('an engi key that changes no flag count writes nothing', () => {
     await key('s');
     await settle();
     expect(writes).toHaveLength(1);
-    expect(writes[0]).toEqual({ flagsA: 5, flagsB: 1, status: 'running', editedPerf: expect.any(Number), changed: ['flags'] });
+    expect(writes[0]).toEqual({ flagsA: 5, flagsB: 1, status: 'running', editedPerf: expect.any(Number), seenModifiedAt: 0, changed: ['flags'] });
   });
 
   it('Backspace with no flag left to take back', async () => {

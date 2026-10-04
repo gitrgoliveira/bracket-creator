@@ -207,10 +207,17 @@ export function SyncStatusPill({ isRunning }) {
 // Every write carries the time of the edit it saves (editedPerf), so however
 // late it goes out, it is never newer than a result recorded after the tap.
 //
+// seenStampRef, optional, holds the stamp (modifiedAt) of the match the editor
+// shows, refreshed every render. Each tap records it beside editedPerf, and
+// the write carries it as `seenModifiedAt` (never on the wire), so the stamp
+// is never older than the match the tap was made against (bc-hlck,
+// api_client.jsx _stampAfterSeen), while a match another device changed
+// after the tap does not move it.
+//
 // onWriteResult, optional, is handed what each running write comes back with
 // (the editors' kept-in-history note, useKeptInHistoryNote). Read through a
 // ref, so a new function each render is fine.
-export function useDebouncedRunningWrite({ isRunningRef, buildPatchRef, onSubmitRef, onWriteResult }) {
+export function useDebouncedRunningWrite({ isRunningRef, buildPatchRef, onSubmitRef, onWriteResult, seenStampRef }) {
   const onWriteResultRef = useRefA(onWriteResult);
   onWriteResultRef.current = onWriteResult;
   const timerRef = useRefA(null);
@@ -218,6 +225,8 @@ export function useDebouncedRunningWrite({ isRunningRef, buildPatchRef, onSubmit
   // (never on the wire) so recordScore stamps the write with the time of that
   // edit, not of its sending (api_client.jsx _editAge).
   const editPerfRef = useRefA(null);
+  // The shown match's stamp at that edit (seenStampRef above).
+  const editSeenRef = useRefA(undefined);
   // One token per editor instance, so two open editors never release each
   // other's pending edit.
   const pendingTokenRef = useRefA({});
@@ -280,6 +289,7 @@ export function useDebouncedRunningWrite({ isRunningRef, buildPatchRef, onSubmit
       // the hand-over instead of flickering to "synced" and back.
       try {
         let patch = { ...buildPatchRef.current("running"), editedPerf: editPerfRef.current };
+        if (editSeenRef.current !== undefined) patch.seenModifiedAt = editSeenRef.current;
         if (transform) patch = transform(patch);
         const p = onSubmitRef.current(durable ? { ...patch, durable: true } : patch);
         if (p && typeof p.then === "function") {
@@ -403,6 +413,7 @@ export function useDebouncedRunningWrite({ isRunningRef, buildPatchRef, onSubmit
     deferredRef.current = false;
     notePending(true);
     editPerfRef.current = perfNow();
+    if (seenStampRef) editSeenRef.current = Number(seenStampRef.current) || 0;
     timerRef.current = setTimeout(() => {
       timerRef.current = null;
       if (holdRef.current) { deferredRef.current = true; return; }

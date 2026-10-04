@@ -62,7 +62,9 @@ export function BarredMatchNotice({ match, password, onDone }) {
     setErr("");
     setBusy(true);
     try {
-      const res = await window.API.recordDecision(match.compId, match.id, body, pw);
+      // Never stamped older than the match as shown (bc-hlck).
+      const seen = match.modifiedAt || 0;
+      const res = await window.API.recordDecision(match.compId, match.id, seen > 0 ? { ...body, seenModifiedAt: seen } : body, pw);
       if (!mountedRef.current) return;
       // bc-cse: notLandedBanner, not writeWasSuperseded alone -- a clock_skew
       // refusal used to read "a newer result for this match is already

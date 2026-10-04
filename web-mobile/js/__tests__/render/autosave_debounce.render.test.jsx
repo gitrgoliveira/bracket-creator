@@ -1666,3 +1666,29 @@ describe('bc-dhas: an edit owed at unmount keeps a newer row', () => {
     expect(row && row.ipponsA).toEqual(['M']);
   });
 });
+
+// bc-hlck: an autosave is never stamped older than the match its tap was made
+// against, and never floored by a change that arrived AFTER the tap (operator
+// ruling 2026-09-27: a tap made before another device's change stays older
+// than it). The tap records the shown match's stamp as `seenModifiedAt`,
+// which recordScore floors the stamp by and never sends.
+describe('bc-hlck: an autosave carries the stamp of the match as it was at the tap', () => {
+  it('records the stamp shown at the tap, not one that arrived before the send, and a later tap records the newer one', async () => {
+    const first = makeRunningMatch({ modifiedAt: 1_000_000 });
+    const { rerender } = renderModal(first);
+    await act(async () => { fireEvent.click(screen.getAllByText('M')[0]); });
+    // Another device's change reaches this editor inside the debounce window.
+    const moved = { ...first, modifiedAt: 2_000_000 };
+    await act(async () => {
+      rerender(<ScoreEditorModal match={moved} onClose={vi.fn()} onSubmit={makeOnSubmit(moved)} password="" />);
+    });
+    await act(async () => { vi.advanceTimersByTime(AUTOSAVE_DEBOUNCE_MS + 50); });
+    expect(window.API.recordScore).toHaveBeenCalledTimes(1);
+    expect(window.API.recordScore.mock.calls[0][2].seenModifiedAt).toBe(1_000_000);
+    // A tap made now was made against the newer match.
+    await act(async () => { fireEvent.click(screen.getAllByText('K')[0]); });
+    await act(async () => { vi.advanceTimersByTime(AUTOSAVE_DEBOUNCE_MS + 50); });
+    expect(window.API.recordScore).toHaveBeenCalledTimes(2);
+    expect(window.API.recordScore.mock.calls[1][2].seenModifiedAt).toBe(2_000_000);
+  });
+});

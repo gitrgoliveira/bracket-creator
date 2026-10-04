@@ -129,6 +129,7 @@ export function EngiScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext
   const autosaveIsRunningRef = useRefE(false);
   const autosaveBuildPatchRef = useRefE(null);
   const autosaveOnSubmitRef = useRefE(null);
+  const autosaveSeenStampRef = useRefE(0);
   // bc-mrgc: what a write applied only in part kept in the match's history.
   const keptInHistory = useKeptInHistoryNote();
   const { markDirty, cancelDebounce } = useDebouncedRunningWrite({
@@ -136,8 +137,10 @@ export function EngiScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext
     buildPatchRef: autosaveBuildPatchRef,
     onSubmitRef: autosaveOnSubmitRef,
     onWriteResult: keptInHistory.noteFromWrite,
+    seenStampRef: autosaveSeenStampRef,
   });
   autosaveIsRunningRef.current = m.status === "running";
+  autosaveSeenStampRef.current = m.modifiedAt || 0;
   autosaveBuildPatchRef.current = (status) => claimChanged({ flagsA, flagsB, status });
   autosaveOnSubmitRef.current = onSubmit;
   // An operator change to either count: the value, then the save it schedules.

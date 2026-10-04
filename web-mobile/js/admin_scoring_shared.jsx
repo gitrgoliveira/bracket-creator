@@ -427,6 +427,9 @@ function buildDecisionBody(kind, { decisionBy, decisionReason }, enchoPeriodCoun
   if (decisionReason) body.decisionReason = decisionReason;
   if (enchoPeriodCount > 0) body.encho = { periodCount: enchoPeriodCount };
   if (opts.force) body.force = true;
+  // The match the decision was recorded on (bc-hlck): recordDecision floors
+  // the stamp by it and never sends it.
+  if (opts.seenModifiedAt > 0) body.seenModifiedAt = opts.seenModifiedAt;
   return body;
 }
 
@@ -506,7 +509,8 @@ function makeSubmitDecision({
     if (setPendingWrite && mountedRef.current) setPendingWrite(false);
     try {
       const updated = await submitDecisionRequest(
-        match.compId, match.id, kind, { decisionBy, decisionReason }, enchoPeriodCount, password, opts,
+        match.compId, match.id, kind, { decisionBy, decisionReason }, enchoPeriodCount, password,
+        { ...opts, seenModifiedAt: match.modifiedAt || 0 },
       );
       if (!mountedRef.current) return;
       // A decision that did not land must not advance ANYTHING below this

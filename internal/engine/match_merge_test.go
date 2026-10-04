@@ -494,6 +494,55 @@ func TestMerge_OvertimeAloneAfterAWithdrawalIsHeld(t *testing.T) {
 	})
 }
 
+// bc-mrgc fix: a running write whose only named group is overtime, sent
+// back with the SAME "no overtime" a default win already recorded, is an
+// echo like any other -- it must not be read as a genuine overtime change
+// just because GroupEncho sits in rep.Applied. Before the fix, entering the
+// R2/R4 block for this echo held the whole write as superseded even though
+// nothing about it differed from what was stored.
+func TestMerge_EchoedOvertimeOverADefaultWinAppliesAsANoOp(t *testing.T) {
+	bothBranches(t, func(t *testing.T, knockout bool) {
+		h := mmIndividual(t, knockout)
+		_, _, err := h.eng.RecordDecision(h.compID, h.matchID, "fusensho", "aka", "", nil, false, mmT1)
+		require.NoError(t, err)
+		before := h.load(t)
+		require.False(t, before.Encho.On(), "precondition: no overtime on a default win")
+
+		board := mmRunning(h, mmT2, state.GroupEncho)
+		// No Encho set: the same "no overtime" the default win already holds.
+		require.NoError(t, h.write(board), "an echo of the stored overtime is a no-op, never a hold")
+
+		m := h.load(t)
+		assert.Equal(t, "fusensho", m.Decision, "unaffected")
+		assert.False(t, m.Encho.On())
+	})
+}
+
+// bc-mrgc fix: holdScoring (and holdGroups generally) used to set HoldReason
+// and NeedsWinner even when the groups it was asked to hold were never
+// actually applied, so nothing was genuinely held. A knockout match whose
+// winner was set by hand over a 0-0 scoreline has no scoring group for an
+// encho-only write to clash with (encho is not one): the write fully
+// applies, yet the history used to record "a knockout match needs a
+// winner" for it anyway.
+func TestMerge_OvertimeOverAHandSetWinnerAppliesWithNoReason(t *testing.T) {
+	h := mmIndividual(t, true)
+	applied, err := h.eng.OverrideBracketWinner(h.compID, h.matchID, wrTeamA, mmT1)
+	require.NoError(t, err)
+	require.True(t, applied)
+
+	board := mmRunning(h, mmT2, state.GroupEncho)
+	board.Encho = &state.EnchoMetadata{PeriodCount: 1}
+	require.NoError(t, h.write(board), "the overtime change applies on its own")
+
+	m := h.load(t)
+	assert.True(t, m.Encho.On())
+	assert.Equal(t, wrTeamA, m.Winner, "the hand-set winner stands")
+	last := h.history(t)[len(h.history(t))-1]
+	assert.Equal(t, state.HistoryOutcomeApplied, last.Outcomes[state.GroupEncho])
+	assert.Empty(t, last.Reason, "nothing was actually held, so no reason is recorded")
+}
+
 // R2's clear still needs an actual scoring change, and once it has one the
 // overtime the same board carries lands with it, exactly as the points do.
 func TestMerge_ScoringAndOvertimeTogetherClearAWithdrawal(t *testing.T) {
@@ -516,6 +565,62 @@ func TestMerge_ScoringAndOvertimeTogetherClearAWithdrawal(t *testing.T) {
 		assert.True(t, m.Encho.On(), "the overtime genuinely played lands with the cleared scoreline")
 		assert.True(t, wrEligible(t, h.store, h.compID, wrTeamAID), "eligibility follows the cleared ruling")
 	})
+}
+
+// bc-mrgc fix: a running write's scoring change that would CLEAR a stored
+// withdrawal (R2) but, once cleared, cannot give a KNOCKOUT match the
+// winner it needs (the new scoreline ties) used to hold only the scoring
+// groups through holdScoring: the overtime landed beside the kiken that
+// still stood, and the answer told the operator to "correct the result
+// with a winner" even though the kiken already gives it one. The decision
+// must stand instead, exactly as a write that never tried to clear it,
+// holding the scoring AND the overtime together.
+func TestMerge_ClearingAWithdrawalThatWouldTieAKnockoutLeavesItStanding(t *testing.T) {
+	h := mmIndividual(t, true)
+	_, _, err := h.eng.RecordDecision(h.compID, h.matchID, "kiken-voluntary", "aka", "knee", nil, false, mmT1)
+	require.NoError(t, err)
+	before := h.load(t)
+
+	board := mmRunning(h, mmT2, state.GroupPoints, state.GroupEncho)
+	board.IpponsA = []string{"M"}
+	board.IpponsB = []string{"K"}
+	board.Encho = &state.EnchoMetadata{PeriodCount: 1}
+	err = h.write(board)
+	require.ErrorIs(t, err, ErrMatchSuperseded, "the tie cannot clear a knockout's kiken, so it stands")
+	assert.ElementsMatch(t, []string{state.GroupPoints, state.GroupEncho}, HeldGroupsOf(err))
+	assert.Equal(t, state.HeldReasonDefaultWinStands, HeldReasonOf(err), "the kiken already gives the match its winner; no correction is asked for")
+	assert.Equal(t, "kiken-voluntary", HeldDecisionOf(err))
+
+	m := h.load(t)
+	assert.Equal(t, "kiken-voluntary", m.Decision, "the withdrawal stands")
+	assert.Equal(t, wrTeamB, m.Winner, "unchanged")
+	assert.Nil(t, m.Encho, "no overtime lands beside a withdrawal that stands")
+	assert.Equal(t, before.IpponsA, m.IpponsA, "the scoreline is as the withdrawal recorded it")
+	assert.Equal(t, before.IpponsB, m.IpponsB)
+	last := h.history(t)[len(h.history(t))-1]
+	assert.Equal(t, defaultWinStandsReason("kiken-voluntary"), last.Reason)
+	assert.Empty(t, last.ClearedWithdrawal, "nothing was actually cleared")
+}
+
+// The pool twin: the same tie clears the kiken and settles as a completed
+// draw (R4's pool rule), with the overtime applying alongside it -- existing
+// behaviour, unaffected by the knockout fix above.
+func TestMerge_ClearingAWithdrawalThatTiesAPoolMatchBecomesADraw(t *testing.T) {
+	h := mmIndividual(t, false)
+	_, _, err := h.eng.RecordDecision(h.compID, h.matchID, "kiken-voluntary", "aka", "knee", nil, false, mmT1)
+	require.NoError(t, err)
+
+	board := mmRunning(h, mmT2, state.GroupPoints, state.GroupEncho)
+	board.IpponsA = []string{"M"}
+	board.IpponsB = []string{"K"}
+	board.Encho = &state.EnchoMetadata{PeriodCount: 1}
+	require.NoError(t, h.write(board), "the tie clears the kiken and settles as a draw")
+
+	m := h.load(t)
+	assert.Equal(t, state.MatchStatusCompleted, m.Status)
+	assert.Equal(t, state.DecisionDraw, m.Decision)
+	assert.Empty(t, m.Winner)
+	assert.True(t, m.Encho.On(), "the overtime applies with the cleared scoreline")
 }
 
 // A verdict that applies but does not move (the same withdrawal sent again

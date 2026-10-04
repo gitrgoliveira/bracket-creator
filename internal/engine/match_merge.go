@@ -328,13 +328,19 @@ func mergeMatchWrite(stored, incoming *state.MatchResult, policy matchWritePolic
 		carryHantei(stored, incoming)
 	}
 
-	// R2 and R3: a scoring change applied to a finished match. An overtime
-	// change rides along even with no scoring change of its own (a board
-	// still toggling encho on a match a default win already closed), since
+	// R2 and R3: a scoring change applied to a finished match. A GENUINE
+	// overtime change (its value actually differs from the stored one)
+	// rides along even with no scoring change of its own (a board still
+	// toggling encho on a match a default win already closed), since
 	// R2/R4's default-win branch below must hold it with any scoring too:
 	// otherwise an (E) mark could land on a default win on its own, which
-	// FIK Art. 32 never produces (one maru in encho, never overtime).
-	if finished && (scoringChanged(stored, incoming, rep.Applied) || slices.Contains(rep.Applied, state.GroupEncho)) {
+	// FIK Art. 32 never produces (one maru in encho, never overtime). An
+	// ECHO of the stored overtime (the same "no overtime" sent back) must
+	// NOT ride along: it is in rep.Applied like any echo, but entering this
+	// block for it alone used to hold the whole write as if something had
+	// changed, answering "Not applied" for a write that changed nothing.
+	if finished && (scoringChanged(stored, incoming, rep.Applied) ||
+		(slices.Contains(rep.Applied, state.GroupEncho) && state.GroupDiffers(stored, incoming, state.GroupEncho))) {
 		probe := *incoming
 		// R2 clears a withdrawal OF THIS MATCH: points scored after it mean
 		// it was a mistake. A fusensho is a default win awarded for a bar
@@ -372,6 +378,19 @@ func mergeMatchWrite(stored, incoming *state.MatchResult, policy matchWritePolic
 				}
 			}
 		default:
+			if cleared {
+				// The clear cannot give the match the winner it needs (the
+				// new scoreline leaves a knockout tied, or an engi count
+				// with no valid total): the decision it would have cleared
+				// is the only thing that gives the match a winner, so it
+				// STANDS instead, exactly as a write that never tried to
+				// clear it (holdDefaultWinScoring holds the scoring AND the
+				// overtime together, so an (E) mark can never land on a
+				// default win on its own, FIK Art. 32). stored.Decision,
+				// never probe's: cleared already emptied that.
+				mh.holdDefaultWinScoring(stored.Decision)
+				break
+			}
 			// R4 (operator ruling 2026-10-04): the change would leave a
 			// finished knockout match tied, or an engi match with no valid
 			// count. It is not applied: the match keeps its recorded finish,
@@ -643,13 +662,21 @@ func (h *mergeHold) raw(group string) {
 
 // holdGroups takes each applied group back out, with reason as the history
 // entry's reason and NeedsWinner reported to the writer.
-func (h *mergeHold) holdGroups(reason string, groups ...string) {
+func (h *mergeHold) holdGroups(reason string, groups ...string) bool {
+	var heldSomething bool
 	for _, g := range groups {
 		i := slices.Index(h.rep.Applied, g)
 		if i < 0 {
 			continue
 		}
 		h.rep.Applied = slices.Delete(h.rep.Applied, i, i+1)
+		// An echo (the incoming value equals the stored one, and reportHeld
+		// has no raw pre-adjustment value to fall back on) is no loss: it
+		// goes to HeldEcho below, and holding nothing real must not report a
+		// reason or ask the operator for a correction nothing needed.
+		if h.rawValues[g] != nil || state.GroupDiffers(h.stored, h.incoming, g) {
+			heldSomething = true
+		}
 		reportHeld(h.rep, g, h.stored, h.incoming, h.rawValues[g])
 		state.CopyGroup(h.incoming, h.stored, g)
 		if s, ok := h.storedStamps[g]; ok {
@@ -658,6 +685,9 @@ func (h *mergeHold) holdGroups(reason string, groups ...string) {
 			delete(h.stamps, g)
 		}
 	}
+	if !heldSomething {
+		return false
+	}
 	h.rep.HoldReason = reason
 	// "Correct the result with a winner" is the answer for the two R4
 	// reasons only; a default win that stands asks for no correction.
@@ -665,17 +695,18 @@ func (h *mergeHold) holdGroups(reason string, groups ...string) {
 	// itself, since the reason text it builds here now names the decision
 	// and so can no longer be compared against one fixed constant.
 	h.rep.NeedsWinner = reason == HoldReasonKnockoutNeedsWinner || reason == HoldReasonEngiNeedsValidCount
+	return true
 }
 
 // holdScoring holds every applied group that decides who won.
-func (h *mergeHold) holdScoring(reason string) {
+func (h *mergeHold) holdScoring(reason string) bool {
 	var scoring []string
 	for _, g := range h.rep.Applied {
 		if state.IsScoringGroup(g) {
 			scoring = append(scoring, g)
 		}
 	}
-	h.holdGroups(reason, scoring...)
+	return h.holdGroups(reason, scoring...)
 }
 
 // holdDefaultWinScoring holds every applied group that decides who won
@@ -692,7 +723,12 @@ func (h *mergeHold) holdDefaultWinScoring(decision string) {
 			groups = append(groups, g)
 		}
 	}
-	h.holdGroups(defaultWinStandsReason(decision), groups...)
+	if !h.holdGroups(defaultWinStandsReason(decision), groups...) {
+		// Nothing of it was genuinely held (every named group was an echo,
+		// or there was none to hold at all): the write fully applied, so it
+		// gets no reason and names no decision either.
+		return
+	}
 	// The decision that closed the match already has the winner it needs,
 	// so the answer sends the operator to the editor's own Remove <decision>
 	// instead of asking for a correction with a winner (holdGroups'

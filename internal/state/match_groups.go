@@ -373,6 +373,46 @@ func (bm *BracketMatch) StampGroups(stamp int64, groups ...string) {
 	stampGroups(&bm.GroupStamps, &bm.ModifiedAt, SubPositions(bm.SubResults), stamp, groups...)
 }
 
+// applyMergedGroupStamps overwrites groups' recorded stamps with ones
+// mergeMatchWrite has already decided for them, bypassing stampGroups' never-
+// lower guard (bc-mrgc fix: the engi recorder). The merge is the one place
+// that orders a group against every other stored group, including S2's
+// displaceNewerScoring: a finish that arrives after a newer but INVALID
+// stored count applies on its own, older scoreline and moves that count to
+// the history, which legitimately puts the group's stamp BACK to the
+// finish's own time. A naive never-lower re-stamp cannot express that move
+// and leaves the group stuck at the displaced count's later stamp, so a
+// further, valid write made between the two is wrongly held. ModifiedAt is
+// recomputed as the newest stamp left on the match (mergeMatchWrite's own
+// rule), since lowering one group's stamp can leave an older one as the new
+// newest.
+func applyMergedGroupStamps(stamps *map[string]int64, modifiedAt *int64, positions []int, decided map[string]int64, groups ...string) {
+	m := MaterializedGroupStamps(*stamps, *modifiedAt, positions)
+	for _, g := range groups {
+		if v, ok := decided[g]; ok {
+			m[g] = v
+		}
+	}
+	*stamps = m
+	var newest int64
+	for _, v := range m {
+		if v > newest {
+			newest = v
+		}
+	}
+	*modifiedAt = newest
+}
+
+// ApplyMergedGroupStamps is applyMergedGroupStamps for a pool/league match.
+func (m *MatchResult) ApplyMergedGroupStamps(decided map[string]int64, groups ...string) {
+	applyMergedGroupStamps(&m.GroupStamps, &m.ModifiedAt, SubPositions(m.SubResults), decided, groups...)
+}
+
+// ApplyMergedGroupStamps is applyMergedGroupStamps for a bracket match.
+func (bm *BracketMatch) ApplyMergedGroupStamps(decided map[string]int64, groups ...string) {
+	applyMergedGroupStamps(&bm.GroupStamps, &bm.ModifiedAt, SubPositions(bm.SubResults), decided, groups...)
+}
+
 // MergeReport is what engine.mergeMatchWrite decided for one write (bc-mrgc).
 // It rides on the incoming MatchResult (MatchResult.Merge) to the history
 // writer and to the handlers' heldGroups; it is never persisted.
@@ -513,7 +553,7 @@ func (r *MergeReport) HeldReason() string {
 // as heldDecision beside heldReason "default_win_stands", "" when the held
 // groups were not held for that reason.
 func (r *MergeReport) HeldDecision() string {
-	if r == nil || !r.DefaultWinStands {
+	if r == nil || r.HeldReason() != HeldReasonDefaultWinStands {
 		return ""
 	}
 	return r.StandingDecision

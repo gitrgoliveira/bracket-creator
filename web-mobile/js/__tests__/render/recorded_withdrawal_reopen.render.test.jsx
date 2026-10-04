@@ -652,12 +652,47 @@ describe('Clear withdrawal and reopen: a later default win from the same withdra
 // status, which the server stamps on the match (withdrawnStatus): an
 // ordinary fusenpai's names THIS match.
 describe('clearing a fusenpai chained onto an earlier withdrawal (bc-kfup)', () => {
-  it('says the match goes back to the queue, not that the competitor can compete again', async () => {
+  // bc-cse: "again" would be false here -- this match's own decision is
+  // fusenpai, never fusensho, so clearing it has not undone any fusensho to
+  // repeat. The fusensho is for the OTHER match (not this one): it is the
+  // first one for THIS match's winner, named exactly as the Recorded line
+  // above names them.
+  it('says the match goes back to the queue, and names a fusensho FOR the winner, never "again"', async () => {
     await mount(individualWithdrawal({ withdrawnStatus: { eligible: false, matchId: 'Pool A-0' } }));
     await waitFor(() => expect(screen.getByTestId('clear-withdrawal-reopen').textContent).toBe('Clear fusenpai'));
     const text = screen.getByTestId('clear-withdrawal-consequence').textContent;
-    expect(text).toBe('The match goes back to the queue. Tanaka is still withdrawn, so record the fusensho again.');
+    expect(text).toBe('The match goes back to the queue. Tanaka is still withdrawn, so record a fusensho for Yamada.');
     expect(text).not.toContain('can compete again');
+    expect(text).not.toContain('again');
+  });
+
+  // Same bug, the other decision it can chain from: a kiken whose competitor
+  // is barred by a DIFFERENT match keeps its own kiken record (bc-kfup: a
+  // second kiken is refused, so this one never recorded a fusensho either).
+  it('says the same for a chained kiken, never "again"', async () => {
+    await mount(individualWithdrawal({
+      decision: 'kiken-voluntary', withdrawnStatus: { eligible: false, matchId: 'Pool A-0' },
+    }));
+    await waitFor(() => expect(screen.getByTestId('clear-withdrawal-reopen').textContent).toBe('Clear kiken'));
+    const text = screen.getByTestId('clear-withdrawal-consequence').textContent;
+    expect(text).toBe('The match goes back to the queue. Tanaka is still withdrawn, so record a fusensho for Yamada.');
+    expect(text).not.toContain('again');
+  });
+
+  // Contrast: when the cleared decision IS a fusensho (the match-level
+  // default win class, isDefaultWin), "again" is literally true -- clearing
+  // it undoes exactly the fusensho that needs recording again to re-close
+  // the queued match. Covered fully by the "a match-level fusensho" describe
+  // above; pinned here too so the two wordings sit beside the bug they tell
+  // apart.
+  it('keeps "again" when the cleared decision really is a fusensho', async () => {
+    await mount(individualWithdrawal({
+      decision: 'fusensho', decisionReason: 'auto: Tanaka withdrawn',
+      withdrawnStatus: { eligible: false, matchId: 'Pool A-0' },
+    }));
+    await waitFor(() => expect(screen.getByTestId('clear-withdrawal-reopen').textContent).toBe('Clear fusensho'));
+    const text = screen.getByTestId('clear-withdrawal-consequence').textContent;
+    expect(text).toBe('The match goes back to the queue. Tanaka is still withdrawn, so record the fusensho again.');
   });
 
   it('keeps the ordinary copy for a fusenpai that barred the competitor itself', async () => {

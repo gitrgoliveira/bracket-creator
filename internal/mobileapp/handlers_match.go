@@ -2352,7 +2352,7 @@ func DefaultWinStandsMessage(decision string) string {
 	if word == "" {
 		word = "decision"
 	}
-	return fmt.Sprintf("Not applied: this match was closed with a %s, so the scoring was kept in the match's history. To change the result, correct the %s from the match's score editor.", word, word)
+	return fmt.Sprintf("Not applied: this match was closed with a %s, so this change was kept in the match's history. To change the result, correct the %s from the match's score editor.", word, word)
 }
 
 // messageForHeldReason is the one place a heldReason code (plus, for a

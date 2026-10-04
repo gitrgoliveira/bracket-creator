@@ -98,3 +98,53 @@ func TestStampGroups_NeverLowersAGroupsStamp(t *testing.T) {
 	m.StampGroups(50, GroupResult)
 	assert.Equal(t, int64(100), m.GroupStamp(GroupResult), "an older stamp than the match's own start never lowers it")
 }
+
+// TestApplyMergedGroupStamps_CanLowerAStampAndRecomputesModifiedAt pins the
+// contract ApplyMergedGroupStamps gives the engi recorder (bc-mrgc Fix 1),
+// in deliberate contrast with StampGroups' never-lower rule above: it
+// applies exactly the stamp mergeMatchWrite already decided for a group,
+// even when that is OLDER than what the match currently records (S2's
+// displaceNewerScoring moves a stored, invalid count's stamp out and
+// replaces it with a finish's own, earlier one), and ModifiedAt is
+// recomputed as the newest stamp actually left on the match -- which can
+// itself move backward when the group that had been keeping it high is
+// the one just lowered.
+func TestApplyMergedGroupStamps_CanLowerAStampAndRecomputesModifiedAt(t *testing.T) {
+	m := &MatchResult{ID: "m", Status: MatchStatusRunning, ModifiedAt: 100}
+	m.StampGroups(400, GroupFlags) // as if a recount had been accepted at 400
+	require.Equal(t, int64(400), m.GroupStamp(GroupFlags), "precondition")
+	require.Equal(t, int64(400), m.ModifiedAt, "precondition")
+
+	m.ApplyMergedGroupStamps(map[string]int64{GroupResult: 200, GroupFlags: 200}, GroupResult, GroupFlags)
+	assert.Equal(t, int64(200), m.GroupStamp(GroupFlags), "the merge's own decision may lower a group's stamp")
+	assert.Equal(t, int64(200), m.GroupStamp(GroupResult))
+	assert.Equal(t, int64(200), m.ModifiedAt, "recomputed as the newest stamp left on the match, lower than before")
+	assert.Equal(t, int64(100), m.GroupStamp(GroupPoints), "a group not named in decided keeps its materialized stamp")
+}
+
+// TestMergeReport_HeldDecisionRequiresTheDefaultWinStandsReason pins
+// bc-mrgc Fix 4: HeldDecision must agree with HeldReason, which also
+// requires something actually held (len(Held)+len(Displaced) > 0). Before
+// the fix, HeldDecision checked DefaultWinStands alone, so a report that
+// set it without holding anything answered heldDecision with no
+// heldReason, contradicting openapi.
+func TestMergeReport_HeldDecisionRequiresTheDefaultWinStandsReason(t *testing.T) {
+	// DefaultWinStands set, but nothing held: HeldReason reads "" (nothing
+	// to explain), so HeldDecision must read "" too.
+	rep := &MergeReport{DefaultWinStands: true, StandingDecision: "fusensho"}
+	assert.Empty(t, rep.HeldReason(), "precondition: nothing was held")
+	assert.Empty(t, rep.HeldDecision(), "no reason means no decision either")
+
+	// DefaultWinStands set AND something genuinely held: both read through.
+	rep2 := &MergeReport{DefaultWinStands: true, StandingDecision: "kiken-voluntary", Held: []string{GroupPoints}}
+	assert.Equal(t, HeldReasonDefaultWinStands, rep2.HeldReason())
+	assert.Equal(t, "kiken-voluntary", rep2.HeldDecision())
+
+	// NeedsWinner takes priority over DefaultWinStands in HeldReason, and a
+	// report in that shape never names a decision.
+	rep3 := &MergeReport{NeedsWinner: true, DefaultWinStands: true, StandingDecision: "fusensho", Held: []string{GroupPoints}}
+	assert.Equal(t, HeldReasonNeedsWinner, rep3.HeldReason())
+	assert.Empty(t, rep3.HeldDecision(), "needs_winner, not default_win_stands")
+
+	assert.Empty(t, (*MergeReport)(nil).HeldDecision(), "a nil report names no decision")
+}

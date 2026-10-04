@@ -39,13 +39,24 @@
 // Exit 0   no hand-rolled checks outside the owning module
 // Exit 1   at least one site re-derives the rule
 
-import { readFileSync } from 'node:fs';
+import { readFileSync, existsSync } from 'node:fs';
 import { resolve, dirname, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { walk, scanSource, printViolations } from './check-helpers.mjs';
+import { walk, scanSource, scanWholeFile, printViolations } from './check-helpers.mjs';
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)));
 const JS_DIR = resolve(ROOT, 'js');
+
+// The default-win rules below are prose rules, not JS-API rules: the operator
+// ruling they enforce ("default win" is not a kendo term) governs anything an
+// operator reads, not only js/jsx. index.html and styles.css carry no such
+// text TODAY (grepped by hand while adding this), but both can carry an
+// operator-visible string (a title, a placeholder, generated CSS content), so
+// the default-win rules alone also scan them; the two JS-API rules above stay
+// scoped to JS_DIR, since neither an `.applied` comparison nor a `window.`
+// mirror read is a thing either file could ever contain.
+const EXTRA_TEXT_FILES = [resolve(ROOT, 'index.html'), resolve(ROOT, 'css', 'styles.css')]
+  .filter((f) => existsSync(f));
 
 // The module that OWNS the rule, and is therefore the one place allowed to
 // state it in terms of the raw response fields.
@@ -96,14 +107,46 @@ export const FORBIDDEN = [
     // NAMES the winner. This rule is unlike the two above: it has no owner
     // allowed to state it directly, the OWNER module (write_result.jsx)
     // included, so it is NOT exempted for OWNER or for api_client.jsx below
-    // (see the per-rule exemption sets). An identifier such as `defaultWin`
-    // or `DEFAULT_WIN_STANDS_*` still passes: the space/hyphen is required,
-    // and stripComments already removes comments before this runs, so a
-    // comment explaining the ruling (this one included) is never a hit.
-    re: /default[ -]win/i,
+    // (see the per-rule exemption sets).
+    //
+    // Scanned WHOLE-FILE (see WHOLE_FILE_RULE_INDICES below), not line by
+    // line: a single-line check missed the shape that actually shipped at
+    // commit 76ffb044, a JSX text node wrapped by the formatter so "the
+    // default" ends one line and "win when..." begins the next -- two lines
+    // neither of which contains the phrase on its own. The separator class
+    // also covers `default{" "}win` (a JSX expression splice), string
+    // concatenation (`'default ' + 'win'`), a hyphenated spelling
+    // ("default-win", the historical testid shape), and a non-breaking
+    // space (`\s` matches U+00A0), all of which render as the same two
+    // words a reader sees run together.
+    //
+    // The separator is REQUIRED (`+`, not `*`): a camelCase identifier such
+    // as `isDefaultWin`, `clearsDefaultWin` or `DEFAULT_WIN_STANDS_REASON`
+    // joins "Default" and "Win" with ZERO characters (or an underscore,
+    // which the class does not include either), so none of those -- all
+    // over this codebase, the OWNER module included -- would survive a
+    // zero-or-more class. Only a real separator (whitespace, a JSX splice,
+    // a quote/plus from concatenation, or a hyphen) trips it.
+    re: /default[\s{}"'+-]+win/i,
     why: 'says "default win", a term kendo does not have; name the recorded decision instead (kiken, fusenpai, fusensho) through decisionWord (write_result.jsx)',
   },
+  {
+    // The other way to say it without the word "default" next to "win":
+    // "X wins by default" / "the match was won by default". Same ruling,
+    // same scanning (whole-file, so a wrap between "win" and "by default"
+    // is caught too); bounded to 40 characters and no sentence break so it
+    // cannot reach across an unrelated "win" and an unrelated "by default"
+    // in two different sentences.
+    re: /\bwins?\b[^.\n]{0,40}\bby default\b/i,
+    why: 'says a side "wins by default", a phrase kendo does not have; name the recorded decision instead (kiken, fusenpai, fusensho) through decisionWord (write_result.jsx)',
+  },
 ];
+
+// Scanned against the WHOLE comment-stripped file (scanWholeFile) rather
+// than line by line (scanSource): both are prose rules whose production text
+// can wrap across a line break, and neither depends on a single line's
+// syntax the way the two JS-API rules above do.
+const WHOLE_FILE_RULE_INDICES = new Set([2, 3]);
 
 // api_client.jsx is the collaborator that turns an HTTP response INTO the
 // discriminated result the predicates read, so it necessarily touches the raw
@@ -118,9 +161,17 @@ const ALLOWED_RULE_INDEX = 0;
 
 // The OWNER module is exempt from the two rules ABOVE it (it is allowed to
 // state its own abstraction in the raw terms those rules forbid everywhere
-// else), but not from the default-win rule: nothing, the owner included, may
-// say "default win".
+// else), but not from the two default-win rules: nothing, the owner
+// included, may say "default win" or "wins ... by default".
 const OWNER_EXEMPT_RULE_INDICES = new Set([0, 1]);
+
+// scanFile: picks scanSource (line-based) or scanWholeFile (comment-stripped
+// whole-file) per rule, per the split above, and merges the hits.
+function scanFile(src, rules) {
+  const lineRules = rules.filter((r) => !WHOLE_FILE_RULE_INDICES.has(FORBIDDEN.indexOf(r)));
+  const wholeRules = rules.filter((r) => WHOLE_FILE_RULE_INDICES.has(FORBIDDEN.indexOf(r)));
+  return [...scanSource(src, lineRules), ...scanWholeFile(src, wholeRules)];
+}
 
 export function findViolations() {
   const violations = [];
@@ -134,7 +185,17 @@ export function findViolations() {
     });
     if (rules.length === 0) continue;
     const rel = relative(ROOT, file);
-    for (const hit of scanSource(readFileSync(file, 'utf8'), rules)) {
+    for (const hit of scanFile(readFileSync(file, 'utf8'), rules)) {
+      violations.push({ rel, ...hit });
+    }
+  }
+  // The two default-win rules are prose rules an operator can hit outside
+  // js/jsx too (see EXTRA_TEXT_FILES above); the JS-API rules have no
+  // business there, so only the whole-file default-win rules run on them.
+  const defaultWinRules = FORBIDDEN.filter((_, i) => WHOLE_FILE_RULE_INDICES.has(i));
+  for (const file of EXTRA_TEXT_FILES) {
+    const rel = relative(ROOT, file);
+    for (const hit of scanWholeFile(readFileSync(file, 'utf8'), defaultWinRules)) {
       violations.push({ rel, ...hit });
     }
   }
@@ -145,14 +206,14 @@ if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.ur
   const violations = findViolations();
   if (violations.length === 0) {
     console.log('  ✓ the not-landed rule is asked, never re-derived');
-    console.log('  ✓ no production string says "default win"');
+    console.log('  ✓ no production string says "default win" or "wins ... by default"');
     console.log('All write-result checks OK.');
     process.exit(0);
   }
   console.error('Write-result checks failed.\n');
   console.error(`The landed/superseded rule belongs to js/${OWNER} (writeDidNotLand / writeWasSuperseded);`);
   console.error('re-deriving it at a call site is how the sixth site was missed last time.');
-  console.error('"default win" is not a kendo term; name the recorded decision instead (kiken, fusenpai, fusensho).\n');
+  console.error('"default win" / "wins ... by default" are not kendo terms; name the recorded decision instead (kiken, fusenpai, fusensho).\n');
   printViolations(violations);
   process.exit(1);
 }

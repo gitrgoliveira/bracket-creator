@@ -3730,6 +3730,23 @@ paths:
                         $ref: '#/components/schemas/SubMatchResult'
                       result:
                         $ref: '#/components/schemas/MatchResult'
+                      heldGroups:
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/MergeGroup'
+                        description: >
+                          Present when the add applied in part: the groups held
+                          and kept in the match's history. As RefusedWrite.heldGroups.
+                      heldReason:
+                        type: string
+                        enum: [needs_winner, default_win_stands]
+                        description: As RefusedWrite.heldReason.
+                      heldDecision:
+                        type: string
+                        description: >
+                          The decision code that closed the match, present
+                          only beside `heldReason: default_win_stands`. As
+                          RefusedWrite.heldDecision.
                   - $ref: '#/components/schemas/RefusedWrite'
         '400':
           description: >
@@ -3837,6 +3854,24 @@ paths:
                     properties:
                       result:
                         $ref: '#/components/schemas/MatchResult'
+                      heldGroups:
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/MergeGroup'
+                        description: >
+                          Present when the remove applied in part: the groups
+                          held and kept in the match's history. As
+                          RefusedWrite.heldGroups.
+                      heldReason:
+                        type: string
+                        enum: [needs_winner, default_win_stands]
+                        description: As RefusedWrite.heldReason.
+                      heldDecision:
+                        type: string
+                        description: >
+                          The decision code that closed the match, present
+                          only beside `heldReason: default_win_stands`. As
+                          RefusedWrite.heldDecision.
                   - $ref: '#/components/schemas/RefusedWrite'
         '400':
           description: >

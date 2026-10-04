@@ -440,9 +440,9 @@ describe('team editor: Remove withdrawal', () => {
     // The way out it names is one that works: a representative bout is
     // fought on the court, and the server would refuse an add while the
     // withdrawal is still stored, so the add is not offered here.
-    expect(screen.getByTestId('daihyosen-hint').textContent).toContain('Clear withdrawal and reopen');
+    expect(screen.getByTestId('daihyosen-hint').textContent).toContain('Clear kiken');
     expect(screen.queryByTestId('scoring-modal-daihyosen-button')).toBeNull();
-    expect(saveButton().title).toContain('Clear withdrawal and reopen');
+    expect(saveButton().title).toContain('Clear kiken');
 
     // A point in bout 2 breaks the tie: the save is a correction again.
     const bout2Buttons = document.querySelectorAll('.team-sub-match__btns')[2];
@@ -450,6 +450,34 @@ describe('team editor: Remove withdrawal', () => {
     expect(saveButton().textContent).toBe('Save correction');
     expect(saveButton().disabled).toBe(false);
     expect(onSubmit).not.toHaveBeenCalled();
+  });
+
+  // bc-cse: the hint and the Needs-a-winner title name the decision
+  // actually recorded, never the retired "Clear withdrawal and reopen"
+  // button, and never promise a reopen outcome ("and reopen" / "back on
+  // the court") the Clear button does not always deliver: a fusenpai whose
+  // bar moves onto a later no-show reopens to the queue, not the court
+  // (RecordedWithdrawal/reopenTargetStatus), so the sentence only commits
+  // to "fight it", not to where it lands first.
+  it('names the recorded fusenpai, not "withdrawal", and promises no reopen outcome', async () => {
+    await mount(teamKiken({
+      decision: 'fusenpai', decisionBy: 'aka',
+      phase: 'bracket', round: 'Round 1', poolName: undefined,
+      subResults: [{ position: 1, sideA: '', sideB: '', ipponsA: [], ipponsB: [], winner: '', decision: 'hikiwake' }],
+    }));
+    const saveButton = () => [...document.querySelectorAll('.score-nav button.btn--primary')][0];
+
+    await tap(screen.getByTestId('remove-withdrawal'));
+    expect(saveButton().textContent).toBe('Needs a winner');
+
+    const hint = screen.getByTestId('daihyosen-hint').textContent;
+    expect(hint).toContain('Clear fusenpai');
+    expect(hint).not.toContain('Clear withdrawal');
+    expect(hint).not.toContain('and reopen');
+    expect(hint).not.toContain('back on the court');
+    expect(saveButton().title).toContain('Clear fusenpai');
+    expect(saveButton().title).not.toContain('Clear withdrawal');
+    expect(saveButton().title).not.toContain('and reopen');
   });
 
   // A finished kachinuki encounter has no Save correction (its result is the

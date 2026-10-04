@@ -154,7 +154,7 @@ func (e *Engine) RecordMatchResultWithIneligibilityTx(tx state.StoreTx, compID, 
 		// fo carries bc-kcdg's downstream-correction confirmation through the
 		// engi seam. Without it an engi knockout correction could neither be
 		// refused nor confirmed: the guard lives past this early return.
-		rec, recErr := e.recordEngiMatch(tx, compID, matchID, result.FlagsA, result.FlagsB, result.CorrectionReason, result.ModifiedAt, fo)
+		rec, recErr := e.recordEngiMatch(tx, compID, matchID, result.FlagsA, result.FlagsB, result.CorrectionReason, result.ModifiedAt, result.GroupStamps, fo)
 		if recErr != nil {
 			return nil, recErr
 		}

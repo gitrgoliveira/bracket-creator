@@ -57,7 +57,7 @@ import { SideLabel } from './side_cell.jsx';
 // Imported from the leaf, not read off `window`, for the same reason
 // admin_scoring_shared.jsx does it: write_result.jsx is import-only, and this
 // editor is ES-imported by hosts and tests that never load api_client.
-import { notLandedBanner, terminalFailureBanner, notSavedText, writeDidNotLand, writeWasRefused, writeRetryable, dependentActionBlocked, FETCH_TIMEOUT_MS, REP_BOUT_NOT_ADDED, REP_BOUT_NOT_REMOVED, noAnswerSentence } from './write_result.jsx';
+import { notLandedBanner, terminalFailureBanner, notSavedText, writeDidNotLand, writeWasRefused, writeRetryable, dependentActionBlocked, FETCH_TIMEOUT_MS, REP_BOUT_NOT_ADDED, REP_BOUT_NOT_REMOVED, noAnswerSentence, decisionWord } from './write_result.jsx';
 
 // boutMiddle is THE single source for a bout's centre value (vs/X/(E)/(DH));
 // the editor derives its per-bout middle from it rather than restating the
@@ -1869,10 +1869,18 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
   // A representative bout is fought on the court, and the server judges a
   // tie on the STORED match, which still holds the withdrawal until this
   // save, so the add is refused during a removal. A tied knockout is "more
-  // fighting left": it is fixed by Clear withdrawal and reopen, and both the
-  // block's title and the representative-bout panel say so.
+  // fighting left": it is fixed by Clear <decision> (named through
+  // decisionWord, bc-cse: "withdrawal" is never the operator's word for a
+  // recorded kiken/fusenpai/fusensho), and both the block's title and the
+  // representative-bout panel say so. Neither promises "and reopen" or
+  // "back on the court": the server may return the match to the queue
+  // instead of straight to running (a fusensho, or a chained fusenpai whose
+  // bar moves on, see RecordedWithdrawal above), so the one thing both
+  // sentences can truthfully say is that the button fights the tie, not
+  // where it lands first.
+  const decisionNoun = decisionWord(m.decision) || "withdrawal";
   const koTieTitle = removingWithdrawal
-    ? "A knockout match can't be a draw: undo, then use Clear withdrawal and reopen to fight a representative bout"
+    ? `A knockout match can't be a draw: undo, then use Clear ${decisionNoun} to fight a representative bout`
     : "A knockout match can't be a draw: add and score a daihyosen to decide a winner";
   // bc-tmfn: Finish (and Save correction: corrections are not exempt) refuses
   // while a numbered bout has no result. Kachinuki ends on End match instead.
@@ -4007,7 +4015,7 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
                 </div>
                 <div className="daihyosen-controls__hint" data-testid="daihyosen-hint">
                   {removingWithdrawal
-                    ? <>A knockout encounter must have a winner. If the bouts were tied, a representative bout (<TermAS name="daihyosen">daihyosen</TermAS>) decided it: undo the removal and use Clear withdrawal and reopen, which puts the match back on the court to fight it.</>
+                    ? <>A knockout encounter must have a winner. If the bouts were tied, a representative bout (<TermAS name="daihyosen">daihyosen</TermAS>) decided it: undo the removal and use Clear {decisionNoun} to fight it.</>
                     : teamTied
                     ? <>This encounter is tied. Add a representative bout (<TermAS name="daihyosen">daihyosen</TermAS>) to decide it. Each side picks one eligible competitor, scored like any other sub-match.</>
                     : <>A knockout encounter must have a winner. If the bouts end tied, add a representative bout (<TermAS name="daihyosen">daihyosen</TermAS>) to break it.</>}

@@ -12,9 +12,17 @@
 // reports the wrong line sends the reader to prose, and a comment stripper
 // that hides code hides violations.
 import { describe, it, expect } from 'vitest';
-import { stripComments, scanSource } from '../../check-helpers.mjs';
+import { stripComments, scanSource, scanWholeFile } from '../../check-helpers.mjs';
 import { FORBIDDEN as NUMBER_RULES } from '../../check-competitor-search.mjs';
 import { FORBIDDEN as WRITE_RULES } from '../../check-write-result.mjs';
+
+// The two default-win rules (WRITE_RULES[2] and [3]) are the ones
+// findViolations scans WHOLE-FILE (scanWholeFile), not line by line: see
+// check-write-result.mjs's WHOLE_FILE_RULE_INDICES. Tests below that exercise
+// a cross-line shape use scanWholeFile directly with just these two, rather
+// than scanSource with the full WRITE_RULES array, since scanSource cannot
+// see across a line break by construction.
+const DEFAULT_WIN_RULES = [WRITE_RULES[2], WRITE_RULES[3]];
 
 const lines = (src) => src.split('\n').length;
 
@@ -118,8 +126,11 @@ describe('the write-result rule is importable without running the gate', () => {
 // is not a kendo term, so no production string may say it. Unlike the two
 // rules above it, this one is deliberately global -- it has no owner allowed
 // to state it directly -- so it is checked here only against scanSource
-// directly (comment-stripped), the same mechanism findViolations uses, never
-// against a hand-rolled owner exemption.
+// directly (comment-stripped), never against a hand-rolled owner exemption.
+// These single-line fixtures work the same way whichever scanner runs them
+// (scanSource or scanWholeFile): there is no line break for the two to
+// disagree about. See the next describe block for the shapes that only a
+// whole-file scan -- findViolations' real mechanism for this rule -- can see.
 describe('the "default win" phrase rule has no legitimate spelling', () => {
   const trips = (line) => scanSource(line + '\n', WRITE_RULES).length === 1;
 
@@ -141,5 +152,96 @@ describe('the "default win" phrase rule has no legitimate spelling', () => {
   it('names the recorded decision instead, which never trips it', () => {
     expect(trips('return `Record fusensho for ${name}`;')).toBe(false);
     expect(trips('return decisionWord(decision);')).toBe(false);
+  });
+});
+
+// bc-cse FIX 2: the line-based scanner above never saw the shape that
+// actually shipped (commit 76ffb044, admin_scoring_shared.jsx ~1878): a JSX
+// text node the formatter wrapped so "the default" ends one line and "win
+// when..." begins the next. Neither line contains the phrase alone, so a
+// per-line regex missed it. These pin the whole-file scanner (scanWholeFile,
+// what findViolations actually runs the default-win rules through) against
+// that shape and its siblings: a JSX expression splice, string
+// concatenation, and a non-breaking space, every one of which renders as the
+// same two words a reader sees run together.
+describe('the "default win" rule sees a wrap a line-based scan cannot', () => {
+  const tripsWhole = (src) => scanWholeFile(src, DEFAULT_WIN_RULES).length === 1;
+
+  it('the exact 76ffb044 shape: a JSX text node wrapped across two lines', () => {
+    // Reproduces admin_scoring_shared.jsx as it shipped at 76ffb044, before
+    // this fix: "default" is the last word of one line, "win" the first word
+    // of the next.
+    const src = [
+      '            <p data-testid="clear-withdrawal-consequence" style={{ margin: "6px 0 0" }}>',
+      '              This reopens the match: it goes back to running and {who || "the withdrawn side"} can',
+      '              compete again. {winnerName || "The winner"}&apos;s points were replaced by the default',
+      '              win when the withdrawal was recorded, so enter them again; {who ? `${who}\'s` : "the withdrawn side\'s"} points',
+      '              are kept. Then score the rest and finish it.',
+      '            </p>',
+    ].join('\n');
+    const hits = scanWholeFile(src, DEFAULT_WIN_RULES);
+    expect(hits.length).toBe(1);
+    // Reports the line the match STARTS on (the "default" line), not the
+    // "win" line it ends on -- the same convention scanSource uses.
+    expect(hits[0].line).toBe(3);
+  });
+
+  it('a JSX expression splice between the words', () => {
+    expect(tripsWhole('const t = <>the default{" "}win stands</>;')).toBe(true);
+  });
+
+  it('string concatenation between the words', () => {
+    expect(tripsWhole("const t = 'the default ' + 'win stands';")).toBe(true);
+  });
+
+  it('a non-breaking space between the words', () => {
+    expect(tripsWhole('const t = "the default win stands";')).toBe(true);
+  });
+
+  it('still requires a real separator, even scanned whole-file', () => {
+    // The identifier concern survives the switch to whole-file scanning:
+    // nothing about scanning the whole file should make a zero-separator
+    // camelCase identifier start tripping the rule.
+    expect(tripsWhole('export function writeDefaultWinStands(res) {\n  return defaultWin;\n}\n')).toBe(false);
+  });
+});
+
+// The second spelling (operator ruling 2026-10-04, "wins by default"):
+// naming a side as winning "by default" is the same banned concept without
+// the literal words "default win" adjacent. Same whole-file scanning, so a
+// wrap between "win" and "by default" is caught too.
+describe('the "wins ... by default" phrase rule', () => {
+  const tripsWhole = (src) => scanWholeFile(src, DEFAULT_WIN_RULES).length === 1;
+
+  it('catches a side named as winning by default', () => {
+    expect(tripsWhole('return `${name} wins 2–0 by default.`;')).toBe(true);
+    expect(tripsWhole('return "Kyoto win by default this round.";')).toBe(true);
+  });
+
+  it('does not reach across a line break either -- the [^.\\n] bound is deliberate', () => {
+    // Unlike the "default ... win" pattern above, this one's gap is bounded
+    // by [^.\n]{0,40}: a sentence a formatter wraps onto a second line is
+    // exactly the shape the bound is there to stop short of, the same as a
+    // period. Reported separately because this is NOT a gap in the rule --
+    // "wins" and "by default" that far apart, even on one line, read as two
+    // different claims, so widening the bound to swallow a line break would
+    // widen it to swallow a whole paragraph too.
+    const src = [
+      'const msg = `${name} wins the encounter',
+      '  by default.`;',
+    ].join('\n');
+    expect(tripsWhole(src)).toBe(false);
+  });
+
+  it('does not reach across a sentence break into an unrelated "by default"', () => {
+    expect(tripsWhole('return "Kyoto wins the first bout. The second is forfeited by default.";')).toBe(false);
+  });
+
+  it('does not trip inside a comment', () => {
+    expect(tripsWhole('// a side that wins by default is never shown that way')).toBe(false);
+  });
+
+  it('names the recorded decision instead, which never trips it', () => {
+    expect(tripsWhole('return `Record fusensho for ${name}`;')).toBe(false);
   });
 });

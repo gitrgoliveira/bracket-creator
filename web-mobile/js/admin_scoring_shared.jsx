@@ -1860,8 +1860,18 @@ function RecordedWithdrawal({ match, ctl, disabled = false, singleBout = false, 
               {eligibility === "restored"
                 ? `${who || "The barred competitor"} can fight again, so the match reopens in progress. Score it and finish it as usual.`
                 : <>
+                  {/* bc-cse: "again" is only true when THIS match's cleared
+                      decision was itself a fusensho (isDefaultWin): clearing
+                      it undoes exactly one fusensho, so recording one to
+                      re-close the (now queued) match is a repeat. A chained
+                      kiken/fusenpai (barredElsewhere, isDefaultWin false)
+                      never recorded a fusensho on this match at all -- it is
+                      the OTHER match that barred this competitor -- so this
+                      is the first fusensho for THIS match's winner, named by
+                      winnerName exactly as the Recorded line above names it. */}
                   The match goes back to the queue. {who || "The barred competitor"} is still withdrawn, so
-                  record the fusensho again{canReinstate ? `, or reinstate ${who || "them"} first to fight it` : ""}.
+                  record {isDefaultWin ? "the fusensho again" : `a fusensho for ${winnerName || "the opponent"}`}
+                  {canReinstate ? `, or reinstate ${who || "them"} first to fight it` : ""}.
                 </>}
             </p>
           ) : eligibility === "staysLater" ? (

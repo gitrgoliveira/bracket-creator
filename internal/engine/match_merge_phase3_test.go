@@ -194,6 +194,72 @@ func TestMerge_EngiRecountAfterTheFinishIsNeverADraw(t *testing.T) {
 	})
 }
 
+// bc-mrgc fix: the engi recorder used to re-stamp the flags group with
+// StampGroups' never-lower guard after the merge had already decided its
+// stamp, which could not express S2's displaceNewerScoring moving a group's
+// stamp BACK to the finish's own, older time (it replaces a newer but
+// INVALID stored count with the finish's own scoreline and moves that count
+// to the history). The flags group was left stuck at the displaced count's
+// later stamp, so a further, genuinely later, VALID recount compared itself
+// against that wrong stamp and was wrongly held. Both arrival orders of the
+// same three writes -- an invalid partial count, a finish made before it but
+// delivered after, and a later valid recount -- must reach the same state.
+func TestMerge_EngiFinishDisplacementStampsTheFlagsAtTheFinishesOwnTime(t *testing.T) {
+	bothBranches(t, func(t *testing.T, knockout bool) {
+		t.Run("the invalid partial count arrives before the stale finish", func(t *testing.T) {
+			h := mmEngi(t, knockout)
+			partial := mmRunning(h, mmT4, state.GroupFlags)
+			partial.FlagsA, partial.FlagsB = 1, 1 // not a valid engi total: held for nobody to see
+			require.NoError(t, h.write(partial))
+
+			// A queued Save result made before the partial count but
+			// delivered after it: the merge cannot apply the stored (invalid)
+			// count, so it displaces it to the history and applies the
+			// finish on its own, older scoreline instead.
+			require.NoError(t, h.write(mmEngiFinish(h, mmT2, 3, 0)))
+
+			recount := mmRunning(h, mmT3, state.GroupFlags)
+			recount.FlagsA, recount.FlagsB = 1, 2
+			require.NoError(t, h.write(recount), "T3 is after the finish's T2, so the valid recount applies")
+
+			m := h.load(t)
+			assert.Equal(t, state.MatchStatusCompleted, m.Status)
+			assert.Equal(t, wrTeamB, m.Winner, "the later, valid recount decides it")
+			assert.Equal(t, 1, m.FlagsA)
+			assert.Equal(t, 2, m.FlagsB)
+			assert.Equal(t, mmT3, m.GroupStamp(state.GroupFlags))
+			assert.Equal(t, mmT3, m.GroupStamp(state.GroupResult))
+
+			entries := h.history(t)
+			var sawDisplaced bool
+			for _, e := range entries {
+				if e.Door == DoorDisplaced && e.Stamp == mmT4 {
+					sawDisplaced = true
+					assert.Equal(t, state.HistoryOutcomeHeld, e.Outcomes[state.GroupFlags])
+					assert.Contains(t, string(e.Held[state.GroupFlags]), `"flagsA":1`)
+				}
+			}
+			assert.True(t, sawDisplaced, "the invalid partial count is kept in the history as displaced")
+		})
+		t.Run("the finish lands first, then the same valid recount", func(t *testing.T) {
+			h := mmEngi(t, knockout)
+			require.NoError(t, h.write(mmEngiFinish(h, mmT2, 3, 0)))
+
+			recount := mmRunning(h, mmT3, state.GroupFlags)
+			recount.FlagsA, recount.FlagsB = 1, 2
+			require.NoError(t, h.write(recount))
+
+			m := h.load(t)
+			assert.Equal(t, state.MatchStatusCompleted, m.Status)
+			assert.Equal(t, wrTeamB, m.Winner, "the later, valid recount decides it")
+			assert.Equal(t, 1, m.FlagsA)
+			assert.Equal(t, 2, m.FlagsB)
+			assert.Equal(t, mmT3, m.GroupStamp(state.GroupFlags))
+			assert.Equal(t, mmT3, m.GroupStamp(state.GroupResult))
+		})
+	})
+}
+
 // A write made before a participant rename (queued offline, replayed after)
 // carries the old name. Its side ids match the stored ids, so it is the same
 // competitor: the write is accepted and the stored, current name is kept,

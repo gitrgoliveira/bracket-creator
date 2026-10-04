@@ -41,6 +41,7 @@ import { bridge as _bridge } from './court_bridge.jsx';
 import { serverNowMs, serverClockOffsetMs, setServerClockOffsetMs } from './server_clock.jsx';
 import {
     writeDidNotLand, writeWasSuperseded, writeWasRefusedForClock, writeNeedsWinner, writeDefaultWinStands, writeHeldDecision, writeDisplacedGroups, supersededBanner,
+    decisionWord,
     SUPERSEDED_REASON, SUPERSEDED_ADVICE,
     CLOCK_SKEW_REASON_TEXT, CLOCK_SKEW_ADVICE, CLOCK_SKEW_UNHEALED_ADVICE,
     downstreamKnockoutPlayedQueueDrop, downstreamKnockoutRunningMessage, downstreamKnockoutRunningReopenMessage,
@@ -1425,16 +1426,32 @@ async function _flushQueue() {
     // a later hold for a DIFFERENT decision collapses it to null (mixed),
     // which defaultWinStandsWord (write_result.jsx) reads as "no single
     // decision to name" exactly like an absent heldDecision does.
+    //
+    // bc-cse: "different" is judged through decisionWord, not the raw code.
+    // kiken-voluntary and kiken-injury are two raw codes for the one word an
+    // operator reads, "kiken" (decisionWord collapses both), so one hold of
+    // each in the same pass must still read as ONE decision, not "mixed".
+    // defaultWinStandsWordThisPass carries that word for the comparison only;
+    // the RAW code is what downstream still needs (defaultWinStandsWord
+    // derives its own word from it again), so it is what gets kept and
+    // passed on, never the word itself.
     let defaultWinStandsDecisionThisPass;
-    // Records one writeDefaultWinStands hold against the two trackers above,
+    let defaultWinStandsWordThisPass;
+    // Records one writeDefaultWinStands hold against the trackers above,
     // called at both sites below so they can never drift apart (one named
     // the decision, the other read it, before this was one function).
     const noteDefaultWinStands = (body) => {
         if (!writeDefaultWinStands(body)) return;
         defaultWinStandsThisPass = true;
         const d = writeHeldDecision(body);
-        if (defaultWinStandsDecisionThisPass === undefined) defaultWinStandsDecisionThisPass = d;
-        else if (defaultWinStandsDecisionThisPass !== d) defaultWinStandsDecisionThisPass = null;
+        const w = decisionWord(d);
+        if (defaultWinStandsDecisionThisPass === undefined) {
+            defaultWinStandsDecisionThisPass = d;
+            defaultWinStandsWordThisPass = w;
+        } else if (defaultWinStandsWordThisPass !== w) {
+            defaultWinStandsDecisionThisPass = null;
+            defaultWinStandsWordThisPass = null;
+        }
     };
     // Held finishes that landed and moved a LATER change of their match to
     // its history (writeDisplacedGroups): told once per pass, like 'sent'.

@@ -35,8 +35,10 @@ export function heldWriteWhere(held, competitions) {
   const compName = (comp && comp.name) || held.compID || '';
   let what;
   if (held.kind === 'lineup') {
-    const team = comp && Array.isArray(comp.participants)
-      ? comp.participants.find((p) => p && p.id === held.teamId) : null;
+    // A competition's roster is `players` (normalizeViewerCompItem); a team
+    // is one entry in it, found by its participant id.
+    const team = comp && Array.isArray(comp.players)
+      ? comp.players.find((p) => p && p.id === held.teamId) : null;
     what = heldLineupLabel(team && team.name);
   } else {
     const m = comp && typeof window.compMatches === 'function'

@@ -4,6 +4,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -58,4 +59,21 @@ func TestNewStoreLeavesNoProbeBehind(t *testing.T) {
 		assert.NotContains(t, d.Name(), writeProbePrefix, "the write check removes what it creates")
 		return nil
 	}))
+}
+
+// A folder that can be neither listed nor written is named once.
+func TestNewStoreNamesAnUnreadableFolderOnce(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("root reads and writes through any folder mode")
+	}
+	root := t.TempDir()
+	_, err := NewStore(root)
+	require.NoError(t, err)
+	comps := filepath.Join(root, "competitions")
+	require.NoError(t, os.Chmod(comps, 0o000))
+	defer func() { _ = os.Chmod(comps, 0o700) }()
+
+	_, err = NewStore(root)
+	require.ErrorIs(t, err, ErrDataNotWritable)
+	assert.Equal(t, 1, strings.Count(err.Error(), comps+":"), err.Error())
 }

@@ -31,7 +31,8 @@ const writeProbePrefix = ".write-check-"
 // the data folder, competitions/, the transaction log, each competition's
 // folder and its match history, and the branding and sponsors folders when
 // they exist. A file's own mode does not matter: a save replaces it by
-// renaming, which needs only its folder. Every folder that fails is named.
+// renaming, which needs only its folder. Every folder that fails is named,
+// once (its first failure).
 func checkDataWritable(folder string) error {
 	compsDir := filepath.Join(folder, "competitions")
 	dirs := []string{folder, compsDir, filepath.Join(folder, ".wal")}
@@ -41,9 +42,16 @@ func checkDataWritable(folder string) error {
 		}
 	}
 	var failed []string
+	named := make(map[string]bool)
+	fail := func(dir string, err error) {
+		if !named[dir] {
+			named[dir] = true
+			failed = append(failed, fmt.Sprintf("  %s: %v", dir, err))
+		}
+	}
 	entries, err := os.ReadDir(compsDir)
 	if err != nil {
-		failed = append(failed, fmt.Sprintf("  %s: %v", compsDir, pathErrCause(err)))
+		fail(compsDir, pathErrCause(err))
 	}
 	for _, e := range entries {
 		if !e.IsDir() {
@@ -57,7 +65,7 @@ func checkDataWritable(folder string) error {
 	}
 	for _, d := range dirs {
 		if err := probeWrite(d); err != nil {
-			failed = append(failed, fmt.Sprintf("  %s: %v", d, err))
+			fail(d, err)
 		}
 	}
 	if len(failed) == 0 {
@@ -75,9 +83,9 @@ func probeWrite(dir string) error {
 	}
 	name := f.Name()
 	if err := f.Close(); err != nil {
-		return errors.Join(err, os.Remove(name))
+		return errors.Join(err, pathErrCause(os.Remove(name)))
 	}
-	return os.Remove(name)
+	return pathErrCause(os.Remove(name))
 }
 
 func isDir(path string) bool {

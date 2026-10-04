@@ -299,7 +299,7 @@ describe('AdminTopbar: the held-writes list', () => {
   function openList() {
     render(
       <window.AdminTopbar
-        tournament={{ name: 'Kanto Open', competitions: [{ id: 'c1', name: 'Teams', participants: [{ id: 't1', name: 'Kodokan' }] }] }}
+        tournament={{ name: 'Kanto Open', competitions: [{ id: 'c1', name: 'Teams', players: [{ id: 't1', name: 'Kodokan', dojo: 'Kodokan', displayName: '', seed: 0 }] }] }}
         onLogout={vi.fn()}
         onViewerMode={vi.fn()}
         hideRunningStrip

@@ -110,6 +110,30 @@ async function saveCorrection() {
 }
 
 describe('individual editor: Remove withdrawal', () => {
+  // Its sentence (where the withdrawn competitor stands once it is removed)
+  // depends on the later matches: a no-show recorded on one after the
+  // withdrawal keeps them withdrawn. So, like the clear beside it, it waits
+  // for that list rather than act under a sentence that is about to change.
+  it('is held until the later matches are in, then says where the competitor stands', async () => {
+    const pending = [];
+    window.API.fetchCompetitionDetails = vi.fn().mockImplementation(() => new Promise((r) => { pending.push(r); }));
+    window.compMatchesForCompetition = () => [{
+      id: 'Pool A-3', compId: 'comp1', status: 'completed', phase: 'pool', poolName: 'Pool A', matchNumber: 3,
+      decision: 'fusenpai', decisionBy: 'shiro',
+      sideA: { id: 'p3', name: 'Suzuki' }, sideB: { id: 'p2', name: 'Tanaka' },
+    }];
+    try {
+      await mount(individualKiken());
+      expect(screen.getByTestId('remove-withdrawal').disabled).toBe(true);
+      await act(async () => { pending.forEach((r) => r({ config: {} })); });
+      await waitFor(() => expect(screen.getByTestId('remove-withdrawal').disabled).toBe(false));
+      expect(screen.getByTestId('remove-withdrawal-consequence').textContent.replace(/\s+/g, ' ')).toContain(
+        'Tanaka stays withdrawn because of the later match listed below.');
+    } finally {
+      window.compMatchesForCompetition = STUBBED_GLOBALS.compMatchesForCompetition;
+    }
+  });
+
   it('sits beside Clear withdrawal and reopen and says what it does', async () => {
     await mount(individualKiken());
     expect(screen.getByTestId('clear-withdrawal-reopen').textContent).toBe('Clear withdrawal and reopen');

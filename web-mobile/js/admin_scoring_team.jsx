@@ -39,6 +39,7 @@ import {
   withdrawalLabel,
   WithdrawalMarkedName,
   BarredMatchNotice,
+  HeldWriteDiscard,
 } from './admin_scoring_shared.jsx';
 // bc-cse: a SCHEDULED match a competitor is barred from must never offer a
 // Start the server would refuse; isBarredMatch (ineligible_match.jsx) is the
@@ -54,7 +55,7 @@ import { SideLabel } from './side_cell.jsx';
 // Imported from the leaf, not read off `window`, for the same reason
 // admin_scoring_shared.jsx does it: write_result.jsx is import-only, and this
 // editor is ES-imported by hosts and tests that never load api_client.
-import { notLandedBanner, terminalFailureBanner, notSavedText, writeDidNotLand, writeWasRefused, writeRetryable, dependentActionBlocked, FETCH_TIMEOUT_MS, REP_BOUT_NOT_ADDED, REP_BOUT_NOT_REMOVED, noAnswerSentence, QUEUED_NOTICE } from './write_result.jsx';
+import { notLandedBanner, terminalFailureBanner, notSavedText, writeDidNotLand, writeWasRefused, writeRetryable, dependentActionBlocked, FETCH_TIMEOUT_MS, REP_BOUT_NOT_ADDED, REP_BOUT_NOT_REMOVED, noAnswerSentence, queuedNotice } from './write_result.jsx';
 
 // boutMiddle is THE single source for a bout's centre value (vs/X/(E)/(DH));
 // the editor derives its per-bout middle from it rather than restating the
@@ -1004,6 +1005,7 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
   // server -- the one moment the operator is most likely to walk away from
   // the court. Mirrors ScoreEditorModal's pendingWrite, minus its Retry
   // affordance: that replays a stored submit closure this editor does not keep.
+  // Holds the queued answer (queuedNotice words the banner from it).
   const [pendingWrite, setPendingWrite] = useStateA(false);
   // T093–T098: decision state: same shape as the individual editor. See the
   // ScoreEditorModal copy for the contract.
@@ -2841,7 +2843,7 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
     // says so; the sync subscription clears it once the queue drains, and the
     // terminal-fail subscription replaces it with the not-saved banner if the
     // write is ultimately refused.
-    if (mountedRef.current && writeRetryable(res)) setPendingWrite(true);
+    if (mountedRef.current && writeRetryable(res)) setPendingWrite(res);
     return res;
   };
 
@@ -4239,7 +4241,8 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
               closure to replay, so the operator re-enters and re-taps instead. */}
           {!writeFailed && pendingWrite && (
             <div className="pending-write-banner" role="status" aria-live="polite">
-              <span>{QUEUED_NOTICE}</span>
+              <span>{queuedNotice(pendingWrite)}</span>
+              <HeldWriteDiscard compId={m.compId} matchId={m.id} onDiscarded={() => setPendingWrite(false)} />
             </div>
           )}
           {writeFailed && (

@@ -165,3 +165,39 @@ func TestLegacyKachinukiEncounterEnchoLeavesOtherCompetitions(t *testing.T) {
 		})
 	}
 }
+
+// A pool representative bout or tie-break bout is ONE individual bout, whose
+// overtime lives at match level because the match is the bout (owner review,
+// GH-T1). The repair clears an encounter's (E), never one of these: a played
+// "Pool A-DH-1" in encho keeps it, in a kachinuki competition too, while the
+// encounter beside it is still cleared.
+func TestLegacyKachinukiEncounterEnchoKeepsAPoolRepBoutsOwn(t *testing.T) {
+	comp := kachinukiComp("k")
+	dir := seedEncounterEncho(t, comp)
+	s, err := NewStore(dir)
+	require.NoError(t, err)
+	pool, err := s.LoadPoolMatches("k")
+	require.NoError(t, err)
+	// Seeded again through the older shape (no marker): the store above ran
+	// the sweep already, so the marker is put back to unset.
+	comp.KachinukiEncounterEnchoCleared = false
+	require.NoError(t, s.SaveCompetition(comp))
+	pool[0].Encho = encounterEncho()
+	pool = append(pool,
+		MatchResult{ID: "Pool A-DH-1", SideA: "R-1", SideB: "W-1", Status: MatchStatusCompleted, Winner: "R-1", IpponsA: []string{"M"}, Encho: encounterEncho()},
+		MatchResult{ID: "Pool A-TB-1", SideA: "R-2", SideB: "W-2", Status: MatchStatusCompleted, Winner: "W-2", IpponsB: []string{"K"}, Encho: encounterEncho()},
+	)
+	require.NoError(t, s.SavePoolMatches("k", pool))
+
+	fresh, err := NewStore(dir)
+	require.NoError(t, err)
+	got, err := fresh.LoadPoolMatches("k")
+	require.NoError(t, err)
+	byID := map[string]MatchResult{}
+	for _, m := range got {
+		byID[m.ID] = m
+	}
+	assert.Nil(t, byID["Pool A-0"].Encho, "the encounter's (E) is still cleared")
+	assert.Equal(t, encounterEncho(), byID["Pool A-DH-1"].Encho, "the representative bout keeps its overtime")
+	assert.Equal(t, encounterEncho(), byID["Pool A-TB-1"].Encho, "and so does the tie-break bout")
+}

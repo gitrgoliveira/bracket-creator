@@ -317,6 +317,40 @@ describe('a write applied in part', () => {
     expect(note()?.textContent).toBe("Kept in the match's history, not applied: bout 2 and overtime. A newer change to the same thing was recorded first.");
   });
 
+  // Operator ruling 2026-10-04: a point added to a finished knockout match
+  // that would leave it tied is not applied. That is the operator's own
+  // correction and nothing newer won, so the note says to correct the result
+  // with a winner, whether the rest of the write applied or not.
+  it.each([
+    ['applied in part', { id: 'm-ind', status: 'completed', heldGroups: ['points'], heldReason: 'needs_winner' }],
+    ['superseded', { applied: false, reason: 'superseded', heldGroups: ['points'], heldReason: 'needs_winner' }],
+  ])('a change held because the finished match needs a winner (%s) says to correct it', async (_how, answer) => {
+    window.API.recordScore.mockImplementation((_c, _m, patch) => {
+      writes.push(patch);
+      return Promise.resolve(answer);
+    });
+    await mount(individual());
+    await pointerTap(ipponBtn('aka', 'M'));
+    await settle();
+    expect(note()?.textContent).toBe(
+      "Kept in the match's history, not applied: points. It would leave the finished match without a winner, and it needs one: correct the result with a winner.");
+  });
+
+  // An earlier-made finish that moved this later change to the history
+  // answers APPLIED with displacedGroups and the needs-winner reason: the
+  // note says "Saved", never "not applied" or "correct the result".
+  it('a write that moved a later change to the history says Saved', async () => {
+    window.API.recordScore.mockImplementation((_c, _m, patch) => {
+      writes.push(patch);
+      return Promise.resolve({ id: 'm-ind', status: 'completed', displacedGroups: ['points'], heldReason: 'needs_winner' });
+    });
+    await mount(individual());
+    await pointerTap(ipponBtn('aka', 'M'));
+    await settle();
+    expect(note()?.textContent).toBe(
+      "Saved. A later change to points would have left the finished match without a winner, so it was moved to the match's history.");
+  });
+
   it('a superseded write shows the banner, not the note', async () => {
     window.API.recordScore.mockImplementation((_c, _m, patch) => {
       writes.push(patch);

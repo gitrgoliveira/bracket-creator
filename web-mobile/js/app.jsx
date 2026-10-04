@@ -7,7 +7,7 @@ import { setCachedAuthConfig } from './admin_helpers.jsx';
 import { LS_NOTIFICATIONS_ENABLED } from './notification_keys.jsx';
 import { bridge, setSnapshotProvider, setDisplayCourt, getLastBroadcastAt, applyPatchToTree, mergeSnapshotIntoTree, deriveLinkState, freshnessMs } from './court_bridge.jsx';
 import { BRANDING_DEFAULTS } from './admin_branding.jsx';
-import { queuedWritesNoun, supersededAlertText } from './write_result.jsx';
+import { queuedWritesNoun, supersededAlertText, displacedAlertText } from './write_result.jsx';
 
 const { useState: useS, useEffect: useE, useRef: useR, useCallback: useC } = React;
 
@@ -375,9 +375,11 @@ export function queueAlertMessage(alert) {
     // result that just won. A supersede is the one drop where re-entering is the
     // wrong move, so it gets its own wording.
     case "superseded":
-      return supersededAlertText(n, one);
+      return supersededAlertText(n, one, !!alert.needsWinner);
     case "server_error":
-      return `The server keeps refusing a queued result${detail}. It is still queued and still retrying, so keep this tab open.`;
+      // It holds back no other write (each queued write is sent on its own),
+      // and the editor of that match offers to discard it (HeldWriteDiscard).
+      return `The server keeps refusing a queued result${detail}. It is still being retried, and later results are still sent. If it never goes through, open that match, discard the held result and enter it again.`;
     case "auth_required":
       return `Sign in again to save ${n} pending ${one ? "result" : "results"}. ${one ? "It is" : "They are"} still queued.`;
     case "storage_full":
@@ -386,14 +388,22 @@ export function queueAlertMessage(alert) {
       return `${n} unsaved ${noun} ${one ? "was" : "were"} discarded because the tournament password changed.`;
     case "sent":
       return `${n} ${noun} sent.`;
+    // Held finishes that landed and moved a later change of their match to
+    // its history (it would have left the finished match without a winner).
+    // Recorded, so not an error: the history has the change.
+    case "displaced":
+      return displacedAlertText(n, one);
     default:
       return null;
   }
 }
 
 // queueAlertToastType: how the one subscriber below shows a queue alert. Only
-// 'sent' is good news; every other kind stays an error. Exported for test.
+// 'sent' is good news, and 'displaced' is information (the result was saved;
+// the change it moved aside is in the history); every other kind stays an
+// error. Exported for test.
 export function queueAlertToastType(alert) {
+  if (alert && alert.kind === "displaced") return "info";
   return alert && alert.kind === "sent" ? "success" : "error";
 }
 

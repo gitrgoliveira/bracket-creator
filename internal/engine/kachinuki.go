@@ -2197,7 +2197,12 @@ func applyKachinukiMerge(comp *state.Competition, prior, result *state.MatchResu
 	// refused: a write from an older client (an offline-queued one replays
 	// whenever it lands) carries the field as state it inherited, and a 400 would
 	// blame the operator for it. Logged, as stripInvalidHantei logs its drop.
-	if comp.ClearKachinukiEncounterEncho(&result.Encho) {
+	// The stored id, when there is a stored match: a payload may omit its own.
+	matchID := result.ID
+	if prior != nil {
+		matchID = prior.ID
+	}
+	if comp.ClearKachinukiEncounterEncho(matchID, &result.Encho) {
 		log.Printf("engine: %s/%s: dropped a match-level encho from a kachinuki encounter write (overtime is recorded per bout)", comp.ID, result.ID)
 	}
 	var stored []state.SubMatchResult

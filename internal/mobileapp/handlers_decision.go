@@ -296,8 +296,9 @@ func respondDecisionEngineError(c *gin.Context, store CompetitionStore, compID, 
 		// that stamp on its MatchResult, so ApplyByTimestamp no longer
 		// takes the unstamped bypass and a decision can lose to a newer
 		// stored result -- the same way a score write can. An unstamped
-		// decision (an older client, or an engine-internal caller) still
-		// takes the bypass and always applies. Mapping it was already
+		// decision (an older client, or an engine-internal caller) takes the
+		// server's time, never older than the stored result (writeStamp,
+		// bc-mrgc review), so it still always applies. Mapping it was already
 		// right for the reason the two daihyosen paths are: this is the
 		// LAST arm a future writer would remember to add, and the
 		// default below is internalError -> 500. The SPA queues
@@ -306,7 +307,7 @@ func respondDecisionEngineError(c *gin.Context, store CompetitionStore, compID, 
 		// supersede here would not merely mis-report a dropped write,
 		// it would poison the offline queue with one that can never
 		// succeed.
-		respondSuperseded(c, engine.HeldGroupsOf(engErr))
+		respondSuperseded(c, engine.HeldGroupsOf(engErr), engine.HeldReasonOf(engErr))
 	case errors.As(engErr, &alreadyIneligErr):
 		// T105/CHK047: concurrent kiken, another operator already
 		// recorded ineligibility for this player on a different

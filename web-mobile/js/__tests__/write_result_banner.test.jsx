@@ -24,7 +24,15 @@ import {
     SUPERSEDED_ADVICE,
     CLOCK_SKEW_REASON_TEXT,
     CLOCK_SKEW_ADVICE,
+    writeNeedsWinner,
+    NEEDS_WINNER_REASON,
+    NEEDS_WINNER_ADVICE,
+    supersededAlertText,
+    writeDisplacedGroups,
+    displacedAlertText,
 } from '../write_result.jsx';
+import { heldGroupsNote, keptInHistoryNote } from '../match_groups.jsx';
+import { closingHistoryToast } from '../admin.jsx';
 
 describe('notLandedBanner', () => {
     it('maps a clock refusal to the clock copy, not the superseded copy', () => {
@@ -168,5 +176,103 @@ describe('writeHeldGroups / writePartlyHeld', () => {
             expect(writePartlyHeld(res)).toBe(false);
             expect(writeHeldGroups(res)).toEqual([]);
         }
+    });
+});
+
+// Operator ruling 2026-10-04: a scoring change that would leave a finished
+// match without the winner it needs (a knockout left tied) is not applied, is
+// kept in the match's history, and the server says so with heldReason
+// "needs_winner". Nothing newer won, so the advice is to correct the result
+// with a winner, never the plain superseded "check the newer change".
+describe('a change held because the finished match needs a winner', () => {
+    const superseded = { applied: false, reason: 'superseded', heldGroups: ['points'], heldReason: 'needs_winner' };
+    const partly = { id: 'm1', status: 'completed', heldGroups: ['points'], heldReason: 'needs_winner' };
+
+    it('is read from heldReason, on a superseded answer and on one applied in part', () => {
+        expect(writeNeedsWinner(superseded)).toBe(true);
+        expect(writeNeedsWinner(partly)).toBe(true);
+        expect(writeNeedsWinner({ applied: false, reason: 'superseded', heldGroups: ['points'] })).toBe(false);
+        expect(writeNeedsWinner({ queued: true })).toBe(false);
+        expect(writeNeedsWinner(null)).toBe(false);
+    });
+
+    it('the superseded banner tells the operator to correct the result with a winner', () => {
+        const banner = notLandedBanner(superseded);
+        expect(banner).toEqual({ lead: SUPERSEDED_LEAD, reason: NEEDS_WINNER_REASON, advice: NEEDS_WINNER_ADVICE });
+        const text = notSavedText(banner);
+        expect(text).toMatch(/^Not applied: /);
+        expect(text).toMatch(/without a winner/);
+        expect(text).toMatch(/Correct the result with a winner\.$/);
+        expect(text).not.toMatch(/newer change/);
+    });
+
+    it('the partial-apply note says it in place of "a newer change"', () => {
+        expect(heldGroupsNote(['points'], true)).toBe(
+            "Kept in the match's history, not applied: points. It would leave the finished match without a winner, and it needs one: correct the result with a winner.");
+        expect(heldGroupsNote(['points'])).toBe(
+            "Kept in the match's history, not applied: points. A newer change to the same thing was recorded first.");
+    });
+
+    it('the queue alert says it too', () => {
+        expect(supersededAlertText(1, true, true)).toMatch(/without a winner.*correct the result with a winner\.$/);
+        expect(supersededAlertText(1, true, true)).not.toMatch(/newer change/);
+        expect(supersededAlertText(2, false, true)).toMatch(/correct that result with a winner\.$/);
+        expect(supersededAlertText(1, true)).not.toMatch(/winner/);
+    });
+
+    it('no em-dash and no "mat" in any of the copy', () => {
+        const all = [NEEDS_WINNER_REASON, NEEDS_WINNER_ADVICE, heldGroupsNote(['points'], true), supersededAlertText(2, false, true)].join(' ');
+        expect(all).not.toMatch(/\u2014/);
+        expect(all).not.toMatch(/\bmats?\b/i);
+    });
+});
+
+// The same reason on a second, APPLIED answer: an older finish arrived after a
+// newer scoring change that, applied after it, would have left the finished
+// knockout without a winner. The finish IS recorded and that later change was
+// MOVED to the history (`displacedGroups`, no heldGroups). Nothing tells the
+// operator to correct a result that is recorded.
+describe('a finish recorded that moved a later change to the history', () => {
+    const displaced = { id: 'm1', status: 'completed', winner: 'A', displacedGroups: ['points'], heldReason: 'needs_winner' };
+    const SAVED = "Saved. A later change to points would have left the finished match without a winner, so it was moved to the match's history.";
+
+    it('is not a write held for a winner', () => {
+        expect(writeDisplacedGroups(displaced)).toEqual(['points']);
+        expect(writeNeedsWinner(displaced)).toBe(false);
+        expect(writeNeedsWinner({ ...displaced, heldGroups: [] })).toBe(false); // bulk-score's item shape
+        expect(writeDisplacedGroups({ id: 'm1' })).toEqual([]);
+        // Held groups beside a move: the one reason is read as the move's,
+        // so nothing says to correct a result that is recorded.
+        expect(writeNeedsWinner({ ...displaced, heldGroups: ['encho'] })).toBe(false);
+    });
+
+    it('the note says Saved and what was moved, never "not applied" or "correct"', () => {
+        expect(keptInHistoryNote(displaced)).toBe(SAVED);
+        expect(keptInHistoryNote({ ...displaced, heldGroups: [] })).toBe(SAVED);
+        expect(SAVED).not.toMatch(/not applied|correct the result/i);
+    });
+
+    it('a write held in part and one that moved a later change says both', () => {
+        const both = { id: 'm1', status: 'completed', heldGroups: ['encho'], displacedGroups: ['bout:2'] };
+        expect(keptInHistoryNote(both)).toBe(
+            "Kept in the match's history, not applied: overtime. A newer change to the same thing was recorded first. "
+            + "Saved. A later change to bout 2 would have left the finished match without a winner, so it was moved to the match's history.");
+    });
+
+    it('nothing kept: no note', () => {
+        expect(keptInHistoryNote({ id: 'm1', status: 'completed' })).toBeNull();
+        expect(keptInHistoryNote({ queued: true })).toBeNull();
+    });
+
+    it('the closing toast after a Finish says it; a write that did not land, or keeps the editor open, says nothing here', () => {
+        expect(closingHistoryToast({ status: 'completed', winner: 'A' }, displaced)).toBe(SAVED);
+        expect(closingHistoryToast({ status: 'completed', winner: 'A' }, { queued: true })).toBeNull();
+        expect(closingHistoryToast({ status: 'completed', winner: 'A' }, { applied: false, reason: 'superseded', heldGroups: ['points'], heldReason: 'needs_winner' })).toBeNull();
+        expect(closingHistoryToast({ status: 'running' }, displaced)).toBeNull();
+    });
+
+    it('the queue alert says the held result was saved', () => {
+        expect(displacedAlertText(1, true)).toMatch(/^A held result was saved\. .*moved to the match's history\.$/);
+        expect(displacedAlertText(2, false)).toMatch(/^2 held results were saved\./);
     });
 });

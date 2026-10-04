@@ -9,13 +9,24 @@ import {
   DOWNSTREAM_KNOCKOUT_PLAYED_CANCELLED,
   attemptScoreWrite,
   downstreamKnockoutReopenedNotice,
-  writePartlyHeld,
-  writeHeldGroups,
   writeKeepsEditorOpen,
 } from './write_result.jsx';
-import { heldGroupsNote } from './match_groups.jsx';
+import { keptInHistoryNote } from './match_groups.jsx';
 
 const { useState: useStateA, useEffect: useEffectA, useRef: useRefA } = React;
+
+// closingHistoryToast (bc-mrgc): the toast editMatchScore shows for a write
+// that landed but kept something in the match's history (part of it held, or
+// a later change it moved there because that change would have left the
+// finished match without a winner), worded by keptInHistoryNote. Only when
+// the write closes the editor: an editor that stays open says so itself
+// (useKeptInHistoryNote). A write that did not land keeps its editor open
+// too (writeKeepsEditorOpen), where its own banner reports it. null when
+// there is nothing to say. Exported for test.
+export function closingHistoryToast(result, saveRes) {
+  if (!saveRes || writeKeepsEditorOpen(result, saveRes)) return null;
+  return keptInHistoryNote(saveRes);
+}
 
 const REFRESHABLE_EVENTS = new Set([
   "competition_started",
@@ -329,13 +340,8 @@ function AdminApp({ tournament, onUpdate, onLogout, onViewerMode, onPasswordChan
       const notice = downstreamKnockoutReopenedNotice(saveRes.downstreamReopened);
       if (notice) showToast(notice);
     }
-    // bc-mrgc: a write applied in part, the rest kept in the match's history
-    // because a newer change to it was recorded first. An editor that stays
-    // open says so itself (useKeptInHistoryNote); one this write closes
-    // cannot, so the note is the toast here.
-    if (writePartlyHeld(saveRes) && !writeKeepsEditorOpen(result, saveRes)) {
-      showToast(heldGroupsNote(writeHeldGroups(saveRes)));
-    }
+    const keptNote = closingHistoryToast(result, saveRes);
+    if (keptNote) showToast(keptNote);
     // F5: when the write was only queued (offline/transient), skip the
     // best-effort refresh. There is nothing new on the server yet.
     // Return saveRes so callers (onSubmit/onSubmitAndNext props) can

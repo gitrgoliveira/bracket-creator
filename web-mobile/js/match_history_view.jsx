@@ -45,6 +45,10 @@ const DOOR_WORDS = {
     'kachinuki-advance': 'Next kachinuki bout added',
     'kachinuki-remove-bout': 'Kachinuki bout removed',
     'downstream-reopen': 'Reopened by a correction to an earlier match',
+    // A change already recorded that an earlier-made finish, arriving later,
+    // moved out of the match because it would have left the finished match
+    // without a winner (the entry carries that change's own time).
+    'displaced': 'Later change moved to history',
 };
 
 export function historyDoorWords(door) {
@@ -115,9 +119,17 @@ export function heldValueText(group, value) {
 // historyEntryView: one history entry as the lines the disclosure shows.
 export function historyEntryView(entry) {
     const changed = (entry.changed || []).map(groupLabel).filter(Boolean);
-    const held = Object.keys(entry.held || {}).map((g) => ({
+    // A line per group the server recorded as HELD, and only those: an echo
+    // it recorded as unchanged (the value already stored) never shows, even
+    // if a value for it rides along.
+    const outcomes = entry.outcomes || {};
+    // A displaced change was recorded first and then moved aside, so it
+    // reads "Moved to history"; any other held change was never applied.
+    const moved = entry.door === 'displaced';
+    const keptWord = moved ? 'Moved to history' : 'Kept in history';
+    const held = Object.keys(entry.held || {}).filter((g) => outcomes[g] === 'held').map((g) => ({
         group: g,
-        text: `Kept in history: ${groupLabel(g)}, ${heldValueText(g, entry.held[g])}`,
+        text: `${keptWord}: ${groupLabel(g)}, ${heldValueText(g, entry.held[g])}`,
     }));
     const cleared = entry.clearedWithdrawal
         ? `Withdrawal cleared by later scoring: ${resultText(entry.clearedWithdrawal)}`
@@ -125,7 +137,7 @@ export function historyEntryView(entry) {
     // Why the whole write was kept rather than applied, when one rule did that
     // (bc-mrgc phase 3): the server's own words ("older revision of this
     // board" for a save the same device had already followed with a newer one).
-    const reason = typeof entry.reason === 'string' && entry.reason ? `Not applied: ${entry.reason}` : null;
+    const reason = typeof entry.reason === 'string' && entry.reason ? `${moved ? 'Moved to history' : 'Not applied'}: ${entry.reason}` : null;
     return {
         time: historyTime(entry),
         door: historyDoorWords(entry.door),

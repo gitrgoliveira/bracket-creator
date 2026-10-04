@@ -164,6 +164,9 @@ func (e *Engine) RecordMatchResultWithIneligibilityTx(tx state.StoreTx, compID, 
 			return nil, recErr
 		}
 		backfillEngiResult(result, rec)
+		// A newer recount the finish moved to the history (S2 with R4)
+		// gets its entry, as it does when it arrives after the finish.
+		e.recordDisplacedHistory(tx, compID, matchID, result.Merge)
 		if err := e.requalifyMixedPoolWrite(tx, compID, comp, matchID, rec, engiPrior, fo); err != nil {
 			return nil, err
 		}
@@ -273,7 +276,7 @@ func (e *Engine) RecordMatchResultWithIneligibilityTx(tx state.StoreTx, compID, 
 			result.SubResults = state.PadDefaultWinBoutPositions(result.SubResults, comp.TeamSize)
 		}
 	}
-	noteServerBoutChanges(result, writerSubs)
+	noteServerBoutChanges(result, writerSubs, prior.SubResults, comp.IsKachinuki())
 
 	// K3 ahead of the write: a withdrawal whose loser a DIFFERENT match has
 	// already made ineligible is refused before anything is written. The
@@ -1018,7 +1021,7 @@ func (e *Engine) recordDecisionTx(tx state.StoreTx, compID, matchID, decision, d
 	if err != nil {
 		return nil, nil, fmt.Errorf("recordDecisionTx: load competition %s: %w", compID, err)
 	}
-	comp.ClearKachinukiEncounterEncho(&encho)
+	comp.ClearKachinukiEncounterEncho(matchID, &encho)
 	result := buildDecisionResult(prior, matchID, decision, decisionBy, decisionReason, encho, modifiedAtStamp)
 
 	// A stale decision (an offline replay older than the stored match) is

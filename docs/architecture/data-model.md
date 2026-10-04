@@ -528,7 +528,7 @@ not applied (the operator sees an explicit notice naming that it was kept in the
 and one applied in part says which groups were held. A write that does not name its groups
 counts as changing every group it carries.
 
-Three rules sit on top. A withdrawal or default win is one change with the scoreline it
+Further rules sit on top. A withdrawal or default win is one change with the scoreline it
 writes: it is held whole when any point or bout was entered after it was declared, because
 points scored later mean the withdrawal no longer describes the match. The other way round, a
 point entered on a board still scoring the match after a withdrawal was recorded means the
@@ -536,12 +536,28 @@ withdrawal was a mistake: it is cleared (and kept in the history), the competito
 can fight again, and the winner is worked out from the points. A board that is still scoring a
 match that has meanwhile been finished never reopens it: its changes made after the finish
 are applied to the finished result, which stays finished, and the winner is worked out again
-from the merged points or bouts; its changes made before the finish are held. If that leaves
-a knockout match tied, it goes back to running, because a knockout cannot end tied, and a
-pool or league match becomes a draw. An engi match is never a draw: a count that decides no
-winner (an even total) sends it back to running, in a pool as in a knockout. An out of order
-write from the same client session (an older save arriving after a newer one) is not applied,
-and is kept whole in the history as an older revision of that board.
+from the merged points or bouts; its changes made before the finish are held. A pool or
+league match that this leaves tied becomes a draw. A finished knockout match needs a winner,
+so a correction that would leave it tied is not applied: the match keeps the result it was
+finished with (it never goes back to running), the change is kept in the history as held, and
+the operator is told to correct the result with a winner. The same holds for an engi match,
+in a pool as in a knockout: it is never a draw, so a recount that decides no winner (an even
+total) is held and the recorded result stands. A judges' decision (hantei) belongs to the
+result, so a points change that does not touch the result keeps it.
+
+The order of arrival does not change the outcome. A finish made before a point that arrives
+later is applied, and the winner is then worked out from the newer point; a finish that
+arrives after a newer point gets the same winner, worked out from that point, and keeps its
+judges' decision. If the newer point would leave a finished knockout match tied (or an engi
+match without a valid count), then in the order the changes were made it came after the
+finish and could not apply. So a finish that arrives after it is applied on the scoreline it
+was made on, and the newer point is moved out of the match into the history as held, with
+the reason. Both orders end in the same match and the same kept change. A finish that does
+not carry the scoreline it was made on cannot be replayed that way; it is held instead, and
+the match stays as the point left it.
+
+An out of order write from the same client session (an older save arriving after a newer one)
+is not applied, and is kept whole in the history as an older revision of that board.
 
 A deliberate correction is subject to the same rule, which matters most when it was made
 without a connection. Correcting the result you are looking at works normally. Correcting
@@ -556,9 +572,10 @@ the competition's `history/` folder, one line per write that reached it: when th
 made, when the server received it, which endpoint it came through, the groups it changed and,
 for each, whether it was applied or held, with the held values. A held group that says exactly
 what is already stored (for example "no overtime" over a match with none) is no loss, so it is
-recorded as unchanged and its value is not kept. When one rule held the whole write, the line
-also says why: an older revision of the same board, or an engi result whose flags and winner
-are kept together. The history is written in the
+recorded as unchanged and its value is not kept. When a rule held changes rather than their
+times, the line also says why: an older revision of the same board, an engi result whose flags
+and winner are kept together, a knockout match that needs a winner, or an engi result that
+needs a valid flag count. The history is written in the
 same transaction as the match, so the two land together or not at all, and a write refused
 outright (an invalid payload, the wrong competitors) leaves no line. Reopening, requeueing,
 overriding a winner and the other server actions that change a result write their own line.
@@ -570,9 +587,12 @@ those times are saved. They are saved for every match, in both files (the last c
 results file, and the bracket file), which is what makes the rule the same wherever a match
 happens to be in the competition. A match saved before the per group times existed has only
 one time for the whole result, and every group reads as changed then, so it is compared exactly
-as before. A write from a client that does not send a time counts as unstamped and always
-applies: the merge discriminates only when both sides carry a stamp, so it can never silently
-hold a legitimate change.
+as before. A running save from a client that does not send a time counts as unstamped and
+always applies: the merge discriminates only when both sides carry a stamp, so it can never
+silently hold a legitimate change. A result the server orders itself (a finish or correction
+that arrives without a time, and every change a server action builds, such as a quick score)
+takes the server's time instead, never older than the stored result, so it still applies and
+a save made before it but arriving later is ordered against it rather than overwriting it.
 
 The comparison only holds if the two clocks agree, so a timestamp that is far enough in the
 future to be impossible is refused and reported rather than trusted or quietly discarded.

@@ -391,9 +391,11 @@ func TestMerge_ScoringAfterATeamWithdrawalClearsIt(t *testing.T) {
 
 // R3: a correction made on a board after the match finished applies to the
 // finished match, which stays finished, and the winner is worked out again.
-// R4: when that leaves the match tied, a pool match is a draw and a knockout
-// match goes back to running (a knockout cannot end tied), its winner taken
-// back out of the next round.
+// R4 (revised, operator ruling 2026-10-04: "It needs a winner if the match is
+// finished and is being corrected"): when that would leave the match tied, a
+// pool match is a draw, and in a knockout the change is NOT applied: the
+// match keeps its recorded finish and its advanced winner, never goes back to
+// running, and the change is held in the history with the reason.
 func TestMerge_RunningPointAfterTheFinish(t *testing.T) {
 	finish := func(t *testing.T, h mmHome) {
 		t.Helper()
@@ -428,17 +430,27 @@ func TestMerge_RunningPointAfterTheFinish(t *testing.T) {
 			late := mmRunning(h, mmT2)
 			late.Changed = nil
 			late.IpponsA, late.IpponsB = []string{"M"}, []string{"K"}
-			require.NoError(t, h.write(late))
+			err := h.write(late)
 			m := h.load(t)
-			assert.Empty(t, m.Winner)
+			assert.Equal(t, state.MatchStatusCompleted, m.Status, "never back to running")
 			if knockout {
-				assert.Equal(t, state.MatchStatusRunning, m.Status, "R4: a knockout match cannot end tied")
-				b, err := h.store.LoadBracket(h.compID)
-				require.NoError(t, err)
-				assert.Equal(t, winnerOfPlaceholder(2, 0), b.Rounds[1][0].SideA, "the old winner comes back out of the next round")
-				assert.Empty(t, b.Rounds[1][0].SideAID)
+				require.ErrorIs(t, err, ErrMatchSuperseded, "R4: the change that ties a knockout is held")
+				assert.Equal(t, []string{state.GroupPoints}, HeldGroupsOf(err))
+				assert.Equal(t, state.HeldReasonNeedsWinner, HeldReasonOf(err))
+				assert.Equal(t, wrTeamA, m.Winner, "the recorded finish stands")
+				assert.Equal(t, []string{"M"}, m.IpponsA)
+				assert.Empty(t, m.IpponsB)
+				assert.Equal(t, mmT1, m.GroupStamp(state.GroupPoints), "the held change moves no stamp")
+				b, berr := h.store.LoadBracket(h.compID)
+				require.NoError(t, berr)
+				assert.Equal(t, wrTeamA, b.Rounds[1][0].SideA, "the winner stays advanced")
+				last := h.history(t)[len(h.history(t))-1]
+				assert.Equal(t, state.HistoryOutcomeHeld, last.Outcomes[state.GroupPoints])
+				assert.JSONEq(t, `{"ipponsA":["M"],"ipponsB":["K"],"hansokuA":0,"hansokuB":0}`, string(last.Held[state.GroupPoints]))
+				assert.Equal(t, HoldReasonKnockoutNeedsWinner, last.Reason)
 			} else {
-				assert.Equal(t, state.MatchStatusCompleted, m.Status)
+				require.NoError(t, err)
+				assert.Empty(t, m.Winner)
 				assert.Equal(t, state.DecisionDraw, m.Decision, "R4: a pool tie is a draw")
 			}
 		})

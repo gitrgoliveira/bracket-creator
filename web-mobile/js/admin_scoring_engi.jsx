@@ -21,7 +21,7 @@
 
 const { useState: useStateE, useEffect: useEffectE, useRef: useRefE } = React;
 
-import { ReasonPrompt, CORRECTION_PRESETS, useAdoptFromServer } from './admin_scoring_shared.jsx';
+import { ReasonPrompt, CORRECTION_PRESETS, useAdoptFromServer, HeldWriteDiscard } from './admin_scoring_shared.jsx';
 import { SyncStatusPill, useDebouncedRunningWrite, useChangedGroups, useKeptInHistoryNote, KeptInHistoryNote } from './admin_scoring_autosave.jsx';
 import { MatchHistoryDisclosure } from './match_history_view.jsx';
 import { useEscapeToClose, confirmDialog } from './ui.jsx';
@@ -29,7 +29,7 @@ import { useEscapeToClose, confirmDialog } from './ui.jsx';
 import { NumberedName } from './numbered_name.jsx';
 import { SideCell } from './side_cell.jsx';
 import { useArmedConfirm } from './tap_guard.jsx';
-import { terminalFailureBanner, notSavedText, writeWasRefused, writeRetryable, QUEUED_NOTICE } from './write_result.jsx';
+import { terminalFailureBanner, notSavedText, writeWasRefused, writeRetryable, queuedNotice } from './write_result.jsx';
 
 const MAX_FLAGS = 5;
 // Valid totals: 1, 3, 5 (odd, guarantees a winner).
@@ -115,6 +115,7 @@ export function EngiScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext
   // Wi-Fi must never lose an engi result.
   const mountedRef = useRefE(true);
   useEffectE(() => () => { mountedRef.current = false; }, []);
+  // Holds the queued answer, false when nothing is pending (queuedNotice).
   const [pendingWrite, setPendingWrite] = useStateE(false);
   // Holds the last submit closure so the banner's "Retry now" can re-invoke it
   // (a closure, not a bare payload, so a queued Finish+Next retries the same
@@ -250,7 +251,7 @@ export function EngiScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext
     // (matches the prior behaviour and avoids a post-unmount state update).
     if (writeRetryable(res) && mountedRef.current) {
       setSubmitting(false);
-      setPendingWrite(true);
+      setPendingWrite(res);
       pendingFnRef.current = fn;
     }
     return res;
@@ -565,10 +566,16 @@ export function EngiScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext
             the operator may still retry manually while we hold the payload. */}
         {pendingWrite && !writeFailed && (
           <div className="pending-write-banner" role="status" aria-live="polite">
-            <span>{QUEUED_NOTICE}</span>
+            <span>{queuedNotice(pendingWrite)}</span>
             {pendingFnRef.current && (
               <button type="button" className="btn btn--sm btn--ghost" disabled={submitting} onClick={() => doSubmit(pendingFnRef.current)}>Retry now</button>
             )}
+            <HeldWriteDiscard
+              compId={m.compId}
+              matchId={m.id}
+              disabled={submitting}
+              onDiscarded={() => { setPendingWrite(false); pendingFnRef.current = null; }}
+            />
           </div>
         )}
         {/* While the correction prompt is open it owns the only Cancel/commit

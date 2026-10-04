@@ -575,10 +575,17 @@ func backfillMatchIdentityForHantei(store CompetitionStore, compID, matchID stri
 	if req.SideB == "" {
 		req.SideB = storedB
 	}
-	if req.SideAID == "" {
+	// An id is filled in only beside the name it belongs to. The engine reads
+	// a side id equal to the stored one as proof that the side is the same
+	// competitor under an old name (adoptCurrentSideName, a write queued
+	// before a rename), so an id copied beside a DIFFERENT name would vouch
+	// for a payload naming someone else, and the write would be accepted
+	// instead of refused as a side mismatch (bc-mrgc review F2). A rename
+	// is proven only by an id the client itself sent.
+	if req.SideAID == "" && req.SideA == storedA {
 		req.SideAID = storedAID
 	}
-	if req.SideBID == "" {
+	if req.SideBID == "" && req.SideB == storedB {
 		req.SideBID = storedBID
 	}
 }
@@ -736,13 +743,19 @@ func RegisterMatchHandlers(r *gin.RouterGroup, eng *engine.Engine, store Competi
 			// HeldGroups names, on a "superseded" entry, every group it
 			// changes: each was kept in the match's history (bc-mrgc).
 			HeldGroups []string `json:"heldGroups,omitempty"`
+			// HeldReason is "needs_winner" when they were held because
+			// applying them would leave the match without the winner it
+			// needs (R4), rather than for a newer stored change.
+			HeldReason string `json:"heldReason,omitempty"`
 		}
 		var errs []scoreError
 		// heldEntry reports an entry that was applied in part: the groups
 		// named were kept in the match's history instead (bc-mrgc).
 		type heldEntry struct {
-			MatchID    string   `json:"matchId"`
-			HeldGroups []string `json:"heldGroups"`
+			MatchID         string   `json:"matchId"`
+			HeldGroups      []string `json:"heldGroups"`
+			DisplacedGroups []string `json:"displacedGroups,omitempty"`
+			HeldReason      string   `json:"heldReason,omitempty"`
 		}
 		var partlyHeld []heldEntry
 		// Only successfully-recorded results go into the SSE broadcast so
@@ -912,6 +925,10 @@ func RegisterMatchHandlers(r *gin.RouterGroup, eng *engine.Engine, store Competi
 					bulkErr.Reason = "superseded"
 					bulkErr.Error = SupersededMessage
 					bulkErr.HeldGroups = engine.HeldGroupsOf(err)
+					bulkErr.HeldReason = engine.HeldReasonOf(err)
+					if bulkErr.HeldReason != "" {
+						bulkErr.Error = NeedsWinnerMessage
+					}
 				case errors.As(err, &alreadyIneligErr):
 					// bc-rawm/bc-cse: this batch shape has no dedicated 409 to
 					// answer with, so the operator sentence rides in Error
@@ -961,8 +978,11 @@ func RegisterMatchHandlers(r *gin.RouterGroup, eng *engine.Engine, store Competi
 				continue
 			}
 			successful = append(successful, results[i].MatchResult)
-			if held := results[i].Merge.HeldGroups(); len(held) > 0 {
-				partlyHeld = append(partlyHeld, heldEntry{MatchID: results[i].ID, HeldGroups: held})
+			if held, displaced := results[i].Merge.HeldGroups(), results[i].Merge.DisplacedGroups(); len(held)+len(displaced) > 0 {
+				if held == nil {
+					held = []string{}
+				}
+				partlyHeld = append(partlyHeld, heldEntry{MatchID: results[i].ID, HeldGroups: held, DisplacedGroups: displaced, HeldReason: results[i].Merge.HeldReason()})
 			}
 			if capturedStatus != nil {
 				eligibilityUpdates = append(eligibilityUpdates, capturedStatus)
@@ -1184,7 +1204,7 @@ func RegisterMatchHandlers(r *gin.RouterGroup, eng *engine.Engine, store Competi
 				// timestamp guard), but mapped anyway: the alternative default is
 				// a 500, which the offline write queue treats as transient and
 				// retries forever against a write that can never win.
-				respondSuperseded(c, result.Merge.HeldGroups())
+				respondSuperseded(c, result.Merge.HeldGroups(), result.Merge.HeldReason())
 				return
 			}
 			if errors.Is(err, engine.ErrMatchSideMismatch) {
@@ -1797,7 +1817,7 @@ func RegisterMatchHandlers(r *gin.RouterGroup, eng *engine.Engine, store Competi
 		// named (the engine's recordOverrideHistory). Answered exactly like
 		// any other write whose every change was held (bc-mrgc phase 3): the
 		// result group it held, and the superseded reason the client keys on.
-		respondSuperseded(c, []string{state.GroupResult})
+		respondSuperseded(c, []string{state.GroupResult}, "")
 	})
 
 	r.PUT("/competitions/:id/matches/:mid/time", func(c *gin.Context) {
@@ -2130,6 +2150,10 @@ type matchSnapshot struct {
 	// winner), which the self-run judge reads a participant's winner against
 	// rather than the sides the write sends.
 	Pairing domain.WinnerAttribution
+	// ResultStamp is the stored stamp of the match's result group (when its
+	// verdict was last changed), which the correction-reason check reads to
+	// tell a stale replay of a finish from a correction (bc-mrgc review).
+	ResultStamp int64
 }
 
 // repBoutOf returns a copy of the first representative-bout row in subs, nil
@@ -2181,6 +2205,7 @@ func lookupMatchSnapshot(s matchStores, compID, matchID string) (matchSnapshot, 
 				Decision:         poolMatches[i].Decision,
 				RepBout:          repBoutOf(poolMatches[i].SubResults),
 				Pairing:          poolMatches[i].Attribution(),
+				ResultStamp:      poolMatches[i].GroupStamp(state.GroupResult),
 			}, true, loadErr
 		}
 	}
@@ -2214,6 +2239,7 @@ func bracketMatchSnapshot(bm *state.BracketMatch) matchSnapshot {
 		Decision:         bm.Decision,
 		RepBout:          repBoutOf(bm.SubResults),
 		Pairing:          bm.Attribution(),
+		ResultStamp:      bm.GroupStamp(state.GroupResult),
 	}
 }
 
@@ -2253,13 +2279,22 @@ func matchSnapshotOrErr(s matchStores, compID, matchID, guardLabel string) (matc
 // paths reach it: each carries the client's stamp (mp-jnvl added the decision
 // one, bc-dhas the daihyosen ones), so the timestamp guard compares rather than
 // taking its unstamped bypass. Quick-score still builds its MatchResult without
-// a stamp and so always applies; it is mapped defensively because its default
-// arm is a 500 the SPA's write queue would retry forever.
+// a client stamp; the merge stamps it with the server's time, never older than
+// the stored result (engine writeStamp), so it always applies. It is mapped
+// defensively because its default arm is a 500 the SPA's write queue would
+// retry forever.
 //
 // bulk-score is deliberately NOT in that list: it reports per-entry failures in
 // its own errors[] array inside an overall 200, so a superseded entry is already
 // excluded from `successful` and cannot poison a queue.
-func respondSuperseded(c *gin.Context, heldGroups []string) {
+//
+// heldReason is the merge's code for why (engine.HeldReasonOf): "" for a newer
+// stored change, "needs_winner" when applying the write would have left a
+// finished match without the winner it needs (R4). The latter is still not
+// lost and still never wins a retry, so it keeps the same applied:false
+// superseded shape, with heldReason and its own message telling the operator
+// to correct the result with a winner.
+func respondSuperseded(c *gin.Context, heldGroups []string, heldReason string) {
 	// LOGGED because this is the one successful-looking response whose work
 	// an operator does not see on the match. Since bc-mrgc the held values are
 	// in the match's history, but the line still names the request, which is
@@ -2275,6 +2310,10 @@ func respondSuperseded(c *gin.Context, heldGroups []string) {
 	if len(heldGroups) > 0 {
 		body["heldGroups"] = heldGroups
 	}
+	if heldReason != "" {
+		body["heldReason"] = heldReason
+		body["message"] = NeedsWinnerMessage
+	}
 	c.JSON(http.StatusOK, body)
 }
 
@@ -2282,6 +2321,12 @@ func respondSuperseded(c *gin.Context, heldGroups []string) {
 // held is answered with: nothing of it was applied, and it is kept in the
 // match's history (bc-mrgc), not lost.
 const SupersededMessage = "Not applied: a newer change to this match is already recorded. This change was kept in the match's history."
+
+// NeedsWinnerMessage is the sentence a write is answered with when its change
+// was held because it would leave a finished match without the winner it
+// needs (R4, operator ruling 2026-10-04): a knockout match left tied, or an
+// engi match left with no valid flag count.
+const NeedsWinnerMessage = "Not applied: this change would leave the finished match without a winner, and it needs one. Correct the result with a winner. This change was kept in the match's history."
 
 // writesOverFinished reports whether a write of this status, over a finished
 // match, is a correction to it rather than a start: a completed correction, or
@@ -2476,6 +2521,15 @@ func applyCorrectionReasonUnderTx(stx state.StoreTx, compID, matchID string, r *
 	}
 	r.ReopenPending = snap.ReopenPending
 	if r.Status == state.MatchStatusCompleted && snap.Status == state.MatchStatusCompleted {
+		// A finish made BEFORE the stored result (a queued Finish replayed
+		// after the match was finished on another device) is no correction:
+		// the merge holds its result by its stamp and keeps it in the match's
+		// history. Demanding a reason here refused it before it got there,
+		// and it was lost (bc-mrgc review). An equal stamp is an exact
+		// replay, which applies, so it is still a correction to justify.
+		if r.ModifiedAt > 0 && r.ModifiedAt < snap.ResultStamp {
+			return correctionCheck{StoredStatus: snap.Status, StoredDecision: snap.Decision}, nil
+		}
 		if r.CorrectionReason == "" {
 			return correctionCheck{StoredStatus: snap.Status, StoredDecision: snap.Decision, Reject: missingCorrectionReasonError()}, nil
 		}
@@ -2716,7 +2770,7 @@ func scoreResponseWithReopened(result *state.MatchResult, reopened []engine.Reop
 		return result
 	}
 	held := result.Merge.HeldGroups()
-	if len(reopened) == 0 && len(held) == 0 {
+	if len(reopened) == 0 && len(held) == 0 && len(result.Merge.DisplacedGroups()) == 0 {
 		return result
 	}
 	// Both errors below are RETURNED BY THE API and cannot be discarded
@@ -2747,6 +2801,19 @@ func scoreResponseWithReopened(result *state.MatchResult, reopened []engine.Reop
 	if len(held) > 0 {
 		merged["heldGroups"] = held
 	}
+	// Why, when it was not a newer change: applying them would have left the
+	// match without the winner it needs (R4), so the operator corrects the
+	// result with a winner.
+	// A stored change this write moved to the history: newer scoring that
+	// would have left the finished match without the winner it needs, which
+	// in stamp order came after this finish and could not apply (S2 with
+	// R4). The finish applied; displacedGroups names what was moved.
+	if displaced := result.Merge.DisplacedGroups(); len(displaced) > 0 {
+		merged["displacedGroups"] = displaced
+	}
+	if reason := result.Merge.HeldReason(); reason != "" {
+		merged["heldReason"] = reason
+	}
 	return merged
 }
 
@@ -2773,7 +2840,7 @@ func holdOlderRevision(c *gin.Context, tx CompetitionTransactor, eng ScoringEngi
 	var notFoundErr *engine.NotFoundError
 	switch {
 	case errors.Is(txErr, engine.ErrMatchSuperseded):
-		respondSuperseded(c, engine.HeldGroupsOf(txErr))
+		respondSuperseded(c, engine.HeldGroupsOf(txErr), engine.HeldReasonOf(txErr))
 	case errors.As(txErr, &notFoundErr):
 		c.JSON(http.StatusNotFound, gin.H{"error": txErr.Error()})
 	case txErr != nil:
@@ -3185,7 +3252,7 @@ func registerScoreHandler(r *gin.RouterGroup, eng ScoringEngine, store Competiti
 				if incomingStatus != state.MatchStatusRunning || result.Status != state.MatchStatusRunning {
 					runningRevStore.Delete(matchKey)
 				}
-				respondSuperseded(c, result.Merge.HeldGroups())
+				respondSuperseded(c, result.Merge.HeldGroups(), result.Merge.HeldReason())
 				return
 			}
 			var refusal *selfRunRefusal

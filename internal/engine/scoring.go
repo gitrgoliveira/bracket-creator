@@ -143,8 +143,12 @@ func reconcileSides(result *state.MatchResult, stored storedSides) (mismatch boo
 // stored one when the side's participant id says it is the same competitor
 // (a rename since the write was made), and every place the write names that
 // side by the old name: the match winner (when its id, if any, is this side's)
-// and the representative-bout row, which names the teams themselves (the
-// numbered bout rows name fighters, never the side).
+// and every bout row. The representative-bout row names the teams
+// themselves, and a numbered row can too: a fixed-order row that names no
+// fighter records the team as its winner, and an id-less kachinuki row
+// likewise. Left on the old name, such a row is credited to nobody
+// (state.SubBoutWinnerSide reads the match's current side names), so the
+// encounter's IV and winner would move (bc-mrgc review F1).
 func adoptCurrentSideName(result *state.MatchResult, side *string, sideID, storedName, storedID string) {
 	old := *side
 	if old == "" || storedName == "" || old == storedName || sideID == "" || sideID != storedID {
@@ -156,9 +160,6 @@ func adoptCurrentSideName(result *state.MatchResult, side *string, sideID, store
 	}
 	for i := range result.SubResults {
 		sub := &result.SubResults[i]
-		if sub.Position != state.DaihyosenSubPosition {
-			continue
-		}
 		if sub.SideA == old {
 			sub.SideA = storedName
 		}
@@ -899,7 +900,7 @@ func applyPoolWrite(stored, result *state.MatchResult, policy matchWritePolicy, 
 	*stored = *result
 	// The write's own merge inputs and report stay on the incoming result for
 	// the caller; the stored copy must not carry them to a later writer.
-	stored.Changed, stored.WriteDoor, stored.Merge = nil, "", nil
+	stored.ClearRequestFields()
 	stored.GroupStamps = state.CloneGroupStamps(result.GroupStamps)
 	return false, false, inherited, nil
 }
@@ -2436,6 +2437,20 @@ func validateBracketCompletion(bm *state.BracketMatch, status state.MatchStatus,
 // Note it does NOT touch bm.Court / bm.ScheduledAt: scheduling is owned
 // elsewhere, and the Court/ScheduledAt handling at the end is an echo BACK into
 // result for the caller's response, not a write.
+// sidesBeforeMerge folds a bracket match's stored pairing into the write
+// before the merge (reconcileSides, as applyPoolWrite does before its own
+// merge) and reports a forward write naming other competitors. A match not
+// playable yet is left to applyBracketMatchResult's own refusal, which names
+// what it is waiting for. applyBracketMatchResult reconciles again; the fold
+// is idempotent.
+func sidesBeforeMerge(bm *state.BracketMatch, result *state.MatchResult, policy matchWritePolicy) (mismatch bool) {
+	if !bracketMatchPlayable(bm) {
+		return false
+	}
+	disagree := reconcileSides(result, storedSides{A: bm.SideA, B: bm.SideB, AID: bm.SideAID, BID: bm.SideBID})
+	return disagree && policy == matchWriteForward
+}
+
 func applyBracketMatchResult(bm *state.BracketMatch, result *state.MatchResult, policy matchWritePolicy) (applied bool, err error) {
 	// A knockout match is playable only once both sides are resolved competitors
 	// (feeder pools/matches finished). This replaces the old bracket-wide Preview
@@ -2635,6 +2650,13 @@ func (e *Engine) applyBracketResultIn(bracket *state.Bracket, compID, matchID st
 			if bm.ID != matchID {
 				continue
 			}
+			// The stored pairing first, as the pool branch does it: the
+			// merge works a winner out again from the merged match (R3, S2),
+			// and a payload that omits its sides would otherwise read as one
+			// with no sides at all (bc-mrgc review S6).
+			if sidesBeforeMerge(bm, result, policy) {
+				return nil, false, ErrMatchSideMismatch
+			}
 			// The merge (bc-mrgc), the SAME owner the pool branch calls, and
 			// FIRST: everything below judges the merged match. A write whose
 			// every change is held is superseded -- the ordinary 200
@@ -2664,38 +2686,22 @@ func (e *Engine) applyBracketResultIn(bracket *state.Bracket, compID, matchID st
 			// including one confirmed for an unrelated reason, since the
 			// decision path's own T103 force used to arrive as this flag.
 			priorWinner, priorWinnerID := propagatedWinnerOf(bracket, rIdx, mIdx, bm)
-			priorStatus := bm.Status
 			if _, err := applyBracketMatchResult(bm, result, policy); err != nil {
 				return nil, false, err
 			}
 			// Propagate only a genuinely completed result. A "running" update is
 			// for live-status display, so the next round's SideA/SideB must stay
-			// empty until the match has a final result.
+			// empty until the match has a final result. A correction never
+			// puts a finished knockout match back to running: one that would
+			// leave it tied is held by the merge (R4, operator ruling
+			// 2026-10-04), so the match keeps its finish and its advanced
+			// winner.
 			var reopened []ReopenedMatch
-			switch {
-			case bracket.Rounds[rIdx][mIdx].Status == state.MatchStatusCompleted:
+			if bracket.Rounds[rIdx][mIdx].Status == state.MatchStatusCompleted {
 				e.propagateBracketWinner(bracket, rIdx, mIdx)
 				if force && policy == matchWriteForward &&
 					winnerActuallyChanged(priorWinner, priorWinnerID, bm) {
 					reopened = forceReopenDownstreamChain(bracket, rIdx, mIdx, bm.ID)
-				}
-			case priorStatus == state.MatchStatusCompleted && policy == matchWriteForward:
-				// R4: a correction made after the finish left the knockout
-				// match tied, so it went back to running. The winner it had
-				// advanced comes back out of the next round, through any byes
-				// it resolved, by the same owner a reopen uses. A later match
-				// being fought refuses the write, and one already played is
-				// named for the operator to confirm, exactly as for a
-				// correction that changes the winner (downstreamCorrectionRefusal);
-				// confirmed, it is reopened first, as the reopen door does.
-				if err := downstreamCorrectionRefusal(bracket, rIdx, mIdx, bm, force); err != nil {
-					return nil, false, err
-				}
-				if force {
-					reopened = forceReopenDownstreamChain(bracket, rIdx, mIdx, bm.ID)
-				}
-				if err := retractPropagatedWinner(bracket, rIdx, mIdx); err != nil {
-					return nil, false, err
 				}
 			}
 			return reopened, inherited, nil
@@ -2706,6 +2712,9 @@ func (e *Engine) applyBracketResultIn(bracket *state.Bracket, compID, matchID st
 	// bronze: it has no downstream match, so the downstream-correction guard
 	// does not apply here either.
 	if bracket.ThirdPlaceMatch != nil && bracket.ThirdPlaceMatch.ID == matchID {
+		if sidesBeforeMerge(bracket.ThirdPlaceMatch, result, policy) {
+			return nil, false, ErrMatchSideMismatch
+		}
 		if mergeMatchWrite(bracketMatchAsResult(bracket.ThirdPlaceMatch), result, policy, mc).Superseded() {
 			return nil, false, ErrMatchSuperseded
 		}

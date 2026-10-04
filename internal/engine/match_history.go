@@ -21,6 +21,10 @@ const (
 	DoorDaihyosenAdd = "daihyosen-add"
 	DoorDaihyosenDel = "daihyosen-remove"
 	DoorEngine       = "engine"
+	// DoorDisplaced names a history entry for a stored change an earlier-
+	// stamped write arriving after it moved to the history (S2 with R4): the
+	// change came through some door before; this entry records it held.
+	DoorDisplaced = "displaced"
 
 	doorReopen           = "reopen"
 	doorRequeue          = "requeue"
@@ -93,6 +97,40 @@ func (e *Engine) recordWriteHistory(h state.StoreTx, compID, matchID string, res
 	if err := h.AppendMatchHistory(compID, entry); err != nil {
 		log.Printf("engine: match %s/%s: history entry not recorded: %v", compID, matchID, err)
 	}
+	e.recordDisplacedHistory(h, compID, matchID, rep)
+}
+
+// recordDisplacedHistory appends one entry per stored change the write moved
+// to the history (MergeReport.Displaced): at that change's own stamp, every
+// group it had set held with its value and the reason. It reads exactly as
+// the entry that change gets when it arrives AFTER the write instead, so the
+// history holds it whichever order the two arrived in.
+func (e *Engine) recordDisplacedHistory(h state.StoreTx, compID, matchID string, rep *state.MergeReport) {
+	if rep == nil {
+		return
+	}
+	for _, d := range rep.Displaced {
+		changed := make([]string, 0, len(d.Values))
+		outcomes := make(map[string]string, len(d.Values))
+		for g := range d.Values {
+			changed = append(changed, g)
+			outcomes[g] = state.HistoryOutcomeHeld
+		}
+		slices.Sort(changed)
+		entry := state.MatchHistoryEntry{
+			MatchID:    matchID,
+			Door:       DoorDisplaced,
+			Stamp:      d.Stamp,
+			ReceivedAt: time.Now().UnixMilli(),
+			Changed:    changed,
+			Outcomes:   outcomes,
+			Held:       d.Values,
+			Reason:     d.Reason,
+		}
+		if err := h.AppendMatchHistory(compID, entry); err != nil {
+			log.Printf("engine: match %s/%s: displaced history entry not recorded: %v", compID, matchID, err)
+		}
+	}
 }
 
 // recordDirectHistory appends the history entry of a write that changes a
@@ -120,17 +158,37 @@ func (e *Engine) recordDirectHistory(h state.StoreTx, compID, matchID, door stri
 // noteServerBoutChanges adds to an explicit Changed every bout row the
 // server itself changed on the write's behalf after the writer sent it (the
 // kachinuki merge's server-appended rows and trailing strip, the default-win
-// padding): before is the bout list as the writer sent it. Without this the
-// merge would read those rows as unchanged and put the stored ones back over
-// them. Diffing here is safe where diffing a client payload is not: both
+// padding): before is the bout list as the writer sent it, stored the stored
+// match's, and kachinuki whether the write merged its bout log by position.
+// Without this the merge would read those rows as unchanged and put the
+// stored ones back over them. This and daihyosenChangedGroups (the
+// representative-bout add and remove, mobileapp) are the two places the
+// server diffs a write against the match it was built from. Diffing here is safe where diffing a client payload is not: both
 // sides are the server's own, made under the write's lock. A write that named
 // no groups needs nothing: its default already covers every row it carries.
-func noteServerBoutChanges(result *state.MatchResult, before []state.SubMatchResult) {
+func noteServerBoutChanges(result *state.MatchResult, before, stored []state.SubMatchResult, kachinuki bool) {
 	if result.Changed == nil {
 		return
 	}
-	was := &state.MatchResult{SubResults: before}
-	positions := state.SubPositions(before)
+	// What the merge would keep for each row the server did not touch: the
+	// writer's own row, or, in a kachinuki write, which merges its bout log
+	// BY POSITION (an omitted row is kept, mergeKachinukiSubResults), the
+	// stored row the writer left out. Without that half a stored row the
+	// kachinuki merge brought in and then stripped (a trailing unscored
+	// pairing at the finish) read as unchanged, and the merge copied it back
+	// (bc-mrgc review S4). In any other write an omitted row is just not
+	// part of it, never a server change, so stored rows are not consulted.
+	wasSubs := state.CloneSubResults(before)
+	if kachinuki {
+		sent := state.SubPositions(before)
+		for i := range stored {
+			if !slices.Contains(sent, stored[i].Position) {
+				wasSubs = append(wasSubs, stored[i])
+			}
+		}
+	}
+	was := &state.MatchResult{SubResults: wasSubs}
+	positions := state.SubPositions(wasSubs)
 	for _, p := range state.SubPositions(result.SubResults) {
 		if !slices.Contains(positions, p) {
 			positions = append(positions, p)
@@ -182,6 +240,11 @@ func (e *Engine) recordOverrideHistory(compID, matchID, winnerName string, stamp
 // applied:false plus heldGroups. errors.Is(err, ErrMatchSuperseded) holds.
 type SupersededError struct {
 	Held []string
+	// HeldReason is the merge report's code for why they were held
+	// (state.MergeReport.HeldReason): "" for a newer stored change,
+	// state.HeldReasonNeedsWinner when applying them would have left the
+	// match without the winner it needs.
+	HeldReason string
 }
 
 func (e *SupersededError) Error() string { return ErrMatchSuperseded.Error() }
@@ -191,7 +254,17 @@ func (e *SupersededError) Is(target error) bool { return target == ErrMatchSuper
 
 // supersededBy is the error a write whose every change was held returns.
 func supersededBy(result *state.MatchResult) error {
-	return &SupersededError{Held: result.Merge.HeldGroups()}
+	return &SupersededError{Held: result.Merge.HeldGroups(), HeldReason: result.Merge.HeldReason()}
+}
+
+// HeldReasonOf returns why a superseded write's groups were held (see
+// SupersededError.HeldReason), or "".
+func HeldReasonOf(err error) string {
+	var se *SupersededError
+	if errors.As(err, &se) {
+		return se.HeldReason
+	}
+	return ""
 }
 
 // HeldGroupsOf returns the groups a superseded write had held, or nil.

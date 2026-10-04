@@ -63,8 +63,11 @@ const OWNER = 'write_result.jsx';
 // with a rule the owner might extend.
 export const FORBIDDEN = [
   {
-    re: /\.applied\s*(===|==|!==|!=)\s*(false|true)/,
-    why: 'compares .applied by hand; ask writeDidNotLand(res) or writeWasSuperseded(res) instead',
+    // `persisted` is the same kind of field: whether a queued write reached
+    // browser storage, which decides what the held-write notice may promise
+    // (queuedNotice).
+    re: /\.(applied|persisted)\s*(===|==|!==|!=)\s*(false|true)/,
+    why: 'compares .applied/.persisted by hand; ask writeDidNotLand(res), writeWasSuperseded(res) or queuedNotice(res) instead',
   },
   {
     // The SECOND way the rule drifts, learned the hard way. These names were
@@ -77,7 +80,7 @@ export const FORBIDDEN = [
     // whole rule exists to prevent. A copy constant read off `window` is worse
     // still: it renders as the literal text "undefined" in an operator banner.
     // Import from write_result.jsx; do not re-add a mirror.
-    re: /window\.(writeDidNotLand|writeWasSuperseded|writeWasRefused|writeWasRefusedForClock|writeRetryable|notLandedBanner|SUPERSEDED_LEAD|SUPERSEDED_REASON|SUPERSEDED_ADVICE|supersededAlertText|writeHeldGroups|writePartlyHeld|CLOCK_SKEW_REASON_TEXT|CLOCK_SKEW_ADVICE|QUEUED_NOTICE|queuedWritesNoun|heldWritesText)\b/,
+    re: /window\.(writeDidNotLand|writeWasSuperseded|writeWasRefused|writeWasRefusedForClock|writeRetryable|notLandedBanner|SUPERSEDED_LEAD|SUPERSEDED_REASON|SUPERSEDED_ADVICE|supersededAlertText|writeHeldGroups|writePartlyHeld|CLOCK_SKEW_REASON_TEXT|CLOCK_SKEW_ADVICE|QUEUED_NOTICE|QUEUED_UNSAVED_NOTICE|queuedNotice|queuedWritesNoun|heldWritesText|writeNeedsWinner|writeDisplacedGroups|supersededBanner|displacedAlertText)\b/,
     why: 'reads an owned predicate/copy off window; those mirrors are deleted, import from write_result.jsx instead',
   },
 ];

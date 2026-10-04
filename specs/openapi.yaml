@@ -2376,9 +2376,22 @@ paths:
           `scheduled` write over a `completed` match never carries `result`:
           its scoring changes apply to the finished match when they were made
           after the result (the match stays completed and its winner is worked
-          out again from the merged points or bouts; a knockout match left tied
-          goes back to running, a pool or league match left tied becomes a
-          draw), and are held when made before it. A scoring change made on a
+          out again from the merged points or bouts; a pool or league match
+          left tied becomes a draw), and are held when made before it. A
+          change that would leave a finished knockout match tied, or an engi
+          match with no valid flag count, is never applied: the match keeps its
+          recorded finish (it never goes back to running) and the change is
+          held, answered with `heldReason: needs_winner`, so the operator
+          corrects the result with a winner. A finish whose result applies over
+          scoring stored NEWER than it gets the winner that scoring gives (the
+          same verdict as if the two had arrived in stamp order); when that
+          scoring would leave the finished match without a winner (a knockout
+          tie, an engi count that is not valid), the finish is applied on its
+          own scoreline, as in stamp order, and that newer scoring is moved to
+          the match's history as held; the answer names it in
+          `displacedGroups`, with the same `heldReason`. A finish that carries
+          no scoreline of its own is held instead. A points change whose write does not apply
+          `result` keeps a recorded judges' decision (hantei mark). A scoring change made on a
           running board after a recorded withdrawal or default win clears it
           (points scored mean the withdrawal was a mistake), and the competitor
           it barred is eligible again. A name that is not a group is a 400.
@@ -2392,7 +2405,13 @@ paths:
             Result recorded. On a normal write the body is the updated (merged)
             MatchResult. When part of the write was held (a newer change to
             those groups is stored) the body also carries `heldGroups`, the
-            groups kept in the match's history instead of applied.
+            groups kept in the match's history instead of applied, and
+            `heldReason: needs_winner` when they were held because applying
+            them would leave a finished match without the winner it needs.
+            An applied finish that moved stored, NEWER scoring into the
+            match's history (it would have left the match without a winner,
+            and in stamp order came after this finish) carries
+            `displacedGroups` naming those groups, with the same `heldReason`.
             A running write the rev-guard finds older than one the same client
             session already sent (a lower rev, e.g. an out-of-order reconnect
             flush) is not applied and not dropped: the whole write is kept in
@@ -3375,6 +3394,14 @@ paths:
                           items:
                             $ref: '#/components/schemas/MergeGroup'
                           description: On a `superseded` entry, the groups held.
+                        heldReason:
+                          type: string
+                          enum: [needs_winner]
+                          description: >
+                            On a `superseded` entry held because applying it would
+                            leave a finished match without the winner it needs
+                            (see RefusedWrite.heldReason); `error` then carries that
+                            sentence.
                   heldGroups:
                     type: array
                     description: >
@@ -3390,6 +3417,15 @@ paths:
                           type: array
                           items:
                             $ref: '#/components/schemas/MergeGroup'
+                        displacedGroups:
+                          type: array
+                          items:
+                            $ref: '#/components/schemas/MergeGroup'
+                          description: As MatchResult.displacedGroups.
+                        heldReason:
+                          type: string
+                          enum: [needs_winner]
+                          description: As RefusedWrite.heldReason.
 
   /api/competitions/{id}/matches/{mid}/quick-score:
     put:
@@ -3442,11 +3478,12 @@ paths:
             last-write-wins guard drops the write because a newer result is
             already stored; see the `/score` endpoint's 200 for the contract.
             Not producible by ANY client today, first-party or not: this
-            endpoint's request schema has no `modifiedAt` field and the handler
-            builds the result server-side without one, so the guard takes its
-            unstamped bypass and the write always applies. Documented, and
-            mapped server-side, so that adding a stamp to this payload later
-            cannot silently turn the drop into a 500.
+            endpoint's request schema has no `modifiedAt` field, and the server
+            stamps the write it builds with its own time, never older than the
+            stored result, so the write always applies (and leaves a stamp a
+            later stale write is ordered against). Documented, and mapped
+            server-side, so that a change to that stamping cannot silently
+            turn the drop into a 500.
           content:
             application/json:
               schema:
@@ -4979,9 +5016,10 @@ components:
         PUT /score, POST /decision, PUT /override-winner and both /daihyosen
         paths each carry a client-supplied modifiedAt, so the guard compares
         rather than bypassing and any of them can produce either condition.
-        The remaining match-write endpoint, /quick-score, still builds its
-        result server-side without a stamp, so the guard takes its unstamped
-        bypass and it always applies; it nonetheless maps the superseded
+        The remaining match-write endpoint, /quick-score, builds its result
+        server-side without a client stamp; the server stamps it with its own
+        time, never older than the stored result, so it always applies; it
+        nonetheless maps the superseded
         condition to this same shape rather than to a 500, so that adding a
         stamp to its payload later cannot silently turn a benign supersede
         into a request an offline queue retries forever. The batch endpoint
@@ -5019,6 +5057,17 @@ components:
           description: >
             Present on `superseded`: the groups the write changes, every one
             of them held and kept in the match's history.
+        heldReason:
+          type: string
+          enum: [needs_winner]
+          description: >
+            Present on `superseded` when the groups were held not because a
+            newer change is stored but because applying them would leave a
+            FINISHED match without the winner it needs (a knockout match left
+            tied, an engi match left with no valid flag count). `message` then
+            tells the operator to correct the result with a winner; the change
+            is kept in the match's history. Also carried, beside `heldGroups`,
+            by a write applied in part.
 
     MatchHistoryEntry:
       type: object
@@ -5033,7 +5082,9 @@ components:
         door:
           type: string
           description: >
-            What made the write: score, bulk-score, quick-score, decision,
+            What made the write (`displaced`: a stored change a finish made
+            before it moved to the history, see MatchResult.displacedGroups):
+            score, bulk-score, quick-score, decision,
             daihyosen-add, daihyosen-remove, reopen, requeue, override-winner,
             engi, kachinuki-advance, kachinuki-remove-bout, downstream-reopen,
             or engine for a write the server made itself.
@@ -5070,12 +5121,15 @@ components:
         reason:
           type: string
           description: >
-            Why every group the write changes was held regardless of its stamp,
-            when one rule did that: "older revision of this board" (a running
-            write the same client session had already followed with a newer
-            one), or "the flags and the winner they decide are kept together"
-            (an engi finish one of whose two groups a newer change outranks).
-            Absent when each group was judged by its own stamp.
+            Why groups were held other than by their own stamps, when one rule
+            did that: "older revision of this board" (a running write the same
+            client session had already followed with a newer one), "the flags
+            and the winner they decide are kept together" (an engi finish one
+            of whose two groups a newer change outranks), "a knockout match
+            needs a winner" (a change that would leave a finished knockout
+            match tied), or "an engi result needs a valid flag count" (a recount
+            that would leave a finished engi match with none). Absent when each
+            group was judged by its own stamp.
         clearedWithdrawal:
           type: object
           description: The withdrawal or default win a later scoring change cleared (the result group as it was), when one was.
@@ -5910,8 +5964,31 @@ components:
             $ref: '#/components/schemas/MergeGroup'
           description: >
             On a write's response only: the groups of THIS write that were not
-            applied (a newer change to them is stored) and were kept in the
-            match's history. Omitted when everything applied.
+            applied (a newer change to them is stored, or applying them would
+            leave a finished match without the winner it needs: see
+            `heldReason`) and were kept in the match's history. Omitted when
+            everything applied.
+        heldReason:
+          type: string
+          readOnly: true
+          enum: [needs_winner]
+          description: >
+            On a write's response only, beside `heldGroups` or
+            `displacedGroups`: present when they were held or moved because
+            applying them would leave a finished match without the winner it
+            needs (see RefusedWrite.heldReason).
+        displacedGroups:
+          type: array
+          readOnly: true
+          items:
+            $ref: '#/components/schemas/MergeGroup'
+          description: >
+            On a write's response only: groups whose STORED values this
+            (applied) finish moved to the match's history, held. They were
+            changed after the finish was made and would have left the match
+            without the winner it needs, so in stamp order they could not
+            apply after it. The history keeps them, at their own stamp, with
+            door `displaced`.
         sideA:
           type: string
           maxLength: 100

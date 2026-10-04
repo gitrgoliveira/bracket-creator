@@ -131,6 +131,22 @@ describe('the History disclosure in the score editor', () => {
   });
 });
 
+// A change already recorded that an earlier-made finish, arriving later,
+// moved out of the match (door "displaced"): it reads "moved", not "not
+// applied", with the server's reason.
+describe('historyEntryView: a later change moved to the history', () => {
+  it('names the door and the move in plain words', () => {
+    const v = view.historyEntryView({
+      matchId: 'm-ko', door: 'displaced', stamp: at(10, 5, 0), receivedAt: at(10, 6, 0), changed: ['points'],
+      outcomes: { points: 'held' }, held: { points: { ipponsA: ['M'], ipponsB: ['K'], hansokuA: 0, hansokuB: 0 } },
+      reason: 'a knockout match needs a winner',
+    });
+    expect(v.door).toBe('Later change moved to history');
+    expect(v.reason).toBe('Moved to history: a knockout match needs a winner');
+    expect(v.held.map((h) => h.text)).toEqual(['Moved to history: points, K vs M']);
+  });
+});
+
 describe('heldValueText', () => {
   it.each([
     ['encho', { periodCount: 2 }, 'overtime'],
@@ -162,13 +178,23 @@ describe('historyEntryView: the reason a whole write was kept', () => {
     expect(view.historyEntryView(ENTRIES[1]).reason).toBeNull();
   });
 
-  it('lists no held line for a group the server recorded as unchanged (an echo)', () => {
+  // The view reads the OUTCOME, not just the presence of a value: the fixture
+  // carries a value for `encho` the server recorded as unchanged (an echo of
+  // what was stored) and for `bout:1` it applied, and neither may read as
+  // kept in history.
+  it('lists no held line for a group the server recorded as unchanged (an echo), even with a value', () => {
     const v = view.historyEntryView({
       matchId: 'm-ind', door: 'decision', stamp: at(10, 1, 0), receivedAt: at(10, 1, 0),
-      changed: ['result', 'points', 'encho'], outcomes: { result: 'held', points: 'held', encho: 'unchanged' },
-      held: { result: { status: 'completed', decision: 'kiken-voluntary', decisionBy: 'aka', winner: 'Yamada' }, points: { ipponsA: [], ipponsB: ['○', '○'], hansokuA: 0, hansokuB: 0 } },
+      changed: ['result', 'points', 'encho', 'bout:1'],
+      outcomes: { result: 'held', points: 'held', encho: 'unchanged', 'bout:1': 'applied' },
+      held: {
+        result: { status: 'completed', decision: 'kiken-voluntary', decisionBy: 'aka', winner: 'Yamada' },
+        points: { ipponsA: [], ipponsB: ['○', '○'], hansokuA: 0, hansokuB: 0 },
+        encho: { periodCount: 1 },
+        'bout:1': { position: 1, ipponsA: ['M'], ipponsB: [], winner: 'Yamada', decision: '' },
+      },
     });
     expect(v.held.map((h) => h.group)).toEqual(['result', 'points']);
-    expect(v.held.map((h) => h.text).join(' ')).not.toMatch(/overtime/);
+    expect(v.held.map((h) => h.text).join(' ')).not.toMatch(/overtime|bout 1/);
   });
 });

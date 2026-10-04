@@ -384,11 +384,25 @@ type MergeReport struct {
 	HeldEcho   []string
 	Unchanged  []string
 	HeldValues map[string]json.RawMessage
-	// HoldReason, when set, is why every group the write changes was held
-	// regardless of its stamp (a running write older than one the same
-	// board already sent: "older revision of this board"). Recorded in the
-	// history entry.
+	// HoldReason, when set, is why groups were held other than by their
+	// stamps: every group the write changes, regardless of its stamp (a
+	// running write older than one the same board already sent: "older
+	// revision of this board"), or the groups that would have left the match
+	// without a winner it needs (NeedsWinner). Recorded in the history entry.
 	HoldReason string
+	// NeedsWinner reports that the held groups were held because applying
+	// them would leave the match with no winner it must have (R4, operator
+	// ruling 2026-10-04: a finished knockout match left tied, or an engi
+	// match left with no valid flag count). The answer carries it as
+	// heldReason "needs_winner", so the operator is told to correct the
+	// result with a winner.
+	NeedsWinner bool
+	// Displaced are STORED changes this write moved to the history (S2 with
+	// R4): a finish that arrives after newer scoring which would leave the
+	// match without the winner it needs is applied on its own scoreline, as
+	// in stamp order, and the newer scoring is kept in the history as held,
+	// one entry per stamp. The answer names their groups (displacedGroups).
+	Displaced []DisplacedChange
 	// ClearedWithdrawal is the result group a later scoring change cleared
 	// (R2: points scored means the withdrawal was a mistake), kept for the
 	// history; nil when none was.
@@ -405,6 +419,56 @@ type MergeReport struct {
 // history entry.
 func (r *MergeReport) Superseded() bool {
 	return r != nil && len(r.Held)+len(r.HeldEcho) > 0 && len(r.Applied) == len(r.Unchanged)
+}
+
+// DisplacedChange is a stored change a later-arriving, earlier-stamped write
+// moved out of the match and into its history (MergeReport.Displaced): its
+// stamp, the values it had set per group, and why it could not stand.
+type DisplacedChange struct {
+	Stamp  int64
+	Values map[string]json.RawMessage
+	Reason string
+}
+
+// DisplacedGroups lists the groups whose stored values the write moved to
+// the history, sorted; nil when none.
+func (r *MergeReport) DisplacedGroups() []string {
+	if r == nil {
+		return nil
+	}
+	var out []string
+	for _, d := range r.Displaced {
+		for g := range d.Values {
+			if !containsString(out, g) {
+				out = append(out, g)
+			}
+		}
+	}
+	sort.Strings(out)
+	return out
+}
+
+func containsString(list []string, s string) bool {
+	for _, v := range list {
+		if v == s {
+			return true
+		}
+	}
+	return false
+}
+
+// HeldReasonNeedsWinner is the wire code (heldReason) of groups held because
+// applying them would leave the match without the winner it needs
+// (MergeReport.NeedsWinner).
+const HeldReasonNeedsWinner = "needs_winner"
+
+// HeldReason is the code a response carries beside heldGroups, "" when the
+// held groups were held by their stamps alone.
+func (r *MergeReport) HeldReason() string {
+	if r == nil || !r.NeedsWinner || len(r.Held)+len(r.Displaced) == 0 {
+		return ""
+	}
+	return HeldReasonNeedsWinner
 }
 
 // HeldGroups is the list a response carries, nil when nothing was held.

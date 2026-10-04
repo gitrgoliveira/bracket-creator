@@ -18,6 +18,7 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"math"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -55,10 +56,12 @@ type MatchHistoryEntry struct {
 	// Held carries the incoming value of every held group, so the change is
 	// kept even though it was not applied.
 	Held map[string]json.RawMessage `json:"held,omitempty"`
-	// Reason says why every change was held regardless of its stamp, when
-	// one rule did that: "older revision of this board" for a running write
-	// the same board had already followed with a newer one (the running rev
-	// guard). Empty when each group was judged by its own stamp.
+	// Reason says why changes were held other than by their stamps, when one
+	// rule did that (MergeReport.HoldReason): "older revision of this board"
+	// for a running write the same board had already followed with a newer
+	// one (the running rev guard), an engi finish held whole, or a change
+	// that would leave a finished match without the winner it needs. Empty
+	// when each group was judged by its own stamp.
 	Reason string `json:"reason,omitempty"`
 	// ClearedWithdrawal is the result a later scoring change cleared (R2).
 	ClearedWithdrawal json.RawMessage `json:"clearedWithdrawal,omitempty"`
@@ -114,7 +117,13 @@ func (s *Store) appendMatchHistoryLocked(compID string, existing []byte, entry M
 	if err != nil {
 		return fmt.Errorf("match history: %w", err)
 	}
-	buf := make([]byte, 0, len(existing)+len(line)+1)
+	// The file grows by one line per write, so its size is bounded in
+	// practice; the check keeps the capacity sum from overflowing whatever
+	// the inputs (the separator and the trailing newline are the +2).
+	if len(existing) > math.MaxInt-len(line)-2 {
+		return fmt.Errorf("match history: %s/%s: history too large to append to", compID, entry.MatchID)
+	}
+	buf := make([]byte, 0, len(existing)+len(line)+2)
 	buf = append(buf, existing...)
 	if len(buf) > 0 && buf[len(buf)-1] != '\n' {
 		buf = append(buf, '\n')

@@ -24,6 +24,9 @@
 // an editor's baselines is admin_scoring_autosave.jsx's useChangedGroups.
 
 import { IPPON_PLACEHOLDER } from './result_slot.jsx';
+import {
+    NEEDS_WINNER_NOTE, writeNeedsWinner, writePartlyHeld, writeHeldGroups, writeDisplacedGroups,
+} from './write_result.jsx';
 
 export const GROUP_POINTS = 'points';
 export const GROUP_RESULT = 'result';
@@ -93,11 +96,40 @@ export function groupsLabel(groups) {
 
 // heldGroupsNote: the quiet note a score editor shows when the server applied
 // a write in part and kept the rest in the match's history (write_result.jsx
-// writePartlyHeld), naming what was kept; null when nothing was.
-export function heldGroupsNote(groups) {
+// writePartlyHeld), naming what was kept; null when nothing was. `needsWinner`
+// when they were held because applying them would leave the finished match
+// without a winner (writeNeedsWinner): the note then says to correct the
+// result with a winner instead of naming a newer change.
+export function heldGroupsNote(groups, needsWinner = false) {
     const words = groupsLabel(groups);
     if (!words) return null;
-    return `Kept in the match's history, not applied: ${words}. A newer change to the same thing was recorded first.`;
+    const why = needsWinner ? NEEDS_WINNER_NOTE : 'A newer change to the same thing was recorded first.';
+    return `Kept in the match's history, not applied: ${words}. ${why}`;
+}
+
+// displacedGroupsNote: the note for a write that WAS recorded and moved a
+// later change of the match to its history, because that change would have
+// left the finished match without a winner (write_result.jsx
+// writeDisplacedGroups). null when nothing was moved.
+export function displacedGroupsNote(groups) {
+    const words = groupsLabel(groups);
+    if (!words) return null;
+    return `Saved. A later change to ${words} would have left the finished match without a winner, so it was moved to the match's history.`;
+}
+
+// keptInHistoryNote: the ONE note a score editor (useKeptInHistoryNote) or
+// its closing host (admin.jsx's toast) shows for what a write's answer kept
+// in the match's history: this write's own groups held (applied in part, or
+// superseded because the finished match needs a winner), and/or later
+// changes it moved there. null when the answer kept nothing.
+export function keptInHistoryNote(res) {
+    const parts = [];
+    if (writePartlyHeld(res) || writeNeedsWinner(res)) {
+        parts.push(heldGroupsNote(writeHeldGroups(res), writeNeedsWinner(res)));
+    }
+    parts.push(displacedGroupsNote(writeDisplacedGroups(res)));
+    const text = parts.filter(Boolean).join(' ');
+    return text || null;
 }
 
 // ---------------------------------------------------------------------------

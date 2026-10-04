@@ -99,6 +99,16 @@ describe('the write-result rule is importable without running the gate', () => {
     expect(trips('window.writeHeldGroups(res)')).toBe(true);
     expect(trips('<span>{window.SUPERSEDED_LEAD}</span>')).toBe(true);
     expect(trips('window.supersededAlertText(1, true)')).toBe(true);
+    // Whether a queued write reached browser storage decides what its notice
+    // may promise: asked through queuedNotice, never compared by hand.
+    expect(trips('if (res.persisted === false) warn();')).toBe(true);
+    expect(trips('<span>{window.queuedNotice(res)}</span>')).toBe(true);
+    expect(trips('<span>{window.QUEUED_UNSAVED_NOTICE}</span>')).toBe(true);
+    expect(trips('<span>{queuedNotice(pendingWrite)}</span>')).toBe(false);
+    // The needs-winner reading: a held change and a later change moved to
+    // the history are told apart by the owner alone.
+    expect(trips('window.writeNeedsWinner(res)')).toBe(true);
+    expect(trips('window.writeDisplacedGroups(res)')).toBe(true);
     expect(trips('<span>{QUEUED_NOTICE}</span>')).toBe(false);
     expect(trips('if (writeDidNotLand(res)) return;')).toBe(false);
   });

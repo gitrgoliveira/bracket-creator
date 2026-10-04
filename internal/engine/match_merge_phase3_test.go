@@ -72,13 +72,21 @@ func TestMerge_EngiStaleFinishIsHeldInHistory(t *testing.T) {
 		assert.Equal(t, mmT2, last.Stamp)
 		assert.Equal(t, state.HistoryOutcomeHeld, last.Outcomes[state.GroupFlags])
 		assert.Contains(t, string(last.Held[state.GroupFlags]), `"flagsA":3`, "the held count is kept with its values")
+		// The flags and the winner they decide are one change: the result is
+		// held WITH the flags even though its own stored stamp is older, and
+		// the entry says why (engiFinishHeld's atomic re-merge).
+		assert.Equal(t, state.HistoryOutcomeHeld, last.Outcomes[state.GroupResult], "the finish's winner is held with its count")
+		assert.Contains(t, string(last.Held[state.GroupResult]), `"winner":"`+wrTeamA+`"`)
+		assert.Equal(t, HoldReasonEngiAtomic, last.Reason)
 	})
 }
 
 // R3 on an engi match: a count changed after the finish applies to the
 // finished match, and the winner is worked out again. An engi match is never
-// a draw, so a count with no winner (an even total) sends it back to running
-// in a pool as in a knockout, never to a hikiwake.
+// a draw, and (R4 revised, operator ruling 2026-10-04) a recount that cannot
+// decide (an even total) is not applied either: it is held in the history
+// with the reason, the match keeps its recorded finish, in a pool as in a
+// knockout, and never goes back to running.
 func TestMerge_EngiRecountAfterTheFinishIsNeverADraw(t *testing.T) {
 	bothBranches(t, func(t *testing.T, knockout bool) {
 		h := mmEngi(t, knockout)
@@ -86,14 +94,22 @@ func TestMerge_EngiRecountAfterTheFinishIsNeverADraw(t *testing.T) {
 
 		recount := mmRunning(h, mmT2, state.GroupFlags)
 		recount.FlagsA, recount.FlagsB = 1, 1
-		require.NoError(t, h.write(recount))
+		err := h.write(recount)
+		require.ErrorIs(t, err, ErrMatchSuperseded, "its one change is held")
+		assert.Equal(t, []string{state.GroupFlags}, HeldGroupsOf(err))
+		assert.Equal(t, state.HeldReasonNeedsWinner, HeldReasonOf(err), "the operator is told the match needs a winner")
 
 		m := h.load(t)
 		assert.NotEqual(t, state.DecisionDraw, m.Decision, "an engi match cannot be drawn")
-		assert.Equal(t, state.MatchStatusRunning, m.Status, "no valid count: back to running for the panel")
-		assert.Empty(t, m.Winner)
-		assert.Equal(t, 1, m.FlagsA)
-		assert.Equal(t, 1, m.FlagsB)
+		assert.Equal(t, state.MatchStatusCompleted, m.Status, "the recorded finish stands")
+		assert.Equal(t, wrTeamA, m.Winner)
+		assert.Equal(t, 3, m.FlagsA)
+		assert.Equal(t, 0, m.FlagsB)
+		assert.Equal(t, mmT1, m.GroupStamp(state.GroupFlags), "the held count moves no stamp")
+		last := h.history(t)[len(h.history(t))-1]
+		assert.Equal(t, state.HistoryOutcomeHeld, last.Outcomes[state.GroupFlags])
+		assert.Contains(t, string(last.Held[state.GroupFlags]), `"flagsA":1`)
+		assert.Equal(t, HoldReasonEngiNeedsValidCount, last.Reason)
 	})
 }
 

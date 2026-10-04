@@ -51,6 +51,24 @@ describe('queueAlertMessage', () => {
         expect(msg).toMatch(/matches/i);
     });
 
+    // A write the server keeps refusing holds back no other write any more,
+    // and its match's editor offers to discard it: the alert says both,
+    // rather than only "keep this tab open".
+    it('a write the server keeps refusing: later results still go, and how to clear it', () => {
+        const msg = queueAlertMessage({ kind: 'server_error', count: 1, terminalCount: 1, detail: 'HTTP 500' });
+        expect(msg).toMatch(/keeps refusing a queued result \(HTTP 500\)/);
+        expect(msg).toMatch(/later results are still sent/i);
+        expect(msg).toMatch(/discard the held result and enter it again/i);
+    });
+
+    // A held finish landed and moved a later change of its match to the
+    // history: recorded, so information, not an error.
+    it('a held finish that moved a later change aside: saved, as information', () => {
+        const alert = { kind: 'displaced', count: 1, terminalCount: 1 };
+        expect(queueAlertMessage(alert)).toMatch(/^A held result was saved\./);
+        expect(queueAlertToastType(alert)).toBe('info');
+    });
+
     it('returns null for an unknown kind, so nothing is toasted', () => {
         expect(queueAlertMessage({ kind: 'not-a-kind', count: 1, terminalCount: 1 })).toBeNull();
     });

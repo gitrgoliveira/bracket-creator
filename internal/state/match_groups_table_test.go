@@ -49,3 +49,27 @@ func TestMatchGroups_SharedTable(t *testing.T) {
 		assert.False(t, ValidGroup(g), "%q is not a group", g)
 	}
 }
+
+// GH-T4 (owner review): the fields that belong to ONE write never travel on
+// a stored copy the store hands out. The cache is filled from the slice the
+// writer saved, so a write's ClearsWithdrawal (or its groups, door or merge
+// report) used to come back on every later load, and a writer building its
+// write from a loaded match (`u := *match`) inherited them.
+func TestStoredCopiesCarryNoRequestFields(t *testing.T) {
+	s, err := NewStore(t.TempDir())
+	require.NoError(t, err)
+	require.NoError(t, s.SaveCompetition(&Competition{ID: "c", Name: "c"}))
+	require.NoError(t, s.SavePoolMatches("c", []MatchResult{{
+		ID: "Pool A-0", SideA: "A", SideB: "B", Status: MatchStatusCompleted, Winner: "A",
+		ClearsWithdrawal: true, Changed: []string{GroupPoints}, WriteDoor: "score", Merge: &MergeReport{Stamp: 1},
+	}}))
+	for _, load := range []string{"first load", "second load"} {
+		ms, err := s.LoadPoolMatches("c")
+		require.NoError(t, err, load)
+		require.Len(t, ms, 1)
+		assert.False(t, ms[0].ClearsWithdrawal, load)
+		assert.Nil(t, ms[0].Changed, load)
+		assert.Empty(t, ms[0].WriteDoor, load)
+		assert.Nil(t, ms[0].Merge, load)
+	}
+}

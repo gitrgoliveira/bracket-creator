@@ -15,7 +15,7 @@ import { sameCompetitor } from './competitor_identity.jsx';
 // Imported from the leaf, not read off `window`: this editor is ES-imported by
 // its host and by unit tests that never load api_client, and write_result.jsx
 // is import-only so it can be reached directly (see its header).
-import { notLandedBanner, terminalFailureBanner, notSavedText, writeWasRefused, writeRetryable, QUEUED_NOTICE } from './write_result.jsx';
+import { notLandedBanner, terminalFailureBanner, notSavedText, writeWasRefused, writeRetryable, queuedNotice } from './write_result.jsx';
 import { useArmedConfirm, acceptTap, clearTap } from './tap_guard.jsx';
 
 import {
@@ -47,6 +47,7 @@ import {
   withdrawnKeyOf,
   WithdrawalMarkedName,
   BarredMatchNotice,
+  HeldWriteDiscard,
 } from './admin_scoring_shared.jsx';
 // bc-cse: a SCHEDULED match a competitor is barred from must never offer a
 // Start the server would refuse; isBarredMatch (ineligible_match.jsx) is the
@@ -178,7 +179,9 @@ export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, on
   const [submitting, setSubmitting] = useStateA(false);
   // F5: pending-write state: set when a terminal submit resolves { queued:true }
   // (offline / transient failure). While pending the modal stays open and shows a
-  // sticky QUEUED_NOTICE ("Not sent yet") banner. Cleared when the queue drains for this match
+  // sticky "Not sent yet" banner (queuedNotice: it holds the queued answer, which
+  // says whether the browser could store the write; `true` when only known to be
+  // pending). Cleared when the queue drains for this match
   // (subscribeSyncStatus + hasPendingTerminalWrite). pendingFn holds the last
   // terminal submit closure so "Retry now" can re-invoke it directly.
   const [pendingWrite, setPendingWrite] = useStateA(false);
@@ -550,7 +553,7 @@ export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, on
     // queued write is worth re-sending (writeRetryable).
     if (writeRetryable(res)) {
       if (mountedRef.current) {
-        setPendingWrite(true);
+        setPendingWrite(res);
         pendingFnRef.current = fn;
       }
     }
@@ -1384,7 +1387,7 @@ export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, on
               and will be retried automatically. Operator may still dismiss. */}
           {pendingWrite && !writeFailed && (
             <div className="pending-write-banner" role="status" aria-live="polite">
-              <span>{QUEUED_NOTICE}</span>
+              <span>{queuedNotice(pendingWrite)}</span>
               {/* Only show Retry when we hold the submit closure. On a hydrated
                   re-open it can't be restored from the serialized queue: but the
                   queue still auto-retries in the background, so no button is fine. */}
@@ -1398,6 +1401,12 @@ export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, on
                   Retry now
                 </button>
               )}
+              <HeldWriteDiscard
+                compId={m.compId}
+                matchId={m.id}
+                disabled={submitting}
+                onDiscarded={() => { setPendingWrite(false); pendingFnRef.current = null; }}
+              />
             </div>
           )}
           {/* bc-cse: a barred match cannot be started as scheduled -- the

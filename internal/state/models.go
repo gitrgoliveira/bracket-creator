@@ -590,9 +590,18 @@ func (c *Competition) IsKachinuki() bool {
 // chokepoint (applyKachinukiMerge), by its decision write before the
 // default-win circles are counted (recordDecisionTx), and by the load repair,
 // so a write and an old file converge on the same shape. encho points at a MatchResult's or a
-// BracketMatch's Encho field.
-func (c *Competition) ClearKachinukiEncounterEncho(encho **EnchoMetadata) bool {
+// BracketMatch's Encho field, and matchID is that match's id.
+//
+// A pool representative bout or tie-break bout (IsPoolDaihyosenMatchID,
+// IsTiebreakerMatchID) is not an encounter: it is ONE individual bout, whose
+// overtime lives at match level because the match is the bout. Its encho is
+// never cleared, in a kachinuki competition too (the same exclusion
+// NeedsDefaultWinBoutPadding makes for those ids).
+func (c *Competition) ClearKachinukiEncounterEncho(matchID string, encho **EnchoMetadata) bool {
 	if !c.IsKachinuki() || encho == nil || *encho == nil {
+		return false
+	}
+	if IsPoolDaihyosenMatchID(matchID) || IsTiebreakerMatchID(matchID) {
 		return false
 	}
 	*encho = nil
@@ -1423,9 +1432,10 @@ type MatchResult struct {
 	// default win recorded by mistake and this completed write is the real
 	// result, so it replaces the stored ruling rather than keeping it
 	// (engine.KeepsWithdrawalRuling). Never written to disk or the wire
-	// (json/CSV omit); the store's in-memory copy of a pool match may keep
-	// it, as it keeps WinnerSide, and nothing reads it there: every write
-	// is judged on the request-built result, never on a stored copy.
+	// (json/CSV omit), and never kept on a stored copy either
+	// (ClearRequestFields): a writer that builds its write from a stored
+	// match (the daihyosen add, `u := *match`) must not inherit another
+	// write's instruction to replace a ruling.
 	ClearsWithdrawal bool `json:"-" yaml:"-"`
 	// Changed names the GROUPS this write changes (match_groups.go: points,
 	// result, encho, flags, rep, bout:<position>), the input to the merge
@@ -1994,4 +2004,15 @@ type Announcement struct {
 	Message   string    `json:"message" yaml:"message"`
 	SentAt    time.Time `json:"sentAt" yaml:"sent_at"`
 	ExpiresAt time.Time `json:"expiresAt" yaml:"expires_at"`
+}
+
+// ClearRequestFields drops the fields that belong to ONE write and never to
+// the match it is stored as: Changed, WriteDoor, Merge and ClearsWithdrawal.
+// The ONE list of them, called on every stored copy (the pool write's
+// whole-struct overwrite and every pool-match copy the store hands out), so a
+// writer building its write from a stored match never inherits another
+// write's groups, door, merge report or instruction to replace a ruling.
+func (m *MatchResult) ClearRequestFields() {
+	m.Changed, m.WriteDoor, m.Merge = nil, "", nil
+	m.ClearsWithdrawal = false
 }

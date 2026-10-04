@@ -10,7 +10,7 @@ import { DAIHYOSEN_POSITION, scoreRowMatchLabel } from './pool_ids.jsx';
 import {
   writeDidNotLand, writeRetryable,
   attemptScoreWrite, DOWNSTREAM_KNOCKOUT_PLAYED_CANCELLED, DOWNSTREAM_KNOCKOUT_REOPEN_CANCELLED, downstreamKnockoutReopenedNotice,
-  courtBusyMessage,
+  courtBusyMessage, HELD_WRITE_DISCARD_LABEL, heldWriteDiscardConfirm,
 } from './write_result.jsx';
 import { sameCompetitor } from './competitor_identity.jsx';
 import { sideWord } from './side_cell.jsx';
@@ -38,6 +38,58 @@ const MAX_IPPONS_PER_SIDE = 2;
 function isBoutDecided(aPts, bPts) {
   return (aPts?.length ?? 0) >= MAX_IPPONS_PER_SIDE
       || (bPts?.length ?? 0) >= MAX_IPPONS_PER_SIDE;
+}
+
+// HeldWriteDiscard: the way past a result held on this device that the server
+// keeps refusing (a 5xx on every retry). Rendered inside a score editor's
+// pending banner, it shows nothing until the queue reports that this match's
+// held write has crossed the server-error threshold, then offers to discard
+// that write, and only it, after a confirm (copy owned by write_result.jsx).
+// It never blocks another write (each queued write is sent on its own), but
+// without this the only way to stop it was signing out, which discards every
+// held result. `onDiscarded` lets the editor drop its pending banner.
+export function HeldWriteDiscard({ compId, matchId, onDiscarded, disabled = false }) {
+  const api = window.API;
+  const keepsFailing = () => !!(api && typeof api.heldWriteKeepsFailing === 'function'
+    && compId && matchId && api.heldWriteKeepsFailing(compId, matchId));
+  const [stuck, setStuck] = useStateA(keepsFailing);
+  const [busy, setBusy] = useStateA(false);
+  const mountedRef = useRefA(true);
+  useEffectA(() => () => { mountedRef.current = false; }, []);
+  // The sync status moves to "server-error" when a held write crosses the
+  // threshold, and back when it lands or is discarded: re-ask on each.
+  useEffectA(() => {
+    setStuck(keepsFailing());
+    if (typeof window.subscribeSyncStatus !== 'function') return undefined;
+    return window.subscribeSyncStatus(() => { if (mountedRef.current) setStuck(keepsFailing()); });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [compId, matchId]);
+  if (!stuck) return null;
+  const discard = async () => {
+    setBusy(true);
+    try {
+      const ok = typeof window.confirmDialog === 'function'
+        ? await window.confirmDialog(heldWriteDiscardConfirm())
+        : false;
+      if (!ok || !mountedRef.current) return;
+      api.discardFailingHeldWrites(compId, matchId);
+      setStuck(keepsFailing());
+      if (typeof onDiscarded === 'function') onDiscarded();
+    } finally {
+      if (mountedRef.current) setBusy(false);
+    }
+  };
+  return (
+    <button
+      type="button"
+      className="btn btn--sm btn--ghost"
+      data-testid="held-write-discard"
+      disabled={disabled || busy}
+      onClick={discard}
+    >
+      {HELD_WRITE_DISCARD_LABEL}
+    </button>
+  );
 }
 
 // getIpponButtons: returns the ordered array of scoring button labels for a
@@ -441,7 +493,8 @@ function makeSubmitDecision({
   isComplete,       // item 7: corrections (isComplete=true) must not auto-advance
   entityLabel = 'competitors',
   // F5: optional pending-write handles threaded in from ScoreEditorModal so
-  // a queued (offline) decision write shows the sticky QUEUED_NOTICE banner.
+  // a queued (offline) decision write shows the sticky "Not sent yet" banner
+  // (handed the queued answer, which queuedNotice words).
   // Not provided by TeamScoreEditorModal (which has its own pending state path).
   setPendingWrite,
   pendingFnRef,
@@ -478,7 +531,7 @@ function makeSubmitDecision({
       // reports it, with no Retry beside it.
       if (writeDidNotLand(updated)) {
         if (setPendingWrite && writeRetryable(updated)) {
-          setPendingWrite(true);
+          setPendingWrite(updated);
           if (pendingFnRef) pendingFnRef.current = () => submit(kind, { decisionBy, decisionReason }, opts);
         }
         return;
@@ -1719,7 +1772,10 @@ function RecordedWithdrawal({ match, ctl, disabled = false, singleBout = false, 
                   className="btn btn--sm"
                   data-testid="remove-withdrawal"
                   onClick={removal.onRemove}
-                  disabled={disabled || ctl.busy || ctl.landed}
+                  // Held until the later-matches lookup settles, like the
+                  // clear beside it: the sentence a removal shows (who stays
+                  // withdrawn, barMovesOn) depends on it.
+                  disabled={disabled || ctl.busy || ctl.landed || !settled}
                 >
                   {namesDefaultWin ? "Remove default win" : "Remove withdrawal"}
                 </button>

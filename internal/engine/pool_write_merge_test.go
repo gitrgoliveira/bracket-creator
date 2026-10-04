@@ -462,8 +462,10 @@ func TestTimestampGuardAppliesToBothBranches(t *testing.T) {
 		require.False(t, mismatch)
 		require.False(t, superseded)
 		assert.Equal(t, "Osaka", p.Winner, "0 means unstamped, which never loses")
-		assert.EqualValues(t, stored, p.ModifiedAt,
-			"and it must not reset the stored stamp, or the match reopens to stale writes")
+		// bc-mrgc review S5: a completing unstamped write takes the server's
+		// time, so it leaves a fence rather than the stamp before it.
+		assert.Greater(t, p.ModifiedAt, int64(stored),
+			"and it must never reset the stored stamp, or the match reopens to stale writes")
 	})
 
 	t.Run("an unstamped STORED value accepts anything, so legacy files are unaffected", func(t *testing.T) {

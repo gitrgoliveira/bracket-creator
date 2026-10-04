@@ -3,8 +3,8 @@
 // Extracted from admin_scoring_modal.jsx (mp-zac3).
 
 import { toBackendMatchResult, matchWire } from './api_serializers.jsx';
-import { changedGroups, statedGroupsOf, groupMatches, heldGroupsNote } from './match_groups.jsx';
-import { writePartlyHeld, writeHeldGroups, writeDidNotLand } from './write_result.jsx';
+import { changedGroups, statedGroupsOf, groupMatches, keptInHistoryNote } from './match_groups.jsx';
+import { writeDidNotLand } from './write_result.jsx';
 
 const { useState: useStateA, useEffect: useEffectA, useRef: useRefA } = React;
 
@@ -60,12 +60,14 @@ export function useChangedGroups(match) {
 }
 
 // ---------------------------------------------------------------------------
-// useKeptInHistoryNote (bc-mrgc): the quiet note a score editor shows when the
-// server applied a write in part and kept the rest in the match's history,
-// because a newer change to the same thing was recorded first. The editor's
-// flow carries on as for any landed write; the note only names what was kept
-// (heldGroupsNote). A write that lands with nothing held clears it; one that
-// did not land (queued, or refused, which has its own banner) leaves it.
+// useKeptInHistoryNote (bc-mrgc): the quiet note a score editor shows when a
+// write's answer kept something in the match's history: part of the write
+// (a newer change to the same thing was recorded first, or it would leave the
+// finished match without a winner), or a later change the write moved there
+// (writeDisplacedGroups). The editor's flow carries on; the note only names
+// what was kept (keptInHistoryNote, match_groups.jsx). A write that lands
+// keeping nothing clears it; one that did not land (queued, or refused, which
+// has its own banner) leaves it.
 // Returns { note, noteFromWrite }, noteFromWrite stable across renders so the
 // autosave can hold it.
 // ---------------------------------------------------------------------------
@@ -81,7 +83,13 @@ export function useKeptInHistoryNote() {
     noteFromWriteRef.current = (res) => {
       if (!mountedRef.current || !res) return;
       let next = shownRef.current;
-      if (writePartlyHeld(res)) next = heldGroupsNote(writeHeldGroups(res));
+      // keptInHistoryNote is the one wording: groups of this write held
+      // (applied in part, or held because the finished match needs a
+      // winner, whether the rest applied or not), and later changes this
+      // write moved to the history. A landed write that kept nothing clears
+      // the note; a write that did not land leaves it.
+      const kept = keptInHistoryNote(res);
+      if (kept) next = kept;
       else if (!writeDidNotLand(res)) next = null;
       if (next === shownRef.current) return;
       shownRef.current = next;

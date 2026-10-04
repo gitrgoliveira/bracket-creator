@@ -27,10 +27,17 @@ func TestApplyMatchWrite_LogsTheUnstampedOverwrite(t *testing.T) {
 		return mergeMatchWrite(stored, incoming, policy, mergeCtx{nilSubsClear: true})
 	}
 
+	// bc-mrgc review S5: a COMPLETED unstamped write now takes the server's
+	// time (writeStamp), so it is compared and no longer bypasses anything.
+	// The bypass that remains is a legacy client's unstamped scheduled or
+	// running write; the scheduled one is what is logged.
 	t.Run("an unstamped write over a stamped result is logged", func(t *testing.T) {
 		var rep *state.MergeReport
 		out := captureLog(t, func() {
-			rep = merge(&state.MatchResult{ID: "Pool A-1", Status: state.MatchStatusCompleted}, 1_700_000_000_000, matchWriteForward)
+			// Over a RUNNING match: over a finished one a scheduled write is
+			// R3's shape, which an unstamped write cannot be ordered into.
+			stored := &state.MatchResult{ID: "Pool A-1", Status: state.MatchStatusRunning, ModifiedAt: 1_700_000_000_000}
+			rep = mergeMatchWrite(stored, &state.MatchResult{ID: "Pool A-1", Status: state.MatchStatusScheduled}, matchWriteForward, mergeCtx{nilSubsClear: true})
 		})
 		require.NotEmpty(t, rep.Applied, "the bypass must still APPLY: logging it is not refusing it")
 		assert.Empty(t, rep.Held)
@@ -67,14 +74,18 @@ func TestApplyMatchWrite_LogsTheUnstampedOverwrite(t *testing.T) {
 			"an intermediate autosave is not the overwrite an operator is asking about, and there is one per keystroke")
 	})
 
-	t.Run("the completed write that follows it is still logged", func(t *testing.T) {
+	// The completed write that follows it used to be the one logged line. It
+	// is no longer a bypass at all (bc-mrgc review S5): it takes the server's
+	// time, applies by comparison, and leaves that stamp as the fence a later
+	// stale replay is ordered against.
+	t.Run("the completed write that follows it is stamped by the server", func(t *testing.T) {
 		var rep *state.MergeReport
 		out := captureLog(t, func() {
 			rep = merge(&state.MatchResult{ID: "Pool A-5", Status: state.MatchStatusCompleted}, 1_700_000_000_000, matchWriteForward)
 		})
 		require.NotEmpty(t, rep.Applied)
-		assert.Contains(t, out, marker, "the terminal write is the one that displaced the operator's result")
-		assert.Contains(t, out, "Pool A-5")
+		assert.NotContains(t, out, marker, "a stamped write bypasses nothing")
+		assert.GreaterOrEqual(t, rep.Stamp, int64(1_700_000_000_000), "the server's time, never older than the stored result")
 	})
 
 	t.Run("a restore is exempt before any stamp is read", func(t *testing.T) {

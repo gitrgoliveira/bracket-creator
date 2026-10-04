@@ -833,10 +833,25 @@ func TestBackfillMatchIdentityForHantei(t *testing.T) {
 			// never touching the client-supplied sides.
 			name:          "sides present, ids empty: store is consulted to fill only the ids",
 			req:           state.MatchResult{SideA: "Alice", SideB: "Bob", DecidedByHantei: trueFlag},
-			store:         &fixedSidesCompetitionStore{sideA: "Someone Else Entirely", sideB: "Also Ignored", sideAID: "id-a", sideBID: "id-b", found: true},
+			store:         &fixedSidesCompetitionStore{sideA: "Alice", sideB: "Bob", sideAID: "id-a", sideBID: "id-b", found: true},
 			wantSideA:     "Alice",
 			wantSideB:     "Bob",
 			wantSideAID:   "id-a",
+			wantSideBID:   "id-b",
+			wantStoreCall: true,
+		},
+		{
+			// bc-mrgc review F2: an id is filled in only beside the name it
+			// belongs to. This case used to fill the stored ids beside names
+			// the store does not hold, and the engine then read those ids as
+			// proof that the payload's sides were the stored competitors
+			// renamed, accepting a write that names someone else.
+			name:          "sides present but not the stored ones, ids empty: no id is vouched for them",
+			req:           state.MatchResult{SideA: "Alice", SideB: "Bob", DecidedByHantei: trueFlag},
+			store:         &fixedSidesCompetitionStore{sideA: "Someone Else Entirely", sideB: "Bob", sideAID: "id-a", sideBID: "id-b", found: true},
+			wantSideA:     "Alice",
+			wantSideB:     "Bob",
+			wantSideAID:   "",
 			wantSideBID:   "id-b",
 			wantStoreCall: true,
 		},

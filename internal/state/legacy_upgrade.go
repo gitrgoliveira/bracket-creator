@@ -1443,7 +1443,7 @@ func (s *Store) clearKachinukiEncounterEnchoInPoolMatchesLocked(compID string, c
 	matches, _ := parsed.([]MatchResult)
 	changed := false
 	for i := range matches {
-		if comp.ClearKachinukiEncounterEncho(&matches[i].Encho) {
+		if comp.ClearKachinukiEncounterEncho(matches[i].ID, &matches[i].Encho) {
 			changed = true
 		}
 	}
@@ -1469,12 +1469,12 @@ func (s *Store) clearKachinukiEncounterEnchoInBracketLocked(compID string, comp 
 	changed := false
 	for i := range bracket.Rounds {
 		for j := range bracket.Rounds[i] {
-			if comp.ClearKachinukiEncounterEncho(&bracket.Rounds[i][j].Encho) {
+			if comp.ClearKachinukiEncounterEncho(bracket.Rounds[i][j].ID, &bracket.Rounds[i][j].Encho) {
 				changed = true
 			}
 		}
 	}
-	if bracket.ThirdPlaceMatch != nil && comp.ClearKachinukiEncounterEncho(&bracket.ThirdPlaceMatch.Encho) {
+	if bracket.ThirdPlaceMatch != nil && comp.ClearKachinukiEncounterEncho(bracket.ThirdPlaceMatch.ID, &bracket.ThirdPlaceMatch.Encho) {
 		changed = true
 	}
 	if !changed {

@@ -165,10 +165,10 @@ func (s *Store) copyMatchResults(results []MatchResult) []MatchResult {
 		// state. Mirrors copyBracket, which already clones its Encho pointer.
 		res[i].Encho = r.Encho.Clone()
 		res[i].GroupStamps = CloneGroupStamps(r.GroupStamps)
-		// The write's own transient merge inputs and outputs never travel on
-		// a stored copy: a writer that builds its result from one (the
+		// The write's own transient inputs and outputs never travel on a
+		// stored copy: a writer that builds its result from one (the
 		// daihyosen add, `u := *match`) must state its own.
-		res[i].Changed, res[i].WriteDoor, res[i].Merge = nil, "", nil
+		res[i].ClearRequestFields()
 		if r.DecidedByHantei != nil {
 			v := *r.DecidedByHantei
 			res[i].DecidedByHantei = &v

@@ -79,11 +79,67 @@ export const SUPERSEDED_ADVICE = 'Check the match and its history before enterin
 
 // supersededAlertText: the queue alert for finished results a replay found
 // superseded (app.jsx queueAlertMessage), worded like the banner above. `n` is
-// how many, `one` whether that is a single result (queuedWritesNoun).
-export function supersededAlertText(n, one) {
-    return one
+// how many, `one` whether that is a single result (queuedWritesNoun),
+// `needsWinner` whether any was held because it would leave a finished match
+// without a winner (writeNeedsWinner).
+export function supersededAlertText(n, one, needsWinner = false) {
+    const text = one
         ? "A result was not applied because a newer change to the same match was recorded first. It was kept in the match's history, so nothing is lost: check the match and its history before entering anything again."
         : `${n} results were not applied because newer changes to the same matches were recorded first. They were kept in each match's history, so nothing is lost: check those matches and their history before entering anything again.`;
+    if (!needsWinner) return text;
+    // At least one was held because it would leave a finished match without
+    // a winner (writeNeedsWinner): for that one, nothing newer won.
+    return one
+        ? "A result was not applied because it would leave the finished match without a winner, and it needs one. It was kept in the match's history, so nothing is lost: correct the result with a winner."
+        : `${text} Where one would leave a finished match without a winner, correct that result with a winner.`;
+}
+
+// writeNeedsWinner / supersededBanner / NEEDS_WINNER_* (operator ruling
+// 2026-10-04): a scoring change that would leave a FINISHED match without the
+// winner it must have (a knockout match left tied, an engi match left with no
+// valid flag count) is not applied. The match keeps its recorded finish, the
+// change is kept in the match's history, and the server says why with
+// heldReason "needs_winner", on a superseded answer and on one applied in
+// part alike. Here the advice is the opposite of the plain superseded one:
+// nothing newer won, so the operator corrects the result, with a winner.
+// writeNeedsWinner is the one reading of that field; supersededBanner is the
+// one choice of banner for a superseded write, asked by notLandedBanner and by
+// api_client.jsx's not-applied broadcast.
+//
+// The same reason rides on a second, APPLIED answer (writeDisplacedGroups): a
+// finish that arrived after a newer scoring change which, applied after it,
+// would have left the match without a winner. The finish is recorded and that
+// later change is MOVED to the history (`displacedGroups`, no heldGroups).
+// writeNeedsWinner is therefore true only for a write whose OWN change was
+// held for the reason; a displaced answer is not one, and says "Saved". An
+// answer that both held groups and moved a later change carries the one
+// reason for both, and the client reads it as the move's: telling the
+// operator to correct a result that IS recorded would be the worse error.
+export const HELD_REASON_NEEDS_WINNER = 'needs_winner';
+export function writeDisplacedGroups(res) {
+    return res && Array.isArray(res.displacedGroups) ? res.displacedGroups.filter((g) => typeof g === 'string') : [];
+}
+export function writeNeedsWinner(res) {
+    return !!res && res.heldReason === HELD_REASON_NEEDS_WINNER
+        && writeDisplacedGroups(res).length === 0
+        && (writeWasSuperseded(res) || writeHeldGroups(res).length > 0);
+}
+// displacedAlertText: the queue alert for queued finishes that landed and
+// moved a later change of the same match to its history (writeDisplacedGroups).
+export function displacedAlertText(n, one) {
+    return one
+        ? "A held result was saved. A later change to that match would have left it without a winner, so the change was moved to the match's history."
+        : `${n} held results were saved. Later changes to those matches would have left them without a winner, so the changes were moved to each match's history.`;
+}
+export const NEEDS_WINNER_REASON = "this change would leave the finished match without a winner, and it needs one, so it was kept in the match's history and nothing is lost";
+export const NEEDS_WINNER_ADVICE = 'Correct the result with a winner.';
+// The sentence the partial-apply note (heldGroupsNote) ends on instead of
+// "A newer change to the same thing was recorded first."
+export const NEEDS_WINNER_NOTE = 'It would leave the finished match without a winner, and it needs one: correct the result with a winner.';
+export function supersededBanner(res) {
+    return writeNeedsWinner(res)
+        ? { lead: SUPERSEDED_LEAD, reason: NEEDS_WINNER_REASON, advice: NEEDS_WINNER_ADVICE }
+        : { lead: SUPERSEDED_LEAD, reason: SUPERSEDED_REASON, advice: SUPERSEDED_ADVICE };
 }
 
 // OVERRIDE_HELD_NOTICE (bc-mrgc phase 3): the court console's toast when a
@@ -233,9 +289,7 @@ export function notLandedBanner(res) {
     if (writeWasRefusedForClock(res)) {
         return { reason: CLOCK_SKEW_REASON_TEXT, advice: CLOCK_SKEW_ADVICE };
     }
-    if (writeWasSuperseded(res)) {
-        return { lead: SUPERSEDED_LEAD, reason: SUPERSEDED_REASON, advice: SUPERSEDED_ADVICE };
-    }
+    if (writeWasSuperseded(res)) return supersededBanner(res);
     return null;
 }
 
@@ -277,6 +331,33 @@ export function notSavedText(failed) {
 // "Not saved", which the docs and notSavedText reserve for a REFUSED write that
 // will never land. Three hand-typed wordings existed before this owner.
 export const QUEUED_NOTICE = 'Not sent yet: saved on this device, and sent when the connection returns.';
+
+// QUEUED_UNSAVED_NOTICE / queuedNotice: the same held write when the browser
+// could not store it (its storage is full or blocked; api_client answers the
+// write with `persisted: false` and raises the storage_full alert). It is
+// held in this page's memory only, so "saved on this device" would be false:
+// a reload or a closed tab loses it. queuedNotice is the ONE choice between
+// the two, asked with the queued answer the editor kept (or `true` when it
+// only knows a write is pending, e.g. reopened over a queued Finish).
+export const QUEUED_UNSAVED_NOTICE = 'Not sent yet: keep this page open until the connection returns.';
+export function queuedNotice(res) {
+    return res && typeof res === 'object' && res.persisted === false ? QUEUED_UNSAVED_NOTICE : QUEUED_NOTICE;
+}
+
+// HELD_WRITE_DISCARD_LABEL / heldWriteDiscardConfirm: the way past a held
+// write the server keeps refusing (api_client.jsx discardFailingHeldWrites).
+// It holds back no other write, but it is retried as long as the page is
+// open, so the editor's pending banner offers to discard it, and only it,
+// after this confirm. Named "result" as the operator counts it.
+export const HELD_WRITE_DISCARD_LABEL = 'Discard held result';
+export function heldWriteDiscardConfirm() {
+    return {
+        message: 'The server keeps refusing the result held on this device for this match, so it may never be sent. '
+            + 'Discard it? Nothing else is discarded. Check the match afterwards, and enter the result again if it is still needed.',
+        confirmLabel: 'Discard it',
+        danger: true,
+    };
+}
 
 // queuedWritesNoun: the ONE rule for how held writes are counted to the
 // operator. An operator counts results, and a held running autosave is not

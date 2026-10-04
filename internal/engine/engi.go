@@ -101,7 +101,15 @@ const HoldReasonEngiAtomic = "the flags and the winner they decide are kept toge
 func engiFinishHeld(prior, result *state.MatchResult, comp *state.Competition, knockout bool) bool {
 	probe := engiFinishProbe(prior, result)
 	rep := mergeMatchWrite(prior, &probe, matchWriteForward, mergeCtx{comp: comp, knockout: knockout})
+	// The stamp the merge ordered the finish by is the one the engi recorder
+	// writes: an unstamped finish takes the server's time there (writeStamp),
+	// so it leaves a fence like every other finish.
+	result.ModifiedAt = rep.Stamp
 	if len(rep.Held)+len(rep.HeldEcho) == 0 {
+		// Applied. The report stays on the write for what it moved to the
+		// history (S2 with R4: a newer recount that left no valid count),
+		// which the caller records once the recorder has written the finish.
+		result.Merge = rep
 		return false
 	}
 	if !rep.Superseded() {

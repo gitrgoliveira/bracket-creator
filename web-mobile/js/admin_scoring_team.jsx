@@ -41,6 +41,7 @@ import {
   BarredMatchNotice,
   HeldWriteDiscard,
   HeldWriteNotice,
+  useClearPendingWhenNothingHeld,
 } from './admin_scoring_shared.jsx';
 // bc-cse: a SCHEDULED match a competitor is barred from must never offer a
 // Start the server would refuse; isBarredMatch (ineligible_match.jsx) is the
@@ -1257,22 +1258,9 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
     return unsub;
   }, [m.compId, m.id]);
 
-  // Clears the pending banner when the queue actually drains. Guarded like the
-  // subscription above: window.subscribeSyncStatus and API are absent in unit
-  // and render tests. 'synced' alone is not enough -- the queue can be empty of
-  // OTHER writes while this match's is still held -- so ask per match.
-  useEffectA(() => {
-    if (!m.compId || !m.id) return;
-    if (typeof window.subscribeSyncStatus !== 'function') return;
-    const unsub = window.subscribeSyncStatus((status) => {
-      if (!mountedRef.current) return;
-      const stillPending = (window.API && typeof window.API.hasPendingTerminalWrite === 'function')
-        ? window.API.hasPendingTerminalWrite(m.compId, m.id)
-        : false;
-      if (status === 'synced' && !stillPending) setPendingWrite(false);
-    });
-    return unsub;
-  }, [m.compId, m.id]);
+  // The pending banner goes once this device holds no write for the match:
+  // landed, or discarded here or from the topbar's list.
+  useClearPendingWhenNothingHeld(m.compId, m.id, pendingWrite, () => setPendingWrite(false));
 
   // Fetch lineup + competition data on mount. Both endpoints are
   // read-only and idempotent; failures degrade gracefully (the modal

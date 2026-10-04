@@ -225,15 +225,19 @@ describe('kachinuki Record bout reports which refusal it got (bc-cse)', () => {
     // Several components subscribe (the pill too), so keep every listener.
     const listeners = new Set();
     window.subscribeSyncStatus = (fn) => { listeners.add(fn); return () => listeners.delete(fn); };
-    window.API.hasPendingTerminalWrite = () => false;
+    // Held while queued; nothing held for the match once it drains.
+    let held = true;
+    window.API.hasHeldWrite = () => held;
     try {
       await tapRecordBout({ queued: true });
       expect(document.querySelector('.pending-write-banner')).not.toBeNull();
 
+      held = false;
       await act(async () => { listeners.forEach((fn) => fn('synced')); });
       expect(document.querySelector('.pending-write-banner')).toBeNull();
     } finally {
       delete window.subscribeSyncStatus;
+      delete window.API.hasHeldWrite;
     }
   });
 });

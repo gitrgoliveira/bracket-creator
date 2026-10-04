@@ -389,6 +389,23 @@ export function heldWriteState(held) {
     return 'waiting to be sent';
 }
 
+// The topbar's held-writes list (HeldWritesPanel, admin_shell.jsx): its
+// title, what it says when nothing is held, its per-row discard, and how it
+// names a lineup (a lineup save is about a team, not a match).
+export const HELD_WRITES_TITLE = 'Held on this device';
+export const HELD_WRITES_EMPTY = 'Nothing is held on this device: everything has been sent.';
+export const HELD_WRITE_DISCARD_ONE_LABEL = 'Discard';
+export function heldLineupLabel(teamName) {
+    return teamName ? `${teamName}'s lineup` : 'A team lineup';
+}
+
+// heldWriteLine: the list row's second line, what it is and where it stands,
+// e.g. "Score update: the server keeps refusing it".
+export function heldWriteLine(held) {
+    const what = heldWriteWhat(held);
+    return `${what.charAt(0).toUpperCase() + what.slice(1)}: ${heldWriteState(held)}`;
+}
+
 // queuedWritesNoun: the ONE rule for how held writes are counted to the
 // operator. An operator counts results, and a held running autosave is not
 // one, so a count that includes any finished result (a completed score, a

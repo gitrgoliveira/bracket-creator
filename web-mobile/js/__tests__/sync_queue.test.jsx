@@ -2797,8 +2797,8 @@ describe('bc-sync: an autosave is stamped with the time of its edit (operator ru
 describe('bc-offl: subscribeUnsentWrites, the held-writes count', () => {
     const offline = () => Promise.reject(new TypeError('offline'));
     const landed = () => Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve({}) });
-    const ZERO = { total: 0, terminal: 0, authBlocked: 0 };
-    const ONE_RESULT = { total: 1, terminal: 1, authBlocked: 0 };
+    const ZERO = { total: 0, terminal: 0, authBlocked: 0, failing: 0 };
+    const ONE_RESULT = { total: 1, terminal: 1, authBlocked: 0, failing: 0 };
     const entry = (matchID) => [`c1:${matchID}`, {
         compID: 'c1', matchID, payload: { status: 'completed', winner: matchID }, password: 'pw',
         kind: 'score', terminal: true, method: 'PUT', url: `/api/competitions/c1/matches/${matchID}/score`,

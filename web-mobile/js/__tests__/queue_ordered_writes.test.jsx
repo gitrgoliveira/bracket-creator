@@ -521,7 +521,7 @@ describe('signing in again re-stamps every write carrying the refused password',
         API.resumeAfterAuth('new');
         await tick(50);
         expect(sent.slice(before).map((r) => r.password)).toEqual(['new', 'new']);
-        expect(API.unsentWrites()).toEqual({ total: 0, terminal: 0, authBlocked: 0 });
+        expect(API.unsentWrites()).toEqual({ total: 0, terminal: 0, authBlocked: 0, failing: 0 });
         warnSpy.mockRestore();
     });
 
@@ -625,6 +625,30 @@ describe('any held write the server keeps refusing can be discarded on its own',
         unsub();
         expect(statuses.at(-1)).not.toBe('server-error');
         expect(API.unsentWrites().total).toBe(0);
+        warnSpy.mockRestore();
+    });
+});
+
+// Once one held write keeps failing, the sync status is already
+// "server-error", so a SECOND write crossing the threshold changes no status.
+// The held counts carry `failing`, so it is still published, at the crossing:
+// that match's editor offers its discard, and the topbar's list re-reads.
+describe('a second held write crossing the server-error threshold is published', () => {
+    it('the held counts move to two failing at the second crossing', async () => {
+        const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+        const s = server({ status: () => 500 });
+        s.online();
+        await flushMicrotasks();
+        await API.recordScore('c1', 'm1', { status: 'completed', winner: 'A' }, 'pw', null);
+        await tick(60_000);
+        expect(API.heldWriteKeepsFailing('c1', 'm1')).toBe(true);
+        const published = [];
+        const unsub = mod.subscribeUnsentWrites((c) => published.push(c));
+        await API.recordScore('c1', 'm2', { status: 'completed', winner: 'B' }, 'pw', null);
+        await tick(60_000);
+        unsub();
+        expect(API.heldWriteKeepsFailing('c1', 'm2')).toBe(true);
+        expect(published.at(-1)).toMatchObject({ total: 2, failing: 2 });
         warnSpy.mockRestore();
     });
 });

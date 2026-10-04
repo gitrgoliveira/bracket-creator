@@ -48,37 +48,66 @@ function isBoutDecided(aPts, bPts) {
 // It never blocks another write (each queued write is sent on its own), but
 // without this the only way to stop it was signing out, which discards every
 // held result. `onDiscarded` lets the editor drop its pending banner.
-// useHeldWriteKeepsFailing: whether this match's held write has crossed the
-// server-error threshold. The sync status moves to "server-error" when one
-// does, and back when it lands or is discarded: re-asked on each. Returns
-// [stuck, recheck].
-function useHeldWriteKeepsFailing(compId, matchId) {
+// useMatchHeldWrite: what this device still holds for one match: `held`,
+// any write at all (a running update, a result, a decision), and `stuck`, one
+// the server keeps refusing. Re-read on every sync status change and every
+// change of the held counts, which include the failing count, so a second
+// write crossing the threshold, a write landing, and a discard made from the
+// topbar's list all reach it. The editors' pending banner, its line
+// (HeldWriteNotice) and its Discard read it.
+export function useMatchHeldWrite(compId, matchId) {
   const api = window.API;
-  const keepsFailing = () => !!(api && typeof api.heldWriteKeepsFailing === 'function'
-    && compId && matchId && api.heldWriteKeepsFailing(compId, matchId));
-  const [stuck, setStuck] = useStateA(keepsFailing);
+  // `held` is null when this page has no queue to ask (the editors' render
+  // tests stub window.API without one): unknown, so nothing is cleared.
+  const read = () => ({
+    held: api && typeof api.hasHeldWrite === 'function' && compId && matchId ? api.hasHeldWrite(compId, matchId) : null,
+    stuck: !!(api && typeof api.heldWriteKeepsFailing === 'function'
+      && compId && matchId && api.heldWriteKeepsFailing(compId, matchId)),
+  });
+  const [state, setState] = useStateA(read);
   const mountedRef = useRefA(true);
   useEffectA(() => () => { mountedRef.current = false; }, []);
   useEffectA(() => {
-    setStuck(keepsFailing());
-    if (typeof window.subscribeSyncStatus !== 'function') return undefined;
-    return window.subscribeSyncStatus(() => { if (mountedRef.current) setStuck(keepsFailing()); });
+    const refresh = () => {
+      if (!mountedRef.current) return;
+      const next = read();
+      setState((prev) => (prev.held === next.held && prev.stuck === next.stuck ? prev : next));
+    };
+    refresh();
+    const offs = [];
+    if (typeof window.subscribeSyncStatus === 'function') offs.push(window.subscribeSyncStatus(refresh));
+    if (typeof window.subscribeUnsentWrites === 'function') offs.push(window.subscribeUnsentWrites(refresh));
+    return () => offs.forEach((off) => { if (typeof off === 'function') off(); });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [compId, matchId]);
-  return [stuck, () => { if (mountedRef.current) setStuck(keepsFailing()); }];
+  return state;
+}
+
+// useClearPendingWhenNothingHeld: the editors' pending banner goes once this
+// device holds no write for the match: it landed, or it was discarded, here
+// or from the topbar's list. Waiting for the whole queue to drain left it up
+// while another match's write was still held, saying this one was saved on
+// the device when nothing was any more. `onClear` resets the editor's banner
+// state (and its kept submit closure).
+export function useClearPendingWhenNothingHeld(compId, matchId, pendingWrite, onClear) {
+  const { held } = useMatchHeldWrite(compId, matchId);
+  useEffectA(() => {
+    if (pendingWrite && held === false) onClear();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pendingWrite, held]);
 }
 
 // HeldWriteNotice: the pending banner's line, worded for where the held
 // write stands (queuedNotice): waiting for the connection, held in this page
 // only, or refused by the server on every attempt. The three editors render it.
 export function HeldWriteNotice({ compId, matchId, res }) {
-  const [stuck] = useHeldWriteKeepsFailing(compId, matchId);
+  const { stuck } = useMatchHeldWrite(compId, matchId);
   return <span>{queuedNotice(res, { keepsFailing: stuck })}</span>;
 }
 
 export function HeldWriteDiscard({ compId, matchId, onDiscarded, disabled = false }) {
   const api = window.API;
-  const [stuck, recheck] = useHeldWriteKeepsFailing(compId, matchId);
+  const { stuck } = useMatchHeldWrite(compId, matchId);
   const [busy, setBusy] = useStateA(false);
   const mountedRef = useRefA(true);
   useEffectA(() => () => { mountedRef.current = false; }, []);
@@ -91,7 +120,6 @@ export function HeldWriteDiscard({ compId, matchId, onDiscarded, disabled = fals
         : false;
       if (!ok || !mountedRef.current) return;
       api.discardFailingHeldWrites(compId, matchId);
-      recheck();
       if (typeof onDiscarded === 'function') onDiscarded();
     } finally {
       if (mountedRef.current) setBusy(false);

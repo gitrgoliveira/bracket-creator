@@ -5,7 +5,7 @@
 
 // The held-writes copy (bc-offl). write_result.jsx is an import-only leaf, so
 // this script-tagged module can import it without a double evaluation.
-import { heldWritesText, heldWriteWhat, heldWriteState, heldWriteDiscardConfirm, matchLabel } from './write_result.jsx';
+import { heldWritesText, heldWriteLine, heldWriteDiscardConfirm, matchLabel, heldLineupLabel, HELD_WRITES_TITLE, HELD_WRITES_EMPTY, HELD_WRITE_DISCARD_ONE_LABEL } from './write_result.jsx';
 import { scoreRowMatchLabel } from './pool_ids.jsx';
 
 const { useState: useStateA, useMemo: useMemoA, useEffect: useEffectA, useRef: useRefA } = React;
@@ -37,7 +37,7 @@ export function heldWriteWhere(held, competitions) {
   if (held.kind === 'lineup') {
     const team = comp && Array.isArray(comp.participants)
       ? comp.participants.find((p) => p && p.id === held.teamId) : null;
-    what = team && team.name ? `${team.name}'s lineup` : 'a team lineup';
+    what = heldLineupLabel(team && team.name);
   } else {
     const m = comp && typeof window.compMatches === 'function'
       ? (window.compMatches(comp) || []).find((x) => x && x.id === held.matchID) : null;
@@ -45,8 +45,6 @@ export function heldWriteWhere(held, competitions) {
   }
   return compName && what ? `${compName} · ${what}` : (compName || what);
 }
-
-const capitalize = (t) => (t ? t.charAt(0).toUpperCase() + t.slice(1) : t);
 
 // HeldWritesPanel: every write held on this device, opened from the topbar's
 // held-writes indicator. A write the server keeps refusing can be discarded
@@ -84,9 +82,9 @@ export function HeldWritesPanel({ competitions, onClose }) {
     }
   };
   return (
-    <Modal title="Held on this device" onClose={onClose}>
+    <Modal title={HELD_WRITES_TITLE} onClose={onClose}>
       {items.length === 0 ? (
-        <p className="held-writes__empty">Nothing is held on this device: everything has been sent.</p>
+        <p className="held-writes__empty">{HELD_WRITES_EMPTY}</p>
       ) : (
         <ul className="held-writes" data-testid="held-writes">
           {items.map((held) => (
@@ -94,7 +92,7 @@ export function HeldWritesPanel({ competitions, onClose }) {
               <div className="held-writes__text">
                 <div className="held-writes__where">{heldWriteWhere(held, competitions)}</div>
                 <div className={`held-writes__state${held.keepsFailing ? ' held-writes__state--error' : ''}`}>
-                  {`${capitalize(heldWriteWhat(held))}: ${heldWriteState(held)}`}
+                  {heldWriteLine(held)}
                 </div>
               </div>
               {held.keepsFailing && (
@@ -104,7 +102,7 @@ export function HeldWritesPanel({ competitions, onClose }) {
                   data-testid="held-write-discard-one"
                   disabled={busyKey !== null}
                   onClick={() => discard(held)}
-                >Discard</button>
+                >{HELD_WRITE_DISCARD_ONE_LABEL}</button>
               )}
             </li>
           ))}

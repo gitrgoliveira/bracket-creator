@@ -49,6 +49,7 @@ import {
   BarredMatchNotice,
   HeldWriteDiscard,
   HeldWriteNotice,
+  useClearPendingWhenNothingHeld,
 } from './admin_scoring_shared.jsx';
 // bc-cse: a SCHEDULED match a competitor is barred from must never offer a
 // Start the server would refuse; isBarredMatch (ineligible_match.jsx) is the
@@ -577,27 +578,12 @@ export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, on
     }
   }, [m.compId, m.id]);
 
-  // F5: subscribe to sync-status so the pending-write banner auto-clears once
-  // the queue drains for this match. Mounted once; reads match identity via
-  // closure. Uses mountedRef guard so setState never fires after unmount.
-  useEffectA(() => {
-    if (!m.compId || !m.id) return;
-    // Guard the window globals: in unit/render tests (and during boot ordering)
-    // subscribeSyncStatus / API can be absent: mirror SyncStatusPill's guard so
-    // the modal never throws on mount.
-    if (typeof window.subscribeSyncStatus !== 'function') return;
-    const unsub = window.subscribeSyncStatus((status) => {
-      if (!mountedRef.current) return;
-      const stillPending = (window.API && typeof window.API.hasPendingTerminalWrite === 'function')
-        ? window.API.hasPendingTerminalWrite(m.compId, m.id)
-        : false;
-      if (status === 'synced' && !stillPending) {
-        setPendingWrite(false);
-        pendingFnRef.current = null;
-      }
-    });
-    return unsub;
-  }, [m.compId, m.id]);
+  // F5: the pending-write banner goes once this device holds no write for the
+  // match: landed, or discarded here or from the topbar's list.
+  useClearPendingWhenNothingHeld(m.compId, m.id, pendingWrite, () => {
+    setPendingWrite(false);
+    pendingFnRef.current = null;
+  });
 
   // F5: surface a PERMANENT terminal-write failure (non-retryable 4xx on a queued
   // retry) as an explicit "not saved" state: otherwise the write is silently

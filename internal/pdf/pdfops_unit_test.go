@@ -103,3 +103,18 @@ func TestMakeTitlePage_EmptyTitleFallbackWriteError(t *testing.T) {
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "write title html")
 }
+
+// The context the generator holds reaches pdfcpu (0.16.0 takes one on every
+// call): a cancelled print stops the PDF work rather than finishing it.
+func TestPageCount_CancelledContextStops(t *testing.T) {
+	f, err := os.CreateTemp(t.TempDir(), "*.pdf")
+	require.NoError(t, err)
+	_, err = f.WriteString("%PDF-1.4\n")
+	require.NoError(t, err)
+	require.NoError(t, f.Close())
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	_, err = PageCount(ctx, f.Name())
+	require.Error(t, err)
+	assert.ErrorIs(t, err, context.Canceled)
+}

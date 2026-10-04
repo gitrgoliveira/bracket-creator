@@ -261,3 +261,61 @@ describe('a queued write keeps its floor when it is re-stamped', () => {
         warnSpy.mockRestore();
     });
 });
+
+describe('a write resent after a clock_skew refusal keeps its floor', () => {
+    // The direct resend (not the queue's) re-stamps with this device's time
+    // once the offset is relearned; it stays after what the write was made
+    // against.
+    function skewOnce() {
+        const sent = [];
+        let call = 0;
+        global.fetch = vi.fn((url, opts) => {
+            if (isClockPoll(url)) {
+                return Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve({ nowMs: Date.now() }) });
+            }
+            sent.push(JSON.parse(opts.body));
+            call++;
+            const answer = call === 1 ? { applied: false, reason: 'clock_skew', serverNowMs: Date.now() } : { applied: true };
+            return Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve(answer) });
+        });
+        return sent;
+    }
+
+    // Only a finished result is resent at once (a running update is left to
+    // the next autosave).
+    it('a finished result', async () => {
+        const seen = Date.now() + 3000;
+        const sent = skewOnce();
+        await API.recordScore('c1', 'm1', { status: 'completed', winner: 'A', ipponsA: ['M', 'M'] }, 'pw', { id: 'm1', compId: 'c1', status: 'running', modifiedAt: seen });
+        expect(sent).toHaveLength(2);
+        expect(sent[1].modifiedAt).toBe(seen + 1);
+    });
+
+    it('a hand-set winner', async () => {
+        const seen = Date.now() + 3000;
+        const sent = skewOnce();
+        await API.overrideBracketWinner('c1', 'r1-m1', 'Team A', 'pw', false, seen);
+        expect(sent).toHaveLength(2);
+        expect(sent[1].modifiedAt).toBe(seen + 1);
+    });
+});
+
+describe('a queued write that takes another\'s place keeps the later floor', () => {
+    // Two running updates made offline coalesce into one queued entry (the
+    // later one is stamped no earlier: here 5 s pass between them). The first
+    // was made against a newer match than the second's snapshot: the entry
+    // keeps the later floor, so a re-stamped replay is never before either.
+    it('the stored entry carries the higher seen stamp', async () => {
+        global.fetch = vi.fn(() => Promise.reject(new TypeError('offline')));
+        const high = Date.now() + 3000;
+        const low = Date.now() - 60_000;
+        await API.recordScore('c1', 'm1', { status: 'running', ipponsA: ['M'], seenModifiedAt: high }, 'pw', null);
+        await flushMicrotasks();
+        vi.advanceTimersByTime(5000);
+        await API.recordScore('c1', 'm1', { status: 'running', ipponsA: ['M', 'K'], seenModifiedAt: low }, 'pw', null);
+        await flushMicrotasks();
+        const stored = JSON.parse(localStorage.getItem('bc_write_queue'));
+        expect(stored).toHaveLength(1);
+        expect(stored[0][1].seenModifiedAt).toBe(high);
+    });
+});

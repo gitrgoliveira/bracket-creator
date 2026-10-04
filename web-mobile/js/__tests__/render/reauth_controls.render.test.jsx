@@ -335,6 +335,16 @@ describe('AdminTopbar: the held-writes list', () => {
     expect(screen.getAllByTestId('held-write')).toHaveLength(2);
   });
 
+  // The list follows the queue while it is open: a second write crossing the
+  // threshold (published as a held-count change) gains its Discard.
+  it('re-reads when the held counts change while it is open', async () => {
+    openList();
+    expect(screen.getAllByTestId('held-write')[2].querySelector('[data-testid="held-write-discard-one"]')).toBeNull();
+    held = held.map((h) => (h.key === 'k3' ? { ...h, keepsFailing: true } : h));
+    await act(async () => { unsentBus.set({ total: 3, terminal: 2, authBlocked: 0, failing: 3 }); });
+    expect(screen.getAllByTestId('held-write')[2].querySelector('[data-testid="held-write-discard-one"]')).not.toBeNull();
+  });
+
   it('a confirm answered No discards nothing', async () => {
     window.confirmDialog = vi.fn().mockResolvedValue(false);
     openList();

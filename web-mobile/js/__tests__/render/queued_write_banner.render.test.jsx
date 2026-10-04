@@ -176,6 +176,26 @@ describe.each(EDITORS)('$name editor: a held write the server keeps refusing can
     expect(screen.queryByRole('status')).toBeNull();
   });
 
+  // The banner goes once this device holds nothing for the match (landed, or
+  // discarded from the topbar's list), even while another match's write keeps
+  // the status at "syncing": it must not go on saying this one is saved.
+  it('goes when the match holds no write any more, whatever else is still held', async () => {
+    let held = true;
+    const unsent = new Set();
+    window.API.hasHeldWrite = vi.fn(() => held);
+    window.subscribeUnsentWrites = (fn) => { unsent.add(fn); fn({ total: 2, terminal: 2, authBlocked: 0, failing: 0 }); return () => unsent.delete(fn); };
+    try {
+      await queued();
+      expect(screen.getByRole('status')).toBeTruthy();
+      held = false;
+      await act(async () => { for (const fn of unsent) fn({ total: 1, terminal: 1, authBlocked: 0, failing: 0 }); });
+      expect(screen.queryByRole('status')).toBeNull();
+    } finally {
+      delete window.API.hasHeldWrite;
+      delete window.subscribeUnsentWrites;
+    }
+  });
+
   it('a cancelled confirm discards nothing', async () => {
     window.confirmDialog = vi.fn().mockResolvedValue(false);
     await queued();

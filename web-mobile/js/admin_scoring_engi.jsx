@@ -21,7 +21,7 @@
 
 const { useState: useStateE, useEffect: useEffectE, useRef: useRefE } = React;
 
-import { ReasonPrompt, CORRECTION_PRESETS, useAdoptFromServer, HeldWriteDiscard, HeldWriteNotice } from './admin_scoring_shared.jsx';
+import { ReasonPrompt, CORRECTION_PRESETS, useAdoptFromServer, HeldWriteDiscard, HeldWriteNotice, useClearPendingWhenNothingHeld } from './admin_scoring_shared.jsx';
 import { SyncStatusPill, useDebouncedRunningWrite, useChangedGroups, useKeptInHistoryNote, KeptInHistoryNote } from './admin_scoring_autosave.jsx';
 import { MatchHistoryDisclosure } from './match_history_view.jsx';
 import { useEscapeToClose, confirmDialog } from './ui.jsx';
@@ -273,23 +273,12 @@ export function EngiScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext
     }
   }, [m.compId, m.id]);
 
-  // F5: auto-clear the pending banner once the queue drains for this match.
-  // Guards the window globals so the modal never throws on mount in tests.
-  useEffectE(() => {
-    if (!m.compId || !m.id) return;
-    if (typeof window.subscribeSyncStatus !== "function") return;
-    const unsub = window.subscribeSyncStatus((status) => {
-      if (!mountedRef.current) return;
-      const stillPending = (window.API && typeof window.API.hasPendingTerminalWrite === "function")
-        ? window.API.hasPendingTerminalWrite(m.compId, m.id)
-        : false;
-      if (status === "synced" && !stillPending) {
-        setPendingWrite(false);
-        pendingFnRef.current = null;
-      }
-    });
-    return unsub;
-  }, [m.compId, m.id]);
+  // F5: the pending banner goes once this device holds no write for the
+  // match: landed, or discarded here or from the topbar's list.
+  useClearPendingWhenNothingHeld(m.compId, m.id, pendingWrite, () => {
+    setPendingWrite(false);
+    pendingFnRef.current = null;
+  });
 
   // Save guard, the same as the individual and team editors' Finish (bc-dtfn,
   // operator ruling 2026-09-27 that the editors behave alike): a tap ARMS the

@@ -420,12 +420,14 @@ describe('EngiScoreEditorModal saves flags as they are entered', () => {
 
   it('a running match saves each change as a running write', async () => {
     const onSubmit = vi.fn().mockResolvedValue({ status: 'running' });
-    render(<EngiScoreEditorModal match={makeMatch({ status: 'running' })} onClose={() => {}} onSubmit={onSubmit} />);
+    // Stamped: the write carries the shown match's stamp from the tap
+    // (bc-hlck), which recordScore floors the stamp by and never sends.
+    render(<EngiScoreEditorModal match={makeMatch({ status: 'running', modifiedAt: 1_000_000 })} onClose={() => {}} onSubmit={onSubmit} />);
     fireEvent.click(screen.getByTestId('engi-aka-inc'));
     fireEvent.click(screen.getByTestId('engi-shiro-inc'));
     await act(async () => { vi.advanceTimersByTime(400); });
     expect(onSubmit).toHaveBeenCalledTimes(1);
-    expect(onSubmit).toHaveBeenCalledWith({ flagsA: 1, flagsB: 1, status: 'running', editedPerf: expect.any(Number), seenModifiedAt: 0, changed: ['flags'] });
+    expect(onSubmit).toHaveBeenCalledWith({ flagsA: 1, flagsB: 1, status: 'running', editedPerf: expect.any(Number), seenModifiedAt: 1_000_000, changed: ['flags'] });
   });
 
   it('a keyboard change saves too', async () => {

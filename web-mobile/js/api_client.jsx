@@ -1237,21 +1237,26 @@ function _deriveSyncStatus() {
 // pill shows it as Syncing...), so the pill and the topbar can disagree for
 // that moment; that is correct, not a drift to fix.
 const _unsentListeners = new Set();
-let _lastUnsent = { total: 0, terminal: 0, authBlocked: 0 };
+let _lastUnsent = { total: 0, terminal: 0, authBlocked: 0, failing: 0 };
+// `failing` counts the held writes past the server-error threshold
+// (_keepsFailing), so a SECOND write crossing it is published even though the
+// sync status is already "server-error" and no other count moves: the
+// editors' notice and Discard and the topbar's list re-read on it.
 function _unsentCounts() {
-    let total = 0, terminal = 0, authBlocked = 0;
+    let total = 0, terminal = 0, authBlocked = 0, failing = 0;
     for (const d of _writeQueue.values()) {
         if (!d) continue;
         total++;
         if (d.terminal) terminal++;
         if (d.authBlocked) authBlocked++;
+        if (_keepsFailing(d)) failing++;
     }
-    return { total, terminal, authBlocked };
+    return { total, terminal, authBlocked, failing };
 }
 function _publishUnsentWrites() {
     const next = _unsentCounts();
     if (next.total === _lastUnsent.total && next.terminal === _lastUnsent.terminal
-        && next.authBlocked === _lastUnsent.authBlocked) return;
+        && next.authBlocked === _lastUnsent.authBlocked && next.failing === _lastUnsent.failing) return;
     _lastUnsent = next;
     for (const fn of _unsentListeners) {
         try { fn({ ...next }); } catch (_e) { /* swallow */ }
@@ -1712,6 +1717,10 @@ async function _flushQueue() {
                                 compID, matchID,
                                 detail: body.reasonHuman || body.error || `HTTP ${res.status}`,
                             });
+                            // Published at once (the failing count moved), so this
+                            // match's editor and the topbar's list offer the
+                            // discard now, not at the end of the pass.
+                            _recomputeSyncStatus();
                         }
                         anyFailed = true;
                     } else if (res.status === 401) {
@@ -3669,9 +3678,10 @@ const API = {
             // so heal the offset (AWAITED - the re-stamp depends on it) and send
             // the same assertion once more, now stamped in the server's frame.
             // Re-stamped with _serverNowMs() rather than the original stamp: the
-            // operator is asserting this winner right now.
+            // operator is asserting this winner right now, still never older
+            // than the feeder it names (bc-hlck).
             await _learnServerClockOffset();
-            payload.modifiedAt = _serverNowMs();
+            _stampPayload(payload, _serverNowMs(), seenModifiedAt);
             let retryRes;
             let retryBody;
             try {
@@ -4588,6 +4598,13 @@ const API = {
     // can discard it, and only it, from the match's editor after a confirm
     // (HeldWriteDiscard, admin_scoring_shared.jsx). Every other write held for
     // the match, and every other match's, is left alone.
+    // Whether this device still holds ANY write for the match (a running
+    // update, a result, a decision): the editors' pending banner stays while
+    // one does and goes when none is left, landed or discarded
+    // (useMatchHeldWrite, admin_scoring_shared.jsx).
+    hasHeldWrite(compID, matchID) {
+        return _entriesFor(_revKey(compID, matchID)).length > 0;
+    },
     heldWriteKeepsFailing(compID, matchID) {
         return _entriesFor(_revKey(compID, matchID)).some(([, d]) => _keepsFailing(d));
     },

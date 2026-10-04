@@ -1692,3 +1692,33 @@ describe('bc-hlck: an autosave carries the stamp of the match as it was at the t
     expect(window.API.recordScore.mock.calls[1][2].seenModifiedAt).toBe(2_000_000);
   });
 });
+
+// bc-hlck in the team editor: its autosave carries the shown match's stamp
+// from the tap, and the representative bout's add is floored by the match as
+// the sheet showed it (the trailing argument).
+describe('bc-hlck: the team editor floors its writes by the match it shows', () => {
+  beforeEach(() => {
+    window.API.recordDaihyosen = vi.fn();
+    window.API.removeDaihyosen = vi.fn();
+  });
+
+  it('an autosave carries the shown stamp from the tap', async () => {
+    renderModal(makeTeamMatch({ modifiedAt: 1_000_000 }));
+    await act(async () => { fireEvent.click(screen.getAllByText('M')[0]); });
+    await act(async () => { vi.advanceTimersByTime(AUTOSAVE_DEBOUNCE_MS + 50); });
+    expect(window.API.recordScore).toHaveBeenCalledTimes(1);
+    expect(window.API.recordScore.mock.calls[0][2].seenModifiedAt).toBe(1_000_000);
+  });
+
+  it('the representative bout add passes the shown stamp', async () => {
+    window.API.recordDaihyosen.mockResolvedValue({ ...makeKnockoutTeamMatch(), subResults: [daihyosenRow()] });
+    renderModal(makeKnockoutTeamMatch({ modifiedAt: 1_000_000 }));
+    await act(async () => { fireEvent.click(tieBoutButton(0)); });
+    await act(async () => { fireEvent.click(tieBoutButton(1)); });
+    await act(async () => { fireEvent.click(tieBoutButton(2)); });
+    await act(async () => { fireEvent.click(screen.getByTestId('scoring-modal-daihyosen-button')); });
+    await settle();
+    expect(window.API.recordDaihyosen).toHaveBeenCalledTimes(1);
+    expect(window.API.recordDaihyosen.mock.calls[0][3]).toBe(1_000_000);
+  });
+});

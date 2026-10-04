@@ -154,14 +154,21 @@ func (e *Engine) RecordMatchResultWithIneligibilityTx(tx state.StoreTx, compID, 
 		// fo carries bc-kcdg's downstream-correction confirmation through the
 		// engi seam. Without it an engi knockout correction could neither be
 		// refused nor confirmed: the guard lives past this early return.
-		rec, recErr := e.recordEngiMatch(tx, compID, matchID, result.FlagsA, result.FlagsB, result.CorrectionReason, result.ModifiedAt, result.GroupStamps, fo)
+		// skipDirectHistory: true. engiFinishHeld has already built this
+		// write's full merge report (result.Merge), per-group outcomes
+		// included, so recordWriteHistory below is the one history entry
+		// for it; recordEngiMatch's own blunt "every changed group
+		// applied" entry would contradict it whenever a group (the flags,
+		// in bc-mrgc's S2 fix) was genuinely held rather than applied. That
+		// call also covers what recordDisplacedHistory used to be called
+		// for separately here (S2 with R4: a newer recount the finish
+		// moved to the history), since recordWriteHistory appends it too.
+		rec, recErr := e.recordEngiMatch(tx, compID, matchID, result.FlagsA, result.FlagsB, result.CorrectionReason, result.ModifiedAt, result.GroupStamps, true, fo)
 		if recErr != nil {
 			return nil, recErr
 		}
 		backfillEngiResult(result, rec)
-		// A newer recount the finish moved to the history (S2 with R4)
-		// gets its entry, as it does when it arrives after the finish.
-		e.recordDisplacedHistory(tx, compID, matchID, result.Merge)
+		e.recordWriteHistory(tx, compID, matchID, result)
 		if err := e.requalifyMixedPoolWrite(tx, compID, comp, matchID, rec, engiPrior, fo); err != nil {
 			return nil, err
 		}

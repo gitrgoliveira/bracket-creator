@@ -19,6 +19,7 @@ package engine
 
 import (
 	"fmt"
+	"slices"
 	"sort"
 
 	"github.com/gitrgoliveira/bracket-creator/internal/domain"
@@ -67,7 +68,7 @@ func engiWinnerSide(flagsA, flagsB int) string {
 //
 // Returns the persisted MatchResult so the handler can echo / broadcast it.
 func (e *Engine) recordEngiMatchResult(h state.StoreTx, compID, matchID string, flagsA, flagsB int, correctionReason string, opts ...ForceOptions) (*state.MatchResult, error) {
-	return e.recordEngiMatch(h, compID, matchID, flagsA, flagsB, correctionReason, 0, nil, opts...)
+	return e.recordEngiMatch(h, compID, matchID, flagsA, flagsB, correctionReason, 0, nil, false, opts...)
 }
 
 // engiFinishProbe is the write an engi finish makes, built on the stored
@@ -105,6 +106,7 @@ func engiFinishHeld(prior, result *state.MatchResult, comp *state.Competition, k
 	// writes: an unstamped finish takes the server's time there (writeStamp),
 	// so it leaves a fence like every other finish.
 	result.ModifiedAt = rep.Stamp
+	result.WriteDoor = doorEngi
 	if len(rep.Held) == 0 {
 		// Applied. A HeldEcho here is no loss (bc-mrgc phase 3: the stored
 		// flags already held this value, just at an older stamp than the
@@ -121,6 +123,28 @@ func engiFinishHeld(prior, result *state.MatchResult, comp *state.Competition, k
 		// again on its own, so the merge's own per-group stamps ride along
 		// on the write for it to apply directly (engi.go's recordEngiMatch,
 		// through state.ApplyMergedGroupStamps).
+		result.GroupStamps = state.CloneGroupStamps(probe.GroupStamps)
+		return false
+	}
+	// S2 (operator ruling 2026-10-04, "the newest count decides" in both
+	// arrival orders): the finish's own flags are held above because a
+	// NEWER count is already on record, but mergeMatchWrite's own S2 block
+	// (through deriveWinnerAfterMerge's engi branch) has already turned
+	// that stored count into a winner on probe, exactly as the OTHER
+	// arrival order reaches when R3 applies the same recount to an
+	// already-finished match. Accepting that derived result here, instead
+	// of discarding it for the atomic re-merge below, is what makes both
+	// arrival orders of the same two writes land on the same state: the
+	// recorder is handed the STORED count (never the finish's own, stale
+	// one) and the winner it gives; the finish's own attempted flags survive
+	// only in the history, as held (reportHeld captured them before the
+	// merge copied the stored count over them). engiValidTotal is checked
+	// again here defensively -- deriveWinnerAfterMerge's engi branch already
+	// refuses an invalid total, so this can never fail in practice, but a
+	// write that answers for what it derives should not lean on that alone.
+	if rep.ResultChanged && slices.Contains(rep.Held, state.GroupFlags) && engiValidTotal(probe.FlagsA, probe.FlagsB) {
+		result.FlagsA, result.FlagsB = probe.FlagsA, probe.FlagsB
+		result.Merge = rep
 		result.GroupStamps = state.CloneGroupStamps(probe.GroupStamps)
 		return false
 	}
@@ -198,6 +222,17 @@ func (e *Engine) recordEngiMatch(
 	correctionReason string,
 	stamp int64,
 	groupStamps map[string]int64,
+	// skipDirectHistory is true for the one caller (RecordMatchResultWithIneligibilityTx,
+	// via engiFinishHeld) that has already built a full merge report for this
+	// write: that caller records the richer, per-group history itself
+	// (recordWriteHistory), so this blunt "every group applied" entry would
+	// only contradict it -- most visibly for bc-mrgc's S2 fix, where the
+	// flags group did NOT apply (a newer stored count stood; the finish's
+	// own flags are held in that caller's own history entry instead). The
+	// other caller, recordEngiMatchResult (the engine-internal callers and
+	// the test suite's direct writes), has no merge report at all, so it
+	// still needs this function's own history entry and passes false.
+	skipDirectHistory bool,
 	opts ...ForceOptions,
 ) (*state.MatchResult, error) {
 	fo := firstForceOptions(opts)
@@ -228,7 +263,9 @@ func (e *Engine) recordEngiMatch(
 		return nil
 	})
 	if err == nil {
-		e.recordDirectHistory(h, compID, matchID, doorEngi, stamp, engiChangedGroups...)
+		if !skipDirectHistory {
+			e.recordDirectHistory(h, compID, matchID, doorEngi, stamp, engiChangedGroups...)
+		}
 		return out, nil
 	}
 	if err != errMatchNotFound {
@@ -293,7 +330,9 @@ func (e *Engine) recordEngiMatch(
 	if updateErr != nil {
 		return nil, updateErr
 	}
-	e.recordDirectHistory(h, compID, matchID, doorEngi, stamp, engiChangedGroups...)
+	if !skipDirectHistory {
+		e.recordDirectHistory(h, compID, matchID, doorEngi, stamp, engiChangedGroups...)
+	}
 	e.restoreForceReopened(h, compID, reopened)
 	if fo.Reopened != nil {
 		*fo.Reopened = append(*fo.Reopened, reopened...)

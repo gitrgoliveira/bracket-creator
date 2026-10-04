@@ -2727,9 +2727,10 @@ paths:
         time, so a write stamped before it (an offline-queued save replayed
         afterwards) is refused as `superseded` rather than completing the
         reopened match again.
-        This is how a withdrawal recorded by mistake is cleared: a withdrawal
-        gives the opponent the win by default, so without it the match was
-        never decided. For every other completed match the correction path (a
+        This is how a withdrawal recorded by mistake is cleared: a
+        kiken, fusenpai, or fusensho names the opponent the winner,
+        so without it the match was never decided. For every other
+        completed match the correction path (a
         completed write with a `correctionReason`) remains the sole sanctioned
         edit of a finished result. Reopening a finalized result is an
         organiser action: the route stays main-password-gated even in self-run

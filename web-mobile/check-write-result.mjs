@@ -127,17 +127,26 @@ export const FORBIDDEN = [
     // over this codebase, the OWNER module included -- would survive a
     // zero-or-more class. Only a real separator (whitespace, a JSX splice,
     // a quote/plus from concatenation, or a hyphen) trips it.
-    re: /default[\s{}"'+-]+win/i,
+    //
+    // The trailing `\b` (bc-cse) requires a word boundary right after "win":
+    // without it, a JSX attribute run such as `variant="default" winner={w}`
+    // tripped this rule too, reading the "win" inside "winner" as the
+    // forbidden word.
+    re: /default[\s{}"'+-]+(?:wins?|loss(?:es)?)\b/i,
     why: 'says "default win", a term kendo does not have; name the recorded decision instead (kiken, fusenpai, fusensho) through decisionWord (write_result.jsx)',
   },
   {
     // The other way to say it without the word "default" next to "win":
-    // "X wins by default" / "the match was won by default". Same ruling,
-    // same scanning (whole-file, so a wrap between "win" and "by default"
-    // is caught too); bounded to 40 characters and no sentence break so it
+    // "X wins by default" / "the match was won by default" / "winning by
+    // default". Same ruling, same scanning (whole-file, so a wrap between
+    // "win"/"won"/"winning" and "by default" is caught too -- the gap is
+    // `[^.]`, not `[^.\n]` (bc-cse), so it crosses a real line break); still
+    // bounded to 40 characters with no sentence break (a literal ".") so it
     // cannot reach across an unrelated "win" and an unrelated "by default"
-    // in two different sentences.
-    re: /\bwins?\b[^.\n]{0,40}\bby default\b/i,
+    // in two different sentences -- that bound alone was always enough to
+    // keep the match inside one sentence, so excluding "\n" as well bought
+    // nothing but the missed wraps this fix closes.
+    re: /\b(?:wins?|won|winning|winners?|loses|lost|losing)\b[^.]{0,40}\bby default\b/i,
     why: 'says a side "wins by default", a phrase kendo does not have; name the recorded decision instead (kiken, fusenpai, fusensho) through decisionWord (write_result.jsx)',
   },
 ];

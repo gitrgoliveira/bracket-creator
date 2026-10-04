@@ -64,19 +64,19 @@ var Glossary = map[string]Term{
 		ID:      "kiken",
 		Kanji:   "棄権",
 		Short:   "Withdrawal",
-		Tooltip: "The competitor withdraws. Two sub-types: Voluntary (FIK Art. 31), permanent disqualification from the competition; Injury (FIK Art. 30), can be reinstated if they are fit to fight again. The match is awarded to the opponent, 2–0.",
+		Tooltip: "The competitor withdraws. Two sub-types: Voluntary (FIK Art. 31), permanent disqualification from the competition; Injury (FIK Art. 30), can be reinstated if they are fit to fight again. The match is awarded to the opponent; any points the withdrawing competitor had already scored stand.",
 	},
 	"kiken-voluntary": {
 		ID:      "kiken-voluntary",
 		Kanji:   "棄権",
 		Short:   "Voluntary withdrawal",
-		Tooltip: "FIK Article 31, the competitor voluntarily withdraws. They forfeit this match (opponent wins 2–0) and are permanently barred from all later matches in this competition.",
+		Tooltip: "FIK Article 31, the competitor voluntarily withdraws. The match is awarded to the opponent; any points the withdrawing competitor had already scored stand. They are permanently barred from all later matches in this competition.",
 	},
 	"kiken-injury": {
 		ID:      "kiken-injury",
 		Kanji:   "棄権",
 		Short:   "Injury withdrawal",
-		Tooltip: "FIK Article 30, the competitor withdraws due to injury or illness. They forfeit this match (opponent wins 2–0) and are blocked from later matches, but can be reinstated if they are fit to fight again.",
+		Tooltip: "FIK Article 30, the competitor withdraws due to injury or illness. The match is awarded to the opponent; any points the withdrawing competitor had already scored stand. They are blocked from later matches, but can be reinstated if they are fit to fight again.",
 	},
 	"fusenpai": {
 		ID:      "fusenpai",

@@ -140,13 +140,27 @@ describe('the "default win" phrase rule has no legitimate spelling', () => {
     expect(trips('return "DEFAULT WIN recorded";')).toBe(true);
   });
 
+  it('catches the plural "default wins" and the "default loss(es)" spelling', () => {
+    expect(trips('return "Record default wins for the pool";')).toBe(true);
+    expect(trips('return "Clear default loss";')).toBe(true);
+    expect(trips('return "Two default losses recorded";')).toBe(true);
+  });
+
   it('does not trip on an identifier -- the space/hyphen is required', () => {
     expect(trips('export function writeDefaultWinStands(res) { return defaultWin; }')).toBe(false);
     expect(trips('export const DEFAULT_WIN_STANDS_REASON = 1;')).toBe(false);
+    expect(trips('export const DefaultLossCount = 1;')).toBe(false);
   });
 
   it('does not trip inside a comment', () => {
     expect(trips('// "default win" does not exist in kendo')).toBe(false);
+  });
+
+  it('requires a word boundary after "win" -- a JSX attribute run must not trip it', () => {
+    // bc-cse: before the trailing \b, this JSX text read "default" then a
+    // quote-and-space separator then "win" (the first three letters of
+    // "winner"), which is a prop list, not the forbidden phrase.
+    expect(trips('<input variant="default" winner={w} />')).toBe(false);
   });
 
   it('names the recorded decision instead, which never trips it', () => {
@@ -209,7 +223,12 @@ describe('the "default win" rule sees a wrap a line-based scan cannot', () => {
 // The second spelling (operator ruling 2026-10-04, "wins by default"):
 // naming a side as winning "by default" is the same banned concept without
 // the literal words "default win" adjacent. Same whole-file scanning, so a
-// wrap between "win" and "by default" is caught too.
+// wrap between "win"/"won"/"winning" and "by default" is caught too
+// (bc-cse): the gap is `[^.]{0,40}`, not `[^.\n]{0,40}`, so it crosses a
+// real line break -- a formatter-wrapped sentence or a wrapped YAML
+// description line -- while the 40-character bound and the literal "."
+// still stop it dead at a sentence boundary, which was always doing that
+// job on its own.
 describe('the "wins ... by default" phrase rule', () => {
   const tripsWhole = (src) => scanWholeFile(src, DEFAULT_WIN_RULES).length === 1;
 
@@ -218,23 +237,34 @@ describe('the "wins ... by default" phrase rule', () => {
     expect(tripsWhole('return "Kyoto win by default this round.";')).toBe(true);
   });
 
-  it('does not reach across a line break either -- the [^.\\n] bound is deliberate', () => {
-    // Unlike the "default ... win" pattern above, this one's gap is bounded
-    // by [^.\n]{0,40}: a sentence a formatter wraps onto a second line is
-    // exactly the shape the bound is there to stop short of, the same as a
-    // period. Reported separately because this is NOT a gap in the rule --
-    // "wins" and "by default" that far apart, even on one line, read as two
-    // different claims, so widening the bound to swallow a line break would
-    // widen it to swallow a whole paragraph too.
+  it('catches the past and participle forms too: "won", "winning"', () => {
+    expect(tripsWhole('return "the match was won by default.";')).toBe(true);
+    expect(tripsWhole('return "winning by default is not shown that way.";')).toBe(true);
+  });
+
+  it('catches "the winner by default" and the loss side: "loses/lost/losing by default"', () => {
+    expect(tripsWhole('return "the winner by default is Kyoto.";')).toBe(true);
+    expect(tripsWhole('return "Kyoto loses by default this round.";')).toBe(true);
+    expect(tripsWhole('return "the match was lost by default.";')).toBe(true);
+    expect(tripsWhole('return "losing by default is not shown that way.";')).toBe(true);
+  });
+
+  it('crosses a line break -- the [^.] bound is what keeps it inside a sentence (bc-cse)', () => {
+    // Before this fix the gap excluded "\n" too, on the claim that letting
+    // it cross a line break would widen the match to a whole paragraph; the
+    // 40-character bound (and the literal "." it still cannot cross) was
+    // already doing that job, so the "\n" exclusion only cost the gate the
+    // wrapped shape a YAML description or a JSX formatter actually produces.
     const src = [
       'const msg = `${name} wins the encounter',
       '  by default.`;',
     ].join('\n');
-    expect(tripsWhole(src)).toBe(false);
+    expect(tripsWhole(src)).toBe(true);
   });
 
   it('does not reach across a sentence break into an unrelated "by default"', () => {
     expect(tripsWhole('return "Kyoto wins the first bout. The second is forfeited by default.";')).toBe(false);
+    expect(tripsWhole('return "Kyoto won. By default the next match starts.";')).toBe(false);
   });
 
   it('does not trip inside a comment', () => {

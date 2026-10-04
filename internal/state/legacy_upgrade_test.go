@@ -598,12 +598,14 @@ func TestLegacyUpgradeSweepKnockoutSecondsWinOverGlobalMinutes(t *testing.T) {
 }
 
 // TestLegacyUpgradeSweepFailureIsolatedPerCompetition: when the on-disk
-// convergence write fails for one competition (its directory is read-only),
-// NewStore must still succeed, and a subsequent LoadCompetition for that
-// same competition must still return the folded values -- the in-memory
-// safety net in parseCompetitionFile does not depend on the write ever
-// landing. This is the "best-effort, never a safety mechanism" property the
-// whole migration rests on.
+// convergence write cannot land for a competition (its directory became
+// read-only after the server started), a LoadCompetition for it must still
+// return the folded values -- the in-memory safety net in
+// parseCompetitionFile does not depend on the write ever landing. This is
+// the "best-effort, never a safety mechanism" property the whole migration
+// rests on. A server STARTING on such a directory refuses to start instead
+// (operator decision 2026-10-04, ErrDataNotWritable), so the directory is
+// made read-only after NewStore.
 func TestLegacyUpgradeSweepFailureIsolatedPerCompetition(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("chmod 0500 isn't enforced on Windows the same way")
@@ -613,6 +615,8 @@ func TestLegacyUpgradeSweepFailureIsolatedPerCompetition(t *testing.T) {
 	}
 
 	dir := t.TempDir()
+	s, err := state.NewStore(dir)
+	require.NoError(t, err)
 	compDir := filepath.Join(dir, "competitions", "locked-comp")
 	require.NoError(t, os.MkdirAll(compDir, 0o700))
 
@@ -629,8 +633,8 @@ func TestLegacyUpgradeSweepFailureIsolatedPerCompetition(t *testing.T) {
 	require.NoError(t, os.Chmod(compDir, 0500))
 	defer func() { _ = os.Chmod(compDir, 0700) }() // let t.TempDir() clean up
 
-	s, err := state.NewStore(dir)
-	require.NoError(t, err, "one broken competition directory must not stop NewStore from succeeding")
+	_, err = state.NewStore(dir)
+	require.ErrorIs(t, err, state.ErrDataNotWritable, "a server starting on a directory it cannot write refuses to start")
 
 	comp, err := s.LoadCompetition("locked-comp")
 	require.NoError(t, err, "a load must still succeed and fold in memory even though the on-disk convergence write failed")

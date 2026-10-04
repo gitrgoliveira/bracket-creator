@@ -149,6 +149,12 @@ func (s *Store) init() error {
 		return err
 	}
 
+	// Refuse to start on data the server cannot write (operator decision
+	// 2026-10-04): before the WAL replay, which writes too.
+	if err := checkDataWritable(s.folder); err != nil {
+		return err
+	}
+
 	// Replay any committed-but-not-finished transactions left over
 	// from a previous process. The WAL package's Scan returns one
 	// *wal.WAL per persisted intent file in id-sorted order

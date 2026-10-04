@@ -5444,6 +5444,11 @@ button.vsched-item:not([data-clickable]) {
   margin: 6px 0 0;
   text-align: left;
 }
+.match-history__caret {
+  display: inline-block;
+  width: 1em;
+  margin-right: 4px;
+}
 .match-history__body {
   margin-top: 4px;
   font-size: 12px;

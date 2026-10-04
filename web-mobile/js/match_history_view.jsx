@@ -185,6 +185,10 @@ export function MatchHistoryDisclosure({ match, password, hidden = false }) {
                 data-testid="match-history-toggle"
                 onClick={() => setOpen((o) => !o)}
             >
+                {/* The same open/closed cue as the editor's other disclosure
+                    (the Ippon-type key): a ghost button reads as plain text
+                    without one, and the operator would not know it opens. */}
+                <span aria-hidden="true" className="match-history__caret">{open ? '▾' : '▸'}</span>
                 {open ? 'Hide history' : 'History'}
             </button>
             {open && (

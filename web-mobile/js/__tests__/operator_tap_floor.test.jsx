@@ -65,7 +65,12 @@ describe('operator tap floors (bc-tp44)', () => {
     expect(bar).toMatch(/min-height: max\(36px, var\(--tap-floor\)\)/);
     expect(bar).toMatch(/padding: 0 6px/);
     expect(bar).toMatch(/align-items: stretch/);
-    expect(block('.lineup-name__bar .pmf__input')).toMatch(/align-self: stretch/);
+    const input = block('.lineup-name__bar .pmf__input');
+    expect(input).toMatch(/align-self: stretch/);
+    // The input is the tap target: it floors its own height (border-box, so
+    // exactly the floor) rather than relying on the bar, whose floor counts
+    // its borders and left an empty box's input 2px short.
+    expect(input).toMatch(/min-height: var\(--tap-floor\)/);
     expect(block('.lineup-name__bar .lineup-name__clear')).toMatch(/align-self: center/);
   });
 

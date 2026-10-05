@@ -6292,6 +6292,9 @@ button.vsched-item:not([data-clickable]) {
    the bar's own padding used to focus nothing); the clear button stays centred. */
 .lineup-name__bar .pmf__input {
   align-self: stretch;
+  /* The input is the tap target, so it carries the floor itself: the bar's
+     own floor counts its 1px borders, which left an empty box's input 42px. */
+  min-height: var(--tap-floor);
 }
 .lineup-name__bar .lineup-name__clear {
   align-self: center;

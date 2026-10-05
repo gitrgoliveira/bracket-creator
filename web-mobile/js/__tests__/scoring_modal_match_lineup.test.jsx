@@ -94,6 +94,42 @@ describe('resolveMatchLineup (mp-bkg regression guard)', () => {
     expect(result?.positions?.senpo).toBe('Match-specific player');
     expect(result).not.toEqual(roundDefault);
   });
+
+  describe('throwOnError', () => {
+    const opts = { throwOnError: true };
+
+    it('the default still swallows a failed read on either endpoint', async () => {
+      const api = makeAPI({ matchThrows: true, roundThrows: true });
+      await expect(resolveMatchLineup(COMP_ID, TEAM_ID, MATCH_ID, ROUND, api)).resolves.toBeNull();
+    });
+
+    it('rethrows a network error from the per-match read', async () => {
+      const api = makeAPI({ matchThrows: true, roundResult: roundLineup });
+      await expect(resolveMatchLineup(COMP_ID, TEAM_ID, MATCH_ID, ROUND, api, opts)).rejects.toThrow('network');
+      expect(api.fetchTeamLineup).not.toHaveBeenCalled();
+    });
+
+    it('rethrows a network error from the round read', async () => {
+      const api = makeAPI({ matchResult: null, roundThrows: true });
+      await expect(resolveMatchLineup(COMP_ID, TEAM_ID, MATCH_ID, ROUND, api, opts)).rejects.toThrow('network');
+    });
+
+    it('rethrows a thrown 404 (competition not found)', async () => {
+      const api = makeAPI({ matchResult: null });
+      api.fetchMatchLineup = vi.fn().mockRejectedValue(new Error('competition not found'));
+      await expect(resolveMatchLineup(COMP_ID, TEAM_ID, MATCH_ID, ROUND, api, opts)).rejects.toThrow('competition not found');
+    });
+
+    it('a null (nothing saved) still falls through to the round, and returns it', async () => {
+      const api = makeAPI({ matchResult: null, roundResult: roundLineup });
+      await expect(resolveMatchLineup(COMP_ID, TEAM_ID, MATCH_ID, ROUND, api, opts)).resolves.toEqual(roundLineup);
+    });
+
+    it('nothing saved at either level is null, not an error', async () => {
+      const api = makeAPI({ matchResult: null, roundResult: null });
+      await expect(resolveMatchLineup(COMP_ID, TEAM_ID, MATCH_ID, ROUND, api, opts)).resolves.toBeNull();
+    });
+  });
 });
 
 describe('resolveLineupTeamId (mp-bkg: name-keyed side → participant UUID)', () => {

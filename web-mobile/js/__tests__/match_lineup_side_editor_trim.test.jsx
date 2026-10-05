@@ -84,8 +84,7 @@ describe('MatchLineupSideEditor trims names before saving', () => {
     runtime.mount(MatchLineupSideEditor, {
       comp: COMP, team: TEAM, match: MATCH, allMatches: [MATCH], password: 'pw', showToast: vi.fn(),
     });
-    await Promise.resolve();
-    await Promise.resolve();
+    for (let i = 0; i < 6; i++) await Promise.resolve(); // resolveMatchLineup adds hops
     return runtime.currentTree();
   }
 
@@ -104,6 +103,11 @@ describe('MatchLineupSideEditor trims names before saving', () => {
   });
 
   it('drops a whitespace-only name rather than persisting blanks', async () => {
+    // Based on a loaded override that holds a name: blanking an already-empty
+    // side is not a change, and Save writes nothing for it.
+    global.window.API.fetchMatchLineup = vi.fn().mockResolvedValue({
+      matchId: 'match-1', positions: { 1: 'Old Name' },
+    });
     let tree = await mount();
     const pickers = findComponents(tree, 'LineupNameInput');
     pickers[0].props.onSelect('   ');

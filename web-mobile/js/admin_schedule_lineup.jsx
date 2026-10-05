@@ -3,7 +3,7 @@
 
 import { LineupNameInput } from './admin_scoring_shared.jsx';
 import { sideLookupKey } from './competitor_identity.jsx';
-import { squadRosterEntries, rosterWithoutPlacedElsewhere, memberPlacedElsewhere } from './lineup_resolver.jsx';
+import { squadRosterEntries, rosterWithoutPlacedElsewhere, memberPlacedElsewhere, resolveMatchLineup, changedLineupPositions } from './lineup_resolver.jsx';
 import { renameMemberFields } from './lineup_rename.jsx';
 
 const { useState: useStateA, useEffect: useEffectA, useRef: useRefA, useMemo: useMemoA } = React;
@@ -141,6 +141,13 @@ export function MatchLineupSideEditor({ comp, team, match, allMatches, password,
   // Track whether the current match's lineup was loaded from a per-match
   // entry (true) or is inheriting the round default (false).
   const [isMatchOverride, setIsMatchOverride] = useStateA(false);
+  // The round the inherited lineup was saved for (0-based), when it carries
+  // one: the nearest saved round, not necessarily this match's own.
+  const [inheritedRound, setInheritedRound] = useStateA(null);
+  // What this side last held on the server (loaded, or confirmed by a save):
+  // Save only writes a side that differs from it, so opening the panel and
+  // saving never turns an inherited lineup into an override.
+  const [baseline, setBaseline] = useStateA({ positions: {}, memberIds: {} });
   // bc-cse gap closure: the composed operator-facing warning shown after a
   // SUCCESSFUL save whose squad-member attachment fell short (see doSave
   // below). Deliberately a separate channel from `error`: the save did not
@@ -255,6 +262,13 @@ export function MatchLineupSideEditor({ comp, team, match, allMatches, password,
         Object.keys(ids).forEach(key => { if (ids[key] === id) next[key] = name; });
         return next;
       });
+      // The server already rewrote the stored lineup's names by id, so the
+      // baseline follows: a rename alone must not make the side look edited.
+      setBaseline(b => {
+        const positionsNext = { ...b.positions };
+        Object.keys(b.memberIds).forEach(key => { if (b.memberIds[key] === id) positionsNext[key] = name; });
+        return { ...b, positions: positionsNext };
+      });
       cancelRename();
     } catch (e) {
       setError(e?.message || "Failed to rename team member");
@@ -294,36 +308,27 @@ export function MatchLineupSideEditor({ comp, team, match, allMatches, password,
     }
     (async () => {
       try {
-        const matchLineup = await window.API.fetchMatchLineup(compId, teamId, matchId);
+        // The same resolution the score sheet makes (per-match entry, else the
+        // nearest saved round), so the panel shows what the sheet will show.
+        // A failed read throws: showing the round default over an override
+        // we could not read would let Save overwrite it.
+        const lineup = await resolveMatchLineup(
+          compId, teamId, matchId, window.resolveRoundIndex(match), window.API, { throwOnError: true }
+        );
         if (cancelled) return;
-        if (matchLineup) {
+        if (lineup) {
           const next = {};
           const nextIds = {};
           positions.forEach(p => {
-            next[p.key] = (matchLineup.positions || {})[p.key] || "";
-            nextIds[p.key] = (matchLineup.memberIds || {})[p.key] || "";
+            next[p.key] = (lineup.positions || {})[p.key] || "";
+            nextIds[p.key] = (lineup.memberIds || {})[p.key] || "";
           });
           setValues(next);
           setMemberIds(nextIds);
-          setIsMatchOverride(true);
+          setBaseline({ positions: next, memberIds: nextIds });
+          setIsMatchOverride(lineup.matchId === matchId);
+          setInheritedRound(Number.isInteger(lineup.round) ? lineup.round : null);
         } else {
-          // No per-match entry: reflect the round default (fetch-and-show,
-          // but do NOT set isMatchOverride so the label says "inheriting").
-          const round = window.resolveRoundIndex(match);
-          try {
-            const roundLineup = await window.API.fetchTeamLineup(compId, teamId, round);
-            if (cancelled) return;
-            if (roundLineup) {
-              const next = {};
-              const nextIds = {};
-              positions.forEach(p => {
-                next[p.key] = (roundLineup.positions || {})[p.key] || "";
-                nextIds[p.key] = (roundLineup.memberIds || {})[p.key] || "";
-              });
-              setValues(next);
-              setMemberIds(nextIds);
-            }
-          } catch (_e) { /* no round lineup: leave blank */ }
           setIsMatchOverride(false);
         }
       } catch (e) {
@@ -406,8 +411,10 @@ export function MatchLineupSideEditor({ comp, team, match, allMatches, password,
       // Reflect exactly what was persisted.
       const next = {};
       positions.forEach(p => { next[p.key] = (updated.positions || {})[p.key] || ""; });
+      const nextIds = { ...memberIdsOut, ...updated.memberIds };
       setValues(next);
-      setMemberIds({ ...memberIdsOut, ...updated.memberIds });
+      setMemberIds(nextIds);
+      setBaseline({ positions: next, memberIds: nextIds });
       setIsMatchOverride(true);
       if (typeof showToast === "function") showToast(successMsg);
       const composer = window.AdminLineupHelpers?.memberIdentityWarning;
@@ -421,7 +428,12 @@ export function MatchLineupSideEditor({ comp, team, match, allMatches, password,
     }
   };
 
+  const dirty = changedLineupPositions(
+    baseline, { positions: values, memberIds }, positions.map(p => p.key)
+  ).length > 0;
+
   const save = () => {
+    if (!dirty) return;
     // Strip empty positions before PUT. The handler replaces the whole
     // positions map (TeamLineup{Positions: req.Positions}), and the domain
     // validator treats an absent key the same as an explicit "": both
@@ -517,7 +529,7 @@ export function MatchLineupSideEditor({ comp, team, match, allMatches, password,
         <span style={{ fontWeight: 700, fontSize: 13 }}>{teamName}</span>
         {isMatchOverride
           ? <span style={{ fontSize: 11, color: "var(--accent)", fontWeight: 600 }}>Override for this match</span>
-          : <span style={{ fontSize: 11, color: "var(--ink-3)" }}>Inheriting round default</span>
+          : <span style={{ fontSize: 11, color: "var(--ink-3)" }}>{inheritedRound !== null ? `Inheriting Round ${inheritedRound + 1} lineup` : "Inheriting round default"}</span>
         }
         <button type="button"
           className="btn btn--sm"
@@ -624,7 +636,8 @@ export function MatchLineupSideEditor({ comp, team, match, allMatches, password,
         <button type="button"
           className="btn btn--primary btn--sm"
           onClick={save}
-          disabled={saving || copying}
+          disabled={saving || copying || !dirty}
+          title={dirty ? undefined : "No changes to save"}
         >
           {saving ? "Saving…" : "Save lineup"}
         </button>

@@ -4033,8 +4033,10 @@ const API = {
     // opts.fallback: best-effort resolution for match-scoring surfaces: when
     // the exact round has nothing saved the server falls back to the
     // closest saved round (highest <= requested, else highest overall). The
-    // lineup EDITOR must NOT pass this: it reads the exact round with no
-    // fallback, so nothing saved there is null ("blank, editable").
+    // Lineups page (AdminLineup, the round editor) must NOT pass this: it
+    // reads the exact round with no fallback, so nothing saved there is null
+    // ("blank, editable"). The score sheet and the at-court lineup panel read
+    // through resolveMatchLineup, which does.
     async fetchTeamLineup(compID, teamId, round, opts) {
         const qs = opts && opts.fallback ? "?fallback=best" : "";
         const res = await fetch(`/api/competitions/${compID}/teams/${teamId}/lineups/${round}${qs}`);

@@ -119,6 +119,17 @@ export function memberPlacedElsewhere(memberIds, posKey, id) {
   return hit ? hit[0] : "";
 }
 
+// changedLineupPositions: the position keys, among `positionKeys`, where
+// `current` differs from `baseline` (both `{ positions, memberIds }` maps keyed
+// by position). A key is changed when its trimmed name or its member id
+// differs; "" and undefined are the same. The one answer to "did the operator
+// edit this side", so a panel writes only a side that changed.
+export function changedLineupPositions(baseline, current, positionKeys) {
+  const name = (side, key) => String(side?.positions?.[key] ?? "").trim();
+  const id = (side, key) => String(side?.memberIds?.[key] ?? "");
+  return positionKeys.filter(key => name(baseline, key) !== name(current, key) || id(baseline, key) !== id(current, key));
+}
+
 export function rosterWithoutPlacedElsewhere(roster, lineup, posKey) {
   const otherNames = new Set(Object.entries(lineup?.positions || {})
     .filter(([key, name]) => key !== posKey && String(name || "").trim())
@@ -277,29 +288,38 @@ export async function buildInlineLineupWrite(compId, teamId, lineup, squad, posK
 
 // resolveMatchLineup: prefer the per-match lineup endpoint (GET
 // match-lineups/:matchId); fall back to the round lineup when no per-match
-// entry exists (saved: false -> null -> round lookup). Network errors on
-// either endpoint are swallowed so the caller degrades gracefully.
+// entry exists (saved: false -> null -> round lookup). Errors on either
+// endpoint are swallowed so a display degrades gracefully, unless the caller
+// passes { throwOnError: true }: the at-court lineup panel does, because a
+// panel that failed to read an override must not show the round default and
+// let Save overwrite it. Nothing saved still falls through (it is null).
 //
 // The round step passes { fallback: true }: match-scoring surfaces are the
 // client-side twin of AMENDMENT 1, so when the match's own round has
 // nothing saved the server resolves the closest saved round instead of
 // answering unsaved (operators typically save one round-0 lineup for the
 // whole day; without this, a knockout final at round index 1 got no names
-// and kachinuki bout 1 was submitted with empty sides). The lineup EDITOR
-// calls fetchTeamLineup directly without the flag, so its exact-round,
-// nothing-saved-is-null semantics are unchanged.
+// and kachinuki bout 1 was submitted with empty sides). Callers: the score
+// sheet, the displays and the at-court lineup panel (MatchLineupSideEditor).
+// The Lineups page (AdminLineup, the round editor) is the one exact-round
+// reader: it calls fetchTeamLineup without the flag and nothing saved
+// arrives as null.
 //
 // mp-bkg regression guard: the per-match endpoint must win when it returns a
 // non-null result (the whole point of the per-match API). This function is
 // tested directly in scoring_modal_match_lineup.test.jsx.
-export async function resolveMatchLineup(compId, teamId, matchId, round, { fetchMatchLineup, fetchTeamLineup }) {
+export async function resolveMatchLineup(compId, teamId, matchId, round, { fetchMatchLineup, fetchTeamLineup }, { throwOnError = false } = {}) {
   try {
     const matchLineup = await fetchMatchLineup(compId, teamId, matchId);
     if (matchLineup !== null) return matchLineup;
-  } catch (_e) { /* network: fall through */ }
+  } catch (e) {
+    if (throwOnError) throw e;
+  }
   try {
     return await fetchTeamLineup(compId, teamId, round, { fallback: true });
-  } catch (_e) { /* competition missing / network: ignore */ }
+  } catch (e) {
+    if (throwOnError) throw e;
+  }
   return null;
 }
 

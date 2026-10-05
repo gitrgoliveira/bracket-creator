@@ -378,12 +378,15 @@ describe('MatchLineupSideEditor resolves names to squad member ids (bc-pnum gap 
   // empty-string placement.
   it('clearing a picked entry removes its id and omits the position from the write', async () => {
     global.window.API.fetchSquads = vi.fn().mockResolvedValue({ 'uuid-grouped': SQUAD_7 });
+    // Based on a loaded override that holds the pick: a pick-then-clear from
+    // an empty side is a net-zero edit, which Save no longer writes.
+    global.window.API.fetchMatchLineup = vi.fn().mockResolvedValue({
+      matchId: 'match-1', positions: { 1: 'Fighter 1' }, memberIds: { 1: 'mem-1' },
+    });
 
     let tree = await mount();
-    let pickers = findComponents(tree, 'LineupNameInput');
-    pickers[0].props.onSelect('Fighter 1', SQUAD_7[0]);
-    tree = runtime.currentTree();
-    pickers = findComponents(tree, 'LineupNameInput');
+    const pickers = findComponents(tree, 'LineupNameInput');
+    expect(pickers[0].props.value).toBe('Fighter 1');
     pickers[0].props.onSelect('');
     tree = runtime.currentTree();
 

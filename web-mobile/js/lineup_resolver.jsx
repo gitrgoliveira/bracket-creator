@@ -334,48 +334,72 @@ export function lineupSourceOf(lineup) {
   return null;
 }
 
+// isOwnLineup: the lineup shown was saved for THIS match, as against one the
+// match carries from an earlier match or from a Lineups-page round. The one
+// answer to that question: the label below and the editors' "Use the previous
+// match's lineup" button both ask it.
+export function isOwnLineup(source, matchId) {
+  return !!source && !!matchId && source.matchId === matchId;
+}
+
 // lineupSourceLabel: how a lineup editor says where the lineup it shows comes
 // from (a team carries the lineup of its previous match unless one is entered
 // for the match). A carried lineup names the earlier match as the scores list
-// does (scoreRowMatchLabel), so the operator can find it.
+// does (scoreRowMatchLabel), so the operator can find it. `allMatches` is the
+// competition's matches, or a function returning them that is called only when
+// the lineup is carried from another match: a caller that has to build the list
+// pays for it then, not on every render.
 export function lineupSourceLabel(source, matchId, allMatches) {
   if (!source) return "No lineup saved yet";
-  if (source.matchId === matchId) return "Lineup for this match";
+  if (isOwnLineup(source, matchId)) return "Lineup for this match";
   if (source.matchId) {
-    const from = (allMatches || []).find(m => m.id === source.matchId);
+    const list = typeof allMatches === "function" ? allMatches() : allMatches;
+    const from = (list || []).find(m => m.id === source.matchId);
     return `Same as ${(from && scoreRowMatchLabel(from)) || source.matchId}`;
   }
   return source.round === 0 ? "Starting lineup" : `From the Lineups page (Round ${source.round + 1})`;
 }
 
+// A team's starting lineup is stored as its round-0 entry.
+export const STARTING_ROUND = 0;
+
 // The words both lineup editors (the at-court panel and the Lineups page) use
 // to take a match's own lineup away so the match carries its team's previous
-// one again: the button, and the confirm that says what else follows.
+// one again: the button, the confirm that says what else follows, why the
+// button waits while a save of that lineup is still queued (the save would
+// replay after the removal and bring the lineup back), and what is said when the
+// lineup the match now carries could not be read.
 export const PREVIOUS_LINEUP_LABEL = "Use the previous match's lineup";
+export const SAVE_QUEUED_REASON = "A save of this lineup is still waiting to be sent.";
+export const REMOVED_UNREAD_NOTICE = "Removed. The lineup this match now uses could not be read: try again.";
 
 export function previousLineupConfirm(matchLabel, teamName) {
+  const match = matchLabel || "this match";
+  const team = teamName || "the team";
   return {
-    message: `Use the previous match's lineup for ${matchLabel || "this match"}? The lineup entered for it is removed, so ${teamName || "the team"} carries the lineup of its previous match instead. Later matches that have no lineup of their own follow too.`,
+    message: `Use the lineup ${team} had before ${match}? The lineup entered for ${match} is removed, so ${team} carries the lineup of its previous match, or its starting lineup if this is its first match. Later matches that have no lineup of their own follow too. Unsaved changes here are discarded.`,
     confirmLabel: "Use previous lineup",
     cancelLabel: "Cancel",
   };
 }
 
 // resolveLineupTeamId maps a match-side key to the participant id that
-// lineups are stored under. A match side's `id`, once resolved
-// (api_serializers.resolveSide), is EITHER the participant's real id (a
-// UUID) or "" -- resolveSide never invents an id from the display name.
-// Callers build `sideKey` via sideLookupKey(side) (competitor_identity.jsx),
-// so an unresolved side (id "") still falls through to its NAME here, and
-// TeamLineups are keyed server-side by whatever team key was used when the
-// lineup was saved; in practice, that's the participant's real id. Passing
-// a bare name straight through can make the lineup GET read nothing saved,
-// and the per-match (and round) lineup never reaches the scoring grid.
-// We look the side up in the competition's participant list by id OR name
-// and return its real id, falling back to the original key when unmatched.
+// lineups are stored under. A lineup belongs to a team's participant id and the
+// server matches it by that id alone: a side with no id has no lineup. A match
+// side's `id`, once resolved (api_serializers.resolveSide), is EITHER the
+// participant's real id (a UUID) or "" -- resolveSide never invents an id from
+// the display name. Callers build `sideKey` via sideLookupKey(side)
+// (competitor_identity.jsx), so an unresolved side (id "") still falls through
+// to its NAME here, and the name is only a way to FIND the participant: the
+// competition's participant list is searched by id OR name (the client's lookup
+// of a participant row, not how the server matches a lineup) and the
+// participant's real id is returned, which is what the lineup reads then
+// address. When no participant matches, the key comes back as it was: an id the
+// list does not hold still reads its lineup, a bare name reads nothing saved.
 //
 // bc-pnum: callers pass sideLookupKey(side) deliberately -- the name arm
-// recovers a real id for an id-less side. No object overload (YAGNI).
+// recovers the real id of a side the match carries by name alone. No object
+// overload (YAGNI).
 export function resolveLineupTeamId(sideKey, players) {
   if (!sideKey) return "";
   const list = Array.isArray(players) ? players : [];

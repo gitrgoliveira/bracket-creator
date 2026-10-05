@@ -409,7 +409,9 @@ function DialogHost() {
   };
 
   return (
-    <div className="modal-backdrop" onClick={onCancel} onClickCapture={onClickCapture}>
+    // The confirm or prompt always stacks above whatever opened it (see
+    // .modal-backdrop--dialog in styles.css).
+    <div className="modal-backdrop modal-backdrop--dialog" onClick={onCancel} onClickCapture={onClickCapture}>
       <div key={req._id} className="modal" ref={dialogRefCb} tabIndex={-1} role="dialog" aria-modal="true" aria-label={req.title} onKeyDown={onDialogKeyDown} onClick={(e) => e.stopPropagation()}>
         <div className="modal__head">
           <div className="modal__title">{req.title}</div>

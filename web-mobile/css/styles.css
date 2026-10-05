@@ -2189,6 +2189,14 @@ a:hover {
 @supports (backdrop-filter: blur(2px)) {
   .modal-backdrop { backdrop-filter: blur(2px); }
 }
+/* The confirm and prompt dialogs (DialogHost) open on top of whatever asked for
+   them. The viewer's match modal and the at-court lineup panel are fixed layers
+   at 1000, so a dialog left at the default 100 opened UNDER them, out of reach.
+   Above every overlay, and under the toast (1200). After .modal-backdrop: same
+   specificity, so the later rule wins. */
+.modal-backdrop--dialog {
+  z-index: 1100;
+}
 
 /* Court-reassignment confirmation, a small, centred confirm card. Moving a
    match to another shiaijo takes it off this court, so it's gated here. */
@@ -6364,6 +6372,40 @@ button.vsched-item:not([data-clickable]) {
   gap: 8px;
   margin-bottom: 8px;
 }
+/* The line under a lineup editor's title, one for the at-court panel and the
+   Lineups page: where the lineup shown was saved and, for a match's own lineup,
+   the button that gives it up. One size and one emphasis for both. */
+.lineup-source {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 8px;
+  font-size: 12px;
+  color: var(--ink-3);
+}
+.lineup-source__label--own {
+  color: var(--accent);
+  font-weight: 600;
+}
+.lineup-source__use {
+  margin-left: auto;
+}
+/* Why that button waits for a queued save, as a line: a title never shows on a
+   touchscreen. */
+.lineup-source__why {
+  flex: 1 0 100%;
+}
+/* Why a lineup could not be read, with Try again beside the words. Try again is a
+   plain .btn, so the coarse-pointer floor reaches it. */
+.lineup-problem {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 8px;
+}
 .lineup-name__dropdown {
   z-index: 60;
   min-width: 200px;
@@ -6718,7 +6760,10 @@ button.vsched-item:not([data-clickable]) {
   font-size: 14px;
   font-weight: 600;
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.2);
-  z-index: 500;
+  /* The top layer, above the confirm dialogs (1100): a toast raised while one is
+     open is not dimmed by its backdrop. It takes no pointer events, so it never
+     blocks the dialog under it. */
+  z-index: 1200;
   pointer-events: none;
   animation: toast-in 300ms cubic-bezier(0.16, 1, 0.3, 1);
 }
@@ -8596,9 +8641,10 @@ abbr.msb-lab { text-decoration: none; cursor: help; }
 /* Fixed-position container stacks all active announcement cards in the top-right
    corner. pointer-events:none on the container means empty space never blocks
    bracket/score affordances behind it; each card re-enables pointer events.
-   z-index 900 sits ABOVE normal viewer chrome (max 500) but BELOW the modal
-   layer (.modal-backdrop dialogs at 1000) so open dialogs stay modal and are
-   never obscured by announcement cards. */
+   z-index 900 sits ABOVE normal viewer chrome (max 200, the tooltips) but BELOW
+   the modal layer (the viewer's match modal and the at-court lineup panel at
+   1000, the confirm dialogs at 1100) so open dialogs stay modal and are never
+   obscured by announcement cards. */
 @keyframes announcement-slide-in {
   from {
     opacity: 0;

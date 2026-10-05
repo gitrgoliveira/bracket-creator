@@ -235,6 +235,64 @@ describe('a lineup saved meanwhile', () => {
   });
 });
 
+// "Not restored, the lineup changed since" is about the lineup as it was opened:
+// it goes once the operator changes that lineup or saves it, and not before.
+describe('the "not restored" notice', () => {
+  const SAVED_MEANWHILE = side({ 3: 'Mori' }, { 3: 'mem-4' });
+
+  function openWithDroppedDraft() {
+    const { map } = installStorage();
+    seed(map, { savedAt: Date.now(), baseline: BLANK, current: NAMED });
+    const view = mount({ baseline: SAVED_MEANWHILE });
+    expect(view.result.current.draft.stale).toEqual({ names: ['Aoki', 'Sato'] });
+    return { view, map };
+  }
+
+  it('stays while nothing is done to the lineup', () => {
+    const { view } = openWithDroppedDraft();
+    view.rerender({ key: KEY, ready: true, baseline: SAVED_MEANWHILE });
+    view.rerender({ key: KEY, ready: true, baseline: SAVED_MEANWHILE });
+    expect(view.result.current.draft.stale).toEqual({ names: ['Aoki', 'Sato'] });
+  });
+
+  it('goes once the operator changes the lineup', () => {
+    const { view, map } = openWithDroppedDraft();
+    act(() => view.result.current.setCurrent(side({ 1: 'Aoki', 3: 'Mori' }, { 1: 'mem-1', 3: 'mem-4' })));
+    expect(view.result.current.draft.stale).toBeNull();
+    // The change is a draft of its own.
+    expect(stored(map).current.positions[1]).toBe('Aoki');
+  });
+
+  it('goes once the operator changes it and puts it back', () => {
+    const { view } = openWithDroppedDraft();
+    act(() => view.result.current.setCurrent(NAMED));
+    act(() => view.result.current.setCurrent(SAVED_MEANWHILE));
+    expect(view.result.current.draft.stale).toBeNull();
+  });
+
+  it('goes once the lineup is saved: what is shown becomes what was loaded', () => {
+    const { map } = installStorage();
+    seed(map, { savedAt: Date.now(), baseline: BLANK, current: NAMED });
+    const view = renderHook((p) => useLineupDraft({
+      key: KEY, ready: true, baseline: p.baseline, current: p.current, positionKeys: KEYS, onRestore: vi.fn(),
+    }), { initialProps: { baseline: SAVED_MEANWHILE, current: SAVED_MEANWHILE } });
+    expect(view.result.current.stale).toEqual({ names: ['Aoki', 'Sato'] });
+
+    view.rerender({ baseline: NAMED, current: NAMED });
+
+    expect(view.result.current.stale).toBeNull();
+    expect(hasDraft(map)).toBe(false);
+  });
+
+  it('does not come back for the next change', () => {
+    const { view } = openWithDroppedDraft();
+    act(() => view.result.current.setCurrent(NAMED));
+    act(() => view.result.current.setCurrent(SAVED_MEANWHILE));
+    act(() => view.result.current.setCurrent(OTHER_NAMED));
+    expect(view.result.current.draft.stale).toBeNull();
+  });
+});
+
 describe('an old or unreadable draft', () => {
   it.each([
     ['13 hours old', 13 * HOUR],

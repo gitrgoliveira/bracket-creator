@@ -45,19 +45,13 @@
 
 import { idOf, nameOf } from './competitor_identity.jsx';
 import { squadSlotLabel } from './squad_member_label.jsx';
-import {
-  rosterWithoutPlacedElsewhere, memberPlacedElsewhere, memberRefusalNote, resolveMatchLineup, changedLineupPositions,
-  lineupFields, lineupSourceOf, lineupSourceLabel, PREVIOUS_LINEUP_LABEL, previousLineupConfirm,
-} from './lineup_resolver.jsx';
+import { rosterWithoutPlacedElsewhere, memberPlacedElsewhere, memberRefusalNote, STARTING_ROUND } from './lineup_resolver.jsx';
 import { poolMatchNumberOf, isSupplementaryBout, scoreRowMatchLabel } from './pool_ids.jsx';
 import { normalizeParticipantName } from './data.jsx';
 import { renameMemberFields } from './lineup_rename.jsx';
-import { useLineupDraft, LineupDraftNotice, lineupDraftKey } from './lineup_draft.jsx';
+import { useLineupForm, LineupSourceLine, LineupProblem, LineupDraftNotice } from './lineup_draft.jsx';
 
-const { useState: useStateA, useEffect: useEffectA, useMemo: useMemoA, useRef: useRefA } = React;
-
-// A team's starting lineup is stored as its round-0 entry.
-const STARTING_ROUND = 0;
+const { useState: useStateA, useEffect: useEffectA, useMemo: useMemoA } = React;
 
 // Term: kendo-glossary tooltip wrapper. Lazy lookup so the script
 // load order between glossary.jsx and this module doesn't matter (both
@@ -102,7 +96,7 @@ function lineupPositionLabel(posKey) {
 // Pull the member roster off the team Player object. Retained for the
 // OTHER lineup surface (admin_schedule_lineup.jsx's match-scoped panel,
 // reached via window.AdminLineupHelpers) which has not moved off
-// team.metadata; the round-scoped editor below (AdminLineup) no longer
+// team.metadata; the Lineups page (AdminLineup, below) no longer
 // calls this itself, it reads the squad store instead (see module header).
 // The CSV parser stores member names in Metadata; fall back to the team
 // name itself so callers that DO use this never see an empty array crash.
@@ -123,7 +117,7 @@ function rosterFor(team) {
 // whitespace assignments are ignored. The base array is never mutated.
 //
 // Retained for admin_schedule_lineup.jsx (see rosterFor's own comment); the
-// round-scoped AdminLineup below no longer calls it.
+// Lineups page (AdminLineup, below) no longer calls it.
 function mergeRosterWithAssigned(baseRoster, lineup) {
   const base = Array.isArray(baseRoster) ? baseRoster : [];
   const positions = lineup && lineup.positions ? lineup.positions : null;
@@ -403,9 +397,9 @@ function baselineWithMemberName(baseline, id, name) {
 function AdminLineup({ comp, team, matchId = "", matchLabel = "", allMatches, password, showToast, onClose }) {
   const teamSize = comp?.teamSize || 5;
   const positions = useMemoA(() => positionsForSize(teamSize), [teamSize]);
+  const positionKeys = positions.map(p => p.key);
   const teamId = teamServerIdOf(team);
   const compId = comp?.id || "";
-  const draftKey = lineupDraftKey({ compId, teamId, matchId });
   // The team's OWN competitor number (e.g. "T10"), the input to
   // squadMemberLabel. Not the member's: a squad member has no number of
   // its own, only an index, and the label composes the two together.
@@ -421,43 +415,35 @@ function AdminLineup({ comp, team, matchId = "", matchLabel = "", allMatches, pa
   // squad member ids in `memberIds`, keyed by the SAME position key so a
   // partial edit to one position never disturbs another's already-resolved
   // id (bc-tmid pass 3's OrderedMembers reasoning, restated client-side).
-  const [values, setValues] = useStateA(() => {
-    const init = {};
-    positions.forEach(p => { init[p.key] = ""; });
-    return init;
+  // They are useLineupForm's, with the lineup as it was read, where it was
+  // saved, the unsaved-picks draft and giving a match's own lineup up: shared
+  // with the at-court panel. `saveWarning` is the composed warning shown after
+  // a SUCCESSFUL save (see save() below): deliberately a separate channel from
+  // `error`, since the save did not fail, so it must never read like the red
+  // error banner.
+  const form = useLineupForm({
+    compId, teamId, matchId, positionKeys, password, matchLabel, teamName: team?.name || team?.Name,
   });
-  const [memberIds, setMemberIds] = useStateA({});
+  const {
+    values, setValues, memberIds, setMemberIds, memberIdsRef, setBaseline,
+    error, setError, warning: saveWarning, setWarning: setSaveWarning,
+  } = form;
   // The team's squad (the actual people on it), loaded from its own store
   // rather than team.metadata (module header). Independent of teamSize: a
   // squad may hold reserves beyond however many positions exist.
   const [squad, setSquad] = useStateA([]);
-  const [loading, setLoading] = useStateA(true);
   const [saving, setSaving] = useStateA(false);
-  const [error, setError] = useStateA("");
   // bc-cse gap closure: did the team's squad fail to load this session? Fed
   // into memberIdentityWarning below, alongside a save's own per-position
   // `failures`, so a squad fetch failure -- which otherwise silently leaves
   // every existing member looking "new" -- is disclosed rather than
   // discarded. A save is never blocked on it.
   const [squadUnavailable, setSquadUnavailable] = useStateA(false);
-  // The composed warning shown after a SUCCESSFUL save (see save() below).
-  // Deliberately a separate channel from `error`: the save did not fail,
-  // so it must never read like the red error banner above.
-  const [saveWarning, setSaveWarning] = useStateA("");
-
-  // For a match: where the lineup shown was saved, as the server names it
-  // (this match, an earlier match it is carried from, or a Lineups-page
-  // round), and what the server held when it was loaded or last saved. Save
-  // writes a match's lineup only once it differs from that baseline, so
-  // opening a match never turns the lineup it carries into one of its own.
-  const [source, setSource] = useStateA(null);
-  const [baseline, setBaseline] = useStateA({ positions: {}, memberIds: {} });
-  // The draft key whose lineup was read into the form. A draft is only judged
-  // against a lineup that was read, never against the empty form of a failed load.
-  const [loadedKey, setLoadedKey] = useStateA("");
-  // A removal (the match's own lineup, or an old round's) is in flight.
-  const [switching, setSwitching] = useStateA(false);
-  const busy = saving || switching;
+  // A removal of a stored lineup (the match's own, or an old round's) is in flight.
+  const busy = saving || form.removing;
+  // The pickers are for a lineup that was read: until then Save is off too, and
+  // the problem line says why.
+  const locked = busy || !form.read;
 
   // Operation 2 (ADD): which position is mid-add, and the name typed so
   // far. Only one position can be mid-add at a time, an operator works one
@@ -478,59 +464,8 @@ function AdminLineup({ comp, team, matchId = "", matchLabel = "", allMatches, pa
   // alongside Rename rather than being duplicated on both.
   const [clearingId, setClearingId] = useStateA(null);
 
-  // memberIdsRef mirrors memberIds for the two handlers that AWAIT a round
-  // trip before touching it. The position pickers stay interactive while a
-  // rename or a clear is in flight (they are gated on `saving` alone), so the
-  // memberIds captured in a handler's closure can be stale by the time it
-  // resolves. An operator who re-picks the position mid-flight otherwise has
-  // that position blanked by the resolving clear, and save() then writes it
-  // with a member id and no name, which the occupancy rule reads as a real
-  // placement fielding a nameless fighter.
-  const memberIdsRef = useRefA(memberIds);
-  memberIdsRef.current = memberIds;
-
-  // The starting lineup is read exactly, as the team's round-0 entry. A match
-  // shows the lineup in force there (its own, else the one it carries; the
-  // server owns that rule), and a failed read throws: an empty form shown over
-  // a lineup that could not be read would let Save overwrite it.
-  const readLineup = () => (matchId
-    ? resolveMatchLineup(compId, teamId, matchId, window.API, { throwOnError: true })
-    : window.API.fetchTeamLineup(compId, teamId, STARTING_ROUND));
-
-  // Shows what was read (null when nothing applies, a fresh form) as the
-  // form's loaded state.
-  const adoptLineup = (lineup) => {
-    const loaded = lineupFields(lineup, positions.map(p => p.key));
-    setValues(loaded.positions);
-    setMemberIds(loaded.memberIds);
-    setBaseline(loaded);
-    setSource(lineupSourceOf(lineup));
-    // Last: the draft sees the lineup as loaded only once everything above is set.
-    setLoadedKey(draftKey);
-  };
-
-  useEffectA(() => {
-    let cancelled = false;
-    if (!compId || !teamId) {
-      setLoading(false);
-      return;
-    }
-    (async () => {
-      try {
-        const lineup = await readLineup();
-        if (cancelled) return;
-        adoptLineup(lineup);
-      } catch (e) {
-        if (!cancelled) setError(e?.message || "Failed to load lineup");
-      } finally {
-        if (!cancelled) setLoading(false);
-      }
-    })();
-    return () => { cancelled = true; };
-  }, [compId, teamId, matchId]);
-
   // Load the team's squad: the pickable member list operation 1 (SELECT)
-  // needs. Independent of the lineup load above -- a squad fetch failure
+  // needs. Independent of the lineup read (useLineupForm) -- a squad fetch failure
   // must never block the lineup from loading or the form from being usable
   // (bc-pnum gap closure); an empty/missing squad is simply []. It DOES mean
   // the picker shows no existing members this session, so anything typed
@@ -746,27 +681,11 @@ function AdminLineup({ comp, team, matchId = "", matchLabel = "", allMatches, pa
     }
   };
 
-  const positionKeys = positions.map(p => p.key);
-  // The starting lineup is always saveable. A match's lineup only once it
-  // differs from what was loaded, so the lineup it carries is never copied
-  // into a lineup of its own by a Save that changed nothing.
-  const dirty = !matchId
-    || changedLineupPositions(baseline, { positions: values, memberIds }, positionKeys).length > 0;
-
-  // Unsaved picks survive a reload, the app's Back and picking another lineup; a
-  // restored draft is only shown, never saved (lineup_draft.jsx, bc-lnul). Naming,
-  // renaming and clearing a team member write through the API and are not drafts.
-  const draft = useLineupDraft({
-    key: draftKey,
-    ready: loadedKey === draftKey,
-    baseline,
-    current: { positions: values, memberIds },
-    positionKeys,
-    onRestore: (side) => { setValues(side.positions); setMemberIds(side.memberIds); },
-  });
-
   const save = async () => {
-    if (!dirty) return;
+    // Nothing is written before the lineup was read, or while it holds no change:
+    // the starting lineup as much as a match's, so a Save that changed nothing
+    // never writes the lineup it carries over as a lineup of its own.
+    if (!form.canSave) return;
     setError("");
     setSaveWarning("");
     setSaving(true);
@@ -805,12 +724,7 @@ function AdminLineup({ comp, team, matchId = "", matchLabel = "", allMatches, pa
       // What the server answered is what it holds now (the lineup as sent, when
       // the answer carries none): the new baseline, for the starting lineup as for
       // a match, so a saved lineup leaves no draft behind.
-      const answered = updated?.positions || positionsOut;
-      const stored = {};
-      positions.forEach(p => { stored[p.key] = answered[p.key] || ""; });
-      setBaseline({ positions: stored, memberIds: { ...memberIdsOut, ...updated?.memberIds } });
-      // The lineup is now this match's own.
-      if (matchId) setSource({ matchId });
+      form.confirmSaved({ positions: updated?.positions || positionsOut, memberIds: { ...memberIdsOut, ...updated?.memberIds } });
       if (typeof showToast === "function") showToast("Lineup saved");
       // bc-cse gap closure: this surface's own SELECT/ADD/RENAME operations
       // already surface a mint/rename failure immediately (see commitAdd's
@@ -826,48 +740,23 @@ function AdminLineup({ comp, team, matchId = "", matchLabel = "", allMatches, pa
     }
   };
 
-  // Removes a stored lineup, then shows what the match carries without it.
-  const removeThenReload = async (remove, failure) => {
-    setSwitching(true);
-    setError("");
-    setSaveWarning("");
-    try {
-      await remove();
-      adoptLineup(await readLineup());
-    } catch (e) {
-      setError(e?.message || failure);
-    } finally {
-      setSwitching(false);
-    }
-  };
-
-  // The match's own lineup goes, so it carries the team's previous lineup again.
-  const dropOwnLineup = async () => {
-    const ok = await window.confirmDialog(previousLineupConfirm(matchLabel, team?.name || team?.Name));
-    if (!ok) return;
-    await removeThenReload(
-      () => window.API.deleteMatchLineup(compId, teamId, matchId, password),
-      "Failed to use the previous match's lineup",
-    );
-  };
-
   // A lineup an earlier version saved for a later round, which this page no
   // longer creates, goes.
   const removeLegacyRound = async () => {
-    const round = source.round;
+    const round = form.source.round;
     const ok = await window.confirmDialog({
       message: `Remove the lineup an earlier version saved for Round ${round + 1}? The matches that used it carry the team's previous lineup instead.`,
       confirmLabel: "Remove",
       cancelLabel: "Cancel",
     });
     if (!ok) return;
-    await removeThenReload(
+    await form.removeStored(
       () => window.API.deleteTeamLineup(compId, teamId, round, password),
       "Failed to remove the lineup",
     );
   };
 
-  if (loading) {
+  if (form.loading) {
     return <div className="page" style={{ padding: 24 }}>Loading lineup…</div>;
   }
 
@@ -911,28 +800,16 @@ function AdminLineup({ comp, team, matchId = "", matchLabel = "", allMatches, pa
         </div>
       </div>
 
+      <LineupProblem form={form} testId="lineup-problem" />
       {matchId && (
-        <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", marginBottom: 12 }}>
-          <span data-testid="lineup-source"
-            style={source && source.matchId === matchId
-              ? { fontSize: 12, color: "var(--accent)", fontWeight: 600 }
-              : { fontSize: 12, color: "var(--ink-3)" }}>
-            {lineupSourceLabel(source, matchId, allMatches)}
-          </span>
-          {source && source.matchId === matchId && (
-            <button type="button" className="btn btn--sm" style={{ marginLeft: "auto" }}
-              onClick={dropOwnLineup} disabled={busy}>
-              {PREVIOUS_LINEUP_LABEL}
-            </button>
-          )}
-        </div>
+        <LineupSourceLine form={form} matchId={matchId} allMatches={allMatches} busy={busy} testId="lineup-source" />
       )}
 
-      <LineupDraftNotice draft={draft} testId="lineup-draft-notice" />
+      <LineupDraftNotice draft={form.draft} testId="lineup-draft-notice" />
 
-      {source && source.round >= 1 && (
+      {form.source && form.source.round >= 1 && (
         <div className="field__hint" data-testid="lineup-legacy-round" style={{ marginBottom: 12 }}>
-          Saved for Round {source.round + 1} by an earlier version: it applies from the start of that round.{" "}
+          Saved for Round {form.source.round + 1} by an earlier version: it applies from the start of that round.{" "}
           <button type="button" className="btn btn--ghost btn--sm" onClick={removeLegacyRound} disabled={busy}>Remove it</button>
         </div>
       )}
@@ -971,7 +848,7 @@ function AdminLineup({ comp, team, matchId = "", matchLabel = "", allMatches, pa
                     className="input"
                     data-testid={`lineup-position-${p.key}`}
                     aria-label={`${p.label} player`}
-                    disabled={busy}
+                    disabled={locked}
                     value={memberId}
                     onChange={(e) => onPickerChange(p.key, e.target.value)}
                   >
@@ -1090,8 +967,8 @@ function AdminLineup({ comp, team, matchId = "", matchLabel = "", allMatches, pa
           <button type="button"
             className="btn btn--primary"
             onClick={save}
-            disabled={busy || !dirty}
-            title={dirty ? undefined : "No changes to save"}
+            disabled={busy || !form.canSave}
+            title={form.saveTitle}
           >
             {saving ? "Saving…" : "Save lineup"}
           </button>
@@ -1107,13 +984,16 @@ function AdminLineup({ comp, team, matchId = "", matchLabel = "", allMatches, pa
 // decides which lineup a match carries. Pool and league matches come first, by
 // their number in the pool (a Swiss team's rounds in the order they were
 // drawn), then the knockout by round and position, the 3rd-place match last.
-// A team is seated by participant id, as the server seats it, so a match whose
-// opponent is not decided yet (a feeder still to play) is listed: its lineup can
-// be set before then. A pool tiebreaker or daihyosen is an individual bout, and a
-// bye (hidden) is a match nobody fights.
+// A team is seated by participant id, as the server seats it. A pool tiebreaker
+// or daihyosen is an individual bout, and a bye (a hidden match, or one with a
+// side left empty, a Swiss bye included) is a match nobody fights. A knockout
+// match whose opponent is not decided yet is no bye: that side carries a
+// placeholder name ("Winner of ..."), so the match is listed and its lineup can
+// be set before then.
 function teamMatchOptions(allMatches, teamId) {
   if (!teamId) return [];
   const mine = (allMatches || []).filter(m => m && m.id && !m.hidden && !isSupplementaryBout(m.id)
+    && nameOf(m.sideA) && nameOf(m.sideB)
     && (idOf(m.sideA) === teamId || idOf(m.sideB) === teamId));
   const pool = mine.filter(m => m.phase === "pool");
   const drawn = [...new Set(pool.map(m => m.poolName))];

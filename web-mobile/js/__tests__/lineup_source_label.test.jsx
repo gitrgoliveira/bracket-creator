@@ -3,11 +3,14 @@
 // the wording that says where it was saved, and the wording for taking a
 // match's own lineup away.
 
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 // viewer_utils publishes window.poolLabel, which scoreRowMatchLabel reads when
 // it names a pool match (in the app viewer.js evaluates it first).
 import '../viewer_utils.jsx';
-import { lineupFields, lineupSourceOf, lineupSourceLabel, PREVIOUS_LINEUP_LABEL, previousLineupConfirm } from '../lineup_resolver.jsx';
+import {
+  lineupFields, lineupSourceOf, lineupSourceLabel, isOwnLineup, STARTING_ROUND, PREVIOUS_LINEUP_LABEL, SAVE_QUEUED_REASON,
+  REMOVED_UNREAD_NOTICE, previousLineupConfirm,
+} from '../lineup_resolver.jsx';
 
 const ALL = [
   { id: 'Pool D-0', phase: 'pool', poolName: 'Pool D' },
@@ -52,6 +55,26 @@ describe('lineupSourceOf', () => {
   });
 });
 
+describe('isOwnLineup', () => {
+  it('is true only for a lineup saved for this very match', () => {
+    expect(isOwnLineup({ matchId: 'Pool D-1' }, 'Pool D-1')).toBe(true);
+    expect(isOwnLineup({ matchId: 'Pool D-0' }, 'Pool D-1')).toBe(false);
+    expect(isOwnLineup({ round: 0 }, 'Pool D-1')).toBe(false);
+    expect(isOwnLineup(null, 'Pool D-1')).toBe(false);
+  });
+
+  it('is false for the starting lineup, which has no match to own it', () => {
+    expect(isOwnLineup({ matchId: 'Pool D-1' }, '')).toBe(false);
+    expect(isOwnLineup({ matchId: '' }, '')).toBe(false);
+  });
+
+  it('is what the label calls "Lineup for this match"', () => {
+    for (const [source, matchId] of [[{ matchId: 'a' }, 'a'], [{ matchId: 'b' }, 'a'], [{ round: 0 }, 'a'], [null, 'a'], [{ matchId: 'a' }, '']]) {
+      expect(lineupSourceLabel(source, matchId, []) === 'Lineup for this match').toBe(isOwnLineup(source, matchId));
+    }
+  });
+});
+
 describe('lineupSourceLabel', () => {
   it.each([
     ['nothing in force', null, 'No lineup saved yet'],
@@ -64,6 +87,23 @@ describe('lineupSourceLabel', () => {
   ])('%s', (_name, source, label) => {
     expect(lineupSourceLabel(source, 'Pool D-1', ALL)).toBe(label);
   });
+
+  it('takes the matches as a function too, called only when the lineup is carried from another match', () => {
+    const matches = vi.fn(() => ALL);
+    expect(lineupSourceLabel(null, 'Pool D-1', matches)).toBe('No lineup saved yet');
+    expect(lineupSourceLabel({ matchId: 'Pool D-1' }, 'Pool D-1', matches)).toBe('Lineup for this match');
+    expect(lineupSourceLabel({ round: 0 }, 'Pool D-1', matches)).toBe('Starting lineup');
+    expect(lineupSourceLabel({ round: 1 }, 'Pool D-1', matches)).toBe('From the Lineups page (Round 2)');
+    expect(matches).not.toHaveBeenCalled();
+
+    expect(lineupSourceLabel({ matchId: 'Pool D-0' }, 'Pool D-1', matches)).toBe('Same as Pool D · Match 1');
+    expect(matches).toHaveBeenCalledTimes(1);
+  });
+
+  it('names the match by its id when there are no matches to look in', () => {
+    expect(lineupSourceLabel({ matchId: 'gone-9' }, 'Pool D-1')).toBe('Same as gone-9');
+    expect(lineupSourceLabel({ matchId: 'gone-9' }, 'Pool D-1', () => undefined)).toBe('Same as gone-9');
+  });
 });
 
 describe('the wording for taking a match\'s own lineup away', () => {
@@ -75,8 +115,30 @@ describe('the wording for taking a match\'s own lineup away', () => {
     expect(confirm.message).toContain('Later matches that have no lineup of their own follow too.');
   });
 
+  it('says what happens to the team\'s first match, and that unsaved changes are discarded', () => {
+    const { message, confirmLabel, cancelLabel } = previousLineupConfirm('Pool D · Match 1', 'Team A');
+    expect(message).toBe(
+      'Use the lineup Team A had before Pool D · Match 1? The lineup entered for Pool D · Match 1 is removed, '
+      + 'so Team A carries the lineup of its previous match, or its starting lineup if this is its first match. '
+      + 'Later matches that have no lineup of their own follow too. Unsaved changes here are discarded.',
+    );
+    expect(confirmLabel).toBe('Use previous lineup');
+    expect(cancelLabel).toBe('Cancel');
+  });
+
   it('reads on when the match or the team has no name', () => {
-    expect(previousLineupConfirm('', '').message).toContain('for this match?');
+    expect(previousLineupConfirm('', '').message).toContain('before this match?');
     expect(previousLineupConfirm('', '').message).toContain('the team carries');
+  });
+});
+
+describe('the other words the lineup editors share', () => {
+  it('say why the button waits for a queued save, and what a removal whose re-read failed leaves', () => {
+    expect(SAVE_QUEUED_REASON).toBe('A save of this lineup is still waiting to be sent.');
+    expect(REMOVED_UNREAD_NOTICE).toBe('Removed. The lineup this match now uses could not be read: try again.');
+  });
+
+  it('keep the team\'s starting lineup as its round-0 entry', () => {
+    expect(STARTING_ROUND).toBe(0);
   });
 });

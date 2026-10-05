@@ -984,6 +984,13 @@ function _queuedLineupSave(base) {
     return _coalesceTarget(base, { kind: 'lineup' }) !== null;
 }
 
+// _lineupKey: the queue BASE of a lineup: a match's own lineup (`matchId`), or a
+// team's Lineups-page round (round 0 is its starting lineup). The one owner of
+// the key: both lineup saves and queuedLineupSave name a lineup by it.
+function _lineupKey(compID, teamId, { matchId, round }) {
+    return matchId ? `lineup:${compID}:${teamId}:match:${matchId}` : `lineup:${compID}:${teamId}:${round}`;
+}
+
 // _storedEntryProblem: why a stored queue entry cannot be replayed
 // ('unreadable'), or null when it can. The checks a rehydrate applies, stated
 // once so taking up another tab's entries (_onStoredQueueChanged) applies them
@@ -2553,8 +2560,8 @@ function parseSkippedCompetitionsHeader(headerValue) {
 
 // Strict === false: a body that does not SAY it is unsaved is a lineup, so
 // a stub/older-shape response with no `saved` field at all still resolves
-// as a lineup rather than being swallowed. Shared by fetchTeamLineup,
-// fetchMatchLineup and fetchLineupInForce.
+// as a lineup rather than being swallowed. Shared by fetchTeamLineup and
+// fetchLineupInForce.
 const lineupOrNull = (body) => (body.saved === false ? null : body);
 
 // What the daihyosen add or remove came back with. A refusal (superseded,
@@ -2648,6 +2655,30 @@ async function _daihyosenRequest(method, compID, matchID, password, notDone, see
     }
     if (!res.ok) throw new Error(_refusalText(body, notDone));
     return _daihyosenOutcome(body);
+}
+
+// What a lineup removal leaves undone when it does not land.
+const LINEUP_NOT_REMOVED = 'The lineup was not removed';
+
+// _deleteLineup: a stored lineup's DELETE. Bounded like every sibling write
+// (_fetchJson: the deadline covers the body), and answered in a plain sentence
+// when the server cannot be reached, never the browser's "Failed to fetch". It is
+// not queued: the editor shows what the match carries without the lineup only
+// once the server has confirmed the removal. A lineup that is not there is
+// removed already (404).
+async function _deleteLineup(url, password, failure) {
+    let res;
+    let body;
+    try {
+        ({ res, body } = await _fetchJson(url, {
+            method: 'DELETE',
+            headers: { 'X-Tournament-Password': password },
+        }));
+    } catch (_e) {
+        throw new Error(noAnswerSentence(LINEUP_NOT_REMOVED));
+    }
+    if (!res.ok && res.status !== 404) throw _refusalError(body, failure);
+    return true;
 }
 
 const API = {
@@ -4053,7 +4084,7 @@ const API = {
         const lineupBody = { teamId, competitionId: compID, round, positions, ...(memberIds ? { memberIds } : {}) };
         // F5: lineup queue key is distinct from score/decision keys so a lineup
         // write doesn't collide with a concurrent score write for the same match.
-        const lineupKey = `lineup:${compID}:${teamId}:${round}`;
+        const lineupKey = _lineupKey(compID, teamId, { round });
         // A save of this lineup still queued is replaced by this one, which
         // the flush sends at once (_queuedLineupSave): sent straight, it could
         // land before the queued one's replay and be overwritten by it.
@@ -4097,15 +4128,7 @@ const API = {
         return body;
     },
     async deleteTeamLineup(compID, teamId, round, password) {
-        const res = await fetch(`/api/competitions/${compID}/teams/${teamId}/lineups/${round}`, {
-            method: 'DELETE',
-            headers: { 'X-Tournament-Password': password }
-        });
-        if (!res.ok && res.status !== 404) {
-            const err = await res.json().catch(() => ({}));
-            throw new Error(err.error || "Failed to delete lineup");
-        }
-        return true;
+        return _deleteLineup(`/api/competitions/${compID}/teams/${teamId}/lineups/${round}`, password, "Failed to delete lineup");
     },
     // bc-tmid pass 3: a team's squad, the actual people on it, lives in its
     // own per-competition store (team-members.yaml), keyed by the team's
@@ -4196,20 +4219,9 @@ const API = {
     },
     // mp-825 / mp-bkg: per-match lineup endpoints. Match ID takes the
     // place of the round key: successive encounters between the same
-    // two teams each carry an independent lineup entry.
-    // `saved: false` -> null (bc-k404: nothing saved for this match is a
-    // 200, not a 404). This reads ONLY the lineup saved for exactly this
-    // match; what a team fields at a match is fetchLineupInForce. A 404 here
-    // means the competition does not exist.
-    async fetchMatchLineup(compID, teamId, matchId) {
-        const res = await fetch(`/api/competitions/${compID}/teams/${teamId}/match-lineups/${matchId}`);
-        if (!res.ok) {
-            const err = await res.json().catch(() => ({}));
-            throw new Error(err.error || "Failed to load match lineup");
-        }
-        const body = await res.json();
-        return lineupOrNull(body);
-    },
+    // two teams each carry an independent lineup entry. Nothing here reads
+    // the lineup saved for exactly one match: what a team fields at a match
+    // is fetchLineupInForce.
     // The lineup a team fields at a match (operator ruling 2026-10-05: a team
     // carries the lineup of its previous match unless one is entered for the
     // match). The server owns the rule (engine/lineup_in_force.go): the
@@ -4240,8 +4252,9 @@ const API = {
     async putMatchLineup(compID, teamId, matchId, positions, password, memberIds) {
         const matchLineupBody = { teamId, competitionId: compID, matchId, positions, ...(memberIds ? { memberIds } : {}) };
         const matchLineupUrl = `/api/competitions/${compID}/teams/${teamId}/match-lineups/${matchId}`;
-        // F5: per-match lineup key: distinct from round-scoped lineups.
-        const matchLineupKey = `lineup:${compID}:${teamId}:match:${matchId}`;
+        // F5: a match's own lineup is queued under its own key (_lineupKey),
+        // distinct from a Lineups-page round's.
+        const matchLineupKey = _lineupKey(compID, teamId, { matchId });
         // Takes the place of a queued save of it, as above.
         if (_queuedLineupSave(matchLineupKey)) {
             _enqueueTerminalWrite(matchLineupKey, 'lineup', 'PUT', matchLineupUrl, matchLineupBody, password, compID, matchId);
@@ -4287,15 +4300,15 @@ const API = {
         return body;
     },
     async deleteMatchLineup(compID, teamId, matchId, password) {
-        const res = await fetch(`/api/competitions/${compID}/teams/${teamId}/match-lineups/${matchId}`, {
-            method: 'DELETE',
-            headers: { 'X-Tournament-Password': password }
-        });
-        if (!res.ok && res.status !== 404) {
-            const err = await res.json().catch(() => ({}));
-            throw new Error(err.error || "Failed to delete match lineup");
-        }
-        return true;
+        return _deleteLineup(`/api/competitions/${compID}/teams/${teamId}/match-lineups/${matchId}`, password, "Failed to delete match lineup");
+    },
+    // Is a save of this lineup still queued? `target` is { matchId } for a match's
+    // own lineup or { round } for a team's Lineups-page round (0: its starting
+    // lineup). A queued save replays after anything sent now, so a removal made
+    // meanwhile would be undone by it: the lineup editors hold their "Use the
+    // previous match's lineup" until it has gone out.
+    queuedLineupSave(compID, teamId, target) {
+        return _queuedLineupSave(_lineupKey(compID, teamId, target || {}));
     },
     // T141: daihyosen (representative bout) appended after a knockout team
     // match ties on IV and PW. Server validates the tie + eligibility and

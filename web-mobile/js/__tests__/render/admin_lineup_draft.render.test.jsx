@@ -245,10 +245,11 @@ describe('the starting lineup\'s unsaved picks', () => {
     expect(sessionStorage.getItem(START_KEY)).toBeNull();
   });
 
-  it('are cleared by Save, which stays enabled as it always was, and a later open shows no notice', async () => {
+  it('are cleared by Save, which waits for a change like a match\'s, and a later open shows no notice', async () => {
     const first = await mountPage();
-    expect(saveButton(first).disabled).toBe(false);
+    expect(saveButton(first).disabled).toBe(true);
     await pick(first, 2, 'mem-4');
+    expect(saveButton(first).disabled).toBe(false);
     first.unmount();
     const again = await mountPage();
     expect(again.getByTestId(NOTICE)).toBeTruthy();

@@ -7,7 +7,7 @@
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { makeReactive } from './helpers/reactive_react.js';
-import { collectText } from './helpers/vdom.js';
+import { collectText, expandNamed } from './helpers/vdom.js';
 
 const realReact = global.React;
 
@@ -35,7 +35,9 @@ function findComponents(tree, name) {
 }
 const saveButton = (tree) =>
   findHosts(tree, 'button').find(b => /Save lineup/.test(collectText(b)));
-const allText = (tree) => collectText(tree);
+// This runtime never calls a child component, so the two the editor hands its
+// source line and its read problem to are expanded by name (both are hook-free).
+const allText = (tree) => collectText(tree, expandNamed('LineupSourceLine', 'LineupProblem'));
 
 describe('MatchLineupSideEditor shows the lineup in force, where it came from, and writes only a changed side', () => {
   let runtime, MatchLineupSideEditor;

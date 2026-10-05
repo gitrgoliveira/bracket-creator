@@ -6,7 +6,7 @@
 // nothing out); the browser check is the acceptance.
 
 import React from 'react';
-import { render, act, fireEvent } from '@testing-library/react';
+import { render, act, fireEvent, cleanup } from '@testing-library/react';
 import { describe, it, expect, beforeAll, beforeEach, afterEach, vi } from 'vitest';
 import { LineupNameInput } from '../../admin_scoring_shared.jsx';
 
@@ -170,5 +170,156 @@ describe('LineupNameInput list placement against the pinned bars', () => {
     expect(dd.style.top).toBe('auto');
     expect(dd.style.bottom).toBe('calc(100% + 4px)');
     expect(dd.style.maxHeight).toBe('240px');
+  });
+});
+
+// The room is bounded by the nearest ancestor that cuts off what overflows it
+// too (the overlay's scroll body, the inline panel's clip, the at-court panel's
+// scroll box), not only by the viewport and the pinned bars: a list taller than
+// that room is cut off or stretches the ancestor's scroll. The box is found from
+// its computed style, so each wrapper here carries an inline overflow.
+describe('LineupNameInput list placement against a clipping ancestor', () => {
+  const input = <LineupNameInput value="" roster={ROSTER} onSelect={() => {}} ariaLabel="pos" color="shiro" />;
+
+  function openIn(tree) {
+    const utils = render(tree);
+    act(() => { fireEvent.focus(utils.container.querySelector('input')); });
+    return { utils, dd: utils.container.querySelector('.lineup-name__dropdown') };
+  }
+
+  it('opens upward when the room left below by the ancestor is small, though the viewport has plenty', () => {
+    rects['clip-box'] = rect(100, 500);
+    rects['pmf__bar'] = rect(400, 440);
+    const { dd } = openIn(<div className="clip-box" style={{ overflowY: 'auto' }}>{input}</div>);
+    // 500 - 440 = 60 below, 400 - 100 = 300 above; the viewport alone would say 380 below.
+    expect(dd.style.top).toBe('auto');
+    expect(dd.style.bottom).toBe('calc(100% + 4px)');
+    expect(dd.style.maxHeight).toBe('240px');
+  });
+
+  it('opens downward under the same input when there is no clipping ancestor', () => {
+    rects['pmf__bar'] = rect(400, 440);
+    const { dd } = openIn(<div className="clip-box">{input}</div>);
+    expect(dd.style.top).toBe('');
+    expect(dd.style.maxHeight).toBe('240px');
+  });
+
+  it('caps the height to the ancestor\'s room when neither side fits the list', () => {
+    rects['clip-box'] = rect(100, 500);
+    rects['pmf__bar'] = rect(250, 290);
+    const { dd } = openIn(<div className="clip-box" style={{ overflowY: 'auto' }}>{input}</div>);
+    // Below 210, above 150: down, capped to 210 less the 8px margin.
+    expect(dd.style.top).toBe('');
+    expect(dd.style.maxHeight).toBe('202px');
+  });
+
+  it('measures the top against the ancestor too, so an upward list stops under its top edge', () => {
+    rects['clip-box'] = rect(300, 700);
+    rects['pmf__bar'] = rect(560, 600);
+    const { dd } = openIn(<div className="clip-box" style={{ overflowY: 'auto' }}>{input}</div>);
+    // Below 100 does not fit; above 560 - 300 = 260 does: up, uncapped. The
+    // viewport's top (0) would have said 560.
+    expect(dd.style.top).toBe('auto');
+    expect(dd.style.maxHeight).toBe('240px');
+
+    cleanup();
+    rects['clip-box'] = rect(480, 700);
+    const second = openIn(<div className="clip-box" style={{ overflowY: 'auto' }}>{input}</div>);
+    // Above is now 560 - 480 = 80, below 100: down, capped to 92.
+    expect(second.dd.style.top).toBe('');
+    expect(second.dd.style.maxHeight).toBe('92px');
+  });
+
+  it('uses the NEAREST clipping ancestor, and passes over one that does not clip', () => {
+    rects['outer'] = rect(0, 820);
+    rects['inner'] = rect(100, 430);
+    rects['pmf__bar'] = rect(300, 340);
+    // The inner box clips: 430 - 340 = 90 below, 200 above: up.
+    const clipped = openIn(
+      <div className="outer" style={{ overflow: 'hidden' }}><div className="inner" style={{ overflowY: 'auto' }}>{input}</div></div>
+    );
+    expect(clipped.dd.style.top).toBe('auto');
+    cleanup();
+    // The inner box does not clip, so the outer one (820 - 340 = 480 below) decides: down.
+    const open = openIn(
+      <div className="outer" style={{ overflow: 'hidden' }}><div className="inner" style={{ overflowY: 'visible' }}>{input}</div></div>
+    );
+    expect(open.dd.style.top).toBe('');
+  });
+
+  it.each([
+    ['hidden', { overflowY: 'hidden' }],
+    ['scroll', { overflowY: 'scroll' }],
+    ['the horizontal axis alone, which makes the vertical axis cut off too', { overflowX: 'auto' }],
+  ])('counts an ancestor that clips: %s', (_name, style) => {
+    rects['clip-box'] = rect(100, 500);
+    rects['pmf__bar'] = rect(400, 440);
+    const { dd } = openIn(<div className="clip-box" style={style}>{input}</div>);
+    expect(dd.style.top).toBe('auto');
+  });
+
+  it('does not stop at the page: the body\'s overflow (a dialog locks it) is not an ancestor to bound by', () => {
+    rects['pmf__bar'] = rect(400, 440);
+    document.body.style.overflow = 'hidden';
+    try {
+      const { dd } = openIn(input);
+      expect(dd.style.top).toBe('');
+    } finally {
+      document.body.style.overflow = '';
+    }
+  });
+
+  it('finds what bounds the room once, when the list opens, and measures only the input again on a scroll', () => {
+    const frames = [];
+    const raf = vi.spyOn(window, 'requestAnimationFrame').mockImplementation((cb) => { frames.push(cb); return frames.length; });
+    const runFrames = () => act(() => { frames.splice(0).forEach((cb) => cb(0)); });
+    const computed = vi.spyOn(window, 'getComputedStyle');
+    try {
+      rects['clip-box'] = rect(100, 500);
+      rects['pmf__bar'] = rect(150, 190);
+      const { dd } = openIn(<div className="clip-box" style={{ overflowY: 'auto' }}>{input}</div>);
+      const lookedUp = computed.mock.calls.length;
+      expect(lookedUp).toBeGreaterThan(0);
+      expect(dd.style.top).toBe('');
+
+      // The page scrolled: the input moved, the box did not. Measured again, twice.
+      rects['pmf__bar'] = rect(430, 470);
+      act(() => { window.dispatchEvent(new Event('scroll')); });
+      runFrames();
+      expect(dd.style.top).toBe('auto');
+      rects['pmf__bar'] = rect(150, 190);
+      act(() => { window.dispatchEvent(new Event('scroll')); });
+      runFrames();
+      expect(dd.style.top).toBe('');
+
+      expect(computed.mock.calls.length).toBe(lookedUp);
+    } finally {
+      raf.mockRestore();
+      computed.mockRestore();
+    }
+  });
+
+  it('does not measure again for a scroll inside the list itself, and does for any other', () => {
+    const frames = [];
+    const raf = vi.spyOn(window, 'requestAnimationFrame').mockImplementation((cb) => { frames.push(cb); return frames.length; });
+    try {
+      rects['pmf__bar'] = rect(300, 340);
+      const { utils, dd } = openIn(
+        <div><div className="elsewhere" data-testid="elsewhere" />{input}</div>
+      );
+      expect(raf).not.toHaveBeenCalled();
+
+      // Scroll does not bubble, but the page-level listener sees it on the way down.
+      act(() => { dd.dispatchEvent(new Event('scroll')); });
+      expect(raf).not.toHaveBeenCalled();
+
+      act(() => { utils.getByTestId('elsewhere').dispatchEvent(new Event('scroll')); });
+      expect(raf).toHaveBeenCalledTimes(1);
+      act(() => { frames.splice(0).forEach((cb) => cb(0)); });
+      act(() => { window.dispatchEvent(new Event('scroll')); });
+      expect(raf).toHaveBeenCalledTimes(2);
+    } finally {
+      raf.mockRestore();
+    }
   });
 });

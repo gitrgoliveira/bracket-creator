@@ -950,28 +950,61 @@ function FoulCounter({ fouls, setFouls, onIncrement, color, disabled }) {
 // `onListPick` is told of a pick made by tapping a row of the open list (an
 // option or "+ Add"), never of a typed commit, Enter, the clear button or a
 // click outside: only that pick closes the list under the finger.
-// The name list is absolutely placed under its input, which the team sheet's
-// pinned header (top) and footer (bottom: the inline dock, the overlay's foot) can cover. Opens
-// down when the room below fits the list, else toward the larger room, and caps
-// the height to that room. Hosts with no pinned bar (the lineup panel, the
-// Lineups page) fall back to the viewport edges. (bc-tmfd)
+// The name list is absolutely placed under its input. It opens down when the room
+// below fits the list, else toward the larger room, and caps its height to that
+// room. The room is bounded by the viewport (the visual one, which the iPad
+// keyboard shrinks), by the team sheet's pinned header (top) and footer (bottom:
+// the inline dock, the overlay's foot), and by the nearest ancestor that cuts off
+// what overflows it (the overlay's scroll body, the inline panel's clip, the
+// at-court panel's scroll box): a list taller than that room would be cut off or
+// stretch the ancestor's scroll. A host with none of these (the Lineups page)
+// uses the viewport edges. (bc-tmfd)
 const LINEUP_LIST_MAX_H = 240;
 const LINEUP_LIST_GAP = 8;
 const LINEUP_LIST_MIN_H = 72;
-function lineupListPlacement(wrapper, bar) {
+
+// Whether an element cuts off what overflows it vertically: hidden, auto, scroll
+// or clip on the vertical axis, or hidden/auto/scroll on the horizontal one,
+// which makes the vertical axis cut off too.
+function clipsVertically(el) {
+  const { overflowX, overflowY } = getComputedStyle(el);
+  const cuts = (v) => v === "hidden" || v === "auto" || v === "scroll";
+  return cuts(overflowY) || overflowY === "clip" || cuts(overflowX);
+}
+
+// The nearest ancestor that clips. The page itself is no ancestor of this kind:
+// the viewport edges stand for it (and a dialog locks the body's scroll).
+function clippingAncestor(el) {
+  for (let a = el.parentElement; a && a !== document.body && a !== document.documentElement; a = a.parentElement) {
+    if (clipsVertically(a)) return a;
+  }
+  return null;
+}
+
+// The elements that bound a name list's room, found once when the list opens: the
+// page scrolling and the keyboard rising move the input, never these.
+function lineupListEdges(wrapper) {
   const scope = wrapper.closest(".scoring-panel, .editor-modal");
-  const pin = scope && scope.querySelector(".team-sheet-pin");
-  const foot = scope && scope.querySelector(".editor-modal__foot--nav");
+  return {
+    pin: scope && scope.querySelector(".team-sheet-pin"),
+    foot: scope && scope.querySelector(".editor-modal__foot--nav"),
+    clip: clippingAncestor(wrapper),
+  };
+}
+
+function lineupListPlacement({ pin, foot, clip }, bar) {
   // The visual viewport shrinks under the iPad keyboard where innerHeight does not.
   const vv = window.visualViewport;
   const viewTop = vv ? vv.offsetTop : 0;
   const viewH = vv ? vv.offsetTop + vv.height : window.innerHeight;
-  const topEdge = Math.max(viewTop, pin ? pin.getBoundingClientRect().bottom : 0, 0);
+  const clipRect = clip ? clip.getBoundingClientRect() : null;
+  const topEdge = Math.max(viewTop, pin ? pin.getBoundingClientRect().bottom : 0, clipRect ? clipRect.top : 0, 0);
   const r = bar.getBoundingClientRect();
   // The footer is the bottom edge wherever it sits below the input: the inline
   // dock is sticky and the overlay's is always visible under the scroll body.
   const footTop = foot ? foot.getBoundingClientRect().top : viewH;
-  const bottomEdge = foot && footTop >= r.bottom ? Math.min(viewH, footTop) : viewH;
+  const dockEdge = foot && footTop >= r.bottom ? Math.min(viewH, footTop) : viewH;
+  const bottomEdge = clipRect ? Math.min(dockEdge, clipRect.bottom) : dockEdge;
   const roomBelow = bottomEdge - r.bottom;
   const roomAbove = r.top - topEdge;
   const up = roomBelow < LINEUP_LIST_MAX_H && roomAbove > roomBelow;
@@ -986,19 +1019,27 @@ function LineupNameInput({ value, roster, onSelect, onListPick, disabled, ariaLa
   const [active, setActive] = useStateA(-1); // -1 = no explicit selection yet
   const ref = useRefA(null);
   const barRef = useRefA(null);
+  const listRef = useRefA(null);
   const [placement, setPlacement] = useStateA({ up: false, maxHeight: undefined });
   // Measured on open, then again whenever the page scrolls or the viewport
-  // changes (the keyboard rising), one frame at a time.
+  // changes (the keyboard rising), one frame at a time. What bounds the room (the
+  // pinned bars, the clipping ancestor) is found once, on open.
   useLayoutEffectA(() => {
-    if (!open) return;
+    if (!open || !ref.current) return;
+    const edges = lineupListEdges(ref.current);
     let frame = 0;
     const measure = () => {
       frame = 0;
       if (!ref.current || !barRef.current) return;
-      const next = lineupListPlacement(ref.current, barRef.current);
+      const next = lineupListPlacement(edges, barRef.current);
       setPlacement(p => (p.up === next.up && p.maxHeight === next.maxHeight ? p : next));
     };
-    const schedule = () => { if (!frame) frame = requestAnimationFrame(measure); };
+    const schedule = (e) => {
+      // The list scrolling itself moves nothing it is placed against.
+      const target = e && e.target;
+      if (target instanceof Node && listRef.current && listRef.current.contains(target)) return;
+      if (!frame) frame = requestAnimationFrame(measure);
+    };
     measure();
     const vv = window.visualViewport;
     window.addEventListener("scroll", schedule, { capture: true, passive: true });
@@ -1159,6 +1200,7 @@ function LineupNameInput({ value, roster, onSelect, onListPick, disabled, ariaLa
       </div>
       {open && optionCount > 0 && (
         <div
+          ref={listRef}
           className="pmf__dropdown lineup-name__dropdown"
           style={{
             ...(placement.up ? { top: "auto", bottom: "calc(100% + 4px)" } : null),

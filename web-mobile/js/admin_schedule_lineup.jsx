@@ -4,18 +4,18 @@
 import { LineupNameInput } from './admin_scoring_shared.jsx';
 import { sideLookupKey } from './competitor_identity.jsx';
 import { scoreRowMatchLabel } from './pool_ids.jsx';
-import {
-  squadRosterEntries, rosterWithoutPlacedElsewhere, memberPlacedElsewhere, resolveMatchLineup, changedLineupPositions,
-  lineupFields, lineupSourceOf, lineupSourceLabel, PREVIOUS_LINEUP_LABEL, previousLineupConfirm,
-} from './lineup_resolver.jsx';
+import { squadRosterEntries, rosterWithoutPlacedElsewhere, memberPlacedElsewhere } from './lineup_resolver.jsx';
 import { renameMemberFields } from './lineup_rename.jsx';
-import { useLineupDraft, LineupDraftNotice, lineupDraftKey } from './lineup_draft.jsx';
+import { useLineupForm, LineupSourceLine, LineupProblem, LineupDraftNotice } from './lineup_draft.jsx';
 
-const { useState: useStateA, useEffect: useEffectA, useRef: useRefA, useMemo: useMemoA } = React;
+const { useState: useStateA, useEffect: useEffectA, useMemo: useMemoA } = React;
 
 // MatchLineupSideEditor: inline lineup editor for one team side within
-// the per-match lineup panel. Handles load, save and use-the-previous-match's-
-// lineup for a single (compId, teamId, matchId) triple.
+// the per-match lineup panel, for a single (compId, teamId, matchId) triple. The
+// lineup's state (read, draft, confirmed save, use-the-previous-match's-lineup)
+// is useLineupForm's, shared with the Lineups page; the save body is this
+// editor's own. `allMatches` is the competition's matches, or a function
+// returning them (lineupSourceLabel calls it only for a carried lineup).
 // Reuses admin_lineup.jsx's exported helpers (positionsForSize, rosterFor,
 // teamIdOf) so there is no duplication of position-label / roster logic.
 // The helpers are read lazily on each render so module evaluation order
@@ -37,63 +37,44 @@ export function MatchLineupSideEditor({ comp, team, match, allMatches, password,
     : (team?.id || team?.name || "");
   const compId = comp?.id || "";
   const matchId = match?.id || "";
-  const draftKey = lineupDraftKey({ compId, teamId, matchId });
+  const positionKeys = positions.map(p => p.key);
 
-  const [values, setValues] = useStateA(() => {
-    const init = {};
-    positions.forEach(p => { init[p.key] = ""; });
-    return init;
+  // The lineup as read and as shown, where it was saved, the unsaved-picks draft,
+  // and giving the match's own lineup up: useLineupForm, shared with the Lineups
+  // page. `values` is a name per position, `memberIds` the squad member id backing
+  // each one (set directly when the operator picks one of the roster's numbered
+  // squad entries; cleared when a position is cleared; a free name typed over it
+  // is resolved through the shared resolver by save()). `lineupWarning` is the
+  // composed operator-facing warning shown after a SUCCESSFUL save whose
+  // squad-member attachment fell short (see doSave): a separate channel from
+  // `error`, since the save did not fail.
+  const form = useLineupForm({
+    compId, teamId, matchId, positionKeys, password,
+    matchLabel: match ? scoreRowMatchLabel(match) : "", teamName: team?.name || team?.Name,
   });
-  // bc-dnst: the squad member id backing each position, keyed the same as
-  // `values`. Set directly (no resolver round trip) when the operator picks
-  // one of the roster's numbered squad entries; cleared when a position is
-  // cleared or a free name is typed over it, in which case save() falls
-  // back to resolving that position's name through the shared resolver, as
-  // it always has.
-  const [memberIds, setMemberIds] = useStateA({});
-  // memberIdsRef mirrors memberIds for commitRename below, which awaits a
-  // round trip before touching it while the pickers stay interactive. Same
-  // rule and same reason as the Lineups page's copy.
-  const memberIdsRef = useRefA(memberIds);
-  memberIdsRef.current = memberIds;
+  const {
+    values, setValues, memberIds, setMemberIds, memberIdsRef, setBaseline,
+    error, setError, warning: lineupWarning, setWarning: setLineupWarning,
+  } = form;
   // RENAME (bc-dnst, operator decision 2026-09-15): a member's name can be
-  // corrected from this panel as well as from the Lineups page (the score
-  // sheet stays add-only). `renamingKey` is the position whose member is
-  // being renamed; the row swaps its picker for a plain input while it is
-  // set. Typing into the picker itself stays a SUBSTITUTION over a named
-  // member (a different person), so a correction needs this explicit door.
+  // corrected from this panel as well as from the Lineups page (the score sheet
+  // stays add-only). `renamingKey` is the position whose member is being renamed;
+  // the row swaps its picker for a plain input while it is set. Typing into the
+  // picker itself stays a SUBSTITUTION over a named member (a different person),
+  // so a correction needs this explicit door.
   const [renamingKey, setRenamingKey] = useStateA(null);
   const [renamingName, setRenamingName] = useStateA("");
   const [renameBusy, setRenameBusy] = useStateA(false);
-  const [loading, setLoading] = useStateA(true);
   const [saving, setSaving] = useStateA(false);
-  const [usingPrevious, setUsingPrevious] = useStateA(false);
-  const [error, setError] = useStateA("");
-  // Where the lineup shown was saved, as the server names it: this match, an
-  // earlier match of the team it is carried from, or the Lineups page for a
-  // round. Null when no lineup is in force.
-  const [source, setSource] = useStateA(null);
-  // What this side last held on the server (loaded, or confirmed by a save):
-  // Save only writes a side that differs from it, so opening the panel and
-  // saving never turns an inherited lineup into an override.
-  const [baseline, setBaseline] = useStateA({ positions: {}, memberIds: {} });
-  // The draft key whose lineup was read into the form. A draft is only judged
-  // against a lineup that was read, never against the empty form of a failed load.
-  const [loadedKey, setLoadedKey] = useStateA("");
-  // bc-cse gap closure: the composed operator-facing warning shown after a
-  // SUCCESSFUL save whose squad-member attachment fell short (see doSave
-  // below). Deliberately a separate channel from `error`: the save did not
-  // fail, so it must never look like the red error banner above it.
-  const [lineupWarning, setLineupWarning] = useStateA("");
 
   // bc-pnum gap closure: this team's squad, loaded once so save() can
   // resolve a typed/picked name to its member id (see doSave below) --
   // this panel's picker (LineupNameInput) stays typeable, unlike the
-  // round-scoped AdminLineup form's strict select-by-id dropdown: it now
+  // Lineups page's strict select-by-id dropdown (AdminLineup): it now
   // ALSO offers every numbered squad entry as a pickable suggestion
   // (bc-dnst, see `suggestions` below), but a freely typed name is still
   // accepted, so a name→id lookup is still needed on that path. Independent
-  // of the lineup-load effect below: a squad
+  // of the lineup read (useLineupForm): a squad
   // fetch failure must not block loading OR saving the lineup itself, so
   // it is swallowed and the resolver (window.AdminLineupHelpers.
   // resolveMemberIdsForPositions) simply mints for every name it cannot
@@ -231,46 +212,6 @@ export function MatchLineupSideEditor({ comp, team, match, allMatches, password,
     // a new member instead of resolving to the one already on the team.
   }, [compId, teamId, password]);
 
-  // Shows the lineup in force (null when none applies) as this side's loaded
-  // state: its names, its members, and where it was saved.
-  const adoptLineup = (lineup) => {
-    const loaded = lineupFields(lineup, positions.map(p => p.key));
-    setValues(loaded.positions);
-    setMemberIds(loaded.memberIds);
-    setBaseline(loaded);
-    setSource(lineupSourceOf(lineup));
-    // Last: the draft sees the lineup as loaded only once everything above is set.
-    setLoadedKey(draftKey);
-  };
-
-  // Load the lineup in force on mount, and where it was saved.
-  useEffectA(() => {
-    let cancelled = false;
-    if (!compId || !teamId || !matchId) {
-      setLoading(false);
-      return;
-    }
-    (async () => {
-      try {
-        // The same resolution the score sheet makes (this match's own lineup,
-        // else the one the team carries from its previous match or round), so
-        // the panel shows what the sheet will show. A failed read throws:
-        // showing an empty lineup over one we could not read would let Save
-        // overwrite it.
-        const lineup = await resolveMatchLineup(
-          compId, teamId, matchId, window.API, { throwOnError: true }
-        );
-        if (cancelled) return;
-        adoptLineup(lineup);
-      } catch (e) {
-        if (!cancelled) setError(e?.message || "Failed to load lineup");
-      } finally {
-        if (!cancelled) setLoading(false);
-      }
-    })();
-    return () => { cancelled = true; };
-  }, [compId, teamId, matchId]);
-
   // knownMemberIds (bc-dnst): the subset of positionsOut whose member id is
   // already known -- picked directly off the roster's numbered entries
   // (see onSelect above), never resolved by name. Those positions skip the
@@ -340,13 +281,7 @@ export function MatchLineupSideEditor({ comp, team, match, allMatches, password,
         return;
       }
       // Reflect exactly what was persisted.
-      const next = {};
-      positions.forEach(p => { next[p.key] = (updated.positions || {})[p.key] || ""; });
-      const nextIds = { ...memberIdsOut, ...updated.memberIds };
-      setValues(next);
-      setMemberIds(nextIds);
-      setBaseline({ positions: next, memberIds: nextIds });
-      setSource({ matchId });
+      form.confirmSaved({ positions: updated.positions, memberIds: { ...memberIdsOut, ...updated.memberIds } });
       if (typeof showToast === "function") showToast(successMsg);
       const composer = window.AdminLineupHelpers?.memberIdentityWarning;
       if (typeof composer === "function") {
@@ -359,22 +294,9 @@ export function MatchLineupSideEditor({ comp, team, match, allMatches, password,
     }
   };
 
-  const positionKeys = positions.map(p => p.key);
-  const dirty = changedLineupPositions(baseline, { positions: values, memberIds }, positionKeys).length > 0;
-
-  // Unsaved picks survive a reload, the app's Back and closing the panel; a
-  // restored draft is only shown, never saved (lineup_draft.jsx, bc-lnul).
-  const draft = useLineupDraft({
-    key: draftKey,
-    ready: loadedKey === draftKey,
-    baseline,
-    current: { positions: values, memberIds },
-    positionKeys,
-    onRestore: (side) => { setValues(side.positions); setMemberIds(side.memberIds); },
-  });
-
   const save = () => {
-    if (!dirty) return;
+    // Nothing is written before the lineup was read, or while it holds no change.
+    if (!form.canSave) return;
     // Strip empty positions before PUT. The handler replaces the whole
     // positions map (TeamLineup{Positions: req.Positions}), and the domain
     // validator treats an absent key the same as an explicit "": both
@@ -406,52 +328,22 @@ export function MatchLineupSideEditor({ comp, team, match, allMatches, password,
     doSave(positionsOut, undefined, knownMemberIds);
   };
 
-  const busy = saving || usingPrevious;
+  const busy = saving || form.removing;
+  // The boxes are for a lineup that was read: until then Save is off too, and the
+  // problem line below says why.
+  const locked = busy || !form.read;
 
-  // Takes this match's own lineup away, so it carries the team's previous
-  // lineup again, and shows what it now carries.
-  const dropOwnLineup = async () => {
-    const ok = await window.confirmDialog(previousLineupConfirm(scoreRowMatchLabel(match), team?.name || team?.Name));
-    if (!ok) return;
-    setUsingPrevious(true);
-    setError("");
-    setLineupWarning("");
-    try {
-      await window.API.deleteMatchLineup(compId, teamId, matchId, password);
-      adoptLineup(await resolveMatchLineup(compId, teamId, matchId, window.API, { throwOnError: true }));
-    } catch (e) {
-      setError(e?.message || "Failed to use the previous match's lineup");
-    } finally {
-      setUsingPrevious(false);
-    }
-  };
-
-  if (loading) return <div style={{ fontSize: 12, color: "var(--ink-3)" }}>Loading lineup…</div>;
+  if (form.loading) return <div style={{ fontSize: 12, color: "var(--ink-3)" }}>Loading lineup…</div>;
 
   const teamName = team?.name || team?.Name || "Team";
 
   return (
     <div data-testid={`match-lineup-side-${teamId}`}>
-      <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8, flexWrap: "wrap" }}>
-        <span style={{ fontWeight: 700, fontSize: 13 }}>{teamName}</span>
-        <span style={source && source.matchId === matchId
-          ? { fontSize: 11, color: "var(--accent)", fontWeight: 600 }
-          : { fontSize: 11, color: "var(--ink-3)" }}>
-          {lineupSourceLabel(source, matchId, allMatches)}
-        </span>
-        {source && source.matchId === matchId && (
-          <button type="button"
-            className="btn btn--sm"
-            style={{ marginLeft: "auto" }}
-            onClick={dropOwnLineup}
-            disabled={busy}
-          >
-            {PREVIOUS_LINEUP_LABEL}
-          </button>
-        )}
-      </div>
+      <div style={{ fontWeight: 700, fontSize: 13, marginBottom: 4 }}>{teamName}</div>
 
-      <LineupDraftNotice draft={draft} testId={`match-lineup-draft-${teamId}`} />
+      <LineupProblem form={form} testId={`match-lineup-problem-${teamId}`} />
+      <LineupSourceLine form={form} matchId={matchId} allMatches={allMatches} busy={busy} testId={`match-lineup-source-${teamId}`} />
+      <LineupDraftNotice draft={form.draft} testId={`match-lineup-draft-${teamId}`} />
 
       {error && (
         <div className="alert alert--error" style={{ marginBottom: 8 }}>
@@ -510,7 +402,7 @@ export function MatchLineupSideEditor({ comp, team, match, allMatches, password,
               roster={rosterForPosition(p.key)}
               ariaLabel={`${p.label} player`}
               clearable={!!memberIds[p.key]}
-              disabled={busy}
+              disabled={locked}
               onSelect={(name, entry) => {
                 const trimmed = (name || "").trim();
                 setValues(v => ({ ...v, [p.key]: trimmed }));
@@ -545,8 +437,8 @@ export function MatchLineupSideEditor({ comp, team, match, allMatches, password,
         <button type="button"
           className="btn btn--primary btn--sm"
           onClick={save}
-          disabled={busy || !dirty}
-          title={dirty ? undefined : "No changes to save"}
+          disabled={busy || !form.canSave}
+          title={form.saveTitle}
         >
           {saving ? "Saving…" : "Save lineup"}
         </button>
@@ -592,9 +484,10 @@ export function MatchLineupPanel({ match, tournament, password, showToast, onClo
   const teamA = players.find(p => matchesKey(p, sideAKey)) || (m.sideA && typeof m.sideA === "object" ? m.sideA : null);
   const teamB = players.find(p => matchesKey(p, sideBKey)) || (m.sideB && typeof m.sideB === "object" ? m.sideB : null);
 
-  // All matches for this competition: a carried lineup names the earlier match
-  // it comes from.
-  const allMatches = typeof window.compMatches === "function" ? window.compMatches(comp) : [];
+  // A lineup carried from an earlier match names it. The competition's matches are
+  // built only when a side shows such a lineup (lineupSourceLabel calls this), not
+  // on every render of the panel.
+  const allMatches = () => (typeof window.compMatches === "function" ? window.compMatches(comp) : []);
 
   const inner = (
     <>

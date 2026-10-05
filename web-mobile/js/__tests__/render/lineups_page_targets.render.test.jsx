@@ -148,12 +148,29 @@ describe('the "Lineup for" select', () => {
     expect(optionTexts(targetSelect(utils))).toEqual(['Starting lineup']);
   });
 
-  it('lists a knockout match whose opponent is not decided yet, even when that side has no name to show', async () => {
+  it('lists a knockout match whose opponent is not decided yet: that side carries a placeholder name', async () => {
     const utils = await mountPage({
       poolMatches: undefined,
-      bracket: { rounds: [[match('m-r0-0', A, NOBODY, { matchNumber: 1 })]] },
+      bracket: { rounds: [[match('m-r0-0', A, { id: '', name: 'Winner of Match 2' }, { matchNumber: 1 })]] },
     });
     expect(optionTexts(targetSelect(utils))).toEqual(['Starting lineup', 'Match 1']);
+  });
+
+  it('leaves out a bye: a match with a side left empty, hidden or not', async () => {
+    // A knockout bye the draw did not hide, and a Swiss bye (sideB "") alongside a real round.
+    const knockout = await mountPage({
+      poolMatches: undefined,
+      bracket: { rounds: [[match('m-r0-0', A, D, { matchNumber: 1 }), match('m-r0-1', A, NOBODY, { matchNumber: 2 })]] },
+    });
+    expect(optionTexts(targetSelect(knockout))).toEqual(['Starting lineup', 'Match 1']);
+    knockout.unmount();
+
+    const swiss = await mountPage({
+      comp: { ...COMP, format: 'swiss' },
+      poolMatches: [match('Swiss-R1-0', A, C), match('Swiss-R2-0', A, NOBODY)],
+      bracket: undefined,
+    });
+    expect(optionTexts(targetSelect(swiss))).toEqual(['Starting lineup', 'Round 1 · Match 1']);
   });
 
   it('leaves out a hidden match the team is seated in, whatever its opponent is named', async () => {

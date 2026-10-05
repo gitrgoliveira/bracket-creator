@@ -66,9 +66,16 @@ const CHECK_MODULES = [
   // pool_ids.jsx.
   'admin_lineup.jsx',
   'admin_schedule_lineup.jsx',
-  // bc-lnul: both lineup editors import the draft hook and notice from
-  // lineup_draft.jsx, which imports the position diff from lineup_resolver.jsx.
+  // bc-lnul: both lineup editors import the form hook, the source line, the read
+  // problem and the draft notice from lineup_draft.jsx, which imports the lineup
+  // read, the position diff and the wording from lineup_resolver.jsx.
   'lineup_draft.jsx',
+  // bc-cfbd: the layers a tap opens keep the bounce of that tap off their
+  // backdrop through the tap_guard.jsx leaf: the participant Edit dialog, the
+  // public match card and the admin sign-in dialog each import useOpenedTapGuard.
+  'admin_participants.jsx',
+  'viewer_match.jsx',
+  'app.jsx',
 ];
 
 // ---------------------------------------------------------------------------

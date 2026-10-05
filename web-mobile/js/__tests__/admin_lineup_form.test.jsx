@@ -459,12 +459,19 @@ describe('AdminLineup form (competition-admin Lineups, bc-tmid pass 3)', () => {
     expect(call[5]).toEqual({ '2': 'sq-blank-2' });
   });
 
+  // A starting lineup is saved only once it differs from what was read (like a
+  // match's), so these two start from a lineup stored by name alone, before
+  // members had ids, and empty one position.
+  const NAMES_ONLY = { teamId: 'team-1', round: 0, positions: { 1: 'Sato', 2: 'Ito' }, saved: true };
+
   it('Save omits memberIds entirely when no position resolved to a squad member', async () => {
-    const tree = await mountFor({ id: 'team-1', name: 'Tora A', number: 'T10' }, { squads: {} });
-    mainSaveButton(tree).props.onClick();
+    const tree = await mountFor({ id: 'team-1', name: 'Tora A', number: 'T10' }, { squads: {}, lineup: NAMES_ONLY });
+    positionSelect(tree, '2').props.onChange({ target: { value: '' } });
+    mainSaveButton(runtime.currentTree()).props.onClick();
     await flush();
     const call = global.window.API.putTeamLineup.mock.calls.at(-1);
     // putTeamLineup(compId, teamId, round, positionsOut, password, memberIdsOut)
+    expect(call[3]).toEqual({ 1: 'Sato' });
     expect(call[5]).toBeUndefined();
   });
 
@@ -474,9 +481,10 @@ describe('AdminLineup form (competition-admin Lineups, bc-tmid pass 3)', () => {
 
   it('shows the squad-unavailable warning after a save that still succeeded, when the squad failed to load', async () => {
     global.window.API.fetchSquads.mockRejectedValue(new Error('network error'));
-    const tree = await mountFor({ id: 'team-1', name: 'Tora A', number: 'T10' });
+    const tree = await mountFor({ id: 'team-1', name: 'Tora A', number: 'T10' }, { lineup: NAMES_ONLY });
 
-    mainSaveButton(tree).props.onClick();
+    positionSelect(tree, '2').props.onChange({ target: { value: '' } });
+    mainSaveButton(runtime.currentTree()).props.onClick();
     await flush();
 
     const tree2 = runtime.currentTree();

@@ -8,7 +8,7 @@
 import { heldWritesText, heldWriteLine, heldWriteDiscardConfirm, matchLabel, heldLineupLabel, HELD_WRITES_TITLE, HELD_WRITES_EMPTY, HELD_WRITE_DISCARD_ONE_LABEL } from './write_result.jsx';
 import { scoreRowMatchLabel } from './pool_ids.jsx';
 
-const { useState: useStateA, useMemo: useMemoA, useEffect: useEffectA, useRef: useRefA } = React;
+const { useState: useStateA, useMemo: useMemoA, useEffect: useEffectA, useRef: useRefA, useLayoutEffect: useLayoutEffectA } = React;
 
 // Producers (loaded earlier).
 const sideName = window.sideName;
@@ -268,12 +268,30 @@ function AdminTopbar({ onLogout, onViewerMode, tournament, hideRunningStrip }) {
   // read open; the pill says what the writes found (operator decision 2026-09-27).
   const linkUp = connected && syncStatus !== 'offline';
 
+  // The stack sizes to its content and grows with the connection alert or the
+  // running strip, so the pinned team header (styles.css .team-sheet-pin) reads
+  // its height from this property instead of a constant.
+  const stackRef = useRefA(null);
+  useLayoutEffectA(() => {
+    const el = stackRef.current;
+    if (!el) return;
+    const root = document.documentElement;
+    const publish = () => root.style.setProperty('--topbar-stack-h', `${el.getBoundingClientRect().height}px`);
+    publish();
+    const ro = typeof ResizeObserver === 'function' ? new ResizeObserver(publish) : null;
+    if (ro) ro.observe(el);
+    return () => {
+      if (ro) ro.disconnect();
+      root.style.removeProperty('--topbar-stack-h');
+    };
+  }, []);
+
   return (
     // Wrap topbar + running-strip in a single sticky container so they scroll
     // together. This lets the topbar size naturally (min-height instead of a
     // fixed height): robust to font scaling / browser zoom, while still
     // keeping the running-strip visually anchored beneath it.
-    <div className="topbar-stack">
+    <div className="topbar-stack" ref={stackRef}>
       <div className="topbar">
         <div className="topbar__brand">
           <img src="/api/branding/logo" onError={(e) => { e.target.onerror = null; e.target.src = "/logo.jpeg"; }} alt="Tournament logo" className="topbar__logo" decoding="async" />

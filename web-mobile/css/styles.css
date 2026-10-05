@@ -5210,7 +5210,7 @@ button.vsched-item:not([data-clickable]) {
    reachable — previously the whole modal scrolled and on a 390px phone the
    primary action sat below the fold behind a nested scroll. Applies to every
    overlay editor (individual, team, engi); the inline .scoring-panel variant
-   flows in the page and is unaffected. */
+   flows in the page, and only its team sheet pins bars (see below). */
 .editor-modal {
   background: var(--surface);
   border-radius: var(--r-lg);
@@ -5236,6 +5236,48 @@ button.vsched-item:not([data-clickable]) {
 
 .scoring-panel .editor-modal__foot--nav {
   position: static;
+}
+
+/* The team sheet pins two bars in the inline hosts (the page scrolls, the
+   panel does not): the team header and result band under the topbar, the
+   footer actions at the bottom edge. overflow: clip keeps the rounded
+   corners without making the panel or its body a scroll container, so both
+   sticky bars resolve against the document. Must follow the static rule
+   above (same specificity). */
+.scoring-panel--team {
+  overflow: clip;
+}
+.scoring-panel--team .editor-modal__body {
+  overflow: visible;
+}
+.scoring-panel--team .editor-modal__foot--nav {
+  position: sticky;
+  bottom: 0;
+  z-index: 60;
+  background: var(--surface);
+  border-top: 1px solid var(--line);
+  /* A correction reason prompt or a pending banner must not grow the dock
+     over the whole sheet. */
+  max-height: 45vh;
+  overflow-y: auto;
+}
+
+/* Team header + result band, one sticky unit (z 9: under the topbar at 30,
+   under the footer dock at 60). Overlay hosts pin it at the top of their
+   scrolling body; the inline hosts sit it under the shell's topbar stack,
+   whose height AdminTopbar publishes as --topbar-stack-h. */
+.team-sheet-pin {
+  position: sticky;
+  top: 0;
+  z-index: 9;
+  flex: 0 0 auto;
+  display: flex;
+  flex-direction: column;
+  padding-bottom: 6px;
+  background: var(--surface);
+}
+.scoring-panel--team .team-sheet-pin {
+  top: var(--topbar-stack-h, 0px);
 }
 
 .editor-modal__head {
@@ -8446,11 +8488,9 @@ abbr.msb-lab { text-decoration: none; cursor: help; }
   flex: 1 1 auto;
   min-height: 0;
   overflow-y: auto;
-  /* The .team-summary is rendered *after* this region in the flex column
-     (not inside it), so it always stays visible below the bout list in the
-     roomy layout. The position:sticky on .team-summary is relative to the
-     .editor-modal__body scroll container, which is most useful if the
-     compact modal ever overflows on a very small screen. */
+  /* The team header and .team-summary sit in .team-sheet-pin, BEFORE this
+     region in the flex column, so they stay visible above the bout list in
+     the roomy layout (its sticky rule is inert here, harmless). */
 }
 /* In compact mode the wrapper is layout-transparent, flow normally. */
 .editor-modal--compact .team-bouts-scroll {

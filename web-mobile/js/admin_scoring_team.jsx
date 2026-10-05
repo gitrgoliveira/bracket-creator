@@ -1358,9 +1358,12 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
   // legacy kachinuki daihyosen row keeps its encho, as the stepper does.
   const kachinukiEncounter = isKachinuki && !hasDaihyosen;
   const encounterEnchoCount = kachinukiEncounter ? 0 : enchoPeriodCount;
-  // Compact "Instrument Panel" mode fits the editor on one viewport page
-  // for ≤5-person teams. Kachinuki renders only the current bout while
-  // running (see kachinukiVisiblePositions), so it always fits even
+  // Compact "Instrument Panel" mode is the tighter bout-row layout for
+  // ≤5-person teams. It does NOT fit one viewport at the operator's iPad
+  // size: the team header and result band (.team-sheet-pin) and the
+  // footer actions are pinned, and the bout rows scroll between them.
+  // Kachinuki renders only the current bout while
+  // running (see kachinukiVisiblePositions), so it stays short even
   // with a 9-person roster. Larger fixed-format
   // teams keep the roomier layout and use .team-bouts-scroll for
   // independent bout-list scrolling.
@@ -3233,8 +3236,11 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
           {/* Inside `inner`, so the wide overlay and the narrow shiaijo inline
               panel get it from ONE placement and cannot diverge. */}
           {matchDataUnreadable(m) ? <UnreadableEditorNote /> : null}
-          {/* Team header */}
-          <div className="sb-match" style={{ marginBottom: 16 }}>
+          {/* Team header and result band, pinned together (bc-tmfd): the
+              running total and the match identity stay in view while the
+              bout rows scroll under them. */}
+          <div className="team-sheet-pin">
+          <div className="sb-match">
             {teamSides.map((s, idx) => (
               <React.Fragment key={s.key}>
                 <div className={`sb-side sb-side--${s.color}`}>
@@ -3267,6 +3273,70 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
               </React.Fragment>
             ))}
           </div>
+          {/* mp-gmcg band redesign (user-confirmed brief): in kachinuki the
+              centre cell carries BOUT-LOG FACTS while running (bout number +
+              last bout result; never a verdict: the old IV/PW-derived
+              "AKA WIN" contradicted the End gate) and the verdict only on
+              completion, derived from the match winner. IV/PW demote to the
+              side cells (they still feed standings tie-breaks). Non-kachinuki
+              team matches keep RESULT + teamVerdictText: fixed formats ARE
+              decided by IV/PW. The running kachinuki scorer drops the band:
+              its fought bouts render as read-only rows (renderReadOnlyBout).
+              Totals are the editor's LOCAL tally, never teamIVPWFrom. */}
+          {!kachinukiBoutMode && (() => {
+            const kb = isKachinuki && !hasDaihyosen
+              ? kachinukiBandModel({
+                  subs, daihyosenIdx, isComplete,
+                  namesAt: playerNamesForBout,
+                  // RAW winner/sides (not pre-flattened to names): winnerSideLR
+                  // inside kachinukiBandModel needs the {id,name} shape to prefer
+                  // id equality over name (review: two teams CAN share a name).
+                  matchWinner: m.winner,
+                  matchDecision: m.decision,
+                  sideA: m.sideA, sideB: m.sideB,
+                  currentBout: parseInt(visiblePositions[visiblePositions.length - 1], 10) || undefined,
+                })
+              : null;
+            return (
+              <div className="team-summary">
+                {teamSides.map((ts, idx) => (
+                  <React.Fragment key={ts.key}>
+                    {/* idx 0 = SHIRO (left, default left-align); idx 1 = AKA, which
+                        sits in the right 1fr grid cell and must right-align to mirror
+                        SHIRO. */}
+                    <div className={`team-summary__side${idx === 1 ? " team-summary__side--right" : ""}`}>
+                      <div className="team-summary__label">{ts.label}</div>
+                      <div className="team-summary__stats">IV: {ts.iv} · PW: {ts.pw}</div>
+                    </div>
+                    {idx === 0 && (
+                      <div className="team-summary__side team-summary__side--center">
+                        {kb ? (
+                          <>
+                            <div className="team-summary__label">{kb.headline}</div>
+                            {kb.verdict
+                              ? <div className={`team-summary__verdict team-summary__verdict--${kb.verdictSide}`} data-testid="team-summary-verdict">{kb.verdict}</div>
+                              : (kb.fact ? <div className="team-summary__fact" data-testid="team-summary-fact">{kb.fact}</div> : null)}
+                          </>
+                        ) : (
+                          <>
+                            <div className="team-summary__label">RESULT</div>
+                            <div className="team-summary__verdict" data-testid="team-summary-result">{teamVerdictText}</div>
+                          </>
+                        )}
+                        {/* bc-kcsh: the recorded decision under the verdict
+                            while a withdrawal is in force (see
+                            teamVerdictText). */}
+                        {rulingShown && (
+                          <div className="team-summary__fact" data-testid="team-summary-decision">{withdrawalLabel(m.decision)}</div>
+                        )}
+                      </div>
+                    )}
+                  </React.Fragment>
+                ))}
+              </div>
+            );
+          })()}
+          </div>
           {/* One clear-a-mark hint for the whole encounter, after the team
               names and before the first bout (operator ruling 2026-09-16,
               bc-dnst). The team sheet repeats a row per bout, so the line
@@ -3284,8 +3354,9 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
               via engine.MaybeAdvanceKachinuki after each score record, so
               the operator re-opens the modal to score the next bout.
               The .team-bouts-scroll wrapper gives the roomy (non-compact)
-              layout an independent scroll region for the bout list so the
-              team header / summary / decision / footer stay anchored. */}
+              overlay an independent scroll region for the bout list; the
+              team header and result band (.team-sheet-pin) and the footer
+              are pinned in every host. */}
           <div className="team-bouts-scroll" onClickCapture={swallowBounce(boutListTapRef)}>
           {[
             // mp-gmcg: operator-led completion. The banner reads "ended"
@@ -3861,77 +3932,6 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
               )}
             </div>
           )}
-
-          {/* Team summary: T138: sticky to the top of the modal body so
-              the totals stay visible as the operator scrolls through many
-              bout rows. zIndex: 5 keeps it under the modal head (10) but
-              above the bout cells.
-              mp-gmcg band redesign (user-confirmed brief): in kachinuki the
-              centre cell carries BOUT-LOG FACTS while running (bout number +
-              last bout result; never a verdict — the old IV/PW-derived
-              "AKA WIN" contradicted the End gate) and the verdict only on
-              completion, derived from the match winner. IV/PW demote to the
-              side cells (they still feed standings tie-breaks). Non-kachinuki
-              team matches keep RESULT + teamVerdictText: fixed formats ARE
-              decided by IV/PW. */}
-          {/* mp-gmcg: in the RUNNING kachinuki scorer the fought bouts render as
-              read-only rows above (renderReadOnlyBout), so the IV/PW summary band
-              is redundant and is dropped. Completed kachinuki (correction verdict)
-              and fixed-format team matches keep it. */}
-          {!kachinukiBoutMode && (() => {
-            const kb = isKachinuki && !hasDaihyosen
-              ? kachinukiBandModel({
-                  subs, daihyosenIdx, isComplete,
-                  namesAt: playerNamesForBout,
-                  // RAW winner/sides (not pre-flattened to names): winnerSideLR
-                  // inside kachinukiBandModel needs the {id,name} shape to prefer
-                  // id equality over name (review: two teams CAN share a name).
-                  matchWinner: m.winner,
-                  matchDecision: m.decision,
-                  sideA: m.sideA, sideB: m.sideB,
-                  currentBout: parseInt(visiblePositions[visiblePositions.length - 1], 10) || undefined,
-                })
-              : null;
-            return (
-              <div className="team-summary" style={{ position: "sticky", top: 0, zIndex: 5 }}>
-                {teamSides.map((ts, idx) => (
-                  <React.Fragment key={ts.key}>
-                    {/* idx 0 = SHIRO (left, default left-align); idx 1 = AKA, which
-                        sits in the right 1fr grid cell and must right-align to mirror
-                        SHIRO — the --right class existed but was never wired up, so
-                        AKA's IV/PW floated mid-panel. */}
-                    <div className={`team-summary__side${idx === 1 ? " team-summary__side--right" : ""}`}>
-                      <div className="team-summary__label">{ts.label}</div>
-                      <div className="team-summary__stats">IV: {ts.iv} · PW: {ts.pw}</div>
-                    </div>
-                    {idx === 0 && (
-                      <div className="team-summary__side team-summary__side--center">
-                        {kb ? (
-                          <>
-                            <div className="team-summary__label">{kb.headline}</div>
-                            {kb.verdict
-                              ? <div className={`team-summary__verdict team-summary__verdict--${kb.verdictSide}`} data-testid="team-summary-verdict">{kb.verdict}</div>
-                              : (kb.fact ? <div className="team-summary__fact" data-testid="team-summary-fact">{kb.fact}</div> : null)}
-                          </>
-                        ) : (
-                          <>
-                            <div className="team-summary__label">RESULT</div>
-                            <div className="team-summary__verdict" data-testid="team-summary-result">{teamVerdictText}</div>
-                          </>
-                        )}
-                        {/* bc-kcsh: the recorded decision under the verdict
-                            while a withdrawal is in force (see
-                            teamVerdictText). */}
-                        {rulingShown && (
-                          <div className="team-summary__fact" data-testid="team-summary-decision">{withdrawalLabel(m.decision)}</div>
-                        )}
-                      </div>
-                    )}
-                  </React.Fragment>
-                ))}
-              </div>
-            );
-          })()}
 
           {/* mp-4pc: hantei affordance for the daihyosen: the rep bout is
               the only team sub-bout that may be decided by judges (FIK 7-5 /

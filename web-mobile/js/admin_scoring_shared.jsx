@@ -3,7 +3,7 @@
 // out so the foundation can be reused and the modal file stays focused on the
 // two stateful editors. See web-mobile/admin_split_plan.md.
 
-const { useState: useStateA, useEffect: useEffectA, useRef: useRefA, useMemo: useMemoA } = React;
+const { useState: useStateA, useEffect: useEffectA, useRef: useRefA, useMemo: useMemoA, useLayoutEffect: useLayoutEffectA } = React;
 const Icon = window.Icon;
 
 import { DAIHYOSEN_POSITION, scoreRowMatchLabel } from './pool_ids.jsx';
@@ -950,11 +950,43 @@ function FoulCounter({ fouls, setFouls, onIncrement, color, disabled }) {
 // `onListPick` is told of a pick made by tapping a row of the open list (an
 // option or "+ Add"), never of a typed commit, Enter, the clear button or a
 // click outside: only that pick closes the list under the finger.
+// The name list is absolutely placed under its input, which the team sheet's
+// pinned header (top) and footer dock (bottom, inline hosts) can cover. Opens
+// down when the room below fits the list, else toward the larger room, and caps
+// the height to that room. Hosts with no pinned bar (the lineup panel, the
+// Lineups page) fall back to the viewport edges. (bc-tmfd)
+const LINEUP_LIST_MAX_H = 240;
+const LINEUP_LIST_GAP = 8;
+const LINEUP_LIST_MIN_H = 72;
+function lineupListPlacement(wrapper, bar) {
+  const scope = wrapper.closest(".scoring-panel, .editor-modal");
+  const pin = scope && scope.querySelector(".team-sheet-pin");
+  const foot = scope && scope.querySelector(".editor-modal__foot--nav");
+  const viewH = window.innerHeight;
+  const topEdge = pin ? Math.max(0, pin.getBoundingClientRect().bottom) : 0;
+  const dockSticky = foot && window.getComputedStyle(foot).position === "sticky";
+  const bottomEdge = dockSticky ? Math.min(viewH, foot.getBoundingClientRect().top) : viewH;
+  const r = bar.getBoundingClientRect();
+  const roomBelow = bottomEdge - r.bottom;
+  const roomAbove = r.top - topEdge;
+  const up = roomBelow < LINEUP_LIST_MAX_H && roomAbove > roomBelow;
+  const room = (up ? roomAbove : roomBelow) - LINEUP_LIST_GAP;
+  const maxHeight = room < LINEUP_LIST_MAX_H ? Math.max(LINEUP_LIST_MIN_H, Math.floor(room)) : undefined;
+  return { up, maxHeight };
+}
+
 function LineupNameInput({ value, roster, onSelect, onListPick, disabled, ariaLabel, color, clearable }) {
   const [query, setQuery] = useStateA("");
   const [open, setOpen] = useStateA(false);
   const [active, setActive] = useStateA(-1); // -1 = no explicit selection yet
   const ref = useRefA(null);
+  const barRef = useRefA(null);
+  const [placement, setPlacement] = useStateA({ up: false, maxHeight: undefined });
+  useLayoutEffectA(() => {
+    if (!open || !ref.current || !barRef.current) return;
+    const next = lineupListPlacement(ref.current, barRef.current);
+    setPlacement(p => (p.up === next.up && p.maxHeight === next.maxHeight ? p : next));
+  }, [open]);
   // Guards against double-commit when click-outside fires first and the blur
   // event arrives immediately after (mousedown precedes blur in browser order).
   const skipBlurRef = useRefA(false);
@@ -1062,7 +1094,7 @@ function LineupNameInput({ value, roster, onSelect, onListPick, disabled, ariaLa
 
   return (
     <div className={`pmf lineup-name lineup-name--${color}${!value ? " lineup-name--empty" : ""}`} ref={ref}>
-      <div className="pmf__bar lineup-name__bar">
+      <div className="pmf__bar lineup-name__bar" ref={barRef}>
         <input
           className="pmf__input"
           placeholder={value || "Add player…"}
@@ -1101,7 +1133,13 @@ function LineupNameInput({ value, roster, onSelect, onListPick, disabled, ariaLa
         )}
       </div>
       {open && optionCount > 0 && (
-        <div className="pmf__dropdown lineup-name__dropdown">
+        <div
+          className="pmf__dropdown lineup-name__dropdown"
+          style={{
+            ...(placement.up ? { top: "auto", bottom: "calc(100% + 4px)" } : null),
+            ...(placement.maxHeight ? { maxHeight: placement.maxHeight } : null),
+          }}
+        >
           {matches.map((entry, i) => (
             <button type="button" key={entry.isObject ? (entry.raw?.id || entry.raw?.index) : entry.name}
               className={`pmf__option ${i === active ? "pmf__option--active" : ""}`}

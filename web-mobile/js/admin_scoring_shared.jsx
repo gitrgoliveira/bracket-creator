@@ -951,7 +951,7 @@ function FoulCounter({ fouls, setFouls, onIncrement, color, disabled }) {
 // option or "+ Add"), never of a typed commit, Enter, the clear button or a
 // click outside: only that pick closes the list under the finger.
 // The name list is absolutely placed under its input, which the team sheet's
-// pinned header (top) and footer dock (bottom, inline hosts) can cover. Opens
+// pinned header (top) and footer (bottom: the inline dock, the overlay's foot) can cover. Opens
 // down when the room below fits the list, else toward the larger room, and caps
 // the height to that room. Hosts with no pinned bar (the lineup panel, the
 // Lineups page) fall back to the viewport edges. (bc-tmfd)
@@ -962,11 +962,16 @@ function lineupListPlacement(wrapper, bar) {
   const scope = wrapper.closest(".scoring-panel, .editor-modal");
   const pin = scope && scope.querySelector(".team-sheet-pin");
   const foot = scope && scope.querySelector(".editor-modal__foot--nav");
-  const viewH = window.innerHeight;
-  const topEdge = pin ? Math.max(0, pin.getBoundingClientRect().bottom) : 0;
-  const dockSticky = foot && window.getComputedStyle(foot).position === "sticky";
-  const bottomEdge = dockSticky ? Math.min(viewH, foot.getBoundingClientRect().top) : viewH;
+  // The visual viewport shrinks under the iPad keyboard where innerHeight does not.
+  const vv = window.visualViewport;
+  const viewTop = vv ? vv.offsetTop : 0;
+  const viewH = vv ? vv.offsetTop + vv.height : window.innerHeight;
+  const topEdge = Math.max(viewTop, pin ? pin.getBoundingClientRect().bottom : 0, 0);
   const r = bar.getBoundingClientRect();
+  // The footer is the bottom edge wherever it sits below the input: the inline
+  // dock is sticky and the overlay's is always visible under the scroll body.
+  const footTop = foot ? foot.getBoundingClientRect().top : viewH;
+  const bottomEdge = foot && footTop >= r.bottom ? Math.min(viewH, footTop) : viewH;
   const roomBelow = bottomEdge - r.bottom;
   const roomAbove = r.top - topEdge;
   const up = roomBelow < LINEUP_LIST_MAX_H && roomAbove > roomBelow;
@@ -975,17 +980,36 @@ function lineupListPlacement(wrapper, bar) {
   return { up, maxHeight };
 }
 
-function LineupNameInput({ value, roster, onSelect, onListPick, disabled, ariaLabel, color, clearable }) {
+function LineupNameInput({ value, roster, onSelect, onListPick, disabled, ariaLabel, color, clearable, inputId }) {
   const [query, setQuery] = useStateA("");
   const [open, setOpen] = useStateA(false);
   const [active, setActive] = useStateA(-1); // -1 = no explicit selection yet
   const ref = useRefA(null);
   const barRef = useRefA(null);
   const [placement, setPlacement] = useStateA({ up: false, maxHeight: undefined });
+  // Measured on open, then again whenever the page scrolls or the viewport
+  // changes (the keyboard rising), one frame at a time.
   useLayoutEffectA(() => {
-    if (!open || !ref.current || !barRef.current) return;
-    const next = lineupListPlacement(ref.current, barRef.current);
-    setPlacement(p => (p.up === next.up && p.maxHeight === next.maxHeight ? p : next));
+    if (!open) return;
+    let frame = 0;
+    const measure = () => {
+      frame = 0;
+      if (!ref.current || !barRef.current) return;
+      const next = lineupListPlacement(ref.current, barRef.current);
+      setPlacement(p => (p.up === next.up && p.maxHeight === next.maxHeight ? p : next));
+    };
+    const schedule = () => { if (!frame) frame = requestAnimationFrame(measure); };
+    measure();
+    const vv = window.visualViewport;
+    window.addEventListener("scroll", schedule, { capture: true, passive: true });
+    window.addEventListener("resize", schedule);
+    if (vv) { vv.addEventListener("resize", schedule); vv.addEventListener("scroll", schedule); }
+    return () => {
+      window.removeEventListener("scroll", schedule, { capture: true });
+      window.removeEventListener("resize", schedule);
+      if (vv) { vv.removeEventListener("resize", schedule); vv.removeEventListener("scroll", schedule); }
+      if (frame) cancelAnimationFrame(frame);
+    };
   }, [open]);
   // Guards against double-commit when click-outside fires first and the blur
   // event arrives immediately after (mousedown precedes blur in browser order).
@@ -1096,6 +1120,7 @@ function LineupNameInput({ value, roster, onSelect, onListPick, disabled, ariaLa
     <div className={`pmf lineup-name lineup-name--${color}${!value ? " lineup-name--empty" : ""}`} ref={ref}>
       <div className="pmf__bar lineup-name__bar" ref={barRef}>
         <input
+          id={inputId}
           className="pmf__input"
           placeholder={value || "Add player…"}
           aria-label={ariaLabel}
@@ -1137,7 +1162,7 @@ function LineupNameInput({ value, roster, onSelect, onListPick, disabled, ariaLa
           className="pmf__dropdown lineup-name__dropdown"
           style={{
             ...(placement.up ? { top: "auto", bottom: "calc(100% + 4px)" } : null),
-            ...(placement.maxHeight ? { maxHeight: placement.maxHeight } : null),
+            maxHeight: placement.maxHeight ?? LINEUP_LIST_MAX_H,
           }}
         >
           {matches.map((entry, i) => (

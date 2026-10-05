@@ -173,11 +173,38 @@ describe('the stylesheet pins the two bars in the inline team panel (bc-tmfd)', 
     const dock = block('.scoring-panel--team .editor-modal__foot--nav');
     expect(dock).toMatch(/position:\s*sticky/);
     expect(dock).toMatch(/bottom:\s*0/);
-    expect(dock).toMatch(/z-index:\s*60/);
+    expect(dock).toMatch(/z-index:\s*20\b/);
     expect(dock).toMatch(/max-height:\s*45vh/);
     const staticAt = css.indexOf('\n.scoring-panel .editor-modal__foot--nav {');
     expect(staticAt).toBeGreaterThan(-1);
     expect(css.indexOf('\n.scoring-panel--team .editor-modal__foot--nav {')).toBeGreaterThan(staticAt);
+  });
+
+  it('keeps the dock under the topbar (30) and above the pin (9) and the name list (8)', () => {
+    const z = (sel) => Number(/z-index:\s*(\d+)/.exec(block(sel))[1]);
+    expect(z('.scoring-panel--team .editor-modal__foot--nav')).toBeLessThan(z('.topbar-stack'));
+    expect(z('.scoring-panel--team .editor-modal__foot--nav')).toBeGreaterThan(z('.team-sheet-pin'));
+    expect(z('.editor-modal__body .lineup-name__dropdown')).toBeLessThan(z('.team-sheet-pin'));
+  });
+
+  it('stacks the name list below the pinned header inside a score editor, and keeps 60 elsewhere', () => {
+    expect(block('.editor-modal__body .lineup-name__dropdown')).toMatch(/z-index:\s*8\b/);
+    expect(block('.lineup-name__dropdown')).toMatch(/z-index:\s*60/);
+  });
+
+  it('leaves the name list height to LineupNameInput: no CSS max-height on it', () => {
+    expect(block('.lineup-name__dropdown')).not.toMatch(/max-height/);
+  });
+
+  it('keeps the action row visible at the dock bottom while the content above scrolls', () => {
+    const nav = block('.scoring-panel--team .editor-modal__foot--nav .score-nav');
+    expect(nav).toMatch(/position:\s*sticky/);
+    expect(nav).toMatch(/bottom:\s*0/);
+    expect(nav).toMatch(/background:\s*var\(--surface\)/);
+  });
+
+  it('falls back to overflow: visible where overflow: clip is unsupported, so the bars still pin', () => {
+    expect(css).toMatch(/@supports not \(overflow: clip\)\s*\{\s*\.scoring-panel--team\s*\{\s*overflow:\s*visible;/);
   });
 
   it('pins the header unit at the top, and the inline scope sits it under the shell topbar', () => {

@@ -426,6 +426,26 @@ describe('MatchLineupSideEditor resolves names to squad member ids (bc-pnum gap 
     expect(rowHosts('div').length).toBeGreaterThan(0);
   });
 
+  it('the position name is a label for its own name box, and no label contains the Rename button', async () => {
+    global.window.API.fetchSquads = vi.fn().mockResolvedValue({ 'uuid-grouped': SQUAD_7 });
+
+    let tree = await mount();
+    findComponents(tree, 'LineupNameInput')[0].props.onSelect('Fighter 1', SQUAD_7[0]);
+    tree = runtime.currentTree();
+
+    const pickers = findComponents(tree, 'LineupNameInput');
+    const ids = pickers.map(p => p.props.inputId);
+    expect(ids[0]).toBeTruthy();
+    expect(new Set(ids).size).toBe(ids.length);
+
+    const labels = findHosts(tree, 'label');
+    const first = labels.find(l => l.props?.htmlFor === ids[0]);
+    expect(first, 'a label points at the first position\'s name box').toBeTruthy();
+    expect(collectText(first)).toBe('1');
+    for (const l of labels) expect(findHosts(l, 'button')).toEqual([]);
+    expect(findHosts(tree, 'button').some(b => b.props?.['aria-label'] === 'Rename 1 player')).toBe(true);
+  });
+
   it('Rename under a named pick renames that member and the next save writes the new name with the same id', async () => {
     global.window.API.fetchSquads = vi.fn().mockResolvedValue({ 'uuid-grouped': SQUAD_7 });
     global.window.API.renameTeamMember = vi.fn().mockResolvedValue({ id: 'mem-1', index: 1, name: 'Fighter One' });

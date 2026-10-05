@@ -5253,7 +5253,7 @@ button.vsched-item:not([data-clickable]) {
 .scoring-panel--team .editor-modal__foot--nav {
   position: sticky;
   bottom: 0;
-  z-index: 60;
+  z-index: 20;
   background: var(--surface);
   border-top: 1px solid var(--line);
   /* A correction reason prompt or a pending banner must not grow the dock
@@ -5261,11 +5261,27 @@ button.vsched-item:not([data-clickable]) {
   max-height: 45vh;
   overflow-y: auto;
 }
+/* The action row stays at the dock's bottom edge while a tall prompt, banner
+   or History disclosure above it scrolls; the key legend after it scrolls
+   into view only at the end. */
+.scoring-panel--team .editor-modal__foot--nav .score-nav {
+  position: sticky;
+  bottom: 0;
+  background: var(--surface);
+}
+/* Safari before 16 has no overflow: clip; keep the bars pinned and lose only
+   the rounded-corner clip. */
+@supports not (overflow: clip) {
+  .scoring-panel--team {
+    overflow: visible;
+  }
+}
 
-/* Team header + result band, one sticky unit (z 9: under the topbar at 30,
-   under the footer dock at 60). Overlay hosts pin it at the top of their
-   scrolling body; the inline hosts sit it under the shell's topbar stack,
-   whose height AdminTopbar publishes as --topbar-stack-h. */
+/* Team header + result band, one sticky unit (z 9: above the name list at 8
+   inside the editor body, under the footer dock at 20 and the topbar at
+   30). Overlay hosts pin it at the top of their scrolling body; the inline
+   hosts sit it under the shell's topbar stack, whose height AdminTopbar
+   publishes as --topbar-stack-h. */
 .team-sheet-pin {
   position: sticky;
   top: 0;
@@ -6340,8 +6356,13 @@ button.vsched-item:not([data-clickable]) {
 .lineup-name__dropdown {
   z-index: 60;
   min-width: 200px;
-  max-height: 240px;
   overflow-y: auto;
+}
+/* Inside a score editor the list slides under the pinned header, the dock and
+   the topbar, exactly as its input does (the body creates no stacking
+   context, so this competes at the root). */
+.editor-modal__body .lineup-name__dropdown {
+  z-index: 8;
 }
 .pmf__option--active {
   background: var(--surface-2);

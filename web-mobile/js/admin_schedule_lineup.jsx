@@ -548,10 +548,9 @@ export function MatchLineupSideEditor({ comp, team, match, allMatches, password,
 
       <div style={{ display: "flex", flexDirection: "column", gap: 8, marginBottom: 12 }}>
         {positions.map(p => { const pickedLabel = pickedLabelFor(p.key); return (
-          // A div, not a label: a label with no `for` activates its first
-          // labelable descendant, which on a named row is the Rename button, so
-          // a tap on the position name opened Rename instead of the name box.
-          // The name box carries its own aria-label.
+          // The row is a div: a label around everything would activate its first
+          // labelable descendant, the Rename button. Only the position name is a
+          // label, pointed at the name box by id.
           <div key={p.key} data-testid={`match-lineup-pos-${teamId}-${p.key}`} style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13 }}>
             {/* The picked member's number (bc-dnst) sits UNDER the position
                 name, inside the label's fixed column: a picked blank slot has
@@ -561,7 +560,7 @@ export function MatchLineupSideEditor({ comp, team, match, allMatches, password,
                 its intrinsic width as flex basis, so a chip beside it grew the
                 column's minimum past the modal and brought in a scrollbar. */}
             <span style={{ minWidth: 72, fontWeight: 600, color: "var(--ink-2)", fontSize: 12, display: "flex", flexDirection: "column", alignItems: "flex-start" }}>
-              {p.label}
+              <label htmlFor={`match-lineup-name-${teamId}-${p.key}`}>{p.label}</label>
               {pickedLabel ? <span className="pmf__opt-label">{pickedLabel}</span> : null}
               {/* Rename lives in the same fixed column, so it adds no width
                   to the row (see the chip note above). */}
@@ -585,6 +584,7 @@ export function MatchLineupSideEditor({ comp, team, match, allMatches, password,
               stacked: true,
             }) : (
             <LineupNameInput
+              inputId={`match-lineup-name-${teamId}-${p.key}`}
               value={values[p.key] || ""}
               roster={rosterForPosition(p.key)}
               ariaLabel={`${p.label} player`}

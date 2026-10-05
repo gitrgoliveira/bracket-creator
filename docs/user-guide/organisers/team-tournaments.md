@@ -20,6 +20,8 @@ The lineup panel for a match says where the lineup it shows comes from: **Lineup
 
 To go back to the previous match's lineup, choose **Use the previous match's lineup**, on the **Lineups** page or at the top of the lineup panel. It appears while the lineup shown is the match's own, asks first, and removes that lineup, so the match carries the team's previous lineup again. Every later match that has no lineup of its own follows it.
 
+Changes you make to a lineup and have not saved are kept in that browser tab, so a reload, going back, or closing the lineup panel does not lose them. When you open the same lineup again, on the **Lineups** page or in the lineup panel, it shows **Unsaved lineup changes restored** with a **Discard** button that puts the saved lineup back. Nothing is saved until you press **Save lineup**. If the lineup changed in the meantime, for example saved from another device, the kept changes are not applied, and a notice lists the names that were not restored.
+
 A lineup an earlier version of the app saved on the **Lineups** page for **Round 2** or later still applies from the start of that round. The page names it, for example "Saved for Round 2 by an earlier version", and offers **Remove it**.
 
 ### Team members

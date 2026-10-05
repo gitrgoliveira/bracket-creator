@@ -6353,6 +6353,17 @@ button.vsched-item:not([data-clickable]) {
     min-width: var(--tap-floor);
   }
 }
+/* The notice a lineup editor shows when it brings back unsaved changes, or says
+   it could not: the amber .alert--warn with the Discard beside the words. The
+   Discard is a plain .btn, so the coarse-pointer floor reaches it. */
+.lineup-draft-note {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 8px;
+}
 .lineup-name__dropdown {
   z-index: 60;
   min-width: 200px;

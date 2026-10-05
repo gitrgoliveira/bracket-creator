@@ -9,6 +9,7 @@ import {
   lineupFields, lineupSourceOf, lineupSourceLabel, PREVIOUS_LINEUP_LABEL, previousLineupConfirm,
 } from './lineup_resolver.jsx';
 import { renameMemberFields } from './lineup_rename.jsx';
+import { useLineupDraft, LineupDraftNotice, lineupDraftKey } from './lineup_draft.jsx';
 
 const { useState: useStateA, useEffect: useEffectA, useRef: useRefA, useMemo: useMemoA } = React;
 
@@ -36,6 +37,7 @@ export function MatchLineupSideEditor({ comp, team, match, allMatches, password,
     : (team?.id || team?.name || "");
   const compId = comp?.id || "";
   const matchId = match?.id || "";
+  const draftKey = lineupDraftKey({ compId, teamId, matchId });
 
   const [values, setValues] = useStateA(() => {
     const init = {};
@@ -75,6 +77,9 @@ export function MatchLineupSideEditor({ comp, team, match, allMatches, password,
   // Save only writes a side that differs from it, so opening the panel and
   // saving never turns an inherited lineup into an override.
   const [baseline, setBaseline] = useStateA({ positions: {}, memberIds: {} });
+  // The draft key whose lineup was read into the form. A draft is only judged
+  // against a lineup that was read, never against the empty form of a failed load.
+  const [loadedKey, setLoadedKey] = useStateA("");
   // bc-cse gap closure: the composed operator-facing warning shown after a
   // SUCCESSFUL save whose squad-member attachment fell short (see doSave
   // below). Deliberately a separate channel from `error`: the save did not
@@ -234,6 +239,8 @@ export function MatchLineupSideEditor({ comp, team, match, allMatches, password,
     setMemberIds(loaded.memberIds);
     setBaseline(loaded);
     setSource(lineupSourceOf(lineup));
+    // Last: the draft sees the lineup as loaded only once everything above is set.
+    setLoadedKey(draftKey);
   };
 
   // Load the lineup in force on mount, and where it was saved.
@@ -352,9 +359,19 @@ export function MatchLineupSideEditor({ comp, team, match, allMatches, password,
     }
   };
 
-  const dirty = changedLineupPositions(
-    baseline, { positions: values, memberIds }, positions.map(p => p.key)
-  ).length > 0;
+  const positionKeys = positions.map(p => p.key);
+  const dirty = changedLineupPositions(baseline, { positions: values, memberIds }, positionKeys).length > 0;
+
+  // Unsaved picks survive a reload, the app's Back and closing the panel; a
+  // restored draft is only shown, never saved (lineup_draft.jsx, bc-lnul).
+  const draft = useLineupDraft({
+    key: draftKey,
+    ready: loadedKey === draftKey,
+    baseline,
+    current: { positions: values, memberIds },
+    positionKeys,
+    onRestore: (side) => { setValues(side.positions); setMemberIds(side.memberIds); },
+  });
 
   const save = () => {
     if (!dirty) return;
@@ -433,6 +450,8 @@ export function MatchLineupSideEditor({ comp, team, match, allMatches, password,
           </button>
         )}
       </div>
+
+      <LineupDraftNotice draft={draft} testId={`match-lineup-draft-${teamId}`} />
 
       {error && (
         <div className="alert alert--error" style={{ marginBottom: 8 }}>

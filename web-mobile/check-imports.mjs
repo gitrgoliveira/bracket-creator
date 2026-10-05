@@ -66,6 +66,9 @@ const CHECK_MODULES = [
   // pool_ids.jsx.
   'admin_lineup.jsx',
   'admin_schedule_lineup.jsx',
+  // bc-lnul: both lineup editors import the draft hook and notice from
+  // lineup_draft.jsx, which imports the position diff from lineup_resolver.jsx.
+  'lineup_draft.jsx',
 ];
 
 // ---------------------------------------------------------------------------

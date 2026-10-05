@@ -148,6 +148,22 @@ describe('the "Lineup for" select', () => {
     expect(optionTexts(targetSelect(utils))).toEqual(['Starting lineup']);
   });
 
+  it('lists a knockout match whose opponent is not decided yet, even when that side has no name to show', async () => {
+    const utils = await mountPage({
+      poolMatches: undefined,
+      bracket: { rounds: [[match('m-r0-0', A, NOBODY, { matchNumber: 1 })]] },
+    });
+    expect(optionTexts(targetSelect(utils))).toEqual(['Starting lineup', 'Match 1']);
+  });
+
+  it('leaves out a hidden match the team is seated in, whatever its opponent is named', async () => {
+    const utils = await mountPage({
+      poolMatches: undefined,
+      bracket: { rounds: [[match('m-r0-0', A, D, { matchNumber: 1 }), match('m-r0-1', A, B, { hidden: true })]] },
+    });
+    expect(optionTexts(targetSelect(utils))).toEqual(['Starting lineup', 'Match 1']);
+  });
+
   it('keeps a Swiss team\'s rounds in the order they were drawn, not by match number alone', async () => {
     // Round 2's match is number 1 of its round and Round 1's is number 4, so
     // ordering by number alone would put Round 2 first.

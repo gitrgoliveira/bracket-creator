@@ -52,6 +52,7 @@ import {
 import { poolMatchNumberOf, isSupplementaryBout, scoreRowMatchLabel } from './pool_ids.jsx';
 import { normalizeParticipantName } from './data.jsx';
 import { renameMemberFields } from './lineup_rename.jsx';
+import { useLineupDraft, LineupDraftNotice, lineupDraftKey } from './lineup_draft.jsx';
 
 const { useState: useStateA, useEffect: useEffectA, useMemo: useMemoA, useRef: useRefA } = React;
 
@@ -404,6 +405,7 @@ function AdminLineup({ comp, team, matchId = "", matchLabel = "", allMatches, pa
   const positions = useMemoA(() => positionsForSize(teamSize), [teamSize]);
   const teamId = teamServerIdOf(team);
   const compId = comp?.id || "";
+  const draftKey = lineupDraftKey({ compId, teamId, matchId });
   // The team's OWN competitor number (e.g. "T10"), the input to
   // squadMemberLabel. Not the member's: a squad member has no number of
   // its own, only an index, and the label composes the two together.
@@ -450,6 +452,9 @@ function AdminLineup({ comp, team, matchId = "", matchLabel = "", allMatches, pa
   // opening a match never turns the lineup it carries into one of its own.
   const [source, setSource] = useStateA(null);
   const [baseline, setBaseline] = useStateA({ positions: {}, memberIds: {} });
+  // The draft key whose lineup was read into the form. A draft is only judged
+  // against a lineup that was read, never against the empty form of a failed load.
+  const [loadedKey, setLoadedKey] = useStateA("");
   // A removal (the match's own lineup, or an old round's) is in flight.
   const [switching, setSwitching] = useStateA(false);
   const busy = saving || switching;
@@ -500,6 +505,8 @@ function AdminLineup({ comp, team, matchId = "", matchLabel = "", allMatches, pa
     setMemberIds(loaded.memberIds);
     setBaseline(loaded);
     setSource(lineupSourceOf(lineup));
+    // Last: the draft sees the lineup as loaded only once everything above is set.
+    setLoadedKey(draftKey);
   };
 
   useEffectA(() => {
@@ -739,11 +746,24 @@ function AdminLineup({ comp, team, matchId = "", matchLabel = "", allMatches, pa
     }
   };
 
+  const positionKeys = positions.map(p => p.key);
   // The starting lineup is always saveable. A match's lineup only once it
   // differs from what was loaded, so the lineup it carries is never copied
   // into a lineup of its own by a Save that changed nothing.
   const dirty = !matchId
-    || changedLineupPositions(baseline, { positions: values, memberIds }, positions.map(p => p.key)).length > 0;
+    || changedLineupPositions(baseline, { positions: values, memberIds }, positionKeys).length > 0;
+
+  // Unsaved picks survive a reload, the app's Back and picking another lineup; a
+  // restored draft is only shown, never saved (lineup_draft.jsx, bc-lnul). Naming,
+  // renaming and clearing a team member write through the API and are not drafts.
+  const draft = useLineupDraft({
+    key: draftKey,
+    ready: loadedKey === draftKey,
+    baseline,
+    current: { positions: values, memberIds },
+    positionKeys,
+    onRestore: (side) => { setValues(side.positions); setMemberIds(side.memberIds); },
+  });
 
   const save = async () => {
     if (!dirty) return;
@@ -782,14 +802,15 @@ function AdminLineup({ comp, team, matchId = "", matchLabel = "", allMatches, pa
         if (typeof showToast === "function") showToast("Offline: lineup not saved yet, will retry");
         return;
       }
-      if (matchId) {
-        // What the server answered is what it holds now: the new baseline, and
-        // the lineup is this match's own.
-        const stored = {};
-        positions.forEach(p => { stored[p.key] = (updated.positions || {})[p.key] || ""; });
-        setBaseline({ positions: stored, memberIds: { ...memberIdsOut, ...updated.memberIds } });
-        setSource({ matchId });
-      }
+      // What the server answered is what it holds now (the lineup as sent, when
+      // the answer carries none): the new baseline, for the starting lineup as for
+      // a match, so a saved lineup leaves no draft behind.
+      const answered = updated?.positions || positionsOut;
+      const stored = {};
+      positions.forEach(p => { stored[p.key] = answered[p.key] || ""; });
+      setBaseline({ positions: stored, memberIds: { ...memberIdsOut, ...updated?.memberIds } });
+      // The lineup is now this match's own.
+      if (matchId) setSource({ matchId });
       if (typeof showToast === "function") showToast("Lineup saved");
       // bc-cse gap closure: this surface's own SELECT/ADD/RENAME operations
       // already surface a mint/rename failure immediately (see commitAdd's
@@ -906,6 +927,8 @@ function AdminLineup({ comp, team, matchId = "", matchLabel = "", allMatches, pa
           )}
         </div>
       )}
+
+      <LineupDraftNotice draft={draft} testId="lineup-draft-notice" />
 
       {source && source.round >= 1 && (
         <div className="field__hint" data-testid="lineup-legacy-round" style={{ marginBottom: 12 }}>
@@ -1084,13 +1107,13 @@ function AdminLineup({ comp, team, matchId = "", matchLabel = "", allMatches, pa
 // decides which lineup a match carries. Pool and league matches come first, by
 // their number in the pool (a Swiss team's rounds in the order they were
 // drawn), then the knockout by round and position, the 3rd-place match last.
-// A team is seated by participant id, as the server seats it. A pool
-// tiebreaker or daihyosen is an individual bout, and a bye (hidden, one side
-// empty) is a match nobody fights.
+// A team is seated by participant id, as the server seats it, so a match whose
+// opponent is not decided yet (a feeder still to play) is listed: its lineup can
+// be set before then. A pool tiebreaker or daihyosen is an individual bout, and a
+// bye (hidden) is a match nobody fights.
 function teamMatchOptions(allMatches, teamId) {
   if (!teamId) return [];
   const mine = (allMatches || []).filter(m => m && m.id && !m.hidden && !isSupplementaryBout(m.id)
-    && nameOf(m.sideA) && nameOf(m.sideB)
     && (idOf(m.sideA) === teamId || idOf(m.sideB) === teamId));
   const pool = mine.filter(m => m.phase === "pool");
   const drawn = [...new Set(pool.map(m => m.poolName))];

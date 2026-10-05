@@ -774,13 +774,13 @@ describe('kachinuki Encho is offered only on the current tied bout', () => {
   // between the FIRST fighters still offers Encho, and the tap records it.
   it('offers Encho on a tie between any pair, lineups in force', async () => {
     const lineupFor = (p) => ({ positions: { 1: `${p}1`, 2: `${p}2`, 3: `${p}3` } });
-    window.API.fetchMatchLineup = vi.fn().mockImplementation(async (_c, teamId) => (
+    window.API.fetchLineupInForce = vi.fn().mockImplementation(async (_c, teamId) => (
       teamId === 'team-A' ? lineupFor('A') : teamId === 'team-B' ? lineupFor('B') : null
     ));
     await renderEditor({
       match: completedKachinukiMatch({ status: 'running', winner: null, subResults: [tiedBout(1)] }),
     });
-    await waitFor(() => expect(window.API.fetchMatchLineup).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(window.API.fetchLineupInForce).toHaveBeenCalledTimes(2));
     const encho = screen.getByTestId('kachinuki-encho-button');
     await act(async () => { fireEvent.click(encho); });
     expect(screen.getByTestId('kachinuki-encho-undo-button'), 'the tap recorded a period').toBeTruthy();

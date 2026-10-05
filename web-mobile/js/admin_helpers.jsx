@@ -981,8 +981,10 @@ function partitionStartableCompetitions(competitions, tournamentCourts) {
 
 // Resolves the 0-based round index from a match object. Bracket matches
 // carry m.roundIndex (stamped by compMatches/viewer.jsx); fall back to a
-// non-negative numeric m.round for any older shapes.
-// Returns 0 for pool matches (no per-round lineup).
+// non-negative numeric m.round for any older shapes. Returns 0 for pool
+// matches. Lineup lookups no longer ask it: the server places the match in
+// match order itself (engine/lineup_in_force.go), so a surface never derives a
+// round to read a lineup.
 function resolveRoundIndex(match) {
   if (typeof match.roundIndex === "number" && match.roundIndex >= 0) return match.roundIndex;
   if (typeof match.round === "number" && match.round >= 0) return match.round;

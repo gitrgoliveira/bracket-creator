@@ -1,5 +1,5 @@
-// mp-bkg: tests for the three matchId-keyed lineup API helpers
-// (fetchMatchLineup, putMatchLineup, deleteMatchLineup) in api_client.jsx.
+// mp-bkg: tests for the matchId-keyed lineup API helpers (fetchMatchLineup,
+// fetchLineupInForce, putMatchLineup, deleteMatchLineup) in api_client.jsx.
 // These mirror the round-scoped helpers: fetchMatchLineup turns a `saved:
 // false` body into null (bc-k404: nothing saved is a 200, not a 404), the
 // same rule fetchTeamLineup applies below, just against a different
@@ -57,6 +57,54 @@ describe('API.fetchMatchLineup', () => {
 
     global.fetch = mockFetch(404, { error: 'competition not found' });
     await expect(API.fetchMatchLineup('c1', 't1', 'm1')).rejects.toThrow('competition not found');
+  });
+});
+
+// The lineup a team fields at a match (operator ruling 2026-10-05): the server
+// owns the rule; the client maps `saved: false` to null and hands the body back
+// whole, source fields included.
+describe('API.fetchLineupInForce', () => {
+  let originalFetch;
+  beforeEach(() => { originalFetch = global.fetch; });
+  afterEach(() => { global.fetch = originalFetch; });
+
+  it('calls the correct /lineup-in-force/:matchId URL', async () => {
+    global.fetch = mockFetch(200, {});
+    await API.fetchLineupInForce('c42', 't99', 'mx7');
+    const [url] = global.fetch.mock.calls[0];
+    expect(url).toBe('/api/competitions/c42/teams/t99/lineup-in-force/mx7');
+  });
+
+  it('returns null when nothing is in force (200, saved false)', async () => {
+    global.fetch = mockFetch(200, { teamId: 'team1', matchId: 'match1', positions: {}, saved: false });
+    expect(await API.fetchLineupInForce('comp1', 'team1', 'match1')).toBeNull();
+  });
+
+  it('returns the body whole, a carried lineup\'s source included', async () => {
+    const carried = { teamId: 'team1', matchId: 'earlier', round: 0, positions: { senpo: 'Alice' }, sourceMatchId: 'earlier', saved: true };
+    global.fetch = mockFetch(200, carried);
+    expect(await API.fetchLineupInForce('comp1', 'team1', 'match1')).toEqual(carried);
+  });
+
+  it('keeps a Lineups-page lineup\'s round 0, the starting lineup, as a source', async () => {
+    const starting = { teamId: 'team1', round: 0, positions: { senpo: 'Alice' }, sourceRound: 0, saved: true };
+    global.fetch = mockFetch(200, starting);
+    const result = await API.fetchLineupInForce('comp1', 'team1', 'match1');
+    expect(result.sourceRound).toBe(0);
+  });
+
+  it('saved true with empty positions is a lineup', async () => {
+    const lineup = { teamId: 'team1', matchId: 'match1', positions: {}, sourceMatchId: 'match1', saved: true };
+    global.fetch = mockFetch(200, lineup);
+    expect(await API.fetchLineupInForce('comp1', 'team1', 'match1')).toEqual(lineup);
+  });
+
+  it('throws on an error answer, 404 included, with the server\'s message', async () => {
+    global.fetch = mockFetch(500, { error: 'internal' });
+    await expect(API.fetchLineupInForce('c1', 't1', 'm1')).rejects.toThrow('internal');
+
+    global.fetch = mockFetch(404, { error: 'competition not found' });
+    await expect(API.fetchLineupInForce('c1', 't1', 'm1')).rejects.toThrow('competition not found');
   });
 });
 

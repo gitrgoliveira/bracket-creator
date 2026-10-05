@@ -1,6 +1,7 @@
-// The at-court lineup panel (MatchLineupSideEditor) resolves a side the way the
-// score sheet does (resolveMatchLineup: the match's own lineup, else the
-// nearest saved round), so it shows the same inherited names, and it never
+// The at-court lineup panel (MatchLineupSideEditor) shows the lineup the team
+// fields at the match, the way the score sheet does (resolveMatchLineup: the
+// match's own lineup, else the one the team carries from its previous match or
+// round; the server owns the rule), says where that lineup was saved, and never
 // writes a side the operator did not change. Same harness as
 // match_lineup_side_editor_member_ids.test.jsx.
 
@@ -36,15 +37,20 @@ const saveButton = (tree) =>
   findHosts(tree, 'button').find(b => /Save lineup/.test(collectText(b)));
 const allText = (tree) => collectText(tree);
 
-describe('MatchLineupSideEditor shows the round default the sheet shows, and writes only a changed side', () => {
+describe('MatchLineupSideEditor shows the lineup in force, where it came from, and writes only a changed side', () => {
   let runtime, MatchLineupSideEditor;
-  let origAPI, origHelpers, origResolveRound, origCompMatches;
+  let origAPI, origHelpers, origCompMatches;
 
   const COMP = { id: 'comp-1', name: 'Team Event', kind: 'team', teamSize: 3 };
   const TEAM = { id: 'uuid-grouped', name: 'Grouped Team', number: 'T5' };
   const MATCH = {
-    id: 'match-1', compId: 'comp-1', round: 1,
+    id: 'Pool D-1', compId: 'comp-1', phase: 'pool', poolName: 'Pool D',
     sideA: { id: 'uuid-grouped', name: 'Grouped Team' }, sideB: { id: 'other', name: 'Other' }, status: 'scheduled',
+  };
+  // The team's earlier match, which the lineup in force is carried from.
+  const EARLIER = {
+    id: 'Pool D-0', compId: 'comp-1', phase: 'pool', poolName: 'Pool D',
+    sideA: { id: 'uuid-grouped', name: 'Grouped Team' }, sideB: { id: 'third', name: 'Third' }, status: 'completed',
   };
   const SQUAD = [
     { id: 'mem-1', index: 1, name: 'Aoki' },
@@ -52,20 +58,20 @@ describe('MatchLineupSideEditor shows the round default the sheet shows, and wri
     { id: 'mem-3', index: 3, name: 'Ito' },
     { id: 'mem-4', index: 4, name: 'Mori' },
   ];
-  // Saved for round 0 only; the match asks for round 1.
-  const ROUND_ZERO = {
-    teamId: 'uuid-grouped', round: 0,
+  const NAMES = {
     positions: { 1: 'Aoki', 2: 'Sato', 3: 'Ito' },
     memberIds: { 1: 'mem-1', 2: 'mem-2', 3: 'mem-3' },
   };
+  // What the server answers, by where the lineup was saved.
+  const CARRIED = { teamId: 'uuid-grouped', matchId: 'Pool D-0', round: 0, ...NAMES, sourceMatchId: 'Pool D-0', saved: true };
+  const OWN = { teamId: 'uuid-grouped', matchId: 'Pool D-1', round: 0, ...NAMES, sourceMatchId: 'Pool D-1', saved: true };
+  const STARTING = { teamId: 'uuid-grouped', round: 0, ...NAMES, sourceRound: 0, saved: true };
 
   beforeEach(async () => {
     origAPI = global.window.API;
     origHelpers = global.window.AdminLineupHelpers;
-    origResolveRound = global.window.resolveRoundIndex;
     origCompMatches = global.window.compMatches;
 
-    global.window.resolveRoundIndex = (m) => m.round;
     global.window.compMatches = () => [];
     global.window.AdminLineupHelpers = {
       positionsForSize: (n) => Array.from({ length: n }, (_, i) => ({ key: String(i + 1), label: String(i + 1) })),
@@ -76,10 +82,7 @@ describe('MatchLineupSideEditor shows the round default the sheet shows, and wri
       memberIdentityWarning: () => '',
     };
     global.window.API = {
-      fetchMatchLineup: vi.fn().mockResolvedValue(null),
-      // Only a best-effort read finds the round-0 lineup; an exact read of
-      // round 1 answers nothing saved (null), as the real client does.
-      fetchTeamLineup: vi.fn((_c, _t, _round, opts) => Promise.resolve(opts && opts.fallback ? ROUND_ZERO : null)),
+      fetchLineupInForce: vi.fn().mockResolvedValue(CARRIED),
       fetchSquads: vi.fn().mockResolvedValue({ 'uuid-grouped': SQUAD }),
       putMatchLineup: vi.fn().mockResolvedValue({ positions: {} }),
     };
@@ -95,46 +98,65 @@ describe('MatchLineupSideEditor shows the round default the sheet shows, and wri
     global.React = realReact;
     global.window.API = origAPI;
     global.window.AdminLineupHelpers = origHelpers;
-    global.window.resolveRoundIndex = origResolveRound;
     global.window.compMatches = origCompMatches;
     vi.resetModules();
   });
 
   const flush = async () => { for (let i = 0; i < 8; i++) await Promise.resolve(); };
 
-  async function mount(match = MATCH) {
+  async function mount(match = MATCH, allMatches = [EARLIER, match]) {
     runtime.mount(MatchLineupSideEditor, {
-      comp: COMP, team: TEAM, match, allMatches: [match], password: 'pw', showToast: vi.fn(),
+      comp: COMP, team: TEAM, match, allMatches, password: 'pw', showToast: vi.fn(),
     });
     await flush();
     return runtime.currentTree();
   }
   const pickerValues = (tree) => findComponents(tree, 'LineupNameInput').map(p => p.props.value);
 
-  it('shows the nearest saved round\'s names, marked as inherited from that round', async () => {
+  it('shows the names the team carries from its earlier match, and names that match', async () => {
     const tree = await mount();
-    expect(global.window.API.fetchTeamLineup).toHaveBeenCalledWith('comp-1', 'uuid-grouped', 1, { fallback: true });
+    expect(global.window.API.fetchLineupInForce).toHaveBeenCalledWith('comp-1', 'uuid-grouped', 'Pool D-1');
     expect(pickerValues(tree)).toEqual(['Aoki', 'Sato', 'Ito']);
-    expect(allText(tree)).toContain('Inheriting Round 1 lineup');
-    expect(allText(tree)).not.toContain('Override for this match');
+    expect(allText(tree)).toContain('Same as Pool D · Match 1');
+    expect(allText(tree)).not.toContain('Lineup for this match');
   });
 
-  it('keeps the plain inherited wording when the lineup carries no round', async () => {
-    global.window.API.fetchTeamLineup = vi.fn().mockResolvedValue({ positions: { 1: 'Aoki' } });
+  it('names a carried-from match the list no longer holds by its id', async () => {
+    const tree = await mount(MATCH, [MATCH]);
+    expect(allText(tree)).toContain('Same as Pool D-0');
+  });
+
+  it('marks the team\'s starting lineup as such', async () => {
+    global.window.API.fetchLineupInForce = vi.fn().mockResolvedValue(STARTING);
     const tree = await mount();
-    expect(allText(tree)).toContain('Inheriting round default');
+    expect(pickerValues(tree)).toEqual(['Aoki', 'Sato', 'Ito']);
+    expect(allText(tree)).toContain('Starting lineup');
   });
 
-  it('marks a match\'s own lineup as an override', async () => {
-    global.window.API.fetchMatchLineup = vi.fn().mockResolvedValue({
-      matchId: 'match-1', positions: { 1: 'Mori' }, memberIds: { 1: 'mem-4' },
+  it('names the round of a later Lineups-page lineup', async () => {
+    global.window.API.fetchLineupInForce = vi.fn().mockResolvedValue({ ...STARTING, round: 1, sourceRound: 1 });
+    const tree = await mount();
+    expect(allText(tree)).toContain('From the Lineups page (Round 2)');
+  });
+
+  it('marks a match\'s own lineup', async () => {
+    global.window.API.fetchLineupInForce = vi.fn().mockResolvedValue({
+      ...OWN, positions: { 1: 'Mori' }, memberIds: { 1: 'mem-4' },
     });
     const tree = await mount();
     expect(pickerValues(tree)).toEqual(['Mori', '', '']);
-    expect(allText(tree)).toContain('Override for this match');
+    expect(allText(tree)).toContain('Lineup for this match');
+    expect(allText(tree)).not.toContain('Same as');
   });
 
-  it('disables Save on an untouched inherited side, and a direct click writes nothing', async () => {
+  it('says so when no lineup is saved at all', async () => {
+    global.window.API.fetchLineupInForce = vi.fn().mockResolvedValue(null);
+    const tree = await mount();
+    expect(pickerValues(tree)).toEqual(['', '', '']);
+    expect(allText(tree)).toContain('No lineup saved yet');
+  });
+
+  it('disables Save on an untouched carried side, and a direct click writes nothing', async () => {
     const tree = await mount();
     const save = saveButton(tree);
     expect(save.props.disabled).toBe(true);
@@ -144,7 +166,7 @@ describe('MatchLineupSideEditor shows the round default the sheet shows, and wri
     expect(global.window.API.putMatchLineup).not.toHaveBeenCalled();
   });
 
-  it('after one edit Save enables and the write carries every inherited position plus the edit', async () => {
+  it('after one edit Save enables and the write carries every carried position plus the edit', async () => {
     let tree = await mount();
     findComponents(tree, 'LineupNameInput')[1].props.onSelect('Mori', SQUAD[3]);
     tree = runtime.currentTree();
@@ -167,7 +189,7 @@ describe('MatchLineupSideEditor shows the round default the sheet shows, and wri
     expect(saveButton(tree).props.disabled).toBe(true);
   });
 
-  it('after a confirmed save the side is the baseline again: Save disables and the label turns to override', async () => {
+  it('after a confirmed save the side is the baseline again: Save disables and the label turns to the match\'s own', async () => {
     global.window.API.putMatchLineup = vi.fn().mockResolvedValue({
       positions: { 1: 'Aoki', 2: 'Mori', 3: 'Ito' }, memberIds: { 1: 'mem-1', 2: 'mem-4', 3: 'mem-3' },
     });
@@ -177,7 +199,8 @@ describe('MatchLineupSideEditor shows the round default the sheet shows, and wri
     await flush();
     tree = runtime.currentTree();
     expect(saveButton(tree).props.disabled).toBe(true);
-    expect(allText(tree)).toContain('Override for this match');
+    expect(allText(tree)).toContain('Lineup for this match');
+    expect(allText(tree)).not.toContain('Same as');
   });
 
   it('a queued (offline) write keeps the side dirty', async () => {
@@ -190,9 +213,9 @@ describe('MatchLineupSideEditor shows the round default the sheet shows, and wri
     expect(saveButton(tree).props.disabled).toBe(false);
   });
 
-  it('a deliberate edit that empties an overridden side is dirty and still saves', async () => {
-    global.window.API.fetchMatchLineup = vi.fn().mockResolvedValue({
-      matchId: 'match-1', positions: { 1: 'Aoki' }, memberIds: { 1: 'mem-1' },
+  it('a deliberate edit that empties a match\'s own side is dirty and still saves', async () => {
+    global.window.API.fetchLineupInForce = vi.fn().mockResolvedValue({
+      ...OWN, positions: { 1: 'Aoki' }, memberIds: { 1: 'mem-1' },
     });
     let tree = await mount();
     findComponents(tree, 'LineupNameInput')[0].props.onSelect('');
@@ -203,21 +226,20 @@ describe('MatchLineupSideEditor shows the round default the sheet shows, and wri
     expect(global.window.API.putMatchLineup.mock.calls[0][3]).toEqual({});
   });
 
-  it('a failed read shows "Failed to load lineup" rather than the round default', async () => {
-    global.window.API.fetchMatchLineup = vi.fn().mockRejectedValue(new Error(''));
+  it('a failed read shows "Failed to load lineup" rather than an empty lineup', async () => {
+    global.window.API.fetchLineupInForce = vi.fn().mockRejectedValue(new Error(''));
     const tree = await mount();
     expect(allText(tree)).toContain('Failed to load lineup');
     expect(pickerValues(tree)).toEqual(['', '', '']);
-    expect(global.window.API.fetchTeamLineup).not.toHaveBeenCalled();
   });
 
   it('a read of a missing competition shows the server\'s message', async () => {
-    global.window.API.fetchTeamLineup = vi.fn().mockRejectedValue(new Error('competition not found'));
+    global.window.API.fetchLineupInForce = vi.fn().mockRejectedValue(new Error('competition not found'));
     const tree = await mount();
     expect(allText(tree)).toContain('competition not found');
   });
 
-  it('renaming a member on an inherited side does not make the side look edited', async () => {
+  it('renaming a member on a carried side does not make the side look edited', async () => {
     global.window.API.renameTeamMember = vi.fn().mockResolvedValue({ id: 'mem-1', index: 1, name: 'Aoki Jr' });
     let tree = await mount();
     const rename = findHosts(tree, 'button').find(b => b.props?.['aria-label'] === 'Rename 1 player');
@@ -234,6 +256,42 @@ describe('MatchLineupSideEditor shows the round default the sheet shows, and wri
     expect(global.window.API.renameTeamMember).toHaveBeenCalledWith('comp-1', 'uuid-grouped', 'mem-1', 'Aoki Jr', 'pw');
     expect(pickerValues(tree)[0]).toBe('Aoki Jr');
     expect(saveButton(tree).props.disabled).toBe(true);
-    expect(allText(tree)).toContain('Inheriting Round 1 lineup');
+    expect(allText(tree)).toContain('Same as Pool D · Match 1');
+  });
+});
+
+// The label's wording as a table, over the two pure helpers the panel reads it
+// through.
+describe('lineupSourceOf and lineupSourceLabel', () => {
+  let lineupSourceOf, lineupSourceLabel;
+  const ALL = [
+    { id: 'Pool D-0', phase: 'pool', poolName: 'Pool D' },
+    { id: 'k-r0-m3', phase: 'bracket', matchNumber: 7 },
+    { id: 'bronze', phase: 'bracket' },
+  ];
+
+  beforeEach(async () => {
+    vi.resetModules();
+    ({ lineupSourceOf, lineupSourceLabel } = await import('../admin_schedule_lineup.jsx'));
+  });
+
+  it('reads the source the server names', () => {
+    expect(lineupSourceOf({ sourceMatchId: 'm0' })).toEqual({ matchId: 'm0' });
+    expect(lineupSourceOf({ sourceRound: 0 })).toEqual({ round: 0 });
+    expect(lineupSourceOf({ sourceRound: 2 })).toEqual({ round: 2 });
+    expect(lineupSourceOf({ positions: {} })).toBeNull();
+    expect(lineupSourceOf(null)).toBeNull();
+  });
+
+  it.each([
+    ['nothing in force', null, 'No lineup saved yet'],
+    ['its own', { matchId: 'Pool D-1' }, 'Lineup for this match'],
+    ['carried from a pool match', { matchId: 'Pool D-0' }, 'Same as Pool D · Match 1'],
+    ['carried from a knockout match', { matchId: 'k-r0-m3' }, 'Same as Match 7'],
+    ['carried from a match the list does not hold', { matchId: 'gone-9' }, 'Same as gone-9'],
+    ['the starting lineup', { round: 0 }, 'Starting lineup'],
+    ['a later round\'s Lineups-page lineup', { round: 1 }, 'From the Lineups page (Round 2)'],
+  ])('%s', (_name, source, label) => {
+    expect(lineupSourceLabel(source, 'Pool D-1', ALL)).toBe(label);
   });
 });

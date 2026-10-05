@@ -43,10 +43,10 @@ func (p Position) Label() string {
 // Keying (mp-825): when MatchID is non-empty the lineup is
 // match-scoped, a team may field a different order/roster for each
 // encounter (e.g. successive pool matches). When MatchID is empty the
-// lineup is round-scoped (the legacy behavior, still used by bracket
-// rounds and pre-mp-825 data): one lineup per (team, round). The two
-// scopes coexist; a match-scoped entry shadows the round-scoped
-// fallback for that match.
+// lineup is round-scoped (the Lineups page's lineup, and pre-mp-825 data):
+// one lineup per (team, round). The two scopes coexist, and which one a team
+// fields in a match is not decided here: a team carries the lineup of its
+// previous match unless one is entered for the match (engine.Engine.LineupInForce).
 //
 // FR-040, data-model §4.
 type TeamLineup struct {

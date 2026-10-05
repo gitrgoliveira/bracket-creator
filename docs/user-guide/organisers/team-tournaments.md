@@ -4,7 +4,17 @@ Team tournaments work with any of the four formats described in [Tournament form
 
 ## Team lineups
 
-Before each team encounter, set the fighting order for each team across the five positions: Senpo, Jiho, Chuken, Fukusho, and Taisho. Smaller teams use fewer positions.
+A team's lineup is its fighting order across the five positions: Senpo, Jiho, Chuken, Fukusho, and Taisho. Smaller teams use fewer positions.
+
+A team keeps the lineup of its previous team match unless you enter a new one for a match. Its first match uses the lineup you saved for it on the **Lineups** page, and any match can have a different lineup of its own. A lineup you enter for a match is used for that match and for every later match of the team, until you enter another. It never changes an earlier match.
+
+Matches count in their order: pool matches by their number in the pool, then the knockout by round, with the 3rd-place match last. In that order, the lineup a team fields in a match is the first of these that exists:
+
+1. The lineup entered for that match.
+2. The latest lineup the team had before it: one entered for an earlier match of the team, or one saved on the **Lineups** page for a round, which takes effect when that round starts. **Round 1** covers the pool matches and the first knockout round, so a lineup saved for **Round 1** is the team's starting lineup, and one saved for **Round 2** takes effect from the second knockout round.
+3. The team's lowest-round lineup on the **Lineups** page, so a team with a lineup saved only for a later round still shows names rather than an empty sheet.
+
+The lineup panel for a match says where the lineup it shows comes from: **Lineup for this match**, **Same as** the earlier match it is carried from, **Starting lineup**, or **From the Lineups page** with the round. The score sheet, the viewer, the court display, the streaming overlay and the Kachinuki Detail sheet of the export all use the same lineup.
 
 ![The Lineups tab: a team and round selector above a completed fighting order, with a competitor picked for each of the five positions (Senpo, Jiho, Chuken, Fukusho, Taisho) from a numbered list, and the Team members list beneath it with a Rename and a Clear name control on each named position.](../../screenshots/team-lineup.png)
 
@@ -161,7 +171,7 @@ Reopening is refused while another match is already running on the same court, b
 
 ![The score editor for a completed kachinuki match, showing the recorded bouts and the Reopen match button, the correction control for a kachinuki match that did not end with a withdrawal.](../../screenshots/kachinuki-reopen.png)
 
-The results workbook (**Export & print**, then **Download results (.xlsx)**) and the blank template (**Download blank template (.xlsx)**) include a **Kachinuki Detail** sheet with a section for every kachinuki encounter in the draw. Each section is titled with its match's name followed by (Kachinuki). A knockout section's name is the title of that match's block on the **Elimination Matches** sheet, so Round 2 - Match 3 there is Round 2 - Match 3 (Kachinuki) here, and a side that is not decided yet reads as the match it comes from, for example M 3. Each section is laid out like a match on the **Elimination Matches** sheet: White (Shiro) on the left and Red (Aka) on the right, matching the scoreboard, each over its own team's name. Each bout row shows the bout number with who fought it and their lineup position, each side's score, and a tie or overtime in the centre column. The result mark (Fus., Kiken) sits beside the fighter it names. An encounter with recorded bouts lists exactly those bouts. An encounter with none yet, such as every encounter in the blank template, gets empty numbered rows to fill in by hand: one for each bout the encounter can take, which is twice the team size less one (9 rows for teams of five).
+The results workbook (**Export & print**, then **Download results (.xlsx)**) and the blank template (**Download blank template (.xlsx)**) include a **Kachinuki Detail** sheet with a section for every kachinuki encounter in the draw. Each section is titled with its match's name followed by (Kachinuki). A knockout section's name is the title of that match's block on the **Elimination Matches** sheet, so Round 2 - Match 3 there is Round 2 - Match 3 (Kachinuki) here, and a side that is not decided yet reads as the match it comes from, for example M 3. Each section is laid out like a match on the **Elimination Matches** sheet: White (Shiro) on the left and Red (Aka) on the right, matching the scoreboard, each over its own team's name. Each bout row shows the bout number with who fought it and their lineup position (the position in the lineup the team fielded in that encounter), each side's score, and a tie or overtime in the centre column. The result mark (Fus., Kiken) sits beside the fighter it names. An encounter with recorded bouts lists exactly those bouts. An encounter with none yet, such as every encounter in the blank template, gets empty numbered rows to fill in by hand: one for each bout the encounter can take, which is twice the team size less one (9 rows for teams of five).
 
 The **Pool Matches** and **Elimination Matches** sheets give each kachinuki encounter the same number of bout rows, the 3rd-place match included. A result fills the bouts fought, in order, and leaves the rest empty. If an encounter fields reserves and runs to more bouts than that, those sheets show its first bouts and the Kachinuki Detail sheet lists them all.
 

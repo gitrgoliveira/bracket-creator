@@ -116,7 +116,7 @@ export function MatchDetailCard({ match, onClose, escapeToClose = true, slotLabe
   // competitor names instead of bout numbers. bc-pnum: squadA/squadB ride
   // along the same fetch (this card passes no `competition`, so
   // useTeamLineups resolves squads off its own fetchCompetitionDetails call).
-  const { lineupA, lineupB, squadA, squadB } = useTeamLineups(isTeam ? match : null, undefined, isTeam ? match.roundIndex : undefined);
+  const { lineupA, lineupB, squadA, squadB } = useTeamLineups(isTeam ? match : null);
   // Show the Daihyosen row when a rep-bout subResult exists (position DAIHYOSEN_POSITION);
   // TeamScoreboard additionally gates it on the match actually being tied.
   const showDH = isTeam && (match.subResults || []).some(s => s.position === DAIHYOSEN_POSITION);

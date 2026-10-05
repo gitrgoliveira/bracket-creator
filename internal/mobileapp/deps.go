@@ -219,6 +219,14 @@ type TeamLineupStore interface {
 	DeleteTeamLineupForMatch(compID, teamID, matchID string) error
 }
 
+// LineupEngine is the consumer-boundary view of engine.Engine used by the
+// public lineup-in-force read in handlers_lineup.go: which lineup a team
+// fields at a match, and where it was saved. Mirrors
+// engine.Engine.LineupInForce, which owns the rule.
+type LineupEngine interface {
+	LineupInForce(compID, teamID, matchID string) (engine.InForceLineup, error)
+}
+
 // SquadStore is the consumer-boundary view of state.Store used by
 // handlers_squad.go (bc-tmid pass 1, clearing added bc-pnum): a team's
 // squad, the people on it, each with a stable id and a display index

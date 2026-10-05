@@ -4,7 +4,9 @@
 //
 // GET returns a teamLineupRead for a (team, round) tuple (200, saved false
 // when nothing is stored; 404 only for an unknown competition). PUT
-// sets/replaces it, DELETE removes it.
+// sets/replaces it, DELETE removes it. A third public GET,
+// .../lineup-in-force/:matchId, answers which lineup the team fields at a match
+// (see lineupInForceRead).
 //
 // All store I/O goes through the TeamLineupStore + CompetitionStore
 // interfaces (deps.go) rather than the concrete *state.Store
@@ -25,6 +27,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/gitrgoliveira/bracket-creator/internal/domain"
+	"github.com/gitrgoliveira/bracket-creator/internal/engine"
 	"github.com/gitrgoliveira/bracket-creator/internal/state"
 )
 
@@ -87,19 +90,21 @@ func validLineupNames(c *gin.Context, req LineupRequest) bool {
 }
 
 // RegisterPublicLineupHandlers wires the read-only GET
-// /competitions/:id/teams/:tid/lineups/:round and
-// /competitions/:id/teams/:tid/match-lineups/:matchId endpoints on an
+// /competitions/:id/teams/:tid/lineups/:round,
+// /competitions/:id/teams/:tid/match-lineups/:matchId and
+// /competitions/:id/teams/:tid/lineup-in-force/:matchId endpoints on an
 // unauthenticated router group. Lineup data (position assignments) is not
 // sensitive, coaches and viewers can see who plays where, and the
 // AdminLineup form needs to load the current lineup without holding
 // admin credentials for the initial read. PUT and DELETE remain on the
 // admin group via RegisterLineupHandlers.
 //
-// Both GETs answer with a teamLineupRead (see its doc); a 404 means the
-// competition does not exist.
+// The first two GETs answer with a teamLineupRead and the third with a
+// lineupInForceRead (see their docs); a 404 means the competition does not
+// exist.
 //
 // Slice 7.B / T127.
-func RegisterPublicLineupHandlers(r *gin.RouterGroup, store TeamLineupStore, comps CompetitionStore) {
+func RegisterPublicLineupHandlers(r *gin.RouterGroup, store TeamLineupStore, comps CompetitionStore, eng LineupEngine) {
 	r.GET("/competitions/:id/teams/:tid/lineups/:round", func(c *gin.Context) {
 		compID, teamID, round, ok := parseLineupParams(c)
 		if !ok {
@@ -115,16 +120,15 @@ func RegisterPublicLineupHandlers(r *gin.RouterGroup, store TeamLineupStore, com
 		}
 		lineup, found := findRoundLineup(lineups, teamID, round)
 		if !found && c.Query("fallback") == "best" {
-			// Best-effort mode, the client-side twin of AMENDMENT 1: the
-			// scoring modal asks for the match's own round index, but
-			// operators typically save one round-0 lineup for the whole
-			// day, so a knockout final (round 1+) would find nothing saved
-			// and leave the modal without names. Resolve via the
-			// FindBestLineup round tiers (highest round <= requested, else
-			// highest overall; match-scoped entries are skipped by passing
-			// an empty matchID). Default behavior without the param stays
-			// exact: nothing saved for THIS round is reported as such
-			// (saved: false), never silently swapped for another round.
+			// Best-effort mode: when nothing is saved for the round asked
+			// for, resolve via the FindBestLineup round tiers (highest
+			// round <= requested, else highest overall; match-scoped
+			// entries are skipped by passing an empty matchID). The match
+			// surfaces no longer use it: they read lineup-in-force, which
+			// also carries a lineup from the team's previous match.
+			// Default behavior without the param stays exact: nothing
+			// saved for THIS round is reported as such (saved: false),
+			// never silently swapped for another round.
 			lineup, found = state.FindBestLineup(lineups, teamID, "", round)
 		}
 		if !found {
@@ -133,10 +137,9 @@ func RegisterPublicLineupHandlers(r *gin.RouterGroup, store TeamLineupStore, com
 		c.JSON(http.StatusOK, teamLineupRead{TeamLineup: lineup, Saved: found})
 	})
 
-	// Match-scoped read (mp-825). The server never falls back to the
-	// round-scoped lineup on this route: that tier belongs to the CLIENT
-	// (resolveMatchLineup), which reads `saved: false` here and asks the
-	// round-scoped route above itself.
+	// Match-scoped read (mp-825): exactly the lineup saved for this match,
+	// never a lineup carried from elsewhere. Whatever a team carries into a
+	// match is read from the lineup-in-force route below.
 	r.GET("/competitions/:id/teams/:tid/match-lineups/:matchId", func(c *gin.Context) {
 		compID, teamID, matchID, ok := parseMatchLineupParams(c)
 		if !ok {
@@ -156,6 +159,61 @@ func RegisterPublicLineupHandlers(r *gin.RouterGroup, store TeamLineupStore, com
 		}
 		c.JSON(http.StatusOK, teamLineupRead{TeamLineup: lineup, Saved: found})
 	})
+
+	// The lineup in force (operator ruling 2026-10-05): the match's own lineup,
+	// else the one the team carries from its previous match or round. The
+	// engine owns the rule; this is the one door every surface reads it
+	// through. Same contract as the two reads above: a competition that exists
+	// always answers 200, with `saved: false` when no lineup applies.
+	r.GET("/competitions/:id/teams/:tid/lineup-in-force/:matchId", func(c *gin.Context) {
+		compID, teamID, matchID, ok := parseMatchLineupParams(c)
+		if !ok {
+			return
+		}
+		if !requireExistingCompetition(c, comps, compID) {
+			return
+		}
+		in, err := eng.LineupInForce(compID, teamID, matchID)
+		if err != nil {
+			internalError(c, err)
+			return
+		}
+		c.JSON(http.StatusOK, newLineupInForceRead(compID, teamID, matchID, in))
+	})
+}
+
+// lineupInForceRead is the response body of the lineup-in-force GET. It embeds
+// the stored lineup that is in force, so its own `matchId`/`round` are the
+// source's, and adds the same `saved` marker teamLineupRead carries plus the
+// source spelled out: `sourceMatchId` when the lineup was saved for a match
+// (the one asked about, or an earlier match of the team it is carried from),
+// `sourceRound` when it is a Lineups-page lineup (round 0 is the starting
+// lineup; a pointer, because 0 is a value to send). Neither is present when
+// nothing is saved.
+type lineupInForceRead struct {
+	domain.TeamLineup
+	Saved         bool   `json:"saved"`
+	SourceMatchID string `json:"sourceMatchId,omitempty"`
+	SourceRound   *int   `json:"sourceRound,omitempty"`
+}
+
+// newLineupInForceRead shapes the engine's answer. A team with nothing in
+// force gets an empty lineup that echoes what was asked, as the other reads do.
+func newLineupInForceRead(compID, teamID, matchID string, in engine.InForceLineup) lineupInForceRead {
+	if !in.Found {
+		return lineupInForceRead{TeamLineup: domain.TeamLineup{
+			TeamID: teamID, CompetitionID: compID, MatchID: matchID, Positions: map[domain.Position]string{},
+		}}
+	}
+	out := lineupInForceRead{TeamLineup: in.Lineup, Saved: true, SourceMatchID: in.Source.MatchID}
+	if out.Positions == nil {
+		out.Positions = map[domain.Position]string{}
+	}
+	if in.Source.MatchID == "" {
+		round := in.Source.Round
+		out.SourceRound = &round
+	}
+	return out
 }
 
 // teamLineupRead is the response body for both public lineup GETs (bc-k404,

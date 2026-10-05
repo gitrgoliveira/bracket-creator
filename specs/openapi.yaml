@@ -20,6 +20,7 @@ info:
     - **`GET /api/competitions/{id}/competitor-status`**: public read; the `POST` write is protected.
     - **`GET /api/competitions/{id}/teams/{tid}/lineups/{round}`**: public read; `PUT`/`DELETE` are protected.
     - **`GET /api/competitions/{id}/teams/{tid}/match-lineups/{matchId}`**: public read; `PUT`/`DELETE` are protected (in self-run mode the `PUT` is open, see below).
+    - **`GET /api/competitions/{id}/teams/{tid}/lineup-in-force/{matchId}`**: public read; the lineup a team fields at a match.
     - **`GET /api/competitions/{id}/swiss/standings`**: public read; always public.
     - **`GET /api/tournament/announcement`**: public read; returns the currently active admin broadcast announcement (204 when none/expired).
 
@@ -4137,9 +4138,9 @@ paths:
       description: |
         Match-scoped lineup (mp-825). Always answers 200 while the competition exists
         (bc-k404): `saved: false` and empty `positions` when no match-scoped entry
-        exists, never a 404. The server never falls back to the round-scoped lineup on
-        this route; that tier belongs to the CALLER, which reads `saved: false` and
-        asks the round-scoped endpoint above itself. 404 is reserved for a competition
+        exists, never a 404. This route answers only the lineup saved for exactly this
+        match, never one carried from elsewhere: the lineup a team FIELDS at a match is
+        read from `GET .../lineup-in-force/{matchId}`. 404 is reserved for a competition
         id that names no competition at all.
       security: []
       responses:
@@ -4247,6 +4248,64 @@ paths:
           description: Lineup deleted.
         '400':
           $ref: '#/components/responses/BadRequest'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /api/competitions/{id}/teams/{tid}/lineup-in-force/{matchId}:
+    parameters:
+      - $ref: '#/components/parameters/CompetitionId'
+      - in: path
+        name: tid
+        required: true
+        schema:
+          type: string
+        description: Team ID (the team's participant id).
+      - in: path
+        name: matchId
+        required: true
+        schema:
+          type: string
+        description: Match ID the lineup is wanted for.
+    get:
+      tags: [competitions]
+      summary: Get the lineup a team fields at a match
+      description: |
+        The lineup in force for the team at the match (operator ruling 2026-10-05: by
+        default a team carries the lineup of its previous team match, and may have a
+        different one in every match). In order:
+
+        1. the lineup saved for the team at this very match;
+        2. else the latest lineup of the team placed before the match: one saved for an
+           earlier match of the team, or a Lineups-page (round-scoped) lineup, which
+           takes effect at the start of its round;
+        3. else the team's lowest-round Lineups-page lineup.
+
+        Match order is fixed: pool and league matches are round 0, in pool-match number
+        order; knockout matches follow at their bracket round index; the 3rd-place match
+        is last. A lineup saved for a match counts only while that match is in the
+        current draw and the team is seated in it by participant id.
+
+        Always answers 200 while the competition exists (bc-k404): `saved: false` and
+        empty `positions` when no lineup applies, never a 404. 404 is reserved for a
+        competition id that names no competition at all. The body is the stored lineup
+        that is in force, so its own `matchId` and `round` are the source's; the source
+        is also spelled out in `sourceMatchId` or `sourceRound`.
+      security: []
+      responses:
+        '200':
+          description: The lineup in force, or none (see `saved`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LineupInForceRead'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          description: Competition not found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
         '500':
           $ref: '#/components/responses/InternalError'
 
@@ -4917,6 +4976,7 @@ components:
         `GET /api/competitions/{id}/competitor-status`,
         `GET /api/competitions/{id}/teams/{tid}/lineups/{round}`,
         `GET /api/competitions/{id}/teams/{tid}/match-lineups/{matchId}`,
+        `GET /api/competitions/{id}/teams/{tid}/lineup-in-force/{matchId}`,
         `GET /api/competitions/{id}/swiss/standings`, and
         `GET /api/tournament/announcement`,
         and (in file mode only) the bootstrap PUT/POST `/api/tournament`
@@ -6899,6 +6959,34 @@ components:
                 fallback=best, the round it resolved to); false when nothing is stored
                 there, in which case `positions` is empty and the round/matchId in the
                 body is the one requested, not a fallback.
+
+    LineupInForceRead:
+      description: >
+        The response body of the lineup-in-force GET: the stored lineup that is in
+        force for the team at the match, with the same required `saved` marker as
+        TeamLineupRead. When `saved` is false, `positions` is empty, the matchId in the
+        body is the one requested, and neither source field is present.
+      allOf:
+        - $ref: '#/components/schemas/TeamLineup'
+        - type: object
+          required: [saved]
+          properties:
+            saved:
+              type: boolean
+              description: true when a lineup is in force for the team at the match.
+            sourceMatchId:
+              type: string
+              description: >
+                Present when the lineup in force was saved for a match: the match asked
+                about (its own lineup) or an earlier match of the team it is carried
+                from. Absent for a Lineups-page lineup.
+            sourceRound:
+              type: integer
+              minimum: 0
+              description: >
+                Present when the lineup in force is a Lineups-page lineup, and then
+                always, round 0 included: the round it was saved for. Round 0 is the
+                team's starting lineup. Absent when `sourceMatchId` is present.
 
     ScheduleEstimate:
       type: object

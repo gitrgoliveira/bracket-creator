@@ -1288,11 +1288,6 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
   useEffectA(() => {
     let cancelled = false;
     if (!m.compId) return;
-    // compMatches injects m.roundIndex (0-based) for bracket matches, and
-    // m.round as a string label for display ("R16", "Quarterfinals", ...).
-    // resolveRoundIndex prefers roundIndex, falls back for legacy shapes.
-    // Pool matches return 0 (no per-round lineup).
-    const round = window.resolveRoundIndex(m);
     // sideLookupKey (competitor_identity.jsx) prefers m.sideA.id over
     // m.sideA.name -- a real id decides, since a UUID never coincidentally
     // equals another team's display name. resolveLineupTeamId's bare-string
@@ -1318,11 +1313,10 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
         // Soft-fail: kachinuki/daihyosen UI just won't render.
         console.warn("Competition fetch for team modal failed:", e);
       }
-      // mp-bkg: prefer per-match lineup (GET match-lineups/:matchId); fall
-      // back to round lineup when no per-match entry exists (saved: false
-      // -> null -> round lookup). Map the name-keyed side to the
-      // participant id the lineup is stored under first: otherwise every
-      // GET reads nothing saved.
+      // The lineup each team fields in this match (GET lineup-in-force:
+      // the match's own, else the one it carries from its previous match or
+      // round). Map the name-keyed side to the participant id the lineup is
+      // stored under first: otherwise every GET reads nothing saved.
       // The detail payload carries participants under config.players; the
       // top-level players array is often an empty (but truthy) [] in this
       // shape, so prefer whichever list is non-empty.
@@ -1333,11 +1327,11 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
       const teamAId = resolveLineupTeamId(sideAKey, players);
       const teamBId = resolveLineupTeamId(sideBKey, players);
       if (teamAId) {
-        const l = await resolveMatchLineup(m.compId, teamAId, m.id, round, window.API);
+        const l = await resolveMatchLineup(m.compId, teamAId, m.id, window.API);
         if (!cancelled) setLineupA(l);
       }
       if (teamBId) {
-        const l = await resolveMatchLineup(m.compId, teamBId, m.id, round, window.API);
+        const l = await resolveMatchLineup(m.compId, teamBId, m.id, window.API);
         if (!cancelled) setLineupB(l);
       }
     })();

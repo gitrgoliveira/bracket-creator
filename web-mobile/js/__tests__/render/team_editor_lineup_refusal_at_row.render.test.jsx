@@ -51,10 +51,9 @@ beforeEach(() => {
       'team-B': members('b', SHIRO_NAMES),
     }),
     // Shiro (side B) already has Ren Abe at senpo.
-    fetchMatchLineup: vi.fn(async (_c, teamId) => (
+    fetchLineupInForce: vi.fn(async (_c, teamId) => (
       teamId === 'team-B' ? { positions: { senpo: 'Ren Abe' }, memberIds: { senpo: 'b1' } } : null
     )),
-    fetchTeamLineup: vi.fn(async () => null),
     putMatchLineup: vi.fn(async () => ({})),
     renameTeamMember: vi.fn(async () => true),
     addTeamMember: vi.fn(async (_c, _t, name) => ({ id: 'new-1', index: 6, name })),

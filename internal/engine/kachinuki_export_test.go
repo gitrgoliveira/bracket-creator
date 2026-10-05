@@ -289,17 +289,19 @@ func TestCollectKachinukiMatches_PoolMatchesWithBouts(t *testing.T) {
 	assert.Len(t, out[2].Bouts, 1)
 }
 
-// TestBuildKachinukiPositionMap_WithLineups verifies that saved team lineups
-// are correctly mapped to the (team, player) → position lookup table.
-func TestBuildKachinukiPositionMap_WithLineups(t *testing.T) {
+// TestKachinukiPositions_StartingLineup verifies that a saved team lineup is
+// mapped to the (team, player) → position lookup of a match that has none of
+// its own.
+func TestKachinukiPositions_StartingLineup(t *testing.T) {
 	eng, store, _ := setupTestEngine(t)
 	compID := "pos-map-comp"
 
-	require.NoError(t, store.SaveCompetition(&state.Competition{
+	comp := &state.Competition{
 		ID:            compID,
 		TeamMatchType: state.TeamMatchTypeKachinuki,
 		TeamSize:      5,
-	}))
+	}
+	require.NoError(t, store.SaveCompetition(comp))
 
 	require.NoError(t, store.SetTeamLineup(compID, domain.TeamLineup{
 		TeamID: "RedTeam",
@@ -313,23 +315,19 @@ func TestBuildKachinukiPositionMap_WithLineups(t *testing.T) {
 		},
 	}, 5))
 
-	comp := &state.Competition{
-		ID:            compID,
-		TeamMatchType: state.TeamMatchTypeKachinuki,
-		TeamSize:      5,
-	}
-	posMap := eng.buildKachinukiPositionMap(compID, comp)
+	posMap := eng.newKachinukiPositions(compID, comp, nil, nil).forMatch(&state.MatchResult{ID: "P1-0", SideA: "RedTeam", SideB: "WhiteTeam"})
 
 	assert.Equal(t, "Senpo", posMap[lineupKey("RedTeam", "R-Senpo")])
 	assert.Equal(t, "Jiho", posMap[lineupKey("RedTeam", "R-Jiho")])
+	assert.Empty(t, posMap[lineupKey("WhiteTeam", "R-Senpo")], "a team's lineup labels only that team's fighters")
 }
 
-// TestBuildKachinukiPositionMap_ParticipantIDKeyed verifies that lineups
-// saved by the UI (TeamID = team participant id, a UUID) still resolve
-// position labels for match sides that carry the team display NAME.
-// The map must be indexed under both keys so resolveKachinukiPosition,
-// which is called with m.SideA/m.SideB (names), finds the label.
-func TestBuildKachinukiPositionMap_ParticipantIDKeyed(t *testing.T) {
+// TestKachinukiPositions_ParticipantIDKeyed verifies that lineups saved by the
+// UI (TeamID = team participant id, a UUID) still resolve position labels for a
+// match side, whether it carries the team's id or only its display NAME.
+// The lookup is keyed by the side's name, which buildKachinukiDetail is called
+// with (m.SideA/m.SideB).
+func TestKachinukiPositions_ParticipantIDKeyed(t *testing.T) {
 	eng, store, _ := setupTestEngine(t)
 	compID := "pos-map-pid-keyed"
 
@@ -363,20 +361,29 @@ func TestBuildKachinukiPositionMap_ParticipantIDKeyed(t *testing.T) {
 		},
 	}, 5))
 
-	posMap := eng.buildKachinukiPositionMap(compID, comp)
+	positions := eng.newKachinukiPositions(compID, comp, nil, nil)
 
-	// Name-keyed lookups: what resolveKachinukiPosition uses with m.SideA/B.
-	assert.Equal(t, "Senpo", posMap[lineupKey("RedTeam", "R-Senpo")])
-	assert.Equal(t, "Jiho", posMap[lineupKey("RedTeam", "R-Jiho")])
-	assert.Equal(t, "Senpo", resolveKachinukiPosition(posMap, "SF-1", "RedTeam", "R-Sub"))
-	// Raw participant-id keys stay available too (match on id OR name).
-	assert.Equal(t, "Senpo", posMap[lineupKey(redID, "R-Senpo")])
+	// The match carries the team's id, or only its name: both reach the
+	// id-keyed lineups (the roster translates the name).
+	for name, side := range map[string]*state.MatchResult{
+		"by id":   {ID: "SF-1", SideA: "RedTeam", SideAID: redID},
+		"by name": {ID: "SF-1", SideA: "RedTeam"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			posMap := positions.forMatch(side)
+			assert.Equal(t, "Senpo", resolveKachinukiPosition(posMap, "RedTeam", "R-Sub"), "the match's own lineup")
+			assert.Empty(t, resolveKachinukiPosition(posMap, "RedTeam", "R-Jiho"), "the own lineup replaces the starting one")
+		})
+	}
+
+	other := positions.forMatch(&state.MatchResult{ID: "SF-2", SideA: "RedTeam", SideAID: redID})
+	assert.Equal(t, "Jiho", resolveKachinukiPosition(other, "RedTeam", "R-Jiho"), "a match with no lineup of its own falls back to the starting lineup")
 }
 
-// TestBuildKachinukiPositionMap_NilComp verifies the nil guard.
-func TestBuildKachinukiPositionMap_NilComp(t *testing.T) {
+// TestKachinukiPositions_NilComp verifies the nil guard.
+func TestKachinukiPositions_NilComp(t *testing.T) {
 	eng, _, _ := setupTestEngine(t)
-	posMap := eng.buildKachinukiPositionMap("any-comp", nil)
+	posMap := eng.newKachinukiPositions("any-comp", nil, nil, nil).forMatch(&state.MatchResult{ID: "m", SideA: "A", SideB: "B"})
 	assert.Empty(t, posMap)
 }
 
@@ -750,23 +757,14 @@ func TestCollectKachinukiMatches_MoreBoutsThanTheBlockKeepsThemAll(t *testing.T)
 	assert.Zero(t, out[0].BlankBoutRows)
 }
 
-// TestResolveKachinukiPosition_PrefersMatchScoped verifies the mp-825
-// selection: a match-scoped lineup wins over the round-scoped fallback,
-// and the fallback applies when no match-scoped entry exists.
-func TestResolveKachinukiPosition_PrefersMatchScoped(t *testing.T) {
-	positions := map[string]string{
-		lineupKey("TeamA", "alice"):                 "Senpo",  // round-scoped fallback
-		matchLineupKey("PoolA-1", "TeamA", "alice"): "Taisho", // match-scoped override for PoolA-1
-	}
+// TestResolveKachinukiPosition verifies the lookup is keyed by team AND player:
+// the two teams of a match may field players with the same name.
+func TestResolveKachinukiPosition(t *testing.T) {
+	positions := map[string]string{lineupKey("TeamA", "alice"): "Senpo"}
 
-	// Match PoolA-1 has a match-scoped override → Taisho.
-	assert.Equal(t, "Taisho", resolveKachinukiPosition(positions, "PoolA-1", "TeamA", "alice"))
-	// Match PoolA-2 has no match-scoped entry → round-scoped fallback.
-	assert.Equal(t, "Senpo", resolveKachinukiPosition(positions, "PoolA-2", "TeamA", "alice"))
-	// Empty matchID → fallback only.
-	assert.Equal(t, "Senpo", resolveKachinukiPosition(positions, "", "TeamA", "alice"))
-	// Unknown player → empty.
-	assert.Equal(t, "", resolveKachinukiPosition(positions, "PoolA-1", "TeamA", "bob"))
+	assert.Equal(t, "Senpo", resolveKachinukiPosition(positions, "TeamA", "alice"))
+	assert.Equal(t, "", resolveKachinukiPosition(positions, "TeamA", "bob"), "unknown player resolves nothing")
+	assert.Equal(t, "", resolveKachinukiPosition(positions, "TeamB", "alice"), "the same name on another team is another fighter")
 }
 
 // --- Engine.KachinukiDetailMatches (exported wrapper) ---
@@ -940,10 +938,10 @@ func TestKachinukiDetailMatches_InvalidCompetitionID(t *testing.T) {
 	assert.Contains(t, err.Error(), "invalid competition ID")
 }
 
-// TestBuildKachinukiPositionMap_MatchScoped verifies the loader splits
-// match-scoped and round-scoped lineups into their respective key
-// namespaces.
-func TestBuildKachinukiPositionMap_MatchScoped(t *testing.T) {
+// TestKachinukiPositions_MatchScopedLineupReachesLaterMatchesOnly verifies that
+// a lineup entered for a match relabels that match and the team's later ones,
+// and never an earlier one.
+func TestKachinukiPositions_MatchScopedLineupReachesLaterMatchesOnly(t *testing.T) {
 	dir := t.TempDir()
 	store, err := state.NewStore(dir)
 	require.NoError(t, err)
@@ -951,31 +949,38 @@ func TestBuildKachinukiPositionMap_MatchScoped(t *testing.T) {
 	comp := &state.Competition{ID: compID, TeamSize: 5}
 	require.NoError(t, store.SaveCompetition(comp))
 
-	// Round-scoped lineup.
+	const teamID = "team-a-id"
+	// Starting lineup.
 	require.NoError(t, store.SetTeamLineup(compID, domain.TeamLineup{
-		TeamID: "TeamA",
+		TeamID: teamID,
 		Positions: map[domain.Position]string{
 			domain.PosSenpo: "alice", domain.PosJiho: "b", domain.PosChuken: "c",
 			domain.PosFukusho: "d", domain.PosTaisho: "e",
 		},
 	}, 5))
-	// Match-scoped lineup for PoolA-1 puts alice at Taisho.
+	// Lineup entered for the team's second match puts alice at Taisho.
 	require.NoError(t, store.SetTeamLineup(compID, domain.TeamLineup{
-		TeamID:  "TeamA",
-		MatchID: "PoolA-1",
+		TeamID:  teamID,
+		MatchID: "Pool A-1",
 		Positions: map[domain.Position]string{
 			domain.PosSenpo: "e", domain.PosJiho: "b", domain.PosChuken: "c",
 			domain.PosFukusho: "d", domain.PosTaisho: "alice",
 		},
 	}, 5))
 
-	e := New(store)
-	m := e.buildKachinukiPositionMap(compID, comp)
+	poolMatches := []state.MatchResult{
+		{ID: "Pool A-0", SideA: "TeamA", SideAID: teamID, SideB: "TeamB", SideBID: "team-b-id"},
+		{ID: "Pool A-1", SideA: "TeamA", SideAID: teamID, SideB: "TeamC", SideBID: "team-c-id"},
+		{ID: "Pool A-2", SideA: "TeamA", SideAID: teamID, SideB: "TeamD", SideBID: "team-d-id"},
+	}
+	positions := New(store).newKachinukiPositions(compID, comp, poolMatches, nil)
+	aliceAt := func(i int) string {
+		return resolveKachinukiPosition(positions.forMatch(&poolMatches[i]), "TeamA", "alice")
+	}
 
-	assert.Equal(t, "Senpo", resolveKachinukiPosition(m, "PoolA-2", "TeamA", "alice"),
-		"no match-scoped entry for PoolA-2 → round fallback Senpo")
-	assert.Equal(t, "Taisho", resolveKachinukiPosition(m, "PoolA-1", "TeamA", "alice"),
-		"match-scoped PoolA-1 overrides alice to Taisho")
+	assert.Equal(t, "Senpo", aliceAt(0), "before the lineup was entered: the starting lineup")
+	assert.Equal(t, "Taisho", aliceAt(1), "the match it was entered for")
+	assert.Equal(t, "Taisho", aliceAt(2), "carried to the team's next match")
 }
 
 // --- Squad member labels (bc-pnum: "make a team member's label
@@ -1306,12 +1311,12 @@ func TestKachinukiDetailMatches_SquadLabel_BracketMatch(t *testing.T) {
 	assert.Equal(t, "T1.1", out[0].Bouts[0].SideALabel, "RedTeam is DrawOrder[0] -> T1, Alice is squad member index 1")
 }
 
-// TestBuildKachinukiPositionMap_NamelessFighterResolvesByMemberID pins the
+// TestKachinukiPositions_NamelessFighterResolvesByMemberID pins the
 // bc-dnst rule that a fighter fielded by squad number and not yet named (an
-// id, an empty name) still gets a position label on the export: the map is
+// id, an empty name) still gets a position label on the export: the lookup is
 // indexed by member id as well as by name, and a bout side resolves by its
 // id first, falling back to its name for legacy rows that carry no id.
-func TestBuildKachinukiPositionMap_NamelessFighterResolvesByMemberID(t *testing.T) {
+func TestKachinukiPositions_NamelessFighterResolvesByMemberID(t *testing.T) {
 	eng, store, _ := setupTestEngine(t)
 	compID := "pos-map-nameless"
 	comp := &state.Competition{ID: compID, TeamMatchType: state.TeamMatchTypeKachinuki, TeamSize: 5}
@@ -1325,12 +1330,12 @@ func TestBuildKachinukiPositionMap_NamelessFighterResolvesByMemberID(t *testing.
 		MemberIDs: map[domain.Position]string{domain.PosSenpo: "mem-senpo", domain.PosJiho: "mem-jiho"},
 	}, 5))
 
-	posMap := eng.buildKachinukiPositionMap(compID, comp)
+	posMap := eng.newKachinukiPositions(compID, comp, nil, nil).forMatch(&state.MatchResult{ID: "SF-2", SideA: "RedTeam", SideAID: redID})
 
-	assert.Equal(t, "Jiho", resolveKachinukiBoutPosition(posMap, "SF-2", "RedTeam", "mem-jiho", ""), "a nameless fighter resolves by id")
-	assert.Equal(t, "Senpo", resolveKachinukiBoutPosition(posMap, "SF-2", "RedTeam", "mem-senpo", "R-Senpo"), "id wins for a named fighter too")
-	assert.Equal(t, "Senpo", resolveKachinukiBoutPosition(posMap, "SF-2", "RedTeam", "", "R-Senpo"), "a row with no id still resolves by name")
-	assert.Equal(t, "", resolveKachinukiBoutPosition(posMap, "SF-2", "RedTeam", "", ""), "no id and no name resolves nothing")
+	assert.Equal(t, "Jiho", resolveKachinukiBoutPosition(posMap, "RedTeam", "mem-jiho", ""), "a nameless fighter resolves by id")
+	assert.Equal(t, "Senpo", resolveKachinukiBoutPosition(posMap, "RedTeam", "mem-senpo", "R-Senpo"), "id wins for a named fighter too")
+	assert.Equal(t, "Senpo", resolveKachinukiBoutPosition(posMap, "RedTeam", "", "R-Senpo"), "a row with no id still resolves by name")
+	assert.Equal(t, "", resolveKachinukiBoutPosition(posMap, "RedTeam", "", ""), "no id and no name resolves nothing")
 }
 
 // A lineup can still hold ONE member id at TWO positions: the duplicate guard
@@ -1340,7 +1345,7 @@ func TestBuildKachinukiPositionMap_NamelessFighterResolvesByMemberID(t *testing.
 // same competition exported "Senpo" on one run and "Chuken" on the next from
 // byte-identical state. Which of the two wins is arbitrary; that it is the
 // SAME one every time is not.
-func TestBuildKachinukiPositionMap_DuplicateMemberIDLabelsDeterministically(t *testing.T) {
+func TestKachinukiPositions_DuplicateMemberIDLabelsDeterministically(t *testing.T) {
 	eng, store, _ := setupTestEngine(t)
 	compID := "pos-map-dup"
 
@@ -1369,14 +1374,17 @@ func TestBuildKachinukiPositionMap_DuplicateMemberIDLabelsDeterministically(t *t
 		filepath.Join(store.GetFolder(), "competitions", compID, "lineups.yaml"), body, 0o600))
 
 	comp := &state.Competition{ID: compID, TeamMatchType: state.TeamMatchTypeKachinuki, TeamSize: 5}
+	match := &state.MatchResult{ID: "P1-0", SideA: "RedTeam", SideB: "WhiteTeam"}
+	labelOf := func() string {
+		return eng.newKachinukiPositions(compID, comp, nil, nil).forMatch(match)[lineupKey("RedTeam", memberKey("m-dup"))]
+	}
 
 	// Repeated because the defect was map-order-dependent: one run could agree
 	// with the fix by luck, so the pin is that many runs agree with EACH OTHER.
-	first := eng.buildKachinukiPositionMap(compID, comp)[lineupKey("RedTeam", memberKey("m-dup"))]
+	first := labelOf()
 	require.NotEmpty(t, first, "the duplicated member must still resolve to a position")
 	for i := 0; i < 24; i++ {
-		got := eng.buildKachinukiPositionMap(compID, comp)[lineupKey("RedTeam", memberKey("m-dup"))]
-		require.Equal(t, first, got, "the surviving label must not depend on map iteration order")
+		require.Equal(t, first, labelOf(), "the surviving label must not depend on map iteration order")
 	}
 	assert.Equal(t, "Chuken", first, "sorted key order keeps the first, which is chuken before senpo")
 }
@@ -1438,4 +1446,103 @@ func TestCollectKachinukiMatches_DecidedWithoutBoutsGetsNoBlankRows(t *testing.T
 	require.Contains(t, rows, "GammaTeam")
 	assert.Zero(t, rows["AlphaTeam"], "a match decided by a withdrawal")
 	assert.Equal(t, 9, rows["GammaTeam"], "a match not played yet keeps 2*5-1 rows")
+}
+
+// kachinukiLineupFor builds a lineup holding the named fighters at the first
+// positions, round-scoped when matchID is empty.
+func kachinukiLineupFor(team, matchID string, round int, fighters map[domain.Position]string) domain.TeamLineup {
+	return domain.TeamLineup{TeamID: team, MatchID: matchID, Round: round, Positions: fighters}
+}
+
+// TestKachinukiDetail_PositionsFollowTheLineupInForce pins that a bout row's
+// position label is read from the lineup in force for its team at ITS match
+// (operator ruling 2026-10-05), never from whichever saved lineup happens to
+// hold the fighter's name.
+func TestKachinukiDetail_PositionsFollowTheLineupInForce(t *testing.T) {
+	positionOf := func(d helper.KachinukiMatchDetail, name string) string {
+		for _, b := range d.Bouts {
+			if b.SideAName == name {
+				return b.SideAPos
+			}
+		}
+		t.Fatalf("no bout with %s on side A in %q", name, d.Label)
+		return ""
+	}
+
+	// The teams as the store holds them: a participant id and the team name.
+	saveTeams := func(store *state.Store, compID string, teams ...string) map[string]string {
+		ids := map[string]string{}
+		roster := make([]domain.Player, len(teams))
+		for i, team := range teams {
+			ids[team] = bctest.StampPlayerID(team, "Dojo")
+			roster[i] = domain.Player{ID: ids[team], Name: team, Dojo: "Dojo"}
+		}
+		require.NoError(t, store.SaveParticipants(compID, roster))
+		return ids
+	}
+
+	t.Run("a lineup entered for a team's first match is carried to its second", func(t *testing.T) {
+		compID := "kx-pos-carried"
+		eng, store, _ := setupKachinukiComp(t, compID, 5, func(c *state.Competition) { c.Format = state.CompFormatMixed })
+		ids := saveTeams(store, compID, "RedTeam", "WhiteTeam", "BlueTeam")
+
+		require.NoError(t, store.SetTeamLineup(compID, kachinukiLineupFor(ids["RedTeam"], "", 0, map[domain.Position]string{
+			domain.PosSenpo: "R-Senpo", domain.PosJiho: "R-Jiho",
+		}), 5))
+		require.NoError(t, store.SetTeamLineup(compID, kachinukiLineupFor(ids["RedTeam"], "Pool A-0", 0, map[domain.Position]string{
+			domain.PosSenpo: "R-Jiho", domain.PosJiho: "R-Senpo",
+		}), 5))
+		bout := func(red, other string) []state.SubMatchResult {
+			return []state.SubMatchResult{{Position: 1, SideA: red, SideB: other, Winner: red, Decision: "fought"}}
+		}
+		require.NoError(t, store.SavePoolMatches(compID, []state.MatchResult{
+			{ID: "Pool A-0", SideA: "RedTeam", SideB: "WhiteTeam", SideAID: ids["RedTeam"], SideBID: ids["WhiteTeam"], SubResults: bout("R-Senpo", "W-1")},
+			{ID: "Pool A-1", SideA: "RedTeam", SideB: "BlueTeam", SideAID: ids["RedTeam"], SideBID: ids["BlueTeam"], SubResults: bout("R-Senpo", "B-1")},
+		}))
+
+		out, err := eng.KachinukiDetailMatches(compID)
+		require.NoError(t, err)
+		require.Len(t, out, 2)
+		assert.Equal(t, "Jiho", positionOf(out[0], "R-Senpo"), "the match's own lineup")
+		assert.Equal(t, "Jiho", positionOf(out[1], "R-Senpo"),
+			"the second match carries the lineup entered for the first, not the starting lineup")
+	})
+
+	t.Run("a Lineups-page entry for round 1 relabels from the first match of round 1", func(t *testing.T) {
+		compID := "kx-pos-round-start"
+		eng, store, _ := setupKachinukiComp(t, compID, 5, func(c *state.Competition) { c.Format = state.CompFormatKnockout })
+		ids := saveTeams(store, compID, "RedTeam", "WhiteTeam", "BlueTeam")
+
+		require.NoError(t, store.SetTeamLineup(compID, kachinukiLineupFor(ids["RedTeam"], "", 0, map[domain.Position]string{
+			domain.PosSenpo: "R-A", domain.PosJiho: "R-B",
+		}), 5))
+		require.NoError(t, store.SetTeamLineup(compID, kachinukiLineupFor(ids["RedTeam"], "", 1, map[domain.Position]string{
+			domain.PosSenpo: "R-B", domain.PosJiho: "R-A", domain.PosChuken: "R-New",
+		}), 5))
+		bouts := func(fighters ...string) []state.SubMatchResult {
+			out := make([]state.SubMatchResult, len(fighters))
+			for i, f := range fighters {
+				out[i] = state.SubMatchResult{Position: i + 1, SideA: f, SideB: "X", Winner: f, Decision: "fought"}
+			}
+			return out
+		}
+		require.NoError(t, store.SaveBracket(compID, &state.Bracket{Rounds: [][]state.BracketMatch{
+			{
+				{ID: "r0-m0", SideA: "RedTeam", SideB: "WhiteTeam", SideAID: ids["RedTeam"], SideBID: ids["WhiteTeam"], SubResults: bouts("R-A", "R-New")},
+				{ID: "r0-m1", SideA: "BlueTeam", SideB: "Other", SideAID: ids["BlueTeam"], SubResults: bouts("B-1")},
+			},
+			{
+				{ID: "r1-m0", SideA: "RedTeam", SideB: "BlueTeam", SideAID: ids["RedTeam"], SideBID: ids["BlueTeam"], SubResults: bouts("R-A", "R-New")},
+			},
+		}}))
+
+		out, err := eng.KachinukiDetailMatches(compID)
+		require.NoError(t, err)
+		require.Len(t, out, 3)
+		assert.Equal(t, "Senpo", positionOf(out[0], "R-A"), "round 0: the starting lineup")
+		assert.Equal(t, "", positionOf(out[0], "R-New"),
+			"a fighter only the round 1 entry holds has no position before round 1 starts")
+		assert.Equal(t, "Jiho", positionOf(out[2], "R-A"), "round 1 starts with its own entry")
+		assert.Equal(t, "Chuken", positionOf(out[2], "R-New"))
+	})
 }

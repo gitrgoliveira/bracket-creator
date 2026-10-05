@@ -35,7 +35,8 @@ Add an optional `MatchID string` to `TeamLineup`.
 - Store key resolves to a **match-scoped** key when `MatchID != ""`, else the existing
   **round-scoped** key. The two namespaces never collide (match keys are prefixed).
 - Bracket and legacy round-only data load unchanged: **no on-disk migration**. A
-  round-only lineup remains valid and is the fallback when no per-match entry exists.
+  round-only lineup remains valid: it is the team's lineup from the start of its round
+  (see the 2026-10-05 note below).
 - Per-match entries are independent: pool match 1's lineup and pool match 2's are
   saved and read apart.
 
@@ -77,6 +78,16 @@ Add an optional `MatchID string` to `TeamLineup`.
 > heuristic when no lineup exists — and it is append-only: it never auto-finalizes a
 > kachinuki encounter; completion is an explicit operator score write.
 
+> **Superseded (2026-10-05, operator ruling):** "match-scoped entry preferred, round-scoped
+> fallback" is no longer the rule. By default a team carries the lineup of its previous team
+> match, and may have a different one in every match; every match has a number and an order.
+> The lineup in force for a team at a match is its own match entry, else the latest of its
+> earlier matches' entries and its Lineups-page lineups (a round's lineup sits at the start of
+> that round), else its lowest-round Lineups-page lineup. Match order is pool and league matches
+> by pool-match number (round 0), then knockout matches by round and position, then the
+> 3rd-place match. `engine.Engine.LineupInForce` owns the rule: `kachinukiRemainingRoster`, the
+> Kachinuki Detail export and `GET .../lineup-in-force/:matchId` all ask it.
+
 ## API
 
 `GET/PUT/DELETE /api/competitions/:id/teams/:tid/lineups/:round`: unchanged (round-scoped).
@@ -85,8 +96,13 @@ New, match-scoped (added alongside, both live one release):
 `GET/PUT/DELETE /api/competitions/:id/teams/:tid/match-lineups/:matchId`
 
 `GET` answers 200 with an empty lineup marked `saved: false` when no match-scoped
-lineup exists; the caller then falls back to the round-scoped endpoint (operator
-decision 2026-09-27, bc-k404).
+lineup exists (operator decision 2026-09-27, bc-k404); it reads only the lineup saved for
+exactly that match.
+
+`GET /api/competitions/:id/teams/:tid/lineup-in-force/:matchId` (public, 2026-10-05): the
+lineup the team fields at the match, with its source (`sourceMatchId` or `sourceRound`).
+Same contract: 200 with `saved: false` when nothing applies, 404 only for an unknown
+competition. Surfaces read this, not the two routes above, for what a team fields.
 
 ## Out of scope (follow-up beads)
 

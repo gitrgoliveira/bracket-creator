@@ -53,8 +53,7 @@ beforeEach(() => {
   window.API = {
     fetchCompetitionDetails: vi.fn().mockResolvedValue({ id: 'c1', config: { format: 'mixed', players: [] } }),
     fetchSquads: vi.fn().mockResolvedValue(SQUADS),
-    fetchMatchLineup: vi.fn(async () => null),
-    fetchTeamLineup: vi.fn(async () => null),
+    fetchLineupInForce: vi.fn(async () => null),
     putMatchLineup: vi.fn(async (_c, teamId, matchId, positions, _pw, memberIds) => ({ teamId, matchId, positions, memberIds })),
     renameTeamMember: vi.fn(async () => true),
     addTeamMember: vi.fn(),

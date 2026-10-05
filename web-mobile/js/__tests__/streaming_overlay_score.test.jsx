@@ -244,8 +244,7 @@ describe('StreamingOverlay team bout name: a rename reaches the current bout (bc
     // stub only needs to resolve without throwing.
     global.window.API = {
       fetchCompetitionDetails: async () => ({}),
-      fetchMatchLineup: async () => null,
-      fetchTeamLineup: async () => null,
+      fetchLineupInForce: async () => null,
     };
     vi.resetModules();
     ({ StreamingOverlay } = await import('../streaming_overlay.jsx'));
@@ -310,8 +309,7 @@ describe('StreamingOverlay team bout: Aka squad label sits after the name, not b
     global.window.Term = function Term(props) { return { type: 'span', props, children: props?.children }; };
     global.window.API = {
       fetchCompetitionDetails: async () => ({}),
-      fetchMatchLineup: async () => null,
-      fetchTeamLineup: async () => null,
+      fetchLineupInForce: async () => null,
     };
     vi.resetModules();
     ({ StreamingOverlay } = await import('../streaming_overlay.jsx'));

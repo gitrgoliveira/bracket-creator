@@ -148,9 +148,9 @@ export function compMatches(c) {
     phase: "bracket",
     round: window.bracketRoundLabel(m, ri, rounds.length),
     phaseName: window.bracketRoundLabel(m, ri, rounds.length),
-    // Raw 0-based round index alongside the display label so consumers
-    // (useTeamLineups) need not parse the label: now a bracket-size string
-    // ("Round 16") that a "Round N"→N-1 parse would misread as round 15.
+    // Raw 0-based round index alongside the display label so consumers need
+    // not parse the label: now a bracket-size string ("Round 16") that a
+    // "Round N"→N-1 parse would misread as round 15.
     roundIndex: ri,
     compId: c.id,
     compName: c.name,

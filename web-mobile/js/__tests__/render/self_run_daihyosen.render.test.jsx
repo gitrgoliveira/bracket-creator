@@ -67,8 +67,7 @@ beforeEach(() => {
   window.API = {
     fetchCompetitionDetails: vi.fn().mockResolvedValue({ id: 'c1', config: { format: 'knockout', players: [] } }),
     fetchSquads: vi.fn(),
-    fetchMatchLineup: vi.fn(async () => null),
-    fetchTeamLineup: vi.fn(async () => null),
+    fetchLineupInForce: vi.fn(async () => null),
     putMatchLineup: vi.fn(),
     // Every write lands, as the server now answers the public page.
     recordScore: vi.fn(async (_c, _id, patch) => ({ status: patch.status })),

@@ -6,11 +6,13 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"testing"
 
 	"github.com/gin-gonic/gin"
 	"github.com/gitrgoliveira/bracket-creator/internal/domain"
+	"github.com/gitrgoliveira/bracket-creator/internal/engine"
 	"github.com/gitrgoliveira/bracket-creator/internal/state"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -48,7 +50,7 @@ func setupLineupTestRouter(t *testing.T) (*gin.Engine, *state.Store, string) {
 
 	// Public group, same as production server.go
 	api := r.Group("/api")
-	RegisterPublicLineupHandlers(api, store, store)
+	RegisterPublicLineupHandlers(api, store, store, engine.New(store))
 
 	// Admin group, AuthMiddleware gates all writes
 	admin := r.Group("/api")
@@ -619,6 +621,7 @@ func TestPublicLineupGET_UnknownCompetition(t *testing.T) {
 	}{
 		{"round", "/api/competitions/no-such-comp/teams/teamA/lineups/1"},
 		{"match", "/api/competitions/no-such-comp/teams/teamA/match-lineups/m1"},
+		{"in force", "/api/competitions/no-such-comp/teams/teamA/lineup-in-force/m1"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			req := httptest.NewRequest(http.MethodGet, tc.path, nil)
@@ -658,4 +661,140 @@ func TestPublicLineupGET_BadParamsStay400(t *testing.T) {
 			assert.Equal(t, http.StatusBadRequest, w.Code, w.Body.String())
 		})
 	}
+}
+
+// inForceBody GETs the lineup-in-force route as an anonymous caller and decodes
+// the RAW body, so a field going missing fails here rather than reading as its
+// zero value.
+func inForceBody(t *testing.T, r *gin.Engine, compID, teamID, matchID string) map[string]any {
+	t.Helper()
+	req := httptest.NewRequest(http.MethodGet,
+		"/api/competitions/"+compID+"/teams/"+url.PathEscape(teamID)+"/lineup-in-force/"+url.PathEscape(matchID), nil)
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	var body map[string]any
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &body))
+	return body
+}
+
+// TestPublicLineupInForceGET answers which lineup a team fields at a match
+// (operator ruling 2026-10-05) for the three shapes it can come from, and
+// nothing. Public like the other lineup reads, and never a 404 for "nothing
+// saved".
+func TestPublicLineupInForceGET(t *testing.T) {
+	r, store, _ := setupLineupTestRouter(t)
+	require.NoError(t, store.SaveTournament(&state.Tournament{Name: "Test", Password: "secret"}))
+	require.NoError(t, store.SaveCompetition(&state.Competition{ID: "c1", TeamSize: 5}))
+	require.NoError(t, store.SavePoolMatches("c1", []state.MatchResult{
+		{ID: "Pool A-0", SideA: "A", SideAID: "teamA", SideB: "B", SideBID: "teamB"},
+		{ID: "Pool A-1", SideA: "A", SideAID: "teamA", SideB: "C", SideBID: "teamC"},
+	}))
+	save := func(l domain.TeamLineup) {
+		l.Positions = map[domain.Position]string{domain.PosSenpo: "p-" + l.MatchID + "-" + string(rune('0'+l.Round))}
+		require.NoError(t, store.SetTeamLineup("c1", l, 5))
+	}
+
+	t.Run("nothing saved is a 200 with saved false, echoing what was asked", func(t *testing.T) {
+		body := inForceBody(t, r, "c1", "teamA", "Pool A-0")
+
+		assert.Equal(t, false, body["saved"], "never omitted")
+		assert.Equal(t, map[string]any{}, body["positions"], "empty positions, not null")
+		assert.Equal(t, "teamA", body["teamId"])
+		assert.Equal(t, "c1", body["competitionId"])
+		assert.Equal(t, "Pool A-0", body["matchId"])
+		assert.NotContains(t, body, "sourceMatchId")
+		assert.NotContains(t, body, "sourceRound")
+	})
+
+	t.Run("a Lineups-page lineup names its round, round 0 being the starting lineup", func(t *testing.T) {
+		save(domain.TeamLineup{TeamID: "teamA", Round: 0})
+		body := inForceBody(t, r, "c1", "teamA", "Pool A-0")
+
+		assert.Equal(t, true, body["saved"])
+		assert.Equal(t, float64(0), body["sourceRound"], "round 0 is present, not omitted")
+		assert.NotContains(t, body, "sourceMatchId")
+		assert.Equal(t, map[string]any{"senpo": "p--0"}, body["positions"])
+	})
+
+	t.Run("a lineup saved for the match is its own", func(t *testing.T) {
+		save(domain.TeamLineup{TeamID: "teamA", MatchID: "Pool A-0"})
+		body := inForceBody(t, r, "c1", "teamA", "Pool A-0")
+
+		assert.Equal(t, true, body["saved"])
+		assert.Equal(t, "Pool A-0", body["sourceMatchId"])
+		assert.NotContains(t, body, "sourceRound")
+		assert.Equal(t, map[string]any{"senpo": "p-Pool A-0-0"}, body["positions"])
+	})
+
+	t.Run("the team's next match carries it, and names the match it came from", func(t *testing.T) {
+		body := inForceBody(t, r, "c1", "teamA", "Pool A-1")
+
+		assert.Equal(t, true, body["saved"])
+		assert.Equal(t, "Pool A-0", body["sourceMatchId"])
+		assert.NotContains(t, body, "sourceRound")
+		assert.Equal(t, map[string]any{"senpo": "p-Pool A-0-0"}, body["positions"])
+	})
+
+	t.Run("another team carries nothing of it", func(t *testing.T) {
+		body := inForceBody(t, r, "c1", "teamC", "Pool A-1")
+
+		assert.Equal(t, false, body["saved"])
+	})
+}
+
+// TestPublicLineupInForceGET_NoAuthRequired: like the other lineup reads, no
+// password is asked even when the tournament has one.
+func TestPublicLineupInForceGET_NoAuthRequired(t *testing.T) {
+	r, store, _ := setupLineupTestRouter(t)
+	require.NoError(t, store.SaveTournament(&state.Tournament{Name: "Test", Password: "secret"}))
+	require.NoError(t, store.SaveCompetition(&state.Competition{ID: "c1", TeamSize: 5}))
+
+	req := httptest.NewRequest(http.MethodGet, "/api/competitions/c1/teams/teamA/lineup-in-force/m1", nil)
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code, w.Body.String())
+}
+
+func TestPublicLineupInForceGET_BadParamsStay400(t *testing.T) {
+	r, _, _ := setupLineupTestRouter(t)
+
+	for _, tc := range []struct {
+		name, path string
+	}{
+		{"bad competition id format", "/api/competitions/bad.id/teams/teamA/lineup-in-force/m1"},
+		{"empty team id", "/api/competitions/c1/teams//lineup-in-force/m1"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodGet, tc.path, nil)
+			w := httptest.NewRecorder()
+			r.ServeHTTP(w, req)
+			assert.Equal(t, http.StatusBadRequest, w.Code, w.Body.String())
+		})
+	}
+}
+
+// failingLineupEngine is a LineupEngine whose read fails.
+type failingLineupEngine struct{}
+
+func (failingLineupEngine) LineupInForce(string, string, string) (engine.InForceLineup, error) {
+	return engine.InForceLineup{}, errors.New("read lineups.yaml: input/output error")
+}
+
+// A read that fails is the server's fault: a 500, not an empty "nothing saved"
+// that would let the sheet show a blank lineup over one it could not read.
+func TestPublicLineupInForceGET_ReadFailureIs500(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	store, err := state.NewStore(t.TempDir())
+	require.NoError(t, err)
+	require.NoError(t, store.SaveCompetition(&state.Competition{ID: "c1", TeamSize: 5}))
+	r := gin.New()
+	RegisterPublicLineupHandlers(r.Group("/api"), store, store, failingLineupEngine{})
+
+	req := httptest.NewRequest(http.MethodGet, "/api/competitions/c1/teams/teamA/lineup-in-force/m1", nil)
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusInternalServerError, w.Code, w.Body.String())
 }

@@ -38,7 +38,7 @@ const saveButton = (tree) =>
 
 describe('MatchLineupSideEditor trims names before saving', () => {
   let runtime, MatchLineupSideEditor;
-  let origAPI, origHelpers, origResolveRound, origCompMatches;
+  let origAPI, origHelpers, origCompMatches;
 
   const COMP = { id: 'comp-1', name: 'Team Event', kind: 'team', teamSize: 3 };
   const TEAM = { id: 'uuid-grouped', name: 'Grouped Team' }; // no metadata
@@ -47,10 +47,8 @@ describe('MatchLineupSideEditor trims names before saving', () => {
   beforeEach(async () => {
     origAPI = global.window.API;
     origHelpers = global.window.AdminLineupHelpers;
-    origResolveRound = global.window.resolveRoundIndex;
     origCompMatches = global.window.compMatches;
 
-    global.window.resolveRoundIndex = () => 0;
     global.window.compMatches = () => [];
     global.window.AdminLineupHelpers = {
       positionsForSize: (n) => Array.from({ length: n }, (_, i) => ({ key: String(i + 1), label: String(i + 1) })),
@@ -59,8 +57,7 @@ describe('MatchLineupSideEditor trims names before saving', () => {
       teamIdOf: (t) => t?.id || t?.name || '',
     };
     global.window.API = {
-      fetchMatchLineup: vi.fn().mockResolvedValue(null),
-      fetchTeamLineup: vi.fn().mockResolvedValue(null),
+      fetchLineupInForce: vi.fn().mockResolvedValue(null),
       putMatchLineup: vi.fn().mockResolvedValue({ positions: {} }),
     };
 
@@ -75,7 +72,6 @@ describe('MatchLineupSideEditor trims names before saving', () => {
     global.React = realReact;
     global.window.API = origAPI;
     global.window.AdminLineupHelpers = origHelpers;
-    global.window.resolveRoundIndex = origResolveRound;
     global.window.compMatches = origCompMatches;
     vi.resetModules();
   });
@@ -105,8 +101,8 @@ describe('MatchLineupSideEditor trims names before saving', () => {
   it('drops a whitespace-only name rather than persisting blanks', async () => {
     // Based on a loaded override that holds a name: blanking an already-empty
     // side is not a change, and Save writes nothing for it.
-    global.window.API.fetchMatchLineup = vi.fn().mockResolvedValue({
-      matchId: 'match-1', positions: { 1: 'Old Name' },
+    global.window.API.fetchLineupInForce = vi.fn().mockResolvedValue({
+      matchId: 'match-1', positions: { 1: 'Old Name' }, sourceMatchId: 'match-1',
     });
     let tree = await mount();
     const pickers = findComponents(tree, 'LineupNameInput');

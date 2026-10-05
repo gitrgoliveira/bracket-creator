@@ -17,7 +17,6 @@ import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest';
 import { installWindowStubs } from '../helpers/stub_globals.js';
 
 const STUBBED_GLOBALS = {
-  resolveRoundIndex: () => 0,
   compMatches: () => [],
   AdminLineupHelpers: {
     positionsForSize: (n) => Array.from({ length: n }, (_, i) => ({ key: String(i + 1), label: String(i + 1) })),
@@ -28,8 +27,9 @@ const STUBBED_GLOBALS = {
     memberIdentityWarning: () => '',
   },
   API: {
+    fetchLineupInForce: vi.fn().mockResolvedValue(null),
+    // "Copy from previous match" reads a sibling's own lineup.
     fetchMatchLineup: vi.fn().mockResolvedValue(null),
-    fetchTeamLineup: vi.fn().mockResolvedValue(null),
     fetchSquads: vi.fn().mockResolvedValue({}),
     putMatchLineup: vi.fn().mockResolvedValue({ positions: {} }),
   },

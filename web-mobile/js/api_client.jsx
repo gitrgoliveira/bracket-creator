@@ -2553,8 +2553,8 @@ function parseSkippedCompetitionsHeader(headerValue) {
 
 // Strict === false: a body that does not SAY it is unsaved is a lineup, so
 // a stub/older-shape response with no `saved` field at all still resolves
-// as a lineup rather than being swallowed. Shared by fetchTeamLineup and
-// fetchMatchLineup.
+// as a lineup rather than being swallowed. Shared by fetchTeamLineup,
+// fetchMatchLineup and fetchLineupInForce.
 const lineupOrNull = (body) => (body.saved === false ? null : body);
 
 // What the daihyosen add or remove came back with. A refusal (superseded,
@@ -4030,13 +4030,13 @@ const API = {
     // The GET answers saved: false when nothing is stored; lineupOrNull
     // makes that null ("blank, editable"). A 404 means the competition does
     // not exist and throws. PUT replaces; DELETE clears.
-    // opts.fallback: best-effort resolution for match-scoring surfaces: when
-    // the exact round has nothing saved the server falls back to the
-    // closest saved round (highest <= requested, else highest overall). The
-    // Lineups page (AdminLineup, the round editor) must NOT pass this: it
-    // reads the exact round with no fallback, so nothing saved there is null
-    // ("blank, editable"). The score sheet and the at-court lineup panel read
-    // through resolveMatchLineup, which does.
+    // opts.fallback: best-effort resolution: when the exact round has nothing
+    // saved the server falls back to the closest saved round (highest <=
+    // requested, else highest overall). The Lineups page (AdminLineup, the
+    // round editor) must NOT pass this: it reads the exact round with no
+    // fallback, so nothing saved there is null ("blank, editable"). The match
+    // surfaces (score sheet, displays, the at-court lineup panel) do not read
+    // rounds at all: they read fetchLineupInForce through resolveMatchLineup.
     async fetchTeamLineup(compID, teamId, round, opts) {
         const qs = opts && opts.fallback ? "?fallback=best" : "";
         const res = await fetch(`/api/competitions/${compID}/teams/${teamId}/lineups/${round}${qs}`);
@@ -4202,14 +4202,32 @@ const API = {
     // place of the round key: successive encounters between the same
     // two teams each carry an independent lineup entry.
     // `saved: false` -> null (bc-k404: nothing saved for this match is a
-    // 200, not a 404; resolveMatchLineup falls back to the round-scoped GET
-    // above on null, never the server). A 404 here means the competition
-    // does not exist.
+    // 200, not a 404). This reads ONLY the lineup saved for exactly this
+    // match; what a team fields at a match is fetchLineupInForce. A 404 here
+    // means the competition does not exist.
     async fetchMatchLineup(compID, teamId, matchId) {
         const res = await fetch(`/api/competitions/${compID}/teams/${teamId}/match-lineups/${matchId}`);
         if (!res.ok) {
             const err = await res.json().catch(() => ({}));
             throw new Error(err.error || "Failed to load match lineup");
+        }
+        const body = await res.json();
+        return lineupOrNull(body);
+    },
+    // The lineup a team fields at a match (operator ruling 2026-10-05: a team
+    // carries the lineup of its previous match unless one is entered for the
+    // match). The server owns the rule (engine/lineup_in_force.go): the
+    // match's own lineup, else the latest of the team's earlier matches' and
+    // its Lineups-page lineups, else its lowest-round Lineups-page lineup.
+    // `saved: false` -> null (nothing applies). A lineup carries where it was
+    // saved: `sourceMatchId` (this match, or an earlier one it is carried
+    // from) or `sourceRound` (a Lineups-page lineup; 0 is the starting
+    // lineup). A 404 means the competition does not exist.
+    async fetchLineupInForce(compID, teamId, matchId) {
+        const res = await fetch(`/api/competitions/${compID}/teams/${teamId}/lineup-in-force/${matchId}`);
+        if (!res.ok) {
+            const err = await res.json().catch(() => ({}));
+            throw new Error(err.error || "Failed to load lineup");
         }
         const body = await res.json();
         return lineupOrNull(body);

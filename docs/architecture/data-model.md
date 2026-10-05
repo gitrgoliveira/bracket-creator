@@ -169,6 +169,17 @@ it may hold more members than the competition's team size: the extra entries are
 replacements an organiser can field, and the team size only fixes how many positions a
 round has.
 
+A lineup is stored for a match or for a round, and the lineup a team fields in a match is
+not stored: it is worked out when read, because a team carries the lineup of its previous
+match unless one is entered for the match. The lineup in force at a match is the match's own,
+else the latest one the team had before it (one saved for an earlier match of the team, or a
+round's lineup, which sits at the start of that round), else the team's lowest-round lineup.
+Matches are ordered by pool-match number first, then by knockout round and position, with the
+3rd-place match last. A lineup saved for a match counts as an earlier lineup only while that
+match is in the current draw and the team is seated in it by participant id. One rule in the
+engine owns this, and the kachinuki roster, the Kachinuki Detail export and the public
+`lineup-in-force` read all ask it.
+
 ## 3. The match and result model
 
 This is the detailed part of the model, because the rules it encodes are detailed. A match

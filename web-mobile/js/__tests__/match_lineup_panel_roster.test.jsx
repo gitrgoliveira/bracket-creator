@@ -93,8 +93,7 @@ describe('MatchLineupPanel roster resolution (mp-bkg)', () => {
 
     // MatchLineupSideEditor fetches its saved lineup on mount: stub to null.
     global.window.API = {
-      fetchMatchLineup: vi.fn().mockResolvedValue(null),
-      fetchTeamLineup: vi.fn().mockResolvedValue(null),
+      fetchLineupInForce: vi.fn().mockResolvedValue(null),
     };
 
     runtime = makeReactive();

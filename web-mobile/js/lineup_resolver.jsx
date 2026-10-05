@@ -1,13 +1,12 @@
-// lineup_resolver.js: shared helpers for resolving per-match and round-scoped
-// team lineups across all consumer surfaces (admin scoring modal, viewer,
+// lineup_resolver.js: shared helpers for resolving the lineup a team fields at
+// a match across all consumer surfaces (admin scoring modal, viewer,
 // TvDisplay, StreamingOverlay).
 //
 // Do NOT import from admin_lineup.jsx; that module is an admin input panel
 // and may not be loaded on public/viewer surfaces.
 //
 // API shape expected:
-//   API.fetchMatchLineup(compId, teamId, matchId) → lineup | null
-//   API.fetchTeamLineup(compId, teamId, round)    → lineup | null
+//   API.fetchLineupInForce(compId, teamId, matchId) → lineup | null
 //
 // Lineup shape:
 //   { teamId, positions: { [posKey]: playerName }, memberIds: { [posKey]: memberId } }
@@ -286,41 +285,29 @@ export async function buildInlineLineupWrite(compId, teamId, lineup, squad, posK
   return { positions, memberIds, squad: nextSquad, failures };
 }
 
-// resolveMatchLineup: prefer the per-match lineup endpoint (GET
-// match-lineups/:matchId); fall back to the round lineup when no per-match
-// entry exists (saved: false -> null -> round lookup). Errors on either
-// endpoint are swallowed so a display degrades gracefully, unless the caller
-// passes { throwOnError: true }: the at-court lineup panel does, because a
-// panel that failed to read an override must not show the round default and
-// let Save overwrite it. Nothing saved still falls through (it is null).
+// resolveMatchLineup: the lineup a team fields at a match, from ONE read (GET
+// lineup-in-force/:matchId): the match's own lineup, else the one the team
+// carries from its previous match or round. The server owns that rule
+// (engine/lineup_in_force.go); no surface restates it. Nothing in force is
+// null. The lineup says where it was saved: `sourceMatchId` (this match, or
+// an earlier one it is carried from) or `sourceRound` (a Lineups-page
+// lineup; 0 is the team's starting lineup).
 //
-// The round step passes { fallback: true }: match-scoring surfaces are the
-// client-side twin of AMENDMENT 1, so when the match's own round has
-// nothing saved the server resolves the closest saved round instead of
-// answering unsaved (operators typically save one round-0 lineup for the
-// whole day; without this, a knockout final at round index 1 got no names
-// and kachinuki bout 1 was submitted with empty sides). Callers: the score
-// sheet, the displays and the at-court lineup panel (MatchLineupSideEditor).
-// The Lineups page (AdminLineup, the round editor) is the one exact-round
-// reader: it calls fetchTeamLineup without the flag and nothing saved
-// arrives as null.
+// A failed read is swallowed so a display degrades gracefully (null), unless
+// the caller passes { throwOnError: true }: the at-court lineup panel does,
+// because a panel that failed to read a lineup must not show an empty one and
+// let Save overwrite it.
 //
-// mp-bkg regression guard: the per-match endpoint must win when it returns a
-// non-null result (the whole point of the per-match API). This function is
-// tested directly in scoring_modal_match_lineup.test.jsx.
-export async function resolveMatchLineup(compId, teamId, matchId, round, { fetchMatchLineup, fetchTeamLineup }, { throwOnError = false } = {}) {
+// mp-bkg regression guard: a match's own lineup always wins (the server
+// answers it first). This function is tested directly in
+// scoring_modal_match_lineup.test.jsx.
+export async function resolveMatchLineup(compId, teamId, matchId, { fetchLineupInForce }, { throwOnError = false } = {}) {
   try {
-    const matchLineup = await fetchMatchLineup(compId, teamId, matchId);
-    if (matchLineup !== null) return matchLineup;
+    return await fetchLineupInForce(compId, teamId, matchId);
   } catch (e) {
     if (throwOnError) throw e;
+    return null;
   }
-  try {
-    return await fetchTeamLineup(compId, teamId, round, { fallback: true });
-  } catch (e) {
-    if (throwOnError) throw e;
-  }
-  return null;
 }
 
 // resolveLineupTeamId maps a match-side key to the participant id that

@@ -308,6 +308,10 @@ func (s *Store) DeleteTeamLineup(compID, teamID string, round int) error {
 //
 // Returns the lineup and true when found, the zero value and false otherwise.
 // Callers should use LoadTeamLineups to obtain the map before calling this.
+//
+// This is a closest-saved-round lookup, not the lineup a team FIELDS at a
+// match: a team carries the lineup of its previous match, which this knows
+// nothing of. That rule is engine.Engine.LineupInForce.
 func FindBestLineup(lineups map[string]domain.TeamLineup, teamID, matchID string, maxRound int) (domain.TeamLineup, bool) {
 	return FindBestLineupAny(lineups, []string{teamID}, matchID, maxRound)
 }

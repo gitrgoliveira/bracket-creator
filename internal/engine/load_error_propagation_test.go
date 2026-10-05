@@ -110,7 +110,7 @@ func TestMatchLookupsPropagateLoadErrors(t *testing.T) {
 					})
 				}},
 				{"findTeamMatch", func() error {
-					_, _, _, err := eng.findTeamMatch(compID, matchID)
+					_, _, err := eng.findTeamMatch(compID, matchID)
 					return err
 				}},
 				{"ReopenMatch", func() error {
@@ -143,7 +143,7 @@ func TestMatchLookupsOnAMissingFileStayNotFound(t *testing.T) {
 	var notFound *NotFoundError
 	require.ErrorAs(t, err, &notFound)
 
-	parent, _, _, err := eng.findTeamMatch(compID, "m-r1-0")
+	parent, _, err := eng.findTeamMatch(compID, "m-r1-0")
 	require.NoError(t, err)
 	assert.Nil(t, parent)
 }

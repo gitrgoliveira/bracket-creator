@@ -1,8 +1,10 @@
 // Per-match lineup components extracted from admin_schedule.jsx (mp-d7tl).
-// pickCopySource, MatchLineupSideEditor (local), MatchLineupPanel.
+// pickCopySource, lineupSourceOf, lineupSourceLabel, MatchLineupSideEditor
+// (local), MatchLineupPanel.
 
 import { LineupNameInput } from './admin_scoring_shared.jsx';
 import { sideLookupKey } from './competitor_identity.jsx';
+import { scoreRowMatchLabel } from './pool_ids.jsx';
 import { squadRosterEntries, rosterWithoutPlacedElsewhere, memberPlacedElsewhere, resolveMatchLineup, changedLineupPositions } from './lineup_resolver.jsx';
 import { renameMemberFields } from './lineup_rename.jsx';
 
@@ -68,6 +70,32 @@ export function pickCopySource(allMatches, currentMatchId, teamId, savedLineups)
     return (b.id || "").localeCompare(a.id || "");
   });
   return candidates[0];
+}
+
+// lineupSourceOf: where a lineup in force was saved, from the fields the
+// server names it by: the match it was saved for (`sourceMatchId`: the match
+// asked about, or an earlier one of the team it is carried from) or the
+// Lineups-page round (`sourceRound`, 0 being the team's starting lineup).
+// Exported for unit testing.
+export function lineupSourceOf(lineup) {
+  if (lineup && lineup.sourceMatchId) return { matchId: lineup.sourceMatchId };
+  if (lineup && Number.isInteger(lineup.sourceRound)) return { round: lineup.sourceRound };
+  return null;
+}
+
+// lineupSourceLabel: how the panel says where the lineup it shows comes from
+// (a team carries the lineup of its previous match unless one is entered for
+// the match). A carried lineup names the earlier match as the scores list
+// does (scoreRowMatchLabel), so the operator can find it. Exported for unit
+// testing.
+export function lineupSourceLabel(source, matchId, allMatches) {
+  if (!source) return "No lineup saved yet";
+  if (source.matchId === matchId) return "Lineup for this match";
+  if (source.matchId) {
+    const from = (allMatches || []).find(m => m.id === source.matchId);
+    return `Same as ${(from && scoreRowMatchLabel(from)) || source.matchId}`;
+  }
+  return source.round === 0 ? "Starting lineup" : `From the Lineups page (Round ${source.round + 1})`;
 }
 
 // MatchLineupSideEditor: inline lineup editor for one team side within
@@ -138,12 +166,10 @@ export function MatchLineupSideEditor({ comp, team, match, allMatches, password,
   const [saving, setSaving] = useStateA(false);
   const [copying, setCopying] = useStateA(false);
   const [error, setError] = useStateA("");
-  // Track whether the current match's lineup was loaded from a per-match
-  // entry (true) or is inheriting the round default (false).
-  const [isMatchOverride, setIsMatchOverride] = useStateA(false);
-  // The round the inherited lineup was saved for (0-based), when it carries
-  // one: the nearest saved round, not necessarily this match's own.
-  const [inheritedRound, setInheritedRound] = useStateA(null);
+  // Where the lineup shown was saved, as the server names it: this match, an
+  // earlier match of the team it is carried from, or the Lineups page for a
+  // round. Null when no lineup is in force.
+  const [source, setSource] = useStateA(null);
   // What this side last held on the server (loaded, or confirmed by a save):
   // Save only writes a side that differs from it, so opening the panel and
   // saving never turns an inherited lineup into an override.
@@ -299,7 +325,7 @@ export function MatchLineupSideEditor({ comp, team, match, allMatches, password,
     // a new member instead of resolving to the one already on the team.
   }, [compId, teamId, password]);
 
-  // Load per-match lineup on mount; record whether it was a real hit.
+  // Load the lineup in force on mount, and where it was saved.
   useEffectA(() => {
     let cancelled = false;
     if (!compId || !teamId || !matchId) {
@@ -308,12 +334,13 @@ export function MatchLineupSideEditor({ comp, team, match, allMatches, password,
     }
     (async () => {
       try {
-        // The same resolution the score sheet makes (per-match entry, else the
-        // nearest saved round), so the panel shows what the sheet will show.
-        // A failed read throws: showing the round default over an override
-        // we could not read would let Save overwrite it.
+        // The same resolution the score sheet makes (this match's own lineup,
+        // else the one the team carries from its previous match or round), so
+        // the panel shows what the sheet will show. A failed read throws:
+        // showing an empty lineup over one we could not read would let Save
+        // overwrite it.
         const lineup = await resolveMatchLineup(
-          compId, teamId, matchId, window.resolveRoundIndex(match), window.API, { throwOnError: true }
+          compId, teamId, matchId, window.API, { throwOnError: true }
         );
         if (cancelled) return;
         if (lineup) {
@@ -326,10 +353,9 @@ export function MatchLineupSideEditor({ comp, team, match, allMatches, password,
           setValues(next);
           setMemberIds(nextIds);
           setBaseline({ positions: next, memberIds: nextIds });
-          setIsMatchOverride(lineup.matchId === matchId);
-          setInheritedRound(Number.isInteger(lineup.round) ? lineup.round : null);
+          setSource(lineupSourceOf(lineup));
         } else {
-          setIsMatchOverride(false);
+          setSource(null);
         }
       } catch (e) {
         if (!cancelled) setError(e?.message || "Failed to load lineup");
@@ -415,7 +441,7 @@ export function MatchLineupSideEditor({ comp, team, match, allMatches, password,
       setValues(next);
       setMemberIds(nextIds);
       setBaseline({ positions: next, memberIds: nextIds });
-      setIsMatchOverride(true);
+      setSource({ matchId });
       if (typeof showToast === "function") showToast(successMsg);
       const composer = window.AdminLineupHelpers?.memberIdentityWarning;
       if (typeof composer === "function") {
@@ -527,10 +553,11 @@ export function MatchLineupSideEditor({ comp, team, match, allMatches, password,
     <div data-testid={`match-lineup-side-${teamId}`}>
       <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8, flexWrap: "wrap" }}>
         <span style={{ fontWeight: 700, fontSize: 13 }}>{teamName}</span>
-        {isMatchOverride
-          ? <span style={{ fontSize: 11, color: "var(--accent)", fontWeight: 600 }}>Override for this match</span>
-          : <span style={{ fontSize: 11, color: "var(--ink-3)" }}>{inheritedRound !== null ? `Inheriting Round ${inheritedRound + 1} lineup` : "Inheriting round default"}</span>
-        }
+        <span style={source && source.matchId === matchId
+          ? { fontSize: 11, color: "var(--accent)", fontWeight: 600 }
+          : { fontSize: 11, color: "var(--ink-3)" }}>
+          {lineupSourceLabel(source, matchId, allMatches)}
+        </span>
         <button type="button"
           className="btn btn--sm"
           style={{ marginLeft: "auto" }}
@@ -695,7 +722,7 @@ export function MatchLineupPanel({ match, tournament, password, showToast, onClo
             </div>
             <h2 style={{ margin: "4px 0 0", fontSize: 20, fontWeight: 700 }}>Lineup for this match</h2>
             <div style={{ fontSize: 12, color: "var(--ink-3)", marginTop: 2 }}>
-              Set per-match lineups below. Changes take effect when you save; the round-default lineup is used as a fallback until then.
+              Each team keeps the lineup of its previous match until you save a different one for this match.
             </div>
           </div>
           <button type="button" className="btn btn--ghost btn--sm" onClick={onClose}>{variant === "inline" ? "Done" : "✕ Close"}</button>

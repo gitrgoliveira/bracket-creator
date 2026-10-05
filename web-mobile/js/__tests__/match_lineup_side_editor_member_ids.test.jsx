@@ -45,7 +45,7 @@ const errorBanner = (tree) =>
 
 describe('MatchLineupSideEditor resolves names to squad member ids (bc-pnum gap closure)', () => {
   let runtime, MatchLineupSideEditor;
-  let origAPI, origHelpers, origResolveRound, origCompMatches;
+  let origAPI, origHelpers, origCompMatches;
 
   const COMP = { id: 'comp-1', name: 'Team Event', kind: 'team', teamSize: 3 };
   const TEAM = { id: 'uuid-grouped', name: 'Grouped Team', number: 'T5' };
@@ -62,10 +62,8 @@ describe('MatchLineupSideEditor resolves names to squad member ids (bc-pnum gap 
   beforeEach(async () => {
     origAPI = global.window.API;
     origHelpers = global.window.AdminLineupHelpers;
-    origResolveRound = global.window.resolveRoundIndex;
     origCompMatches = global.window.compMatches;
 
-    global.window.resolveRoundIndex = () => 0;
     global.window.compMatches = () => [];
     global.window.AdminLineupHelpers = {
       positionsForSize: (n) => Array.from({ length: n }, (_, i) => ({ key: String(i + 1), label: String(i + 1) })),
@@ -76,8 +74,9 @@ describe('MatchLineupSideEditor resolves names to squad member ids (bc-pnum gap 
       memberIdentityWarning,
     };
     global.window.API = {
+      fetchLineupInForce: vi.fn().mockResolvedValue(null),
+      // Only "Copy from previous match" reads a sibling's own lineup.
       fetchMatchLineup: vi.fn().mockResolvedValue(null),
-      fetchTeamLineup: vi.fn().mockResolvedValue(null),
       fetchSquads: vi.fn().mockResolvedValue({}),
       putMatchLineup: vi.fn().mockResolvedValue({ positions: {} }),
     };
@@ -93,7 +92,6 @@ describe('MatchLineupSideEditor resolves names to squad member ids (bc-pnum gap 
     global.React = realReact;
     global.window.API = origAPI;
     global.window.AdminLineupHelpers = origHelpers;
-    global.window.resolveRoundIndex = origResolveRound;
     global.window.compMatches = origCompMatches;
     vi.resetModules();
   });
@@ -380,8 +378,8 @@ describe('MatchLineupSideEditor resolves names to squad member ids (bc-pnum gap 
     global.window.API.fetchSquads = vi.fn().mockResolvedValue({ 'uuid-grouped': SQUAD_7 });
     // Based on a loaded override that holds the pick: a pick-then-clear from
     // an empty side is a net-zero edit, which Save no longer writes.
-    global.window.API.fetchMatchLineup = vi.fn().mockResolvedValue({
-      matchId: 'match-1', positions: { 1: 'Fighter 1' }, memberIds: { 1: 'mem-1' },
+    global.window.API.fetchLineupInForce = vi.fn().mockResolvedValue({
+      matchId: 'match-1', positions: { 1: 'Fighter 1' }, memberIds: { 1: 'mem-1' }, sourceMatchId: 'match-1',
     });
 
     let tree = await mount();

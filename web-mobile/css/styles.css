@@ -6323,6 +6323,19 @@ button.vsched-item:not([data-clickable]) {
 .lineup-name__bar .lineup-name__clear {
   align-self: center;
 }
+/* A box that takes no pick right now (the team sheet disables every name box
+   while a name it took is being read against and saved) looks disabled the way
+   the buttons do (.btn:disabled), on the muted surface: a box that looks like
+   every other one is tapped for nothing. The input is the tap target, so the
+   cursor is set on it as well as on the bar. */
+.lineup-name__bar:has(.pmf__input:disabled) {
+  background: var(--surface-2);
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+.lineup-name__bar .pmf__input:disabled {
+  cursor: not-allowed;
+}
 /* An unfilled lineup slot is a "fill this" caution, not an error, and the
    two sides are already Aka (red) / Shiro per the colour system, so a red
    outline here reads as "both sides are Aka". Use the amber --warn family

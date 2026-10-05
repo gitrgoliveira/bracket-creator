@@ -235,8 +235,10 @@ describe('a lineup saved meanwhile', () => {
   });
 });
 
-// "Not restored, the lineup changed since" is about the lineup as it was opened:
-// it goes once the operator changes that lineup or saves it, and not before.
+// "Not restored, the lineup changed since" names the names the draft could not
+// restore from the lineup as it was opened. Re-entering one of several is no
+// answer to the others, so it stays through every edit and goes when the editor
+// says the lineup was saved or given up (`resolved`), or when the lineup is left.
 describe('the "not restored" notice', () => {
   const SAVED_MEANWHILE = side({ 3: 'Mori' }, { 3: 'mem-4' });
 
@@ -255,40 +257,58 @@ describe('the "not restored" notice', () => {
     expect(view.result.current.draft.stale).toEqual({ names: ['Aoki', 'Sato'] });
   });
 
-  it('goes once the operator changes the lineup', () => {
+  it('stays when the operator changes the lineup, and the change is a draft of its own', () => {
     const { view, map } = openWithDroppedDraft();
     act(() => view.result.current.setCurrent(side({ 1: 'Aoki', 3: 'Mori' }, { 1: 'mem-1', 3: 'mem-4' })));
-    expect(view.result.current.draft.stale).toBeNull();
-    // The change is a draft of its own.
+    expect(view.result.current.draft.stale).toEqual({ names: ['Aoki', 'Sato'] });
     expect(stored(map).current.positions[1]).toBe('Aoki');
   });
 
-  it('goes once the operator changes it and puts it back', () => {
+  it('stays through one name after another being entered, so the rest are still named', () => {
+    const { view } = openWithDroppedDraft();
+    act(() => view.result.current.setCurrent(side({ 1: 'Aoki', 3: 'Mori' }, { 1: 'mem-1', 3: 'mem-4' })));
+    act(() => view.result.current.setCurrent(side({ 1: 'Aoki', 2: 'Sato', 3: 'Mori' }, { 1: 'mem-1', 2: 'mem-2', 3: 'mem-4' })));
+    expect(view.result.current.draft.stale).toEqual({ names: ['Aoki', 'Sato'] });
+  });
+
+  it('stays when the operator changes it and puts it back: the names are still not in the lineup', () => {
     const { view } = openWithDroppedDraft();
     act(() => view.result.current.setCurrent(NAMED));
     act(() => view.result.current.setCurrent(SAVED_MEANWHILE));
-    expect(view.result.current.draft.stale).toBeNull();
+    expect(view.result.current.draft.stale).toEqual({ names: ['Aoki', 'Sato'] });
   });
 
-  it('goes once the lineup is saved: what is shown becomes what was loaded', () => {
-    const { map } = installStorage();
-    seed(map, { savedAt: Date.now(), baseline: BLANK, current: NAMED });
-    const view = renderHook((p) => useLineupDraft({
-      key: KEY, ready: true, baseline: p.baseline, current: p.current, positionKeys: KEYS, onRestore: vi.fn(),
-    }), { initialProps: { baseline: SAVED_MEANWHILE, current: SAVED_MEANWHILE } });
-    expect(view.result.current.stale).toEqual({ names: ['Aoki', 'Sato'] });
+  it('stays when the lineup it was opened on is read again and has changed once more', () => {
+    const { view } = openWithDroppedDraft();
+    view.rerender({ key: KEY, ready: true, baseline: OTHER_NAMED });
+    act(() => view.result.current.setCurrent(OTHER_NAMED));
+    expect(view.result.current.draft.stale).toEqual({ names: ['Aoki', 'Sato'] });
+  });
 
-    view.rerender({ baseline: NAMED, current: NAMED });
+  it('goes once the editor says the lineup was saved', () => {
+    const { view, map } = openWithDroppedDraft();
+    act(() => view.result.current.setCurrent(NAMED));
+    act(() => view.result.current.draft.resolved());
+    view.rerender({ key: KEY, ready: true, baseline: NAMED });
 
-    expect(view.result.current.stale).toBeNull();
+    expect(view.result.current.draft.stale).toBeNull();
     expect(hasDraft(map)).toBe(false);
   });
 
   it('does not come back for the next change', () => {
     const { view } = openWithDroppedDraft();
+    act(() => view.result.current.draft.resolved());
     act(() => view.result.current.setCurrent(NAMED));
     act(() => view.result.current.setCurrent(SAVED_MEANWHILE));
     act(() => view.result.current.setCurrent(OTHER_NAMED));
+    expect(view.result.current.draft.stale).toBeNull();
+  });
+
+  it('is not shown again when the operator leaves the lineup and comes back to it', () => {
+    const { view } = openWithDroppedDraft();
+    view.rerender({ key: OTHER_KEY, ready: true, baseline: SAVED_MEANWHILE });
+    expect(view.result.current.draft.stale).toBeNull();
+    view.rerender({ key: KEY, ready: true, baseline: SAVED_MEANWHILE });
     expect(view.result.current.draft.stale).toBeNull();
   });
 });

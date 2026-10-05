@@ -75,12 +75,13 @@ const CHECK_MODULES = [
   'lineup_resolver.jsx',
   // bc-cfbd: the layers a tap opens keep the bounce of that tap off their
   // backdrop through the tap_guard.jsx leaf: the participant Edit dialog, the
-  // public match card, the admin sign-in dialog and ui.jsx's confirm and Modal
-  // each import useOpenedTapGuard.
+  // public match card, the admin sign-in dialog, the shiaijo console's confirm
+  // and ui.jsx's confirm and Modal each import useOpenedTapGuard.
   'admin_participants.jsx',
   'viewer_match.jsx',
   'app.jsx',
   'ui.jsx',
+  'admin_shiaijo.jsx',
 ];
 
 // ---------------------------------------------------------------------------

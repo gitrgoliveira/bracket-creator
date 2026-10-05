@@ -90,3 +90,27 @@ describe('operator tap floors (bc-tp44)', () => {
     expect(coarse).toMatch(/margin: -10px -5px/);
   });
 });
+
+// A name box whose lineup is unread, or whose save is out, is disabled: it must
+// look it, or the operator taps it and nothing happens.
+describe('the lineup name box looks disabled when its input is', () => {
+  const disabledBar = '.lineup-name__bar:has(.pmf__input:disabled)';
+
+  it('dims the bar as a disabled button is dimmed, on the muted surface, and says not-allowed', () => {
+    const bar = block(disabledBar);
+    expect(bar).toMatch(/opacity: 0\.6/);
+    expect(bar).toMatch(/background: var\(--surface-2\)/);
+    expect(bar).toMatch(/cursor: not-allowed/);
+    expect(block('.btn:disabled'), 'the buttons\' own disabled look').toMatch(/opacity: 0\.6/);
+  });
+
+  it('puts the cursor on the input too: it fills the bar, so it is what the pointer is over', () => {
+    expect(block('.lineup-name__bar .pmf__input:disabled')).toMatch(/cursor: not-allowed/);
+  });
+
+  it('leaves the size alone: the 44px floors stand', () => {
+    expect(block(disabledBar)).not.toMatch(/height|padding|margin/);
+    expect(block('.lineup-name__bar')).toMatch(/min-height: max\(36px, var\(--tap-floor\)\)/);
+    expect(block('.lineup-name__bar .pmf__input')).toMatch(/min-height: var\(--tap-floor\)/);
+  });
+});

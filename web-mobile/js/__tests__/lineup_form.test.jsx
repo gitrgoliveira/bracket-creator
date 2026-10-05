@@ -416,3 +416,259 @@ describe('a save of the lineup that is still queued', () => {
     expect(listeners.size).toBe(0);
   });
 });
+
+// Another device saved a lineup of the competition. The editors follow it, as the
+// team sheet does, but never over what the operator has done to the form.
+describe('a lineup change announced for the competition', () => {
+  const CHANGED = {
+    positions: { 1: 'Kato', 2: 'Sato', 3: 'Ito' }, memberIds: { 1: 'mem-5', 2: 'mem-2', 3: 'mem-3' },
+    sourceMatchId: 'm1', saved: true,
+  };
+  const announce = (detail = { competitionId: 'c' }) => act(async () => {
+    window.dispatchEvent(new CustomEvent('lineup-updated', detail === undefined ? {} : { detail }));
+  });
+  const reads = () => api.fetchLineupInForce.mock.calls.length;
+  const settle = () => act(async () => { await new Promise((resolve) => setTimeout(resolve, 0)); });
+  function deferred() {
+    let resolve;
+    const promise = new Promise((res) => { resolve = res; });
+    return { promise, resolve };
+  }
+
+  it('is read again and shown while the form is untouched, with no loading screen in between', async () => {
+    const loadings = [];
+    const view = renderHook((p) => {
+      const form = useLineupForm(p);
+      loadings.push(form.loading);
+      return form;
+    }, { initialProps: props() });
+    await act(async () => { await Promise.resolve(); });
+    expect(view.result.current.values[1]).toBe('Aoki');
+    loadings.length = 0;
+
+    api.fetchLineupInForce.mockResolvedValue(CHANGED);
+    await announce();
+
+    expect(reads()).toBe(2);
+    expect(view.result.current.values[1]).toBe('Kato');
+    expect(view.result.current.memberIds[1]).toBe('mem-5');
+    expect(view.result.current.baseline.positions[1]).toBe('Kato');
+    expect(view.result.current.source).toEqual({ matchId: 'm1' });
+    expect(view.result.current.dirty).toBe(false);
+    expect(loadings.length).toBeGreaterThan(0);
+    expect(loadings.every((l) => l === false), 'the form stays on screen').toBe(true);
+  });
+
+  it('follows the starting lineup the same way', async () => {
+    const view = await mount({ matchId: '' });
+    api.fetchTeamLineup.mockResolvedValue({ ...STARTING, positions: { ...NAMES.positions, 1: 'Kato' } });
+
+    await announce();
+
+    expect(api.fetchTeamLineup).toHaveBeenCalledTimes(2);
+    expect(view.result.current.values[1]).toBe('Kato');
+  });
+
+  it('follows an announcement that names no competition', async () => {
+    await mount();
+    await announce(undefined);
+    expect(reads()).toBe(2);
+  });
+
+  it('leaves a form the operator has edited alone: nothing is read, and the edit stands', async () => {
+    const view = await mount();
+    edit(view);
+    api.fetchLineupInForce.mockResolvedValue(CHANGED);
+
+    await announce();
+
+    expect(reads()).toBe(1);
+    expect(view.result.current.values[1]).toBe('Mori');
+    expect(view.result.current.dirty).toBe(true);
+  });
+
+  it('does not read over an edit made while the read was out', async () => {
+    const view = await mount();
+    const late = deferred();
+    api.fetchLineupInForce.mockReturnValue(late.promise);
+    await announce();
+    expect(reads()).toBe(2);
+
+    edit(view);
+    await act(async () => { late.resolve(CHANGED); });
+
+    expect(view.result.current.values[1]).toBe('Mori');
+    expect(view.result.current.baseline.positions[1]).toBe('Aoki');
+    expect(view.result.current.dirty).toBe(true);
+  });
+
+  it('does not put the lineup from before a save back over the saved one', async () => {
+    const view = await mount();
+    const late = deferred();
+    api.fetchLineupInForce.mockReturnValue(late.promise);
+    await announce();
+    edit(view);
+    act(() => view.result.current.confirmSaved({
+      positions: { 1: 'Mori', 2: 'Sato', 3: 'Ito' }, memberIds: { 1: 'mem-4', 2: 'mem-2', 3: 'mem-3' },
+    }));
+
+    await act(async () => { late.resolve(CARRIED); });
+
+    expect(view.result.current.values[1]).toBe('Mori');
+    expect(view.result.current.baseline.positions[1]).toBe('Mori');
+    expect(view.result.current.dirty).toBe(false);
+  });
+
+  it('is not read while a removal is out, and the removal\'s own read is what ends up shown', async () => {
+    api.fetchLineupInForce.mockResolvedValueOnce(OWN).mockResolvedValue(CARRIED);
+    const view = await mount();
+    const gate = deferred();
+    api.deleteMatchLineup.mockReturnValue(gate.promise);
+    let removal;
+    await act(async () => {
+      removal = view.result.current.dropOwnLineup();
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+    expect(view.result.current.removing).toBe(true);
+    const before = reads();
+
+    await announce();
+    expect(reads(), 'nothing is read while the removal is out').toBe(before);
+
+    await act(async () => { gate.resolve(true); await removal; });
+    expect(view.result.current.removing).toBe(false);
+    expect(view.result.current.source).toEqual({ matchId: 'm0' });
+  });
+
+  it('does not put the lineup that a removal took away back, when a read from before it answers', async () => {
+    api.fetchLineupInForce.mockResolvedValueOnce(OWN);
+    const view = await mount();
+    const late = deferred();
+    api.fetchLineupInForce.mockReturnValueOnce(late.promise).mockResolvedValue(CARRIED);
+    await announce();
+    expect(reads(), 'the announcement started a read').toBe(2);
+
+    await act(async () => { await view.result.current.dropOwnLineup(); });
+    expect(view.result.current.source).toEqual({ matchId: 'm0' });
+    await act(async () => { late.resolve(OWN); });
+
+    expect(view.result.current.source, 'the lineup the match carries now').toEqual({ matchId: 'm0' });
+  });
+
+  it('keeps what is shown, and raises no problem, when the read that follows fails', async () => {
+    const view = await mount();
+    api.fetchLineupInForce.mockRejectedValue(new Error('offline'));
+
+    await announce();
+
+    expect(reads()).toBe(2);
+    expect(view.result.current.values[1]).toBe('Aoki');
+    expect(view.result.current.loadError).toBe('');
+    expect(view.result.current.read).toBe(true);
+  });
+
+  it('reads a form that could not be read again, and keeps its problem when that fails too', async () => {
+    api.fetchLineupInForce.mockRejectedValue(new Error('competition not found'));
+    const view = await mount();
+    expect(view.result.current.read).toBe(false);
+
+    await announce();
+    expect(reads()).toBe(2);
+    expect(view.result.current.loadError).toBe('competition not found');
+    expect(view.result.current.loading).toBe(false);
+
+    api.fetchLineupInForce.mockResolvedValue(CARRIED);
+    await announce();
+    expect(view.result.current.read).toBe(true);
+    expect(view.result.current.loadError).toBe('');
+    expect(view.result.current.values[1]).toBe('Aoki');
+  });
+
+  it('ignores a change announced for another competition', async () => {
+    await mount();
+    await announce({ competitionId: 'another' });
+    expect(reads()).toBe(1);
+  });
+
+  it('stops listening when the editor closes', async () => {
+    const view = await mount();
+    view.unmount();
+    await announce();
+    await settle();
+    expect(reads()).toBe(1);
+  });
+});
+
+// "Not restored, the lineup changed since: Mori, Kato" names the names a draft
+// could not restore. Re-entering one is not an answer to the others, so it stays
+// through every edit; saving the lineup, or giving it up, answers it.
+describe('the "not restored" notice', () => {
+  const STALE_DRAFT = {
+    savedAt: Date.now(),
+    baseline: { positions: { 1: 'Old', 2: 'Sato', 3: 'Ito' }, memberIds: { 1: 'mem-9', 2: 'mem-2', 3: 'mem-3' } },
+    current: { positions: { 1: 'Mori', 2: 'Kato', 3: 'Ito' }, memberIds: { 1: 'mem-4', 2: 'mem-5', 3: 'mem-3' } },
+  };
+  const NAMED = { names: ['Mori', 'Kato'] };
+
+  async function mountWithStaleDraft() {
+    sessionStorage.setItem(DRAFT_KEY, JSON.stringify(STALE_DRAFT));
+    const view = await mount();
+    expect(view.result.current.draft.stale).toEqual(NAMED);
+    return view;
+  }
+
+  it('stays through the operator\'s edits, and through putting one back', async () => {
+    const view = await mountWithStaleDraft();
+
+    edit(view, { 1: 'Mori' });
+    expect(view.result.current.draft.stale).toEqual(NAMED);
+    edit(view, { 2: 'Kato' });
+    expect(view.result.current.draft.stale).toEqual(NAMED);
+    edit(view, { 1: 'Aoki', 2: 'Sato' });
+    expect(view.result.current.dirty).toBe(false);
+    expect(view.result.current.draft.stale).toEqual(NAMED);
+  });
+
+  it('stays when another device\'s change is followed', async () => {
+    const view = await mountWithStaleDraft();
+    api.fetchLineupInForce.mockResolvedValue({ ...CARRIED, positions: { ...NAMES.positions, 3: 'Oda' } });
+
+    await act(async () => { window.dispatchEvent(new CustomEvent('lineup-updated', { detail: { competitionId: 'c' } })); });
+
+    expect(view.result.current.values[3]).toBe('Oda');
+    expect(view.result.current.draft.stale).toEqual(NAMED);
+  });
+
+  it('goes once the lineup is saved', async () => {
+    const view = await mountWithStaleDraft();
+    edit(view, { 1: 'Mori' });
+
+    act(() => view.result.current.confirmSaved({
+      positions: { 1: 'Mori', 2: 'Sato', 3: 'Ito' }, memberIds: { 1: 'mem-4', 2: 'mem-2', 3: 'mem-3' },
+    }));
+
+    expect(view.result.current.draft.stale).toBeNull();
+  });
+
+  it('goes once the lineup is given up for the one the match carries', async () => {
+    api.fetchLineupInForce.mockResolvedValueOnce(OWN).mockResolvedValue(CARRIED);
+    const view = await mountWithStaleDraft();
+
+    await act(async () => { await view.result.current.dropOwnLineup(); });
+
+    expect(view.result.current.draft.stale).toBeNull();
+  });
+
+  it('is not shown again when the operator leaves the lineup and comes back to it', async () => {
+    const view = await mountWithStaleDraft();
+
+    view.rerender(props({ matchId: 'm2' }));
+    await act(async () => { await Promise.resolve(); });
+    expect(view.result.current.draft.stale).toBeNull();
+
+    view.rerender(props({ matchId: 'm1' }));
+    await act(async () => { await Promise.resolve(); });
+    expect(view.result.current.read).toBe(true);
+    expect(view.result.current.draft.stale).toBeNull();
+  });
+});

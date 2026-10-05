@@ -100,9 +100,10 @@ const NOTHING = { restored: false, stale: null };
 //   positionKeys  the lineup's position keys
 //   onRestore   called with the { positions, memberIds } to show, for a restored
 //               draft and for discard()
-// Returns { restored, stale, discard }: `restored` while a restored draft is still
-// unsaved; `stale` is { names } when the lineup changed meanwhile and the draft
-// was dropped rather than overwrite it.
+// Returns { restored, stale, discard, resolved }: `restored` while a restored draft
+// is still unsaved; `stale` is { names } when the lineup changed meanwhile and the
+// draft was dropped rather than overwrite it, and it stays until the editor calls
+// `resolved()` (the lineup was saved, or given up) or the lineup is left.
 export function useLineupDraft({ key, ready, baseline, current, positionKeys, onRestore }) {
   const { useState, useRef, useCallback, useLayoutEffect } = React;
   const [outcome, setOutcome] = useState({ key: '', ...NOTHING });
@@ -124,10 +125,16 @@ export function useLineupDraft({ key, ready, baseline, current, positionKeys, on
     const { baseFields: loaded, nowFields: shown, positionKeys: keys, onRestore: restore } = latest.current;
     if (readKey.current !== key) {
       readKey.current = key;
+      // A notice left from another lineup, or from this one's last visit, is not
+      // this visit's.
+      const settle = (next) => setOutcome((o) => (
+        !o.restored && !o.stale && !next.restored && !next.stale ? o : { key, ...next }
+      ));
       const draft = readDraft(key);
       if (!draft) {
         // None stored (a no-op), or one that cannot be read: it goes.
         removeDraft(key);
+        settle(NOTHING);
         return;
       }
       const expired = Date.now() - draft.savedAt > MAX_AGE_MS;
@@ -135,24 +142,22 @@ export function useLineupDraft({ key, ready, baseline, current, positionKeys, on
         || changedLineupPositions(draft.current, loaded, keys).length === 0) {
         // Too old, nothing in it, or the saved lineup already holds all of it.
         removeDraft(key);
+        settle(NOTHING);
       } else if (changedLineupPositions(draft.baseline, loaded, keys).length > 0) {
         // The lineup changed meanwhile (another device): never overwrite it.
         removeDraft(key);
-        setOutcome({ key, restored: false, stale: { names: draftNames(draft, keys) } });
+        settle({ restored: false, stale: { names: draftNames(draft, keys) } });
       } else {
         restore(lineupFields(draft.current, keys));
-        setOutcome({ key, restored: true, stale: null });
+        settle({ restored: true, stale: null });
       }
       return;
     }
-    // "Not restored" is about the lineup as it was opened: once the operator has
-    // changed it, or saved it, the notice no longer says anything.
     if (changedLineupPositions(loaded, shown, keys).length > 0) {
       writeDraft(key, { savedAt: Date.now(), baseline: loaded, current: shown });
-      setOutcome((o) => (o.stale ? { ...o, stale: null } : o));
     } else {
       removeDraft(key);
-      setOutcome((o) => (o.restored || o.stale ? { ...o, restored: false, stale: null } : o));
+      setOutcome((o) => (o.restored ? { ...o, restored: false } : o));
     }
   }, [key, ready, signature]);
 
@@ -163,8 +168,15 @@ export function useLineupDraft({ key, ready, baseline, current, positionKeys, on
     setOutcome((o) => (o.restored ? { ...o, restored: false } : o));
   }, [key]);
 
+  // "Not restored" says which names are missing from the lineup as it was opened,
+  // so editing does not answer it, not even putting the edit back: only the lineup
+  // being saved, or given up, does.
+  const resolved = useCallback(() => {
+    setOutcome((o) => (o.stale ? { ...o, stale: null } : o));
+  }, []);
+
   const mine = outcome.key === key ? outcome : NOTHING;
-  return { restored: mine.restored, stale: mine.stale, discard };
+  return { restored: mine.restored, stale: mine.stale, discard, resolved };
 }
 
 // LineupDraftNotice: the amber notice under an editor's source label, from what
@@ -210,12 +222,15 @@ const blankNames = (positionKeys) => Object.fromEntries(positionKeys.map((key) =
 //   saveQueued          a save of this lineup is still waiting to be sent
 // and gives the editor
 //   confirmSaved(lineup)  after the server confirmed a save: that is now the
-//                         baseline, and a match's own lineup
+//                         baseline, and a match's own lineup, and what a draft
+//                         could not restore no longer applies
 //   dropOwnLineup()       confirm, then remove a match's own lineup, so the match
 //                         carries its team's previous one, and show that one
 //   removeStored(remove, failure)  the same for any other stored lineup
 //   retry()               read again ("Try again")
-// The editors keep their layouts and their save bodies.
+// A lineup change announced for the competition (the lineup-updated event) is
+// followed: the lineup is read again and shown, unless the form has edits or a
+// removal is out. The editors keep their layouts and their save bodies.
 export function useLineupForm({ compId, teamId, matchId = '', positionKeys, password, matchLabel, teamName }) {
   const { useState, useRef, useEffect } = React;
   const draftKey = lineupDraftKey({ compId, teamId, matchId });
@@ -290,10 +305,34 @@ export function useLineupForm({ compId, teamId, matchId = '', positionKeys, pass
     return !!(api && typeof api.queuedLineupSave === 'function' && compId && teamId
       && api.queuedLineupSave(compId, teamId, matchId ? { matchId } : { round: STARTING_ROUND }));
   };
+
+  const read = loadedKey === draftKey;
+  const current = { positions: values, memberIds };
+  const dirty = changedLineupPositions(baseline, current, positionKeys).length > 0;
+
+  // Another device changed a lineup of this competition: read this one again and
+  // show it, unless the operator has edits on it or a removal is out, which are
+  // theirs and stay (the draft covers a reopen). This editor's own save is held off
+  // the same way, since the form stays dirty until confirmSaved. A read of a
+  // lineup already shown that fails leaves it as it is, raising no problem over a
+  // form that can still be used.
+  const follow = async () => {
+    const shown = read;
+    const mine = ++attempt.current;
+    try {
+      const lineup = await readLineup();
+      if (attempt.current === mine && !live.current.touched) adopt(lineup);
+    } catch (e) {
+      if (attempt.current === mine && !shown) setLoadError(lineupReadFailure(e));
+    } finally {
+      if (attempt.current === mine) setLoading(false);
+    }
+  };
+
   // The effects below key on the lineup alone and call these as of the render they
   // run in.
   const live = useRef(null);
-  live.current = { load, queuedNow };
+  live.current = { load, follow, queuedNow, touched: dirty || removing };
 
   useEffect(() => {
     if (!compId || !teamId) {
@@ -302,6 +341,16 @@ export function useLineupForm({ compId, teamId, matchId = '', positionKeys, pass
     }
     live.current.load();
     return () => { attempt.current += 1; };
+  }, [compId, teamId, matchId]);
+
+  useEffect(() => {
+    if (!compId || !teamId) return undefined;
+    const onUpdated = (e) => {
+      if (e.detail && e.detail.competitionId !== compId) return;
+      if (!live.current.touched) live.current.follow();
+    };
+    window.addEventListener('lineup-updated', onUpdated);
+    return () => window.removeEventListener('lineup-updated', onUpdated);
   }, [compId, teamId, matchId]);
 
   const retry = () => {
@@ -323,10 +372,6 @@ export function useLineupForm({ compId, teamId, matchId = '', positionKeys, pass
     return () => offs.forEach((off) => { if (typeof off === 'function') off(); });
   }, [compId, teamId, matchId]);
 
-  const read = loadedKey === draftKey;
-  const current = { positions: values, memberIds };
-  const dirty = changedLineupPositions(baseline, current, positionKeys).length > 0;
-
   // Unsaved picks survive a reload, the app's Back and closing the editor; a
   // restored draft is only shown, never saved.
   const draft = useLineupDraft({
@@ -340,11 +385,14 @@ export function useLineupForm({ compId, teamId, matchId = '', positionKeys, pass
 
   // What the server answered to a save is what it holds now.
   const confirmSaved = ({ positions, memberIds: ids }) => {
+    // A read begun before the save would answer with the lineup from before it.
+    attempt.current += 1;
     const stored = lineupFields({ positions, memberIds: ids }, positionKeys);
     setValues(stored.positions);
     setMemberIds(stored.memberIds);
     setBaseline(stored);
     if (matchId) setSource({ matchId });
+    draft.resolved();
   };
 
   // Removes a stored lineup, then shows what the match carries without it. A
@@ -356,6 +404,8 @@ export function useLineupForm({ compId, teamId, matchId = '', positionKeys, pass
     setRemoving(true);
     setError('');
     setWarning('');
+    // A read begun before the removal would answer with the lineup that is going.
+    attempt.current += 1;
     try {
       try {
         await remove();
@@ -364,6 +414,7 @@ export function useLineupForm({ compId, teamId, matchId = '', positionKeys, pass
         return;
       }
       removeDraft(draftKey);
+      draft.resolved();
       try {
         adopt(await readLineup());
       } catch (_e) {

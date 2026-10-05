@@ -242,14 +242,15 @@ import (
 // NEXT read after that save retries the repair with a roster that can now
 // resolve it, without requiring a restart.
 //
-// ONLY the five PUBLIC, caller-does-not-already-hold-the-lock entry points on
+// ONLY the six PUBLIC, caller-does-not-already-hold-the-lock entry points on
 // the READ path (loadParticipants, Store.LoadPools, Store.LoadPoolMatches,
-// Store.LoadBracket, and ParticipantsFingerprint below, which calls it
-// directly rather than through one of the other four), PLUS ONE caller on the
-// startup path (sweepLegacyUpgrades below, called once from NewStore, which
-// loops every id ListCompetitions finds so the whole data folder converges
-// without waiting for each competition's files to be individually read) call
-// this. All six are safe for the identical reason: none of them already hold
+// Store.LoadBracket, Store.DrawMatches (draw_matches.go), and
+// ParticipantsFingerprint below, which calls it directly rather than through
+// one of the loaders), PLUS ONE caller on the startup path
+// (sweepLegacyUpgrades below, called once from NewStore, which loops every id
+// ListCompetitions finds so the whole data folder converges without waiting
+// for each competition's files to be individually read) call this. All seven
+// are safe for the identical reason: none of them already hold
 // compID's per-comp lock at the point they call in. The *Locked siblings
 // (loadPoolsLocked, LoadPoolMatchesLocked, loadBracketLocked) and every
 // storeTx method (including storeTx.LoadBracket) are called by something

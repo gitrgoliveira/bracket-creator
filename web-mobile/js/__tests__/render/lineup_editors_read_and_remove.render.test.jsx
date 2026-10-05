@@ -9,7 +9,10 @@
 //    back), and says why in a line, never in a title alone;
 //  - a removal whose re-read fails leaves an empty, unread form that cannot be
 //    saved, never the removed lineup shown as the match's own;
-//  - "Not restored" goes once the operator saves the lineup or changes it.
+//  - "Not restored" stays through the operator's edits and goes once the operator
+//    saves the lineup;
+//  - a lineup change announced for the competition is followed while the form is
+//    untouched, and never over an edit.
 
 import React from 'react';
 import { render, act, fireEvent } from '@testing-library/react';
@@ -389,10 +392,10 @@ describe('"Not restored, the lineup changed since"', () => {
     return again;
   }
 
-  it('goes once the operator changes the lineup', async () => {
+  it('stays when the operator changes the lineup: the names it lists are still not in it', async () => {
     const utils = await openWithStaleDraft();
     await typeName(utils, 2, 'Mori');
-    expect(utils.queryByTestId('match-lineup-draft-team-a')).toBeNull();
+    expect(utils.getByTestId('match-lineup-draft-team-a').textContent).toBe('Not restored, the lineup changed since: Mori');
   });
 
   it('goes once the operator saves it', async () => {
@@ -407,6 +410,67 @@ describe('"Not restored, the lineup changed since"', () => {
     const utils = await openWithStaleDraft();
     await act(async () => { await Promise.resolve(); });
     expect(utils.getByTestId('match-lineup-draft-team-a')).toBeTruthy();
+  });
+});
+
+describe('a lineup change announced for the competition', () => {
+  const CHANGED_ELSEWHERE = lineupFor({
+    matchId: 'Pool A-2', sourceMatchId: 'Pool A-2',
+    positions: { 1: 'Mori', 2: 'Sato', 3: 'Ito' }, memberIds: { 1: 'mem-4', 2: 'mem-2', 3: 'mem-3' },
+  });
+  const announce = () => act(async () => {
+    window.dispatchEvent(new CustomEvent('lineup-updated', { detail: { competitionId: 'comp-1' } }));
+  });
+  const nameBox = (utils, position) => utils.getByLabelText(`${position} player`);
+
+  it('shows in the at-court panel while it is untouched', async () => {
+    const utils = await mountPanel();
+    expect(nameBox(utils, 1).value).toBe('Aoki');
+    api.fetchLineupInForce.mockResolvedValue(CHANGED_ELSEWHERE);
+
+    await announce();
+
+    expect(nameBox(utils, 1).value).toBe('Mori');
+    expect(saveButton(utils).disabled, 'what was read is not a change to save').toBe(true);
+    expect(utils.getByTestId('match-lineup-source-team-a').textContent).toBe('Lineup for this match');
+  });
+
+  it('is left out of an at-court panel the operator has edited', async () => {
+    const utils = await mountPanel();
+    await typeName(utils, 2, 'Kato');
+    api.fetchLineupInForce.mockResolvedValue(CHANGED_ELSEWHERE);
+
+    await announce();
+
+    expect(api.fetchLineupInForce).toHaveBeenCalledTimes(1);
+    expect(nameBox(utils, 2).value).toBe('Kato');
+    expect(nameBox(utils, 1).value).toBe('Aoki');
+  });
+
+  it('shows on the Lineups page while it is untouched', async () => {
+    const utils = await mountPage();
+    await chooseTarget(utils, 'Pool A-2');
+    expect(pageSelect(utils, 1).value).toBe('mem-1');
+    api.fetchLineupInForce.mockResolvedValue(CHANGED_ELSEWHERE);
+
+    await announce();
+
+    expect(pageSelect(utils, 1).value).toBe('mem-4');
+  });
+
+  it('is left out of a Lineups page the operator has edited', async () => {
+    const utils = await mountPage();
+    await chooseTarget(utils, 'Pool A-2');
+    await act(async () => { fireEvent.change(pageSelect(utils, 2), { target: { value: 'mem-4' } }); });
+    api.fetchLineupInForce.mockResolvedValue(CHANGED_ELSEWHERE);
+
+    const reads = api.fetchLineupInForce.mock.calls.length;
+
+    await announce();
+
+    expect(api.fetchLineupInForce, 'nothing is read over an edit').toHaveBeenCalledTimes(reads);
+    expect(pageSelect(utils, 2).value).toBe('mem-4');
+    expect(pageSelect(utils, 1).value).toBe('mem-1');
   });
 });
 

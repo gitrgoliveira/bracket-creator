@@ -840,9 +840,10 @@ function predatesAnswer(match, override) {
   return override.at > 0 && !!match && isOlderRunningCopy(match, override.match.status, override.at);
 }
 
-// What a pick is answered with when its side's lineup was never read: a write
-// composed on nothing would replace the lineup the team's later matches carry.
-const LINEUP_NOT_READ_NOTICE = "The lineup could not be read, so this name was not saved. Close and reopen the match.";
+// What a pick is answered with when its side's lineup was never read and the
+// pick's own read fails: a write composed on nothing would replace the lineup the
+// team's later matches carry.
+const LINEUP_NOT_READ_NOTICE = "The lineup could not be read, so this name was not saved. Check the connection and try again.";
 
 // The lineup a save of this match's lineup for the team, still waiting in the
 // outbox, would write: null when none is. The server's copy lacks that edit, and
@@ -868,15 +869,19 @@ const NO_LINEUPS = { a: null, b: null };
 // The lineup each team fields in this match, as the server holds it. A name
 // picked on the sheet saves the WHOLE lineup and every later match of the team
 // inherits it, so a write must never be composed on a lineup that was not
-// read: beginLineupWrite refuses a side ("a" Aka/sideA, "b" Shiro/sideB) until
-// a read of it has landed. null is a successful read of "nothing in force".
+// read. A side ("a" Aka/sideA, "b" Shiro/sideB) whose first read has not landed
+// is read by the pick itself (lineupToWriteOn), which is refused only when that
+// read fails; such a side is also read again when the connection returns.
+// null is a successful read of "nothing in force".
 //
 // One sync per match: a read begun for another match, or after the sheet
-// closed, never lands, and of two reads of a side the later-begun wins. A read
-// that fails leaves the side as it was. A change announced for this
-// competition is followed, except for a side this sheet is writing (that side
-// is read once its write settles) or whose lineup has a save still queued (the
-// server's copy lacks that edit, so the lineup held stays).
+// closed, never lands, and of two reads of a side the later-begun wins, a
+// confirmed write of the side counting as the latest read, so a read still out
+// from before it cannot put the old lineup back. A read that fails leaves the
+// side as it was. A change announced for this competition is followed, except
+// for a side this sheet is writing (that side is read once its write settles)
+// or whose lineup has a save still queued (the server's copy lacks that edit,
+// so the lineup held stays).
 function useMatchLineups(compId, matchId) {
   const [lineups, setLineups] = useStateA(NO_LINEUPS);
   const syncRef = useRefA(null);
@@ -907,7 +912,7 @@ function useMatchLineups(compId, matchId) {
       }
       return lineup;
     };
-    // A read nobody waits on; the next pick on an unread side says so.
+    // A read nobody waits on; when it fails, the next pick on the side reads again.
     const refresh = (side) => (
       sync.alive && sync.teamIds[side] ? read(side, sync.teamIds[side]).catch(() => {}) : Promise.resolve()
     );
@@ -915,15 +920,17 @@ function useMatchLineups(compId, matchId) {
       sync.teamIds = teamIds;
       return Promise.all(LINEUP_SIDES.map(side => refresh(side)));
     };
-    // One write of one side's lineup, bound to this match; null while the side has not been read.
+    // One write of one side's lineup, bound to this match.
     sync.beginWrite = (side) => {
-      if (!isRead(side)) return null;
       sync.writing[side] += 1;
       return {
+        isRead: () => isRead(side),
         read: (teamId) => read(side, teamId),
         held: () => sync.held[side],
         set: (lineup) => {
           if (!sync.alive) return;
+          // A read still out began before this write: it must not put the old lineup back.
+          sync.landed[side] = ++sync.began[side];
           sync.held[side] = lineup;
           setLineups(prev => ({ ...prev, [side]: lineup }));
         },
@@ -944,10 +951,18 @@ function useMatchLineups(compId, matchId) {
         else refresh(side);
       }
     };
+    // A side never read is read again once the connection is back.
+    const onOnline = () => {
+      for (const side of LINEUP_SIDES) {
+        if (!isRead(side)) refresh(side);
+      }
+    };
     window.addEventListener("lineup-updated", onLineupUpdated);
+    window.addEventListener("online", onOnline);
     return () => {
       sync.alive = false;
       window.removeEventListener("lineup-updated", onLineupUpdated);
+      window.removeEventListener("online", onOnline);
     };
   }, [compId, matchId]);
 
@@ -1644,7 +1659,8 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
   // the outbox would write (the server's copy lacks that edit, whichever surface
   // queued it), else what the server holds now. The lineup held here stands in
   // when the server cannot be asked, and putMatchLineup queues the write when it
-  // cannot be sent either.
+  // cannot be sent either. A side never read holds none, so for it a read that
+  // fails refuses the pick.
   const lineupToWriteOn = async (write, teamId) => {
     const queued = queuedMatchLineup(m.compId, teamId, m.id);
     if (queued) return { ...write.held(), ...queued };
@@ -1653,8 +1669,9 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
       const fresh = await withinDeadline(write.read(teamId), FETCH_TIMEOUT_MS);
       if (fresh !== TIMED_OUT) return fresh;
     } catch (_e) {
-      // The server cannot be asked: the held lineup stands in.
+      // The server cannot be asked.
     }
+    if (!write.isRead()) throw new Error(LINEUP_NOT_READ_NOTICE);
     return write.held();
   };
 
@@ -1663,7 +1680,8 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
   // resolves/mints that position's member id (see buildInlineLineupWrite),
   // then PUTs both. Lineups are always editable; no force/reason needed. The
   // write replaces the lineup every later match of the team carries, so a side
-  // whose lineup was never read is refused rather than composed on nothing.
+  // whose lineup was never read is read by the pick itself, and refused when
+  // that read fails, rather than composed on nothing.
   //
   // member is the squad-member object LineupNameInput hands back when the
   // operator picked one of the row's numbered entries (bc-dnst); it is
@@ -1673,10 +1691,6 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
     const notify = (tone, text) => { if (mountedRef.current) setLineupNotice({ key: noticeKey, tone, text }); };
     setLineupNotice(null);
     const write = beginLineupWrite(side);
-    if (!write) {
-      notify("error", LINEUP_NOT_READ_NOTICE);
-      return;
-    }
     setInlineLineupSaving(true);
     try {
       const current = await lineupToWriteOn(write, teamId);

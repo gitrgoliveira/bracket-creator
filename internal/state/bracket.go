@@ -209,6 +209,7 @@ func (s *Store) copyBracket(b *Bracket) *Bracket {
 		for j := range res.Rounds[i] {
 			res.Rounds[i][j].Encho = round[j].Encho.Clone()
 			res.Rounds[i][j].SubResults = CloneSubResults(round[j].SubResults)
+			res.Rounds[i][j].GroupStamps = CloneGroupStamps(round[j].GroupStamps)
 			if round[j].Feeders != nil {
 				res.Rounds[i][j].Feeders = append([]string(nil), round[j].Feeders...)
 			}
@@ -227,6 +228,7 @@ func (s *Store) copyBracket(b *Bracket) *Bracket {
 		tpm := *b.ThirdPlaceMatch
 		tpm.Encho = b.ThirdPlaceMatch.Encho.Clone()
 		tpm.SubResults = CloneSubResults(b.ThirdPlaceMatch.SubResults)
+		tpm.GroupStamps = CloneGroupStamps(b.ThirdPlaceMatch.GroupStamps)
 		if b.ThirdPlaceMatch.Feeders != nil {
 			tpm.Feeders = append([]string(nil), b.ThirdPlaceMatch.Feeders...)
 		}
@@ -411,6 +413,14 @@ func findBracketMatchByID(b *Bracket, matchID string) *BracketMatch {
 		return b.ThirdPlaceMatch
 	}
 	return nil
+}
+
+// MatchByID is findBracketMatchByID for a caller outside this package that
+// mutates a bracket match inside UpdateBracket and may need to abort the
+// write (UpdateBracketMatchByID's mutate cannot): rounds first, then the
+// bronze sibling, or nil.
+func (b *Bracket) MatchByID(matchID string) *BracketMatch {
+	return findBracketMatchByID(b, matchID)
 }
 
 // MatchStatusByID returns the status of the match with the given ID, searching

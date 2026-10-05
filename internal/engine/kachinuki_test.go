@@ -738,7 +738,7 @@ func TestMaybeAdvanceKachinuki_AppendsBoutNextRound(t *testing.T) {
 		},
 	}))
 
-	changed, postLog, err := eng.MaybeAdvanceKachinuki(compID, "P1-0")
+	changed, post, err := eng.MaybeAdvanceKachinuki(compID, "P1-0")
 	require.NoError(t, err)
 	assert.True(t, changed, "next bout should have been appended")
 
@@ -749,12 +749,12 @@ func TestMaybeAdvanceKachinuki_AppendsBoutNextRound(t *testing.T) {
 	assert.Equal(t, "A-Jiho", matches[0].SubResults[2].SideA, "A-Jiho stays as SideA winner")
 	assert.Equal(t, "B-Senpo", matches[0].SubResults[2].SideB, "B-Senpo is next SideB")
 
-	// mp-gmcg review E1: the returned postLog is the FULL post-append bout log,
+	// mp-gmcg review E1: the returned post.BoutLog is the FULL post-append bout log,
 	// so the handler echoes the appended pairing without re-reading the store.
 	// It must match what was persisted.
-	require.Len(t, postLog, 3, "postLog carries the appended bout")
-	assert.Equal(t, matches[0].SubResults, postLog, "postLog equals the persisted bout log")
-	assert.Equal(t, 3, postLog[2].Position, "appended bout carries its position")
+	require.Len(t, post.BoutLog, 3, "post.BoutLog carries the appended bout")
+	assert.Equal(t, matches[0].SubResults, post.BoutLog, "post.BoutLog equals the persisted bout log")
+	assert.Equal(t, 3, post.BoutLog[2].Position, "appended bout carries its position")
 }
 
 // A2 lineup integration tests -----------------------------------------------
@@ -1005,11 +1005,11 @@ func TestMaybeAdvanceKachinuki_RenameDoesNotRequeueRetiredMember(t *testing.T) {
 		},
 	}, 2))
 
-	changed, postLog, err := eng.MaybeAdvanceKachinuki(comp.ID, "P1-0")
+	changed, post, err := eng.MaybeAdvanceKachinuki(comp.ID, "P1-0")
 	require.NoError(t, err)
 	require.True(t, changed, "W-1 stays on and must be paired against the next un-retired RED fighter")
-	require.Len(t, postLog, 2)
-	next := postLog[1]
+	require.Len(t, post.BoutLog, 2)
+	next := post.BoutLog[1]
 	assert.Equal(t, "Backup", next.SideA,
 		"Suzuki (Sato, renamed) already lost and must NOT be requeued despite the name change")
 	assert.Equal(t, "W-1", next.SideB, "the bout-1 winner stays on")
@@ -2086,7 +2086,9 @@ func TestReopenKachinukiMatch_DiscardsVerdictKeepsBoutLog(t *testing.T) {
 
 	t.Run("pool", func(t *testing.T) {
 		compID := "reopen-verdict-pool"
-		eng, store, _ := setupKachinukiComp(t, compID, 3)
+		// markerSet: the load repair (bc-kheb) would clear the stored Encho
+		// before the reopen ran, and the Encho assertion would pin nothing.
+		eng, store, _ := setupKachinukiComp(t, compID, 3, markerSet)
 		require.NoError(t, store.SavePoolMatches(compID, []state.MatchResult{{
 			ID: "P1-0", SideA: "RedTeam", SideB: "WhiteTeam",
 			Status: state.MatchStatusCompleted,
@@ -2132,7 +2134,7 @@ func TestReopenKachinukiMatch_DiscardsVerdictKeepsBoutLog(t *testing.T) {
 
 	t.Run("bracket", func(t *testing.T) {
 		compID := "reopen-verdict-bracket"
-		eng, store, _ := setupKachinukiComp(t, compID, 3)
+		eng, store, _ := setupKachinukiComp(t, compID, 3, markerSet)
 		require.NoError(t, store.SaveBracket(compID, &state.Bracket{
 			Rounds: [][]state.BracketMatch{
 				{{
@@ -3859,16 +3861,16 @@ func TestMaybeAdvanceKachinuki_AdvancesOffABoutFoughtEntirelyByNumber(t *testing
 		},
 	}))
 
-	changed, postLog, err := eng.MaybeAdvanceKachinuki(compID, "P1-0")
+	changed, post, err := eng.MaybeAdvanceKachinuki(compID, "P1-0")
 	require.NoError(t, err)
 	require.True(t, changed,
 		"a bout fought entirely by squad number identifies both sides through their member ids; the encounter must keep advancing")
-	require.Len(t, postLog, 2, "the next pairing is appended after the scored bout")
-	assert.Equal(t, 2, postLog[1].Position, "the appended row is bout 2")
+	require.Len(t, post.BoutLog, 2, "the next pairing is appended after the scored bout")
+	assert.Equal(t, 2, post.BoutLog[1].Position, "the appended row is bout 2")
 	// WHO is paired matters as much as that a row appeared: red-1 won and must
 	// stay on, white-2 is the next unretired White member. Asserting only the
 	// position would pass for an append that paired the wrong two fighters,
 	// which is the failure winner-stays-on exists to prevent.
-	assert.Equal(t, "red-1", postLog[1].SideAMemberID, "the winner stays on, by id")
-	assert.Equal(t, "white-2", postLog[1].SideBMemberID, "the next White member comes in, by id")
+	assert.Equal(t, "red-1", post.BoutLog[1].SideAMemberID, "the winner stays on, by id")
+	assert.Equal(t, "white-2", post.BoutLog[1].SideBMemberID, "the next White member comes in, by id")
 }

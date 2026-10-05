@@ -7,6 +7,7 @@ import { setCachedAuthConfig } from './admin_helpers.jsx';
 import { LS_NOTIFICATIONS_ENABLED } from './notification_keys.jsx';
 import { bridge, setSnapshotProvider, setDisplayCourt, getLastBroadcastAt, applyPatchToTree, mergeSnapshotIntoTree, deriveLinkState, freshnessMs } from './court_bridge.jsx';
 import { BRANDING_DEFAULTS } from './admin_branding.jsx';
+import { queuedWritesNoun, supersededAlertText, displacedAlertText } from './write_result.jsx';
 
 const { useState: useS, useEffect: useE, useRef: useR, useCallback: useC } = React;
 
@@ -346,28 +347,21 @@ function parseCourtFromSearch() {
 
 // bc-qttl: turn a queue alert from api_client.jsx into operator-facing prose.
 //
-// The queue holds writes that have not reached the server. Every alert below is
-// bad news about finished work, so every one of these is rendered as an ERROR
-// toast (>=8s dwell, manual dismiss, protected from being clobbered by a later
-// success toast) rather than an informational one.
+// The queue holds writes that have not reached the server. Every alert below but
+// one is bad news about finished work, rendered as an ERROR toast (>=8s dwell,
+// manual dismiss, protected from being clobbered by a later success toast)
+// rather than an informational one. The exception is 'sent' (bc-offl): held
+// finished results that have now landed, a success toast (queueAlertToastType).
 //
 // Counts are reported as FINISHED RESULTS when the alert carries any, falling
 // back to raw writes otherwise: an operator counts results, and a queued running
-// autosave is not one. Exported for test.
+// autosave is not one (queuedWritesNoun, write_result.jsx). Exported for test.
 export function queueAlertMessage(alert) {
   if (!alert) return null;
-  const total = Number(alert.count) || 0;
-  const term = Number(alert.terminalCount) || 0;
-  const n = term > 0 ? term : total;
+  const { n, one, noun } = queuedWritesNoun(alert.terminalCount, alert.count);
   if (n <= 0 && alert.kind !== "storage_full") return null;
-  const one = n === 1;
-  const noun = term > 0
-    ? (one ? "finished result" : "finished results")
-    : (one ? "score update" : "score updates");
   const detail = alert.detail ? ` (${alert.detail})` : "";
   switch (alert.kind) {
-    case "expired":
-      return `${n} ${noun} never reached the server and ${one ? "was" : "were"} discarded after 12 hours in the queue. Re-enter ${one ? "it" : "them"} if still needed.`;
     case "unreadable":
       return `${n} queued ${one ? "write" : "writes"} could not be read and ${one ? "was" : "were"} discarded. Check the affected ${one ? "match" : "matches"}.`;
     case "rejected":
@@ -381,18 +375,36 @@ export function queueAlertMessage(alert) {
     // result that just won. A supersede is the one drop where re-entering is the
     // wrong move, so it gets its own wording.
     case "superseded":
-      return `${one ? "A result was" : `${n} results were`} not saved because a newer result is already recorded for the same ${one ? "match" : "matches"}. Check what is recorded before re-entering anything.`;
+      return supersededAlertText(n, one, !!alert.needsWinner, !!alert.defaultWinStands, alert.decision || null);
     case "server_error":
-      return `The server keeps refusing a queued result${detail}. It is still queued and still retrying, so keep this tab open.`;
+      // It holds back no other write (each queued write is sent on its own),
+      // and the editor of that match offers to discard it (HeldWriteDiscard).
+      return `The server keeps refusing a queued result${detail}. It is still being retried, and later results are still sent. If it never goes through, open that match, discard the held result and enter it again.`;
     case "auth_required":
       return `Sign in again to save ${n} pending ${one ? "result" : "results"}. ${one ? "It is" : "They are"} still queued.`;
     case "storage_full":
       return "Browser storage is full, so unsaved results can no longer be kept safely. Let them sync before reloading this tab.";
     case "discarded":
       return `${n} unsaved ${noun} ${one ? "was" : "were"} discarded because the tournament password changed.`;
+    case "sent":
+      return `${n} ${noun} sent.`;
+    // Held finishes that landed and moved a later change of their match to
+    // its history (it would have left the finished match without a winner).
+    // Recorded, so not an error: the history has the change.
+    case "displaced":
+      return displacedAlertText(n, one);
     default:
       return null;
   }
+}
+
+// queueAlertToastType: how the one subscriber below shows a queue alert. Only
+// 'sent' is good news, and 'displaced' is information (the result was saved;
+// the change it moved aside is in the history); every other kind stays an
+// error. Exported for test.
+export function queueAlertToastType(alert) {
+  if (alert && alert.kind === "displaced") return "info";
+  return alert && alert.kind === "sent" ? "success" : "error";
 }
 
 function App() {
@@ -586,7 +598,7 @@ function App() {
     if (typeof window.subscribeQueueAlert !== "function") return;
     return window.subscribeQueueAlert((alert) => {
       const message = queueAlertMessage(alert);
-      if (message) showToast(message, "error");
+      if (message) showToast(message, queueAlertToastType(alert));
     });
     // Mount-only: showToast closes over setToast, which is stable.
     // oxlint-disable-next-line react-hooks/exhaustive-deps

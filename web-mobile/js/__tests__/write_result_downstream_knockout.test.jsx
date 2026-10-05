@@ -332,18 +332,21 @@ describe('downstreamKnockoutPlayedConfirm with a qualifier change', () => {
 });
 
 // The terminal refusal: a knockout match the move reaches is being fought now.
+// One match, two (the 3rd-place match first) and three, with and without a
+// court, on both doors, are pinned against the server's own sentence in
+// downstream_running_messages_shared.test.jsx. These are the SPA-only shapes.
 describe('downstreamKnockoutRunningMessage', () => {
-    it('names the match and the way out', () => {
+    it('leaves the court clause out for a match with no court', () => {
         expect(downstreamKnockoutRunningMessage([{ id: 'm-r1-0', number: 9 }]))
-            .toBe('Match 9 is being fought now. Finish it or send it back to the queue, then save again.');
+            .toBe('Match 9 is being fought now. Finish it or send it back to the queue, then save this correction again.');
     });
-    it('names several in the plural', () => {
+    it('names several with no court in the plural', () => {
         expect(downstreamKnockoutRunningMessage([{ id: 'm-r1-0', number: 9 }, { id: 'm-bronze', number: 0 }]))
-            .toBe('Match 9 and the 3rd-place match are being fought now. Finish them or send them back to the queue, then save again.');
+            .toBe('Match 9 and the 3rd-place match are being fought now. Finish them or send them back to the queue, then save this correction again.');
     });
     it('never prints an empty subject', () => {
         expect(downstreamKnockoutRunningMessage(undefined))
-            .toBe('A knockout match is being fought now. Finish it or send it back to the queue, then save again.');
+            .toBe('A knockout match is being fought now. Finish it or send it back to the queue, then save this correction again.');
     });
 });
 
@@ -403,11 +406,11 @@ describe('a server-named knockout match keeps its round in every message', () =>
         expect(downstreamKnockoutReopenedNotice([semi]))
             .toBe('Match 1 (Semifinals) was reopened with its points kept: check them, then finish it again.');
         expect(downstreamKnockoutRunningMessage([semi]))
-            .toBe('Match 1 (Semifinals) is being fought now. Finish it or send it back to the queue, then save again.');
+            .toBe('Match 1 (Semifinals) is being fought now. Finish it or send it back to the queue, then save this correction again.');
         // A bracket saved before rounds were recorded is named "knockout Match
         // N" by the server; the sentence still starts with a capital.
         expect(downstreamKnockoutRunningMessage([{ id: 'm-r1-0', number: 1, label: 'knockout Match 1' }]))
-            .toBe('Knockout Match 1 is being fought now. Finish it or send it back to the queue, then save again.');
+            .toBe('Knockout Match 1 is being fought now. Finish it or send it back to the queue, then save this correction again.');
     });
 });
 

@@ -38,22 +38,22 @@ describe('ineligible_match', () => {
     expect(defaultWinDecisionBody(onB)).toEqual({
       decision: 'fusensho', decisionBy: 'shiro', decisionReason: 'auto: Yama C withdrawn',
     });
-    expect(defaultWinActionLabel(onB)).toBe('Record default win for Umi E');
+    expect(defaultWinActionLabel(onB)).toBe('Record fusensho for Umi E');
 
     const onA = match({ ineligibleSides: { a: 'fusenpai' } });
     expect(defaultWinDecisionBody(onA).decisionBy).toBe('aka');
-    expect(defaultWinActionLabel(onA)).toBe('Record default win for Yama C');
+    expect(defaultWinActionLabel(onA)).toBe('Record fusensho for Yama C');
   });
 
   it('says who cannot fight and what to do, by the decision that barred them', () => {
     expect(barredNote(match({ ineligibleSides: { b: 'kiken-voluntary' } })))
-      .toBe('Yama C withdrew: record the default win.');
+      .toBe('Yama C withdrew: record the fusensho.');
     expect(barredNote(match({ ineligibleSides: { b: 'kiken' } })))
-      .toBe('Yama C withdrew: record the default win.');
+      .toBe('Yama C withdrew: record the fusensho.');
     expect(barredNote(match({ ineligibleSides: { b: 'fusenpai' } })))
-      .toBe('Yama C did not appear earlier: record the default win.');
+      .toBe('Yama C did not appear earlier: record the fusensho.');
     const injured = match({ ineligibleSides: { b: 'kiken-injury' } });
-    expect(barredNote(injured)).toBe('Yama C withdrew injured: reinstate them or record the default win.');
+    expect(barredNote(injured)).toBe('Yama C withdrew injured: reinstate them or record the fusensho.');
     expect(awaitedDefaultWin(injured).reinstateable).toBe(true);
   });
 

@@ -651,6 +651,60 @@ func TestRequalify_Engi_FirstSecondSwap_WarnsThenReopens(t *testing.T) {
 	assert.Equal(t, 1, seated[rqID("A2")])
 }
 
+// TestRequalify_Engi_RefusedCorrectionLeavesNoHistoryEntry pins bc-cse: a
+// refused engi pool correction (the operator's write is rejected because the
+// old qualifier already fought a downstream knockout match, and the operator
+// has not confirmed the reopen) restores the pool row exactly as
+// TestRequalify_Engi_FirstSecondSwap_WarnsThenReopens does above, and must
+// leave NO new match history entry behind, since the write never landed.
+// Before the fix, RecordMatchResultWithIneligibilityTx's engi branch called
+// recordWriteHistory BEFORE requalifyMixedPoolWrite, so a refusal there left
+// a staged history line claiming "applied" for a write every caller then
+// commits along with the rolled-back row. Confirmed with Force, the write
+// lands and its history entry IS recorded.
+func TestRequalify_Engi_RefusedCorrectionLeavesNoHistoryEntry(t *testing.T) {
+	f := newRQFixture(t, "rq-engi-hist", 2, [][]string{{"A1", "A2"}, {"B1", "B2"}}, func(c *state.Competition) { c.Engi = true })
+	engi := func(matchID string, flagsA, flagsB int, fo ...ForceOptions) error {
+		t.Helper()
+		return f.write(matchID, &state.MatchResult{FlagsA: flagsA, FlagsB: flagsB, Status: state.MatchStatusCompleted}, fo...)
+	}
+	require.NoError(t, engi("Pool A-0", 3, 0)) // A1 (side A) wins
+	require.NoError(t, engi("Pool B-0", 3, 0))
+	f.resolve()
+	m1, s1 := f.slot("Pool A-1st")
+	flagsA, flagsB := 3, 0
+	if s1 == "B" {
+		flagsA, flagsB = 0, 3
+	}
+	require.NoError(t, engi(m1.ID, flagsA, flagsB), "A1 fights and wins the 1st-place match")
+
+	before, err := f.store.LoadMatchHistory(f.compID, "Pool A-0")
+	require.NoError(t, err)
+
+	cErr := engi("Pool A-0", 0, 3)
+	var played *DownstreamKnockoutPlayedError
+	require.ErrorAs(t, cErr, &played, "the correction names the match A1 already fought")
+
+	stored := loadPoolMatchByID(t, f.store, f.compID, "Pool A-0")
+	require.NotNil(t, stored)
+	assert.Equal(t, "A1", stored.Winner, "refused until confirmed")
+	assert.Equal(t, 3, stored.FlagsA, "the refusal restores the flags too")
+	assert.Equal(t, 0, stored.FlagsB)
+
+	after, err := f.store.LoadMatchHistory(f.compID, "Pool A-0")
+	require.NoError(t, err)
+	assert.Equal(t, before, after, "a refused write must leave no new match history entry")
+
+	// Confirmed with Force: the write lands and IS recorded.
+	require.NoError(t, engi("Pool A-0", 0, 3, ForceOptions{Force: true}))
+	confirmed, err := f.store.LoadMatchHistory(f.compID, "Pool A-0")
+	require.NoError(t, err)
+	require.Len(t, confirmed, len(before)+1, "the confirmed write adds exactly one history entry")
+	last := confirmed[len(confirmed)-1]
+	assert.Equal(t, state.HistoryOutcomeApplied, last.Outcomes[state.GroupResult])
+	assert.Equal(t, state.HistoryOutcomeApplied, last.Outcomes[state.GroupFlags])
+}
+
 // A pool-rank override (the chusen door) moves a pool's order without a match
 // write, so it answers for the knockout exactly as a pool correction does:
 // named and refused while the old 1st has fought, the override taken back; a
@@ -771,6 +825,13 @@ func TestRevertMatchToQueue_PoolStampsRevertFence(t *testing.T) {
 
 	stale := f.poolResult("Pool A-0", "A1")
 	stale.ModifiedAt = now - 5_000 // written before the requeue, replayed after it
+	// bc-mrgc: the requeue fences the VERDICT (it stamps the result group with
+	// the server's now) and keeps the score with the stamps it had. The
+	// replay's verdict is held; the rest of it echoes the stored score, so
+	// nothing of it applies and it answers superseded, kept in the match's
+	// history rather than lost.
 	require.ErrorIs(t, f.write("Pool A-0", stale), ErrMatchSuperseded)
+	require.NotNil(t, stale.Merge)
+	assert.Equal(t, []string{state.GroupResult}, stale.Merge.Held)
 	assert.Equal(t, state.MatchStatusScheduled, loadPoolMatchByID(t, f.store, f.compID, "Pool A-0").Status)
 }

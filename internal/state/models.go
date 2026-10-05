@@ -503,6 +503,16 @@ type Competition struct {
 	// competition to CompStatusComplete. Phase 3b.
 	LeagueTiebreakFinalized bool `yaml:"league_tiebreak_finalized,omitempty" json:"leagueTiebreakFinalized,omitempty"`
 
+	// KachinukiEncounterEnchoCleared records that the one-time load repair
+	// (upgradeKachinukiEncounterEnchoLocked, legacy_upgrade.go) has cleared the
+	// match-level overtime an older release stored on this competition's
+	// kachinuki encounters (bc-kheb). The repair runs only while it is false,
+	// and sets it once both match files are saved; POST /competitions sets it
+	// on a competition created as kachinuki, which has nothing to repair. Server-managed: `json:"-"`
+	// keeps it off the wire, and the settings PUT copies onto the stored
+	// record, so nothing a client sends can clear it.
+	KachinukiEncounterEnchoCleared bool `yaml:"kachinuki_encounter_encho_cleared,omitempty" json:"-"`
+
 	Players []domain.Player `yaml:"-" json:"players"`
 }
 
@@ -569,6 +579,33 @@ func (c Competition) EffectiveFormat() string {
 // fighter per side.
 func (c *Competition) IsKachinuki() bool {
 	return c != nil && c.TeamSize >= 2 && c.TeamMatchType == TeamMatchTypeKachinuki
+}
+
+// ClearKachinukiEncounterEncho clears a match-level overtime record from one
+// of c's encounters when c is kachinuki, and reports whether it cleared one.
+// The ONE owner of the rule (operator ruling 2026-09-24, bc-kheb): one bout
+// fought on in encho does not put a kachinuki encounter in overtime, so (E)
+// lives on that bout's own row (SubMatchResult.Encho, never touched here) and
+// the encounter carries none. Called by the engine's kachinuki write
+// chokepoint (applyKachinukiMerge), by its decision write before the
+// default-win circles are counted (recordDecisionTx), and by the load repair,
+// so a write and an old file converge on the same shape. encho points at a MatchResult's or a
+// BracketMatch's Encho field, and matchID is that match's id.
+//
+// A pool representative bout or tie-break bout (IsPoolDaihyosenMatchID,
+// IsTiebreakerMatchID) is not an encounter: it is ONE individual bout, whose
+// overtime lives at match level because the match is the bout. Its encho is
+// never cleared, in a kachinuki competition too (the same exclusion
+// NeedsDefaultWinBoutPadding makes for those ids).
+func (c *Competition) ClearKachinukiEncounterEncho(matchID string, encho **EnchoMetadata) bool {
+	if !c.IsKachinuki() || encho == nil || *encho == nil {
+		return false
+	}
+	if IsPoolDaihyosenMatchID(matchID) || IsTiebreakerMatchID(matchID) {
+		return false
+	}
+	*encho = nil
+	return true
 }
 
 // TeamBoutRows is the number of numbered bout rows a team match's block has
@@ -1389,7 +1426,36 @@ type MatchResult struct {
 	// it to resolve WinnerID from the stored side ids even when both sides
 	// share a name. Never persisted (json/CSV omit); it only carries the
 	// side decision from the handler to the id-resolution step.
-	WinnerSide     string           `json:"-" yaml:"-"`
+	WinnerSide string `json:"-" yaml:"-"`
+	// ClearsWithdrawal is a transient flag set by the score handler from the
+	// request's `clearWithdrawal`: the operator removed a withdrawal or
+	// default win recorded by mistake and this completed write is the real
+	// result, so it replaces the stored ruling rather than keeping it
+	// (engine.KeepsWithdrawalRuling). Never written to disk or the wire
+	// (json/CSV omit), and never kept on a stored copy either
+	// (ClearRequestFields): a writer that builds its write from a stored
+	// match (the daihyosen add, `u := *match`) must not inherit another
+	// write's instruction to replace a ruling.
+	ClearsWithdrawal bool `json:"-" yaml:"-"`
+	// Changed names the GROUPS this write changes (match_groups.go: points,
+	// result, encho, flags, rep, bout:<position>), the input to the merge
+	// owner engine.mergeMatchWrite (bc-mrgc). Transient like ClearsWithdrawal:
+	// the score handler reads it from the request's `changed`, and every
+	// server-built write (decision, daihyosen add/remove, quick-score, a
+	// start) sets it explicitly. nil means "the writer stated nothing", which
+	// the merge reads as every group the payload carries (see
+	// engine.defaultChangedGroups). Never written to disk or the wire.
+	Changed []string `json:"-" yaml:"-"`
+	// WriteDoor names the endpoint a write came through ("score", "decision",
+	// "daihyosen-add", ...), for the match history entry the write leaves.
+	// Transient, set by the handler; "" reads as "engine" in the history.
+	WriteDoor string `json:"-" yaml:"-"`
+	// Merge is what engine.mergeMatchWrite decided for THIS write: which
+	// groups applied, which were held (kept in the match history because a
+	// newer change to them is stored), and the held values. Set on the
+	// incoming result only, read by the history writer and the handlers'
+	// heldGroups; never persisted.
+	Merge          *MergeReport     `json:"-" yaml:"-"`
 	IpponsA        []string         `json:"ipponsA"` // waza letters M/K/D/T/H/S (naginata), or ○ (FIK default-win marker)
 	IpponsB        []string         `json:"ipponsB"`
 	HansokuA       int              `json:"hansokuA"`
@@ -1531,15 +1597,30 @@ type MatchResult struct {
 	// via BracketMatch.ModifiedAt, pool-matches.csv via its own column. The
 	// guard needs a STORED stamp to compare against, so persistence is not a
 	// detail here, it is the precondition; this was bracket-only for exactly as
-	// long as the pool file had nowhere to put it. engine.applyMatchWrite is the
-	// one primitive both branches call.
+	// long as the pool file had nowhere to put it. engine.mergeMatchWrite is the
+	// one owner both branches call (bc-mrgc), comparing per group.
 	//
-	// The completed-never-reverted guard stays on top regardless. 0
+	// A running write never reverts a completed match regardless (it never
+	// carries the result group, engine.runningOverFinished). 0
 	// (absent/legacy) means "unstamped": it is treated as arrival-order and still
 	// APPLIES (it does NOT lose to a stamped write), so old files and un-stamped
 	// clients behave exactly as before rather than having a legitimate change
 	// silently dropped. See domain.ApplyByTimestamp.
+	//
+	// Since bc-mrgc the comparison is made PER GROUP (GroupStamps below);
+	// ModifiedAt stays the newest of the group stamps, which is what recency
+	// (result_recency.jsx) and the SPA's keepNewerMatches read.
 	ModifiedAt int64 `json:"modifiedAt,omitempty" yaml:"-"`
+	// GroupStamps is the stamp of the last applied change to each group
+	// (match_groups.go), the per-group form of ModifiedAt that
+	// engine.mergeMatchWrite orders writes by (bc-mrgc). nil on a match
+	// written before groups existed: every group then reads as stamped at
+	// ModifiedAt (GroupStamp), so a legacy file behaves exactly as the
+	// whole-match guard did. A bout group whose row is gone keeps its stamp
+	// (a tombstone), so an older write still carrying the row cannot bring it
+	// back. Persisted as the last pool-matches.csv column and in bracket.json
+	// (BracketMatch.GroupStamps).
+	GroupStamps map[string]int64 `json:"groupStamps,omitempty" yaml:"-"`
 }
 
 // HanteiDecided reports whether a hantei verdict stands on this match: the
@@ -1822,6 +1903,10 @@ type BracketMatch struct {
 	// 0 = unstamped/legacy: arrival-order, still applies (never dropped). See
 	// domain.ApplyByTimestamp.
 	ModifiedAt int64 `json:"modifiedAt,omitempty"`
+	// GroupStamps mirrors MatchResult.GroupStamps (bc-mrgc): the stamp of the
+	// last applied change to each group of this match, persisted in
+	// bracket.json. nil on a legacy match (every group reads ModifiedAt).
+	GroupStamps map[string]int64 `json:"groupStamps,omitempty"`
 	// PlaceholderA / PlaceholderB / PlaceholderWinner record what SideA / SideB /
 	// Winner held at DRAW time, before any pool resolved. They are written once,
 	// by engine.buildBracketFromDraw, for a pool-fed (mixed) knockout whose
@@ -1919,4 +2004,15 @@ type Announcement struct {
 	Message   string    `json:"message" yaml:"message"`
 	SentAt    time.Time `json:"sentAt" yaml:"sent_at"`
 	ExpiresAt time.Time `json:"expiresAt" yaml:"expires_at"`
+}
+
+// ClearRequestFields drops the fields that belong to ONE write and never to
+// the match it is stored as: Changed, WriteDoor, Merge and ClearsWithdrawal.
+// The ONE list of them, called on every stored copy (the pool write's
+// whole-struct overwrite and every pool-match copy the store hands out), so a
+// writer building its write from a stored match never inherits another
+// write's groups, door, merge report or instruction to replace a ruling.
+func (m *MatchResult) ClearRequestFields() {
+	m.Changed, m.WriteDoor, m.Merge = nil, "", nil
+	m.ClearsWithdrawal = false
 }

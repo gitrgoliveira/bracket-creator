@@ -6,6 +6,12 @@ before:
     - go mod tidy
     - go generate ./...
     - mkdir -p web-mobile/dist
+    # web-mobile/vendor/* (preact, hooks, compat, preact-router) is gitignored
+    # and fetched only by the Makefile's vendor-frontend target, which local
+    # builds and the Dockerfiles depend on but goreleaser never called.
+    # Without this, every release artifact embeds web-mobile/vendor's tracked
+    # placeholder instead of Preact and the mobile app's UI renders blank.
+    - make vendor-frontend
     # Mirror Makefile's esbuild-jsx target so release builds bundle every
     # web-mobile/js/*.jsx entry, not just the four legacy names. The
     # previous explicit list went stale as sources moved from .js to .jsx

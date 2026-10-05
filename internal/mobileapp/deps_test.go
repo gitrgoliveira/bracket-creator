@@ -102,7 +102,7 @@ func (stubScoringEngine) UpdateMatchTime(string, string, string) error {
 	return nil
 }
 
-func (stubScoringEngine) MaybeAdvanceKachinuki(string, string) (bool, []state.SubMatchResult, error) {
+func (stubScoringEngine) MaybeAdvanceKachinuki(string, string) (bool, *engine.KachinukiAdvance, error) {
 	return false, nil, nil
 }
 

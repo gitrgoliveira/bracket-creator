@@ -145,6 +145,12 @@ type StoreTx interface {
 	// write is individually crash-safe, and no other WAL-staged file
 	// is touched by this path, so cross-file atomicity is not required.
 	UpdateParticipant(compID, pid string, withZekkenName bool, transform func(*domain.Player) error) (*domain.Player, error)
+	// AppendMatchHistory stages one entry onto a match's history file
+	// (match_history.go) in this transaction, so the entry lands exactly when
+	// the write it describes does. LoadMatchHistory reads it back,
+	// read-your-own-writes over an append this transaction staged.
+	AppendMatchHistory(compID string, entry MatchHistoryEntry) error
+	LoadMatchHistory(compID, matchID string) ([]MatchHistoryEntry, error)
 }
 
 // WithTransaction runs fn under the per-competition write lock for

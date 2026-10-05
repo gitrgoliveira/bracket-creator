@@ -9,9 +9,24 @@ import {
   DOWNSTREAM_KNOCKOUT_PLAYED_CANCELLED,
   attemptScoreWrite,
   downstreamKnockoutReopenedNotice,
+  writeKeepsEditorOpen,
 } from './write_result.jsx';
+import { keptInHistoryNote } from './match_groups.jsx';
 
 const { useState: useStateA, useEffect: useEffectA, useRef: useRefA } = React;
+
+// closingHistoryToast (bc-mrgc): the toast editMatchScore shows for a write
+// that landed but kept something in the match's history (part of it held, or
+// a later change it moved there because that change would have left the
+// finished match without a winner), worded by keptInHistoryNote. Only when
+// the write closes the editor: an editor that stays open says so itself
+// (useKeptInHistoryNote). A write that did not land keeps its editor open
+// too (writeKeepsEditorOpen), where its own banner reports it. null when
+// there is nothing to say. Exported for test.
+export function closingHistoryToast(result, saveRes) {
+  if (!saveRes || writeKeepsEditorOpen(result, saveRes)) return null;
+  return keptInHistoryNote(saveRes);
+}
 
 const REFRESHABLE_EVENTS = new Set([
   "competition_started",
@@ -325,20 +340,18 @@ function AdminApp({ tournament, onUpdate, onLogout, onViewerMode, onPasswordChan
       const notice = downstreamKnockoutReopenedNotice(saveRes.downstreamReopened);
       if (notice) showToast(notice);
     }
+    const keptNote = closingHistoryToast(result, saveRes);
+    if (keptNote) showToast(keptNote);
     // F5: when the write was only queued (offline/transient), skip the
     // best-effort refresh. There is nothing new on the server yet.
     // Return saveRes so callers (onSubmit/onSubmitAndNext props) can
     // propagate the { queued: true } signal up to the score editor.
     if (saveRes && saveRes.queued) return saveRes;
     await refreshCompsBestEffort("Score");
-    // B3: stale-write surfacing. The server returns { stale: true } (HTTP 200)
-    // when the match was already advanced to a newer state (e.g. kachinuki
-    // exhaustion completed the match between the editor opening and the submit).
-    // The refresh above already resyncs the local state from the server, so the
-    // operator will see the correct match status after this toast is dismissed.
-    if (saveRes && saveRes.stale) {
-      showToast("The server already completed this match. Reopen it to see the current result.", "error");
-    }
+    // No {stale:true} answer exists any more (bc-mrgc phase 3): a write the
+    // server does not apply is kept in the match's history and answered
+    // superseded (applied:false, heldGroups), which the editor reports itself
+    // (notLandedBanner) and the refresh above resyncs.
     return saveRes;
   };
 

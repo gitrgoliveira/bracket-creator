@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { queueAlertMessage } from '../app.jsx';
+import { queueAlertMessage, queueAlertToastType } from '../app.jsx';
 
 // The alert kinds are what the operator actually READS when a result does not
 // reach the server, so the wording is behaviour, not decoration.
@@ -12,11 +12,14 @@ describe('queueAlertMessage', () => {
     it('tells the operator NOT to simply re-enter a superseded result', () => {
         const msg = queueAlertMessage({ kind: 'superseded', count: 1, terminalCount: 1 });
         expect(msg).toBeTruthy();
-        expect(msg).toMatch(/not saved/i);
-        expect(msg).toMatch(/newer result/i);
+        // bc-mrgc: the result is kept in the match's history, not lost.
+        expect(msg).toMatch(/not applied/i);
+        expect(msg).toMatch(/newer change/i);
+        expect(msg).toMatch(/kept in the match's history/i);
+        expect(msg).toMatch(/nothing is lost/i);
         // The distinguishing instruction. 'rejected' says "Re-enter it."; this
         // must not, or the advice actively causes the data loss it reports.
-        expect(msg).toMatch(/check what is recorded/i);
+        expect(msg).toMatch(/check the match and its history/i);
         expect(msg).not.toMatch(/^.*\bRe-enter it\.\s*$/i);
     });
 
@@ -43,11 +46,56 @@ describe('queueAlertMessage', () => {
 
     it('pluralises a superseded batch', () => {
         const msg = queueAlertMessage({ kind: 'superseded', count: 3, terminalCount: 3 });
-        expect(msg).toMatch(/3 results were not saved/i);
+        expect(msg).toMatch(/3 results were not applied/i);
+        expect(msg).toMatch(/kept in each match's history/i);
         expect(msg).toMatch(/matches/i);
+    });
+
+    // A write the server keeps refusing holds back no other write any more,
+    // and its match's editor offers to discard it: the alert says both,
+    // rather than only "keep this tab open".
+    it('a write the server keeps refusing: later results still go, and how to clear it', () => {
+        const msg = queueAlertMessage({ kind: 'server_error', count: 1, terminalCount: 1, detail: 'HTTP 500' });
+        expect(msg).toMatch(/keeps refusing a queued result \(HTTP 500\)/);
+        expect(msg).toMatch(/later results are still sent/i);
+        expect(msg).toMatch(/discard the held result and enter it again/i);
+    });
+
+    // A held finish landed and moved a later change of its match to the
+    // history: recorded, so information, not an error.
+    it('a held finish that moved a later change aside: saved, as information', () => {
+        const alert = { kind: 'displaced', count: 1, terminalCount: 1 };
+        expect(queueAlertMessage(alert)).toMatch(/^A held result was saved\./);
+        expect(queueAlertToastType(alert)).toBe('info');
     });
 
     it('returns null for an unknown kind, so nothing is toasted', () => {
         expect(queueAlertMessage({ kind: 'not-a-kind', count: 1, terminalCount: 1 })).toBeNull();
     });
+
+    // bc-mrgc phase 3: nothing queued is discarded for its age any more (the
+    // server orders an old write by its stamp and keeps what loses in the
+    // match's history), so the 12-hour discard notice is gone with it.
+    it('has no expiry notice: no queued write is discarded for its age', () => {
+        expect(queueAlertMessage({ kind: 'expired', count: 1, terminalCount: 1 })).toBeNull();
+    });
+
+    // bc-offl (operator decision 2026-09-27, Q2): held results that landed.
+    it('confirms held results that were sent, singular and plural', () => {
+        expect(queueAlertMessage({ kind: 'sent', count: 1, terminalCount: 1 })).toBe('1 finished result sent.');
+        expect(queueAlertMessage({ kind: 'sent', count: 3, terminalCount: 3 })).toBe('3 finished results sent.');
+    });
+});
+
+describe('queueAlertToastType', () => {
+    it('shows a sent confirmation as a success toast', () => {
+        expect(queueAlertToastType({ kind: 'sent', count: 1, terminalCount: 1 })).toBe('success');
+    });
+
+    it.each(['unreadable', 'rejected', 'superseded', 'server_error', 'auth_required', 'storage_full', 'discarded'])(
+        'keeps %s an error toast',
+        (kind) => {
+            expect(queueAlertToastType({ kind, count: 1, terminalCount: 1 })).toBe('error');
+        },
+    );
 });

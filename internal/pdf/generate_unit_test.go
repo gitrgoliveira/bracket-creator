@@ -95,7 +95,7 @@ func TestPublishAtomic(t *testing.T) {
 }
 
 func TestMergePDFs_EmptyList(t *testing.T) {
-	err := MergePDFs([]string{}, filepath.Join(t.TempDir(), "out.pdf"))
+	err := MergePDFs(context.Background(), []string{}, filepath.Join(t.TempDir(), "out.pdf"))
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "no PDFs to merge")
 }

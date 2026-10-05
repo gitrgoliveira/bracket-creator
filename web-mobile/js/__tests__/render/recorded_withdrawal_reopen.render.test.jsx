@@ -448,15 +448,15 @@ describe("Clear withdrawal and reopen names the winner's lost points on a single
   it('individual kiken', async () => {
     await mount(individualWithdrawal({ decision: 'kiken-injury', ipponsB: ['M'] }));
     const text = screen.getByTestId('clear-withdrawal-consequence').textContent;
-    expect(text).toContain("Yamada's points were replaced by the default win when the withdrawal was recorded, so enter them again");
+    expect(text).toContain("Yamada's points were replaced by the kiken when the withdrawal was recorded, so enter them again");
     expect(text).toContain("Tanaka's points are kept");
     expect(text).not.toContain('with what was fought kept');
   });
 
-  it('individual fusenpai: a no-show fought nothing, so only the default win goes', async () => {
+  it('individual fusenpai: a no-show fought nothing, so only the win it gave goes', async () => {
     await mount(individualWithdrawal());
     const text = screen.getByTestId('clear-withdrawal-consequence').textContent;
-    expect(text).toContain('the default win given to Yamada is removed, and Tanaka can compete again');
+    expect(text).toContain('the win the fusenpai gave to Yamada is removed, and Tanaka can compete again');
     expect(text).not.toContain('points');
   });
 
@@ -464,7 +464,7 @@ describe("Clear withdrawal and reopen names the winner's lost points on a single
     await mount(teamWithdrawal());
     const text = screen.getByTestId('clear-withdrawal-consequence').textContent;
     expect(text).toContain('with what was fought kept');
-    expect(text).not.toContain('replaced by the default win');
+    expect(text).not.toContain('replaced by the');
   });
 });
 
@@ -491,30 +491,30 @@ describe('Clear withdrawal and reopen: pool match feeding a knockout', () => {
 });
 
 // bc-rawm: withdrawalInForce widened to the match-level DEFAULT-WIN class
-// (a match-level default win writes a whole-match `decision: "fusensho"` for
+// (a match-level fusensho writes a whole-match `decision: "fusensho"` for
 // a match against a competitor already withdrawn elsewhere, recorded from
 // that match's own notice: BarredMatchNotice / the queue row's Record
-// default win). Same RecordedWithdrawal door as kiken/fusenpai, different
-// copy: the Recorded line names the winner, and the reopen button reads
-// "Clear default win and reopen".
-describe('a match-level fusensho default win (bc-rawm)', () => {
-  // Yamada (aka) got the default win when Tanaka (shiro) withdrew elsewhere
-  // and the opponent's default win was recorded for this still-scheduled
-  // match against Yamada.
+// fusensho for <opponent>). Same RecordedWithdrawal door as kiken/fusenpai,
+// different copy: the Recorded line names the winner, and the reopen button
+// reads "Clear fusensho" (no "and reopen").
+describe('a match-level fusensho (bc-rawm)', () => {
+  // Yamada (aka) got the fusensho when Tanaka (shiro) withdrew elsewhere and
+  // the opponent's fusensho was recorded for this still-scheduled match
+  // against Yamada.
   const defaultWin = (o = {}) => individualWithdrawal({
     decision: 'fusensho', decisionBy: 'shiro', decisionReason: 'auto: Tanaka withdrawn',
     ipponsA: ['○', '○'], ipponsB: [],
     ...o,
   });
 
-  it('names the winner in the Recorded line and offers "Clear default win"', async () => {
+  it('names the winner in the Recorded line and offers "Clear fusensho"', async () => {
     await mount(defaultWin());
     const line = screen.getByTestId('recorded-withdrawal');
-    expect(line.textContent).toContain('Recorded: Default win (fusensho) for Yamada. Tanaka had withdrawn.');
+    expect(line.textContent).toContain('Recorded: Fusensho for Yamada. Tanaka had withdrawn.');
     const button = screen.getByTestId('clear-withdrawal-reopen');
     // bc-cse: no "and reopen" -- a fusensho reopen does not always land
     // running any more (see the consequence copy test below).
-    expect(button.textContent).toBe('Clear default win');
+    expect(button.textContent).toBe('Clear fusensho');
   });
 
   // bc-cse: the server returns the match to SCHEDULED, not running, when
@@ -524,10 +524,10 @@ describe('a match-level fusensho default win (bc-rawm)', () => {
   // running". No withdrawnStatus on the match here, so the reinstate clause
   // is correctly absent: unknown reads as "not reinstateable", never as a
   // promise that may not hold.
-  it('the reopen consequence says the match queues again and the default win must be re-recorded', async () => {
+  it('the reopen consequence says the match queues again and the fusensho must be re-recorded', async () => {
     await mount(defaultWin());
     const text = screen.getByTestId('clear-withdrawal-consequence').textContent;
-    expect(text).toBe('The match goes back to the queue. Tanaka is still withdrawn, so record the default win again.');
+    expect(text).toBe('The match goes back to the queue. Tanaka is still withdrawn, so record the fusensho again.');
     expect(text).not.toContain('reinstate');
     expect(text).not.toContain('goes back to running');
   });
@@ -537,7 +537,7 @@ describe('a match-level fusensho default win (bc-rawm)', () => {
   it('offers the reinstate route too when the barred competitor is still ineligible and reinstateable', async () => {
     await mount(defaultWin({ withdrawnStatus: { eligible: false, reinstateable: true } }));
     const text = screen.getByTestId('clear-withdrawal-consequence').textContent;
-    expect(text).toBe('The match goes back to the queue. Tanaka is still withdrawn, so record the default win again, or reinstate Tanaka first to fight it.');
+    expect(text).toBe('The match goes back to the queue. Tanaka is still withdrawn, so record the fusensho again, or reinstate Tanaka first to fight it.');
   });
 
   // Not reinstateable (e.g. kiken-voluntary) or no longer barred: no
@@ -577,7 +577,7 @@ describe('a match-level fusensho default win (bc-rawm)', () => {
   // (admin_scoring_team.jsx) and anywhere else that needs a label rather
   // than the full winner-naming sentence RecordedWithdrawal composes itself.
   it('withdrawalLabel gives the short "fact" form', () => {
-    expect(withdrawalLabel('fusensho')).toBe('Default win (fusensho)');
+    expect(withdrawalLabel('fusensho')).toBe('Fusensho');
   });
 });
 
@@ -597,13 +597,13 @@ describe('Clear withdrawal and reopen: a later default win from the same withdra
     window.API.fetchCompetitionDetails = vi.fn().mockResolvedValue({ id: 'comp1', config: {} });
     window.compMatchesForCompetition = vi.fn().mockReturnValue([laterMatch]);
     await mount(teamWithdrawal());
-    await waitFor(() => expect(screen.getByTestId('clear-withdrawal-default-win-consequences')).toBeTruthy());
-    const line = screen.getByTestId(`clear-withdrawal-default-win-${laterMatch.id}`);
+    await waitFor(() => expect(screen.getByTestId('clear-withdrawal-later-matches')).toBeTruthy());
+    const line = screen.getByTestId(`clear-withdrawal-later-match-${laterMatch.id}`);
     // bc-cse: named by scoreRowMatchLabel FIRST -- a pairing alone cannot be
     // found in the scores list, which is where the operator has to go to
     // reopen it -- joined to the pairing the same way ReopenFeedback's own
     // fetched blockerLabel does ("<lead> · <pairing>").
-    expect(line.textContent).toBe('Pool 2 · Match 1 · Kyoto vs Osaka keeps its default win; reopen it to fight it.');
+    expect(line.textContent).toBe('Pool 2 · Match 1 · Kyoto vs Osaka keeps its fusensho; reopen it to fight it.');
   });
 
   // bc-cse: a match carrying no number at all (drawn before numbering
@@ -617,9 +617,9 @@ describe('Clear withdrawal and reopen: a later default win from the same withdra
     window.API.fetchCompetitionDetails = vi.fn().mockResolvedValue({ id: 'comp1', config: {} });
     window.compMatchesForCompetition = vi.fn().mockReturnValue([laterMatch]);
     await mount(teamWithdrawal());
-    await waitFor(() => expect(screen.getByTestId('clear-withdrawal-default-win-consequences')).toBeTruthy());
-    const line = screen.getByTestId(`clear-withdrawal-default-win-${laterMatch.id}`);
-    expect(line.textContent).toBe('Kyoto vs Osaka keeps its default win; reopen it to fight it.');
+    await waitFor(() => expect(screen.getByTestId('clear-withdrawal-later-matches')).toBeTruthy());
+    const line = screen.getByTestId(`clear-withdrawal-later-match-${laterMatch.id}`);
+    expect(line.textContent).toBe('Kyoto vs Osaka keeps its fusensho; reopen it to fight it.');
     expect(line.textContent).not.toContain('Pool 2-DH-0');
   });
 
@@ -632,7 +632,7 @@ describe('Clear withdrawal and reopen: a later default win from the same withdra
     window.compMatchesForCompetition = vi.fn().mockReturnValue([unrelated]);
     await mount(teamWithdrawal());
     await waitFor(() => expect(screen.getByTestId('clear-withdrawal-consequence')).toBeTruthy());
-    expect(screen.queryByTestId('clear-withdrawal-default-win-consequences')).toBeNull();
+    expect(screen.queryByTestId('clear-withdrawal-later-matches')).toBeNull();
   });
 
   it('omits the block when there is no such later match', async () => {
@@ -640,7 +640,7 @@ describe('Clear withdrawal and reopen: a later default win from the same withdra
     window.compMatchesForCompetition = vi.fn().mockReturnValue([]);
     await mount(teamWithdrawal());
     await waitFor(() => expect(screen.getByTestId('clear-withdrawal-consequence')).toBeTruthy());
-    expect(screen.queryByTestId('clear-withdrawal-default-win-consequences')).toBeNull();
+    expect(screen.queryByTestId('clear-withdrawal-later-matches')).toBeNull();
   });
 });
 
@@ -652,17 +652,52 @@ describe('Clear withdrawal and reopen: a later default win from the same withdra
 // status, which the server stamps on the match (withdrawnStatus): an
 // ordinary fusenpai's names THIS match.
 describe('clearing a fusenpai chained onto an earlier withdrawal (bc-kfup)', () => {
-  it('says the match goes back to the queue, not that the competitor can compete again', async () => {
+  // bc-cse: "again" would be false here -- this match's own decision is
+  // fusenpai, never fusensho, so clearing it has not undone any fusensho to
+  // repeat. The fusensho is for the OTHER match (not this one): it is the
+  // first one for THIS match's winner, named exactly as the Recorded line
+  // above names them.
+  it('says the match goes back to the queue, and names a fusensho FOR the winner, never "again"', async () => {
     await mount(individualWithdrawal({ withdrawnStatus: { eligible: false, matchId: 'Pool A-0' } }));
-    await waitFor(() => expect(screen.getByTestId('clear-withdrawal-reopen').textContent).toBe('Clear default win'));
+    await waitFor(() => expect(screen.getByTestId('clear-withdrawal-reopen').textContent).toBe('Clear fusenpai'));
     const text = screen.getByTestId('clear-withdrawal-consequence').textContent;
-    expect(text).toBe('The match goes back to the queue. Tanaka is still withdrawn, so record the default win again.');
+    expect(text).toBe('The match goes back to the queue. Tanaka is still withdrawn, so record a fusensho for Yamada.');
     expect(text).not.toContain('can compete again');
+    expect(text).not.toContain('again');
+  });
+
+  // Same bug, the other decision it can chain from: a kiken whose competitor
+  // is barred by a DIFFERENT match keeps its own kiken record (bc-kfup: a
+  // second kiken is refused, so this one never recorded a fusensho either).
+  it('says the same for a chained kiken, never "again"', async () => {
+    await mount(individualWithdrawal({
+      decision: 'kiken-voluntary', withdrawnStatus: { eligible: false, matchId: 'Pool A-0' },
+    }));
+    await waitFor(() => expect(screen.getByTestId('clear-withdrawal-reopen').textContent).toBe('Clear kiken'));
+    const text = screen.getByTestId('clear-withdrawal-consequence').textContent;
+    expect(text).toBe('The match goes back to the queue. Tanaka is still withdrawn, so record a fusensho for Yamada.');
+    expect(text).not.toContain('again');
+  });
+
+  // Contrast: when the cleared decision IS a fusensho (the match-level
+  // default win class, isDefaultWin), "again" is literally true -- clearing
+  // it undoes exactly the fusensho that needs recording again to re-close
+  // the queued match. Covered fully by the "a match-level fusensho" describe
+  // above; pinned here too so the two wordings sit beside the bug they tell
+  // apart.
+  it('keeps "again" when the cleared decision really is a fusensho', async () => {
+    await mount(individualWithdrawal({
+      decision: 'fusensho', decisionReason: 'auto: Tanaka withdrawn',
+      withdrawnStatus: { eligible: false, matchId: 'Pool A-0' },
+    }));
+    await waitFor(() => expect(screen.getByTestId('clear-withdrawal-reopen').textContent).toBe('Clear fusensho'));
+    const text = screen.getByTestId('clear-withdrawal-consequence').textContent;
+    expect(text).toBe('The match goes back to the queue. Tanaka is still withdrawn, so record the fusensho again.');
   });
 
   it('keeps the ordinary copy for a fusenpai that barred the competitor itself', async () => {
     await mount(individualWithdrawal({ withdrawnStatus: { eligible: false, matchId: 'm-r1-0' } }));
-    expect(screen.getByTestId('clear-withdrawal-reopen').textContent).toBe('Clear withdrawal and reopen');
+    expect(screen.getByTestId('clear-withdrawal-reopen').textContent).toBe('Clear fusenpai and reopen');
     expect(screen.getByTestId('clear-withdrawal-consequence').textContent).toContain('can compete again');
   });
 
@@ -671,7 +706,7 @@ describe('clearing a fusenpai chained onto an earlier withdrawal (bc-kfup)', () 
   // the queue. The copy must not promise "back to running".
   it('a kiken whose competitor is barred by another match also says the match goes back to the queue', async () => {
     await mount(individualWithdrawal({ decision: 'kiken-voluntary', withdrawnStatus: { eligible: false, matchId: 'Pool A-5' } }));
-    await waitFor(() => expect(screen.getByTestId('clear-withdrawal-reopen').textContent).toBe('Clear withdrawal'));
+    await waitFor(() => expect(screen.getByTestId('clear-withdrawal-reopen').textContent).toBe('Clear kiken'));
     expect(screen.getByTestId('clear-withdrawal-consequence').textContent).toContain('goes back to the queue');
   });
 
@@ -694,13 +729,13 @@ describe('clearing a fusenpai chained onto an earlier withdrawal (bc-kfup)', () 
     }];
     try {
       await mount(individualWithdrawal({ decision: 'kiken-voluntary' }));
-      await waitFor(() => expect(screen.getByTestId('clear-withdrawal-default-win-Pool A-3')).toBeTruthy());
-      expect(screen.getByTestId('clear-withdrawal-default-win-Pool A-3').textContent).toContain('keeps its default win');
+      await waitFor(() => expect(screen.getByTestId('clear-withdrawal-later-match-Pool A-3')).toBeTruthy());
+      expect(screen.getByTestId('clear-withdrawal-later-match-Pool A-3').textContent).toContain('keeps its fusenpai');
       // Clearing this kiken moves the bar onto that no-show (the server's
       // standingWithdrawalOf), so the match goes to the queue, not the court.
       expect(screen.getByTestId('clear-withdrawal-consequence').textContent).toBe(
         'The match goes back to the queue. Tanaka also did not appear for a later match, listed below, so they are still withdrawn because of it.');
-      expect(screen.getByTestId('clear-withdrawal-reopen').textContent).toBe('Clear withdrawal');
+      expect(screen.getByTestId('clear-withdrawal-reopen').textContent).toBe('Clear kiken');
     } finally {
       window.compMatchesForCompetition = STUBBED_GLOBALS.compMatchesForCompetition;
     }

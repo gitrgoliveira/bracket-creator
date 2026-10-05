@@ -26,7 +26,7 @@ const { useState, useEffect, useRef } = React;
 import {
   barredNote, awaitedDefaultWin, defaultWinDecisionBody, defaultWinActionLabel, bothBarredDrawAction,
 } from './ineligible_match.jsx';
-import { notLandedBanner, notSavedText, writeDidNotLand } from './write_result.jsx';
+import { notLandedBanner, notSavedText, writeDidNotLand, queuedNotice } from './write_result.jsx';
 
 // No onDone/refresh plumbing here on purpose: recording the default win, or
 // reinstating the competitor, is an ordinary /decision or /reinstate write,
@@ -62,7 +62,9 @@ export function BarredMatchNotice({ match, password, onDone }) {
     setErr("");
     setBusy(true);
     try {
-      const res = await window.API.recordDecision(match.compId, match.id, body, pw);
+      // Never stamped older than the match as shown (bc-hlck).
+      const seen = match.modifiedAt || 0;
+      const res = await window.API.recordDecision(match.compId, match.id, seen > 0 ? { ...body, seenModifiedAt: seen } : body, pw);
       if (!mountedRef.current) return;
       // bc-cse: notLandedBanner, not writeWasSuperseded alone -- a clock_skew
       // refusal used to read "a newer result for this match is already
@@ -76,7 +78,7 @@ export function BarredMatchNotice({ match, password, onDone }) {
         return;
       }
       if (writeDidNotLand(res)) {
-        setErr("Not saved yet: queued, and will be recorded once the connection returns.");
+        setErr(queuedNotice(res));
       }
       setLanded(true);
       if (typeof onDone === "function") onDone(res);
@@ -115,7 +117,7 @@ export function BarredMatchNotice({ match, password, onDone }) {
       {err && <div style={{ marginTop: 4 }}>{err}</div>}
       <div style={{ display: "flex", gap: 8, marginTop: 6, flexWrap: "wrap" }}>
         {w && (
-          <button type="button" className="btn btn--sm" data-testid="barred-match-default-win"
+          <button type="button" className="btn btn--sm" data-testid="barred-match-record-fusensho"
             onClick={recordDefaultWin} disabled={busy || landed}>
             {busy ? "Recording…" : landed ? "Recorded" : defaultWinActionLabel(match)}
           </button>

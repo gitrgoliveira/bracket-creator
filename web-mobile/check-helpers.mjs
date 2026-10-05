@@ -79,6 +79,36 @@ export function scanSource(src, rules) {
   return hits;
 }
 
+// scanWholeFile: like scanSource, but tests each rule against the WHOLE
+// comment-stripped file rather than one line at a time, so a rule whose
+// production text can wrap across lines (a JSX text node split by the
+// bundler's own line length, `{" "}`, string concatenation, or a literal
+// newline inside a tag) is still caught. scanSource alone cannot see this:
+// testing "default" and "win" on separate lines never trips a single-line
+// regex even when they are one sentence apart. A rule meant for this scanner
+// still reads naturally against a single line (there is no join inserted;
+// stripComments already keeps every line where it was, so `\n` in the regex
+// matches a real line break in the source).
+//
+// `line` is 1-based and counts the newlines in the stripped text BEFORE the
+// match start, so it names where each match STARTS, exactly as scanSource
+// does for a single-line hit.
+export function scanWholeFile(src, rules) {
+  const stripped = stripComments(src);
+  const hits = [];
+  for (const { re, why } of rules) {
+    const flags = re.flags.includes('g') ? re.flags : `${re.flags}g`;
+    const global = new RegExp(re.source, flags);
+    let m;
+    while ((m = global.exec(stripped)) !== null) {
+      const line = stripped.slice(0, m.index).split('\n').length;
+      hits.push({ line, text: m[0].replace(/\s+/g, ' ').trim(), why });
+      if (m[0].length === 0) global.lastIndex += 1; // never loop on a zero-width match
+    }
+  }
+  return hits;
+}
+
 // printViolations: one block per hit, in the file:line form editors link.
 export function printViolations(violations) {
   for (const v of violations) {

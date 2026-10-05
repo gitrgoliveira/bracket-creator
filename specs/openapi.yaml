@@ -56,7 +56,7 @@ info:
     which is refused with 409 `daihyosen_added`. It carries only what the competitors saw: a match
     `decision` that is empty, `fought` or `hikiwake`, a numbered bout `decision` that is
     one of those or `fusensho`, and a representative-bout `decision` that is empty or
-    `daihyosen` (a draw or a default win there would decide the encounter). Any
+    `daihyosen` (a draw, a kiken, a fusenpai, or a fusensho there would decide the encounter). Any
     other decision, or the `Ht` judges'-decision mark on a numbered bout, is refused
     with 400. A judges' decision on the representative bout stays the organiser's:
     such a write may send the row back as the organiser recorded it (same winner,
@@ -1833,6 +1833,9 @@ paths:
                           type: string
                           description: >
                             The operator's name for the match, shown as is: its number and knockout round, e.g. `Match 3 (Final)`; `knockout Match 3` when the bracket records no round, `the 3rd-place match` for the bronze, the id when it has no number.
+                        court:
+                          type: string
+                          description: The shiaijo the match is on (e.g. `A`); empty when it has none.
         '400':
           description: >
             playerId is missing, blank, or does not name a competitor in this
@@ -1892,6 +1895,9 @@ paths:
                               type: string
                               description: >
                                 The operator's name for the match, shown as is: its number and knockout round, e.g. `Match 3 (Final)`; `knockout Match 3` when the bracket records no round, `the 3rd-place match` for the bronze, the id when it has no number.
+                            court:
+                              type: string
+                              description: The shiaijo the match is on (e.g. `A`); empty when it has none.
                       message:
                         type: string
         '422':
@@ -2350,6 +2356,52 @@ paths:
           one) is kept rather than replaced by the payload's empty scoreline.
           Without it, an empty scoreline clears the stored one. `startOnly`
           with any status other than `running` is a 400.
+
+          `clearWithdrawal: true` (also request-only) marks a completed
+          correction that removes a kiken, fusenpai, or fusensho recorded by
+          mistake: the payload is the real result (a win, or a draw) and
+          replaces the recorded ruling, the match stays completed, and the
+          competitor the withdrawal barred is eligible again. Without it, a
+          completed correction with no decision, or `hikiwake`, keeps the
+          ruling. A team match must then carry a result on every bout.
+
+          `changed` (also request-only) names the GROUPS this write changes,
+          and the server merges the write group by group (see the MergeGroup
+          schema): each named group applies only when the write's
+          `modifiedAt` is not older than that group's stored stamp
+          (`groupStamps` on the match), a group the write does not name is
+          never overwritten, and a named group that does not apply is HELD,
+          kept in the match's history with its values. Absent `changed` means
+          every group the payload carries, except that a `running` or
+          `scheduled` write over a `completed` match never carries `result`:
+          its scoring changes apply to the finished match when they were made
+          after the result (the match stays completed and its winner is worked
+          out again from the merged points or bouts; a pool or league match
+          left tied becomes a draw), and are held when made before it. A
+          change that would leave a finished knockout match tied, or an engi
+          match with no valid flag count, is never applied: the match keeps its
+          recorded finish (it never goes back to running) and the change is
+          held, answered with `heldReason: needs_winner`, so the operator
+          corrects the result with a winner. A running board's scoring, or
+          its overtime, over a match a decision already closed (a kiken or a
+          fusenpai of this match, or a fusensho awarded because the other
+          side is barred by a DIFFERENT match) is held the same way, answered
+          with `heldReason: default_win_stands` and `heldDecision` naming
+          that decision; the match already has the winner it needs, so the
+          operator corrects the decision from the match's score editor
+          instead of correcting the result with one. A finish whose result applies over
+          scoring stored NEWER than it gets the winner that scoring gives (the
+          same verdict as if the two had arrived in stamp order); when that
+          scoring would leave the finished match without a winner (a knockout
+          tie, an engi count that is not valid), the finish is applied on its
+          own scoreline, as in stamp order, and that newer scoring is moved to
+          the match's history as held; the answer names it in
+          `displacedGroups`, with the same `heldReason`. A finish that carries
+          no scoreline of its own is held instead. A points change whose write does not apply
+          `result` keeps a recorded judges' decision (hantei mark). A scoring change made on a
+          running board after a recorded kiken, fusenpai, or fusensho clears
+          it (points scored mean the withdrawal was a mistake), and the competitor
+          it barred is eligible again. A name that is not a group is a 400.
         content:
           application/json:
             schema:
@@ -2357,49 +2409,46 @@ paths:
       responses:
         '200':
           description: |
-            Result recorded. On a normal write the body is the updated MatchResult.
-            When a running-write autosave is a no-op the body is `{"stale":true}`
-            (the `stale` field set, all other MatchResult fields absent). This
-            happens in two cases: (a) the rev-guard drops it as a same-session
-            out-of-order delivery (a lower rev than one already applied for that
-            client session, e.g. a reconnect flush), or (b) the match is already
-            completed, so a running write must not revert the final result.
-            Different client sessions are concurrent operators; the server
-            applies those last-write-wins, never stale — and when the
-            last-write-wins comparison drops the INCOMING write, the body is the
-            RefusedWrite shape (`{"applied": false, "reason": ..., ...}`):
-            nothing was persisted, no SSE broadcast is emitted, and the client
-            must surface "not saved" rather than treat the echo as a save. Two
-            causes: `superseded` (the `modifiedAt` is older than the stored
-            result's, the reconnecting offline court case) and `clock_skew`
-            (the `modifiedAt` is implausibly far in the future, so this device's
-            clock is wrong; the write is refused rather than trusted or zeroed,
-            and the client should resync from GET /api/time and re-submit the
-            same result). See the RefusedWrite schema.
+            Result recorded. On a normal write the body is the updated (merged)
+            MatchResult. When part of the write was held (a newer change to
+            those groups is stored) the body also carries `heldGroups`, the
+            groups kept in the match's history instead of applied, and
+            `heldReason: needs_winner` when they were held because applying
+            them would leave a finished match without the winner it needs, or
+            `heldReason: default_win_stands` with `heldDecision` naming the
+            decision (a kiken or a fusenpai of this match, or a fusensho
+            awarded for a bar on a DIFFERENT match) that already closed the
+            match.
+            An applied finish that moved stored, NEWER scoring into the
+            match's history (it would have left the match without a winner,
+            and in stamp order came after this finish) carries
+            `displacedGroups` naming those groups, with the same `heldReason`.
+            A running write the rev-guard finds older than one the same client
+            session already sent (a lower rev, e.g. an out-of-order reconnect
+            flush) is not applied and not dropped: the whole write is kept in
+            the match's history with the reason "older revision of this board"
+            and answered with the RefusedWrite shape below (`superseded`, with
+            the `heldGroups` it held). Different client sessions are concurrent
+            operators; the server merges their writes by stamp. When EVERY
+            group the write changes is held, the body is the RefusedWrite shape
+            (`{"applied": false, "reason": "superseded", "heldGroups": [...],
+            ...}`): nothing of it was applied to the match, no SSE broadcast is
+            emitted, and the held values are in the match's history. The other
+            RefusedWrite cause is `clock_skew` (the `modifiedAt` is implausibly
+            far in the future, so this device's clock is wrong; the write is
+            refused rather than trusted or zeroed, and the client should resync
+            from GET /api/time and re-submit the same result). See the
+            RefusedWrite schema.
           content:
             application/json:
               schema:
                 # anyOf, not oneOf: MatchResult is an open schema (no required
-                # fields, no additionalProperties:false), so `{"stale":true}`
+                # fields, no additionalProperties:false), so a RefusedWrite body
                 # also validates against it. oneOf demands exactly one match and
-                # would flag that as ambiguous in most JSON-Schema tooling. The
-                # stale branch pins additionalProperties:false so a stale marker
-                # is unambiguous; a real result still matches the MatchResult
-                # branch.
+                # would flag that as ambiguous in most JSON-Schema tooling.
                 anyOf:
                   - $ref: '#/components/schemas/MatchResult'
                   - $ref: '#/components/schemas/RefusedWrite'
-                  - type: object
-                    additionalProperties: false
-                    properties:
-                      stale:
-                        type: boolean
-                        description: >
-                          true when a running-write autosave was a no-op; either
-                          dropped by the rev-guard as a same-session out-of-order
-                          delivery, or rejected because the match is already
-                          completed. Omitted on normal responses.
-                    required: [stale]
         '400':
           description: |
             Invalid payload, or a correction of a match that is already
@@ -2433,7 +2482,7 @@ paths:
             `subResults`, `correctionReason` and stamp are saved; the recorded
             withdrawal (`decision`, `decisionBy`, `decisionReason`, `winner`,
             `winnerId`, `encho`) is kept as stored; and so is the winner's
-            default-win scoreline. On a single-bout match (no `subResults`)
+            maru scoreline (the circles FIK records for the withdrawal). On a single-bout match (no `subResults`)
             the withdrawing side's `ipponsA`/`ipponsB` are taken from the write
             (only real struck letters; an omitted side keeps the stored
             letters), so a correction to the points struck before the
@@ -2472,7 +2521,7 @@ paths:
             - `ineligible_competitor`: a participant is ineligible (kiken/fusenpai in a prior match, or barred by
               a decision recorded on a different match). `reasonHuman` is a full operator sentence naming the
               competitor, the match, and what to do, e.g. "Alice withdrew in Pool A · Match 1 and cannot fight
-              again. Record the default win for Carol."; when BOTH sides of a knockout match are barred (the
+              again. Record the fusensho for Carol."; when BOTH sides of a knockout match are barred (the
               only case a knockout cannot resolve with a draw), it instead reads "Neither Alice nor Bob can
               fight Pool A · Match 1: correct the earlier withdrawal or the draw."
               Extra fields: `playerId`, `reason`, `reasonHuman`.
@@ -2522,11 +2571,13 @@ paths:
               places that move.
             - `downstream_knockout_running`: a pool correction in a mixed
               competition would move a qualifier out of a knockout match being
-              fought now. Nothing is written, and `forceDownstreamReopen` does
-              not get past it: finish that match or send it back to the queue,
-              then save again. Extra fields: `matchId` (this match),
-              `runningMatches` (`[{id, number, label}]`), `message` (the operator's
-              sentence).
+              fought now, or a knockout correction's new winner would change a
+              side of a later knockout match being fought now. Nothing is
+              written, and `forceDownstreamReopen` does not get past it:
+              finish that match or send it back to the queue, then save this
+              correction again. Extra fields: `matchId` (this match),
+              `runningMatches` (`[{id, number, label, court}]`), `message`
+              (the operator's sentence, naming the shiaijo).
           content:
             application/json:
               schema:
@@ -2588,6 +2639,9 @@ paths:
                           type: string
                           description: >
                             The operator's name for the match, shown as is: its number and knockout round, e.g. `Match 3 (Final)`; `knockout Match 3` when the bracket records no round, `the 3rd-place match` for the bronze, the id when it has no number.
+                        court:
+                          type: string
+                          description: The shiaijo the match is on (e.g. `A`); empty when it has none.
         '422':
           description: |
             `corrupt_overrides`: this competition's overrides.json could not
@@ -2653,29 +2707,33 @@ paths:
       description: |
         Sanctioned "Reopen match" for a COMPLETED match that is either a
         kachinuki team match, or any match (team or individual, pool or
-        knockout) whose stored `decision` is a withdrawal or default win
-        (kiken of any kind, fusenpai, or fusensho). Status returns to
-        `running` -- EXCEPT a match-level `fusensho` whose `decisionBy` side
-        is STILL barred by a decision recorded on a DIFFERENT match, which
-        returns to `scheduled` instead: going straight to `running` would
-        strand the operator behind the eligibility gate with no way to
-        start it. The identical fusensho reopens to `running` once that
-        competitor is reinstated. The match-level verdict
-        (winner, decision, default-win scoreline) is cleared, and what was
+        knockout) whose stored `decision` is a kiken (of any kind), a
+        fusenpai, or a fusensho. Status returns to
+        `running` -- EXCEPT when the decision's `decisionBy` side is STILL
+        barred by a decision recorded on a DIFFERENT match, which returns to
+        `scheduled` instead: this can hold for a kiken, a fusenpai, or a
+        fusensho reopen alike, not fusensho alone, since going straight to
+        `running` would strand the operator behind the eligibility gate with
+        no way to start it. The identical reopen returns to `running` once
+        that bar is gone, whether because the competitor was reinstated or
+        because whatever else recorded the bar was itself cleared. The
+        match-level verdict
+        (winner, decision, maru scoreline) is cleared, and what was
         fought is kept: the bout log (subResults), or on a single-bout match
         (an individual match, a pool daihyosen or tiebreaker bout) the letters
         the withdrawing side had struck, the fouls, the overtime and, on a
         team rep bout, who fought it (repPlayerA/B). The winner's letters from
         before the withdrawal are not kept: recording the withdrawal replaced
-        them with the default-win maru, which the reopen clears. The operator
+        them with the maru FIK records for it, which the reopen clears. The operator
         then scores the rest and completes the match through the score
         endpoint. The reopen stamps the match's `modifiedAt` with the server's
         time, so a write stamped before it (an offline-queued save replayed
         afterwards) is refused as `superseded` rather than completing the
         reopened match again.
-        This is how a withdrawal recorded by mistake is cleared: a withdrawal
-        gives the opponent the win by default, so without it the match was
-        never decided. For every other completed match the correction path (a
+        This is how a withdrawal recorded by mistake is cleared: a
+        kiken, fusenpai, or fusensho names the opponent the winner,
+        so without it the match was never decided. For every other
+        completed match the correction path (a
         completed write with a `correctionReason`) remains the sole sanctioned
         edit of a finished result. Reopening a finalized result is an
         organiser action: the route stays main-password-gated even in self-run
@@ -2683,9 +2741,12 @@ paths:
         `X-Tournament-Password` gets 401. Broadcasts a `match_updated` event.
 
         Reopening a match a withdrawal (kiken, fusenpai) ended REMOVES the
-        withdrawal: every competitor-status entry that match recorded is
-        restored to eligible, in the same transaction as the reopen, and the
-        restore is broadcast as `competitor_status_updated`.
+        withdrawal: every competitor-status entry that named this match as
+        the bar is restored to eligible, UNLESS a fusenpai recorded on a
+        different match chained onto the same bar, in which case the status
+        instead moves to name that chained fusenpai and the competitor stays
+        barred because of it. Either way this runs in the same transaction as
+        the reopen, and the change is broadcast as `competitor_status_updated`.
 
         Knockout matches: a winner already propagated into a next-round slot
         that has not been fought is retracted to its "Winner of rX-mY"
@@ -2694,13 +2755,16 @@ paths:
         already been completed with a result of its own, the reopen is
         refused with `downstream_knockout_played` naming it; a retry with
         `forceDownstreamReopen: true` reopens that match too (back to
-        `scheduled`, its result and bouts cleared, to be fought again), and
+        `scheduled` where it sits, its winner cleared and its points, bouts
+        and flags kept, to be finished again), and
         the 200 response lists it in `reopenedMatches` with a `match_updated`
         event for each. When a withdrawal had decided that reopened match, it
         goes with its verdict: the competitor it barred is restored to
         eligible and a `competitor_status_updated` event is broadcast, as for
-        the match being reopened. A next match that is in progress, or that a bye
-        resolved off this winner, is refused outright. A pool match is never
+        the match being reopened. A next match that is in progress is refused
+        outright (`downstream_knockout_running`). A bye the winner went
+        through is unwound rather than refused, and the first real match past
+        it is the one judged. A pool match is never
         refused for the knockout its pool feeds: reopening it moves no
         knockout slot. The write that finishes it is checked instead: the same
         result is saved silently, and a different one that moves a qualifier
@@ -2768,13 +2832,16 @@ paths:
                           type: string
                           description: >
                             The operator's name for the match, shown as is: its number and knockout round, e.g. `Match 3 (Final)`; `knockout Match 3` when the bracket records no round, `the 3rd-place match` for the bronze, the id when it has no number.
+                        court:
+                          type: string
+                          description: The shiaijo the match is on (e.g. `A`); empty when it has none.
         '400':
           description: >
             The `reason` is longer than 200 characters, the body is present but
             malformed JSON, or the match is neither a kachinuki team match nor
-            one a withdrawal or default win decided: "reopen is only for
-            kachinuki team matches and for matches decided by a withdrawal or
-            default win (kiken, kiken-injury, fusenpai, or fusensho); correct
+            one a withdrawal or fusensho decided: "reopen is only for
+            kachinuki team matches and for matches decided by a withdrawal
+            (kiken, kiken-injury, or fusenpai) or a fusensho; correct
             other results via the score editor instead."
           content:
             application/json:
@@ -2799,14 +2866,14 @@ paths:
             - `error: downstream_knockout_played`: a later knockout match fed
               by this result has a result of its own. Extra fields:
               `matchId` (this match), `blockingMatchId`, `blockingMatches`
-              (`[{id, number, label}]`, two for a semifinal feeding the final and the
+              (`[{id, number, label, court}]`, two for a semifinal feeding the final and the
               bronze match), `displaced` (the competitor in the slot this match
               fed), `message`. Retry with `forceDownstreamReopen: true` to
               reopen them too.
             - `error: downstream_knockout_running`: a later knockout match fed
               by this result is being fought right now, so it cannot be
               reopened with it. Nothing is written. Extra fields: `matchId`
-              (this match), `runningMatches` (`[{id, number, label}]`),
+              (this match), `runningMatches` (`[{id, number, label, court}]`),
               `message`.
             - `error: court_busy` (machine code, sentence in `message`):
               another match is already running on this match's court, in this
@@ -2864,6 +2931,9 @@ paths:
                             label:
                               type: string
                               description: The operator's name for the match; see `engine.OperatorMatchLabel`.
+                            court:
+                              type: string
+                              description: The shiaijo the match is on (e.g. `A`); empty when it has none.
                       message:
                         type: string
         '500':
@@ -2876,7 +2946,7 @@ paths:
       description: |
         The atomic remedy for a court_busy reopen. When reopening a finished
         match ({id}/{mid}, the target: any match the reopen endpoint accepts
-        -- including one decided by a match-level default win, fusensho --
+        -- including one decided by a match-level fusensho --
         with the same gate and the same `downstream_knockout_played` /
         `forceDownstreamReopen` / `downstream_knockout_running` handling,
         checked BEFORE the blocker is touched) is refused because ANOTHER
@@ -2938,7 +3008,7 @@ paths:
             `blockerCompId` is missing or malformed, `blockerMatchId` is missing
             or too long, the `reason` exceeds 200 characters, the body is
             malformed JSON, or the target is neither a kachinuki team match nor
-            one a withdrawal or default win decided (same message as
+            one a withdrawal or fusensho decided (same message as
             `POST .../reopen`'s 400).
           content:
             application/json:
@@ -3015,6 +3085,9 @@ paths:
                               type: integer
                             label:
                               type: string
+                            court:
+                              type: string
+                              description: The shiaijo the match is on (e.g. `A`); empty when it has none.
                       message:
                         type: string
         '500':
@@ -3102,6 +3175,42 @@ paths:
         '200':
           description: Court updated.
 
+  /api/competitions/{id}/matches/{mid}/history:
+    get:
+      tags: [matches]
+      summary: A match's write history
+      description: >
+        Every write that reached the match, applied or not, in the order the
+        changes were MADE: by each entry's `stamp`, oldest first, an unstamped
+        write placed at its `receivedAt`, ties in arrival order (bc-mrgc). A
+        change the merge did not apply, because a newer change to the same
+        group was already recorded, is kept here with its value (`held`), so
+        nothing an operator entered is lost. The score editors show it in a
+        History disclosure. An organiser view: in a self-run tournament it
+        stays behind the main password.
+      security:
+        - TournamentPassword: []
+      parameters:
+        - $ref: '#/components/parameters/CompetitionId'
+        - $ref: '#/components/parameters/MatchId'
+      responses:
+        '200':
+          description: The match's history; an empty array when it has none.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/MatchHistoryEntry'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          description: Missing or incorrect tournament password.
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
   /api/competitions/{id}/matches/{mid}/override-winner:
     put:
       tags: [matches]
@@ -3141,13 +3250,14 @@ paths:
             refetch. 200 either way: neither case is a fault and neither can win
             a retry as-is.
 
-            Two ways it can be false. The timestamp last-write-wins guard may
-            have dropped the assertion because a newer stored result already
-            decides this match (bare `{"applied": false}`). Or the request's
-            `modifiedAt` was implausibly far in the future, in which case the
-            body is the RefusedWrite shape with `reason: clock_skew` and a
-            `serverNowMs`, and the client should resync its clock offset from
-            GET /api/time before re-submitting.
+            Two ways it can be false, both the RefusedWrite shape. A newer
+            stored result already decides this match: the assertion is not
+            applied, it is kept in the match's history with the winner it
+            named, and the body is `reason: superseded` with `heldGroups:
+            ["result"]`, exactly like a score write whose every change was held.
+            Or the request's `modifiedAt` was implausibly far in the future:
+            `reason: clock_skew` with a `serverNowMs`, and the client should
+            resync its clock offset from GET /api/time before re-submitting.
           content:
             application/json:
               schema:
@@ -3158,7 +3268,25 @@ paths:
                     properties:
                       applied:
                         type: boolean
+                        enum: [true]
                   - $ref: '#/components/schemas/RefusedWrite'
+        '409':
+          description: >
+            The same knockout refusals as PUT .../score, with the same bodies:
+            `downstream_knockout_played` when the new winner would change who
+            a later knockout match with its own result was fought by (retry
+            with `forceDownstreamReopen: true`), and
+            `downstream_knockout_running` when it would change a side of a
+            later knockout match being fought now (`runningMatches`, each with
+            its `court`; not confirmable, `forceDownstreamReopen` does not get
+            past it). Nothing is written.
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - $ref: '#/components/schemas/Error'
+                  - $ref: '#/components/schemas/DownstreamKnockoutPlayedError'
+                  - $ref: '#/components/schemas/DownstreamKnockoutRunningError'
 
   /api/competitions/{id}/matches/{mid}/time:
     put:
@@ -3255,8 +3383,10 @@ paths:
                           description: >
                             Machine-readable discriminator, present only for the
                             classes named here and omitted for every other failure, so
-                            its presence always means the same thing. `superseded`: a
-                            newer result for that match is already stored. `clock_skew`:
+                            its presence always means the same thing. `superseded`:
+                            every group the entry changes is held, a newer change to each
+                            being already stored; `heldGroups` names them and they are kept
+                            in the match's history. `clock_skew`:
                             that entry's `modifiedAt` is implausibly far in the future, so
                             the sending device's clock is wrong; nothing was written for
                             it and re-running the import will not help until the clock is
@@ -3275,9 +3405,62 @@ paths:
                             to apply it and reopen those matches.
                             `downstream_knockout_running`: the entry is a pool correction
                             that would move a qualifier out of a knockout match being
-                            fought now; finish or requeue that match, then retry. In
+                            fought now, or a knockout correction whose new winner would
+                            change a side of a later knockout match being fought now;
+                            `forceDownstreamReopen` does not get past it; finish or
+                            requeue that match, then retry. In
                             every case the entry is excluded from `succeeded` and never
                             broadcast. Other entries in the batch are unaffected.
+                        heldGroups:
+                          type: array
+                          items:
+                            $ref: '#/components/schemas/MergeGroup'
+                          description: On a `superseded` entry, the groups held.
+                        heldReason:
+                          type: string
+                          enum: [needs_winner, default_win_stands]
+                          description: >
+                            On a `superseded` entry held because applying it would
+                            leave a finished match without the winner it needs, or
+                            because a decision (a kiken or a fusenpai of this
+                            match, or a fusensho awarded for a bar on a DIFFERENT
+                            match) already closed the match (see
+                            RefusedWrite.heldReason); `error` then carries that
+                            sentence.
+                        heldDecision:
+                          type: string
+                          description: >
+                            The decision code (e.g. `fusensho`, `kiken-voluntary`)
+                            that closed the match, present only beside
+                            `heldReason: default_win_stands`. See
+                            RefusedWrite.heldDecision.
+                  heldGroups:
+                    type: array
+                    description: >
+                      Entries that applied in part: the groups of each that were held
+                      (a newer change to them is stored) and kept in the match's
+                      history. Omitted when no entry was held in part.
+                    items:
+                      type: object
+                      properties:
+                        matchId:
+                          type: string
+                        heldGroups:
+                          type: array
+                          items:
+                            $ref: '#/components/schemas/MergeGroup'
+                        displacedGroups:
+                          type: array
+                          items:
+                            $ref: '#/components/schemas/MergeGroup'
+                          description: As MatchResult.displacedGroups.
+                        heldReason:
+                          type: string
+                          enum: [needs_winner, default_win_stands]
+                          description: As RefusedWrite.heldReason.
+                        heldDecision:
+                          type: string
+                          description: As RefusedWrite.heldDecision.
 
   /api/competitions/{id}/matches/{mid}/quick-score:
     put:
@@ -3330,11 +3513,12 @@ paths:
             last-write-wins guard drops the write because a newer result is
             already stored; see the `/score` endpoint's 200 for the contract.
             Not producible by ANY client today, first-party or not: this
-            endpoint's request schema has no `modifiedAt` field and the handler
-            builds the result server-side without one, so the guard takes its
-            unstamped bypass and the write always applies. Documented, and
-            mapped server-side, so that adding a stamp to this payload later
-            cannot silently turn the drop into a 500.
+            endpoint's request schema has no `modifiedAt` field, and the server
+            stamps the write it builds with its own time, never older than the
+            stored result, so the write always applies (and leaves a stamp a
+            later stale write is ordered against). Documented, and mapped
+            server-side, so that a change to that stamping cannot silently
+            turn the drop into a 500.
           content:
             application/json:
               schema:
@@ -3343,6 +3527,17 @@ paths:
                   - $ref: '#/components/schemas/RefusedWrite'
         '400':
           $ref: '#/components/responses/BadRequest'
+        '409':
+          description: >
+            The same knockout refusals as PUT .../score, with the same bodies:
+            `downstream_knockout_played` (retry with
+            `forceDownstreamReopen: true`), and `downstream_knockout_running`
+            when the result would change a side of, or move a qualifier out
+            of, a knockout match being fought now (not confirmable).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
 
   /api/competitions/{id}/matches/{mid}/decision:
     post:
@@ -3422,10 +3617,21 @@ paths:
       responses:
         '200':
           description: >
-            Decision recorded, OR the write was refused. A refusal carries the
-            RefusedWrite shape (`applied: false` with a `reason` of
-            `superseded` or `clock_skew`) instead of a MatchResult; nothing is
-            stored and no SSE event is emitted.
+            Decision recorded, OR the write was refused. A decision changes
+            the `result`, `points` and `encho` groups (MergeGroup) and is
+            atomic: it is held whole when its verdict is older than the stored
+            one, or when any stored points or bout change was made after it
+            (points scored after a withdrawal was declared mean it no longer
+            describes the match). A held decision carries the RefusedWrite shape
+            (`applied: false`, `reason: superseded`, `heldGroups`) instead of a
+            MatchResult, is kept in the match's history, and bars nobody; a
+            `clock_skew` refusal stores nothing. No SSE event is emitted for
+            either. A recorded decision that had part of it held carries
+            `heldGroups` beside the MatchResult. An exact replay of the decision
+            already recorded (the same decision, side and `modifiedAt`: a
+            queued send whose first answer was lost) is answered as recorded,
+            with the stored MatchResult, before any 409 below; it changes
+            nothing.
           content:
             application/json:
               schema:
@@ -3444,20 +3650,24 @@ paths:
             Competitor not eligible (`ineligible_competitor`; `reasonHuman`
             names the competitor, the match, and what to do, e.g. "Alice
             withdrew in Pool A · Match 1 and cannot fight again. Record the
-            default win for Carol."; the knockout both-sides-barred case
+            fusensho for Carol."; the knockout both-sides-barred case
             reads "Neither Alice nor Bob can fight Pool A · Match 1: correct
             the earlier withdrawal or the draw."), or a decision
             that would change who a knockout match with its own result was
             fought by (`downstream_knockout_played`, retry with
             `forceDownstreamReopen: true`; `qualifierChange` names the pool
             places a decision on a mixed competition's pool match moves), or
-            one that would move a qualifier out of a knockout match being
-            fought now (`downstream_knockout_running`, not confirmable). Same
-            bodies as PUT .../score.
+            one that would move a qualifier out of, or change a side of, a
+            knockout match being fought now (`downstream_knockout_running`,
+            not confirmable, and answered before `decision_locked` so no
+            confirm precedes it). Same bodies as PUT .../score.
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/Error'
+                oneOf:
+                  - $ref: '#/components/schemas/Error'
+                  - $ref: '#/components/schemas/DownstreamKnockoutPlayedError'
+                  - $ref: '#/components/schemas/DownstreamKnockoutRunningError'
         '422':
           description: |
             `corrupt_overrides`: this competition's overrides.json could not
@@ -3519,7 +3729,10 @@ paths:
             `result`, without the audit notes (`decisionReason`,
             `correctionReason`) the public broadcast leaves out. OR the write was refused: a RefusedWrite (`applied:
             false` with a `reason` of `superseded` or `clock_skew`); nothing is
-            stored and no SSE event is emitted.
+            applied to the match and no SSE event is emitted. A superseded add
+            (the representative bout and the verdict, the groups it changes,
+            both held) carries `heldGroups` and is kept in the match's history.
+            An add applied in part carries `heldGroups` beside `result`.
           content:
             application/json:
               schema:
@@ -3531,6 +3744,23 @@ paths:
                         $ref: '#/components/schemas/SubMatchResult'
                       result:
                         $ref: '#/components/schemas/MatchResult'
+                      heldGroups:
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/MergeGroup'
+                        description: >
+                          Present when the add applied in part: the groups held
+                          and kept in the match's history. As RefusedWrite.heldGroups.
+                      heldReason:
+                        type: string
+                        enum: [needs_winner, default_win_stands]
+                        description: As RefusedWrite.heldReason.
+                      heldDecision:
+                        type: string
+                        description: >
+                          The decision code that closed the match, present
+                          only beside `heldReason: default_win_stands`. As
+                          RefusedWrite.heldDecision.
                   - $ref: '#/components/schemas/RefusedWrite'
         '400':
           description: >
@@ -3625,7 +3855,10 @@ paths:
             stamp, under `result`, without the audit notes (`decisionReason`,
             `correctionReason`) the public broadcast leaves out. OR the write was refused: a RefusedWrite
             (`applied: false` with a `reason` of `superseded` or
-            `clock_skew`); nothing is stored and no SSE event is emitted.
+            `clock_skew`); nothing is applied to the match and no SSE event is
+            emitted. A superseded remove carries `heldGroups` and is kept in
+            the match's history. The removed bout keeps its stamp, so an older
+            write still carrying it cannot bring it back.
           content:
             application/json:
               schema:
@@ -3635,6 +3868,24 @@ paths:
                     properties:
                       result:
                         $ref: '#/components/schemas/MatchResult'
+                      heldGroups:
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/MergeGroup'
+                        description: >
+                          Present when the remove applied in part: the groups
+                          held and kept in the match's history. As
+                          RefusedWrite.heldGroups.
+                      heldReason:
+                        type: string
+                        enum: [needs_winner, default_win_stands]
+                        description: As RefusedWrite.heldReason.
+                      heldDecision:
+                        type: string
+                        description: >
+                          The decision code that closed the match, present
+                          only beside `heldReason: default_win_stands`. As
+                          RefusedWrite.heldDecision.
                   - $ref: '#/components/schemas/RefusedWrite'
         '400':
           description: >
@@ -4808,14 +5059,16 @@ components:
       additionalProperties: false
       required: [applied, reason, message]
       description: >
-        A write the timestamp last-write-wins guard did not persist. Two causes,
-        told apart by `reason`, and they need different remedies:
+        A write nothing of which was applied to the match. Two causes, told
+        apart by `reason`, and they need different remedies:
 
-        - `superseded`: a NEWER result for this match is already stored, so the
-          incoming write lost the comparison. Clients must treat this as "not
-          saved" (show the message) and must NOT advise blind re-entry:
-          re-submitting re-stamps the payload with the current clock and would
-          overwrite the newer result that won.
+        - `superseded`: every group the write changes is held, because a NEWER
+          change to each is already stored (the merge orders a match's writes
+          group by group, by stamp; see MergeGroup). The write is not lost: its
+          values are kept in the match's history, and `heldGroups` names the
+          groups. Clients must treat this as "not applied" (show the message)
+          and must NOT advise blind re-entry: re-submitting re-stamps the
+          payload with the current clock and would overwrite the newer change.
 
         - `clock_skew`: the request's `modifiedAt` is implausibly far in the
           future (more than a few seconds ahead of the server), so this device's
@@ -4830,14 +5083,16 @@ components:
         Both are returned with HTTP 200, never an error status: neither is a
         fault, and neither can win a retry as-is, so an error status would make
         an offline write queue retry an unwinnable request forever. Nothing is
-        persisted and no SSE broadcast is emitted in either case.
+        applied to the match and no SSE broadcast is emitted in either case; a
+        superseded write leaves its match history entry and nothing else.
 
         PUT /score, POST /decision, PUT /override-winner and both /daihyosen
         paths each carry a client-supplied modifiedAt, so the guard compares
         rather than bypassing and any of them can produce either condition.
-        The remaining match-write endpoint, /quick-score, still builds its
-        result server-side without a stamp, so the guard takes its unstamped
-        bypass and it always applies; it nonetheless maps the superseded
+        The remaining match-write endpoint, /quick-score, builds its result
+        server-side without a client stamp; the server stamps it with its own
+        time, never older than the stored result, so it always applies; it
+        nonetheless maps the superseded
         condition to this same shape rather than to a 500, so that adding a
         stamp to its payload later cannot silently turn a benign supersede
         into a request an offline queue retries forever. The batch endpoint
@@ -4852,9 +5107,11 @@ components:
           type: string
           enum: [superseded, clock_skew]
           description: >
-            Machine-readable cause. `superseded` means a newer stored result
-            won; `clock_skew` means this device's clock is ahead of the server
-            and the stamp was refused.
+            Machine-readable cause. `superseded` means the write's groups were
+            held rather than applied, either because a newer stored result won
+            or for one of the two other reasons named in `heldReason`;
+            `clock_skew` means this device's clock is ahead of the server and
+            the stamp was refused.
         serverNowMs:
           type: integer
           format: int64
@@ -4868,6 +5125,127 @@ components:
         message:
           type: string
           description: Operator-facing explanation.
+        heldGroups:
+          type: array
+          items:
+            $ref: '#/components/schemas/MergeGroup'
+          description: >
+            Present on `superseded`: the groups the write changes, every one
+            of them held and kept in the match's history.
+        heldReason:
+          type: string
+          enum: [needs_winner, default_win_stands]
+          description: >
+            Present on `superseded` when the groups were held not because a
+            newer change is stored but for one of two other reasons.
+            `needs_winner`: applying them would leave a FINISHED match
+            without the winner it needs (a knockout match left tied, an engi
+            match left with no valid flag count); `message` then tells the
+            operator to correct the result with a winner. `default_win_stands`:
+            a decision already closed the match -- a kiken or a fusenpai of
+            this match, or a fusensho awarded because the other side is
+            barred by a DIFFERENT match; `heldDecision` names which one, and
+            `message` then tells the operator to correct that decision from
+            the match's score editor instead, since the match already has
+            the winner it needs. Either way the change is kept in the
+            match's history. Also carried, beside `heldGroups`, by a write
+            applied in part.
+        heldDecision:
+          type: string
+          description: >
+            The decision code (e.g. `fusensho`, `kiken-voluntary`) that
+            closed the match, present only beside `heldReason:
+            default_win_stands`. Kendo names the decision itself; there is no
+            shared umbrella term for this class of result, so a client
+            renders this value (or a word derived from it) rather than a
+            generic label.
+
+    MatchHistoryEntry:
+      type: object
+      description: >
+        One write that reached a match (bc-mrgc): what made it, when the change
+        was made, the groups it changed and, per group, whether it was applied
+        or kept in the history because a newer change to that group was
+        already recorded.
+      properties:
+        matchId:
+          type: string
+        door:
+          type: string
+          description: >
+            What made the write (`displaced`: a stored change a finish made
+            before it moved to the history, see MatchResult.displacedGroups):
+            score, bulk-score, quick-score, decision,
+            daihyosen-add, daihyosen-remove, reopen, requeue, override-winner,
+            engi, kachinuki-advance, kachinuki-remove-bout, downstream-reopen,
+            or engine for a write the server made itself.
+          example: score
+        stamp:
+          type: integer
+          format: int64
+          description: When the change was made (the write's modifiedAt, server-relative unix ms); 0 for an unstamped write.
+        receivedAt:
+          type: integer
+          format: int64
+          description: When the server took the write (unix ms).
+        session:
+          type: string
+          description: The client scoring session, when the write named one.
+        changed:
+          type: array
+          items:
+            $ref: '#/components/schemas/MergeGroup'
+        outcomes:
+          type: object
+          description: Per group the write changed, `applied`, `unchanged` (applied, equal to the stored value) or `held` (kept here, not applied).
+          additionalProperties:
+            type: string
+            enum: [applied, unchanged, held]
+        held:
+          type: object
+          description: >
+            The value of every held group, as the write carried it, keyed by
+            MergeGroup. A held group whose value equals the stored one (an
+            echo, e.g. a decision's "no overtime" over a match with none) is
+            no loss: it is recorded as `unchanged` and kept out of here.
+          additionalProperties: {}
+        reason:
+          type: string
+          description: >
+            Why groups were held other than by their own stamps, when one rule
+            did that: "older revision of this board" (a running write the same
+            client session had already followed with a newer one), "a finish
+            and the scoreline it stood on are kept together" (a completing
+            write stamped older than the stored result over a finished match,
+            held whole), "the flags and the winner they decide are kept
+            together" (an engi finish one of whose two groups a newer change
+            outranks), "a kiken closed this match" / "a fusenpai closed this
+            match" / "a fusensho closed this match" (scoring or overtime sent
+            for a match one of those decisions already closed; the answer
+            carries `heldReason: default_win_stands` and `heldDecision`), "a
+            knockout match needs a winner" (a change that would leave a
+            finished knockout match tied), or "an engi result needs a valid
+            flag count" (a recount that would leave a finished engi match with
+            none). Absent when each group was judged by its own stamp.
+        clearedWithdrawal:
+          type: object
+          description: The kiken, fusenpai, or fusensho a later scoring change cleared (the result group as it was), when one was.
+          additionalProperties: {}
+
+    MergeGroup:
+      type: string
+      description: >
+        A group of match fields that change together and are ordered together
+        (bc-mrgc). `points` is the match-level scoreline (ipponsA, ipponsB,
+        hansokuA, hansokuB); `result` is the verdict (status, winner, winnerId,
+        decision, decisionBy, decisionReason, and the correctionReason and
+        resultSource that describe it); `encho` the match-level overtime;
+        `flags` the engi flag counts; `rep` the pool representative players;
+        and `bout:<position>` one bout row (1..n, or -1 for the representative
+        bout). The sides, court, schedule and round are not groups. A write
+        names the groups it changes in `changed`; the match records the stamp
+        of the last applied change to each in `groupStamps`.
+      pattern: '^(points|result|encho|flags|rep|bout:-?[0-9]+)$'
 
     DaihyosenWriteStamp:
       type: object
@@ -4927,6 +5305,9 @@ components:
                 type: string
                 description: >
                   The operator's name for the match, shown as is: its number and knockout round, e.g. `Match 3 (Final)`; `knockout Match 3` when the bracket records no round, `the 3rd-place match` for the bronze, the id when it has no number.
+              court:
+                type: string
+                description: The shiaijo the match is on (e.g. `A`); empty when it has none.
         displaced:
           type: string
           description: The competitor in the slot this match fed, when there is one blocking match.
@@ -4967,6 +5348,46 @@ components:
                 description: The corrected standings leave this place tied until a tie-break is fought; its slot returns to its draw label.
         message:
           type: string
+
+    DownstreamKnockoutRunningError:
+      type: object
+      description: >
+        409 body when a write, reopen, override-winner or decision would move
+        a qualifier out of, or change a side of, a knockout match being
+        fought now: a pool correction in a mixed competition moving the
+        qualifier, or a knockout correction whose new winner changes a later
+        match's side. Not confirmable, unlike DownstreamKnockoutPlayedError:
+        `forceDownstreamReopen` does not get past it, because the match is in
+        progress at the shiaijo. Finish that match or send it back to the
+        queue, then retry the write.
+      required: [error]
+      properties:
+        error:
+          type: string
+          enum: [downstream_knockout_running]
+        matchId:
+          type: string
+          description: The match being corrected, reopened, or decided.
+        runningMatches:
+          type: array
+          description: The knockout matches being fought now that block the write.
+          items:
+            type: object
+            properties:
+              id:
+                type: string
+              number:
+                type: integer
+              label:
+                type: string
+                description: >
+                  The operator's name for the match, shown as is: its number and knockout round, e.g. `Match 3 (Final)`; `knockout Match 3` when the bracket records no round, `the 3rd-place match` for the bronze, the id when it has no number.
+              court:
+                type: string
+                description: The shiaijo the match is on (e.g. `A`); empty when it has none.
+        message:
+          type: string
+          description: The operator's sentence, naming the shiaijo.
 
     Sponsor:
       type: object
@@ -5588,9 +6009,9 @@ components:
     WithdrawnStatusAnnotation:
       type: object
       description: >
-        Request-time only, never stored. On a completed match a withdrawal or
-        default win decided: where the withdrawn side's competitor status
-        stands now. Set on the viewer payloads, and on the result a /decision,
+        Request-time only, never stored. On a completed match a kiken,
+        fusenpai, or fusensho decided: where the withdrawn side's competitor
+        status stands now. Set on the viewer payloads, and on the result a /decision,
         /score or bulk-score write returns and pushes.
       properties:
         eligible:
@@ -5648,6 +6069,69 @@ components:
             single session's own out-of-order delivery (a reconnect flush). Writes
             from different sessions are concurrent operators and apply
             last-write-wins. Never returned in responses or public projections.
+        changed:
+          type: array
+          writeOnly: true
+          items:
+            $ref: '#/components/schemas/MergeGroup'
+          description: >
+            The groups this write changes (PUT /score and each /bulk-score
+            entry). The server applies each one only if the write's
+            `modifiedAt` is not older than that group's stored stamp, never
+            overwrites a group the write does not name, and keeps a named
+            group it does not apply in the match's history. Absent means every
+            group the payload carries; see PUT /score. Never stored or
+            returned.
+        groupStamps:
+          type: object
+          readOnly: true
+          additionalProperties:
+            type: integer
+            format: int64
+          description: >
+            The stamp (server-relative unix ms) of the last applied change to
+            each group, keyed by MergeGroup. Absent on a match written before
+            groups existed: every group then reads as stamped at
+            `modifiedAt`. A bout group whose row is gone keeps its stamp, so an
+            older write still carrying the row cannot bring it back.
+        heldGroups:
+          type: array
+          readOnly: true
+          items:
+            $ref: '#/components/schemas/MergeGroup'
+          description: >
+            On a write's response only: the groups of THIS write that were not
+            applied (a newer change to them is stored, applying them would
+            leave a finished match without the winner it needs, or a
+            decision already closed the match: see `heldReason`) and were
+            kept in the match's history. Omitted when everything applied.
+        heldReason:
+          type: string
+          readOnly: true
+          enum: [needs_winner, default_win_stands]
+          description: >
+            On a write's response only, beside `heldGroups` or
+            `displacedGroups`: present when they were held or moved because
+            applying them would leave a finished match without the winner it
+            needs, or because a decision (a kiken or a fusenpai of this
+            match, or a fusensho awarded for a bar recorded on a DIFFERENT
+            match) already closed the match (see RefusedWrite.heldReason).
+        heldDecision:
+          type: string
+          readOnly: true
+          description: As RefusedWrite.heldDecision.
+        displacedGroups:
+          type: array
+          readOnly: true
+          items:
+            $ref: '#/components/schemas/MergeGroup'
+          description: >
+            On a write's response only: groups whose STORED values this
+            (applied) finish moved to the match's history, held. They were
+            changed after the finish was made and would have left the match
+            without the winner it needs, so in stamp order they could not
+            apply after it. The history keeps them, at their own stamp, with
+            door `displaced`.
         sideA:
           type: string
           maxLength: 100
@@ -5687,7 +6171,7 @@ components:
             character — a waza letter (M/K/D/T, and S in naginata; the set is
             deliberately open, so do not validate against a fixed list), the
             "H" ippon awarded by the opponent's second hansoku, the "○" (maru)
-            awarded per point on a default win, or "•" for an unfilled slot —
+            awarded per point on a kiken, fusenpai, or fusensho, or "•" for an unfilled slot —
             or the two-character non-scoring "Ht" judges'-decision mark, which
             rides in the winner's list only. "|" is rejected. At most 2 entries
             per side, and both sides may not hold 2 scoring entries.
@@ -5825,8 +6309,8 @@ components:
         (rendered left), Aka is sideA (rendered right). The daihyosen
         (position -1) sub-bout is excluded, so a representative-bout-decided
         tie reports the tied totals (for example IV 0-0). For a non-kachinuki
-        match decided by a match-level default win, these totals already
-        include the credit for every unfought numbered bout (one victory and
+        match decided by a match-level kiken, fusenpai, or fusensho, these
+        totals already include the credit for every unfought numbered bout (one victory and
         two points per bout, to the side `decisionBy` did not name); refer to
         `MatchResult.decisionBy`. Absent on individual matches. Never sent by
         clients.
@@ -5885,7 +6369,7 @@ components:
           description: >
             Decision code for this individual sub-match. For numbered bouts:
             `""` (normal victory), `"hikiwake"` (draw/tie), or `"fusensho"`
-            (per-bout default win). The daihyosen representative bout
+            (a per-bout win awarded for a bar on a different match). The daihyosen representative bout
             (`position: -1`) always carries `"daihyosen"`; including when its
             winner is declared by hantei on a tied bout (the frontend emits
             `decision: "daihyosen"` with the "Ht" mark in the winner's ippon
@@ -5980,7 +6464,7 @@ components:
           maxItems: 2
           description: >
             Side A's struck ippons as waza letters (M/K/D/T/H, maru for a
-            default win), plus the non-scoring "Ht" judges'-decision mark on
+            kiken, fusenpai, or fusensho), plus the non-scoring "Ht" judges'-decision mark on
             the winner's side. The same shape as `MatchResult.ipponsA`.
         ipponsB:
           type: array
@@ -6121,7 +6605,16 @@ components:
             Server-relative unix-millis timestamp of the last change to this
             bracket match's result, used to reconcile out-of-order writes.
             0/absent means unstamped (legacy data); arrival order still
-            applies.
+            applies. Always the newest of `groupStamps`.
+        groupStamps:
+          type: object
+          readOnly: true
+          additionalProperties:
+            type: integer
+            format: int64
+          description: >
+            The stamp of the last applied change to each group of this match,
+            keyed by MergeGroup; see MatchResult.groupStamps.
         placeholderA:
           type: string
           readOnly: true

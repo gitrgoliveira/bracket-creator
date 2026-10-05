@@ -208,6 +208,12 @@ func TestScoreHandler_KachinukiBoutFinalAppendsNextBout(t *testing.T) {
 	matches, err := store.LoadPoolMatches(compID)
 	require.NoError(t, err)
 	require.Len(t, matches, 1)
+	// And the stamp the advance gave the match, not the write's: the editor
+	// floors its next tap on the new bout by the stamp it shows (bc-hlck),
+	// and the pre-advance one let a device running behind the server stamp
+	// that tap older than the bout it scores.
+	assert.Positive(t, matches[0].ModifiedAt, "the advance stamps the match")
+	assert.Equal(t, matches[0].ModifiedAt, echoed.ModifiedAt, "the echo carries the advance's stamp")
 	require.Len(t, matches[0].SubResults, 2, "flagged bout-final write must append bout 2")
 	assert.Equal(t, "R-1", matches[0].SubResults[1].SideA, "winner stays on")
 	assert.Equal(t, "W-2", matches[0].SubResults[1].SideB, "next from lineup")
@@ -1133,8 +1139,9 @@ func TestReopenHandler_BracketDownstreamStates(t *testing.T) {
 
 // TestScoreHandler_KachinukiCompletedToRunningStillNoOps pins that the
 // reopen endpoint did NOT weaken the score path's stale-write guard: a
-// plain status "running" write against a completed match is still
-// silently discarded (stale) rather than reverting the finished result.
+// plain status "running" write against a completed match never reverts the
+// finished result (bc-mrgc: it never carries the verdict, and an unstamped
+// one is held whole).
 // Reopen is the only sanctioned way back to running.
 func TestScoreHandler_KachinukiCompletedToRunningStillNoOps(t *testing.T) {
 	compID := "kachinuki-stale-guard-survives"
@@ -1150,7 +1157,11 @@ func TestScoreHandler_KachinukiCompletedToRunningStillNoOps(t *testing.T) {
 		},
 	})
 	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
-	assert.Contains(t, w.Body.String(), `"stale":true`, "the write must be discarded as stale, not applied")
+	// bc-mrgc: unstamped, so it cannot be ordered after the finish; every
+	// change it makes is held in the match's history and it answers
+	// superseded (it used to answer {stale:true}).
+	assert.Contains(t, w.Body.String(), `"applied":false`, "the write must not be applied")
+	assert.Contains(t, w.Body.String(), `"reason":"superseded"`)
 
 	matches, err := store.LoadPoolMatches(compID)
 	require.NoError(t, err)

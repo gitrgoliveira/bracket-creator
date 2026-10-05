@@ -1352,6 +1352,20 @@ describe('item 7: non-points decisions advance to next match', () => {
       setDecisionPromptKind: vi.fn(),
     });
 
+    // bc-hlck: the decision is never stamped older than the match it was
+    // recorded on; the body carries that match's stamp for recordDecision,
+    // which floors by it and never sends it. A match with no stamp adds
+    // nothing, so the body is as it always was.
+    it('the body carries the stamp of the match the decision was recorded on', async () => {
+      const submit = makeSubmitDecision({ match: { ...makeMatch('m-s'), modifiedAt: 1_700_000_000_000 }, enchoPeriodCount: 0, password: 'pw', ...makeSetters(), onClose: vi.fn() });
+      await submit('fusenpai', { decisionBy: 'shiro', decisionReason: '' });
+      expect(window.API.recordDecision).toHaveBeenCalledWith('c1', 'm-s', { decision: 'fusenpai', decisionBy: 'shiro', seenModifiedAt: 1_700_000_000_000 }, 'pw');
+      window.API.recordDecision.mockClear();
+      const plain = makeSubmitDecision({ match: makeMatch('m-p'), enchoPeriodCount: 0, password: 'pw', ...makeSetters(), onClose: vi.fn() });
+      await plain('fusenpai', { decisionBy: 'shiro', decisionReason: '' });
+      expect(window.API.recordDecision).toHaveBeenCalledWith('c1', 'm-p', { decision: 'fusenpai', decisionBy: 'shiro' }, 'pw');
+    });
+
     it('calls onAfterDecision for fusenpai when provided and match is not a correction', async () => {
       const onAfterDecision = vi.fn().mockResolvedValue(undefined);
       const onClose = vi.fn();

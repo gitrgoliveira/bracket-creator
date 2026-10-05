@@ -2,6 +2,7 @@ package engine
 
 import (
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 
@@ -52,13 +53,17 @@ func TestRecordDecision_StoresTheClientWriteStamp(t *testing.T) {
 		require.Equal(t, stamp, storedStamp(t, store, compID))
 	})
 
-	// The engine-internal pass-through and every existing caller omit it, and
-	// must keep taking ApplyByTimestamp's unstamped bypass rather than being
-	// handed a meaningless 0 that reads as "written at the epoch".
-	t.Run("an unstamped decision stays unstamped", func(t *testing.T) {
+	// The engine-internal pass-through and every existing caller omit it.
+	// Such a decision used to stay unstamped, which left nothing a later stale
+	// write could be ordered against (bc-mrgc review S5): it now takes the
+	// server's time, the time the decision was made.
+	t.Run("an unstamped decision takes the server's time", func(t *testing.T) {
 		eng, store, compID := setup(t)
+		before := time.Now().UnixMilli()
 		_, _, err := eng.RecordDecision(compID, "Pool A-0", "kiken", "aka", "knee", nil, false)
 		require.NoError(t, err)
-		require.Zero(t, storedStamp(t, store, compID))
+		got := storedStamp(t, store, compID)
+		require.GreaterOrEqual(t, got, before)
+		require.LessOrEqual(t, got, time.Now().UnixMilli())
 	})
 }

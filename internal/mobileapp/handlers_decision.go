@@ -166,7 +166,6 @@ func RegisterDecisionHandlers(r *gin.RouterGroup, eng ScoringEngine, store Compe
 			c.JSON(http.StatusBadRequest, gin.H{"error": "engi competitions do not support kiken/fusenpai decisions; use flag scoring instead"})
 			return
 		}
-
 		// T156: run the entire RecordDecision flow inside one
 		// WithTransaction. The engine call chain, sides lookup, T103
 		// downstream-match check, T105 concurrent-kiken pre-check,
@@ -265,7 +264,9 @@ func RegisterDecisionHandlers(r *gin.RouterGroup, eng ScoringEngine, store Compe
 		// without reading the returned result.
 		tryAutoCompletePoolsAfterWrite(c, eng, hub, id, state.MatchResult{ID: mid, Status: state.MatchStatusCompleted})
 
-		c.JSON(http.StatusOK, result)
+		// The stored result, plus heldGroups when part of the decision was
+		// kept in the match's history rather than applied (bc-mrgc).
+		c.JSON(http.StatusOK, scoreResponseWithReopened(result, nil))
 	})
 }
 
@@ -295,8 +296,9 @@ func respondDecisionEngineError(c *gin.Context, store CompetitionStore, compID, 
 		// that stamp on its MatchResult, so ApplyByTimestamp no longer
 		// takes the unstamped bypass and a decision can lose to a newer
 		// stored result -- the same way a score write can. An unstamped
-		// decision (an older client, or an engine-internal caller) still
-		// takes the bypass and always applies. Mapping it was already
+		// decision (an older client, or an engine-internal caller) takes the
+		// server's time, never older than the stored result (writeStamp,
+		// bc-mrgc review), so it still always applies. Mapping it was already
 		// right for the reason the two daihyosen paths are: this is the
 		// LAST arm a future writer would remember to add, and the
 		// default below is internalError -> 500. The SPA queues
@@ -305,7 +307,7 @@ func respondDecisionEngineError(c *gin.Context, store CompetitionStore, compID, 
 		// supersede here would not merely mis-report a dropped write,
 		// it would poison the offline queue with one that can never
 		// succeed.
-		respondSuperseded(c)
+		respondSuperseded(c, engine.HeldGroupsOf(engErr), engine.HeldReasonOf(engErr), engine.HeldDecisionOf(engErr))
 	case errors.As(engErr, &alreadyIneligErr):
 		// T105/CHK047: concurrent kiken, another operator already
 		// recorded ineligibility for this player on a different
@@ -350,8 +352,10 @@ func respondDecisionEngineError(c *gin.Context, store CompetitionStore, compID, 
 		})
 	case respondIfDownstreamKnockoutRunning(c, engErr):
 		// A decision on a mixed competition's POOL match that would
-		// move a qualifier out of a knockout match being fought now:
-		// terminal, not confirmable (see
+		// move a qualifier out of a knockout match being fought now, or
+		// on a knockout match whose new winner would change a side of a
+		// later match being fought now (bc-rfsw, raised before the T103
+		// decision_locked check): terminal, not confirmable (see
 		// respondIfDownstreamKnockoutRunning's doc comment).
 	case respondIfDownstreamKnockoutPlayed(c, engErr):
 		// bc-kcdg: this decision would change an already-propagated
@@ -442,6 +446,8 @@ func handleBothSidesBarredHikiwake(c *gin.Context, eng ScoringEngine, store Comp
 			ID: matchID, SideA: m.SideA, SideB: m.SideB, SideAID: m.SideAID, SideBID: m.SideBID,
 			Status: state.MatchStatusCompleted, Decision: "hikiwake", DecisionReason: reason,
 			ModifiedAt: req.ModifiedAt,
+			// The draw is a verdict and nothing else (bc-mrgc).
+			Changed: []string{state.GroupResult}, WriteDoor: engine.DoorDecision,
 		}
 		if _, werr := eng.RecordMatchResultWithIneligibilityTx(stx, compID, matchID, write); werr != nil {
 			writeErr = werr
@@ -480,6 +486,6 @@ func handleBothSidesBarredHikiwake(c *gin.Context, eng ScoringEngine, store Comp
 		"results":       matchesForBroadcast([]state.MatchResult{result}),
 	})
 	tryAutoCompletePoolsAfterWrite(c, eng, hub, compID, result)
-	c.JSON(http.StatusOK, result)
+	c.JSON(http.StatusOK, scoreResponseWithReopened(&result, nil))
 	return true
 }

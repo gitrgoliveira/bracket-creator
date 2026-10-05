@@ -585,6 +585,16 @@ func (e *Engine) RecordDecisionWithOptions(compID, matchID, decision, decisionBy
 // only the fields the kiken-undo path needs are populated. Returns a
 // *NotFoundError when the match is unknown, and a store load error as it is.
 func (e *Engine) lookupExistingResult(h state.StoreTx, compID, matchID string) (*state.MatchResult, error) {
+	r, _, err := e.lookupExistingResultIn(h, compID, matchID)
+	return r, err
+}
+
+// lookupExistingResultIn is lookupExistingResult reporting WHERE the match
+// lives as well: inPool is true for a pool-matches.csv row and false for a
+// bracket match. One read answers both questions, so a writer that needs the
+// prior and the branch it is on (the merge's knockout/nilSubsClear context)
+// does not load the pool file a second time to ask the second.
+func (e *Engine) lookupExistingResultIn(h state.StoreTx, compID, matchID string) (*state.MatchResult, bool, error) {
 	// A load error is the caller's error, never "not found": a missing file
 	// already loads as empty (a knockout-only competition has no pool file, a
 	// pool-only one no bracket), so an error here is a file that exists and
@@ -593,31 +603,31 @@ func (e *Engine) lookupExistingResult(h state.StoreTx, compID, matchID string) (
 	// instead of the corrupt-file 500 that names the file to repair.
 	poolMatches, err := h.LoadPoolMatches(compID)
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
 	for i := range poolMatches {
 		if poolMatches[i].ID == matchID {
 			r := poolMatches[i]
-			return &r, nil
+			return &r, true, nil
 		}
 	}
 	bracket, err := h.LoadBracket(compID)
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
 	if bracket != nil {
 		for _, round := range bracket.Rounds {
 			for i := range round {
 				if round[i].ID == matchID {
-					return bracketMatchAsResult(&round[i]), nil
+					return bracketMatchAsResult(&round[i]), false, nil
 				}
 			}
 		}
 		if bracket.ThirdPlaceMatch != nil && bracket.ThirdPlaceMatch.ID == matchID {
-			return bracketMatchAsResult(bracket.ThirdPlaceMatch), nil
+			return bracketMatchAsResult(bracket.ThirdPlaceMatch), false, nil
 		}
 	}
-	return nil, notFoundErrorf("match %q not found in competition %q", matchID, compID)
+	return nil, false, notFoundErrorf("match %q not found in competition %q", matchID, compID)
 }
 
 // hasDownstreamMatchStarted reports whether any pool or bracket match

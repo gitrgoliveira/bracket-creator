@@ -18,7 +18,8 @@ import (
 
 // sponsorsDirName is the subdirectory under the store root that holds
 // uploaded sponsor logo files. Created lazily on first upload.
-const sponsorsDirName = "sponsors"
+// The folder name is state's, which the startup write check reads too.
+const sponsorsDirName = state.SponsorsDirName
 
 // sponsorFilePattern enforces the server-generated filename shape on the
 // public GET route: 16 lowercase hex chars + .png/.jpg/.jpeg. Any other

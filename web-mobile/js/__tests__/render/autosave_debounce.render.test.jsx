@@ -431,7 +431,7 @@ describe('bc-emsl: a team-sheet tap that clears nothing writes nothing', () => {
 
     const circle = markSlots(subMatchRows()[0], 'aka').find((b) => b.textContent === '\u25CB');
     expect(circle).toBeTruthy();
-    expect(circle.title).toBe('Default win: use Fusensho to undo');
+    expect(circle.title).toBe('Awarded by fusensho: use Fusensho to undo');
     await act(async () => { fireEvent.click(circle); });
     await act(async () => { vi.advanceTimersByTime(AUTOSAVE_DEBOUNCE_MS + 50); });
 
@@ -1214,7 +1214,7 @@ describe('bc-dhas: a refused add or remove is reported and changes nothing', () 
     await act(async () => { add.resolve({ applied: false, reason: 'superseded', message: 'Not saved.' }); });
     await settle();
 
-    expect(failedBanner()?.textContent).toBe(`Not saved: ${SUPERSEDED_REASON}. ${SUPERSEDED_ADVICE}`);
+    expect(failedBanner()?.textContent).toBe(`Not applied: ${SUPERSEDED_REASON}. ${SUPERSEDED_ADVICE}`);
     expect(screen.getByTestId('scoring-modal-daihyosen-button')).toBeTruthy();
     expect(screen.queryByTestId('team-daihyosen-remove')).toBeNull();
     expect(window.API.recordScore).toHaveBeenCalledTimes(1);
@@ -1664,5 +1664,61 @@ describe('bc-dhas: an edit owed at unmount keeps a newer row', () => {
     expect(window.API.recordScore).toHaveBeenCalledTimes(1);
     const row = window.API.recordScore.mock.calls[0][2].subResults.find((s) => s.position === -1);
     expect(row && row.ipponsA).toEqual(['M']);
+  });
+});
+
+// bc-hlck: an autosave is never stamped older than the match its tap was made
+// against, and never floored by a change that arrived AFTER the tap (operator
+// ruling 2026-09-27: a tap made before another device's change stays older
+// than it). The tap records the shown match's stamp as `seenModifiedAt`,
+// which recordScore floors the stamp by and never sends.
+describe('bc-hlck: an autosave carries the stamp of the match as it was at the tap', () => {
+  it('records the stamp shown at the tap, not one that arrived before the send, and a later tap records the newer one', async () => {
+    const first = makeRunningMatch({ modifiedAt: 1_000_000 });
+    const { rerender } = renderModal(first);
+    await act(async () => { fireEvent.click(screen.getAllByText('M')[0]); });
+    // Another device's change reaches this editor inside the debounce window.
+    const moved = { ...first, modifiedAt: 2_000_000 };
+    await act(async () => {
+      rerender(<ScoreEditorModal match={moved} onClose={vi.fn()} onSubmit={makeOnSubmit(moved)} password="" />);
+    });
+    await act(async () => { vi.advanceTimersByTime(AUTOSAVE_DEBOUNCE_MS + 50); });
+    expect(window.API.recordScore).toHaveBeenCalledTimes(1);
+    expect(window.API.recordScore.mock.calls[0][2].seenModifiedAt).toBe(1_000_000);
+    // A tap made now was made against the newer match.
+    await act(async () => { fireEvent.click(screen.getAllByText('K')[0]); });
+    await act(async () => { vi.advanceTimersByTime(AUTOSAVE_DEBOUNCE_MS + 50); });
+    expect(window.API.recordScore).toHaveBeenCalledTimes(2);
+    expect(window.API.recordScore.mock.calls[1][2].seenModifiedAt).toBe(2_000_000);
+  });
+});
+
+// bc-hlck in the team editor: its autosave carries the shown match's stamp
+// from the tap, and the representative bout's add is floored by the match as
+// the sheet showed it (the trailing argument).
+describe('bc-hlck: the team editor floors its writes by the match it shows', () => {
+  beforeEach(() => {
+    window.API.recordDaihyosen = vi.fn();
+    window.API.removeDaihyosen = vi.fn();
+  });
+
+  it('an autosave carries the shown stamp from the tap', async () => {
+    renderModal(makeTeamMatch({ modifiedAt: 1_000_000 }));
+    await act(async () => { fireEvent.click(screen.getAllByText('M')[0]); });
+    await act(async () => { vi.advanceTimersByTime(AUTOSAVE_DEBOUNCE_MS + 50); });
+    expect(window.API.recordScore).toHaveBeenCalledTimes(1);
+    expect(window.API.recordScore.mock.calls[0][2].seenModifiedAt).toBe(1_000_000);
+  });
+
+  it('the representative bout add passes the shown stamp', async () => {
+    window.API.recordDaihyosen.mockResolvedValue({ ...makeKnockoutTeamMatch(), subResults: [daihyosenRow()] });
+    renderModal(makeKnockoutTeamMatch({ modifiedAt: 1_000_000 }));
+    await act(async () => { fireEvent.click(tieBoutButton(0)); });
+    await act(async () => { fireEvent.click(tieBoutButton(1)); });
+    await act(async () => { fireEvent.click(tieBoutButton(2)); });
+    await act(async () => { fireEvent.click(screen.getByTestId('scoring-modal-daihyosen-button')); });
+    await settle();
+    expect(window.API.recordDaihyosen).toHaveBeenCalledTimes(1);
+    expect(window.API.recordDaihyosen.mock.calls[0][3]).toBe(1_000_000);
   });
 });

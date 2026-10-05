@@ -125,6 +125,29 @@ func IsDefaultWinDecisionStr(s string) bool {
 	return IsKikenDecisionStr(s) || s == string(DecisionFusenpai) || s == string(DecisionFusensho)
 }
 
+// DecisionWord names, in the operator's own vocabulary, the decision that
+// closed a match without a fought scoreline: "kiken" for any kiken variant
+// (legacy, voluntary, or injury), "fusenpai" for a no-show, "fusensho" for a
+// default win awarded on someone else's withdrawal or no-show. These three
+// branches mirror IsDefaultWinDecisionStr's, so a caller that already
+// guarded on that predicate always gets a non-empty word back. Kendo has no
+// English word for this class of result -- the rulebook names each decision,
+// never a shared umbrella term -- so every sentence a person reads names ONE
+// of these three rather than reaching for a generic label (operator ruling
+// 2026-10-04). Returns "" for a decision outside the set (fought, hikiwake,
+// daihyosen, kachinuki-exhaustion, ...).
+func DecisionWord(d string) string {
+	switch {
+	case IsKikenDecisionStr(d):
+		return "kiken"
+	case d == string(DecisionFusenpai):
+		return "fusenpai"
+	case d == string(DecisionFusensho):
+		return "fusensho"
+	}
+	return ""
+}
+
 // IsWithdrawalDecisionStr reports whether the decision is a WITHDRAWAL: any
 // kiken variant, or fusenpai (a no-show). Deliberately narrower than
 // IsDefaultWinDecisionStr, which additionally includes fusensho -- a default

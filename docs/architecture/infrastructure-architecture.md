@@ -55,7 +55,7 @@ flowchart TB
     caddy --> cvol
 ```
 
-- App runs as **non-root (uid 65534)**. The data volume must be owned by that uid, or the app refuses to start. App port 8080 is `expose`d to the proxy only, never published to the host.
+- App runs as **non-root (uid 65534)**. The data volume must be owned by that uid, or the app refuses to start: at startup it tries a write in the data folder, the transaction log, every competition folder and its match history, and the branding and sponsors folders, and names every one it cannot write to. App port 8080 is `expose`d to the proxy only, never published to the host.
 - `restart: unless-stopped` (compose) / auto-restart (cloud) brings the app back after reboots.
 
 ## 3. Deployment options

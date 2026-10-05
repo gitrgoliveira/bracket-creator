@@ -8,6 +8,7 @@ import React from 'react';
 import { render, act, fireEvent, screen } from '@testing-library/react';
 import { describe, it, expect, vi, beforeAll, afterAll, beforeEach } from 'vitest';
 import { installWindowStubs } from '../helpers/stub_globals.js';
+import { QUEUED_NOTICE } from '../../write_result.jsx';
 
 const STUBBED_GLOBALS = {
   isHikiwake: () => false,
@@ -78,19 +79,31 @@ async function mount(match, props = {}) {
 }
 
 describe('a scheduled barred match shows BarredMatchNotice instead of Start (bc-cse)', () => {
-  it('individual editor: no Start match button; the note and default-win action are offered instead', async () => {
+  it('individual editor: no Start match button; the note and fusensho action are offered instead', async () => {
     await mount(individualBarred());
     expect(screen.queryByText('Start match')).toBeNull();
     const notice = screen.getByTestId('barred-match-notice');
-    expect(notice.textContent).toContain('Tanaka withdrew: record the default win.');
+    expect(notice.textContent).toContain('Tanaka withdrew: record the fusensho.');
     // kiken-voluntary is not reinstateable.
     expect(screen.queryByTestId('barred-match-reinstate')).toBeNull();
-    const btn = screen.getByTestId('barred-match-default-win');
-    expect(btn.textContent).toBe('Record default win for Yamada');
+    const btn = screen.getByTestId('barred-match-record-fusensho');
+    expect(btn.textContent).toBe('Record fusensho for Yamada');
 
     await act(async () => { fireEvent.click(btn); });
     expect(window.API.recordDecision).toHaveBeenCalledWith('comp1', 'm-r1-0', {
       decision: 'fusensho', decisionBy: 'shiro', decisionReason: 'auto: Tanaka withdrawn',
+    }, 'secret');
+  });
+
+  // bc-hlck: the default win is never stamped older than the match as shown:
+  // the body carries its stamp for recordDecision, which never sends it.
+  it('the default win carries the stamp of the match as shown', async () => {
+    window.API.recordDecision.mockClear();
+    await mount(individualBarred({ modifiedAt: 1_700_000_000_000 }));
+    await act(async () => { fireEvent.click(screen.getByTestId('barred-match-record-fusensho')); });
+    expect(window.API.recordDecision).toHaveBeenCalledWith('comp1', 'm-r1-0', {
+      decision: 'fusensho', decisionBy: 'shiro', decisionReason: 'auto: Tanaka withdrawn',
+      seenModifiedAt: 1_700_000_000_000,
     }, 'secret');
   });
 
@@ -104,20 +117,30 @@ describe('a scheduled barred match shows BarredMatchNotice instead of Start (bc-
     expect(actions.contains(notice)).toBe(false);
   });
 
+  // bc-offl: a default win recorded offline is held on the device, and the
+  // notice says so in the one held-write wording (QUEUED_NOTICE), not a
+  // fourth hand-typed copy.
+  it('individual editor: a default win held offline shows the held-write notice', async () => {
+    window.API.recordDecision = vi.fn().mockResolvedValue({ queued: true });
+    await mount(individualBarred());
+    await act(async () => { fireEvent.click(screen.getByTestId('barred-match-record-fusensho')); });
+    expect(screen.getByTestId('barred-match-notice').textContent).toContain(QUEUED_NOTICE);
+  });
+
   it('individual editor: a non-barred scheduled match still shows Start match', async () => {
     await mount(individualBarred({ ineligibleSides: undefined }));
     expect(screen.getByText('Start match')).toBeTruthy();
     expect(screen.queryByTestId('barred-match-notice')).toBeNull();
   });
 
-  it('team editor: no Start match button; both the default-win action and Reinstate are offered for a kiken-injury withdrawal', async () => {
+  it('team editor: no Start match button; both the fusensho action and Reinstate are offered for a kiken-injury withdrawal', async () => {
     await mount(teamBarred());
     expect(screen.queryByText('Start match')).toBeNull();
     const notice = screen.getByTestId('barred-match-notice');
-    expect(notice.textContent).toContain('Kyoto withdrew injured: reinstate them or record the default win.');
+    expect(notice.textContent).toContain('Kyoto withdrew injured: reinstate them or record the fusensho.');
 
-    const awardBtn = screen.getByTestId('barred-match-default-win');
-    expect(awardBtn.textContent).toBe('Record default win for Osaka');
+    const awardBtn = screen.getByTestId('barred-match-record-fusensho');
+    expect(awardBtn.textContent).toBe('Record fusensho for Osaka');
     const reinstateBtn = screen.getByTestId('barred-match-reinstate');
     expect(reinstateBtn.textContent).toBe('Reinstate Kyoto');
 
@@ -151,7 +174,7 @@ describe('both sides barred (bc-cse)', () => {
     expect(notice.textContent).toContain('Both withdrew earlier: neither can fight this match.');
     // Neither single-sided action is offered: awaitedDefaultWin is null when
     // both sides are barred.
-    expect(screen.queryByTestId('barred-match-default-win')).toBeNull();
+    expect(screen.queryByTestId('barred-match-record-fusensho')).toBeNull();
     expect(screen.queryByTestId('barred-match-reinstate')).toBeNull();
 
     const btn = screen.getByTestId('barred-match-record-drawn');
@@ -166,7 +189,7 @@ describe('both sides barred (bc-cse)', () => {
     await mount(individualBarred({ ineligibleSides: { a: 'kiken-voluntary', b: 'fusenpai' } }));
     const notice = screen.getByTestId('barred-match-notice');
     expect(notice.textContent).toBe('Neither can fight: correct the earlier withdrawal or the draw.');
-    expect(screen.queryByTestId('barred-match-default-win')).toBeNull();
+    expect(screen.queryByTestId('barred-match-record-fusensho')).toBeNull();
     expect(screen.queryByTestId('barred-match-reinstate')).toBeNull();
     expect(screen.queryByTestId('barred-match-record-drawn')).toBeNull();
     expect(notice.querySelectorAll('button').length).toBe(0);

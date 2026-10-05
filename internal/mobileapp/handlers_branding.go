@@ -14,7 +14,8 @@ import (
 
 // brandingDirName is the subdirectory under the store root for uploaded
 // tournament logos. One file at a time: logo.png or logo.jpg.
-const brandingDirName = "branding"
+// The folder name is state's, which the startup write check reads too.
+const brandingDirName = state.BrandingDirName
 
 // validBrandingContentTypes maps http.DetectContentType sniff results to
 // the canonical filename extension used on disk.

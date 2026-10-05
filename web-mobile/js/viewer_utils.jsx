@@ -10,7 +10,7 @@
 //
 // pool_ids.jsx is a leaf module (no imports, no side effects), so importing it
 // here does not introduce a load-order dependency or a double-eval risk.
-import { isSupplementaryBout, teamMatchTypeFor, poolNameOf, swissRoundLabel } from './pool_ids.jsx';
+import { isSupplementaryBout, teamMatchTypeFor, poolNameOf, swissRoundLabel, poolMatchNumberOf } from './pool_ids.jsx';
 
 // TermV: kendo-glossary tooltip wrapper. Lazy lookup so the script
 // load order between glossary.jsx and viewer.jsx doesn't matter.
@@ -187,8 +187,11 @@ export function compMatches(c) {
 
   // Add poolPosition (1-based) and poolCount (total RR matches in this pool)
   // to each pool match so the eyebrow and queue rows can show "Match N of M"
-  // (AC2). Matches are ordered by their natural sort within the pool group;
-  // poolCount is the number of REGULAR round-robin matches with the same
+  // (AC2). N is the bout's number from its id (poolMatchNumberOf), the one
+  // every surface uses (the server's label, the scores list, the workbook):
+  // the draw numbers a pool's bouts in the order they are played (operator
+  // ruling 2026-10-04), so a new draw's N is its place in the playing order,
+  // and a bout keeps its number when the queue is reordered. poolCount is the number of REGULAR round-robin matches with the same
   // poolName, which equals N*(N-1)/2 for a pool of N players. Tiebreak
   // ("-TB-") and pool-daihyosen ("-DH-") bouts are NOT part of the RR schedule,
   // so they are excluded here: counting them would inflate poolCount and shift
@@ -207,8 +210,8 @@ export function compMatches(c) {
   }
   for (const pms of Object.values(poolMatchesByPool)) {
     const count = pms.length;
-    pms.forEach((m, i) => {
-      m.poolPosition = i + 1;
+    pms.forEach((m) => {
+      m.poolPosition = poolMatchNumberOf(m.id);
       m.poolCount = count;
     });
   }

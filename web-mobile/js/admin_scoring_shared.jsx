@@ -8,9 +8,9 @@ const Icon = window.Icon;
 
 import { DAIHYOSEN_POSITION, scoreRowMatchLabel } from './pool_ids.jsx';
 import {
-  writeDidNotLand, writeRetryable,
+  writeDidNotLand, writeRetryable, decisionWord,
   attemptScoreWrite, DOWNSTREAM_KNOCKOUT_PLAYED_CANCELLED, DOWNSTREAM_KNOCKOUT_REOPEN_CANCELLED, downstreamKnockoutReopenedNotice,
-  courtBusyMessage,
+  courtBusyMessage, HELD_WRITE_DISCARD_LABEL, heldWriteDiscardConfirm, queuedNotice,
 } from './write_result.jsx';
 import { sameCompetitor } from './competitor_identity.jsx';
 import { sideWord } from './side_cell.jsx';
@@ -38,6 +38,104 @@ const MAX_IPPONS_PER_SIDE = 2;
 function isBoutDecided(aPts, bPts) {
   return (aPts?.length ?? 0) >= MAX_IPPONS_PER_SIDE
       || (bPts?.length ?? 0) >= MAX_IPPONS_PER_SIDE;
+}
+
+// HeldWriteDiscard: the way past a result held on this device that the server
+// keeps refusing (a 5xx on every retry). Rendered inside a score editor's
+// pending banner, it shows nothing until the queue reports that this match's
+// held write has crossed the server-error threshold, then offers to discard
+// that write, and only it, after a confirm (copy owned by write_result.jsx).
+// It never blocks another write (each queued write is sent on its own), but
+// without this the only way to stop it was signing out, which discards every
+// held result. `onDiscarded` lets the editor drop its pending banner.
+// useMatchHeldWrite: what this device still holds for one match: `held`,
+// any write at all (a running update, a result, a decision), and `stuck`, one
+// the server keeps refusing. Re-read on every sync status change and every
+// change of the held counts, which include the failing count, so a second
+// write crossing the threshold, a write landing, and a discard made from the
+// topbar's list all reach it. The editors' pending banner, its line
+// (HeldWriteNotice) and its Discard read it.
+export function useMatchHeldWrite(compId, matchId) {
+  const api = window.API;
+  // `held` is null when this page has no queue to ask (the editors' render
+  // tests stub window.API without one): unknown, so nothing is cleared.
+  const read = () => ({
+    held: api && typeof api.hasHeldWrite === 'function' && compId && matchId ? api.hasHeldWrite(compId, matchId) : null,
+    stuck: !!(api && typeof api.heldWriteKeepsFailing === 'function'
+      && compId && matchId && api.heldWriteKeepsFailing(compId, matchId)),
+  });
+  const [state, setState] = useStateA(read);
+  const mountedRef = useRefA(true);
+  useEffectA(() => () => { mountedRef.current = false; }, []);
+  useEffectA(() => {
+    const refresh = () => {
+      if (!mountedRef.current) return;
+      const next = read();
+      setState((prev) => (prev.held === next.held && prev.stuck === next.stuck ? prev : next));
+    };
+    refresh();
+    const offs = [];
+    if (typeof window.subscribeSyncStatus === 'function') offs.push(window.subscribeSyncStatus(refresh));
+    if (typeof window.subscribeUnsentWrites === 'function') offs.push(window.subscribeUnsentWrites(refresh));
+    return () => offs.forEach((off) => { if (typeof off === 'function') off(); });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [compId, matchId]);
+  return state;
+}
+
+// useClearPendingWhenNothingHeld: the editors' pending banner goes once this
+// device holds no write for the match: it landed, or it was discarded, here
+// or from the topbar's list. Waiting for the whole queue to drain left it up
+// while another match's write was still held, saying this one was saved on
+// the device when nothing was any more. `onClear` resets the editor's banner
+// state (and its kept submit closure).
+export function useClearPendingWhenNothingHeld(compId, matchId, pendingWrite, onClear) {
+  const { held } = useMatchHeldWrite(compId, matchId);
+  useEffectA(() => {
+    if (pendingWrite && held === false) onClear();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pendingWrite, held]);
+}
+
+// HeldWriteNotice: the pending banner's line, worded for where the held
+// write stands (queuedNotice): waiting for the connection, held in this page
+// only, or refused by the server on every attempt. The three editors render it.
+export function HeldWriteNotice({ compId, matchId, res }) {
+  const { stuck } = useMatchHeldWrite(compId, matchId);
+  return <span>{queuedNotice(res, { keepsFailing: stuck })}</span>;
+}
+
+export function HeldWriteDiscard({ compId, matchId, onDiscarded, disabled = false }) {
+  const api = window.API;
+  const { stuck } = useMatchHeldWrite(compId, matchId);
+  const [busy, setBusy] = useStateA(false);
+  const mountedRef = useRefA(true);
+  useEffectA(() => () => { mountedRef.current = false; }, []);
+  if (!stuck) return null;
+  const discard = async () => {
+    setBusy(true);
+    try {
+      const ok = typeof window.confirmDialog === 'function'
+        ? await window.confirmDialog(heldWriteDiscardConfirm())
+        : false;
+      if (!ok || !mountedRef.current) return;
+      api.discardFailingHeldWrites(compId, matchId);
+      if (typeof onDiscarded === 'function') onDiscarded();
+    } finally {
+      if (mountedRef.current) setBusy(false);
+    }
+  };
+  return (
+    <button
+      type="button"
+      className="btn btn--sm btn--ghost"
+      data-testid="held-write-discard"
+      disabled={disabled || busy}
+      onClick={discard}
+    >
+      {HELD_WRITE_DISCARD_LABEL}
+    </button>
+  );
 }
 
 // getIpponButtons: returns the ordered array of scoring button labels for a
@@ -375,6 +473,9 @@ function buildDecisionBody(kind, { decisionBy, decisionReason }, enchoPeriodCoun
   if (decisionReason) body.decisionReason = decisionReason;
   if (enchoPeriodCount > 0) body.encho = { periodCount: enchoPeriodCount };
   if (opts.force) body.force = true;
+  // The match the decision was recorded on (bc-hlck): recordDecision floors
+  // the stamp by it and never sends it.
+  if (opts.seenModifiedAt > 0) body.seenModifiedAt = opts.seenModifiedAt;
   return body;
 }
 
@@ -441,7 +542,8 @@ function makeSubmitDecision({
   isComplete,       // item 7: corrections (isComplete=true) must not auto-advance
   entityLabel = 'competitors',
   // F5: optional pending-write handles threaded in from ScoreEditorModal so
-  // a queued (offline) decision write shows the sticky "Not saved yet" banner.
+  // a queued (offline) decision write shows the sticky "Not sent yet" banner
+  // (handed the queued answer, which queuedNotice words).
   // Not provided by TeamScoreEditorModal (which has its own pending state path).
   setPendingWrite,
   pendingFnRef,
@@ -453,7 +555,8 @@ function makeSubmitDecision({
     if (setPendingWrite && mountedRef.current) setPendingWrite(false);
     try {
       const updated = await submitDecisionRequest(
-        match.compId, match.id, kind, { decisionBy, decisionReason }, enchoPeriodCount, password, opts,
+        match.compId, match.id, kind, { decisionBy, decisionReason }, enchoPeriodCount, password,
+        { ...opts, seenModifiedAt: match.modifiedAt || 0 },
       );
       if (!mountedRef.current) return;
       // A decision that did not land must not advance ANYTHING below this
@@ -478,7 +581,7 @@ function makeSubmitDecision({
       // reports it, with no Retry beside it.
       if (writeDidNotLand(updated)) {
         if (setPendingWrite && writeRetryable(updated)) {
-          setPendingWrite(true);
+          setPendingWrite(updated);
           if (pendingFnRef) pendingFnRef.current = () => submit(kind, { decisionBy, decisionReason }, opts);
         }
         return;
@@ -844,7 +947,10 @@ function FoulCounter({ fouls, setFouls, onIncrement, color, disabled }) {
 // `clearable` (bc-dnst): show the clear button even with an empty value, for a
 // host whose position is occupied by a picked squad slot that has no name yet
 // (the Up Next lineup panel); without it a nameless placement had no way out.
-function LineupNameInput({ value, roster, onSelect, disabled, ariaLabel, color, clearable }) {
+// `onListPick` is told of a pick made by tapping a row of the open list (an
+// option or "+ Add"), never of a typed commit, Enter, the clear button or a
+// click outside: only that pick closes the list under the finger.
+function LineupNameInput({ value, roster, onSelect, onListPick, disabled, ariaLabel, color, clearable }) {
   const [query, setQuery] = useStateA("");
   const [open, setOpen] = useStateA(false);
   const [active, setActive] = useStateA(-1); // -1 = no explicit selection yet
@@ -899,8 +1005,10 @@ function LineupNameInput({ value, roster, onSelect, disabled, ariaLabel, color, 
 
   // On click-outside: commit a typed but un-submitted name rather than
   // discarding it. Without this, tabbing quickly between slots loses names.
-  // Note: option onMouseDown uses preventDefault so the outside mousedown only
-  // fires when clicking a genuinely external target (q is already "" after commit).
+  // Note: option onMouseDown uses preventDefault so focus stays in the input;
+  // the option itself commits on CLICK (bc-flst), so the whole tap lands on
+  // the option before the list closes. The outside mousedown only fires when
+  // clicking a genuinely external target (q is already "" after commit).
   window.useClickOutside(ref, () => {
     if (q) {
       skipBlurRef.current = true;
@@ -963,6 +1071,15 @@ function LineupNameInput({ value, roster, onSelect, disabled, ariaLabel, color, 
           value={open ? query : (value || "")}
           onChange={(e) => { setQuery(e.target.value); setOpen(true); setActive(-1); }}
           onFocus={() => { setOpen(true); setQuery(""); setActive(-1); }}
+          // A tap on a box that still has focus (after Escape closed the
+          // list, or after a pick in a host that keeps the box enabled, e.g.
+          // admin_schedule_lineup.jsx) fires no focus event, so the tap
+          // itself reopens the list (bc-flst). A host that disables the box
+          // while the pick's own write is out (the team editor) drops focus
+          // instead, so onFocus reopens it there. This onClick only ever
+          // opens, never toggles closed, so the click that follows the first
+          // focus is a no-op.
+          onClick={() => { if (!open && !disabled) { setOpen(true); setQuery(""); setActive(-1); } }}
           onKeyDown={onKeyDown}
           onBlur={(e) => {
             // Do not close if focus moved to something inside the wrapper
@@ -980,7 +1097,7 @@ function LineupNameInput({ value, roster, onSelect, disabled, ariaLabel, color, 
         />
         {(value || clearable) && !disabled && (
           <button type="button" className="lineup-name__clear" title="Clear player" aria-label="Clear player"
-            onMouseDown={(e) => { e.preventDefault(); commit(""); }}>×</button>
+            onMouseDown={(e) => e.preventDefault()} onClick={() => commit("")}>×</button>
         )}
       </div>
       {open && optionCount > 0 && (
@@ -988,7 +1105,7 @@ function LineupNameInput({ value, roster, onSelect, disabled, ariaLabel, color, 
           {matches.map((entry, i) => (
             <button type="button" key={entry.isObject ? (entry.raw?.id || entry.raw?.index) : entry.name}
               className={`pmf__option ${i === active ? "pmf__option--active" : ""}`}
-              onMouseDown={(e) => { e.preventDefault(); commitEntry(entry); }}>
+              onMouseDown={(e) => e.preventDefault()} onClick={() => { onListPick?.(); commitEntry(entry); }}>
               {entry.isObject ? (
                 <>
                   <span className="pmf__opt-label">{entry.label}</span>
@@ -1002,7 +1119,7 @@ function LineupNameInput({ value, roster, onSelect, disabled, ariaLabel, color, 
           {canAddNew && (
             <button type="button"
               className={`pmf__option lineup-name__add ${active === matches.length ? "pmf__option--active" : ""}`}
-              onMouseDown={(e) => { e.preventDefault(); commit(q); }}>
+              onMouseDown={(e) => e.preventDefault()} onClick={() => { onListPick?.(); commit(q); }}>
               <span className="pmf__opt-name">+ Add “{q}”</span>
             </button>
           )}
@@ -1082,16 +1199,23 @@ const CORRECTION_PRESETS = ["Scoring error", "Wrong competitor", "Data entry", "
 // editors read it. Any kiken that is not the injury kind reads as voluntary,
 // the legacy bare "kiken" included, which the server loads as voluntary too.
 function withdrawalLabel(decision) {
-  if (decision === "fusenpai") return "Fusenpai";
+  if (decision === "fusenpai" || decision === "fusensho") {
+    // bc-cse: derives its word from decisionWord (write_result.jsx) rather
+    // than restating the map -- "fusensho" used to read "Default win
+    // (fusensho)" here, which named a thing kendo does not have alongside
+    // the thing it does (operator ruling 2026-10-04).
+    const word = decisionWord(decision);
+    return word.charAt(0).toUpperCase() + word.slice(1);
+  }
   // bc-rawm: a match-level fusensho, the shape a match-level default win
-  // takes when the operator taps "Record default win for <opponent>" on a
+  // takes when the operator taps "Record fusensho for <opponent>" on a
   // match against an already-withdrawn competitor -- the match's own notice
-  // (BarredMatchNotice / defaultWinDecisionBodyForSide, ineligible_match.jsx).
-  // Short label for the same "fact" slots kiken/fusenpai use (e.g.
-  // admin_scoring_team.jsx's team-summary-decision); the fuller "Default win
-  // (fusensho) for <winner>" sentence is composed in RecordedWithdrawal,
-  // which needs the winner's name this function does not have.
-  if (decision === "fusensho") return "Default win (fusensho)";
+  // (BarredMatchNotice / defaultWinDecisionBodyForSide, ineligible_match.jsx)
+  // -- falls through the branch above. Short label for the same "fact" slots
+  // kiken/fusenpai use (e.g. admin_scoring_team.jsx's team-summary-decision);
+  // the fuller "Fusensho for <winner>" sentence is composed in
+  // RecordedWithdrawal, which needs the winner's name this function does not
+  // have.
   return decision === "kiken-injury" ? "Kiken – Injury" : "Kiken – Voluntary";
 }
 
@@ -1337,6 +1461,58 @@ function useMatchReopen({ match, password, isComplete }) {
   return { busy, landed, err, conflict, blockerLabel, notice, reopen, requeueBlocker, dismissConflict: () => setConflict(null) };
 }
 
+// useWithdrawalRemoval: Remove withdrawal (operator ruling 2026-10-03, "the
+// fix must leave the match resolved"), the one state machine both editors run
+// for it. The operator takes the recorded ruling off in the editor, enters
+// the result as it was fought, and Save correction sends it with
+// clearWithdrawal, which replaces the ruling on the server
+// (engine.KeepsWithdrawalRuling). Nothing is sent before that save.
+//
+// `enabled` is the editor's one statement of whether it can offer it at all
+// (the team editor passes !isKachinuki: a finished kachinuki encounter has no
+// Save correction). onRemove/onUndo are the editor's own side effects (what
+// its board does when the ruling goes or comes back); the hook flips the
+// state around them.
+//
+// ONE reset rule: a removal belongs to the match and the ruling it was made
+// against, so a change of the match id, the decision or the side it names
+// ends a pending removal, and the ruling shows again. Keyed on those three
+// values, never on the match object, which SSE re-creates on every broadcast.
+// What the board does then is onReset, which defaults to onUndo: the
+// individual board must re-seed, or the winner's side would lock again over
+// the operator's letters. The team editor keeps its bout edits (an edit in
+// progress survives a verdict adopted from another device) and only clears
+// its refusal notice.
+//
+// Returns:
+//   removing    - a removal is pending: the editor obeys the bouts, not the ruling
+//   rulingShown - a recorded withdrawal is in force and is still shown
+//   removal     - RecordedWithdrawal's `removal` prop, null when !enabled
+//   patchBlock  - spread into every completed write
+// `held` is the editor's pendingWrite: the correction carrying the removal
+// was saved on this device and is waiting to be sent. Undo cannot recall
+// it, so the removal then reads as sent and offers no Undo.
+function useWithdrawalRemoval({ match, enabled, held = false, onRemove, onUndo, onReset = onUndo }) {
+  const [removed, setRemoved] = useStateA(false);
+  const inForce = withdrawalInForce(match);
+  const removing = !!enabled && inForce && removed;
+  const rulingShown = inForce && !removing;
+  useEffectA(() => {
+    if (!removed) return;
+    setRemoved(false);
+    if (onReset) onReset();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [match.id, match.decision, match.decisionBy]);
+  const removal = enabled ? {
+    removed: removing,
+    held: removing && !!held,
+    onRemove: () => { setRemoved(true); if (onRemove) onRemove(); },
+    onUndo: () => { setRemoved(false); if (onUndo) onUndo(); },
+  } : null;
+  const patchBlock = removing ? { clearWithdrawal: true } : {};
+  return { removing, rulingShown, removal, patchBlock };
+}
+
 // ReopenFeedback: what a reopen made through useMatchReopen came back with,
 // rendered ONCE per editor, outside the control that started the reopen
 // (testIdPrefix names the door). It must outlive that control: Clear
@@ -1409,30 +1585,42 @@ function ReopenFeedback({ ctl, testIdPrefix }) {
 // that decide its copy, at most (see `settled` there).
 export const LATER_MATCHES_HOLD_MS = 2000;
 
-// RecordedWithdrawal: what a correction of a withdrawal-decided match shows
-// about the withdrawal, and the one way to remove it, identical in the
+// RecordedWithdrawal: what a correction of a match a kiken, fusenpai or
+// fusensho decided shows, and the two fixes it offers, identical in the
 // individual and team editors (operator ruling 2026-09-24: "Everything should
 // be able to be fixed, in case of a wrong entry").
 //
-// Clearing a withdrawal is a REOPEN, not a score write: a withdrawal means the
-// opponent received the default score, so without it the match was never
-// decided. The match goes back to running with what was fought kept and the
-// withdrawn side eligible again, and the operator scores the rest and
-// finishes it normally (engine.ReopenMatch). The reason is asked for BEFORE
-// the reopen posts and rides it, with the consequence spelled out above it
-// (operator ruling 2026-09-24: the operator "just needs to be aware of the
-// consequences"). On a single bout (singleBout: the individual editor, which
-// also scores a team's -DH-/-TB- rep bout) the consequence names the one
-// thing the reopen cannot keep, the winner's points, which the recorded
-// withdrawal had already replaced with the default win.
+// "Clear <decision> and reopen" is a REOPEN, not a score write: the match
+// goes back to running with what was fought kept and the withdrawn side
+// eligible again, and the operator scores the rest and finishes it normally
+// (engine.ReopenMatch). It is ONE TAP WITH NO REASON (operator ruling
+// 2026-09-25: a match can be reopened without any reason, and nothing is
+// gated on that); the consequence is spelled out beside the button rather
+// than behind a confirm step. On a single bout (singleBout: the individual
+// editor, which also scores a team's -DH-/-TB- rep bout) that consequence
+// names the one thing the reopen cannot keep: the winner's points, which
+// recording the decision had already replaced with its own circles.
 //
-// A kachinuki encounter a withdrawal decided renders this too, in place of
-// its plain one-tap Reopen, so a withdrawal has one control and one
-// consequence text in every editor; the plain Reopen stays for every other
-// kachinuki result. Switching the withdrawal to the other side stays with the
-// editor's own withdrawal controls. What the reopen came back with (the
-// notice, an error, the court-busy remedy) is rendered by the editor through
-// ReopenFeedback, never here: this unmounts as soon as the match is running.
+// "Remove <decision>" is the other fix (useWithdrawalRemoval; operator ruling
+// 2026-10-03, "the fix must leave the match resolved"): the match stays
+// finished, the operator enters the result as it was fought, and Save
+// correction sends it with clearWithdrawal so it replaces the ruling
+// (engine.KeepsWithdrawalRuling). Save correction asks for a reason there;
+// the reopen above does not. The removed state lives in useWithdrawalRemoval,
+// which the EDITOR runs and reads to unlock the board, and which hands this
+// component the `removal` prop ({ removed, onRemove, onUndo }) as it is;
+// this component only offers the switch and says what it does. Without
+// `removal` (kachinuki, which has no Save correction) only the reopen is
+// offered.
+//
+// A kachinuki encounter a kiken, fusenpai or fusensho decided renders this
+// too, in place of its plain one-tap Reopen, so such a decision has one
+// control pair and one set of consequence text in every editor; the plain
+// Reopen stays for every other kachinuki result. Switching the withdrawal to
+// the other side stays with the editor's own withdrawal controls. What the
+// reopen came back with (the notice, an error, the court-busy remedy) is
+// rendered by the editor through ReopenFeedback, never here: this unmounts
+// as soon as the match is running.
 //
 // A POOL match of a pools-then-knockout competition adds one line: finishing
 // the reopened match may change who qualifies from its pool, and the save
@@ -1440,15 +1628,15 @@ export const LATER_MATCHES_HOLD_MS = 2000;
 // is saved (the server's qualifierChange refusal, confirmed through
 // attemptScoreWrite like any other).
 //
-// bc-rawm: widened to the match-level DEFAULT-WIN class alongside kiken and
-// fusenpai (withdrawalInForce above), for a match closed with a fusensho
-// recorded from the match's own notice because the competitor was already
-// ineligible from an earlier withdrawal. Reads and the reopen remedy are otherwise identical;
-// only the copy differs: the Recorded line names the winner, and the clear
-// button drops "and reopen" ("Clear default win", or "Clear withdrawal" for a
-// kiken whose competitor is barred by another match), because such a match
-// may go back to the queue rather than onto the court.
-function RecordedWithdrawal({ match, ctl, disabled = false, singleBout = false }) {
+// bc-rawm: widened past kiken and fusenpai to a fusensho recorded at match
+// level (withdrawalInForce above), for a match closed because the competitor
+// was already ineligible from an earlier withdrawal. Reads and the reopen
+// remedy are otherwise identical; only the copy differs: the Recorded line
+// names the winner, and the clear button drops "and reopen" ("Clear
+// fusensho", or "Clear kiken"/"Clear fusenpai" for a competitor barred by
+// another match instead), because such a match may go back to the queue
+// rather than onto the court.
+function RecordedWithdrawal({ match, ctl, disabled = false, singleBout = false, removal = null }) {
   const withdrawnKey = withdrawnKeyOf(match);
   const withdrawn = withdrawnSideOf(match);
   const who = withdrawn?.name || "";
@@ -1457,6 +1645,13 @@ function RecordedWithdrawal({ match, ctl, disabled = false, singleBout = false }
   const isDefaultWin = match.decision === "fusensho";
   const what = match.decision === "fusenpai" ? "did not appear" : "withdrew";
   const feedsKnockout = match.phase === "pool" && match.compFormat === "mixed";
+  // bc-cse: the operator's word for what IS recorded on this match --
+  // "kiken", "fusenpai", or "fusensho" -- never "withdrawal"/"default win"
+  // as two names for the same thing (operator ruling 2026-10-04: "default
+  // win" does not exist in kendo). Always resolves: RecordedWithdrawal
+  // renders only once withdrawalInForce(match) is true, which gates on
+  // exactly this decision class.
+  const decisionNoun = decisionWord(match.decision) || "withdrawal";
 
   // bc-cse: "Everything should be able to be fixed... the operator just needs
   // to be aware of the consequences" (operator ruling 2026-09-24) extends past
@@ -1550,20 +1745,38 @@ function RecordedWithdrawal({ match, ctl, disabled = false, singleBout = false }
   // returns this one to the queue too (engine.reopenTargetStatusTx).
   const barMovesOn = !clearsDefaultWin && !!laterDefaultWins
     && laterDefaultWins.some(x => x.decision === "fusenpai");
+  const removed = !!(removal && removal.removed);
+  // Where the withdrawn competitor stands once this ruling is gone, the ONE
+  // answer both fixes describe (the reopen copy and the removal sentence):
+  //   staysLater     - the bar moves onto a later no-show (barMovesOn);
+  //   staysElsewhere - another match bars them (barredElsewhere), or this is
+  //                    a match-level fusensho, which never recorded a bar of
+  //                    its own, and the server does not read them eligible;
+  //   restored       - they can compete again: this match's record was the
+  //                    bar, or the server already reads them eligible.
+  let eligibility = "restored";
+  if (barMovesOn) eligibility = "staysLater";
+  else if (clearsDefaultWin && !isEligibleAgain) eligibility = "staysElsewhere";
+  const withdrawnWho = who || "The withdrawn competitor";
+  const removeEligibility = {
+    staysLater: ` ${withdrawnWho} stays withdrawn because of the later match listed below.`,
+    staysElsewhere: ` ${withdrawnWho} stays withdrawn because of another match.`,
+    restored: ` ${withdrawnWho} can compete again.`,
+  }[eligibility];
 
   return (
     <div className="decision-recorded" data-testid="recorded-withdrawal" style={{ marginTop: 10, fontSize: 13 }}>
       <div>
         {/* bc-rawm: a match-level fusensho (recorded from the match's own
-            notice: BarredMatchNotice / the queue row's Record default win)
-            names the WINNER first -- "Default win (fusensho) for <winner>" --
+            notice: BarredMatchNotice / the queue row's Record fusensho for
+            <opponent>) names the WINNER first -- "Fusensho for <winner>" --
             so the operator sees who benefits from the same reading the wire's
             decisionBy already carries, then names who had withdrawn as a
             second sentence. withdrawalLabel cannot build this on its own: it
             takes only the decision string, not the winner's name. */}
         <span>
           {isDefaultWin
-            ? `Recorded: Default win (fusensho) for ${winnerName || "the opponent"}. ${who || "The withdrawn competitor"} had withdrawn.`
+            ? `Recorded: Fusensho for ${winnerName || "the opponent"}. ${who || "The withdrawn competitor"} had withdrawn.`
             : `Recorded: ${withdrawalLabel(match.decision)}${who ? `, ${who} ${what}` : ""}.`}
         </span>
         {" "}
@@ -1572,23 +1785,71 @@ function RecordedWithdrawal({ match, ctl, disabled = false, singleBout = false }
             the clear does is stated below, before it is tapped. The one
             second step left is useMatchReopen's own, when a later knockout
             match has already been fought ("Reopen both"). */}
-        <button
-          type="button"
-          className="btn btn--sm"
-          data-testid="clear-withdrawal-reopen"
-          onClick={() => ctl.reopen("")}
-          disabled={disabled || ctl.busy || ctl.landed || !settled}
-        >
-              {/* bc-cse: "Clear default win" -- no "and reopen" -- because a
+        {removed && removal.held ? (
+          // The correction is saved on this device and waiting to be sent: it
+          // will remove the ruling when it lands, and Undo could not recall it.
+          <span data-testid="remove-withdrawal-pending">
+            The correction is saved on this device and removes the {decisionNoun} when it is sent.
+          </span>
+        ) : removed ? (
+          // Removed in the editor, not yet saved: nothing has been sent, so
+          // Undo just puts the recorded result back on the board.
+          <>
+            <span data-testid="remove-withdrawal-pending">
+              {`The ${decisionNoun} will be removed when you save the correction.`}
+            </span>
+            {" "}
+            <button
+              type="button"
+              className="btn btn--sm"
+              data-testid="remove-withdrawal-undo"
+              onClick={removal.onUndo}
+              disabled={disabled}
+            >
+              Undo
+            </button>
+          </>
+        ) : (
+          <>
+            <button
+              type="button"
+              className="btn btn--sm"
+              data-testid="clear-withdrawal-reopen"
+              onClick={() => ctl.reopen("")}
+              disabled={disabled || ctl.busy || ctl.landed || !settled}
+            >
+              {/* bc-cse: "Clear <decision>" -- no "and reopen" -- because a
                   fusensho reopen no longer always lands running: the server
                   returns the match to SCHEDULED when the barred competitor
                   is still barred (BarredMatchNotice shows again), and only
                   to running once they no longer are, so this button cannot
                   promise "and reopen" for either outcome uniformly. */}
-              {ctl.busy ? "Reopening…" : ctl.landed ? "Reopened" : !(clearsDefaultWin || barMovesOn) ? "Clear withdrawal and reopen"
-                : (isDefaultWin || match.decision === "fusenpai") ? "Clear default win" : "Clear withdrawal"}
-        </button>
+              {ctl.busy ? "Reopening…" : ctl.landed ? "Reopened" : !(clearsDefaultWin || barMovesOn) ? `Clear ${decisionNoun} and reopen`
+                : `Clear ${decisionNoun}`}
+            </button>
+            {removal && (
+              <>
+                {" "}
+                {/* No reason here: Save correction asks for one, and
+                    nothing is sent until then. */}
+                <button
+                  type="button"
+                  className="btn btn--sm"
+                  data-testid="remove-withdrawal"
+                  onClick={removal.onRemove}
+                  // Held until the later-matches lookup settles, like the
+                  // clear beside it: the sentence a removal shows (who stays
+                  // withdrawn, barMovesOn) depends on it.
+                  disabled={disabled || ctl.busy || ctl.landed || !settled}
+                >
+                  {`Remove ${decisionNoun}`}
+                </button>
+              </>
+            )}
+          </>
+        )}
       </div>
+      {!removed && (<>
           {clearsDefaultWin ? (
             // bc-cse: a fusensho names the OTHER competitor as barred, not
             // this match's own withdrawal, so clearing it does not simply
@@ -1601,36 +1862,46 @@ function RecordedWithdrawal({ match, ctl, disabled = false, singleBout = false }
             // server reopens this match straight to running, so the copy
             // says that instead of promising the queue.
             <p data-testid="clear-withdrawal-consequence" style={{ margin: "6px 0 0" }}>
-              {isEligibleAgain
+              {eligibility === "restored"
                 ? `${who || "The barred competitor"} can fight again, so the match reopens in progress. Score it and finish it as usual.`
                 : <>
+                  {/* bc-cse: "again" is only true when THIS match's cleared
+                      decision was itself a fusensho (isDefaultWin): clearing
+                      it undoes exactly one fusensho, so recording one to
+                      re-close the (now queued) match is a repeat. A chained
+                      kiken/fusenpai (barredElsewhere, isDefaultWin false)
+                      never recorded a fusensho on this match at all -- it is
+                      the OTHER match that barred this competitor -- so this
+                      is the first fusensho for THIS match's winner, named by
+                      winnerName exactly as the Recorded line above names it. */}
                   The match goes back to the queue. {who || "The barred competitor"} is still withdrawn, so
-                  record the default win again{canReinstate ? `, or reinstate ${who || "them"} first to fight it` : ""}.
+                  record {isDefaultWin ? "the fusensho again" : `a fusensho for ${winnerName || "the opponent"}`}
+                  {canReinstate ? `, or reinstate ${who || "them"} first to fight it` : ""}.
                 </>}
             </p>
-          ) : barMovesOn ? (
+          ) : eligibility === "staysLater" ? (
             <p data-testid="clear-withdrawal-consequence" style={{ margin: "6px 0 0" }}>
               The match goes back to the queue. {who || "The withdrawn competitor"} also did not
               appear for a later match, listed below, so they are still withdrawn because of it.
             </p>
           ) : singleBout && match.decision === "fusenpai" ? (
             // A no-show fought nothing: there are no points to keep or lose,
-            // so the reopen only removes the default win.
+            // so the reopen only removes the win the fusenpai gave.
             <p data-testid="clear-withdrawal-consequence" style={{ margin: "6px 0 0" }}>
-              This reopens the match: it goes back to running, the default win given
+              This reopens the match: it goes back to running, the win the fusenpai gave
               to {winnerName || "the other side"} is removed, and {who || "the side marked absent"} can
               compete again. Then score the match and finish it.
             </p>
           ) : singleBout ? (
             // A single bout (an individual match, or a team -DH-/-TB- rep
             // bout) loses the WINNER's points on a reopen: recording the
-            // kiken replaced them with the default win (recordDecisionTx)
+            // decision replaced them with its own award (recordDecisionTx)
             // and the reopen drops that verdict, so only what the withdrawing
             // side struck is still there to keep (engine singleBoutFightOf).
             <p data-testid="clear-withdrawal-consequence" style={{ margin: "6px 0 0" }}>
               This reopens the match: it goes back to running and {who || "the withdrawn side"} can
-              compete again. {winnerName || "The winner"}&apos;s points were replaced by the default
-              win when the withdrawal was recorded, so enter them again; {who ? `${who}'s` : "the withdrawn side's"} points
+              compete again. {winnerName || "The winner"}&apos;s points were replaced by the {decisionNoun}
+              {" "}when the withdrawal was recorded, so enter them again; {who ? `${who}'s` : "the withdrawn side's"} points
               are kept. Then score the rest and finish it.
             </p>
           ) : (
@@ -1639,6 +1910,19 @@ function RecordedWithdrawal({ match, ctl, disabled = false, singleBout = false }
               {who || "the withdrawn side"} can compete again, and you score the rest and finish it.
             </p>
           )}
+      </>)}
+      {removal && (
+        // The one-save fix beside the reopen (operator ruling 2026-10-03):
+        // the match never leaves the finished state and never takes the
+        // court. Offered, it follows the reopen copy; pending, it stands in
+        // for it. The eligibility tail is the same answer either way.
+        <p data-testid="remove-withdrawal-consequence" style={{ margin: "6px 0 0" }}>
+          {removed
+            ? "Enter the result as it was fought, then save the correction. The match stays finished."
+            : "Or remove it: the match stays finished, you enter the result as it was fought and save the correction."}
+          {removeEligibility}
+        </p>
+      )}
           {feedsKnockout && (
             // A pool match of a pools-then-knockout competition feeds the
             // knockout through its standings, so the result it is finished
@@ -1652,7 +1936,7 @@ function RecordedWithdrawal({ match, ctl, disabled = false, singleBout = false }
             </p>
           )}
           {laterDefaultWins && laterDefaultWins.length > 0 && (
-            <div data-testid="clear-withdrawal-default-win-consequences" style={{ margin: "6px 0 0" }}>
+            <div data-testid="clear-withdrawal-later-matches" style={{ margin: "6px 0 0" }}>
               {/* bc-cse: named by scoreRowMatchLabel first -- a pairing alone
                   cannot be found in the scores list, which is where the
                   operator has to go to reopen it -- with the pairing appended
@@ -1664,9 +1948,10 @@ function RecordedWithdrawal({ match, ctl, disabled = false, singleBout = false }
               {laterDefaultWins.map((x) => {
                 const label = scoreRowMatchLabel(x);
                 const pairing = `${x.sideB?.name || "Shiro"} vs ${x.sideA?.name || "Aka"}`;
+                const noun = decisionWord(x.decision) || "decision";
                 return (
-                  <p key={x.id} data-testid={`clear-withdrawal-default-win-${x.id}`} style={{ margin: "4px 0 0" }}>
-                    {label ? `${label} · ${pairing}` : pairing} keeps its default win; reopen it to fight it.
+                  <p key={x.id} data-testid={`clear-withdrawal-later-match-${x.id}`} style={{ margin: "4px 0 0" }}>
+                    {label ? `${label} · ${pairing}` : pairing} keeps its {noun}; reopen it to fight it.
                   </p>
                 );
               })}
@@ -1686,15 +1971,19 @@ function RecordedWithdrawal({ match, ctl, disabled = false, singleBout = false }
 // INNER side of the name, across it from the number (numberFollowsName), and
 // never in the centre: the middle is a closed set, and Kiken/Fus. name one
 // competitor. Both editors render their header names through here, the
-// individual board and the team encounter header alike.
-function WithdrawalMarkedName({ match, sideKey, side, name, number }) {
+// individual board and the team encounter header alike. `rulingShown` is the
+// editor's own answer to "is the recorded ruling on show" (useWithdrawalRemoval:
+// false during a pending Remove withdrawal), and the mark appears only when it
+// is true, so a surface that forgets to pass it shows no mark rather than a
+// mark the board no longer agrees with.
+function WithdrawalMarkedName({ match, sideKey, side, name, number, rulingShown = false }) {
   // bc-cse: take BOTH marks once and place the right one on the right name,
   // rather than always reading .loser -- for a match-level fusensho the
   // withdrawal names the BARRED (losing) side, and sideMarks' fusensho arm
   // puts its "Fus." on .winner, not .loser, so reading .loser alone showed
   // NO mark at all on either header while the bracket, list rows, TV
   // headline and export all marked the winner "Fus.".
-  const inForce = withdrawalInForce(match);
+  const inForce = rulingShown === true && withdrawalInForce(match);
   const withdrawnKey = inForce ? withdrawnKeyOf(match) : "";
   let mark = "";
   if (inForce && withdrawnKey) {
@@ -1839,6 +2128,7 @@ export {
   withdrawnKeyOf,
   withdrawalInForce,
   useMatchReopen,
+  useWithdrawalRemoval,
   ReopenFeedback,
   RecordedWithdrawal,
   WithdrawalMarkedName,

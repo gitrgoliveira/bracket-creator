@@ -201,6 +201,7 @@ func NewRouterWithHub(store *state.Store, eng *engine.Engine, res *resources.Res
 	RegisterCompetitionHandlers(adminSmallBody, store, eng, hub, elevated)
 	RegisterParticipantHandlers(adminSmallBody, store, eng, hub, elevated)
 	RegisterMatchHandlers(adminSmallBody, eng, store, store, hub, verifier, store)
+	RegisterMatchHistoryHandler(adminSmallBody, store)
 	RegisterDecisionHandlers(adminSmallBody, eng, store, store, hub)
 	RegisterEligibilityHandlers(adminSmallBody, store, hub)
 	RegisterReinstateHandler(adminSmallBody, eng, hub)

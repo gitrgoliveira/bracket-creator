@@ -394,6 +394,9 @@ describe('pool corrections that move a qualifier', () => {
   it.each([
     ['recordScore', () => API.recordScore('c1', 'Pool A-0', { status: 'completed' }, 'pw')],
     ['recordDecision', () => API.recordDecision('c1', 'Pool A-0', { decision: 'kiken-voluntary', decisionBy: 'aka' }, 'pw')],
+    // bc-rfsw: an override (ResolveFeedersModal) whose winner would change a
+    // side of a later match being fought now gets the same sentence.
+    ['overrideBracketWinner', () => API.overrideBracketWinner('c1', 'Pool A-0', 'Alice', 'pw')],
   ])('%s throws the running refusal as the operator copy, never confirmable', async (_door, send) => {
     originalFetch = global.fetch;
     global.fetch = vi.fn().mockResolvedValue({
@@ -401,16 +404,16 @@ describe('pool corrections that move a qualifier', () => {
       status: 409,
       json: async () => ({
         error: 'downstream_knockout_running', matchId: 'Pool A-0',
-        runningMatches: [{ id: 'm-r1-0', number: 1 }], message: 'server copy',
+        runningMatches: [{ id: 'm-r1-0', number: 1, court: 'A' }], message: 'server copy',
       }),
     });
     const err = await send().then(
       () => { throw new Error('expected a rejection'); },
       (e) => e,
     );
-    expect(err.message).toBe('Match 1 is being fought now. Finish it or send it back to the queue, then save again.');
+    expect(err.message).toBe('Match 1 is being fought now on Shiaijo A. Finish it or send it back to the queue, then save this correction again.');
     expect(err.code).toBe('downstream_knockout_running');
-    expect(err.downstreamKnockoutRunning).toEqual({ matchId: 'Pool A-0', runningMatches: [{ id: 'm-r1-0', number: 1 }] });
+    expect(err.downstreamKnockoutRunning).toEqual({ matchId: 'Pool A-0', runningMatches: [{ id: 'm-r1-0', number: 1, court: 'A' }] });
     expect(downstreamKnockoutPlayedRefusal(err)).toBeNull();
   });
 });

@@ -122,7 +122,7 @@ describe('a participant runs the representative bout of a tied knockout team mat
     const onClose = await openEditor(knockoutTeamMatch());
     await addRepBout();
 
-    expect(window.API.recordDaihyosen).toHaveBeenCalledWith('c1', 'm1', '');
+    expect(window.API.recordDaihyosen).toHaveBeenCalledWith('c1', 'm1', '', 0);
     expect(repBoutRow(), 'the representative bout is on the sheet').toBeTruthy();
     expect(screen.getByTestId('team-daihyosen-remove'), 'Remove is offered while it is unscored').toBeTruthy();
     expect(screen.queryByTestId('team-daihyosen-hantei-arm'), 'no hantei is offered').toBeNull();
@@ -232,7 +232,7 @@ describe('a participant runs the representative bout of a tied knockout team mat
     const saved = repBoutOf(lastWire());
     expect(saved, 'the save made first carries the representative bout').toMatchObject({ decision: 'daihyosen' });
     expect([...(saved.ipponsA || []), ...(saved.ipponsB || [])]).toEqual([]);
-    expect(window.API.removeDaihyosen).toHaveBeenCalledWith('c1', 'm1', '');
+    expect(window.API.removeDaihyosen).toHaveBeenCalledWith('c1', 'm1', '', 0);
     expect(window.alert).not.toHaveBeenCalled();
     expect(document.querySelector('[data-testid="team-editor-error"]'), 'no refusal is shown').toBeNull();
     expect(repBoutRow(), 'the row is gone').toBeFalsy();

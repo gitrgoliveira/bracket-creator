@@ -403,6 +403,29 @@ describe('MatchLineupSideEditor resolves names to squad member ids (bc-pnum gap 
   // same rename the Lineups page offers; typing into the picker over a named
   // member stays a substitution. A blank pick gets no Rename: it is named by
   // typing into the box.
+  // bc-tp44: the Rename link is sized by a class (an inline style outranked the
+  // coarse .btn floors and left it 47x14 on an iPad), and its row is a div: a
+  // label with no `for` activates its first labelable descendant, which on a
+  // named row is this button, so tapping the position name opened Rename.
+  it('Rename carries a class not an inline style, and its row host is not a label', async () => {
+    global.window.API.fetchSquads = vi.fn().mockResolvedValue({ 'uuid-grouped': SQUAD_7 });
+
+    let tree = await mount();
+    const pickers = findComponents(tree, 'LineupNameInput');
+    pickers[0].props.onSelect('Fighter 1', SQUAD_7[0]);
+    tree = runtime.currentTree();
+
+    const rename = findHosts(tree, 'button').find(b => b.props?.['aria-label'] === 'Rename 1 player');
+    expect(rename).toBeTruthy();
+    expect(rename.props.style).toBeUndefined();
+    expect(rename.props.className).toContain('lineup-rename-btn');
+
+    const rowHosts = (type) => findHosts(tree, type)
+      .filter(n => /^match-lineup-pos-/.test(n.props?.['data-testid'] || ''));
+    expect(rowHosts('label')).toEqual([]);
+    expect(rowHosts('div').length).toBeGreaterThan(0);
+  });
+
   it('Rename under a named pick renames that member and the next save writes the new name with the same id', async () => {
     global.window.API.fetchSquads = vi.fn().mockResolvedValue({ 'uuid-grouped': SQUAD_7 });
     global.window.API.renameTeamMember = vi.fn().mockResolvedValue({ id: 'mem-1', index: 1, name: 'Fighter One' });

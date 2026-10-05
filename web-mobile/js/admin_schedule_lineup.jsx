@@ -548,7 +548,11 @@ export function MatchLineupSideEditor({ comp, team, match, allMatches, password,
 
       <div style={{ display: "flex", flexDirection: "column", gap: 8, marginBottom: 12 }}>
         {positions.map(p => { const pickedLabel = pickedLabelFor(p.key); return (
-          <label key={p.key} data-testid={`match-lineup-pos-${teamId}-${p.key}`} style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13 }}>
+          // A div, not a label: a label with no `for` activates its first
+          // labelable descendant, which on a named row is the Rename button, so
+          // a tap on the position name opened Rename instead of the name box.
+          // The name box carries its own aria-label.
+          <div key={p.key} data-testid={`match-lineup-pos-${teamId}-${p.key}`} style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13 }}>
             {/* The picked member's number (bc-dnst) sits UNDER the position
                 name, inside the label's fixed column: a picked blank slot has
                 no name, so without it the box reads empty after the pick and
@@ -562,7 +566,7 @@ export function MatchLineupSideEditor({ comp, team, match, allMatches, password,
               {/* Rename lives in the same fixed column, so it adds no width
                   to the row (see the chip note above). */}
               {namedMemberAt(p.key) && renamingKey !== p.key ? (
-                <button type="button" className="btn btn--ghost btn--sm" style={{ padding: "0 2px", fontSize: 11, height: "auto", minHeight: 0 }}
+                <button type="button" className="btn btn--ghost btn--sm lineup-rename-btn"
                   onClick={() => startRename(p.key)} disabled={saving || copying || renameBusy}
                   aria-label={`Rename ${p.label} player`}>Rename</button>
               ) : null}
@@ -607,7 +611,7 @@ export function MatchLineupSideEditor({ comp, team, match, allMatches, password,
               }}
             />
             )}
-          </label>
+          </div>
         ); })}
         {suggestions.length === 0 && (
           <div style={{ fontSize: 12, color: "var(--ink-3)", fontStyle: "italic" }}>

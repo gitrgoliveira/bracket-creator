@@ -3604,8 +3604,12 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
                       corrected past bout carries it; the live current bout does
                       not (it is never collapsible). */}
                   {idx === editingDoneBoutIdx && (
-                    <button type="button" className="tsm-caret tsm-caret--open tsm-caret-btn" data-testid={`kachinuki-done-collapse-${idx}`}
-                      aria-label={`Collapse bout ${idx + 1}`} aria-expanded={true} onClick={closeDoneBoutEdit}>▶</button>
+                    <button type="button" className="tsm-caret-btn" data-testid={`kachinuki-done-collapse-${idx}`}
+                      aria-label={`Collapse bout ${idx + 1}`} aria-expanded={true} onClick={closeDoneBoutEdit}>
+                      {/* bc-tp44: only the glyph rotates. Rotating the button
+                          itself made its 44x36 tap box hit-test as 36x44. */}
+                      <span className="tsm-caret tsm-caret--open" aria-hidden="true">▶</span>
+                    </button>
                   )}
                   {/* Bout number only: the FIK position abbreviations
                       (Sen/Ji/Chu/Fuk/Tai) that used to ride under it were

@@ -6241,9 +6241,18 @@ button.vsched-item:not([data-clickable]) {
   margin-bottom: 0;
 }
 .lineup-name__bar {
-  min-height: 36px;
-  padding: 4px 6px;
+  min-height: max(36px, var(--tap-floor));
+  padding: 0 6px;
   flex-wrap: nowrap;
+  align-items: stretch;
+}
+/* The input fills the bar, so the whole bar is the typeable target (a tap on
+   the bar's own padding used to focus nothing); the clear button stays centred. */
+.lineup-name__bar .pmf__input {
+  align-self: stretch;
+}
+.lineup-name__bar .lineup-name__clear {
+  align-self: center;
 }
 /* An unfilled lineup slot is a "fill this" caution, not an error, and the
    two sides are already Aka (red) / Shiro per the colour system, so a red
@@ -6267,6 +6276,21 @@ button.vsched-item:not([data-clickable]) {
 }
 .lineup-name__clear:hover {
   color: var(--ink-1);
+}
+/* The at-court lineup panel's Rename link: compact under a fine pointer, and
+   floored under a coarse one. Two classes, so it outranks both .btn floors
+   (an inline style used to, which left it 47x14 on an iPad). */
+.btn.lineup-rename-btn {
+  padding: 0 2px;
+  font-size: 11px;
+  height: auto;
+  min-height: 0;
+}
+@media (pointer: coarse) {
+  .btn.lineup-rename-btn {
+    min-height: var(--tap-floor);
+    min-width: var(--tap-floor);
+  }
 }
 .lineup-name__dropdown {
   z-index: 60;
@@ -7570,13 +7594,15 @@ abbr.msb-lab { text-decoration: none; cursor: help; }
   gap: 3px 6px;
 }
 @media (pointer: coarse) {
+  /* The box bleeds into the row padding and the gap rather than widening the
+     number gutter, which the team header restates as a margin. */
   .tsm-caret-btn {
-    min-height: 44px;
-    min-width: 36px;
+    min-height: var(--tap-floor);
+    min-width: var(--tap-floor);
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    margin: -10px 0;
+    margin: -10px -5px;
   }
 }
 
@@ -7914,6 +7940,18 @@ abbr.msb-lab { text-decoration: none; cursor: help; }
   align-items: center;
   gap: 6px;
   font-weight: 600;
+  min-height: var(--tap-floor);
+  cursor: pointer;
+}
+/* The label, not the checkbox, is the tap target: the native box stays small
+   on a fine pointer and grows with the label under a coarse one. */
+@media (pointer: coarse) {
+  .encho-row__label { padding-inline: 6px; }
+  .encho-row__label input[type="checkbox"] {
+    width: 20px;
+    height: 20px;
+    accent-color: var(--accent);
+  }
 }
 .encho-row__stepper {
   display: flex;
@@ -7927,8 +7965,8 @@ abbr.msb-lab { text-decoration: none; cursor: help; }
   font-weight: 700;
 }
 .encho-row__btn {
-  min-width: 28px;
-  min-height: 28px;
+  min-width: max(28px, var(--tap-floor));
+  min-height: max(28px, var(--tap-floor));
 }
 
 /* --- Compact mode: chrome ------------------------------------------------ */

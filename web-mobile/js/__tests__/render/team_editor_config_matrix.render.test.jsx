@@ -369,7 +369,13 @@ describe('TeamScoreEditorModal kachinuki bout navigation', () => {
     expect(rows[1].querySelector('.team-sub-match__btns')).not.toBeNull();
     // The collapse caret (rotated, aria-expanded=true) is the close control.
     const caret = screen.getByTestId('kachinuki-done-collapse-0');
-    expect(caret.classList.contains('tsm-caret--open')).toBe(true);
+    // bc-tp44: only the GLYPH is rotated. Rotating the button itself made its
+    // 44x36 tap box hit-test as 36x44.
+    expect(caret.classList.contains('tsm-caret--open')).toBe(false);
+    expect(caret.classList.contains('tsm-caret-btn')).toBe(true);
+    const glyph = caret.querySelector('.tsm-caret.tsm-caret--open');
+    expect(glyph).not.toBeNull();
+    expect(glyph.getAttribute('aria-hidden')).toBe('true');
     expect(caret.getAttribute('aria-expanded')).toBe('true');
   });
 

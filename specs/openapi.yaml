@@ -2755,13 +2755,16 @@ paths:
         already been completed with a result of its own, the reopen is
         refused with `downstream_knockout_played` naming it; a retry with
         `forceDownstreamReopen: true` reopens that match too (back to
-        `scheduled`, its result and bouts cleared, to be fought again), and
+        `scheduled` where it sits, its winner cleared and its points, bouts
+        and flags kept, to be finished again), and
         the 200 response lists it in `reopenedMatches` with a `match_updated`
         event for each. When a withdrawal had decided that reopened match, it
         goes with its verdict: the competitor it barred is restored to
         eligible and a `competitor_status_updated` event is broadcast, as for
-        the match being reopened. A next match that is in progress, or that a bye
-        resolved off this winner, is refused outright. A pool match is never
+        the match being reopened. A next match that is in progress is refused
+        outright (`downstream_knockout_running`). A bye the winner went
+        through is unwound rather than refused, and the first real match past
+        it is the one judged. A pool match is never
         refused for the knockout its pool feeds: reopening it moves no
         knockout slot. The write that finishes it is checked instead: the same
         result is saved silently, and a different one that moves a qualifier

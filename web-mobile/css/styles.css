@@ -652,11 +652,15 @@ a:hover {
 /* Armed "Finish" state: the commit button has been tapped once and now shows
    the computed verdict, awaiting a confirming second tap. Deepen the fill and
    add the accent ring so it reads as "armed, tap again to record", navy, not
-   red (red is reserved for Aka/danger; this is a confirm, not a warning). */
+   red (red is reserved for Aka/danger; this is a confirm, not a warning).
+   Also owns its text colour: a plain .btn (no .btn--primary alongside it,
+   e.g. the kachinuki End match button) has no other rule setting color, so
+   without this the default dark ink renders unreadable on the navy fill. */
 .btn--confirm,
 .btn--confirm:hover {
   background: var(--accent-strong);
   border-color: var(--accent-strong);
+  color: var(--accent-fg);
   box-shadow: 0 0 0 3px var(--accent-soft);
 }
 

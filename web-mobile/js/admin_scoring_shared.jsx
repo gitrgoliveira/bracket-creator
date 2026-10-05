@@ -1582,30 +1582,42 @@ function ReopenFeedback({ ctl, testIdPrefix }) {
 // that decide its copy, at most (see `settled` there).
 export const LATER_MATCHES_HOLD_MS = 2000;
 
-// RecordedWithdrawal: what a correction of a withdrawal-decided match shows
-// about the withdrawal, and the one way to remove it, identical in the
+// RecordedWithdrawal: what a correction of a match a kiken, fusenpai or
+// fusensho decided shows, and the two fixes it offers, identical in the
 // individual and team editors (operator ruling 2026-09-24: "Everything should
 // be able to be fixed, in case of a wrong entry").
 //
-// Clearing a withdrawal is a REOPEN, not a score write: a withdrawal means the
-// opponent received the default score, so without it the match was never
-// decided. The match goes back to running with what was fought kept and the
-// withdrawn side eligible again, and the operator scores the rest and
-// finishes it normally (engine.ReopenMatch). The reason is asked for BEFORE
-// the reopen posts and rides it, with the consequence spelled out above it
-// (operator ruling 2026-09-24: the operator "just needs to be aware of the
-// consequences"). On a single bout (singleBout: the individual editor, which
-// also scores a team's -DH-/-TB- rep bout) the consequence names the one
-// thing the reopen cannot keep, the winner's points, which the recorded
-// withdrawal had already replaced with the default win.
+// "Clear <decision> and reopen" is a REOPEN, not a score write: the match
+// goes back to running with what was fought kept and the withdrawn side
+// eligible again, and the operator scores the rest and finishes it normally
+// (engine.ReopenMatch). It is ONE TAP WITH NO REASON (operator ruling
+// 2026-09-25: a match can be reopened without any reason, and nothing is
+// gated on that); the consequence is spelled out beside the button rather
+// than behind a confirm step. On a single bout (singleBout: the individual
+// editor, which also scores a team's -DH-/-TB- rep bout) that consequence
+// names the one thing the reopen cannot keep: the winner's points, which
+// recording the decision had already replaced with its own circles.
 //
-// A kachinuki encounter a withdrawal decided renders this too, in place of
-// its plain one-tap Reopen, so a withdrawal has one control and one
-// consequence text in every editor; the plain Reopen stays for every other
-// kachinuki result. Switching the withdrawal to the other side stays with the
-// editor's own withdrawal controls. What the reopen came back with (the
-// notice, an error, the court-busy remedy) is rendered by the editor through
-// ReopenFeedback, never here: this unmounts as soon as the match is running.
+// "Remove <decision>" is the other fix (useWithdrawalRemoval; operator ruling
+// 2026-10-03, "the fix must leave the match resolved"): the match stays
+// finished, the operator enters the result as it was fought, and Save
+// correction sends it with clearWithdrawal so it replaces the ruling
+// (engine.KeepsWithdrawalRuling). Save correction asks for a reason there;
+// the reopen above does not. The removed state lives in useWithdrawalRemoval,
+// which the EDITOR runs and reads to unlock the board, and which hands this
+// component the `removal` prop ({ removed, onRemove, onUndo }) as it is;
+// this component only offers the switch and says what it does. Without
+// `removal` (kachinuki, which has no Save correction) only the reopen is
+// offered.
+//
+// A kachinuki encounter a kiken, fusenpai or fusensho decided renders this
+// too, in place of its plain one-tap Reopen, so such a decision has one
+// control pair and one set of consequence text in every editor; the plain
+// Reopen stays for every other kachinuki result. Switching the withdrawal to
+// the other side stays with the editor's own withdrawal controls. What the
+// reopen came back with (the notice, an error, the court-busy remedy) is
+// rendered by the editor through ReopenFeedback, never here: this unmounts
+// as soon as the match is running.
 //
 // A POOL match of a pools-then-knockout competition adds one line: finishing
 // the reopened match may change who qualifies from its pool, and the save
@@ -1613,24 +1625,14 @@ export const LATER_MATCHES_HOLD_MS = 2000;
 // is saved (the server's qualifierChange refusal, confirmed through
 // attemptScoreWrite like any other).
 //
-// bc-rawm: widened to the match-level DEFAULT-WIN class alongside kiken and
-// fusenpai (withdrawalInForce above), for a match closed with a fusensho
-// recorded from the match's own notice because the competitor was already
-// ineligible from an earlier withdrawal. Reads and the reopen remedy are otherwise identical;
-// only the copy differs: the Recorded line names the winner, and the clear
-// button drops "and reopen" ("Clear default win", or "Clear withdrawal" for a
-// kiken whose competitor is barred by another match), because such a match
-// may go back to the queue rather than onto the court.
-// removal (operator ruling 2026-10-03, "the fix must leave the match
-// resolved"): an editor that can save the real result over the recorded
-// ruling passes { removed, onRemove, onUndo }. Remove withdrawal is that
-// fix: the match stays finished, the operator enters the result as it was
-// fought, and Save correction sends it with clearWithdrawal so it replaces
-// the ruling (engine.KeepsWithdrawalRuling). The removed state lives in
-// useWithdrawalRemoval, which the EDITOR runs and reads to unlock the board,
-// and which hands this prop over as it is; this component only offers
-// the switch and says what it does. Without `removal` (kachinuki, which has
-// no Save correction) only the reopen is offered, as before.
+// bc-rawm: widened past kiken and fusenpai to a fusensho recorded at match
+// level (withdrawalInForce above), for a match closed because the competitor
+// was already ineligible from an earlier withdrawal. Reads and the reopen
+// remedy are otherwise identical; only the copy differs: the Recorded line
+// names the winner, and the clear button drops "and reopen" ("Clear
+// fusensho", or "Clear kiken"/"Clear fusenpai" for a competitor barred by
+// another match instead), because such a match may go back to the queue
+// rather than onto the court.
 function RecordedWithdrawal({ match, ctl, disabled = false, singleBout = false, removal = null }) {
   const withdrawnKey = withdrawnKeyOf(match);
   const withdrawn = withdrawnSideOf(match);

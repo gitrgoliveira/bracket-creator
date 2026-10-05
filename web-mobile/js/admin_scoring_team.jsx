@@ -840,6 +840,123 @@ function predatesAnswer(match, override) {
   return override.at > 0 && !!match && isOlderRunningCopy(match, override.match.status, override.at);
 }
 
+// What a pick is answered with when its side's lineup was never read: a write
+// composed on nothing would replace the lineup the team's later matches carry.
+const LINEUP_NOT_READ_NOTICE = "The lineup could not be read, so this name was not saved. Close and reopen the match.";
+
+// Is a save of this match's lineup for the team still waiting in the outbox?
+// The server's copy then lacks that edit, and a write would replace the queued
+// save, so the lineup held here (which has the edit) is what it is composed on.
+function lineupSaveQueued(compId, teamId, matchId) {
+  const api = window.API;
+  return !!api && typeof api.queuedLineupSave === "function" && !!api.queuedLineupSave(compId, teamId, { matchId });
+}
+
+// The ONE key of a bout row's lineup notice, per side. The same whichever way
+// the pick is written (a lineup position, or the bout itself), so the editable
+// row and the read-only row of a recorded kachinuki bout both find it.
+function lineupNoticeKey(side, idx) {
+  return `${side}:${idx}`;
+}
+
+const LINEUP_SIDES = ["a", "b"];
+const NO_LINEUPS = { a: null, b: null };
+
+// The lineup each team fields in this match, as the server holds it. A name
+// picked on the sheet saves the WHOLE lineup and every later match of the team
+// inherits it, so a write must never be composed on a lineup that was not
+// read: beginLineupWrite refuses a side ("a" Aka/sideA, "b" Shiro/sideB) until
+// a read of it has landed. null is a successful read of "nothing in force".
+//
+// One sync per match: a read begun for another match, or after the sheet
+// closed, never lands, and of two reads of a side the later-begun wins. A read
+// that fails leaves the side as it was. A change announced for this
+// competition is followed, except for a side this sheet is writing (that side
+// is read once its write settles) or whose lineup has a save still queued (the
+// server's copy lacks that edit, so the lineup held stays).
+function useMatchLineups(compId, matchId) {
+  const [lineups, setLineups] = useStateA(NO_LINEUPS);
+  const syncRef = useRefA(null);
+
+  useEffectA(() => {
+    const sync = {
+      alive: true,
+      teamIds: { a: "", b: "" },
+      began: { a: 0, b: 0 },
+      landed: { a: 0, b: 0 },
+      writing: { a: 0, b: 0 },
+      announced: { a: false, b: false },
+      held: { a: null, b: null },
+    };
+    syncRef.current = sync;
+    setLineups(NO_LINEUPS);
+
+    const isRead = (side) => sync.landed[side] > 0;
+    // Rejects when the lineup cannot be read: each caller decides what that means.
+    const read = async (side, teamId) => {
+      const seq = ++sync.began[side];
+      const lineup = await resolveMatchLineup(compId, teamId, matchId, window.API, { throwOnError: true });
+      const keepsHeld = isRead(side) && lineupSaveQueued(compId, teamId, matchId);
+      if (sync.alive && seq >= sync.landed[side] && !keepsHeld) {
+        sync.landed[side] = seq;
+        sync.held[side] = lineup;
+        setLineups(prev => ({ ...prev, [side]: lineup }));
+      }
+      return lineup;
+    };
+    // A read nobody waits on; the next pick on an unread side says so.
+    const refresh = (side) => (
+      sync.alive && sync.teamIds[side] ? read(side, sync.teamIds[side]).catch(() => {}) : Promise.resolve()
+    );
+    sync.start = (teamIds) => {
+      sync.teamIds = teamIds;
+      return Promise.all(LINEUP_SIDES.map(side => refresh(side)));
+    };
+    // One write of one side's lineup, bound to this match; null while the side has not been read.
+    sync.beginWrite = (side) => {
+      if (!isRead(side)) return null;
+      sync.writing[side] += 1;
+      return {
+        read: (teamId) => read(side, teamId),
+        held: () => sync.held[side],
+        set: (lineup) => {
+          if (!sync.alive) return;
+          sync.held[side] = lineup;
+          setLineups(prev => ({ ...prev, [side]: lineup }));
+        },
+        end: () => {
+          sync.writing[side] -= 1;
+          if (sync.writing[side] === 0 && sync.announced[side]) {
+            sync.announced[side] = false;
+            refresh(side);
+          }
+        },
+      };
+    };
+
+    const onLineupUpdated = (e) => {
+      if (e.detail && e.detail.competitionId !== compId) return;
+      for (const side of LINEUP_SIDES) {
+        if (sync.writing[side] > 0) sync.announced[side] = true;
+        else refresh(side);
+      }
+    };
+    window.addEventListener("lineup-updated", onLineupUpdated);
+    return () => {
+      sync.alive = false;
+      window.removeEventListener("lineup-updated", onLineupUpdated);
+    };
+  }, [compId, matchId]);
+
+  return {
+    lineupA: lineups.a,
+    lineupB: lineups.b,
+    // Reads both sides at once, once the competition has said which teams they are.
+    startLineupReads: (teamIds) => syncRef.current.start(teamIds),
+    beginLineupWrite: (side) => syncRef.current.beginWrite(side),
+  };
+}
+
 export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSubmitAndNext, onAfterDecision, onStartLanded, prevMatch, nextMatch, onPrev, onNext, password, selfReport, teamMembers, variant = "modal", canClose = true }) {
   // mp-gmcg: a successful [× Remove this bout] shrinks the SERVER bout log, and
   // the parent may not have caught up when this render runs. matchOverride
@@ -1046,13 +1163,13 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
   // T131: lineup data so each bout cell can show the assigned player
   // name + canonical position label. Falls back gracefully when the
   // lineup hasn't been submitted yet (saved: false -> null, bc-k404).
-  const [lineupA, setLineupA] = useStateA(null);
-  const [lineupB, setLineupB] = useStateA(null);
+  const { lineupA, lineupB, startLineupReads, beginLineupWrite } = useMatchLineups(m.compId, m.id);
   // bc-pnum gap closure: each side's squad, so the inline lineup picker
   // below (submitInlineLineup / buildInlineLineupWrite) can resolve a
   // name typed or picked in THIS modal to its squad member id -- this is
-  // the THIRD lineup-writing surface (round-scoped AdminLineup and the
-  // per-match MatchLineupPanel were converted in earlier passes), and the
+  // the THIRD lineup-writing surface (the Lineups page, which sets a team's
+  // starting lineup or one match's own lineup, and the at-court
+  // MatchLineupPanel were converted in earlier passes), and the
   // one most likely to matter for kachinuki retirement: a substitution
   // made here, mid-encounter, is exactly when a slot's occupant changes.
   const [squadA, setSquadA] = useStateA([]);
@@ -1074,10 +1191,10 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
   const [editorErr, setEditorErr] = useStateA(""); // inline error surface: daihyosen add/remove
   // What a bout row's name box produced, drawn inside that row so the operator
   // sees it beside what they typed: { key, tone, text } with key
-  // `${side}:${positionKey}` (a lineup row) or `${side}:bout:${idx}` (a
-  // kachinuki manual row). tone "error": nothing was written (a refusal or a
-  // failed save). tone "warn" (bc-cse gap closure): the save succeeded and only
-  // the squad-member identity attachment fell short. The two never share a look.
+  // lineupNoticeKey(side, idx). tone "error": nothing was written (a refusal,
+  // an unread lineup or a failed save). tone "warn" (bc-cse gap closure): the
+  // save succeeded and only the squad-member identity attachment fell short.
+  // The two never share a look.
   const [lineupNotice, setLineupNotice] = useStateA(null);
   // The bout side (rowSides tapKey) whose refused Fusensho was last tapped:
   // its reason shows under that row (bc-fsnp). A title alone never shows on a
@@ -1284,7 +1401,8 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
 
   // Fetch lineup + competition data on mount. Both endpoints are
   // read-only and idempotent; failures degrade gracefully (the modal
-  // still functions, just without position labels / kachinuki mode).
+  // still functions, just without position labels / kachinuki mode, and a
+  // side whose lineup was not read saves no lineup: see submitInlineLineup).
   useEffectA(() => {
     let cancelled = false;
     if (!m.compId) return;
@@ -1324,16 +1442,11 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
         (detail && detail.players && detail.players.length ? detail.players : null)
         || (detail && detail.config && detail.config.players)
         || [];
-      const teamAId = resolveLineupTeamId(sideAKey, players);
-      const teamBId = resolveLineupTeamId(sideBKey, players);
-      if (teamAId) {
-        const l = await resolveMatchLineup(m.compId, teamAId, m.id, window.API);
-        if (!cancelled) setLineupA(l);
-      }
-      if (teamBId) {
-        const l = await resolveMatchLineup(m.compId, teamBId, m.id, window.API);
-        if (!cancelled) setLineupB(l);
-      }
+      if (cancelled) return;
+      await startLineupReads({
+        a: resolveLineupTeamId(sideAKey, players),
+        b: resolveLineupTeamId(sideBKey, players),
+      });
     })();
     return () => { cancelled = true; };
   }, [m.compId, m.id]);
@@ -1524,22 +1637,46 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
     // ruling put on it, and every typed name is written with no member id.
   }, [m.compId, compMeta, password, teamMembersKey]);
 
+  // The lineup a write is composed on: what the server holds now. The lineup
+  // held here stands in when a save of it is still queued (the server's copy
+  // lacks that edit) or the server cannot be asked, and putMatchLineup queues
+  // the write when it cannot be sent either.
+  const lineupToWriteOn = async (write, teamId) => {
+    if (!lineupSaveQueued(m.compId, teamId, m.id)) {
+      try {
+        // The read has no deadline of its own: unanswered, the boxes would stay disabled.
+        const fresh = await withinDeadline(write.read(teamId), FETCH_TIMEOUT_MS);
+        if (fresh !== TIMED_OUT) return fresh;
+      } catch (_e) {
+        // The server cannot be asked: the held lineup stands in.
+      }
+    }
+    return write.held();
+  };
+
   // Submit an inline position change: builds the full positions map from the
-  // existing lineup + the changed key→value, resolves/mints that position's
-  // member id (see buildInlineLineupWrite), then PUTs both. Lineups are
-  // always editable; no force/reason needed.
+  // lineup it is composed on (lineupToWriteOn) + the changed key→value,
+  // resolves/mints that position's member id (see buildInlineLineupWrite),
+  // then PUTs both. Lineups are always editable; no force/reason needed. The
+  // write replaces the lineup every later match of the team carries, so a side
+  // whose lineup was never read is refused rather than composed on nothing.
   //
   // member is the squad-member object LineupNameInput hands back when the
   // operator picked one of the row's numbered entries (bc-dnst); it is
   // undefined for a typed/"+ Add" name, and buildInlineLineupWrite writes
   // by id rather than resolving by name when it is present.
-  const submitInlineLineup = async (sideKey, teamId, lineup, squad, setSquad, posKey, value, member) => {
-    const noticeKey = `${sideKey}:${posKey}`;
+  const submitInlineLineup = async ({ side, noticeKey, teamId, squad, setSquad, posKey, value, member }) => {
     const notify = (tone, text) => { if (mountedRef.current) setLineupNotice({ key: noticeKey, tone, text }); };
-    setInlineLineupSaving(true);
     setLineupNotice(null);
+    const write = beginLineupWrite(side);
+    if (!write) {
+      notify("error", LINEUP_NOT_READ_NOTICE);
+      return;
+    }
+    setInlineLineupSaving(true);
     try {
-      const built = await buildInlineLineupWrite(m.compId, teamId, lineup, squad, posKey, value, password, member);
+      const current = await lineupToWriteOn(write, teamId);
+      const built = await buildInlineLineupWrite(m.compId, teamId, current, squad, posKey, value, password, member);
       // bc-dnst duplicate guard: buildInlineLineupWrite refuses entirely
       // (no write attempted) rather than doubling a member up across two
       // positions. Tell the operator which position already holds them and
@@ -1555,15 +1692,10 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
       if (typeof setSquad === "function") setSquad(nextSquad);
       const hasMemberIds = Object.keys(updatedIds).length > 0;
       await window.API.putMatchLineup(m.compId, teamId, m.id, updated, password, hasMemberIds ? updatedIds : undefined);
-      // Refresh lineup state from the response is deferred: on next open the
-      // modal re-fetches. For immediate feedback we do a partial reload of
-      // lineup state for the affected side.
+      // The response carries no lineup: show what was written on top of what
+      // it was composed on, until the server's own announcement is read.
       if (!mountedRef.current) return;
-      if (teamId === teamIdForSide(m.sideA)) {
-        setLineupA(prev => ({ ...prev, positions: updated, memberIds: updatedIds }));
-      } else {
-        setLineupB(prev => ({ ...prev, positions: updated, memberIds: updatedIds }));
-      }
+      write.set({ ...current, positions: updated, memberIds: updatedIds });
       // bc-cse gap closure: the write above succeeded (putMatchLineup did
       // not throw), so this is the non-blocking warning tone, never the
       // error one -- the save is done, only its squad-member identity
@@ -1576,6 +1708,7 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
     } catch (e) {
       notify("error", e?.message || "Failed to update lineup");
     } finally {
+      write.end();
       if (mountedRef.current) setInlineLineupSaving(false);
     }
   };
@@ -2335,7 +2468,7 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
   };
 
   // bc-pnum: the squad member label beside a bout row's fighter name (the
-  // SAME "T10.1" identifier the round-scoped Lineups page shows --
+  // SAME "T10.1" identifier the Lineups page shows --
   // squadMemberLabel, squad_member_label.jsx), shared by the editable row
   // and the read-only (past-bout) row so both resolve identically: squad
   // member id first (resolveSquadMember, lineup_resolver.jsx), falling back
@@ -2448,6 +2581,20 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
     );
   };
 
+  // The notice a bout row's name box produced (lineupNotice, keyed by
+  // lineupNoticeKey): under that side's name in the editable row, and after the
+  // read-only row of a recorded kachinuki bout, since a rename or save that
+  // answers after the bout was recorded still has to show somewhere.
+  const renderLineupNotice = (key) => (lineupNotice && lineupNotice.key === key ? (
+    <div
+      className={lineupNotice.tone === "error" ? "alert alert--error" : "alert alert--warn"}
+      role={lineupNotice.tone === "error" ? "alert" : "status"}
+      data-tone={lineupNotice.tone}
+      data-testid="team-editor-lineup-warning">
+      {lineupNotice.text}
+    </div>
+  ) : null);
+
   // mp-gmcg: read-only display of a fought kachinuki bout — the SAME
   // team-sub-match layout as the editable bout row (position, Shiro/Aka names,
   // centred ippon-mark slots, winner) minus the controls. Reuses the
@@ -2470,8 +2617,8 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
     const aDisplayName = resolveBoutSideDisplayName({ squad: squadA, memberId: aMemberId, storedName: aName });
     const bDisplayName = resolveBoutSideDisplayName({ squad: squadB, memberId: bMemberId, storedName: bName });
     const nameCls = (side) => "tsm-name__static" + (t.winner === side ? " tsm-name__static--win" : "");
-    return (
-      <div key={`ro-${idx}`} className="team-sub-match team-sub-match--readonly team-sub-match--editable" data-testid={`kachinuki-done-bout-${idx}`}
+    const row = (
+      <div className="team-sub-match team-sub-match--readonly team-sub-match--editable" data-testid={`kachinuki-done-bout-${idx}`}
         role="button" tabIndex={0} aria-label={`Correct bout ${idx + 1}`} aria-expanded={false}
         onClick={() => openDoneBoutEdit(idx)}
         onKeyDown={e => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); openDoneBoutEdit(idx); } }}>
@@ -2506,6 +2653,15 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
           </div>
         </div>
       </div>
+    );
+    // A role="button" has presentational children, so a notice inside the row
+    // would not be announced: it follows the row instead.
+    return (
+      <React.Fragment key={`ro-${idx}`}>
+        {row}
+        {renderLineupNotice(lineupNoticeKey("b", idx))}
+        {renderLineupNotice(lineupNoticeKey("a", idx))}
+      </React.Fragment>
     );
   };
 
@@ -3464,12 +3620,16 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
             );
             const rosterB = withoutPlacedElsewhere(rosterForSide(m.sideB, lineupB, squadB), lineupB);
             const rosterA = withoutPlacedElsewhere(rosterForSide(m.sideA, lineupA, squadA), lineupA);
+            // Where this row's pick on each side files its notice, and where the
+            // row looks for it (rowSides below).
+            const noticeKeyB = lineupNoticeKey("b", idx);
+            const noticeKeyA = lineupNoticeKey("a", idx);
             // member (LineupNameInput's second onSelect argument) is the
             // picked squad-member object when the operator chose one of the
             // row's numbered entries; it is undefined for a typed/"+ Add"
             // name, exactly like buildInlineLineupWrite's own optional arg.
-            const pickPlayer = (sideKey, teamId, lineup, squad, setSquad) => (value, member) => {
-              submitInlineLineup(sideKey, teamId, lineup, squad, setSquad, lineupPosKey, value, member);
+            const pickPlayer = (side, noticeKey, teamId, squad, setSquad) => (value, member) => {
+              submitInlineLineup({ side, noticeKey, teamId, squad, setSquad, posKey: lineupPosKey, value, member });
             };
             // mp-gmcg: a manually-added bout has no lineup key (positions
             // beyond teamSize are not valid lineup keys) and no server
@@ -3491,15 +3651,15 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
             // hoisted out of this row closure; this factory just binds it to
             // the row's own sub/index and this side's key, mirroring
             // pickPlayer above.
-            const pickManual = (rowSide, sideKey, memberIdKey, squad, setSquad, teamId) => (value, member) => {
+            const pickManual = (side, noticeKey, squad, setSquad, teamId) => (value, member) => {
               setLineupNotice(null);
               return pickManualBoutName({
-                sub: s, idx, sideKey, memberIdKey, squad, setSquad, teamId,
+                sub: s, idx, sideKey: `${side}Name`, memberIdKey: `${side}MemberIdOverride`, squad, setSquad, teamId,
                 compId: m.compId, password, updateSub,
                 // A self-run competitor cannot open the Lineups page, so they are
                 // pointed at the organizer, as the server's own refusals do.
                 onRenameFailed: (typed, e) => setLineupNotice({
-                  key: `${rowSide}:bout:${idx}`,
+                  key: noticeKey,
                   tone: "warn",
                   text: `"${typed}" was used for this bout, but the team member could not be renamed. ${memberRefusalNote({ code: e && e.code, reason: e && e.message }, selfReport ? "Ask the tournament organizer to rename them." : "Rename them on the Lineups page.")}`,
                 }),
@@ -3586,9 +3746,9 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
                 playerName: resolveBoutSideDisplayName({ squad: squadB, memberId: playerBMemberId, storedName: playerBName }),
                 memberId: playerBMemberId,
                 memberLabel: playerBLabel, roster: isDaihyoRow ? [] : rosterB, forceInput: manualPathB,
-                noticeKey: manualPathB ? `b:bout:${idx}` : `b:${lineupPosKey}`,
+                noticeKey: noticeKeyB,
                 lineupSlot: !isDaihyoRow && idx + 1 <= teamSize,
-                onSelectName: manualPathB ? pickManual("b", "bName", "bMemberIdOverride", squadB, setSquadB, teamIdB) : pickPlayer("b", teamIdB, lineupB, squadB, setSquadB),
+                onSelectName: manualPathB ? pickManual("b", noticeKeyB, squadB, setSquadB, teamIdB) : pickPlayer("b", noticeKeyB, teamIdB, squadB, setSquadB),
               },
               {
                 key: "a", tapKey: `${idx}:a`, pts: s.aPts, fouls: s.aFouls,
@@ -3604,9 +3764,9 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
                 playerName: resolveBoutSideDisplayName({ squad: squadA, memberId: playerAMemberId, storedName: playerAName }),
                 memberId: playerAMemberId,
                 memberLabel: playerALabel, roster: isDaihyoRow ? [] : rosterA, forceInput: manualPathA,
-                noticeKey: manualPathA ? `a:bout:${idx}` : `a:${lineupPosKey}`,
+                noticeKey: noticeKeyA,
                 lineupSlot: !isDaihyoRow && idx + 1 <= teamSize,
-                onSelectName: manualPathA ? pickManual("a", "aName", "aMemberIdOverride", squadA, setSquadA, teamIdA) : pickPlayer("a", teamIdA, lineupA, squadA, setSquadA),
+                onSelectName: manualPathA ? pickManual("a", noticeKeyA, squadA, setSquadA, teamIdA) : pickPlayer("a", noticeKeyA, teamIdA, squadA, setSquadA),
               },
             ];
 
@@ -3756,15 +3916,7 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
                               : <span className="tsm-name__static tsm-name__static--empty" aria-label={`${posLabel} ${rs.label}: no player named`}>-</span>
                           )}
                         </div>
-                        {lineupNotice && lineupNotice.key === rs.noticeKey && (
-                          <div
-                            className={lineupNotice.tone === "error" ? "alert alert--error" : "alert alert--warn"}
-                            role={lineupNotice.tone === "error" ? "alert" : "status"}
-                            data-tone={lineupNotice.tone}
-                            data-testid="team-editor-lineup-warning">
-                            {lineupNotice.text}
-                          </div>
-                        )}
+                        {renderLineupNotice(rs.noticeKey)}
                         {/* Row 1: the ippon mark buttons and the per-bout
                             Fusensho button (layout: the .tsm-row-1 compact rules
                             in styles.css). T096/FR-031: Fusensho awards the bout

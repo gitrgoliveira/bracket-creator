@@ -45,6 +45,7 @@ const MATCH_KEY = 'bc.lineupDraft.v1:comp-1:team-a:match:Pool A-2';
 const USE_PREVIOUS = "Use the previous match's lineup";
 const QUEUED_LINE = 'A save of this lineup is still waiting to be sent.';
 const REMOVED_UNREAD = 'Removed. The lineup this match now uses could not be read: try again.';
+const NO_ANSWER = 'The lineup could not be read: the server did not answer. Check the connection and try again.';
 
 let AdminTeamLineupsList;
 let MatchLineupSideEditor;
@@ -179,6 +180,15 @@ describe('the at-court panel, for a lineup that could not be read', () => {
     expect(failed.getByTestId('match-lineup-draft-team-a').textContent).toContain('Unsaved lineup changes restored');
   });
 
+  it('says a read the server never answered in a plain sentence, with a Try again, never the browser\'s "Failed to fetch"', async () => {
+    api.fetchLineupInForce.mockRejectedValue(new TypeError('Failed to fetch'));
+    const utils = await mountPanel();
+    expect(utils.getByText(NO_ANSWER)).toBeTruthy();
+    expect(utils.queryByText('Failed to fetch')).toBeNull();
+    expect(tryAgain(utils)).toBeTruthy();
+    expect(saveButton(utils).disabled).toBe(true);
+  });
+
   it('keeps the problem when the second read fails too', async () => {
     const utils = await mountPanel();
     api.fetchLineupInForce.mockRejectedValue(new Error('still down'));
@@ -230,6 +240,15 @@ describe('the Lineups page, for a lineup that could not be read', () => {
     api.fetchLineupInForce.mockResolvedValue(CARRIED);
     await click(tryAgain(utils));
     expect(utils.getByText('Same as Pool A · Match 1')).toBeTruthy();
+    expect(saveButton(utils).disabled).toBe(true);
+  });
+
+  it('says a read the server never answered in a plain sentence, with a Try again, never the browser\'s "Failed to fetch"', async () => {
+    api.fetchTeamLineup.mockRejectedValue(new TypeError('Failed to fetch'));
+    const utils = await mountPage();
+    expect(utils.getByText(NO_ANSWER)).toBeTruthy();
+    expect(utils.queryByText('Failed to fetch')).toBeNull();
+    expect(tryAgain(utils)).toBeTruthy();
     expect(saveButton(utils).disabled).toBe(true);
   });
 

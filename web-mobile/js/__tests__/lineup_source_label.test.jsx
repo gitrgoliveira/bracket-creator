@@ -9,7 +9,7 @@ import { describe, it, expect, vi } from 'vitest';
 import '../viewer_utils.jsx';
 import {
   lineupFields, lineupSourceOf, lineupSourceLabel, isOwnLineup, STARTING_ROUND, PREVIOUS_LINEUP_LABEL, SAVE_QUEUED_REASON,
-  REMOVED_UNREAD_NOTICE, previousLineupConfirm,
+  REMOVED_UNREAD_NOTICE, LINEUP_READ_NO_ANSWER, lineupReadFailure, previousLineupConfirm,
 } from '../lineup_resolver.jsx';
 
 const ALL = [
@@ -140,5 +140,38 @@ describe('the other words the lineup editors share', () => {
 
   it('keep the team\'s starting lineup as its round-0 entry', () => {
     expect(STARTING_ROUND).toBe(0);
+  });
+});
+
+// What an editor shows when the read of a lineup fails: the server's own words
+// when it answered, one plain sentence when it never did.
+describe('lineupReadFailure', () => {
+  it('words a read nobody answered as one sentence that says what to do', () => {
+    expect(LINEUP_READ_NO_ANSWER).toBe(
+      'The lineup could not be read: the server did not answer. Check the connection and try again.',
+    );
+  });
+
+  it.each([
+    ['Chrome', 'Failed to fetch'],
+    ['Firefox', 'NetworkError when attempting to fetch resource.'],
+    ['Safari', 'Load failed'],
+  ])('says a request that never reached the server by that sentence, whatever %s calls it', (_browser, text) => {
+    expect(lineupReadFailure(new TypeError(text))).toBe(LINEUP_READ_NO_ANSWER);
+  });
+
+  it('says a request given up on at its deadline by that sentence too', () => {
+    const timedOut = Object.assign(new Error('the request was not answered in time'), { timedOut: true });
+    expect(lineupReadFailure(timedOut)).toBe(LINEUP_READ_NO_ANSWER);
+  });
+
+  it('keeps the server\'s own words when it answered with some', () => {
+    expect(lineupReadFailure(new Error('competition not found'))).toBe('competition not found');
+  });
+
+  it('falls back to a plain sentence for an answer with no words, or for no error at all', () => {
+    expect(lineupReadFailure(new Error(''))).toBe('Failed to load lineup');
+    expect(lineupReadFailure(undefined)).toBe('Failed to load lineup');
+    expect(lineupReadFailure(null)).toBe('Failed to load lineup');
   });
 });

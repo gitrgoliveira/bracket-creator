@@ -329,9 +329,11 @@ describe('team editor: a lineup write is composed on the lineup the server holds
   });
 });
 
-// A save of the lineup still waiting in the outbox (API.queuedLineupSave) is not
-// on the server yet, so the server's copy lacks that edit and putMatchLineup
-// would replace the queued save with whatever the next write is composed on.
+// A save of the lineup still waiting in the outbox is not on the server yet, so
+// the server's copy lacks that edit, and putMatchLineup would replace the queued
+// save with whatever the next write is composed on. API.queuedLineupSave answers
+// with the lineup that save would write, whichever surface queued it (this sheet,
+// the at-court panel or the Lineups page), and the write is composed on that.
 describe('team editor: a save of this lineup is still waiting in the outbox', () => {
   const OPEN = { positions: { senpo: 'Ren Abe' }, memberIds: { senpo: 'b1' } };
   const SERVER_COPY = { positions: { senpo: 'Ren Abe', fukusho: 'Rin Ota' }, memberIds: { senpo: 'b1', fukusho: 'b4' } };
@@ -346,8 +348,8 @@ describe('team editor: a save of this lineup is still waiting in the outbox', ()
     });
   }
 
-  it('composes the write on the lineup it holds, and does not read the server\'s copy', async () => {
-    window.API.queuedLineupSave = vi.fn(() => true);
+  it('composes the write on the lineup that save would write, and does not read the server\'s copy', async () => {
+    window.API.queuedLineupSave = vi.fn(() => OPEN);
     serverAnswering(SERVER_COPY);
     const { container } = await mountFivePerson();
 
@@ -362,8 +364,30 @@ describe('team editor: a save of this lineup is still waiting in the outbox', ()
     expect(memberIds).toEqual({ senpo: 'b1', jiho: 'b2' });
   });
 
-  it('asks about the side it writes, and only that side is composed on the held lineup', async () => {
-    window.API.queuedLineupSave = vi.fn((_c, teamId) => teamId === 'team-B');
+  it('composes the write on a save another surface queued, never on the lineup it holds', async () => {
+    // The at-court panel or the Lineups page queued this lineup on this device while
+    // offline. The lineup this sheet read at opening is out of date against it:
+    // composed on that, the write would take the queued save's place and lose it.
+    const STALE = { positions: { senpo: 'Ren Abe', jiho: 'Rin Ota' }, memberIds: { senpo: 'b1', jiho: 'b4' } };
+    const QUEUED = { positions: { jiho: 'Kai Mori', chuken: 'Sho Ueda' }, memberIds: { jiho: 'b2', chuken: 'b5' } };
+    window.API.queuedLineupSave = vi.fn(() => QUEUED);
+    window.API.fetchLineupInForce = vi.fn(async (_c, teamId) => (teamId === 'team-B' ? STALE : null));
+    const { container } = await mountFivePerson();
+
+    await typeName(senpoInput(container), 'Yui Sato');
+
+    expect(readsOf('team-B'), 'only the read at opening').toBe(1);
+    expect(window.API.putMatchLineup).toHaveBeenCalledTimes(1);
+    const [, teamId, matchId, positions, , memberIds] = window.API.putMatchLineup.mock.calls[0];
+    expect([teamId, matchId]).toEqual(['team-B', 'm1']);
+    expect(positions, 'the queued lineup plus this pick, and nothing the held one contradicts it with').toEqual({
+      jiho: 'Kai Mori', chuken: 'Sho Ueda', senpo: 'Yui Sato',
+    });
+    expect(memberIds).toEqual({ jiho: 'b2', chuken: 'b5', senpo: 'b3' });
+  });
+
+  it('asks about the side it writes, and only that side is composed on a queued lineup', async () => {
+    window.API.queuedLineupSave = vi.fn((_c, teamId) => (teamId === 'team-B' ? OPEN : null));
     serverAnswering(SERVER_COPY);
     const { container } = await mountFivePerson();
 
@@ -377,7 +401,7 @@ describe('team editor: a save of this lineup is still waiting in the outbox', ()
   it('keeps showing the lineup it holds when a read answers with the server\'s copy meanwhile', async () => {
     let queued = false;
     let serverCopy = OPEN;
-    window.API.queuedLineupSave = vi.fn(() => queued);
+    window.API.queuedLineupSave = vi.fn(() => (queued ? OPEN : null));
     window.API.fetchLineupInForce = vi.fn(async (_c, teamId) => (teamId === 'team-B' ? serverCopy : null));
     const { container } = await mountFivePerson();
     expect(senpoInput(container).value).toBe('Ren Abe');
@@ -394,7 +418,7 @@ describe('team editor: a save of this lineup is still waiting in the outbox', ()
   });
 
   it('still shows the lineup read at opening when a save was already queued then', async () => {
-    window.API.queuedLineupSave = vi.fn(() => true);
+    window.API.queuedLineupSave = vi.fn(() => OPEN);
     serverAnswering(SERVER_COPY);
     const { container } = await mountFivePerson();
 

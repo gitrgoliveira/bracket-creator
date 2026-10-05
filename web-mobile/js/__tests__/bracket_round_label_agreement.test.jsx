@@ -129,7 +129,7 @@ describe('row labels agree with bracket columns across a collapsed bye round (mp
     expect(phaseLabel(rounds[0][0], true, 0, 3, 'knockout')).toBe('Semifinals');
   });
 
-  it('keeps roundIndex RAW so lineup fetches still key on the backend round', () => {
+  it('keeps roundIndex RAW: the position in bracket.rounds, not the effective round the label names', () => {
     const rows = compMatches(comp()).filter((m) => m.phase === 'bracket');
     const byId = Object.fromEntries(rows.map((m) => [m.id, m]));
     // The label moved to the effective round; the index must NOT follow it.

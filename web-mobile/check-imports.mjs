@@ -70,12 +70,17 @@ const CHECK_MODULES = [
   // problem and the draft notice from lineup_draft.jsx, which imports the lineup
   // read, the position diff and the wording from lineup_resolver.jsx.
   'lineup_draft.jsx',
+  // lineup_resolver.jsx words a lineup read nobody answered through
+  // noAnswerSentence, the one owner of that sentence in write_result.jsx.
+  'lineup_resolver.jsx',
   // bc-cfbd: the layers a tap opens keep the bounce of that tap off their
   // backdrop through the tap_guard.jsx leaf: the participant Edit dialog, the
-  // public match card and the admin sign-in dialog each import useOpenedTapGuard.
+  // public match card, the admin sign-in dialog and ui.jsx's confirm and Modal
+  // each import useOpenedTapGuard.
   'admin_participants.jsx',
   'viewer_match.jsx',
   'app.jsx',
+  'ui.jsx',
 ];
 
 // ---------------------------------------------------------------------------

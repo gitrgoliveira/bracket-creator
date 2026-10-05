@@ -14,11 +14,15 @@ import RealReact from 'react';
 import { renderHook, act } from '@testing-library/react';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { useLineupForm, lineupDraftKey } from '../lineup_draft.jsx';
-import { REMOVED_UNREAD_NOTICE } from '../lineup_resolver.jsx';
+import { REMOVED_UNREAD_NOTICE, LINEUP_READ_NO_ANSWER } from '../lineup_resolver.jsx';
+import { API as realApi } from '../api_client.jsx';
 
 const stubReact = global.React;
 const KEYS = ['1', '2', '3'];
 const NAMES = { positions: { 1: 'Aoki', 2: 'Sato', 3: 'Ito' }, memberIds: { 1: 'mem-1', 2: 'mem-2', 3: 'mem-3' } };
+// What API.queuedLineupSave answers while a save of the lineup is queued: the
+// lineup that save would write. null is nothing queued.
+const QUEUED = { positions: { 1: 'Mori' }, memberIds: {} };
 const OWN = { ...NAMES, sourceMatchId: 'm1', saved: true };
 const CARRIED = { ...NAMES, sourceMatchId: 'm0', saved: true };
 const STARTING = { ...NAMES, sourceRound: 0, saved: true };
@@ -38,7 +42,7 @@ beforeEach(() => {
     fetchTeamLineup: vi.fn().mockResolvedValue(STARTING),
     fetchLineupInForce: vi.fn().mockResolvedValue(CARRIED),
     deleteMatchLineup: vi.fn().mockResolvedValue(true),
-    queuedLineupSave: vi.fn().mockReturnValue(false),
+    queuedLineupSave: vi.fn().mockReturnValue(null),
   };
   window.API = api;
   window.confirmDialog = vi.fn().mockResolvedValue(true);
@@ -132,6 +136,41 @@ describe('a lineup that could not be read', () => {
     api.fetchLineupInForce.mockRejectedValue(new Error(''));
     const view = await mount();
     expect(view.result.current.loadError).toBe('Failed to load lineup');
+  });
+
+  it.each([
+    ['a match lineup', { matchId: 'm1' }, () => api.fetchLineupInForce],
+    ['a starting lineup', { matchId: '' }, () => api.fetchTeamLineup],
+  ])('says a read the server never answered in a plain sentence, never the browser\'s own text (%s)', async (_what, extra, read) => {
+    read().mockRejectedValue(new TypeError('Failed to fetch'));
+    const view = await mount(extra);
+    expect(view.result.current.loadError).toBe(LINEUP_READ_NO_ANSWER);
+    expect(view.result.current.loadError).not.toMatch(/Failed to fetch/);
+    expect(view.result.current.read).toBe(false);
+  });
+
+  it('says a read given up on at its deadline the same way', async () => {
+    api.fetchLineupInForce.mockRejectedValue(Object.assign(new Error('the request was not answered in time'), { timedOut: true }));
+    const view = await mount();
+    expect(view.result.current.loadError).toBe(LINEUP_READ_NO_ANSWER);
+  });
+
+  it('through the real client: a connection that is down reads as that sentence, an answer in the server\'s own words', async () => {
+    const originalFetch = global.fetch;
+    window.API = realApi;
+    try {
+      global.fetch = vi.fn(() => Promise.reject(new TypeError('Failed to fetch')));
+      const view = await mount();
+      expect(view.result.current.loadError).toBe(LINEUP_READ_NO_ANSWER);
+
+      global.fetch = vi.fn(() => Promise.resolve({
+        ok: false, status: 404, json: () => Promise.resolve({ error: 'competition not found' }),
+      }));
+      await act(async () => { view.result.current.retry(); });
+      expect(view.result.current.loadError).toBe('competition not found');
+    } finally {
+      global.fetch = originalFetch;
+    }
   });
 
   it('keeps its problem when the editor clears its own errors, until a read succeeds', async () => {
@@ -335,9 +374,20 @@ describe('a save of the lineup that is still queued', () => {
     expect(view.result.current.saveQueued).toBe(false);
   });
 
+  it('is true when the API answers with the queued lineup, even one with every position cleared, and false for null', async () => {
+    api.queuedLineupSave.mockReturnValue(QUEUED);
+    expect((await mount()).result.current.saveQueued).toBe(true);
+
+    api.queuedLineupSave.mockReturnValue({ positions: {}, memberIds: {} });
+    expect((await mount()).result.current.saveQueued).toBe(true);
+
+    api.queuedLineupSave.mockReturnValue(null);
+    expect((await mount()).result.current.saveQueued).toBe(false);
+  });
+
   it('keeps the removal from being asked for: nothing is confirmed, nothing removed', async () => {
     api.fetchLineupInForce.mockResolvedValue(OWN);
-    api.queuedLineupSave.mockReturnValue(true);
+    api.queuedLineupSave.mockReturnValue(QUEUED);
     const view = await mount();
     expect(view.result.current.saveQueued).toBe(true);
 
@@ -350,15 +400,15 @@ describe('a save of the lineup that is still queued', () => {
   it('follows the queue: it is false again once the save has gone out', async () => {
     const listeners = new Set();
     window.subscribeUnsentWrites = (fn) => { listeners.add(fn); fn(); return () => listeners.delete(fn); };
-    api.queuedLineupSave.mockReturnValue(true);
+    api.queuedLineupSave.mockReturnValue(QUEUED);
     const view = await mount();
     expect(view.result.current.saveQueued).toBe(true);
 
-    api.queuedLineupSave.mockReturnValue(false);
+    api.queuedLineupSave.mockReturnValue(null);
     act(() => listeners.forEach((fn) => fn()));
     expect(view.result.current.saveQueued).toBe(false);
 
-    api.queuedLineupSave.mockReturnValue(true);
+    api.queuedLineupSave.mockReturnValue(QUEUED);
     act(() => listeners.forEach((fn) => fn()));
     expect(view.result.current.saveQueued).toBe(true);
 

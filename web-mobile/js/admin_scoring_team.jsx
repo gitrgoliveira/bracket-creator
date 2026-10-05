@@ -844,12 +844,15 @@ function predatesAnswer(match, override) {
 // composed on nothing would replace the lineup the team's later matches carry.
 const LINEUP_NOT_READ_NOTICE = "The lineup could not be read, so this name was not saved. Close and reopen the match.";
 
-// Is a save of this match's lineup for the team still waiting in the outbox?
-// The server's copy then lacks that edit, and a write would replace the queued
-// save, so the lineup held here (which has the edit) is what it is composed on.
-function lineupSaveQueued(compId, teamId, matchId) {
+// The lineup a save of this match's lineup for the team, still waiting in the
+// outbox, would write: null when none is. The server's copy lacks that edit, and
+// a write would replace the queued save, so a write is composed on this lineup,
+// whichever surface queued it. The lineup held here has the edits made on this
+// sheet only: the at-court lineup panel or the Lineups page may have saved since.
+function queuedMatchLineup(compId, teamId, matchId) {
   const api = window.API;
-  return !!api && typeof api.queuedLineupSave === "function" && !!api.queuedLineupSave(compId, teamId, { matchId });
+  if (!api || typeof api.queuedLineupSave !== "function") return null;
+  return api.queuedLineupSave(compId, teamId, { matchId }) || null;
 }
 
 // The ONE key of a bout row's lineup notice, per side. The same whichever way
@@ -896,7 +899,7 @@ function useMatchLineups(compId, matchId) {
     const read = async (side, teamId) => {
       const seq = ++sync.began[side];
       const lineup = await resolveMatchLineup(compId, teamId, matchId, window.API, { throwOnError: true });
-      const keepsHeld = isRead(side) && lineupSaveQueued(compId, teamId, matchId);
+      const keepsHeld = isRead(side) && queuedMatchLineup(compId, teamId, matchId) !== null;
       if (sync.alive && seq >= sync.landed[side] && !keepsHeld) {
         sync.landed[side] = seq;
         sync.held[side] = lineup;
@@ -1637,19 +1640,20 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
     // ruling put on it, and every typed name is written with no member id.
   }, [m.compId, compMeta, password, teamMembersKey]);
 
-  // The lineup a write is composed on: what the server holds now. The lineup
-  // held here stands in when a save of it is still queued (the server's copy
-  // lacks that edit) or the server cannot be asked, and putMatchLineup queues
-  // the write when it cannot be sent either.
+  // The lineup a write is composed on: the lineup a save of it still waiting in
+  // the outbox would write (the server's copy lacks that edit, whichever surface
+  // queued it), else what the server holds now. The lineup held here stands in
+  // when the server cannot be asked, and putMatchLineup queues the write when it
+  // cannot be sent either.
   const lineupToWriteOn = async (write, teamId) => {
-    if (!lineupSaveQueued(m.compId, teamId, m.id)) {
-      try {
-        // The read has no deadline of its own: unanswered, the boxes would stay disabled.
-        const fresh = await withinDeadline(write.read(teamId), FETCH_TIMEOUT_MS);
-        if (fresh !== TIMED_OUT) return fresh;
-      } catch (_e) {
-        // The server cannot be asked: the held lineup stands in.
-      }
+    const queued = queuedMatchLineup(m.compId, teamId, m.id);
+    if (queued) return { ...write.held(), ...queued };
+    try {
+      // The read has no deadline of its own: unanswered, the boxes would stay disabled.
+      const fresh = await withinDeadline(write.read(teamId), FETCH_TIMEOUT_MS);
+      if (fresh !== TIMED_OUT) return fresh;
+    } catch (_e) {
+      // The server cannot be asked: the held lineup stands in.
     }
     return write.held();
   };

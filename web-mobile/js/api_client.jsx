@@ -972,16 +972,24 @@ function _coalesceTarget(base, descriptor) {
     return last;
 }
 
-// _queuedLineupSave: is a save of this lineup (`base`) still queued? A new
-// save then takes its place in the queue (_coalesceTarget) rather than go
-// straight to the server: a lineup PUT carries no stamp the server could order
-// it by, so a direct save landing while the older one is still being replayed
-// could be overwritten by it. That is not waiting behind it: the queued save is
-// replaced by the newer one and the flush the enqueue kicks sends it at once.
-// Every other write goes straight to the server whatever is queued (bc-mrgc:
-// the server orders a match write by its stamp).
+// _queuedLineupSave: the lineup a save of this lineup (`base`) still queued would
+// write, `{ positions, memberIds }` (a copy), or null when none is queued. A
+// queued save that clears every position is still a lineup, so the answer is
+// truthy exactly when a save is queued. A new save of the lineup then takes its
+// place in the queue (_coalesceTarget) rather than go straight to the server: a
+// lineup PUT carries no stamp the server could order it by, so a direct save
+// landing while the older one is still being replayed could be overwritten by
+// it. That is not waiting behind it: the queued save is replaced by the newer
+// one and the flush the enqueue kicks sends it at once. It is replaced whole, so
+// the newer save is composed on the lineup this answers with, never on the
+// server's copy, which lacks that edit. Every other write goes straight to the
+// server whatever is queued (bc-mrgc: the server orders a match write by its
+// stamp).
 function _queuedLineupSave(base) {
-    return _coalesceTarget(base, { kind: 'lineup' }) !== null;
+    const queued = _coalesceTarget(base, { kind: 'lineup' });
+    if (!queued) return null;
+    const { positions, memberIds } = queued[1].payload || {};
+    return { positions: { ...positions }, memberIds: { ...memberIds } };
 }
 
 // _lineupKey: the queue BASE of a lineup: a match's own lineup (`matchId`), or a
@@ -4302,11 +4310,14 @@ const API = {
     async deleteMatchLineup(compID, teamId, matchId, password) {
         return _deleteLineup(`/api/competitions/${compID}/teams/${teamId}/match-lineups/${matchId}`, password, "Failed to delete match lineup");
     },
-    // Is a save of this lineup still queued? `target` is { matchId } for a match's
-    // own lineup or { round } for a team's Lineups-page round (0: its starting
-    // lineup). A queued save replays after anything sent now, so a removal made
-    // meanwhile would be undone by it: the lineup editors hold their "Use the
-    // previous match's lineup" until it has gone out.
+    // The lineup a still-queued save of this lineup would write, `{ positions,
+    // memberIds }`, or null when none is queued. `target` is { matchId } for a
+    // match's own lineup or { round } for a team's Lineups-page round (0: its
+    // starting lineup). A queued save replays after anything sent now, so a
+    // removal made meanwhile would be undone by it: the lineup editors hold their
+    // "Use the previous match's lineup" while this is not null. A new save of the
+    // lineup replaces the queued one whole, so it is composed on this lineup, not
+    // on the server's copy, which lacks that edit.
     queuedLineupSave(compID, teamId, target) {
         return _queuedLineupSave(_lineupKey(compID, teamId, target || {}));
     },

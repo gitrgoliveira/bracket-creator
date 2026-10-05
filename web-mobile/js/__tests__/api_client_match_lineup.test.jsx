@@ -297,9 +297,13 @@ describe('removing a lineup when the server does not answer', () => {
   });
 });
 
-// Is a save of this lineup still queued? A queued save replays after anything
-// sent now, so a removal made meanwhile would be undone by it: the editors hold
-// "Use the previous match's lineup" until it has gone out.
+// Is a save of this lineup still queued, and what would it write? A queued save
+// replays after anything sent now, so a removal made meanwhile would be undone by
+// it: the editors hold "Use the previous match's lineup" until it has gone out. A
+// write composed on the lineup the server holds would take its place in the queue
+// and lose its edit, so the team score sheet composes on the lineup this answers
+// with. null is nothing queued: a queued save that clears every position is still
+// a lineup.
 describe('API.queuedLineupSave', () => {
   let originalFetch;
   beforeEach(() => {
@@ -316,28 +320,64 @@ describe('API.queuedLineupSave', () => {
   });
   const offline = () => { global.fetch = vi.fn(() => Promise.reject(new TypeError('network error'))); };
 
-  it('is false while nothing is queued', () => {
-    expect(API.queuedLineupSave('c1', 't1', { matchId: 'm1' })).toBe(false);
-    expect(API.queuedLineupSave('c1', 't1', { round: 0 })).toBe(false);
+  it('is null while nothing is queued', () => {
+    expect(API.queuedLineupSave('c1', 't1', { matchId: 'm1' })).toBeNull();
+    expect(API.queuedLineupSave('c1', 't1', { round: 0 })).toBeNull();
   });
 
-  it('is true for the match whose own lineup save is queued, and for that match of that team only', async () => {
+  it('is the lineup of the match whose own lineup save is queued, and for that match of that team only', async () => {
     offline();
     expect(await API.putMatchLineup('c1', 't-q', 'm-q', { senpo: 'Bob' }, 'pw')).toEqual({ queued: true });
-    expect(API.queuedLineupSave('c1', 't-q', { matchId: 'm-q' })).toBe(true);
-    expect(API.queuedLineupSave('c1', 't-q', { matchId: 'm-other' })).toBe(false);
-    expect(API.queuedLineupSave('c1', 't-other', { matchId: 'm-q' })).toBe(false);
-    expect(API.queuedLineupSave('c2', 't-q', { matchId: 'm-q' })).toBe(false);
+    expect(API.queuedLineupSave('c1', 't-q', { matchId: 'm-q' })).toEqual({ positions: { senpo: 'Bob' }, memberIds: {} });
+    expect(API.queuedLineupSave('c1', 't-q', { matchId: 'm-other' })).toBeNull();
+    expect(API.queuedLineupSave('c1', 't-other', { matchId: 'm-q' })).toBeNull();
+    expect(API.queuedLineupSave('c2', 't-q', { matchId: 'm-q' })).toBeNull();
     // Neither the team's starting lineup nor another round.
-    expect(API.queuedLineupSave('c1', 't-q', { round: 0 })).toBe(false);
+    expect(API.queuedLineupSave('c1', 't-q', { round: 0 })).toBeNull();
   });
 
-  it('is true for a queued starting lineup (round 0), and for that round only', async () => {
+  it('is the lineup of a queued starting lineup (round 0), and for that round only', async () => {
     offline();
     await API.putTeamLineup('c1', 't-q', 0, { senpo: 'Bob' }, 'pw');
-    expect(API.queuedLineupSave('c1', 't-q', { round: 0 })).toBe(true);
-    expect(API.queuedLineupSave('c1', 't-q', { round: 1 })).toBe(false);
-    expect(API.queuedLineupSave('c1', 't-q', { matchId: 'm-q' })).toBe(false);
+    expect(API.queuedLineupSave('c1', 't-q', { round: 0 })).toEqual({ positions: { senpo: 'Bob' }, memberIds: {} });
+    expect(API.queuedLineupSave('c1', 't-q', { round: 1 })).toBeNull();
+    expect(API.queuedLineupSave('c1', 't-q', { matchId: 'm-q' })).toBeNull();
+  });
+
+  it('carries the member ids the save carries', async () => {
+    offline();
+    await API.putMatchLineup('c1', 't-q', 'm-q', { senpo: 'Bob', jiho: 'Amy' }, 'pw', { senpo: 'mem-1', jiho: 'mem-2' });
+    expect(API.queuedLineupSave('c1', 't-q', { matchId: 'm-q' })).toEqual({
+      positions: { senpo: 'Bob', jiho: 'Amy' }, memberIds: { senpo: 'mem-1', jiho: 'mem-2' },
+    });
+  });
+
+  it('is the newest save of that lineup, which took the earlier one\'s place', async () => {
+    offline();
+    await API.putMatchLineup('c1', 't-q', 'm-q', { senpo: 'Bob' }, 'pw', { senpo: 'mem-1' });
+    await API.putMatchLineup('c1', 't-q', 'm-q', { senpo: 'Cy', jiho: 'Amy' }, 'pw');
+    expect(API.queuedLineupSave('c1', 't-q', { matchId: 'm-q' })).toEqual({
+      positions: { senpo: 'Cy', jiho: 'Amy' }, memberIds: {},
+    });
+  });
+
+  it('is still a lineup when the save clears every position: null means nothing is queued', async () => {
+    offline();
+    await API.putMatchLineup('c1', 't-q', 'm-q', {}, 'pw');
+    const queued = API.queuedLineupSave('c1', 't-q', { matchId: 'm-q' });
+    expect(queued).toEqual({ positions: {}, memberIds: {} });
+    expect(queued).toBeTruthy();
+  });
+
+  it('hands out a copy: composing on it changes nothing that is queued', async () => {
+    offline();
+    await API.putMatchLineup('c1', 't-q', 'm-q', { senpo: 'Bob' }, 'pw', { senpo: 'mem-1' });
+    const asked = API.queuedLineupSave('c1', 't-q', { matchId: 'm-q' });
+    asked.positions.jiho = 'Amy';
+    delete asked.memberIds.senpo;
+    expect(API.queuedLineupSave('c1', 't-q', { matchId: 'm-q' })).toEqual({
+      positions: { senpo: 'Bob' }, memberIds: { senpo: 'mem-1' },
+    });
   });
 
   it('asks about the very queue entry a save is queued under: the same key the save used', async () => {
@@ -347,15 +387,15 @@ describe('API.queuedLineupSave', () => {
     expect(keys.some((key) => key.startsWith('lineup:c1:t-q:match:m-q'))).toBe(true);
   });
 
-  it('is false again once the queue is cleared', async () => {
+  it('is null again once the queue is cleared', async () => {
     offline();
     await API.putMatchLineup('c1', 't-q', 'm-q', { senpo: 'Bob' }, 'pw');
-    expect(API.queuedLineupSave('c1', 't-q', { matchId: 'm-q' })).toBe(true);
+    expect(API.queuedLineupSave('c1', 't-q', { matchId: 'm-q' })).not.toBeNull();
     API.clearQueue();
-    expect(API.queuedLineupSave('c1', 't-q', { matchId: 'm-q' })).toBe(false);
+    expect(API.queuedLineupSave('c1', 't-q', { matchId: 'm-q' })).toBeNull();
   });
 
   it('asks about no lineup at all when it is given no target, and does not throw', () => {
-    expect(API.queuedLineupSave('c1', 't1')).toBe(false);
+    expect(API.queuedLineupSave('c1', 't1')).toBeNull();
   });
 });

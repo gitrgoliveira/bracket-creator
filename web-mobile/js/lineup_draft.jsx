@@ -20,6 +20,7 @@
 import {
   changedLineupPositions, lineupFields, lineupSourceOf, lineupSourceLabel, isOwnLineup, resolveMatchLineup,
   previousLineupConfirm, PREVIOUS_LINEUP_LABEL, SAVE_QUEUED_REASON, REMOVED_UNREAD_NOTICE, STARTING_ROUND,
+  lineupReadFailure,
 } from './lineup_resolver.jsx';
 
 const STORAGE_PREFIX = 'bc.lineupDraft.v1:';
@@ -274,7 +275,7 @@ export function useLineupForm({ compId, teamId, matchId = '', positionKeys, pass
       const lineup = await readLineup();
       if (attempt.current === mine) adopt(lineup);
     } catch (e) {
-      if (attempt.current === mine) setLoadError(e?.message || 'Failed to load lineup');
+      if (attempt.current === mine) setLoadError(lineupReadFailure(e));
     } finally {
       if (attempt.current === mine) setLoading(false);
     }
@@ -282,6 +283,8 @@ export function useLineupForm({ compId, teamId, matchId = '', positionKeys, pass
 
   // A save of this lineup that is still queued (offline, or refused for now)
   // replays after anything sent now: removing the lineup would be undone by it.
+  // The API answers with the lineup that save would write, or null: only whether
+  // one is queued matters here.
   const queuedNow = () => {
     const api = window.API;
     return !!(api && typeof api.queuedLineupSave === 'function' && compId && teamId

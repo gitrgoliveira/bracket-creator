@@ -17,6 +17,7 @@
 
 import { squadMemberLabel, squadSlotLabel } from './squad_member_label.jsx';
 import { scoreRowMatchLabel } from './pool_ids.jsx';
+import { noAnswerSentence } from './write_result.jsx';
 
 // squadRosterEntries: the ONE builder of a lineup picker's list for a team
 // (bc-dnst), shared by the score sheet's per-row picker (admin_scoring_team
@@ -372,6 +373,18 @@ export const STARTING_ROUND = 0;
 export const PREVIOUS_LINEUP_LABEL = "Use the previous match's lineup";
 export const SAVE_QUEUED_REASON = "A save of this lineup is still waiting to be sent.";
 export const REMOVED_UNREAD_NOTICE = "Removed. The lineup this match now uses could not be read: try again.";
+
+// What a lineup editor says when the read of a lineup fails. A request that never
+// reached the server rejects with a TypeError, whatever the browser's own text for
+// it ("Failed to fetch" in one, "Load failed" in another), and a bounded request
+// given up on is marked `timedOut`: both are said by one sentence that tells the
+// operator what to do. An answer the server did send is said in its own words,
+// or in the fallback when it carries none.
+export const LINEUP_READ_NO_ANSWER = noAnswerSentence("The lineup could not be read");
+export function lineupReadFailure(error) {
+  if (error instanceof TypeError || (error && error.timedOut)) return LINEUP_READ_NO_ANSWER;
+  return (error && error.message) || "Failed to load lineup";
+}
 
 export function previousLineupConfirm(matchLabel, teamName) {
   const match = matchLabel || "this match";

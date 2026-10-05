@@ -1,9 +1,12 @@
 package engine
 
 import (
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/gitrgoliveira/bracket-creator/internal/domain"
+	"github.com/gitrgoliveira/bracket-creator/internal/helper"
 	"github.com/gitrgoliveira/bracket-creator/internal/state"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -208,9 +211,9 @@ func TestLineupInForce_Rule(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			pool, bracket := lineupDrawFixture()
-			rule := newLineupRule(lineupsOf(tc.lineups...), nil, pool, bracket)
+			rule := newLineupRuleFrom(lineupsOf(tc.lineups...), pool, bracket)
 
-			got := rule.inForce(lineupTeam, "", tc.match)
+			got := rule.inForce(lineupTeam, tc.match)
 
 			if tc.want == "" {
 				assert.False(t, got.Found, "nothing is in force, got %q", senpoOf(got))
@@ -232,13 +235,13 @@ func TestLineupInForce_SameRoundOrder(t *testing.T) {
 		{drawnKnockoutMatch("a", "o1", "o2")},
 		{drawnKnockoutMatch("b", lineupTeam, "o1"), drawnKnockoutMatch("c", lineupTeam, "o2")},
 	}}
-	rule := newLineupRule(lineupsOf(
+	rule := newLineupRuleFrom(lineupsOf(
 		lineupOf(lineupTeam, "", 1, "round1"),
 		lineupOf(lineupTeam, "b", 0, "b"),
-	), nil, nil, bracket)
+	), nil, bracket)
 
-	assert.Equal(t, "b", senpoOf(rule.inForce(lineupTeam, "", "b")), "the entry saved for b")
-	assert.Equal(t, "b", senpoOf(rule.inForce(lineupTeam, "", "c")),
+	assert.Equal(t, "b", senpoOf(rule.inForce(lineupTeam, "b")), "the entry saved for b")
+	assert.Equal(t, "b", senpoOf(rule.inForce(lineupTeam, "c")),
 		"the entry on b is later than the round 1 start, so c carries it")
 }
 
@@ -250,10 +253,10 @@ func TestLineupInForce_MatchOrder(t *testing.T) {
 			drawnPoolMatch("Pool A-0", lineupTeam, "o1"),
 			drawnPoolMatch("Pool A-1", lineupTeam, "o2"),
 		}
-		rule := newLineupRule(lineupsOf(lineupOf(lineupTeam, "Pool A-0", 0, "m0")), nil, pool, nil)
+		rule := newLineupRuleFrom(lineupsOf(lineupOf(lineupTeam, "Pool A-0", 0, "m0")), pool, nil)
 
-		assert.True(t, rule.inForce(lineupTeam, "", "Pool A-1").Found, "match 2 follows match 1")
-		assert.True(t, rule.inForce(lineupTeam, "", "Pool A-2").Found, "match 3 follows match 1, though stored first")
+		assert.True(t, rule.inForce(lineupTeam, "Pool A-1").Found, "match 2 follows match 1")
+		assert.True(t, rule.inForce(lineupTeam, "Pool A-2").Found, "match 3 follows match 1, though stored first")
 	})
 
 	t.Run("a pool match numbered 10 follows number 2", func(t *testing.T) {
@@ -261,9 +264,9 @@ func TestLineupInForce_MatchOrder(t *testing.T) {
 			drawnPoolMatch("Pool A-10", lineupTeam, "o1"),
 			drawnPoolMatch("Pool A-2", lineupTeam, "o2"),
 		}
-		rule := newLineupRule(lineupsOf(lineupOf(lineupTeam, "Pool A-2", 0, "m2")), nil, pool, nil)
+		rule := newLineupRuleFrom(lineupsOf(lineupOf(lineupTeam, "Pool A-2", 0, "m2")), pool, nil)
 
-		assert.Equal(t, "m2", senpoOf(rule.inForce(lineupTeam, "", "Pool A-10")), "numbered numerically, not as text")
+		assert.Equal(t, "m2", senpoOf(rule.inForce(lineupTeam, "Pool A-10")), "numbered numerically, not as text")
 	})
 
 	t.Run("Swiss rounds are played in round order", func(t *testing.T) {
@@ -271,19 +274,19 @@ func TestLineupInForce_MatchOrder(t *testing.T) {
 			drawnPoolMatch("Swiss-R2-0", lineupTeam, "o2"),
 			drawnPoolMatch("Swiss-R1-3", lineupTeam, "o1"),
 		}
-		rule := newLineupRule(lineupsOf(lineupOf(lineupTeam, "Swiss-R1-3", 0, "round1")), nil, pool, nil)
+		rule := newLineupRuleFrom(lineupsOf(lineupOf(lineupTeam, "Swiss-R1-3", 0, "round1")), pool, nil)
 
-		assert.Equal(t, "round1", senpoOf(rule.inForce(lineupTeam, "", "Swiss-R2-0")))
-		assert.Equal(t, "round1", senpoOf(rule.inForce(lineupTeam, "", "Swiss-R1-3")), "its own entry")
+		assert.Equal(t, "round1", senpoOf(rule.inForce(lineupTeam, "Swiss-R2-0")))
+		assert.Equal(t, "round1", senpoOf(rule.inForce(lineupTeam, "Swiss-R1-3")), "its own entry")
 	})
 
 	t.Run("the knockout follows the pool, and rounds follow one another", func(t *testing.T) {
 		pool, bracket := lineupDrawFixture()
-		rule := newLineupRule(lineupsOf(lineupOf(lineupTeam, "r0-m0", 0, "k0")), nil, pool, bracket)
+		rule := newLineupRuleFrom(lineupsOf(lineupOf(lineupTeam, "r0-m0", 0, "k0")), pool, bracket)
 
-		assert.False(t, rule.inForce(lineupTeam, "", "Pool A-2").Found, "the pool is before the knockout")
-		assert.Equal(t, "k0", senpoOf(rule.inForce(lineupTeam, "", "r1-m0")))
-		assert.Equal(t, "k0", senpoOf(rule.inForce(lineupTeam, "", "bronze")))
+		assert.False(t, rule.inForce(lineupTeam, "Pool A-2").Found, "the pool is before the knockout")
+		assert.Equal(t, "k0", senpoOf(rule.inForce(lineupTeam, "r1-m0")))
+		assert.Equal(t, "k0", senpoOf(rule.inForce(lineupTeam, "bronze")))
 	})
 }
 
@@ -295,9 +298,9 @@ func TestLineupInForce_TeamIdentity(t *testing.T) {
 			{ID: "Pool A-0", SideA: "Old Name", SideAID: lineupTeam, SideB: "Other", SideBID: "o1"},
 			drawnPoolMatch("Pool A-1", lineupTeam, "o2"),
 		}
-		rule := newLineupRule(lineupsOf(lineupOf(lineupTeam, "Pool A-0", 0, "m0")), nil, pool, nil)
+		rule := newLineupRuleFrom(lineupsOf(lineupOf(lineupTeam, "Pool A-0", 0, "m0")), pool, nil)
 
-		assert.Equal(t, "m0", senpoOf(rule.inForce(lineupTeam, "TeamT", "Pool A-1")))
+		assert.Equal(t, "m0", senpoOf(rule.inForce(lineupTeam, "Pool A-1")))
 	})
 
 	t.Run("a match naming the team but seating another id is not the team's match", func(t *testing.T) {
@@ -305,12 +308,12 @@ func TestLineupInForce_TeamIdentity(t *testing.T) {
 			{ID: "Pool A-0", SideA: "TeamT", SideAID: "imposter", SideB: "Other", SideBID: "o1"},
 			drawnPoolMatch("Pool A-1", lineupTeam, "o2"),
 		}
-		rule := newLineupRule(lineupsOf(
+		rule := newLineupRuleFrom(lineupsOf(
 			lineupOf(lineupTeam, "", 0, "start"),
 			lineupOf(lineupTeam, "Pool A-0", 0, "stale"),
-		), nil, pool, nil)
+		), pool, nil)
 
-		assert.Equal(t, "start", senpoOf(rule.inForce(lineupTeam, "TeamT", "Pool A-1")),
+		assert.Equal(t, "start", senpoOf(rule.inForce(lineupTeam, "Pool A-1")),
 			"the entry on a match the team is not seated in by id is a stale one")
 	})
 
@@ -319,26 +322,33 @@ func TestLineupInForce_TeamIdentity(t *testing.T) {
 			{ID: "Pool A-0", SideA: "TeamT", SideB: "Other"},
 			drawnPoolMatch("Pool A-1", lineupTeam, "o2"),
 		}
-		rule := newLineupRule(lineupsOf(
+		rule := newLineupRuleFrom(lineupsOf(
 			lineupOf(lineupTeam, "", 0, "start"),
 			lineupOf(lineupTeam, "Pool A-0", 0, "stale"),
-		), nil, pool, nil)
+		), pool, nil)
 
-		assert.Equal(t, "start", senpoOf(rule.inForce(lineupTeam, "TeamT", "Pool A-1")))
+		assert.Equal(t, "start", senpoOf(rule.inForce(lineupTeam, "Pool A-1")))
 	})
 
-	t.Run("lineups saved under the team name are found, the participant id first", func(t *testing.T) {
-		roster := []domain.Player{{ID: lineupTeam, Name: "TeamT"}}
+	t.Run("a lineup stored under the team's name is not the team's", func(t *testing.T) {
 		pool, bracket := lineupDrawFixture()
+		rule := newLineupRuleFrom(lineupsOf(
+			lineupOf("TeamT", "", 0, "start-by-name"),
+			lineupOf("TeamT", "Pool A-0", 0, "m0-by-name"),
+		), pool, bracket)
 
-		onlyName := newLineupRule(lineupsOf(lineupOf("TeamT", "", 0, "by-name")), roster, pool, bracket)
-		assert.Equal(t, "by-name", senpoOf(onlyName.inForce(lineupTeam, "", "Pool A-0")), "asked by id, found under the name")
-		assert.Equal(t, "by-name", senpoOf(onlyName.inForce("", "TeamT", "Pool A-0")), "asked by name, the roster supplies the id")
-
-		both := newLineupRule(lineupsOf(lineupOf("TeamT", "", 0, "by-name"), lineupOf(lineupTeam, "", 0, "by-id")), roster, pool, bracket)
-		assert.Equal(t, "by-id", senpoOf(both.inForce(lineupTeam, "TeamT", "Pool A-0")), "the id key beats the name key at one place")
+		for _, match := range []string{"Pool A-0", "Pool A-1", "r0-m0"} {
+			assert.False(t, rule.inForce(lineupTeam, match).Found,
+				"%s: the team is its participant id, and nothing is stored under it", match)
+		}
 	})
 
+	t.Run("an id-less side has no lineup, whatever is stored", func(t *testing.T) {
+		pool, bracket := lineupDrawFixture()
+		rule := newLineupRuleFrom(lineupsOf(lineupOf("", "", 0, "under-no-key"), lineupOf(lineupTeam, "", 0, "start")), pool, bracket)
+
+		assert.False(t, rule.inForce("", "Pool A-0").Found)
+	})
 }
 
 // TestLineupInForce_ThroughTheStore runs the rule over what a competition
@@ -398,5 +408,101 @@ func TestLineupInForce_ThroughTheStore(t *testing.T) {
 			assert.Equal(t, c.want, senpoOf(got), c.match)
 			assert.Equal(t, c.source, got.Source, c.match)
 		}
+	})
+}
+
+// TestLineupInForce_ReadsByTheTeamIDAlone pins, through the store read, that a
+// lineup is the team's only when it is stored under the team's participant id:
+// the roster knows the team's name too, which is what a name lookup would
+// translate through, and it must not.
+func TestLineupInForce_ReadsByTheTeamIDAlone(t *testing.T) {
+	eng, store, _ := setupTestEngine(t)
+	const compID = "lineup-by-id-alone"
+	require.NoError(t, store.SaveCompetition(&state.Competition{ID: compID, TeamSize: 5, Kind: "team"}))
+	teamID := helper.NewUUID4()
+	require.NoError(t, store.SaveParticipants(compID, []domain.Player{{ID: teamID, Name: "TeamT", Dojo: "Dojo"}}))
+	require.NoError(t, store.SavePoolMatches(compID, []state.MatchResult{
+		{ID: "Pool A-0", SideA: "TeamT", SideAID: teamID, SideB: "Other", SideBID: "other"},
+		{ID: "Pool A-1", SideA: "TeamT", SideAID: teamID, SideB: "Third", SideBID: "third"},
+	}))
+	require.NoError(t, store.SetTeamLineup(compID, lineupOf("TeamT", "", 0, "start-by-name"), 5))
+	require.NoError(t, store.SetTeamLineup(compID, lineupOf("TeamT", "Pool A-0", 0, "m0-by-name"), 5))
+
+	for _, match := range []string{"Pool A-0", "Pool A-1"} {
+		got, err := eng.LineupInForce(compID, teamID, match)
+		require.NoError(t, err)
+		assert.False(t, got.Found, "%s: a lineup stored under the team's name is not the team's", match)
+	}
+
+	require.NoError(t, store.SetTeamLineup(compID, lineupOf(teamID, "", 0, "start"), 5))
+	got, err := eng.LineupInForce(compID, teamID, "Pool A-1")
+	require.NoError(t, err)
+	require.True(t, got.Found, "stored under its id, it is found")
+	assert.Equal(t, "start", senpoOf(got))
+}
+
+// TestLineupInForce_DegradesOnAnUnreadableMatchFile pins that a damaged match
+// file costs the read the part of the draw it held, never the read: the lineups
+// are intact, so the answer is built from the file that loaded and the other is
+// logged by name. A lineups.yaml that cannot be read is still an error, since
+// "nothing saved" would be false.
+func TestLineupInForce_DegradesOnAnUnreadableMatchFile(t *testing.T) {
+	garbage := func(t *testing.T, store *state.Store, compID, file, body string) {
+		t.Helper()
+		require.NoError(t, os.WriteFile(filepath.Join(store.GetFolder(), "competitions", compID, file), []byte(body), 0o600))
+	}
+	team := func(t *testing.T, id string) (*Engine, *state.Store) {
+		t.Helper()
+		eng, store, _ := setupTestEngine(t)
+		require.NoError(t, store.SaveCompetition(&state.Competition{ID: id, TeamSize: 5, Kind: "team"}))
+		return eng, store
+	}
+
+	t.Run("an unreadable bracket.json still answers from the pool matches", func(t *testing.T) {
+		const compID = "degrade-bracket"
+		eng, store := team(t, compID)
+		pool, _ := lineupDrawFixture()
+		require.NoError(t, store.SavePoolMatches(compID, pool))
+		garbage(t, store, compID, "bracket.json", "{not json")
+		require.NoError(t, store.SetTeamLineup(compID, lineupOf(lineupTeam, "", 0, "start"), 5))
+		require.NoError(t, store.SetTeamLineup(compID, lineupOf(lineupTeam, "Pool A-0", 0, "m0"), 5))
+
+		var got InForceLineup
+		var err error
+		out := captureLog(t, func() { got, err = eng.LineupInForce(compID, lineupTeam, "Pool A-2") })
+
+		require.NoError(t, err)
+		require.True(t, got.Found)
+		assert.Equal(t, "m0", senpoOf(got), "carried from Pool A-0, which the pool file still places")
+		assert.Contains(t, out, "bracket.json", "the file that could not be read is named")
+	})
+
+	t.Run("an unreadable pool-matches.csv still answers from the bracket", func(t *testing.T) {
+		const compID = "degrade-pool"
+		eng, store := team(t, compID)
+		_, bracket := lineupDrawFixture()
+		require.NoError(t, store.SaveBracket(compID, bracket))
+		garbage(t, store, compID, "pool-matches.csv", "\"unterminated")
+		require.NoError(t, store.SetTeamLineup(compID, lineupOf(lineupTeam, "", 0, "start"), 5))
+		require.NoError(t, store.SetTeamLineup(compID, lineupOf(lineupTeam, "r0-m0", 0, "k0"), 5))
+
+		var got InForceLineup
+		var err error
+		out := captureLog(t, func() { got, err = eng.LineupInForce(compID, lineupTeam, "r1-m0") })
+
+		require.NoError(t, err)
+		require.True(t, got.Found)
+		assert.Equal(t, "k0", senpoOf(got), "carried from r0-m0, which the bracket still places")
+		assert.Contains(t, out, "pool-matches.csv", "the file that could not be read is named")
+	})
+
+	t.Run("an unreadable lineups.yaml is an error", func(t *testing.T) {
+		const compID = "degrade-lineups"
+		eng, store := team(t, compID)
+		garbage(t, store, compID, "lineups.yaml", "lineups: [this is: not: valid yaml")
+
+		_, err := eng.LineupInForce(compID, lineupTeam, "Pool A-0")
+
+		require.Error(t, err)
 	})
 }

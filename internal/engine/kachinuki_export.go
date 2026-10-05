@@ -12,6 +12,7 @@ package engine
 import (
 	"cmp"
 	"fmt"
+	"log"
 	"maps"
 	"slices"
 
@@ -61,14 +62,15 @@ func (e *Engine) collectKachinukiMatches(compID string, comp *state.Competition)
 	// A bracket that cannot be read leaves the pool sections alone.
 	bracket, err := e.store.LoadBracket(compID)
 	if err != nil {
+		log.Printf("engine.collectKachinukiMatches compId=%s: bracket.json load error: %v; the export lists the pool sections only", compID, err)
 		bracket = nil
 	}
 
 	// Each match's section reads its fighters' positions from the lineup in
-	// force for its teams at that match. The lineups are read once per export;
-	// they may be missing entirely, in which case positions render as empty
-	// strings.
-	positions := e.newKachinukiPositions(compID, comp, poolMatches, bracket)
+	// force for its teams at that match, over the draw loaded above. The
+	// lineups are read once per export; they may be missing entirely, in which
+	// case positions render as empty strings.
+	rule := e.lineupRuleOrNone("engine.collectKachinukiMatches", compID, poolMatches, bracket)
 
 	// Squad member labels (bc-pnum: "make a team member's label available
 	// to the public surfaces" -- the printed record is one of the
@@ -83,7 +85,7 @@ func (e *Engine) collectKachinukiMatches(compID string, comp *state.Competition)
 	// section builds a match's section; one not yet decided and with no bout
 	// recorded gets the empty rows for hand entry.
 	section := func(m *state.MatchResult, label string) helper.KachinukiMatchDetail {
-		detail := buildKachinukiDetail(m, label, positions.forMatch(m), teamNumbers, squads)
+		detail := buildKachinukiDetail(m, label, rule.positionsForMatch(m), teamNumbers, squads)
 		if len(detail.Bouts) == 0 && m.Status != state.MatchStatusCompleted {
 			detail.BlankBoutRows = comp.TeamBoutRows()
 		}
@@ -175,8 +177,7 @@ func (e *Engine) collectKachinukiMatches(compID string, comp *state.Competition)
 // yet, or an unreadable roster/pools/bracket file all return an empty
 // map, so the caller's labels fall back to blank rather than the whole
 // export failing over an auxiliary read -- the same tolerance
-// buildKachinukiPositionMap already applies to a missing/corrupt lineups
-// file, a few lines below in this file.
+// lineupRuleOrNone applies to a missing/corrupt lineups file.
 func (e *Engine) buildKachinukiTeamNumbers(compID string, comp *state.Competition) map[string]string {
 	out := map[string]string{}
 	if comp == nil || comp.EffectiveNumberPrefix() == "" {
@@ -282,7 +283,7 @@ func resolveKachinukiDisplayName(squads map[string][]domain.TeamMember, teamID, 
 
 // buildKachinukiDetail converts a single state.MatchResult into the
 // helper-layer detail struct. positions is the match's own position lookup
-// (kachinukiPositions.forMatch).
+// (lineupRule.positionsForMatch).
 func buildKachinukiDetail(m *state.MatchResult, label string, positions map[string]string, teamNumbers map[string]string, squads map[string][]domain.TeamMember) helper.KachinukiMatchDetail {
 	resolvePos := func(team, memberID, player string) string {
 		return resolveKachinukiBoutPosition(positions, team, memberID, player)
@@ -339,41 +340,21 @@ func memberKey(memberID string) string {
 	return "\x00id\x00" + memberID
 }
 
-// kachinukiPositions answers, for any match's section of the export, the lineup
+// positionsForMatch answers, for a match's section of the export, the lineup
 // position each fighter held there. The position is read from the lineup in
 // force for the fighter's team at THAT match (lineup_in_force.go), never from
-// whichever saved lineup holds the fighter's name. The zero value, and one
-// built without lineups, answer nothing: positions render as empty strings,
-// which the renderer handles.
-type kachinukiPositions struct {
-	rule *lineupRule
-}
-
-// newKachinukiPositions loads the competition's lineups once, for every match
-// of the export. A failed or empty read leaves the positions empty rather than
-// failing the export, and the draw it positions matches in is the one the
-// export already holds.
-func (e *Engine) newKachinukiPositions(compID string, comp *state.Competition, poolMatches []state.MatchResult, bracket *state.Bracket) *kachinukiPositions {
-	if comp == nil {
-		return &kachinukiPositions{}
-	}
-	lineups, err := e.store.LoadTeamLineups(compID)
-	if err != nil || len(lineups) == 0 {
-		return &kachinukiPositions{}
-	}
-	return &kachinukiPositions{rule: newLineupRule(lineups, e.loadLineupRoster(compID, comp), poolMatches, bracket)}
-}
-
-// forMatch returns the position label of every fighter in m's section, keyed
-// by lineupKey(team name, fighter): by name, and by member id (memberKey) as
-// well, since a fighter fielded by number alone has an id and no name.
-func (p *kachinukiPositions) forMatch(m *state.MatchResult) map[string]string {
+// whichever saved lineup holds the fighter's name, and the team is its
+// participant id, as on every other read of the rule: a side with no id labels
+// nothing. The empty rule, &lineupRule{}, labels nothing, and positions then
+// render as empty strings, which the renderer handles.
+//
+// The result is keyed by lineupKey(team name, fighter): by name, and by member
+// id (memberKey) as well, since a fighter fielded by number alone has an id and
+// no name.
+func (r *lineupRule) positionsForMatch(m *state.MatchResult) map[string]string {
 	out := map[string]string{}
-	if p.rule == nil {
-		return out
-	}
 	for _, side := range []struct{ id, name string }{{m.SideAID, m.SideA}, {m.SideBID, m.SideB}} {
-		if in := p.rule.inForce(side.id, side.name, m.ID); in.Found {
+		if in := r.inForce(side.id, m.ID); in.Found {
 			indexLineupPositions(out, side.name, in.Lineup)
 		}
 	}
@@ -381,37 +362,39 @@ func (p *kachinukiPositions) forMatch(m *state.MatchResult) map[string]string {
 }
 
 // indexLineupPositions adds each position a lineup fills to out, under
-// lineupKey(team, fighter).
+// lineupKey(team, fighter), by name and by member id.
+//
+// Both are indexed over SORTED positions, first write wins, because one fighter
+// can still hold two positions of a lineup: the duplicate guard is new, and
+// rows written before it are live data repaired by hand. Both loops compute the
+// same map key for such a fighter, so a plain range let Go's randomised map
+// order decide which position label survived, and the same competition exported
+// "Senpo" on one run and "Chuken" on the next. Which of the two wins is
+// arbitrary either way; that it is the SAME one every time is not.
 func indexLineupPositions(out map[string]string, team string, lineup domain.TeamLineup) {
-	for pos, playerName := range lineup.Positions {
-		if playerName == "" {
-			continue
-		}
-		out[lineupKey(team, playerName)] = pos.Label()
-	}
+	indexFirstPositionHeld(out, team, lineup.Positions, func(name string) string { return name })
 	// Every position held by id is indexed under the id as well, so a
 	// nameless fighter (bc-dnst) still resolves; resolveKachinukiBoutPosition
 	// tries the id first.
-	//
-	// Iterated over SORTED keys, and first-write-wins, because a lineup can
-	// still hold one member id at two positions: the duplicate guard is new
-	// and rows written before it are live data repaired by hand. Both
-	// iterations compute the same map key here, so a plain range let Go's
-	// randomised map order decide which position label survived, and the
-	// same competition exported "Senpo" on one run and "Chuken" on the
-	// next. Which of the two wins is arbitrary either way; that it is the
-	// SAME one every time is not.
-	indexedIDs := make(map[string]struct{}, len(lineup.MemberIDs))
-	for _, pos := range slices.Sorted(maps.Keys(lineup.MemberIDs)) {
-		memberID := lineup.MemberIDs[pos]
-		if memberID == "" {
+	indexFirstPositionHeld(out, team, lineup.MemberIDs, memberKey)
+}
+
+// indexFirstPositionHeld indexes held (position to a fighter's name or member
+// id, empty for a vacant position) into out under lineupKey(team, key(held)),
+// walking the positions in sorted order so a fighter held twice keeps the label
+// of the first.
+func indexFirstPositionHeld(out map[string]string, team string, held map[domain.Position]string, key func(string) string) {
+	indexed := make(map[string]struct{}, len(held))
+	for _, pos := range slices.Sorted(maps.Keys(held)) {
+		fighter := held[pos]
+		if fighter == "" {
 			continue
 		}
-		if _, dup := indexedIDs[memberID]; dup {
+		if _, dup := indexed[fighter]; dup {
 			continue
 		}
-		indexedIDs[memberID] = struct{}{}
-		out[lineupKey(team, memberKey(memberID))] = pos.Label()
+		indexed[fighter] = struct{}{}
+		out[lineupKey(team, key(fighter))] = pos.Label()
 	}
 }
 

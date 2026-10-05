@@ -176,8 +176,12 @@ else the latest one the team had before it (one saved for an earlier match of th
 round's lineup, which sits at the start of that round), else the team's lowest-round lineup.
 Matches are ordered by pool-match number first, then by knockout round and position, with the
 3rd-place match last. A lineup saved for a match counts as an earlier lineup only while that
-match is in the current draw and the team is seated in it by participant id. One rule in the
-engine owns this, and the kachinuki roster, the Kachinuki Detail export and the public
+match is in the current draw and the team is seated in it by participant id. A team is its
+participant id and nothing else: a lineup is the team's only when it is stored under that id,
+a lineup stored under a team name is not the team's, and a side with no id has none.
+Discarding a draw removes the lineups saved for its matches, because a draw generated again
+reuses the match ids, and keeps the round lineups (the starting lineup is round 0). One rule
+in the engine owns this, and the kachinuki roster, the Kachinuki Detail export and the public
 `lineup-in-force` read all ask it.
 
 ## 3. The match and result model

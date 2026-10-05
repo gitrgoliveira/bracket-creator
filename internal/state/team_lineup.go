@@ -321,3 +321,36 @@ func (s *Store) DeleteTeamLineupForMatch(compID, teamID, matchID string) error {
 	delete(current, key)
 	return s.saveTeamLineupsLocked(compID, current, s.directWrite)
 }
+
+// DeleteMatchScopedTeamLineups removes every match-scoped lineup of compID and
+// keeps the round-scoped ones (a team's starting lineup is round 0). A discarded
+// draw calls it: generating the draw again reuses the match ids, so a lineup
+// left behind for one would become a team's own lineup at the reused id, and
+// every later match of the team would carry it.
+//
+// Rewrites lineups.yaml only when an entry was dropped, and never creates the
+// competition directory (see saveTeamLineupsLocked).
+func (s *Store) DeleteMatchScopedTeamLineups(compID string) error {
+	if err := ValidateCompetitionID(compID); err != nil {
+		return err
+	}
+	mu := s.getCompLock(compID)
+	mu.Lock()
+	defer mu.Unlock()
+
+	current, err := s.loadTeamLineupsLocked(compID)
+	if err != nil {
+		return err
+	}
+	dropped := false
+	for key, l := range current {
+		if l.MatchID != "" {
+			delete(current, key)
+			dropped = true
+		}
+	}
+	if !dropped {
+		return nil
+	}
+	return s.saveTeamLineupsLocked(compID, current, s.directWrite)
+}

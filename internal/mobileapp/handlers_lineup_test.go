@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/gin-gonic/gin"
@@ -689,6 +690,29 @@ func TestPublicLineupInForceGET(t *testing.T) {
 
 		assert.Equal(t, false, body["saved"])
 	})
+}
+
+// A damaged match file costs the read the part of the draw it held, never the
+// read: the lineups are intact, so a pool match's carried lineup is still
+// answered when bracket.json cannot be read, and the 500 stays for a lineups
+// file that cannot be (TestPublicLineupInForceGET_ReadFailureIs500).
+func TestPublicLineupInForceGET_AnUnreadableBracketStillAnswers(t *testing.T) {
+	r, store, dir := setupLineupTestRouter(t)
+	require.NoError(t, store.SaveCompetition(&state.Competition{ID: "c1", TeamSize: 5}))
+	require.NoError(t, store.SavePoolMatches("c1", []state.MatchResult{
+		{ID: "Pool A-0", SideA: "A", SideAID: "teamA", SideB: "B", SideBID: "teamB"},
+		{ID: "Pool A-1", SideA: "A", SideAID: "teamA", SideB: "C", SideBID: "teamC"},
+	}))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "competitions", "c1", "bracket.json"), []byte("{not json"), 0o600))
+	require.NoError(t, store.SetTeamLineup("c1", domain.TeamLineup{
+		TeamID: "teamA", MatchID: "Pool A-0", Positions: map[domain.Position]string{domain.PosSenpo: "carried"},
+	}, 5))
+
+	body := inForceBody(t, r, "c1", "teamA", "Pool A-1")
+
+	assert.Equal(t, true, body["saved"])
+	assert.Equal(t, "Pool A-0", body["sourceMatchId"], "carried from the previous match, which the pool file still places")
+	assert.Equal(t, map[string]any{"senpo": "carried"}, body["positions"])
 }
 
 // TestPublicLineupInForceGET_NoAuthRequired: like the other lineup reads, no

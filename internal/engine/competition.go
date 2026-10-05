@@ -659,7 +659,8 @@ func (e *Engine) GenerateDraw(id string) error {
 }
 
 // DiscardDraw discards the generated draw for a draw-ready competition,
-// deleting the draw artifacts and resetting the competition to Setup.
+// deleting the draw artifacts, the match histories and the lineups saved for
+// the matches, and resetting the competition to Setup.
 // Returns an error when the competition is not in draw-ready state.
 //
 // Ordering rationale: files are deleted BEFORE the status flip. While the
@@ -708,6 +709,12 @@ func (e *Engine) DiscardDraw(id string) error {
 	// reuses the match ids, and its matches must not inherit these.
 	if err := e.store.DeleteMatchHistory(id); err != nil {
 		return fmt.Errorf("DiscardDraw: failed to delete the match history: %w", err)
+	}
+	// So do the lineups saved for those matches: left behind, one would become
+	// a team's own lineup at the reused id and be carried to every later match.
+	// The round lineups (the starting lineup is round 0) stay.
+	if err := e.store.DeleteMatchScopedTeamLineups(id); err != nil {
+		return fmt.Errorf("DiscardDraw: failed to delete the match lineups: %w", err)
 	}
 	_, err = e.store.UpdateCompetitionChanged(id, func(current *state.Competition) (*state.Competition, error) {
 		if current == nil {

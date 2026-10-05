@@ -421,7 +421,7 @@ describe('MatchLineupSideEditor resolves names to squad member ids (bc-pnum gap 
     expect(rename.props.className).toContain('lineup-rename-btn');
 
     const rowHosts = (type) => findHosts(tree, type)
-      .filter(n => /^match-lineup-pos-/.test(n.props?.['data-testid'] || ''));
+      .filter(n => (n.props?.['data-testid'] || '').startsWith('match-lineup-pos-'));
     expect(rowHosts('label')).toEqual([]);
     expect(rowHosts('div').length).toBeGreaterThan(0);
   });

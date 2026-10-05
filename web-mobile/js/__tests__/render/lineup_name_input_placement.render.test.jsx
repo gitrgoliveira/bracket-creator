@@ -7,7 +7,7 @@
 
 import React from 'react';
 import { render, act, fireEvent } from '@testing-library/react';
-import { describe, it, expect, vi, beforeAll, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeAll, beforeEach, afterEach } from 'vitest';
 import { LineupNameInput } from '../../admin_scoring_shared.jsx';
 
 const VIEW_H = 820;

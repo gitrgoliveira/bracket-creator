@@ -5,7 +5,7 @@
 
 import React from 'react';
 import { render, act } from '@testing-library/react';
-import { describe, it, expect, vi, beforeAll, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeAll, beforeEach, afterEach } from 'vitest';
 
 const PROP = '--topbar-stack-h';
 const rootValue = () => document.documentElement.style.getPropertyValue(PROP);

@@ -1071,11 +1071,14 @@ function LineupNameInput({ value, roster, onSelect, onListPick, disabled, ariaLa
           value={open ? query : (value || "")}
           onChange={(e) => { setQuery(e.target.value); setOpen(true); setActive(-1); }}
           onFocus={() => { setOpen(true); setQuery(""); setActive(-1); }}
-          // A tap on a box that still has focus (after a pick, the options'
-          // preventDefault kept it there) fires no focus event, so the tap
-          // itself reopens the list (bc-flst). It only ever opens, never
-          // toggles closed, so the click that follows the first focus is a
-          // no-op.
+          // A tap on a box that still has focus (after Escape closed the
+          // list, or after a pick in a host that keeps the box enabled, e.g.
+          // admin_schedule_lineup.jsx) fires no focus event, so the tap
+          // itself reopens the list (bc-flst). A host that disables the box
+          // while the pick's own write is out (the team editor) drops focus
+          // instead, so onFocus reopens it there. This onClick only ever
+          // opens, never toggles closed, so the click that follows the first
+          // focus is a no-op.
           onClick={() => { if (!open && !disabled) { setOpen(true); setQuery(""); setActive(-1); } }}
           onKeyDown={onKeyDown}
           onBlur={(e) => {

@@ -256,7 +256,7 @@ The following tournament operations described in the spec are physical/logistica
 
 **Priority**: Medium
 
-**Tournament need**: Two distinct scenarios require a recorded-decision handling beyond normal scoring:
+**Tournament need**: Two distinct scenarios need handling as a recorded decision, beyond normal scoring:
 
 1. **Kiken (withdrawal)**: A competitor withdraws mid-tournament due to injury, illness, or other reasons. The opponent receives 2–0 (regulation) or 1–0 (encho). The withdrawn competitor is **prohibited from participating in subsequent matches**. In team matches under FIK rules, specific positions must be vacated (Jiho for 1 withdrawal, Jiho + Fukusho for 2; Senpo and Taisho cannot be forfeited; 3+ withdrawals disqualify the team).
 

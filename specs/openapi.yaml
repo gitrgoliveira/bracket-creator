@@ -3283,6 +3283,7 @@ paths:
                 oneOf:
                   - $ref: '#/components/schemas/Error'
                   - $ref: '#/components/schemas/DownstreamKnockoutPlayedError'
+                  - $ref: '#/components/schemas/DownstreamKnockoutRunningError'
 
   /api/competitions/{id}/matches/{mid}/time:
     put:
@@ -3660,7 +3661,10 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/Error'
+                oneOf:
+                  - $ref: '#/components/schemas/Error'
+                  - $ref: '#/components/schemas/DownstreamKnockoutPlayedError'
+                  - $ref: '#/components/schemas/DownstreamKnockoutRunningError'
         '422':
           description: |
             `corrupt_overrides`: this competition's overrides.json could not
@@ -5207,13 +5211,19 @@ components:
           description: >
             Why groups were held other than by their own stamps, when one rule
             did that: "older revision of this board" (a running write the same
-            client session had already followed with a newer one), "the flags
-            and the winner they decide are kept together" (an engi finish one
-            of whose two groups a newer change outranks), "a knockout match
-            needs a winner" (a change that would leave a finished knockout
-            match tied), or "an engi result needs a valid flag count" (a recount
-            that would leave a finished engi match with none). Absent when each
-            group was judged by its own stamp.
+            client session had already followed with a newer one), "a finish
+            and the scoreline it stood on are kept together" (a completing
+            write stamped older than the stored result over a finished match,
+            held whole), "the flags and the winner they decide are kept
+            together" (an engi finish one of whose two groups a newer change
+            outranks), "a kiken closed this match" / "a fusenpai closed this
+            match" / "a fusensho closed this match" (scoring or overtime sent
+            for a match one of those decisions already closed; the answer
+            carries `heldReason: default_win_stands` and `heldDecision`), "a
+            knockout match needs a winner" (a change that would leave a
+            finished knockout match tied), or "an engi result needs a valid
+            flag count" (a recount that would leave a finished engi match with
+            none). Absent when each group was judged by its own stamp.
         clearedWithdrawal:
           type: object
           description: The kiken, fusenpai, or fusensho a later scoring change cleared (the result group as it was), when one was.
@@ -5335,6 +5345,46 @@ components:
                 description: The corrected standings leave this place tied until a tie-break is fought; its slot returns to its draw label.
         message:
           type: string
+
+    DownstreamKnockoutRunningError:
+      type: object
+      description: >
+        409 body when a write, reopen, override-winner or decision would move
+        a qualifier out of, or change a side of, a knockout match being
+        fought now: a pool correction in a mixed competition moving the
+        qualifier, or a knockout correction whose new winner changes a later
+        match's side. Not confirmable, unlike DownstreamKnockoutPlayedError:
+        `forceDownstreamReopen` does not get past it, because the match is in
+        progress at the shiaijo. Finish that match or send it back to the
+        queue, then retry the write.
+      required: [error]
+      properties:
+        error:
+          type: string
+          enum: [downstream_knockout_running]
+        matchId:
+          type: string
+          description: The match being corrected, reopened, or decided.
+        runningMatches:
+          type: array
+          description: The knockout matches being fought now that block the write.
+          items:
+            type: object
+            properties:
+              id:
+                type: string
+              number:
+                type: integer
+              label:
+                type: string
+                description: >
+                  The operator's name for the match, shown as is: its number and knockout round, e.g. `Match 3 (Final)`; `knockout Match 3` when the bracket records no round, `the 3rd-place match` for the bronze, the id when it has no number.
+              court:
+                type: string
+                description: The shiaijo the match is on (e.g. `A`); empty when it has none.
+        message:
+          type: string
+          description: The operator's sentence, naming the shiaijo.
 
     Sponsor:
       type: object

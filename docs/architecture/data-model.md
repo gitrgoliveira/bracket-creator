@@ -546,7 +546,7 @@ can fight again, and the winner is worked out from the points. That clearing rul
 match itself. A kiken, fusenpai, or fusensho that has already closed a match, whether a
 withdrawal or a win awarded because the other side is barred by another match, otherwise
 stands: a later change to its score, or its overtime, says nothing about that decision, so
-it is held, in the history with the reason. A board that is still scoring a
+it is held in the history with the reason. A board that is still scoring a
 match that has meanwhile been finished never reopens it: its changes made after the finish
 are applied to the finished result, which stays finished, and the winner is worked out again
 from the merged points or bouts; its changes made before the finish are held. A pool or
@@ -586,9 +586,10 @@ made, when the server received it, which endpoint it came through, the groups it
 for each, whether it was applied or held, with the held values. A held group that says exactly
 what is already stored (for example "no overtime" over a match with none) is no loss, so it is
 recorded as unchanged and its value is not kept. When a rule held changes rather than their
-times, the line also says why: an older revision of the same board, an engi result whose flags
-and winner are kept together, a knockout match that needs a winner, or an engi result that
-needs a valid flag count. The history is written in the
+times, the line also says why: an older revision of the same board, a late finish kept
+together with the scoreline it closed the match on, an engi result whose flags and winner are
+kept together, a kiken, fusenpai, or fusensho that already closed the match, a knockout match
+that needs a winner, or an engi result that needs a valid flag count. The history is written in the
 same transaction as the match, so the two land together or not at all, and a write refused
 outright (an invalid payload, the wrong competitors) leaves no line. Reopening, requeueing,
 overriding a winner and the other server actions that change a result write their own line.

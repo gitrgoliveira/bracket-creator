@@ -275,10 +275,16 @@ export function EngiScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext
 
   // F5: the pending banner goes once this device holds no write for the
   // match: landed, or discarded here or from the topbar's list.
-  useClearPendingWhenNothingHeld(m.compId, m.id, pendingWrite, () => {
+  // bc-cse (operator ruling 2026-10-05): a discarded held write disarms the
+  // two-tap commit too, so a discarded result is not one tap from being sent
+  // again. The same function serves the editor's own Discard and the hook's
+  // edge for a discard made elsewhere.
+  const dropHeldWrite = () => {
     setPendingWrite(false);
     pendingFnRef.current = null;
-  });
+    setSaveArmed(false);
+  };
+  useClearPendingWhenNothingHeld(m.compId, m.id, pendingWrite, dropHeldWrite);
 
   // Save guard, the same as the individual and team editors' Finish (bc-dtfn,
   // operator ruling 2026-09-27 that the editors behave alike): a tap ARMS the
@@ -566,7 +572,7 @@ export function EngiScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext
               compId={m.compId}
               matchId={m.id}
               disabled={submitting}
-              onDiscarded={() => { setPendingWrite(false); pendingFnRef.current = null; }}
+              onDiscarded={dropHeldWrite}
             />
           </div>
         )}

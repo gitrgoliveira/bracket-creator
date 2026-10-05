@@ -580,10 +580,16 @@ export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, on
 
   // F5: the pending-write banner goes once this device holds no write for the
   // match: landed, or discarded here or from the topbar's list.
-  useClearPendingWhenNothingHeld(m.compId, m.id, pendingWrite, () => {
+  // bc-cse (operator ruling 2026-10-05): a discarded held write disarms the
+  // two-tap commit too, so a discarded result is not one tap from being sent
+  // again. The same function serves the editor's own Discard and the hook's
+  // edge for a discard made elsewhere.
+  const dropHeldWrite = () => {
     setPendingWrite(false);
     pendingFnRef.current = null;
-  });
+    setFinishArmed(false);
+  };
+  useClearPendingWhenNothingHeld(m.compId, m.id, pendingWrite, dropHeldWrite);
 
   // F5: surface a PERMANENT terminal-write failure (non-retryable 4xx on a queued
   // retry) as an explicit "not saved" state: otherwise the write is silently
@@ -1398,7 +1404,7 @@ export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, on
                 compId={m.compId}
                 matchId={m.id}
                 disabled={submitting}
-                onDiscarded={() => { setPendingWrite(false); pendingFnRef.current = null; }}
+                onDiscarded={dropHeldWrite}
               />
             </div>
           )}

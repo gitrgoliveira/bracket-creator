@@ -105,7 +105,9 @@ export function heldValueText(group, value) {
             return resultText(v);
         case GROUP_ENCHO:
             // (E) is always bare: the period count is recorded, never shown.
-            return v && v.periodCount > 0 ? 'overtime' : 'no overtime';
+            // The group name is already "overtime" (groupLabel), so the value
+            // says whether it was started rather than repeating the word.
+            return v && v.periodCount > 0 ? 'started' : 'not started';
         case GROUP_FLAGS:
             return v ? `flags Shiro ${Number(v.flagsB) || 0}, Aka ${Number(v.flagsA) || 0}` : 'no flags';
         case GROUP_REP:

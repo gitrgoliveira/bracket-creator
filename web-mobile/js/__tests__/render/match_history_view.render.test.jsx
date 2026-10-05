@@ -149,8 +149,8 @@ describe('historyEntryView: a later change moved to the history', () => {
 
 describe('heldValueText', () => {
   it.each([
-    ['encho', { periodCount: 2 }, 'overtime'],
-    ['encho', null, 'no overtime'],
+    ['encho', { periodCount: 2 }, 'started'],
+    ['encho', null, 'not started'],
     ['flags', { flagsA: 1, flagsB: 2 }, 'flags Shiro 2, Aka 1'],
     ['result', { status: 'completed', decision: 'hikiwake' }, 'draw'],
     ['result', { status: 'completed', decision: 'fusensho', decisionBy: 'shiro' }, 'Fusensho against Shiro'],

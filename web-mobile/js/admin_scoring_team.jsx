@@ -1268,7 +1268,17 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
 
   // The pending banner goes once this device holds no write for the match:
   // landed, or discarded here or from the topbar's list.
-  useClearPendingWhenNothingHeld(m.compId, m.id, pendingWrite, () => setPendingWrite(false));
+  // bc-cse (operator ruling 2026-10-05): a discarded held write disarms the
+  // two-tap commits too (Finish and the kachinuki End match, which share this
+  // one pendingWrite), so a discarded result is not one tap from being sent
+  // again. The same function serves the editor's own Discard and the hook's
+  // edge for a discard made elsewhere.
+  const dropHeldWrite = () => {
+    setPendingWrite(false);
+    setFinishArmed(false);
+    setEndArmed(false);
+  };
+  useClearPendingWhenNothingHeld(m.compId, m.id, pendingWrite, dropHeldWrite);
 
   // Fetch lineup + competition data on mount. Both endpoints are
   // read-only and idempotent; failures degrade gracefully (the modal
@@ -4254,7 +4264,7 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
           {!writeFailed && pendingWrite && (
             <div className="pending-write-banner" role="status" aria-live="polite">
               <HeldWriteNotice compId={m.compId} matchId={m.id} res={pendingWrite} />
-              <HeldWriteDiscard compId={m.compId} matchId={m.id} onDiscarded={() => setPendingWrite(false)} />
+              <HeldWriteDiscard compId={m.compId} matchId={m.id} onDiscarded={dropHeldWrite} />
             </div>
           )}
           {writeFailed && (

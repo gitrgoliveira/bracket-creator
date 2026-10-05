@@ -15,7 +15,7 @@
 import { createTimerPool } from './timer_pool.jsx';
 import { applyPatch, keepNewerCompetitions } from './patch.jsx';
 import { SideCell } from './side_cell.jsx';
-import { stampTap, swallowBounce } from './tap_guard.jsx';
+import { useOpenedTapGuard } from './tap_guard.jsx';
 // Imported DIRECTLY from the leaf rather than read off `window`. Two of the
 // call sites below sit inside a `try { } catch (_e) { }` that swallows, so a
 // missing global there would degrade into exactly the silent not-saved failure
@@ -817,8 +817,7 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
     // bc-cfbd: the two confirms below open from a tap; the bounce of that tap
     // must not land on the fresh backdrop or its buttons. One ref serves both
     // (only one is ever open).
-    const confirmOpenedTapRef = useRefSh(null);
-    const stampConfirmOpened = useCallbackSh((node) => { if (node) stampTap(confirmOpenedTapRef); }, []);
+    const { openedRef: confirmOpenedRef, onClickCapture: confirmOnClickCapture } = useOpenedTapGuard();
     const [reverting, setReverting] = useStateSh(false);
     // Selected competition for filtering the queue. Default: running match's comp,
     // else first comp with scheduled matches here, else any comp with matches here.
@@ -1880,7 +1879,7 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
             </div>
 
             {pendingMove && (
-                <div className="modal-backdrop" ref={stampConfirmOpened} onClickCapture={swallowBounce(confirmOpenedTapRef)}
+                <div className="modal-backdrop" ref={confirmOpenedRef} onClickCapture={confirmOnClickCapture}
                     onClick={() => !movingCourt && setPendingMove(null)}>
                     <div className="shiaijo-move-confirm" role="dialog" aria-modal="true"
                         aria-labelledby="shiaijo-move-title" onClick={(e) => e.stopPropagation()}>
@@ -1904,7 +1903,7 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
             )}
 
             {pendingRevert && (
-                <div className="modal-backdrop" ref={stampConfirmOpened} onClickCapture={swallowBounce(confirmOpenedTapRef)}
+                <div className="modal-backdrop" ref={confirmOpenedRef} onClickCapture={confirmOnClickCapture}
                     onClick={() => !reverting && setPendingRevert(null)}>
                     <div className="shiaijo-move-confirm" role="dialog" aria-modal="true"
                         aria-labelledby="shiaijo-revert-title" onClick={(e) => e.stopPropagation()}>

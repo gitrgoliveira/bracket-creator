@@ -28,7 +28,7 @@ import { useEscapeToClose, confirmDialog } from './ui.jsx';
 // NumberedName: single owner of the number-chip-on-the-outer-side rule.
 import { NumberedName } from './numbered_name.jsx';
 import { SideCell } from './side_cell.jsx';
-import { useArmedConfirm } from './tap_guard.jsx';
+import { useArmedConfirm, useOpenedTapGuard } from './tap_guard.jsx';
 import { terminalFailureBanner, notSavedText, writeWasRefused, writeRetryable } from './write_result.jsx';
 
 const MAX_FLAGS = 5;
@@ -200,6 +200,8 @@ export function EngiScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext
   };
   const handleDismiss = () => leaveEditor(onClose);
   useEscapeToClose(canClose ? handleDismiss : undefined);
+  // bc-cfbd: the bounce of the tap that opened the overlay must not dismiss it.
+  const { openedRef, onClickCapture } = useOpenedTapGuard({ backdropOnly: true });
   const goPrev = () => leaveEditor(onPrev);
   const goNext = () => leaveEditor(onNext);
 
@@ -624,7 +626,7 @@ export function EngiScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext
   }
 
   return (
-    <div className="modal-backdrop" data-testid="scoring-modal-root" onClick={handleDismiss}>
+    <div className="modal-backdrop" data-testid="scoring-modal-root" ref={openedRef} onClickCapture={onClickCapture} onClick={handleDismiss}>
       <div className="editor-modal editor-modal--compact" role="dialog" aria-modal="true" aria-label={dialogLabel} onClick={(e) => e.stopPropagation()} data-testid="engi-score-editor">
         {inner}
       </div>

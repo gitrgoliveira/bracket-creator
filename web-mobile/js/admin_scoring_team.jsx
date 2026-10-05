@@ -66,7 +66,7 @@ import { boutMiddle, winnerSideLR } from './bracket.jsx';
 import { realIppons, hanteiTied, hanteiSlot, hanteiWinnerKey, nameOf, sideSlotOrder, attributeWinnerSide, subBoutAttribution, DEFAULT_WIN_IPPON } from './result_slot.jsx';
 import { creditedSideKey, creditedTotals } from './team_default_credit.jsx';
 // bc-dtfn: the one owner of "is this tap the bounce of the previous one".
-import { stampTap, clearTap, acceptTap, swallowBounce, useArmedConfirm } from './tap_guard.jsx';
+import { stampTap, clearTap, acceptTap, swallowBounce, useArmedConfirm, useOpenedTapGuard } from './tap_guard.jsx';
 
 // renderTeamBoutMiddle: the ONE place the editor turns a sub-bout into its
 // centre value, for BOTH the read-only done row and the live entry row. Derives
@@ -3149,6 +3149,8 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
   // bc-dscn: a host that cannot close (the inline court console) has nothing
   // to discard INTO, so it never prompts either.
   const handleDismiss = () => (canClose ? leaveEditor(onClose) : undefined);
+  // bc-cfbd: the bounce of the tap that opened the overlay must not dismiss it.
+  const { openedRef, onClickCapture } = useOpenedTapGuard({ backdropOnly: true });
   const goPrev = () => leaveEditor(onPrev);
   const goNext = () => leaveEditor(onNext);
 
@@ -3764,6 +3766,7 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
                           <div
                             className={lineupNotice.tone === "error" ? "alert alert--error" : "alert alert--warn"}
                             role={lineupNotice.tone === "error" ? "alert" : "status"}
+                            data-tone={lineupNotice.tone}
                             data-testid="team-editor-lineup-warning">
                             {lineupNotice.text}
                           </div>
@@ -4514,7 +4517,7 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
   }
 
   return (
-    <div className="modal-backdrop" data-testid="scoring-modal-root" onClick={handleDismiss}>
+    <div className="modal-backdrop" data-testid="scoring-modal-root" ref={openedRef} onClickCapture={onClickCapture} onClick={handleDismiss}>
       <div className={`editor-modal editor-modal--team ${useCompact ? "editor-modal--compact" : ""}`} role="dialog" aria-modal="true" aria-label={dialogLabel} onClick={(e) => e.stopPropagation()}>
         {inner}
       </div>

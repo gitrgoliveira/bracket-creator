@@ -16,7 +16,7 @@ import { sameCompetitor } from './competitor_identity.jsx';
 // its host and by unit tests that never load api_client, and write_result.jsx
 // is import-only so it can be reached directly (see its header).
 import { notLandedBanner, terminalFailureBanner, notSavedText, writeWasRefused, writeRetryable, decisionWord } from './write_result.jsx';
-import { useArmedConfirm, acceptTap, clearTap } from './tap_guard.jsx';
+import { useArmedConfirm, useOpenedTapGuard, acceptTap, clearTap } from './tap_guard.jsx';
 
 import {
   MAX_IPPONS_PER_SIDE,
@@ -885,6 +885,8 @@ export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, on
   // bc-dscn: a host that cannot close (the inline court console) has nothing
   // to discard INTO, so it never prompts either.
   const handleDismiss = () => (canClose ? leaveEditor(onClose) : undefined);
+  // bc-cfbd: the bounce of the tap that opened the overlay must not dismiss it.
+  const { openedRef, onClickCapture } = useOpenedTapGuard({ backdropOnly: true });
   const goPrev = () => leaveEditor(onPrev);
   const goNext = () => leaveEditor(onNext);
 
@@ -1503,7 +1505,7 @@ export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, on
   }
 
   return (
-    <div className="modal-backdrop" data-testid="scoring-modal-root" onClick={handleDismiss}>
+    <div className="modal-backdrop" data-testid="scoring-modal-root" ref={openedRef} onClickCapture={onClickCapture} onClick={handleDismiss}>
       <div className="editor-modal editor-modal--lg editor-modal--compact" role="dialog" aria-modal="true" aria-label={dialogLabel} onClick={(e) => e.stopPropagation()}>
         {inner}
       </div>

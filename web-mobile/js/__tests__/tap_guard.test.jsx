@@ -2,7 +2,7 @@
 // (bc-dtfn). The hook (useArmedConfirm) is pinned through the editors in
 // render/finish_arm_dwell.render.test.jsx; this pins the pure helpers.
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { TAP_BOUNCE_MS, isPointerTap, stampTap, clearTap, tapIsBounce, acceptTap, swallowBounce } from '../tap_guard.jsx';
+import { TAP_BOUNCE_MS, isPointerTap, stampTap, clearTap, tapIsBounce, acceptTap, swallowBounce, useOpenedTapGuard } from '../tap_guard.jsx';
 
 const pointer = { detail: 1 };
 const keyboard = { detail: 0 };
@@ -105,5 +105,62 @@ describe('swallowBounce', () => {
     const late = ev(1);
     handler(late);
     expect(late.stopPropagation).not.toHaveBeenCalled();
+  });
+});
+
+describe('useOpenedTapGuard', () => {
+  const ev = (detail) => ({ detail, stopPropagation: vi.fn(), preventDefault: vi.fn() });
+
+  it('stamps when a node mounts and ignores the unmount call', () => {
+    const { openedRef, onClickCapture } = useOpenedTapGuard();
+    openedRef(null);
+    const unmounted = ev(1);
+    onClickCapture(unmounted);
+    expect(unmounted.stopPropagation).not.toHaveBeenCalled();
+
+    openedRef({});
+    const bounce = ev(1);
+    onClickCapture(bounce);
+    expect(bounce.stopPropagation).toHaveBeenCalled();
+    expect(bounce.preventDefault).toHaveBeenCalled();
+  });
+
+  it('lets a pointer click through once the window has passed', () => {
+    const { openedRef, onClickCapture } = useOpenedTapGuard();
+    openedRef({});
+    vi.advanceTimersByTime(TAP_BOUNCE_MS);
+    const late = ev(1);
+    onClickCapture(late);
+    expect(late.stopPropagation).not.toHaveBeenCalled();
+  });
+
+  it('never swallows a keyboard click (detail 0)', () => {
+    const { openedRef, onClickCapture } = useOpenedTapGuard();
+    openedRef({});
+    const key = ev(0);
+    onClickCapture(key);
+    expect(key.stopPropagation).not.toHaveBeenCalled();
+  });
+
+  it('a new mount re-stamps (a request replacing another)', () => {
+    const { openedRef, onClickCapture } = useOpenedTapGuard();
+    openedRef({});
+    vi.advanceTimersByTime(TAP_BOUNCE_MS + 10);
+    openedRef({});
+    const bounce = ev(1);
+    onClickCapture(bounce);
+    expect(bounce.stopPropagation).toHaveBeenCalled();
+  });
+
+  it('with backdropOnly, swallows a bounce on the backdrop but not on a control inside it', () => {
+    const { openedRef, onClickCapture } = useOpenedTapGuard({ backdropOnly: true });
+    openedRef({});
+    const backdrop = {};
+    const onBackdrop = { ...ev(1), target: backdrop, currentTarget: backdrop };
+    onClickCapture(onBackdrop);
+    expect(onBackdrop.stopPropagation).toHaveBeenCalled();
+    const onControl = { ...ev(1), target: {}, currentTarget: backdrop };
+    onClickCapture(onControl);
+    expect(onControl.stopPropagation).not.toHaveBeenCalled();
   });
 });

@@ -122,6 +122,7 @@ describe('team editor: a lineup refusal shows in the row the operator typed in (
     expect(notice.textContent).toBe('Ren Abe is already at Senpo.');
     expect(notice.getAttribute('role')).toBe('alert');
     expect(notice.classList.contains('alert--error')).toBe(true);
+    expect(notice.getAttribute('data-tone')).toBe('error');
     expect(notice.closest('.team-sub-match')).toBe(jihoRow(container));
     expect(notice.closest('.team-sub-match__side--shiro')).not.toBeNull();
     expect(container.querySelector('[data-testid="team-editor-error"]')).toBeNull();
@@ -138,6 +139,7 @@ describe('team editor: a lineup refusal shows in the row the operator typed in (
     expect(notice.textContent).toMatch(/^Lineup saved, but/);
     expect(notice.getAttribute('role')).toBe('status');
     expect(notice.classList.contains('alert--warn')).toBe(true);
+    expect(notice.getAttribute('data-tone')).toBe('warn');
     expect(notice.closest('.team-sub-match')).toBe(jihoRow(container));
     expect(notice.closest('.team-sub-match__side--shiro')).not.toBeNull();
   });

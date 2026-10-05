@@ -558,6 +558,17 @@ export function dependentActionBlocked(res) {
 // that save runs under ends too (admin_scoring_team.jsx runRepBoutChange).
 export const FETCH_TIMEOUT_MS = 12000;
 
+// withinDeadline: a promise's outcome, or TIMED_OUT once `ms` has passed with
+// none. Only the wait ends: the promise itself runs on. It gives a wait that is
+// not a request of its own (the team editor's save before a representative-bout
+// change, the lineup read a pick or a Save is composed on) the same bound.
+export const TIMED_OUT = Symbol("timed out");
+export function withinDeadline(promise, ms) {
+    let timer;
+    const late = new Promise((resolve) => { timer = setTimeout(() => resolve(TIMED_OUT), ms); });
+    return Promise.race([promise, late]).finally(() => clearTimeout(timer));
+}
+
 // What a representative-bout add or remove leaves undone when it does not
 // land, and the sentence for one the server never answered, or answered with
 // a body that never completed. The team editor shows it as it is, whichever

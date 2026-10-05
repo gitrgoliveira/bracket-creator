@@ -36,6 +36,10 @@ function findComponents(tree, name) {
 const saveButton = (tree) =>
   findHosts(tree, 'button').find(b => /Save lineup/.test(collectText(b)));
 
+// A Save reads the lineup again before it writes (operator decision 2026-10-05),
+// so the write lands a few microtask hops after the tap.
+const flush = async () => { for (let i = 0; i < 12; i++) await Promise.resolve(); };
+
 describe('MatchLineupSideEditor trims names before saving', () => {
   let runtime, MatchLineupSideEditor;
   let origAPI, origHelpers, origCompMatches;
@@ -91,7 +95,7 @@ describe('MatchLineupSideEditor trims names before saving', () => {
     pickers[0].props.onSelect('  Padded Name  ');
     tree = runtime.currentTree();
     saveButton(tree).props.onClick();
-    await Promise.resolve();
+    await flush();
     expect(global.window.API.putMatchLineup).toHaveBeenCalled();
     // putMatchLineup(compId, teamId, matchId, positionsOut, ...)
     const positionsOut = global.window.API.putMatchLineup.mock.calls.at(-1)[3];
@@ -109,7 +113,7 @@ describe('MatchLineupSideEditor trims names before saving', () => {
     pickers[0].props.onSelect('   ');
     tree = runtime.currentTree();
     saveButton(tree).props.onClick();
-    await Promise.resolve();
+    await flush();
     const positionsOut = global.window.API.putMatchLineup.mock.calls.at(-1)[3];
     expect(positionsOut['1']).toBeUndefined();
   });

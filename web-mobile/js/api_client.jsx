@@ -2689,6 +2689,23 @@ async function _deleteLineup(url, password, failure) {
     return true;
 }
 
+// _readLineup: a lineup's GET, bounded like every sibling request (_fetchJson:
+// the deadline covers the body), so a read the server never answers rejects with
+// _requestTimedOut's error, which lineupReadFailure words, instead of leaving an
+// editor on "Loading lineup…" until the browser gives up on the connection.
+// `saved: false` reads as null (lineupOrNull). Shared by fetchTeamLineup and
+// fetchLineupInForce.
+async function _readLineup(url) {
+    const { res, body } = await _fetchJson(url, {});
+    if (!res.ok) throw new Error(body.error || "Failed to load lineup");
+    // _fetchJson reads an unreadable body as {}: never hand that on as a lineup.
+    // The server's answer always says whether a lineup is saved, and a sign-in
+    // page answering for it would otherwise read as an empty lineup, which a
+    // Save composed on it would write over the real one.
+    if (Object.keys(body).length === 0) throw new Error("The lineup could not be read. Check the connection and try again.");
+    return lineupOrNull(body);
+}
+
 const API = {
     async fetchTournament() {
         const res = await fetch('/api/viewer/tournament');
@@ -4074,13 +4091,7 @@ const API = {
     // lineup panel) do not read rounds at all: they read fetchLineupInForce
     // through resolveMatchLineup.
     async fetchTeamLineup(compID, teamId, round) {
-        const res = await fetch(`/api/competitions/${compID}/teams/${teamId}/lineups/${round}`);
-        if (!res.ok) {
-            const err = await res.json().catch(() => ({}));
-            throw new Error(err.error || "Failed to load lineup");
-        }
-        const body = await res.json();
-        return lineupOrNull(body);
+        return _readLineup(`/api/competitions/${compID}/teams/${teamId}/lineups/${round}`);
     },
     // memberIds (bc-tmid pass 3) is optional and keyed by the same position
     // as positions: the squad member id half of a lineup, sent alongside
@@ -4240,13 +4251,7 @@ const API = {
     // from) or `sourceRound` (a Lineups-page lineup; 0 is the starting
     // lineup). A 404 means the competition does not exist.
     async fetchLineupInForce(compID, teamId, matchId) {
-        const res = await fetch(`/api/competitions/${compID}/teams/${teamId}/lineup-in-force/${matchId}`);
-        if (!res.ok) {
-            const err = await res.json().catch(() => ({}));
-            throw new Error(err.error || "Failed to load lineup");
-        }
-        const body = await res.json();
-        return lineupOrNull(body);
+        return _readLineup(`/api/competitions/${compID}/teams/${teamId}/lineup-in-force/${matchId}`);
     },
     // memberIds (bc-pnum gap closure) is optional and keyed by the same
     // position as positions, exactly like putTeamLineup's own memberIds

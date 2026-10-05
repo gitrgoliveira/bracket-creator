@@ -14,14 +14,16 @@
 // is shown, whether it differs, the draft, the confirmed save and giving a
 // match's own lineup up. The editors keep their layouts and their save bodies.
 //
-// Its one import is lineup_resolver.jsx, the owner of the lineup read and of
-// which positions differ. The hooks read the React global at call time, as
-// tap_guard.jsx does.
+// Its imports are lineup_resolver.jsx, the owner of the lineup read, of which
+// positions differ and of what a Save writes, and write_result.jsx, the leaf that
+// owns the deadline a bounded wait is given. The hooks read the React global at
+// call time, as tap_guard.jsx does.
 import {
-  changedLineupPositions, lineupFields, lineupSourceOf, lineupSourceLabel, isOwnLineup, resolveMatchLineup,
+  changedLineupPositions, composeLineupSave, lineupFields, lineupSourceOf, lineupSourceLabel, isOwnLineup, resolveMatchLineup,
   previousLineupConfirm, PREVIOUS_LINEUP_LABEL, SAVE_QUEUED_REASON, REMOVED_UNREAD_NOTICE, STARTING_ROUND,
   lineupReadFailure,
 } from './lineup_resolver.jsx';
+import { FETCH_TIMEOUT_MS, TIMED_OUT, withinDeadline } from './write_result.jsx';
 
 const STORAGE_PREFIX = 'bc.lineupDraft.v1:';
 // A draft older than this is never offered: the operator has moved on.
@@ -201,6 +203,17 @@ const NO_CHANGES_TITLE = 'No changes to save';
 // A name box per position, all empty: the form of a lineup nothing is known of.
 const blankNames = (positionKeys) => Object.fromEntries(positionKeys.map((key) => [key, '']));
 
+// The team's members (the API answers every team's, keyed by id), or null when
+// they cannot be read: whoever asks keeps the list it has.
+async function readMembers(compId, teamId, password) {
+  try {
+    const squads = await window.API.fetchSquads(compId, password);
+    return (squads && squads[teamId]) || [];
+  } catch (_e) {
+    return null;
+  }
+}
+
 // useLineupForm: the state of one lineup editor, for a team's match (`matchId`)
 // or for its starting lineup (no matchId). It reads the lineup (a match's is the
 // one in force there, which the server works out; the starting lineup is read
@@ -220,7 +233,16 @@ const blankNames = (positionKeys) => Object.fromEntries(positionKeys.map((key) =
 //                       so that giving a lineup up clears both
 //   removing            a removal is out
 //   saveQueued          a save of this lineup is still waiting to be sent
+//   squad               the team's members as the API answers them (the editors
+//                       set it after a rename or a mint), and squadUnavailable,
+//                       that they could not be read
 // and gives the editor
+//   lineupToSave()        what a Save writes: the lineup as stored now with the
+//                         operator's changes on it, `{ positions, memberIds,
+//                         changed }`. It is read again for it, under the deadline
+//                         a bounded request has, and taken from the baseline
+//                         when it cannot be read, so an offline save is written
+//                         and queued as it always was. What it reads is not shown
 //   confirmSaved(lineup)  after the server confirmed a save: that is now the
 //                         baseline, and a match's own lineup, and what a draft
 //                         could not restore no longer applies
@@ -230,7 +252,9 @@ const blankNames = (positionKeys) => Object.fromEntries(positionKeys.map((key) =
 //   retry()               read again ("Try again")
 // A lineup change announced for the competition (the lineup-updated event) is
 // followed: the lineup is read again and shown, unless the form has edits or a
-// removal is out. The editors keep their layouts and their save bodies.
+// removal is out, and the team's members are read again with it, so the lineup
+// shown never names a member the list lacks. The editors keep their layouts and
+// their save bodies.
 export function useLineupForm({ compId, teamId, matchId = '', positionKeys, password, matchLabel, teamName }) {
   const { useState, useRef, useEffect } = React;
   const draftKey = lineupDraftKey({ compId, teamId, matchId });
@@ -255,6 +279,10 @@ export function useLineupForm({ compId, teamId, matchId = '', positionKeys, pass
   const [error, setError] = useState('');
   const [warning, setWarning] = useState('');
   const [removing, setRemoving] = useState(false);
+  // The team's members. A read that fails leaves the list as it is, and flags that
+  // it could not be read: a lineup is still read and saved without it.
+  const [squad, setSquad] = useState([]);
+  const [squadUnavailable, setSquadUnavailable] = useState(false);
   // The read whose answer may still be shown: another lineup, or leaving, ends it.
   const attempt = useRef(0);
 
@@ -315,13 +343,25 @@ export function useLineupForm({ compId, teamId, matchId = '', positionKeys, pass
   // theirs and stay (the draft covers a reopen). This editor's own save is held off
   // the same way, since the form stays dirty until confirmSaved. A read of a
   // lineup already shown that fails leaves it as it is, raising no problem over a
-  // form that can still be used.
+  // form that can still be used. The team's members are read with it and shown
+  // with it, so the lineup never names one the list lacks (a member another device
+  // created since); their read has the deadline of any bounded request, and one
+  // that fails or is not answered leaves the list as it is.
   const follow = async () => {
     const shown = read;
     const mine = ++attempt.current;
     try {
-      const lineup = await readLineup();
-      if (attempt.current === mine && !live.current.touched) adopt(lineup);
+      const [lineup, members] = await Promise.all([
+        readLineup(),
+        withinDeadline(readMembers(compId, teamId, password), FETCH_TIMEOUT_MS),
+      ]);
+      if (attempt.current === mine && !live.current.touched) {
+        if (Array.isArray(members)) {
+          setSquad(members);
+          setSquadUnavailable(false);
+        }
+        adopt(lineup);
+      }
     } catch (e) {
       if (attempt.current === mine && !shown) setLoadError(lineupReadFailure(e));
     } finally {
@@ -353,6 +393,29 @@ export function useLineupForm({ compId, teamId, matchId = '', positionKeys, pass
     return () => window.removeEventListener('lineup-updated', onUpdated);
   }, [compId, teamId, matchId]);
 
+  // The team's members, independent of the lineup read: one that fails must not
+  // block loading or saving the lineup. `password` is a dependency, not just a
+  // closure read, and a read that succeeds clears the flag a failed one raised:
+  // the re-auth modal is a SIBLING of the admin app, so a 401 here unmounts
+  // nothing and neither compId nor teamId ever changes. Without both halves one
+  // 401 would leave the pickers empty for the editor's whole life, and every typed
+  // name would mint a new member instead of resolving to the one already on the
+  // team.
+  useEffect(() => {
+    if (!compId || !teamId) return undefined;
+    let cancelled = false;
+    readMembers(compId, teamId, password).then((members) => {
+      if (cancelled) return;
+      if (members) {
+        setSquad(members);
+        setSquadUnavailable(false);
+      } else {
+        setSquadUnavailable(true);
+      }
+    });
+    return () => { cancelled = true; };
+  }, [compId, teamId, password]);
+
   const retry = () => {
     setLoadError('');
     setLoading(true);
@@ -382,6 +445,28 @@ export function useLineupForm({ compId, teamId, matchId = '', positionKeys, pass
     positionKeys,
     onRestore: (side) => { setValues(side.positions); setMemberIds(side.memberIds); },
   });
+
+  // What a Save writes (operator decision 2026-10-05): the lineup as stored now with
+  // the operator's changes on it, not the form restated, which would put back on
+  // every position the operator left alone the value the form was read with, over
+  // a change another device made since. The lineup is read again for it, and from
+  // the baseline (the lineup as loaded or last confirmed) when that read fails or is
+  // not answered in time, so an offline save is written, and queued, as it always
+  // was. What was read is not shown: the server's answer to the save is
+  // (confirmSaved). `changed` names the positions the operator changed.
+  const lineupToSave = async () => {
+    let stored = baseline;
+    try {
+      const fresh = await withinDeadline(readLineup(), FETCH_TIMEOUT_MS);
+      if (fresh !== TIMED_OUT) stored = fresh;
+    } catch (_e) {
+      // The server cannot be asked: the lineup as loaded stands in for it.
+    }
+    return {
+      ...composeLineupSave(baseline, current, stored, positionKeys),
+      changed: changedLineupPositions(baseline, current, positionKeys),
+    };
+  };
 
   // What the server answered to a save is what it holds now.
   const confirmSaved = ({ positions, memberIds: ids }) => {
@@ -443,7 +528,8 @@ export function useLineupForm({ compId, teamId, matchId = '', positionKeys, pass
     // A form that holds nothing read has no draft to offer back or discard.
     draft: read ? draft : { ...draft, restored: false, stale: null },
     error, setError, warning, setWarning,
-    removing, removeStored, dropOwnLineup, saveQueued, confirmSaved,
+    squad, setSquad, squadUnavailable,
+    removing, removeStored, dropOwnLineup, saveQueued, lineupToSave, confirmSaved,
   };
 }
 

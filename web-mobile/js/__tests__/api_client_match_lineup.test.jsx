@@ -7,6 +7,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { API } from '../api_client.jsx';
 import { FETCH_TIMEOUT_MS } from '../write_result.jsx';
+import { lineupReadFailure, LINEUP_READ_NO_ANSWER } from '../lineup_resolver.jsx';
 
 // Minimal fetch stub that records the most recent call.
 function mockFetch(status, body) {
@@ -28,7 +29,7 @@ describe('API.fetchLineupInForce', () => {
   afterEach(() => { global.fetch = originalFetch; });
 
   it('calls the correct /lineup-in-force/:matchId URL', async () => {
-    global.fetch = mockFetch(200, {});
+    global.fetch = mockFetch(200, { positions: {}, saved: false });
     await API.fetchLineupInForce('c42', 't99', 'mx7');
     const [url] = global.fetch.mock.calls[0];
     expect(url).toBe('/api/competitions/c42/teams/t99/lineup-in-force/mx7');
@@ -106,6 +107,81 @@ describe('API.fetchTeamLineup', () => {
   it('throws on a 500', async () => {
     global.fetch = mockFetch(500, { error: 'internal' });
     await expect(API.fetchTeamLineup('c1', 't1', 1)).rejects.toThrow('internal');
+  });
+});
+
+// Both reads are bounded like every sibling request (the deadline covers the
+// body too): a read the server never answers must end, with the timed-out error
+// lineupReadFailure words, or an editor stays on "Loading lineup…" until the
+// browser gives up on the connection.
+describe('reading a lineup when the server does not answer', () => {
+  const reads = [
+    ['fetchLineupInForce', () => API.fetchLineupInForce('c1', 't1', 'm1')],
+    ['fetchTeamLineup', () => API.fetchTeamLineup('c1', 't1', 0)],
+  ];
+  let originalFetch;
+  beforeEach(() => { originalFetch = global.fetch; });
+  afterEach(() => { global.fetch = originalFetch; vi.useRealTimers(); });
+
+  // What a read has come to so far, without waiting on it.
+  function watch(read) {
+    const seen = { outcome: 'waiting' };
+    read().then((lineup) => { seen.outcome = lineup; }, (error) => { seen.outcome = error; });
+    return seen;
+  }
+
+  it.each(reads)('%s rejects with the timed-out error when the request is never answered, at the deadline', async (_name, read) => {
+    vi.useFakeTimers();
+    global.fetch = vi.fn(() => new Promise(() => {}));
+    const seen = watch(read);
+    await vi.advanceTimersByTimeAsync(FETCH_TIMEOUT_MS - 1);
+    expect(seen.outcome).toBe('waiting');
+    await vi.advanceTimersByTimeAsync(2);
+    expect(seen.outcome).toBeInstanceOf(Error);
+    expect(seen.outcome.timedOut).toBe(true);
+    expect(lineupReadFailure(seen.outcome)).toBe(LINEUP_READ_NO_ANSWER);
+  });
+
+  it.each(reads)('%s gives up on an answer whose body never completes, too', async (_name, read) => {
+    vi.useFakeTimers();
+    global.fetch = vi.fn(() => Promise.resolve({ ok: true, status: 200, json: () => new Promise(() => {}) }));
+    const seen = watch(read);
+    await vi.advanceTimersByTimeAsync(FETCH_TIMEOUT_MS + 1);
+    expect(seen.outcome.timedOut).toBe(true);
+  });
+
+  it.each(reads)('%s aborts the request it gave up on, which frees its connection', async (_name, read) => {
+    vi.useFakeTimers();
+    global.fetch = vi.fn((_url, { signal }) => new Promise((_resolve, reject) => {
+      signal.addEventListener('abort', () => reject(new DOMException('aborted', 'AbortError')));
+    }));
+    const seen = watch(read);
+    await vi.advanceTimersByTimeAsync(FETCH_TIMEOUT_MS + 1);
+    expect(global.fetch.mock.calls[0][1].signal.aborted).toBe(true);
+    expect(seen.outcome.timedOut).toBe(true);
+  });
+
+  it.each(reads)('%s lets a connection that is down through as the browser\'s own error, which lineupReadFailure words', async (_name, read) => {
+    global.fetch = vi.fn(() => Promise.reject(new TypeError('Failed to fetch')));
+    const error = await read().catch((e) => e);
+    expect(error).toBeInstanceOf(TypeError);
+    expect(error.timedOut).toBeUndefined();
+    expect(lineupReadFailure(error)).toBe(LINEUP_READ_NO_ANSWER);
+  });
+
+  it.each(reads)('%s still throws the server\'s own message, or a plain sentence when it sends none', async (_name, read) => {
+    global.fetch = mockFetch(404, { error: 'competition not found' });
+    await expect(read()).rejects.toThrow('competition not found');
+    global.fetch = mockFetch(500, {});
+    await expect(read()).rejects.toThrow('Failed to load lineup');
+  });
+
+  // _fetchJson reads an unreadable body as {}. A 200 that is not JSON (a venue's
+  // sign-in page answering for the server) must stay a failed read, never an
+  // empty lineup: a Save composed on it would blank the lineup it stands for.
+  it.each(reads)('%s does not hand an unreadable answer on as a lineup', async (_name, read) => {
+    global.fetch = vi.fn(() => Promise.resolve({ ok: true, status: 200, json: () => Promise.reject(new SyntaxError('Unexpected token < in JSON')) }));
+    await expect(read()).rejects.toThrow('The lineup could not be read. Check the connection and try again.');
   });
 });
 

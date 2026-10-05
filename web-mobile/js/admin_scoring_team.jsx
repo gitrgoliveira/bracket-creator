@@ -57,7 +57,7 @@ import { SideLabel } from './side_cell.jsx';
 // Imported from the leaf, not read off `window`, for the same reason
 // admin_scoring_shared.jsx does it: write_result.jsx is import-only, and this
 // editor is ES-imported by hosts and tests that never load api_client.
-import { notLandedBanner, terminalFailureBanner, notSavedText, writeDidNotLand, writeWasRefused, writeRetryable, dependentActionBlocked, FETCH_TIMEOUT_MS, REP_BOUT_NOT_ADDED, REP_BOUT_NOT_REMOVED, noAnswerSentence, decisionWord } from './write_result.jsx';
+import { notLandedBanner, terminalFailureBanner, notSavedText, writeDidNotLand, writeWasRefused, writeRetryable, dependentActionBlocked, FETCH_TIMEOUT_MS, withinDeadline, TIMED_OUT, REP_BOUT_NOT_ADDED, REP_BOUT_NOT_REMOVED, noAnswerSentence, decisionWord } from './write_result.jsx';
 
 // boutMiddle is THE single source for a bout's centre value (vs/X/(E)/(DH));
 // the editor derives its per-bout middle from it rather than restating the
@@ -142,7 +142,7 @@ export function preserveStoredDaihyosenVerdict({ armed, pickedSide, tied, existi
 // StreamingOverlay). The implementations live in lineup_resolver.jsx;
 // re-exported here so existing imports from admin_scoring_modal.jsx (which
 // re-exports them onward) continue to work.
-import { resolveMatchLineup, resolveLineupTeamId, resolveBoutSideName, resolveBoutSideMemberId, resolveSquadMember, squadMemberIdForUniqueName, squadRosterEntries, rosterWithoutPlacedElsewhere, resolveBoutSideDisplayName, buildInlineLineupWrite, memberRefusalNote, POS_KEYS_5, POS_LABELS_5 } from './lineup_resolver.jsx';
+import { resolveMatchLineup, resolveLineupTeamId, resolveBoutSideName, resolveBoutSideMemberId, resolveSquadMember, squadMemberIdForUniqueName, squadRosterEntries, rosterWithoutPlacedElsewhere, resolveBoutSideDisplayName, buildInlineLineupWrite, memberRefusalNote, alreadyPlacedNote, POS_KEYS_5, POS_LABELS_5 } from './lineup_resolver.jsx';
 import { DAIHYOSEN_POSITION } from './pool_ids.jsx';
 import { joinList } from './admin_helpers.jsx';
 // The shared owner of what an operator is told about unreadable data; the
@@ -807,15 +807,6 @@ const REP_BOUT_REMOVE_REFUSALS = new Map([
   ["no_daihyosen", "No daihyosen to remove"],
 ]);
 
-// withinDeadline: a promise's outcome, or TIMED_OUT once `ms` has passed with
-// none. Only the wait ends: the promise itself runs on.
-const TIMED_OUT = Symbol("timed out");
-function withinDeadline(promise, ms) {
-  let timer;
-  const late = new Promise((resolve) => { timer = setTimeout(() => resolve(TIMED_OUT), ms); });
-  return Promise.race([promise, late]).finally(() => clearTimeout(timer));
-}
-
 // subsKey: a bout log by its content, the one comparison the match override
 // makes both when the prop moves (the clearing effect) and when a server
 // answer is adopted (adoptServerSubs), so the two cannot disagree about
@@ -875,8 +866,8 @@ const NO_LINEUPS = { a: null, b: null };
 // null is a successful read of "nothing in force".
 //
 // One sync per match: a read begun for another match, or after the sheet
-// closed, never lands, and of two reads of a side the later-begun wins, a
-// confirmed write of the side counting as the latest read, so a read still out
+// closed, never lands, and of two reads of a side the later-begun wins, a write
+// of the side (sent or queued) counting as the latest read, so a read still out
 // from before it cannot put the old lineup back. A read that fails leaves the
 // side as it was. A change announced for this competition is followed, except
 // for a side this sheet is writing (that side is read once its write settles)
@@ -1702,8 +1693,7 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
       if (built.refused) {
         const labelFn = window.AdminLineupHelpers?.lineupPositionLabel;
         const label = typeof labelFn === "function" ? labelFn(built.refused.position) : built.refused.position;
-        const who = built.refused.name || "This fighter";
-        notify("error", `${who} is already at ${label}.`);
+        notify("error", alreadyPlacedNote(built.refused.name, label));
         return;
       }
       const { positions: updated, memberIds: updatedIds, squad: nextSquad, failures } = built;

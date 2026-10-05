@@ -45,13 +45,13 @@
 
 import { idOf, nameOf } from './competitor_identity.jsx';
 import { squadSlotLabel } from './squad_member_label.jsx';
-import { rosterWithoutPlacedElsewhere, memberPlacedElsewhere, memberRefusalNote, STARTING_ROUND } from './lineup_resolver.jsx';
+import { rosterWithoutPlacedElsewhere, memberPlacedElsewhere, memberRefusalNote, lineupDuplicateNote, alreadyPlacedNote, STARTING_ROUND } from './lineup_resolver.jsx';
 import { poolMatchNumberOf, isSupplementaryBout, scoreRowMatchLabel } from './pool_ids.jsx';
 import { normalizeParticipantName } from './data.jsx';
 import { renameMemberFields } from './lineup_rename.jsx';
 import { useLineupForm, LineupSourceLine, LineupProblem, LineupDraftNotice } from './lineup_draft.jsx';
 
-const { useState: useStateA, useEffect: useEffectA, useMemo: useMemoA } = React;
+const { useState: useStateA, useMemo: useMemoA } = React;
 
 // Term: kendo-glossary tooltip wrapper. Lazy lookup so the script
 // load order between glossary.jsx and this module doesn't matter (both
@@ -424,21 +424,21 @@ function AdminLineup({ comp, team, matchId = "", matchLabel = "", allMatches, pa
   const form = useLineupForm({
     compId, teamId, matchId, positionKeys, password, matchLabel, teamName: team?.name || team?.Name,
   });
+  // The team's squad (the actual people on it), read from its own store rather than
+  // team.metadata (module header), by the hook: it reads them again when it follows
+  // a lineup another device saved, so a member created there is not shown as an
+  // empty slot. Independent of teamSize: a squad may hold reserves beyond however
+  // many positions exist. bc-cse gap closure: `squadUnavailable` is whether the
+  // squad failed to load this session. Fed into memberIdentityWarning below,
+  // alongside a save's own per-position `failures`, so a squad fetch failure --
+  // which otherwise silently leaves every existing member looking "new" -- is
+  // disclosed rather than discarded. A save is never blocked on it.
   const {
     values, setValues, memberIds, setMemberIds, memberIdsRef, setBaseline,
     error, setError, warning: saveWarning, setWarning: setSaveWarning,
+    squad, setSquad, squadUnavailable,
   } = form;
-  // The team's squad (the actual people on it), loaded from its own store
-  // rather than team.metadata (module header). Independent of teamSize: a
-  // squad may hold reserves beyond however many positions exist.
-  const [squad, setSquad] = useStateA([]);
   const [saving, setSaving] = useStateA(false);
-  // bc-cse gap closure: did the team's squad fail to load this session? Fed
-  // into memberIdentityWarning below, alongside a save's own per-position
-  // `failures`, so a squad fetch failure -- which otherwise silently leaves
-  // every existing member looking "new" -- is disclosed rather than
-  // discarded. A save is never blocked on it.
-  const [squadUnavailable, setSquadUnavailable] = useStateA(false);
   // A removal of a stored lineup (the match's own, or an old round's) is in flight.
   const busy = saving || form.removing;
   // The pickers are for a lineup that was read: until then Save is off too, and
@@ -463,39 +463,6 @@ function AdminLineup({ comp, team, matchId = "", matchLabel = "", allMatches, pa
   // Settings page's now-removed Squad members section, and moved here
   // alongside Rename rather than being duplicated on both.
   const [clearingId, setClearingId] = useStateA(null);
-
-  // Load the team's squad: the pickable member list operation 1 (SELECT)
-  // needs. Independent of the lineup read (useLineupForm) -- a squad fetch failure
-  // must never block the lineup from loading or the form from being usable
-  // (bc-pnum gap closure); an empty/missing squad is simply []. It DOES mean
-  // the picker shows no existing members this session, so anything typed
-  // through "+ Add new member..." looks new to the resolver even when it
-  // is not; squadUnavailable carries that fact to memberIdentityWarning.
-  // `password` is a dependency, not just a closure read, and squadUnavailable
-  // is cleared on every attempt. The operator can reach this screen before
-  // entering the password (or with a rotated one), and the 401 that follows
-  // used to strand the section in its error state until the whole route
-  // remounted, because compId never changed: requestReauth renders the modal
-  // as a SIBLING of the admin app, so nothing unmounts and setPassword only
-  // changes a closure value. That rationale came with the deleted Settings
-  // section and was lost when this effect moved here; without it every picker
-  // stays empty, "+ Add new member" mints instead of resolving, and every save
-  // shows a false "the team member list could not be loaded" (bc-dnst).
-  useEffectA(() => {
-    let cancelled = false;
-    if (!compId || !teamId) return;
-    (async () => {
-      try {
-        const squads = await window.API.fetchSquads(compId, password);
-        if (cancelled) return;
-        setSquad((squads && squads[teamId]) || []);
-        setSquadUnavailable(false);
-      } catch (_e) {
-        if (!cancelled) setSquadUnavailable(true);
-      }
-    })();
-    return () => { cancelled = true; };
-  }, [compId, teamId, password]);
 
   const squadSorted = useMemoA(() => squadMemberOptions(squad), [squad]);
 
@@ -570,7 +537,7 @@ function AdminLineup({ comp, team, matchId = "", matchLabel = "", allMatches, pa
     if (existingMember) {
       const elsewhere = memberPlacedElsewhere(memberIds, posKey, existingMember.id);
       if (elsewhere) {
-        setError(`${existingMember.name} is already at ${lineupPositionLabel(elsewhere)}.`);
+        setError(alreadyPlacedNote(existingMember.name, lineupPositionLabel(elsewhere)));
         return;
       }
       selectMember(posKey, existingMember);
@@ -690,6 +657,11 @@ function AdminLineup({ comp, team, matchId = "", matchLabel = "", allMatches, pa
     setSaveWarning("");
     setSaving(true);
     try {
+      // The positions the operator changed are theirs; every other position goes
+      // as the lineup is stored now (form.lineupToSave, operator decision
+      // 2026-10-05), so a change another device made to it since this page read the
+      // lineup is not put back.
+      const { positions: composed, memberIds: composedIds } = await form.lineupToSave();
       // Strip vacant positions before sending: an omitted key reads as
       // "vacant" the same way an explicit empty string would (the server's
       // ValidatePositions only checks that submitted KEYS are valid for the
@@ -700,15 +672,23 @@ function AdminLineup({ comp, team, matchId = "", matchLabel = "", allMatches, pa
       // name, exactly as the match panel and the score sheet write it.
       const positionsOut = {};
       const memberIdsOut = {};
-      Object.entries(values).forEach(([k, v]) => {
+      positionKeys.forEach((k) => {
         // Trim here too (not just on commit), so a Save never persists
         // leading/trailing or whitespace-only names.
-        const trimmed = (v || "").trim();
-        if (trimmed || memberIds[k]) {
+        const trimmed = (composed[k] || "").trim();
+        if (trimmed || composedIds[k]) {
           positionsOut[k] = trimmed;
-          if (memberIds[k]) memberIdsOut[k] = memberIds[k];
+          if (composedIds[k]) memberIdsOut[k] = composedIds[k];
         }
       });
+      // One position per member (the shared predicate, bc-dnst), asked of the lineup
+      // as composed: the pickers never offer a member this form holds at another
+      // position, but another device may have placed them there since it was read.
+      const duplicate = lineupDuplicateNote(positionsOut, memberIdsOut, lineupPositionLabel);
+      if (duplicate) {
+        setError(duplicate);
+        return;
+      }
       const hasMemberIds = Object.keys(memberIdsOut).length > 0;
       const idsOut = hasMemberIds ? memberIdsOut : undefined;
       const updated = matchId

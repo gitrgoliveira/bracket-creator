@@ -43,6 +43,10 @@ const memberWarning = (tree) =>
 const errorBanner = (tree) =>
   findHosts(tree, 'div').find(d => collectText(d) && /Failed to (save|load) lineup/.test(collectText(d)));
 
+// A Save reads the lineup again before it writes (operator decision 2026-10-05),
+// so the write lands a few microtask hops after the tap.
+const flush = async () => { for (let i = 0; i < 12; i++) await Promise.resolve(); };
+
 describe('MatchLineupSideEditor resolves names to squad member ids (bc-pnum gap closure)', () => {
   let runtime, MatchLineupSideEditor;
   let origAPI, origHelpers, origCompMatches;
@@ -113,8 +117,7 @@ describe('MatchLineupSideEditor resolves names to squad member ids (bc-pnum gap 
     pickers[0].props.onSelect('Sato');
     tree = runtime.currentTree();
     saveButton(tree).props.onClick();
-    await Promise.resolve();
-    await Promise.resolve();
+    await flush();
 
     expect(global.window.AdminLineupHelpers.resolveMemberIdsForPositions)
       // The sixth argument is the panel's own memberIds map (bc-dnst): the
@@ -134,8 +137,7 @@ describe('MatchLineupSideEditor resolves names to squad member ids (bc-pnum gap 
     pickers[0].props.onSelect('Sato');
     tree = runtime.currentTree();
     saveButton(tree).props.onClick();
-    await Promise.resolve();
-    await Promise.resolve();
+    await flush();
 
     expect(global.window.API.putMatchLineup).toHaveBeenCalled();
     // putMatchLineup(compId, teamId, matchId, positionsOut, password, memberIdsOut)
@@ -150,8 +152,7 @@ describe('MatchLineupSideEditor resolves names to squad member ids (bc-pnum gap 
     pickers[0].props.onSelect('Sato');
     tree = runtime.currentTree();
     saveButton(tree).props.onClick();
-    await Promise.resolve();
-    await Promise.resolve();
+    await flush();
 
     const call = global.window.API.putMatchLineup.mock.calls.at(-1);
     expect(call[5]).toBeUndefined();
@@ -167,8 +168,7 @@ describe('MatchLineupSideEditor resolves names to squad member ids (bc-pnum gap 
     pickers[0].props.onSelect('Sato');
     tree = runtime.currentTree();
     saveButton(tree).props.onClick();
-    await Promise.resolve();
-    await Promise.resolve();
+    await flush();
 
     expect(global.window.API.putMatchLineup).toHaveBeenCalled();
     const call = global.window.API.putMatchLineup.mock.calls.at(-1);
@@ -190,9 +190,7 @@ describe('MatchLineupSideEditor resolves names to squad member ids (bc-pnum gap 
     pickers[0].props.onSelect('Sato');
     tree = runtime.currentTree();
     saveButton(tree).props.onClick();
-    await Promise.resolve();
-    await Promise.resolve();
-    await Promise.resolve();
+    await flush();
 
     tree = runtime.currentTree();
     // The save itself still succeeded (never blocked): putMatchLineup ran.
@@ -226,9 +224,7 @@ describe('MatchLineupSideEditor resolves names to squad member ids (bc-pnum gap 
     pickers[0].props.onSelect('Sato');
     tree = runtime.currentTree();
     saveButton(tree).props.onClick();
-    await Promise.resolve();
-    await Promise.resolve();
-    await Promise.resolve();
+    await flush();
 
     tree = runtime.currentTree();
     expect(global.window.API.putMatchLineup).toHaveBeenCalled(); // never blocked
@@ -283,8 +279,7 @@ describe('MatchLineupSideEditor resolves names to squad member ids (bc-pnum gap 
     pickers[0].props.onSelect('Fighter 1', SQUAD_7[0]);
     tree = runtime.currentTree();
     saveButton(tree).props.onClick();
-    await Promise.resolve();
-    await Promise.resolve();
+    await flush();
 
     // The picked id is already known, so this position never goes through
     // resolveMemberIdsForPositions at all.
@@ -316,8 +311,7 @@ describe('MatchLineupSideEditor resolves names to squad member ids (bc-pnum gap 
     tree = runtime.currentTree();
 
     saveButton(tree).props.onClick();
-    await Promise.resolve();
-    await Promise.resolve();
+    await flush();
 
     expect(global.window.AdminLineupHelpers.resolveMemberIdsForPositions).toHaveBeenCalledWith(
       'comp-1', 'uuid-grouped', { '1': 'Yamada' }, SQUAD_7, 'pw',
@@ -344,8 +338,7 @@ describe('MatchLineupSideEditor resolves names to squad member ids (bc-pnum gap 
     tree = runtime.currentTree();
 
     saveButton(tree).props.onClick();
-    await Promise.resolve();
-    await Promise.resolve();
+    await flush();
 
     expect(global.window.AdminLineupHelpers.resolveMemberIdsForPositions).not.toHaveBeenCalled();
     expect(global.window.API.putMatchLineup).toHaveBeenCalled();
@@ -432,8 +425,7 @@ describe('MatchLineupSideEditor resolves names to squad member ids (bc-pnum gap 
     expect(findComponents(tree, 'LineupNameInput')[0].props.value).toBe('Fighter One');
 
     saveButton(tree).props.onClick();
-    await Promise.resolve();
-    await Promise.resolve();
+    await flush();
     expect(global.window.AdminLineupHelpers.resolveMemberIdsForPositions).not.toHaveBeenCalled();
     const call = global.window.API.putMatchLineup.mock.calls.at(-1);
     expect(call[3]).toEqual({ 1: 'Fighter One', 2: '' });

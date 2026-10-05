@@ -392,7 +392,7 @@ describe('"Not restored, the lineup changed since"', () => {
     return again;
   }
 
-  it('stays when the operator changes the lineup: the names it lists are still not in it', async () => {
+  it('stays when the operator changes the lineup, even to a name it lists', async () => {
     const utils = await openWithStaleDraft();
     await typeName(utils, 2, 'Mori');
     expect(utils.getByTestId('match-lineup-draft-team-a').textContent).toBe('Not restored, the lineup changed since: Mori');

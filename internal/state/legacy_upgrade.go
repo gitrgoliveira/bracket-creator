@@ -242,21 +242,24 @@ import (
 // NEXT read after that save retries the repair with a roster that can now
 // resolve it, without requiring a restart.
 //
-// ONLY the six PUBLIC, caller-does-not-already-hold-the-lock entry points on
-// the READ path (loadParticipants, Store.LoadPools, Store.LoadPoolMatches,
-// Store.LoadBracket, Store.DrawMatches (draw_matches.go), and
-// ParticipantsFingerprint below, which calls it directly rather than through
-// one of the loaders), PLUS ONE caller on the startup path
-// (sweepLegacyUpgrades below, called once from NewStore, which loops every id
-// ListCompetitions finds so the whole data folder converges without waiting
-// for each competition's files to be individually read) call this. All seven
-// are safe for the identical reason: none of them already hold
-// compID's per-comp lock at the point they call in. The *Locked siblings
-// (loadPoolsLocked, LoadPoolMatchesLocked, loadBracketLocked) and every
-// storeTx method (including storeTx.LoadBracket) are called by something
-// that ALREADY holds the per-comp lock (typically WithTransaction), so
-// calling this from any of them would try to re-acquire a non-reentrant
-// mutex and deadlock. Do not add a call here from inside that set.
+// Every caller reaches this WITHOUT compID's per-comp lock held, which is the
+// one thing that makes the call safe. The callers are of three kinds: the
+// store's own read path (loadParticipants, Store.LoadPools,
+// Store.LoadPoolMatches, Store.LoadBracket, Store.DrawMatches
+// (draw_matches.go), and ParticipantsFingerprint below, which calls it directly
+// rather than through one of the loaders); the startup path (sweepLegacyUpgrades
+// below, called once from NewStore, which loops every id ListCompetitions finds
+// so the whole data folder converges without waiting for each competition's
+// files to be individually read); and the engine's read-modify-writes of the
+// pool matches (internal/engine), which read through a transaction handle, and
+// a transaction read skips this conversion, so each asks for it first, before it
+// opens the transaction and from code no store closure encloses. The *Locked
+// siblings (loadPoolsLocked, LoadPoolMatchesLocked, loadBracketLocked) and every
+// storeTx method (including storeTx.LoadBracket) are called by something that
+// ALREADY holds the per-comp lock (typically WithTransaction), so calling this
+// from any of them, or from inside any closure the store runs under that lock
+// (WithTransaction, the Update* methods), would try to re-acquire a
+// non-reentrant mutex and deadlock. Do not add a call here from inside that set.
 //
 // Failure policy: a failed conversion is logged and NOT retried until the
 // next process start OR the next participants.csv write, whichever comes

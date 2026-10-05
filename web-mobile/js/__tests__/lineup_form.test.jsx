@@ -15,6 +15,7 @@ import { renderHook, act } from '@testing-library/react';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { useLineupForm, lineupDraftKey } from '../lineup_draft.jsx';
 import { REMOVED_UNREAD_NOTICE, LINEUP_READ_NO_ANSWER } from '../lineup_resolver.jsx';
+import { FETCH_TIMEOUT_MS } from '../write_result.jsx';
 import { API as realApi } from '../api_client.jsx';
 
 const stubReact = global.React;
@@ -23,6 +24,12 @@ const NAMES = { positions: { 1: 'Aoki', 2: 'Sato', 3: 'Ito' }, memberIds: { 1: '
 // What API.queuedLineupSave answers while a save of the lineup is queued: the
 // lineup that save would write. null is nothing queued.
 const QUEUED = { positions: { 1: 'Mori' }, memberIds: {} };
+// The team's members as the API answers them, keyed by the team's id.
+const MEMBERS = [
+  { id: 'mem-1', index: 1, name: 'Aoki' },
+  { id: 'mem-2', index: 2, name: 'Sato' },
+  { id: 'mem-3', index: 3, name: 'Ito' },
+];
 const OWN = { ...NAMES, sourceMatchId: 'm1', saved: true };
 const CARRIED = { ...NAMES, sourceMatchId: 'm0', saved: true };
 const STARTING = { ...NAMES, sourceRound: 0, saved: true };
@@ -43,6 +50,7 @@ beforeEach(() => {
     fetchLineupInForce: vi.fn().mockResolvedValue(CARRIED),
     deleteMatchLineup: vi.fn().mockResolvedValue(true),
     queuedLineupSave: vi.fn().mockReturnValue(null),
+    fetchSquads: vi.fn().mockResolvedValue({ t: MEMBERS }),
   };
   window.API = api;
   window.confirmDialog = vi.fn().mockResolvedValue(true);
@@ -72,6 +80,12 @@ async function mount(extra) {
 const edit = (view, positions = { 1: 'Mori' }) => act(() => {
   view.result.current.setValues((v) => ({ ...v, ...positions }));
 });
+
+function deferred() {
+  let resolve;
+  const promise = new Promise((res) => { resolve = res; });
+  return { promise, resolve };
+}
 
 describe('reading', () => {
   it('reads a match through the lineup in force, and the starting lineup exactly, as round 0', async () => {
@@ -429,11 +443,6 @@ describe('a lineup change announced for the competition', () => {
   });
   const reads = () => api.fetchLineupInForce.mock.calls.length;
   const settle = () => act(async () => { await new Promise((resolve) => setTimeout(resolve, 0)); });
-  function deferred() {
-    let resolve;
-    const promise = new Promise((res) => { resolve = res; });
-    return { promise, resolve };
-  }
 
   it('is read again and shown while the form is untouched, with no loading screen in between', async () => {
     const loadings = [];
@@ -670,5 +679,252 @@ describe('the "not restored" notice', () => {
     await act(async () => { await Promise.resolve(); });
     expect(view.result.current.read).toBe(true);
     expect(view.result.current.draft.stale).toBeNull();
+  });
+});
+
+// A Save writes the lineup as stored NOW with the operator's changes on it, not
+// the form restated (operator decision 2026-10-05), so a position another device
+// changed since the form was read is not put back. lineupToSave reads the lineup
+// again for it, under the deadline every bounded request has, and composes on the
+// lineup as loaded when that read cannot be made, so an offline save is written
+// (and queued) as it always was. What it reads is never shown.
+describe('the lineup a Save writes', () => {
+  // Another device changed position 2 after the form was read.
+  const CHANGED_ELSEWHERE = {
+    positions: { 1: 'Aoki', 2: 'Kato', 3: 'Ito' }, memberIds: { 1: 'mem-1', 2: 'mem-5', 3: 'mem-3' },
+    sourceMatchId: 'm1', saved: true,
+  };
+  const RESTATED = { positions: { 1: 'Mori', 2: 'Sato', 3: 'Ito' }, memberIds: { 1: 'mem-1', 2: 'mem-2', 3: 'mem-3' }, changed: ['1'] };
+
+  async function lineupToSave(view) {
+    let composed;
+    await act(async () => { composed = await view.result.current.lineupToSave(); });
+    return composed;
+  }
+
+  it('is the lineup as stored now with the operator\'s changes on it, and names the positions those are', async () => {
+    const view = await mount();
+    edit(view, { 1: 'Mori' });
+    api.fetchLineupInForce.mockResolvedValue(CHANGED_ELSEWHERE);
+
+    expect(await lineupToSave(view)).toEqual({
+      positions: { 1: 'Mori', 2: 'Kato', 3: 'Ito' },
+      memberIds: { 1: 'mem-1', 2: 'mem-5', 3: 'mem-3' },
+      changed: ['1'],
+    });
+    expect(api.fetchLineupInForce, 'the lineup is read again for it').toHaveBeenCalledTimes(2);
+  });
+
+  it('reads a starting lineup the way the form did, as round 0', async () => {
+    const view = await mount({ matchId: '' });
+    edit(view, { 1: 'Mori' });
+    api.fetchTeamLineup.mockResolvedValue({ ...STARTING, positions: CHANGED_ELSEWHERE.positions, memberIds: CHANGED_ELSEWHERE.memberIds });
+
+    const composed = await lineupToSave(view);
+
+    expect(api.fetchTeamLineup).toHaveBeenLastCalledWith('c', 't', 0);
+    expect(composed.positions).toEqual({ 1: 'Mori', 2: 'Kato', 3: 'Ito' });
+  });
+
+  it('shows nothing of what it read: the form, its baseline and what can be saved stay as they were', async () => {
+    const view = await mount();
+    edit(view, { 1: 'Mori' });
+    api.fetchLineupInForce.mockResolvedValue(CHANGED_ELSEWHERE);
+
+    await lineupToSave(view);
+
+    expect(view.result.current.values).toEqual({ 1: 'Mori', 2: 'Sato', 3: 'Ito' });
+    expect(view.result.current.memberIds[2]).toBe('mem-2');
+    expect(view.result.current.baseline.positions[2]).toBe('Sato');
+    expect(view.result.current.dirty).toBe(true);
+    expect(view.result.current.loading).toBe(false);
+  });
+
+  it('is the form restated on the lineup as loaded when the read fails, so an offline save is written as it always was', async () => {
+    const view = await mount();
+    edit(view, { 1: 'Mori' });
+    api.fetchLineupInForce.mockRejectedValue(new TypeError('Failed to fetch'));
+
+    expect(await lineupToSave(view)).toEqual(RESTATED);
+    expect(api.fetchLineupInForce, 'the read was tried').toHaveBeenCalledTimes(2);
+  });
+
+  it('does the same when the read is not answered, once the deadline has passed and not before', async () => {
+    const view = await mount();
+    edit(view, { 1: 'Mori' });
+    api.fetchLineupInForce.mockReturnValue(new Promise(() => {}));
+    vi.useFakeTimers();
+    try {
+      let pending;
+      act(() => { pending = view.result.current.lineupToSave(); });
+      let settled = false;
+      pending.then(() => { settled = true; });
+
+      await act(async () => { await vi.advanceTimersByTimeAsync(FETCH_TIMEOUT_MS - 1); });
+      expect(settled, 'it waits for the read until the deadline').toBe(false);
+      await act(async () => { await vi.advanceTimersByTimeAsync(2); });
+
+      expect(settled).toBe(true);
+      expect(await pending).toEqual(RESTATED);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('takes the positions left alone as blank from a lineup that says nothing is in force', async () => {
+    const view = await mount();
+    edit(view, { 1: 'Mori' });
+    api.fetchLineupInForce.mockResolvedValue(null);
+
+    expect(await lineupToSave(view)).toEqual({
+      positions: { 1: 'Mori', 2: '', 3: '' }, memberIds: { 1: 'mem-1', 2: '', 3: '' }, changed: ['1'],
+    });
+  });
+
+  it('counts a position put back to what was loaded as no change at all, so what is stored there stands', async () => {
+    const view = await mount();
+    edit(view, { 1: 'Mori' });
+    edit(view, { 1: 'Aoki', 3: 'Oda' });
+    api.fetchLineupInForce.mockResolvedValue(CHANGED_ELSEWHERE);
+
+    const composed = await lineupToSave(view);
+
+    expect(composed.changed).toEqual(['3']);
+    expect(composed.positions).toEqual({ 1: 'Aoki', 2: 'Kato', 3: 'Oda' });
+  });
+});
+
+// The team's members are the other half of what both lineup editors show: a
+// position's member is picked from them and named by them. The hook reads them,
+// and again whenever it follows another device's lineup, so a lineup it shows
+// never names a member the list lacks (one created elsewhere meanwhile).
+describe('the team\'s members', () => {
+  const NEW_MEMBER = { id: 'mem-9', index: 4, name: 'Zed' };
+  const FOLLOWED = {
+    positions: { 1: 'Aoki', 2: 'Zed', 3: 'Ito' }, memberIds: { 1: 'mem-1', 2: 'mem-9', 3: 'mem-3' },
+    sourceMatchId: 'm1', saved: true,
+  };
+  const announce = () => act(async () => {
+    window.dispatchEvent(new CustomEvent('lineup-updated', { detail: { competitionId: 'c' } }));
+  });
+
+  it('are read when the editor opens, for its team, with the password', async () => {
+    const view = await mount();
+    expect(api.fetchSquads).toHaveBeenCalledWith('c', 'pw');
+    expect(view.result.current.squad).toEqual(MEMBERS);
+    expect(view.result.current.squadUnavailable).toBe(false);
+  });
+
+  it('are an empty list, not a failure, when the answer holds none for the team', async () => {
+    api.fetchSquads.mockResolvedValue({ other: MEMBERS });
+    const view = await mount();
+    expect(view.result.current.squad).toEqual([]);
+    expect(view.result.current.squadUnavailable).toBe(false);
+  });
+
+  it('say they could not be read when the read fails, and the list stays empty', async () => {
+    api.fetchSquads.mockRejectedValue(new Error('down'));
+    const view = await mount();
+    expect(view.result.current.squad).toEqual([]);
+    expect(view.result.current.squadUnavailable).toBe(true);
+  });
+
+  it('do not hold the lineup back: a lineup that loads is shown whether or not the members could be read', async () => {
+    api.fetchSquads.mockRejectedValue(new Error('down'));
+    const view = await mount();
+    expect(view.result.current.read).toBe(true);
+    expect(view.result.current.values).toEqual(NAMES.positions);
+  });
+
+  it('are read again when the password changes, and a read that now succeeds clears the earlier failure', async () => {
+    api.fetchSquads.mockRejectedValueOnce(new Error('401')).mockResolvedValue({ t: MEMBERS });
+    const view = await mount();
+    expect(view.result.current.squadUnavailable).toBe(true);
+
+    view.rerender(props({ password: 'new' }));
+    await act(async () => { await Promise.resolve(); });
+
+    expect(api.fetchSquads).toHaveBeenLastCalledWith('c', 'new');
+    expect(view.result.current.squad).toEqual(MEMBERS);
+    expect(view.result.current.squadUnavailable).toBe(false);
+  });
+
+  it('are the editor\'s to change after a rename or a mint: the list it sets is the list shown', async () => {
+    const view = await mount();
+    act(() => view.result.current.setSquad((list) => [...list, NEW_MEMBER]));
+    expect(view.result.current.squad).toEqual([...MEMBERS, NEW_MEMBER]);
+  });
+
+  it('are read again with a followed lineup and shown with it: no render shows a lineup naming a member the list lacks', async () => {
+    const renders = [];
+    const view = renderHook((p) => {
+      const form = useLineupForm(p);
+      renders.push({ squad: form.squad, memberIds: form.memberIds });
+      return form;
+    }, { initialProps: props() });
+    await act(async () => { await Promise.resolve(); });
+    api.fetchSquads.mockResolvedValue({ t: [...MEMBERS, NEW_MEMBER] });
+    api.fetchLineupInForce.mockResolvedValue(FOLLOWED);
+    renders.length = 0;
+
+    await announce();
+
+    expect(api.fetchSquads).toHaveBeenCalledTimes(2);
+    expect(view.result.current.memberIds[2]).toBe('mem-9');
+    expect(view.result.current.squad).toContainEqual(NEW_MEMBER);
+    expect(renders.length).toBeGreaterThan(0);
+    expect(renders.every(({ squad, memberIds }) => Object.values(memberIds).every((id) => !id || squad.some((m) => m.id === id)))).toBe(true);
+  });
+
+  it('keep the list the editor has, and the lineup is still shown, when the read that comes with a followed lineup fails', async () => {
+    const view = await mount();
+    api.fetchSquads.mockRejectedValue(new Error('offline'));
+    api.fetchLineupInForce.mockResolvedValue(FOLLOWED);
+
+    await announce();
+
+    expect(view.result.current.memberIds[2]).toBe('mem-9');
+    expect(view.result.current.squad).toEqual(MEMBERS);
+    expect(view.result.current.squadUnavailable, 'a list that was read is not unavailable').toBe(false);
+  });
+
+  it('are waited for, with the lineup, only until the deadline: a read never answered does not hold a followed lineup back for good', async () => {
+    const view = await mount();
+    api.fetchSquads.mockReturnValue(new Promise(() => {}));
+    api.fetchLineupInForce.mockResolvedValue(FOLLOWED);
+    vi.useFakeTimers();
+    try {
+      await announce();
+      expect(view.result.current.memberIds[2], 'shown with the members, so held while they are awaited').toBe('mem-2');
+
+      await act(async () => { await vi.advanceTimersByTimeAsync(FETCH_TIMEOUT_MS); });
+
+      expect(view.result.current.memberIds[2]).toBe('mem-9');
+      expect(view.result.current.squad).toEqual(MEMBERS);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('are not read again for a lineup the form refuses to follow, and what a read answers is not shown over an edit', async () => {
+    const view = await mount();
+    const members = deferred();
+    const lineup = deferred();
+    api.fetchSquads.mockReturnValue(members.promise);
+    api.fetchLineupInForce.mockReturnValue(lineup.promise);
+    await announce();
+    expect(api.fetchSquads).toHaveBeenCalledTimes(2);
+
+    edit(view, { 1: 'Mori' });
+    await act(async () => {
+      members.resolve({ t: [...MEMBERS, NEW_MEMBER] });
+      lineup.resolve(FOLLOWED);
+    });
+
+    expect(view.result.current.values[1]).toBe('Mori');
+    expect(view.result.current.squad).toEqual(MEMBERS);
+
+    await announce();
+    expect(api.fetchSquads, 'an edited form is not followed at all').toHaveBeenCalledTimes(2);
   });
 });

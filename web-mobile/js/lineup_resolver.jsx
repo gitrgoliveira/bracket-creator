@@ -120,6 +120,25 @@ export function memberPlacedElsewhere(memberIds, posKey, id) {
   return hit ? hit[0] : "";
 }
 
+// alreadyPlacedNote: the ONE wording of the refusal memberPlacedElsewhere backs.
+// `name` is the fighter (blank reads "This fighter") and `positionLabel` the
+// position that already holds them, labelled the way the asking editor labels it.
+export function alreadyPlacedNote(name, positionLabel) {
+  return `${String(name ?? "").trim() || "This fighter"} is already at ${positionLabel}.`;
+}
+
+// lineupDuplicateNote: the sentence for a lineup that would field one member at
+// two positions, or "" when it does not. Both editors ask it of the lineup a Save
+// is about to write, so the refusal reads alike and never has to come from the
+// server's own check. `labelOf` words a position key the way the editor labels it.
+export function lineupDuplicateNote(positions, memberIds, labelOf) {
+  for (const [key, id] of Object.entries(memberIds || {})) {
+    const otherKey = memberPlacedElsewhere(memberIds, key, id);
+    if (otherKey) return alreadyPlacedNote(positions?.[key], labelOf(otherKey));
+  }
+  return "";
+}
+
 // changedLineupPositions: the position keys, among `positionKeys`, where
 // `current` differs from `baseline` (both `{ positions, memberIds }` maps keyed
 // by position). A key is changed when its trimmed name or its member id
@@ -129,6 +148,24 @@ export function changedLineupPositions(baseline, current, positionKeys) {
   const name = (side, key) => String(side?.positions?.[key] ?? "").trim();
   const id = (side, key) => String(side?.memberIds?.[key] ?? "");
   return positionKeys.filter(key => name(baseline, key) !== name(current, key) || id(baseline, key) !== id(current, key));
+}
+
+// composeLineupSave: what a Save writes (operator decision 2026-10-05): the
+// lineup as `stored` holds it now, with the positions the operator changed
+// (`current` against `baseline`, by changedLineupPositions) put on it. Restating
+// the whole form instead would put back, on every position the operator left
+// alone, the value the form was read with, over a change another device made
+// since. A name and its member id are taken together from the same side. The
+// answer is `{ positions, memberIds }` over `positionKeys` alone, as lineupFields
+// reads them, and `stored` may be null (nothing in force).
+export function composeLineupSave(baseline, current, stored, positionKeys) {
+  const composed = lineupFields(stored, positionKeys);
+  const edited = lineupFields(current, positionKeys);
+  changedLineupPositions(baseline, current, positionKeys).forEach(key => {
+    composed.positions[key] = edited.positions[key];
+    composed.memberIds[key] = edited.memberIds[key];
+  });
+  return composed;
 }
 
 export function rosterWithoutPlacedElsewhere(roster, lineup, posKey) {

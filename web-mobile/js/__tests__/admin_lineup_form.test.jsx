@@ -561,7 +561,7 @@ describe('AdminLineup form (competition-admin Lineups, bc-tmid pass 3)', () => {
     expect(global.window.API.renameTeamMember).not.toHaveBeenCalled();
 
     const tree3 = runtime.currentTree();
-    expect(collectText(tree3)).toContain('is already at');
+    expect(collectText(tree3)).toContain('Yamada is already at Position 2.');
     // Position 1 was never assigned Yamada's id: the refusal returns before
     // selectMember runs, so its add-row stays open rather than switching
     // back to a select showing a (wrongly) resolved value.

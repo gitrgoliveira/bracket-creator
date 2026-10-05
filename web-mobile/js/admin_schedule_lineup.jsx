@@ -4,11 +4,11 @@
 import { LineupNameInput } from './admin_scoring_shared.jsx';
 import { sideLookupKey } from './competitor_identity.jsx';
 import { scoreRowMatchLabel } from './pool_ids.jsx';
-import { squadRosterEntries, rosterWithoutPlacedElsewhere, memberPlacedElsewhere } from './lineup_resolver.jsx';
+import { squadRosterEntries, rosterWithoutPlacedElsewhere, lineupDuplicateNote } from './lineup_resolver.jsx';
 import { renameMemberFields } from './lineup_rename.jsx';
 import { useLineupForm, LineupSourceLine, LineupProblem, LineupDraftNotice } from './lineup_draft.jsx';
 
-const { useState: useStateA, useEffect: useEffectA, useMemo: useMemoA } = React;
+const { useState: useStateA, useMemo: useMemoA } = React;
 
 // MatchLineupSideEditor: inline lineup editor for one team side within
 // the per-match lineup panel, for a single (compId, teamId, matchId) triple. The
@@ -47,7 +47,15 @@ export function MatchLineupSideEditor({ comp, team, match, allMatches, password,
   // is resolved through the shared resolver by save()). `lineupWarning` is the
   // composed operator-facing warning shown after a SUCCESSFUL save whose
   // squad-member attachment fell short (see doSave): a separate channel from
-  // `error`, since the save did not fail.
+  // `error`, since the save did not fail. `squad` is the team's members, read by
+  // the hook (bc-pnum gap closure) and again when it follows a lineup another
+  // device saved: this panel's picker (LineupNameInput) stays typeable, unlike the
+  // Lineups page's strict select-by-id dropdown (AdminLineup), so doSave resolves a
+  // typed name to its member id against it. A squad that could not be read must
+  // not block loading OR saving the lineup: the resolver simply mints for every
+  // name it cannot find against an empty list, and bc-cse's `squadUnavailable`
+  // records that this happened, so doSave's warning names the real root cause
+  // instead of reporting every position the resolver then "failed" to match.
   const form = useLineupForm({
     compId, teamId, matchId, positionKeys, password,
     matchLabel: match ? scoreRowMatchLabel(match) : "", teamName: team?.name || team?.Name,
@@ -55,6 +63,7 @@ export function MatchLineupSideEditor({ comp, team, match, allMatches, password,
   const {
     values, setValues, memberIds, setMemberIds, memberIdsRef, setBaseline,
     error, setError, warning: lineupWarning, setWarning: setLineupWarning,
+    squad, setSquad, squadUnavailable,
   } = form;
   // RENAME (bc-dnst, operator decision 2026-09-15): a member's name can be
   // corrected from this panel as well as from the Lineups page (the score sheet
@@ -66,23 +75,6 @@ export function MatchLineupSideEditor({ comp, team, match, allMatches, password,
   const [renamingName, setRenamingName] = useStateA("");
   const [renameBusy, setRenameBusy] = useStateA(false);
   const [saving, setSaving] = useStateA(false);
-
-  // bc-pnum gap closure: this team's squad, loaded once so save() can
-  // resolve a typed/picked name to its member id (see doSave below) --
-  // this panel's picker (LineupNameInput) stays typeable, unlike the
-  // Lineups page's strict select-by-id dropdown (AdminLineup): it now
-  // ALSO offers every numbered squad entry as a pickable suggestion
-  // (bc-dnst, see `suggestions` below), but a freely typed name is still
-  // accepted, so a name→id lookup is still needed on that path. Independent
-  // of the lineup read (useLineupForm): a squad
-  // fetch failure must not block loading OR saving the lineup itself, so
-  // it is swallowed and the resolver (window.AdminLineupHelpers.
-  // resolveMemberIdsForPositions) simply mints for every name it cannot
-  // find against an empty list. bc-cse: `squadUnavailable` records that this
-  // happened, so doSave's warning names the real root cause instead of
-  // reporting every position the resolver then "failed" to match.
-  const [squad, setSquad] = useStateA([]);
-  const [squadUnavailable, setSquadUnavailable] = useStateA(false);
 
   // bc-pnum: the suggestion list reads the SQUAD, because that is where a
   // team's members now live. rosterFor reads the roster row's metadata array,
@@ -189,41 +181,64 @@ export function MatchLineupSideEditor({ comp, team, match, allMatches, password,
       setRenameBusy(false);
     }
   };
-  useEffectA(() => {
-    let cancelled = false;
-    if (!compId || !teamId) return;
-    (async () => {
-      try {
-        const squads = await window.API.fetchSquads(compId, password);
-        if (cancelled) return;
-        setSquad((squads && squads[teamId]) || []);
-        setSquadUnavailable(false);
-      } catch (_e) {
-        if (!cancelled) setSquadUnavailable(true);
-      }
-    })();
-    return () => { cancelled = true; };
-    // `password` is a DEPENDENCY, not just a closure read, and the success
-    // path CLEARS squadUnavailable. Same rule as the Lineups page's copy of
-    // this effect, which carries the full rationale: the re-auth modal is a
-    // SIBLING of the admin app, so a 401 here unmounts nothing and neither
-    // compId nor teamId ever changes. Without both halves one 401 leaves this
-    // panel's pickers empty for its whole lifetime and every typed name mints
-    // a new member instead of resolving to the one already on the team.
-  }, [compId, teamId, password]);
-
-  // knownMemberIds (bc-dnst): the subset of positionsOut whose member id is
-  // already known -- picked directly off the roster's numbered entries
-  // (see onSelect above), never resolved by name. Those positions skip the
-  // resolver entirely; only positions with NO known id still go through it.
-  const doSave = async (positionsOut, successMsg = "Match lineup saved", knownMemberIds = {}) => {
+  // What a Save writes is composed on the lineup as stored NOW, with only the
+  // positions the operator changed put on it (form.lineupToSave, operator decision
+  // 2026-10-05), so a position another device changed since this panel read the
+  // lineup is not put back. Every other position goes as stored, name and id as
+  // they are: never resolved, never minted, even when it names a member this
+  // panel's list has not heard of (one another device created). Of the changed
+  // positions, those whose member id is already known (bc-dnst) -- picked directly
+  // off the roster's numbered entries (see onSelect above), never resolved by
+  // name -- skip the resolver entirely; only a changed position with NO known id
+  // goes through it.
+  const doSave = async (successMsg = "Match lineup saved") => {
     setError("");
     setLineupWarning("");
     setSaving(true);
     try {
-      // bc-pnum gap closure: resolve each occupied-but-unresolved position's
-      // name to a squad member id before writing. A name not on the squad is
-      // a substitute typed straight into the slot; per operator ruling,
+      const { positions: composed, memberIds: composedIds, changed } = await form.lineupToSave();
+      // Strip empty positions before PUT. The handler replaces the whole
+      // positions map (TeamLineup{Positions: req.Positions}), and the domain
+      // validator treats an absent key the same as an explicit "": both
+      // "missing". Sending explicit empties only bloats the persisted YAML.
+      const positionsOut = {};
+      const memberIdsOut = {};
+      const positionsForResolver = {};
+      positions.forEach(p => {
+        const key = p.key;
+        const pickedId = composedIds[key];
+        if (!changed.includes(key)) {
+          // A picked-but-unnamed slot is a placement too: kept with its id.
+          if (composed[key] || pickedId) {
+            positionsOut[key] = composed[key];
+            if (pickedId) memberIdsOut[key] = pickedId;
+          }
+          return;
+        }
+        // Trim here too (not only at the picker's onSelect) so a Save can never
+        // persist leading/trailing or whitespace-only names: matches AdminLineup.
+        const v = (composed[key] || "").trim();
+        // A picked squad entry is a real placement even when its member is
+        // still unnamed (bc-dnst): keep the position so the id survives,
+        // exactly like buildInlineLineupWrite (lineup_resolver.jsx). The
+        // id is KNOWN (no resolver) while the box still reads the picked
+        // member's own name, or nothing; a DIFFERENT name typed over the pick
+        // goes through the resolver with this id as the position's current
+        // member, so it renames that member (a blank one) rather than the
+        // slot seeded for the position, and never the wrong fighter.
+        const picked = pickedId ? squadEntries.find(e => e.id === pickedId) : null;
+        const unchanged = !!picked && (!v || v.toLowerCase() === picked.name.toLowerCase());
+        if (pickedId && unchanged) {
+          positionsOut[key] = v;
+          memberIdsOut[key] = pickedId;
+        } else if (v) {
+          positionsOut[key] = v;
+          positionsForResolver[key] = v;
+        }
+      });
+      // bc-pnum gap closure: resolve each changed, occupied-but-unresolved
+      // position's name to a squad member id before writing. A name not on the
+      // squad is a substitute typed straight into the slot; per operator ruling,
       // adding a new name in a position MINTS the member in that one step
       // (see resolveMemberIdsForPositions, admin_lineup.jsx -- the ONE
       // place this resolve/mint contract lives, shared with the inline
@@ -234,19 +249,13 @@ export function MatchLineupSideEditor({ comp, team, match, allMatches, password,
       // behaves today. bc-cse: the failure is no longer discarded either --
       // `memberFailures` carries it through to the warning shown below on
       // a successful save.
-      let memberIdsOut = { ...knownMemberIds };
       let memberFailures = [];
-      const positionsForResolver = {};
-      Object.keys(positionsOut).forEach(key => {
-        const name = (positionsOut[key] || "").trim();
-        if (name && !knownMemberIds[key]) positionsForResolver[key] = name;
-      });
       if (Object.keys(positionsForResolver).length > 0) {
         try {
           const resolver = window.AdminLineupHelpers?.resolveMemberIdsForPositions;
           if (typeof resolver === "function") {
-            const resolved = await resolver(compId, teamId, positionsForResolver, squad, password, memberIds);
-            memberIdsOut = { ...memberIdsOut, ...resolved.memberIds };
+            const resolved = await resolver(compId, teamId, positionsForResolver, squad, password, composedIds);
+            Object.assign(memberIdsOut, resolved.memberIds);
             memberFailures = resolved.failures || [];
             setSquad(resolved.squad);
           }
@@ -256,17 +265,14 @@ export function MatchLineupSideEditor({ comp, team, match, allMatches, password,
           // not block the save. Proceed with the names alone.
         }
       }
-      // One position per member (the shared predicate, bc-dnst): a typed
-      // name can resolve onto a member the list never offered because it is
+      // One position per member (the shared predicate, bc-dnst), asked of the
+      // lineup as composed, so a member another device placed meanwhile counts: a
+      // typed name can resolve onto a member the list never offered because it is
       // already fielded elsewhere. Refuse before writing and say where.
-      for (const [key, id] of Object.entries(memberIdsOut)) {
-        const otherKey = memberPlacedElsewhere(memberIdsOut, key, id);
-        if (otherKey) {
-          const who = (positionsOut[key] || "").trim() || "This fighter";
-          const where = positions.find(p => p.key === otherKey)?.label || otherKey;
-          setError(`${who} is already at ${where}.`);
-          return;
-        }
+      const duplicate = lineupDuplicateNote(positionsOut, memberIdsOut, (key) => positions.find(p => p.key === key)?.label || key);
+      if (duplicate) {
+        setError(duplicate);
+        return;
       }
       const hasMemberIds = Object.keys(memberIdsOut).length > 0;
       const updated = await window.API.putMatchLineup(
@@ -297,35 +303,7 @@ export function MatchLineupSideEditor({ comp, team, match, allMatches, password,
   const save = () => {
     // Nothing is written before the lineup was read, or while it holds no change.
     if (!form.canSave) return;
-    // Strip empty positions before PUT. The handler replaces the whole
-    // positions map (TeamLineup{Positions: req.Positions}), and the domain
-    // validator treats an absent key the same as an explicit "": both
-    // "missing". Sending explicit empties only bloats the persisted YAML.
-    const positionsOut = {};
-    const knownMemberIds = {};
-    positions.forEach(p => {
-      // Trim here too (not only at the picker's onSelect) so a Save can never
-      // persist leading/trailing or whitespace-only names: matches AdminLineup.
-      const v = (values[p.key] || "").trim();
-      const pickedId = memberIds[p.key];
-      // A picked squad entry is a real placement even when its member is
-      // still unnamed (bc-dnst): keep the position so the id survives,
-      // exactly like buildInlineLineupWrite (lineup_resolver.jsx). The
-      // id is KNOWN (no resolver) while the box still reads the picked
-      // member's own name, or nothing; a DIFFERENT name typed over the pick
-      // goes through the resolver with this id as the position's current
-      // member, so it renames that member (a blank one) rather than the
-      // slot seeded for the position, and never the wrong fighter.
-      const picked = pickedId ? squadEntries.find(e => e.id === pickedId) : null;
-      const unchanged = !!picked && (!v || v.toLowerCase() === picked.name.toLowerCase());
-      if (pickedId && unchanged) {
-        positionsOut[p.key] = v;
-        knownMemberIds[p.key] = pickedId;
-      } else if (v) {
-        positionsOut[p.key] = v;
-      }
-    });
-    doSave(positionsOut, undefined, knownMemberIds);
+    doSave();
   };
 
   const busy = saving || form.removing;

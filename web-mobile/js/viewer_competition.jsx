@@ -412,12 +412,7 @@ export function ViewerCompetition({ tournament, competition, pools, poolMatches,
                       // bracketRoundLabel keeps it agreeing if that ever changes,
                       // and leaves no second copy of the naming rule (mp-u37s).
                       const label = window.bracketRoundLabel(m, ri, total ?? derivedBracket.rounds.length);
-                      // m.roundIndex is the backend round array index, stamped by
-                      // buildDisplayModel (meta mode) or the raw rounds[ri] position
-                      // (legacy mode where ri equals the backend index). Prefer it
-                      // over the display-column index so lineup fetches use the right
-                      // round when phantom leading rounds shift the display column.
-                      openMatch(m, { phase: "bracket", round: label, phaseName: label, roundIndex: m.roundIndex ?? ri, compId: c.id, compName: c.name, compKind: c.kind, teamSize: c.teamSize, compEngi: isEngi, teamMatchType: teamMatchTypeFor(c) });
+                      openMatch(m, { phase: "bracket", round: label, phaseName: label, compId: c.id, compName: c.name, compKind: c.kind, teamSize: c.teamSize, compEngi: isEngi, teamMatchType: teamMatchTypeFor(c) });
                     }}
                   />
                   {derivedBracket.thirdPlaceMatch && (() => {
@@ -437,7 +432,7 @@ export function ViewerCompetition({ tournament, competition, pools, poolMatches,
                           showDojo={tweaks.showDojo ?? true}
                           highlighted={currentMatch?.id === bm.id}
                           highlightPlayers={highlightPlayers}
-                          onClick={() => openMatch(bm, { phase: "bracket", round: "3rd Place", phaseName: "3rd Place", roundIndex: derivedBracket.rounds.length, compId: c.id, compName: c.name, compKind: c.kind, teamSize: c.teamSize, compEngi: isEngi, teamMatchType: teamMatchTypeFor(c) })}
+                          onClick={() => openMatch(bm, { phase: "bracket", round: "3rd Place", phaseName: "3rd Place", compId: c.id, compName: c.name, compKind: c.kind, teamSize: c.teamSize, compEngi: isEngi, teamMatchType: teamMatchTypeFor(c) })}
                         />
                       </div>
                     );

@@ -21,6 +21,7 @@ import { DAIHYOSEN_POSITION } from './pool_ids.jsx';
 import { sameCompetitor } from './competitor_identity.jsx';
 import { barredNameMark } from './barred_chip.jsx';
 import { matchShowsScore } from './match_shows_score.jsx';
+import { useOpenedTapGuard } from './tap_guard.jsx';
 
 const { useState, useMemo, useRef: useRefV, useCallback } = React;
 
@@ -380,6 +381,10 @@ export function bracketMatchIn(bracket, id) {
 
 export function MatchViewerModal({ match, onClose, tournament, compId: defaultCompId, slotLabel }) {
   window.useEscapeToClose(onClose);
+  // bc-cfbd: the bounce of the tap that opened the modal must not reach its
+  // backdrop or its buttons. The node mounts again when the score editor
+  // closes, which stamps again.
+  const { openedRef, onClickCapture } = useOpenedTapGuard();
   // Whether the editor is open, not a copy of the match: the editor reads the
   // live `match` prop, so it follows a result corrected on another device.
   const [isScoring, setIsScoring] = useState(false);
@@ -465,7 +470,7 @@ export function MatchViewerModal({ match, onClose, tournament, compId: defaultCo
   }
 
   return (
-    <div className="modal-backdrop" onClick={onClose} style={{ zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+    <div className="modal-backdrop" ref={openedRef} onClick={onClose} onClickCapture={onClickCapture} style={{ zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
       <div ref={modalRefCb} tabIndex={-1} role="dialog" aria-modal="true" aria-label={dialogLabel} onClick={e => e.stopPropagation()} style={{ width: "100%", maxWidth: 500, margin: 16 }}>
         {/* Reuse the canonical MatchDetailCard so the modal and the inline
             card render identically (DRY): same header, colour badges and

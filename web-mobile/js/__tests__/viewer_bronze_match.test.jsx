@@ -214,11 +214,11 @@ describe('ViewerCompetition bronze / 3rd-place match rendering (mp-gy6g)', () =>
     expect(text).not.toContain('3rd Place');
   });
 
-  // mp-gy6g review fix: the bronze card's onClick used to stamp roundIndex:
-  // -1, which round-indexed consumers (displays, queue grouping) read as
-  // absent, mis-grouping the bronze match into round 0. It must match
-  // compMatches' convention of "one past the final" (rounds.length) instead.
-  it('stamps the bronze match roundIndex as rounds.length (one past the final), not -1', () => {
+  // The bronze card opens the modal on the live bronze row, headed "3rd Place".
+  // The opener declares only its round label and the competition's fields; the
+  // row's own roundIndex (one past the final) is compMatches' business and is
+  // pinned in bronze_shiaijo.test.jsx, since nothing in the modal reads it.
+  it('opens the modal on the bronze match, headed "3rd Place"', () => {
     const bracket = mkBracket(true);
     const tree = runtime.mount(ViewerCompetition, {
       tournament: { competitions: [] },
@@ -241,11 +241,19 @@ describe('ViewerCompetition bronze / 3rd-place match rendering (mp-gy6g)', () =>
 
     // The click sets selectedMatch, which mounts MatchViewerModal with the
     // clicked match as a prop. Find it by name (real import, not stubbed)
-    // and read the roundIndex without invoking the component.
+    // and read the match without invoking the component.
     const updated = runtime.currentTree();
     const modalVnode = findAll(updated, n => n && typeof n.type === 'function' && n.type.name === 'MatchViewerModal')[0];
     expect(modalVnode).toBeTruthy();
-    expect(modalVnode.props.match.roundIndex).toBe(bracket.rounds.length);
-    expect(modalVnode.props.match.roundIndex).not.toBe(-1);
+    expect(modalVnode.props.match).toMatchObject({
+      id: 'm-bronze',
+      phase: 'bracket',
+      round: '3rd Place',
+      phaseName: '3rd Place',
+      compId: 'nagi-1',
+      compName: 'Naginata Cup',
+    });
+    expect(modalVnode.props.match.sideA.name).toBe('Bob');
+    expect(modalVnode.props.match.sideB.name).toBe('Dave');
   });
 });

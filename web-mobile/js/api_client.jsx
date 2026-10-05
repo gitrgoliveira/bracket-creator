@@ -4029,17 +4029,13 @@ const API = {
     },
     // The GET answers saved: false when nothing is stored; lineupOrNull
     // makes that null ("blank, editable"). A 404 means the competition does
-    // not exist and throws. PUT replaces; DELETE clears.
-    // opts.fallback: best-effort resolution: when the exact round has nothing
-    // saved the server falls back to the closest saved round (highest <=
-    // requested, else highest overall). The Lineups page (AdminLineup, the
-    // round editor) must NOT pass this: it reads the exact round with no
-    // fallback, so nothing saved there is null ("blank, editable"). The match
-    // surfaces (score sheet, displays, the at-court lineup panel) do not read
-    // rounds at all: they read fetchLineupInForce through resolveMatchLineup.
-    async fetchTeamLineup(compID, teamId, round, opts) {
-        const qs = opts && opts.fallback ? "?fallback=best" : "";
-        const res = await fetch(`/api/competitions/${compID}/teams/${teamId}/lineups/${round}${qs}`);
+    // not exist and throws. PUT replaces; DELETE clears. The read is of the
+    // exact round: the Lineups page reads a team's starting lineup (round 0)
+    // this way, and the match surfaces (score sheet, displays, the at-court
+    // lineup panel) do not read rounds at all: they read fetchLineupInForce
+    // through resolveMatchLineup.
+    async fetchTeamLineup(compID, teamId, round) {
+        const res = await fetch(`/api/competitions/${compID}/teams/${teamId}/lineups/${round}`);
         if (!res.ok) {
             const err = await res.json().catch(() => ({}));
             throw new Error(err.error || "Failed to load lineup");

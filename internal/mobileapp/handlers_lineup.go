@@ -119,18 +119,6 @@ func RegisterPublicLineupHandlers(r *gin.RouterGroup, store TeamLineupStore, com
 			return
 		}
 		lineup, found := findRoundLineup(lineups, teamID, round)
-		if !found && c.Query("fallback") == "best" {
-			// Best-effort mode: when nothing is saved for the round asked
-			// for, resolve via the FindBestLineup round tiers (highest
-			// round <= requested, else highest overall; match-scoped
-			// entries are skipped by passing an empty matchID). The match
-			// surfaces no longer use it: they read lineup-in-force, which
-			// also carries a lineup from the team's previous match.
-			// Default behavior without the param stays exact: nothing
-			// saved for THIS round is reported as such (saved: false),
-			// never silently swapped for another round.
-			lineup, found = state.FindBestLineup(lineups, teamID, "", round)
-		}
 		if !found {
 			lineup = domain.TeamLineup{TeamID: teamID, CompetitionID: compID, Round: round, Positions: map[domain.Position]string{}}
 		}

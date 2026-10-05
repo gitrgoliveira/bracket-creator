@@ -5,7 +5,14 @@
 // other sizes). Lineups are always editable; operators can change them
 // at any time before or during a match.
 //
-// Wire shape (matches domain.TeamLineup):
+// The page edits one lineup at a time (operator ruling 2026-10-05: a team
+// carries the lineup of its previous team match unless one is entered for a
+// match): the team's STARTING lineup, stored as its round-0 entry, or the
+// lineup of one of its team matches. A match shows the lineup in force there
+// and says where it was saved (lineup_resolver.jsx).
+//
+// Wire shape (matches domain.TeamLineup; a match's own lineup carries
+// `matchId` where this one has `round`):
 //   {
 //     teamId: "team-1",
 //     competitionId: "...",
@@ -38,11 +45,18 @@
 
 import { idOf, nameOf } from './competitor_identity.jsx';
 import { squadSlotLabel } from './squad_member_label.jsx';
-import { rosterWithoutPlacedElsewhere, memberPlacedElsewhere, memberRefusalNote } from './lineup_resolver.jsx';
+import {
+  rosterWithoutPlacedElsewhere, memberPlacedElsewhere, memberRefusalNote, resolveMatchLineup, changedLineupPositions,
+  lineupFields, lineupSourceOf, lineupSourceLabel, PREVIOUS_LINEUP_LABEL, previousLineupConfirm,
+} from './lineup_resolver.jsx';
+import { poolMatchNumberOf, isSupplementaryBout, scoreRowMatchLabel } from './pool_ids.jsx';
 import { normalizeParticipantName } from './data.jsx';
 import { renameMemberFields } from './lineup_rename.jsx';
 
 const { useState: useStateA, useEffect: useEffectA, useMemo: useMemoA, useRef: useRefA } = React;
+
+// A team's starting lineup is stored as its round-0 entry.
+const STARTING_ROUND = 0;
 
 // Term: kendo-glossary tooltip wrapper. Lazy lookup so the script
 // load order between glossary.jsx and this module doesn't matter (both
@@ -372,7 +386,20 @@ function memberIdentityWarning(failures, squadUnavailable) {
   return `Lineup saved, but ${parts.join(" ")} Scores will still record normally.`;
 }
 
-function AdminLineup({ comp, team, round, password, showToast, onClose }) {
+// baselineWithMemberName: the loaded baseline after a team member's name
+// changed. The server rewrites the name of every stored lineup position that
+// holds the member by id, so a rename or a clear alone must not make the
+// lineup look edited.
+function baselineWithMemberName(baseline, id, name) {
+  const positions = { ...baseline.positions };
+  Object.keys(baseline.memberIds).forEach(key => { if (baseline.memberIds[key] === id) positions[key] = name; });
+  return { ...baseline, positions };
+}
+
+// AdminLineup edits one lineup of one team: its starting lineup (no matchId),
+// or the lineup of the team match matchId names. matchLabel is how that match
+// is named, and allMatches names the earlier match a carried lineup comes from.
+function AdminLineup({ comp, team, matchId = "", matchLabel = "", allMatches, password, showToast, onClose }) {
   const teamSize = comp?.teamSize || 5;
   const positions = useMemoA(() => positionsForSize(teamSize), [teamSize]);
   const teamId = teamServerIdOf(team);
@@ -416,6 +443,17 @@ function AdminLineup({ comp, team, round, password, showToast, onClose }) {
   // so it must never read like the red error banner above.
   const [saveWarning, setSaveWarning] = useStateA("");
 
+  // For a match: where the lineup shown was saved, as the server names it
+  // (this match, an earlier match it is carried from, or a Lineups-page
+  // round), and what the server held when it was loaded or last saved. Save
+  // writes a match's lineup only once it differs from that baseline, so
+  // opening a match never turns the lineup it carries into one of its own.
+  const [source, setSource] = useStateA(null);
+  const [baseline, setBaseline] = useStateA({ positions: {}, memberIds: {} });
+  // A removal (the match's own lineup, or an old round's) is in flight.
+  const [switching, setSwitching] = useStateA(false);
+  const busy = saving || switching;
+
   // Operation 2 (ADD): which position is mid-add, and the name typed so
   // far. Only one position can be mid-add at a time, an operator works one
   // slot at a time, so a single pair of fields is enough.
@@ -446,7 +484,24 @@ function AdminLineup({ comp, team, round, password, showToast, onClose }) {
   const memberIdsRef = useRefA(memberIds);
   memberIdsRef.current = memberIds;
 
-  // Load the existing lineup (positions/memberIds); null (nothing saved) -> a fresh form.
+  // The starting lineup is read exactly, as the team's round-0 entry. A match
+  // shows the lineup in force there (its own, else the one it carries; the
+  // server owns that rule), and a failed read throws: an empty form shown over
+  // a lineup that could not be read would let Save overwrite it.
+  const readLineup = () => (matchId
+    ? resolveMatchLineup(compId, teamId, matchId, window.API, { throwOnError: true })
+    : window.API.fetchTeamLineup(compId, teamId, STARTING_ROUND));
+
+  // Shows what was read (null when nothing applies, a fresh form) as the
+  // form's loaded state.
+  const adoptLineup = (lineup) => {
+    const loaded = lineupFields(lineup, positions.map(p => p.key));
+    setValues(loaded.positions);
+    setMemberIds(loaded.memberIds);
+    setBaseline(loaded);
+    setSource(lineupSourceOf(lineup));
+  };
+
   useEffectA(() => {
     let cancelled = false;
     if (!compId || !teamId) {
@@ -455,18 +510,9 @@ function AdminLineup({ comp, team, round, password, showToast, onClose }) {
     }
     (async () => {
       try {
-        const lineup = await window.API.fetchTeamLineup(compId, teamId, round);
+        const lineup = await readLineup();
         if (cancelled) return;
-        if (lineup) {
-          const nextValues = {};
-          const nextIds = {};
-          positions.forEach(p => {
-            nextValues[p.key] = (lineup.positions || {})[p.key] || "";
-            nextIds[p.key] = (lineup.memberIds || {})[p.key] || "";
-          });
-          setValues(nextValues);
-          setMemberIds(nextIds);
-        }
+        adoptLineup(lineup);
       } catch (e) {
         if (!cancelled) setError(e?.message || "Failed to load lineup");
       } finally {
@@ -474,7 +520,7 @@ function AdminLineup({ comp, team, round, password, showToast, onClose }) {
       }
     })();
     return () => { cancelled = true; };
-  }, [compId, teamId, round]);
+  }, [compId, teamId, matchId]);
 
   // Load the team's squad: the pickable member list operation 1 (SELECT)
   // needs. Independent of the lineup load above -- a squad fetch failure
@@ -651,6 +697,7 @@ function AdminLineup({ comp, team, round, password, showToast, onClose }) {
         });
         return next;
       });
+      setBaseline(b => baselineWithMemberName(b, id, name));
       setRenamingId(null);
       setRenamingName("");
     } catch (e) {
@@ -684,6 +731,7 @@ function AdminLineup({ comp, team, round, password, showToast, onClose }) {
         });
         return next;
       });
+      setBaseline(b => baselineWithMemberName(b, member.id, ""));
     } catch (e) {
       setError(e?.message || "Failed to clear the name");
     } finally {
@@ -691,7 +739,14 @@ function AdminLineup({ comp, team, round, password, showToast, onClose }) {
     }
   };
 
+  // The starting lineup is always saveable. A match's lineup only once it
+  // differs from what was loaded, so the lineup it carries is never copied
+  // into a lineup of its own by a Save that changed nothing.
+  const dirty = !matchId
+    || changedLineupPositions(baseline, { positions: values, memberIds }, positions.map(p => p.key)).length > 0;
+
   const save = async () => {
+    if (!dirty) return;
     setError("");
     setSaveWarning("");
     setSaving(true);
@@ -716,15 +771,24 @@ function AdminLineup({ comp, team, round, password, showToast, onClose }) {
         }
       });
       const hasMemberIds = Object.keys(memberIdsOut).length > 0;
-      const updated = await window.API.putTeamLineup(
-        compId, teamId, round, positionsOut, password, hasMemberIds ? memberIdsOut : undefined
-      );
+      const idsOut = hasMemberIds ? memberIdsOut : undefined;
+      const updated = matchId
+        ? await window.API.putMatchLineup(compId, teamId, matchId, positionsOut, password, idsOut)
+        : await window.API.putTeamLineup(compId, teamId, STARTING_ROUND, positionsOut, password, idsOut);
       // F5: a queued (offline/transient) write is NOT a confirmed save: don't
       // clear the revising state or show "saved"; the write is durable and will
       // retry. Keep the form editable and tell the operator it's pending.
       if (updated && updated.queued) {
         if (typeof showToast === "function") showToast("Offline: lineup not saved yet, will retry");
         return;
+      }
+      if (matchId) {
+        // What the server answered is what it holds now: the new baseline, and
+        // the lineup is this match's own.
+        const stored = {};
+        positions.forEach(p => { stored[p.key] = (updated.positions || {})[p.key] || ""; });
+        setBaseline({ positions: stored, memberIds: { ...memberIdsOut, ...updated.memberIds } });
+        setSource({ matchId });
       }
       if (typeof showToast === "function") showToast("Lineup saved");
       // bc-cse gap closure: this surface's own SELECT/ADD/RENAME operations
@@ -739,6 +803,47 @@ function AdminLineup({ comp, team, round, password, showToast, onClose }) {
     } finally {
       setSaving(false);
     }
+  };
+
+  // Removes a stored lineup, then shows what the match carries without it.
+  const removeThenReload = async (remove, failure) => {
+    setSwitching(true);
+    setError("");
+    setSaveWarning("");
+    try {
+      await remove();
+      adoptLineup(await readLineup());
+    } catch (e) {
+      setError(e?.message || failure);
+    } finally {
+      setSwitching(false);
+    }
+  };
+
+  // The match's own lineup goes, so it carries the team's previous lineup again.
+  const dropOwnLineup = async () => {
+    const ok = await window.confirmDialog(previousLineupConfirm(matchLabel, team?.name || team?.Name));
+    if (!ok) return;
+    await removeThenReload(
+      () => window.API.deleteMatchLineup(compId, teamId, matchId, password),
+      "Failed to use the previous match's lineup",
+    );
+  };
+
+  // A lineup an earlier version saved for a later round, which this page no
+  // longer creates, goes.
+  const removeLegacyRound = async () => {
+    const round = source.round;
+    const ok = await window.confirmDialog({
+      message: `Remove the lineup an earlier version saved for Round ${round + 1}? The matches that used it carry the team's previous lineup instead.`,
+      confirmLabel: "Remove",
+      cancelLabel: "Cancel",
+    });
+    if (!ok) return;
+    await removeThenReload(
+      () => window.API.deleteTeamLineup(compId, teamId, round, password),
+      "Failed to remove the lineup",
+    );
   };
 
   if (loading) {
@@ -768,7 +873,7 @@ function AdminLineup({ comp, team, round, password, showToast, onClose }) {
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
         <div>
           <div className="overline">
-            {comp?.name} · Round {round + 1}
+            {matchId ? matchLabel : "Starting lineup"}
           </div>
           <h2 style={{ margin: "4px 0 0 0", fontSize: 22, fontWeight: 700 }}>
             {team?.name || team?.Name || "Team"}: Lineup
@@ -784,6 +889,30 @@ function AdminLineup({ comp, team, round, password, showToast, onClose }) {
           )}
         </div>
       </div>
+
+      {matchId && (
+        <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", marginBottom: 12 }}>
+          <span data-testid="lineup-source"
+            style={source && source.matchId === matchId
+              ? { fontSize: 12, color: "var(--accent)", fontWeight: 600 }
+              : { fontSize: 12, color: "var(--ink-3)" }}>
+            {lineupSourceLabel(source, matchId, allMatches)}
+          </span>
+          {source && source.matchId === matchId && (
+            <button type="button" className="btn btn--sm" style={{ marginLeft: "auto" }}
+              onClick={dropOwnLineup} disabled={busy}>
+              {PREVIOUS_LINEUP_LABEL}
+            </button>
+          )}
+        </div>
+      )}
+
+      {source && source.round >= 1 && (
+        <div className="field__hint" data-testid="lineup-legacy-round" style={{ marginBottom: 12 }}>
+          Saved for Round {source.round + 1} by an earlier version: it applies from the start of that round.{" "}
+          <button type="button" className="btn btn--ghost btn--sm" onClick={removeLegacyRound} disabled={busy}>Remove it</button>
+        </div>
+      )}
 
       {error && (
         <div className="alert alert--error" style={{ marginBottom: 12 }}>
@@ -819,7 +948,7 @@ function AdminLineup({ comp, team, round, password, showToast, onClose }) {
                     className="input"
                     data-testid={`lineup-position-${p.key}`}
                     aria-label={`${p.label} player`}
-                    disabled={saving}
+                    disabled={busy}
                     value={memberId}
                     onChange={(e) => onPickerChange(p.key, e.target.value)}
                   >
@@ -938,7 +1067,8 @@ function AdminLineup({ comp, team, round, password, showToast, onClose }) {
           <button type="button"
             className="btn btn--primary"
             onClick={save}
-            disabled={saving}
+            disabled={busy || !dirty}
+            title={dirty ? undefined : "No changes to save"}
           >
             {saving ? "Saving…" : "Save lineup"}
           </button>
@@ -948,14 +1078,53 @@ function AdminLineup({ comp, team, round, password, showToast, onClose }) {
   );
 }
 
-// AdminTeamLineupsList: a small selector that picks a team from the
-// competition's player list and renders AdminLineup for it. Mounted by
-// the "Lineups" sidebar entry in admin_competition.jsx (T136 nav hook).
-function AdminTeamLineupsList({ comp, password, showToast }) {
+// teamMatchOptions: the team matches `teamId` is seated in, as the { id, label }
+// choices of the "Lineup for" select. The order follows the server's match
+// order (engine/lineup_in_force.go) and is presentation only: the server alone
+// decides which lineup a match carries. Pool and league matches come first, by
+// their number in the pool (a Swiss team's rounds in the order they were
+// drawn), then the knockout by round and position, the 3rd-place match last.
+// A team is seated by participant id, as the server seats it. A pool
+// tiebreaker or daihyosen is an individual bout, and a bye (hidden, one side
+// empty) is a match nobody fights.
+function teamMatchOptions(allMatches, teamId) {
+  if (!teamId) return [];
+  const mine = (allMatches || []).filter(m => m && m.id && !m.hidden && !isSupplementaryBout(m.id)
+    && nameOf(m.sideA) && nameOf(m.sideB)
+    && (idOf(m.sideA) === teamId || idOf(m.sideB) === teamId));
+  const pool = mine.filter(m => m.phase === "pool");
+  const drawn = [...new Set(pool.map(m => m.poolName))];
+  pool.sort((a, b) => drawn.indexOf(a.poolName) - drawn.indexOf(b.poolName) || poolMatchNumberOf(a.id) - poolMatchNumberOf(b.id));
+  // Array.sort is stable, so a round's matches keep their position order.
+  const knockout = mine.filter(m => m.phase === "bracket").sort((a, b) => a.roundIndex - b.roundIndex);
+  return [...pool, ...knockout].map(m => ({ id: m.id, label: scoreRowMatchLabel(m) || m.id }));
+}
+
+// AdminTeamLineupsList: selectors that pick a team from the competition's
+// player list and which of its lineups to edit (its starting lineup, or one of
+// its team matches), and render AdminLineup for that pair. Mounted by the
+// "Lineups" sidebar entry in admin_competition.jsx (T136 nav hook).
+function AdminTeamLineupsList({ comp, pools, poolMatches, bracket, password, showToast }) {
   const teams = (comp?.players || []);
   const [teamId, setTeamId] = useStateA(teams[0] ? teamIdOf(teams[0]) : "");
-  const [round, setRound] = useStateA(0);
+  // "" is the team's starting lineup; otherwise the id of one of its matches.
+  const [matchId, setMatchId] = useStateA("");
   const selectedTeam = teams.find(t => teamIdOf(t) === teamId) || teams[0];
+  // The competition page holds the match data beside the competition's config
+  // (pools, poolMatches and bracket are its own props), so the matches are read
+  // from both. A competition that carries the data itself is read as it stands.
+  const allMatches = useMemoA(() => {
+    if (typeof window.compMatchesForCompetition !== "function") return [];
+    const data = (pools || poolMatches || bracket) ? { pools, poolMatches, bracket } : undefined;
+    return window.compMatchesForCompetition(comp, data);
+  }, [comp, pools, poolMatches, bracket]);
+  const matchOptions = useMemoA(
+    () => teamMatchOptions(allMatches, teamServerIdOf(selectedTeam)),
+    [allMatches, selectedTeam]
+  );
+  // A match that has left the draw (a draw discarded and drawn again) is no
+  // longer offered, and the page goes back to the starting lineup.
+  const target = matchOptions.find(o => o.id === matchId) || null;
 
   if ((comp?.kind || "") !== "team") {
     return (
@@ -975,7 +1144,7 @@ function AdminTeamLineupsList({ comp, password, showToast }) {
           <select
             className="input"
             value={teamId}
-            onChange={(e) => setTeamId(e.target.value)}
+            onChange={(e) => { setTeamId(e.target.value); setMatchId(""); }}
             style={{ padding: "6px 8px", fontSize: 14, minWidth: 200 }}
           >
             {teams.map(t => (
@@ -984,30 +1153,32 @@ function AdminTeamLineupsList({ comp, password, showToast }) {
           </select>
         </label>
         <label style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-          <span className="overline">Round</span>
-          <input
+          <span className="overline">Lineup for</span>
+          <select
             className="input"
-            type="number"
-            min={1}
-            value={round + 1}
-            onChange={(e) => {
-              const v = parseInt(e.target.value, 10);
-              if (Number.isFinite(v) && v >= 1) setRound(v - 1);
-            }}
-            style={{ padding: "6px 8px", fontSize: 14, width: 80 }}
-          />
+            value={target ? target.id : ""}
+            onChange={(e) => setMatchId(e.target.value)}
+            style={{ padding: "6px 8px", fontSize: 14, minWidth: 200 }}
+          >
+            <option value="">Starting lineup</option>
+            {matchOptions.map(o => (
+              <option key={o.id} value={o.id}>{o.label}</option>
+            ))}
+          </select>
         </label>
       </div>
       {selectedTeam ? (
         <AdminLineup
           comp={comp}
           team={selectedTeam}
-          round={round}
+          matchId={target ? target.id : ""}
+          matchLabel={target ? target.label : ""}
+          allMatches={allMatches}
           password={password}
           showToast={showToast}
           // pass a stable key on the inner form so switching teams /
-          // rounds remounts the loader cleanly instead of stale state.
-          key={`${teamIdOf(selectedTeam)}-${round}`}
+          // lineups remounts the loader cleanly instead of stale state.
+          key={`${teamIdOf(selectedTeam)}:${target ? `match:${target.id}` : "start"}`}
         />
       ) : (
         <div className="page" style={{ padding: 24, color: "var(--ink-3)" }}>

@@ -4033,7 +4033,11 @@ paths:
         required: true
         schema:
           type: integer
-        description: "Tournament round index, 0-based. The admin UI displays round 0 as Round 1."
+        description: >
+          Lineups-page round, 0-based. Round 0 is the team's starting lineup. Rounds 1 and
+          up were saved by earlier versions of the Lineups page, which no longer creates
+          them; each applies from the start of its round. What a team fields at a match is
+          read from lineup-in-force, not from a round.
     get:
       tags: [competitions]
       summary: Get team lineup for round
@@ -4041,26 +4045,11 @@ paths:
         Always answers 200 while the competition exists (bc-k404, operator decision
         2026-09-27: a lineup either exists or it doesn't, and empty is a normal state,
         not a missing resource). The response's `saved` field is the marker: `true`
-        means the lineup stored at the round asked for (or, with `fallback=best`, the
-        resolved round); `false` means nothing is stored there, and the body echoes the
-        requested round with empty `positions`. 404 is reserved for a competition id
-        that names no competition at all.
+        means the lineup stored at exactly the round asked for; `false` means nothing is
+        stored there, and the body echoes the requested round with empty `positions`,
+        never another round's lineup. 404 is reserved for a competition id that names no
+        competition at all.
       security: []
-      parameters:
-        - in: query
-          name: fallback
-          required: false
-          schema:
-            type: string
-            enum: [best]
-          description: >
-            When fallback=best the server resolves the best available lineup when none
-            exists for the exact round (the highest round at or below the requested one,
-            then the team's latest lineup), answering `saved: false` only when the team
-            has no round-scoped lineups at all. This round-scoped endpoint has no
-            matchId, so match-scoped lineups are never consulted. Without this parameter
-            the endpoint keeps exact-round semantics (saved: false when that round has
-            nothing saved). PUT and DELETE are unaffected.
       responses:
         '200':
           description: Team lineup, saved or not (see `saved`).
@@ -6955,10 +6944,9 @@ components:
             saved:
               type: boolean
               description: >
-                true when a lineup is stored at the round/matchId asked for (or, with
-                fallback=best, the round it resolved to); false when nothing is stored
-                there, in which case `positions` is empty and the round/matchId in the
-                body is the one requested, not a fallback.
+                true when a lineup is stored at exactly the round/matchId asked for;
+                false when nothing is stored there, in which case `positions` is empty
+                and the round/matchId in the body is the one requested.
 
     LineupInForceRead:
       description: >

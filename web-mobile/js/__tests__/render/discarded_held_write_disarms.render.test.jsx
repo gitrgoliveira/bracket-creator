@@ -38,7 +38,6 @@ const STUBBED_GLOBALS = {
   isTextEntry: () => false,
   isInteractiveTarget: () => false,
   confirmDialog: vi.fn().mockResolvedValue(true),
-  resolveRoundIndex: () => 0,
   AdminLineupHelpers: { rosterFor: vi.fn().mockReturnValue([]) },
   compMatches: () => [],
   compMatchesForCompetition: () => [],

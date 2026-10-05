@@ -15,7 +15,6 @@ import (
 	"testing"
 
 	"github.com/gitrgoliveira/bracket-creator/internal/domain"
-	"github.com/gitrgoliveira/bracket-creator/internal/state"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"gopkg.in/yaml.v3"
@@ -61,7 +60,7 @@ func TestLegacyLineupMemberIDUpgradeOnRead(t *testing.T) {
 	lineups, err := fresh.LoadTeamLineups("c1")
 	require.NoError(t, err)
 
-	repaired, ok := state.FindBestLineup(lineups, teamID, "", 0)
+	repaired, ok := roundZeroLineup(lineups, teamID)
 	require.True(t, ok, "the repaired lineup must still be found")
 	assert.Equal(t, sato.ID, repaired.MemberIDs[domain.PositionNumbered(1)],
 		"Sato's slot resolves against the squad by an exact, unambiguous name match")
@@ -70,7 +69,7 @@ func TestLegacyLineupMemberIDUpgradeOnRead(t *testing.T) {
 	assert.Equal(t, "Ghost", repaired.Positions[domain.PositionNumbered(2)],
 		"the name itself is untouched; only the id half is ever filled")
 
-	noSquad, ok := state.FindBestLineup(lineups, noSquadTeamID, "", 0)
+	noSquad, ok := roundZeroLineup(lineups, noSquadTeamID)
 	require.True(t, ok)
 	assert.Empty(t, noSquad.MemberIDs, "a team with no squad recorded at all is left alone entirely")
 
@@ -109,7 +108,7 @@ func TestLegacyLineupUpgrade_NeverFieldsOneMemberAtTwoPositions(t *testing.T) {
 
 	lineups, err := fresh.LoadTeamLineups("c1")
 	require.NoError(t, err)
-	repaired, ok := state.FindBestLineup(lineups, teamID, "", 0)
+	repaired, ok := roundZeroLineup(lineups, teamID)
 	require.True(t, ok)
 
 	ids := []string{
@@ -167,7 +166,7 @@ func TestLegacyLineupUpgrade_RepairsADuplicateAlreadyOnDisk(t *testing.T) {
 
 	lineups, err := fresh.LoadTeamLineups("c1")
 	require.NoError(t, err)
-	repaired, ok := state.FindBestLineup(lineups, teamID, "", 0)
+	repaired, ok := roundZeroLineup(lineups, teamID)
 	require.True(t, ok)
 
 	assert.Equal(t, sato.ID, repaired.MemberIDs[domain.PositionNumbered(1)])
@@ -175,4 +174,16 @@ func TestLegacyLineupUpgrade_RepairsADuplicateAlreadyOnDisk(t *testing.T) {
 		"the inherited duplicate is cleared on load, not left to fail every future write")
 	assert.Equal(t, "Sato", repaired.Positions[domain.PositionNumbered(2)], "its name is kept")
 	require.NoError(t, repaired.ValidatePositions(3))
+}
+
+// roundZeroLineup reads a team's round-0 lineup (the team's starting lineup)
+// out of a loaded lineups map. The map's keys are the store's own, so it scans
+// for the entry instead.
+func roundZeroLineup(lineups map[string]domain.TeamLineup, teamID string) (domain.TeamLineup, bool) {
+	for _, l := range lineups {
+		if l.TeamID == teamID && l.MatchID == "" && l.Round == 0 {
+			return l, true
+		}
+	}
+	return domain.TeamLineup{}, false
 }

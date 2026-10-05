@@ -259,39 +259,3 @@ describe('MatchLineupSideEditor shows the lineup in force, where it came from, a
     expect(allText(tree)).toContain('Same as Pool D · Match 1');
   });
 });
-
-// The label's wording as a table, over the two pure helpers the panel reads it
-// through.
-describe('lineupSourceOf and lineupSourceLabel', () => {
-  let lineupSourceOf, lineupSourceLabel;
-  const ALL = [
-    { id: 'Pool D-0', phase: 'pool', poolName: 'Pool D' },
-    { id: 'k-r0-m3', phase: 'bracket', matchNumber: 7 },
-    { id: 'bronze', phase: 'bracket' },
-  ];
-
-  beforeEach(async () => {
-    vi.resetModules();
-    ({ lineupSourceOf, lineupSourceLabel } = await import('../admin_schedule_lineup.jsx'));
-  });
-
-  it('reads the source the server names', () => {
-    expect(lineupSourceOf({ sourceMatchId: 'm0' })).toEqual({ matchId: 'm0' });
-    expect(lineupSourceOf({ sourceRound: 0 })).toEqual({ round: 0 });
-    expect(lineupSourceOf({ sourceRound: 2 })).toEqual({ round: 2 });
-    expect(lineupSourceOf({ positions: {} })).toBeNull();
-    expect(lineupSourceOf(null)).toBeNull();
-  });
-
-  it.each([
-    ['nothing in force', null, 'No lineup saved yet'],
-    ['its own', { matchId: 'Pool D-1' }, 'Lineup for this match'],
-    ['carried from a pool match', { matchId: 'Pool D-0' }, 'Same as Pool D · Match 1'],
-    ['carried from a knockout match', { matchId: 'k-r0-m3' }, 'Same as Match 7'],
-    ['carried from a match the list does not hold', { matchId: 'gone-9' }, 'Same as gone-9'],
-    ['the starting lineup', { round: 0 }, 'Starting lineup'],
-    ['a later round\'s Lineups-page lineup', { round: 1 }, 'From the Lineups page (Round 2)'],
-  ])('%s', (_name, source, label) => {
-    expect(lineupSourceLabel(source, 'Pool D-1', ALL)).toBe(label);
-  });
-});

@@ -113,30 +113,29 @@ describe('API.fetchTeamLineup', () => {
   beforeEach(() => { originalFetch = global.fetch; });
   afterEach(() => { global.fetch = originalFetch; });
 
-  it('calls the correct URL without fallback', async () => {
+  it('calls the correct URL, with no query', async () => {
     global.fetch = mockFetch(200, { teamId: 't1', round: 1, positions: {}, saved: false });
     await API.fetchTeamLineup('c1', 't1', 1);
     const [url] = global.fetch.mock.calls[0];
     expect(url).toBe('/api/competitions/c1/teams/t1/lineups/1');
   });
 
-  it('calls the correct URL with ?fallback=best', async () => {
-    global.fetch = mockFetch(200, { teamId: 't1', round: 1, positions: {}, saved: false });
-    await API.fetchTeamLineup('c1', 't1', 1, { fallback: true });
+  it('reads round 0, a team\'s starting lineup, from the round route', async () => {
+    global.fetch = mockFetch(200, { teamId: 't1', round: 0, positions: {}, saved: false });
+    await API.fetchTeamLineup('c1', 't1', 0);
     const [url] = global.fetch.mock.calls[0];
-    expect(url).toBe('/api/competitions/c1/teams/t1/lineups/1?fallback=best');
+    expect(url).toBe('/api/competitions/c1/teams/t1/lineups/0');
   });
 
-  it('returns null when saved is false, with or without fallback', async () => {
+  it('returns null when saved is false', async () => {
     global.fetch = mockFetch(200, { teamId: 't1', round: 1, positions: {}, saved: false });
     expect(await API.fetchTeamLineup('c1', 't1', 1)).toBeNull();
-    expect(await API.fetchTeamLineup('c1', 't1', 1, { fallback: true })).toBeNull();
   });
 
   it('returns the body when saved is true', async () => {
     const lineup = { teamId: 't1', round: 0, positions: { senpo: 'Alice' }, saved: true };
     global.fetch = mockFetch(200, lineup);
-    const result = await API.fetchTeamLineup('c1', 't1', 1, { fallback: true });
+    const result = await API.fetchTeamLineup('c1', 't1', 0);
     expect(result).toEqual(lineup);
   });
 

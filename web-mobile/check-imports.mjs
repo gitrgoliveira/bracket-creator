@@ -61,6 +61,11 @@ const CHECK_MODULES = [
   // admin_scoring_shared.jsx, match_groups.jsx).
   'admin_scoring_engi.jsx',
   'match_history_view.jsx',
+  // bc-lpfb: both lineup editors import the helpers they share from
+  // lineup_resolver.jsx (the source wording moved there from the panel) and
+  // pool_ids.jsx.
+  'admin_lineup.jsx',
+  'admin_schedule_lineup.jsx',
 ];
 
 // ---------------------------------------------------------------------------

@@ -107,7 +107,7 @@ describe('AdminLineup form (competition-admin Lineups, bc-tmid pass 3)', () => {
       global.window.API.fetchSquads.mockResolvedValue(opts.squads);
     }
     runtime.mount(AdminLineup, {
-      comp: opts.comp || COMP, team, round: 0, password: 'pw', showToast: vi.fn(), onClose: vi.fn(),
+      comp: opts.comp || COMP, team, password: 'pw', showToast: vi.fn(), onClose: vi.fn(),
     });
     await flush();
     return runtime.currentTree();

@@ -106,5 +106,5 @@ competition. Surfaces read this, not the two routes above, for what a team field
 
 ## Out of scope (follow-up beads)
 
-- **Phase 5**: Score-editor UI: per-side lineup edit panel + "Copy from previous match".
+- **Phase 5**: Score-editor UI: per-side lineup edit panel. Its "Copy from previous match" was removed (2026-10-05): a team carries the lineup of its previous match by default, so the panel offers "Use the previous match's lineup" on a match's own lineup instead.
 - **Phase 6**: Viewer/TV overlay rendering of the per-match lineup.

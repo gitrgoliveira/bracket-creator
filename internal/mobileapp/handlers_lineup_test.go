@@ -490,23 +490,19 @@ func TestLineupPUT_MemberIDsInvalidPositionKey(t *testing.T) {
 	assert.Equal(t, http.StatusBadRequest, w.Code)
 }
 
-// TestPublicLineupGET_FallbackBest: the scoring modal is the client-side
-// twin of AMENDMENT 1. Operators typically save one round-0 lineup for
-// the whole day, but a knockout final asks for its own round index (1+),
-// and an exact-only GET answers nothing saved, leaving the modal with no
-// names (UAT: the final's bootstrapped bout 1 was submitted with empty
-// sides). With ?fallback=best the handler resolves via the FindBestLineup
-// round tiers (highest round <= requested, else highest overall). Without
-// the param the exact-round semantics are unchanged (the lineup editor
-// relies on saved: false meaning "no lineup submitted for THIS round").
-func TestPublicLineupGET_FallbackBest(t *testing.T) {
+// TestPublicLineupGET_RoundIsExact: the round GET reads exactly the round asked
+// for. A team with a round-0 lineup and nothing for round 1 answers "nothing
+// saved" for round 1, echoing the round asked for and never a lineup swapped in
+// from another round: the Lineups page reads its starting lineup (round 0) this
+// way. What a team fields at a match is lineup-in-force, not this route.
+func TestPublicLineupGET_RoundIsExact(t *testing.T) {
 	r, store, _ := setupLineupTestRouter(t)
 
 	require.NoError(t, store.SaveCompetition(&state.Competition{
-		ID:       "c-fb",
+		ID:       "c-exact",
 		TeamSize: 5,
 	}))
-	require.NoError(t, store.SetTeamLineup("c-fb", domain.TeamLineup{
+	require.NoError(t, store.SetTeamLineup("c-exact", domain.TeamLineup{
 		TeamID: "teamA",
 		Round:  0,
 		Positions: map[domain.Position]string{
@@ -518,92 +514,44 @@ func TestPublicLineupGET_FallbackBest(t *testing.T) {
 		},
 	}, 5))
 
-	t.Run("exact miss with fallback=best returns the round-0 lineup", func(t *testing.T) {
-		req := httptest.NewRequest(http.MethodGet,
-			"/api/competitions/c-fb/teams/teamA/lineups/1?fallback=best", nil)
+	get := func(t *testing.T, path string) map[string]any {
+		t.Helper()
+		req := httptest.NewRequest(http.MethodGet, path, nil)
 		w := httptest.NewRecorder()
 		r.ServeHTTP(w, req)
-
 		require.Equal(t, http.StatusOK, w.Code, w.Body.String())
 		var body map[string]any
 		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &body))
+		return body
+	}
+
+	// The second query is what an older bundle may still send.
+	for _, query := range []string{"", "?fallback=best"} {
+		t.Run("an exact miss answers nothing saved"+query, func(t *testing.T) {
+			body := get(t, "/api/competitions/c-exact/teams/teamA/lineups/1"+query)
+			assert.Equal(t, false, body["saved"])
+			assert.Equal(t, map[string]any{}, body["positions"])
+			assert.Equal(t, float64(1), body["round"], "echoes the requested round, not another's")
+		})
+	}
+
+	t.Run("an exact hit is the round asked for", func(t *testing.T) {
+		body := get(t, "/api/competitions/c-exact/teams/teamA/lineups/0")
 		assert.Equal(t, true, body["saved"])
-		var got domain.TeamLineup
-		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &got))
-		assert.Equal(t, "teamA", got.TeamID)
-		assert.Equal(t, 0, got.Round, "round-0 lineup resolved for the round-1 request")
-		assert.Equal(t, "p1", got.Positions[domain.PosSenpo])
+		assert.Equal(t, float64(0), body["round"])
+		assert.Equal(t, "p1", body["positions"].(map[string]any)["senpo"])
 	})
 
-	t.Run("exact miss without the param answers nothing saved", func(t *testing.T) {
-		req := httptest.NewRequest(http.MethodGet,
-			"/api/competitions/c-fb/teams/teamA/lineups/1", nil)
-		w := httptest.NewRecorder()
-		r.ServeHTTP(w, req)
-		require.Equal(t, http.StatusOK, w.Code, w.Body.String())
-		var body map[string]any
-		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &body))
-		assert.Equal(t, false, body["saved"])
-		assert.Equal(t, map[string]any{}, body["positions"])
-		assert.Equal(t, float64(1), body["round"], "echoes the requested round, not the fallback's")
-	})
-
-	t.Run("fallback=best with no round lineup at all answers nothing saved", func(t *testing.T) {
-		req := httptest.NewRequest(http.MethodGet,
-			"/api/competitions/c-fb/teams/teamB/lineups/1?fallback=best", nil)
-		w := httptest.NewRecorder()
-		r.ServeHTTP(w, req)
-		require.Equal(t, http.StatusOK, w.Code, w.Body.String())
-		var body map[string]any
-		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &body))
-		assert.Equal(t, false, body["saved"])
-		assert.Equal(t, float64(1), body["round"])
-
-		// A MATCH-scoped lineup for the SAME team must never satisfy the
-		// round-scoped fallback: FindBestLineupAny skips match-scoped
-		// entries by design (AMENDMENT 1), so seeding one here and still
-		// reading saved: false pins that it was never consulted.
-		require.NoError(t, store.SetTeamLineup("c-fb", domain.TeamLineup{
+	t.Run("a match-scoped lineup of the team never answers a round read", func(t *testing.T) {
+		require.NoError(t, store.SetTeamLineup("c-exact", domain.TeamLineup{
 			TeamID:  "teamB",
 			MatchID: "Pool A-0",
 			Positions: map[domain.Position]string{
-				domain.PosSenpo:   "m1",
-				domain.PosJiho:    "m2",
-				domain.PosChuken:  "m3",
-				domain.PosFukusho: "m4",
-				domain.PosTaisho:  "m5",
+				domain.PosSenpo: "m1",
 			},
 		}, 5))
-		req2 := httptest.NewRequest(http.MethodGet,
-			"/api/competitions/c-fb/teams/teamB/lineups/1?fallback=best", nil)
-		w2 := httptest.NewRecorder()
-		r.ServeHTTP(w2, req2)
-		require.Equal(t, http.StatusOK, w2.Code, w2.Body.String())
-		var body2 map[string]any
-		require.NoError(t, json.Unmarshal(w2.Body.Bytes(), &body2))
-		assert.Equal(t, false, body2["saved"], "a match-scoped entry must not satisfy the round fallback")
-	})
-
-	t.Run("exact hit ignores the param", func(t *testing.T) {
-		require.NoError(t, store.SetTeamLineup("c-fb", domain.TeamLineup{
-			TeamID: "teamA",
-			Round:  1,
-			Positions: map[domain.Position]string{
-				domain.PosSenpo:   "q1",
-				domain.PosJiho:    "q2",
-				domain.PosChuken:  "q3",
-				domain.PosFukusho: "q4",
-				domain.PosTaisho:  "q5",
-			},
-		}, 5))
-		req := httptest.NewRequest(http.MethodGet,
-			"/api/competitions/c-fb/teams/teamA/lineups/1?fallback=best", nil)
-		w := httptest.NewRecorder()
-		r.ServeHTTP(w, req)
-		require.Equal(t, http.StatusOK, w.Code)
-		var got domain.TeamLineup
-		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &got))
-		assert.Equal(t, 1, got.Round, "exact round-1 lineup wins over fallback")
+		body := get(t, "/api/competitions/c-exact/teams/teamB/lineups/0")
+		assert.Equal(t, false, body["saved"], "a match-scoped entry is not a round's lineup")
 	})
 }
 

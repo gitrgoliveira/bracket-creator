@@ -75,8 +75,6 @@ describe('MatchLineupSideEditor resolves names to squad member ids (bc-pnum gap 
     };
     global.window.API = {
       fetchLineupInForce: vi.fn().mockResolvedValue(null),
-      // Only "Copy from previous match" reads a sibling's own lineup.
-      fetchMatchLineup: vi.fn().mockResolvedValue(null),
       fetchSquads: vi.fn().mockResolvedValue({}),
       putMatchLineup: vi.fn().mockResolvedValue({ positions: {} }),
     };
@@ -295,49 +293,6 @@ describe('MatchLineupSideEditor resolves names to squad member ids (bc-pnum gap 
     const call = global.window.API.putMatchLineup.mock.calls.at(-1);
     expect(call[3]).toEqual({ 1: 'Fighter 1' });
     expect(call[5]).toEqual({ 1: 'mem-1' });
-  });
-
-  // bc-cse: "Copy from previous match" can carry a source position that has
-  // an id but no name yet (a fighter fielded by number, never typed). The
-  // copy must still write that position (present, with an empty string) and
-  // its id, and must not send it through the resolver at all: an empty name
-  // never enters positionsForResolver, the id already known.
-  it('copying a source position with an id and an empty name writes it directly, skipping the resolver', async () => {
-    const MATCH_PREV = {
-      id: 'match-0', compId: 'comp-1',
-      sideA: { id: 'uuid-grouped', name: 'Grouped Team' }, sideB: { id: 'other', name: 'Other' },
-      status: 'completed',
-    };
-    global.window.API.fetchMatchLineup = vi.fn((_compId, _teamId, matchId) => (
-      matchId === 'match-0'
-        ? Promise.resolve({ positions: { '1': '' }, memberIds: { '1': 'mem-1' } })
-        : Promise.resolve(null)
-    ));
-
-    runtime.mount(MatchLineupSideEditor, {
-      comp: COMP, team: TEAM, match: MATCH, allMatches: [MATCH, MATCH_PREV], password: 'pw', showToast: vi.fn(),
-    });
-    await Promise.resolve();
-    await Promise.resolve();
-    await Promise.resolve();
-    let tree = runtime.currentTree();
-
-    const copyBtn = findHosts(tree, 'button').find(b => /Copy from previous match/.test(collectText(b)));
-    expect(copyBtn).toBeTruthy();
-    copyBtn.props.onClick();
-    await Promise.resolve();
-    await Promise.resolve();
-    await Promise.resolve();
-    await Promise.resolve();
-
-    expect(global.window.AdminLineupHelpers.resolveMemberIdsForPositions).not.toHaveBeenCalled();
-    expect(global.window.API.putMatchLineup).toHaveBeenCalled();
-    const call = global.window.API.putMatchLineup.mock.calls.at(-1);
-    // positionsOut(3): the position is PRESENT with an empty string, not
-    // omitted, because its id makes it a real placement (bc-dnst).
-    expect(call[3]).toEqual({ '1': '' });
-    // memberIdsOut(5): the copied id rides along unresolved.
-    expect(call[5]).toEqual({ '1': 'mem-1' });
   });
 
   // bc-cse: typing a DIFFERENT name over a previously PICKED entry (its id

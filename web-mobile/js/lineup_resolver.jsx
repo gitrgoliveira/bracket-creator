@@ -16,6 +16,7 @@
 // posKey as `positions`; a lineup saved before squads existed simply omits it.
 
 import { squadMemberLabel, squadSlotLabel } from './squad_member_label.jsx';
+import { scoreRowMatchLabel } from './pool_ids.jsx';
 
 // squadRosterEntries: the ONE builder of a lineup picker's list for a team
 // (bc-dnst), shared by the score sheet's per-row picker (admin_scoring_team
@@ -294,9 +295,9 @@ export async function buildInlineLineupWrite(compId, teamId, lineup, squad, posK
 // lineup; 0 is the team's starting lineup).
 //
 // A failed read is swallowed so a display degrades gracefully (null), unless
-// the caller passes { throwOnError: true }: the at-court lineup panel does,
-// because a panel that failed to read a lineup must not show an empty one and
-// let Save overwrite it.
+// the caller passes { throwOnError: true }: the at-court lineup panel and the
+// Lineups page do, because an editor that failed to read a lineup must not
+// show an empty one and let Save overwrite it.
 //
 // mp-bkg regression guard: a match's own lineup always wins (the server
 // answers it first). This function is tested directly in
@@ -308,6 +309,56 @@ export async function resolveMatchLineup(compId, teamId, matchId, { fetchLineupI
     if (throwOnError) throw e;
     return null;
   }
+}
+
+// lineupFields: what a lineup read holds, as the form fields of a lineup editor:
+// the name and the member id of every position in `positionKeys` ("" for a
+// position the lineup leaves vacant, or for no lineup at all).
+export function lineupFields(lineup, positionKeys) {
+  const positions = {};
+  const memberIds = {};
+  positionKeys.forEach(key => {
+    positions[key] = ((lineup && lineup.positions) || {})[key] || "";
+    memberIds[key] = ((lineup && lineup.memberIds) || {})[key] || "";
+  });
+  return { positions, memberIds };
+}
+
+// lineupSourceOf: where a lineup in force was saved, from the fields the
+// server names it by: the match it was saved for (`sourceMatchId`: the match
+// asked about, or an earlier one of the team it is carried from) or the
+// Lineups-page round (`sourceRound`, 0 being the team's starting lineup).
+export function lineupSourceOf(lineup) {
+  if (lineup && lineup.sourceMatchId) return { matchId: lineup.sourceMatchId };
+  if (lineup && Number.isInteger(lineup.sourceRound)) return { round: lineup.sourceRound };
+  return null;
+}
+
+// lineupSourceLabel: how a lineup editor says where the lineup it shows comes
+// from (a team carries the lineup of its previous match unless one is entered
+// for the match). A carried lineup names the earlier match as the scores list
+// does (scoreRowMatchLabel), so the operator can find it.
+export function lineupSourceLabel(source, matchId, allMatches) {
+  if (!source) return "No lineup saved yet";
+  if (source.matchId === matchId) return "Lineup for this match";
+  if (source.matchId) {
+    const from = (allMatches || []).find(m => m.id === source.matchId);
+    return `Same as ${(from && scoreRowMatchLabel(from)) || source.matchId}`;
+  }
+  return source.round === 0 ? "Starting lineup" : `From the Lineups page (Round ${source.round + 1})`;
+}
+
+// The words both lineup editors (the at-court panel and the Lineups page) use
+// to take a match's own lineup away so the match carries its team's previous
+// one again: the button, and the confirm that says what else follows.
+export const PREVIOUS_LINEUP_LABEL = "Use the previous match's lineup";
+
+export function previousLineupConfirm(matchLabel, teamName) {
+  return {
+    message: `Use the previous match's lineup for ${matchLabel || "this match"}? The lineup entered for it is removed, so ${teamName || "the team"} carries the lineup of its previous match instead. Later matches that have no lineup of their own follow too.`,
+    confirmLabel: "Use previous lineup",
+    cancelLabel: "Cancel",
+  };
 }
 
 // resolveLineupTeamId maps a match-side key to the participant id that

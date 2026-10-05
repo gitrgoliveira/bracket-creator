@@ -24,7 +24,6 @@ const STUBBED_GLOBALS = {
   isTextEntry: () => false,
   isInteractiveTarget: () => false,
   confirmDialog: viMock.fn().mockResolvedValue(true),
-  resolveRoundIndex: () => 0,
   API: {
     fetchCompetitionDetails: viMock.fn().mockResolvedValue(null),
     recordScore: viMock.fn(),

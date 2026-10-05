@@ -215,11 +215,9 @@ describe('ViewerCompetition bronze / 3rd-place match rendering (mp-gy6g)', () =>
   });
 
   // mp-gy6g review fix: the bronze card's onClick used to stamp roundIndex:
-  // -1, but resolveRoundIndex (admin_helpers.jsx) treats any negative
-  // roundIndex as absent and falls back to 0, mis-grouping the bronze match
-  // into round 0 for round-indexed consumers (team lineup fetch, displays,
-  // queue grouping). It must match compMatches' convention of "one past the
-  // final" (rounds.length) instead.
+  // -1, which round-indexed consumers (displays, queue grouping) read as
+  // absent, mis-grouping the bronze match into round 0. It must match
+  // compMatches' convention of "one past the final" (rounds.length) instead.
   it('stamps the bronze match roundIndex as rounds.length (one past the final), not -1', () => {
     const bracket = mkBracket(true);
     const tree = runtime.mount(ViewerCompetition, {

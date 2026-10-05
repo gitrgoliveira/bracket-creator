@@ -1071,12 +1071,14 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
   // T141: error banner mapping for the daihyosen POST. Server returns
   // 400 not_tied / 400 pool_match / 409 insufficient_eligibility: see
   // handlers_daihyosen.go for the canonical strings.
-  const [editorErr, setEditorErr] = useStateA(""); // inline error surface: daihyosen + lineup saves
-  // bc-cse gap closure: the composed operator-facing warning shown after a
-  // SUCCESSFUL inline lineup save whose squad-member attachment fell short
-  // (see submitInlineLineup below). Deliberately separate from editorErr:
-  // the save did not fail, so it must never read like that channel.
-  const [editorWarning, setEditorWarning] = useStateA("");
+  const [editorErr, setEditorErr] = useStateA(""); // inline error surface: daihyosen add/remove
+  // What a bout row's name box produced, drawn inside that row so the operator
+  // sees it beside what they typed: { key, tone, text } with key
+  // `${side}:${positionKey}` (a lineup row) or `${side}:bout:${idx}` (a
+  // kachinuki manual row). tone "error": nothing was written (a refusal or a
+  // failed save). tone "warn" (bc-cse gap closure): the save succeeded and only
+  // the squad-member identity attachment fell short. The two never share a look.
+  const [lineupNotice, setLineupNotice] = useStateA(null);
   // The bout side (rowSides tapKey) whose refused Fusensho was last tapped:
   // its reason shows under that row (bc-fsnp). A title alone never shows on a
   // touchscreen, so the button stays tappable and explains itself instead.
@@ -1534,9 +1536,11 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
   // operator picked one of the row's numbered entries (bc-dnst); it is
   // undefined for a typed/"+ Add" name, and buildInlineLineupWrite writes
   // by id rather than resolving by name when it is present.
-  const submitInlineLineup = async (teamId, lineup, squad, setSquad, posKey, value, member) => {
+  const submitInlineLineup = async (sideKey, teamId, lineup, squad, setSquad, posKey, value, member) => {
+    const noticeKey = `${sideKey}:${posKey}`;
+    const notify = (tone, text) => { if (mountedRef.current) setLineupNotice({ key: noticeKey, tone, text }); };
     setInlineLineupSaving(true);
-    setEditorWarning("");
+    setLineupNotice(null);
     try {
       const built = await buildInlineLineupWrite(m.compId, teamId, lineup, squad, posKey, value, password, member);
       // bc-dnst duplicate guard: buildInlineLineupWrite refuses entirely
@@ -1544,11 +1548,10 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
       // positions. Tell the operator which position already holds them and
       // leave the box exactly as it was.
       if (built.refused) {
-        if (!mountedRef.current) return;
         const labelFn = window.AdminLineupHelpers?.lineupPositionLabel;
         const label = typeof labelFn === "function" ? labelFn(built.refused.position) : built.refused.position;
         const who = built.refused.name || "This fighter";
-        setEditorWarning(`${who} is already at ${label}.`);
+        notify("error", `${who} is already at ${label}.`);
         return;
       }
       const { positions: updated, memberIds: updatedIds, squad: nextSquad, failures } = built;
@@ -1565,17 +1568,16 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
         setLineupB(prev => ({ ...prev, positions: updated, memberIds: updatedIds }));
       }
       // bc-cse gap closure: the write above succeeded (putMatchLineup did
-      // not throw), so this is the non-blocking warning channel, never the
+      // not throw), so this is the non-blocking warning tone, never the
       // error one -- the save is done, only its squad-member identity
       // attachment fell short.
       const composer = window.AdminLineupHelpers?.memberIdentityWarning;
       if (typeof composer === "function") {
-        setEditorWarning(composer(failures || [], squadUnavailable));
+        const warning = composer(failures || [], squadUnavailable);
+        if (warning) notify("warn", warning);
       }
     } catch (e) {
-      // Surface error briefly: can't use a toast from inside the modal so
-      // we reuse the editorErr channel for a one-off message.
-      if (mountedRef.current) setEditorErr(e?.message || "Failed to update lineup");
+      notify("error", e?.message || "Failed to update lineup");
     } finally {
       if (mountedRef.current) setInlineLineupSaving(false);
     }
@@ -3399,8 +3401,8 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
             // picked squad-member object when the operator chose one of the
             // row's numbered entries; it is undefined for a typed/"+ Add"
             // name, exactly like buildInlineLineupWrite's own optional arg.
-            const pickPlayer = (teamId, lineup, squad, setSquad) => (value, member) => {
-              submitInlineLineup(teamId, lineup, squad, setSquad, lineupPosKey, value, member);
+            const pickPlayer = (sideKey, teamId, lineup, squad, setSquad) => (value, member) => {
+              submitInlineLineup(sideKey, teamId, lineup, squad, setSquad, lineupPosKey, value, member);
             };
             // mp-gmcg: a manually-added bout has no lineup key (positions
             // beyond teamSize are not valid lineup keys) and no server
@@ -3422,14 +3424,20 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
             // hoisted out of this row closure; this factory just binds it to
             // the row's own sub/index and this side's key, mirroring
             // pickPlayer above.
-            const pickManual = (sideKey, memberIdKey, squad, setSquad, teamId) => (value, member) =>
-              pickManualBoutName({
+            const pickManual = (rowSide, sideKey, memberIdKey, squad, setSquad, teamId) => (value, member) => {
+              setLineupNotice(null);
+              return pickManualBoutName({
                 sub: s, idx, sideKey, memberIdKey, squad, setSquad, teamId,
                 compId: m.compId, password, updateSub,
                 // A self-run competitor cannot open the Lineups page, so they are
                 // pointed at the organizer, as the server's own refusals do.
-                onRenameFailed: (typed, e) => setEditorWarning(`"${typed}" was used for this bout, but the team member could not be renamed. ${memberRefusalNote({ code: e && e.code, reason: e && e.message }, selfReport ? "Ask the tournament organizer to rename them." : "Rename them on the Lineups page.")}`),
+                onRenameFailed: (typed, e) => setLineupNotice({
+                  key: `${rowSide}:bout:${idx}`,
+                  tone: "warn",
+                  text: `"${typed}" was used for this bout, but the team member could not be renamed. ${memberRefusalNote({ code: e && e.code, reason: e && e.message }, selfReport ? "Ask the tournament organizer to rename them." : "Rename them on the Lineups page.")}`,
+                }),
               }, value, member);
+            };
             // mp-gmcg: a kachinuki side with NO resolved name AND no lineup
             // route gets a free-typed name input riding the sub (like a
             // manual row). This covers the one-sided WALKOVER SLOT the engine
@@ -3511,8 +3519,9 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
                 playerName: resolveBoutSideDisplayName({ squad: squadB, memberId: playerBMemberId, storedName: playerBName }),
                 memberId: playerBMemberId,
                 memberLabel: playerBLabel, roster: isDaihyoRow ? [] : rosterB, forceInput: manualPathB,
+                noticeKey: manualPathB ? `b:bout:${idx}` : `b:${lineupPosKey}`,
                 lineupSlot: !isDaihyoRow && idx + 1 <= teamSize,
-                onSelectName: manualPathB ? pickManual("bName", "bMemberIdOverride", squadB, setSquadB, teamIdB) : pickPlayer(teamIdB, lineupB, squadB, setSquadB),
+                onSelectName: manualPathB ? pickManual("b", "bName", "bMemberIdOverride", squadB, setSquadB, teamIdB) : pickPlayer("b", teamIdB, lineupB, squadB, setSquadB),
               },
               {
                 key: "a", tapKey: `${idx}:a`, pts: s.aPts, fouls: s.aFouls,
@@ -3528,8 +3537,9 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
                 playerName: resolveBoutSideDisplayName({ squad: squadA, memberId: playerAMemberId, storedName: playerAName }),
                 memberId: playerAMemberId,
                 memberLabel: playerALabel, roster: isDaihyoRow ? [] : rosterA, forceInput: manualPathA,
+                noticeKey: manualPathA ? `a:bout:${idx}` : `a:${lineupPosKey}`,
                 lineupSlot: !isDaihyoRow && idx + 1 <= teamSize,
-                onSelectName: manualPathA ? pickManual("aName", "aMemberIdOverride", squadA, setSquadA, teamIdA) : pickPlayer(teamIdA, lineupA, squadA, setSquadA),
+                onSelectName: manualPathA ? pickManual("a", "aName", "aMemberIdOverride", squadA, setSquadA, teamIdA) : pickPlayer("a", teamIdA, lineupA, squadA, setSquadA),
               },
             ];
 
@@ -3679,6 +3689,14 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
                               : <span className="tsm-name__static tsm-name__static--empty" aria-label={`${posLabel} ${rs.label}: no player named`}>-</span>
                           )}
                         </div>
+                        {lineupNotice && lineupNotice.key === rs.noticeKey && (
+                          <div
+                            className={lineupNotice.tone === "error" ? "alert alert--error" : "alert alert--warn"}
+                            role={lineupNotice.tone === "error" ? "alert" : "status"}
+                            data-testid="team-editor-lineup-warning">
+                            {lineupNotice.text}
+                          </div>
+                        )}
                         {/* Row 1: the ippon mark buttons and the per-bout
                             Fusensho button (layout: the .tsm-row-1 compact rules
                             in styles.css). T096/FR-031: Fusensho awards the bout
@@ -4047,24 +4065,14 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
             );
           })()}
 
-          {/* The modal's ONE inline error surface: the daihyosen add/remove
-              POSTs AND the inline lineup-position PUT all report here. It
-              used to live INSIDE the add-daihyosen block above, which returns
-              null for kachinuki / pool / already-has-a-daihyosen matches — so
-              a failed lineup save (reachable exactly in the kachinuki flow)
-              set a message the operator never saw. Rendered here, a sibling
-              of decisionErr, it shows wherever it is set. */}
+          {/* The daihyosen add/remove POSTs report here. It used to live
+              INSIDE the add-daihyosen block above, which returns null for
+              kachinuki / pool / already-has-a-daihyosen matches, so a failure
+              there set a message the operator never saw. Rendered here, a
+              sibling of decisionErr, it shows wherever it is set. A bout
+              row's name box reports in its own row instead (lineupNotice). */}
           {editorErr && (
             <div data-testid="team-editor-error" className="daihyosen-controls__err" style={{ marginTop: 6 }}>{editorErr}</div>
-          )}
-
-          {/* Non-blocking: the inline lineup save above already succeeded.
-              Amber .alert--warn, a separate channel from editorErr, so it
-              can never be mistaken for that failed-save message. */}
-          {editorWarning && (
-            <div className="alert alert--warn" role="status" data-testid="team-editor-lineup-warning" style={{ marginTop: 6 }}>
-              {editorWarning}
-            </div>
           )}
 
           {/* Ippon-type letter legend: same affordance as the individual

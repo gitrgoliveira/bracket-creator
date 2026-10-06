@@ -3,7 +3,7 @@
 // Extracted from admin_scoring_modal.jsx (mp-zac3).
 
 import { toBackendMatchResult, matchWire } from './api_serializers.jsx';
-import { changedGroups, statedGroupsOf, groupMatches, keptInHistoryNote } from './match_groups.jsx';
+import { changedGroups, statedGroupsOf, groupMatches, keptInHistoryNote, GROUP_RESULT } from './match_groups.jsx';
 import { writeDidNotLand } from './write_result.jsx';
 
 const { useState: useStateA, useEffect: useEffectA, useRef: useRefA } = React;
@@ -40,10 +40,17 @@ export function useChangedGroups(match) {
   matchRef.current = match;
   const stateRef = useRefA(null);
   const keyOf = (m) => `${(m && m.compId) || ""}\u0000${(m && m.id) || ""}`;
+  const reopened = !!(match && match.reopenPending);
   // The editor moving to another match starts over from that match.
   if (!stateRef.current || stateRef.current.key !== keyOf(match)) {
-    stateRef.current = { key: keyOf(match), seed: matchWire(match), agreed: {}, last: null };
+    stateRef.current = { key: keyOf(match), seed: matchWire(match), agreed: {}, last: null, reopened };
   }
+  // A reopen is a write the server makes, not one the editor builds, so no build
+  // moves the result the editor agrees with off the finished one. Once the server
+  // marks the match reopened the editor agrees with the reopened result, so ending
+  // it again with the same verdict still says the result changed.
+  if (reopened && !stateRef.current.reopened) stateRef.current.agreed[GROUP_RESULT] = matchWire(match);
+  stateRef.current.reopened = reopened;
   return (patch) => {
     if (!patch) return patch;
     const m = matchRef.current;

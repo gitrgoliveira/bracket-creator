@@ -278,6 +278,31 @@ describe('kachinuki reopen: ending it again asks for no reason', () => {
     await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(1));
     expect(onSubmit.mock.calls[0][0].correctionReason).toBeUndefined();
   });
+
+  // The editor opened on the finished encounter, so the result it last agreed
+  // with is the finished one. The reopen is a write the server makes, not one the
+  // editor builds: ended again with nothing else changed, End rebuilds that same
+  // result, and must still say it changed the result, or the server, told that
+  // nothing changed, keeps the encounter running.
+  it('names the result when the encounter is ended again from the editor that reopened it', async () => {
+    const onSubmit = vi.fn().mockResolvedValue(undefined);
+    const finished = completedKachinukiMatch({ winnerId: 'team-A', decision: 'kachinuki-exhaustion' });
+    const utils = await renderEditor({ match: finished, onSubmit });
+    await act(async () => { fireEvent.click(screen.getByTestId('kachinuki-reopen-button')); });
+    await act(async () => {
+      utils.rerender(
+        <ScoreEditorModal match={reopenedKachinukiMatch({ winnerId: '', decision: '' })} onClose={vi.fn()} onSubmit={onSubmit} password="secret" />
+      );
+    });
+
+    fireEvent.click(screen.getByTestId('kachinuki-end-match-button'));
+    await act(async () => { fireEvent.click(screen.getByTestId('kachinuki-end-match-button')); });
+
+    await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(1));
+    const patch = onSubmit.mock.calls[0][0];
+    expect(patch.status).toBe('completed');
+    expect(patch.changed).toContain('result');
+  });
 });
 
 describe('kachinuki reopen: a busy court gets a remedy, not a dead end', () => {

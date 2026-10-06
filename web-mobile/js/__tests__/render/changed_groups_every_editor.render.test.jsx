@@ -171,6 +171,20 @@ describe('individual editor', () => {
     expect(lastWrite().changed).toEqual(['points']);
   });
 
+  it('a reopen moves only the result the editor agrees with: a held edit still names no other group', async () => {
+    // The server marks the match reopened while a point is unsaved, and another
+    // device has recorded overtime. The editor takes the reopened result as
+    // agreed (so ending it again says the result changed) and nothing else: its
+    // save must not put "no overtime" back.
+    const { rerender } = await mount(individual());
+    await pointerTap(ipponBtn('shiro', 'K'));
+    await act(async () => { rerender(editorFor(individual({ reopenPending: true, encho: { periodCount: 1 } }))); });
+    await settle();
+    expect(writes).toHaveLength(1);
+    expect(lastWrite().encho).toBeUndefined();
+    expect(lastWrite().changed).toEqual(['points']);
+  });
+
   it('an editor that followed a change elsewhere does not name it back', async () => {
     // Nothing unsaved: the editor re-seeds to the overtime recorded
     // elsewhere, and its next point names the points alone.

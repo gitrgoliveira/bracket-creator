@@ -142,7 +142,7 @@ export function preserveStoredDaihyosenVerdict({ armed, pickedSide, tied, existi
 // StreamingOverlay). The implementations live in lineup_resolver.jsx;
 // re-exported here so existing imports from admin_scoring_modal.jsx (which
 // re-exports them onward) continue to work.
-import { resolveMatchLineup, resolveLineupTeamId, resolveBoutSideName, resolveBoutSideMemberId, resolveSquadMember, squadMemberIdForUniqueName, squadRosterEntries, rosterWithoutPlacedElsewhere, resolveBoutSideDisplayName, buildInlineLineupWrite, memberRefusalNote, alreadyPlacedNote, POS_KEYS_5, POS_LABELS_5 } from './lineup_resolver.jsx';
+import { resolveMatchLineup, resolveLineupTeamId, resolveBoutSideName, resolveBoutSideMemberId, resolveSquadMember, squadMemberIdForUniqueName, squadRosterEntries, rosterWithoutPlacedElsewhere, resolveBoutSideDisplayName, buildInlineLineupWrite, memberRefusalNote, alreadyPlacedNote, lineupPositionLabel, POS_KEYS_5, POS_LABELS_5 } from './lineup_resolver.jsx';
 // The one owner of what a list of team members that arrives does to the members
 // shown, and of keeping a member this sheet named or added over a list that predates it.
 import { mergeMembers, changedMembers, takeMembers } from './lineup_draft.jsx';
@@ -1722,9 +1722,7 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
       // positions. Tell the operator which position already holds them and
       // leave the box exactly as it was.
       if (built.refused) {
-        const labelFn = window.AdminLineupHelpers?.lineupPositionLabel;
-        const label = typeof labelFn === "function" ? labelFn(built.refused.position) : built.refused.position;
-        notify("error", alreadyPlacedNote(built.refused.name, label));
+        notify("error", alreadyPlacedNote(built.refused.name, lineupPositionLabel(built.refused.position)));
         return;
       }
       const { positions: updated, memberIds: updatedIds, squad: nextSquad, failures } = built;

@@ -423,7 +423,7 @@ describe('the at-court panel', () => {
 
     await click(saveButton(utils));
 
-    expect(utils.getByText('Mori is already at 2.')).toBeTruthy();
+    expect(utils.getByText('Mori is already at Position 2.')).toBeTruthy();
     expect(api.putMatchLineup).not.toHaveBeenCalled();
     expect(saveButton(utils).disabled, 'the operator can still fix it and save').toBe(false);
     expect(utils.getByLabelText('2 player').value, 'the position the note names shows what the Save read').toBe('Mori');
@@ -437,7 +437,7 @@ describe('the at-court panel', () => {
 
     await click(saveButton(utils));
 
-    expect(utils.getByText('Mori is already at 1.')).toBeTruthy();
+    expect(utils.getByText('Mori is already at Position 1.')).toBeTruthy();
     expect(api.putMatchLineup).not.toHaveBeenCalled();
     expect(api.addTeamMember).not.toHaveBeenCalled();
   });
@@ -449,7 +449,7 @@ describe('the at-court panel', () => {
 
     await click(saveButton(utils));
 
-    expect(utils.getByText('Mori is already at 2.')).toBeTruthy();
+    expect(utils.getByText('Mori is already at Position 2.')).toBeTruthy();
     expect(api.putMatchLineup).not.toHaveBeenCalled();
     expect(api.addTeamMember).not.toHaveBeenCalled();
     expect(api.renameTeamMember).not.toHaveBeenCalled();
@@ -482,7 +482,7 @@ describe('the at-court panel', () => {
 
       await click(saveButton(utils));
 
-      expect(utils.getByText('Kato is already at 1.')).toBeTruthy();
+      expect(utils.getByText('Kato is already at Position 1.')).toBeTruthy();
       expect(api.renameTeamMember, 'nobody is named for a Save that is refused').not.toHaveBeenCalled();
       expect(api.addTeamMember).not.toHaveBeenCalled();
       expect(api.putMatchLineup).not.toHaveBeenCalled();
@@ -497,10 +497,23 @@ describe('the at-court panel', () => {
 
       await click(saveButton(utils));
 
-      expect(utils.getByText('Mori is already at 1.')).toBeTruthy();
+      expect(utils.getByText('Mori is already at Position 1.')).toBeTruthy();
       expect(api.addTeamMember, 'nothing is minted for a Save that is refused').not.toHaveBeenCalled();
       expect(api.renameTeamMember).not.toHaveBeenCalled();
       expect(api.putMatchLineup).not.toHaveBeenCalled();
+    });
+
+    it('takes the refusal down once the operator changes a position: the next Save judges the lineup again', async () => {
+      const utils = await mountPanel();
+      await pickFromList(utils, 2, 'Mori');
+      await typeName(utils, 3, 'Kato');
+      api.fetchLineupInForce.mockResolvedValue(matchLineup(MORI_AT_1));
+      await click(saveButton(utils));
+      expect(utils.getByText('Mori is already at Position 1.')).toBeTruthy();
+
+      await typeName(utils, 2, 'Ito');
+
+      expect(utils.queryByText('Mori is already at Position 1.')).toBeNull();
     });
 
     it('is refused before anything is minted or renamed when a typed name is a member the lineup holds elsewhere', async () => {
@@ -511,7 +524,7 @@ describe('the at-court panel', () => {
 
       await click(saveButton(utils));
 
-      expect(utils.getByText('Mori is already at 1.')).toBeTruthy();
+      expect(utils.getByText('Mori is already at Position 1.')).toBeTruthy();
       expect(resolver, 'the names are not resolved for a Save that is refused').not.toHaveBeenCalled();
       expect(api.addTeamMember, 'Kato is not minted').not.toHaveBeenCalled();
       expect(api.renameTeamMember).not.toHaveBeenCalled();
@@ -576,7 +589,7 @@ describe('the at-court panel', () => {
 
       await click(saveButton(utils));
 
-      expect(utils.getByText('Kato is already at 2.')).toBeTruthy();
+      expect(utils.getByText('Kato is already at Position 2.')).toBeTruthy();
       refusedBeforeAnythingIsWritten();
     });
 
@@ -589,7 +602,7 @@ describe('the at-court panel', () => {
 
       await click(saveButton(utils));
 
-      expect(utils.getByText('Ito is already at 1.')).toBeTruthy();
+      expect(utils.getByText('Ito is already at Position 1.')).toBeTruthy();
       refusedBeforeAnythingIsWritten();
       expect(saveButton(utils).disabled, 'the operator can still fix it and save').toBe(false);
     });
@@ -603,7 +616,7 @@ describe('the at-court panel', () => {
 
       await click(saveButton(utils));
 
-      expect(utils.getByText('Kato is already at 1.')).toBeTruthy();
+      expect(utils.getByText('Kato is already at Position 1.')).toBeTruthy();
       refusedBeforeAnythingIsWritten();
     });
 
@@ -616,7 +629,7 @@ describe('the at-court panel', () => {
 
       await click(saveButton(utils));
 
-      expect(utils.getByText('Ito is already at 1.')).toBeTruthy();
+      expect(utils.getByText('Ito is already at Position 1.')).toBeTruthy();
       refusedBeforeAnythingIsWritten();
     });
 
@@ -969,6 +982,20 @@ describe('the Lineups page', () => {
     expect(utils.getByText('Mori is already at Position 2.')).toBeTruthy();
     expect(api.putTeamLineup).not.toHaveBeenCalled();
     expect(saveButton(utils).disabled, 'the operator can still fix it and save').toBe(false);
+  });
+
+  it('takes the refusal down once the operator changes a position: the next Save judges the lineup again', async () => {
+    const utils = await mountPage();
+    await pick(utils, 1, 'mem-4');
+    api.fetchTeamLineup.mockResolvedValue(startingLineup({
+      positions: { 1: 'Aoki', 2: 'Mori', 3: 'Ito' }, memberIds: { 1: 'mem-1', 2: 'mem-4', 3: 'mem-3' },
+    }));
+    await click(saveButton(utils));
+    expect(utils.getByText('Mori is already at Position 2.')).toBeTruthy();
+
+    await pick(utils, 1, 'mem-1');
+
+    expect(utils.queryByText('Mori is already at Position 2.')).toBeNull();
   });
 
   it('names the position that was already there when another device\'s placement is the one the operator picked a member for, shows it, and lets a change to it through', async () => {

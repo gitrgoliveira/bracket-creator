@@ -4,7 +4,7 @@
 import { LineupNameInput } from './admin_scoring_shared.jsx';
 import { sideLookupKey } from './competitor_identity.jsx';
 import { scoreRowMatchLabel } from './pool_ids.jsx';
-import { squadRosterEntries, rosterWithoutPlacedElsewhere, lineupDuplicateNote } from './lineup_resolver.jsx';
+import { squadRosterEntries, rosterWithoutPlacedElsewhere, lineupDuplicateNote, lineupPositionLabel } from './lineup_resolver.jsx';
 import { renameMemberFields } from './lineup_rename.jsx';
 import { useLineupForm, LineupSourceLine, LineupProblem, LineupDraftNotice } from './lineup_draft.jsx';
 
@@ -269,9 +269,7 @@ export function MatchLineupSideEditor({ comp, team, match, allMatches, password,
       // sent to the resolver are the ones whose name the operator typed, so a refusal
       // names where they picked the member rather than the box they typed it into.
       const typed = Object.keys(positionsForResolver);
-      const duplicateIn = (ids) => lineupDuplicateNote(
-        positionsOut, ids, (key) => positions.find(p => p.key === key)?.label || key, positionKeys, changed, typed,
-      );
+      const duplicateIn = (ids) => lineupDuplicateNote(positionsOut, ids, lineupPositionLabel, positionKeys, changed, typed);
       const refusedEarly = duplicateIn({ ...memberIdsOut, ...placedByResolver });
       if (refusedEarly) {
         setError(refusedEarly);
@@ -426,6 +424,9 @@ export function MatchLineupSideEditor({ comp, team, match, allMatches, password,
               disabled={locked}
               onSelect={(name, entry) => {
                 const trimmed = (name || "").trim();
+                // The refusal shown was for the lineup as it was; the next Save
+                // judges it again.
+                setError("");
                 setValues(v => ({ ...v, [p.key]: trimmed }));
                 // A picked squad entry (LineupNameInput's second onSelect
                 // argument) carries its own member id: record it directly.

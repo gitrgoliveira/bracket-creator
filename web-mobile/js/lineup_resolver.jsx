@@ -480,6 +480,15 @@ export const POS_KEYS_5 = ["senpo", "jiho", "chuken", "fukusho", "taisho"];
 // Consumed by admin_scoring_team.jsx and streaming_overlay.jsx (single source).
 export const POS_LABELS_5 = POS_KEYS_5.map((s) => s.charAt(0).toUpperCase() + s.slice(1));
 
+// lineupPositionLabel: how a sentence names a lineup position, by its key: the
+// FIK name for a five-person team's (Senpo, Jiho, ...), else "Position N", which
+// reads on its own outside the rows that show the bare number. The one label every
+// lineup editor and the score sheet put into alreadyPlacedNote.
+export function lineupPositionLabel(posKey) {
+  const i = POS_KEYS_5.indexOf(posKey);
+  return i >= 0 ? POS_LABELS_5[i] : `Position ${posKey}`;
+}
+
 // resolveBoutSideName: which name identifies one side of a sub-bout row.
 // KACHINUKI numbered bouts are SERVER-FIRST: the engine appended the
 // pairing via winner-stays advancement (bout 5 is "winner of bout 4 vs

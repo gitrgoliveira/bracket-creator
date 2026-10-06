@@ -45,7 +45,7 @@
 
 import { idOf, nameOf } from './competitor_identity.jsx';
 import { squadSlotLabel } from './squad_member_label.jsx';
-import { rosterWithoutPlacedElsewhere, memberPlacedElsewhere, memberRefusalNote, lineupDuplicateNote, alreadyPlacedNote, STARTING_ROUND } from './lineup_resolver.jsx';
+import { rosterWithoutPlacedElsewhere, memberPlacedElsewhere, memberRefusalNote, lineupDuplicateNote, alreadyPlacedNote, lineupPositionLabel, STARTING_ROUND } from './lineup_resolver.jsx';
 import { poolMatchNumberOf, isSupplementaryBout, scoreRowMatchLabel } from './pool_ids.jsx';
 import { normalizeParticipantName } from './data.jsx';
 import { renameMemberFields } from './lineup_rename.jsx';
@@ -82,16 +82,6 @@ function positionsForSize(teamSize) {
   }));
 }
 
-// lineupPositionLabel: the operator-facing name for a position KEY, reusing
-// POS_LABELS_5's own labels (Senpo, Jiho, ...) rather than a second copy of
-// them, so the two can never drift. A numeric-size key (positionsForSize's
-// "1".."N") has no FIK name, so it reads as "Position N": unambiguous on
-// its own outside the table context memberIdentityWarning's callers render
-// it in.
-const POS_LABEL_BY_KEY = POS_LABELS_5.reduce((acc, p) => { acc[p.key] = p.label; return acc; }, {});
-function lineupPositionLabel(posKey) {
-  return POS_LABEL_BY_KEY[posKey] || `Position ${posKey}`;
-}
 
 // Pull the member roster off the team Player object. Retained for the
 // OTHER lineup surface (admin_schedule_lineup.jsx's match-scoped panel,
@@ -491,12 +481,16 @@ function AdminLineup({ comp, team, matchId = "", matchLabel = "", allMatches, pa
 
   // Operation 1 (SELECT): put an existing squad member's (name, id) pair
   // into a position, both keyed together so they can never drift apart.
+  // A change to a position ends the refusal shown for the lineup as it was: the
+  // next Save judges the lineup again.
   const selectMember = (posKey, member) => {
+    setError("");
     setValues(v => ({ ...v, [posKey]: member.name }));
     setMemberIds(ids => ({ ...ids, [posKey]: member.id }));
   };
 
   const clearPosition = (posKey) => {
+    setError("");
     setValues(v => ({ ...v, [posKey]: "" }));
     setMemberIds(ids => ({ ...ids, [posKey]: "" }));
   };

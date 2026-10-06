@@ -464,6 +464,11 @@ function AdminLineup({ comp, team, matchId = "", matchLabel = "", allMatches, pa
   // alongside Rename rather than being duplicated on both.
   const [clearingId, setClearingId] = useStateA(null);
 
+  // A change to a team member is out. The save waits for it, and while a save (or a
+  // removal) is out the controls that make one are off: a rename made then would be
+  // written over by the save, and an add finished then would not be placed.
+  const memberBusy = addBusy || renameBusy || clearingId !== null;
+
   const squadSorted = useMemoA(() => squadMemberOptions(squad), [squad]);
 
   // rostersByPosition (bc-rvfx): the per-position "who's left to pick" list,
@@ -474,7 +479,13 @@ function AdminLineup({ comp, team, matchId = "", matchLabel = "", allMatches, pa
   // squad nor the lineup (e.g. typing into the Rename box) was pure waste.
   const rostersByPosition = useMemoA(() => {
     const byKey = {};
-    positions.forEach(p => { byKey[p.key] = rosterWithoutPlacedElsewhere(squadSorted, { positions: values, memberIds }, p.key); });
+    positions.forEach(p => {
+      const offered = rosterWithoutPlacedElsewhere(squadSorted, { positions: values, memberIds }, p.key);
+      // A position always lists the member it holds: a lineup another device saved can
+      // hold one member at two positions, and a picker without its own value would
+      // show "none" where the form holds a member.
+      byKey[p.key] = squadSorted.filter(m => m.id === memberIds[p.key] || offered.includes(m));
+    });
     return byKey;
   }, [positions, squadSorted, values, memberIds]);
 
@@ -661,7 +672,7 @@ function AdminLineup({ comp, team, matchId = "", matchLabel = "", allMatches, pa
       // as the lineup is stored now (form.lineupToSave, operator decision
       // 2026-10-05), so a change another device made to it since this page read the
       // lineup is not put back.
-      const { positions: composed, memberIds: composedIds } = await form.lineupToSave();
+      const { positions: composed, memberIds: composedIds, changed } = await form.lineupToSave();
       // Strip vacant positions before sending: an omitted key reads as
       // "vacant" the same way an explicit empty string would (the server's
       // ValidatePositions only checks that submitted KEYS are valid for the
@@ -684,7 +695,7 @@ function AdminLineup({ comp, team, matchId = "", matchLabel = "", allMatches, pa
       // One position per member (the shared predicate, bc-dnst), asked of the lineup
       // as composed: the pickers never offer a member this form holds at another
       // position, but another device may have placed them there since it was read.
-      const duplicate = lineupDuplicateNote(positionsOut, memberIdsOut, lineupPositionLabel);
+      const duplicate = lineupDuplicateNote(positionsOut, memberIdsOut, lineupPositionLabel, positionKeys, changed);
       if (duplicate) {
         setError(duplicate);
         return;
@@ -785,7 +796,7 @@ function AdminLineup({ comp, team, matchId = "", matchLabel = "", allMatches, pa
         <LineupSourceLine form={form} matchId={matchId} allMatches={allMatches} busy={busy} testId="lineup-source" />
       )}
 
-      <LineupDraftNotice draft={form.draft} testId="lineup-draft-notice" />
+      <LineupDraftNotice draft={form.draft} busy={busy} testId="lineup-draft-notice" />
 
       {form.source && form.source.round >= 1 && (
         <div className="field__hint" data-testid="lineup-legacy-round" style={{ marginBottom: 12 }}>
@@ -853,17 +864,17 @@ function AdminLineup({ comp, team, matchId = "", matchLabel = "", allMatches, pa
                       className="input"
                       aria-label={`New member name for ${p.label}`}
                       value={addingName}
-                      disabled={addBusy}
+                      disabled={addBusy || busy}
                       onChange={(e) => setAddingName(e.target.value)}
                       onKeyDown={(e) => {
                         if (e.key === "Enter") { e.preventDefault(); commitAdd(); }
                         else if (e.key === "Escape") { e.preventDefault(); cancelAdd(); }
                       }}
                     />
-                    <button type="button" className="btn btn--sm" onClick={commitAdd} disabled={addBusy || !addingName.trim()}>
+                    <button type="button" className="btn btn--sm" onClick={commitAdd} disabled={addBusy || busy || !addingName.trim()}>
                       {addBusy ? "Adding…" : "Add"}
                     </button>
-                    <button type="button" className="btn btn--ghost btn--sm" onClick={cancelAdd} disabled={addBusy}>Cancel</button>
+                    <button type="button" className="btn btn--ghost btn--sm" onClick={cancelAdd} disabled={addBusy || busy}>Cancel</button>
                   </div>
                 )}
               </label>
@@ -911,14 +922,14 @@ function AdminLineup({ comp, team, matchId = "", matchLabel = "", allMatches, pa
                     busy: renameBusy,
                     ariaLabel: `Rename ${m.name}`,
                     inputStyle: { flex: 1 },
-                    disabled: renameBusy,
+                    disabled: renameBusy || busy,
                   }) : (
                     <>
                       <span style={{ fontSize: 13, color: "var(--ink-3)", minWidth: 44 }}>
                         {squadSlotLabel(teamNumber, m.index)}
                       </span>
                       <span style={{ flex: 1 }}>{m.name}</span>
-                      <button type="button" className="btn btn--ghost btn--sm" onClick={() => startRename(m)}>Rename</button>
+                      <button type="button" className="btn btn--ghost btn--sm" onClick={() => startRename(m)} disabled={busy}>Rename</button>
                       {/* Nothing to clear on an already-blank slot: the row
                           shows no Clear button at all rather than one that
                           would refuse itself (a blank candidate never
@@ -929,7 +940,7 @@ function AdminLineup({ comp, team, matchId = "", matchLabel = "", allMatches, pa
                           type="button"
                           className="btn btn--ghost btn--sm"
                           onClick={() => clearMember(m)}
-                          disabled={renameBusy || clearingId !== null || started}
+                          disabled={busy || renameBusy || clearingId !== null || started}
                           title={started ? "Names cannot be cleared once the competition has started" : undefined}
                         >
                           {clearingId === m.id ? "Clearing…" : "Clear name"}
@@ -947,7 +958,7 @@ function AdminLineup({ comp, team, matchId = "", matchLabel = "", allMatches, pa
           <button type="button"
             className="btn btn--primary"
             onClick={save}
-            disabled={busy || !form.canSave}
+            disabled={busy || memberBusy || !form.canSave}
             title={form.saveTitle}
           >
             {saving ? "Saving…" : "Save lineup"}

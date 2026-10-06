@@ -190,7 +190,9 @@ export function MatchLineupSideEditor({ comp, team, match, allMatches, password,
   // positions, those whose member id is already known (bc-dnst) -- picked directly
   // off the roster's numbered entries (see onSelect above), never resolved by
   // name -- skip the resolver entirely; only a changed position with NO known id
-  // goes through it.
+  // goes through it, against the team's members as the Save's re-read left them
+  // (form.squadRef), not the list this closure held when Save was tapped: a typed
+  // name resolves to a member another device created, never mints it a second time.
   const doSave = async (successMsg = "Match lineup saved") => {
     setError("");
     setLineupWarning("");
@@ -204,6 +206,7 @@ export function MatchLineupSideEditor({ comp, team, match, allMatches, password,
       const positionsOut = {};
       const memberIdsOut = {};
       const positionsForResolver = {};
+      const blankHeld = {};
       positions.forEach(p => {
         const key = p.key;
         const pickedId = composedIds[key];
@@ -234,8 +237,24 @@ export function MatchLineupSideEditor({ comp, team, match, allMatches, password,
         } else if (v) {
           positionsOut[key] = v;
           positionsForResolver[key] = v;
+          // The resolver names a blank member the position holds in place, so that
+          // member is the position's already (a named member's id is not: a typed
+          // name over it becomes whoever the resolver finds or mints).
+          if (picked && !picked.name) blankHeld[key] = pickedId;
         }
       });
+      // One position per member (the shared predicate, bc-dnst), asked of the lineup
+      // as composed, so a member another device placed meanwhile counts. Asked before
+      // the resolver as well as after it: the resolver renames a blank member or mints
+      // one, and nothing may be written for a Save that is then refused.
+      const duplicateIn = (ids) => lineupDuplicateNote(
+        positionsOut, ids, (key) => positions.find(p => p.key === key)?.label || key, positionKeys, changed,
+      );
+      const refusedEarly = duplicateIn({ ...memberIdsOut, ...blankHeld });
+      if (refusedEarly) {
+        setError(refusedEarly);
+        return;
+      }
       // bc-pnum gap closure: resolve each changed, occupied-but-unresolved
       // position's name to a squad member id before writing. A name not on the
       // squad is a substitute typed straight into the slot; per operator ruling,
@@ -254,7 +273,7 @@ export function MatchLineupSideEditor({ comp, team, match, allMatches, password,
         try {
           const resolver = window.AdminLineupHelpers?.resolveMemberIdsForPositions;
           if (typeof resolver === "function") {
-            const resolved = await resolver(compId, teamId, positionsForResolver, squad, password, composedIds);
+            const resolved = await resolver(compId, teamId, positionsForResolver, form.squadRef.current, password, composedIds);
             Object.assign(memberIdsOut, resolved.memberIds);
             memberFailures = resolved.failures || [];
             setSquad(resolved.squad);
@@ -265,11 +284,10 @@ export function MatchLineupSideEditor({ comp, team, match, allMatches, password,
           // not block the save. Proceed with the names alone.
         }
       }
-      // One position per member (the shared predicate, bc-dnst), asked of the
-      // lineup as composed, so a member another device placed meanwhile counts: a
-      // typed name can resolve onto a member the list never offered because it is
-      // already fielded elsewhere. Refuse before writing and say where.
-      const duplicate = lineupDuplicateNote(positionsOut, memberIdsOut, (key) => positions.find(p => p.key === key)?.label || key);
+      // Again, now that the typed names have ids: a typed name can resolve onto a
+      // member the list never offered because it is already fielded elsewhere.
+      // Refuse before writing and say where.
+      const duplicate = duplicateIn(memberIdsOut);
       if (duplicate) {
         setError(duplicate);
         return;
@@ -321,7 +339,7 @@ export function MatchLineupSideEditor({ comp, team, match, allMatches, password,
 
       <LineupProblem form={form} testId={`match-lineup-problem-${teamId}`} />
       <LineupSourceLine form={form} matchId={matchId} allMatches={allMatches} busy={busy} testId={`match-lineup-source-${teamId}`} />
-      <LineupDraftNotice draft={form.draft} testId={`match-lineup-draft-${teamId}`} />
+      <LineupDraftNotice draft={form.draft} busy={busy} testId={`match-lineup-draft-${teamId}`} />
 
       {error && (
         <div className="alert alert--error" style={{ marginBottom: 8 }}>
@@ -369,6 +387,9 @@ export function MatchLineupSideEditor({ comp, team, match, allMatches, password,
               onCommit: commitRename,
               onCancel: cancelRename,
               busy: renameBusy,
+              // A rename made while the lineup is being saved would be written over
+              // by the save, which carries the old spelling.
+              disabled: busy,
               ariaLabel: `Rename ${p.label} player`,
               inputStyle: { width: "100%", minWidth: 0, boxSizing: "border-box" },
               autoFocus: true,
@@ -415,7 +436,7 @@ export function MatchLineupSideEditor({ comp, team, match, allMatches, password,
         <button type="button"
           className="btn btn--primary btn--sm"
           onClick={save}
-          disabled={busy || !form.canSave}
+          disabled={busy || renameBusy || !form.canSave}
           title={form.saveTitle}
         >
           {saving ? "Saving…" : "Save lineup"}

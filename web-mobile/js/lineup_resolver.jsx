@@ -130,11 +130,21 @@ export function alreadyPlacedNote(name, positionLabel) {
 // lineupDuplicateNote: the sentence for a lineup that would field one member at
 // two positions, or "" when it does not. Both editors ask it of the lineup a Save
 // is about to write, so the refusal reads alike and never has to come from the
-// server's own check. `labelOf` words a position key the way the editor labels it.
-export function lineupDuplicateNote(positions, memberIds, labelOf) {
-  for (const [key, id] of Object.entries(memberIds || {})) {
-    const otherKey = memberPlacedElsewhere(memberIds, key, id);
-    if (otherKey) return alreadyPlacedNote(positions?.[key], labelOf(otherKey));
+// server's own check. `labelOf` words a position key the way the editor labels it;
+// `positionKeys` is the lineup's positions in order, and `changed` the ones the
+// operator changed (changedLineupPositions): the note names a position they did not.
+export function lineupDuplicateNote(positions, memberIds, labelOf, positionKeys, changed) {
+  const nameAt = (key) => String(positions?.[key] ?? "").trim();
+  for (const key of positionKeys) {
+    const otherKey = memberPlacedElsewhere(memberIds, key, memberIds?.[key]);
+    if (!otherKey) continue;
+    // `key` is the earlier of the two in position order. The position the operator
+    // changed is the one being refused, so when only one of the pair is theirs the
+    // note names the other, which was already there; when both or neither are, the
+    // earlier one. The fighter is named from the position named, else from the other.
+    const there = changed.includes(key) && !changed.includes(otherKey) ? otherKey : key;
+    const here = there === key ? otherKey : key;
+    return alreadyPlacedNote(nameAt(there) || nameAt(here), labelOf(there));
   }
   return "";
 }

@@ -2698,10 +2698,10 @@ async function _deleteLineup(url, password, failure) {
 async function _readLineup(url) {
     const { res, body } = await _fetchJson(url, {});
     if (!res.ok) throw new Error(body.error || "Failed to load lineup");
-    // _fetchJson reads an unreadable body as {}: never hand that on as a lineup.
-    // The server's answer always says whether a lineup is saved, and a sign-in
-    // page answering for it would otherwise read as an empty lineup, which a
-    // Save composed on it would write over the real one.
+    // An answer whose body could not be read comes back from _fetchJson as an empty
+    // object, which cannot be told from one the server sent. A body with no keys is
+    // refused here rather than read as no lineup, since a Save composed on it would
+    // write over the real one.
     if (Object.keys(body).length === 0) throw new Error("The lineup could not be read. Check the connection and try again.");
     return lineupOrNull(body);
 }

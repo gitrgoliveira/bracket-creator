@@ -119,28 +119,57 @@ describe('composeLineupSave', () => {
 });
 
 // lineupDuplicateNote is asked of the lineup a Save is about to write, by both
-// editors, so the refusal for one member at two positions reads alike.
+// editors, so the refusal for one member at two positions reads alike. It names the
+// position the operator did NOT change: the one that was already there.
 describe('lineupDuplicateNote', () => {
   const label = (key) => `Position ${key}`;
+  const note = (positions, memberIds, changed = []) => lineupDuplicateNote(positions, memberIds, label, KEYS, changed);
 
   it('is empty for a lineup that fields each member once, and for one with no ids at all', () => {
-    expect(lineupDuplicateNote({ 1: 'Aoki', 2: 'Sato' }, { 1: 'mem-1', 2: 'mem-2' }, label)).toBe('');
-    expect(lineupDuplicateNote({ 1: 'Aoki', 2: 'Sato' }, {}, label)).toBe('');
-    expect(lineupDuplicateNote({ 1: 'Aoki' }, undefined, label)).toBe('');
+    expect(note({ 1: 'Aoki', 2: 'Sato' }, { 1: 'mem-1', 2: 'mem-2' })).toBe('');
+    expect(note({ 1: 'Aoki', 2: 'Sato' }, {})).toBe('');
+    expect(note({ 1: 'Aoki' }, undefined)).toBe('');
   });
 
-  it('names the fighter and the position that already holds that member', () => {
-    expect(lineupDuplicateNote({ 1: 'Aoki', 2: 'Sato' }, { 1: 'mem-1', 2: 'mem-1' }, label)).toBe('Aoki is already at Position 2.');
+  it('names the fighter and the position the operator did not change, whichever of the two comes first', () => {
+    const positions = { 1: 'Mori', 2: 'Mori' };
+    const ids = { 1: 'mem-4', 2: 'mem-4' };
+    expect(note(positions, ids, ['2'])).toBe('Mori is already at Position 1.');
+    expect(note(positions, ids, ['1'])).toBe('Mori is already at Position 2.');
+  });
+
+  it('does not depend on the order the ids were collected in: an id resolved last is still the operator\'s', () => {
+    const keys = ['senpo', 'jiho', 'chuken'];
+    const words = { senpo: 'Senpo', jiho: 'Jiho', chuken: 'Chuken' };
+    // Senpo is stored; Jiho's id, resolved from a typed name, is added after the others.
+    const ids = { senpo: 'mem-4', chuken: 'mem-3' };
+    ids.jiho = 'mem-4';
+    const positions = { senpo: 'Mori', jiho: 'Mori', chuken: 'Ito' };
+    expect(lineupDuplicateNote(positions, ids, (key) => words[key], keys, ['jiho'])).toBe('Mori is already at Senpo.');
+    expect(lineupDuplicateNote(positions, ids, (key) => words[key], keys, ['senpo'])).toBe('Mori is already at Jiho.');
+  });
+
+  it('names the earlier position when the operator changed both of them, or neither', () => {
+    const positions = { 1: 'Mori', 2: 'Mori' };
+    const ids = { 1: 'mem-4', 2: 'mem-4' };
+    expect(note(positions, ids, ['1', '2'])).toBe('Mori is already at Position 1.');
+    expect(note(positions, ids, [])).toBe('Mori is already at Position 1.');
+    expect(note(positions, ids, ['3'])).toBe('Mori is already at Position 1.');
+  });
+
+  it('takes the name from the position it names, and from the other when that one has none yet', () => {
+    expect(note({ 1: 'Mori', 2: 'mori' }, { 1: 'mem-4', 2: 'mem-4' }, ['2'])).toBe('Mori is already at Position 1.');
+    expect(note({ 1: '', 2: 'Kato' }, { 1: 'mem-6', 2: 'mem-6' }, ['2'])).toBe('Kato is already at Position 1.');
   });
 
   it('trims the name, and says "This fighter" for a placement that has none yet', () => {
-    expect(lineupDuplicateNote({ 1: ' Aoki ', 2: 'Sato' }, { 1: 'mem-1', 2: 'mem-1' }, label)).toBe('Aoki is already at Position 2.');
-    expect(lineupDuplicateNote({ 1: '', 2: '' }, { 1: 'mem-1', 2: 'mem-1' }, label)).toBe('This fighter is already at Position 2.');
-    expect(lineupDuplicateNote({ 2: 'Sato' }, { 1: 'mem-1', 2: 'mem-1' }, label)).toBe('This fighter is already at Position 2.');
+    expect(note({ 1: ' Aoki ', 2: 'Sato' }, { 1: 'mem-1', 2: 'mem-1' })).toBe('Aoki is already at Position 1.');
+    expect(note({ 1: '', 2: '' }, { 1: 'mem-1', 2: 'mem-1' })).toBe('This fighter is already at Position 1.');
+    expect(note({ 1: '  ', 2: 'Sato' }, { 1: 'mem-1', 2: 'mem-1' })).toBe('Sato is already at Position 1.');
   });
 
   it('is not troubled by positions that hold no member', () => {
-    expect(lineupDuplicateNote({ 1: 'Aoki', 2: 'Sato', 3: 'Ito' }, { 1: '', 2: '', 3: 'mem-3' }, label)).toBe('');
+    expect(note({ 1: 'Aoki', 2: 'Sato', 3: 'Ito' }, { 1: '', 2: '', 3: 'mem-3' })).toBe('');
   });
 });
 

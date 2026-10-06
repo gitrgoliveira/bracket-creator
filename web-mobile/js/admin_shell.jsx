@@ -1005,14 +1005,18 @@ function CourtPicker({ value, courts, onChange, btnClassName = "", label = "", a
 
   // On open, seed the active option to the current court and move focus into
   // the popover. On close, return focus to the trigger so keyboard users
-  // aren't dropped to <body>.
+  // aren't dropped to <body>; only on a close, never as the picker mounts (it
+  // is closed then too): every queue and score row carries a picker, and focus
+  // jumped to the last one mounted, scrolling the page to it.
+  const wasOpen = useRefA(false);
   useEffectA(() => {
     if (open) {
       const cur = Math.max(0, courts.indexOf(value));
       setActiveIdx(cur);
-    } else {
+    } else if (wasOpen.current) {
       triggerRef.current && triggerRef.current.focus();
     }
+    wasOpen.current = open;
   }, [open]);
 
   // Focus the active option element whenever it changes while open.

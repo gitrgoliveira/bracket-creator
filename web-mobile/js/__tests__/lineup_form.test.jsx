@@ -1206,6 +1206,119 @@ describe('the team\'s members', () => {
       expect(view.result.current.squadRef.current).toEqual([...MEMBERS, NEW_MEMBER]);
     });
 
+    // A second change finds the member the first one put on the list, which is not a
+    // list that was read: it must not end the read made as the editor opened either.
+    it('does not end the read made as the editor opened by a second change: the member the first one added is not a list that was read', async () => {
+      const opening = deferred();
+      const afterFirst = deferred();
+      api.fetchSquads
+        .mockReturnValueOnce(opening.promise)
+        .mockReturnValueOnce(afterFirst.promise)
+        .mockRejectedValueOnce(new Error('offline'));
+      const view = renderHook((p) => useLineupForm(p), { initialProps: props() });
+      await act(async () => { await Promise.resolve(); });
+
+      // A Save minted a typed name, then the member was renamed, both while no list is shown.
+      await change(view, (list) => [...list, NEW_MEMBER]);
+      await change(view, (list) => list.map((m) => (m.id === NEW_MEMBER.id ? { ...m, name: 'Zed-san' } : m)));
+      expect(api.fetchSquads, 'both changes read the members again').toHaveBeenCalledTimes(3);
+      await act(async () => { opening.resolve({ t: MEMBERS }); });
+      await act(async () => { afterFirst.resolve({ t: [...MEMBERS, NEW_MEMBER] }); });
+
+      expect(view.result.current.squad.map((m) => m.id), 'the whole team is shown, not only the members the changes added').toEqual(['mem-1', 'mem-2', 'mem-3', 'mem-9']);
+      expect(view.result.current.squadUnavailable).toBe(false);
+    });
+
+    // While no read's list is shown the editor can only have changed members it made
+    // itself (a mint, then a rename of it), which the read made as the editor opened does
+    // not hold, so it cannot undo them and is kept. Every other read begun before a change
+    // holds an older state of those members, and is ended: the mint's own re-read answering
+    // after the rename would put the old spelling back, and keep it when the last re-read
+    // fails.
+    describe('before any list is shown', () => {
+      const RENAMED = (list) => list.map((m) => (m.id === NEW_MEMBER.id ? { ...m, name: 'Zed-san' } : m));
+      const nameOf = (list, id) => list.find((m) => m.id === id)?.name;
+      // The opening read, the mint's re-read (still out at the rename) and the rename's re-read, which fails.
+      const mintThenRename = async () => {
+        const opening = deferred();
+        const afterMint = deferred();
+        api.fetchSquads
+          .mockReturnValueOnce(opening.promise)
+          .mockReturnValueOnce(afterMint.promise)
+          .mockRejectedValueOnce(new Error('offline'));
+        const view = renderHook((p) => useLineupForm(p), { initialProps: props() });
+        await act(async () => { await Promise.resolve(); });
+        await change(view, (list) => [...list, NEW_MEMBER]);
+        await change(view, RENAMED);
+        expect(api.fetchSquads, 'each change reads the members again').toHaveBeenCalledTimes(3);
+        return { view, opening, afterMint };
+      };
+      const expectWholeTeamAndRename = (view) => {
+        expect(view.result.current.squad.map((m) => m.id), 'the rest of the team is shown').toEqual(['mem-1', 'mem-2', 'mem-3', 'mem-9']);
+        expect(nameOf(view.result.current.squad, 'mem-9'), 'under the name the rename gave').toBe('Zed-san');
+        expect(nameOf(view.result.current.squadRef.current, 'mem-9'), 'and on the ref a handler reads').toBe('Zed-san');
+        expect(view.result.current.squadUnavailable).toBe(false);
+      };
+
+      it('keeps the renamed spelling when the mint\'s re-read answers after the rename, and the opening read landing late still brings the rest of the team', async () => {
+        const { view, opening, afterMint } = await mintThenRename();
+
+        await act(async () => { afterMint.resolve({ t: [...MEMBERS, NEW_MEMBER] }); });
+        expect(nameOf(view.result.current.squad, 'mem-9'), 'the old spelling does not come back').toBe('Zed-san');
+        await act(async () => { opening.resolve({ t: MEMBERS }); });
+
+        expectWholeTeamAndRename(view);
+      });
+
+      it('keeps it too when the opening read answers first', async () => {
+        const { view, opening, afterMint } = await mintThenRename();
+
+        await act(async () => { opening.resolve({ t: MEMBERS }); });
+        await act(async () => { afterMint.resolve({ t: [...MEMBERS, NEW_MEMBER] }); });
+
+        expectWholeTeamAndRename(view);
+      });
+
+      it('ends a read begun for a followed lineup before the change, which holds the same older state', async () => {
+        const opening = deferred();
+        const followed = deferred();
+        api.fetchSquads
+          .mockReturnValueOnce(opening.promise)
+          .mockReturnValueOnce(followed.promise)
+          .mockRejectedValue(new Error('offline'));
+        const view = renderHook((p) => useLineupForm(p), { initialProps: props() });
+        await act(async () => { await Promise.resolve(); });
+        await announce();
+        expect(api.fetchSquads, 'the followed lineup reads the members').toHaveBeenCalledTimes(2);
+        await change(view, (list) => [...list, NEW_MEMBER]);
+
+        await act(async () => { followed.resolve({ t: MEMBERS }); });
+
+        expect(view.result.current.squad, 'it answers for the team as it was before the change').toEqual([NEW_MEMBER]);
+        await act(async () => { opening.resolve({ t: MEMBERS }); });
+        expect(view.result.current.squad, 'the read made as the editor opened brings the team').toEqual([...MEMBERS, NEW_MEMBER]);
+      });
+
+      it('shows the re-read begun after the last change, which holds it', async () => {
+        const opening = deferred();
+        const afterMint = deferred();
+        const afterRename = deferred();
+        api.fetchSquads
+          .mockReturnValueOnce(opening.promise)
+          .mockReturnValueOnce(afterMint.promise)
+          .mockReturnValueOnce(afterRename.promise);
+        const view = renderHook((p) => useLineupForm(p), { initialProps: props() });
+        await act(async () => { await Promise.resolve(); });
+        await change(view, (list) => [...list, NEW_MEMBER]);
+        await change(view, RENAMED);
+
+        await act(async () => { afterRename.resolve({ t: [...MEMBERS, { ...NEW_MEMBER, name: 'Zed-san' }, { id: 'mem-10', index: 5, name: 'Kato' }] }); });
+
+        expect(view.result.current.squad.map((m) => m.id), 'what that read holds, another device\'s member among it').toEqual(['mem-1', 'mem-2', 'mem-3', 'mem-9', 'mem-10']);
+        expect(nameOf(view.result.current.squad, 'mem-9')).toBe('Zed-san');
+      });
+    });
+
     it('shows nothing and flags nothing when the read after it fails: the list is the one the change made', async () => {
       const view = await mount();
       api.fetchSquads.mockRejectedValue(new Error('offline'));
@@ -1447,5 +1560,161 @@ describe('the team\'s members', () => {
     await act(async () => { await view.result.current.lineupToSave(); });
 
     expect(api.fetchSquads).toHaveBeenCalledTimes(1);
+  });
+
+  // A name typed before the first list is shown would be resolved against no members: a
+  // new name minted where the member's seeded slot is free, and the name of a member the
+  // team has refused by the server as a second one. The editors that resolve a typed name
+  // wait for the list first (waitForMembers), bounded by the deadline of any request.
+  describe('the wait for the first list', () => {
+    const openedWith = async (opening) => {
+      api.fetchSquads.mockReturnValueOnce(opening.promise);
+      const view = renderHook((p) => useLineupForm(p), { initialProps: props() });
+      await act(async () => { await Promise.resolve(); });
+      return view;
+    };
+
+    it('is nothing to wait for once the list the editor opened with is shown', async () => {
+      const view = await mount();
+      expect(view.result.current.waitForMembers()).toBeNull();
+    });
+
+    it('lasts until the read made as the editor opened shows its list, and says so', async () => {
+      const opening = deferred();
+      const view = await openedWith(opening);
+      let outcome;
+      const waiting = view.result.current.waitForMembers();
+      expect(waiting, 'the read is out').not.toBeNull();
+      waiting.then((listed) => { outcome = listed; });
+      await act(async () => { await Promise.resolve(); });
+      expect(outcome, 'still waiting').toBeUndefined();
+
+      await act(async () => { opening.resolve({ t: MEMBERS }); });
+
+      expect(await waiting).toBe(true);
+      expect(view.result.current.squad).toEqual(MEMBERS);
+      expect(view.result.current.waitForMembers()).toBeNull();
+    });
+
+    it('is ended by an empty list: a team with no members is a list that was read', async () => {
+      const opening = deferred();
+      const view = await openedWith(opening);
+      const waiting = view.result.current.waitForMembers();
+
+      await act(async () => { opening.resolve({ t: [] }); });
+
+      expect(await waiting).toBe(true);
+    });
+
+    it('is ended by the read failing, which says no list was shown, and there is nothing to wait for after it', async () => {
+      const opening = deferred();
+      const view = await openedWith(opening);
+      const waiting = view.result.current.waitForMembers();
+
+      await act(async () => { opening.reject(new Error('down')); });
+
+      expect(await waiting).toBe(false);
+      expect(view.result.current.squadUnavailable).toBe(true);
+      expect(view.result.current.waitForMembers(), 'the editor goes on without them, as it always did').toBeNull();
+    });
+
+    it('is ended at the deadline of any bounded request, saying no list was shown', async () => {
+      vi.useFakeTimers();
+      try {
+        const view = await openedWith(deferred());
+        let outcome = 'waiting';
+        view.result.current.waitForMembers().then((listed) => { outcome = listed; });
+
+        await act(async () => { await vi.advanceTimersByTimeAsync(FETCH_TIMEOUT_MS - 1); });
+        expect(outcome).toBe('waiting');
+        await act(async () => { await vi.advanceTimersByTimeAsync(1); });
+
+        expect(outcome).toBe(false);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    // A read that hangs holds up the first typed name for the deadline and no other: after
+    // it the editor goes on without the members, as it does when the read fails, and says
+    // so. A list that arrives later is still shown.
+    it('ends at the deadline for good: nothing is left to wait for, the members read as unavailable, and a list that arrives later is still shown', async () => {
+      vi.useFakeTimers();
+      try {
+        const opening = deferred();
+        const view = await openedWith(opening);
+        view.result.current.waitForMembers();
+
+        await act(async () => { await vi.advanceTimersByTimeAsync(FETCH_TIMEOUT_MS); });
+
+        expect(view.result.current.waitForMembers(), 'a name typed next goes on at once').toBeNull();
+        expect(view.result.current.squadUnavailable, 'and the editor says the members could not be read').toBe(true);
+
+        await act(async () => { opening.resolve({ t: MEMBERS }); });
+
+        expect(view.result.current.squad, 'the list that arrives late is shown').toEqual(MEMBERS);
+        expect(view.result.current.squadUnavailable, 'and the members are available again').toBe(false);
+        expect(view.result.current.waitForMembers()).toBeNull();
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it('is ended for a second wait begun meanwhile by the first one\'s deadline, not held for a deadline of its own', async () => {
+      vi.useFakeTimers();
+      try {
+        const view = await openedWith(deferred());
+        view.result.current.waitForMembers();
+        await act(async () => { await vi.advanceTimersByTimeAsync(5000); });
+        let second = 'waiting';
+        view.result.current.waitForMembers().then((listed) => { second = listed; });
+
+        await act(async () => { await vi.advanceTimersByTimeAsync(FETCH_TIMEOUT_MS - 5000); });
+
+        expect(second).toBe(false);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    // Only a read's list ends it: the members an editor's own change put on the list are
+    // not the team's, and a typed name resolved against them alone still misses the rest.
+    it('is not ended by a change the editor made itself, nor by that change\'s own read failing', async () => {
+      const opening = deferred();
+      const view = await openedWith(opening);
+      api.fetchSquads.mockRejectedValue(new Error('offline'));
+
+      await change(view, (list) => [...list, NEW_MEMBER]);
+
+      expect(view.result.current.squad).toEqual([NEW_MEMBER]);
+      expect(view.result.current.waitForMembers()).not.toBeNull();
+      await act(async () => { opening.resolve({ t: MEMBERS }); });
+      expect(view.result.current.waitForMembers()).toBeNull();
+    });
+
+    it('is not started again by a read that is out once a list has been shown', async () => {
+      const view = await mount();
+      api.fetchSquads.mockReturnValue(new Promise(() => {}));
+
+      await announce();
+
+      expect(api.fetchSquads, 'a followed lineup reads the members again').toHaveBeenCalledTimes(2);
+      expect(view.result.current.waitForMembers()).toBeNull();
+    });
+
+    it('starts again when the editor is given another team, whose members were not read yet', async () => {
+      const view = await mount();
+      expect(view.result.current.waitForMembers()).toBeNull();
+      const other = deferred();
+      api.fetchSquads.mockReturnValue(other.promise);
+
+      view.rerender(props({ teamId: 'u' }));
+      await act(async () => { await Promise.resolve(); });
+      const waiting = view.result.current.waitForMembers();
+      expect(waiting).not.toBeNull();
+
+      await act(async () => { other.resolve({ u: [{ id: 'oth-1', index: 1, name: 'Oda' }] }); });
+      expect(await waiting).toBe(true);
+    });
   });
 });

@@ -238,6 +238,16 @@ export function MatchLineupSideEditor({ comp, team, match, allMatches, password,
           positionsForResolver[key] = v;
         }
       });
+      // A typed name is resolved against the team's members, so they must have been
+      // read: against none, a new name is minted where the position's seeded slot is
+      // free, and the name of a member the team has is refused by the server as a
+      // second one. Members that cannot be read, or not in time, go without, as they
+      // always did, and the warning below says so.
+      let membersUnavailable = squadUnavailable;
+      if (Object.keys(positionsForResolver).length > 0) {
+        const waiting = form.waitForMembers();
+        if (waiting && !(await waiting)) membersUnavailable = true;
+      }
       // The member the resolver will put each typed name on, asked of the list the
       // resolver is given (the team's members as the Save's re-read left them), in its
       // order and with its own two lookups: the member the name belongs to, else the
@@ -329,7 +339,7 @@ export function MatchLineupSideEditor({ comp, team, match, allMatches, password,
       if (typeof showToast === "function") showToast(successMsg);
       const composer = window.AdminLineupHelpers?.memberIdentityWarning;
       if (typeof composer === "function") {
-        setLineupWarning(composer(memberFailures, squadUnavailable));
+        setLineupWarning(composer(memberFailures, membersUnavailable));
       }
     } catch (e) {
       setError(e?.message || "Failed to save lineup");

@@ -2053,6 +2053,15 @@ a:hover {
   border: 0;
 }
 
+/* Holds its space (operator ruling 2026-10-06): out of play for now, but the
+   box stays where it is, so nothing beside it or under it moves when it comes
+   and goes. visibility:hidden, not display:none, which would give the space
+   back; it also takes the element out of the accessibility tree (it is not
+   announced), the tab order and the pointer. */
+.holds-space {
+  visibility: hidden;
+}
+
 .pool-match-numbered-row__score {
   font-family: var(--font-mono);
   font-weight: 600;

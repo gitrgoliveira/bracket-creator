@@ -33,9 +33,10 @@ import (
 )
 
 // lineupRoundRefused is the 400 a PUT of a lineup for round 1 or later answers.
-// Releases up to v2.1.1 saved one from the Lineups page; the state layer moves
-// each onto a match (state.settleRoundLineups), and a team now carries the lineup
-// of its previous match instead.
+// Releases up to v2.1.1 saved one from the Lineups page; the state layer gives a
+// team that has one a lineup for each match it is seated in
+// (state.settleRoundLineups), and a team now carries the lineup of its previous
+// match instead.
 const lineupRoundRefused = "A lineup is saved as the team's starting lineup or for a match."
 
 // lineupSetStatus maps a SetTeamLineup error to the right HTTP status. Domain

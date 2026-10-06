@@ -12,12 +12,17 @@
 // typed for another bout finds nobody and names a second member instead of being
 // refused by the duplicate guard, and a member the sheet had just added vanishes with
 // its number. A list that shows the write is the server catching up: after it, a
-// change made elsewhere shows.
+// change made elsewhere shows. So does a list that shows neither the name written nor
+// the name the member had before it: it was not read before the write, so another
+// device gave the member that name, and it shows at once. The admin sheet reads its
+// members again whenever a lineup change is announced for its competition, so such a
+// change shows without reopening the sheet.
 
 import React from 'react';
 import { render, act, fireEvent, screen } from '@testing-library/react';
 import { describe, it, expect, vi, beforeAll, afterAll, beforeEach } from 'vitest';
 import { installWindowStubs } from '../helpers/stub_globals.js';
+import { FETCH_TIMEOUT_MS } from '../../write_result.jsx';
 
 const STUBBED_GLOBALS = {
   isHikiwake: () => false,
@@ -67,8 +72,10 @@ const flush = () => act(async () => { await new Promise((r) => setTimeout(r, 0))
 
 // What the server holds, so a lineup the sheet reads is the one it saved.
 let lineups;
-// The answers of the members reads the sheet has asked for, in the order it asked.
+// The answers of the members reads the sheet has asked for, in the order it asked, and
+// what makes each of them fail.
 let memberReads;
+let memberFailures;
 // Held until the test lets the competition arrive, which makes the sheet read the
 // members again.
 let competition;
@@ -76,10 +83,11 @@ let competition;
 beforeEach(() => {
   lineups = {};
   memberReads = [];
+  memberFailures = [];
   competition = deferred();
   window.API = {
     fetchCompetitionDetails: vi.fn(() => competition.promise),
-    fetchSquads: vi.fn(() => new Promise((resolve) => { memberReads.push(resolve); })),
+    fetchSquads: vi.fn(() => new Promise((resolve, reject) => { memberReads.push(resolve); memberFailures.push(reject); })),
     fetchLineupInForce: vi.fn(async (_c, teamId) => lineups[teamId] || null),
     putMatchLineup: vi.fn(async (_c, teamId, _m, positions, _pw, memberIds) => {
       lineups[teamId] = { positions, memberIds: memberIds || {} };
@@ -181,13 +189,26 @@ describe('team editor: a members read that predates the sheet\'s own write does 
     expect(label(container, 0, 'shiro'), 'the row still carries the added member').toBe('T2.6');
   });
 
+  // A name typed before the first list arrives waits for it, until the deadline of any
+  // request (team_editor_members_read_first.render.test.jsx). Once it has given up, the
+  // sheet knows no member and adds one, and the list answering late lacks it.
   it('keeps a member added before the first list arrived, which lacks it', async () => {
-    // The first read is still out, so the sheet knows no member yet and adds one.
-    await act(async () => {
-      render(<ScoreEditorModal match={teamMatch()} onClose={vi.fn()} onSubmit={vi.fn().mockResolvedValue(undefined)} password="" />);
-    });
-    await typeName(bout(document, 0, 'shiro'), 'Newcomer');
-    expect(window.API.addTeamMember).toHaveBeenCalledTimes(1);
+    vi.useFakeTimers();
+    try {
+      await act(async () => {
+        render(<ScoreEditorModal match={teamMatch()} onClose={vi.fn()} onSubmit={vi.fn().mockResolvedValue(undefined)} password="" />);
+      });
+      const input = bout(document, 0, 'shiro');
+      await act(async () => {
+        fireEvent.focus(input);
+        fireEvent.change(input, { target: { value: 'Newcomer' } });
+        fireEvent.keyDown(input, { key: 'Enter' });
+      });
+      await act(async () => { await vi.advanceTimersByTimeAsync(FETCH_TIMEOUT_MS); });
+      expect(window.API.addTeamMember).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.useRealTimers();
+    }
 
     await act(async () => { memberReads[0](teams(SHIRO_NAMED)); });
     await flush();
@@ -280,5 +301,161 @@ describe('team editor: the host\'s copy of the members that predates the sheet\'
     // Another device renames the member: that shows now.
     await hostHolds({ 'team-A': [{ id: 'a1', index: 1, name: 'Mei Ito-Kato' }, ...blank('a').slice(1)], 'team-B': blank('b') });
     expect(aka(0).value).toBe('Mei Ito-Kato');
+  });
+
+  it('keeps the name the sheet wrote over a copy that still holds the name the member had before the write', async () => {
+    await typeName(aka(0), 'Mei Ito');
+    expect(aka(0).value).toBe('Mei Ito');
+
+    // A copy refreshed before the write reached the server: a1 is unnamed in it, as it was.
+    await hostHolds({ 'team-A': blank('a'), 'team-B': [...blank('b'), { id: 'b6', index: 6, name: '' }] });
+
+    expect(aka(0).value).toBe('Mei Ito');
+  });
+
+  // A copy that holds neither the name written nor the name the member had was not read
+  // before the write: another device gave the member that name, so it shows, and the write
+  // is done with.
+  it('shows the name a copy gives the member the sheet named when another device gave it, and follows the copies after', async () => {
+    await typeName(aka(0), 'Mei Ito');
+    expect(aka(0).value).toBe('Mei Ito');
+
+    await hostHolds({ 'team-A': [{ id: 'a1', index: 1, name: 'Mei Endo' }, ...blank('a').slice(1)], 'team-B': blank('b') });
+    expect(aka(0).value, 'another device\'s name shows over the sheet\'s own').toBe('Mei Endo');
+
+    await hostHolds({ 'team-A': [{ id: 'a1', index: 1, name: 'Mei Endo-Kato' }, ...blank('a').slice(1)], 'team-B': blank('b') });
+    expect(aka(0).value, 'and the sheet\'s write no longer stands over what the copy holds').toBe('Mei Endo-Kato');
+  });
+
+  // The public page's copy follows lineup changes through the host's own refresh, so the
+  // sheet reads nothing for them.
+  it('is not read again on a lineup change: the host\'s copy is what it follows', async () => {
+    await act(async () => { window.dispatchEvent(new CustomEvent('lineup-updated', { detail: { competitionId: 'c1' } })); });
+    await flush();
+
+    expect(window.API.fetchSquads).not.toHaveBeenCalled();
+  });
+});
+
+// The admin sheet reads its own members, and reads them again whenever a lineup change is
+// announced for its competition (the event the server sends for a rename, a cleared name
+// and every lineup save), so a member renamed, cleared or added on another device shows
+// without reopening the sheet, as the lineup editors' members do.
+describe('team editor: the admin sheet follows the members another device changes', () => {
+  const announce = (competitionId = 'comp1') => act(async () => {
+    window.dispatchEvent(new CustomEvent('lineup-updated', { detail: { competitionId } }));
+  });
+  const shiro = (...names) => teams(members('b', names));
+  const OTHERS = ['Kai Mori', 'Yui Sato', 'Rin Ota', 'Sho Ueda'];
+  // Opens the sheet with its two reads (as it opens, and when the competition arrives) both answered.
+  async function open(firstNames) {
+    const utils = await mountWithSecondReadOut(shiro(...firstNames));
+    await act(async () => { memberReads[1](shiro(...firstNames)); });
+    await flush();
+    return utils;
+  }
+  const options = async (container) => {
+    await act(async () => { fireEvent.focus(bout(container, 2, 'shiro')); });
+    return offered(container, 2, 'shiro');
+  };
+
+  it('reads the members again and shows a rename made elsewhere', async () => {
+    const { container } = await open(['Ren Abe', ...OTHERS]);
+    expect((await options(container)).some((o) => o.includes('Ren Abe'))).toBe(true);
+
+    await announce();
+    expect(memberReads, 'a read for the announcement').toHaveLength(3);
+    await act(async () => { memberReads[2](shiro('Ren Abe-Kato', ...OTHERS)); });
+    await flush();
+
+    const after = await options(container);
+    expect(after.some((o) => o.includes('Ren Abe-Kato')), 'the new name is offered').toBe(true);
+    expect(after.some((o) => /Ren Abe(?!-)/.test(o)), 'and the old one no longer').toBe(false);
+  });
+
+  it('shows a member added or cleared elsewhere in the same way', async () => {
+    const { container } = await open(['Ren Abe', ...OTHERS]);
+
+    await announce();
+    await act(async () => { memberReads[2](teams([...members('b', ['', ...OTHERS]), { id: 'b6', index: 6, name: 'Newcomer' }])); });
+    await flush();
+
+    const after = await options(container);
+    expect(after.some((o) => o.includes('Newcomer')), 'the member another device added').toBe(true);
+    expect(after.some((o) => o.includes('Ren Abe')), 'the name another device cleared').toBe(false);
+  });
+
+  it('shows a rename made elsewhere of a member the sheet named, once a read has shown the sheet\'s own name', async () => {
+    const { container } = await open(['', ...OTHERS]);
+    await typeName(bout(container, 0, 'shiro'), 'Ito');
+    expect(window.API.renameTeamMember).toHaveBeenCalledWith('comp1', 'team-B', 'b1', 'Ito', '');
+    expect(bout(container, 0, 'shiro').value).toBe('Ito');
+
+    // The server announces the rename, and the read holds it.
+    await announce();
+    await act(async () => { memberReads[2](shiro('Ito', ...OTHERS)); });
+    await flush();
+    expect(bout(container, 0, 'shiro').value).toBe('Ito');
+
+    // Another device renames the member: it shows, where the sheet's write used to stand over it.
+    await announce();
+    await act(async () => { memberReads[3](shiro('Itoh', ...OTHERS)); });
+    await flush();
+    expect(bout(container, 0, 'shiro').value).toBe('Itoh');
+  });
+
+  // Only the read made as the sheet opens says the members could not be read: a later one
+  // that fails changes nothing, and the list that was read stays.
+  it('says nothing when a later read fails: the members that were read stay, and a name typed next carries no warning', async () => {
+    const { container } = await open(['', ...OTHERS]);
+    await announce();
+    await act(async () => { memberFailures[2](new TypeError('Failed to fetch')); });
+    await flush();
+
+    await typeName(bout(container, 0, 'shiro'), 'Ito');
+
+    expect(window.API.renameTeamMember, 'resolved against the list that was read').toHaveBeenCalledWith('comp1', 'team-B', 'b1', 'Ito', '');
+    expect(notices(container), 'no warning that the members could not be read').toHaveLength(0);
+  });
+
+  it('keeps the name the sheet wrote over a read that predates the write, as before', async () => {
+    const { container } = await open(['', ...OTHERS]);
+    await announce();
+    await typeName(bout(container, 0, 'shiro'), 'Ito');
+
+    // The read begun by the announcement, before the write, answers with the member unnamed.
+    await act(async () => { memberReads[2](shiro('', ...OTHERS)); });
+    await flush();
+
+    expect(bout(container, 0, 'shiro').value).toBe('Ito');
+  });
+
+  it('takes the answers in the order their reads began: an older answer arriving after a newer one is ignored', async () => {
+    const { container } = await open(['Ren Abe', ...OTHERS]);
+    await announce();
+    await announce();
+    expect(memberReads, 'one read for each announcement').toHaveLength(4);
+
+    await act(async () => { memberReads[3](shiro('Ren Newer', ...OTHERS)); });
+    await flush();
+    await act(async () => { memberReads[2](shiro('Ren Older', ...OTHERS)); });
+    await flush();
+
+    const after = await options(container);
+    expect(after.some((o) => o.includes('Ren Newer')), 'the newer list stays').toBe(true);
+    expect(after.some((o) => o.includes('Ren Older')), 'the older one does not replace it').toBe(false);
+  });
+
+  it('still takes an older answer while no newer one has been, and ignores an announcement for another competition', async () => {
+    const { container } = await open(['Ren Abe', ...OTHERS]);
+    await announce('another-competition');
+    expect(memberReads, 'nothing is read for another competition').toHaveLength(2);
+
+    await announce();
+    await announce();
+    await act(async () => { memberReads[2](shiro('Ren Older', ...OTHERS)); });
+    await flush();
+
+    expect((await options(container)).some((o) => o.includes('Ren Older')), 'the only answer so far is taken').toBe(true);
   });
 });

@@ -516,15 +516,37 @@ type Competition struct {
 	// RoundLineupsConverted records that no lineup of this competition waits
 	// on a round: releases up to v2.1.1 let the Lineups page save a lineup for
 	// round r, and a team now carries the lineup of its previous match
-	// instead, so each of those is moved onto the match the team first fields
-	// it in (settleRoundLineups, round_lineups.go). The load repair and the
-	// writes that seat a team in the draw run only while it is false, and set
-	// it once nothing is left waiting for a team to be seated; POST
-	// /competitions sets it on a new competition, which has nothing to convert
-	// and no writer left that creates a round lineup. Server-managed: `json:"-"`
-	// keeps it off the wire, and the settings PUT copies onto the stored
-	// record, so nothing a client sends can clear it.
+	// instead, so a team with such a lineup is given a lineup of its own for
+	// every match it is seated in, equal to what v2.1.1 showed there
+	// (settleRoundLineups, round_lineups.go). The load repair and the writes
+	// that seat a team in the draw run only while it is false, and set it once
+	// the competition is completed (the round lineups are removed then);
+	// POST /competitions sets it on a new competition, which has nothing to
+	// convert and no writer left that creates a round lineup. Server-managed:
+	// `json:"-"` keeps it off the wire, and the settings PUT copies onto the
+	// stored record, so nothing a client sends can clear it.
 	RoundLineupsConverted bool `yaml:"round_lineups_converted,omitempty" json:"-"`
+
+	// RoundLineupsGiven records which (team, match) pairs that conversion has
+	// settled, while RoundLineupsConverted is false: it maps a team's
+	// participant id to the ids of the matches settled for it, each list sorted
+	// and without duplicates, so config.md (which people read and edit) shows
+	//
+	//	round_lineups_given:
+	//	    <team id>:
+	//	        - r0-m0
+	//	        - r1-m0
+	//
+	// A pair listed here is never given a lineup again, whatever lineups.yaml
+	// holds, so a lineup the operator removes from a match ("Use the previous
+	// match's lineup") stays removed; a pair seated and not listed is given the
+	// lineup v2.1.1 showed there when it has none, and listed either way. The
+	// conversion clears it when it sets the marker, and DiscardDraw clears it,
+	// because the next draw reuses the match ids and is given its lineups
+	// again. Server-managed like the marker: `json:"-"` keeps it off the wire,
+	// and the settings PUT copies onto the stored record, so nothing a client
+	// sends can change it.
+	RoundLineupsGiven map[string][]string `yaml:"round_lineups_given,omitempty" json:"-"`
 
 	Players []domain.Player `yaml:"-" json:"players"`
 }

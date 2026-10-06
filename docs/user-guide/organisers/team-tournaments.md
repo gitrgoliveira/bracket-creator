@@ -21,9 +21,9 @@ To go back to the previous match's lineup, choose **Use the previous match's lin
 
 Changes you make to a lineup and have not saved are kept in that browser tab, so a reload, going back, or closing the lineup panel does not lose them. When you open the same lineup again, on the **Lineups** page or in the lineup panel, it shows **Unsaved lineup changes restored** with a **Discard** button that puts the saved lineup back. Nothing is saved until you press **Save lineup**. If the lineup changed in the meantime, for example saved from another device, the kept changes are not applied, and a notice lists the names that were not restored.
 
-Lineups that an earlier version of the app saved on the **Lineups** page for a round are moved to this way of working when the app starts. A team with no **Starting lineup** gets the lineup of its earliest round as its **Starting lineup**. A lineup saved for a later round becomes the team's lineup for its first match of that round, as soon as the team is seated in that match, and the team carries it from there. A lineup for a round the team can no longer reach is removed.
+Lineups that an earlier version of the app saved on the **Lineups** page for a round are converted when the app starts, so every match shows the lineup that version showed for it. Each match the team is seated in gets that lineup as its own, and a match the team reaches later, such as its next knockout match, gets it as soon as the team is seated there. You can change or remove any of these like any other match's lineup, and a lineup you remove stays removed. A team with no **Starting lineup** gets the lineup of its latest round as its **Starting lineup**, which is what that version showed before the team's first saved round. The round lineups themselves are removed once the competition is completed.
 
-Discarding a draw removes the lineups of its matches, including any moved there from an earlier version, since a new draw makes new matches. Each team's **Starting lineup** stays.
+Discarding a draw removes the lineups of its matches, including those converted from an earlier version, since a new draw makes new matches. The new draw's matches are given the converted lineups again, and each team's **Starting lineup** stays.
 
 ### Team members
 

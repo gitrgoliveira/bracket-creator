@@ -18,11 +18,12 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// A competition recorded by v2.1.1 with a Lineups-page lineup for round 2
-// (stored as round 1): once the data folder is loaded, the lineup-in-force read
-// gives the team its starting lineup before its round 1 match and the moved
-// lineup from that match on, naming the match it was moved onto.
-func TestPublicLineupInForceGET_AfterTheRoundLineupsAreMoved(t *testing.T) {
+// A competition recorded by v2.1.1 with a Lineups-page lineup for round 1 and
+// one for round 2 (stored as rounds 0 and 1): once the data folder is loaded, the
+// lineup-in-force read gives the team, at each match it is seated in, the lineup
+// v2.1.1 showed there, naming the match it now belongs to. The round lineup
+// itself is kept until the competition is completed.
+func TestPublicLineupInForceGET_AfterTheRoundLineupsAreConverted(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	dir := t.TempDir()
 	seed, err := state.NewStore(dir)
@@ -65,11 +66,11 @@ func TestPublicLineupInForceGET_AfterTheRoundLineupsAreMoved(t *testing.T) {
 	r := gin.New()
 	RegisterPublicLineupHandlers(r.Group("/api"), store, store, engine.New(store))
 
-	start := inForceBody(t, r, compID, tora, "r0-m0")
-	assert.Equal(t, true, start["saved"])
-	assert.Equal(t, map[string]any{"1": "Sato"}, start["positions"], "before round 2 the team fields its starting lineup")
-	assert.Equal(t, float64(0), start["sourceRound"])
-	assert.NotContains(t, start, "sourceMatchId")
+	first := inForceBody(t, r, compID, tora, "r0-m0")
+	assert.Equal(t, true, first["saved"])
+	assert.Equal(t, map[string]any{"1": "Sato"}, first["positions"], "at its first match the team fields what v2.1.1 showed there: the lineup saved for round 1")
+	assert.Equal(t, "r0-m0", first["sourceMatchId"], "which is now the lineup of that match")
+	assert.NotContains(t, first, "sourceRound")
 
 	final := inForceBody(t, r, compID, tora, "r1-m0")
 	assert.Equal(t, true, final["saved"])
@@ -77,14 +78,39 @@ func TestPublicLineupInForceGET_AfterTheRoundLineupsAreMoved(t *testing.T) {
 	assert.Equal(t, "r1-m0", final["sourceMatchId"], "which is now the lineup of that match")
 	assert.NotContains(t, final, "sourceRound")
 
+	start := inForceBody(t, r, compID, tora, "a-match-the-draw-does-not-hold")
+	assert.Equal(t, true, start["saved"])
+	assert.Equal(t, map[string]any{"1": "Sato"}, start["positions"], "a match the draw does not hold gets the starting lineup")
+	assert.Equal(t, float64(0), start["sourceRound"])
+	assert.NotContains(t, start, "sourceMatchId")
+
 	waiting := inForceBody(t, r, compID, usagi, "r1-m0")
 	assert.Equal(t, false, waiting["saved"], "a team with no lineup has none in force")
 
-	req := httptest.NewRequest(http.MethodGet, "/api/competitions/"+compID+"/teams/"+tora+"/lineups/1", nil)
-	w := httptest.NewRecorder()
-	r.ServeHTTP(w, req)
-	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
-	var roundOne map[string]any
-	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &roundOne))
-	assert.Equal(t, false, roundOne["saved"], "the round lineup itself is gone: it was moved")
+	roundOneSaved := func(r *gin.Engine) any {
+		req := httptest.NewRequest(http.MethodGet, "/api/competitions/"+compID+"/teams/"+tora+"/lineups/1", nil)
+		w := httptest.NewRecorder()
+		r.ServeHTTP(w, req)
+		require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+		var roundOne map[string]any
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &roundOne))
+		return roundOne["saved"]
+	}
+	assert.Equal(t, true, roundOneSaved(r), "while the competition is on the round lineup is kept: a correction can still seat a team")
+
+	// Completed in a write the draw's hooks do not see: the next load retires it.
+	_, err = store.UpdateCompetitionChanged(compID, func(c *state.Competition) (*state.Competition, error) {
+		c.Status = state.CompStatusComplete
+		return c, nil
+	})
+	require.NoError(t, err)
+	restarted, err := state.NewStore(dir)
+	require.NoError(t, err)
+	r = gin.New()
+	RegisterPublicLineupHandlers(r.Group("/api"), restarted, restarted, engine.New(restarted))
+
+	assert.Equal(t, false, roundOneSaved(r), "the round lineup itself is gone: each match it was shown at holds its own lineup")
+	again := inForceBody(t, r, compID, tora, "r1-m0")
+	assert.Equal(t, map[string]any{"1": "Ito"}, again["positions"])
+	assert.Equal(t, "r1-m0", again["sourceMatchId"])
 }

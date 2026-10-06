@@ -184,14 +184,19 @@ reuses the match ids, and keeps the starting lineups. One rule in the engine own
 the kachinuki roster, the Kachinuki Detail export and the public `lineup-in-force` read all
 ask it.
 
-Releases up to v2.1.1 also saved a lineup for a round. Such a lineup is moved into this form
-rather than read. A team with no starting lineup gets its lowest round's lineup as its
-starting lineup. A lineup stored under a team's name is stored under the team's id when
-exactly one team has that name. Each round lineup becomes the team's lineup for its first
-match, in match order, at that round or later, once the team is seated in it: the write that
-seats the team moves it, in the same transaction. A round lineup that no match can seat its
-team in any more is removed. A competition's `config.md` records `round_lineups_converted`
-once nothing is left to move, and a new competition starts with it set.
+Releases up to v2.1.1 also saved a lineup for a round, and read the lineup a team fielded at
+a match as the match's own, else the round lineup with the highest round at or below the
+match's round, else the highest round. Such a lineup is converted into this form rather than
+read. A lineup stored under a team's name is stored under the team's id when exactly one team
+has that name. A team with a lineup for round 1 or later is given, at every match it is
+seated in by participant id, a lineup of its own equal to the one v2.1.1 showed there; a
+match it is seated in later is given its lineup by the write that seats it, in the same
+transaction. `config.md` lists, under each team's id, the matches already given one
+(`round_lineups_given`), so a lineup removed from one of them is not given again; discarding
+the draw clears the list, since the next draw reuses the match ids. Such a team with no starting lineup gets the one
+v2.1.1 showed before its first saved round, its highest round's. The round lineups stay,
+never read, until the competition is completed; then they are removed and `config.md`
+records `round_lineups_converted`. A new competition starts with it set.
 
 ## 3. The match and result model
 

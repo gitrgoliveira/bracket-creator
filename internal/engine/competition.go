@@ -725,6 +725,10 @@ func (e *Engine) DiscardDraw(id string) error {
 		}
 		current.Status = state.CompStatusSetup
 		current.SwissCurrentRound = 0 // reset so a fresh GenerateDraw can re-initialise it
+		// The pairs the round-lineup conversion had settled belong to this
+		// draw's match ids, which the next draw reuses: its matches are given
+		// their lineups again.
+		current.RoundLineupsGiven = nil
 		return current, nil
 	})
 	return err

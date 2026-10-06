@@ -131,6 +131,7 @@ func (s *Store) copyCompetition(c *Competition) *Competition {
 		cp.Players = make([]domain.Player, len(c.Players))
 		copy(cp.Players, c.Players)
 	}
+	cp.RoundLineupsGiven = cloneRoundLineupsGiven(c.RoundLineupsGiven)
 	return &cp
 }
 

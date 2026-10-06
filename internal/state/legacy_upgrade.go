@@ -188,14 +188,18 @@ import (
 //     page of releases up to v2.1.1) convert ON READ, below, AFTER the id
 //     repairs above (round_lineups.go owns the rule and the frame each kind of
 //     match was read at). A team now carries the lineup of its previous match,
-//     so each round lineup becomes the team's lineup for the first match it
-//     is seated in, in match order, at that round or later; a lineup saved
-//     under a team's NAME is keyed by the team's id; a team with only later
-//     rounds gets the lowest as its starting lineup. A lineup no match can ever
-//     seat its team in is dropped, and one whose team is not seated yet waits:
-//     the write that seats the team moves it (Store.settleRoundLineupsAfterWrite,
+//     so a team with a round lineup is given, for every match it is seated in,
+//     a lineup of its own equal to what v2.1.1 showed there; a lineup saved
+//     under a team's NAME is keyed by the team's id; a team with no starting
+//     lineup gets what v2.1.1 showed before any round it saved (the highest)
+//     as one. The round lineups stay until the competition is completed, and
+//     a team seated in a match later (a correction can do it) is given its
+//     lineup in the write that seats it (Store.settleRoundLineupsAfterWrite,
 //     storeTx.settleRoundLineupsAtCommit, the one place the draw's writers
-//     share). Keyed on Competition.RoundLineupsConverted, set once nothing waits.
+//     share). Competition.RoundLineupsGiven records which (team, match) pairs
+//     were settled, so a lineup the operator removes stays removed. Keyed on
+//     Competition.RoundLineupsConverted, set when the competition is
+//     completed.
 //
 //   - pool-matches.csv / bracket.json SUB-BOUT rows (SubMatchResult's
 //     SideAMemberID/SideBMemberID/WinnerMemberID) convert in the SAME pass
@@ -2174,19 +2178,21 @@ func (s *Store) upgradeLineupMemberIDsLocked(compID string, roster *legacyUpgrad
 // upgradeRoundLineupsLocked is the load repair for the round lineups releases up
 // to v2.1.1 saved (round_lineups.go owns the rule): the first settlement of a
 // competition that has not been settled, over what its files hold now. Runs
-// after the side-id repairs (a lineup moves only onto a match its team is seated
-// in by id) and the lineup member-id repair (so the copies carry the ids).
+// after the side-id repairs (a lineup is given only for a match its team is
+// seated in by id) and the lineup member-id repair (so the copies carry the ids).
 // Caller holds the per-comp lock.
 func (s *Store) upgradeRoundLineupsLocked(compID string, roster *legacyUpgradeRoster) error {
 	st := s.directRoundLineupStage(compID)
 	st.comp = roster.competition
 	st.players = func(*Competition) ([]domain.Player, error) { return roster.rosterPlayers() }
-	marked, err := st.settle(true)
-	if marked {
+	saved, err := st.settle(true)
+	if saved != nil {
 		// The roster's copy of the record is the one the steps after this one
-		// save from, so it has to carry the marker or they would write it away.
+		// save from, so it has to carry what the settlement saved (the marker,
+		// or the pairs it settled) or they would write it away.
 		if comp, cerr := roster.competition(); cerr == nil && comp != nil {
-			comp.RoundLineupsConverted = true
+			comp.RoundLineupsConverted = saved.RoundLineupsConverted
+			comp.RoundLineupsGiven = cloneRoundLineupsGiven(saved.RoundLineupsGiven)
 		}
 	}
 	return err

@@ -531,6 +531,21 @@ function AdminLineup({ comp, team, matchId = "", matchLabel = "", allMatches, pa
     const posKey = addingPos;
     const name = addingName.trim();
     if (!posKey || !name) { setAddingPos(null); setAddingName(""); return; }
+    // The name is judged against the team's members, so they must have been
+    // read: against none, a member the team has would be added again (and the
+    // server would refuse it as a second member of that name), and a position
+    // whose seeded slot is free would mint rather than name it. Members that
+    // cannot be read, or not in time, go without, as they always did. What is
+    // judged is the list and the placements as they are once the wait is over,
+    // not the ones this handler closed over.
+    const waiting = form.waitForMembers();
+    if (waiting) {
+      setAddBusy(true);
+      await waiting;
+      setAddBusy(false);
+    }
+    const members = form.squadRef.current;
+    const placed = memberIdsRef.current;
     // The three outcomes the resolver itself has, in ITS order, so the copy
     // can never describe a branch the action will not take. First: the name
     // is an EXISTING member's (same normalisation as the resolver): nothing
@@ -538,9 +553,9 @@ function AdminLineup({ comp, team, matchId = "", matchLabel = "", allMatches, pa
     // confirmation because nothing permanent happens; unless the lineup
     // already fields them elsewhere, which is refused where the list would
     // not have offered them.
-    const existingMember = resolveMemberIdForName(squad, name);
+    const existingMember = resolveMemberIdForName(members, name);
     if (existingMember) {
-      const elsewhere = memberPlacedElsewhere(memberIds, posKey, existingMember.id);
+      const elsewhere = memberPlacedElsewhere(placed, posKey, existingMember.id);
       if (elsewhere) {
         setError(alreadyPlacedNote(existingMember.name, lineupPositionLabel(elsewhere)));
         return;
@@ -550,7 +565,7 @@ function AdminLineup({ comp, team, matchId = "", matchLabel = "", allMatches, pa
       setAddingName("");
       return;
     }
-    const blankMember = blankMemberForPosition(squad, posKey, memberIds);
+    const blankMember = blankMemberForPosition(members, posKey, placed);
     const message = blankMember
       ? `Name ${squadSlotLabel(teamNumber, blankMember.index)} as "${name}"?`
       : `Add "${name}" as a new member of ${team?.name || team?.Name || "this team"}? This adds a new position to the team. Once added, it can be cleared but never removed.`;
@@ -563,7 +578,7 @@ function AdminLineup({ comp, team, matchId = "", matchLabel = "", allMatches, pa
     setAddBusy(true);
     setError("");
     try {
-      const resolved = await resolveMemberIdsForPositions(compId, teamId, { [posKey]: name }, squad, password, memberIds);
+      const resolved = await resolveMemberIdsForPositions(compId, teamId, { [posKey]: name }, members, password, placed);
       const failure = (resolved.failures || []).find(f => f.position === posKey);
       if (failure) {
         setError(failure.reason || "Failed to add team member");

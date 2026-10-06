@@ -15,10 +15,12 @@ package engine
 //  3. else, for a match the draw does not hold, the starting lineup.
 //
 // A lineup saved for a later round (round >= 1, which releases up to v2.1.1 let
-// the Lineups page save) is not read. The state layer moves each onto the first
-// match its team is seated in at that round (state.settleRoundLineups), on load
-// and then in the write that seats the team, so one that still exists is
-// waiting for its team to be seated, and cannot apply.
+// the Lineups page save) is not read. The state layer gives a team that has one
+// a lineup of its own for every match it is seated in, equal to what v2.1.1
+// showed there (state.settleRoundLineups), on load and then in the write that
+// seats the team in a match, so one that still exists is kept until the
+// competition is completed, for a team a correction may still seat, and cannot
+// apply.
 //
 // Match order is state.MatchPlace: pool and league matches in pool-match number,
 // which is playing order (a Swiss team's rounds in round order); knockout matches
@@ -51,7 +53,8 @@ type LineupSource struct {
 	MatchID string
 	// Round is the Lineups-page round the lineup was saved for, meaningful
 	// only when MatchID is empty. It is 0, the team's starting lineup: a
-	// lineup for a later round is moved onto a match, never read as one.
+	// lineup for a later round is given to the matches it applied to, never
+	// read as one.
 	Round int
 }
 

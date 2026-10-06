@@ -14,9 +14,10 @@
 // is shown, whether it differs, the draft, the confirmed save and giving a
 // match's own lineup up. The editors keep their layouts and their save bodies.
 //
-// The rules for the team's members (mergeMembers, changedMembers, takeMembers) are
-// exported too: the team score sheet writes members from its bout rows and keeps its
-// own lists, and asks the same owner what a list that arrives does to them.
+// The rules for the team's members (mergeMembers, changedMembers, recordWrites,
+// takeMembers and newMembersWait, the wait for a team's first list) are exported too:
+// the team score sheet writes members from its bout rows and keeps its own lists, and
+// asks the same owner what a list that arrives does to them.
 //
 // Its imports are lineup_resolver.jsx, the owner of the lineup read, of which
 // positions differ and of what a Save writes, and write_result.jsx, the leaf that
@@ -238,25 +239,92 @@ export function changedMembers(before, after) {
   return after.filter((m) => !was.has(m.id) || (was.get(m.id).name || '') !== (m.name || ''));
 }
 
+// The writes an editor that writes members itself made, noted for takeMembers, by member
+// id: for each member of `written` (what the editor named or added, once the server holds
+// it), the name it gave (`name`) and the names the member had in the lists that predate
+// the write (`was`): the name it has in `shown`, the list the editor shows, none for a
+// member the write added, and the names before an earlier write of the same member that
+// no list has shown yet, since a list read before that one still holds them. Returns the
+// writes pending, `pending` and these, without changing `pending`.
+export function recordWrites(pending, shown, written) {
+  const noted = { ...pending };
+  written.forEach((mem) => {
+    const earlier = pending[mem.id];
+    const before = shown.find((s) => s.id === mem.id);
+    let was = [];
+    if (earlier) was = [...earlier.was, earlier.name];
+    else if (before) was = [before.name || ''];
+    noted[mem.id] = { name: mem.name || '', was };
+  });
+  return noted;
+}
+
 // A list of the team's members arrives (a read's answer, the host's own copy) at an
 // editor that writes members itself. `pending` holds what the editor wrote that no
-// list that arrived has shown yet, by member id: the name it gave. A list can predate
-// a write, so the write stands over it: the member the editor named stays named, and
-// one it added stays (the list shown holds it, which mergeMembers keeps). A list that
-// shows the name is the server caught up, so the write is done with and a change to
-// that member made elsewhere shows from then on. Returns the members to show and the
-// writes still pending.
+// list that arrived has shown yet, by member id (see recordWrites). A list that holds
+// the name written is the server caught up, so the write is done with, even when the
+// member had that name before (a rename and a rename back). A list that lacks the
+// member, or holds a name the member had before the write, was read before it, so the
+// write stands over it: the member the editor named stays named, and one it added
+// stays (the list shown holds it, which mergeMembers keeps). Any other name was given
+// on another device: it shows, and the write is done with, so a change to that member
+// made elsewhere shows from then on. (A change made before the write but read after it
+// shows for a moment: the next list holds the write, and corrects it.) Returns the
+// members to show and the writes still pending.
 export function takeMembers(shown, arriving, pending) {
   const standing = {};
   const members = mergeMembers(shown, arriving).map((m) => {
     const wrote = pending[m.id];
     if (wrote === undefined) return m;
     const theirs = arriving.find((a) => a.id === m.id);
-    if (theirs && (theirs.name || '') === wrote) return m;
+    if (theirs) {
+      const name = theirs.name || '';
+      if (name === wrote.name || !wrote.was.includes(name)) return m;
+    }
     standing[m.id] = wrote;
-    return { ...m, name: wrote };
+    return { ...m, name: wrote.name };
   });
   return { members, pending: standing };
+}
+
+// The first list of a team's members that a read shows, and the wait for it. A name
+// typed before one is shown is resolved against no members: a new name is minted where
+// the member's seeded slot is free, and the name of a member the team already has is
+// refused by the server as a second member of that name. `listed` says a READ's list has
+// been shown for the team (a change an editor made itself is not one). `pending()` is
+// null when there is nothing out to wait for (a list is shown, or the read failed: the
+// editor goes on without one, as it always did), else a promise that ends when a list
+// is shown, when the read fails or at the deadline of any bounded request, and says
+// whether a list was shown by then: when none was, the editor owns up to going on
+// without (the members-unavailable warning). The deadline ends the wait for good: a read
+// that hangs holds up the first name typed and no other, which goes on at once, and
+// `onTimeout` lets the editor flag the members as unavailable for it as it does when
+// the read fails. A list that arrives later is still shown (`show`). Another team starts
+// a new wait.
+export function newMembersWait(onTimeout) {
+  let settle;
+  const done = new Promise((resolve) => { settle = resolve; });
+  const end = () => {
+    wait.ended = true;
+    settle();
+  };
+  const wait = {
+    listed: false,
+    ended: false,
+    show: () => {
+      wait.listed = true;
+      end();
+    },
+    fail: end,
+    pending: () => (wait.ended ? null : withinDeadline(done, FETCH_TIMEOUT_MS).then((outcome) => {
+      if (outcome === TIMED_OUT) {
+        end();
+        if (onTimeout) onTimeout();
+      }
+      return wait.listed;
+    })),
+  };
+  return wait;
 }
 
 // useLineupForm: the state of one lineup editor, for a team's match (`matchId`)
@@ -303,6 +371,14 @@ export function takeMembers(shown, arriving, pending) {
 //                         carries its team's previous one, and show that one
 //   removeStored(remove, failure)  the same for any other stored lineup
 //   retry()               read again ("Try again")
+//   waitForMembers()      what an editor awaits before it resolves a typed name:
+//                         null when nothing is out to wait for (a list of the team's
+//                         members that was read is shown, or the read failed), else
+//                         a promise that ends when one is shown, when the read fails
+//                         or at the deadline of any bounded request, and says whether
+//                         one was shown (newMembersWait). Against no list the name
+//                         would be minted where the member's seeded slot is free, or
+//                         where the team already has the member
 // A lineup change announced for the competition (the lineup-updated event) is
 // followed: the lineup is read again and shown, unless the form has edits or a
 // removal is out (one announced while a read of the lineup is out waits for that
@@ -369,9 +445,20 @@ export function useLineupForm({ compId, teamId, matchId = '', positionKeys, pass
   // one, so an older answer never replaces a newer one, and a read that shows nothing
   // (it failed, was not answered in time, or was dropped) never stops an older read
   // still out from landing. An editor's own change ends every read begun before it
-  // (see changeMembers).
+  // (see changeMembers): all of them once a read's list is shown, and while none is,
+  // all but the read made as the editor opened, whose number membersOpened keeps, up
+  // to membersChanged, the last number such a change ended.
   const membersRead = useRef(0);
   const membersShown = useRef(0);
+  const membersOpened = useRef(0);
+  const membersChanged = useRef(0);
+  // Whether a read's list is shown for this team, and the wait for it (see
+  // newMembersWait): what changeMembers and an editor's typed name both ask. Another
+  // team starts it again. A wait the deadline ended flags the members as unavailable,
+  // as a read that failed does, so the names typed after it say so too.
+  const firstMembers = useRef(null);
+  const newWait = () => newMembersWait(() => setSquadUnavailable(true));
+  if (firstMembers.current === null) firstMembers.current = newWait();
 
   // The ONE door every list of the team's members comes through: showMembers, below,
   // for a read's answer, and changeMembers for an editor's own change. It may be
@@ -387,12 +474,16 @@ export function useLineupForm({ compId, teamId, matchId = '', positionKeys, pass
   };
 
   // Shows what a members read answered: a list, not a failure (null) or the
-  // deadline (TIMED_OUT), from a read that began after the one shown.
+  // deadline (TIMED_OUT), from a read that began after the one shown, and, unless
+  // it is the read made as the editor opened, after the last change that ended the
+  // reads begun before it while no list was shown (see changeMembers).
   const showMembers = (mine, members) => {
     if (!Array.isArray(members) || mine <= membersShown.current) return;
+    if (mine !== membersOpened.current && mine <= membersChanged.current) return;
     membersShown.current = mine;
     setSquad(members);
     setSquadUnavailable(false);
+    firstMembers.current.show();
   };
 
   // The ONE door for an editor's own change to the team's members, made once the
@@ -401,16 +492,24 @@ export function useLineupForm({ compId, teamId, matchId = '', positionKeys, pass
   // it with the list from before, and an arriving list wins over the one shown (see
   // mergeMembers): a rename would be undone, and the new name typed next would find
   // nobody, so it would be put on an unnamed member or minted as a second one. Once a
-  // list is shown, every read begun so far is therefore ended. While none is (the
-  // read made as the editor opened is still out, and a Save minted a typed name
+  // read's list is shown, every read begun so far is therefore ended. While none is
+  // (the read made as the editor opened is still out, and a Save minted a typed name
   // meanwhile), that read is not ended: it holds the rest of the team, and the
-  // change has nothing of it to undo. Either way the members are read again: that
+  // editor can only have changed members it made itself, which it does not hold, so
+  // it has nothing of the change to undo. Every other read begun before the change is
+  // ended all the same (the re-read of an earlier change, a Save's, a followed
+  // lineup's): each holds an older state of the members the editor made, and landing
+  // after a rename it would put the old spelling back, and keep it when the last
+  // re-read fails. What counts is a READ's list: the members an earlier change of the
+  // editor's own put on the list are not one, or a second change would end the read
+  // that still holds the rest of the team. Either way the members are read again: that
   // read begins after the change, so it holds it, and a member another device added
   // meanwhile still arrives. One that fails shows nothing and changes no flag.
   const changeMembers = (next) => {
-    const listed = squadRef.current.length > 0;
+    const listed = firstMembers.current.listed;
     setSquad(next);
     if (listed) membersShown.current = membersRead.current;
+    else membersChanged.current = membersRead.current;
     const mine = ++membersRead.current;
     readMembers(compId, teamId, password).then((members) => showMembers(mine, members));
   };
@@ -552,6 +651,7 @@ export function useLineupForm({ compId, teamId, matchId = '', positionKeys, pass
     squadTeam.current = team;
     squadRef.current = [];
     setSquadList([]);
+    firstMembers.current = newWait();
   }, [compId, teamId]);
 
   // The team's members, independent of the lineup read: one that fails must not
@@ -567,9 +667,14 @@ export function useLineupForm({ compId, teamId, matchId = '', positionKeys, pass
   useEffect(() => {
     if (!compId || !teamId) return undefined;
     const mine = ++membersRead.current;
+    membersOpened.current = mine;
     readMembers(compId, teamId, password).then((members) => {
-      if (members) showMembers(mine, members);
-      else if (mine > membersShown.current) setSquadUnavailable(true);
+      if (members) {
+        showMembers(mine, members);
+      } else if (mine > membersShown.current) {
+        setSquadUnavailable(true);
+        firstMembers.current.fail();
+      }
     });
     return () => { membersShown.current = membersRead.current; };
   }, [compId, teamId, password]);
@@ -710,7 +815,7 @@ export function useLineupForm({ compId, teamId, matchId = '', positionKeys, pass
     // A form that holds nothing read has no draft to offer back or discard.
     draft: read ? draft : { ...draft, restored: false, stale: null },
     error, setError, warning, setWarning,
-    squad, changeMembers, squadRef, squadUnavailable,
+    squad, changeMembers, squadRef, squadUnavailable, waitForMembers: () => firstMembers.current.pending(),
     removing, removeStored, dropOwnLineup, saveQueued, lineupToSave, confirmSaved,
   };
 }

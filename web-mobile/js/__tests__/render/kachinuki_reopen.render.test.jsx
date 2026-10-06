@@ -716,6 +716,13 @@ describe('kachinuki Encho is offered only on the current tied bout', () => {
   const tiedBout = (pos, a = 'A1', b = 'B1') => (
     { position: pos, sideA: a, sideB: b, ipponsA: ['M'], ipponsB: ['M'] }
   );
+  // Whether a button is offered. While either of the two is, both are in the footer and
+  // the other is held hidden in its place (the describe below), so "not offered" is
+  // either not rendered or held.
+  const offered = (testId) => {
+    const button = screen.queryByTestId(testId);
+    return !!button && !button.classList.contains('holds-space');
+  };
 
   it('shows the Encho button when the tied bout is the current bout', async () => {
     await renderEditor({
@@ -755,18 +762,18 @@ describe('kachinuki Encho is offered only on the current tied bout', () => {
     await renderEditor({
       match: completedKachinukiMatch({ status: 'running', winner: null, subResults: [tiedBout(1)] }),
     });
-    expect(screen.queryByTestId('kachinuki-encho-undo-button')).toBeNull();
+    expect(offered('kachinuki-encho-undo-button')).toBe(false);
     await act(async () => { fireEvent.click(screen.getByTestId('kachinuki-encho-button')); });
     await act(async () => { fireEvent.click(screen.getByTestId('kachinuki-encho-button')); });
-    expect(screen.getByTestId('kachinuki-encho-undo-button')).toBeTruthy();
+    expect(offered('kachinuki-encho-undo-button')).toBe(true);
 
     const undo = () => act(async () => { fireEvent.click(screen.getByTestId('kachinuki-encho-undo-button')); });
     await undo();
-    expect(screen.queryByTestId('kachinuki-encho-undo-button'), 'one period still on').not.toBeNull();
+    expect(offered('kachinuki-encho-undo-button'), 'one period still on').toBe(true);
     await undo();
-    expect(screen.queryByTestId('kachinuki-encho-undo-button')).toBeNull();
+    expect(offered('kachinuki-encho-undo-button')).toBe(false);
     // Back to the tie it was: Encho is offered again.
-    expect(screen.getByTestId('kachinuki-encho-button')).toBeTruthy();
+    expect(offered('kachinuki-encho-button')).toBe(true);
   });
 
   it('undoing the only period of a 0-0 tie restores the Tie', async () => {
@@ -779,7 +786,7 @@ describe('kachinuki Encho is offered only on the current tied bout', () => {
     await act(async () => { fireEvent.click(screen.getByTestId('kachinuki-encho-button')); });
     await act(async () => { fireEvent.click(screen.getByTestId('kachinuki-encho-undo-button')); });
     expect(screen.getByTestId('scoring-modal-tie-button').textContent).toContain('✓');
-    expect(screen.getByTestId('kachinuki-encho-button'), 'still a tied bout, so Encho is offered again').toBeTruthy();
+    expect(offered('kachinuki-encho-button'), 'still a tied bout, so Encho is offered again').toBe(true);
   });
 
   it('offers no undo once a point has been struck in encho', async () => {
@@ -787,9 +794,9 @@ describe('kachinuki Encho is offered only on the current tied bout', () => {
       match: completedKachinukiMatch({ status: 'running', winner: null, subResults: [tiedBout(1)] }),
     });
     await act(async () => { fireEvent.click(screen.getByTestId('kachinuki-encho-button')); });
-    expect(screen.getByTestId('kachinuki-encho-undo-button')).toBeTruthy();
+    expect(offered('kachinuki-encho-undo-button')).toBe(true);
     await act(async () => { fireEvent.keyDown(window, { key: 'K', shiftKey: true }); });
-    expect(screen.queryByTestId('kachinuki-encho-undo-button')).toBeNull();
+    expect(offered('kachinuki-encho-undo-button')).toBe(false);
   });
 
   // Operator ruling 2026-09-26: whether a tied pair fights on is the
@@ -807,7 +814,85 @@ describe('kachinuki Encho is offered only on the current tied bout', () => {
     await waitFor(() => expect(window.API.fetchLineupInForce).toHaveBeenCalledTimes(2));
     const encho = screen.getByTestId('kachinuki-encho-button');
     await act(async () => { fireEvent.click(encho); });
-    expect(screen.getByTestId('kachinuki-encho-undo-button'), 'the tap recorded a period').toBeTruthy();
+    expect(offered('kachinuki-encho-undo-button'), 'the tap recorded a period').toBe(true);
+  });
+});
+
+// Operator ruling 2026-10-06, "Keep Encho in place": the footer's actions row is centred, so
+// a button that comes and goes beside Encho moved it (measured: 55 px left when Undo encho
+// appeared, so a double tap on Encho landed on Undo encho and cancelled itself). While
+// either of the two is offered both are in the row, in the same order, and the other is
+// held hidden in its place: same label, so the same width, out of the accessibility tree,
+// the tab order and the pointer. jsdom lays nothing out, so the class and the disabled
+// state are what the DOM shows; the stylesheet rule is pinned in team_editor_clear_hint.
+describe('kachinuki Encho and Undo encho keep their places in the footer', () => {
+  const HELD = 'holds-space';
+  const ENCHO = 'kachinuki-encho-button';
+  const UNDO = 'kachinuki-encho-undo-button';
+  const tied = (extra = {}) => ({ position: 1, sideA: 'A1', sideB: 'B1', ipponsA: ['M'], ipponsB: ['M'], ...extra });
+  const running = (subResults) => completedKachinukiMatch({ status: 'running', winner: null, subResults });
+  const held = (id) => screen.getByTestId(id).classList.contains(HELD);
+  const labels = () => [...document.querySelector('.score-nav__actions').querySelectorAll('button')]
+    .map((b) => b.textContent.trim())
+    .filter((label) => ['Record bout', 'Encho', 'Undo encho', 'End match'].includes(label));
+
+  it('renders both, Encho before Undo encho, with Undo encho held while only Encho is offered', async () => {
+    await renderEditor({ match: running([tied()]) });
+
+    expect(labels(), 'in a fixed order between Record bout and End match').toEqual(['Record bout', 'Encho', 'Undo encho', 'End match']);
+    expect(held(ENCHO)).toBe(false);
+    expect(held(UNDO)).toBe(true);
+    expect(screen.getByTestId(UNDO).textContent.trim(), 'the same label, so the same width').toBe('Undo encho');
+  });
+
+  it('keeps the same two buttons in the same order when Undo encho becomes offered, and holds nothing back', async () => {
+    await renderEditor({ match: running([tied()]) });
+    const encho = screen.getByTestId(ENCHO);
+    const undo = screen.getByTestId(UNDO);
+
+    await act(async () => { fireEvent.click(encho); });
+
+    expect(screen.getByTestId(ENCHO), 'the same element, not one that is added or removed').toBe(encho);
+    expect(screen.getByTestId(UNDO)).toBe(undo);
+    expect(labels()).toEqual(['Record bout', 'Encho', 'Undo encho', 'End match']);
+    expect(held(ENCHO)).toBe(false);
+    expect(held(UNDO)).toBe(false);
+  });
+
+  it('offers both once a 0-0 tie is taken into encho, and takes it back to a tie with both still in place', async () => {
+    await renderEditor({ match: running([tied({ ipponsA: [], ipponsB: [], decision: 'hikiwake' })]) });
+    expect(held(UNDO)).toBe(true);
+
+    await act(async () => { fireEvent.click(screen.getByTestId(ENCHO)); });
+    expect(labels()).toEqual(['Record bout', 'Encho', 'Undo encho', 'End match']);
+    expect(held(ENCHO)).toBe(false);
+    expect(held(UNDO)).toBe(false);
+
+    await act(async () => { fireEvent.click(screen.getByTestId(UNDO)); });
+    expect(labels()).toEqual(['Record bout', 'Encho', 'Undo encho', 'End match']);
+    expect(held(ENCHO)).toBe(false);
+    expect(held(UNDO), 'back to the tie: Undo encho goes, its place stays').toBe(true);
+  });
+
+  it('is not focusable or clickable while held: it is disabled, and a tap does nothing', async () => {
+    const onSubmit = vi.fn().mockResolvedValue(undefined);
+    await renderEditor({ match: running([tied()]), onSubmit });
+    const undo = screen.getByTestId(UNDO);
+
+    expect(undo.disabled).toBe(true);
+    await act(async () => { fireEvent.click(undo); });
+
+    expect(held(UNDO), 'nothing was taken back, nothing changed').toBe(true);
+    expect(held(ENCHO)).toBe(false);
+    expect(onSubmit).not.toHaveBeenCalled();
+  });
+
+  it('renders neither once Record has appended the next pairing: nothing to keep in place', async () => {
+    await renderEditor({ match: running([tied(), { position: 2, sideA: 'A1', sideB: 'B2', ipponsA: [], ipponsB: [] }]) });
+
+    expect(labels()).toEqual(['Record bout', 'End match']);
+    expect(screen.queryByTestId(ENCHO)).toBeNull();
+    expect(screen.queryByTestId(UNDO)).toBeNull();
   });
 });
 

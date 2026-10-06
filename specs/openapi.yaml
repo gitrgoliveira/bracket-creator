@@ -4036,9 +4036,10 @@ paths:
         description: >
           Lineups-page round, 0-based. Round 0 is the team's starting lineup, the only
           round a PUT saves. Rounds 1 and up were saved by earlier versions of the
-          Lineups page, which no longer creates them: the server moves each onto a match
-          when it loads the competition, or when its team is seated, so a read of one
-          finds it only until then. What a team fields at a match is read from
+          Lineups page, which no longer creates them: the server gives the team, at
+          every match it is seated in, a lineup of its own equal to the one that version
+          showed there, and removes them once the competition is completed, so a read of
+          one finds it only until then. What a team fields at a match is read from
           lineup-in-force, not from a round.
     get:
       tags: [competitions]
@@ -4275,9 +4276,10 @@ paths:
         3. else, for a match the draw does not hold, the starting lineup.
 
         A lineup saved for round 1 or later by earlier versions of the Lineups page is
-        not read: the server moves each onto the first match its team is seated in at
-        that round, when it loads the competition and then in the write that seats the
-        team, so one that still exists is waiting for its team to be seated.
+        not read: the server gives its team, at every match it is seated in, a lineup of
+        its own equal to the one that version showed there, when it loads the
+        competition and then in the write that seats the team, and removes the round
+        lineups once the competition is completed.
 
         Match order is fixed: pool and league matches in pool-match number order;
         knockout matches follow at their bracket round index; the 3rd-place match is
@@ -6985,8 +6987,9 @@ components:
               description: >
                 Present when the lineup in force is the team's starting lineup, and
                 then always, round 0 included (0 is a value to send, not an absence).
-                A lineup for a later round is moved onto a match, never read as one, so
-                this is always 0. Absent when `sourceMatchId` is present.
+                A lineup for a later round is never read as one (the server converts it
+                into lineups for its team's matches), so this is always 0. Absent when
+                `sourceMatchId` is present.
 
     ScheduleEstimate:
       type: object

@@ -1560,8 +1560,9 @@ func TestKachinukiDetail_PositionsFollowTheLineupInForce(t *testing.T) {
 	})
 
 	// A round 1 lineup (round >= 1, which releases up to v2.1.1 let the Lineups
-	// page save) is moved onto a match by the state layer when its team is
-	// seated; one written straight to the store afterwards is not read.
+	// page save) is given to the matches it applied to by the state layer when
+	// its team is seated; one written straight to the store afterwards is not
+	// read.
 	round1Bracket := func(t *testing.T, store *state.Store, compID string, ids map[string]string) {
 		t.Helper()
 		bouts := func(fighters ...string) []state.SubMatchResult {

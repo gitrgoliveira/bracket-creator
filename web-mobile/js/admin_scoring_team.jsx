@@ -143,6 +143,9 @@ export function preserveStoredDaihyosenVerdict({ armed, pickedSide, tied, existi
 // re-exported here so existing imports from admin_scoring_modal.jsx (which
 // re-exports them onward) continue to work.
 import { resolveMatchLineup, resolveLineupTeamId, resolveBoutSideName, resolveBoutSideMemberId, resolveSquadMember, squadMemberIdForUniqueName, squadRosterEntries, rosterWithoutPlacedElsewhere, resolveBoutSideDisplayName, buildInlineLineupWrite, memberRefusalNote, alreadyPlacedNote, POS_KEYS_5, POS_LABELS_5 } from './lineup_resolver.jsx';
+// The one owner of what a list of team members that arrives does to the members
+// shown, and of keeping a member this sheet named or added over a list that predates it.
+import { mergeMembers, changedMembers, takeMembers } from './lineup_draft.jsx';
 import { DAIHYOSEN_POSITION } from './pool_ids.jsx';
 import { joinList } from './admin_helpers.jsx';
 // The shared owner of what an operator is told about unreadable data; the
@@ -638,8 +641,9 @@ export function resolveKachinukiBoutSides({ aName, bName, wKey, teamWinnerName }
 // still-BLANK member RENAMES that member (the ruling: the name attaches to
 // the number it was shown with) and keeps the row's id; typed over anything
 // else (a named member, or no prior pick at all) is a substitution and
-// carries no id, exactly as the fixed-order lineup path does.
-export async function pickManualBoutName({ sub, idx, sideKey, memberIdKey, squad, setSquad, compId, teamId, password, updateSub, onRenameFailed }, value, member) {
+// carries no id, exactly as the fixed-order lineup path does. A rename the
+// server holds is handed to onRenamed as the member written.
+export async function pickManualBoutName({ sub, idx, sideKey, memberIdKey, squad, onRenamed, compId, teamId, password, updateSub, onRenameFailed }, value, member) {
   if (member && member.id) {
     updateSub(idx, prev => ({ ...prev, [sideKey]: value, [memberIdKey]: member.id }));
     return;
@@ -652,9 +656,7 @@ export async function pickManualBoutName({ sub, idx, sideKey, memberIdKey, squad
   if (!renames || !teamId || typeof window.API?.renameTeamMember !== "function") return;
   try {
     await window.API.renameTeamMember(compId, teamId, priorId, typed, password);
-    if (typeof setSquad === "function") {
-      setSquad(sq => (Array.isArray(sq) ? sq : []).map(mm => (mm && mm.id === priorId) ? { ...mm, name: typed } : mm));
-    }
+    if (typeof onRenamed === "function") onRenamed([{ ...prior, name: typed }]);
   } catch (e) {
     // TELL THE OPERATOR. The rename never reached the server, so the member
     // stays nameless there permanently: every later picker row, the Lineups
@@ -1189,6 +1191,32 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
   // positions the resolver could only ever "fail" to match against an
   // empty local squad.
   const [squadUnavailable, setSquadUnavailable] = useStateA(false);
+  // The members each side shows are held on refs too, so that a list merges with
+  // the one shown even before the render that shows it, and so are the names this
+  // sheet's own writes gave (member id -> name) that no list that arrived has
+  // shown yet. Every list reaches the sheet through one of the two doors below.
+  const membersShown = useRefA({ a: [], b: [] });
+  const membersPending = useRefA({ a: {}, b: {} });
+  const showMembers = (side, list) => {
+    membersShown.current[side] = list;
+    (side === "a" ? setSquadA : setSquadB)(list);
+  };
+  // A list of a side's members arrives: a read's answer, or the host's copy.
+  const takeSideMembers = (side, arriving) => {
+    const taken = takeMembers(membersShown.current[side], arriving, membersPending.current[side]);
+    membersPending.current[side] = taken.pending;
+    showMembers(side, taken.members);
+  };
+  // The members a write of this sheet named or added, handed over once the server
+  // holds them. A list that predates the write (a read begun before it, or the
+  // host's copy, which the sheet cannot sequence) must not undo it, so the write
+  // stands over every list until one shows it. Accepted: if another device
+  // changes the same member after this write and before a list shows it, the sheet
+  // shows its own name until it closes (one operator per court makes this rare).
+  const wroteSideMembers = (side, written) => {
+    written.forEach((mem) => { membersPending.current[side][mem.id] = mem.name || ""; });
+    showMembers(side, mergeMembers(membersShown.current[side], written));
+  };
   // T136 / T141: competition lookup so we can branch on teamMatchType
   // ("kachinuki" vs "fixed") and gate the daihyosen affordance on the
   // knockout-format precondition. Falls back to compKind/teamSize when
@@ -1611,7 +1639,8 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
   // viewer payload, because the team-members route needs the organiser
   // password there. Keyed on the two sides' lists by content, so a refetch
   // that brings them the same members changes nothing, whatever it brings
-  // the competition's other teams.
+  // the competition's other teams. Either way a list is merged with the members
+  // shown, never put in their place (takeSideMembers).
   const teamMembersKey = teamMembers
     ? JSON.stringify([teamMembers[teamIdForSide(m.sideA)] || [], teamMembers[teamIdForSide(m.sideB)] || []])
     : "";
@@ -1621,8 +1650,8 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
     const teamBId = teamIdForSide(m.sideB);
     if (!m.compId || (!teamAId && !teamBId)) return;
     if (teamMembers) {
-      if (teamAId) setSquadA(teamMembers[teamAId] || []);
-      if (teamBId) setSquadB(teamMembers[teamBId] || []);
+      if (teamAId) takeSideMembers("a", teamMembers[teamAId] || []);
+      if (teamBId) takeSideMembers("b", teamMembers[teamBId] || []);
       setSquadUnavailable(false);
       return;
     }
@@ -1630,8 +1659,8 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
       try {
         const squads = await window.API.fetchSquads(m.compId, password);
         if (cancelled) return;
-        if (teamAId) setSquadA((squads && squads[teamAId]) || []);
-        if (teamBId) setSquadB((squads && squads[teamBId]) || []);
+        if (teamAId) takeSideMembers("a", (squads && squads[teamAId]) || []);
+        if (teamBId) takeSideMembers("b", (squads && squads[teamBId]) || []);
         setSquadUnavailable(false);
       } catch (_e) {
         if (!cancelled) setSquadUnavailable(true);
@@ -1680,7 +1709,7 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
   // operator picked one of the row's numbered entries (bc-dnst); it is
   // undefined for a typed/"+ Add" name, and buildInlineLineupWrite writes
   // by id rather than resolving by name when it is present.
-  const submitInlineLineup = async ({ side, noticeKey, teamId, squad, setSquad, posKey, value, member }) => {
+  const submitInlineLineup = async ({ side, noticeKey, teamId, squad, posKey, value, member }) => {
     const notify = (tone, text) => { if (mountedRef.current) setLineupNotice({ key: noticeKey, tone, text }); };
     setLineupNotice(null);
     const write = beginLineupWrite(side);
@@ -1699,7 +1728,9 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
         return;
       }
       const { positions: updated, memberIds: updatedIds, squad: nextSquad, failures } = built;
-      if (typeof setSquad === "function") setSquad(nextSquad);
+      // What the resolver named or added, against the list it was given: that
+      // list can be older than the one shown by now.
+      wroteSideMembers(side, changedMembers(squad, nextSquad));
       const hasMemberIds = Object.keys(updatedIds).length > 0;
       await window.API.putMatchLineup(m.compId, teamId, m.id, updated, password, hasMemberIds ? updatedIds : undefined);
       // The response carries no lineup: show what was written on top of what
@@ -3639,8 +3670,8 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
             // picked squad-member object when the operator chose one of the
             // row's numbered entries; it is undefined for a typed/"+ Add"
             // name, exactly like buildInlineLineupWrite's own optional arg.
-            const pickPlayer = (side, noticeKey, teamId, squad, setSquad) => (value, member) => {
-              submitInlineLineup({ side, noticeKey, teamId, squad, setSquad, posKey: lineupPosKey, value, member });
+            const pickPlayer = (side, noticeKey, teamId, squad) => (value, member) => {
+              submitInlineLineup({ side, noticeKey, teamId, squad, posKey: lineupPosKey, value, member });
             };
             // mp-gmcg: a manually-added bout has no lineup key (positions
             // beyond teamSize are not valid lineup keys) and no server
@@ -3662,11 +3693,12 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
             // hoisted out of this row closure; this factory just binds it to
             // the row's own sub/index and this side's key, mirroring
             // pickPlayer above.
-            const pickManual = (side, noticeKey, squad, setSquad, teamId) => (value, member) => {
+            const pickManual = (side, noticeKey, squad, teamId) => (value, member) => {
               setLineupNotice(null);
               return pickManualBoutName({
-                sub: s, idx, sideKey: `${side}Name`, memberIdKey: `${side}MemberIdOverride`, squad, setSquad, teamId,
+                sub: s, idx, sideKey: `${side}Name`, memberIdKey: `${side}MemberIdOverride`, squad, teamId,
                 compId: m.compId, password, updateSub,
+                onRenamed: (written) => wroteSideMembers(side, written),
                 // A self-run competitor cannot open the Lineups page, so they are
                 // pointed at the organizer, as the server's own refusals do.
                 onRenameFailed: (typed, e) => setLineupNotice({
@@ -3759,7 +3791,7 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
                 memberLabel: playerBLabel, roster: isDaihyoRow ? [] : rosterB, forceInput: manualPathB,
                 noticeKey: noticeKeyB,
                 lineupSlot: !isDaihyoRow && idx + 1 <= teamSize,
-                onSelectName: manualPathB ? pickManual("b", noticeKeyB, squadB, setSquadB, teamIdB) : pickPlayer("b", noticeKeyB, teamIdB, squadB, setSquadB),
+                onSelectName: manualPathB ? pickManual("b", noticeKeyB, squadB, teamIdB) : pickPlayer("b", noticeKeyB, teamIdB, squadB),
               },
               {
                 key: "a", tapKey: `${idx}:a`, pts: s.aPts, fouls: s.aFouls,
@@ -3777,7 +3809,7 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
                 memberLabel: playerALabel, roster: isDaihyoRow ? [] : rosterA, forceInput: manualPathA,
                 noticeKey: noticeKeyA,
                 lineupSlot: !isDaihyoRow && idx + 1 <= teamSize,
-                onSelectName: manualPathA ? pickManual("a", noticeKeyA, squadA, setSquadA, teamIdA) : pickPlayer("a", noticeKeyA, teamIdA, squadA, setSquadA),
+                onSelectName: manualPathA ? pickManual("a", noticeKeyA, squadA, teamIdA) : pickPlayer("a", noticeKeyA, teamIdA, squadA),
               },
             ];
 

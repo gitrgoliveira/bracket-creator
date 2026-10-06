@@ -14,6 +14,10 @@
 // is shown, whether it differs, the draft, the confirmed save and giving a
 // match's own lineup up. The editors keep their layouts and their save bodies.
 //
+// The rules for the team's members (mergeMembers, changedMembers, takeMembers) are
+// exported too: the team score sheet writes members from its bout rows and keeps its
+// own lists, and asks the same owner what a list that arrives does to them.
+//
 // Its imports are lineup_resolver.jsx, the owner of the lineup read, of which
 // positions differ and of what a Save writes, and write_result.jsx, the leaf that
 // owns the deadline a bounded wait is given. The hooks read the React global at
@@ -221,10 +225,38 @@ async function readMembers(compId, teamId, password) {
 // member number order, the order the pickers list them in. No screen removes a
 // member, so one a list lacks was added after that list was read, or after the list
 // an editor built its update on, and was not taken away.
-function mergeMembers(shown, arriving) {
+export function mergeMembers(shown, arriving) {
   const arrived = new Set(arriving.map((m) => m.id));
   return [...arriving, ...shown.filter((m) => !arrived.has(m.id))]
     .sort((a, b) => (a.index || 0) - (b.index || 0));
+}
+
+// The members of `after` that `before` lacks, or holds under another name: what a
+// change that built `after` out of `before` wrote.
+export function changedMembers(before, after) {
+  const was = new Map(before.map((m) => [m.id, m]));
+  return after.filter((m) => !was.has(m.id) || (was.get(m.id).name || '') !== (m.name || ''));
+}
+
+// A list of the team's members arrives (a read's answer, the host's own copy) at an
+// editor that writes members itself. `pending` holds what the editor wrote that no
+// list that arrived has shown yet, by member id: the name it gave. A list can predate
+// a write, so the write stands over it: the member the editor named stays named, and
+// one it added stays (the list shown holds it, which mergeMembers keeps). A list that
+// shows the name is the server caught up, so the write is done with and a change to
+// that member made elsewhere shows from then on. Returns the members to show and the
+// writes still pending.
+export function takeMembers(shown, arriving, pending) {
+  const standing = {};
+  const members = mergeMembers(shown, arriving).map((m) => {
+    const wrote = pending[m.id];
+    if (wrote === undefined) return m;
+    const theirs = arriving.find((a) => a.id === m.id);
+    if (theirs && (theirs.name || '') === wrote) return m;
+    standing[m.id] = wrote;
+    return { ...m, name: wrote };
+  });
+  return { members, pending: standing };
 }
 
 // useLineupForm: the state of one lineup editor, for a team's match (`matchId`)

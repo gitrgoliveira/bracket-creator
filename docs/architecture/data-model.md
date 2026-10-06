@@ -195,8 +195,8 @@ transaction. `config.md` lists, under each team's id, the matches already given 
 (`round_lineups_given`), so a lineup removed from one of them is not given again; discarding
 the draw clears the list, since the next draw reuses the match ids. Such a team with no starting lineup gets the one
 v2.1.1 showed before its first saved round, its highest round's. The round lineups stay,
-never read, until the competition is completed; then they are removed and `config.md`
-records `round_lineups_converted`. A new competition starts with it set.
+never read, until the competition is completed; then the next write of the draw, or the
+next start of the app, removes them and `config.md` records `round_lineups_converted`. A new competition starts with it set.
 
 ## 3. The match and result model
 

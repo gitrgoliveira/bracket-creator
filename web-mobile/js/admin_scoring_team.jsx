@@ -2,7 +2,7 @@
 // Private to the scoring module; ScoreEditorModal routes here for team matches.
 // Extracted from admin_scoring_modal.jsx (mp-zac3).
 
-const { useState: useStateA, useEffect: useEffectA, useRef: useRefA } = React;
+const { useState: useStateA, useEffect: useEffectA, useRef: useRefA, useLayoutEffect: useLayoutEffectA } = React;
 
 import {
   MAX_IPPONS_PER_SIDE,
@@ -52,6 +52,7 @@ import { isOlderRunningCopy } from './patch.jsx';
 import { useDebouncedRunningWrite, SyncStatusPill, useChangedGroups, useKeptInHistoryNote, KeptInHistoryNote } from './admin_scoring_autosave.jsx';
 import { MatchHistoryDisclosure } from './match_history_view.jsx';
 import { serverNowMs } from './server_clock.jsx';
+import { publishHeight } from './published_height.jsx';
 import { SideLabel } from './side_cell.jsx';
 
 // Imported from the leaf, not read off `window`, for the same reason
@@ -3556,6 +3557,26 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
   // individual ScoreEditorModal).
   const dialogLabel = `Team score editor: ${m.sideB?.name || m.sideB || "Shiro"} vs ${m.sideA?.name || m.sideA || "Aka"}${m.court ? ` · Shiaijo ${m.court}` : ""}`;
 
+  // The bars the sheet pins cover whatever the page scrolls under them: the team
+  // header and result band at the top (.team-sheet-pin) and, on the inline hosts,
+  // the footer dock at the bottom. A control a scroll brings only just into view
+  // (a keyboard Tab onto it, scrollIntoView) would stop under one, so their
+  // heights are published (published_height.jsx) for the scroll margin the
+  // stylesheet gives the sheet's content, on the element whose scroll they
+  // affect. The inline hosts scroll the document under both bars. An overlay
+  // scrolls its body under the header alone: its footer sits outside the
+  // scrolling body and covers nothing.
+  const bodyRef = useRefA(null);
+  const pinRef = useRefA(null);
+  const dockRef = useRefA(null);
+  const isInline = variant === "inline";
+  useLayoutEffectA(() => {
+    const host = isInline ? document.documentElement : bodyRef.current;
+    const stops = [publishHeight(pinRef.current, host, "--team-pin-h")];
+    if (isInline) stops.push(publishHeight(dockRef.current, host, "--team-dock-h"));
+    return () => stops.forEach((stop) => stop());
+  }, []);
+
   const inner = (
     <>
         <div className="editor-modal__head">
@@ -3586,14 +3607,14 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
           </div>
         </div>
 
-        <div className="editor-modal__body">
+        <div className="editor-modal__body" ref={bodyRef}>
           {/* Inside `inner`, so the wide overlay and the narrow shiaijo inline
               panel get it from ONE placement and cannot diverge. */}
           {matchDataUnreadable(m) ? <UnreadableEditorNote /> : null}
           {/* Team header and result band, pinned together (bc-tmfd): the
               running total and the match identity stay in view while the
               bout rows scroll under them. */}
-          <div className="team-sheet-pin">
+          <div className="team-sheet-pin" ref={pinRef}>
           <div className="sb-match">
             {teamSides.map((s, idx) => (
               <React.Fragment key={s.key}>
@@ -4547,7 +4568,7 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
 
         </div>
 
-        <div className="editor-modal__foot editor-modal__foot--nav">
+        <div className="editor-modal__foot editor-modal__foot--nav" ref={dockRef}>
           {/* Audit reason prompt for team-match corrections: same contract
               as ScoreEditorModal: operator must confirm before the patch fires. */}
           {correctionPromptOpen && (

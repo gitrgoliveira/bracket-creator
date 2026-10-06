@@ -5298,7 +5298,9 @@ button.vsched-item:not([data-clickable]) {
    inside the editor body, under the footer dock at 20 and the topbar at
    30). Overlay hosts pin it at the top of their scrolling body; the inline
    hosts sit it under the shell's topbar stack, whose height AdminTopbar
-   publishes as --topbar-stack-h. */
+   publishes as --topbar-stack-h. The sheet publishes this unit's own height as
+   --team-pin-h, and the inline dock's as --team-dock-h, for the scroll margin
+   that keeps a focused control clear of the bars (the content rules below). */
 .team-sheet-pin {
   position: sticky;
   top: 0;
@@ -5323,6 +5325,30 @@ button.vsched-item:not([data-clickable]) {
   top: calc(-1 * var(--editor-body-pad-top));
   margin-top: calc(-1 * var(--editor-body-pad-top));
   padding-top: var(--editor-body-pad-top);
+}
+/* A control a scroll brings only just into view (a keyboard Tab onto it,
+   scrollIntoView) stops clear of the bars the sheet pins over its content: the
+   topbar and the pinned header above it, the footer dock below it. The sheet's
+   own content carries that as scroll margin, sized by the heights the sheet
+   publishes while it is mounted (published_height.jsx). It is margin on the
+   content's controls and not padding on the scroller: padding claims a strip of
+   the viewport, a bar's own controls (the dock's Finish, a button of the topbar)
+   lie inside it, and focusing one scrolled the page by about 300px for nothing.
+   So only controls in the body's content are reached, never one in the pinned
+   header or the footer dock. Each rule hangs off its host's own root (a
+   scoring-panel inline, an editor-modal in an overlay), so no element meets two;
+   an overlay's footer sits outside the scrolling body and covers nothing, so only
+   the top is margined there. The inline head (the title row and Close) scrolls
+   with the page above the pinned header, so only the topbar can cover it. */
+.scoring-panel--team > .editor-modal__body :is(button, a[href], input, select, textarea, summary, [tabindex]):not(.team-sheet-pin *) {
+  scroll-margin-top: calc(var(--topbar-stack-h, 0px) + var(--team-pin-h, 0px));
+  scroll-margin-bottom: var(--team-dock-h, 0px);
+}
+.scoring-panel--team > .editor-modal__head :is(button, a[href], input, select, textarea, summary, [tabindex]) {
+  scroll-margin-top: var(--topbar-stack-h, 0px);
+}
+.editor-modal--team > .editor-modal__body :is(button, a[href], input, select, textarea, summary, [tabindex]):not(.team-sheet-pin *) {
+  scroll-margin-top: var(--team-pin-h, 0px);
 }
 
 .editor-modal__head {

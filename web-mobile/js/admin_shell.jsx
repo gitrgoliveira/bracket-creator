@@ -7,6 +7,7 @@
 // this script-tagged module can import it without a double evaluation.
 import { heldWritesText, heldWriteLine, heldWriteDiscardConfirm, matchLabel, heldLineupLabel, HELD_WRITES_TITLE, HELD_WRITES_EMPTY, HELD_WRITE_DISCARD_ONE_LABEL } from './write_result.jsx';
 import { scoreRowMatchLabel } from './pool_ids.jsx';
+import { publishHeight } from './published_height.jsx';
 
 const { useState: useStateA, useMemo: useMemoA, useEffect: useEffectA, useRef: useRefA, useLayoutEffect: useLayoutEffectA } = React;
 
@@ -269,21 +270,14 @@ function AdminTopbar({ onLogout, onViewerMode, tournament, hideRunningStrip }) {
   const linkUp = connected && syncStatus !== 'offline';
 
   // The stack sizes to its content and grows with the connection alert or the
-  // running strip, so the pinned team header (styles.css .team-sheet-pin) reads
-  // its height from this property instead of a constant.
+  // running strip, so the pinned team header (styles.css .team-sheet-pin) and
+  // the inline team sheet's scroll margin read its height from this property
+  // instead of a constant.
   const stackRef = useRefA(null);
   useLayoutEffectA(() => {
     const el = stackRef.current;
     if (!el) return;
-    const root = document.documentElement;
-    const publish = () => root.style.setProperty('--topbar-stack-h', `${el.getBoundingClientRect().height}px`);
-    publish();
-    const ro = typeof ResizeObserver === 'function' ? new ResizeObserver(publish) : null;
-    if (ro) ro.observe(el);
-    return () => {
-      if (ro) ro.disconnect();
-      root.style.removeProperty('--topbar-stack-h');
-    };
+    return publishHeight(el, document.documentElement, '--topbar-stack-h');
   }, []);
 
   return (

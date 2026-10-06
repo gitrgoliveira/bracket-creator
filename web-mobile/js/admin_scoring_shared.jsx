@@ -1154,7 +1154,16 @@ function LineupNameInput({ value, roster, onSelect, onListPick, disabled, ariaLa
       if (active >= 0 && active < matches.length) commitEntry(matches[active]);
       else if (active === matches.length && canAddNew) commit(q);
       else if (q) commit(q);
-    } else if (e.key === "Escape") { e.preventDefault(); setOpen(false); setQuery(""); }
+    } else if (e.key === "Escape") {
+      // One Escape closes one layer: an open list takes it, and keeps it from the
+      // overlay score editor's own Escape (a window listener that closes the
+      // editor). A closed list leaves it to the editor, as before.
+      if (!open) return;
+      e.preventDefault();
+      e.stopPropagation();
+      setOpen(false);
+      setQuery("");
+    }
   };
 
   return (

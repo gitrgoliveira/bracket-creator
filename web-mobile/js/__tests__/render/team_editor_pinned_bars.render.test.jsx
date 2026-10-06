@@ -8,7 +8,7 @@
 
 import React from 'react';
 import { render, act, screen, within } from '@testing-library/react';
-import { describe, it, expect, vi, beforeAll, afterAll } from 'vitest';
+import { describe, it, expect, vi, beforeAll, afterAll, beforeEach, afterEach } from 'vitest';
 import { installWindowStubs } from '../helpers/stub_globals.js';
 import { cssBlock, readStylesheet } from '../helpers/source.js';
 
@@ -162,6 +162,31 @@ const block = (selector) => {
   expect(b, `rule ${selector} exists`).not.toBeNull();
   return b;
 };
+// One entry per selector of every rule, comments dropped (they carry braces),
+// wherever an @media block nests it. A selector's last compound is what the
+// rule styles, so a rule for something INSIDE a class is not a rule for it. A
+// list splits at its top-level commas only: the commas inside :is(...) and
+// [...] belong to one selector.
+const splitSelectors = (list) => {
+  const out = [];
+  let depth = 0;
+  let current = '';
+  for (const ch of list) {
+    if (ch === '(' || ch === '[') depth += 1;
+    if (ch === ')' || ch === ']') depth -= 1;
+    if (ch === ',' && depth === 0) {
+      out.push(current.trim());
+      current = '';
+    } else {
+      current += ch;
+    }
+  }
+  if (current.trim()) out.push(current.trim());
+  return out;
+};
+const rules = [...css.replace(/\/\*[\s\S]*?\*\//g, '').matchAll(/([^{}]+)\{([^{}]*)\}/g)].flatMap(
+  ([, selectors, decls]) => splitSelectors(selectors).map((selector) => ({ selector, decls })),
+);
 
 describe('the stylesheet pins the two bars in the inline team panel (bc-tmfd)', () => {
   it('clips the panel instead of making it a scroll container, so both bars stick to the page', () => {
@@ -230,12 +255,6 @@ describe('the stylesheet pins the two bars in the inline team panel (bc-tmfd)', 
 // lays nothing out, so these read the rules; the acceptance is the browser
 // measurement.
 describe('the stylesheet keeps the overlay bouts in the body, under the pinned bar', () => {
-  // One entry per selector of every rule, comments dropped (they carry braces),
-  // wherever an @media block nests it. A selector's last compound is what the
-  // rule styles, so a rule for something INSIDE a class is not a rule for it.
-  const rules = [...css.replace(/\/\*[\s\S]*?\*\//g, '').matchAll(/([^{}]+)\{([^{}]*)\}/g)].flatMap(
-    ([, selectors, decls]) => selectors.split(',').map((selector) => ({ selector: selector.trim(), decls })),
-  );
   const styling = (cls) =>
     rules.filter(({ selector }) => new RegExp(`\\.${cls}(?![\\w-])[^\\s>+~]*$`).test(selector));
   // Anchored on the property name, so text-overflow is not read as overflow.
@@ -312,5 +331,196 @@ describe('the stylesheet keeps the overlay bouts in the body, under the pinned b
       expect(gap, `${selector} has a gap the sweep can read`).toBeGreaterThan(0);
       expect(noteMargin + gap, `${selector}: ${pad}px is covered above the bar, and the note's ${noteMargin}px margin plus the ${gap}px gap must leave it clear`).toBeGreaterThanOrEqual(pad);
     }
+  });
+});
+
+// A scroll that brings a control only just into view (a keyboard Tab onto it,
+// scrollIntoView) leaves it exactly under whichever bar it came from: measured on
+// the court console, "Remove this bout" scrolled to the bottom edge had the dock's
+// hint text across its centre, so a tap on it landed on the dock. The sheet's own
+// content carries scroll margin sized to the bars to keep such a target clear of
+// them, and CSS cannot read an element's height, so the sheet publishes the
+// heights while it is mounted (published_height.jsx, the mechanism AdminTopbar's
+// --topbar-stack-h uses too): on the element whose scroll they affect. The inline
+// hosts scroll the DOCUMENT under both bars; an overlay scrolls its body under the
+// pinned header alone, its footer sitting outside the scrolling body and covering
+// nothing. jsdom lays nothing out, so the heights are stubbed; the acceptance is
+// the browser.
+describe('the team sheet publishes the heights of the bars the page scrolls under', () => {
+  const PIN_H = '--team-pin-h';
+  const DOCK_H = '--team-dock-h';
+  const ROOT = document.documentElement;
+  const DOCK = '.editor-modal__foot--nav';
+  const realRect = Element.prototype.getBoundingClientRect;
+  const realRO = globalThis.ResizeObserver;
+  let heights;
+  let observers;
+
+  beforeEach(() => {
+    heights = { 'team-sheet-pin': 88, 'editor-modal__foot--nav': 140 };
+    observers = [];
+    Element.prototype.getBoundingClientRect = function () {
+      const cls = Object.keys(heights).find((c) => this.classList && this.classList.contains(c));
+      return cls ? { top: 0, bottom: heights[cls], height: heights[cls], left: 0, right: 0, width: 0, x: 0, y: 0 } : realRect.call(this);
+    };
+    globalThis.ResizeObserver = class {
+      constructor(cb) { this.cb = cb; this.observed = []; this.disconnected = false; observers.push(this); }
+      observe(el) { this.observed.push(el); }
+      disconnect() { this.disconnected = true; }
+    };
+  });
+
+  afterEach(() => {
+    Element.prototype.getBoundingClientRect = realRect;
+    globalThis.ResizeObserver = realRO;
+    ROOT.style.removeProperty(PIN_H);
+    ROOT.style.removeProperty(DOCK_H);
+  });
+
+  const rootValue = (prop) => ROOT.style.getPropertyValue(prop);
+  const valueOn = (el, prop) => el.style.getPropertyValue(prop);
+  const watching = (el) => observers.find((o) => o.observed.includes(el));
+
+  it('inline: publishes both heights on the document root as measured, before any observer fires', async () => {
+    const { container } = await mount({ variant: 'inline' });
+    expect(rootValue(PIN_H)).toBe('88px');
+    expect(rootValue(DOCK_H)).toBe('140px');
+    expect(watching(container.querySelector(PIN)), 'the header unit is observed').toBeDefined();
+    expect(watching(container.querySelector(DOCK)), 'and so is the dock').toBeDefined();
+    // The page scrolls, not the panel: nothing is published on the panel's body.
+    const body = container.querySelector('.editor-modal__body');
+    expect(valueOn(body, PIN_H)).toBe('');
+    expect(valueOn(body, DOCK_H)).toBe('');
+  });
+
+  it('inline: follows each bar as it grows and shrinks (a correction prompt opens in the dock)', async () => {
+    const { container } = await mount({ variant: 'inline' });
+    heights['editor-modal__foot--nav'] = 210;
+    act(() => { watching(container.querySelector(DOCK)).cb([]); });
+    expect(rootValue(DOCK_H)).toBe('210px');
+    expect(rootValue(PIN_H), 'the header unit is unchanged').toBe('88px');
+    heights['team-sheet-pin'] = 64;
+    act(() => { watching(container.querySelector(PIN)).cb([]); });
+    expect(rootValue(PIN_H)).toBe('64px');
+    expect(rootValue(DOCK_H)).toBe('210px');
+  });
+
+  it('inline: removes both from the root and stops observing when the sheet unmounts', async () => {
+    const { container, unmount } = await mount({ variant: 'inline' });
+    const pinObserver = watching(container.querySelector(PIN));
+    const dockObserver = watching(container.querySelector(DOCK));
+    unmount();
+    expect(rootValue(PIN_H)).toBe('');
+    expect(rootValue(DOCK_H)).toBe('');
+    expect(pinObserver.disconnected).toBe(true);
+    expect(dockObserver.disconnected).toBe(true);
+  });
+
+  it('overlay: publishes the header unit on the scrolling body, and nothing on the root or for the footer', async () => {
+    const { container } = await mount();
+    const body = container.querySelector('.editor-modal--team > .editor-modal__body');
+    expect(valueOn(body, PIN_H)).toBe('88px');
+    expect(rootValue(PIN_H), 'the document is not scrolled under the overlay bar').toBe('');
+    expect(rootValue(DOCK_H)).toBe('');
+    expect(valueOn(body, DOCK_H), 'the footer sits outside the scrolling body and covers nothing').toBe('');
+    expect(watching(container.querySelector(DOCK)), 'so it is not measured').toBeUndefined();
+  });
+
+  it('overlay: follows the header unit, and removes it when the sheet unmounts', async () => {
+    const { container, unmount } = await mount();
+    const body = container.querySelector('.editor-modal--team > .editor-modal__body');
+    const observer = watching(container.querySelector(PIN));
+    heights['team-sheet-pin'] = 120;
+    act(() => { observer.cb([]); });
+    expect(valueOn(body, PIN_H)).toBe('120px');
+    unmount();
+    expect(valueOn(body, PIN_H)).toBe('');
+    expect(observer.disconnected).toBe(true);
+  });
+});
+
+// The clearance is margin on the sheet's CONTENT, never padding on the scroller.
+// Padding claims a strip of the viewport, and a bar's own controls (the dock's
+// Finish, a button of the topbar) lie inside it, so focusing one scrolled the page
+// by about 300px for nothing (measured at 1180x820 with the root padded by the
+// bars). Margin on the content's controls leaves those alone. jsdom lays nothing
+// out, so these read the rules and run their selectors against the mounted sheets;
+// the acceptance is the browser.
+describe('the stylesheet keeps the sheet\'s own content clear of the bars with scroll margin', () => {
+  const BAR_HEIGHT = /--(?:topbar-stack|team-pin|team-dock)-h/;
+  const declares = (decls, prop) => new RegExp(`(?:^|[\\s;])${prop}:`).test(decls);
+  const margins = () => rules.filter((r) => declares(r.decls, 'scroll-margin-top') && BAR_HEIGHT.test(r.decls));
+  const inlineRule = () => margins().find((r) => r.selector.startsWith('.scoring-panel--team > .editor-modal__body'));
+  const overlayRule = () => margins().find((r) => r.selector.startsWith('.editor-modal--team > .editor-modal__body'));
+  const reach = (el) => ({
+    inline: Boolean(inlineRule()) && el.matches(inlineRule().selector),
+    overlay: Boolean(overlayRule()) && el.matches(overlayRule().selector),
+  });
+  const CONTROLS = 'button, a[href], input, select, textarea, summary, [tabindex]';
+  const controlsIn = (container, scope) => Array.from(container.querySelectorAll(scope)).flatMap((el) => (
+    el.matches(CONTROLS) ? [el] : Array.from(el.querySelectorAll(CONTROLS))
+  ));
+  const named = (el) => el.outerHTML.slice(0, 90);
+
+  it('pads no scroll by a bar height: a bar\'s own control would sit inside the padded strip', () => {
+    const padding = rules.filter((r) => declares(r.decls, 'scroll-padding(?:-[a-z]+)?') && BAR_HEIGHT.test(r.decls));
+    expect(padding.map((r) => r.selector)).toEqual([]);
+  });
+
+  it('inline hosts: the content clears the topbar and the pinned header above it and the dock below it', () => {
+    const rule = inlineRule();
+    expect(rule, 'a rule for the inline body exists').toBeDefined();
+    expect(rule.decls).toMatch(/scroll-margin-top:\s*calc\(var\(--topbar-stack-h,\s*0px\)\s*\+\s*var\(--team-pin-h,\s*0px\)\)/);
+    expect(rule.decls).toMatch(/scroll-margin-bottom:\s*var\(--team-dock-h,\s*0px\)/);
+  });
+
+  it('overlay hosts: the content clears the pinned header alone, and nothing at the foot', () => {
+    const rule = overlayRule();
+    expect(rule, 'a rule for the overlay body exists').toBeDefined();
+    expect(rule.decls).toMatch(/scroll-margin-top:\s*var\(--team-pin-h,\s*0px\)/);
+    expect(rule.decls, 'the footer sits outside the scrolling body and covers nothing').not.toMatch(/scroll-margin-bottom/);
+  });
+
+  it('inline sheet: every control in the body is reached by the inline rule alone, and none in the pin, the dock or the head', async () => {
+    const { container } = await mount({ variant: 'inline', teamMatchType: 'kachinuki' });
+    const content = controlsIn(container, '.editor-modal__body').filter((el) => !el.closest(PIN));
+    expect(content.length, 'the sheet has content controls').toBeGreaterThan(0);
+    expect(container.querySelector('[data-testid="kachinuki-add-bout-button"]'), 'the button below the bouts is one of them').not.toBeNull();
+    for (const el of content) expect(reach(el), named(el)).toEqual({ inline: true, overlay: false });
+
+    const bars = [...controlsIn(container, '.editor-modal__foot--nav'), ...controlsIn(container, '.editor-modal__head')];
+    expect(bars.length, 'the dock and the head have controls').toBeGreaterThan(0);
+    // The pinned header holds no control today; one added to it must not be reached either.
+    const probe = container.querySelector(PIN).appendChild(document.createElement('button'));
+    for (const el of [...bars, probe]) expect(reach(el), named(el)).toEqual({ inline: false, overlay: false });
+  });
+
+  // The inline sheet's head (its title row and Close) scrolls with the page above
+  // the pinned header, so only the topbar can cover it: its controls clear the
+  // topbar alone. The overlay's head sits outside its scrolling body.
+  const headRule = () => margins().find((r) => r.selector.startsWith('.scoring-panel--team > .editor-modal__head'));
+  it('inline sheet: the head\'s controls clear the topbar, and nothing else is reached by that rule', async () => {
+    const rule = headRule();
+    expect(rule, 'a rule for the inline head exists').toBeDefined();
+    expect(rule.decls).toMatch(/scroll-margin-top:\s*var\(--topbar-stack-h,\s*0px\)/);
+    expect(rule.decls, 'the head is above the dock, which never covers it').not.toMatch(/scroll-margin-bottom/);
+    const { container } = await mount({ variant: 'inline', teamMatchType: 'kachinuki' });
+    const head = controlsIn(container, '.editor-modal__head');
+    expect(head.length, 'the head has controls').toBeGreaterThan(0);
+    for (const el of head) expect(el.matches(rule.selector), named(el)).toBe(true);
+    const others = [...controlsIn(container, '.editor-modal__body'), ...controlsIn(container, '.editor-modal__foot--nav')];
+    for (const el of others) expect(el.matches(rule.selector), named(el)).toBe(false);
+  });
+
+  it('overlay sheet: every control in the body is reached by the overlay rule alone, and none in the pin, the dock or the head', async () => {
+    const { container } = await mount({ teamMatchType: 'kachinuki' });
+    const content = controlsIn(container, '.editor-modal__body').filter((el) => !el.closest(PIN));
+    expect(content.length, 'the sheet has content controls').toBeGreaterThan(0);
+    for (const el of content) expect(reach(el), named(el)).toEqual({ inline: false, overlay: true });
+
+    const bars = [...controlsIn(container, '.editor-modal__foot--nav'), ...controlsIn(container, '.editor-modal__head')];
+    expect(bars.length, 'the dock and the head have controls').toBeGreaterThan(0);
+    const probe = container.querySelector(PIN).appendChild(document.createElement('button'));
+    for (const el of [...bars, probe]) expect(reach(el), named(el)).toEqual({ inline: false, overlay: false });
   });
 });

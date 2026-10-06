@@ -1,6 +1,7 @@
 // The first-run tournament form, the admin sign-in form and Sign out.
 // Every selector for those three lives here.
 import { expect } from '@playwright/test';
+import { dwell } from './pace.mjs';
 
 export const PASSWORD = 'e2e-operator';
 
@@ -41,7 +42,10 @@ export async function login(page, password = PASSWORD) {
   await page.goto('/admin');
   const form = page.locator('.modal.auth');
   await expect(form.getByText('Admin sign in')).toBeVisible();
+  const shown = Date.now();
   await form.locator('#admin-password').fill(password);
+  // The dialog ignores a tap inside the bounce window of its opening.
+  await dwell(page, shown);
   await form.getByRole('button', { name: 'Sign in' }).tap();
   await expect(page.getByRole('button', { name: 'Sign out' })).toBeVisible();
 }

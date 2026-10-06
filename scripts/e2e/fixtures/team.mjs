@@ -2,7 +2,8 @@
 // points, and scoring a bout inside a team encounter.
 //
 //   the Lineups page      /admin/competition/:id/lineups (admin_lineup.jsx)
-//                         writes the ROUND lineup, one team at a time
+//                         writes one team's STARTING lineup, or, through its
+//                         "Lineup for" select, one match's own lineup
 //   the match panel       "Enter lineup" / "Lineup" on the shiaijo queue
 //                         (admin_schedule_lineup.jsx), writes the MATCH lineup
 //   the score sheet row   the name box on each bout row of the team editor
@@ -14,6 +15,7 @@
 // real control; none of them asserts app behaviour beyond "the tap landed".
 import { expect } from '@playwright/test';
 import { createTournament, login } from './setup.mjs';
+import { settled } from './pace.mjs';
 
 // FIK position names for a five-person team, in order; any other size uses
 // bare numbers (admin_lineup.jsx positionsForSize).
@@ -44,9 +46,15 @@ const overlineField = (page, text) => page.locator('label')
 
 export const lineupsForm = (page) => page.getByTestId('lineup-form-root');
 
-// Open the Lineups page on `team` (its display name) and `round` (1-based,
-// as the page shows it).
-export async function openLineups(page, id, { team, round = 1 } = {}) {
+// The Lineups page's own name for a team's lineup before any match has one of
+// its own: what the "Lineup for" select offers first and the form's overline
+// reads for it.
+export const STARTING_LINEUP = 'Starting lineup';
+
+// Open the Lineups page on `team` (its display name) and on the lineup the
+// "Lineup for" select names: the team's "Starting lineup" (the default), or the
+// label of one of its matches as the select lists it (e.g. "Pool A · Match 1").
+export async function openLineups(page, id, { team, lineupFor = STARTING_LINEUP } = {}) {
   await page.goto(`/admin/competition/${encodeURIComponent(id)}/lineups`);
   await expect(lineupsForm(page)).toBeVisible();
   if (team) {
@@ -54,13 +62,19 @@ export async function openLineups(page, id, { team, round = 1 } = {}) {
     await sel.selectOption({ label: team });
     await expect(lineupsForm(page).locator('h2')).toContainText(team);
   }
-  if (round !== 1) {
-    await overlineField(page, 'Round').locator('input').fill(String(round));
+  if (lineupFor !== STARTING_LINEUP) {
+    await overlineField(page, 'Lineup for').locator('select').selectOption({ label: lineupFor });
   }
-  await expect(lineupsForm(page)).toContainText(`Round ${round}`);
+  // The form's overline names the lineup it edits.
+  await expect(lineupsForm(page).locator('.overline').first()).toHaveText(lineupFor);
   // The team members load separately from the lineup; wait for their list.
   await expect(lineupsForm(page).getByText('Team members', { exact: true })).toBeVisible();
 }
+
+// The choices of the Lineups page's "Lineup for" select, in order: "Starting
+// lineup" first, then the team's matches by the labels the select shows.
+export const lineupForOptions = async (page) => (await overlineField(page, 'Lineup for').locator('option').allInnerTexts())
+  .map((t) => t.trim());
 
 // The position's <select> on the Lineups page ("Senpo player", "2 player").
 export const lineupsSelect = (page, label) => lineupsForm(page).getByRole('combobox', { name: `${label} player` });
@@ -91,6 +105,8 @@ export async function lineupsStartAdd(page, label, name) {
 // Answer the open confirm dialog with its named button.
 export async function answerDialog(page, label) {
   const dialog = page.locator('.modal[role="dialog"]').filter({ has: page.locator('.modal__foot') }).last();
+  // A confirm ignores a tap inside the bounce window of its opening.
+  await settled(dialog);
   await dialog.getByRole('button', { name: label }).tap();
   await dialog.waitFor({ state: 'hidden' });
 }
@@ -116,6 +132,12 @@ export const lineupsSelected = async (page, label) => (await lineupsSelect(page,
 // One side of the panel: 0 = Shiro (left), 1 = Aka (right).
 export const panelSide = (page, i) => page.locator('[data-testid^="match-lineup-side-"]').nth(i);
 export const panelInput = (page, i, label) => panelSide(page, i).getByRole('textbox', { name: `${label} player`, exact: true });
+// Where the lineup a side shows comes from: "Lineup for this match", "Same as
+// <match>" or "Starting lineup" (LineupSourceLine, lineup_draft.jsx).
+export const panelSource = (page, i) => panelSide(page, i).locator('[data-testid^="match-lineup-source-"]');
+// The side's Save lineup, which stays disabled until the operator changes
+// something on that side and reads "Saving…" while the write is out.
+export const panelSaveButton = (page, i) => panelSide(page, i).getByRole('button', { name: /^(Save lineup|Saving…)$/ });
 
 // Open the Up next card's "Enter lineup".
 export async function openPanelFromUpNext(page) {
@@ -147,9 +169,12 @@ export async function typeIntoNameBox(input, name) {
   await input.press('Enter');
 }
 
+// Tap one side's Save lineup and return once the button is back from "Saving…".
+// It comes back disabled when the side was saved (nothing is left to save) and
+// enabled when the save was refused, so the caller asserts which it meant.
 export async function panelSave(page, i) {
-  await panelSide(page, i).getByRole('button', { name: 'Save lineup' }).tap();
-  await expect(panelSide(page, i).getByRole('button', { name: 'Save lineup' })).toBeEnabled();
+  await panelSaveButton(page, i).tap();
+  await expect(panelSide(page, i).getByRole('button', { name: 'Save lineup' })).toBeVisible();
 }
 
 export async function closePanel(page) {
@@ -238,6 +263,8 @@ export async function finishTeam(root) {
   await expect(btn).toHaveText(/^Finish( \+ Start Next →)?$/);
   await btn.tap();
   await expect(btn).toHaveText(/^Tap again to finish/);
+  // The second tap counts once the arming tap's bounce window has passed.
+  await settled(btn);
   await btn.tap();
   await expect(root.locator('button', { hasText: /^(Tap again to finish|Saving…)/ })).toHaveCount(0, { timeout: 15000 });
 }

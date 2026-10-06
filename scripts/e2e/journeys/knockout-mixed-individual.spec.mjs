@@ -181,7 +181,7 @@ test.describe('knockout-mixed-individual', () => {
     row({ step: 'finish', action: 'Finish + Start Next', variant: 'V2 doubleTap', ...dblFinish,
       finishedByDoubleTap: finishedByDouble, stillArmed: armedLeft, shot: await shot(page, 'finish-double-tapped') });
     if (!finishedByDouble) {
-      if (!armedLeft) await finishButton(page).tap();
+      if (!armedLeft) await armFinish(page);
       await armedFinishButton(page).tap();
     }
     const r1 = await lastCompleted(page);
@@ -373,8 +373,9 @@ test.describe('knockout-mixed-individual', () => {
   });
 
   // J2. Special decisions. On F1b (court E, pools): a kiken recorded against
-  // the WRONG side by a hasty operator (the prompt defaults to Shiro), its
-  // default-win chain, then the undo through the 409 decision_locked confirm;
+  // the WRONG side by a hasty operator (the prompt defaults to Shiro), the
+  // fusensho recorded from the withdrawn competitor's next match, then the undo
+  // through the 409 decision_locked confirm;
   // a fusenpai that auto-advances. On F2 (court C, knockout): a tied 1-1 bout
   // through encho (an unbounded counter) to hantei.
   test('J2 special decisions: kiken chain and undo, fusenpai, encho, hantei', async ({ page }) => {
@@ -414,10 +415,10 @@ test.describe('knockout-mixed-individual', () => {
     row({ step: 'kiken', action: 'side radio (Which side withdrew?)', variant: 'size', ...(await tapSize(radio)),
       label: await tapSize(decisionPrompt(page).locator('label').first()) });
     await decisionPrompt(page).getByRole('button', { name: 'Record' }).tap();
-    const remaining = inlineEditor(page).locator('.remaining-matches');
-    await expect(remaining).toBeVisible();
-    const withdrawnShown = (await remaining.locator('div').first().innerText()).trim();
-    const withdrawnName = withdrawnShown.replace(/^Remaining matches for\s*/, '').replace(/\s*✕$/, '').trim();
+    // Recording a withdrawal changes only that match: no panel offers the
+    // competitor's other matches. The side the prompt preselected is the one
+    // recorded.
+    const withdrawnName = b1[defaultSide];
     row({ step: 'kiken', action: 'Record (prompt left on its default side)', variant: 'V4 hasty (inline prompt)',
       intendedWithdrawer: `aka: ${b1.aka}`, defaultSide, recordedWithdrawer: withdrawnName,
       wrongSide: defaultSide !== 'aka', shot: await shot(page, 'kiken-recorded-default-side') });
@@ -428,13 +429,12 @@ test.describe('knockout-mixed-individual', () => {
     expect(kikenResult).toMatch(/○/);
     expect(kikenResult).toMatch(/Kiken/);
 
-    // The default-win chain. The operator looks up at the shiaijo for a
-    // moment before tapping anything in the remaining-matches panel.
-    const panelAtOnce = await remaining.isVisible().catch(() => false);
+    // The withdrawn competitor's other matches are closed one at a time, each
+    // from its own notice. The operator looks up at the shiaijo for a moment
+    // first: nothing is lost by it.
     await page.waitForTimeout(3000);
-    const panelAfter3s = await remaining.isVisible().catch(() => false);
-    row({ step: 'kiken chain', action: 'remaining-matches panel, 3s later', variant: 'V3 interrupt (looked away)',
-      panelAtOnce, panelAfter3s, editor: await inlineEditor(page).isVisible().catch(() => false),
+    row({ step: 'kiken chain', action: 'the console, 3s after the withdrawal', variant: 'V3 interrupt (looked away)',
+      editor: await inlineEditor(page).isVisible().catch(() => false),
       idle: await page.locator('.shiaijo__placeholder').isVisible().catch(() => false),
       shot: await shot(page, 'kiken-chain-after-3s') });
 
@@ -453,20 +453,20 @@ test.describe('knockout-mixed-individual', () => {
       pair: pairW, noStartButton: startCount === 0, notice: noticeText,
       shot: await shot(page, 'withdrawn-next-bout-barred') });
     expect(startCount).toBe(0);
-    expect(noticeText).toBe(`${withdrawnName} withdrew: record the default win.`);
+    expect(noticeText).toBe(`${withdrawnName} withdrew: record the fusensho.`);
 
-    // Record the default win the way the operator now does: tap the notice's
-    // own button, then double-tap it (the impatient thumb) -- it locks itself
-    // on the first response, so only one decision must land.
-    const defaultWinBtn = notice.getByTestId('barred-match-default-win');
-    row({ step: 'kiken chain', action: 'Record default win for the opponent (barred-match notice)', variant: 'size', ...(await tapSize(defaultWinBtn)) });
-    const dblDefaultWin = await doubleTap(defaultWinBtn);
+    // Record the fusensho the way the operator does: tap the notice's own
+    // button, then double-tap it (the impatient thumb) -- it locks itself on
+    // the first response, so only one decision must land.
+    const fusenshoBtn = notice.getByTestId('barred-match-record-fusensho');
+    row({ step: 'kiken chain', action: 'Record fusensho for the opponent (barred-match notice)', variant: 'size', ...(await tapSize(fusenshoBtn)) });
+    const dblFusensho = await doubleTap(fusenshoBtn);
     const chainRow = completedRowFor(page, pairW);
     await expect(chainRow).toBeVisible({ timeout: 8000 });
     const chainResult = (await chainRow.locator('.shiaijo-qrow__result').innerText()).trim();
-    row({ step: 'kiken chain', action: 'Record default win for the opponent (barred-match notice)', variant: 'V2 doubleTap', ...dblDefaultWin,
+    row({ step: 'kiken chain', action: 'Record fusensho for the opponent (barred-match notice)', variant: 'V2 doubleTap', ...dblFusensho,
       result: chainResult, cardLeftQueue: !(await nextOfWithdrawn.isVisible().catch(() => false)),
-      shot: await shot(page, 'chain-default-win-recorded') });
+      shot: await shot(page, 'chain-fusensho-recorded') });
     // The notice records a fusensho: the winner shows two circles and the
     // Fus. mark sits beside them, the side that was present (sideMarks).
     expect(chainResult).toMatch(/○/);
@@ -490,28 +490,13 @@ test.describe('knockout-mixed-individual', () => {
       hasty = await hastyConfirm(page);
     }
     await page.waitForTimeout(1500);
-    const undoPanel = await remaining.isVisible().catch(() => false);
-    const undoPanelText = undoPanel ? (await remaining.innerText()).replace(/\s+/g, ' ').slice(0, 240) : null;
     const undoneResult = (await completedRowFor(page, b1).locator('.shiaijo-qrow__result').innerText()).trim();
     row({ step: 'kiken undo', action: 'Kiken - Voluntary on the other side (correction)', variant: 'V4 hastyConfirm (409 decision_locked)',
-      dialogShown: locked, ...(hasty || {}), result: undoneResult, remainingPanel: undoPanelText,
+      dialogShown: locked, ...(hasty || {}), result: undoneResult,
       shot: await shot(page, 'kiken-undo-forced') });
     expect(locked).toBe(true);
     // Docs: the kiken now sits beside Aka, the real withdrawer.
     expect(undoneResult).toMatch(/○○ vs Kiken|○○.*Kiken$/);
-    let award = null;
-    if (undoPanel) {
-      const btn = remaining.getByRole('button', { name: 'Award default win to opponent' });
-      if (await btn.count()) {
-        await btn.first().tap();
-        await page.waitForTimeout(1500);
-        award = { error: ((await remaining.locator('div[style*="danger"]').allInnerTexts().catch(() => [])) || []).join(' | '),
-          left: await btn.count() };
-      }
-      row({ step: 'kiken undo', action: 'Award default win to opponent (panel after the undo)', variant: 'correct path (the chain)',
-        panel: undoPanelText, award, shot: await shot(page, 'undo-chain-award') });
-      await remaining.getByRole('button', { name: '✕' }).tap().catch(() => {});
-    }
     const backToCourt = page.getByRole('button', { name: /Back to court/ });
     if (await backToCourt.isVisible().catch(() => false)) await backToCourt.tap();
     await page.waitForTimeout(1000);
@@ -532,8 +517,7 @@ test.describe('knockout-mixed-individual', () => {
       const opp = live.aka === b1.aka ? 'shiro' : 'aka';
       await ipponButton(page, opp, 'M').tap();
       await settle(page);
-      await finishButton(page).tap();
-      await armedFinishButton(page).tap();
+      await (await armFinish(page)).tap();
       await page.waitForTimeout(1500);
       const msg = (await page.locator('.toast, .pending-write-banner').allInnerTexts().catch(() => [])).join(' | ');
       const done = await completedRowFor(page, live).isVisible().catch(() => false);
@@ -723,8 +707,7 @@ test.describe('knockout-mixed-individual', () => {
 
     // Network down; Finish (two taps).
     await context.setOffline(true);
-    await finishButton(page).tap();
-    await armedFinishButton(page).tap();
+    await (await armFinish(page)).tap();
     await page.waitForTimeout(300);
     const at300 = {
       editor: await inlineEditor(page).isVisible().catch(() => false),
@@ -1098,8 +1081,7 @@ test.describe('knockout-mixed-individual', () => {
     await settle(page);
     await context.setOffline(true);
     try {
-      await finishButton(page).tap();
-      await armedFinishButton(page).tap();
+      await (await armFinish(page)).tap();
       await page.waitForTimeout(1000);
       await expect(page.getByText(/Not saved yet/)).toBeVisible();
     } finally {

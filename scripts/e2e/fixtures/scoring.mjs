@@ -4,12 +4,15 @@
 // every helper takes the editor's selector. The team and kachinuki editors
 // score differently and get their own helpers when a journey needs them.
 //
-// Start and Finish come from scripts/screenshots/lib/editor.mjs (startMatch,
-// finishMatch), re-exported here so a journey imports one scoring module.
+// The editor selectors and Start come from scripts/screenshots/lib/editor.mjs,
+// re-exported here so a journey imports one scoring module. Finish is written
+// here: the app ignores a second tap inside the bounce window of the one that
+// armed it (fixtures/pace.mjs), which the library's finishMatch does not wait out.
 import { expect } from '@playwright/test';
-import { EDITOR, INLINE_EDITOR, finishMatch, startMatch } from '../../screenshots/lib/editor.mjs';
+import { EDITOR, INLINE_EDITOR, startMatch } from '../../screenshots/lib/editor.mjs';
+import { settled } from './pace.mjs';
 
-export { EDITOR, INLINE_EDITOR, finishMatch, startMatch };
+export { EDITOR, INLINE_EDITOR, startMatch };
 
 const SIDE_NAME = { shiro: 'Shiro', aka: 'Aka' };
 
@@ -44,9 +47,25 @@ export const finishButton = (page, root = INLINE_EDITOR) => page.locator(root)
 export const armedFinishButton = (page, root = INLINE_EDITOR) => page.locator(root)
   .locator('button').filter({ hasText: /^Tap again to finish/ }).first();
 
-// Tap Finish once: the two-tap guard arms and nothing is submitted yet.
+// Tap Finish once: the two-tap guard arms and nothing is submitted yet. Returns
+// the armed button once the arm is old enough for a second tap to count.
 export async function armFinish(page, root = INLINE_EDITOR) {
   await finishButton(page, root).tap();
-  await expect(armedFinishButton(page, root)).toBeVisible();
+  await settled(armedFinishButton(page, root));
   return armedFinishButton(page, root);
+}
+
+// Finish in two taps and return once the write has landed. The label is "Finish
+// + Start Next →" instead whenever another match waits on the same shiaijo, and
+// that form leaves the editor open on the next match. Not for the engi editor
+// ("Save result" arms too, but is its own button) or a correction ("Save
+// correction" does not arm).
+export async function finishMatch(page, root = EDITOR) {
+  const armed = await armFinish(page, root);
+  await armed.tap();
+  // The button reads "Saving…" from the second tap until the server answers,
+  // then the editor closes (plain Finish) or moves to the next match, whose own
+  // Finish label is not the arm. Neither label is left once the write landed.
+  await page.locator(root).first().locator('button').filter({ hasText: /^(Tap again to finish|Saving…)/ }).first()
+    .waitFor({ state: 'hidden', timeout: 15000 });
 }

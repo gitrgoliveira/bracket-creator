@@ -16,6 +16,7 @@
 // Taps go through page.touchscreen at the element's centre: the browser's own
 // hit-testing decides what is tapped, as it does for a thumb. Every project in
 // playwright.config.mjs has a touchscreen.
+import { dwell } from './pace.mjs';
 
 // Controls a thumb can land on.
 const INTERACTIVE = 'button, [role="button"], a[href], input:not([type="hidden"]), select, textarea, [role="checkbox"], [role="tab"], [role="switch"]';
@@ -215,6 +216,7 @@ export async function interrupt(page, kind, { awayMs = 600, during } = {}) {
 export async function hastyConfirm(page) {
   const dialog = page.locator('.modal[role="dialog"]').filter({ has: page.locator('.modal__foot') }).last();
   await dialog.waitFor({ state: 'visible' });
+  const shown = Date.now();
   const buttons = dialog.locator('.modal__foot button');
   const rank = (cls) => (/\bbtn--danger\b/.test(cls) ? 3 : /\bbtn--primary\b/.test(cls) ? 2 : /\bbtn--ghost\b/.test(cls) ? 0 : 1);
   const PROMINENCE = ['ghost', 'plain', 'primary', 'danger'];
@@ -235,6 +237,9 @@ export async function hastyConfirm(page) {
   const title = (await dialog.getAttribute('aria-label')) || '';
   const message = ((await dialog.locator('.dialog-msg').allInnerTexts())[0] || '').trim();
   const { x, y } = await centreOf(best.b);
+  // A confirm ignores every tap inside the bounce window of its opening, so
+  // "hasty" here is a hurried operator, never a tap before the guard lets one in.
+  await dwell(page, shown);
   await page.touchscreen.tap(x, y);
   await dialog.waitFor({ state: 'hidden' });
   return {

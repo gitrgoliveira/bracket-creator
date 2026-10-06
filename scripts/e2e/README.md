@@ -25,6 +25,7 @@ stamp outlives it; run `npx playwright install chromium` here.
     fixtures/test.mjs       the `test` every journey imports (server, baseURL, page)
     fixtures/devices.mjs    the operator iPad and the spectator phone
     fixtures/setup.mjs      first-run tournament form, sign in, sign out
+    fixtures/pace.mjs       the dwell the app's tap-bounce guard needs (below)
     fixtures/wizard.mjs     the create-competition wizard
     fixtures/competition.mjs  roster paste box, Generate / Discard draw, Start
     fixtures/shiaijo.mjs    /admin/shiaijo/:court (queue and inline editor)
@@ -99,6 +100,19 @@ asserted. `hidden` needs a note: headless Chromium never changes page
 visibility on its own, so the helper overrides `document.hidden` and
 `document.visibilityState` and dispatches a real `visibilitychange` for each
 edge, which is what the app's listeners read.
+
+## The pace of a tap
+
+The app ignores a pointer tap that lands within 400ms of the layer it opened (a
+confirm, the sign-in dialog) or of the tap that armed a two-tap commit (Finish,
+End match), and a second tap on the same ippon button inside that window
+(`web-mobile/js/tap_guard.jsx`). Playwright's second tap is always inside it, so
+`fixtures/pace.mjs` holds the dwell (`TAP_DWELL_MS`) and every helper that taps
+into a fresh layer or confirms an arm waits it out: `login`, `hastyConfirm`,
+`answerDialog`, `finishMatch`, `finishTeam`, `endMatch`, `awardBoutIppon`. A
+journey that taps such a thing by hand does the same. `doubleTap` is the one
+helper that deliberately does not: it is the bounce, and the app is meant to
+ignore the second tap.
 
 ## Output
 

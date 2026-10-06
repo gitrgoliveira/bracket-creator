@@ -8,6 +8,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { expect } from '@playwright/test';
 import { EDITOR, INLINE_EDITOR } from './scoring.mjs';
+import { dwell, settled } from './pace.mjs';
 
 // Twelve entrants for F1 (pools of 3, two through): six dojos, two members
 // each, (name, dojo) unique. Names start with distinct letters so the
@@ -120,6 +121,7 @@ export async function slotMarks(page, side, root = INLINE_EDITOR) {
 export async function hastyShiaijoConfirm(page) {
   const dialog = page.locator('.shiaijo-move-confirm[role="dialog"]').last();
   await dialog.waitFor({ state: 'visible' });
+  const shown = Date.now();
   const buttons = dialog.locator('.shiaijo-move-confirm__actions button');
   let best = null;
   const labels = [];
@@ -133,6 +135,8 @@ export async function hastyShiaijoConfirm(page) {
   }
   const title = ((await dialog.locator('h3').allInnerTexts())[0] || '').trim();
   const message = ((await dialog.locator('p').allInnerTexts())[0] || '').trim();
+  // The confirm ignores a tap inside the bounce window of its opening (fixtures/pace.mjs).
+  await dwell(page, shown);
   await best.b.tap();
   await dialog.waitFor({ state: 'hidden' });
   return { label: best.label, prominence: ['ghost', 'plain', 'primary', 'danger'][best.rank], otherLabels: labels.filter((l) => l !== best.label), title, message };
@@ -176,7 +180,10 @@ export async function ensureRunning(page) {
     const idle = await page.locator('.shiaijo__placeholder').isVisible().catch(() => false);
     if (idle && await card.isVisible().catch(() => false)) {
       const start = card.getByRole('button', { name: 'Start match' });
-      if (await start.isEnabled().catch(() => false)) await start.tap();
+      // The card can leave while this runs (Finish + Start Next has just started
+      // the match it shows): a tap that finds it gone is not a failure, the loop
+      // looks again.
+      if (await start.isEnabled().catch(() => false)) await start.tap({ timeout: 2_000 }).catch(() => {});
     }
     await page.waitForTimeout(250);
   }
@@ -195,7 +202,8 @@ export async function playRunningBout(page, { waza = 'M' } = {}) {
   const finish = ed.locator('button').filter({ hasText: /^Finish( \+ Start Next|$)/ }).first();
   await finish.tap();
   const armed = ed.locator('button').filter({ hasText: /^Tap again to finish/ }).first();
-  await armed.waitFor({ state: 'visible', timeout: 3000 });
+  // The second tap counts once the arming tap's bounce window has passed.
+  await settled(armed);
   await armed.tap();
   await expect(completedRowFor(page, pair)).toBeVisible();
   // Wait for the editor to let go of the finished bout (it moves on to the

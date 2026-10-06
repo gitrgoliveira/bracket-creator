@@ -69,8 +69,8 @@ async function seedF4(page, { name, court, prefix, teams }) {
   return id;
 }
 
-// Name every position of `team`'s round-1 lineup on the Lineups page.
-async function nameRound1(page, id, team, names, teamSize) {
+// Name every position of `team`'s starting lineup on the Lineups page.
+async function nameStartingLineup(page, id, team, names, teamSize) {
   await T.openLineups(page, id, { team });
   const labels = T.positionLabels(teamSize);
   for (let i = 0; i < names.length; i += 1) await T.lineupsNameSlot(page, labels[i], names[i]);
@@ -95,7 +95,7 @@ test.describe('knockout-mixed-team', () => {
       pair3 = await sides(upNextCard(page));
     });
 
-    // ---- Entry point 1: the Lineups page (round default)
+    // ---- Entry point 1: the Lineups page (the team's starting lineup)
     await test.step('F3 EP1 Lineups page: positions are bare numbers, name three slots', async () => {
       await T.openLineups(page, f3, { team: pair3.shiro });
       // teamSize 3 shows bare numbers (positionsForSize).
@@ -156,10 +156,15 @@ test.describe('knockout-mixed-team', () => {
       await T.lineupsPick(page, '3', '.5');
       const r = await interrupt(page, 'reload');
       await T.openLineups(page, f3, { team: pair3.shiro });
+      // The unsaved picks come back as a draft kept in this tab, offered with
+      // Discard; they are only shown, never saved.
+      const draftNotice = T.lineupsForm(page).getByTestId('lineup-draft-notice');
+      await expect(draftNotice).toContainText('Unsaved lineup changes restored');
       const after = [await T.lineupsSelected(page, '1'), await T.lineupsSelected(page, '2'), await T.lineupsSelected(page, '3')];
       await shot(page, 'f3-lineups-after-reload-unsaved', { fullPage: true });
       record({ step: 'EP1 unsaved lineup', action: 'reload before Save', variant: 'V3 interrupt reload', ...r, positionsAfter: after,
-        note: 'names were minted by the confirms; the position picks were never saved' });
+        draftNotice: (await draftNotice.innerText()).replace(/\s+/g, ' ').trim(),
+        note: 'names were minted by the confirms; the position picks come back as an unsaved draft' });
       // Re-place the three and save, re-tapping Save while it reads "Saving…".
       await T.lineupsPick(page, '1', 'Aoki');
       await T.lineupsPick(page, '2', 'Baba');
@@ -176,14 +181,14 @@ test.describe('knockout-mixed-team', () => {
     });
 
     // ---- Entry point 2: the at-court match panel (match override)
-    await test.step('F3 EP2 match panel from Up next: what it shows of the round default', async () => {
+    await test.step('F3 EP2 match panel from Up next: the lineup in force and where it comes from', async () => {
       await openShiaijo(page, 'A');
       await T.openPanelFromUpNext(page);
       const shiroBoxes = await Promise.all(['1', '2', '3'].map((l) => T.panelInput(page, 0, l).inputValue()));
-      const label = (await T.panelSide(page, 0).innerText()).includes('Inheriting round default');
-      await shot(page, 'f3-panel-round-default');
-      record({ step: 'EP2 open panel', action: 'Enter lineup (Up next)', variant: 'correct', inheritingLabel: label, shiroBoxes,
-        roundDefaultOnLineupsPage: ['Aoki', 'Baba', 'Chiba'], note: 'bc-lpfb when the boxes are empty' });
+      const shiroSource = (await T.panelSource(page, 0).innerText()).trim();
+      await shot(page, 'f3-panel-lineup-in-force');
+      record({ step: 'EP2 open panel', action: 'Enter lineup (Up next)', variant: 'correct', shiroSource, shiroBoxes,
+        startingLineupOnLineupsPage: ['Aoki', 'Baba', 'Chiba'], note: 'bc-lpfb when the boxes are empty' });
     });
 
     await test.step('F3 EP2 Aka lineup typed in the panel; V1 neighbour of Aka Save; duplicate refusal', async () => {
@@ -195,9 +200,11 @@ test.describe('knockout-mixed-team', () => {
       const box2Options = await T.panelSide(page, 1).locator('.pmf__option').allInnerTexts();
       await T.dismissNameBox(page);
       await shot(page, 'f3-panel-aka-typed');
-      // V1: the thumb lands left of Aka's Save lineup. Since bc-cpdc moved
-      // "Copy from previous match" to the top of each side, no control sits
-      // within reach there, so the row records that the hazard is gone.
+      // V1: the thumb lands left of Aka's Save lineup. What sits there depends on
+      // how many rows each side has (there is no "Copy from previous match" any
+      // more: a team carries its previous match's lineup); with three rows a side
+      // it is the clear x of Shiro's third name box, which empties that position.
+      // The row records what was hit, and the next step puts Shiro back.
       const akaSave = T.panelSide(page, 1).getByRole('button', { name: 'Save lineup' });
       const nb = await tapNeighbour(akaSave, 'left').catch((e) => {
         if (!/no control within/.test(e.message)) throw e;
@@ -206,11 +213,13 @@ test.describe('knockout-mixed-team', () => {
       await page.waitForTimeout(800);
       const shiroState = (await T.panelSide(page, 0).innerText()).replace(/\s+/g, ' ');
       await shot(page, 'f3-panel-v1-neighbour-of-aka-save');
-      record({ step: 'EP2 save Aka', action: 'Save lineup (Aka)', variant: 'V1 tapNeighbour left (hazard gone since bc-cpdc)', ...nb, shiroSideAfter: shiroState.slice(0, 200),
+      record({ step: 'EP2 save Aka', action: 'Save lineup (Aka)', variant: 'V1 tapNeighbour left', ...nb, shiroSideAfter: shiroState.slice(0, 200),
         akaSaveTapBox: await T.tapBox(akaSave), box2OfferedWhileDaiAt1: box2Options });
       // Then the intended tap.
       await T.panelSave(page, 1);
-      await expect(T.panelSide(page, 1)).toContainText('Override for this match');
+      await expect(T.panelSource(page, 1)).toHaveText('Lineup for this match');
+      // Saved: nothing is left to save on that side until it changes again.
+      await expect(T.panelSaveButton(page, 1)).toBeDisabled();
       await shot(page, 'f3-panel-aka-saved');
       const rename = T.panelSide(page, 1).getByRole('button', { name: 'Rename 1 player' });
       record({ step: 'EP2 Rename', action: 'Rename control on the panel', variant: 'tap target', renameTapBox: await T.tapBox(rename) });
@@ -224,31 +233,51 @@ test.describe('knockout-mixed-team', () => {
       await shot(page, 'f3-panel-duplicate-refused');
       record({ step: 'EP2 duplicate', action: 'type Dai at 2 (Dai at 1), Save', variant: 'refusal copy', copy, note: 'bc-lprf when it names 2, the position being typed, not 1' });
       expect(copy).toMatch(/Dai is already at/);
-      // Repair: put Eto back.
+      // Repair: put Eto back. That is the lineup already saved, so nothing is
+      // left to save and Save lineup goes off again; the repair is two taps.
       await T.pickFromNameBox(T.panelInput(page, 1, '2'), 'Eto');
-      await T.panelSave(page, 1);
-      await expect(T.panelSide(page, 1).locator('.alert--error')).toHaveCount(0);
-      record({ step: 'EP2 duplicate', action: 'repair', variant: 'recover', tapsToRecover: 3 });
+      await expect(T.panelSaveButton(page, 1)).toBeDisabled();
+      record({ step: 'EP2 duplicate', action: 'repair', variant: 'recover', tapsToRecover: 2,
+        refusalStillShown: await T.panelSide(page, 1).locator('.alert--error').count() });
     });
 
-    await test.step('F3 EP2 V1: Save lineup tapped on the SHIRO side, whose boxes the panel showed empty', async () => {
-      // The thumb meant Aka's Save and landed on Shiro's, whose boxes read
-      // empty even though the Lineups page holds a round default.
-      const shiroSave = T.panelSide(page, 0).getByRole('button', { name: 'Save lineup' });
-      await shiroSave.tap();
-      await page.waitForTimeout(800);
-      const shiroLabel = (await T.panelSide(page, 0).innerText()).includes('Override for this match');
-      await shot(page, 'f3-panel-shiro-empty-saved');
+    await test.step('F3 EP2 V1: the thumb lands on SHIRO\'s Save lineup, which has no change to save', async () => {
+      // The thumb meant Aka's Save and landed on Shiro's. First put Shiro's side
+      // back as it was loaded: the neighbour tap above may have cleared a
+      // position (the x beside a name box), which the operator mends by picking the
+      // fighter again. The recorded `repairedPositions` says whether it did.
+      const startingLineup = ['Aoki', 'Baba', 'Chiba'];
+      const repairedPositions = [];
+      for (const [i, name] of startingLineup.entries()) {
+        const box = T.panelInput(page, 0, String(i + 1));
+        if ((await box.inputValue()) === name) continue;
+        await T.pickFromNameBox(box, name);
+        await expect(box).toHaveValue(name);
+        repairedPositions.push(String(i + 1));
+      }
+      // Shiro's boxes show the starting lineup the Lineups page holds and nothing
+      // on that side differs from it, so Save lineup is off: there is no tap to land.
+      const shiroSave = T.panelSaveButton(page, 0);
+      await expect(shiroSave).toBeDisabled();
+      const shiroSource = (await T.panelSource(page, 0).innerText()).trim();
+      // No lineup of Shiro's own was written for this match.
+      const shiroOverride = shiroSource === 'Lineup for this match';
+      expect(shiroOverride).toBe(false);
+      await shot(page, 'f3-panel-shiro-save-off');
       await T.closePanel(page);
-      // What the score sheet now shows for Shiro's first position.
+      // What the score sheet shows for Shiro's first position.
       await upNextCard(page).getByRole('button', { name: 'Start match' }).tap();
       const ed = inlineEditor(page);
       await expect(T.boutRow(ed, 1)).toBeVisible();
+      // The sheet names the starting lineup's fighter, as the panel did (the
+      // name box fills once the lineup in force has been read).
+      await expect(T.rowNameBox(T.boutRow(ed, 1), 'shiro')).toHaveValue('Aoki');
+      await expect(T.rowNameBox(T.boutRow(ed, 1), 'aka')).toHaveValue('Dai');
       const r1 = await T.rowNameBox(T.boutRow(ed, 1), 'shiro').inputValue();
       const r1aka = await T.rowNameBox(T.boutRow(ed, 1), 'aka').inputValue();
-      await shot(page, 'f3-sheet-after-shiro-empty-save');
-      record({ step: 'EP2 wrong Save', action: 'Save lineup (Shiro, boxes shown empty)', variant: 'V1 wrong side', shiroOverride: shiroLabel,
-        sheetRow1Shiro: r1, sheetRow1Aka: r1aka, roundDefaultRow1: 'Aoki' });
+      await shot(page, 'f3-sheet-after-shiro-save-off');
+      record({ step: 'EP2 wrong Save', action: 'Save lineup (Shiro, nothing changed)', variant: 'V1 wrong side', shiroSaveDisabled: true, shiroSource,
+        shiroOverride, repairedPositions, sheetRow1Shiro: r1, sheetRow1Aka: r1aka, startingLineupRow1: 'Aoki' });
     });
 
     // ---- Entry point 3: the score sheet row
@@ -257,7 +286,8 @@ test.describe('knockout-mixed-team', () => {
       const row1 = T.boutRow(ed, 1);
       const box = T.rowNameBox(row1, 'shiro');
       const boxTap = await T.tapBox(row1.locator('.team-sub-match__side--shiro .lineup-name__bar'));
-      // Whatever row 1 shows now, name it Aoki first (the intended fighter).
+      // Row 1 already names Aoki (the starting lineup's fighter); open its list
+      // as the operator would to confirm or change it.
       await box.tap();
       await row1.locator('.pmf__option').first().waitFor({ state: 'visible', timeout: 3000 }).catch(() => {});
       const offered = await row1.locator('.pmf__option').allInnerTexts();
@@ -286,11 +316,9 @@ test.describe('knockout-mixed-team', () => {
       record({ step: 'EP3 wrong fighter', action: 'pick row 1 Shiro', variant: 'V1 option below', offered, picked: wrongText,
         boxAfterWrong: afterWrong, labelAfterWrong, repaired: await box.inputValue(), tapsToRecover: 2, boxTapBox: boxTap });
 
-      // Re-enter rows 2 and 3 (the empty Shiro override left them blank):
-      // the operator's cost of the wrong-side Save above.
-      await T.pickFromNameBox(T.rowNameBox(T.boutRow(ed, 2), 'shiro'), 'Baba');
+      // Rows 2 and 3 still name the starting lineup's fighters: the Save the
+      // thumb landed on above had nothing to write, so it cost the operator nothing.
       await expect(T.rowNameBox(T.boutRow(ed, 2), 'shiro')).toHaveValue('Baba');
-      await T.pickFromNameBox(T.rowNameBox(T.boutRow(ed, 3), 'shiro'), 'Chiba');
       await expect(T.rowNameBox(T.boutRow(ed, 3), 'shiro')).toHaveValue('Chiba');
       // One member at two rows: type Baba (row 2) into row 1.
       await T.typeIntoNameBox(box, 'Baba');
@@ -312,6 +340,24 @@ test.describe('knockout-mixed-team', () => {
       await T.openLineups(page, f3, { team: pair3.shiro });
       const lineupsPage = [await T.lineupsSelected(page, '1'), await T.lineupsSelected(page, '2'), await T.lineupsSelected(page, '3')];
       record({ step: 'three entry points', action: 'compare Shiro positions', variant: 'consistency', sheet, lineupsPage });
+    });
+
+    await test.step('F3 the Lineups page edits one match\'s own lineup through "Lineup for"', async () => {
+      // Aka's lineup was saved for its first match at the court (entry point 2):
+      // the page shows it, as that match's own, when "Lineup for" names the match.
+      await T.openLineups(page, f3, { team: pair3.aka });
+      const options = await T.lineupForOptions(page);
+      expect(options[0]).toBe(T.STARTING_LINEUP);
+      expect(options.length).toBeGreaterThan(1);
+      await T.openLineups(page, f3, { team: pair3.aka, lineupFor: options[1] });
+      const names = [await T.lineupsSelected(page, '1'), await T.lineupsSelected(page, '2'), await T.lineupsSelected(page, '3')];
+      await expect(T.lineupsForm(page).getByTestId('lineup-source')).toHaveText('Lineup for this match');
+      await expect(T.lineupsForm(page).getByRole('button', { name: 'Save lineup' })).toBeDisabled();
+      await shot(page, 'f3-lineups-for-a-match', { fullPage: true });
+      record({ step: 'Lineup for', action: 'choose the first match in "Lineup for"', variant: 'correct', options, names });
+      expect(names[0]).toContain('Dai');
+      expect(names[1]).toContain('Eto');
+      expect(names[2]).toContain('Fuji');
     });
 
     await test.step('F3 V4: a sixth member through "+ Add new member…" while two reserve slots are blank', async () => {
@@ -439,7 +485,7 @@ test.describe('knockout-mixed-team', () => {
       // teamSize 5 shows the FIK position names.
       for (const l of T.FIK5) await expect(T.lineupsSelect(page, l)).toBeVisible();
       await shot(page, 'f4-lineups-fik-names', { fullPage: true });
-      await nameRound1(page, f4, pair4.shiro, ['Ito', 'Kato', 'Sato', 'Mori', 'Ueda'], 5);
+      await nameStartingLineup(page, f4, pair4.shiro, ['Ito', 'Kato', 'Sato', 'Mori', 'Ueda'], 5);
       const dup = await T.lineupsStartAdd(page, 'Taisho', 'Ito');
       expect(dup.alert).toMatch(/Ito is already at Senpo/);
       await shot(page, 'f4-lineups-duplicate-refused', { fullPage: true });
@@ -447,7 +493,7 @@ test.describe('knockout-mixed-team', () => {
       await T.lineupsForm(page).getByRole('button', { name: 'Cancel' }).tap();
     });
 
-    await test.step('F4 EP2 panel on a first-round (semifinal) match: FIK names and the round default', async () => {
+    await test.step('F4 EP2 panel on a first-round (semifinal) match: FIK names and the starting lineup', async () => {
       await openShiaijo(page, 'C');
       await T.openPanelFromUpNext(page);
       for (const l of T.FIK5) await expect(T.panelInput(page, 0, l)).toBeVisible();
@@ -1009,7 +1055,11 @@ test.describe('knockout-mixed-team', () => {
   // kept as a self-contained test so the fix can remove the fixme and keep
   // the step as its guard. Each seeds its own competition on its own shiaijo.
 
-  test.fixme('bc-lpfb: the match lineup panel shows a pool match\'s round-default lineup as empty', async ({ page }) => {
+  // The panel used to read "Inheriting round default" over empty boxes while the
+  // score sheet named that default's fighters. A team now carries the lineup of
+  // its previous team match (its starting lineup before its first), and the
+  // panel shows the lineup in force with the line saying where it comes from.
+  test('bc-lpfb: the match lineup panel shows the lineup the score sheet shows, and Save lineup waits for a change', async ({ page }) => {
     await T.enterAdmin(page);
     const id = await createCompetition(page, {
       name: 'B1 Pools', kind: 'team', format: 'mixed', teamSize: 3, teamMatchType: 'fixed', courts: ['G', 'H'], numberPrefix: 'G',
@@ -1019,14 +1069,19 @@ test.describe('knockout-mixed-team', () => {
     await startCompetition(page, id);
     await openShiaijo(page, 'G');
     const pair = await sides(upNextCard(page));
-    await nameRound1(page, id, pair.shiro, ['Aoki', 'Baba', 'Chiba'], 3);
+    const names = ['Aoki', 'Baba', 'Chiba'];
+    await nameStartingLineup(page, id, pair.shiro, names, 3);
     await openShiaijo(page, 'G');
     await T.openPanelFromUpNext(page);
-    // The panel says "Inheriting round default" and must show that default,
-    // as the score sheet does.
-    await expect(T.panelSide(page, 0)).toContainText('Inheriting round default');
-    await expect(T.panelInput(page, 0, '1')).toHaveValue('Aoki');
-    await expect(T.panelInput(page, 0, '3')).toHaveValue('Chiba');
+    // The panel shows the starting lineup as the lineup in force, says so, and
+    // with nothing changed on Shiro's side offers no Save lineup.
+    await expect(T.panelSource(page, 0)).toHaveText(T.STARTING_LINEUP);
+    for (const [i, name] of names.entries()) await expect(T.panelInput(page, 0, String(i + 1))).toHaveValue(name);
+    await expect(T.panelSaveButton(page, 0)).toBeDisabled();
+    await T.closePanel(page);
+    // The score sheet, once the match starts, names the same fighters.
+    const ed = await T.startUpNextTeam(page);
+    for (const [i, name] of names.entries()) await expect(T.rowNameBox(T.boutRow(ed, i + 1), 'shiro')).toHaveValue(name);
   });
 
   test.fixme('bc-lprf: the match lineup panel\'s "already at" refusal names the wrong position', async ({ page }) => {
@@ -1037,7 +1092,7 @@ test.describe('knockout-mixed-team', () => {
     await T.typeIntoNameBox(T.panelInput(page, 1, 'Senpo'), 'Dai');
     await T.typeIntoNameBox(T.panelInput(page, 1, 'Jiho'), 'Eto');
     await T.panelSave(page, 1);
-    await expect(T.panelSide(page, 1)).toContainText('Override for this match');
+    await expect(T.panelSource(page, 1)).toHaveText('Lineup for this match');
     // Dai holds Senpo; typing Dai at Jiho is refused naming where Dai IS
     // (team-tournaments.md: "refused with the position they hold").
     await T.typeIntoNameBox(T.panelInput(page, 1, 'Jiho'), 'Dai');

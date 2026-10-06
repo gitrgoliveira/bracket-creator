@@ -11,6 +11,7 @@
 // what is hit, as it does for a thumb.
 import { expect } from '@playwright/test';
 import { INLINE_EDITOR } from '../../screenshots/lib/editor.mjs';
+import { dwell, settled } from './pace.mjs';
 
 // Does the page still match (pointer: coarse)? Measured on this journey: after
 // a fullPage screenshot (fixtures/shots.mjs with { fullPage: true }) the
@@ -53,6 +54,10 @@ export async function openLineupFromUpNext(page) {
 // names and leaves the side unsaved.
 export const lineupSide = (page, teamName) => page.locator('[data-testid^="match-lineup-side-"]').filter({ hasText: teamName }).first();
 
+// Where the lineup a side shows comes from: "Lineup for this match", "Same as
+// <match>" or "Starting lineup" (LineupSourceLine, lineup_draft.jsx).
+export const lineupSource = (side) => side.locator('[data-testid^="match-lineup-source-"]');
+
 export async function typeLineup(page, teamName, names, { save: doSave = true } = {}) {
   const side = lineupSide(page, teamName);
   await expect(side).toBeVisible();
@@ -68,7 +73,9 @@ export async function typeLineup(page, teamName, names, { save: doSave = true } 
   if (!doSave) return side;
   const save = side.getByRole('button', { name: /^(Save lineup|Saving…)$/ });
   await save.tap();
-  await expect(side.getByRole('button', { name: 'Save lineup' })).toBeEnabled();
+  // Saved: the side shows the lineup as its own match's, and Save lineup waits
+  // for the next change.
+  await expect(lineupSource(side)).toHaveText('Lineup for this match');
   return side;
 }
 
@@ -100,6 +107,8 @@ export const tieButton = (row) => row.getByTestId('scoring-modal-tie-button');
 export const recordBoutButton = (page) => editor(page).getByRole('button', { name: /^(Record bout|Saving…)$/ }).first();
 export const endMatchButton = (page) => editor(page).getByTestId('kachinuki-end-match-button');
 export const enchoButton = (page) => editor(page).getByTestId('kachinuki-encho-button');
+// Takes one overtime period back; offered beside Encho once the bout is in overtime.
+export const enchoUndoButton = (page) => editor(page).getByTestId('kachinuki-encho-undo-button');
 export const removeBoutButton = (page) => editor(page).getByTestId('kachinuki-remove-bout-button');
 export const reopenButton = (page) => page.getByTestId('kachinuki-reopen-button');
 export const syncPill = (page) => editor(page).locator('.sync-pill__label').first();
@@ -134,15 +143,32 @@ export async function doneRowWinner(row) {
   return '';
 }
 
+// A fighter name list left open on a bout row, by a tap that landed on a name
+// box. Close it the way a thumb does, with a tap on the empty page margin (Escape
+// would leave the box focused). Returns whether one was open.
+export async function closeFighterList(page) {
+  const options = editor(page).locator('.pmf__option');
+  const wasOpen = (await options.count()) > 0;
+  if (wasOpen) {
+    await page.touchscreen.tap(6, 500);
+    await expect(options).toHaveCount(0);
+  }
+  return wasOpen;
+}
+
 // The centre mark of a row (vs / X / (E)).
 export const boutMiddle = async (row) => (await row.locator('.team-sub-match__score').first().innerText()).trim();
 
-// Award one ippon on the live bout and wait for the board to show it.
+// Award one ippon on the current bout and wait for the board to show it. A second
+// ippon on the same side only counts once the first one's bounce window has
+// passed (fixtures/pace.mjs), so the helper returns after it.
 export async function awardBoutIppon(page, side, waza = 'M') {
   const row = currentBout(page);
   const before = await boutFilled(row, side).count();
+  const tappedAt = Date.now();
   await boutIpponButton(row, side, waza).tap();
   await expect(boutFilled(currentBout(page), side)).toHaveCount(before + 1);
+  await dwell(page, tappedAt);
 }
 
 // Record bout: one tap. Returns once the bout has become a read-only row (the
@@ -167,6 +193,8 @@ export async function endMatch(page) {
   await btn.tap();
   await expect(btn).toHaveText(/^Tap again/);
   const armed = (await btn.innerText()).trim();
+  // The second tap counts once the arming tap's bounce window has passed.
+  await settled(btn);
   await btn.tap();
   return armed;
 }

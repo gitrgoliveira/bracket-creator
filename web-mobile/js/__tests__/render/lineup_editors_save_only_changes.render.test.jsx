@@ -23,6 +23,9 @@
 //    would place without a clash is not refused;
 //  - while a Save waits for its read and its write nothing that changes the lineup
 //    or the team's members is usable, and Save waits while one of those is out;
+//  - a side of the panel given another team (a knockout feeder decided on another
+//    device) gets a fresh editor, so a Save the old team still has out, its write or
+//    the member it is minting, lands nothing in the new team's lineup or members;
 //  - a lineup followed from another device is shown with the team's members read
 //    again, so a member created elsewhere is not shown as an empty slot;
 //  - a Save that shows what another device changed reads the team's members again
@@ -69,6 +72,7 @@ const PANEL_MATCH = PANEL_MATCHES[2];
 
 let AdminTeamLineupsList;
 let MatchLineupSideEditor;
+let MatchLineupPanel;
 let realResolver;
 let resolver;
 let saved;
@@ -99,7 +103,7 @@ beforeEach(async () => {
   delete window.subscribeUnsentWrites;
   delete window.subscribeSyncStatus;
   ({ AdminTeamLineupsList } = await import('../../admin_lineup.jsx'));
-  ({ MatchLineupSideEditor } = await import('../../admin_schedule_lineup.jsx'));
+  ({ MatchLineupSideEditor, MatchLineupPanel } = await import('../../admin_schedule_lineup.jsx'));
   // The panel resolves a typed name through window.AdminLineupHelpers at call time:
   // wrapped, so a test can see which positions it was asked about.
   realResolver ||= window.AdminLineupHelpers.resolveMemberIdsForPositions;
@@ -626,6 +630,109 @@ describe('the at-court panel', () => {
     await flush();
 
     expect(saveButton(utils).disabled, 'the rename has landed, and the lineup is still unsaved').toBe(false);
+  });
+});
+
+// A side of a match can be given another team while the panel is open (a knockout
+// feeder decided on another device). That side's editor is then a new one, so
+// whatever the old team's Save still has out lands nowhere.
+describe('the at-court panel when a side is given another team', () => {
+  const B_MEMBERS = [
+    { id: 'b-1', index: 1, name: 'Baba' }, { id: 'b-2', index: 2, name: 'Bando' },
+    { id: 'b-3', index: 3, name: 'Bessho' }, { id: 'b-4', index: 4, name: 'Bito' },
+  ];
+  const C_MEMBERS = [
+    { id: 'c-1', index: 1, name: 'Chiba' }, { id: 'c-2', index: 2, name: 'Cho' },
+    { id: 'c-3', index: 3, name: 'Date' }, { id: 'c-4', index: 4, name: 'Endo' },
+  ];
+  const LINEUPS = {
+    'team-a': NAMES,
+    'team-b': { positions: { 1: 'Baba', 2: 'Bando', 3: 'Bessho' }, memberIds: { 1: 'b-1', 2: 'b-2', 3: 'b-3' } },
+    'team-c': { positions: { 1: 'Chiba', 2: 'Cho', 3: 'Date' }, memberIds: { 1: 'c-1', 2: 'c-2', 3: 'c-3' } },
+  };
+  // Team B plays on the SHIRO side until team C takes its place.
+  const WITH_B = { ...PANEL_MATCH, sideB: B };
+  const WITH_C = { ...PANEL_MATCH, sideB: C };
+
+  beforeEach(() => {
+    api.fetchSquads.mockResolvedValue({ 'team-a': SQUAD, 'team-b': B_MEMBERS, 'team-c': C_MEMBERS });
+    api.fetchLineupInForce.mockImplementation((_c, teamId) => Promise.resolve(
+      lineupFor({ ...LINEUPS[teamId], teamId, matchId: 'Pool A-2', sourceMatchId: 'Pool A-0' }),
+    ));
+  });
+
+  const panelFor = (match) => (
+    <MatchLineupPanel match={match} tournament={{ competitions: [COMP] }} password="pw" showToast={showToast} onClose={() => {}} variant="inline" />
+  );
+  const side = (utils, teamId) => within(utils.getByTestId(`match-lineup-side-${teamId}`));
+
+  async function mountMatchPanel(match) {
+    let utils;
+    await act(async () => { utils = render(panelFor(match)); });
+    await flush();
+    return utils;
+  }
+
+  // The operator types a name nobody has at team B's position 1 and saves.
+  async function saveNewNameForTeamB(utils) {
+    await act(async () => {
+      const input = side(utils, 'team-b').getByLabelText('1 player');
+      fireEvent.focus(input);
+      fireEvent.change(input, { target: { value: 'Kobayashi' } });
+      fireEvent.keyDown(input, { key: 'Enter' });
+    });
+    await click(side(utils, 'team-b').getByRole('button', { name: /^Save lineup$/ }));
+  }
+
+  async function giveTeamCTheSide(utils) {
+    await act(async () => { utils.rerender(panelFor(WITH_C)); });
+    await flush();
+  }
+
+  // The new team's editor shows its own lineup and offers its own members, none of team B's.
+  async function expectTeamCAlone(utils) {
+    const c = side(utils, 'team-c');
+    expect(c.getByLabelText('1 player').value).toBe('Chiba');
+    expect(c.getByLabelText('2 player').value).toBe('Cho');
+    expect(c.getByLabelText('3 player').value).toBe('Date');
+    // The open list shows the query, not the value: look, then close it again.
+    await act(async () => { fireEvent.focus(c.getByLabelText('1 player')); });
+    expect(c.getByText('Endo'), 'its own unplaced member').toBeTruthy();
+    expect(c.queryByText('Bito'), 'team B\'s unplaced member').toBeNull();
+    expect(c.queryByText('Kobayashi'), 'the member team B\'s Save minted').toBeNull();
+    await act(async () => { fireEvent.keyDown(c.getByLabelText('1 player'), { key: 'Escape' }); });
+  }
+
+  it('lands nothing of a write the old team still has out in the new team\'s lineup or members', async () => {
+    const utils = await mountMatchPanel(WITH_B);
+    const write = deferred();
+    api.putMatchLineup.mockReturnValue(write.promise);
+    await saveNewNameForTeamB(utils);
+    expect(api.putMatchLineup, 'team B\'s write is out').toHaveBeenCalledTimes(1);
+
+    await giveTeamCTheSide(utils);
+    await expectTeamCAlone(utils);
+    await act(async () => {
+      write.resolve({ positions: { 1: 'Kobayashi', 2: 'Bando', 3: 'Bessho' }, memberIds: { 1: 'mem-minted', 2: 'b-2', 3: 'b-3' } });
+    });
+    await flush();
+
+    await expectTeamCAlone(utils);
+  });
+
+  it('lands nothing either of the member the old team\'s Save was still minting', async () => {
+    const utils = await mountMatchPanel(WITH_B);
+    const mint = deferred();
+    api.addTeamMember.mockReturnValue(mint.promise);
+    await saveNewNameForTeamB(utils);
+    expect(api.addTeamMember, 'the member is being minted for team B').toHaveBeenCalledTimes(1);
+
+    await giveTeamCTheSide(utils);
+    await expectTeamCAlone(utils);
+    await act(async () => { mint.resolve({ id: 'mem-minted', index: 6, name: 'Kobayashi' }); });
+    await flush();
+
+    await expectTeamCAlone(utils);
   });
 });
 

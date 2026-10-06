@@ -503,6 +503,9 @@ export function MatchLineupPanel({ match, tournament, password, showToast, onClo
   // on every render of the panel.
   const allMatches = () => (typeof window.compMatches === "function" ? window.compMatches(comp) : []);
 
+  // The side's team is part of its editor's key: a side given another team while the
+  // panel is open (a knockout feeder decided on another device) gets a fresh editor, so
+  // a Save the old team's editor still has out lands nowhere in the new team's form.
   const inner = (
     <>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 16 }}>
@@ -525,7 +528,7 @@ export function MatchLineupPanel({ match, tournament, password, showToast, onClo
             </div>
             {teamB ? (
               <MatchLineupSideEditor
-                key={`${m.id}-side-b`}
+                key={`${m.id}-side-b-${sideBKey}`}
                 comp={comp}
                 team={teamB}
                 match={m}
@@ -543,7 +546,7 @@ export function MatchLineupPanel({ match, tournament, password, showToast, onClo
             </div>
             {teamA ? (
               <MatchLineupSideEditor
-                key={`${m.id}-side-a`}
+                key={`${m.id}-side-a-${sideAKey}`}
                 comp={comp}
                 team={teamA}
                 match={m}

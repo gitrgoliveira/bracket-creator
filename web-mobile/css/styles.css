@@ -5305,8 +5305,12 @@ button.vsched-item:not([data-clickable]) {
 }
 /* In the overlay the bar sticks to the body's top edge, over the body's top
    padding, so a bout scrolled past does not show in a strip above the team
-   names; the negative margin keeps it where it sits before it sticks. */
-.editor-modal--team > .editor-modal__body > .team-sheet-pin:first-child {
+   names; the negative margin keeps it where it sits before it sticks. The note
+   for a match whose stored data cannot be read can come first (the bar is then
+   the body's second child): the bar's box starts that far up into the space the
+   note's bottom margin and the body's gap leave, which clears it in both
+   densities, so it never reaches the note. */
+.editor-modal--team > .editor-modal__body > .team-sheet-pin {
   top: calc(-1 * var(--editor-body-pad-top));
   margin-top: calc(-1 * var(--editor-body-pad-top));
   padding-top: var(--editor-body-pad-top);

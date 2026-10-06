@@ -63,7 +63,7 @@ export function MatchLineupSideEditor({ comp, team, match, allMatches, password,
   const {
     values, setValues, memberIds, setMemberIds, memberIdsRef, setBaseline,
     error, setError, warning: lineupWarning, setWarning: setLineupWarning,
-    squad, setSquad, squadUnavailable,
+    squad, changeMembers, squadUnavailable,
   } = form;
   // RENAME (bc-dnst, operator decision 2026-09-15): a member's name can be
   // corrected from this panel as well as from the Lineups page (the score sheet
@@ -156,7 +156,7 @@ export function MatchLineupSideEditor({ comp, team, match, allMatches, password,
     setError("");
     try {
       await window.API.renameTeamMember(compId, teamId, id, name, password);
-      setSquad(sq => sq.map(m => (m && m.id === id ? { ...m, name } : m)));
+      changeMembers(sq => sq.map(m => (m && m.id === id ? { ...m, name } : m)));
       setValues(v => {
         const next = { ...v };
         // Read the CURRENT placements, not the ones this handler closed over
@@ -238,22 +238,29 @@ export function MatchLineupSideEditor({ comp, team, match, allMatches, password,
           positionsForResolver[key] = v;
         }
       });
-      // The member the resolver will put each typed name on, when that member exists
-      // already, asked of the list the resolver is given (the team's members as the
-      // Save's re-read left them) and in its order: the member the name belongs to,
-      // else the unnamed member the position holds, which it names in place (a named
-      // member's id is not the position's: a typed name over it becomes whoever the
-      // resolver finds or mints). Anything else it puts there is new (a mint, or the
-      // position's own seeded slot, taken only while that slot is free), so it can
-      // collide with nobody.
-      const members = form.squadRef.current;
-      const memberNamed = window.AdminLineupHelpers?.resolveMemberIdForName;
+      // The member the resolver will put each typed name on, asked of the list the
+      // resolver is given (the team's members as the Save's re-read left them), in its
+      // order and with its own two lookups: the member the name belongs to, else the
+      // unnamed member it names in place (the one the position holds, else the
+      // position's seeded slot while that slot is free). Else it mints, and a minted
+      // member collides with no member that exists. The next typed position can: the
+      // resolver goes through the names one after another, and a name it has just
+      // given a member is found again for the next position that carries it, so a new
+      // name typed at two positions is one member at both, which it finds out only
+      // once it has named or minted the first. The same walk is made here on a copy of
+      // the list, a member of its own standing in for a mint, and nothing is written.
+      const { resolveMemberIdForName: memberNamed, blankMemberForPosition: blankFor } = window.AdminLineupHelpers || {};
+      const walked = form.squadRef.current.map(m => ({ ...m }));
       const placedByResolver = {};
       Object.entries(positionsForResolver).forEach(([key, name]) => {
-        const named = typeof memberNamed === "function" ? memberNamed(members, name) : null;
-        const held = members.find(m => m.id === composedIds[key] && !(m.name || "").trim());
-        const id = named?.id || held?.id;
-        if (id) placedByResolver[key] = id;
+        let member = (typeof memberNamed === "function" ? memberNamed(walked, name) : null)
+          || (typeof blankFor === "function" ? blankFor(walked, key, composedIds) : null);
+        if (!member) {
+          member = { id: `new-at-${key}` };
+          walked.push(member);
+        }
+        if (!member.name) member.name = name;
+        placedByResolver[key] = member.id;
       });
       // One position per member (the shared predicate, bc-dnst), asked of the lineup
       // as composed, so a member another device placed meanwhile counts. Asked before
@@ -291,7 +298,7 @@ export function MatchLineupSideEditor({ comp, team, match, allMatches, password,
             const resolved = await resolver(compId, teamId, positionsForResolver, form.squadRef.current, password, composedIds);
             Object.assign(memberIdsOut, resolved.memberIds);
             memberFailures = resolved.failures || [];
-            setSquad(resolved.squad);
+            changeMembers(resolved.squad);
           }
         } catch (_e) {
           // Defense in depth on top of the helper's own per-position mint

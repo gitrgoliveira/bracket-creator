@@ -328,23 +328,26 @@ export function useLineupForm({ compId, teamId, matchId = '', positionKeys, pass
   // lineup, and drops it when the read fails.
   const reading = useRef(null);
   const followDue = useRef(false);
-  // The same for the team's members, which three reads ask for (the one made when
-  // the editor opens, the one a followed lineup makes and the one a Save makes when
-  // it shows a lineup another device changed) and which need not answer in the
-  // order they began. Each takes the next number from membersRead as it begins;
-  // membersShown is the number of the read whose list is shown. An answer is shown
-  // only when its read began after that one, so an older answer never replaces a
-  // newer one, and a read that shows nothing (it failed, was not answered in time,
-  // or was dropped) never stops an older read still out from landing.
+  // The same for the team's members, which four reads ask for (the one made when
+  // the editor opens, the one a followed lineup makes, the one a Save makes when
+  // it shows a lineup another device changed, and the one an editor's own change of
+  // the members makes) and which need not answer in the order they began. Each takes
+  // the next number from membersRead as it begins; membersShown is the number of the
+  // read whose list is shown. An answer is shown only when its read began after that
+  // one, so an older answer never replaces a newer one, and a read that shows nothing
+  // (it failed, was not answered in time, or was dropped) never stops an older read
+  // still out from landing. An editor's own change ends every read begun before it
+  // (see changeMembers).
   const membersRead = useRef(0);
   const membersShown = useRef(0);
 
-  // The ONE door every list of the team's members comes through, a read's answer and
-  // an editor's own update (after an add, a rename or a mint; it may pass a function,
-  // which is given the list shown) alike. The list is merged with the one shown (see
-  // mergeMembers), so no member is lost to a read begun before they were added or to
-  // an update built on an older list, and it is on squadRef at once. It takes no read
-  // number: an editor's update never ends a read still out, whose list must arrive.
+  // The ONE door every list of the team's members comes through: showMembers, below,
+  // for a read's answer, and changeMembers for an editor's own change. It may be
+  // passed a function, which is given the list shown. The list is merged with the one
+  // shown (see mergeMembers), so no member is lost to a read begun before they were
+  // added or to a change built on an older list, and it is on squadRef at once. It is
+  // not handed to the editors: what an editor changes goes through changeMembers,
+  // which also settles the reads still out.
   const setSquad = (next) => {
     const merged = mergeMembers(squadRef.current, typeof next === 'function' ? next(squadRef.current) : next);
     squadRef.current = merged;
@@ -358,6 +361,26 @@ export function useLineupForm({ compId, teamId, matchId = '', positionKeys, pass
     membersShown.current = mine;
     setSquad(members);
     setSquadUnavailable(false);
+  };
+
+  // The ONE door for an editor's own change to the team's members, made once the
+  // server holds it (an add, a rename, a cleared name, a mint; it may pass a function,
+  // which is given the list shown). A members read begun before it can answer after
+  // it with the list from before, and an arriving list wins over the one shown (see
+  // mergeMembers): a rename would be undone, and the new name typed next would find
+  // nobody, so it would be put on an unnamed member or minted as a second one. Once a
+  // list is shown, every read begun so far is therefore ended. While none is (the
+  // read made as the editor opened is still out, and a Save minted a typed name
+  // meanwhile), that read is not ended: it holds the rest of the team, and the
+  // change has nothing of it to undo. Either way the members are read again: that
+  // read begins after the change, so it holds it, and a member another device added
+  // meanwhile still arrives. One that fails shows nothing and changes no flag.
+  const changeMembers = (next) => {
+    const listed = squadRef.current.length > 0;
+    setSquad(next);
+    if (listed) membersShown.current = membersRead.current;
+    const mine = ++membersRead.current;
+    readMembers(compId, teamId, password).then((members) => showMembers(mine, members));
   };
 
   const readLineup = () => (matchId
@@ -507,8 +530,8 @@ export function useLineupForm({ compId, teamId, matchId = '', positionKeys, pass
   // 401 would leave the pickers empty for the editor's whole life, and every typed
   // name would mint a new member instead of resolving to the one already on the
   // team. Changing the team or the password, or leaving, ends every members read
-  // begun so far, this one and any a followed lineup or a Save made: they were made
-  // for what no longer applies.
+  // begun so far, this one and any a followed lineup, a Save or an editor's own change
+  // made: they were made for what no longer applies.
   useEffect(() => {
     if (!compId || !teamId) return undefined;
     const mine = ++membersRead.current;
@@ -655,7 +678,7 @@ export function useLineupForm({ compId, teamId, matchId = '', positionKeys, pass
     // A form that holds nothing read has no draft to offer back or discard.
     draft: read ? draft : { ...draft, restored: false, stale: null },
     error, setError, warning, setWarning,
-    squad, setSquad, squadRef, squadUnavailable,
+    squad, changeMembers, squadRef, squadUnavailable,
     removing, removeStored, dropOwnLineup, saveQueued, lineupToSave, confirmSaved,
   };
 }

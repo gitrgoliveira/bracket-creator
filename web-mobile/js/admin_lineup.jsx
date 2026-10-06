@@ -436,7 +436,7 @@ function AdminLineup({ comp, team, matchId = "", matchLabel = "", allMatches, pa
   const {
     values, setValues, memberIds, setMemberIds, memberIdsRef, setBaseline,
     error, setError, warning: saveWarning, setWarning: setSaveWarning,
-    squad, setSquad, squadUnavailable,
+    squad, changeMembers, squadUnavailable,
   } = form;
   const [saving, setSaving] = useStateA(false);
   // A removal of a stored lineup (the match's own, or an old round's) is in flight.
@@ -577,7 +577,7 @@ function AdminLineup({ comp, team, matchId = "", matchLabel = "", allMatches, pa
       }
       const resolvedId = resolved.memberIds[posKey];
       const resolvedMember = resolved.squad.find(m => m.id === resolvedId);
-      setSquad(resolved.squad);
+      changeMembers(resolved.squad);
       if (resolvedMember) selectMember(posKey, resolvedMember);
       setAddingPos(null);
       setAddingName("");
@@ -608,7 +608,7 @@ function AdminLineup({ comp, team, matchId = "", matchLabel = "", allMatches, pa
     setError("");
     try {
       await window.API.renameTeamMember(compId, teamId, id, name, password);
-      setSquad(s => s.map(m => (m.id === id ? { ...m, name } : m)));
+      changeMembers(s => s.map(m => (m.id === id ? { ...m, name } : m)));
       setValues(v => {
         const next = { ...v };
         const ids = memberIdsRef.current;
@@ -642,7 +642,7 @@ function AdminLineup({ comp, team, matchId = "", matchLabel = "", allMatches, pa
     setError("");
     try {
       await window.API.clearTeamMember(compId, teamId, member.id, password);
-      setSquad(s => s.map(m => (m.id === member.id ? { ...m, name: "" } : m)));
+      changeMembers(s => s.map(m => (m.id === member.id ? { ...m, name: "" } : m)));
       setValues(v => {
         const next = { ...v };
         const ids = memberIdsRef.current;

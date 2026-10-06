@@ -302,6 +302,12 @@ describe('AdminLineup form (competition-admin Lineups, bc-tmid pass 3)', () => {
     const tree = await mountFor({ id: 'team-1', name: 'Tora A', number: 'T10' }, {
       squads: { 'team-1': [{ id: 'sq-sato', index: 1, name: 'Sato' }] },
     });
+    // The server holds a rename once it is made, so the read the page makes after it
+    // answers with the new name.
+    global.window.API.renameTeamMember.mockImplementation(async (_c, _t, id, name) => {
+      global.window.API.fetchSquads.mockResolvedValue({ 'team-1': [{ id, index: 1, name }] });
+      return true;
+    });
     // Select the member into position 1 first.
     positionSelect(tree, '1').props.onChange({ target: { value: 'sq-sato' } });
 
@@ -366,6 +372,12 @@ describe('AdminLineup form (competition-admin Lineups, bc-tmid pass 3)', () => {
     it('clicking it clears the server-side name and blanks the position that held that member by id, keeping the id placement', async () => {
       const tree = await mountFor({ id: 'team-1', name: 'Tora A', number: 'T10' }, {
         squads: { 'team-1': [{ id: 'sq-sato', index: 1, name: 'Sato' }] },
+      });
+      // The server holds a cleared name once it is cleared, so the read the page makes
+      // after it answers with the member unnamed.
+      global.window.API.clearTeamMember.mockImplementation(async (_c, _t, id) => {
+        global.window.API.fetchSquads.mockResolvedValue({ 'team-1': [{ id, index: 1, name: '' }] });
+        return true;
       });
       // Place the member at position 1 first, so its persistence can be checked.
       positionSelect(tree, '1').props.onChange({ target: { value: 'sq-sato' } });

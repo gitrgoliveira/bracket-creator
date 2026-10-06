@@ -46,7 +46,7 @@ afterAll(() => restoreGlobals());
 
 const ONE_MARK = [{ position: 1, sideA: 'A1', sideB: 'B1', ipponsA: [], ipponsB: ['M'] }];
 
-async function mount({ teamSize = 5, teamMatchType = 'fixed', variant } = {}) {
+async function mount({ teamSize = 5, teamMatchType = 'fixed', variant, unreadable = false } = {}) {
   window.API.fetchCompetitionDetails = vi.fn().mockResolvedValue({
     id: 'comp1',
     config: { format: 'knockout', teamMatchType, naginata: false, players: [] },
@@ -70,6 +70,7 @@ async function mount({ teamSize = 5, teamMatchType = 'fixed', variant } = {}) {
           sideA: { id: 'team-A', name: 'Team A' },
           sideB: { id: 'team-B', name: 'Team B' },
           subResults: ONE_MARK,
+          ...(unreadable ? { subResultsUnreadable: true } : {}),
         }}
         onClose={vi.fn()}
         onSubmit={vi.fn().mockResolvedValue(undefined)}
@@ -267,9 +268,49 @@ describe('the stylesheet keeps the overlay bouts in the body, under the pinned b
   });
 
   it('sticks the overlay bar over the body padding: top and margin-top pull it up by that much, padding-top keeps its content in place', () => {
-    const bar = block('.editor-modal--team > .editor-modal__body > .team-sheet-pin:first-child');
+    const bar = block('.editor-modal--team > .editor-modal__body > .team-sheet-pin');
     expect(bar).toMatch(/(?:^|[\s;])top:\s*calc\(-1 \* var\(--editor-body-pad-top\)\)/);
     expect(bar).toMatch(/margin-top:\s*calc\(-1 \* var\(--editor-body-pad-top\)\)/);
     expect(bar).toMatch(/padding-top:\s*var\(--editor-body-pad-top\)/);
+  });
+
+  // The note shown for a match whose stored data cannot be read is the one thing that
+  // can come before the bar in the body. The bar is then the body's second child, and a
+  // rule that only reached a first child left it stuck below the body's top padding, so a
+  // bout scrolled past showed in a strip above the team names.
+  it('reaches the bar when the unreadable-data note comes first, so the strip above the team names is covered then as well', async () => {
+    const { container } = await mount({ unreadable: true });
+    const body = container.querySelector('.editor-modal--team > .editor-modal__body');
+    const children = Array.from(body.children);
+    const pin = body.querySelector('.team-sheet-pin');
+    expect(children[0].classList.contains('data-issue--editor'), 'the note opens the body').toBe(true);
+    expect(children[1], 'and the bar follows it').toBe(pin);
+    const pullingUp = rules.filter(({ decls }) => /margin-top:\s*calc\(-1 \* var\(--editor-body-pad-top\)\)/.test(decls));
+    expect(pullingUp.length, 'the rule that pulls the bar over the body padding exists').toBeGreaterThan(0);
+    for (const { selector } of pullingUp) {
+      expect(pin.matches(selector), `${selector} reaches the bar that follows the note`).toBe(true);
+    }
+  });
+
+  // The bar's box starts that far above its content (the padding it covers), so what
+  // comes before it must leave that much clear, or the box would hide the bottom edge of
+  // the note. The note carries a bottom margin of its own and the body a gap, in each
+  // density; this is the premise the rule above rests on.
+  it('leaves the note room above the bar: its bottom margin and the body gap clear the padding the bar covers, in both densities', () => {
+    const px = (decls, prop) => Number(new RegExp(`(?:^|[\\s;])${prop}:\\s*(\\d+)px`).exec(decls)?.[1]);
+    // The bottom of a margin shorthand: the third value when there are three or four, else the first.
+    const marginBottom = (decls) => {
+      const values = /(?:^|[\s;])margin:\s*([^;}]+)/.exec(decls)?.[1].trim().split(/\s+/) ?? [];
+      return parseFloat(values.length >= 3 ? values[2] : values[0]);
+    };
+    const noteMargin = marginBottom(block('.data-issue--editor'));
+    expect(noteMargin, 'the note has a bottom margin the sweep can read').toBeGreaterThan(0);
+    for (const selector of ['.editor-modal__body', '.editor-modal--compact .editor-modal__body']) {
+      const body = block(selector);
+      const pad = px(body, '--editor-body-pad-top');
+      const gap = px(body, 'gap');
+      expect(gap, `${selector} has a gap the sweep can read`).toBeGreaterThan(0);
+      expect(noteMargin + gap, `${selector}: ${pad}px is covered above the bar, and the note's ${noteMargin}px margin plus the ${gap}px gap must leave it clear`).toBeGreaterThanOrEqual(pad);
+    }
   });
 });

@@ -57,6 +57,10 @@ const ZED_AT_3 = { positions: { 1: 'Aoki', 2: 'Sato', 3: 'Zed' }, memberIds: { 1
 const BLANK = { id: 'mem-6', index: 6, name: '' };
 const MORI_AT_1 = { positions: { 1: 'Mori', 2: 'Sato', 3: 'Ito' }, memberIds: { 1: 'mem-4', 2: 'mem-2', 3: 'mem-3' } };
 const BLANK_AT_3 = { positions: { 1: 'Aoki', 2: 'Sato', 3: '' }, memberIds: { 1: 'mem-1', 2: 'mem-2', 3: 'mem-6' } };
+const BLANK_AT_1 = { positions: { 1: '', 2: 'Sato', 3: 'Ito' }, memberIds: { 1: 'mem-6', 2: 'mem-2', 3: 'mem-3' } };
+// A team just drawn: three members nobody has named yet, and nothing in the lineup.
+const FRESH = [1, 2, 3].map((index) => ({ id: `mem-${index}`, index, name: '' }));
+const EMPTY = { positions: {}, memberIds: {} };
 
 const A = { id: 'team-a', name: 'Team A' };
 const B = { id: 'team-b', name: 'Team B' };
@@ -293,6 +297,37 @@ describe('the at-court panel', () => {
     expect(panelRow(utils, 1).getByRole('button', { name: 'Rename 1 player' })).toBeTruthy();
   });
 
+  it('places the member a rename gave its new name by its id when that name is typed: a read of the team\'s members begun before the rename, answering after it with the old name, does not undo it', async () => {
+    const utils = await mountPanel();
+    // A lineup change from another device starts a read of the team's members, still out
+    // when the rename lands (the lineup it reads already carries the new spelling).
+    const older = deferred();
+    api.fetchSquads.mockReturnValueOnce(older.promise);
+    api.fetchLineupInForce.mockResolvedValue(matchLineup({ positions: { ...NAMES.positions, 3: 'Itoh' } }));
+    await announce();
+    // The operator renames Ito (position 3) to Itoh; a read begun after that answers with it.
+    api.fetchSquads.mockResolvedValue({ 'team-a': SQUAD.map((m) => (m.id === 'mem-3' ? { ...m, name: 'Itoh' } : m)) });
+    await click(panelRow(utils, 3).getByRole('button', { name: 'Rename 3 player' }));
+    await act(async () => { fireEvent.change(panelRow(utils, 3).getByLabelText('Rename 3 player'), { target: { value: 'Itoh' } }); });
+    await click(panelRow(utils, 3).getByRole('button', { name: 'Save' }));
+    expect(api.renameTeamMember).toHaveBeenCalledWith('comp-1', 'team-a', 'mem-3', 'Itoh', 'pw');
+    // The read begun before it answers now, with the old name.
+    await act(async () => { older.resolve({ 'team-a': SQUAD }); });
+    await flush();
+    // The operator takes Itoh off position 3 and types the new name there again.
+    await act(async () => { fireEvent.click(within(utils.getByTestId('match-lineup-pos-team-a-3')).getByRole('button', { name: 'Clear player' })); });
+    await typeName(utils, 3, 'Itoh');
+
+    await click(saveButton(utils));
+
+    expect(api.addTeamMember, 'Itoh is the member that exists, not a new one').not.toHaveBeenCalled();
+    expect(api.renameTeamMember, 'and no slot is named for it: only the rename the operator made').toHaveBeenCalledTimes(1);
+    expect(putOf(api.putMatchLineup.mock.calls[0])).toEqual({
+      positions: { 1: 'Aoki', 2: 'Sato', 3: 'Itoh' },
+      memberIds: { 1: 'mem-1', 2: 'mem-2', 3: 'mem-3' },
+    });
+  });
+
   it('clears a position the operator cleared, whatever another device put there meanwhile', async () => {
     const utils = await mountPanel();
     await act(async () => { fireEvent.click(within(utils.getByTestId('match-lineup-pos-team-a-1')).getByRole('button', { name: 'Clear player' })); });
@@ -522,16 +557,85 @@ describe('the at-court panel', () => {
     });
   });
 
-  it('refuses after the resolver a name that is new to the team typed at two positions: it is one member only once the first is minted', async () => {
-    const utils = await mountPanel();
-    await typeName(utils, 2, 'Kato');
-    await typeName(utils, 3, 'Kato');
+  // A name nobody on the team has is one member once the resolver has named or minted it
+  // for the first position, and it finds that member again for the second. Typed at two
+  // positions it is one member fielded twice, so the Save is refused before the first is
+  // named or minted, not after.
+  describe('a name that is new to the team typed at two positions', () => {
+    const refusedBeforeAnythingIsWritten = () => {
+      expect(api.addTeamMember, 'nobody is minted for it').not.toHaveBeenCalled();
+      expect(api.renameTeamMember, 'no slot is named for it').not.toHaveBeenCalled();
+      expect(api.putMatchLineup).not.toHaveBeenCalled();
+      expect(resolver, 'the names are not resolved for a Save that is refused').not.toHaveBeenCalled();
+    };
 
-    await click(saveButton(utils));
+    it('is refused before a member is minted for it', async () => {
+      const utils = await mountPanel();
+      await typeName(utils, 2, 'Kato');
+      await typeName(utils, 3, 'Kato');
 
-    expect(api.addTeamMember, 'Kato is minted once, for the first position').toHaveBeenCalledTimes(1);
-    expect(utils.getByText('Kato is already at 2.')).toBeTruthy();
-    expect(api.putMatchLineup).not.toHaveBeenCalled();
+      await click(saveButton(utils));
+
+      expect(utils.getByText('Kato is already at 2.')).toBeTruthy();
+      refusedBeforeAnythingIsWritten();
+    });
+
+    it('is refused before the unnamed member of a slot is named for it, naming the earlier position', async () => {
+      api.fetchSquads.mockResolvedValue({ 'team-a': FRESH });
+      api.fetchLineupInForce.mockResolvedValue(matchLineup(EMPTY));
+      const utils = await mountPanel();
+      await typeName(utils, 1, 'Ito');
+      await typeName(utils, 3, 'Ito');
+
+      await click(saveButton(utils));
+
+      expect(utils.getByText('Ito is already at 1.')).toBeTruthy();
+      refusedBeforeAnythingIsWritten();
+      expect(saveButton(utils).disabled, 'the operator can still fix it and save').toBe(false);
+    });
+
+    it('is refused when the unnamed member the first position holds is the one that would carry it', async () => {
+      api.fetchSquads.mockResolvedValue({ 'team-a': [...SQUAD, BLANK] });
+      api.fetchLineupInForce.mockResolvedValue(matchLineup(BLANK_AT_1));
+      const utils = await mountPanel();
+      await typeName(utils, 1, 'Kato');
+      await typeName(utils, 3, 'Kato');
+
+      await click(saveButton(utils));
+
+      expect(utils.getByText('Kato is already at 1.')).toBeTruthy();
+      refusedBeforeAnythingIsWritten();
+    });
+
+    it('is one name however it is written, as the resolver reads it: case and accents do not make two', async () => {
+      api.fetchSquads.mockResolvedValue({ 'team-a': FRESH });
+      api.fetchLineupInForce.mockResolvedValue(matchLineup(EMPTY));
+      const utils = await mountPanel();
+      await typeName(utils, 1, 'Ito');
+      await typeName(utils, 3, 'ITÔ');
+
+      await click(saveButton(utils));
+
+      expect(utils.getByText('Ito is already at 1.')).toBeTruthy();
+      refusedBeforeAnythingIsWritten();
+    });
+
+    it('is not held against two different new names: each is written for its own position', async () => {
+      api.fetchSquads.mockResolvedValue({ 'team-a': FRESH });
+      api.fetchLineupInForce.mockResolvedValue(matchLineup(EMPTY));
+      const utils = await mountPanel();
+      await typeName(utils, 1, 'Ito');
+      await typeName(utils, 3, 'Itoh');
+
+      await click(saveButton(utils));
+
+      expect(api.renameTeamMember).toHaveBeenCalledTimes(2);
+      expect(api.addTeamMember).not.toHaveBeenCalled();
+      expect(putOf(api.putMatchLineup.mock.calls[0])).toEqual({
+        positions: { 1: 'Ito', 3: 'Itoh' },
+        memberIds: { 1: 'mem-1', 3: 'mem-3' },
+      });
+    });
   });
 
   describe('the ids handed to the name resolver', () => {

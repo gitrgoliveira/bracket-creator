@@ -819,6 +819,31 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
     // (only one is ever open).
     const { openedRef: confirmOpenedRef, onClickCapture: confirmOnClickCapture } = useOpenedTapGuard();
     const [reverting, setReverting] = useStateSh(false);
+    // The two confirms are this page's own dialogs, so they do what DialogHost does
+    // for confirmDialog: focus moves into the open one (its first button, Cancel),
+    // Escape cancels it while its request is not out, and focus goes back to the
+    // control that opened it once it closes, without scrolling the page.
+    const confirmOpen = Boolean(pendingMove || pendingRevert);
+    const confirmBoxRef = useRefSh(null);
+    const confirmOpenerRef = useRefSh(null);
+    window.useEscapeToClose(confirmOpen && !movingCourt && !reverting
+        ? () => { setPendingMove(null); setPendingRevert(null); }
+        : undefined);
+    useEffectSh(() => {
+        if (confirmOpen) {
+            confirmOpenerRef.current = document.activeElement;
+            // A 0ms timer, as DialogHost's: a focus moved during the commit is reset.
+            const timer = setTimeout(() => {
+                const first = confirmBoxRef.current && confirmBoxRef.current.querySelector("button");
+                if (first) first.focus({ preventScroll: true });
+            }, 0);
+            return () => clearTimeout(timer);
+        }
+        const opener = confirmOpenerRef.current;
+        confirmOpenerRef.current = null;
+        if (opener && opener !== document.body && document.contains(opener)) opener.focus({ preventScroll: true });
+        return undefined;
+    }, [confirmOpen]);
     // Selected competition for filtering the queue. Default: running match's comp,
     // else first comp with scheduled matches here, else any comp with matches here.
     const [selectedCompId, setSelectedCompId] = useStateSh(null);
@@ -1881,7 +1906,7 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
             {pendingMove && (
                 <div className="modal-backdrop" ref={confirmOpenedRef} onClickCapture={confirmOnClickCapture}
                     onClick={() => !movingCourt && setPendingMove(null)}>
-                    <div className="shiaijo-move-confirm" role="dialog" aria-modal="true"
+                    <div className="shiaijo-move-confirm" role="dialog" aria-modal="true" ref={confirmBoxRef}
                         aria-labelledby="shiaijo-move-title" onClick={(e) => e.stopPropagation()}>
                         <h3 id="shiaijo-move-title" className="shiaijo-move-confirm__title">
                             Move to Shiaijo {pendingMove.to}?
@@ -1905,7 +1930,7 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
             {pendingRevert && (
                 <div className="modal-backdrop" ref={confirmOpenedRef} onClickCapture={confirmOnClickCapture}
                     onClick={() => !reverting && setPendingRevert(null)}>
-                    <div className="shiaijo-move-confirm" role="dialog" aria-modal="true"
+                    <div className="shiaijo-move-confirm" role="dialog" aria-modal="true" ref={confirmBoxRef}
                         aria-labelledby="shiaijo-revert-title" onClick={(e) => e.stopPropagation()}>
                         <h3 id="shiaijo-revert-title" className="shiaijo-move-confirm__title">
                             Send back to queue?

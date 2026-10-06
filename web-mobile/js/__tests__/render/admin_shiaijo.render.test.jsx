@@ -1,6 +1,6 @@
 import React from 'react';
-import { render, act } from '@testing-library/react';
-import { describe, it, expect, vi, beforeAll, afterAll, afterEach } from 'vitest';
+import { render, act, fireEvent, within } from '@testing-library/react';
+import { describe, it, expect, vi, beforeAll, afterAll, beforeEach, afterEach } from 'vitest';
 import { installWindowStubs } from '../helpers/stub_globals.js';
 import { DOWNSTREAM_KNOCKOUT_PLAYED_CANCELLED } from '../../write_result.jsx';
 // Window globals required by admin_shiaijo.jsx.
@@ -666,6 +666,77 @@ describe('AdminShiaijoPage render-smoke', () => {
       window.API.subscribeToEvents = prevSub;
       window.API.revertMatchToQueue = prevRevert;
     }
+  });
+
+  // The console's own confirms (Send back to queue, the court move) work like the
+  // app's other dialogs from a keyboard: focus goes into the confirm as it opens,
+  // Escape cancels one that is not busy, and focus goes back to the control that
+  // opened it. Found in the browser: Escape did nothing and focus fell to the page.
+  describe('the console confirms from a keyboard', () => {
+    const running = {
+      id: 'm1', compId: 'c1', compName: 'Cup', status: 'running',
+      phase: 'bracket', matchNumber: 1, court: 'A', compKind: 'team', teamSize: 5,
+      sideA: { id: 'a', name: 'Team A' }, sideB: { id: 'b', name: 'Team B' },
+    };
+    const settle = () => act(async () => { await new Promise((r) => setTimeout(r, 5)); });
+    let saved;
+    beforeEach(() => {
+      saved = { fetch: window.API.fetchCourtMatches, sub: window.API.subscribeToEvents, revert: window.API.revertMatchToQueue };
+      window.tournamentMatches = () => [running];
+      window.filterMatchesByCourt = (matches) => matches;
+      window.API.fetchCourtMatches = vi.fn().mockImplementation(() => Promise.resolve([{ id: 'c1', name: 'Cup' }]));
+      window.API.subscribeToEvents = () => () => {};
+    });
+    afterEach(() => {
+      window.API.fetchCourtMatches = saved.fetch;
+      window.API.subscribeToEvents = saved.sub;
+      window.API.revertMatchToQueue = saved.revert;
+    });
+
+    it('Send back to queue: focus goes in, Escape cancels and gives it back, and a confirm whose request is out stays', async () => {
+      let answer;
+      window.API.revertMatchToQueue = vi.fn().mockImplementation(() => new Promise((r) => { answer = r; }));
+      let utils;
+      await act(async () => { utils = renderPage(makeMinimalTournament()); });
+      const opener = utils.getByRole('button', { name: /^send back to queue$/i });
+      opener.focus();
+      await act(async () => { opener.click(); });
+      await settle();
+      const dialog = utils.getByRole('dialog', { name: /send back to queue\?/i });
+      expect(dialog.contains(document.activeElement), 'focus is in the confirm').toBe(true);
+
+      await act(async () => { fireEvent.keyDown(document.activeElement, { key: 'Escape' }); });
+      await settle();
+      expect(utils.queryByRole('dialog'), 'Escape cancels it').toBeNull();
+      expect(document.activeElement, 'focus is back on the control that opened it').toBe(utils.getByRole('button', { name: /^send back to queue$/i }));
+      expect(window.API.revertMatchToQueue).not.toHaveBeenCalled();
+
+      await act(async () => { utils.getByRole('button', { name: /^send back to queue$/i }).click(); });
+      await settle();
+      const again = utils.getByRole('dialog', { name: /send back to queue\?/i });
+      await act(async () => { within(again).getByRole('button', { name: /^send back to queue$/i }).click(); });
+      await act(async () => { fireEvent.keyDown(document.body, { key: 'Escape' }); });
+      expect(utils.queryByRole('dialog'), 'a confirm whose request is out stays open').not.toBeNull();
+      await act(async () => { answer(true); });
+    });
+
+    it('the court move: focus goes in, Escape cancels and gives it back', async () => {
+      // A queued row after Up next carries the court control (as in the move
+      // confirm test below; mountCourt seeds a court feed).
+      const c = await mountCourt([courtMatch('m1', 'running'), courtMatch('m2', 'scheduled'), courtMatch('m3', 'scheduled')]);
+      try {
+        const opener = c.utils.getAllByTestId('move-to-B')[0];
+        opener.focus();
+        await act(async () => { opener.click(); });
+        await settle();
+        const dialog = c.utils.getByRole('dialog', { name: /move to shiaijo b\?/i });
+        expect(dialog.contains(document.activeElement), 'focus is in the confirm').toBe(true);
+        await act(async () => { fireEvent.keyDown(document.activeElement, { key: 'Escape' }); });
+        await settle();
+        expect(c.utils.queryByRole('dialog'), 'Escape cancels it').toBeNull();
+        expect(document.activeElement, 'focus is back on the control that opened it').toBe(c.utils.getAllByTestId('move-to-B')[0]);
+      } finally { c.restore(); }
+    });
   });
 
   // UAT (bc-tmfn): the operator corrects a finished match, taps Clear

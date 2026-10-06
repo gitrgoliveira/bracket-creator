@@ -216,6 +216,17 @@ async function readMembers(compId, teamId, password) {
   }
 }
 
+// The team's members once `arriving` is shown beside `shown`: every member of the
+// list that arrives, as it holds them, and every member shown that it lacks, in
+// member number order, the order the pickers list them in. No screen removes a
+// member, so one a list lacks was added after that list was read, or after the list
+// an editor built its update on, and was not taken away.
+function mergeMembers(shown, arriving) {
+  const arrived = new Set(arriving.map((m) => m.id));
+  return [...arriving, ...shown.filter((m) => !arrived.has(m.id))]
+    .sort((a, b) => (a.index || 0) - (b.index || 0));
+}
+
 // useLineupForm: the state of one lineup editor, for a team's match (`matchId`)
 // or for its starting lineup (no matchId). It reads the lineup (a match's is the
 // one in force there, which the server works out; the starting lineup is read
@@ -236,9 +247,11 @@ async function readMembers(compId, teamId, password) {
 //   removing            a removal is out
 //   saveQueued          a save of this lineup is still waiting to be sent
 //   squad               the team's members as the API answers them (the editors
-//                       set it after a rename or a mint), squadRef, the same list
-//                       for a handler that resumes after lineupToSave, and
-//                       squadUnavailable, that they could not be read
+//                       set it after a rename or a mint), a list that arrives
+//                       being merged with the one shown by member id so that none
+//                       is lost, squadRef, the same list for a handler that
+//                       resumes after lineupToSave, and squadUnavailable, that
+//                       they could not be read
 // and gives the editor
 //   lineupToSave()        what a Save writes: the lineup as stored now with the
 //                         operator's changes on it, `{ positions, memberIds,
@@ -260,10 +273,12 @@ async function readMembers(compId, teamId, password) {
 //   retry()               read again ("Try again")
 // A lineup change announced for the competition (the lineup-updated event) is
 // followed: the lineup is read again and shown, unless the form has edits or a
-// removal is out, and the team's members are read again with it, so a member
-// another device created is in the list when the lineup names them. They are shown
-// whether or not the lineup is (the list is not the operator's edit); a members
-// read that fails or is not answered shows nothing and keeps the list as it was.
+// removal is out (one announced while a read of the lineup is out waits for that
+// read, and is followed once it has shown the lineup, or dropped when it fails),
+// and the team's members are read again with it, so a member another device
+// created is in the list when the lineup names them. They are shown whether or
+// not the lineup is (the list is not the operator's edit); a members read that
+// fails or is not answered shows nothing and keeps the list as it was.
 // The editors keep their layouts and their save bodies.
 export function useLineupForm({ compId, teamId, matchId = '', positionKeys, password, matchLabel, teamName }) {
   const { useState, useRef, useEffect } = React;
@@ -293,19 +308,26 @@ export function useLineupForm({ compId, teamId, matchId = '', positionKeys, pass
   // list as it is and flags that it could not be read, unless a read that began
   // after it is shown: a lineup is still read and saved without it. A read made
   // later that fails shows nothing and changes no flag.
-  const [squad, setSquad] = useState([]);
+  const [squad, setSquadList] = useState([]);
   const [squadUnavailable, setSquadUnavailable] = useState(false);
   // squadRef mirrors squad for the editor's save, which resolves a typed name after
   // it awaits lineupToSave. That Save may have read the team's members again and
   // brought in a member another device created, which the list the save closed over
   // when Save was tapped lacks: the resolver would mint the member a second time,
-  // and a member can never be removed. A list a read shows is put on it as it is
-  // shown, so it holds that list when lineupToSave returns, whether or not the
-  // render that shows it has run.
+  // and a member can never be removed. A list that arrives (setSquad, below) is put
+  // on it as it is shown, so it holds that list when lineupToSave returns, whether
+  // or not the render that shows it has run.
   const squadRef = useRef(squad);
   squadRef.current = squad;
   // The read whose answer may still be shown: another lineup, or leaving, ends it.
   const attempt = useRef(0);
+  // The number, in `attempt`, of the read of the lineup that is out (the first, a Try
+  // again, or the one of another lineup), null when none is. A lineup change announced
+  // meanwhile is not read over it: a read that replaced it could fail where it would
+  // have shown the lineup. `followDue` keeps the change until that read has shown the
+  // lineup, and drops it when the read fails.
+  const reading = useRef(null);
+  const followDue = useRef(false);
   // The same for the team's members, which three reads ask for (the one made when
   // the editor opens, the one a followed lineup makes and the one a Save makes when
   // it shows a lineup another device changed) and which need not answer in the
@@ -317,13 +339,23 @@ export function useLineupForm({ compId, teamId, matchId = '', positionKeys, pass
   const membersRead = useRef(0);
   const membersShown = useRef(0);
 
+  // The ONE door every list of the team's members comes through, a read's answer and
+  // an editor's own update (after an add, a rename or a mint; it may pass a function,
+  // which is given the list shown) alike. The list is merged with the one shown (see
+  // mergeMembers), so no member is lost to a read begun before they were added or to
+  // an update built on an older list, and it is on squadRef at once. It takes no read
+  // number: an editor's update never ends a read still out, whose list must arrive.
+  const setSquad = (next) => {
+    const merged = mergeMembers(squadRef.current, typeof next === 'function' ? next(squadRef.current) : next);
+    squadRef.current = merged;
+    setSquadList(merged);
+  };
+
   // Shows what a members read answered: a list, not a failure (null) or the
-  // deadline (TIMED_OUT), from a read that began after the one shown. It is on
-  // squadRef at once.
+  // deadline (TIMED_OUT), from a read that began after the one shown.
   const showMembers = (mine, members) => {
     if (!Array.isArray(members) || mine <= membersShown.current) return;
     membersShown.current = mine;
-    squadRef.current = members;
     setSquad(members);
     setSquadUnavailable(false);
   };
@@ -356,13 +388,23 @@ export function useLineupForm({ compId, teamId, matchId = '', positionKeys, pass
 
   const load = async () => {
     const mine = ++attempt.current;
+    reading.current = mine;
+    // This read is of the lineup as it is now: a change announced before it began
+    // has nothing left to add.
+    followDue.current = false;
     try {
       const lineup = await readLineup();
       if (attempt.current === mine) adopt(lineup);
     } catch (e) {
-      if (attempt.current === mine) setLoadError(lineupReadFailure(e));
+      if (attempt.current === mine) {
+        setLoadError(lineupReadFailure(e));
+        followDue.current = false;
+      }
     } finally {
-      if (attempt.current === mine) setLoading(false);
+      if (attempt.current === mine) {
+        reading.current = null;
+        setLoading(false);
+      }
     }
   };
 
@@ -382,7 +424,8 @@ export function useLineupForm({ compId, teamId, matchId = '', positionKeys, pass
 
   // Another device changed a lineup of this competition: read this one again and
   // show it, unless the operator has edits on it or a removal is out, which are
-  // theirs and stay (the draft covers a reopen). This editor's own save is held off
+  // theirs and stay (the draft covers a reopen), or a read of the lineup is still
+  // out, which it waits for (see `reading`). This editor's own save is held off
   // the same way, since the form stays dirty until confirmSaved. A read of a
   // lineup already shown that fails leaves it as it is, raising no problem over a
   // form that can still be used. The team's members are read with it, so a member
@@ -428,11 +471,33 @@ export function useLineupForm({ compId, teamId, matchId = '', positionKeys, pass
     if (!compId || !teamId) return undefined;
     const onUpdated = (e) => {
       if (e.detail && e.detail.competitionId !== compId) return;
-      if (!live.current.touched) live.current.follow();
+      if (reading.current === attempt.current) followDue.current = true;
+      else if (!live.current.touched) live.current.follow();
     };
     window.addEventListener('lineup-updated', onUpdated);
     return () => window.removeEventListener('lineup-updated', onUpdated);
   }, [compId, teamId, matchId]);
+
+  // A change announced while the lineup was being read is followed once that read has
+  // shown it. It starts here, not inside the read: `live` holds the render that shows
+  // the lineup, so the follow knows it is shown and a failure of its own raises no
+  // problem over it.
+  useEffect(() => {
+    if (!read || !followDue.current) return;
+    followDue.current = false;
+    if (!live.current.touched) live.current.follow();
+  }, [read]);
+
+  // The list shown is the one of the team it was read for: giving the editor another
+  // team drops it, so its members are not merged into the new team's list.
+  const squadTeam = useRef(`${compId}/${teamId}`);
+  useEffect(() => {
+    const team = `${compId}/${teamId}`;
+    if (squadTeam.current === team) return;
+    squadTeam.current = team;
+    squadRef.current = [];
+    setSquadList([]);
+  }, [compId, teamId]);
 
   // The team's members, independent of the lineup read: one that fails must not
   // block loading or saving the lineup. `password` is a dependency, not just a

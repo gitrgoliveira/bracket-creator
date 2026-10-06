@@ -144,7 +144,7 @@ describe('team editor: the header and the result band are one pinned unit ahead 
     expect(container.querySelector('.editor-modal__foot--nav .score-nav')).not.toBeNull();
   });
 
-  it('overlay, roomy (team of six): same order, ahead of the bout scroll region', async () => {
+  it('overlay, roomy (team of six): same order, ahead of the bout list', async () => {
     const { container } = await mount({ teamSize: 6 });
     expect(container.querySelector('.editor-modal--team')).not.toBeNull();
     expect(container.querySelector('.editor-modal--compact')).toBeNull();
@@ -155,14 +155,14 @@ describe('team editor: the header and the result band are one pinned unit ahead 
   });
 });
 
-describe('the stylesheet pins the two bars in the inline team panel (bc-tmfd)', () => {
-  const css = readStylesheet();
-  const block = (selector) => {
-    const b = cssBlock(css, selector);
-    expect(b, `rule ${selector} exists`).not.toBeNull();
-    return b;
-  };
+const css = readStylesheet();
+const block = (selector) => {
+  const b = cssBlock(css, selector);
+  expect(b, `rule ${selector} exists`).not.toBeNull();
+  return b;
+};
 
+describe('the stylesheet pins the two bars in the inline team panel (bc-tmfd)', () => {
   it('clips the panel instead of making it a scroll container, so both bars stick to the page', () => {
     expect(block('.scoring-panel--team')).toMatch(/overflow:\s*clip/);
     expect(block('.scoring-panel--team .editor-modal__body')).toMatch(/overflow:\s*visible/);
@@ -218,5 +218,58 @@ describe('the stylesheet pins the two bars in the inline team panel (bc-tmfd)', 
     const shared = block('.scoring-panel');
     expect(shared).toMatch(/overflow:\s*hidden/);
     expect(block('.scoring-panel .editor-modal__foot--nav')).toMatch(/position:\s*static/);
+  });
+});
+
+// The overlay's bout rows flow in .editor-modal__body, a modal's one scroll
+// region, under the pinned bar. A rule that hid that body's overflow and made
+// the bout list a scroll area of its own left the list only the height the
+// pinned bar, a knockout's tie-breaker panel and the rows below the bouts did
+// not take: 8px for a team of six at 1180x820, so no bout could be seen. jsdom
+// lays nothing out, so these read the rules; the acceptance is the browser
+// measurement.
+describe('the stylesheet keeps the overlay bouts in the body, under the pinned bar', () => {
+  // One entry per selector of every rule, comments dropped (they carry braces),
+  // wherever an @media block nests it. A selector's last compound is what the
+  // rule styles, so a rule for something INSIDE a class is not a rule for it.
+  const rules = [...css.replace(/\/\*[\s\S]*?\*\//g, '').matchAll(/([^{}]+)\{([^{}]*)\}/g)].flatMap(
+    ([, selectors, decls]) => selectors.split(',').map((selector) => ({ selector: selector.trim(), decls })),
+  );
+  const styling = (cls) =>
+    rules.filter(({ selector }) => new RegExp(`\\.${cls}(?![\\w-])[^\\s>+~]*$`).test(selector));
+  // Anchored on the property name, so text-overflow is not read as overflow.
+  const CLIPS = /(?:^|[\s;])overflow(?:-y)?:[^;]*\b(?:hidden|clip)\b/;
+  const OWN_OVERFLOW = /(?:^|[\s;])overflow(?:-y)?:[^;]*\b(?:auto|scroll|hidden|clip)\b/;
+
+  it('leaves the body the scroll region: no rule on an editor body hides its overflow', () => {
+    expect(block('.editor-modal__body')).toMatch(/overflow-y:\s*auto/);
+    const bodies = styling('editor-modal__body');
+    expect(bodies.map((r) => r.selector), 'the sweep finds the body rules').toContain('.editor-modal__body');
+    for (const { selector, decls } of bodies) {
+      expect(decls, `${selector} hides the body overflow`).not.toMatch(CLIPS);
+    }
+  });
+
+  it('never makes the bout list a scroll region of its own, which would leave it only the height that remains', () => {
+    const lists = styling('team-bouts-scroll');
+    expect(lists.length, 'the sweep finds a rule for the wrapper itself, or it proves nothing').toBeGreaterThan(0);
+    for (const { selector, decls } of lists) {
+      expect(decls, `${selector} gives the bout list its own overflow`).not.toMatch(OWN_OVERFLOW);
+    }
+  });
+
+  it('names the body top padding in both densities and pads with it, so the bar can cover exactly that much', () => {
+    for (const selector of ['.editor-modal__body', '.editor-modal--compact .editor-modal__body']) {
+      const body = block(selector);
+      expect(body, `${selector} names the top padding`).toMatch(/--editor-body-pad-top:\s*\d+px/);
+      expect(body, `${selector} pads with it`).toMatch(/padding:\s*var\(--editor-body-pad-top\)\s/);
+    }
+  });
+
+  it('sticks the overlay bar over the body padding: top and margin-top pull it up by that much, padding-top keeps its content in place', () => {
+    const bar = block('.editor-modal--team > .editor-modal__body > .team-sheet-pin:first-child');
+    expect(bar).toMatch(/(?:^|[\s;])top:\s*calc\(-1 \* var\(--editor-body-pad-top\)\)/);
+    expect(bar).toMatch(/margin-top:\s*calc\(-1 \* var\(--editor-body-pad-top\)\)/);
+    expect(bar).toMatch(/padding-top:\s*var\(--editor-body-pad-top\)/);
   });
 });

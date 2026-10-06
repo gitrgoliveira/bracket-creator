@@ -1480,9 +1480,11 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
   // footer actions are pinned, and the bout rows scroll between them.
   // Kachinuki renders only the current bout while
   // running (see kachinukiVisiblePositions), so it stays short even
-  // with a 9-person roster. Larger fixed-format
-  // teams keep the roomier layout and use .team-bouts-scroll for
-  // independent bout-list scrolling.
+  // with a 9-person roster. A team of six or more outside kachinuki keeps
+  // the roomier layout. Both layouts scroll the same way: the bout rows
+  // move with the body, under the pinned team header and result band and
+  // above the pinned footer, in every host, and .team-bouts-scroll only
+  // scopes the rows' layout rules.
   // bc-dnst: BOTH inline hosts read this one condition, the shiaijo console
   // (admin_shiaijo.jsx) and the Competition > Bracket running-match panel
   // (admin_competition_bracket.jsx), same as the overlay, so a team never
@@ -3513,10 +3515,11 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
               kachinukiVisiblePositions above). The server appends new bouts
               via engine.MaybeAdvanceKachinuki after each score record, so
               the operator re-opens the modal to score the next bout.
-              The .team-bouts-scroll wrapper gives the roomy (non-compact)
-              overlay an independent scroll region for the bout list; the
-              team header and result band (.team-sheet-pin) and the footer
-              are pinned in every host. */}
+              The .team-bouts-scroll wrapper scopes the bout rows' layout
+              rules and is not a scroll region: the rows scroll with the
+              body, under the team header and result band (.team-sheet-pin)
+              and above the footer, which are pinned in every host and both
+              layouts. */}
           <div className="team-bouts-scroll" onClickCapture={swallowBounce(boutListTapRef)}>
           {[
             // mp-gmcg: operator-led completion. The banner reads "ended"

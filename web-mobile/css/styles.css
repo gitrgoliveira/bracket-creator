@@ -5303,6 +5303,14 @@ button.vsched-item:not([data-clickable]) {
 .scoring-panel--team .team-sheet-pin {
   top: var(--topbar-stack-h, 0px);
 }
+/* In the overlay the bar sticks to the body's top edge, over the body's top
+   padding, so a bout scrolled past does not show in a strip above the team
+   names; the negative margin keeps it where it sits before it sticks. */
+.editor-modal--team > .editor-modal__body > .team-sheet-pin:first-child {
+  top: calc(-1 * var(--editor-body-pad-top));
+  margin-top: calc(-1 * var(--editor-body-pad-top));
+  padding-top: var(--editor-body-pad-top);
+}
 
 .editor-modal__head {
   padding: 18px 22px;
@@ -5311,7 +5319,9 @@ button.vsched-item:not([data-clickable]) {
 }
 
 .editor-modal__body {
-  padding: 18px 22px;
+  /* Named so the team sheet's pinned bar can cover it (.team-sheet-pin). */
+  --editor-body-pad-top: 18px;
+  padding: var(--editor-body-pad-top) 22px;
   display: flex;
   flex-direction: column;
   gap: 14px;
@@ -7979,8 +7989,8 @@ abbr.msb-lab { text-decoration: none; cursor: help; }
    individual matches (always), team matches with teamSize ≤ 5, and
    kachinuki team matches (regardless of size, since kachinuki renders the
    current bout only). Fixed-format team matches with teamSize > 5 keep the
-   roomy legacy layout but get the `.team-bouts-scroll` rule below for
-   independent bout-list scrolling. The engi (kata) editor body is compact on
+   roomy legacy layout, whose bouts scroll with the body as in every other
+   layout. The engi (kata) editor body is compact on
    BOTH hosts (operator ruling 2026-09-18): this text used to say engi was
    compact on neither, while the inline panel carried the class and the overlay
    did not, so the same editor rendered at two densities and the comment
@@ -8124,7 +8134,8 @@ abbr.msb-lab { text-decoration: none; cursor: help; }
   gap: 12px;
 }
 .editor-modal--compact .editor-modal__body {
-  padding: 6px 14px;
+  --editor-body-pad-top: 6px;
+  padding: var(--editor-body-pad-top) 14px;
   gap: 4px;
 }
 .editor-modal--compact .editor-modal__foot {
@@ -8558,33 +8569,15 @@ abbr.msb-lab { text-decoration: none; cursor: help; }
   to   { opacity: 1; transform: translateY(0); }
 }
 
-/* --- Roomy (non-compact) bout list scroll region ----------------------- */
-/* Make the modal frame a flex column so the head/foot stay anchored and
-   only the body (containing .team-bouts-scroll) participates in vertical
-   space. The base .editor-modal has overflow:auto so an oversize modal
-   spawns a single scrollbar on the outer frame; that double-scrolls when
-   we also scroll the bouts list. Switch to overflow:hidden + body flex
-   for the roomy team case only, compact modals never overflow. */
-.editor-modal--team:not(.editor-modal--compact) {
-  display: flex;
-  flex-direction: column;
-  overflow: hidden;
-}
-.editor-modal--team:not(.editor-modal--compact) .editor-modal__body {
-  flex: 1 1 auto;
-  min-height: 0;
-  overflow: hidden;
-  display: flex;
-  flex-direction: column;
-}
-.editor-modal--team:not(.editor-modal--compact) .team-bouts-scroll {
-  flex: 1 1 auto;
-  min-height: 0;
-  overflow-y: auto;
-  /* The team header and .team-summary sit in .team-sheet-pin, BEFORE this
-     region in the flex column, so they stay visible above the bout list in
-     the roomy layout (its sticky rule is inert here, harmless). */
-}
+/* --- Bout list in the overlay ------------------------------------------- */
+/* The bouts flow in the modal body, which scrolls (.editor-modal__body) while
+   the team header and result band (.team-sheet-pin) stick at its top and the
+   footer stays below it, roomy (a team of six or more) and compact alike. The
+   roomy layout used to hide the body's overflow and scroll the bout list on
+   its own, to keep the band (then rendered after the bouts) in view; with the
+   band pinned at the top that list only got the height left over, which a
+   knockout's tie-breaker panel and the rows below it took almost entirely
+   (8px for a team of six on a 1180x820 screen). */
 /* In compact mode the wrapper is layout-transparent, flow normally. */
 .editor-modal--compact .team-bouts-scroll {
   display: contents;

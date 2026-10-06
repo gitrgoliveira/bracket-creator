@@ -120,10 +120,12 @@ describe('composeLineupSave', () => {
 
 // lineupDuplicateNote is asked of the lineup a Save is about to write, by both
 // editors, so the refusal for one member at two positions reads alike. It names the
-// position the operator did NOT change: the one that was already there.
+// position the operator did NOT change: the one that was already there. Of two
+// they changed it names the one they picked the member for, never the box they typed
+// a name into, and failing that the earlier.
 describe('lineupDuplicateNote', () => {
   const label = (key) => `Position ${key}`;
-  const note = (positions, memberIds, changed = []) => lineupDuplicateNote(positions, memberIds, label, KEYS, changed);
+  const note = (positions, memberIds, changed = [], typed = []) => lineupDuplicateNote(positions, memberIds, label, KEYS, changed, typed);
 
   it('is empty for a lineup that fields each member once, and for one with no ids at all', () => {
     expect(note({ 1: 'Aoki', 2: 'Sato' }, { 1: 'mem-1', 2: 'mem-2' })).toBe('');
@@ -155,6 +157,28 @@ describe('lineupDuplicateNote', () => {
     expect(note(positions, ids, ['1', '2'])).toBe('Mori is already at Position 1.');
     expect(note(positions, ids, [])).toBe('Mori is already at Position 1.');
     expect(note(positions, ids, ['3'])).toBe('Mori is already at Position 1.');
+  });
+
+  it('names the position the member was picked for, not the box a name was typed into, when the operator changed both', () => {
+    const positions = { 1: 'Mori', 2: 'Mori' };
+    const ids = { 1: 'mem-4', 2: 'mem-4' };
+    expect(note(positions, ids, ['1', '2'], ['1'])).toBe('Mori is already at Position 2.');
+    expect(note(positions, ids, ['1', '2'], ['2'])).toBe('Mori is already at Position 1.');
+  });
+
+  it('names the earlier position when the operator typed a name into both of them, or picked the member for both', () => {
+    const positions = { 1: 'Mori', 2: 'Mori' };
+    const ids = { 1: 'mem-4', 2: 'mem-4' };
+    expect(note(positions, ids, ['1', '2'], ['1', '2'])).toBe('Mori is already at Position 1.');
+    expect(note(positions, ids, ['1', '2'], [])).toBe('Mori is already at Position 1.');
+  });
+
+  it('names a position the operator did not change before it looks at what they typed', () => {
+    const positions = { 1: 'Mori', 2: 'Mori' };
+    const ids = { 1: 'mem-4', 2: 'mem-4' };
+    expect(note(positions, ids, ['1'], ['1'])).toBe('Mori is already at Position 2.');
+    expect(note(positions, ids, ['2'], ['2'])).toBe('Mori is already at Position 1.');
+    expect(note(positions, ids, ['2'], [])).toBe('Mori is already at Position 1.');
   });
 
   it('takes the name from the position it names, and from the other when that one has none yet', () => {

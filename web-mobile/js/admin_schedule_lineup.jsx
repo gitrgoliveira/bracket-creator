@@ -206,7 +206,6 @@ export function MatchLineupSideEditor({ comp, team, match, allMatches, password,
       const positionsOut = {};
       const memberIdsOut = {};
       const positionsForResolver = {};
-      const blankHeld = {};
       positions.forEach(p => {
         const key = p.key;
         const pickedId = composedIds[key];
@@ -237,20 +236,36 @@ export function MatchLineupSideEditor({ comp, team, match, allMatches, password,
         } else if (v) {
           positionsOut[key] = v;
           positionsForResolver[key] = v;
-          // The resolver names a blank member the position holds in place, so that
-          // member is the position's already (a named member's id is not: a typed
-          // name over it becomes whoever the resolver finds or mints).
-          if (picked && !picked.name) blankHeld[key] = pickedId;
         }
+      });
+      // The member the resolver will put each typed name on, when that member exists
+      // already, asked of the list the resolver is given (the team's members as the
+      // Save's re-read left them) and in its order: the member the name belongs to,
+      // else the unnamed member the position holds, which it names in place (a named
+      // member's id is not the position's: a typed name over it becomes whoever the
+      // resolver finds or mints). Anything else it puts there is new (a mint, or the
+      // position's own seeded slot, taken only while that slot is free), so it can
+      // collide with nobody.
+      const members = form.squadRef.current;
+      const memberNamed = window.AdminLineupHelpers?.resolveMemberIdForName;
+      const placedByResolver = {};
+      Object.entries(positionsForResolver).forEach(([key, name]) => {
+        const named = typeof memberNamed === "function" ? memberNamed(members, name) : null;
+        const held = members.find(m => m.id === composedIds[key] && !(m.name || "").trim());
+        const id = named?.id || held?.id;
+        if (id) placedByResolver[key] = id;
       });
       // One position per member (the shared predicate, bc-dnst), asked of the lineup
       // as composed, so a member another device placed meanwhile counts. Asked before
       // the resolver as well as after it: the resolver renames a blank member or mints
-      // one, and nothing may be written for a Save that is then refused.
+      // one, and nothing may be written for a Save that is then refused. The positions
+      // sent to the resolver are the ones whose name the operator typed, so a refusal
+      // names where they picked the member rather than the box they typed it into.
+      const typed = Object.keys(positionsForResolver);
       const duplicateIn = (ids) => lineupDuplicateNote(
-        positionsOut, ids, (key) => positions.find(p => p.key === key)?.label || key, positionKeys, changed,
+        positionsOut, ids, (key) => positions.find(p => p.key === key)?.label || key, positionKeys, changed, typed,
       );
-      const refusedEarly = duplicateIn({ ...memberIdsOut, ...blankHeld });
+      const refusedEarly = duplicateIn({ ...memberIdsOut, ...placedByResolver });
       if (refusedEarly) {
         setError(refusedEarly);
         return;

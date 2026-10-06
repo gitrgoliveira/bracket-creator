@@ -1559,17 +1559,11 @@ func TestKachinukiDetail_PositionsFollowTheLineupInForce(t *testing.T) {
 			"the second match carries the lineup entered for the first, not the starting lineup")
 	})
 
-	t.Run("a Lineups-page entry for round 1 relabels from the first match of round 1", func(t *testing.T) {
-		compID := "kx-pos-round-start"
-		eng, store, _ := setupKachinukiComp(t, compID, 5, func(c *state.Competition) { c.Format = state.CompFormatKnockout })
-		ids := saveTeams(store, compID, "RedTeam", "WhiteTeam", "BlueTeam")
-
-		require.NoError(t, store.SetTeamLineup(compID, kachinukiLineupFor(ids["RedTeam"], "", 0, map[domain.Position]string{
-			domain.PosSenpo: "R-A", domain.PosJiho: "R-B",
-		}), 5))
-		require.NoError(t, store.SetTeamLineup(compID, kachinukiLineupFor(ids["RedTeam"], "", 1, map[domain.Position]string{
-			domain.PosSenpo: "R-B", domain.PosJiho: "R-A", domain.PosChuken: "R-New",
-		}), 5))
+	// A round 1 lineup (round >= 1, which releases up to v2.1.1 let the Lineups
+	// page save) is moved onto a match by the state layer when its team is
+	// seated; one written straight to the store afterwards is not read.
+	round1Bracket := func(t *testing.T, store *state.Store, compID string, ids map[string]string) {
+		t.Helper()
 		bouts := func(fighters ...string) []state.SubMatchResult {
 			out := make([]state.SubMatchResult, len(fighters))
 			for i, f := range fighters {
@@ -1586,13 +1580,43 @@ func TestKachinukiDetail_PositionsFollowTheLineupInForce(t *testing.T) {
 				{ID: "r1-m0", SideA: "RedTeam", SideB: "BlueTeam", SideAID: ids["RedTeam"], SideBID: ids["BlueTeam"], SubResults: bouts("R-A", "R-New")},
 			},
 		}}))
+	}
+	startAndRound1 := map[domain.Position]string{domain.PosSenpo: "R-B", domain.PosJiho: "R-A", domain.PosChuken: "R-New"}
+
+	t.Run("a Lineups-page entry for round 1 is not read: the round 1 match carries the lineup before it", func(t *testing.T) {
+		compID := "kx-pos-round-ignored"
+		eng, store, _ := setupKachinukiComp(t, compID, 5, func(c *state.Competition) { c.Format = state.CompFormatKnockout })
+		ids := saveTeams(store, compID, "RedTeam", "WhiteTeam", "BlueTeam")
+		require.NoError(t, store.SetTeamLineup(compID, kachinukiLineupFor(ids["RedTeam"], "", 0, map[domain.Position]string{
+			domain.PosSenpo: "R-A", domain.PosJiho: "R-B",
+		}), 5))
+		require.NoError(t, store.SetTeamLineup(compID, kachinukiLineupFor(ids["RedTeam"], "", 1, startAndRound1), 5))
+		round1Bracket(t, store, compID, ids)
 
 		out, err := eng.KachinukiDetailMatches(compID)
 		require.NoError(t, err)
 		require.Len(t, out, 3)
 		assert.Equal(t, "Senpo", positionOf(out[0], "R-A"), "round 0: the starting lineup")
-		assert.Equal(t, "", positionOf(out[0], "R-New"),
-			"a fighter only the round 1 entry holds has no position before round 1 starts")
+		assert.Equal(t, "", positionOf(out[0], "R-New"), "a fighter only the round 1 entry holds has no position")
+		assert.Equal(t, "Senpo", positionOf(out[2], "R-A"), "round 1 carries the starting lineup: the round 1 entry is not read")
+		assert.Equal(t, "", positionOf(out[2], "R-New"))
+	})
+
+	t.Run("a lineup entered for a round 1 match relabels from that match", func(t *testing.T) {
+		compID := "kx-pos-round-match"
+		eng, store, _ := setupKachinukiComp(t, compID, 5, func(c *state.Competition) { c.Format = state.CompFormatKnockout })
+		ids := saveTeams(store, compID, "RedTeam", "WhiteTeam", "BlueTeam")
+		require.NoError(t, store.SetTeamLineup(compID, kachinukiLineupFor(ids["RedTeam"], "", 0, map[domain.Position]string{
+			domain.PosSenpo: "R-A", domain.PosJiho: "R-B",
+		}), 5))
+		require.NoError(t, store.SetTeamLineup(compID, kachinukiLineupFor(ids["RedTeam"], "r1-m0", 0, startAndRound1), 5))
+		round1Bracket(t, store, compID, ids)
+
+		out, err := eng.KachinukiDetailMatches(compID)
+		require.NoError(t, err)
+		require.Len(t, out, 3)
+		assert.Equal(t, "Senpo", positionOf(out[0], "R-A"), "round 0: the starting lineup")
+		assert.Equal(t, "", positionOf(out[0], "R-New"), "a fighter only the round 1 match's lineup holds has no position before it")
 		assert.Equal(t, "Jiho", positionOf(out[2], "R-A"), "round 1 starts with its own entry")
 		assert.Equal(t, "Chuken", positionOf(out[2], "R-New"))
 	})

@@ -83,7 +83,6 @@ describe('lineupSourceLabel', () => {
     ['carried from a knockout match', { matchId: 'k-r0-m3' }, 'Same as Match 7'],
     ['carried from a match the list does not hold', { matchId: 'gone-9' }, 'Same as gone-9'],
     ['the starting lineup', { round: 0 }, 'Starting lineup'],
-    ['a later round\'s Lineups-page lineup', { round: 1 }, 'From the Lineups page (Round 2)'],
   ])('%s', (_name, source, label) => {
     expect(lineupSourceLabel(source, 'Pool D-1', ALL)).toBe(label);
   });
@@ -93,7 +92,6 @@ describe('lineupSourceLabel', () => {
     expect(lineupSourceLabel(null, 'Pool D-1', matches)).toBe('No lineup saved yet');
     expect(lineupSourceLabel({ matchId: 'Pool D-1' }, 'Pool D-1', matches)).toBe('Lineup for this match');
     expect(lineupSourceLabel({ round: 0 }, 'Pool D-1', matches)).toBe('Starting lineup');
-    expect(lineupSourceLabel({ round: 1 }, 'Pool D-1', matches)).toBe('From the Lineups page (Round 2)');
     expect(matches).not.toHaveBeenCalled();
 
     expect(lineupSourceLabel({ matchId: 'Pool D-0' }, 'Pool D-1', matches)).toBe('Same as Pool D · Match 1');

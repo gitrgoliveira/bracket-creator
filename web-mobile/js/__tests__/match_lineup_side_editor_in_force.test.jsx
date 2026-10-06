@@ -135,12 +135,6 @@ describe('MatchLineupSideEditor shows the lineup in force, where it came from, a
     expect(allText(tree)).toContain('Starting lineup');
   });
 
-  it('names the round of a later Lineups-page lineup', async () => {
-    global.window.API.fetchLineupInForce = vi.fn().mockResolvedValue({ ...STARTING, round: 1, sourceRound: 1 });
-    const tree = await mount();
-    expect(allText(tree)).toContain('From the Lineups page (Round 2)');
-  });
-
   it('marks a match\'s own lineup', async () => {
     global.window.API.fetchLineupInForce = vi.fn().mockResolvedValue({
       ...OWN, positions: { 1: 'Mori' }, memberIds: { 1: 'mem-4' },

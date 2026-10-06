@@ -6,8 +6,6 @@ import (
 	"fmt"
 	"math/rand"
 	"sort"
-	"strconv"
-	"strings"
 
 	"github.com/gitrgoliveira/bracket-creator/internal/domain"
 	"github.com/gitrgoliveira/bracket-creator/internal/helper"
@@ -24,7 +22,10 @@ import (
 // existing scoring endpoint, eligibility gate, and SSE broadcast all
 // key off MatchResult.ID. Adding a new "Swiss match" file would
 // duplicate that infrastructure for no semantic gain.
-const swissMatchIDPrefix = "Swiss-R"
+//
+// The prefix lives in state (state.SwissMatchIDPrefix) with the rest of the id
+// grammar, because match order (state.DrawMatch.Place) reads it too.
+const swissMatchIDPrefix = state.SwissMatchIDPrefix
 
 // swissPoolName returns the synthetic "pool name" prefix used for a
 // Swiss round so that helper.parsePoolMatchesFile / scoring.go can
@@ -46,19 +47,7 @@ func swissMatchID(round, idx int) string {
 // match ID or malformed shape. Used by SwissStandings to scope its
 // match scan to Swiss matches only.
 func parseSwissMatchRound(id string) (int, bool) {
-	if !strings.HasPrefix(id, swissMatchIDPrefix) {
-		return 0, false
-	}
-	rest := strings.TrimPrefix(id, swissMatchIDPrefix)
-	dash := strings.Index(rest, "-")
-	if dash < 0 {
-		return 0, false
-	}
-	n, err := strconv.Atoi(rest[:dash])
-	if err != nil || n < 1 {
-		return 0, false
-	}
-	return n, true
+	return state.ParseSwissMatchRound(id)
 }
 
 // buildSwissRosterIndex builds the identity-lookup table over roster (the

@@ -318,7 +318,6 @@ describe('removing a lineup when the server does not answer', () => {
   const NOT_REMOVED = 'The lineup was not removed: the server did not answer. Check the connection and try again.';
   const removals = [
     ['deleteMatchLineup', () => API.deleteMatchLineup('c1', 't1', 'm1', 'pw')],
-    ['deleteTeamLineup', () => API.deleteTeamLineup('c1', 't1', 1, 'pw')],
   ];
   let originalFetch;
   beforeEach(() => { originalFetch = global.fetch; });

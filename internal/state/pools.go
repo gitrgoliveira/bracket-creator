@@ -728,7 +728,11 @@ func (s *Store) SavePoolMatches(compID string, results []MatchResult) error {
 	mu.Lock()
 	defer mu.Unlock()
 
-	return s.savePoolMatchesLocked(compID, results, s.directWrite)
+	if err := s.savePoolMatchesLocked(compID, results, s.directWrite); err != nil {
+		return err
+	}
+	s.settleRoundLineupsAfterWrite(compID)
+	return nil
 }
 
 // savePoolMatchesLocked persists results to disk and refreshes the cache.
@@ -826,7 +830,11 @@ func (s *Store) UpdatePoolMatchByID(compID, matchID string, mutate func(*MatchRe
 	mu.Lock()
 	defer mu.Unlock()
 
-	return s.updatePoolMatchByIDLocked(compID, matchID, mutate, s.directWrite)
+	found, err := s.updatePoolMatchByIDLocked(compID, matchID, mutate, s.directWrite)
+	if found && err == nil {
+		s.settleRoundLineupsAfterWrite(compID)
+	}
+	return found, err
 }
 
 // updatePoolMatchByIDLocked is the lock-free body of

@@ -203,7 +203,7 @@ func TestLineupPUT_RequiresAuth(t *testing.T) {
 
 	t.Run("no password header returns 401", func(t *testing.T) {
 		req := httptest.NewRequest(http.MethodPut,
-			"/api/competitions/c1/teams/teamA/lineups/1",
+			"/api/competitions/c1/teams/teamA/lineups/0",
 			bytes.NewBuffer(body))
 		req.Header.Set("Content-Type", "application/json")
 		w := httptest.NewRecorder()
@@ -214,7 +214,7 @@ func TestLineupPUT_RequiresAuth(t *testing.T) {
 
 	t.Run("correct password header succeeds", func(t *testing.T) {
 		req := httptest.NewRequest(http.MethodPut,
-			"/api/competitions/c1/teams/teamA/lineups/1",
+			"/api/competitions/c1/teams/teamA/lineups/0",
 			bytes.NewBuffer(body))
 		req.Header.Set("Content-Type", "application/json")
 		req.Header.Set("X-Tournament-Password", "secret")
@@ -319,7 +319,7 @@ func TestLineupPUT_NoCompetition(t *testing.T) {
 		},
 	})
 	req := httptest.NewRequest(http.MethodPut,
-		"/api/competitions/no-such-comp/teams/teamA/lineups/1",
+		"/api/competitions/no-such-comp/teams/teamA/lineups/0",
 		bytes.NewBuffer(body))
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("X-Tournament-Password", "secret")
@@ -339,7 +339,7 @@ func TestLineupPUT_ZeroTeamSize(t *testing.T) {
 		"positions": map[string]string{"senpo": "p1"},
 	})
 	req := httptest.NewRequest(http.MethodPut,
-		"/api/competitions/c1/teams/teamA/lineups/1",
+		"/api/competitions/c1/teams/teamA/lineups/0",
 		bytes.NewBuffer(body))
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("X-Tournament-Password", "secret")
@@ -364,7 +364,7 @@ func TestLineupPUT_ValidationError(t *testing.T) {
 		},
 	})
 	req := httptest.NewRequest(http.MethodPut,
-		"/api/competitions/c1/teams/teamA/lineups/1",
+		"/api/competitions/c1/teams/teamA/lineups/0",
 		bytes.NewBuffer(body))
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("X-Tournament-Password", "secret")
@@ -380,13 +380,66 @@ func TestLineupPUT_InvalidJSON(t *testing.T) {
 	require.NoError(t, store.SaveCompetition(&state.Competition{ID: "c1", TeamSize: 5}))
 
 	req := httptest.NewRequest(http.MethodPut,
-		"/api/competitions/c1/teams/teamA/lineups/1",
+		"/api/competitions/c1/teams/teamA/lineups/0",
 		bytes.NewBufferString("{bad-json"))
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("X-Tournament-Password", "secret")
 	w := httptest.NewRecorder()
 	r.ServeHTTP(w, req)
 	assert.Equal(t, http.StatusBadRequest, w.Code)
+}
+
+// TestLineupPUT_RoundsAboveZeroAreRefused: a lineup is saved as the team's
+// starting lineup (round 0) or for a match. The Lineups page no longer saves a
+// lineup for a later round and a team carries the lineup of its previous match,
+// so a PUT for round 1 or later answers 400 in plain words, stores nothing, and
+// answers before it reads the body or looks for the competition. GET and
+// DELETE for those rounds still answer, for what an older release left.
+func TestLineupPUT_RoundsAboveZeroAreRefused(t *testing.T) {
+	r, store, _ := setupLineupTestRouter(t)
+	require.NoError(t, store.SaveTournament(&state.Tournament{Name: "Test", Password: "secret"}))
+	require.NoError(t, store.SaveCompetition(&state.Competition{ID: "c1", TeamSize: 5}))
+	const sentence = "A lineup is saved as the team's starting lineup or for a match."
+
+	put := func(path, body string) *httptest.ResponseRecorder {
+		req := httptest.NewRequest(http.MethodPut, path, bytes.NewBufferString(body))
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("X-Tournament-Password", "secret")
+		w := httptest.NewRecorder()
+		r.ServeHTTP(w, req)
+		return w
+	}
+	const valid = `{"positions":{"senpo":"p1"}}`
+
+	for _, round := range []string{"1", "2", "10"} {
+		t.Run("round "+round+" is refused and stores nothing", func(t *testing.T) {
+			w := put("/api/competitions/c1/teams/teamA/lineups/"+round, valid)
+
+			require.Equal(t, http.StatusBadRequest, w.Code, w.Body.String())
+			var body map[string]string
+			require.NoError(t, json.Unmarshal(w.Body.Bytes(), &body))
+			assert.Equal(t, sentence, body["error"])
+			lineups, err := store.LoadTeamLineups("c1")
+			require.NoError(t, err)
+			assert.Empty(t, lineups)
+		})
+	}
+
+	t.Run("the refusal does not wait for the body or the competition", func(t *testing.T) {
+		assert.Equal(t, http.StatusBadRequest, put("/api/competitions/c1/teams/teamA/lineups/1", "{bad-json").Code)
+		w := put("/api/competitions/no-such-comp/teams/teamA/lineups/1", valid)
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assert.Contains(t, w.Body.String(), sentence)
+	})
+
+	t.Run("round 0, the starting lineup, is still saved", func(t *testing.T) {
+		w := put("/api/competitions/c1/teams/teamA/lineups/0", valid)
+
+		require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+		lineups, err := store.LoadTeamLineups("c1")
+		require.NoError(t, err)
+		assert.Len(t, lineups, 1)
+	})
 }
 
 // TestLineupPUT_MemberIDsRoundTrip (bc-tmid pass 3): a PUT body carrying
@@ -408,7 +461,7 @@ func TestLineupPUT_MemberIDsRoundTrip(t *testing.T) {
 		},
 	})
 	req := httptest.NewRequest(http.MethodPut,
-		"/api/competitions/c1/teams/teamA/lineups/1",
+		"/api/competitions/c1/teams/teamA/lineups/0",
 		bytes.NewBuffer(body))
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("X-Tournament-Password", "secret")
@@ -421,7 +474,7 @@ func TestLineupPUT_MemberIDsRoundTrip(t *testing.T) {
 	assert.Equal(t, "member-sato", putResp.MemberIDs[domain.PosSenpo], "PUT response carries memberIds")
 	assert.Equal(t, "member-ito", putResp.MemberIDs[domain.PosJiho])
 
-	getReq := httptest.NewRequest(http.MethodGet, "/api/competitions/c1/teams/teamA/lineups/1", nil)
+	getReq := httptest.NewRequest(http.MethodGet, "/api/competitions/c1/teams/teamA/lineups/0", nil)
 	getW := httptest.NewRecorder()
 	r.ServeHTTP(getW, getReq)
 	require.Equal(t, http.StatusOK, getW.Code)
@@ -447,7 +500,7 @@ func TestLineupPUT_MemberIDsOmitted_BehavesAsBefore(t *testing.T) {
 		},
 	})
 	req := httptest.NewRequest(http.MethodPut,
-		"/api/competitions/c1/teams/teamA/lineups/1",
+		"/api/competitions/c1/teams/teamA/lineups/0",
 		bytes.NewBuffer(body))
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("X-Tournament-Password", "secret")
@@ -482,7 +535,7 @@ func TestLineupPUT_MemberIDsInvalidPositionKey(t *testing.T) {
 		},
 	})
 	req := httptest.NewRequest(http.MethodPut,
-		"/api/competitions/c1/teams/teamA/lineups/1",
+		"/api/competitions/c1/teams/teamA/lineups/0",
 		bytes.NewBuffer(body))
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("X-Tournament-Password", "secret")

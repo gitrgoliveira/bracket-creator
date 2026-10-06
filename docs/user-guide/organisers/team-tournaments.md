@@ -11,10 +11,9 @@ A team keeps the lineup of its previous team match unless you enter a new one fo
 Matches count in their order: pool matches by their number in the pool, then the knockout by round, with the 3rd-place match last. **Lineup for** lists a team's matches in that order. In that order, the lineup a team fields in a match is the first of these that exists:
 
 1. The lineup entered for that match.
-2. The latest lineup the team had before it: one entered for an earlier match of the team, its **Starting lineup**, or a lineup an earlier version of the app saved on the **Lineups** page for a round, which takes effect when that round of the knockout starts.
-3. The earliest lineup an earlier version saved for a later round, so a team with no **Starting lineup** and a lineup saved only for a later round still shows names rather than an empty sheet.
+2. The latest lineup the team had before it: one entered for an earlier match of the team, or its **Starting lineup**.
 
-The lineup panel for a match says where the lineup it shows comes from: **Lineup for this match**, **Same as** the earlier match it is carried from, **Starting lineup**, or **From the Lineups page** with the round. The score sheet, the viewer, the court display, the streaming overlay and the Kachinuki Detail sheet of the export all use the same lineup.
+The lineup panel for a match says where the lineup it shows comes from: **Lineup for this match**, **Same as** the earlier match it is carried from, or **Starting lineup**. The score sheet, the viewer, the court display, the streaming overlay and the Kachinuki Detail sheet of the export all use the same lineup.
 
 ![The Lineups tab: a team and lineup selector above a completed fighting order, with a competitor picked for each of the five positions (Senpo, Jiho, Chuken, Fukusho, Taisho) from a numbered list, and the Team members list beneath it with a Rename and a Clear name control on each named position.](../../screenshots/team-lineup.png)
 
@@ -22,9 +21,9 @@ To go back to the previous match's lineup, choose **Use the previous match's lin
 
 Changes you make to a lineup and have not saved are kept in that browser tab, so a reload, going back, or closing the lineup panel does not lose them. When you open the same lineup again, on the **Lineups** page or in the lineup panel, it shows **Unsaved lineup changes restored** with a **Discard** button that puts the saved lineup back. Nothing is saved until you press **Save lineup**. If the lineup changed in the meantime, for example saved from another device, the kept changes are not applied, and a notice lists the names that were not restored.
 
-A lineup an earlier version of the app saved on the **Lineups** page for **Round 2** or later still applies from the start of that round of the knockout. Pool and league matches all count as the first round, so such a lineup reaches them only as the last resort in the list above. The page names it, for example "Saved for Round 2 by an earlier version", and offers **Remove it**.
+Lineups that an earlier version of the app saved on the **Lineups** page for a round are moved to this way of working when the app starts. A team with no **Starting lineup** gets the lineup of its earliest round as its **Starting lineup**. A lineup saved for a later round becomes the team's lineup for its first match of that round, as soon as the team is seated in that match, and the team carries it from there. A lineup for a round the team can no longer reach is removed.
 
-Discarding a draw removes the lineups entered for its matches, since a new draw makes new matches. Each team's **Starting lineup** stays.
+Discarding a draw removes the lineups of its matches, including any moved there from an earlier version, since a new draw makes new matches. Each team's **Starting lineup** stays.
 
 ### Team members
 

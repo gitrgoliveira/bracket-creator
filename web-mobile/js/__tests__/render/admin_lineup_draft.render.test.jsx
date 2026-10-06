@@ -56,7 +56,6 @@ beforeEach(async () => {
     putTeamLineup: vi.fn().mockImplementation((_c, _t, _r, positions, _pw, memberIds) => Promise.resolve({ positions, memberIds })),
     putMatchLineup: vi.fn().mockImplementation((_c, _t, _m, positions, _pw, memberIds) => Promise.resolve({ positions, memberIds })),
     deleteMatchLineup: vi.fn().mockResolvedValue(true),
-    deleteTeamLineup: vi.fn().mockResolvedValue(true),
   };
   window.API = api;
   ({ AdminTeamLineupsList } = await import('../../admin_lineup.jsx'));

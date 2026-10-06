@@ -513,6 +513,19 @@ type Competition struct {
 	// record, so nothing a client sends can clear it.
 	KachinukiEncounterEnchoCleared bool `yaml:"kachinuki_encounter_encho_cleared,omitempty" json:"-"`
 
+	// RoundLineupsConverted records that no lineup of this competition waits
+	// on a round: releases up to v2.1.1 let the Lineups page save a lineup for
+	// round r, and a team now carries the lineup of its previous match
+	// instead, so each of those is moved onto the match the team first fields
+	// it in (settleRoundLineups, round_lineups.go). The load repair and the
+	// writes that seat a team in the draw run only while it is false, and set
+	// it once nothing is left waiting for a team to be seated; POST
+	// /competitions sets it on a new competition, which has nothing to convert
+	// and no writer left that creates a round lineup. Server-managed: `json:"-"`
+	// keeps it off the wire, and the settings PUT copies onto the stored
+	// record, so nothing a client sends can clear it.
+	RoundLineupsConverted bool `yaml:"round_lineups_converted,omitempty" json:"-"`
+
 	Players []domain.Player `yaml:"-" json:"players"`
 }
 

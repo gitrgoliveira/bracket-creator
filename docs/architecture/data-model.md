@@ -169,20 +169,29 @@ it may hold more members than the competition's team size: the extra entries are
 replacements an organiser can field, and the team size only fixes how many positions a
 round has.
 
-A lineup is stored for a match or for a round, and the lineup a team fields in a match is
-not stored: it is worked out when read, because a team carries the lineup of its previous
-match unless one is entered for the match. The lineup in force at a match is the match's own,
-else the latest one the team had before it (one saved for an earlier match of the team, or a
-round's lineup, which sits at the start of that round), else the team's lowest-round lineup.
+A lineup is stored for a match or as a team's starting lineup (its round-0 entry), and the
+lineup a team fields in a match is not stored: it is worked out when read, because a team
+carries the lineup of its previous match unless one is entered for the match. The lineup in
+force at a match is the match's own, else the latest one the team had before it: one saved for
+an earlier match of the team, or its starting lineup, which comes before every match.
 Matches are ordered by pool-match number first, then by knockout round and position, with the
 3rd-place match last. A lineup saved for a match counts as an earlier lineup only while that
 match is in the current draw and the team is seated in it by participant id. A team is its
 participant id and nothing else: a lineup is the team's only when it is stored under that id,
 a lineup stored under a team name is not the team's, and a side with no id has none.
 Discarding a draw removes the lineups saved for its matches, because a draw generated again
-reuses the match ids, and keeps the round lineups (the starting lineup is round 0). One rule
-in the engine owns this, and the kachinuki roster, the Kachinuki Detail export and the public
-`lineup-in-force` read all ask it.
+reuses the match ids, and keeps the starting lineups. One rule in the engine owns this, and
+the kachinuki roster, the Kachinuki Detail export and the public `lineup-in-force` read all
+ask it.
+
+Releases up to v2.1.1 also saved a lineup for a round. Such a lineup is moved into this form
+rather than read. A team with no starting lineup gets its lowest round's lineup as its
+starting lineup. A lineup stored under a team's name is stored under the team's id when
+exactly one team has that name. Each round lineup becomes the team's lineup for its first
+match, in match order, at that round or later, once the team is seated in it: the write that
+seats the team moves it, in the same transaction. A round lineup that no match can seat its
+team in any more is removed. A competition's `config.md` records `round_lineups_converted`
+once nothing is left to move, and a new competition starts with it set.
 
 ## 3. The match and result model
 
@@ -431,7 +440,7 @@ classDiagram
     }
     class lineups_yaml["lineups.yaml"] {
         <<YAML>>
-        TeamLineup by round or match
+        TeamLineup per match, or the starting one
         position to name and member id
         a position may hold an id and an empty name
     }

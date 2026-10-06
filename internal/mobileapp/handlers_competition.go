@@ -1042,6 +1042,9 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 		// repair to clear, since every write strips it, so it starts marked
 		// rather than having its config.md rewritten on the next start.
 		comp.KachinukiEncounterEnchoCleared = comp.IsKachinuki()
+		// Likewise it has no lineup for a round to move onto a match, and no
+		// writer left that creates one.
+		comp.RoundLineupsConverted = true
 		var validationErr, idErr error
 		lockErr := store.WithCompetitionRenameLock(func() error {
 			if existing, _ := store.LoadCompetition(comp.ID); existing != nil {

@@ -257,7 +257,11 @@ func (s *Store) SaveBracket(compID string, b *Bracket) error {
 	mu.Lock()
 	defer mu.Unlock()
 
-	return s.saveBracketLocked(compID, b, s.directWrite)
+	if err := s.saveBracketLocked(compID, b, s.directWrite); err != nil {
+		return err
+	}
+	s.settleRoundLineupsAfterWrite(compID)
+	return nil
 }
 
 // loadBracketLocked reads the bracket directly from disk WITHOUT
@@ -363,7 +367,11 @@ func (s *Store) UpdateBracket(compID string, mutate func(*Bracket) error) error 
 	mu.Lock()
 	defer mu.Unlock()
 
-	return s.updateBracketLocked(compID, mutate, s.directWrite)
+	if err := s.updateBracketLocked(compID, mutate, s.directWrite); err != nil {
+		return err
+	}
+	s.settleRoundLineupsAfterWrite(compID)
+	return nil
 }
 
 // updateBracketLocked is the lock-free body of UpdateBracket. Caller
@@ -531,7 +539,11 @@ func (s *Store) UpdateBracketMatchByID(compID, matchID string, mutate func(*Brac
 	mu := s.getCompLock(compID)
 	mu.Lock()
 	defer mu.Unlock()
-	return s.updateBracketMatchByIDLocked(compID, matchID, mutate, s.directWrite)
+	found, err := s.updateBracketMatchByIDLocked(compID, matchID, mutate, s.directWrite)
+	if found && err == nil {
+		s.settleRoundLineupsAfterWrite(compID)
+	}
+	return found, err
 }
 
 // updateBracketMatchByIDLocked is the lock-free body of UpdateBracketMatchByID

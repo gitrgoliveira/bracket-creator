@@ -40,7 +40,7 @@ info:
     has a name (409 `member_already_named`), add or name a member once the competition
     has finished (409 `competition_finished`), or add one to a team that already holds
     twice its team size plus two members (409 `team_member_limit`). The Lineups page's
-    other writes (round lineups, deleting a match lineup, clearing a member's name)
+    other writes (the starting lineup, deleting a match lineup, clearing a member's name)
     and `GET .../team-members` stay gated.
     An empty `X-Tournament-Password` also runs the representative bout of a tied
     knockout team match: `POST`/`DELETE .../matches/{mid}/daihyosen` add and remove
@@ -4034,10 +4034,12 @@ paths:
         schema:
           type: integer
         description: >
-          Lineups-page round, 0-based. Round 0 is the team's starting lineup. Rounds 1 and
-          up were saved by earlier versions of the Lineups page, which no longer creates
-          them; each applies from the start of its round. What a team fields at a match is
-          read from lineup-in-force, not from a round.
+          Lineups-page round, 0-based. Round 0 is the team's starting lineup, the only
+          round a PUT saves. Rounds 1 and up were saved by earlier versions of the
+          Lineups page, which no longer creates them: the server moves each onto a match
+          when it loads the competition, or when its team is seated, so a read of one
+          finds it only until then. What a team fields at a match is read from
+          lineup-in-force, not from a round.
     get:
       tags: [competitions]
       summary: Get team lineup for round
@@ -4085,8 +4087,11 @@ paths:
                 $ref: '#/components/schemas/TeamLineup'
         '400':
           description: >
-            The body is not a JSON object, a position key is not a valid
-            position, or a position's name is longer than 100 bytes.
+            The round is 1 or more (a lineup is saved as the team's starting lineup, or
+            for a match, so the answer is "A lineup is saved as the team's starting
+            lineup or for a match." before the body is read), the body is not a JSON
+            object, a position key is not a valid position, or a position's name is
+            longer than 100 bytes.
           content:
             application/json:
               schema:
@@ -4265,13 +4270,18 @@ paths:
 
         1. the lineup saved for the team at this very match;
         2. else the latest lineup of the team placed before the match: one saved for an
-           earlier match of the team, or a Lineups-page (round-scoped) lineup, which
-           takes effect at the start of its round;
-        3. else the team's lowest-round Lineups-page lineup.
+           earlier match of the team, or, at the very start, the team's starting lineup
+           (the Lineups-page lineup, round 0);
+        3. else, for a match the draw does not hold, the starting lineup.
 
-        Match order is fixed: pool and league matches are round 0, in pool-match number
-        order; knockout matches follow at their bracket round index; the 3rd-place match
-        is last. A lineup saved for a match counts only while that match is in the
+        A lineup saved for round 1 or later by earlier versions of the Lineups page is
+        not read: the server moves each onto the first match its team is seated in at
+        that round, when it loads the competition and then in the write that seats the
+        team, so one that still exists is waiting for its team to be seated.
+
+        Match order is fixed: pool and league matches in pool-match number order;
+        knockout matches follow at their bracket round index; the 3rd-place match is
+        last. A lineup saved for a match counts only while that match is in the
         current draw and the team is seated in it by participant id.
 
         Always answers 200 while the competition exists (bc-k404): `saved: false` and
@@ -6896,9 +6906,10 @@ components:
     TeamLineup:
       type: object
       description: >
-        Lineup assigning team members to positions. Round-scoped by default;
-        when matchId is present the lineup is keyed to a specific match/encounter
-        (mp-825), overriding the round lineup for that bout.
+        Lineup assigning team members to positions: the team's starting lineup
+        (round 0, no matchId) or, when matchId is present, the team's own lineup for
+        that match/encounter (mp-825; its round is 0), which the team carries to its
+        later matches until another is entered.
       required: [teamId, competitionId, round, positions]
       properties:
         teamId:
@@ -6911,7 +6922,7 @@ components:
           type: string
           description: >
             When present, keys this lineup to a specific match/encounter rather
-            than the whole round. Omitted for round-scoped lineups.
+            than the team's starting lineup. Omitted for the starting lineup.
         positions:
           type: object
           additionalProperties:
@@ -6967,14 +6978,15 @@ components:
               description: >
                 Present when the lineup in force was saved for a match: the match asked
                 about (its own lineup) or an earlier match of the team it is carried
-                from. Absent for a Lineups-page lineup.
+                from. Absent for the starting lineup.
             sourceRound:
               type: integer
               minimum: 0
               description: >
-                Present when the lineup in force is a Lineups-page lineup, and then
-                always, round 0 included: the round it was saved for. Round 0 is the
-                team's starting lineup. Absent when `sourceMatchId` is present.
+                Present when the lineup in force is the team's starting lineup, and
+                then always, round 0 included (0 is a value to send, not an absence).
+                A lineup for a later round is moved onto a match, never read as one, so
+                this is always 0. Absent when `sourceMatchId` is present.
 
     ScheduleEstimate:
       type: object

@@ -439,7 +439,7 @@ function AdminLineup({ comp, team, matchId = "", matchLabel = "", allMatches, pa
     squad, changeMembers, squadUnavailable,
   } = form;
   const [saving, setSaving] = useStateA(false);
-  // A removal of a stored lineup (the match's own, or an old round's) is in flight.
+  // A removal of the match's own lineup is in flight.
   const busy = saving || form.removing;
   // The pickers are for a lineup that was read: until then Save is off too, and
   // the problem line says why.
@@ -731,22 +731,6 @@ function AdminLineup({ comp, team, matchId = "", matchLabel = "", allMatches, pa
     }
   };
 
-  // A lineup an earlier version saved for a later round, which this page no
-  // longer creates, goes.
-  const removeLegacyRound = async () => {
-    const round = form.source.round;
-    const ok = await window.confirmDialog({
-      message: `Remove the lineup an earlier version saved for Round ${round + 1}? The matches that used it carry the team's previous lineup instead.`,
-      confirmLabel: "Remove",
-      cancelLabel: "Cancel",
-    });
-    if (!ok) return;
-    await form.removeStored(
-      () => window.API.deleteTeamLineup(compId, teamId, round, password),
-      "Failed to remove the lineup",
-    );
-  };
-
   if (form.loading) {
     return <div className="page" style={{ padding: 24 }}>Loading lineup…</div>;
   }
@@ -797,13 +781,6 @@ function AdminLineup({ comp, team, matchId = "", matchLabel = "", allMatches, pa
       )}
 
       <LineupDraftNotice draft={form.draft} busy={busy} testId="lineup-draft-notice" />
-
-      {form.source && form.source.round >= 1 && (
-        <div className="field__hint" data-testid="lineup-legacy-round" style={{ marginBottom: 12 }}>
-          Saved for Round {form.source.round + 1} by an earlier version: it applies from the start of that round.{" "}
-          <button type="button" className="btn btn--ghost btn--sm" onClick={removeLegacyRound} disabled={busy}>Remove it</button>
-        </div>
-      )}
 
       {error && (
         <div className="alert alert--error" style={{ marginBottom: 12 }}>

@@ -4146,9 +4146,6 @@ const API = {
         }
         return body;
     },
-    async deleteTeamLineup(compID, teamId, round, password) {
-        return _deleteLineup(`/api/competitions/${compID}/teams/${teamId}/lineups/${round}`, password, "Failed to delete lineup");
-    },
     // bc-tmid pass 3: a team's squad, the actual people on it, lives in its
     // own per-competition store (team-members.yaml), keyed by the team's
     // participant id -- see internal/state/squad.go. Returns the whole
@@ -4244,12 +4241,11 @@ const API = {
     // The lineup a team fields at a match (operator ruling 2026-10-05: a team
     // carries the lineup of its previous match unless one is entered for the
     // match). The server owns the rule (engine/lineup_in_force.go): the
-    // match's own lineup, else the latest of the team's earlier matches' and
-    // its Lineups-page lineups, else its lowest-round Lineups-page lineup.
-    // `saved: false` -> null (nothing applies). A lineup carries where it was
-    // saved: `sourceMatchId` (this match, or an earlier one it is carried
-    // from) or `sourceRound` (a Lineups-page lineup; 0 is the starting
-    // lineup). A 404 means the competition does not exist.
+    // match's own lineup, else the latest of the team's earlier matches'
+    // lineups, else its starting lineup. `saved: false` -> null (nothing
+    // applies). A lineup carries where it was saved: `sourceMatchId` (this
+    // match, or an earlier one it is carried from) or `sourceRound` (0, the
+    // starting lineup). A 404 means the competition does not exist.
     async fetchLineupInForce(compID, teamId, matchId) {
         return _readLineup(`/api/competitions/${compID}/teams/${teamId}/lineup-in-force/${matchId}`);
     },

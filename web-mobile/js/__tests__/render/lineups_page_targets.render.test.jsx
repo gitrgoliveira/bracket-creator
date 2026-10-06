@@ -22,7 +22,6 @@ const lineupFor = (extra) => ({ teamId: 'team-a', competitionId: 'comp-1', ...NA
 const STARTING = lineupFor({ round: 0, sourceRound: 0 });
 const CARRIED = lineupFor({ matchId: 'Pool A-0', sourceMatchId: 'Pool A-0' });
 const OWN = lineupFor({ matchId: 'Pool A-2', sourceMatchId: 'Pool A-2' });
-const LEGACY_ROUND_1 = lineupFor({ round: 1, sourceRound: 1 });
 
 const A = { id: 'team-a', name: 'Team A' };
 const B = { id: 'team-b', name: 'Team B' };
@@ -75,7 +74,6 @@ beforeEach(async () => {
     putTeamLineup: vi.fn().mockResolvedValue({}),
     putMatchLineup: vi.fn().mockImplementation((_c, _t, _m, positions, _pw, memberIds) => Promise.resolve({ positions, memberIds })),
     deleteMatchLineup: vi.fn().mockResolvedValue(true),
-    deleteTeamLineup: vi.fn().mockResolvedValue(true),
   };
   window.API = api;
   ({ AdminTeamLineupsList } = await import('../../admin_lineup.jsx'));
@@ -309,7 +307,6 @@ describe('a match', () => {
     await chooseTarget(utils, 'Pool A-0');
     expect(utils.getByText('Starting lineup', { selector: '[data-testid="lineup-source"]' })).toBeTruthy();
     expect(utils.queryByRole('button', { name: "Use the previous match's lineup" })).toBeNull();
-    expect(utils.queryByTestId('lineup-legacy-round')).toBeNull();
   });
 
   it('reads a failed load as an error, never as an empty lineup', async () => {
@@ -376,31 +373,3 @@ describe('Use the previous match\'s lineup', () => {
   });
 });
 
-describe('a lineup saved for a later round by an earlier version', () => {
-  it('is named, and can be removed from the page', async () => {
-    api.fetchLineupInForce.mockResolvedValueOnce(LEGACY_ROUND_1).mockResolvedValue(STARTING);
-    const utils = await mountPage();
-    await chooseTarget(utils, 'm-r1-0');
-
-    const note = utils.getByTestId('lineup-legacy-round');
-    expect(note.textContent).toContain('Saved for Round 2 by an earlier version: it applies from the start of that round.');
-
-    await click(within(note).getByRole('button', { name: 'Remove it' }));
-
-    expect(window.confirmDialog).toHaveBeenCalledTimes(1);
-    expect(api.deleteTeamLineup).toHaveBeenCalledWith('comp-1', 'team-a', 1, 'pw');
-    expect(api.deleteMatchLineup).not.toHaveBeenCalled();
-    expect(api.fetchLineupInForce).toHaveBeenCalledTimes(2);
-    expect(utils.queryByTestId('lineup-legacy-round')).toBeNull();
-    expect(utils.getByText('Starting lineup', { selector: '[data-testid="lineup-source"]' })).toBeTruthy();
-  });
-
-  it('removes nothing when the operator declines', async () => {
-    api.fetchLineupInForce.mockResolvedValue(LEGACY_ROUND_1);
-    window.confirmDialog.mockResolvedValue(false);
-    const utils = await mountPage();
-    await chooseTarget(utils, 'm-r1-0');
-    await click(within(utils.getByTestId('lineup-legacy-round')).getByRole('button', { name: 'Remove it' }));
-    expect(api.deleteTeamLineup).not.toHaveBeenCalled();
-  });
-});

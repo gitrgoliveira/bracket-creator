@@ -341,11 +341,11 @@ export async function buildInlineLineupWrite(compId, teamId, lineup, squad, posK
 
 // resolveMatchLineup: the lineup a team fields at a match, from ONE read (GET
 // lineup-in-force/:matchId): the match's own lineup, else the one the team
-// carries from its previous match or round. The server owns that rule
-// (engine/lineup_in_force.go); no surface restates it. Nothing in force is
-// null. The lineup says where it was saved: `sourceMatchId` (this match, or
-// an earlier one it is carried from) or `sourceRound` (a Lineups-page
-// lineup; 0 is the team's starting lineup).
+// carries from its previous match, else its starting lineup. The server owns
+// that rule (engine/lineup_in_force.go); no surface restates it. Nothing in
+// force is null. The lineup says where it was saved: `sourceMatchId` (this
+// match, or an earlier one it is carried from) or `sourceRound` (0, the team's
+// starting lineup).
 //
 // A failed read is swallowed so a display degrades gracefully (null), unless
 // the caller passes { throwOnError: true }: the at-court lineup panel and the
@@ -379,8 +379,8 @@ export function lineupFields(lineup, positionKeys) {
 
 // lineupSourceOf: where a lineup in force was saved, from the fields the
 // server names it by: the match it was saved for (`sourceMatchId`: the match
-// asked about, or an earlier one of the team it is carried from) or the
-// Lineups-page round (`sourceRound`, 0 being the team's starting lineup).
+// asked about, or an earlier one of the team it is carried from) or the team's
+// starting lineup (`sourceRound`, 0).
 export function lineupSourceOf(lineup) {
   if (lineup && lineup.sourceMatchId) return { matchId: lineup.sourceMatchId };
   if (lineup && Number.isInteger(lineup.sourceRound)) return { round: lineup.sourceRound };
@@ -388,7 +388,7 @@ export function lineupSourceOf(lineup) {
 }
 
 // isOwnLineup: the lineup shown was saved for THIS match, as against one the
-// match carries from an earlier match or from a Lineups-page round. The one
+// match carries from an earlier match or from the starting lineup. The one
 // answer to that question: the label below and the editors' "Use the previous
 // match's lineup" button both ask it.
 export function isOwnLineup(source, matchId) {
@@ -410,7 +410,7 @@ export function lineupSourceLabel(source, matchId, allMatches) {
     const from = (list || []).find(m => m.id === source.matchId);
     return `Same as ${(from && scoreRowMatchLabel(from)) || source.matchId}`;
   }
-  return source.round === 0 ? "Starting lineup" : `From the Lineups page (Round ${source.round + 1})`;
+  return "Starting lineup";
 }
 
 // A team's starting lineup is stored as its round-0 entry.

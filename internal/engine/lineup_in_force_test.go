@@ -133,47 +133,42 @@ func TestLineupInForce_Rule(t *testing.T) {
 			match:   "Pool A-0", want: "",
 		},
 		{
-			name:    "a round 1 entry begins at the team's first round 1 match",
+			name:    "a lineup for a later round is not read: its team's match was given it when the team was seated",
 			lineups: []domain.TeamLineup{lineupOf(lineupTeam, "", 0, "start"), lineupOf(lineupTeam, "", 1, "round1")},
-			match:   "r1-m0", want: "round1", source: LineupSource{Round: 1},
+			match:   "r1-m0", want: "start", source: LineupSource{Round: 0},
 		},
 		{
-			name:    "and does not reach back to the round before it",
+			name:    "nor before it",
 			lineups: []domain.TeamLineup{lineupOf(lineupTeam, "", 0, "start"), lineupOf(lineupTeam, "", 1, "round1")},
 			match:   "r0-m0", want: "start", source: LineupSource{Round: 0},
 		},
 		{
-			name:    "a round 1 entry supersedes a per-match entry from an earlier round",
+			name:    "it does not displace the entry carried from an earlier match",
 			lineups: []domain.TeamLineup{lineupOf(lineupTeam, "", 0, "start"), lineupOf(lineupTeam, "Pool A-0", 0, "m0"), lineupOf(lineupTeam, "", 1, "round1")},
-			match:   "r1-m0", want: "round1", source: LineupSource{Round: 1},
+			match:   "r1-m0", want: "m0", source: LineupSource{MatchID: "Pool A-0"},
 		},
 		{
-			name:    "but the earlier match still carries its own entry",
+			name:    "and the earlier match still carries its own entry",
 			lineups: []domain.TeamLineup{lineupOf(lineupTeam, "", 0, "start"), lineupOf(lineupTeam, "Pool A-0", 0, "m0"), lineupOf(lineupTeam, "", 1, "round1")},
 			match:   "r0-m0", want: "m0", source: LineupSource{MatchID: "Pool A-0"},
 		},
 		{
-			name:    "an entry for a round 1 match is carried on, past the round 1 start entry",
+			name:    "an entry for a round 1 match is carried on, past a lineup for the round",
 			lineups: []domain.TeamLineup{lineupOf(lineupTeam, "", 1, "round1"), lineupOf(lineupTeam, "r1-m0", 0, "m-r1")},
 			match:   "bronze", want: "m-r1", source: LineupSource{MatchID: "r1-m0"},
 		},
 		{
-			name:    "the 3rd-place match is last, after the final round",
-			lineups: []domain.TeamLineup{lineupOf(lineupTeam, "", 0, "start"), lineupOf(lineupTeam, "", 2, "bronze-round")},
-			match:   "bronze", want: "bronze-round", source: LineupSource{Round: 2},
+			name:    "the 3rd-place match is last, and takes the starting lineup when nothing is carried to it",
+			lineups: []domain.TeamLineup{lineupOf(lineupTeam, "", 0, "start"), lineupOf(lineupTeam, "", 2, "round2")},
+			match:   "bronze", want: "start", source: LineupSource{Round: 0},
 		},
 		{
-			name:    "a round entry for the 3rd-place stage does not reach the final",
-			lineups: []domain.TeamLineup{lineupOf(lineupTeam, "", 0, "start"), lineupOf(lineupTeam, "", 2, "bronze-round")},
-			match:   "r1-m0", want: "start", source: LineupSource{Round: 0},
-		},
-		{
-			name:    "a team with only a later round's lineup still shows names: its lowest round",
+			name:    "a team with only lineups for later rounds has none in force: they wait for the team to be seated",
 			lineups: []domain.TeamLineup{lineupOf(lineupTeam, "", 2, "round2"), lineupOf(lineupTeam, "", 1, "round1")},
-			match:   "Pool A-0", want: "round1", source: LineupSource{Round: 1},
+			match:   "Pool A-0", want: "",
 		},
 		{
-			name:    "a lineup entered for an earlier match still beats a later round's lineup",
+			name:    "a lineup entered for an earlier match is carried whatever lineups wait for later rounds",
 			lineups: []domain.TeamLineup{lineupOf(lineupTeam, "", 1, "round1"), lineupOf(lineupTeam, "Pool A-0", 0, "m0")},
 			match:   "Pool A-1", want: "m0", source: LineupSource{MatchID: "Pool A-0"},
 		},
@@ -183,7 +178,7 @@ func TestLineupInForce_Rule(t *testing.T) {
 			match:   "nope", want: "own", source: LineupSource{MatchID: "nope"},
 		},
 		{
-			name:    "and otherwise the lowest-round lineup, having no place in match order",
+			name:    "and otherwise the starting lineup, having no place in match order",
 			lineups: []domain.TeamLineup{lineupOf(lineupTeam, "", 1, "round1"), lineupOf(lineupTeam, "", 0, "start"), lineupOf(lineupTeam, "Pool A-0", 0, "m0")},
 			match:   "nope", want: "start", source: LineupSource{Round: 0},
 		},
@@ -228,8 +223,8 @@ func TestLineupInForce_Rule(t *testing.T) {
 
 // TestLineupInForce_SameRoundOrder covers a round in which a team plays more
 // than once, as it always does in the pool phase: a per-match entry on an
-// earlier match is later in match order than the round's start entry, so it
-// wins.
+// earlier match is carried to the team's next match of the round, and a lineup
+// still waiting for a later round never stands in its way.
 func TestLineupInForce_SameRoundOrder(t *testing.T) {
 	bracket := &state.Bracket{Rounds: [][]state.BracketMatch{
 		{drawnKnockoutMatch("a", "o1", "o2")},
@@ -242,7 +237,7 @@ func TestLineupInForce_SameRoundOrder(t *testing.T) {
 
 	assert.Equal(t, "b", senpoOf(rule.inForce(lineupTeam, "b")), "the entry saved for b")
 	assert.Equal(t, "b", senpoOf(rule.inForce(lineupTeam, "c")),
-		"the entry on b is later than the round 1 start, so c carries it")
+		"c carries the entry on b, which comes before it in the round")
 }
 
 // TestLineupInForce_MatchOrder pins the order a team's matches are played in.
@@ -389,6 +384,8 @@ func TestLineupInForce_ThroughTheStore(t *testing.T) {
 		require.NoError(t, store.SaveBracket(compID, bracket))
 		require.NoError(t, store.SetTeamLineup(compID, lineupOf(lineupTeam, "", 0, "start"), 5))
 		require.NoError(t, store.SetTeamLineup(compID, lineupOf(lineupTeam, "Pool A-0", 0, "m0"), 5))
+		// A lineup for round 1 written straight to the store, as an older
+		// release left one: nothing reads it.
 		require.NoError(t, store.SetTeamLineup(compID, lineupOf(lineupTeam, "", 1, "round1"), 5))
 
 		cases := []struct {
@@ -398,8 +395,8 @@ func TestLineupInForce_ThroughTheStore(t *testing.T) {
 			{"Pool A-0", "m0", LineupSource{MatchID: "Pool A-0"}},
 			{"Pool A-2", "m0", LineupSource{MatchID: "Pool A-0"}},
 			{"r0-m0", "m0", LineupSource{MatchID: "Pool A-0"}},
-			{"r1-m0", "round1", LineupSource{Round: 1}},
-			{"bronze", "round1", LineupSource{Round: 1}},
+			{"r1-m0", "m0", LineupSource{MatchID: "Pool A-0"}},
+			{"bronze", "m0", LineupSource{MatchID: "Pool A-0"}},
 		}
 		for _, c := range cases {
 			got, err := eng.LineupInForce(compID, lineupTeam, c.match)

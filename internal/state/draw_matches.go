@@ -22,6 +22,13 @@ type DrawMatch struct {
 	// Index is a knockout match's position within its round, 0 for the
 	// 3rd-place match; 0 for any other match.
 	Index int
+	// Hidden is true for a structural bye: a bracket match nobody plays, which
+	// the draw can still seat a team in (a bye's winner is seated at once).
+	Hidden bool
+	// PoolRound is a pool or league match's stored Round: its circle-method
+	// round, or -1 for a pool drawn without rounds. 0 for a knockout match, and
+	// for a Swiss match, which never stored one.
+	PoolRound int
 }
 
 // DrawMatchesFrom projects loaded matches into DrawMatch values: every pool
@@ -41,7 +48,7 @@ func DrawMatchesFrom(poolMatches []MatchResult, bracket *Bracket) []DrawMatch {
 	out := make([]DrawMatch, 0, n)
 	for i := range poolMatches {
 		m := &poolMatches[i]
-		out = append(out, DrawMatch{ID: m.ID, SideAID: m.SideAID, SideBID: m.SideBID})
+		out = append(out, DrawMatch{ID: m.ID, SideAID: m.SideAID, SideBID: m.SideBID, PoolRound: m.Round})
 	}
 	if bracket == nil {
 		return out
@@ -49,11 +56,11 @@ func DrawMatchesFrom(poolMatches []MatchResult, bracket *Bracket) []DrawMatch {
 	for round := range bracket.Rounds {
 		for index := range bracket.Rounds[round] {
 			bm := &bracket.Rounds[round][index]
-			out = append(out, DrawMatch{ID: bm.ID, SideAID: bm.SideAID, SideBID: bm.SideBID, Knockout: true, Round: round, Index: index})
+			out = append(out, DrawMatch{ID: bm.ID, SideAID: bm.SideAID, SideBID: bm.SideBID, Knockout: true, Round: round, Index: index, Hidden: bm.Hidden})
 		}
 	}
 	if bm := bracket.ThirdPlaceMatch; bm != nil {
-		out = append(out, DrawMatch{ID: bm.ID, SideAID: bm.SideAID, SideBID: bm.SideBID, Knockout: true, Round: len(bracket.Rounds)})
+		out = append(out, DrawMatch{ID: bm.ID, SideAID: bm.SideAID, SideBID: bm.SideBID, Knockout: true, Round: len(bracket.Rounds), Hidden: bm.Hidden})
 	}
 	return out
 }

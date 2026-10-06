@@ -4,7 +4,8 @@
 //
 // GET returns a teamLineupRead for a (team, round) tuple (200, saved false
 // when nothing is stored; 404 only for an unknown competition). PUT
-// sets/replaces it, DELETE removes it. A third public GET,
+// sets/replaces it, for round 0 only (the team's starting lineup: a later round
+// is a 400, lineupRoundRefused), DELETE removes it. A third public GET,
 // .../lineup-in-force/:matchId, answers which lineup the team fields at a match
 // (see lineupInForceRead).
 //
@@ -30,6 +31,12 @@ import (
 	"github.com/gitrgoliveira/bracket-creator/internal/engine"
 	"github.com/gitrgoliveira/bracket-creator/internal/state"
 )
+
+// lineupRoundRefused is the 400 a PUT of a lineup for round 1 or later answers.
+// Releases up to v2.1.1 saved one from the Lineups page; the state layer moves
+// each onto a match (state.settleRoundLineups), and a team now carries the lineup
+// of its previous match instead.
+const lineupRoundRefused = "A lineup is saved as the team's starting lineup or for a match."
 
 // lineupSetStatus maps a SetTeamLineup error to the right HTTP status. Domain
 // lineup validation failures (a position key not valid for the team size, or a
@@ -277,6 +284,14 @@ func RegisterLineupHandlers(r *gin.RouterGroup, store TeamLineupStore, comps Com
 	r.PUT("/competitions/:id/teams/:tid/lineups/:round", func(c *gin.Context) {
 		compID, teamID, round, ok := parseLineupParams(c)
 		if !ok {
+			return
+		}
+		// A lineup is the team's starting lineup (round 0) or one for a match: a
+		// team carries the lineup of its previous match, so there is nothing a
+		// lineup for a later round would mean. Answered before the body or the
+		// competition is read, whatever either holds.
+		if round >= 1 {
+			c.JSON(http.StatusBadRequest, gin.H{"error": lineupRoundRefused})
 			return
 		}
 		var req LineupRequest

@@ -10,19 +10,21 @@ package engine
 //
 //  1. the lineup saved for T at M itself: a match's own lineup always wins;
 //  2. else the latest lineup of T placed before M in match order: one saved for
-//     an earlier match of T, or a Lineups-page lineup for round r, which sits
-//     at the START of round r (after T's round r-1 matches, before its round r
-//     ones), so a round's lineup is simply where that round begins;
-//  3. else T's lowest-round Lineups-page lineup, so a team whose only saved
-//     lineup belongs to a later round still shows names rather than an empty
-//     sheet.
+//     an earlier match of T, or, at the very start, T's starting lineup (the
+//     Lineups page's lineup, stored as round 0);
+//  3. else, for a match the draw does not hold, the starting lineup.
 //
-// Match order is fixed. Pool and league matches (a Swiss team's rounds in
-// round order) are round 0, in pool-match number, which is playing order;
-// knockout matches follow at their bracket round index, in position order; the
-// 3rd-place match is last, at len(Rounds). A pool daihyosen or tiebreaker is
-// one individual bout, not a team match: it holds no lineup and is never a
-// previous match.
+// A lineup saved for a later round (round >= 1, which releases up to v2.1.1 let
+// the Lineups page save) is not read. The state layer moves each onto the first
+// match its team is seated in at that round (state.settleRoundLineups), on load
+// and then in the write that seats the team, so one that still exists is
+// waiting for its team to be seated, and cannot apply.
+//
+// Match order is state.MatchPlace: pool and league matches in pool-match number,
+// which is playing order (a Swiss team's rounds in round order); knockout matches
+// after them at their bracket round index, in position order; the 3rd-place match
+// last, at len(Rounds). A pool daihyosen or tiebreaker is one individual bout,
+// not a team match: it holds no lineup and is never a previous match.
 //
 // A team is its participant id, and nothing else. Every caller asks with the id
 // (the HTTP read's :tid, a match's SideAID/SideBID) and a lineup is the team's
@@ -34,7 +36,6 @@ package engine
 // is ignored.
 
 import (
-	"cmp"
 	"log"
 	"slices"
 
@@ -49,7 +50,8 @@ type LineupSource struct {
 	// Empty for a Lineups-page lineup.
 	MatchID string
 	// Round is the Lineups-page round the lineup was saved for, meaningful
-	// only when MatchID is empty. Round 0 is the team's starting lineup.
+	// only when MatchID is empty. It is 0, the team's starting lineup: a
+	// lineup for a later round is moved onto a match, never read as one.
 	Round int
 }
 
@@ -63,75 +65,25 @@ type InForceLineup struct {
 	Found bool
 }
 
-// Places in match order within a round. A round's Lineups-page lineup sits
-// before every match of that round.
-const (
-	placeRoundStart = iota - 1
-	placePool
-	placeKnockout
-)
-
-// matchPlace is a place in match order: where a team match is played, or
-// where a round's Lineups-page lineup begins.
-type matchPlace struct {
-	// round is 0 for the pool phase, the bracket round index for a knockout
-	// match, and len(Rounds) for the 3rd-place match.
-	round int
-	// phase is placeRoundStart, placePool or placeKnockout.
-	phase int
-	// group is the Swiss round, so a Swiss team's rounds play in order; 0 for
-	// every other match.
-	group int
-	// index is the pool-match number, or the match's position in its round.
-	index int
-	// seq is the stored order, so no two matches share a place.
-	seq int
-}
-
-func (a matchPlace) compare(b matchPlace) int {
-	return cmp.Or(
-		cmp.Compare(a.round, b.round),
-		cmp.Compare(a.phase, b.phase),
-		cmp.Compare(a.group, b.group),
-		cmp.Compare(a.index, b.index),
-		cmp.Compare(a.seq, b.seq),
-	)
-}
-
-// drawnMatch is one team match of the draw: its place, and who is seated.
+// drawnMatch is one team match of the draw: who is seated, and its place in
+// match order.
 type drawnMatch struct {
-	place            matchPlace
-	sideAID, sideBID string
-}
-
-// seats reports whether the team with participant id teamID is seated in the
-// match. A side that carries no id (a bye, an unresolved feeder) seats nobody.
-func (d drawnMatch) seats(teamID string) bool {
-	return teamID != "" && (d.sideAID == teamID || d.sideBID == teamID)
+	state.DrawMatch
+	place state.MatchPlace
 }
 
 // lineupDraw is the draw as the rule sees it: every team match by id.
 type lineupDraw map[string]drawnMatch
 
-// newLineupDraw places each team match of a projected draw: a pool or league
-// match by its pool-match number (a Swiss team's rounds in round order), a
-// knockout match by round and position, the 3rd-place match last. A pool
-// daihyosen or tiebreaker is not a team match and is left out.
+// newLineupDraw places each team match of a projected draw in match order
+// (state.DrawMatch.Place). A pool daihyosen or tiebreaker is not a team match
+// and is left out.
 func newLineupDraw(matches []state.DrawMatch) lineupDraw {
 	draw := make(lineupDraw, len(matches))
 	for seq, m := range matches {
-		if m.ID == "" {
-			continue
+		if place, ok := m.Place(seq); ok {
+			draw[m.ID] = drawnMatch{DrawMatch: m, place: place}
 		}
-		place := matchPlace{round: m.Round, phase: placeKnockout, index: m.Index, seq: seq}
-		if !m.Knockout {
-			if IsPoolDaihyosenMatchID(m.ID) || IsTiebreakerMatchID(m.ID) {
-				continue
-			}
-			swissRound, _ := parseSwissMatchRound(m.ID)
-			place = matchPlace{phase: placePool, group: swissRound, index: poolPhaseMatchNumber(m.ID), seq: seq}
-		}
-		draw[m.ID] = drawnMatch{place: place, sideAID: m.SideAID, sideBID: m.SideBID}
 	}
 	return draw
 }
@@ -162,63 +114,64 @@ func newLineupRuleFrom(lineups map[string]domain.TeamLineup, poolMatches []state
 	return newLineupRule(lineups, state.DrawMatchesFrom(poolMatches, bracket))
 }
 
-// placedLineup is a saved lineup of the team being asked about, with where it
-// sits in match order.
+// placedLineup is a saved lineup of the team being asked about, for an earlier
+// match, with where that match sits in match order.
 type placedLineup struct {
 	lineup domain.TeamLineup
-	place  matchPlace
+	place  state.MatchPlace
 }
 
 // inForce resolves the lineup the team with participant id teamID fields at
 // matchID. An empty teamID, a side with no id, has no lineup. A match the draw
 // does not hold has no place in match order, so only its own lineup (1) and the
-// lowest-round Lineups-page lineup (3) can apply to it.
+// starting lineup (3) can apply to it.
 func (r *lineupRule) inForce(teamID, matchID string) InForceLineup {
 	if teamID == "" {
 		return InForceLineup{}
 	}
 	at, located := r.draw[matchID]
 
-	var own, before, rounds []placedLineup
+	var own, start []domain.TeamLineup
+	var before []placedLineup
 	for _, l := range r.lineups {
 		if l.TeamID != teamID {
 			continue
 		}
 		switch l.MatchID {
 		case "":
-			p := placedLineup{lineup: l, place: matchPlace{round: l.Round, phase: placeRoundStart}}
-			rounds = append(rounds, p)
-			if located && l.Round <= at.place.round {
-				before = append(before, p)
+			// Only round 0, the starting lineup, is read. Any other round's
+			// lineup is waiting for its team to be seated (see the rule above).
+			if l.Round == 0 {
+				start = append(start, l)
 			}
 		case matchID:
-			own = append(own, placedLineup{lineup: l})
+			own = append(own, l)
 		default:
 			earlier, drawn := r.draw[l.MatchID]
-			if located && drawn && earlier.seats(teamID) && earlier.place.compare(at.place) < 0 {
+			if located && drawn && earlier.Seats(teamID) && earlier.place.Compare(at.place) < 0 {
 				before = append(before, placedLineup{lineup: l, place: earlier.place})
 			}
 		}
 	}
 
-	// Each pick is unambiguous: a team has one lineup per match and one per
-	// round, and no two places are equal.
-	var best placedLineup
+	// Each pick is unambiguous: a team has one lineup per match and one
+	// starting lineup, and no two places are equal.
+	var best domain.TeamLineup
 	switch {
 	case len(own) > 0:
 		best = own[0]
 	case len(before) > 0:
-		best = slices.MaxFunc(before, func(a, b placedLineup) int { return a.place.compare(b.place) })
-	case len(rounds) > 0:
-		best = slices.MinFunc(rounds, func(a, b placedLineup) int { return a.place.compare(b.place) })
+		best = slices.MaxFunc(before, func(a, b placedLineup) int { return a.place.Compare(b.place) }).lineup
+	case len(start) > 0:
+		best = start[0]
 	default:
 		return InForceLineup{}
 	}
-	source := LineupSource{Round: best.lineup.Round}
-	if best.lineup.MatchID != "" {
-		source = LineupSource{MatchID: best.lineup.MatchID}
+	source := LineupSource{Round: best.Round}
+	if best.MatchID != "" {
+		source = LineupSource{MatchID: best.MatchID}
 	}
-	return InForceLineup{Lineup: best.lineup, Source: source, Found: true}
+	return InForceLineup{Lineup: best, Source: source, Found: true}
 }
 
 // lineupRuleOrNone builds the rule for a caller that holds the pool matches and

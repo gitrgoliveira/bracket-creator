@@ -656,7 +656,7 @@ export async function pickManualBoutName({ sub, idx, sideKey, memberIdKey, squad
   if (!renames || !teamId || typeof window.API?.renameTeamMember !== "function") return;
   try {
     await window.API.renameTeamMember(compId, teamId, priorId, typed, password);
-    if (typeof onRenamed === "function") onRenamed([{ ...prior, name: typed }]);
+    onRenamed([{ ...prior, name: typed }]);
   } catch (e) {
     // TELL THE OPERATOR. The rename never reached the server, so the member
     // stays nameless there permanently: every later picker row, the Lineups

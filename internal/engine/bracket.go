@@ -111,7 +111,11 @@ func (e *Engine) generateKnockout(comp *state.Competition, players []domain.Play
 // with pools.csv on disk and no knockout to score into). Draw building goes
 // through buildPoolFedDraw (knockout_skeleton.go), shared with the export
 // path's poolDraw, so both agree on which builder a given competition uses.
-func (e *Engine) generatePoolPreviewBracket(comp *state.Competition) error {
+//
+// poolMatches is the saved pool phase (the draw passes what generatePools
+// saved, the quarantine rebuild what is on disk): each court's knockout is
+// timed after that court's last pool bout (bc-kosc).
+func (e *Engine) generatePoolPreviewBracket(comp *state.Competition, poolMatches []state.MatchResult) error {
 	pools, err := e.store.LoadPools(comp.ID)
 	if err != nil {
 		return fmt.Errorf("loading pools for preview bracket: %w", err)
@@ -154,13 +158,6 @@ func (e *Engine) generatePoolPreviewBracket(comp *state.Competition) error {
 	// never resolved competitors at draw time, so there is nothing to stamp
 	// (see buildBracketFromDraw's own doc comment). ResolveQualifiedPools
 	// stamps ids as each placeholder resolves to a real pool finisher.
-	// The pool matches are already saved (generatePools, or the quarantine
-	// rebuild's existing file): each court's knockout is timed after that
-	// court's last pool bout (bc-kosc).
-	poolMatches, err := e.store.LoadPoolMatches(comp.ID)
-	if err != nil {
-		return fmt.Errorf("loading pool matches for preview bracket: %w", err)
-	}
 	bracket, err := e.buildBracketFromDraw(comp, draw, nil, poolMatches)
 	if err != nil {
 		return err

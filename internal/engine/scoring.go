@@ -3326,10 +3326,7 @@ func parseWinnerOf(s string, numRounds int) (int, int) {
 }
 
 func (e *Engine) UpdateMatchCourt(compId string, matchId string, newCourt string) error {
-	err := e.withPoolMatch(e.store, compId, matchId, func(r *state.MatchResult) error {
-		r.Court = newCourt
-		return nil
-	})
+	err := e.updatePoolMatchCourt(compId, matchId, newCourt)
 	if err == nil {
 		return nil
 	}
@@ -3547,6 +3544,46 @@ func (e *Engine) OverrideBracketWinner(compId string, matchId string, winnerName
 	return true, nil
 }
 
+// updatePoolMatchCourt moves a pool match to another court and, in a pools +
+// knockout competition, moves that court's knockout matches past it when it
+// now runs into them (moveKnockoutPastPools), in one transaction (bc-kosc).
+// The move picks no time on the new court, so the app keeps that court's
+// pools before its knockout. Returns errMatchNotFound, with nothing written,
+// when matchId is not a pool match.
+func (e *Engine) updatePoolMatchCourt(compId, matchId, newCourt string) error {
+	// Read before the transaction: the tournament has its own lock.
+	tournament, tournErr := e.store.LoadTournament()
+	// The reads below run under the competition's lock, which skips the
+	// first-read legacy conversion the store's own reads run.
+	e.store.EnsureLegacyUpgraded(compId)
+	return e.store.WithTransaction(compId, func(tx state.StoreTx) error {
+		if err := e.withPoolMatch(tx, compId, matchId, func(r *state.MatchResult) error {
+			r.Court = newCourt
+			return nil
+		}); err != nil {
+			return err
+		}
+		comp, err := tx.LoadCompetition(compId)
+		if err != nil {
+			return err
+		}
+		if !comp.IsKnockoutEnabled() {
+			return nil
+		}
+		if tournErr != nil {
+			return tournErr
+		}
+		matches, err := tx.LoadPoolMatches(compId)
+		if err != nil {
+			return err
+		}
+		return moveKnockoutPastPools(tx, compId, matches, comp, tournament)
+	})
+}
+
+// UpdateMatchTime sets a match's time and moves nothing else: a time set by
+// hand is the operator ordering the court (the queue's up/down is two of
+// these), so the knockout is not pushed past a pool bout moved later.
 func (e *Engine) UpdateMatchTime(compId string, matchId string, scheduledAt string) error {
 	err := e.withPoolMatch(e.store, compId, matchId, func(r *state.MatchResult) error {
 		r.ScheduledAt = scheduledAt

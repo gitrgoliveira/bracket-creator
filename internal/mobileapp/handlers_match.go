@@ -1301,6 +1301,9 @@ func RegisterMatchHandlers(r *gin.RouterGroup, eng *engine.Engine, store Competi
 			"matchId":       mid,
 			"court":         req.Court,
 		})
+		// A pool bout moved onto a court may move that court's knockout
+		// later (bc-kosc), so the schedule is announced as the time edit's is.
+		hub.Broadcast(EventScheduleUpdated, nil)
 
 		c.Status(http.StatusOK)
 	})

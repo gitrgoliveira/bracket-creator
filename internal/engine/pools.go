@@ -10,14 +10,14 @@ import (
 	"github.com/gitrgoliveira/bracket-creator/internal/state"
 )
 
-func (e *Engine) generatePools(comp *state.Competition, players []domain.Player, seeds []domain.SeedAssignment) error {
+func (e *Engine) generatePools(comp *state.Competition, players []domain.Player, seeds []domain.SeedAssignment) ([]state.MatchResult, error) {
 	// PoolSize is the divisor in CreatePools (and is fed to PoolSeeding); a
 	// zero/negative value would otherwise reach helper.CreatePools and the
 	// guard there returns a plain error mapped to HTTP 500. Validate up front
 	// so a competition started with an unset PoolSize fails as a clean 400
 	// (validationErrorf → *ValidationError) with an actionable message. (mp-ebgz)
 	if comp.PoolSize <= 0 {
-		return validationErrorf("competition %s cannot start: pool size must be at least 1, got %d, set a pool size before starting", comp.ID, comp.PoolSize)
+		return nil, validationErrorf("competition %s cannot start: pool size must be at least 1, got %d, set a pool size before starting", comp.ID, comp.PoolSize)
 	}
 
 	isMax := comp.PoolSizeMode == "max"
@@ -47,7 +47,7 @@ func (e *Engine) generatePools(comp *state.Competition, players []domain.Player,
 	poolFedKnockout := comp.Format == state.CompFormatMixed
 	if poolFedKnockout {
 		if err := state.ValidateExtraQualifiers(comp.ExtraQualifiers, comp.PoolSizeMode, comp.EffectivePoolWinners()); err != nil {
-			return wrapValidationErrorf(err, "competition %s cannot start: %s", comp.ID, err.Error())
+			return nil, wrapValidationErrorf(err, "competition %s cannot start: %s", comp.ID, err.Error())
 		}
 	}
 
@@ -66,7 +66,7 @@ func (e *Engine) generatePools(comp *state.Competition, players []domain.Player,
 	// Excel-coupled helpers accept domain values directly.
 	if len(seeds) > 0 {
 		if err := helper.ApplySeeds(players, seeds); err != nil {
-			return fmt.Errorf("applying seeds: %w", err)
+			return nil, fmt.Errorf("applying seeds: %w", err)
 		}
 	}
 
@@ -103,7 +103,7 @@ func (e *Engine) generatePools(comp *state.Competition, players []domain.Player,
 			// count and minimum pool size, so it is wrapped as a clean,
 			// actionable *ValidationError (-> HTTP 400) rather than
 			// restated.
-			return wrapValidationErrorf(err, "competition %s cannot start: %s", comp.ID, err.Error())
+			return nil, wrapValidationErrorf(err, "competition %s cannot start: %s", comp.ID, err.Error())
 		}
 	} else {
 		// helper.BuildPoolPhaseTreeAwareWithMode, not plain
@@ -152,7 +152,7 @@ func (e *Engine) generatePools(comp *state.Competition, players []domain.Player,
 			// guard belongs to the actionable class -- that is what would
 			// let a future writer add a genuine internal fault here and
 			// assume 400 was the considered answer.
-			return wrapValidationErrorf(err, "competition %s cannot start: %s", comp.ID, err.Error())
+			return nil, wrapValidationErrorf(err, "competition %s cannot start: %s", comp.ID, err.Error())
 		}
 	}
 
@@ -165,7 +165,7 @@ func (e *Engine) generatePools(comp *state.Competition, players []domain.Player,
 	// (league/swiss legitimately produce 1 pool, exempted.)
 	if comp.Format == state.CompFormatMixed {
 		if len(pools) < 2 {
-			return validationErrorf("mixed (Pools + Knockout) competition %s requires at least 2 pools, got %d with %d participants at PoolSize=%d; reduce PoolSize, add participants, or change format to league", comp.ID, len(pools), len(players), comp.PoolSize)
+			return nil, validationErrorf("mixed (Pools + Knockout) competition %s requires at least 2 pools, got %d with %d participants at PoolSize=%d; reduce PoolSize, add participants, or change format to league", comp.ID, len(pools), len(players), comp.PoolSize)
 		}
 		// Every pool must be able to supply PoolWinners finishers to the knockout.
 		// In "max" mode an odd participant count can leave an under-filled last
@@ -177,7 +177,7 @@ func (e *Engine) generatePools(comp *state.Competition, players []domain.Player,
 		poolWinners := comp.EffectivePoolWinners()
 		for _, p := range pools {
 			if len(p.Players) < poolWinners {
-				return validationErrorf("mixed (Pools + Knockout) competition %s: pool %q has only %d participant(s) but %d advance to the knockout (PoolWinners=%d), every pool needs at least PoolWinners participants; reduce PoolWinners, adjust PoolSize/pool-size-mode, or add participants", comp.ID, p.PoolName, len(p.Players), poolWinners, poolWinners)
+				return nil, validationErrorf("mixed (Pools + Knockout) competition %s: pool %q has only %d participant(s) but %d advance to the knockout (PoolWinners=%d), every pool needs at least PoolWinners participants; reduce PoolWinners, adjust PoolSize/pool-size-mode, or add participants", comp.ID, p.PoolName, len(p.Players), poolWinners, poolWinners)
 			}
 		}
 		// bc-qual LP-3c's defense-in-depth ValidateExtraQualifiers check used
@@ -217,13 +217,13 @@ func (e *Engine) generatePools(comp *state.Competition, players []domain.Player,
 			// Same prefix as this function's three other refusals: the
 			// operator sees these side by side and a bare sentence here read
 			// as coming from somewhere else entirely.
-			return wrapValidationErrorf(err, "competition %s cannot start: %s", comp.ID, err.Error())
+			return nil, wrapValidationErrorf(err, "competition %s cannot start: %s", comp.ID, err.Error())
 		}
 	}
 
 	// Save pools
 	if err := e.store.SavePools(comp.ID, pools); err != nil {
-		return err
+		return nil, err
 	}
 
 	// drawCourts, derived above, is reused rather than recomputed: this
@@ -231,7 +231,7 @@ func (e *Engine) generatePools(comp *state.Competition, players []domain.Player,
 	// second derivation is a second thing to keep in step.
 	courtAssign, err := helper.AssignPoolsToCourts(len(pools), drawCourts)
 	if err != nil {
-		return fmt.Errorf("assigning pools to courts: %w", err)
+		return nil, fmt.Errorf("assigning pools to courts: %w", err)
 	}
 
 	var results []state.MatchResult
@@ -276,7 +276,7 @@ func (e *Engine) generatePools(comp *state.Competition, players []domain.Player,
 	// pipeline.
 	tournament, err := e.store.LoadTournament()
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	if comp.Format == state.CompFormatLeague {
@@ -316,7 +316,7 @@ func (e *Engine) generatePools(comp *state.Competition, players []domain.Player,
 	}
 
 	numberPoolMatchesInPlayingOrder(results)
-	return e.store.SavePoolMatches(comp.ID, results)
+	return results, e.store.SavePoolMatches(comp.ID, results)
 }
 
 // numberPoolMatchesInPlayingOrder gives each pool's bouts their ids in the

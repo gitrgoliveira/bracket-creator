@@ -164,3 +164,91 @@ func TestPushKnockoutPastPools(t *testing.T) {
 
 	assert.False(t, pushKnockoutPastPools(b, comp, nil, pm), "nothing left to move")
 }
+
+// bc-kosc: a pool bout moved onto another court moves that court's knockout
+// past it. A time set by hand moves nothing: it is the operator ordering the
+// court, and the queue's up/down is two of them.
+func TestPoolScheduleEdit_CourtMoveMovesTheKnockout(t *testing.T) {
+	setup := func(t *testing.T, courts []string) (*Engine, *state.Store, string) {
+		eng, store, _ := setupTestEngine(t)
+		id := "bc-kosc-edit"
+		createTestCompetition(t, store, id, state.CompFormatMixed, 3, func(c *state.Competition) { c.Courts = courts })
+		saveTestParticipants(t, store, id, kosc6)
+		require.NoError(t, eng.GenerateDraw(id))
+		return eng, store, id
+	}
+	bracket := func(t *testing.T, store *state.Store, id string) *state.Bracket {
+		b, err := store.LoadBracket(id)
+		require.NoError(t, err)
+		return b
+	}
+	pool := func(t *testing.T, store *state.Store, id string) []state.MatchResult {
+		pm, err := store.LoadPoolMatches(id)
+		require.NoError(t, err)
+		require.NotEmpty(t, pm)
+		return pm
+	}
+
+	t.Run("a court move", func(t *testing.T) {
+		eng, store, id := setup(t, []string{"A", "B"})
+		m := pool(t, store, id)[0]
+		other := "A"
+		if m.Court == "A" {
+			other = "B"
+		}
+		// Give the bout a time inside the other court's knockout, on its own
+		// court first (a time edit, which moves nothing), then move it across.
+		ko := numberedKnockoutTimes(bracket(t, store, id))[other]
+		require.NotEmpty(t, ko)
+		require.NoError(t, eng.UpdateMatchTime(id, m.ID, ko[0].Format(scheduleClockLayout)))
+		require.NoError(t, eng.UpdateMatchCourt(id, m.ID, other))
+		comp, err := store.LoadCompetition(id)
+		require.NoError(t, err)
+		tourn, err := store.LoadTournament()
+		require.NoError(t, err)
+		end := poolPhaseEndByCourt(pool(t, store, id), comp, tourn)[other]
+		for _, ts := range numberedKnockoutTimes(bracket(t, store, id))[other] {
+			assert.Falsef(t, ts.Before(end), "court %s knockout at %s before the moved bout ends at %s", other, ts.Format("15:04"), end.Format("15:04"))
+		}
+	})
+
+	t.Run("a time set by hand", func(t *testing.T) {
+		eng, store, id := setup(t, []string{"A"})
+		before := numberedKnockoutTimes(bracket(t, store, id))
+		last := before["A"][len(before["A"])-1]
+		require.NoError(t, eng.UpdateMatchTime(id, pool(t, store, id)[0].ID, last.Add(time.Hour).Format(scheduleClockLayout)))
+		assert.Equal(t, before, numberedKnockoutTimes(bracket(t, store, id)))
+	})
+
+	t.Run("up on the first knockout match stays", func(t *testing.T) {
+		eng, store, id := setup(t, []string{"A"})
+		pm := pool(t, store, id)
+		lastPool := pm[0]
+		for _, m := range pm {
+			if parseClockHHMM(m.ScheduledAt).After(parseClockHHMM(lastPool.ScheduledAt)) {
+				lastPool = m
+			}
+		}
+		var first state.BracketMatch
+		for _, r := range bracket(t, store, id).Rounds {
+			for _, m := range r {
+				if m.MatchNumber == 1 {
+					first = m
+				}
+			}
+		}
+		require.NotEmpty(t, first.ID)
+		// The queue's swap: the moved match first, then its neighbour.
+		require.NoError(t, eng.UpdateMatchTime(id, first.ID, lastPool.ScheduledAt))
+		require.NoError(t, eng.UpdateMatchTime(id, lastPool.ID, first.ScheduledAt))
+		got := ""
+		for _, r := range bracket(t, store, id).Rounds {
+			for _, m := range r {
+				if m.ID == first.ID {
+					got = m.ScheduledAt
+				}
+			}
+		}
+		assert.Equal(t, lastPool.ScheduledAt, got, "the knockout match the operator moved up stays ahead of the pool bout")
+	})
+}

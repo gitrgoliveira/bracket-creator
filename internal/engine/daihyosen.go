@@ -331,26 +331,6 @@ func appendWithSlots(allMatches, injected []state.MatchResult, comp *state.Compe
 	return allMatches
 }
 
-// savePoolMatchesAndKnockoutTimes saves a pool phase that gained bouts after
-// the draw and, in a pools + knockout competition, moves the knockout matches
-// those bouts now run into (pushKnockoutPastPools), in the same transaction.
-func savePoolMatchesAndKnockoutTimes(tx state.StoreTx, compID string, matches []state.MatchResult, comp *state.Competition, tournament *state.Tournament) error {
-	if err := tx.SavePoolMatches(compID, matches); err != nil {
-		return err
-	}
-	if !comp.IsKnockoutEnabled() {
-		return nil
-	}
-	bracket, err := tx.LoadBracket(compID)
-	if err != nil {
-		return err
-	}
-	if !pushKnockoutPastPools(bracket, comp, tournament, matches) {
-		return nil
-	}
-	return tx.SaveBracket(compID, bracket)
-}
-
 // ComputeTeamSummary aggregates SubMatchResult entries into TeamSummary
 // values for the two named sides. Sub-results whose Winner is empty
 // (drawn bouts / hikiwake) contribute nothing to IV but their ippons

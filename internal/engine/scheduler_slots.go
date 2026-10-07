@@ -264,9 +264,8 @@ func assignPoolMatchSlots(matches []state.MatchResult, comp *state.Competition, 
 // a cursor threaded out of assignPoolMatchSlots, makes it right for both
 // callers that build the preview bracket (the draw and the quarantine
 // rebuild) and for pushKnockoutPastPools, which moves the knockout when a
-// tie-break or representative bout is added later. A pool time the operator
-// moves by hand does not move the knockout. Rows with no parseable time are
-// skipped. bc-kosc.
+// pool bout is added after the draw or moved onto another court. Rows with no
+// parseable time are skipped. bc-kosc.
 func poolPhaseEndByCourt(matches []state.MatchResult, comp *state.Competition, tournament *state.Tournament) map[string]time.Time {
 	ends := map[string]time.Time{}
 	slot := time.Duration(perMatchElapsedMinutes(comp, tournament, false)) * time.Minute
@@ -287,9 +286,10 @@ func poolPhaseEndByCourt(matches []state.MatchResult, comp *state.Competition, t
 }
 
 // pushKnockoutPastPools moves a court's knockout matches after that court's
-// pool phase when a pool bout added after the draw (a tie-break or
-// representative bout, appended at the end of its court) now runs into them
-// (bc-kosc). A court whose first scheduled knockout match already starts at or
+// pool phase when a pool bout now runs into them (bc-kosc): a tie-break or
+// representative bout added after the draw (appended at the end of its
+// court), or a pool bout the operator moved onto another court. A time set by
+// hand moves nothing (UpdateMatchTime). It only ever moves the knockout later. A court whose first scheduled knockout match already starts at or
 // after its pool end is left exactly as it is, so a time the operator set
 // survives. Otherwise its scheduled matches keep their order and gaps and are
 // moved only as far as they must be: each starts no earlier than the pool end,
@@ -363,6 +363,33 @@ func pushKnockoutPastPools(b *state.Bracket, comp *state.Competition, tournament
 		}
 	}
 	return moved
+}
+
+// savePoolMatchesAndKnockoutTimes saves a pool phase that gained bouts after
+// the draw and moves the knockout matches those bouts now run into, in the
+// same transaction.
+func savePoolMatchesAndKnockoutTimes(tx state.StoreTx, compID string, matches []state.MatchResult, comp *state.Competition, tournament *state.Tournament) error {
+	if err := tx.SavePoolMatches(compID, matches); err != nil {
+		return err
+	}
+	return moveKnockoutPastPools(tx, compID, matches, comp, tournament)
+}
+
+// moveKnockoutPastPools applies pushKnockoutPastPools to the stored bracket of
+// a pools + knockout competition, inside the caller's transaction, and saves
+// it only when something moved.
+func moveKnockoutPastPools(tx state.StoreTx, compID string, poolMatches []state.MatchResult, comp *state.Competition, tournament *state.Tournament) error {
+	if !comp.IsKnockoutEnabled() {
+		return nil
+	}
+	bracket, err := tx.LoadBracket(compID)
+	if err != nil {
+		return err
+	}
+	if !pushKnockoutPastPools(bracket, comp, tournament, poolMatches) {
+		return nil
+	}
+	return tx.SaveBracket(compID, bracket)
 }
 
 // assignBracketMatchSlots is the bracket analogue of

@@ -1276,7 +1276,8 @@ func (e *Engine) runDrawPipeline(id string) error {
 		if err := clearEarlierDraw(); err != nil {
 			return err
 		}
-		if err := e.generatePools(comp, players, seeds); err != nil {
+		poolMatches, err := e.generatePools(comp, players, seeds)
+		if err != nil {
 			return err
 		}
 		// mp-9dz: a mixed (Pools + Knockout) competition feeds a knockout
@@ -1285,7 +1286,7 @@ func (e *Engine) runDrawPipeline(id string) error {
 		// source competition at draw time, mirroring the Excel Tree sheet.
 		// League has no knockout stage, so skip it there.
 		if comp.Format == state.CompFormatMixed {
-			if err := e.generatePoolPreviewBracket(comp); err != nil {
+			if err := e.generatePoolPreviewBracket(comp, poolMatches); err != nil {
 				return err
 			}
 		}

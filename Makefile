@@ -336,7 +336,7 @@ docs/clean: ## Remove the docs venv and the built site
 # Checking it equals the version about to be tagged is a release step
 # (.github/agents/release.agent.md). This leaves bin/bracket-creator stamped
 # with it until the next plain `make go/build`.
-DOCS_CAPTURE_VERSION := v2.1.1
+DOCS_CAPTURE_VERSION := v2.2.0
 
 SHOTS_DIR := scripts/screenshots
 SHOTS_DEPS_STAMP := $(SHOTS_DIR)/node_modules/.package-lock.json

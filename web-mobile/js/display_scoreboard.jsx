@@ -721,8 +721,7 @@ function TvDisplay({ court, tournament, competitions, withZekkenName, linkState 
     // normalizeViewerCompItem).
     const { lineupA, lineupB, squadA, squadB } = useTeamLineups(
         isTeamMatch && promoted && promoted.match ? promoted.match : null,
-        isTeamMatch && promoted ? promoted.competition : null,
-        promoted ? promoted.roundIndex : undefined
+        isTeamMatch && promoted ? promoted.competition : null
     );
 
     // mp-13y: DH (Daihyosen) row gating: shown when:

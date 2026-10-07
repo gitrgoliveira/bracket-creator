@@ -1,13 +1,16 @@
-// editorErr is the team editor's ONE inline error surface: the daihyosen
-// add/remove POSTs and the inline lineup-position PUT all report through it.
+// editorErr is the team editor's inline error surface for the daihyosen
+// add/remove POSTs. An inline lineup-position save that is refused or fails
+// reports in the bout row it was made in instead (see
+// team_editor_lineup_refusal_at_row.render.test.jsx), not here.
 //
 // It used to be rendered INSIDE the "add a representative bout" block, whose
 // guard is `if (hasDaihyosen || !isKnockoutPhase || isKachinuki) return null`.
-// Every state that can SET the error from somewhere else therefore hid it:
+// Every state that could SET the error from somewhere else therefore hid it:
 // removing an existing daihyosen (hasDaihyosen is true, so the block that
-// would have shown the failure is gone) and a failed lineup save in the
-// kachinuki flow (isKachinuki is true). The operator saw the button return to
-// rest and nothing else — a silent failure on a write they believe landed.
+// would have shown the failure is gone) and, while a failed lineup save still
+// reported here, the kachinuki flow (isKachinuki is true). The operator saw
+// the button return to rest and nothing else — a silent failure on a write
+// they believe landed.
 //
 // Pinned here on the remove-daihyosen path because it needs no lineup wiring:
 // the assertion is simply that the failure REACHES THE SCREEN.
@@ -25,7 +28,6 @@ const STUBBED_GLOBALS = {
   isTextEntry: () => false,
   isInteractiveTarget: () => false,
   confirmDialog: vi.fn().mockResolvedValue(true),
-  resolveRoundIndex: () => 0,
   API: {},
   AdminLineupHelpers: { rosterFor: vi.fn().mockReturnValue([]) },
   compMatches: () => [],

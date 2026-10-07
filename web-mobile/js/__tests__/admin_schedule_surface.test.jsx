@@ -22,7 +22,6 @@ import {
   timeToMinutes,
   suggestRebalances,
   allMatchesCompleted,
-  pickCopySource,
   MatchLineupPanel,
 } from '../admin_schedule.jsx';
 
@@ -36,7 +35,6 @@ const ES_EXPORTS = {
   timeToMinutes,
   suggestRebalances,
   allMatchesCompleted,
-  pickCopySource,
   MatchLineupPanel,
 };
 

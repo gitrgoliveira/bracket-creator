@@ -9,6 +9,7 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"github.com/gitrgoliveira/bracket-creator/internal/state/wal"
 )
@@ -25,6 +26,10 @@ type Store struct {
 	// crash between the WAL commit and the target writes can't
 	// silently lose the transaction.
 	walDir string
+
+	// clock is the store's wall clock for the stamps it writes (stampMember);
+	// nil means time.Now. A test sets it to stand still or to step back.
+	clock func() time.Time
 
 	// compMu maps competition ID -> *sync.RWMutex for fine-grained locking.
 	compMu sync.Map
@@ -334,6 +339,29 @@ func (s *Store) cachedBracket(compID string) (*Bracket, error) {
 	}
 	bracket, _ := data.(*Bracket)
 	return bracket, nil
+}
+
+// now is the store's wall clock for the stamps it writes: time.Now, or the clock
+// a test has set.
+func (s *Store) now() time.Time {
+	if s.clock != nil {
+		return s.clock()
+	}
+	return time.Now()
+}
+
+// cachedCompetition is cachedPoolMatches's competition twin: the no-copy
+// accessor for config.md, pairing it with parseCompetitionFile in one place. The
+// result is nil when the competition has no config.md. Callers MUST NOT mutate
+// it: writers replace the cached record and never change it in place, and
+// LoadCompetition copies it for a caller that needs an owned one.
+func (s *Store) cachedCompetition(compID string) (*Competition, error) {
+	data, err := s.loadCached(compID, "config.md", parseCompetitionFile)
+	if err != nil {
+		return nil, err
+	}
+	comp, _ := data.(*Competition)
+	return comp, nil
 }
 
 // invalidCompDir is where a rejected competition id resolves. No legal id can

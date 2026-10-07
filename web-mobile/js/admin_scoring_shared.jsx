@@ -3,7 +3,7 @@
 // out so the foundation can be reused and the modal file stays focused on the
 // two stateful editors. See web-mobile/admin_split_plan.md.
 
-const { useState: useStateA, useEffect: useEffectA, useRef: useRefA, useMemo: useMemoA } = React;
+const { useState: useStateA, useEffect: useEffectA, useRef: useRefA, useMemo: useMemoA, useLayoutEffect: useLayoutEffectA } = React;
 const Icon = window.Icon;
 
 import { DAIHYOSEN_POSITION, scoreRowMatchLabel } from './pool_ids.jsx';
@@ -950,11 +950,108 @@ function FoulCounter({ fouls, setFouls, onIncrement, color, disabled }) {
 // `onListPick` is told of a pick made by tapping a row of the open list (an
 // option or "+ Add"), never of a typed commit, Enter, the clear button or a
 // click outside: only that pick closes the list under the finger.
-function LineupNameInput({ value, roster, onSelect, onListPick, disabled, ariaLabel, color, clearable }) {
+// The name list is absolutely placed under its input. It opens down when the room
+// below fits the list, else toward the larger room, and caps its height to that
+// room. The room is bounded by the viewport (the visual one, which the iPad
+// keyboard shrinks), by the team sheet's pinned header (top) and footer (bottom:
+// the inline dock, the overlay's foot), and by the nearest ancestor that cuts off
+// what overflows it (the overlay's scroll body, the inline panel's clip, the
+// at-court panel's scroll box): a list taller than that room would be cut off or
+// stretch the ancestor's scroll. A host with none of these (the Lineups page)
+// uses the viewport edges. (bc-tmfd)
+const LINEUP_LIST_MAX_H = 240;
+const LINEUP_LIST_GAP = 8;
+const LINEUP_LIST_MIN_H = 72;
+
+// Whether an element cuts off what overflows it vertically: hidden, auto, scroll
+// or clip on the vertical axis, or hidden/auto/scroll on the horizontal one,
+// which makes the vertical axis cut off too.
+function clipsVertically(el) {
+  const { overflowX, overflowY } = getComputedStyle(el);
+  const cuts = (v) => v === "hidden" || v === "auto" || v === "scroll";
+  return cuts(overflowY) || overflowY === "clip" || cuts(overflowX);
+}
+
+// The nearest ancestor that clips. The page itself is no ancestor of this kind:
+// the viewport edges stand for it (and a dialog locks the body's scroll).
+function clippingAncestor(el) {
+  for (let a = el.parentElement; a && a !== document.body && a !== document.documentElement; a = a.parentElement) {
+    if (clipsVertically(a)) return a;
+  }
+  return null;
+}
+
+// The elements that bound a name list's room, found once when the list opens: the
+// page scrolling and the keyboard rising move the input, never these.
+function lineupListEdges(wrapper) {
+  const scope = wrapper.closest(".scoring-panel, .editor-modal");
+  return {
+    pin: scope && scope.querySelector(".team-sheet-pin"),
+    foot: scope && scope.querySelector(".editor-modal__foot--nav"),
+    clip: clippingAncestor(wrapper),
+  };
+}
+
+function lineupListPlacement({ pin, foot, clip }, bar) {
+  // The visual viewport shrinks under the iPad keyboard where innerHeight does not.
+  const vv = window.visualViewport;
+  const viewTop = vv ? vv.offsetTop : 0;
+  const viewH = vv ? vv.offsetTop + vv.height : window.innerHeight;
+  const clipRect = clip ? clip.getBoundingClientRect() : null;
+  const topEdge = Math.max(viewTop, pin ? pin.getBoundingClientRect().bottom : 0, clipRect ? clipRect.top : 0, 0);
+  const r = bar.getBoundingClientRect();
+  // The footer is the bottom edge wherever it sits below the input: the inline
+  // dock is sticky and the overlay's is always visible under the scroll body.
+  const footTop = foot ? foot.getBoundingClientRect().top : viewH;
+  const dockEdge = foot && footTop >= r.bottom ? Math.min(viewH, footTop) : viewH;
+  const bottomEdge = clipRect ? Math.min(dockEdge, clipRect.bottom) : dockEdge;
+  const roomBelow = bottomEdge - r.bottom;
+  const roomAbove = r.top - topEdge;
+  const up = roomBelow < LINEUP_LIST_MAX_H && roomAbove > roomBelow;
+  const room = (up ? roomAbove : roomBelow) - LINEUP_LIST_GAP;
+  const maxHeight = room < LINEUP_LIST_MAX_H ? Math.max(LINEUP_LIST_MIN_H, Math.floor(room)) : undefined;
+  return { up, maxHeight };
+}
+
+function LineupNameInput({ value, roster, onSelect, onListPick, disabled, ariaLabel, color, clearable, inputId }) {
   const [query, setQuery] = useStateA("");
   const [open, setOpen] = useStateA(false);
   const [active, setActive] = useStateA(-1); // -1 = no explicit selection yet
   const ref = useRefA(null);
+  const barRef = useRefA(null);
+  const listRef = useRefA(null);
+  const [placement, setPlacement] = useStateA({ up: false, maxHeight: undefined });
+  // Measured on open, then again whenever the page scrolls or the viewport
+  // changes (the keyboard rising), one frame at a time. What bounds the room (the
+  // pinned bars, the clipping ancestor) is found once, on open.
+  useLayoutEffectA(() => {
+    if (!open || !ref.current) return;
+    const edges = lineupListEdges(ref.current);
+    let frame = 0;
+    const measure = () => {
+      frame = 0;
+      if (!ref.current || !barRef.current) return;
+      const next = lineupListPlacement(edges, barRef.current);
+      setPlacement(p => (p.up === next.up && p.maxHeight === next.maxHeight ? p : next));
+    };
+    const schedule = (e) => {
+      // The list scrolling itself moves nothing it is placed against.
+      const target = e && e.target;
+      if (target instanceof Node && listRef.current && listRef.current.contains(target)) return;
+      if (!frame) frame = requestAnimationFrame(measure);
+    };
+    measure();
+    const vv = window.visualViewport;
+    window.addEventListener("scroll", schedule, { capture: true, passive: true });
+    window.addEventListener("resize", schedule);
+    if (vv) { vv.addEventListener("resize", schedule); vv.addEventListener("scroll", schedule); }
+    return () => {
+      window.removeEventListener("scroll", schedule, { capture: true });
+      window.removeEventListener("resize", schedule);
+      if (vv) { vv.removeEventListener("resize", schedule); vv.removeEventListener("scroll", schedule); }
+      if (frame) cancelAnimationFrame(frame);
+    };
+  }, [open]);
   // Guards against double-commit when click-outside fires first and the blur
   // event arrives immediately after (mousedown precedes blur in browser order).
   const skipBlurRef = useRefA(false);
@@ -1057,13 +1154,24 @@ function LineupNameInput({ value, roster, onSelect, onListPick, disabled, ariaLa
       if (active >= 0 && active < matches.length) commitEntry(matches[active]);
       else if (active === matches.length && canAddNew) commit(q);
       else if (q) commit(q);
-    } else if (e.key === "Escape") { e.preventDefault(); setOpen(false); setQuery(""); }
+    } else if (e.key === "Escape") {
+      // One Escape closes one layer: a DRAWN list takes it, and keeps it from the
+      // overlay score editor's own Escape (a window listener that closes the
+      // editor). No list drawn (it is drawn only with an option to show: a closed
+      // box, or an open one with nothing to offer) leaves it to the editor.
+      if (!open || optionCount === 0) return;
+      e.preventDefault();
+      e.stopPropagation();
+      setOpen(false);
+      setQuery("");
+    }
   };
 
   return (
     <div className={`pmf lineup-name lineup-name--${color}${!value ? " lineup-name--empty" : ""}`} ref={ref}>
-      <div className="pmf__bar lineup-name__bar">
+      <div className="pmf__bar lineup-name__bar" ref={barRef}>
         <input
+          id={inputId}
           className="pmf__input"
           placeholder={value || "Add player…"}
           aria-label={ariaLabel}
@@ -1101,7 +1209,14 @@ function LineupNameInput({ value, roster, onSelect, onListPick, disabled, ariaLa
         )}
       </div>
       {open && optionCount > 0 && (
-        <div className="pmf__dropdown lineup-name__dropdown">
+        <div
+          ref={listRef}
+          className="pmf__dropdown lineup-name__dropdown"
+          style={{
+            ...(placement.up ? { top: "auto", bottom: "calc(100% + 4px)" } : null),
+            maxHeight: placement.maxHeight ?? LINEUP_LIST_MAX_H,
+          }}
+        >
           {matches.map((entry, i) => (
             <button type="button" key={entry.isObject ? (entry.raw?.id || entry.raw?.index) : entry.name}
               className={`pmf__option ${i === active ? "pmf__option--active" : ""}`}

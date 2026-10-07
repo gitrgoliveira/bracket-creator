@@ -74,12 +74,11 @@ export function boutHansokuMark(foulCount) {
 // competition (or a payload predating this field) simply yields {} and
 // every lookup below degrades to [].
 //
-// `roundIndex` (optional, 0-based) is the authoritative round for the
-// round-scoped lineup fallback. Callers that know the bracket round (the TV
-// display / overlay carry it as promoted.roundIndex) MUST pass it: do not
-// rely on parsing match.round, which now holds a bracket-size display label
-// ("Round 16"/"Round 32") in some surfaces and would misderive the round.
-export function useTeamLineups(match, competition, roundIndex) {
+// Each side's lineup is the one in force for its team at THIS match (a team
+// carries the lineup of its previous match unless one is entered for the
+// match; resolveMatchLineup reads it from the server, which owns the rule), so
+// no round has to be derived here.
+export function useTeamLineups(match, competition) {
   const [lineupA, setLineupA] = useSB(null);
   const [lineupB, setLineupB] = useSB(null);
   const [squadA, setSquadA] = useSB([]);
@@ -161,29 +160,13 @@ export function useTeamLineups(match, competition, roundIndex) {
           console.warn("useTeamLineups: competition fetch failed", _e);
         }
       }
-      // Prefer the explicit 0-based round index. Only when it is absent do we
-      // fall back to match.round: a raw numeric index, or the legacy engine
-      // label "Round <number>" (1-based round NUMBER → 0-based). We deliberately
-      // do NOT trust a bracket-size label here; callers with a real round pass
-      // roundIndex so this parse is never reached on those surfaces.
-      let round = 0;
-      if (typeof roundIndex === "number" && roundIndex >= 0) {
-        round = roundIndex;
-      } else if (typeof match.round === "number" && match.round >= 0) {
-        // A pool match stores Round -1 ("no round"); like resolveRoundIndex,
-        // it reads as round 0 rather than asking the server for round -1.
-        round = match.round;
-      } else if (typeof match.round === "string") {
-        const mr = /^Round\s+(\d+)$/.exec(match.round);
-        if (mr) round = parseInt(mr[1], 10) - 1;
-      }
       const teamAId = resolveLineupTeamId(sideAId, players);
       const teamBId = resolveLineupTeamId(sideBId, players);
       // Both sides are independent GETs: fetch them in parallel to halve the
       // time-to-render (the promoted match changes often on TV/overlay).
       const [la, lb] = await Promise.all([
-        teamAId ? resolveMatchLineup(compId, teamAId, matchId, round, window.API) : null,
-        teamBId ? resolveMatchLineup(compId, teamBId, matchId, round, window.API) : null,
+        teamAId ? resolveMatchLineup(compId, teamAId, matchId, window.API) : null,
+        teamBId ? resolveMatchLineup(compId, teamBId, matchId, window.API) : null,
       ]);
       if (cancelled) return;
       if (teamAId) setLineupA(la);
@@ -193,9 +176,7 @@ export function useTeamLineups(match, competition, roundIndex) {
       if (teamBId) setSquadB(squads[teamBId] || []);
     })();
     return () => { cancelled = true; };
-    // match?.round participates in the fallback-round lineup fetch, so a round
-    // change on a reused match id must re-run the effect.
-  }, [compId, matchId, sideAId, sideBId, roundIndex, match?.round, lineupVersion, squadsSig]);
+  }, [compId, matchId, sideAId, sideBId, lineupVersion, squadsSig]);
 
   return { lineupA, lineupB, squadA, squadB };
 }

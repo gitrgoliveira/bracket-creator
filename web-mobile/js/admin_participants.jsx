@@ -7,6 +7,7 @@
 import { seededRanks } from './admin_helpers.jsx';
 import { NO_ID_HINT } from './data_integrity.jsx';
 import { NumberedName } from './numbered_name.jsx';
+import { useOpenedTapGuard } from './tap_guard.jsx';
 
 const { useState: useStateA, useMemo: useMemoA, useEffect: useEffectA, useRef: useRefA } = React;
 
@@ -285,6 +286,9 @@ function AdminParticipants({ c, tournament: _tournament, onUpdate, password, sho
   const [replaceDojo, setReplaceDojo] = useStateA("");
   const [replaceDanGrade, setReplaceDanGrade] = useStateA("");
   const [replaceZekken, setReplaceZekken] = useStateA("");
+  // The Edit dialog opens under the finger that tapped a row's pencil, so the
+  // bounce of that tap must not reach its backdrop, which dismisses it (bc-cfbd).
+  const { openedRef: editOpenedRef, onClickCapture: editOnClickCapture } = useOpenedTapGuard();
   // nearDupPending holds {pairs} when the server returned Tier-2 near-dup
   // warnings on the roster save. The save has already committed (warnings are
   // non-blocking); this drives a post-save informational banner.
@@ -1016,7 +1020,7 @@ function AdminParticipants({ c, tournament: _tournament, onUpdate, password, sho
             </div>
           )}
           {replaceTarget && (
-            <div role="dialog" aria-modal="true" aria-labelledby="edit-modal-title" style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.4)", zIndex: 200, display: "flex", alignItems: "center", justifyContent: "center" }} onClick={e => { if (e.target === e.currentTarget) setReplaceTarget(null); }}>
+            <div role="dialog" aria-modal="true" aria-labelledby="edit-modal-title" ref={editOpenedRef} onClickCapture={editOnClickCapture} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.4)", zIndex: 200, display: "flex", alignItems: "center", justifyContent: "center" }} onClick={e => { if (e.target === e.currentTarget) setReplaceTarget(null); }}>
               <EscapeListener onClose={() => setReplaceTarget(null)} />
               <div className="card" style={{ minWidth: 320, maxWidth: 420, margin: 16 }}>
                 <div className="card__head"><div id="edit-modal-title" className="card__title">Edit {replaceTarget.name}</div></div>

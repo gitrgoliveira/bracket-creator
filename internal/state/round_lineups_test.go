@@ -1,0 +1,630 @@
+package state
+
+import (
+	"fmt"
+	"os"
+	"slices"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/gitrgoliveira/bracket-creator/internal/domain"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+)
+
+// A competition with no lineups at all has nothing to move, whether the
+// caller read an empty file or none: the settlement answers a map it can write
+// into, changes nothing and leaves nothing waiting.
+func TestSettleRoundLineups_NoLineups(t *testing.T) {
+	comp := &Competition{ID: "c", Kind: "team", TeamSize: 3, Format: CompFormatKnockout}
+	players := []domain.Player{{ID: "t", Name: "Tora"}}
+
+	for name, lineups := range map[string]map[string]domain.TeamLineup{"nil": nil, "empty": {}} {
+		t.Run(name, func(t *testing.T) {
+			for _, onLoad := range []bool{true, false} {
+				res := settleRoundLineups(comp, players, lineups, nil, onLoad)
+
+				assert.NotNil(t, res.lineups)
+				assert.Empty(t, res.lineups)
+				assert.False(t, res.changed)
+				assert.Zero(t, res.waiting)
+				assert.Empty(t, res.given)
+				assert.False(t, res.givenGrew)
+				assert.Empty(t, res.notes)
+			}
+		})
+	}
+}
+
+// settleRoundLineups reads only its arguments: the lineups it was given are
+// never modified, the map it answers is its own.
+func TestSettleRoundLineups_NeverModifiesWhatItWasGiven(t *testing.T) {
+	settledBefore := map[string][]string{"t": {"r0-m0"}}
+	comp := &Competition{ID: "c", Kind: "team", TeamSize: 3, Format: CompFormatKnockout, RoundLineupsGiven: cloneRoundLineupsGiven(settledBefore)}
+	players := []domain.Player{{ID: "t", Name: "Tora"}}
+	round1 := domain.TeamLineup{TeamID: "t", CompetitionID: "c", Round: 1,
+		Positions: map[domain.Position]string{"1": "Sato"}, MemberIDs: map[domain.Position]string{"1": "m"}}
+	given := map[string]domain.TeamLineup{teamLineupKey("t", 1): round1}
+	draw := []DrawMatch{{ID: "r1-m0", SideAID: "t", SideBID: "o", Knockout: true, Round: 1}}
+
+	res := settleRoundLineups(comp, players, given, draw, true)
+
+	assert.True(t, res.changed)
+	assert.Len(t, given, 1, "the map it was given still holds its lineup")
+	assert.Contains(t, given, teamLineupKey("t", 1))
+	moved := res.lineups[teamLineupMatchKey("t", "r1-m0")]
+	moved.Positions["1"] = "changed"
+	assert.Equal(t, "Sato", round1.Positions["1"], "a lineup it made carries its own copy of the maps")
+	assert.Equal(t, "Sato", given[teamLineupKey("t", 1)].Positions["1"])
+	assert.Equal(t, settledBefore, comp.RoundLineupsGiven, "the competition's record of the pairs settled is not modified")
+	assert.Equal(t, map[string][]string{"t": {"r0-m0", "r1-m0"}}, res.given, "the answer is the record plus the pair it settled")
+	res.given["t"][0] = "changed"
+	assert.Equal(t, settledBefore, comp.RoundLineupsGiven, "and shares no list with it")
+}
+
+// settleRoundLineups gives a team that has lineups for later rounds the lineup
+// v2.1.1 showed at each match it is seated in: the round lineup with the highest
+// round at or below the match's, else the highest round there was.
+func TestSettleRoundLineups_ReadsAsV211Did(t *testing.T) {
+	comp := &Competition{ID: "c", Kind: "team", TeamSize: 3, Format: CompFormatLeague}
+	players := []domain.Player{{ID: "t", Name: "Tora"}, {ID: "o", Name: "Other"}}
+	for _, tc := range []struct {
+		name   string
+		rounds []int
+		// reads maps a match's round to the round whose lineup it shows.
+		reads map[int]int
+	}{
+		{"one later round only: it is the highest there is, so earlier matches show it too", []int{1}, map[int]int{0: 1, 1: 1, 2: 1}},
+		{"a starting lineup and a later round", []int{0, 2}, map[int]int{0: 0, 1: 0, 2: 2, 3: 2}},
+		{"two later rounds and no starting lineup: an earlier match shows the highest", []int{1, 2}, map[int]int{0: 2, 1: 1, 2: 2, 3: 2}},
+		{"two later rounds, the lower of them above round 1", []int{2, 3}, map[int]int{0: 3, 1: 3, 2: 2, 3: 3, 4: 3}},
+		{"every round", []int{0, 1, 2}, map[int]int{0: 0, 1: 1, 2: 2, 3: 2}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			lineups := map[string]domain.TeamLineup{}
+			kept := 0
+			for _, r := range tc.rounds {
+				lineups[teamLineupKey("t", r)] = domain.TeamLineup{TeamID: "t", CompetitionID: "c", Round: r,
+					Positions: map[domain.Position]string{"1": fmt.Sprintf("round%d", r)}}
+				if r >= 1 {
+					kept++
+				}
+			}
+			bouts := func(pool string) []DrawMatch {
+				var draw []DrawMatch
+				for round := range tc.reads {
+					draw = append(draw, DrawMatch{ID: fmt.Sprintf("Pool %s-%d", pool, round), SideAID: "t", SideBID: "o", PoolRound: round})
+				}
+				return draw
+			}
+
+			// The load repair settles the matches the team is seated in at load.
+			first := settleRoundLineups(comp, players, lineups, bouts("A"), true)
+			// A write settles again, after matches it is seated in later were added.
+			later := *comp
+			later.RoundLineupsGiven = first.given
+			second := settleRoundLineups(&later, players, first.lineups, append(bouts("A"), bouts("B")...), false)
+
+			for round, want := range tc.reads {
+				for pool, res := range map[string]roundLineupSettlement{"A": first, "B": second} {
+					got := res.lineups[teamLineupMatchKey("t", fmt.Sprintf("Pool %s-%d", pool, round))]
+					assert.Equal(t, fmt.Sprintf("round%d", want), got.Positions["1"], "a match at round %d, given by pass %s", round, pool)
+				}
+			}
+			assert.Equal(t, kept, first.waiting, "the round lineups stay until the competition is completed")
+			assert.Equal(t, kept, second.waiting)
+			for _, r := range tc.rounds {
+				if r >= 1 {
+					assert.Contains(t, second.lineups, teamLineupKey("t", r))
+				}
+			}
+		})
+	}
+}
+
+// A legacy team's round lineup is kept until the competition is completed,
+// whatever the draw holds (a team can still be seated in a match by a correction
+// until then), and removed when it is; the marker follows, which is what waiting
+// counts.
+func TestSettleRoundLineups_WaitsUntilTheCompetitionIsCompleted(t *testing.T) {
+	round1 := map[string]domain.TeamLineup{teamLineupKey("t", 1): {TeamID: "t", CompetitionID: "c", Round: 1,
+		Positions: map[domain.Position]string{"1": "Sato"}}}
+	players := []domain.Player{{ID: "t", Name: "Tora"}, {ID: "o", Name: "Other"}}
+	comp := func(format string, status CompetitionStatus) *Competition {
+		return &Competition{ID: "c", Kind: "team", TeamSize: 3, Format: format, Status: status}
+	}
+	decided := DrawMatch{ID: "Pool A-0", SideAID: "t", SideBID: "o"}
+	undecided := DrawMatch{ID: "r1-m0", SideAID: "t", Knockout: true, Round: 1}
+	for _, tc := range []struct {
+		name string
+		comp *Competition
+		draw []DrawMatch
+		kept bool
+	}{
+		{"nothing is drawn", comp(CompFormatLeague, CompStatusSetup), nil, true},
+		{"every match of a league has both sides, and the league is on", comp(CompFormatLeague, CompStatusPools), []DrawMatch{decided}, true},
+		{"a knockout with a side to be decided", comp(CompFormatKnockout, CompStatusKnockout), []DrawMatch{undecided}, true},
+		{"a Swiss competition between rounds", comp(CompFormatSwiss, CompStatusPools), []DrawMatch{{ID: "Swiss-R1-0", SideAID: "t", SideBID: "o"}}, true},
+		{"a competition that is drawn and not started", comp(CompFormatMixed, CompStatusDrawReady), []DrawMatch{decided}, true},
+		{"a completed league", comp(CompFormatLeague, CompStatusComplete), []DrawMatch{decided}, false},
+		{"a completed knockout, whatever is undecided", comp(CompFormatKnockout, CompStatusComplete), []DrawMatch{undecided}, false},
+		{"a completed competition with no draw", comp(CompFormatKnockout, CompStatusComplete), nil, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			res := settleRoundLineups(tc.comp, players, round1, tc.draw, false)
+
+			if tc.kept {
+				assert.Equal(t, 1, res.waiting)
+				assert.Contains(t, res.lineups, teamLineupKey("t", 1))
+			} else {
+				assert.Zero(t, res.waiting)
+				assert.NotContains(t, res.lineups, teamLineupKey("t", 1))
+			}
+		})
+	}
+}
+
+// A lineup saved under a team's name is keyed by the team's id when exactly one
+// team has that name, and waits while a team of that name has no id yet.
+func TestSettleRoundLineups_ANameAwaitsAnIdUntilEveryTeamOfThatNameHasOne(t *testing.T) {
+	comp := &Competition{ID: "c", Kind: "team", TeamSize: 3, Format: CompFormatKnockout}
+	byName := func(name string) map[string]domain.TeamLineup {
+		return map[string]domain.TeamLineup{teamLineupKey(name, 0): {TeamID: name, CompetitionID: "c", Positions: map[domain.Position]string{"1": "Sato"}}}
+	}
+	for _, tc := range []struct {
+		name    string
+		players []domain.Player
+		keyedBy string
+		waiting int
+	}{
+		{"one team, with an id", []domain.Player{{ID: "t", Name: "Tora"}}, "t", 0},
+		{"one team, with no id yet", []domain.Player{{Name: "Tora"}}, "Tora", 1},
+		{"two teams of the name, one with no id yet", []domain.Player{{ID: "t", Name: "Tora"}, {Name: "Tora"}}, "Tora", 1},
+		{"two teams of the name, both with ids", []domain.Player{{ID: "t", Name: "Tora"}, {ID: "u", Name: "Tora"}}, "Tora", 0},
+		{"no team of the name", []domain.Player{{ID: "t", Name: "Usagi"}}, "Tora", 0},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			res := settleRoundLineups(comp, tc.players, byName("Tora"), nil, true)
+
+			assert.Contains(t, res.lineups, teamLineupKey(tc.keyedBy, 0), "keyed by %q", tc.keyedBy)
+			assert.Equal(t, tc.waiting, res.waiting)
+		})
+	}
+}
+
+// Settling what it has already settled decides nothing.
+func TestSettleRoundLineups_IsIdempotent(t *testing.T) {
+	comp := &Competition{ID: "c", Kind: "team", TeamSize: 3, Format: CompFormatMixed}
+	players := []domain.Player{{ID: "t", Name: "Tora"}, {ID: "o", Name: "Other"}}
+	lineups := map[string]domain.TeamLineup{
+		teamLineupKey("t", 0): {TeamID: "t", CompetitionID: "c", Round: 0, Positions: map[domain.Position]string{"1": "Sato"}},
+		teamLineupKey("t", 1): {TeamID: "t", CompetitionID: "c", Round: 1, Positions: map[domain.Position]string{"1": "Ito"}},
+	}
+	draw := []DrawMatch{
+		{ID: "Pool A-0", SideAID: "t", SideBID: "o", PoolRound: 1},
+		{ID: "r0-m0", Knockout: true},
+	}
+
+	first := settleRoundLineups(comp, players, lineups, draw, true)
+	again := *comp
+	again.RoundLineupsGiven = first.given
+	second := settleRoundLineups(&again, players, first.lineups, draw, false)
+
+	assert.True(t, first.changed)
+	assert.True(t, first.givenGrew)
+	assert.Equal(t, map[string][]string{"t": {"Pool A-0"}}, first.given)
+	assert.Equal(t, 1, first.waiting)
+	assert.False(t, second.changed)
+	assert.False(t, second.givenGrew)
+	assert.Equal(t, first.lineups, second.lineups)
+	assert.Equal(t, first.given, second.given)
+	assert.Equal(t, 1, second.waiting)
+	assert.Empty(t, second.notes)
+}
+
+// settlementComp is a team competition of the format, in the status.
+func settlementComp(format string, status CompetitionStatus) *Competition {
+	return &Competition{ID: "c", Kind: "team", TeamSize: 3, Format: format, Status: status}
+}
+
+// round1For is the lineups of team "t" that a Lineups page saved a round 1
+// lineup in, as settleRoundLineups is given them.
+func round1For() map[string]domain.TeamLineup {
+	return map[string]domain.TeamLineup{teamLineupKey("t", 1): {TeamID: "t", CompetitionID: "c", Round: 1,
+		Positions: map[domain.Position]string{"1": "Sato"}}}
+}
+
+// A legacy team is given a lineup for the team matches it is seated in by id, and
+// for no other: a structural bye (hidden) is a match nobody plays, a pool
+// representative bout or tie-break is one individual bout, a league's
+// bracket.json is vestigial, and a match the team is not in is not its own.
+func TestSettleRoundLineups_GivesLineupsOnlyForTheMatchesATeamPlays(t *testing.T) {
+	players := []domain.Player{{ID: "t", Name: "Tora"}, {ID: "o", Name: "Other"}}
+	decided := DrawMatch{ID: "Pool A-0", SideAID: "t", SideBID: "o"}
+	for _, tc := range []struct {
+		name string
+		comp *Competition
+		draw []DrawMatch
+		// matches are the ids of the matches a lineup is given for.
+		matches []string
+	}{
+		{"the matches of a knockout", settlementComp(CompFormatKnockout, CompStatusKnockout),
+			[]DrawMatch{{ID: "r0-m0", SideAID: "t", SideBID: "o", Knockout: true}, {ID: "r1-m0", SideAID: "t", Knockout: true, Round: 1}}, []string{"r0-m0", "r1-m0"}},
+		{"a pool match whose other side has no id", settlementComp(CompFormatLeague, CompStatusPools),
+			[]DrawMatch{{ID: "Pool A-0", SideAID: "t"}}, []string{"Pool A-0"}},
+		{"a hidden bye", settlementComp(CompFormatKnockout, CompStatusKnockout),
+			[]DrawMatch{{ID: "r0-m0", SideAID: "t", Knockout: true, Hidden: true}, {ID: "r1-m0", SideAID: "t", SideBID: "o", Knockout: true, Round: 1}}, []string{"r1-m0"}},
+		{"a pool representative bout and a tie-break", settlementComp(CompFormatLeague, CompStatusPools),
+			[]DrawMatch{decided, {ID: "Pool A-DH-1", SideAID: "t", SideBID: "o"}, {ID: "Pool A-TB-1", SideAID: "t", SideBID: "o"}}, []string{"Pool A-0"}},
+		{"a league's vestigial bracket", settlementComp(CompFormatLeague, CompStatusPools),
+			[]DrawMatch{decided, {ID: "r0-m0", SideAID: "t", SideBID: "o", Knockout: true}}, []string{"Pool A-0"}},
+		{"a match the team is not in", settlementComp(CompFormatLeague, CompStatusPools),
+			[]DrawMatch{{ID: "Pool A-0", SideAID: "o", SideBID: "x"}}, nil},
+		{"the 3rd-place match", settlementComp(CompFormatKnockout, CompStatusKnockout),
+			[]DrawMatch{{ID: "r0-m0", SideAID: "t", SideBID: "o", Knockout: true}, {ID: BronzeMatchID, SideAID: "t", SideBID: "o", Knockout: true, Round: 1}}, []string{"r0-m0", BronzeMatchID}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			res := settleRoundLineups(tc.comp, players, round1For(), tc.draw, false)
+
+			var want map[string][]string
+			if len(tc.matches) > 0 {
+				want = map[string][]string{"t": slices.Sorted(slices.Values(tc.matches))}
+			}
+			assert.Equal(t, want, res.given)
+			for _, id := range tc.matches {
+				assert.Contains(t, res.lineups, teamLineupMatchKey("t", id))
+			}
+			assert.Len(t, res.lineups, 1+len(tc.matches), "the round lineup and one lineup per match")
+		})
+	}
+}
+
+// A legacy team that has no starting lineup is given, on the load pass, the
+// lineup v2.1.1 showed before any round it saved: the highest, which v2.1.1
+// fell back to. A match seated later and read at a round below the team's
+// lowest then reads that lineup, as v2.1.1 did.
+func TestSettleRoundLineups_SeedsTheStartingLineupWithWhatV211ShowedBeforeAnyRound(t *testing.T) {
+	comp := settlementComp(CompFormatMixed, CompStatusPools)
+	players := []domain.Player{{ID: "t", Name: "Tora"}}
+	for _, tc := range []struct {
+		name   string
+		rounds []int
+		onLoad bool
+		// start is the lineup the team has as its starting lineup afterwards, "" for none.
+		start string
+	}{
+		{"one later round", []int{1}, true, "round1"},
+		{"two later rounds: v2.1.1 fell back to the highest", []int{1, 2}, true, "round2"},
+		{"two later rounds, the lower above round 1", []int{2, 3}, true, "round3"},
+		{"a starting lineup of its own is kept", []int{0, 2}, true, "round0"},
+		{"a write seeds nothing", []int{1, 2}, false, ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			lineups := map[string]domain.TeamLineup{}
+			for _, r := range tc.rounds {
+				lineups[teamLineupKey("t", r)] = domain.TeamLineup{TeamID: "t", CompetitionID: "c", Round: r,
+					Positions: map[domain.Position]string{"1": fmt.Sprintf("round%d", r)}}
+			}
+
+			res := settleRoundLineups(comp, players, lineups, nil, tc.onLoad)
+
+			start, ok := res.lineups[teamLineupKey("t", 0)]
+			if tc.start == "" {
+				assert.False(t, ok)
+				return
+			}
+			assert.True(t, ok)
+			assert.Equal(t, tc.start, start.Positions["1"])
+			if slices.Contains(tc.rounds, 0) {
+				return // the team's own lineup, not a copy
+			}
+			start.Positions["1"] = "changed"
+			for _, r := range tc.rounds {
+				assert.NotEqual(t, "changed", lineups[teamLineupKey("t", r)].Positions["1"], "a seeded starting lineup carries its own copy of the maps")
+			}
+		})
+	}
+}
+
+// A pair the competition's record lists as settled is left alone, whatever the
+// lineups hold: a lineup the operator removed from a match stays removed. A
+// seated pair the record does not list is given the lineup v2.1.1 showed there
+// when the team has none, and listed either way.
+func TestSettleRoundLineups_APairAlreadyGivenIsLeftAlone(t *testing.T) {
+	comp := settlementComp(CompFormatLeague, CompStatusPools)
+	comp.RoundLineupsGiven = map[string][]string{"t": {"Pool A-0"}}
+	players := []domain.Player{{ID: "t", Name: "Tora"}, {ID: "o", Name: "Other"}}
+	lineups := round1For()
+	own := domain.TeamLineup{TeamID: "t", CompetitionID: "c", MatchID: "Pool A-2", Positions: map[domain.Position]string{"1": "Ito"}}
+	lineups[teamLineupMatchKey("t", "Pool A-2")] = own
+	draw := []DrawMatch{
+		{ID: "Pool A-0", SideAID: "t", SideBID: "o"},
+		{ID: "Pool A-1", SideAID: "t", SideBID: "o"},
+		{ID: "Pool A-2", SideAID: "t", SideBID: "o"},
+	}
+
+	res := settleRoundLineups(comp, players, lineups, draw, false)
+
+	assert.NotContains(t, res.lineups, teamLineupMatchKey("t", "Pool A-0"), "listed, and without a lineup: the operator removed it, and that stands")
+	assert.Equal(t, "Sato", res.lineups[teamLineupMatchKey("t", "Pool A-1")].Positions["1"], "not listed: given what v2.1.1 showed")
+	assert.Equal(t, own, res.lineups[teamLineupMatchKey("t", "Pool A-2")], "not listed, with a lineup of its own: that is v2.1.1's reading, and is left as it is")
+	assert.Equal(t, map[string][]string{"t": {"Pool A-0", "Pool A-1", "Pool A-2"}}, res.given, "all three are settled now")
+	assert.True(t, res.givenGrew)
+}
+
+// The record keeps each team's list sorted and without duplicates, whatever a
+// hand-edited config.md held: a list with its ids out of order or repeated is
+// read as the set it is, and a team with no ids is not kept.
+func TestSettleRoundLineups_KeepsEachTeamsListSortedWithoutDuplicates(t *testing.T) {
+	comp := settlementComp(CompFormatLeague, CompStatusPools)
+	comp.RoundLineupsGiven = map[string][]string{"t": {"Pool A-1", "Pool A-0", "Pool A-1"}, "nobody": {}}
+	players := []domain.Player{{ID: "t", Name: "Tora"}, {ID: "o", Name: "Other"}}
+	draw := []DrawMatch{
+		{ID: "Pool A-0", SideAID: "t", SideBID: "o"},
+		{ID: "Pool A-1", SideAID: "t", SideBID: "o"},
+		{ID: "Pool A-2", SideAID: "t", SideBID: "o"},
+	}
+
+	res := settleRoundLineups(comp, players, round1For(), draw, false)
+
+	assert.Equal(t, map[string][]string{"t": {"Pool A-0", "Pool A-1", "Pool A-2"}}, res.given)
+	assert.NotContains(t, res.lineups, teamLineupMatchKey("t", "Pool A-0"), "a pair listed out of order is still listed")
+	assert.NotContains(t, res.lineups, teamLineupMatchKey("t", "Pool A-1"))
+	assert.Contains(t, res.lineups, teamLineupMatchKey("t", "Pool A-2"))
+}
+
+// A copy of a competition shares no part of its record of the pairs settled: not
+// the map, and not a team's list.
+func TestCopyCompetition_DeepCopiesTheRoundLineupsGiven(t *testing.T) {
+	original := &Competition{ID: "c", RoundLineupsGiven: map[string][]string{"t": {"r0-m0", "r1-m0"}}}
+
+	cp := (&Store{}).copyCompetition(original)
+	cp.RoundLineupsGiven["t"][0] = "changed"
+	cp.RoundLineupsGiven["u"] = []string{"r0-m1"}
+
+	assert.Equal(t, map[string][]string{"t": {"r0-m0", "r1-m0"}}, original.RoundLineupsGiven)
+	assert.Nil(t, (&Store{}).copyCompetition(&Competition{ID: "c"}).RoundLineupsGiven, "no record stays none")
+}
+
+// The list of legacy teams is shared with no copy either, and an empty record
+// stays nil: a nil list is what tells the first settlement from a later one.
+func TestCopyCompetition_DeepCopiesTheRoundLineupsLegacy(t *testing.T) {
+	original := &Competition{ID: "c", RoundLineupsLegacy: []string{"t", "u"}}
+
+	cp := (&Store{}).copyCompetition(original)
+	cp.RoundLineupsLegacy[0] = "changed"
+
+	assert.Equal(t, []string{"t", "u"}, original.RoundLineupsLegacy)
+	assert.Nil(t, (&Store{}).copyCompetition(&Competition{ID: "c"}).RoundLineupsLegacy, "no record stays none")
+}
+
+// legacyReading answers what v2.1.1 showed from a team's round lineups, and says
+// when there were none: v2.1.1 showed a team with no lineup for a round nothing at
+// a match it had no lineup entered for, and an empty slice has no highest round to
+// fall back to.
+func TestLegacyReading_ATeamWithNoRoundLineupWasShownNothing(t *testing.T) {
+	for name, rounds := range map[string][]domain.TeamLineup{"nil": nil, "empty": {}} {
+		t.Run(name, func(t *testing.T) {
+			for _, round := range []int{0, 1, 5} {
+				got, shown := legacyReading(rounds, round)
+
+				assert.False(t, shown)
+				assert.Empty(t, got.Positions)
+			}
+		})
+	}
+	one := []domain.TeamLineup{{Round: 2, Positions: map[domain.Position]string{"1": "Sato"}}}
+	for _, round := range []int{0, 2, 7} {
+		got, shown := legacyReading(one, round)
+		assert.True(t, shown, "round %d", round)
+		assert.Equal(t, "Sato", got.Positions["1"])
+	}
+}
+
+// A match lineup makes a team legacy at the competition's FIRST settlement only
+// (no list recorded yet), and only for a match of the draw that seats the team by
+// id; from then on the recorded list and a lineup for a round decide.
+func TestSettleRoundLineups_AMatchLineupMakesATeamLegacyOnlyAtTheFirstSettlement(t *testing.T) {
+	players := []domain.Player{{ID: "t", Name: "Tora"}, {ID: "o", Name: "Other"}, {ID: "x", Name: "Extra"}}
+	draw := []DrawMatch{
+		{ID: "Pool A-0", SideAID: "t", SideBID: "o", PoolRound: 0},
+		{ID: "Pool A-1", SideAID: "t", SideBID: "o", PoolRound: 1},
+	}
+	entered := func(team, matchID string) map[string]domain.TeamLineup {
+		return map[string]domain.TeamLineup{teamLineupMatchKey(team, matchID): {
+			TeamID: team, CompetitionID: "c", MatchID: matchID, Positions: map[domain.Position]string{"1": "Sato"},
+		}}
+	}
+	for _, tc := range []struct {
+		name         string
+		recorded     []string
+		lineups      map[string]domain.TeamLineup
+		wantLegacy   []string
+		wantFound    bool
+		wantPinnedAt []string // the matches Tora is given an empty lineup for
+		wantWaiting  int
+	}{
+		{"first pass, a match it plays", nil, entered("t", "Pool A-0"), []string{"t"}, true, []string{"Pool A-1"}, 1},
+		{"first pass, a match it does not play", nil, entered("x", "Pool A-0"), nil, false, nil, 0},
+		{"first pass, a match the draw does not hold", nil, entered("t", "Pool Z-9"), nil, false, nil, 0},
+		{"a later pass: the list is recorded, and this team is not on it", []string{"o"}, entered("t", "Pool A-0"), nil, false, nil, 1},
+		{"a later pass: a team on the list is read from it", []string{"t"}, entered("o", "Pool A-0"), nil, false, []string{"Pool A-0", "Pool A-1"}, 1},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			comp := settlementComp(CompFormatLeague, CompStatusPools)
+			comp.RoundLineupsLegacy = tc.recorded
+
+			res := settleRoundLineups(comp, players, tc.lineups, draw, false)
+
+			assert.Equal(t, tc.wantLegacy, res.legacy)
+			assert.Equal(t, tc.wantFound, res.legacyFound)
+			var pinned []string
+			for _, m := range draw {
+				if l, ok := res.lineups[teamLineupMatchKey("t", m.ID)]; ok {
+					if _, own := tc.lineups[teamLineupMatchKey("t", m.ID)]; !own {
+						pinned = append(pinned, m.ID)
+						assert.NotNil(t, l.Positions, "an empty lineup is stored as an empty one, not a missing one")
+						assert.Empty(t, l.Positions)
+					}
+				}
+			}
+			assert.Equal(t, tc.wantPinnedAt, pinned)
+			assert.Equal(t, tc.wantWaiting, res.waiting, "a legacy team waits for the competition to be completed, so the marker stays unset")
+		})
+	}
+}
+
+// The lineups are saved before the competition's record. If saving the record
+// failed, the next pass finds each lineup it gave and only lists the pairs.
+func TestSettleRoundLineups_LineupsThatLandedBeforeTheRecordOnlyAddThePairs(t *testing.T) {
+	comp := settlementComp(CompFormatLeague, CompStatusPools)
+	players := []domain.Player{{ID: "t", Name: "Tora"}, {ID: "o", Name: "Other"}}
+	draw := []DrawMatch{
+		{ID: "Pool A-0", SideAID: "t", SideBID: "o"},
+		{ID: "Pool A-1", SideAID: "t", SideBID: "o"},
+	}
+	landed := settleRoundLineups(comp, players, round1For(), draw, false)
+	require.True(t, landed.changed)
+
+	next := settleRoundLineups(comp, players, landed.lineups, draw, false) // comp still lists nothing
+
+	assert.False(t, next.changed, "nothing to give: the lineups are there")
+	assert.True(t, next.givenGrew)
+	assert.Equal(t, landed.given, next.given)
+	assert.Equal(t, landed.lineups, next.lineups)
+}
+
+// markedTeamStore is a store holding a team competition with a pool draw whose
+// round-lineup conversion is done: it carries the marker, as every competition
+// this release creates does, so every write of its draw asks the settlement and
+// finds nothing to do.
+func markedTeamStore(t testing.TB) (*Store, string) {
+	t.Helper()
+	store, err := NewStore(t.TempDir())
+	require.NoError(t, err)
+	const compID = "marked"
+	require.NoError(t, store.SaveCompetition(&Competition{
+		ID: compID, Name: "Marked", Kind: "team", TeamSize: 3, Format: CompFormatLeague, Status: CompStatusPools,
+		Courts: []string{"A", "B"}, StartTime: "09:00", RoundLineupsConverted: true,
+	}))
+	players := make([]domain.Player, 8)
+	for i := range players {
+		players[i] = domain.Player{ID: fmt.Sprintf("00000000-0000-4000-8000-%012d", i), Name: fmt.Sprintf("Team%d", i), Dojo: fmt.Sprintf("Dojo%d", i)}
+	}
+	require.NoError(t, store.SaveParticipants(compID, players))
+	var matches []MatchResult
+	for i := 0; i < len(players); i++ {
+		for j := i + 1; j < len(players); j++ {
+			matches = append(matches, MatchResult{
+				ID:    fmt.Sprintf("Pool A-%d", len(matches)),
+				SideA: players[i].Name, SideAID: players[i].ID, SideB: players[j].Name, SideBID: players[j].ID,
+			})
+		}
+	}
+	require.NoError(t, store.SavePoolMatches(compID, matches))
+	return store, compID
+}
+
+// A write of the draw asks the settlement whether anything waits, and for a
+// competition that is marked the answer comes from the competition record the
+// store already holds: it neither reads config.md from disk nor parses it again.
+func TestSettleRoundLineupsAfterWrite_AMarkedCompetitionCostsNothing(t *testing.T) {
+	store, compID := markedTeamStore(t)
+	mu := store.getCompLock(compID)
+	mu.Lock()
+	defer mu.Unlock()
+	store.settleRoundLineupsAfterWrite(compID) // warm the competition record
+
+	allocs := testing.AllocsPerRun(50, func() { store.settleRoundLineupsAfterWrite(compID) })
+
+	t.Logf("allocations per settlement of a marked competition: %.0f", allocs)
+	assert.Less(t, allocs, 40.0, "a marked competition must not be read from disk and parsed on every write of its draw (that costs about 200)")
+}
+
+// The record the settlement answers from is the store's cached one, which is
+// checked against the file on every use: a config.md edited by hand since, to take
+// the marker off, is read again and settled, not answered from the old record.
+func TestSettleRoundLineupsAfterWrite_AHandEditedMarkerIsNotAnsweredFromTheCache(t *testing.T) {
+	store, compID := markedTeamStore(t)
+	require.NoError(t, store.SetTeamLineup(compID, domain.TeamLineup{
+		TeamID: "00000000-0000-4000-8000-000000000000", CompetitionID: compID, Round: 1,
+		Positions: map[domain.Position]string{domain.PositionNumbered(1): "tora-round1"},
+	}, 3))
+	mu := store.getCompLock(compID)
+	mu.Lock()
+	defer mu.Unlock()
+	store.settleRoundLineupsAfterWrite(compID) // the record is cached, marked
+	path := store.compPath(compID, "config.md")
+	raw, err := os.ReadFile(path) // #nosec G304 -- a path under the test store
+	require.NoError(t, err)
+	edited := strings.ReplaceAll(string(raw), "round_lineups_converted: true\n", "")
+	require.NotEqual(t, string(raw), edited, "precondition: the marker was in config.md")
+	require.NoError(t, os.WriteFile(path, []byte(edited), 0o600))
+	later := time.Now().Add(time.Hour)
+	require.NoError(t, os.Chtimes(path, later, later)) // a coarse clock cannot make the two edits look alike
+
+	store.settleRoundLineupsAfterWrite(compID)
+
+	lineups, err := store.loadTeamLineupsLocked(compID)
+	require.NoError(t, err)
+	assert.Contains(t, lineups, teamLineupMatchKey("00000000-0000-4000-8000-000000000000", "Pool A-0"),
+		"the unmarked competition was settled: its legacy team was given its lineup at a match")
+}
+
+// BenchmarkSettleRoundLineupsAfterWrite_Marked is the cost, per write of the
+// draw, of a competition that is marked.
+func BenchmarkSettleRoundLineupsAfterWrite_Marked(b *testing.B) {
+	store, compID := markedTeamStore(b)
+	mu := store.getCompLock(compID)
+	mu.Lock()
+	defer mu.Unlock()
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		store.settleRoundLineupsAfterWrite(compID)
+	}
+}
+
+// A lineup stored under the name of a player that has no id yet keeps the
+// conversion from being marked done; one under an id, a name no player has, or the
+// name of a player that has an id does not.
+func TestLineupRoster_AnyAwaitsID(t *testing.T) {
+	roster := newLineupRoster([]domain.Player{{ID: "a", Name: "Alpha"}, {Name: "Bravo"}})
+	under := func(team string) map[string]domain.TeamLineup {
+		return map[string]domain.TeamLineup{teamLineupKey(team, 0): {TeamID: team}}
+	}
+	for _, tc := range []struct {
+		name    string
+		lineups map[string]domain.TeamLineup
+		want    bool
+	}{
+		{"none", nil, false},
+		{"under a participant id", under("a"), false},
+		{"under the name of a player with an id", under("Alpha"), false},
+		{"under a name no player has", under("Nobody"), false},
+		{"under the name of a player with no id", under("Bravo"), true},
+		{"an unkeyed lineup", under(""), false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			assert.Equal(t, tc.want, roster.anyAwaitsID(tc.lineups))
+		})
+	}
+}
+
+// Only a team of the roster is waited for, each once, sorted, and a match lineup or
+// the starting lineup makes none.
+func TestTeamsWithRoundLineups(t *testing.T) {
+	roster := newLineupRoster([]domain.Player{{ID: "b", Name: "B"}, {ID: "a", Name: "A"}, {ID: "c", Name: "C"}})
+	lineups := map[string]domain.TeamLineup{
+		teamLineupKey("b", 1):               {TeamID: "b", Round: 1},
+		teamLineupKey("b", 2):               {TeamID: "b", Round: 2},
+		teamLineupKey("a", 1):               {TeamID: "a", Round: 1},
+		teamLineupKey("c", 0):               {TeamID: "c", Round: 0},
+		teamLineupMatchKey("c", "Pool A-0"): {TeamID: "c", MatchID: "Pool A-0"},
+		teamLineupKey("gone", 3):            {TeamID: "gone", Round: 3},
+	}
+
+	assert.Equal(t, []string{"a", "b"}, teamsWithRoundLineups(lineups, roster))
+	assert.Nil(t, teamsWithRoundLineups(nil, roster))
+}

@@ -12,6 +12,7 @@ import React from 'react';
 import { render, act, cleanup, fireEvent } from '@testing-library/react';
 import { describe, it, expect, vi, beforeAll, afterAll, beforeEach, afterEach } from 'vitest';
 import { installWindowStubs } from '../helpers/stub_globals.js';
+import { answered } from '../helpers/team_members.js';
 import { TAP_BOUNCE_MS } from '../../tap_guard.jsx';
 import { pointerTap, keyboardClick } from '../helpers/tap_events.js';
 
@@ -22,7 +23,6 @@ const STUBBED_GLOBALS = {
   isTextEntry: () => false,
   isInteractiveTarget: () => false,
   confirmDialog: vi.fn().mockResolvedValue(true),
-  resolveRoundIndex: () => 0,
   API: {},
   AdminLineupHelpers: { rosterFor: vi.fn().mockReturnValue([]) },
   compMatches: () => [],
@@ -53,10 +53,10 @@ beforeEach(() => {
   window.API = {
     fetchCompetitionDetails: vi.fn().mockResolvedValue({ id: 'c1', config: { format: 'mixed', players: [] } }),
     fetchSquads: vi.fn().mockResolvedValue(SQUADS),
-    fetchMatchLineup: vi.fn(async () => null),
-    fetchTeamLineup: vi.fn(async () => null),
+    fetchLineupInForce: vi.fn(async () => null),
     putMatchLineup: vi.fn(async (_c, teamId, matchId, positions, _pw, memberIds) => ({ teamId, matchId, positions, memberIds })),
-    renameTeamMember: vi.fn(async () => true),
+    // The server answers a member write with the member it holds, stamped.
+    renameTeamMember: vi.fn(async (_c, _t, id, name) => answered({ id, index: Number(id.slice(1)) }, { name })),
     addTeamMember: vi.fn(),
     recordScore: vi.fn(async () => ({ status: 'running' })),
     recordDaihyosen: vi.fn(),

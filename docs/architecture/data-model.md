@@ -110,6 +110,7 @@ classDiagram
         +string ID
         +int Index
         +string Name
+        +int64 ModifiedAt
     }
 
     class Overrides {
@@ -156,6 +157,12 @@ id, so a bout already fought names the same person whatever the name is changed 
 member stays available at any time, including after the start, because a team fields
 replacements mid tournament.
 
+Each member also records when it was last added, named, renamed or cleared (`ModifiedAt`,
+server time, 0 until the first such write). One member's stamps only grow, so a page that
+holds two copies of a member, one from a list it read and one from a write it made, keeps the
+newer one whatever order they arrived in, and a list read before a rename can never put the
+old name back.
+
 The label an organiser reads is the team's competitor number followed by the member index,
 for example `T10.1`. That label is composed when it is shown and never stored, because a
 competitor number can change and the identity underneath it cannot. It is derived the same
@@ -168,6 +175,52 @@ Members of different teams may share a name freely. The member list is not a sta
 it may hold more members than the competition's team size: the extra entries are the
 replacements an organiser can field, and the team size only fixes how many positions a
 round has.
+
+A lineup is stored for a match or as a team's starting lineup (its round-0 entry), and the
+lineup a team fields in a match is not stored: it is worked out when read, because a team
+carries the lineup of its previous match unless one is entered for the match. The lineup in
+force at a match is the match's own, else the latest one the team had before it: one saved for
+an earlier match of the team, or its starting lineup, which comes before every match.
+Matches are ordered by pool-match number first, then by knockout round and position, with the
+3rd-place match last. A lineup saved for a match counts as an earlier lineup only while that
+match is in the current draw and the team is seated in it by participant id. A team is its
+participant id and nothing else: a lineup is the team's only when it is stored under that id,
+a lineup stored under a team name is not the team's, and a side with no id has none.
+Discarding a draw removes the lineups saved for its matches, because a draw generated again
+reuses the match ids, and keeps the starting lineups. One rule in the engine owns this, and
+the kachinuki roster, the Kachinuki Detail export and the public `lineup-in-force` read all
+ask it.
+
+A lineup save names the positions it changed, and the server writes only those, under the
+competition's lock, onto the lineup stored for that match or that starting lineup, or, for a
+match with no lineup of its own yet, onto the lineup in force there. Two devices that change
+different positions of one lineup both keep their change, whichever save arrives first, a
+save sent later from a device that was offline included. Two changes to the same position
+keep the later arrival.
+
+Releases up to v2.1.1 also saved a lineup for a round, and read the lineup a team fielded at
+a match as the match's own, else the round lineup with the highest round at or below the
+match's round, else the highest round, so a lineup saved for one match applied to that match
+alone. Such lineups are converted into this form rather than read under that rule. A lineup
+stored under a team's name is stored under the team's id when exactly one team has that name.
+A legacy team is one with a lineup for round 1 or later, or one that, when the app first
+settles the competition, holds a lineup saved for a match of the current draw that seats it
+by participant id. `config.md` records that list at the first settlement
+(`round_lineups_legacy`), so a lineup saved for a match afterwards never makes a team legacy.
+A legacy team is given, at every match it is seated in by participant id, a lineup of its own
+equal to the one v2.1.1 showed there, or an empty one where v2.1.1 showed none (no round
+lineup and no lineup for that match), since carrying would show an earlier match's instead. A
+match it is seated in later is given its lineup by the write that seats it: inside that
+write's transaction when it runs in one, otherwise straight after it. `config.md` lists, under
+each team's id, the matches already given one (`round_lineups_given`), so a lineup removed
+from one of them is not given again. Discarding the draw, or generating a new one, clears that
+list, since the next draw reuses the match ids, and drops from the legacy list every team with
+no round lineup, whose converted match lineups went with the draw. A legacy team with round
+lineups and no starting lineup gets the one v2.1.1 showed before its first saved round, its
+highest round's. The round lineups stay, never read, until the competition is completed; then
+the next write of the draw, or the next start of the app, removes them and `config.md` records
+`round_lineups_converted`, which is set as soon as no legacy team waits. A new competition
+starts with it set.
 
 ## 3. The match and result model
 
@@ -416,7 +469,7 @@ classDiagram
     }
     class lineups_yaml["lineups.yaml"] {
         <<YAML>>
-        TeamLineup by round or match
+        TeamLineup per match, or the starting one
         position to name and member id
         a position may hold an id and an empty name
     }

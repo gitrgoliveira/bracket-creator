@@ -513,6 +513,60 @@ type Competition struct {
 	// record, so nothing a client sends can clear it.
 	KachinukiEncounterEnchoCleared bool `yaml:"kachinuki_encounter_encho_cleared,omitempty" json:"-"`
 
+	// RoundLineupsConverted records that no lineup of this competition waits
+	// on a round: releases up to v2.1.1 let the Lineups page save a lineup for
+	// round r, and a team now carries the lineup of its previous match
+	// instead, so a team with such a lineup is given a lineup of its own for
+	// every match it is seated in, equal to what v2.1.1 showed there
+	// (settleRoundLineups, round_lineups.go). The load repair and the writes
+	// that seat a team in the draw run only while it is false, and set it as
+	// soon as nothing waits: at once for a competition with no team that has
+	// such a lineup, and for one that has, when the competition is completed
+	// (the round lineups are removed then);
+	// POST /competitions sets it on a new competition, which has nothing to
+	// convert and no writer left that creates a round lineup. Server-managed:
+	// `json:"-"` keeps it off the wire, and the settings PUT copies onto the
+	// stored record, so nothing a client sends can clear it.
+	RoundLineupsConverted bool `yaml:"round_lineups_converted,omitempty" json:"-"`
+
+	// RoundLineupsGiven records which (team, match) pairs that conversion has
+	// settled, while RoundLineupsConverted is false: it maps a team's
+	// participant id to the ids of the matches settled for it, each list sorted
+	// and without duplicates, so config.md (which people read and edit) shows
+	//
+	//	round_lineups_given:
+	//	    <team id>:
+	//	        - r0-m0
+	//	        - r1-m0
+	//
+	// A pair listed here is never given a lineup again, whatever lineups.yaml
+	// holds, so a lineup the operator removes from a match ("Use the previous
+	// match's lineup") stays removed; a pair seated and not listed is given the
+	// lineup v2.1.1 showed there when it has none, and listed either way. The
+	// conversion clears it when it sets the marker, and DiscardDraw clears it,
+	// because the next draw reuses the match ids and is given its lineups
+	// again. Server-managed like the marker: `json:"-"` keeps it off the wire,
+	// and the settings PUT copies onto the stored record, so nothing a client
+	// sends can change it.
+	RoundLineupsGiven map[string][]string `yaml:"round_lineups_given,omitempty" json:"-"`
+
+	// RoundLineupsLegacy records, while RoundLineupsConverted is false, the teams
+	// the conversion's FIRST settlement of this competition found to be legacy:
+	// the participant ids, sorted, of every team with a lineup for a round r >= 1
+	// or with a match lineup, stored under its id, for a match of the draw that
+	// seats it (v2.1.1 read a match's own lineup and never carried it to another
+	// match, so such a team is shown, at its other matches, what v2.1.1 showed
+	// and not what a team now carries). Later settlements read the list, plus any
+	// team with a lineup for a later round, so a match lineup saved by this
+	// release never makes a team legacy. It is also how a later settlement tells
+	// the first one is done: after it a competition is either marked or has a
+	// legacy team to wait for, so the list is not empty. The conversion clears it
+	// with the marker, and ClearDrawLineups drops from it every team with no lineup
+	// for a later round, whose match lineups went with the draw. Server-managed
+	// like the marker: `json:"-"` keeps it off the wire, and the settings PUT
+	// copies onto the stored record, so nothing a client sends can change it.
+	RoundLineupsLegacy []string `yaml:"round_lineups_legacy,omitempty" json:"-"`
+
 	Players []domain.Player `yaml:"-" json:"players"`
 }
 
@@ -565,6 +619,16 @@ func (c Competition) EffectiveFormat() string {
 		return CompFormatKnockout
 	}
 	return c.Format
+}
+
+// IsTeam reports whether c is a team competition: its Kind is "team" or its
+// TeamSize is positive. The single spelling of this predicate: it was written
+// out at a dozen call sites, since the engine identifies a team competition by
+// Kind in some paths and by TeamSize in others (ValidateCompetitionTeamSize
+// keeps the two in step for a competition that was created or edited through
+// the API, so for one the two readings agree).
+func (c *Competition) IsTeam() bool {
+	return c != nil && (c.Kind == "team" || c.TeamSize > 0)
 }
 
 // IsKachinuki reports whether c is a kachinuki (winner-stays-on) team

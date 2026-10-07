@@ -16,6 +16,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { makeReactive } from './helpers/reactive_react.js';
 import { collectText } from './helpers/vdom.js';
+import { answered } from './helpers/team_members.js';
 
 const realReact = global.React;
 
@@ -74,8 +75,9 @@ describe('AdminLineup form (competition-admin Lineups, bc-tmid pass 3)', () => {
       fetchTeamLineup: vi.fn().mockResolvedValue(null), // nothing saved -> fresh form
       fetchSquads: vi.fn().mockResolvedValue({}),
       addTeamMember: vi.fn(),
-      renameTeamMember: vi.fn().mockResolvedValue(true),
-      clearTeamMember: vi.fn().mockResolvedValue(true),
+      // The server answers a member write with the member it holds, stamped.
+      renameTeamMember: vi.fn(async (_c, _t, id, name) => answered({ id, index: 1 }, { name })),
+      clearTeamMember: vi.fn(async (_c, _t, id) => answered({ id, index: 1 }, { name: '' })),
       putTeamLineup: vi.fn().mockResolvedValue({}),
     };
     // bc-pnum: commitAdd (operation 2) now confirms before minting. Default
@@ -107,7 +109,7 @@ describe('AdminLineup form (competition-admin Lineups, bc-tmid pass 3)', () => {
       global.window.API.fetchSquads.mockResolvedValue(opts.squads);
     }
     runtime.mount(AdminLineup, {
-      comp: opts.comp || COMP, team, round: 0, password: 'pw', showToast: vi.fn(), onClose: vi.fn(),
+      comp: opts.comp || COMP, team, password: 'pw', showToast: vi.fn(), onClose: vi.fn(),
     });
     await flush();
     return runtime.currentTree();
@@ -322,6 +324,9 @@ describe('AdminLineup form (competition-admin Lineups, bc-tmid pass 3)', () => {
     await flush();
 
     expect(global.window.API.renameTeamMember).toHaveBeenCalledWith('comp-1', 'team-1', 'sq-sato', 'Sato-Renamed', 'pw');
+    // The member the server answered is what the page shows: the members are not read
+    // again after the write (the server announces it to every device instead).
+    expect(global.window.API.fetchSquads).toHaveBeenCalledTimes(1);
 
     const tree3 = runtime.currentTree();
     // The position's select value (the id) is unchanged...
@@ -335,6 +340,22 @@ describe('AdminLineup form (competition-admin Lineups, bc-tmid pass 3)', () => {
     // Save persists the NEW name against the SAME (unchanged) id.
     expect(call[3]['1']).toBe('Sato-Renamed');
     expect(call[5]['1']).toBe('sq-sato');
+  });
+
+  // A member no one has named yet is named by its slot in the rename box's label, as
+  // everywhere else on this page (squadSlotLabel): built from the name alone, the
+  // label read "Rename " and told a screen reader nothing about which member it was.
+  it('labels the rename box of a member with no name by its slot', async () => {
+    const tree = await mountFor({ id: 'team-1', name: 'Tora A', number: 'T10' }, {
+      squads: { 'team-1': [{ id: 'sq-sato', index: 1, name: 'Sato' }, { id: 'sq-blank', index: 2, name: '' }] },
+    });
+    buttonNamed(squadRow(tree, 'sq-blank'), 'Rename').props.onClick();
+    const blankField = findHosts(squadRow(runtime.currentTree(), 'sq-blank'), 'input')[0];
+    expect(blankField.props['aria-label']).toBe('Rename T10.2');
+    buttonNamed(squadRow(runtime.currentTree(), 'sq-blank'), 'Cancel').props.onClick();
+    buttonNamed(squadRow(runtime.currentTree(), 'sq-sato'), 'Rename').props.onClick();
+    const namedField = findHosts(squadRow(runtime.currentTree(), 'sq-sato'), 'input')[0];
+    expect(namedField.props['aria-label'], 'a named member keeps its name').toBe('Rename Sato');
   });
 
   it('there is no member-removal control anywhere in the form', async () => {
@@ -375,6 +396,7 @@ describe('AdminLineup form (competition-admin Lineups, bc-tmid pass 3)', () => {
       await flush();
 
       expect(global.window.API.clearTeamMember).toHaveBeenCalledWith('comp-1', 'team-1', 'sq-sato', 'pw');
+      expect(global.window.API.fetchSquads, 'the members are not read again after the write').toHaveBeenCalledTimes(1);
 
       const tree3 = runtime.currentTree();
       expect(collectText(squadRow(tree3, 'sq-sato'))).not.toContain('Sato');
@@ -454,18 +476,29 @@ describe('AdminLineup form (competition-admin Lineups, bc-tmid pass 3)', () => {
     await flush();
 
     const call = global.window.API.putTeamLineup.mock.calls.at(-1);
-    // putTeamLineup(compId, teamId, round, positionsOut, password, memberIdsOut)
+    // putTeamLineup(compId, teamId, round, positions, password, memberIds, changed):
+    // the changed position alone, a picked member that has no name yet with its id.
     expect(call[3]).toEqual({ '2': '' });
     expect(call[5]).toEqual({ '2': 'sq-blank-2' });
+    expect(call[6]).toEqual(['2']);
   });
 
+  // A starting lineup is saved only once it differs from what was read (like a
+  // match's), so these two start from a lineup stored by name alone, before
+  // members had ids, and empty one position.
+  const NAMES_ONLY = { teamId: 'team-1', round: 0, positions: { 1: 'Sato', 2: 'Ito' }, saved: true };
+
   it('Save omits memberIds entirely when no position resolved to a squad member', async () => {
-    const tree = await mountFor({ id: 'team-1', name: 'Tora A', number: 'T10' }, { squads: {} });
-    mainSaveButton(tree).props.onClick();
+    const tree = await mountFor({ id: 'team-1', name: 'Tora A', number: 'T10' }, { squads: {}, lineup: NAMES_ONLY });
+    positionSelect(tree, '2').props.onChange({ target: { value: '' } });
+    mainSaveButton(runtime.currentTree()).props.onClick();
     await flush();
     const call = global.window.API.putTeamLineup.mock.calls.at(-1);
-    // putTeamLineup(compId, teamId, round, positionsOut, password, memberIdsOut)
+    // putTeamLineup(compId, teamId, round, positions, password, memberIds, changed):
+    // the cleared position goes as its empty name, which the server needs to be there.
+    expect(call[3]).toEqual({ 2: '' });
     expect(call[5]).toBeUndefined();
+    expect(call[6]).toEqual(['2']);
   });
 
   // bc-cse gap closure: make a silent failure visible, without ever blocking.
@@ -474,9 +507,10 @@ describe('AdminLineup form (competition-admin Lineups, bc-tmid pass 3)', () => {
 
   it('shows the squad-unavailable warning after a save that still succeeded, when the squad failed to load', async () => {
     global.window.API.fetchSquads.mockRejectedValue(new Error('network error'));
-    const tree = await mountFor({ id: 'team-1', name: 'Tora A', number: 'T10' });
+    const tree = await mountFor({ id: 'team-1', name: 'Tora A', number: 'T10' }, { lineup: NAMES_ONLY });
 
-    mainSaveButton(tree).props.onClick();
+    positionSelect(tree, '2').props.onChange({ target: { value: '' } });
+    mainSaveButton(runtime.currentTree()).props.onClick();
     await flush();
 
     const tree2 = runtime.currentTree();
@@ -553,7 +587,7 @@ describe('AdminLineup form (competition-admin Lineups, bc-tmid pass 3)', () => {
     expect(global.window.API.renameTeamMember).not.toHaveBeenCalled();
 
     const tree3 = runtime.currentTree();
-    expect(collectText(tree3)).toContain('is already at');
+    expect(collectText(tree3)).toContain('Yamada is already at Position 2.');
     // Position 1 was never assigned Yamada's id: the refusal returns before
     // selectMember runs, so its add-row stays open rather than switching
     // back to a select showing a (wrongly) resolved value.

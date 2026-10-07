@@ -173,7 +173,10 @@ import (
 //   - a team's lineups.yaml positions (occupied Positions entries with no
 //     MemberIDs counterpart) convert ON READ, below (bc-tmid pass 2),
 //     AFTER the team-members.yaml migration above so a team migrated in the SAME
-//     pass is still resolvable. Unlike every upgrade above this one is not
+//     pass is still resolvable, and AFTER the round-lineup step in the next
+//     bullet, which keys a lineup saved under a team's NAME by the team's id
+//     and copies it, so the repair reaches every lineup that step moved or
+//     gave. Unlike every upgrade above this one is not
 //     resolving against the roster at all, but against the TEAM'S OWN
 //     squad (team-members.yaml), and needs none of the NameCount-gated
 //     uniqueness dance those upgrades carry: two members of ONE team
@@ -183,6 +186,24 @@ import (
 //     member -- a genuinely unresolvable row, or a team with no squad
 //     recorded at all -- is left alone; every id-aware reader falls back
 //     to the name for exactly that slot.
+//
+//   - a team's lineups.yaml round lineups (round >= 1, saved by the Lineups
+//     page of releases up to v2.1.1) convert ON READ, below, AFTER the id
+//     repairs above (round_lineups.go owns the rule and the frame each kind of
+//     match was read at). A team now carries the lineup of its previous match,
+//     so a team with a round lineup is given, for every match it is seated in,
+//     a lineup of its own equal to what v2.1.1 showed there; a lineup saved
+//     under a team's NAME is keyed by the team's id; a team with no starting
+//     lineup gets what v2.1.1 showed before any round it saved (the highest)
+//     as one. The round lineups stay until the competition is completed, and
+//     a team seated in a match later (a correction can do it) is given its
+//     lineup in the write that seats it (Store.settleRoundLineupsAfterWrite,
+//     storeTx.settleRoundLineupsAtCommit, the one place the draw's writers
+//     share). Competition.RoundLineupsGiven records which (team, match) pairs
+//     were settled, so a lineup the operator removes stays removed. Keyed on
+//     Competition.RoundLineupsConverted, set as soon as nothing waits: at
+//     once for a competition with no team that has a round lineup, else when
+//     the competition is completed.
 //
 //   - pool-matches.csv / bracket.json SUB-BOUT rows (SubMatchResult's
 //     SideAMemberID/SideBMemberID/WinnerMemberID) convert in the SAME pass
@@ -242,20 +263,24 @@ import (
 // NEXT read after that save retries the repair with a roster that can now
 // resolve it, without requiring a restart.
 //
-// ONLY the five PUBLIC, caller-does-not-already-hold-the-lock entry points on
-// the READ path (loadParticipants, Store.LoadPools, Store.LoadPoolMatches,
-// Store.LoadBracket, and ParticipantsFingerprint below, which calls it
-// directly rather than through one of the other four), PLUS ONE caller on the
-// startup path (sweepLegacyUpgrades below, called once from NewStore, which
-// loops every id ListCompetitions finds so the whole data folder converges
-// without waiting for each competition's files to be individually read) call
-// this. All six are safe for the identical reason: none of them already hold
-// compID's per-comp lock at the point they call in. The *Locked siblings
-// (loadPoolsLocked, LoadPoolMatchesLocked, loadBracketLocked) and every
-// storeTx method (including storeTx.LoadBracket) are called by something
-// that ALREADY holds the per-comp lock (typically WithTransaction), so
-// calling this from any of them would try to re-acquire a non-reentrant
-// mutex and deadlock. Do not add a call here from inside that set.
+// Every caller reaches this WITHOUT compID's per-comp lock held, which is the
+// one thing that makes the call safe. The callers are of three kinds: the
+// store's own read path (loadParticipants, Store.LoadPools,
+// Store.LoadPoolMatches, Store.LoadBracket, Store.DrawMatches
+// (draw_matches.go), and ParticipantsFingerprint below, which calls it directly
+// rather than through one of the loaders); the startup path (sweepLegacyUpgrades
+// below, called once from NewStore, which loops every id ListCompetitions finds
+// so the whole data folder converges without waiting for each competition's
+// files to be individually read); and the engine's read-modify-writes of the
+// pool matches (internal/engine), which read through a transaction handle, and
+// a transaction read skips this conversion, so each asks for it first, before it
+// opens the transaction and from code no store closure encloses. The *Locked
+// siblings (loadPoolsLocked, LoadPoolMatchesLocked, loadBracketLocked) and every
+// storeTx method (including storeTx.LoadBracket) are called by something that
+// ALREADY holds the per-comp lock (typically WithTransaction), so calling this
+// from any of them, or from inside any closure the store runs under that lock
+// (WithTransaction, the Update* methods), would try to re-acquire a
+// non-reentrant mutex and deadlock. Do not add a call here from inside that set.
 //
 // Failure policy: a failed conversion is logged and NOT retried until the
 // next process start OR the next participants.csv write, whichever comes
@@ -344,6 +369,16 @@ func (s *Store) EnsureLegacyUpgraded(compID string) {
 	if err := s.upgradeBracketLocked(compID, roster); err != nil {
 		log.Printf("state: legacy bracket upgrade for %s: %v", compID, err)
 	}
+	// After the three id repairs above: a round lineup moves only onto a match
+	// its team is seated in by id.
+	if err := s.upgradeRoundLineupsLocked(compID, roster); err != nil {
+		log.Printf("state: legacy round-lineup upgrade for %s: %v", compID, err)
+	}
+	// After the round-lineup step, not before it: the repair resolves a position
+	// against the squad of the team a lineup is stored under, and a lineup stored
+	// under a team's NAME has none until that step has keyed it by the team's id.
+	// Run here it also reaches the starting lineup that step seeds and the lineup
+	// it gives each match, so none of them is left without its member ids.
 	if err := s.upgradeLineupMemberIDsLocked(compID, roster); err != nil {
 		log.Printf("state: legacy lineup-member-id upgrade for %s: %v", compID, err)
 	}
@@ -2104,9 +2139,12 @@ func (s *Store) upgradeLineupMemberIDsLocked(compID string, roster *legacyUpgrad
 		//
 		// Sorted, because which of the two positions keeps the id must not
 		// depend on Go's randomised map order: the same file would otherwise
-		// repair differently on two loads.
+		// repair differently on two loads. In the order a lineup is fielded
+		// (domain.ComparePositions), so the position the roster fields first keeps
+		// it: for the named positions senpo, not chuken, which a text order put
+		// first.
 		used := make(map[string]struct{}, len(l.MemberIDs))
-		for _, pos := range slices.Sorted(maps.Keys(l.MemberIDs)) {
+		for _, pos := range slices.SortedFunc(maps.Keys(l.MemberIDs), domain.ComparePositions) {
 			id := l.MemberIDs[pos]
 			if id == "" {
 				continue
@@ -2119,7 +2157,7 @@ func (s *Store) upgradeLineupMemberIDsLocked(compID string, roster *legacyUpgrad
 			}
 			used[id] = struct{}{}
 		}
-		for _, pos := range slices.Sorted(maps.Keys(l.Positions)) {
+		for _, pos := range slices.SortedFunc(maps.Keys(l.Positions), domain.ComparePositions) {
 			name := l.Positions[pos]
 			if name == "" || l.MemberIDs[pos] != "" {
 				continue
@@ -2147,6 +2185,32 @@ func (s *Store) upgradeLineupMemberIDsLocked(compID string, roster *legacyUpgrad
 		return nil
 	}
 	return s.saveTeamLineupsLocked(compID, lineups, s.directWrite)
+}
+
+// upgradeRoundLineupsLocked is the load repair for the round lineups releases up
+// to v2.1.1 saved (round_lineups.go owns the rule): the first settlement of a
+// competition that has not been settled, over what its files hold now. Runs
+// after the side-id repairs (a lineup is given only for a match its team is
+// seated in by id) and before the lineup member-id repair, which then gives the
+// lineups this step keys by id, seeds and gives to matches their member ids.
+// Caller holds the per-comp lock.
+func (s *Store) upgradeRoundLineupsLocked(compID string, roster *legacyUpgradeRoster) error {
+	st := s.directRoundLineupStage(compID)
+	st.comp = roster.competition
+	st.players = func(*Competition) ([]domain.Player, error) { return roster.rosterPlayers() }
+	saved, err := st.settle(true)
+	if saved != nil {
+		// The roster's copy of the record is the one the steps after this one
+		// save from, so it has to carry what the settlement saved (the marker,
+		// the pairs it settled, or the legacy teams it found) or they would
+		// write it away.
+		if comp, cerr := roster.competition(); cerr == nil && comp != nil {
+			comp.RoundLineupsConverted = saved.RoundLineupsConverted
+			comp.RoundLineupsGiven = cloneRoundLineupsGiven(saved.RoundLineupsGiven)
+			comp.RoundLineupsLegacy = slices.Clone(saved.RoundLineupsLegacy)
+		}
+	}
+	return err
 }
 
 // upgradeTeamMembersFilenameLocked moves a competition recorded by v2.0.0 from

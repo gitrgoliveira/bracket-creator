@@ -100,7 +100,7 @@ describe('ViewerCompetition: a match opened from a tab follows the live data (bc
     let view;
     await act(async () => { view = render(page()); });
     await openEditorOn(view, 'k1');
-    expect(probe.props.match).toMatchObject({ id: 'k1', modifiedAt: 100, phase: 'bracket', round: 'Final', roundIndex: 0, compId: 'c1', compName: 'Open' });
+    expect(probe.props.match).toMatchObject({ id: 'k1', modifiedAt: 100, phase: 'bracket', round: 'Final', compId: 'c1', compName: 'Open' });
 
     // A point recorded on another device reaches the page as a new row.
     await act(async () => {

@@ -572,13 +572,14 @@ func (e *Engine) advanceKachinukiOnce(compID, matchID string) (bool, *KachinukiA
 	// advancement runs in both (bracket bouts append via
 	// appendNextKachinukiBout, with propagateBracketWinner on
 	// exhaustion).
-	parent, isBracket, roundIdx, err := e.findTeamMatch(compID, matchID)
+	located, err := e.findTeamMatch(compID, matchID)
 	if err != nil {
 		return false, nil, err
 	}
-	if parent == nil || len(parent.SubResults) == 0 {
+	if located == nil || len(located.Result.SubResults) == 0 {
 		return false, nil, nil
 	}
+	parent, isBracket := located.Result, located.IsBracket
 	// A completed match is final: corrections re-submit the bout log of a
 	// finished match and must never re-run advancement (which would append
 	// a phantom next bout onto the completed result). Defense in depth on
@@ -629,7 +630,8 @@ func (e *Engine) advanceKachinukiOnce(compID, matchID string) (bool, *KachinukiA
 	// retirements (A2, GAP 1 / GAP 2a). Without a lineup the function
 	// degrades to the bout-log-only heuristic so existing competitions
 	// without lineups continue to work.
-	remainingA, remainingB, rosterAvailable := e.kachinukiRemainingRoster(compID, matchID, comp, parent, roundIdx)
+	rule := e.lineupRuleOrNone("engine.MaybeAdvanceKachinuki", compID, comp.IsKnockoutEnabled(), located.PoolMatches, located.Bracket)
+	remainingA, remainingB, rosterAvailable := kachinukiRemainingRoster(comp, parent, rule)
 
 	out := AdvanceKachinuki(AdvanceKachinukiInput{
 		LastBout: last,
@@ -1599,9 +1601,12 @@ type matchHome struct {
 
 // findMatchHome walks the three homes a match ID can have — pool matches, then
 // bracket rounds, then the bronze (3rd-place) match — in that FIXED order, and
-// invokes visit for the owning home. It is the MUTATING, in-transaction walk,
-// and the engine's only copy of it, so a new caller cannot drop the bronze
-// branch by hand-copying the ~60-line skeleton (mp-gmcg review F6).
+// invokes visit for the owning home. It is the engine's only copy of that walk,
+// so a new caller cannot drop the bronze branch by hand-copying the ~60-line
+// skeleton (mp-gmcg review F6). The visitor may mutate the home and persist it
+// through h.Save, as the reopen and bout-removal paths do inside a transaction,
+// or only read it, as findTeamMatch does over the bare store: nothing is saved
+// unless the visitor asks.
 // found=false with a nil error means the ID is in neither store. A LOAD error
 // from either store is returned as it is, never read as "not in this store": a
 // missing file already loads as empty, so an error is a file that exists and
@@ -2515,48 +2520,43 @@ func preserveKachinukiMemberIDs(storedByPos map[int]state.SubMatchResult, in *st
 	}
 }
 
-// findTeamMatch locates a match by ID, returning the parent record (a
-// copy), a flag indicating whether it was found in the bracket store
-// rather than the pool store, and the bracket round index (0 for pool
-// matches, rIdx for bracket matches, len(Rounds) for the ThirdPlaceMatch
-// so round-scoped lineup resolution prefers the bronze's own stage,
-// matching the client's derivedBracket.rounds.length).
-func (e *Engine) findTeamMatch(compID, matchID string) (*state.MatchResult, bool, int, error) {
-	// A load error is returned, never read as "no such match" (see
-	// findMatchHome): a nil parent is reserved for an id in neither store.
-	poolMatches, err := e.store.LoadPoolMatches(compID)
+// teamMatch is a team match located by findTeamMatch, with the draw it was found
+// in.
+type teamMatch struct {
+	// Result is the match as a pool-shaped record (a copy): a bracket match is
+	// projected through bracketMatchToTeamResult.
+	Result    *state.MatchResult
+	IsBracket bool
+	// PoolMatches and Bracket are what findMatchHome loaded to find the match,
+	// so the lineup rule is built from them rather than from a second read of
+	// the draw. Bracket is nil for a pool match, which the walk finds before it
+	// reads the bracket: no knockout match is ever before a pool match in match
+	// order, so the rule answers the same without it.
+	PoolMatches []state.MatchResult
+	Bracket     *state.Bracket
+}
+
+// findTeamMatch locates a match by ID through findMatchHome, in the pool store,
+// then the bracket rounds, then the 3rd-place match. It returns nil when the
+// ID is in neither.
+func (e *Engine) findTeamMatch(compID, matchID string) (*teamMatch, error) {
+	var found *teamMatch
+	// A load error comes back from findMatchHome, never read as "no such match":
+	// a nil result is reserved for an id in neither store.
+	_, err := findMatchHome(e.store, compID, matchID, func(h matchHome) error {
+		found = &teamMatch{PoolMatches: h.PoolMatches, Bracket: h.BracketRoot}
+		if h.Pool != nil {
+			m := *h.Pool
+			found.Result = &m
+			return nil
+		}
+		found.Result, found.IsBracket = bracketMatchToTeamResult(*h.Bracket), true
+		return nil
+	})
 	if err != nil {
-		return nil, false, 0, err
+		return nil, err
 	}
-	for i := range poolMatches {
-		if poolMatches[i].ID == matchID {
-			m := poolMatches[i]
-			return &m, false, 0, nil
-		}
-	}
-	bracket, err := e.store.LoadBracket(compID)
-	if err != nil {
-		return nil, false, 0, err
-	}
-	if bracket != nil {
-		for rIdx, round := range bracket.Rounds {
-			for _, bm := range round {
-				if bm.ID == matchID {
-					return bracketMatchToTeamResult(bm), true, rIdx, nil
-				}
-			}
-		}
-		// The single-3rd-place (bronze) match is a sibling of
-		// bracket.Rounds, not an element of it; look it up here. Its
-		// effective round index is len(Rounds) (one past the final round),
-		// mirroring the client's derivedBracket.rounds.length so a
-		// round-scoped lineup saved for the bronze stage resolves ahead of
-		// an earlier round's lineup.
-		if bm := bracket.ThirdPlaceMatch; bm != nil && bm.ID == matchID {
-			return bracketMatchToTeamResult(*bm), true, len(bracket.Rounds), nil
-		}
-	}
-	return nil, false, 0, nil
+	return found, nil
 }
 
 // bracketMatchToTeamResult projects a BracketMatch into the *MatchResult shape
@@ -2614,11 +2614,12 @@ func bracketMatchToTeamResult(bm state.BracketMatch) *state.MatchResult {
 // is true when at least one side's roster was resolved from a saved TeamLineup;
 // false means both sides fell back to the bout-log-only heuristic.
 //
-// Priority per side (AMENDMENT 1 / GAP 1 / GAP 2a):
-//  1. Match-scoped lineup for this matchID.
-//  2. Round-scoped lineup: highest round <= roundIdx.
-//  3. Round-scoped lineup: highest round overall (fallback).
-//  4. Bout-log-only heuristic (anyone who appeared in a bout, minus retired).
+// Priority per side (GAP 1 / GAP 2a):
+//  1. The lineup in force for the side's team at this match (see
+//     lineup_in_force.go: the match's own lineup, else the one the team
+//     carries from its previous match or round), matched by the side's
+//     participant id; a side with no id has none.
+//  2. Bout-log-only heuristic (anyone who appeared in a bout, minus retired).
 //
 // The full ordered roster (from lineup.OrderedMembers, bc-tmid pass 2) is
 // filtered by IsMemberRetired against RetiredPlayersFromBoutLog's sets to
@@ -2628,15 +2629,15 @@ func bracketMatchToTeamResult(bm state.BracketMatch) *state.MatchResult {
 // retiring bout row carried no id to match against and the name belongs to
 // one member of this roster alone. See IsMemberRetired for why both tiers
 // are needed and what the gate protects.
-func (e *Engine) kachinukiRemainingRoster(compID, matchID string, comp *state.Competition, parent *state.MatchResult, roundIdx int) ([]kachinukiFighter, []kachinukiFighter, bool) {
+func kachinukiRemainingRoster(comp *state.Competition, parent *state.MatchResult, rule *lineupRule) ([]kachinukiFighter, []kachinukiFighter, bool) {
 	retiredA, retiredB := RetiredPlayersFromBoutLog(parent.SubResults, parent.SideA, parent.SideB)
 
-	// Attempt lineup-based roster resolution.
-	lineupFor := e.lineupInForce(compID, matchID, comp, roundIdx)
-
-	resolveRoster := func(teamName string, retired RetiredMemberSet) ([]kachinukiFighter, bool) {
-		if lineup, found := lineupFor(teamName); found {
-			full := lineup.OrderedMembers(comp.TeamSize)
+	// resolveRoster builds one side's remaining roster. teamID is the side's
+	// participant id, which is what its lineup is matched by; sideA says which
+	// column of the bout log the side is, so nothing here compares team names.
+	resolveRoster := func(teamID string, sideA bool, retired RetiredMemberSet) ([]kachinukiFighter, bool) {
+		if in := rule.inForce(teamID, parent.ID); in.Found {
+			full := in.Lineup.OrderedMembers(comp.TeamSize)
 			fighters := make([]kachinukiFighter, len(full))
 			for i, slot := range full {
 				fighters[i] = kachinukiFighter{Name: slot.Name, MemberID: slot.MemberID}
@@ -2654,13 +2655,12 @@ func (e *Engine) kachinukiRemainingRoster(compID, matchID string, comp *state.Co
 		// each by the same id-then-name order the lineup branch uses.
 		seen := map[string]struct{}{}
 		out := make([]kachinukiFighter, 0)
-		isA := teamName == parent.SideA
 		for _, b := range parent.SubResults {
 			if b.Position == state.DaihyosenSubPosition {
 				continue // rep bout, not a roster player (see RetiredPlayersFromBoutLog)
 			}
 			f := kachinukiFighter{Name: b.SideB, MemberID: b.SideBMemberID}
-			if isA {
+			if sideA {
 				f = kachinukiFighter{Name: b.SideA, MemberID: b.SideAMemberID}
 			}
 			key := f.MemberID
@@ -2687,57 +2687,7 @@ func (e *Engine) kachinukiRemainingRoster(compID, matchID string, comp *state.Co
 		return filterRemainingFighters(out, retired), false
 	}
 
-	remainingA, foundA := resolveRoster(parent.SideA, retiredA)
-	remainingB, foundB := resolveRoster(parent.SideB, retiredB)
+	remainingA, foundA := resolveRoster(parent.SideAID, true, retiredA)
+	remainingB, foundB := resolveRoster(parent.SideBID, false, retiredB)
 	return remainingA, remainingB, foundA || foundB
-}
-
-// lineupInForce loads a competition's saved lineups once and returns the
-// resolver for "which lineup is in force for this side of matchID": a
-// match-scoped lineup first, else the round-scoped one for roundIdx, per
-// state.FindBestLineupAny's tiers. The resolver answers false when the side
-// has no saved lineup, including when the lineups could not be loaded (the
-// error is logged).
-func (e *Engine) lineupInForce(compID, matchID string, comp *state.Competition, roundIdx int) func(teamName string) (domain.TeamLineup, bool) {
-	lineups, err := e.store.LoadTeamLineups(compID)
-	if err != nil {
-		log.Printf("engine.lineupInForce compId=%s matchId=%s: lineup load error: %v; resolving no lineup", compID, matchID, err)
-		lineups = nil
-	}
-
-	// The lineup editor keys lineups by the team PARTICIPANT ID
-	// (player.id, a UUID) while match sides carry the team display NAME,
-	// so translate each side name to its participant ID and try both keys
-	// ("match on id OR name"). A participant load failure only degrades
-	// the lookup to name-only.
-	var participants []domain.Player
-	if len(lineups) > 0 {
-		participants, err = e.store.LoadParticipants(compID, comp.EffectiveWithZekkenName())
-		if err != nil {
-			log.Printf("engine.lineupInForce compId=%s matchId=%s: participant load error: %v; lineup lookup degrades to name-only", compID, matchID, err)
-			participants = nil
-		}
-	}
-	teamKeys := func(teamName string) []string {
-		// Participant ID FIRST, then the display name. The lineup editor's
-		// current storage key is the participant ID, so an id-keyed lineup
-		// must win a same-round tie over a legacy name-keyed one:
-		// FindBestLineupAny resolves same-tier ties by slice order. The name
-		// stays as a fallback for lineups saved under it (older data, or a
-		// team name that is not a participant id). Mirrors the id-first order
-		// in kachinuki_export.go's teamKeys.
-		var keys []string
-		for _, p := range participants {
-			if p.Name == teamName && p.ID != "" && p.ID != teamName {
-				keys = append(keys, p.ID)
-			}
-		}
-		return append(keys, teamName)
-	}
-	return func(teamName string) (domain.TeamLineup, bool) {
-		if lineups == nil {
-			return domain.TeamLineup{}, false
-		}
-		return state.FindBestLineupAny(lineups, teamKeys(teamName), matchID, roundIdx)
-	}
 }

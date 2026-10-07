@@ -20,6 +20,7 @@ info:
     - **`GET /api/competitions/{id}/competitor-status`**: public read; the `POST` write is protected.
     - **`GET /api/competitions/{id}/teams/{tid}/lineups/{round}`**: public read; `PUT`/`DELETE` are protected.
     - **`GET /api/competitions/{id}/teams/{tid}/match-lineups/{matchId}`**: public read; `PUT`/`DELETE` are protected (in self-run mode the `PUT` is open, see below).
+    - **`GET /api/competitions/{id}/teams/{tid}/lineup-in-force/{matchId}`**: public read; the lineup a team fields at a match.
     - **`GET /api/competitions/{id}/swiss/standings`**: public read; always public.
     - **`GET /api/tournament/announcement`**: public read; returns the currently active admin broadcast announcement (204 when none/expired).
 
@@ -39,7 +40,7 @@ info:
     has a name (409 `member_already_named`), add or name a member once the competition
     has finished (409 `competition_finished`), or add one to a team that already holds
     twice its team size plus two members (409 `team_member_limit`). The Lineups page's
-    other writes (round lineups, deleting a match lineup, clearing a member's name)
+    other writes (the starting lineup, deleting a match lineup, clearing a member's name)
     and `GET .../team-members` stay gated.
     An empty `X-Tournament-Password` also runs the representative bout of a tied
     knockout team match: `POST`/`DELETE .../matches/{mid}/daihyosen` add and remove
@@ -4032,7 +4033,14 @@ paths:
         required: true
         schema:
           type: integer
-        description: "Tournament round index, 0-based. The admin UI displays round 0 as Round 1."
+        description: >
+          Lineups-page round, 0-based. Round 0 is the team's starting lineup, the only
+          round a PUT saves. Rounds 1 and up were saved by earlier versions of the
+          Lineups page, which no longer creates them: the server gives the team, at
+          every match it is seated in, a lineup of its own equal to the one that version
+          showed there, and removes them once the competition is completed, so a read of
+          one finds it only until then. What a team fields at a match is read from
+          lineup-in-force, not from a round.
     get:
       tags: [competitions]
       summary: Get team lineup for round
@@ -4040,26 +4048,11 @@ paths:
         Always answers 200 while the competition exists (bc-k404, operator decision
         2026-09-27: a lineup either exists or it doesn't, and empty is a normal state,
         not a missing resource). The response's `saved` field is the marker: `true`
-        means the lineup stored at the round asked for (or, with `fallback=best`, the
-        resolved round); `false` means nothing is stored there, and the body echoes the
-        requested round with empty `positions`. 404 is reserved for a competition id
-        that names no competition at all.
+        means the lineup stored at exactly the round asked for; `false` means nothing is
+        stored there, and the body echoes the requested round with empty `positions`,
+        never another round's lineup. 404 is reserved for a competition id that names no
+        competition at all.
       security: []
-      parameters:
-        - in: query
-          name: fallback
-          required: false
-          schema:
-            type: string
-            enum: [best]
-          description: >
-            When fallback=best the server resolves the best available lineup when none
-            exists for the exact round (the highest round at or below the requested one,
-            then the team's latest lineup), answering `saved: false` only when the team
-            has no round-scoped lineups at all. This round-scoped endpoint has no
-            matchId, so match-scoped lineups are never consulted. Without this parameter
-            the endpoint keeps exact-round semantics (saved: false when that round has
-            nothing saved). PUT and DELETE are unaffected.
       responses:
         '200':
           description: Team lineup, saved or not (see `saved`).
@@ -4078,6 +4071,12 @@ paths:
     put:
       tags: [competitions]
       summary: Save team lineup for round
+      description: |
+        Saves the team's starting lineup (round 0). With `changed` (operator decision
+        2026-10-07), only the positions it names are written, onto the starting lineup
+        stored when the request is handled (an empty one when none is), so a change
+        another device made to any other position stays; see `TeamLineupSave`. Without
+        it the body replaces the whole lineup.
       security:
         - TournamentPassword: []
       requestBody:
@@ -4085,18 +4084,22 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/TeamLineup'
+              $ref: '#/components/schemas/TeamLineupSave'
       responses:
         '200':
-          description: Lineup saved.
+          description: Lineup saved. The body is the whole lineup as stored after the save.
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/TeamLineup'
         '400':
           description: >
-            The body is not a JSON object, a position key is not a valid
-            position, or a position's name is longer than 100 bytes.
+            The round is 1 or more (a lineup is saved as the team's starting lineup, or
+            for a match, so the answer is "A lineup is saved as the team's starting
+            lineup or for a match." before the body is read), the body is not a JSON
+            object, a position key is not a valid position, a position's name is
+            longer than 100 bytes, `changed` is empty or names a position `positions`
+            does not hold, or the saved lineup would place one member at two positions.
           content:
             application/json:
               schema:
@@ -4137,9 +4140,9 @@ paths:
       description: |
         Match-scoped lineup (mp-825). Always answers 200 while the competition exists
         (bc-k404): `saved: false` and empty `positions` when no match-scoped entry
-        exists, never a 404. The server never falls back to the round-scoped lineup on
-        this route; that tier belongs to the CALLER, which reads `saved: false` and
-        asks the round-scoped endpoint above itself. 404 is reserved for a competition
+        exists, never a 404. This route answers only the lineup saved for exactly this
+        match, never one carried from elsewhere: the lineup a team FIELDS at a match is
+        read from `GET .../lineup-in-force/{matchId}`. 404 is reserved for a competition
         id that names no competition at all.
       security: []
       responses:
@@ -4166,15 +4169,24 @@ paths:
         save; a structurally invalid payload (FIK shape rules) is still rejected
         with a 400.
 
+        With `changed` (operator decision 2026-10-07), only the positions it names
+        are written, under the competition's lock, onto the match's own lineup, or,
+        when the match has none yet, onto the lineup in force there (the one the
+        team carries from its previous match, else its starting lineup), so a
+        change another device made to any other position stays, whichever save
+        arrives first. Two saves of the same position keep the later arrival.
+        Without `changed` the body replaces the whole lineup. See `TeamLineupSave`.
+
         In a self-run tournament the request is also accepted with an empty
         password: the public score sheet saves it when a competitor names a
         bout's fighter (bc-dhas). Such a request is refused for a match that
         does not exist (404), for a team the match does not hold by id (404
-        `team_not_in_match`), for a member id the team does not hold (400
-        `team_member_not_in_team`), or for a match that has finished (409
-        `result_finalized`, the score endpoint's own refusal); the organiser,
-        sending the password, keeps the always-editable rule above, and a
-        password that is sent but wrong gets 401 before the body is read.
+        `team_not_in_match`), for a member id the team does not hold among the
+        positions the save writes (400 `team_member_not_in_team`), or for a match
+        that has finished (409 `result_finalized`, the score endpoint's own
+        refusal); the organiser, sending the password, keeps the always-editable
+        rule above, and a password that is sent but wrong gets 401 before the
+        body is read.
       security:
         - TournamentPassword: []
       requestBody:
@@ -4182,10 +4194,10 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/TeamLineup'
+              $ref: '#/components/schemas/TeamLineupSave'
       responses:
         '200':
-          description: Lineup saved.
+          description: Lineup saved. The body is the whole lineup as stored after the save.
           content:
             application/json:
               schema:
@@ -4193,11 +4205,13 @@ paths:
         '400':
           description: |
             The body is not a JSON object, a position key is not a valid
-            position, or a position's name is longer than 100 bytes. Self-run,
-            an empty password: also a member id the team does not hold
-            (`error: team_member_not_in_team`, with a `message` to show, e.g.
-            "The member chosen for senpo is not on this team. Pick again from
-            the list.").
+            position, a position's name is longer than 100 bytes, `changed` is
+            empty or names a position `positions` does not hold, or the saved
+            lineup would place one member at two positions (the answer names
+            both). Self-run, an empty password: also a member id the team does
+            not hold (`error: team_member_not_in_team`, with a `message` to
+            show, e.g. "The member chosen for senpo is not on this team. Pick
+            again from the list.").
           content:
             application/json:
               schema:
@@ -4250,6 +4264,73 @@ paths:
         '500':
           $ref: '#/components/responses/InternalError'
 
+  /api/competitions/{id}/teams/{tid}/lineup-in-force/{matchId}:
+    parameters:
+      - $ref: '#/components/parameters/CompetitionId'
+      - in: path
+        name: tid
+        required: true
+        schema:
+          type: string
+        description: Team ID (the team's participant id).
+      - in: path
+        name: matchId
+        required: true
+        schema:
+          type: string
+        description: Match ID the lineup is wanted for.
+    get:
+      tags: [competitions]
+      summary: Get the lineup a team fields at a match
+      description: |
+        The lineup in force for the team at the match (operator ruling 2026-10-05: by
+        default a team carries the lineup of its previous team match, and may have a
+        different one in every match). In order:
+
+        1. the lineup saved for the team at this very match;
+        2. else the latest lineup of the team placed before the match: one saved for an
+           earlier match of the team, or, at the very start, the team's starting lineup
+           (the Lineups-page lineup, round 0);
+        3. else, for a match the draw does not hold, the starting lineup.
+
+        A lineup saved for round 1 or later by earlier versions of the Lineups page is
+        not read: the server gives its team, at every match it is seated in, a lineup of
+        its own equal to the one that version showed there, when it loads the
+        competition and then in the write that seats the team, and removes the round
+        lineups once the competition is completed. A team that had a lineup saved for a
+        match by those versions is given the same, so a match it had none for shows the
+        lineup those versions showed there (its starting lineup, or none), not the one
+        it would carry from that match.
+
+        Match order is fixed: pool and league matches in pool-match number order;
+        knockout matches follow at their bracket round index; the 3rd-place match is
+        last. A lineup saved for a match counts only while that match is in the
+        current draw and the team is seated in it by participant id.
+
+        Always answers 200 while the competition exists (bc-k404): `saved: false` and
+        empty `positions` when no lineup applies, never a 404. 404 is reserved for a
+        competition id that names no competition at all. The body is the stored lineup
+        that is in force, so its own `matchId` and `round` are the source's; the source
+        is also spelled out in `sourceMatchId` or `sourceRound`.
+      security: []
+      responses:
+        '200':
+          description: The lineup in force, or none (see `saved`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LineupInForceRead'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          description: Competition not found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
   /api/competitions/{id}/teams/{tid}/members:
     parameters:
       - $ref: '#/components/parameters/CompetitionId'
@@ -4264,7 +4345,9 @@ paths:
       summary: Add a team member
       description: |
         Adds a member to the team with the next display index; an index is
-        never reused. Two members of one team may not share a name.
+        never reused. Two members of one team may not share a name. The answer
+        carries the member's `modifiedAt` stamp, and the change is announced to
+        every open page (the `lineup_updated` event, naming the team).
 
         In a self-run tournament a request with an empty password may add one
         too: the public score sheet does when a competitor types a fighter's
@@ -4350,6 +4433,7 @@ paths:
         recorded with in their stored `sideA`/`sideB`, but every surface of the
         app and the export show the member's current name, looked up by id, so
         a rename changes what those bouts show too, finished matches included.
+        The answer is the member as stored, with its new `modifiedAt` stamp.
 
         In a self-run tournament a request with an empty password may name a
         member who has no name yet (the public score sheet does when a
@@ -4368,8 +4452,12 @@ paths:
             schema:
               $ref: '#/components/schemas/TeamMemberName'
       responses:
-        '204':
+        '200':
           description: Member named.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TeamMember'
         '400':
           description: The body is not a JSON object, or `name` is empty or longer than 100 bytes.
           content:
@@ -4409,6 +4497,44 @@ paths:
                   message:
                     type: string
                     description: The sentence the public page shows as it is (member_already_named, competition_finished).
+    delete:
+      tags: [competitions]
+      summary: Clear a team member's name
+      description: |
+        The operator's removal of a member: clears the name and keeps the member's
+        id and display index, so a bout already fought that names this position
+        keeps its meaning (a member is never removed). Refused once the
+        competition has started. Needs the password in a self-run tournament too.
+        The answer is the member as stored, with its new `modifiedAt` stamp.
+      security:
+        - TournamentPassword: []
+      responses:
+        '200':
+          description: Name cleared.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TeamMember'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          description: '`invalid tournament password`: missing or wrong.'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: No competition, team or member with this id.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '409':
+          description: The competition has started, so a member's name can no longer be cleared.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
 
   /api/competitions/{id}/swiss/generate-round:
     parameters:
@@ -4917,6 +5043,7 @@ components:
         `GET /api/competitions/{id}/competitor-status`,
         `GET /api/competitions/{id}/teams/{tid}/lineups/{round}`,
         `GET /api/competitions/{id}/teams/{tid}/match-lineups/{matchId}`,
+        `GET /api/competitions/{id}/teams/{tid}/lineup-in-force/{matchId}`,
         `GET /api/competitions/{id}/swiss/standings`, and
         `GET /api/tournament/announcement`,
         and (in file mode only) the bootstrap PUT/POST `/api/tournament`
@@ -6843,13 +6970,23 @@ components:
         name:
           type: string
           description: Empty for a numbered member no one has named yet.
+        modifiedAt:
+          type: integer
+          format: int64
+          description: >
+            When the member was last added, named, renamed or cleared (server time,
+            unix ms). One member's stamps only grow, so of two copies of a member the
+            one with the larger stamp is the newer; a page keeps that one whatever
+            order the copies arrive in. 0 for a member no such write has touched yet
+            (a numbered slot seeded for the team, or one stored by an earlier release).
 
     TeamLineup:
       type: object
       description: >
-        Lineup assigning team members to positions. Round-scoped by default;
-        when matchId is present the lineup is keyed to a specific match/encounter
-        (mp-825), overriding the round lineup for that bout.
+        Lineup assigning team members to positions: the team's starting lineup
+        (round 0, no matchId) or, when matchId is present, the team's own lineup for
+        that match/encounter (mp-825; its round is 0), which the team carries to its
+        later matches until another is entered.
       required: [teamId, competitionId, round, positions]
       properties:
         teamId:
@@ -6862,7 +6999,7 @@ components:
           type: string
           description: >
             When present, keys this lineup to a specific match/encounter rather
-            than the whole round. Omitted for round-scoped lineups.
+            than the team's starting lineup. Omitted for the starting lineup.
         positions:
           type: object
           additionalProperties:
@@ -6878,6 +7015,30 @@ components:
             Map of position label to the team member's id, keyed by the same
             positions as `positions`. Optional: a position without an entry
             here is identified by its name alone.
+
+    TeamLineupSave:
+      description: >
+        The request body of the two lineup PUTs: a TeamLineup plus an optional
+        `changed` list (operator decision 2026-10-07: a save names the positions it
+        changed). With `changed`, only the positions it names are written, onto the
+        lineup stored for that key when the request is handled (for a match with no
+        lineup of its own, the lineup in force there); every other key of
+        `positions` and `memberIds` is ignored, so a client may send its whole form.
+        Without it, the body replaces the whole lineup.
+      allOf:
+        - $ref: '#/components/schemas/TeamLineup'
+        - type: object
+          properties:
+            changed:
+              type: array
+              minItems: 1
+              items:
+                type: string
+              description: >
+                The positions this save changed. Each must be a key of `positions`:
+                a non-empty name, or an empty name with a `memberIds` entry (a member
+                with no name yet), places a fighter there; an empty name with no
+                `memberIds` entry clears the position.
 
     TeamLineupRead:
       description: >
@@ -6895,10 +7056,39 @@ components:
             saved:
               type: boolean
               description: >
-                true when a lineup is stored at the round/matchId asked for (or, with
-                fallback=best, the round it resolved to); false when nothing is stored
-                there, in which case `positions` is empty and the round/matchId in the
-                body is the one requested, not a fallback.
+                true when a lineup is stored at exactly the round/matchId asked for;
+                false when nothing is stored there, in which case `positions` is empty
+                and the round/matchId in the body is the one requested.
+
+    LineupInForceRead:
+      description: >
+        The response body of the lineup-in-force GET: the stored lineup that is in
+        force for the team at the match, with the same required `saved` marker as
+        TeamLineupRead. When `saved` is false, `positions` is empty, the matchId in the
+        body is the one requested, and neither source field is present.
+      allOf:
+        - $ref: '#/components/schemas/TeamLineup'
+        - type: object
+          required: [saved]
+          properties:
+            saved:
+              type: boolean
+              description: true when a lineup is in force for the team at the match.
+            sourceMatchId:
+              type: string
+              description: >
+                Present when the lineup in force was saved for a match: the match asked
+                about (its own lineup) or an earlier match of the team it is carried
+                from. Absent for the starting lineup.
+            sourceRound:
+              type: integer
+              minimum: 0
+              description: >
+                Present when the lineup in force is the team's starting lineup, and
+                then always, round 0 included (0 is a value to send, not an absence).
+                A lineup for a later round is never read as one (the server converts it
+                into lineups for its team's matches), so this is always 0. Absent when
+                `sourceMatchId` is present.
 
     ScheduleEstimate:
       type: object

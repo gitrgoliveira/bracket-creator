@@ -2053,6 +2053,15 @@ a:hover {
   border: 0;
 }
 
+/* Holds its space (operator ruling 2026-10-06): out of play for now, but the
+   box stays where it is, so nothing beside it or under it moves when it comes
+   and goes. visibility:hidden, not display:none, which would give the space
+   back; it also takes the element out of the accessibility tree (it is not
+   announced), the tab order and the pointer. */
+.holds-space {
+  visibility: hidden;
+}
+
 .pool-match-numbered-row__score {
   font-family: var(--font-mono);
   font-weight: 600;
@@ -2177,17 +2186,29 @@ a:hover {
 }
 
 /* ---------- Modal ---------- */
+/* The modal layer: above the announcement cards (900), which sit over the page's
+   own chrome, so an open modal is never obscured by one. Every overlay score
+   editor and the shared Modal are a plain .modal-backdrop, so this one rule lifts
+   them all; the confirm dialogs go higher still (below). */
 .modal-backdrop {
   position: fixed;
   inset: 0;
   background: rgba(15, 20, 35, 0.55);
   display: grid;
   place-items: center;
-  z-index: 100;
+  z-index: 1000;
   padding: 20px;
 }
 @supports (backdrop-filter: blur(2px)) {
   .modal-backdrop { backdrop-filter: blur(2px); }
+}
+/* The confirm and prompt dialogs (DialogHost) open on top of whatever asked for
+   them. The viewer's match modal and the at-court lineup panel are fixed layers
+   at 1000, the modal layer's own value, so a dialog left on it opened UNDER them,
+   out of reach. Above every overlay, and under the toast (1200). After
+   .modal-backdrop: same specificity, so the later rule wins. */
+.modal-backdrop--dialog {
+  z-index: 1100;
 }
 
 /* Court-reassignment confirmation, a small, centred confirm card. Moving a
@@ -5210,7 +5231,7 @@ button.vsched-item:not([data-clickable]) {
    reachable — previously the whole modal scrolled and on a 390px phone the
    primary action sat below the fold behind a nested scroll. Applies to every
    overlay editor (individual, team, engi); the inline .scoring-panel variant
-   flows in the page and is unaffected. */
+   flows in the page, and only its team sheet pins bars (see below). */
 .editor-modal {
   background: var(--surface);
   border-radius: var(--r-lg);
@@ -5238,6 +5259,102 @@ button.vsched-item:not([data-clickable]) {
   position: static;
 }
 
+/* The team sheet pins two bars in the inline hosts (the page scrolls, the
+   panel does not): the team header and result band under the topbar, the
+   footer actions at the bottom edge. overflow: clip keeps the rounded
+   corners without making the panel or its body a scroll container, so both
+   sticky bars resolve against the document. Must follow the static rule
+   above (same specificity). */
+.scoring-panel--team {
+  overflow: clip;
+}
+.scoring-panel--team .editor-modal__body {
+  overflow: visible;
+}
+.scoring-panel--team .editor-modal__foot--nav {
+  position: sticky;
+  bottom: 0;
+  z-index: 20;
+  background: var(--surface);
+  border-top: 1px solid var(--line);
+  /* A correction reason prompt or a pending banner must not grow the dock
+     over the whole sheet. */
+  max-height: 45vh;
+  overflow-y: auto;
+}
+/* The action row stays at the dock's bottom edge while a tall prompt, banner
+   or History disclosure above it scrolls; the key legend after it scrolls
+   into view only at the end. */
+.scoring-panel--team .editor-modal__foot--nav .score-nav {
+  position: sticky;
+  bottom: 0;
+  background: var(--surface);
+}
+/* Safari before 16 has no overflow: clip; keep the bars pinned and lose only
+   the rounded-corner clip. */
+@supports not (overflow: clip) {
+  .scoring-panel--team {
+    overflow: visible;
+  }
+}
+
+/* Team header + result band, one sticky unit (z 9: above the name list at 8
+   inside the editor body, under the footer dock at 20 and the topbar at
+   30). Overlay hosts pin it at the top of their scrolling body; the inline
+   hosts sit it under the shell's topbar stack, whose height AdminTopbar
+   publishes as --topbar-stack-h. The sheet publishes this unit's own height as
+   --team-pin-h, and the inline dock's as --team-dock-h, for the scroll margin
+   that keeps a focused control clear of the bars (the content rules below). */
+.team-sheet-pin {
+  position: sticky;
+  top: 0;
+  z-index: 9;
+  flex: 0 0 auto;
+  display: flex;
+  flex-direction: column;
+  padding-bottom: 6px;
+  background: var(--surface);
+}
+.scoring-panel--team .team-sheet-pin {
+  top: var(--topbar-stack-h, 0px);
+}
+/* In the overlay the bar sticks to the body's top edge, over the body's top
+   padding, so a bout scrolled past does not show in a strip above the team
+   names; the negative margin keeps it where it sits before it sticks. The note
+   for a match whose stored data cannot be read can come first (the bar is then
+   the body's second child): the bar's box starts that far up into the space the
+   note's bottom margin and the body's gap leave, which clears it in both
+   densities, so it never reaches the note. */
+.editor-modal--team > .editor-modal__body > .team-sheet-pin {
+  top: calc(-1 * var(--editor-body-pad-top));
+  margin-top: calc(-1 * var(--editor-body-pad-top));
+  padding-top: var(--editor-body-pad-top);
+}
+/* A control a scroll brings only just into view (a keyboard Tab onto it,
+   scrollIntoView) stops clear of the bars the sheet pins over its content: the
+   topbar and the pinned header above it, the footer dock below it. The sheet's
+   own content carries that as scroll margin, sized by the heights the sheet
+   publishes while it is mounted (published_height.jsx). It is margin on the
+   content's controls and not padding on the scroller: padding claims a strip of
+   the viewport, a bar's own controls (the dock's Finish, a button of the topbar)
+   lie inside it, and focusing one scrolled the page by about 300px for nothing.
+   So only controls in the body's content are reached, never one in the pinned
+   header or the footer dock. Each rule hangs off its host's own root (a
+   scoring-panel inline, an editor-modal in an overlay), so no element meets two;
+   an overlay's footer sits outside the scrolling body and covers nothing, so only
+   the top is margined there. The inline head (the title row and Close) scrolls
+   with the page above the pinned header, so only the topbar can cover it. */
+.scoring-panel--team > .editor-modal__body :is(button, a[href], input, select, textarea, summary, [tabindex]):not(.team-sheet-pin *) {
+  scroll-margin-top: calc(var(--topbar-stack-h, 0px) + var(--team-pin-h, 0px));
+  scroll-margin-bottom: var(--team-dock-h, 0px);
+}
+.scoring-panel--team > .editor-modal__head :is(button, a[href], input, select, textarea, summary, [tabindex]) {
+  scroll-margin-top: var(--topbar-stack-h, 0px);
+}
+.editor-modal--team > .editor-modal__body :is(button, a[href], input, select, textarea, summary, [tabindex]):not(.team-sheet-pin *) {
+  scroll-margin-top: var(--team-pin-h, 0px);
+}
+
 .editor-modal__head {
   padding: 18px 22px;
   border-bottom: 1px solid var(--line);
@@ -5245,7 +5362,9 @@ button.vsched-item:not([data-clickable]) {
 }
 
 .editor-modal__body {
-  padding: 18px 22px;
+  /* Named so the team sheet's pinned bar can cover it (.team-sheet-pin). */
+  --editor-body-pad-top: 18px;
+  padding: var(--editor-body-pad-top) 22px;
   display: flex;
   flex-direction: column;
   gap: 14px;
@@ -6241,9 +6360,34 @@ button.vsched-item:not([data-clickable]) {
   margin-bottom: 0;
 }
 .lineup-name__bar {
-  min-height: 36px;
-  padding: 4px 6px;
+  min-height: max(36px, var(--tap-floor));
+  padding: 0 6px;
   flex-wrap: nowrap;
+  align-items: stretch;
+}
+/* The input fills the bar, so the whole bar is the typeable target (a tap on
+   the bar's own padding used to focus nothing); the clear button stays centred. */
+.lineup-name__bar .pmf__input {
+  align-self: stretch;
+  /* The input is the tap target, so it carries the floor itself: the bar's
+     own floor counts its 1px borders, which left an empty box's input 42px. */
+  min-height: var(--tap-floor);
+}
+.lineup-name__bar .lineup-name__clear {
+  align-self: center;
+}
+/* A box that takes no pick right now (the team sheet disables every name box
+   while a name it took is being read against and saved) looks disabled the way
+   the buttons do (.btn:disabled), on the muted surface: a box that looks like
+   every other one is tapped for nothing. The input is the tap target, so the
+   cursor is set on it as well as on the bar. */
+.lineup-name__bar:has(.pmf__input:disabled) {
+  background: var(--surface-2);
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+.lineup-name__bar .pmf__input:disabled {
+  cursor: not-allowed;
 }
 /* An unfilled lineup slot is a "fill this" caution, not an error, and the
    two sides are already Aka (red) / Shiro per the colour system, so a red
@@ -6268,11 +6412,76 @@ button.vsched-item:not([data-clickable]) {
 .lineup-name__clear:hover {
   color: var(--ink-1);
 }
+/* The at-court lineup panel's Rename link: compact under a fine pointer, and
+   floored under a coarse one. Two classes, so it outranks both .btn floors
+   (an inline style used to, which left it 47x14 on an iPad). */
+.btn.lineup-rename-btn {
+  padding: 0 2px;
+  font-size: 11px;
+  height: auto;
+  min-height: 0;
+}
+@media (pointer: coarse) {
+  .btn.lineup-rename-btn {
+    min-height: var(--tap-floor);
+    min-width: var(--tap-floor);
+  }
+}
+/* The notice a lineup editor shows when it brings back unsaved changes, or says
+   it could not: the amber .alert--warn with the Discard beside the words. The
+   Discard is a plain .btn, so the coarse-pointer floor reaches it. */
+.lineup-draft-note {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+/* The line under a lineup editor's title, one for the at-court panel and the
+   Lineups page: where the lineup shown was saved and, for a match's own lineup,
+   the button that gives it up. One size and one emphasis for both. */
+.lineup-source {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 8px;
+  font-size: 12px;
+  color: var(--ink-3);
+}
+.lineup-source__label--own {
+  color: var(--accent);
+  font-weight: 600;
+}
+.lineup-source__use {
+  margin-left: auto;
+}
+/* Why that button waits for a queued save, as a line: a title never shows on a
+   touchscreen. */
+.lineup-source__why {
+  flex: 1 0 100%;
+}
+/* Why a lineup could not be read, with Try again beside the words. Try again is a
+   plain .btn, so the coarse-pointer floor reaches it. */
+.lineup-problem {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 8px;
+}
 .lineup-name__dropdown {
   z-index: 60;
   min-width: 200px;
-  max-height: 240px;
   overflow-y: auto;
+}
+/* Inside a score editor the list slides under the pinned header, the dock and
+   the topbar, exactly as its input does (the body creates no stacking
+   context, so this competes at the root). */
+.editor-modal__body .lineup-name__dropdown {
+  z-index: 8;
 }
 .pmf__option--active {
   background: var(--surface-2);
@@ -6617,7 +6826,10 @@ button.vsched-item:not([data-clickable]) {
   font-size: 14px;
   font-weight: 600;
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.2);
-  z-index: 500;
+  /* The top layer, above the confirm dialogs (1100): a toast raised while one is
+     open is not dimmed by its backdrop. It takes no pointer events, so it never
+     blocks the dialog under it. */
+  z-index: 1200;
   pointer-events: none;
   animation: toast-in 300ms cubic-bezier(0.16, 1, 0.3, 1);
 }
@@ -7570,13 +7782,15 @@ abbr.msb-lab { text-decoration: none; cursor: help; }
   gap: 3px 6px;
 }
 @media (pointer: coarse) {
+  /* The box bleeds into the row padding and the gap rather than widening the
+     number gutter, which the team header restates as a margin. */
   .tsm-caret-btn {
-    min-height: 44px;
-    min-width: 36px;
+    min-height: var(--tap-floor);
+    min-width: var(--tap-floor);
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    margin: -10px 0;
+    margin: -10px -5px;
   }
 }
 
@@ -7818,8 +8032,8 @@ abbr.msb-lab { text-decoration: none; cursor: help; }
    individual matches (always), team matches with teamSize ≤ 5, and
    kachinuki team matches (regardless of size, since kachinuki renders the
    current bout only). Fixed-format team matches with teamSize > 5 keep the
-   roomy legacy layout but get the `.team-bouts-scroll` rule below for
-   independent bout-list scrolling. The engi (kata) editor body is compact on
+   roomy legacy layout, whose bouts scroll with the body as in every other
+   layout. The engi (kata) editor body is compact on
    BOTH hosts (operator ruling 2026-09-18): this text used to say engi was
    compact on neither, while the inline panel carried the class and the overlay
    did not, so the same editor rendered at two densities and the comment
@@ -7914,6 +8128,18 @@ abbr.msb-lab { text-decoration: none; cursor: help; }
   align-items: center;
   gap: 6px;
   font-weight: 600;
+  min-height: var(--tap-floor);
+  cursor: pointer;
+}
+/* The label, not the checkbox, is the tap target: the native box stays small
+   on a fine pointer and grows with the label under a coarse one. */
+@media (pointer: coarse) {
+  .encho-row__label { padding-inline: 6px; }
+  .encho-row__label input[type="checkbox"] {
+    width: 20px;
+    height: 20px;
+    accent-color: var(--accent);
+  }
 }
 .encho-row__stepper {
   display: flex;
@@ -7927,8 +8153,8 @@ abbr.msb-lab { text-decoration: none; cursor: help; }
   font-weight: 700;
 }
 .encho-row__btn {
-  min-width: 28px;
-  min-height: 28px;
+  min-width: max(28px, var(--tap-floor));
+  min-height: max(28px, var(--tap-floor));
 }
 
 /* --- Compact mode: chrome ------------------------------------------------ */
@@ -7951,7 +8177,8 @@ abbr.msb-lab { text-decoration: none; cursor: help; }
   gap: 12px;
 }
 .editor-modal--compact .editor-modal__body {
-  padding: 6px 14px;
+  --editor-body-pad-top: 6px;
+  padding: var(--editor-body-pad-top) 14px;
   gap: 4px;
 }
 .editor-modal--compact .editor-modal__foot {
@@ -8385,35 +8612,15 @@ abbr.msb-lab { text-decoration: none; cursor: help; }
   to   { opacity: 1; transform: translateY(0); }
 }
 
-/* --- Roomy (non-compact) bout list scroll region ----------------------- */
-/* Make the modal frame a flex column so the head/foot stay anchored and
-   only the body (containing .team-bouts-scroll) participates in vertical
-   space. The base .editor-modal has overflow:auto so an oversize modal
-   spawns a single scrollbar on the outer frame; that double-scrolls when
-   we also scroll the bouts list. Switch to overflow:hidden + body flex
-   for the roomy team case only, compact modals never overflow. */
-.editor-modal--team:not(.editor-modal--compact) {
-  display: flex;
-  flex-direction: column;
-  overflow: hidden;
-}
-.editor-modal--team:not(.editor-modal--compact) .editor-modal__body {
-  flex: 1 1 auto;
-  min-height: 0;
-  overflow: hidden;
-  display: flex;
-  flex-direction: column;
-}
-.editor-modal--team:not(.editor-modal--compact) .team-bouts-scroll {
-  flex: 1 1 auto;
-  min-height: 0;
-  overflow-y: auto;
-  /* The .team-summary is rendered *after* this region in the flex column
-     (not inside it), so it always stays visible below the bout list in the
-     roomy layout. The position:sticky on .team-summary is relative to the
-     .editor-modal__body scroll container, which is most useful if the
-     compact modal ever overflows on a very small screen. */
-}
+/* --- Bout list in the overlay ------------------------------------------- */
+/* The bouts flow in the modal body, which scrolls (.editor-modal__body) while
+   the team header and result band (.team-sheet-pin) stick at its top and the
+   footer stays below it, roomy (a team of six or more) and compact alike. The
+   roomy layout used to hide the body's overflow and scroll the bout list on
+   its own, to keep the band (then rendered after the bouts) in view; with the
+   band pinned at the top that list only got the height left over, which a
+   knockout's tie-breaker panel and the rows below it took almost entirely
+   (8px for a team of six on a 1180x820 screen). */
 /* In compact mode the wrapper is layout-transparent, flow normally. */
 .editor-modal--compact .team-bouts-scroll {
   display: contents;
@@ -8483,9 +8690,11 @@ abbr.msb-lab { text-decoration: none; cursor: help; }
 /* Fixed-position container stacks all active announcement cards in the top-right
    corner. pointer-events:none on the container means empty space never blocks
    bracket/score affordances behind it; each card re-enables pointer events.
-   z-index 900 sits ABOVE normal viewer chrome (max 500) but BELOW the modal
-   layer (.modal-backdrop dialogs at 1000) so open dialogs stay modal and are
-   never obscured by announcement cards. */
+   z-index 900 sits ABOVE normal viewer chrome (max 200, the tooltips) but BELOW
+   the modal layer (every .modal-backdrop, the overlay score editors and the shared
+   Modal among them, and the viewer's match modal and the at-court lineup panel,
+   at 1000; the confirm dialogs at 1100) so open dialogs stay modal and are never
+   obscured by announcement cards. */
 @keyframes announcement-slide-in {
   from {
     opacity: 0;

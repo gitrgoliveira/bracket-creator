@@ -8,6 +8,7 @@ import { LS_NOTIFICATIONS_ENABLED } from './notification_keys.jsx';
 import { bridge, setSnapshotProvider, setDisplayCourt, getLastBroadcastAt, applyPatchToTree, mergeSnapshotIntoTree, deriveLinkState, freshnessMs } from './court_bridge.jsx';
 import { BRANDING_DEFAULTS } from './admin_branding.jsx';
 import { queuedWritesNoun, supersededAlertText, displacedAlertText } from './write_result.jsx';
+import { useOpenedTapGuard } from './tap_guard.jsx';
 
 const { useState: useS, useEffect: useE, useRef: useR, useCallback: useC } = React;
 
@@ -1692,6 +1693,9 @@ function AuthModal({ onClose, onSuccess, onForgotPassword, resetEnabled, reauth 
   // as the admin-side mountedRef pattern.
   const mountedRef = useR(true);
   useE(() => () => { mountedRef.current = false; }, []);
+  // bc-cfbd: the bounce of the tap that opened the modal must not reach its
+  // backdrop or its buttons.
+  const { openedRef, onClickCapture } = useOpenedTapGuard();
 
   const submit = async (e) => {
     e.preventDefault();
@@ -1723,7 +1727,7 @@ function AuthModal({ onClose, onSuccess, onForgotPassword, resetEnabled, reauth 
     // .modal-backdrop default of 100 sits below viewer chrome at 200/500 and
     // below the mp-udb announcement overlay at 900); without this the sign-in
     // dialog could be obscured by chrome or by announcement cards.
-    <div className="modal-backdrop" onClick={onClose} style={{ zIndex: 1000 }}>
+    <div className="modal-backdrop" ref={openedRef} onClick={onClose} onClickCapture={onClickCapture} style={{ zIndex: 1000 }}>
       <div className="modal auth" onClick={(e) => e.stopPropagation()}>
         <img src="/api/branding/logo" onError={(e) => { e.target.onerror = null; e.target.src = "/logo.jpeg"; }} alt="Tournament logo" className="auth__logo" decoding="async" />
         <div className="auth__title">{reauth ? "Sign in to save" : "Admin sign in"}</div>

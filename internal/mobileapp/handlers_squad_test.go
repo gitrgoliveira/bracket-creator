@@ -135,7 +135,7 @@ func TestSquadHandlers_RenameMember(t *testing.T) {
 	req := squadJSONReq(http.MethodPut, "/api/competitions/c1/teams/"+teamID+"/members/"+member.ID, "secret", SquadMemberRequest{Name: "Alicia"})
 	w := httptest.NewRecorder()
 	r.ServeHTTP(w, req)
-	require.Equal(t, http.StatusNoContent, w.Code, w.Body.String())
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
 
 	squads, err := store.LoadSquads("c1")
 	require.NoError(t, err)
@@ -215,7 +215,7 @@ func TestSquadHandlers_ClearMember(t *testing.T) {
 	req := squadJSONReq(http.MethodDelete, "/api/competitions/c1/teams/"+teamID+"/members/"+member.ID, "secret", nil)
 	w := httptest.NewRecorder()
 	r.ServeHTTP(w, req)
-	require.Equal(t, http.StatusNoContent, w.Code, w.Body.String())
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
 
 	squads, err := store.LoadSquads("c1")
 	require.NoError(t, err)
@@ -281,9 +281,10 @@ func TestSquadHandlers_AddToUnknownTeamIs404(t *testing.T) {
 // Without it the failure is LOSS, not staleness: a second admin holding a
 // pre-rename lineup makes any unrelated inline pick, its write spreads the
 // whole stale positions map, and the operator's correction is reverted on
-// disk. ADD stays silent on purpose and is asserted here so the split cannot
-// be "tidied" into one rule.
-func TestSquadHandlers_RenameAndClearBroadcastTheLineupEvent(t *testing.T) {
+// disk. An add fires it too (operator decision 2026-10-07, when a member began
+// to carry a server stamp): a device that added a member is then seen by the
+// others, whose copy of the team's members would otherwise lack it.
+func TestSquadHandlers_EveryMemberWriteBroadcastsTheLineupEvent(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
 	dir, err := os.MkdirTemp("", "squad-bcast-*")
@@ -308,11 +309,12 @@ func TestSquadHandlers_RenameAndClearBroadcastTheLineupEvent(t *testing.T) {
 
 	base := "/api/competitions/c1/teams/" + teamID + "/members"
 
-	// ADD: deliberately silent.
+	// ADD: fires, so the other devices read the team's members again.
 	w := httptest.NewRecorder()
 	r.ServeHTTP(w, squadJSONReq(http.MethodPost, base, "secret", map[string]any{"name": "Sato"}))
 	require.Equal(t, http.StatusCreated, w.Code, w.Body.String())
-	assert.Empty(t, hub.events, "adding a member stays silent, as its own rationale says")
+	require.Len(t, hub.events, 1, "an add must announce the member it made")
+	assert.Equal(t, EventLineupUpdated, hub.events[0])
 
 	var added domain.TeamMember
 	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &added))
@@ -321,15 +323,15 @@ func TestSquadHandlers_RenameAndClearBroadcastTheLineupEvent(t *testing.T) {
 	// RENAME: fires, because it rewrote lineups.yaml too.
 	w = httptest.NewRecorder()
 	r.ServeHTTP(w, squadJSONReq(http.MethodPut, base+"/"+added.ID, "secret", map[string]any{"name": "Sato Kenji"}))
-	require.Equal(t, http.StatusNoContent, w.Code, w.Body.String())
-	require.Len(t, hub.events, 1, "a rename must announce the lineup change it made")
-	assert.Equal(t, EventLineupUpdated, hub.events[0],
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	require.Len(t, hub.events, 2, "a rename must announce the lineup change it made")
+	assert.Equal(t, EventLineupUpdated, hub.events[1],
 		"the EXISTING lineup event, so no squad reader needs a new subscriber")
 
 	// CLEAR: fires for the same reason.
 	w = httptest.NewRecorder()
 	r.ServeHTTP(w, squadJSONReq(http.MethodDelete, base+"/"+added.ID, "secret", nil))
-	require.Equal(t, http.StatusNoContent, w.Code, w.Body.String())
-	require.Len(t, hub.events, 2)
-	assert.Equal(t, EventLineupUpdated, hub.events[1])
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	require.Len(t, hub.events, 3)
+	assert.Equal(t, EventLineupUpdated, hub.events[2])
 }

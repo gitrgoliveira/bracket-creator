@@ -26,11 +26,13 @@
 // documented reason: admin_schedule_lineup.jsx's per-position row is a fixed
 // two-column layout that must not grow WIDTH, so its Save/Cancel row sits
 // BELOW the input rather than beside it (see the comment on that branch
-// below). `disabled` is the input's own disabled attribute, kept separate
-// from `busy` (which always governs the two buttons and the Save label)
-// because admin_schedule_lineup.jsx's input was never disabled while a
-// rename was in flight -- a pre-existing difference between the two hosts,
-// preserved here rather than smoothed away.
+// below). `busy` is this rename being saved: it turns the two buttons off and
+// puts "Saving…" on Save. `disabled` turns the input and both buttons off
+// without that label, for a host whose own save is out (a rename made then
+// would be overwritten by it). It is kept separate from `busy` because
+// admin_schedule_lineup.jsx's input was never disabled while a rename was in
+// flight -- a pre-existing difference between the two hosts, preserved here
+// rather than smoothed away.
 export function renameMemberFields({
   value,
   onChange,
@@ -54,17 +56,23 @@ export function renameMemberFields({
       onChange={(e) => onChange(e.target.value)}
       onKeyDown={(e) => {
         if (e.key === "Enter") { e.preventDefault(); onCommit(); }
-        else if (e.key === "Escape") { e.preventDefault(); onCancel(); }
+        else if (e.key === "Escape") {
+          // One Escape closes one layer: cancelling the rename must not also close
+          // the at-court panel the box is in (its Escape is a window listener).
+          e.preventDefault();
+          e.stopPropagation();
+          onCancel();
+        }
       }}
     />
   );
   const saveButton = (
-    <button type="button" className="btn btn--sm" onClick={onCommit} disabled={busy || !value.trim()}>
+    <button type="button" className="btn btn--sm" onClick={onCommit} disabled={busy || disabled || !value.trim()}>
       {busy ? "Saving…" : "Save"}
     </button>
   );
   const cancelButton = (
-    <button type="button" className="btn btn--ghost btn--sm" onClick={onCancel} disabled={busy}>Cancel</button>
+    <button type="button" className="btn btn--ghost btn--sm" onClick={onCancel} disabled={busy || disabled}>Cancel</button>
   );
   if (stacked) {
     // Input on top, Save and Cancel below: adds height, never width (a

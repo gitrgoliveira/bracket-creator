@@ -181,7 +181,7 @@ describe('ViewerCompetition stamps bracket rows with the EFFECTIVE round (mp-u37
     expect(recent[0].phaseName).toBe('Quarterfinals');
   });
 
-  it('keeps roundIndex RAW so lineup fetches still key on the backend round', () => {
+  it('keeps roundIndex RAW: the position in bracket.rounds, not the effective round the label names', () => {
     const props = overviewProps(normalizeCompetitionDetail(rawDetail()));
     // The label moved to the effective round; the index must NOT follow it.
     expect(props.runningMatches[0].roundIndex).toBe(0);

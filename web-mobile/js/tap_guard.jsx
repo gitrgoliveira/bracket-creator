@@ -12,9 +12,9 @@
 // Space carries detail === 0, and keyboard input is never swallowed (bc-kbrw).
 //
 // A leaf with no imports: every consumer ES-imports it directly, and there is
-// no window mirror (the write_result.jsx pattern). useArmedConfirm reads the
-// React global at CALL time, as ui.jsx's hooks do, so importing this module
-// needs no React.
+// no window mirror (the write_result.jsx pattern). useArmedConfirm and
+// useOpenedTapGuard read the React global at CALL time, as ui.jsx's hooks
+// do, so importing this module needs no React.
 
 // Longer than a double tap's gap, shorter than a deliberate second tap. Two
 // real ippon calls can never arrive this close: the shushin stops play for
@@ -81,6 +81,26 @@ export const swallowBounce = (ref, key = KEYLESS) => (ev) => {
   ev.stopPropagation();
   ev.preventDefault();
 };
+
+// useOpenedTapGuard: a layer opened by a tap (a confirm, a modal, an overlay
+// editor) must not take the bounce of that tap, which lands on the fresh
+// backdrop one render later (bc-cfbd). `openedRef` goes on the layer's node
+// (or is called from a callback ref that already exists) and stamps when it
+// mounts; `onClickCapture` goes on the backdrop and swallows a pointer bounce
+// within TAP_BOUNCE_MS of that stamp. A confirm swallows every click in its
+// layer; `{ backdropOnly: true }` swallows only a click on the backdrop itself,
+// for an editor whose controls the operator may use at once.
+//   const { openedRef, onClickCapture } = useOpenedTapGuard();
+//   <div className="modal-backdrop" ref={openedRef} onClickCapture={onClickCapture}>
+export function useOpenedTapGuard({ backdropOnly = false } = {}) {
+  const stampRef = React.useRef(null);
+  const openedRef = React.useCallback((node) => { if (node) stampTap(stampRef); }, []);
+  const onClickCapture = React.useMemo(() => {
+    const swallow = swallowBounce(stampRef);
+    return backdropOnly ? (ev) => { if (ev.target === ev.currentTarget) swallow(ev); } : swallow;
+  }, [backdropOnly]);
+  return { openedRef, onClickCapture };
+}
 
 // useArmedConfirm: the two-tap commit (Finish, Finish + Start Next, End
 // match). The first tap arms; a second tap commits only once the button has

@@ -219,6 +219,14 @@ type TeamLineupStore interface {
 	DeleteTeamLineupForMatch(compID, teamID, matchID string) error
 }
 
+// LineupEngine is the consumer-boundary view of engine.Engine used by the
+// public lineup-in-force read in handlers_lineup.go: which lineup a team
+// fields at a match, and where it was saved. Mirrors
+// engine.Engine.LineupInForce, which owns the rule.
+type LineupEngine interface {
+	LineupInForce(compID, teamID, matchID string) (engine.InForceLineup, error)
+}
+
 // SquadStore is the consumer-boundary view of state.Store used by
 // handlers_squad.go (bc-tmid pass 1, clearing added bc-pnum): a team's
 // squad, the people on it, each with a stable id and a display index
@@ -229,9 +237,11 @@ type SquadStore interface {
 	LoadSquads(compID string) (map[string][]domain.TeamMember, error)
 	AddTeamMember(compID, teamID, name string) (domain.TeamMember, error)
 	AddTeamMemberUpTo(compID, teamID, name string, limit int) (domain.TeamMember, error)
-	RenameTeamMember(compID, teamID, memberID, newName string) error
-	NameUnnamedTeamMember(compID, teamID, memberID, newName string) error
-	ClearTeamMemberName(compID, teamID, memberID string) error
+	// The three name writers answer with the member as written, carrying the
+	// server stamp that write gave it (domain.TeamMember.ModifiedAt).
+	RenameTeamMember(compID, teamID, memberID, newName string) (domain.TeamMember, error)
+	NameUnnamedTeamMember(compID, teamID, memberID, newName string) (domain.TeamMember, error)
+	ClearTeamMemberName(compID, teamID, memberID string) (domain.TeamMember, error)
 }
 
 // Broadcaster is the consumer-boundary view of *Hub used by handlers

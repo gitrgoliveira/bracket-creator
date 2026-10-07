@@ -6,11 +6,14 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/gin-gonic/gin"
 	"github.com/gitrgoliveira/bracket-creator/internal/domain"
+	"github.com/gitrgoliveira/bracket-creator/internal/engine"
 	"github.com/gitrgoliveira/bracket-creator/internal/state"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -48,7 +51,7 @@ func setupLineupTestRouter(t *testing.T) (*gin.Engine, *state.Store, string) {
 
 	// Public group, same as production server.go
 	api := r.Group("/api")
-	RegisterPublicLineupHandlers(api, store, store)
+	RegisterPublicLineupHandlers(api, store, store, engine.New(store))
 
 	// Admin group, AuthMiddleware gates all writes
 	admin := r.Group("/api")
@@ -200,7 +203,7 @@ func TestLineupPUT_RequiresAuth(t *testing.T) {
 
 	t.Run("no password header returns 401", func(t *testing.T) {
 		req := httptest.NewRequest(http.MethodPut,
-			"/api/competitions/c1/teams/teamA/lineups/1",
+			"/api/competitions/c1/teams/teamA/lineups/0",
 			bytes.NewBuffer(body))
 		req.Header.Set("Content-Type", "application/json")
 		w := httptest.NewRecorder()
@@ -211,7 +214,7 @@ func TestLineupPUT_RequiresAuth(t *testing.T) {
 
 	t.Run("correct password header succeeds", func(t *testing.T) {
 		req := httptest.NewRequest(http.MethodPut,
-			"/api/competitions/c1/teams/teamA/lineups/1",
+			"/api/competitions/c1/teams/teamA/lineups/0",
 			bytes.NewBuffer(body))
 		req.Header.Set("Content-Type", "application/json")
 		req.Header.Set("X-Tournament-Password", "secret")
@@ -316,7 +319,7 @@ func TestLineupPUT_NoCompetition(t *testing.T) {
 		},
 	})
 	req := httptest.NewRequest(http.MethodPut,
-		"/api/competitions/no-such-comp/teams/teamA/lineups/1",
+		"/api/competitions/no-such-comp/teams/teamA/lineups/0",
 		bytes.NewBuffer(body))
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("X-Tournament-Password", "secret")
@@ -336,7 +339,7 @@ func TestLineupPUT_ZeroTeamSize(t *testing.T) {
 		"positions": map[string]string{"senpo": "p1"},
 	})
 	req := httptest.NewRequest(http.MethodPut,
-		"/api/competitions/c1/teams/teamA/lineups/1",
+		"/api/competitions/c1/teams/teamA/lineups/0",
 		bytes.NewBuffer(body))
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("X-Tournament-Password", "secret")
@@ -361,7 +364,7 @@ func TestLineupPUT_ValidationError(t *testing.T) {
 		},
 	})
 	req := httptest.NewRequest(http.MethodPut,
-		"/api/competitions/c1/teams/teamA/lineups/1",
+		"/api/competitions/c1/teams/teamA/lineups/0",
 		bytes.NewBuffer(body))
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("X-Tournament-Password", "secret")
@@ -377,13 +380,66 @@ func TestLineupPUT_InvalidJSON(t *testing.T) {
 	require.NoError(t, store.SaveCompetition(&state.Competition{ID: "c1", TeamSize: 5}))
 
 	req := httptest.NewRequest(http.MethodPut,
-		"/api/competitions/c1/teams/teamA/lineups/1",
+		"/api/competitions/c1/teams/teamA/lineups/0",
 		bytes.NewBufferString("{bad-json"))
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("X-Tournament-Password", "secret")
 	w := httptest.NewRecorder()
 	r.ServeHTTP(w, req)
 	assert.Equal(t, http.StatusBadRequest, w.Code)
+}
+
+// TestLineupPUT_RoundsAboveZeroAreRefused: a lineup is saved as the team's
+// starting lineup (round 0) or for a match. The Lineups page no longer saves a
+// lineup for a later round and a team carries the lineup of its previous match,
+// so a PUT for round 1 or later answers 400 in plain words, stores nothing, and
+// answers before it reads the body or looks for the competition. GET and
+// DELETE for those rounds still answer, for what an older release left.
+func TestLineupPUT_RoundsAboveZeroAreRefused(t *testing.T) {
+	r, store, _ := setupLineupTestRouter(t)
+	require.NoError(t, store.SaveTournament(&state.Tournament{Name: "Test", Password: "secret"}))
+	require.NoError(t, store.SaveCompetition(&state.Competition{ID: "c1", TeamSize: 5}))
+	const sentence = "A lineup is saved as the team's starting lineup or for a match."
+
+	put := func(path, body string) *httptest.ResponseRecorder {
+		req := httptest.NewRequest(http.MethodPut, path, bytes.NewBufferString(body))
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("X-Tournament-Password", "secret")
+		w := httptest.NewRecorder()
+		r.ServeHTTP(w, req)
+		return w
+	}
+	const valid = `{"positions":{"senpo":"p1"}}`
+
+	for _, round := range []string{"1", "2", "10"} {
+		t.Run("round "+round+" is refused and stores nothing", func(t *testing.T) {
+			w := put("/api/competitions/c1/teams/teamA/lineups/"+round, valid)
+
+			require.Equal(t, http.StatusBadRequest, w.Code, w.Body.String())
+			var body map[string]string
+			require.NoError(t, json.Unmarshal(w.Body.Bytes(), &body))
+			assert.Equal(t, sentence, body["error"])
+			lineups, err := store.LoadTeamLineups("c1")
+			require.NoError(t, err)
+			assert.Empty(t, lineups)
+		})
+	}
+
+	t.Run("the refusal does not wait for the body or the competition", func(t *testing.T) {
+		assert.Equal(t, http.StatusBadRequest, put("/api/competitions/c1/teams/teamA/lineups/1", "{bad-json").Code)
+		w := put("/api/competitions/no-such-comp/teams/teamA/lineups/1", valid)
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assert.Contains(t, w.Body.String(), sentence)
+	})
+
+	t.Run("round 0, the starting lineup, is still saved", func(t *testing.T) {
+		w := put("/api/competitions/c1/teams/teamA/lineups/0", valid)
+
+		require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+		lineups, err := store.LoadTeamLineups("c1")
+		require.NoError(t, err)
+		assert.Len(t, lineups, 1)
+	})
 }
 
 // TestLineupPUT_MemberIDsRoundTrip (bc-tmid pass 3): a PUT body carrying
@@ -405,7 +461,7 @@ func TestLineupPUT_MemberIDsRoundTrip(t *testing.T) {
 		},
 	})
 	req := httptest.NewRequest(http.MethodPut,
-		"/api/competitions/c1/teams/teamA/lineups/1",
+		"/api/competitions/c1/teams/teamA/lineups/0",
 		bytes.NewBuffer(body))
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("X-Tournament-Password", "secret")
@@ -418,7 +474,7 @@ func TestLineupPUT_MemberIDsRoundTrip(t *testing.T) {
 	assert.Equal(t, "member-sato", putResp.MemberIDs[domain.PosSenpo], "PUT response carries memberIds")
 	assert.Equal(t, "member-ito", putResp.MemberIDs[domain.PosJiho])
 
-	getReq := httptest.NewRequest(http.MethodGet, "/api/competitions/c1/teams/teamA/lineups/1", nil)
+	getReq := httptest.NewRequest(http.MethodGet, "/api/competitions/c1/teams/teamA/lineups/0", nil)
 	getW := httptest.NewRecorder()
 	r.ServeHTTP(getW, getReq)
 	require.Equal(t, http.StatusOK, getW.Code)
@@ -444,7 +500,7 @@ func TestLineupPUT_MemberIDsOmitted_BehavesAsBefore(t *testing.T) {
 		},
 	})
 	req := httptest.NewRequest(http.MethodPut,
-		"/api/competitions/c1/teams/teamA/lineups/1",
+		"/api/competitions/c1/teams/teamA/lineups/0",
 		bytes.NewBuffer(body))
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("X-Tournament-Password", "secret")
@@ -479,7 +535,7 @@ func TestLineupPUT_MemberIDsInvalidPositionKey(t *testing.T) {
 		},
 	})
 	req := httptest.NewRequest(http.MethodPut,
-		"/api/competitions/c1/teams/teamA/lineups/1",
+		"/api/competitions/c1/teams/teamA/lineups/0",
 		bytes.NewBuffer(body))
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("X-Tournament-Password", "secret")
@@ -488,23 +544,19 @@ func TestLineupPUT_MemberIDsInvalidPositionKey(t *testing.T) {
 	assert.Equal(t, http.StatusBadRequest, w.Code)
 }
 
-// TestPublicLineupGET_FallbackBest: the scoring modal is the client-side
-// twin of AMENDMENT 1. Operators typically save one round-0 lineup for
-// the whole day, but a knockout final asks for its own round index (1+),
-// and an exact-only GET answers nothing saved, leaving the modal with no
-// names (UAT: the final's bootstrapped bout 1 was submitted with empty
-// sides). With ?fallback=best the handler resolves via the FindBestLineup
-// round tiers (highest round <= requested, else highest overall). Without
-// the param the exact-round semantics are unchanged (the lineup editor
-// relies on saved: false meaning "no lineup submitted for THIS round").
-func TestPublicLineupGET_FallbackBest(t *testing.T) {
+// TestPublicLineupGET_RoundIsExact: the round GET reads exactly the round asked
+// for. A team with a round-0 lineup and nothing for round 1 answers "nothing
+// saved" for round 1, echoing the round asked for and never a lineup swapped in
+// from another round: the Lineups page reads its starting lineup (round 0) this
+// way. What a team fields at a match is lineup-in-force, not this route.
+func TestPublicLineupGET_RoundIsExact(t *testing.T) {
 	r, store, _ := setupLineupTestRouter(t)
 
 	require.NoError(t, store.SaveCompetition(&state.Competition{
-		ID:       "c-fb",
+		ID:       "c-exact",
 		TeamSize: 5,
 	}))
-	require.NoError(t, store.SetTeamLineup("c-fb", domain.TeamLineup{
+	require.NoError(t, store.SetTeamLineup("c-exact", domain.TeamLineup{
 		TeamID: "teamA",
 		Round:  0,
 		Positions: map[domain.Position]string{
@@ -516,92 +568,44 @@ func TestPublicLineupGET_FallbackBest(t *testing.T) {
 		},
 	}, 5))
 
-	t.Run("exact miss with fallback=best returns the round-0 lineup", func(t *testing.T) {
-		req := httptest.NewRequest(http.MethodGet,
-			"/api/competitions/c-fb/teams/teamA/lineups/1?fallback=best", nil)
+	get := func(t *testing.T, path string) map[string]any {
+		t.Helper()
+		req := httptest.NewRequest(http.MethodGet, path, nil)
 		w := httptest.NewRecorder()
 		r.ServeHTTP(w, req)
-
 		require.Equal(t, http.StatusOK, w.Code, w.Body.String())
 		var body map[string]any
 		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &body))
+		return body
+	}
+
+	// The second query is what an older bundle may still send.
+	for _, query := range []string{"", "?fallback=best"} {
+		t.Run("an exact miss answers nothing saved"+query, func(t *testing.T) {
+			body := get(t, "/api/competitions/c-exact/teams/teamA/lineups/1"+query)
+			assert.Equal(t, false, body["saved"])
+			assert.Equal(t, map[string]any{}, body["positions"])
+			assert.Equal(t, float64(1), body["round"], "echoes the requested round, not another's")
+		})
+	}
+
+	t.Run("an exact hit is the round asked for", func(t *testing.T) {
+		body := get(t, "/api/competitions/c-exact/teams/teamA/lineups/0")
 		assert.Equal(t, true, body["saved"])
-		var got domain.TeamLineup
-		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &got))
-		assert.Equal(t, "teamA", got.TeamID)
-		assert.Equal(t, 0, got.Round, "round-0 lineup resolved for the round-1 request")
-		assert.Equal(t, "p1", got.Positions[domain.PosSenpo])
+		assert.Equal(t, float64(0), body["round"])
+		assert.Equal(t, "p1", body["positions"].(map[string]any)["senpo"])
 	})
 
-	t.Run("exact miss without the param answers nothing saved", func(t *testing.T) {
-		req := httptest.NewRequest(http.MethodGet,
-			"/api/competitions/c-fb/teams/teamA/lineups/1", nil)
-		w := httptest.NewRecorder()
-		r.ServeHTTP(w, req)
-		require.Equal(t, http.StatusOK, w.Code, w.Body.String())
-		var body map[string]any
-		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &body))
-		assert.Equal(t, false, body["saved"])
-		assert.Equal(t, map[string]any{}, body["positions"])
-		assert.Equal(t, float64(1), body["round"], "echoes the requested round, not the fallback's")
-	})
-
-	t.Run("fallback=best with no round lineup at all answers nothing saved", func(t *testing.T) {
-		req := httptest.NewRequest(http.MethodGet,
-			"/api/competitions/c-fb/teams/teamB/lineups/1?fallback=best", nil)
-		w := httptest.NewRecorder()
-		r.ServeHTTP(w, req)
-		require.Equal(t, http.StatusOK, w.Code, w.Body.String())
-		var body map[string]any
-		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &body))
-		assert.Equal(t, false, body["saved"])
-		assert.Equal(t, float64(1), body["round"])
-
-		// A MATCH-scoped lineup for the SAME team must never satisfy the
-		// round-scoped fallback: FindBestLineupAny skips match-scoped
-		// entries by design (AMENDMENT 1), so seeding one here and still
-		// reading saved: false pins that it was never consulted.
-		require.NoError(t, store.SetTeamLineup("c-fb", domain.TeamLineup{
+	t.Run("a match-scoped lineup of the team never answers a round read", func(t *testing.T) {
+		require.NoError(t, store.SetTeamLineup("c-exact", domain.TeamLineup{
 			TeamID:  "teamB",
 			MatchID: "Pool A-0",
 			Positions: map[domain.Position]string{
-				domain.PosSenpo:   "m1",
-				domain.PosJiho:    "m2",
-				domain.PosChuken:  "m3",
-				domain.PosFukusho: "m4",
-				domain.PosTaisho:  "m5",
+				domain.PosSenpo: "m1",
 			},
 		}, 5))
-		req2 := httptest.NewRequest(http.MethodGet,
-			"/api/competitions/c-fb/teams/teamB/lineups/1?fallback=best", nil)
-		w2 := httptest.NewRecorder()
-		r.ServeHTTP(w2, req2)
-		require.Equal(t, http.StatusOK, w2.Code, w2.Body.String())
-		var body2 map[string]any
-		require.NoError(t, json.Unmarshal(w2.Body.Bytes(), &body2))
-		assert.Equal(t, false, body2["saved"], "a match-scoped entry must not satisfy the round fallback")
-	})
-
-	t.Run("exact hit ignores the param", func(t *testing.T) {
-		require.NoError(t, store.SetTeamLineup("c-fb", domain.TeamLineup{
-			TeamID: "teamA",
-			Round:  1,
-			Positions: map[domain.Position]string{
-				domain.PosSenpo:   "q1",
-				domain.PosJiho:    "q2",
-				domain.PosChuken:  "q3",
-				domain.PosFukusho: "q4",
-				domain.PosTaisho:  "q5",
-			},
-		}, 5))
-		req := httptest.NewRequest(http.MethodGet,
-			"/api/competitions/c-fb/teams/teamA/lineups/1?fallback=best", nil)
-		w := httptest.NewRecorder()
-		r.ServeHTTP(w, req)
-		require.Equal(t, http.StatusOK, w.Code)
-		var got domain.TeamLineup
-		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &got))
-		assert.Equal(t, 1, got.Round, "exact round-1 lineup wins over fallback")
+		body := get(t, "/api/competitions/c-exact/teams/teamB/lineups/0")
+		assert.Equal(t, false, body["saved"], "a match-scoped entry is not a round's lineup")
 	})
 }
 
@@ -619,6 +623,7 @@ func TestPublicLineupGET_UnknownCompetition(t *testing.T) {
 	}{
 		{"round", "/api/competitions/no-such-comp/teams/teamA/lineups/1"},
 		{"match", "/api/competitions/no-such-comp/teams/teamA/match-lineups/m1"},
+		{"in force", "/api/competitions/no-such-comp/teams/teamA/lineup-in-force/m1"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			req := httptest.NewRequest(http.MethodGet, tc.path, nil)
@@ -658,4 +663,163 @@ func TestPublicLineupGET_BadParamsStay400(t *testing.T) {
 			assert.Equal(t, http.StatusBadRequest, w.Code, w.Body.String())
 		})
 	}
+}
+
+// inForceBody GETs the lineup-in-force route as an anonymous caller and decodes
+// the RAW body, so a field going missing fails here rather than reading as its
+// zero value.
+func inForceBody(t *testing.T, r *gin.Engine, compID, teamID, matchID string) map[string]any {
+	t.Helper()
+	req := httptest.NewRequest(http.MethodGet,
+		"/api/competitions/"+compID+"/teams/"+url.PathEscape(teamID)+"/lineup-in-force/"+url.PathEscape(matchID), nil)
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	var body map[string]any
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &body))
+	return body
+}
+
+// TestPublicLineupInForceGET answers which lineup a team fields at a match
+// (operator ruling 2026-10-05) for the three shapes it can come from, and
+// nothing. Public like the other lineup reads, and never a 404 for "nothing
+// saved".
+func TestPublicLineupInForceGET(t *testing.T) {
+	r, store, _ := setupLineupTestRouter(t)
+	require.NoError(t, store.SaveTournament(&state.Tournament{Name: "Test", Password: "secret"}))
+	require.NoError(t, store.SaveCompetition(&state.Competition{ID: "c1", TeamSize: 5}))
+	require.NoError(t, store.SavePoolMatches("c1", []state.MatchResult{
+		{ID: "Pool A-0", SideA: "A", SideAID: "teamA", SideB: "B", SideBID: "teamB"},
+		{ID: "Pool A-1", SideA: "A", SideAID: "teamA", SideB: "C", SideBID: "teamC"},
+	}))
+	save := func(l domain.TeamLineup) {
+		l.Positions = map[domain.Position]string{domain.PosSenpo: "p-" + l.MatchID + "-" + string(rune('0'+l.Round))}
+		require.NoError(t, store.SetTeamLineup("c1", l, 5))
+	}
+
+	t.Run("nothing saved is a 200 with saved false, echoing what was asked", func(t *testing.T) {
+		body := inForceBody(t, r, "c1", "teamA", "Pool A-0")
+
+		assert.Equal(t, false, body["saved"], "never omitted")
+		assert.Equal(t, map[string]any{}, body["positions"], "empty positions, not null")
+		assert.Equal(t, "teamA", body["teamId"])
+		assert.Equal(t, "c1", body["competitionId"])
+		assert.Equal(t, "Pool A-0", body["matchId"])
+		assert.NotContains(t, body, "sourceMatchId")
+		assert.NotContains(t, body, "sourceRound")
+	})
+
+	t.Run("a Lineups-page lineup names its round, round 0 being the starting lineup", func(t *testing.T) {
+		save(domain.TeamLineup{TeamID: "teamA", Round: 0})
+		body := inForceBody(t, r, "c1", "teamA", "Pool A-0")
+
+		assert.Equal(t, true, body["saved"])
+		assert.Equal(t, float64(0), body["sourceRound"], "round 0 is present, not omitted")
+		assert.NotContains(t, body, "sourceMatchId")
+		assert.Equal(t, map[string]any{"senpo": "p--0"}, body["positions"])
+	})
+
+	t.Run("a lineup saved for the match is its own", func(t *testing.T) {
+		save(domain.TeamLineup{TeamID: "teamA", MatchID: "Pool A-0"})
+		body := inForceBody(t, r, "c1", "teamA", "Pool A-0")
+
+		assert.Equal(t, true, body["saved"])
+		assert.Equal(t, "Pool A-0", body["sourceMatchId"])
+		assert.NotContains(t, body, "sourceRound")
+		assert.Equal(t, map[string]any{"senpo": "p-Pool A-0-0"}, body["positions"])
+	})
+
+	t.Run("the team's next match carries it, and names the match it came from", func(t *testing.T) {
+		body := inForceBody(t, r, "c1", "teamA", "Pool A-1")
+
+		assert.Equal(t, true, body["saved"])
+		assert.Equal(t, "Pool A-0", body["sourceMatchId"])
+		assert.NotContains(t, body, "sourceRound")
+		assert.Equal(t, map[string]any{"senpo": "p-Pool A-0-0"}, body["positions"])
+	})
+
+	t.Run("another team carries nothing of it", func(t *testing.T) {
+		body := inForceBody(t, r, "c1", "teamC", "Pool A-1")
+
+		assert.Equal(t, false, body["saved"])
+	})
+}
+
+// A damaged match file costs the read the part of the draw it held, never the
+// read: the lineups are intact, so a pool match's carried lineup is still
+// answered when bracket.json cannot be read, and the 500 stays for a lineups
+// file that cannot be (TestPublicLineupInForceGET_ReadFailureIs500).
+func TestPublicLineupInForceGET_AnUnreadableBracketStillAnswers(t *testing.T) {
+	r, store, dir := setupLineupTestRouter(t)
+	require.NoError(t, store.SaveCompetition(&state.Competition{ID: "c1", TeamSize: 5}))
+	require.NoError(t, store.SavePoolMatches("c1", []state.MatchResult{
+		{ID: "Pool A-0", SideA: "A", SideAID: "teamA", SideB: "B", SideBID: "teamB"},
+		{ID: "Pool A-1", SideA: "A", SideAID: "teamA", SideB: "C", SideBID: "teamC"},
+	}))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "competitions", "c1", "bracket.json"), []byte("{not json"), 0o600))
+	require.NoError(t, store.SetTeamLineup("c1", domain.TeamLineup{
+		TeamID: "teamA", MatchID: "Pool A-0", Positions: map[domain.Position]string{domain.PosSenpo: "carried"},
+	}, 5))
+
+	body := inForceBody(t, r, "c1", "teamA", "Pool A-1")
+
+	assert.Equal(t, true, body["saved"])
+	assert.Equal(t, "Pool A-0", body["sourceMatchId"], "carried from the previous match, which the pool file still places")
+	assert.Equal(t, map[string]any{"senpo": "carried"}, body["positions"])
+}
+
+// TestPublicLineupInForceGET_NoAuthRequired: like the other lineup reads, no
+// password is asked even when the tournament has one.
+func TestPublicLineupInForceGET_NoAuthRequired(t *testing.T) {
+	r, store, _ := setupLineupTestRouter(t)
+	require.NoError(t, store.SaveTournament(&state.Tournament{Name: "Test", Password: "secret"}))
+	require.NoError(t, store.SaveCompetition(&state.Competition{ID: "c1", TeamSize: 5}))
+
+	req := httptest.NewRequest(http.MethodGet, "/api/competitions/c1/teams/teamA/lineup-in-force/m1", nil)
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code, w.Body.String())
+}
+
+func TestPublicLineupInForceGET_BadParamsStay400(t *testing.T) {
+	r, _, _ := setupLineupTestRouter(t)
+
+	for _, tc := range []struct {
+		name, path string
+	}{
+		{"bad competition id format", "/api/competitions/bad.id/teams/teamA/lineup-in-force/m1"},
+		{"empty team id", "/api/competitions/c1/teams//lineup-in-force/m1"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodGet, tc.path, nil)
+			w := httptest.NewRecorder()
+			r.ServeHTTP(w, req)
+			assert.Equal(t, http.StatusBadRequest, w.Code, w.Body.String())
+		})
+	}
+}
+
+// failingLineupEngine is a LineupEngine whose read fails.
+type failingLineupEngine struct{}
+
+func (failingLineupEngine) LineupInForce(string, string, string) (engine.InForceLineup, error) {
+	return engine.InForceLineup{}, errors.New("read lineups.yaml: input/output error")
+}
+
+// A read that fails is the server's fault: a 500, not an empty "nothing saved"
+// that would let the sheet show a blank lineup over one it could not read.
+func TestPublicLineupInForceGET_ReadFailureIs500(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	store, err := state.NewStore(t.TempDir())
+	require.NoError(t, err)
+	require.NoError(t, store.SaveCompetition(&state.Competition{ID: "c1", TeamSize: 5}))
+	r := gin.New()
+	RegisterPublicLineupHandlers(r.Group("/api"), store, store, failingLineupEngine{})
+
+	req := httptest.NewRequest(http.MethodGet, "/api/competitions/c1/teams/teamA/lineup-in-force/m1", nil)
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusInternalServerError, w.Code, w.Body.String())
 }

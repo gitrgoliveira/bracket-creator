@@ -25,7 +25,7 @@ type SkippedCompetition struct {
 // mobile-app Export-PDFs endpoint.
 //
 // Each competition's display name becomes the title-page text; team
-// competitions (TeamSize > 0 or Kind == "team") are flagged so the Tags group
+// competitions (Competition.IsTeam) are flagged so the Tags group
 // can exclude them. compIDs, when non-empty, restricts export to those
 // competitions; otherwise all competitions are exported.
 //
@@ -104,7 +104,7 @@ func (e *Engine) ExportTournamentWorkbooks(tmpDir string, compIDs ...string) ([]
 		sources = append(sources, pdf.SourceWorkbook{
 			Path:   xlsxPath,
 			Title:  title,
-			IsTeam: comp.TeamSize > 0 || comp.Kind == "team",
+			IsTeam: comp.IsTeam(),
 		})
 	}
 	return sources, skipped, nil

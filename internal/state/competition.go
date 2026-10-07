@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"time"
 
 	"github.com/gitrgoliveira/bracket-creator/internal/domain"
@@ -131,6 +132,8 @@ func (s *Store) copyCompetition(c *Competition) *Competition {
 		cp.Players = make([]domain.Player, len(c.Players))
 		copy(cp.Players, c.Players)
 	}
+	cp.RoundLineupsGiven = cloneRoundLineupsGiven(c.RoundLineupsGiven)
+	cp.RoundLineupsLegacy = slices.Clone(c.RoundLineupsLegacy)
 	return &cp
 }
 

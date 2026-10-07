@@ -19,7 +19,6 @@ const STUBBED_GLOBALS = {
   isTextEntry: () => false,
   isInteractiveTarget: () => false,
   confirmDialog: vi.fn().mockResolvedValue(true),
-  resolveRoundIndex: () => 0,
   API: {
     fetchCompetitionDetails: vi.fn().mockResolvedValue({
       id: 'comp1', config: { format: 'mixed', teamMatchType: 'kachinuki', naginata: false, players: [] },

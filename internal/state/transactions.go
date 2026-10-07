@@ -240,6 +240,12 @@ func (s *Store) WithTransaction(compID string, fn func(tx StoreTx) error) error 
 		return ferr
 	}
 
+	// A transaction that wrote the draw also moves the round lineups that
+	// write seated a team for, staged here beside it so they commit together
+	// (round_lineups.go). After fn returns nil, so a transaction that does not
+	// commit settles nothing.
+	tx.settleRoundLineupsAtCommit()
+
 	// Fast path: a tx that called nothing through the WAL writer
 	// (e.g., pure read-only or a no-op save like
 	// SaveCompetitionChanged returning false-changed) has no

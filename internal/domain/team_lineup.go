@@ -1,8 +1,11 @@
 package domain
 
 import (
+	"cmp"
 	"errors"
 	"fmt"
+	"maps"
+	"slices"
 	"strconv"
 	"strings"
 )
@@ -43,10 +46,10 @@ func (p Position) Label() string {
 // Keying (mp-825): when MatchID is non-empty the lineup is
 // match-scoped, a team may field a different order/roster for each
 // encounter (e.g. successive pool matches). When MatchID is empty the
-// lineup is round-scoped (the legacy behavior, still used by bracket
-// rounds and pre-mp-825 data): one lineup per (team, round). The two
-// scopes coexist; a match-scoped entry shadows the round-scoped
-// fallback for that match.
+// lineup is round-scoped (the Lineups page's lineup, and pre-mp-825 data):
+// one lineup per (team, round). The two scopes coexist, and which one a team
+// fields in a match is not decided here: a team carries the lineup of its
+// previous match unless one is entered for the match (engine.Engine.LineupInForce).
 //
 // FR-040, data-model §4.
 type TeamLineup struct {
@@ -133,6 +136,71 @@ func (t TeamLineup) checkDuplicateMembers(teamSize int) error {
 	return nil
 }
 
+// ErrLineupNoChangedPositions is the refusal of a save that says it changed
+// positions and names none.
+var ErrLineupNoChangedPositions = errors.New("team_lineup: a save that lists the positions it changed must list at least one")
+
+// ErrLineupChangedPositionMissing is the refusal of a save that lists a changed
+// position its positions map has no entry for: the new name is what the save
+// says, so a changed position with nothing to say is a malformed save, not a
+// request to clear it (a clear is an entry with no name).
+var ErrLineupChangedPositionMissing = errors.New("team_lineup: a changed position has no entry in positions")
+
+// ApplyChanges is t with each position in changed set from a save's own maps and
+// every other position as t holds it: the way a save that names the positions it
+// changed lands on the lineup stored when it arrives, so two saves changing
+// different positions both keep their change. positions and memberIDs may carry
+// the whole of the sender's form; only the changed keys are read, and the rest
+// are ignored, whatever they hold.
+//
+// For a changed position p, positions must have an entry for it
+// (ErrLineupChangedPositionMissing otherwise). The name is positions[p] and the
+// member id memberIDs[p], absent meaning none. A position with neither is cleared,
+// removed from both maps; any other is set: the name, and the id, which is removed
+// when it is empty so a new name never keeps the old member's id beside it. A name
+// with no id is a person typed in; an id with no name places a member who has none
+// yet. An empty changed list is ErrLineupNoChangedPositions.
+//
+// The result shares nothing with t, and its Positions is never nil. It is not
+// validated: ValidatePositions answers for the composed lineup, which is where a
+// member placed at two positions is caught, naming both.
+func (t TeamLineup) ApplyChanges(changed []Position, positions, memberIDs map[Position]string) (TeamLineup, error) {
+	if len(changed) == 0 {
+		return TeamLineup{}, ErrLineupNoChangedPositions
+	}
+	out := t
+	out.Positions = maps.Clone(t.Positions)
+	if out.Positions == nil {
+		out.Positions = map[Position]string{}
+	}
+	out.MemberIDs = maps.Clone(t.MemberIDs)
+	for _, p := range changed {
+		name, ok := positions[p]
+		if !ok {
+			return TeamLineup{}, fmt.Errorf("%w: %q", ErrLineupChangedPositionMissing, p)
+		}
+		id := memberIDs[p]
+		if name == "" && id == "" {
+			delete(out.Positions, p)
+			delete(out.MemberIDs, p)
+			continue
+		}
+		out.Positions[p] = name
+		if id == "" {
+			delete(out.MemberIDs, p)
+		} else {
+			if out.MemberIDs == nil {
+				out.MemberIDs = map[Position]string{}
+			}
+			out.MemberIDs[p] = id
+		}
+	}
+	if len(out.MemberIDs) == 0 {
+		out.MemberIDs = nil
+	}
+	return out, nil
+}
+
 // LineupSlot is one OCCUPIED position from a lineup: the Position itself,
 // its display NAME (Positions), and its squad MEMBER ID (MemberIDs) when
 // that position has been repaired/resolved -- empty for an unrepaired
@@ -151,20 +219,54 @@ type LineupSlot struct {
 	MemberID string
 }
 
+// fikPositionOrder is the five FIK names of a 5-person team in the order they
+// are fielded, senpo first and taisho last. Both canonicalPositionOrder and
+// ComparePositions read it, so the order is defined once.
+var fikPositionOrder = [...]Position{PosSenpo, PosJiho, PosChuken, PosFukusho, PosTaisho}
+
 // canonicalPositionOrder returns the position traversal order OrderedMembers
 // walks: the five FIK names for a 5-person team, else 1..teamSize
-// numerically. It has a single consumer today, but stays its own named step
-// rather than being inlined into OrderedMembers, so the order itself stays
-// separately readable and testable.
+// numerically. It stays its own named step rather than being inlined into
+// OrderedMembers, so the order itself stays separately readable and testable.
 func canonicalPositionOrder(teamSize int) []Position {
 	if teamSize == 5 {
-		return []Position{PosSenpo, PosJiho, PosChuken, PosFukusho, PosTaisho}
+		return slices.Clone(fikPositionOrder[:])
 	}
 	order := make([]Position, teamSize)
 	for i := 1; i <= teamSize; i++ {
 		order[i-1] = PositionNumbered(i)
 	}
 	return order
+}
+
+// ComparePositions orders two positions the way a lineup is fielded, the order
+// canonicalPositionOrder walks: the five FIK names from senpo to taisho, then
+// numbered positions by their number (10 after 2), then any other position by
+// name. A reader that must walk the positions a lineup holds without a team size
+// (the Kachinuki Detail export, which labels a fighter by the first position it
+// holds) orders them with this, so it agrees with the roster that walks
+// OrderedMembers about which position comes first.
+func ComparePositions(a, b Position) int {
+	groupA, rankA := positionRank(a)
+	groupB, rankB := positionRank(b)
+	return cmp.Or(
+		cmp.Compare(groupA, groupB),
+		cmp.Compare(rankA, rankB),
+		cmp.Compare(a, b),
+	)
+}
+
+// positionRank places a position in the order ComparePositions gives: group 0
+// for a FIK name (its rank is its place in fikPositionOrder), group 1 for a
+// numbered position (its rank is its number), group 2 for any other.
+func positionRank(p Position) (group, rank int) {
+	if i := slices.Index(fikPositionOrder[:], p); i >= 0 {
+		return 0, i
+	}
+	if n, err := strconv.Atoi(string(p)); err == nil && n >= 0 {
+		return 1, n
+	}
+	return 2, 0
 }
 
 // OrderedMembers returns the occupied lineup slots in canonical position

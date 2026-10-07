@@ -180,7 +180,7 @@ func TestSelfRun_ScoreSheetTeamWrites_AnonymousCallerSaves(t *testing.T) {
 	assert.Equal(t, f.blankA, lineup.MemberIDs[domain.PosSenpo])
 
 	w = f.send(http.MethodPut, f.membersPath()+"/"+f.blankA, "", map[string]any{"name": "Mei Ito"})
-	require.Equal(t, http.StatusNoContent, w.Code, "naming a member with no name yet: %s", w.Body.String())
+	require.Equal(t, http.StatusOK, w.Code, "naming a member with no name yet: %s", w.Body.String())
 	assert.Equal(t, "Mei Ito", f.memberName(t, f.blankA))
 
 	w = f.send(http.MethodPost, f.membersPath(), "", map[string]any{"name": "Ren Abe"})
@@ -265,9 +265,9 @@ func TestSelfRun_NamingABlankMemberAtOnceOneWins(t *testing.T) {
 	}
 	wg.Wait()
 
-	assert.ElementsMatch(t, []int{http.StatusNoContent, http.StatusConflict}, codes, "one caller names the member, the other is refused")
+	assert.ElementsMatch(t, []int{http.StatusOK, http.StatusConflict}, codes, "one caller names the member, the other is refused")
 	winner := names[0]
-	if codes[1] == http.StatusNoContent {
+	if codes[1] == http.StatusOK {
 		winner = names[1]
 	}
 	assert.Equal(t, winner, f.memberName(t, f.blankA), "the member keeps the name of the caller that succeeded")
@@ -281,7 +281,7 @@ func TestSelfRun_ScoreSheetTeamWrites_OrganiserUnrestricted(t *testing.T) {
 	require.Equal(t, http.StatusOK, w.Code, "a finished match's lineup stays editable: %s", w.Body.String())
 
 	w = f.send(http.MethodPut, f.membersPath()+"/"+f.namedA, "main-pw", map[string]any{"name": "Sato Kenji"})
-	require.Equal(t, http.StatusNoContent, w.Code, "renaming a named member: %s", w.Body.String())
+	require.Equal(t, http.StatusOK, w.Code, "renaming a named member: %s", w.Body.String())
 	assert.Equal(t, "Sato Kenji", f.memberName(t, f.namedA))
 }
 
@@ -432,7 +432,7 @@ func TestSelfRun_AddingAMemberIsBounded(t *testing.T) {
 		w := f.send(http.MethodPost, f.membersPath(), "main-pw", map[string]any{"name": "Ren Abe"})
 		require.Equal(t, http.StatusCreated, w.Code, w.Body.String())
 		w = f.send(http.MethodPut, f.membersPath()+"/"+f.blankA, "main-pw", map[string]any{"name": "Mei Ito"})
-		require.Equal(t, http.StatusNoContent, w.Code, w.Body.String())
+		require.Equal(t, http.StatusOK, w.Code, w.Body.String())
 	})
 }
 

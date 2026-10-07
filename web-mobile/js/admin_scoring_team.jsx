@@ -2,7 +2,7 @@
 // Private to the scoring module; ScoreEditorModal routes here for team matches.
 // Extracted from admin_scoring_modal.jsx (mp-zac3).
 
-const { useState: useStateA, useEffect: useEffectA, useRef: useRefA } = React;
+const { useState: useStateA, useEffect: useEffectA, useRef: useRefA, useLayoutEffect: useLayoutEffectA } = React;
 
 import {
   MAX_IPPONS_PER_SIDE,
@@ -52,12 +52,13 @@ import { isOlderRunningCopy } from './patch.jsx';
 import { useDebouncedRunningWrite, SyncStatusPill, useChangedGroups, useKeptInHistoryNote, KeptInHistoryNote } from './admin_scoring_autosave.jsx';
 import { MatchHistoryDisclosure } from './match_history_view.jsx';
 import { serverNowMs } from './server_clock.jsx';
+import { publishHeight } from './published_height.jsx';
 import { SideLabel } from './side_cell.jsx';
 
 // Imported from the leaf, not read off `window`, for the same reason
 // admin_scoring_shared.jsx does it: write_result.jsx is import-only, and this
 // editor is ES-imported by hosts and tests that never load api_client.
-import { notLandedBanner, terminalFailureBanner, notSavedText, writeDidNotLand, writeWasRefused, writeRetryable, dependentActionBlocked, FETCH_TIMEOUT_MS, REP_BOUT_NOT_ADDED, REP_BOUT_NOT_REMOVED, noAnswerSentence, decisionWord } from './write_result.jsx';
+import { notLandedBanner, terminalFailureBanner, notSavedText, writeDidNotLand, writeWasRefused, writeRetryable, queuedNotice, dependentActionBlocked, FETCH_TIMEOUT_MS, withinDeadline, TIMED_OUT, REP_BOUT_NOT_ADDED, REP_BOUT_NOT_REMOVED, noAnswerSentence, decisionWord } from './write_result.jsx';
 
 // boutMiddle is THE single source for a bout's centre value (vs/X/(E)/(DH));
 // the editor derives its per-bout middle from it rather than restating the
@@ -66,7 +67,7 @@ import { boutMiddle, winnerSideLR } from './bracket.jsx';
 import { realIppons, hanteiTied, hanteiSlot, hanteiWinnerKey, nameOf, sideSlotOrder, attributeWinnerSide, subBoutAttribution, DEFAULT_WIN_IPPON } from './result_slot.jsx';
 import { creditedSideKey, creditedTotals } from './team_default_credit.jsx';
 // bc-dtfn: the one owner of "is this tap the bounce of the previous one".
-import { stampTap, clearTap, acceptTap, swallowBounce, useArmedConfirm } from './tap_guard.jsx';
+import { stampTap, clearTap, acceptTap, swallowBounce, useArmedConfirm, useOpenedTapGuard } from './tap_guard.jsx';
 
 // renderTeamBoutMiddle: the ONE place the editor turns a sub-bout into its
 // centre value, for BOTH the read-only done row and the live entry row. Derives
@@ -142,7 +143,12 @@ export function preserveStoredDaihyosenVerdict({ armed, pickedSide, tied, existi
 // StreamingOverlay). The implementations live in lineup_resolver.jsx;
 // re-exported here so existing imports from admin_scoring_modal.jsx (which
 // re-exports them onward) continue to work.
-import { resolveMatchLineup, resolveLineupTeamId, resolveBoutSideName, resolveBoutSideMemberId, resolveSquadMember, squadMemberIdForUniqueName, squadRosterEntries, rosterWithoutPlacedElsewhere, resolveBoutSideDisplayName, buildInlineLineupWrite, memberRefusalNote, POS_KEYS_5, POS_LABELS_5 } from './lineup_resolver.jsx';
+import { resolveMatchLineup, resolveLineupTeamId, resolveBoutSideName, resolveBoutSideMemberId, resolveSquadMember, squadMemberIdForUniqueName, squadRosterEntries, rosterWithoutPlacedElsewhere, resolveBoutSideDisplayName, buildInlineLineupWrite, memberRefusalNote, alreadyPlacedNote, lineupPositionLabel, POS_KEYS_5, POS_LABELS_5 } from './lineup_resolver.jsx';
+// The one owner of what a lineup save carries: the one position a name-box pick changes.
+import { changedLineupSave } from './lineup_save.jsx';
+// The one owner of what a list of team members that arrives does to the members
+// shown, and of keeping a member this sheet named or added over a list that predates it.
+import { mergeMembers, newMembersWait } from './lineup_draft.jsx';
 import { DAIHYOSEN_POSITION } from './pool_ids.jsx';
 import { joinList } from './admin_helpers.jsx';
 // The shared owner of what an operator is told about unreadable data; the
@@ -638,8 +644,9 @@ export function resolveKachinukiBoutSides({ aName, bName, wKey, teamWinnerName }
 // still-BLANK member RENAMES that member (the ruling: the name attaches to
 // the number it was shown with) and keeps the row's id; typed over anything
 // else (a named member, or no prior pick at all) is a substitution and
-// carries no id, exactly as the fixed-order lineup path does.
-export async function pickManualBoutName({ sub, idx, sideKey, memberIdKey, squad, setSquad, compId, teamId, password, updateSub, onRenameFailed }, value, member) {
+// carries no id, exactly as the fixed-order lineup path does. A rename the
+// server holds is handed to onRenamed as the member written.
+export async function pickManualBoutName({ sub, idx, sideKey, memberIdKey, squad, onRenamed, compId, teamId, password, updateSub, onRenameFailed }, value, member) {
   if (member && member.id) {
     updateSub(idx, prev => ({ ...prev, [sideKey]: value, [memberIdKey]: member.id }));
     return;
@@ -651,10 +658,9 @@ export async function pickManualBoutName({ sub, idx, sideKey, memberIdKey, squad
   updateSub(idx, prev => ({ ...prev, [sideKey]: value, [memberIdKey]: renames ? priorId : "" }));
   if (!renames || !teamId || typeof window.API?.renameTeamMember !== "function") return;
   try {
-    await window.API.renameTeamMember(compId, teamId, priorId, typed, password);
-    if (typeof setSquad === "function") {
-      setSquad(sq => (Array.isArray(sq) ? sq : []).map(mm => (mm && mm.id === priorId) ? { ...mm, name: typed } : mm));
-    }
+    // The member as the server answered it, stamped: what the sheet's lists merge by,
+    // where a copy built from the name typed carries no stamp and would lose to every list.
+    onRenamed([await window.API.renameTeamMember(compId, teamId, priorId, typed, password)]);
   } catch (e) {
     // TELL THE OPERATOR. The rename never reached the server, so the member
     // stays nameless there permanently: every later picker row, the Lineups
@@ -807,15 +813,6 @@ const REP_BOUT_REMOVE_REFUSALS = new Map([
   ["no_daihyosen", "No daihyosen to remove"],
 ]);
 
-// withinDeadline: a promise's outcome, or TIMED_OUT once `ms` has passed with
-// none. Only the wait ends: the promise itself runs on.
-const TIMED_OUT = Symbol("timed out");
-function withinDeadline(promise, ms) {
-  let timer;
-  const late = new Promise((resolve) => { timer = setTimeout(() => resolve(TIMED_OUT), ms); });
-  return Promise.race([promise, late]).finally(() => clearTimeout(timer));
-}
-
 // subsKey: a bout log by its content, the one comparison the match override
 // makes both when the prop moves (the clearing effect) and when a server
 // answer is adopted (adoptServerSubs), so the two cannot disagree about
@@ -838,6 +835,190 @@ function holdsAnswer(stamp, at) {
 // match from before that write. It is keepNewerMatches' rule (patch.jsx).
 function predatesAnswer(match, override) {
   return override.at > 0 && !!match && isOlderRunningCopy(match, override.match.status, override.at);
+}
+
+// What a pick is answered with when its side's lineup was never read and the
+// pick's own read fails: with no lineup held, the pick could be neither checked
+// (one member at one position) nor shown on the row.
+const LINEUP_NOT_READ_NOTICE = "The lineup could not be read, so this name was not saved. Check the connection and try again.";
+
+// What a pick is answered with when another team was really seated on its side while
+// the pick was out (the feeding match corrected on another device): the name was typed
+// for the team that played the side then, and the members and lineup it would write are
+// theirs.
+const SIDE_TEAM_CHANGED_NOTICE = "Nothing was saved because another team is now on this side. Type the name again.";
+
+// Whether a save of this match's lineup for the team is still waiting in the
+// outbox, whichever surface queued it. The server's copy lacks that edit, so a
+// read of it is not shown over the lineup held here (useMatchLineups). The lineup
+// held here has the edits made on this sheet only: the at-court lineup panel or the
+// Lineups page may have saved since.
+function matchLineupSaveQueued(compId, teamId, matchId) {
+  const api = window.API;
+  if (!api || typeof api.queuedLineupSave !== "function") return false;
+  return !!api.queuedLineupSave(compId, teamId, { matchId });
+}
+
+// The ONE key of a bout row's lineup notice, per side. The same whichever way
+// the pick is written (a lineup position, or the bout itself), so the editable
+// row and the read-only row of a recorded kachinuki bout both find it.
+function lineupNoticeKey(side, idx) {
+  return `${side}:${idx}`;
+}
+
+// The row a notice was filed for: lineupNoticeKey's own shape, read back.
+function lineupNoticeRow(key) {
+  return Number(key.split(":")[1]);
+}
+
+const LINEUP_SIDES = ["a", "b"];
+const NO_LINEUPS = { a: null, b: null };
+
+// The lineup each team fields in this match, as the server holds it. A name
+// picked on the sheet saves the one position it names and the server puts it on
+// the lineup it holds (operator decision 2026-10-07, "Only changed positions");
+// the lineup held here is what the pick is checked against (one member at one
+// position) and what the rows show, so a pick on a lineup that was not read is
+// refused. A side ("a" Aka/sideA, "b" Shiro/sideB) whose first read has not landed
+// is read by the pick itself (lineupHeldFor), which is refused only when that
+// read fails; such a side is also read again when the connection returns.
+// null is a successful read of "nothing in force".
+//
+// One sync per match: a read begun for another match, or after the sheet
+// closed, never lands, and of two reads of a side the later-begun wins, a write
+// of the side (sent or queued) counting as the latest read, so a read still out
+// from before it cannot put the old lineup back. A read that fails leaves the
+// side as it was. A change announced for this competition is followed, except
+// for a side this sheet is writing (that side is read once its write settles)
+// or whose lineup has a save still queued (the server's copy lacks that edit,
+// so the lineup held stays).
+//
+// A side given another team (dropLineup) holds no lineup until the new team's is
+// read: the old team's goes, and no read or write still out for it lands on the
+// side, whenever it answers. The side then reads as never read, so a pick on it
+// is refused when the new team's read fails, never checked against or shown on
+// the old team's lineup.
+function useMatchLineups(compId, matchId) {
+  const [lineups, setLineups] = useStateA(NO_LINEUPS);
+  const syncRef = useRefA(null);
+
+  useEffectA(() => {
+    const sync = {
+      alive: true,
+      teamIds: { a: "", b: "" },
+      began: { a: 0, b: 0 },
+      landed: { a: 0, b: 0 },
+      // Raised when a side is given another team: what began before it is for the old one.
+      epoch: { a: 0, b: 0 },
+      writing: { a: 0, b: 0 },
+      announced: { a: false, b: false },
+      held: { a: null, b: null },
+    };
+    syncRef.current = sync;
+    setLineups(NO_LINEUPS);
+
+    const isRead = (side) => sync.landed[side] > 0;
+    // Rejects when the lineup cannot be read: each caller decides what that means.
+    const read = async (side, teamId) => {
+      const seq = ++sync.began[side];
+      const epoch = sync.epoch[side];
+      const lineup = await resolveMatchLineup(compId, teamId, matchId, window.API, { throwOnError: true });
+      const keepsHeld = isRead(side) && matchLineupSaveQueued(compId, teamId, matchId);
+      if (sync.alive && epoch === sync.epoch[side] && seq >= sync.landed[side] && !keepsHeld) {
+        sync.landed[side] = seq;
+        sync.held[side] = lineup;
+        setLineups(prev => ({ ...prev, [side]: lineup }));
+      }
+      return lineup;
+    };
+    // A read nobody waits on; when it fails, the next pick on the side reads again.
+    const refresh = (side) => (
+      sync.alive && sync.teamIds[side] ? read(side, sync.teamIds[side]).catch(() => {}) : Promise.resolve()
+    );
+    sync.start = (teamIds) => {
+      sync.teamIds = teamIds;
+      return Promise.all(LINEUP_SIDES.map(side => refresh(side)));
+    };
+    // The side is given another team: nothing of the old team's lineup stays on it, and
+    // no read or write still out for the old team lands, whenever it answers. No team
+    // is read for the side until start names the new one, and until its lineup lands
+    // the side reads as never read.
+    sync.drop = (side) => {
+      sync.epoch[side] += 1;
+      sync.landed[side] = 0;
+      sync.held[side] = null;
+      sync.teamIds[side] = "";
+      setLineups(prev => ({ ...prev, [side]: null }));
+    };
+    // Asks whether the side was given another team since now: the one counter that says
+    // so, which a pick (or a rename) that waits on the server checks when it answers.
+    sync.watchSide = (side) => {
+      const epoch = sync.epoch[side];
+      return () => epoch !== sync.epoch[side];
+    };
+    // One write of one side's lineup, bound to this match.
+    sync.beginWrite = (side) => {
+      sync.writing[side] += 1;
+      const epoch = sync.epoch[side];
+      return {
+        sideChanged: sync.watchSide(side),
+        isRead: () => isRead(side),
+        read: (teamId) => read(side, teamId),
+        held: () => sync.held[side],
+        set: (lineup) => {
+          if (!sync.alive || epoch !== sync.epoch[side]) return;
+          // A read still out began before this write: it must not put the old lineup back.
+          sync.landed[side] = ++sync.began[side];
+          sync.held[side] = lineup;
+          setLineups(prev => ({ ...prev, [side]: lineup }));
+        },
+        end: () => {
+          sync.writing[side] -= 1;
+          if (sync.writing[side] === 0 && sync.announced[side]) {
+            sync.announced[side] = false;
+            refresh(side);
+          }
+        },
+      };
+    };
+
+    const onLineupUpdated = (e) => {
+      if (e.detail && e.detail.competitionId !== compId) return;
+      // The announcement names the team it changed: only the side that has that team
+      // is read again. One that names none is read for both, as before.
+      const teamId = e.detail && e.detail.teamId;
+      for (const side of LINEUP_SIDES) {
+        if (teamId && sync.teamIds[side] !== teamId) continue;
+        if (sync.writing[side] > 0) sync.announced[side] = true;
+        else refresh(side);
+      }
+    };
+    // A side never read is read again once the connection is back.
+    const onOnline = () => {
+      for (const side of LINEUP_SIDES) {
+        if (!isRead(side)) refresh(side);
+      }
+    };
+    window.addEventListener("lineup-updated", onLineupUpdated);
+    window.addEventListener("online", onOnline);
+    return () => {
+      sync.alive = false;
+      window.removeEventListener("lineup-updated", onLineupUpdated);
+      window.removeEventListener("online", onOnline);
+    };
+  }, [compId, matchId]);
+
+  return {
+    lineupA: lineups.a,
+    lineupB: lineups.b,
+    // Reads both sides at once, once the competition has said which teams they are.
+    startLineupReads: (teamIds) => syncRef.current.start(teamIds),
+    beginLineupWrite: (side) => syncRef.current.beginWrite(side),
+    // Whether the side was given another team since now (see sync.watchSide).
+    watchLineupSide: (side) => syncRef.current.watchSide(side),
+    // A side given another team: its lineup goes until the new team's is read.
+    dropLineup: (side) => syncRef.current.drop(side),
+  };
 }
 
 export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSubmitAndNext, onAfterDecision, onStartLanded, prevMatch, nextMatch, onPrev, onNext, password, selfReport, teamMembers, variant = "modal", canClose = true }) {
@@ -1046,13 +1227,13 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
   // T131: lineup data so each bout cell can show the assigned player
   // name + canonical position label. Falls back gracefully when the
   // lineup hasn't been submitted yet (saved: false -> null, bc-k404).
-  const [lineupA, setLineupA] = useStateA(null);
-  const [lineupB, setLineupB] = useStateA(null);
+  const { lineupA, lineupB, startLineupReads, beginLineupWrite, watchLineupSide, dropLineup } = useMatchLineups(m.compId, m.id);
   // bc-pnum gap closure: each side's squad, so the inline lineup picker
   // below (submitInlineLineup / buildInlineLineupWrite) can resolve a
   // name typed or picked in THIS modal to its squad member id -- this is
-  // the THIRD lineup-writing surface (round-scoped AdminLineup and the
-  // per-match MatchLineupPanel were converted in earlier passes), and the
+  // the THIRD lineup-writing surface (the Lineups page, which sets a team's
+  // starting lineup or one match's own lineup, and the at-court
+  // MatchLineupPanel were converted in earlier passes), and the
   // one most likely to matter for kachinuki retirement: a substitution
   // made here, mid-encounter, is exactly when a slot's occupant changes.
   const [squadA, setSquadA] = useStateA([]);
@@ -1063,6 +1244,57 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
   // positions the resolver could only ever "fail" to match against an
   // empty local squad.
   const [squadUnavailable, setSquadUnavailable] = useStateA(false);
+  // The members each side shows are held on a ref too, so that a list merges with
+  // the one shown even before the render that shows it. Every list reaches the
+  // sheet through one of the two doors below, and is merged by the stamp each member
+  // carries (mergeMembers): of a member both hold, the copy with the larger stamp
+  // stands, whichever list brought it and whichever read began first.
+  const membersShown = useRefA({ a: [], b: [] });
+  // And each side's wait for the first list of its team's members, which a name typed
+  // before one arrives waits for (submitInlineLineup): resolved against none, a new name
+  // is minted where the member's seeded slot is free, and the name of a member the team
+  // has is refused by the server as a second one. A side takes a list only once its team
+  // is known, so for a side the roster has not named yet the wait stays open.
+  const membersWait = useRefA(null);
+  // A wait the deadline ended flags the members as unavailable, as a read that failed
+  // does, so the names typed after it say so too.
+  const newSideWait = () => newMembersWait(() => setSquadUnavailable(true));
+  if (membersWait.current === null) membersWait.current = { a: newSideWait(), b: newSideWait() };
+  // The key and team each side was last seen with (see the effect that notices a side
+  // given another team). A pick writes for the team the side has when it goes on, and
+  // stops when the side was given another team since it began (watchLineupSide).
+  const sideSeen = useRefA(null);
+  const showMembers = (side, list) => {
+    membersShown.current[side] = list;
+    (side === "a" ? setSquadA : setSquadB)(list);
+  };
+  // A list of a side's members arrives: a read's answer, or the host's copy. It is
+  // merged with the one shown, by stamp, and it is a list that was read, which ends the
+  // side's wait for its first.
+  const takeSideMembers = (side, arriving) => {
+    showMembers(side, mergeMembers(membersShown.current[side], arriving));
+    membersWait.current[side].show();
+  };
+  // A side is given another team: the list shown and the wait for its first list belong
+  // to the old team, and neither is carried over. The new team's list would be merged
+  // into the old team's members, which would then be offered and refused by the server
+  // (team_member_not_in_team). A pick still waiting for the old team's members is let
+  // go at once: it finds the side given another team and writes nothing
+  // (submitInlineLineup).
+  const dropSideMembers = (side) => {
+    membersWait.current[side].fail();
+    membersWait.current[side] = newSideWait();
+    showMembers(side, []);
+  };
+  // The members a write of this sheet named or added, handed over as the server
+  // answered them once it holds them, with the stamp it gave them. A list that
+  // predates the write (a read begun before it, or the host's copy, which the sheet
+  // cannot sequence) does not undo it, since the stamp of the write is the larger,
+  // and a rename another device makes after it shows over it. A copy built from the
+  // name typed carries no stamp and would lose to every list.
+  const wroteSideMembers = (side, written) => {
+    showMembers(side, mergeMembers(membersShown.current[side], written));
+  };
   // T136 / T141: competition lookup so we can branch on teamMatchType
   // ("kachinuki" vs "fixed") and gate the daihyosen affordance on the
   // knockout-format precondition. Falls back to compKind/teamSize when
@@ -1071,12 +1303,18 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
   // T141: error banner mapping for the daihyosen POST. Server returns
   // 400 not_tied / 400 pool_match / 409 insufficient_eligibility: see
   // handlers_daihyosen.go for the canonical strings.
-  const [editorErr, setEditorErr] = useStateA(""); // inline error surface: daihyosen + lineup saves
-  // bc-cse gap closure: the composed operator-facing warning shown after a
-  // SUCCESSFUL inline lineup save whose squad-member attachment fell short
-  // (see submitInlineLineup below). Deliberately separate from editorErr:
-  // the save did not fail, so it must never read like that channel.
-  const [editorWarning, setEditorWarning] = useStateA("");
+  const [editorErr, setEditorErr] = useStateA(""); // inline error surface: daihyosen add/remove
+  // What a bout row's name box produced, drawn inside that row so the operator
+  // sees it beside what they typed: { key, tone, text } with key
+  // lineupNoticeKey(side, idx). tone "error": nothing was written (a refusal,
+  // an unread lineup or a failed save). tone "warn" (bc-cse gap closure): the
+  // save succeeded and only the squad-member identity attachment fell short.
+  // The two never share a look.
+  const [lineupNotice, setLineupNotice] = useStateA(null);
+  // The bout at row idx was removed (and none comes after it): a notice filed for it
+  // must not wait for a bout added at the same place, where it would read as being
+  // about that pairing.
+  const dropNoticesFromRow = (idx) => setLineupNotice((n) => (n && lineupNoticeRow(n.key) >= idx ? null : n));
   // The bout side (rowSides tapKey) whose refused Fusensho was last tapped:
   // its reason shows under that row (bc-fsnp). A title alone never shows on a
   // touchscreen, so the button stays tappable and explains itself instead.
@@ -1280,29 +1518,100 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
   };
   useClearPendingWhenNothingHeld(m.compId, m.id, pendingWrite, dropHeldWrite);
 
-  // Fetch lineup + competition data on mount. Both endpoints are
+  // Which team plays each side, and whether the sheet knows it yet. The teams'
+  // roster comes from compMeta.players. rosterFor expects the team object (with
+  // metadata array); resolveLineupTeamId matches by name.
+  //
+  // bc-pnum: sideKey below (sideLookupKey, competitor_identity.jsx) prefers
+  // side.id over side.name -- a real id decides, since a UUID never
+  // coincidentally equals another team's display name. `pid` mirrors that
+  // same id-else-name preference for each
+  // CANDIDATE team, so `pid === sideKey || pname === sideKey` matches by id
+  // whenever BOTH `side` and the candidate carry one. The name clause is
+  // unreachable ONLY when `side` itself carries a real id (sideKey is then
+  // a UUID, which a display name never coincidentally equals) -- it is NOT
+  // blocked merely because the CANDIDATE has an id: when `side` has none
+  // (sideKey falls back to its name, since resolveSide never invents one --
+  // an unresolved side's id is simply ""), `pname === sideKey` can still
+  // match a DIFFERENT team that only shares that display name, even though
+  // that candidate carries a real id of its own. This is accepted, not a
+  // new gap: it is the same documented (name, dojo) collision an id-less
+  // side already risks anywhere it falls back to a name lookup, and the
+  // name path must stay reachable for an id-less `side` to recover via
+  // that lookup at all. This is left as a string compare rather than
+  // switched to the id-decides-then-stop object form for the same reason
+  // as the sibling sideAKey/sideBKey composite below.
+  const allPlayers =
+    (compMeta?.players?.length ? compMeta.players : null)
+    || (compMeta?.config?.players)
+    || [];
+  // The team on a side: its id as far as the sheet can tell, and whether the
+  // team is KNOWN: the side carries an id, or the roster named a participant for
+  // it. A side that carries only a name resolves to the name until the roster
+  // arrives, and then to the participant's id.
+  const sideTeam = (side) => {
+    const sideKey = sideLookupKey(side);
+    // Same guard as rosterForSide below: "" must never match a roster
+    // entry whose own id/ID/name/Name are all absent.
+    if (!sideKey) return { id: "", known: false };
+    const teamObj = allPlayers.find(p => {
+      const pid = p?.id || p?.ID || p?.name || p?.Name || "";
+      const pname = p?.name || p?.Name || "";
+      return pid === sideKey || pname === sideKey;
+    });
+    return {
+      id: teamObj ? (teamObj.id || teamObj.ID || teamObj.name || teamObj.Name || sideKey) : sideKey,
+      known: !!side?.id || !!teamObj,
+    };
+  };
+  const sideAKey = sideLookupKey(m.sideA);
+  const sideBKey = sideLookupKey(m.sideB);
+  const { id: teamAId, known: teamAKnown } = sideTeam(m.sideA);
+  const { id: teamBId, known: teamBKnown } = sideTeam(m.sideB);
+  // A side given another team (a knockout feeder corrected elsewhere seats another
+  // one) drops what it held of the old team before a list of the new one is taken:
+  // its list, the names written for it and its lineup, and a pick still out for it is
+  // stopped (dropping the lineup raises the side's epoch, which a pick asks). This
+  // effect is declared ahead of the ones that read the lineups and the members, so the
+  // old team's lineup and members are dropped before the new team's are read whatever
+  // those await. A side is given another team only when its own key in the match
+  // (sideLookupKey) AND the team it resolves to both change. A side that carries only
+  // a name resolves to the name until the competition arrives with the roster, and
+  // then to the team's id, and the match can start to carry the id of the team it
+  // named: the key or the team moves, not both, and it is the same team.
+  const giveSideAnotherTeam = (side) => {
+    dropSideMembers(side);
+    dropLineup(side);
+  };
+  useEffectA(() => {
+    const was = sideSeen.current;
+    sideSeen.current = { a: { key: sideAKey, team: teamAId }, b: { key: sideBKey, team: teamBId } };
+    if (!was) return;
+    if (was.a.key !== sideAKey && was.a.team !== teamAId) giveSideAnotherTeam("a");
+    if (was.b.key !== sideBKey && was.b.team !== teamBId) giveSideAnotherTeam("b");
+  }, [sideAKey, sideBKey, teamAId, teamBId]);
+
+  // Fetch lineup + competition data on mount, and again when a side is
+  // given another team (the feeding match of a knockout corrected on
+  // another device), so the side shows the new team's lineup and not the
+  // old team's beside the new team's members. Both endpoints are
   // read-only and idempotent; failures degrade gracefully (the modal
-  // still functions, just without position labels / kachinuki mode).
+  // still functions, just without position labels / kachinuki mode, and a
+  // side whose lineup was not read saves no lineup: see submitInlineLineup).
+  //
+  // sideLookupKey (competitor_identity.jsx) prefers m.sideA.id over
+  // m.sideA.name -- a real id decides, since a UUID never coincidentally
+  // equals another team's display name. resolveLineupTeamId's bare-string
+  // branch then either confirms it against the roster by name or, finding
+  // nothing, returns it unchanged. Deliberately a STRING, not the side
+  // object: resolveSide (api_serializers.jsx) never invents an id from
+  // the name -- a side with no real id at all (the player map lookup
+  // misses entirely) carries id "" -- so the object form's id-decides
+  // branch would stop at that empty id and never fall through to the name
+  // lookup this string form still performs.
   useEffectA(() => {
     let cancelled = false;
     if (!m.compId) return;
-    // compMatches injects m.roundIndex (0-based) for bracket matches, and
-    // m.round as a string label for display ("R16", "Quarterfinals", ...).
-    // resolveRoundIndex prefers roundIndex, falls back for legacy shapes.
-    // Pool matches return 0 (no per-round lineup).
-    const round = window.resolveRoundIndex(m);
-    // sideLookupKey (competitor_identity.jsx) prefers m.sideA.id over
-    // m.sideA.name -- a real id decides, since a UUID never coincidentally
-    // equals another team's display name. resolveLineupTeamId's bare-string
-    // branch then either confirms it against the roster by name or, finding
-    // nothing, returns it unchanged. Deliberately a STRING, not the side
-    // object: resolveSide (api_serializers.jsx) never invents an id from
-    // the name -- a side with no real id at all (the player map lookup
-    // misses entirely) carries id "" -- so the object form's id-decides
-    // branch would stop at that empty id and never fall through to the name
-    // lookup this string form still performs.
-    const sideAKey = sideLookupKey(m.sideA);
-    const sideBKey = sideLookupKey(m.sideB);
     (async () => {
       // Competition detail for teamMatchType + format AND the participant
       // list used to map the name-keyed sides to their real lineup ids.
@@ -1316,11 +1625,10 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
         // Soft-fail: kachinuki/daihyosen UI just won't render.
         console.warn("Competition fetch for team modal failed:", e);
       }
-      // mp-bkg: prefer per-match lineup (GET match-lineups/:matchId); fall
-      // back to round lineup when no per-match entry exists (saved: false
-      // -> null -> round lookup). Map the name-keyed side to the
-      // participant id the lineup is stored under first: otherwise every
-      // GET reads nothing saved.
+      // The lineup each team fields in this match (GET lineup-in-force:
+      // the match's own, else the one it carries from its previous match or
+      // round). Map the name-keyed side to the participant id the lineup is
+      // stored under first: otherwise every GET reads nothing saved.
       // The detail payload carries participants under config.players; the
       // top-level players array is often an empty (but truthy) [] in this
       // shape, so prefer whichever list is non-empty.
@@ -1328,19 +1636,14 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
         (detail && detail.players && detail.players.length ? detail.players : null)
         || (detail && detail.config && detail.config.players)
         || [];
-      const teamAId = resolveLineupTeamId(sideAKey, players);
-      const teamBId = resolveLineupTeamId(sideBKey, players);
-      if (teamAId) {
-        const l = await resolveMatchLineup(m.compId, teamAId, m.id, round, window.API);
-        if (!cancelled) setLineupA(l);
-      }
-      if (teamBId) {
-        const l = await resolveMatchLineup(m.compId, teamBId, m.id, round, window.API);
-        if (!cancelled) setLineupB(l);
-      }
+      if (cancelled) return;
+      await startLineupReads({
+        a: resolveLineupTeamId(sideAKey, players),
+        b: resolveLineupTeamId(sideBKey, players),
+      });
     })();
     return () => { cancelled = true; };
-  }, [m.compId, m.id]);
+  }, [m.compId, m.id, sideAKey, sideBKey]);
 
   // T136: kachinuki branch. Match-level teamMatchType (added by
   // viewer.compMatches in a sibling slice) is preferred; competition
@@ -1356,12 +1659,17 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
   // legacy kachinuki daihyosen row keeps its encho, as the stepper does.
   const kachinukiEncounter = isKachinuki && !hasDaihyosen;
   const encounterEnchoCount = kachinukiEncounter ? 0 : enchoPeriodCount;
-  // Compact "Instrument Panel" mode fits the editor on one viewport page
-  // for ≤5-person teams. Kachinuki renders only the current bout while
-  // running (see kachinukiVisiblePositions), so it always fits even
-  // with a 9-person roster. Larger fixed-format
-  // teams keep the roomier layout and use .team-bouts-scroll for
-  // independent bout-list scrolling.
+  // Compact "Instrument Panel" mode is the tighter bout-row layout for
+  // ≤5-person teams. It does NOT fit one viewport at the operator's iPad
+  // size: the team header and result band (.team-sheet-pin) and the
+  // footer actions are pinned, and the bout rows scroll between them.
+  // Kachinuki renders only the current bout while
+  // running (see kachinukiVisiblePositions), so it stays short even
+  // with a 9-person roster. A team of six or more outside kachinuki keeps
+  // the roomier layout. Both layouts scroll the same way: the bout rows
+  // move with the body, under the pinned team header and result band and
+  // above the pinned footer, in every host, and .team-bouts-scroll only
+  // scopes the rows' layout rules.
   // bc-dnst: BOTH inline hosts read this one condition, the shiaijo console
   // (admin_shiaijo.jsx) and the Competition > Bracket running-match panel
   // (admin_competition_bracket.jsx), same as the overlay, so a team never
@@ -1387,32 +1695,6 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
   // Whether an inline position PUT is in flight (prevents double-submit).
   const [inlineLineupSaving, setInlineLineupSaving] = useStateA(false);
 
-  // Derive each team's roster from compMeta.players. rosterFor expects the
-  // team object (with metadata array); resolveLineupTeamId matches by name.
-  //
-  // bc-pnum: sideKey below (sideLookupKey, competitor_identity.jsx) prefers
-  // side.id over side.name -- a real id decides, since a UUID never
-  // coincidentally equals another team's display name. `pid` mirrors that
-  // same id-else-name preference for each
-  // CANDIDATE team, so `pid === sideKey || pname === sideKey` matches by id
-  // whenever BOTH `side` and the candidate carry one. The name clause is
-  // unreachable ONLY when `side` itself carries a real id (sideKey is then
-  // a UUID, which a display name never coincidentally equals) -- it is NOT
-  // blocked merely because the CANDIDATE has an id: when `side` has none
-  // (sideKey falls back to its name, since resolveSide never invents one --
-  // an unresolved side's id is simply ""), `pname === sideKey` can still
-  // match a DIFFERENT team that only shares that display name, even though
-  // that candidate carries a real id of its own. This is accepted, not a
-  // new gap: it is the same documented (name, dojo) collision an id-less
-  // side already risks anywhere it falls back to a name lookup, and the
-  // name path must stay reachable for an id-less `side` to recover via
-  // that lookup at all. This is left as a string compare rather than
-  // switched to the id-decides-then-stop object form for the same reason
-  // as the sibling sideAKey/sideBKey composite above.
-  const allPlayers =
-    (compMeta?.players?.length ? compMeta.players : null)
-    || (compMeta?.config?.players)
-    || [];
   // lineup is this side's already-assigned positions; mergeRosterWithAssigned
   // folds any operator-added substitute (a "+ Add …" free name not in
   // team.metadata) back into the autocomplete so it reappears for the team's
@@ -1460,61 +1742,85 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
     // the same one the Up Next "Enter lineup" panel uses.
     return squadRosterEntries({ teamNumber, squad, legacyNames, lineup });
   };
-  const teamIdForSide = (side) => {
-    const sideKey = sideLookupKey(side);
-    // Same guard as rosterForSide above: "" must never match a roster
-    // entry whose own id/ID/name/Name are all absent.
-    if (!sideKey) return "";
-    const teamObj = allPlayers.find(p => {
-      const pid = p?.id || p?.ID || p?.name || p?.Name || "";
-      const pname = p?.name || p?.Name || "";
-      return pid === sideKey || pname === sideKey;
-    });
-    return teamObj ? (teamObj.id || teamObj.ID || teamObj.name || teamObj.Name || sideKey) : sideKey;
-  };
 
   // bc-pnum gap closure: load each side's squad once compMeta (and
-  // therefore allPlayers / teamIdForSide) has resolved, so submitInlineLineup
+  // therefore allPlayers / sideTeam) has resolved, so submitInlineLineup
   // below can resolve a name typed or picked in this modal to its squad
-  // member id. Keyed on compMeta rather than the raw sideA/sideB keys so
-  // this re-runs once the real team ids are known; a squad fetch failure
-  // must not block scoring, so it never blocks here either (the resolver
-  // then simply mints for every name it cannot find against an empty
-  // list). bc-cse: `squadUnavailable` records that this happened, so
-  // submitInlineLineup's warning names the real root cause.
+  // member id. Keyed on compMeta and on the two sides' teams rather than
+  // the raw sideA/sideB keys, so this re-runs once the real team ids are known
+  // and again when a side is given another team; a failed read of the team
+  // members must not block scoring, so it never blocks here either (a name
+  // typed before the list arrives waits for it, bounded; one that finds the
+  // read failed or unanswered is resolved against an empty list, which simply
+  // mints for every name it cannot find). bc-cse: `squadUnavailable` records
+  // that this happened, so submitInlineLineup's warning names the real root
+  // cause.
+  //
+  // A side takes its list only once its team is known (sideTeam): the members
+  // route answers by participant id, so for the name of a side the roster has
+  // not named yet it has none, and the empty list taken for it would end the
+  // side's wait and be what a name typed meanwhile is resolved against. Until
+  // then the side's wait stays open, bounded as ever.
   //
   // A host that already holds the team members passes them as teamMembers
   // and nothing is fetched: the public self-run page reads them from the
   // viewer payload, because the team-members route needs the organiser
   // password there. Keyed on the two sides' lists by content, so a refetch
   // that brings them the same members changes nothing, whatever it brings
-  // the competition's other teams.
+  // the competition's other teams. Either way a list is merged with the members
+  // shown, never put in their place (takeSideMembers).
   const teamMembersKey = teamMembers
-    ? JSON.stringify([teamMembers[teamIdForSide(m.sideA)] || [], teamMembers[teamIdForSide(m.sideB)] || []])
+    ? JSON.stringify([teamMembers[teamAId] || [], teamMembers[teamBId] || []])
     : "";
   useEffectA(() => {
     let cancelled = false;
-    const teamAId = teamIdForSide(m.sideA);
-    const teamBId = teamIdForSide(m.sideB);
     if (!m.compId || (!teamAId && !teamBId)) return;
     if (teamMembers) {
-      if (teamAId) setSquadA(teamMembers[teamAId] || []);
-      if (teamBId) setSquadB(teamMembers[teamBId] || []);
+      if (teamAKnown) takeSideMembers("a", teamMembers[teamAId] || []);
+      if (teamBKnown) takeSideMembers("b", teamMembers[teamBId] || []);
       setSquadUnavailable(false);
       return;
     }
-    (async () => {
+    // A read of the members, made as this effect opens and again for every lineup
+    // change announced for the competition (the event the server sends for a rename,
+    // a cleared name and every lineup save), so a member renamed, cleared or added on
+    // another device shows without reopening the sheet. Answers need no order: each list
+    // is merged by the stamp its members carry (takeSideMembers), so an older answer
+    // arriving after a newer one undoes nothing, and one that is not answered, or fails,
+    // shows nothing. A later read that fails says nothing: only the read made as the
+    // effect opens says the members could not be read, and not when a list has been
+    // shown by then.
+    const read = async (opening) => {
       try {
         const squads = await window.API.fetchSquads(m.compId, password);
         if (cancelled) return;
-        if (teamAId) setSquadA((squads && squads[teamAId]) || []);
-        if (teamBId) setSquadB((squads && squads[teamBId]) || []);
+        if (teamAKnown) takeSideMembers("a", (squads && squads[teamAId]) || []);
+        if (teamBKnown) takeSideMembers("b", (squads && squads[teamBId]) || []);
         setSquadUnavailable(false);
       } catch (_e) {
-        if (!cancelled) setSquadUnavailable(true);
+        // The warning speaks for the members as they are shown: the opening read failing
+        // after a list already showed the members is stale news, and says nothing.
+        if (opening && !cancelled && !membersWait.current.a.listed && !membersWait.current.b.listed) {
+          setSquadUnavailable(true);
+          membersWait.current.a.fail();
+          membersWait.current.b.fail();
+        }
       }
-    })();
-    return () => { cancelled = true; };
+    };
+    read(true);
+    const onLineupUpdated = (e) => {
+      if (e.detail && e.detail.competitionId !== m.compId) return;
+      // The announcement names the team it changed: this sheet reads the members again
+      // only for its own two. One that names none is read, as before.
+      const teamId = e.detail && e.detail.teamId;
+      if (teamId && teamId !== teamAId && teamId !== teamBId) return;
+      read(false);
+    };
+    window.addEventListener("lineup-updated", onLineupUpdated);
+    return () => {
+      cancelled = true;
+      window.removeEventListener("lineup-updated", onLineupUpdated);
+    };
     // `password` is a DEPENDENCY, not just a closure read, and the success
     // path CLEARS squadUnavailable. Same rule as the Lineups page's copy of
     // this effect, which carries the full rationale: requestReauth renders
@@ -1523,60 +1829,117 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
     // halves one 401 strands the editor for the whole encounter: every bout
     // row's picker offers nothing, every row loses the squad number this
     // ruling put on it, and every typed name is written with no member id.
-  }, [m.compId, compMeta, password, teamMembersKey]);
+  }, [m.compId, compMeta, password, teamMembersKey, teamAId, teamBId, teamAKnown, teamBKnown]);
 
-  // Submit an inline position change: builds the full positions map from the
-  // existing lineup + the changed key→value, resolves/mints that position's
-  // member id (see buildInlineLineupWrite), then PUTs both. Lineups are
-  // always editable; no force/reason needed.
+  // The lineup a pick is checked against and shown on: the one this sheet holds for
+  // the side, which its own reads and writes keep (useMatchLineups, which also follows
+  // a change another device announces). The write is composed on nothing here: it
+  // names the one position it changes and the server puts it on the lineup it holds
+  // (operator decision 2026-10-07, "Only changed positions"), so what the server
+  // holds is never read again for it, and a pick made with no connection is queued as
+  // it is. A side never read holds none, so for it a read that fails refuses the pick.
+  const lineupHeldFor = async (write, teamId) => {
+    if (write.isRead()) return write.held();
+    try {
+      // The read has no deadline of its own: unanswered, the boxes would stay disabled.
+      const fresh = await withinDeadline(write.read(teamId), FETCH_TIMEOUT_MS);
+      if (fresh !== TIMED_OUT) return fresh;
+    } catch (_e) {
+      // The server cannot be asked.
+    }
+    throw new Error(LINEUP_NOT_READ_NOTICE);
+  };
+
+  // Submit an inline position change: resolves/mints that position's member id
+  // (see buildInlineLineupWrite), checks the lineup held for the side is not given
+  // the member twice, then PUTs the one position it changes, named in `changed`
+  // (lineup_save.jsx). Lineups are always editable; no force/reason needed.
   //
   // member is the squad-member object LineupNameInput hands back when the
   // operator picked one of the row's numbered entries (bc-dnst); it is
   // undefined for a typed/"+ Add" name, and buildInlineLineupWrite writes
   // by id rather than resolving by name when it is present.
-  const submitInlineLineup = async (teamId, lineup, squad, setSquad, posKey, value, member) => {
+  const submitInlineLineup = async ({ side, noticeKey, posKey, value, member }) => {
+    const notify = (tone, text) => { if (mountedRef.current) setLineupNotice({ key: noticeKey, tone, text }); };
+    setLineupNotice(null);
+    // The name is typed for the team that plays this side as the pick begins.
+    const write = beginLineupWrite(side);
     setInlineLineupSaving(true);
-    setEditorWarning("");
     try {
-      const built = await buildInlineLineupWrite(m.compId, teamId, lineup, squad, posKey, value, password, member);
+      // A typed name is resolved against the side's members, so they must have been
+      // read (membersWait): against none, a new name is minted where the position's
+      // seeded slot is free, and the name of a member the team has is refused by the
+      // server as a second one. Members that cannot be read, or not in time, go
+      // without, as they always did, and the warning below says so.
+      let membersUnavailable = squadUnavailable;
+      const waiting = !member && value ? membersWait.current[side].pending() : null;
+      if (waiting && !(await waiting)) membersUnavailable = true;
+      // If the side has really been given another team since (a wait for the old team's
+      // members is let go at once when that happens), the list shown is that team's, and
+      // a write would put its member in the old team's lineup, or the old team's in a
+      // lineup the side no longer carries: nothing is written. Asked before the lineup
+      // is read, so the old team's lineup is not read back into a side that now has
+      // another team's; again once it has been, which can take as long as the wait; and
+      // again once the member writes are done. Those stay: they are what was typed for
+      // the old team, and its own members.
+      const sideChanged = () => {
+        if (!write.sideChanged()) return false;
+        notify("error", SIDE_TEAM_CHANGED_NOTICE);
+        return true;
+      };
+      if (sideChanged()) return;
+      // The team as the sheet knows it now, not as it was when the pick began: a side
+      // that carried only a name then can have been named by the roster meanwhile (the
+      // wait above ends when it is), and its lineup and members are the participant's.
+      const teamId = sideSeen.current[side].team;
+      const current = await lineupHeldFor(write, teamId);
+      if (sideChanged()) return;
+      // The list shown now, not the one this pick closed over: it can be older.
+      const squad = membersShown.current[side];
+      const built = await buildInlineLineupWrite(m.compId, teamId, current, squad, posKey, value, password, member);
+      if (sideChanged()) return;
       // bc-dnst duplicate guard: buildInlineLineupWrite refuses entirely
       // (no write attempted) rather than doubling a member up across two
       // positions. Tell the operator which position already holds them and
       // leave the box exactly as it was.
       if (built.refused) {
-        if (!mountedRef.current) return;
-        const labelFn = window.AdminLineupHelpers?.lineupPositionLabel;
-        const label = typeof labelFn === "function" ? labelFn(built.refused.position) : built.refused.position;
-        const who = built.refused.name || "This fighter";
-        setEditorWarning(`${who} is already at ${label}.`);
+        notify("error", alreadyPlacedNote(built.refused.name, lineupPositionLabel(built.refused.position)));
         return;
       }
-      const { positions: updated, memberIds: updatedIds, squad: nextSquad, failures } = built;
-      if (typeof setSquad === "function") setSquad(nextSquad);
-      const hasMemberIds = Object.keys(updatedIds).length > 0;
-      await window.API.putMatchLineup(m.compId, teamId, m.id, updated, password, hasMemberIds ? updatedIds : undefined);
-      // Refresh lineup state from the response is deferred: on next open the
-      // modal re-fetches. For immediate feedback we do a partial reload of
-      // lineup state for the affected side.
+      const { positions: shown, memberIds: shownIds, changed, squad: nextSquad, failures } = built;
+      // What the resolver named or added, as the server answered it, with its stamp:
+      // the list it was given can be older than the one shown by now, and the stamps
+      // decide which copy of each member stands.
+      wroteSideMembers(side, nextSquad);
+      const body = changedLineupSave(shown, shownIds, changed);
+      const hasMemberIds = Object.keys(body.memberIds).length > 0;
+      const answer = await window.API.putMatchLineup(m.compId, teamId, m.id, body.positions, password, hasMemberIds ? body.memberIds : undefined, body.changed);
       if (!mountedRef.current) return;
-      if (teamId === teamIdForSide(m.sideA)) {
-        setLineupA(prev => ({ ...prev, positions: updated, memberIds: updatedIds }));
-      } else {
-        setLineupB(prev => ({ ...prev, positions: updated, memberIds: updatedIds }));
+      // A write that landed answers the whole lineup the server holds now, shown as
+      // it is. One that only reached the outbox answers none: the pick is shown on
+      // the lineup held, until the server's own announcement is read.
+      write.set(answer && answer.queued ? { ...current, positions: shown, memberIds: shownIds } : answer);
+      // A lineup that only reached the outbox is held on this device, not saved: say
+      // so in the row, the way every held write is worded (queuedNotice also tells
+      // when the browser could not store it), and leave out the warning below, which
+      // begins "Lineup saved". The lineup editors take the same exit.
+      if (answer && answer.queued) {
+        notify("warn", queuedNotice(answer));
+        return;
       }
       // bc-cse gap closure: the write above succeeded (putMatchLineup did
-      // not throw), so this is the non-blocking warning channel, never the
+      // not throw), so this is the non-blocking warning tone, never the
       // error one -- the save is done, only its squad-member identity
       // attachment fell short.
       const composer = window.AdminLineupHelpers?.memberIdentityWarning;
       if (typeof composer === "function") {
-        setEditorWarning(composer(failures || [], squadUnavailable));
+        const warning = composer(failures || [], membersUnavailable);
+        if (warning) notify("warn", warning);
       }
     } catch (e) {
-      // Surface error briefly: can't use a toast from inside the modal so
-      // we reuse the editorErr channel for a one-off message.
-      if (mountedRef.current) setEditorErr(e?.message || "Failed to update lineup");
+      notify("error", e?.message || "Failed to update lineup");
     } finally {
+      write.end();
       if (mountedRef.current) setInlineLineupSaving(false);
     }
   };
@@ -2174,6 +2537,7 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
       setManualBouts(remaining);
       const target = clampPositionCount(maxSubPos, remaining.length ? Math.max(...remaining) : 0);
       setSubsByOperator(prev => resizeSubsTo(prev, target));
+      dropNoticesFromRow(pos - 1);
       setEndArmed(false);
       setFinishArmed(false);
       setRemoveBoutErr("");
@@ -2193,6 +2557,7 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
       // The server strips exactly the trailing bout at `pos`, so the new log
       // ceiling is pos-1; keep the teamSize floor (clampPositionCount).
       setSubsByOperator(prev => resizeSubsTo(prev, clampPositionCount(pos - 1, manualMaxPos)));
+      dropNoticesFromRow(pos - 1);
       setEndArmed(false);
       setFinishArmed(false);
     } catch (e) {
@@ -2336,13 +2701,13 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
   };
 
   // bc-pnum: the squad member label beside a bout row's fighter name (the
-  // SAME "T10.1" identifier the round-scoped Lineups page shows --
+  // SAME "T10.1" identifier the Lineups page shows --
   // squadMemberLabel, squad_member_label.jsx), shared by the editable row
   // and the read-only (past-bout) row so both resolve identically: squad
   // member id first (resolveSquadMember, lineup_resolver.jsx), falling back
   // to an exact name match only when no id resolved. "a" is AKA/squadA/
   // m.sideA, "b" is SHIRO/squadB/m.sideB, matching this file's side
-  // convention throughout (teamIdForSide et al). Returns "" (never a stray
+  // convention throughout (sideTeam et al). Returns "" (never a stray
   // label) when the fighter matches no squad member, or the team carries no
   // competitor number yet.
   const squadLabelFor = (side, memberId, name) => {
@@ -2449,6 +2814,20 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
     );
   };
 
+  // The notice a bout row's name box produced (lineupNotice, keyed by
+  // lineupNoticeKey): under that side's name in the editable row, and after the
+  // read-only row of a recorded kachinuki bout, since a rename or save that
+  // answers after the bout was recorded still has to show somewhere.
+  const renderLineupNotice = (key) => (lineupNotice && lineupNotice.key === key ? (
+    <div
+      className={lineupNotice.tone === "error" ? "alert alert--error" : "alert alert--warn"}
+      role={lineupNotice.tone === "error" ? "alert" : "status"}
+      data-tone={lineupNotice.tone}
+      data-testid="team-editor-lineup-warning">
+      {lineupNotice.text}
+    </div>
+  ) : null);
+
   // mp-gmcg: read-only display of a fought kachinuki bout — the SAME
   // team-sub-match layout as the editable bout row (position, Shiro/Aka names,
   // centred ippon-mark slots, winner) minus the controls. Reuses the
@@ -2471,8 +2850,8 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
     const aDisplayName = resolveBoutSideDisplayName({ squad: squadA, memberId: aMemberId, storedName: aName });
     const bDisplayName = resolveBoutSideDisplayName({ squad: squadB, memberId: bMemberId, storedName: bName });
     const nameCls = (side) => "tsm-name__static" + (t.winner === side ? " tsm-name__static--win" : "");
-    return (
-      <div key={`ro-${idx}`} className="team-sub-match team-sub-match--readonly team-sub-match--editable" data-testid={`kachinuki-done-bout-${idx}`}
+    const row = (
+      <div className="team-sub-match team-sub-match--readonly team-sub-match--editable" data-testid={`kachinuki-done-bout-${idx}`}
         role="button" tabIndex={0} aria-label={`Correct bout ${idx + 1}`} aria-expanded={false}
         onClick={() => openDoneBoutEdit(idx)}
         onKeyDown={e => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); openDoneBoutEdit(idx); } }}>
@@ -2507,6 +2886,15 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
           </div>
         </div>
       </div>
+    );
+    // A role="button" has presentational children, so a notice inside the row
+    // would not be announced: it follows the row instead.
+    return (
+      <React.Fragment key={`ro-${idx}`}>
+        {row}
+        {renderLineupNotice(lineupNoticeKey("b", idx))}
+        {renderLineupNotice(lineupNoticeKey("a", idx))}
+      </React.Fragment>
     );
   };
 
@@ -3144,6 +3532,8 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
   // bc-dscn: a host that cannot close (the inline court console) has nothing
   // to discard INTO, so it never prompts either.
   const handleDismiss = () => (canClose ? leaveEditor(onClose) : undefined);
+  // bc-cfbd: the bounce of the tap that opened the overlay must not dismiss it.
+  const { openedRef, onClickCapture } = useOpenedTapGuard({ backdropOnly: true });
   const goPrev = () => leaveEditor(onPrev);
   const goNext = () => leaveEditor(onNext);
 
@@ -3197,6 +3587,26 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
   // individual ScoreEditorModal).
   const dialogLabel = `Team score editor: ${m.sideB?.name || m.sideB || "Shiro"} vs ${m.sideA?.name || m.sideA || "Aka"}${m.court ? ` · Shiaijo ${m.court}` : ""}`;
 
+  // The bars the sheet pins cover whatever the page scrolls under them: the team
+  // header and result band at the top (.team-sheet-pin) and, on the inline hosts,
+  // the footer dock at the bottom. A control a scroll brings only just into view
+  // (a keyboard Tab onto it, scrollIntoView) would stop under one, so their
+  // heights are published (published_height.jsx) for the scroll margin the
+  // stylesheet gives the sheet's content, on the element whose scroll they
+  // affect. The inline hosts scroll the document under both bars. An overlay
+  // scrolls its body under the header alone: its footer sits outside the
+  // scrolling body and covers nothing.
+  const bodyRef = useRefA(null);
+  const pinRef = useRefA(null);
+  const dockRef = useRefA(null);
+  const isInline = variant === "inline";
+  useLayoutEffectA(() => {
+    const host = isInline ? document.documentElement : bodyRef.current;
+    const stops = [publishHeight(pinRef.current, host, "--team-pin-h")];
+    if (isInline) stops.push(publishHeight(dockRef.current, host, "--team-dock-h"));
+    return () => stops.forEach((stop) => stop());
+  }, []);
+
   const inner = (
     <>
         <div className="editor-modal__head">
@@ -3227,12 +3637,15 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
           </div>
         </div>
 
-        <div className="editor-modal__body">
+        <div className="editor-modal__body" ref={bodyRef}>
           {/* Inside `inner`, so the wide overlay and the narrow shiaijo inline
               panel get it from ONE placement and cannot diverge. */}
           {matchDataUnreadable(m) ? <UnreadableEditorNote /> : null}
-          {/* Team header */}
-          <div className="sb-match" style={{ marginBottom: 16 }}>
+          {/* Team header and result band, pinned together (bc-tmfd): the
+              running total and the match identity stay in view while the
+              bout rows scroll under them. */}
+          <div className="team-sheet-pin" ref={pinRef}>
+          <div className="sb-match">
             {teamSides.map((s, idx) => (
               <React.Fragment key={s.key}>
                 <div className={`sb-side sb-side--${s.color}`}>
@@ -3265,25 +3678,100 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
               </React.Fragment>
             ))}
           </div>
+          {/* mp-gmcg band redesign (user-confirmed brief): in kachinuki the
+              centre cell carries BOUT-LOG FACTS while running (bout number +
+              last bout result; never a verdict: the old IV/PW-derived
+              "AKA WIN" contradicted the End gate) and the verdict only on
+              completion, derived from the match winner. IV/PW demote to the
+              side cells (they still feed standings tie-breaks). Non-kachinuki
+              team matches keep RESULT + teamVerdictText: fixed formats ARE
+              decided by IV/PW. The running kachinuki scorer drops the band:
+              its fought bouts render as read-only rows (renderReadOnlyBout).
+              Totals are the editor's LOCAL tally, never teamIVPWFrom. */}
+          {!kachinukiBoutMode && (() => {
+            const kb = isKachinuki && !hasDaihyosen
+              ? kachinukiBandModel({
+                  subs, daihyosenIdx, isComplete,
+                  namesAt: playerNamesForBout,
+                  // RAW winner/sides (not pre-flattened to names): winnerSideLR
+                  // inside kachinukiBandModel needs the {id,name} shape to prefer
+                  // id equality over name (review: two teams CAN share a name).
+                  matchWinner: m.winner,
+                  matchDecision: m.decision,
+                  sideA: m.sideA, sideB: m.sideB,
+                  currentBout: parseInt(visiblePositions[visiblePositions.length - 1], 10) || undefined,
+                })
+              : null;
+            return (
+              <div className="team-summary">
+                {teamSides.map((ts, idx) => (
+                  <React.Fragment key={ts.key}>
+                    {/* idx 0 = SHIRO (left, default left-align); idx 1 = AKA, which
+                        sits in the right 1fr grid cell and must right-align to mirror
+                        SHIRO. */}
+                    <div className={`team-summary__side${idx === 1 ? " team-summary__side--right" : ""}`}>
+                      <div className="team-summary__label">{ts.label}</div>
+                      <div className="team-summary__stats">IV: {ts.iv} · PW: {ts.pw}</div>
+                    </div>
+                    {idx === 0 && (
+                      <div className="team-summary__side team-summary__side--center">
+                        {kb ? (
+                          <>
+                            <div className="team-summary__label">{kb.headline}</div>
+                            {kb.verdict
+                              ? <div className={`team-summary__verdict team-summary__verdict--${kb.verdictSide}`} data-testid="team-summary-verdict">{kb.verdict}</div>
+                              : (kb.fact ? <div className="team-summary__fact" data-testid="team-summary-fact">{kb.fact}</div> : null)}
+                          </>
+                        ) : (
+                          <>
+                            <div className="team-summary__label">RESULT</div>
+                            <div className="team-summary__verdict" data-testid="team-summary-result">{teamVerdictText}</div>
+                          </>
+                        )}
+                        {/* bc-kcsh: the recorded decision under the verdict
+                            while a withdrawal is in force (see
+                            teamVerdictText). */}
+                        {rulingShown && (
+                          <div className="team-summary__fact" data-testid="team-summary-decision">{withdrawalLabel(m.decision)}</div>
+                        )}
+                      </div>
+                    )}
+                  </React.Fragment>
+                ))}
+              </div>
+            );
+          })()}
+          </div>
           {/* One clear-a-mark hint for the whole encounter, after the team
               names and before the first bout (operator ruling 2026-09-16,
               bc-dnst). The team sheet repeats a row per bout, so the line
               that sits under the marks on the individual board would be
               noise here; it is stated once for the sheet instead. Same
               words and same .sb-hint owner as that board, and shown on the
-              same condition: only while there is a mark to clear. */}
-          {anyMarkScored && (
-            <div className="sb-hint sb-hint--encounter" data-testid="team-scoring-clear-hint">Tap a scored mark to clear it</div>
-          )}
+              same condition: only while there is a mark to clear. Otherwise it
+              is held, not removed (operator ruling 2026-10-06, "Hold its
+              space"): .holds-space keeps its box and takes it out of the
+              accessibility tree, so the bout rows below never move when it
+              comes and goes (in kachinuki it goes at every Record bout and
+              returns with the next bout's first point, which shifted them
+              28.5 px under a quick second tap). */}
+          <div
+            className={`sb-hint sb-hint--encounter${anyMarkScored ? "" : " holds-space"}`}
+            data-testid="team-scoring-clear-hint"
+          >
+            Tap a scored mark to clear it
+          </div>
 
           {/* Individual match rows. T136: in kachinuki mode only the
               current bout is rendered (see visiblePositions /
               kachinukiVisiblePositions above). The server appends new bouts
               via engine.MaybeAdvanceKachinuki after each score record, so
               the operator re-opens the modal to score the next bout.
-              The .team-bouts-scroll wrapper gives the roomy (non-compact)
-              layout an independent scroll region for the bout list so the
-              team header / summary / decision / footer stay anchored. */}
+              The .team-bouts-scroll wrapper scopes the bout rows' layout
+              rules and is not a scroll region: the rows scroll with the
+              body, under the team header and result band (.team-sheet-pin)
+              and above the footer, which are pinned in every host and both
+              layouts. */}
           <div className="team-bouts-scroll" onClickCapture={swallowBounce(boutListTapRef)}>
           {[
             // mp-gmcg: operator-led completion. The banner reads "ended"
@@ -3369,8 +3857,6 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
             // not in the position column. Compute the per-side name props here
             // so they can ride on the rowSides entries below.
             const lineupPosKey = posKey5 || posKeyN;
-            const teamIdB = teamIdForSide(m.sideB); // SHIRO = left
-            const teamIdA = teamIdForSide(m.sideA); // AKA = right
             // A fixed-order lineup fields each fighter once, so a member already
             // placed at ANOTHER position of this side's lineup is not offered
             // for this row (bc-dnst click test: the list offered a fighter twice
@@ -3395,12 +3881,16 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
             );
             const rosterB = withoutPlacedElsewhere(rosterForSide(m.sideB, lineupB, squadB), lineupB);
             const rosterA = withoutPlacedElsewhere(rosterForSide(m.sideA, lineupA, squadA), lineupA);
+            // Where this row's pick on each side files its notice, and where the
+            // row looks for it (rowSides below).
+            const noticeKeyB = lineupNoticeKey("b", idx);
+            const noticeKeyA = lineupNoticeKey("a", idx);
             // member (LineupNameInput's second onSelect argument) is the
             // picked squad-member object when the operator chose one of the
             // row's numbered entries; it is undefined for a typed/"+ Add"
             // name, exactly like buildInlineLineupWrite's own optional arg.
-            const pickPlayer = (teamId, lineup, squad, setSquad) => (value, member) => {
-              submitInlineLineup(teamId, lineup, squad, setSquad, lineupPosKey, value, member);
+            const pickPlayer = (side, noticeKey) => (value, member) => {
+              submitInlineLineup({ side, noticeKey, posKey: lineupPosKey, value, member });
             };
             // mp-gmcg: a manually-added bout has no lineup key (positions
             // beyond teamSize are not valid lineup keys) and no server
@@ -3422,14 +3912,33 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
             // hoisted out of this row closure; this factory just binds it to
             // the row's own sub/index and this side's key, mirroring
             // pickPlayer above.
-            const pickManual = (sideKey, memberIdKey, squad, setSquad, teamId) => (value, member) =>
-              pickManualBoutName({
-                sub: s, idx, sideKey, memberIdKey, squad, setSquad, teamId,
+            const pickManual = (side, noticeKey, squad, teamId) => (value, member) => {
+              setLineupNotice(null);
+              // A rename waits on the server, and the side can be given another team
+              // meanwhile: the member it names is then the old team's, which is not put in
+              // the new team's list nor reported in its row (submitInlineLineup's rule).
+              const sideChanged = watchLineupSide(side);
+              const sideChangedNotice = () => {
+                if (!sideChanged()) return false;
+                setLineupNotice({ key: noticeKey, tone: "error", text: SIDE_TEAM_CHANGED_NOTICE });
+                return true;
+              };
+              return pickManualBoutName({
+                sub: s, idx, sideKey: `${side}Name`, memberIdKey: `${side}MemberIdOverride`, squad, teamId,
                 compId: m.compId, password, updateSub,
+                onRenamed: (written) => { if (!sideChangedNotice()) wroteSideMembers(side, written); },
                 // A self-run competitor cannot open the Lineups page, so they are
                 // pointed at the organizer, as the server's own refusals do.
-                onRenameFailed: (typed, e) => setEditorWarning(`"${typed}" was used for this bout, but the team member could not be renamed. ${memberRefusalNote({ code: e && e.code, reason: e && e.message }, selfReport ? "Ask the tournament organizer to rename them." : "Rename them on the Lineups page.")}`),
+                onRenameFailed: (typed, e) => {
+                  if (sideChangedNotice()) return;
+                  setLineupNotice({
+                    key: noticeKey,
+                    tone: "warn",
+                    text: `"${typed}" was used for this bout, but the team member could not be renamed. ${memberRefusalNote({ code: e && e.code, reason: e && e.message }, selfReport ? "Ask the tournament organizer to rename them." : "Rename them on the Lineups page.")}`,
+                  });
+                },
               }, value, member);
+            };
             // mp-gmcg: a kachinuki side with NO resolved name AND no lineup
             // route gets a free-typed name input riding the sub (like a
             // manual row). This covers the one-sided WALKOVER SLOT the engine
@@ -3511,8 +4020,9 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
                 playerName: resolveBoutSideDisplayName({ squad: squadB, memberId: playerBMemberId, storedName: playerBName }),
                 memberId: playerBMemberId,
                 memberLabel: playerBLabel, roster: isDaihyoRow ? [] : rosterB, forceInput: manualPathB,
+                noticeKey: noticeKeyB,
                 lineupSlot: !isDaihyoRow && idx + 1 <= teamSize,
-                onSelectName: manualPathB ? pickManual("bName", "bMemberIdOverride", squadB, setSquadB, teamIdB) : pickPlayer(teamIdB, lineupB, squadB, setSquadB),
+                onSelectName: manualPathB ? pickManual("b", noticeKeyB, squadB, teamBId) : pickPlayer("b", noticeKeyB),
               },
               {
                 key: "a", tapKey: `${idx}:a`, pts: s.aPts, fouls: s.aFouls,
@@ -3528,8 +4038,9 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
                 playerName: resolveBoutSideDisplayName({ squad: squadA, memberId: playerAMemberId, storedName: playerAName }),
                 memberId: playerAMemberId,
                 memberLabel: playerALabel, roster: isDaihyoRow ? [] : rosterA, forceInput: manualPathA,
+                noticeKey: noticeKeyA,
                 lineupSlot: !isDaihyoRow && idx + 1 <= teamSize,
-                onSelectName: manualPathA ? pickManual("aName", "aMemberIdOverride", squadA, setSquadA, teamIdA) : pickPlayer(teamIdA, lineupA, squadA, setSquadA),
+                onSelectName: manualPathA ? pickManual("a", noticeKeyA, squadA, teamAId) : pickPlayer("a", noticeKeyA),
               },
             ];
 
@@ -3604,8 +4115,12 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
                       corrected past bout carries it; the live current bout does
                       not (it is never collapsible). */}
                   {idx === editingDoneBoutIdx && (
-                    <button type="button" className="tsm-caret tsm-caret--open tsm-caret-btn" data-testid={`kachinuki-done-collapse-${idx}`}
-                      aria-label={`Collapse bout ${idx + 1}`} aria-expanded={true} onClick={closeDoneBoutEdit}>▶</button>
+                    <button type="button" className="tsm-caret-btn" data-testid={`kachinuki-done-collapse-${idx}`}
+                      aria-label={`Collapse bout ${idx + 1}`} aria-expanded={true} onClick={closeDoneBoutEdit}>
+                      {/* bc-tp44: only the glyph rotates. Rotating the button
+                          itself made its 44x36 tap box hit-test as 36x44. */}
+                      <span className="tsm-caret tsm-caret--open" aria-hidden="true">▶</span>
+                    </button>
                   )}
                   {/* Bout number only: the FIK position abbreviations
                       (Sen/Ji/Chu/Fuk/Tai) that used to ride under it were
@@ -3675,6 +4190,7 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
                               : <span className="tsm-name__static tsm-name__static--empty" aria-label={`${posLabel} ${rs.label}: no player named`}>-</span>
                           )}
                         </div>
+                        {renderLineupNotice(rs.noticeKey)}
                         {/* Row 1: the ippon mark buttons and the per-bout
                             Fusensho button (layout: the .tsm-row-1 compact rules
                             in styles.css). T096/FR-031: Fusensho awards the bout
@@ -3840,77 +4356,6 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
             </div>
           )}
 
-          {/* Team summary: T138: sticky to the top of the modal body so
-              the totals stay visible as the operator scrolls through many
-              bout rows. zIndex: 5 keeps it under the modal head (10) but
-              above the bout cells.
-              mp-gmcg band redesign (user-confirmed brief): in kachinuki the
-              centre cell carries BOUT-LOG FACTS while running (bout number +
-              last bout result; never a verdict — the old IV/PW-derived
-              "AKA WIN" contradicted the End gate) and the verdict only on
-              completion, derived from the match winner. IV/PW demote to the
-              side cells (they still feed standings tie-breaks). Non-kachinuki
-              team matches keep RESULT + teamVerdictText: fixed formats ARE
-              decided by IV/PW. */}
-          {/* mp-gmcg: in the RUNNING kachinuki scorer the fought bouts render as
-              read-only rows above (renderReadOnlyBout), so the IV/PW summary band
-              is redundant and is dropped. Completed kachinuki (correction verdict)
-              and fixed-format team matches keep it. */}
-          {!kachinukiBoutMode && (() => {
-            const kb = isKachinuki && !hasDaihyosen
-              ? kachinukiBandModel({
-                  subs, daihyosenIdx, isComplete,
-                  namesAt: playerNamesForBout,
-                  // RAW winner/sides (not pre-flattened to names): winnerSideLR
-                  // inside kachinukiBandModel needs the {id,name} shape to prefer
-                  // id equality over name (review: two teams CAN share a name).
-                  matchWinner: m.winner,
-                  matchDecision: m.decision,
-                  sideA: m.sideA, sideB: m.sideB,
-                  currentBout: parseInt(visiblePositions[visiblePositions.length - 1], 10) || undefined,
-                })
-              : null;
-            return (
-              <div className="team-summary" style={{ position: "sticky", top: 0, zIndex: 5 }}>
-                {teamSides.map((ts, idx) => (
-                  <React.Fragment key={ts.key}>
-                    {/* idx 0 = SHIRO (left, default left-align); idx 1 = AKA, which
-                        sits in the right 1fr grid cell and must right-align to mirror
-                        SHIRO — the --right class existed but was never wired up, so
-                        AKA's IV/PW floated mid-panel. */}
-                    <div className={`team-summary__side${idx === 1 ? " team-summary__side--right" : ""}`}>
-                      <div className="team-summary__label">{ts.label}</div>
-                      <div className="team-summary__stats">IV: {ts.iv} · PW: {ts.pw}</div>
-                    </div>
-                    {idx === 0 && (
-                      <div className="team-summary__side team-summary__side--center">
-                        {kb ? (
-                          <>
-                            <div className="team-summary__label">{kb.headline}</div>
-                            {kb.verdict
-                              ? <div className={`team-summary__verdict team-summary__verdict--${kb.verdictSide}`} data-testid="team-summary-verdict">{kb.verdict}</div>
-                              : (kb.fact ? <div className="team-summary__fact" data-testid="team-summary-fact">{kb.fact}</div> : null)}
-                          </>
-                        ) : (
-                          <>
-                            <div className="team-summary__label">RESULT</div>
-                            <div className="team-summary__verdict" data-testid="team-summary-result">{teamVerdictText}</div>
-                          </>
-                        )}
-                        {/* bc-kcsh: the recorded decision under the verdict
-                            while a withdrawal is in force (see
-                            teamVerdictText). */}
-                        {rulingShown && (
-                          <div className="team-summary__fact" data-testid="team-summary-decision">{withdrawalLabel(m.decision)}</div>
-                        )}
-                      </div>
-                    )}
-                  </React.Fragment>
-                ))}
-              </div>
-            );
-          })()}
-
           {/* mp-4pc: hantei affordance for the daihyosen: the rep bout is
               the only team sub-bout that may be decided by judges (FIK 7-5 /
               29-6). Encho is optional: a tied daihyosen may be taken straight
@@ -4043,24 +4488,14 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
             );
           })()}
 
-          {/* The modal's ONE inline error surface: the daihyosen add/remove
-              POSTs AND the inline lineup-position PUT all report here. It
-              used to live INSIDE the add-daihyosen block above, which returns
-              null for kachinuki / pool / already-has-a-daihyosen matches — so
-              a failed lineup save (reachable exactly in the kachinuki flow)
-              set a message the operator never saw. Rendered here, a sibling
-              of decisionErr, it shows wherever it is set. */}
+          {/* The daihyosen add/remove POSTs report here. It used to live
+              INSIDE the add-daihyosen block above, which returns null for
+              kachinuki / pool / already-has-a-daihyosen matches, so a failure
+              there set a message the operator never saw. Rendered here, a
+              sibling of decisionErr, it shows wherever it is set. A bout
+              row's name box reports in its own row instead (lineupNotice). */}
           {editorErr && (
             <div data-testid="team-editor-error" className="daihyosen-controls__err" style={{ marginTop: 6 }}>{editorErr}</div>
-          )}
-
-          {/* Non-blocking: the inline lineup save above already succeeded.
-              Amber .alert--warn, a separate channel from editorErr, so it
-              can never be mistaken for that failed-save message. */}
-          {editorWarning && (
-            <div className="alert alert--warn" role="status" data-testid="team-editor-lineup-warning" style={{ marginTop: 6 }}>
-              {editorWarning}
-            </div>
           )}
 
           {/* Ippon-type letter legend: same affordance as the individual
@@ -4173,7 +4608,7 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
 
         </div>
 
-        <div className="editor-modal__foot editor-modal__foot--nav">
+        <div className="editor-modal__foot editor-modal__foot--nav" ref={dockRef}>
           {/* Audit reason prompt for team-match corrections: same contract
               as ScoreEditorModal: operator must confirm before the patch fires. */}
           {correctionPromptOpen && (
@@ -4410,30 +4845,38 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
                     bout End would judge is still the CURRENT editable bout
                     (kachinukiEnchoOffered): once Record has advanced the
                     encounter, overtime on the past bout is meaningless and the
-                    button would silently edit a read-only row (mp-gmcg review). */}
-                {kachinukiEnchoOffered && (
-                  <button
-                    type="button"
-                    className="btn"
-                    data-testid="kachinuki-encho-button"
-                    onClick={applyKachinukiEncho}
-                    disabled={submitting}
-                    title="Overtime: the same pair keeps fighting this bout"
-                  >
-                    Encho
-                  </button>
-                )}
-                {kachinukiEnchoUndoable && (
-                  <button
-                    type="button"
-                    className="btn btn--ghost"
-                    data-testid="kachinuki-encho-undo-button"
-                    onClick={undoKachinukiEncho}
-                    disabled={submitting}
-                    title="Take back one overtime period on this bout"
-                  >
-                    Undo encho
-                  </button>
+                    button would silently edit a read-only row (mp-gmcg review).
+                    While either of Encho and Undo encho is offered both are in the
+                    row, in this order, and the other is HELD (.holds-space) in its
+                    place (operator ruling 2026-10-06, "Keep Encho in place"): the
+                    row is centred, so a button added or removed beside Encho moved
+                    it (55 px left when Undo encho appeared), and a double tap on
+                    Encho landed on Undo encho and cancelled itself. A held button
+                    has the same label, so the same width, and is disabled besides:
+                    out of the tab order and the pointer, and no tap reaches it. */}
+                {(kachinukiEnchoOffered || kachinukiEnchoUndoable) && (
+                  <>
+                    <button
+                      type="button"
+                      className={`btn${kachinukiEnchoOffered ? "" : " holds-space"}`}
+                      data-testid="kachinuki-encho-button"
+                      onClick={applyKachinukiEncho}
+                      disabled={submitting || !kachinukiEnchoOffered}
+                      title="Overtime: the same pair keeps fighting this bout"
+                    >
+                      Encho
+                    </button>
+                    <button
+                      type="button"
+                      className={`btn btn--ghost${kachinukiEnchoUndoable ? "" : " holds-space"}`}
+                      data-testid="kachinuki-encho-undo-button"
+                      onClick={undoKachinukiEncho}
+                      disabled={submitting || !kachinukiEnchoUndoable}
+                      title="Take back one overtime period on this bout"
+                    >
+                      Undo encho
+                    </button>
+                  </>
                 )}
                 <button type="button" className={`btn ${endArmed ? "btn--confirm" : ""}`} data-testid="kachinuki-end-match-button" onClick={(ev) => {
                   if (kachinukiEndOutcome?.kind === "blocked") return;
@@ -4502,7 +4945,7 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
   }
 
   return (
-    <div className="modal-backdrop" data-testid="scoring-modal-root" onClick={handleDismiss}>
+    <div className="modal-backdrop" data-testid="scoring-modal-root" ref={openedRef} onClickCapture={onClickCapture} onClick={handleDismiss}>
       <div className={`editor-modal editor-modal--team ${useCompact ? "editor-modal--compact" : ""}`} role="dialog" aria-modal="true" aria-label={dialogLabel} onClick={(e) => e.stopPropagation()}>
         {inner}
       </div>

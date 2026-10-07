@@ -60,6 +60,19 @@ type TeamMember struct {
 	// state.SquadReserveSlots reserves (state.upgradeSquadsFromMetadataLocked),
 	// each already carrying its ID and Index, with Name blank until filled in.
 	Name string `json:"name" yaml:"name"`
+
+	// ModifiedAt is the server's time, in milliseconds since the epoch, of the
+	// last write that created this member or changed its name. The store stamps
+	// it under the competition's lock (state.Store.stampMember) with the later of
+	// the server's time and one more than the member's previous stamp, so one
+	// member's stamps only grow, whatever the server's clock does between writes.
+	// A client holding two copies of a member keeps the one with the larger stamp.
+	//
+	// It is 0 for a member no write of this release has touched: a seeded blank
+	// slot, or one recorded before the field existed. The wire always carries it,
+	// so a reader can tell 0 from a missing key; the file leaves it out at 0, so a
+	// team-members.yaml written before it round-trips byte for byte.
+	ModifiedAt int64 `json:"modifiedAt" yaml:"modifiedAt,omitempty"`
 }
 
 // SquadMemberLabel composes a squad member's visible label (bc-pnum, "make

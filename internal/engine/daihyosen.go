@@ -292,7 +292,7 @@ func (e *Engine) InjectPoolDaihyosenMatches(compID string) ([]state.MatchResult,
 		if tournErr != nil {
 			return tournErr
 		}
-		return tx.SavePoolMatches(compID, appendWithSlots(allMatches, injected, comp, tournament))
+		return savePoolMatchesAndKnockoutTimes(tx, compID, appendWithSlots(allMatches, injected, comp, tournament), comp, tournament)
 	})
 	if err != nil {
 		return nil, err
@@ -329,6 +329,26 @@ func appendWithSlots(allMatches, injected []state.MatchResult, comp *state.Compe
 		}
 	}
 	return allMatches
+}
+
+// savePoolMatchesAndKnockoutTimes saves a pool phase that gained bouts after
+// the draw and, in a pools + knockout competition, moves the knockout matches
+// those bouts now run into (pushKnockoutPastPools), in the same transaction.
+func savePoolMatchesAndKnockoutTimes(tx state.StoreTx, compID string, matches []state.MatchResult, comp *state.Competition, tournament *state.Tournament) error {
+	if err := tx.SavePoolMatches(compID, matches); err != nil {
+		return err
+	}
+	if !comp.IsKnockoutEnabled() {
+		return nil
+	}
+	bracket, err := tx.LoadBracket(compID)
+	if err != nil {
+		return err
+	}
+	if !pushKnockoutPastPools(bracket, comp, tournament, matches) {
+		return nil
+	}
+	return tx.SaveBracket(compID, bracket)
 }
 
 // ComputeTeamSummary aggregates SubMatchResult entries into TeamSummary

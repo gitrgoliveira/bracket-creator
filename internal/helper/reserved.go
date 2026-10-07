@@ -32,3 +32,11 @@ func IsReservedParticipantName(name string) bool {
 func IsPoolFinalistPlaceholder(s string) bool {
 	return reservedPoolFinalistRE.MatchString(s)
 }
+
+// IsWinnerOfPlaceholder reports whether s is a next-round feeder label
+// ("Winner of r1-m3") as the engine writes it into a bracket slot not decided
+// yet. It matches that exact shape only, so a competitor whose name merely
+// starts with "Winner of" is a competitor.
+func IsWinnerOfPlaceholder(s string) bool {
+	return reservedWinnerOfRE.MatchString(s)
+}

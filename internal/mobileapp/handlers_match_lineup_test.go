@@ -54,15 +54,21 @@ func TestMatchLineupPUTGET_RoundTrip(t *testing.T) {
 	gw := httptest.NewRecorder()
 	r.ServeHTTP(gw, greq)
 	require.Equal(t, http.StatusOK, gw.Code)
+	var body map[string]any
+	require.NoError(t, json.Unmarshal(gw.Body.Bytes(), &body))
+	assert.Equal(t, true, body["saved"])
 	var got domain.TeamLineup
 	require.NoError(t, json.Unmarshal(gw.Body.Bytes(), &got))
 	assert.Equal(t, "PoolA-0", got.MatchID)
 	assert.Equal(t, "p1", got.Positions[domain.PosSenpo])
 }
 
-// TestMatchLineupGET_404WhenAbsent: GET returns 404 so callers can fall
-// back to the round-scoped endpoint.
-func TestMatchLineupGET_404WhenAbsent(t *testing.T) {
+// TestMatchLineupGET_EmptyWhenNothingSaved: GET answers 200 with an empty
+// lineup marked saved: false when no match-scoped entry exists (bc-k404).
+// The server never falls back to the round-scoped lineup on this route --
+// that tier belongs to the CLIENT (resolveMatchLineup) -- so a saved ROUND
+// lineup for the same team must not change the answer.
+func TestMatchLineupGET_EmptyWhenNothingSaved(t *testing.T) {
 	r, store, _ := setupLineupTestRouter(t)
 	require.NoError(t, store.SaveCompetition(&state.Competition{ID: "c1", TeamSize: 5}))
 
@@ -70,7 +76,64 @@ func TestMatchLineupGET_404WhenAbsent(t *testing.T) {
 		"/api/competitions/c1/teams/teamA/match-lineups/PoolA-9", nil)
 	w := httptest.NewRecorder()
 	r.ServeHTTP(w, req)
-	assert.Equal(t, http.StatusNotFound, w.Code)
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	var body map[string]any
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &body))
+	assert.Equal(t, false, body["saved"])
+	assert.Equal(t, map[string]any{}, body["positions"])
+	assert.Equal(t, "PoolA-9", body["matchId"])
+	assert.Equal(t, float64(0), body["round"])
+
+	// Seed a ROUND lineup for the same team; the match route must still
+	// answer saved: false, since it never falls back on its own.
+	require.NoError(t, store.SetTeamLineup("c1", domain.TeamLineup{
+		TeamID: "teamA",
+		Round:  0,
+		Positions: map[domain.Position]string{
+			domain.PosSenpo:   "p1",
+			domain.PosJiho:    "p2",
+			domain.PosChuken:  "p3",
+			domain.PosFukusho: "p4",
+			domain.PosTaisho:  "p5",
+		},
+	}, 5))
+
+	req2 := httptest.NewRequest(http.MethodGet,
+		"/api/competitions/c1/teams/teamA/match-lineups/PoolA-9", nil)
+	w2 := httptest.NewRecorder()
+	r.ServeHTTP(w2, req2)
+	require.Equal(t, http.StatusOK, w2.Code, w2.Body.String())
+	var body2 map[string]any
+	require.NoError(t, json.Unmarshal(w2.Body.Bytes(), &body2))
+	assert.Equal(t, false, body2["saved"], "the match route never falls back to a round lineup")
+}
+
+// TestMatchLineupPUT_EmptyPositionsStillCountsAsSaved (bc-k404): a lineup
+// with an empty positions map is a legitimate saved state (bc-lpfb's own
+// write path produces exactly this shape), and `saved` -- not emptiness --
+// is what tells it apart from "nothing submitted at all".
+func TestMatchLineupPUT_EmptyPositionsStillCountsAsSaved(t *testing.T) {
+	r, store, _ := setupLineupTestRouter(t)
+	require.NoError(t, store.SaveTournament(&state.Tournament{Name: "T", Password: "secret"}))
+	require.NoError(t, store.SaveCompetition(&state.Competition{ID: "c1", TeamSize: 5}))
+
+	body, _ := json.Marshal(LineupRequest{Positions: map[domain.Position]string{}})
+	req := httptest.NewRequest(http.MethodPut,
+		"/api/competitions/c1/teams/teamA/match-lineups/PoolA-0", bytes.NewReader(body))
+	req.Header.Set("X-Tournament-Password", "secret")
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+
+	greq := httptest.NewRequest(http.MethodGet,
+		"/api/competitions/c1/teams/teamA/match-lineups/PoolA-0", nil)
+	gw := httptest.NewRecorder()
+	r.ServeHTTP(gw, greq)
+	require.Equal(t, http.StatusOK, gw.Code)
+	var got map[string]any
+	require.NoError(t, json.Unmarshal(gw.Body.Bytes(), &got))
+	assert.Equal(t, true, got["saved"], "an empty but SAVED lineup is still saved: true")
+	assert.Equal(t, map[string]any{}, got["positions"])
 }
 
 // TestMatchLineupPUT_AlwaysEditable: a match-scoped PUT always succeeds,

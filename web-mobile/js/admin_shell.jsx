@@ -3,7 +3,13 @@
 // lives here so it loads before any section-specific file. See
 // web-mobile/admin_split_plan.md.
 
-const { useState: useStateA, useMemo: useMemoA, useEffect: useEffectA, useRef: useRefA } = React;
+// The held-writes copy (bc-offl). write_result.jsx is an import-only leaf, so
+// this script-tagged module can import it without a double evaluation.
+import { heldWritesText, heldWriteLine, heldWriteDiscardConfirm, matchLabel, heldLineupLabel, HELD_WRITES_TITLE, HELD_WRITES_EMPTY, HELD_WRITE_DISCARD_ONE_LABEL } from './write_result.jsx';
+import { scoreRowMatchLabel } from './pool_ids.jsx';
+import { publishHeight } from './published_height.jsx';
+
+const { useState: useStateA, useMemo: useMemoA, useEffect: useEffectA, useRef: useRefA, useLayoutEffect: useLayoutEffectA } = React;
 
 // Producers (loaded earlier).
 const sideName = window.sideName;
@@ -20,6 +26,94 @@ const Modal = window.Modal;
 // a second copy of a QR-plus-copy modal is the drift this repo keeps paying
 // for. qr.js is no longer imported here because ShareLinkModal owns the QR.
 const ShareLinkModal = window.ShareLinkModal;
+
+// heldWriteWhere: which match (or team) one held write is about, named the
+// way the score list names it (scoreRowMatchLabel) when the competition's
+// matches are loaded, else by the match's number or id (matchLabel). The
+// competition is named too: the list spans every competition on the device.
+export function heldWriteWhere(held, competitions) {
+  const comp = (competitions || []).find((c) => c && c.id === held.compID) || null;
+  const compName = (comp && comp.name) || held.compID || '';
+  let what;
+  if (held.kind === 'lineup') {
+    // A competition's roster is `players` (normalizeViewerCompItem); a team
+    // is one entry in it, found by its participant id.
+    const team = comp && Array.isArray(comp.players)
+      ? comp.players.find((p) => p && p.id === held.teamId) : null;
+    what = heldLineupLabel(team && team.name);
+  } else {
+    const m = comp && typeof window.compMatches === 'function'
+      ? (window.compMatches(comp) || []).find((x) => x && x.id === held.matchID) : null;
+    what = (m && scoreRowMatchLabel(m)) || matchLabel(m ? { number: m.matchNumber, id: m.id } : { id: held.matchID });
+  }
+  return compName && what ? `${compName} · ${what}` : (compName || what);
+}
+
+// HeldWritesPanel: every write held on this device, opened from the topbar's
+// held-writes indicator. A write the server keeps refusing can be discarded
+// here, one at a time and after a confirm, whatever it is: a running
+// autosave, a lineup save or a hand-set winner has no editor of its own to
+// offer it (the score editors' banner offers it for a result). A write that is
+// only waiting for the connection, or for a sign-in, is listed without one: it
+// lands on its own. Re-read whenever the sync status or the held count moves.
+export function HeldWritesPanel({ competitions, onClose }) {
+  const api = window.API;
+  const read = () => (api && typeof api.heldWrites === 'function' ? api.heldWrites() : []);
+  const [items, setItems] = useStateA(read);
+  const [busyKey, setBusyKey] = useStateA(null);
+  const mountedRef = useRefA(true);
+  useEffectA(() => () => { mountedRef.current = false; }, []);
+  useEffectA(() => {
+    const refresh = () => { if (mountedRef.current) setItems(read()); };
+    const offs = [];
+    if (typeof window.subscribeSyncStatus === 'function') offs.push(window.subscribeSyncStatus(refresh));
+    if (typeof window.subscribeUnsentWrites === 'function') offs.push(window.subscribeUnsentWrites(refresh));
+    return () => offs.forEach((off) => { if (typeof off === 'function') off(); });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  const discard = async (held) => {
+    setBusyKey(held.key);
+    try {
+      const ok = typeof window.confirmDialog === 'function'
+        ? await window.confirmDialog(heldWriteDiscardConfirm(held))
+        : false;
+      if (!ok || !mountedRef.current) return;
+      api.discardHeldWrite(held.key);
+      setItems(read());
+    } finally {
+      if (mountedRef.current) setBusyKey(null);
+    }
+  };
+  return (
+    <Modal title={HELD_WRITES_TITLE} onClose={onClose}>
+      {items.length === 0 ? (
+        <p className="held-writes__empty">{HELD_WRITES_EMPTY}</p>
+      ) : (
+        <ul className="held-writes" data-testid="held-writes">
+          {items.map((held) => (
+            <li key={held.key} className="held-writes__item" data-testid="held-write">
+              <div className="held-writes__text">
+                <div className="held-writes__where">{heldWriteWhere(held, competitions)}</div>
+                <div className={`held-writes__state${held.keepsFailing ? ' held-writes__state--error' : ''}`}>
+                  {heldWriteLine(held)}
+                </div>
+              </div>
+              {held.keepsFailing && (
+                <button
+                  type="button"
+                  className="btn btn--sm btn--ghost"
+                  data-testid="held-write-discard-one"
+                  disabled={busyKey !== null}
+                  onClick={() => discard(held)}
+                >{HELD_WRITE_DISCARD_ONE_LABEL}</button>
+              )}
+            </li>
+          ))}
+        </ul>
+      )}
+    </Modal>
+  );
+}
 
 // Maximum running-match chips rendered in the topbar status strip before the
 // "+N more" overflow indicator kicks in.
@@ -157,12 +251,41 @@ function AdminTopbar({ onLogout, onViewerMode, tournament, hideRunningStrip }) {
     return () => unsub();
   }, []);
 
+  // bc-offl: the held-writes count. A result finished while offline is held on
+  // this device, and the court console rightly moves on to the next match, which
+  // unmounts the editor whose banner said so; this indicator is the always-
+  // mounted home for it (operator decision 2026-09-27: a separate item after the
+  // connection pill, the danger colour, no pulse).
+  const [unsent, setUnsent] = useStateA(null);
+  useEffectA(() => {
+    const subscribe = typeof window !== 'undefined' && window.subscribeUnsentWrites;
+    if (!subscribe) return;
+    const unsub = subscribe((c) => setUnsent(c));
+    return () => unsub();
+  }, []);
+  const heldText = heldWritesText(syncStatus, unsent);
+  const [heldOpen, setHeldOpen] = useStateA(false);
+  // While queued writes fail for network reasons the event stream may still
+  // read open; the pill says what the writes found (operator decision 2026-09-27).
+  const linkUp = connected && syncStatus !== 'offline';
+
+  // The stack sizes to its content and grows with the connection alert or the
+  // running strip, so the pinned team header (styles.css .team-sheet-pin) and
+  // the inline team sheet's scroll margin read its height from this property
+  // instead of a constant.
+  const stackRef = useRefA(null);
+  useLayoutEffectA(() => {
+    const el = stackRef.current;
+    if (!el) return;
+    return publishHeight(el, document.documentElement, '--topbar-stack-h');
+  }, []);
+
   return (
     // Wrap topbar + running-strip in a single sticky container so they scroll
     // together. This lets the topbar size naturally (min-height instead of a
     // fixed height): robust to font scaling / browser zoom, while still
     // keeping the running-strip visually anchored beneath it.
-    <div className="topbar-stack">
+    <div className="topbar-stack" ref={stackRef}>
       <div className="topbar">
         <div className="topbar__brand">
           <img src="/api/branding/logo" onError={(e) => { e.target.onerror = null; e.target.src = "/logo.jpeg"; }} alt="Tournament logo" className="topbar__logo" decoding="async" />
@@ -180,14 +303,35 @@ function AdminTopbar({ onLogout, onViewerMode, tournament, hideRunningStrip }) {
             (DESIGN.md Principle 3). role=status + aria-live announce the
             change to assistive tech without alarming. */}
         <span
-          className={`topbar__conn${connected ? "" : " topbar__conn--down"}`}
+          className={`topbar__conn${linkUp ? "" : " topbar__conn--down"}`}
           role="status"
           aria-live="polite"
-          title={connected ? "Receiving real-time updates" : "Connection lost, reconnecting"}
+          title={linkUp ? "Receiving real-time updates" : "Connection lost, reconnecting"}
         >
           <span aria-hidden="true" className="topbar__conn__dot"></span>
-          {connected ? "Connected" : "Reconnecting…"}
+          {linkUp ? "Connected" : "Reconnecting…"}
         </span>
+        {heldText && (
+          // Opens the list of what is held (HeldWritesPanel), where a write
+          // the server keeps refusing can be discarded. The live region is
+          // the text inside, so the button's own name stays the count.
+          <button
+            type="button"
+            className={`topbar__held${syncStatus === 'offline' ? " topbar__held--offline" : syncStatus === 'server-error' ? " topbar__held--error" : ""}`}
+            aria-haspopup="dialog"
+            data-testid="topbar-held"
+            onClick={() => setHeldOpen(true)}
+          >
+            <span aria-hidden="true" className="topbar__held__dot"></span>
+            <span role="status" aria-live="polite">{heldText}</span>
+          </button>
+        )}
+        {heldOpen && (
+          <HeldWritesPanel
+            competitions={tournament && tournament.competitions}
+            onClose={() => setHeldOpen(false)}
+          />
+        )}
         <button type="button" className="viewer-toggle" onClick={onViewerMode}><Icon name="eye" /> Public viewer</button>
         {syncStatus === 'auth-required' && (
           <button
@@ -856,19 +1000,32 @@ function CourtPicker({ value, courts, onChange, btnClassName = "", label = "", a
   const ref = useRefA(null);
   const triggerRef = useRefA(null);
   const optionRefs = useRefA([]);
+  // Whether the close in flight was made inside the picker (Escape, a choice, its
+  // own button). An outside tap closes it too, but by the time the close lands the
+  // tapped control has taken focus, and it keeps it.
+  const closedFromInside = useRefA(false);
+  const close = (fromInside) => { closedFromInside.current = fromInside; setOpen(false); };
 
-  window.useClickOutside(ref, () => setOpen(false), open);
+  window.useClickOutside(ref, () => close(false), open);
 
   // On open, seed the active option to the current court and move focus into
-  // the popover. On close, return focus to the trigger so keyboard users
-  // aren't dropped to <body>.
+  // the popover. On a close made inside the picker, return focus to the trigger
+  // so keyboard users aren't dropped to <body>, without scrolling: the button is
+  // where the operator was. Only on a close, never as the picker mounts (it is
+  // closed then too): every queue and score row carries a picker, and focus
+  // jumped to the last one mounted, scrolling the page to it. Never on an outside
+  // tap: taking focus back from the control that was tapped blurred a name box
+  // (dropping the iPad keyboard) and scrolled the Scores page back to the button.
+  const wasOpen = useRefA(false);
   useEffectA(() => {
     if (open) {
       const cur = Math.max(0, courts.indexOf(value));
       setActiveIdx(cur);
-    } else {
-      triggerRef.current && triggerRef.current.focus();
+    } else if (wasOpen.current && closedFromInside.current) {
+      triggerRef.current && triggerRef.current.focus({ preventScroll: true });
     }
+    if (!open) closedFromInside.current = false;
+    wasOpen.current = open;
   }, [open]);
 
   // Focus the active option element whenever it changes while open.
@@ -878,13 +1035,13 @@ function CourtPicker({ value, courts, onChange, btnClassName = "", label = "", a
     }
   }, [open, activeIdx]);
 
-  const select = (cc) => { setOpen(false); if (cc !== value) onChange(cc); };
+  const select = (cc) => { close(true); if (cc !== value) onChange(cc); };
 
   const onPopoverKeyDown = (e) => {
     if (e.key === "Escape") {
       e.preventDefault();
       e.stopPropagation();
-      setOpen(false);
+      close(true);
       return;
     }
     // Every branch below indexes into `courts`; with no courts there's nothing
@@ -914,7 +1071,7 @@ function CourtPicker({ value, courts, onChange, btnClassName = "", label = "", a
       <button type="button"
         ref={triggerRef}
         className={btnClassName}
-        onClick={(e) => { e.stopPropagation(); setOpen((o) => !o); }}
+        onClick={(e) => { e.stopPropagation(); if (open) close(true); else setOpen(true); }}
         title="Change shiaijo"
         aria-haspopup="listbox"
         aria-expanded={open}

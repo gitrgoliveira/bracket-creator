@@ -1,7 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import {
   resolveDecisionPassword,
-  assertRunningWritePersisted,
   buildDecisionBody,
   submitDecisionRequest,
   getIpponButtons,
@@ -22,12 +21,11 @@ import {
   teamResultLabel,
   isKoTieBlocked,
 } from '../admin_scoring_modal.jsx';
-import { makeSubmitDecision } from '../admin_scoring_shared.jsx';
+import { makeSubmitDecision, fusenshoAllowed, clearFusensho, applyBoutScoreEdit } from '../admin_scoring_shared.jsx';
 import { DOWNSTREAM_KNOCKOUT_PLAYED_CANCELLED } from '../write_result.jsx';
 import { sameCompetitor } from '../competitor_identity.jsx';
 import { preserveStoredDaihyosenVerdict } from '../admin_scoring_team.jsx';
 import { hanteiWinnerKey, hanteiSlot } from '../result_slot.jsx';
-import { defaultWinMaru } from '../bracket.jsx';
 // teamEncounterHasResult is a module-internal helper of admin_scoring_team.jsx
 // (not part of the thin-entry consumer barrel), imported directly like the
 // resolveMatchLineup tests do.
@@ -56,60 +54,6 @@ describe('resolveDecisionPassword', () => {
     expect(resolveDecisionPassword('')).toBe('');
     expect(resolveDecisionPassword(undefined)).toBe('');
     expect(resolveDecisionPassword(null)).toBe('');
-  });
-});
-
-describe('assertRunningWritePersisted (daihyosen pre-save prerequisite guard)', () => {
-  // recordScore returns a discriminated { queued: true } when a running write
-  // could only be enqueued (offline / retryable 5xx), NOT server-confirmed.
-  // Actions with a hard prerequisite on persistence (the daihyosen pre-save)
-  // must abort on that case rather than proceed against stale server state.
-  it('throws "score_not_synced" when the write was only queued', () => {
-    expect(() => assertRunningWritePersisted({ queued: true })).toThrow('score_not_synced');
-  });
-
-  it('does not throw for a server-confirmed MatchResult', () => {
-    expect(() => assertRunningWritePersisted({ id: 'm1', status: 'running' })).not.toThrow();
-  });
-
-  it('does not throw for a same-session stale 200 (server already holds equal-or-newer state)', () => {
-    // A { stale: true } result means the server no-op'd an out-of-order write
-    // because it already has an equal-or-newer state; dependent reads are safe,
-    // so daihyosen should proceed, not abort.
-    expect(() => assertRunningWritePersisted({ stale: true })).not.toThrow();
-  });
-
-  it('does not throw for null/undefined (no result to inspect)', () => {
-    expect(() => assertRunningWritePersisted(null)).not.toThrow();
-    expect(() => assertRunningWritePersisted(undefined)).not.toThrow();
-  });
-
-  it('does not throw when queued is falsy', () => {
-    expect(() => assertRunningWritePersisted({ queued: false })).not.toThrow();
-  });
-
-  // bc-lww1: the server gained a SECOND not-landed shape. A 200 {applied:false}
-  // means the timestamp guard dropped this write because a DIFFERENT writer's
-  // newer result is stored, so nothing the operator entered was saved and the
-  // dependent daihyosen request would be built on sub-results they never saw.
-  // This guard was the sixth site of the "did it land?" question and the one
-  // the original five-site conversion missed.
-  it('throws "score_not_synced" when the server superseded the write', () => {
-    expect(() => assertRunningWritePersisted({ applied: false, reason: 'superseded' }))
-      .toThrow('score_not_synced');
-  });
-
-  // The distinction that makes this guard non-trivial: `stale` (above) is the
-  // operator's OWN out-of-order write and proceeds, while `applied:false` is
-  // someone else's result winning and must abort. Both are 200s that are not
-  // MatchResults, so "not a MatchResult" is NOT the rule.
-  it('treats a superseded write differently from a same-session stale one', () => {
-    expect(() => assertRunningWritePersisted({ stale: true })).not.toThrow();
-    expect(() => assertRunningWritePersisted({ applied: false })).toThrow('score_not_synced');
-  });
-
-  it('does not throw when applied is true', () => {
-    expect(() => assertRunningWritePersisted({ applied: true, id: 'm1' })).not.toThrow();
   });
 });
 
@@ -761,17 +705,12 @@ describe('nextFoulOnDecrement (team `−` button regression)', () => {
 });
 
 describe('applyFusenshoToggle', () => {
-  // The toggle takes its maru cells from the shared count rule; register
-  // the REAL source so these tests pin it, not the window-absent fallback.
-  beforeEach(() => { global.window.defaultWinMaru = defaultWinMaru; });
-  afterEach(() => { delete global.window.defaultWinMaru; });
-
   // Per-bout Fusensho is a toggle in TeamScoreEditorModal. Toggle-on
-  // overwrites the bout to a 2-0 default win for the chosen side; the
-  // pre-fusensho points are stashed in _preFusensho so that toggling off
-  // (re-clicking the active side) can restore them. Bug fix: previously
-  // the untoggle only cleared the flag and left the auto-filled 2-0 in
-  // place, losing the operator's prior score.
+  // gives the chosen side its default-win maru and leaves the other side the
+  // points it had already struck (FIK Art. 32, bc-fsnp); the pre-fusensho
+  // points are stashed in _preFusensho so that toggling off (re-clicking the
+  // active side) can restore them. Without a snapshot (after a reload) the
+  // untoggle drops the circles and keeps the struck points.
 
   const clean = () => ({ aPts: [], bPts: [], aFouls: 0, bFouls: 0, fusensho: "" });
 
@@ -828,7 +767,9 @@ describe('applyFusenshoToggle', () => {
 
     const afterSwitch = applyFusenshoToggle(afterA, "b");
     expect(afterSwitch.fusensho).toBe("b");
-    expect(afterSwitch.aPts).toEqual([]);
+    // bc-fsnp: the new loser (A) keeps what A had struck before ANY fusensho
+    // (the snapshot's M), never the circles the first fusensho gave it.
+    expect(afterSwitch.aPts).toEqual(['M']);
     expect(afterSwitch.bPts).toEqual(['○', '○']);
     // Snapshot stays anchored to the genuine pre-fusensho state.
     expect(afterSwitch._preFusensho).toEqual({ aPts: ['M'], bPts: [], aFouls: 0, bFouls: 0 });
@@ -859,21 +800,54 @@ describe('applyFusenshoToggle', () => {
     });
   });
 
-  it('defensive: untoggle without a snapshot just clears the flag', () => {
-    // Models the modal-reopen case: initSubs reads decision="fusensho"
-    // from the backend payload and lights up the button, but does NOT
-    // round-trip the snapshot. Untoggling in that state must not crash;
-    // it falls through to clearing the flag and leaving the score alone.
-    const prev = { aPts: ['○', '○'], bPts: [], aFouls: 0, bFouls: 0, fusensho: "a" };
+  it('untoggle without a snapshot strips the circles and keeps struck points (bc-fsnp)', () => {
+    // Models the modal-reopen case: the editor seeds fusensho from the
+    // backend payload and lights up the button, but does NOT round-trip the
+    // snapshot. The circles are the default win's, so they go; the other
+    // side's struck K stays. They used to stay behind as two ordinary points.
+    const prev = { aPts: ['○', '○'], bPts: ['K'], aFouls: 0, bFouls: 0, fusensho: "a" };
     const next = applyFusenshoToggle(prev, "a");
     expect(next).toEqual({
-      aPts: ['○', '○'],
-      bPts: [],
+      aPts: [],
+      bPts: ['K'],
       aFouls: 0,
       bFouls: 0,
       fusensho: "",
       _preFusensho: undefined,
     });
+  });
+
+  it('toggle-on keeps the other side\'s struck points (bc-fsnp)', () => {
+    // FIK Art. 32: any point the withdrawing side had scored stays valid.
+    const prev = { aPts: [], bPts: ['K'], aFouls: 0, bFouls: 0, fusensho: "" };
+    const next = applyFusenshoToggle(prev, "a");
+    expect(next.aPts).toEqual(['○', '○']);
+    expect(next.bPts).toEqual(['K']);
+    expect(next.fusensho).toBe("a");
+    // An H the side was awarded is a point it holds, so it stays too.
+    const withH = applyFusenshoToggle({ aPts: ['H'], bPts: [], aFouls: 0, bFouls: 0, fusensho: "" }, "b");
+    expect(withH.aPts).toEqual(['H']);
+    expect(withH.bPts).toEqual(['○', '○']);
+  });
+
+  it('toggle-on in encho gives one circle and keeps the other side\'s point (bc-fsnp)', () => {
+    const prev = { aPts: [], bPts: ['K'], aFouls: 0, bFouls: 0, fusensho: "", encho: 1 };
+    const next = applyFusenshoToggle(prev, "a");
+    expect(next.aPts).toEqual(['○']);
+    expect(next.bPts).toEqual(['K']);
+  });
+
+  it('a fusensho against a side that already won the bout is refused (bc-fsnp)', () => {
+    // Circles against two struck points would be an impossible 2-2, which
+    // the server rejects on every save; the bout is already B's.
+    const prev = { aPts: [], bPts: ['M', 'K'], aFouls: 0, bFouls: 0, fusensho: "" };
+    expect(fusenshoAllowed(prev, "a")).toBe(false);
+    expect(applyFusenshoToggle(prev, "a")).toBe(prev);
+    // The winning side itself may still take the default win.
+    expect(fusenshoAllowed(prev, "b")).toBe(true);
+    // Undoing an active fusensho is never refused.
+    const active = { aPts: ['○', '○'], bPts: ['K'], aFouls: 0, bFouls: 0, fusensho: "a" };
+    expect(fusenshoAllowed(active, "a")).toBe(true);
   });
 
   // mp-gmcg: a kachinuki sub-bout carries an `encho` period count (and, for
@@ -897,11 +871,105 @@ describe('applyFusenshoToggle', () => {
     expect(next.fusensho).toBe("");
   });
 
+  it('a side-switch on a reopened row, then its undo, leaves no circles as points (bc-fsnp)', () => {
+    // A row reopened from saved state carries its fusensho but no snapshot.
+    // Taking its circles into the snapshot let this undo restore them as
+    // ordinary points with the fusensho cleared.
+    const reopened = { aPts: ['○', '○'], bPts: ['K'], aFouls: 0, bFouls: 0, fusensho: "a", draw: false };
+    const switched = applyFusenshoToggle(reopened, "b");
+    expect(switched.aPts).toEqual([]);
+    expect(switched.bPts).toEqual(['○', '○']);
+    const undone = applyFusenshoToggle(switched, "b");
+    expect(undone.fusensho).toBe("");
+    expect(undone.aPts).toEqual([]);
+    expect(undone.bPts).toEqual(['K']);
+  });
+
   it('applying fusensho clears a stale draw (mutually exclusive)', () => {
     const prev = { aPts: [], bPts: [], aFouls: 0, bFouls: 0, fusensho: "", draw: true };
     const next = applyFusenshoToggle(prev, "a");
     expect(next.draw).toBe(false);
     expect(next.fusensho).toBe("a");
+  });
+});
+
+describe('clearFusensho (bc-fsnp)', () => {
+  it('drops the winner\'s circles, keeps struck points and clears the flags', () => {
+    const prev = { aPts: ['○', '○'], bPts: ['K'], fusensho: "a", _preFusensho: { aPts: [], bPts: ['K'] }, encho: 0 };
+    expect(clearFusensho(prev)).toEqual({ aPts: [], bPts: ['K'], fusensho: "", _preFusensho: undefined, encho: 0 });
+  });
+
+  it('strips a circle an edit carried in and keeps the edit itself', () => {
+    // An H awarded onto the circle side (a foul on the other side) survives;
+    // the circles do not.
+    const prev = { aPts: ['○', '○', 'H'], bPts: ['K'], fusensho: "a" };
+    expect(clearFusensho(prev).aPts).toEqual(['H']);
+  });
+
+  it('is the identity on pts when no fusensho is set', () => {
+    const prev = { aPts: ['M'], bPts: ['K'], fusensho: "", draw: true };
+    const next = clearFusensho(prev);
+    expect(next.aPts).toBe(prev.aPts);
+    expect(next.bPts).toBe(prev.bPts);
+    expect(next.draw).toBe(true);
+  });
+});
+
+describe('applyBoutScoreEdit (bc-fsnp)', () => {
+  // AKA (a) holds the fusensho; SHIRO (b) keeps the kote it struck.
+  const fusenshoRow = (snap) => ({ aPts: ['○', '○'], bPts: ['K'], aFouls: 0, bFouls: 0, fusensho: "a", draw: false, _preFusensho: snap });
+
+  it('taking a mark off the losing side keeps the fusensho', () => {
+    const prev = fusenshoRow({ aPts: ['M'], bPts: ['K'], aFouls: 0, bFouls: 0 });
+    const next = applyBoutScoreEdit(prev, { ...prev, bPts: [] });
+    expect(next.fusensho).toBe("a");
+    expect(next.aPts).toEqual(['○', '○']);
+    expect(next.bPts).toEqual([]);
+  });
+
+  it('the snapshot follows the correction, so the undo does not bring the mark back', () => {
+    const prev = fusenshoRow({ aPts: ['M'], bPts: ['K'], aFouls: 0, bFouls: 0 });
+    const undone = applyFusenshoToggle(applyBoutScoreEdit(prev, { ...prev, bPts: [] }), "a");
+    expect(undone.fusensho).toBe("");
+    expect(undone.aPts).toEqual(['M']);
+    expect(undone.bPts).toEqual([]);
+  });
+
+  it('on a reopened row (no snapshot) the undo keeps the correction too', () => {
+    const prev = fusenshoRow(undefined);
+    const corrected = applyBoutScoreEdit(prev, { ...prev, bPts: [] });
+    expect(corrected._preFusensho).toBeUndefined();
+    const undone = applyFusenshoToggle(corrected, "a");
+    expect(undone.aPts).toEqual([]);
+    expect(undone.bPts).toEqual([]);
+  });
+
+  it('adding a point is a fresh strike and ends the fusensho', () => {
+    // In encho the winner holds ONE circle, so the ippon buttons stay enabled.
+    const prev = { ...fusenshoRow(undefined), aPts: ['○'], bPts: [], encho: 1 };
+    const next = applyBoutScoreEdit(prev, { ...prev, bPts: ['M'] });
+    expect(next.fusensho).toBe("");
+    expect(next.aPts).toEqual([]);
+    expect(next.bPts).toEqual(['M']);
+  });
+
+  it('a foul edit ends the fusensho', () => {
+    const prev = fusenshoRow(undefined);
+    const next = applyBoutScoreEdit(prev, { ...prev, bFouls: 1 });
+    expect(next.fusensho).toBe("");
+    expect(next.aPts).toEqual([]);
+  });
+
+  it('an edit on a row without a fusensho clears its draw', () => {
+    const prev = { aPts: [], bPts: [], aFouls: 0, bFouls: 0, fusensho: "", draw: true };
+    const next = applyBoutScoreEdit(prev, { ...prev, aPts: ['M'] });
+    expect(next.draw).toBe(false);
+    expect(next.aPts).toEqual(['M']);
+  });
+
+  it('an edit that changes nothing leaves the row as it was', () => {
+    const prev = fusenshoRow(undefined);
+    expect(applyBoutScoreEdit(prev, prev)).toBe(prev);
   });
 });
 
@@ -1281,8 +1349,21 @@ describe('item 7: non-points decisions advance to next match', () => {
       mountedRef: { current: true },
       setDecisionSubmitting: vi.fn(),
       setDecisionErr: vi.fn(),
-      setWithdrawnPlayer: vi.fn(),
       setDecisionPromptKind: vi.fn(),
+    });
+
+    // bc-hlck: the decision is never stamped older than the match it was
+    // recorded on; the body carries that match's stamp for recordDecision,
+    // which floors by it and never sends it. A match with no stamp adds
+    // nothing, so the body is as it always was.
+    it('the body carries the stamp of the match the decision was recorded on', async () => {
+      const submit = makeSubmitDecision({ match: { ...makeMatch('m-s'), modifiedAt: 1_700_000_000_000 }, enchoPeriodCount: 0, password: 'pw', ...makeSetters(), onClose: vi.fn() });
+      await submit('fusenpai', { decisionBy: 'shiro', decisionReason: '' });
+      expect(window.API.recordDecision).toHaveBeenCalledWith('c1', 'm-s', { decision: 'fusenpai', decisionBy: 'shiro', seenModifiedAt: 1_700_000_000_000 }, 'pw');
+      window.API.recordDecision.mockClear();
+      const plain = makeSubmitDecision({ match: makeMatch('m-p'), enchoPeriodCount: 0, password: 'pw', ...makeSetters(), onClose: vi.fn() });
+      await plain('fusenpai', { decisionBy: 'shiro', decisionReason: '' });
+      expect(window.API.recordDecision).toHaveBeenCalledWith('c1', 'm-p', { decision: 'fusenpai', decisionBy: 'shiro' }, 'pw');
     });
 
     it('calls onAfterDecision for fusenpai when provided and match is not a correction', async () => {
@@ -1339,47 +1420,34 @@ describe('item 7: non-points decisions advance to next match', () => {
       expect(onAfterDecision).not.toHaveBeenCalled();
     });
 
-    it('does NOT call onAfterDecision for a kiken decision (modal stays open for RemainingMatchesPanel)', async () => {
+    // Operator ruling 2026-09-26: recording a withdrawal changes only the
+    // match it is recorded on. Kiken no longer parks the modal on a
+    // "remaining matches" panel; it follows the exact same onAfterDecision /
+    // onClose rule as any other decision.
+    it('calls onAfterDecision for a kiken decision, same as any other, when not a correction', async () => {
       const onAfterDecision = vi.fn().mockResolvedValue(undefined);
       const onClose = vi.fn();
-      const setWithdrawnPlayer = vi.fn();
       const submit = makeSubmitDecision({
         match: makeMatch('m4'), enchoPeriodCount: 0, password: 'pw',
-        ...makeSetters(), setWithdrawnPlayer, onClose, onAfterDecision, isComplete: false,
+        ...makeSetters(), onClose, onAfterDecision, isComplete: false,
         entityLabel: 'competitors',
       });
       await submit('kiken-voluntary', { decisionBy: 'aka', decisionReason: '' });
-      // Kiken neither advances nor closes; it parks on RemainingMatchesPanel.
-      expect(onAfterDecision).not.toHaveBeenCalled();
+      expect(onAfterDecision).toHaveBeenCalled();
       expect(onClose).not.toHaveBeenCalled();
-      expect(setWithdrawnPlayer).toHaveBeenCalled();
     });
 
-    // bc-pnum: the loser used to be re-derived from the /decision response's
-    // plain winner/sideA/sideB NAME strings. Two participants sharing a
-    // display name from different dojos make those strings identical on
-    // both sides, so a name compare always resolves to the SAME side
-    // regardless of who actually withdrew. decisionBy ("aka"/"shiro")
-    // already names the withdrawn side unambiguously and matches the
-    // server's own attribution (scoring_tx.go: aka=sideA, shiro=sideB).
-    it('resolves the withdrawn player by decisionBy, not by name, when both sides share a display name', async () => {
-      window.API.recordDecision = vi.fn().mockResolvedValue({
-        winner: 'Sato', sideA: 'Sato', sideB: 'Sato',
-      });
-      const match = {
-        compId: 'c1', id: 'm5',
-        sideA: { id: 'S1', name: 'Sato', dojo: 'Tokyo' },
-        sideB: { id: 'S2', name: 'Sato', dojo: 'Osaka' },
-      };
-      const setWithdrawnPlayer = vi.fn();
+    it('falls back to onClose for a kiken correction (isComplete=true)', async () => {
+      const onAfterDecision = vi.fn().mockResolvedValue(undefined);
+      const onClose = vi.fn();
       const submit = makeSubmitDecision({
-        match, enchoPeriodCount: 0, password: 'pw',
-        ...makeSetters(), setWithdrawnPlayer, onClose: vi.fn(), isComplete: false,
+        match: makeMatch('m4b'), enchoPeriodCount: 0, password: 'pw',
+        ...makeSetters(), onClose, onAfterDecision, isComplete: true,
         entityLabel: 'competitors',
       });
-      // Shiro withdrew: the loser is sideB (Osaka), never sideA (Tokyo).
-      await submit('kiken-voluntary', { decisionBy: 'shiro', decisionReason: '' });
-      expect(setWithdrawnPlayer).toHaveBeenCalledWith(match.sideB);
+      await submit('kiken-voluntary', { decisionBy: 'aka', decisionReason: '' });
+      expect(onClose).toHaveBeenCalled();
+      expect(onAfterDecision).not.toHaveBeenCalled();
     });
   });
 });
@@ -1465,7 +1533,6 @@ describe('submitDecisionRequest / makeSubmitDecision: downstream_knockout_played
       mountedRef: { current: true },
       setDecisionSubmitting: vi.fn(),
       setDecisionErr,
-      setWithdrawnPlayer: vi.fn(),
       setDecisionPromptKind: vi.fn(),
       onClose: vi.fn(),
       isComplete: true, // correcting an already-completed match
@@ -1504,16 +1571,15 @@ describe('submitDecisionRequest / makeSubmitDecision: downstream_knockout_played
       mountedRef: { current: true },
       setDecisionSubmitting: vi.fn(),
       setDecisionErr,
-      setWithdrawnPlayer: vi.fn(),
       setDecisionPromptKind: vi.fn(),
       onClose,
       isComplete: true,
       entityLabel: 'competitors',
     });
 
-    // fusenpai (not kiken): kiken always parks on RemainingMatchesPanel
-    // regardless of isComplete, so a correction that should close the modal
-    // needs a non-kiken decision to exercise the else-branch onClose() path.
+    // fusenpai here, but kiken takes the identical isComplete gate now
+    // (operator ruling 2026-09-26): any decision on a correction closes via
+    // the else-branch onClose() path.
     await submit('fusenpai', { decisionBy: 'aka', decisionReason: '' });
 
     expect(window.API.recordDecision).toHaveBeenCalledTimes(2);
@@ -1523,13 +1589,13 @@ describe('submitDecisionRequest / makeSubmitDecision: downstream_knockout_played
   });
 });
 
-// bc-pnum: RemainingMatchesPanel's match filter, award() side resolution,
-// and its opponent-render lookup all call sameCompetitor (competitor_
-// identity.jsx) directly to decide whether a match side is the withdrawn
-// player -- never an OR that could count a name hit even when both sides
-// carry ids and differ. These fixtures pin that call-site usage, on top of
+// bc-pnum: RecordedWithdrawal's laterDefaultWins fetch (admin_scoring_
+// shared.jsx) calls sameCompetitor (competitor_identity.jsx) directly to
+// decide whether a later match's side is the withdrawn competitor -- never
+// an OR that could count a name hit even when both sides carry ids and
+// differ. These fixtures pin that call-site usage, on top of
 // sameCompetitor's own coverage in competitor_identity.test.jsx.
-describe('sameCompetitor (RemainingMatchesPanel identity, bc-pnum)', () => {
+describe('sameCompetitor (default-win identity matching, bc-pnum)', () => {
   it('decides by id when both the withdrawn player and the side carry one', () => {
     const side = { id: 'S2', name: 'Sato' };
     // Same name, different id: an id compare must say "no", never fall
@@ -1562,25 +1628,24 @@ describe('sameCompetitor (RemainingMatchesPanel identity, bc-pnum)', () => {
   });
 
   // Item 7 (UI-reachable fixture): the same mixed-case refusal, exercised
-  // through the SAME shape RemainingMatchesPanel actually builds --
-  // withdrawnPlayer as resolved by makeSubmitDecision's kiken branch
-  // (match.sideA/sideB, an {id,name} object with a real UUID) against a
-  // remaining match's side that resolveSide left id-less (a bracket row
-  // api_serializers.jsx could not resolve at all).
-  it('UI-reachable: a kiken-resolved withdrawn player never lights an id-less remaining-match side sharing its name', () => {
-    // Shape makeSubmitDecision's kiken branch actually produces (see that
-    // test file's own withdrawn-player assertions): match.sideA/sideB.
+  // through the SAME shape RecordedWithdrawal's laterDefaultWins fetch
+  // actually builds -- the withdrawn side (an {id,name} object with a real
+  // UUID, taken from the originating match's sideA/sideB via withdrawnSideOf)
+  // against a later match's side that resolveSide left id-less (a bracket
+  // row api_serializers.jsx could not resolve at all).
+  it('UI-reachable: a withdrawn competitor never lights an id-less later-match side sharing its name', () => {
+    // Shape withdrawnSideOf actually produces: match.sideA/sideB.
     const originatingMatch = {
       sideA: { id: 'S1', name: 'Sato', dojo: 'Tokyo' },
       sideB: { id: 'S9', name: 'Someone Else', dojo: 'Nagoya' },
     };
-    const withdrawnPlayer = originatingMatch.sideA; // aka withdrew.
+    const withdrawnSide = originatingMatch.sideA; // aka withdrew.
     // A different, later bracket round match whose side never got a real id
     // (resolveSide's own residual "not found" fallback would invent one from
     // the name in production; here we model the ALREADY id-less shape a
     // caller must not misattribute).
     const remainingMatchSide = { id: '', name: 'Sato' };
-    expect(sameCompetitor(remainingMatchSide, withdrawnPlayer)).toBe(false);
+    expect(sameCompetitor(remainingMatchSide, withdrawnSide)).toBe(false);
   });
 });
 

@@ -18,8 +18,6 @@ package engine
 import (
 	"fmt"
 	"log"
-	"strconv"
-	"strings"
 
 	"github.com/gitrgoliveira/bracket-creator/internal/state"
 )
@@ -141,19 +139,11 @@ func supplementaryOrNumberedLabel(heading, matchID string) string {
 // 1-based match number WITHIN its pool/round, taken from the id's own
 // trailing "-<digits>" ordinal (0-based on disk, so +1 here). Returns 0 for
 // a supplementary id (DH/TB) or an id with no numeric ordinal at all.
+//
+// Delegates to state.PoolPhaseMatchNumber, where the id grammar lives: match
+// order (state.DrawMatch.Place) reads the same number.
 func poolPhaseMatchNumber(matchID string) int {
-	if IsPoolDaihyosenMatchID(matchID) || IsTiebreakerMatchID(matchID) {
-		return 0
-	}
-	i := strings.LastIndexByte(matchID, '-')
-	if i < 0 {
-		return 0
-	}
-	n, err := strconv.Atoi(matchID[i+1:])
-	if err != nil {
-		return 0
-	}
-	return n + 1
+	return state.PoolPhaseMatchNumber(matchID)
 }
 
 // bracketReopenedMatchFor resolves matchID's Number/DisplayRound through

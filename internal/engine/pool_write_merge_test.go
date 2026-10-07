@@ -17,7 +17,7 @@ import (
 // rather than through this helper — the whole point of bc-lww1 being that a
 // dropped write must not be indistinguishable from an applied one.
 func poolMismatch(stored, result *state.MatchResult, policy matchWritePolicy) bool {
-	mismatch, _, _, _ := applyPoolWrite(stored, result, policy)
+	mismatch, _, _, _ := applyPoolWrite(stored, result, policy, nil)
 	return mismatch
 }
 
@@ -185,8 +185,8 @@ func TestQuickScoreKeepsCorrectionReason(t *testing.T) {
 // the verdict (mark present = it stands, mark absent = it does not), and the
 // old flag-carry machinery has nothing left to carry. The one write shape
 // that loses a verdict it arguably "did not address" is a stale pre-ruling
-// client re-scoring a hantei match with markless ippons inside the offline
-// queue's replay window; accepted and documented in state/legacy_hantei.go.
+// client re-scoring a hantei match with markless ippons replayed from the
+// offline queue; accepted and documented in state/legacy_hantei.go.
 func TestPoolWrite_HanteiTravelsWithTheScoreline(t *testing.T) {
 	stored := func() *state.MatchResult {
 		return &state.MatchResult{
@@ -382,11 +382,25 @@ func TestSideMismatchIsAForwardOnlyErrorInBothBranches(t *testing.T) {
 	})
 }
 
-// Timestamp last-write-wins is a property of a MATCH, not of the store its
-// phase happens to live in. It was bracket-only for one reason: the guard needs
-// a stored stamp, and pool-matches.csv had no column for one, so a reconnecting
+// bracketWrite is what applyBracketResultIn does to ONE bracket match, without
+// the bracket around it: the merge (mergeMatchWrite, the owner both branches
+// call) and then the field write. Since bc-mrgc the timestamp ordering lives
+// in the merge, so a test that drives the bracket write directly and means to
+// exercise the ordering goes through this.
+func bracketWrite(bm *state.BracketMatch, result *state.MatchResult, policy matchWritePolicy) (bool, error) {
+	if mergeMatchWrite(bracketMatchAsResult(bm), result, policy, mergeCtx{knockout: true}).Superseded() {
+		return false, nil
+	}
+	return applyBracketMatchResult(bm, result, policy)
+}
+
+// Timestamp ordering is a property of a MATCH, not of the store its phase
+// happens to live in. It was bracket-only for one reason: the guard needs a
+// stored stamp, and pool-matches.csv had no column for one, so a reconnecting
 // court's stale change was discarded in the knockout and applied in the pool.
-// Both branches now go through applyMatchWrite.
+// Both branches now go through the one merge owner, mergeMatchWrite (bc-mrgc);
+// these stored matches carry no group stamps, so every group reads the match's
+// ModifiedAt and the whole write is ordered as one, exactly as before.
 func TestTimestampGuardAppliesToBothBranches(t *testing.T) {
 	const stored, older, newer = 2_000, 1_000, 3_000
 
@@ -411,7 +425,7 @@ func TestTimestampGuardAppliesToBothBranches(t *testing.T) {
 
 	t.Run("a strictly older write is dropped, in the pool too", func(t *testing.T) {
 		p := poolStored()
-		mismatch, superseded, _, _ := applyPoolWrite(p, incoming(older), matchWriteForward)
+		mismatch, superseded, _, _ := applyPoolWrite(p, incoming(older), matchWriteForward, nil)
 		require.False(t, mismatch, "the payload names the right pairing; it is merely late")
 		// bc-lww1: the drop has to be REPORTED, not just performed. A `false,
 		// false` here is exactly the bug — indistinguishable from a clean write,
@@ -422,7 +436,7 @@ func TestTimestampGuardAppliesToBothBranches(t *testing.T) {
 		assert.EqualValues(t, stored, p.ModifiedAt)
 
 		b := bracketStored()
-		applied, err := applyBracketMatchResult(b, incoming(older), matchWriteForward)
+		applied, err := bracketWrite(b, incoming(older), matchWriteForward)
 		require.NoError(t, err)
 		assert.False(t, applied)
 		assert.Equal(t, "Kyoto", b.Winner, "same answer on the other branch")
@@ -430,13 +444,13 @@ func TestTimestampGuardAppliesToBothBranches(t *testing.T) {
 
 	t.Run("a newer write applies on both", func(t *testing.T) {
 		p := poolStored()
-		mismatch, superseded, _, _ := applyPoolWrite(p, incoming(newer), matchWriteForward)
+		mismatch, superseded, _, _ := applyPoolWrite(p, incoming(newer), matchWriteForward, nil)
 		require.False(t, mismatch)
 		require.False(t, superseded, "a write that landed must never report itself superseded")
 		assert.Equal(t, "Osaka", p.Winner)
 
 		b := bracketStored()
-		applied, err := applyBracketMatchResult(b, incoming(newer), matchWriteForward)
+		applied, err := bracketWrite(b, incoming(newer), matchWriteForward)
 		require.NoError(t, err)
 		assert.True(t, applied)
 		assert.Equal(t, "Osaka", b.Winner)
@@ -444,18 +458,20 @@ func TestTimestampGuardAppliesToBothBranches(t *testing.T) {
 
 	t.Run("an unstamped write still applies, so legacy clients are unaffected", func(t *testing.T) {
 		p := poolStored()
-		mismatch, superseded, _, _ := applyPoolWrite(p, incoming(0), matchWriteForward)
+		mismatch, superseded, _, _ := applyPoolWrite(p, incoming(0), matchWriteForward, nil)
 		require.False(t, mismatch)
 		require.False(t, superseded)
 		assert.Equal(t, "Osaka", p.Winner, "0 means unstamped, which never loses")
-		assert.EqualValues(t, stored, p.ModifiedAt,
-			"and it must not reset the stored stamp, or the match reopens to stale writes")
+		// bc-mrgc review S5: a completing unstamped write takes the server's
+		// time, so it leaves a fence rather than the stamp before it.
+		assert.Greater(t, p.ModifiedAt, int64(stored),
+			"and it must never reset the stored stamp, or the match reopens to stale writes")
 	})
 
 	t.Run("an unstamped STORED value accepts anything, so legacy files are unaffected", func(t *testing.T) {
 		p := poolStored()
 		p.ModifiedAt = 0 // a row written before the column existed
-		mismatch, superseded, _, _ := applyPoolWrite(p, incoming(older), matchWriteForward)
+		mismatch, superseded, _, _ := applyPoolWrite(p, incoming(older), matchWriteForward, nil)
 		require.False(t, mismatch)
 		require.False(t, superseded, "a legacy file must not start reporting supersedes")
 		assert.Equal(t, "Osaka", p.Winner)
@@ -465,14 +481,14 @@ func TestTimestampGuardAppliesToBothBranches(t *testing.T) {
 	// correction is never dropped as stale", pinning a bypass that let any write
 	// carrying a CorrectionReason outrank the stamp. That exemption was written
 	// for a live correction and could not tell one from a replay, so an offline
-	// correction flushed from the write queue up to 12h later silently
+	// correction flushed from the write queue hours later silently
 	// overwrote a newer result the operator had never seen. See applyMatchWrite
 	// for why LWW still protects every case the bypass was meant to protect.
 	t.Run("a stale correction is dropped like any other stale write", func(t *testing.T) {
 		p := poolStored()
 		corr := incoming(older)
 		corr.CorrectionReason = "scoreboard misread"
-		mismatch, superseded, _, _ := applyPoolWrite(p, corr, matchWriteForward)
+		mismatch, superseded, _, _ := applyPoolWrite(p, corr, matchWriteForward, nil)
 		require.False(t, mismatch)
 		require.True(t, superseded,
 			"a correction older than the stored result is a replay, not an override")
@@ -486,7 +502,7 @@ func TestTimestampGuardAppliesToBothBranches(t *testing.T) {
 		p := poolStored()
 		corr := incoming(newer)
 		corr.CorrectionReason = "scoreboard misread"
-		mismatch, superseded, _, _ := applyPoolWrite(p, corr, matchWriteForward)
+		mismatch, superseded, _, _ := applyPoolWrite(p, corr, matchWriteForward, nil)
 		require.False(t, mismatch)
 		require.False(t, superseded, "a fresh correction is not a replay")
 		assert.Equal(t, "Osaka", p.Winner,
@@ -509,7 +525,7 @@ func TestTimestampGuardAppliesToBothBranches(t *testing.T) {
 		snap := incoming(older)
 		snap.Winner = "Kyoto"
 		snap.Status = state.MatchStatusScheduled
-		mismatch, superseded, _, _ := applyPoolWrite(p, snap, matchWriteRestore)
+		mismatch, superseded, _, _ := applyPoolWrite(p, snap, matchWriteRestore, nil)
 		require.False(t, mismatch)
 		require.False(t, superseded, "a restore is exempt, so it can never report a supersede")
 		assert.Equal(t, state.MatchStatusScheduled, p.Status, "the rollback landed")
@@ -597,9 +613,14 @@ func TestStripInvalidHantei_InheritedMarkIsStrippedNotRejected(t *testing.T) {
 		IpponsA: []string{"M", domain.HanteiMark}, IpponsB: []string{"K"},
 	}
 	// What the daihyosen add path builds: the stored match, verbatim, with the
-	// status moved on. Nothing here came from the operator's request.
+	// status moved on. Nothing here came from the operator's request. It names
+	// the groups it changes (bc-mrgc), as that door does: the representative
+	// bout and the verdict, which it moves back to running. The scoreline is
+	// not one of them, so the merge keeps the stored one, mark included.
 	incoming := *stored
 	incoming.Status = state.MatchStatusRunning
+	incoming.Changed = []string{state.BoutGroup(state.DaihyosenSubPosition), state.GroupResult}
+	incoming.WriteDoor = DoorDaihyosenAdd
 
 	require.False(t, poolMismatch(stored, &incoming, matchWriteForward),
 		"an inherited mark must not fail the write that inherited it")

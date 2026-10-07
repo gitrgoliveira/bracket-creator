@@ -66,3 +66,11 @@ func TestEnchoMetadataPersists(t *testing.T) {
 	require.NotNil(t, got.Encho, "Encho metadata must survive YAML round-trip")
 	assert.Equal(t, 1, got.Encho.PeriodCount)
 }
+
+// TestKachinukiMaxBouts pins the most bouts a kachinuki encounter can take:
+// all of one team and all but one of the other.
+func TestKachinukiMaxBouts(t *testing.T) {
+	for teamSize, want := range map[int]int{2: 3, 3: 5, 5: 9} {
+		assert.Equal(t, want, domain.KachinukiMaxBouts(teamSize), "teams of %d", teamSize)
+	}
+}

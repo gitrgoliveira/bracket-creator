@@ -135,25 +135,27 @@ func TestBuildResultsWorkbook_TeamBracketSubMatchScoresLandInCorrectCells(t *tes
 		return v
 	}
 
-	// Position 1 (fixed-order): row H+2+1 = H+3. Red A (bm.SideA) won by
-	// fusensho, so the LEFT column carries the default-win maru + Fus. mark
-	// and the RIGHT column carries neither. Swapping bm.SideA/bm.SideB at
-	// the call site flips this onto the right column instead.
+	// Position 1 (fixed-order): row H+2+1 = H+3. Red A (bm.SideA, Aka) won
+	// by fusensho, so the RIGHT column carries the default-win maru + Fus.
+	// mark and the LEFT column carries neither. Swapping bm.SideA/bm.SideB
+	// at the call site flips this onto the left column instead.
 	pos1Row := headerExcelRow + 3
 	left1 := cellAt(lCol, pos1Row)
 	right1 := cellAt(rCol, pos1Row)
-	assert.Contains(t, left1, "Fus.", "Red A (bm.SideA) is the encounter's actual winner and sits in the LEFT column")
-	assert.Contains(t, left1, "○", "and carries the default-win maru")
-	assert.Empty(t, right1, "the losing side's column must carry neither mark nor maru")
+	assert.Contains(t, right1, "Fus.", "Red A (bm.SideA) is the encounter's actual winner and sits in the RIGHT column")
+	assert.Contains(t, right1, "○", "and carries the default-win maru")
+	assert.Empty(t, left1, "the losing side's column must carry neither mark nor maru")
 
-	// Position 3 (named row): row H+2+3 = H+5, ippon letters "MK" verbatim.
-	// A wrong row derivation (e.g. an off-by-one at the call site) leaves
-	// this cell empty and plants "MK" one row away instead.
+	// Position 3 (named row): row H+2+3 = H+5, SideA's ippon letters "MK"
+	// verbatim, in the RIGHT (Aka) column. A wrong row derivation (e.g. an
+	// off-by-one at the call site) leaves this cell empty and plants "MK"
+	// one row away instead.
 	pos3Row := headerExcelRow + 5
-	assert.Equal(t, "MK", cellAt(lCol, pos3Row), "position 3's ippon letters must land at H+2+Position")
+	assert.Equal(t, "MK", cellAt(rCol, pos3Row), "position 3's ippon letters must land at H+2+Position")
 
 	// The row between the two populated sub-bouts (position 2, absent from
 	// SubResults) must stay untouched by either write.
+	assert.Empty(t, cellAt(rCol, headerExcelRow+4), "no stray content between the two populated sub-bout rows")
 	assert.Empty(t, cellAt(lCol, headerExcelRow+4), "no stray content between the two populated sub-bout rows")
 }
 
@@ -254,24 +256,24 @@ func TestBuildResultsWorkbook_TeamBracketDefaultWinCreditedBoutShowsMaruNoMark(t
 		return v
 	}
 
-	// Bouts 1-3 (rows H+3, H+4, H+5): the maru on Red A's (left) column, no
-	// "Kiken" text anywhere on the row -- not even on Red B's (right, empty)
-	// column, which is the side the mark would name.
+	// Bouts 1-3 (rows H+3, H+4, H+5): the maru on Red A's (right, Aka) column,
+	// no "Kiken" text anywhere on the row -- not even on Red B's (left, Shiro,
+	// empty) column, which is the side the mark would name.
 	for pos := 1; pos <= 3; pos++ {
 		row := headerExcelRow + 2 + pos
 		left := cellAt(lCol, row)
 		right := cellAt(rCol, row)
-		assert.Equal(t, "○○", left, "bout %d: the default-win maru, no per-row mark", pos)
-		assert.Empty(t, right, "bout %d: the credited side's opponent column stays empty", pos)
-		assert.NotContains(t, left, "Kiken", "bout %d: no per-row Kiken mark", pos)
+		assert.Equal(t, "○○", right, "bout %d: the default-win maru, no per-row mark", pos)
+		assert.Empty(t, left, "bout %d: the credited side's opponent column stays empty", pos)
+		assert.NotContains(t, right, "Kiken", "bout %d: no per-row Kiken mark", pos)
 	}
 
 	// The summary row (H+5+teamSize=H+8) carries the ONE Kiken mark, on Red
-	// B's (right, the withdrawer) column, alongside Red A's IV=3 count with
-	// no mark on its own column.
+	// B's (left, Shiro, the withdrawer) column, alongside Red A's IV=3 count
+	// with no mark on its own (right, Aka) column.
 	summaryRow := headerExcelRow + 8
 	leftSummary := cellAt(lCol, summaryRow)
 	rightSummary := cellAt(rCol, summaryRow)
-	assert.Equal(t, "3", leftSummary, "Red A: IV 3, no mark on the credited side")
-	assert.Contains(t, rightSummary, "Kiken", "Red B: the withdrawer's mark rides the summary row")
+	assert.Equal(t, "3", rightSummary, "Red A: IV 3, no mark on the credited side")
+	assert.Contains(t, leftSummary, "Kiken", "Red B: the withdrawer's mark rides the summary row")
 }

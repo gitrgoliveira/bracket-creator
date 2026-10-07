@@ -286,6 +286,25 @@ describe('Viewer Utils', () => {
       expect(compMatches(c)).toEqual([]);
     });
 
+    // "Match N of M" reads the bout's number from its id, the one every
+    // surface uses (operator ruling 2026-10-04: one number, the playing
+    // order, ids in sync). A draw made before the draw numbered its bouts in
+    // playing order saved them out of id order; the console now names them
+    // as the server's label and the workbook do, not by row position.
+    it('names a bout by its id\'s number whatever row it is saved in', () => {
+      const c = mkComp({
+        poolMatches: [
+          { id: 'Pool A-1', status: 'scheduled' },
+          { id: 'Pool A-2', status: 'scheduled' },
+          { id: 'Pool A-0', status: 'scheduled' },
+        ],
+      });
+      const ms = compMatches(c);
+      expect(ms.map((m) => [m.id, m.poolPosition, m.poolCount])).toEqual([
+        ['Pool A-1', 2, 3], ['Pool A-2', 3, 3], ['Pool A-0', 1, 3],
+      ]);
+    });
+
     it('excludes tiebreak/daihyosen bouts from poolCount and poolPosition', () => {
       // 3-player RR = 3 regular matches; the -TB- and -DH- bouts must NOT count
       // toward "Match N of M" (they are not part of the round-robin schedule).
@@ -1236,7 +1255,9 @@ describe('LeagueMatrix (mp-f4xo)', () => {
 });
 
 // mp-7x4n: ViewerOverview opens MatchViewerModal in self-run mode,
-// MatchDetailCard in officiated mode.
+// MatchDetailCard in officiated mode. The modal reads its match from
+// allMatches, the competition's whole list ViewerCompetition passes, so every
+// fixture that opens it carries the match there too.
 describe('ViewerOverview self-run vs officiated match click (mp-7x4n)', () => {
   const realReact = global.React;
   let runtime;
@@ -1309,6 +1330,7 @@ describe('ViewerOverview self-run vs officiated match click (mp-7x4n)', () => {
       runningMatches: [],
       upcomingMatches: [m],
       recentMatches: [],
+      allMatches: [m],
       tweaks: {},
       tournament: { mode: 'self-run' },
       compId: 'c1',
@@ -1336,6 +1358,7 @@ describe('ViewerOverview self-run vs officiated match click (mp-7x4n)', () => {
       runningMatches: [],
       upcomingMatches: [m],
       recentMatches: [],
+      allMatches: [m],
       tweaks: {},
       tournament: { mode: 'officiated' },
       compId: 'c1',
@@ -1362,6 +1385,7 @@ describe('ViewerOverview self-run vs officiated match click (mp-7x4n)', () => {
       runningMatches: [],
       upcomingMatches: [],
       recentMatches: [],
+      allMatches: [running],
       tweaks: {},
       tournament: { mode: 'self-run' },
       compId: 'c1',
@@ -1384,6 +1408,7 @@ describe('ViewerOverview self-run vs officiated match click (mp-7x4n)', () => {
       runningMatches: [],
       upcomingMatches: [],
       recentMatches: [],
+      allMatches: [running],
       tweaks: {},
       tournament: { mode: 'self-run' },
       compId: 'c1',

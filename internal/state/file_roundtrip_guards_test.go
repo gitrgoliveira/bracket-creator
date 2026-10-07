@@ -270,7 +270,8 @@ func TestMarshalledStructsStayFullyMarshalled(t *testing.T) {
 // A pointer field is allocated and filled through; a slice field gets
 // exactly one element, itself filled the same way, so a nested
 // slice-of-struct (Bracket.Rounds, BracketMatch.SubResults) is covered too.
-// Map and interface fields are not needed by (and so not handled by)
+// Map fields get one entry (see the case below). Interface fields are not
+// needed by (and so not handled by)
 // anything this guards today; add a case here if one is ever declared on a
 // bracket.json type.
 func fillNonZero(v reflect.Value) {
@@ -292,6 +293,15 @@ func fillNonZero(v reflect.Value) {
 	case reflect.Pointer:
 		v.Set(reflect.New(v.Type().Elem()))
 		fillNonZero(v.Elem())
+	case reflect.Map:
+		// One entry, key and value each filled the same way
+		// (BracketMatch.GroupStamps, bc-mrgc, is the first map field).
+		key := reflect.New(v.Type().Key()).Elem()
+		fillNonZero(key)
+		val := reflect.New(v.Type().Elem()).Elem()
+		fillNonZero(val)
+		v.Set(reflect.MakeMap(v.Type()))
+		v.SetMapIndex(key, val)
 	case reflect.Struct:
 		for i := range v.NumField() {
 			if !v.Type().Field(i).IsExported() {

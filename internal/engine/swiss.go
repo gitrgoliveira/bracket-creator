@@ -6,8 +6,6 @@ import (
 	"fmt"
 	"math/rand"
 	"sort"
-	"strconv"
-	"strings"
 
 	"github.com/gitrgoliveira/bracket-creator/internal/domain"
 	"github.com/gitrgoliveira/bracket-creator/internal/helper"
@@ -24,7 +22,10 @@ import (
 // existing scoring endpoint, eligibility gate, and SSE broadcast all
 // key off MatchResult.ID. Adding a new "Swiss match" file would
 // duplicate that infrastructure for no semantic gain.
-const swissMatchIDPrefix = "Swiss-R"
+//
+// The prefix lives in state (state.SwissMatchIDPrefix) with the rest of the id
+// grammar, because match order (state.DrawMatch.Place) reads it too.
+const swissMatchIDPrefix = state.SwissMatchIDPrefix
 
 // swissPoolName returns the synthetic "pool name" prefix used for a
 // Swiss round so that helper.parsePoolMatchesFile / scoring.go can
@@ -46,19 +47,7 @@ func swissMatchID(round, idx int) string {
 // match ID or malformed shape. Used by SwissStandings to scope its
 // match scan to Swiss matches only.
 func parseSwissMatchRound(id string) (int, bool) {
-	if !strings.HasPrefix(id, swissMatchIDPrefix) {
-		return 0, false
-	}
-	rest := strings.TrimPrefix(id, swissMatchIDPrefix)
-	dash := strings.Index(rest, "-")
-	if dash < 0 {
-		return 0, false
-	}
-	n, err := strconv.Atoi(rest[:dash])
-	if err != nil || n < 1 {
-		return 0, false
-	}
-	return n, true
+	return state.ParseSwissMatchRound(id)
 }
 
 // buildSwissRosterIndex builds the identity-lookup table over roster (the
@@ -967,14 +956,27 @@ func (e *Engine) AdvanceSwissRound(compID string) ([]state.MatchResult, int, err
 		return nil, 0, err
 	}
 
-	prior, err := e.store.LoadPoolMatches(compID)
-	if err != nil {
-		return nil, 0, err
-	}
-	merged := make([]state.MatchResult, 0, len(prior)+len(newMatches))
-	merged = append(merged, prior...)
-	merged = append(merged, newMatches...)
-	if err := e.store.SavePoolMatches(compID, merged); err != nil {
+	// The append is ONE read-modify-write under the per-competition lock
+	// (bc-mrgc phase 3): it used to load and save under two separate lock
+	// acquisitions, so a correction landing in between was overwritten by the
+	// stale copy saved back. (The pairing itself reads the finished round
+	// outside the lock; a correction to it after this point is ordered like
+	// any other write and is never lost.)
+	// The reads below run under the competition's lock (tx.LoadPoolMatches),
+	// which skips the first-read legacy conversion; run it first, as the
+	// store's own LoadPoolMatches always did (a no-op after the first call).
+	e.store.EnsureLegacyUpgraded(compID)
+	if err := e.store.WithTransaction(compID, func(tx state.StoreTx) error {
+		prior, err := tx.LoadPoolMatches(compID)
+		if err != nil {
+			return err
+		}
+		e.noteMatchRead(compID)
+		merged := make([]state.MatchResult, 0, len(prior)+len(newMatches))
+		merged = append(merged, prior...)
+		merged = append(merged, newMatches...)
+		return tx.SavePoolMatches(compID, merged)
+	}); err != nil {
 		return nil, 0, err
 	}
 

@@ -252,7 +252,7 @@ func buildViewerCompetitionPayload(store *state.Store, compID, courtFilter strin
 	// bc-pnum: "make a team member's label available to the public
 	// surfaces". Same gate as the detail endpoint above (isTeamComp,
 	// buildViewerCompetitionPayload's caller for GET /competitions/:id):
-	// Kind == "team" || TeamSize > 0, so an individual competition never
+	// Competition.IsTeam, so an individual competition never
 	// attempts a team-members.yaml read at all. This matters MORE here than on
 	// the detail endpoint: this function runs once per competition in the
 	// tournament (buildViewerCompetitionPayloads' safeGo fan-out) on the
@@ -261,7 +261,7 @@ func buildViewerCompetitionPayload(store *state.Store, compID, courtFilter strin
 	// display and the streaming overlay -- an ungated read would multiply
 	// an unnecessary stat+parse across every individual competition in the
 	// tournament on every such poll, not just cost one extra read.
-	isTeamComp := comp.Kind == "team" || comp.TeamSize > 0
+	isTeamComp := comp.IsTeam()
 
 	// Global views like Scoring/Schedule need matches and brackets.
 	poolMatches, pmErr := store.LoadPoolMatches(compID)
@@ -369,15 +369,15 @@ func buildViewerCompetitionPayload(store *state.Store, compID, courtFilter strin
 
 	// bc-cse: stamp ineligibleSides BEFORE the queue-position derivation
 	// below, which reads the stamp back to skip a barred scheduled match.
-	// Gated on anyScheduledMatchHasBothSides so a competition with nothing
+	// Gated on anyMatchToAnnotate so a competition with nothing
 	// this annotation could ever act on never pays for the
 	// LoadCompetitorStatus read.
-	if anyScheduledMatchHasBothSides(poolMatches, bracket) {
+	if anyMatchToAnnotate(poolMatches, bracket) {
 		statuses, stErr := store.LoadCompetitorStatus(compID)
 		if stErr != nil {
 			log.Printf("mobileapp: viewer payload %s: load competitor status: %v", compID, stErr)
 		} else {
-			annotateIneligibleSides(poolMatches, bracket, statuses)
+			annotateEligibility(poolMatches, bracket, statuses)
 		}
 	}
 
@@ -632,14 +632,13 @@ func RegisterViewerHandlers(r *gin.RouterGroup, store *state.Store, eng *engine.
 
 			// bc-pnum: "make a team member's label available to the public
 			// surfaces". Gated on the same team-competition discriminator the
-			// rest of the codebase uses (Kind == "team" || TeamSize > 0, e.g.
-			// Competition.IsKachinuki's own condition and the JS twin in
+			// rest of the codebase uses (Competition.IsTeam, whose JS twin is in
 			// admin_schedule_lineup.jsx) so an individual competition never
 			// attempts a team-members.yaml read at all: this is a hot path (every
 			// viewer/TV/streaming-overlay poll), and a file that can only
 			// ever be empty for this shape of competition is not worth a
 			// stat, let alone a read+parse.
-			isTeamComp := comp.Kind == "team" || comp.TeamSize > 0
+			isTeamComp := comp.IsTeam()
 
 			// Run all independent I/O concurrently.
 			var (
@@ -790,13 +789,13 @@ func RegisterViewerHandlers(r *gin.RouterGroup, store *state.Store, eng *engine.
 
 			// bc-cse: same gate and ordering as buildViewerCompetitionPayload's
 			// own ineligibleSides stamp (this endpoint's sibling aggregate);
-			// see anyScheduledMatchHasBothSides for why the read is gated.
-			if anyScheduledMatchHasBothSides(poolMatches, bracket) {
+			// see anyMatchToAnnotate for why the read is gated.
+			if anyMatchToAnnotate(poolMatches, bracket) {
 				statuses, stErr := store.LoadCompetitorStatus(id)
 				if stErr != nil {
 					log.Printf("mobileapp: viewer payload %s: load competitor status: %v", id, stErr)
 				} else {
-					annotateIneligibleSides(poolMatches, bracket, statuses)
+					annotateEligibility(poolMatches, bracket, statuses)
 				}
 			}
 

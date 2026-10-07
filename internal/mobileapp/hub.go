@@ -47,8 +47,11 @@ const (
 	// aside and the knockout stage rebuilt. Every device is showing a wedged
 	// competition when this happens, so they all need to reload.
 	EventBracketQuarantined EventType = "bracket_quarantined"
-	EventLineupUpdated      EventType = "lineup_updated"
-	EventResyncRequired     EventType = "resync_required"
+	// EventLineupUpdated: a team's lineups or members changed. Payload:
+	// {competitionId, teamId} and, for a lineup saved for a match, matchId
+	// (lineupUpdatedPayload builds it for every writer).
+	EventLineupUpdated  EventType = "lineup_updated"
+	EventResyncRequired EventType = "resync_required"
 )
 
 // AutoCompleteErrorHeader is set on score/start responses when the
@@ -62,9 +65,10 @@ const (
 )
 
 // DefaultHistorySize is the default ring buffer capacity for replay-on-reconnect (T216).
-// 100 events is roughly 30 seconds of activity on a busy tournament floor
-// (multi-court bulk score) and matches what we measured in v3 review.
-const DefaultHistorySize = 100
+// The v3 review measured 100 events at roughly 30 seconds of activity on a
+// busy tournament floor (multi-court bulk score); 200 holds about a minute,
+// so a device off the wifi that long still catches up by replay.
+const DefaultHistorySize = 200
 
 // DefaultMaxSSEClients caps concurrent /api/events subscribers per process.
 // Each subscriber allocates one buffered channel (100-element historyEntry
@@ -162,7 +166,7 @@ type Hub struct {
 
 	// history is a ring buffer of the last HistorySize broadcast
 	// envelopes. Indexed by `seq % HistorySize`. Reads (via
-	// snapshotHistorySince) take the read lock; writes (in Broadcast)
+	// snapshotHistorySinceLocked) hold the lock; writes (in Broadcast)
 	// take the write lock.
 	history     []historyEntry
 	HistorySize int
@@ -361,19 +365,12 @@ func (h *Hub) Broadcast(eventType EventType, data any) {
 	}
 }
 
-// snapshotHistorySince returns history entries whose seq is strictly
+// snapshotHistorySinceLocked returns history entries whose seq is strictly
 // greater than `since`, ordered by ascending seq. Returns at most
 // HistorySize entries (older ones have been overwritten in the ring).
 // The bool result is false when the requested `since` is older than the
 // oldest entry retained in the buffer, caller may want to log a "snapshot
 // needed" sentinel in that case (gap exceeds replay capacity).
-func (h *Hub) snapshotHistorySince(since int64) (entries []historyEntry, complete bool) {
-	h.mu.RLock()
-	defer h.mu.RUnlock()
-	return h.snapshotHistorySinceLocked(since)
-}
-
-// snapshotHistorySinceLocked is the lock-free body of snapshotHistorySince.
 // Caller holds h.mu (read or write).
 func (h *Hub) snapshotHistorySinceLocked(since int64) (entries []historyEntry, complete bool) {
 	currentSeq := h.seq.Load()
@@ -420,11 +417,18 @@ func (h *Hub) snapshotHistorySinceLocked(since int64) (entries []historyEntry, c
 //
 // The handler also emits an SSE `id: <seq>` line for every event so the
 // browser's auto-reconnect carries the right Last-Event-ID without any
-// JS work.
+// JS work. The SPA never relies on that auto-reconnect: it closes the
+// source on an error and opens a new one, which carries no header, so it
+// sends the last id it saw as the `lastEventId` query parameter instead.
+// The header wins when both are present.
 func (h *Hub) HandleEvents() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		var lastEventID int64
-		if raw := c.GetHeader("Last-Event-ID"); raw != "" {
+		raw := c.GetHeader("Last-Event-ID")
+		if raw == "" {
+			raw = c.Query("lastEventId")
+		}
+		if raw != "" {
 			if v, err := strconv.ParseInt(raw, 10, 64); err == nil && v > 0 {
 				lastEventID = v
 			}

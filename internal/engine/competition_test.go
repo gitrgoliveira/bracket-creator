@@ -705,6 +705,41 @@ func TestDiscardDraw_ResetsToSetup(t *testing.T) {
 	}
 }
 
+// TestDiscardDraw_RemovesTheLineupsSavedForItsMatches pins that discarding a draw
+// takes the lineups saved for its matches with it, and leaves the round lineups
+// (the starting lineup is round 0). A regenerated draw reuses the match ids, so
+// a match lineup left behind would be a team's own lineup at the reused id and
+// be carried to every later match of the team.
+func TestDiscardDraw_RemovesTheLineupsSavedForItsMatches(t *testing.T) {
+	eng, store, _ := setupTestEngine(t)
+	compID := "discard-draw-lineups"
+	createTestCompetition(t, store, compID, state.CompFormatLeague, 3)
+	saveTestParticipants(t, store, compID, []string{"Alice", "Bob", "Charlie", "Dave", "Eve", "Frank"})
+	require.NoError(t, eng.GenerateDraw(compID))
+	matches, err := store.LoadPoolMatches(compID)
+	require.NoError(t, err)
+	require.NotEmpty(t, matches)
+	team, first := matches[0].SideAID, matches[0].ID
+	require.NotEmpty(t, team)
+
+	require.NoError(t, store.SetTeamLineup(compID, lineupOf(team, "", 0, "start"), 5))
+	require.NoError(t, store.SetTeamLineup(compID, lineupOf(team, first, 0, "stale"), 5))
+
+	require.NoError(t, eng.DiscardDraw(compID))
+
+	lineups, err := store.LoadTeamLineups(compID)
+	require.NoError(t, err)
+	require.Len(t, lineups, 1, "only the starting lineup is left")
+	for _, l := range lineups {
+		assert.Empty(t, l.MatchID)
+		assert.Equal(t, 0, l.Round)
+	}
+	in, err := eng.LineupInForce(compID, team, first)
+	require.NoError(t, err)
+	require.True(t, in.Found)
+	assert.Equal(t, "start", senpoOf(in), "the team's lineup at the reused id is its starting lineup, not the discarded draw's")
+}
+
 // TestDiscardDraw_RejectsNonDrawReady ensures DiscardDraw errors when not in
 // draw-ready state.
 func TestDiscardDraw_RejectsNonDrawReady(t *testing.T) {

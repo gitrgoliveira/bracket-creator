@@ -60,12 +60,34 @@ jobs:
           # runner architectures ever change.
           # The slim image's dpkg path-exclude filter strips manpages/docs at
           # unpack time; remove it so the test sees the package's real payload.
-          docker run --rm --platform linux/amd64 -v "$PWD/dist:/dist:ro" debian:stable-slim bash -c \
-            "rm -f /etc/dpkg/dpkg.cfg.d/docker \
-             && apt-get update -qq >/dev/null && apt-get install -qqy /dist/$DEB >/dev/null \
-             && bracket-creator version \
-             && test -f /usr/share/bash-completion/completions/bracket-creator \
-             && test -f /usr/share/man/man1/bracket-creator.1.gz"
+          # Beyond `version`, the debian check also starts the mobile app and
+          # fetches its UI assets (dist/app.js, dist/glossary_data.js and the
+          # four vendor/*.js Preact files): a goreleaser build that embeds no
+          # Preact (web-mobile/vendor's gitignored files were never fetched)
+          # still runs `version` fine but serves a blank UI, which this catches.
+          docker run --rm --platform linux/amd64 -v "$PWD/dist:/dist:ro" debian:stable-slim bash -c "
+            set -e
+            rm -f /etc/dpkg/dpkg.cfg.d/docker
+            apt-get update -qq >/dev/null
+            apt-get install -qqy /dist/$DEB curl >/dev/null
+            bracket-creator version
+            test -f /usr/share/bash-completion/completions/bracket-creator
+            test -f /usr/share/man/man1/bracket-creator.1.gz
+            export TOURNAMENT_DATA_DIR=\$(mktemp -d)
+            bracket-creator mobile-app --port 18080 &
+            pid=\$!
+            for i in \$(seq 1 30); do
+              curl -fsS -o /dev/null http://localhost:18080/api/auth-config && break
+              sleep 1
+            done
+            curl -fsS -o /dev/null http://localhost:18080/dist/app.js
+            curl -fsS -o /dev/null http://localhost:18080/dist/glossary_data.js
+            curl -fsS -o /dev/null http://localhost:18080/vendor/preact.min.js
+            curl -fsS -o /dev/null http://localhost:18080/vendor/hooks.umd.js
+            curl -fsS -o /dev/null http://localhost:18080/vendor/compat.umd.js
+            curl -fsS -o /dev/null http://localhost:18080/vendor/preact-router.umd.js
+            kill \$pid 2>/dev/null || true
+          "
           docker run --rm --platform linux/amd64 -v "$PWD/dist:/dist:ro" fedora:latest bash -c \
             "dnf install -qy /dist/$RPM >/dev/null && bracket-creator version"
           docker run --rm --platform linux/amd64 -v "$PWD/dist:/dist:ro" alpine:latest sh -c \

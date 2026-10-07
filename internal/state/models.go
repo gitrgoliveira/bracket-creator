@@ -330,7 +330,6 @@ type Competition struct {
 	StartTime         string            `yaml:"start_time" json:"startTime"`
 	Date              string            `yaml:"date" json:"date"`
 	Status            CompetitionStatus `yaml:"status" json:"status"`
-	Mirror            bool              `yaml:"mirror" json:"mirror"`
 	WithZekkenName    bool              `yaml:"with_zekken_name" json:"withZekkenName"`
 	NumberPrefix      string            `yaml:"number_prefix,omitempty" json:"numberPrefix,omitempty"`
 	HasParticipantIDs bool              `yaml:"has_participant_ids,omitempty" json:"hasParticipantIDs,omitempty"`
@@ -504,6 +503,70 @@ type Competition struct {
 	// competition to CompStatusComplete. Phase 3b.
 	LeagueTiebreakFinalized bool `yaml:"league_tiebreak_finalized,omitempty" json:"leagueTiebreakFinalized,omitempty"`
 
+	// KachinukiEncounterEnchoCleared records that the one-time load repair
+	// (upgradeKachinukiEncounterEnchoLocked, legacy_upgrade.go) has cleared the
+	// match-level overtime an older release stored on this competition's
+	// kachinuki encounters (bc-kheb). The repair runs only while it is false,
+	// and sets it once both match files are saved; POST /competitions sets it
+	// on a competition created as kachinuki, which has nothing to repair. Server-managed: `json:"-"`
+	// keeps it off the wire, and the settings PUT copies onto the stored
+	// record, so nothing a client sends can clear it.
+	KachinukiEncounterEnchoCleared bool `yaml:"kachinuki_encounter_encho_cleared,omitempty" json:"-"`
+
+	// RoundLineupsConverted records that no lineup of this competition waits
+	// on a round: releases up to v2.1.1 let the Lineups page save a lineup for
+	// round r, and a team now carries the lineup of its previous match
+	// instead, so a team with such a lineup is given a lineup of its own for
+	// every match it is seated in, equal to what v2.1.1 showed there
+	// (settleRoundLineups, round_lineups.go). The load repair and the writes
+	// that seat a team in the draw run only while it is false, and set it as
+	// soon as nothing waits: at once for a competition with no team that has
+	// such a lineup, and for one that has, when the competition is completed
+	// (the round lineups are removed then);
+	// POST /competitions sets it on a new competition, which has nothing to
+	// convert and no writer left that creates a round lineup. Server-managed:
+	// `json:"-"` keeps it off the wire, and the settings PUT copies onto the
+	// stored record, so nothing a client sends can clear it.
+	RoundLineupsConverted bool `yaml:"round_lineups_converted,omitempty" json:"-"`
+
+	// RoundLineupsGiven records which (team, match) pairs that conversion has
+	// settled, while RoundLineupsConverted is false: it maps a team's
+	// participant id to the ids of the matches settled for it, each list sorted
+	// and without duplicates, so config.md (which people read and edit) shows
+	//
+	//	round_lineups_given:
+	//	    <team id>:
+	//	        - r0-m0
+	//	        - r1-m0
+	//
+	// A pair listed here is never given a lineup again, whatever lineups.yaml
+	// holds, so a lineup the operator removes from a match ("Use the previous
+	// match's lineup") stays removed; a pair seated and not listed is given the
+	// lineup v2.1.1 showed there when it has none, and listed either way. The
+	// conversion clears it when it sets the marker, and DiscardDraw clears it,
+	// because the next draw reuses the match ids and is given its lineups
+	// again. Server-managed like the marker: `json:"-"` keeps it off the wire,
+	// and the settings PUT copies onto the stored record, so nothing a client
+	// sends can change it.
+	RoundLineupsGiven map[string][]string `yaml:"round_lineups_given,omitempty" json:"-"`
+
+	// RoundLineupsLegacy records, while RoundLineupsConverted is false, the teams
+	// the conversion's FIRST settlement of this competition found to be legacy:
+	// the participant ids, sorted, of every team with a lineup for a round r >= 1
+	// or with a match lineup, stored under its id, for a match of the draw that
+	// seats it (v2.1.1 read a match's own lineup and never carried it to another
+	// match, so such a team is shown, at its other matches, what v2.1.1 showed
+	// and not what a team now carries). Later settlements read the list, plus any
+	// team with a lineup for a later round, so a match lineup saved by this
+	// release never makes a team legacy. It is also how a later settlement tells
+	// the first one is done: after it a competition is either marked or has a
+	// legacy team to wait for, so the list is not empty. The conversion clears it
+	// with the marker, and ClearDrawLineups drops from it every team with no lineup
+	// for a later round, whose match lineups went with the draw. Server-managed
+	// like the marker: `json:"-"` keeps it off the wire, and the settings PUT
+	// copies onto the stored record, so nothing a client sends can change it.
+	RoundLineupsLegacy []string `yaml:"round_lineups_legacy,omitempty" json:"-"`
+
 	Players []domain.Player `yaml:"-" json:"players"`
 }
 
@@ -558,6 +621,16 @@ func (c Competition) EffectiveFormat() string {
 	return c.Format
 }
 
+// IsTeam reports whether c is a team competition: its Kind is "team" or its
+// TeamSize is positive. The single spelling of this predicate: it was written
+// out at a dozen call sites, since the engine identifies a team competition by
+// Kind in some paths and by TeamSize in others (ValidateCompetitionTeamSize
+// keeps the two in step for a competition that was created or edited through
+// the API, so for one the two readings agree).
+func (c *Competition) IsTeam() bool {
+	return c != nil && (c.Kind == "team" || c.TeamSize > 0)
+}
+
 // IsKachinuki reports whether c is a kachinuki (winner-stays-on) team
 // competition. The single spelling of this predicate (mp-gmcg review): before
 // this method it was reimplemented inline at 7 call sites across
@@ -570,6 +643,52 @@ func (c Competition) EffectiveFormat() string {
 // fighter per side.
 func (c *Competition) IsKachinuki() bool {
 	return c != nil && c.TeamSize >= 2 && c.TeamMatchType == TeamMatchTypeKachinuki
+}
+
+// ClearKachinukiEncounterEncho clears a match-level overtime record from one
+// of c's encounters when c is kachinuki, and reports whether it cleared one.
+// The ONE owner of the rule (operator ruling 2026-09-24, bc-kheb): one bout
+// fought on in encho does not put a kachinuki encounter in overtime, so (E)
+// lives on that bout's own row (SubMatchResult.Encho, never touched here) and
+// the encounter carries none. Called by the engine's kachinuki write
+// chokepoint (applyKachinukiMerge), by its decision write before the
+// default-win circles are counted (recordDecisionTx), and by the load repair,
+// so a write and an old file converge on the same shape. encho points at a MatchResult's or a
+// BracketMatch's Encho field, and matchID is that match's id.
+//
+// A pool representative bout or tie-break bout (IsPoolDaihyosenMatchID,
+// IsTiebreakerMatchID) is not an encounter: it is ONE individual bout, whose
+// overtime lives at match level because the match is the bout. Its encho is
+// never cleared, in a kachinuki competition too (the same exclusion
+// NeedsDefaultWinBoutPadding makes for those ids).
+func (c *Competition) ClearKachinukiEncounterEncho(matchID string, encho **EnchoMetadata) bool {
+	if !c.IsKachinuki() || encho == nil || *encho == nil {
+		return false
+	}
+	if IsPoolDaihyosenMatchID(matchID) || IsTiebreakerMatchID(matchID) {
+		return false
+	}
+	*encho = nil
+	return true
+}
+
+// TeamBoutRows is the number of numbered bout rows a team match's block has
+// on the score sheets, and the ONE owner of that count: 0 for an individual
+// competition, TeamSize for a team match, and domain.KachinukiMaxBouts for
+// kachinuki. Every workbook asks here, the app's exports and the blank
+// template the /create generator draws alike: the Pool Matches and
+// Elimination Matches blocks (the 3rd-place block included), their IV/PW
+// formula ranges, the results overlay's row mapping, and the Kachinuki
+// Detail sheet's empty rows for hand entry.
+func (c *Competition) TeamBoutRows() int {
+	switch {
+	case c == nil || c.TeamSize <= 0:
+		return 0
+	case c.IsKachinuki():
+		return domain.KachinukiMaxBouts(c.TeamSize)
+	default:
+		return c.TeamSize
+	}
 }
 
 // MinMatchDurationSeconds / MaxMatchDurationSeconds bound a per-match clock to
@@ -1128,9 +1247,22 @@ const DecisionDraw = "hikiwake"
 // missing from the sheet.
 const DaihyosenSubPosition = -1
 
+// DaihyosenSubIndex returns the index of the representative-bout row in subs,
+// the first row at DaihyosenSubPosition, or -1 when there is none. It is the
+// one answer to "which row is the representative bout": an encounter holds
+// one, and where a hand-edited or legacy file holds two, it is the first.
+func DaihyosenSubIndex(subs []SubMatchResult) int {
+	for i := range subs {
+		if subs[i].Position == DaihyosenSubPosition {
+			return i
+		}
+	}
+	return -1
+}
+
 // IsDraw reports whether a match decision string represents a draw.
 func IsDraw(decision string) bool {
-	return decision == DecisionDraw
+	return domain.IsDrawDecisionStr(decision)
 }
 
 type SubMatchResult struct {
@@ -1314,6 +1446,18 @@ type IneligibleSidesAnnotation struct {
 	B string `json:"b,omitempty"`
 }
 
+// WithdrawnStatusAnnotation is where the withdrawn side of a COMPLETED match
+// that a withdrawal or default win decided stands now: its competitor status
+// (eligible, the match that bars it, whether it can be reinstated). The
+// editor's clear control words its consequence from it (a bar recorded by
+// another match, eligible again, reinstateable) without a status fetch of its
+// own. Request-time only, like IneligibleSidesAnnotation.
+type WithdrawnStatusAnnotation struct {
+	Eligible      bool   `json:"eligible"`
+	MatchID       string `json:"matchId,omitempty"`
+	Reinstateable bool   `json:"reinstateable,omitempty"`
+}
+
 type MatchResult struct {
 	ID     string `json:"id"`
 	SideA  string `json:"sideA"` // Player/Team Name
@@ -1346,7 +1490,36 @@ type MatchResult struct {
 	// it to resolve WinnerID from the stored side ids even when both sides
 	// share a name. Never persisted (json/CSV omit); it only carries the
 	// side decision from the handler to the id-resolution step.
-	WinnerSide     string           `json:"-" yaml:"-"`
+	WinnerSide string `json:"-" yaml:"-"`
+	// ClearsWithdrawal is a transient flag set by the score handler from the
+	// request's `clearWithdrawal`: the operator removed a withdrawal or
+	// default win recorded by mistake and this completed write is the real
+	// result, so it replaces the stored ruling rather than keeping it
+	// (engine.KeepsWithdrawalRuling). Never written to disk or the wire
+	// (json/CSV omit), and never kept on a stored copy either
+	// (ClearRequestFields): a writer that builds its write from a stored
+	// match (the daihyosen add, `u := *match`) must not inherit another
+	// write's instruction to replace a ruling.
+	ClearsWithdrawal bool `json:"-" yaml:"-"`
+	// Changed names the GROUPS this write changes (match_groups.go: points,
+	// result, encho, flags, rep, bout:<position>), the input to the merge
+	// owner engine.mergeMatchWrite (bc-mrgc). Transient like ClearsWithdrawal:
+	// the score handler reads it from the request's `changed`, and every
+	// server-built write (decision, daihyosen add/remove, quick-score, a
+	// start) sets it explicitly. nil means "the writer stated nothing", which
+	// the merge reads as every group the payload carries (see
+	// engine.defaultChangedGroups). Never written to disk or the wire.
+	Changed []string `json:"-" yaml:"-"`
+	// WriteDoor names the endpoint a write came through ("score", "decision",
+	// "daihyosen-add", ...), for the match history entry the write leaves.
+	// Transient, set by the handler; "" reads as "engine" in the history.
+	WriteDoor string `json:"-" yaml:"-"`
+	// Merge is what engine.mergeMatchWrite decided for THIS write: which
+	// groups applied, which were held (kept in the match history because a
+	// newer change to them is stored), and the held values. Set on the
+	// incoming result only, read by the history writer and the handlers'
+	// heldGroups; never persisted.
+	Merge          *MergeReport     `json:"-" yaml:"-"`
 	IpponsA        []string         `json:"ipponsA"` // waza letters M/K/D/T/H/S (naginata), or ○ (FIK default-win marker)
 	IpponsB        []string         `json:"ipponsB"`
 	HansokuA       int              `json:"hansokuA"`
@@ -1392,7 +1565,7 @@ type MatchResult struct {
 	QueuePosition        int            `json:"queuePosition,omitempty" yaml:"-"`
 	// IneligibleSides is a READ-ONLY, request-time annotation (bc-cse),
 	// exactly like QueuePosition above: stamped only on the copy a viewer
-	// endpoint serves (mobileapp.annotateIneligibleSides), never on an
+	// endpoint serves (mobileapp.annotateEligibility), never on an
 	// object bound for a write, so it never reaches pool-matches.csv (no
 	// entry in poolMatchColumns, pools.go) the same way QueuePosition does
 	// not. Non-nil only for a SCHEDULED match whose stamped SideAID/SideBID
@@ -1401,6 +1574,11 @@ type MatchResult struct {
 	// without a second round trip. Omitted on the wire entirely when
 	// neither side is barred.
 	IneligibleSides *IneligibleSidesAnnotation `json:"ineligibleSides,omitempty" yaml:"-"`
+	// WithdrawnStatus is a READ-ONLY, request-time annotation stamped with
+	// IneligibleSides (mobileapp.annotateEligibility) and kept off disk the
+	// same way. Non-nil only on a COMPLETED match a withdrawal or default win
+	// decided whose withdrawn side has a competitor status.
+	WithdrawnStatus *WithdrawnStatusAnnotation `json:"withdrawnStatus,omitempty" yaml:"-"`
 	// DecidedByHantei is a LEGACY READ-ONLY channel, exactly as on
 	// SubMatchResult (see there and legacy_hantei.go): the verdict is the
 	// domain.HanteiMark entry in the winner's IpponsA/IpponsB. A hantei on a
@@ -1483,15 +1661,30 @@ type MatchResult struct {
 	// via BracketMatch.ModifiedAt, pool-matches.csv via its own column. The
 	// guard needs a STORED stamp to compare against, so persistence is not a
 	// detail here, it is the precondition; this was bracket-only for exactly as
-	// long as the pool file had nowhere to put it. engine.applyMatchWrite is the
-	// one primitive both branches call.
+	// long as the pool file had nowhere to put it. engine.mergeMatchWrite is the
+	// one owner both branches call (bc-mrgc), comparing per group.
 	//
-	// The completed-never-reverted guard stays on top regardless. 0
+	// A running write never reverts a completed match regardless (it never
+	// carries the result group, engine.runningOverFinished). 0
 	// (absent/legacy) means "unstamped": it is treated as arrival-order and still
 	// APPLIES (it does NOT lose to a stamped write), so old files and un-stamped
 	// clients behave exactly as before rather than having a legitimate change
 	// silently dropped. See domain.ApplyByTimestamp.
+	//
+	// Since bc-mrgc the comparison is made PER GROUP (GroupStamps below);
+	// ModifiedAt stays the newest of the group stamps, which is what recency
+	// (result_recency.jsx) and the SPA's keepNewerMatches read.
 	ModifiedAt int64 `json:"modifiedAt,omitempty" yaml:"-"`
+	// GroupStamps is the stamp of the last applied change to each group
+	// (match_groups.go), the per-group form of ModifiedAt that
+	// engine.mergeMatchWrite orders writes by (bc-mrgc). nil on a match
+	// written before groups existed: every group then reads as stamped at
+	// ModifiedAt (GroupStamp), so a legacy file behaves exactly as the
+	// whole-match guard did. A bout group whose row is gone keeps its stamp
+	// (a tombstone), so an older write still carrying the row cannot bring it
+	// back. Persisted as the last pool-matches.csv column and in bracket.json
+	// (BracketMatch.GroupStamps).
+	GroupStamps map[string]int64 `json:"groupStamps,omitempty" yaml:"-"`
 }
 
 // HanteiDecided reports whether a hantei verdict stands on this match: the
@@ -1555,7 +1748,7 @@ type EnchoMetadata struct {
 
 // On reports whether the block records overtime that was actually fought:
 // non-nil with a positive PeriodCount. THE single predicate for "did this
-// result happen in encho" — the (E) label (enchoLabel, pinned by the
+// result happen in encho" — the (E) label (domain.EnchoLabel, pinned by the
 // golden table), the default-win maru count (domain.DefaultWinIppons
 // callers), and decision validation all key on it, so a degenerate
 // {periodCount: 0} block can never make one surface claim overtime while
@@ -1575,12 +1768,13 @@ func (e *EnchoMetadata) Clone() *EnchoMetadata {
 	return &c
 }
 
-// cloneSubResults deep-copies a sub-result slice so cached state never shares
+// CloneSubResults deep-copies a sub-result slice so cached state never shares
 // the IpponsA/IpponsB slices or nested Encho pointers with a returned value.
 // Used by both the pool match copy path (copyMatchResults) and the bracket
-// copy path (copyBracket); keep them aligned. Returns nil for a nil input so
+// copy path (copyBracket); keep them aligned. The engine's keepQueuedScore
+// uses it to copy a stored bout log onto a start. Returns nil for a nil input so
 // the omitempty/preserve semantics round-trip unchanged.
-func cloneSubResults(subs []SubMatchResult) []SubMatchResult {
+func CloneSubResults(subs []SubMatchResult) []SubMatchResult {
 	if subs == nil {
 		return nil
 	}
@@ -1688,7 +1882,7 @@ type BracketMatch struct {
 	QueuePosition int      `json:"queuePosition,omitempty"`
 	// IneligibleSides mirrors MatchResult.IneligibleSides for a bracket
 	// match (bc-cse): a request-time-only annotation, stamped by
-	// mobileapp.annotateIneligibleSides on the copy a viewer endpoint
+	// mobileapp.annotateEligibility on the copy a viewer endpoint
 	// serves, never on the object a write persists to bracket.json (the
 	// same discipline QueuePosition above already relies on -- see its own
 	// doc comment on MatchResult for why that is safe without a json:"-"
@@ -1696,6 +1890,10 @@ type BracketMatch struct {
 	// marshal, so what keeps a derived field off disk is WHEN it is set,
 	// not a wire/disk type split).
 	IneligibleSides *IneligibleSidesAnnotation `json:"ineligibleSides,omitempty"`
+	// WithdrawnStatus mirrors MatchResult.WithdrawnStatus for a bracket
+	// match, set only on the copy a viewer endpoint serves (see
+	// IneligibleSides above for why that keeps it off bracket.json).
+	WithdrawnStatus *WithdrawnStatusAnnotation `json:"withdrawnStatus,omitempty"`
 	// MatchNumber is the sequential bracket match number, matching the
 	// "Match N" label printed on the Excel tree sheet. 0 means unset; for a
 	// BracketMatch that is a hidden/bye placeholder, or a legacy bracket saved
@@ -1769,6 +1967,10 @@ type BracketMatch struct {
 	// 0 = unstamped/legacy: arrival-order, still applies (never dropped). See
 	// domain.ApplyByTimestamp.
 	ModifiedAt int64 `json:"modifiedAt,omitempty"`
+	// GroupStamps mirrors MatchResult.GroupStamps (bc-mrgc): the stamp of the
+	// last applied change to each group of this match, persisted in
+	// bracket.json. nil on a legacy match (every group reads ModifiedAt).
+	GroupStamps map[string]int64 `json:"groupStamps,omitempty"`
 	// PlaceholderA / PlaceholderB / PlaceholderWinner record what SideA / SideB /
 	// Winner held at DRAW time, before any pool resolved. They are written once,
 	// by engine.buildBracketFromDraw, for a pool-fed (mixed) knockout whose
@@ -1866,4 +2068,15 @@ type Announcement struct {
 	Message   string    `json:"message" yaml:"message"`
 	SentAt    time.Time `json:"sentAt" yaml:"sent_at"`
 	ExpiresAt time.Time `json:"expiresAt" yaml:"expires_at"`
+}
+
+// ClearRequestFields drops the fields that belong to ONE write and never to
+// the match it is stored as: Changed, WriteDoor, Merge and ClearsWithdrawal.
+// The ONE list of them, called on every stored copy (the pool write's
+// whole-struct overwrite and every pool-match copy the store hands out), so a
+// writer building its write from a stored match never inherits another
+// write's groups, door, merge report or instruction to replace a ruling.
+func (m *MatchResult) ClearRequestFields() {
+	m.Changed, m.WriteDoor, m.Merge = nil, "", nil
+	m.ClearsWithdrawal = false
 }

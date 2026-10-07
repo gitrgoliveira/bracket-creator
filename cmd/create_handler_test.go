@@ -339,14 +339,14 @@ func TestCreateHandler_NaginataKnockout_ThirdPlaceBlock_EntrantFormulas(t *testi
 	rightFormula, err := f.GetCellFormula("Elimination Matches", fmt.Sprintf("G%d", scoreExcelRow))
 	require.NoError(t, err)
 
-	// Both cells together must reference both semifinal match numbers ("M 1" and
-	// "M 2" for a 4-player bracket) via CONCATENATE formulas. With mirror=true
-	// (hardcoded for the knockout web handler) the two formulas swap sides, so we
-	// assert the pair rather than a specific cell.
-	combined := leftFormula + " " + rightFormula
-	assert.Contains(t, combined, "CONCATENATE", "bronze entrant cells must carry CONCATENATE formulas referencing semifinal losers")
-	assert.Contains(t, combined, "M 1", "bronze entrant formulas must reference semifinal M 1")
-	assert.Contains(t, combined, "M 2", "bronze entrant formulas must reference semifinal M 2")
+	// Both cells must reference a semifinal loser ("M 1" and "M 2" for a
+	// 4-player bracket) via CONCATENATE formulas. The upper semi's loser is
+	// the bronze's Aka side, so it sits on the RIGHT; the lower semi's loser
+	// (Shiro) on the LEFT.
+	assert.Contains(t, leftFormula, "CONCATENATE", "bronze entrant cells must carry CONCATENATE formulas referencing semifinal losers")
+	assert.Contains(t, rightFormula, "CONCATENATE", "bronze entrant cells must carry CONCATENATE formulas referencing semifinal losers")
+	assert.Contains(t, leftFormula, `"M 2 "`, "the left (Shiro) bronze entrant is the loser of semifinal M 2")
+	assert.Contains(t, rightFormula, `"M 1 "`, "the right (Aka) bronze entrant is the loser of semifinal M 1")
 }
 
 // findResultsRow returns the 1-based Excel row index of the first row whose
@@ -520,4 +520,27 @@ func TestCreateHandler_NeitherLegacyNorCurrentField_NoThirdPlaceBlock(t *testing
 
 	require.Equal(t, -1, bctest.FindCellRow(rows, helper.ThirdPlaceLabel),
 		"a request with neither the legacy nor the current 3rd-place field must not produce a '3rd Place' block")
+}
+
+// TestCreateHandler_KnockoutEntrantNamedLikeAPoolPrintsOnce pins that only a
+// pool-finalist placeholder ("Pool A-1st") is printed as a label in front of
+// its cell: a knockout entrant whose own name merely contains "Pool" reads as
+// that name once, from the data sheet, not "John Poole John Poole".
+func TestCreateHandler_KnockoutEntrantNamedLikeAPoolPrintsOnce(t *testing.T) {
+	f := postCreate(t, url.Values{
+		"tournamentType": {"knockout"},
+		"playerList":     {"John Poole, Poole Dojo\nPool Kendo Club, Seaside Dojo"},
+		"courts":         {"1"},
+		"teamMatches":    {"0"},
+		"determined":     {"on"},
+	})
+	rows, err := f.GetRows(helper.SheetEliminationMatches)
+	require.NoError(t, err)
+	h := bctest.FirstRowWith(rows, 0, "Round 1 - Match 1")
+	require.GreaterOrEqual(t, h, 0)
+	for _, col := range []string{"A", "G"} {
+		formula, err := f.GetCellFormula(helper.SheetEliminationMatches, fmt.Sprintf("%s%d", col, h+3))
+		require.NoError(t, err)
+		assert.Regexp(t, `^'data'!\$?[A-Z]+\$?\d+$`, formula, "entrant cell %s%d names the competitor from the data sheet alone", col, h+3)
+	}
 }

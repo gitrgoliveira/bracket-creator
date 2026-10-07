@@ -16,29 +16,45 @@ import (
 //
 // Both negative controls matter: a log that fires on every write is noise no one
 // will read, and a log that fires when nothing was bypassed is a false alarm.
+//
+// bc-mrgc moved the comparison into the merge owner, which compares per group;
+// the log line stayed with it (logUnstampedOverwrite, called once per write by
+// mergeMatchWrite), so these cases drive the merge itself.
 func TestApplyMatchWrite_LogsTheUnstampedOverwrite(t *testing.T) {
 	const marker = "unstamped write overwrites"
+	merge := func(incoming *state.MatchResult, storedModifiedAt int64, policy matchWritePolicy) *state.MergeReport {
+		stored := &state.MatchResult{ID: incoming.ID, Status: state.MatchStatusCompleted, ModifiedAt: storedModifiedAt}
+		return mergeMatchWrite(stored, incoming, policy, mergeCtx{nilSubsClear: true})
+	}
 
+	// bc-mrgc review S5: a COMPLETED unstamped write now takes the server's
+	// time (writeStamp), so it is compared and no longer bypasses anything.
+	// The bypass that remains is a legacy client's unstamped scheduled or
+	// running write; the scheduled one is what is logged.
 	t.Run("an unstamped write over a stamped result is logged", func(t *testing.T) {
-		var applied bool
+		var rep *state.MergeReport
 		out := captureLog(t, func() {
-			applied = applyMatchWrite(&state.MatchResult{ID: "Pool A-1"}, 1_700_000_000_000, matchWriteForward)
+			// Over a RUNNING match: over a finished one a scheduled write is
+			// R3's shape, which an unstamped write cannot be ordered into.
+			stored := &state.MatchResult{ID: "Pool A-1", Status: state.MatchStatusRunning, ModifiedAt: 1_700_000_000_000}
+			rep = mergeMatchWrite(stored, &state.MatchResult{ID: "Pool A-1", Status: state.MatchStatusScheduled}, matchWriteForward, mergeCtx{nilSubsClear: true})
 		})
-		require.True(t, applied, "the bypass must still APPLY: logging it is not refusing it")
+		require.NotEmpty(t, rep.Applied, "the bypass must still APPLY: logging it is not refusing it")
+		assert.Empty(t, rep.Held)
 		assert.Contains(t, out, marker)
 		assert.Contains(t, out, "Pool A-1", "the log must name the match, it is the only identifier in scope here")
 	})
 
 	t.Run("a stamped write over a stamped result is not logged", func(t *testing.T) {
 		out := captureLog(t, func() {
-			applyMatchWrite(&state.MatchResult{ID: "Pool A-2", ModifiedAt: 1_700_000_001_000}, 1_700_000_000_000, matchWriteForward)
+			merge(&state.MatchResult{ID: "Pool A-2", ModifiedAt: 1_700_000_001_000}, 1_700_000_000_000, matchWriteForward)
 		})
 		assert.NotContains(t, out, marker, "both sides are stamped, so the guard compared them; nothing was bypassed")
 	})
 
 	t.Run("an unstamped write over an unstamped result is not logged", func(t *testing.T) {
 		out := captureLog(t, func() {
-			applyMatchWrite(&state.MatchResult{ID: "Pool A-3"}, 0, matchWriteForward)
+			merge(&state.MatchResult{ID: "Pool A-3"}, 0, matchWriteForward)
 		})
 		assert.NotContains(t, out, marker,
 			"there is no stamped result being overwritten; this is a pre-column file or a legacy client, the ordinary case")
@@ -52,25 +68,29 @@ func TestApplyMatchWrite_LogsTheUnstampedOverwrite(t *testing.T) {
 	// against the SAME surviving stored stamp still reports.
 	t.Run("a running autosave taking the same bypass is not logged", func(t *testing.T) {
 		out := captureLog(t, func() {
-			applyMatchWrite(&state.MatchResult{ID: "Pool A-5", Status: state.MatchStatusRunning}, 1_700_000_000_000, matchWriteForward)
+			merge(&state.MatchResult{ID: "Pool A-5", Status: state.MatchStatusRunning}, 1_700_000_000_000, matchWriteForward)
 		})
 		assert.NotContains(t, out, marker,
 			"an intermediate autosave is not the overwrite an operator is asking about, and there is one per keystroke")
 	})
 
-	t.Run("the completed write that follows it is still logged", func(t *testing.T) {
-		var applied bool
+	// The completed write that follows it used to be the one logged line. It
+	// is no longer a bypass at all (bc-mrgc review S5): it takes the server's
+	// time, applies by comparison, and leaves that stamp as the fence a later
+	// stale replay is ordered against.
+	t.Run("the completed write that follows it is stamped by the server", func(t *testing.T) {
+		var rep *state.MergeReport
 		out := captureLog(t, func() {
-			applied = applyMatchWrite(&state.MatchResult{ID: "Pool A-5", Status: state.MatchStatusCompleted}, 1_700_000_000_000, matchWriteForward)
+			rep = merge(&state.MatchResult{ID: "Pool A-5", Status: state.MatchStatusCompleted}, 1_700_000_000_000, matchWriteForward)
 		})
-		require.True(t, applied)
-		assert.Contains(t, out, marker, "the terminal write is the one that displaced the operator's result")
-		assert.Contains(t, out, "Pool A-5")
+		require.NotEmpty(t, rep.Applied)
+		assert.NotContains(t, out, marker, "a stamped write bypasses nothing")
+		assert.GreaterOrEqual(t, rep.Stamp, int64(1_700_000_000_000), "the server's time, never older than the stored result")
 	})
 
 	t.Run("a restore is exempt before any stamp is read", func(t *testing.T) {
 		out := captureLog(t, func() {
-			applyMatchWrite(&state.MatchResult{ID: "Pool A-4"}, 1_700_000_000_000, matchWriteRestore)
+			merge(&state.MatchResult{ID: "Pool A-4"}, 1_700_000_000_000, matchWriteRestore)
 		})
 		assert.NotContains(t, out, marker,
 			"a rollback replays a trusted snapshot of this same match and is not an overwrite to report")

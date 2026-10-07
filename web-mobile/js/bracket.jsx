@@ -15,10 +15,11 @@ const { useRef, useLayoutEffect: useLayoutEffectBC, useState: useStateBC, useEff
 import { DAIHYOSEN_POSITION } from './pool_ids.jsx';
 import { barredSides } from './ineligible_match.jsx';
 import { BarredChip } from './barred_chip.jsx';
-import { realIppons } from './result_slot.jsx';
+import { realIppons, enchoOn, defaultWinMaru } from './result_slot.jsx';
 import { sameCompetitor } from './competitor_identity.jsx';
 import { NumberedName } from './numbered_name.jsx';
 import { creditedBoutSide, isTeamDefaultWinDecision } from './team_default_credit.jsx';
+import { matchShowsScore } from './match_shows_score.jsx';
 
 // TermBC: kendo-glossary tooltip wrapper. Lazy lookup so the script
 // load order between glossary.jsx and this module doesn't matter.
@@ -177,21 +178,14 @@ function sideLabel(side) {
 // stepper records how many periods were fought (periodCount persists for the
 // tournament log), but the result marking deliberately never carries the
 // number: counted markers ("(E×3)") confuse readers of brackets and result
-// sheets. Do not reintroduce the count here. Mirrors enchoLabel() in
-// internal/export/suffix.go, pinned by the shared table in
+// sheets. Do not reintroduce the count here. Mirrors domain.EnchoLabel
+// (internal/domain/result_marks.go), pinned by the shared table in
 // internal/export/testdata/encho_labels.json. The score editors' "· (E)
 // Overtime ×N" eyebrow is different on purpose: a live readout of the stepper
 // the operator is using, not a result marking.
 function enchoLabel(encho) {
   return enchoOn(encho) ? "(E)" : "";
 }
-
-// enchoOn: THE single predicate for "did this result happen in encho" —
-// a non-degenerate block with a positive periodCount. The (E) label and
-// the default-win maru count both key on it, so a stray
-// {periodCount: 0} block can never make one surface claim overtime
-// while another denies it. Mirrors state.EnchoMetadata.On (Go).
-const enchoOn = (encho) => (encho?.periodCount || 0) > 0;
 
 // middleMark: the ONE mark the centre of a score may carry. The middle column
 // of a score sheet can only ever read:
@@ -203,8 +197,9 @@ const enchoOn = (encho) => (encho?.periodCount || 0) > 0;
 // cannot end tied (encho runs until someone scores), so X beats (E); and a
 // daihyosen bout is one-point sudden death, so DH bouts do not have encho and
 // (DH) beats (E). Everything else — Kiken, Fus., Ht — is a RESULT and belongs
-// beside the competitor it names: see sideMarks. Mirrors MiddleMark in
-// internal/export/suffix.go.
+// beside the competitor it names: see sideMarks. Mirrors domain.MiddleMark
+// (internal/domain/result_marks.go); export.MiddleMark adapts it to an encho
+// block, as this function takes one.
 function middleMark(decision, encho) {
   if (isHikiwakeBC(decision)) return "X";
   if (decision === "daihyosen") return "(DH)";
@@ -213,14 +208,15 @@ function middleMark(decision, encho) {
 
 // joinSp: join a score fragment and a result mark with a space, skipping
 // empties ("M" + "Ht" → "M Ht", "" + "Kiken" → "Kiken"). The JS twin of
-// joinSp in internal/export/suffix.go.
+// domain.JoinNonEmpty in internal/domain/result_marks.go.
 const joinSp = (a, b) => [a, b].filter(Boolean).join(" ");
 
 // placeMarks: resolve sideMarks onto the two display slots — the winner's
 // mark rides the winning side, the loser's the other. When neither slot is
 // known to have won, no marks are placed; each caller owns that fallback
 // (score strings trail the marks, match cards drop them). The JS analogue
-// of the winner-resolution half of SideMarksLR in internal/export/suffix.go.
+// of domain.SideMarksAB (internal/domain/result_marks.go), whose marks
+// export.SideMarksLR places White-left on the sheet.
 // Companion rule: on the two-slot GRID surfaces (the shared scoreboard and the
 // team score editor) which of a side's two cells the mark takes is answered by
 // resultSlot in result_slot.jsx — a separate leaf; the dependency reasoning is
@@ -239,16 +235,6 @@ const isDrawResult = (decision, score) => isHikiwakeBC(decision) || isHikiwakeBC
 // technique. Delegates to team_default_credit.jsx's isTeamDefaultWinDecision,
 // THE one JS owner of this class (bc-cse) -- see that function's own comment.
 const isDefaultWinBC = isTeamDefaultWinDecision;
-
-// defaultWinMaru: the maru cells a default win awards — one "○" per point,
-// per the FIK Regulations (Article 32 and the Score Board appendix p.15:
-// "put one mark in case of Encho"): the two-point pair in regulation, the
-// single deciding point in encho (sudden death). THE single JS source of
-// the maru-count rule; mirrors domain.DefaultWinIppons (Go, same cells
-// shape). The canonical record is the engine's RecordDecision fill via
-// domain.DefaultWinIppons — displays only fall back to this for winners
-// whose recorded cells are empty (byes, legacy data).
-const defaultWinMaru = (encho) => (enchoOn(encho) ? ["○"] : ["○", "○"]);
 
 // boutMiddle: THE single source for what a bout's middle can read —
 // "vs" (plain, including unplayed/pending), "X" (tie), "(E)" (overtime),
@@ -284,14 +270,15 @@ function matchMiddleMark(match) {
 //   kiken    → loser  "Kiken" (the competitor who withdrew)
 //   fusenpai → loser  "Fus."  (the no-show)
 //   fusensho → winner "Fus."  (the default WIN names the present side)
-// Mirrors internal/export/suffix.go SideMarks exactly (CLAUDE.md documents
-// the pair as one mirrored rule). bc-tmfn removed the earlier fusensho gap
-// here: this surface used to omit the winner-side "Fus." mark on the theory
-// that "the viewer surfaces it via a separate bout badge", but no such badge
-// exists for a MATCH-LEVEL fusensho decision (only a per-bout team row's ○○
-// fill, which is a different thing), so a match-level default win used to
-// render with no mark on this surface at all. There is no divergence left to
-// document: a fusensho match now reads identically here and in the export.
+// Mirrors domain.SideMarks (internal/domain/result_marks.go) exactly
+// (CLAUDE.md documents the pair as one mirrored rule). bc-tmfn removed the
+// earlier fusensho gap here: this surface used to omit the winner-side "Fus."
+// mark on the theory that "the viewer surfaces it via a separate bout badge",
+// but no such badge exists for a MATCH-LEVEL fusensho decision (only a
+// per-bout team row's ○○ fill, which is a different thing), so a match-level
+// default win used to render with no mark on this surface at all. There is no
+// divergence left to document: a fusensho match now reads identically here and
+// in the export.
 function sideMarks(decision, decidedByHantei) {
   let winner = "", loser = "";
   if (isKikenDecisionBC(decision)) loser = "Kiken";
@@ -369,9 +356,10 @@ function winnerSideLR(m) {
 // name ("M Ht (E) K", "– vs Kiken"), which needs `winnerSide`
 // ("left" | "right", from winnerSideLR) — without it the marks fall back to
 // trailing after the score, still readable but unattributed.
-// Mirrors the Excel export (internal/export/suffix.go MiddleMark/SideMarks +
-// builder cell writes; the sheet template's own middle cell text is "vs" and
-// its empty score cells stay empty).
+// Mirrors the Excel export (domain.MiddleMark/domain.SideMarks, placed on the
+// sheet by export.SideMarksLR, plus the builder's cell writes; the sheet
+// template's own middle cell text is "vs" and its empty score cells stay
+// empty).
 function formatIpponsScore(ipponsLeft, ipponsRight, score, decision, encho, decidedByHantei, winnerSide) {
   // decidedByHantei (positional) is the canonical flag. The `typeof` guard
   // lets callers that omit the arg safely get false without sending undefined.
@@ -611,7 +599,9 @@ const MatchCard = React.memo(({ match, variant, showDojo, onClick, highlighted, 
 
   // Meta-strip middle mark: X | (E) | (DH), mutually exclusive (see
   // middleMark). The X chip keeps its dedicated span below for styling.
-  const metaMid = matchMiddleMark(match);
+  // Gated on matchShowsScore: a queued match keeps its overtime, and its card
+  // must still read as not started (bc-sbq).
+  const metaMid = matchShowsScore(match) ? matchMiddleMark(match) : "";
   return (
     <button
       ref={matchRef}
@@ -1435,14 +1425,16 @@ function matchScoreStr(m) {
 // A running TEAM match has no such risk (its aggregate is mark-free), so it
 // gets the live update the underlying bug is actually about; a running
 // individual match keeps the plain "vs" middle until it completes.
-// Everything else → boutMiddle (normally the plain "vs"); the row's
-// .is-running highlight is the "now" signal, NOT a centre glyph, and the
-// labelled "● NOW" badge elsewhere is a separate affordance.
+// Everything else → the plain "vs" (matchShowsScore, match_shows_score.jsx): a queued match
+// keeps its score, including an overtime whose (E) boutMiddle would otherwise
+// print, and must still read as not started (bc-sbq). The row's .is-running
+// highlight is the "now" signal, NOT a centre glyph, and the labelled
+// "● NOW" badge elsewhere is a separate affordance.
 function matchStateCell(m) {
+  if (!matchShowsScore(m)) return "vs";
   const mid = boutMiddle(m.decision, m.encho, m.score);
   if (m.status === "completed") return matchScoreStr(m) || mid;
-  if (m.status === "running") return teamIVPWScore(m) || mid;
-  return mid;
+  return teamIVPWScore(m) || mid;
 }
 
 // bronzeUnderFinalStyle: inline style that places the 3rd-place (bronze) card

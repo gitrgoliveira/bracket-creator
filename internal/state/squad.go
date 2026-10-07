@@ -83,6 +83,10 @@ func squadFloor(teamSize int) int {
 // clear) either way.
 var ErrTeamMemberNotFound = errors.New("team member not found")
 
+// ErrTeamMemberNamed is NameUnnamedTeamMember's refusal: the member already
+// has a name, and only the organiser may change one (RenameTeamMember).
+var ErrTeamMemberNamed = errors.New("team member already has a name")
+
 // ErrTeamNotFound is returned when a squad write names a team id that no
 // participant in this competition carries.
 var ErrTeamNotFound = errors.New("no team with that id in this competition")
@@ -179,6 +183,18 @@ func copySquads(in map[string][]domain.TeamMember) map[string][]domain.TeamMembe
 		out[id] = cp
 	}
 	return out
+}
+
+// stampMember sets m's ModifiedAt for a write made now: the server's time in
+// milliseconds, or one more than m's previous stamp when that is not earlier, so
+// the stamps of one member only grow, whatever the clock does between its writes
+// (a server whose clock is set back still orders them). Every writer that
+// creates a member or changes its name calls it under the competition's lock
+// (addTeamMember, renameTeamMemberTx, clearTeamMemberNameTx); the writers that
+// only seed or migrate members leave the stamp at 0, as a member no write has
+// touched carries.
+func (s *Store) stampMember(m *domain.TeamMember) {
+	m.ModifiedAt = max(s.now().UnixMilli(), m.ModifiedAt+1)
 }
 
 // LoadSquads returns every team's squad persisted for compID, keyed by the
@@ -368,22 +384,24 @@ func (s *Store) pruneOrphanedTeamMembersLocked(compID string, comp *Competition,
 // (seeds.go): LoadParticipants would re-acquire the lock this function's
 // caller already holds and deadlock a non-reentrant mutex. WithSeeds is off
 // because the seed merge is irrelevant to an id comparison and would read a
-// second file.
-func (s *Store) requireTeamParticipantLocked(compID, teamID string) error {
-	withZekken, _, err := s.withZekkenNameLocked(compID)
+// second file. The competition record it read is returned, as
+// withZekkenNameLocked returns it, so a caller judging its status reads
+// config.md once.
+func (s *Store) requireTeamParticipantLocked(compID, teamID string) (*Competition, error) {
+	withZekken, comp, err := s.withZekkenNameLocked(compID)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	players, err := s.loadParticipantsNoLock(compID, withZekken, LoadParticipantsOpts{WithSeeds: false})
 	if err != nil {
-		return err
+		return nil, err
 	}
 	for i := range players {
 		if players[i].ID == teamID {
-			return nil
+			return comp, nil
 		}
 	}
-	return fmt.Errorf("%w: %q", ErrTeamNotFound, teamID)
+	return nil, fmt.Errorf("%w: %q", ErrTeamNotFound, teamID)
 }
 
 // squadDuplicateNameCheck runs helper.DuplicateNamesWithKeys over
@@ -450,6 +468,47 @@ func squadDuplicateNameCheck(candidateName string, otherNames []string) error {
 // by overwriting it; a squad member is not, which is why the two diverge.
 // See requireTeamParticipantLocked below.
 func (s *Store) AddTeamMember(compID, teamID, name string) (domain.TeamMember, error) {
+	return s.addTeamMember(compID, teamID, name, 0, false)
+}
+
+// ErrTeamMemberLimit is AddTeamMemberUpTo's refusal: the squad already holds
+// limit members.
+var ErrTeamMemberLimit = errors.New("team already holds as many members as allowed")
+
+// ErrCompetitionFinished refuses a participant's team-member write
+// (AddTeamMemberUpTo, NameUnnamedTeamMember) once the competition is
+// complete.
+var ErrCompetitionFinished = errors.New("competition has finished")
+
+// AddTeamMemberUpTo is a self-run participant's add: AddTeamMember held to a
+// squad of at most limit members (limit <= 0 means no cap), and refused with
+// ErrCompetitionFinished once the competition is complete. Both are read under
+// the same lock as the write, the lock a competition's completion also takes,
+// so requests racing each other or the finish cannot pass them.
+func (s *Store) AddTeamMemberUpTo(compID, teamID, name string, limit int) (domain.TeamMember, error) {
+	return s.addTeamMember(compID, teamID, name, limit, true)
+}
+
+// requireCompetitionOpen is ErrCompetitionFinished's check, on a record read
+// under the competition lock.
+func requireCompetitionOpen(comp *Competition) error {
+	if comp != nil && comp.Status == CompStatusComplete {
+		return ErrCompetitionFinished
+	}
+	return nil
+}
+
+// requireCompetitionOpenLocked reads the record and checks it. The caller
+// holds the competition lock.
+func (s *Store) requireCompetitionOpenLocked(compID string) error {
+	comp, err := s.loadCompetitionLocked(compID)
+	if err != nil {
+		return err
+	}
+	return requireCompetitionOpen(comp)
+}
+
+func (s *Store) addTeamMember(compID, teamID, name string, limit int, participant bool) (domain.TeamMember, error) {
 	if err := ValidateCompetitionID(compID); err != nil {
 		return domain.TeamMember{}, err
 	}
@@ -459,8 +518,14 @@ func (s *Store) AddTeamMember(compID, teamID, name string) (domain.TeamMember, e
 	mu.Lock()
 	defer mu.Unlock()
 
-	if err := s.requireTeamParticipantLocked(compID, teamID); err != nil {
+	comp, err := s.requireTeamParticipantLocked(compID, teamID)
+	if err != nil {
 		return domain.TeamMember{}, err
+	}
+	if participant {
+		if err := requireCompetitionOpen(comp); err != nil {
+			return domain.TeamMember{}, err
+		}
 	}
 
 	squads, err := s.loadSquadsLocked(compID)
@@ -468,6 +533,9 @@ func (s *Store) AddTeamMember(compID, teamID, name string) (domain.TeamMember, e
 		return domain.TeamMember{}, err
 	}
 	existing := squads[teamID]
+	if limit > 0 && len(existing) >= limit {
+		return domain.TeamMember{}, ErrTeamMemberLimit
+	}
 
 	otherNames := make([]string, 0, len(existing))
 	for _, m := range existing {
@@ -484,6 +552,7 @@ func (s *Store) AddTeamMember(compID, teamID, name string) (domain.TeamMember, e
 		}
 	}
 	member := domain.TeamMember{ID: newParticipantID(), Index: nextIndex, Name: name}
+	s.stampMember(&member)
 	squads[teamID] = append(existing, member)
 
 	if err := s.saveSquadsLocked(compID, squads, s.directWrite); err != nil {
@@ -504,24 +573,51 @@ func (s *Store) AddTeamMember(compID, teamID, name string) (domain.TeamMember, e
 // sitting beside one already stamped. It also returned the SECOND write's error
 // as the whole call's, so the operator was told a rename that HAD landed had
 // failed, and retyping the old name became a second real rename.
-func (s *Store) RenameTeamMember(compID, teamID, memberID, newName string) error {
-	if err := ValidateCompetitionID(compID); err != nil {
-		return err
-	}
-	newName = strings.TrimSpace(newName)
-	return s.WithTransaction(compID, func(tx StoreTx) error {
-		return s.renameTeamMemberTx(tx, compID, teamID, memberID, newName)
-	})
+//
+// It answers with the member as written, stamped (stampMember): the copy this
+// write produced, which a client keeps in place of any it held with a smaller
+// stamp.
+func (s *Store) RenameTeamMember(compID, teamID, memberID, newName string) (domain.TeamMember, error) {
+	return s.nameTeamMember(compID, teamID, memberID, newName, false)
 }
 
-// renameTeamMemberTx is RenameTeamMember's body, staged through the
+// NameUnnamedTeamMember is a self-run participant's RenameTeamMember: for a
+// member who has no name yet, refused with ErrTeamMemberNamed when the member
+// has one and with ErrCompetitionFinished once the competition is complete.
+// Both checks read under the same hold of the competition lock as the write,
+// the lock a competition's completion also takes, so two callers naming one
+// blank member cannot both pass (the second finds the first's name), and
+// neither can a caller racing the finish. Like RenameTeamMember it answers with
+// the member as written.
+func (s *Store) NameUnnamedTeamMember(compID, teamID, memberID, newName string) (domain.TeamMember, error) {
+	return s.nameTeamMember(compID, teamID, memberID, newName, true)
+}
+
+func (s *Store) nameTeamMember(compID, teamID, memberID, newName string, onlyUnnamed bool) (domain.TeamMember, error) {
+	if err := ValidateCompetitionID(compID); err != nil {
+		return domain.TeamMember{}, err
+	}
+	newName = strings.TrimSpace(newName)
+	var member domain.TeamMember
+	err := s.WithTransaction(compID, func(tx StoreTx) error {
+		var err error
+		member, err = s.renameTeamMemberTx(tx, compID, teamID, memberID, newName, onlyUnnamed)
+		return err
+	})
+	if err != nil {
+		return domain.TeamMember{}, err
+	}
+	return member, nil
+}
+
+// renameTeamMemberTx is the body of both renames, staged through the
 // transaction's writer so the squad file and the lineups file land together
-// or not at all.
-func (s *Store) renameTeamMemberTx(tx StoreTx, compID, teamID, memberID, newName string) error {
+// or not at all. It answers with the member it stamped.
+func (s *Store) renameTeamMemberTx(tx StoreTx, compID, teamID, memberID, newName string, onlyUnnamed bool) (domain.TeamMember, error) {
 	write := tx.(*storeTx).txWriteFn()
 	squads, err := s.loadSquadsLocked(compID)
 	if err != nil {
-		return err
+		return domain.TeamMember{}, err
 	}
 	existing := squads[teamID]
 
@@ -535,18 +631,30 @@ func (s *Store) renameTeamMemberTx(tx StoreTx, compID, teamID, memberID, newName
 		otherNames = append(otherNames, m.Name)
 	}
 	if target == -1 {
-		return ErrTeamMemberNotFound
+		return domain.TeamMember{}, ErrTeamMemberNotFound
+	}
+	if onlyUnnamed {
+		if strings.TrimSpace(existing[target].Name) != "" {
+			return domain.TeamMember{}, ErrTeamMemberNamed
+		}
+		if err := s.requireCompetitionOpenLocked(compID); err != nil {
+			return domain.TeamMember{}, err
+		}
 	}
 	if err := squadDuplicateNameCheck(newName, otherNames); err != nil {
-		return err
+		return domain.TeamMember{}, err
 	}
 
 	existing[target].Name = newName
+	s.stampMember(&existing[target])
 	squads[teamID] = existing
 	if err := s.saveSquadsLocked(compID, squads, write); err != nil {
-		return err
+		return domain.TeamMember{}, err
 	}
-	return s.renameMemberInLineupsLocked(compID, memberID, newName, write)
+	if err := s.renameMemberInLineupsLocked(compID, memberID, newName, write); err != nil {
+		return domain.TeamMember{}, err
+	}
+	return existing[target], nil
 }
 
 // renameMemberInLineupsLocked carries a member's new name into every stored
@@ -613,28 +721,37 @@ func (s *Store) renameMemberInLineupsLocked(compID, memberID, name string, write
 //
 // Like RenameTeamMember, both writes ride ONE WAL transaction; see that
 // function's comment for why.
-func (s *Store) ClearTeamMemberName(compID, teamID, memberID string) error {
+//
+// It answers with the member as written, stamped (stampMember), like the renames.
+func (s *Store) ClearTeamMemberName(compID, teamID, memberID string) (domain.TeamMember, error) {
 	if err := ValidateCompetitionID(compID); err != nil {
-		return err
+		return domain.TeamMember{}, err
 	}
-	return s.WithTransaction(compID, func(tx StoreTx) error {
-		return s.clearTeamMemberNameTx(tx, compID, teamID, memberID)
+	var member domain.TeamMember
+	err := s.WithTransaction(compID, func(tx StoreTx) error {
+		var err error
+		member, err = s.clearTeamMemberNameTx(tx, compID, teamID, memberID)
+		return err
 	})
+	if err != nil {
+		return domain.TeamMember{}, err
+	}
+	return member, nil
 }
 
-func (s *Store) clearTeamMemberNameTx(tx StoreTx, compID, teamID, memberID string) error {
+func (s *Store) clearTeamMemberNameTx(tx StoreTx, compID, teamID, memberID string) (domain.TeamMember, error) {
 	write := tx.(*storeTx).txWriteFn()
 	comp, err := s.loadCompetitionLocked(compID)
 	if err != nil {
-		return err
+		return domain.TeamMember{}, err
 	}
 	if comp != nil && !CanStart(comp.Status) {
-		return ErrTeamMemberClearAfterStart
+		return domain.TeamMember{}, ErrTeamMemberClearAfterStart
 	}
 
 	squads, err := s.loadSquadsLocked(compID)
 	if err != nil {
-		return err
+		return domain.TeamMember{}, err
 	}
 	existing := squads[teamID]
 
@@ -646,13 +763,17 @@ func (s *Store) clearTeamMemberNameTx(tx StoreTx, compID, teamID, memberID strin
 		}
 	}
 	if target == -1 {
-		return ErrTeamMemberNotFound
+		return domain.TeamMember{}, ErrTeamMemberNotFound
 	}
 
 	existing[target].Name = ""
+	s.stampMember(&existing[target])
 	squads[teamID] = existing
 	if err := s.saveSquadsLocked(compID, squads, write); err != nil {
-		return err
+		return domain.TeamMember{}, err
 	}
-	return s.renameMemberInLineupsLocked(compID, memberID, "", write)
+	if err := s.renameMemberInLineupsLocked(compID, memberID, "", write); err != nil {
+		return domain.TeamMember{}, err
+	}
+	return existing[target], nil
 }

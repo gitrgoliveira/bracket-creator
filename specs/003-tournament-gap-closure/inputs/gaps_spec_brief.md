@@ -40,7 +40,7 @@ This brief asks SpecKit to plan the work needed to close all those gaps so the a
 - **Encho**: Overtime period under ippon-shobu (first-point) rules after a knockout draw.
 - **Kiken**: Withdrawal mid-tournament (injury/illness). Opponent wins 2–0 (1–0 in encho). The withdrawn competitor is barred from subsequent matches.
 - **Fusenpai**: No-show at court call. Opponent wins 2–0. Same prohibition as kiken.
-- **Fusensho**: Default win awarded when a team is missing a player for a position; counts as 2–0 for that bout.
+- **Fusensho**: Win recorded when a team is missing a player for a position; counts as 2–0 for that bout.
 - **Daihyosen**: Representative ippon-shobu bout used to resolve a tied team knockout match when individual victories (IV) and points won (PW) are equal.
 - **Kachinuki**: Winner-stays-on team format; the winning fighter remains to face the next opponent.
 - **Senpo / Jiho / Chuken / Fukusho / Taisho**: Standard 5-person team positions (1st through 5th/captain).
@@ -163,7 +163,7 @@ Today `MatchResult.Decision` is a draw flag only. A fought 2–0, a kiken 2–0,
 - New `DecisionBy` field naming the side that triggered the decision (the losing side for kiken/fusenpai/fusensho).
 - Scoring modal additions:
   - "Kiken" (withdrawal) action: auto-fills 2–0 in regulation, 1–0 in encho, records reason.
-  - "Default win" / "Fusenpai" action for no-shows: auto-fills 2–0.
+  - "Fusenpai" action for no-shows: auto-fills 2–0.
   - "Fusensho" action per bout in team scoring for missing-player defaults; contributes to IV/PW.
 - Encho tracking: counter or flag indicating how many encho periods were played; optional separate hansoku tracking per period if the tournament rules reset fouls between encho.
 - Visual distinction in match list, results, and brackets: "Kiken", "Fus.", "(E)" suffixes alongside the score.
@@ -172,7 +172,7 @@ Today `MatchResult.Decision` is a draw flag only. A fought 2–0, a kiken 2–0,
 
 - New `CompetitorStatus { PlayerID, Eligible, Reason, MatchID }` state.
 - Engine checks eligibility before allowing a match to start; rejects starting a match where a competitor is marked ineligible.
-- After kiken/fusenpai is recorded, the app surfaces the competitor's remaining scheduled matches and prompts the operator to resolve them (award default wins to opponents or remove from bracket).
+- After kiken/fusenpai is recorded, each of the competitor's remaining scheduled matches carries its own notice with a one-tap fusensho recorded for the opponent, resolved when it comes up (operator ruling 2026-09-26: recording a withdrawal changes only that match, so nothing is resolved in bulk from the match where they withdrew).
 - Team kiken under FIK rules: validate that the correct positions are vacated (Jiho for 1 withdrawal, Jiho + Fukusho for 2; Senpo and Taisho cannot be forfeited; 3+ withdrawals disqualify the team).
 
 ---

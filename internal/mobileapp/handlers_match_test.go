@@ -27,7 +27,7 @@ import (
 // reopen/correction audit gate fails CLOSED when the pre-write snapshot read
 // errors (mp-gmcg). A best-effort read that swallowed the error and let
 // the write finalize on an assumed-false ReopenPending, silently dropping the
-// mandatory audit reason; the gate now mirrors checkFinalizedUnderTx and
+// mandatory audit reason; the gate now mirrors holdSelfReportedWriteUnderTx and
 // surfaces the error so the transaction aborts (HTTP 500) instead. A directory
 // in place of pool-matches.csv is the deterministic stand-in for the transient
 // single-read fault: os.Open on a dir succeeds but csv.ReadAll on it does not,
@@ -703,6 +703,10 @@ func (f *fixedSidesCompetitionStore) MatchSidesByID(string, string) (string, str
 	return f.sideA, f.sideB, f.sideAID, f.sideBID, f.found, f.sidesErr
 }
 
+func (fixedSidesCompetitionStore) LoadCompetitorStatus(string) (map[string]domain.CompetitorStatus, error) {
+	return nil, nil
+}
+
 // TestBackfillMatchIdentityForHantei is a table-driven unit test of the
 // merged helper (bc-qual + bc-dmsr reviews; this replaced two hand-copied
 // twins, backfillMatchLevelSidesForLegacyHantei which backfilled only
@@ -829,10 +833,25 @@ func TestBackfillMatchIdentityForHantei(t *testing.T) {
 			// never touching the client-supplied sides.
 			name:          "sides present, ids empty: store is consulted to fill only the ids",
 			req:           state.MatchResult{SideA: "Alice", SideB: "Bob", DecidedByHantei: trueFlag},
-			store:         &fixedSidesCompetitionStore{sideA: "Someone Else Entirely", sideB: "Also Ignored", sideAID: "id-a", sideBID: "id-b", found: true},
+			store:         &fixedSidesCompetitionStore{sideA: "Alice", sideB: "Bob", sideAID: "id-a", sideBID: "id-b", found: true},
 			wantSideA:     "Alice",
 			wantSideB:     "Bob",
 			wantSideAID:   "id-a",
+			wantSideBID:   "id-b",
+			wantStoreCall: true,
+		},
+		{
+			// bc-mrgc review F2: an id is filled in only beside the name it
+			// belongs to. This case used to fill the stored ids beside names
+			// the store does not hold, and the engine then read those ids as
+			// proof that the payload's sides were the stored competitors
+			// renamed, accepting a write that names someone else.
+			name:          "sides present but not the stored ones, ids empty: no id is vouched for them",
+			req:           state.MatchResult{SideA: "Alice", SideB: "Bob", DecidedByHantei: trueFlag},
+			store:         &fixedSidesCompetitionStore{sideA: "Someone Else Entirely", sideB: "Bob", sideAID: "id-a", sideBID: "id-b", found: true},
+			wantSideA:     "Alice",
+			wantSideB:     "Bob",
+			wantSideAID:   "",
 			wantSideBID:   "id-b",
 			wantStoreCall: true,
 		},
@@ -1617,8 +1636,9 @@ func TestQuickScoreHandler(t *testing.T) {
 // TestScoreHandler_RevGuard validates the C2 monotonic-revision guard for
 // "running" autosave writes:
 //
-//   - A stale running write (rev < stored high-water) is silently no-op'd
-//     (HTTP 200 with {"stale":true}); the stored result is unchanged.
+//   - A stale running write (rev < stored high-water) is not applied: it is
+//     kept in the match's history and answered superseded with heldGroups
+//     (bc-mrgc phase 3); the stored result is unchanged.
 //   - A higher rev advances the mark and the write proceeds normally.
 //   - Rev==0 (unversioned) writes always proceed regardless of the mark.
 //   - Completed writes are never blocked by a stale rev.
@@ -1707,27 +1727,57 @@ func TestScoreHandler_RevGuard(t *testing.T) {
 	t.Run("rev=0 (unversioned) always proceeds", func(t *testing.T) {
 		code, body := scoreRunning(0)
 		assert.Equal(t, http.StatusOK, code)
-		assert.Nil(t, body["stale"], "unversioned write must not be marked stale")
+		assert.NotEqual(t, false, body["applied"], "unversioned write must not be marked stale")
 	})
 
 	t.Run("higher rev advances the mark and write proceeds", func(t *testing.T) {
 		code, body := scoreRunning(5)
 		assert.Equal(t, http.StatusOK, code)
-		assert.Nil(t, body["stale"], "higher rev should proceed, not be stale")
+		assert.NotEqual(t, false, body["applied"], "higher rev should proceed, not be stale")
 	})
 
 	t.Run("same rev is not stale (equal rev always proceeds)", func(t *testing.T) {
 		code, body := scoreRunning(5)
 		assert.Equal(t, http.StatusOK, code)
-		assert.Nil(t, body["stale"], "equal rev should proceed")
+		assert.NotEqual(t, false, body["applied"], "equal rev should proceed")
 	})
 
-	t.Run("stale running write is dropped with stale=true, stored result unchanged", func(t *testing.T) {
-		// Send rev=3 after rev=5 is the stored mark, should be stale.
-		code, body := scoreRunning(3)
-		assert.Equal(t, http.StatusOK, code)
-		stale, ok := body["stale"].(bool)
-		assert.True(t, ok && stale, "stale running write must return {stale:true}")
+	t.Run("an older revision is not applied, kept in the history and answered superseded", func(t *testing.T) {
+		// rev=3 after rev=5 is the stored mark: an older revision of this
+		// board. It carries a different scoreline (K, where rev 5 stored M), so
+		// the points group is a real loss if dropped (bc-mrgc phase 3:
+		// "Nothing should be dropped").
+		payload, _ := json.Marshal(map[string]any{
+			"sideA": "Alice", "sideB": "Bob",
+			"ipponsA": []string{"K"}, "ipponsB": []string{},
+			"status": "running", "rev": 3, "revSession": "rg-sess",
+			"changed": []string{"points"},
+		})
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest("PUT", "/api/competitions/rg1/matches/PoolA-1/score", bytes.NewBuffer(payload))
+		req.Header.Set("Content-Type", "application/json")
+		r.ServeHTTP(w, req)
+		require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+		var body map[string]any
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &body))
+		assert.Nil(t, body["stale"], "the {stale:true} answer is gone: nothing is dropped without a trace")
+		assert.Equal(t, false, body["applied"])
+		assert.Equal(t, "superseded", body["reason"])
+		assert.Equal(t, []any{"points"}, body["heldGroups"])
+
+		ms, err := store.LoadPoolMatches("rg1")
+		require.NoError(t, err)
+		require.Len(t, ms, 1)
+		assert.Equal(t, []string{"M"}, ms[0].IpponsA, "the newer revision stays")
+
+		hist, err := store.LoadMatchHistory("rg1", "PoolA-1")
+		require.NoError(t, err)
+		require.NotEmpty(t, hist)
+		last := hist[len(hist)-1]
+		assert.Equal(t, engine.HoldReasonOlderRevision, last.Reason)
+		assert.Equal(t, "rg-sess", last.Session)
+		assert.Equal(t, state.HistoryOutcomeHeld, last.Outcomes["points"])
+		assert.Contains(t, string(last.Held["points"]), `"K"`, "the held scoreline is kept with its values")
 	})
 
 	t.Run("rev>0 without a RevSession is unversioned (always proceeds)", func(t *testing.T) {
@@ -1736,7 +1786,7 @@ func TestScoreHandler_RevGuard(t *testing.T) {
 		// treated as unversioned, so it proceeds rather than being dropped.
 		code, body := scoreRunningNoSession(1)
 		assert.Equal(t, http.StatusOK, code)
-		assert.Nil(t, body["stale"], "a Rev without a RevSession must never be marked stale")
+		assert.NotEqual(t, false, body["applied"], "a Rev without a RevSession must never be marked stale")
 	})
 
 	t.Run("completed write is never blocked by stale rev guard", func(t *testing.T) {
@@ -1784,20 +1834,20 @@ func TestScoreHandler_RevGuard_SessionTakeover(t *testing.T) {
 	t.Run("session A advances to rev=5", func(t *testing.T) {
 		code, body := scoreRunningWithSession("session-A", 5)
 		assert.Equal(t, http.StatusOK, code)
-		assert.Nil(t, body["stale"], "initial write must proceed")
+		assert.NotEqual(t, false, body["applied"], "initial write must proceed")
 	})
 
-	t.Run("session A rev=3 is stale (same session, lower rev)", func(t *testing.T) {
+	t.Run("session A rev=3 is held (same session, lower rev)", func(t *testing.T) {
 		code, body := scoreRunningWithSession("session-A", 3)
 		assert.Equal(t, http.StatusOK, code)
-		stale, ok := body["stale"].(bool)
-		assert.True(t, ok && stale, "lower rev in same session must be stale")
+		assert.Equal(t, false, body["applied"], "lower rev in same session is not applied")
+		assert.Equal(t, "superseded", body["reason"])
 	})
 
 	t.Run("session B rev=1 proceeds (new session takes over despite A being at rev=5)", func(t *testing.T) {
 		code, body := scoreRunningWithSession("session-B", 1)
 		assert.Equal(t, http.StatusOK, code)
-		assert.Nil(t, body["stale"], "a new session must never be dropped as stale")
+		assert.NotEqual(t, false, body["applied"], "a new session must never be dropped as stale")
 	})
 
 	t.Run("session B rev=0 is unversioned and always proceeds", func(t *testing.T) {
@@ -1806,7 +1856,7 @@ func TestScoreHandler_RevGuard_SessionTakeover(t *testing.T) {
 		// rather than be dropped as stale.
 		code, body := scoreRunningWithSession("session-B", 0)
 		assert.Equal(t, http.StatusOK, code)
-		assert.Nil(t, body["stale"], "rev=0 is unversioned and must always proceed")
+		assert.NotEqual(t, false, body["applied"], "rev=0 is unversioned and must always proceed")
 	})
 }
 
@@ -2624,6 +2674,10 @@ func (f failingCompetitionStore) MatchSidesByID(string, string) (string, string,
 	return "", "", "", "", false, f.err
 }
 
+func (f failingCompetitionStore) LoadCompetitorStatus(string) (map[string]domain.CompetitorStatus, error) {
+	return nil, f.err
+}
+
 // TestAnnotateQueuePositions_NonEmpty verifies that annotateQueuePositions
 // fills in per-court queue positions for a non-empty match list.
 func TestAnnotateQueuePositions_NonEmpty(t *testing.T) {
@@ -3401,12 +3455,16 @@ func TestScoreHandler_RunningWriteCannotRevertCompleted(t *testing.T) {
 	req2.Header.Set("Content-Type", "application/json")
 	r.ServeHTTP(w2, req2)
 
-	// Step 3: the server must return 200 with stale=true.
+	// Step 3: the server must return 200, the write not applied. bc-mrgc: a
+	// running write over a finished match never carries the verdict, and this
+	// one is unstamped, so it cannot be ordered after the finish: every change
+	// it makes is held (kept in the match's history) and it answers
+	// superseded, where it used to answer {stale:true}.
 	assert.Equal(t, http.StatusOK, w2.Code, "stale running write must return 200")
 	var body map[string]any
 	require.NoError(t, json.Unmarshal(w2.Body.Bytes(), &body))
-	stale, ok := body["stale"].(bool)
-	assert.True(t, ok && stale, "stale running write must return {stale:true}")
+	assert.Equal(t, false, body["applied"], "stale running write must not apply; body: %s", w2.Body.String())
+	assert.Equal(t, "superseded", body["reason"])
 
 	// Step 4: match must still be completed, not reverted to running.
 	assert.Equal(t, state.MatchStatusCompleted, loadStatus(), "running write must not revert a completed match")
@@ -3563,12 +3621,13 @@ func TestScoreHandler_ScheduledWriteCannotRevertCompleted(t *testing.T) {
 	req2.Header.Set("Content-Type", "application/json")
 	r.ServeHTTP(w2, req2)
 
-	// Step 3: the server must return 200 with stale=true.
+	// Step 3: the server must return 200, the write not applied (bc-mrgc: see
+	// TestScoreHandler_RunningWriteCannotRevertCompleted).
 	assert.Equal(t, http.StatusOK, w2.Code, "stale scheduled write must return 200")
 	var body map[string]any
 	require.NoError(t, json.Unmarshal(w2.Body.Bytes(), &body))
-	stale, ok := body["stale"].(bool)
-	assert.True(t, ok && stale, "stale scheduled write must return {stale:true}")
+	assert.Equal(t, false, body["applied"], "stale scheduled write must not apply; body: %s", w2.Body.String())
+	assert.Equal(t, "superseded", body["reason"])
 
 	// Step 4: match must still be completed with the original winner intact.
 	after := loadMatch()

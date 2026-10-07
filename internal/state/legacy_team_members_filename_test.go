@@ -306,7 +306,7 @@ func TestSquadMutator_AdoptsTheLegacyFileBeforeWriting(t *testing.T) {
 func TestSquadMutator_RenameAdoptsTheLegacyFileBeforeLookingUp(t *testing.T) {
 	s, id, teamID, _ := unadoptedLegacyCompetition(t, v200SquadsYAML)
 
-	err := s.RenameTeamMember(id, teamID, "11111111-1111-4111-8111-111111111111", "Haruki Sato")
+	err := renameMember(s, id, teamID, "11111111-1111-4111-8111-111111111111", "Haruki Sato")
 	require.NoError(t, err, "a member recorded by v2.0.0 must be reachable by id after adoption")
 
 	members, err := s.LoadSquads(id)

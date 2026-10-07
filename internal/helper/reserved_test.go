@@ -36,3 +36,31 @@ func TestIsReservedParticipantName(t *testing.T) {
 		}
 	}
 }
+
+// The two placeholder predicates each match their own shape exactly, so a
+// competitor named like the start of one ("John Poole", "Winner of Kyushu")
+// is a competitor.
+func TestPlaceholderPredicatesMatchTheirShapeOnly(t *testing.T) {
+	for _, tc := range []struct {
+		s              string
+		pool, winnerOf bool
+	}{
+		{s: "Pool A-1st", pool: true},
+		{s: "Pool AA-2nd", pool: true},
+		{s: "Winner of r1-m0", winnerOf: true},
+		{s: "Winner of r10-m99", winnerOf: true},
+		{s: "John Poole"},
+		{s: "Pool Kendo Club"},
+		{s: "Winner of Kyushu"},
+		{s: "Winner Of Kyushu"},
+		{s: "Winner of r1-m0 B"},
+		{s: ""},
+	} {
+		if got := IsPoolFinalistPlaceholder(tc.s); got != tc.pool {
+			t.Errorf("IsPoolFinalistPlaceholder(%q) = %v, want %v", tc.s, got, tc.pool)
+		}
+		if got := IsWinnerOfPlaceholder(tc.s); got != tc.winnerOf {
+			t.Errorf("IsWinnerOfPlaceholder(%q) = %v, want %v", tc.s, got, tc.winnerOf)
+		}
+	}
+}

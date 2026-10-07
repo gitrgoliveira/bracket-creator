@@ -29,7 +29,6 @@ const STUBBED_GLOBALS = {
   isTextEntry: () => false,
   isInteractiveTarget: () => false,
   confirmDialog: vi.fn().mockResolvedValue(true),
-  resolveRoundIndex: () => 0,
   API: {
     fetchCompetitionDetails: vi.fn().mockResolvedValue(null),
     recordScore: vi.fn().mockResolvedValue(undefined),
@@ -90,10 +89,13 @@ function teamMatch(status) {
   };
 }
 
+// Closing unmounts the editor, as every host does: the unmount is what writes
+// an edit still inside the autosave window.
 function mount(match, props = {}) {
   const onSubmit = vi.fn().mockResolvedValue(undefined);
-  const onClose = vi.fn();
-  const utils = render(
+  let utils;
+  const onClose = vi.fn(() => utils.unmount());
+  utils = render(
     <ScoreEditorModal match={match} onSubmit={onSubmit} password="" {...props} onClose={onClose} />,
   );
   return { ...utils, onSubmit, onClose };
@@ -211,10 +213,11 @@ describe('bc-dscn: team editor', () => {
     expect(onClose).toHaveBeenCalledTimes(1);
   });
 
-  // Under kachinuki the running patch drops every unplayed row, so a fighter
-  // picked on the current bout (it rides the bout, not a lineup PUT) is not
-  // carried by a flush: closing would lose it, so the prompt stays.
-  it('a RUNNING kachinuki match with a fighter picked on the unscored current bout still prompts', async () => {
+  // A fighter picked on the current bout rides the bout, not a lineup PUT.
+  // The running patch used to drop every unplayed row, so the pick was not
+  // carried by a flush and closing had to prompt. Since bc-kclr the current
+  // bout is always sent, so closing flushes the pick and asks nothing.
+  it('a RUNNING kachinuki match with a fighter picked on the unscored current bout flushes the pick on close', async () => {
     const savedAPI = window.API;
     window.API = {
       ...savedAPI,
@@ -244,13 +247,16 @@ describe('bc-dscn: team editor', () => {
       const fresh = Array.from(document.querySelectorAll('.team-sub-match__side--aka .pmf__option'))
         .find((b) => b.textContent.includes('Fresh Fighter'));
       expect(fresh, 'expected "Fresh Fighter" to be offered').toBeTruthy();
-      await act(async () => { fireEvent.mouseDown(fresh); });
+      await act(async () => { fireEvent.click(fresh); });
 
       window.confirmDialog = vi.fn().mockResolvedValue(false);
       await clickClose();
-      expect(window.confirmDialog).toHaveBeenCalledTimes(1);
-      expect(utils.onClose).not.toHaveBeenCalled();
-      expect(utils.onSubmit).not.toHaveBeenCalled();
+      expect(window.confirmDialog).not.toHaveBeenCalled();
+      expect(utils.onClose).toHaveBeenCalledTimes(1);
+      expect(utils.onSubmit).toHaveBeenCalledTimes(1);
+      const bout6 = utils.onSubmit.mock.calls[0][0].subResults.find((r) => r.position === 6);
+      expect(bout6, 'the current bout carries the pick').toBeTruthy();
+      expect(bout6.sideAMemberId).toBe('m-fresh');
     } finally {
       window.API = savedAPI;
     }

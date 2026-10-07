@@ -30,7 +30,7 @@ func TestGenerateAllProducesGroupedPDFs(t *testing.T) {
 		path, ok := out[typ]
 		require.Truef(t, ok, "group %q should be produced", typ)
 		require.FileExists(t, path)
-		n, err := PageCount(path)
+		n, err := PageCount(context.Background(), path)
 		require.NoError(t, err)
 		assert.Positive(t, n, "group %q PDF should have pages", typ)
 	}

@@ -1,5 +1,7 @@
 // Shared UI primitives used by both admin and viewer modules.
 
+import { useOpenedTapGuard } from './tap_guard.jsx';
+
 // Formats that run their matches through the pool pipeline but are not pools.
 // See the label note inside StatusBadge.
 const POOLS_PHASE_FORMAT_LABEL = { league: "League", swiss: "Swiss" };
@@ -72,6 +74,9 @@ const TOAST_ERROR_DWELL_MS = 8000;
 // windows.
 //
 //  - success/info: role=status + aria-live=polite, short auto-dismiss.
+//  - pending: the same, with the pending icon instead of the success check: a
+//    write the device holds until the connection returns is not saved yet
+//    (worded by write_result.jsx's queuedNotice).
 //  - error: role=alert + aria-live=assertive, long dwell (>=8s) plus a manual
 //    dismiss control; cannot be clobbered by an incoming non-error toast.
 function Toast({ message, type, onClose }) {
@@ -122,7 +127,7 @@ function Toast({ message, type, onClose }) {
       role={role}
       aria-live={ariaLive}
     >
-      <div className="toast__icon" aria-hidden="true">{shownIsError ? '⚠️' : '✅'}</div>
+      <div className="toast__icon" aria-hidden="true">{shownIsError ? '⚠️' : shown.type === 'pending' ? '⏳' : '✅'}</div>
       <div className="toast__msg">{shown.message}</div>
       {shownIsError && (
         <button type="button"
@@ -318,6 +323,8 @@ function DialogHost() {
   const inputRef = React.useRef(null);
   const triggerRef = React.useRef(null);
   const trapRef = React.useRef(null);
+  // bc-cfbd: the bounce of the tap that opened the dialog lands on nothing.
+  const { openedRef, onClickCapture } = useOpenedTapGuard();
 
   React.useEffect(() => {
     const fn = (r) => { setReq(r); if (r && r.kind === "prompt") setValue(r.defaultValue || ""); };
@@ -338,6 +345,7 @@ function DialogHost() {
   // aria-modal carry the background-isolation contract instead.
   const dialogRefCb = React.useCallback((node) => {
     if (node) {
+      openedRef(node); // the key change re-mounts this node when a request replaces another
       triggerRef.current = document.activeElement;
       // Save the baseline inline overflow so close restores EXACTLY it, rather
       // than blindly clearing to "" (which would clobber a pre-existing inline
@@ -377,7 +385,7 @@ function DialogHost() {
       const trig = triggerRef.current;
       if (trig && typeof trig.focus === "function" && document.contains(trig)) trig.focus();
     }
-  }, []);
+  }, [openedRef]);
 
   const close = (result) => {
     const r = req;
@@ -404,7 +412,9 @@ function DialogHost() {
   };
 
   return (
-    <div className="modal-backdrop" onClick={onCancel}>
+    // The confirm or prompt always stacks above whatever opened it (see
+    // .modal-backdrop--dialog in styles.css).
+    <div className="modal-backdrop modal-backdrop--dialog" onClick={onCancel} onClickCapture={onClickCapture}>
       <div key={req._id} className="modal" ref={dialogRefCb} tabIndex={-1} role="dialog" aria-modal="true" aria-label={req.title} onKeyDown={onDialogKeyDown} onClick={(e) => e.stopPropagation()}>
         <div className="modal__head">
           <div className="modal__title">{req.title}</div>
@@ -588,8 +598,11 @@ function ShareLinkModal({ title, url, onClose, onCopy, children }) {
 
 function Modal({ title, onClose, children, footer, size, dismissable = true, className, style, ariaLabel }) {
   useEscapeToClose(dismissable ? onClose : undefined);
+  // bc-cfbd: the bounce of the tap that opened this modal must not reach its
+  // backdrop or its buttons.
+  const { openedRef, onClickCapture } = useOpenedTapGuard();
   return (
-    <div className="modal-backdrop" onClick={dismissable ? onClose : undefined}>
+    <div className="modal-backdrop" ref={openedRef} onClick={dismissable ? onClose : undefined} onClickCapture={onClickCapture}>
       <div
         className={`modal${size ? ` modal--${size}` : ""}${className ? ` ${className}` : ""}`}
         onClick={(e) => e.stopPropagation()}

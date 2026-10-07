@@ -1,6 +1,6 @@
 package engine
 
-// TestExportCompetitionXlsx_Engi characterizes the blank-template export path
+// TestExportCompetitionXlsx_Engi characterizes the stored-draw export path
 // (Engine.ExportCompetitionXlsx -> excel.NewFileFromScratch) for an engi (kata)
 // competition. Prior to this test there was zero characterization coverage for
 // engi on this path. The assertions pin the already-shipped behavior:
@@ -13,15 +13,14 @@ package engine
 //     name column (engi stores both members in Player.Name; the CSV layout is
 //     unchanged, so WithZekkenName=false engi comps use the plain layout).
 //
-// Note on formulas: the blank-template path loads pools from CSV (which does not
-// persist match pairings). As a result the match grid has no match rows and the
-// W/L/Flags standings formulas collapse to literal "0". The ISNUMBER+N( formula
-// pattern is therefore not present in this export path; it is instead exercised by
-// TestBuildResultsWorkbook_* tests in internal/export, which use the full
-// helper.Pool.Matches slice.
+//   - The standings cells are live formulas over the match rows: the
+//     stored-draw path rebuilds each pool's matches from pool-matches.csv
+//     (AttachPoolMatches), so W counts a won bout by ISNUMBER and Flags sums
+//     the flags with N(), as in the results workbook.
 
 import (
 	"bytes"
+	"slices"
 	"strings"
 	"testing"
 
@@ -64,8 +63,8 @@ func startNaginata4PlayerXlsx(t *testing.T, eng *Engine, store *state.Store, com
 	require.NoError(t, eng.StartCompetition(compID))
 }
 
-// TestExportCompetitionXlsx_NaginataThirdPlaceSlot verifies that the blank-
-// template export for a naginata knockout competition includes a "3rd Place"
+// TestExportCompetitionXlsx_NaginataThirdPlaceSlot verifies that the
+// stored-draw export for a naginata knockout competition includes a "3rd Place"
 // slot on the Elimination Matches sheet so the operator can hand-score it.
 func TestExportCompetitionXlsx_NaginataThirdPlaceSlot(t *testing.T) {
 	eng, store, _ := setupTestEngine(t)
@@ -91,14 +90,14 @@ func TestExportCompetitionXlsx_NaginataThirdPlaceSlot(t *testing.T) {
 	require.NoError(t, err)
 
 	assert.GreaterOrEqual(t, bctest.FindCellRow(rows, helper.ThirdPlaceLabel), 0,
-		"blank-template export for a naginata competition must have a '3rd Place' slot on the Elimination Matches sheet")
+		"stored-draw export for a naginata competition must have a '3rd Place' slot on the Elimination Matches sheet")
 }
 
 // TestExportCompetitionXlsx_NaginataThirdPlacePrintAreaAndLayout verifies that
-// the blank-template export path (Engine.ExportCompetitionXlsx) sets the
+// the stored-draw export path (Engine.ExportCompetitionXlsx) sets the
 // _xlnm.Print_Area defined name for the Elimination Matches sheet to cover the
 // "3rd Place" block AND applies a sheet page layout for that sheet.
-// Before Fix C, the blank-template path called PrintThirdPlaceBlock without
+// Before Fix C, the stored-draw path called PrintThirdPlaceBlock without
 // then calling SetEliminationPrintArea or SetSheetLayoutPortraitA4DownThenOver,
 // so the sheet had no print area and no page layout.
 func TestExportCompetitionXlsx_NaginataThirdPlacePrintAreaAndLayout(t *testing.T) {
@@ -120,7 +119,7 @@ func TestExportCompetitionXlsx_NaginataThirdPlacePrintAreaAndLayout(t *testing.T
 	require.NoError(t, err)
 	thirdPlaceExcelRow := bctest.FindCellRow(rows, helper.ThirdPlaceLabel) + 1
 	require.GreaterOrEqual(t, thirdPlaceExcelRow, 1,
-		"blank-template naginata export must have a '3rd Place' row")
+		"stored-draw naginata export must have a '3rd Place' row")
 
 	// Check the Print_Area defined name covers the bronze block.
 	printAreaLastRow := -1
@@ -131,7 +130,7 @@ func TestExportCompetitionXlsx_NaginataThirdPlacePrintAreaAndLayout(t *testing.T
 		}
 	}
 	assert.GreaterOrEqual(t, printAreaLastRow, thirdPlaceExcelRow,
-		"_xlnm.Print_Area last row (%d) must cover the '3rd Place' row (%d) on the blank-template export path",
+		"_xlnm.Print_Area last row (%d) must cover the '3rd Place' row (%d) on the stored-draw export path",
 		printAreaLastRow, thirdPlaceExcelRow)
 }
 
@@ -176,6 +175,19 @@ func TestExportCompetitionXlsx_Engi(t *testing.T) {
 		"Pool Matches standings must NOT carry 'PW' header for an engi competition")
 	assert.Equal(t, -1, bctest.FindCellRow(pmRows, "PL"),
 		"Pool Matches standings must NOT carry 'PL' header for an engi competition")
+
+	// The first standings row's W and Flags cells count the match rows.
+	header := bctest.FindCellRow(pmRows, helper.ColHeaderFlags)
+	require.GreaterOrEqual(t, header, 0)
+	for col, want := range map[string]string{"W": "ISNUMBER(", helper.ColHeaderFlags: "N("} {
+		c := slices.Index(pmRows[header], col)
+		require.GreaterOrEqual(t, c, 0, "the standings header carries %q", col)
+		cell, err := excelize.CoordinatesToCellName(c+1, header+2)
+		require.NoError(t, err)
+		formula, err := f.GetCellFormula(helper.SheetPoolMatches, cell)
+		require.NoError(t, err)
+		assert.Contains(t, formula, want, "%s (%s) counts the match rows", col, cell)
+	}
 
 	// --- Data sheet: the combined pair name appears in the Name column ---
 	dataRows, err := f.GetRows(helper.SheetData)

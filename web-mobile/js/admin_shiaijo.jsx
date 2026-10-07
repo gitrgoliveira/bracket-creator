@@ -13,8 +13,10 @@
 // local-only UI (per the brief; backend persistence is a follow-up).
 
 import { createTimerPool } from './timer_pool.jsx';
-import { realIppons } from './result_slot.jsx';
+import { applyPatch, keepNewerCompetitions } from './patch.jsx';
 import { SideCell } from './side_cell.jsx';
+import { useOpenedTapGuard } from './tap_guard.jsx';
+import { useDialogFocus } from './dialog_focus.jsx';
 // Imported DIRECTLY from the leaf rather than read off `window`. Two of the
 // call sites below sit inside a `try { } catch (_e) { }` that swallows, so a
 // missing global there would degrade into exactly the silent not-saved failure
@@ -24,7 +26,7 @@ import { SideCell } from './side_cell.jsx';
 // already makes.
 import {
     writeDidNotLand, writeWasSuperseded, writeWasRefusedForClock, CLOCK_SKEW_REASON_TEXT,
-    attemptScoreWrite, DOWNSTREAM_KNOCKOUT_PLAYED_CANCELLED,
+    attemptScoreWrite, DOWNSTREAM_KNOCKOUT_PLAYED_CANCELLED, OVERRIDE_HELD_NOTICE,
 } from './write_result.jsx';
 // swissRoundLabel: single owner is pool_ids.jsx (mp-dej2); this file used to
 // carry its own copy.
@@ -40,7 +42,7 @@ import { resultRecencyDesc } from './result_recency.jsx';
 // default-win action instead of Start. One leaf owns the question
 // (ineligible_match.jsx); BarredMatchNotice (admin_scoring_shared.jsx) is the
 // one component that renders the note plus that action across every surface.
-import { isBarredMatch } from './ineligible_match.jsx';
+import { isBarredMatch, sideBarredByDecision, involvesCompetitor } from './ineligible_match.jsx';
 // Straight from its own leaf, NOT admin_scoring_shared.jsx: that module also
 // imports bracket.jsx (for sideMarks), and admin_shiaijo.jsx's render suite
 // stubs window.BracketTree before importing this file -- routing through
@@ -248,12 +250,24 @@ export function applyBronzeLoserLocal(rounds, matchId, winnerName, thirdPlaceMat
 // on reconnect self-heals its queue instead of waiting for the next ordinary
 // event. Gating on a prior error avoids a redundant double-fetch on page load,
 // where the mount fetch already runs. Exported for unit testing.
+//
+// markLost() counts as such an error. The stream does not always error when the
+// device loses its connection: app.jsx reopens it when the device comes back
+// online (reconnectEvents closes the old one, which fires no error), so that
+// reopen arrives as an 'open' with nothing before it, and a court that went
+// offline kept its stale queue (offering Start for a match another device had
+// started) until a manual refresh. The console marks the stream lost on
+// 'online', and the reopen that follows refetches. The reopen, not 'online'
+// itself, is the moment to fetch: it is when the device is known to reach the
+// server again.
 export function makeReconnectRefetcher(onReconnect) {
     let sawError = false;
-    return (status) => {
+    const onStatus = (status) => {
         if (status === "error") { sawError = true; return; }
         if (status === "open" && sawError) { sawError = false; onReconnect(); }
     };
+    onStatus.markLost = () => { sawError = true; };
+    return onStatus;
 }
 
 // How many of the most-recent completed bouts the Completed section shows
@@ -303,11 +317,15 @@ export function shiaijoScoreCell(m) {
 // result, password) call shape into overrideBracketWinner's own positional
 // signature. Only sends forceDownstreamReopen when true, so the FIRST attempt
 // for each feeder is byte-identical to the call before this override gained
-// the confirm+retry loop (bc-kcdg).
+// the confirm+retry loop (bc-kcdg). The feeder's stamp as this device has it
+// rides last when there is one, so the assertion is never stamped older than
+// the feeder it names (bc-hlck); with none, the call is as it always was.
 function recordOverrideWinner(compId, matchId, result, pw) {
-    return result.forceDownstreamReopen
-        ? window.API.overrideBracketWinner(compId, matchId, result.winnerName, pw, true)
-        : window.API.overrideBracketWinner(compId, matchId, result.winnerName, pw);
+    const args = [compId, matchId, result.winnerName, pw];
+    const seen = Number(result.seenModifiedAt) || 0;
+    if (result.forceDownstreamReopen || seen > 0) args.push(!!result.forceDownstreamReopen);
+    if (seen > 0) args.push(seen);
+    return window.API.overrideBracketWinner(...args);
 }
 
 // ResolveFeedersModal (mp-y3nk Phase 3): last-resort recovery when a court must
@@ -364,7 +382,7 @@ function ResolveFeedersModal({ match, comp, password, onClose, onResolved, onOpt
                     confirmDialog: window.confirmDialog,
                     compId: comp.id,
                     matchId: s.feeder.id,
-                    result: { winnerName: winner },
+                    result: { winnerName: winner, seenModifiedAt: s.feeder.modifiedAt || 0 },
                     password,
                     match: null,
                 });
@@ -377,7 +395,7 @@ function ResolveFeedersModal({ match, comp, password, onClose, onResolved, onOpt
                     if (writeWasRefusedForClock(r)) {
                         // Refused for clock skew: nothing newer exists, nothing was
                         // recorded anywhere, and the client has just resynced. The
-                        // "already recorded elsewhere" wording would be a plain
+                        // "newer result recorded first" wording would be a plain
                         // falsehood and would stop the operator retrying the one
                         // action that now works.
                         anyClockRefused = true;
@@ -402,7 +420,7 @@ function ResolveFeedersModal({ match, comp, password, onClose, onResolved, onOpt
                 showToast(anyQueued
                     ? "Recorded offline. This match is ready to run now and will sync when the court reconnects."
                     : anyDropped
-                        ? "Some results were already recorded elsewhere. Refreshing this court to show the current state."
+                        ? OVERRIDE_HELD_NOTICE
                         : anyClockRefused
                             ? "This device's clock was out of step with the server and has been resynced. Try resolving again."
                             : "Feeders resolved. The match is ready to start.");
@@ -479,6 +497,29 @@ function ResolveFeedersModal({ match, comp, password, onClose, onResolved, onOpt
     );
 }
 
+// The match with id in one competition of the court feed, pool or knockout.
+function matchInComp(comp, id) {
+    const pool = (comp.poolMatches || []).find((m) => m.id === id);
+    if (pool) return pool;
+    const b = comp.bracket;
+    if (!b) return null;
+    for (const round of b.rounds || []) {
+        const m = round.find((x) => x.id === id);
+        if (m) return m;
+    }
+    return b.thirdPlaceMatch && b.thirdPlaceMatch.id === id ? b.thirdPlaceMatch : null;
+}
+
+// confirmMatchLabel: how a confirm names the match it acts on. BOTH
+// competitors, never one: "Ito Rin leaves Shiaijo A" read as a person moving,
+// not a match. Order mirrors the on-court display (Shiro/sideB vs Aka/sideA).
+// Shared by the court move and Send back to queue.
+function confirmMatchLabel(m) {
+    const shiro = (m.sideB && m.sideB.name) || "";
+    const aka = (m.sideA && m.sideA.name) || "";
+    return (shiro && aka) ? `${shiro} vs ${aka}` : (shiro || aka || "this match");
+}
+
 function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, onMoveCourt, onLogout, onViewerMode, password, showToast, tweaks, onSwitchCourt }) {
     // Normalize once: filterMatchesByCourt trims its param, so a bookmarked URL
     // with stray whitespace must use the trimmed value everywhere.
@@ -504,6 +545,10 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
     // feed, not in the subscription. Until the first fetch resolves it falls back
     // to the prop aggregate so the queue is never momentarily blank.
     const [courtComps, setCourtComps] = useStateSh(null);
+    // The feed as of this render, for the event handler below, whose closure
+    // outlives renders.
+    const courtCompsRef = useRefSh(null);
+    courtCompsRef.current = courtComps;
     // True while a manual "Refresh" is in flight (button feedback only).
     const [refreshing, setRefreshing] = useStateSh(false);
     // Refetch this court's live feed. Hoisted (not an effect-local closure) so
@@ -513,7 +558,10 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
     const refreshCourt = useCallbackSh(() => {
         if (!court || !window.API || typeof window.API.fetchCourtMatches !== "function") return Promise.resolve();
         return window.API.fetchCourtMatches(court)
-            .then(comps => { if (mountedRef.current) setCourtComps(comps); })
+            // A refetch never puts a row back to an older state
+            // (keepNewerCompetitions, patch.jsx): the rule showRunningPush
+            // applies to a push.
+            .then(comps => { if (mountedRef.current) setCourtComps((prev) => keepNewerCompetitions(prev, comps)); })
             .catch(err => console.error("Failed to fetch court matches", err));
     }, [court]);
     // Operator-triggered re-sync: the last-resort recovery when a court's tablet
@@ -586,7 +634,30 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
         if (!court || !window.API || typeof window.API.fetchCourtMatches !== "function") return;
         let cancelled = false;
         const timerPool = createTimerPool();
-        const scheduleRefresh = () => timerPool.schedule(() => { if (!cancelled) refreshCourt(); }, 200 + Math.random() * 400);
+        // One refetch per burst of events, not one per event: a running match
+        // broadcasts every saved point, and each used to schedule its own
+        // full fetch of the court's feed.
+        let refreshPending = false;
+        const scheduleRefresh = () => {
+            if (refreshPending) return;
+            refreshPending = true;
+            timerPool.schedule(() => { refreshPending = false; if (!cancelled) refreshCourt(); }, 200 + Math.random() * 400);
+        };
+        // A running match's score update changes only its own row, so the
+        // pushed result is shown at once rather than after the refetch. The
+        // refetch still follows (once per burst): it carries what a push
+        // cannot, such as another row a finish moves, and a running update the
+        // server coalesced away. A push older than the row it would replace is
+        // not applied: a newer state is already shown.
+        const showRunningPush = (event) => {
+            const cid = event.data && event.data.competitionId;
+            const r = event.data && event.data.result;
+            const comp = cid && r && r.status === "running" && Array.isArray(courtCompsRef.current)
+                ? courtCompsRef.current.find((c) => c.id === cid) : null;
+            const row = comp && matchInComp(comp, r.id);
+            if (!row || row.status !== "running" || (r.modifiedAt || 0) < (row.modifiedAt || 0)) return;
+            setCourtComps((prev) => (Array.isArray(prev) ? prev.map((c) => (c.id === cid ? applyPatch(c, event) : c)) : prev));
+        };
         refreshCourt();
         let unsub = () => {};
         if (typeof window.API.subscribeToEvents === "function") {
@@ -616,19 +687,38 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
                         const cid = event.data && event.data.competitionId;
                         setStartError((prev) => (prev && (!cid || prev.compId === cid) ? null : prev));
                     }
+                    if (event.type === "match_updated") showRunningPush(event);
                     scheduleRefresh();
                 },
                 onStatus
             );
-            unsub = () => { if (typeof off === "function") off(); };
+            // Back online: the reopen app.jsx makes refetches (see
+            // makeReconnectRefetcher.markLost).
+            const onOnline = () => onStatus.markLost();
+            window.addEventListener("online", onOnline);
+            unsub = () => {
+                window.removeEventListener("online", onOnline);
+                if (typeof off === "function") off();
+            };
         }
+        // Back from the background (an iPad locked or switched app): events
+        // may have been missed meanwhile, and admin.jsx's own resume refresh
+        // reloads the competition, not this court's feed.
+        const onVisible = () => { if (!document.hidden && !cancelled) scheduleRefresh(); };
+        document.addEventListener("visibilitychange", onVisible);
         let unsubResync = () => {};
         if (typeof window.subscribeBracketResync === "function") {
             // A queued override the server LWW-dropped emits no SSE broadcast, so
             // refetch to replace any stale optimistic bracket state (mp-y3nk).
             unsubResync = window.subscribeBracketResync(() => { if (!cancelled) scheduleRefresh(); });
         }
-        return () => { cancelled = true; timerPool.clearAll(); unsub(); unsubResync(); };
+        return () => {
+            cancelled = true;
+            timerPool.clearAll();
+            document.removeEventListener("visibilitychange", onVisible);
+            unsub();
+            unsubResync();
+        };
     }, [court, refreshCourt]);
 
     // Court-scoped competitions: the live feed once loaded, else the prop
@@ -697,6 +787,9 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
     // scoring panel instead; the find() in pickedMatch guards staleness, so a
     // pick that completes or vanishes falls back to running[0] automatically.
     const [pickedKey, setPickedKey] = useStateSh(null);
+    // The match pickMatch started, and the scheduled snapshot it started
+    // from: see ScoreEditorModal's `started` (bc-strt).
+    const [startedFrom, setStartedFrom] = useStateSh(null);
     // The COMPLETED match the operator has opened to correct in place (parity
     // with the Scores page's "Correct" button). Kept separate from pickedKey so
     // it takes priority over the running bout WITHOUT disturbing it, and so it
@@ -713,17 +806,34 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
     // A scheduled team match whose lineup the operator is entering before start.
     // Opens the team scoresheet as a modal; positions persist via putMatchLineup
     // independent of scoring, so the operator can set the lineup and close
-    // without starting (or hit Start from inside the modal).
-    const [lineupMatch, setLineupMatch] = useStateSh(null);
+    // without starting (or hit Start from inside the modal). Held as a key and
+    // resolved from the court's matches below, like pickedKey: a snapshot would
+    // keep the panel's editors on the teams the match had when it was opened,
+    // when a feeding match decided on another device has since seated another
+    // team on a side.
+    const [lineupKey, setLineupKey] = useStateSh(null);
     // A pending placeholder final the operator is resolving to run during an
     // update outage (mp-y3nk Phase 3): opens ResolveFeedersModal.
     const [resolveMatch, setResolveMatch] = useStateSh(null);
     // Pending revert-to-queue confirmation. Set when the operator clicks
-    // "Send back to queue" on any running bout (scored or not). Cleared on
-    // confirm or cancel. Shape: {compId, matchId, label, scored} where `scored`
-    // drives the "entered score will be discarded" confirm copy.
+    // "Send back to queue" on a running bout. Cleared on confirm or cancel.
+    // Shape: {compId, matchId, label}.
     const [pendingRevert, setPendingRevert] = useStateSh(null);
+    // bc-cfbd: the two confirms below open from a tap; the bounce of that tap
+    // must not land on the fresh backdrop or its buttons. One ref serves both
+    // (only one is ever open).
+    const { openedRef: confirmOpenedRef, onClickCapture: confirmOnClickCapture } = useOpenedTapGuard();
     const [reverting, setReverting] = useStateSh(false);
+    // The two confirms are this page's own dialogs, so they do what DialogHost does
+    // for confirmDialog: focus moves into the open one (its first button, Cancel),
+    // Escape cancels it while its request is not out, and focus goes back to the
+    // control that opened it once it closes, without scrolling the page.
+    const confirmOpen = Boolean(pendingMove || pendingRevert);
+    const confirmBoxRef = useRefSh(null);
+    window.useEscapeToClose(confirmOpen && !movingCourt && !reverting
+        ? () => { setPendingMove(null); setPendingRevert(null); }
+        : undefined);
+    useDialogFocus(confirmBoxRef, confirmOpen);
     // Selected competition for filtering the queue. Default: running match's comp,
     // else first comp with scheduled matches here, else any comp with matches here.
     const [selectedCompId, setSelectedCompId] = useStateSh(null);
@@ -811,13 +921,21 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
         // Else any comp
         return courtsComps[0].id;
     }, [selectedCompId, courtsComps, running, allMatches]);
+    // One operator per court (operator ruling 2026-09-26): the console never
+    // switches competition by itself. The default above only CHOOSES the first
+    // one shown; it is then held as if picked, so a finished bout or a match
+    // moved onto this court cannot swap the competition under the operator.
+    // From then on only the picker and the banner below change it (and a
+    // competition that leaves this court falls back to the default again).
+    useEffectSh(() => {
+        if (effectiveCompId && effectiveCompId !== selectedCompId) setSelectedCompId(effectiveCompId);
+    }, [effectiveCompId, selectedCompId]);
 
     // The scoring panel shows the match the operator is officiating. By default
     // that's the running (NOW) bout, but the operator may pick any upcoming
-    // match to run out of order via its "Score" button (pickMatch). Picking is
-    // governed by two rules in pickMatch: it is BLOCKED while the current bout
-    // has scoring in progress (you must finish or correct it first), and an
-    // unscored current bout is DEFERRED one slot before the new pick starts.
+    // match to run out of order via its "Score" button (pickMatch). A running
+    // current bout is sent back to the queue first, keeping any score entered
+    // for it (bc-sbq), so the court never has two running bouts.
     // A pickedMatch that completes (or vanishes) falls back to running[0]: the
     // find() filters out completed matches and the `pickedMatch || running[0]`
     // expression covers the null case. This keeps the finish-advance flow clean
@@ -837,6 +955,10 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
     const correctingMatch = useMemoSh(
         () => correctingKey ? sorted.find((x) => matchKey(x) === correctingKey) || null : null,
         [correctingKey, sorted]
+    );
+    const lineupMatch = useMemoSh(
+        () => lineupKey ? sorted.find((x) => matchKey(x) === lineupKey) || null : null,
+        [lineupKey, sorted]
     );
     // A correction that is REOPENED (a kachinuki Reopen, or Clear withdrawal
     // and reopen: completed -> running) is no longer a correction of a past
@@ -862,7 +984,12 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
             setCorrectingKey(null);
         }
     }, [correctingKey, correctingStatus]);
-    const selectedMatch = useMemoSh(() => correctingMatch || pickedMatch || running[0] || null, [correctingMatch, pickedMatch, running]);
+    // A match the operator deliberately holds open: a correction. It outranks
+    // the pick and the live bout, so while one is set it IS selectedMatch.
+    const selectedMatch = useMemoSh(
+        () => correctingMatch || pickedMatch || running[0] || null,
+        [correctingMatch, pickedMatch, running]
+    );
 
     // For pool daihyosen/tiebreaker bouts, enrich the selected match with
     // rep-player roster data so ScoreEditorModal renders the rep-picker dropdowns
@@ -984,31 +1111,41 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
     // be on a running bout from a different comp than the selector (AC7), so
     // keying off m.compId keeps Submit+Next within the competition the operator
     // just scored instead of hopping to the selected comp.
-    const nextActiveAfter = (m) => {
+    const nextActiveAfter = (m, withdrawn = null) => {
         const pool = [...running, ...scheduled].filter((x) => x.compId === m.compId);
         const idx = pool.findIndex((x) => matchKey(x) === matchKey(m));
         if (idx < 0) return null;
         // bc-cse: skip a barred match. Both Finish + Start Next and the
         // after-decision advance feed this straight into a Start write, which
         // the server would just refuse (409 ineligible_competitor); the
-        // barred match is left for its own queue row to resolve.
-        return pool.slice(idx + 1).find((x) => x.status !== "completed" && !isBarredMatch(x)) || null;
+        // barred match is left for its own queue row to resolve. `withdrawn`
+        // is a competitor the decision just barred (sideBarredByDecision):
+        // this court's list does not show their matches barred until it is
+        // refetched.
+        return pool.slice(idx + 1).find((x) => x.status !== "completed" && !isBarredMatch(x) && !involvesCompetitor(x, withdrawn)) || null;
     };
 
     // Amber nudge banner logic (AC6): fires ONLY when the SELECTED competition
     // has no more matches to run on this court (it has finished, or hasn't
     // started yet: no running and no scheduled bouts here) AND another
     // competition still has scheduled matches on the court. That's the "you're
-    // on the wrong competition, switch" case. It deliberately does NOT fire just
-    // because another competition has an earlier match while this one is still
-    // active: the operator runs their current competition to completion first.
-    // Never red/navy: uses --warn-* tokens only.
+    // on the wrong competition, switch" case. It deliberately does NOT turn
+    // amber just because another competition has an earlier match while this
+    // one is still active: the operator runs their current competition to
+    // completion first. In that case it is the quiet variant (alsoWaiting):
+    // neutral, "N <comp> matches also waiting on this court", still a tap to
+    // switch and never a switch by itself (operator request 2026-10-03, after
+    // a match moved here from another court was visible only through the
+    // picker). Never red/navy: the amber case uses --warn-* tokens only.
     const nudgeBanner = useMemoSh(() => {
         if (!effectiveCompId || !courtKnown) return null;
 
-        // Selected comp still has a running or scheduled match here → no nudge.
+        // Selected comp still has a running or scheduled match here: no
+        // "switch" nudge, but the other competition's matches are still named
+        // (alsoWaiting), quietly, because a match moved onto this court from
+        // another one was otherwise visible only through the competition
+        // picker (operator request 2026-10-03).
         const selHasActive = running.some(m => m.compId === effectiveCompId) || filteredScheduled.length > 0;
-        if (selHasActive) return null;
 
         // Other competitions' scheduled matches still on this court.
         const otherScheduled = allMatches.filter(
@@ -1023,9 +1160,12 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
             if (!byComp[m.compId]) byComp[m.compId] = { id: m.compId, name: m.compName, count: 0 };
             byComp[m.compId].count++;
         }
+        // EVERY other competition waiting here is named, each with its own
+        // switch, most matches first: a match moved onto this court may
+        // belong to the smaller one.
         const entries = Object.values(byComp);
         entries.sort((a, b) => b.count - a.count);
-        return { comp: entries[0].name, compId: entries[0].id, count: entries[0].count };
+        return { entries, alsoWaiting: selHasActive };
     }, [allMatches, effectiveCompId, running, filteredScheduled, courtKnown]);
 
     // Delegate to the canonical start-patch factory (admin_schedule.jsx) rather
@@ -1075,33 +1215,14 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
         }
     };
 
-    // scoringStarted: has the current running bout had ANY score entered? Used
-    // by pickMatch to decide whether switching away is safe: a bout with any
-    // entered state must be finished or corrected first (you can't abandon a
-    // half-scored bout, and the defer/un-start path would discard it).
-    // Counts real ippons (ignoring "•" placeholder slots), points, FOULS
-    // (hansoku: top-level or score.fouls), and team sub-bout results, so a
-    // lone foul or a scored team sub-bout also locks the switch.
-    const scoringStarted = (mm) => {
-        if (!mm || mm.status !== "running") return false;
-        const fouls = (mm.hansokuA || 0) + (mm.hansokuB || 0) + (mm.score?.fouls?.a || 0) + (mm.score?.fouls?.b || 0);
-        return realIppons(mm.ipponsA).length > 0 ||
-            realIppons(mm.ipponsB).length > 0 ||
-            (mm.score?.winnerPts || 0) > 0 ||
-            (mm.score?.loserPts || 0) > 0 ||
-            fouls > 0 ||
-            (window.enchoOn ? window.enchoOn(mm.encho) : (mm.encho?.periodCount || 0) > 0) ||
-            (mm.subResults?.length || 0) > 0;
-    };
-
     // pickMatch: run an upcoming match out of order. Rules:
     //   • Completed matches are never picked here — correcting them is a
     //     separate deliberate action (see correctMatch), so this returns early.
-    //   • If a DIFFERENT bout is running with scoring already started, block:
-    //     finish or correct it first (can't abandon a half-scored bout).
-    //   • If a DIFFERENT bout is running but unscored, defer it: un-start it
-    //     (back to scheduled) so the court is never left with two running bouts.
-    //     The deferred bout returns to the queue and runs after the picked one.
+    //   • If a DIFFERENT bout is running, defer it: send it back to the queue
+    //     so the court is never left with two running bouts. It keeps its
+    //     score (operator ruling 2026-09-26, bc-sbq: switch, keeping the
+    //     score), so a mistaken switch is undone with one tap on its Start,
+    //     and it runs after the picked one.
     //   • A scheduled pick is started (through the eligibility gate); a pick
     //     that's already running just takes the panel.
     const pickMatch = async (m) => {
@@ -1109,18 +1230,13 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
         const cur = running[0] || null;
         const isSame = cur && matchKey(cur) === matchKey(m);
         if (cur && !isSame) {
-            if (scoringStarted(cur)) {
-                if (showToast) showToast("Finish or correct the bout in progress first", "error");
-                return;
-            }
-            // Unscored current bout: un-start it back to scheduled, otherwise the
-            // pick below would leave the court with two running bouts. Route
-            // through the dedicated revert-to-queue endpoint (not a scheduled
-            // /score write): it clears every score field server-side AND skips the
-            // StartMatchTx eligibility gate, so a stale cross-match ineligibility
-            // can't silently 409 the defer. scoringStarted (above) already
-            // guarantees this bout has no entered state. If the revert fails we
-            // surface a toast and must NOT start the pick.
+            // Send the current bout back to the queue, otherwise the pick below
+            // would leave the court with two running bouts. Route through the
+            // dedicated revert-to-queue endpoint (not a scheduled /score write):
+            // it keeps the bout's score server-side AND skips the StartMatchTx
+            // eligibility gate, so a stale cross-match ineligibility can't
+            // silently 409 the defer. If the revert fails we surface a toast and
+            // must NOT start the pick.
             if (!window.API || typeof window.API.revertMatchToQueue !== "function") return;
             try {
                 await window.API.revertMatchToQueue(cur.compId, cur.id, password);
@@ -1133,6 +1249,9 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
         if (m.status === "scheduled") {
             const ok = await startMatch(m);
             if (!ok || !mountedRef.current) return;
+            // bc-strt: the editor treats this snapshot as running, so a point
+            // struck before the refetch shows it running saves at once.
+            setStartedFrom({ key: matchKey(m), at: m.modifiedAt });
         }
         setPickedKey(matchKey(m));
     };
@@ -1153,10 +1272,10 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
         setCorrectingKey(matchKey(m));
     };
     // Leave the correction and return to the live court (running bout or the
-    // done state). Only offered on a COMPLETED correcting match: once it is
+    // done state). Only offered on a COMPLETED correction: once it is
     // reopened it is the live bout, finished via End match / Finish or sent
     // back to the queue like any other.
-    const stopCorrecting = () => setCorrectingKey(null);
+    const stopCorrecting = () => { setCorrectingKey(null); };
 
     // Call to court: optional. Broadcasts a tournament announcement so the
     // competitors (and anyone watching the public app) are notified they're
@@ -1222,16 +1341,11 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
     // Revert a running bout back to the queue. Gated behind a confirm dialog
     // (same pattern as court reassignment) because discarding the running state
     // is disruptive: viewers drop the match from "Now" and it reappears in the
-    // upcoming list. Allowed even when a score has been entered (the operator may
-    // have started the wrong match after tapping a point); the confirm warns that
-    // any entered score will be discarded. `scored` drives that warning copy.
+    // upcoming list. Always offered on a running bout, and the match keeps its
+    // score (operator ruling 2026-09-26, bc-sbq): starting it again carries on
+    // from it, and the operator removes a wrong mark themselves.
     const requestRevert = (m) => {
-        // Name BOTH competitors so the confirm identifies the match, not just
-        // one side. Order mirrors the on-court display (Shiro/sideB vs Aka/sideA).
-        const shiro = (m.sideB && m.sideB.name) || "";
-        const aka = (m.sideA && m.sideA.name) || "";
-        const label = (shiro && aka) ? `${shiro} vs ${aka}` : (shiro || aka || "this match");
-        setPendingRevert({ compId: m.compId, matchId: m.id, label, scored: scoringStarted(m) });
+        setPendingRevert({ compId: m.compId, matchId: m.id, label: confirmMatchLabel(m) });
     };
     const confirmRevert = async () => {
         if (!pendingRevert || reverting) return;
@@ -1265,8 +1379,7 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
     // once the operator confirms.
     const requestMoveCourt = (compId, matchId, toCourt) => {
         const mm = sorted.find((x) => x.compId === compId && x.id === matchId);
-        const label = mm ? ((mm.sideB && mm.sideB.name) || (mm.sideA && mm.sideA.name) || "this match") : "this match";
-        setPendingMove({ compId, matchId, to: toCourt, label, from: (mm && mm.court) || court });
+        setPendingMove({ compId, matchId, to: toCourt, label: mm ? confirmMatchLabel(mm) : "this match", from: (mm && mm.court) || court });
     };
     const confirmMoveCourt = async () => {
         if (!pendingMove || movingCourt) return;
@@ -1478,7 +1591,7 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
                                                 {startingKey === matchKey(upNext) ? "Starting…" : "Start match"}
                                             </button>
                                             {isTeamMatch(upNext) && (
-                                                <button type="button" className="btn btn--sm" onClick={() => setLineupMatch(upNext)}
+                                                <button type="button" className="btn btn--sm" onClick={() => setLineupKey(matchKey(upNext))}
                                                     title="Set the team lineup before starting">
                                                     Enter lineup
                                                 </button>
@@ -1518,7 +1631,7 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
                                 <ShiaijoQueueGroup
                                     label="Upcoming" subGroup matches={upcomingQueueMatches}
                                     courts={courts} onMoveCourt={requestMoveCourt}
-                                    onMove={moveMatch} onEnterLineup={setLineupMatch}
+                                    onMove={moveMatch} onEnterLineup={(m) => setLineupKey(matchKey(m))}
                                     onPick={pickMatch}
                                     onCall={callToCourt} callingKey={callingKey} calledKey={calledKey} startingKey={startingKey}
                                     scheduled={filteredScheduled}
@@ -1585,20 +1698,30 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
 
                         {/* ── Scoring / lineup + context (right) ──────── */}
                         <div className="shiaijo__main">
-                            {nudgeBanner && (
-                                <button
-                                    type="button"
-                                    className="alert alert--warn shiaijo-nudge"
-                                    onClick={() => setSelectedCompId(nudgeBanner.compId)}
-                                    aria-label={`Switch to ${nudgeBanner.comp}`}
-                                >
-                                    <span className="shiaijo-nudge__icon" aria-hidden="true">{Icon ? <Icon name="alert-circle" size={15} /> : "⚠"}</span>
-                                    <span className="shiaijo-nudge__text">
-                                        {`Switch to ${nudgeBanner.comp}: ${nudgeBanner.count} match${nudgeBanner.count === 1 ? "" : "es"} waiting on this court.`}
-                                    </span>
-                                    <span className="shiaijo-nudge__cta" aria-hidden="true">Switch →</span>
-                                </button>
-                            )}
+                            {nudgeBanner && nudgeBanner.entries.map((e) => {
+                                const matches = `${e.count} ${e.count === 1 ? "match" : "matches"}`;
+                                const text = nudgeBanner.alsoWaiting
+                                    ? `${e.count} ${e.name} ${e.count === 1 ? "match" : "matches"} also waiting on this court.`
+                                    : `Switch to ${e.name}: ${matches} waiting on this court.`;
+                                return (
+                                    <button
+                                        type="button"
+                                        key={e.id}
+                                        className={`alert shiaijo-nudge ${nudgeBanner.alsoWaiting ? "shiaijo-nudge--also" : "alert--warn"}`}
+                                        data-testid="shiaijo-nudge"
+                                        onClick={() => setSelectedCompId(e.id)}
+                                        // The name carries the visible text (WCAG 2.5.3) and,
+                                        // on the quiet line, what the tap does.
+                                        aria-label={nudgeBanner.alsoWaiting ? `${text} Switch to ${e.name}` : text}
+                                    >
+                                        {!nudgeBanner.alsoWaiting && (
+                                            <span className="shiaijo-nudge__icon" aria-hidden="true">{Icon ? <Icon name="alert-circle" size={15} /> : "⚠"}</span>
+                                        )}
+                                        <span className="shiaijo-nudge__text">{text}</span>
+                                        <span className="shiaijo-nudge__cta" aria-hidden="true">Switch →</span>
+                                    </button>
+                                );
+                            })}
                             {allDone && !correctingMatch && (
                                 <div className="empty">
                                     <h3>{selectedCompName ? `${selectedCompName} is complete on Shiaijo ${court}` : `All matches complete on Shiaijo ${court}`}</h3>
@@ -1624,6 +1747,9 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
                                 </div>
                             )}
 
+                            {/* correctingMatch too: correcting the court's last
+                                bout makes allDone true, and the pin must still
+                                hold the editor open. */}
                             {(!allDone || correctingMatch) && selectedMatch && (
                                 <ScoreEditorModal
                                     // No subResults.length: see the same key in
@@ -1634,7 +1760,10 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
                                     key={matchKey(selectedMatch)}
                                     variant="inline"
                                     match={editorMatch}
+                                    // The inline editor never closes itself; every
+                                    // caller of onClose is a no-op here.
                                     onClose={() => {}}
+                                    started={!!startedFrom && startedFrom.key === matchKey(selectedMatch) && startedFrom.at === selectedMatch.modifiedAt}
                                     canClose={false}
                                     onSubmit={async (patch) => {
                                         try {
@@ -1647,10 +1776,12 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
                                             // them to go and check. A queued write still advances (it
                                             // reconciles on reconnect); see writeWasSuperseded.
                                             if (!writeWasSuperseded(res)) maybeAdvanceLocal(selectedMatch, patch);
-                                            // A write that did not land (queued, F5; or superseded by a
-                                            // newer stored result, bc-lww1) returns its signal so the
-                                            // editor shows the not-saved banner rather than looking saved.
-                                            if (writeDidNotLand(res)) return res;
+                                            // What the write came back with, so the editor shows the
+                                            // not-saved banner for one that did not land (queued, F5; or
+                                            // superseded by a newer stored result, bc-lww1) and tells a
+                                            // landed start from a refused one, which threw and returns
+                                            // nothing.
+                                            return res;
                                         }
                                         catch (_e) { /* surfaced via toast */ }
                                     }}
@@ -1685,8 +1816,9 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
                                             applyLocalBracketWin(selectedMatch.compId, selectedMatch.id, winnerName);
                                         }
                                         // Then start the next scheduled match so the panel advances
-                                        // (mirrors onSubmitAndNext).
-                                        const next = nextActiveAfter(selectedMatch);
+                                        // (mirrors onSubmitAndNext), passing over the matches of a
+                                        // competitor a withdrawal or no-show has just barred.
+                                        const next = nextActiveAfter(selectedMatch, sideBarredByDecision(result, selectedMatch));
                                         if (next && next.status === "scheduled") {
                                             try { await onEditScore(next.compId, next.id, startPatch(), next); } catch (_s) { /* gate */ }
                                         }
@@ -1713,14 +1845,15 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
                                 `!correctingMatch` guard: a reopened correction IS
                                 the running bout on this court (it becomes the live
                                 pick as soon as the refetch shows it running), so
-                                "Send back to queue" is its sanctioned exit - the
-                                twin of "Back to court" above, which stopCorrecting
+                                "Send back to queue" is its exit - the twin of
+                                "Back to court" above, which stopCorrecting
                                 deliberately withholds while running (a stray Back
                                 to court could strand a result-less bout behind
                                 another running match). `status === "running"`
                                 alone keeps this off a still-completed correction,
-                                which shows "Back to court" instead. Without this,
-                                a reopened correction had no in-panel exit. */}
+                                which shows "Back to court" instead. Offered
+                                whatever has been scored: the match keeps its
+                                score in the queue (bc-sbq). */}
                             {!allDone && selectedMatch && selectedMatch.status === "running" && window.API && typeof window.API.revertMatchToQueue === "function" && (
                                 <div className="shiaijo-revert">
                                     <button
@@ -1765,8 +1898,9 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
             </div>
 
             {pendingMove && (
-                <div className="modal-backdrop" onClick={() => !movingCourt && setPendingMove(null)}>
-                    <div className="shiaijo-move-confirm" role="dialog" aria-modal="true"
+                <div className="modal-backdrop" ref={confirmOpenedRef} onClickCapture={confirmOnClickCapture}
+                    onClick={() => !movingCourt && setPendingMove(null)}>
+                    <div className="shiaijo-move-confirm" role="dialog" aria-modal="true" ref={confirmBoxRef}
                         aria-labelledby="shiaijo-move-title" onClick={(e) => e.stopPropagation()}>
                         <h3 id="shiaijo-move-title" className="shiaijo-move-confirm__title">
                             Move to Shiaijo {pendingMove.to}?
@@ -1788,17 +1922,16 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
             )}
 
             {pendingRevert && (
-                <div className="modal-backdrop" onClick={() => !reverting && setPendingRevert(null)}>
-                    <div className="shiaijo-move-confirm" role="dialog" aria-modal="true"
+                <div className="modal-backdrop" ref={confirmOpenedRef} onClickCapture={confirmOnClickCapture}
+                    onClick={() => !reverting && setPendingRevert(null)}>
+                    <div className="shiaijo-move-confirm" role="dialog" aria-modal="true" ref={confirmBoxRef}
                         aria-labelledby="shiaijo-revert-title" onClick={(e) => e.stopPropagation()}>
                         <h3 id="shiaijo-revert-title" className="shiaijo-move-confirm__title">
                             Send back to queue?
                         </h3>
                         <p className="shiaijo-move-confirm__body">
                             <strong>{pendingRevert.label}</strong> will be returned to the upcoming queue.
-                            {pendingRevert.scored
-                                ? " Any score entered on this bout will be discarded."
-                                : " No score has been entered, so nothing will be lost."}
+                            {" Any score entered is kept: starting it again carries on from there."}
                         </p>
                         <div className="shiaijo-move-confirm__actions">
                             <button type="button" className="btn" onClick={() => setPendingRevert(null)} disabled={reverting}>
@@ -1823,7 +1956,7 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
                     tournament={{ competitions: courtCompetitions }}
                     password={password}
                     showToast={typeof showToast === "function" ? showToast : undefined}
-                    onClose={() => setLineupMatch(null)}
+                    onClose={() => setLineupKey(null)}
                 />
             )}
             {resolveMatch && Modal && (

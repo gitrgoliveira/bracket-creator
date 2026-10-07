@@ -1190,22 +1190,14 @@ func playerCoordKey(p Player) string {
 	return p.Name + "|" + p.DisplayName + "|" + p.Dojo
 }
 
-// ConvertPlayersToWinners maps a competitor's DISPLAYED name to the data-sheet
-// cell the tree formula concatenates.
-//
-// Known and deliberate: the returned map is keyed by name, so two competitors
-// who share a name (legal when their dojos differ) collapse to one entry. That
-// is safe HERE, and only here, because the cell being referenced holds the
-// player's NAME (column B, see dataColumnLayout.writePlayer) -- both namesakes
-// resolve to a cell containing the same string, so the rendered bracket is
-// identical either way. The lookup key would have to become an identity, and
-// the tree would have to carry that identity instead of a bare name, for a
-// difference nobody can see. If this map is ever pointed at a cell that
-// differs BETWEEN two namesakes -- the competitor number is the obvious
-// candidate, numberCell is already on playerCellCoord -- that reasoning
-// expires and the key must become helper.CompetitorKey.
+// ConvertPlayersToWinners maps each competitor to the data-sheet cell holding
+// its name, keyed by PlayerKey for a leaf stamped with an EntrantKey
+// (StampEntrantKeys) and by its displayed name for one that is not. Two
+// namesakes from different dojos share the name key, so only the identity key
+// keeps each entrant cell on its own row: the data sheet is editable, and a
+// name corrected there must reach that competitor alone.
 func ConvertPlayersToWinners(players []Player, sanitized bool, pCoords map[string]playerCellCoord) map[string]MatchWinner {
-	matchWinners := make(map[string]MatchWinner, len(players))
+	matchWinners := make(map[string]MatchWinner, 2*len(players))
 	for _, player := range players {
 		coord, ok := pCoords[playerCoordKey(player)]
 		if !ok {
@@ -1216,6 +1208,7 @@ func ConvertPlayersToWinners(players []Player, sanitized bool, pCoords map[strin
 			key = player.DisplayName
 		}
 		matchWinners[key] = MatchWinner{cellCoord: coord.cellCoord}
+		matchWinners[PlayerKey(player)] = MatchWinner{cellCoord: coord.cellCoord}
 	}
 	return matchWinners
 }

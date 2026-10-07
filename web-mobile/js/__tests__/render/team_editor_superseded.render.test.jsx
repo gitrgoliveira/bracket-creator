@@ -19,7 +19,7 @@ import React from 'react';
 import { render, act, fireEvent, screen, waitFor } from '@testing-library/react';
 import { describe, it, expect, vi, beforeAll, afterAll, beforeEach } from 'vitest';
 import { installWindowStubs } from '../helpers/stub_globals.js';
-import { SUPERSEDED_REASON, SUPERSEDED_ADVICE, CLOCK_SKEW_REASON_TEXT, CLOCK_SKEW_ADVICE } from '../../write_result.jsx';
+import { SUPERSEDED_REASON, SUPERSEDED_ADVICE, CLOCK_SKEW_REASON_TEXT, CLOCK_SKEW_ADVICE, QUEUED_NOTICE } from '../../write_result.jsx';
 
 const STUBBED_GLOBALS = {
   isHikiwake: () => false,
@@ -28,7 +28,6 @@ const STUBBED_GLOBALS = {
   isTextEntry: () => false,
   isInteractiveTarget: () => false,
   confirmDialog: vi.fn().mockResolvedValue(true),
-  resolveRoundIndex: () => 0,
   API: {},
   AdminLineupHelpers: { rosterFor: vi.fn().mockReturnValue([]) },
   compMatches: () => [],
@@ -114,11 +113,13 @@ describe('team score editor: a superseded explicit tap reaches the screen (bc-lw
 
     await waitFor(() => {
       const alert = screen.getByRole('alert');
-      expect(alert.textContent).toContain('Not saved');
+      // bc-mrgc: the tap is kept in the match's history, not lost.
+      expect(alert.textContent).toContain('Not applied');
+      expect(alert.textContent).toContain("kept in the match's history");
       // The advice is the load-bearing half: every OTHER write failure ends in
-      // "re-enter the result", which here would overwrite the newer result that
-      // won. The operator has to look at what is recorded first.
-      expect(alert.textContent).toContain('Check the recorded result');
+      // "re-enter the result", which here would overwrite the newer change that
+      // won. The operator has to look at the match first.
+      expect(alert.textContent).toContain('Check the match and its history');
       expect(alert.textContent).not.toContain('Re-enter the result and submit again');
     });
   });
@@ -157,6 +158,48 @@ describe('team score editor: a superseded explicit tap reaches the screen (bc-lw
       await waitFor(() => {
         expect(screen.getByRole('alert').textContent).toContain('Not saved: save rejected');
       });
+    } finally {
+      delete window.subscribeTerminalWriteFailed;
+    }
+  });
+
+  // A queued finish refused on replay in the server's own words (here the
+  // representative bout removed on another device) carries `sentence`: the
+  // banner shows that sentence as it is, once, with no second full stop and
+  // no default advice to re-enter, which would contradict its own.
+  it('shows a refusal the server worded itself as it is', async () => {
+    const sentence = "This match's representative bout was removed on another device. Check the scores and finish again.";
+    const subscribers = [];
+    window.subscribeTerminalWriteFailed = (fn) => { subscribers.push(fn); return () => {}; };
+    try {
+      await renderEditor(vi.fn().mockResolvedValue(undefined));
+      await act(async () => {
+        for (const fn of subscribers) {
+          fn({ compID: 'comp1', matchID: 'm1', kind: 'score', status: 409, reason: sentence, sentence: true });
+        }
+      });
+
+      const text = screen.getByRole('alert').textContent;
+      expect(text).toBe(`Not saved: ${sentence}`);
+      expect(text).not.toContain('..');
+      expect(text).not.toContain('Re-enter the result and submit again');
+    } finally {
+      delete window.subscribeTerminalWriteFailed;
+    }
+  });
+
+  it('keeps its own words around a refusal that is only a code', async () => {
+    const subscribers = [];
+    window.subscribeTerminalWriteFailed = (fn) => { subscribers.push(fn); return () => {}; };
+    try {
+      await renderEditor(vi.fn().mockResolvedValue(undefined));
+      await act(async () => {
+        for (const fn of subscribers) {
+          fn({ compID: 'comp1', matchID: 'm1', kind: 'score', status: 409, reason: 'conflict' });
+        }
+      });
+
+      expect(screen.getByRole('alert').textContent).toBe('Not saved: conflict. Re-enter the result and submit again.');
     } finally {
       delete window.subscribeTerminalWriteFailed;
     }
@@ -255,7 +298,7 @@ describe('team score editor: a queued completed write says so', () => {
     await act(async () => { fireEvent.click(screen.getByText('Start match')); });
 
     const banner = await screen.findByRole('status');
-    expect(banner.textContent).toContain('Not sent yet');
+    expect(banner.textContent).toContain(QUEUED_NOTICE);
     // Distinct from the refused case: this one WILL sync, so it must not tell
     // the operator to go and check what is recorded.
     expect(banner.textContent).not.toContain('Check the recorded result');

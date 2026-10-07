@@ -3,9 +3,9 @@
 // Purpose: verify that the POST /create body is built correctly for engi and
 // naginata competitions (mp-wvba gap closure), and that the 3rd-place field
 // it sends (thirdPlaceMatch, bc-3rdp gap closure) follows
-// effectiveTwoThirdPlaces rather than the raw naginata flag. Imports
-// buildXlsxBody directly so no component mounting or fetch mocking is
-// required.
+// effectiveTwoThirdPlaces rather than the raw naginata flag, and that a
+// kachinuki competition says so (teamMatchType). Imports buildXlsxBody
+// directly so no component mounting or fetch mocking is required.
 
 import { describe, it, expect } from 'vitest';
 import { buildXlsxBody } from '../admin_schedule_export.jsx';
@@ -104,6 +104,79 @@ describe('buildXlsxBody thirdPlaceMatch param', () => {
   it('never sends the legacy naginata field', () => {
     const body = buildXlsxBody({ format: 'knockout', naginata: true, courts: ['A'] }, 'Test', four);
     expect(body.get('naginata')).toBeNull();
+  });
+});
+
+// ── teamMatchType: the kachinuki blank template ─────────────────────────────
+//
+// A kachinuki competition's blank workbook gives every team block a row for
+// each bout an encounter can take and adds the Kachinuki Detail sheet. The
+// server decides that from teamMatchType, so the body names the format only
+// for a kachinuki competition (state.Competition.IsKachinuki: teams of two or
+// more) and teamMatches stays the team size.
+
+describe('buildXlsxBody teamMatchType param', () => {
+  const four = [
+    player('Ryu', 'DA'),
+    player('Tora', 'DB'),
+    player('Kame', 'DC'),
+    player('Taka', 'DD'),
+  ];
+  const cfg = (team) => ({ format: 'knockout', courts: ['A'], ...team });
+
+  it('sends teamMatchType=kachinuki for a kachinuki competition, teamMatches still the team size', () => {
+    const body = buildXlsxBody(cfg({ teamSize: 3, teamMatchType: 'kachinuki' }), 'Test', four);
+    expect(body.get('teamMatchType')).toBe('kachinuki');
+    expect(body.get('teamMatches')).toBe('3');
+  });
+
+  it('does NOT send teamMatchType for a fixed-order team competition', () => {
+    const body = buildXlsxBody(cfg({ teamSize: 3, teamMatchType: 'fixed' }), 'Test', four);
+    expect(body.get('teamMatchType')).toBeNull();
+  });
+
+  it('does NOT send teamMatchType for a team competition with no format set', () => {
+    const body = buildXlsxBody(cfg({ teamSize: 3 }), 'Test', four);
+    expect(body.get('teamMatchType')).toBeNull();
+  });
+
+  it('does NOT send teamMatchType for an individual competition', () => {
+    const body = buildXlsxBody(cfg({ teamSize: 0, teamMatchType: 'kachinuki' }), 'Test', four);
+    expect(body.get('teamMatchType')).toBeNull();
+  });
+
+  it('does NOT send teamMatchType for teams of one, too small for kachinuki', () => {
+    const body = buildXlsxBody(cfg({ teamSize: 1, teamMatchType: 'kachinuki' }), 'Test', four);
+    expect(body.get('teamMatchType')).toBeNull();
+  });
+});
+
+// ── tournamentType: the effective format ─────────────────────────────────────
+// A stored "" format is a knockout (state.Competition.EffectiveFormat), and
+// the engine draws it as one, so its blank template must be a knockout too.
+
+describe('buildXlsxBody tournamentType', () => {
+  const four = [player('A', 'D1'), player('B', 'D2'), player('C', 'D3'), player('D', 'D4')];
+
+  it.each([
+    ['', 'knockout'],
+    [undefined, 'knockout'],
+    ['knockout', 'knockout'],
+    ['mixed', 'pools'],
+    ['league', 'pools'],
+  ])('format %j asks for a %s template', (format, type) => {
+    const body = buildXlsxBody({ format, poolSize: 3, poolWinners: 2, courts: ['A'] }, 'Test', four);
+    expect(body.get('tournamentType')).toBe(type);
+  });
+
+  it.each([
+    ['league', 'league'],
+    ['mixed', null],
+    ['knockout', null],
+    ['', null],
+  ])('format %j sends format=%s so only a league draws no knockout', (format, sent) => {
+    const body = buildXlsxBody({ format, poolSize: 3, poolWinners: 2, courts: ['A'] }, 'Test', four);
+    expect(body.get('format')).toBe(sent);
   });
 });
 

@@ -257,14 +257,16 @@ func TestSelfRun_SelfRunMode_CompetitionConfigRoutes_RequireMainPassword(t *test
 		// play, so they stay main-password gated even in self-run mode (mp-i96p).
 		{http.MethodGet, "/api/competitions/some-id/export"},
 		{http.MethodGet, "/api/competitions/some-id/export-results"},
-		// Squad management (bc-tmid): organiser setup, same class as team
-		// lineup PUT/DELETE just above.
+		// Team members (bc-tmid): the read and the name clear stay organiser
+		// setup. Adding and naming a member are public in self-run, because
+		// the public score sheet names fighters through them
+		// (self_run_team_writes_test.go).
 		{http.MethodGet, "/api/competitions/some-id/team-members"},
-		{http.MethodPost, "/api/competitions/some-id/teams/some-team/members"},
-		{http.MethodPut, "/api/competitions/some-id/teams/some-team/members/some-member"},
-		// bc-pnum: clearing a member's name is the operator's "removal",
-		// same class as the PUT just above.
+		// bc-pnum: clearing a member's name is the operator's "removal".
 		{http.MethodDelete, "/api/competitions/some-id/teams/some-team/members/some-member"},
+		// bc-mrgc: a match's write history, held values included, is the
+		// score editors' organiser view; the public page never reads it.
+		{http.MethodGet, "/api/competitions/some-id/matches/some-match/history"},
 	}
 
 	for _, tc := range configRoutes {
@@ -1049,4 +1051,39 @@ func TestSelfRun_RequeueBlockerAndReopenRequiresMainPassword(t *testing.T) {
 	r.ServeHTTP(w, req)
 	assert.Equal(t, http.StatusUnauthorized, w.Code,
 		"requeue-blocker-and-reopen must be main-gated in self-run mode")
+}
+
+// bc-dhas: bulk-score and quick-score write results without the participant
+// score path's self-run rules (the decision allowlist, the finished-match
+// refusal and the representative bout's hantei guard), and quick-score
+// replaces a match's bouts outright. Left public, either would undo all of
+// them, so both are main-gated in self-run mode, like reopen. No page calls
+// either route; organiser tooling sends the password.
+func TestSelfRun_BulkAndQuickScoreRequireMainPassword(t *testing.T) {
+	store := newTempStore(t)
+	seedSelfRunTournament(t, store, "admin-pw")
+	r := setupSelfRunRouter(t, store, NewFileVerifier(store))
+
+	routes := []struct {
+		method, path string
+		body         any
+	}{
+		{http.MethodPost, "/api/competitions/some-comp/matches/bulk-score", []any{}},
+		{http.MethodPut, "/api/competitions/some-comp/matches/m-r1-0/quick-score", map[string]any{"sideA": "A", "sideB": "B", "teamAWins": 1}},
+	}
+	for _, rt := range routes {
+		t.Run(rt.method+" "+rt.path, func(t *testing.T) {
+			req := jsonReq(rt.method, rt.path, rt.body)
+			req.Header.Set("X-Tournament-Password", "")
+			w := httptest.NewRecorder()
+			r.ServeHTTP(w, req)
+			assert.Equal(t, http.StatusUnauthorized, w.Code, "without the password: %s", w.Body.String())
+
+			req = jsonReq(rt.method, rt.path, rt.body)
+			req.Header.Set("X-Tournament-Password", "main-pw")
+			w = httptest.NewRecorder()
+			r.ServeHTTP(w, req)
+			assert.NotEqual(t, http.StatusUnauthorized, w.Code, "the password clears the gate: %s", w.Body.String())
+		})
+	}
 }

@@ -188,7 +188,7 @@ describe('formatIpponsScore', () => {
       expect(formatIpponsScore(['○', '○'], [], null, 'kiken-voluntary', null, false, 'left')).toBe('○○ vs Kiken');
     });
 
-    it('fusensho places a winner-side "Fus." mark, mirroring internal/export/suffix.go SideMarks exactly (bc-tmfn)', () => {
+    it('fusensho places a winner-side "Fus." mark, mirroring domain.SideMarks exactly (bc-tmfn)', () => {
       // The earlier version of this test pinned a deliberate divergence: the
       // Excel export folded fusensho in as a winner-side "Fus." (no badge to
       // carry it there) while this surface omitted it on the theory that "the

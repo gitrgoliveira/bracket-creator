@@ -815,7 +815,10 @@ type ScoreRequest state.MatchResult
 //     standings).
 //   - Decision (T077, FR-031, contracts/match-decisions.md):
 //     value must be one of fought/hikiwake/kiken/fusenpai/fusensho/
-//     daihyosen/kachinuki-exhaustion (or empty).
+//     daihyosen/kachinuki-exhaustion (or empty). kachinuki-exhaustion is
+//     further limited to a kachinuki competition by
+//     refuseKachinukiDecisionForComp, which the handlers run with the
+//     competition loaded.
 //     kiken/fusenpai require decisionBy and a winning-side scoreline
 //     (2-0 in regulation, 1-0 in encho). fusensho is only
 //     valid on a per-bout SubResult, not on a top-level score request.
@@ -1006,6 +1009,62 @@ func (r *ScoreRequest) validateDecision() error {
 		}
 	}
 	return nil
+}
+
+// kachinukiDecisionField names the first place a score payload carries the
+// kachinuki win decision: "decision" at match level, "subResults[i].decision"
+// on a bout row, or "" when it carries none.
+func kachinukiDecisionField(r *state.MatchResult) string {
+	const exhaustion = string(domain.DecisionKachinukiExhaustion)
+	if r.Decision == exhaustion {
+		return "decision"
+	}
+	for i := range r.SubResults {
+		if r.SubResults[i].Decision == exhaustion {
+			return fmt.Sprintf("subResults[%d].decision", i)
+		}
+	}
+	return ""
+}
+
+// refuseKachinukiDecisionForComp is the ONE check that the kachinuki win
+// decision ("kachinuki-exhaustion") is written only to a kachinuki
+// competition. validateDecision allows the value because it has no
+// competition to judge it by; this runs where the competition is known, on
+// both doors that take a client decision: PUT /score (through
+// refuseKachinukiDecision) and bulk-score (with the competition it loads once
+// per batch). POST /decision never accepts the value, and quick-score sends
+// no decision. The value is checked at match level and on every bout row,
+// since a bout row's decision has no allowlist of its own. A nil competition
+// is left to the write, which reports it missing.
+func refuseKachinukiDecisionForComp(comp *state.Competition, r *state.MatchResult) *ValidationError {
+	if comp == nil || comp.IsKachinuki() {
+		return nil
+	}
+	field := kachinukiDecisionField(r)
+	if field == "" {
+		return nil
+	}
+	return &ValidationError{
+		Field:   field,
+		Message: "kachinuki-exhaustion is only for a kachinuki (winner stays on) competition, and this one is not; record the result without it",
+	}
+}
+
+// refuseKachinukiDecision is refuseKachinukiDecisionForComp for PUT /score,
+// which holds no competition record: it loads one only when the payload
+// carries the value, so an ordinary write pays no store read. A load failure
+// is returned as an error (the caller answers 500), never as a refusal that
+// would blame the payload for it.
+func refuseKachinukiDecision(store CompetitionStore, compID string, r *state.MatchResult) (*ValidationError, error) {
+	if kachinukiDecisionField(r) == "" {
+		return nil, nil
+	}
+	comp, err := store.LoadCompetition(compID)
+	if err != nil {
+		return nil, err
+	}
+	return refuseKachinukiDecisionForComp(comp, r), nil
 }
 
 // winningScoreline reports whether exactly one of the two ippon slices
@@ -1263,7 +1322,7 @@ func (r *ScoreRequest) AsMatchResult() *state.MatchResult {
 
 // IsSelfRunReportableDecision reports whether the given decision value is
 // permitted for participant self-reporting in self-run tournaments (i.e.
-// when no valid admin password is present on the request).
+// when the request's password is empty, selfRunAnonymous).
 //
 // Allowed at the top level: "" (none), "fought", "hikiwake". These are
 // factual observations a participant can make without referee authority.
@@ -1272,8 +1331,11 @@ func (r *ScoreRequest) AsMatchResult() *state.MatchResult {
 //
 // Rejected: "kiken-voluntary", "kiken-injury", "fusenpai", "daihyosen",
 // "kachinuki-exhaustion", "fusensho", referee/operator rulings with
-// eligibility side-effects or official designation requirements. Also
-// rejected when decidedByHantei is explicitly true (judges' panel decision).
+// eligibility side-effects or official designation requirements. A
+// match-level "daihyosen" is the /decision ruling; the representative bout
+// itself is a sub-result row a participant may score (see
+// IsSelfRunReportableSubDecision). Also rejected when the hantei mark is
+// present (a judges' decision stays the organiser's).
 func IsSelfRunReportableDecision(decision string, hanteiDecided bool) bool {
 	if hanteiDecided {
 		return false
@@ -1287,16 +1349,21 @@ func IsSelfRunReportableDecision(decision string, hanteiDecided bool) bool {
 }
 
 // IsSelfRunReportableSubDecision validates a sub-bout decision for self-run
-// anonymous callers. Allowed: "" (none), "fought", "hikiwake", "fusensho"
-// (per-bout forfeiture is a factual observation). Rejected: kiken variants,
-// fusenpai, daihyosen, kachinuki-exhaustion, decidedByHantei=true. Also
-// rejects position == -1 (daihyosen representative bout placeholder).
-func IsSelfRunReportableSubDecision(decision string, decidedByHantei bool, position int) bool {
+// anonymous callers. Allowed on a numbered bout: "" (none), "fought",
+// "hikiwake", "fusensho" (per-bout forfeiture is a factual observation). The
+// representative bout (position -1) takes only "" or "daihyosen" (operator
+// decision, bc-dhas): it is sudden death, and a draw or default win recorded
+// on it would decide the encounter (deriveDaihyosenWinner) as the organiser's
+// ruling does. Rejected: kiken variants, fusenpai, kachinuki-exhaustion, and
+// "daihyosen" on a numbered bout. It judges one row's decision and nothing
+// else. A hantei mark on a numbered bout is refused for every caller by
+// validateSubBout, which runs first. Whether the write may carry a representative bout at all
+// and whether a hantei mark on it repeats the organiser's depend on the
+// stored match, so holdSelfReportedWriteUnderTx decides them under the
+// write's lock.
+func IsSelfRunReportableSubDecision(decision string, position int) bool {
 	if position == state.DaihyosenSubPosition {
-		return false
-	}
-	if decidedByHantei {
-		return false
+		return decision == "" || decision == "daihyosen"
 	}
 	switch decision {
 	case "", "fought", "hikiwake", "fusensho":
@@ -1304,6 +1371,17 @@ func IsSelfRunReportableSubDecision(decision string, decidedByHantei bool, posit
 	default:
 		return false
 	}
+}
+
+// sameHanteiVerdict reports whether in carries the verdict stored does: the
+// same winner between the same two sides, with the mark on the same side. The
+// side names count as much as the arrays, because the arrays are positional
+// while the winner is read against the row's names: a row that swaps the names
+// keeps the mark in the same array and hands the verdict to the other team.
+func sameHanteiVerdict(stored, in *state.SubMatchResult) bool {
+	return in.Winner == stored.Winner && in.SideA == stored.SideA && in.SideB == stored.SideB &&
+		domain.ContainsHantei(in.IpponsA) == domain.ContainsHantei(stored.IpponsA) &&
+		domain.ContainsHantei(in.IpponsB) == domain.ContainsHantei(stored.IpponsB)
 }
 
 // validateRemovedCourtsNotInUse refuses a competition court change that would

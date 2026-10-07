@@ -1,0 +1,15 @@
+{
+  "_comment": [
+    "bc-dhas: what a self-run participant is told about the judges' decision",
+    "(hantei) on a representative bout, shared by BOTH places that say it:",
+    "internal/mobileapp/handlers_match.go (repBoutHanteiRefusal, the",
+    "409 hantei_organiser_only message the public page shows as it is) and",
+    "web-mobile/js/admin_scoring_team.jsx (the note under a representative bout",
+    "the judges decided). The participant must read the same words whichever",
+    "side says them. It pins values, not source text. \"recorded\" is both the",
+    "note and the refusal once a hantei is on record; \"notRecorded\" is the",
+    "refusal alone, since the public sheet offers no hantei control to note."
+  ],
+  "recorded": "The judges decided this representative bout (hantei). Ask the tournament organizer to change it.",
+  "notRecorded": "Only the tournament organizer can record a judges' decision (hantei)."
+}

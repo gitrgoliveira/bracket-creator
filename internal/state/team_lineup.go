@@ -17,8 +17,10 @@ package state
 
 import (
 	"fmt"
+	"log"
 	"maps"
 	"os"
+	"slices"
 	"sort"
 
 	"github.com/gitrgoliveira/bracket-creator/internal/domain"
@@ -99,6 +101,24 @@ func (s *Store) LoadTeamLineups(compID string) (map[string]domain.TeamLineup, er
 		return nil, err
 	}
 	return copyTeamLineups(data.(map[string]domain.TeamLineup)), nil
+}
+
+// ReadTeamLineups calls read with the lineups persisted for compID, keyed as
+// LoadTeamLineups keys them, taken from the cache without copying them: a caller
+// that answers with one lineup copies that one instead of all of them. read must
+// not modify the map or any lineup in it, nor keep either after it returns. A
+// write replaces the cached map and never changes one in place, so the map read
+// holds stays whole for as long as it holds it, though a write may have replaced
+// it by then. A missing file is no lineups yet, an empty map.
+func (s *Store) ReadTeamLineups(compID string, read func(lineups map[string]domain.TeamLineup)) error {
+	data, err := s.loadCached(compID, teamLineupFilename, func(path string) (any, error) {
+		return parseTeamLineupsFile(path)
+	})
+	if err != nil {
+		return err
+	}
+	read(data.(map[string]domain.TeamLineup))
+	return nil
 }
 
 // loadTeamLineupsLocked reads the lineup file directly from disk WITHOUT
@@ -190,12 +210,18 @@ func (s *Store) saveTeamLineupsLocked(compID string, lineups map[string]domain.T
 }
 
 // pruneOrphanedTeamLineupsLocked drops lineups.yaml entries for teams no
-// longer present in keepIDs, the lineup sibling of
-// pruneOrphanedTeamMembersLocked in squad.go (bc-tmfn): same trigger (a
-// roster write that already landed), same Kind/TeamSize gate, same
-// best-effort contract (a failure here is logged by the caller, not
-// propagated). Only writes when an entry was actually dropped.
-func (s *Store) pruneOrphanedTeamLineupsLocked(compID string, comp *Competition, keepIDs map[string]bool) error {
+// longer on the roster that was just written, players, whose ids are already
+// minted: the lineup sibling of pruneOrphanedTeamMembersLocked in squad.go
+// (bc-tmfn): same trigger (a roster write that already landed), same Kind/TeamSize
+// gate, same best-effort contract (a failure here is logged by the caller, not
+// propagated). Only writes when an entry was actually dropped or re-keyed.
+//
+// A lineup saved under a team's NAME, which v2.0.0's Lineups page did for a team
+// that had no id yet, belongs to the team this very write has just given an id:
+// it is keyed by that id first, by the rule the round-lineup settlement keys it
+// by (roundLineupSettlement.keyByTeamID), so the write that mints the ids keeps
+// it. One whose name is no team's, or is several teams', is left to the prune.
+func (s *Store) pruneOrphanedTeamLineupsLocked(compID string, comp *Competition, players []domain.Player) error {
 	if comp == nil || (comp.Kind != "team" && comp.TeamSize == 0) {
 		return nil
 	}
@@ -214,9 +240,15 @@ func (s *Store) pruneOrphanedTeamLineupsLocked(compID string, comp *Competition,
 	if len(lineups) == 0 {
 		return nil
 	}
-	changed := false
+	roster := newLineupRoster(players)
+	keyed := roundLineupSettlement{lineups: lineups}
+	keyed.keyByTeamID(roster, false)
+	for _, note := range keyed.notes {
+		log.Printf("state: roster write for %s: %s", compID, note)
+	}
+	changed := keyed.changed
 	for key, l := range lineups {
-		if !keepIDs[l.TeamID] {
+		if !roster.has(l.TeamID) {
 			delete(lineups, key)
 			changed = true
 		}
@@ -297,81 +329,6 @@ func (s *Store) DeleteTeamLineup(compID, teamID string, round int) error {
 	return s.saveTeamLineupsLocked(compID, current, s.directWrite)
 }
 
-// FindBestLineup returns the most relevant lineup for teamID from a pre-loaded
-// lineups map, following the AMENDMENT 1 priority order:
-//  1. Match-scoped entry keyed by matchID (exact match for the specific bout).
-//  2. Round-scoped: the highest round <= maxRound (the current match's round,
-//     e.g. 0 for pool matches, bracket round index for knockout matches).
-//  3. Round-scoped: the highest round overall (fallback when no saved lineup
-//     has round <= maxRound, e.g. operator saved a bracket-phase lineup but the
-//     current match is a pool match, or vice versa).
-//
-// Returns the lineup and true when found, the zero value and false otherwise.
-// Callers should use LoadTeamLineups to obtain the map before calling this.
-func FindBestLineup(lineups map[string]domain.TeamLineup, teamID, matchID string, maxRound int) (domain.TeamLineup, bool) {
-	return FindBestLineupAny(lineups, []string{teamID}, matchID, maxRound)
-}
-
-// FindBestLineupAny is FindBestLineup for a set of candidate team keys.
-// The lineup editor keys lineups by the team PARTICIPANT ID (player.id)
-// while match sides carry the team display NAME, so callers resolving a
-// lineup for a match side must try both keys ("match on id OR name").
-// The AMENDMENT 1 priority tiers apply ACROSS the whole key set: a
-// match-scoped entry under any key beats a round-scoped entry under any
-// key. Within a tier, ties between keys resolve to the first teamID in
-// the slice that has an entry.
-func FindBestLineupAny(lineups map[string]domain.TeamLineup, teamIDs []string, matchID string, maxRound int) (domain.TeamLineup, bool) {
-	// 1. Match-scoped (exact), first key wins.
-	if matchID != "" {
-		for _, teamID := range teamIDs {
-			key := teamLineupMatchKey(teamID, matchID)
-			if l, ok := lineups[key]; ok {
-				return l, true
-			}
-		}
-	}
-	// 2. Round-scoped: highest round <= maxRound.
-	// 3. Round-scoped: highest round overall (AMENDMENT 1 fallback).
-	// Map iteration order is nondeterministic, so ties on Round are broken
-	// by the teamID's position in teamIDs (the documented "first key wins"
-	// priority), keeping selection stable across calls.
-	// Precompute teamID -> rank once (first occurrence wins, matching
-	// slices.Index) so the per-entry rank lookup below is O(1).
-	rankByID := make(map[string]int, len(teamIDs))
-	for i, id := range teamIDs {
-		if _, seen := rankByID[id]; !seen {
-			rankByID[id] = i
-		}
-	}
-	var best, fallback domain.TeamLineup
-	bestRank, fallbackRank := -1, -1
-	hasBest, hasFallback := false, false
-	for _, l := range lineups {
-		if l.MatchID != "" {
-			continue // skip match-scoped entries
-		}
-		rank, ok := rankByID[l.TeamID]
-		if !ok {
-			continue // wrong team
-		}
-		if l.Round <= maxRound {
-			if !hasBest || l.Round > best.Round || (l.Round == best.Round && rank < bestRank) {
-				best, bestRank, hasBest = l, rank, true
-			}
-		}
-		if !hasFallback || l.Round > fallback.Round || (l.Round == fallback.Round && rank < fallbackRank) {
-			fallback, fallbackRank, hasFallback = l, rank, true
-		}
-	}
-	if hasBest {
-		return best, true
-	}
-	if hasFallback {
-		return fallback, true
-	}
-	return domain.TeamLineup{}, false
-}
-
 // DeleteTeamLineupForMatch removes the match-scoped lineup for
 // (teamID, matchID) if present (mp-825). Lineups are always deletable,
 // including while a match is running.
@@ -395,4 +352,83 @@ func (s *Store) DeleteTeamLineupForMatch(compID, teamID, matchID string) error {
 	}
 	delete(current, key)
 	return s.saveTeamLineupsLocked(compID, current, s.directWrite)
+}
+
+// ClearDrawLineups removes what a draw leaves in the lineup state of compID, in
+// one transaction: every match-scoped lineup (the round-scoped ones stay, a
+// team's starting lineup is round 0) and the record of the (team, match) pairs
+// the round-lineup conversion settled (Competition.RoundLineupsGiven). Generating
+// a draw again reuses the match ids, so a lineup left behind for one would become
+// a team's own lineup at the reused id and every later match of the team would
+// carry it, and a pair left in the record would keep the conversion from giving
+// the new draw's match its lineup. A discarded draw calls it, and so does a draw
+// generated from Setup, which may be the retry of one that failed after it wrote
+// its matches.
+//
+// Writes only what changed, and never creates the competition directory (see
+// saveTeamLineupsLocked).
+func (s *Store) ClearDrawLineups(compID string) error {
+	if err := ValidateCompetitionID(compID); err != nil {
+		return err
+	}
+	return s.WithTransaction(compID, func(tx StoreTx) error {
+		write := tx.(*storeTx).txWriteFn()
+		lineups, err := tx.LoadTeamLineups(compID)
+		if err != nil {
+			return err
+		}
+		dropped := false
+		for key, l := range lineups {
+			if l.MatchID != "" {
+				delete(lineups, key)
+				dropped = true
+			}
+		}
+		if dropped {
+			if err := s.saveTeamLineupsLocked(compID, lineups, write); err != nil {
+				return err
+			}
+		}
+		comp, err := tx.LoadCompetition(compID)
+		if err != nil || comp == nil {
+			return err
+		}
+		changed := len(comp.RoundLineupsGiven) > 0
+		comp.RoundLineupsGiven = nil
+		if len(comp.RoundLineupsLegacy) > 0 && s.trimLegacyTeams(compID, comp, lineups) {
+			changed = true
+		}
+		if !changed {
+			return nil
+		}
+		return s.saveCompetitionLocked(comp, write)
+	})
+}
+
+// trimLegacyTeams drops from comp's legacy teams (Competition.RoundLineupsLegacy)
+// those a draw's removal leaves nothing to show: a team that was legacy only for
+// its v2.1.1 match lineups has nothing left to be shown what v2.1.1 showed, since
+// they went with the draw. One with a lineup for a round keeps waiting, since the
+// next draw's matches are given theirs from it. With none left the conversion is
+// done and the marker is set, unless a lineup still waits for a player's id (it
+// would stay name-keyed for good). Reports whether comp changed. A roster that
+// cannot be read leaves the teams as they are: a team that waits for nothing is
+// only kept waiting until the competition is completed. Caller holds the
+// competition's lock.
+func (s *Store) trimLegacyTeams(compID string, comp *Competition, lineups map[string]domain.TeamLineup) bool {
+	players, err := s.loadParticipantsNoLock(compID, comp.EffectiveWithZekkenName(), LoadParticipantsOpts{HasIDs: comp.ParticipantIDsHint()})
+	if err != nil {
+		log.Printf("state: the legacy teams of %s are left as they are after the draw's removal: the roster could not be read: %v", compID, err)
+		return false
+	}
+	roster := newLineupRoster(players)
+	kept := teamsWithRoundLineups(lineups, roster)
+	if slices.Equal(kept, comp.RoundLineupsLegacy) {
+		return false
+	}
+	comp.RoundLineupsLegacy = kept
+	if len(kept) == 0 && !roster.anyAwaitsID(lineups) {
+		comp.RoundLineupsConverted = true
+	}
+	return true
 }

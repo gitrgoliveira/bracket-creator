@@ -1,4 +1,7 @@
 import { describe, it, expect } from 'vitest';
+import { readFileSync } from 'fs';
+import { resolve, dirname } from 'path';
+import { fileURLToPath } from 'url';
 import { mergeCompetitionsIntoTournament, mergeTournamentPatch, normalizeCreatedRecord } from '../admin.jsx';
 
 // /deep-review finding on UI side: AdminApp's async handlers
@@ -341,5 +344,27 @@ describe('normalizeCreatedRecord', () => {
     const created = { id: 'c1', players: null };
     const result = normalizeCreatedRecord(created);
     expect(result).not.toBe(created);
+  });
+});
+
+// The refresh after a write (refreshCompsBestEffort) lives inside AdminApp, so
+// its request is read from source, as score_write_same_tick.test.jsx reads the
+// score chain. A score editor waits on this refresh after every write it makes,
+// the save before a representative-bout add included, so it must be bounded
+// (fetchCompetitions' `bounded`, pinned in clock_offset.test.jsx): one left
+// hanging held the editor and the add for good.
+describe('the refresh after a write is bounded', () => {
+  it('refreshCompsBestEffort asks for the aggregate bounded', () => {
+    const here = dirname(fileURLToPath(import.meta.url));
+    const text = readFileSync(resolve(here, '..', 'admin.jsx'), 'utf8');
+    const at = text.indexOf('const refreshCompsBestEffort = async (');
+    expect(at, 'refreshCompsBestEffort not found in admin.jsx').toBeGreaterThan(0);
+    const body = text.slice(at, text.indexOf('\n  };', at));
+    expect(body).toMatch(/await window\.API\.fetchCompetitions\(\{ bounded: true \}\)/);
+    // What a failure toasts is refreshFailureToast's to say (nothing for a
+    // refresh given up on, pinned with the real request's errors in
+    // clock_offset.test.jsx), so the refresh asks it rather than toasting.
+    expect(body).toMatch(/refreshFailureToast\(actionLabel, e\)/);
+    expect(body).not.toMatch(/showToast\(`\$\{actionLabel\} succeeded/);
   });
 });

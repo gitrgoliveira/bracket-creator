@@ -114,7 +114,7 @@ flowchart TB
         mw["middleware.go<br/>X-Tournament-Password auth · body caps"]
         authsrc["auth_source.go<br/>PasswordVerifier (file | locked/bcrypt)"]
         handlers["handlers_*.go<br/>competition · match · participants · tournament<br/>decision · eligibility · lineup · schedule · reset · auth-config"]
-        hub["hub.go (SSE hub)<br/>seq stamping · 100-event replay ring · resync · heartbeat"]
+        hub["hub.go (SSE hub)<br/>seq stamping · 200-event replay ring · resync · heartbeat"]
         safego["safego.go<br/>panic-safe goroutines"]
         engine["engine adapter"]
         store[("state.Store<br/>WithTransaction + WAL")]

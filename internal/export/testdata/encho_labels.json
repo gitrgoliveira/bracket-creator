@@ -1,10 +1,11 @@
 {
   "_comment": [
     "mp-m4bn: the single source of truth for the overtime marker, shared by",
-    "BOTH language implementations of enchoLabel: internal/export/suffix.go",
-    "(the exported results workbook) and web-mobile/js/bracket.jsx (bracket,",
-    "court console, viewer, TV). internal/export/suffix_test.go table-drives",
-    "the Go side over these cases; web-mobile/js/__tests__/score_display.test.jsx",
+    "BOTH language implementations of the marker: domain.EnchoLabel in",
+    "internal/domain/result_marks.go (the exported workbooks) and enchoLabel in",
+    "web-mobile/js/bracket.jsx (bracket, court console, viewer, TV).",
+    "internal/export/suffix_test.go table-drives the Go side over these cases;",
+    "web-mobile/js/__tests__/score_display.test.jsx",
     "reads this same file and drives the JS side.",
     "",
     "THE CONTRACT: encho is just encho. Any positive periodCount renders the",

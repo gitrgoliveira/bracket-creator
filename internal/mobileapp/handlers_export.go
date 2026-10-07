@@ -34,7 +34,7 @@ func RegisterExportResultsHandlers(r *gin.RouterGroup, store *state.Store, eng *
 			// Swiss (no static bracket) and a stored bracket that no longer
 			// matches the competition's current settings both surface as a
 			// 422, not a 500 -- see respondUnexportableCompetitionError,
-			// shared with the blank-template /export route's handling of the
+			// shared with the stored-draw /export route's handling of the
 			// same two sentinels (handlers_competition.go).
 			if respondUnexportableCompetitionError(c, err) {
 				return

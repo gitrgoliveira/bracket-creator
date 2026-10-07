@@ -55,6 +55,11 @@ await import('./js/ui.jsx');
 let warnSpy, errorSpy;
 
 beforeEach(() => {
+  // The dialog stubs above are one mock each for every test in a file, and a
+  // test's vi.spyOn(window, 'alert') hands back that same mock, so their calls
+  // are cleared here or one test's alert shows up in the next one's assertions.
+  // Only the calls: an implementation a test gave one stays until it changes it.
+  for (const dialog of [global.alert, global.confirm, global.prompt]) dialog.mockClear();
   warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
   errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
 });

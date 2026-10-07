@@ -124,34 +124,23 @@ describe('lineup_resolver: resolveMatchLineup', () => {
     ({ resolveMatchLineup } = await import('../lineup_resolver.jsx'));
   });
 
-  it('returns match-specific lineup when fetchMatchLineup succeeds', async () => {
-    const matchLineup = { positions: { senpo: 'A' } };
-    const fetchers = {
-      fetchMatchLineup: vi.fn().mockResolvedValue(matchLineup),
-      fetchTeamLineup: vi.fn().mockResolvedValue({ positions: { senpo: 'B' } }),
-    };
-    const result = await resolveMatchLineup('c1', 't1', 'm1', 0, fetchers);
-    expect(result).toBe(matchLineup);
-    expect(fetchers.fetchTeamLineup).not.toHaveBeenCalled();
+  it('returns the lineup in force for the team at the match', async () => {
+    const inForce = { positions: { senpo: 'A' }, sourceMatchId: 'm0' };
+    const fetchers = { fetchLineupInForce: vi.fn().mockResolvedValue(inForce) };
+    const result = await resolveMatchLineup('c1', 't1', 'm1', fetchers);
+    expect(result).toBe(inForce);
+    expect(fetchers.fetchLineupInForce).toHaveBeenCalledWith('c1', 't1', 'm1');
   });
 
-  it('falls through to round-based lineup when fetchMatchLineup returns null', async () => {
-    const roundLineup = { positions: { '1': 'C' } };
-    const fetchers = {
-      fetchMatchLineup: vi.fn().mockResolvedValue(null),
-      fetchTeamLineup: vi.fn().mockResolvedValue(roundLineup),
-    };
-    const result = await resolveMatchLineup('c1', 't1', 'm1', 2, fetchers);
-    expect(result).toBe(roundLineup);
-    expect(fetchers.fetchTeamLineup).toHaveBeenCalledWith('c1', 't1', 2, { fallback: true });
+  it('returns null when nothing is in force', async () => {
+    const fetchers = { fetchLineupInForce: vi.fn().mockResolvedValue(null) };
+    const result = await resolveMatchLineup('c1', 't1', 'm1', fetchers);
+    expect(result).toBeNull();
   });
 
-  it('returns null when both fetchers throw/reject', async () => {
-    const fetchers = {
-      fetchMatchLineup: vi.fn().mockRejectedValue(new Error('network')),
-      fetchTeamLineup: vi.fn().mockRejectedValue(new Error('404')),
-    };
-    const result = await resolveMatchLineup('c1', 't1', 'm1', 0, fetchers);
+  it('returns null when the read throws/rejects', async () => {
+    const fetchers = { fetchLineupInForce: vi.fn().mockRejectedValue(new Error('network')) };
+    const result = await resolveMatchLineup('c1', 't1', 'm1', fetchers);
     expect(result).toBeNull();
   });
 });

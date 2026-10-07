@@ -1,13 +1,12 @@
-// lineup_resolver.js: shared helpers for resolving per-match and round-scoped
-// team lineups across all consumer surfaces (admin scoring modal, viewer,
+// lineup_resolver.js: shared helpers for resolving the lineup a team fields at
+// a match across all consumer surfaces (admin scoring modal, viewer,
 // TvDisplay, StreamingOverlay).
 //
 // Do NOT import from admin_lineup.jsx; that module is an admin input panel
 // and may not be loaded on public/viewer surfaces.
 //
 // API shape expected:
-//   API.fetchMatchLineup(compId, teamId, matchId) → lineup | null
-//   API.fetchTeamLineup(compId, teamId, round)    → lineup | null
+//   API.fetchLineupInForce(compId, teamId, matchId) → lineup | null
 //
 // Lineup shape:
 //   { teamId, positions: { [posKey]: playerName }, memberIds: { [posKey]: memberId } }
@@ -17,6 +16,8 @@
 // posKey as `positions`; a lineup saved before squads existed simply omits it.
 
 import { squadMemberLabel, squadSlotLabel } from './squad_member_label.jsx';
+import { scoreRowMatchLabel } from './pool_ids.jsx';
+import { noAnswerSentence } from './write_result.jsx';
 
 // squadRosterEntries: the ONE builder of a lineup picker's list for a team
 // (bc-dnst), shared by the score sheet's per-row picker (admin_scoring_team
@@ -119,6 +120,51 @@ export function memberPlacedElsewhere(memberIds, posKey, id) {
   return hit ? hit[0] : "";
 }
 
+// alreadyPlacedNote: the ONE wording of the refusal memberPlacedElsewhere backs.
+// `name` is the fighter (blank reads "This fighter") and `positionLabel` the
+// position that already holds them, labelled the way the asking editor labels it.
+export function alreadyPlacedNote(name, positionLabel) {
+  return `${String(name ?? "").trim() || "This fighter"} is already at ${positionLabel}.`;
+}
+
+// lineupDuplicateNote: the sentence for a lineup that would field one member at
+// two positions, or "" when it does not. Both editors ask it of the lineup a Save
+// is about to write, so the refusal reads alike and never has to come from the
+// server's own check. `labelOf` words a position key the way the editor labels it;
+// `positionKeys` is the lineup's positions in order, `changed` the ones the operator
+// changed (changedLineupPositions) and `typed` the ones among them that hold a name
+// they typed (the panel's; the Lineups page types none): the note names a position
+// they did not change, else one they picked the member for, else the earlier.
+export function lineupDuplicateNote(positions, memberIds, labelOf, positionKeys, changed, typed = []) {
+  const nameAt = (key) => String(positions?.[key] ?? "").trim();
+  for (const key of positionKeys) {
+    const otherKey = memberPlacedElsewhere(memberIds, key, memberIds?.[key]);
+    if (!otherKey) continue;
+    // `key` is the earlier of the two in position order. The position the operator
+    // changed is the one being refused, so the note names the one of the pair they did
+    // not change, which was already there (the earlier one when neither is theirs).
+    // When both are theirs it names the one they picked the member for, not the box
+    // they typed that member's name into; when both were typed, or both picked, the
+    // earlier one. The fighter is named from the position named, else from the other.
+    const pair = [key, otherKey];
+    const there = pair.find((k) => !changed.includes(k)) ?? pair.find((k) => !typed.includes(k)) ?? key;
+    const here = there === key ? otherKey : key;
+    return alreadyPlacedNote(nameAt(there) || nameAt(here), labelOf(there));
+  }
+  return "";
+}
+
+// changedLineupPositions: the position keys, among `positionKeys`, where
+// `current` differs from `baseline` (both `{ positions, memberIds }` maps keyed
+// by position). A key is changed when its trimmed name or its member id
+// differs; "" and undefined are the same. The one answer to "did the operator
+// edit this side", so a panel writes only a side that changed.
+export function changedLineupPositions(baseline, current, positionKeys) {
+  const name = (side, key) => String(side?.positions?.[key] ?? "").trim();
+  const id = (side, key) => String(side?.memberIds?.[key] ?? "");
+  return positionKeys.filter(key => name(baseline, key) !== name(current, key) || id(baseline, key) !== id(current, key));
+}
+
 export function rosterWithoutPlacedElsewhere(roster, lineup, posKey) {
   const otherNames = new Set(Object.entries(lineup?.positions || {})
     .filter(([key, name]) => key !== posKey && String(name || "").trim())
@@ -144,9 +190,27 @@ export function rosterWithoutPlacedElsewhere(roster, lineup, posKey) {
   });
 }
 
-// mergeLineupIdsForPosition composes the WHOLE memberIds map an inline
-// lineup write sends: carries `existingIds` forward untouched, then either
-// sets `posKey` to `resolvedId` or CLEARS it -- clearing happens both when
+// MEMBER_ALREADY_NAMED: the code a participant's rename of a team member who
+// already has a name is refused with (errMemberAlreadyNamed,
+// internal/mobileapp/handlers_squad.go). The refusal's sentence is the
+// server's; memberRefusalNote is how both paths that name a member (a typed
+// bout-row name, a saved lineup) show it.
+export const MEMBER_ALREADY_NAMED = "member_already_named";
+
+// memberRefusalNote: the sentence a refused team member write adds after the
+// words that say what was not done. For a member who already has a name it is
+// the server's own sentence, as it is, so the participant reads that refusal
+// one way wherever they typed the name; for anything else it is `fallback`.
+// `refusal` is { code, reason }: the thrown Error's code and message, as a
+// resolver failure records them.
+export function memberRefusalNote(refusal, fallback) {
+  return refusal && refusal.code === MEMBER_ALREADY_NAMED && refusal.reason ? refusal.reason : fallback;
+}
+
+// mergeLineupIdsForPosition composes the WHOLE memberIds map of the lineup an
+// inline lineup write leaves behind (the sheet shows it; the save itself
+// carries the one position it changes): carries `existingIds` forward
+// untouched, then either sets `posKey` to `resolvedId` or CLEARS it -- clearing happens both when
 // the operator cleared the position (no name, so nothing to resolve) and
 // when a name was typed/picked but resolution/minting failed (offline venue
 // wifi). Either way a stale id must never survive under a position it no
@@ -163,11 +227,15 @@ export function mergeLineupIdsForPosition(existingIds, posKey, resolvedId) {
 
 // buildInlineLineupWrite computes exactly what the inline lineup picker
 // (submitInlineLineup, inside TeamScoreEditorModal in admin_scoring_team.jsx)
-// sends to putMatchLineup: the WHOLE positions map (existing + the one
-// changed position) and its memberIds counterpart, merged via
-// mergeLineupIdsForPosition above. Exported (and pulled out of the
-// component) so this exact value-in/body-out contract -- including "a mint
-// failure never blocks the write" -- is pinned directly, without mounting
+// writes with putMatchLineup: the one position it changes, `changed: [posKey]`
+// (operator decision 2026-10-07, "Only changed positions": the server puts it on
+// the lineup it holds), and the lineup as it will be, `lineup` (what the sheet
+// holds) with that position changed: the WHOLE positions map and its memberIds
+// counterpart, merged via mergeLineupIdsForPosition above, which the sheet
+// shows while the save is only queued. changedLineupSave (lineup_save.jsx)
+// builds the body from the three. Exported (and pulled out of the component) so
+// this exact value-in/body-out contract -- including "a mint failure never
+// blocks the write" -- is pinned directly, without mounting
 // TeamScoreEditorModal, which vitest's hook stubs cannot drive through a
 // full interaction (see tie_button_no_term.test.jsx). It lives here, not in
 // the scoring module, because it IS the lineup-write authority every other
@@ -255,51 +323,135 @@ export async function buildInlineLineupWrite(compId, teamId, lineup, squad, posK
   }
 
   const memberIds = mergeLineupIdsForPosition(lineup?.memberIds, posKey, resolvedId);
-  return { positions, memberIds, squad: nextSquad, failures };
+  return { positions, memberIds, changed: [posKey], squad: nextSquad, failures };
 }
 
-// resolveMatchLineup: prefer the per-match lineup endpoint (GET
-// match-lineups/:matchId); fall back to the round lineup when no per-match
-// entry exists (404 → null → round lookup). Network errors on either
-// endpoint are swallowed so the caller degrades gracefully.
+// resolveMatchLineup: the lineup a team fields at a match, from ONE read (GET
+// lineup-in-force/:matchId): the match's own lineup, else the one the team
+// carries from its previous match, else its starting lineup. The server owns
+// that rule (engine/lineup_in_force.go); no surface restates it. Nothing in
+// force is null. The lineup says where it was saved: `sourceMatchId` (this
+// match, or an earlier one it is carried from) or `sourceRound` (0, the team's
+// starting lineup).
 //
-// The round step passes { fallback: true }: match-scoring surfaces are the
-// client-side twin of AMENDMENT 1, so when the match's own round has no
-// saved lineup the server resolves the closest saved round instead of 404
-// (operators typically save one round-0 lineup for the whole day; without
-// this, a knockout final at round index 1 got no names and kachinuki bout 1
-// was submitted with empty sides). The lineup EDITOR calls fetchTeamLineup
-// directly without the flag, so its exact + 404 semantics are unchanged.
+// A failed read is swallowed so a display degrades gracefully (null), unless
+// the caller passes { throwOnError: true }: the at-court lineup panel and the
+// Lineups page do, because an editor that failed to read a lineup must not
+// show an empty one and let Save overwrite it.
 //
-// mp-bkg regression guard: the per-match endpoint must win when it returns a
-// non-null result (the whole point of the per-match API). This function is
-// tested directly in scoring_modal_match_lineup.test.jsx.
-export async function resolveMatchLineup(compId, teamId, matchId, round, { fetchMatchLineup, fetchTeamLineup }) {
+// mp-bkg regression guard: a match's own lineup always wins (the server
+// answers it first). This function is tested directly in
+// scoring_modal_match_lineup.test.jsx.
+export async function resolveMatchLineup(compId, teamId, matchId, { fetchLineupInForce }, { throwOnError = false } = {}) {
   try {
-    const matchLineup = await fetchMatchLineup(compId, teamId, matchId);
-    if (matchLineup !== null) return matchLineup;
-  } catch (_e) { /* network: fall through */ }
-  try {
-    return await fetchTeamLineup(compId, teamId, round, { fallback: true });
-  } catch (_e) { /* 404 / network: ignore */ }
+    return await fetchLineupInForce(compId, teamId, matchId);
+  } catch (e) {
+    if (throwOnError) throw e;
+    return null;
+  }
+}
+
+// lineupFields: what a lineup read holds, as the form fields of a lineup editor:
+// the name and the member id of every position in `positionKeys` ("" for a
+// position the lineup leaves vacant, or for no lineup at all).
+export function lineupFields(lineup, positionKeys) {
+  const positions = {};
+  const memberIds = {};
+  positionKeys.forEach(key => {
+    positions[key] = ((lineup && lineup.positions) || {})[key] || "";
+    memberIds[key] = ((lineup && lineup.memberIds) || {})[key] || "";
+  });
+  return { positions, memberIds };
+}
+
+// lineupSourceOf: where a lineup in force was saved, from the fields the
+// server names it by: the match it was saved for (`sourceMatchId`: the match
+// asked about, or an earlier one of the team it is carried from) or the team's
+// starting lineup (`sourceRound`, 0).
+export function lineupSourceOf(lineup) {
+  if (lineup && lineup.sourceMatchId) return { matchId: lineup.sourceMatchId };
+  if (lineup && Number.isInteger(lineup.sourceRound)) return { round: lineup.sourceRound };
   return null;
 }
 
+// isOwnLineup: the lineup shown was saved for THIS match, as against one the
+// match carries from an earlier match or from the starting lineup. The one
+// answer to that question: the label below and the editors' "Use the previous
+// match's lineup" button both ask it.
+export function isOwnLineup(source, matchId) {
+  return !!source && !!matchId && source.matchId === matchId;
+}
+
+// lineupSourceLabel: how a lineup editor says where the lineup it shows comes
+// from (a team carries the lineup of its previous match unless one is entered
+// for the match). A carried lineup names the earlier match as the scores list
+// does (scoreRowMatchLabel), so the operator can find it. `allMatches` is the
+// competition's matches, or a function returning them that is called only when
+// the lineup is carried from another match: a caller that has to build the list
+// pays for it then, not on every render.
+export function lineupSourceLabel(source, matchId, allMatches) {
+  if (!source) return "No lineup saved yet";
+  if (isOwnLineup(source, matchId)) return "Lineup for this match";
+  if (source.matchId) {
+    const list = typeof allMatches === "function" ? allMatches() : allMatches;
+    const from = (list || []).find(m => m.id === source.matchId);
+    return `Same as ${(from && scoreRowMatchLabel(from)) || source.matchId}`;
+  }
+  return "Starting lineup";
+}
+
+// A team's starting lineup is stored as its round-0 entry.
+export const STARTING_ROUND = 0;
+
+// The words both lineup editors (the at-court panel and the Lineups page) use
+// to take a match's own lineup away so the match carries its team's previous
+// one again: the button, the confirm that says what else follows, why the
+// button waits while a save of that lineup is still queued (the save would
+// replay after the removal and bring the lineup back), and what is said when the
+// lineup the match now carries could not be read.
+export const PREVIOUS_LINEUP_LABEL = "Use the previous match's lineup";
+export const SAVE_QUEUED_REASON = "A save of this lineup is still waiting to be sent.";
+export const REMOVED_UNREAD_NOTICE = "Removed. The lineup this match now uses could not be read: try again.";
+
+// What a lineup editor says when the read of a lineup fails. A request that never
+// reached the server rejects with a TypeError, whatever the browser's own text for
+// it ("Failed to fetch" in one, "Load failed" in another), and a bounded request
+// given up on is marked `timedOut`: both are said by one sentence that tells the
+// operator what to do. An answer the server did send is said in its own words,
+// or in the fallback when it carries none.
+export const LINEUP_READ_NO_ANSWER = noAnswerSentence("The lineup could not be read");
+export function lineupReadFailure(error) {
+  if (error instanceof TypeError || (error && error.timedOut)) return LINEUP_READ_NO_ANSWER;
+  return (error && error.message) || "Failed to load lineup";
+}
+
+export function previousLineupConfirm(matchLabel, teamName) {
+  const match = matchLabel || "this match";
+  const team = teamName || "the team";
+  return {
+    message: `Use the lineup ${team} had before ${match}? The lineup entered for ${match} is removed, so ${team} carries the lineup of its previous match, or its starting lineup if this is its first match. Later matches that have no lineup of their own follow too. Unsaved changes here are discarded.`,
+    confirmLabel: "Use previous lineup",
+    cancelLabel: "Cancel",
+  };
+}
+
 // resolveLineupTeamId maps a match-side key to the participant id that
-// lineups are stored under. A match side's `id`, once resolved
-// (api_serializers.resolveSide), is EITHER the participant's real id (a
-// UUID) or "" -- resolveSide never invents an id from the display name.
-// Callers build `sideKey` via sideLookupKey(side) (competitor_identity.jsx),
-// so an unresolved side (id "") still falls through to its NAME here, and
-// TeamLineups are keyed server-side by whatever team key was used when the
-// lineup was saved; in practice, that's the participant's real id. Passing
-// a bare name straight through can make the lineup GET 404 and the
-// per-match (and round) lineup never reaches the scoring grid. We look the
-// side up in the competition's participant list by id OR name and return
-// its real id, falling back to the original key when unmatched.
+// lineups are stored under. A lineup belongs to a team's participant id and the
+// server matches it by that id alone: a side with no id has no lineup. A match
+// side's `id`, once resolved (api_serializers.resolveSide), is EITHER the
+// participant's real id (a UUID) or "" -- resolveSide never invents an id from
+// the display name. Callers build `sideKey` via sideLookupKey(side)
+// (competitor_identity.jsx), so an unresolved side (id "") still falls through
+// to its NAME here, and the name is only a way to FIND the participant: the
+// competition's participant list is searched by id OR name (the client's lookup
+// of a participant row, not how the server matches a lineup) and the
+// participant's real id is returned, which is what the lineup reads then
+// address. When no participant matches, the key comes back as it was: an id the
+// list does not hold still reads its lineup, a bare name reads nothing saved.
 //
 // bc-pnum: callers pass sideLookupKey(side) deliberately -- the name arm
-// recovers a real id for an id-less side. No object overload (YAGNI).
+// recovers the real id of a side the match carries by name alone. No object
+// overload (YAGNI).
 export function resolveLineupTeamId(sideKey, players) {
   if (!sideKey) return "";
   const list = Array.isArray(players) ? players : [];
@@ -314,6 +466,15 @@ export const POS_KEYS_5 = ["senpo", "jiho", "chuken", "fukusho", "taisho"];
 // Title-case labels for display (Senpo, Jiho, ...), derived from POS_KEYS_5.
 // Consumed by admin_scoring_team.jsx and streaming_overlay.jsx (single source).
 export const POS_LABELS_5 = POS_KEYS_5.map((s) => s.charAt(0).toUpperCase() + s.slice(1));
+
+// lineupPositionLabel: how a sentence names a lineup position, by its key: the
+// FIK name for a five-person team's (Senpo, Jiho, ...), else "Position N", which
+// reads on its own outside the rows that show the bare number. The one label every
+// lineup editor and the score sheet put into alreadyPlacedNote.
+export function lineupPositionLabel(posKey) {
+  const i = POS_KEYS_5.indexOf(posKey);
+  return i >= 0 ? POS_LABELS_5[i] : `Position ${posKey}`;
+}
 
 // resolveBoutSideName: which name identifies one side of a sub-bout row.
 // KACHINUKI numbered bouts are SERVER-FIRST: the engine appended the

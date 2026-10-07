@@ -3,19 +3,20 @@
 // (imported from admin_scoring_team.jsx).
 // Extracted from admin_scoring_modal.jsx (mp-zac3).
 
-const { useState: useStateA, useEffect: useEffectA, useRef: useRefA } = React;
+const { useState: useStateA, useEffect: useEffectA, useRef: useRefA, useMemo: useMemoA } = React;
 
 // Leaf module (no side effects): safe to ES-import. The DH label is
 // daihyosen-specific; the rep pickers below stay gated on m.repIsTeam (a "-TB-"
 // tiebreaker is also a rep bout, just not a daihyosen).
 import { isPoolDaihyosenBout } from './pool_ids.jsx';
 import { SideLabel } from './side_cell.jsx';
-import { realIppons, hanteiTied, hanteiSlot, hanteiWinnerKey, sideSlotOrder } from './result_slot.jsx';
+import { realIppons, hanteiTied, hanteiSlot, hanteiWinnerKey, sideSlotOrder, struckIppons } from './result_slot.jsx';
 import { sameCompetitor } from './competitor_identity.jsx';
 // Imported from the leaf, not read off `window`: this editor is ES-imported by
 // its host and by unit tests that never load api_client, and write_result.jsx
 // is import-only so it can be reached directly (see its header).
-import { notLandedBanner } from './write_result.jsx';
+import { notLandedBanner, terminalFailureBanner, notSavedText, writeWasRefused, writeRetryable, decisionWord } from './write_result.jsx';
+import { useArmedConfirm, useOpenedTapGuard, acceptTap, clearTap } from './tap_guard.jsx';
 
 import {
   MAX_IPPONS_PER_SIDE,
@@ -28,32 +29,35 @@ import {
   reconcileFoulsAtOpen,
   TermAS,
   GlossaryHintAS,
-  resolveDecisionPassword,
   makeSubmitDecision,
   decideDrawToggle,
   shouldBlockScoringKeys,
   EnchoControl,
   DecisionPrompt,
-  RemainingMatchesPanel,
   FoulCounter,
   ReasonPrompt,
   CORRECTION_PRESETS,
   useAdoptFromServer,
   sideColorName,
   useMatchReopen,
+  useWithdrawalRemoval,
   ReopenFeedback,
   RecordedWithdrawal,
   withdrawalInForce,
   withdrawnKeyOf,
   WithdrawalMarkedName,
   BarredMatchNotice,
+  HeldWriteDiscard,
+  HeldWriteNotice,
+  useClearPendingWhenNothingHeld,
 } from './admin_scoring_shared.jsx';
 // bc-cse: a SCHEDULED match a competitor is barred from must never offer a
 // Start the server would refuse; isBarredMatch (ineligible_match.jsx) is the
 // one owner of that question.
 import { isBarredMatch } from './ineligible_match.jsx';
 
-import { SyncStatusPill, useDebouncedRunningWrite } from './admin_scoring_autosave.jsx';
+import { SyncStatusPill, useDebouncedRunningWrite, useChangedGroups, useKeptInHistoryNote, KeptInHistoryNote } from './admin_scoring_autosave.jsx';
+import { MatchHistoryDisclosure } from './match_history_view.jsx';
 
 // isKoTieBlocked: import-only, from the team editor's shared module. bc-rawm
 // reuses it here for the SAME tie rule (a knockout match cannot finish with
@@ -61,8 +65,24 @@ import { SyncStatusPill, useDebouncedRunningWrite } from './admin_scoring_autosa
 import { TeamScoreEditorModal, isKoTieBlocked } from './admin_scoring_team.jsx';
 import { EngiScoreEditorModal } from './admin_scoring_engi.jsx';
 
-export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, onAfterDecision, prevMatch, nextMatch, onPrev, onNext, password, selfReport, variant = "modal", canClose = true }) {
-  const m = match;
+export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, onAfterDecision, started = false, prevMatch, nextMatch, onPrev, onNext, password, selfReport, teamMembers, variant = "modal", canClose = true }) {
+  // bc-strt: a match whose start has landed is RUNNING, even while the host's
+  // list still says scheduled (it refetches a moment after each save). The
+  // editors autosave only a match they see as running, so a point struck in
+  // that moment stayed on this board alone, and every other screen showed
+  // 0-0 until the next save. startedFrom is this editor's own Start match;
+  // `started` is the host's (the court console's Up next card). Each names
+  // the scheduled snapshot the start was made from, so the override lasts
+  // only while the feed still shows THAT snapshot: the next one (running, or
+  // a later send back to the queue, which stamps the match) ends it. A
+  // refused start sets neither.
+  const [startedFrom, setStartedFrom] = useStateA(null);
+  const treatAsRunning = match.status === "scheduled"
+    && (started || (startedFrom !== null && startedFrom.at === match.modifiedAt));
+  const m = useMemoA(() => (treatAsRunning ? { ...match, status: "running" } : match), [match, treatAsRunning]);
+  // bc-mrgc: names the groups each write changes, against the match this
+  // editor renders from (see useChangedGroups).
+  const claimChanged = useChangedGroups(m);
   const isComplete = m.status === "completed";
   // Canonical team check (matches admin_pools.jsx and the lineup panel):
   // compKind OR a positive teamSize. A team competition created with only
@@ -161,7 +181,9 @@ export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, on
   const [submitting, setSubmitting] = useStateA(false);
   // F5: pending-write state: set when a terminal submit resolves { queued:true }
   // (offline / transient failure). While pending the modal stays open and shows a
-  // sticky "Not saved yet" banner. Cleared when the queue drains for this match
+  // sticky "Not sent yet" banner (queuedNotice: it holds the queued answer, which
+  // says whether the browser could store the write; `true` when only known to be
+  // pending). Cleared when the queue drains for this match
   // (subscribeSyncStatus + hasPendingTerminalWrite). pendingFn holds the last
   // terminal submit closure so "Retry now" can re-invoke it directly.
   const [pendingWrite, setPendingWrite] = useStateA(false);
@@ -181,16 +203,20 @@ export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, on
   const isEngi = !!m.compEngi;
   // T093–T098: decision (kiken/fusenpai) prompt state. promptKind is
   // "" | "kiken-voluntary" | "kiken-injury" | "fusenpai"; when non-empty the inline prompt replaces the
-  // bottom controls. After the POST /decision succeeds, withdrawnPlayer holds
-  // the side that lost so the "Remaining matches" panel can render below.
+  // bottom controls.
   const [decisionPromptKind, setDecisionPromptKind] = useStateA("");
   const [decisionSubmitting, setDecisionSubmitting] = useStateA(false);
   const [decisionErr, setDecisionErr] = useStateA("");
-  const [withdrawnPlayer, setWithdrawnPlayer] = useStateA(null);
-  // Audit reason collected when correcting a completed match. showCorrectionPrompt
-  // gates the ReasonPrompt overlay; correctionReason carries the confirmed string.
+  // Audit reason collected when correcting a completed match. correctionPrompt
+  // is the open ReasonPrompt (null when closed); correctionReason carries the
+  // confirmed string. bc-htcr: the prompt holds the write it confirms, handed
+  // the reason. A null action is the default correction (Save correction,
+  // Enter: the buildPatch("completed") write); submitHantei passes its own,
+  // because a hantei verdict is not a buildPatch write. Wrapped in an object:
+  // a bare function handed to a state setter would run as an updater.
   const [correctionReason, setCorrectionReason] = useStateA("");
-  const [showCorrectionPrompt, setShowCorrectionPrompt] = useStateA(false);
+  const [correctionPrompt, setCorrectionPrompt] = useStateA(null);
+  const askCorrectionReason = (action = null) => setCorrectionPrompt({ action });
   // mp-62vr: for a team daihyosen/tiebreaker rep bout the sides are TEAM names;
   // the operator picks which player each team fields from its roster. repPlayerA
   // = Aka (sideA), repPlayerB = Shiro (sideB). Only rendered when m.repIsTeam.
@@ -205,9 +231,24 @@ export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, on
   // it does NOT protect is a mount-time value that has since been CHANGED
   // elsewhere: "an explicit value in result always wins", so this editor would
   // put its stale name back. That is the case this closes.
+  //
+  // A pick the operator made stands until the server holds it. Each pick is
+  // saved as it is made (markScoringDirty in the pickers), so the save of one
+  // pick coming back must not undo a second pick made before it arrived. One
+  // adopt per side, so a pick still being saved on one side does not stop the
+  // other side following the server. An empty pick never counts as unsaved:
+  // the server keeps a name over "", so it would read unsaved forever.
   useAdoptFromServer({
-    signature: JSON.stringify([m.repPlayerA || "", m.repPlayerB || ""]),
-    apply: () => { setRepPlayerA(m.repPlayerA || ""); setRepPlayerB(m.repPlayerB || ""); },
+    signature: m.repPlayerA || "",
+    apply: () => setRepPlayerA(m.repPlayerA || ""),
+    keepLocalEdits: true,
+    isDirty: repPlayerA !== "" && repPlayerA !== (m.repPlayerA || ""),
+  });
+  useAdoptFromServer({
+    signature: m.repPlayerB || "",
+    apply: () => setRepPlayerB(m.repPlayerB || ""),
+    keepLocalEdits: true,
+    isDirty: repPlayerB !== "" && repPlayerB !== (m.repPlayerB || ""),
   });
   // doSubmit's setSubmitting(false) in finally fires post-await; if the
   // parent unmounts the modal during the in-flight save (e.g.
@@ -223,11 +264,15 @@ export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, on
   const _autosaveIsRunningRef = useRefA(false);
   const _autosaveBuildPatchRef = useRefA(null);
   const _autosaveOnSubmitRef = useRefA(null);
-  const { markDirty: markScoringDirty, cancelDebounce: cancelScoringDebounce, flushPending: flushScoringAutosave } = useDebouncedRunningWrite({
+  const _autosaveSeenStampRef = useRefA(0);
+  // bc-mrgc: what a write applied only in part kept in the match's history.
+  const keptInHistory = useKeptInHistoryNote();
+  const { markDirty: markScoringDirty, cancelDebounce: cancelScoringDebounce } = useDebouncedRunningWrite({
     isRunningRef: _autosaveIsRunningRef,
     buildPatchRef: _autosaveBuildPatchRef,
     onSubmitRef: _autosaveOnSubmitRef,
-    mountedRef,
+    onWriteResult: keptInHistory.noteFromWrite,
+    seenStampRef: _autosaveSeenStampRef,
   });
 
   useEffectA(() => {
@@ -245,23 +290,25 @@ export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, on
   // - decisionBy is "shiro" or "aka" per the server contract.
   // - encho rides along when the operator has marked overtime so the server
   //   can attach the periodCount metadata to the resulting MatchResult.
-  // - On success we close the modal (matching the Save button contract) UNLESS
-  //   the decision is kiken: in that case we keep the modal open and surface
-  //   the RemainingMatchesPanel so the operator can chain default-win awards.
+  // - On success we close the modal (matching the Save button contract),
+  //   unless the host provides onAfterDecision and this isn't a correction,
+  //   in which case we advance to the next match instead (item 7). Kiken
+  //   follows this exact rule too now (operator ruling 2026-09-26):
+  //   recording a withdrawal changes only the match it was recorded on.
   // - T103/CHK024: when the server replies 409 decision_locked (the
   //   prior kiken on this match can't be safely overwritten because a
   //   subsequent match for either side has started), prompt the
   //   operator to confirm and re-send with force=true.
   // Shared factory (admin_scoring_shared.jsx): the individual + team modals had
   // byte-identical copies; "competitors" is the only per-modal wording.
-  // Item 7: a non-kiken decision (fusenpai) routes through onAfterDecision when
-  // the host page provides it (and this isn't a correction) so the court
-  // advances to the next match: mirroring the Finish + Start Next flow. Hantei
-  // advance is handled separately in submitHantei below. Kiken keeps the modal
-  // open for RemainingMatchesPanel regardless.
+  // Item 7: a decision (fusenpai, kiken, or any future non-points decision)
+  // routes through onAfterDecision when the host page provides it (and this
+  // isn't a correction) so the court advances to the next match: mirroring
+  // the Finish + Start Next flow. Hantei advance is handled separately in
+  // submitHantei below.
   const submitDecision = makeSubmitDecision({
     match: m, enchoPeriodCount, password, mountedRef,
-    setDecisionSubmitting, setDecisionErr, setWithdrawnPlayer, setDecisionPromptKind,
+    setDecisionSubmitting, setDecisionErr, setDecisionPromptKind,
     onClose, onAfterDecision, isComplete, entityLabel: "competitors",
     // F5: thread pending-write handles so the factory can show the sticky banner
     // when the decision write is only queued (offline / transient failure).
@@ -269,9 +316,11 @@ export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, on
   });
   // bc-tmfn: Clear withdrawal and reopen, the same door and component the team
   // editor uses (RecordedWithdrawal / useMatchReopen, admin_scoring_shared.jsx).
-  // A correction here keeps a recorded withdrawal (it has no way to state a
-  // decision), so removing one recorded by mistake is a reopen: the match goes
-  // back to running with the letters the withdrawing side struck. The editor
+  // A plain correction here keeps a recorded withdrawal (it has no way to
+  // state a decision). Removing one recorded by mistake is either Remove
+  // withdrawal (below: one save, the match stays finished) or a reopen: the
+  // match goes back to running with the letters the withdrawing side struck,
+  // for a match that still has fighting left in it. On a reopen the editor
   // STAYS OPEN and follows the match to running in place, so
   // the operator scores the rest here, as the consequence text tells them,
   // and the ReopenFeedback in the footer can still show what else the reopen
@@ -288,8 +337,35 @@ export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, on
   // bout, so it cannot be the side that withdrew (and the server refuses the
   // 2-2 that two letters against two maru would make). "" when no withdrawal
   // is in force, or the ruling does not say who withdrew.
-  const withdrawnKey = recordedWithdrawal ? withdrawnKeyOf(m) : "";
-  const lockedKey = withdrawnKey === "a" ? "b" : withdrawnKey === "b" ? "a" : "";
+  //
+  // Remove withdrawal (operator ruling 2026-10-03: a fix must leave the match
+  // resolved) lifts all of that in THIS editor: the ruling is no longer kept,
+  // so both sides take ordinary entry and Save correction sends the real
+  // result with clearWithdrawal, which replaces the ruling on the server.
+  // Nothing is sent until then. recordedLockedKey is the SERVER's ruling and
+  // is what the re-seed below watches; lockedKey is what the board obeys.
+  // The removal itself, and when it ends, is useWithdrawalRemoval's: Remove
+  // takes the winner's default-win maru off (struckIppons keeps whatever
+  // either side actually struck, the withdrawer's letters included) and the
+  // board takes ordinary entry; Undo, or the ruling moving under a pending
+  // removal, puts the recorded result back, ruling, maru and locks alike.
+  const {
+    removing: removingWithdrawal, rulingShown, removal: withdrawalRemoval,
+    patchBlock: clearWithdrawalBlock,
+  } = useWithdrawalRemoval({
+    match: m,
+    enabled: true,
+    held: pendingWrite,
+    onRemove: () => { setAPts((p) => struckIppons(p)); setBPts((p) => struckIppons(p)); },
+    // The recorded verdict comes back too: a hantei armed during the removal
+    // would otherwise outlive the tie it was armed on (the circles return,
+    // the hantei row and its Cancel go, and every control stays disabled).
+    onUndo: () => { applyServerScore(); setDecidedByHantei(hanteiRecorded); },
+  });
+  const recordedWithdrawnKey = recordedWithdrawal ? withdrawnKeyOf(m) : "";
+  const recordedLockedKey = recordedWithdrawnKey === "a" ? "b" : recordedWithdrawnKey === "b" ? "a" : "";
+  const withdrawnKey = rulingShown ? recordedWithdrawnKey : "";
+  const lockedKey = rulingShown ? recordedLockedKey : "";
   const sideCap = (side) => (side === lockedKey ? 0 : lockedKey ? MAX_IPPONS_PER_SIDE - 1 : MAX_IPPONS_PER_SIDE);
 
   // Hansoku Hs are now physically present in the opponent's pts array
@@ -303,6 +379,16 @@ export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, on
   const aTotal = realIppons(aPts).length;
   const bTotal = realIppons(bPts).length;
 
+  // bc-dtip: a bouncing thumb recorded M M from one tap. The ippon BUTTONS
+  // ignore a repeat pointer tap on the same side within TAP_BOUNCE_MS (two
+  // real ippon calls can never arrive that close); the guard sits at the
+  // button, not in addPt, so the keyboard shortcuts stay direct. Keyed by
+  // side: a bounce can land on the same side's neighbouring letter, while the
+  // other side's button is a different action.
+  const ipponTapRef = useRefA(null);
+  const tapIppon = (ev, side, letter) => {
+    if (acceptTap(ipponTapRef, ev, side)) addPt(side, letter);
+  };
   const addPt = (side, letter) => {
     // No-op when the side is already at the 2-ippon max: don't mark dirty or
     // schedule an autosave PUT / SSE fan-out for a tap that changes nothing.
@@ -332,6 +418,8 @@ export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, on
     const cur = side === "a" ? aPts : bPts;
     if (cur[idx] === undefined) return; // fast no-op path: don't mark dirty / autosave
     if (side === lockedKey) return; // the recorded default-win maru is not the operator's to remove
+    // Taking a mark back off, then tapping the right letter, is never a bounce.
+    clearTap(ipponTapRef, side);
     if (side === "a") setAPts((p) => p.filter((_, i) => i !== idx));
     else setBPts((p) => p.filter((_, i) => i !== idx));
     markScoringDirty(); // C1
@@ -341,6 +429,10 @@ export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, on
   // to non-"reset" patches. periodCount=0 means "no overtime"; emitting the
   // field as undefined keeps the wire payload clean (omitempty server-side).
   const enchoBlock = () => enchoPeriodCount > 0 ? { encho: { periodCount: enchoPeriodCount } } : {};
+  // An operator change to the overtime count: the value (a number, or the
+  // updater EnchoControl's stepper hands over), then the save it schedules, as
+  // for a point. The count adopted from the server does not come through here.
+  const changeEnchoPeriodCount = (v) => { setEnchoPeriodCount(v); markScoringDirty(); };
   // decidedByHantei is only set via the dedicated submitHantei path
   // (SHIRO/AKA hantei buttons). The regular Finish/Enter buildPatch
   // explicitly clears the flag (sends false) when the match was previously
@@ -360,7 +452,11 @@ export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, on
   // them on empty server-side, so an unset dropdown won't wipe a prior pick.
   const repBlock = m.repIsTeam ? { repPlayerA, repPlayerB } : {};
 
-  const buildPatch = (targetStatus) => {
+  // bc-mrgc: every patch this editor hands its host names the groups it
+  // changes (useChangedGroups), and `extra` (a correction reason given at
+  // the prompt) is part of the write those groups are worked out from.
+  const buildPatch = (targetStatus, extra) => claimChanged({ ...buildPatchFields(targetStatus), ...extra });
+  const buildPatchFields = (targetStatus) => {
     const fouls = { a: aFouls, b: bFouls };
     if (targetStatus === "scheduled") return { winner: null, status: "scheduled", score: null, ipponsA: [], ipponsB: [], hansokuA: 0, hansokuB: 0, ...hanteiClear, ...repBlock };
     if (targetStatus === "running") return {
@@ -371,7 +467,12 @@ export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, on
       ...enchoBlock(), ...hanteiClear, ...repBlock,
     };
     const correctionBlock = isComplete && correctionReason ? { correctionReason } : {};
-    if (isDrawToggled) return { winner: null, ipponsA: [], ipponsB: [], hansokuA: aFouls, hansokuB: bFouls, status: "completed", score: { type: "hikiwake", winnerPts: 0, loserPts: 0, fouls, corrected: isComplete }, ...enchoBlock(), ...hanteiClear, ...correctionBlock, ...repBlock };
+    // What every completed shape below ends with, built once so a new shape
+    // cannot leave part of it out. clearWithdrawalBlock rides only here: the
+    // running and scheduled shapes never carry it (the server reads it on a
+    // completed correction alone).
+    const completedTail = { ...enchoBlock(), ...hanteiClear, ...correctionBlock, ...clearWithdrawalBlock, ...repBlock };
+    if (isDrawToggled) return { winner: null, ipponsA: [], ipponsB: [], hansokuA: aFouls, hansokuB: bFouls, status: "completed", score: { type: "hikiwake", winnerPts: 0, loserPts: 0, fouls, corrected: isComplete }, ...completedTail };
     // ippon. Hansoku Hs are already physically present in the pts arrays
     // (folded in by applyFoulIncrement at the 2-foul boundary), so no
     // additional H fold is needed here.
@@ -380,14 +481,15 @@ export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, on
     const aFinal = aLetters.slice(0, MAX_IPPONS_PER_SIDE);
     const bFinal = bLetters.slice(0, MAX_IPPONS_PER_SIDE);
     const winnerSide = aFinal.length > bFinal.length ? "a" : bFinal.length > aFinal.length ? "b" : null;
-    if (!winnerSide) return { winner: null, ipponsA: aFinal, ipponsB: bFinal, hansokuA: aFouls, hansokuB: bFouls, status: "completed", score: { type: "hikiwake", winnerPts: 0, loserPts: 0, fouls, corrected: isComplete }, ...enchoBlock(), ...hanteiClear, ...correctionBlock, ...repBlock };
+    if (!winnerSide) return { winner: null, ipponsA: aFinal, ipponsB: bFinal, hansokuA: aFouls, hansokuB: bFouls, status: "completed", score: { type: "hikiwake", winnerPts: 0, loserPts: 0, fouls, corrected: isComplete }, ...completedTail };
     const winner = winnerSide === "a" ? m.sideA : m.sideB;
     const ippons = winnerSide === "a" ? aFinal : bFinal;
-    return { winner, ipponsA: aFinal, ipponsB: bFinal, hansokuA: aFouls, hansokuB: bFouls, status: "completed", score: { type: "ippon", winnerPts: ippons.length, loserPts: (winnerSide === "a" ? bFinal : aFinal).length, ippons, fouls, corrected: isComplete }, ...enchoBlock(), ...hanteiClear, ...correctionBlock, ...repBlock };
+    return { winner, ipponsA: aFinal, ipponsB: bFinal, hansokuA: aFouls, hansokuB: bFouls, status: "completed", score: { type: "ippon", winnerPts: ippons.length, loserPts: (winnerSide === "a" ? bFinal : aFinal).length, ippons, fouls, corrected: isComplete }, ...completedTail };
   };
   // C1: keep autosave refs fresh with the latest buildPatch / onSubmit /
   // running-status so the debounce callback never reads a stale closure.
   _autosaveIsRunningRef.current = m.status === "running";
+  _autosaveSeenStampRef.current = m.modifiedAt || 0;
   _autosaveBuildPatchRef.current = buildPatch;
   _autosaveOnSubmitRef.current = onSubmit;
 
@@ -415,9 +517,24 @@ export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, on
       status: "completed",
       ...enchoBlock(),
       decidedByHantei: true,
+      // A hantei is a real result too: after Remove withdrawal it replaces
+      // the ruling exactly as Save correction's own write does.
+      ...clearWithdrawalBlock,
     };
+    // bc-htcr: a hantei verdict on a completed match is a correction like
+    // any other, so it carries the audit reason the server requires, and
+    // asks for one first when none has been given, exactly as Save
+    // correction does. Without this the write was refused and the wrong
+    // verdict stood, with no other way to change it (Save correction is off
+    // while the hantei is set).
+    if (isComplete && !correctionReason) {
+      askCorrectionReason((r) => doSubmit(() => onSubmit(claimChanged({ ...patch, correctionReason: r }))));
+      return undefined;
+    }
+    if (isComplete) patch.correctionReason = correctionReason;
     const submitFn = (!isComplete && onSubmitAndNext) ? onSubmitAndNext : onSubmit;
-    return doSubmit(() => submitFn(patch));
+    const claimed = claimChanged(patch);
+    return doSubmit(() => submitFn(claimed));
   };
 
   const doSubmit = async (fn) => {
@@ -431,12 +548,17 @@ export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, on
     } finally {
       if (mountedRef.current) setSubmitting(false);
     }
+    keptInHistory.noteFromWrite(res);
+    // A refused write disarms Finish (writeWasRefused): left armed, one tap
+    // re-sent the write just refused. A queued one stays armed.
+    if (writeWasRefused(res) && mountedRef.current) setFinishArmed(false);
     // F5: if the terminal write was only queued (offline / transient), do NOT
     // close or advance. Instead enter pending-write mode: show the sticky banner
-    // and remember the submit closure so "Retry now" can re-invoke it.
-    if (res && res.queued) {
+    // and remember the submit closure so "Retry now" can re-invoke it. Only a
+    // queued write is worth re-sending (writeRetryable).
+    if (writeRetryable(res)) {
       if (mountedRef.current) {
-        setPendingWrite(true);
+        setPendingWrite(res);
         pendingFnRef.current = fn;
       }
     }
@@ -456,27 +578,18 @@ export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, on
     }
   }, [m.compId, m.id]);
 
-  // F5: subscribe to sync-status so the pending-write banner auto-clears once
-  // the queue drains for this match. Mounted once; reads match identity via
-  // closure. Uses mountedRef guard so setState never fires after unmount.
-  useEffectA(() => {
-    if (!m.compId || !m.id) return;
-    // Guard the window globals: in unit/render tests (and during boot ordering)
-    // subscribeSyncStatus / API can be absent: mirror SyncStatusPill's guard so
-    // the modal never throws on mount.
-    if (typeof window.subscribeSyncStatus !== 'function') return;
-    const unsub = window.subscribeSyncStatus((status) => {
-      if (!mountedRef.current) return;
-      const stillPending = (window.API && typeof window.API.hasPendingTerminalWrite === 'function')
-        ? window.API.hasPendingTerminalWrite(m.compId, m.id)
-        : false;
-      if (status === 'synced' && !stillPending) {
-        setPendingWrite(false);
-        pendingFnRef.current = null;
-      }
-    });
-    return unsub;
-  }, [m.compId, m.id]);
+  // F5: the pending-write banner goes once this device holds no write for the
+  // match: landed, or discarded here or from the topbar's list.
+  // bc-cse (operator ruling 2026-10-05): a discarded held write disarms the
+  // two-tap commit too, so a discarded result is not one tap from being sent
+  // again. The same function serves the editor's own Discard and the hook's
+  // edge for a discard made elsewhere.
+  const dropHeldWrite = () => {
+    setPendingWrite(false);
+    pendingFnRef.current = null;
+    setFinishArmed(false);
+  };
+  useClearPendingWhenNothingHeld(m.compId, m.id, pendingWrite, dropHeldWrite);
 
   // F5: surface a PERMANENT terminal-write failure (non-retryable 4xx on a queued
   // retry) as an explicit "not saved" state: otherwise the write is silently
@@ -487,7 +600,7 @@ export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, on
     const unsub = window.subscribeTerminalWriteFailed((info) => {
       if (!mountedRef.current) return;
       if (!info || info.compID !== m.compId || info.matchID !== m.id) return;
-      setWriteFailed({ reason: info.reason || `save rejected (${info.status || 'error'})`, advice: info.advice });
+      setWriteFailed(terminalFailureBanner(info));
       setPendingWrite(false); // the queued write is gone: it failed, not pending
       // DISARM the finish confirmation. The submit that just failed left the
       // button in its "Tap again to finish" state, so the operator was one tap
@@ -520,15 +633,13 @@ export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, on
   // site is below isDirty, which is what it needs.
   //
   // Be precise about what happens if they then save over a newer result.
-  // Timestamp last-write-wins (mp-y3nk) now covers EVERY match, pool and
-  // knockout alike, through engine.applyMatchWrite: a write stamped older than
-  // the stored result is dropped, so an editor that sat through an outage
-  // cannot bury a result recorded meanwhile. That is a floor, not a resolution
-  // protocol. Concurrent editors are still deliberately last-write-wins
-  // (handlers_match.go says so), the guard only orders writes that carry
-  // stamps, and the `stale: true` response covers a narrower case again (a
-  // lower Rev from the SAME session, or a running write arriving after
-  // completion).
+  // The server's merge (bc-mrgc, engine.mergeMatchWrite) covers EVERY match,
+  // pool and knockout alike: a change stamped older than the stored change to
+  // the same thing is not applied but kept in the match's history, so an
+  // editor that sat through an outage cannot bury a result recorded
+  // meanwhile. That is a floor, not a resolution protocol. Concurrent editors
+  // still order by stamp per group, and a lower Rev from the SAME session is
+  // held in the history as an older revision of that board.
   //
   // So this re-seed is still doing the load-bearing work: it removes the
   // ARTIFICIAL conflicts, where an editor holding a mount-time snapshot wrote
@@ -583,6 +694,9 @@ export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, on
     // The winner's slots while a recorded withdrawal is in force: the maru
     // shows, read-only (see lockedKey).
     const locked = s.key === lockedKey;
+    // bc-cse: names the recorded decision -- "default win" does not exist
+    // in kendo and must never appear here (operator ruling 2026-10-04).
+    const decisionNoun = decisionWord(m.decision) || "decision";
     return sideSlotOrder(s.color).map((i, ordinal) => {
       const isHt = htSlot === i;
       // The spoken ordinal counts in READING order (ordinal), not by the
@@ -598,8 +712,8 @@ export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, on
           className={`sb-slot ${(isHt || s.pts[i]) ? "sb-slot--filled" : ""}`}
           onClick={() => removePt(s.key, i)}
           disabled={decidedByHantei || locked}
-          title={locked ? "Default win recorded with the withdrawal" : decidedByHantei ? (hanteiRecorded ? "Locked: hantei already recorded" : "Hantei armed: choose a winner above, or cancel") : "Click to remove"}
-          aria-label={`${sideColorName(s.color)} slot ${ordinal + 1}: ${isHt ? "Ht" : (s.pts[i] ? (locked ? `${s.pts[i]}, default win` : `remove ${s.pts[i]}`) : "empty")}`}
+          title={locked ? `${decisionNoun.charAt(0).toUpperCase()}${decisionNoun.slice(1)} recorded` : decidedByHantei ? (hanteiRecorded ? "Locked: hantei already recorded" : "Hantei armed: choose a winner above, or cancel") : "Click to remove"}
+          aria-label={`${sideColorName(s.color)} slot ${ordinal + 1}: ${isHt ? "Ht" : (s.pts[i] ? (locked ? `${s.pts[i]}, ${decisionNoun}` : `remove ${s.pts[i]}`) : "empty")}`}
         >
           {isHt ? "Ht" : (s.pts[i] || "\u00b7")}
         </button>
@@ -678,7 +792,11 @@ export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, on
   const hasPointsOrDraw = isDrawToggled || aTotal > 0 || bTotal > 0;
   const koTieBlocked = !decidedByHantei && m.status !== "scheduled" && hasPointsOrDraw &&
     isKoTieBlocked({ isKnockoutPhase, teamWinner: individualWinner, isComplete: false });
-  const KO_TIE_REASON = "Needs a winner: fight encho, then record hantei if still tied.";
+  // A participant on the public self-run page cannot record a hantei (see the
+  // decision place below), so it points them at the organizer instead.
+  const KO_TIE_REASON = selfReport
+    ? "Needs a winner: fight encho, then ask the organizer for a hantei if still tied."
+    : "Needs a winner: fight encho, then record hantei if still tied.";
   const canFinish = !decidedByHantei && !koTieBlocked && hasPointsOrDraw;
 
   // Finish guard (see TeamScoreEditorModal): one tap ARMS the button — its label
@@ -688,7 +806,9 @@ export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, on
   // confirmed. Keyboard Enter stays direct (deliberate, not an accidental tablet
   // brush). The result itself is verified from the score slots above, not the
   // button; a lossy "SHIRO WIN 1–0" caption is not a check.
-  const [finishArmed, setFinishArmed] = useStateA(false);
+  // bc-dtfn: the arm-then-confirm guard with a dwell, so the bounce of the
+  // arming tap cannot commit (tap_guard.jsx).
+  const { armed: finishArmed, setArmed: setFinishArmed, confirm: confirmFinish } = useArmedConfirm();
   useEffectA(() => { setFinishArmed(false); }, [aTotal, bTotal, isDrawToggled]);
 
   // "Has the OPERATOR changed anything", which gates the discard prompt — so
@@ -698,22 +818,16 @@ export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, on
   // is not an unsaved change of theirs, and prompting "discard unsaved scoring
   // changes?" on an editor nobody touched trains operators to dismiss the one
   // prompt that protects real work.
-  //
-  // scoringDirty is what closing a RUNNING match may flush (bc-dscn): isDirty
-  // without the hantei ARM, which is a mode rather than a result. Flushing on
-  // an arm alone would send a freshly stamped write with an unchanged
-  // scoreline, which could win last-write-wins over another device's older
-  // queued result. Withdrawing a RECORDED verdict is a result, not the arm,
-  // and buildPatch carries it (hanteiClear), so that term stays.
-  const scoringDirty =
+  const isDirty =
     !window.arraysEqual(aPts, initialAPts) ||
     !window.arraysEqual(bPts, initialBPts) ||
     aFouls !== initialAFouls ||
     bFouls !== initialBFouls ||
     isDrawToggled !== initialIsDrawToggled ||
     enchoPeriodCount !== initialEnchoPeriods ||
-    (hanteiRecorded && !decidedByHantei);
-  const isDirty = scoringDirty || decidedByHantei !== hanteiRecorded;
+    decidedByHantei !== hanteiRecorded ||
+    // A removed withdrawal is unsaved until Save correction sends it.
+    removingWithdrawal;
   // The scoreline half of the same rule, declared HERE because the hook needs
   // isDirty: it reads the value from the render BEFORE the server change (see
   // useAdoptFromServer). It self-corrects: a re-seed makes the next render's
@@ -732,37 +846,49 @@ export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, on
   // autosave onto a match with no withdrawal left to explain them. This is
   // not the peer disagreement keepLocalEdits protects; the operator's own
   // reopen moved the server, so the board re-seeds from it.
-  const lockedKeyRef = useRefA(lockedKey);
+  // Keyed on the SERVER's ruling (recordedLockedKey), never on the board's
+  // lockedKey: Remove withdrawal unlocks the board locally, and re-seeding on
+  // that would put the default-win maru straight back. A ruling that moves
+  // under the board also ends a removal made against the old one, through
+  // useWithdrawalRemoval's own reset (above).
+  const lockedKeyRef = useRefA(recordedLockedKey);
   useEffectA(() => {
-    if (lockedKeyRef.current === lockedKey) return;
-    lockedKeyRef.current = lockedKey;
+    if (lockedKeyRef.current === recordedLockedKey) return;
+    lockedKeyRef.current = recordedLockedKey;
     applyServerScore();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [lockedKey]);
-  const handleDismiss = async () => {
-    // Don't close while any save/decision request is in flight: letting
+  }, [recordedLockedKey]);
+  // leaveEditor: every way out of the editor that is not a write, Close and
+  // Prev/Next alike (operator ruling 2026-09-27: Prev/Next ask as Close does).
+  const leaveEditor = async (go) => {
+    // Don't leave while any save/decision request is in flight: letting
     // the modal unmount would orphan the pending fetch and lose the
     // setState landing.
     if (submitting || decisionSubmitting) return;
-    // bc-dscn: a host that cannot close (the inline court console) has nothing
-    // to discard INTO, so it never prompts either.
-    if (!canClose) return;
-    // bc-dscn: on a RUNNING match every scoring edit is autosaved, so closing
-    // discards nothing: save any edit still inside the debounce window now and
-    // close without asking. Two local states are NOT in buildPatch("running")
-    // and so are not saved by it: the hantei ARM, which is only a mode (the
-    // verdict is committed by the side buttons, submitHantei) and is dropped
-    // with no write (scoringDirty excludes it), and the hikiwake toggle, which
-    // is a result the operator entered; that one keeps the prompt below,
-    // because closing would lose it.
+    // bc-dscn: on a RUNNING match every scoring edit is autosaved, and the
+    // unmount writes one still inside the debounce window
+    // (useDebouncedRunningWrite), so leaving discards nothing and asks
+    // nothing. Two local states are NOT in buildPatch("running"): the hantei
+    // ARM, which is only a mode (the verdict is committed by the side buttons,
+    // submitHantei) and is dropped with no write (it never marks dirty), and
+    // the hikiwake toggle, which is a result the operator entered; that one
+    // keeps the prompt below, because leaving would lose it.
     if (m.status === "running" && isDrawToggled === initialIsDrawToggled) {
-      if (scoringDirty) flushScoringAutosave();
-      onClose();
+      go();
       return;
     }
     if (isDirty && !(await window.confirmDialog({ message: "Discard unsaved scoring changes?", confirmLabel: "Discard changes", danger: true }))) return;
-    onClose();
+    // Discarded: the unmount must not write the edit the operator threw away.
+    cancelScoringDebounce();
+    go();
   };
+  // bc-dscn: a host that cannot close (the inline court console) has nothing
+  // to discard INTO, so it never prompts either.
+  const handleDismiss = () => (canClose ? leaveEditor(onClose) : undefined);
+  // bc-cfbd: the bounce of the tap that opened the overlay must not dismiss it.
+  const { openedRef, onClickCapture } = useOpenedTapGuard({ backdropOnly: true });
+  const goPrev = () => leaveEditor(onPrev);
+  const goNext = () => leaveEditor(onNext);
 
   // Keyboard shortcuts:
   //   Shift+M/K/D/T/H  → award point to AKA (red, sideA)
@@ -776,7 +902,7 @@ export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, on
   // Scoring shortcuts (Enter/M/K/D/T/H/X, plus S in Naginata) are skipped when any interactive
   // element (input, button, link, …) has focus so native activation still works.
   const kbRef = React.useRef(null);
-  kbRef.current = { delegated: isTeam || isEngi, submitting, canFinish, isDrawToggled, isKnockoutPhase, aTotal, bTotal, handleDismiss, canClose, onPrev, onNext, prevMatch, nextMatch, onSubmit, onSubmitAndNext, buildPatch, addPt, doSubmit, isNaginata, decidedByHantei, isComplete, correctionReason, setShowCorrectionPrompt, markScoringDirty, cancelScoringDebounce };
+  kbRef.current = { delegated: isTeam || isEngi, submitting, canFinish, isDrawToggled, isKnockoutPhase, aTotal, bTotal, handleDismiss, canClose, onPrev, onNext, goPrev, goNext, prevMatch, nextMatch, onSubmit, onSubmitAndNext, buildPatch, addPt, doSubmit, isNaginata, decidedByHantei, isComplete, correctionReason, askCorrectionReason, markScoringDirty, cancelScoringDebounce };
 
   useEffectA(() => {
     const onKeyDown = (ev) => {
@@ -803,8 +929,8 @@ export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, on
         // wires onPrev/onNext unconditionally, and with no neighbour they
         // call scoreKeyOf(null), which throws. Same condition as the nav
         // buttons and the shortcut hint's hasNav.
-        if (ev.key === "ArrowLeft" && s.onPrev && s.prevMatch) { ev.preventDefault(); s.onPrev(); return; }
-        if (ev.key === "ArrowRight" && s.onNext && s.nextMatch) { ev.preventDefault(); s.onNext(); return; }
+        if (ev.key === "ArrowLeft" && s.onPrev && s.prevMatch) { ev.preventDefault(); s.goPrev(); return; }
+        if (ev.key === "ArrowRight" && s.onNext && s.nextMatch) { ev.preventDefault(); s.goNext(); return; }
       }
 
       // Scoring shortcuts blocked when any interactive element has focus
@@ -813,7 +939,7 @@ export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, on
       if (ev.key === "Enter" && s.canFinish) {
         ev.preventDefault();
         if (s.isComplete && !s.correctionReason) {
-          s.setShowCorrectionPrompt(true);
+          s.askCorrectionReason();
           return;
         }
         const patch = s.buildPatch("completed");
@@ -860,11 +986,11 @@ export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, on
   // editor is shown from the first render with no kendo-editor flash.
   // The team check is skipped for engi (engi is never a team).
   if (isEngi) {
-    return <EngiScoreEditorModal match={m} onClose={onClose} onSubmit={onSubmit} onSubmitAndNext={onSubmitAndNext} prevMatch={prevMatch} nextMatch={nextMatch} onPrev={onPrev} onNext={onNext} variant={variant} canClose={canClose} />;
+    return <EngiScoreEditorModal match={m} onClose={onClose} onSubmit={onSubmit} onSubmitAndNext={onSubmitAndNext} prevMatch={prevMatch} nextMatch={nextMatch} onPrev={onPrev} onNext={onNext} variant={variant} canClose={canClose} password={password} selfReport={selfReport} />;
   }
   // Team routing: forward to TeamScoreEditorModal.
   if (isTeam) {
-    return <TeamScoreEditorModal match={m} teamSize={teamSize} onClose={onClose} onSubmit={onSubmit} onSubmitAndNext={onSubmitAndNext} onAfterDecision={onAfterDecision} prevMatch={prevMatch} nextMatch={nextMatch} onPrev={onPrev} onNext={onNext} password={password} selfReport={selfReport} variant={variant} canClose={canClose} />;
+    return <TeamScoreEditorModal match={m} teamSize={teamSize} onClose={onClose} onSubmit={onSubmit} onSubmitAndNext={onSubmitAndNext} onAfterDecision={onAfterDecision} onStartLanded={() => setStartedFrom({ at: match.modifiedAt })} prevMatch={prevMatch} nextMatch={nextMatch} onPrev={onPrev} onNext={onNext} password={password} selfReport={selfReport} teamMembers={teamMembers} variant={variant} canClose={canClose} />;
   }
 
   // a11y: label the dialog with the match/court context so screen readers
@@ -917,7 +1043,9 @@ export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, on
           {/* mp-62vr: rep-player pickers for a team daihyosen/tiebreaker rep
               bout. The sides are TEAM names; the operator records which player
               each team fields, picked from that team's roster. Shiro = sideB,
-              Aka = sideA, matching the scoreboard's colour assignment. */}
+              Aka = sideA, matching the scoreboard's colour assignment. A pick
+              rides every running write (repBlock), so it is saved like a
+              point, not held until the next one. */}
           {m.repIsTeam && (
             <div data-testid="rep-bout-picker" className="rep-bout-picker" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 14 }}>
               <label style={{ display: "flex", flexDirection: "column", gap: 4, fontSize: 12, fontWeight: 700, color: "var(--ink-2)" }}>
@@ -927,7 +1055,7 @@ export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, on
                   className="input"
                   value={repPlayerB}
                   disabled={submitting}
-                  onChange={(e) => setRepPlayerB(e.target.value)}
+                  onChange={(e) => { setRepPlayerB(e.target.value); markScoringDirty(); }}
                   style={{ padding: "6px 8px", fontSize: 14 }}
                 >
                   <option value="">Select player</option>
@@ -941,7 +1069,7 @@ export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, on
                   className="input"
                   value={repPlayerA}
                   disabled={submitting}
-                  onChange={(e) => setRepPlayerA(e.target.value)}
+                  onChange={(e) => { setRepPlayerA(e.target.value); markScoringDirty(); }}
                   style={{ padding: "6px 8px", fontSize: 14 }}
                 >
                   <option value="">Select player</option>
@@ -972,11 +1100,11 @@ export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, on
                           withdrawal's Kiken/Fus. rides beside the withdrawn
                           competitor (WithdrawalMarkedName, bc-kcsh). */}
                       <div className="sb-name">
-                        <WithdrawalMarkedName match={m} sideKey={s.key} side={s.color} name={s.name} number={s.number} />
+                        <WithdrawalMarkedName match={m} sideKey={s.key} side={s.color} name={s.name} number={s.number} rulingShown={rulingShown} />
                       </div>
                       <div className="sb-points-grid">
                         {getIpponButtons(isNaginata).map((cc) => (
-                          <button key={cc} className={`ipt-btn ${cc === "H" ? "ipt-btn--h" : ""}`} onClick={() => addPt(s.key, cc)} disabled={boutDecided || decidedByHantei || s.key === lockedKey}>{cc}</button>
+                          <button key={cc} className={`ipt-btn ${cc === "H" ? "ipt-btn--h" : ""}`} onClick={(ev) => tapIppon(ev, s.key, cc)} disabled={boutDecided || decidedByHantei || s.key === lockedKey}>{cc}</button>
                         ))}
                       </div>
                     </div>
@@ -1059,7 +1187,7 @@ export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, on
           <div className="encho-center">
             <EnchoControl
               enchoPeriodCount={enchoPeriodCount}
-              setEnchoPeriodCount={setEnchoPeriodCount}
+              setEnchoPeriodCount={changeEnchoPeriodCount}
             />
           </div>
 
@@ -1071,12 +1199,13 @@ export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, on
           {/* T093–T098: decision place. The judges'-decision (hantei) affordance
               forms the TOP row whenever the scoreline is tied; the withdrawal/
               forfeit controls (kiken/fusenpai/fusensho) form the BOTTOM row.
-              Hantei keeps its own tied-scoreline condition so it still surfaces
-              in self-report mode, where the admin-only controls below are hidden.
+              Neither row is offered in self-report mode: a hantei and a
+              withdrawal stay the organiser's, and the server refuses both from
+              a participant (bc-dhas).
               Sits between the scoring board and the footer so the flow is: enter
-              score OR record a decision → either way the modal closes (or
-              surfaces the remaining-matches list for kiken). */}
-          {(aTotal === bTotal || (!withdrawnPlayer && !decisionPromptKind && !selfReport)) && (
+              score OR record a decision, either way the modal closes or
+              advances, same as any other decision. */}
+          {!selfReport && (aTotal === bTotal || !decisionPromptKind) && (
             <div className="decision-controls decision-controls--stacked" style={{ marginTop: 12, fontSize: 12 }}>
               <span className="decision-controls__label" style={{ color: "var(--ink-3)", fontWeight: 600 }}>Decision:</span>
               {/* A tied match may be decided by referee hantei. The winner is
@@ -1150,7 +1279,7 @@ export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, on
                   )}
                 </div>
               )}
-              {!withdrawnPlayer && !decisionPromptKind && !selfReport && (
+              {!decisionPromptKind && (
                 <div className="decision-controls__group">
                   <div className="decision-btn-group">
                     <button data-testid="scoring-modal-kiken-voluntary-button" type="button" className="btn btn--sm" onClick={() => { setDecisionErr(""); setDecisionPromptKind("kiken-voluntary"); }} disabled={submitting || decisionSubmitting}>
@@ -1185,8 +1314,11 @@ export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, on
           )}
           {/* Correcting a match a withdrawal ended: what is recorded, and the
               way to remove it when it was a wrong entry. */}
-          {recordedWithdrawal && !decisionPromptKind && !withdrawnPlayer && !selfReport && (
-            <RecordedWithdrawal match={m} ctl={reopenCtl} disabled={submitting || decisionSubmitting} singleBout />
+          {recordedWithdrawal && !decisionPromptKind && !selfReport && (
+            <RecordedWithdrawal
+              match={m} ctl={reopenCtl} disabled={submitting || decisionSubmitting} singleBout
+              removal={withdrawalRemoval}
+            />
           )}
           {decisionErr && (
             <div style={{ color: "var(--danger)", fontSize: 12, marginTop: 6 }}>{decisionErr}</div>
@@ -1203,38 +1335,32 @@ export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, on
               onSubmit={({ decisionBy, decisionReason }) => submitDecision(decisionPromptKind, { decisionBy, decisionReason })}
             />
           )}
-          {withdrawnPlayer && (
-            <RemainingMatchesPanel
-              compID={m.compId}
-              password={resolveDecisionPassword(password)}
-              withdrawnPlayer={withdrawnPlayer}
-              onAwarded={() => { /* stay open; operator decides when to close */ }}
-              onClose={() => { setWithdrawnPlayer(null); onClose(); }}
-            />
-          )}
-
         </div>
 
         {/* Sticky navigation + action footer */}
         <div className="editor-modal__foot editor-modal__foot--nav">
           {/* Audit reason prompt: shown when correcting a completed match.
               Operator must confirm a reason before the patch is submitted. */}
-          {isComplete && showCorrectionPrompt && (
+          {isComplete && correctionPrompt && (
             <ReasonPrompt
               label="Reason for correction"
               presets={CORRECTION_PRESETS}
               submitting={submitting}
               onConfirm={(r) => {
                 setCorrectionReason(r);
-                setShowCorrectionPrompt(false);
+                setCorrectionPrompt(null);
+                // A write that asked for this reason (the hantei buttons)
+                // runs itself; otherwise it is the default correction.
+                const { action } = correctionPrompt;
+                if (action) { action(r); return; }
                 // Re-trigger submit with the now-populated reason.
                 // buildPatch reads correctionReason from state, but state
                 // updates are async: pass r inline via a local override
                 // so the patch is correct on the very first submit.
-                const patch = { ...buildPatch("completed"), correctionReason: r };
+                const patch = buildPatch("completed", { correctionReason: r });
                 doSubmit(() => onSubmit(patch));
               }}
-              onCancel={() => setShowCorrectionPrompt(false)}
+              onCancel={() => setCorrectionPrompt(null)}
             />
           )}
           {/* What Clear withdrawal and reopen came back with: the notice
@@ -1243,35 +1369,26 @@ export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, on
               RecordedWithdrawal, which unmounts the moment the match is
               running again (the team editor places its copy the same way). */}
           <ReopenFeedback ctl={reopenCtl} testIdPrefix="withdrawal-reopen" />
-          {/* F5: PERMANENT-failure banner: a queued terminal write was rejected
-              (non-retryable 4xx) and dropped, so it never saved. Non-dismissible
-              danger state; the operator must re-enter and submit again. Takes
-              precedence over the (now-cleared) pending banner. */}
+          {/* F5: PERMANENT-failure banner: the write was refused (superseded,
+              refused for the clock, or a 4xx on a queued replay), so it never
+              saved. Non-dismissible danger state. No Retry (writeRetryable
+              says why); the banner says what to do instead. Takes precedence over the
+              (now-cleared) pending banner. */}
           {writeFailed && (
             <div className="pending-write-banner pending-write-banner--failed" role="alert" aria-live="assertive">
-              <span>Not saved: {writeFailed.reason}. {writeFailed.advice || "Re-enter the result and submit again."}</span>
-              {/* Only offer Retry when we still hold the submit closure. After a
-                  reopen/hydration it can't be recovered from the serialized queue,
-                  so a Retry button would be permanently disabled and misleading: 
-                  the banner text already tells the operator to re-enter. */}
-              {pendingFnRef.current && (
-                <button
-                  type="button"
-                  className="btn btn--sm"
-                  disabled={submitting}
-                  onClick={() => doSubmit(pendingFnRef.current)}
-                >
-                  Retry
-                </button>
-              )}
+              <span>{notSavedText(writeFailed)}</span>
             </div>
           )}
+          <KeptInHistoryNote note={keptInHistory.note} />
+          {/* bc-mrgc: every write that reached this match, kept or applied.
+              The organiser's view, so not on a self-run participant's sheet. */}
+          <MatchHistoryDisclosure match={m} password={password} hidden={!!selfReport} />
           {/* F5: pending-write banner: shown when a terminal submit was only queued
               (offline / transient failure). The write is durable in localStorage
               and will be retried automatically. Operator may still dismiss. */}
           {pendingWrite && !writeFailed && (
             <div className="pending-write-banner" role="status" aria-live="polite">
-              <span>Not saved yet: will keep retrying until it lands.</span>
+              <HeldWriteNotice compId={m.compId} matchId={m.id} res={pendingWrite} />
               {/* Only show Retry when we hold the submit closure. On a hydrated
                   re-open it can't be restored from the serialized queue: but the
                   queue still auto-retries in the background, so no button is fine. */}
@@ -1285,6 +1402,12 @@ export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, on
                   Retry now
                 </button>
               )}
+              <HeldWriteDiscard
+                compId={m.compId}
+                matchId={m.id}
+                disabled={submitting}
+                onDiscarded={dropHeldWrite}
+              />
             </div>
           )}
           {/* bc-cse: a barred match cannot be started as scheduled -- the
@@ -1303,10 +1426,10 @@ export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, on
               row: hide the footer's own nav+actions so the operator never sees
               two Cancels and two commit buttons at the highest-stakes moment
               (amending a recorded result). Mirrored in EngiScoreEditorModal. */}
-          {!(isComplete && showCorrectionPrompt) && (
+          {!(isComplete && correctionPrompt) && (
           <div className="score-nav">
             {prevMatch ? (
-              <button className="btn btn--sm score-nav__prev" onClick={onPrev} disabled={submitting} title={prevMatch.sideA?.name + " vs " + prevMatch.sideB?.name}>← Prev</button>
+              <button className="btn btn--sm score-nav__prev" onClick={goPrev} disabled={submitting} title={prevMatch.sideA?.name + " vs " + prevMatch.sideB?.name}>← Prev</button>
             ) : <span />}
 
             <div className="score-nav__actions">
@@ -1320,29 +1443,34 @@ export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, on
                   // button having saved nothing. Check the awaited result
                   // directly instead of relying on the broadcast.
                   const res = await doSubmit(() => onSubmit(buildPatch("running")));
+                  // A refused start (the court is busy, a competitor is
+                  // withdrawn) stored nothing: the host reported it and
+                  // returns nothing, so the match must not read as started.
+                  if (!res) return;
                   // bc-cse: which not-saved banner, if any. The clock-vs-
                   // supersede ordering (and the silence on a queued write)
                   // lives in notLandedBanner; see write_result.jsx.
                   const banner = notLandedBanner(res);
                   if (banner) setWriteFailed(banner);
+                  else setStartedFrom({ at: match.modifiedAt });
                 }} disabled={submitting}>
                   Start match
                 </button>
               )}
               {canClose && <button className="btn" onClick={handleDismiss} disabled={submitting}>Cancel</button>}
               {onSubmitAndNext ? (
-                <button className={`btn btn--primary ${finishArmed && !isComplete ? "btn--confirm" : ""}`} onClick={() => {
-                  if (isComplete && !correctionReason) { setShowCorrectionPrompt(true); return; }
-                  if (!isComplete && !finishArmed) { setFinishArmed(true); return; }
+                <button className={`btn btn--primary ${finishArmed && !isComplete ? "btn--confirm" : ""}`} onClick={(ev) => {
+                  if (isComplete && !correctionReason) { askCorrectionReason(); return; }
+                  if (!isComplete && !confirmFinish(ev)) return;
                   doSubmit(() => (isComplete ? onSubmit : onSubmitAndNext)(buildPatch("completed")));
                 }} disabled={submitting || !canFinish}
                   title={koTieBlocked ? KO_TIE_REASON : undefined}>
                   {submitting ? "Saving…" : koTieBlocked ? "Needs a winner" : isComplete ? "Save correction" : finishArmed ? "Tap again to finish →" : "Finish + Start Next →"}
                 </button>
               ) : (
-                <button className={`btn btn--primary ${finishArmed && !isComplete ? "btn--confirm" : ""}`} onClick={() => {
-                  if (isComplete && !correctionReason) { setShowCorrectionPrompt(true); return; }
-                  if (!isComplete && !finishArmed) { setFinishArmed(true); return; }
+                <button className={`btn btn--primary ${finishArmed && !isComplete ? "btn--confirm" : ""}`} onClick={(ev) => {
+                  if (isComplete && !correctionReason) { askCorrectionReason(); return; }
+                  if (!isComplete && !confirmFinish(ev)) return;
                   doSubmit(() => onSubmit(buildPatch("completed")));
                 }} disabled={submitting || !canFinish}
                   title={koTieBlocked ? KO_TIE_REASON : undefined}>
@@ -1352,7 +1480,7 @@ export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, on
             </div>
 
             {nextMatch ? (
-              <button className="btn btn--sm score-nav__next" onClick={onNext} disabled={submitting} title={nextMatch.sideA?.name + " vs " + nextMatch.sideB?.name}>Next →</button>
+              <button className="btn btn--sm score-nav__next" onClick={goNext} disabled={submitting} title={nextMatch.sideA?.name + " vs " + nextMatch.sideB?.name}>Next →</button>
             ) : <span />}
           </div>
           )}
@@ -1377,7 +1505,7 @@ export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, on
   }
 
   return (
-    <div className="modal-backdrop" data-testid="scoring-modal-root" onClick={handleDismiss}>
+    <div className="modal-backdrop" data-testid="scoring-modal-root" ref={openedRef} onClickCapture={onClickCapture} onClick={handleDismiss}>
       <div className="editor-modal editor-modal--lg editor-modal--compact" role="dialog" aria-modal="true" aria-label={dialogLabel} onClick={(e) => e.stopPropagation()}>
         {inner}
       </div>

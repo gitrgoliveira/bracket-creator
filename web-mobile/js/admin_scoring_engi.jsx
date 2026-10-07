@@ -13,18 +13,23 @@
 // modal/inline wrapper, editor-modal__head/body/foot, ReasonPrompt-gated
 // corrections, Escape-to-close with a dirty-state confirm) so an operator
 // moving between a kendo and an Engi match on the same court sees one
-// consistent editor, not two different products. Engi has no live/"running"
-// scoring phase (flags are entered all at once, no autosave), so it skips
-// the kendo editor's PRE-MATCH pill, keyboard scoring shortcuts, and
-// SyncStatusPill: those concepts don't apply here.
+// consistent editor, not two different products. While the match is running
+// the flags are saved as they are entered (operator ruling 2026-09-26), through
+// the same debounced running write and SyncStatusPill the kendo editors use, so
+// a match sent back to the queue or switched away from keeps them. It skips
+// the kendo editor's PRE-MATCH pill and keyboard scoring shortcuts.
 
 const { useState: useStateE, useEffect: useEffectE, useRef: useRefE } = React;
 
-import { ReasonPrompt, CORRECTION_PRESETS, useAdoptFromServer } from './admin_scoring_shared.jsx';
+import { ReasonPrompt, CORRECTION_PRESETS, useAdoptFromServer, HeldWriteDiscard, HeldWriteNotice, useClearPendingWhenNothingHeld } from './admin_scoring_shared.jsx';
+import { SyncStatusPill, useDebouncedRunningWrite, useChangedGroups, useKeptInHistoryNote, KeptInHistoryNote } from './admin_scoring_autosave.jsx';
+import { MatchHistoryDisclosure } from './match_history_view.jsx';
 import { useEscapeToClose, confirmDialog } from './ui.jsx';
 // NumberedName: single owner of the number-chip-on-the-outer-side rule.
 import { NumberedName } from './numbered_name.jsx';
 import { SideCell } from './side_cell.jsx';
+import { useArmedConfirm, useOpenedTapGuard } from './tap_guard.jsx';
+import { terminalFailureBanner, notSavedText, writeWasRefused, writeRetryable } from './write_result.jsx';
 
 const MAX_FLAGS = 5;
 // Valid totals: 1, 3, 5 (odd, guarantees a winner).
@@ -87,8 +92,11 @@ function deriveWinner(flagsA, flagsB) {
 // EngiScoreEditorModal: full engi flag-counter editor.
 // Props mirror the individual ScoreEditorModal surface so the dispatch in
 // admin_scoring_individual.jsx can forward the same prop bag.
-export function EngiScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, prevMatch, nextMatch, onPrev, onNext, variant = "modal", canClose = true }) {
+export function EngiScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, prevMatch, nextMatch, onPrev, onNext, variant = "modal", canClose = true, password, selfReport }) {
   const m = match;
+  // bc-mrgc: names the groups each write changes, against the match this
+  // editor renders from (see useChangedGroups).
+  const claimChanged = useChangedGroups(m);
   const isComplete = m.status === "completed";
   const initialFlagsA = m.flagsA || 0;
   const initialFlagsB = m.flagsB || 0;
@@ -97,7 +105,7 @@ export function EngiScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext
   const [submitting, setSubmitting] = useStateE(false);
   const [err, setErr] = useStateE("");
   // Audit reason collected when correcting a completed match, mirroring
-  // ScoreEditorModal's showCorrectionPrompt/correctionReason pair.
+  // ScoreEditorModal's correctionPrompt/correctionReason pair.
   const [correctionReason, setCorrectionReason] = useStateE("");
   const [showCorrectionPrompt, setShowCorrectionPrompt] = useStateE(false);
 
@@ -107,6 +115,7 @@ export function EngiScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext
   // Wi-Fi must never lose an engi result.
   const mountedRef = useRefE(true);
   useEffectE(() => () => { mountedRef.current = false; }, []);
+  // Holds the queued answer, false when nothing is pending (queuedNotice).
   const [pendingWrite, setPendingWrite] = useStateE(false);
   // Holds the last submit closure so the banner's "Retry now" can re-invoke it
   // (a closure, not a bare payload, so a queued Finish+Next retries the same
@@ -114,6 +123,37 @@ export function EngiScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext
   // but the closure can't be recovered from the serialized queue, so Retry hides).
   const pendingFnRef = useRefE(null);
   const [writeFailed, setWriteFailed] = useStateE(null); // { reason, advice? } | null
+
+  // Flags saved as they are entered while the match is running: the refs are
+  // refreshed every render (below) so the debounce never reads a stale closure.
+  const autosaveIsRunningRef = useRefE(false);
+  const autosaveBuildPatchRef = useRefE(null);
+  const autosaveOnSubmitRef = useRefE(null);
+  const autosaveSeenStampRef = useRefE(0);
+  // bc-mrgc: what a write applied only in part kept in the match's history.
+  const keptInHistory = useKeptInHistoryNote();
+  const { markDirty, cancelDebounce } = useDebouncedRunningWrite({
+    isRunningRef: autosaveIsRunningRef,
+    buildPatchRef: autosaveBuildPatchRef,
+    onSubmitRef: autosaveOnSubmitRef,
+    onWriteResult: keptInHistory.noteFromWrite,
+    seenStampRef: autosaveSeenStampRef,
+  });
+  autosaveIsRunningRef.current = m.status === "running";
+  autosaveSeenStampRef.current = m.modifiedAt || 0;
+  autosaveBuildPatchRef.current = (status) => claimChanged({ flagsA, flagsB, status });
+  autosaveOnSubmitRef.current = onSubmit;
+  // An operator change to either count: the value, then the save it schedules.
+  // A count adopted from the server does not come through here. A key pressed
+  // at a bound (a/s at MAX_FLAGS, Backspace at 0; the buttons are disabled
+  // there) changes nothing, so it must not write either: a running write
+  // stamped now can beat another device's older queued result (bc-rvfx).
+  const changeFlags = (side, n) => {
+    const next = clamp(n);
+    if (next === (side === "a" ? flagsA : flagsB)) return;
+    (side === "a" ? setFlagsA : setFlagsB)(next);
+    markDirty();
+  };
 
   const total = flagsA + flagsB;
   const isValidTotal = VALID_TOTALS.has(total);
@@ -134,10 +174,9 @@ export function EngiScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext
   // there is no per-row seam to merge along. An operator with unsaved flags
   // keeps all of them.
   //
-  // No autosave here (flags are entered in one go), which makes the window
-  // WIDER than the kendo editors', not narrower: nothing this editor holds
-  // reaches the server until the operator submits, so a stale reading can sit
-  // in front of them for as long as the match is open.
+  // Until the match is running nothing this editor holds reaches the server
+  // before the operator submits, so a stale reading can sit in front of them
+  // for as long as the match is open.
   useAdoptFromServer({
     signature: `${initialFlagsA}:${initialFlagsB}`,
     apply: () => { setFlagsA(initialFlagsA); setFlagsB(initialFlagsB); },
@@ -145,12 +184,26 @@ export function EngiScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext
     isDirty,
   });
 
-  const handleDismiss = async () => {
+  // Every way out that is not a write, Close and Prev/Next alike (operator
+  // ruling 2026-09-27: Prev/Next ask as Close does).
+  const leaveEditor = async (go) => {
     if (submitting) return;
+    // A running match's flags are saved as entered, and the unmount writes a
+    // change still inside the autosave window, so there is nothing to discard.
+    if (m.status === "running") {
+      go();
+      return;
+    }
+    // Not running, so nothing is autosaved and nothing waits to be written.
     if (isDirty && !(await confirmDialog({ message: "Discard unsaved scoring changes?", confirmLabel: "Discard changes", danger: true }))) return;
-    onClose();
+    go();
   };
+  const handleDismiss = () => leaveEditor(onClose);
   useEscapeToClose(canClose ? handleDismiss : undefined);
+  // bc-cfbd: the bounce of the tap that opened the overlay must not dismiss it.
+  const { openedRef, onClickCapture } = useOpenedTapGuard({ backdropOnly: true });
+  const goPrev = () => leaveEditor(onPrev);
+  const goNext = () => leaveEditor(onNext);
 
   // Pair names: the side's name holds both members combined ("Name 1 - Name 2");
   // split so member 2 renders under member 1. Both sides of an engi match are
@@ -172,6 +225,7 @@ export function EngiScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext
   // doSubmit takes a submit CLOSURE (like ScoreEditorModal) so the caller picks
   // onSubmit vs onSubmitAndNext; F5 retry re-invokes the same closure.
   const doSubmit = async (fn) => {
+    cancelDebounce(); // the explicit save supersedes a pending autosave
     setSubmitting(true);
     setErr("");
     // Clear any prior pending/failed state when the operator explicitly retries.
@@ -183,15 +237,26 @@ export function EngiScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext
       if (mountedRef.current) { setErr(e?.message || "Save failed"); setSubmitting(false); }
       return;
     }
+    keptInHistory.noteFromWrite(res);
+    // A refused save (writeWasRefused: the host reported it and handed back
+    // nothing, or superseded / clock_skew) re-enables the controls and
+    // disarms Save: left armed, one tap re-sent the write just refused. It
+    // used to leave `submitting` set, so Save read "Saving…" and stayed
+    // disabled for good.
+    if (writeWasRefused(res)) {
+      if (mountedRef.current) { setSubmitting(false); setSaveArmed(false); }
+      return res;
+    }
     // F5: a terminal write that was only queued (offline / transient) resolves
     // { queued: true } instead of throwing. Do NOT close as if saved: re-enable
     // the controls, enter pending-write mode with the sticky banner, and
-    // remember the closure so "Retry now" can re-invoke it. On a clean success
+    // remember the closure so "Retry now" can re-invoke it (writeRetryable:
+    // the one write a re-send can land). Save stays armed. On a clean success
     // the parent closes the modal, so we intentionally leave `submitting` set
     // (matches the prior behaviour and avoids a post-unmount state update).
-    if (res && res.queued && mountedRef.current) {
+    if (writeRetryable(res) && mountedRef.current) {
       setSubmitting(false);
-      setPendingWrite(true);
+      setPendingWrite(res);
       pendingFnRef.current = fn;
     }
     return res;
@@ -210,23 +275,28 @@ export function EngiScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext
     }
   }, [m.compId, m.id]);
 
-  // F5: auto-clear the pending banner once the queue drains for this match.
-  // Guards the window globals so the modal never throws on mount in tests.
-  useEffectE(() => {
-    if (!m.compId || !m.id) return;
-    if (typeof window.subscribeSyncStatus !== "function") return;
-    const unsub = window.subscribeSyncStatus((status) => {
-      if (!mountedRef.current) return;
-      const stillPending = (window.API && typeof window.API.hasPendingTerminalWrite === "function")
-        ? window.API.hasPendingTerminalWrite(m.compId, m.id)
-        : false;
-      if (status === "synced" && !stillPending) {
-        setPendingWrite(false);
-        pendingFnRef.current = null;
-      }
-    });
-    return unsub;
-  }, [m.compId, m.id]);
+  // F5: the pending banner goes once this device holds no write for the
+  // match: landed, or discarded here or from the topbar's list.
+  // bc-cse (operator ruling 2026-10-05): a discarded held write disarms the
+  // two-tap commit too, so a discarded result is not one tap from being sent
+  // again. The same function serves the editor's own Discard and the hook's
+  // edge for a discard made elsewhere.
+  const dropHeldWrite = () => {
+    setPendingWrite(false);
+    pendingFnRef.current = null;
+    setSaveArmed(false);
+  };
+  useClearPendingWhenNothingHeld(m.compId, m.id, pendingWrite, dropHeldWrite);
+
+  // Save guard, the same as the individual and team editors' Finish (bc-dtfn,
+  // operator ruling 2026-09-27 that the editors behave alike): a tap ARMS the
+  // button, whose label then says to tap again, and a second tap after
+  // TAP_BOUNCE_MS saves, so the bounce of the arming tap can neither save nor
+  // start the next match. Any flag change disarms it, so a stale count cannot
+  // be confirmed. A correction ("Save correction") and keyboard Enter save
+  // directly, as there.
+  const { armed: saveArmed, setArmed: setSaveArmed, confirm: confirmSave } = useArmedConfirm();
+  useEffectE(() => { setSaveArmed(false); }, [flagsA, flagsB]);
 
   // F5: surface a PERMANENT terminal-write failure (non-retryable 4xx on a
   // queued retry) as an explicit "not saved" state, else the write is silently
@@ -237,8 +307,11 @@ export function EngiScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext
     const unsub = window.subscribeTerminalWriteFailed((info) => {
       if (!mountedRef.current) return;
       if (!info || info.compID !== m.compId || info.matchID !== m.id) return;
-      setWriteFailed({ reason: info.reason || `save rejected (${info.status || "error"})`, advice: info.advice });
+      setWriteFailed(terminalFailureBanner(info));
       setPendingWrite(false);
+      // Re-sending a failed save has to be deliberate: disarm, as the
+      // individual editor does.
+      setSaveArmed(false);
     });
     return unsub;
   }, [m.compId, m.id]);
@@ -247,7 +320,7 @@ export function EngiScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext
   // once confirmed via ReasonPrompt, so a retry after a failed first attempt
   // (operator clicks "Save correction" again without reopening the prompt) must
   // still carry it: otherwise the retry silently drops the audit reason.
-  const buildPayload = () => ({ flagsA, flagsB, status: "completed", ...(correctionReason ? { correctionReason } : {}) });
+  const buildPayload = () => claimChanged({ flagsA, flagsB, status: "completed", ...(correctionReason ? { correctionReason } : {}) });
   const handleSubmit = () => {
     if (!canSubmit) return;
     if (isComplete && !correctionReason) {
@@ -277,7 +350,7 @@ export function EngiScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext
   // fresh state via kbRef. Escape stays owned by useEscapeToClose above.
   const kbRef = useRefE(null);
   const lastSideRef = useRefE(null); // "a" | "s" | null: which side Backspace undoes
-  kbRef.current = { submitting, canSubmit, showCorrectionPrompt, flagsA, flagsB, setFlagsA, setFlagsB, clamp, handleSubmit, onPrev, onNext, prevMatch, nextMatch };
+  kbRef.current = { submitting, canSubmit, showCorrectionPrompt, flagsA, flagsB, changeFlags, handleSubmit, onPrev, onNext, goPrev, goNext, prevMatch, nextMatch };
   useEffectE(() => {
     const onKeyDown = (ev) => {
       const s = kbRef.current;
@@ -292,8 +365,8 @@ export function EngiScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext
       // Keyed on the neighbour match as well as the callback: the Scores tab
       // wires onPrev/onNext unconditionally, and with no neighbour they call
       // scoreKeyOf(null), which throws. Same condition as the hint's hasNav.
-      if (ev.key === "ArrowLeft" && s.onPrev && s.prevMatch) { ev.preventDefault(); s.onPrev(); return; }
-      if (ev.key === "ArrowRight" && s.onNext && s.nextMatch) { ev.preventDefault(); s.onNext(); return; }
+      if (ev.key === "ArrowLeft" && s.onPrev && s.prevMatch) { ev.preventDefault(); s.goPrev(); return; }
+      if (ev.key === "ArrowRight" && s.onNext && s.nextMatch) { ev.preventDefault(); s.goNext(); return; }
 
       if (ev.key === "Enter") {
         // Let a focused button/link/input handle its own Enter (e.g. Cancel).
@@ -303,13 +376,13 @@ export function EngiScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext
       }
       switch (ev.key) {
         case "a": case "A":
-          ev.preventDefault(); s.setFlagsA(s.clamp(s.flagsA + 1)); lastSideRef.current = "a"; break;
+          ev.preventDefault(); s.changeFlags("a", s.flagsA + 1); lastSideRef.current = "a"; break;
         case "s": case "S":
-          ev.preventDefault(); s.setFlagsB(s.clamp(s.flagsB + 1)); lastSideRef.current = "s"; break;
+          ev.preventDefault(); s.changeFlags("b", s.flagsB + 1); lastSideRef.current = "s"; break;
         case "Backspace": case "Delete":
           ev.preventDefault();
-          if (lastSideRef.current === "a") s.setFlagsA(s.clamp(s.flagsA - 1));
-          else if (lastSideRef.current === "s") s.setFlagsB(s.clamp(s.flagsB - 1));
+          if (lastSideRef.current === "a") s.changeFlags("a", s.flagsA - 1);
+          else if (lastSideRef.current === "s") s.changeFlags("b", s.flagsB - 1);
           break;
         default: break;
       }
@@ -343,6 +416,7 @@ export function EngiScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext
           {isComplete && (
             <div className="editor-head-pill" style={{ fontSize: 10, fontWeight: 700 }}>CORRECTION</div>
           )}
+          <SyncStatusPill isRunning={m.status === "running"} />
           {canClose && <button className="btn btn--ghost btn--sm" onClick={handleDismiss} disabled={submitting} style={{ padding: "2px 8px" }} aria-label="Close" data-testid="engi-close-btn">✕ Close</button>}
         </div>
       </div>
@@ -377,7 +451,7 @@ export function EngiScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext
               <button
                 type="button"
                 className="btn engi-counter__btn"
-                onClick={() => setFlagsB(clamp(flagsB - 1))}
+                onClick={() => changeFlags("b", flagsB - 1)}
                 disabled={flagsB <= 0}
                 aria-label="Shiro minus one flag"
                 data-testid="engi-shiro-dec"
@@ -386,7 +460,7 @@ export function EngiScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext
               <button
                 type="button"
                 className="btn engi-counter__btn"
-                onClick={() => setFlagsB(clamp(flagsB + 1))}
+                onClick={() => changeFlags("b", flagsB + 1)}
                 disabled={flagsB >= MAX_FLAGS}
                 aria-label="Shiro plus one flag"
                 data-testid="engi-shiro-inc"
@@ -417,7 +491,7 @@ export function EngiScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext
               <button
                 type="button"
                 className="btn engi-counter__btn"
-                onClick={() => setFlagsA(clamp(flagsA - 1))}
+                onClick={() => changeFlags("a", flagsA - 1)}
                 disabled={flagsA <= 0}
                 aria-label="Aka minus one flag"
                 data-testid="engi-aka-dec"
@@ -426,7 +500,7 @@ export function EngiScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext
               <button
                 type="button"
                 className="btn engi-counter__btn"
-                onClick={() => setFlagsA(clamp(flagsA + 1))}
+                onClick={() => changeFlags("a", flagsA + 1)}
                 disabled={flagsA >= MAX_FLAGS}
                 aria-label="Aka plus one flag"
                 data-testid="engi-aka-inc"
@@ -468,31 +542,40 @@ export function EngiScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext
               setCorrectionReason(r);
               setShowCorrectionPrompt(false);
               // A correction saves the current match only (never advance).
-              doSubmit(() => onSubmit({ flagsA, flagsB, status: "completed", correctionReason: r }));
+              const patch = claimChanged({ flagsA, flagsB, status: "completed", correctionReason: r });
+              doSubmit(() => onSubmit(patch));
             }}
             onCancel={() => setShowCorrectionPrompt(false)}
           />
         )}
-        {/* F5: PERMANENT-failure banner: a queued terminal write was rejected
-            (non-retryable) and dropped, so it never saved. Takes precedence
-            over the pending banner. Mirrors ScoreEditorModal. */}
+        {/* F5: PERMANENT-failure banner: the write was refused, so it never
+            saved. No Retry: a refusal is never fixed by sending the same write
+            again (writeRetryable). Takes precedence over the pending banner.
+            Mirrors ScoreEditorModal. */}
         {writeFailed && (
           <div className="pending-write-banner pending-write-banner--failed" role="alert" aria-live="assertive">
-            <span>Not saved: {writeFailed.reason}. {writeFailed.advice || "Re-enter the result and submit again."}</span>
-            {pendingFnRef.current && (
-              <button type="button" className="btn btn--sm" disabled={submitting} onClick={() => doSubmit(pendingFnRef.current)}>Retry</button>
-            )}
+            <span>{notSavedText(writeFailed)}</span>
           </div>
         )}
+        <KeptInHistoryNote note={keptInHistory.note} />
+        {/* bc-mrgc: every write that reached this match, kept or applied.
+            The organiser's view, so not on a self-run participant's sheet. */}
+        <MatchHistoryDisclosure match={m} password={password} hidden={!!selfReport} />
         {/* F5: pending-write banner: a terminal submit was only queued (offline
             / transient). The write is durable in localStorage and auto-retries;
             the operator may still retry manually while we hold the payload. */}
         {pendingWrite && !writeFailed && (
           <div className="pending-write-banner" role="status" aria-live="polite">
-            <span>Not saved yet: will keep retrying until it lands.</span>
+            <HeldWriteNotice compId={m.compId} matchId={m.id} res={pendingWrite} />
             {pendingFnRef.current && (
               <button type="button" className="btn btn--sm btn--ghost" disabled={submitting} onClick={() => doSubmit(pendingFnRef.current)}>Retry now</button>
             )}
+            <HeldWriteDiscard
+              compId={m.compId}
+              matchId={m.id}
+              disabled={submitting}
+              onDiscarded={dropHeldWrite}
+            />
           </div>
         )}
         {/* While the correction prompt is open it owns the only Cancel/commit
@@ -502,23 +585,25 @@ export function EngiScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext
         {!(isComplete && showCorrectionPrompt) && (
           <div className="score-nav">
             {prevMatch ? (
-              <button type="button" className="btn btn--sm score-nav__prev" onClick={onPrev} disabled={submitting} title={(prevMatch.sideA?.name || "") + " vs " + (prevMatch.sideB?.name || "")}>← Prev</button>
+              <button type="button" className="btn btn--sm score-nav__prev" onClick={goPrev} disabled={submitting} title={(prevMatch.sideA?.name || "") + " vs " + (prevMatch.sideB?.name || "")}>← Prev</button>
             ) : <span />}
             <div className="score-nav__actions">
               {canClose && <button type="button" className="btn" onClick={handleDismiss} disabled={submitting}>Cancel</button>}
               <button
                 type="button"
-                className="btn btn--primary"
-                onClick={handleSubmit}
+                className={`btn btn--primary ${saveArmed && !isComplete ? "btn--confirm" : ""}`}
+                onClick={(ev) => { if (!isComplete && !confirmSave(ev)) return; handleSubmit(); }}
                 disabled={!canSubmit}
                 data-testid="engi-submit"
                 style={invalidOutline ? { outline: "2px solid var(--danger)" } : null}
               >
-                {submitting ? "Saving…" : isComplete ? "Save correction" : (onSubmitAndNext ? "Finish + Start Next →" : "Save result")}
+                {submitting ? "Saving…" : isComplete ? "Save correction"
+                  : saveArmed ? (onSubmitAndNext ? "Tap again to finish →" : "Tap again to save")
+                  : (onSubmitAndNext ? "Finish + Start Next →" : "Save result")}
               </button>
             </div>
             {nextMatch ? (
-              <button type="button" className="btn btn--sm score-nav__next" onClick={onNext} disabled={submitting} title={(nextMatch.sideA?.name || "") + " vs " + (nextMatch.sideB?.name || "")}>Next →</button>
+              <button type="button" className="btn btn--sm score-nav__next" onClick={goNext} disabled={submitting} title={(nextMatch.sideA?.name || "") + " vs " + (nextMatch.sideB?.name || "")}>Next →</button>
             ) : <span />}
           </div>
         )}
@@ -541,7 +626,7 @@ export function EngiScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext
   }
 
   return (
-    <div className="modal-backdrop" data-testid="scoring-modal-root" onClick={handleDismiss}>
+    <div className="modal-backdrop" data-testid="scoring-modal-root" ref={openedRef} onClickCapture={onClickCapture} onClick={handleDismiss}>
       <div className="editor-modal editor-modal--compact" role="dialog" aria-modal="true" aria-label={dialogLabel} onClick={(e) => e.stopPropagation()} data-testid="engi-score-editor">
         {inner}
       </div>

@@ -151,10 +151,24 @@ func TestLoadCompetitionDoesNotRewriteConfigOnDisk(t *testing.T) {
 	assert.Equal(t, before, after, "LoadCompetition itself must never rewrite config.md")
 }
 
+// assertNoMirrorLine fails the test if raw's re-saved config.md carries any
+// "mirror:" line: the legacy mirror key is folded away on load and must
+// never survive a save. Shared by both legacy-mirror-key convergence tests
+// below.
+func assertNoMirrorLine(t *testing.T, raw []byte) {
+	t.Helper()
+	for _, line := range strings.Split(string(raw), "\n") {
+		assert.Falsef(t, strings.HasPrefix(line, "mirror:"), "re-saved config.md must carry no mirror: line, got %q", line)
+	}
+}
+
 // TestSaveConvergesLegacyConfigOnDisk covers the other half: the on-disk file
 // converges onto the canonical values once something actually saves the
 // competition. SaveCompetition re-serialises whatever LoadCompetition handed
-// back, which is already folded, so no retired key or value survives.
+// back, which is already folded, so no retired key or value survives. It
+// also proves the mirror key specifically folds away: the fixture carries
+// `mirror: false`, and TestSaveConvergesLegacyMirrorKeyOnDisk below covers
+// the `mirror: true` case this fixture does not.
 //
 // Like TestLoadCompetitionDoesNotRewriteConfigOnDisk, the competition
 // directory is populated AFTER this test's Store is already open, so it is
@@ -170,6 +184,7 @@ func TestSaveConvergesLegacyConfigOnDisk(t *testing.T) {
 	require.NoError(t, os.MkdirAll(compDir, 0o700))
 	fixture, err := os.ReadFile(filepath.Join("testdata", "legacy_playoffs_config.md"))
 	require.NoError(t, err)
+	require.Contains(t, string(fixture), "mirror: false", "fixture must still exercise the stale mirror key")
 	require.NoError(t, os.WriteFile(filepath.Join(compDir, "config.md"), fixture, 0o600))
 
 	comp, err := s.LoadCompetition("bracket-court-d")
@@ -183,6 +198,44 @@ func TestSaveConvergesLegacyConfigOnDisk(t *testing.T) {
 	assert.Contains(t, string(raw), "knockout_match_duration_seconds: 300")
 	assert.NotContains(t, string(raw), "playoffs")
 	assert.NotContains(t, string(raw), "playoff_match_duration")
+	assertNoMirrorLine(t, raw)
+}
+
+// TestSaveConvergesLegacyMirrorKeyOnDisk pins bc-xlcl's storage-compat claim:
+// a config.md written before the per-competition `mirror` switch was removed
+// (state.Competition carries no Mirror field any more) still loads -- the
+// unknown YAML key is simply ignored, as every decode in this tree does, no
+// KnownFields/DisallowUnknownFields/UnmarshalStrict exists anywhere in the
+// Go tree -- and the next real save converges the on-disk file onto the
+// current shape with no `mirror:` line at all. Same load-then-save pattern as
+// TestSaveConvergesLegacyConfigOnDisk, which covers the `mirror: false` case
+// (among that fixture's other legacy keys); this test covers `mirror: true`
+// specifically, the value that fixture does not hold, so a fold that only
+// special-cased one value would still be caught.
+func TestSaveConvergesLegacyMirrorKeyOnDisk(t *testing.T) {
+	dir := t.TempDir()
+	s, err := state.NewStore(dir)
+	require.NoError(t, err)
+
+	compDir := filepath.Join(dir, "competitions", "c1")
+	require.NoError(t, os.MkdirAll(compDir, 0o700))
+	legacy := "---\n" +
+		"id: c1\n" +
+		"name: C1\n" +
+		"kind: individual\n" +
+		"format: knockout\n" +
+		"status: knockout\n" +
+		"mirror: true\n" +
+		"---\n"
+	require.NoError(t, os.WriteFile(filepath.Join(compDir, "config.md"), []byte(legacy), 0o600))
+
+	comp, err := s.LoadCompetition("c1")
+	require.NoError(t, err, "a stale mirror key must not stop the file loading")
+	require.NoError(t, s.SaveCompetition(comp))
+
+	raw, err := os.ReadFile(filepath.Join(compDir, "config.md"))
+	require.NoError(t, err)
+	assertNoMirrorLine(t, raw)
 }
 
 // TestLoadCompetitionWithMismatchedIDDoesNotCorruptAnotherCompetition is a
@@ -545,12 +598,14 @@ func TestLegacyUpgradeSweepKnockoutSecondsWinOverGlobalMinutes(t *testing.T) {
 }
 
 // TestLegacyUpgradeSweepFailureIsolatedPerCompetition: when the on-disk
-// convergence write fails for one competition (its directory is read-only),
-// NewStore must still succeed, and a subsequent LoadCompetition for that
-// same competition must still return the folded values -- the in-memory
-// safety net in parseCompetitionFile does not depend on the write ever
-// landing. This is the "best-effort, never a safety mechanism" property the
-// whole migration rests on.
+// convergence write cannot land for a competition (its directory became
+// read-only after the server started), a LoadCompetition for it must still
+// return the folded values -- the in-memory safety net in
+// parseCompetitionFile does not depend on the write ever landing. This is
+// the "best-effort, never a safety mechanism" property the whole migration
+// rests on. A server STARTING on such a directory refuses to start instead
+// (operator decision 2026-10-04, ErrDataNotWritable), so the directory is
+// made read-only after NewStore.
 func TestLegacyUpgradeSweepFailureIsolatedPerCompetition(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("chmod 0500 isn't enforced on Windows the same way")
@@ -560,6 +615,8 @@ func TestLegacyUpgradeSweepFailureIsolatedPerCompetition(t *testing.T) {
 	}
 
 	dir := t.TempDir()
+	s, err := state.NewStore(dir)
+	require.NoError(t, err)
 	compDir := filepath.Join(dir, "competitions", "locked-comp")
 	require.NoError(t, os.MkdirAll(compDir, 0o700))
 
@@ -576,8 +633,8 @@ func TestLegacyUpgradeSweepFailureIsolatedPerCompetition(t *testing.T) {
 	require.NoError(t, os.Chmod(compDir, 0500))
 	defer func() { _ = os.Chmod(compDir, 0700) }() // let t.TempDir() clean up
 
-	s, err := state.NewStore(dir)
-	require.NoError(t, err, "one broken competition directory must not stop NewStore from succeeding")
+	_, err = state.NewStore(dir)
+	require.ErrorIs(t, err, state.ErrDataNotWritable, "a server starting on a directory it cannot write refuses to start")
 
 	comp, err := s.LoadCompetition("locked-comp")
 	require.NoError(t, err, "a load must still succeed and fold in memory even though the on-disk convergence write failed")

@@ -772,6 +772,56 @@ func TestCompetition_IsKachinuki(t *testing.T) {
 	})
 }
 
+// TestCompetition_IsTeam pins the one spelling of "is a team competition": Kind
+// "team" or a positive TeamSize, whichever of the two marks it.
+func TestCompetition_IsTeam(t *testing.T) {
+	cases := []struct {
+		name string
+		comp *Competition
+		want bool
+	}{
+		{"nil receiver is false", nil, false},
+		{"an individual competition", &Competition{Kind: "individual"}, false},
+		{"no kind and no team size", &Competition{}, false},
+		{"Kind team", &Competition{Kind: "team", TeamSize: 3}, true},
+		{"Kind team with no team size yet", &Competition{Kind: "team"}, true},
+		{"a team size with no kind", &Competition{TeamSize: 3}, true},
+		{"a team size of one is positive", &Competition{TeamSize: 1}, true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			assert.Equal(t, tc.want, tc.comp.IsTeam())
+		})
+	}
+}
+
+// TestCompetition_TeamBoutRows pins the one owner of a team block's bout-row
+// count: a team match prints TeamSize rows, a kachinuki encounter the
+// 2*TeamSize-1 bouts it can take at most, an individual competition none.
+func TestCompetition_TeamBoutRows(t *testing.T) {
+	cases := []struct {
+		name string
+		comp *Competition
+		want int
+	}{
+		{"nil receiver", nil, 0},
+		{"individual", &Competition{TeamSize: 0}, 0},
+		{"individual with kachinuki type", &Competition{TeamSize: 0, TeamMatchType: TeamMatchTypeKachinuki}, 0},
+		{"negative team size", &Competition{TeamSize: -3, TeamMatchType: TeamMatchTypeKachinuki}, 0},
+		{"team size 1 with kachinuki type is not kachinuki", &Competition{TeamSize: 1, TeamMatchType: TeamMatchTypeKachinuki}, 1},
+		{"team match of 3", &Competition{TeamSize: 3, TeamMatchType: TeamMatchTypeFixed}, 3},
+		{"team match of 5, type unset", &Competition{TeamSize: 5}, 5},
+		{"kachinuki of 2", &Competition{TeamSize: 2, TeamMatchType: TeamMatchTypeKachinuki}, 3},
+		{"kachinuki of 3", &Competition{TeamSize: 3, TeamMatchType: TeamMatchTypeKachinuki}, 5},
+		{"kachinuki of 5", &Competition{TeamSize: 5, TeamMatchType: TeamMatchTypeKachinuki}, 9},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			assert.Equal(t, tc.want, tc.comp.TeamBoutRows())
+		})
+	}
+}
+
 func TestMatchResult_RoundRoundtrip(t *testing.T) {
 	mr := MatchResult{
 		ID:    "test-match-1",

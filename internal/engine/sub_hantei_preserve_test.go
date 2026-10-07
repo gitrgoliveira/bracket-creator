@@ -650,7 +650,8 @@ func TestBracketRollbackRestoresTheScore(t *testing.T) {
 			ID: "m-r1-0", SideA: "Kyoto", SideB: "Osaka",
 			Winner: "Osaka", Status: state.MatchStatusCompleted, ModifiedAt: 4_000,
 		}
-		applied, err := applyBracketMatchResult(bm, stale, matchWriteForward)
+		// Through the merge, where the ordering lives since bc-mrgc.
+		applied, err := bracketWrite(bm, stale, matchWriteForward)
 		require.NoError(t, err)
 		assert.False(t, applied,
 			"a write older than the restored result must be dropped, not waved through")
@@ -797,7 +798,7 @@ func TestBracketForwardWrite_PreservedVerdictReachesTheWinner(t *testing.T) {
 			SubResults: stored().SubResults,
 		}
 		result := silent()
-		mismatch, _, _, _ := applyPoolWrite(poolStored, result, matchWriteForward)
+		mismatch, _, _, _ := applyPoolWrite(poolStored, result, matchWriteForward, nil)
 		require.False(t, mismatch)
 		assert.Equal(t, "Kyoto", poolStored.Winner)
 	})

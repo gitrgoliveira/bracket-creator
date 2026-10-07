@@ -11,7 +11,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// TestExportBracketHandler_SwissUnprocessable verifies the blank-template
+// TestExportBracketHandler_SwissUnprocessable verifies the stored-draw
 // bracket export endpoint (GET /api/competitions/:id/export, distinct from
 // the sibling /export-results endpoint already covered by
 // TestExportResultsHandler_SwissUnprocessable in handlers_export_test.go)

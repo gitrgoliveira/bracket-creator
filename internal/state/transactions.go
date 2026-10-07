@@ -115,6 +115,9 @@ type StoreTx interface {
 	LoadTeamLineups(compID string) (map[string]domain.TeamLineup, error)
 	SetTeamLineup(compID string, l domain.TeamLineup, teamSize int) error
 	LoadParticipants(compID string, withZekkenName bool) ([]domain.Player, error)
+	// LoadSquads is Store.LoadSquads under the held lock, read-your-own-writes
+	// over a team-members file this transaction already staged.
+	LoadSquads(compID string) (map[string][]domain.TeamMember, error)
 
 	// UpdatePoolMatchByID is the tx-aware twin of
 	// Store.UpdatePoolMatchByID. Same semantics, same return values; the
@@ -142,6 +145,12 @@ type StoreTx interface {
 	// write is individually crash-safe, and no other WAL-staged file
 	// is touched by this path, so cross-file atomicity is not required.
 	UpdateParticipant(compID, pid string, withZekkenName bool, transform func(*domain.Player) error) (*domain.Player, error)
+	// AppendMatchHistory stages one entry onto a match's history file
+	// (match_history.go) in this transaction, so the entry lands exactly when
+	// the write it describes does. LoadMatchHistory reads it back,
+	// read-your-own-writes over an append this transaction staged.
+	AppendMatchHistory(compID string, entry MatchHistoryEntry) error
+	LoadMatchHistory(compID, matchID string) ([]MatchHistoryEntry, error)
 }
 
 // WithTransaction runs fn under the per-competition write lock for
@@ -230,6 +239,12 @@ func (s *Store) WithTransaction(compID string, fn func(tx StoreTx) error) error 
 		s.invalidateCachesForWALIntents(compID, w.Intents())
 		return ferr
 	}
+
+	// A transaction that wrote the draw also moves the round lineups that
+	// write seated a team for, staged here beside it so they commit together
+	// (round_lineups.go). After fn returns nil, so a transaction that does not
+	// commit settles nothing.
+	tx.settleRoundLineupsAtCommit()
 
 	// Fast path: a tx that called nothing through the WAL writer
 	// (e.g., pure read-only or a no-op save like
@@ -598,6 +613,16 @@ func (t *storeTx) SetTeamLineup(compID string, l domain.TeamLineup, teamSize int
 		return t.store.saveTeamLineupsLocked(compID, current, t.txWriteFn())
 	}
 	return t.store.setTeamLineupLocked(compID, l, teamSize, t.txWriteFn())
+}
+
+func (t *storeTx) LoadSquads(compID string) (map[string][]domain.TeamMember, error) {
+	if err := t.checkCompID(compID); err != nil {
+		return nil, err
+	}
+	if pending, ok := t.pendingFor(teamMembersFilename); ok {
+		return parseSquadsBytes(pending)
+	}
+	return t.store.loadSquadsLocked(compID)
 }
 
 func (t *storeTx) LoadParticipants(compID string, withZekkenName bool) ([]domain.Player, error) {

@@ -58,9 +58,24 @@ type CompetitionStore interface {
 	// backfill a score payload's sides/ids ahead of the request-boundary
 	// legacy-hantei fold and the hantei mark-placement validation, both of
 	// which run before the engine's own reconcileSides/backfillMatchIdentity
-	// backfill. sideAID/sideBID are always "" for a bracket match (it
-	// persists no ids).
+	// backfill. sideAID/sideBID are "" for a bracket side that is not a
+	// resolved competitor yet (a bye slot or an unresolved feeder).
 	MatchSidesByID(compID, matchID string) (sideA, sideB, sideAID, sideBID string, found bool, err error)
+	// LoadCompetitorStatus returns the competition's eligibility records,
+	// keyed by participant id. Mirrors state.Store.LoadCompetitorStatus; a
+	// match write reads it to stamp the withdrawal it pushes
+	// (stampWithdrawnStatus).
+	LoadCompetitorStatus(compID string) (map[string]domain.CompetitorStatus, error)
+}
+
+// MatchHistoryStore is what the match-history read needs (bc-mrgc,
+// RegisterMatchHistoryHandler): the competition and the match, to answer 404
+// for one that does not exist, and the match's history itself. Mirrors
+// state.Store.
+type MatchHistoryStore interface {
+	LoadCompetition(id string) (*state.Competition, error)
+	MatchStatusByID(compID, matchID string) (state.MatchStatus, bool, error)
+	LoadMatchHistory(compID, matchID string) ([]state.MatchHistoryEntry, error)
 }
 
 // ScoringEngine is the consumer-boundary view of engine.Engine used by
@@ -165,9 +180,9 @@ type ScoringEngine interface {
 	// kachinuki ("winner-stays-on") team match. No-op for non-kachinuki
 	// competitions. Returns (advanced, postLog, err): postLog is the full
 	// bout log AFTER the appended pairing when advanced is true, so the
-	// caller echoes it without re-reading the match. Mirrors
-	// engine.Engine.MaybeAdvanceKachinuki. FR-044, T135.
-	MaybeAdvanceKachinuki(compID, matchID string) (bool, []state.SubMatchResult, error)
+	// caller echoes it, with the stamps the advance left, without re-reading
+	// the match. Mirrors engine.Engine.MaybeAdvanceKachinuki. FR-044, T135.
+	MaybeAdvanceKachinuki(compID, matchID string) (bool, *engine.KachinukiAdvance, error)
 }
 
 // CompetitorStatusStore is the consumer-boundary view of state.Store
@@ -204,6 +219,14 @@ type TeamLineupStore interface {
 	DeleteTeamLineupForMatch(compID, teamID, matchID string) error
 }
 
+// LineupEngine is the consumer-boundary view of engine.Engine used by the
+// public lineup-in-force read in handlers_lineup.go: which lineup a team
+// fields at a match, and where it was saved. Mirrors
+// engine.Engine.LineupInForce, which owns the rule.
+type LineupEngine interface {
+	LineupInForce(compID, teamID, matchID string) (engine.InForceLineup, error)
+}
+
 // SquadStore is the consumer-boundary view of state.Store used by
 // handlers_squad.go (bc-tmid pass 1, clearing added bc-pnum): a team's
 // squad, the people on it, each with a stable id and a display index
@@ -213,8 +236,12 @@ type TeamLineupStore interface {
 type SquadStore interface {
 	LoadSquads(compID string) (map[string][]domain.TeamMember, error)
 	AddTeamMember(compID, teamID, name string) (domain.TeamMember, error)
-	RenameTeamMember(compID, teamID, memberID, newName string) error
-	ClearTeamMemberName(compID, teamID, memberID string) error
+	AddTeamMemberUpTo(compID, teamID, name string, limit int) (domain.TeamMember, error)
+	// The three name writers answer with the member as written, carrying the
+	// server stamp that write gave it (domain.TeamMember.ModifiedAt).
+	RenameTeamMember(compID, teamID, memberID, newName string) (domain.TeamMember, error)
+	NameUnnamedTeamMember(compID, teamID, memberID, newName string) (domain.TeamMember, error)
+	ClearTeamMemberName(compID, teamID, memberID string) (domain.TeamMember, error)
 }
 
 // Broadcaster is the consumer-boundary view of *Hub used by handlers

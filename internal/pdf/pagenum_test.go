@@ -17,15 +17,15 @@ func TestStampPageNumbersPreservesPageCount(t *testing.T) {
 	pdfPath, err := conv.ConvertToPDF(context.Background(), xlsx, tmp)
 	require.NoError(t, err)
 
-	before, err := PageCount(pdfPath)
+	before, err := PageCount(context.Background(), pdfPath)
 	require.NoError(t, err)
 	require.Positive(t, before)
 
 	stamped := filepath.Join(tmp, "stamped.pdf")
-	require.NoError(t, StampPageNumbers(pdfPath, stamped))
+	require.NoError(t, StampPageNumbers(context.Background(), pdfPath, stamped))
 	require.FileExists(t, stamped)
 
-	after, err := PageCount(stamped)
+	after, err := PageCount(context.Background(), stamped)
 	require.NoError(t, err)
 	assert.Equal(t, before, after, "stamping must not add or drop pages")
 }

@@ -3,7 +3,7 @@
 
 import { TermV, competitionKindLabel, poolLabel, compMatchesForCompetition } from './viewer_utils.jsx';
 import { isFollowedPlayer, isPlayerWatched, entryKey, resolveWatchedPlayers, findPrimaryEntry, buildPrimaryNextMatch, buildRoster, useWatchlist, buildWatchedSets, matchInvolvesWatchedSet } from './viewer_watchlist_core.jsx';
-import { MatchDetailCard, VSchedItem, MatchViewerModal } from './viewer_match.jsx';
+import { MatchDetailCard, VSchedItem, MatchViewerModal, useLiveMatch, bracketMatchIn } from './viewer_match.jsx';
 import { WinnerBadge, SwissStandingsViewer, PoolsViewer, LeagueStandingsViewer, DHBadge, matchWinnerName } from './viewer_standings.jsx';
 import { AwardsView } from './viewer_awards.jsx';
 import { usePrimaryWatch } from './viewer_schedule.jsx';
@@ -48,8 +48,9 @@ export function ViewerCompetition({ tournament, competition, pools, poolMatches,
   // this component receives pools/poolMatches/bracket as separate props (the
   // `competition` prop is detail.config, which carries none of them — see
   // app.jsx), so compMatchesForCompetition recombines the two halves. That
-  // helper is shared with the withdrawal panel so the recombination exists
-  // once rather than being spread by hand at each call site. compMatches
+  // helper is shared with the score editor's match lookups so the
+  // recombination exists once rather than being spread by hand at each call
+  // site. compMatches
   // reads the flat poolMatches list directly rather than walking `pools`, so a
   // Swiss competition (pools: [] always — Swiss piggybacks pool-matches.csv
   // with a synthetic "Swiss-R1" pool name but never writes pools.csv) now
@@ -244,7 +245,12 @@ export function ViewerCompetition({ tournament, competition, pools, poolMatches,
 
   const [bracketScrollTarget, setBracketScrollTarget] = useState(null);
   const bracketScrollRef = useRefV(null);
-  const [selectedMatch, setSelectedMatch] = useState(null);
+  // The live row is allMatches', which carries the competition's fields the
+  // score editor routes on, so only the Bracket tab declares anything (its
+  // round label). A preview bracket is not in allMatches, so its raw row is
+  // the fallback, and the Bracket tab's declaration supplies the rest.
+  const [selectedMatch, openMatch, closeMatch] = useLiveMatch((id) =>
+    allMatches.find((m) => m.id === id) || bracketMatchIn(bracket, id));
   const [bracketOverflowRight, setBracketOverflowRight] = useState(false);
 
   // Keyed on an id STRING, not a match object: re-scroll only when the target
@@ -373,6 +379,7 @@ export function ViewerCompetition({ tournament, competition, pools, poolMatches,
               runningMatches={runningMatches}
               upcomingMatches={upcomingMatches}
               recentMatches={recentMatches}
+              allMatches={allMatches}
               tweaks={tweaks}
               tournament={tournament}
               compId={c.id}
@@ -405,12 +412,7 @@ export function ViewerCompetition({ tournament, competition, pools, poolMatches,
                       // bracketRoundLabel keeps it agreeing if that ever changes,
                       // and leaves no second copy of the naming rule (mp-u37s).
                       const label = window.bracketRoundLabel(m, ri, total ?? derivedBracket.rounds.length);
-                      // m.roundIndex is the backend round array index, stamped by
-                      // buildDisplayModel (meta mode) or the raw rounds[ri] position
-                      // (legacy mode where ri equals the backend index). Prefer it
-                      // over the display-column index so lineup fetches use the right
-                      // round when phantom leading rounds shift the display column.
-                      setSelectedMatch({ ...m, phase: "bracket", round: label, phaseName: label, roundIndex: m.roundIndex ?? ri, compId: c.id, compName: c.name, compKind: c.kind, teamSize: c.teamSize, compEngi: isEngi, teamMatchType: teamMatchTypeFor(c) });
+                      openMatch(m, { phase: "bracket", round: label, phaseName: label, compId: c.id, compName: c.name, compKind: c.kind, teamSize: c.teamSize, compEngi: isEngi, teamMatchType: teamMatchTypeFor(c) });
                     }}
                   />
                   {derivedBracket.thirdPlaceMatch && (() => {
@@ -430,7 +432,7 @@ export function ViewerCompetition({ tournament, competition, pools, poolMatches,
                           showDojo={tweaks.showDojo ?? true}
                           highlighted={currentMatch?.id === bm.id}
                           highlightPlayers={highlightPlayers}
-                          onClick={() => setSelectedMatch({ ...bm, phase: "bracket", round: "3rd Place", phaseName: "3rd Place", roundIndex: derivedBracket.rounds.length, compId: c.id, compName: c.name, compKind: c.kind, teamSize: c.teamSize, compEngi: isEngi, teamMatchType: teamMatchTypeFor(c) })}
+                          onClick={() => openMatch(bm, { phase: "bracket", round: "3rd Place", phaseName: "3rd Place", compId: c.id, compName: c.name, compKind: c.kind, teamSize: c.teamSize, compEngi: isEngi, teamMatchType: teamMatchTypeFor(c) })}
                         />
                       </div>
                     );
@@ -444,10 +446,10 @@ export function ViewerCompetition({ tournament, competition, pools, poolMatches,
               LeagueStandingsViewer. Mirrored in admin_pools.jsx and
               admin_shiaijo.jsx's ShiaijoContext. */}
           {effectiveTab === "pools" && hasPools && !isLeague && (
-            <PoolsViewer pools={pools} standings={standings} poolMatches={poolMatches} tweaks={tweaks} competition={c} onMatchClick={setSelectedMatch} highlightPlayers={highlightPlayers} />
+            <PoolsViewer pools={pools} standings={standings} poolMatches={poolMatches} tweaks={tweaks} competition={c} onMatchClick={(m) => openMatch(m)} highlightPlayers={highlightPlayers} />
           )}
           {effectiveTab === "league" && hasPools && isLeague && (
-            <LeagueStandingsViewer competition={c} poolMatches={poolMatches} tweaks={tweaks} onMatchClick={setSelectedMatch} highlightPlayers={highlightPlayers} />
+            <LeagueStandingsViewer competition={c} poolMatches={poolMatches} tweaks={tweaks} onMatchClick={(m) => openMatch(m)} highlightPlayers={highlightPlayers} />
           )}
           {effectiveTab === "swiss" && isSwiss && (
             <SwissStandingsViewer competition={c} poolMatches={poolMatches} tweaks={tweaks} />
@@ -464,14 +466,18 @@ export function ViewerCompetition({ tournament, competition, pools, poolMatches,
           {window.VersionFooter && <window.VersionFooter />}
         </div>
       </div>
-      {selectedMatch && <MatchViewerModal match={selectedMatch} onClose={() => setSelectedMatch(null)} tournament={tournament} compId={c.id} slotLabel={bracketSlotLabel} />}
+      {selectedMatch && <MatchViewerModal match={selectedMatch} onClose={closeMatch} tournament={tournament} compId={c.id} slotLabel={bracketSlotLabel} />}
     </div>
   );
 }
 
-export function ViewerOverview({ c, myPlayer, myUpcoming, currentMatch, runningMatches, upcomingMatches, recentMatches, tweaks, tournament, compId, standings, pools, poolMatches, onSwitchTab, hasActiveFilter, filterLabel, highlightPlayers }) {
+export function ViewerOverview({ c, myPlayer, myUpcoming, currentMatch, runningMatches, upcomingMatches, recentMatches, allMatches, tweaks, tournament, compId, standings, pools, poolMatches, onSwitchTab, hasActiveFilter, filterLabel, highlightPlayers }) {
   const [expandedMatchId, setExpandedMatchId] = useState(null);
-  const [selectedMatch, setSelectedMatch] = useState(null);
+  // Every match this tab shows is a row of allMatches (ViewerCompetition
+  // derives the other lists from it), which also keeps a match that has
+  // dropped out of Recent results' cap while its modal is open.
+  const [selectedMatch, openMatch, closeMatch] = useLiveMatch((id) =>
+    (allMatches || []).find((m) => m && m.id === id) || null);
   const isSelfRun = tournament && tournament.mode === "self-run";
 
   const isLeague = c.format === "league";
@@ -524,7 +530,7 @@ export function ViewerOverview({ c, myPlayer, myUpcoming, currentMatch, runningM
 
   const handleMatchClick = (m) => {
     if (isSelfRun) {
-      setSelectedMatch(m);
+      openMatch(m);
     } else {
       setExpandedMatchId(prev => prev === m.id ? null : m.id);
     }
@@ -727,7 +733,7 @@ export function ViewerOverview({ c, myPlayer, myUpcoming, currentMatch, runningM
           </div>
         </>
       )}
-      {isSelfRun && selectedMatch && <MatchViewerModal match={selectedMatch} onClose={() => setSelectedMatch(null)} tournament={tournament} compId={compId} />}
+      {isSelfRun && selectedMatch && <MatchViewerModal match={selectedMatch} onClose={closeMatch} tournament={tournament} compId={compId} />}
     </div>
   );
 }

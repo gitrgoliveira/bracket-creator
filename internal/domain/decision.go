@@ -108,6 +108,14 @@ func IsKikenDecisionStr(s string) bool {
 	return IsKikenDecision(Decision(s))
 }
 
+// IsDrawDecisionStr reports whether the decision is a draw (hikiwake). The
+// ONE shared check: domain.MiddleMark's centre-mark switch and
+// state.IsDraw's wire-string check both delegate here rather than each
+// comparing against the wire value by hand.
+func IsDrawDecisionStr(s string) bool {
+	return s == string(DecisionHikiwake)
+}
+
 // IsDefaultWinDecisionStr reports whether the decision awards the match
 // points without a technique — the "default win" class (any kiken,
 // fusenpai, or fusensho) whose awarded points record as maru. These
@@ -115,6 +123,29 @@ func IsKikenDecisionStr(s string) bool {
 // isDefaultWinBC in web-mobile/js/bracket.jsx.
 func IsDefaultWinDecisionStr(s string) bool {
 	return IsKikenDecisionStr(s) || s == string(DecisionFusenpai) || s == string(DecisionFusensho)
+}
+
+// DecisionWord names, in the operator's own vocabulary, the decision that
+// closed a match without a fought scoreline: "kiken" for any kiken variant
+// (legacy, voluntary, or injury), "fusenpai" for a no-show, "fusensho" for a
+// default win awarded on someone else's withdrawal or no-show. These three
+// branches mirror IsDefaultWinDecisionStr's, so a caller that already
+// guarded on that predicate always gets a non-empty word back. Kendo has no
+// English word for this class of result -- the rulebook names each decision,
+// never a shared umbrella term -- so every sentence a person reads names ONE
+// of these three rather than reaching for a generic label (operator ruling
+// 2026-10-04). Returns "" for a decision outside the set (fought, hikiwake,
+// daihyosen, kachinuki-exhaustion, ...).
+func DecisionWord(d string) string {
+	switch {
+	case IsKikenDecisionStr(d):
+		return "kiken"
+	case d == string(DecisionFusenpai):
+		return "fusenpai"
+	case d == string(DecisionFusensho):
+		return "fusensho"
+	}
+	return ""
 }
 
 // IsWithdrawalDecisionStr reports whether the decision is a WITHDRAWAL: any

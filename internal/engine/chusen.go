@@ -177,7 +177,7 @@ func (e *Engine) ChusenStatus(compID string) (ChusenReport, error) {
 	if comp == nil {
 		return report, notFoundErrorf("competition %s not found", compID)
 	}
-	isTeam := comp.Kind == "team" || comp.TeamSize > 0
+	isTeam := comp.IsTeam()
 	if !isTeam || !comp.AcceptsPoolRankOverride() {
 		return report, nil
 	}

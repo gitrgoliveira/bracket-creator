@@ -61,7 +61,6 @@ const STUBBED_GLOBALS = {
   isTextEntry: () => false,
   isInteractiveTarget: () => false,
   confirmDialog: vi.fn().mockResolvedValue(true),
-  resolveRoundIndex: () => 0,
   API: {
     fetchCompetitionDetails: vi.fn().mockResolvedValue(null),
     recordScore: vi.fn(),
@@ -219,22 +218,19 @@ describe('ScoreEditorModal dispatch: forwarded props per branch', () => {
     expect(p.onAfterDecision).toBe(bag.onAfterDecision);
   });
 
-  it('engi branch forwards navigation but DROPS password, selfReport and onAfterDecision', () => {
-    // CURRENT behaviour, pinned: the engi branch forwards neither password
-    // nor selfReport nor onAfterDecision (admin_scoring_individual.jsx).
-    // Consequences: the engi editor cannot distinguish the public self-run
-    // surface from the admin console, and a decision recorded from an engi
-    // match cannot trigger the mount site's after-decision advance.
-    // Whether that is correct is ruled on by mp-yqxn.6 (engi operator path)
-    // and mp-yqxn.5 (public self-run surface). If a fix lands, flip these
-    // expectations deliberately.
+  it('engi branch forwards navigation, password and selfReport, and DROPS onAfterDecision', () => {
+    // bc-mrgc flipped two of the three: the engi editor's History disclosure
+    // reads the organiser's history route with the password, and hides itself
+    // on the public self-run surface (selfReport), as the other editors' do.
+    // onAfterDecision is still not forwarded: a decision recorded from an
+    // engi match cannot trigger the mount site's after-decision advance
+    // (mp-yqxn.6, engi operator path).
     const bag = fullPropBag();
     render(<ScoreEditorModal match={makeMatch({ compEngi: true })} {...bag} />);
     const p = probes.engi.props;
     for (const k of FORWARDED_TO_BOTH) expect(p[k], k).toBe(bag[k]);
-    // The three dropped props:
-    expect(p.password).toBeUndefined();
-    expect(p.selfReport).toBeUndefined();
+    expect(p.password).toBe('pw');
+    expect(p.selfReport).toBe(true);
     expect(p.onAfterDecision).toBeUndefined();
   });
 });

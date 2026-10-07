@@ -208,7 +208,8 @@ func (s *Store) copyBracket(b *Bracket) *Bracket {
 		// match copy path (copyMatchResults).
 		for j := range res.Rounds[i] {
 			res.Rounds[i][j].Encho = round[j].Encho.Clone()
-			res.Rounds[i][j].SubResults = cloneSubResults(round[j].SubResults)
+			res.Rounds[i][j].SubResults = CloneSubResults(round[j].SubResults)
+			res.Rounds[i][j].GroupStamps = CloneGroupStamps(round[j].GroupStamps)
 			if round[j].Feeders != nil {
 				res.Rounds[i][j].Feeders = append([]string(nil), round[j].Feeders...)
 			}
@@ -226,7 +227,8 @@ func (s *Store) copyBracket(b *Bracket) *Bracket {
 	if b.ThirdPlaceMatch != nil {
 		tpm := *b.ThirdPlaceMatch
 		tpm.Encho = b.ThirdPlaceMatch.Encho.Clone()
-		tpm.SubResults = cloneSubResults(b.ThirdPlaceMatch.SubResults)
+		tpm.SubResults = CloneSubResults(b.ThirdPlaceMatch.SubResults)
+		tpm.GroupStamps = CloneGroupStamps(b.ThirdPlaceMatch.GroupStamps)
 		if b.ThirdPlaceMatch.Feeders != nil {
 			tpm.Feeders = append([]string(nil), b.ThirdPlaceMatch.Feeders...)
 		}
@@ -255,7 +257,11 @@ func (s *Store) SaveBracket(compID string, b *Bracket) error {
 	mu.Lock()
 	defer mu.Unlock()
 
-	return s.saveBracketLocked(compID, b, s.directWrite)
+	if err := s.saveBracketLocked(compID, b, s.directWrite); err != nil {
+		return err
+	}
+	s.settleRoundLineupsAfterWrite(compID)
+	return nil
 }
 
 // loadBracketLocked reads the bracket directly from disk WITHOUT
@@ -361,7 +367,11 @@ func (s *Store) UpdateBracket(compID string, mutate func(*Bracket) error) error 
 	mu.Lock()
 	defer mu.Unlock()
 
-	return s.updateBracketLocked(compID, mutate, s.directWrite)
+	if err := s.updateBracketLocked(compID, mutate, s.directWrite); err != nil {
+		return err
+	}
+	s.settleRoundLineupsAfterWrite(compID)
+	return nil
 }
 
 // updateBracketLocked is the lock-free body of UpdateBracket. Caller
@@ -411,6 +421,14 @@ func findBracketMatchByID(b *Bracket, matchID string) *BracketMatch {
 		return b.ThirdPlaceMatch
 	}
 	return nil
+}
+
+// MatchByID is findBracketMatchByID for a caller outside this package that
+// mutates a bracket match inside UpdateBracket and may need to abort the
+// write (UpdateBracketMatchByID's mutate cannot): rounds first, then the
+// bronze sibling, or nil.
+func (b *Bracket) MatchByID(matchID string) *BracketMatch {
+	return findBracketMatchByID(b, matchID)
 }
 
 // MatchStatusByID returns the status of the match with the given ID, searching
@@ -521,7 +539,11 @@ func (s *Store) UpdateBracketMatchByID(compID, matchID string, mutate func(*Brac
 	mu := s.getCompLock(compID)
 	mu.Lock()
 	defer mu.Unlock()
-	return s.updateBracketMatchByIDLocked(compID, matchID, mutate, s.directWrite)
+	found, err := s.updateBracketMatchByIDLocked(compID, matchID, mutate, s.directWrite)
+	if found && err == nil {
+		s.settleRoundLineupsAfterWrite(compID)
+	}
+	return found, err
 }
 
 // updateBracketMatchByIDLocked is the lock-free body of UpdateBracketMatchByID

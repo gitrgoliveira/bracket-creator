@@ -12,7 +12,7 @@
 // here (plus window.* assignments) so the public surface of viewer.jsx is
 // unchanged.
 
-import { writeDidNotLand } from './write_result.jsx';
+import { writeKeepsEditorOpen } from './write_result.jsx';
 import { SideLabel } from './side_cell.jsx';
 import { useTeamLineups, TeamScoreboard, IndividualScore, numberedParts, teamNameMark } from './match_scoreboard.jsx';
 import { NumberedName } from './numbered_name.jsx';
@@ -20,8 +20,10 @@ import { TermV, poolLabel } from './viewer_utils.jsx';
 import { DAIHYOSEN_POSITION } from './pool_ids.jsx';
 import { sameCompetitor } from './competitor_identity.jsx';
 import { barredNameMark } from './barred_chip.jsx';
+import { matchShowsScore } from './match_shows_score.jsx';
+import { useOpenedTapGuard } from './tap_guard.jsx';
 
-const { useState, useRef: useRefV, useCallback } = React;
+const { useState, useMemo, useRef: useRefV, useCallback } = React;
 
 // ---------------------------------------------------------------------------
 // mymatchQueueLabel: FR-025 label for the "Your next match" Queue chip.
@@ -115,7 +117,7 @@ export function MatchDetailCard({ match, onClose, escapeToClose = true, slotLabe
   // competitor names instead of bout numbers. bc-pnum: squadA/squadB ride
   // along the same fetch (this card passes no `competition`, so
   // useTeamLineups resolves squads off its own fetchCompetitionDetails call).
-  const { lineupA, lineupB, squadA, squadB } = useTeamLineups(isTeam ? match : null, undefined, isTeam ? match.roundIndex : undefined);
+  const { lineupA, lineupB, squadA, squadB } = useTeamLineups(isTeam ? match : null);
   // Show the Daihyosen row when a rep-bout subResult exists (position DAIHYOSEN_POSITION);
   // TeamScoreboard additionally gates it on the match actually being tied.
   const showDH = isTeam && (match.subResults || []).some(s => s.position === DAIHYOSEN_POSITION);
@@ -203,8 +205,11 @@ export const VSchedItem = React.memo(({ m, tweaks, showCompetition, onClick, hig
   // Score string for completed matches (final) and running matches (live, once
   // at least one ippon has landed). matchScoreStr returns "" before any score
   // exists, so a just-started running match falls through to the "vs" render.
+  // matchShowsScore is the gate: a match sent back to the queue keeps its
+  // score but reads as not started (bc-sbq).
   const isRunning = m.status === "running";
-  const scoreStr = (m.status === "completed" || isRunning)
+  const showsScore = matchShowsScore(m);
+  const scoreStr = showsScore
     ? (window.matchScoreStr(m) || null)
     : null;
   // bc-tmfn: a TEAM row's score cell (window.matchScoreStr → teamIVPWScore)
@@ -293,8 +298,10 @@ export const VSchedItem = React.memo(({ m, tweaks, showCompetition, onClick, hig
             the bout MIDDLE, derived from the single source boutMiddle
             (bracket.jsx): "vs" / "X" / "(E)" / "(DH)" and nothing else. A dash
             is never a valid middle (it is a CELL value only), so both the
-            pending and the completed-but-scoreless cases go through the same
-            call rather than being branched by status here.
+            running and the completed-but-scoreless cases go through the same
+            call. A SCHEDULED row takes the plain "vs" without asking it
+            (showsScore above): a match sent back to the queue keeps its
+            overtime, and its (E) must not show before it restarts (bc-sbq).
 
             Guarded like the twin call in admin_schedule_score_editor.jsx, and
             unlike matchScoreStr above, because this branch also renders for
@@ -308,7 +315,7 @@ export const VSchedItem = React.memo(({ m, tweaks, showCompetition, onClick, hig
         {scoreStr ? (
           <span className={`vsched-item__score${isRunning ? " vsched-item__score--live" : ""}`}>{scoreStr}</span>
         ) : (
-          <span className="vsched-item__vs">{window.boutMiddle ? window.boutMiddle(m.decision, m.encho, m.score) : "vs"}</span>
+          <span className="vsched-item__vs">{showsScore && window.boutMiddle ? window.boutMiddle(m.decision, m.encho, m.score) : "vs"}</span>
         )}
         <div className={`vsched-item__side vsched-item__side--aka ${aWin ? "vsched-item__side--w" : ""}`}>
           <SideLabel side="aka" />
@@ -322,12 +329,65 @@ export const VSchedItem = React.memo(({ m, tweaks, showCompetition, onClick, hig
 VSchedItem.displayName = "VSchedItem";
 
 // ---------------------------------------------------------------------------
+// useLiveMatch: the match a public-page MatchViewerModal is open on
+// ---------------------------------------------------------------------------
+
+// Every page that opens MatchViewerModal (the competition page's tabs and
+// Overview, Home, Schedule) reads the match from its live data on every
+// render, so the modal and the score editor it opens follow a result recorded
+// or corrected on another device. `rowOf(id, compId)` finds the row the page
+// holds for a match. open(match, decoration) keeps only the match's id and
+// competition, plus the keys its opener DECLARES (the Bracket tab's round
+// label, say), which win over the row's own. Nothing else is taken from the
+// object handed in: an opener may hold a copy taken long before (Home's alert
+// banner keeps the match from when the alert fired), and its scoreline must
+// never stand in for the live one. A match that leaves the data closes the
+// modal and is forgotten, because a draw discarded and made again reuses the
+// match ids.
+export function useLiveMatch(rowOf) {
+  const [picked, setPicked] = useState(null);
+  const row = picked ? rowOf(picked.id, picked.compId) : null;
+  React.useEffect(() => {
+    if (picked && !row) setPicked(null);
+  }, [picked, row]);
+  const match = useMemo(() => (row && picked.decoration ? { ...row, ...picked.decoration } : row), [row, picked]);
+  const open = (m, decoration) => setPicked({ id: m.id, compId: m.compId, decoration: decoration || null });
+  return [match, open, () => setPicked(null)];
+}
+
+// matchInList: the row a match list built by tournamentMatches holds for a
+// match, found by its id AND its competition, because match ids repeat across
+// competitions (each draw numbers its own): by id alone, another competition's
+// match of the same id would stand in for it. Home and Schedule use it in
+// their `rowOf` for useLiveMatch.
+export function matchInList(list, id, compId) {
+  return list.find((m) => m.id === id && m.compId === compId);
+}
+
+// bracketMatchIn: the row a bracket holds for a match id, in its rounds or its
+// bronze, read as compMatches (viewer_utils.jsx) reads them, the legacy
+// array-shaped bracket included. A raw row, without compMatches' own fields:
+// the Bracket tab opens a preview bracket's match through it, since a preview
+// is not in the competition's match list.
+export function bracketMatchIn(bracket, id) {
+  const rounds = (bracket && bracket.rounds) || (Array.isArray(bracket) ? bracket : []);
+  return rounds.flat().find((m) => m && m.id === id)
+    || (bracket && bracket.thirdPlaceMatch && bracket.thirdPlaceMatch.id === id ? bracket.thirdPlaceMatch : null);
+}
+
+// ---------------------------------------------------------------------------
 // MatchViewerModal
 // ---------------------------------------------------------------------------
 
 export function MatchViewerModal({ match, onClose, tournament, compId: defaultCompId, slotLabel }) {
   window.useEscapeToClose(onClose);
-  const [scoringMatch, setScoringMatch] = useState(null);
+  // bc-cfbd: the bounce of the tap that opened the modal must not reach its
+  // backdrop or its buttons. The node mounts again when the score editor
+  // closes, which stamps again.
+  const { openedRef, onClickCapture } = useOpenedTapGuard();
+  // Whether the editor is open, not a copy of the match: the editor reads the
+  // live `match` prop, so it follows a result corrected on another device.
+  const [isScoring, setIsScoring] = useState(false);
   const triggerRef = useRefV(null);
   const trapRef = useRefV(null);
   const modalRefCb = useCallback((node) => {
@@ -373,21 +433,21 @@ export function MatchViewerModal({ match, onClose, tournament, compId: defaultCo
   const sideBName = slotName(match.sideB?.name || (typeof match.sideB === "string" ? match.sideB : ""), (match.feeders || [])[1]);
   const dialogLabel = sideAName && sideBName ? `Match: ${sideBName} vs ${sideAName}` : "Match details";
 
-  if (scoringMatch && window.ScoreEditorModal) {
+  if (isScoring && window.ScoreEditorModal) {
+    const compId = match.compId || defaultCompId;
+    const comp = ((tournament && tournament.competitions) || []).find((c) => c.id === compId);
     return React.createElement(window.ScoreEditorModal, {
-      match: scoringMatch,
-      onClose: () => setScoringMatch(null),
+      match,
+      onClose: () => setIsScoring(false),
       onSubmit: async (patch) => {
         try {
-          const res = await window.API.recordScore(scoringMatch.compId || defaultCompId, scoringMatch.id, patch, "", scoringMatch);
-          // A write that did not land is NOT a confirmed save: keep the editor
-          // open and return the signal so its not-saved banner shows. Closing
-          // here would be a false success on the public self-run surface, which
-          // matters more here than anywhere else: this surface has no toast, so
-          // the banner is the ONLY thing that can report it. Covers the queued
-          // case and the superseded one (bc-lww1).
-          if (writeDidNotLand(res)) return res;
-          setScoringMatch(null);
+          const res = await window.API.recordScore(compId, match.id, patch, "", match);
+          // Close only when a landed write ends the match (writeKeepsEditorOpen,
+          // the rule every closing host asks). Start, an autosave, or a write
+          // that did not land keeps the editor open; the last shows its
+          // not-saved banner, the only report this toast-less surface has.
+          if (writeKeepsEditorOpen(patch, res)) return res;
+          setIsScoring(false);
           onClose();
           return res;
         } catch (err) {
@@ -402,11 +462,15 @@ export function MatchViewerModal({ match, onClose, tournament, compId: defaultCo
       },
       password: "",
       selfReport: true,
+      // The team-members route needs the organiser password, so the members
+      // come from the viewer payload this page already holds. Always a map,
+      // so the editor never asks the route.
+      teamMembers: (comp && comp.squads) || {},
     });
   }
 
   return (
-    <div className="modal-backdrop" onClick={onClose} style={{ zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+    <div className="modal-backdrop" ref={openedRef} onClick={onClose} onClickCapture={onClickCapture} style={{ zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
       <div ref={modalRefCb} tabIndex={-1} role="dialog" aria-modal="true" aria-label={dialogLabel} onClick={e => e.stopPropagation()} style={{ width: "100%", maxWidth: 500, margin: 16 }}>
         {/* Reuse the canonical MatchDetailCard so the modal and the inline
             card render identically (DRY): same header, colour badges and
@@ -422,7 +486,7 @@ export function MatchViewerModal({ match, onClose, tournament, compId: defaultCo
             ) : (
               <button type="button"
                 className="btn btn--primary btn--sm"
-                onClick={() => setScoringMatch({ ...match, id: match.id })}
+                onClick={() => setIsScoring(true)}
               >
                 Report result
               </button>

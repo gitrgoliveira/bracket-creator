@@ -93,8 +93,7 @@ describe('MatchLineupPanel roster resolution (mp-bkg)', () => {
 
     // MatchLineupSideEditor fetches its saved lineup on mount: stub to null.
     global.window.API = {
-      fetchMatchLineup: vi.fn().mockResolvedValue(null),
-      fetchTeamLineup: vi.fn().mockResolvedValue(null),
+      fetchLineupInForce: vi.fn().mockResolvedValue(null),
     };
 
     runtime = makeReactive();
@@ -159,6 +158,30 @@ describe('MatchLineupPanel roster resolution (mp-bkg)', () => {
     // isTeamComp === false → the panel renders null.
     const sideEditors = findComponents(tree, n => n === 'MatchLineupSideEditor');
     expect(sideEditors.length).toBe(0);
+  });
+
+  it('hands the side editors a function for the competition\'s matches, which builds them only when asked', async () => {
+    global.window.compMatches = vi.fn(() => [{ id: 'match-0', phase: 'pool', poolName: 'Pool A' }]);
+    runtime.mount(MatchLineupPanel, {
+      match: MATCH,
+      tournament: TOURNAMENT,
+      password: 'pw',
+      showToast: vi.fn(),
+      onClose: vi.fn(),
+    });
+    await Promise.resolve();
+    await Promise.resolve();
+
+    // A render of the panel builds nothing: only a lineup carried from another
+    // match needs one match of the list, and the side editor asks for it then.
+    expect(global.window.compMatches).not.toHaveBeenCalled();
+    const sideEditors = findComponents(runtime.currentTree(), n => n === 'MatchLineupSideEditor');
+    expect(sideEditors.length).toBe(2);
+    for (const node of sideEditors) expect(typeof node.props.allMatches).toBe('function');
+
+    expect(sideEditors[0].props.allMatches()).toEqual([{ id: 'match-0', phase: 'pool', poolName: 'Pool A' }]);
+    expect(global.window.compMatches).toHaveBeenCalledTimes(1);
+    expect(global.window.compMatches.mock.calls[0][0].id).toBe(COMP_ID);
   });
 
   it('falls back to the match-side object when no participant matches', async () => {

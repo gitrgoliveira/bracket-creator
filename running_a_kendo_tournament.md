@@ -73,7 +73,7 @@ Pre-registration is typically required days or weeks before the event, with entr
 
 For team competitions, the **fighting order** (lineup) must be submitted to the head table before the opening ceremony concludes. This becomes the official order and cannot be changed mid-round, though revised orders for subsequent rounds must be submitted immediately after the team exits the court.
 
-**No-shows**: a competitor who does not appear at the court within a set time after being called (typically 5 minutes, per EKC Rules Section 4) is declared a default loss (**fusenpai**) and is disqualified. The opponent receives a 2–0 win. Note: this is distinct from injury-related inability to continue, where reinstatement may be possible (see [Withdrawal Mid-Tournament](#withdrawal-mid-tournament-kiken)).
+**No-shows**: a competitor who does not appear at the court within a set time after being called (typically 5 minutes, per EKC Rules Section 4) is declared **fusenpai** (no-show) and is disqualified. The opponent receives a 2–0 win. Note: this is distinct from injury-related inability to continue, where reinstatement may be possible (see [Withdrawal Mid-Tournament](#withdrawal-mid-tournament-kiken)).
 
 ## Equipment Inspection (Kensa)
 
@@ -422,7 +422,7 @@ Some tournament styles have teams of 10 or more.
 
 ### Absent Players (Fusensho)
 
-If a team is missing a player for a position, the opposing fighter at that position wins by default (fusensho) with a score of **2–0**. This counts as one individual victory and two points for the winning side when calculating the team match result.
+If a team is missing a player for a position, the opposing fighter at that position is recorded as the fusensho winner, scored **2–0**. This counts as one individual victory and two points for the winning side when calculating the team match result.
 
 ### How a Team Match Is Decided
 

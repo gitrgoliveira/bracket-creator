@@ -37,13 +37,51 @@ function stripComments(s) {
 // esbuild transpile-only and vitest silently (see the file header above) --
 // exactly the drift class this checker exists to catch, and exactly the two
 // surfaces the bc-symm operator ruling requires to stay in lockstep.
+//
+// admin_scoring_shared.jsx and bracket.jsx were added by bc-fsnp/bc-dtfn: the
+// scoring editors' shared helpers now import struckIppons from result_slot.jsx
+// and defaultWinMaru from bracket.jsx, and the editors import the tap_guard.jsx leaf.
+// match_scoreboard.jsx likewise: enchoOn and defaultWinMaru moved into the
+// result_slot.jsx leaf, and the scoreboard imports defaultWinMaru from there.
 const CHECK_MODULES = [
   'admin_scoring_modal.jsx',
   'admin_scoring_individual.jsx',
   'admin_scoring_team.jsx',
+  'admin_scoring_shared.jsx',
   'admin_scoring_autosave.jsx',
+  'bracket.jsx',
+  'match_scoreboard.jsx',
   'admin_setup.jsx',
   'admin_competition_settings.jsx',
+  // bc-offl: the topbar's held-writes indicator imports its copy from
+  // write_result.jsx, the shell's one ES import.
+  'admin_shell.jsx',
+  // bc-mrgc: the engi editor imports the change-group hook, and the History
+  // disclosure reads its words from four owners (bracket.jsx, result_slot.jsx,
+  // admin_scoring_shared.jsx, match_groups.jsx).
+  'admin_scoring_engi.jsx',
+  'match_history_view.jsx',
+  // bc-lpfb: both lineup editors import the helpers they share from
+  // lineup_resolver.jsx (the source wording moved there from the panel) and
+  // pool_ids.jsx.
+  'admin_lineup.jsx',
+  'admin_schedule_lineup.jsx',
+  // bc-lnul: both lineup editors import the form hook, the source line, the read
+  // problem and the draft notice from lineup_draft.jsx, which imports the lineup
+  // read, the position diff and the wording from lineup_resolver.jsx.
+  'lineup_draft.jsx',
+  // lineup_resolver.jsx words a lineup read nobody answered through
+  // noAnswerSentence, the one owner of that sentence in write_result.jsx.
+  'lineup_resolver.jsx',
+  // bc-cfbd: the layers a tap opens keep the bounce of that tap off their
+  // backdrop through the tap_guard.jsx leaf: the participant Edit dialog, the
+  // public match card, the admin sign-in dialog, the shiaijo console's confirm
+  // and ui.jsx's confirm and Modal each import useOpenedTapGuard.
+  'admin_participants.jsx',
+  'viewer_match.jsx',
+  'app.jsx',
+  'ui.jsx',
+  'admin_shiaijo.jsx',
 ];
 
 // ---------------------------------------------------------------------------

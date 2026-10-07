@@ -436,6 +436,18 @@ describe('makeReconnectRefetcher; refetch only on reconnect (open-after-error)',
     expect(spy).toHaveBeenCalledTimes(2);
   });
 
+  // The device came back online: app.jsx reopens the stream by closing it,
+  // which fires no error, so the console marks it lost itself.
+  it('refetches on the open that follows markLost (back online, no error seen)', () => {
+    const spy = vi.fn();
+    const h = makeReconnectRefetcher(spy);
+    h('open');
+    h.markLost(); h('open');
+    expect(spy).toHaveBeenCalledTimes(1);
+    h('open');
+    expect(spy).toHaveBeenCalledTimes(1);
+  });
+
   it('ignores a repeated open with no intervening error (no spurious refetch)', () => {
     const spy = vi.fn();
     const h = makeReconnectRefetcher(spy);

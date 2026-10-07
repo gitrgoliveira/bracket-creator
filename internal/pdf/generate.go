@@ -112,7 +112,7 @@ func (g *Generator) generate(ctx context.Context, groups []Group, sources []Sour
 		if err != nil {
 			return nil, err
 		}
-		ranges, err := SheetRanges(full)
+		ranges, err := SheetRanges(ctx, full)
 		if err != nil {
 			return nil, err
 		}
@@ -169,7 +169,7 @@ func (g *Generator) buildGroup(ctx context.Context, grp Group, conv []converted,
 		}
 
 		extract := filepath.Join(work, fmt.Sprintf("%s_%d_extract.pdf", grp.Type, extractSeq))
-		if err := ExtractPages(c.pdf, picks, extract); err != nil {
+		if err := ExtractPages(ctx, c.pdf, picks, extract); err != nil {
 			return "", false, err
 		}
 		parts = append(parts, extract)
@@ -180,14 +180,14 @@ func (g *Generator) buildGroup(ctx context.Context, grp Group, conv []converted,
 	}
 
 	merged := filepath.Join(work, grp.Type+"_merged.pdf")
-	if err := MergePDFs(parts, merged); err != nil {
+	if err := MergePDFs(ctx, parts, merged); err != nil {
 		return "", false, err
 	}
 
 	final := merged
 	if grp.PageNumbers {
 		stamped := filepath.Join(work, grp.Type+"_stamped.pdf")
-		if err := StampPageNumbers(merged, stamped); err != nil {
+		if err := StampPageNumbers(ctx, merged, stamped); err != nil {
 			return "", false, err
 		}
 		final = stamped

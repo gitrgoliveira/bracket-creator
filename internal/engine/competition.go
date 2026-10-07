@@ -659,7 +659,8 @@ func (e *Engine) GenerateDraw(id string) error {
 }
 
 // DiscardDraw discards the generated draw for a draw-ready competition,
-// deleting the draw artifacts and resetting the competition to Setup.
+// deleting the draw artifacts, the match histories and the lineups saved for
+// the matches, and resetting the competition to Setup.
 // Returns an error when the competition is not in draw-ready state.
 //
 // Ordering rationale: files are deleted BEFORE the status flip. While the
@@ -703,6 +704,20 @@ func (e *Engine) DiscardDraw(id string) error {
 		if err := e.store.DeleteCompetitionFile(id, f); err != nil {
 			return fmt.Errorf("DiscardDraw: failed to delete %s: %w", f, err)
 		}
+	}
+	// The matches' histories go with them (bc-mrgc): a draw generated again
+	// reuses the match ids, and its matches must not inherit these.
+	if err := e.store.DeleteMatchHistory(id); err != nil {
+		return fmt.Errorf("DiscardDraw: failed to delete the match history: %w", err)
+	}
+	// So do the lineups saved for those matches, and the record of the pairs the
+	// round-lineup conversion settled in them: the next draw reuses the match ids,
+	// so a lineup left behind would become a team's own lineup at the reused id
+	// and be carried to every later match, and a pair left in the record would keep
+	// the new match from being given its lineup. The round lineups (the starting
+	// lineup is round 0) stay.
+	if err := e.store.ClearDrawLineups(id); err != nil {
+		return fmt.Errorf("DiscardDraw: failed to clear the match lineups: %w", err)
 	}
 	_, err = e.store.UpdateCompetitionChanged(id, func(current *state.Competition) (*state.Competition, error) {
 		if current == nil {
@@ -1098,8 +1113,8 @@ func (e *Engine) runDrawPipeline(id string) error {
 	// per pool). It is therefore snapshotted and validated in the atomic commit
 	// below, but ONLY for mixed format, for other formats it still doesn't
 	// drive generation, so admin's concurrent change is preserved by leaving
-	// current.PoolWinners alone. Mirror (export-only), Name, Date, Venue are
-	// still NOT snapshotted (UI-only, never read during generation).
+	// current.PoolWinners alone. Name, Date, Venue are still NOT
+	// snapshotted (UI-only, never read during generation).
 	//
 	// Roster/seed mtimes. Settings drift is detected via the field-by-
 	// field snapshot above; participants and seeds live in separate
@@ -1208,7 +1223,7 @@ func (e *Engine) runDrawPipeline(id string) error {
 	// competition can start holding a duplicate in the first place. isTeam
 	// mirrors the same Kind/TeamSize discriminator the write-floor check
 	// uses (comp.TeamSize is already defaulted above when Kind=="team").
-	isTeam := comp.Kind == "team" || comp.TeamSize > 0
+	isTeam := comp.IsTeam()
 	if err := helper.ValidateNoDuplicateTeamMembers(players, isTeam); err != nil {
 		return validationErrorf("competition %s cannot generate a draw: %s", id, err.Error())
 	}
@@ -1241,8 +1256,26 @@ func (e *Engine) runDrawPipeline(id string) error {
 	// per-comp lock acquisitions, so they run OUTSIDE the
 	// UpdateCompetitionChanged transform below (re-entering the lock would
 	// deadlock).
+	//
+	// A draw generated from Setup starts with none of an earlier draw's lineups:
+	// a competition in Setup holds no draw that stands, so whatever is on disk is
+	// the leftover of an attempt that failed after it wrote its matches (the
+	// refusal and the drift check below both come after the writes), and the write
+	// that saved those matches gave the legacy teams lineups at them and recorded
+	// the pairs. This draw reuses the match ids with other pairings, so neither may
+	// outlive its draw, as DiscardDraw leaves things. Cleared just before the
+	// first write, after every refusal that leaves the files alone.
+	clearEarlierDraw := func() error {
+		if err := e.store.ClearDrawLineups(id); err != nil {
+			return fmt.Errorf("competition %s: failed to clear the lineups of an earlier draw: %w", id, err)
+		}
+		return nil
+	}
 	switch comp.Format {
 	case state.CompFormatMixed, state.CompFormatLeague:
+		if err := clearEarlierDraw(); err != nil {
+			return err
+		}
 		if err := e.generatePools(comp, players, seeds); err != nil {
 			return err
 		}
@@ -1284,6 +1317,9 @@ func (e *Engine) runDrawPipeline(id string) error {
 		if err != nil {
 			return err
 		}
+		if err := clearEarlierDraw(); err != nil {
+			return err
+		}
 		if err := e.store.SavePoolMatches(id, r1); err != nil {
 			return err
 		}
@@ -1293,6 +1329,9 @@ func (e *Engine) runDrawPipeline(id string) error {
 		// A standalone knockout competition (the only remaining knockout case
 		// after the derived-knockout path was removed in mp-turx) uses standalone
 		// seeding, there is no pool-preview topology to mirror.
+		if err := clearEarlierDraw(); err != nil {
+			return err
+		}
 		if err := e.generateKnockout(comp, players, seeds); err != nil {
 			return err
 		}
@@ -1322,7 +1361,10 @@ func (e *Engine) runDrawPipeline(id string) error {
 	// Note: our generated pools.csv / bracket.json have already been
 	// written by this point (see pipeline limitations in the function
 	// comment), aborting here leaves them as orphaned artifacts that
-	// the next successful start overwrites. Pre-existing partial-
+	// the next successful start overwrites. So are the lineups the
+	// round-lineup settlement gave the legacy teams at those matches, and
+	// its record of the pairs: the next start clears them before it
+	// generates (clearEarlierDraw above). Pre-existing partial-
 	// atomicity issue; the fix here only guarantees comp-config
 	// consistency.
 	_, err = e.store.UpdateCompetitionChanged(id, func(current *state.Competition) (*state.Competition, error) {
@@ -1344,7 +1386,7 @@ func (e *Engine) runDrawPipeline(id string) error {
 		//   - Courts (court labels assigned to generated matches)
 		//   - Kind / WithZekkenName (participants loading)
 		//   - CheckInEnabled (decides which participants are included)
-		// Other config fields (TeamSize, Name, Date, Venue, Mirror) are NOT
+		// Other config fields (TeamSize, Name, Date, Venue) are NOT
 		// validated, they don't drive generation, so admin's concurrent
 		// change to them doesn't invalidate the pools.csv / bracket.json we
 		// just wrote. Their values are preserved by leaving `current.X` alone

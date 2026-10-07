@@ -6,6 +6,8 @@
 package state
 
 import (
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/gitrgoliveira/bracket-creator/internal/domain"
@@ -113,4 +115,100 @@ func TestDeleteTeamLineupForMatch(t *testing.T) {
 	got, err := store.LoadTeamLineups(compID)
 	require.NoError(t, err)
 	assert.Empty(t, got, "match lineup gone after delete")
+}
+
+// TestClearDrawLineups: every match-scoped lineup goes, whichever team it is
+// for, and the round-scoped ones stay (a team's starting lineup is its round-0
+// entry), and so does the record of the pairs the round-lineup conversion
+// settled. A discarded draw and a draw generated from Setup rely on this: the
+// regenerated draw reuses the match ids, so a lineup left behind for one would
+// become a team's own at the reused id, and a pair left in the record would keep
+// the new draw's match from being given its lineup.
+func TestClearDrawLineups(t *testing.T) {
+	store, cleanup := newTestStore(t)
+	defer cleanup()
+
+	const compID = "team-match-delete-all"
+	require.NoError(t, store.SaveCompetition(&Competition{ID: compID}))
+
+	t.Run("nothing saved is not an error and writes no file", func(t *testing.T) {
+		require.NoError(t, store.ClearDrawLineups(compID))
+
+		_, err := os.Stat(filepath.Join(store.GetFolder(), "competitions", compID, teamLineupFilename))
+		assert.True(t, os.IsNotExist(err), "no lineups.yaml was there to rewrite")
+	})
+
+	require.NoError(t, store.SetTeamLineup(compID, fiveStarter("team-alpha", 0), 5))
+	require.NoError(t, store.SetTeamLineup(compID, fiveStarter("team-alpha", 1), 5))
+	require.NoError(t, store.SetTeamLineup(compID, fiveStarterForMatch("team-alpha", "P1"), 5))
+	require.NoError(t, store.SetTeamLineup(compID, fiveStarterForMatch("team-alpha", "P2"), 5))
+	require.NoError(t, store.SetTeamLineup(compID, fiveStarterForMatch("team-beta", "P1"), 5))
+
+	t.Run("drops every match-scoped lineup and keeps the round-scoped ones", func(t *testing.T) {
+		require.NoError(t, store.ClearDrawLineups(compID))
+
+		got, err := store.LoadTeamLineups(compID)
+		require.NoError(t, err)
+		assert.Len(t, got, 2)
+		assert.Contains(t, got, teamLineupKey("team-alpha", 0), "the starting lineup stays")
+		assert.Contains(t, got, teamLineupKey("team-alpha", 1), "a later round's lineup stays")
+	})
+
+	t.Run("is idempotent", func(t *testing.T) {
+		require.NoError(t, store.ClearDrawLineups(compID))
+
+		got, err := store.LoadTeamLineups(compID)
+		require.NoError(t, err)
+		assert.Len(t, got, 2)
+	})
+
+	t.Run("clears the record of the pairs settled and nothing else in config.md", func(t *testing.T) {
+		const settled = "team-match-delete-record"
+		require.NoError(t, store.SaveCompetition(&Competition{
+			ID: settled, Name: "Kept", Kind: "team", TeamSize: 5,
+			RoundLineupsGiven: map[string][]string{"team-alpha": {"P1", "P2"}, "team-beta": {"P1"}},
+		}))
+		require.NoError(t, store.SetTeamLineup(settled, fiveStarter("team-alpha", 1), 5))
+		require.NoError(t, store.SetTeamLineup(settled, fiveStarterForMatch("team-alpha", "P1"), 5))
+
+		require.NoError(t, store.ClearDrawLineups(settled))
+
+		comp, err := store.LoadCompetition(settled)
+		require.NoError(t, err)
+		assert.Empty(t, comp.RoundLineupsGiven)
+		assert.Equal(t, "Kept", comp.Name)
+		assert.Equal(t, 5, comp.TeamSize)
+		raw, err := os.ReadFile(filepath.Join(store.GetFolder(), "competitions", settled, "config.md")) // #nosec G304 -- a path under the test store
+		require.NoError(t, err)
+		assert.NotContains(t, string(raw), "round_lineups_given")
+		got, err := store.LoadTeamLineups(settled)
+		require.NoError(t, err)
+		assert.Len(t, got, 1, "the lineups and the record go in the same call")
+		assert.Contains(t, got, teamLineupKey("team-alpha", 1))
+	})
+
+	t.Run("a record with nothing in it is left alone, byte for byte", func(t *testing.T) {
+		const plain = "team-match-delete-plain"
+		require.NoError(t, store.SaveCompetition(&Competition{ID: plain, Name: "Plain", RoundLineupsConverted: true}))
+		path := filepath.Join(store.GetFolder(), "competitions", plain, "config.md")
+		before, err := os.ReadFile(path) // #nosec G304 -- a path under the test store
+		require.NoError(t, err)
+
+		require.NoError(t, store.ClearDrawLineups(plain))
+
+		after, err := os.ReadFile(path) // #nosec G304 -- a path under the test store
+		require.NoError(t, err)
+		assert.Equal(t, string(before), string(after), "the marker and every other field stay as they were")
+	})
+
+	t.Run("never creates the competition directory", func(t *testing.T) {
+		require.NoError(t, store.ClearDrawLineups("never-created"))
+
+		_, err := os.Stat(filepath.Join(store.GetFolder(), "competitions", "never-created"))
+		assert.True(t, os.IsNotExist(err), "only competition creation makes the directory")
+	})
+
+	t.Run("an invalid competition id is an error", func(t *testing.T) {
+		assert.Error(t, store.ClearDrawLineups("../traversal"))
+	})
 }

@@ -1498,7 +1498,9 @@ func (s *Store) saveParticipantsNoLock(compID string, players []domain.Player, w
 	// only on stamped. Best-effort, same contract as the seeds-orphan prune
 	// next to this write's callers: a failure here is logged, not
 	// propagated, and the leftover orphan is retried on the next roster
-	// write.
+	// write. The lineup prune is given the stamped roster itself rather than
+	// keepIDs: it first keys a lineup saved under a team's NAME by the id this
+	// write just minted for that team, which a set of ids cannot say.
 	keepIDs := make(map[string]bool, len(stamped))
 	for i := range stamped {
 		keepIDs[stamped[i].ID] = true
@@ -1509,7 +1511,7 @@ func (s *Store) saveParticipantsNoLock(compID string, players []domain.Player, w
 		if err := s.pruneOrphanedTeamMembersLocked(compID, comp, keepIDs); err != nil {
 			log.Printf("state: saveParticipants %s: prune orphaned team members: %v", compID, err)
 		}
-		if err := s.pruneOrphanedTeamLineupsLocked(compID, comp, keepIDs); err != nil {
+		if err := s.pruneOrphanedTeamLineupsLocked(compID, comp, stamped); err != nil {
 			log.Printf("state: saveParticipants %s: prune orphaned team lineups: %v", compID, err)
 		}
 	}

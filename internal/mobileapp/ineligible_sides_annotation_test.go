@@ -19,50 +19,67 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestAnyScheduledMatchHasBothSides(t *testing.T) {
+func TestAnyMatchToAnnotate(t *testing.T) {
 	t.Run("no matches", func(t *testing.T) {
-		assert.False(t, anyScheduledMatchHasBothSides(nil, nil))
+		assert.False(t, anyMatchToAnnotate(nil, nil))
 	})
 	t.Run("scheduled pool match with both ids", func(t *testing.T) {
 		ms := []state.MatchResult{{Status: state.MatchStatusScheduled, SideAID: "a", SideBID: "b"}}
-		assert.True(t, anyScheduledMatchHasBothSides(ms, nil))
+		assert.True(t, anyMatchToAnnotate(ms, nil))
 	})
 	t.Run("scheduled pool match missing one id", func(t *testing.T) {
 		ms := []state.MatchResult{{Status: state.MatchStatusScheduled, SideAID: "a"}}
-		assert.False(t, anyScheduledMatchHasBothSides(ms, nil))
+		assert.False(t, anyMatchToAnnotate(ms, nil))
 	})
 	t.Run("running match with both ids does not count", func(t *testing.T) {
 		ms := []state.MatchResult{{Status: state.MatchStatusRunning, SideAID: "a", SideBID: "b"}}
-		assert.False(t, anyScheduledMatchHasBothSides(ms, nil))
+		assert.False(t, anyMatchToAnnotate(ms, nil))
 	})
 	t.Run("bracket round match", func(t *testing.T) {
 		b := &state.Bracket{Rounds: [][]state.BracketMatch{{
 			{Status: state.MatchStatusScheduled, SideAID: "a", SideBID: "b"},
 		}}}
-		assert.True(t, anyScheduledMatchHasBothSides(nil, b))
+		assert.True(t, anyMatchToAnnotate(nil, b))
 	})
 	t.Run("bronze match", func(t *testing.T) {
 		b := &state.Bracket{ThirdPlaceMatch: &state.BracketMatch{
 			Status: state.MatchStatusScheduled, SideAID: "a", SideBID: "b",
 		}}
-		assert.True(t, anyScheduledMatchHasBothSides(nil, b))
+		assert.True(t, anyMatchToAnnotate(nil, b))
+	})
+	// The withdrawnStatus stamp goes on a completed match a withdrawal or
+	// default win decided, which is all that is left once every match is
+	// finished.
+	t.Run("completed pool match a withdrawal decided", func(t *testing.T) {
+		ms := []state.MatchResult{{Status: state.MatchStatusCompleted, Decision: "fusenpai", SideAID: "a", SideBID: "b"}}
+		assert.True(t, anyMatchToAnnotate(ms, nil))
+	})
+	t.Run("completed bracket match a default win decided", func(t *testing.T) {
+		b := &state.Bracket{Rounds: [][]state.BracketMatch{{
+			{Status: state.MatchStatusCompleted, Decision: "fusensho", SideAID: "a", SideBID: "b"},
+		}}}
+		assert.True(t, anyMatchToAnnotate(nil, b))
+	})
+	t.Run("completed match that was fought does not count", func(t *testing.T) {
+		ms := []state.MatchResult{{Status: state.MatchStatusCompleted, Decision: "fought", SideAID: "a", SideBID: "b"}}
+		assert.False(t, anyMatchToAnnotate(ms, nil))
 	})
 }
 
-func TestAnnotateIneligibleSides(t *testing.T) {
+func TestAnnotateEligibility(t *testing.T) {
 	statuses := map[string]domain.CompetitorStatus{
 		"alice": {PlayerID: "alice", Eligible: false, MatchID: "Pool A-0", Reason: "kiken-voluntary at Pool A-0"},
 	}
 
 	t.Run("no statuses: no-op, whatever the matches", func(t *testing.T) {
 		ms := []state.MatchResult{{ID: "Pool A-1", Status: state.MatchStatusScheduled, SideAID: "alice", SideBID: "carol"}}
-		annotateIneligibleSides(ms, nil, nil)
+		annotateEligibility(ms, nil, nil)
 		assert.Nil(t, ms[0].IneligibleSides)
 	})
 
 	t.Run("scheduled match with a barred side A is stamped", func(t *testing.T) {
 		ms := []state.MatchResult{{ID: "Pool A-1", Status: state.MatchStatusScheduled, SideAID: "alice", SideBID: "carol"}}
-		annotateIneligibleSides(ms, nil, statuses)
+		annotateEligibility(ms, nil, statuses)
 		require.NotNil(t, ms[0].IneligibleSides)
 		assert.Equal(t, "kiken-voluntary", ms[0].IneligibleSides.A)
 		assert.Empty(t, ms[0].IneligibleSides.B)
@@ -70,7 +87,7 @@ func TestAnnotateIneligibleSides(t *testing.T) {
 
 	t.Run("scheduled match with a barred side B is stamped", func(t *testing.T) {
 		ms := []state.MatchResult{{ID: "Pool A-1", Status: state.MatchStatusScheduled, SideAID: "carol", SideBID: "alice"}}
-		annotateIneligibleSides(ms, nil, statuses)
+		annotateEligibility(ms, nil, statuses)
 		require.NotNil(t, ms[0].IneligibleSides)
 		assert.Empty(t, ms[0].IneligibleSides.A)
 		assert.Equal(t, "kiken-voluntary", ms[0].IneligibleSides.B)
@@ -78,7 +95,7 @@ func TestAnnotateIneligibleSides(t *testing.T) {
 
 	t.Run("the undo path: a match barred by ITS OWN prior decision is not stamped", func(t *testing.T) {
 		ms := []state.MatchResult{{ID: "Pool A-0", Status: state.MatchStatusScheduled, SideAID: "alice", SideBID: "bob"}}
-		annotateIneligibleSides(ms, nil, statuses)
+		annotateEligibility(ms, nil, statuses)
 		assert.Nil(t, ms[0].IneligibleSides, "Pool A-0 recorded alice's own status; it must not bar itself")
 	})
 
@@ -87,14 +104,14 @@ func TestAnnotateIneligibleSides(t *testing.T) {
 			{ID: "Pool A-2", Status: state.MatchStatusRunning, SideAID: "alice", SideBID: "carol"},
 			{ID: "Pool A-3", Status: state.MatchStatusCompleted, SideAID: "alice", SideBID: "carol"},
 		}
-		annotateIneligibleSides(ms, nil, statuses)
+		annotateEligibility(ms, nil, statuses)
 		assert.Nil(t, ms[0].IneligibleSides)
 		assert.Nil(t, ms[1].IneligibleSides)
 	})
 
 	t.Run("no barred side: not stamped", func(t *testing.T) {
 		ms := []state.MatchResult{{ID: "Pool A-4", Status: state.MatchStatusScheduled, SideAID: "bob", SideBID: "carol"}}
-		annotateIneligibleSides(ms, nil, statuses)
+		annotateEligibility(ms, nil, statuses)
 		assert.Nil(t, ms[0].IneligibleSides)
 	})
 
@@ -102,7 +119,7 @@ func TestAnnotateIneligibleSides(t *testing.T) {
 		b := &state.Bracket{Rounds: [][]state.BracketMatch{{
 			{ID: "m-r1-0", Status: state.MatchStatusScheduled, SideAID: "alice", SideBID: "carol"},
 		}}}
-		annotateIneligibleSides(nil, b, statuses)
+		annotateEligibility(nil, b, statuses)
 		require.NotNil(t, b.Rounds[0][0].IneligibleSides)
 		assert.Equal(t, "kiken-voluntary", b.Rounds[0][0].IneligibleSides.A)
 	})
@@ -111,7 +128,7 @@ func TestAnnotateIneligibleSides(t *testing.T) {
 		b := &state.Bracket{ThirdPlaceMatch: &state.BracketMatch{
 			ID: "m-bronze", Status: state.MatchStatusScheduled, SideAID: "alice", SideBID: "carol",
 		}}
-		annotateIneligibleSides(nil, b, statuses)
+		annotateEligibility(nil, b, statuses)
 		require.NotNil(t, b.ThirdPlaceMatch.IneligibleSides)
 	})
 
@@ -127,7 +144,7 @@ func TestAnnotateIneligibleSides(t *testing.T) {
 			"dave": {PlayerID: "dave", Eligible: false, Reason: "disqualified for unsporting conduct"},
 		}
 		ms := []state.MatchResult{{ID: "Pool A-9", Status: state.MatchStatusScheduled, SideAID: "dave", SideBID: "carol"}}
-		annotateIneligibleSides(ms, nil, freeTextStatuses)
+		annotateEligibility(ms, nil, freeTextStatuses)
 		assert.Nil(t, ms[0].IneligibleSides, "an unparseable barring reason must leave the annotation nil, not an empty {}")
 	})
 
@@ -137,7 +154,7 @@ func TestAnnotateIneligibleSides(t *testing.T) {
 			"dave":  {PlayerID: "dave", Eligible: false, Reason: "disqualified for unsporting conduct"},
 		}
 		ms := []state.MatchResult{{ID: "Pool A-9", Status: state.MatchStatusScheduled, SideAID: "alice", SideBID: "dave"}}
-		annotateIneligibleSides(ms, nil, mixedStatuses)
+		annotateEligibility(ms, nil, mixedStatuses)
 		require.NotNil(t, ms[0].IneligibleSides)
 		assert.Equal(t, "kiken-voluntary", ms[0].IneligibleSides.A)
 		assert.Empty(t, ms[0].IneligibleSides.B, "dave's reason does not parse, so his side is not stamped")
@@ -243,4 +260,65 @@ func TestViewerCompetitionDetail_IneligibleSides_RemovedAfterReinstate(t *testin
 	after := findMatch(get(), "Pool A-1")
 	assert.Nil(t, after["ineligibleSides"], "the annotation must be gone once Alice is reinstated")
 	assert.Equal(t, float64(1), after["queuePosition"], "the match rejoins the queue")
+}
+
+// The withdrawnStatus stamp must still be served once every match is
+// finished. The score editor words a no-show's clear from it: without it, a
+// no-show chained onto an earlier withdrawal read "goes back to running, can
+// compete again" while the server sent the match back to the queue.
+func TestViewerCompetitionDetail_WithdrawnStatus_AfterEveryMatchIsFinished(t *testing.T) {
+	store, err := state.NewStore(t.TempDir())
+	require.NoError(t, err)
+	eng := engine.New(store)
+
+	// A league: nothing follows its table, so once its last match is played
+	// no scheduled match is left anywhere. (A mixed competition's knockout
+	// would still hold scheduled matches here; the same holds for it once the
+	// final is played.)
+	compID := "withdrawn-status-all-finished"
+	require.NoError(t, store.SaveCompetition(&state.Competition{
+		ID: compID, Format: state.CompFormatLeague, Status: state.CompStatusPools,
+	}))
+	aliceID, bobID, carolID := helper.NewUUID4(), helper.NewUUID4(), helper.NewUUID4()
+	require.NoError(t, store.SaveParticipants(compID, []domain.Player{
+		{ID: aliceID, Name: "Alice", Dojo: "A"},
+		{ID: bobID, Name: "Bob", Dojo: "B"},
+		{ID: carolID, Name: "Carol", Dojo: "C"},
+	}))
+	require.NoError(t, store.SavePoolMatches(compID, []state.MatchResult{
+		{ID: "Pool A-0", SideA: "Alice", SideB: "Bob", SideAID: aliceID, SideBID: bobID, Court: "A", Status: state.MatchStatusScheduled},
+		{ID: "Pool A-1", SideA: "Alice", SideB: "Carol", SideAID: aliceID, SideBID: carolID, Court: "A", Status: state.MatchStatusScheduled},
+		{ID: "Pool A-2", SideA: "Bob", SideB: "Carol", SideAID: bobID, SideBID: carolID, Court: "A", Status: state.MatchStatusCompleted,
+			Decision: "fought", Winner: "Bob", WinnerID: bobID, IpponsA: []string{"M"}},
+	}))
+	// Alice withdraws in Pool A-0, then a no-show is recorded against her on
+	// Pool A-1, which chains onto that bar (bc-kfup). Every match is now over.
+	_, _, err = eng.RecordDecision(compID, "Pool A-0", "kiken-voluntary", "aka", "test", nil, false)
+	require.NoError(t, err)
+	_, _, err = eng.RecordDecision(compID, "Pool A-1", "fusenpai", "aka", "", nil, false)
+	require.NoError(t, err)
+
+	gin.SetMode(gin.TestMode)
+	r := gin.New()
+	RegisterViewerHandlers(r.Group("/api/viewer"), store, eng)
+	w := httptest.NewRecorder()
+	req, err := http.NewRequest(http.MethodGet, "/api/viewer/competitions/"+compID, nil)
+	require.NoError(t, err)
+	r.ServeHTTP(w, req)
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	var body map[string]any
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &body))
+
+	var noShow map[string]any
+	for _, raw := range body["poolMatches"].([]any) {
+		if m := raw.(map[string]any); m["id"] == "Pool A-1" {
+			noShow = m
+		}
+	}
+	require.NotNil(t, noShow)
+	require.Equal(t, "completed", noShow["status"], "precondition: no match is left to play")
+	stamp, ok := noShow["withdrawnStatus"].(map[string]any)
+	require.True(t, ok, "the no-show's match carries withdrawnStatus, got %+v", noShow)
+	assert.Equal(t, false, stamp["eligible"])
+	assert.Equal(t, "Pool A-0", stamp["matchId"], "the bar is the withdrawal's, not the no-show's")
 }

@@ -357,3 +357,33 @@ func TestBracketRollback_SameNamePair_RestoresWinnerID(t *testing.T) {
 	assert.Equal(t, osakaID, m.WinnerID, "the rollback must restore the prior winner's id (Osaka), which the row's own SideA/SideB names cannot disambiguate on their own")
 	assert.Equal(t, state.MatchStatusCompleted, m.Status)
 }
+
+// A competitor whose name merely starts with "Winner of" is a competitor, not
+// a feeder label: losing a semifinal puts them in the 3rd-place match, and a
+// correction that would displace them names them.
+func TestBracket_ACompetitorNamedLikeAFeederLabel(t *testing.T) {
+	const kyushu = "Winner of Kyushu"
+	t.Run("the semifinal loser reaches the 3rd-place match", func(t *testing.T) {
+		eng, _, _ := setupTestEngine(t)
+		bracket := &state.Bracket{
+			Rounds: [][]state.BracketMatch{
+				{
+					{ID: "sf-0", SideA: kyushu, SideAID: "kyushu-id", SideB: "Bob", SideBID: "bob-id",
+						Winner: "Bob", WinnerID: "bob-id", Status: state.MatchStatusCompleted},
+					{ID: "sf-1", SideA: "Charlie", SideB: "Dave", Status: state.MatchStatusScheduled},
+				},
+				{{ID: "final", Status: state.MatchStatusScheduled}},
+			},
+			ThirdPlaceMatch: &state.BracketMatch{ID: "bronze", Status: state.MatchStatusScheduled, DisplayRound: -1},
+		}
+		eng.propagateBracketWinner(bracket, 0, 0)
+		assert.Equal(t, kyushu, bracket.ThirdPlaceMatch.SideA)
+		assert.Equal(t, "kyushu-id", bracket.ThirdPlaceMatch.SideAID)
+	})
+	t.Run("a correction names the competitor it would displace", func(t *testing.T) {
+		corrected := &state.BracketMatch{ID: "sf-0", Winner: "Bob"}
+		blocking := &state.BracketMatch{ID: "final", SideA: kyushu, SideB: "Winner of r2-m1"}
+		assert.Equal(t, kyushu, displacedCompetitor(corrected, blocking, 0))
+		assert.Equal(t, "Bob", displacedCompetitor(corrected, blocking, 1), "a feeder label falls back to the stored winner")
+	})
+}

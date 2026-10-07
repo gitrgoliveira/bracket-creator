@@ -13,30 +13,55 @@ export const EDITOR = '.editor-modal';
 // The same editor mounted INLINE, as the shiaijo page (/admin/shiaijo/:court)
 // does: admin_scoring_individual.jsx renders `variant="inline"` as
 // `<div class="scoring-panel editor-modal--compact">`, with no backdrop and no
-// `.editor-modal` class, so EDITOR matches nothing there. finishMatch takes
-// the editor's selector as `root` for that reason; the default keeps every
-// overlay caller unchanged. startMatch does not: on that page "Start match"
-// lives on the Up next card, outside the editor, and the card's button never
-// leaves (it moves on to the next match), so startMatch's wait would not hold.
+// `.editor-modal` class, so EDITOR matches nothing there. The e2e journeys
+// pass it as the editor's root (scripts/e2e/fixtures/scoring.mjs); finishMatch
+// and startMatch below drive the overlay only.
 export const INLINE_EDITOR = '.scoring-panel';
 
-// Finish is a two-tap guard on the individual and (non-kachinuki) team editors:
-// the first tap arms the button ("Tap again to finish"), only the second
-// submits (admin_scoring_individual.jsx and admin_scoring_team.jsx, the
-// `finishArmed` label). Its label is "Finish + Start Next →" instead whenever
-// another match waits on the same shiaijo, and that form leaves the editor
-// open on the next match; whether to dismiss it is the caller's business.
+// The editors ignore a repeat POINTER tap within their bounce window
+// (TAP_BOUNCE_MS, 400ms, in web-mobile/js/tap_guard.jsx): a second ippon or
+// foul on the same side of a bout, and the confirming tap of a two-tap Finish
+// or End match that came too soon after the arming one. A Playwright click is
+// a pointer tap, so a recipe waits at least this long between two such taps
+// or the second one is dropped.
+export const TAP_DWELL_MS = 500;
+
+// sameSideTapPacer: for a recipe that taps ippons from a list, returns an
+// async `pace(page, side)` to await just before each tap. It waits out
+// TAP_DWELL_MS since that side's previous tap and lets any other tap through
+// at once, so a list stays as fast as its own gaps allow.
+export function sameSideTapPacer() {
+  const last = {};
+  return async (page, side) => {
+    const since = Date.now() - (last[side] ?? -Infinity);
+    if (since < TAP_DWELL_MS) await page.waitForTimeout(TAP_DWELL_MS - since);
+    last[side] = Date.now();
+  };
+}
+
+// Finish is a two-tap guard on every editor: the first tap arms the button
+// ("Tap again to finish"), only the second submits (admin_scoring_individual.jsx
+// and admin_scoring_team.jsx, the `finishArmed` label). The engi editor's is
+// "Save result", armed as "Tap again to save" (admin_scoring_engi.jsx,
+// `saveArmed`). Its label is "Finish + Start Next →" instead whenever another
+// match waits on the same shiaijo, and that form leaves the editor open on the
+// next match; whether to dismiss it is the caller's business.
 //
 // The arm is waited for, never probed: a probe on the same tick misses it, the
 // second tap is skipped, and the next taps score a match the caller did not
 // mean. If it never appears the wait throws, because a Finish that did not arm
-// did not finish. Not for the engi editor ("Save result" commits in one tap)
-// or a correction ("Save correction" does not arm either).
-export async function finishMatch(page, root = EDITOR) {
-  const modal = page.locator(root).first();
-  await modal.locator('button').filter({ hasText: /^Finish( \+ Start Next|$)/ }).first().click();
-  const armed = modal.locator('button').filter({ hasText: /^Tap again to finish/ }).first();
+// did not finish. The second tap then waits out the bounce window, which
+// would otherwise swallow it (TAP_DWELL_MS). Not for a correction ("Save
+// correction" does not arm).
+export async function finishMatch(page) {
+  const modal = page.locator(EDITOR).first();
+  await modal.locator('button').filter({ hasText: /^(Finish( \+ Start Next|$)|Save result$)/ }).first().click();
+  // The bounce window runs from the arming tap, so the wait for the arm label
+  // counts towards it.
+  const armedAt = Date.now();
+  const armed = modal.locator('button').filter({ hasText: /^Tap again to (finish|save)/ }).first();
   await armed.waitFor({ state: 'visible', timeout: 3000 });
+  await page.waitForTimeout(Math.max(0, TAP_DWELL_MS - (Date.now() - armedAt)));
   await armed.click();
   // Return once the write has landed, not after a guessed pause. The button
   // reads "Saving…" from the second tap until the server answers, then either
@@ -44,7 +69,7 @@ export async function finishMatch(page, root = EDITOR) {
   // button takes that match's own label (Finish + Start Next). Either way no
   // button reads the arm or "Saving…" any more, and the arm label covers the
   // tick before "Saving…" first renders.
-  await modal.locator('button').filter({ hasText: /^(Tap again to finish|Saving…)/ }).first()
+  await modal.locator('button').filter({ hasText: /^(Tap again to (finish|save)|Saving…)/ }).first()
     .waitFor({ state: 'hidden', timeout: 15000 });
 }
 

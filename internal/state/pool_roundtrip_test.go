@@ -39,10 +39,18 @@ var notPersistedInPoolCSV = map[string]string{
 		"(DeriveQueuePositions), never authored, so persisting it would create a " +
 		"second source of truth that could disagree with the schedule.",
 	"IneligibleSides": "request-time-only annotation (bc-cse), stamped by " +
-		"mobileapp.annotateIneligibleSides on the served copy from the " +
+		"mobileapp.annotateEligibility on the served copy from the " +
 		"competitor-status store, never authored onto the object a write " +
 		"persists -- same discipline as QueuePosition above.",
+	"WithdrawnStatus": "request-time-only annotation stamped with IneligibleSides " +
+		"by mobileapp.annotateEligibility on the served copy, from the " +
+		"competitor-status store; never persisted, same discipline.",
 	"WinnerSide": "derived: the winner name compared against SideA/SideB.",
+	"ClearsWithdrawal": "request-only flag set by the /score handler from the " +
+		"body's clearWithdrawal: it tells THIS write to replace a recorded " +
+		"withdrawal (engine.KeepsWithdrawalRuling). Once the write lands the " +
+		"stored decision says what happened, so persisting the flag would " +
+		"make a later write read as a removal it never asked for.",
 	"SubResultsRaw": "the SubResults cell's UNPARSED bytes, retained only when " +
 		"that cell failed to parse so the whole-file rewrite cannot destroy an " +
 		"organiser's malformed edit. It has no column of its own because it IS " +
@@ -53,6 +61,14 @@ var notPersistedInPoolCSV = map[string]string{
 		"fills SubResultsRaw, and carried to the SPA so the operator sees which " +
 		"match lost its bouts. Derived state, not a column, exactly like " +
 		"QueuePosition and WinnerSide.",
+	"Changed": "request-only (bc-mrgc): the groups THIS write changes, the " +
+		"merge's input (engine.mergeMatchWrite). Once the write lands the " +
+		"stored match and its GroupStamps say what changed; persisting it " +
+		"would make a later write that names nothing read as one that does.",
+	"WriteDoor": "request-only (bc-mrgc): the endpoint a write came through, " +
+		"for its match history entry, which is where it is kept.",
+	"Merge": "the merge's report on THIS write (bc-mrgc), read by the history " +
+		"writer and the handlers' heldGroups; the history file keeps it.",
 	"DecidedByHantei": "LEGACY READ-ONLY compatibility channel (models.go doc " +
 		"comment above the field): the verdict is the domain.HanteiMark entry " +
 		"in the winner's IpponsA/IpponsB, and writers must never set this flag. " +

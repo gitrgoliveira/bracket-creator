@@ -6,8 +6,9 @@
 //
 // The editor selectors and Start come from scripts/screenshots/lib/editor.mjs,
 // re-exported here so a journey imports one scoring module. Finish is written
-// here: the app ignores a second tap inside the bounce window of the one that
-// armed it (fixtures/pace.mjs), which the library's finishMatch does not wait out.
+// here because a journey TAPS, as the operator does on the iPad, and takes the
+// inline editor as well as the overlay; the library's finishMatch clicks, on the
+// overlay only. Both wait out the bounce window (fixtures/pace.mjs).
 import { expect } from '@playwright/test';
 import { EDITOR, INLINE_EDITOR, startMatch } from '../../screenshots/lib/editor.mjs';
 import { settled } from './pace.mjs';

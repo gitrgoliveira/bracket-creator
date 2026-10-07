@@ -26,10 +26,11 @@ class FakeEventSource {
         if (typeof this.onopen === 'function') this.onopen();
     }
 
-    /** Simulate receiving a server-sent event. */
-    simulateMessage(data) {
+    /** Simulate receiving a server-sent event; `id` is the frame's `id:` line. */
+    simulateMessage(data, id) {
+        if (id !== undefined) this.lastEventId = id;
         if (typeof this.onmessage === 'function') {
-            this.onmessage({ data: typeof data === 'string' ? data : JSON.stringify(data) });
+            this.onmessage({ data: typeof data === 'string' ? data : JSON.stringify(data), lastEventId: this.lastEventId || '' });
         }
     }
 
@@ -337,5 +338,50 @@ describe('subscribeToEvents: shared singleton', () => {
 
         vi.clearAllTimers();
         unsub1(); unsub2();
+    });
+});
+
+// A reconnect opens a NEW EventSource, which sends no Last-Event-ID header, so
+// the client carries the last id it saw on the URL and the hub replays every
+// event after it. Without it the events sent while the stream was down were
+// lost until the next event's seq gap was noticed.
+describe('reconnect resumes from the last event id', () => {
+    it('the first connect asks for no replay, a reconnect asks from the last id seen', () => {
+        const unsub = API.subscribeToEvents(() => {});
+        const first = FakeEventSource.instances[0];
+        expect(first.url).toBe('/api/events');
+        first.simulateOpen();
+        first.simulateMessage({ type: 'match_updated', seq: 6 }, '6');
+        first.simulateMessage({ type: 'match_updated', seq: 7 }, '7');
+        first.simulateMessage({ type: 'heartbeat', nowMs: Date.now() });
+
+        first.simulateError();
+        vi.advanceTimersByTime(5000);
+        expect(FakeEventSource.instances).toHaveLength(2);
+        expect(FakeEventSource.instances[1].url).toBe('/api/events?lastEventId=7');
+
+        // A forced reconnect (tab resume, back online) resumes the same way.
+        FakeEventSource.instances[1].simulateOpen();
+        FakeEventSource.instances[1].simulateMessage({ type: 'match_updated', seq: 8 }, '8');
+        API.reconnectEvents();
+        expect(FakeEventSource.instances[2].url).toBe('/api/events?lastEventId=8');
+
+        vi.clearAllTimers();
+        unsub();
+    });
+
+    it('a resync from a restarted server that carries no id resets it', () => {
+        const unsub = API.subscribeToEvents(() => {});
+        const src = FakeEventSource.instances[0];
+        src.simulateOpen();
+        src.simulateMessage({ type: 'match_updated', seq: 40 }, '40');
+        // The restarted server's head is 0: its resync has no id: line, and the
+        // browser keeps 40 as the source's last id.
+        src.simulateMessage({ type: 'resync_required', seq: 0 });
+        API.reconnectEvents();
+        expect(FakeEventSource.instances[1].url).toBe('/api/events');
+
+        vi.clearAllTimers();
+        unsub();
     });
 });

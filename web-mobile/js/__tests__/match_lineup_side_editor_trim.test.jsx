@@ -36,9 +36,13 @@ function findComponents(tree, name) {
 const saveButton = (tree) =>
   findHosts(tree, 'button').find(b => /Save lineup/.test(collectText(b)));
 
+// A Save reads the lineup again before it writes (operator decision 2026-10-05),
+// so the write lands a few microtask hops after the tap.
+const flush = async () => { for (let i = 0; i < 12; i++) await Promise.resolve(); };
+
 describe('MatchLineupSideEditor trims names before saving', () => {
   let runtime, MatchLineupSideEditor;
-  let origAPI, origHelpers, origResolveRound, origCompMatches;
+  let origAPI, origHelpers, origCompMatches;
 
   const COMP = { id: 'comp-1', name: 'Team Event', kind: 'team', teamSize: 3 };
   const TEAM = { id: 'uuid-grouped', name: 'Grouped Team' }; // no metadata
@@ -47,10 +51,8 @@ describe('MatchLineupSideEditor trims names before saving', () => {
   beforeEach(async () => {
     origAPI = global.window.API;
     origHelpers = global.window.AdminLineupHelpers;
-    origResolveRound = global.window.resolveRoundIndex;
     origCompMatches = global.window.compMatches;
 
-    global.window.resolveRoundIndex = () => 0;
     global.window.compMatches = () => [];
     global.window.AdminLineupHelpers = {
       positionsForSize: (n) => Array.from({ length: n }, (_, i) => ({ key: String(i + 1), label: String(i + 1) })),
@@ -59,8 +61,7 @@ describe('MatchLineupSideEditor trims names before saving', () => {
       teamIdOf: (t) => t?.id || t?.name || '',
     };
     global.window.API = {
-      fetchMatchLineup: vi.fn().mockResolvedValue(null),
-      fetchTeamLineup: vi.fn().mockResolvedValue(null),
+      fetchLineupInForce: vi.fn().mockResolvedValue(null),
       putMatchLineup: vi.fn().mockResolvedValue({ positions: {} }),
     };
 
@@ -75,7 +76,6 @@ describe('MatchLineupSideEditor trims names before saving', () => {
     global.React = realReact;
     global.window.API = origAPI;
     global.window.AdminLineupHelpers = origHelpers;
-    global.window.resolveRoundIndex = origResolveRound;
     global.window.compMatches = origCompMatches;
     vi.resetModules();
   });
@@ -84,8 +84,7 @@ describe('MatchLineupSideEditor trims names before saving', () => {
     runtime.mount(MatchLineupSideEditor, {
       comp: COMP, team: TEAM, match: MATCH, allMatches: [MATCH], password: 'pw', showToast: vi.fn(),
     });
-    await Promise.resolve();
-    await Promise.resolve();
+    for (let i = 0; i < 6; i++) await Promise.resolve(); // resolveMatchLineup adds hops
     return runtime.currentTree();
   }
 
@@ -96,21 +95,27 @@ describe('MatchLineupSideEditor trims names before saving', () => {
     pickers[0].props.onSelect('  Padded Name  ');
     tree = runtime.currentTree();
     saveButton(tree).props.onClick();
-    await Promise.resolve();
+    await flush();
     expect(global.window.API.putMatchLineup).toHaveBeenCalled();
     // putMatchLineup(compId, teamId, matchId, positionsOut, ...)
     const positionsOut = global.window.API.putMatchLineup.mock.calls.at(-1)[3];
     expect(positionsOut['1']).toBe('Padded Name');
   });
 
-  it('drops a whitespace-only name rather than persisting blanks', async () => {
+  it('clears a position typed over with whitespace only rather than persisting blanks', async () => {
+    // Based on a loaded override that holds a name: blanking an already-empty
+    // side is not a change, and Save writes nothing for it.
+    global.window.API.fetchLineupInForce = vi.fn().mockResolvedValue({
+      matchId: 'match-1', positions: { 1: 'Old Name' }, sourceMatchId: 'match-1',
+    });
     let tree = await mount();
     const pickers = findComponents(tree, 'LineupNameInput');
     pickers[0].props.onSelect('   ');
     tree = runtime.currentTree();
     saveButton(tree).props.onClick();
-    await Promise.resolve();
+    await flush();
+    // The position goes as its empty name, never as the blanks the operator typed.
     const positionsOut = global.window.API.putMatchLineup.mock.calls.at(-1)[3];
-    expect(positionsOut['1']).toBeUndefined();
+    expect(positionsOut['1']).toBe('');
   });
 });

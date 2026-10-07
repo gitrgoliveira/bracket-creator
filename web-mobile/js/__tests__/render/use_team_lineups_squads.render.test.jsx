@@ -21,15 +21,14 @@ const MATCH = { id: 'Pool A-0', compId: 'comp1', sideA: { id: 'team-a', name: 'T
 
 let latest;
 function Probe({ competition }) {
-  latest = useTeamLineups(MATCH, competition, 0);
+  latest = useTeamLineups(MATCH, competition);
   return null;
 }
 
 beforeEach(async () => {
   origAPI = window.API;
   window.API = {
-    fetchMatchLineup: vi.fn().mockResolvedValue(null),
-    fetchTeamLineup: vi.fn().mockResolvedValue(null),
+    fetchLineupInForce: vi.fn().mockResolvedValue(null),
     fetchCompetitionDetails: vi.fn().mockResolvedValue({}),
   };
   ({ useTeamLineups } = await import('../../match_scoreboard.jsx'));
@@ -49,16 +48,19 @@ describe('useTeamLineups follows a changed squads map (bc-dnst)', () => {
   });
 });
 
-// A pool match stores Round -1 ("no round"). A board handed the stored
-// match (no roundIndex) must read it as round 0, as resolveRoundIndex does:
-// the server refuses a negative round with a 400.
-describe('useTeamLineups reads a pool match stored Round -1 as round 0', () => {
-  it('never asks the server for round -1', async () => {
+// A team fields the lineup in force at THIS match (the one it carries from its
+// previous match, unless one is entered for the match): each side is asked for
+// by team and match alone, never by a round the board would have to derive, so
+// a pool match stored Round -1 ("no round") needs no special reading.
+describe('useTeamLineups asks for the lineup in force at the match', () => {
+  it('asks for each side by team and match, and for no round', async () => {
     const POOL_MATCH = { ...MATCH, round: -1 };
     function PoolProbe() { useTeamLineups(POOL_MATCH, COMP('Sato')); return null; }
     await act(async () => { render(<PoolProbe />); });
     await act(async () => { await Promise.resolve(); await Promise.resolve(); });
-    expect(window.API.fetchTeamLineup).toHaveBeenCalled();
-    for (const call of window.API.fetchTeamLineup.mock.calls) expect(call[2]).toBe(0);
+    expect(window.API.fetchLineupInForce.mock.calls).toEqual([
+      ['comp1', 'team-a', 'Pool A-0'],
+      ['comp1', 'team-b', 'Pool A-0'],
+    ]);
   });
 });

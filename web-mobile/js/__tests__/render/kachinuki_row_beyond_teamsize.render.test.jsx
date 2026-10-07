@@ -20,6 +20,7 @@ import React from 'react';
 import { render, act, fireEvent } from '@testing-library/react';
 import { describe, it, expect, vi, beforeAll, afterAll, beforeEach } from 'vitest';
 import { installWindowStubs } from '../helpers/stub_globals.js';
+import { answered } from '../helpers/team_members.js';
 
 const STUBBED_GLOBALS = {
   isHikiwake: () => false,
@@ -28,7 +29,6 @@ const STUBBED_GLOBALS = {
   isTextEntry: () => false,
   isInteractiveTarget: () => false,
   confirmDialog: vi.fn().mockResolvedValue(true),
-  resolveRoundIndex: () => 0,
   API: {},
   AdminLineupHelpers: { rosterFor: vi.fn().mockReturnValue([]) },
   compMatches: () => [],
@@ -70,7 +70,7 @@ beforeEach(() => {
     recordDaihyosen: vi.fn(),
     removeDaihyosen: vi.fn(),
     putMatchLineup,
-    renameTeamMember: vi.fn().mockResolvedValue({ id: 'm-blank', index: 7, name: 'Ito' }),
+    renameTeamMember: vi.fn().mockResolvedValue(answered({ id: 'm-blank', index: 7 }, { name: 'Ito' })),
     recordDecision: vi.fn(),
     fetchSquads: vi.fn().mockResolvedValue({ 'team-A': SQUAD_A, 'team-B': SQUAD_B }),
   };
@@ -142,7 +142,7 @@ describe('bc-dnst: kachinuki row beyond teamSize routes name picks off the lineu
     const freshOption = options.find((b) => b.textContent.includes('Fresh Fighter'));
     expect(freshOption, 'expected "Fresh Fighter" to be offered from the squad').toBeTruthy();
 
-    await act(async () => { fireEvent.mouseDown(freshOption); });
+    await act(async () => { fireEvent.click(freshOption); });
 
     expect(putMatchLineup).not.toHaveBeenCalled();
 
@@ -170,7 +170,7 @@ describe('bc-dnst: kachinuki row beyond teamSize routes name picks off the lineu
     const blankOption = Array.from(document.querySelectorAll('.team-sub-match__side--aka .pmf__option'))
       .find((b) => b.textContent.includes('T5.7'));
     expect(blankOption, 'expected the blank slot T5.7 to be offered').toBeTruthy();
-    await act(async () => { fireEvent.mouseDown(blankOption); });
+    await act(async () => { fireEvent.click(blankOption); });
     // The current bout's AKA side is the one that renders an input (fought
     // rows are read-only), so locate it from the input, not the first row.
     const akaSide = () => document.querySelector('.team-sub-match__side--aka input').closest('.team-sub-match__side--aka');

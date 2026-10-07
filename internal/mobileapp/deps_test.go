@@ -34,6 +34,10 @@ func (stubCompetitionStore) MatchSidesByID(string, string) (string, string, stri
 	return "", "", "", "", false, nil
 }
 
+func (stubCompetitionStore) LoadCompetitorStatus(string) (map[string]domain.CompetitorStatus, error) {
+	return nil, nil
+}
+
 // stubTournamentLoader is a no-op implementation of TournamentLoader. Same
 // rationale as stubCompetitionStore.
 type stubTournamentLoader struct{}
@@ -98,7 +102,7 @@ func (stubScoringEngine) UpdateMatchTime(string, string, string) error {
 	return nil
 }
 
-func (stubScoringEngine) MaybeAdvanceKachinuki(string, string) (bool, []state.SubMatchResult, error) {
+func (stubScoringEngine) MaybeAdvanceKachinuki(string, string) (bool, *engine.KachinukiAdvance, error) {
 	return false, nil, nil
 }
 

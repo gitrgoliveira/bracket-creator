@@ -4,11 +4,11 @@ import (
 	"encoding/json"
 	"log"
 	"net/http"
-	"regexp"
 	"strings"
 
 	"github.com/gin-gonic/gin"
 	"github.com/gitrgoliveira/bracket-creator/internal/domain"
+	"github.com/gitrgoliveira/bracket-creator/internal/helper"
 	"github.com/gitrgoliveira/bracket-creator/internal/state"
 )
 
@@ -33,7 +33,7 @@ import (
 // the viewer payload does (that shared helper calls the engine function
 // directly -- a plain package-level function, not threaded through as a
 // parameter -- so this file needs no engine reference of its own), the SAME
-// derivation the blank-template export uses, so this surface's numbers
+// derivation the stored-draw export uses, so this surface's numbers
 // cannot silently disagree with either of those.
 func RegisterDisplayHandlers(r *gin.RouterGroup, store *state.Store) {
 	// P2 (mp-9afd style): singleflight group for the court-scoped match feed,
@@ -231,39 +231,22 @@ func RegisterDisplayHandlers(r *gin.RouterGroup, store *state.Store) {
 	})
 }
 
-// bracketPlaceholderRE / poolOriginPlaceholderRE use the same patterns as the
-// BRACKET_PLACEHOLDER_RE / POOL_ORIGIN_PLACEHOLDER_RE constants in
-// web-mobile/js/admin_helpers.jsx (the Go and JS identifiers differ in casing).
-// A side matching either is an unresolved placeholder ("Winner of r2-m1",
-// "Pool A-1st"), not a real fighter.
-var (
-	bracketPlaceholderRE    = regexp.MustCompile(`^Winner of r\d+-m\d+$`)
-	poolOriginPlaceholderRE = regexp.MustCompile(`^Pool .+-\d+(st|nd|rd|th)$`)
-)
-
 // courtMatchSidesReal mirrors hasBothSides (web-mobile/js/admin_helpers.jsx):
 // a match counts only when both sides are present AND neither is a bracket
 // "Winner of…" or pool-origin "Pool A-1st" placeholder, so the
 // court→competitions index lists exactly the competitions the operator selector
-// derives from the aggregate today. One intentional difference from the JS
-// helper: this Go side additionally TrimSpace-normalizes each name before the
-// empty/placeholder checks. That only widens the empty-side guard (a
-// whitespace-only side reads as absent) and never changes which real names
-// pass, so the two predicates agree on every real match; they are not
-// byte-for-byte identical implementations.
+// derives from the aggregate today. The placeholder shapes are helper's
+// (IsReservedParticipantName), the patterns BRACKET_PLACEHOLDER_RE /
+// POOL_ORIGIN_PLACEHOLDER_RE in admin_helpers.jsx repeat. One intentional
+// difference from the JS helper: this Go side additionally TrimSpace-normalizes
+// each name before the empty/placeholder checks. That only widens the
+// empty-side guard (a whitespace-only side reads as absent) and never changes
+// which real names pass, so the two predicates agree on every real match; they
+// are not byte-for-byte identical implementations.
 func courtMatchSidesReal(a, b string) bool {
 	a = strings.TrimSpace(a)
 	b = strings.TrimSpace(b)
-	if a == "" || b == "" {
-		return false
-	}
-	if bracketPlaceholderRE.MatchString(a) || bracketPlaceholderRE.MatchString(b) {
-		return false
-	}
-	if poolOriginPlaceholderRE.MatchString(a) || poolOriginPlaceholderRE.MatchString(b) {
-		return false
-	}
-	return true
+	return a != "" && b != "" && !helper.IsReservedParticipantName(a) && !helper.IsReservedParticipantName(b)
 }
 
 // resolveCourt is the shared preamble for the court-scoped display surfaces. It

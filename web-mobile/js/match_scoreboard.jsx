@@ -19,11 +19,12 @@
 
 import { resolveMatchLineup, resolveLineupTeamId, pickFromLineup, pickMemberIdFromLineup, boutSideView, kachinukiHidesLineupPosition, resolveBoutSideSquadLabel } from './lineup_resolver.jsx';
 import { DAIHYOSEN_POSITION } from './pool_ids.jsx';
-import { resultSlot, sideSlotOrder, realIppons, hanteiTied, nameOf, attributeWinnerSide, subBoutAttribution } from './result_slot.jsx';
+import { resultSlot, sideSlotOrder, realIppons, hanteiTied, nameOf, attributeWinnerSide, subBoutAttribution, defaultWinMaru } from './result_slot.jsx';
 import { sideLookupKey } from './competitor_identity.jsx';
 import { NumberedName, numberFollowsName } from './numbered_name.jsx';
 import { creditedBoutSide, subBoutHasResult } from './team_default_credit.jsx';
 import { barredNameMark } from './barred_chip.jsx';
+import { matchShowsScore } from './match_shows_score.jsx';
 
 // bc-pnum: inline style for the squad member label riding beside a bout
 // row's fighter name (BoutSubRow below), the public twin of
@@ -73,12 +74,11 @@ export function boutHansokuMark(foulCount) {
 // competition (or a payload predating this field) simply yields {} and
 // every lookup below degrades to [].
 //
-// `roundIndex` (optional, 0-based) is the authoritative round for the
-// round-scoped lineup fallback. Callers that know the bracket round (the TV
-// display / overlay carry it as promoted.roundIndex) MUST pass it: do not
-// rely on parsing match.round, which now holds a bracket-size display label
-// ("Round 16"/"Round 32") in some surfaces and would misderive the round.
-export function useTeamLineups(match, competition, roundIndex) {
+// Each side's lineup is the one in force for its team at THIS match (a team
+// carries the lineup of its previous match unless one is entered for the
+// match; resolveMatchLineup reads it from the server, which owns the rule), so
+// no round has to be derived here.
+export function useTeamLineups(match, competition) {
   const [lineupA, setLineupA] = useSB(null);
   const [lineupB, setLineupB] = useSB(null);
   const [squadA, setSquadA] = useSB([]);
@@ -160,29 +160,13 @@ export function useTeamLineups(match, competition, roundIndex) {
           console.warn("useTeamLineups: competition fetch failed", _e);
         }
       }
-      // Prefer the explicit 0-based round index. Only when it is absent do we
-      // fall back to match.round: a raw numeric index, or the legacy engine
-      // label "Round <number>" (1-based round NUMBER → 0-based). We deliberately
-      // do NOT trust a bracket-size label here; callers with a real round pass
-      // roundIndex so this parse is never reached on those surfaces.
-      let round = 0;
-      if (typeof roundIndex === "number" && roundIndex >= 0) {
-        round = roundIndex;
-      } else if (typeof match.round === "number" && match.round >= 0) {
-        // A pool match stores Round -1 ("no round"); like resolveRoundIndex,
-        // it reads as round 0 rather than asking the server for round -1.
-        round = match.round;
-      } else if (typeof match.round === "string") {
-        const mr = /^Round\s+(\d+)$/.exec(match.round);
-        if (mr) round = parseInt(mr[1], 10) - 1;
-      }
       const teamAId = resolveLineupTeamId(sideAId, players);
       const teamBId = resolveLineupTeamId(sideBId, players);
       // Both sides are independent GETs: fetch them in parallel to halve the
       // time-to-render (the promoted match changes often on TV/overlay).
       const [la, lb] = await Promise.all([
-        teamAId ? resolveMatchLineup(compId, teamAId, matchId, round, window.API) : null,
-        teamBId ? resolveMatchLineup(compId, teamBId, matchId, round, window.API) : null,
+        teamAId ? resolveMatchLineup(compId, teamAId, matchId, window.API) : null,
+        teamBId ? resolveMatchLineup(compId, teamBId, matchId, window.API) : null,
       ]);
       if (cancelled) return;
       if (teamAId) setLineupA(la);
@@ -192,9 +176,7 @@ export function useTeamLineups(match, competition, roundIndex) {
       if (teamBId) setSquadB(squads[teamBId] || []);
     })();
     return () => { cancelled = true; };
-    // match?.round participates in the fallback-round lineup fetch, so a round
-    // change on a reused match id must re-run the effect.
-  }, [compId, matchId, sideAId, sideBId, roundIndex, match?.round, lineupVersion, squadsSig]);
+  }, [compId, matchId, sideAId, sideBId, lineupVersion, squadsSig]);
 
   return { lineupA, lineupB, squadA, squadB };
 }
@@ -269,7 +251,7 @@ function subWinnerSides(sub, matchSideA, matchSideB) {
 // Ht DOES land there (it takes the first free slot), so a selector on it proves
 // the mark's position only when the fixture's scoreline is stated too; assert on
 // the whole `.msb-slots` group when you mean "somewhere in the win group".
-const WAZA_NAMES = { M: "Men (head)", K: "Kote (wrist)", D: "Do (body)", T: "Tsuki (throat)", H: "Hansoku (penalty)", S: "Sune (shin)", "○": "Default win", Ht: "Hantei (judges' decision)" };
+const WAZA_NAMES = { M: "Men (head)", K: "Kote (wrist)", D: "Do (body)", T: "Tsuki (throat)", H: "Hansoku (penalty)", S: "Sune (shin)", "○": "Awarded (kiken, fusenpai or fusensho)", Ht: "Hantei (judges' decision)" };
 
 function slotCells(letters, side, testid) {
   // sideSlotOrder, not a local reverse: slot 0 is the OUTER (name-side) cell on
@@ -362,7 +344,7 @@ function centreMarks(sub, matchSideA, matchSideB) {
   // the mark then renders inboard of them rather than being dropped.
   const resultCells = (letters) => {
     if (!sub.decidedByHantei) {
-      return { cells: window.defaultWinMaru ? window.defaultWinMaru(sub.encho) : ["○", "○"], loose: false };
+      return { cells: defaultWinMaru(sub.encho), loose: false };
     }
     const cells = letters.slice(0, 2);
     const { slot, loose } = resultSlot(cells);
@@ -620,21 +602,28 @@ export function IndividualScore({ match, variant, showNames, withZekkenName, shi
   const aKey = sideId(match.sideA) || nameOf(match.sideA);
   const bKey = sideId(match.sideB) || nameOf(match.sideB);
   const ambiguous = !!aKey && aKey === bKey;
+  // bc-sbq: a match waiting in the queue keeps its score on the server but is
+  // shown NOT STARTED (matchShowsScore): the pairing with empty
+  // slots, no marks, no penalty triangle, a plain "vs" centre. Gated here,
+  // inside the component, so every host (TV board, lobby, viewer card)
+  // inherits it; `result` is the one source every score field below reads.
+  const shows = matchShowsScore(match);
+  const result = shows ? match : {};
   const sub = {
-    ipponsA: match.ipponsA || [],
-    ipponsB: match.ipponsB || [],
-    hansokuA: match.hansokuA, hansokuB: match.hansokuB,
-    decidedByHantei: match.decidedByHantei, score: match.score, decision: match.decision,
+    ipponsA: result.ipponsA || [],
+    ipponsB: result.ipponsB || [],
+    hansokuA: result.hansokuA, hansokuB: result.hansokuB,
+    decidedByHantei: result.decidedByHantei, score: result.score, decision: result.decision,
     // encho MUST be threaded: without it matchMiddleMark can never yield (E) on
     // an individual row, and defaultWinMaru would award the regulation ○○ for a
     // default win that actually happened in overtime, where the rulebook marks
     // a single ○. This row centre is the mark's ONE home (operator ruling):
     // the TV/lobby header chips that used to duplicate X/(E)/(DH) above it
     // were removed; only the OBS overlay, which renders no row, keeps a chip.
-    encho: match.encho,
-    winner: ambiguous ? "" : (sideId(match.winner) || nameOf(match.winner)),
+    encho: result.encho,
+    winner: ambiguous ? "" : (sideId(result.winner) || nameOf(result.winner)),
     sideA: aKey, sideB: bKey,
-    flagsA: match.flagsA, flagsB: match.flagsB,
+    flagsA: result.flagsA, flagsB: result.flagsB,
   };
   // showNames fills the (otherwise empty) name spans with the two competitors,
   // colour-coded Shiro dark / Aka red: used by the TV pool/round list where each
@@ -761,7 +750,19 @@ export function teamNameMark(side, mark, nameEl) {
   return numberFollowsName(side) ? <>{markEl}{" "}{nameEl}</> : <>{nameEl}{" "}{markEl}</>;
 }
 
-export function TeamScoreboard({ subResults, teamResult, lineupA, lineupB, teamSize, showDH, variant, shiroName, akaName, matchSideA, matchSideB, isRunning, kachinuki, squadA, squadB, numberA, numberB, decision, decisionBy, status, shiroMark, akaMark }) {
+export function TeamScoreboard({ subResults: recordedSubResults, teamResult: recordedTeamResult, lineupA, lineupB, teamSize, showDH: showDHProp, variant, shiroName, akaName, matchSideA, matchSideB, isRunning, kachinuki, squadA, squadB, numberA, numberB, decision, decisionBy, status, shiroMark, akaMark }) {
+  // bc-sbq: a match waiting in the queue keeps its fought bouts on the server
+  // but is shown NOT STARTED (matchShowsScore): every bout row
+  // queued with empty slots, no marks, IV/PW 0, exactly as a match that never
+  // began. So a non-shown match renders from NO bouts and NO aggregate, and
+  // its Daihyosen row is withheld too: with the bouts blanked the aggregate
+  // reads tied, and a host's showDH (computed from the REAL bouts) would
+  // otherwise print "Daihyosen pending" on a match that has not started.
+  // `status` is therefore required of every host.
+  const shows = matchShowsScore({ status });
+  const subResults = shows ? recordedSubResults : [];
+  const teamResult = shows ? recordedTeamResult : null;
+  const showDH = shows && showDHProp;
   // Real numbered bouts only: exclude the daihyosen sentinel and any malformed
   // negative position (mirrors the Go-side defensive skip).
   const regular = (subResults || []).filter(s => s.position > DAIHYOSEN_POSITION);

@@ -132,6 +132,35 @@ describe('API Utils', () => {
       expect(result2.forceDownstreamReopen).toBeUndefined();
     });
 
+    // Operator ruling 2026-10-03: Remove withdrawal, then Save correction,
+    // sends the real result with clearWithdrawal so it replaces the recorded
+    // withdrawal instead of being kept under it. A plain correction must not
+    // carry the key at all (engine.KeepsWithdrawalRuling keeps the ruling then).
+    it('forwards clearWithdrawal:true with the real result (Remove withdrawal)', () => {
+      const match = { sideA: 'A', sideB: 'B' };
+      const won = toBackendMatchResult({
+        winner: 'A', status: 'completed', ipponsA: ['M', 'K'], ipponsB: ['M'],
+        score: { type: 'ippon' }, clearWithdrawal: true,
+      }, match);
+      expect(won.clearWithdrawal).toBe(true);
+      expect(won.decision).toBe('');
+      expect(won.winner).toBe('A');
+      const drawn = toBackendMatchResult({
+        winner: null, status: 'completed', ipponsA: [], ipponsB: [],
+        score: { type: 'hikiwake' }, clearWithdrawal: true,
+      }, match);
+      expect(drawn.clearWithdrawal).toBe(true);
+      expect(drawn.decision).toBe('hikiwake');
+    });
+
+    it('omits clearWithdrawal when absent or falsy (a plain correction keeps the ruling)', () => {
+      const match = { sideA: 'A', sideB: 'B' };
+      const plain = toBackendMatchResult({ winner: 'A', status: 'completed', ipponsA: ['M'], ipponsB: [] }, match);
+      expect(plain).not.toHaveProperty('clearWithdrawal');
+      const off = toBackendMatchResult({ winner: 'A', status: 'completed', ipponsA: ['M'], ipponsB: [], clearWithdrawal: false }, match);
+      expect(off).not.toHaveProperty('clearWithdrawal');
+    });
+
     it('an explicit false leaves the payload markless (the clear IS the absence)', () => {
       const match = { sideA: 'A', sideB: 'B', decidedByHantei: true };
       const result = toBackendMatchResult({
@@ -1163,7 +1192,7 @@ describe('API Utils', () => {
           json: async () => ({ error: 'downstream_knockout_running', matchId: '', runningMatches: [{ id: 'm9', number: 9 }] }),
         });
         await expect(API.overridePoolRanks('c1', 'Pool A', order, 'pw', true))
-          .rejects.toThrow('Match 9 is being fought now. Finish it or send it back to the queue, then save again.');
+          .rejects.toThrow('Match 9 is being fought now. Finish it or send it back to the queue, then save this correction again.');
         const [, opts] = global.fetch.mock.calls[0];
         expect(JSON.parse(opts.body)).toEqual({ ranks: order, forceDownstreamReopen: true });
       });
@@ -1864,5 +1893,28 @@ describe('normalizeMatch: same-name winner attribution is arbitrary but CONSISTE
       sideA: 'Tanaka', sideB: 'Suzuki', winner: 'Suzuki', status: 'completed',
     }, map);
     expect(norm.winner.id).toBe('uuid-s');
+  });
+});
+
+// bc-sbq: the court console's Start carries startOnly so the server keeps the
+// score a queued match already holds; the wire has no other way to say "no
+// score sent", since the start's empty arrays are the same bytes as an
+// operator clearing every mark.
+describe('startOnly reaches the wire only from startPatch (bc-sbq)', () => {
+  it('startPatch is flagged, and the serializer carries the flag', async () => {
+    const { startPatch } = await import('../admin_schedule_score_editor.jsx');
+    const patch = startPatch();
+    expect(patch.startOnly).toBe(true);
+    const wire = toBackendMatchResult(patch, { sideA: 'Alice', sideB: 'Bob' });
+    expect(wire.startOnly).toBe(true);
+    expect(wire.status).toBe('running');
+    // A start sends no scoreline: the server keeps the stored one.
+    expect(wire.ipponsA).toBeUndefined();
+    expect(wire.hansokuB).toBeUndefined();
+  });
+
+  it('an editor board sent as running is not flagged', () => {
+    const wire = toBackendMatchResult({ status: 'running', ipponsA: [], ipponsB: [] }, { sideA: 'Alice', sideB: 'Bob' });
+    expect(wire.startOnly).toBeUndefined();
   });
 });

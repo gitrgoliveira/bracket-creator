@@ -73,7 +73,7 @@ describe('LineupNameInput click-outside / blur commit', () => {
     expect(onSelect).not.toHaveBeenCalled();
   });
 
-  it('option onMouseDown commits the option name (single call, no double-commit from subsequent click-outside)', () => {
+  it('option click commits the option name (single call, no double-commit from subsequent click-outside)', () => {
     const onSelect = vi.fn();
     const roster = ['Tanaka', 'Suzuki'];
     let tree = runtime.mount(LineupNameInput, { value: '', roster, onSelect, ariaLabel: 'pos', color: 'shiro' });
@@ -86,8 +86,11 @@ describe('LineupNameInput click-outside / blur commit', () => {
     const optionBtn = findInTree(tree, n => n?.type === 'button' && !!n?.props?.onMouseDown);
     expect(optionBtn).toBeTruthy();
 
-    // Fire option mousedown (preventDefault + commit option name).
+    // The option's mousedown only keeps focus in the input; its click
+    // commits the option name (bc-flst).
     optionBtn.props.onMouseDown({ preventDefault: vi.fn() });
+    expect(onSelect).not.toHaveBeenCalled();
+    optionBtn.props.onClick({ detail: 1 });
     // onSelect called with the option name.
     expect(onSelect).toHaveBeenCalledTimes(1);
 
@@ -163,7 +166,7 @@ describe('LineupNameInput object-entry roster (bc-dnst)', () => {
     const optionButtons = findAll(tree, n => n?.type === 'button' && hasClass(n, 'pmf__option'));
     expect(optionButtons.length).toBe(2);
     // First option is the named entry (Sato).
-    optionButtons[0].props.onMouseDown({ preventDefault: vi.fn() });
+    optionButtons[0].props.onClick({ detail: 1 });
 
     expect(onSelect).toHaveBeenCalledTimes(1);
     expect(onSelect).toHaveBeenCalledWith('Sato', roster[0]);
@@ -177,7 +180,7 @@ describe('LineupNameInput object-entry roster (bc-dnst)', () => {
     tree = runtime.currentTree();
 
     const optionButtons = findAll(tree, n => n?.type === 'button' && hasClass(n, 'pmf__option'));
-    optionButtons[1].props.onMouseDown({ preventDefault: vi.fn() });
+    optionButtons[1].props.onClick({ detail: 1 });
 
     expect(onSelect).toHaveBeenCalledTimes(1);
     expect(onSelect).toHaveBeenCalledWith('', roster[1]);
@@ -202,13 +205,124 @@ describe('LineupNameInput object-entry roster (bc-dnst)', () => {
     tree = runtime.currentTree();
 
     const optionButtons = findAll(tree, n => n?.type === 'button' && hasClass(n, 'pmf__option'));
-    optionButtons[0].props.onMouseDown({ preventDefault: vi.fn() });
+    optionButtons[0].props.onClick({ detail: 1 });
 
     expect(onSelect).toHaveBeenCalledTimes(1);
     // A string-origin entry still commits like a plain string always did:
     // ONE argument, not a second `undefined` (which would fail
     // toHaveBeenCalledWith('Tanaka') under Vitest's exact-arity matching).
     expect(onSelect).toHaveBeenCalledWith('Tanaka');
+    expect(onSelect.mock.calls[0].length).toBe(1);
+  });
+});
+
+// bc-flst: a pick used to commit on MOUSEDOWN and close the list mid-gesture,
+// so the rest of the tap (and a double tap's second tap) landed on whatever
+// the list had covered; and the list opened only from the focus EVENT, so a
+// box that kept focus after a pick would not reopen on a tap. Every commit is
+// now on click, and a tap on the box reopens it.
+describe('LineupNameInput commits on click and reopens on tap (bc-flst)', () => {
+  let runtime, LineupNameInput;
+
+  beforeEach(async () => {
+    global.window.useClickOutside = vi.fn();
+    runtime = makeReactive();
+    global.React = runtime.React;
+    vi.resetModules();
+    ({ LineupNameInput } = await import('../admin_scoring_shared.jsx'));
+  });
+
+  afterEach(() => {
+    runtime.unmount();
+    global.React = realReact;
+    vi.resetModules();
+  });
+
+  const dropdownOf = (tree) => findInTree(tree, n => hasClass(n, 'pmf__dropdown'));
+  const inputOf = (tree) => findInTree(tree, n => n?.type === 'input');
+
+  it('a tap on the already-focused box reopens the list', () => {
+    const onSelect = vi.fn();
+    let tree = runtime.mount(LineupNameInput, { value: '', roster: ['Tanaka', 'Suzuki'], onSelect, ariaLabel: 'pos', color: 'shiro' });
+    inputOf(tree).props.onFocus();
+    tree = runtime.currentTree();
+    const option = findAll(tree, n => n?.type === 'button' && hasClass(n, 'pmf__option'))[0];
+    option.props.onClick({ detail: 1 });
+    tree = runtime.currentTree();
+    expect(onSelect).toHaveBeenCalledWith('Tanaka');
+    expect(dropdownOf(tree)).toBeFalsy();
+
+    // The box kept focus (the option's mousedown prevented the blur), so no
+    // focus event will come: the tap itself must reopen the list.
+    expect(typeof inputOf(tree).props.onClick).toBe('function');
+    inputOf(tree).props.onClick({ detail: 1 });
+    tree = runtime.currentTree();
+    expect(dropdownOf(tree)).toBeTruthy();
+  });
+
+  it('a tap on an open box never closes it (the click after the first focus is a no-op)', () => {
+    let tree = runtime.mount(LineupNameInput, { value: '', roster: ['Tanaka'], onSelect: vi.fn(), ariaLabel: 'pos', color: 'shiro' });
+    inputOf(tree).props.onFocus();
+    tree = runtime.currentTree();
+    inputOf(tree).props.onClick({ detail: 1 });
+    tree = runtime.currentTree();
+    expect(dropdownOf(tree)).toBeTruthy();
+  });
+
+  it('a tap on a disabled box does not open the list', () => {
+    let tree = runtime.mount(LineupNameInput, { value: '', roster: ['Tanaka'], onSelect: vi.fn(), ariaLabel: 'pos', color: 'shiro', disabled: true });
+    const onClick = inputOf(tree).props.onClick;
+    if (onClick) onClick({ detail: 1 });
+    tree = runtime.currentTree();
+    expect(dropdownOf(tree)).toBeFalsy();
+  });
+
+  it('a roster option commits on click, not on mousedown', () => {
+    const onSelect = vi.fn();
+    let tree = runtime.mount(LineupNameInput, { value: '', roster: ['Tanaka'], onSelect, ariaLabel: 'pos', color: 'shiro' });
+    inputOf(tree).props.onFocus();
+    tree = runtime.currentTree();
+    const option = findAll(tree, n => n?.type === 'button' && hasClass(n, 'pmf__option'))[0];
+    const preventDefault = vi.fn();
+    option.props.onMouseDown({ preventDefault });
+    // The mousedown still keeps focus in the input, and commits nothing.
+    expect(preventDefault).toHaveBeenCalled();
+    expect(onSelect).not.toHaveBeenCalled();
+    expect(dropdownOf(runtime.currentTree())).toBeTruthy();
+    option.props.onClick({ detail: 1 });
+    expect(onSelect).toHaveBeenCalledTimes(1);
+    expect(onSelect).toHaveBeenCalledWith('Tanaka');
+  });
+
+  it('the "+ Add" row commits on click, not on mousedown', () => {
+    const onSelect = vi.fn();
+    let tree = runtime.mount(LineupNameInput, { value: '', roster: ['Tanaka'], onSelect, ariaLabel: 'pos', color: 'shiro' });
+    inputOf(tree).props.onChange({ target: { value: 'Ito' } });
+    tree = runtime.currentTree();
+    const add = findInTree(tree, n => n?.type === 'button' && hasClass(n, 'lineup-name__add'));
+    expect(add).toBeTruthy();
+    const preventDefault = vi.fn();
+    add.props.onMouseDown({ preventDefault });
+    expect(preventDefault).toHaveBeenCalled();
+    expect(onSelect).not.toHaveBeenCalled();
+    add.props.onClick({ detail: 1 });
+    expect(onSelect).toHaveBeenCalledTimes(1);
+    expect(onSelect).toHaveBeenCalledWith('Ito');
+    expect(onSelect.mock.calls[0].length).toBe(1);
+  });
+
+  it('the clear button commits on click, not on mousedown', () => {
+    const onSelect = vi.fn();
+    const tree = runtime.mount(LineupNameInput, { value: 'Tanaka', roster: ['Tanaka'], onSelect, ariaLabel: 'pos', color: 'shiro' });
+    const clear = findInTree(tree, n => n?.type === 'button' && hasClass(n, 'lineup-name__clear'));
+    expect(clear).toBeTruthy();
+    const preventDefault = vi.fn();
+    clear.props.onMouseDown({ preventDefault });
+    expect(preventDefault).toHaveBeenCalled();
+    expect(onSelect).not.toHaveBeenCalled();
+    clear.props.onClick({ detail: 1 });
+    expect(onSelect).toHaveBeenCalledTimes(1);
+    expect(onSelect).toHaveBeenCalledWith('');
     expect(onSelect.mock.calls[0].length).toBe(1);
   });
 });

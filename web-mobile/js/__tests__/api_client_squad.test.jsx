@@ -6,6 +6,7 @@
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { API } from '../api_client.jsx';
+import { FETCH_TIMEOUT_MS } from '../write_result.jsx';
 
 function mockFetch(status, body) {
   return vi.fn(() =>
@@ -54,8 +55,8 @@ describe('API.addTeamMember', () => {
   beforeEach(() => { originalFetch = global.fetch; });
   afterEach(() => { global.fetch = originalFetch; });
 
-  it('POSTs the name and returns the minted member', async () => {
-    const created = { id: 'm2', index: 2, name: 'Ito' };
+  it('POSTs the name and returns the minted member, with the stamp the server gave it', async () => {
+    const created = { id: 'm2', index: 2, name: 'Ito', modifiedAt: 1700000000123 };
     global.fetch = mockFetch(201, created);
     const result = await API.addTeamMember('c1', 'team-1', 'Ito', 'pw');
     const [url, opts] = global.fetch.mock.calls[0];
@@ -77,14 +78,15 @@ describe('API.renameTeamMember', () => {
   beforeEach(() => { originalFetch = global.fetch; });
   afterEach(() => { global.fetch = originalFetch; });
 
-  it('PUTs the new name to the member endpoint and resolves true on 204', async () => {
-    global.fetch = vi.fn(() => Promise.resolve({ ok: true, status: 204 }));
+  it('PUTs the new name to the member endpoint and returns the member the server answers, with its stamp', async () => {
+    const renamed = { id: 'm1', index: 1, name: 'Sato-Renamed', modifiedAt: 1700000000456 };
+    global.fetch = mockFetch(200, renamed);
     const result = await API.renameTeamMember('c1', 'team-1', 'm1', 'Sato-Renamed', 'pw');
     const [url, opts] = global.fetch.mock.calls[0];
     expect(url).toBe('/api/competitions/c1/teams/team-1/members/m1');
     expect(opts.method).toBe('PUT');
     expect(JSON.parse(opts.body)).toEqual({ name: 'Sato-Renamed' });
-    expect(result).toBe(true);
+    expect(result).toEqual(renamed);
   });
 
   it('throws on a 404 (member id does not resolve)', async () => {
@@ -93,19 +95,136 @@ describe('API.renameTeamMember', () => {
   });
 });
 
+// bc-dhas: the public score sheet makes both writes and shows a thrown message
+// as it is, so a refusal that carries a sentence throws the sentence, not the
+// code beside it.
+describe('the member writes throw a refusal\'s sentence, not its code', () => {
+  let originalFetch;
+  beforeEach(() => { originalFetch = global.fetch; });
+  afterEach(() => { global.fetch = originalFetch; });
+
+  it.each([
+    ['add', (API) => API.addTeamMember('c1', 'team-1', 'Ito', '')],
+    ['rename', (API) => API.renameTeamMember('c1', 'team-1', 'm1', 'Ito', '')],
+    ['clear', (API) => API.clearTeamMember('c1', 'team-1', 'm1', '')],
+  ])('the %s', async (_name, send) => {
+    global.fetch = mockFetch(409, { error: 'result_finalized', message: 'This match has finished. Contact the tournament organizer.' });
+    await expect(send(API)).rejects.toThrow('This match has finished. Contact the tournament organizer.');
+  });
+
+  // The code stays on the error beside the sentence, so the team editor and
+  // the Lineups page can tell a member who already has a name from any other
+  // refusal (lineup_resolver.jsx memberRefusalNote) without comparing words.
+  it.each([
+    ['add', (API) => API.addTeamMember('c1', 'team-1', 'Ito', '')],
+    ['rename', (API) => API.renameTeamMember('c1', 'team-1', 'm1', 'Ito', '')],
+    ['clear', (API) => API.clearTeamMember('c1', 'team-1', 'm1', '')],
+  ])('the %s keeps a refusal\'s code on the error it throws', async (_name, send) => {
+    global.fetch = mockFetch(409, { error: 'member_already_named', message: 'This team member already has a name. Ask the tournament organizer to change it.' });
+    const err = await send(API).catch((e) => e);
+    expect(err.message).toBe('This team member already has a name. Ask the tournament organizer to change it.');
+    expect(err.code).toBe('member_already_named');
+  });
+
+  it.each([
+    ['add', (API) => API.addTeamMember('c1', 'team-1', 'Ito', '')],
+    ['rename', (API) => API.renameTeamMember('c1', 'team-1', 'm1', 'Ito', '')],
+    ['clear', (API) => API.clearTeamMember('c1', 'team-1', 'm1', '')],
+  ])('the %s leaves no code on a refusal that is only a message', async (_name, send) => {
+    global.fetch = mockFetch(404, { error: 'team member not found' });
+    const err = await send(API).catch((e) => e);
+    expect(err.message).toBe('team member not found');
+    expect(err.code).toBeUndefined();
+  });
+});
+
+// The team score sheet holds every name box disabled, and the side's lineup
+// announcements back, while a member write is out, so one the server never answers
+// would keep naming off until the browser gave up on the connection. Every member
+// write (an add, a rename, a cleared name) is bounded like every sibling request (the
+// deadline covers the body too) and ends in a plain sentence the sheet shows as it is.
+describe('the member writes when the server does not answer', () => {
+  const sends = [
+    ['addTeamMember', () => API.addTeamMember('c1', 'team-1', 'Ito', 'pw'), 'The team member was not added'],
+    ['renameTeamMember', () => API.renameTeamMember('c1', 'team-1', 'm1', 'Ito', 'pw'), 'The team member was not renamed'],
+    ['clearTeamMember', () => API.clearTeamMember('c1', 'team-1', 'm1', 'pw'), 'The team member\'s name was not cleared'],
+  ];
+  let originalFetch;
+  beforeEach(() => { originalFetch = global.fetch; });
+  afterEach(() => { global.fetch = originalFetch; vi.useRealTimers(); });
+
+  // What a write has come to so far, without waiting on it.
+  function watch(send) {
+    const seen = { outcome: 'waiting' };
+    send().then((value) => { seen.outcome = value; }, (error) => { seen.outcome = error; });
+    return seen;
+  }
+  const sentence = (notDone) => `${notDone}: the server did not answer. Check the connection and try again.`;
+
+  it.each(sends)('%s gives up at the deadline when the request is never answered', async (_name, send, notDone) => {
+    vi.useFakeTimers();
+    global.fetch = vi.fn(() => new Promise(() => {}));
+    const seen = watch(send);
+    await vi.advanceTimersByTimeAsync(FETCH_TIMEOUT_MS - 1);
+    expect(seen.outcome).toBe('waiting');
+    await vi.advanceTimersByTimeAsync(2);
+    expect(seen.outcome).toBeInstanceOf(Error);
+    expect(seen.outcome.message).toBe(sentence(notDone));
+  });
+
+  it.each(sends)('%s gives up on an answer whose body never completes, too', async (_name, send, notDone) => {
+    vi.useFakeTimers();
+    global.fetch = vi.fn(() => Promise.resolve({ ok: true, status: 201, json: () => new Promise(() => {}) }));
+    const seen = watch(send);
+    await vi.advanceTimersByTimeAsync(FETCH_TIMEOUT_MS + 1);
+    expect(seen.outcome).toBeInstanceOf(Error);
+    expect(seen.outcome.message).toBe(sentence(notDone));
+  });
+
+  it.each(sends)('%s aborts the request it gave up on, which frees its connection', async (_name, send) => {
+    vi.useFakeTimers();
+    global.fetch = vi.fn((_url, { signal }) => new Promise((_resolve, reject) => {
+      signal.addEventListener('abort', () => reject(new DOMException('aborted', 'AbortError')));
+    }));
+    const seen = watch(send);
+    await vi.advanceTimersByTimeAsync(FETCH_TIMEOUT_MS + 1);
+    expect(global.fetch.mock.calls[0][1].signal.aborted).toBe(true);
+    expect(seen.outcome).toBeInstanceOf(Error);
+  });
+
+  it.each(sends)('%s answers a connection that is down in the same sentence, not the browser\'s own', async (_name, send, notDone) => {
+    global.fetch = vi.fn(() => Promise.reject(new TypeError('Failed to fetch')));
+    await expect(send()).rejects.toThrow(sentence(notDone));
+  });
+
+  // _fetchJson reads an unreadable body as {}, which cannot be told from a member the
+  // server sent: an answer with no id is no member, so the write is a failed one.
+  it.each(sends)('%s does not hand an unreadable answer on as a member', async (_name, send, notDone) => {
+    global.fetch = vi.fn(() => Promise.resolve({ ok: true, status: 200, json: () => Promise.reject(new SyntaxError('Unexpected token < in JSON')) }));
+    await expect(send()).rejects.toThrow(sentence(notDone));
+  });
+
+  it.each(sends)('%s does not take an answer with no member in it for a success', async (_name, send, notDone) => {
+    global.fetch = vi.fn(() => Promise.resolve({ ok: true, status: 204 }));
+    await expect(send()).rejects.toThrow(sentence(notDone));
+  });
+});
+
 describe('API.clearTeamMember', () => {
   let originalFetch;
   beforeEach(() => { originalFetch = global.fetch; });
   afterEach(() => { global.fetch = originalFetch; });
 
-  it('DELETEs the member endpoint and resolves true on 204', async () => {
-    global.fetch = vi.fn(() => Promise.resolve({ ok: true, status: 204 }));
+  it('DELETEs the member endpoint and returns the member the server answers, nameless, with its stamp', async () => {
+    const cleared = { id: 'm1', index: 1, name: '', modifiedAt: 1700000000789 };
+    global.fetch = mockFetch(200, cleared);
     const result = await API.clearTeamMember('c1', 'team-1', 'm1', 'pw');
     const [url, opts] = global.fetch.mock.calls[0];
     expect(url).toBe('/api/competitions/c1/teams/team-1/members/m1');
     expect(opts.method).toBe('DELETE');
     expect(opts.headers['X-Tournament-Password']).toBe('pw');
-    expect(result).toBe(true);
+    expect(opts.body, 'a clear sends no body').toBeUndefined();
+    expect(result).toEqual(cleared);
   });
 
   it('throws with the server message on a 409 once the competition has started', async () => {

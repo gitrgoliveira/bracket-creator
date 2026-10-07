@@ -66,7 +66,7 @@ func TestConcurrentBroadcastsHaveUniqueMonotonicSeq(t *testing.T) {
 	const Total = Goroutines * PerGoroutine
 
 	// Use a hub with ring-buffer capacity ≥ Total so we can verify the
-	// stamping invariant via snapshotHistorySince instead of via a
+	// stamping invariant via snapshotHistorySinceLocked instead of via a
 	// subscriber channel. The live-streaming path uses a non-blocking
 	// send (cap 100, slow consumers are dropped, documented behaviour
 	// covered by hub_test.go), which is the wrong surface to test the
@@ -90,7 +90,9 @@ func TestConcurrentBroadcastsHaveUniqueMonotonicSeq(t *testing.T) {
 
 	// Pull all envelopes from the ring buffer (since=0 returns every
 	// retained entry in seq order).
-	entries, complete := h.snapshotHistorySince(0)
+	h.mu.RLock()
+	entries, complete := h.snapshotHistorySinceLocked(0)
+	h.mu.RUnlock()
 	require.True(t, complete, "ring buffer should retain every envelope when capacity > Total")
 	require.Len(t, entries, Total, "should have retained one entry per Broadcast")
 

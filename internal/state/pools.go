@@ -159,11 +159,16 @@ func (s *Store) copyMatchResults(results []MatchResult) []MatchResult {
 			res[i].IpponsB = make([]string, len(r.IpponsB))
 			copy(res[i].IpponsB, r.IpponsB)
 		}
-		res[i].SubResults = cloneSubResults(r.SubResults)
+		res[i].SubResults = CloneSubResults(r.SubResults)
 		// Deep-copy the pointer fields so a caller mutating a returned
 		// result through *Encho / *DecidedByHantei cannot corrupt cached
 		// state. Mirrors copyBracket, which already clones its Encho pointer.
 		res[i].Encho = r.Encho.Clone()
+		res[i].GroupStamps = CloneGroupStamps(r.GroupStamps)
+		// The write's own transient inputs and outputs never travel on a
+		// stored copy: a writer that builds its result from one (the
+		// daihyosen add, `u := *match`) must state its own.
+		res[i].ClearRequestFields()
 		if r.DecidedByHantei != nil {
 			v := *r.DecidedByHantei
 			res[i].DecidedByHantei = &v
@@ -631,6 +636,38 @@ var poolMatchColumns = []poolMatchColumn{
 				m.ModifiedAt = v
 			}
 		}},
+	// The per-group stamps the merge orders writes by (bc-mrgc), one JSON
+	// object in one cell. Empty when the match has none (a legacy row, or a
+	// match never written with a stamp), which reads back as nil: every group
+	// then reads ModifiedAt, the whole-match comparison legacy rows have
+	// always had. A cell that does not parse reads as nil the same way and is
+	// logged, so a hand edit degrades to the legacy comparison rather than
+	// failing the row.
+	{name: "GroupStamps",
+		put: func(r *MatchResult) string {
+			if len(r.GroupStamps) == 0 {
+				return ""
+			}
+			b, err := json.Marshal(r.GroupStamps)
+			if err != nil {
+				slog.Error("state: pool match GroupStamps marshal failed; writing empty cell",
+					"matchID", r.ID, "error", err)
+				return ""
+			}
+			return string(b)
+		},
+		take: func(m *MatchResult, cell string) {
+			if cell == "" {
+				return
+			}
+			var stamps map[string]int64
+			if err := json.Unmarshal([]byte(cell), &stamps); err != nil {
+				slog.Error("state: pool match GroupStamps cell corrupt; reading as unstamped groups",
+					"matchID", m.ID, "error", err)
+				return
+			}
+			m.GroupStamps = stamps
+		}},
 }
 
 // poolMatchHeader derives the CSV header row from the table.
@@ -691,7 +728,11 @@ func (s *Store) SavePoolMatches(compID string, results []MatchResult) error {
 	mu.Lock()
 	defer mu.Unlock()
 
-	return s.savePoolMatchesLocked(compID, results, s.directWrite)
+	if err := s.savePoolMatchesLocked(compID, results, s.directWrite); err != nil {
+		return err
+	}
+	s.settleRoundLineupsAfterWrite(compID)
+	return nil
 }
 
 // savePoolMatchesLocked persists results to disk and refreshes the cache.
@@ -789,7 +830,11 @@ func (s *Store) UpdatePoolMatchByID(compID, matchID string, mutate func(*MatchRe
 	mu.Lock()
 	defer mu.Unlock()
 
-	return s.updatePoolMatchByIDLocked(compID, matchID, mutate, s.directWrite)
+	found, err := s.updatePoolMatchByIDLocked(compID, matchID, mutate, s.directWrite)
+	if found && err == nil {
+		s.settleRoundLineupsAfterWrite(compID)
+	}
+	return found, err
 }
 
 // updatePoolMatchByIDLocked is the lock-free body of

@@ -1,6 +1,6 @@
 import React from 'react';
-import { render, act } from '@testing-library/react';
-import { describe, it, expect, vi, beforeAll, afterAll, afterEach } from 'vitest';
+import { render, act, fireEvent, within } from '@testing-library/react';
+import { describe, it, expect, vi, beforeAll, afterAll, beforeEach, afterEach } from 'vitest';
 import { installWindowStubs } from '../helpers/stub_globals.js';
 import { DOWNSTREAM_KNOCKOUT_PLAYED_CANCELLED } from '../../write_result.jsx';
 // Window globals required by admin_shiaijo.jsx.
@@ -27,7 +27,16 @@ const STUBBED_GLOBALS = {
   // WHICH match the console selected (captured at import, so it cannot be
   // swapped per test).
   ScoreEditorModal: (props) => { probe.props = props; return <div data-testid="score-editor" data-match={props.match ? props.match.id : ''} />; },
-  CourtPicker: () => null,
+  // A bare court control: one button per OTHER court, calling onChange the
+  // way the real CourtPicker's option does (admin_shell.jsx), so the console's
+  // move confirm can be reached without the real popover.
+  CourtPicker: ({ value, courts, onChange }) => (
+    <span data-testid="court-picker-stub">
+      {(courts || []).filter((cc) => cc !== value).map((cc) => (
+        <button type="button" key={cc} data-testid={`move-to-${cc}`} onClick={() => onChange(cc)}>{`Move to ${cc}`}</button>
+      ))}
+    </span>
+  ),
   BracketTree: () => null,
   Icon: ({ name }) => <span>{name}</span>,
   // hasBothSides / isPendingBracketMatch are the REAL implementations published
@@ -259,6 +268,79 @@ describe('AdminShiaijoPage render-smoke', () => {
     expect(queryByText('Start match')).toBeNull();
   });
 
+  // A court back online refetches its feed when the stream reopens, with no
+  // manual Refresh. app.jsx reopens the stream on 'online' by closing it, which
+  // fires no error, so the reopen reads as a bare 'open' (the stale court seen
+  // in the browser: Start still offered for a match another device started).
+  // The refetch is jittered (200-600 ms), hence the fake timers.
+  it('refetches the court feed when the stream reopens after the device comes back online', async () => {
+    vi.useFakeTimers();
+    const fetchCourtMatches = vi.fn().mockResolvedValue([]);
+    const prevFetch = window.API.fetchCourtMatches;
+    const prevSub = window.API.subscribeToEvents;
+    let status = null;
+    window.API.fetchCourtMatches = fetchCourtMatches;
+    window.API.subscribeToEvents = (_cb, onStatus) => { status = onStatus; return () => {}; };
+    window.tournamentMatches = () => [];
+    window.filterMatchesByCourt = (matches) => matches;
+    try {
+      await act(async () => { renderPage(makeMinimalTournament()); });
+      await act(async () => { status('open'); await vi.advanceTimersByTimeAsync(1000); });
+      const afterConnect = fetchCourtMatches.mock.calls.length;
+      // A bare reopen with nothing before it is not a reconnect.
+      await act(async () => { status('open'); await vi.advanceTimersByTimeAsync(1000); });
+      expect(fetchCourtMatches.mock.calls.length).toBe(afterConnect);
+      await act(async () => {
+        window.dispatchEvent(new Event('online'));
+        status('open');
+        await vi.advanceTimersByTimeAsync(1000);
+      });
+      expect(fetchCourtMatches.mock.calls.length).toBe(afterConnect + 1);
+    } finally {
+      vi.useRealTimers();
+      window.API.fetchCourtMatches = prevFetch;
+      window.API.subscribeToEvents = prevSub;
+    }
+  });
+
+  // Back from the background (an iPad locked or switched app), the court's
+  // feed is refetched: admin.jsx's own resume refresh reloads the
+  // competition, not this court's feed.
+  it('refetches the court feed when the page becomes visible again', async () => {
+    vi.useFakeTimers();
+    const fetchCourtMatches = vi.fn().mockResolvedValue([]);
+    const prevFetch = window.API.fetchCourtMatches;
+    const prevSub = window.API.subscribeToEvents;
+    window.API.fetchCourtMatches = fetchCourtMatches;
+    window.API.subscribeToEvents = () => () => {};
+    window.tournamentMatches = () => [];
+    window.filterMatchesByCourt = (matches) => matches;
+    const hidden = Object.getOwnPropertyDescriptor(Document.prototype, 'hidden');
+    let isHidden = false;
+    Object.defineProperty(document, 'hidden', { configurable: true, get: () => isHidden });
+    try {
+      let utils;
+      await act(async () => { utils = renderPage(makeMinimalTournament()); await vi.advanceTimersByTimeAsync(1000); });
+      const afterMount = fetchCourtMatches.mock.calls.length;
+      isHidden = true;
+      await act(async () => { document.dispatchEvent(new Event('visibilitychange')); await vi.advanceTimersByTimeAsync(1000); });
+      expect(fetchCourtMatches.mock.calls.length).toBe(afterMount);
+      isHidden = false;
+      await act(async () => { document.dispatchEvent(new Event('visibilitychange')); await vi.advanceTimersByTimeAsync(1000); });
+      expect(fetchCourtMatches.mock.calls.length).toBe(afterMount + 1);
+      // Unmounted, it no longer listens.
+      utils.unmount();
+      await act(async () => { document.dispatchEvent(new Event('visibilitychange')); await vi.advanceTimersByTimeAsync(1000); });
+      expect(fetchCourtMatches.mock.calls.length).toBe(afterMount + 1);
+    } finally {
+      vi.useRealTimers();
+      delete document.hidden;
+      if (hidden) Object.defineProperty(Document.prototype, 'hidden', hidden);
+      window.API.fetchCourtMatches = prevFetch;
+      window.API.subscribeToEvents = prevSub;
+    }
+  });
+
   // mp-y3nk Phase 2: the manual "Refresh" button re-pulls the court feed on
   // demand, the operator's recovery when the queue looks stale after a dropped
   // connection. It must call fetchCourtMatches again beyond the mount fetch.
@@ -336,7 +418,9 @@ describe('AdminShiaijoPage render-smoke', () => {
   it('Run now → recording feeder winners calls overrideBracketWinner per feeder', async () => {
     const rounds = [
       [
-        { id: 'm-r2-0', status: 'scheduled', sideA: { id: 'a', name: 'Alice' }, sideB: { id: 'b', name: 'Bob' } },
+        // Stamped: the assertion is floored by it (bc-hlck). The other feeder
+        // carries no stamp, and its call is exactly as it always was.
+        { id: 'm-r2-0', status: 'scheduled', modifiedAt: 1_700_000_000_000, sideA: { id: 'a', name: 'Alice' }, sideB: { id: 'b', name: 'Bob' } },
         { id: 'm-r2-1', status: 'scheduled', sideA: { id: 'c', name: 'Carol' }, sideB: { id: 'd', name: 'Dan' } },
       ],
       [
@@ -363,7 +447,7 @@ describe('AdminShiaijoPage render-smoke', () => {
       await act(async () => { utils.getByRole('button', { name: 'Carol' }).click(); });
       await act(async () => { utils.getByRole('button', { name: /record & make startable/i }).click(); });
       expect(overrideBracketWinner).toHaveBeenCalledTimes(2);
-      expect(overrideBracketWinner).toHaveBeenCalledWith('c1', 'm-r2-0', 'Alice', expect.anything());
+      expect(overrideBracketWinner).toHaveBeenCalledWith('c1', 'm-r2-0', 'Alice', expect.anything(), false, 1_700_000_000_000);
       expect(overrideBracketWinner).toHaveBeenCalledWith('c1', 'm-r2-1', 'Carol', expect.anything());
     } finally {
       window.API.overrideBracketWinner = prevOverride;
@@ -582,6 +666,77 @@ describe('AdminShiaijoPage render-smoke', () => {
       window.API.subscribeToEvents = prevSub;
       window.API.revertMatchToQueue = prevRevert;
     }
+  });
+
+  // The console's own confirms (Send back to queue, the court move) work like the
+  // app's other dialogs from a keyboard: focus goes into the confirm as it opens,
+  // Escape cancels one that is not busy, and focus goes back to the control that
+  // opened it. Found in the browser: Escape did nothing and focus fell to the page.
+  describe('the console confirms from a keyboard', () => {
+    const running = {
+      id: 'm1', compId: 'c1', compName: 'Cup', status: 'running',
+      phase: 'bracket', matchNumber: 1, court: 'A', compKind: 'team', teamSize: 5,
+      sideA: { id: 'a', name: 'Team A' }, sideB: { id: 'b', name: 'Team B' },
+    };
+    const settle = () => act(async () => { await new Promise((r) => setTimeout(r, 5)); });
+    let saved;
+    beforeEach(() => {
+      saved = { fetch: window.API.fetchCourtMatches, sub: window.API.subscribeToEvents, revert: window.API.revertMatchToQueue };
+      window.tournamentMatches = () => [running];
+      window.filterMatchesByCourt = (matches) => matches;
+      window.API.fetchCourtMatches = vi.fn().mockImplementation(() => Promise.resolve([{ id: 'c1', name: 'Cup' }]));
+      window.API.subscribeToEvents = () => () => {};
+    });
+    afterEach(() => {
+      window.API.fetchCourtMatches = saved.fetch;
+      window.API.subscribeToEvents = saved.sub;
+      window.API.revertMatchToQueue = saved.revert;
+    });
+
+    it('Send back to queue: focus goes in, Escape cancels and gives it back, and a confirm whose request is out stays', async () => {
+      let answer;
+      window.API.revertMatchToQueue = vi.fn().mockImplementation(() => new Promise((r) => { answer = r; }));
+      let utils;
+      await act(async () => { utils = renderPage(makeMinimalTournament()); });
+      const opener = utils.getByRole('button', { name: /^send back to queue$/i });
+      opener.focus();
+      await act(async () => { opener.click(); });
+      await settle();
+      const dialog = utils.getByRole('dialog', { name: /send back to queue\?/i });
+      expect(dialog.contains(document.activeElement), 'focus is in the confirm').toBe(true);
+
+      await act(async () => { fireEvent.keyDown(document.activeElement, { key: 'Escape' }); });
+      await settle();
+      expect(utils.queryByRole('dialog'), 'Escape cancels it').toBeNull();
+      expect(document.activeElement, 'focus is back on the control that opened it').toBe(utils.getByRole('button', { name: /^send back to queue$/i }));
+      expect(window.API.revertMatchToQueue).not.toHaveBeenCalled();
+
+      await act(async () => { utils.getByRole('button', { name: /^send back to queue$/i }).click(); });
+      await settle();
+      const again = utils.getByRole('dialog', { name: /send back to queue\?/i });
+      await act(async () => { within(again).getByRole('button', { name: /^send back to queue$/i }).click(); });
+      await act(async () => { fireEvent.keyDown(document.body, { key: 'Escape' }); });
+      expect(utils.queryByRole('dialog'), 'a confirm whose request is out stays open').not.toBeNull();
+      await act(async () => { answer(true); });
+    });
+
+    it('the court move: focus goes in, Escape cancels and gives it back', async () => {
+      // A queued row after Up next carries the court control (as in the move
+      // confirm test below; mountCourt seeds a court feed).
+      const c = await mountCourt([courtMatch('m1', 'running'), courtMatch('m2', 'scheduled'), courtMatch('m3', 'scheduled')]);
+      try {
+        const opener = c.utils.getAllByTestId('move-to-B')[0];
+        opener.focus();
+        await act(async () => { opener.click(); });
+        await settle();
+        const dialog = c.utils.getByRole('dialog', { name: /move to shiaijo b\?/i });
+        expect(dialog.contains(document.activeElement), 'focus is in the confirm').toBe(true);
+        await act(async () => { fireEvent.keyDown(document.activeElement, { key: 'Escape' }); });
+        await settle();
+        expect(c.utils.queryByRole('dialog'), 'Escape cancels it').toBeNull();
+        expect(document.activeElement, 'focus is back on the control that opened it').toBe(c.utils.getAllByTestId('move-to-B')[0]);
+      } finally { c.restore(); }
+    });
   });
 
   // UAT (bc-tmfn): the operator corrects a finished match, taps Clear
@@ -870,7 +1025,7 @@ describe('a barred match is skipped by every auto-pick (bc-cse)', () => {
     court: 'A', scheduledAt: '09:10', sideA: side('s', 'Sato'), sideB: side('k', 'Kato'),
   };
 
-  it('Up Next skips it, its queue row offers the default win instead of Start, and no Reinstate for a non-reinstateable withdrawal', async () => {
+  it('Up Next skips it, its queue row offers the fusensho action instead of Start, and no Reinstate for a non-reinstateable withdrawal', async () => {
     window.tournamentMatches = () => [barredMatch(), openMatch];
     window.filterMatchesByCourt = (m) => m;
     const recordDecision = vi.fn().mockResolvedValue({ applied: true });
@@ -890,12 +1045,12 @@ describe('a barred match is skipped by every auto-pick (bc-cse)', () => {
       const rows = [...utils.container.querySelectorAll('.shiaijo-qrow')];
       const row = rows.find((r) => r.textContent.includes('Yama'));
       expect(row).toBeTruthy();
-      expect(row.textContent).toContain('Yama withdrew: record the default win.');
+      expect(row.textContent).toContain('Yama withdrew: record the fusensho.');
       const startBtn = [...row.querySelectorAll('button')].find((b) => /^start match$/i.test(b.textContent));
       expect(startBtn).toBeUndefined();
       expect(utils.queryByTestId('barred-match-reinstate')).toBeNull();
-      const awardBtn = utils.getByTestId('barred-match-default-win');
-      expect(awardBtn.textContent).toBe('Record default win for Umi');
+      const awardBtn = utils.getByTestId('barred-match-record-fusensho');
+      expect(awardBtn.textContent).toBe('Record fusensho for Umi');
 
       await act(async () => { awardBtn.click(); });
       expect(recordDecision).toHaveBeenCalledWith('c1', 'm-barred', {
@@ -953,7 +1108,7 @@ describe('a barred match is skipped by every auto-pick (bc-cse)', () => {
     await act(async () => { utils = renderPage(makeMinimalTournament()); });
     const notice = utils.getByTestId('barred-match-notice');
     expect(notice.textContent).toContain('Both withdrew earlier: neither can fight this match.');
-    expect(utils.queryByTestId('barred-match-default-win')).toBeNull();
+    expect(utils.queryByTestId('barred-match-record-fusensho')).toBeNull();
     expect(utils.queryByTestId('barred-match-reinstate')).toBeNull();
     expect(utils.getByTestId('barred-match-record-drawn').textContent).toBe('Record as drawn (neither can fight)');
   });
@@ -1019,5 +1174,345 @@ describe('a barred match is skipped by every auto-pick (bc-cse)', () => {
     const buttonText = [...row.querySelectorAll('button')].map((b) => b.textContent);
     expect(buttonText).not.toContain('Lineup');
     expect(buttonText.some((t) => /call to court/i.test(t))).toBe(false);
+  });
+});
+
+// Shared by the render tests below: a mutable court feed, a Refresh that
+// re-reads it, and the editor probe's current match.
+async function mountCourt(initial) {
+  const feed = { current: initial };
+  window.tournamentMatches = () => feed.current;
+  window.filterMatchesByCourt = (matches) => matches;
+  const prev = {
+    fetch: window.API.fetchCourtMatches,
+    sub: window.API.subscribeToEvents,
+    revert: window.API.revertMatchToQueue,
+  };
+  window.API.fetchCourtMatches = vi.fn().mockImplementation(() => Promise.resolve([{ id: 'c1', name: 'Cup' }]));
+  window.API.subscribeToEvents = () => () => {};
+  window.API.revertMatchToQueue = vi.fn().mockResolvedValue(true);
+  const showToast = vi.fn();
+  let utils;
+  await act(async () => {
+    utils = render(
+      <AdminShiaijoPage tournament={makeMinimalTournament()} court="A" onBack={vi.fn()} onEditScore={vi.fn()}
+        onMoveCourt={vi.fn()} onLogout={vi.fn()} onViewerMode={vi.fn()} password="" showToast={showToast}
+        tweaks={{}} onSwitchCourt={vi.fn()} />
+    );
+  });
+  return {
+    utils,
+    feed,
+    showToast,
+    editorMatch: () => { const el = utils.queryByTestId('score-editor'); return el ? el.getAttribute('data-match') : null; },
+    refresh: async () => { await act(async () => { utils.getByRole('button', { name: /refresh/i }).click(); }); },
+    restore: () => {
+      window.API.fetchCourtMatches = prev.fetch;
+      window.API.subscribeToEvents = prev.sub;
+      window.API.revertMatchToQueue = prev.revert;
+    },
+  };
+}
+
+const courtSide = (id, name) => ({ id, name });
+const courtMatch = (id, status, over = {}) => ({
+  id, compId: 'c1', compName: 'Cup', status, phase: 'pool', poolName: 'Pool A', court: 'A',
+  scheduledAt: `09:0${id.slice(-1)}`,
+  sideA: courtSide(`${id}-a`, `Aka ${id}`), sideB: courtSide(`${id}-b`, `Shiro ${id}`),
+  ...over,
+});
+
+// bc-sbq (operator ruling 2026-09-26): a match sent back to the queue keeps
+// its score, so Send back to queue is always offered, its confirm says the
+// score is kept, and picking another bout sends a scored one back rather than
+// refusing to switch (a mistaken switch is undone with one tap on its Start).
+describe('Send back to queue keeps the score and is always offered (bc-sbq)', () => {
+  const tapSendBack = async (c) => {
+    await act(async () => { c.utils.getByRole('button', { name: /send back to queue/i }).click(); });
+    return c.utils.container.querySelector('.shiaijo-move-confirm[role="dialog"]');
+  };
+
+  it('is offered on a team match with a fought bout, and says the score is kept', async () => {
+    const c = await mountCourt([courtMatch('m1', 'running', {
+      compKind: 'team', teamSize: 3, reopenPending: true,
+      subResults: [
+        { position: 1, sideA: 'A1', sideB: 'B1', ipponsA: ['M'], ipponsB: [], winner: 'A1' },
+        { position: 2, sideA: 'A2', sideB: 'B2', ipponsA: [], ipponsB: [] },
+      ],
+    })]);
+    try {
+      expect(c.editorMatch()).toBe('m1');
+      const dialog = await tapSendBack(c);
+      expect(dialog.textContent).toContain('Any score entered is kept');
+      expect(dialog.textContent).not.toMatch(/discard|lost/i);
+    } finally { c.restore(); }
+  });
+
+  it('sends a scored bout back when confirmed', async () => {
+    const c = await mountCourt([courtMatch('m1', 'running', { ipponsA: ['M'], hansokuB: 1 })]);
+    try {
+      await tapSendBack(c);
+      const confirm = [...c.utils.container.querySelectorAll('.shiaijo-move-confirm button')]
+        .find((b) => /send back to queue/i.test(b.textContent));
+      await act(async () => { confirm.click(); });
+      expect(window.API.revertMatchToQueue).toHaveBeenCalledWith('c1', 'm1', '');
+    } finally { c.restore(); }
+  });
+
+  it('picking another bout sends a scored one back to the queue and starts the pick', async () => {
+    const c = await mountCourt([courtMatch('m1', 'running', { ipponsA: ['M'] }), courtMatch('m2', 'scheduled')]);
+    try {
+      const startNext = c.utils.getAllByRole('button').find((b) => /^start/i.test(b.textContent.trim()));
+      expect(startNext, 'the Up Next card offers Start for m2').toBeTruthy();
+      await act(async () => { startNext.click(); });
+      expect(window.API.revertMatchToQueue).toHaveBeenCalledWith('c1', 'm1', '');
+      expect(c.showToast).not.toHaveBeenCalledWith('Finish or correct the bout in progress first', 'error');
+    } finally { c.restore(); }
+  });
+});
+
+// bc-strt: the console opens a match its Up next card started while the court
+// list still says scheduled. It tells the editor so (`started`), for the
+// scheduled snapshot the start was made from and no other, so a point struck
+// before the refetch saves at once and a later send back to the queue is not
+// mistaken for a start.
+describe('the editor is told a match the console started is running (bc-strt)', () => {
+  it('passes started for the snapshot it started, and only that one', async () => {
+    // The probe is module-wide: drop a previous test's editor, or the refused
+    // start below (which mounts no editor) would read that one's props.
+    probe.props = null;
+    const side = (id, name) => ({ id, name });
+    const m1 = {
+      id: 'm1', compId: 'c1', compName: 'Cup', status: 'scheduled', phase: 'pool', poolName: 'Pool A',
+      court: 'A', scheduledAt: '09:00', sideA: side('p1', 'Yamada'), sideB: side('p2', 'Tanaka'), modifiedAt: 100,
+    };
+    const m2 = { ...m1, id: 'm2', scheduledAt: '09:05', sideA: side('p3', 'Sato'), sideB: side('p4', 'Kato') };
+    let current = [m1, m2];
+    window.tournamentMatches = () => current;
+    const prevFetch = window.API.fetchCourtMatches;
+    const prevSub = window.API.subscribeToEvents;
+    window.API.fetchCourtMatches = vi.fn().mockImplementation(() => Promise.resolve([{ id: 'c1', name: 'Cup' }]));
+    window.API.subscribeToEvents = () => () => {};
+    let startResult = { applied: false, reason: 'clock_skew' };
+    const onEditScore = vi.fn().mockImplementation(() => Promise.resolve(startResult));
+    try {
+      let utils;
+      await act(async () => { utils = renderPage(makeMinimalTournament(), 'A', { onEditScore }); });
+      const start = async () => {
+        const card = utils.container.querySelector('.shiaijo-upnext__card');
+        const btn = [...card.querySelectorAll('button')].find((b) => /start match/i.test(b.textContent));
+        await act(async () => { btn.click(); });
+      };
+      const refresh = async () => { await act(async () => { utils.getByRole('button', { name: /refresh/i }).click(); }); };
+
+      // A refused start is no start.
+      await start();
+      expect(onEditScore).toHaveBeenCalledTimes(1);
+      expect(probe.props?.started || false).toBe(false);
+
+      startResult = { applied: true };
+      await start();
+      expect(probe.props.match.id).toBe('m1');
+      expect(probe.props.match.status, 'the list has not caught up yet').toBe('scheduled');
+      expect(probe.props.started).toBe(true);
+
+      // The list catches up; later the match goes back to the queue, which
+      // stamps it. That scheduled snapshot was not started.
+      current = [{ ...m1, status: 'running', modifiedAt: 200 }, m2];
+      await refresh();
+      current = [{ ...m1, modifiedAt: 300 }, m2];
+      await refresh();
+      expect(probe.props.match.id, 'the pick still holds the panel').toBe('m1');
+      expect(probe.props.match.status).toBe('scheduled');
+      expect(probe.props.started).toBe(false);
+    } finally {
+      window.API.fetchCourtMatches = prevFetch;
+      window.API.subscribeToEvents = prevSub;
+    }
+  });
+});
+
+// The console used to refetch its whole court feed for every event, and a
+// running match broadcasts every saved point. A running match's score update
+// changes only its own row, so the pushed result is shown at once, a push
+// older than the row it would replace is ignored, and the refetch that still
+// follows (for what a push cannot carry) happens once per burst.
+describe('the court console shows a pushed running score at once', () => {
+  it('applies the push to its row, ignores a stale one, and refetches once per burst', async () => {
+    vi.useFakeTimers();
+    const side = (id, name) => ({ id, name });
+    const running = (o = {}) => ({
+      id: 'm1', status: 'running', phase: 'pool', poolName: 'Pool A', court: 'A', scheduledAt: '09:00',
+      sideA: side('p1', 'Yamada'), sideB: side('p2', 'Tanaka'), ipponsA: [], ipponsB: [], modifiedAt: 100, ...o,
+    });
+    const comp = { id: 'c1', name: 'Cup', status: 'pools', poolMatches: [running()] };
+    let emit = () => {};
+    const prev = {
+      fetch: window.API.fetchCourtMatches, sub: window.API.subscribeToEvents,
+      tm: window.tournamentMatches, fbc: window.filterMatchesByCourt,
+    };
+    const fetchCourtMatches = vi.fn().mockResolvedValue([comp]);
+    window.API.fetchCourtMatches = fetchCourtMatches;
+    window.API.subscribeToEvents = (cb) => { emit = cb; return () => {}; };
+    window.tournamentMatches = (t) => (t.competitions || [])
+      .flatMap((c) => (c.poolMatches || []).map((m) => ({ ...m, compId: c.id, compName: c.name })));
+    window.filterMatchesByCourt = (matches) => matches;
+    try {
+      await act(async () => { renderPage(makeMinimalTournament(), 'A'); });
+      await act(async () => { await Promise.resolve(); });
+      expect(probe.props.match?.id).toBe('m1');
+      const fetchesBefore = fetchCourtMatches.mock.calls.length;
+      const push = (o) => act(async () => {
+        emit({ type: 'match_updated', data: { competitionId: 'c1', matchId: 'm1', result: running(o) } });
+      });
+
+      await push({ ipponsA: ['M'], modifiedAt: 200 });
+      expect(probe.props.match.ipponsA, 'shown at once, before any refetch').toEqual(['M']);
+      await push({ ipponsA: ['M', 'K'], modifiedAt: 300 });
+      await push({ ipponsA: [], modifiedAt: 250 });
+      expect(probe.props.match.ipponsA, 'a push older than the row is not applied').toEqual(['M', 'K']);
+      expect(fetchCourtMatches.mock.calls.length, 'nothing refetched yet').toBe(fetchesBefore);
+
+      await act(async () => { vi.advanceTimersByTime(700); });
+      await act(async () => { await Promise.resolve(); });
+      expect(fetchCourtMatches.mock.calls.length, 'one refetch for the burst of three').toBe(fetchesBefore + 1);
+      // That refetch answers with the row as it stood before the pushes (it
+      // read the data before the writes committed): the newer row stays.
+      expect(probe.props.match.ipponsA, 'a refetch older than the row does not put the old score back').toEqual(['M', 'K']);
+
+      // A refetch as new as the row, or newer, replaces it as before.
+      fetchCourtMatches.mockResolvedValue([{ ...comp, poolMatches: [running({ ipponsA: ['M', 'K'], ipponsB: ['D'], modifiedAt: 400 })] }]);
+      await act(async () => { emit({ type: 'schedule_updated', data: {} }); });
+      await act(async () => { vi.advanceTimersByTime(700); });
+      await act(async () => { await Promise.resolve(); });
+      expect(probe.props.match.ipponsB, 'a newer refetch is taken').toEqual(['D']);
+    } finally {
+      window.API.fetchCourtMatches = prev.fetch;
+      window.API.subscribeToEvents = prev.sub;
+      window.tournamentMatches = prev.tm;
+      window.filterMatchesByCourt = prev.fbc;
+      vi.useRealTimers();
+    }
+  });
+});
+
+// Recording a withdrawal advances the court like any other decision (operator
+// ruling 2026-09-26). This court's list does not show the withdrawn
+// competitor's matches barred until it is refetched, so the advance passes
+// over them itself rather than starting one the server then refuses.
+describe('the court moves on past the withdrawn competitor', () => {
+  it('starts the next match the withdrawn competitor is not in', async () => {
+    const side = (id, name) => ({ id, name });
+    const row = (id, a, b, status, at) => ({
+      id, compId: 'c1', compName: 'Cup', status, phase: 'pool', poolName: 'Pool A', court: 'A', scheduledAt: at, sideA: a, sideB: b,
+    });
+    const aoki = side('p1', 'Aoki');
+    const run = row('m1', aoki, side('p2', 'Baba'), 'running', '09:00');
+    window.tournamentMatches = () => [run, row('m2', side('p3', 'Endo'), aoki, 'scheduled', '09:05'), row('m3', side('p4', 'Doi'), side('p5', 'Fujii'), 'scheduled', '09:10')];
+    window.filterMatchesByCourt = (matches) => matches;
+    const onEditScore = vi.fn().mockResolvedValue({ status: 'running' });
+    await act(async () => { renderPage(makeMinimalTournament(), 'A', { onEditScore }); });
+    expect(probe.props.match?.id).toBe('m1');
+    await act(async () => {
+      // What /decision answers with: the stored match, sides as bare names.
+      await probe.props.onAfterDecision({
+        id: 'm1', sideA: 'Aoki', sideB: 'Baba', sideAId: 'p1', sideBId: 'p2', winner: 'Baba', winnerId: 'p2',
+        status: 'completed', decision: 'kiken-voluntary', decisionBy: 'aka',
+      });
+    });
+    expect(onEditScore).toHaveBeenCalledTimes(1);
+    expect(onEditScore.mock.calls[0][1], "Aoki's next match is passed over").toBe('m3');
+  });
+});
+
+// Operator request 2026-10-03: a match moved onto this court from another one,
+// for a competition other than the one shown, was visible only through the
+// competition picker. The court names the other competition's waiting matches
+// quietly while its own still has work, keeps the amber "Switch to" for when it
+// has none, and never switches by itself. The move confirm names the MATCH,
+// both competitors, not one person.
+describe('a court shared with another competition', () => {
+  const shared = () => [
+    courtMatch('m1', 'running'),
+    courtMatch('m2', 'scheduled'),
+    courtMatch('m3', 'scheduled', { compId: 'c2', compName: 'League' }),
+  ];
+  const nudge = (c) => c.utils.queryByTestId('shiaijo-nudge');
+
+  it("names the other competition's waiting match quietly while this one still has work", async () => {
+    const c = await mountCourt(shared());
+    try {
+      const n = nudge(c);
+      expect(n, 'the other competition is named on the court').toBeTruthy();
+      expect(n.textContent).toContain('1 League match also waiting on this court.');
+      expect(n.classList.contains('shiaijo-nudge--also')).toBe(true);
+      expect(n.classList.contains('alert--warn')).toBe(false);
+      expect(c.editorMatch(), 'nothing switched by itself').toBe('m1');
+    } finally { c.restore(); }
+  });
+
+  it('switches only when tapped', async () => {
+    const c = await mountCourt(shared());
+    try {
+      const picker = () => c.utils.container.querySelector('select[aria-label="Select competition to officiate"]');
+      expect(picker().value).toBe('c1');
+      await act(async () => { nudge(c).click(); });
+      expect(picker().value).toBe('c2');
+    } finally { c.restore(); }
+  });
+
+  // One operator per court: the competition shown is held, so the bout that
+  // finishes does not swap the court to the other competition. It turns
+  // amber and waits for the tap instead.
+  it('holds the competition when its last bout here finishes, and turns amber, "Switch to"', async () => {
+    const c = await mountCourt([
+      courtMatch('m1', 'running'),
+      courtMatch('m3', 'scheduled', { compId: 'c2', compName: 'League' }),
+    ]);
+    try {
+      const picker = () => c.utils.container.querySelector('select[aria-label="Select competition to officiate"]');
+      expect(picker().value).toBe('c1');
+      c.feed.current = [
+        courtMatch('m1', 'completed', { winner: courtSide('m1-a', 'Aka m1') }),
+        courtMatch('m3', 'scheduled', { compId: 'c2', compName: 'League' }),
+      ];
+      await c.refresh();
+      expect(picker().value, 'the console did not switch by itself').toBe('c1');
+      const n = nudge(c);
+      expect(n.textContent).toContain('Switch to League: 1 match waiting on this court.');
+      expect(n.classList.contains('alert--warn')).toBe(true);
+      expect(n.classList.contains('shiaijo-nudge--also')).toBe(false);
+      await act(async () => { n.click(); });
+      expect(picker().value).toBe('c2');
+    } finally { c.restore(); }
+  });
+
+  it('names every other competition waiting here, each with its own switch', async () => {
+    const c = await mountCourt([
+      courtMatch('m1', 'running'),
+      courtMatch('m3', 'scheduled', { compId: 'c2', compName: 'League' }),
+      courtMatch('m4', 'scheduled', { compId: 'c3', compName: 'Teams' }),
+      courtMatch('m5', 'scheduled', { compId: 'c3', compName: 'Teams' }),
+    ]);
+    try {
+      const lines = c.utils.getAllByTestId('shiaijo-nudge');
+      expect(lines.map((l) => l.querySelector('.shiaijo-nudge__text').textContent)).toEqual([
+        '2 Teams matches also waiting on this court.',
+        '1 League match also waiting on this court.',
+      ]);
+      // The accessible name carries the visible text and what the tap does.
+      expect(lines[1].getAttribute('aria-label')).toBe('1 League match also waiting on this court. Switch to League');
+      await act(async () => { lines[1].click(); });
+      expect(c.utils.container.querySelector('select[aria-label="Select competition to officiate"]').value).toBe('c2');
+    } finally { c.restore(); }
+  });
+
+  it('the move confirm names both competitors', async () => {
+    const c = await mountCourt([courtMatch('m1', 'running'), courtMatch('m2', 'scheduled'), courtMatch('m3', 'scheduled')]);
+    try {
+      await act(async () => { c.utils.getAllByTestId('move-to-B')[0].click(); });
+      const dialog = c.utils.container.querySelector('.shiaijo-move-confirm[role="dialog"]');
+      expect(dialog.textContent).toMatch(/Shiro m\d vs Aka m\d leaves Shiaijo A and joins the queue on Shiaijo B\./);
+    } finally { c.restore(); }
   });
 });

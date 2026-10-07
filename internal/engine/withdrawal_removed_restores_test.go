@@ -119,9 +119,27 @@ func TestWithdrawalRemoved_SupersededWriteRestoresNothing(t *testing.T) {
 	stored := wrPoolMatch(t, store, compID)
 	require.NotZero(t, stored.ModifiedAt)
 
-	_, err = eng.RecordMatchResultWithIneligibility(compID, "Pool A-0", &state.MatchResult{
+	stale := &state.MatchResult{
 		ID: "Pool A-0", SideA: wrTeamA, SideB: wrTeamB, Winner: wrTeamB, Decision: "fought",
 		Status: state.MatchStatusCompleted, ModifiedAt: stored.ModifiedAt - 1000,
+		SubResults: wrFoughtBouts(),
+	}
+	_, err = eng.RecordMatchResultWithIneligibility(compID, "Pool A-0", stale)
+	// bc-mrgc: the write's verdict is older than the withdrawal, so it is held
+	// (kept in the match's history) and the withdrawal stands. Its bouts are
+	// ordered on their own: none was changed after the write was made, so they
+	// apply. What this test pins is unchanged: the verdict did not land, so
+	// nothing is restored.
+	require.NoError(t, err)
+	require.NotNil(t, stale.Merge)
+	assert.Contains(t, stale.Merge.Held, state.GroupResult)
+	assert.Equal(t, before, string(readStatusFile(t, dir, compID)))
+	assert.Equal(t, "kiken-voluntary", wrPoolMatch(t, store, compID).Decision)
+
+	// Older than every stored change: nothing of it applies.
+	_, err = eng.RecordMatchResultWithIneligibility(compID, "Pool A-0", &state.MatchResult{
+		ID: "Pool A-0", SideA: wrTeamA, SideB: wrTeamB, Winner: wrTeamB, Decision: "fought",
+		Status: state.MatchStatusCompleted, ModifiedAt: 1,
 		SubResults: wrFoughtBouts(),
 	})
 	require.ErrorIs(t, err, ErrMatchSuperseded)

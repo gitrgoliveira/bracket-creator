@@ -43,7 +43,7 @@ func TestRecordBracketMatchResultTx_HappyPath(t *testing.T) {
 	}
 	var txErr error
 	_ = store.WithTransaction(compID, func(tx state.StoreTx) error {
-		_, _, txErr = eng.recordBracketMatchResult(tx, compID, "M1", result, matchWriteForward, false)
+		_, _, txErr = eng.recordBracketMatchResult(tx, compID, "M1", result, matchWriteForward, false, nil)
 		return nil
 	})
 	require.NoError(t, txErr)
@@ -70,7 +70,7 @@ func TestRecordBracketMatchResultTx_MatchNotFound(t *testing.T) {
 
 	var txErr error
 	_ = store.WithTransaction(compID, func(tx state.StoreTx) error {
-		_, _, txErr = eng.recordBracketMatchResult(tx, compID, "GHOST", &state.MatchResult{Winner: "X"}, matchWriteForward, false)
+		_, _, txErr = eng.recordBracketMatchResult(tx, compID, "GHOST", &state.MatchResult{Winner: "X"}, matchWriteForward, false, nil)
 		return nil
 	})
 	require.Error(t, txErr)
@@ -87,7 +87,7 @@ func TestRecordBracketMatchResultTx_NilBracket(t *testing.T) {
 
 	var txErr error
 	_ = store.WithTransaction(compID, func(tx state.StoreTx) error {
-		_, _, txErr = eng.recordBracketMatchResult(tx, compID, "M1", &state.MatchResult{Winner: "X"}, matchWriteForward, false)
+		_, _, txErr = eng.recordBracketMatchResult(tx, compID, "M1", &state.MatchResult{Winner: "X"}, matchWriteForward, false, nil)
 		return nil
 	})
 	require.Error(t, txErr)
@@ -273,7 +273,7 @@ func TestCheckConcurrentIneligibilityTx_AlreadyIneligible(t *testing.T) {
 	var txErr error
 	_ = store.WithTransaction(compID, func(tx state.StoreTx) error {
 		// "Alice" is the loser of a different match "Pool A-1".
-		txErr = eng.checkConcurrentIneligibility(tx, compID, "Pool A-1", "", "Alice")
+		txErr = eng.checkConcurrentIneligibility(tx, compID, "Pool A-1", "kiken-voluntary", "", "Alice")
 		return nil
 	})
 	require.Error(t, txErr)
@@ -301,7 +301,7 @@ func TestCheckConcurrentIneligibilityTx_SameMatchAllowed(t *testing.T) {
 
 	var txErr error
 	_ = store.WithTransaction(compID, func(tx state.StoreTx) error {
-		txErr = eng.checkConcurrentIneligibility(tx, compID, "Pool A-0", "", "Alice")
+		txErr = eng.checkConcurrentIneligibility(tx, compID, "Pool A-0", "kiken-voluntary", "", "Alice")
 		return nil
 	})
 	require.NoError(t, txErr, "same-match ineligibility must be allowed (undo path)")
@@ -316,7 +316,7 @@ func TestCheckConcurrentIneligibilityTx_EmptyLoser(t *testing.T) {
 
 	var txErr error
 	_ = store.WithTransaction(compID, func(tx state.StoreTx) error {
-		txErr = eng.checkConcurrentIneligibility(tx, compID, "M1", "", "")
+		txErr = eng.checkConcurrentIneligibility(tx, compID, "M1", "kiken-voluntary", "", "")
 		return nil
 	})
 	require.NoError(t, txErr)
@@ -621,7 +621,7 @@ func TestCheckConcurrentIneligibilityTx_PlayerNotInPool(t *testing.T) {
 
 	var txErr error
 	_ = store.WithTransaction(compID, func(tx state.StoreTx) error {
-		txErr = eng.checkConcurrentIneligibility(tx, compID, "Pool A-0", "", "Unknown")
+		txErr = eng.checkConcurrentIneligibility(tx, compID, "Pool A-0", "kiken-voluntary", "", "Unknown")
 		return nil
 	})
 	require.NoError(t, txErr, "unknown player must not trigger an error (best-effort)")

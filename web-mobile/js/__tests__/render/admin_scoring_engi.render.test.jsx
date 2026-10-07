@@ -1,7 +1,10 @@
 import React from 'react';
-import { render, fireEvent, screen, waitFor } from '@testing-library/react';
-import { describe, it, expect, vi } from 'vitest';
+import { render, fireEvent, screen, waitFor, act } from '@testing-library/react';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { EngiScoreEditorModal } from '../../admin_scoring_engi.jsx';
+import { TAP_BOUNCE_MS } from '../../tap_guard.jsx';
+import { QUEUED_NOTICE } from '../../write_result.jsx';
+import { pointerTap } from '../helpers/tap_events.js';
 
 // Regression coverage for a real orientation bug: sideB is Shiro and sideA is
 // Aka everywhere else in the app (bracket.jsx PlayerLine, admin_pools.jsx,
@@ -56,14 +59,18 @@ describe('EngiScoreEditorModal orientation', () => {
   });
 
   it('submits flagsA tied to the Aka/sideA count and flagsB tied to the Shiro/sideB count', async () => {
-    const onSubmit = vi.fn().mockResolvedValue(undefined);
+    // A landed save. Nothing handed back is a host reporting a refusal
+    // (writeWasRefused), which re-enables Save after the click's act.
+    const onSubmit = vi.fn().mockResolvedValue({});
     render(<EngiScoreEditorModal match={makeMatch()} onClose={() => {}} onSubmit={onSubmit} />);
     // 3 flags to Aka (sideA), 0 to Shiro (sideB): a valid {1,3,5} total.
     fireEvent.click(screen.getByTestId('engi-aka-inc'));
     fireEvent.click(screen.getByTestId('engi-aka-inc'));
     fireEvent.click(screen.getByTestId('engi-aka-inc'));
+    // Save is a two-tap guard: the first tap arms it, the second saves.
     fireEvent.click(screen.getByTestId('engi-submit'));
-    expect(onSubmit).toHaveBeenCalledWith({ flagsA: 3, flagsB: 0, status: 'completed' });
+    fireEvent.click(screen.getByTestId('engi-submit'));
+    expect(onSubmit).toHaveBeenCalledWith({ flagsA: 3, flagsB: 0, status: 'completed', changed: ['result', 'flags'] });
   });
 
   it('highlights the Aka box as winner when flagsA > flagsB', () => {
@@ -100,13 +107,13 @@ describe('EngiScoreEditorModal correction retry (Copilot review: PR #326)', () =
     fireEvent.click(screen.getByText('Confirm'));
 
     await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(1));
-    expect(onSubmit).toHaveBeenNthCalledWith(1, { flagsA: 3, flagsB: 0, status: 'completed', correctionReason: 'Scoring error' });
+    expect(onSubmit).toHaveBeenNthCalledWith(1, { flagsA: 3, flagsB: 0, status: 'completed', correctionReason: 'Scoring error', changed: ['result'] });
 
     // Retry: correctionReason is already set in state, so this click skips
     // the ReasonPrompt gate and goes straight to doSubmit.
     fireEvent.click(screen.getByTestId('engi-submit'));
     await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(2));
-    expect(onSubmit).toHaveBeenNthCalledWith(2, { flagsA: 3, flagsB: 0, status: 'completed', correctionReason: 'Scoring error' });
+    expect(onSubmit).toHaveBeenNthCalledWith(2, { flagsA: 3, flagsB: 0, status: 'completed', correctionReason: 'Scoring error', changed: ['result'] });
   });
 });
 
@@ -119,7 +126,9 @@ describe('EngiScoreEditorModal Finish + Start Next (impeccable critique P2)', ()
     const submit = screen.getByTestId('engi-submit');
     expect(submit.textContent).toContain('Finish + Start Next');
     fireEvent.click(submit);
-    await waitFor(() => expect(onSubmitAndNext).toHaveBeenCalledWith({ flagsA: 3, flagsB: 0, status: 'completed' }));
+    expect(submit.textContent).toBe('Tap again to finish →');
+    fireEvent.click(submit);
+    await waitFor(() => expect(onSubmitAndNext).toHaveBeenCalledWith({ flagsA: 3, flagsB: 0, status: 'completed', changed: ['result'] }));
     expect(onSubmit).not.toHaveBeenCalled();
   });
 
@@ -132,7 +141,7 @@ describe('EngiScoreEditorModal Finish + Start Next (impeccable critique P2)', ()
     expect(submit.textContent).toContain('Save correction');
     fireEvent.click(submit); // opens ReasonPrompt
     fireEvent.click(screen.getByText('Confirm'));
-    await waitFor(() => expect(onSubmit).toHaveBeenCalledWith({ flagsA: 3, flagsB: 0, status: 'completed', correctionReason: 'Scoring error' }));
+    await waitFor(() => expect(onSubmit).toHaveBeenCalledWith({ flagsA: 3, flagsB: 0, status: 'completed', correctionReason: 'Scoring error', changed: ['result'] }));
     expect(onSubmitAndNext).not.toHaveBeenCalled();
   });
 
@@ -184,7 +193,7 @@ describe('EngiScoreEditorModal keyboard flag entry (impeccable critique P2/P3)',
     expect(screen.getByTestId('engi-aka-count').textContent).toBe('3');
     expect(screen.getByTestId('engi-shiro-count').textContent).toBe('2');
     fireEvent.keyDown(document.body, { key: 'Enter' });
-    await waitFor(() => expect(onSubmit).toHaveBeenCalledWith({ flagsA: 3, flagsB: 2, status: 'completed' }));
+    await waitFor(() => expect(onSubmit).toHaveBeenCalledWith({ flagsA: 3, flagsB: 2, status: 'completed', changed: ['result', 'flags'] }));
   });
 
   it('does not hijack typing inside a text field (reason note)', () => {
@@ -211,16 +220,17 @@ describe('EngiScoreEditorModal offline safety net (impeccable critique P2)', () 
     render(<EngiScoreEditorModal match={makeMatch({ flagsA: 3, flagsB: 0 })} onClose={() => {}} onSubmit={onSubmit} />);
 
     fireEvent.click(screen.getByTestId('engi-submit'));
+    fireEvent.click(screen.getByTestId('engi-submit'));
     await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(1));
     // Pending banner is shown and the commit control is still available (modal
     // stayed open, not closed-as-saved).
-    await waitFor(() => expect(screen.getByText(/will keep retrying until it lands/i)).toBeTruthy());
+    await waitFor(() => expect(screen.getByText(QUEUED_NOTICE)).toBeTruthy());
     expect(screen.queryByTestId('engi-submit')).not.toBeNull();
 
     // Retry now re-invokes the same payload.
     fireEvent.click(screen.getByText('Retry now'));
     await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(2));
-    expect(onSubmit).toHaveBeenNthCalledWith(2, { flagsA: 3, flagsB: 0, status: 'completed' });
+    expect(onSubmit).toHaveBeenNthCalledWith(2, { flagsA: 3, flagsB: 0, status: 'completed', changed: ['result'] });
   });
 });
 
@@ -397,5 +407,140 @@ describe('bc-kbhn: engi ←/→ need a neighbour match', () => {
     expect(screen.getByTestId('engi-shortcut-hint').textContent).toContain('prev/next');
     fireEvent.keyDown(document.body, { key: 'ArrowRight' });
     expect(onNext).toHaveBeenCalledTimes(1);
+  });
+});
+
+// Operator ruling 2026-09-26: engi flags are saved as they are entered, so a
+// match sent back to the queue or switched away from keeps them. While the
+// match is running each change rides the same debounced running write the
+// kendo editors use; before it starts nothing is written until the result is.
+describe('EngiScoreEditorModal saves flags as they are entered', () => {
+  beforeEach(() => { vi.useFakeTimers(); });
+  afterEach(() => { vi.useRealTimers(); });
+
+  it('a running match saves each change as a running write', async () => {
+    const onSubmit = vi.fn().mockResolvedValue({ status: 'running' });
+    // Stamped: the write carries the shown match's stamp from the tap
+    // (bc-hlck), which recordScore floors the stamp by and never sends.
+    render(<EngiScoreEditorModal match={makeMatch({ status: 'running', modifiedAt: 1_000_000 })} onClose={() => {}} onSubmit={onSubmit} />);
+    fireEvent.click(screen.getByTestId('engi-aka-inc'));
+    fireEvent.click(screen.getByTestId('engi-shiro-inc'));
+    await act(async () => { vi.advanceTimersByTime(400); });
+    expect(onSubmit).toHaveBeenCalledTimes(1);
+    expect(onSubmit).toHaveBeenCalledWith({ flagsA: 1, flagsB: 1, status: 'running', editedPerf: expect.any(Number), seenModifiedAt: 1_000_000, changed: ['flags'] });
+  });
+
+  it('a keyboard change saves too', async () => {
+    const onSubmit = vi.fn().mockResolvedValue({ status: 'running' });
+    render(<EngiScoreEditorModal match={makeMatch({ status: 'running' })} onClose={() => {}} onSubmit={onSubmit} />);
+    await act(async () => { fireEvent.keyDown(window, { key: 's' }); });
+    await act(async () => { vi.advanceTimersByTime(400); });
+    expect(onSubmit).toHaveBeenCalledWith({ flagsA: 0, flagsB: 1, status: 'running', editedPerf: expect.any(Number), seenModifiedAt: 0, changed: ['flags'] });
+  });
+
+  it('a match not yet started writes nothing until the result is saved', async () => {
+    const onSubmit = vi.fn().mockResolvedValue(undefined);
+    render(<EngiScoreEditorModal match={makeMatch({ status: 'scheduled' })} onClose={() => {}} onSubmit={onSubmit} />);
+    fireEvent.click(screen.getByTestId('engi-aka-inc'));
+    await act(async () => { vi.advanceTimersByTime(400); });
+    expect(onSubmit).not.toHaveBeenCalled();
+  });
+
+  it('closing a running match with a change still pending saves it and asks nothing', async () => {
+    const onSubmit = vi.fn().mockResolvedValue({ status: 'running' });
+    // Closing unmounts the editor, as every host does; the unmount writes it.
+    let view;
+    const onClose = vi.fn(() => view.unmount());
+    view = render(<EngiScoreEditorModal match={makeMatch({ status: 'running' })} onClose={onClose} onSubmit={onSubmit} />);
+    fireEvent.click(screen.getByTestId('engi-aka-inc'));
+    await act(async () => { fireEvent.click(screen.getByTestId('engi-close-btn')); });
+    expect(onSubmit).toHaveBeenCalledWith({ flagsA: 1, flagsB: 0, status: 'running', editedPerf: expect.any(Number), seenModifiedAt: 0, changed: ['flags'] });
+    expect(onClose).toHaveBeenCalled();
+  });
+});
+
+describe('a flag change inside the autosave window survives Prev/Next', () => {
+  beforeEach(() => { vi.useFakeTimers(); });
+  afterEach(() => { vi.useRealTimers(); });
+
+  it.each([
+    ['the Next button', () => fireEvent.click(screen.getByText('Next →'))],
+    ['the → key', () => fireEvent.keyDown(window, { key: 'ArrowRight' })],
+  ])('%s within 300ms of a change saves it', async (_via, goNext) => {
+    const onSubmit = vi.fn().mockResolvedValue({ status: 'running' });
+    let view;
+    const onNext = vi.fn(() => view.unmount());
+    view = render(<EngiScoreEditorModal
+      match={makeMatch({ status: 'running' })} onClose={() => {}} onSubmit={onSubmit}
+      nextMatch={{ sideA: { name: 'Z' }, sideB: { name: 'W' } }} onNext={onNext}
+    />);
+    fireEvent.click(screen.getByTestId('engi-aka-inc'));
+    await act(async () => { goNext(); });
+    await act(async () => { vi.advanceTimersByTime(400); });
+    expect(onNext).toHaveBeenCalledTimes(1);
+    expect(onSubmit).toHaveBeenCalledWith({ flagsA: 1, flagsB: 0, status: 'running', editedPerf: expect.any(Number), seenModifiedAt: 0, changed: ['flags'] });
+  });
+});
+
+describe('bc-dtfn: the engi Save is a two-tap guard, as Finish is in the other editors', () => {
+  // Operator ruling 2026-09-27: the editors behave alike. A bouncing thumb on
+  // "Finish + Start Next" used to save AND start the next match.
+  beforeEach(() => { vi.useFakeTimers(); });
+  afterEach(() => { vi.useRealTimers(); });
+
+  const mount = (props = {}) => {
+    const onSubmit = vi.fn().mockResolvedValue(undefined);
+    render(<EngiScoreEditorModal match={makeMatch({ flagsA: 3, flagsB: 0 })} onClose={() => {}} onSubmit={onSubmit} {...props} />);
+    return { onSubmit, save: screen.getByTestId('engi-submit') };
+  };
+
+  it('a double tap only arms it', async () => {
+    const onSubmitAndNext = vi.fn().mockResolvedValue(undefined);
+    const { onSubmit, save } = mount({ onSubmitAndNext });
+    await pointerTap(save);
+    await pointerTap(save);
+    expect(save.textContent).toBe('Tap again to finish →');
+    expect(onSubmit).not.toHaveBeenCalled();
+    expect(onSubmitAndNext).not.toHaveBeenCalled();
+  });
+
+  it('a deliberate second tap after the window saves once', async () => {
+    const { onSubmit, save } = mount();
+    await pointerTap(save);
+    expect(save.textContent).toBe('Tap again to save');
+    await act(async () => { vi.advanceTimersByTime(TAP_BOUNCE_MS + 50); });
+    await pointerTap(save);
+    expect(onSubmit).toHaveBeenCalledTimes(1);
+    expect(onSubmit).toHaveBeenCalledWith({ flagsA: 3, flagsB: 0, status: 'completed', changed: ['result'] });
+  });
+
+  it('a flag change disarms it', async () => {
+    const { onSubmit, save } = mount();
+    await pointerTap(save);
+    fireEvent.click(screen.getByTestId('engi-aka-inc'));
+    expect(save.textContent).toBe('Save result');
+    await act(async () => { vi.advanceTimersByTime(TAP_BOUNCE_MS + 50); });
+    await pointerTap(save);
+    expect(onSubmit).not.toHaveBeenCalled();
+  });
+
+  it('a save that failed disarms it, so re-sending is deliberate', async () => {
+    const subscribers = [];
+    window.subscribeTerminalWriteFailed = (fn) => { subscribers.push(fn); return () => {}; };
+    try {
+      const { save } = mount({ match: makeMatch({ compId: 'c1', id: 'm1', flagsA: 3, flagsB: 0 }) });
+      await pointerTap(save);
+      expect(save.textContent).toBe('Tap again to save');
+      await act(async () => { subscribers.forEach((fn) => fn({ compID: 'c1', matchID: 'm1', reason: 'superseded' })); });
+      expect(save.textContent).toBe('Save result');
+    } finally {
+      delete window.subscribeTerminalWriteFailed;
+    }
+  });
+
+  it('keyboard Enter saves directly', async () => {
+    const { onSubmit } = mount();
+    await act(async () => { fireEvent.keyDown(window, { key: 'Enter' }); });
+    expect(onSubmit).toHaveBeenCalledTimes(1);
   });
 });

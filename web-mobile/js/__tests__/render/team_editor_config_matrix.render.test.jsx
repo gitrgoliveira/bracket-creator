@@ -31,7 +31,6 @@ const STUBBED_GLOBALS = {
   isTextEntry: () => false,
   isInteractiveTarget: () => false,
   confirmDialog: vi.fn().mockResolvedValue(true),
-  resolveRoundIndex: () => 0,
   API: {
     fetchCompetitionDetails: vi.fn().mockResolvedValue(null),
     recordScore: vi.fn().mockResolvedValue(undefined),
@@ -369,7 +368,13 @@ describe('TeamScoreEditorModal kachinuki bout navigation', () => {
     expect(rows[1].querySelector('.team-sub-match__btns')).not.toBeNull();
     // The collapse caret (rotated, aria-expanded=true) is the close control.
     const caret = screen.getByTestId('kachinuki-done-collapse-0');
-    expect(caret.classList.contains('tsm-caret--open')).toBe(true);
+    // bc-tp44: only the GLYPH is rotated. Rotating the button itself made its
+    // 44x36 tap box hit-test as 36x44.
+    expect(caret.classList.contains('tsm-caret--open')).toBe(false);
+    expect(caret.classList.contains('tsm-caret-btn')).toBe(true);
+    const glyph = caret.querySelector('.tsm-caret.tsm-caret--open');
+    expect(glyph).not.toBeNull();
+    expect(glyph.getAttribute('aria-hidden')).toBe('true');
     expect(caret.getAttribute('aria-expanded')).toBe('true');
   });
 
@@ -515,7 +520,7 @@ describe('TeamScoreEditorModal: a fixed-order row with no roster metadata still 
   // number of the blank squad member seeded for that position.
   afterEach(() => {
     delete window.API.fetchSquads;
-    delete window.API.fetchMatchLineup;
+    delete window.API.fetchLineupInForce;
   });
 
   it('every numbered row renders a name input on both sides, labelled with each blank member\'s own number', async () => {
@@ -609,7 +614,7 @@ describe('TeamScoreEditorModal: a fixed-order row with no roster metadata still 
     });
     // Kenji Tanaka (member b2, seeded to position 2) is placed at Chuken
     // (position 3) in the saved Shiro lineup.
-    window.API.fetchMatchLineup = vi.fn().mockImplementation(async (_compId, teamId) => (
+    window.API.fetchLineupInForce = vi.fn().mockImplementation(async (_compId, teamId) => (
       teamId === 'team-B'
         ? { positions: { chuken: 'Kenji Tanaka' }, memberIds: { chuken: 'b2' } }
         : null
@@ -653,7 +658,7 @@ describe('TeamScoreEditorModal: a fixed-order row with no roster metadata still 
       'team-A': blankSquad('a'),
       'team-B': squadB,
     });
-    window.API.fetchMatchLineup = vi.fn().mockImplementation(async (_compId, teamId) => (
+    window.API.fetchLineupInForce = vi.fn().mockImplementation(async (_compId, teamId) => (
       teamId === 'team-B'
         ? { positions: { chuken: 'Kenji Tanaka' }, memberIds: { chuken: 'b2' } }
         : null

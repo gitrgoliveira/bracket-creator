@@ -208,6 +208,12 @@ func TestScoreHandler_KachinukiBoutFinalAppendsNextBout(t *testing.T) {
 	matches, err := store.LoadPoolMatches(compID)
 	require.NoError(t, err)
 	require.Len(t, matches, 1)
+	// And the stamp the advance gave the match, not the write's: the editor
+	// floors its next tap on the new bout by the stamp it shows (bc-hlck),
+	// and the pre-advance one let a device running behind the server stamp
+	// that tap older than the bout it scores.
+	assert.Positive(t, matches[0].ModifiedAt, "the advance stamps the match")
+	assert.Equal(t, matches[0].ModifiedAt, echoed.ModifiedAt, "the echo carries the advance's stamp")
 	require.Len(t, matches[0].SubResults, 2, "flagged bout-final write must append bout 2")
 	assert.Equal(t, "R-1", matches[0].SubResults[1].SideA, "winner stays on")
 	assert.Equal(t, "W-2", matches[0].SubResults[1].SideB, "next from lineup")
@@ -565,7 +571,10 @@ func TestScoreHandler_KachinukiEnchoFinalBoutPersists(t *testing.T) {
 // result (e.g. the taisho must be defeated) is OPERATOR DISCRETION — the
 // operator may fight a tied pool pairing on in overtime rather than accept
 // the draw, and the app must never hard-code that rule by phase (operator
-// ruling superseding an earlier bracket-only scoping).
+// ruling superseding an earlier bracket-only scoping). Nor by pairing: this is
+// the first fighters' bout, and any tied pair may go to encho (operator ruling
+// 2026-09-26: the operator decides how a match is run, the app records it; a
+// taisho-only rule was tried the day before and reversed).
 func TestScoreHandler_KachinukiPoolBoutEnchoAccepted(t *testing.T) {
 	compID := "kachinuki-pool-encho-accepted"
 	r, store := setupKachinukiScoreServer(t, compID)
@@ -1130,8 +1139,9 @@ func TestReopenHandler_BracketDownstreamStates(t *testing.T) {
 
 // TestScoreHandler_KachinukiCompletedToRunningStillNoOps pins that the
 // reopen endpoint did NOT weaken the score path's stale-write guard: a
-// plain status "running" write against a completed match is still
-// silently discarded (stale) rather than reverting the finished result.
+// plain status "running" write against a completed match never reverts the
+// finished result (bc-mrgc: it never carries the verdict, and an unstamped
+// one is held whole).
 // Reopen is the only sanctioned way back to running.
 func TestScoreHandler_KachinukiCompletedToRunningStillNoOps(t *testing.T) {
 	compID := "kachinuki-stale-guard-survives"
@@ -1147,7 +1157,11 @@ func TestScoreHandler_KachinukiCompletedToRunningStillNoOps(t *testing.T) {
 		},
 	})
 	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
-	assert.Contains(t, w.Body.String(), `"stale":true`, "the write must be discarded as stale, not applied")
+	// bc-mrgc: unstamped, so it cannot be ordered after the finish; every
+	// change it makes is held in the match's history and it answers
+	// superseded (it used to answer {stale:true}).
+	assert.Contains(t, w.Body.String(), `"applied":false`, "the write must not be applied")
+	assert.Contains(t, w.Body.String(), `"reason":"superseded"`)
 
 	matches, err := store.LoadPoolMatches(compID)
 	require.NoError(t, err)
@@ -1560,8 +1574,8 @@ func TestReopenHandler_DecisionEndsAReopenedBracketMatch(t *testing.T) {
 }
 
 // TestDecisionHandler_UnreopenedMatchNeedsNoReason: the ordinary kiken/fusenpai
-// flow (by far the common case, and the one RemainingMatchesPanel drives in
-// bulk) needs no reason, and a first finalization records no correction.
+// flow (by far the common case) needs no reason, and a first finalization
+// records no correction.
 func TestDecisionHandler_UnreopenedMatchNeedsNoReason(t *testing.T) {
 	compID := "kachinuki-decision-no-reopen"
 	r, store := setupKachinukiScoreServer(t, compID)
@@ -1941,4 +1955,125 @@ func TestRemoveKachinukiBoutHandler(t *testing.T) {
 		require.Equal(t, http.StatusBadRequest, w.Code, w.Body.String())
 		assert.Contains(t, w.Body.String(), "matchId")
 	})
+}
+
+// TestKachinukiExhaustionRefusedOutsideKachinuki pins refuseKachinukiDecision:
+// the kachinuki win decision is refused on a competition that is not
+// kachinuki, at match level and on a bout row, on both doors that take a
+// client decision (PUT /score and bulk-score), and nothing is stored. A
+// kachinuki competition still takes it, and POST /decision never took it.
+func TestKachinukiExhaustionRefusedOutsideKachinuki(t *testing.T) {
+	const want = "kachinuki-exhaustion is only for a kachinuki (winner stays on) competition, and this one is not; record the result without it"
+	exhaustion := string(domain.DecisionKachinukiExhaustion)
+	matchLevel := func() map[string]any {
+		p := finishPayload(wonBout(1), wonBout(2), wonBout(3))
+		p["decision"] = exhaustion
+		return p
+	}
+	errorOf := func(t *testing.T, w *httptest.ResponseRecorder) string {
+		t.Helper()
+		var body map[string]any
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &body))
+		msg, _ := body["error"].(string)
+		return msg
+	}
+
+	t.Run("PUT /score refuses it at match level on a fixed-order team match", func(t *testing.T) {
+		r, store := setupTeamFinishServer(t, 3, state.TeamMatchTypeFixed)
+		w := putScore(t, r, "tf", finishGateMatchID, matchLevel())
+		require.Equal(t, http.StatusBadRequest, w.Code, w.Body.String())
+		assert.Equal(t, "decision: "+want, errorOf(t, w))
+		assert.Equal(t, state.MatchStatusRunning, finishGateStored(t, store).Status, "a refused write stores nothing")
+	})
+
+	t.Run("PUT /score refuses it on a bout row", func(t *testing.T) {
+		r, store := setupTeamFinishServer(t, 3, state.TeamMatchTypeFixed)
+		bout := wonBout(2)
+		bout["decision"] = exhaustion
+		p := finishPayload(wonBout(1), bout, wonBout(3))
+		p["status"] = "running"
+		w := putScore(t, r, "tf", finishGateMatchID, p)
+		require.Equal(t, http.StatusBadRequest, w.Code, w.Body.String())
+		assert.Equal(t, "subResults[1].decision: "+want, errorOf(t, w))
+		assert.Empty(t, finishGateStored(t, store).SubResults, "a refused write stores nothing")
+	})
+
+	t.Run("bulk-score refuses the entry", func(t *testing.T) {
+		r, store := setupTeamFinishServer(t, 3, state.TeamMatchTypeFixed)
+		entry := matchLevel()
+		entry["id"] = finishGateMatchID
+		body, err := json.Marshal([]map[string]any{entry})
+		require.NoError(t, err)
+		req, err := http.NewRequest(http.MethodPost, "/api/competitions/tf/matches/bulk-score", bytes.NewBuffer(body))
+		require.NoError(t, err)
+		req.Header.Set("Content-Type", "application/json")
+		w := httptest.NewRecorder()
+		r.ServeHTTP(w, req)
+		require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+		var resp struct {
+			Succeeded int `json:"succeeded"`
+			Errors    []struct {
+				MatchID string `json:"matchId"`
+				Error   string `json:"error"`
+			} `json:"errors"`
+		}
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+		assert.Zero(t, resp.Succeeded)
+		require.Len(t, resp.Errors, 1)
+		assert.Equal(t, finishGateMatchID, resp.Errors[0].MatchID)
+		assert.Equal(t, "decision: "+want, resp.Errors[0].Error)
+		assert.Equal(t, state.MatchStatusRunning, finishGateStored(t, store).Status, "a refused entry stores nothing")
+	})
+
+	t.Run("a competition without team bouts refuses it too", func(t *testing.T) {
+		// TeamSize 0 is the individual shape (team-matches=0).
+		r, store := setupTeamFinishServer(t, 0, "")
+		w := putScore(t, r, "tf", finishGateMatchID, map[string]any{
+			"status": "completed", "winner": finishGateTeamA,
+			"sideA": finishGateTeamA, "sideB": finishGateTeamB,
+			"ipponsA": []string{"M", "K"}, "ipponsB": []string{},
+			"decision": exhaustion,
+		})
+		require.Equal(t, http.StatusBadRequest, w.Code, w.Body.String())
+		assert.Equal(t, "decision: "+want, errorOf(t, w))
+		assert.Equal(t, state.MatchStatusRunning, finishGateStored(t, store).Status)
+	})
+
+	t.Run("a kachinuki competition still takes it", func(t *testing.T) {
+		r, store := setupTeamFinishServer(t, 3, state.TeamMatchTypeKachinuki)
+		w := putScore(t, r, "tf", finishGateMatchID, matchLevel())
+		require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+		stored := finishGateStored(t, store)
+		assert.Equal(t, state.MatchStatusCompleted, stored.Status)
+		assert.Equal(t, exhaustion, stored.Decision)
+	})
+
+	t.Run("POST /decision never took it", func(t *testing.T) {
+		r, store := setupTeamFinishServer(t, 3, state.TeamMatchTypeFixed)
+		w := postDecision(t, r, "tf", finishGateMatchID, map[string]any{"decision": exhaustion, "decisionBy": "aka"})
+		require.Equal(t, http.StatusBadRequest, w.Code, w.Body.String())
+		assert.Contains(t, errorOf(t, w), "unsupported on /decision endpoint")
+		assert.Equal(t, state.MatchStatusRunning, finishGateStored(t, store).Status)
+	})
+}
+
+// TestRefuseKachinukiDecision_Scope pins the lazy wrapper PUT /score uses: it
+// reads the competition only when the payload carries the value, answers a
+// load failure as an error rather than a refusal, and leaves a missing
+// competition to the write.
+func TestRefuseKachinukiDecision_Scope(t *testing.T) {
+	store, err := state.NewStore(t.TempDir())
+	require.NoError(t, err)
+	exhaustion := &state.MatchResult{Decision: string(domain.DecisionKachinukiExhaustion)}
+
+	verr, err := refuseKachinukiDecision(store, "bad/id", &state.MatchResult{Decision: "fought"})
+	require.NoError(t, err, "a payload without the value never reads the competition")
+	assert.Nil(t, verr)
+
+	_, err = refuseKachinukiDecision(store, "bad/id", exhaustion)
+	assert.Error(t, err, "an unreadable competition is an error, not a refusal blaming the payload")
+
+	verr, err = refuseKachinukiDecision(store, "missing", exhaustion)
+	require.NoError(t, err)
+	assert.Nil(t, verr, "a competition that does not exist is left to the write to report")
 }

@@ -27,6 +27,15 @@ import (
 // failures should still return an explicit 4xx with their own message.
 func internalError(c *gin.Context, err error, publicMsg ...string) {
 	log.Printf("mobileapp: %s %s: %v", c.Request.Method, c.Request.URL.Path, err)
+	// A transaction whose log committed and whose file write then failed
+	// (state.ErrTxCommitted) is a disk fault, not a refused write: the change
+	// is kept and lands on restart, or with the next write the disk accepts.
+	// The answer stays a 500, so the device keeps retrying until one lands
+	// (operator decision 2026-10-04), and the log says so as an error.
+	if errors.Is(err, state.ErrTxCommitted) {
+		log.Printf("mobileapp: ERROR: %s %s: the server's disk refused a file write. The change is kept in the transaction log and is written on restart, or by the next write the disk accepts; the device keeps retrying it. Check the disk (space, permissions).",
+			c.Request.Method, c.Request.URL.Path)
+	}
 	// A file the operator can repair is the ONE internal failure worth naming.
 	// Everything else here is deliberately opaque, but "internal error" on a
 	// corrupt competition file tells an organiser mid tournament that scoring
@@ -55,6 +64,15 @@ func internalError(c *gin.Context, err error, publicMsg ...string) {
 		msg = publicMsg[0]
 	}
 	c.JSON(http.StatusInternalServerError, gin.H{"error": msg})
+}
+
+// txResponse is an answer a handler decides inside a transaction and writes
+// after the lock releases: writing JSON while holding the lock would let a slow
+// consumer stall every other writer for the same competition for the whole
+// stream.
+type txResponse struct {
+	status int
+	body   gin.H
 }
 
 // respondEngineError classifies err against the two typed engine sentinels
@@ -188,14 +206,14 @@ func barredCompetitorSentence(name, label, decision, opponent string) string {
 	switch decision {
 	case string(domain.DecisionKikenInjury):
 		if opponent == "" {
-			return fmt.Sprintf("%s withdrew injured in %s. Reinstate %s if the doctor allows.", name, label, name)
+			return fmt.Sprintf("%s withdrew injured in %s. Reinstate %s if they can fight again.", name, label, name)
 		}
-		return fmt.Sprintf("%s withdrew injured in %s. Reinstate %s if the doctor allows, or record the default win for %s.", name, label, name, opponent)
+		return fmt.Sprintf("%s withdrew injured in %s. Reinstate %s if they can fight again, or record the fusensho for %s.", name, label, name, opponent)
 	case string(domain.DecisionFusenpai):
 		if opponent == "" {
 			return fmt.Sprintf("%s did not appear for %s and cannot fight again.", name, label)
 		}
-		return fmt.Sprintf("%s did not appear for %s and cannot fight again. Record the default win for %s.", name, label, opponent)
+		return fmt.Sprintf("%s did not appear for %s and cannot fight again. Record the fusensho for %s.", name, label, opponent)
 	default:
 		// kiken, kiken-voluntary, and any other/legacy barring decision this
 		// app never itself writes (fusensho/daihyosen do not bar anyone, so
@@ -205,7 +223,7 @@ func barredCompetitorSentence(name, label, decision, opponent string) string {
 		if opponent == "" {
 			return fmt.Sprintf("%s withdrew in %s and cannot fight again.", name, label)
 		}
-		return fmt.Sprintf("%s withdrew in %s and cannot fight again. Record the default win for %s.", name, label, opponent)
+		return fmt.Sprintf("%s withdrew in %s and cannot fight again. Record the fusensho for %s.", name, label, opponent)
 	}
 }
 
@@ -257,9 +275,11 @@ func respondIfEngineWriteError(c *gin.Context, err error) bool {
 // a server fault" cases: a terminal 422 naming the file, never a 500.
 //
 // Shared by every handler whose engine call can reach LoadOverrides: the
-// score handler, the decision handler, the daihyosen add/remove handlers,
-// the league-tiebreak candidates/generate handlers, and the chusen-
-// candidates handler. Before this was extracted, only the score handler
+// score handler, the decision handler, the league-tiebreak candidates/generate
+// handlers, and the chusen-candidates handler. The daihyosen add/remove
+// handlers reach it through respondIfEngineWriteError too, but their writes
+// are always running ones, which never read the overrides, so they never
+// answer 422. Before this was extracted, only the score handler
 // had this mapping and every sibling call site fell through to a 500 for
 // the identical failure.
 func respondIfCorruptOverrides(c *gin.Context, err error) bool {
@@ -283,7 +303,7 @@ func respondIfCorruptOverrides(c *gin.Context, err error) bool {
 // draw, restore the settings, or use the live standings view), not server
 // faults, hence 422 rather than 500.
 //
-// Shared by the blank-template export route (GET .../export,
+// Shared by the stored-draw export route (GET .../export,
 // handlers_competition.go) and the results-archive export route (GET
 // .../export-results, handlers_export.go) so the same two-sentinel mapping
 // does not drift into two hand-copied bodies -- mirrors
@@ -362,13 +382,15 @@ func qualifierChangePayload(changes []engine.QualifierChange) []engine.Qualifier
 // with HTTP 409 {"error":"downstream_knockout_running","matchId",
 // "runningMatches","message"} and reports whether it answered. A pool
 // correction in a mixed competition that would move a qualifier out of a
-// knockout match somebody is fighting right now is refused outright: unlike
+// knockout match somebody is fighting right now, or a knockout correction
+// whose new winner would change a side of a later match being fought
+// (operator decision 2026-09-27), is refused outright: unlike
 // downstream_knockout_played it is NOT confirmable (forceDownstreamReopen does
-// not get past it), because reopening a match mid-bout would wipe what is
-// being scored at the shiaijo. message is the operator's copy ("Match 9 (Quarterfinals) is
-// being fought now. Finish it or send it back to the queue, then save
-// again."). A 409, never a 5xx, so the offline write queue drops a replay
-// that meets it instead of retrying it forever (mp-q8c6).
+// not get past it), because the match is in progress at the shiaijo. message
+// is the operator's copy ("Match 9 (Quarterfinals) is being fought now on
+// Shiaijo B. Finish it or send it back to the queue, then save this
+// correction again."). A 409, never a 5xx, so the offline write queue drops a
+// replay that meets it instead of retrying it forever (mp-q8c6).
 func respondIfDownstreamKnockoutRunning(c *gin.Context, err error) bool {
 	var runningErr *engine.DownstreamKnockoutRunningError
 	if !errors.As(err, &runningErr) {
@@ -385,8 +407,9 @@ func respondIfDownstreamKnockoutRunning(c *gin.Context, err error) bool {
 
 // blockedMatchesPayload renders knockout matches for the wire, for every
 // payload that names them to the operator (blockingMatches, runningMatches,
-// reopenedMatches): id for addressing, number, and label, the words the
-// operator is shown ("Match 3 (Final)", engine.MatchLabel). The client prints
+// reopenedMatches): id for addressing, number, label, the words the operator
+// is shown ("Match 3 (Final)", engine.MatchLabel), and court, the shiaijo the
+// match is on ("" when it has none). The client prints
 // the label as it is rather than composing its own from the number, so the
 // dialog and this payload's message cannot name the same match two ways. A
 // number of 0 means the match never got one (a bye placeholder, or a
@@ -395,7 +418,7 @@ func respondIfDownstreamKnockoutRunning(c *gin.Context, err error) bool {
 func blockedMatchesPayload(blocking []engine.ReopenedMatch) []map[string]any {
 	out := make([]map[string]any, 0, len(blocking))
 	for _, b := range blocking {
-		out = append(out, map[string]any{"id": b.ID, "number": b.Number, "label": engine.MatchLabel(b)})
+		out = append(out, map[string]any{"id": b.ID, "number": b.Number, "label": engine.MatchLabel(b), "court": b.Court})
 	}
 	return out
 }

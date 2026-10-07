@@ -33,3 +33,11 @@ type EnchoMetadata struct {
 	PeriodCount int `json:"periodCount" yaml:"periodCount"`
 	// Periods field deferred to Slice 3 if needed
 }
+
+// KachinukiMaxBouts is the most bouts a kachinuki encounter between teams of
+// teamSize can take: every bout retires at least one fighter and the
+// encounter ends when one team is out, so at most all of one team and all but
+// one of the other, 2*teamSize-1.
+func KachinukiMaxBouts(teamSize int) int {
+	return 2*teamSize - 1
+}

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/gitrgoliveira/bracket-creator/internal/helper"
 	"github.com/gitrgoliveira/bracket-creator/internal/state"
 )
 
@@ -180,8 +181,8 @@ func (e *DownstreamKnockoutPlayedError) Error() string {
 			// A pool-rank override (OverridePoolRanks) corrects no match.
 			change = fmt.Sprintf("changing the ranking of %s changes who qualified from it", pool)
 		}
-		return fmt.Sprintf("%s, and %s %s already fought by %s. Retry with forceDownstreamReopen to apply the change and reopen %s to be fought again",
-			change, strings.Join(labels, " and "), verb, who, them)
+		return fmt.Sprintf("%s, and %s %s already fought by %s. Retry with forceDownstreamReopen to apply the change and reopen %s with the new competitor in, the winner cleared and the points kept",
+			change, sentenceList(labels), verb, who, them)
 	}
 	labels := make([]string, 0, len(e.Blocking))
 	for _, b := range e.Blocking {
@@ -189,15 +190,15 @@ func (e *DownstreamKnockoutPlayedError) Error() string {
 	}
 	blocked := e.BlockingMatchID
 	if len(labels) > 0 {
-		blocked = strings.Join(labels, " and ")
+		blocked = sentenceList(labels)
 	}
 	if len(e.Blocking) > 1 {
 		// No Displaced clause: it names one competitor, and these matches do
 		// not share one.
-		return fmt.Sprintf("correcting %s would change the winner already propagated into %s, which have recorded their own results. Retry with forceDownstreamReopen to apply the correction and reopen both to be fought again",
+		return fmt.Sprintf("correcting %s would change the winner already propagated into %s, which have recorded their own results. Retry with forceDownstreamReopen to apply the correction and reopen both with the new competitors in, the winners cleared and the points kept",
 			label, blocked)
 	}
-	return fmt.Sprintf("correcting %s would change the winner already propagated into %s, which has recorded its own result; this would displace %q without updating that result. Retry with forceDownstreamReopen to apply the correction and reopen %s to be fought again",
+	return fmt.Sprintf("correcting %s would change the winner already propagated into %s, which has recorded its own result; this would displace %q without updating that result. Retry with forceDownstreamReopen to apply the correction and reopen %s with the new competitor in, the winner cleared and the points kept",
 		label, blocked, e.Displaced, blocked)
 }
 
@@ -209,12 +210,15 @@ func (e *DownstreamKnockoutPlayedError) Is(target error) bool {
 // DownstreamKnockoutRunningError. Handlers should return HTTP 409.
 var ErrDownstreamKnockoutRunning = errors.New("downstream knockout match is being fought")
 
-// DownstreamKnockoutRunningError refuses a write that would move a
-// qualifier out of a knockout match somebody is fighting RIGHT NOW. Two
-// producers construct it, distinguished by Reopening: a pool correction in
-// a mixed competition (pool_requalify.go's requalifyAfterPoolWrite, the
-// default Reopening:false), and the reopen / requeue-blocker-and-reopen
-// doors (reopenBracketDownstreamCheck, kachinuki.go, Reopening:true). Unlike
+// DownstreamKnockoutRunningError refuses a write that would change a side of
+// a knockout match somebody is fighting RIGHT NOW. Three producers construct
+// it, distinguished by Reopening: a pool correction in a mixed competition
+// (pool_requalify.go's requalifyAfterPoolWrite) and a knockout correction
+// whose new winner reaches a running later match (runningDownstreamRefusal,
+// on the score, decision, override and engi doors; operator decision
+// 2026-09-27), both the default Reopening:false, and the reopen /
+// requeue-blocker-and-reopen doors (reopenBracketDownstreamCheck,
+// kachinuki.go, Reopening:true). Unlike
 // DownstreamKnockoutPlayedError it cannot be confirmed past: reopening a
 // match mid-bout would wipe strikes being scored at the shiaijo, so the
 // operator finishes the match or sends it back to the queue first, THEN
@@ -222,8 +226,8 @@ var ErrDownstreamKnockoutRunning = errors.New("downstream knockout match is bein
 // reason to exist (see Error()). Checked before the played case, so the
 // operator is never asked to confirm something that would then be refused.
 type DownstreamKnockoutRunningError struct {
-	// MatchID is the pool match being corrected; "" for a pool-rank override
-	// (OverridePoolRanks), which corrects none.
+	// MatchID is the match being corrected or reopened; "" for a pool-rank
+	// override (OverridePoolRanks), which corrects none.
 	MatchID string
 	// Running is every knockout match the move would reach that is being
 	// fought, each with the number the operator knows it by.
@@ -236,30 +240,60 @@ type DownstreamKnockoutRunningError struct {
 	Reopening bool
 }
 
-// Error is the operator-facing sentence (the SPA shows the same words, from
-// write_result.jsx's downstreamKnockoutRunningMessage) for the SAVE-path
-// wording (Reopening:false); the reopen path's own wording is Reopening's
-// whole reason to exist, see the struct doc.
+// Error is the operator-facing sentence. The SPA shows the same words, from
+// write_result.jsx's downstreamKnockoutRunningMessage (Reopening:false) and
+// downstreamKnockoutRunningReopenMessage (Reopening:true); both languages are
+// pinned by the one table testdata/downstream_running_messages.json.
 func (e *DownstreamKnockoutRunningError) Error() string {
-	labels := make([]string, 0, len(e.Running))
-	for _, r := range e.Running {
-		labels = append(labels, MatchLabel(r))
-	}
-	subject := strings.Join(labels, " and ")
-	if subject == "" {
-		subject = "A knockout match"
-	}
-	verb := "is"
 	them := "it"
-	if len(labels) > 1 {
-		verb, them = "are", "them"
+	if len(e.Running) > 1 {
+		them = "them"
 	}
-	retry := "then save again"
+	retry := "then save this correction again"
 	if e.Reopening {
 		retry = "then reopen this match again"
 	}
-	return fmt.Sprintf("%s %s being fought now. Finish %s or send %s back to the queue, %s.",
-		SentenceCase(subject), verb, them, them, retry)
+	return fmt.Sprintf("%s. Finish %s or send %s back to the queue, %s.",
+		SentenceCase(runningSubject(e.Running)), them, them, retry)
+}
+
+// runningSubject names the matches being fought and where: "Match 3 (Final)
+// is being fought now on Shiaijo A", and for two, "the 3rd-place match is
+// being fought now on Shiaijo B and Match 3 (Final) on Shiaijo A". The court
+// clause is left out for a match with no court, and when none has one the
+// plural form stands ("A and B are being fought now"). The SPA's runningParts
+// (write_result.jsx) composes the same words.
+func runningSubject(running []ReopenedMatch) string {
+	if len(running) == 0 {
+		return "A knockout match is being fought now"
+	}
+	anyCourt := false
+	for _, r := range running {
+		anyCourt = anyCourt || r.Court != ""
+	}
+	if !anyCourt {
+		labels := make([]string, 0, len(running))
+		for _, r := range running {
+			labels = append(labels, MatchLabel(r))
+		}
+		verb := "is"
+		if len(labels) > 1 {
+			verb = "are"
+		}
+		return fmt.Sprintf("%s %s being fought now", sentenceList(labels), verb)
+	}
+	parts := make([]string, 0, len(running))
+	for i, r := range running {
+		part := MatchLabel(r)
+		if i == 0 {
+			part += " is being fought now"
+		}
+		if r.Court != "" {
+			part += " on " + helper.ShiaijoLabel(r.Court)
+		}
+		parts = append(parts, part)
+	}
+	return sentenceList(parts)
 }
 
 func (e *DownstreamKnockoutRunningError) Is(target error) bool {
@@ -309,6 +343,17 @@ func SentenceCase(s string) string {
 	return strings.ToUpper(s[:1]) + s[1:]
 }
 
+// sentenceList joins items for a sentence, "A, B and C", the same words the
+// SPA's matchLabelList and runningParts (write_result.jsx) compose, so a
+// refusal reads alike whether the server's message or the client's copy is
+// shown.
+func sentenceList(items []string) string {
+	if len(items) <= 1 {
+		return strings.Join(items, "")
+	}
+	return strings.Join(items[:len(items)-1], ", ") + " and " + items[len(items)-1]
+}
+
 func MatchLabel(m ReopenedMatch) string {
 	if m.Number > 0 {
 		if m.DisplayRound > 0 {
@@ -344,7 +389,7 @@ func roundLabelFromEnd(fromEnd int) string {
 // therefore by ExportTournamentWorkbooks), and is aliased by
 // internal/export.ErrSwissExportUnsupported for BuildResultsWorkbook. Swiss
 // has no pools and no static bracket -- results are per-round pairings plus a
-// running standings table -- so NEITHER the blank-template bracket export nor
+// running standings table -- so NEITHER the stored-draw export nor
 // the results-workbook export has anything to render; the message below is
 // shared by both and deliberately does not call either path a "bracket
 // export". Handlers should return HTTP 422 with the sentinel's message,

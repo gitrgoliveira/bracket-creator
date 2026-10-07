@@ -100,8 +100,7 @@ function StreamingOverlay({ court, position, competitions }) {
     // now hoists squads onto).
     const { lineupA: ovlLineupA, lineupB: ovlLineupB, squadA: ovlSquadA, squadB: ovlSquadB } = useTeamLineups(
         isTeamMatch && hasRunning ? running.match : null,
-        isTeamMatch && hasRunning ? comp : null,
-        hasRunning ? running.roundIndex : undefined
+        isTeamMatch && hasRunning ? comp : null
     );
 
     // Current bout for the overlay. findCurrentBoutIndex returns an index

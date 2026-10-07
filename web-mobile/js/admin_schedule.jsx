@@ -19,7 +19,7 @@ import {
   filterMatchesByCourt, computeCourtPaceStats, CourtPacePanel,
   suggestRebalances,
 } from './admin_schedule_pacing.jsx';
-import { pickCopySource, MatchLineupPanel } from './admin_schedule_lineup.jsx';
+import { MatchLineupPanel } from './admin_schedule_lineup.jsx';
 import { AdminExport } from './admin_schedule_export.jsx';
 import { startPatch, AdminScoreEditor, AdminScoreEditorPage } from './admin_schedule_score_editor.jsx';
 import { AdminSchedulePage } from './admin_schedule_page.jsx';
@@ -31,7 +31,7 @@ export {
   timeEdited, timeToMinutes, allMatchesCompleted,
   clampDurationSeconds,
   filterMatchesByCourt, computeCourtPaceStats, CourtPacePanel,
-  suggestRebalances, pickCopySource, MatchLineupPanel,
+  suggestRebalances, MatchLineupPanel,
 };
 
 window.AdminSchedulePage = AdminSchedulePage;

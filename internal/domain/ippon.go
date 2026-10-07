@@ -117,12 +117,27 @@ func CountScoringIppons(ippons []string) int {
 // not that anyone scored.
 //
 // One predicate so a counter and a renderer cannot disagree about the same
-// slice: CountScoringIppons counts through it, and export.IpponsScore draws
-// through it. They previously differed on HanteiMark, so a mark that survived
-// into an exported cell would have been printed as a struck point AND marked
-// again by SideMarks. Mirrors realIppons in web-mobile/js/result_slot.jsx.
+// slice: CountScoringIppons counts through it, and IpponsScore draws through
+// it. They previously differed on HanteiMark, so a mark that survived into an
+// exported cell would have been printed as a struck point AND marked again by
+// SideMarks. Mirrors realIppons in web-mobile/js/result_slot.jsx.
 func IsScoringIppon(v string) bool {
 	return v != "" && v != IpponPlaceholder && v != HanteiMark
+}
+
+// IpponsScore formats an ippon slice as a readable score string: ["M","K"] ->
+// "MK", nil/empty -> "". Draws through IsScoringIppon, so a placeholder dot
+// or a judges'-decision mark never leaks into the printed cell. Mirrors the
+// character-join behaviour in formatIpponsScore (bracket.jsx) without the
+// full display logic (bye/hikiwake special cases live in the caller).
+func IpponsScore(ippons []string) string {
+	result := ""
+	for _, s := range ippons {
+		if IsScoringIppon(s) {
+			result += s
+		}
+	}
+	return result
 }
 
 // MatchSide is the three-value result of attributing a match's winner to a
@@ -221,6 +236,26 @@ type WinnerAttribution struct {
 func SubBoutAttribution(att WinnerAttribution) WinnerAttribution {
 	if att.SideA != "" && att.SideA == att.SideB {
 		att.SideA, att.SideB = "", ""
+	}
+	return att
+}
+
+// SubBoutAttributionForTeamRow is SubBoutAttribution for one bout row of a
+// TEAM encounter, plus the one case it alone does not cover: a row naming no
+// fighter of its own settles at the MATCH level, so it is attributed by the
+// encounter's team names. rawAtt must come straight from
+// state.SubMatchResult.Attribution(): whether the row names a fighter is
+// asked of the RAW names, because a same-name fighter pair is blanked by
+// SubBoutAttribution too and must stay blanked. The team names go in AFTER
+// that blank, never through it: they are match-level identity, unique by
+// rule, and where a legacy roster holds two same-named teams the row is
+// attributed as the match itself is, to side A first, the side the app and
+// the standings (state.SubBoutWinnerSide) give it. Every team bout row on the
+// score sheets and the Kachinuki Detail sheet is attributed here.
+func SubBoutAttributionForTeamRow(rawAtt WinnerAttribution, teamSideA, teamSideB string) WinnerAttribution {
+	att := SubBoutAttribution(rawAtt)
+	if rawAtt.SideA == "" && rawAtt.SideB == "" {
+		att.SideA, att.SideB = teamSideA, teamSideB
 	}
 	return att
 }

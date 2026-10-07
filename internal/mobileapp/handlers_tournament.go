@@ -330,7 +330,7 @@ func guardCourtRemoval(c *gin.Context, store *state.Store, courts []string) bool
 }
 
 // checkCourtRemoval is the store-walking half of the shrink guard. It returns
-// (infraErr, validationErr) like checkUniqueCompFields: infraErr means the
+// (infraErr, validationErr) like CheckUniqueCompFields: infraErr means the
 // store could not be queried (caller should 500), validationErr means a live
 // competition still depends on a court this request REMOVES (caller should
 // 400).

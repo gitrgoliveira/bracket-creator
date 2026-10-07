@@ -6,7 +6,15 @@
 // mounting anything.
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { resolveMemberIdForName, resolveMemberIdsForPositions, memberIdentityWarning, blankMemberForPosition } from '../admin_lineup.jsx';
+import { resolveMemberIdForName, resolveMemberIdsForPositions, memberIdentityWarning, blankMemberForPosition, typedNameTarget } from '../admin_lineup.jsx';
+import { answered } from './helpers/team_members.js';
+
+// A rename as the server answers it: the member, named, with the stamp it gave the write.
+const renamingIn = (members) => vi.fn((_comp, _team, id, name) => Promise.resolve(answered(members.find((m) => m.id === id), { name })));
+
+// The server's sentence for a participant's rename of a team member who
+// already has a name (errMemberAlreadyNamed, internal/mobileapp/handlers_squad.go).
+const ALREADY_NAMED_SENTENCE = 'This team member already has a name. Ask the tournament organizer to change it.';
 
 const SQUAD = [
   { id: 'mem-sato', index: 0, name: 'Sato' },
@@ -150,7 +158,7 @@ describe('resolveMemberIdsForPositions', () => {
 
   it('bc-dnst: a name typed into a named position (senpo) renames the blank member seeded at its index, never mints', async () => {
     const addTeamMember = vi.fn();
-    const renameTeamMember = vi.fn().mockResolvedValue(true);
+    const renameTeamMember = renamingIn(BLANK_SQUAD);
     global.window.API = { addTeamMember, renameTeamMember };
     const { memberIds, squad } = await resolveMemberIdsForPositions(
       'comp1', 'team1', { senpo: 'Sato' }, BLANK_SQUAD, 'pw'
@@ -161,9 +169,30 @@ describe('resolveMemberIdsForPositions', () => {
     expect(squad.find(m => m.id === 'm1').name).toBe('Sato');
   });
 
+  // The list an editor merges the squad into orders copies of a member by the stamp the
+  // server gave them, so the renamed member the resolver hands back must be the one the
+  // server answered: a copy it built from the typed name has no stamp, and any list
+  // read before the rename would win over it.
+  it('the member it renamed is the one the server answered, stamp included, never a copy built from the name typed', async () => {
+    const renameTeamMember = renamingIn(BLANK_SQUAD);
+    global.window.API = { addTeamMember: vi.fn(), renameTeamMember };
+    const { squad } = await resolveMemberIdsForPositions('comp1', 'team1', { senpo: 'Sato' }, BLANK_SQUAD, 'pw');
+    const answeredMember = await renameTeamMember.mock.results[0].value;
+    expect(squad.find(m => m.id === 'm1')).toBe(answeredMember);
+    expect(squad.find(m => m.id === 'm1').modifiedAt).toBeGreaterThan(0);
+    expect(squad.find(m => m.id === 'm2'), 'the member it did not touch is as it was').toBe(BLANK_SQUAD[1]);
+  });
+
+  it('the member it minted is the one the server answered, stamp included', async () => {
+    const minted = answered({ id: 'mem-new', index: 3, name: '' }, { name: 'Yamada' });
+    global.window.API = { addTeamMember: vi.fn().mockResolvedValue(minted), renameTeamMember: vi.fn() };
+    const { squad } = await resolveMemberIdsForPositions('comp1', 'team1', { senpo: 'Yamada' }, [{ id: 'm1', index: 1, name: 'Ito' }], 'pw');
+    expect(squad.find(m => m.id === 'mem-new')).toBe(minted);
+  });
+
   it('bc-dnst: a numeric position key ("2") renames the blank member seeded at that index', async () => {
     const addTeamMember = vi.fn();
-    const renameTeamMember = vi.fn().mockResolvedValue(true);
+    const renameTeamMember = renamingIn(BLANK_SQUAD);
     global.window.API = { addTeamMember, renameTeamMember };
     const { memberIds, squad } = await resolveMemberIdsForPositions(
       'comp1', 'team1', { '2': 'Ito' }, BLANK_SQUAD, 'pw'
@@ -213,6 +242,18 @@ describe('resolveMemberIdsForPositions', () => {
     expect(addTeamMember).not.toHaveBeenCalled();
   });
 
+  // bc-dhas: a participant's rename of a member someone has already named is
+  // refused with a code (member_already_named) beside its sentence. The failure
+  // keeps both, so the warning can show that refusal in the server's words.
+  it('a rename refused with a code keeps the code beside the reason', async () => {
+    const refused = Object.assign(new Error(ALREADY_NAMED_SENTENCE), { code: 'member_already_named' });
+    global.window.API = { addTeamMember: vi.fn(), renameTeamMember: vi.fn().mockRejectedValue(refused) };
+    const { failures } = await resolveMemberIdsForPositions(
+      'comp1', 'team1', { senpo: 'Sato' }, BLANK_SQUAD, ''
+    );
+    expect(failures).toEqual([{ position: 'senpo', name: 'Sato', reason: ALREADY_NAMED_SENTENCE, code: 'member_already_named' }]);
+  });
+
   // bc-dnst (currentIds, the 6th argument): a name typed into a slot that
   // was PICKED BY NUMBER (its memberId already recorded on this position,
   // e.g. via LineupNameInput's object-entry roster) must rename THAT
@@ -222,12 +263,12 @@ describe('resolveMemberIdsForPositions', () => {
   // index-default fallback, not merely as a tie-break when they agree.
   it('bc-dnst: currentIds naming a blank member (not the index default) renames THAT member instead', async () => {
     const addTeamMember = vi.fn();
-    const renameTeamMember = vi.fn().mockResolvedValue(true);
-    global.window.API = { addTeamMember, renameTeamMember };
     const squad = [
       { id: 'm1', index: 1, name: '' }, // senpo's own index default: must NOT be touched
       { id: 'm6', index: 6, name: '' }, // the reserve actually picked into senpo
     ];
+    const renameTeamMember = renamingIn(squad);
+    global.window.API = { addTeamMember, renameTeamMember };
     const { memberIds, squad: nextSquad } = await resolveMemberIdsForPositions(
       'comp1', 'team1', { senpo: 'Picked Name' }, squad, 'pw', { senpo: 'm6' }
     );
@@ -285,6 +326,35 @@ describe('blankMemberForPosition', () => {
     const squad = [{ id: 'm1', index: 1, name: '' }];
     expect(blankMemberForPosition(squad, 'senpo', { senpo: 'm1' })).toEqual(squad[0]);
     expect(blankMemberForPosition(squad, 'senpo', {})).toEqual(squad[0]);
+  });
+});
+
+// typedNameTarget is the ONE order a name typed at a position is placed by: the resolver
+// above, the Lineups page's add and the at-court panel's check before a Save (which
+// asks it of a copy of the members and writes nothing) all drive it.
+describe('typedNameTarget', () => {
+  const MEMBERS = [
+    { id: 'm1', index: 1, name: 'Ito' },
+    { id: 'm2', index: 2, name: '' },
+    { id: 'm3', index: 3, name: '' },
+  ];
+
+  it('is the member the name belongs to, whatever the position holds: nothing is written', () => {
+    expect(typedNameTarget(MEMBERS, '2', ' ito ', {})).toEqual({ member: MEMBERS[0], write: 'none' });
+  });
+
+  it('is the unnamed member the position holds, else the one seeded for it, which the name is written to', () => {
+    expect(typedNameTarget(MEMBERS, '2', 'Mori', {})).toEqual({ member: MEMBERS[1], write: 'rename' });
+    expect(typedNameTarget(MEMBERS, '2', 'Mori', { 2: 'm3' })).toEqual({ member: MEMBERS[2], write: 'rename' });
+  });
+
+  it('is a member that does not exist yet when no member is unnamed at the position (the seeded one is fielded elsewhere, or named)', () => {
+    expect(typedNameTarget(MEMBERS, '2', 'Mori', { 1: 'm2' })).toEqual({ member: null, write: 'add' });
+    expect(typedNameTarget(MEMBERS, '1', 'Mori', {})).toEqual({ member: null, write: 'add' });
+  });
+
+  it('tries the name before the position: a name a member has is never written to another', () => {
+    expect(typedNameTarget(MEMBERS, '2', 'Ito', { 2: 'm2' }).write).toBe('none');
   });
 });
 
@@ -376,6 +446,28 @@ describe('memberIdentityWarning', () => {
     );
     expect(msg).toContain('team member');
     expect(msg.toLowerCase()).not.toContain('member id');
+  });
+
+  // bc-dhas: a member who already has a name is refused in the server's own
+  // sentence, and the warning shows it as that sentence, the way the score
+  // sheet's bout row does (memberRefusalNote), not in brackets.
+  it('shows a member-already-named refusal in the server\'s own sentence', () => {
+    const msg = memberIdentityWarning(
+      [{ position: 'senpo', name: 'Sato', reason: ALREADY_NAMED_SENTENCE, code: 'member_already_named' }], false,
+    );
+    expect(msg).toBe(`Lineup saved, but Senpo (Sato) could not be linked to a team member. ${ALREADY_NAMED_SENTENCE} Scores will still record normally.`);
+  });
+
+  it('keeps any other reason in brackets, one sentence per position', () => {
+    const msg = memberIdentityWarning(
+      [
+        { position: 'senpo', name: 'Sato', reason: 'offline' },
+        { position: 'taisho', name: 'Ito', reason: ALREADY_NAMED_SENTENCE, code: 'member_already_named' },
+        { position: 'jiho', name: 'Abe', reason: '' },
+      ],
+      false,
+    );
+    expect(msg).toBe(`Lineup saved, but Senpo (Sato) could not be linked to a team member (offline). Taisho (Ito) could not be linked to a team member. ${ALREADY_NAMED_SENTENCE} Jiho (Abe) could not be linked to a team member. Scores will still record normally.`);
   });
 
   it('ignores entries with no position key defensively (never throws on malformed input)', () => {

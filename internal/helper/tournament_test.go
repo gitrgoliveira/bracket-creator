@@ -688,8 +688,12 @@ func TestConvertPlayersToWinners(t *testing.T) {
 	t.Run("with sanitized names", func(t *testing.T) {
 		winners := ConvertPlayersToWinners(players, true, pCoords)
 
-		if len(winners) != 2 {
-			t.Errorf("Expected 2 winners, got %d", len(winners))
+		// Each player under its displayed name and under its identity.
+		if len(winners) != 4 {
+			t.Errorf("Expected 4 entries, got %d", len(winners))
+		}
+		if winners[PlayerKey(players[1])].cell != "A2" {
+			t.Error("Expected Bob's identity key to reference A2")
 		}
 
 		if _, ok := winners["A. SMITH"]; !ok {
@@ -704,8 +708,8 @@ func TestConvertPlayersToWinners(t *testing.T) {
 	t.Run("without sanitized names", func(t *testing.T) {
 		winners := ConvertPlayersToWinners(players, false, pCoords)
 
-		if len(winners) != 2 {
-			t.Errorf("Expected 2 winners, got %d", len(winners))
+		if len(winners) != 4 {
+			t.Errorf("Expected 4 entries, got %d", len(winners))
 		}
 
 		if _, ok := winners["Alice"]; !ok {
@@ -1435,14 +1439,17 @@ func TestConvertPlayersToWinnersEdgeCases(t *testing.T) {
 			},
 			sanitized: true,
 			validate: func(t *testing.T, winners map[string]MatchWinner) {
-				// Last one wins due to map overwrite
-				if len(winners) != 1 {
-					t.Errorf("Expected 1 entry (overwritten), got %d", len(winners))
+				// The shared name key keeps the last; each identity keeps its own row.
+				if len(winners) != 3 {
+					t.Errorf("Expected 3 entries, got %d", len(winners))
 				}
 				if winner, ok := winners["J. DOE"]; !ok {
 					t.Error("Expected key 'J. DOE' in map")
 				} else if winner.cell != "A2" {
 					t.Errorf("Expected last player's cell 'A2', got %s", winner.cell)
+				}
+				if winners[PlayerKey(Player{Name: "John Doe"})].cell != "A1" {
+					t.Error("Expected John Doe's identity key to keep A1")
 				}
 			},
 		},
@@ -1457,9 +1464,9 @@ func TestConvertPlayersToWinnersEdgeCases(t *testing.T) {
 			},
 			sanitized: false,
 			validate: func(t *testing.T, winners map[string]MatchWinner) {
-				// Only one entry since both players share the same name key
-				if len(winners) != 1 {
-					t.Errorf("Expected 1 entry (overwritten), got %d", len(winners))
+				// One name key and one identity: the two rows are the same competitor.
+				if len(winners) != 2 {
+					t.Errorf("Expected 2 entries, got %d", len(winners))
 				}
 				if winner, ok := winners["John Smith"]; !ok {
 					t.Error("Expected key 'John Smith' in map")
@@ -1478,8 +1485,8 @@ func TestConvertPlayersToWinnersEdgeCases(t *testing.T) {
 			},
 			sanitized: true,
 			validate: func(t *testing.T, winners map[string]MatchWinner) {
-				if len(winners) != 1 {
-					t.Errorf("Expected 1 entry, got %d", len(winners))
+				if len(winners) != 2 {
+					t.Errorf("Expected 2 entries, got %d", len(winners))
 				}
 				if winner, ok := winners["ALICE"]; !ok {
 					t.Error("Expected key 'ALICE' in map")

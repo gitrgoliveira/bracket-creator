@@ -3,7 +3,7 @@
 
 This runs against the Markdown SOURCES under ``docs/`` (not the built site),
 so it catches wording problems before ``mkdocs build`` ever renders them.
-Four rules are enforced, each of which the public docs must never contain:
+Seven rules are enforced, each of which the public docs must never contain:
 
 * ``em-dash``: the character U+2014 (an em dash). House style writes short
   sentences instead.
@@ -14,12 +14,44 @@ Four rules are enforced, each of which the public docs must never contain:
   public reader.
 * ``mat``: the word "mat"/"mats"/"matside". Kendo has no mats; the fighting area
   is a shiai-jo (court).
+* ``default-win``: the phrase "default win" (or "default-win"). Kendo has no
+  such term (operator ruling 2026-10-04): every finished match has a result,
+  a scoreline or a registered decision that names the winner -- name the
+  recorded decision instead (kiken, fusenpai, fusensho).
+* ``default-winner``: the same ruling, the noun form -- "default winner(s)"
+  -- which ``default-win``'s own word-boundary requirement cannot reach.
+* ``wins-by-default``: the same ruling again, the other way to say it --
+  naming a side as winning "by default" without the words "default" and
+  "win" next to each other.
 
 ``docs/dev-guide/code_of_conduct.md`` is skipped because it is third-party
 text (the Contributor Covenant) that this repo does not control the wording
 of. Lines inside fenced code blocks, HTML comments, and inline code spans are
-skipped, since those are not rendered prose. HTML tags are stripped before
-matching, so an attribute (e.g. a CSS class) can never be misread as prose.
+skipped, since those are not rendered prose; a skipped block always ENDS the
+paragraph it interrupts rather than letting the prose before it join the
+prose after it (bc-cse) -- a line-based rule never saw the difference, but a
+paragraph rule that joined across a skipped block could read two unrelated
+sentences as one. HTML tags are stripped before matching, for both the line
+rules and the three paragraph rules (bc-cse: before this fix only the line
+rules got this treatment, so e.g. ``<img src="shots/default-win.png">`` read
+as prose to the paragraph rules alone). Markdown emphasis markers (``*`` and
+``_``) are also stripped before the three paragraph rules run, so
+``**default** win`` and ``_default_ win`` read exactly as ``default win``
+rather than hiding the two words behind punctuation neither gate's character
+class names.
+
+The first four rules are checked LINE BY LINE, which is correct for them (an
+em dash, a "See [...]" link, an internal id, and "mat" are each self-contained
+within one line in every real violation seen). The three default-win rules
+are different: Markdown source commonly soft-wraps a sentence across
+physical lines (a paragraph renders as one block regardless of where its
+source lines break), so "the default" ending one line and "win" starting the
+next is one violation a line-by-line check cannot see -- the same class of
+miss the sibling JS gate (web-mobile/check-write-result.mjs) fixed for the
+same ruling. Those three rules are therefore checked against each PARAGRAPH
+(a run of consecutive non-blank prose lines, rejoined with newlines
+preserved so a hit's line number can still be computed), never against a
+single line alone.
 
 Usage:
     python3 docs/check_prose.py [docs_dir]   # default: docs
@@ -43,12 +75,82 @@ INTERNAL_ID_RE = re.compile(r"\b(mp|bc)-[a-z0-9]{3,4}\b")
 MAT_RE = re.compile(r"\bmat(s|side)?\b", re.IGNORECASE)
 HTML_TAG_RE = re.compile(r"<[^>]+>")
 
-# (rule name, pattern) pairs checked against each prose line, in report order.
+# (rule name, pattern) pairs checked against each prose LINE, in report order.
 RULES: list[tuple[str, re.Pattern[str]]] = [
     ("em-dash", re.compile("—")),  # U+2014; house style writes short sentences instead
     ("see-link", SEE_LINK_RE),
     ("internal-id", INTERNAL_ID_RE),
     ("mat", MAT_RE),
+]
+
+# The default-win trio (operator ruling 2026-10-04), checked against each
+# PARAGRAPH instead (see iter_paragraphs below), so a phrase a Markdown
+# source wraps across two lines is still caught -- mirrors
+# web-mobile/check-write-result.mjs's own default-win rules, widened the
+# same way for the same ruling (the Go gate gets the same three too).
+#
+# The separator in DEFAULT_WIN_RE is REQUIRED (`+`, not `*`), matching the JS
+# rule's own reasoning even though prose has no camelCase identifiers to
+# protect: the two words running together with NO separator at all
+# ("defaultwin") is not a shape an author produces by accident in prose, so
+# there is nothing real to catch there, and keeping the gates'
+# character classes in the same shape is one less thing to keep in sync by
+# hand. One or more of whitespace (a line wrap included -- `\s` matches a
+# newline), a quote, a brace, `+`, or a hyphen (the historical "default-win"
+# spelling) bridges the two words. The trailing `\b` (bc-cse) requires a
+# word boundary right after "win": without it, an HTML attribute run such as
+# ``variant="default" winner={w}`` would read the "win" inside "winner" as
+# the forbidden word, matching the same fix in the JS and Go gates.
+DEFAULT_WIN_RE = re.compile(r"default[\s{}\"'+-]+(?:wins?|loss(?:es)?)\b", re.IGNORECASE)
+# "default winner(s)" (bc-cse FIX C): the noun form DEFAULT_WIN_RE's
+# trailing \b after "win" cannot reach, because "winner" never satisfies a
+# boundary right after "win" (the "n" ending "win" and the "n" opening
+# "ner" are both word characters). The separator here is whitespace only,
+# deliberately narrower than DEFAULT_WIN_RE's: an HTML attribute run such as
+# ``variant="default" winner={w}`` separates the two words with a quote,
+# which this class excludes, so that shape still passes here too.
+DEFAULT_WINNER_RE = re.compile(r"default\s+winners?\b", re.IGNORECASE)
+# The other way to say it without "default" and "win" adjacent: naming a
+# side as winning "by default", including the past and participle forms
+# ("won by default", "winning by default") a bare `wins?` alternation
+# missed. Bounded to 40 characters with no sentence break (a literal ".")
+# or Markdown table-row break (a literal "|", bc-cse FIX B) so it cannot
+# reach across an unrelated "win" and an unrelated "by default" in two
+# different sentences or table cells. The gap is `[^.|]`, not `[^.\n]` or
+# `[^.]` (bc-cse): it crosses a real line break, since a Markdown paragraph
+# wraps its source lines exactly the way DEFAULT_WIN_RE already accounts
+# for, and the 40-character bound (plus "." and "|") was already the thing
+# keeping the match inside one sentence/cell -- excluding "\n" as well
+# bought nothing but the wrapped shape this fix exists to catch.
+#
+# Rebalanced to the decision wordings only -- wins, won, winning, loses --
+# after "winners?", "lost" and "losing" produced real false positives on
+# ordinary settings/connection prose ("Winners per pool is 2 by default.",
+# "If the connection is lost, by default the app retries.", "Points lost
+# (PL) are hidden by default."): none of those name a kendo decision.
+# "winner ... by default" is still caught by DEFAULT_WINNER_RE above when
+# the two words sit next to each other, which is the shape that occurs.
+#
+# "won" excludes its own contraction "won't" without a lookahead (Python's
+# re module has none): `\bwon\b` alone also matches inside "won't", because
+# the word-to-apostrophe transition is itself a `\b`. The alternative
+# instead requires the character right after "won" to be present and NOT
+# an apostrophe, a literal "." or a literal "|" (or end of string) --
+# excluding "." and "|" too keeps this forced character from swallowing
+# the sentence/cell boundary the gap after it exists to stop at.
+# "wonder"/"wondering" never reach this branch, since `\bwon\b` does not
+# match a "won" that continues into more word characters. `by\s+default`
+# (not a literal "by default") lets a wrap land between "by" and
+# "default" themselves too (bc-cse FIX A).
+WINS_BY_DEFAULT_RE = re.compile(
+    r"(?:\b(?:wins?|winning|loses)\b|\bwon\b(?:[^'.|]|$))[^.|]{0,40}\bby\s+default\b",
+    re.IGNORECASE,
+)
+
+PARAGRAPH_RULES: list[tuple[str, re.Pattern[str]]] = [
+    ("default-win", DEFAULT_WIN_RE),
+    ("default-winner", DEFAULT_WINNER_RE),
+    ("wins-by-default", WINS_BY_DEFAULT_RE),
 ]
 
 # Inline code spans (single-backtick delimited) and complete HTML comments,
@@ -68,6 +170,32 @@ def check_line(line: str) -> list[str]:
             rules.append(name)
 
     return rules
+
+
+# Markdown emphasis delimiters. Stripped (not replaced with a space) before
+# the three paragraph rules run, so "**default** win" and "_default_ win"
+# read as the plain "default win" a reader actually sees, rather than
+# hiding the two words behind punctuation none of DEFAULT_WIN_RE's,
+# DEFAULT_WINNER_RE's, nor WINS_BY_DEFAULT_RE's character class names.
+# Inline code spans are already gone by this point (iter_prose_lines strips
+# them before yielding a line), so this cannot eat an underscore inside a
+# real identifier such as `snake_case`.
+EMPHASIS_RE = re.compile(r"[*_]+")
+
+
+def _paragraph_prose(line: str) -> str:
+    """Normalize one line the way the three PARAGRAPH_RULES need it: HTML tags
+    stripped to a space (bc-cse), exactly as check_line does for the line
+    rules -- before this fix only check_line got that treatment, so e.g.
+    ``<img src="shots/default-win.png">`` read as prose to the paragraph
+    rules alone -- plus Markdown emphasis markers removed. Applied PER LINE,
+    before iter_paragraphs joins lines into a paragraph: HTML_TAG_RE's
+    `[^>]+` would otherwise match across a real line break once lines are
+    joined with "\\n" and silently eat it, throwing off every lineno that
+    check_paragraphs recovers by counting newlines.
+    """
+    text = HTML_TAG_RE.sub(" ", line)
+    return EMPHASIS_RE.sub("", text)
 
 
 def _fence_marker(stripped: str) -> tuple[str | None, int]:
@@ -103,6 +231,13 @@ def iter_prose_lines(text: str):
     if an unterminated ``<!--`` remains, the prose before it is still checked
     and the rest of the file is skipped until a later line's ``-->`` closes
     it, after which the remainder of THAT line is checked normally.
+
+    A line this function skips (fence open/body/close, an HTML comment's
+    interior) is yielded as an EMPTY line rather than omitted outright
+    (bc-cse): check_line("") trips nothing, so the four line rules are
+    unaffected, but iter_paragraphs treats a blank line as the end of a
+    paragraph, so a skipped block always breaks the paragraph around it
+    instead of letting prose before it run on into prose after it.
     """
     fence_char: str | None = None
     fence_len = 0
@@ -115,16 +250,19 @@ def iter_prose_lines(text: str):
             if stripped.startswith(fence_char * fence_len):
                 fence_char = None
                 fence_len = 0
+            yield lineno, ""
             continue
 
         ch, run = _fence_marker(stripped)
         if ch is not None:
             fence_char, fence_len = ch, run
+            yield lineno, ""
             continue
 
         if in_html_comment:
             idx = line.find("-->")
             if idx == -1:
+                yield lineno, ""
                 continue
             in_html_comment = False
             line = line[idx + 3 :]
@@ -139,6 +277,57 @@ def iter_prose_lines(text: str):
             continue
 
         yield lineno, line
+
+
+def iter_paragraphs(prose_lines: list[tuple[int, str]]):
+    """Group consecutive non-blank prose lines into paragraphs, each yielded
+    as (start_lineno, joined_text), the lines rejoined with "\\n" (not
+    collapsed to a space) so a hit's line can still be recovered by counting
+    the newlines before its match start.
+
+    A blank line (empty after stripping) ends the current paragraph. This
+    runs over the lines iter_prose_lines already yielded -- fenced code,
+    HTML comments and inline code spans are already gone -- so a paragraph
+    here is exactly a CommonMark paragraph: one block that renders as
+    continuous prose regardless of where its source lines break, which is
+    the reason DEFAULT_WIN_RE and WINS_BY_DEFAULT_RE need this instead of
+    the plain per-line check every other rule uses.
+    """
+    buf: list[str] = []
+    start: int | None = None
+    for lineno, line in prose_lines:
+        if line.strip() == "":
+            if buf:
+                yield start, "\n".join(buf)
+                buf = []
+                start = None
+            continue
+        if not buf:
+            start = lineno
+        buf.append(line)
+    if buf:
+        yield start, "\n".join(buf)
+
+
+def check_paragraphs(prose_lines: list[tuple[int, str]]):
+    """Yield (lineno, rule, excerpt) for every PARAGRAPH_RULES hit, lineno
+    being where the match itself starts (not merely the paragraph's first
+    line), excerpt the matched text with internal whitespace collapsed to a
+    single space so a wrapped hit still prints as one readable line.
+
+    Each line is run through _paragraph_prose (HTML tags and Markdown
+    emphasis markers stripped) BEFORE iter_paragraphs joins it with its
+    neighbours (bc-cse), so an HTML tag's own "<"/">" can never be mistaken
+    for a line break once lines are joined with "\\n", and lineno stays a
+    correct count of real newlines.
+    """
+    normalized = [(lineno, _paragraph_prose(line)) for lineno, line in prose_lines]
+    for start, paragraph in iter_paragraphs(normalized):
+        for name, pattern in PARAGRAPH_RULES:
+            for m in pattern.finditer(paragraph):
+                lineno = start + paragraph.count("\n", 0, m.start())
+                excerpt = re.sub(r"\s+", " ", m.group(0)).strip()
+                yield lineno, name, excerpt
 
 
 def main() -> int:
@@ -166,10 +355,14 @@ def main() -> int:
     for path in sorted(md_files):
         with open(path, encoding="utf-8") as fh:
             text = fh.read()
-        for lineno, line in iter_prose_lines(text):
+        prose_lines = list(iter_prose_lines(text))
+        for lineno, line in prose_lines:
             for rule in check_line(line):
                 bad = True
                 print(f"{path}:{lineno}: {rule}: {line.strip()}")
+        for lineno, rule, excerpt in check_paragraphs(prose_lines):
+            bad = True
+            print(f"{path}:{lineno}: {rule}: {excerpt}")
 
     if bad:
         return 1

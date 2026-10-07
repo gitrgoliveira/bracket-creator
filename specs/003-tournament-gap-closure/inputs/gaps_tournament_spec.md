@@ -200,17 +200,17 @@ The following tournament operations described in the spec are physical/logistica
 
 ---
 
-## Gap 10: Fusensho (Default Win for Absent Players)
+## Gap 10: Fusensho (Win Recorded for Absent Players)
 
 **Priority**: Low
 
-**Tournament need**: If a team is missing a player for a position, the opposing fighter wins by default (fusensho) with a score of 2–0. This counts as one individual victory and two points for the winning side.
+**Tournament need**: If a team is missing a player for a position, the opposing fighter is recorded as the fusensho winner at that position, scored 2–0. This counts as one individual victory and two points for the winning side.
 
 **Current state**: No explicit fusensho handling. A missing player in a team bout must be manually scored as 2–0 by the operator, with no indication that it was a default rather than a fought result.
 
 **What's missing**:
 
-- A "Fusensho" / "Default win" button or toggle in the team scoring modal that auto-fills 2–0 for the bout.
+- A "Fusensho" button or toggle in the team scoring modal that auto-fills 2–0 for the bout.
 - Visual distinction between fought and defaulted bouts in the scoreboard and results (e.g., "Fus." label).
 - Correct accounting: fusensho 2–0 must contribute to IV and PW totals for the winning team.
 
@@ -256,7 +256,7 @@ The following tournament operations described in the spec are physical/logistica
 
 **Priority**: Medium
 
-**Tournament need**: Two distinct scenarios require default-win handling beyond normal scoring:
+**Tournament need**: Two distinct scenarios need handling as a recorded decision, beyond normal scoring:
 
 1. **Kiken (withdrawal)**: A competitor withdraws mid-tournament due to injury, illness, or other reasons. The opponent receives 2–0 (regulation) or 1–0 (encho). The withdrawn competitor is **prohibited from participating in subsequent matches**. In team matches under FIK rules, specific positions must be vacated (Jiho for 1 withdrawal, Jiho + Fukusho for 2; Senpo and Taisho cannot be forfeited; 3+ withdrawals disqualify the team).
 
@@ -268,7 +268,7 @@ The following tournament operations described in the spec are physical/logistica
 
 - A match decision type beyond scored/draw: `kiken` (withdrawal) and `fusenpai` (no-show), recording the reason alongside the default score.
 - Auto-fill of the default score (2–0 for regulation, 1–0 for encho kiken) when the operator selects kiken/fusenpai.
-- **Prohibition enforcement**: once a competitor is marked as withdrawn or no-show, the app should flag or block their subsequent scheduled matches and prompt the operator to resolve them (award default wins to opponents or remove from bracket).
+- **Prohibition enforcement**: once a competitor is marked as withdrawn or no-show, the app should flag or block their subsequent scheduled matches and prompt the operator to resolve them (record a fusensho for opponents or remove from bracket).
 - For team kiken: validation that the correct positions are vacated per FIK rules (position-specific forfeiture constraints for 5-person teams).
 - Visual distinction in match results and brackets: "Kiken" or "Fus." label alongside the score.
 

@@ -13,7 +13,7 @@ import (
 )
 
 // TestIsScoringIppon pins the one predicate CountScoringIppons and
-// export.IpponsScore both draw through: an empty cell, the unfilled-slot
+// IpponsScore both draw through: an empty cell, the unfilled-slot
 // placeholder, and the judges'-decision mark are all NOT points.
 func TestIsScoringIppon(t *testing.T) {
 	tests := []struct {
@@ -216,6 +216,57 @@ func TestSubBoutAttribution(t *testing.T) {
 		att := domain.SubBoutAttribution(domain.WinnerAttribution{Winner: "Team A"})
 		assert.Equal(t, "Team A", att.Winner)
 		assert.Empty(t, att.SideA)
+	})
+}
+
+// TestSubBoutAttributionForTeamRow pins the team-row fallback: a bout row
+// that names no fighter of its own is attributed by the encounter's team
+// names. The discriminating case is the one a check made after
+// SubBoutAttribution would get wrong: a same-name FIGHTER pair is blanked too,
+// and must STAY blanked rather than be re-attributed by the team names.
+func TestSubBoutAttributionForTeamRow(t *testing.T) {
+	t.Run("nameless row falls back to the team names", func(t *testing.T) {
+		att := domain.SubBoutAttributionForTeamRow(
+			domain.WinnerAttribution{Winner: "RedTeam"}, "RedTeam", "WhiteTeam")
+		assert.Equal(t, "RedTeam", att.SideA)
+		assert.Equal(t, "WhiteTeam", att.SideB)
+		assert.Equal(t, domain.MatchSideA, domain.AttributeWinnerSide(att))
+	})
+
+	t.Run("same-name fighter pair stays blanked, not re-attributed by team names", func(t *testing.T) {
+		att := domain.SubBoutAttributionForTeamRow(
+			domain.WinnerAttribution{Winner: "X", SideA: "X", SideB: "X"}, "RedTeam", "WhiteTeam")
+		assert.Empty(t, att.SideA, "a same-name fighter pair is blanked by SubBoutAttribution, not by this fallback")
+		assert.Empty(t, att.SideB)
+		assert.Equal(t, domain.MatchSideNone, domain.AttributeWinnerSide(att),
+			"the team names must never stand in for two fighters who happen to share a name")
+	})
+
+	t.Run("a row naming one fighter keeps deciding for itself", func(t *testing.T) {
+		att := domain.SubBoutAttributionForTeamRow(
+			domain.WinnerAttribution{Winner: "Ito", SideA: "", SideB: "Ito"}, "RedTeam", "WhiteTeam")
+		assert.Empty(t, att.SideA, "only ONE side is empty, so the row is not silent: no team-name fallback")
+		assert.Equal(t, "Ito", att.SideB)
+	})
+
+	t.Run("distinct fighter names are passed through untouched", func(t *testing.T) {
+		att := domain.SubBoutAttributionForTeamRow(
+			domain.WinnerAttribution{Winner: "Ito", SideA: "Sato", SideB: "Ito"}, "RedTeam", "WhiteTeam")
+		assert.Equal(t, "Sato", att.SideA)
+		assert.Equal(t, "Ito", att.SideB)
+	})
+
+	// A legacy roster can hold two same-named teams. A row naming no fighter
+	// settles at the match level, where the app and the standings
+	// (state.SubBoutWinnerSide) give such a pair's winner to side A, so the
+	// workbook marks the same side rather than none.
+	t.Run("a nameless row between two same-named teams keeps side A", func(t *testing.T) {
+		att := domain.SubBoutAttributionForTeamRow(
+			domain.WinnerAttribution{Winner: "Kyoto"}, "Kyoto", "Kyoto")
+		assert.Equal(t, domain.MatchSideA, domain.AttributeWinnerSide(att))
+		markA, markB := domain.SideMarksAB(string(domain.DecisionFusensho), false, att)
+		assert.Equal(t, "Fus.", markA, "the fusensho is marked beside side A")
+		assert.Empty(t, markB)
 	})
 }
 

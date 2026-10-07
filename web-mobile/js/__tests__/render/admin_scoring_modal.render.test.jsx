@@ -1,7 +1,8 @@
 import React from 'react';
-import { render } from '@testing-library/react';
+import { render, act, fireEvent, screen } from '@testing-library/react';
 import { describe, it, expect, vi, beforeAll, afterAll } from 'vitest';
 import { installWindowStubs } from '../helpers/stub_globals.js';
+import { downstreamKnockoutRunningMessage } from '../../write_result.jsx';
 
 // Window globals required by admin_scoring_modal.jsx (and its transitive
 // import admin_scoring_shared.jsx). Divide into:
@@ -20,7 +21,6 @@ const STUBBED_GLOBALS = {
   isTextEntry: () => false,
   isInteractiveTarget: () => false,
   confirmDialog: vi.fn().mockResolvedValue(true),
-  resolveRoundIndex: () => 0,
   API: {
     fetchCompetitionDetails: vi.fn().mockResolvedValue(null),
     recordScore: vi.fn(),
@@ -145,4 +145,46 @@ describe('ScoreEditorModal side labelling', () => {
       expect(srText).toContain('Aka:');
     });
   }
+});
+
+// bc-rfsw: a withdrawal re-recorded on a knockout match whose later match is
+// being fought now is refused (409 downstream_knockout_running, operator
+// decision 2026-09-27). The editor shows the operator's sentence on the
+// decision error line, asks nothing first (it is not decision_locked, so no
+// "Proceed anyway?"), and does not move the court on.
+describe('ScoreEditorModal: a decision refused because a later match is being fought', () => {
+  for (const [label, make] of [
+    ['individual', () => makeIndividualMatch({ id: 'm-r1-0', compId: 'c1', status: 'running', phase: 'knockout', ipponsA: [], ipponsB: [] })],
+    ['team', () => makeTeamMatch({ id: 'm-r1-0', compId: 'c1', status: 'running', phase: 'knockout', teamSize: 3 })],
+  ]) it(`${label}: shows the sentence on the decision error line, with no confirm and no advance`, async () => {
+    const sentence = downstreamKnockoutRunningMessage([{ id: 'm-r2-0', number: 3, label: 'Match 3 (Final)', court: 'A' }]);
+    expect(sentence).toBe('Match 3 (Final) is being fought now on Shiaijo A. Finish it or send it back to the queue, then save this correction again.');
+    const refusal = Object.assign(new Error(sentence), {
+      code: 'downstream_knockout_running',
+      downstreamKnockoutRunning: { matchId: 'm-r1-0', runningMatches: [{ id: 'm-r2-0', number: 3, label: 'Match 3 (Final)', court: 'A' }] },
+    });
+    const prevKiken = window.isKikenDecision;
+    window.isKikenDecision = (d) => d === 'kiken' || d === 'kiken-voluntary' || d === 'kiken-injury';
+    window.API.recordDecision = vi.fn().mockRejectedValue(refusal);
+    window.confirmDialog = vi.fn().mockResolvedValue(true);
+    const onAfterDecision = vi.fn().mockResolvedValue(undefined);
+    try {
+      await act(async () => {
+        render(<ScoreEditorModal
+          match={make()}
+          onClose={vi.fn()} onSubmit={vi.fn().mockResolvedValue(undefined)} onAfterDecision={onAfterDecision} password="secret" />);
+      });
+      await act(async () => { fireEvent.click(screen.getByRole('button', { name: /^Kiken . Voluntary$/ })); });
+      const form = document.querySelector('form.decision-prompt');
+      fireEvent.click(form.querySelector('input[name="decision-side"][value="shiro"]'));
+      await act(async () => { fireEvent.submit(form); });
+
+      expect(screen.getByText(sentence)).toBeTruthy();
+      expect(window.API.recordDecision).toHaveBeenCalledTimes(1);
+      expect(window.confirmDialog).not.toHaveBeenCalled();
+      expect(onAfterDecision).not.toHaveBeenCalled();
+    } finally {
+      window.isKikenDecision = prevKiken;
+    }
+  });
 });

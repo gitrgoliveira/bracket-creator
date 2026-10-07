@@ -1,7 +1,7 @@
 // Admin side: single tournament. Tournament has multiple Competitions.
 // Top-level: Tournament dashboard (all competitions), per-competition pages.
 
-import { applyPatch as patchCompetitionData, checkSeqGap } from './patch.jsx';
+import { applyPatch as patchCompetitionData, checkSeqGap, keepNewerDetail } from './patch.jsx';
 import { createTimerPool } from './timer_pool.jsx';
 // Imported from the leaf, not read off `window`: write_result.jsx is
 // import-only (see its header) and every consumer ES-imports it directly.
@@ -9,9 +9,24 @@ import {
   DOWNSTREAM_KNOCKOUT_PLAYED_CANCELLED,
   attemptScoreWrite,
   downstreamKnockoutReopenedNotice,
+  writeKeepsEditorOpen,
 } from './write_result.jsx';
+import { keptInHistoryNote } from './match_groups.jsx';
 
 const { useState: useStateA, useEffect: useEffectA, useRef: useRefA } = React;
+
+// closingHistoryToast (bc-mrgc): the toast editMatchScore shows for a write
+// that landed but kept something in the match's history (part of it held, or
+// a later change it moved there because that change would have left the
+// finished match without a winner), worded by keptInHistoryNote. Only when
+// the write closes the editor: an editor that stays open says so itself
+// (useKeptInHistoryNote). A write that did not land keeps its editor open
+// too (writeKeepsEditorOpen), where its own banner reports it. null when
+// there is nothing to say. Exported for test.
+export function closingHistoryToast(result, saveRes) {
+  if (!saveRes || writeKeepsEditorOpen(result, saveRes)) return null;
+  return keptInHistoryNote(saveRes);
+}
 
 const REFRESHABLE_EVENTS = new Set([
   "competition_started",
@@ -172,14 +187,20 @@ function AdminApp({ tournament, onUpdate, onLogout, onViewerMode, onPasswordChan
   // or duplicate-ID errors on the second attempt. Separating the refresh
   // into this helper makes the contract explicit: mutation errors throw,
   // refresh errors log + toast a "reload to see latest" hint.
+  //
+  // Bounded (fetchCompetitions' `bounded`): a score editor waits on this after
+  // every write it makes, a representative-bout add's save included, so a
+  // refresh that never answers would hold that editor. One given up on is
+  // logged and toasts nothing (refreshFailureToast).
   const refreshCompsBestEffort = async (actionLabel) => {
     try {
-      const comps = await window.API.fetchCompetitions();
+      const comps = await window.API.fetchCompetitions({ bounded: true });
       if (!mountedRef.current) return;
       onUpdateRef.current(mergeCompetitionsIntoTournament(tRef.current, () => comps));
     } catch (e) {
       console.warn(`refresh after ${actionLabel} failed (action did succeed):`, e);
-      if (mountedRef.current) showToast(`${actionLabel} succeeded; refresh failed. Reload to see latest`, "error");
+      const toast = refreshFailureToast(actionLabel, e);
+      if (toast && mountedRef.current) showToast(toast, "error");
     }
   };
 
@@ -263,7 +284,7 @@ function AdminApp({ tournament, onUpdate, onLogout, onViewerMode, onPasswordChan
     if (view.kind === "competition" && view.id === cid) {
       try {
         const details = await window.API.fetchCompetitionDetails(cid);
-        if (mountedRef.current) setAdminCompData(details);
+        if (mountedRef.current) setAdminCompData((prev) => keepNewerDetail(prev, details));
       } catch (e) {
         console.error("Failed to refresh competition details after save:", e);
       }
@@ -319,20 +340,18 @@ function AdminApp({ tournament, onUpdate, onLogout, onViewerMode, onPasswordChan
       const notice = downstreamKnockoutReopenedNotice(saveRes.downstreamReopened);
       if (notice) showToast(notice);
     }
+    const keptNote = closingHistoryToast(result, saveRes);
+    if (keptNote) showToast(keptNote);
     // F5: when the write was only queued (offline/transient), skip the
     // best-effort refresh. There is nothing new on the server yet.
     // Return saveRes so callers (onSubmit/onSubmitAndNext props) can
     // propagate the { queued: true } signal up to the score editor.
     if (saveRes && saveRes.queued) return saveRes;
     await refreshCompsBestEffort("Score");
-    // B3: stale-write surfacing. The server returns { stale: true } (HTTP 200)
-    // when the match was already advanced to a newer state (e.g. kachinuki
-    // exhaustion completed the match between the editor opening and the submit).
-    // The refresh above already resyncs the local state from the server, so the
-    // operator will see the correct match status after this toast is dismissed.
-    if (saveRes && saveRes.stale) {
-      showToast("The server already completed this match. Reopen it to see the current result.", "error");
-    }
+    // No {stale:true} answer exists any more (bc-mrgc phase 3): a write the
+    // server does not apply is kept in the match's history and answered
+    // superseded (applied:false, heldGroups), which the editor reports itself
+    // (notLandedBanner) and the refresh above resyncs.
     return saveRes;
   };
 
@@ -481,7 +500,7 @@ function AdminApp({ tournament, onUpdate, onLogout, onViewerMode, onPasswordChan
     setAdminLoading(true);
     window.API.fetchCompetitionDetails(view.id)
       .then(data => {
-        if (!cancelled) { setAdminCompData(data); setAdminLoading(false); }
+        if (!cancelled) { setAdminCompData((prev) => keepNewerDetail(prev, data)); setAdminLoading(false); }
       })
       .catch(err => {
         if (!cancelled) { console.error(err); setAdminLoading(false); }
@@ -553,7 +572,7 @@ function AdminApp({ tournament, onUpdate, onLogout, onViewerMode, onPasswordChan
           window.API.fetchCompetitionDetails(targetId)
             .then(data => {
               if (cancelled || data?.config?.id !== targetId) return;
-              setAdminCompData(data);
+              setAdminCompData((prev) => keepNewerDetail(prev, data));
             })
             .catch(err => console.error('tab-resume refresh failed:', err));
         });
@@ -575,7 +594,7 @@ function AdminApp({ tournament, onUpdate, onLogout, onViewerMode, onPasswordChan
             window.API.fetchCompetitionDetails(targetId)
               .then(data => {
                 if (cancelled || data?.config?.id !== targetId) return;
-                setAdminCompData(data);
+                setAdminCompData((prev) => keepNewerDetail(prev, data));
               })
               .catch(err => console.error('resync refresh failed:', err));
           });
@@ -591,7 +610,7 @@ function AdminApp({ tournament, onUpdate, onLogout, onViewerMode, onPasswordChan
             window.API.fetchCompetitionDetails(targetId)
               .then(data => {
                 if (cancelled || data?.config?.id !== targetId) return;
-                setAdminCompData(data);
+                setAdminCompData((prev) => keepNewerDetail(prev, data));
               })
               .catch(err => console.error('gap refetch failed:', err));
           });
@@ -624,7 +643,7 @@ function AdminApp({ tournament, onUpdate, onLogout, onViewerMode, onPasswordChan
                   // check is belt-and-braces in case a fetch comes back with
                   // unexpected data shape.
                   if (cancelled || data?.config?.id !== targetId) return;
-                  setAdminCompData(data);
+                  setAdminCompData((prev) => keepNewerDetail(prev, data));
                 })
                 .catch(err => console.error("Failed to refresh competition details", err));
             });
@@ -849,7 +868,7 @@ function AdminApp({ tournament, onUpdate, onLogout, onViewerMode, onPasswordChan
       onOpenCompetition={(id, section) => setView({ kind: "competition", id, section: section || "overview" })}
       onCreateCompetition={() => setView({ kind: "createComp" })}
       onUpdate={(next) => updateCompetition(c.id, next)}
-      onRefreshCompetition={() => window.API.fetchCompetitionDetails(c.id).then(setAdminCompData).catch(err => console.error("refresh failed:", err))}
+      onRefreshCompetition={() => window.API.fetchCompetitionDetails(c.id).then((data) => setAdminCompData((prev) => keepNewerDetail(prev, data))).catch(err => console.error("refresh failed:", err))}
       onMoveCourt={moveMatchCourt}
       onEditScore={editMatchScore}
       onLogout={onLogout}
@@ -868,6 +887,18 @@ function AdminApp({ tournament, onUpdate, onLogout, onViewerMode, onPasswordChan
 // Defense-in-depth alongside the server-side fix.
 function normalizeCreatedRecord(created) {
   return { ...created, players: created.players ?? [] };
+}
+
+// refreshFailureToast: what the operator is told when the refresh after an
+// action fails (the action itself did succeed): the hint to reload, or nothing
+// for a refresh given up on at its deadline (the bounded request's
+// `timedOut`). The score editors refresh after every autosave, so on a large
+// tournament over slow venue wifi a timed-out refresh would toast every few
+// taps, while the write reaches this page by push anyway and Reload would
+// fetch the same slow aggregate again.
+function refreshFailureToast(actionLabel, e) {
+  if (e && e.timedOut) return null;
+  return `${actionLabel} succeeded; refresh failed. Reload to see latest`;
 }
 
 // StartAllModal: three-phase dialog for the dashboard "Start all" action.
@@ -967,4 +998,4 @@ window.normalizeCreatedRecord = normalizeCreatedRecord;
 // component with no window binding, and its confirm phase now carries the
 // "will NOT be started" list, which is the surface that stops "Start all"
 // offering a competition the server would refuse.
-export { mergeCompetitionsIntoTournament, mergeTournamentPatch, normalizeCreatedRecord, StartAllModal, attemptScoreWrite };
+export { mergeCompetitionsIntoTournament, mergeTournamentPatch, normalizeCreatedRecord, refreshFailureToast, StartAllModal, attemptScoreWrite };

@@ -203,90 +203,124 @@ func generatePoolDaihyosenMatches(poolName string, tiedGroup []state.PlayerStand
 // computeStandings. The frontend routes these to the individual ScoreEditorModal
 // by detecting the DH prefix in compMatches.
 func (e *Engine) InjectPoolDaihyosenMatches(compID string) ([]state.MatchResult, error) {
-	comp, err := e.store.LoadCompetition(compID)
-	if err != nil {
-		return nil, err
-	}
-	if comp == nil {
-		return nil, notFoundErrorf("competition %s not found", compID)
-	}
+	// Read before the transaction (the tournament has its own lock), and
+	// only reported when there is something to schedule, as it always was.
+	tournament, tournErr := e.store.LoadTournament()
 
-	// A daihyosen is played only where the tie affects advancement/seeding;
-	// pendingTieBreaks owns that band.
-	standings, err := e.CalculatePoolStandings(compID)
-	if err != nil {
-		return nil, err
-	}
-
-	allMatches, err := e.store.LoadPoolMatches(compID)
-	if err != nil {
-		return nil, err
-	}
-
-	// Scan existing DH matches per pool for idempotency and ID sequencing.
-	// poolNameFromMatchID strips the trailing suffix deterministically so
-	// overlapping pool names (e.g. "Pool A" vs "Pool A-East") are handled
-	// correctly without ambiguous prefix scanning. existingRows are handed to
-	// generatePoolDaihyosenMatches raw (not reduced to a bare-name dedup map
-	// here) so it can resolve each row's sides against the SPECIFIC tied
-	// group being processed via groupMemberIDs -- see that function's
-	// doc comment for why a bare-name reduction at this scan stage would
-	// collapse distinct namesake-involving pairs.
-	poolDH := map[string][]state.MatchResult{}
-	poolCourt := map[string]string{}
-	// regularIncomplete[pool] is true if any regular (non-DH) match in the pool
-	// is not yet completed. Daihyosen tie-breaks must only be injected after a
-	// pool's regular round-robin is finished, otherwise a partial-result tie
-	// would inject DH matches that a later result breaks, orphaning them. (See
-	// the matching guard in InjectTiebreakerMatches.)
-	regularIncomplete := map[string]bool{}
-	for _, m := range allMatches {
-		pn, ok := poolNameFromMatchID(m.ID)
-		if !ok {
-			continue
-		}
-		if _, inStandings := standings[pn]; !inStandings {
-			continue
-		}
-		if _, seen := poolCourt[pn]; !seen {
-			// Uses the first match's court. Pool competitions assign one
-			// court per pool, so all matches in a pool share the same court.
-			poolCourt[pn] = m.Court
-		}
-		if IsPoolDaihyosenMatchID(m.ID) {
-			poolDH[pn] = append(poolDH[pn], m)
-		} else if m.Status != state.MatchStatusCompleted {
-			regularIncomplete[pn] = true
-		}
-	}
-
+	// ONE read-modify-write of pool-matches.csv under the per-competition
+	// lock (bc-mrgc phase 3): it used to load and save under two separate
+	// lock acquisitions, so a score landing in between was overwritten by
+	// the stale copy this saved back. The standings that decide the
+	// injection are read inside the same transaction, from the same rows.
+	// The reads below run under the competition's lock (tx.LoadPoolMatches),
+	// which skips the first-read legacy conversion; run it first, as the
+	// store's own LoadPoolMatches always did (a no-op after the first call).
+	e.store.EnsureLegacyUpgraded(compID)
 	var injected []state.MatchResult
-	for poolName, poolStandings := range standings {
-		// Don't inject daihyosen until the pool's regular matches are all done.
-		if regularIncomplete[poolName] {
-			continue
+	err := e.store.WithTransaction(compID, func(tx state.StoreTx) error {
+		comp, err := tx.LoadCompetition(compID)
+		if err != nil {
+			return err
 		}
-		for _, p := range pendingTieBreaks(comp, poolName, poolStandings, poolDH[poolName], poolCourt[poolName], true) {
-			injected = append(injected, p.bouts...)
+		if comp == nil {
+			return notFoundErrorf("competition %s not found", compID)
 		}
-	}
 
+		// A daihyosen is played only where the tie affects advancement/seeding;
+		// pendingTieBreaks owns that band.
+		standings, err := e.computeStandingsFrom(tx, compID)
+		if err != nil {
+			return err
+		}
+
+		allMatches, err := tx.LoadPoolMatches(compID)
+		if err != nil {
+			return err
+		}
+		e.noteMatchRead(compID)
+
+		// Scan existing DH matches per pool for idempotency and ID sequencing.
+		// poolNameFromMatchID strips the trailing suffix deterministically so
+		// overlapping pool names (e.g. "Pool A" vs "Pool A-East") are handled
+		// correctly without ambiguous prefix scanning. existingRows are handed to
+		// generatePoolDaihyosenMatches raw (not reduced to a bare-name dedup map
+		// here) so it can resolve each row's sides against the SPECIFIC tied
+		// group being processed via groupMemberIDs -- see that function's
+		// doc comment for why a bare-name reduction at this scan stage would
+		// collapse distinct namesake-involving pairs.
+		poolDH := map[string][]state.MatchResult{}
+		poolCourt := map[string]string{}
+		// regularIncomplete[pool] is true if any regular (non-DH) match in the pool
+		// is not yet completed. Daihyosen tie-breaks must only be injected after a
+		// pool's regular round-robin is finished, otherwise a partial-result tie
+		// would inject DH matches that a later result breaks, orphaning them. (See
+		// the matching guard in InjectTiebreakerMatches.)
+		regularIncomplete := map[string]bool{}
+		for _, m := range allMatches {
+			pn, ok := poolNameFromMatchID(m.ID)
+			if !ok {
+				continue
+			}
+			if _, inStandings := standings[pn]; !inStandings {
+				continue
+			}
+			if _, seen := poolCourt[pn]; !seen {
+				// Uses the first match's court. Pool competitions assign one
+				// court per pool, so all matches in a pool share the same court.
+				poolCourt[pn] = m.Court
+			}
+			if IsPoolDaihyosenMatchID(m.ID) {
+				poolDH[pn] = append(poolDH[pn], m)
+			} else if m.Status != state.MatchStatusCompleted {
+				regularIncomplete[pn] = true
+			}
+		}
+
+		for poolName, poolStandings := range standings {
+			// Don't inject daihyosen until the pool's regular matches are all done.
+			if regularIncomplete[poolName] {
+				continue
+			}
+			for _, p := range pendingTieBreaks(comp, poolName, poolStandings, poolDH[poolName], poolCourt[poolName], true) {
+				injected = append(injected, p.bouts...)
+			}
+		}
+
+		if len(injected) == 0 {
+			return nil
+		}
+		if tournErr != nil {
+			return tournErr
+		}
+		return tx.SavePoolMatches(compID, appendWithSlots(allMatches, injected, comp, tournament))
+	})
+	if err != nil {
+		return nil, err
+	}
 	if len(injected) == 0 {
 		return nil, nil
 	}
 
-	allMatches = append(allMatches, injected...)
+	e.standingsCache.Delete(compID)
+	e.standingsFlight.Delete(compID)
 
-	// Reassign slots so the new DH matches get ScheduledAt values.
+	return injected, nil
+}
+
+// appendWithSlots appends injected matches to a competition's pool matches
+// and gives the new ones schedule slots, keeping every time an operator (or
+// an earlier slotting) already set. Shared by the injections that append
+// tie-break and representative bouts in one read-modify-write.
+func appendWithSlots(allMatches, injected []state.MatchResult, comp *state.Competition, tournament *state.Tournament) []state.MatchResult {
+	allMatches = append(allMatches, injected...)
+	// Snapshot operator-adjusted times first so they survive the
+	// reassignment; only newly injected matches (ScheduledAt == "") should
+	// receive new slots.
 	existingTimes := make(map[string]string, len(allMatches))
 	for _, m := range allMatches {
 		if m.ScheduledAt != "" {
 			existingTimes[m.ID] = m.ScheduledAt
 		}
-	}
-	tournament, err := e.store.LoadTournament()
-	if err != nil {
-		return nil, err
 	}
 	allMatches, _ = assignPoolMatchSlots(allMatches, comp, tournament)
 	for i := range allMatches {
@@ -294,15 +328,7 @@ func (e *Engine) InjectPoolDaihyosenMatches(compID string) ([]state.MatchResult,
 			allMatches[i].ScheduledAt = t
 		}
 	}
-
-	if err := e.store.SavePoolMatches(compID, allMatches); err != nil {
-		return nil, err
-	}
-
-	e.standingsCache.Delete(compID)
-	e.standingsFlight.Delete(compID)
-
-	return injected, nil
+	return allMatches
 }
 
 // ComputeTeamSummary aggregates SubMatchResult entries into TeamSummary
@@ -323,12 +349,10 @@ func (e *Engine) InjectPoolDaihyosenMatches(compID string) ([]state.MatchResult,
 // change. That call site computes credit the same way MatchResult.TeamResult
 // does (state.DefaultWinCreditSide against the match's own
 // Status/Decision/DecisionBy/Attribution()) rather than passing
-// domain.MatchSideNone, even though the match it reads is never itself
-// completed-by-default-win at that point (AddDaihyosen only applies to a
-// still-tied, still-running encounter, so DefaultWinCreditSide already
-// answers MatchSideNone there) -- computing it properly costs nothing and
-// keeps every caller going through the one canonical derivation rather than
-// a caller hand-asserting "no ruling can be in force here".
+// domain.MatchSideNone. A self-run participant's add reaches only a running
+// match, where DefaultWinCreditSide answers MatchSideNone, but the
+// organiser's reaches a completed one too, where a default-win ruling's
+// credit counts towards the tie as it does for every other reader.
 func ComputeTeamSummary(subResults []state.SubMatchResult, sideAName, sideBName string, credit domain.MatchSide) (TeamSummary, TeamSummary) {
 	// Delegate to the single source of truth in state (the same computation
 	// feeds the wire teamResult the frontend renders), so tie-break math and

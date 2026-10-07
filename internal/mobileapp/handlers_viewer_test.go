@@ -755,6 +755,14 @@ func TestViewerCompetitionDetail_TeamCompetitionCarriesSquads(t *testing.T) {
 	assert.Equal(t, "", body.Squads[redID][2].Name, "a floor-padded slot must be blank")
 	assert.Equal(t, 4, body.Squads[redID][3].Index)
 	assert.Equal(t, "", body.Squads[redID][3].Name, "a floor-padded slot must be blank")
+
+	// A member carries the server stamp its write gave it (domain.TeamMember.ModifiedAt),
+	// and a slot no write has touched carries 0, in this payload as in the admin one.
+	require.Positive(t, member.ModifiedAt)
+	assert.Equal(t, member.ModifiedAt, body.Squads[redID][0].ModifiedAt)
+	assert.Positive(t, body.Squads[redID][1].ModifiedAt, "the blank member the test added was created by a write too")
+	assert.Zero(t, body.Squads[redID][2].ModifiedAt)
+	assert.Zero(t, body.Squads[redID][3].ModifiedAt)
 }
 
 // TestViewerCompetitionDetail_IndividualCompetitionSkipsSquadsRead

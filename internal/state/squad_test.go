@@ -4,6 +4,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"sync"
 	"testing"
 
 	"github.com/gitrgoliveira/bracket-creator/internal/domain"
@@ -38,6 +39,24 @@ func newSquadTestStore(t *testing.T) (store *Store, compID, teamA, teamB string)
 	return s, id, stored[0].ID, stored[1].ID
 }
 
+// renameMember, nameMember and clearMember are the three member name writers for
+// a test that asks only whether the write failed: each answers with the member as
+// written (carrying its stamp), which team_member_stamp_test.go reads.
+func renameMember(s *Store, compID, teamID, memberID, name string) error {
+	_, err := s.RenameTeamMember(compID, teamID, memberID, name)
+	return err
+}
+
+func nameMember(s *Store, compID, teamID, memberID, name string) error {
+	_, err := s.NameUnnamedTeamMember(compID, teamID, memberID, name)
+	return err
+}
+
+func clearMember(s *Store, compID, teamID, memberID string) error {
+	_, err := s.ClearTeamMemberName(compID, teamID, memberID)
+	return err
+}
+
 // --- AddTeamMember / RenameTeamMember ---------------------------------------
 
 // A reserve added beyond the 5 seeded slots (TeamSize 3, floor 5) gets
@@ -58,7 +77,7 @@ func TestSquad_AddMintsIDAndIndex_RenameKeepsBoth(t *testing.T) {
 	assert.NotEqual(t, m1.ID, m2.ID)
 	assert.Equal(t, 7, m2.Index, "a second reserve must get the next index, not a fresh 1")
 
-	require.NoError(t, s.RenameTeamMember(id, teamA, m1.ID, "Alicia"))
+	require.NoError(t, renameMember(s, id, teamA, m1.ID, "Alicia"))
 
 	squads, err := s.LoadSquads(id)
 	require.NoError(t, err)
@@ -109,19 +128,19 @@ func TestSquad_RenameRefusesDuplicateWithinOneTeam_ButNotSelf(t *testing.T) {
 	require.NoError(t, err)
 
 	t.Run("renaming to another member's name is refused", func(t *testing.T) {
-		err := s.RenameTeamMember(id, teamA, alice.ID, "Bob")
+		err := renameMember(s, id, teamA, alice.ID, "Bob")
 		require.Error(t, err)
 		assert.True(t, errors.Is(err, ErrDuplicateTeamMember))
 	})
 
 	t.Run("renaming to another member's name in a normalized form is refused", func(t *testing.T) {
-		err := s.RenameTeamMember(id, teamA, alice.ID, " bob ")
+		err := renameMember(s, id, teamA, alice.ID, " bob ")
 		require.Error(t, err)
 		assert.True(t, errors.Is(err, ErrDuplicateTeamMember))
 	})
 
 	t.Run("renaming a member to their OWN current name is not a self-collision", func(t *testing.T) {
-		err := s.RenameTeamMember(id, teamA, alice.ID, "Alice")
+		err := renameMember(s, id, teamA, alice.ID, "Alice")
 		require.NoError(t, err, "a rename to the member's own current name must not be refused as a collision with itself")
 	})
 }
@@ -132,7 +151,7 @@ func TestSquad_RenameUnknownMemberOrTeam(t *testing.T) {
 	s, id, teamA, _ := newSquadTestStore(t)
 
 	t.Run("no squad for the team at all", func(t *testing.T) {
-		err := s.RenameTeamMember(id, "no-such-team", "no-such-member", "X")
+		err := renameMember(s, id, "no-such-team", "no-such-member", "X")
 		require.Error(t, err)
 		assert.True(t, errors.Is(err, ErrTeamMemberNotFound))
 	})
@@ -140,10 +159,31 @@ func TestSquad_RenameUnknownMemberOrTeam(t *testing.T) {
 	t.Run("team exists but member id does not", func(t *testing.T) {
 		_, err := s.AddTeamMember(id, teamA, "Alice")
 		require.NoError(t, err)
-		err = s.RenameTeamMember(id, teamA, "no-such-member", "X")
+		err = renameMember(s, id, teamA, "no-such-member", "X")
 		require.Error(t, err)
 		assert.True(t, errors.Is(err, ErrTeamMemberNotFound))
 	})
+}
+
+// NameUnnamedTeamMember names a member who has no name yet and refuses one who
+// has, writing nothing; an unknown member is still ErrTeamMemberNotFound.
+func TestSquad_NameUnnamedTeamMember(t *testing.T) {
+	s, id, teamA, _ := newSquadTestStore(t)
+	squads, err := s.LoadSquads(id)
+	require.NoError(t, err)
+	blank := squads[teamA][0]
+	require.Empty(t, blank.Name, "teamA is seeded with blank members")
+
+	require.NoError(t, nameMember(s, id, teamA, blank.ID, " Mei Ito "))
+	err = nameMember(s, id, teamA, blank.ID, "Ren Abe")
+	assert.ErrorIs(t, err, ErrTeamMemberNamed, "a member who has a name is not renamed")
+
+	squads, err = s.LoadSquads(id)
+	require.NoError(t, err)
+	assert.Equal(t, "Mei Ito", squads[teamA][0].Name, "the first name stands, trimmed")
+
+	assert.ErrorIs(t, nameMember(s, id, teamA, "no-such-member", "X"), ErrTeamMemberNotFound)
+	require.NoError(t, renameMember(s, id, teamA, blank.ID, "Ren Abe"), "the organiser's rename is unrestricted")
 }
 
 // A squad may exceed the competition's TeamSize: reserves and replacements
@@ -160,6 +200,45 @@ func TestSquad_SizeMayExceedCompetitionTeamSize(t *testing.T) {
 	squads, err := s.LoadSquads(id)
 	require.NoError(t, err)
 	assert.Len(t, squads[teamA], 10, "the 5 seeded slots plus all 5 added reserves must be persisted despite a TeamSize of 3")
+}
+
+// AddTeamMemberUpTo reads the cap under the write's own lock, so requests
+// racing for the last slots cannot all pass it: exactly the room left is
+// added and every other caller is refused.
+func TestSquad_AddTeamMemberUpToHoldsTheCapUnderRacingAdds(t *testing.T) {
+	s, id, teamA, _ := newSquadTestStore(t) // teamA already carries 5 seeded slots
+
+	const limit, callers = 8, 20
+	var wg sync.WaitGroup
+	results := make(chan error, callers)
+	for i := 0; i < callers; i++ {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			_, err := s.AddTeamMemberUpTo(id, teamA, string(rune('A'+i))+"-racer", limit)
+			results <- err
+		}(i)
+	}
+	wg.Wait()
+	close(results)
+
+	added, refused := 0, 0
+	for err := range results {
+		switch {
+		case err == nil:
+			added++
+		case errors.Is(err, ErrTeamMemberLimit):
+			refused++
+		default:
+			require.NoError(t, err)
+		}
+	}
+	assert.Equal(t, limit-5, added)
+	assert.Equal(t, callers-(limit-5), refused)
+
+	squads, err := s.LoadSquads(id)
+	require.NoError(t, err)
+	assert.Len(t, squads[teamA], limit)
 }
 
 // --- saveSquadsLocked / directory creation ----------------------------------
@@ -670,7 +749,7 @@ func TestSquad_ClearBlanksNameKeepsIDAndIndex(t *testing.T) {
 	m, err := s.AddTeamMember(id, teamA, "Alice")
 	require.NoError(t, err)
 
-	require.NoError(t, s.ClearTeamMemberName(id, teamA, m.ID))
+	require.NoError(t, clearMember(s, id, teamA, m.ID))
 
 	squads, err := s.LoadSquads(id)
 	require.NoError(t, err)
@@ -694,7 +773,7 @@ func TestSquad_ClearBeforeDrawIsAllowed(t *testing.T) {
 	m, err := s.AddTeamMember(id, teamA, "Alice")
 	require.NoError(t, err)
 
-	require.NoError(t, s.ClearTeamMemberName(id, teamA, m.ID), "a competition still in setup must allow clearing")
+	require.NoError(t, clearMember(s, id, teamA, m.ID), "a competition still in setup must allow clearing")
 }
 
 // Clearing is still allowed once a draw exists but the competition has not
@@ -710,7 +789,7 @@ func TestSquad_ClearAtDrawReadyIsAllowed(t *testing.T) {
 	comp.Status = CompStatusDrawReady
 	require.NoError(t, s.SaveCompetition(comp))
 
-	require.NoError(t, s.ClearTeamMemberName(id, teamA, m.ID), "draw-ready is still before start; clearing must be allowed")
+	require.NoError(t, clearMember(s, id, teamA, m.ID), "draw-ready is still before start; clearing must be allowed")
 }
 
 // Clearing is refused once the competition has started, with its own
@@ -726,7 +805,7 @@ func TestSquad_ClearRefusedOnceStarted(t *testing.T) {
 	require.NoError(t, s.SaveCompetition(comp))
 
 	versionBefore := s.FileVersion(id, teamMembersFilename)
-	err = s.ClearTeamMemberName(id, teamA, m.ID)
+	err = clearMember(s, id, teamA, m.ID)
 	require.Error(t, err)
 	assert.True(t, errors.Is(err, ErrTeamMemberClearAfterStart))
 
@@ -760,7 +839,7 @@ func TestSquad_RenameAndAddRemainAvailableOnceStarted(t *testing.T) {
 	comp.Status = CompStatusPools
 	require.NoError(t, s.SaveCompetition(comp))
 
-	require.NoError(t, s.RenameTeamMember(id, teamA, m.ID, "Alicia"),
+	require.NoError(t, renameMember(s, id, teamA, m.ID, "Alicia"),
 		"a started competition must still allow a member's name to be corrected")
 
 	reserve, err := s.AddTeamMember(id, teamA, "Bob")
@@ -785,13 +864,13 @@ func TestSquad_ClearUnknownMemberOrTeam(t *testing.T) {
 	s, id, teamA, _ := newSquadTestStore(t)
 
 	t.Run("no squad for the team at all", func(t *testing.T) {
-		err := s.ClearTeamMemberName(id, "no-such-team", "no-such-member")
+		err := clearMember(s, id, "no-such-team", "no-such-member")
 		require.Error(t, err)
 		assert.True(t, errors.Is(err, ErrTeamMemberNotFound))
 	})
 
 	t.Run("team exists but member id does not", func(t *testing.T) {
-		err := s.ClearTeamMemberName(id, teamA, "no-such-member")
+		err := clearMember(s, id, teamA, "no-such-member")
 		require.Error(t, err)
 		assert.True(t, errors.Is(err, ErrTeamMemberNotFound))
 	})
@@ -819,7 +898,7 @@ func TestSquad_RenameAndClearReachStoredLineups(t *testing.T) {
 		MemberIDs: map[domain.Position]string{domain.PositionNumbered(1): sato.ID},
 	}, 3))
 
-	require.NoError(t, store.RenameTeamMember(compID, teamA, sato.ID, "Sato"))
+	require.NoError(t, renameMember(store, compID, teamA, sato.ID, "Sato"))
 	lineups, err := store.LoadTeamLineups(compID)
 	require.NoError(t, err)
 	require.Len(t, lineups, 2)
@@ -830,7 +909,7 @@ func TestSquad_RenameAndClearReachStoredLineups(t *testing.T) {
 		}
 	}
 
-	require.NoError(t, store.ClearTeamMemberName(compID, teamA, sato.ID))
+	require.NoError(t, clearMember(store, compID, teamA, sato.ID))
 	lineups, err = store.LoadTeamLineups(compID)
 	require.NoError(t, err)
 	for _, l := range lineups {
@@ -859,7 +938,7 @@ func TestRenameTeamMember_LeavesTheSquadUntouchedWhenTheLineupHalfFails(t *testi
 	lineupPath := filepath.Join(s.GetFolder(), "competitions", compID, teamLineupFilename)
 	require.NoError(t, os.WriteFile(lineupPath, []byte("lineups: [this is not a list\n"), 0o600))
 
-	err = s.RenameTeamMember(compID, teamA, member.ID, "Sato Kenji")
+	err = renameMember(s, compID, teamA, member.ID, "Sato Kenji")
 	require.Error(t, err, "a rename that cannot reach the lineup half must report it")
 
 	// THE POINT: the squad write is rolled back with it, so the operator's
@@ -885,7 +964,7 @@ func TestClearTeamMemberName_LeavesTheSquadUntouchedWhenTheLineupHalfFails(t *te
 	lineupPath := filepath.Join(s.GetFolder(), "competitions", compID, teamLineupFilename)
 	require.NoError(t, os.WriteFile(lineupPath, []byte("lineups: [this is not a list\n"), 0o600))
 
-	err = s.ClearTeamMemberName(compID, teamA, member.ID)
+	err = clearMember(s, compID, teamA, member.ID)
 	require.Error(t, err)
 
 	squads, loadErr := s.LoadSquads(compID)

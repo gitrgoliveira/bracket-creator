@@ -12,8 +12,10 @@
 // The dwell below is therefore the operator's own pace, not a wait for the app:
 // nothing in the page says the window has passed, so it is timed from the
 // moment the journey saw the layer or the arm. TAP_DWELL_MS is the screenshot
-// harness's own value for the same reason, kept above the app's window.
-export const TAP_DWELL_MS = 500;
+// harness's value, kept above the app's window, so both harnesses pace alike.
+import { TAP_DWELL_MS } from '../../screenshots/lib/editor.mjs';
+
+export { TAP_DWELL_MS };
 
 // Wait out what is left of the dwell since `since` (a Date.now() reading taken
 // when the layer or the arm was seen).

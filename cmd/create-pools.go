@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"bufio"
+	"cmp"
 	"fmt"
 	"os"
 
@@ -17,6 +18,8 @@ type poolOptions struct {
 	maxPlayers      int
 	poolWinners     int
 	teamMatches     int
+	teamMatchType   state.TeamMatchType // teamMatchType: kachinuki gives every team block a row for each bout an encounter can take and adds the Kachinuki Detail sheet. Set ONLY by the web /create handler (the app's blank template); deliberately NOT a CLI flag (owner decision: no new CLI options).
+	format          string              // format: state.CompFormatLeague draws the one pool with no knockout; "" is pools then knockout. Set ONLY by the web /create handler (the app's blank template); deliberately NOT a CLI flag (owner decision: no new CLI options).
 	courts          int
 	filePath        string
 	outputPath      string
@@ -347,7 +350,14 @@ func (o *poolOptions) createPools(entries []string) error {
 	// result. Reuses state's single owner of the rule (mirrors the engine's
 	// two Excel export paths) rather than restating "+1" here.
 	printPoolMatchesWinners := (state.Competition{PoolWinners: o.poolWinners, ExtraQualifiers: o.extraQualifiers}).MatchWinnerRanksNeeded()
-	matchWinners, _ := helper.PrintPoolMatches(f, pools, o.teamMatches, printPoolMatchesWinners, courtNames, nil, true, poolCoords, playerCoords, o.engi)
+	// Every team block is sized by the owner the app's exports ask
+	// (state.Competition.TeamBoutRows), so a kachinuki one gets a row for
+	// every bout an encounter can take. Whether a knockout follows the pools
+	// is asked of the same competition (IsKnockoutEnabled), as the stored-draw
+	// export asks it, so a league's blank template prints no final.
+	comp := &state.Competition{Format: cmp.Or(o.format, state.CompFormatMixed), TeamSize: o.teamMatches, TeamMatchType: o.teamMatchType}
+	knockout := comp.IsKnockoutEnabled()
+	matchWinners, _ := helper.PrintPoolMatches(f, pools, comp.TeamBoutRows(), printPoolMatchesWinners, courtNames, nil, poolCoords, playerCoords, o.engi)
 
 	// Court-first pool-to-knockout draw (specs/007-ekc-draw): one bracket
 	// region per shiaijo, 2nd places crossing to the partner court, byes
@@ -374,8 +384,11 @@ func (o *poolOptions) createPools(entries []string) error {
 	// each extra/drafted qualifier on top, so the estimate reflects the
 	// actual draw size rather than silently under-counting the extras.
 	totalQualifiers := len(pools) * o.poolWinners
-	switch o.extraQualifiers {
-	case state.ExtraQualifiersLargerPools:
+	switch {
+	case !knockout:
+		// A league is decided by its table: nobody qualifies, nothing is drawn.
+		totalQualifiers = 0
+	case o.extraQualifiers == state.ExtraQualifiersLargerPools:
 		overrides := cliExtraQualifierOverrides(pools, activePoolSize, o.poolWinners)
 		for _, w := range overrides {
 			totalQualifiers += w - o.poolWinners
@@ -390,7 +403,7 @@ func (o *poolOptions) createPools(entries []string) error {
 			// supports; report it plainly instead of guessing.
 			return fmt.Errorf("could not build a larger-pools knockout draw from %d pools with %d winner(s) per pool on %d shiaijo (this pool/shiaijo shape is outside what --extra-qualifiers larger-pools currently supports; adjust --courts/pool sizing, or drop --extra-qualifiers)", len(pools), o.poolWinners, o.courts)
 		}
-	case state.ExtraQualifiersFillBracket:
+	case o.extraQualifiers == state.ExtraQualifiersFillBracket:
 		// helper.SelectFillBracketDraftIndices owns the whole draft
 		// pipeline -- D = NextPow2(pools) - pools, per-half capacity,
 		// capacity-aware seeded-first selection (WKC's own rule) -- shared
@@ -427,12 +440,22 @@ func (o *poolOptions) createPools(entries []string) error {
 		fmt.Printf("Warning: %s\n", w)
 	}
 
-	plan := blankWorkbookCourtPlan(draw, courtNames)
-	eliminationMatchRounds, numPages, err := helper.RenderKnockoutPages(f, plan, o.singleTree, pools, poolCoords, playerCoords, matchWinners)
-	if err != nil {
-		return err
+	// A league has no knockout pages, no elimination rounds and so no knockout
+	// section on the Kachinuki Detail sheet; its unused tree template is
+	// deleted all the same, as the stored-draw export deletes it.
+	var plan helper.CourtPlan
+	var eliminationMatchRounds [][]*helper.Node
+	if knockout {
+		plan = blankWorkbookCourtPlan(draw, courtNames)
+		var numPages int
+		eliminationMatchRounds, numPages, err = helper.RenderKnockoutPages(f, plan, o.singleTree, pools, poolCoords, playerCoords, matchWinners)
+		if err != nil {
+			return err
+		}
+		finishKnockoutPages(f, numPages, eliminationMatchRounds)
+	} else if err := f.DeleteSheet(helper.SheetTree); err != nil {
+		return fmt.Errorf("delete tree template sheet: %w", err)
 	}
-	finishKnockoutPages(f, numPages, eliminationMatchRounds)
 
 	helper.CreateNamesWithPoolToPrint(f, pools, o.withZekkenName, courtNames, nil, playerCoords, o.numberPrefix)
 
@@ -445,10 +468,16 @@ func (o *poolOptions) createPools(entries []string) error {
 		totalPoolMatches += len(p.Matches)
 	}
 
-	printEliminationWithBronze(f, matchWinners, eliminationMatchRounds, o.teamMatches, plan, o.engi, o.thirdPlaceMatch)
-	helper.FillEstimations(f, int64(len(pools)), int64(totalPoolMatches), int64(o.teamMatches), int64(totalQualifiers-1), o.courts)
+	if knockout {
+		printEliminationWithBronze(f, matchWinners, eliminationMatchRounds, comp.TeamBoutRows(), plan, o.engi, o.thirdPlaceMatch)
+	}
+	if err := writeBlankKachinukiDetail(f, comp, pools, eliminationMatchRounds, o.thirdPlaceMatch); err != nil {
+		return err
+	}
+	// n qualifiers play n-1 knockout matches; a league, with none, plays none.
+	helper.FillEstimations(f, int64(len(pools)), int64(totalPoolMatches), int64(o.teamMatches), int64(max(totalQualifiers-1, 0)), o.courts)
 
-	// Apply sheet protection to all sheets except data and Time Estimator
+	// Protect every sheet but the editable ones (helper.ProtectAllSheets).
 	helper.ProtectAllSheets(f)
 
 	// Save the spreadsheet file

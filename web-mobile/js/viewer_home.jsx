@@ -5,7 +5,7 @@ import { competitionKindLabel, compMatches, tournamentMatches, TournamentInfo, c
 import { matchParticipantIds, mergeSharedWatchlist, resolveEntryPlayerIds, resolveWatchedPlayers, findPrimaryEntry, heroEntry, sharedLinkPass, readSharedLedger, writeSharedLedger, clearSharedLedger, sessionStore, buildPrimaryNextMatch, buildPrimaryLastResult, buildRoster, rosterFullyLoaded, useWatchlist, buildWatchedSets, matchInvolvesWatchedSet } from './viewer_watchlist_core.jsx';
 import { runOnce, notifEnable, notifDisable, useChimeMuted, isFollowedMatchOnDeck, useFollowedMatchAlert, useSecondaryWatchAlert, MyMatchAlertBanner } from './viewer_alerts.jsx';
 import { notificationSupported } from './viewer_notifications.jsx';
-import { VSchedItem, MatchViewerModal } from './viewer_match.jsx';
+import { VSchedItem, MatchViewerModal, useLiveMatch, matchInList } from './viewer_match.jsx';
 import { buildWatchlistUpcoming, usePrimaryWatch, WATCHED_UPCOMING_LIST_MAX } from './viewer_schedule.jsx';
 import { mirrorWatchlistParam } from './watchlist_link.jsx';
 import { isBarredMatch } from './ineligible_match.jsx';
@@ -119,7 +119,6 @@ export function ViewerHome({ tournament, onSelectCompetition, onAdminClick, onOp
   }, [compsByDate]);
 
   const [courtFilter, setCourtFilter] = useState("all");
-  const [selectedMatch, setSelectedMatch] = useState(null);
 
   // mp-xhaa: per-viewer personalisation is now a single unified watchlist of
   // up to 50 entities: individual players OR whole dojos. Exactly one entity
@@ -234,6 +233,8 @@ export function ViewerHome({ tournament, onSelectCompetition, onAdminClick, onOp
 
   // global "across-all-competitions" lists for the home page
   const allMatches = useMemo(() => tournamentMatches(t), [t]);
+  // Every door on this page shows the live row from this list.
+  const [selectedMatch, openMatch, closeMatch] = useLiveMatch((id, compId) => matchInList(allMatches, id, compId));
   const bothSidesMatches = useMemo(() => allMatches.filter(hasBothSides), [allMatches]);
   // Running-comp set: gates the home NOW / Up-next strips and the running dot.
   // BOTH setup and draw-ready are excluded: a draw-ready comp has a published
@@ -420,7 +421,7 @@ export function ViewerHome({ tournament, onSelectCompetition, onAdminClick, onOp
           {showAlertBanner && (
             <MyMatchAlertBanner
               match={alertMatch}
-              onView={(m) => { setSelectedMatch(m); setAlertDismissed(true); }}
+              onView={(m) => { openMatch(m); setAlertDismissed(true); }}
               onDismiss={() => setAlertDismissed(true)}
             />
           )}
@@ -430,7 +431,7 @@ export function ViewerHome({ tournament, onSelectCompetition, onAdminClick, onOp
           {showSecondaryBanner && (
             <MyMatchAlertBanner
               match={secondaryAlert}
-              onView={(m) => { setSelectedMatch(m); setSecondaryDismissed(true); }}
+              onView={(m) => { openMatch(m); setSecondaryDismissed(true); }}
               onDismiss={() => setSecondaryDismissed(true)}
             />
           )}
@@ -451,7 +452,7 @@ export function ViewerHome({ tournament, onSelectCompetition, onAdminClick, onOp
             heroEntry={heroWatchEntry}
             heroNextMatch={heroNextMatch}
             upcoming={watchedUpcoming}
-            onMatchClick={setSelectedMatch}
+            onMatchClick={openMatch}
             chimeMuted={chimeMuted}
             onBellToggle={handleBellToggle}
             onFirstAdd={chimeMuted ? handleBellToggle : undefined}
@@ -461,7 +462,7 @@ export function ViewerHome({ tournament, onSelectCompetition, onAdminClick, onOp
             <div className="hero-running">
               <div className="hero-running__lbl"><span className="dot dot--running"></span> NOW · {pluralize(globalRunning.length, "match", "matches")}</div>
               <div className="vsched hero-running__vsched">
-                {globalRunning.slice(0, 3).map((m) => <VSchedItem key={`${m.compId}:${m.id}`} m={m} tweaks={{ showDojo: true }} showCompetition onClick={() => setSelectedMatch(m)} />)}
+                {globalRunning.slice(0, 3).map((m) => <VSchedItem key={`${m.compId}:${m.id}`} m={m} tweaks={{ showDojo: true }} showCompetition onClick={() => openMatch(m)} />)}
               </div>
             </div>
           )}
@@ -561,7 +562,7 @@ export function ViewerHome({ tournament, onSelectCompetition, onAdminClick, onOp
             <>
               <div className="section-title viewer__upnext-title">Up next · {upNext.length}</div>
               <div className="vsched">
-                {upNext.map((m) => <VSchedItem key={`${m.compId}:${m.id}`} m={m} tweaks={{ showDojo: true }} showCompetition onClick={() => setSelectedMatch(m)} />)}
+                {upNext.map((m) => <VSchedItem key={`${m.compId}:${m.id}`} m={m} tweaks={{ showDojo: true }} showCompetition onClick={() => openMatch(m)} />)}
               </div>
             </>
           )}
@@ -602,7 +603,7 @@ export function ViewerHome({ tournament, onSelectCompetition, onAdminClick, onOp
           {window.VersionFooter && <window.VersionFooter />}
         </div>
       </div>
-      {selectedMatch && <MatchViewerModal match={selectedMatch} onClose={() => setSelectedMatch(null)} tournament={t} />}
+      {selectedMatch && <MatchViewerModal match={selectedMatch} onClose={closeMatch} tournament={t} />}
     </div>
   );
 }

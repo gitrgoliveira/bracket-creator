@@ -411,7 +411,7 @@ func TestAssignSlotsBracketByesSkipCursor(t *testing.T) {
 			{ID: "m-r1-2", Court: "A", Status: state.MatchStatusScheduled},
 		},
 	}
-	assignBracketMatchSlots(rounds, comp, tournament)
+	assignBracketMatchSlots(rounds, comp, tournament, nil)
 
 	// Bye, then two real matches. All three get a time slot, but
 	// the bye does not advance the cursor: 09:00 (bye), 09:00, 09:06.
@@ -530,7 +530,7 @@ func TestAssignSlots_EmptyReturnsStartAnchorNotZero(t *testing.T) {
 	assert.True(t, poolCur.Equal(dayStart), "empty pool slots (no opening) should return dayStart")
 	assert.Equal(t, 0.0, poolCur.Sub(dayStart).Minutes(), "empty pool duration must be 0")
 
-	brkCur := assignBracketMatchSlots(nil, comp, nil)
+	brkCur := assignBracketMatchSlots(nil, comp, nil, nil)
 	assert.True(t, brkCur.Equal(dayStart), "empty bracket slots (no opening) should return dayStart")
 
 	// With a 30m opening block → anchor == dayStart + 30m (consistent with the
@@ -538,7 +538,7 @@ func TestAssignSlots_EmptyReturnsStartAnchorNotZero(t *testing.T) {
 	tourn := &state.Tournament{OpeningBlock: "30m"}
 	_, poolCurOpen := assignPoolMatchSlots(nil, comp, tourn)
 	assert.Equal(t, 30.0, poolCurOpen.Sub(dayStart).Minutes(), "empty pool with 30m opening must anchor at +30m")
-	brkCurOpen := assignBracketMatchSlots(nil, comp, tourn)
+	brkCurOpen := assignBracketMatchSlots(nil, comp, tourn, nil)
 	assert.Equal(t, 30.0, brkCurOpen.Sub(dayStart).Minutes(), "empty bracket with 30m opening must anchor at +30m")
 
 	// nil comp → zero time.Time (dayStart cannot be derived).
@@ -560,7 +560,7 @@ func TestScheduleBronze_PlacesBronzeBeforeFinalOnSharedCourt(t *testing.T) {
 		},
 		ThirdPlaceMatch: &state.BracketMatch{ID: "m-bronze", Court: "A", Status: state.MatchStatusScheduled},
 	}
-	assignBracketMatchSlots(bracket.Rounds, comp, nil)
+	assignBracketMatchSlots(bracket.Rounds, comp, nil, nil)
 	finalBefore := bracket.Rounds[1][0].ScheduledAt
 	require.NotEmpty(t, finalBefore)
 
@@ -588,11 +588,81 @@ func TestScheduleBronze_DifferentCourtInheritsFinalTimeOnly(t *testing.T) {
 		},
 		ThirdPlaceMatch: &state.BracketMatch{ID: "m-bronze", Court: "B", Status: state.MatchStatusScheduled},
 	}
-	assignBracketMatchSlots(bracket.Rounds, comp, nil)
+	assignBracketMatchSlots(bracket.Rounds, comp, nil, nil)
 	finalBefore := bracket.Rounds[1][0].ScheduledAt
 
 	scheduleBronze(bracket, comp, nil)
 
 	assert.Equal(t, finalBefore, bracket.ThirdPlaceMatch.ScheduledAt, "different-court bronze inherits the final's time")
 	assert.Equal(t, finalBefore, bracket.Rounds[1][0].ScheduledAt, "different-court bronze must not push the final")
+}
+
+// TestAssignBracketSlots_StartAfterPoolPhase pins bc-kosc: a per-court start
+// moves that court's knockout slots after its pool phase, a bye still takes
+// the court's start and consumes nothing, and a nil map keeps the day start.
+func TestAssignBracketSlots_StartAfterPoolPhase(t *testing.T) {
+	comp := &state.Competition{
+		StartTime:                    "09:00",
+		KnockoutMatchDurationSeconds: 240,
+		Courts:                       []string{"A", "B"},
+	}
+	tournament := &state.Tournament{ClockToElapsedMultiplier: 1.5}
+	build := func() [][]state.BracketMatch {
+		return [][]state.BracketMatch{{
+			{ID: "bye", Court: "A", Status: state.MatchStatusCompleted, Winner: "X"},
+			{ID: "a1", Court: "A", Status: state.MatchStatusScheduled, MatchNumber: 1},
+			{ID: "a2", Court: "A", Status: state.MatchStatusScheduled, MatchNumber: 2},
+			{ID: "b1", Court: "B", Status: state.MatchStatusScheduled, MatchNumber: 3},
+		}}
+	}
+
+	rounds := build()
+	assignBracketMatchSlots(rounds, comp, tournament, map[string]time.Time{"A": parseClockHHMM("09:24")})
+	assert.Equal(t, "09:24", rounds[0][0].ScheduledAt, "bye takes the court start")
+	assert.Equal(t, "09:24", rounds[0][1].ScheduledAt)
+	assert.Equal(t, "09:30", rounds[0][2].ScheduledAt, "bye consumed nothing")
+	assert.Equal(t, "09:00", rounds[0][3].ScheduledAt, "a court absent from the map keeps the day start")
+
+	rounds = build()
+	assignBracketMatchSlots(rounds, comp, tournament, map[string]time.Time{"A": parseClockHHMM("08:00")})
+	assert.Equal(t, "09:00", rounds[0][1].ScheduledAt, "an earlier court start never pulls before the day start")
+
+	rounds = build()
+	assignBracketMatchSlots(rounds, comp, tournament, nil)
+	assert.Equal(t, "09:00", rounds[0][1].ScheduledAt, "nil keeps today's behaviour")
+	assert.Equal(t, "09:06", rounds[0][2].ScheduledAt)
+}
+
+func TestPoolPhaseEndByCourt(t *testing.T) {
+	tournament := &state.Tournament{ClockToElapsedMultiplier: 1.5}
+
+	t.Run("latest per court, skips blank and unparseable rows", func(t *testing.T) {
+		comp := &state.Competition{PoolMatchDurationSeconds: 240, Courts: []string{"A", "B"}}
+		per := perMatchElapsedMinutes(comp, tournament, false)
+		require.Equal(t, 6, per)
+		ends := poolPhaseEndByCourt([]state.MatchResult{
+			{Court: "A", ScheduledAt: "09:00"},
+			{Court: "A", ScheduledAt: "09:06"},
+			{Court: "A", ScheduledAt: ""},
+			{Court: "B", ScheduledAt: "bogus"},
+		}, comp, tournament)
+		assert.Equal(t, map[string]time.Time{"A": parseClockHHMM("09:12")}, ends)
+	})
+
+	t.Run("a hand-moved later time wins", func(t *testing.T) {
+		comp := &state.Competition{PoolMatchDurationSeconds: 240}
+		ends := poolPhaseEndByCourt([]state.MatchResult{
+			{Court: "A", ScheduledAt: "14:00"},
+			{Court: "A", ScheduledAt: "09:00"},
+		}, comp, tournament)
+		assert.Equal(t, parseClockHHMM("14:06"), ends["A"])
+	})
+
+	t.Run("team duration", func(t *testing.T) {
+		comp := &state.Competition{Kind: "team", TeamSize: 5, PoolMatchDurationSeconds: 240}
+		per := perMatchElapsedMinutes(comp, tournament, false)
+		require.Greater(t, per, 6)
+		ends := poolPhaseEndByCourt([]state.MatchResult{{Court: "A", ScheduledAt: "09:00"}}, comp, tournament)
+		assert.Equal(t, parseClockHHMM("09:00").Add(time.Duration(per)*time.Minute), ends["A"])
+	})
 }

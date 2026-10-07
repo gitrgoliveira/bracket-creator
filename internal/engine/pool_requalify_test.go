@@ -70,7 +70,7 @@ func newRQFixture(t *testing.T, compID string, poolWinners int, names [][]string
 	draw := helper.BuildKnockoutDraw(pools, poolWinners, 1)
 	stored, err := store.LoadCompetition(compID)
 	require.NoError(t, err)
-	bracket, err := eng.buildBracketFromDraw(stored, draw, nil)
+	bracket, err := eng.buildBracketFromDraw(stored, draw, nil, nil)
 	require.NoError(t, err)
 	require.NoError(t, store.SaveBracket(compID, bracket))
 	return &rqFix{t: t, eng: eng, store: store, compID: compID}

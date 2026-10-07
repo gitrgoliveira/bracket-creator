@@ -434,6 +434,12 @@ function nextFoulOnDecrement(currentFouls) {
 // are type="module" scripts and may execute in any order). Falls back
 // to a plain pass-through when window.Term isn't available yet (e.g.
 // vitest harness, or pre-mount of the glossary module).
+//
+// RULE (bc-otpl): a Term is never inside a button or label. A Term is itself
+// a control (its own click handler stops propagation), so nested in another
+// control it swallows the tap meant for the outer one. Put the control's text
+// in plain words and GlossaryHintAS BESIDE the control, as the Kiken/Fusenpai
+// buttons and EnchoControl do.
 function TermAS(props) {
   if (typeof window !== 'undefined' && window.Term) {
     return React.createElement(window.Term, props, props.children);
@@ -736,8 +742,9 @@ function EnchoControl({ enchoPeriodCount, setEnchoPeriodCount }) {
           aria-label="Show overtime (encho) controls"
         >
           <span aria-hidden="true" className="encho-pill__icon">{Icon ? <Icon name="timer" size={14} /> : "⏱"}</span>
-          <TermAS name="encho">Overtime</TermAS>
+          Overtime
         </button>
+        <GlossaryHintAS name="encho" />
       </div>
     );
   }
@@ -754,8 +761,9 @@ function EnchoControl({ enchoPeriodCount, setEnchoPeriodCount }) {
             if (!e.target.checked) setShowCounter(false);
           }}
         />
-        <TermAS name="encho">Encho</TermAS> started (overtime)
+        Encho started (overtime)
       </label>
+      <GlossaryHintAS name="encho" />
       {enchoPeriodCount > 0 && (
         <div className="encho-row__stepper">
           <button
@@ -785,41 +793,58 @@ function EnchoControl({ enchoPeriodCount, setEnchoPeriodCount }) {
 // is always optional, a reopened match included: a match can be reopened
 // without any reason, and ending it again asks for none (operator ruling
 // 2026-09-25).
-function DecisionPrompt({ kind, sideA, sideB, defaultSide, askReason, onCancel, onSubmit, submitting }) {
-  const [side, setSide] = useStateA(defaultSide || "shiro");
+function DecisionPrompt({ kind, sideA, sideB, askReason, onCancel, onSubmit, submitting }) {
+  // No side is preselected (operator decision 2026-10-07, bc-dsid): a
+  // withdrawal or no-show recorded against the wrong side inverts the result,
+  // so the operator must pick, and Record stays off until they do.
+  const [side, setSide] = useStateA("");
   const [reason, setReason] = useStateA("");
   const showReason = askReason;
   // Display rule (locked, glossary.md §Display rule): render the
   // romaji term ALONE: the popover (via <Term>) carries the gloss.
   // We keep "Decision" untouched (it's already plain English) and
   // wrap the kendo terms so a volunteer hovering/tapping the title
-  // gets the full tooltip.
+  // gets the full tooltip. The title is not a control, so its Term is fine;
+  // the side options below are labels and carry plain text (the rule above
+  // TermAS).
   const isKiken = window.isKikenDecision(kind);
   const title = isKiken || kind === "fusenpai"
     ? React.createElement(TermAS, { name: kind }, withdrawalLabel(kind))
     : "Decision";
+  const sideName = (key) => (key === "shiro" ? sideB?.name : sideA?.name) || (key === "shiro" ? "Shiro" : "Aka");
 
   const submit = (e) => {
     e?.preventDefault?.();
-    if (submitting) return;
+    if (submitting || !side) return;
     onSubmit({ decisionBy: side, decisionReason: showReason ? reason.trim() : "" });
   };
+
+  const verb = isKiken ? "withdrew" : "did not show up";
+  const sideOption = (key, word, colour, name) => (
+    <label className={`radio-pill decision-prompt__side${side === key ? " is-active" : ""}`}>
+      <input type="radio" name="decision-side" value={key} checked={side === key} onChange={() => setSide(key)} />
+      <span>{word} ({colour}){name ? `: ${name}` : ""}</span>
+    </label>
+  );
 
   return (
     <form className="decision-prompt" onSubmit={submit} style={{ border: "1px solid var(--line)", borderRadius: 6, padding: 12, marginTop: 8, marginBottom: 8, background: "var(--bg-2)" }}>
       <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 8 }}>{title}</div>
       <div style={{ display: "flex", flexDirection: "column", gap: 6, fontSize: 12 }}>
         <div style={{ fontWeight: 600 }}>{isKiken ? "Which side withdrew?" : "Which side did not show up?"}</div>
-        <div style={{ display: "flex", gap: 12 }}>
-          <label style={{ display: "flex", alignItems: "center", gap: 4 }}>
-            <input type="radio" name="decision-side" value="shiro" checked={side === "shiro"} onChange={() => setSide("shiro")} />
-            <span><TermAS name="shiro">SHIRO</TermAS> (White){sideB?.name ? `: ${sideB.name}` : ""}</span>
-          </label>
-          <label style={{ display: "flex", alignItems: "center", gap: 4 }}>
-            <input type="radio" name="decision-side" value="aka" checked={side === "aka"} onChange={() => setSide("aka")} />
-            <span><TermAS name="aka">AKA</TermAS> (Red){sideA?.name ? `: ${sideA.name}` : ""}</span>
-          </label>
+        <div className="decision-prompt__sides">
+          {sideOption("shiro", "SHIRO", "White", sideB?.name)}
+          {sideOption("aka", "AKA", "Red", sideA?.name)}
         </div>
+        {side ? (
+          <div className="decision-prompt__consequence" data-testid="decision-prompt-consequence" aria-live="polite">
+            {withdrawalConsequence(kind, sideName(side), sideName(side === "shiro" ? "aka" : "shiro"))}
+          </div>
+        ) : (
+          <div className="decision-prompt__hint" data-testid="decision-prompt-hint">
+            Pick the side that {verb}.
+          </div>
+        )}
         {showReason && (
           <label style={{ display: "flex", flexDirection: "column", gap: 4, marginTop: 4 }}>
             <span style={{ fontWeight: 600 }}>
@@ -839,8 +864,8 @@ function DecisionPrompt({ kind, sideA, sideB, defaultSide, askReason, onCancel, 
       </div>
       <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", marginTop: 10 }}>
         <button type="button" className="btn btn--sm" onClick={onCancel} disabled={submitting}>Cancel</button>
-        <button type="submit" className="btn btn--primary btn--sm" disabled={submitting}>
-          {submitting ? "Saving…" : "Record"}
+        <button type="submit" className="btn btn--primary btn--sm" disabled={submitting || !side}>
+          {submitting ? "Saving…" : side ? `Record: ${side === "shiro" ? "SHIRO" : "AKA"} ${verb}` : "Record"}
         </button>
       </div>
     </form>
@@ -1312,6 +1337,17 @@ function withdrawalLabel(decision) {
   // RecordedWithdrawal, which needs the winner's name this function does not
   // have.
   return decision === "kiken-injury" ? "Kiken – Injury" : "Kiken – Voluntary";
+}
+
+// withdrawalConsequence: the one sentence that says what recording a
+// withdrawal or no-show does, shown once the operator has picked the side
+// (DecisionPrompt). The kiken-injury kind is the reinstateable one; every
+// other kiken, the legacy bare one included, and the no-show are permanent.
+function withdrawalConsequence(kind, withdrawnName, otherName) {
+  const barred = kind === "kiken-injury"
+    ? "cannot fight again unless reinstated"
+    : "cannot fight again in this competition";
+  return `${withdrawnName} ${barred}. ${otherName} wins this match.`;
 }
 
 // withdrawnSideOf: the side a recorded withdrawal names as the one that
@@ -2219,6 +2255,7 @@ export {
   ReasonPrompt,
   CORRECTION_PRESETS,
   withdrawalLabel,
+  withdrawalConsequence,
   withdrawnSideOf,
   withdrawnKeyOf,
   withdrawalInForce,

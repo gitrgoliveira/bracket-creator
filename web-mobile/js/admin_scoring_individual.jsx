@@ -1326,7 +1326,6 @@ export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, on
               kind={decisionPromptKind}
               sideA={m.sideA}
               sideB={m.sideB}
-              defaultSide="shiro"
               askReason={window.isKikenDecision(decisionPromptKind)}
               submitting={decisionSubmitting}
               onCancel={() => { setDecisionPromptKind(""); setDecisionErr(""); }}

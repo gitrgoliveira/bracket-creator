@@ -277,32 +277,10 @@ describe('DecisionPrompt → /decision POST integration', () => {
     window.API = originalAPI;
   });
 
-  it('DecisionPrompt onSubmit fires the form-submit handler with default side', () => {
-    // The React mock returns `[initial, vi.fn()]` from useState, so
-    // calling DecisionPrompt as a function produces the initial-state
-    // virtual tree; the form's onSubmit is what we exercise here.
-    const onSubmit = vi.fn();
-    const tree = DecisionPrompt({
-      kind: 'kiken',
-      sideA: { name: 'Tora' },
-      sideB: { name: 'Kuma' },
-      defaultSide: 'shiro',
-      askReason: true,
-      onCancel: vi.fn(),
-      onSubmit,
-      submitting: false,
-    });
-    expect(tree.type).toBe('form');
-    expect(typeof tree.props.onSubmit).toBe('function');
-
-    tree.props.onSubmit({ preventDefault: () => {} });
-    expect(onSubmit).toHaveBeenCalledWith({
-      decisionBy: 'shiro',
-      decisionReason: '',
-    });
-  });
-
-  it('DecisionPrompt onSubmit defaults side to "shiro" when defaultSide is missing', () => {
+  // The side-picker and submit-flow tests live in
+  // render/decision_prompt_side.render.test.jsx (real React). Here, with the
+  // fake useState, only the initial state is visible: no side is picked.
+  it('DecisionPrompt submits nothing while no side is picked (no preselected side)', () => {
     const onSubmit = vi.fn();
     const tree = DecisionPrompt({
       kind: 'fusenpai',
@@ -314,57 +292,7 @@ describe('DecisionPrompt → /decision POST integration', () => {
       submitting: false,
     });
     tree.props.onSubmit({ preventDefault: () => {} });
-    expect(onSubmit).toHaveBeenCalledWith({
-      decisionBy: 'shiro',
-      decisionReason: '',
-    });
-  });
-
-  it('DecisionPrompt onSubmit is a no-op while submitting', () => {
-    // Guards against double-submit when the operator double-clicks
-    // the Record button.
-    const onSubmit = vi.fn();
-    const tree = DecisionPrompt({
-      kind: 'kiken',
-      sideA: { name: 'Tora' },
-      sideB: { name: 'Kuma' },
-      defaultSide: 'aka',
-      askReason: false,
-      onCancel: vi.fn(),
-      onSubmit,
-      submitting: true,
-    });
-    tree.props.onSubmit({ preventDefault: () => {} });
     expect(onSubmit).not.toHaveBeenCalled();
-  });
-
-  it('the parent flow: DecisionPrompt onSubmit → submitDecisionRequest → recordDecision', async () => {
-    // Route the DecisionPrompt callback through submitDecisionRequest.
-    // the same path ScoreEditorModal.submitDecision takes; so the test
-    // would fail if the password stopped flowing to recordDecision.
-    const onSubmit = vi.fn((payload) =>
-      submitDecisionRequest('comp-1', 'match-1', 'kiken-voluntary', payload, 0, 'explicit-pw'),
-    );
-
-    const tree = DecisionPrompt({
-      kind: 'kiken',
-      sideA: { name: 'Tora' },
-      sideB: { name: 'Kuma' },
-      defaultSide: 'aka',
-      askReason: true,
-      onCancel: vi.fn(),
-      onSubmit,
-      submitting: false,
-    });
-
-    await tree.props.onSubmit({ preventDefault: () => {} });
-
-    expect(window.API.recordDecision).toHaveBeenCalledWith(
-      'comp-1',
-      'match-1',
-      { decision: 'kiken-voluntary', decisionBy: 'aka' },
-      'explicit-pw',
-    );
   });
 
   it('regression: submitDecision path forwards the modal password prop to recordDecision', async () => {
@@ -382,36 +310,6 @@ describe('DecisionPrompt → /decision POST integration', () => {
       'match-9',
       { decision: 'fusenpai', decisionBy: 'shiro' },
       'tournament-secret',
-    );
-  });
-
-  it('parent flow includes encho.periodCount in the body when > 0', async () => {
-    // The encho counter rides alongside the decision so the server can
-    // attach periodCount to MatchResult.Encho. Pinned here so the
-    // wiring through buildDecisionBody isn't dropped during a refactor.
-    const onSubmit = vi.fn((payload) => {
-      const body = buildDecisionBody('hikiwake', payload, 3); // 3 encho periods
-      const password = resolveDecisionPassword('pw');
-      return window.API.recordDecision('comp-1', 'match-1', body, password);
-    });
-    const tree = DecisionPrompt({
-      kind: 'hikiwake',
-      sideA: { name: 'A' },
-      sideB: { name: 'B' },
-      defaultSide: 'shiro',
-      askReason: false,
-      onCancel: vi.fn(),
-      onSubmit,
-      submitting: false,
-    });
-
-    await tree.props.onSubmit({ preventDefault: () => {} });
-
-    expect(window.API.recordDecision).toHaveBeenCalledWith(
-      'comp-1',
-      'match-1',
-      { decision: 'hikiwake', decisionBy: 'shiro', encho: { periodCount: 3 } },
-      'pw',
     );
   });
 
@@ -439,32 +337,6 @@ describe('DecisionPrompt → /decision POST integration', () => {
     expect(setDecisionErr).toHaveBeenLastCalledWith('some_other_conflict');
   });
 
-  it('fusenpai: decisionBy is the ABSENT/LOSING side, not the winning side', () => {
-    // The UI label was previously "Which side gets the default win?"
-    // operators interpreted it as picking the WINNER and sent the wrong
-    // side as decisionBy, inverting the result. The label is now
-    // "Which side did not show up?" so operators pick the ABSENT (losing)
-    // side. This test pins the wire contract: selecting "shiro" means
-    // SHIRO forfeits and AKA receives the auto-filled 2-0 win.
-    const onSubmit = vi.fn((payload) => {
-      return buildDecisionBody('fusenpai', payload, 0);
-    });
-    const tree = DecisionPrompt({
-      kind: 'fusenpai',
-      sideA: { name: 'Hayashi' },
-      sideB: { name: 'Nakamura' },
-      defaultSide: 'shiro',
-      askReason: false,
-      onCancel: vi.fn(),
-      onSubmit,
-      submitting: false,
-    });
-    tree.props.onSubmit({ preventDefault: () => {} });
-    // decisionBy = "shiro" → SHIRO is the absent side → engine gives win to AKA
-    expect(onSubmit).toHaveBeenCalledWith({ decisionBy: 'shiro', decisionReason: '' });
-    const body = buildDecisionBody('fusenpai', { decisionBy: 'shiro', decisionReason: '' }, 0);
-    expect(body).toEqual({ decision: 'fusenpai', decisionBy: 'shiro' });
-  });
 });
 
 describe('isBoutDecided / MAX_IPPONS_PER_SIDE', () => {

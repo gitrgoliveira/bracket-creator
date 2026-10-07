@@ -8,6 +8,8 @@ Not every bout is decided on points. The score editor records the kendo outcomes
 
 Kiken covers two distinct situations with different consequences.
 
+Pick the side that withdrew: no side is chosen for you, and **Record** stays unavailable until you pick one. Once you do, the button names it (for example **Record: AKA withdrew**) and a line beneath says who cannot fight again and who wins the match.
+
 ### Voluntary withdrawal (FIK Article 31)
 
 A voluntary kiken is permanent. The competitor takes no further matches in this competition and cannot be reinstated.
@@ -19,6 +21,8 @@ An injury kiken can be reinstated later by the operator if the competitor recove
 ## Fusenpai and fusensho
 
 **Fusenpai** is the no-show decision: the competitor who did not appear forfeits the match.
+
+Pick the side that did not show up: no side is chosen for you, and **Record** stays unavailable until you pick one. Once you do, the button names it (for example **Record: SHIRO did not show up**).
 
 **Fusensho** is used in team matches when the opposing team fields a vacant position, awarding that bout to the other side. It is also the decision the app records for the match itself when you record the win for the opponent of an already-barred competitor; refer to [Matches after a competitor is barred](#matches-after-a-competitor-is-barred). When neither team has a fighter for a position, record that bout as a **Tie** instead.
 

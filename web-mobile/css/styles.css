@@ -8079,6 +8079,7 @@ abbr.msb-lab { text-decoration: none; cursor: help; }
 .encho-row--collapsed {
   display: flex;
   align-items: center;
+  gap: 4px;
   margin-bottom: 8px;
 }
 .encho-pill {
@@ -8601,6 +8602,37 @@ abbr.msb-lab { text-decoration: none; cursor: help; }
   outline-offset: 1px;
   border-color: var(--accent);
   box-shadow: var(--focus-ring);
+}
+
+/* --- Decision prompt side picker (bc-dsid) ------------------------------ */
+.decision-prompt__sides {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+/* The native radio stays in the tab order and the accessibility tree; the
+   pill is what the eye and the thumb see. */
+.decision-prompt__side {
+  position: relative;
+  gap: 4px;
+}
+.decision-prompt__side input[type="radio"] {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  opacity: 0;
+  cursor: pointer;
+}
+.decision-prompt__side:has(input:focus-visible) {
+  box-shadow: var(--focus-ring);
+}
+.decision-prompt__hint {
+  color: var(--ink-3);
+}
+.decision-prompt__consequence {
+  font-weight: 600;
 }
 
 /* --- Decision prompt motion (compact + roomy) -------------------------- */

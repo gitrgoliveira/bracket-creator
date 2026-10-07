@@ -4474,10 +4474,9 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
                     ? <>This encounter is tied. Add a representative bout (<TermAS name="daihyosen">daihyosen</TermAS>) to decide it. Each side picks one eligible competitor, scored like any other sub-match.</>
                     : <>A knockout encounter must have a winner. If the bouts end tied, add a representative bout (<TermAS name="daihyosen">daihyosen</TermAS>) to break it.</>}
                 </div>
-                {/* Plain-text label only: a glossary <TermAS> inside the
-                    button would swallow the tap via stopPropagation (the
-                    term's own click handler), leaving a dead-zone over the
-                    word. The term is taught in the title/hint above instead. */}
+                {/* Plain-text label only (the rule above TermAS in
+                    admin_scoring_shared.jsx). The term is taught in the
+                    title/hint above instead. */}
                 {!removingWithdrawal && <div>
                   <button data-testid="scoring-modal-daihyosen-button" type="button" className={`btn btn--sm ${teamTied ? "btn--primary" : "btn--ghost"}`} onClick={onDaihyosen} disabled={daihyosenBusy || submitting || decisionSubmitting}>
                     {daihyosenBusy ? "Adding…" : "Add representative bout"}
@@ -4577,7 +4576,6 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
               kind={decisionPromptKind}
               sideA={{ name: m.sideA?.name || m.sideA }}
               sideB={{ name: m.sideB?.name || m.sideB }}
-              defaultSide="shiro"
               askReason={window.isKikenDecision(decisionPromptKind)}
               submitting={decisionSubmitting}
               onCancel={() => { setDecisionPromptKind(""); setDecisionErr(""); }}

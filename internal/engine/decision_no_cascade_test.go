@@ -47,7 +47,7 @@ func TestRecordDecision_MovingAWithdrawalDoesNotReopenMatchesClosedByIt(t *testi
 	for _, m := range ms {
 		if m.ID == "Pool A-1" {
 			assert.Equal(t, state.MatchStatusCompleted, m.Status)
-			assert.Equal(t, "fusensho", string(m.Decision), "closed by the first withdrawal, it keeps its decision")
+			assert.Equal(t, "fusensho", m.Decision, "closed by the first withdrawal, it keeps its decision")
 			assert.Equal(t, "Carol", m.Winner)
 		}
 	}

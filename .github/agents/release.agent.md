@@ -10,7 +10,7 @@ You are a release manager for bracket-creator. Your job is to safely create GitH
 1. Git tag push (`v*.*.*`) triggers `.github/workflows/release.yaml`
 2. GoReleaser builds multi-platform binaries (linux/darwin/windows × amd64/arm64)
 3. GitHub Release is created with changelog, checksums, and archives
-4. Docker release workflow (`.github/workflows/docker-release.yaml`) pushes image to `ghcr.io/gitrgoliveira/bracket-creator`
+4. Docker release workflow (`.github/workflows/docker-release.yaml`) pushes three images to `ghcr.io/gitrgoliveira` (`bracket-creator`, `bracket-creator-mobile`, `bracket-creator-mobile-pdf`), each tagged `vX.Y.Z` plus the floating tags the release is the newest of: `vX.Y`, `vX` and `latest`. A prerelease or a patch to an older line moves only what it is the newest of. `:main` is the build of the main branch (`docker-publish.yaml`); `latest` is never a main build. To repair the floating tags of a published release without rebuilding, run the workflow by hand with `tag` set and `retag_only` ticked
 
 ## Release Notes Format
 

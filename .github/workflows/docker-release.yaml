@@ -8,6 +8,11 @@ name: Publish Released Docker image
         description: "Tag to publish (e.g. v0.11.0)"
         required: true
         type: string
+      retag_only:
+        description: "Only move the floating tags (latest, vMAJOR, vMAJOR.MINOR) onto the image already published for this tag; build nothing"
+        required: false
+        default: false
+        type: boolean
   push:
     tags:
       - "v[0-9]+.[0-9]+.[0-9]+*"
@@ -29,6 +34,7 @@ env:
 jobs:
   build-and-push:
     name: Build and push ${{ matrix.image.name }}
+    if: ${{ !(github.event_name == 'workflow_dispatch' && inputs.retag_only) }}
     runs-on: ${{ matrix.runner }}
     permissions:
       contents: read
@@ -108,6 +114,8 @@ jobs:
     name: Merge manifests for ${{ matrix.image.name }}
     runs-on: ubuntu-24.04
     needs: build-and-push
+    # A retag-only dispatch skips the build, which would otherwise skip this too.
+    if: ${{ !cancelled() && (needs.build-and-push.result == 'success' || needs.build-and-push.result == 'skipped') }}
     permissions:
       contents: read
       packages: write
@@ -123,16 +131,45 @@ jobs:
             tag_suffix: "-mobile-pdf"
     steps:
       - name: Download AMD64 digest
+        if: ${{ !(github.event_name == 'workflow_dispatch' && inputs.retag_only) }}
         uses: actions/download-artifact@v8
         with:
           name: digest-${{ matrix.image.name }}-X64
           path: /tmp/digests
 
       - name: Download ARM64 digest
+        if: ${{ !(github.event_name == 'workflow_dispatch' && inputs.retag_only) }}
         uses: actions/download-artifact@v8
         with:
           name: digest-${{ matrix.image.name }}-ARM64
           path: /tmp/digests
+
+      - name: Work out which floating tags this release moves
+        run: |
+          # A floating tag follows the newest stable release of what it names:
+          # vMAJOR.MINOR the newest vMAJOR.MINOR.x, vMAJOR the newest vMAJOR.x.y
+          # and latest the newest of all. So a patch for an older line moves only
+          # its own line, and a prerelease (v2.3.0-rc1) moves none of them.
+          stable=$( { git ls-remote --tags --refs "https://github.com/${GITHUB_REPOSITORY}" 'refs/tags/v*' \
+                        | sed 's|.*refs/tags/||'
+                      echo "${IMAGE_TAG}"; } | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' || true)
+          newest() { sort -uV | tail -n 1; }
+          aliases=""
+          if [[ "${IMAGE_TAG}" =~ ^v([0-9]+)\.([0-9]+)\.[0-9]+$ ]]; then
+            major="${BASH_REMATCH[1]}"
+            minor="${BASH_REMATCH[2]}"
+            if [ "$(grep -E "^v${major}\.${minor}\." <<<"${stable}" | newest)" = "${IMAGE_TAG}" ]; then
+              aliases="v${major}.${minor}"
+            fi
+            if [ "$(grep -E "^v${major}\." <<<"${stable}" | newest)" = "${IMAGE_TAG}" ]; then
+              aliases="${aliases} v${major}"
+            fi
+            if [ "$(newest <<<"${stable}")" = "${IMAGE_TAG}" ]; then
+              aliases="${aliases} latest"
+            fi
+          fi
+          echo "ALIAS_TAGS=${aliases# }" >> "$GITHUB_ENV"
+          echo "Floating tags moved by ${IMAGE_TAG}: ${aliases:-none}"
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v4
@@ -145,9 +182,27 @@ jobs:
           password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Create and push multi-arch manifest
+        if: ${{ !(github.event_name == 'workflow_dispatch' && inputs.retag_only) }}
         working-directory: /tmp/digests
         run: |
           IMAGE="ghcr.io/${{ github.repository }}${{ matrix.image.tag_suffix }}"
-          docker buildx imagetools create \
-            --tag "${IMAGE}:${IMAGE_TAG}" \
+          tags=(--tag "${IMAGE}:${IMAGE_TAG}")
+          for alias in ${ALIAS_TAGS}; do
+            tags+=(--tag "${IMAGE}:${alias}")
+          done
+          docker buildx imagetools create "${tags[@]}" \
             $(printf "${IMAGE}@sha256:%s " *)
+
+      - name: Move the floating tags onto the published image
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.retag_only }}
+        run: |
+          IMAGE="ghcr.io/${{ github.repository }}${{ matrix.image.tag_suffix }}"
+          if [ -z "${ALIAS_TAGS}" ]; then
+            echo "${IMAGE_TAG} is not the newest of any line; no floating tag moves."
+            exit 0
+          fi
+          tags=()
+          for alias in ${ALIAS_TAGS}; do
+            tags+=(--tag "${IMAGE}:${alias}")
+          done
+          docker buildx imagetools create "${tags[@]}" "${IMAGE}:${IMAGE_TAG}"

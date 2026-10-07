@@ -1,7 +1,7 @@
 // pool_ids.jsx: canonical parser for pool-match ids. A leaf that imports only
-// write_result.jsx (itself a leaf with no imports, for scoreRowMatchLabel's
-// matchLabel below), so both display_helpers.jsx and admin_pools.jsx can
-// import it without pulling a real transitive import chain into either:
+// write_result.jsx and side_cell.jsx (each a leaf with no imports, for
+// scoreRowMatchLabel's matchLabel and scoreRowMatchName's sideWord), so both
+// display_helpers.jsx and admin_pools.jsx can import it without pulling a real transitive import chain into either:
 // admin_pools.jsx otherwise relies on window globals rather than ESM
 // imports, so a leaf this close to dependency-free keeps its module graph
 // trivial. Single source of truth for the pool-id parse rule used across the
@@ -18,6 +18,7 @@
 // This regex constant is intentionally module-private: callers use the
 // exported poolNameOf() wrapper below, never the raw pattern.
 import { matchLabel } from './write_result.jsx';
+import { sideWord } from './side_cell.jsx';
 
 // DAIHYOSEN_POSITION is the sentinel `position` value marking a sub-bout as
 // the daihyosen (representative bout) rather than a numbered roster bout
@@ -122,7 +123,7 @@ export function scoreRowMatchLabel(m) {
 // vs Sato"); the bare pairing when the row carries no label (a daihyosen or
 // tiebreaker bout, an unnumbered knockout row).
 export function scoreRowMatchName(m) {
-    const pairing = `${m.sideB?.name || "Shiro"} vs ${m.sideA?.name || "Aka"}`;
+    const pairing = `${m.sideB?.name || sideWord("shiro")} vs ${m.sideA?.name || sideWord("aka")}`;
     const label = scoreRowMatchLabel(m);
     return label ? `${label} · ${pairing}` : pairing;
 }

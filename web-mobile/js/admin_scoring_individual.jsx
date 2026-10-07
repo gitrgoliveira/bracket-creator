@@ -763,7 +763,9 @@ export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, on
     ? "Needs a winner: fight encho, then ask the organizer for a hantei if still tied."
     : "Needs a winner: fight encho, then record hantei if still tied.";
   // bc-htsd: hantei is valid at 0-0, so the picked side stands in for points.
-  const canFinish = decidedByHantei ? !!hanteiPick : (!koTieBlocked && hasPointsOrDraw);
+  // It needs the tied scoreline the hantei row is shown on: a recorded hantei
+  // on an untied line (legacy data) cannot be finished, as before.
+  const canFinish = decidedByHantei ? (!!hanteiPick && aTotal === bTotal) : (!koTieBlocked && hasPointsOrDraw);
 
   // Finish guard (see TeamScoreEditorModal): one tap ARMS the button — its label
   // becomes an explicit "Tap again to finish" INSTRUCTION (not a verdict), so the
@@ -835,12 +837,12 @@ export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, on
     // bc-dscn: on a RUNNING match every scoring edit is autosaved, and the
     // unmount writes one still inside the debounce window
     // (useDebouncedRunningWrite), so leaving discards nothing and asks
-    // nothing. Two local states are NOT in buildPatch("running"): the hantei
-    // ARM, which is only a mode (the verdict is committed by Finish with a
-    // picked side) and is dropped with no write (it never marks dirty), and
-    // the hikiwake toggle, which is a result the operator entered; that one
-    // keeps the prompt below, because leaving would lose it.
-    if (m.status === "running" && isDrawToggled === initialIsDrawToggled) {
+    // nothing. Local states NOT in buildPatch("running"): the hantei ARM,
+    // which is only a mode and is dropped with no write (it never marks
+    // dirty), and two results the operator entered, the hantei side pick
+    // (committed only by Finish) and the hikiwake toggle; those keep the
+    // prompt below, because leaving would lose them.
+    if (m.status === "running" && isDrawToggled === initialIsDrawToggled && hanteiPick === recordedHtKey) {
       go();
       return;
     }

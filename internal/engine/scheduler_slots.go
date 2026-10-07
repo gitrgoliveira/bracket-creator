@@ -261,9 +261,11 @@ func assignPoolMatchSlots(matches []state.MatchResult, comp *state.Competition, 
 // poolPhaseEndByCourt returns, per court, the clock time the pool phase ends:
 // the latest STORED pool ScheduledAt plus one pool slot
 // (perMatchElapsedMinutes, pool clock). Reading the stored times, rather than
-// a cursor threaded out of assignPoolMatchSlots, makes it right for every
-// caller, including a pool time the operator moved by hand and the quarantine
-// rebuild. Rows with no parseable time are skipped. bc-kosc.
+// a cursor threaded out of assignPoolMatchSlots, makes it right for both
+// callers that build the preview bracket: the draw and the quarantine rebuild.
+// It is read once, when the preview is built; a pool bout injected or moved
+// later does not re-time the knockout. Rows with no parseable time are
+// skipped. bc-kosc.
 func poolPhaseEndByCourt(matches []state.MatchResult, comp *state.Competition, tournament *state.Tournament) map[string]time.Time {
 	ends := map[string]time.Time{}
 	slot := time.Duration(perMatchElapsedMinutes(comp, tournament, false)) * time.Minute
@@ -298,8 +300,10 @@ func poolPhaseEndByCourt(matches []state.MatchResult, comp *state.Competition, t
 // courtStart is the per-court earliest start (bc-kosc): a court's cursor
 // begins at the later of dayStart + OpeningBlock and courtStart[court], so a
 // pools + knockout competition schedules each court's knockout after THAT
-// court's last pool bout (see poolPhaseEndByCourt). A nil map, or a court
-// absent from it, keeps the day start (knockout-only competitions pass nil).
+// court's last pool bout (see poolPhaseEndByCourt). A court absent from a
+// non-empty map (one that holds no pool bout) starts after the latest pool
+// end on any court. A nil or empty map keeps the day start (knockout-only
+// competitions pass nil).
 // Byes still take their court's start and consume nothing.
 //
 // Returns the maximum per-court end-cursor (the clock time when the
@@ -319,11 +323,23 @@ func assignBracketMatchSlots(rounds [][]state.BracketMatch, comp *state.Competit
 		return openAt
 	}
 
-	startFor := func(court string) time.Time {
-		if t, ok := courtStart[court]; ok && t.After(openAt) {
-			return t
+	// A court that holds no pool bout still waits for the pool phase: its
+	// knockout is fed by qualifiers from other courts, so it starts after
+	// the latest pool end anywhere.
+	latestPoolEnd := openAt
+	for _, t := range courtStart {
+		if t.After(latestPoolEnd) {
+			latestPoolEnd = t
 		}
-		return openAt
+	}
+	startFor := func(court string) time.Time {
+		if t, ok := courtStart[court]; ok {
+			if t.After(openAt) {
+				return t
+			}
+			return openAt
+		}
+		return latestPoolEnd
 	}
 	courtCursor := map[string]time.Time{}
 	for _, court := range comp.Courts {

@@ -152,4 +152,35 @@ describe('hantei side buttons only pick (bc-htsd)', () => {
     expect(onSubmit.mock.calls[0][0].winner).toMatchObject({ id: 'p2', name: 'Tanaka' });
     expect(onSubmit.mock.calls[0][0].decidedByHantei).toBe(true);
   });
+
+  it('leaving a running match with hantei only armed asks nothing', async () => {
+    const onClose = vi.fn();
+    window.confirmDialog.mockClear();
+    render(<ScoreEditorModal match={tied()} onClose={onClose} onSubmit={vi.fn()} password="" />);
+    await click(screen.getByTestId('scoring-modal-hantei-arm'));
+    await act(async () => { fireEvent.keyDown(document, { key: 'Escape' }); });
+    expect(window.confirmDialog, 'the arm alone is a mode: leaving asks nothing').not.toHaveBeenCalled();
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  it('leaving a running match after picking a side prompts, and staying keeps the editor', async () => {
+    const onClose = vi.fn();
+    window.confirmDialog.mockClear();
+    window.confirmDialog.mockResolvedValueOnce(false);
+    render(<ScoreEditorModal match={tied()} onClose={onClose} onSubmit={vi.fn()} password="" />);
+    await armAndPick('scoring-modal-hantei-aka');
+    await act(async () => { fireEvent.keyDown(document, { key: 'Escape' }); });
+    expect(window.confirmDialog).toHaveBeenCalledTimes(1);
+    expect(onClose).not.toHaveBeenCalled();
+  });
+
+  it('a recorded hantei on an untied scoreline (legacy data) cannot be finished', async () => {
+    const onSubmit = vi.fn().mockResolvedValue(undefined);
+    render(<ScoreEditorModal
+      match={tied({ status: 'completed', ipponsA: ['M'], ipponsB: [], decidedByHantei: true, winner: { id: 'p1', name: 'Yamada' } })}
+      onClose={vi.fn()} onSubmit={onSubmit} password="" />);
+    expect(screen.queryByTestId('scoring-modal-hantei-row')).toBeNull();
+    const save = [...document.querySelectorAll('.score-nav button')].find((x) => x.textContent === 'Save correction');
+    expect(save.disabled, 'a Save would send a hantei the server refuses on an untied line').toBe(true);
+  });
 });

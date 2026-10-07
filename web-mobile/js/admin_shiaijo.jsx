@@ -25,7 +25,7 @@ import { useDialogFocus } from './dialog_focus.jsx';
 // api_client.jsx does not apply to it — the same move admin_scoring_shared.jsx
 // already makes.
 import {
-    writeDidNotLand, writeWasSuperseded, writeWasRefusedForClock, CLOCK_SKEW_REASON_TEXT,
+    writeDidNotLand, writeKeepsEditorOpen, writeWasSuperseded, writeWasRefusedForClock, CLOCK_SKEW_REASON_TEXT,
     attemptScoreWrite, DOWNSTREAM_KNOCKOUT_PLAYED_CANCELLED, OVERRIDE_HELD_NOTICE,
     startWhileCorrectingMessage, correctWhileRunningMessage,
 } from './write_result.jsx';
@@ -1856,7 +1856,7 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
                                             // A landed Save correction ends the correction (a
                                             // write that did not land keeps it open, with the
                                             // editor's not-saved banner).
-                                            if (res && !writeDidNotLand(res) && patch && patch.status === "completed"
+                                            if (res && patch && patch.status === "completed" && !writeKeepsEditorOpen(patch, res)
                                                 && correctingKey && correctingKey === matchKey(selectedMatch) && mountedRef.current) {
                                                 setCorrectingKey(null);
                                             }

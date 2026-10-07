@@ -621,7 +621,7 @@ func TestAssignBracketSlots_StartAfterPoolPhase(t *testing.T) {
 	assert.Equal(t, "09:24", rounds[0][0].ScheduledAt, "bye takes the court start")
 	assert.Equal(t, "09:24", rounds[0][1].ScheduledAt)
 	assert.Equal(t, "09:30", rounds[0][2].ScheduledAt, "bye consumed nothing")
-	assert.Equal(t, "09:00", rounds[0][3].ScheduledAt, "a court absent from the map keeps the day start")
+	assert.Equal(t, "09:24", rounds[0][3].ScheduledAt, "a court with no pool bout waits for the latest pool end")
 
 	rounds = build()
 	assignBracketMatchSlots(rounds, comp, tournament, map[string]time.Time{"A": parseClockHHMM("08:00")})

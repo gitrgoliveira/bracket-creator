@@ -264,7 +264,7 @@ describe('the team editor shows the daihyosen verdict the server holds', () => {
     const { rerender, container } = render(
       <ScoreEditorModal match={teamMatch([bout()])} onClose={vi.fn()} onSubmit={vi.fn()} password="" />
     );
-    const armed = c => /Cancel hantei|SHIRO wins|AKA wins/.test(c.textContent);
+    const armed = c => /Cancel hantei|SHIRO \(White\) wins|AKA \(Red\) wins/.test(c.textContent);
     expect(armed(container)).toBe(false);
 
     await act(async () => { rerender(

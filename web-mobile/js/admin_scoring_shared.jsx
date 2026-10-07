@@ -13,7 +13,7 @@ import {
   courtBusyMessage, HELD_WRITE_DISCARD_LABEL, heldWriteDiscardConfirm, queuedNotice,
 } from './write_result.jsx';
 import { sameCompetitor } from './competitor_identity.jsx';
-import { sideWord } from './side_cell.jsx';
+import { sideWord, sideWithColour } from './side_cell.jsx';
 import { sideMarks, defaultWinMaru } from './bracket.jsx';
 import { NumberedName, numberFollowsName } from './numbered_name.jsx';
 import { withdrawnSideKey } from './ineligible_match.jsx';
@@ -814,8 +814,8 @@ function DecisionPrompt({ kind, sideA, sideB, askReason, onCancel, onSubmit, sub
   // Each side's words and competitor, in one place: Shiro is sideB, Aka is
   // sideA, as everywhere in the editors. The side word comes from sideWord.
   const sides = {
-    shiro: { colour: "White", name: sideB?.name },
-    aka: { colour: "Red", name: sideA?.name },
+    shiro: { name: sideB?.name },
+    aka: { name: sideA?.name },
   };
   const nameOf = (key) => sides[key].name || sideWord(key);
 
@@ -829,7 +829,7 @@ function DecisionPrompt({ kind, sideA, sideB, askReason, onCancel, onSubmit, sub
   const sideOption = (key) => (
     <label className={`radio-pill decision-prompt__side${side === key ? " is-active" : ""}`}>
       <input type="radio" name="decision-side" value={key} checked={side === key} onChange={() => setSide(key)} />
-      <span>{sideWord(key).toUpperCase()} ({sides[key].colour}){sides[key].name ? `: ${sides[key].name}` : ""}</span>
+      <span>{sideWithColour(key)}{sides[key].name ? `: ${sides[key].name}` : ""}</span>
     </label>
   );
 

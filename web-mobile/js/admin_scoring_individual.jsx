@@ -9,7 +9,7 @@ const { useState: useStateA, useEffect: useEffectA, useRef: useRefA, useMemo: us
 // daihyosen-specific; the rep pickers below stay gated on m.repIsTeam (a "-TB-"
 // tiebreaker is also a rep bout, just not a daihyosen).
 import { isPoolDaihyosenBout } from './pool_ids.jsx';
-import { SideLabel } from './side_cell.jsx';
+import { SideLabel, sideWithColour } from './side_cell.jsx';
 import { realIppons, hanteiTied, hanteiSlot, hanteiWinnerKey, sideSlotOrder, struckIppons } from './result_slot.jsx';
 import { sameCompetitor } from './competitor_identity.jsx';
 // Imported from the leaf, not read off `window`: this editor is ES-imported by
@@ -766,6 +766,12 @@ export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, on
   // It needs the tied scoreline the hantei row is shown on: a recorded hantei
   // on an untied line (legacy data) cannot be finished, as before.
   const canFinish = decidedByHantei ? (!!hanteiPick && aTotal === bTotal) : (!koTieBlocked && hasPointsOrDraw);
+  // Why Finish is off while hantei is armed: no winner picked yet, or a
+  // recorded hantei on an untied scoreline (legacy data). Shown under the
+  // hantei row, since a title never shows on a touchscreen.
+  const hanteiFinishBlock = !decidedByHantei ? "" : !hanteiPick
+    ? "Pick the hantei winner, then finish."
+    : aTotal !== bTotal ? "Hantei needs a tied score: cancel hantei, or correct the score." : "";
 
   // Finish guard (see TeamScoreEditorModal): one tap ARMS the button — its label
   // becomes an explicit "Tap again to finish" INSTRUCTION (not a verdict), so the
@@ -1180,8 +1186,10 @@ export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, on
               {/* A tied match may be decided by referee hantei. The winner is
                   recorded with the hantei flag, distinguishable from an
                   ippon-derived win for stats, audit, and Excel. */}
-              {aTotal === bTotal && (
-                <div className="hantei-row" data-testid="scoring-modal-hantei-row" style={{ display: "flex", gap: 8, alignItems: "center", padding: "6px 8px", background: "var(--card-2, #fafafa)", borderRadius: 6 }}>
+              {/* Kept while armed on an untied scoreline (a legacy record),
+                  so its Cancel stays reachable: the grid is locked while armed. */}
+              {(aTotal === bTotal || decidedByHantei) && (
+                <div className="hantei-row" data-testid="scoring-modal-hantei-row" style={{ display: "flex", flexWrap: "wrap", gap: 8, alignItems: "center", padding: "6px 8px", background: "var(--card-2, #fafafa)", borderRadius: 6 }}>
                   <span style={{ fontWeight: 600, color: "var(--ink-2)" }}>Hantei</span>
                   <span style={{ color: "var(--ink-3)" }}>(judges' decision)</span>
                   {!decidedByHantei && (
@@ -1211,8 +1219,11 @@ export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, on
                     </button>
                   )}
                   {decidedByHantei && (
-                    <div style={{ marginLeft: "auto", display: "flex", gap: 6 }}>
-                      {/* The recorded side renders primary, like the team
+                    <div style={{ marginLeft: "auto", display: "flex", flexWrap: "wrap", gap: 6 }}>
+                      {/* Each button names its side's colour and competitor
+                          (sideWithColour), so an operator who does not know
+                          SHIRO and AKA can still tell them apart.
+                          The recorded side renders primary, like the team
                           panel: this row is the verdict's second channel, so
                           it must SHOW the verdict, not just offer buttons —
                           on a drifted 2-2 the dropped loose mark makes this
@@ -1225,7 +1236,7 @@ export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, on
                         onClick={() => setHanteiPick("b")}
                         disabled={submitting || decisionSubmitting}
                       >
-                        SHIRO wins
+                        {sideWithColour("shiro")} wins{m.sideB?.name ? `: ${m.sideB.name}` : ""}
                       </button>
                       <button
                         type="button"
@@ -1235,7 +1246,7 @@ export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, on
                         onClick={() => setHanteiPick("a")}
                         disabled={submitting || decisionSubmitting}
                       >
-                        AKA wins
+                        {sideWithColour("aka")} wins{m.sideA?.name ? `: ${m.sideA.name}` : ""}
                       </button>
                       <button
                         type="button"
@@ -1246,6 +1257,11 @@ export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, on
                       >
                         Cancel
                       </button>
+                    </div>
+                  )}
+                  {hanteiFinishBlock && (
+                    <div data-testid="scoring-modal-hantei-hint" aria-live="polite" style={{ flexBasis: "100%", fontSize: 12, color: "var(--ink-3)" }}>
+                      {hanteiFinishBlock}
                     </div>
                   )}
                 </div>
@@ -1430,7 +1446,7 @@ export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, on
                   if (!isComplete && !confirmFinish(ev)) return;
                   doSubmit(() => (isComplete ? onSubmit : onSubmitAndNext)(buildPatch("completed")));
                 }} disabled={submitting || !canFinish}
-                  title={koTieBlocked ? KO_TIE_REASON : undefined}>
+                  title={koTieBlocked ? KO_TIE_REASON : hanteiFinishBlock || undefined}>
                   {submitting ? "Saving…" : koTieBlocked ? "Needs a winner" : isComplete ? "Save correction" : finishArmed ? "Tap again to finish →" : "Finish + Start Next →"}
                 </button>
               ) : (
@@ -1439,7 +1455,7 @@ export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, on
                   if (!isComplete && !confirmFinish(ev)) return;
                   doSubmit(() => onSubmit(buildPatch("completed")));
                 }} disabled={submitting || !canFinish}
-                  title={koTieBlocked ? KO_TIE_REASON : undefined}>
+                  title={koTieBlocked ? KO_TIE_REASON : hanteiFinishBlock || undefined}>
                   {submitting ? "Saving…" : koTieBlocked ? "Needs a winner" : isComplete ? "Save correction" : finishArmed ? "Tap again to finish" : "Finish"}
                 </button>
               )}

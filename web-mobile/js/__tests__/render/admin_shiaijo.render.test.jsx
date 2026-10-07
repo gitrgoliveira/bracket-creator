@@ -1627,7 +1627,7 @@ describe('a running match and an open correction never coexist on the console (b
       expect(onEditScore).not.toHaveBeenCalled();
       await act(async () => { c.utils.getByRole('button', { name: /back to court/i }).click(); });
       expect(heading(c)).not.toContain('Correcting');
-      expect(alertsWith(c, 'Finish or cancel the correction')).toHaveLength(0);
+      expect(alertsWith(c, 'Save the correction of')).toHaveLength(0);
       await tapUpNextStart(c);
       expect(onEditScore).toHaveBeenCalledTimes(1);
       expect(onEditScore.mock.calls[0][1]).toBe('m2');
@@ -1666,6 +1666,26 @@ describe('a running match and an open correction never coexist on the console (b
       await act(async () => { await probe.props.onSubmit({ status: 'running' }); });
       expect(heading(c3)).toContain('Correcting');
     } finally { c3.restore(); }
+  });
+
+  it('g) a Save correction answered after another correction was opened leaves that one open', async () => {
+    let answer;
+    const onEditScore = vi.fn().mockImplementation(() => new Promise((r) => { answer = r; }));
+    const c = await mountCourt([
+      courtMatch('m1', 'completed', { modifiedAt: 1000 }),
+      courtMatch('m3', 'completed', { modifiedAt: 1100 }),
+    ], { onEditScore });
+    try {
+      await tapCorrect(c, 'Aka m1');
+      const saveM1 = probe.props.onSubmit;
+      let saving;
+      await act(async () => { saving = saveM1({ status: 'completed' }); });
+      await tapCorrect(c, 'Aka m3');
+      expect(c.editorMatch()).toBe('m3');
+      await act(async () => { answer({ applied: true }); await saving; });
+      expect(c.editorMatch(), "m1's answer does not close m3's correction").toBe('m3');
+      expect(heading(c)).toContain('Correcting');
+    } finally { c.restore(); }
   });
 
   it('e) a landed decision on a correction (onClose) ends it; with no correction onClose changes nothing', async () => {

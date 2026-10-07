@@ -3570,8 +3570,12 @@ func (e *Engine) updatePoolMatchCourt(compId, matchId, newCourt string) error {
 		if !comp.IsKnockoutEnabled() {
 			return nil
 		}
+		// The move is what the operator asked for; the knockout push only
+		// follows it. A tournament that cannot be read leaves the knockout
+		// times as they are rather than refusing the move.
 		if tournErr != nil {
-			return tournErr
+			log.Printf("engine: court move of %s/%s kept the knockout times: tournament unreadable: %v", compId, matchId, tournErr)
+			return nil
 		}
 		matches, err := tx.LoadPoolMatches(compId)
 		if err != nil {

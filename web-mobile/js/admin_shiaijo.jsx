@@ -1347,6 +1347,9 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
     // the live bout, finished via End match / Finish or sent back to the
     // queue like any other.
     const stopCorrecting = () => { setCorrectingKey(null); };
+    // End the correction of the match keyed `key` only if it is still the one
+    // open: a write's answer may arrive after another correction was opened.
+    const endCorrectionOf = (key) => { setCorrectingKey((k) => (k === key ? null : k)); };
 
     // Call to court: optional. Broadcasts a tournament announcement so the
     // competitors (and anyone watching the public app) are notified they're
@@ -1845,20 +1848,22 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
                                     // (which ends it) and the daihyosen add/remove
                                     // on a running match, where nothing is open: a
                                     // no-op.
-                                    onClose={() => {
-                                        if (correctingKey && correctingKey === matchKey(selectedMatch)) setCorrectingKey(null);
-                                    }}
+                                    // Both close only THIS match's correction: the answer can
+                                    // arrive after the operator opened a correction on another
+                                    // match, so the key is captured before the write and
+                                    // compared against the current one (endCorrectionOf).
+                                    onClose={() => endCorrectionOf(matchKey(selectedMatch))}
                                     started={isStartedSnapshot(selectedMatch)}
                                     canClose={false}
                                     onSubmit={async (patch) => {
+                                        const key = matchKey(selectedMatch);
                                         try {
                                             const res = await onEditScore(selectedMatch.compId, selectedMatch.id, patch, selectedMatch);
                                             // A landed Save correction ends the correction (a
                                             // write that did not land keeps it open, with the
                                             // editor's not-saved banner).
-                                            if (res && patch && patch.status === "completed" && !writeKeepsEditorOpen(patch, res)
-                                                && correctingKey && correctingKey === matchKey(selectedMatch) && mountedRef.current) {
-                                                setCorrectingKey(null);
+                                            if (res && patch && patch.status === "completed" && !writeKeepsEditorOpen(patch, res) && mountedRef.current) {
+                                                endCorrectionOf(key);
                                             }
                                             // Optimistically advance the local bracket so an offline court
                                             // sees the next match resolve (reconciled by refetch online).

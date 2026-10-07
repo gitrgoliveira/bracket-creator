@@ -833,9 +833,10 @@ export function courtBusyMessage({ court, label }) {
 
 // The court console never holds a running match and an open correction at
 // once (operator ruling 2026-09-27, bc-crpn). Each refused tap names the other
-// one, with the label string the caller built (scoreRowMatchName).
+// one, with the label string the caller built (scoreRowMatchName), and names
+// the console's own buttons: there is no "Cancel" there.
 export function startWhileCorrectingMessage({ label }) {
-    return `Finish or cancel the correction of ${label} first, then start this match.`;
+    return `Save the correction of ${label}, or leave it with Back to court, then start this match.`;
 }
 
 export function correctWhileRunningMessage({ court, label }) {

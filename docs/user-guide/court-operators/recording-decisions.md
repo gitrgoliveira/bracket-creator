@@ -42,7 +42,7 @@ Encho is the extra period played when a match is level at the end of regulation 
 
 An individual knockout match cannot be finished level. While the score is tied, the **Finish** button reads **Needs a winner** instead: fight encho, then record a hantei if the competitors are still level after it.
 
-To record a hantei, tap **Decide by hantei**, pick the winning side with **SHIRO wins** or **AKA wins**, then tap **Finish** and tap it again to confirm. Picking a side on its own records nothing, so a slip of the thumb between the two buttons can be put right before anything is saved.
+To record a hantei, tap **Decide by hantei** and pick the winning side. Each button names the side's colour and competitor, for example **SHIRO (White) wins: Tanaka** and **AKA (Red) wins: Yamada**. Then finish the match as usual: **Finish** (on the court console, **Finish + Start Next**) and tap it again to confirm, or **Save correction** when you are correcting a result. Picking a side on its own records nothing, so a slip of the thumb between the two buttons can be put right before anything is saved.
 
 In the score editor, open the **Overtime** control and tick **Encho started**. A counter appears so you can record how many overtime periods were fought, using the **+** and **-** buttons. The counter starts at 1 and has no upper limit. How many periods are fought, and how a match still level after them is finally settled, is the shimpan's call. That may be a judges' decision for an individual bout, or a daihyosen for a team encounter. Record what actually happened on court, however many periods that took.
 

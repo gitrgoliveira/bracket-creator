@@ -63,6 +63,13 @@ const armAndPick = async (testid) => {
 };
 
 describe('hantei side buttons only pick (bc-htsd)', () => {
+  it('each button names its colour and competitor, for an operator who does not know SHIRO and AKA', async () => {
+    render(<ScoreEditorModal match={tied()} onClose={vi.fn()} onSubmit={vi.fn()} password="" />);
+    await click(screen.getByTestId('scoring-modal-hantei-arm'));
+    expect(screen.getByTestId('scoring-modal-hantei-shiro').textContent).toBe('SHIRO (White) wins: Tanaka');
+    expect(screen.getByTestId('scoring-modal-hantei-aka').textContent).toBe('AKA (Red) wins: Yamada');
+  });
+
   it('picking a side commits nothing; Finish, tapped twice, commits exactly the pick', async () => {
     vi.useFakeTimers();
     const onSubmit = vi.fn().mockResolvedValue(undefined);
@@ -109,8 +116,10 @@ describe('hantei side buttons only pick (bc-htsd)', () => {
     await click(screen.getByTestId('scoring-modal-hantei-arm'));
     expect(finishBtn().disabled).toBe(true);
     expect(finishBtn().textContent).not.toMatch(/Needs a winner/);
+    expect(screen.getByTestId('scoring-modal-hantei-hint').textContent, 'a disabled Finish says why').toBe('Pick the hantei winner, then finish.');
     await click(screen.getByTestId('scoring-modal-hantei-shiro'));
     expect(finishBtn().disabled).toBe(false);
+    expect(screen.queryByTestId('scoring-modal-hantei-hint')).toBeNull();
   });
 
   it('a verdict recorded on another device is adopted as the pick', async () => {
@@ -179,8 +188,12 @@ describe('hantei side buttons only pick (bc-htsd)', () => {
     render(<ScoreEditorModal
       match={tied({ status: 'completed', ipponsA: ['M'], ipponsB: [], decidedByHantei: true, winner: { id: 'p1', name: 'Yamada' } })}
       onClose={vi.fn()} onSubmit={onSubmit} password="" />);
-    expect(screen.queryByTestId('scoring-modal-hantei-row')).toBeNull();
     const save = [...document.querySelectorAll('.score-nav button')].find((x) => x.textContent === 'Save correction');
     expect(save.disabled, 'a Save would send a hantei the server refuses on an untied line').toBe(true);
+    // Not stuck: the row stays with its Cancel and says why, so the
+    // operator can drop the hantei and correct the result.
+    expect(screen.getByTestId('scoring-modal-hantei-hint').textContent).toMatch(/needs a tied score/);
+    await click(screen.getByTestId('scoring-modal-hantei-cancel'));
+    expect(screen.queryByTestId('scoring-modal-hantei-row'), 'untied and not armed: no hantei row').toBeNull();
   });
 });

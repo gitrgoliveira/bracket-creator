@@ -8,7 +8,7 @@ import { startWhileCorrectingMessage, correctWhileRunningMessage, courtBusyMessa
 describe('startWhileCorrectingMessage', () => {
     it('names the correction and the remedy', () => {
         expect(startWhileCorrectingMessage({ label: 'Pool A · Match 2 · Kato vs Sato' }))
-            .toBe('Finish or cancel the correction of Pool A · Match 2 · Kato vs Sato first, then start this match.');
+            .toBe('Save the correction of Pool A · Match 2 · Kato vs Sato, or leave it with Back to court, then start this match.');
     });
 });
 

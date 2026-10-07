@@ -53,7 +53,7 @@ import { useDebouncedRunningWrite, SyncStatusPill, useChangedGroups, useKeptInHi
 import { MatchHistoryDisclosure } from './match_history_view.jsx';
 import { serverNowMs } from './server_clock.jsx';
 import { publishHeight } from './published_height.jsx';
-import { SideLabel } from './side_cell.jsx';
+import { SideLabel, sideWithColour } from './side_cell.jsx';
 
 // Imported from the leaf, not read off `window`, for the same reason
 // admin_scoring_shared.jsx does it: write_result.jsx is import-only, and this
@@ -3578,8 +3578,8 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
 
   // left = SHIRO (White), right = AKA (Red)
   const teamSides = [
-    { key: "b", name: m.sideB?.name || m.sideB, number: m.sideB?.number, label: "SHIRO (White)", color: "shiro", iv: ivB, pw: pwB },
-    { key: "a", name: m.sideA?.name || m.sideA, number: m.sideA?.number, label: "AKA (Red)", color: "aka", iv: ivA, pw: pwA },
+    { key: "b", name: m.sideB?.name || m.sideB, number: m.sideB?.number, label: sideWithColour("shiro"), color: "shiro", iv: ivB, pw: pwB },
+    { key: "a", name: m.sideA?.name || m.sideA, number: m.sideA?.number, label: sideWithColour("aka"), color: "aka", iv: ivA, pw: pwA },
   ];
 
   // a11y: label the dialog with the match/court context (mirrors the
@@ -4407,11 +4407,11 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
                   </button>
                 )}
                 {!selfReport && daihyosenHanteiArmed && (
-                  <div style={{ marginLeft: "auto", display: "flex", gap: 6 }}>
+                  <div style={{ marginLeft: "auto", display: "flex", flexWrap: "wrap", gap: 6 }}>
                     <button type="button" className={`btn btn--sm ${daihyosenHantei === "b" ? "btn--primary" : ""}`} data-testid="team-daihyosen-hantei-shiro"
-                      onClick={() => pickDaihyosenHantei("b")} disabled={submitting || decisionSubmitting}>SHIRO wins</button>
+                      onClick={() => pickDaihyosenHantei("b")} disabled={submitting || decisionSubmitting}>{sideWithColour("shiro")} wins</button>
                     <button type="button" className={`btn btn--sm ${daihyosenHantei === "a" ? "btn--primary" : ""}`} data-testid="team-daihyosen-hantei-aka"
-                      onClick={() => pickDaihyosenHantei("a")} disabled={submitting || decisionSubmitting}>AKA wins</button>
+                      onClick={() => pickDaihyosenHantei("a")} disabled={submitting || decisionSubmitting}>{sideWithColour("aka")} wins</button>
                     <button type="button" className="btn btn--ghost btn--sm" data-testid="team-daihyosen-hantei-cancel"
                       onClick={clearHantei} disabled={submitting || decisionSubmitting}>Cancel</button>
                   </div>

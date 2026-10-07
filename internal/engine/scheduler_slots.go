@@ -312,12 +312,20 @@ func pushKnockoutPastPools(b *state.Bracket, comp *state.Competition, tournament
 			latest = t
 		}
 	}
-	byCourt := map[string][]*state.BracketMatch{}
+	// A row whose time does not parse is left alone, as poolPhaseEndByCourt
+	// leaves it out: parseClockHHMM would read it as 09:00 and re-time it.
+	type timed struct {
+		m  *state.BracketMatch
+		at time.Time
+	}
+	byCourt := map[string][]timed{}
 	started := map[string]bool{}
 	visit := func(m *state.BracketMatch) {
 		switch {
 		case m.Status == state.MatchStatusScheduled && m.ScheduledAt != "":
-			byCourt[m.Court] = append(byCourt[m.Court], m)
+			if at, err := time.Parse(scheduleClockLayout, m.ScheduledAt); err == nil {
+				byCourt[m.Court] = append(byCourt[m.Court], timed{m, at})
+			}
 		case m.Status != state.MatchStatusScheduled && m.MatchNumber > 0:
 			started[m.Court] = true
 		}
@@ -342,21 +350,20 @@ func pushKnockoutPastPools(b *state.Bracket, comp *state.Competition, tournament
 		if !ok {
 			poolEnd = latest
 		}
-		sort.SliceStable(ms, func(i, j int) bool {
-			return parseClockHHMM(ms[i].ScheduledAt).Before(parseClockHHMM(ms[j].ScheduledAt))
-		})
-		if !parseClockHHMM(ms[0].ScheduledAt).Before(poolEnd) {
+		sort.SliceStable(ms, func(i, j int) bool { return ms[i].at.Before(ms[j].at) })
+		if !ms[0].at.Before(poolEnd) {
 			continue
 		}
 		cursor := poolEnd
-		for _, m := range ms {
-			t := parseClockHHMM(m.ScheduledAt)
+		for _, x := range ms {
+			t := x.at
+			// Only a match the push moves is moved past lunch: a later
+			// time the operator set, even one inside lunch, stays theirs.
 			if t.Before(cursor) {
-				t = cursor
+				t = skipCeremonyBlocks(cursor, lunchStart, lunchMin)
 			}
-			t = skipCeremonyBlocks(t, lunchStart, lunchMin)
-			if at := t.Format(scheduleClockLayout); at != m.ScheduledAt {
-				m.ScheduledAt = at
+			if !t.Equal(x.at) {
+				x.m.ScheduledAt = t.Format(scheduleClockLayout)
 				moved = true
 			}
 			cursor = t.Add(slot)

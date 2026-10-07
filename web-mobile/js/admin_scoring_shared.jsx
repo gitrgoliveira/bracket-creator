@@ -6,7 +6,7 @@
 const { useState: useStateA, useEffect: useEffectA, useRef: useRefA, useMemo: useMemoA, useLayoutEffect: useLayoutEffectA } = React;
 const Icon = window.Icon;
 
-import { DAIHYOSEN_POSITION, scoreRowMatchLabel } from './pool_ids.jsx';
+import { DAIHYOSEN_POSITION, scoreRowMatchName } from './pool_ids.jsx';
 import {
   writeDidNotLand, writeRetryable, decisionWord,
   attemptScoreWrite, DOWNSTREAM_KNOCKOUT_PLAYED_CANCELLED, DOWNSTREAM_KNOCKOUT_REOPEN_CANCELLED, downstreamKnockoutReopenedNotice,
@@ -2068,21 +2068,17 @@ function RecordedWithdrawal({ match, ctl, disabled = false, singleBout = false, 
           )}
           {laterDefaultWins && laterDefaultWins.length > 0 && (
             <div data-testid="clear-withdrawal-later-matches" style={{ margin: "6px 0 0" }}>
-              {/* bc-cse: named by scoreRowMatchLabel first -- a pairing alone
-                  cannot be found in the scores list, which is where the
+              {/* bc-cse: named by the match's row label first -- a pairing
+                  alone cannot be found in the scores list, which is where the
                   operator has to go to reopen it -- with the pairing appended
-                  the same way ReopenFeedback's own fetched blockerLabel joins
-                  a lead onto a pairing ("Pool A · Match 2 · Shiro vs Aka"),
-                  so the two operator lines that name a match this way agree.
-                  Falls back to the bare pairing when the match carries no
-                  number at all (see scoreRowMatchLabel's own doc). */}
+                  ("Pool A · Match 2 · Shiro vs Aka"). scoreRowMatchName owns
+                  that composition, shared with the court console's refusal
+                  notices (bc-crpn). */}
               {laterDefaultWins.map((x) => {
-                const label = scoreRowMatchLabel(x);
-                const pairing = `${x.sideB?.name || "Shiro"} vs ${x.sideA?.name || "Aka"}`;
                 const noun = decisionWord(x.decision) || "decision";
                 return (
                   <p key={x.id} data-testid={`clear-withdrawal-later-match-${x.id}`} style={{ margin: "4px 0 0" }}>
-                    {label ? `${label} · ${pairing}` : pairing} keeps its {noun}; reopen it to fight it.
+                    {scoreRowMatchName(x)} keeps its {noun}; reopen it to fight it.
                   </p>
                 );
               })}

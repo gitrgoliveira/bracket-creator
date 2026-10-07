@@ -178,8 +178,9 @@ describe('the editor shows the verdict the server holds', () => {
   });
 
   it('cannot be finished past a verdict without ruling on it', async () => {
-    // The adopted verdict locks scoring: Finish is disabled while it stands,
-    // so no write can quietly land a different result over it.
+    // The adopted verdict locks scoring, and its side is adopted as the pick
+    // (bc-htsd): Finish commits that verdict and nothing else, so no write can
+    // quietly land a different result over it.
     const onSubmit = vi.fn();
     const { rerender, container } = render(
       <ScoreEditorModal match={tiedRunningMatch()} onClose={vi.fn()} onSubmit={onSubmit} password="" />
@@ -188,9 +189,11 @@ describe('the editor shows the verdict the server holds', () => {
       <ScoreEditorModal match={withVerdict()} onClose={vi.fn()} onSubmit={onSubmit} password="" />
     ); });
 
-    const btn = await finish(container);
-    expect(btn.disabled).toBe(true);
-    expect(onSubmit).not.toHaveBeenCalled();
+    await finish(container);
+    expect(onSubmit).toHaveBeenCalledTimes(1);
+    const patch = onSubmit.mock.calls[0][0];
+    expect(patch.decidedByHantei).toBe(true);
+    expect(patch.winner).toMatchObject({ id: 'p1', name: 'Yamada' });
   });
 
   it('adopting is not an unsaved change of the operators', async () => {

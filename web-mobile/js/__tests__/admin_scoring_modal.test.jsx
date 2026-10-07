@@ -1130,7 +1130,8 @@ describe('subBoutHasBeenPlayed (drops untouched kachinuki bouts)', () => {
 // Item 7: hantei and fusenpai must route through onSubmitAndNext/onAfterDecision
 // so the next match on the same court is started without an extra operator tap.
 describe('item 7: non-points decisions advance to next match', () => {
-  // submitHantei is component-internal, but the routing logic
+  // A hantei is committed by Finish (bc-htsd; hantei_single_tap.render.test.jsx
+  // pins it through the real editor), whose routing logic
   //   `(!isComplete && onSubmitAndNext) ? onSubmitAndNext: onSubmit`
   // is a pure predicate we can test directly.
   it('routes hantei to onSubmitAndNext when provided and match is not a correction', () => {

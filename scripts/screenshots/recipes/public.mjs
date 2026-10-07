@@ -58,13 +58,16 @@ async function armEncho(page) {
 }
 
 // Settle a TIED match by referee decision. The individual editor keeps this
-// behind a two-step control (admin_scoring_individual.jsx:946-1003): "Decide by
-// hantei..." arms it, then a SHIRO/AKA button commits - and that commit is also
-// what advances to the next match, exactly as Finish does. The verdict is
-// recorded as an "Ht" ippon in the winner's free slot, never as a centre mark.
+// behind a pick and a commit (admin_scoring_individual.jsx): "Decide by
+// hantei..." arms it, a SHIRO/AKA button only PICKS the winning side, and
+// Finish commits it under the usual two-tap guard (finishMatch waits out the
+// bounce window, TAP_DWELL_MS). That commit also advances to the next match,
+// exactly as Finish does. The verdict is recorded as an "Ht" ippon in the
+// winner's free slot, never as a centre mark.
 async function decideByHantei(page, side) {
   await page.locator('[data-testid="scoring-modal-hantei-arm"]').click();
   await page.locator(`[data-testid="scoring-modal-hantei-${side}"]`).click();
+  await finishMatch(page);
 }
 
 export const families = {

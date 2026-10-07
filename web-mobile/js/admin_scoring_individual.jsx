@@ -166,9 +166,13 @@ export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, on
   // depending on which screen you look at is the worse failure. Adopting means
   // an explicit `false` below is always the operator ruling on something in
   // front of them.
+  // bc-htsd: the side picked for the verdict is adopted with it, keyed on the
+  // two VALUES (never on m), so a local pick stands until the server changes.
+  const recordedHtKey = hanteiRecorded ? hanteiWinnerKey(m) : "";
+  const [hanteiPick, setHanteiPick] = useStateA(recordedHtKey);
   useAdoptFromServer({
-    signature: hanteiRecorded,
-    apply: () => setDecidedByHantei(hanteiRecorded),
+    signature: JSON.stringify([hanteiRecorded, recordedHtKey]),
+    apply: () => { setDecidedByHantei(hanteiRecorded); setHanteiPick(recordedHtKey); },
   });
   // Which side ("a"/"b"/"") holds a RECORDED hantei verdict, for the display
   // chip in the slot grid. Gated on the SERVER's verdict — not the local armed
@@ -177,7 +181,6 @@ export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, on
   // side. Empty when the winner is unattributable (same-name pair: mirror the
   // scoreboard, mark neither).
   // The tie gate is applied at the render site against the CURRENT pts.
-  const recordedHtKey = hanteiRecorded ? hanteiWinnerKey(m) : "";
   const [submitting, setSubmitting] = useStateA(false);
   // F5: pending-write state: set when a terminal submit resolves { queued:true }
   // (offline / transient failure). While pending the modal stays open and shows a
@@ -209,14 +212,11 @@ export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, on
   const [decisionErr, setDecisionErr] = useStateA("");
   // Audit reason collected when correcting a completed match. correctionPrompt
   // is the open ReasonPrompt (null when closed); correctionReason carries the
-  // confirmed string. bc-htcr: the prompt holds the write it confirms, handed
-  // the reason. A null action is the default correction (Save correction,
-  // Enter: the buildPatch("completed") write); submitHantei passes its own,
-  // because a hantei verdict is not a buildPatch write. Wrapped in an object:
-  // a bare function handed to a state setter would run as an updater.
+  // confirmed string. The prompt confirms the one correction write,
+  // buildPatch("completed") (a hantei verdict included, bc-htsd).
   const [correctionReason, setCorrectionReason] = useStateA("");
   const [correctionPrompt, setCorrectionPrompt] = useStateA(null);
-  const askCorrectionReason = (action = null) => setCorrectionPrompt({ action });
+  const askCorrectionReason = () => setCorrectionPrompt(true);
   // mp-62vr: for a team daihyosen/tiebreaker rep bout the sides are TEAM names;
   // the operator picks which player each team fields from its roster. repPlayerA
   // = Aka (sideA), repPlayerB = Shiro (sideB). Only rendered when m.repIsTeam.
@@ -302,8 +302,7 @@ export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, on
   // Item 7: a decision (fusenpai, kiken, or any future non-points decision)
   // routes through onAfterDecision when the host page provides it (and this
   // isn't a correction) so the court advances to the next match: mirroring
-  // the Finish + Start Next flow. Hantei advance is handled separately in
-  // submitHantei below.
+  // the Finish + Start Next flow. A hantei is committed by Finish (bc-htsd).
   const submitDecision = makeSubmitDecision({
     match: m, enchoPeriodCount, password, mountedRef,
     setDecisionSubmitting, setDecisionErr, setDecisionPromptKind,
@@ -358,7 +357,7 @@ export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, on
     // The recorded verdict comes back too: a hantei armed during the removal
     // would otherwise outlive the tie it was armed on (the circles return,
     // the hantei row and its Cancel go, and every control stays disabled).
-    onUndo: () => { applyServerScore(); setDecidedByHantei(hanteiRecorded); },
+    onUndo: () => { applyServerScore(); setDecidedByHantei(hanteiRecorded); setHanteiPick(recordedHtKey); },
   });
   const recordedWithdrawnKey = recordedWithdrawal ? withdrawnKeyOf(m) : "";
   const recordedLockedKey = recordedWithdrawnKey === "a" ? "b" : recordedWithdrawnKey === "b" ? "a" : "";
@@ -431,8 +430,8 @@ export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, on
   // updater EnchoControl's stepper hands over), then the save it schedules, as
   // for a point. The count adopted from the server does not come through here.
   const changeEnchoPeriodCount = (v) => { setEnchoPeriodCount(v); markScoringDirty(); };
-  // decidedByHantei is only set via the dedicated submitHantei path
-  // (SHIRO/AKA hantei buttons). The regular Finish/Enter buildPatch
+  // decidedByHantei rides only a completed buildPatch with a picked side
+  // (bc-htsd). A re-edit without hantei armed
   // explicitly clears the flag (sends false) when the match was previously
   // hantei-decided, so a re-edit via the normal flow removes the stale Ht
   // marker rather than preserving it on the server.
@@ -470,6 +469,19 @@ export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, on
     // running and scheduled shapes never carry it (the server reads it on a
     // completed correction alone).
     const completedTail = { ...enchoBlock(), ...hanteiClear, ...correctionBlock, ...clearWithdrawalBlock, ...repBlock };
+    // bc-htsd: a hantei verdict is committed by Finish, never by the side
+    // buttons (which only pick). Only a completed target carries the flag, so
+    // the running autosave body never does. The entered ippons stay (a 1-1
+    // score stays visible beside the Ht mark).
+    if (decidedByHantei && hanteiPick) {
+      return {
+        winner: hanteiPick === "a" ? m.sideA : m.sideB,
+        ipponsA: realIppons(aPts).slice(0, MAX_IPPONS_PER_SIDE),
+        ipponsB: realIppons(bPts).slice(0, MAX_IPPONS_PER_SIDE),
+        hansokuA: aFouls, hansokuB: bFouls, status: "completed",
+        ...completedTail, decidedByHantei: true,
+      };
+    }
     if (isDrawToggled) return { winner: null, ipponsA: [], ipponsB: [], hansokuA: aFouls, hansokuB: bFouls, status: "completed", score: { type: "hikiwake", winnerPts: 0, loserPts: 0, fouls, corrected: isComplete }, ...completedTail };
     // ippon. Hansoku Hs are already physically present in the pts arrays
     // (folded in by applyFoulIncrement at the 2-foul boundary), so no
@@ -490,50 +502,6 @@ export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, on
   _autosaveSeenStampRef.current = m.modifiedAt || 0;
   _autosaveBuildPatchRef.current = buildPatch;
   _autosaveOnSubmitRef.current = onSubmit;
-
-  // Hantei submit: tied scoreline (with or without encho). Operator picks a
-  // side; we send a completed patch with the chosen side as winner, the
-  // *entered* ippon arrays preserved (so a 1–1 score stays visible alongside the Ht
-  // marker: clearing them would lose the tied score history that the
-  // viewer/Excel renderers display under the hantei suffix), and the
-  // decidedByHantei flag set. This is a dedicated affordance because the
-  // regular flow assumes an ippon-derived win.
-  //
-  // Item 7: mirror the Finish button's isComplete ? onSubmit: onSubmitAndNext
-  // choice so a hantei finish also advances to the next match on the same
-  // court (when onSubmitAndNext is available and this isn't a correction).
-  const submitHantei = (winnerSide) => {
-    const winner = winnerSide === "a" ? m.sideA : m.sideB;
-    const aFinal = realIppons(aPts).slice(0, MAX_IPPONS_PER_SIDE);
-    const bFinal = realIppons(bPts).slice(0, MAX_IPPONS_PER_SIDE);
-    const patch = {
-      winner,
-      ipponsA: aFinal,
-      ipponsB: bFinal,
-      hansokuA: aFouls,
-      hansokuB: bFouls,
-      status: "completed",
-      ...enchoBlock(),
-      decidedByHantei: true,
-      // A hantei is a real result too: after Remove withdrawal it replaces
-      // the ruling exactly as Save correction's own write does.
-      ...clearWithdrawalBlock,
-    };
-    // bc-htcr: a hantei verdict on a completed match is a correction like
-    // any other, so it carries the audit reason the server requires, and
-    // asks for one first when none has been given, exactly as Save
-    // correction does. Without this the write was refused and the wrong
-    // verdict stood, with no other way to change it (Save correction is off
-    // while the hantei is set).
-    if (isComplete && !correctionReason) {
-      askCorrectionReason((r) => doSubmit(() => onSubmit(claimChanged({ ...patch, correctionReason: r }))));
-      return undefined;
-    }
-    if (isComplete) patch.correctionReason = correctionReason;
-    const submitFn = (!isComplete && onSubmitAndNext) ? onSubmitAndNext : onSubmit;
-    const claimed = claimChanged(patch);
-    return doSubmit(() => submitFn(claimed));
-  };
 
   const doSubmit = async (fn) => {
     cancelScoringDebounce(); // C1: cancel any pending autosave before explicit submit
@@ -685,7 +653,7 @@ export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, on
     // the primary cells AND the score.ippons fallback through realIppons), so
     // raw and filtered agree here and the mark lands in a genuinely free cell.
     const htSlot = hanteiSlot(
-      decidedByHantei && hanteiTied(aPts, bPts) && recordedHtKey === s.key, s.pts);
+      decidedByHantei && hanteiTied(aPts, bPts) && hanteiPick === s.key, s.pts);
     // sideSlotOrder: the same visual mirror the read-only scoreboard and the
     // team editor apply, so DOM order is visual order and no CSS mirror is
     // needed here any more (result_slot.jsx owns the rule).
@@ -755,10 +723,9 @@ export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, on
   // Marks a tap can clear: under a recorded withdrawal, the withdrawer's only.
   const clearableMarks = withdrawerPts ? realIppons(withdrawerPts).length : aTotal + bTotal;
 
-  // While hantei is armed the operator must commit via the dedicated SHIRO /
-  // AKA buttons (which route through submitHantei). Disable the regular
-  // Finish/Enter so the patch can't accidentally mark an ippon-decided match
-  // as hantei-decided. Keyboard Enter is also gated on canFinish.
+  // While hantei is armed the SHIRO / AKA buttons only PICK a side and
+  // Finish/Enter commit it (canFinish needs the pick); the scoring grid is
+  // locked so the patch can't mark an ippon-decided match as hantei-decided.
   // A knockout match can't end in a draw (it's decided by encho then hantei),
   // so the hikiwake toggle is suppressed in the bracket phase: m.phase ===
   // "bracket" is the in-modal KO signal (see TeamScoreEditorModal).
@@ -795,7 +762,8 @@ export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, on
   const KO_TIE_REASON = selfReport
     ? "Needs a winner: fight encho, then ask the organizer for a hantei if still tied."
     : "Needs a winner: fight encho, then record hantei if still tied.";
-  const canFinish = !decidedByHantei && !koTieBlocked && hasPointsOrDraw;
+  // bc-htsd: hantei is valid at 0-0, so the picked side stands in for points.
+  const canFinish = decidedByHantei ? !!hanteiPick : (!koTieBlocked && hasPointsOrDraw);
 
   // Finish guard (see TeamScoreEditorModal): one tap ARMS the button — its label
   // becomes an explicit "Tap again to finish" INSTRUCTION (not a verdict), so the
@@ -807,7 +775,7 @@ export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, on
   // bc-dtfn: the arm-then-confirm guard with a dwell, so the bounce of the
   // arming tap cannot commit (tap_guard.jsx).
   const { armed: finishArmed, setArmed: setFinishArmed, confirm: confirmFinish } = useArmedConfirm();
-  useEffectA(() => { setFinishArmed(false); }, [aTotal, bTotal, isDrawToggled]);
+  useEffectA(() => { setFinishArmed(false); }, [aTotal, bTotal, isDrawToggled, hanteiPick, decidedByHantei]);
 
   // "Has the OPERATOR changed anything", which gates the discard prompt — so
   // the verdict term compares against what the SERVER holds, not against a
@@ -824,6 +792,7 @@ export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, on
     isDrawToggled !== initialIsDrawToggled ||
     enchoPeriodCount !== initialEnchoPeriods ||
     decidedByHantei !== hanteiRecorded ||
+    hanteiPick !== recordedHtKey ||
     // A removed withdrawal is unsaved until Save correction sends it.
     removingWithdrawal;
   // The scoreline half of the same rule, declared HERE because the hook needs
@@ -867,8 +836,8 @@ export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, on
     // unmount writes one still inside the debounce window
     // (useDebouncedRunningWrite), so leaving discards nothing and asks
     // nothing. Two local states are NOT in buildPatch("running"): the hantei
-    // ARM, which is only a mode (the verdict is committed by the side buttons,
-    // submitHantei) and is dropped with no write (it never marks dirty), and
+    // ARM, which is only a mode (the verdict is committed by Finish with a
+    // picked side) and is dropped with no write (it never marks dirty), and
     // the hikiwake toggle, which is a result the operator entered; that one
     // keeps the prompt below, because leaving would lose it.
     if (m.status === "running" && isDrawToggled === initialIsDrawToggled) {
@@ -1248,18 +1217,20 @@ export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, on
                           highlight the only place the side is visible. */}
                       <button
                         type="button"
-                        className={`btn btn--sm ${recordedHtKey === "b" ? "btn--primary" : ""}`}
+                        className={`btn btn--sm ${hanteiPick === "b" ? "btn--primary" : ""}`}
                         data-testid="scoring-modal-hantei-shiro"
-                        onClick={() => submitHantei("b")}
+                        aria-pressed={hanteiPick === "b"}
+                        onClick={() => setHanteiPick("b")}
                         disabled={submitting || decisionSubmitting}
                       >
                         SHIRO wins
                       </button>
                       <button
                         type="button"
-                        className={`btn btn--sm ${recordedHtKey === "a" ? "btn--primary" : ""}`}
+                        className={`btn btn--sm ${hanteiPick === "a" ? "btn--primary" : ""}`}
                         data-testid="scoring-modal-hantei-aka"
-                        onClick={() => submitHantei("a")}
+                        aria-pressed={hanteiPick === "a"}
+                        onClick={() => setHanteiPick("a")}
                         disabled={submitting || decisionSubmitting}
                       >
                         AKA wins
@@ -1268,7 +1239,7 @@ export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, on
                         type="button"
                         className="btn btn--ghost btn--sm"
                         data-testid="scoring-modal-hantei-cancel"
-                        onClick={() => setDecidedByHantei(false)}
+                        onClick={() => { setDecidedByHantei(false); setHanteiPick(recordedHtKey); }}
                         disabled={submitting || decisionSubmitting}
                       >
                         Cancel
@@ -1346,10 +1317,6 @@ export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, on
               onConfirm={(r) => {
                 setCorrectionReason(r);
                 setCorrectionPrompt(null);
-                // A write that asked for this reason (the hantei buttons)
-                // runs itself; otherwise it is the default correction.
-                const { action } = correctionPrompt;
-                if (action) { action(r); return; }
                 // Re-trigger submit with the now-populated reason.
                 // buildPatch reads correctionReason from state, but state
                 // updates are async: pass r inline via a local override

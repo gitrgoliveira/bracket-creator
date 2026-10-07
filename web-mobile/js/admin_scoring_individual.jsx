@@ -771,7 +771,7 @@ export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, on
   // hantei row, since a title never shows on a touchscreen.
   const hanteiFinishBlock = !decidedByHantei ? "" : !hanteiPick
     ? "Pick the hantei winner, then finish."
-    : aTotal !== bTotal ? "Hantei needs a tied score: cancel hantei, or correct the score." : "";
+    : aTotal !== bTotal ? "Hantei needs a tied score: cancel hantei, then correct the score." : "";
 
   // Finish guard (see TeamScoreEditorModal): one tap ARMS the button — its label
   // becomes an explicit "Tap again to finish" INSTRUCTION (not a verdict), so the

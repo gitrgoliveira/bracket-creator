@@ -35,6 +35,7 @@ import { render, act, fireEvent, within } from '@testing-library/react';
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { answered, namedLater } from '../helpers/team_members.js';
 import { lineupPutStub } from '../helpers/lineup_server.js';
+import { QUEUED_NOTICE, QUEUED_UNSAVED_NOTICE } from '../../write_result.jsx';
 
 const SQUAD = [
   { id: 'mem-1', index: 1, name: 'Aoki' },
@@ -380,9 +381,20 @@ describe('the at-court panel', () => {
       expect(api.fetchLineupInForce, 'nothing is read for the Save').toHaveBeenCalledTimes(1);
       expect(api.putMatchLineup.mock.calls[0][3]).toEqual({ 1: 'Mori' });
       expect(changedOf(api.putMatchLineup.mock.calls[0])).toEqual(['1']);
-      expect(showToast).toHaveBeenCalledWith('Offline: match lineup not saved yet, will retry');
+      // The held-write words every editor uses, with the pending icon: not a success.
+      expect(showToast).toHaveBeenCalledWith(QUEUED_NOTICE, 'pending');
       expect(utils.getByLabelText('1 player').value).toBe('Mori');
       expect(saveButton(utils).disabled, 'still unsaved').toBe(false);
+    });
+
+    it('says to keep the page open when the browser could not store the save', async () => {
+      const utils = await mountPanel();
+      await typeName(utils, 1, 'Mori');
+      api.putMatchLineup.mockResolvedValue({ queued: true, persisted: false });
+
+      await click(saveButton(utils));
+
+      expect(showToast).toHaveBeenCalledWith(QUEUED_UNSAVED_NOTICE, 'pending');
     });
   });
 
@@ -755,7 +767,7 @@ describe('the Lineups page', () => {
       expect(api.fetchTeamLineup, 'nothing is read for the Save').toHaveBeenCalledTimes(1);
       expect(api.putTeamLineup.mock.calls[0][3]).toEqual({ 1: 'Mori' });
       expect(changedOf(api.putTeamLineup.mock.calls[0])).toEqual(['1']);
-      expect(showToast).toHaveBeenCalledWith('Offline: lineup not saved yet, will retry');
+      expect(showToast).toHaveBeenCalledWith(QUEUED_NOTICE, 'pending');
       expect(utils.getByTestId('lineup-position-1').value).toBe('mem-4');
     });
   });

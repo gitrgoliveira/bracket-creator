@@ -53,6 +53,7 @@ import { poolMatchNumberOf, isSupplementaryBout, scoreRowMatchLabel } from './po
 import { normalizeParticipantName } from './data.jsx';
 import { renameMemberFields } from './lineup_rename.jsx';
 import { changedLineupSave } from './lineup_save.jsx';
+import { queuedNotice } from './write_result.jsx';
 import { useLineupForm, LineupSourceLine, LineupProblem, LineupDraftNotice } from './lineup_draft.jsx';
 
 const { useState: useStateA, useMemo: useMemoA } = React;
@@ -698,7 +699,7 @@ function AdminLineup({ comp, team, matchId = "", matchLabel = "", notInMatch = f
       // clear the revising state or show "saved"; the write is durable and will
       // retry. Keep the form editable and tell the operator it's pending.
       if (updated && updated.queued) {
-        if (typeof showToast === "function") showToast("Offline: lineup not saved yet, will retry");
+        if (typeof showToast === "function") showToast(queuedNotice(updated), "pending");
         return;
       }
       // What the server answered is the whole lineup it holds now, the positions this

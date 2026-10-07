@@ -7,6 +7,7 @@ import { scoreRowMatchLabel } from './pool_ids.jsx';
 import { squadRosterEntries, rosterWithoutPlacedElsewhere, lineupDuplicateNote, lineupPositionLabel } from './lineup_resolver.jsx';
 import { renameMemberFields } from './lineup_rename.jsx';
 import { changedLineupSave } from './lineup_save.jsx';
+import { queuedNotice } from './write_result.jsx';
 import { useLineupForm, LineupSourceLine, LineupProblem, LineupDraftNotice } from './lineup_draft.jsx';
 import { useOpenedTapGuard } from './tap_guard.jsx';
 import { useDialogFocus } from './dialog_focus.jsx';
@@ -320,7 +321,7 @@ export function MatchLineupSideEditor({ comp, team, match, allMatches, password,
       // field) or show success; keep the operator's entered values and report
       // pending. The write is durable and will retry.
       if (updated && updated.queued) {
-        if (typeof showToast === "function") showToast("Offline: match lineup not saved yet, will retry");
+        if (typeof showToast === "function") showToast(queuedNotice(updated), "pending");
         return;
       }
       // Reflect exactly what was persisted: the whole lineup the server holds now,

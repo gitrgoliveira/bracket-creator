@@ -74,6 +74,9 @@ const TOAST_ERROR_DWELL_MS = 8000;
 // windows.
 //
 //  - success/info: role=status + aria-live=polite, short auto-dismiss.
+//  - pending: the same, with the pending icon instead of the success check: a
+//    write the device holds until the connection returns is not saved yet
+//    (worded by write_result.jsx's queuedNotice).
 //  - error: role=alert + aria-live=assertive, long dwell (>=8s) plus a manual
 //    dismiss control; cannot be clobbered by an incoming non-error toast.
 function Toast({ message, type, onClose }) {
@@ -124,7 +127,7 @@ function Toast({ message, type, onClose }) {
       role={role}
       aria-live={ariaLive}
     >
-      <div className="toast__icon" aria-hidden="true">{shownIsError ? '⚠️' : '✅'}</div>
+      <div className="toast__icon" aria-hidden="true">{shownIsError ? '⚠️' : shown.type === 'pending' ? '⏳' : '✅'}</div>
       <div className="toast__msg">{shown.message}</div>
       {shownIsError && (
         <button type="button"

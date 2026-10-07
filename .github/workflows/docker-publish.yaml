@@ -1,5 +1,7 @@
 ---
-name: Publish latest Docker image
+# Builds of main, tagged `main`. The `latest`, vMAJOR and vMAJOR.MINOR tags
+# belong to docker-release.yaml and only ever name a release.
+name: Publish main Docker image
 
 "on":
   workflow_dispatch:
@@ -135,5 +137,5 @@ jobs:
         run: |
           IMAGE="ghcr.io/${{ github.repository }}${{ matrix.image.tag_suffix }}"
           docker buildx imagetools create \
-            --tag "${IMAGE}:latest" \
+            --tag "${IMAGE}:main" \
             $(printf "${IMAGE}@sha256:%s " *)

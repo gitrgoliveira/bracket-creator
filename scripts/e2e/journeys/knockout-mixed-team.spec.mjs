@@ -1081,7 +1081,7 @@ test.describe('knockout-mixed-team', () => {
     for (const [i, name] of names.entries()) await expect(T.rowNameBox(T.boutRow(ed, i + 1), 'shiro')).toHaveValue(name);
   });
 
-  test.fixme('bc-lprf: the match lineup panel\'s "already at" refusal names the wrong position', async ({ page }) => {
+  test('bc-lprf: the match lineup panel\'s "already at" refusal names the wrong position', async ({ page }) => {
     await T.enterAdmin(page);
     await seedF4(page, { name: 'B2 KO', court: 'I', prefix: 'I', teams: FOUR_TEAMS('B2') });
     await openShiaijo(page, 'I');

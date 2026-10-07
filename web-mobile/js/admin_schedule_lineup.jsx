@@ -476,12 +476,14 @@ export function MatchLineupSideEditor({ comp, team, match, allMatches, password,
 // one MatchLineupSideEditor per team side (sideA / sideB). Only shown for
 // team competitions (compKind === "team" || teamSize > 0).
 export function MatchLineupPanel({ match, tournament, password, showToast, onClose, variant = "modal" }) {
-  // The overlay is a layer over the page, and takes what the app's other layers take:
-  // the bounce of the tap that opened it lands on nothing, Escape closes it unless a
-  // write is out (its editors hold it open meanwhile), and focus goes into it and back
-  // to the control that opened it. The inline variant sits in the page, and is none of it.
+  // The overlay is a layer over the page and an editor, like the overlay score editors:
+  // its controls work at once, so the bounce of the tap that opened it is guarded on
+  // its backdrop only (operator ruling 2026-10-06 for the editor overlays; guarding the
+  // whole layer made a Close tapped at once do nothing). Escape closes it unless a write
+  // is out (its editors hold it open meanwhile), and focus goes into it and back to the
+  // control that opened it. The inline variant sits in the page, and is none of it.
   const overlay = variant !== "inline";
-  const { openedRef, onClickCapture } = useOpenedTapGuard();
+  const { openedRef, onClickCapture } = useOpenedTapGuard({ backdropOnly: true });
   const boxRef = useRefA(null);
   const writesOut = useRefA(0);
   const holdOpen = useCallbackA(() => {

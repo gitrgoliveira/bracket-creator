@@ -891,7 +891,7 @@ function AdminLineup({ comp, team, matchId = "", matchLabel = "", notInMatch = f
                     onCommit: commitRename,
                     onCancel: cancelRename,
                     busy: renameBusy,
-                    ariaLabel: `Rename ${m.name}`,
+                    ariaLabel: `Rename ${m.name || squadSlotLabel(teamNumber, m.index)}`,
                     inputStyle: { flex: 1 },
                     disabled: renameBusy || busy,
                   }) : (

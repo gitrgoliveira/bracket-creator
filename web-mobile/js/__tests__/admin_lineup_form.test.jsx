@@ -342,6 +342,22 @@ describe('AdminLineup form (competition-admin Lineups, bc-tmid pass 3)', () => {
     expect(call[5]['1']).toBe('sq-sato');
   });
 
+  // A member no one has named yet is named by its slot in the rename box's label, as
+  // everywhere else on this page (squadSlotLabel): built from the name alone, the
+  // label read "Rename " and told a screen reader nothing about which member it was.
+  it('labels the rename box of a member with no name by its slot', async () => {
+    const tree = await mountFor({ id: 'team-1', name: 'Tora A', number: 'T10' }, {
+      squads: { 'team-1': [{ id: 'sq-sato', index: 1, name: 'Sato' }, { id: 'sq-blank', index: 2, name: '' }] },
+    });
+    buttonNamed(squadRow(tree, 'sq-blank'), 'Rename').props.onClick();
+    const blankField = findHosts(squadRow(runtime.currentTree(), 'sq-blank'), 'input')[0];
+    expect(blankField.props['aria-label']).toBe('Rename T10.2');
+    buttonNamed(squadRow(runtime.currentTree(), 'sq-blank'), 'Cancel').props.onClick();
+    buttonNamed(squadRow(runtime.currentTree(), 'sq-sato'), 'Rename').props.onClick();
+    const namedField = findHosts(squadRow(runtime.currentTree(), 'sq-sato'), 'input')[0];
+    expect(namedField.props['aria-label'], 'a named member keeps its name').toBe('Rename Sato');
+  });
+
   it('there is no member-removal control anywhere in the form', async () => {
     const tree = await mountFor({ id: 'team-1', name: 'Tora A', number: 'T10' }, {
       squads: { 'team-1': [{ id: 'sq-sato', index: 1, name: 'Sato' }] },

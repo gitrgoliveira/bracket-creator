@@ -1,9 +1,11 @@
-// The at-court lineup panel is a layer over the page, and takes what the app's other
-// layers take: the bounce of the tap that opened it lands on nothing (a second click
-// of a double tap used to land on whichever control of the panel lay under the
-// finger), Escape closes it unless a write is out, focus goes into it and back to the
-// control that opened it, and it is a dialog with a name. One Escape closes one layer:
-// an open name list, or an open rename box, takes it first.
+// The at-court lineup panel is a layer over the page, and an editor like the overlay
+// score editors: its controls work at once, so it guards only its backdrop against the
+// bounce of the tap that opened it (operator ruling 2026-10-06 for the editor overlays:
+// the second tap of a double tap lands on the control under the finger, and that is
+// accepted). Swallowing every tap for the bounce window made a Close tapped at once do
+// nothing (found by PR #442's journeys). Escape closes it unless a write is out, focus
+// goes into it and back to the control that opened it, and it is a dialog with a name.
+// One Escape closes one layer: an open name list, or an open rename box, takes it first.
 
 import React from 'react';
 import { render, act, fireEvent, within, cleanup } from '@testing-library/react';
@@ -155,14 +157,14 @@ describe('the tap that opened the panel', () => {
 
   beforeEach(() => { vi.useFakeTimers(); });
 
-  it('has its bounce swallowed: a second click that lands on a control of the panel does nothing', async () => {
+  it('leaves the panel\'s controls working at once, as the overlay score editors do', async () => {
     const utils = await mount();
     await wait(30);
     await pointerTap(closeButton(utils));
-    expect(utils.onClose).not.toHaveBeenCalled();
+    expect(utils.onClose, 'a Close tapped straight after opening closes the panel').toHaveBeenCalledTimes(1);
   });
 
-  it('is followed by a deliberate tap that works after the window', async () => {
+  it('is followed by a tap that works after the window too', async () => {
     const utils = await mount();
     await wait(TAP_BOUNCE_MS + 50);
     await pointerTap(closeButton(utils));

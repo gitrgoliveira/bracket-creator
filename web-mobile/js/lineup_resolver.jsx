@@ -165,24 +165,6 @@ export function changedLineupPositions(baseline, current, positionKeys) {
   return positionKeys.filter(key => name(baseline, key) !== name(current, key) || id(baseline, key) !== id(current, key));
 }
 
-// composeLineupSave: what a Save writes (operator decision 2026-10-05): the
-// lineup as `stored` holds it now, with the positions the operator changed
-// (`current` against `baseline`, by changedLineupPositions) put on it. Restating
-// the whole form instead would put back, on every position the operator left
-// alone, the value the form was read with, over a change another device made
-// since. A name and its member id are taken together from the same side. The
-// answer is `{ positions, memberIds }` over `positionKeys` alone, as lineupFields
-// reads them, and `stored` may be null (nothing in force).
-export function composeLineupSave(baseline, current, stored, positionKeys) {
-  const composed = lineupFields(stored, positionKeys);
-  const edited = lineupFields(current, positionKeys);
-  changedLineupPositions(baseline, current, positionKeys).forEach(key => {
-    composed.positions[key] = edited.positions[key];
-    composed.memberIds[key] = edited.memberIds[key];
-  });
-  return composed;
-}
-
 export function rosterWithoutPlacedElsewhere(roster, lineup, posKey) {
   const otherNames = new Set(Object.entries(lineup?.positions || {})
     .filter(([key, name]) => key !== posKey && String(name || "").trim())
@@ -225,9 +207,10 @@ export function memberRefusalNote(refusal, fallback) {
   return refusal && refusal.code === MEMBER_ALREADY_NAMED && refusal.reason ? refusal.reason : fallback;
 }
 
-// mergeLineupIdsForPosition composes the WHOLE memberIds map an inline
-// lineup write sends: carries `existingIds` forward untouched, then either
-// sets `posKey` to `resolvedId` or CLEARS it -- clearing happens both when
+// mergeLineupIdsForPosition composes the WHOLE memberIds map of the lineup an
+// inline lineup write leaves behind (the sheet shows it; the save itself
+// carries the one position it changes): carries `existingIds` forward
+// untouched, then either sets `posKey` to `resolvedId` or CLEARS it -- clearing happens both when
 // the operator cleared the position (no name, so nothing to resolve) and
 // when a name was typed/picked but resolution/minting failed (offline venue
 // wifi). Either way a stale id must never survive under a position it no
@@ -244,11 +227,15 @@ export function mergeLineupIdsForPosition(existingIds, posKey, resolvedId) {
 
 // buildInlineLineupWrite computes exactly what the inline lineup picker
 // (submitInlineLineup, inside TeamScoreEditorModal in admin_scoring_team.jsx)
-// sends to putMatchLineup: the WHOLE positions map (existing + the one
-// changed position) and its memberIds counterpart, merged via
-// mergeLineupIdsForPosition above. Exported (and pulled out of the
-// component) so this exact value-in/body-out contract -- including "a mint
-// failure never blocks the write" -- is pinned directly, without mounting
+// writes with putMatchLineup: the one position it changes, `changed: [posKey]`
+// (operator decision 2026-10-07, "Only changed positions": the server puts it on
+// the lineup it holds), and the lineup as it will be, `lineup` (what the sheet
+// holds) with that position changed: the WHOLE positions map and its memberIds
+// counterpart, merged via mergeLineupIdsForPosition above, which the sheet
+// shows while the save is only queued. changedLineupSave (lineup_save.jsx)
+// builds the body from the three. Exported (and pulled out of the component) so
+// this exact value-in/body-out contract -- including "a mint failure never
+// blocks the write" -- is pinned directly, without mounting
 // TeamScoreEditorModal, which vitest's hook stubs cannot drive through a
 // full interaction (see tie_button_no_term.test.jsx). It lives here, not in
 // the scoring module, because it IS the lineup-write authority every other
@@ -336,7 +323,7 @@ export async function buildInlineLineupWrite(compId, teamId, lineup, squad, posK
   }
 
   const memberIds = mergeLineupIdsForPosition(lineup?.memberIds, posKey, resolvedId);
-  return { positions, memberIds, squad: nextSquad, failures };
+  return { positions, memberIds, changed: [posKey], squad: nextSquad, failures };
 }
 
 // resolveMatchLineup: the lineup a team fields at a match, from ONE read (GET

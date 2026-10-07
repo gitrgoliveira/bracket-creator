@@ -19,23 +19,19 @@
 // (isSelfRunMainGatedConfigRoute, middleware.go): the public page reads team
 // members from the viewer payload and never clears one.
 //
-// ADD is deliberately silent; RENAME and CLEAR are not, and the split is the
-// point. The original rule was that squad edits are setup done by one
-// organiser, not the concurrent multi-device traffic the lineup broadcast
-// exists for, so a member added on one device is invisible to a second admin
-// session until it remounts. That consequence is still accepted for ADD. On
-// the public score sheet an add is followed by the match lineup PUT, which
-// broadcasts, so the other devices refetch the members anyway.
-//
-// Rename and clear outgrew it. They now rewrite lineups.yaml as well
+// Every write fires EventLineupUpdated: ADD, RENAME and CLEAR. Rename and clear
+// rewrite lineups.yaml as well as team-members.yaml
 // (state.renameMemberInLineupsLocked), because a lineup position stores a
 // display copy of the member's name that the score sheet and the export read.
-// Every other writer of that file fires EventLineupUpdated, and without it the
-// failure is not staleness but LOSS: a second admin holding a pre-rename
-// lineup makes any unrelated inline pick, its write spreads the whole stale
-// positions map, and the operator's correction is reverted on disk. So these
-// two fire the EXISTING lineup event rather than a new squad one, which is why
-// no squad reader needs a new subscriber. The event names the team
+// Every other writer of that file fires the event, and without it the failure
+// is not staleness but LOSS: a second admin holding a pre-rename lineup makes
+// any unrelated inline pick, its write spreads the whole stale positions map,
+// and the operator's correction is reverted on disk. An ADD was silent until a
+// member began to carry a server stamp (operator decision 2026-10-07): the other
+// devices keep, of two copies of a member, the one with the larger stamp, so a
+// device that added one must be told to read the team's members again. All three
+// fire the EXISTING lineup event rather than a new members one, which is why no
+// reader of a team's members needs a new subscriber. The event names the team
 // (lineupUpdatedPayload) and no match, since a rename reaches the team's
 // lineups at every match.
 //
@@ -43,14 +39,15 @@
 // changed. A spurious refetch costs one request; a missed one costs the
 // rename. Same safe direction bumpFileVersion takes in the store.
 //
+// The three writes answer with the member as written, stamped (POST 201, PUT
+// and DELETE 200), and GET team-members carries each member's stamp, so a client
+// that holds the answer holds the copy this write produced.
+//
 // The public READ surfaces do not call these routes: the viewer, the court
 // display and the streaming overlay read a team's squad from the viewer
-// payload (handlers_viewer.go). A rename or a clear reaches them through that
-// same lineup event, on which the SPA refetches the payload (app.jsx). An add
-// reaches them only on their next payload fetch, which some OTHER broadcast
-// triggers: on the public score sheet the lineup PUT that follows it, and on
-// the Lineups page, where an add is setup, whatever broadcast comes next; the
-// label it feeds is enrichment beside a name that is already correct.
+// payload (handlers_viewer.go), which carries the same stamps. A write reaches
+// them through that same lineup event, on which the SPA refetches the payload
+// (app.jsx).
 package mobileapp
 
 import (
@@ -132,6 +129,7 @@ func RegisterSquadHandlers(r *gin.RouterGroup, store SquadStore, comps Competiti
 			return
 		}
 		c.JSON(http.StatusCreated, member)
+		hub.Broadcast(EventLineupUpdated, lineupUpdatedPayload(compID, teamID, ""))
 	})
 
 	r.PUT("/competitions/:id/teams/:tid/members/:memberId", func(c *gin.Context) {
@@ -170,11 +168,12 @@ func RegisterSquadHandlers(r *gin.RouterGroup, store SquadStore, comps Competiti
 		if anonymous {
 			rename = store.NameUnnamedTeamMember
 		}
-		if err := rename(compID, teamID, memberID, req.Name); err != nil {
+		member, err := rename(compID, teamID, memberID, req.Name)
+		if err != nil {
 			respondSquadWriteError(c, err)
 			return
 		}
-		c.Status(http.StatusNoContent)
+		c.JSON(http.StatusOK, member)
 		hub.Broadcast(EventLineupUpdated, lineupUpdatedPayload(compID, teamID, ""))
 	})
 
@@ -198,11 +197,12 @@ func RegisterSquadHandlers(r *gin.RouterGroup, store SquadStore, comps Competiti
 			c.JSON(http.StatusBadRequest, gin.H{"error": "member ID is required"})
 			return
 		}
-		if err := store.ClearTeamMemberName(compID, teamID, memberID); err != nil {
+		member, err := store.ClearTeamMemberName(compID, teamID, memberID)
+		if err != nil {
 			respondSquadWriteError(c, err)
 			return
 		}
-		c.Status(http.StatusNoContent)
+		c.JSON(http.StatusOK, member)
 		hub.Broadcast(EventLineupUpdated, lineupUpdatedPayload(compID, teamID, ""))
 	})
 }

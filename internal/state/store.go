@@ -9,6 +9,7 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"github.com/gitrgoliveira/bracket-creator/internal/state/wal"
 )
@@ -25,6 +26,10 @@ type Store struct {
 	// crash between the WAL commit and the target writes can't
 	// silently lose the transaction.
 	walDir string
+
+	// clock is the store's wall clock for the stamps it writes (stampMember);
+	// nil means time.Now. A test sets it to stand still or to step back.
+	clock func() time.Time
 
 	// compMu maps competition ID -> *sync.RWMutex for fine-grained locking.
 	compMu sync.Map
@@ -334,6 +339,15 @@ func (s *Store) cachedBracket(compID string) (*Bracket, error) {
 	}
 	bracket, _ := data.(*Bracket)
 	return bracket, nil
+}
+
+// now is the store's wall clock for the stamps it writes: time.Now, or the clock
+// a test has set.
+func (s *Store) now() time.Time {
+	if s.clock != nil {
+		return s.clock()
+	}
+	return time.Now()
 }
 
 // cachedCompetition is cachedPoolMatches's competition twin: the no-copy

@@ -20,6 +20,7 @@ import React from 'react';
 import { render, act, fireEvent } from '@testing-library/react';
 import { describe, it, expect, vi, beforeAll, afterAll, beforeEach } from 'vitest';
 import { installWindowStubs } from '../helpers/stub_globals.js';
+import { answered } from '../helpers/team_members.js';
 
 const STUBBED_GLOBALS = {
   isHikiwake: () => false,
@@ -69,7 +70,7 @@ beforeEach(() => {
     recordDaihyosen: vi.fn(),
     removeDaihyosen: vi.fn(),
     putMatchLineup,
-    renameTeamMember: vi.fn().mockResolvedValue({ id: 'm-blank', index: 7, name: 'Ito' }),
+    renameTeamMember: vi.fn().mockResolvedValue(answered({ id: 'm-blank', index: 7 }, { name: 'Ito' })),
     recordDecision: vi.fn(),
     fetchSquads: vi.fn().mockResolvedValue({ 'team-A': SQUAD_A, 'team-B': SQUAD_B }),
   };

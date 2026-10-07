@@ -193,6 +193,17 @@ func rlGiven(t *testing.T, store *state.Store) map[string][]string {
 	return comp.RoundLineupsGiven
 }
 
+// rlLegacy is the teams the competition's record lists as legacy (config.md's
+// round_lineups_legacy): the teams whose lineups v2.1.1 read by round or by match,
+// found by the first settlement.
+func rlLegacy(t *testing.T, store *state.Store) []string {
+	t.Helper()
+	comp, err := store.LoadCompetition(rlComp)
+	require.NoError(t, err)
+	require.NotNil(t, comp)
+	return comp.RoundLineupsLegacy
+}
+
 // rlTouchPool is a write of the draw that seats nobody new: a pool match
 // started.
 func rlTouchPool(t *testing.T, store *state.Store, matchID string) {
@@ -364,10 +375,15 @@ func TestRoundLineups_LoadGivesEachSeatedMatchItsLineupAndKeepsTheRound(t *testi
 	})
 
 	t.Run("the pairs it settled are recorded in config.md, and the marker stays unset", func(t *testing.T) {
+		// Kuma has a lineup of its own for r0-m0 and none for a round: v2.1.1's
+		// reading of the one match it is seated in, which its pair records.
 		assert.Equal(t, map[string][]string{
 			teams.tora:  {"r0-m0", "r1-m0"},
 			teams.usagi: {"r0-m1"},
+			teams.kuma:  {"r0-m0"},
 		}, rlGiven(t, store))
+		assert.Equal(t, slices.Sorted(slices.Values([]string{teams.tora, teams.usagi, teams.kuma})), rlLegacy(t, store),
+			"the teams that had a lineup for a round, or one entered for a match, are the legacy teams")
 		assert.Contains(t, rlRaw(t, dir, "config.md"), "round_lineups_given")
 		assert.False(t, rlMarker(t, store))
 		assert.NotContains(t, rlRaw(t, dir, "config.md"), "round_lineups_converted")
@@ -1575,10 +1591,13 @@ func TestRoundLineups_ALegacyTeamSeatedLaterGetsItsReadingInTheWriteThatSeatsIt(
 	}
 }
 
-// TestRoundLineups_ATeamWithoutALaterRoundIsLeftAsItIs: only a team with a round
-// lineup for round 2 or later was ever affected by the change of rule; any other
-// team keeps exactly the lineups it has, and is given none for the matches it is
-// seated in (its own lineups carry under the new rule).
+// TestRoundLineups_ATeamWithoutALaterRoundIsLeftAsItIs: a team with no round
+// lineup for round 2 or later and none entered for a match (Saru, with only a
+// starting lineup) was never affected by the change of rule: it keeps exactly the
+// lineups it has, and is given none for the matches it is seated in (its starting
+// lineup carries under the new rule). Kuma has a lineup entered for r0-m0, the only
+// match it is seated in, so it is a legacy team too (match_only_test.go); it keeps
+// that lineup and has no other match to be given one for.
 func TestRoundLineups_ATeamWithoutALaterRoundIsLeftAsItIs(t *testing.T) {
 	teams := newRLTeams()
 	dir := rlSeed(t, rlTeamComp(state.CompFormatKnockout), teams, nil, rlKnockout(teams),
@@ -2047,6 +2066,11 @@ func TestRoundLineups_TheGivenPairsAreClearedWithTheMarker(t *testing.T) {
 // reads it back as it was.
 func TestRoundLineups_TheGivenRecordIsReadableInConfigMd(t *testing.T) {
 	teams := newRLTeams()
+	// yaml.v3 orders a map's keys by reading each run of digits as a number, which
+	// is not the order slices.Sorted gives for two random ids that share a first
+	// digit (6ce3... before 605110...), so ids drawn at random failed this test one
+	// run in ten. Fixed ids whose two orders agree make the expected text exact.
+	teams.tora, teams.usagi = "11111111-1111-4111-8111-111111111111", "22222222-2222-4222-8222-222222222222"
 	dir := rlSeed(t, rlTeamComp(state.CompFormatKnockout), teams, nil, rlKnockout(teams),
 		rlLineup(teams.tora, "", 1, "tora-round1"),
 		rlLineup(teams.usagi, "", 1, "usagi-round1"),
@@ -2065,6 +2089,8 @@ func TestRoundLineups_TheGivenRecordIsReadableInConfigMd(t *testing.T) {
 	}
 	config := rlRaw(t, dir, "config.md")
 	assert.Contains(t, config, want)
+	assert.Contains(t, config, "round_lineups_legacy:\n    - "+teams.tora+"\n    - "+teams.usagi+"\n",
+		"the teams found legacy are a plain list of ids, sorted")
 	assert.NotContains(t, config, "\x00", "no NUL byte")
 	assert.NotContains(t, config, `\0`, "and no escaped one")
 	assert.NotContains(t, config, "m:"+teams.tora, "no lineup key")
@@ -2199,11 +2225,13 @@ func TestRoundLineups_TheLoadStepsAfterTheSettlementDoNotWriteItAway(t *testing.
 			if tc.completed {
 				assert.Contains(t, config, "round_lineups_converted: true", "the marker the settlement set is still there")
 				assert.NotContains(t, config, "round_lineups_given")
+				assert.NotContains(t, config, "round_lineups_legacy")
 				assert.True(t, rlMarker(t, store))
 				return
 			}
 			assert.Contains(t, config, "round_lineups_given", "the pairs the settlement recorded are still there")
 			assert.Equal(t, map[string][]string{teams.tora: {"r0-m0", "r1-m0"}}, rlGiven(t, store))
+			assert.Equal(t, []string{teams.tora}, rlLegacy(t, store), "and so are the legacy teams it found")
 			assert.False(t, rlMarker(t, store))
 		})
 	}

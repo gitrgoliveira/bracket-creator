@@ -4,6 +4,7 @@ import (
 	"cmp"
 	"errors"
 	"fmt"
+	"maps"
 	"slices"
 	"strconv"
 	"strings"
@@ -133,6 +134,71 @@ func (t TeamLineup) checkDuplicateMembers(teamSize int) error {
 		seen[id] = pos
 	}
 	return nil
+}
+
+// ErrLineupNoChangedPositions is the refusal of a save that says it changed
+// positions and names none.
+var ErrLineupNoChangedPositions = errors.New("team_lineup: a save that lists the positions it changed must list at least one")
+
+// ErrLineupChangedPositionMissing is the refusal of a save that lists a changed
+// position its positions map has no entry for: the new name is what the save
+// says, so a changed position with nothing to say is a malformed save, not a
+// request to clear it (a clear is an entry with no name).
+var ErrLineupChangedPositionMissing = errors.New("team_lineup: a changed position has no entry in positions")
+
+// ApplyChanges is t with each position in changed set from a save's own maps and
+// every other position as t holds it: the way a save that names the positions it
+// changed lands on the lineup stored when it arrives, so two saves changing
+// different positions both keep their change. positions and memberIDs may carry
+// the whole of the sender's form; only the changed keys are read, and the rest
+// are ignored, whatever they hold.
+//
+// For a changed position p, positions must have an entry for it
+// (ErrLineupChangedPositionMissing otherwise). The name is positions[p] and the
+// member id memberIDs[p], absent meaning none. A position with neither is cleared,
+// removed from both maps; any other is set: the name, and the id, which is removed
+// when it is empty so a new name never keeps the old member's id beside it. A name
+// with no id is a person typed in; an id with no name places a member who has none
+// yet. An empty changed list is ErrLineupNoChangedPositions.
+//
+// The result shares nothing with t, and its Positions is never nil. It is not
+// validated: ValidatePositions answers for the composed lineup, which is where a
+// member placed at two positions is caught, naming both.
+func (t TeamLineup) ApplyChanges(changed []Position, positions, memberIDs map[Position]string) (TeamLineup, error) {
+	if len(changed) == 0 {
+		return TeamLineup{}, ErrLineupNoChangedPositions
+	}
+	out := t
+	out.Positions = maps.Clone(t.Positions)
+	if out.Positions == nil {
+		out.Positions = map[Position]string{}
+	}
+	out.MemberIDs = maps.Clone(t.MemberIDs)
+	for _, p := range changed {
+		name, ok := positions[p]
+		if !ok {
+			return TeamLineup{}, fmt.Errorf("%w: %q", ErrLineupChangedPositionMissing, p)
+		}
+		id := memberIDs[p]
+		if name == "" && id == "" {
+			delete(out.Positions, p)
+			delete(out.MemberIDs, p)
+			continue
+		}
+		out.Positions[p] = name
+		if id == "" {
+			delete(out.MemberIDs, p)
+		} else {
+			if out.MemberIDs == nil {
+				out.MemberIDs = map[Position]string{}
+			}
+			out.MemberIDs[p] = id
+		}
+	}
+	if len(out.MemberIDs) == 0 {
+		out.MemberIDs = nil
+	}
+	return out, nil
 }
 
 // LineupSlot is one OCCUPIED position from a lineup: the Position itself,

@@ -11,6 +11,8 @@ import React from 'react';
 import { render, act, fireEvent, screen, waitFor } from '@testing-library/react';
 import { describe, it, expect, vi, beforeAll, afterAll, beforeEach } from 'vitest';
 import { installWindowStubs } from '../helpers/stub_globals.js';
+import { answered } from '../helpers/team_members.js';
+import { lineupPutStubByTeam } from '../helpers/lineup_server.js';
 
 const STUBBED_GLOBALS = {
   isHikiwake: () => false,
@@ -41,15 +43,20 @@ afterAll(() => restoreGlobals());
 const blank = (p) => [1, 2, 3, 4, 5].map((i) => ({ id: `${p}${i}`, index: i, name: '' }));
 const named = (p, names) => names.map((name, i) => ({ id: `${p}${i + 1}`, index: i + 1, name }));
 
+// What the server holds, by team: a save names the position it changed and the server
+// answers the lineup it holds then.
+let lineups;
+
 beforeEach(() => {
+  lineups = {};
   window.API = {
     fetchCompetitionDetails: vi.fn().mockResolvedValue({ id: 'c1', config: { format: 'mixed', players: [] } }),
     fetchSquads: vi.fn(),
     fetchLineupInForce: vi.fn(async () => null),
-    // What the server now answers the public page.
-    putMatchLineup: vi.fn(async (_c, teamId, matchId, positions, _pw, memberIds) => ({ teamId, matchId, positions, memberIds })),
-    renameTeamMember: vi.fn(async () => true),
-    addTeamMember: vi.fn(async (_c, _t, name) => ({ id: 'new-1', index: 6, name })),
+    putMatchLineup: lineupPutStubByTeam(() => lineups),
+    // The server answers a member write with the member it holds, stamped.
+    renameTeamMember: vi.fn(async (_c, _t, id, name) => answered({ id, index: Number(id.slice(1)) }, { name })),
+    addTeamMember: vi.fn(async (_c, _t, name) => answered({ id: 'new-1', index: 6 }, { name })),
     recordScore: vi.fn(async () => ({ status: 'running' })),
     hasPendingTerminalWrite: () => false,
     notePendingEdit: () => () => {},
@@ -94,7 +101,7 @@ describe.each(['fixed', 'kachinuki'])('a participant names bout 1 of a %s team m
     await typeName(akaBout1(), 'Mei Ito');
 
     expect(window.API.renameTeamMember).toHaveBeenCalledWith('c1', 'team-A', 'a1', 'Mei Ito', '');
-    expect(window.API.putMatchLineup).toHaveBeenCalledWith('c1', 'team-A', 'm1', { senpo: 'Mei Ito' }, '', { senpo: 'a1' });
+    expect(window.API.putMatchLineup).toHaveBeenCalledWith('c1', 'team-A', 'm1', { senpo: 'Mei Ito' }, '', { senpo: 'a1' }, ['senpo']);
     noError();
     expect(akaBout1().value).toBe('Mei Ito');
   });
@@ -114,7 +121,7 @@ describe('a participant fills in a fixed-order row from the list (bc-dhas)', () 
     await act(async () => { fireEvent.click(kai); });
     await act(async () => { await new Promise((r) => setTimeout(r, 0)); });
 
-    expect(window.API.putMatchLineup).toHaveBeenCalledWith('c1', 'team-A', 'm1', { senpo: 'Kai Mori' }, '', { senpo: 'a2' });
+    expect(window.API.putMatchLineup).toHaveBeenCalledWith('c1', 'team-A', 'm1', { senpo: 'Kai Mori' }, '', { senpo: 'a2' }, ['senpo']);
     expect(window.API.renameTeamMember).not.toHaveBeenCalled();
     noError();
     expect(akaBout1().value).toBe('Kai Mori');
@@ -133,7 +140,7 @@ describe('a participant fills in a fixed-order row from the list (bc-dhas)', () 
     await act(async () => { await new Promise((r) => setTimeout(r, 0)); });
 
     expect(window.API.addTeamMember).toHaveBeenCalledWith('c1', 'team-A', 'Jun Oda', '');
-    expect(window.API.putMatchLineup).toHaveBeenCalledWith('c1', 'team-A', 'm1', { senpo: 'Jun Oda' }, '', { senpo: 'new-1' });
+    expect(window.API.putMatchLineup).toHaveBeenCalledWith('c1', 'team-A', 'm1', { senpo: 'Jun Oda' }, '', { senpo: 'new-1' }, ['senpo']);
     noError();
     expect(akaBout1().value).toBe('Jun Oda');
   });

@@ -4071,6 +4071,12 @@ paths:
     put:
       tags: [competitions]
       summary: Save team lineup for round
+      description: |
+        Saves the team's starting lineup (round 0). With `changed` (operator decision
+        2026-10-07), only the positions it names are written, onto the starting lineup
+        stored when the request is handled (an empty one when none is), so a change
+        another device made to any other position stays; see `TeamLineupSave`. Without
+        it the body replaces the whole lineup.
       security:
         - TournamentPassword: []
       requestBody:
@@ -4078,10 +4084,10 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/TeamLineup'
+              $ref: '#/components/schemas/TeamLineupSave'
       responses:
         '200':
-          description: Lineup saved.
+          description: Lineup saved. The body is the whole lineup as stored after the save.
           content:
             application/json:
               schema:
@@ -4091,8 +4097,9 @@ paths:
             The round is 1 or more (a lineup is saved as the team's starting lineup, or
             for a match, so the answer is "A lineup is saved as the team's starting
             lineup or for a match." before the body is read), the body is not a JSON
-            object, a position key is not a valid position, or a position's name is
-            longer than 100 bytes.
+            object, a position key is not a valid position, a position's name is
+            longer than 100 bytes, `changed` is empty or names a position `positions`
+            does not hold, or the saved lineup would place one member at two positions.
           content:
             application/json:
               schema:
@@ -4162,15 +4169,24 @@ paths:
         save; a structurally invalid payload (FIK shape rules) is still rejected
         with a 400.
 
+        With `changed` (operator decision 2026-10-07), only the positions it names
+        are written, under the competition's lock, onto the match's own lineup, or,
+        when the match has none yet, onto the lineup in force there (the one the
+        team carries from its previous match, else its starting lineup), so a
+        change another device made to any other position stays, whichever save
+        arrives first. Two saves of the same position keep the later arrival.
+        Without `changed` the body replaces the whole lineup. See `TeamLineupSave`.
+
         In a self-run tournament the request is also accepted with an empty
         password: the public score sheet saves it when a competitor names a
         bout's fighter (bc-dhas). Such a request is refused for a match that
         does not exist (404), for a team the match does not hold by id (404
-        `team_not_in_match`), for a member id the team does not hold (400
-        `team_member_not_in_team`), or for a match that has finished (409
-        `result_finalized`, the score endpoint's own refusal); the organiser,
-        sending the password, keeps the always-editable rule above, and a
-        password that is sent but wrong gets 401 before the body is read.
+        `team_not_in_match`), for a member id the team does not hold among the
+        positions the save writes (400 `team_member_not_in_team`), or for a match
+        that has finished (409 `result_finalized`, the score endpoint's own
+        refusal); the organiser, sending the password, keeps the always-editable
+        rule above, and a password that is sent but wrong gets 401 before the
+        body is read.
       security:
         - TournamentPassword: []
       requestBody:
@@ -4178,10 +4194,10 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/TeamLineup'
+              $ref: '#/components/schemas/TeamLineupSave'
       responses:
         '200':
-          description: Lineup saved.
+          description: Lineup saved. The body is the whole lineup as stored after the save.
           content:
             application/json:
               schema:
@@ -4189,11 +4205,13 @@ paths:
         '400':
           description: |
             The body is not a JSON object, a position key is not a valid
-            position, or a position's name is longer than 100 bytes. Self-run,
-            an empty password: also a member id the team does not hold
-            (`error: team_member_not_in_team`, with a `message` to show, e.g.
-            "The member chosen for senpo is not on this team. Pick again from
-            the list.").
+            position, a position's name is longer than 100 bytes, `changed` is
+            empty or names a position `positions` does not hold, or the saved
+            lineup would place one member at two positions (the answer names
+            both). Self-run, an empty password: also a member id the team does
+            not hold (`error: team_member_not_in_team`, with a `message` to
+            show, e.g. "The member chosen for senpo is not on this team. Pick
+            again from the list.").
           content:
             application/json:
               schema:
@@ -4279,7 +4297,10 @@ paths:
         not read: the server gives its team, at every match it is seated in, a lineup of
         its own equal to the one that version showed there, when it loads the
         competition and then in the write that seats the team, and removes the round
-        lineups once the competition is completed.
+        lineups once the competition is completed. A team that had a lineup saved for a
+        match by those versions is given the same, so a match it had none for shows the
+        lineup those versions showed there (its starting lineup, or none), not the one
+        it would carry from that match.
 
         Match order is fixed: pool and league matches in pool-match number order;
         knockout matches follow at their bracket round index; the 3rd-place match is
@@ -4324,7 +4345,9 @@ paths:
       summary: Add a team member
       description: |
         Adds a member to the team with the next display index; an index is
-        never reused. Two members of one team may not share a name.
+        never reused. Two members of one team may not share a name. The answer
+        carries the member's `modifiedAt` stamp, and the change is announced to
+        every open page (the `lineup_updated` event, naming the team).
 
         In a self-run tournament a request with an empty password may add one
         too: the public score sheet does when a competitor types a fighter's
@@ -4410,6 +4433,7 @@ paths:
         recorded with in their stored `sideA`/`sideB`, but every surface of the
         app and the export show the member's current name, looked up by id, so
         a rename changes what those bouts show too, finished matches included.
+        The answer is the member as stored, with its new `modifiedAt` stamp.
 
         In a self-run tournament a request with an empty password may name a
         member who has no name yet (the public score sheet does when a
@@ -4428,8 +4452,12 @@ paths:
             schema:
               $ref: '#/components/schemas/TeamMemberName'
       responses:
-        '204':
+        '200':
           description: Member named.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TeamMember'
         '400':
           description: The body is not a JSON object, or `name` is empty or longer than 100 bytes.
           content:
@@ -4469,6 +4497,44 @@ paths:
                   message:
                     type: string
                     description: The sentence the public page shows as it is (member_already_named, competition_finished).
+    delete:
+      tags: [competitions]
+      summary: Clear a team member's name
+      description: |
+        The operator's removal of a member: clears the name and keeps the member's
+        id and display index, so a bout already fought that names this position
+        keeps its meaning (a member is never removed). Refused once the
+        competition has started. Needs the password in a self-run tournament too.
+        The answer is the member as stored, with its new `modifiedAt` stamp.
+      security:
+        - TournamentPassword: []
+      responses:
+        '200':
+          description: Name cleared.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TeamMember'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          description: '`invalid tournament password`: missing or wrong.'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: No competition, team or member with this id.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '409':
+          description: The competition has started, so a member's name can no longer be cleared.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
 
   /api/competitions/{id}/swiss/generate-round:
     parameters:
@@ -6904,6 +6970,15 @@ components:
         name:
           type: string
           description: Empty for a numbered member no one has named yet.
+        modifiedAt:
+          type: integer
+          format: int64
+          description: >
+            When the member was last added, named, renamed or cleared (server time,
+            unix ms). One member's stamps only grow, so of two copies of a member the
+            one with the larger stamp is the newer; a page keeps that one whatever
+            order the copies arrive in. 0 for a member no such write has touched yet
+            (a numbered slot seeded for the team, or one stored by an earlier release).
 
     TeamLineup:
       type: object
@@ -6940,6 +7015,30 @@ components:
             Map of position label to the team member's id, keyed by the same
             positions as `positions`. Optional: a position without an entry
             here is identified by its name alone.
+
+    TeamLineupSave:
+      description: >
+        The request body of the two lineup PUTs: a TeamLineup plus an optional
+        `changed` list (operator decision 2026-10-07: a save names the positions it
+        changed). With `changed`, only the positions it names are written, onto the
+        lineup stored for that key when the request is handled (for a match with no
+        lineup of its own, the lineup in force there); every other key of
+        `positions` and `memberIds` is ignored, so a client may send its whole form.
+        Without it, the body replaces the whole lineup.
+      allOf:
+        - $ref: '#/components/schemas/TeamLineup'
+        - type: object
+          properties:
+            changed:
+              type: array
+              minItems: 1
+              items:
+                type: string
+              description: >
+                The positions this save changed. Each must be a key of `positions`:
+                a non-empty name, or an empty name with a `memberIds` entry (a member
+                with no name yet), places a fighter there; an empty name with no
+                `memberIds` entry clears the position.
 
     TeamLineupRead:
       description: >

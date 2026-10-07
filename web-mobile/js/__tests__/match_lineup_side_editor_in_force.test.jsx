@@ -8,6 +8,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { makeReactive } from './helpers/reactive_react.js';
 import { collectText, expandNamed } from './helpers/vdom.js';
+import { answered } from './helpers/team_members.js';
 
 const realReact = global.React;
 
@@ -162,7 +163,9 @@ describe('MatchLineupSideEditor shows the lineup in force, where it came from, a
     expect(global.window.API.putMatchLineup).not.toHaveBeenCalled();
   });
 
-  it('after one edit Save enables and the write carries every carried position plus the edit', async () => {
+  // A save names the positions it changed and carries those alone (operator decision
+  // 2026-10-07): the carried positions are not sent, the server holds them.
+  it('after one edit Save enables and the write carries the edited position alone, naming it', async () => {
     let tree = await mount();
     findComponents(tree, 'LineupNameInput')[1].props.onSelect('Mori', SQUAD[3]);
     tree = runtime.currentTree();
@@ -173,8 +176,9 @@ describe('MatchLineupSideEditor shows the lineup in force, where it came from, a
 
     expect(global.window.API.putMatchLineup).toHaveBeenCalledTimes(1);
     const call = global.window.API.putMatchLineup.mock.calls[0];
-    expect(call[3]).toEqual({ 1: 'Aoki', 2: 'Mori', 3: 'Ito' });
-    expect(call[5]).toEqual({ 1: 'mem-1', 2: 'mem-4', 3: 'mem-3' });
+    expect(call[3]).toEqual({ 2: 'Mori' });
+    expect(call[5]).toEqual({ 2: 'mem-4' });
+    expect(call[6]).toEqual(['2']);
   });
 
   it('an edit put back to what was loaded is not a change', async () => {
@@ -219,7 +223,9 @@ describe('MatchLineupSideEditor shows the lineup in force, where it came from, a
     expect(saveButton(tree).props.disabled).toBe(false);
     saveButton(tree).props.onClick();
     await flush();
-    expect(global.window.API.putMatchLineup.mock.calls[0][3]).toEqual({});
+    // The emptied position goes as its empty name, which the server needs to be there.
+    expect(global.window.API.putMatchLineup.mock.calls[0][3]).toEqual({ 1: '' });
+    expect(global.window.API.putMatchLineup.mock.calls[0][6]).toEqual(['1']);
   });
 
   it('a failed read shows "Failed to load lineup" rather than an empty lineup', async () => {
@@ -236,7 +242,7 @@ describe('MatchLineupSideEditor shows the lineup in force, where it came from, a
   });
 
   it('renaming a member on a carried side does not make the side look edited', async () => {
-    global.window.API.renameTeamMember = vi.fn().mockResolvedValue({ id: 'mem-1', index: 1, name: 'Aoki Jr' });
+    global.window.API.renameTeamMember = vi.fn().mockResolvedValue(answered({ id: 'mem-1', index: 1 }, { name: 'Aoki Jr' }));
     let tree = await mount();
     const rename = findHosts(tree, 'button').find(b => b.props?.['aria-label'] === 'Rename 1 player');
     expect(rename).toBeTruthy();

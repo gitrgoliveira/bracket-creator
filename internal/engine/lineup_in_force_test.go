@@ -578,6 +578,37 @@ func TestLineupInForce_ReturnsACopyOfTheStoredLineup(t *testing.T) {
 	assert.NotEqual(t, "changed by the caller", again.Lineup.MemberIDs[domain.PosSenpo])
 }
 
+// LineupInForceFrom is the one rule asked over what a caller already holds, for a
+// caller inside a transaction: it answers as the engine's read does from the store,
+// for a draw with a knockout and for one without.
+func TestLineupInForceFrom_IsTheEnginesRuleOverWhatTheCallerHolds(t *testing.T) {
+	pool, bracket := lineupDrawFixture()
+	lineups := lineupsOf(lineupOf(lineupTeam, "", 0, "start"), lineupOf(lineupTeam, "Pool A-0", 0, "m0"))
+
+	t.Run("a draw with a knockout", func(t *testing.T) {
+		for _, match := range []string{"Pool A-0", "Pool A-1", "Pool A-2", "r0-m0", "bronze", "not-in-the-draw"} {
+			got := LineupInForceFrom(lineups, pool, bracket, true, lineupTeam, match)
+
+			assert.Equal(t, ruleOver(lineups, pool, bracket).inForce(lineupTeam, match), got, match)
+		}
+		got := LineupInForceFrom(lineups, pool, bracket, true, lineupTeam, "Pool A-1")
+		require.True(t, got.Found)
+		assert.Equal(t, "m0", senpoOf(got), "carried from the previous match")
+		assert.Equal(t, LineupSource{MatchID: "Pool A-0"}, got.Source)
+	})
+
+	t.Run("a draw with no knockout leaves its vestigial bracket out", func(t *testing.T) {
+		got := LineupInForceFrom(lineups, pool, bracket, false, lineupTeam, "r0-m0")
+
+		assert.Equal(t, "start", senpoOf(got), "the bracket match is no team match, so only the starting lineup applies")
+	})
+
+	t.Run("a team with no lineup has none in force", func(t *testing.T) {
+		assert.False(t, LineupInForceFrom(lineups, pool, bracket, true, "somebody-else", "Pool A-1").Found)
+		assert.False(t, LineupInForceFrom(nil, pool, bracket, true, lineupTeam, "Pool A-1").Found)
+	})
+}
+
 // The read copies only the lineup it returns, so what it costs does not grow with
 // the lineups the competition holds: against 64 stored lineups it allocates a
 // small fraction of what copying them all does (LoadTeamLineups).

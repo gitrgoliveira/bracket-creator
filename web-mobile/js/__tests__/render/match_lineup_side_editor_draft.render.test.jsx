@@ -9,6 +9,7 @@ import React from 'react';
 import { render, act, fireEvent } from '@testing-library/react';
 import { describe, it, expect, beforeAll, beforeEach, afterAll, vi } from 'vitest';
 import { installWindowStubs } from '../helpers/stub_globals.js';
+import { lineupPutStub } from '../helpers/lineup_server.js';
 
 const NAMES = { positions: { 1: 'Aoki', 2: 'Sato', 3: 'Ito' }, memberIds: { 1: 'mem-1', 2: 'mem-2', 3: 'mem-3' } };
 const CARRIED = { teamId: 'uuid-grouped', matchId: 'Pool D-0', ...NAMES, sourceMatchId: 'Pool D-0', saved: true };
@@ -63,8 +64,10 @@ afterAll(() => restoreGlobals());
 beforeEach(() => {
   sessionStorage.clear();
   api.fetchLineupInForce.mockReset().mockResolvedValue(CARRIED);
+  // A save names the positions it changed, and the server answers the lineup it holds
+  // then (lineupPutStub): the lineup in force is what it holds.
   api.putMatchLineup.mockReset().mockImplementation(
-    (_c, _t, _m, positions, _pw, memberIds) => Promise.resolve({ positions, memberIds }),
+    lineupPutStub({ positions: { ...NAMES.positions }, memberIds: { ...NAMES.memberIds } }),
   );
   api.deleteMatchLineup.mockReset().mockResolvedValue(true);
   window.confirmDialog.mockReset().mockResolvedValue(true);
@@ -164,7 +167,8 @@ describe('unsaved picks in the at-court lineup panel', () => {
     await click(saveButton(again));
 
     expect(api.putMatchLineup).toHaveBeenCalledTimes(1);
-    expect(api.putMatchLineup.mock.calls[0].slice(0, 4)).toEqual(['comp-1', 'uuid-grouped', 'Pool D-1', { 1: 'Mori', 2: 'Sato', 3: 'Ito' }]);
+    expect(api.putMatchLineup.mock.calls[0].slice(0, 4)).toEqual(['comp-1', 'uuid-grouped', 'Pool D-1', { 1: 'Mori' }]);
+    expect(api.putMatchLineup.mock.calls[0][6], 'the save names the position it changed').toEqual(['1']);
     expect(again.queryByTestId(NOTICE)).toBeNull();
     expect(sessionStorage.getItem(STORAGE_KEY)).toBeNull();
     again.unmount();
@@ -248,7 +252,7 @@ describe('the operator\'s own save, landed after the panel was closed', () => {
     const first = await mountPanel();
     await typeName(first, 1, 'Mori');
     await click(saveButton(first));
-    expect(api.putMatchLineup.mock.calls[0][5], 'the save carried the id of the member it named').toEqual({ 1: 'mem-9', 2: 'mem-2', 3: 'mem-3' });
+    expect(api.putMatchLineup.mock.calls[0][5], 'the save carried the id of the member it named').toEqual({ 1: 'mem-9' });
     first.unmount();
     api.fetchLineupInForce.mockResolvedValue(LANDED);
 

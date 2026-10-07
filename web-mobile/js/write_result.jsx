@@ -561,7 +561,8 @@ export const FETCH_TIMEOUT_MS = 12000;
 // withinDeadline: a promise's outcome, or TIMED_OUT once `ms` has passed with
 // none. Only the wait ends: the promise itself runs on. It gives a wait that is
 // not a request of its own (the team editor's save before a representative-bout
-// change, the lineup read a pick or a Save is composed on) the same bound.
+// change, the read of a side's lineup that a pick on a side never read makes) the
+// same bound.
 export const TIMED_OUT = Symbol("timed out");
 export function withinDeadline(promise, ms) {
     let timer;

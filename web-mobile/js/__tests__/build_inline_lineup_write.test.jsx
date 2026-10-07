@@ -8,6 +8,7 @@
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { buildInlineLineupWrite, mergeLineupIdsForPosition } from '../lineup_resolver.jsx';
+import { changedLineupSave } from '../lineup_save.jsx';
 
 describe('mergeLineupIdsForPosition', () => {
   it('carries existing ids forward and sets the resolved id for the changed position', () => {
@@ -59,6 +60,33 @@ describe('buildInlineLineupWrite', () => {
     expect(out.positions).toEqual({ senpo: 'Sato', jiho: 'Tanaka' });
     // Existing id carried forward; the changed one resolved.
     expect(out.memberIds).toEqual({ senpo: 'mem-sato', jiho: 'mem-tanaka' });
+  });
+
+  // Operator decision 2026-10-07, "Only changed positions": the write names the one
+  // position it changes and the server puts it on the lineup it holds. The rest of
+  // what comes back is the lineup as it will be, which the sheet shows.
+  it('names the one position it changes, and the body built from it carries that position alone', async () => {
+    global.window.AdminLineupHelpers = { resolveMemberIdsForPositions: vi.fn() };
+    const member = { id: 'mem-tanaka', index: 2, name: 'Tanaka' };
+
+    const out = await buildInlineLineupWrite('comp1', 'team1', lineup, [], 'jiho', 'Tanaka', 'pw', member);
+
+    expect(out.changed).toEqual(['jiho']);
+    expect(out.positions).toEqual({ senpo: 'Sato', jiho: 'Tanaka' });
+    expect(changedLineupSave(out.positions, out.memberIds, out.changed)).toEqual({
+      positions: { jiho: 'Tanaka' }, memberIds: { jiho: 'mem-tanaka' }, changed: ['jiho'],
+    });
+  });
+
+  it('names a cleared position too: the body says it by its empty name, which the server needs to be there', async () => {
+    global.window.AdminLineupHelpers = { resolveMemberIdsForPositions: vi.fn() };
+
+    const out = await buildInlineLineupWrite('comp1', 'team1', lineup, [], 'senpo', '', 'pw');
+
+    expect(out.changed).toEqual(['senpo']);
+    expect(changedLineupSave(out.positions, out.memberIds, out.changed)).toEqual({
+      positions: { senpo: '' }, memberIds: {}, changed: ['senpo'],
+    });
   });
 
   it('mints a new member for a name not on the squad and uses the returned id', async () => {

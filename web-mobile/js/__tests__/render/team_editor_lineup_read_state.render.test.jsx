@@ -1,6 +1,9 @@
-// A name picked in a bout row saves the WHOLE lineup for the match, and every
-// later match of the team inherits it (the carry rule). So the sheet must never
-// compose that write on a lineup it has not read, or has read and let go stale:
+// A name picked in a bout row saves the one position it names, and the server puts
+// it on the lineup it holds when the save arrives (operator decision 2026-10-07,
+// "Only changed positions"); every later match of the team inherits that lineup (the
+// carry rule). The sheet composes nothing and re-reads nothing for the write. What it
+// holds for a side is what a pick is checked against (one member at one position) and
+// what the rows show, so:
 //
 //   - both teams' lineups are read together, and a team whose lineup could not
 //     be read is told apart from one with nothing saved (null is a read);
@@ -8,10 +11,12 @@
 //     failed) reads it first and saves; it is refused, in the row, with nothing
 //     sent, only when that read fails, and a side never read is read again when
 //     the connection returns;
-//   - every write re-reads that side first and is composed on what the server
-//     holds now; when the server cannot be asked, or a save of the lineup is
-//     still waiting in the outbox, it is composed on the lineup held here, and
-//     putMatchLineup queues it when offline;
+//   - a pick on a side that was read is written at once, naming its position: no read
+//     of the lineup is made for it, a position set elsewhere since opening stays, and
+//     the lineup the server answers (the whole lineup it holds) is what the side shows;
+//   - when the server cannot be reached, or a save of the lineup is already waiting in
+//     the outbox, the pick is queued and shown on the lineup held; the API joins it to
+//     the queued save;
 //   - a read that began before a confirmed write never puts the old lineup back;
 //   - a lineup change announced for this competition is followed, but never in
 //     the middle of this sheet's own write for that side;
@@ -22,6 +27,8 @@ import React from 'react';
 import { render, act, fireEvent } from '@testing-library/react';
 import { describe, it, expect, vi, beforeAll, afterAll, beforeEach } from 'vitest';
 import { installWindowStubs } from '../helpers/stub_globals.js';
+import { answered } from '../helpers/team_members.js';
+import { lineupPutStubByTeam } from '../helpers/lineup_server.js';
 import { FETCH_TIMEOUT_MS, QUEUED_NOTICE, QUEUED_UNSAVED_NOTICE } from '../../write_result.jsx';
 
 const STUBBED_GLOBALS = {
@@ -64,7 +71,12 @@ function deferred() {
 
 const flush = () => act(async () => { await new Promise((r) => setTimeout(r, 0)); });
 
+// What the server holds by team, which a save lands its position on and answers whole
+// (lineupPutStubByTeam); a test sets it to the lineup another device left.
+let lineups;
+
 beforeEach(() => {
+  lineups = {};
   window.compMatches = () => [];
   window.compMatchesForCompetition = () => [];
   window.API = {
@@ -77,9 +89,10 @@ beforeEach(() => {
       'team-B': members('b', SHIRO_NAMES),
     }),
     fetchLineupInForce: vi.fn(async () => null),
-    putMatchLineup: vi.fn(async () => ({})),
-    renameTeamMember: vi.fn(async () => true),
-    addTeamMember: vi.fn(async (_c, _t, name) => ({ id: 'new-1', index: 6, name })),
+    putMatchLineup: lineupPutStubByTeam(() => lineups),
+    // The server answers a member write with the member it holds, stamped.
+    renameTeamMember: vi.fn(async (_c, _t, id, name) => answered({ id, index: Number(id.slice(1)) || 1 }, { name })),
+    addTeamMember: vi.fn(async (_c, _t, name) => answered({ id: 'new-1', index: 6 }, { name })),
     recordScore: vi.fn().mockResolvedValue(undefined),
     recordDaihyosen: vi.fn(),
     removeDaihyosen: vi.fn(),
@@ -234,7 +247,8 @@ describe('team editor: a pick on a side not yet read reads it first', () => {
   const OPEN = { positions: { senpo: 'Ren Abe' }, memberIds: { senpo: 'b1' } };
   const senpoInput = (container) => container.querySelectorAll('.team-sub-match')[0].querySelector('.team-sub-match__side--shiro input');
 
-  it('reads the lineup itself while the first read is still out, saves on what it read, and refuses nothing', async () => {
+  it('reads the lineup itself while the first read is still out, writes the one position, and refuses nothing', async () => {
+    lineups['team-B'] = OPEN;
     let unanswered = 2;
     window.API.fetchLineupInForce = vi.fn((_c, teamId) => {
       if (unanswered > 0) {
@@ -251,14 +265,16 @@ describe('team editor: a pick on a side not yet read reads it first', () => {
     expect(notices(container)).toHaveLength(0);
     expect(readsOf('team-B'), 'and the pick asked for itself').toBe(2);
     expect(window.API.putMatchLineup).toHaveBeenCalledTimes(1);
-    const [, teamId, matchId, positions, , memberIds] = window.API.putMatchLineup.mock.calls[0];
+    const [, teamId, matchId, positions, , memberIds, changed] = window.API.putMatchLineup.mock.calls[0];
     expect([teamId, matchId]).toEqual(['team-B', 'm1']);
-    expect(positions, 'composed on what that read answered').toEqual({ senpo: 'Ren Abe', jiho: 'Kai Mori' });
-    expect(memberIds).toEqual({ senpo: 'b1', jiho: 'b2' });
-    expect(senpoInput(container).value, 'the side is shown as read').toBe('Ren Abe');
+    expect(positions, 'names the one position it changes').toEqual({ jiho: 'Kai Mori' });
+    expect(memberIds).toEqual({ jiho: 'b2' });
+    expect(changed).toEqual(['jiho']);
+    expect(senpoInput(container).value, 'the side shows the lineup the server answered').toBe('Ren Abe');
   });
 
   it('reads the side again at the next pick after a read that failed, and saves once it can', async () => {
+    lineups['team-B'] = OPEN;
     let healthy = false;
     window.API.fetchLineupInForce = vi.fn(async (_c, teamId) => {
       if (!healthy) throw new Error('offline');
@@ -274,7 +290,8 @@ describe('team editor: a pick on a side not yet read reads it first', () => {
 
     expect(notices(container)).toHaveLength(0);
     expect(window.API.putMatchLineup).toHaveBeenCalledTimes(1);
-    expect(window.API.putMatchLineup.mock.calls[0][3]).toEqual({ senpo: 'Ren Abe', jiho: 'Kai Mori' });
+    expect(window.API.putMatchLineup.mock.calls[0][3]).toEqual({ jiho: 'Kai Mori' });
+    expect(senpoInput(container).value, 'and the side shows the lineup the server answered').toBe('Ren Abe');
   });
 
   it('shows a side that was never read once a change is announced for it', async () => {
@@ -292,16 +309,6 @@ describe('team editor: a pick on a side not yet read reads it first', () => {
     expect(senpoInput(container).value).toBe('Ren Abe');
   });
 
-  it('composes on a save waiting in the outbox without reading, even for a side never read', async () => {
-    window.API.queuedLineupSave = vi.fn((_c, teamId) => (teamId === 'team-B' ? OPEN : null));
-    window.API.fetchLineupInForce = vi.fn().mockRejectedValue(new Error('offline'));
-    const { container } = await mountFivePerson();
-
-    await typeName(jihoInput(container, 'shiro'), 'Kai Mori');
-
-    expect(notices(container)).toHaveLength(0);
-    expect(window.API.putMatchLineup.mock.calls[0][3]).toEqual({ senpo: 'Ren Abe', jiho: 'Kai Mori' });
-  });
 });
 
 describe('team editor: a side never read is read again when the connection returns', () => {
@@ -354,43 +361,10 @@ describe('team editor: a side never read is read again when the connection retur
   });
 });
 
-// A pick whose own read gave up waiting writes on the lineup held and goes on;
-// that read is still out, and answers with the lineup from before the write.
+// A read begun by an announcement before the pick can still be out when the pick
+// writes, and answers with the lineup from before the write.
 describe('team editor: a confirmed write is not undone by a read that began before it', () => {
   const OPEN = { positions: { senpo: 'Ren Abe' }, memberIds: { senpo: 'b1' } };
-
-  it('keeps what was written when the read the pick gave up on answers afterwards', async () => {
-    const late = deferred();
-    let shiroReads = 0;
-    window.API.fetchLineupInForce = vi.fn((_c, teamId) => {
-      if (teamId !== 'team-B') return Promise.resolve(null);
-      shiroReads += 1;
-      return shiroReads === 1 ? Promise.resolve(OPEN) : late.promise;
-    });
-    const { container } = await mountFivePerson();
-
-    vi.useFakeTimers();
-    try {
-      const input = jihoInput(container, 'shiro');
-      await act(async () => {
-        fireEvent.focus(input);
-        fireEvent.change(input, { target: { value: 'Kai Mori' } });
-        fireEvent.keyDown(input, { key: 'Enter' });
-      });
-      await act(async () => { vi.advanceTimersByTime(FETCH_TIMEOUT_MS); });
-      await act(async () => { await Promise.resolve(); });
-    } finally {
-      vi.useRealTimers();
-    }
-    await flush();
-    expect(window.API.putMatchLineup).toHaveBeenCalledTimes(1);
-    expect(jihoInput(container, 'shiro').value, 'the row shows what was written').toBe('Kai Mori');
-
-    await act(async () => { late.resolve(OPEN); });
-    await flush();
-
-    expect(jihoInput(container, 'shiro').value, 'the lineup from before the write does not come back').toBe('Kai Mori');
-  });
 
   it('keeps what was written when a read begun by an announcement before it answers afterwards', async () => {
     const reads = [];
@@ -406,76 +380,62 @@ describe('team editor: a confirmed write is not undone by a read that began befo
     await announceLineupChange({ competitionId: 'comp1' });
     expect(reads).toHaveLength(2);
 
-    vi.useFakeTimers();
-    try {
-      const input = jihoInput(container, 'shiro');
-      await act(async () => {
-        fireEvent.focus(input);
-        fireEvent.change(input, { target: { value: 'Kai Mori' } });
-        fireEvent.keyDown(input, { key: 'Enter' });
-      });
-      await act(async () => { vi.advanceTimersByTime(FETCH_TIMEOUT_MS); });
-      await act(async () => { await Promise.resolve(); });
-    } finally {
-      vi.useRealTimers();
-    }
-    await flush();
+    await typeName(jihoInput(container, 'shiro'), 'Kai Mori');
+    expect(window.API.putMatchLineup).toHaveBeenCalledTimes(1);
     expect(jihoInput(container, 'shiro').value).toBe('Kai Mori');
 
-    await act(async () => { reads[1].resolve(OPEN); reads[2].resolve(OPEN); });
+    await act(async () => { reads[1].resolve(OPEN); });
     await flush();
 
-    expect(jihoInput(container, 'shiro').value).toBe('Kai Mori');
+    expect(jihoInput(container, 'shiro').value, 'the lineup from before the write does not come back').toBe('Kai Mori');
   });
 });
 
-describe('team editor: a lineup write is composed on the lineup the server holds now', () => {
+describe('team editor: a pick names the one position it changes', () => {
   const OPEN = { positions: { senpo: 'Ren Abe' }, memberIds: { senpo: 'b1' } };
   const NOW = { positions: { senpo: 'Ren Abe', fukusho: 'Rin Ota' }, memberIds: { senpo: 'b1', fukusho: 'b4' } };
+  const shiroInputAt = (container, row) => container.querySelectorAll('.team-sub-match')[row].querySelector('.team-sub-match__side--shiro input');
 
-  it.each([
-    ['the outbox cannot be asked', undefined],
-    ['no save of the lineup is queued', () => false],
-  ])('re-reads first, so a position set elsewhere since opening is not written away (%s)', async (_what, queuedLineupSave) => {
-    window.API.queuedLineupSave = queuedLineupSave;
-    let shiroReads = 0;
-    window.API.fetchLineupInForce = vi.fn(async (_c, teamId) => {
-      if (teamId !== 'team-B') return null;
-      shiroReads += 1;
-      return shiroReads === 1 ? OPEN : NOW;
-    });
+  it('writes the one position and reads nothing for it, so a position set elsewhere since opening stays', async () => {
+    window.API.fetchLineupInForce = vi.fn(async (_c, teamId) => (teamId === 'team-B' ? OPEN : null));
     const { container } = await mountFivePerson();
+    // Another device set fukusho after this sheet read the lineup.
+    lineups['team-B'] = NOW;
+    expect(shiroInputAt(container, 3).value, 'this sheet has not heard of it').toBe('');
 
     await typeName(jihoInput(container, 'shiro'), 'Kai Mori');
 
+    expect(readsOf('team-B'), 'the lineup is not read for the pick').toBe(1);
     expect(window.API.putMatchLineup).toHaveBeenCalledTimes(1);
-    const [, teamId, matchId, positions, , memberIds] = window.API.putMatchLineup.mock.calls[0];
+    const [, teamId, matchId, positions, , memberIds, changed] = window.API.putMatchLineup.mock.calls[0];
     expect([teamId, matchId]).toEqual(['team-B', 'm1']);
-    expect(positions).toEqual({ senpo: 'Ren Abe', fukusho: 'Rin Ota', jiho: 'Kai Mori' });
-    expect(memberIds).toEqual({ senpo: 'b1', fukusho: 'b4', jiho: 'b2' });
-  });
-
-  it('writes on the lineup it holds when the lineup cannot be read again, and does not refuse', async () => {
-    let shiroReads = 0;
-    window.API.fetchLineupInForce = vi.fn(async (_c, teamId) => {
-      if (teamId !== 'team-B') return null;
-      shiroReads += 1;
-      if (shiroReads > 1) throw new Error('offline');
-      return OPEN;
-    });
-    const { container } = await mountFivePerson();
-
-    await typeName(jihoInput(container, 'shiro'), 'Kai Mori');
-
+    expect(positions).toEqual({ jiho: 'Kai Mori' });
+    expect(memberIds).toEqual({ jiho: 'b2' });
+    expect(changed).toEqual(['jiho']);
+    // The server put it on the lineup it holds, and what it answered is what the side shows.
+    expect(lineups['team-B'].positions).toEqual({ senpo: 'Ren Abe', fukusho: 'Rin Ota', jiho: 'Kai Mori' });
+    expect(shiroInputAt(container, 3).value, 'the position another device set shows after the write').toBe('Rin Ota');
     expect(notices(container)).toHaveLength(0);
-    expect(window.API.putMatchLineup).toHaveBeenCalledTimes(1);
-    const [, teamId, matchId, positions, , memberIds] = window.API.putMatchLineup.mock.calls[0];
-    expect([teamId, matchId]).toEqual(['team-B', 'm1']);
-    expect(positions).toEqual({ senpo: 'Ren Abe', jiho: 'Kai Mori' });
-    expect(memberIds).toEqual({ senpo: 'b1', jiho: 'b2' });
   });
 
-  it('keeps writing on the lineup it holds, pick after pick, while the server cannot be reached', async () => {
+  it('writes a cleared name as that position\'s empty name, which the server needs to be there', async () => {
+    window.API.fetchLineupInForce = vi.fn(async (_c, teamId) => (teamId === 'team-B' ? OPEN : null));
+    lineups['team-B'] = OPEN;
+    const { container } = await mountFivePerson();
+
+    const clear = container.querySelectorAll('.team-sub-match')[0].querySelector('.team-sub-match__side--shiro .lineup-name__clear');
+    await act(async () => { fireEvent.click(clear); });
+    await flush();
+
+    expect(window.API.putMatchLineup).toHaveBeenCalledTimes(1);
+    const [, , , positions, , memberIds, changed] = window.API.putMatchLineup.mock.calls[0];
+    expect(positions).toEqual({ senpo: '' });
+    expect(memberIds).toBeUndefined();
+    expect(changed).toEqual(['senpo']);
+    expect(lineups['team-B'].positions, 'the server cleared it').toEqual({});
+  });
+
+  it('keeps writing, pick after pick, while the server cannot be reached: each is queued with its own position and shown', async () => {
     let reachable = true;
     window.API.fetchLineupInForce = vi.fn(async (_c, teamId) => {
       if (!reachable) throw new Error('offline');
@@ -486,7 +446,7 @@ describe('team editor: a lineup write is composed on the lineup the server holds
     reachable = false;
 
     await typeName(jihoInput(container, 'shiro'), 'Kai Mori');
-    const chuken = container.querySelectorAll('.team-sub-match')[2].querySelector('.team-sub-match__side--shiro input');
+    const chuken = shiroInputAt(container, 2);
     await typeName(chuken, 'Yui Sato');
 
     // Each pick only reached the outbox, and says so in its row (the latest pick's: a
@@ -494,7 +454,13 @@ describe('team editor: a lineup write is composed on the lineup the server holds
     // would have the operator believe it was.
     expect([...notices(container)].map((n) => n.textContent)).toEqual([QUEUED_NOTICE]);
     expect(window.API.putMatchLineup).toHaveBeenCalledTimes(2);
-    expect(window.API.putMatchLineup.mock.calls[1][3]).toEqual({ senpo: 'Ren Abe', jiho: 'Kai Mori', chuken: 'Yui Sato' });
+    expect(window.API.putMatchLineup.mock.calls[0][3]).toEqual({ jiho: 'Kai Mori' });
+    expect(window.API.putMatchLineup.mock.calls[1][3], 'its own position, not the lineup').toEqual({ chuken: 'Yui Sato' });
+    expect(window.API.putMatchLineup.mock.calls[1][6]).toEqual(['chuken']);
+    // Neither reached the server, and both are shown on the lineup held.
+    expect(shiroInputAt(container, 0).value).toBe('Ren Abe');
+    expect(jihoInput(container, 'shiro').value).toBe('Kai Mori');
+    expect(chuken.value).toBe('Yui Sato');
   });
 
   describe('a pick that only reached the outbox is not reported as saved', () => {
@@ -541,63 +507,45 @@ describe('team editor: a lineup write is composed on the lineup the server holds
     });
   });
 
-  it('writes on the lineup it holds, and frees the boxes, when the lineup is not answered in time', async () => {
-    let shiroReads = 0;
-    window.API.fetchLineupInForce = vi.fn((_c, teamId) => {
-      if (teamId !== 'team-B') return Promise.resolve(null);
-      shiroReads += 1;
-      return shiroReads === 1 ? Promise.resolve(OPEN) : new Promise(() => {});
-    });
-    const { container } = await mountFivePerson();
+  // The pick is checked against the lineup the sheet holds: the one it read, kept by
+  // what it announces and by its own writes. The server asks the same of the lineup it
+  // composes, and refuses naming both positions when another device placed the member.
+  describe('is checked against the lineup the sheet holds', () => {
+    const PLACED = { positions: { senpo: 'Kai Mori', chuken: 'Ren Abe' }, memberIds: { senpo: 'b2', chuken: 'b1' } };
 
-    vi.useFakeTimers();
-    try {
-      const input = jihoInput(container, 'shiro');
-      await act(async () => {
-        fireEvent.focus(input);
-        fireEvent.change(input, { target: { value: 'Kai Mori' } });
-        fireEvent.keyDown(input, { key: 'Enter' });
-      });
-      expect(input.disabled, 'the boxes wait while the lineup is read').toBe(true);
+    it('refuses a member that lineup already places elsewhere, and sends nothing', async () => {
+      window.API.fetchLineupInForce = vi.fn(async (_c, teamId) => (teamId === 'team-B' ? PLACED : null));
+      const { container } = await mountFivePerson();
+
+      // Ren Abe is at chuken, so this pick is refused.
+      await typeName(jihoInput(container, 'shiro'), 'Ren Abe');
+
       expect(window.API.putMatchLineup).not.toHaveBeenCalled();
-      await act(async () => { vi.advanceTimersByTime(FETCH_TIMEOUT_MS); });
-      await act(async () => { await Promise.resolve(); });
-    } finally {
-      vi.useRealTimers();
-    }
-
-    expect(notices(container)).toHaveLength(0);
-    expect(window.API.putMatchLineup).toHaveBeenCalledTimes(1);
-    expect(window.API.putMatchLineup.mock.calls[0][3]).toEqual({ senpo: 'Ren Abe', jiho: 'Kai Mori' });
-    expect(jihoInput(container, 'shiro').disabled).toBe(false);
-  });
-
-  it('shows the lineup it re-read, not the one from opening, after a write it refused', async () => {
-    let shiroReads = 0;
-    window.API.fetchLineupInForce = vi.fn(async (_c, teamId) => {
-      if (teamId !== 'team-B') return null;
-      shiroReads += 1;
-      return shiroReads === 1 ? { positions: { senpo: 'Ren Abe' }, memberIds: { senpo: 'b1' } }
-        : { positions: { senpo: 'Kai Mori', chuken: 'Ren Abe' }, memberIds: { senpo: 'b2', chuken: 'b1' } };
+      expect(notices(container)[0].textContent).toBe('Ren Abe is already at Chuken.');
+      expect(shiroInputAt(container, 0).value).toBe('Kai Mori');
     });
-    const { container } = await mountFivePerson();
-    const senpoInput = () => container.querySelectorAll('.team-sub-match')[0].querySelector('.team-sub-match__side--shiro input');
-    expect(senpoInput().value).toBe('Ren Abe');
 
-    // Ren Abe is at chuken in the lineup it re-reads, so this pick is refused.
-    await typeName(jihoInput(container, 'shiro'), 'Ren Abe');
+    it('judges a pick against what a change announced since opening brought', async () => {
+      let placed = false;
+      window.API.fetchLineupInForce = vi.fn(async (_c, teamId) => (teamId === 'team-B' ? (placed ? PLACED : OPEN) : null));
+      const { container } = await mountFivePerson();
+      placed = true;
+      await announceLineupChange({ competitionId: 'comp1' });
+      expect(shiroInputAt(container, 2).value).toBe('Ren Abe');
 
-    expect(window.API.putMatchLineup).not.toHaveBeenCalled();
-    expect(notices(container)[0].textContent).toBe('Ren Abe is already at Chuken.');
-    expect(senpoInput().value, 'the rows show the lineup it re-read').toBe('Kai Mori');
+      await typeName(jihoInput(container, 'shiro'), 'Ren Abe');
+
+      expect(window.API.putMatchLineup).not.toHaveBeenCalled();
+      expect(notices(container)[0].textContent).toBe('Ren Abe is already at Chuken.');
+    });
   });
 });
 
-// A save of the lineup still waiting in the outbox is not on the server yet, so
-// the server's copy lacks that edit, and putMatchLineup would replace the queued
-// save with whatever the next write is composed on. API.queuedLineupSave answers
-// with the lineup that save would write, whichever surface queued it (this sheet,
-// the at-court panel or the Lineups page), and the write is composed on that.
+// A save of the lineup still waiting in the outbox is not on the server yet. The API
+// joins a new save to it (one entry per lineup, the union of the positions), so the
+// sheet names its own position and composes nothing on what is queued, whichever
+// surface queued it (this sheet, the at-court panel or the Lineups page).
+// API.queuedLineupSave only says whether one is queued.
 describe('team editor: a save of this lineup is still waiting in the outbox', () => {
   const OPEN = { positions: { senpo: 'Ren Abe' }, memberIds: { senpo: 'b1' } };
   const SERVER_COPY = { positions: { senpo: 'Ren Abe', fukusho: 'Rin Ota' }, memberIds: { senpo: 'b1', fukusho: 'b4' } };
@@ -612,60 +560,26 @@ describe('team editor: a save of this lineup is still waiting in the outbox', ()
     });
   }
 
-  it('composes the write on the lineup that save would write, and does not read the server\'s copy', async () => {
-    window.API.queuedLineupSave = vi.fn(() => OPEN);
+  it('writes its own position alone and reads nothing for it', async () => {
+    window.API.queuedLineupSave = vi.fn(() => true);
     serverAnswering(SERVER_COPY);
     const { container } = await mountFivePerson();
 
     await typeName(jihoInput(container, 'shiro'), 'Kai Mori');
 
-    expect(window.API.queuedLineupSave).toHaveBeenCalledWith('comp1', 'team-B', { matchId: 'm1' });
     expect(readsOf('team-B'), 'only the read at opening').toBe(1);
     expect(window.API.putMatchLineup).toHaveBeenCalledTimes(1);
-    const [, teamId, , positions, , memberIds] = window.API.putMatchLineup.mock.calls[0];
+    const [, teamId, , positions, , memberIds, changed] = window.API.putMatchLineup.mock.calls[0];
     expect(teamId).toBe('team-B');
-    expect(positions).toEqual({ senpo: 'Ren Abe', jiho: 'Kai Mori' });
-    expect(memberIds).toEqual({ senpo: 'b1', jiho: 'b2' });
-  });
-
-  it('composes the write on a save another surface queued, never on the lineup it holds', async () => {
-    // The at-court panel or the Lineups page queued this lineup on this device while
-    // offline. The lineup this sheet read at opening is out of date against it:
-    // composed on that, the write would take the queued save's place and lose it.
-    const STALE = { positions: { senpo: 'Ren Abe', jiho: 'Rin Ota' }, memberIds: { senpo: 'b1', jiho: 'b4' } };
-    const QUEUED = { positions: { jiho: 'Kai Mori', chuken: 'Sho Ueda' }, memberIds: { jiho: 'b2', chuken: 'b5' } };
-    window.API.queuedLineupSave = vi.fn(() => QUEUED);
-    window.API.fetchLineupInForce = vi.fn(async (_c, teamId) => (teamId === 'team-B' ? STALE : null));
-    const { container } = await mountFivePerson();
-
-    await typeName(senpoInput(container), 'Yui Sato');
-
-    expect(readsOf('team-B'), 'only the read at opening').toBe(1);
-    expect(window.API.putMatchLineup).toHaveBeenCalledTimes(1);
-    const [, teamId, matchId, positions, , memberIds] = window.API.putMatchLineup.mock.calls[0];
-    expect([teamId, matchId]).toEqual(['team-B', 'm1']);
-    expect(positions, 'the queued lineup plus this pick, and nothing the held one contradicts it with').toEqual({
-      jiho: 'Kai Mori', chuken: 'Sho Ueda', senpo: 'Yui Sato',
-    });
-    expect(memberIds).toEqual({ jiho: 'b2', chuken: 'b5', senpo: 'b3' });
-  });
-
-  it('asks about the side it writes, and only that side is composed on a queued lineup', async () => {
-    window.API.queuedLineupSave = vi.fn((_c, teamId) => (teamId === 'team-B' ? OPEN : null));
-    serverAnswering(SERVER_COPY);
-    const { container } = await mountFivePerson();
-
-    await typeName(jihoInput(container, 'aka'), 'A Two');
-
-    expect(window.API.queuedLineupSave).toHaveBeenCalledWith('comp1', 'team-A', { matchId: 'm1' });
-    expect(readsOf('team-A'), 'Aka has nothing queued: it reads again before writing').toBe(2);
-    expect(window.API.putMatchLineup.mock.calls[0][1]).toBe('team-A');
+    expect(positions).toEqual({ jiho: 'Kai Mori' });
+    expect(memberIds).toEqual({ jiho: 'b2' });
+    expect(changed).toEqual(['jiho']);
   });
 
   it('keeps showing the lineup it holds when a read answers with the server\'s copy meanwhile', async () => {
     let queued = false;
     let serverCopy = OPEN;
-    window.API.queuedLineupSave = vi.fn(() => (queued ? OPEN : null));
+    window.API.queuedLineupSave = vi.fn(() => queued);
     window.API.fetchLineupInForce = vi.fn(async (_c, teamId) => (teamId === 'team-B' ? serverCopy : null));
     const { container } = await mountFivePerson();
     expect(senpoInput(container).value).toBe('Ren Abe');
@@ -682,7 +596,7 @@ describe('team editor: a save of this lineup is still waiting in the outbox', ()
   });
 
   it('still shows the lineup read at opening when a save was already queued then', async () => {
-    window.API.queuedLineupSave = vi.fn(() => OPEN);
+    window.API.queuedLineupSave = vi.fn(() => true);
     serverAnswering(SERVER_COPY);
     const { container } = await mountFivePerson();
 
@@ -789,23 +703,23 @@ describe('team editor: it follows a lineup change announced for this competition
 
     await typeName(jihoInput(container, 'shiro'), 'Kai Mori');
     expect(window.API.putMatchLineup).toHaveBeenCalledTimes(1);
-    // Mount read each team once; the pick's own re-read took Shiro's second.
-    expect([readsOf('team-A'), readsOf('team-B')]).toEqual([1, 2]);
+    // Mount read each team once; the pick read nothing.
+    expect([readsOf('team-A'), readsOf('team-B')]).toEqual([1, 1]);
 
     await announceLineupChange({ competitionId: 'comp1' });
     expect(readsOf('team-A'), 'the side nobody is writing is read at once').toBe(2);
-    expect(readsOf('team-B'), 'the side being written waits').toBe(2);
+    expect(readsOf('team-B'), 'the side being written waits').toBe(1);
 
-    await act(async () => { put.resolve({}); });
+    await act(async () => { put.resolve({ positions: { jiho: 'Kai Mori' }, memberIds: { jiho: 'b2' } }); });
     await flush();
-    expect(readsOf('team-B'), 'and is read once its write has settled').toBe(3);
+    expect(readsOf('team-B'), 'and is read once its write has settled').toBe(2);
     expect(readsOf('team-A')).toBe(2);
   });
 
   it('does not read a side again after a write when nothing was announced meanwhile', async () => {
     const { container } = await mountFivePerson();
     await typeName(jihoInput(container, 'shiro'), 'Kai Mori');
-    expect([readsOf('team-A'), readsOf('team-B')]).toEqual([1, 2]);
+    expect([readsOf('team-A'), readsOf('team-B')]).toEqual([1, 1]);
   });
 });
 

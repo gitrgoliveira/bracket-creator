@@ -550,6 +550,23 @@ type Competition struct {
 	// sends can change it.
 	RoundLineupsGiven map[string][]string `yaml:"round_lineups_given,omitempty" json:"-"`
 
+	// RoundLineupsLegacy records, while RoundLineupsConverted is false, the teams
+	// the conversion's FIRST settlement of this competition found to be legacy:
+	// the participant ids, sorted, of every team with a lineup for a round r >= 1
+	// or with a match lineup, stored under its id, for a match of the draw that
+	// seats it (v2.1.1 read a match's own lineup and never carried it to another
+	// match, so such a team is shown, at its other matches, what v2.1.1 showed
+	// and not what a team now carries). Later settlements read the list, plus any
+	// team with a lineup for a later round, so a match lineup saved by this
+	// release never makes a team legacy. It is also how a later settlement tells
+	// the first one is done: after it a competition is either marked or has a
+	// legacy team to wait for, so the list is not empty. The conversion clears it
+	// with the marker, and ClearDrawLineups drops from it every team with no lineup
+	// for a later round, whose match lineups went with the draw. Server-managed
+	// like the marker: `json:"-"` keeps it off the wire, and the settings PUT
+	// copies onto the stored record, so nothing a client sends can change it.
+	RoundLineupsLegacy []string `yaml:"round_lineups_legacy,omitempty" json:"-"`
+
 	Players []domain.Player `yaml:"-" json:"players"`
 }
 

@@ -19,11 +19,15 @@ The lineup panel for a match says where the lineup it shows comes from: **Lineup
 
 To go back to the previous match's lineup, choose **Use the previous match's lineup**, on the **Lineups** page or at the top of the lineup panel. It appears while the lineup shown is the match's own, asks first, and removes that lineup, so the match carries the team's previous lineup again. Every later match that has no lineup of its own follows it.
 
+Saving a lineup writes only the positions you changed. If someone saves a change to another position of the same lineup from a different device, both changes are kept, whichever save arrives first, even when yours is sent later because this device was offline. If you both changed the same position, the save that arrives last is kept.
+
 Changes you make to a lineup and have not saved are kept in that browser tab, so a reload, going back, or closing the lineup panel does not lose them. When you open the same lineup again, on the **Lineups** page or in the lineup panel, it shows **Unsaved lineup changes restored** with a **Discard** button that puts the saved lineup back. Nothing is saved until you press **Save lineup**. If the lineup changed in the meantime, for example saved from another device, the kept changes are not applied, and a notice lists the names that were not restored.
 
 Lineups that an earlier version of the app saved on the **Lineups** page for a round are converted when the app starts, so every match shows the lineup that version showed for it. Each match the team is seated in gets that lineup as its own, and a match the team reaches later, such as its next knockout match, gets it as soon as the team is seated there. You can change or remove any of these like any other match's lineup, and a lineup you remove stays removed. A team with no **Starting lineup** gets the lineup of its latest round as its **Starting lineup**, which is what that version showed before the team's first saved round. The round lineups themselves are removed once the competition is completed.
 
-Discarding a draw removes the lineups of its matches, including those converted from an earlier version, since a new draw makes new matches. The new draw's matches are given the converted lineups again, and each team's **Starting lineup** stays.
+That version also used a lineup entered for a match for that match only. A team that had one is converted the same way, so each of its matches shows what that version showed there: the lineup entered for that match, else the team's **Starting lineup**, or no lineup when the team had none. A lineup you enter after the upgrade is carried to later matches as usual.
+
+Discarding a draw removes the lineups of its matches, including those converted from an earlier version, since a new draw makes new matches. The new draw's matches are given the lineups converted from round lineups again, and each team's **Starting lineup** stays. Lineups that version entered for a match went with the old draw, so those teams carry their lineups like any other.
 
 ### Team members
 

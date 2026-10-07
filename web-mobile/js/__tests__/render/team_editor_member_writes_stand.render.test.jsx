@@ -1,6 +1,7 @@
 // A name typed in a bout row names or adds a team member on the server, and the
-// sheet shows that member from then on. A list of the team's members that was read
-// before the write must not undo it, whichever way the list reaches the sheet:
+// sheet shows that member from then on. The server stamps every member write
+// (`modifiedAt`) and answers the member with its stamp, and of two copies of a member
+// the sheet keeps the one with the larger stamp, whichever way a list reaches it:
 //
 //   - an admin host leaves the sheet to read the members itself, once as it opens and
 //     again when the competition arrives, and the second read can answer after a name
@@ -11,17 +12,17 @@
 // Undone, a member the sheet had just named shows as unnamed again, so the same name
 // typed for another bout finds nobody and names a second member instead of being
 // refused by the duplicate guard, and a member the sheet had just added vanishes with
-// its number. A list that shows the write is the server catching up: after it, a
-// change made elsewhere shows. So does a list that shows neither the name written nor
-// the name the member had before it: it was not read before the write, so another
-// device gave the member that name, and it shows at once. The admin sheet reads its
-// members again whenever a lineup change is announced for its competition, so such a
-// change shows without reopening the sheet.
+// its number. A list read before the write holds the member with an older stamp, so it
+// undoes nothing; a list that holds a larger stamp was written after, by another device,
+// and shows at once. The admin sheet reads its members again whenever a lineup change is
+// announced for its competition, so such a change shows without reopening the sheet.
 
 import React from 'react';
 import { render, act, fireEvent, screen } from '@testing-library/react';
 import { describe, it, expect, vi, beforeAll, afterAll, beforeEach } from 'vitest';
 import { installWindowStubs } from '../helpers/stub_globals.js';
+import { answered, namedLater } from '../helpers/team_members.js';
+import { lineupPutStubByTeam } from '../helpers/lineup_server.js';
 import { FETCH_TIMEOUT_MS } from '../../write_result.jsx';
 
 const STUBBED_GLOBALS = {
@@ -89,12 +90,12 @@ beforeEach(() => {
     fetchCompetitionDetails: vi.fn(() => competition.promise),
     fetchSquads: vi.fn(() => new Promise((resolve, reject) => { memberReads.push(resolve); memberFailures.push(reject); })),
     fetchLineupInForce: vi.fn(async (_c, teamId) => lineups[teamId] || null),
-    putMatchLineup: vi.fn(async (_c, teamId, _m, positions, _pw, memberIds) => {
-      lineups[teamId] = { positions, memberIds: memberIds || {} };
-      return {};
-    }),
-    renameTeamMember: vi.fn(async () => true),
-    addTeamMember: vi.fn(async (_c, _t, name) => ({ id: 'new-1', index: 6, name })),
+    // A save names the position it changed, and the server answers the lineup it holds then.
+    putMatchLineup: lineupPutStubByTeam(() => lineups),
+    // The server answers a member write with the member it holds, stamped. The ids here
+    // are the letter of the team and the member's number.
+    renameTeamMember: vi.fn(async (_c, _t, id, name) => answered({ id, index: Number(id.slice(1)) }, { name })),
+    addTeamMember: vi.fn(async (_c, _t, name) => answered({ id: 'new-1', index: 6 }, { name })),
     recordScore: vi.fn().mockResolvedValue(undefined),
     recordDaihyosen: vi.fn(),
     removeDaihyosen: vi.fn(),
@@ -279,13 +280,19 @@ describe('team editor: the host\'s copy of the members that predates the sheet\'
     await flush();
   });
 
-  it('keeps the member the sheet named until the copy shows the name, then follows a rename made elsewhere', async () => {
+  // The member as the server answered the sheet's write, and the host's copy of team A
+  // with that member in place of the unnamed a1.
+  const written = () => window.API.renameTeamMember.mock.results[0].value;
+  const copyWith = (member) => ({ 'team-A': [member, ...blank('a').slice(1)], 'team-B': blank('b') });
+
+  it('keeps the member the sheet named over a copy that predates the write, and a copy that holds the write changes nothing', async () => {
     await typeName(aka(0), 'Mei Ito');
     expect(window.API.renameTeamMember).toHaveBeenCalledWith('c1', 'team-A', 'a1', 'Mei Ito', '');
     expect(aka(0).value).toBe('Mei Ito');
 
-    // A copy refreshed before the write reached the server: a1 has no name in it. The
-    // other team's list changed too, which is what makes the sheet take the copy in.
+    // A copy refreshed before the write reached the server: a1 has no name in it, and no
+    // stamp. The other team's list changed too, which is what makes the sheet take the
+    // copy in.
     await hostHolds({ 'team-A': blank('a'), 'team-B': [...blank('b'), { id: 'b6', index: 6, name: '' }] });
     await typeName(aka(1), 'Mei Ito');
 
@@ -295,12 +302,23 @@ describe('team editor: the host\'s copy of the members that predates the sheet\'
     expect(notices(document)[0].textContent).toBe('Mei Ito is already at Senpo.');
 
     // The copy that has the write: the server has caught up.
-    await hostHolds({ 'team-A': [{ id: 'a1', index: 1, name: 'Mei Ito' }, ...blank('a').slice(1)], 'team-B': blank('b') });
+    await hostHolds(copyWith(await written()));
+    expect(aka(0).value).toBe('Mei Ito');
+  });
+
+  it('shows a rename another device made after the sheet\'s own write, and follows the copies after it', async () => {
+    await typeName(aka(0), 'Mei Ito');
+    const mine = await written();
+    await hostHolds(copyWith(mine));
     expect(aka(0).value).toBe('Mei Ito');
 
-    // Another device renames the member: that shows now.
-    await hostHolds({ 'team-A': [{ id: 'a1', index: 1, name: 'Mei Ito-Kato' }, ...blank('a').slice(1)], 'team-B': blank('b') });
+    // Another device renames the member: its stamp is the larger, so that shows now.
+    const theirs = namedLater(mine, 'Mei Ito-Kato');
+    await hostHolds(copyWith(theirs));
     expect(aka(0).value).toBe('Mei Ito-Kato');
+
+    await hostHolds(copyWith(namedLater(theirs, 'Mei Ito-Kato Jr')));
+    expect(aka(0).value).toBe('Mei Ito-Kato Jr');
   });
 
   it('keeps the name the sheet wrote over a copy that still holds the name the member had before the write', async () => {
@@ -313,18 +331,19 @@ describe('team editor: the host\'s copy of the members that predates the sheet\'
     expect(aka(0).value).toBe('Mei Ito');
   });
 
-  // A copy that holds neither the name written nor the name the member had was not read
-  // before the write: another device gave the member that name, so it shows, and the write
-  // is done with.
-  it('shows the name a copy gives the member the sheet named when another device gave it, and follows the copies after', async () => {
+  // The stamp, not the name, says which copy is newer: a copy that holds a name the member
+  // never had before the write but carries an OLDER stamp was read before it, so it
+  // undoes nothing; the same name with a larger stamp was given after the write, and shows.
+  it('tells another device\'s name from a stale copy by the stamp: an older stamp changes nothing, a larger one shows', async () => {
     await typeName(aka(0), 'Mei Ito');
+    const mine = await written();
     expect(aka(0).value).toBe('Mei Ito');
 
-    await hostHolds({ 'team-A': [{ id: 'a1', index: 1, name: 'Mei Endo' }, ...blank('a').slice(1)], 'team-B': blank('b') });
-    expect(aka(0).value, 'another device\'s name shows over the sheet\'s own').toBe('Mei Endo');
+    await hostHolds(copyWith({ ...mine, name: 'Mei Endo', modifiedAt: mine.modifiedAt - 1 }));
+    expect(aka(0).value, 'a name with an older stamp was read before the write').toBe('Mei Ito');
 
-    await hostHolds({ 'team-A': [{ id: 'a1', index: 1, name: 'Mei Endo-Kato' }, ...blank('a').slice(1)], 'team-B': blank('b') });
-    expect(aka(0).value, 'and the sheet\'s write no longer stands over what the copy holds').toBe('Mei Endo-Kato');
+    await hostHolds(copyWith(namedLater(mine, 'Mei Endo')));
+    expect(aka(0).value, 'a name with a larger stamp was given after it').toBe('Mei Endo');
   });
 
   // The public page's copy follows lineup changes through the host's own refresh, so the
@@ -385,23 +404,62 @@ describe('team editor: the admin sheet follows the members another device change
     expect(after.some((o) => o.includes('Ren Abe')), 'the name another device cleared').toBe(false);
   });
 
-  it('shows a rename made elsewhere of a member the sheet named, once a read has shown the sheet\'s own name', async () => {
+  // The list a read answers once the server holds `first` as the first member, as the
+  // write's own answer stamped it.
+  const shiroWith = (first, ...rest) => ({ 'team-A': AKA, 'team-B': [first, ...members('b', ['', ...rest]).slice(1)] });
+
+  it('shows a rename made elsewhere of a member the sheet named, however the sheet\'s own write was read', async () => {
     const { container } = await open(['', ...OTHERS]);
     await typeName(bout(container, 0, 'shiro'), 'Ito');
     expect(window.API.renameTeamMember).toHaveBeenCalledWith('comp1', 'team-B', 'b1', 'Ito', '');
     expect(bout(container, 0, 'shiro').value).toBe('Ito');
+    const mine = await window.API.renameTeamMember.mock.results[0].value;
 
-    // The server announces the rename, and the read holds it.
+    // The server announces the rename, and the read holds it, with the stamp of the write.
     await announce();
-    await act(async () => { memberReads[2](shiro('Ito', ...OTHERS)); });
+    await act(async () => { memberReads[2](shiroWith(mine, ...OTHERS)); });
     await flush();
     expect(bout(container, 0, 'shiro').value).toBe('Ito');
 
-    // Another device renames the member: it shows, where the sheet's write used to stand over it.
+    // Another device renames the member: its stamp is the larger, so that shows.
     await announce();
-    await act(async () => { memberReads[3](shiro('Itoh', ...OTHERS)); });
+    await act(async () => { memberReads[3](shiroWith(namedLater(mine, 'Itoh'), ...OTHERS)); });
     await flush();
     expect(bout(container, 0, 'shiro').value).toBe('Itoh');
+  });
+
+  it('shows another device\'s later rename of a member the sheet named even when no read has shown the sheet\'s own name first', async () => {
+    const { container } = await open(['', ...OTHERS]);
+    await typeName(bout(container, 0, 'shiro'), 'Ito');
+    const mine = await window.API.renameTeamMember.mock.results[0].value;
+
+    await announce();
+    await act(async () => { memberReads[2](shiroWith(namedLater(mine, 'Itoh'), ...OTHERS)); });
+    await flush();
+
+    expect(bout(container, 0, 'shiro').value).toBe('Itoh');
+  });
+
+  it('keeps the member the sheet named over a read begun before the write that answers after it, and over one the write\'s own answer is older than', async () => {
+    const { container } = await open(['', ...OTHERS]);
+    await announce();
+    await typeName(bout(container, 0, 'shiro'), 'Ito');
+    const mine = await window.API.renameTeamMember.mock.results[0].value;
+    // A read of what the server held before the write answers after it.
+    await act(async () => { memberReads[2](shiro('', ...OTHERS)); });
+    await flush();
+    expect(bout(container, 0, 'shiro').value, 'the older list does not undo the write').toBe('Ito');
+
+    // A list another device's later rename made, then the answer of this sheet's own write
+    // arriving once more (a retry of the same write is the same stamp): the larger stays.
+    await announce();
+    await act(async () => { memberReads[3](shiroWith(namedLater(mine, 'Itoh'), ...OTHERS)); });
+    await flush();
+    expect(bout(container, 0, 'shiro').value).toBe('Itoh');
+    await announce();
+    await act(async () => { memberReads[4](shiroWith(mine, ...OTHERS)); });
+    await flush();
+    expect(bout(container, 0, 'shiro').value, 'a list holding only this sheet\'s own, older copy does not undo the later rename').toBe('Itoh');
   });
 
   // Only the read made as the sheet opens says the members could not be read: a later one
@@ -430,20 +488,63 @@ describe('team editor: the admin sheet follows the members another device change
     expect(bout(container, 0, 'shiro').value).toBe('Ito');
   });
 
-  it('takes the answers in the order their reads began: an older answer arriving after a newer one is ignored', async () => {
-    const { container } = await open(['Ren Abe', ...OTHERS]);
-    await announce();
-    await announce();
-    expect(memberReads, 'one read for each announcement').toHaveLength(4);
+  // Which copy of a member is newer is read off the stamp the server gave it, never off
+  // which read began first or which answer arrived last.
+  describe('keeps the newest copy of a member, whichever order the answers arrive in', () => {
+    const older = answered({ id: 'b1', index: 1 }, { name: 'Ren Older' });
+    const newer = namedLater(older, 'Ren Newer');
+    const holding = (first) => shiroWith(first, ...OTHERS);
 
-    await act(async () => { memberReads[3](shiro('Ren Newer', ...OTHERS)); });
-    await flush();
-    await act(async () => { memberReads[2](shiro('Ren Older', ...OTHERS)); });
-    await flush();
+    it('an older copy arriving after a newer one is ignored', async () => {
+      const { container } = await open(['Ren Abe', ...OTHERS]);
+      await announce();
+      await announce();
+      expect(memberReads, 'one read for each announcement').toHaveLength(4);
 
-    const after = await options(container);
-    expect(after.some((o) => o.includes('Ren Newer')), 'the newer list stays').toBe(true);
-    expect(after.some((o) => o.includes('Ren Older')), 'the older one does not replace it').toBe(false);
+      await act(async () => { memberReads[3](holding(newer)); });
+      await flush();
+      await act(async () => { memberReads[2](holding(older)); });
+      await flush();
+
+      const after = await options(container);
+      expect(after.some((o) => o.includes('Ren Newer')), 'the newer copy stays').toBe(true);
+      expect(after.some((o) => o.includes('Ren Older')), 'the older one does not replace it').toBe(false);
+    });
+
+    // The sheet's write is answered after a list that holds a later rename of the same member
+    // has been shown: the answer carries the older stamp, so it does not undo that list.
+    it('an own write\'s answer older than a list already shown does not undo the list', async () => {
+      const { container } = await open(['', ...OTHERS]);
+      const answer = deferred();
+      const mine = answered({ id: 'b1', index: 1 }, { name: 'Ito' });
+      window.API.renameTeamMember = vi.fn(() => answer.promise);
+      await typeName(bout(container, 0, 'shiro'), 'Ito');
+      expect(window.API.renameTeamMember, 'the write is out').toHaveBeenCalledTimes(1);
+
+      // Another device renames the member after this write was stamped, and a read shows it.
+      await announce();
+      await act(async () => { memberReads[2](holding(namedLater(mine, 'Itoh'))); });
+      await flush();
+      await act(async () => { answer.resolve(mine); });
+      await flush();
+
+      expect(bout(container, 0, 'shiro').value).toBe('Itoh');
+    });
+
+    it('a newer copy shows even when the read that holds it began first', async () => {
+      const { container } = await open(['Ren Abe', ...OTHERS]);
+      await announce();
+      await announce();
+
+      await act(async () => { memberReads[3](holding(older)); });
+      await flush();
+      await act(async () => { memberReads[2](holding(newer)); });
+      await flush();
+
+      const after = await options(container);
+      expect(after.some((o) => o.includes('Ren Newer')), 'the newer copy shows').toBe(true);
+      expect(after.some((o) => o.includes('Ren Older')), 'and the older one does not stand beside it').toBe(false);
+    });
   });
 
   it('still takes an older answer while no newer one has been, and ignores an announcement for another competition', async () => {
@@ -569,8 +670,8 @@ describe('team editor: a kachinuki row\'s name box', () => {
     await act(async () => { memberReads[memberReads.length - 1]({ 'team-A': blank('a'), 'team-C': blank('c') }); });
     await flush();
 
-    // The rename the old team's member was waiting on lands.
-    await act(async () => { rename.resolve(true); });
+    // The rename the old team's member was waiting on lands, answered as the server does.
+    await act(async () => { rename.resolve(answered({ id: 'b3', index: 3 }, { name: 'Ito' })); });
     await flush();
 
     await act(async () => { fireEvent.focus(shiroNow(container)); });

@@ -17,13 +17,13 @@ import { useLineupForm, lineupDraftKey } from '../lineup_draft.jsx';
 import { REMOVED_UNREAD_NOTICE, LINEUP_READ_NO_ANSWER } from '../lineup_resolver.jsx';
 import { FETCH_TIMEOUT_MS } from '../write_result.jsx';
 import { API as realApi } from '../api_client.jsx';
+import { answered, namedLater } from './helpers/team_members.js';
 
 const stubReact = global.React;
 const KEYS = ['1', '2', '3'];
 const NAMES = { positions: { 1: 'Aoki', 2: 'Sato', 3: 'Ito' }, memberIds: { 1: 'mem-1', 2: 'mem-2', 3: 'mem-3' } };
-// What API.queuedLineupSave answers while a save of the lineup is queued: the
-// lineup that save would write. null is nothing queued.
-const QUEUED = { positions: { 1: 'Mori' }, memberIds: {} };
+// What API.queuedLineupSave answers while a save of the lineup is queued.
+const QUEUED = true;
 // The team's members as the API answers them, keyed by the team's id.
 const MEMBERS = [
   { id: 'mem-1', index: 1, name: 'Aoki' },
@@ -49,7 +49,7 @@ beforeEach(() => {
     fetchTeamLineup: vi.fn().mockResolvedValue(STARTING),
     fetchLineupInForce: vi.fn().mockResolvedValue(CARRIED),
     deleteMatchLineup: vi.fn().mockResolvedValue(true),
-    queuedLineupSave: vi.fn().mockReturnValue(null),
+    queuedLineupSave: vi.fn().mockReturnValue(false),
     fetchSquads: vi.fn().mockResolvedValue({ t: MEMBERS }),
   };
   window.API = api;
@@ -262,6 +262,25 @@ describe('what may be saved', () => {
     expect(view.result.current.source).toEqual({ matchId: 'm1' });
   });
 
+  // A save names only the positions the operator changed, and the server answers the
+  // whole lineup it holds then: a position the operator left alone that another
+  // device changed is shown after the save, with the id the server holds, not the
+  // one this form had.
+  it('confirmSaved shows the whole lineup the server answered: a position left alone that another device changed shows, with its own id', async () => {
+    const view = await mount();
+    edit(view, { 1: 'Mori' });
+    await act(async () => { await view.result.current.lineupToSave(); });
+    act(() => view.result.current.confirmSaved({
+      positions: { 1: 'Mori', 2: 'Kato', 3: 'Ito' }, memberIds: { 1: 'mem-1', 2: 'mem-5', 3: 'mem-3' },
+    }));
+    expect(view.result.current.values).toEqual({ 1: 'Mori', 2: 'Kato', 3: 'Ito' });
+    expect(view.result.current.memberIds).toEqual({ 1: 'mem-1', 2: 'mem-5', 3: 'mem-3' });
+    expect(view.result.current.baseline).toEqual({
+      positions: { 1: 'Mori', 2: 'Kato', 3: 'Ito' }, memberIds: { 1: 'mem-1', 2: 'mem-5', 3: 'mem-3' },
+    });
+    expect(view.result.current.dirty).toBe(false);
+  });
+
   it('confirmSaved leaves the source of a starting lineup alone, and takes a missing answer as blank', async () => {
     const view = await mount({ matchId: '' });
     edit(view);
@@ -380,14 +399,11 @@ describe('a save of the lineup that is still queued', () => {
     expect(view.result.current.saveQueued).toBe(false);
   });
 
-  it('is true when the API answers with the queued lineup, even one with every position cleared, and false for null', async () => {
+  it('is true when the API says a save is queued, and false when it says none is', async () => {
     api.queuedLineupSave.mockReturnValue(QUEUED);
     expect((await mount()).result.current.saveQueued).toBe(true);
 
-    api.queuedLineupSave.mockReturnValue({ positions: {}, memberIds: {} });
-    expect((await mount()).result.current.saveQueued).toBe(true);
-
-    api.queuedLineupSave.mockReturnValue(null);
+    api.queuedLineupSave.mockReturnValue(false);
     expect((await mount()).result.current.saveQueued).toBe(false);
   });
 
@@ -410,7 +426,7 @@ describe('a save of the lineup that is still queued', () => {
     const view = await mount();
     expect(view.result.current.saveQueued).toBe(true);
 
-    api.queuedLineupSave.mockReturnValue(null);
+    api.queuedLineupSave.mockReturnValue(false);
     act(() => listeners.forEach((fn) => fn()));
     expect(view.result.current.saveQueued).toBe(false);
 
@@ -819,131 +835,61 @@ describe('the "not restored" notice', () => {
   });
 });
 
-// A Save writes the lineup as stored NOW with the operator's changes on it, not
-// the form restated (operator decision 2026-10-05), so a position another device
-// changed since the form was read is not put back. lineupToSave reads the lineup
-// again for it, under the deadline every bounded request has, and composes on the
-// lineup as loaded when that read cannot be made, so an offline save is written
-// (and queued) as it always was. What it read on a position the operator left
-// alone is shown, so a Save that is then refused leaves the conflict on screen;
-// a read that could not be made shows nothing.
-describe('the lineup a Save writes', () => {
-  // Another device changed position 2 after the form was read.
-  const CHANGED_ELSEWHERE = {
-    positions: { 1: 'Aoki', 2: 'Kato', 3: 'Ito' }, memberIds: { 1: 'mem-1', 2: 'mem-5', 3: 'mem-3' },
-    sourceMatchId: 'm1', saved: true,
-  };
-  const RESTATED = { positions: { 1: 'Mori', 2: 'Sato', 3: 'Ito' }, memberIds: { 1: 'mem-1', 2: 'mem-2', 3: 'mem-3' }, changed: ['1'] };
+// A Save carries the form as shown and names the positions the operator changed
+// (operator decision 2026-10-07, "Only changed positions"): the server puts those on
+// the lineup it holds when the save arrives, so a position another device changed
+// since the form was read stays, and nothing is asked of the server for it: no lineup
+// to compose on, and no members either (a member another device creates is announced,
+// and the editor reads the members again for it). That is why a Save with no
+// connection is built, and queued, like any other.
+describe('what a Save carries', () => {
+  // A name typed in, as the panel's boxes do: no member id is picked for it.
+  const typeName = (view, position, name) => act(() => {
+    view.result.current.setValues((v) => ({ ...v, [position]: name }));
+    view.result.current.setMemberIds((ids) => ({ ...ids, [position]: '' }));
+  });
 
-  async function lineupToSave(view) {
-    let composed;
-    await act(async () => { composed = await view.result.current.lineupToSave(); });
-    return composed;
-  }
-
-  it('is the lineup as stored now with the operator\'s changes on it, and names the positions those are', async () => {
+  it('is the form as shown, and names the positions the operator changed', async () => {
     const view = await mount();
     edit(view, { 1: 'Mori' });
-    api.fetchLineupInForce.mockResolvedValue(CHANGED_ELSEWHERE);
 
-    expect(await lineupToSave(view)).toEqual({
-      positions: { 1: 'Mori', 2: 'Kato', 3: 'Ito' },
-      memberIds: { 1: 'mem-1', 2: 'mem-5', 3: 'mem-3' },
+    expect(view.result.current.lineupToSave()).toEqual({
+      positions: { 1: 'Mori', 2: 'Sato', 3: 'Ito' },
+      memberIds: { 1: 'mem-1', 2: 'mem-2', 3: 'mem-3' },
       changed: ['1'],
     });
-    expect(api.fetchLineupInForce, 'the lineup is read again for it').toHaveBeenCalledTimes(2);
   });
 
-  it('reads a starting lineup the way the form did, as round 0', async () => {
-    const view = await mount({ matchId: '' });
-    edit(view, { 1: 'Mori' });
-    api.fetchTeamLineup.mockResolvedValue({ ...STARTING, positions: CHANGED_ELSEWHERE.positions, memberIds: CHANGED_ELSEWHERE.memberIds });
-
-    const composed = await lineupToSave(view);
-
-    expect(api.fetchTeamLineup).toHaveBeenLastCalledWith('c', 't', 0);
-    expect(composed.positions).toEqual({ 1: 'Mori', 2: 'Kato', 3: 'Ito' });
-  });
-
-  it('shows what it read on a position the operator left alone: that is the baseline now, the operator\'s change stays on it, and the source follows', async () => {
+  it('asks nothing of the server: no lineup to compose on and no members, a name typed in included', async () => {
     const view = await mount();
     edit(view, { 1: 'Mori' });
-    api.fetchLineupInForce.mockResolvedValue({ ...CHANGED_ELSEWHERE, sourceMatchId: 'm9' });
+    typeName(view, 2, 'Zed');
+    api.fetchLineupInForce.mockClear();
+    api.fetchTeamLineup.mockClear();
+    api.fetchSquads.mockClear();
 
-    await lineupToSave(view);
+    expect(view.result.current.lineupToSave().changed).toEqual(['1', '2']);
 
-    expect(view.result.current.values).toEqual({ 1: 'Mori', 2: 'Kato', 3: 'Ito' });
-    expect(view.result.current.memberIds).toEqual({ 1: 'mem-1', 2: 'mem-5', 3: 'mem-3' });
-    expect(view.result.current.baseline).toEqual({
-      positions: { 1: 'Aoki', 2: 'Kato', 3: 'Ito' }, memberIds: { 1: 'mem-1', 2: 'mem-5', 3: 'mem-3' },
-    });
-    expect(view.result.current.source).toEqual({ matchId: 'm9' });
-    expect(view.result.current.dirty, 'what the operator changed is still unsaved').toBe(true);
-    expect(view.result.current.canSave).toBe(true);
-    expect(view.result.current.loading).toBe(false);
+    expect(api.fetchLineupInForce).not.toHaveBeenCalled();
+    expect(api.fetchTeamLineup).not.toHaveBeenCalled();
+    expect(api.fetchSquads).not.toHaveBeenCalled();
   });
 
-  it('counts a position put back to what it was loaded with as a change once another device\'s value is what is stored there', async () => {
-    const view = await mount();
-    edit(view, { 2: 'Mori' });
-    api.fetchLineupInForce.mockResolvedValue({
-      ...CARRIED, positions: { 1: 'Mori', 2: 'Sato', 3: 'Ito' }, memberIds: { 1: 'mem-4', 2: 'mem-2', 3: 'mem-3' },
-    });
-
-    await lineupToSave(view);
-    edit(view, { 1: 'Aoki', 2: 'Sato' });
-
-    expect(view.result.current.dirty, 'Aoki is not what is stored at 1 any more').toBe(true);
-  });
-
-  it('returns the lineup it composed even when the form then equals what was read, because another device made the same change', async () => {
+  it('is built the same with no connection: the server not answering changes nothing', async () => {
     const view = await mount();
     edit(view, { 1: 'Mori' });
-    // Another device made the same change to position 1, and another to position 2.
-    api.fetchLineupInForce.mockResolvedValue({
-      ...CHANGED_ELSEWHERE, positions: { 1: 'Mori', 2: 'Kato', 3: 'Ito' }, memberIds: { 1: 'mem-1', 2: 'mem-5', 3: 'mem-3' },
-    });
-
-    const composed = await lineupToSave(view);
-
-    expect(composed).toEqual({
-      positions: { 1: 'Mori', 2: 'Kato', 3: 'Ito' }, memberIds: { 1: 'mem-1', 2: 'mem-5', 3: 'mem-3' }, changed: ['1'],
-    });
-    expect(view.result.current.dirty, 'nothing is left to change').toBe(false);
-  });
-
-  it('shows nothing of a read that differs from the baseline only on a position the operator changed', async () => {
-    const view = await mount();
-    edit(view, { 1: 'Mori' });
-    api.fetchLineupInForce.mockResolvedValue({
-      ...CARRIED, positions: { 1: 'Oda', 2: 'Sato', 3: 'Ito' }, memberIds: { 1: 'mem-8', 2: 'mem-2', 3: 'mem-3' }, sourceMatchId: 'm9',
-    });
-
-    const composed = await lineupToSave(view);
-
-    expect(composed.positions[1]).toBe('Mori');
-    expect(view.result.current.baseline).toEqual(NAMES);
-    expect(view.result.current.source).toEqual({ matchId: 'm0' });
-    expect(view.result.current.values[1]).toBe('Mori');
-  });
-
-  it('shows nothing of a read that holds what the form was loaded with', async () => {
-    const view = await mount();
-    edit(view, { 1: 'Mori' });
-    const before = view.result.current.baseline;
-
-    await lineupToSave(view);
-
-    expect(view.result.current.baseline, 'not even replaced by an equal copy').toBe(before);
-  });
-
-  it('shows nothing when the read cannot be made: the form, its baseline and its source stay as they were', async () => {
-    const view = await mount();
-    edit(view, { 1: 'Mori' });
-    const before = view.result.current.baseline;
     api.fetchLineupInForce.mockRejectedValue(new TypeError('Failed to fetch'));
+    api.fetchSquads.mockRejectedValue(new TypeError('Failed to fetch'));
 
-    await lineupToSave(view);
+    expect(view.result.current.lineupToSave().changed).toEqual(['1']);
+  });
+
+  it('shows nothing of the server: the form, its baseline and its source stay as they were', async () => {
+    const view = await mount();
+    edit(view, { 1: 'Mori' });
+    const before = view.result.current.baseline;
+
+    view.result.current.lineupToSave();
 
     expect(view.result.current.baseline).toBe(before);
     expect(view.result.current.values).toEqual({ 1: 'Mori', 2: 'Sato', 3: 'Ito' });
@@ -951,60 +897,38 @@ describe('the lineup a Save writes', () => {
     expect(view.result.current.dirty).toBe(true);
   });
 
-  it('is the form restated on the lineup as loaded when the read fails, so an offline save is written as it always was', async () => {
-    const view = await mount();
-    edit(view, { 1: 'Mori' });
-    api.fetchLineupInForce.mockRejectedValue(new TypeError('Failed to fetch'));
-
-    expect(await lineupToSave(view)).toEqual(RESTATED);
-    expect(api.fetchLineupInForce, 'the read was tried').toHaveBeenCalledTimes(2);
-  });
-
-  it('does the same when the read is not answered, once the deadline has passed and not before, and shows nothing', async () => {
-    const view = await mount();
-    edit(view, { 1: 'Mori' });
-    const before = view.result.current.baseline;
-    api.fetchLineupInForce.mockReturnValue(new Promise(() => {}));
-    vi.useFakeTimers();
-    try {
-      let pending;
-      act(() => { pending = view.result.current.lineupToSave(); });
-      let settled = false;
-      pending.then(() => { settled = true; });
-
-      await act(async () => { await vi.advanceTimersByTimeAsync(FETCH_TIMEOUT_MS - 1); });
-      expect(settled, 'it waits for the read until the deadline').toBe(false);
-      await act(async () => { await vi.advanceTimersByTimeAsync(2); });
-
-      expect(settled).toBe(true);
-      expect(await pending).toEqual(RESTATED);
-      expect(view.result.current.baseline).toBe(before);
-      expect(view.result.current.source).toEqual({ matchId: 'm0' });
-    } finally {
-      vi.useRealTimers();
-    }
-  });
-
-  it('takes the positions left alone as blank from a lineup that says nothing is in force', async () => {
-    const view = await mount();
-    edit(view, { 1: 'Mori' });
-    api.fetchLineupInForce.mockResolvedValue(null);
-
-    expect(await lineupToSave(view)).toEqual({
-      positions: { 1: 'Mori', 2: '', 3: '' }, memberIds: { 1: 'mem-1', 2: '', 3: '' }, changed: ['1'],
-    });
-  });
-
-  it('counts a position put back to what was loaded as no change at all, so what is stored there stands', async () => {
+  it('names a position put back to what was loaded as no change at all', async () => {
     const view = await mount();
     edit(view, { 1: 'Mori' });
     edit(view, { 1: 'Aoki', 3: 'Oda' });
-    api.fetchLineupInForce.mockResolvedValue(CHANGED_ELSEWHERE);
 
-    const composed = await lineupToSave(view);
+    expect(view.result.current.lineupToSave().changed).toEqual(['3']);
+  });
 
-    expect(composed.changed).toEqual(['3']);
-    expect(composed.positions).toEqual({ 1: 'Aoki', 2: 'Kato', 3: 'Oda' });
+  it('names a position the operator cleared, with its name and its id empty', async () => {
+    const view = await mount();
+    act(() => {
+      view.result.current.setValues((v) => ({ ...v, 2: '' }));
+      view.result.current.setMemberIds((ids) => ({ ...ids, 2: '' }));
+    });
+
+    expect(view.result.current.lineupToSave()).toEqual({
+      positions: { 1: 'Aoki', 2: '', 3: 'Ito' }, memberIds: { 1: 'mem-1', 2: '', 3: 'mem-3' }, changed: ['2'],
+    });
+  });
+
+  it('names a member picked before it was named: its name is empty and its id is the placement', async () => {
+    const view = await mount();
+    act(() => {
+      view.result.current.setValues((v) => ({ ...v, 2: '' }));
+      view.result.current.setMemberIds((ids) => ({ ...ids, 2: 'mem-blank' }));
+    });
+
+    const carried = view.result.current.lineupToSave();
+
+    expect(carried.changed).toEqual(['2']);
+    expect(carried.positions[2]).toBe('');
+    expect(carried.memberIds[2]).toBe('mem-blank');
   });
 });
 
@@ -1012,7 +936,9 @@ describe('the lineup a Save writes', () => {
 // position's member is picked from them and named by them. The hook reads them,
 // and again whenever it follows another device's lineup, so a member created
 // elsewhere meanwhile is in the list the followed lineup names, whenever that read
-// is answered; the later of two reads is the one that stands.
+// is answered. Each member carries the stamp the server gave its last write, and of two
+// copies of a member the one with the larger stamp is the one that stands, whichever
+// list brought it and whichever read began first.
 describe('the team\'s members', () => {
   const NEW_MEMBER = { id: 'mem-9', index: 4, name: 'Zed' };
   const FOLLOWED = {
@@ -1023,8 +949,8 @@ describe('the team\'s members', () => {
     window.dispatchEvent(new CustomEvent('lineup-updated', { detail: { competitionId: 'c' } }));
   });
   // An editor's own change to the members, made once the server holds it (an add, a
-  // rename, a mint): the read it starts answers inside the act.
-  const change = (view, next) => act(async () => { view.result.current.changeMembers(next); });
+  // rename, a mint): the members as the server answered the write, stamped.
+  const change = (view, members) => act(async () => { view.result.current.changeMembers(members); });
 
   it('are read when the editor opens, for its team, with the password', async () => {
     const view = await mount();
@@ -1067,19 +993,22 @@ describe('the team\'s members', () => {
     expect(view.result.current.squadUnavailable).toBe(false);
   });
 
-  it('are not replaced by an older read: the read made when the editor opened, answering after a followed lineup read them again, changes nothing', async () => {
+  it('are not replaced by an older copy: the read made when the editor opened, answering after a followed lineup read them again, undoes nothing the later read brought', async () => {
     const opening = deferred();
     api.fetchSquads.mockReturnValueOnce(opening.promise);
     const view = renderHook((p) => useLineupForm(p), { initialProps: props() });
     await act(async () => { await Promise.resolve(); });
-    api.fetchSquads.mockResolvedValue({ t: [...MEMBERS, NEW_MEMBER] });
+    // Another device named Sato after the opening read began: the followed read holds it, stamped.
+    const renamed = answered(MEMBERS[1], { name: 'Sato-san' });
+    api.fetchSquads.mockResolvedValue({ t: [MEMBERS[0], renamed, MEMBERS[2], NEW_MEMBER] });
     api.fetchLineupInForce.mockResolvedValue(FOLLOWED);
     await announce();
     expect(view.result.current.squad, 'the followed read').toContainEqual(NEW_MEMBER);
 
     await act(async () => { opening.resolve({ t: MEMBERS }); });
 
-    expect(view.result.current.squad, 'the later read stands').toContainEqual(NEW_MEMBER);
+    expect(view.result.current.squad, 'the member the later read brought stands').toContainEqual(NEW_MEMBER);
+    expect(view.result.current.squad[1], 'and so does the name it gave Sato, which the older list predates').toEqual(renamed);
     expect(view.result.current.squadUnavailable).toBe(false);
   });
 
@@ -1147,19 +1076,20 @@ describe('the team\'s members', () => {
     expect(view.result.current.squadUnavailable, 'the read made for the team it shows failed').toBe(true);
   });
 
-  it('are the editor\'s to change after a rename or a mint: the list it sets is the list shown', async () => {
+  it('are the editor\'s to change after a rename or a mint: the member the server answered joins the list shown', async () => {
     const view = await mount();
-    await change(view, (list) => [...list, NEW_MEMBER]);
+    await change(view, [NEW_MEMBER]);
     expect(view.result.current.squad).toEqual([...MEMBERS, NEW_MEMBER]);
   });
 
-  // The editors call memberRenamed once the server holds a rename, or a cleared name (the
-  // name ""): the one place that shows it on the members, the positions and the baseline.
+  // The editors call memberRenamed with the member the server answered once it holds a
+  // rename, or a cleared name (the name ""): the one place that shows it on the members,
+  // the positions and the baseline.
   describe('a member renamed on the server', () => {
-    // The members are read again after the change, and the server then holds the rename.
+    // The server's answer to the write: the member, named, with the stamp it gave it.
     const renamed = (view, id, name) => {
-      api.fetchSquads.mockResolvedValue({ t: MEMBERS.map((m) => (m.id === id ? { ...m, name } : m)) });
-      return act(async () => { view.result.current.memberRenamed(id, name); });
+      const member = answered(MEMBERS.find((m) => m.id === id), { name });
+      return act(async () => { view.result.current.memberRenamed(member); });
     };
 
     it('shows the new name on the members, the positions that hold the member and the baseline: a rename alone is no edit', async () => {
@@ -1198,210 +1128,167 @@ describe('the team\'s members', () => {
 
       expect(view.result.current.values).toEqual({ 1: 'Sato-san', 2: '', 3: 'Ito' });
     });
+
+    it('does not read the members again: the change is announced to every device, this one included', async () => {
+      const view = await mount();
+      expect(api.fetchSquads).toHaveBeenCalledTimes(1);
+
+      await renamed(view, 'mem-2', 'Sato-san');
+
+      expect(api.fetchSquads).toHaveBeenCalledTimes(1);
+    });
+
+    it('shows the name the copy that is kept has, when the answer is older than the member shown: the positions follow the list', async () => {
+      const view = await mount();
+      // Another device named Sato after this rename was made, and a read has shown it.
+      const mine = answered(MEMBERS[1], { name: 'Sato-san' });
+      const theirs = namedLater(mine, 'Sato-kun');
+      api.fetchSquads.mockResolvedValue({ t: [MEMBERS[0], theirs, MEMBERS[2]] });
+      await announce();
+      expect(view.result.current.squad[1]).toEqual(theirs);
+
+      await act(async () => { view.result.current.memberRenamed(mine); });
+
+      expect(view.result.current.squad[1], 'the answer older than the list does not undo it').toEqual(theirs);
+      expect(view.result.current.values[2], 'nor does it name the position the old way').toBe('Sato-kun');
+      expect(view.result.current.baseline.positions[2]).toBe('Sato-kun');
+    });
+
+    it('is nothing for a team the editor has since left', async () => {
+      const view = await mount();
+      const staleRenamed = view.result.current.memberRenamed;
+      api.fetchSquads.mockResolvedValue({ u: [{ id: 'oth-1', index: 1, name: 'Oda' }] });
+      view.rerender(props({ teamId: 'u' }));
+      await act(async () => { await Promise.resolve(); });
+
+      act(() => { staleRenamed(answered(MEMBERS[1], { name: 'Sato-san' })); });
+
+      expect(view.result.current.squad, 'the list of the team it shows now').toEqual([{ id: 'oth-1', index: 1, name: 'Oda' }]);
+      expect(view.result.current.squadRef.current.map((m) => m.id)).toEqual(['oth-1']);
+    });
   });
 
   // A read begun before an editor's change can answer after it, with the list from
   // before: a rename undone by it would also leave the typed new name resolving to
   // nobody, and a typed name that finds nobody is named onto a blank slot or minted
-  // as a second member.
+  // as a second member. The member the server answered carries the stamp of the write,
+  // and of two copies the larger stamp stands, so no list can undo it and no read is
+  // made after the change to put it right: the server announces the change to every
+  // device, which reads then.
   describe('an editor\'s own change', () => {
-    const RENAMED = { ...MEMBERS[1], name: 'Sato-san' };
+    const RENAMED = () => answered(MEMBERS[1], { name: 'Sato-san' });
 
-    it('is kept over a read begun before it, which answers after it with the list from before, and the members are read again', async () => {
+    it('is not read again, and flags nothing: the list is the one the change made', async () => {
       const view = await mount();
-      // A lineup another device saved starts a read of the members, still out when the editor renames Sato.
+
+      await change(view, [NEW_MEMBER]);
+
+      expect(api.fetchSquads, 'no read is made after the change').toHaveBeenCalledTimes(1);
+      expect(view.result.current.squad).toEqual([...MEMBERS, NEW_MEMBER]);
+      expect(view.result.current.squadUnavailable, 'a list that was read is not unavailable').toBe(false);
+    });
+
+    it('stands over a read begun before it, which answers after it with the list from before', async () => {
+      const view = await mount();
+      // A lineup another device saved starts a read of the members, still out when the rename is answered.
       const older = deferred();
       api.fetchSquads.mockReturnValueOnce(older.promise);
       api.fetchLineupInForce.mockResolvedValue(FOLLOWED);
       await announce();
-      // What a read begun after the rename answers: the new name, and a member another device added meanwhile.
-      api.fetchSquads.mockResolvedValue({ t: [MEMBERS[0], RENAMED, MEMBERS[2], NEW_MEMBER] });
+      const renamed = RENAMED();
 
-      await change(view, (list) => list.map((m) => (m.id === 'mem-2' ? RENAMED : m)));
+      await change(view, [renamed]);
       await act(async () => { older.resolve({ t: MEMBERS }); });
 
-      expect(view.result.current.squad[1], 'the read begun before the rename does not bring the old name back').toEqual(RENAMED);
+      expect(view.result.current.squad[1], 'the read begun before the rename does not bring the old name back').toEqual(renamed);
       expect(view.result.current.squadRef.current[1].name, 'nor on the ref a handler reads').toBe('Sato-san');
-      expect(api.fetchSquads, 'the members are read again after the change').toHaveBeenCalledTimes(3);
-      expect(view.result.current.squad, 'and what that read holds is shown').toContainEqual(NEW_MEMBER);
-    });
-
-    it('is followed by a read that wins over the one made as the editor opened, which answers last with an older list', async () => {
-      const opening = deferred();
-      api.fetchSquads.mockReturnValueOnce(opening.promise);
-      const view = renderHook((p) => useLineupForm(p), { initialProps: props() });
-      await act(async () => { await Promise.resolve(); });
-
-      await change(view, (list) => [...list, NEW_MEMBER]);
-      expect(api.fetchSquads).toHaveBeenCalledTimes(2);
-      expect(view.result.current.squad, 'the list the later read brought, with the change').toEqual([...MEMBERS, NEW_MEMBER]);
-      // The read made as the editor opened answers last, with a name another device has since changed.
-      await act(async () => { opening.resolve({ t: [{ ...MEMBERS[1], name: 'Older name' }] }); });
-
-      expect(view.result.current.squad).toEqual([...MEMBERS, NEW_MEMBER]);
-      expect(view.result.current.squadUnavailable).toBe(false);
+      expect(api.fetchSquads, 'and the change is not followed by a read of its own').toHaveBeenCalledTimes(2);
     });
 
     // A Save can mint a typed name before the read made as the editor opened has
     // answered: nothing shown can be undone then, and that read holds the rest of the
     // team, which a name typed next must find rather than mint again.
-    it('does not end the read made as the editor opened while no list is shown: when the read after the change fails, that read still brings the rest of the team', async () => {
+    it('stands over the read made as the editor opened, which answers last with the list from before it, and that read still brings the rest of the team', async () => {
       const opening = deferred();
       api.fetchSquads.mockReturnValueOnce(opening.promise);
       const view = renderHook((p) => useLineupForm(p), { initialProps: props() });
       await act(async () => { await Promise.resolve(); });
-      api.fetchSquads.mockRejectedValue(new Error('offline'));
+      const renamed = RENAMED();
 
-      await change(view, (list) => [...list, NEW_MEMBER]);
+      await change(view, [renamed]);
+      expect(view.result.current.squad, 'the change alone, until a list is read').toEqual([renamed]);
       await act(async () => { opening.resolve({ t: MEMBERS }); });
 
-      expect(view.result.current.squad).toEqual([...MEMBERS, NEW_MEMBER]);
-      expect(view.result.current.squadRef.current).toEqual([...MEMBERS, NEW_MEMBER]);
-    });
-
-    // A second change finds the member the first one put on the list, which is not a
-    // list that was read: it must not end the read made as the editor opened either.
-    it('does not end the read made as the editor opened by a second change: the member the first one added is not a list that was read', async () => {
-      const opening = deferred();
-      const afterFirst = deferred();
-      api.fetchSquads
-        .mockReturnValueOnce(opening.promise)
-        .mockReturnValueOnce(afterFirst.promise)
-        .mockRejectedValueOnce(new Error('offline'));
-      const view = renderHook((p) => useLineupForm(p), { initialProps: props() });
-      await act(async () => { await Promise.resolve(); });
-
-      // A Save minted a typed name, then the member was renamed, both while no list is shown.
-      await change(view, (list) => [...list, NEW_MEMBER]);
-      await change(view, (list) => list.map((m) => (m.id === NEW_MEMBER.id ? { ...m, name: 'Zed-san' } : m)));
-      expect(api.fetchSquads, 'both changes read the members again').toHaveBeenCalledTimes(3);
-      await act(async () => { opening.resolve({ t: MEMBERS }); });
-      await act(async () => { afterFirst.resolve({ t: [...MEMBERS, NEW_MEMBER] }); });
-
-      expect(view.result.current.squad.map((m) => m.id), 'the whole team is shown, not only the members the changes added').toEqual(['mem-1', 'mem-2', 'mem-3', 'mem-9']);
+      expect(view.result.current.squad).toEqual([MEMBERS[0], renamed, MEMBERS[2]]);
+      expect(view.result.current.squadRef.current[1].name).toBe('Sato-san');
       expect(view.result.current.squadUnavailable).toBe(false);
     });
 
-    // While no read's list is shown the editor can only have changed members it made
-    // itself (a mint, then a rename of it), which the read made as the editor opened does
-    // not hold, so it cannot undo them and is kept. Every other read begun before a change
-    // holds an older state of those members, and is ended: the mint's own re-read answering
-    // after the rename would put the old spelling back, and keep it when the last re-read
-    // fails.
-    describe('before any list is shown', () => {
-      const RENAMED = (list) => list.map((m) => (m.id === NEW_MEMBER.id ? { ...m, name: 'Zed-san' } : m));
-      const nameOf = (list, id) => list.find((m) => m.id === id)?.name;
-      // The opening read, the mint's re-read (still out at the rename) and the rename's re-read, which fails.
-      const mintThenRename = async () => {
-        const opening = deferred();
-        const afterMint = deferred();
-        api.fetchSquads
-          .mockReturnValueOnce(opening.promise)
-          .mockReturnValueOnce(afterMint.promise)
-          .mockRejectedValueOnce(new Error('offline'));
-        const view = renderHook((p) => useLineupForm(p), { initialProps: props() });
-        await act(async () => { await Promise.resolve(); });
-        await change(view, (list) => [...list, NEW_MEMBER]);
-        await change(view, RENAMED);
-        expect(api.fetchSquads, 'each change reads the members again').toHaveBeenCalledTimes(3);
-        return { view, opening, afterMint };
-      };
-      const expectWholeTeamAndRename = (view) => {
-        expect(view.result.current.squad.map((m) => m.id), 'the rest of the team is shown').toEqual(['mem-1', 'mem-2', 'mem-3', 'mem-9']);
-        expect(nameOf(view.result.current.squad, 'mem-9'), 'under the name the rename gave').toBe('Zed-san');
-        expect(nameOf(view.result.current.squadRef.current, 'mem-9'), 'and on the ref a handler reads').toBe('Zed-san');
-        expect(view.result.current.squadUnavailable).toBe(false);
-      };
+    // While no list is shown the editor can only have changed members it made itself (a
+    // mint, then a rename of it), which the read made as the editor opened does not
+    // hold, and every other read begun before a change holds an older state of them.
+    it.each([
+      ['the read made as the editor opened first', true],
+      ['the followed lineup\'s read first', false],
+    ])('stands through a mint and a rename of the minted member, %s', async (_order, openingFirst) => {
+      const opening = deferred();
+      const followed = deferred();
+      api.fetchSquads.mockReturnValueOnce(opening.promise).mockReturnValueOnce(followed.promise);
+      const view = renderHook((p) => useLineupForm(p), { initialProps: props() });
+      await act(async () => { await Promise.resolve(); });
+      await announce();
+      expect(api.fetchSquads, 'the followed lineup reads the members').toHaveBeenCalledTimes(2);
+      const minted = answered(NEW_MEMBER);
+      const renamedMinted = answered(minted, { name: 'Zed-san' });
 
-      it('keeps the renamed spelling when the mint\'s re-read answers after the rename, and the opening read landing late still brings the rest of the team', async () => {
-        const { view, opening, afterMint } = await mintThenRename();
+      await change(view, [minted]);
+      await change(view, [renamedMinted]);
+      const answers = [
+        () => act(async () => { opening.resolve({ t: MEMBERS }); }),
+        () => act(async () => { followed.resolve({ t: [...MEMBERS, NEW_MEMBER] }); }),
+      ];
+      if (!openingFirst) answers.reverse();
+      await answers[0]();
+      await answers[1]();
 
-        await act(async () => { afterMint.resolve({ t: [...MEMBERS, NEW_MEMBER] }); });
-        expect(nameOf(view.result.current.squad, 'mem-9'), 'the old spelling does not come back').toBe('Zed-san');
-        await act(async () => { opening.resolve({ t: MEMBERS }); });
-
-        expectWholeTeamAndRename(view);
-      });
-
-      it('keeps it too when the opening read answers first', async () => {
-        const { view, opening, afterMint } = await mintThenRename();
-
-        await act(async () => { opening.resolve({ t: MEMBERS }); });
-        await act(async () => { afterMint.resolve({ t: [...MEMBERS, NEW_MEMBER] }); });
-
-        expectWholeTeamAndRename(view);
-      });
-
-      it('ends a read begun for a followed lineup before the change, which holds the same older state', async () => {
-        const opening = deferred();
-        const followed = deferred();
-        api.fetchSquads
-          .mockReturnValueOnce(opening.promise)
-          .mockReturnValueOnce(followed.promise)
-          .mockRejectedValue(new Error('offline'));
-        const view = renderHook((p) => useLineupForm(p), { initialProps: props() });
-        await act(async () => { await Promise.resolve(); });
-        await announce();
-        expect(api.fetchSquads, 'the followed lineup reads the members').toHaveBeenCalledTimes(2);
-        await change(view, (list) => [...list, NEW_MEMBER]);
-
-        await act(async () => { followed.resolve({ t: MEMBERS }); });
-
-        expect(view.result.current.squad, 'it answers for the team as it was before the change').toEqual([NEW_MEMBER]);
-        await act(async () => { opening.resolve({ t: MEMBERS }); });
-        expect(view.result.current.squad, 'the read made as the editor opened brings the team').toEqual([...MEMBERS, NEW_MEMBER]);
-      });
-
-      it('shows the re-read begun after the last change, which holds it', async () => {
-        const opening = deferred();
-        const afterMint = deferred();
-        const afterRename = deferred();
-        api.fetchSquads
-          .mockReturnValueOnce(opening.promise)
-          .mockReturnValueOnce(afterMint.promise)
-          .mockReturnValueOnce(afterRename.promise);
-        const view = renderHook((p) => useLineupForm(p), { initialProps: props() });
-        await act(async () => { await Promise.resolve(); });
-        await change(view, (list) => [...list, NEW_MEMBER]);
-        await change(view, RENAMED);
-
-        await act(async () => { afterRename.resolve({ t: [...MEMBERS, { ...NEW_MEMBER, name: 'Zed-san' }, { id: 'mem-10', index: 5, name: 'Kato' }] }); });
-
-        expect(view.result.current.squad.map((m) => m.id), 'what that read holds, another device\'s member among it').toEqual(['mem-1', 'mem-2', 'mem-3', 'mem-9', 'mem-10']);
-        expect(nameOf(view.result.current.squad, 'mem-9')).toBe('Zed-san');
-      });
+      expect(view.result.current.squad.map((m) => m.id), 'the rest of the team is shown').toEqual(['mem-1', 'mem-2', 'mem-3', 'mem-9']);
+      expect(view.result.current.squad[3].name, 'under the name the rename gave').toBe('Zed-san');
+      expect(view.result.current.squadRef.current[3].name, 'and on the ref a handler reads').toBe('Zed-san');
+      expect(view.result.current.squadUnavailable).toBe(false);
     });
 
-    it('shows nothing and flags nothing when the read after it fails: the list is the one the change made', async () => {
+    it('is nothing for a team the editor has since left: a handler that resumes after the editor was given another team adds it to no list', async () => {
+      const OTHER = [{ id: 'oth-1', index: 1, name: 'Oda' }];
       const view = await mount();
-      api.fetchSquads.mockRejectedValue(new Error('offline'));
+      const staleChange = view.result.current.changeMembers;
+      api.fetchSquads.mockResolvedValue({ u: OTHER });
+      view.rerender(props({ teamId: 'u' }));
+      await act(async () => { await Promise.resolve(); });
 
-      await change(view, (list) => [...list, NEW_MEMBER]);
+      act(() => { staleChange([NEW_MEMBER]); });
 
-      expect(api.fetchSquads, 'the read was made').toHaveBeenCalledTimes(2);
-      expect(view.result.current.squad).toEqual([...MEMBERS, NEW_MEMBER]);
-      expect(view.result.current.squadUnavailable, 'a list that was read is not unavailable').toBe(false);
+      expect(view.result.current.squad).toEqual(OTHER);
+      expect(view.result.current.squadRef.current).toEqual(OTHER);
     });
 
-    it('starts a read that is ended with the others when the editor is given another team: its late answer shows nothing for the new team', async () => {
+    it('is not undone by a read of the members a followed lineup made for a team the editor has since left', async () => {
       const view = await mount();
-      const after = deferred();
-      api.fetchSquads.mockReturnValueOnce(after.promise);
-      await change(view, (list) => [...list, NEW_MEMBER]);
-      expect(api.fetchSquads, 'the read after the change is out').toHaveBeenCalledTimes(2);
+      const followed = deferred();
+      api.fetchSquads.mockReturnValueOnce(followed.promise);
+      await announce();
       api.fetchSquads.mockRejectedValue(new Error('offline'));
       view.rerender(props({ teamId: 'u' }));
       await act(async () => { await Promise.resolve(); });
 
-      await act(async () => { after.resolve({ t: MEMBERS }); });
+      await act(async () => { followed.resolve({ t: [...MEMBERS, NEW_MEMBER] }); });
 
-      expect(view.result.current.squad).toEqual([]);
+      expect(view.result.current.squad, 'the team it shows now has no list').toEqual([]);
     });
   });
 
   // No screen removes a member, so a list that arrives, from a read or from an editor's
-  // own update, only ever adds to the one shown: every member it holds as it holds them,
-  // and every member shown that it lacks, in member number order.
+  // own write, only ever adds to the one shown: every member of both lists, in member
+  // number order, and of a member both hold the copy with the larger stamp.
   describe('a list that arrives is merged with the one shown', () => {
     const MINTED = { id: 'mem-10', index: 5, name: 'Kato' };
 
@@ -1411,7 +1298,7 @@ describe('the team\'s members', () => {
       api.fetchSquads.mockReturnValue(members.promise);
       await announce();
 
-      await change(view, (list) => [...list, NEW_MEMBER]);
+      await change(view, [NEW_MEMBER]);
       await act(async () => { members.resolve({ t: MEMBERS }); });
 
       expect(view.result.current.squad).toEqual([...MEMBERS, NEW_MEMBER]);
@@ -1432,29 +1319,29 @@ describe('the team\'s members', () => {
       expect(view.result.current.squadRef.current).toEqual([...MEMBERS, NEW_MEMBER, MINTED]);
     });
 
-    it('takes the member as the list that arrives holds it, so a rename through the function the editors pass shows the new name', async () => {
+    it('takes a rename as the server answered it: the member with the new name and its stamp', async () => {
       const view = await mount();
-      // The server holds the rename before the editor changes the list, so the read after it answers with it.
-      api.fetchSquads.mockResolvedValue({ t: [MEMBERS[0], { ...MEMBERS[1], name: 'Sato-san' }, MEMBERS[2]] });
+      const renamed = answered(MEMBERS[1], { name: 'Sato-san' });
 
-      await change(view, (list) => list.map((m) => (m.id === 'mem-2' ? { ...m, name: 'Sato-san' } : m)));
+      await change(view, [renamed]);
 
-      expect(view.result.current.squad).toEqual([MEMBERS[0], { ...MEMBERS[1], name: 'Sato-san' }, MEMBERS[2]]);
+      expect(view.result.current.squad).toEqual([MEMBERS[0], renamed, MEMBERS[2]]);
       expect(view.result.current.squadRef.current[1].name).toBe('Sato-san');
     });
 
-    it('takes the member as a read holds it too: a name another device changed replaces the one shown', async () => {
+    it('takes the member as a read holds it too: a name another device gave it later replaces the one shown', async () => {
       const view = await mount();
-      api.fetchSquads.mockResolvedValue({ t: [MEMBERS[0], { ...MEMBERS[1], name: 'Sato-san' }, MEMBERS[2]] });
+      const later = answered(MEMBERS[1], { name: 'Sato-san' });
+      api.fetchSquads.mockResolvedValue({ t: [MEMBERS[0], later, MEMBERS[2]] });
 
       await announce();
 
-      expect(view.result.current.squad[1]).toEqual({ ...MEMBERS[1], name: 'Sato-san' });
+      expect(view.result.current.squad[1]).toEqual(later);
     });
 
     it('lists the members in member number order, whichever list each came in on', async () => {
       const view = await mount();
-      await change(view, (list) => [...list, NEW_MEMBER]);
+      await change(view, [NEW_MEMBER]);
       // The read answers with a member numbered after the one the editor added, and without it.
       api.fetchSquads.mockResolvedValue({ t: [...MEMBERS, MINTED] });
 
@@ -1475,6 +1362,71 @@ describe('the team\'s members', () => {
 
       expect(view.result.current.squad).toEqual(OTHER);
       expect(view.result.current.squadRef.current).toEqual(OTHER);
+    });
+  });
+
+  // Each write of a member is stamped by the server, and the editor keeps the newest
+  // copy of each member by that stamp, whichever way it came: an own write's answer or a
+  // read's list, in whatever order they arrive.
+  describe('the newest copy of a member stands', () => {
+    it('an older list never undoes a newer rename', async () => {
+      const view = await mount();
+      const renamed = answered(MEMBERS[1], { name: 'Sato-san' });
+      await change(view, [renamed]);
+      // A list read before the rename was made: the member as it was, unstamped.
+      api.fetchSquads.mockResolvedValue({ t: MEMBERS });
+
+      await announce();
+
+      expect(view.result.current.squad[1]).toEqual(renamed);
+      expect(view.result.current.squadRef.current[1]).toEqual(renamed);
+    });
+
+    it('another device\'s later rename shows, even after this device wrote the member', async () => {
+      const view = await mount();
+      const mine = answered(MEMBERS[1], { name: 'Sato-san' });
+      await change(view, [mine]);
+      const theirs = namedLater(mine, 'Sato-kun');
+      api.fetchSquads.mockResolvedValue({ t: [MEMBERS[0], theirs, MEMBERS[2]] });
+
+      await announce();
+
+      expect(view.result.current.squad[1]).toEqual(theirs);
+      expect(view.result.current.squadRef.current[1].name).toBe('Sato-kun');
+    });
+
+    it('an own write\'s answer older than a list already shown does not undo the list', async () => {
+      const view = await mount();
+      const mine = answered(MEMBERS[1], { name: 'Sato-san' });
+      const theirs = namedLater(mine, 'Sato-kun');
+      api.fetchSquads.mockResolvedValue({ t: [MEMBERS[0], theirs, MEMBERS[2]] });
+      await announce();
+      expect(view.result.current.squad[1]).toEqual(theirs);
+
+      await change(view, [mine]);
+
+      expect(view.result.current.squad[1]).toEqual(theirs);
+      expect(view.result.current.squadRef.current[1]).toEqual(theirs);
+    });
+
+    it('a name cleared by a write stands over a list that still names the member', async () => {
+      const view = await mount();
+      const cleared = answered(MEMBERS[1], { name: '' });
+      await change(view, [cleared]);
+      api.fetchSquads.mockResolvedValue({ t: MEMBERS });
+
+      await announce();
+
+      expect(view.result.current.squad[1]).toEqual(cleared);
+    });
+
+    it('a member nobody has written yet is taken as the list that arrives holds it', async () => {
+      const view = await mount();
+      api.fetchSquads.mockResolvedValue({ t: [MEMBERS[0], { ...MEMBERS[1], name: 'Sato-sensei' }, MEMBERS[2]] });
+
+      await announce();
+
+      expect(view.result.current.squad[1].name).toBe('Sato-sensei');
     });
   });
 
@@ -1567,70 +1519,6 @@ describe('the team\'s members', () => {
     expect(view.result.current.values[1]).toBe('Mori');
     expect(view.result.current.values[2], 'nor is a position the operator left alone replaced').toBe('Sato');
     expect(view.result.current.dirty).toBe(true);
-  });
-
-  it('are read again when a Save shows a lineup another device changed, and the Save waits for them: nothing of that read lands after the Save\'s own writes', async () => {
-    const view = await mount();
-    edit(view, { 1: 'Mori' });
-    const members = deferred();
-    api.fetchSquads.mockReturnValue(members.promise);
-    api.fetchLineupInForce.mockResolvedValue(FOLLOWED);
-    let write;
-    let pending;
-    await act(async () => {
-      pending = view.result.current.lineupToSave().then((composed) => { write = composed; });
-      await new Promise((resolve) => setTimeout(resolve, 0));
-    });
-    expect(api.fetchSquads).toHaveBeenCalledTimes(2);
-    expect(write, 'the Save is out while they are').toBeUndefined();
-
-    let held;
-    await act(async () => {
-      members.resolve({ t: [...MEMBERS, NEW_MEMBER] });
-      await pending;
-      held = view.result.current.squadRef.current;
-    });
-
-    expect(write.positions, 'what the Save read on a position left alone, with the operator\'s change').toEqual({ 1: 'Mori', 2: 'Zed', 3: 'Ito' });
-    expect(held, 'on the ref a handler reads when the Save returns, before anything renders').toContainEqual(NEW_MEMBER);
-    expect(view.result.current.squad).toContainEqual(NEW_MEMBER);
-  });
-
-  it('are waited for by a Save only until the deadline: a read never answered does not hold the Save back for good', async () => {
-    const view = await mount();
-    edit(view, { 1: 'Mori' });
-    api.fetchSquads.mockReturnValue(new Promise(() => {}));
-    api.fetchLineupInForce.mockResolvedValue(FOLLOWED);
-    vi.useFakeTimers();
-    try {
-      let write;
-      let pending;
-      await act(async () => {
-        pending = view.result.current.lineupToSave().then((composed) => { write = composed; });
-        await vi.advanceTimersByTimeAsync(FETCH_TIMEOUT_MS - 1);
-      });
-      expect(write, 'still waiting for them').toBeUndefined();
-
-      await act(async () => {
-        await vi.advanceTimersByTimeAsync(1);
-        await pending;
-      });
-
-      expect(write.positions[2]).toBe('Zed');
-      expect(view.result.current.squad, 'a read that was not answered shows nothing').toEqual(MEMBERS);
-      expect(view.result.current.squadUnavailable).toBe(false);
-    } finally {
-      vi.useRealTimers();
-    }
-  });
-
-  it('are not read again by a Save that shows nothing another device changed', async () => {
-    const view = await mount();
-    edit(view, { 1: 'Mori' });
-
-    await act(async () => { await view.result.current.lineupToSave(); });
-
-    expect(api.fetchSquads).toHaveBeenCalledTimes(1);
   });
 
   // A name typed before the first list is shown would be resolved against no members: a
@@ -1748,19 +1636,19 @@ describe('the team\'s members', () => {
       }
     });
 
-    // Only a read's list ends it: the members an editor's own change put on the list are
+    // Only a read's list ends it: the members an editor's own write put on the list are
     // not the team's, and a typed name resolved against them alone still misses the rest.
-    it('is not ended by a change the editor made itself, nor by that change\'s own read failing', async () => {
+    it('is not ended by a member the editor wrote itself, however newly stamped: only a read\'s list ends it', async () => {
       const opening = deferred();
       const view = await openedWith(opening);
-      api.fetchSquads.mockRejectedValue(new Error('offline'));
 
-      await change(view, (list) => [...list, NEW_MEMBER]);
+      await change(view, [answered(NEW_MEMBER)]);
 
-      expect(view.result.current.squad).toEqual([NEW_MEMBER]);
+      expect(view.result.current.squad).toEqual([expect.objectContaining({ id: 'mem-9', name: 'Zed' })]);
       expect(view.result.current.waitForMembers()).not.toBeNull();
       await act(async () => { opening.resolve({ t: MEMBERS }); });
       expect(view.result.current.waitForMembers()).toBeNull();
+      expect(view.result.current.squad.map((m) => m.id)).toEqual(['mem-1', 'mem-2', 'mem-3', 'mem-9']);
     });
 
     it('is not started again by a read that is out once a list has been shown', async () => {

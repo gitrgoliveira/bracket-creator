@@ -10,17 +10,22 @@ package state
 // the highest round at or below the match's round (FindBestLineup), else the
 // highest round there was. A team now fields the lineup of its previous match
 // unless one is entered for the match (engine.LineupInForce), which has no place
-// for a lineup that waits for a round. So a team with a lineup for a round
-// r >= 1 (a legacy team) is given, for every team match it is seated in by id (in
-// match order, MatchPlace; TeamMatches says which matches are team matches, a
-// bye being none, since nobody plays it), a lineup of its own for that match
-// equal to what v2.1.1 showed there, written exactly as
-// PUT .../match-lineups/:matchId writes one (a match-scoped entry, Round 0). A
-// match that already has an own lineup of the team keeps it: that is v2.1.1's own
-// reading. Every match a legacy team is seated in then holds its own lineup, so
-// nothing the operator enters later for another match changes it, and settling
-// again finds nothing to give. A team with no lineup for a round r >= 1 is left
-// exactly as it is.
+// for a lineup that waits for a round, and one entered for a match no longer stays
+// at that match. So a legacy team, a team with a lineup for a round r >= 1 or, found
+// at the competition's first settlement, one with a lineup entered for a match it is
+// seated in (the match lineups it had were shown nowhere else, and the team carries
+// them from now on), is given, for every team match it is seated in by id (in match
+// order, MatchPlace; TeamMatches says which matches are team matches, a bye being
+// none, since nobody plays it), a lineup of its own for that match equal to what
+// v2.1.1 showed there, written exactly as PUT .../match-lineups/:matchId writes one
+// (a match-scoped entry, Round 0). A team that had no lineup for a round at all was
+// shown none at a match it had no lineup for, and is given an EMPTY lineup of its own
+// there (positions {}, which the lineup rule honours as the match's own: it shows
+// none rather than carrying an earlier match's). A match that already has an own
+// lineup of the team keeps it: that is v2.1.1's own reading. Every match a legacy
+// team is seated in then holds its own lineup, so nothing the operator enters later
+// for another match changes it, and settling again finds nothing to give. A team
+// that is not legacy is left exactly as it is.
 //
 // The round a match had is the one the client read the lineup by
 // (resolveRoundIndex, web-mobile/js/admin_helpers.jsx, identical in v2.0.0,
@@ -32,15 +37,28 @@ package state
 // not rise, which is why a lineup is given per match rather than moved to the
 // first match at its round.
 //
+// Which teams are legacy is decided ONCE, at the competition's first settlement
+// (the load pass: no marker and no list recorded), and recorded in config.md
+// (Competition.RoundLineupsLegacy). A lineup entered for a match is a reading of
+// v2.1.1 only until the first pass; one saved by this release is the operator's
+// own and carries to the team's later matches, so it must never make a team
+// legacy afterwards, and a restart must not find it again. Later passes read the
+// record, plus any team that has a lineup for a round r >= 1. A match lineup left
+// behind by a re-seat, for a match the team is not seated in, is no reading v2.1.1
+// showed and makes no team legacy.
+//
 // The round lineups themselves stay on disk (engine.LineupInForce never reads
 // one) until the competition is completed: a correction can seat a team in a
 // match until it is over, and the match is given the lineup v2.1.1 showed there
-// from them. When it is completed they are removed. The competition's
+// from them. When it is completed they are removed. A legacy team with no round
+// lineup waits as well, for the same reason. The competition's
 // RoundLineupsConverted marker is set as soon as nothing waits: at the first
 // settlement, whatever the status, for a competition with no legacy team (and
 // none waiting for an id, below), so such a competition costs nothing after it;
 // for one that has a legacy team, when the competition is completed and the
-// round lineups are removed. Every write of the draw settles again
+// round lineups are removed, or when the draw's removal leaves none
+// (ClearDrawLineups: a team found only for its match lineups has nothing left to
+// be shown once they went with the draw). Every write of the draw settles again
 // (Store.settleRoundLineupsAfterWrite for a write that goes straight to disk,
 // storeTx.settleRoundLineupsAtCommit for a transaction), so a match a team is
 // seated in later is given its lineup in the write that seats it; a competition
@@ -54,8 +72,9 @@ package state
 // stays removed; a seated pair that is not listed is given the lineup v2.1.1
 // showed when the team has none there, and listed either way. The lineups are
 // saved before the record, so a failure between the two leaves lineups the next
-// pass finds and only lists. The marker clears the record, and DiscardDraw does
-// too, since the next draw reuses the match ids.
+// pass finds and only lists. The marker clears the record (and the list of legacy
+// teams), and ClearDrawLineups clears the record too, since the next draw reuses
+// the match ids.
 //
 // A team with no starting lineup (round 0) is given, on the load pass, what
 // v2.1.1 showed before any round it saved: its highest round's lineup, which
@@ -126,11 +145,11 @@ func (r lineupRoster) awaitsID(name string) bool {
 }
 
 // roundLineupSettlement is what settleRoundLineups decided: the lineups to
-// store, whether they differ from those it was given, how many lineups still
-// wait (a legacy team's round lineup, kept until the competition is completed,
-// or one saved under the name of a team that has no id yet), the (team, match)
-// pairs settled, and a note for the log on every match lineup given, round
-// lineup removed and re-key.
+// store, whether they differ from those it was given, how many things still wait
+// (a legacy team, until the competition is completed, or a lineup saved under the
+// name of a team that has no id yet), the (team, match) pairs settled, the legacy
+// teams found, and a note for the log on every match lineup given, round lineup
+// removed and re-key.
 type roundLineupSettlement struct {
 	lineups map[string]domain.TeamLineup
 	changed bool
@@ -140,7 +159,12 @@ type roundLineupSettlement struct {
 	// givenGrew whether that is more than the competition's record holds.
 	given     map[string][]string
 	givenGrew bool
-	notes     []string
+	// legacy is the legacy teams this settlement found, sorted, and
+	// legacyFound whether this was the competition's first settlement and found
+	// any, so the list is to be recorded (Competition.RoundLineupsLegacy).
+	legacy      []string
+	legacyFound bool
+	notes       []string
 }
 
 // cloneRoundLineupsGiven is a deep copy of a Competition.RoundLineupsGiven: the
@@ -180,10 +204,11 @@ func lineupCopy(l domain.TeamLineup, team, compID, matchID string, round int) do
 // settleRoundLineups gives each legacy team the lineup v2.1.1 showed at every
 // match it is seated in, and removes the round lineups once the competition is
 // completed. It reads only its arguments: comp is the competition (its format
-// says whether a knockout is played, its status whether it is over, and
-// RoundLineupsGiven which pairs were settled before), players its roster,
-// lineups the stored lineups (never modified), and draw the matches as
-// DrawMatchesFrom lists them.
+// says whether a knockout is played, its status whether it is over,
+// RoundLineupsGiven which pairs were settled before and RoundLineupsLegacy which
+// teams the first settlement found legacy), players its roster, lineups the
+// stored lineups (never modified), and draw the matches as DrawMatchesFrom lists
+// them.
 //
 // A pair (team, match) is settled once: when the team is seated in the match and
 // the record does not list the pair, the team is given v2.1.1's reading unless it
@@ -203,8 +228,9 @@ func settleRoundLineups(comp *Competition, players []domain.Player, lineups map[
 	}
 	roster := newLineupRoster(players)
 	res.keyByTeamID(roster, onLoad)
-	legacy := res.legacyTeams(roster)
-	res.giveMatchLineups(comp, legacy, TeamMatches(draw, comp.IsKnockoutEnabled()))
+	matches := TeamMatches(draw, comp.IsKnockoutEnabled())
+	legacy := res.legacyTeams(comp, roster, matches)
+	res.giveMatchLineups(comp, legacy, matches)
 	if onLoad {
 		res.seedStartingLineups(comp.ID, legacy)
 	}
@@ -260,11 +286,27 @@ func (r *roundLineupSettlement) keyByTeamID(roster lineupRoster, onLoad bool) {
 	}
 }
 
-// legacyTeams returns, for each team of the roster that has a lineup for a round
-// r >= 1 (which only the Lineups page of releases up to v2.1.1 could save), all
-// its round lineups, the starting lineup (round 0) included, lowest round first.
-// A team with no such lineup is not one: it is left as it is.
-func (r *roundLineupSettlement) legacyTeams(roster lineupRoster) map[string][]domain.TeamLineup {
+// legacyTeams returns, for each legacy team of the roster, all its round
+// lineups, the starting lineup (round 0) included, lowest round first: none for a
+// team that had no lineup for a round. A team is legacy when it
+//
+//   - has a lineup for a round r >= 1, which only the Lineups page of releases up
+//     to v2.1.1 could save;
+//   - is one of the teams comp.RoundLineupsLegacy records, the legacy teams the
+//     competition's first settlement found; or
+//   - at that first settlement itself (nothing recorded yet), has a match lineup,
+//     stored under its id, for a match of the draw that seats it. v2.1.1 read a
+//     match's own lineup and never carried it to another match, so such a team
+//     was shown at its other matches what its round lineups said, or nothing,
+//     where a team now carries the lineup of its previous match. A match lineup
+//     for a match that does not seat the team, left behind by a re-seat, is no
+//     reading v2.1.1 showed and makes it none; and one saved after the first
+//     settlement is this release's, which carries, so it never does.
+//
+// A team that is none of these is left exactly as it is. Which teams were found
+// is recorded when this is the first settlement (legacyFound), so the next one,
+// and a restart's, reads them rather than deriving them again.
+func (r *roundLineupSettlement) legacyTeams(comp *Competition, roster lineupRoster, matches []TeamMatch) map[string][]domain.TeamLineup {
 	rounds := map[string][]domain.TeamLineup{}
 	for _, l := range r.lineups {
 		if l.MatchID == "" && roster.has(l.TeamID) {
@@ -272,36 +314,97 @@ func (r *roundLineupSettlement) legacyTeams(roster lineupRoster) map[string][]do
 		}
 	}
 	legacy := map[string][]domain.TeamLineup{}
+	add := func(team string) {
+		lineups := rounds[team]
+		slices.SortFunc(lineups, func(a, b domain.TeamLineup) int { return cmp.Compare(a.Round, b.Round) })
+		legacy[team] = lineups
+	}
 	for team, lineups := range rounds {
 		if slices.ContainsFunc(lineups, func(l domain.TeamLineup) bool { return l.Round >= 1 }) {
-			slices.SortFunc(lineups, func(a, b domain.TeamLineup) int { return cmp.Compare(a.Round, b.Round) })
-			legacy[team] = lineups
+			add(team)
 		}
+	}
+	for _, team := range comp.RoundLineupsLegacy {
+		if roster.has(team) {
+			add(team)
+		}
+	}
+	first := comp.RoundLineupsLegacy == nil
+	if first {
+		seatedIn := func(team, matchID string) bool {
+			return slices.ContainsFunc(matches, func(m TeamMatch) bool { return m.ID == matchID && m.Seats(team) })
+		}
+		for _, l := range r.lineups {
+			if l.MatchID != "" && roster.has(l.TeamID) && seatedIn(l.TeamID, l.MatchID) {
+				add(l.TeamID)
+			}
+		}
+	}
+	if first && len(legacy) > 0 {
+		r.legacy = slices.Sorted(maps.Keys(legacy))
+		r.legacyFound = true
 	}
 	return legacy
 }
 
+// teamsWithRoundLineups is the teams of the roster that have a lineup for a round
+// r >= 1 in lineups, each once, sorted: the legacy teams a draw's removal leaves,
+// since a team found only for the lineups entered for its matches has nothing left
+// to be shown once they went with the draw. A lineup of a team that is no longer on
+// the roster is no team's to wait for. nil when there are none, as the record of
+// legacy teams (Competition.RoundLineupsLegacy) is when empty.
+func teamsWithRoundLineups(lineups map[string]domain.TeamLineup, roster lineupRoster) []string {
+	var teams []string
+	for _, l := range lineups {
+		if l.MatchID == "" && l.Round >= 1 && roster.has(l.TeamID) {
+			teams = append(teams, l.TeamID)
+		}
+	}
+	slices.Sort(teams)
+	return slices.Compact(teams)
+}
+
+// anyAwaitsID reports whether a lineup is stored under the name of a player that
+// has no participant id yet, which keyByTeamID keeps waiting for the id: nothing
+// may mark the conversion done while one does, or it would stay name-keyed for good.
+func (r lineupRoster) anyAwaitsID(lineups map[string]domain.TeamLineup) bool {
+	for _, l := range lineups {
+		if l.TeamID != "" && !r.has(l.TeamID) && r.awaitsID(l.TeamID) {
+			return true
+		}
+	}
+	return false
+}
+
 // legacyReading is the lineup v2.1.1 showed a team at a match read at round,
 // from the team's round lineups, lowest round first: the one with the highest
-// round at or below round, else the highest round there was. rounds is not empty.
-func legacyReading(rounds []domain.TeamLineup, round int) domain.TeamLineup {
-	if above := slices.IndexFunc(rounds, func(l domain.TeamLineup) bool { return l.Round > round }); above > 0 {
-		return rounds[above-1]
+// round at or below round, else the highest round there was. ok is false when the
+// team had no lineup for a round at all, and v2.1.1 showed none.
+func legacyReading(rounds []domain.TeamLineup, round int) (lineup domain.TeamLineup, ok bool) {
+	for i := len(rounds) - 1; i >= 0; i-- {
+		if rounds[i].Round <= round {
+			return rounds[i], true
+		}
 	}
-	// Either none is above round, so the highest is also the highest at or
-	// below it, or all are, and v2.1.1 fell back to the highest there was.
-	return rounds[len(rounds)-1]
+	if len(rounds) == 0 {
+		return domain.TeamLineup{}, false
+	}
+	// Every round is above round: v2.1.1 fell back to the highest there was.
+	return rounds[len(rounds)-1], true
 }
 
 // giveMatchLineups settles each pair of a legacy team and a match it is seated in
 // by id that the competition's record does not list: the team is given the lineup
 // v2.1.1 showed there (legacyReading at the round the match was read at) unless
 // it already has a lineup of its own for the match, which is v2.1.1's own reading
-// of it and is left as it is, and the pair is listed either way. A listed pair is
-// left alone, so a lineup the operator removed from a match stays removed. The
-// reading is taken from the round lineups as the pass finds them, so a starting
-// lineup an earlier pass seeded is one of them: it is the one v2.1.1 fell back to
-// for a match read below the team's lowest round, so it changes no reading.
+// of it and is left as it is, and the pair is listed either way. A team that had
+// no lineup for a round at all was shown none, and is given an empty lineup of its
+// own, which the lineup rule honours as the match's own, so the match shows none
+// rather than what an earlier one does. A listed pair is left alone, so a lineup
+// the operator removed from a match stays removed. The reading is taken from the
+// round lineups as the pass finds them, so a starting lineup an earlier pass
+// seeded is one of them: it is the one v2.1.1 fell back to for a match read below
+// the team's lowest round, so it changes no reading.
 func (r *roundLineupSettlement) giveMatchLineups(comp *Competition, legacy map[string][]domain.TeamLineup, matches []TeamMatch) {
 	settled := make(map[string]map[string]struct{}, len(comp.RoundLineupsGiven))
 	for team, matchIDs := range comp.RoundLineupsGiven {
@@ -329,10 +432,18 @@ func (r *roundLineupSettlement) giveMatchLineups(comp *Competition, legacy map[s
 			if _, own := r.lineups[key]; own {
 				continue
 			}
-			src := legacyReading(legacy[team], legacyLineupRound(m.DrawMatch))
-			r.lineups[key] = lineupCopy(src, team, comp.ID, m.ID, 0)
+			src, shown := legacyReading(legacy[team], legacyLineupRound(m.DrawMatch))
+			given := lineupCopy(src, team, comp.ID, m.ID, 0)
+			if given.Positions == nil {
+				given.Positions = map[domain.Position]string{}
+			}
+			r.lineups[key] = given
 			r.changed = true
-			r.notef("team %s: its round %d lineup is now its own lineup for match %s, where v2.1.1 showed it", team, src.Round, m.ID)
+			if shown {
+				r.notef("team %s: its round %d lineup is now its own lineup for match %s, where v2.1.1 showed it", team, src.Round, m.ID)
+			} else {
+				r.notef("team %s: an empty lineup is now its own lineup for match %s, where v2.1.1 showed none", team, m.ID)
+			}
 		}
 	}
 	r.given = nil
@@ -353,10 +464,10 @@ func (r *roundLineupSettlement) giveMatchLineups(comp *Competition, legacy map[s
 // hold.
 func (r *roundLineupSettlement) seedStartingLineups(compID string, legacy map[string][]domain.TeamLineup) {
 	for _, team := range slices.Sorted(maps.Keys(legacy)) {
-		if legacy[team][0].Round == 0 {
+		if len(legacy[team]) == 0 || legacy[team][0].Round == 0 {
 			continue
 		}
-		src := legacyReading(legacy[team], 0)
+		src, _ := legacyReading(legacy[team], 0)
 		r.lineups[teamLineupKey(team, 0)] = lineupCopy(src, team, compID, "", 0)
 		r.changed = true
 		r.notef("team %s had no starting lineup: its round %d lineup, which v2.1.1 showed before any round it saved, is now it", team, src.Round)
@@ -364,22 +475,27 @@ func (r *roundLineupSettlement) seedStartingLineups(compID string, legacy map[st
 }
 
 // retireRoundLineups removes each legacy team's round lineups (round >= 1) once
-// the competition is completed, and counts them as waiting until then: a
-// correction can seat a team in a match until it is over, and the match is given
-// the lineup v2.1.1 showed there from them. The starting lineup stays.
+// the competition is completed, and counts each legacy team as waiting until
+// then: a correction can seat a team in a match until it is over, and the match is
+// given the lineup v2.1.1 showed there. The starting lineup stays. A team with no
+// round lineup to remove waits too, since the match it is seated in later is given
+// its reading all the same.
 func (r *roundLineupSettlement) retireRoundLineups(legacy map[string][]domain.TeamLineup, completed bool) {
 	for _, team := range slices.Sorted(maps.Keys(legacy)) {
+		held := 0
 		for _, l := range legacy[team] {
 			if l.Round < 1 {
 				continue
 			}
-			if !completed {
-				r.waiting++
-				continue
+			held++
+			if completed {
+				delete(r.lineups, lineupStorageKey(l))
+				r.changed = true
+				r.notef("the round %d lineup of team %s is removed: the competition is completed, and each match the team is seated in holds its own lineup", l.Round, team)
 			}
-			delete(r.lineups, lineupStorageKey(l))
-			r.changed = true
-			r.notef("the round %d lineup of team %s is removed: the competition is completed, and each match the team is seated in holds its own lineup", l.Round, team)
+		}
+		if !completed {
+			r.waiting += max(held, 1)
 		}
 	}
 }
@@ -431,9 +547,10 @@ func (st *roundLineupStage) loadPlayers(comp *Competition) ([]domain.Player, err
 }
 
 // settle runs one settlement and stores what it decided: the lineups when they
-// changed, then the competition's record when the pairs settled grew (or, when
-// nothing waits any more, with the marker set and the pairs cleared). saved is the
-// record as it was saved, nil when nothing was. A competition that is not a team
+// changed, then the competition's record when the pairs settled grew or the first
+// settlement found the legacy teams (or, when nothing waits any more, with the
+// marker set and the pairs and the legacy teams cleared). saved is the record as
+// it was saved, nil when nothing was. A competition that is not a team
 // competition, that is already marked, or that does not exist has nothing to
 // settle. Everything is read and decided before the first write, so a failure
 // leaves nothing half done; a failed write is retried by the next write of the
@@ -482,15 +599,19 @@ func (st *roundLineupStage) settle(onLoad bool) (saved *Competition, err error) 
 		log.Printf("state: round-lineup upgrade for %s: %s", st.compID, note)
 	}
 	marked := res.waiting == 0
-	if !marked && !res.givenGrew {
+	if !marked && !res.givenGrew && !res.legacyFound {
 		return nil, nil
 	}
 	next := *comp
 	if marked {
 		next.RoundLineupsConverted = true
 		next.RoundLineupsGiven = nil
+		next.RoundLineupsLegacy = nil
 	} else {
 		next.RoundLineupsGiven = res.given
+		if res.legacyFound {
+			next.RoundLineupsLegacy = res.legacy
+		}
 	}
 	if _, err := st.store.saveCompetitionChangedLocked(&next, st.write); err != nil {
 		return nil, fmt.Errorf("round lineups settled but the competition's record of them was not saved: %w", err)

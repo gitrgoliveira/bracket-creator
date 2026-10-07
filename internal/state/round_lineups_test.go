@@ -387,6 +387,94 @@ func TestCopyCompetition_DeepCopiesTheRoundLineupsGiven(t *testing.T) {
 	assert.Nil(t, (&Store{}).copyCompetition(&Competition{ID: "c"}).RoundLineupsGiven, "no record stays none")
 }
 
+// The list of legacy teams is shared with no copy either, and an empty record
+// stays nil: a nil list is what tells the first settlement from a later one.
+func TestCopyCompetition_DeepCopiesTheRoundLineupsLegacy(t *testing.T) {
+	original := &Competition{ID: "c", RoundLineupsLegacy: []string{"t", "u"}}
+
+	cp := (&Store{}).copyCompetition(original)
+	cp.RoundLineupsLegacy[0] = "changed"
+
+	assert.Equal(t, []string{"t", "u"}, original.RoundLineupsLegacy)
+	assert.Nil(t, (&Store{}).copyCompetition(&Competition{ID: "c"}).RoundLineupsLegacy, "no record stays none")
+}
+
+// legacyReading answers what v2.1.1 showed from a team's round lineups, and says
+// when there were none: v2.1.1 showed a team with no lineup for a round nothing at
+// a match it had no lineup entered for, and an empty slice has no highest round to
+// fall back to.
+func TestLegacyReading_ATeamWithNoRoundLineupWasShownNothing(t *testing.T) {
+	for name, rounds := range map[string][]domain.TeamLineup{"nil": nil, "empty": {}} {
+		t.Run(name, func(t *testing.T) {
+			for _, round := range []int{0, 1, 5} {
+				got, shown := legacyReading(rounds, round)
+
+				assert.False(t, shown)
+				assert.Empty(t, got.Positions)
+			}
+		})
+	}
+	one := []domain.TeamLineup{{Round: 2, Positions: map[domain.Position]string{"1": "Sato"}}}
+	for _, round := range []int{0, 2, 7} {
+		got, shown := legacyReading(one, round)
+		assert.True(t, shown, "round %d", round)
+		assert.Equal(t, "Sato", got.Positions["1"])
+	}
+}
+
+// A match lineup makes a team legacy at the competition's FIRST settlement only
+// (no list recorded yet), and only for a match of the draw that seats the team by
+// id; from then on the recorded list and a lineup for a round decide.
+func TestSettleRoundLineups_AMatchLineupMakesATeamLegacyOnlyAtTheFirstSettlement(t *testing.T) {
+	players := []domain.Player{{ID: "t", Name: "Tora"}, {ID: "o", Name: "Other"}, {ID: "x", Name: "Extra"}}
+	draw := []DrawMatch{
+		{ID: "Pool A-0", SideAID: "t", SideBID: "o", PoolRound: 0},
+		{ID: "Pool A-1", SideAID: "t", SideBID: "o", PoolRound: 1},
+	}
+	entered := func(team, matchID string) map[string]domain.TeamLineup {
+		return map[string]domain.TeamLineup{teamLineupMatchKey(team, matchID): {
+			TeamID: team, CompetitionID: "c", MatchID: matchID, Positions: map[domain.Position]string{"1": "Sato"},
+		}}
+	}
+	for _, tc := range []struct {
+		name         string
+		recorded     []string
+		lineups      map[string]domain.TeamLineup
+		wantLegacy   []string
+		wantFound    bool
+		wantPinnedAt []string // the matches Tora is given an empty lineup for
+		wantWaiting  int
+	}{
+		{"first pass, a match it plays", nil, entered("t", "Pool A-0"), []string{"t"}, true, []string{"Pool A-1"}, 1},
+		{"first pass, a match it does not play", nil, entered("x", "Pool A-0"), nil, false, nil, 0},
+		{"first pass, a match the draw does not hold", nil, entered("t", "Pool Z-9"), nil, false, nil, 0},
+		{"a later pass: the list is recorded, and this team is not on it", []string{"o"}, entered("t", "Pool A-0"), nil, false, nil, 1},
+		{"a later pass: a team on the list is read from it", []string{"t"}, entered("o", "Pool A-0"), nil, false, []string{"Pool A-0", "Pool A-1"}, 1},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			comp := settlementComp(CompFormatLeague, CompStatusPools)
+			comp.RoundLineupsLegacy = tc.recorded
+
+			res := settleRoundLineups(comp, players, tc.lineups, draw, false)
+
+			assert.Equal(t, tc.wantLegacy, res.legacy)
+			assert.Equal(t, tc.wantFound, res.legacyFound)
+			var pinned []string
+			for _, m := range draw {
+				if l, ok := res.lineups[teamLineupMatchKey("t", m.ID)]; ok {
+					if _, own := tc.lineups[teamLineupMatchKey("t", m.ID)]; !own {
+						pinned = append(pinned, m.ID)
+						assert.NotNil(t, l.Positions, "an empty lineup is stored as an empty one, not a missing one")
+						assert.Empty(t, l.Positions)
+					}
+				}
+			}
+			assert.Equal(t, tc.wantPinnedAt, pinned)
+			assert.Equal(t, tc.wantWaiting, res.waiting, "a legacy team waits for the competition to be completed, so the marker stays unset")
+		})
+	}
+}
+
 // The lineups are saved before the competition's record. If saving the record
 // failed, the next pass finds each lineup it gave and only lists the pairs.
 func TestSettleRoundLineups_LineupsThatLandedBeforeTheRecordOnlyAddThePairs(t *testing.T) {
@@ -496,4 +584,47 @@ func BenchmarkSettleRoundLineupsAfterWrite_Marked(b *testing.B) {
 	for i := 0; i < b.N; i++ {
 		store.settleRoundLineupsAfterWrite(compID)
 	}
+}
+
+// A lineup stored under the name of a player that has no id yet keeps the
+// conversion from being marked done; one under an id, a name no player has, or the
+// name of a player that has an id does not.
+func TestLineupRoster_AnyAwaitsID(t *testing.T) {
+	roster := newLineupRoster([]domain.Player{{ID: "a", Name: "Alpha"}, {Name: "Bravo"}})
+	under := func(team string) map[string]domain.TeamLineup {
+		return map[string]domain.TeamLineup{teamLineupKey(team, 0): {TeamID: team}}
+	}
+	for _, tc := range []struct {
+		name    string
+		lineups map[string]domain.TeamLineup
+		want    bool
+	}{
+		{"none", nil, false},
+		{"under a participant id", under("a"), false},
+		{"under the name of a player with an id", under("Alpha"), false},
+		{"under a name no player has", under("Nobody"), false},
+		{"under the name of a player with no id", under("Bravo"), true},
+		{"an unkeyed lineup", under(""), false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			assert.Equal(t, tc.want, roster.anyAwaitsID(tc.lineups))
+		})
+	}
+}
+
+// Only a team of the roster is waited for, each once, sorted, and a match lineup or
+// the starting lineup makes none.
+func TestTeamsWithRoundLineups(t *testing.T) {
+	roster := newLineupRoster([]domain.Player{{ID: "b", Name: "B"}, {ID: "a", Name: "A"}, {ID: "c", Name: "C"}})
+	lineups := map[string]domain.TeamLineup{
+		teamLineupKey("b", 1):               {TeamID: "b", Round: 1},
+		teamLineupKey("b", 2):               {TeamID: "b", Round: 2},
+		teamLineupKey("a", 1):               {TeamID: "a", Round: 1},
+		teamLineupKey("c", 0):               {TeamID: "c", Round: 0},
+		teamLineupMatchKey("c", "Pool A-0"): {TeamID: "c", MatchID: "Pool A-0"},
+		teamLineupKey("gone", 3):            {TeamID: "gone", Round: 3},
+	}
+
+	assert.Equal(t, []string{"a", "b"}, teamsWithRoundLineups(lineups, roster))
+	assert.Nil(t, teamsWithRoundLineups(nil, roster))
 }

@@ -36,6 +36,7 @@
 
 import { normalizeCompetitionDetail, normalizePlayer, toBackendMatchResult, buildPlayerMetadata } from './api_serializers.jsx';
 import { unionChanged } from './match_groups.jsx';
+import { joinQueuedLineupSave } from './lineup_save.jsx';
 import { bridge as _bridge } from './court_bridge.jsx';
 // The offset lives in a leaf so a score editor can read the same clock (server_clock.jsx).
 import { serverNowMs, serverClockOffsetMs, setServerClockOffsetMs } from './server_clock.jsx';
@@ -566,14 +567,15 @@ const _revSession = (typeof crypto !== 'undefined' && crypto.randomUUID)
 // coalescing rule (_coalesceTarget): a score write takes the place of the
 // match's LAST entry only when that entry is a score write no newer than it,
 // and a running write only of a running one, claiming the groups both changed
-// (union, as bc-mrgc phase 2 does); a lineup save takes the place of a queued
-// save of the same lineup, because a lineup PUT restates the whole lineup and
-// carries no stamp the server could order it by. Nothing else replaces
-// anything: a running write never replaces a queued Finish or a decision, and
-// a decision and a score for the same match are two entries. A key persisted
-// by an earlier build (one entry per match, keyed by the base itself) is a
-// valid entry of this shape: its base is the key, so an old queue loads and
-// replays as it is.
+// (union, as bc-mrgc phase 2 does); a lineup save joins the queued save of the
+// same lineup, so a lineup has ONE entry (lineup_save.jsx: the union of the
+// positions the two changed, the later value standing where both changed one),
+// because a lineup PUT carries no stamp the server could order it by. Nothing
+// else replaces anything: a running write never replaces a queued Finish or
+// a decision, and a decision and a score for the same match are two entries.
+// A key persisted by an earlier build (one entry per match, keyed by the base
+// itself) is a valid entry of this shape: its base is the key, so an old queue
+// loads and replays as it is.
 //
 // F4: The queue is persisted to localStorage on every change so that a page
 // reload or crash during a wifi gap does not lose unsaved scores/decisions.
@@ -950,20 +952,18 @@ function _entriesFor(base) {
 // RUNNING write takes the place of a running one only: never of a queued
 // Finish or correction. A Finish or correction may take the place of either
 // (a later Finish, or the editor's Retry re-sending the queued one, is the
-// same result restated, not a second one). A LINEUP save takes the place of a
-// queued save of the same lineup (the base names the lineup): the PUT replaces
-// the whole lineup, so the later save says everything the earlier one did. A
-// decision or an override is never replaced, and nothing coalesces across
-// one. The page-hide copy of a write still being sent (_keepInflightRunning)
-// is its own entry until its fetch settles.
+// same result restated, not a second one). A LINEUP save joins the queued save
+// of the same lineup (the base names the lineup): _placeWrite makes the one
+// entry say what both changed. A decision or an override is never replaced,
+// and nothing coalesces across one. The page-hide copy of a write still being
+// sent (_keepInflightRunning) is its own entry until its fetch settles.
 function _coalesceTarget(base, descriptor) {
     if (!descriptor) return null;
     const list = _entriesFor(base);
     const last = list.length ? list[list.length - 1] : null;
     if (!last) return null;
     const [key, prev] = last;
-    // A lineup save restates the whole lineup (the PUT replaces it), so a
-    // later save of the same lineup carries everything a queued one said.
+    // A lineup has one entry in the queue: a later save of it joins the queued one.
     if (descriptor.kind === 'lineup') return prev && prev.kind === 'lineup' ? last : null;
     if (descriptor.kind !== 'score') return null;
     if (!prev || prev.kind !== 'score' || _heldByOpenFetch(key, prev)) return null;
@@ -972,24 +972,18 @@ function _coalesceTarget(base, descriptor) {
     return last;
 }
 
-// _queuedLineupSave: the lineup a save of this lineup (`base`) still queued would
-// write, `{ positions, memberIds }` (a copy), or null when none is queued. A
-// queued save that clears every position is still a lineup, so the answer is
-// truthy exactly when a save is queued. A new save of the lineup then takes its
-// place in the queue (_coalesceTarget) rather than go straight to the server: a
-// lineup PUT carries no stamp the server could order it by, so a direct save
-// landing while the older one is still being replayed could be overwritten by
-// it. That is not waiting behind it: the queued save is replaced by the newer
-// one and the flush the enqueue kicks sends it at once. It is replaced whole, so
-// the newer save is composed on the lineup this answers with, never on the
-// server's copy, which lacks that edit. Every other write goes straight to the
-// server whatever is queued (bc-mrgc: the server orders a match write by its
-// stamp).
+// _queuedLineupSave: whether a save of this lineup (`base`) is still queued. A new
+// save of the lineup then joins that entry (_coalesceTarget, _placeWrite) rather
+// than go straight to the server: a lineup PUT carries no stamp the server could
+// order it by, so a direct save landing while the older one is still being
+// replayed could be overwritten by it. That is not waiting behind it: the joined
+// entry is the one flush the enqueue kicks sends at once. It carries both saves'
+// changes, so nothing is composed on what is queued. It is also what holds back
+// removing the lineup, which the replay would undo. Every other write goes
+// straight to the server whatever is queued (bc-mrgc: the server orders a match
+// write by its stamp).
 function _queuedLineupSave(base) {
-    const queued = _coalesceTarget(base, { kind: 'lineup' });
-    if (!queued) return null;
-    const { positions, memberIds } = queued[1].payload || {};
-    return { positions: { ...positions }, memberIds: { ...memberIds } };
+    return _coalesceTarget(base, { kind: 'lineup' }) !== null;
 }
 
 // _lineupKey: the queue BASE of a lineup: a match's own lineup (`matchId`), or a
@@ -1976,10 +1970,11 @@ function _queuedAnswer() {
 }
 
 // _placeWrite: the key a new write about `base` goes under. When it coalesces
-// (_coalesceTarget), it takes the last running score write's key and carries
-// what that write said that a later write must not lose: the groups it
+// (_coalesceTarget), it takes the queued entry's key and carries what that
+// write said that a later write must not lose: the groups a score write
 // changed (_claimingQueuedGroups) and, for a running write, a pending
-// kachinukiBoutFinal (enqueueRunningWrite's comment says why). Otherwise it is
+// kachinukiBoutFinal (enqueueRunningWrite's comment says why); a lineup save
+// the positions the queued save changed (joinQueuedLineupSave). Otherwise it is
 // a new entry, after the others in replay order.
 function _placeWrite(base, descriptor) {
     const target = _coalesceTarget(base, descriptor);
@@ -1990,7 +1985,9 @@ function _placeWrite(base, descriptor) {
     if (Number(prev.seenModifiedAt) > (Number(descriptor.seenModifiedAt) || 0)) {
         descriptor.seenModifiedAt = prev.seenModifiedAt;
     }
-    let payload = _claimingQueuedGroups(prev, descriptor.payload);
+    let payload = descriptor.kind === 'lineup'
+        ? joinQueuedLineupSave(prev.payload, descriptor.payload)
+        : _claimingQueuedGroups(prev, descriptor.payload);
     if (!descriptor.terminal && prev.payload && prev.payload.kachinukiBoutFinal
         && payload && !payload.kachinukiBoutFinal) {
         payload = { ...payload, kachinukiBoutFinal: true };
@@ -2072,9 +2069,9 @@ function _withoutDownstreamConfirmation(payload) {
  * A terminal SCORE write (a Finish, a correction) takes the place of the
  * match's last queued write when that is a score write (running, or a Finish
  * the editor's Retry is re-sending), claiming its groups (_coalesceTarget,
- * _placeWrite); every other terminal write (a
- * decision, a lineup, an override) is queued after what is there and replays
- * in order. Nothing queued is ever replaced by it otherwise.
+ * _placeWrite); a lineup save joins the queued save of its lineup; every
+ * other terminal write (a decision, an override) is queued after what is there
+ * and replays in order. Nothing queued is ever replaced by it otherwise.
  * @param {string} key        - Queue BASE: the match the write is about (use
  *                              _revKey, or the lineup / override base)
  * @param {WriteKind} kind    - 'score' | 'decision' | 'lineup'
@@ -2668,27 +2665,6 @@ async function _daihyosenRequest(method, compID, matchID, password, notDone, see
 // What a lineup removal leaves undone when it does not land.
 const LINEUP_NOT_REMOVED = 'The lineup was not removed';
 
-// _deleteLineup: a stored lineup's DELETE. Bounded like every sibling write
-// (_fetchJson: the deadline covers the body), and answered in a plain sentence
-// when the server cannot be reached, never the browser's "Failed to fetch". It is
-// not queued: the editor shows what the match carries without the lineup only
-// once the server has confirmed the removal. A lineup that is not there is
-// removed already (404).
-async function _deleteLineup(url, password, failure) {
-    let res;
-    let body;
-    try {
-        ({ res, body } = await _fetchJson(url, {
-            method: 'DELETE',
-            headers: { 'X-Tournament-Password': password },
-        }));
-    } catch (_e) {
-        throw new Error(noAnswerSentence(LINEUP_NOT_REMOVED));
-    }
-    if (!res.ok && res.status !== 404) throw _refusalError(body, failure);
-    return true;
-}
-
 // _readLineup: a lineup's GET, bounded like every sibling request (_fetchJson:
 // the deadline covers the body), so a read the server never answers rejects with
 // _requestTimedOut's error, which lineupReadFailure words, instead of leaving an
@@ -2700,8 +2676,8 @@ async function _readLineup(url) {
     if (!res.ok) throw new Error(body.error || "Failed to load lineup");
     // An answer whose body could not be read comes back from _fetchJson as an empty
     // object, which cannot be told from one the server sent. A body with no keys is
-    // refused here rather than read as no lineup, since a Save composed on it would
-    // write over the real one.
+    // refused here rather than read as no lineup, since an editor would then show an
+    // empty lineup as the one the team fields.
     if (Object.keys(body).length === 0) throw new Error("The lineup could not be read. Check the connection and try again.");
     return lineupOrNull(body);
 }
@@ -2709,25 +2685,37 @@ async function _readLineup(url) {
 // What a team member write leaves undone when the server does not answer it.
 const TEAM_MEMBER_NOT_ADDED = 'The team member was not added';
 const TEAM_MEMBER_NOT_RENAMED = 'The team member was not renamed';
+const TEAM_MEMBER_NOT_CLEARED = 'The team member\'s name was not cleared';
 
-// _memberWrite: a team member's POST (add) or PUT (rename). The team score sheet holds
-// every name box disabled, and the side's lineup announcements back, until the write
-// settles, so it is bounded like every sibling request (_fetchJson: the deadline covers
-// the body) and answered in a plain sentence when the server cannot be reached or does
-// not answer, never the browser's "Failed to fetch". Resolves to { res, body }.
-async function _memberWrite(url, method, name, password, notDone) {
+// _memberWrite: a team member's POST (add), PUT (rename) or DELETE (cleared name). The
+// team score sheet holds every name box disabled, and the side's lineup announcements
+// back, until the write settles, so it is bounded like every sibling request
+// (_fetchJson: the deadline covers the body) and answered in a plain sentence when the
+// server cannot be reached or does not answer, never the browser's "Failed to fetch".
+// `payload` is the JSON body, none for a clear. Resolves to { res, body }.
+async function _memberWrite(url, method, password, notDone, payload) {
+    const headers = { 'X-Tournament-Password': password };
+    const opts = { method, headers };
+    if (payload !== undefined) {
+        headers['Content-Type'] = 'application/json';
+        opts.body = JSON.stringify(payload);
+    }
     try {
-        return await _fetchJson(url, {
-            method,
-            headers: {
-                'Content-Type': 'application/json',
-                'X-Tournament-Password': password
-            },
-            body: JSON.stringify({ name })
-        });
+        return await _fetchJson(url, opts);
     } catch (_e) {
         throw new Error(noAnswerSentence(notDone));
     }
+}
+
+// _answeredMember: the member a write answers, which the server has stamped
+// (`modifiedAt`): what an editor merges in by that stamp, so it is the answer and not a
+// copy built from what was typed, which carries no stamp and would lose to every list.
+// _fetchJson reads an unreadable body as {}, which cannot be told from a member the
+// server sent: an answer with no id is no member, and the write is a failed one.
+function _answeredMember(res, body, failure, notDone) {
+    if (!res.ok) throw _refusalError(body, failure);
+    if (!body.id) throw new Error(noAnswerSentence(notDone));
+    return body;
 }
 
 const API = {
@@ -4122,14 +4110,25 @@ const API = {
     // the name so the server can persist both together. Omitted entirely
     // when the caller passes nothing, so a caller that never adopted squad
     // members (or an older bundle) round-trips exactly as before.
-    async putTeamLineup(compID, teamId, round, positions, password, memberIds) {
+    //
+    // changed (operator decision 2026-10-07, "Only changed positions") names the
+    // positions this save changes: the server reads only those and lands them
+    // on the lineup it holds when the save arrives, so a position another device
+    // changed meanwhile stays, and the answer is the whole lineup it then holds
+    // (lineup_save.jsx builds the body: positions and memberIds for the changed
+    // positions only). Omitted, the body is a whole lineup that replaces the
+    // stored one.
+    async putTeamLineup(compID, teamId, round, positions, password, memberIds, changed) {
         const lineupUrl = `/api/competitions/${compID}/teams/${teamId}/lineups/${round}`;
-        const lineupBody = { teamId, competitionId: compID, round, positions, ...(memberIds ? { memberIds } : {}) };
+        const lineupBody = {
+            teamId, competitionId: compID, round, positions,
+            ...(memberIds ? { memberIds } : {}), ...(changed ? { changed } : {}),
+        };
         // F5: lineup queue key is distinct from score/decision keys so a lineup
         // write doesn't collide with a concurrent score write for the same match.
         const lineupKey = _lineupKey(compID, teamId, { round });
-        // A save of this lineup still queued is replaced by this one, which
-        // the flush sends at once (_queuedLineupSave): sent straight, it could
+        // A save of this lineup still queued is joined by this one, which the
+        // flush sends at once (_queuedLineupSave): sent straight, it could
         // land before the queued one's replay and be overwritten by it.
         if (_queuedLineupSave(lineupKey)) {
             _enqueueTerminalWrite(lineupKey, 'lineup', 'PUT', lineupUrl, lineupBody, password, compID, '');
@@ -4204,41 +4203,31 @@ const API = {
     },
     // Mints the new member's id and display index server-side in one step
     // (operator ruling: assigned automatically as members are added) and
-    // returns the created {id, index, name}. clearTeamMember below is the
-    // nearest counterpart and only blanks a name: an index, once minted, is
-    // never freed.
+    // returns the created {id, index, name, modifiedAt}, 201. clearTeamMember
+    // below is the nearest counterpart and only blanks a name: an index, once
+    // minted, is never freed. Every member write answers the member with the
+    // stamp the server gave it (_answeredMember), and the server announces the
+    // change (lineup_updated, with the team) to every device.
     async addTeamMember(compID, teamId, name, password) {
-        const { res, body } = await _memberWrite(`/api/competitions/${compID}/teams/${teamId}/members`, 'POST', name, password, TEAM_MEMBER_NOT_ADDED);
-        if (!res.ok) throw _refusalError(body, "Failed to add team member");
-        // _fetchJson reads an unreadable body as {}, which cannot be told from a member
-        // the server sent: one with no id is no member, and is not handed on as one.
-        if (!body.id) throw new Error(noAnswerSentence(TEAM_MEMBER_NOT_ADDED));
-        return body;
+        const { res, body } = await _memberWrite(`/api/competitions/${compID}/teams/${teamId}/members`, 'POST', password, TEAM_MEMBER_NOT_ADDED, { name });
+        return _answeredMember(res, body, "Failed to add team member", TEAM_MEMBER_NOT_ADDED);
     },
-    // Keeps memberId's id and index; only the display name changes.
-    // 204 No Content on success.
+    // Keeps memberId's id and index; only the display name changes. Answers 200
+    // with the member, stamped.
     async renameTeamMember(compID, teamId, memberId, name, password) {
-        const { res, body } = await _memberWrite(`/api/competitions/${compID}/teams/${teamId}/members/${memberId}`, 'PUT', name, password, TEAM_MEMBER_NOT_RENAMED);
-        if (!res.ok) throw _refusalError(body, "Failed to rename team member");
-        return true;
+        const { res, body } = await _memberWrite(`/api/competitions/${compID}/teams/${teamId}/members/${memberId}`, 'PUT', password, TEAM_MEMBER_NOT_RENAMED, { name });
+        return _answeredMember(res, body, "Failed to rename team member", TEAM_MEMBER_NOT_RENAMED);
     },
     // The operator's "removal": blanks memberId's Name back to "" and
     // leaves the id and display index untouched, so a bout already fought
     // that names this position keeps meaning the same person (bc-pnum).
-    // 204 No Content on success. Refused with a 409 once the competition
-    // has started (state.ErrTeamMemberClearAfterStart); the server's own
-    // message is operator-facing, so it is surfaced verbatim rather than
-    // remapped here.
+    // Answers 200 with the member, nameless and stamped. Refused with a 409
+    // once the competition has started (state.ErrTeamMemberClearAfterStart);
+    // the server's own message is operator-facing, so it is surfaced verbatim
+    // rather than remapped here.
     async clearTeamMember(compID, teamId, memberId, password) {
-        const res = await fetch(`/api/competitions/${compID}/teams/${teamId}/members/${memberId}`, {
-            method: 'DELETE',
-            headers: { 'X-Tournament-Password': password }
-        });
-        if (!res.ok) {
-            const err = await res.json().catch(() => ({}));
-            throw new Error(err.error || "Failed to clear team member");
-        }
-        return true;
+        const { res, body } = await _memberWrite(`/api/competitions/${compID}/teams/${teamId}/members/${memberId}`, 'DELETE', password, TEAM_MEMBER_NOT_CLEARED);
+        return _answeredMember(res, body, "Failed to clear team member", TEAM_MEMBER_NOT_CLEARED);
     },
     // mp-825 / mp-bkg: per-match lineup endpoints. Match ID takes the
     // place of the round key: successive encounters between the same
@@ -4264,14 +4253,18 @@ const API = {
     // (or an older bundle) round-trips exactly as before -- including into
     // the offline queue: matchLineupBody (built once, below) is the SAME
     // object fed to both the live fetch and _enqueueTerminalWrite, so a
-    // replayed lineup write carries the ids too.
-    async putMatchLineup(compID, teamId, matchId, positions, password, memberIds) {
-        const matchLineupBody = { teamId, competitionId: compID, matchId, positions, ...(memberIds ? { memberIds } : {}) };
+    // replayed lineup write carries the ids too. `changed` names the positions
+    // the save changes, as for putTeamLineup above.
+    async putMatchLineup(compID, teamId, matchId, positions, password, memberIds, changed) {
+        const matchLineupBody = {
+            teamId, competitionId: compID, matchId, positions,
+            ...(memberIds ? { memberIds } : {}), ...(changed ? { changed } : {}),
+        };
         const matchLineupUrl = `/api/competitions/${compID}/teams/${teamId}/match-lineups/${matchId}`;
         // F5: a match's own lineup is queued under its own key (_lineupKey),
         // distinct from a Lineups-page round's.
         const matchLineupKey = _lineupKey(compID, teamId, { matchId });
-        // Takes the place of a queued save of it, as above.
+        // Joins a queued save of it, as above.
         if (_queuedLineupSave(matchLineupKey)) {
             _enqueueTerminalWrite(matchLineupKey, 'lineup', 'PUT', matchLineupUrl, matchLineupBody, password, compID, matchId);
             return _queuedAnswer();
@@ -4315,17 +4308,32 @@ const API = {
         }
         return body;
     },
+    // Removes the match's own lineup. Bounded like every sibling write
+    // (_fetchJson: the deadline covers the body), and answered in a plain sentence
+    // when the server cannot be reached, never the browser's "Failed to fetch". It
+    // is not queued: the editor shows what the match carries without the lineup
+    // only once the server has confirmed the removal. A lineup that is not there
+    // is removed already (404).
     async deleteMatchLineup(compID, teamId, matchId, password) {
-        return _deleteLineup(`/api/competitions/${compID}/teams/${teamId}/match-lineups/${matchId}`, password, "Failed to delete match lineup");
+        let res;
+        let body;
+        try {
+            ({ res, body } = await _fetchJson(`/api/competitions/${compID}/teams/${teamId}/match-lineups/${matchId}`, {
+                method: 'DELETE',
+                headers: { 'X-Tournament-Password': password },
+            }));
+        } catch (_e) {
+            throw new Error(noAnswerSentence(LINEUP_NOT_REMOVED));
+        }
+        if (!res.ok && res.status !== 404) throw _refusalError(body, "Failed to delete match lineup");
+        return true;
     },
-    // The lineup a still-queued save of this lineup would write, `{ positions,
-    // memberIds }`, or null when none is queued. `target` is { matchId } for a
+    // Whether a save of this lineup is still queued. `target` is { matchId } for a
     // match's own lineup or { round } for a team's Lineups-page round (0: its
     // starting lineup). A queued save replays after anything sent now, so a
     // removal made meanwhile would be undone by it: the lineup editors hold their
-    // "Use the previous match's lineup" while this is not null. A new save of the
-    // lineup replaces the queued one whole, so it is composed on this lineup, not
-    // on the server's copy, which lacks that edit.
+    // "Use the previous match's lineup" while this is true. Nothing is composed
+    // on a queued save: a new save of the lineup joins it and names what it changed.
     queuedLineupSave(compID, teamId, target) {
         return _queuedLineupSave(_lineupKey(compID, teamId, target || {}));
     },

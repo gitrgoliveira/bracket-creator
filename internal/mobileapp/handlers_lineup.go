@@ -5,7 +5,9 @@
 // GET returns a teamLineupRead for a (team, round) tuple (200, saved false
 // when nothing is stored; 404 only for an unknown competition). PUT
 // sets/replaces it, for round 0 only (the team's starting lineup: a later round
-// is a 400, lineupRoundRefused), DELETE removes it. A third public GET,
+// is a 400, lineupRoundRefused), DELETE removes it. A PUT, of either scope, may
+// name the positions it changed (LineupRequest.Changed) and then lands only
+// those on the lineup stored when it arrives (lineupSave.base). A third public GET,
 // .../lineup-in-force/:matchId, answers which lineup the team fields at a match
 // (see lineupInForceRead).
 //
@@ -79,16 +81,69 @@ func lineupSetStatus(err error) int {
 // Positions keys already went through (it walks MemberIDs as its own loop
 // beside Positions), so an invalid position key here is rejected exactly
 // like an invalid Positions key, with no separate check needed here.
+//
+// Changed (operator decision 2026-10-07, "Only changed positions") names the
+// positions the sender changed, so two devices changing different positions of
+// one lineup both keep their change. Absent, the body is the whole lineup and
+// replaces the stored one, which is how a save queued by an older build replays.
+// Present, it must list at least one position: the server then reads only those
+// keys, whatever else the body holds (the client may send its whole form), and
+// lands them on the lineup it reads under the write's lock (lineupSave.base). A
+// pointer, because an empty list is a refusal and an absent one is not.
 type LineupRequest struct {
 	Positions map[domain.Position]string `json:"positions"`
 	MemberIDs map[domain.Position]string `json:"memberIds,omitempty"`
+	Changed   *[]domain.Position         `json:"changed,omitempty"`
 }
 
-// validLineupNames answers 400, and reports false, when a position's name is
-// longer than a competitor's (MaxLenPlayerName). Both lineup PUTs ask it, as
-// both store the names they are sent.
-func validLineupNames(c *gin.Context, req LineupRequest) bool {
-	for pos, name := range req.Positions {
+// changedPositions are the positions the save names as changed, and whether it
+// names any list at all: absent means the body is the whole lineup.
+func (r LineupRequest) changedPositions() (changed []domain.Position, partial bool) {
+	if r.Changed == nil {
+		return nil, false
+	}
+	return *r.Changed, true
+}
+
+// memberIDsRead is the member ids a save is judged on, the positions it reads:
+// those of the changed positions when it names them, every one when it is the
+// whole lineup.
+func (r LineupRequest) memberIDsRead() map[domain.Position]string {
+	changed, partial := r.changedPositions()
+	if !partial {
+		return r.MemberIDs
+	}
+	read := make(map[domain.Position]string, len(changed))
+	for _, p := range changed {
+		if id := r.MemberIDs[p]; id != "" {
+			read[p] = id
+		}
+	}
+	return read
+}
+
+// validLineupRequest answers 400, and reports false, for a save no write could
+// make sense of before it reads any lineup: a list of changed positions that is
+// empty, or a name longer than a competitor's (MaxLenPlayerName) in any position
+// the save stores, which is every position of a whole lineup and only the changed
+// ones of a partial save (the rest of its body is ignored). Both lineup PUTs ask
+// it, as both store the names they are sent.
+func validLineupRequest(c *gin.Context, req LineupRequest) bool {
+	changed, partial := req.changedPositions()
+	if partial && len(changed) == 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": domain.ErrLineupNoChangedPositions.Error()})
+		return false
+	}
+	stored := req.Positions
+	if partial {
+		stored = make(map[domain.Position]string, len(changed))
+		for _, p := range changed {
+			if name, ok := req.Positions[p]; ok {
+				stored[p] = name
+			}
+		}
+	}
+	for pos, name := range stored {
 		if err := validateMaxLen("positions."+string(pos), name, MaxLenPlayerName); err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 			return false
@@ -300,18 +355,12 @@ func RegisterLineupHandlers(r *gin.RouterGroup, store TeamLineupStore, comps Com
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 			return
 		}
-		if !validLineupNames(c, req) {
+		if !validLineupRequest(c, req) {
 			return
 		}
 
-		lineup := domain.TeamLineup{
-			TeamID:        teamID,
-			CompetitionID: compID,
-			Round:         round,
-			Positions:     req.Positions,
-			MemberIDs:     req.MemberIDs,
-		}
-		saveLineup(c, tx, hub, lineup, nil, func(lineups map[string]domain.TeamLineup) (domain.TeamLineup, bool) {
+		save := lineupSave{compID: compID, teamID: teamID, round: round, req: req}
+		saveLineup(c, tx, hub, save, nil, func(lineups map[string]domain.TeamLineup) (domain.TeamLineup, bool) {
 			return findRoundLineup(lineups, teamID, round)
 		})
 	})
@@ -347,17 +396,11 @@ func RegisterLineupHandlers(r *gin.RouterGroup, store TeamLineupStore, comps Com
 			return
 		}
 
-		if !validLineupNames(c, req) {
+		if !validLineupRequest(c, req) {
 			return
 		}
 
-		lineup := domain.TeamLineup{
-			TeamID:        teamID,
-			CompetitionID: compID,
-			MatchID:       matchID,
-			Positions:     req.Positions,
-			MemberIDs:     req.MemberIDs,
-		}
+		save := lineupSave{compID: compID, teamID: teamID, matchID: matchID, req: req}
 		// An anonymous self-run caller writes from the public score sheet,
 		// so the score path's rule holds: the match must exist and hold the
 		// team by id (errTeamNotInMatch), and once it has finished its lineup
@@ -382,10 +425,10 @@ func RegisterLineupHandlers(r *gin.RouterGroup, store TeamLineupStore, comps Com
 				if isMatchFinalized(snap.Status) {
 					return resultFinalized("This match has finished, so its lineup can no longer be changed. Contact the tournament organizer to correct it.").response()
 				}
-				return memberIDsOutsideTeam(stx, compID, teamID, req.MemberIDs)
+				return memberIDsOutsideTeam(stx, compID, teamID, req.memberIDsRead())
 			}
 		}
-		saveLineup(c, tx, hub, lineup, guard, func(lineups map[string]domain.TeamLineup) (domain.TeamLineup, bool) {
+		saveLineup(c, tx, hub, save, guard, func(lineups map[string]domain.TeamLineup) (domain.TeamLineup, bool) {
 			return findMatchLineup(lineups, teamID, matchID)
 		})
 	})
@@ -447,15 +490,85 @@ func errLineupMemberNotInTeam(pos domain.Position) *selfRunRefusal {
 	}
 }
 
+// lineupSave is one PUT of a lineup: whose it is, the match it is for (none for
+// the team's starting lineup, round 0) and what the body said.
+type lineupSave struct {
+	compID, teamID string
+	matchID        string
+	round          int
+	req            LineupRequest
+}
+
+// lineupToStore is the lineup this save stores, built under the write's lock.
+// A body that names no changed positions is the whole lineup. One that does has
+// its changed positions landed on the base read here (base), so what another
+// device saved a moment ago is kept, and the result is the lineup stored for this
+// team at this scope.
+func (w lineupSave) lineupToStore(stx state.StoreTx, comp *state.Competition) (domain.TeamLineup, *txResponse) {
+	changed, partial := w.req.changedPositions()
+	if !partial {
+		return domain.TeamLineup{
+			TeamID: w.teamID, CompetitionID: w.compID, Round: w.round, MatchID: w.matchID,
+			Positions: w.req.Positions, MemberIDs: w.req.MemberIDs,
+		}, nil
+	}
+	base, resp := w.base(stx, comp)
+	if resp != nil {
+		return domain.TeamLineup{}, resp
+	}
+	lineup, err := base.ApplyChanges(changed, w.req.Positions, w.req.MemberIDs)
+	if err != nil {
+		return domain.TeamLineup{}, &txResponse{status: lineupSetStatus(err), body: gin.H{"error": err.Error()}}
+	}
+	lineup.TeamID, lineup.CompetitionID, lineup.Round, lineup.MatchID = w.teamID, w.compID, w.round, w.matchID
+	return lineup, nil
+}
+
+// base is the lineup a partial save lands on. For a match, its own stored
+// lineup; with none, the lineup in force there, which is what the team fields
+// there and so what a read of the match shows: the match's own lineup is read
+// whole, never merged with the one before it, so a base left empty would drop
+// every carried position from the next read. Failing both, empty. For the
+// starting lineup, the one stored, else empty. The in-force rule is the
+// engine's one (engine.LineupInForceFrom), asked over what this transaction
+// loads, since the store's own reads would wait on the lock it holds.
+func (w lineupSave) base(stx state.StoreTx, comp *state.Competition) (domain.TeamLineup, *txResponse) {
+	internal := func(what string, err error) (domain.TeamLineup, *txResponse) {
+		log.Printf("mobileapp: lineup save for %s: %s: %v", w.compID, what, err)
+		return domain.TeamLineup{}, &txResponse{status: http.StatusInternalServerError, body: gin.H{"error": "internal error"}}
+	}
+	lineups, err := stx.LoadTeamLineups(w.compID)
+	if err != nil {
+		return internal("LoadTeamLineups", err)
+	}
+	if w.matchID == "" {
+		start, _ := findRoundLineup(lineups, w.teamID, w.round)
+		return start, nil
+	}
+	if own, ok := findMatchLineup(lineups, w.teamID, w.matchID); ok {
+		return own, nil
+	}
+	pool, err := stx.LoadPoolMatches(w.compID)
+	if err != nil {
+		return internal("LoadPoolMatches", err)
+	}
+	bracket, err := stx.LoadBracket(w.compID)
+	if err != nil {
+		return internal("LoadBracket", err)
+	}
+	return engine.LineupInForceFrom(lineups, pool, bracket, comp.IsKnockoutEnabled(), w.teamID, w.matchID).Lineup, nil
+}
+
 // saveLineup is the body the round and the match lineup PUTs share. Under one
 // per-comp lock (T156, the same atomicity argument the engine
 // UpdatePoolMatchByID / UpdateBracket primitives make) it loads the
 // competition for its team size, runs guard (the match PUT's rule for a
-// participant; nil when there is none), saves the lineup and reads it back
-// with find for the response. The answer is written after the lock releases
-// (txResponse), and a saved lineup is broadcast so SSE clients re-fetch it.
-func saveLineup(c *gin.Context, tx CompetitionTransactor, hub Broadcaster, lineup domain.TeamLineup, guard func(stx state.StoreTx) *txResponse, find func(map[string]domain.TeamLineup) (domain.TeamLineup, bool)) {
-	compID := lineup.CompetitionID
+// participant; nil when there is none), builds the lineup to store
+// (lineupSave.lineupToStore), saves it and reads it back with find for the
+// response. The answer is written after the lock releases (txResponse), and a
+// saved lineup is broadcast so SSE clients re-fetch it.
+func saveLineup(c *gin.Context, tx CompetitionTransactor, hub Broadcaster, save lineupSave, guard func(stx state.StoreTx) *txResponse, find func(map[string]domain.TeamLineup) (domain.TeamLineup, bool)) {
+	compID := save.compID
 	var respErr *txResponse
 	var persistedLineup domain.TeamLineup
 	txErr := tx.WithTransaction(compID, func(stx state.StoreTx) error {
@@ -484,6 +597,10 @@ func saveLineup(c *gin.Context, tx CompetitionTransactor, hub Broadcaster, lineu
 			if respErr = guard(stx); respErr != nil {
 				return nil
 			}
+		}
+		var lineup domain.TeamLineup
+		if lineup, respErr = save.lineupToStore(stx, comp); respErr != nil {
+			return nil
 		}
 		if err := stx.SetTeamLineup(compID, lineup, teamSize); err != nil {
 			// Domain validation errors ("team_lineup:" prefix) are 400; a
@@ -521,7 +638,7 @@ func saveLineup(c *gin.Context, tx CompetitionTransactor, hub Broadcaster, lineu
 		return
 	}
 	c.JSON(http.StatusOK, persistedLineup)
-	hub.Broadcast(EventLineupUpdated, lineupUpdatedPayload(compID, lineup.TeamID, lineup.MatchID))
+	hub.Broadcast(EventLineupUpdated, lineupUpdatedPayload(compID, save.teamID, save.matchID))
 }
 
 // lineupUpdatedPayload is the data of an EventLineupUpdated, the one place it is

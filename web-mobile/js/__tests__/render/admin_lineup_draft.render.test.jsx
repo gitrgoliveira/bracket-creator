@@ -10,6 +10,7 @@
 import React from 'react';
 import { render, act, fireEvent } from '@testing-library/react';
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { lineupPutStub } from '../helpers/lineup_server.js';
 
 const SQUAD = [
   { id: 'mem-1', index: 1, name: 'Aoki' },
@@ -53,8 +54,10 @@ beforeEach(async () => {
     fetchTeamLineup: vi.fn().mockResolvedValue(STARTING),
     fetchLineupInForce: vi.fn().mockResolvedValue(CARRIED),
     fetchSquads: vi.fn().mockResolvedValue({ 'team-a': SQUAD }),
-    putTeamLineup: vi.fn().mockImplementation((_c, _t, _r, positions, _pw, memberIds) => Promise.resolve({ positions, memberIds })),
-    putMatchLineup: vi.fn().mockImplementation((_c, _t, _m, positions, _pw, memberIds) => Promise.resolve({ positions, memberIds })),
+    // A save names the positions it changed, and the server answers the lineup it
+    // holds then (lineupPutStub): the lineups the page read are what it holds.
+    putTeamLineup: lineupPutStub({ positions: { ...NAMES.positions }, memberIds: { ...NAMES.memberIds } }),
+    putMatchLineup: lineupPutStub({ positions: { ...NAMES.positions }, memberIds: { ...NAMES.memberIds } }),
     deleteMatchLineup: vi.fn().mockResolvedValue(true),
   };
   window.API = api;
@@ -158,7 +161,7 @@ describe('a match\'s unsaved picks', () => {
     await click(saveButton(again));
 
     expect(api.putMatchLineup).toHaveBeenCalledWith(
-      'comp-1', 'team-a', 'Pool A-2', { 1: 'Mori', 2: 'Sato', 3: 'Ito' }, 'pw', { 1: 'mem-4', 2: 'mem-2', 3: 'mem-3' },
+      'comp-1', 'team-a', 'Pool A-2', { 1: 'Mori' }, 'pw', { 1: 'mem-4' }, ['1'],
     );
     expect(again.queryByTestId(NOTICE)).toBeNull();
     expect(sessionStorage.getItem(MATCH_KEY)).toBeNull();
@@ -256,7 +259,7 @@ describe('the starting lineup\'s unsaved picks', () => {
     await click(saveButton(again));
 
     expect(api.putTeamLineup).toHaveBeenCalledWith(
-      'comp-1', 'team-a', 0, { 1: 'Aoki', 2: 'Mori', 3: 'Ito' }, 'pw', { 1: 'mem-1', 2: 'mem-4', 3: 'mem-3' },
+      'comp-1', 'team-a', 0, { 2: 'Mori' }, 'pw', { 2: 'mem-4' }, ['2'],
     );
     expect(again.queryByTestId(NOTICE)).toBeNull();
     expect(sessionStorage.getItem(START_KEY)).toBeNull();
@@ -266,17 +269,6 @@ describe('the starting lineup\'s unsaved picks', () => {
     const reopened = await mountPage();
     expect(reopened.queryByTestId(NOTICE)).toBeNull();
     expect(positionValue(reopened, 2)).toBe('mem-4');
-  });
-
-  it('are cleared by a Save whose answer carries no lineup, the lineup as sent being what is held', async () => {
-    api.putTeamLineup.mockResolvedValue({});
-    const utils = await mountPage();
-    await pick(utils, 2, 'mem-4');
-    expect(draftAt(START_KEY)).not.toBeNull();
-
-    await click(saveButton(utils));
-
-    expect(sessionStorage.getItem(START_KEY)).toBeNull();
   });
 
   it('are not cleared by a save that was only queued (offline): the lineup is still unsaved', async () => {

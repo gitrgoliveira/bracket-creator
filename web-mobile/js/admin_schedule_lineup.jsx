@@ -6,6 +6,7 @@ import { sideLookupKey } from './competitor_identity.jsx';
 import { scoreRowMatchLabel } from './pool_ids.jsx';
 import { squadRosterEntries, rosterWithoutPlacedElsewhere, lineupDuplicateNote, lineupPositionLabel } from './lineup_resolver.jsx';
 import { renameMemberFields } from './lineup_rename.jsx';
+import { changedLineupSave } from './lineup_save.jsx';
 import { useLineupForm, LineupSourceLine, LineupProblem, LineupDraftNotice } from './lineup_draft.jsx';
 import { useOpenedTapGuard } from './tap_guard.jsx';
 import { useDialogFocus } from './dialog_focus.jsx';
@@ -161,8 +162,7 @@ export function MatchLineupSideEditor({ comp, team, match, allMatches, password,
     setRenameBusy(true);
     setError("");
     try {
-      await window.API.renameTeamMember(compId, teamId, id, name, password);
-      form.memberRenamed(id, name);
+      form.memberRenamed(await window.API.renameTeamMember(compId, teamId, id, name, password));
       cancelRename();
     } catch (e) {
       setError(e?.message || "Failed to rename team member");
@@ -170,28 +170,27 @@ export function MatchLineupSideEditor({ comp, team, match, allMatches, password,
       setRenameBusy(false);
     }
   };
-  // What a Save writes is composed on the lineup as stored NOW, with only the
-  // positions the operator changed put on it (form.lineupToSave, operator decision
-  // 2026-10-05), so a position another device changed since this panel read the
-  // lineup is not put back. Every other position goes as stored, name and id as
-  // they are: never resolved, never minted, even when it names a member this
-  // panel's list has not heard of (one another device created). Of the changed
-  // positions, those whose member id is already known (bc-dnst) -- picked directly
-  // off the roster's numbered entries (see onSelect above), never resolved by
-  // name -- skip the resolver entirely; only a changed position with NO known id
-  // goes through it, against the team's members as the Save's re-read left them
-  // (form.squadRef), not the list this closure held when Save was tapped: a typed
-  // name resolves to a member another device created, never mints it a second time.
+  // What a Save carries is the positions the operator changed and nothing else
+  // (form.lineupToSave, operator decision 2026-10-07): the server puts them on the
+  // lineup it holds when the save arrives, so a position another device changed
+  // since this panel read the lineup stays. A position left alone is never
+  // resolved, never minted, even when it names a member this panel's list has not
+  // heard of (one another device created). Of the changed positions, those whose
+  // member id is already known (bc-dnst) -- picked directly off the roster's
+  // numbered entries (see onSelect above), never resolved by name -- skip the
+  // resolver entirely; only a changed position with NO known id goes through it,
+  // against the team's members as the Save's read of them left them (form.squadRef),
+  // not the list this closure held when Save was tapped: a typed name resolves to a
+  // member another device created, never mints it a second time.
   const doSave = async () => {
     setError("");
     setLineupWarning("");
     setSaving(true);
     try {
-      const { positions: composed, memberIds: composedIds, changed } = await form.lineupToSave();
-      // Strip empty positions before PUT. The handler replaces the whole
-      // positions map (TeamLineup{Positions: req.Positions}), and the domain
-      // validator treats an absent key the same as an explicit "": both
-      // "missing". Sending explicit empties only bloats the persisted YAML.
+      const { positions: composed, memberIds: composedIds, changed } = form.lineupToSave();
+      // The lineup as the form shows it once the typed names are resolved, vacant
+      // positions left out: the lineup the duplicate guard below is asked of. What is
+      // sent is the positions the operator changed (changedLineupSave, below).
       const positionsOut = {};
       const memberIdsOut = {};
       const positionsForResolver = {};
@@ -238,7 +237,7 @@ export function MatchLineupSideEditor({ comp, team, match, allMatches, password,
         if (waiting && !(await waiting)) membersUnavailable = true;
       }
       // The member the resolver will put each typed name on, asked of the list the
-      // resolver is given (the team's members as the Save's re-read left them) through
+      // resolver is given (the team's members as the Save's read of them left them) through
       // the resolver's own decision (typedNameTarget). A minted member collides with
       // no member that exists. The next typed position can: the resolver goes through
       // the names one after another, and a name it has just given a member is found
@@ -259,7 +258,8 @@ export function MatchLineupSideEditor({ comp, team, match, allMatches, password,
         placedByResolver[key] = member.id;
       });
       // One position per member (the shared predicate, bc-dnst), asked of the lineup
-      // as composed, so a member another device placed meanwhile counts. Asked before
+      // as the form shows it (a member another device placed meanwhile is for the
+      // server to refuse, naming both positions). Asked before
       // the resolver as well as after it: the resolver renames a blank member or mints
       // one, and nothing may be written for a Save that is then refused. The positions
       // sent to the resolver are the ones whose name the operator typed, so a refusal
@@ -308,10 +308,13 @@ export function MatchLineupSideEditor({ comp, team, match, allMatches, password,
         setError(duplicate);
         return;
       }
-      const hasMemberIds = Object.keys(memberIdsOut).length > 0;
-      const updated = await window.API.putMatchLineup(
-        compId, teamId, matchId, positionsOut, password, hasMemberIds ? memberIdsOut : undefined
-      );
+      // The save names the positions the operator changed, and carries those alone:
+      // the server puts them on the lineup it holds when the save arrives (operator
+      // decision 2026-10-07), so a position left alone keeps whatever another device
+      // made of it, and a cleared one goes as its empty name.
+      const body = changedLineupSave(positionsOut, memberIdsOut, changed);
+      const idsOut = Object.keys(body.memberIds).length > 0 ? body.memberIds : undefined;
+      const updated = await window.API.putMatchLineup(compId, teamId, matchId, body.positions, password, idsOut, body.changed);
       // F5: a queued (offline/transient) write is NOT confirmed. Do NOT rebuild
       // the form from updated.positions (which is absent, would clear every
       // field) or show success; keep the operator's entered values and report
@@ -320,8 +323,9 @@ export function MatchLineupSideEditor({ comp, team, match, allMatches, password,
         if (typeof showToast === "function") showToast("Offline: match lineup not saved yet, will retry");
         return;
       }
-      // Reflect exactly what was persisted.
-      form.confirmSaved({ positions: updated.positions, memberIds: { ...memberIdsOut, ...updated.memberIds } });
+      // Reflect exactly what was persisted: the whole lineup the server holds now,
+      // the positions left alone included.
+      form.confirmSaved(updated);
       if (typeof showToast === "function") showToast("Match lineup saved");
       const composer = window.AdminLineupHelpers?.memberIdentityWarning;
       if (typeof composer === "function") {

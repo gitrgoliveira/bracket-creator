@@ -114,3 +114,76 @@ func TestPublicLineupInForceGET_AfterTheRoundLineupsAreConverted(t *testing.T) {
 	assert.Equal(t, map[string]any{"1": "Ito"}, again["positions"])
 	assert.Equal(t, "r1-m0", again["sourceMatchId"])
 }
+
+// A team that v2.1.1 had a lineup entered for a match for, and none for a round,
+// was shown nothing at its other matches (operator decision 2026-10-07: "Show what
+// v2.1.1 showed"). Once the data folder is loaded each of those matches holds an
+// EMPTY lineup of its own, and both lineup reads answer it as a saved one: saved
+// true, the match itself as the source, and an empty positions object (never a
+// missing one), where an unsaved lineup answers saved false. A team with no
+// lineup at all has none in force.
+func TestPublicLineupReads_AMatchOnlyLegacyTeamIsShownNothingElsewhere(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	dir := t.TempDir()
+	seed, err := state.NewStore(dir)
+	require.NoError(t, err)
+	const compID = "match-only-by-v211"
+	tora, kuma, usagi, saru := helper.NewUUID4(), helper.NewUUID4(), helper.NewUUID4(), helper.NewUUID4()
+	require.NoError(t, seed.SaveCompetition(&state.Competition{
+		ID: compID, Name: "Match Only By v2.1.1", Kind: "team", TeamSize: 3, Format: state.CompFormatKnockout, Status: state.CompStatusKnockout,
+	}))
+	require.NoError(t, seed.SaveParticipants(compID, []domain.Player{
+		{ID: tora, Name: "Tora", Dojo: "A"}, {ID: kuma, Name: "Kuma", Dojo: "B"},
+		{ID: usagi, Name: "Usagi", Dojo: "C"}, {ID: saru, Name: "Saru", Dojo: "D"},
+	}))
+	require.NoError(t, seed.SaveBracket(compID, &state.Bracket{Rounds: [][]state.BracketMatch{
+		{
+			{ID: "r0-m0", SideA: "Tora", SideAID: tora, SideB: "Kuma", SideBID: kuma, Status: state.MatchStatusCompleted, Winner: "Tora", WinnerID: tora},
+			{ID: "r0-m1", SideA: "Usagi", SideAID: usagi, SideB: "Saru", SideBID: saru, Status: state.MatchStatusCompleted, Winner: "Usagi", WinnerID: usagi},
+		},
+		{{ID: "r1-m0", SideA: "Tora", SideAID: tora, SideB: "Usagi", SideBID: usagi}},
+	}}))
+	stored, err := seed.LoadCompetition(compID)
+	require.NoError(t, err)
+	stored.RoundLineupsConverted = false
+	require.NoError(t, seed.SaveCompetition(stored))
+	raw, err := yaml.Marshal(struct {
+		Lineups []domain.TeamLineup `yaml:"lineups"`
+	}{Lineups: []domain.TeamLineup{{
+		TeamID: tora, CompetitionID: compID, MatchID: "r0-m0",
+		Positions: map[domain.Position]string{domain.PositionNumbered(1): "Sato"},
+	}}})
+	require.NoError(t, err)
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "competitions", compID, "lineups.yaml"), raw, 0o600))
+
+	store, err := state.NewStore(dir)
+	require.NoError(t, err)
+	r := gin.New()
+	RegisterPublicLineupHandlers(r.Group("/api"), store, store, engine.New(store))
+
+	entered := inForceBody(t, r, compID, tora, "r0-m0")
+	assert.Equal(t, true, entered["saved"])
+	assert.Equal(t, map[string]any{"1": "Sato"}, entered["positions"], "the lineup entered is left as it is")
+	assert.Equal(t, "r0-m0", entered["sourceMatchId"])
+
+	final := inForceBody(t, r, compID, tora, "r1-m0")
+	assert.Equal(t, true, final["saved"], "an empty lineup of its own is a saved one")
+	assert.Equal(t, "r1-m0", final["sourceMatchId"], "it belongs to the match itself, not to the match it was entered for")
+	assert.NotContains(t, final, "sourceRound")
+	assert.Equal(t, map[string]any{}, final["positions"], "an empty object, not a missing field")
+	assert.Equal(t, "r1-m0", final["matchId"])
+	assert.Equal(t, tora, final["teamId"])
+
+	// The match-lineup read of the same match: the same stored lineup.
+	req := httptest.NewRequest(http.MethodGet, "/api/competitions/"+compID+"/teams/"+tora+"/match-lineups/r1-m0", nil)
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	var own map[string]any
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &own))
+	assert.Equal(t, true, own["saved"])
+	assert.Equal(t, map[string]any{}, own["positions"])
+
+	nothing := inForceBody(t, r, compID, kuma, "r0-m0")
+	assert.Equal(t, false, nothing["saved"], "a team with no lineup at all has none in force")
+}

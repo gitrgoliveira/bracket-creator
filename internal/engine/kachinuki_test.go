@@ -1005,7 +1005,8 @@ func TestMaybeAdvanceKachinuki_RenameDoesNotRequeueRetiredMember(t *testing.T) {
 	// The operator renames Sato -> Suzuki (id unchanged) and re-saves the
 	// SAME lineup slot under the new name, as re-selecting the same squad
 	// member would.
-	require.NoError(t, store.RenameTeamMember(comp.ID, redID, sato.ID, "Suzuki"))
+	_, err = store.RenameTeamMember(comp.ID, redID, sato.ID, "Suzuki")
+	require.NoError(t, err)
 	require.NoError(t, store.SetTeamLineup(comp.ID, domain.TeamLineup{
 		TeamID: redID, Round: 0,
 		Positions: map[domain.Position]string{

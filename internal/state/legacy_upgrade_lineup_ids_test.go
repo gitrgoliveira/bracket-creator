@@ -115,7 +115,7 @@ func TestLegacyLineupUpgrade_NeverFieldsOneMemberAtTwoPositions(t *testing.T) {
 		repaired.MemberIDs[domain.PositionNumbered(1)],
 		repaired.MemberIDs[domain.PositionNumbered(2)],
 	}
-	assert.Equal(t, sato.ID, ids[0], "the FIRST position in key order takes the id, deterministically")
+	assert.Equal(t, sato.ID, ids[0], "the FIRST position fielded takes the id, deterministically")
 	assert.Empty(t, ids[1], "the second must not receive the same id: that row is refused on every future write")
 
 	// Both positions keep their NAME: the repair touches only the id half, so
@@ -174,6 +174,66 @@ func TestLegacyLineupUpgrade_RepairsADuplicateAlreadyOnDisk(t *testing.T) {
 		"the inherited duplicate is cleared on load, not left to fail every future write")
 	assert.Equal(t, "Sato", repaired.Positions[domain.PositionNumbered(2)], "its name is kept")
 	require.NoError(t, repaired.ValidatePositions(3))
+}
+
+// The position that keeps the id when one member is at two is the first the team
+// fields (domain.ComparePositions, the order the roster walks), not the first as
+// text: for the five named positions that is senpo before chuken, where a text
+// order read chuken first and kept the id at the position the roster fields second.
+func TestLegacyLineupUpgrade_AMemberAtTwoNamedPositionsKeepsTheIdAtTheFirstFielded(t *testing.T) {
+	writeLineup := func(t *testing.T, dir string, l domain.TeamLineup) {
+		t.Helper()
+		type lineupFileShape struct {
+			Lineups []domain.TeamLineup `yaml:"lineups"`
+		}
+		body, err := yaml.Marshal(&lineupFileShape{Lineups: []domain.TeamLineup{l}})
+		require.NoError(t, err)
+		require.NoError(t, os.WriteFile(filepath.Join(dir, "competitions", "c1", "lineups.yaml"), body, 0o600))
+	}
+
+	t.Run("an id already at both positions stays at senpo", func(t *testing.T) {
+		dir, s := newLegacyUpgradeFixture(t)
+		teamID := legacyUpgradeTeams(t, s, "Tora")[0]
+		sato, err := s.AddTeamMember("c1", teamID, "Sato")
+		require.NoError(t, err)
+		writeLineup(t, dir, domain.TeamLineup{
+			TeamID: teamID, Round: 0,
+			Positions: map[domain.Position]string{domain.PosSenpo: "Sato", domain.PosChuken: "Sato"},
+			MemberIDs: map[domain.Position]string{domain.PosSenpo: sato.ID, domain.PosChuken: sato.ID},
+		})
+
+		fresh := freshLegacyUpgradeStore(t, dir)
+		fresh.EnsureLegacyUpgraded("c1")
+
+		lineups, err := fresh.LoadTeamLineups("c1")
+		require.NoError(t, err)
+		repaired, ok := roundZeroLineup(lineups, teamID)
+		require.True(t, ok)
+		assert.Equal(t, sato.ID, repaired.MemberIDs[domain.PosSenpo])
+		assert.Empty(t, repaired.MemberIDs[domain.PosChuken], "the second position fielded loses the id, and keeps its name")
+		assert.Equal(t, "Sato", repaired.Positions[domain.PosChuken])
+	})
+
+	t.Run("a name at both positions is given its id at senpo", func(t *testing.T) {
+		dir, s := newLegacyUpgradeFixture(t)
+		teamID := legacyUpgradeTeams(t, s, "Tora")[0]
+		sato, err := s.AddTeamMember("c1", teamID, "Sato")
+		require.NoError(t, err)
+		writeLineup(t, dir, domain.TeamLineup{
+			TeamID: teamID, Round: 0,
+			Positions: map[domain.Position]string{domain.PosSenpo: "Sato", domain.PosChuken: "Sato"},
+		})
+
+		fresh := freshLegacyUpgradeStore(t, dir)
+		fresh.EnsureLegacyUpgraded("c1")
+
+		lineups, err := fresh.LoadTeamLineups("c1")
+		require.NoError(t, err)
+		repaired, ok := roundZeroLineup(lineups, teamID)
+		require.True(t, ok)
+		assert.Equal(t, sato.ID, repaired.MemberIDs[domain.PosSenpo])
+		assert.Empty(t, repaired.MemberIDs[domain.PosChuken])
+	})
 }
 
 // roundZeroLineup reads a team's round-0 lineup (the team's starting lineup)

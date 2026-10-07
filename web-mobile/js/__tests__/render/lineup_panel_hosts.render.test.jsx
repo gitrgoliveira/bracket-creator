@@ -15,6 +15,7 @@ import React from 'react';
 import { render, act, fireEvent, within } from '@testing-library/react';
 import { describe, it, expect, vi, beforeAll, afterAll, beforeEach } from 'vitest';
 import { installWindowStubs } from '../helpers/stub_globals.js';
+import { answered } from '../helpers/team_members.js';
 
 const A = { id: 'team-a', name: 'Team A' };
 const B = { id: 'team-b', name: 'Team B' };
@@ -50,7 +51,8 @@ const STUBS = {
     queuedLineupSave: vi.fn().mockReturnValue(null),
     putMatchLineup: vi.fn(),
     addTeamMember: vi.fn(),
-    renameTeamMember: vi.fn().mockResolvedValue(true),
+    // The server answers a member write with the member it holds, stamped.
+    renameTeamMember: vi.fn((_comp, _team, id, name) => Promise.resolve(answered({ id, index: 1 }, { name }))),
   },
 };
 
@@ -162,7 +164,7 @@ describe('the Scores page lineup panel when the old team still has a save out', 
       teamId, competitionId: 'comp-1', ...LINEUPS[teamId], matchId: 'm-r1-0', sourceMatchId: 'm-r1-0', saved: true,
     }));
     window.API.putMatchLineup.mockReset();
-    window.API.addTeamMember.mockReset().mockImplementation((_comp, _team, name) => Promise.resolve({ id: 'mem-minted', index: 6, name }));
+    window.API.addTeamMember.mockReset().mockImplementation((_comp, _team, name) => Promise.resolve(answered({ id: 'mem-minted', index: 6 }, { name })));
   });
 
   const deferred = () => {
@@ -239,7 +241,7 @@ describe('the Scores page lineup panel when the old team still has a save out', 
 
     await giveTeamCTheSide(utils);
     await expectTeamCAlone(utils);
-    await act(async () => { mint.resolve({ id: 'mem-minted', index: 6, name: 'Kobayashi' }); });
+    await act(async () => { mint.resolve(answered({ id: 'mem-minted', index: 6 }, { name: 'Kobayashi' })); });
     await flush();
 
     await expectTeamCAlone(utils);

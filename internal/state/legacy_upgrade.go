@@ -2139,9 +2139,12 @@ func (s *Store) upgradeLineupMemberIDsLocked(compID string, roster *legacyUpgrad
 		//
 		// Sorted, because which of the two positions keeps the id must not
 		// depend on Go's randomised map order: the same file would otherwise
-		// repair differently on two loads.
+		// repair differently on two loads. In the order a lineup is fielded
+		// (domain.ComparePositions), so the position the roster fields first keeps
+		// it: for the named positions senpo, not chuken, which a text order put
+		// first.
 		used := make(map[string]struct{}, len(l.MemberIDs))
-		for _, pos := range slices.Sorted(maps.Keys(l.MemberIDs)) {
+		for _, pos := range slices.SortedFunc(maps.Keys(l.MemberIDs), domain.ComparePositions) {
 			id := l.MemberIDs[pos]
 			if id == "" {
 				continue
@@ -2154,7 +2157,7 @@ func (s *Store) upgradeLineupMemberIDsLocked(compID string, roster *legacyUpgrad
 			}
 			used[id] = struct{}{}
 		}
-		for _, pos := range slices.Sorted(maps.Keys(l.Positions)) {
+		for _, pos := range slices.SortedFunc(maps.Keys(l.Positions), domain.ComparePositions) {
 			name := l.Positions[pos]
 			if name == "" || l.MemberIDs[pos] != "" {
 				continue
@@ -2199,10 +2202,12 @@ func (s *Store) upgradeRoundLineupsLocked(compID string, roster *legacyUpgradeRo
 	if saved != nil {
 		// The roster's copy of the record is the one the steps after this one
 		// save from, so it has to carry what the settlement saved (the marker,
-		// or the pairs it settled) or they would write it away.
+		// the pairs it settled, or the legacy teams it found) or they would
+		// write it away.
 		if comp, cerr := roster.competition(); cerr == nil && comp != nil {
 			comp.RoundLineupsConverted = saved.RoundLineupsConverted
 			comp.RoundLineupsGiven = cloneRoundLineupsGiven(saved.RoundLineupsGiven)
+			comp.RoundLineupsLegacy = slices.Clone(saved.RoundLineupsLegacy)
 		}
 	}
 	return err

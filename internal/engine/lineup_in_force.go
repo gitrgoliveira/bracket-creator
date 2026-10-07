@@ -8,17 +8,21 @@ package engine
 //
 // The lineup in force for team T at match M is, in order:
 //
-//  1. the lineup saved for T at M itself: a match's own lineup always wins;
+//  1. the lineup saved for T at M itself: a match's own lineup always wins,
+//     whole, even one that holds no position (the state layer stores one for a
+//     match v2.1.1 showed a team nothing at, so the match shows none rather than
+//     what an earlier match did);
 //  2. else the latest lineup of T placed before M in match order: one saved for
 //     an earlier match of T, or, at the very start, T's starting lineup (the
 //     Lineups page's lineup, stored as round 0);
 //  3. else, for a match the draw does not hold, the starting lineup.
 //
 // A lineup saved for a later round (round >= 1, which releases up to v2.1.1 let
-// the Lineups page save) is not read. The state layer gives a team that has one
-// a lineup of its own for every match it is seated in, equal to what v2.1.1
-// showed there (state.settleRoundLineups), on load and then in the write that
-// seats the team in a match, so one that still exists is kept until the
+// the Lineups page save) is not read. The state layer gives a legacy team, one
+// that has such a lineup or that v2.1.1 had a lineup entered for a match for, a
+// lineup of its own for every match it is seated in, equal to what v2.1.1 showed
+// there (state.settleRoundLineups), on load and then in the write that seats the
+// team in a match, so a round lineup that still exists is kept until the
 // competition is completed, for a team a correction may still seat, and cannot
 // apply.
 //
@@ -219,6 +223,18 @@ func (e *Engine) LineupInForce(compID, teamID, matchID string) (InForceLineup, e
 		in.Lineup = copyLineup(in.Lineup)
 	})
 	return in, err
+}
+
+// LineupInForceFrom answers the same question as Engine.LineupInForce, over what
+// the caller already holds, for a caller that cannot ask the store: one inside a
+// transaction, which holds the competition's lock the store's own reads wait on.
+// It is the one rule (lineupRule.inForce) over the stored lineups, the draw's pool
+// matches and bracket, and whether the competition plays a knockout stage
+// (Competition.IsKnockoutEnabled), which is how the engine's read builds its draw
+// as well. The lineup it returns is the caller's own entry in lineups, not a copy
+// of it.
+func LineupInForceFrom(lineups map[string]domain.TeamLineup, poolMatches []state.MatchResult, bracket *state.Bracket, knockout bool, teamID, matchID string) InForceLineup {
+	return newLineupRuleFrom(lineups, poolMatches, bracket, knockout).inForce(teamID, matchID)
 }
 
 // copyLineup is l with its own copies of the position maps.

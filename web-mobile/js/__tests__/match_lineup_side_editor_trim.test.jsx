@@ -102,7 +102,7 @@ describe('MatchLineupSideEditor trims names before saving', () => {
     expect(positionsOut['1']).toBe('Padded Name');
   });
 
-  it('drops a whitespace-only name rather than persisting blanks', async () => {
+  it('clears a position typed over with whitespace only rather than persisting blanks', async () => {
     // Based on a loaded override that holds a name: blanking an already-empty
     // side is not a change, and Save writes nothing for it.
     global.window.API.fetchLineupInForce = vi.fn().mockResolvedValue({
@@ -114,7 +114,8 @@ describe('MatchLineupSideEditor trims names before saving', () => {
     tree = runtime.currentTree();
     saveButton(tree).props.onClick();
     await flush();
+    // The position goes as its empty name, never as the blanks the operator typed.
     const positionsOut = global.window.API.putMatchLineup.mock.calls.at(-1)[3];
-    expect(positionsOut['1']).toBeUndefined();
+    expect(positionsOut['1']).toBe('');
   });
 });

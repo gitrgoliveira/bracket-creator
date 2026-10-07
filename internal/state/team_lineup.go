@@ -20,6 +20,7 @@ import (
 	"log"
 	"maps"
 	"os"
+	"slices"
 	"sort"
 
 	"github.com/gitrgoliveira/bracket-creator/internal/domain"
@@ -389,10 +390,45 @@ func (s *Store) ClearDrawLineups(compID string) error {
 			}
 		}
 		comp, err := tx.LoadCompetition(compID)
-		if err != nil || comp == nil || len(comp.RoundLineupsGiven) == 0 {
+		if err != nil || comp == nil {
 			return err
 		}
+		changed := len(comp.RoundLineupsGiven) > 0
 		comp.RoundLineupsGiven = nil
+		if len(comp.RoundLineupsLegacy) > 0 && s.trimLegacyTeams(compID, comp, lineups) {
+			changed = true
+		}
+		if !changed {
+			return nil
+		}
 		return s.saveCompetitionLocked(comp, write)
 	})
+}
+
+// trimLegacyTeams drops from comp's legacy teams (Competition.RoundLineupsLegacy)
+// those a draw's removal leaves nothing to show: a team that was legacy only for
+// its v2.1.1 match lineups has nothing left to be shown what v2.1.1 showed, since
+// they went with the draw. One with a lineup for a round keeps waiting, since the
+// next draw's matches are given theirs from it. With none left the conversion is
+// done and the marker is set, unless a lineup still waits for a player's id (it
+// would stay name-keyed for good). Reports whether comp changed. A roster that
+// cannot be read leaves the teams as they are: a team that waits for nothing is
+// only kept waiting until the competition is completed. Caller holds the
+// competition's lock.
+func (s *Store) trimLegacyTeams(compID string, comp *Competition, lineups map[string]domain.TeamLineup) bool {
+	players, err := s.loadParticipantsNoLock(compID, comp.EffectiveWithZekkenName(), LoadParticipantsOpts{HasIDs: comp.ParticipantIDsHint()})
+	if err != nil {
+		log.Printf("state: the legacy teams of %s are left as they are after the draw's removal: the roster could not be read: %v", compID, err)
+		return false
+	}
+	roster := newLineupRoster(players)
+	kept := teamsWithRoundLineups(lineups, roster)
+	if slices.Equal(kept, comp.RoundLineupsLegacy) {
+		return false
+	}
+	comp.RoundLineupsLegacy = kept
+	if len(kept) == 0 && !roster.anyAwaitsID(lineups) {
+		comp.RoundLineupsConverted = true
+	}
+	return true
 }

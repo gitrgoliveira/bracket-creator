@@ -10,6 +10,7 @@ import React from 'react';
 import { render, act, fireEvent } from '@testing-library/react';
 import { describe, it, expect, vi, beforeAll, afterAll, beforeEach } from 'vitest';
 import { installWindowStubs } from '../helpers/stub_globals.js';
+import { answered } from '../helpers/team_members.js';
 
 const STUBBED_GLOBALS = {
   isHikiwake: () => false,
@@ -54,8 +55,9 @@ beforeEach(() => {
       teamId === 'team-B' ? { positions: { senpo: 'Ren Abe' }, memberIds: { senpo: 'b1' } } : null
     )),
     putMatchLineup: vi.fn(async () => ({})),
-    renameTeamMember: vi.fn(async () => true),
-    addTeamMember: vi.fn(async (_c, _t, name) => ({ id: 'new-1', index: 6, name })),
+    // The server answers a member write with the member it holds, stamped.
+    renameTeamMember: vi.fn(async (_c, _t, id, name) => answered({ id, index: Number(id.slice(1)) }, { name })),
+    addTeamMember: vi.fn(async (_c, _t, name) => answered({ id: 'new-1', index: 6 }, { name })),
     recordScore: vi.fn().mockResolvedValue(undefined),
     recordDaihyosen: vi.fn(),
     removeDaihyosen: vi.fn(),

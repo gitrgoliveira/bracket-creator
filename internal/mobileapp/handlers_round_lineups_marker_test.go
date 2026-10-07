@@ -47,16 +47,22 @@ func TestCreateCompetition_StartsWithTheRoundLineupMarker(t *testing.T) {
 
 // The settings PUT merges what a client sends onto the stored record, and the
 // round-lineup conversion's own fields are off the wire: a settings save made
-// while the conversion is under way keeps the pairs it has settled (or its
-// marker), so it cannot give a lineup the operator removed back.
+// while the conversion is under way keeps the pairs it has settled, the legacy
+// teams it found (or its marker), so it cannot give a lineup the operator removed
+// back, nor make a team legacy again that a match lineup saved since would.
 func TestPUTCompetition_KeepsWhatTheRoundLineupConversionRecorded(t *testing.T) {
 	for _, tc := range []struct {
 		name      string
 		given     map[string][]string
+		legacy    []string
 		converted bool
 	}{
-		{"the pairs settled", map[string][]string{"team-a": {"r0-m0", "r1-m0"}}, false},
-		{"the marker", nil, true},
+		// A record that lists no legacy team reads as one the first settlement has
+		// not run for, which that settlement would fill in, so every row that is not
+		// marked lists them.
+		{"the pairs settled", map[string][]string{"team-a": {"r0-m0", "r1-m0"}}, []string{"team-a"}, false},
+		{"the legacy teams", nil, []string{"team-a", "team-b"}, false},
+		{"the marker", nil, nil, true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			r, store, _, _, tempDir := setupTestRouter(t)
@@ -64,7 +70,8 @@ func TestPUTCompetition_KeepsWhatTheRoundLineupConversionRecorded(t *testing.T) 
 			const compID = "round-lineups-record"
 			seed := state.Competition{
 				ID: compID, Name: "Round Lineups", Kind: "team", TeamSize: 3, Format: state.CompFormatKnockout,
-				PoolSize: 3, Courts: []string{"A"}, RoundLineupsGiven: tc.given, RoundLineupsConverted: tc.converted,
+				PoolSize: 3, Courts: []string{"A"}, RoundLineupsGiven: tc.given, RoundLineupsLegacy: tc.legacy,
+				RoundLineupsConverted: tc.converted,
 			}
 			require.NoError(t, store.SaveCompetition(&seed))
 			// A team with a lineup for a later round: the conversion has it to wait
@@ -90,6 +97,7 @@ func TestPUTCompetition_KeepsWhatTheRoundLineupConversionRecorded(t *testing.T) 
 			require.NotNil(t, stored)
 			assert.Equal(t, "Round Lineups Renamed", stored.Name)
 			assert.Equal(t, tc.given, stored.RoundLineupsGiven)
+			assert.Equal(t, tc.legacy, stored.RoundLineupsLegacy)
 			assert.Equal(t, tc.converted, stored.RoundLineupsConverted)
 		})
 	}

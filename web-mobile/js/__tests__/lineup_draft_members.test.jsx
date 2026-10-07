@@ -1,206 +1,119 @@
-// takeMembers, recordWrites and changedMembers (lineup_draft.jsx) are what an editor that
-// writes team members itself keeps them with: a list that arrives is merged with the
-// members shown, and a name the editor wrote stands over a list that predates it until a
-// list shows the name, or shows another one, which another device gave.
+// mergeMembers (lineup_draft.jsx) is the ONE rule every list of a team's members goes
+// through, in both lineup editors and on the team score sheet: the server stamps a member
+// (`modifiedAt`) each time it is created or named, and a list that arrives is merged with
+// the one shown by member id, keeping for each member the copy with the larger stamp. Which
+// list arrived last, or which read began first, says nothing about which copy is newer.
 
 import { describe, it, expect } from 'vitest';
-import { changedMembers, recordWrites, takeMembers } from '../lineup_draft.jsx';
+import { mergeMembers } from '../lineup_draft.jsx';
 
-const member = (n, name = '') => ({ id: `m${n}`, index: n, name });
+const member = (n, name = '', modifiedAt = 0) => ({ id: `m${n}`, index: n, name, modifiedAt });
 const names = (members) => members.map((m) => `${m.index}:${m.name}`);
-// What an editor wrote for a member that no list has shown yet: the name it gave, and the
-// names the member had in the lists that predate the write (none for a member it added).
-const wrote = (name, ...was) => ({ name, was });
 
-describe('takeMembers: a list arrives with nothing written by the editor', () => {
-  it('takes the list as it holds each member, and keeps a member shown that it lacks', () => {
+describe('mergeMembers: which members are in the list', () => {
+  it('holds every member of both lists, once, in member number order', () => {
     const shown = [member(1), member(2, 'Kai'), member(6, 'Added elsewhere')];
-    const arriving = [member(2, 'Kai Mori'), member(1, 'Ren')];
+    const arriving = [member(2, 'Kai'), member(1), member(4, 'Newcomer')];
 
-    const { members, pending } = takeMembers(shown, arriving, {});
+    expect(names(mergeMembers(shown, arriving))).toEqual(['1:', '2:Kai', '4:Newcomer', '6:Added elsewhere']);
+  });
 
-    expect(names(members)).toEqual(['1:Ren', '2:Kai Mori', '6:Added elsewhere']);
-    expect(pending).toEqual({});
+  it('keeps a member shown that the list lacks: no screen removes a member', () => {
+    expect(names(mergeMembers([member(1, 'Ren'), member(2, 'Ito', 7)], [member(1, 'Ren')]))).toEqual(['1:Ren', '2:Ito']);
+  });
+
+  it('brings in a member the list holds that is not shown', () => {
+    expect(names(mergeMembers([member(1, 'Ren')], [member(1, 'Ren'), member(2, 'Mei', 9)]))).toEqual(['1:Ren', '2:Mei']);
+  });
+
+  it('gives an empty list as it is merged with nothing', () => {
+    expect(mergeMembers([], [])).toEqual([]);
+    expect(names(mergeMembers([], [member(2, 'Kai'), member(1)]))).toEqual(['1:', '2:Kai']);
+    expect(names(mergeMembers([member(2, 'Kai'), member(1)], []))).toEqual(['1:', '2:Kai']);
+  });
+
+  it('changes neither list it is given', () => {
+    const shown = [member(2, 'Kai', 3), member(1)];
+    const arriving = [member(1, 'Ito', 5)];
+    const before = JSON.stringify([shown, arriving]);
+
+    mergeMembers(shown, arriving);
+
+    expect(JSON.stringify([shown, arriving])).toBe(before);
   });
 });
 
-describe('takeMembers: a name the editor wrote', () => {
-  it('stands over a list that holds the name the member had before the write', () => {
-    const shown = [member(1, 'Ito'), member(2, 'Kai')];
-    const arriving = [member(1), member(2, 'Kai')];
+describe('mergeMembers: the copy of a member that is kept', () => {
+  it('is the arriving one when its stamp is larger', () => {
+    const merged = mergeMembers([member(1, 'Ito', 100)], [member(1, 'Itoh', 200)]);
 
-    const { members, pending } = takeMembers(shown, arriving, { m1: wrote('Ito', '') });
-
-    expect(names(members)).toEqual(['1:Ito', '2:Kai']);
-    expect(pending).toEqual({ m1: wrote('Ito', '') });
+    expect(merged).toEqual([member(1, 'Itoh', 200)]);
   });
 
-  it('stands over a list that holds the name the member had before the write, whatever that was', () => {
-    const shown = [member(1, 'Ito')];
+  it('is the one shown when its stamp is larger: an older list never undoes a newer rename', () => {
+    const merged = mergeMembers([member(1, 'Itoh', 200)], [member(1, 'Ito', 100)]);
 
-    const { members, pending } = takeMembers(shown, [member(1, 'Old name')], { m1: wrote('Ito', 'Old name') });
-
-    expect(names(members)).toEqual(['1:Ito']);
-    expect(pending).toEqual({ m1: wrote('Ito', 'Old name') });
+    expect(merged).toEqual([member(1, 'Itoh', 200)]);
   });
 
-  it('stands over a list that lacks the member', () => {
-    const shown = [member(1, 'Ren'), member(2, 'Ito')];
+  it('is the arriving one on a tie', () => {
+    const shown = [member(1, 'Ito', 100)];
+    const arriving = [member(1, 'Ito', 100)];
 
-    const { members, pending } = takeMembers(shown, [member(1, 'Ren')], { m2: wrote('Ito', '') });
+    const merged = mergeMembers(shown, arriving);
 
-    expect(names(members)).toEqual(['1:Ren', '2:Ito']);
-    expect(pending).toEqual({ m2: wrote('Ito', '') });
+    expect(merged).toEqual([member(1, 'Ito', 100)]);
+    expect(merged[0]).toBe(arriving[0]);
   });
 
-  it('keeps a member the editor added when the list lacks it', () => {
-    const shown = [member(1, 'Ren'), member(6, 'Newcomer')];
+  it('is the arriving one when neither carries a stamp: members nobody has touched', () => {
+    const shown = [{ id: 'm1', index: 1, name: 'Old' }];
+    const arriving = [{ id: 'm1', index: 1, name: 'New' }];
 
-    const { members, pending } = takeMembers(shown, [member(1, 'Ren')], { m6: wrote('Newcomer') });
-
-    expect(names(members)).toEqual(['1:Ren', '6:Newcomer']);
-    expect(pending).toEqual({ m6: wrote('Newcomer') });
+    expect(mergeMembers(shown, arriving)).toEqual(arriving);
   });
 
-  it('is done with once a list shows the name, and a later change elsewhere shows', () => {
-    const shown = [member(1, 'Ito')];
+  it('reads a missing stamp as 0: any stamped copy outranks one with none, either way round', () => {
+    const stamped = member(1, 'Ito', 5);
+    const unstamped = { id: 'm1', index: 1, name: 'Before' };
 
-    const caughtUp = takeMembers(shown, [member(1, 'Ito')], { m1: wrote('Ito', '') });
-    expect(names(caughtUp.members)).toEqual(['1:Ito']);
-    expect(caughtUp.pending).toEqual({});
-
-    const renamed = takeMembers(caughtUp.members, [member(1, 'Ito Kato')], caughtUp.pending);
-    expect(names(renamed.members)).toEqual(['1:Ito Kato']);
+    expect(mergeMembers([stamped], [unstamped])).toEqual([stamped]);
+    expect(mergeMembers([unstamped], [stamped])).toEqual([stamped]);
   });
 
-  // A rename and a rename back: the name written is also a name the member had before. A list
-  // that shows it is the server caught up, not one that predates the write, so the write is
-  // done with and a change made elsewhere to the name in between shows from then on.
-  it('is done with once a list shows the name, even when the member had that name before: a rename and a rename back', () => {
-    const shown = [member(1, 'Ito')];
+  it('reads a stamp of 0 as no stamp at all', () => {
+    expect(mergeMembers([member(1, 'Ito', 0)], [member(1, '', 0)])).toEqual([member(1, '', 0)]);
+    expect(mergeMembers([member(1, 'Ito', 3)], [member(1, '', 0)])).toEqual([member(1, 'Ito', 3)]);
+  });
 
-    const caughtUp = takeMembers(shown, [member(1, 'Ito')], { m1: wrote('Ito', 'Ito', 'Itoh') });
+  it('keeps a cleared name when it is the newer copy: a list that still names the member does not bring the name back', () => {
+    const cleared = member(1, '', 50);
 
-    expect(names(caughtUp.members)).toEqual(['1:Ito']);
-    expect(caughtUp.pending).toEqual({});
-    const changed = takeMembers(caughtUp.members, [member(1, 'Itoh')], caughtUp.pending);
-    expect(names(changed.members)).toEqual(['1:Itoh']);
+    expect(mergeMembers([cleared], [member(1, 'Ito', 40)])).toEqual([cleared]);
+    expect(mergeMembers([member(1, 'Ito', 40)], [cleared])).toEqual([cleared]);
   });
 
   it('is judged member by member', () => {
-    const shown = [member(1, 'Ito'), member(2, 'Mori')];
-    const arriving = [member(1, 'Ito'), member(2)];
+    const shown = [member(1, 'Ito', 10), member(2, 'Mori', 3)];
+    const arriving = [member(1, 'Old', 5), member(2, 'Mori Kato', 8)];
 
-    const { members, pending } = takeMembers(shown, arriving, { m1: wrote('Ito', ''), m2: wrote('Mori', '') });
-
-    expect(names(members)).toEqual(['1:Ito', '2:Mori']);
-    expect(pending).toEqual({ m2: wrote('Mori', '') });
+    expect(names(mergeMembers(shown, arriving))).toEqual(['1:Ito', '2:Mori Kato']);
   });
 
-  it('does not touch a member the editor did not write', () => {
-    const shown = [member(1, 'Ito'), member(2, 'Kai')];
-    const arriving = [member(1), member(2, 'Kai Mori')];
+  it('settles three copies the same whichever order they arrive in', () => {
+    const own = member(1, 'Ito', 120);
+    const elsewhereLater = member(1, 'Itoh', 150);
+    const read = member(1, 'Old', 0);
+    const orders = [
+      [own, elsewhereLater, read],
+      [read, own, elsewhereLater],
+      [elsewhereLater, read, own],
+      [own, read, elsewhereLater],
+    ];
 
-    const { members } = takeMembers(shown, arriving, { m1: wrote('Ito', '') });
-
-    expect(names(members)).toEqual(['1:Ito', '2:Kai Mori']);
-  });
-});
-
-// A list that holds neither the name written nor the name the member had before it was
-// not read before the write: another device gave the member that name. It is shown, and
-// the write is done with, so a later change shows as well. (A change made elsewhere before
-// the write but read after it shows for a moment: the next list holds the write.)
-describe('takeMembers: a name another device gave the member', () => {
-  it('is shown over the name the editor wrote, and the write is done with', () => {
-    const shown = [member(1, 'Ito')];
-
-    const { members, pending } = takeMembers(shown, [member(1, 'Itoh')], { m1: wrote('Ito', '') });
-
-    expect(names(members)).toEqual(['1:Itoh']);
-    expect(pending).toEqual({});
-  });
-
-  it('is shown over a member the editor added, which the list holds under another name', () => {
-    const shown = [member(1, 'Ren'), member(6, 'Newcomer')];
-
-    const { members, pending } = takeMembers(shown, [member(1, 'Ren'), member(6, 'Mei Endo')], { m6: wrote('Newcomer') });
-
-    expect(names(members)).toEqual(['1:Ren', '6:Mei Endo']);
-    expect(pending).toEqual({});
-  });
-
-  it('is shown when it clears the name, if the member had a name before the write', () => {
-    const shown = [member(1, 'Ito')];
-
-    const { members, pending } = takeMembers(shown, [member(1, '')], { m1: wrote('Ito', 'Old name') });
-
-    expect(names(members)).toEqual(['1:']);
-    expect(pending).toEqual({});
-  });
-
-  it('is told from a list that predates two writes to the same member, which still shows the first name or the one before', () => {
-    const shown = [member(1, 'Itoh')];
-    const both = { m1: wrote('Itoh', '', 'Ito') };
-
-    for (const read of ['', 'Ito']) {
-      const stale = takeMembers(shown, [member(1, read)], both);
-      expect(names(stale.members)).toEqual(['1:Itoh']);
-      expect(stale.pending).toEqual(both);
-    }
-    expect(takeMembers(shown, [member(1, 'Itoh')], both).pending).toEqual({});
-    expect(names(takeMembers(shown, [member(1, 'Other')], both).members)).toEqual(['1:Other']);
-  });
-});
-
-describe('recordWrites', () => {
-  it('notes with each name written the name the member had in the list shown before the write', () => {
-    const shown = [member(1), member(2, 'Kai')];
-
-    expect(recordWrites({}, shown, [member(1, 'Ito')])).toEqual({ m1: wrote('Ito', '') });
-  });
-
-  it('notes none for a member the write added', () => {
-    expect(recordWrites({}, [member(1, 'Ren')], [member(6, 'Newcomer')])).toEqual({ m6: wrote('Newcomer') });
-  });
-
-  it('reads an unnamed member as the empty name, whichever way the name is missing', () => {
-    expect(recordWrites({}, [{ id: 'm1', index: 1 }], [{ id: 'm1', index: 1, name: 'Ito' }])).toEqual({ m1: wrote('Ito', '') });
-    expect(recordWrites({}, [member(1)], [{ id: 'm1', index: 1 }])).toEqual({ m1: wrote('', '') });
-  });
-
-  it('keeps the names a member had before an earlier write that no list has shown yet', () => {
-    const first = recordWrites({}, [member(1)], [member(1, 'Ito')]);
-
-    const second = recordWrites(first, [member(1, 'Ito')], [member(1, 'Itoh')]);
-
-    expect(second).toEqual({ m1: wrote('Itoh', '', 'Ito') });
-  });
-
-  it('leaves the writes of other members as they are, and the pending it is given untouched', () => {
-    const pending = { m2: wrote('Mori', '') };
-
-    const noted = recordWrites(pending, [member(1)], [member(1, 'Ito')]);
-
-    expect(noted).toEqual({ m1: wrote('Ito', ''), m2: wrote('Mori', '') });
-    expect(pending).toEqual({ m2: wrote('Mori', '') });
-  });
-});
-
-describe('changedMembers', () => {
-  it('names the members a change renamed or added, and no other', () => {
-    const before = [member(1), member(2, 'Kai')];
-    const after = [member(1, 'Ito'), member(2, 'Kai'), member(6, 'Newcomer')];
-
-    expect(changedMembers(before, after)).toEqual([member(1, 'Ito'), member(6, 'Newcomer')]);
-  });
-
-  it('reads an unnamed member as it is, whichever way the name is missing', () => {
-    expect(changedMembers([{ id: 'm1', index: 1 }], [member(1)])).toEqual([]);
-  });
-
-  it('names nothing for a change that wrote nothing', () => {
-    const list = [member(1, 'Ren'), member(2)];
-    expect(changedMembers(list, list.map((m) => ({ ...m })))).toEqual([]);
+    orders.forEach((order) => {
+      const merged = order.reduce((shown, copy) => mergeMembers(shown, [copy]), []);
+      expect(merged).toEqual([elsewhereLater]);
+    });
   });
 });

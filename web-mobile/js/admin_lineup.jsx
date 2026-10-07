@@ -20,6 +20,9 @@
 //     positions: { senpo: "Sato", ... },
 //     memberIds: { senpo: "member-uuid", ... }
 //   }
+// A save does not send the lineup: it names the positions it changed
+// (`changed`, with those positions' names and ids), and the server puts them on
+// the lineup it holds (lineup_save.jsx, operator decision 2026-10-07).
 //
 // bc-tmid pass 3: a position now carries the squad MEMBER's stable id
 // (memberIds) alongside the display NAME (positions) it always carried.
@@ -49,6 +52,7 @@ import { rosterWithoutPlacedElsewhere, memberPlacedElsewhere, memberRefusalNote,
 import { poolMatchNumberOf, isSupplementaryBout, scoreRowMatchLabel } from './pool_ids.jsx';
 import { normalizeParticipantName } from './data.jsx';
 import { renameMemberFields } from './lineup_rename.jsx';
+import { changedLineupSave } from './lineup_save.jsx';
 import { useLineupForm, LineupSourceLine, LineupProblem, LineupDraftNotice } from './lineup_draft.jsx';
 
 const { useState: useStateA, useMemo: useMemoA } = React;
@@ -317,8 +321,10 @@ async function resolveMemberIdsForPositions(compId, teamId, positions, squad, pa
     }
     if (write === "rename") {
       try {
-        await window.API.renameTeamMember(compId, teamId, target.id, name, password);
-        currentSquad = currentSquad.map(mem => (mem === target ? { ...mem, name } : mem));
+        // The member as the server answered it, stamped: what the lists merge by. A copy
+        // built from the name typed carries no stamp and would lose to every list.
+        const renamed = await window.API.renameTeamMember(compId, teamId, target.id, name, password);
+        currentSquad = currentSquad.map(mem => (mem === target ? renamed : mem));
         memberIds[posKey] = target.id;
       } catch (e) {
         failures.push(memberWriteFailure(posKey, name, e));
@@ -621,8 +627,7 @@ function AdminLineup({ comp, team, matchId = "", matchLabel = "", notInMatch = f
     setRenameBusy(true);
     setError("");
     try {
-      await window.API.renameTeamMember(compId, teamId, id, name, password);
-      form.memberRenamed(id, name);
+      form.memberRenamed(await window.API.renameTeamMember(compId, teamId, id, name, password));
       setRenamingId(null);
       setRenamingName("");
     } catch (e) {
@@ -646,8 +651,7 @@ function AdminLineup({ comp, team, matchId = "", matchLabel = "", notInMatch = f
     setClearingId(member.id);
     setError("");
     try {
-      await window.API.clearTeamMember(compId, teamId, member.id, password);
-      form.memberRenamed(member.id, "");
+      form.memberRenamed(await window.API.clearTeamMember(compId, teamId, member.id, password));
     } catch (e) {
       setError(e?.message || "Failed to clear the name");
     } finally {
@@ -664,43 +668,32 @@ function AdminLineup({ comp, team, matchId = "", matchLabel = "", notInMatch = f
     setSaveWarning("");
     setSaving(true);
     try {
-      // The positions the operator changed are theirs; every other position goes
-      // as the lineup is stored now (form.lineupToSave, operator decision
-      // 2026-10-05), so a change another device made to it since this page read the
-      // lineup is not put back.
-      const { positions: composed, memberIds: composedIds, changed } = await form.lineupToSave();
-      // Strip vacant positions before sending: an omitted key reads as
-      // "vacant" the same way an explicit empty string would (the server's
-      // ValidatePositions only checks that submitted KEYS are valid for the
-      // team size, not whether values are filled), so this is a storage-
-      // hygiene choice, an omitted key, not a stored empty string. A
-      // position holding a picked squad slot with no name yet is NOT vacant
-      // (bc-dnst): the id is the placement, so it is written with an empty
-      // name, exactly as the match panel and the score sheet write it.
-      const positionsOut = {};
-      const memberIdsOut = {};
-      positionKeys.forEach((k) => {
-        // Trim here too (not just on commit), so a Save never persists
-        // leading/trailing or whitespace-only names.
-        const trimmed = (composed[k] || "").trim();
-        if (trimmed || composedIds[k]) {
-          positionsOut[k] = trimmed;
-          if (composedIds[k]) memberIdsOut[k] = composedIds[k];
-        }
-      });
+      // The save names the positions the operator changed and carries those alone
+      // (form.lineupToSave, operator decision 2026-10-07): the server puts them on the
+      // lineup it holds when the save arrives, so a change another device made to a
+      // position left alone since this page read the lineup stays.
+      const { positions: shown, memberIds: shownIds, changed } = form.lineupToSave();
+      // Trim here too (not just on commit), so a Save never persists leading/trailing
+      // or whitespace-only names. A cleared position goes as its empty name, which the
+      // server needs to be there, and a position holding a picked team member with no
+      // name yet is not vacant (bc-dnst): the id is the placement, so it goes with an
+      // empty name, exactly as the match panel and the score sheet write it.
+      const named = {};
+      positionKeys.forEach((k) => { named[k] = (shown[k] || "").trim(); });
       // One position per member (the shared predicate, bc-dnst), asked of the lineup
-      // as composed: the pickers never offer a member this form holds at another
-      // position, but another device may have placed them there since it was read.
-      const duplicate = lineupDuplicateNote(positionsOut, memberIdsOut, lineupPositionLabel, positionKeys, changed);
+      // as the form shows it: the pickers never offer a member this form holds at
+      // another position, but a lineup another device saved can hold one twice. The
+      // server asks the same of the lineup it composes, and refuses naming both.
+      const duplicate = lineupDuplicateNote(named, shownIds, lineupPositionLabel, positionKeys, changed);
       if (duplicate) {
         setError(duplicate);
         return;
       }
-      const hasMemberIds = Object.keys(memberIdsOut).length > 0;
-      const idsOut = hasMemberIds ? memberIdsOut : undefined;
+      const body = changedLineupSave(named, shownIds, changed);
+      const idsOut = Object.keys(body.memberIds).length > 0 ? body.memberIds : undefined;
       const updated = matchId
-        ? await window.API.putMatchLineup(compId, teamId, matchId, positionsOut, password, idsOut)
-        : await window.API.putTeamLineup(compId, teamId, STARTING_ROUND, positionsOut, password, idsOut);
+        ? await window.API.putMatchLineup(compId, teamId, matchId, body.positions, password, idsOut, body.changed)
+        : await window.API.putTeamLineup(compId, teamId, STARTING_ROUND, body.positions, password, idsOut, body.changed);
       // F5: a queued (offline/transient) write is NOT a confirmed save: don't
       // clear the revising state or show "saved"; the write is durable and will
       // retry. Keep the form editable and tell the operator it's pending.
@@ -708,10 +701,10 @@ function AdminLineup({ comp, team, matchId = "", matchLabel = "", notInMatch = f
         if (typeof showToast === "function") showToast("Offline: lineup not saved yet, will retry");
         return;
       }
-      // What the server answered is what it holds now (the lineup as sent, when
-      // the answer carries none): the new baseline, for the starting lineup as for
-      // a match, so a saved lineup leaves no draft behind.
-      form.confirmSaved({ positions: updated?.positions || positionsOut, memberIds: { ...memberIdsOut, ...updated?.memberIds } });
+      // What the server answered is the whole lineup it holds now, the positions this
+      // save left alone included: the new baseline, for the starting lineup as for a
+      // match, so a saved lineup leaves no draft behind.
+      form.confirmSaved(updated);
       if (typeof showToast === "function") showToast("Lineup saved");
       // bc-cse gap closure: this surface's own SELECT/ADD/RENAME operations
       // already surface a mint/rename failure immediately (see commitAdd's
@@ -778,7 +771,7 @@ function AdminLineup({ comp, team, matchId = "", matchLabel = "", notInMatch = f
         </div>
       )}
       {matchId && (
-        <LineupSourceLine form={form} matchId={matchId} allMatches={allMatches} busy={busy} testId="lineup-source" />
+        <LineupSourceLine form={form} matchId={matchId} allMatches={allMatches} busy={busy || notInMatch} testId="lineup-source" />
       )}
 
       <LineupDraftNotice draft={form.draft} busy={busy} testId="lineup-draft-notice" />

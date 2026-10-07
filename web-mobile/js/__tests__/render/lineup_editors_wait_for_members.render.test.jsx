@@ -18,6 +18,8 @@ import React from 'react';
 import { render, act, fireEvent } from '@testing-library/react';
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { FETCH_TIMEOUT_MS } from '../../write_result.jsx';
+import { answered } from '../helpers/team_members.js';
+import { lineupPutStub } from '../helpers/lineup_server.js';
 
 const TEAM_MEMBERS = [
   { id: 'mem-1', index: 1, name: 'Aoki' },
@@ -63,10 +65,12 @@ beforeEach(async () => {
     fetchTeamLineup: vi.fn().mockResolvedValue(STARTING),
     fetchLineupInForce: vi.fn().mockResolvedValue(lineupFor({ matchId: 'Pool A-0', sourceMatchId: 'Pool A-0' })),
     fetchSquads: vi.fn().mockResolvedValue({ 'team-a': TEAM_MEMBERS }),
-    putTeamLineup: vi.fn().mockImplementation((_c, _t, _r, positions, _pw, memberIds) => Promise.resolve({ positions, memberIds })),
-    putMatchLineup: vi.fn().mockImplementation((_c, _t, _m, positions, _pw, memberIds) => Promise.resolve({ positions, memberIds })),
-    addTeamMember: vi.fn().mockImplementation((_c, _t, name) => Promise.resolve({ id: 'mem-minted', index: 6, name })),
-    renameTeamMember: vi.fn().mockResolvedValue(true),
+    // A save names the positions it changed, and the server answers the lineup it holds then.
+    putTeamLineup: lineupPutStub({ positions: { ...NAMES.positions }, memberIds: { ...NAMES.memberIds } }),
+    putMatchLineup: lineupPutStub({ positions: { ...NAMES.positions }, memberIds: { ...NAMES.memberIds } }),
+    // The server answers a member write with the member it holds, stamped.
+    addTeamMember: vi.fn().mockImplementation((_c, _t, name) => Promise.resolve(answered({ id: 'mem-minted', index: 6 }, { name }))),
+    renameTeamMember: vi.fn().mockImplementation((_c, _t, id, name) => Promise.resolve(answered({ id, index: Number(id.slice(4)) }, { name }))),
     queuedLineupSave: vi.fn().mockReturnValue(false),
   };
   window.API = api;
@@ -155,10 +159,7 @@ describe('the at-court panel: a Save with a typed name waits for the team\'s mem
 
     expect(api.addTeamMember, 'Mori is the member the team has, not a new one').not.toHaveBeenCalled();
     expect(api.renameTeamMember).not.toHaveBeenCalled();
-    expect(putOf(api.putMatchLineup.mock.calls[0])).toEqual({
-      positions: { 1: 'Mori', 2: 'Sato', 3: 'Ito' },
-      memberIds: { 1: 'mem-4', 2: 'mem-2', 3: 'mem-3' },
-    });
+    expect(putOf(api.putMatchLineup.mock.calls[0])).toEqual({ positions: { 1: 'Mori' }, memberIds: { 1: 'mem-4' } });
   });
 
   it('names the unnamed member seeded for the position when a new name is typed before the members were read', async () => {
@@ -209,9 +210,8 @@ describe('the at-court panel: a Save with a typed name waits for the team\'s mem
 
     await click(saveButton(utils));
 
-    expect(putOf(api.putMatchLineup.mock.calls[0])).toEqual({
-      positions: { 2: 'Sato', 3: 'Ito' }, memberIds: { 2: 'mem-2', 3: 'mem-3' },
-    });
+    // The cleared position goes as its empty name, which the server needs to be there.
+    expect(putOf(api.putMatchLineup.mock.calls[0])).toEqual({ positions: { 1: '' } });
   });
 
   it('goes on without the members when they could not be read, as it always did, and says so', async () => {
@@ -222,7 +222,7 @@ describe('the at-court panel: a Save with a typed name waits for the team\'s mem
     await click(saveButton(utils));
 
     expect(api.addTeamMember, 'the name is minted against no list, at once').toHaveBeenCalledTimes(1);
-    expect(putOf(api.putMatchLineup.mock.calls[0]).memberIds).toEqual({ 1: 'mem-minted', 2: 'mem-2', 3: 'mem-3' });
+    expect(putOf(api.putMatchLineup.mock.calls[0]).memberIds).toEqual({ 1: 'mem-minted' });
     expect(warning(utils)).toContain('team member list could not be loaded');
   });
 
@@ -238,7 +238,7 @@ describe('the at-court panel: a Save with a typed name waits for the team\'s mem
     await flush();
 
     expect(api.addTeamMember).toHaveBeenCalledTimes(1);
-    expect(putOf(api.putMatchLineup.mock.calls[0]).memberIds).toEqual({ 1: 'mem-minted', 2: 'mem-2', 3: 'mem-3' });
+    expect(putOf(api.putMatchLineup.mock.calls[0]).memberIds).toEqual({ 1: 'mem-minted' });
     expect(warning(utils)).toContain('team member list could not be loaded');
   });
 
@@ -259,7 +259,7 @@ describe('the at-court panel: a Save with a typed name waits for the team\'s mem
     }
 
     expect(api.addTeamMember).toHaveBeenCalledTimes(1);
-    expect(putOf(api.putMatchLineup.mock.calls[0]).memberIds).toEqual({ 1: 'mem-minted', 2: 'mem-2', 3: 'mem-3' });
+    expect(putOf(api.putMatchLineup.mock.calls[0]).memberIds).toEqual({ 1: 'mem-minted' });
     expect(warning(utils)).toContain('team member list could not be loaded');
   });
 
@@ -273,7 +273,7 @@ describe('the at-court panel: a Save with a typed name waits for the team\'s mem
     await click(saveButton(utils));
 
     expect(api.addTeamMember, 'Kato is minted against the list shown, at once').toHaveBeenCalledTimes(1);
-    expect(putOf(api.putMatchLineup.mock.calls[0]).memberIds).toEqual({ 1: 'mem-1', 2: 'mem-minted', 3: 'mem-3' });
+    expect(putOf(api.putMatchLineup.mock.calls[0]).memberIds).toEqual({ 2: 'mem-minted' });
   });
 });
 

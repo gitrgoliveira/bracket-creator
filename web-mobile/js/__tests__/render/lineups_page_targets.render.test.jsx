@@ -10,6 +10,7 @@ import React from 'react';
 import { render, act, fireEvent, within } from '@testing-library/react';
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { bracketRoundLabel } from '../../bracket.jsx';
+import { lineupPutStub } from '../helpers/lineup_server.js';
 
 const SQUAD = [
   { id: 'mem-1', index: 1, name: 'Aoki' },
@@ -71,8 +72,10 @@ beforeEach(async () => {
     fetchTeamLineup: vi.fn().mockResolvedValue(null),
     fetchLineupInForce: vi.fn().mockResolvedValue(null),
     fetchSquads: vi.fn().mockResolvedValue({ 'team-a': SQUAD }),
-    putTeamLineup: vi.fn().mockResolvedValue({}),
-    putMatchLineup: vi.fn().mockImplementation((_c, _t, _m, positions, _pw, memberIds) => Promise.resolve({ positions, memberIds })),
+    // A save names the positions it changed, and the server answers the lineup it
+    // holds then (lineupPutStub): the starting lineup is empty, a match carries NAMES.
+    putTeamLineup: lineupPutStub({ positions: {}, memberIds: {} }),
+    putMatchLineup: lineupPutStub({ positions: { ...NAMES.positions }, memberIds: { ...NAMES.memberIds } }),
     deleteMatchLineup: vi.fn().mockResolvedValue(true),
   };
   window.API = api;
@@ -228,7 +231,7 @@ describe('the starting lineup', () => {
     await pick(utils, 1, 'mem-1');
     await click(saveButton(utils));
     expect(api.putTeamLineup).toHaveBeenCalledTimes(1);
-    expect(api.putTeamLineup).toHaveBeenCalledWith('comp-1', 'team-a', 0, { 1: 'Aoki' }, 'pw', { 1: 'mem-1' });
+    expect(api.putTeamLineup).toHaveBeenCalledWith('comp-1', 'team-a', 0, { 1: 'Aoki' }, 'pw', { 1: 'mem-1' }, ['1']);
     expect(api.putMatchLineup).not.toHaveBeenCalled();
   });
 });
@@ -263,7 +266,7 @@ describe('a match', () => {
 
     expect(api.putMatchLineup).toHaveBeenCalledTimes(1);
     expect(api.putMatchLineup).toHaveBeenCalledWith(
-      'comp-1', 'team-a', 'Pool A-2', { 1: 'Aoki', 2: 'Mori', 3: 'Ito' }, 'pw', { 1: 'mem-1', 2: 'mem-4', 3: 'mem-3' },
+      'comp-1', 'team-a', 'Pool A-2', { 2: 'Mori' }, 'pw', { 2: 'mem-4' }, ['2'],
     );
     expect(api.putTeamLineup).not.toHaveBeenCalled();
   });
@@ -431,6 +434,27 @@ describe('a match the team is no longer in', () => {
     expect(api.putTeamLineup, 'and nothing is written over the starting lineup').not.toHaveBeenCalled();
     expect(utils.getByTestId('lineup-position-2').value, 'the edit is not lost from view').toBe('mem-4');
     expect(utils.getByTestId('lineup-position-2').disabled, 'but cannot be taken further').toBe(true);
+  });
+
+  // Removing the lineup of a match the team is not in is no way on either: the only way
+  // on is choosing another match, or the starting lineup.
+  it('locks "Use the previous match\'s lineup" too, so the lineup it names is not removed', async () => {
+    api.fetchSquads.mockResolvedValue({ 'team-a': SQUAD, 'team-c': SQUAD });
+    api.fetchLineupInForce.mockResolvedValue(lineupFor({ teamId: 'team-c', matchId: 'm-r1-0', sourceMatchId: 'm-r1-0' }));
+    api.fetchTeamLineup.mockResolvedValue(lineupFor({ teamId: 'team-c', round: 0, sourceRound: 0 }));
+    const utils = await mountPage({ poolMatches: undefined, bracket: finalWith(C) });
+    await act(async () => { fireEvent.change(utils.getByLabelText('Team'), { target: { value: 'team-c' } }); });
+    await chooseTarget(utils, 'm-r1-0');
+    const useButton = () => utils.getByRole('button', { name: "Use the previous match's lineup" });
+    expect(useButton().disabled, 'offered while the team plays the match').toBe(false);
+
+    await giveTheFinalTo(utils, finalWith(B));
+
+    expect(notInMatch(utils)).toBeTruthy();
+    expect(useButton().disabled).toBe(true);
+    await click(useButton());
+    expect(window.confirmDialog).not.toHaveBeenCalled();
+    expect(api.deleteMatchLineup).not.toHaveBeenCalled();
   });
 
   it('is the same for a match that has left the draw altogether', async () => {

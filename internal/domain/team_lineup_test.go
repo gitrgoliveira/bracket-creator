@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"maps"
 	"slices"
+	"strings"
 	"testing"
 
 	"github.com/gitrgoliveira/bracket-creator/internal/domain"
@@ -80,6 +81,111 @@ func TestComparePositions(t *testing.T) {
 			assert.Equalf(t, cmp.Compare(i, j), domain.ComparePositions(a, b), "%q against %q", a, b)
 		}
 	}
+}
+
+// TestTeamLineup_ApplyChanges: a save that names the positions it changed lands
+// them on a base and leaves every other position as the base holds it.
+func TestTeamLineup_ApplyChanges(t *testing.T) {
+	base := domain.TeamLineup{
+		TeamID: "team", CompetitionID: "comp", MatchID: "Pool A-1", Round: 0,
+		Positions: map[domain.Position]string{domain.PosSenpo: "Ito", domain.PosJiho: "Ueno", domain.PosChuken: "Endo"},
+		MemberIDs: map[domain.Position]string{domain.PosSenpo: "m-ito", domain.PosJiho: "m-ueno"},
+	}
+	apply := func(t *testing.T, changed []domain.Position, positions, ids map[domain.Position]string) domain.TeamLineup {
+		t.Helper()
+		got, err := base.ApplyChanges(changed, positions, ids)
+		require.NoError(t, err)
+		return got
+	}
+
+	t.Run("a name with no id sets the name and drops the id the position had", func(t *testing.T) {
+		got := apply(t, []domain.Position{domain.PosSenpo}, map[domain.Position]string{domain.PosSenpo: "Kato"}, nil)
+
+		assert.Equal(t, "Kato", got.Positions[domain.PosSenpo])
+		assert.NotContains(t, got.MemberIDs, domain.PosSenpo)
+		assert.Equal(t, "m-ueno", got.MemberIDs[domain.PosJiho], "another position keeps its id")
+	})
+
+	t.Run("a name and an id set both", func(t *testing.T) {
+		got := apply(t, []domain.Position{domain.PosChuken}, map[domain.Position]string{domain.PosChuken: "Kato"}, map[domain.Position]string{domain.PosChuken: "m-kato"})
+
+		assert.Equal(t, "Kato", got.Positions[domain.PosChuken])
+		assert.Equal(t, "m-kato", got.MemberIDs[domain.PosChuken])
+	})
+
+	t.Run("an id with no name places a member who has none yet", func(t *testing.T) {
+		got := apply(t, []domain.Position{domain.PosFukusho}, map[domain.Position]string{domain.PosFukusho: ""}, map[domain.Position]string{domain.PosFukusho: "m-blank"})
+
+		name, held := got.Positions[domain.PosFukusho]
+		assert.True(t, held)
+		assert.Empty(t, name)
+		assert.Equal(t, "m-blank", got.MemberIDs[domain.PosFukusho])
+	})
+
+	t.Run("neither a name nor an id clears the position from both maps", func(t *testing.T) {
+		got := apply(t, []domain.Position{domain.PosSenpo}, map[domain.Position]string{domain.PosSenpo: ""}, nil)
+
+		assert.NotContains(t, got.Positions, domain.PosSenpo)
+		assert.NotContains(t, got.MemberIDs, domain.PosSenpo)
+	})
+
+	t.Run("a position that is not changed is left as the base holds it, whatever the save carries", func(t *testing.T) {
+		got := apply(t, []domain.Position{domain.PosJiho},
+			map[domain.Position]string{domain.PosJiho: "Ueda", domain.PosSenpo: "stale", domain.PosTaisho: "Kato", "nonsense": "x"},
+			map[domain.Position]string{domain.PosSenpo: "m-stale", domain.PosTaisho: "m-kato"})
+
+		assert.Equal(t, map[domain.Position]string{domain.PosSenpo: "Ito", domain.PosJiho: "Ueda", domain.PosChuken: "Endo"}, got.Positions)
+		assert.Equal(t, map[domain.Position]string{domain.PosSenpo: "m-ito"}, got.MemberIDs)
+	})
+
+	t.Run("the identity of the base is kept and nothing is shared with it", func(t *testing.T) {
+		got := apply(t, []domain.Position{domain.PosSenpo}, map[domain.Position]string{domain.PosSenpo: "Kato"}, nil)
+		got.Positions[domain.PosJiho] = "changed afterwards"
+
+		assert.Equal(t, "team", got.TeamID)
+		assert.Equal(t, "Pool A-1", got.MatchID)
+		assert.Equal(t, "Ueno", base.Positions[domain.PosJiho])
+		assert.Equal(t, "Ito", base.Positions[domain.PosSenpo])
+		assert.Equal(t, "m-ito", base.MemberIDs[domain.PosSenpo])
+	})
+
+	t.Run("an empty base takes the changes, and clearing the last position leaves an empty map", func(t *testing.T) {
+		got, err := domain.TeamLineup{}.ApplyChanges([]domain.Position{domain.PosSenpo}, map[domain.Position]string{domain.PosSenpo: "Ito"}, nil)
+		require.NoError(t, err)
+		assert.Equal(t, map[domain.Position]string{domain.PosSenpo: "Ito"}, got.Positions)
+		assert.Nil(t, got.MemberIDs, "no ids is no map, as a lineup saved without ids has none")
+
+		emptied, err := got.ApplyChanges([]domain.Position{domain.PosSenpo}, map[domain.Position]string{domain.PosSenpo: ""}, nil)
+		require.NoError(t, err)
+		assert.NotNil(t, emptied.Positions)
+		assert.Empty(t, emptied.Positions)
+	})
+
+	t.Run("a changed position with no entry in positions is refused, naming it", func(t *testing.T) {
+		_, err := base.ApplyChanges([]domain.Position{domain.PosSenpo, domain.PosJiho}, map[domain.Position]string{domain.PosSenpo: "Kato"}, nil)
+
+		require.ErrorIs(t, err, domain.ErrLineupChangedPositionMissing)
+		assert.Contains(t, err.Error(), "jiho")
+		assert.True(t, strings.HasPrefix(err.Error(), "team_lineup:"), "it classifies as a client error like every lineup refusal")
+	})
+
+	t.Run("no changed positions is refused", func(t *testing.T) {
+		for _, changed := range [][]domain.Position{nil, {}} {
+			_, err := base.ApplyChanges(changed, map[domain.Position]string{domain.PosSenpo: "Kato"}, nil)
+
+			require.ErrorIs(t, err, domain.ErrLineupNoChangedPositions)
+		}
+	})
+
+	t.Run("a member placed at two positions is left for ValidatePositions to name", func(t *testing.T) {
+		got := apply(t, []domain.Position{domain.PosChuken}, map[domain.Position]string{domain.PosChuken: "Ito"}, map[domain.Position]string{domain.PosChuken: "m-ito"})
+
+		err := got.ValidatePositions(5)
+
+		require.ErrorIs(t, err, domain.ErrLineupDuplicateMember)
+		assert.Contains(t, err.Error(), "senpo")
+		assert.Contains(t, err.Error(), "chuken")
+	})
 }
 
 // TestTeamLineup_OrderedMembers_ThreePerson verifies the numeric-position

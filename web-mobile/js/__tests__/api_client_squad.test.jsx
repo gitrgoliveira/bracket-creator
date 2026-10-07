@@ -55,8 +55,8 @@ describe('API.addTeamMember', () => {
   beforeEach(() => { originalFetch = global.fetch; });
   afterEach(() => { global.fetch = originalFetch; });
 
-  it('POSTs the name and returns the minted member', async () => {
-    const created = { id: 'm2', index: 2, name: 'Ito' };
+  it('POSTs the name and returns the minted member, with the stamp the server gave it', async () => {
+    const created = { id: 'm2', index: 2, name: 'Ito', modifiedAt: 1700000000123 };
     global.fetch = mockFetch(201, created);
     const result = await API.addTeamMember('c1', 'team-1', 'Ito', 'pw');
     const [url, opts] = global.fetch.mock.calls[0];
@@ -78,14 +78,15 @@ describe('API.renameTeamMember', () => {
   beforeEach(() => { originalFetch = global.fetch; });
   afterEach(() => { global.fetch = originalFetch; });
 
-  it('PUTs the new name to the member endpoint and resolves true on 204', async () => {
-    global.fetch = vi.fn(() => Promise.resolve({ ok: true, status: 204 }));
+  it('PUTs the new name to the member endpoint and returns the member the server answers, with its stamp', async () => {
+    const renamed = { id: 'm1', index: 1, name: 'Sato-Renamed', modifiedAt: 1700000000456 };
+    global.fetch = mockFetch(200, renamed);
     const result = await API.renameTeamMember('c1', 'team-1', 'm1', 'Sato-Renamed', 'pw');
     const [url, opts] = global.fetch.mock.calls[0];
     expect(url).toBe('/api/competitions/c1/teams/team-1/members/m1');
     expect(opts.method).toBe('PUT');
     expect(JSON.parse(opts.body)).toEqual({ name: 'Sato-Renamed' });
-    expect(result).toBe(true);
+    expect(result).toEqual(renamed);
   });
 
   it('throws on a 404 (member id does not resolve)', async () => {
@@ -105,6 +106,7 @@ describe('the member writes throw a refusal\'s sentence, not its code', () => {
   it.each([
     ['add', (API) => API.addTeamMember('c1', 'team-1', 'Ito', '')],
     ['rename', (API) => API.renameTeamMember('c1', 'team-1', 'm1', 'Ito', '')],
+    ['clear', (API) => API.clearTeamMember('c1', 'team-1', 'm1', '')],
   ])('the %s', async (_name, send) => {
     global.fetch = mockFetch(409, { error: 'result_finalized', message: 'This match has finished. Contact the tournament organizer.' });
     await expect(send(API)).rejects.toThrow('This match has finished. Contact the tournament organizer.');
@@ -116,6 +118,7 @@ describe('the member writes throw a refusal\'s sentence, not its code', () => {
   it.each([
     ['add', (API) => API.addTeamMember('c1', 'team-1', 'Ito', '')],
     ['rename', (API) => API.renameTeamMember('c1', 'team-1', 'm1', 'Ito', '')],
+    ['clear', (API) => API.clearTeamMember('c1', 'team-1', 'm1', '')],
   ])('the %s keeps a refusal\'s code on the error it throws', async (_name, send) => {
     global.fetch = mockFetch(409, { error: 'member_already_named', message: 'This team member already has a name. Ask the tournament organizer to change it.' });
     const err = await send(API).catch((e) => e);
@@ -126,6 +129,7 @@ describe('the member writes throw a refusal\'s sentence, not its code', () => {
   it.each([
     ['add', (API) => API.addTeamMember('c1', 'team-1', 'Ito', '')],
     ['rename', (API) => API.renameTeamMember('c1', 'team-1', 'm1', 'Ito', '')],
+    ['clear', (API) => API.clearTeamMember('c1', 'team-1', 'm1', '')],
   ])('the %s leaves no code on a refusal that is only a message', async (_name, send) => {
     global.fetch = mockFetch(404, { error: 'team member not found' });
     const err = await send(API).catch((e) => e);
@@ -136,13 +140,14 @@ describe('the member writes throw a refusal\'s sentence, not its code', () => {
 
 // The team score sheet holds every name box disabled, and the side's lineup
 // announcements back, while a member write is out, so one the server never answers
-// would keep naming off until the browser gave up on the connection. Both writes are
-// bounded like every sibling request (the deadline covers the body too) and end in a
-// plain sentence the sheet shows as it is.
+// would keep naming off until the browser gave up on the connection. Every member
+// write (an add, a rename, a cleared name) is bounded like every sibling request (the
+// deadline covers the body too) and ends in a plain sentence the sheet shows as it is.
 describe('the member writes when the server does not answer', () => {
   const sends = [
     ['addTeamMember', () => API.addTeamMember('c1', 'team-1', 'Ito', 'pw'), 'The team member was not added'],
     ['renameTeamMember', () => API.renameTeamMember('c1', 'team-1', 'm1', 'Ito', 'pw'), 'The team member was not renamed'],
+    ['clearTeamMember', () => API.clearTeamMember('c1', 'team-1', 'm1', 'pw'), 'The team member\'s name was not cleared'],
   ];
   let originalFetch;
   beforeEach(() => { originalFetch = global.fetch; });
@@ -192,9 +197,16 @@ describe('the member writes when the server does not answer', () => {
     await expect(send()).rejects.toThrow(sentence(notDone));
   });
 
-  it('addTeamMember does not hand an unreadable answer on as a member', async () => {
-    global.fetch = vi.fn(() => Promise.resolve({ ok: true, status: 201, json: () => Promise.reject(new SyntaxError('Unexpected token < in JSON')) }));
-    await expect(API.addTeamMember('c1', 'team-1', 'Ito', 'pw')).rejects.toThrow(sentence('The team member was not added'));
+  // _fetchJson reads an unreadable body as {}, which cannot be told from a member the
+  // server sent: an answer with no id is no member, so the write is a failed one.
+  it.each(sends)('%s does not hand an unreadable answer on as a member', async (_name, send, notDone) => {
+    global.fetch = vi.fn(() => Promise.resolve({ ok: true, status: 200, json: () => Promise.reject(new SyntaxError('Unexpected token < in JSON')) }));
+    await expect(send()).rejects.toThrow(sentence(notDone));
+  });
+
+  it.each(sends)('%s does not take an answer with no member in it for a success', async (_name, send, notDone) => {
+    global.fetch = vi.fn(() => Promise.resolve({ ok: true, status: 204 }));
+    await expect(send()).rejects.toThrow(sentence(notDone));
   });
 });
 
@@ -203,14 +215,16 @@ describe('API.clearTeamMember', () => {
   beforeEach(() => { originalFetch = global.fetch; });
   afterEach(() => { global.fetch = originalFetch; });
 
-  it('DELETEs the member endpoint and resolves true on 204', async () => {
-    global.fetch = vi.fn(() => Promise.resolve({ ok: true, status: 204 }));
+  it('DELETEs the member endpoint and returns the member the server answers, nameless, with its stamp', async () => {
+    const cleared = { id: 'm1', index: 1, name: '', modifiedAt: 1700000000789 };
+    global.fetch = mockFetch(200, cleared);
     const result = await API.clearTeamMember('c1', 'team-1', 'm1', 'pw');
     const [url, opts] = global.fetch.mock.calls[0];
     expect(url).toBe('/api/competitions/c1/teams/team-1/members/m1');
     expect(opts.method).toBe('DELETE');
     expect(opts.headers['X-Tournament-Password']).toBe('pw');
-    expect(result).toBe(true);
+    expect(opts.body, 'a clear sends no body').toBeUndefined();
+    expect(result).toEqual(cleared);
   });
 
   it('throws with the server message on a 409 once the competition has started', async () => {

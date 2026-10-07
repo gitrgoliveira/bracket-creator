@@ -10,6 +10,7 @@ import { render, act, fireEvent, within, cleanup } from '@testing-library/react'
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { TAP_BOUNCE_MS } from '../../tap_guard.jsx';
 import { pointerTap, keyboardClick } from '../helpers/tap_events.js';
+import { answered } from '../helpers/team_members.js';
 
 const MEMBERS = [
   { id: 'mem-1', index: 1, name: 'Aoki' },
@@ -38,8 +39,9 @@ beforeEach(async () => {
     })),
     fetchSquads: vi.fn().mockResolvedValue({ 'team-a': MEMBERS, 'team-b': MEMBERS }),
     putMatchLineup: vi.fn().mockImplementation((_c, _t, _m, positions, _pw, memberIds) => Promise.resolve({ positions, memberIds })),
-    addTeamMember: vi.fn().mockImplementation((_c, _t, name) => Promise.resolve({ id: 'mem-minted', index: 6, name })),
-    renameTeamMember: vi.fn().mockResolvedValue(true),
+    // The server answers a member write with the member it holds, stamped.
+    addTeamMember: vi.fn().mockImplementation((_c, _t, name) => Promise.resolve(answered({ id: 'mem-minted', index: 6 }, { name }))),
+    renameTeamMember: vi.fn().mockImplementation((_c, _t, id, name) => Promise.resolve(answered({ id, index: 1 }, { name }))),
     queuedLineupSave: vi.fn().mockReturnValue(null),
   };
   window.API = api;

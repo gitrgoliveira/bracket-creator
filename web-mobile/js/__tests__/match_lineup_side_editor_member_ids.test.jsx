@@ -8,6 +8,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { makeReactive } from './helpers/reactive_react.js';
 import { collectText } from './helpers/vdom.js';
+import { answered } from './helpers/team_members.js';
 // bc-cse: the REAL composer, not a stub, so these tests exercise the exact
 // wording the operator sees (mirrors admin_lineup.jsx's own window bridge).
 import { memberIdentityWarning } from '../admin_lineup.jsx';
@@ -320,10 +321,10 @@ describe('MatchLineupSideEditor resolves names to squad member ids (bc-pnum gap 
   });
 
   // bc-cse: clearing a picked entry (the roster's clear affordance: an
-  // empty name, no entry) must remove its id from memberIds AND omit that
-  // position from the write entirely -- it goes back to vacant, not to an
-  // empty-string placement.
-  it('clearing a picked entry removes its id and omits the position from the write', async () => {
+  // empty name, no entry) must remove its id from memberIds: the position goes
+  // back to vacant, which a save names by its empty name and no id (the server
+  // clears a changed position that has neither).
+  it('clearing a picked entry removes its id and names the position by its empty name', async () => {
     global.window.API.fetchSquads = vi.fn().mockResolvedValue({ 'uuid-grouped': SQUAD_7 });
     // Based on a loaded override that holds the pick: a pick-then-clear from
     // an empty side is a net-zero edit, which Save no longer writes.
@@ -343,8 +344,9 @@ describe('MatchLineupSideEditor resolves names to squad member ids (bc-pnum gap 
     expect(global.window.AdminLineupHelpers.resolveMemberIdsForPositions).not.toHaveBeenCalled();
     expect(global.window.API.putMatchLineup).toHaveBeenCalled();
     const call = global.window.API.putMatchLineup.mock.calls.at(-1);
-    expect(call[3]).toEqual({});
+    expect(call[3]).toEqual({ 1: '' });
     expect(call[5]).toBeUndefined();
+    expect(call[6]).toEqual(['1']);
   });
 
   // bc-dnst (operator decision 2026-09-15): a member's name can be corrected
@@ -397,7 +399,7 @@ describe('MatchLineupSideEditor resolves names to squad member ids (bc-pnum gap 
 
   it('Rename under a named pick renames that member and the next save writes the new name with the same id', async () => {
     global.window.API.fetchSquads = vi.fn().mockResolvedValue({ 'uuid-grouped': SQUAD_7 });
-    global.window.API.renameTeamMember = vi.fn().mockResolvedValue({ id: 'mem-1', index: 1, name: 'Fighter One' });
+    global.window.API.renameTeamMember = vi.fn().mockResolvedValue(answered({ id: 'mem-1', index: 1 }, { name: 'Fighter One' }));
 
     let tree = await mount();
     let pickers = findComponents(tree, 'LineupNameInput');

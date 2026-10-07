@@ -40,6 +40,7 @@ import { render, act, fireEvent } from '@testing-library/react';
 import { describe, it, expect, vi, beforeAll, afterAll, beforeEach } from 'vitest';
 import { installWindowStubs } from '../helpers/stub_globals.js';
 import { readCode } from '../helpers/source.js';
+import { lineupPutStubByTeam } from '../helpers/lineup_server.js';
 import { FETCH_TIMEOUT_MS } from '../../write_result.jsx';
 
 const STUBBED_GLOBALS = {
@@ -98,10 +99,8 @@ beforeEach(() => {
     fetchCompetitionDetails: vi.fn(() => competition.promise),
     fetchSquads: vi.fn(() => new Promise((resolve, reject) => { memberReads.push({ resolve, reject }); })),
     fetchLineupInForce: vi.fn(async (_c, teamId) => lineups[teamId] || null),
-    putMatchLineup: vi.fn(async (_c, teamId, _m, positions, _pw, memberIds) => {
-      lineups[teamId] = { positions, memberIds: memberIds || {} };
-      return {};
-    }),
+    // A save names the position it changed, and the server answers the lineup it holds then.
+    putMatchLineup: lineupPutStubByTeam(() => lineups),
     renameTeamMember: vi.fn(async () => true),
     addTeamMember: vi.fn(async (_c, _t, name) => ({ id: 'new-1', index: 6, name })),
     recordScore: vi.fn().mockResolvedValue(undefined),
@@ -626,14 +625,15 @@ describe('team editor: a side that carries only its name', () => {
       await act(async () => { competition.resolve(ROSTER); });
       await act(async () => { memberReads.forEach((read) => read.resolve(lists)); });
       await flush();
-      const lineupRead = deferred();
-      window.API.fetchLineupInForce = vi.fn(() => lineupRead.promise);
+      // The pick is out while the member it names is being added.
+      const mint = deferred();
+      window.API.addTeamMember = vi.fn(() => mint.promise);
       await typeName(bout(document, 0, 'aka'), 'Newcomer');
 
       await act(async () => { view.rerender(host({ id: 'team-N', name: 'Team N', number: 'T5' })); });
       await flush();
       expect(holds(await offers(document, 2, 'aka'), 'Nao One'), 'the list is kept').toBe(true);
-      await act(async () => { lineupRead.resolve(null); });
+      await act(async () => { mint.resolve({ id: 'new-1', index: 6, name: 'Newcomer' }); });
       await flush();
 
       expect(window.API.putMatchLineup, 'the pick is written').toHaveBeenCalledTimes(1);
@@ -647,13 +647,14 @@ describe('team editor: a side that carries only its name', () => {
       await act(async () => { memberReads.forEach((read) => read.resolve(lists)); });
       await flush();
       expect(holds(await offers(document, 2, 'aka'), 'Nao One')).toBe(true);
-      const lineupRead = deferred();
-      window.API.fetchLineupInForce = vi.fn(() => lineupRead.promise);
+      // The pick is out while the member it names is being added.
+      const mint = deferred();
+      window.API.addTeamMember = vi.fn(() => mint.promise);
       await typeName(bout(document, 0, 'aka'), 'Newcomer');
 
       await act(async () => { view.rerender(host(onlyName('Team O'))); });
       await flush();
-      await act(async () => { lineupRead.resolve(null); });
+      await act(async () => { mint.resolve({ id: 'new-1', index: 6, name: 'Newcomer' }); });
       await act(async () => { memberReads.forEach((read) => read.resolve(lists)); });
       await flush();
 

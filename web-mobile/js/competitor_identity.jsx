@@ -24,7 +24,7 @@
 // the intentional recovery path for resolveSide's own "no id at all"
 // fallback (api_serializers.jsx), and is why callers like
 // match_scoreboard.jsx's useTeamLineups, admin_scoring_team.jsx's
-// sideAKey/rosterForSide/teamIdForSide, and admin_schedule_lineup.jsx's
+// sideAKey/rosterForSide, and admin_schedule_lineup.jsx's
 // sideKey/matchesKey call sideLookupKey (below) rather than sameCompetitor.
 // admin_lineup.jsx's teamIdOf is the one exception: its legacy ID/Name
 // fallback has a precedence sideLookupKey's simple shape can't reproduce,

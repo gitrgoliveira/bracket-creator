@@ -299,7 +299,7 @@ func poolPhaseEndByCourt(matches []state.MatchResult, comp *state.Competition, t
 // bout waits for the latest pool end on any court. Reports whether anything
 // moved.
 func pushKnockoutPastPools(b *state.Bracket, comp *state.Competition, tournament *state.Tournament, poolMatches []state.MatchResult) bool {
-	if b == nil || comp == nil {
+	if b == nil {
 		return false
 	}
 	ends := poolPhaseEndByCourt(poolMatches, comp, tournament)

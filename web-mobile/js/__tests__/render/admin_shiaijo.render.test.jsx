@@ -2,7 +2,8 @@ import React from 'react';
 import { render, act, fireEvent, within } from '@testing-library/react';
 import { describe, it, expect, vi, beforeAll, afterAll, beforeEach, afterEach } from 'vitest';
 import { installWindowStubs } from '../helpers/stub_globals.js';
-import { DOWNSTREAM_KNOCKOUT_PLAYED_CANCELLED } from '../../write_result.jsx';
+import { DOWNSTREAM_KNOCKOUT_PLAYED_CANCELLED, startWhileCorrectingMessage, correctWhileRunningMessage } from '../../write_result.jsx';
+import { scoreRowMatchName } from '../../pool_ids.jsx';
 // Window globals required by admin_shiaijo.jsx.
 // MODULE-EVAL-TIME entries (e.g. `const AdminTopbar = window.AdminTopbar;`)
 // must be set before the dynamic import, or the module captures undefined.
@@ -800,10 +801,10 @@ describe('AdminShiaijoPage render-smoke', () => {
   // withdrawal reopens to "scheduled" instead (engine.reopenTargetStatus):
   // starting it straight into "running" would strand the operator behind
   // the eligibility gate. The correction must still end, or the panel stays
-  // pinned to the now-cleared correction and hides whatever the court's
-  // normal view would show -- here, the OTHER match already running on this
-  // same court -- until a reload.
-  it('a correction cleared to "scheduled" (still-barred fusensho) releases the panel back to the running bout', async () => {
+  // pinned to the now-cleared correction (and, with the console's refusal to
+  // start a match during a correction, no Start would ever work) until a
+  // reload.
+  it('a correction cleared to "scheduled" (still-barred fusensho) ends, and nothing stays pinned to it', async () => {
     const side = (id, name) => ({ id, name });
     const m1 = {
       id: 'm1', compId: 'c1', compName: 'Cup', status: 'completed', phase: 'pool', poolName: 'Pool A',
@@ -812,7 +813,7 @@ describe('AdminShiaijoPage render-smoke', () => {
       decision: 'fusensho', decisionBy: 'aka',
     };
     const m2 = {
-      id: 'm2', compId: 'c1', compName: 'Cup', status: 'running', phase: 'pool', poolName: 'Pool A',
+      id: 'm2', compId: 'c1', compName: 'Cup', status: 'scheduled', phase: 'pool', poolName: 'Pool A',
       court: 'A', scheduledAt: '09:05', sideA: side('p3', 'Sato'), sideB: side('p4', 'Kato'),
     };
     let current = [m1, m2];
@@ -827,7 +828,7 @@ describe('AdminShiaijoPage render-smoke', () => {
     try {
       let utils;
       await act(async () => { utils = renderPage(makeMinimalTournament()); });
-      const editorMatch = () => utils.getByTestId('score-editor').getAttribute('data-match');
+      const editorMatch = () => { const el = utils.queryByTestId('score-editor'); return el ? el.getAttribute('data-match') : null; };
       const heading = () => utils.container.querySelector('.shiaijo-context__toggle').textContent;
       const refresh = async () => { await act(async () => { utils.getByRole('button', { name: /refresh/i }).click(); }); };
 
@@ -837,15 +838,15 @@ describe('AdminShiaijoPage render-smoke', () => {
 
       // Clear the withdrawal and reopen: the barred fusensho side is still
       // barred elsewhere, so the server sends m1 to "scheduled", not
-      // "running" (m2 keeps running throughout, on the same court).
+      // "running" (m2 is only queued, on the same court).
       current = [{ ...m1, status: 'scheduled', decision: '', decisionBy: '', winner: undefined }, m2];
       await refresh();
 
-      // The correction must end: the panel falls back to the court's
-      // normal view -- the running bout (m2) -- instead of staying pinned
-      // to m1.
-      expect(editorMatch(), "the panel must release m1 and follow the court's running bout").toBe('m2');
+      // The correction must end: nothing stays pinned to m1 and the panel
+      // is the court's ordinary view (m2 is only queued, so no editor).
+      expect(editorMatch(), 'the panel must release m1').toBeNull();
       expect(heading()).not.toContain('Correcting');
+      expect(utils.queryByRole('button', { name: /back to court/i })).toBeNull();
     } finally {
       window.API.fetchCourtMatches = prevFetch;
       window.API.subscribeToEvents = prevSub;
@@ -1179,7 +1180,7 @@ describe('a barred match is skipped by every auto-pick (bc-cse)', () => {
 
 // Shared by the render tests below: a mutable court feed, a Refresh that
 // re-reads it, and the editor probe's current match.
-async function mountCourt(initial) {
+async function mountCourt(initial, opts = {}) {
   const feed = { current: initial };
   window.tournamentMatches = () => feed.current;
   window.filterMatchesByCourt = (matches) => matches;
@@ -1195,7 +1196,7 @@ async function mountCourt(initial) {
   let utils;
   await act(async () => {
     utils = render(
-      <AdminShiaijoPage tournament={makeMinimalTournament()} court="A" onBack={vi.fn()} onEditScore={vi.fn()}
+      <AdminShiaijoPage tournament={makeMinimalTournament()} court="A" onBack={vi.fn()} onEditScore={opts.onEditScore || vi.fn()}
         onMoveCourt={vi.fn()} onLogout={vi.fn()} onViewerMode={vi.fn()} password="" showToast={showToast}
         tweaks={{}} onSwitchCourt={vi.fn()} />
     );
@@ -1513,6 +1514,195 @@ describe('a court shared with another competition', () => {
       await act(async () => { c.utils.getAllByTestId('move-to-B')[0].click(); });
       const dialog = c.utils.container.querySelector('.shiaijo-move-confirm[role="dialog"]');
       expect(dialog.textContent).toMatch(/Shiro m\d vs Aka m\d leaves Shiaijo A and joins the queue on Shiaijo B\./);
+    } finally { c.restore(); }
+  });
+});
+
+// bc-crpn (operator ruling 2026-09-27): the court console never holds a
+// running match and an open correction through its own taps, in either order.
+// Correct is refused while a bout is live; Start match is refused while a
+// correction is open; a landed Save correction ends the correction. A match
+// started from another screen mid-correction does NOT close it (operator
+// decision 2026-10-07): the running match is listed beside it instead.
+describe('a running match and an open correction never coexist on the console (bc-crpn)', () => {
+  const tapCorrect = async (c, rowText) => {
+    const row = [...c.utils.container.querySelectorAll('.shiaijo-qrow--complete')].find((r) => r.textContent.includes(rowText));
+    const btn = [...row.querySelectorAll('button')].find((b) => b.textContent.trim() === 'Correct');
+    await act(async () => { btn.click(); });
+    return row;
+  };
+  const tapUpNextStart = async (c) => {
+    const card = c.utils.container.querySelector('.shiaijo-upnext__card');
+    const btn = [...card.querySelectorAll('button')].find((b) => /start match/i.test(b.textContent));
+    await act(async () => { btn.click(); });
+    return card;
+  };
+  const heading = (c) => c.utils.container.querySelector('.shiaijo-context__toggle').textContent;
+  const rowOf = (c, text) => [...c.utils.container.querySelectorAll('.shiaijo-qrow')].find((r) => r.textContent.includes(text));
+  const alertsWith = (c, text) => [...c.utils.container.querySelectorAll('[role="alert"]')].filter((a) => a.textContent.includes(text));
+
+  it('a) Correct is refused while a bout runs on this court, and the notice goes with the bout', async () => {
+    const m1 = courtMatch('m1', 'completed', { modifiedAt: 1000, winner: courtSide('m1-a', 'Aka m1') });
+    const m2 = courtMatch('m2', 'running');
+    const c = await mountCourt([m1, m2]);
+    try {
+      const row = await tapCorrect(c, 'Aka m1');
+      const text = correctWhileRunningMessage({ court: 'A', label: scoreRowMatchName(m2) });
+      expect(c.editorMatch()).toBe('m2');
+      expect(heading(c)).not.toContain('Correcting');
+      const alert = row.querySelector('[role="alert"]');
+      expect(alert && alert.textContent).toBe(text);
+      expect(c.showToast).toHaveBeenCalledWith(text, 'error');
+
+      c.feed.current = [m1, { ...m2, status: 'completed', modifiedAt: 2000 }];
+      await c.refresh();
+      expect(alertsWith(c, text)).toHaveLength(0);
+    } finally { c.restore(); }
+  });
+
+  it('b) Correct is refused in the window after this console\'s own Start, and while the start is in flight', async () => {
+    const m1 = courtMatch('m1', 'completed', { modifiedAt: 1000 });
+    const m2 = courtMatch('m2', 'scheduled', { modifiedAt: 100 });
+    const onEditScore = vi.fn().mockResolvedValue({ applied: true });
+    const c = await mountCourt([m1, m2], { onEditScore });
+    try {
+      await tapUpNextStart(c);
+      expect(onEditScore).toHaveBeenCalledTimes(1);
+      // The feed has NOT caught up: m2 still reads "scheduled".
+      await tapCorrect(c, 'Aka m1');
+      const text = correctWhileRunningMessage({ court: 'A', label: scoreRowMatchName(m2) });
+      expect(c.showToast).toHaveBeenCalledWith(text, 'error');
+      expect(heading(c)).not.toContain('Correcting');
+    } finally { c.restore(); }
+
+    const m1b = courtMatch('m1', 'completed', { modifiedAt: 1000 });
+    const m2b = courtMatch('m2', 'scheduled', { modifiedAt: 100 });
+    const pending = vi.fn().mockImplementation(() => new Promise(() => {}));
+    const c2 = await mountCourt([m1b, m2b], { onEditScore: pending });
+    try {
+      await tapUpNextStart(c2);
+      await tapCorrect(c2, 'Aka m1');
+      expect(c2.showToast).toHaveBeenCalledWith(correctWhileRunningMessage({ court: 'A', label: scoreRowMatchName(m2b) }), 'error');
+      expect(heading(c2)).not.toContain('Correcting');
+    } finally { c2.restore(); }
+  });
+
+  it('c) Start is refused while a correction is open, on the Up next card and on an Upcoming row', async () => {
+    const m1 = courtMatch('m1', 'completed', { modifiedAt: 1000 });
+    const m2 = courtMatch('m2', 'scheduled');
+    const m3 = courtMatch('m3', 'scheduled');
+    const onEditScore = vi.fn().mockResolvedValue({ applied: true });
+    const c = await mountCourt([m1, m2, m3], { onEditScore });
+    try {
+      await tapCorrect(c, 'Aka m1');
+      expect(c.editorMatch()).toBe('m1');
+      const text = startWhileCorrectingMessage({ label: scoreRowMatchName(m1) });
+
+      const card = await tapUpNextStart(c);
+      expect(onEditScore).not.toHaveBeenCalled();
+      expect(window.API.revertMatchToQueue).not.toHaveBeenCalled();
+      expect(c.editorMatch()).toBe('m1');
+      expect(heading(c)).toContain('Correcting');
+      expect(card.querySelector('.shiaijo-upnext__error[role="alert"]').textContent).toBe(text);
+      expect(c.showToast).toHaveBeenCalledWith(text, 'error');
+
+      const row3 = rowOf(c, 'Aka m3');
+      const start3 = [...row3.querySelectorAll('button')].find((b) => /start match/i.test(b.textContent));
+      await act(async () => { start3.click(); });
+      expect(onEditScore).not.toHaveBeenCalled();
+      expect(rowOf(c, 'Aka m3').querySelector('[role="alert"]').textContent).toBe(text);
+      // A newer tap replaces the older notice.
+      expect(c.utils.container.querySelector('.shiaijo-upnext__card .shiaijo-upnext__error')).toBeNull();
+    } finally { c.restore(); }
+  });
+
+  it('f) Back to court cancels the correction, then Start works', async () => {
+    const m1 = courtMatch('m1', 'completed', { modifiedAt: 1000 });
+    const m2 = courtMatch('m2', 'scheduled');
+    const onEditScore = vi.fn().mockResolvedValue({ applied: true });
+    const c = await mountCourt([m1, m2], { onEditScore });
+    try {
+      await tapCorrect(c, 'Aka m1');
+      await tapUpNextStart(c);
+      expect(onEditScore).not.toHaveBeenCalled();
+      await act(async () => { c.utils.getByRole('button', { name: /back to court/i }).click(); });
+      expect(heading(c)).not.toContain('Correcting');
+      expect(alertsWith(c, 'Finish or cancel the correction')).toHaveLength(0);
+      await tapUpNextStart(c);
+      expect(onEditScore).toHaveBeenCalledTimes(1);
+      expect(onEditScore.mock.calls[0][1]).toBe('m2');
+    } finally { c.restore(); }
+  });
+
+  it('d) a landed Save correction ends the correction, then Start works; a queued one keeps it open', async () => {
+    const m1 = courtMatch('m1', 'completed', { modifiedAt: 1000 });
+    const m2 = courtMatch('m2', 'scheduled');
+    const onEditScore = vi.fn().mockResolvedValue({ applied: true });
+    const c = await mountCourt([m1, m2], { onEditScore });
+    try {
+      await tapCorrect(c, 'Aka m1');
+      expect(c.utils.queryByRole('button', { name: /back to court/i })).toBeTruthy();
+      await act(async () => { await probe.props.onSubmit({ status: 'completed' }); });
+      expect(c.utils.queryByRole('button', { name: /back to court/i })).toBeNull();
+      expect(heading(c)).not.toContain('Correcting');
+      await tapUpNextStart(c);
+      expect(onEditScore).toHaveBeenCalledTimes(2);
+      expect(onEditScore.mock.calls[1][1]).toBe('m2');
+    } finally { c.restore(); }
+
+    const queued = vi.fn().mockResolvedValue({ queued: true });
+    const c2 = await mountCourt([courtMatch('m1', 'completed', { modifiedAt: 1000 }), courtMatch('m2', 'scheduled')], { onEditScore: queued });
+    try {
+      await tapCorrect(c2, 'Aka m1');
+      await act(async () => { await probe.props.onSubmit({ status: 'completed' }); });
+      expect(c2.utils.queryByRole('button', { name: /back to court/i })).toBeTruthy();
+      expect(heading(c2)).toContain('Correcting');
+    } finally { c2.restore(); }
+
+    // A write that is not a finish (a running patch) never ends it either.
+    const c3 = await mountCourt([courtMatch('m1', 'completed', { modifiedAt: 1000 })], { onEditScore: vi.fn().mockResolvedValue({ applied: true }) });
+    try {
+      await tapCorrect(c3, 'Aka m1');
+      await act(async () => { await probe.props.onSubmit({ status: 'running' }); });
+      expect(heading(c3)).toContain('Correcting');
+    } finally { c3.restore(); }
+  });
+
+  it('e) a landed decision on a correction (onClose) ends it; with no correction onClose changes nothing', async () => {
+    const m1 = courtMatch('m1', 'completed', { modifiedAt: 1000 });
+    const c = await mountCourt([m1, courtMatch('m2', 'scheduled')]);
+    try {
+      await tapCorrect(c, 'Aka m1');
+      expect(heading(c)).toContain('Correcting');
+      await act(async () => { probe.props.onClose(); });
+      expect(heading(c)).not.toContain('Correcting');
+      expect(c.utils.queryByRole('button', { name: /back to court/i })).toBeNull();
+    } finally { c.restore(); }
+
+    const c2 = await mountCourt([courtMatch('m1', 'completed', { modifiedAt: 1000 }), courtMatch('m2', 'running')]);
+    try {
+      expect(c2.editorMatch()).toBe('m2');
+      await act(async () => { probe.props.onClose(); });
+      expect(c2.editorMatch()).toBe('m2');
+    } finally { c2.restore(); }
+  });
+
+  it('g) a match started from another screen mid-correction leaves the correction open and is listed beside it', async () => {
+    const m1 = courtMatch('m1', 'completed', { modifiedAt: 1000 });
+    const m2 = courtMatch('m2', 'scheduled');
+    const c = await mountCourt([m1, m2]);
+    try {
+      await tapCorrect(c, 'Aka m1');
+      expect(c.utils.queryByText(/another bout is running/i)).toBeNull();
+      c.feed.current = [m1, { ...m2, status: 'running', modifiedAt: 3000 }];
+      await c.refresh();
+      expect(c.editorMatch()).toBe('m1');
+      expect(heading(c)).toContain('Correcting');
+      expect(c.showToast).not.toHaveBeenCalled();
+      const block = c.utils.container.querySelector('.shiaijo-also-running');
+      expect(block, 'the running match is listed above the correction').toBeTruthy();
+      expect(block.textContent).toContain('Another bout is running on Shiaijo A');
+      expect(block.textContent).toContain('Shiro m2 vs Aka m2');
     } finally { c.restore(); }
   });
 });

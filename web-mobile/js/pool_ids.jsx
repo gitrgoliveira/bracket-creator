@@ -117,6 +117,16 @@ export function scoreRowMatchLabel(m) {
     return pool ? `${pool} · Match ${n}` : `Match ${n}`;
 }
 
+// scoreRowMatchName: a match named the way an operator line quotes it, the
+// row label with the pairing appended, Shiro first ("Pool A · Match 2 · Kato
+// vs Sato"); the bare pairing when the row carries no label (a daihyosen or
+// tiebreaker bout, an unnumbered knockout row).
+export function scoreRowMatchName(m) {
+    const pairing = `${m.sideB?.name || "Shiro"} vs ${m.sideA?.name || "Aka"}`;
+    const label = scoreRowMatchLabel(m);
+    return label ? `${label} · ${pairing}` : pairing;
+}
+
 // This regex constant is intentionally module-private: callers use the
 // exported isSupplementaryBout() wrapper below, never the raw pattern.
 const SUPPLEMENTARY_BOUT_RE = /-(?:DH|TB)-\d+$/;

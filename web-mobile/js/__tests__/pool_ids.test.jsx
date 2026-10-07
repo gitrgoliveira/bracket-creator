@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { poolNameOf, isSupplementaryBout, isPoolDaihyosenBout, poolMatchNumberOf } from '../pool_ids.jsx';
+import { poolNameOf, isSupplementaryBout, isPoolDaihyosenBout, poolMatchNumberOf, scoreRowMatchName } from '../pool_ids.jsx';
 
 describe('poolNameOf', () => {
   it('parses regular / DH / TB ids to the pool name, hyphens preserved', () => {
@@ -75,5 +75,29 @@ describe('poolMatchNumberOf (a pool bout is numbered inside its own pool)', () =
     expect(poolMatchNumberOf('')).toBe(0);
     expect(poolMatchNumberOf(undefined)).toBe(0);
     expect(poolMatchNumberOf(null)).toBe(0);
+  });
+});
+
+// bc-crpn: the label an operator line quotes a match by, Shiro first.
+describe('scoreRowMatchName', () => {
+  const sides = { sideA: { name: 'Sato' }, sideB: { name: 'Kato' } };
+
+  it('a pool row reads label, then the pairing with Shiro (sideB) first', () => {
+    expect(scoreRowMatchName({ id: 'Pool A-1', phase: 'pool', poolName: 'Pool A', ...sides }))
+      .toBe('Pool A · Match 2 · Kato vs Sato');
+  });
+
+  it('a daihyosen or tiebreaker row carries no label, so it is the bare pairing', () => {
+    expect(scoreRowMatchName({ id: 'Pool A-DH-0', phase: 'pool', poolName: 'Pool A', ...sides })).toBe('Kato vs Sato');
+    expect(scoreRowMatchName({ id: 'Pool A-TB-0', phase: 'pool', poolName: 'Pool A', ...sides })).toBe('Kato vs Sato');
+  });
+
+  it('a numbered knockout row reads "Match N", an unnumbered one the bare pairing', () => {
+    expect(scoreRowMatchName({ id: 'r1-m0', phase: 'bracket', matchNumber: 4, ...sides })).toBe('Match 4 · Kato vs Sato');
+    expect(scoreRowMatchName({ id: 'r1-m0', phase: 'bracket', ...sides })).toBe('Kato vs Sato');
+  });
+
+  it('a side with no name falls back to Shiro / Aka', () => {
+    expect(scoreRowMatchName({ id: 'Pool A-DH-0', phase: 'pool' })).toBe('Shiro vs Aka');
   });
 });

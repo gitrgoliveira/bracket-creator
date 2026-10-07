@@ -831,6 +831,17 @@ export function courtBusyMessage({ court, label }) {
     return `Shiaijo ${court} is running ${label}. Finish it or send it back to the queue first.`;
 }
 
+// The court console never holds a running match and an open correction at
+// once (operator ruling 2026-09-27, bc-crpn). Each refused tap names the other
+// one, with the label string the caller built (scoreRowMatchName).
+export function startWhileCorrectingMessage({ label }) {
+    return `Finish or cancel the correction of ${label} first, then start this match.`;
+}
+
+export function correctWhileRunningMessage({ court, label }) {
+    return `Shiaijo ${court} is running ${label}. Finish it or send it back to the queue first, then correct this match.`;
+}
+
 // runningParts names the matches being fought and where, the same words as
 // engine's runningSubject: "Match 3 (Final) is being fought now on Shiaijo
 // A", and for two, "The 3rd-place match is being fought now on Shiaijo B and

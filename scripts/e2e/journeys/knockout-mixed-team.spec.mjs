@@ -957,9 +957,6 @@ test.describe('knockout-mixed-team', () => {
       await test.step('level the encounter and add the daihyosen at the court', async () => {
         await T.boutIppon(ed, 2, 'aka', 'M');
         for (const n of [3, 4, 5]) await T.ensureTie(ed, n);
-        // Let the last Tie's autosave land first: added inside its 300ms
-        // debounce, the representative bout is erased by it (bc-dhas).
-        await page.waitForTimeout(800);
         await ed.getByTestId('scoring-modal-daihyosen-button').tap();
         await expect(T.boutRow(ed, 'DH')).toBeVisible();
         await expect(tvBoard(tv)).toContainText('(DH)');
@@ -1125,15 +1122,14 @@ test.describe('knockout-mixed-team', () => {
     }
   });
 
-  test.fixme('bc-fsnp: a fusensho wipes the points the other side already scored, so its undo cannot bring them back after a reload', async ({ page }) => {
+  test('bc-fsnp: a fusensho wipes the points the other side already scored, so its undo cannot bring them back after a reload', async ({ page }) => {
     await T.enterAdmin(page);
     await seedF4(page, { name: 'B4 KO', court: 'K', prefix: 'L', teams: [['B4 Ume', 'Kita Dojo'], ['B4 Sakura', 'Minami Dojo']] });
     await openShiaijo(page, 'K');
     const ed = await T.startUpNextTeam(page);
     await T.boutIppon(ed, 1, 'shiro', 'K');
-    // The kote is saved before the fusensho (the pill cannot say so: it
-    // reads Synced through the autosave's debounce).
-    await page.waitForTimeout(1500);
+    // The kote is saved before the fusensho.
+    await expect(T.syncPill(ed)).toHaveText('Synced');
     // Shiro's fighter cannot continue; the bout goes to Aka by default.
     await T.rowFusensho(T.boutRow(ed, 1), 'aka').tap();
     await expect(T.rowSlots(T.boutRow(ed, 1), 'aka')).toHaveText(['○', '○']);
@@ -1181,8 +1177,6 @@ test.describe('knockout-mixed-team', () => {
     await openShiaijo(page, 'F');
     const ed = await T.startUpNextTeam(page);
     for (const n of [1, 2, 3, 4, 5]) await T.ensureTie(ed, n);
-    // Past the last Tie's autosave, so bc-dhas does not erase the row.
-    await page.waitForTimeout(800);
     await ed.getByTestId('scoring-modal-daihyosen-button').tap();
     const dh = T.boutRow(ed, 'DH');
     await expect(dh).toBeVisible();
@@ -1192,7 +1186,7 @@ test.describe('knockout-mixed-team', () => {
     await expect(T.rowNameBox(dh, 'aka')).toBeVisible();
   });
 
-  test.fixme('bc-dhas: a representative bout added right after the last Tie is erased by that Tie\'s pending autosave', async ({ page }) => {
+  test('bc-dhas: a representative bout added right after the last Tie is erased by that Tie\'s pending autosave', async ({ page }) => {
     await T.enterAdmin(page);
     await seedF4(page, { name: 'B9 KO', court: 'L', prefix: 'T', teams: [['B9 Ume', 'Kita Dojo'], ['B9 Sakura', 'Minami Dojo']] });
     await openShiaijo(page, 'L');
@@ -1205,30 +1199,5 @@ test.describe('knockout-mixed-team', () => {
     await expect(T.boutRow(ed, 'DH')).toBeVisible();
     await page.reload();
     await expect(T.boutRow(ed, 'DH')).toBeVisible();
-  });
-  test.fixme('bc-kpnl: on the court console the withdrawn team\'s remaining-matches panel vanishes before a default win can be awarded', async ({ page }) => {
-    await T.enterAdmin(page);
-    const id = await createCompetition(page, {
-      name: 'B8 Pools', kind: 'team', format: 'mixed', teamSize: 3, teamMatchType: 'fixed', courts: ['O', 'P'], numberPrefix: 'V',
-    });
-    await pasteRoster(page, id, SIX_TEAMS);
-    await generateDraw(page, id);
-    await startCompetition(page, id);
-    await openShiaijo(page, 'O');
-    const ed = await T.startUpNextTeam(page);
-    const summary = ed.locator('.decision-disclosure__summary');
-    await summary.scrollIntoViewIfNeeded();
-    await summary.tap();
-    await ed.getByTestId('scoring-modal-kiken-voluntary-button').tap();
-    const prompt = ed.locator('form.decision-prompt');
-    await prompt.locator('input[value="shiro"]').check();
-    await prompt.locator('button.btn--primary').tap();
-    // recording-decisions.md / the kiken default-win chain: the withdrawn
-    // team's remaining pool matches are offered for a default win, and the
-    // offer stays until the operator acts on it.
-    const award = page.getByRole('button', { name: 'Award default win to opponent' });
-    await expect(award.first()).toBeVisible();
-    await page.waitForTimeout(2000);
-    await expect(award.first()).toBeVisible();
   });
 });

@@ -1104,7 +1104,7 @@ test.describe('J5 kachinuki from the court console', () => {
 
   // bc-emsl: a tap on an EMPTY mark slot (the "·" beside the scored
   // marks) is not a no-op: it clears the bout's Tie.
-  test.fixme('bc-emsl: tapping an empty mark slot clears the bout\'s Tie', async ({ page }) => {
+  test('bc-emsl: tapping an empty mark slot clears the bout\'s Tie', async ({ page }) => {
     await login(page);
     await openShiaijo(page, 'A');
     const row = currentBout(page);
@@ -1122,7 +1122,7 @@ test.describe('J5 kachinuki from the court console', () => {
 
   // bc-kheb: Encho on ONE kachinuki bout sets the encounter's overtime
   // count, so the header keeps reading "(E) OVERTIME" on every later bout.
-  test.fixme('bc-kheb: after one bout goes to encho, the header claims overtime on every later bout', async ({ page }) => {
+  test('bc-kheb: after one bout goes to encho, the header claims overtime on every later bout', async ({ page }) => {
     await login(page);
     await openShiaijo(page, 'A');
     const row = currentBout(page);
@@ -1138,7 +1138,7 @@ test.describe('J5 kachinuki from the court console', () => {
   // bc-sync: for the autosave's debounce window after a tap, the sync pill
   // already reads "Synced" although nothing has been sent; a reload in that
   // window loses the point with no warning (audit row "final bout 4").
-  test.fixme('bc-sync: the sync pill reads "Synced" while a tapped point is still unsaved', async ({ page }) => {
+  test('bc-sync: the sync pill reads "Synced" while a tapped point is still unsaved', async ({ page }) => {
     await login(page);
     await openShiaijo(page, 'A');
     const live = currentBout(page);
@@ -1158,7 +1158,8 @@ test.describe('J5 kachinuki from the court console', () => {
     const S = MEMBERS[finalPair.shiro];
     // Shiro keeps winning with whoever is on until End match; the operator
     // ends it when Aka is out of fighters. The Aka fighter changes each bout.
-    for (let i = 0; i < 5; i += 1) {
+    // Play on from the first unfought bout: bc-kheb above records bout 1.
+    for (let i = await doneRows(page).count(); i < 5; i += 1) {
       const live = currentBout(page);
       if (i === 3) {
         // V3: the tab reloads a moment after a point is tapped. What does the

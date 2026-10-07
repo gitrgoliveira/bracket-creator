@@ -952,20 +952,7 @@ test.describe('knockout-mixed-individual', () => {
     return id;
   };
 
-  test.fixme('bc-kpnl: after a kiken on the shiaijo console the remaining-matches panel stays until the operator closes it', async ({ page }) => {
-    await login(page);
-    await seedOwn(page, { name: 'Finding A1', format: 'mixed', poolSize: 3, poolWinners: 2, courts: ['G'], numberPrefix: 'FA' }, rosterOf('Aone', 6));
-    await openShiaijo(page, 'G');
-    await ensureRunning(page);
-    await recordDecision(page, 'kiken-voluntary', { side: 'aka' });
-    const panel = inlineEditor(page).locator('.remaining-matches');
-    await expect(panel).toBeVisible();
-    await page.waitForTimeout(3000);
-    await expect(panel).toBeVisible();
-    await expect(panel.getByRole('button', { name: 'Award default win to opponent' })).toHaveCount(1);
-  });
-
-  test.fixme('bc-kfup: a withdrawn competitor\'s remaining pool bout can be recorded as their default loss', async ({ page }) => {
+  test('bc-kfup: a withdrawn competitor\'s remaining pool bout can be recorded as their default loss', async ({ page }) => {
     await login(page);
     const id = await seedOwn(page, { name: 'Finding A2', format: 'mixed', poolSize: 3, poolWinners: 2, courts: ['H'], numberPrefix: 'FB' }, rosterOf('Atwo', 6));
     await openShiaijo(page, 'H');
@@ -993,7 +980,7 @@ test.describe('knockout-mixed-individual', () => {
     await expect(inlineEditor(page).getByTestId('scoring-modal-encho-checkbox')).toBeVisible();
   });
 
-  test.fixme('bc-htcr: a hantei verdict can be corrected to the other side from the Correct editor', async ({ page }) => {
+  test('bc-htcr: a hantei verdict can be corrected to the other side from the Correct editor', async ({ page }) => {
     await login(page);
     await seedOwn(page, { name: 'Finding A4', format: 'knockout', courts: ['J'], numberPrefix: 'FD' }, rosterOf('Afour', 4));
     await openShiaijo(page, 'J');
@@ -1020,7 +1007,7 @@ test.describe('knockout-mixed-individual', () => {
     await expect.poll(async () => (await done.locator('.shiaijo-qrow__result').innerText()).trim(), { timeout: 10_000 }).not.toBe(before);
   });
 
-  test.fixme('bc-plcl: the Pools-tab score editor stays open through Start match and an ippon', async ({ page }) => {
+  test('bc-plcl: the Pools-tab score editor stays open through Start match and an ippon', async ({ page }) => {
     await login(page);
     const id = await seedOwn(page, { name: 'Finding A5', format: 'mixed', poolSize: 3, poolWinners: 2, courts: ['K'], numberPrefix: 'FE' }, rosterOf('Afive', 6));
     await page.goto(`/admin/competition/${id}/pools`);
@@ -1035,7 +1022,7 @@ test.describe('knockout-mixed-individual', () => {
     await page.waitForTimeout(1500);
     await expect(page.locator(EDITOR)).toBeVisible();
   });
-  test.fixme('bc-sbq: Send back to queue warns that the score will be discarded whenever a mark is on the board', async ({ page }) => {
+  test('bc-sbq: Send back to queue says the score is kept, and starting the bout again carries it on', async ({ page }) => {
     await login(page);
     await seedOwn(page, { name: 'Finding A6', format: 'mixed', poolSize: 3, poolWinners: 2, courts: ['L'], numberPrefix: 'FF' }, rosterOf('Asix', 6));
     await openShiaijo(page, 'L');
@@ -1053,9 +1040,13 @@ test.describe('knockout-mixed-individual', () => {
     await page.getByRole('button', { name: 'Send back to queue' }).tap();
     const dialog = page.locator('.shiaijo-move-confirm[role="dialog"]');
     await expect(dialog).toBeVisible();
-    await expect(dialog).toContainText('will be discarded');
-    await expect(dialog).not.toContainText('nothing will be lost');
+    await expect(dialog).toContainText('Any score entered is kept');
     await page.unroute('**/api/**', slowReads);
+    await hastyShiaijoConfirm(page);
+    // The dialog's promise holds: started again, the bout still has its point.
+    const again = await ensureRunning(page);
+    expect(again).toEqual(pair);
+    await expect.poll(() => slotMarks(page, winnerOf(pair))).toEqual(['M']);
   });
   test.fixme('bc-kosc: in pools + knockout, no knockout bout is scheduled before the last pool bout', async ({ page }) => {
     await login(page);
@@ -1072,7 +1063,7 @@ test.describe('knockout-mixed-individual', () => {
     expect(koTimes.length).toBeGreaterThan(0);
     expect(koTimes[0] > poolTimes[poolTimes.length - 1]).toBe(true);
   });
-  test.fixme('bc-offl: finishing a bout offline on the court console says the result is not saved yet', async ({ page, context }) => {
+  test('bc-offl: finishing a bout offline on the court console says the result is not saved yet', async ({ page, context }) => {
     await login(page);
     await seedOwn(page, { name: 'Finding A8', format: 'knockout', courts: ['N'], numberPrefix: 'FH' }, rosterOf('Aeight', 4));
     await openShiaijo(page, 'N');
@@ -1083,7 +1074,7 @@ test.describe('knockout-mixed-individual', () => {
     try {
       await (await armFinish(page)).tap();
       await page.waitForTimeout(1000);
-      await expect(page.getByText(/Not saved yet/)).toBeVisible();
+      await expect(page.getByText('Offline: 1 result not sent')).toBeVisible();
     } finally {
       await context.setOffline(false);
     }
